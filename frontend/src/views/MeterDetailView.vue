@@ -32,6 +32,7 @@ import {
   ocrMeterReading,
   getMeterReport,
   isCompletePeriod,
+  isInterpolatedPeriod,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   METER_ROLE_LABELS,
@@ -828,6 +829,11 @@ watch(meterId, () => loadDetail())
                 v-if="!isCompletePeriod(data)"
                 class="pi pi-exclamation-circle partial-marker"
                 v-tooltip.right="`Nur teilweise abgelesen (${Math.round(data.coverage * 100)} % des Zeitraums)`"
+              />
+              <i
+                v-else-if="isInterpolatedPeriod(data)"
+                class="pi pi-sliders-h partial-marker"
+                v-tooltip.right="`Rechnerisch verteilt: die Ablesungen liegen im Mittel ${Math.round(data.meanIntervalDays)} Tage auseinander, der Wert ist kein gemessener Zeitraumverbrauch`"
               />
             </template>
           </Column>

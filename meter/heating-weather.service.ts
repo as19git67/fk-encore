@@ -33,7 +33,7 @@ import {
   type MeterReportBucket,
 } from "./reports.service";
 import { listElectricityTariffs } from "./tariffs.service";
-import { linearRegressionSlope } from "./trends.service";
+import { linearRegressionSlopeOverTime } from "./trends.service";
 
 export type HeatingReferenceSource = "degree_days" | "estimated";
 
@@ -251,7 +251,12 @@ export function buildHeatingWeatherReport(
   );
   const latest = fullYears[fullYears.length - 1] ?? null;
   const previous = fullYears[fullYears.length - 2] ?? null;
-  const series = fullYears.map((stat) => stat.kwhPerDegreeDay as number);
+  // Regression over calendar time, so a year without full measurement does
+  // not get squeezed out of the axis.
+  const series = fullYears.map((stat) => ({
+    x: stat.year,
+    y: stat.kwhPerDegreeDay as number,
+  }));
 
   return {
     meterId: meter.id,
@@ -270,7 +275,7 @@ export function buildHeatingWeatherReport(
       latest && previous && previous.kwhPerDegreeDay
         ? ratio(((latest.kwhPerDegreeDay ?? 0) - previous.kwhPerDegreeDay) / previous.kwhPerDegreeDay)
         : null,
-    slopePerYear: round(linearRegressionSlope(series), 4),
+    slopePerYear: round(linearRegressionSlopeOverTime(series, 3), 4),
   };
 }
 

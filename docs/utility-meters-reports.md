@@ -206,3 +206,24 @@ Getroffen:
 
 Umgesetzt wie vorgeschlagen: die **JAZ-Bandbreite** (± 0,5) statt eines
 Punktwerts bei B1.
+
+Nachgezogen nach der Modell-Analyse (PR #1201, Details in
+`utility-meters.md` §5.1–§5.2.4):
+
+5. **Summen nur über vollständige Buckets** (`complete`), Quoten aus gemeinsam
+   vorhandenen Paaren, fehlende Rolle → `null` statt 0, Datenfehler als
+   `warnings` statt gekappt, doppelte Rollen gemeldet.
+6. **PV-Anteil zur Einspeisevergütung** in beiden Vergleichen (statt
+   Doppelbewertung beim E-Auto und Nullbewertung bei der Wärmepumpe); CO₂ nur
+   über den Netzanteil; Annahmen und Preise zeitgültig je Bucket; Summen nur
+   über die gemeinsame Bucket-Menge; Ladeverluste als Annahme.
+7. **Amortisation** auf gemessenen Monaten (`measuredMonths`), Hochrechnung
+   nur aus zwölf lückenlosen Monaten; Investition als Summe aller Einträge;
+   `heatPumpRest` als eigene Anwendung.
+8. **Regressionen über die Kalenderzeit** mit Mindestpunktzahl; Vorjahr statt
+   Erstwert bei Verdichter und PV-Ertrag; PV-Ertrag immer je Kalenderjahr
+   gegen den Median; Wasser-Grundlast nur bei ausreichend dichten Ablesungen;
+   Laufzeitanteil ungekappt mit `implausible`-Marker.
+9. **Wasserrollen** `water_main`/`water_garden` (Grundgebühr einmal, Garten
+   ohne Abwasser); Einspeisevergütung nach Generation und Leistungsstufe;
+   Jahreskosten aus Monaten; Plausibilitätsgrenzen beim Anlegen von Annahmen.

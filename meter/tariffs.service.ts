@@ -140,6 +140,7 @@ const TARIFF_KINDS: ElectricityTariffKind[] = [
   "water_base_price",
   "sewage_price",
   "heating_degree_days",
+  "ev_charging_loss",
 ];
 
 const TARIFF_UNITS: ElectricityTariffUnit[] = [
@@ -165,6 +166,24 @@ function parseValidFrom(value: string): string {
   return date.toISOString();
 }
 
+/**
+ * Plausible ranges per kind. A boiler efficiency typed as 90 instead of 0.9
+ * or a petrol consumption of 0 l/100 km would not fail loudly anywhere
+ * downstream — it would silently turn a comparison upside down.
+ */
+const AMOUNT_BOUNDS: Partial<Record<ElectricityTariffKind, { min: number; max: number; hint: string }>> = {
+  boiler_efficiency: { min: 0.3, max: 1.2, hint: "a ratio such as 0.9" },
+  heat_pump_scop: { min: 1, max: 8, hint: "a ratio such as 3.5" },
+  ev_consumption: { min: 5, max: 60, hint: "kWh per 100 km" },
+  petrol_consumption: { min: 2, max: 30, hint: "litres per 100 km" },
+  ev_charging_loss: { min: 0, max: 0.5, hint: "a ratio such as 0.1" },
+  expected_return_rate: { min: 0, max: 0.3, hint: "a ratio such as 0.05" },
+  grid_co2: { min: 0, max: 2, hint: "kg per kWh" },
+  gas_co2: { min: 0, max: 2, hint: "kg per kWh" },
+  petrol_co2: { min: 0, max: 5, hint: "kg per litre" },
+  heating_degree_days: { min: 0, max: 2000, hint: "Kelvin-days per month" },
+};
+
 function assertTariff(input: UpsertElectricityTariffInput) {
   if (!TARIFF_KINDS.includes(input.kind)) {
     throw APIError.invalidArgument("unknown tariff kind");
@@ -174,6 +193,12 @@ function assertTariff(input: UpsertElectricityTariffInput) {
   }
   if (!Number.isFinite(input.amount) || input.amount < 0) {
     throw APIError.invalidArgument("amount must be a non-negative number");
+  }
+  const bounds = AMOUNT_BOUNDS[input.kind];
+  if (bounds && (input.amount < bounds.min || input.amount > bounds.max)) {
+    throw APIError.invalidArgument(
+      `${input.kind} must be between ${bounds.min} and ${bounds.max} (${bounds.hint})`,
+    );
   }
 }
 
@@ -460,51 +485,97 @@ export class EnergyTariffTimeline {
     return this.byKind.get(kind) ?? [];
   }
 
+  /**
+   * The entry in force at `at`: the one with the latest `validFrom` on or
+   * before that instant.
+   *
+   * Feed-in tariffs come in *generations* (a price list dated the same day
+   * with one row per capacity tier). The generation in force is the latest
+   * dated one; within it the tier that applies to the system is the smallest
+   * limit at or above the installed capacity (`pv_capacity_kwp` at that
+   * time). Without a known capacity the lowest tier is used, without any
+   * applicable tier the largest. Rows without a tier apply to any capacity.
+   */
   private entryAt(kind: ElectricityTariffKind, at: Date): ElectricityTariff | null {
     const candidates = this.entries(kind).filter((entry) => new Date(entry.validFrom) <= at);
     if (candidates.length === 0) return null;
-    if (kind === "feed_in") {
-      return [...candidates].sort((a, b) => (a.capacityLimitKw ?? Infinity) - (b.capacityLimitKw ?? Infinity))[0];
-    }
-    return candidates[candidates.length - 1];
+    if (kind !== "feed_in") return candidates[candidates.length - 1];
+
+    const latestFrom = candidates[candidates.length - 1].validFrom;
+    const generation = candidates.filter((entry) => entry.validFrom === latestFrom);
+    const capacity = this.amountAt("pv_capacity_kwp", at);
+    const applicable = generation.filter(
+      (entry) =>
+        entry.capacityLimitKw === null || capacity === null || entry.capacityLimitKw >= capacity,
+    );
+    const pool = applicable.length > 0 ? applicable : generation;
+    return [...pool].sort(
+      (a, b) => (a.capacityLimitKw ?? Infinity) - (b.capacityLimitKw ?? Infinity),
+    )[0];
   }
 
+  /** Change points of a kind strictly inside (after, before). */
+  private changesBetween(kind: ElectricityTariffKind, after: Date, before: Date): Date[] {
+    return this.entries(kind)
+      .map((entry) => new Date(entry.validFrom))
+      .filter((date) => date > after && date < before)
+      .sort((a, b) => a.getTime() - b.getTime());
+  }
+
+  /**
+   * Time-weighted price over [start, end). Days without any entry in force
+   * (a tariff that starts mid-period) do not count towards the weighting;
+   * only a period without a single priced day yields null. The result is
+   * applied to the whole period's kWh — the assumption being that the price
+   * in force for most of it is the best available estimate for the rest.
+   */
   private weightedKwhPrice(kind: ElectricityTariffKind, start: Date, end: Date): number | null {
-    const totalDays = daysBetween(start, end);
-    if (totalDays <= 0) return null;
+    if (daysBetween(start, end) <= 0) return null;
     let cursor = start;
     let weighted = 0;
+    let pricedDays = 0;
     while (cursor < end) {
+      const nextChange = this.changesBetween(kind, cursor, end)[0] ?? end;
       const current = this.entryAt(kind, cursor);
-      if (!current) return null;
-      const nextChange = this.entries(kind)
-        .map((entry) => new Date(entry.validFrom))
-        .filter((date) => date > cursor && date < end)
-        .sort((a, b) => a.getTime() - b.getTime())[0] ?? end;
-      const segmentDays = daysBetween(cursor, nextChange);
-      weighted += Number(current.amount) * segmentDays;
+      if (current) {
+        const segmentDays = daysBetween(cursor, nextChange);
+        weighted += Number(current.amount) * segmentDays;
+        pricedDays += segmentDays;
+      }
       cursor = nextChange;
     }
-    return weighted / totalDays;
+    return pricedDays > 0 ? weighted / pricedDays : null;
   }
 
+  /**
+   * Standing charge over [start, end): each month prorated by days, and a
+   * change of the charge inside a month split at the change date. Months
+   * without an entry in force cost nothing; a period without a single
+   * charged day yields null.
+   */
   private baseCost(start: Date, end: Date, kind: ElectricityTariffKind = "base_price"): number | null {
     if (this.entries(kind).length === 0) return null;
     let cursor = start;
     let cost = 0;
+    let charged = false;
     while (cursor < end) {
-      const monthEnd = addMonth(cursor);
+      const monthStart = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1));
+      const monthEnd = addMonth(monthStart);
       const segmentEnd = monthEnd < end ? monthEnd : end;
-      const tariff = this.entryAt(kind, cursor);
-      if (!tariff) return null;
-      const fullMonthDays = daysBetween(
-        new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1)),
-        monthEnd,
-      );
-      cost += Number(tariff.amount) * (daysBetween(cursor, segmentEnd) / fullMonthDays);
+      const fullMonthDays = daysBetween(monthStart, monthEnd);
+      let sub = cursor;
+      while (sub < segmentEnd) {
+        const nextChange = this.changesBetween(kind, sub, segmentEnd)[0] ?? segmentEnd;
+        const tariff = this.entryAt(kind, sub);
+        if (tariff) {
+          cost += Number(tariff.amount) * (daysBetween(sub, nextChange) / fullMonthDays);
+          charged = true;
+        }
+        sub = nextChange;
+      }
       cursor = segmentEnd;
     }
-    return cost;
+    return charged ? cost : null;
   }
 
   /**
@@ -552,11 +623,51 @@ export class EnergyTariffTimeline {
     return this.baseCost(startOfUtcDay(periodStart), startOfUtcDay(periodEnd), kind);
   }
 
-  /** Latest value of a single-figure tariff entry such as the PV investment. */
-  amountOf(kind: ElectricityTariffKind): number | null {
+  /**
+   * The value of a single-figure assumption in force at `at` (SCOP, boiler
+   * efficiency, capacity, emission factors …). A value dated after `at`
+   * does not apply — a future-dated change must not rewrite history — but
+   * the earliest entry extends backwards, so one entry dated today still
+   * covers the whole history the way a single assumption always did.
+   */
+  amountAt(kind: ElectricityTariffKind, at: Date | string): number | null {
     const entries = this.entries(kind);
     if (entries.length === 0) return null;
-    return Number(entries[entries.length - 1].amount);
+    const instant = typeof at === "string" ? new Date(at) : at;
+    const inForce = entries.filter((entry) => new Date(entry.validFrom) <= instant);
+    const chosen = inForce.length > 0 ? inForce[inForce.length - 1] : entries[0];
+    return Number(chosen.amount);
+  }
+
+  /** The value in force now — the current assumption, never a future-dated one. */
+  amountOf(kind: ElectricityTariffKind): number | null {
+    return this.amountAt(kind, new Date());
+  }
+
+  /**
+   * Every entry of a kind in force by `until` (default: now), for values that
+   * accumulate rather than replace each other — an investment followed by an
+   * extension is two rows and the system cost both.
+   */
+  sumUntil(kind: ElectricityTariffKind, until: Date = new Date()): number | null {
+    const entries = this.entries(kind).filter((entry) => new Date(entry.validFrom) <= until);
+    if (entries.length === 0) return null;
+    return entries.reduce((sum, entry) => sum + Number(entry.amount), 0);
+  }
+
+  /** The entries a report actually drew on: every one in force somewhere in [start, end). */
+  entriesForPeriod(kind: ElectricityTariffKind, start: Date | string, end: Date | string): ElectricityTariff[] {
+    const from = typeof start === "string" ? new Date(start) : start;
+    const to = typeof end === "string" ? new Date(end) : end;
+    const entries = this.entries(kind);
+    if (entries.length === 0) return [];
+    const inForceAtStart = this.entryAt(kind, from) ?? entries[0];
+    const later = entries.filter((entry) => {
+      const date = new Date(entry.validFrom);
+      return date > from && date < to;
+    });
+    const result = [inForceAtStart, ...later];
+    return result.filter((entry, index) => result.findIndex((other) => other.id === entry.id) === index);
   }
 
   costsForBucket(input: EnergyTariffCostInput): EnergyTariffCostResult {
@@ -581,13 +692,15 @@ export class EnergyTariffTimeline {
       avoidedGridCostEur !== null && feedInRevenueEur !== null
         ? avoidedGridCostEur + feedInRevenueEur
         : null;
+    // A missing standing charge is a charge of zero, not a reason to drop the
+    // work-price part of the bill.
     const netElectricityCostEur =
-      gridImportCostEur !== null && baseCostEur !== null
-        ? gridImportCostEur + baseCostEur - (feedInRevenueEur ?? 0)
+      gridImportCostEur !== null
+        ? gridImportCostEur + (baseCostEur ?? 0) - (feedInRevenueEur ?? 0)
         : null;
     const noPvElectricityCostEur =
-      input.totalConsumption !== null && importPrice !== null && baseCostEur !== null
-        ? input.totalConsumption * importPrice + baseCostEur
+      input.totalConsumption !== null && importPrice !== null
+        ? input.totalConsumption * importPrice + (baseCostEur ?? 0)
         : null;
 
     return {
@@ -600,6 +713,25 @@ export class EnergyTariffTimeline {
       noPvElectricityCostEur: roundMoney(noPvElectricityCostEur),
     };
   }
+}
+
+/** Sum of per-bucket cost results; a figure is null only if it is null everywhere. */
+export function sumCostResults(results: Array<EnergyTariffCostResult | null>): EnergyTariffCostResult | null {
+  const present = results.filter((r): r is EnergyTariffCostResult => r !== null);
+  if (present.length === 0) return null;
+  const sum = (pick: (r: EnergyTariffCostResult) => number | null) => {
+    const values = present.map(pick).filter((v): v is number => v !== null);
+    return values.length === 0 ? null : roundMoney(values.reduce((a, b) => a + b, 0));
+  };
+  return {
+    gridImportCostEur: sum((r) => r.gridImportCostEur),
+    baseCostEur: sum((r) => r.baseCostEur),
+    feedInRevenueEur: sum((r) => r.feedInRevenueEur),
+    avoidedGridCostEur: sum((r) => r.avoidedGridCostEur),
+    pvBenefitEur: sum((r) => r.pvBenefitEur),
+    netElectricityCostEur: sum((r) => r.netElectricityCostEur),
+    noPvElectricityCostEur: sum((r) => r.noPvElectricityCostEur),
+  };
 }
 
 export async function loadEnergyTariffTimeline(userId: number): Promise<EnergyTariffTimeline> {

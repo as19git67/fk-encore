@@ -6,12 +6,27 @@
  * model calculations, not measurements: only the electricity side is metered,
  * the other side is derived from assumptions.
  *
- * Two consequences shape the design. Every response carries the assumptions it
- * used, so the UI can show them and the reader can judge the number. And the
- * heat-pump comparison is reported as a **range** over SCOP ± SCOP_BAND rather
- * than a single figure — without a heat meter the seasonal performance factor
- * is an estimate, and a single euro amount would claim a precision the data
- * does not have.
+ * Valuation of the metered electricity, the same for both comparisons: the
+ * grid share at the work price in force, the PV share at the feed-in tariff
+ * of the period — that is what the kWh would have earned had the heat pump or
+ * the car not used it, so it is the true incremental cost of the use. Without
+ * a feed-in tariff the PV share is valued at the self-consumption value (or
+ * the grid price). Valuing the PV share at the self-consumption value *and*
+ * adding the forgone feed-in on top would price the same kWh twice; doing it
+ * for the car but not the heat pump would tilt the two comparisons against
+ * each other. Both were the case once and are the reason this is spelled out.
+ *
+ * Every response carries the assumptions it used, dated, so the UI can show
+ * them and the reader can judge the number. Assumptions are read at the
+ * period they apply to (`amountAt`), prices time-weighted over the period.
+ * The heat-pump comparison is reported as a **range** over SCOP ± SCOP_BAND
+ * rather than a single figure — without a heat meter the seasonal performance
+ * factor is an estimate. It is a one-parameter band: boiler efficiency and
+ * gas price enter as single values.
+ *
+ * Headline totals are formed over the periods where *both* sides are known
+ * (`compared`), so the difference shown is the difference of the two figures
+ * next to it.
  */
 
 import { APIError } from "encore.dev/api";
@@ -26,7 +41,6 @@ import {
   type ElectricityTariffUnit,
   type EnergyTariffTimeline,
 } from "./tariffs.service";
-import { buildUsageCostBucket, type UsageCostBucket } from "./economics.service";
 
 /**
  * How far the seasonal performance factor is varied to give the heat-pump
@@ -51,44 +65,66 @@ export interface ComparisonAssumption {
   label: string;
   amount: number;
   unit: ElectricityTariffUnit;
+  /** From when this value applied; several entries of one kind form a series. */
+  validFrom: string;
 }
 
-/** A euro figure with the range that the SCOP uncertainty spans. */
+/** A figure with the range that the SCOP uncertainty spans. */
 export interface CostRange {
   low: number | null;
   mid: number | null;
   high: number | null;
 }
 
+/** Where the heat pump's electricity figure comes from. */
+export type HeatSource =
+  /** Heating and hot water sub-meters. */
+  | "sub_meters"
+  /** The whole-pump meter; no PV split is metered. */
+  | "heat_pump_total"
+  /** Only the heating sub-meter — hot water is missing from the comparison. */
+  | "heating_only"
+  /** Only the hot-water sub-meter — heating is missing from the comparison. */
+  | "hot_water_only";
+
 export interface HeatingComparisonBucket {
   key: string;
   label: string;
   periodStart: string;
   periodEnd: string;
-  /** Electricity the heat pump actually used for heating and hot water. */
+  /** Electricity of the heat pump (heating + hot water). */
   heatPumpKwh: number | null;
-  /** Actual cost of that electricity. */
+  /** PV share of it; null when no PV sub-meter exists. */
+  heatPumpPvKwh: number | null;
+  heatPumpGridKwh: number | null;
+  /** Grid share at the work price, PV share at the feed-in tariff. */
   heatPumpCostEur: number | null;
-  /** Heat delivered, derived from the electricity via the SCOP. */
+  /** Heat the pump delivered: electricity × SCOP, as a range. */
   heatDeliveredKwh: CostRange;
-  /** Gas that a boiler would have burned for the same heat. */
+  /** Gas a boiler would have burnt for that heat. */
   gasKwh: CostRange;
-  /** What that gas would have cost, including the standing charge. */
   gasCostEur: CostRange;
   /** Positive = the heat pump was cheaper. */
   savingsEur: CostRange;
+  /** Gas emissions avoided minus the emissions of the grid share. */
+  avoidedCo2Kg: CostRange;
+  /** Both sides known — only these feed the totals. */
+  compared: boolean;
 }
 
 export interface HeatingComparison {
   buckets: HeatingComparisonBucket[];
-  /** Span actually covered by buckets with heat pump consumption; null if none. */
+  /** Span of the compared periods; null if none. */
   periodStart: string | null;
   periodEnd: string | null;
+  comparedPeriods: number;
+  heatSource: HeatSource | null;
+  totalHeatPumpKwh: number | null;
   totalHeatPumpCostEur: number | null;
   totalGasCostEur: CostRange;
   totalSavingsEur: CostRange;
-  /** kg CO2 avoided against the gas boiler; null without emission factors. */
   avoidedCo2Kg: number | null;
+  avoidedCo2Range: CostRange;
   scop: number | null;
   scopRange: { low: number; high: number } | null;
   assumptions: ComparisonAssumption[];
@@ -100,40 +136,35 @@ export interface CarComparisonBucket {
   periodStart: string;
   periodEnd: string;
   chargedKwh: number | null;
-  /** Actual metered cost of that charging electricity (grid + self-consumption price). */
+  chargedPvKwh: number | null;
+  chargedGridKwh: number | null;
+  /** Grid share at the work price, PV share at the feed-in tariff. */
   evCostEur: number | null;
-  /**
-   * Feed-in revenue forgone on the PV share of the charge: that kWh could have
-   * been exported instead of used to charge. Null without a feed-in tariff.
-   */
-  lostFeedInEur: number | null;
-  /** evCostEur plus the forgone feed-in revenue — the true cost of charging at home. */
-  evCostWithOpportunityEur: number | null;
-  /** Distance the charged energy covers, from the assumed consumption. */
+  /** From the charged kWh after charging losses. */
   kilometers: number | null;
-  /** Petrol the same distance would have needed. */
   petrolLitres: number | null;
   petrolCostEur: number | null;
-  /** Positive = charging was cheaper than the petrol car, against evCostWithOpportunityEur. */
+  /** Positive = the EV was cheaper. */
   savingsEur: number | null;
+  avoidedCo2Kg: number | null;
+  compared: boolean;
 }
 
 export interface CarComparison {
   buckets: CarComparisonBucket[];
-  /** Span actually covered by buckets with charging activity; null if none. */
   periodStart: string | null;
   periodEnd: string | null;
+  comparedPeriods: number;
   totalChargedKwh: number | null;
   totalKilometers: number | null;
   totalEvCostEur: number | null;
-  totalLostFeedInEur: number | null;
-  totalEvCostWithOpportunityEur: number | null;
   totalPetrolCostEur: number | null;
   totalSavingsEur: number | null;
-  /** Cost per kilometre, in cents — against the opportunity-adjusted charging cost. */
   evCentsPerKm: number | null;
   petrolCentsPerKm: number | null;
   avoidedCo2Kg: number | null;
+  /** Share of the wallbox reading lost before the battery, as used. */
+  chargingLoss: number;
   assumptions: ComparisonAssumption[];
 }
 
@@ -142,7 +173,6 @@ export interface ComparisonsReport {
   currency: "EUR";
   from: string | null;
   to: string | null;
-  /** False when the assumptions for a comparison are missing entirely. */
   hasHeatingAssumptions: boolean;
   hasCarAssumptions: boolean;
   heating: HeatingComparison | null;
@@ -157,10 +187,13 @@ const ASSUMPTION_LABELS: Partial<Record<ElectricityTariffKind, string>> = {
   ev_consumption: "Verbrauch E-Auto",
   petrol_consumption: "Verbrauch Benziner",
   petrol_price: "Benzinpreis",
+  ev_charging_loss: "Ladeverluste",
   grid_co2: "CO₂-Faktor Netzstrom",
   gas_co2: "CO₂-Faktor Erdgas",
   petrol_co2: "CO₂-Faktor Benzin",
+  grid_import: "Arbeitspreis Netzbezug",
   feed_in: "Einspeisevergütung",
+  self_consumption_value: "Eigenverbrauchswert",
 };
 
 const ASSUMPTION_UNITS: Partial<Record<ElectricityTariffKind, ElectricityTariffUnit>> = {
@@ -171,26 +204,37 @@ const ASSUMPTION_UNITS: Partial<Record<ElectricityTariffKind, ElectricityTariffU
   ev_consumption: "kwh_per_100km",
   petrol_consumption: "l_per_100km",
   petrol_price: "eur_per_l",
+  ev_charging_loss: "ratio",
   grid_co2: "kg_per_kwh",
   gas_co2: "kg_per_kwh",
   petrol_co2: "kg_per_l",
+  grid_import: "eur_per_kwh",
   feed_in: "eur_per_kwh",
+  self_consumption_value: "eur_per_kwh",
 };
 
+/** Every dated entry of the given kinds the compared span drew on. */
 function collectAssumptions(
   timeline: EnergyTariffTimeline,
   kinds: ElectricityTariffKind[],
+  periodStart: string | null,
+  periodEnd: string | null,
 ): ComparisonAssumption[] {
   const result: ComparisonAssumption[] = [];
   for (const kind of kinds) {
-    const amount = timeline.amountOf(kind);
-    if (amount === null) continue;
-    result.push({
-      kind,
-      label: ASSUMPTION_LABELS[kind] ?? kind,
-      amount,
-      unit: ASSUMPTION_UNITS[kind] ?? "eur",
-    });
+    const entries =
+      periodStart && periodEnd
+        ? timeline.entriesForPeriod(kind, periodStart, periodEnd)
+        : timeline.entriesForPeriod(kind, "1900-01-01T00:00:00.000Z", "2999-01-01T00:00:00.000Z");
+    for (const entry of entries) {
+      result.push({
+        kind,
+        label: ASSUMPTION_LABELS[kind] ?? kind,
+        amount: entry.amount,
+        unit: entry.unit ?? ASSUMPTION_UNITS[kind] ?? "eur",
+        validFrom: entry.validFrom,
+      });
+    }
   }
   return result;
 }
@@ -207,6 +251,10 @@ function mapRange(range: CostRange, fn: (value: number) => number): CostRange {
   };
 }
 
+function roundRange(range: CostRange, round: (v: number | null) => number | null): CostRange {
+  return { low: round(range.low), mid: round(range.mid), high: round(range.high) };
+}
+
 function sumRanges(ranges: CostRange[]): CostRange {
   const sumKey = (key: keyof CostRange) => {
     const values = ranges.map((range) => range[key]).filter((v): v is number => v !== null);
@@ -220,27 +268,19 @@ function sumOf(values: Array<number | null>): number | null {
   return present.length === 0 ? null : present.reduce((a, b) => a + b, 0);
 }
 
-/**
- * Span actually covered by the buckets that carry a value — not the report's
- * `from`/`to` filter, which is usually null (unbounded) and would leave the
- * reader guessing which years the figures below are drawn from.
- */
+/** Span of the periods that carry a value. */
 function coveredPeriod<T extends { periodStart: string; periodEnd: string }>(
   buckets: T[],
-  hasValue: (bucket: T) => boolean,
 ): { periodStart: string | null; periodEnd: string | null } {
-  const relevant = buckets.filter(hasValue);
-  if (relevant.length === 0) return { periodStart: null, periodEnd: null };
-  return {
-    periodStart: relevant[0].periodStart,
-    periodEnd: relevant[relevant.length - 1].periodEnd,
-  };
+  if (buckets.length === 0) return { periodStart: null, periodEnd: null };
+  return { periodStart: buckets[0].periodStart, periodEnd: buckets[buckets.length - 1].periodEnd };
 }
 
 /**
  * A low SCOP means the heat pump delivered less heat per kWh, so the boiler
  * replacing it burns less gas — the *low* SCOP therefore yields the *low* gas
- * cost. The range is ordered by SCOP, and the cost figures follow it.
+ * figure. Measured is the electricity; the heat is the estimate, and the band
+ * is the uncertainty of that estimate.
  */
 function heatRangeFromScop(electricityKwh: number, scop: number): CostRange {
   return {
@@ -250,235 +290,280 @@ function heatRangeFromScop(electricityKwh: number, scop: number): CostRange {
   };
 }
 
+/** Grid share at the work price, PV share at what it would have earned exported. */
+function electricityCost(
+  timeline: EnergyTariffTimeline,
+  bucket: { periodStart: string; periodEnd: string },
+  gridKwh: number,
+  pvKwh: number,
+): number | null {
+  const prices = timeline.pricesForPeriod(bucket.periodStart, bucket.periodEnd);
+  if (prices.gridImportPricePerKwh === null) return null;
+  const pvValue = prices.feedInPricePerKwh ?? prices.selfConsumptionPricePerKwh ?? prices.gridImportPricePerKwh;
+  return gridKwh * prices.gridImportPricePerKwh + pvKwh * pvValue;
+}
+
+/** Electricity of the heat pump in a period, from whatever meters exist. */
+function heatPumpElectricity(
+  bucket: EnergyReportBucket,
+): { total: number; pv: number | null; source: HeatSource } | null {
+  const heating = bucket.heatHeatingTotal;
+  const hotWater = bucket.hotWaterTotal;
+  const pvOf = (total: number | null, pv: number | null) =>
+    total === null ? null : pv === null ? null : Math.min(pv, total);
+  if (heating !== null && hotWater !== null) {
+    const heatingPv = pvOf(heating, bucket.heatHeatingPv);
+    const hotWaterPv = pvOf(hotWater, bucket.hotWaterPv);
+    return {
+      total: heating + hotWater,
+      pv: heatingPv === null && hotWaterPv === null ? null : (heatingPv ?? 0) + (hotWaterPv ?? 0),
+      source: "sub_meters",
+    };
+  }
+  if (bucket.heatPumpTotal !== null) {
+    return { total: bucket.heatPumpTotal, pv: null, source: "heat_pump_total" };
+  }
+  if (heating !== null) {
+    return { total: heating, pv: pvOf(heating, bucket.heatHeatingPv), source: "heating_only" };
+  }
+  if (hotWater !== null) {
+    return { total: hotWater, pv: pvOf(hotWater, bucket.hotWaterPv), source: "hot_water_only" };
+  }
+  return null;
+}
+
 export function buildHeatingComparison(
   energyBuckets: EnergyReportBucket[],
-  usageBuckets: UsageCostBucket[],
   timeline: EnergyTariffTimeline,
 ): HeatingComparison | null {
-  const scop = timeline.amountOf("heat_pump_scop");
-  const boilerEfficiency = timeline.amountOf("boiler_efficiency");
-  if (scop === null || scop <= 0 || boilerEfficiency === null || boilerEfficiency <= 0) {
+  const scopNow = timeline.amountOf("heat_pump_scop");
+  const boilerNow = timeline.amountOf("boiler_efficiency");
+  if (scopNow === null || scopNow <= 0 || boilerNow === null || boilerNow <= 0) {
     return null;
   }
 
-  const usageByKey = new Map(usageBuckets.map((bucket) => [bucket.key, bucket]));
-  const gasCo2 = timeline.amountOf("gas_co2");
-  const gridCo2 = timeline.amountOf("grid_co2");
-
+  let heatSource: HeatSource | null = null;
   const buckets = energyBuckets.map((bucket): HeatingComparisonBucket => {
-    const usage = usageByKey.get(bucket.key);
-    const heatPumpKwh = sumOf([bucket.heatHeatingTotal, bucket.hotWaterTotal]);
-    const heatPumpCostEur = sumOf([
-      usage?.heating.costEur ?? null,
-      usage?.hotWater.costEur ?? null,
-    ]);
-
-    if (heatPumpKwh === null) {
-      return {
-        key: bucket.key,
-        label: bucket.label,
-        periodStart: bucket.periodStart,
-        periodEnd: bucket.periodEnd,
-        heatPumpKwh: null,
-        heatPumpCostEur: roundMoney(heatPumpCostEur),
-        heatDeliveredKwh: emptyRange(),
-        gasKwh: emptyRange(),
-        gasCostEur: emptyRange(),
-        savingsEur: emptyRange(),
-      };
-    }
-
-    const gasPrice = timeline.weightedAmountForPeriod(
-      "gas_price",
-      bucket.periodStart,
-      bucket.periodEnd,
-    );
-    const gasBaseCost =
-      timeline.monthlyChargeForPeriod("gas_base_price", bucket.periodStart, bucket.periodEnd) ?? 0;
-
-    const heatDeliveredKwh = heatRangeFromScop(heatPumpKwh, scop);
-    const gasKwh = mapRange(heatDeliveredKwh, (heat) => heat / boilerEfficiency);
-    const gasCostEur =
-      gasPrice === null
-        ? emptyRange()
-        : mapRange(gasKwh, (kwh) => kwh * gasPrice + gasBaseCost);
-    const savingsEur =
-      heatPumpCostEur === null
-        ? emptyRange()
-        : mapRange(gasCostEur, (cost) => cost - heatPumpCostEur);
-
-    return {
+    const base = {
       key: bucket.key,
       label: bucket.label,
       periodStart: bucket.periodStart,
       periodEnd: bucket.periodEnd,
-      heatPumpKwh: roundAmount(heatPumpKwh),
+    };
+    const electricity = heatPumpElectricity(bucket);
+    if (!electricity) {
+      return {
+        ...base,
+        heatPumpKwh: null,
+        heatPumpPvKwh: null,
+        heatPumpGridKwh: null,
+        heatPumpCostEur: null,
+        heatDeliveredKwh: emptyRange(),
+        gasKwh: emptyRange(),
+        gasCostEur: emptyRange(),
+        savingsEur: emptyRange(),
+        avoidedCo2Kg: emptyRange(),
+        compared: false,
+      };
+    }
+    heatSource ??= electricity.source;
+
+    const pvKwh = electricity.pv ?? 0;
+    const gridKwh = Math.max(0, electricity.total - pvKwh);
+    const heatPumpCostEur = electricityCost(timeline, bucket, gridKwh, pvKwh);
+
+    const scop = timeline.amountAt("heat_pump_scop", bucket.periodStart) ?? scopNow;
+    const boilerEfficiency = timeline.amountAt("boiler_efficiency", bucket.periodStart) ?? boilerNow;
+    const gasPrice = timeline.weightedAmountForPeriod("gas_price", bucket.periodStart, bucket.periodEnd);
+    const gasBaseCost =
+      timeline.monthlyChargeForPeriod("gas_base_price", bucket.periodStart, bucket.periodEnd) ?? 0;
+
+    const heatDeliveredKwh = heatRangeFromScop(electricity.total, scop);
+    const gasKwh = mapRange(heatDeliveredKwh, (heat) => heat / boilerEfficiency);
+    const gasCostEur =
+      gasPrice === null ? emptyRange() : mapRange(gasKwh, (kwh) => kwh * gasPrice + gasBaseCost);
+    const savingsEur =
+      heatPumpCostEur === null ? emptyRange() : mapRange(gasCostEur, (cost) => cost - heatPumpCostEur);
+
+    // Only the grid share of the heat pump emits; PV kWh do not. Without a
+    // grid factor the balance is not formed rather than pretending the grid
+    // share is clean.
+    const gasCo2 = timeline.amountAt("gas_co2", bucket.periodStart);
+    const gridCo2 = timeline.amountAt("grid_co2", bucket.periodStart);
+    const avoidedCo2Kg =
+      gasCo2 === null || gridCo2 === null
+        ? emptyRange()
+        : mapRange(gasKwh, (kwh) => kwh * gasCo2 - gridKwh * gridCo2);
+
+    return {
+      ...base,
+      heatPumpKwh: roundAmount(electricity.total),
+      heatPumpPvKwh: electricity.pv === null ? null : roundAmount(pvKwh),
+      heatPumpGridKwh: roundAmount(gridKwh),
       heatPumpCostEur: roundMoney(heatPumpCostEur),
-      heatDeliveredKwh: mapRange(heatDeliveredKwh, (value) => roundAmount(value) as number),
-      gasKwh: mapRange(gasKwh, (value) => roundAmount(value) as number),
-      gasCostEur: mapRange(gasCostEur, (value) => roundMoney(value) as number),
-      savingsEur: mapRange(savingsEur, (value) => roundMoney(value) as number),
+      heatDeliveredKwh: roundRange(heatDeliveredKwh, roundAmount),
+      gasKwh: roundRange(gasKwh, roundAmount),
+      gasCostEur: roundRange(gasCostEur, roundMoney),
+      savingsEur: roundRange(savingsEur, roundMoney),
+      avoidedCo2Kg: roundRange(avoidedCo2Kg, roundAmount),
+      compared: savingsEur.mid !== null,
     };
   });
 
-  const totalGasKwhMid = sumOf(buckets.map((bucket) => bucket.gasKwh.mid));
-  const totalHeatPumpKwh = sumOf(buckets.map((bucket) => bucket.heatPumpKwh));
-  const avoidedCo2Kg =
-    gasCo2 !== null && totalGasKwhMid !== null
-      ? roundAmount(
-          totalGasKwhMid * gasCo2 -
-            // The heat pump is not emission-free: its grid share still counts.
-            (gridCo2 !== null && totalHeatPumpKwh !== null ? totalHeatPumpKwh * gridCo2 : 0),
-        )
-      : null;
+  const compared = buckets.filter((bucket) => bucket.compared);
+  const span = coveredPeriod(compared);
+  const avoidedCo2Range = sumRanges(compared.map((bucket) => bucket.avoidedCo2Kg));
 
   return {
     buckets,
-    ...coveredPeriod(buckets, (bucket) => bucket.heatPumpKwh !== null),
-    totalHeatPumpCostEur: roundMoney(sumOf(buckets.map((bucket) => bucket.heatPumpCostEur))),
-    totalGasCostEur: sumRanges(buckets.map((bucket) => bucket.gasCostEur)),
-    totalSavingsEur: sumRanges(buckets.map((bucket) => bucket.savingsEur)),
-    avoidedCo2Kg,
-    scop,
-    scopRange: { low: Math.max(0, scop - SCOP_BAND), high: scop + SCOP_BAND },
-    assumptions: collectAssumptions(timeline, [
-      "heat_pump_scop",
-      "boiler_efficiency",
-      "gas_price",
-      "gas_base_price",
-      "gas_co2",
-      "grid_co2",
-    ]),
+    ...span,
+    comparedPeriods: compared.length,
+    heatSource,
+    totalHeatPumpKwh: roundAmount(sumOf(compared.map((bucket) => bucket.heatPumpKwh))),
+    totalHeatPumpCostEur: roundMoney(sumOf(compared.map((bucket) => bucket.heatPumpCostEur))),
+    totalGasCostEur: sumRanges(compared.map((bucket) => bucket.gasCostEur)),
+    totalSavingsEur: sumRanges(compared.map((bucket) => bucket.savingsEur)),
+    avoidedCo2Kg: roundAmount(avoidedCo2Range.mid),
+    avoidedCo2Range: roundRange(avoidedCo2Range, roundAmount),
+    scop: scopNow,
+    scopRange: { low: Math.max(0, scopNow - SCOP_BAND), high: scopNow + SCOP_BAND },
+    assumptions: collectAssumptions(
+      timeline,
+      [
+        "heat_pump_scop",
+        "boiler_efficiency",
+        "gas_price",
+        "gas_base_price",
+        "grid_import",
+        "feed_in",
+        "self_consumption_value",
+        "gas_co2",
+        "grid_co2",
+      ],
+      span.periodStart,
+      span.periodEnd,
+    ),
   };
 }
 
 export function buildCarComparison(
   energyBuckets: EnergyReportBucket[],
-  usageBuckets: UsageCostBucket[],
   timeline: EnergyTariffTimeline,
 ): CarComparison | null {
-  const evConsumption = timeline.amountOf("ev_consumption");
-  const petrolConsumption = timeline.amountOf("petrol_consumption");
-  if (evConsumption === null || evConsumption <= 0 || petrolConsumption === null) {
+  const evConsumptionNow = timeline.amountOf("ev_consumption");
+  const petrolConsumptionNow = timeline.amountOf("petrol_consumption");
+  if (
+    evConsumptionNow === null ||
+    evConsumptionNow <= 0 ||
+    petrolConsumptionNow === null ||
+    petrolConsumptionNow <= 0
+  ) {
     return null;
   }
-
-  const usageByKey = new Map(usageBuckets.map((bucket) => [bucket.key, bucket]));
-  const petrolCo2 = timeline.amountOf("petrol_co2");
-  const gridCo2 = timeline.amountOf("grid_co2");
+  const chargingLossNow = timeline.amountOf("ev_charging_loss") ?? 0;
 
   const buckets = energyBuckets.map((bucket): CarComparisonBucket => {
-    const chargedKwh = bucket.evChargerTotal;
-    const evCostEur = usageByKey.get(bucket.key)?.evCharger.costEur ?? null;
-    // PV kWh spent charging could have been exported instead — that forgone
-    // feed-in revenue is a real cost of charging at home, not a saving.
-    const feedInPrice = timeline.weightedAmountForPeriod(
-      "feed_in",
-      bucket.periodStart,
-      bucket.periodEnd,
-    );
-    const lostFeedInEur =
-      feedInPrice === null || bucket.evChargerPv === null
-        ? null
-        : bucket.evChargerPv * feedInPrice;
-    const evCostWithOpportunityEur =
-      evCostEur === null ? null : evCostEur + (lostFeedInEur ?? 0);
-
-    if (chargedKwh === null) {
-      return {
-        key: bucket.key,
-        label: bucket.label,
-        periodStart: bucket.periodStart,
-        periodEnd: bucket.periodEnd,
-        chargedKwh: null,
-        evCostEur: roundMoney(evCostEur),
-        lostFeedInEur: roundMoney(lostFeedInEur),
-        evCostWithOpportunityEur: roundMoney(evCostWithOpportunityEur),
-        kilometers: null,
-        petrolLitres: null,
-        petrolCostEur: null,
-        savingsEur: null,
-      };
-    }
-
-    const petrolPrice = timeline.weightedAmountForPeriod(
-      "petrol_price",
-      bucket.periodStart,
-      bucket.periodEnd,
-    );
-    const kilometers = (chargedKwh / evConsumption) * 100;
-    const petrolLitres = (kilometers / 100) * petrolConsumption;
-    const petrolCostEur = petrolPrice === null ? null : petrolLitres * petrolPrice;
-
-    return {
+    const base = {
       key: bucket.key,
       label: bucket.label,
       periodStart: bucket.periodStart,
       periodEnd: bucket.periodEnd,
+    };
+    const chargedKwh = bucket.evChargerTotal;
+    if (chargedKwh === null) {
+      return {
+        ...base,
+        chargedKwh: null,
+        chargedPvKwh: null,
+        chargedGridKwh: null,
+        evCostEur: null,
+        kilometers: null,
+        petrolLitres: null,
+        petrolCostEur: null,
+        savingsEur: null,
+        avoidedCo2Kg: null,
+        compared: false,
+      };
+    }
+    const pvKwh = bucket.evChargerPv === null ? 0 : Math.min(bucket.evChargerPv, chargedKwh);
+    const gridKwh = Math.max(0, chargedKwh - pvKwh);
+    const evCostEur = electricityCost(timeline, bucket, gridKwh, pvKwh);
+
+    const evConsumption = timeline.amountAt("ev_consumption", bucket.periodStart) ?? evConsumptionNow;
+    const petrolConsumption =
+      timeline.amountAt("petrol_consumption", bucket.periodStart) ?? petrolConsumptionNow;
+    const chargingLoss = Math.min(
+      0.9,
+      Math.max(0, timeline.amountAt("ev_charging_loss", bucket.periodStart) ?? chargingLossNow),
+    );
+    const petrolPrice = timeline.weightedAmountForPeriod("petrol_price", bucket.periodStart, bucket.periodEnd);
+
+    // The wallbox meter sits before the charger; what the battery keeps is less.
+    const kilometers = (chargedKwh * (1 - chargingLoss)) / evConsumption * 100;
+    const petrolLitres = (kilometers / 100) * petrolConsumption;
+    const petrolCostEur = petrolPrice === null ? null : petrolLitres * petrolPrice;
+    const savingsEur =
+      petrolCostEur === null || evCostEur === null ? null : petrolCostEur - evCostEur;
+
+    const petrolCo2 = timeline.amountAt("petrol_co2", bucket.periodStart);
+    const gridCo2 = timeline.amountAt("grid_co2", bucket.periodStart);
+    const avoidedCo2Kg =
+      petrolCo2 === null || gridCo2 === null ? null : petrolLitres * petrolCo2 - gridKwh * gridCo2;
+
+    return {
+      ...base,
       chargedKwh: roundAmount(chargedKwh),
+      chargedPvKwh: bucket.evChargerPv === null ? null : roundAmount(pvKwh),
+      chargedGridKwh: roundAmount(gridKwh),
       evCostEur: roundMoney(evCostEur),
-      lostFeedInEur: roundMoney(lostFeedInEur),
-      evCostWithOpportunityEur: roundMoney(evCostWithOpportunityEur),
       kilometers: roundAmount(kilometers, 0),
       petrolLitres: roundAmount(petrolLitres),
       petrolCostEur: roundMoney(petrolCostEur),
-      savingsEur:
-        petrolCostEur === null || evCostWithOpportunityEur === null
-          ? null
-          : roundMoney(petrolCostEur - evCostWithOpportunityEur),
+      savingsEur: roundMoney(savingsEur),
+      avoidedCo2Kg: roundAmount(avoidedCo2Kg),
+      compared: savingsEur !== null,
     };
   });
 
-  const totalChargedKwh = sumOf(buckets.map((bucket) => bucket.chargedKwh));
-  const totalKilometers = sumOf(buckets.map((bucket) => bucket.kilometers));
-  const totalEvCostEur = sumOf(buckets.map((bucket) => bucket.evCostEur));
-  const totalLostFeedInEur = sumOf(buckets.map((bucket) => bucket.lostFeedInEur));
-  const totalEvCostWithOpportunityEur = sumOf(
-    buckets.map((bucket) => bucket.evCostWithOpportunityEur),
-  );
-  const totalPetrolCostEur = sumOf(buckets.map((bucket) => bucket.petrolCostEur));
-  const totalPetrolLitres = sumOf(buckets.map((bucket) => bucket.petrolLitres));
-
+  const compared = buckets.filter((bucket) => bucket.compared);
+  const span = coveredPeriod(compared);
+  const totalKilometers = sumOf(compared.map((bucket) => bucket.kilometers));
+  const totalEvCostEur = sumOf(compared.map((bucket) => bucket.evCostEur));
+  const totalPetrolCostEur = sumOf(compared.map((bucket) => bucket.petrolCostEur));
   const centsPerKm = (cost: number | null) =>
     cost === null || totalKilometers === null || totalKilometers <= 0
       ? null
       : roundAmount((cost / totalKilometers) * 100, 1);
 
-  const avoidedCo2Kg =
-    petrolCo2 !== null && totalPetrolLitres !== null
-      ? roundAmount(
-          totalPetrolLitres * petrolCo2 -
-            // Only the grid share of charging emits; PV kWh do not.
-            (gridCo2 !== null
-              ? (sumOf(buckets.map((bucket) => bucket.chargedKwh)) ?? 0) * gridCo2
-              : 0),
-        )
-      : null;
-
   return {
     buckets,
-    ...coveredPeriod(buckets, (bucket) => bucket.chargedKwh !== null),
-    totalChargedKwh: roundAmount(totalChargedKwh),
+    ...span,
+    comparedPeriods: compared.length,
+    totalChargedKwh: roundAmount(sumOf(compared.map((bucket) => bucket.chargedKwh))),
     totalKilometers: roundAmount(totalKilometers, 0),
     totalEvCostEur: roundMoney(totalEvCostEur),
-    totalLostFeedInEur: roundMoney(totalLostFeedInEur),
-    totalEvCostWithOpportunityEur: roundMoney(totalEvCostWithOpportunityEur),
     totalPetrolCostEur: roundMoney(totalPetrolCostEur),
-    totalSavingsEur:
-      totalPetrolCostEur === null || totalEvCostWithOpportunityEur === null
-        ? null
-        : roundMoney(totalPetrolCostEur - totalEvCostWithOpportunityEur),
-    evCentsPerKm: centsPerKm(totalEvCostWithOpportunityEur),
+    totalSavingsEur: roundMoney(sumOf(compared.map((bucket) => bucket.savingsEur))),
+    evCentsPerKm: centsPerKm(totalEvCostEur),
     petrolCentsPerKm: centsPerKm(totalPetrolCostEur),
-    avoidedCo2Kg,
-    assumptions: collectAssumptions(timeline, [
-      "ev_consumption",
-      "petrol_consumption",
-      "petrol_price",
-      "petrol_co2",
-      "grid_co2",
-      "feed_in",
-    ]),
+    avoidedCo2Kg: roundAmount(sumOf(compared.map((bucket) => bucket.avoidedCo2Kg))),
+    chargingLoss: chargingLossNow,
+    assumptions: collectAssumptions(
+      timeline,
+      [
+        "ev_consumption",
+        "petrol_consumption",
+        "petrol_price",
+        "ev_charging_loss",
+        "grid_import",
+        "feed_in",
+        "self_consumption_value",
+        "petrol_co2",
+        "grid_co2",
+      ],
+      span.periodStart,
+      span.periodEnd,
+    ),
   };
 }
 
@@ -494,12 +579,12 @@ export async function getComparisonsReportForUser(
 
   const report = await getEnergyReportForUser(userId, granularity, fromDate, toDate);
   const timeline = await loadEnergyTariffTimeline(userId);
-  const usageBuckets = timeline.hasCostTariffs()
-    ? report.buckets.map((bucket) => buildUsageCostBucket(bucket, timeline))
-    : [];
+  // Only fully measured periods: a half-metered month against a full month
+  // of gas standing charge would tilt every figure.
+  const buckets = report.buckets.filter((bucket) => bucket.complete);
 
-  const heating = buildHeatingComparison(report.buckets, usageBuckets, timeline);
-  const car = buildCarComparison(report.buckets, usageBuckets, timeline);
+  const heating = timeline.hasCostTariffs() ? buildHeatingComparison(buckets, timeline) : null;
+  const car = timeline.hasCostTariffs() ? buildCarComparison(buckets, timeline) : null;
 
   return {
     granularity,

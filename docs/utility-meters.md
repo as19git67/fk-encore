@@ -255,18 +255,35 @@ nötig, Haushalts-Scope reicht).
   für die Reproduktion alter Zahlen erhalten.
 - Die Berechnung ist generisch für alle Zählertypen und läuft über den
   Absolutstand der Messstelle, also auch über Gerätewechsel hinweg.
-- `from`/`to` filtern bei `interpolated` ganze Buckets nach Perioden-Start,
-  bei `interval_start` weiterhin die Intervalle nach Start-Zeitpunkt.
+- `from`/`to` filtern in beiden Zuordnungen ganze Buckets nach
+  Perioden-Start — erst nach dem Vorjahresvergleich, damit ein Filter die
+  Referenzperiode nicht entfernt.
+- **Gerätewechsel**: der Absolutstand läuft über alle Geräte der Messstelle.
+  Hat ein abgelöstes Gerät keinen `end_value`, zählt seine letzte Ablesung als
+  Endstand (`buildDeviceOffsets` in `meter.service.ts`, von Reports,
+  Anomalie-Erkennung und Ablesungsliste gemeinsam genutzt).
+- Zwei Ablesungen zum selben Zeitpunkt (z. B. Gerätewechsel) bilden ein
+  Intervall der Länge 0; sein Verbrauch wird vollständig dem Bucket des
+  Zeitpunkts zugerechnet statt verloren zu gehen.
+- `startValue`/`endValue` eines Buckets sind die auf die Periodengrenzen
+  interpolierten Stände, nicht die nächstgelegenen Ablesungen — sonst passte
+  „Ende − Anfang“ nicht zum ausgewiesenen Verbrauch.
 - **`coverage`** je Bucket (0..1) gibt an, welcher Anteil der Periode
   tatsächlich von Ablesungen abgedeckt ist. Ab `COMPLETE_COVERAGE_THRESHOLD`
   (0,99) gilt eine Periode als vollständig gemessen; darunter ist sie eine
   Teilperiode und fließt weder in den Vorjahresvergleich noch in die Trends
   ein. Das Frontend markiert solche Perioden.
+- **`meanIntervalDays`**: coverage-gewichtete mittlere Länge der
+  Ableseintervalle hinter dem Bucket. Ein Monat aus einer einzigen
+  Jahresablesung hat `coverage` 1, aber ein mittleres Intervall von 365 Tagen
+  — der Wert ist verteilt, nicht gemessen. Die Detail-View markiert Buckets,
+  deren mittleres Intervall mehr als das Doppelte der Periode beträgt
+  (`isInterpolatedPeriod`).
 - **Vorjahresvergleich**: jeder Bucket trägt `previousConsumption`,
   `deltaAbsolute` und `deltaPercent` für dieselbe Periode ein Jahr früher —
-  nur wenn beide Perioden vollständig gemessen sind. Der Vergleich wird vor
-  dem `from`/`to`-Filter berechnet, damit ein Filter die Referenzperiode nicht
-  entfernt.
+  nur wenn beide Perioden vollständig gemessen sind. `deltaPercent`
+  vergleicht die **Tagesraten**, nicht die Summen: ein Schaltjahr-Februar oder
+  ein 53-Wochen-Jahr ist keine Verbrauchsänderung.
 - Bei Betriebsstundenzählern identisch (Einheit h).
 - **`day`/`week`** (#1024): Tages-Buckets tragen den Schlüssel `YYYY-MM-DD`,
   Wochen-Buckets die ISO-Woche `YYYY-Www` (Montag bis Sonntag, Wochenjahr
@@ -293,11 +310,28 @@ Alle Kennzahlen laufen über die **rollierende 12-Monats-Summe**, nicht über
 rohe Monatswerte — sonst misst eine Regression über zwölf Monate überwiegend
 die Jahreszeit. Je Kennzahl geliefert: `current12` (letzte zwölf vollständig
 gemessenen Monate), `previous12` (die zwölf davor), `changeAbsolute`,
-`changePercent`, `slopePerYear` (Regression über die Rollreihe) und
-`direction` (`rising`/`falling`/`stable`/`unknown`). Änderungen unter 2 %
-gelten als `stable`. Eine Lücke in den Ablesungen macht jedes Rollfenster,
-das sie enthält, `null` — ein fehlender Monat darf nicht wie ein Rückgang
-aussehen.
+`changePercent`, `slopePerYear` (Regression über die Rollreihe),
+`trendPoints` (Anzahl der Rollwerte hinter der Regression), `direction`
+(`rising`/`falling`/`stable`/`unknown`) und `directionBasis`
+(`year_over_year` / `regression` / `none`). Änderungen unter 2 % gelten als
+`stable`. Eine Lücke in den Ablesungen macht jedes Rollfenster, das sie
+enthält, `null` — ein fehlender Monat darf nicht wie ein Rückgang aussehen.
+
+Die Regression braucht mindestens `MIN_SLOPE_POINTS` (6) Rollwerte, also 17
+Monate Daten: aufeinanderfolgende Rollfenster überlappen sich zu elf Zwölfteln,
+drei davon sind fast eine einzige Beobachtung. Mit weniger Punkten bleibt die
+Richtung `unknown`, statt aus drei überlappenden Werten eine Tendenz zu
+behaupten. Liegt ein volles Vorjahr vor, ist es die Basis der Richtung; die
+Regression greift nur dahinter (`directionBasis`), und das Frontend sagt das.
+
+Die Regressions-Helfer (`linearRegressionSlopeOverTime`, `yearsAt`) sind
+exportiert und rechnen über die **Kalenderzeit**, nicht über Listenpositionen —
+eine Messlücke von einem Jahr darf die Steigung nicht verdoppeln. Anlagenzustand
+(§5.2.3) und Witterungsbereinigung (§5.2.6) nutzen dieselben.
+
+Rollen-Zähler (Wasser Hausanschluss/Garten, Gas) bekommen genau eine Kachel:
+ein Zähler, der schon über seine Rolle im Report steht, taucht in der Schleife
+über die Einzelzähler nicht ein zweites Mal auf.
 
 ### 5.2 Strom-/PV-Gesamtreport
 
@@ -340,6 +374,43 @@ PV-Kennzahlen und Analysewerte einfließen. Migration `0123_meter_roles`
 backfilled bereits importierte historische Zähler einmalig; beim manuellen
 Anlegen/Bearbeiten kann die Report-Rolle gesetzt werden.
 
+Regeln, die aus der Analyse der Reports folgen (PR #1201):
+
+- **`complete`** je Bucket: PV-Set vollständig **und** jeder beteiligte Zähler
+  über `COMPLETE_COVERAGE_THRESHOLD`. Nur vollständige Buckets gehen in
+  `totals` ein; unvollständige werden trotzdem geliefert und im Frontend
+  markiert. Die Summen für Eigenverbrauch und Gesamtverbrauch sind Summen der
+  Bucket-Werte, die Quoten (Autarkie, EV-Quote, PV-Anteile) werden aus den
+  Summen der jeweils **gemeinsam** vorhandenen Paare gebildet, nicht aus
+  Summen über unterschiedliche Bucket-Mengen.
+- **Fehlende Rolle → `null`**, nicht 0: „Verbrauch ohne Wärmepumpe/E-Auto“
+  ist nur definiert, wenn die abzuziehenden Zähler existieren. Fehlt
+  `heat_pump_total`, wird die Summe der vorhandenen Unterzähler abgezogen.
+- **`warnings`** je Bucket (`export_exceeds_production`,
+  `exclusion_exceeds_total`) machen Datenfehler sichtbar, statt sie zu
+  kappen: mehr Einspeisung als Produktion heißt meist „an verschiedenen Tagen
+  abgelesen“, Wärmepumpe + Wallbox über dem Gesamtverbrauch heißt „ein
+  Unterzähler hängt nicht am Netzbezug“. PV-Anteile werden auf 1 begrenzt.
+- **`duplicateRoles`**: tragen mehrere sichtbare Zähler dieselbe Rolle, wird
+  nur der erste verwendet (`resolveRoleMeters`), und der Report sagt das —
+  vorher fiel stillschweigend der jeweils zufällige Treffer.
+- **Jahreskosten** werden aus den Monatsbuckets summiert (`sumCostResults`),
+  nicht aus dem Jahresbucket gerechnet: ein Preiswechsel mitten im Jahr wird
+  so tagesgenau gewichtet, und der Grundpreis wird an Preisänderungen
+  innerhalb eines Monats geteilt. Ohne Grundpreis-Eintrag gilt 0, nicht
+  „Kosten unbekannt“.
+- **Einspeisevergütung**: der Eintrag ist die zum Zeitpunkt jüngste
+  *Generation* (`valid_from` ≤ Zeitpunkt) und darin die Leistungsstufe ≥
+  `pv_capacity_kwp` (Fallback: kleinste Stufe). Der Tarif der
+  Inbetriebnahme gilt 20 Jahre — eine später hinterlegte Generation für eine
+  Erweiterung überschreibt ihn nicht rückwirkend.
+- **Zeitgültige Annahmen** (`amountAt(kind, at)`): ein Wert mit `valid_from`
+  in der Zukunft gilt nicht rückwärts, der früheste Eintrag gilt aber auch
+  vor seinem `valid_from` (Preise gab es schon). Beim Anlegen prüft
+  `assertTariff` Plausibilitätsgrenzen je Art (`AMOUNT_BOUNDS`: JAZ 1–8,
+  Kesselwirkungsgrad 0,3–1,2, Ladeverluste 0–0,5, Rendite 0–0,3 usw.), damit
+  ein Tippfehler (JAZ 35) nicht als Ergebnis erscheint.
+
 Kosten und PV-Ersparnis verwenden `meter_electricity_tariffs`. Die
 Tarifverwaltung erlaubt Preisänderungen mit `valid_from` für:
 
@@ -369,12 +440,19 @@ Zwei Blöcke, die die kWh-Reports nicht beantworten können:
 **PV-Ersparnis und Amortisation.** Je Bucket `netElectricityCostEur` (mit PV,
 tatsächlich) gegen `noPvElectricityCostEur` (dieselbe Verbrauchsmenge komplett
 aus dem Netz gekauft); die Differenz ist `savingsEur`, kumuliert in
-`cumulativeSavingsEur`. Die Amortisation stellt der Investition
-(`pv_investment_net` + `pv_investment_vat`) den über die **gesamte** gemessene
-Historie kumulierten PV-Nutzen gegenüber — unabhängig von `from`/`to`, denn
-die Frage ist, was die Anlage seit Inbetriebnahme eingebracht hat. Die
-Hochrechnung des Amortisationsdatums nutzt den Nutzen der letzten zwölf
-Monate.
+`cumulativeSavingsEur`. Die Summen (`totalSavingsEur` usw.) laufen wie im
+Energie-Report nur über `complete`-Buckets. Die Amortisation stellt der
+Investition (Summe aller `pv_investment_net`- und `pv_investment_vat`-
+Einträge bis heute, eine Erweiterung ist ein zweiter Eintrag) den über die
+**gesamte** gemessene Historie kumulierten PV-Nutzen gegenüber — unabhängig
+von `from`/`to`, denn die Frage ist, was die Anlage seit Inbetriebnahme
+eingebracht hat. `measuredMonths` sind die vollständig gemessenen Monate
+dahinter, `yearsElapsed` = `measuredMonths` / 12 ist die gemeinsame Zeitbasis
+von Nutzen und Opportunitätskosten — ein Messloch verlängert also nicht die
+Zinsrechnung. Die Hochrechnung des Amortisationsdatums nutzt
+`benefitLast12MonthsEur`, den Nutzen der letzten zwölf **lückenlos**
+gemessenen Monate; klafft in den letzten zwölf Monaten eine Lücke, bleibt er
+`null` und es gibt bewusst kein Datum.
 
 Die Opportunitätskosten sind **kein Stammdatum**, sondern werden gerechnet.
 Einzige Annahme ist `expected_return_rate` — die Rendite, die das Geld
@@ -392,13 +470,21 @@ die Bedingung wieder einfach: das Datum ist erreichbar, sobald der
 Jahresnutzen (letzte 12 Monate) über den jährlichen Opportunitätskosten
 liegt; sonst wird bewusst **kein** Datum geliefert statt eines geschönten.
 
-**Kosten je Anwendung.** Heizung, Warmwasser, E-Auto/Wallbox und der übrige
-Haushalt jeweils in €. Eigenverbrauchte kWh werden mit
-`self_consumption_value` bewertet, Netzbezug mit dem zeitgültigen
-Arbeitspreis. Der PV-Anteil des Haushalts ist der Rest der
-Gesamt-Eigenverbrauchsmenge, den kein Unterzähler beansprucht (begrenzt auf
-den Haushaltsverbrauch). Der Grundpreis wird keiner Anwendung zugeordnet,
-sondern nur in der Periodensumme geführt.
+**Kosten je Anwendung.** Heizung, Warmwasser, Wärmepumpe (Rest),
+E-Auto/Wallbox und der übrige Haushalt jeweils in €. Eigenverbrauchte kWh
+werden mit `self_consumption_value` bewertet, Netzbezug mit dem zeitgültigen
+Arbeitspreis; `gridKwh` ist immer gesetzt und der PV-Anteil nie größer als
+der Gesamtverbrauch der Anwendung. **`heatPumpRest`** ist der Anteil des
+Zählers „Wärmepumpe gesamt“, den Heizungs- und Warmwasser-Unterzähler nicht
+abdecken (oder die ganze Pumpe, wenn es keine Unterzähler gibt) — vorher
+fehlte er in jeder Anwendung und der Haushalt war zu groß. Sein PV-Anteil ist
+nicht gemessen, er zählt zum Netzpreis. Der PV-Anteil des Haushalts ist der
+Rest der Gesamt-Eigenverbrauchsmenge, den kein Unterzähler beansprucht
+(begrenzt auf den Haushaltsverbrauch). Der Grundpreis wird keiner Anwendung
+zugeordnet; `totalCostEur` ist Anwendungen + Grundpreis. Die Anwendungssummen
+sind ein **Vergleichswert** (Netzbezug zum Arbeitspreis plus Eigenverbrauch
+zum Eigenverbrauchswert), nicht die Stromrechnung — das Frontend sagt das
+unter der Tabelle.
 
 Fehlen Preise (`hasTariffs === false`), bleiben beide Blöcke leer statt mit
 Platzhalterwerten zu rechnen.
@@ -412,37 +498,53 @@ Gegenrechnung beruht auf Annahmen. Jede Response liefert deshalb die
 verwendeten Annahmen mit (`assumptions`), damit das Frontend sie anzeigen kann
 und die Zahl beurteilbar bleibt.
 
-**Wärmepumpe statt Gasheizung.** Wärmemenge = (Heizung + Warmwasser) [kWh el.]
-× JAZ; Gasbedarf = Wärmemenge ÷ Kesselwirkungsgrad; Gaskosten = Gasbedarf ×
-Gaspreis + Gas-Grundpreis. Gegengerechnet werden die *tatsächlichen*
-Stromkosten für Heizung + Warmwasser aus §5.2.1.
+**Bewertung des Stroms** (für beide Vergleiche gleich): der Netzanteil zum
+zeitgültigen Arbeitspreis, der PV-Anteil zur zeitgültigen
+**Einspeisevergütung** — das ist, was diese kWh stattdessen gebracht hätten
+(Fallback: Eigenverbrauchswert, dann Arbeitspreis). Die frühere Fassung
+bewertete den PV-Anteil beim E-Auto doppelt (Eigenverbrauchswert *plus*
+entgangene Einspeisung) und bei der Wärmepumpe gar nicht; jetzt gilt für
+beide dieselbe Opportunitätslogik.
+
+**Wärmepumpe statt Gasheizung.** Wärmemenge = Wärmepumpenstrom [kWh el.] ×
+JAZ; Gasbedarf = Wärmemenge ÷ Kesselwirkungsgrad; Gaskosten = Gasbedarf ×
+Gaspreis + Gas-Grundpreis. Der Wärmepumpenstrom kommt aus den Unterzählern
+Heizung + Warmwasser (`heatSource: sub_meters`); fehlen sie, aus
+`heat_pump_total` (ohne PV-Aufteilung, alles zum Netzpreis) oder aus dem
+einen vorhandenen Unterzähler (`heating_only` / `hot_water_only`) — der
+Report benennt die Quelle, das Frontend erklärt die Einschränkung.
 
 Ohne Wärmemengenzähler ist die JAZ geschätzt. Das Ergebnis wird deshalb als
 **Bandbreite** über JAZ ± `SCOP_BAND` (0,5) ausgewiesen, nicht als eine Zahl.
 Eine niedrigere JAZ bedeutet weniger gelieferte Wärme und damit weniger Gas —
 die Bandbreite ist nach der JAZ geordnet, die Kostenwerte folgen ihr.
 
-**E-Auto statt Benziner.** km = Wallbox-kWh ÷ Verbrauch [kWh/100 km] × 100;
-Benzinbedarf = km ÷ 100 × [l/100 km]; Benzinkosten = Liter × Benzinpreis.
-Gegengerechnet werden die tatsächlichen Ladekosten **plus** die entgangene
-Einspeisevergütung auf den PV-Anteil des Ladestroms
-(`evChargerPv × zeitgültige Einspeisevergütung`, `lostFeedInEur`): diese kWh
-hätten alternativ eingespeist werden können, das ist ein echter Opportunitäts-
-kostenanteil des Ladens, kein hypothetischer. `evCostWithOpportunityEur` =
-gemessene Ladekosten + `lostFeedInEur` und ist die Basis für die Differenz und
-für ct/km — nicht die reinen gemessenen Kosten (`evCostEur`, weiterhin einzeln
-verfügbar). Ohne Einspeisevergütung bleibt `lostFeedInEur` `null` und
-`evCostWithOpportunityEur` entspricht `evCostEur`.
+**E-Auto statt Benziner.** km = Wallbox-kWh × (1 − `ev_charging_loss`) ÷
+Verbrauch [kWh/100 km] × 100; Benzinbedarf = km ÷ 100 × [l/100 km];
+Benzinkosten = Liter × Benzinpreis. Die Wallbox zählt mehr, als in der
+Batterie ankommt; ohne hinterlegte Ladeverluste (Annahme `ev_charging_loss`,
+Faktor 0–0,5) gilt 0 und das Frontend weist darauf hin, dass die Kilometer
+dann eher überschätzt sind. `evCostEur` ist die oben beschriebene Bewertung
+des Ladestroms und die Basis für Differenz und ct/km.
 
-Beide Vergleiche geben zusätzlich den tatsächlich abgedeckten Zeitraum aus
-(`periodStart`/`periodEnd` je Vergleich — die Spanne der Buckets mit
-Wärmepumpen- bzw. Ladeaktivität, nicht der ggf. leere `from`/`to`-Filter der
-Anfrage), damit im Frontend erkennbar ist, über welche Monate/Jahre die Zahlen
-gemittelt sind.
+**Gemeinsame Bucket-Menge.** Nur Buckets, in denen *beide* Seiten bekannt sind
+(`compared`), gehen in die Summen, ct/km, CO₂ und den ausgewiesenen Zeitraum
+(`periodStart`/`periodEnd`, `comparedPeriods`) ein — sonst stünden 24 Monate
+Stromkosten gegen 18 Monate Benzinpreis. Unvollständig gemessene Buckets
+(§5.2 `complete`) werden vorher entfernt.
 
-**CO₂** wird nur berechnet, wenn die Emissionsfaktoren hinterlegt sind. Der
-Netzanteil von Wärmepumpe bzw. Ladestrom wird dabei gegengerechnet — die
-Alternative ist nicht emissionsfrei.
+**Zeitgültige Annahmen.** Jeder Bucket rechnet mit dem Wert, der zu seinem
+Beginn galt (`amountAt`): JAZ, Verbräuche, Emissionsfaktoren, Preise. Die
+`assumptions` enthalten deshalb je Art alle im Zeitraum wirksamen Einträge
+mit `validFrom` (`entriesForPeriod`), einschließlich Arbeitspreis,
+Einspeisevergütung und Eigenverbrauchswert; das Frontend zeigt eine Reihe als
+„x ab MM.JJJJ, y ab MM.JJJJ“.
+
+**CO₂** wird nur berechnet, wenn die Emissionsfaktoren hinterlegt sind, und
+zwar mit dem **Netzanteil** des Stroms — PV-Strom hat keinen Strommix-Faktor.
+Fehlt der Netzfaktor, bleibt CO₂ `null`. Bei der Wärmepumpe hängt die
+vermiedene Menge an der JAZ und wird deshalb wie die Kosten als Bandbreite
+geliefert (`avoidedCo2Range`; `avoidedCo2Kg` ist der Mittelwert).
 
 Fehlen die Kern-Annahmen einer Vergleichsrechnung (JAZ + Kesselwirkungsgrad
 bzw. Verbrauch E-Auto + Verbrauch Benziner), liefert sie `null` statt mit
@@ -461,7 +563,8 @@ wann“-Logik — eine zweite Tabelle mit dupliziertem CRUD wäre reiner Overhea
 | `gas_base_price` | `eur_per_month` | Gas-Grundpreis |
 | `boiler_efficiency` | `ratio` | Kesselwirkungsgrad |
 | `heat_pump_scop` | `ratio` | Jahresarbeitszahl |
-| `ev_consumption` | `kwh_per_100km` | Verbrauch E-Auto |
+| `ev_consumption` | `kwh_per_100km` | Verbrauch E-Auto (ab Batterie) |
+| `ev_charging_loss` | `ratio` | Ladeverluste zwischen Wallbox und Batterie (Migration 0194) |
 | `petrol_consumption` | `l_per_100km` | Verbrauch Benziner |
 | `petrol_price` | `eur_per_l` | Benzinpreis |
 | `grid_co2` / `gas_co2` | `kg_per_kwh` | Emissionsfaktoren |
@@ -522,29 +625,63 @@ Frühindikatoren, die in den Verbrauchssummen untergehen:
   Kältemittelverlust, verschmutzter Wärmetauscher). Braucht die Rolle
   `compressor_hours` (Migration 0149, Import setzt sie für „Verdichter“).
   Das Verhältnis wird nur gebildet, wenn **beide** Seiten vollständig gemessen
-  sind — sonst stünde ein voller Monat Strom gegen einen halben Monat Stunden.
+  sind — sonst stünde ein voller Monat Strom gegen einen halben Monat Stunden —
+  und wenn der Verdichter mindestens `MIN_COMPRESSOR_RUNTIME_SHARE` (3 %) der
+  Periode lief: im Sommer misst der Quotient Stand-by und Anläufe, nicht die
+  Pumpe. `changePercent` vergleicht die letzte Periode mit **derselben Periode
+  ein Jahr früher** (`previousYearKwhPerHour`, `latestKey`), nie einen Januar
+  mit einem Juli; `slopePerYear` ist eine Regression über die Kalenderzeit.
 - **Laufzeitanteil** je Aggregat — Betriebsstunden ÷ gemessene Zeit der
   Periode. Gemessen wird gegen die tatsächlich abgedeckte Zeit
   (`coverage`), sonst wirkte ein halb abgelesener Monat halb so ausgelastet.
+  Der Anteil wird **nicht** auf 100 % gekappt: mehr Stunden als der Zeitraum
+  hat sind ein Ablesefehler, den der Leser sehen soll (`implausible`). Der
+  Durchschnitt ist nach Periodenlänge gewichtet.
 - **Wasser-Grundlast** — der *kleinste* Tagesverbrauch einer Periode. Steigt
   dieser Boden bei gleichbleibendem Gesamtverbrauch, ist das die klassische
   Signatur eines laufenden Spülkastens oder Lecks. Berechnet aus den rohen
   Ableseintervallen, **nicht** aus den interpolierten Buckets: ein Minimum
   lässt sich nicht interpolieren, das Verteilen würde genau die ruhige Phase
   verwischen, die das Leck sichtbar macht. Jedes Intervall zählt zur Periode
-  seines Startzeitpunkts.
+  seines Startzeitpunkts; `from`/`to` filtern nach diesem Startzeitpunkt.
+  Ein Minimum gibt es nur, wenn die Periode mindestens zwei Intervalle hat oder
+  das kürzeste höchstens `MAX_BASELINE_INTERVAL_DAYS` (7) lang ist — mit einer
+  Ablesung pro Monat ist das Minimum der Durchschnitt und sagt nichts
+  (`minDailyRate` `null`, `tooSparse` wenn das für alle Perioden gilt).
+  Verglichen (`latestKey`, Vorjahr, Regression) werden nur Perioden, deren
+  Intervalle mindestens die Hälfte der Periode abdecken (`measuredDays`).
 - **Ertrag je kWp** — Jahresertrag ÷ Anlagenleistung (`pv_capacity_kwp`).
   Normalisiert das Wetterjahr heraus und ist damit der einzige belastbare
-  Frühindikator für Degradation oder verschmutzte Module. Teilperioden bleiben
-  außen vor, sonst sähe eine Messlücke wie Degradation aus.
+  Frühindikator für Degradation oder verschmutzte Module. Immer je
+  **Kalenderjahr**, unabhängig von der Report-Granularität — ein Dezember
+  gegen einen Juli ist Wetter, keine Degradation. Je Jahr gilt die damals
+  installierte Leistung (`timeline.amountAt("pv_capacity_kwp", …)`,
+  `capacityKwp` im Bucket), damit eine Erweiterung nicht als Ertragssprung
+  erscheint. Verglichen wird mit dem Vorjahr (`changeVsPreviousYearPercent`)
+  und mit dem **Median der übrigen Jahre** (`changeVsMedianPercent`) — das
+  beste Jahr ist per Definition das glücklichste Wetter, gegen das jedes
+  normale Jahr wie Verfall aussieht (`bestYieldPerKwp` bleibt als Zusatzinfo).
+  Teilperioden bleiben außen vor, sonst sähe eine Messlücke wie Degradation
+  aus.
+
+Der Report meldet `missingRoles` (Wärmepumpe gesamt, PV-Produktion,
+Verdichter) und `duplicateRoles`, lädt jeden Zähler-Report je Granularität nur
+einmal und die Teilberichte parallel.
 
 ### 5.2.4 Wasserkosten
 
 Teil des Wirtschaftlichkeits-Reports (§5.2.1) als `water[]`, ein Eintrag je
 sichtbarem Wasserzähler. Frisch- und Abwasser werden beide auf die gemessene
 Menge berechnet (`water_price`, `sewage_price`), die Grundgebühr
-(`water_base_price`) anteilig über Monatsgrenzen. Ohne Wassertarife bleibt
-die Liste leer.
+(`water_base_price`) anteilig über Monatsgrenzen. Ohne Wassertarife (auch
+nur Grundgebühr) bleibt die Liste leer.
+
+Rollen (Migration 0194): **`water_main`** ist der Hausanschluss und trägt die
+Grundgebühr — fehlt die Rolle, ist es der erste Wasserzähler ohne Gartenrolle.
+**`water_garden`** ist ein Gartenwasserzähler: keine Abwassergebühr (das
+Wasser landet nicht im Kanal) und keine Grundgebühr. Vorher bekam jeder
+Wasserzähler beides, und ein Haushalt mit zwei Zählern zahlte die Grundgebühr
+rechnerisch doppelt.
 
 ### 5.2.5 Saisonprofil Autarkie/Eigenverbrauch (A3, #1022)
 

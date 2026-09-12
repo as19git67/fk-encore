@@ -3,10 +3,11 @@ import { asc, eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { meterDevices, meterReadings } from "../db/schema";
-import { listMeters, loadVisibleMeter, type MeterListItem } from "./meter.service";
+import { listMeters, loadDeviceOffsets, loadVisibleMeter, type MeterListItem } from "./meter.service";
 import {
   EnergyTariffTimeline,
   loadEnergyTariffTimeline,
+  sumCostResults,
   type EnergyTariffCostResult,
 } from "./tariffs.service";
 
@@ -51,9 +52,20 @@ export interface MeterReportBucket {
   intervals: number;
   /** Share of the period actually spanned by readings, 0..1. */
   coverage: number;
+  /**
+   * Coverage-weighted mean length of the reading intervals behind this
+   * period, in days. A month built from a single yearly reading has a
+   * coverage of 1 but a mean interval of 365 — the value is interpolated,
+   * not measured, and the UI can say so.
+   */
+  meanIntervalDays: number | null;
   /** Same period one year earlier; null unless both periods are fully covered. */
   previousConsumption: number | null;
   deltaAbsolute: number | null;
+  /**
+   * Relative change of the *daily rate*, so a leap-year February or a
+   * 53-week year is not reported as a change in consumption.
+   */
   deltaPercent: number | null;
 }
 
@@ -88,6 +100,13 @@ export interface EnergyReportMeterRef {
   name: string;
 }
 
+/** Data conditions the report clamps rather than fails on; the UI flags them. */
+export type EnergyBucketWarning =
+  /** More exported than produced — usually readings taken on different days. */
+  | "export_exceeds_production"
+  /** Heat pump + wallbox exceed the total — a sub-meter not fed from grid_import. */
+  | "exclusion_exceeds_total";
+
 export interface EnergyReportBucket {
   key: string;
   label: string;
@@ -95,6 +114,9 @@ export interface EnergyReportBucket {
   periodEnd: string;
   /** Lowest coverage among the contributing meters, 0..1. */
   coverage: number;
+  /** Full PV set present and coverage at or above the threshold; only these feed `totals`. */
+  complete: boolean;
+  warnings: EnergyBucketWarning[];
   gridImport: number | null;
   gridExport: number | null;
   production: number | null;
@@ -128,8 +150,13 @@ export interface EnergyReport {
   to: string | null;
   meters: EnergyReportMeterRef[];
   missingRoles: EnergyReportRole[];
+  /** Roles carried by more than one visible meter; only the first is used. */
+  duplicateRoles: EnergyReportRole[];
   buckets: EnergyReportBucket[];
-  totals: Omit<EnergyReportBucket, "key" | "label" | "periodStart" | "periodEnd" | "coverage">;
+  totals: Omit<
+    EnergyReportBucket,
+    "key" | "label" | "periodStart" | "periodEnd" | "coverage" | "complete" | "warnings"
+  >;
   hasTariffs: boolean;
 }
 
@@ -316,10 +343,17 @@ export function bucketsPerYear(granularity: ReportGranularity): number {
     case "month":
       return 12;
     case "week":
-      return 52;
+      return 365.25 / 7;
     case "day":
-      return 365;
+      return 365.25;
   }
+}
+
+const MS_PER_DAY_F = 86_400_000;
+
+/** Length of a period in days. */
+export function periodDays(periodStart: string, periodEnd: string): number {
+  return (new Date(periodEnd).getTime() - new Date(periodStart).getTime()) / MS_PER_DAY_F;
 }
 
 export function roundReportValue(value: number, decimals: number): number {
@@ -334,10 +368,17 @@ function roundRatio(value: number | null): number | null {
 
 interface BucketAccumulator {
   key: string;
-  startReading: AbsoluteReadingPoint;
-  endReading: AbsoluteReadingPoint;
+  /** Absolute value and instant at the start of the first charged segment. */
+  startAt: string;
+  startValue: number;
+  /** … and at the end of the last charged segment. */
+  endAt: string;
+  endValue: number;
   consumption: number;
   intervals: number;
+  /** Σ interval length × overlap, for the coverage-weighted mean interval. */
+  weightedIntervalMs: number;
+  overlapMs: number;
 }
 
 /** Milliseconds of each bucket that lie between the first and last reading. */
@@ -395,10 +436,12 @@ function attachPreviousYear(
     }
     bucket.previousConsumption = previous.consumption;
     bucket.deltaAbsolute = roundReportValue(bucket.consumption - previous.consumption, decimals);
-    bucket.deltaPercent =
-      previous.consumption > 0
-        ? roundRatio((bucket.consumption - previous.consumption) / previous.consumption)
-        : null;
+    // Compare daily rates: a 29-day February against a 28-day one, or a
+    // 53-week year against a 52-week one, is not a change in consumption.
+    const rate = bucket.consumption / periodDays(bucket.periodStart, bucket.periodEnd);
+    const previousRate =
+      previous.consumption / periodDays(previous.periodStart, previous.periodEnd);
+    bucket.deltaPercent = previousRate > 0 ? roundRatio((rate - previousRate) / previousRate) : null;
   }
   return buckets;
 }
@@ -423,22 +466,27 @@ export function buildMeterReportBuckets(
 
   const charge = (
     key: string,
-    start: AbsoluteReadingPoint,
-    end: AbsoluteReadingPoint,
+    segment: { startAt: string; startValue: number; endAt: string; endValue: number },
     consumption: number,
+    intervalMs: number,
+    overlapMs: number,
   ) => {
     const existing = accumulators.get(key);
     if (existing) {
-      existing.endReading = end;
+      existing.endAt = segment.endAt;
+      existing.endValue = segment.endValue;
       existing.consumption += consumption;
       existing.intervals += 1;
+      existing.weightedIntervalMs += intervalMs * overlapMs;
+      existing.overlapMs += overlapMs;
     } else {
       accumulators.set(key, {
         key,
-        startReading: start,
-        endReading: end,
+        ...segment,
         consumption,
         intervals: 1,
+        weightedIntervalMs: intervalMs * overlapMs,
+        overlapMs,
       });
     }
   };
@@ -456,30 +504,46 @@ export function buildMeterReportBuckets(
     const durationMs = endDate.getTime() - startDate.getTime();
     if (durationMs > 0) spans.push({ startDate, endDate });
 
-    if (allocation === "interval_start") {
-      // Legacy mode filters the intervals themselves, not the buckets.
-      if (from && startDate < from) continue;
-      if (to && startDate >= to) continue;
-      charge(bucketKey(startDate, granularity), start, end, consumption);
+    const whole = {
+      startAt: start.takenAt,
+      startValue: start.value,
+      endAt: end.takenAt,
+      endValue: end.value,
+    };
+
+    // Two readings at the same instant (a device swap whose closing and
+    // opening reading share a timestamp) still carry consumption — it goes
+    // to the period of that instant rather than being lost.
+    if (allocation === "interval_start" || durationMs <= 0) {
+      charge(bucketKey(startDate, granularity), whole, consumption, durationMs, durationMs);
       continue;
     }
 
-    if (durationMs <= 0) continue;
+    // Absolute value at an instant inside the interval, assuming a constant rate.
+    const valueAt = (ms: number) =>
+      start.value + (consumption * (ms - startDate.getTime())) / durationMs;
+
     for (
       let cursor = bucketStartDate(startDate, granularity);
       cursor.getTime() < endDate.getTime();
       cursor = nextBucketStart(cursor, granularity)
     ) {
       const bucketEnd = nextBucketStart(cursor, granularity);
-      const overlapMs =
-        Math.min(endDate.getTime(), bucketEnd.getTime()) -
-        Math.max(startDate.getTime(), cursor.getTime());
+      const segmentStartMs = Math.max(startDate.getTime(), cursor.getTime());
+      const segmentEndMs = Math.min(endDate.getTime(), bucketEnd.getTime());
+      const overlapMs = segmentEndMs - segmentStartMs;
       if (overlapMs <= 0) continue;
       charge(
         bucketKey(cursor, granularity),
-        start,
-        end,
+        {
+          startAt: new Date(segmentStartMs).toISOString(),
+          startValue: valueAt(segmentStartMs),
+          endAt: new Date(segmentEndMs).toISOString(),
+          endValue: valueAt(segmentEndMs),
+        },
         (consumption * overlapMs) / durationMs,
+        durationMs,
+        overlapMs,
       );
     }
   }
@@ -492,13 +556,17 @@ export function buildMeterReportBuckets(
       label: bucketLabel(entry.key, granularity),
       periodStart: bucketStartIso(entry.key, granularity),
       periodEnd: bucketEndIso(entry.key, granularity),
-      startReadingAt: entry.startReading.takenAt,
-      endReadingAt: entry.endReading.takenAt,
-      startValue: entry.startReading.value,
-      endValue: entry.endReading.value,
+      startReadingAt: entry.startAt,
+      endReadingAt: entry.endAt,
+      startValue: roundReportValue(entry.startValue, decimals),
+      endValue: roundReportValue(entry.endValue, decimals),
       consumption: roundReportValue(entry.consumption, decimals),
       intervals: entry.intervals,
       coverage: bucketCoverage(entry.key, granularity, coveredMsByKey.get(entry.key) ?? 0),
+      meanIntervalDays:
+        entry.overlapMs > 0
+          ? Math.round((entry.weightedIntervalMs / entry.overlapMs / MS_PER_DAY_F) * 10) / 10
+          : null,
       previousConsumption: null,
       deltaAbsolute: null,
       deltaPercent: null,
@@ -506,9 +574,9 @@ export function buildMeterReportBuckets(
 
   attachPreviousYear(buckets, granularity, decimals);
 
-  if (allocation === "interval_start") return buckets;
-  // Interpolated mode filters whole buckets: every period whose start lies in
-  // [from, to). Filtering after the comparison keeps the reference year usable.
+  // The filter works on whole periods in both modes and only after the
+  // comparison, so a `from` never removes the reference year — in
+  // `interval_start` mode a period is the one its intervals start in.
   return buckets.filter((bucket) => {
     const periodStart = new Date(bucket.periodStart);
     if (from && periodStart < from) return false;
@@ -522,25 +590,8 @@ export async function loadAbsoluteReadingSeries(
   meterId: number,
 ): Promise<AbsoluteReadingPoint[]> {
   await loadVisibleMeter(userId, meterId);
-
-  const devices = await dbAll<typeof meterDevices.$inferSelect>(
-    db
-      .select()
-      .from(meterDevices)
-      .where(eq(meterDevices.meter_id, meterId))
-      .orderBy(asc(meterDevices.installed_at), asc(meterDevices.id)),
-  );
+  const { devices, offsets } = await loadDeviceOffsets(meterId);
   if (devices.length === 0) return [];
-
-  const baseByDevice = new Map<number, { base: number; start: number }>();
-  let running = 0;
-  for (const device of devices) {
-    const start = parseFloat(device.start_value);
-    baseByDevice.set(device.id, { base: running, start });
-    if (device.end_value !== null) {
-      running += parseFloat(device.end_value) - start;
-    }
-  }
 
   const readings = await dbAll<{ device_id: number; value: string; taken_at: string }>(
     db
@@ -556,11 +607,11 @@ export async function loadAbsoluteReadingSeries(
   );
 
   return readings.map((reading) => {
-    const base = baseByDevice.get(reading.device_id);
+    const offset = offsets.get(reading.device_id);
     const rawValue = parseFloat(reading.value);
     return {
       takenAt: reading.taken_at,
-      value: base ? base.base + rawValue - base.start : rawValue,
+      value: offset ? offset.baseOffset + rawValue - offset.startValue : rawValue,
     };
   });
 }
@@ -603,6 +654,14 @@ export async function getMeterReportForUser(
   };
 }
 
+/** Roles whose consumption is taken out of the total to get the rest of the household. */
+const EXCLUSION_ROLES: EnergyReportRole[] = [
+  "heat_pump_total",
+  "heat_heating_total",
+  "hot_water_total",
+  "ev_charger_total",
+];
+
 export function buildEnergyReportFromMeterReports(
   reports: Partial<Record<EnergyReportRole, MeterReport>>,
   granularity: ReportGranularity,
@@ -610,19 +669,12 @@ export function buildEnergyReportFromMeterReports(
   toDate: Date | null,
   tariffTimeline?: EnergyTariffTimeline,
   allocation: BucketAllocation = "interpolated",
-): Omit<EnergyReport, "meters" | "missingRoles"> {
+  /** Per-key cost results that replace the bucket's own (yearly costs summed from months). */
+  costOverrides?: Map<string, EnergyTariffCostResult | null>,
+): Omit<EnergyReport, "meters" | "missingRoles" | "duplicateRoles"> {
   const decimals = Math.max(
     0,
-    reports.grid_import?.decimals ?? 0,
-    reports.grid_export?.decimals ?? 0,
-    reports.pv_production?.decimals ?? 0,
-    reports.heat_pump_total?.decimals ?? 0,
-    reports.heat_heating_total?.decimals ?? 0,
-    reports.heat_heating_pv?.decimals ?? 0,
-    reports.hot_water_total?.decimals ?? 0,
-    reports.hot_water_pv?.decimals ?? 0,
-    reports.ev_charger_total?.decimals ?? 0,
-    reports.ev_charger_pv?.decimals ?? 0,
+    ...ENERGY_REPORT_ROLES.map((role) => reports[role]?.decimals ?? 0),
   );
   const bucketKeys = new Set<string>();
   for (const report of Object.values(reports)) {
@@ -633,6 +685,13 @@ export function buildEnergyReportFromMeterReports(
   for (const role of ENERGY_REPORT_ROLES) {
     byRole.set(role, new Map((reports[role]?.buckets ?? []).map((bucket) => [bucket.key, bucket])));
   }
+  // A role the household meters at all. If such a role has no bucket for a
+  // period, the period is *missing* that reading — not consuming zero.
+  const meteredRoles = new Set<EnergyReportRole>(
+    ENERGY_REPORT_ROLES.filter((role) => (reports[role]?.buckets.length ?? 0) > 0),
+  );
+  const missingFor = (role: EnergyReportRole, key: string) =>
+    meteredRoles.has(role) && !byRole.get(role)?.has(key);
 
   const buckets = [...bucketKeys].sort().map((key): EnergyReportBucket => {
     const source =
@@ -643,40 +702,27 @@ export function buildEnergyReportFromMeterReports(
       byRole.get("heat_heating_total")?.get(key) ??
       byRole.get("hot_water_total")?.get(key) ??
       byRole.get("ev_charger_total")?.get(key);
-    const gridImport = byRole.get("grid_import")?.get(key)?.consumption ?? null;
-    const gridExport = byRole.get("grid_export")?.get(key)?.consumption ?? null;
-    const production = byRole.get("pv_production")?.get(key)?.consumption ?? null;
-    const heatPumpTotal = byRole.get("heat_pump_total")?.get(key)?.consumption ?? null;
-    const heatHeatingTotal = byRole.get("heat_heating_total")?.get(key)?.consumption ?? null;
-    const heatHeatingPv = byRole.get("heat_heating_pv")?.get(key)?.consumption ?? null;
-    const heatHeatingGrid =
-      heatHeatingTotal !== null && heatHeatingPv !== null
-        ? roundReportValue(Math.max(0, heatHeatingTotal - heatHeatingPv), decimals)
-        : null;
-    const heatHeatingPvShare =
-      heatHeatingTotal !== null && heatHeatingTotal > 0 && heatHeatingPv !== null
-        ? roundRatio(heatHeatingPv / heatHeatingTotal)
-        : null;
-    const hotWaterTotal = byRole.get("hot_water_total")?.get(key)?.consumption ?? null;
-    const hotWaterPv = byRole.get("hot_water_pv")?.get(key)?.consumption ?? null;
-    const hotWaterGrid =
-      hotWaterTotal !== null && hotWaterPv !== null
-        ? roundReportValue(Math.max(0, hotWaterTotal - hotWaterPv), decimals)
-        : null;
-    const hotWaterPvShare =
-      hotWaterTotal !== null && hotWaterTotal > 0 && hotWaterPv !== null
-        ? roundRatio(hotWaterPv / hotWaterTotal)
-        : null;
-    const evChargerTotal = byRole.get("ev_charger_total")?.get(key)?.consumption ?? null;
-    const evChargerPv = byRole.get("ev_charger_pv")?.get(key)?.consumption ?? null;
-    const evChargerGrid =
-      evChargerTotal !== null && evChargerPv !== null
-        ? roundReportValue(Math.max(0, evChargerTotal - evChargerPv), decimals)
-        : null;
-    const evChargerPvShare =
-      evChargerTotal !== null && evChargerTotal > 0 && evChargerPv !== null
-        ? roundRatio(evChargerPv / evChargerTotal)
-        : null;
+    const value = (role: EnergyReportRole) => byRole.get(role)?.get(key)?.consumption ?? null;
+    const gridImport = value("grid_import");
+    const gridExport = value("grid_export");
+    const production = value("pv_production");
+    const heatPumpTotal = value("heat_pump_total");
+    const heatHeatingTotal = value("heat_heating_total");
+    const heatHeatingPv = value("heat_heating_pv");
+    const hotWaterTotal = value("hot_water_total");
+    const hotWaterPv = value("hot_water_pv");
+    const evChargerTotal = value("ev_charger_total");
+    const evChargerPv = value("ev_charger_pv");
+
+    const gridShare = (total: number | null, pv: number | null) =>
+      total !== null && pv !== null ? roundReportValue(Math.max(0, total - pv), decimals) : null;
+    const pvShare = (total: number | null, pv: number | null) =>
+      total !== null && total > 0 && pv !== null ? roundRatio(Math.min(1, pv / total)) : null;
+
+    const warnings: EnergyBucketWarning[] = [];
+    if (production !== null && gridExport !== null && gridExport > production) {
+      warnings.push("export_exceeds_production");
+    }
     const selfConsumption =
       production !== null && gridExport !== null
         ? roundReportValue(Math.max(0, production - gridExport), decimals)
@@ -685,26 +731,41 @@ export function buildEnergyReportFromMeterReports(
       gridImport !== null && selfConsumption !== null
         ? roundReportValue(gridImport + selfConsumption, decimals)
         : null;
+
+    // Heat pump share: the whole-pump meter if the household has one,
+    // otherwise whatever sub-meters it has. A metered role without a bucket
+    // for this period leaves the household figure undefined.
+    const exclusionMissing = EXCLUSION_ROLES.some((role) => missingFor(role, key));
+    const subMeters = [heatHeatingTotal, hotWaterTotal].filter((v): v is number => v !== null);
     const heatPumpExclusion =
       heatPumpTotal ??
-      (heatHeatingTotal !== null && hotWaterTotal !== null
-        ? roundReportValue(heatHeatingTotal + hotWaterTotal, decimals)
+      (subMeters.length > 0
+        ? roundReportValue(subMeters.reduce((a, b) => a + b, 0), decimals)
         : null);
-    const consumptionWithoutHeatPumpAndEv =
-      totalConsumption !== null
-        ? roundReportValue(Math.max(0, totalConsumption - (heatPumpExclusion ?? 0) - (evChargerTotal ?? 0)), decimals)
-        : null;
+    let consumptionWithoutHeatPumpAndEv: number | null = null;
+    if (totalConsumption !== null && !exclusionMissing) {
+      const excluded = (heatPumpExclusion ?? 0) + (evChargerTotal ?? 0);
+      if (excluded > totalConsumption + 0.5) warnings.push("exclusion_exceeds_total");
+      consumptionWithoutHeatPumpAndEv = roundReportValue(
+        Math.max(0, totalConsumption - excluded),
+        decimals,
+      );
+    }
 
     const contributingCoverages = ENERGY_REPORT_ROLES.map(
       (role) => byRole.get(role)?.get(key)?.coverage,
     ).filter((value): value is number => value !== undefined);
+    const coverage = contributingCoverages.length > 0 ? Math.min(...contributingCoverages) : 0;
+    const hasPvSet = gridImport !== null && gridExport !== null && production !== null;
 
     const bucket: EnergyReportBucket = {
       key,
       label: source?.label ?? bucketLabel(key, granularity),
       periodStart: source?.periodStart ?? bucketStartIso(key, granularity),
       periodEnd: source?.periodEnd ?? bucketEndIso(key, granularity),
-      coverage: contributingCoverages.length > 0 ? Math.min(...contributingCoverages) : 0,
+      coverage,
+      complete: hasPvSet && coverage >= COMPLETE_COVERAGE_THRESHOLD,
+      warnings,
       gridImport,
       gridExport,
       production,
@@ -722,59 +783,62 @@ export function buildEnergyReportFromMeterReports(
       heatPumpTotal,
       heatHeatingTotal,
       heatHeatingPv,
-      heatHeatingGrid,
-      heatHeatingPvShare,
+      heatHeatingGrid: gridShare(heatHeatingTotal, heatHeatingPv),
+      heatHeatingPvShare: pvShare(heatHeatingTotal, heatHeatingPv),
       hotWaterTotal,
       hotWaterPv,
-      hotWaterGrid,
-      hotWaterPvShare,
+      hotWaterGrid: gridShare(hotWaterTotal, hotWaterPv),
+      hotWaterPvShare: pvShare(hotWaterTotal, hotWaterPv),
       evChargerTotal,
       evChargerPv,
-      evChargerGrid,
-      evChargerPvShare,
+      evChargerGrid: gridShare(evChargerTotal, evChargerPv),
+      evChargerPvShare: pvShare(evChargerTotal, evChargerPv),
       costs: null,
     };
-    bucket.costs = tariffTimeline?.hasCostTariffs()
-      ? tariffTimeline.costsForBucket({
-          periodStart: bucket.periodStart,
-          periodEnd: bucket.periodEnd,
-          gridImport: bucket.gridImport,
-          gridExport: bucket.gridExport,
-          selfConsumption: bucket.selfConsumption,
-          totalConsumption: bucket.totalConsumption,
-        })
-      : null;
+    bucket.costs = costOverrides?.has(key)
+      ? (costOverrides.get(key) ?? null)
+      : tariffTimeline?.hasCostTariffs()
+        ? tariffTimeline.costsForBucket({
+            periodStart: bucket.periodStart,
+            periodEnd: bucket.periodEnd,
+            gridImport: bucket.gridImport,
+            gridExport: bucket.gridExport,
+            selfConsumption: bucket.selfConsumption,
+            totalConsumption: bucket.totalConsumption,
+          })
+        : null;
     return bucket;
   });
-  const completeBuckets = buckets.filter(
+
+  // Periods before the PV system (no full set of grid import, export and
+  // production) stay out of the PV report altogether. Partially measured
+  // periods are shown, flagged, and kept out of the totals.
+  const pvBuckets = buckets.filter(
     (bucket) =>
-      bucket.gridImport !== null &&
-      bucket.gridExport !== null &&
-      bucket.production !== null &&
-      bucket.selfConsumption !== null &&
-      bucket.totalConsumption !== null &&
-      bucket.autarky !== null &&
-      bucket.selfConsumptionRate !== null,
+      bucket.gridImport !== null && bucket.gridExport !== null && bucket.production !== null,
   );
+  const completeBuckets = pvBuckets.filter((bucket) => bucket.complete);
 
   const sum = (selector: (bucket: EnergyReportBucket) => number | null) => {
     const values = completeBuckets.map(selector).filter((value): value is number => value !== null);
     if (values.length === 0) return null;
     return roundReportValue(values.reduce((total, value) => total + value, 0), decimals);
   };
-
-  const gridImport = sum((bucket) => bucket.gridImport);
-  const gridExport = sum((bucket) => bucket.gridExport);
-  const production = sum((bucket) => bucket.production);
-  const heatPumpTotal = sum((bucket) => bucket.heatPumpTotal);
-  const heatHeatingTotal = sum((bucket) => bucket.heatHeatingTotal);
-  const heatHeatingPv = sum((bucket) => bucket.heatHeatingPv);
-  const heatHeatingGrid = sum((bucket) => bucket.heatHeatingGrid);
-  const hotWaterTotal = sum((bucket) => bucket.hotWaterTotal);
-  const hotWaterPv = sum((bucket) => bucket.hotWaterPv);
-  const hotWaterGrid = sum((bucket) => bucket.hotWaterGrid);
-  const evChargerTotal = sum((bucket) => bucket.evChargerTotal);
-  const evChargerPv = sum((bucket) => bucket.evChargerPv);
+  /**
+   * A share over the periods where *both* sides are known — summing a
+   * numerator over more periods than its denominator would report a PV share
+   * above one hundred percent after a sub-meter was added later.
+   */
+  const pairedShare = (
+    totalOf: (bucket: EnergyReportBucket) => number | null,
+    pvOf: (bucket: EnergyReportBucket) => number | null,
+  ) => {
+    const pairs = completeBuckets.filter((b) => totalOf(b) !== null && pvOf(b) !== null);
+    if (pairs.length === 0) return null;
+    const total = pairs.reduce((acc, b) => acc + (totalOf(b) as number), 0);
+    const pv = pairs.reduce((acc, b) => acc + (pvOf(b) as number), 0);
+    return total > 0 ? roundRatio(Math.min(1, pv / total)) : null;
+  };
   const costSum = (selector: (bucket: EnergyReportBucket) => number | null | undefined) => {
     const values = completeBuckets
       .map(selector)
@@ -782,23 +846,19 @@ export function buildEnergyReportFromMeterReports(
     if (values.length === 0) return null;
     return Math.round(values.reduce((total, value) => total + value, 0) * 100) / 100;
   };
-  const selfConsumption =
-    production !== null && gridExport !== null
-      ? roundReportValue(Math.max(0, production - gridExport), decimals)
-      : null;
-  const totalConsumption =
-    gridImport !== null && selfConsumption !== null
-      ? roundReportValue(gridImport + selfConsumption, decimals)
-      : null;
-  const heatPumpExclusion =
-    heatPumpTotal ??
-    (heatHeatingTotal !== null && hotWaterTotal !== null
-      ? roundReportValue(heatHeatingTotal + hotWaterTotal, decimals)
-      : null);
-  const consumptionWithoutHeatPumpAndEv =
-    totalConsumption !== null
-      ? roundReportValue(Math.max(0, totalConsumption - (heatPumpExclusion ?? 0) - (evChargerTotal ?? 0)), decimals)
-      : null;
+
+  const gridImport = sum((bucket) => bucket.gridImport);
+  const gridExport = sum((bucket) => bucket.gridExport);
+  const production = sum((bucket) => bucket.production);
+  // Sums of the bucket figures, so the total row adds up to its columns.
+  const selfConsumption = sum((bucket) => bucket.selfConsumption);
+  const totalConsumption = sum((bucket) => bucket.totalConsumption);
+  const heatHeatingTotal = sum((bucket) => bucket.heatHeatingTotal);
+  const heatHeatingPv = sum((bucket) => bucket.heatHeatingPv);
+  const hotWaterTotal = sum((bucket) => bucket.hotWaterTotal);
+  const hotWaterPv = sum((bucket) => bucket.hotWaterPv);
+  const evChargerTotal = sum((bucket) => bucket.evChargerTotal);
+  const evChargerPv = sum((bucket) => bucket.evChargerPv);
 
   return {
     unit: "kWh",
@@ -807,14 +867,14 @@ export function buildEnergyReportFromMeterReports(
     allocation,
     from: fromDate?.toISOString() ?? null,
     to: toDate?.toISOString() ?? null,
-    buckets: completeBuckets,
+    buckets: pvBuckets,
     totals: {
       gridImport,
       gridExport,
       production,
       selfConsumption,
       totalConsumption,
-      consumptionWithoutHeatPumpAndEv,
+      consumptionWithoutHeatPumpAndEv: sum((bucket) => bucket.consumptionWithoutHeatPumpAndEv),
       autarky:
         totalConsumption !== null && totalConsumption > 0 && gridImport !== null
           ? roundRatio(1 - gridImport / totalConsumption)
@@ -823,28 +883,19 @@ export function buildEnergyReportFromMeterReports(
         production !== null && production > 0 && selfConsumption !== null
           ? roundRatio(selfConsumption / production)
           : null,
-      heatPumpTotal,
+      heatPumpTotal: sum((bucket) => bucket.heatPumpTotal),
       heatHeatingTotal,
       heatHeatingPv,
-      heatHeatingGrid,
-      heatHeatingPvShare:
-        heatHeatingTotal !== null && heatHeatingTotal > 0 && heatHeatingPv !== null
-          ? roundRatio(heatHeatingPv / heatHeatingTotal)
-          : null,
+      heatHeatingGrid: sum((bucket) => bucket.heatHeatingGrid),
+      heatHeatingPvShare: pairedShare((b) => b.heatHeatingTotal, (b) => b.heatHeatingPv),
       hotWaterTotal,
       hotWaterPv,
-      hotWaterGrid,
-      hotWaterPvShare:
-        hotWaterTotal !== null && hotWaterTotal > 0 && hotWaterPv !== null
-          ? roundRatio(hotWaterPv / hotWaterTotal)
-          : null,
+      hotWaterGrid: sum((bucket) => bucket.hotWaterGrid),
+      hotWaterPvShare: pairedShare((b) => b.hotWaterTotal, (b) => b.hotWaterPv),
       evChargerTotal,
       evChargerPv,
       evChargerGrid: sum((bucket) => bucket.evChargerGrid),
-      evChargerPvShare:
-        evChargerTotal !== null && evChargerTotal > 0 && evChargerPv !== null
-          ? roundRatio(evChargerPv / evChargerTotal)
-          : null,
+      evChargerPvShare: pairedShare((b) => b.evChargerTotal, (b) => b.evChargerPv),
       costs: tariffTimeline?.hasCostTariffs()
         ? {
             gridImportCostEur: costSum((bucket) => bucket.costs?.gridImportCostEur),
@@ -861,6 +912,21 @@ export function buildEnergyReportFromMeterReports(
   };
 }
 
+/** The first visible meter per role, plus the roles that occur more than once. */
+export async function resolveRoleMeters(
+  userId: number,
+): Promise<{ roleMeters: Map<EnergyReportRole, MeterListItem>; duplicateRoles: EnergyReportRole[] }> {
+  const roleMeters = new Map<EnergyReportRole, MeterListItem>();
+  const duplicates = new Set<EnergyReportRole>();
+  for (const meter of await listMeters(userId)) {
+    const role = meter.role as EnergyReportRole | null;
+    if (!role || !ENERGY_REPORT_ROLES.includes(role)) continue;
+    if (roleMeters.has(role)) duplicates.add(role);
+    else roleMeters.set(role, meter);
+  }
+  return { roleMeters, duplicateRoles: [...duplicates] };
+}
+
 export async function getEnergyReportForUser(
   userId: number,
   granularity: ReportGranularity,
@@ -872,25 +938,42 @@ export async function getEnergyReportForUser(
     throw APIError.invalidArgument("from must be before to");
   }
 
-  const roleMeters = new Map<EnergyReportRole, MeterListItem>();
-  for (const meter of await listMeters(userId)) {
-    const role = meter.role;
-    if (role && !roleMeters.has(role)) roleMeters.set(role, meter);
-  }
+  const { roleMeters, duplicateRoles } = await resolveRoleMeters(userId);
+  const tariffTimeline = await loadEnergyTariffTimeline(userId);
 
-  const reports: Partial<Record<EnergyReportRole, MeterReport>> = {};
-  for (const [role, meter] of roleMeters) {
-    reports[role] = await getMeterReportForUser(
-      userId,
-      meter.id,
-      granularity,
+  const loadReports = async (g: ReportGranularity) => {
+    const reports: Partial<Record<EnergyReportRole, MeterReport>> = {};
+    for (const [role, meter] of roleMeters) {
+      reports[role] = await getMeterReportForUser(userId, meter.id, g, fromDate, toDate, allocation);
+    }
+    return reports;
+  };
+  const reports = await loadReports(granularity);
+
+  // A year's cost is the sum of its months' costs, not the year's kWh at a
+  // day-weighted average price: consumption is seasonal, price changes are
+  // not, and the two ways of counting would otherwise disagree by a few
+  // percent between the month and the year view.
+  let costOverrides: Map<string, EnergyTariffCostResult | null> | undefined;
+  if (granularity === "year" && tariffTimeline.hasCostTariffs()) {
+    const monthly = buildEnergyReportFromMeterReports(
+      await loadReports("month"),
+      "month",
       fromDate,
       toDate,
+      tariffTimeline,
       allocation,
+    );
+    const monthsByYear = new Map<string, Array<EnergyTariffCostResult | null>>();
+    for (const bucket of monthly.buckets) {
+      const year = bucket.key.slice(0, 4);
+      monthsByYear.set(year, [...(monthsByYear.get(year) ?? []), bucket.costs]);
+    }
+    costOverrides = new Map(
+      [...monthsByYear.entries()].map(([year, list]) => [year, sumCostResults(list)]),
     );
   }
 
-  const tariffTimeline = await loadEnergyTariffTimeline(userId);
   const base = buildEnergyReportFromMeterReports(
     reports,
     granularity,
@@ -898,6 +981,7 @@ export async function getEnergyReportForUser(
     toDate,
     tariffTimeline,
     allocation,
+    costOverrides,
   );
   return {
     ...base,
@@ -907,5 +991,6 @@ export async function getEnergyReportForUser(
       name: meter.name,
     })),
     missingRoles: REQUIRED_ENERGY_REPORT_ROLES.filter((role) => !roleMeters.has(role)),
+    duplicateRoles,
   };
 }

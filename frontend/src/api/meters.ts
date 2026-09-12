@@ -13,6 +13,8 @@ export type MeterRole =
   | 'ev_charger_total'
   | 'ev_charger_pv'
   | 'compressor_hours'
+  | 'water_main'
+  | 'water_garden'
 
 export interface MeterListItem {
   id: number
@@ -246,10 +248,34 @@ export interface MeterReportBucket {
   intervals: number
   /** Share of the period actually spanned by readings, 0..1. */
   coverage: number
+  /**
+   * Coverage-weighted mean length of the reading intervals behind this period,
+   * in days. A month built from one yearly reading has a coverage of 1 but a
+   * mean interval of 365 — its value is interpolated, not measured.
+   */
+  meanIntervalDays: number | null
   /** Same period one year earlier; null unless both periods are fully covered. */
   previousConsumption: number | null
   deltaAbsolute: number | null
+  /** Relative change of the daily rate, so a leap day or a 53-week year is not a change. */
   deltaPercent: number | null
+}
+
+/** Days in the bucket's period. */
+export function periodDays(bucket: { periodStart: string; periodEnd: string }) {
+  return (new Date(bucket.periodEnd).getTime() - new Date(bucket.periodStart).getTime()) / 86_400_000
+}
+
+/**
+ * True when the value was spread out of readings much further apart than the
+ * period itself — a monthly figure from yearly readings is not a measurement.
+ */
+export function isInterpolatedPeriod(bucket: {
+  periodStart: string
+  periodEnd: string
+  meanIntervalDays: number | null
+}) {
+  return bucket.meanIntervalDays !== null && bucket.meanIntervalDays > periodDays(bucket) * 2
 }
 
 /**
@@ -296,6 +322,19 @@ export interface EnergyReportMeterRef {
   name: string
 }
 
+export type EnergyBucketWarning =
+  /** More exported than produced — usually readings taken on different days. */
+  | 'export_exceeds_production'
+  /** Heat pump + wallbox exceed the total — a sub-meter not fed from grid_import. */
+  | 'exclusion_exceeds_total'
+
+export const ENERGY_BUCKET_WARNING_LABELS: Record<EnergyBucketWarning, string> = {
+  export_exceeds_production:
+    'Einspeisung größer als Produktion — die Zähler wurden vermutlich an verschiedenen Tagen abgelesen.',
+  exclusion_exceeds_total:
+    'Wärmepumpe und Wallbox zusammen größer als der Gesamtverbrauch — ein Unterzähler hängt wohl nicht am Netzbezug.',
+}
+
 export interface EnergyReportBucket {
   key: string
   label: string
@@ -303,6 +342,9 @@ export interface EnergyReportBucket {
   periodEnd: string
   /** Lowest coverage among the contributing meters, 0..1. */
   coverage: number
+  /** Full PV set present and fully measured; only these feed `totals`. */
+  complete: boolean
+  warnings: EnergyBucketWarning[]
   gridImport: number | null
   gridExport: number | null
   production: number | null
@@ -346,8 +388,13 @@ export interface EnergyReport {
   to: string | null
   meters: EnergyReportMeterRef[]
   missingRoles: EnergyReportRole[]
+  /** Roles carried by more than one visible meter; only the first is used. */
+  duplicateRoles: EnergyReportRole[]
   buckets: EnergyReportBucket[]
-  totals: Omit<EnergyReportBucket, 'key' | 'label' | 'periodStart' | 'periodEnd' | 'coverage'>
+  totals: Omit<
+    EnergyReportBucket,
+    'key' | 'label' | 'periodStart' | 'periodEnd' | 'coverage' | 'complete' | 'warnings'
+  >
   hasTariffs: boolean
 }
 
@@ -362,6 +409,8 @@ export function getEnergyReport(
 // ── Consumption trends ─────────────────────────────────────────────────────
 
 export type TrendDirection = 'rising' | 'falling' | 'stable' | 'unknown'
+/** What the reported direction is based on. */
+export type TrendDirectionBasis = 'year_over_year' | 'regression' | 'none'
 
 export interface TrendPoint {
   key: string
@@ -386,7 +435,11 @@ export interface ConsumptionTrend {
   changePercent: number | null
   /** Change of the annual total per year, from a regression over rolling12. */
   slopePerYear: number | null
+  /** Rolling-12 points the regression ran over. */
+  trendPoints: number
   direction: TrendDirection
+  /** Whether the direction compares two full years or reads the regression. */
+  directionBasis: TrendDirectionBasis
   monthsAvailable: number
   rangeStart: string | null
   rangeEnd: string | null
@@ -417,6 +470,8 @@ export interface PvEconomicsBucket {
   pvBenefitEur: number | null
   cumulativeSavingsEur: number | null
   cumulativePvBenefitEur: number | null
+  /** Fully measured period with the whole PV set; only these feed the amortisation. */
+  complete: boolean
 }
 
 export interface PvAmortization {
@@ -425,12 +480,17 @@ export interface PvAmortization {
   investmentTotalEur: number | null
   /** Expected yearly return of the money, as a ratio (0.05 = 5 %). */
   expectedReturnRate: number | null
-  /** Return forgone so far, compounded at that rate. */
+  /** Return forgone over the measured months, as a flat yearly amount × `yearsElapsed`. */
   opportunityCostEur: number | null
+  /** PV benefit accumulated over the whole measured history. */
   cumulativePvBenefitEur: number
   remainingEur: number | null
   remainingWithOpportunityEur: number | null
+  /** Benefit of the last twelve fully measured, consecutive months; null while there is a gap. */
   benefitLast12MonthsEur: number | null
+  /** Fully measured months the benefit was accumulated over. */
+  measuredMonths: number
+  /** `measuredMonths` / 12 — the time basis of both benefit and opportunity cost. */
   yearsElapsed: number
   payoffReached: boolean
   projectedPayoffDate: string | null
@@ -451,6 +511,12 @@ export interface UsageCostBucket {
   periodEnd: string
   heating: ApplicationCost
   hotWater: ApplicationCost
+  /**
+   * Heat pump consumption the sub-meters do not account for (whole-pump meter
+   * minus heating and hot water), or the whole pump where there are no
+   * sub-meters. Valued at the grid price — its PV share is not metered.
+   */
+  heatPumpRest: ApplicationCost
   evCharger: ApplicationCost
   household: ApplicationCost
   /** Standing charge, which belongs to no single application. */
@@ -514,7 +580,20 @@ export interface ComparisonAssumption {
   label: string
   amount: number
   unit: ElectricityTariffUnit
+  /** From when this value applied; several entries of one kind form a series. */
+  validFrom: string
 }
+
+/** Where the heat pump electricity of the comparison comes from. */
+export type HeatSource =
+  /** Heating and hot water sub-meters. */
+  | 'sub_meters'
+  /** The whole-pump meter; no PV split is metered. */
+  | 'heat_pump_total'
+  /** Only the heating sub-meter — hot water is missing from the comparison. */
+  | 'heating_only'
+  /** Only the hot-water sub-meter — heating is missing from the comparison. */
+  | 'hot_water_only'
 
 /** A figure with the range the SCOP uncertainty spans. */
 export interface CostRange {
@@ -529,23 +608,35 @@ export interface HeatingComparisonBucket {
   periodStart: string
   periodEnd: string
   heatPumpKwh: number | null
+  /** PV share of it; null when no PV sub-meter exists. */
+  heatPumpPvKwh: number | null
+  heatPumpGridKwh: number | null
+  /** Grid share at the work price, PV share at the feed-in tariff. */
   heatPumpCostEur: number | null
   heatDeliveredKwh: CostRange
   gasKwh: CostRange
   gasCostEur: CostRange
   /** Positive = the heat pump was cheaper. */
   savingsEur: CostRange
+  /** Gas emissions avoided minus the emissions of the grid share. */
+  avoidedCo2Kg: CostRange
+  /** Both sides known — only these feed the totals. */
+  compared: boolean
 }
 
 export interface HeatingComparison {
   buckets: HeatingComparisonBucket[]
-  /** Span actually covered by buckets with heat pump consumption; null if none. */
+  /** Span of the compared periods; null if none. */
   periodStart: string | null
   periodEnd: string | null
+  comparedPeriods: number
+  heatSource: HeatSource | null
+  totalHeatPumpKwh: number | null
   totalHeatPumpCostEur: number | null
   totalGasCostEur: CostRange
   totalSavingsEur: CostRange
   avoidedCo2Kg: number | null
+  avoidedCo2Range: CostRange
   scop: number | null
   scopRange: { low: number; high: number } | null
   assumptions: ComparisonAssumption[]
@@ -557,33 +648,36 @@ export interface CarComparisonBucket {
   periodStart: string
   periodEnd: string
   chargedKwh: number | null
-  /** Actual metered cost of that charging electricity. */
+  chargedPvKwh: number | null
+  chargedGridKwh: number | null
+  /** Grid share at the work price, PV share at the feed-in tariff. */
   evCostEur: number | null
-  /** Feed-in revenue forgone on the PV share of the charge; null without a feed-in tariff. */
-  lostFeedInEur: number | null
-  /** evCostEur plus the forgone feed-in revenue — the true cost of charging at home. */
-  evCostWithOpportunityEur: number | null
+  /** From the charged kWh after charging losses. */
   kilometers: number | null
   petrolLitres: number | null
   petrolCostEur: number | null
+  /** Positive = the EV was cheaper. */
   savingsEur: number | null
+  avoidedCo2Kg: number | null
+  compared: boolean
 }
 
 export interface CarComparison {
   buckets: CarComparisonBucket[]
-  /** Span actually covered by buckets with charging activity; null if none. */
+  /** Span of the compared periods; null if none. */
   periodStart: string | null
   periodEnd: string | null
+  comparedPeriods: number
   totalChargedKwh: number | null
   totalKilometers: number | null
   totalEvCostEur: number | null
-  totalLostFeedInEur: number | null
-  totalEvCostWithOpportunityEur: number | null
   totalPetrolCostEur: number | null
   totalSavingsEur: number | null
   evCentsPerKm: number | null
   petrolCentsPerKm: number | null
   avoidedCo2Kg: number | null
+  /** Share of the wallbox reading lost before the battery, as used. */
+  chargingLoss: number
   assumptions: ComparisonAssumption[]
 }
 
@@ -611,8 +705,10 @@ export interface OperatingHoursBucket {
   periodStart: string
   periodEnd: string
   hours: number
-  /** Share of the measured time the machine actually ran, 0..1. */
+  /** Share of the measured time the machine actually ran; above 1 the reading is implausible. */
   runtimeShare: number | null
+  /** More hours counted than the measured time contains. */
+  implausible: boolean
   coverage: number
 }
 
@@ -622,6 +718,7 @@ export interface OperatingHoursMetric {
   unit: string
   buckets: OperatingHoursBucket[]
   totalHours: number
+  /** Runtime share over the fully measured periods, weighted by their length. */
   averageRuntimeShare: number | null
 }
 
@@ -634,6 +731,8 @@ export interface CompressorEfficiencyBucket {
   compressorHours: number | null
   /** Electricity per hour of running — rising means losing efficiency. */
   kwhPerHour: number | null
+  /** Same period a year earlier. */
+  previousYearKwhPerHour: number | null
 }
 
 export interface CompressorEfficiency {
@@ -642,7 +741,12 @@ export interface CompressorEfficiency {
   buckets: CompressorEfficiencyBucket[]
   earliestKwhPerHour: number | null
   latestKwhPerHour: number | null
+  /** Period the latest value belongs to. */
+  latestKey: string | null
+  previousYearKwhPerHour: number | null
+  /** Latest period against the same period a year earlier. */
   changePercent: number | null
+  /** Regression over calendar time. */
   slopePerYear: number | null
 }
 
@@ -651,10 +755,13 @@ export interface WaterBaselineBucket {
   label: string
   periodStart: string
   periodEnd: string
-  /** Lowest daily rate among the reading intervals starting in this period. */
+  /** Lowest daily rate among the reading intervals starting in this period; null when too sparse. */
   minDailyRate: number | null
   averageDailyRate: number | null
   intervals: number
+  shortestIntervalDays: number | null
+  /** Days of the period covered by intervals starting in it. */
+  measuredDays: number
 }
 
 export interface WaterBaseline {
@@ -663,9 +770,12 @@ export interface WaterBaseline {
   unit: string
   buckets: WaterBaselineBucket[]
   latestMinDailyRate: number | null
+  latestKey: string | null
   previousYearMinDailyRate: number | null
   changePercent: number | null
   slopePerYear: number | null
+  /** No period had readings close enough together for a baseline. */
+  tooSparse: boolean
 }
 
 export interface PvYieldBucket {
@@ -674,16 +784,26 @@ export interface PvYieldBucket {
   periodStart: string
   periodEnd: string
   productionKwh: number
+  /** Installed capacity in force in that year. */
+  capacityKwp: number | null
+  /** kWh per installed kWp — comparable across weather years. */
   yieldPerKwp: number | null
   coverage: number
 }
 
 export interface PvYieldReport {
   meterId: number
+  /** Current installed capacity. */
   capacityKwp: number
+  /** Always calendar years, whatever granularity the report was asked for. */
   buckets: PvYieldBucket[]
-  bestYieldPerKwp: number | null
   latestYieldPerKwp: number | null
+  latestKey: string | null
+  previousYearYieldPerKwp: number | null
+  changeVsPreviousYearPercent: number | null
+  medianYieldPerKwp: number | null
+  changeVsMedianPercent: number | null
+  bestYieldPerKwp: number | null
   changeVsBestPercent: number | null
 }
 
@@ -695,6 +815,9 @@ export interface EquipmentReport {
   compressorEfficiency: CompressorEfficiency | null
   waterBaselines: WaterBaseline[]
   pvYield: PvYieldReport | null
+  /** Roles a figure would need and the household has not assigned. */
+  missingRoles: EnergyReportRole[]
+  duplicateRoles: EnergyReportRole[]
 }
 
 export function getEquipmentReport(granularity: MeterReportGranularity = 'month') {
@@ -718,6 +841,7 @@ export type ElectricityTariffKind =
   | 'boiler_efficiency'
   | 'heat_pump_scop'
   | 'ev_consumption'
+  | 'ev_charging_loss'
   | 'petrol_consumption'
   | 'petrol_price'
   | 'grid_co2'
@@ -931,6 +1055,8 @@ export const METER_ROLE_LABELS: Record<MeterRole, string> = {
   ev_charger_total: 'E-Auto/Wallbox gesamt',
   ev_charger_pv: 'E-Auto/Wallbox PV',
   compressor_hours: 'Verdichter-Betriebsstunden',
+  water_main: 'Wasser Hausanschluss',
+  water_garden: 'Wasser Garten (ohne Abwasser)',
 }
 
 export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, string> = {
@@ -946,6 +1072,7 @@ export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, strin
   boiler_efficiency: 'Kesselwirkungsgrad',
   heat_pump_scop: 'Jahresarbeitszahl (JAZ)',
   ev_consumption: 'Verbrauch E-Auto',
+  ev_charging_loss: 'Ladeverluste E-Auto',
   petrol_consumption: 'Verbrauch Benziner',
   petrol_price: 'Benzinpreis',
   grid_co2: 'CO₂-Faktor Netzstrom',
@@ -975,7 +1102,10 @@ export const ELECTRICITY_TARIFF_KIND_EXPLANATIONS: Record<ElectricityTariffKind,
     'Wirkungsgrad eines Gaskessels (0..1): wie viel der eingesetzten Gasenergie tatsächlich als Wärme ankommt. Ein moderner Brennwertkessel liegt nahe 1.',
   heat_pump_scop:
     'Jahresarbeitszahl (JAZ/SCOP) der Wärmepumpe: wie viel kWh Wärme sie im Schnitt aus 1 kWh Strom macht. Ohne Wärmemengenzähler eine Schätzung — der Report zeigt deshalb eine Bandbreite.',
-  ev_consumption: 'Stromverbrauch des E-Autos in kWh je 100 km.',
+  ev_consumption:
+    'Stromverbrauch des E-Autos in kWh je 100 km, wie ihn das Auto anzeigt (ab Batterie).',
+  ev_charging_loss:
+    'Anteil des an der Wallbox gemessenen Stroms, der beim Laden verloren geht (z. B. 0,1 für 10 %). Die Wallbox zählt mehr, als in der Batterie ankommt; ohne diesen Wert werden die gefahrenen Kilometer überschätzt.',
   petrol_consumption: 'Verbrauch eines vergleichbaren Benziners in Liter je 100 km.',
   petrol_price: 'Benzinpreis pro Liter, für den Vergleich mit einem Verbrenner.',
   grid_co2: 'CO₂-Ausstoß pro kWh Netzstrom (Strommix), für die CO₂-Bilanz.',
