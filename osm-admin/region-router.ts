@@ -5,10 +5,25 @@
  * Single responsibility:
  *
  *   pickRegion(lat, lon): walk the `osm_region_imports` rows whose
- *     status is `ready_running`, return the one whose bbox is the
- *     smallest match. A short-lived in-memory cache keyed on a Geohash-7
+ *     status is `ready_running`, take the ones whose bbox contains the
+ *     point, smallest first, and return the first that **actually holds
+ *     data there**. A short-lived in-memory cache keyed on a Geohash-7
  *     cell (~150 m × 150 m) keeps the round-trip free for repeated
  *     lookups in the same area.
+ *
+ * The second half of that sentence was missing for a long time, and it
+ * is the half that matters. A bounding box says "might contain", never
+ * "does": a Geofabrik extract is cut along administrative borders and
+ * its rectangle overlaps its neighbours generously. Italy's Nord-Ovest
+ * — Piedmont, Liguria, Lombardy — has a rectangle reaching south past
+ * Pisa and east past Florence, so a trip to either was routed to a
+ * database whose data stops at the Tuscan border. It came back with no
+ * spots and no explanation, while a village a few kilometres further
+ * south fell outside the rectangle, asked for its own region and was
+ * planned correctly.
+ *
+ * So the bbox stays what it is good at — a cheap, indexed way to
+ * shortlist — and the data decides.
  *
  * Since the migration to the single-container geo service there is no
  * per-region cold-start anymore — the geo container is always up. The
@@ -17,10 +32,12 @@
  * treated as a synonym for `ready_running` on read.
  */
 
+import log from "encore.dev/log";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
 import { isRegionStatus, type RegionStatus } from "./state-machine";
+import { getGeoClient } from "./geo-client";
 
 /** Geohash precision: 7 chars ≈ 153 m × 153 m at the equator. */
 const GEOHASH_PRECISION = 7;
@@ -44,6 +61,11 @@ export interface RouterDeps {
   now?: () => Date;
   /** Geohash function — override in tests. */
   geohash?: (lat: number, lon: number, precision: number) => string;
+  /**
+   * Does that database hold anything near the point? Defaults to asking
+   * the geo service; a test passes its own.
+   */
+  covers?: (postgresDb: string, lat: number, lon: number) => Promise<boolean>;
 }
 
 interface CacheEntry {
@@ -94,34 +116,76 @@ export async function pickRegion(
       ),
     );
 
-  let best: typeof rows[number] | null = null;
-  let bestArea = Infinity;
-  for (const r of rows) {
-    const area =
-      (r.bbox_max_lat - r.bbox_min_lat) * (r.bbox_max_lon - r.bbox_min_lon);
-    if (area < bestArea) {
-      bestArea = area;
-      best = r;
-    }
-  }
+  // Smallest rectangle first: where two regions genuinely overlap, the
+  // tighter one is the likelier home of the point.
+  const candidates = rows
+    .filter((r) => isRegionStatus(r.status))
+    .sort((a, b) => bboxArea(a) - bboxArea(b));
 
+  const covers = deps.covers ?? defaultCovers;
   let match: RegionMatch | null = null;
-  if (best && isRegionStatus(best.status)) {
-    match = {
-      slug: best.slug,
-      status: best.status,
-      postgresDb: best.postgres_db,
-      bbox: {
-        minLat: best.bbox_min_lat,
-        minLon: best.bbox_min_lon,
-        maxLat: best.bbox_max_lat,
-        maxLon: best.bbox_max_lon,
-      },
-    };
+  for (const row of candidates) {
+    // Every candidate is asked, the only one included: a single wrong
+    // rectangle is exactly the case this exists for. Pisa had one
+    // candidate, and taking it on trust is what produced an empty trip.
+    let covered = false;
+    try {
+      covered = await covers(row.postgres_db, lat, lon);
+    } catch (err) {
+      // A probe that cannot run must not decide. Treat it as "no
+      // opinion" and keep the candidate: an unreachable geo service is
+      // a fault of its own, and turning it into "this region does not
+      // cover Pisa" would send a good trip off to import a region it
+      // already has.
+      log.warn("coverage probe failed, keeping the bbox match", {
+        postgresDb: row.postgres_db,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      covered = true;
+    }
+    if (!covered) {
+      log.info("region rejected: its bbox contains the point, its data does not", {
+        postgresDb: row.postgres_db,
+        slug: row.slug,
+        lat,
+        lon,
+      });
+      continue;
+    }
+    match = toMatch(row);
+    break;
   }
 
   cache.set(hash, { match, expiresAt: now().getTime() + CACHE_TTL_MS });
   return match;
+}
+
+function bboxArea(r: {
+  bbox_min_lat: number; bbox_min_lon: number; bbox_max_lat: number; bbox_max_lon: number;
+}): number {
+  return (r.bbox_max_lat - r.bbox_min_lat) * (r.bbox_max_lon - r.bbox_min_lon);
+}
+
+function toMatch(row: {
+  slug: string; status: string; postgres_db: string;
+  bbox_min_lat: number; bbox_min_lon: number; bbox_max_lat: number; bbox_max_lon: number;
+}): RegionMatch | null {
+  if (!isRegionStatus(row.status)) return null;
+  return {
+    slug: row.slug,
+    status: row.status,
+    postgresDb: row.postgres_db,
+    bbox: {
+      minLat: row.bbox_min_lat,
+      minLon: row.bbox_min_lon,
+      maxLat: row.bbox_max_lat,
+      maxLon: row.bbox_max_lon,
+    },
+  };
+}
+
+async function defaultCovers(postgresDb: string, lat: number, lon: number): Promise<boolean> {
+  return await getGeoClient().hasCoverage(postgresDb, lat, lon);
 }
 
 /**
