@@ -853,8 +853,18 @@ export const detailTripDay = api(
       locatedStoredFixpoints(day.fixpoints),
       day.blocks.flatMap((b) => (b.startMinutes === null ? [] : [{ startMinutes: b.startMinutes }])),
     );
+    // A day trip is planned around its destination and out of its own
+    // pool (§4.5). The leg's pool is the quarters' — filling a Florence
+    // day out of it would produce a day in the wrong city, and the
+    // frame it already carries (the later start, the shortened last
+    // block) was written for the drive.
+    const dayTrip = dayTripOf(leg.anchor, day.anchor, leg.mode);
+    const pool = dayTrip === null
+      ? leg.pool
+      : await dayTripPool(dayTrip, constraintsOf(plan), leg.radiusM ?? searchRadiusFor(leg.mode),
+                          new Map());
     const solved = solveDay({
-      anchor: leg.anchor,
+      anchor: dayTrip?.at ?? leg.anchor,
       start: ends.start ?? undefined,
       end: ends.end ?? undefined,
       blocks: day.blocks.map((b) => ({
@@ -864,13 +874,15 @@ export const detailTripDay = api(
         baseBudgetMinutes: b.budgetMinutes,
         budgetMinutes: b.budgetMinutes,
       })),
-      candidates: leg.pool,
+      candidates: pool,
       maxWalkMinutes,
       mode: leg.mode,
     });
 
     const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((st) => st.osmRef)));
-    const remaining = leg.pool.filter((c) => !placed.has(c.osmRef));
+    // What the outing did not use joins the leg's pool rather than
+    // vanishing with the day (§4.5).
+    const remaining = mergeByOsmRef(leg.pool, pool).filter((c) => !placed.has(c.osmRef));
 
     // The same ordering a day planned with the trip gets (§7.3): a day
     // filled in later must not come out differently from one filled in
@@ -1426,6 +1438,11 @@ async function planLeg(
         fixpoints: fixpoints.map((f) => f.stored),
         detailed: false,
         bufferReason: buffer?.reason ?? null,
+        // Kept even though nothing is planned yet: the destination is
+        // part of the frame the traveller set, and dropping it here
+        // filled the day out of the quarters' pool when somebody
+        // detailed it the evening before (§4.5).
+        anchor: storedAnchor(dayTrip),
       });
       continue;
     }
@@ -1478,12 +1495,7 @@ async function planLeg(
       blocks: lit.map((b) => ({ ...b, startMinutes: startsByBlock.get(b.id) })),
       fixpoints: fixpoints.map((f) => f.stored),
       detailed: true,
-      anchor: dayTrip === null ? null : {
-        lat: dayTrip.at.lat,
-        lon: dayTrip.at.lon,
-        label: dayTrip.label,
-        radiusM: dayTrip.radiusM,
-      },
+      anchor: storedAnchor(dayTrip),
     });
     const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
     // What the day trip did not use joins the leg's pool rather than
@@ -1907,6 +1919,31 @@ async function searchArea(
     log.warn("area search failed", { rank, radiusM, postgresDb, reason });
     return { spots: [], failure: reason };
   }
+}
+
+/** A day trip as the day stores it, or null for a day at the quarters. */
+function storedAnchor(dayTrip: DayTrip | null): DayAnchor | null {
+  if (dayTrip === null) return null;
+  return {
+    lat: dayTrip.at.lat,
+    lon: dayTrip.at.lon,
+    label: dayTrip.label,
+    radiusM: dayTrip.radiusM,
+  };
+}
+
+/** The trip-wide constraints a day-trip search needs, out of a stored plan. */
+function constraintsOf(plan: StoredPlan): {
+  categories?: string[];
+  interests?: string[];
+  dwellMinutes?: Record<string, number>;
+} {
+  const c = plan.constraints;
+  return {
+    categories: (c.categories ?? undefined) as string[] | undefined,
+    interests: (c.interests ?? undefined) as string[] | undefined,
+    dwellMinutes: (c.dwellMinutes ?? undefined) as Record<string, number> | undefined,
+  };
 }
 
 /**

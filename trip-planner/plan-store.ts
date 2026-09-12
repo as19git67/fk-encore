@@ -33,7 +33,7 @@ import {
 import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
-import { travelClassFor, type TransportMode } from "./travel";
+import { travelClassFor, travelLeg, type TransportMode } from "./travel";
 import { loadBranches, type StoredBranch } from "./branch-store";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 
@@ -152,6 +152,12 @@ export interface StoredDayAnchor {
   lon: number;
   label: string | null;
   radiusM: number | null;
+  /**
+   * Getting there from the quarters, one way, in minutes. Derived from
+   * the two anchors and the leg's mode rather than stored — a column
+   * could disagree with all three.
+   */
+  travelMinutes: number;
 }
 
 export interface StoredFixpoint extends Fixpoint {
@@ -970,6 +976,8 @@ export async function loadPlan(
           lon: row.anchor_lon,
           label: row.anchor_label,
           radiusM: row.anchor_radius_m,
+          // Filled in once the leg's anchor and mode are known.
+          travelMinutes: 0,
         },
     });
     daysByLeg.set(row.leg_id, list);
@@ -1021,7 +1029,14 @@ export async function loadPlan(
       startDate: l.start_date,
       radiusM: l.radius_m,
       dayStartMinutes: l.day_starts_at,
-      days: daysByLeg.get(l.id) ?? [],
+      // The drive is filled in here rather than stored: it follows from
+      // the two anchors and the mode, and a column could disagree with
+      // all three. The app needs it for one sentence — "Pisa · 1 h 10
+      // hin und zurück" — and computing it a second time in Swift would
+      // be a second travel model (§4.5).
+      days: withTravel(daysByLeg.get(l.id) ?? [],
+                       { lat: l.anchor_lat, lon: l.anchor_lon },
+                       l.mode as TransportMode),
       pool: poolByLeg.get(l.id) ?? [],
     })),
   };
@@ -1332,6 +1347,24 @@ export async function removeFromPool(
  * Null clears all four columns together: a day trip with a label and no
  * coordinate would be a destination nobody can plan around.
  */
+/** The days of one leg, each day trip carrying what the drive costs. */
+function withTravel(
+  days: StoredDay[],
+  legAnchor: { lat: number; lon: number },
+  mode: TransportMode,
+): StoredDay[] {
+  return days.map((day) =>
+    day.anchor === null
+      ? day
+      : {
+        ...day,
+        anchor: {
+          ...day.anchor,
+          travelMinutes: travelLeg(legAnchor, day.anchor, mode).minutes,
+        },
+      });
+}
+
 export async function setDayAnchor(
   dayId: number,
   anchor: DayAnchor | null,

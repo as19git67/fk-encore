@@ -581,6 +581,39 @@ final class TripPlannerViewModel {
         }
     }
 
+    /// Send this day somewhere else, or call it home (§4.5).
+    ///
+    /// `nil` clears it. The server re-plans either way: a day whose
+    /// destination moved but whose spots did not is a day that no
+    /// longer adds up — the pool it was built from is the wrong city's.
+    func setDayAnchor(_ place: TripPlace?) async {
+        struct Body: Encodable {
+            let legIndex: Int
+            let dayIndex: Int
+            /// Both or neither — the server refuses half a coordinate.
+            let lat: Double?
+            let lon: Double?
+            let label: String?
+        }
+        isSavingFixpoint = true
+        defer { isSavingFixpoint = false }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/days/anchor",
+                body: Body(
+                    legIndex: legIndex,
+                    dayIndex: dayIndex,
+                    lat: place?.latitude,
+                    lon: place?.longitude,
+                    label: place?.name,
+                ),
+            )
+            apply(response)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Take one off again. The day gets its minutes back, so the server
     /// plans it again — a block still shortened for a train nobody
     /// catches would be wrong in the quietest possible way.

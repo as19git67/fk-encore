@@ -18,7 +18,7 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { createTripPlan } from "./plans";
+import { createTripPlan, detailTripDay } from "./plans";
 import { setTripDayAnchor } from "./day-anchor-edit";
 
 /** The base, and a town an hour away by car. */
@@ -195,5 +195,25 @@ describe("a base with day trips (§4.5)", () => {
     const created = await createTripPlan({ legs: [{ anchor: BASE, days: 1 }] });
     await expect(setTripDayAnchor({ planId: created.plan.id, dayIndex: 0, lat: 43.7 }))
       .rejects.toThrow(/together/);
+  });
+
+  it("fills a day trip out of its own pool the evening before", async () => {
+    // Day two is beyond the detail horizon at first. Filling it later
+    // must land in the same city as filling it now — the leg's pool is
+    // the quarters' one, and a Florence day built from it would be a
+    // day in the wrong place.
+    const created = await createTripPlan({
+      legs: [{
+        anchor: BASE, days: 2, mode: "car", radiusM: 5_000,
+        dayAnchors: [{ dayIndex: 1, ...TOWN, label: "Nachbarstadt" }],
+      }],
+      detailDays: 1,
+    });
+    expect(created.plan.legs[0].days[1].detailed).toBe(false);
+
+    const filled = await detailTripDay({ planId: created.plan.id, dayIndex: 1 });
+
+    expect(stopsOf(filled.plan, 1).length).toBeGreaterThan(0);
+    expect(stopsOf(filled.plan, 1).every((ref) => Number(ref.split(":")[1]) >= 21)).toBe(true);
   });
 });
