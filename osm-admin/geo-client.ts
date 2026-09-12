@@ -203,6 +203,16 @@ export interface GeoClient {
   ): Promise<GeoPoiCandidate[]>;
   /** Area search for trip planning — see the method on HttpGeoClient. */
   searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage>;
+  /**
+   * Is this corner of the world in that database at all (§4.3)?
+   *
+   * The region router picks by bounding box, and a bounding box says
+   * "might contain", never "does": a Geofabrik extract is cut along
+   * administrative borders and its rectangle overlaps its neighbours.
+   * Italy's Nord-Ovest rectangle covers Pisa; its data stops at the
+   * Tuscan border.
+   */
+  hasCoverage(postgresDb: string, lat: number, lon: number): Promise<boolean>;
   /** The category vocabulary `searchPois` accepts. Region-independent. */
   poiCategories(): Promise<GeoPoiCategory[]>;
   /** Per-table size breakdown, for before/after import measurements. */
@@ -317,6 +327,15 @@ export class HttpGeoClient implements GeoClient {
       limit: query.limit,
       offset: query.offset,
     });
+  }
+
+  async hasCoverage(postgresDb: string, lat: number, lon: number): Promise<boolean> {
+    const body = await this.postJson<{ covered: boolean }>("/coverage", {
+      database: postgresDb,
+      lat,
+      lon,
+    });
+    return body.covered === true;
   }
 
   /**

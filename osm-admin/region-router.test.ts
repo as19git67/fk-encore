@@ -8,6 +8,8 @@ import {
   markUsed,
   pickRegion,
 } from "./region-router";
+import { resetGeoClient, setGeoClient } from "./geo-client";
+import { InMemoryGeoClient } from "./geo-client.test-helper";
 
 async function seed(opts: {
   slug: string;
@@ -30,6 +32,11 @@ async function seed(opts: {
 beforeEach(async () => {
   await db.delete(osmRegionImports);
   clearRouterCache();
+  // The default probe asks the geo service whether the database really
+  // holds that corner of the world. Left unset it would answer "yes" to
+  // everything, which is the fiction these tests are about.
+  setGeoClient(new InMemoryGeoClient());
+  return () => resetGeoClient();
 });
 
 describe("pickRegion", () => {
@@ -128,5 +135,68 @@ describe("geohash7", () => {
     const a = geohash7(48.137, 11.575, 7); // Munich
     const b = geohash7(53.55, 10.0, 7); // Hamburg
     expect(a).not.toBe(b);
+  });
+});
+
+describe("a bounding box that lies", () => {
+  /**
+   * Italy's Nord-Ovest — Piedmont, Liguria, Lombardy — in a rectangle
+   * that reaches south past Pisa and east past Florence. Its data stops
+   * at the Tuscan border, and for a while the planner did not know
+   * that: a trip to Pisa came back with no spots and no explanation.
+   */
+  const PISA = { lat: 43.7199, lon: 10.3973 };
+  const TURIN = { lat: 45.0703, lon: 7.6869 };
+
+  async function seedNordOvest() {
+    await seed({ slug: "italy/nord-ovest", bbox: [43.7, 6.6, 46.6, 11.4] });
+  }
+
+  it("refuses a region whose data does not reach the point", async () => {
+    const geo = new InMemoryGeoClient();
+    geo.setCoverage("nom_italy_nord_ovest", TURIN);
+    setGeoClient(geo);
+    await seedNordOvest();
+
+    // The rectangle contains Pisa; the extract does not. Null is the
+    // honest answer, and it is what makes the caller ask for the right
+    // region instead of planning an empty trip.
+    expect(await pickRegion(PISA.lat, PISA.lon)).toBeNull();
+  });
+
+  it("still returns the region for a point it really holds", async () => {
+    const geo = new InMemoryGeoClient();
+    geo.setCoverage("nom_italy_nord_ovest", TURIN);
+    setGeoClient(geo);
+    await seedNordOvest();
+
+    expect((await pickRegion(TURIN.lat, TURIN.lon))?.slug).toBe("italy/nord-ovest");
+  });
+
+  it("moves on to the next rectangle when the smallest one is wrong", async () => {
+    const geo = new InMemoryGeoClient();
+    geo.setCoverage("nom_italy_centro", PISA);
+    setGeoClient(geo);
+    await seedNordOvest();
+    await seed({ slug: "italy/centro", bbox: [41.0, 9.0, 44.5, 14.0] });
+
+    // Nord-Ovest has the smaller rectangle and would have won on area
+    // alone. The data decides instead.
+    expect((await pickRegion(PISA.lat, PISA.lon))?.slug).toBe("italy/centro");
+  });
+
+  it("keeps the bbox match when the probe itself fails", async () => {
+    // An unreachable geo service is a fault of its own. Turning it into
+    // "this region does not cover Pisa" would send a good trip off to
+    // import a region it already has.
+    const geo = new InMemoryGeoClient();
+    geo.setHealthy(false);
+    setGeoClient({
+      ...geo,
+      hasCoverage: async () => { throw new Error("geo: connect ECONNREFUSED"); },
+    } as unknown as InMemoryGeoClient);
+    await seedNordOvest();
+
+    expect((await pickRegion(PISA.lat, PISA.lon))?.slug).toBe("italy/nord-ovest");
   });
 });

@@ -253,6 +253,26 @@ export class InMemoryGeoClient implements GeoClient {
     return { database: postgresDb, spots: page, hasMore: offset + limit < spots.length };
   }
 
+  /**
+   * Which databases hold data where. Empty means "every database
+   * covers everywhere", which is what almost every test wants: the
+   * bbox is the fiction under test, not the coverage.
+   */
+  private coverage = new Map<string, Array<{ lat: number; lon: number; radiusM: number }>>();
+
+  /** Say that this database really does hold that corner of the world. */
+  setCoverage(postgresDb: string, at: { lat: number; lon: number }, radiusM = 25_000): void {
+    const list = this.coverage.get(postgresDb) ?? [];
+    list.push({ ...at, radiusM });
+    this.coverage.set(postgresDb, list);
+  }
+
+  async hasCoverage(postgresDb: string, lat: number, lon: number): Promise<boolean> {
+    const declared = this.coverage.get(postgresDb);
+    if (this.coverage.size === 0) return true;
+    return (declared ?? []).some((c) => metresBetween(c, { lat, lon }) <= c.radiusM);
+  }
+
   setPoiCategories(categories: GeoPoiCategory[]): void {
     this.categories = categories;
   }

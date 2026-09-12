@@ -9,6 +9,8 @@
  *   POST   /reverse               — { database, lat, lon } → ReverseResult
  *   POST   /pois                  — { database, lat, lon, radiusM?, maxCandidates? }
  *   POST   /pois/search           — area search for trip planning
+ *   POST   /coverage              — { database, lat, lon, radiusM? } → is that
+ *                                   corner of the world in this database at all
  *   GET    /pois/categories       — the category vocabulary /pois/search accepts
  *   POST   /import                — { slug, postgresDb, pbfUrl }
  *   DELETE /regions/:database     — drop a region database (admin)
@@ -26,6 +28,7 @@ import { reverseGeocode } from "./reverse.ts";
 import { findPoiCandidates } from "./pois.ts";
 import { readRegionStorage } from "./storage.ts";
 import { POI_CATEGORIES } from "./poi-categories.ts";
+import { hasCoverage } from "./coverage.ts";
 import { PoiSearchError, searchPois, type PoiSearchOptions } from "./poi-search.ts";
 import {
   dropRegion,
@@ -155,6 +158,17 @@ app.post("/pois", async (req, res, next) => {
       maxCandidates,
     });
     res.json({ database, candidates });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/coverage", async (req, res, next) => {
+  try {
+    const { database, lat, lon } = parseLookupBody(req.body);
+    const radiusM = optionalPositiveInt((req.body as Record<string, unknown>)?.radiusM);
+    const covered = await hasCoverage(database, lat, lon, radiusM);
+    res.json({ database, covered });
   } catch (err) {
     next(err);
   }
