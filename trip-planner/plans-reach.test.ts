@@ -178,14 +178,27 @@ describe("how far a leg reaches", () => {
     expect(refsOf(plan.legs[0])).toContain("way:1");
   });
 
-  it("still plans when one of the two searches fails", async () => {
+  it("refuses rather than calling a dead search an empty city", async () => {
+    // Both searches down is not "there is nothing here". Saved as a
+    // trip it writes a lie into the plan and hides it behind a day that
+    // looks merely empty — which is how Florence came back with no
+    // spots and no explanation.
+    geo.setSearchSpots("nom_bay", [BRIDGE, ...crowdedBlock()]);
+    geo.failSearchFor("nom_bay");
+
+    await expect(createTripPlan({ legs: [{ anchor: DOWNTOWN, mode: "car", days: 1 }] }))
+      .rejects.toThrow(/Umgebungssuche/);
+  });
+
+  it("still plans when only one of the two searches fails", async () => {
     // A leg with half a pool beats a refusal to save what somebody
     // typed (§4.3).
     geo.setSearchSpots("nom_bay", [BRIDGE, ...crowdedBlock()]);
-    geo.failSearchFor("nom_bay");
+    geo.failSearchFor("nom_bay", { rank: "prominence" });
 
     const { plan } = await createTripPlan({ legs: [{ anchor: DOWNTOWN, mode: "car", days: 1 }] });
 
     expect(plan.legs[0].days).toHaveLength(1);
+    expect(refsOf(plan.legs[0]).length).toBeGreaterThan(0);
   });
 });
