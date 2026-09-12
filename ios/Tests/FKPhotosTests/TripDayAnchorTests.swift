@@ -126,4 +126,21 @@ final class TripDayAnchorTests: XCTestCase {
         XCTAssertFalse(try anchor(label: "Pisa", travelMinutes: 82, departMinutes: 8 * 60)
             .costLine.contains("geschätzt"))
     }
+
+    func testTheSheetCanBeReopenedOnTheOutingItAlreadyHas() throws {
+        // "Ändern" used to give a blank search field, so changing only
+        // the return hour meant finding Pisa a second time — and
+        // leaving without searching would have saved the day away from
+        // the place it was already on.
+        let outing = try anchor(label: "Pisa", travelMinutes: 82)
+        XCTAssertEqual(outing.place.name, "Pisa")
+        XCTAssertEqual(outing.place.latitude, 43.7199)
+        XCTAssertEqual(outing.place.longitude, 10.3973)
+    }
+
+    func testAnOutingNobodyNamedComesBackAsTheWordTheDayShows() throws {
+        // Not a guessed city: "Auswärts" is what the day card has been
+        // saying all along, so saving it again writes nothing new.
+        XCTAssertEqual(try anchor(label: nil, travelMinutes: 82).place.name, "Auswärts")
+    }
 }

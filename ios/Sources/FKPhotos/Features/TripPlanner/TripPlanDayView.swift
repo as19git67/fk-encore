@@ -692,7 +692,11 @@ struct TripPlanDayView: View {
     /// feature goes to be looked for by people who already know it is
     /// there.
     private func fixpointBand(_ day: TripDay) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        // No spacing of its own: every row inside carries the 44 pt of
+        // height Apple asks of a control, and the dividers between them
+        // do the separating. Six points between two footnote-sized
+        // labels looked like one paragraph and hit like one target.
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(day.fixpoints) { fix in
                 HStack(spacing: 8) {
                     Image(systemName: fix.isDeparture ? "arrow.right.to.line" : "calendar.badge.clock")
@@ -717,31 +721,23 @@ struct TripPlanDayView: View {
                         }
                     }
                     Spacer()
-                    Button(role: .destructive) {
+                    removeButton("\(fix.label) entfernen") {
                         Task { await viewModel.removeFixpoint(fix) }
-                    } label: {
-                        Image(systemName: "xmark.circle")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .disabled(viewModel.isSavingFixpoint)
-                    .accessibilityLabel("\(fix.label) entfernen")
                 }
+                .frame(minHeight: 44)
+                Divider()
             }
 
-            Button {
+            frameAction(day.fixpoints.isEmpty ? "Feste Zeit eintragen" : "Weitere feste Zeit",
+                        systemImage: "clock.badge.exclamationmark") {
                 addingFixpoint = true
-            } label: {
-                Label(day.fixpoints.isEmpty ? "Feste Zeit eintragen" : "Weitere feste Zeit",
-                      systemImage: "clock.badge.exclamationmark")
-                    .font(.footnote)
             }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isSavingFixpoint)
-
+            Divider()
             outingRow(day)
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(day.fixpoints.isEmpty && day.anchor == nil
                     ? AnyShapeStyle(.clear)
@@ -768,28 +764,58 @@ struct TripPlanDayView: View {
                 Spacer()
                 Button("Ändern") { settingDayAnchor = true }
                     .buttonStyle(.borderless)
-                    .font(.footnote)
+                    .font(.subheadline)
+                    .frame(minWidth: 44, minHeight: 44)
                     .disabled(viewModel.isSavingFixpoint)
-                Button(role: .destructive) {
+                removeButton("Ausflug nach \(outing.displayName) entfernen") {
                     Task { await viewModel.setDayAnchor(nil) }
-                } label: {
-                    Image(systemName: "xmark.circle")
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .disabled(viewModel.isSavingFixpoint)
-                .accessibilityLabel("Ausflug nach \(outing.displayName) entfernen")
             }
+            .frame(minHeight: 44)
         } else {
-            Button {
+            frameAction("Ausflug planen", systemImage: "car") {
                 settingDayAnchor = true
-            } label: {
-                Label("Ausflug planen", systemImage: "car")
-                    .font(.footnote)
             }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isSavingFixpoint)
         }
+    }
+
+    /// One way into the day's frame — a full-width row rather than a
+    /// footnote-sized label.
+    ///
+    /// Apple's Human Interface Guidelines ask for a tappable area of at
+    /// least 44 × 44 pt, and two nine-point labels six points apart met
+    /// neither half of that: too small to hit and too close to tell
+    /// apart. The row spans the band, so the target is the whole line.
+    private func frameAction(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void,
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isSavingFixpoint)
+    }
+
+    /// Taking something back out of the frame. The glyph is small on
+    /// purpose; the area around it is not.
+    private func removeButton(
+        _ label: String,
+        action: @escaping () -> Void,
+    ) -> some View {
+        Button(role: .destructive, action: action) {
+            Image(systemName: "xmark.circle")
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .disabled(viewModel.isSavingFixpoint)
+        .accessibilityLabel(label)
     }
 
     /// What naming a place did to this day, or nothing when it did
