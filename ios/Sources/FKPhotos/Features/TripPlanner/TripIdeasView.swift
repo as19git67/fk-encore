@@ -18,12 +18,10 @@ import SwiftUI
 struct TripIdeasView: View {
     @State private var model = TripIdeasViewModel()
     @State private var isAddingHere = false
-    @State private var noteDraft = ""
     @State private var shareEmail = ""
     @State private var isSharing = false
     /// True while the shared link is being turned into an entry.
     @State private var isAddingShared = false
-    @State private var sharedNote = ""
     /// Whether the collection may speak up on its own (§20.2).
     @State private var noticesEnabled = TripIdeaNoticePreferences.isEnabled()
     @Environment(\.scenePhase) private var scenePhase
@@ -163,26 +161,28 @@ struct TripIdeasView: View {
             }
         }
         .refreshable { await model.load() }
-        .alert("Das hier merken", isPresented: $isAddingHere) {
-            TextField("Notiz (optional)", text: $noteDraft)
-            Button("Abbrechen", role: .cancel) {}
-            Button("Merken") {
-                Task { await model.addHere(note: noteDraft) }
+        // A sheet rather than an alert, because an alert cannot ask how
+        // long you stay — and without that the server refuses every
+        // place OpenStreetMap does not know.
+        .sheet(isPresented: $isAddingHere) {
+            TripIdeaCaptureSheet(
+                title: "Das hier merken",
+                // Said before it happens, not after: the coordinate is
+                // what makes the entry findable again, and somebody
+                // standing in the wrong place should know that is what
+                // gets stored.
+                explanation: "Gespeichert wird, wo ihr gerade steht.",
+            ) { note, dwellMinutes in
+                await model.addHere(note: note, dwellMinutes: dwellMinutes)
             }
-        } message: {
-            // Said before it happens, not after: the coordinate is what
-            // makes the entry findable again, and somebody standing in
-            // the wrong place should know that is what gets stored.
-            Text("Gespeichert wird, wo ihr gerade steht.")
         }
-        .alert("In den Vorrat", isPresented: $isAddingShared) {
-            TextField("Notiz (optional)", text: $sharedNote)
-            Button("Abbrechen", role: .cancel) {}
-            Button("Merken") {
-                Task { await model.addShared(note: sharedNote) }
+        .sheet(isPresented: $isAddingShared) {
+            TripIdeaCaptureSheet(
+                title: "In den Vorrat",
+                explanation: "Der Ort aus dem Link wird gemerkt — mit dem Link als Herkunft.",
+            ) { note, dwellMinutes in
+                await model.addShared(note: note, dwellMinutes: dwellMinutes)
             }
-        } message: {
-            Text("Der Ort aus dem Link wird gemerkt — mit dem Link als Herkunft.")
         }
         .alert("Mitschreiben lassen", isPresented: $isSharing) {
             TextField("E-Mail-Adresse", text: $shareEmail)
@@ -213,10 +213,7 @@ struct TripIdeasView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             HStack {
-                Button("In den Vorrat") {
-                    sharedNote = ""
-                    isAddingShared = true
-                }
+                Button("In den Vorrat") { isAddingShared = true }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isAdding)
                 Button("Später") { model.dismissShare() }
@@ -226,15 +223,21 @@ struct TripIdeasView: View {
         .padding(.vertical, 4)
     }
 
-    /// Nothing collected, nothing loading, and no shared link waiting —
-    /// the offer from a share is a row worth seeing, and an overlay
-    /// would cover it.
+    /// Nothing collected, nothing loading, no shared link waiting and
+    /// nothing to say — the offer from a share is a row worth seeing,
+    /// and an overlay would cover it.
+    ///
+    /// The last two clauses are the fix for a failure nobody could see:
+    /// this overlay is opaque and sits over the rows that carry the
+    /// error and the confirmation. An addition the server refused
+    /// therefore looked exactly like an addition nobody made — "merken"
+    /// tapped, dialog gone, list still empty, no word about why.
     private var isEmpty: Bool {
         model.entries.isEmpty && !model.isLoading && model.sharedPlace == nil
+            && model.errorMessage == nil && model.lastAddition == nil
     }
 
     private func startAdding() {
-        noteDraft = ""
         isAddingHere = true
     }
 

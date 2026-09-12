@@ -27,6 +27,19 @@ struct ShareIdeaCollection: Decodable, Identifiable {
     var id: Int { ownerId }
 }
 
+/// What the server made of a shared link.
+///
+/// Three answers, and the caller has to tell them apart: a place, a
+/// page that is not a map link at all, and a short link nobody could
+/// follow — only the last is worth trying again.
+struct ShareMapLinkRead: Decodable, Sendable {
+    let isMapLink: Bool
+    let lat: Double?
+    let lon: Double?
+    let name: String?
+    let unresolved: Bool
+}
+
 struct ShareProposal: Decodable, Identifiable, Sendable {
     let name: String?
     let verdict: String
@@ -161,6 +174,35 @@ enum ShareExtensionAPI {
             return request
         }
         try check(http, data: data)
+    }
+
+    // MARK: - Reading a map link (§9.2)
+
+    /// What the shared link says, read by the server.
+    ///
+    /// The extension used to read it here, and knew one format: Apple's
+    /// `ll=`. A link out of Google Maps therefore looked like a link
+    /// carrying nothing, and since the collection is only offered for a
+    /// share that has a coordinate, the picker showed trips and nothing
+    /// else — the exact situation the idea pool exists to avoid.
+    ///
+    /// The server has read Apple, Google, OpenStreetMap, `geo:` and the
+    /// short forms of all of them since the share sheet existed. It
+    /// only ever hung off a trip, which is the one thing this share may
+    /// not have.
+    static func readMapLink(_ urlString: String) async throws -> ShareMapLinkRead {
+        struct Body: Encodable { let url: String }
+        let body = try JSONEncoder().encode(Body(url: urlString))
+        let (data, http) = try await ShareAuth.perform {
+            var request = URLRequest(url: url(for: "/trip-planner/map-link"), timeoutInterval: 20)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            authorise(&request)
+            return request
+        }
+        try check(http, data: data)
+        return try JSONDecoder().decode(ShareMapLinkRead.self, from: data)
     }
 
     // MARK: - Analyse
