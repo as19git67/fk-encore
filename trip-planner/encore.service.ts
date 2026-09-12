@@ -37,6 +37,7 @@ import "./climate";
 import "./hidden-spots";
 import "./to-pool";
 import "./fixpoint-edit";
+import "./day-anchor-edit";
 import "./interest-list";
 import "./day-blocks";
 import "./bundle";

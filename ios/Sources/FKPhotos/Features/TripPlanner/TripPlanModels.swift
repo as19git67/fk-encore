@@ -105,9 +105,46 @@ struct TripDay: Codable, Identifiable, Sendable {
     var bufferReason: String?
     let blocks: [TripBlock]
     let fixpoints: [TripFixpoint]
+    /// Where this day happens when it is a day trip (§4.5) — nil for
+    /// every ordinary day, which stays at the quarters. Optional so a
+    /// response from an older server still decodes.
+    var anchor: TripDayAnchor?
 
     /// True when the day was kept free rather than left unplanned.
     var isBuffer: Bool { !(bufferReason ?? "").isEmpty }
+}
+
+/// A day trip's destination (§4.5).
+///
+/// Three days in one Airbnb, one of them in Pisa: the quarters never
+/// move, so it is one leg — only the day goes somewhere else.
+struct TripDayAnchor: Codable, Sendable, Equatable {
+    let lat: Double
+    let lon: Double
+    /// What the traveller calls it. Nil when nobody named it.
+    let label: String?
+    /// How far the planner looked around it, when the day said.
+    let radiusM: Int?
+    /// Getting there from the quarters, one way. Computed by the server
+    /// from both anchors and the mode — a second travel model in the
+    /// app would be a second set of answers.
+    let travelMinutes: Int
+
+    var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
+
+    /// What to call it: the name, or the plain fact that it is
+    /// elsewhere. Never invented (§15.3).
+    var displayName: String {
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed! : "Auswärts"
+    }
+
+    /// "Pisa · 2 h 20 hin und zurück" — the one line the day card has
+    /// room for, and the half that explains why the day is shorter.
+    var summary: String {
+        guard travelMinutes > 0 else { return displayName }
+        return "\(displayName) · \(TripClock.duration(travelMinutes * 2)) hin und zurück"
+    }
 }
 
 struct TripBlock: Codable, Identifiable, Sendable {

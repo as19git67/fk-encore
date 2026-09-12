@@ -2894,6 +2894,14 @@ export const tripPlanDays = pgTable(
     // empty day looks like a failure to fill one, and only the sentence
     // tells the two apart.
     buffer_reason: text("buffer_reason"),
+    // The day anchor (§4.5, migration 0195): where *this* day happens,
+    // when that is not the quarters. Null for every ordinary day, which
+    // then inherits the leg's anchor and changes nothing.
+    anchor_lat: doublePrecision("anchor_lat"),
+    anchor_lon: doublePrecision("anchor_lon"),
+    anchor_label: text("anchor_label"),
+    // Null falls back to the leg's radius, which follows the mode.
+    anchor_radius_m: integer("anchor_radius_m"),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );

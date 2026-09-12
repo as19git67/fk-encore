@@ -33,6 +33,7 @@ struct TripPlanDayView: View {
     @State private var moving: TripStopMove?
     /// Open while a hard time is being written (§4.4).
     @State private var addingFixpoint = false
+    @State private var settingDayAnchor = false
     @State var viewModel: TripPlannerViewModel
 
     var body: some View {
@@ -97,6 +98,18 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Etappen (\(viewModel.plan?.legs.count ?? 1))",
                                   systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                        }
+                        // A day that happens somewhere else (§4.5).
+                        // On the day's own menu rather than the leg's:
+                        // it is this Tuesday that goes to Pisa, not the
+                        // trip.
+                        Button {
+                            settingDayAnchor = true
+                        } label: {
+                            Label(viewModel.day?.anchor == nil
+                                  ? "Tagesziel setzen"
+                                  : "Tagesziel ändern",
+                                  systemImage: "car")
                         }
                         // Who else may plan this trip (§6.2) — a
                         // different question from who is coming along
@@ -196,6 +209,14 @@ struct TripPlanDayView: View {
                 Button("Apple Karten") { openMaps(choice, with: .apple) }
                 Button("Google Maps") { openMaps(choice, with: .google) }
                 Button("Abbrechen", role: .cancel) {}
+            }
+        }
+        .sheet(isPresented: $settingDayAnchor) {
+            TripDayAnchorSheet(
+                dayLabel: dayLabel(),
+                current: viewModel.day?.anchor,
+            ) { place in
+                await viewModel.setDayAnchor(place)
             }
         }
         .sheet(isPresented: $addingFixpoint) {
@@ -523,7 +544,7 @@ struct TripPlanDayView: View {
             // platform, and a header still promising the hotel is the
             // one line somebody would plan the evening by.
             HStack(spacing: 6) {
-                Image(systemName: leg.anchorRadiusM == nil ? "house" : "circle.dashed")
+                Image(systemName: headerSymbol(leg))
                 Text(headerLine(leg))
                     .lineLimit(2)
                 Spacer()
@@ -543,12 +564,22 @@ struct TripPlanDayView: View {
         .foregroundStyle(.secondary)
     }
 
+    private func headerSymbol(_ leg: TripLeg) -> String {
+        if viewModel.day?.anchor != nil { return "car" }
+        return leg.anchorRadiusM == nil ? "house" : "circle.dashed"
+    }
+
     /// "Start: Hauptbahnhof · Ziel: Hotel Adler" — the day's two ends.
     ///
     /// Falls back to the sentence it always had, because on nearly
     /// every day both ends *are* the accommodation and naming it twice
     /// would be noise.
     private func headerLine(_ leg: TripLeg) -> String {
+        // A day trip says where the day is, not where the bed is: the
+        // anchor is still true and no longer the useful half (§4.5).
+        if let trip = viewModel.day?.anchor {
+            return "Tagesziel: \(trip.summary)"
+        }
         let anchor = leg.anchorRadiusM == nil
             ? leg.anchorTitle
             : "\(leg.anchorTitle) (ungefähr)"

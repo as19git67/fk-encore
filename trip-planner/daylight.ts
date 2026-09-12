@@ -83,7 +83,7 @@ export const dayLight = api(
     // A caller may bring its own profile — the offline bundle does,
     // because it has one per day already. Otherwise the stored one for
     // this place, and a free horizon when nobody has measured it.
-    const horizon = req.horizon ?? (await horizonFor(leg.anchor));
+    const horizon = req.horizon ?? (await horizonFor(day.anchor ?? leg.anchor));
     return lightOfDay(leg, day, validateOffset(req.utcOffsetMinutes), horizon);
   },
 );
@@ -105,7 +105,9 @@ export function lightOfDay(
   const date = leg.startDate === null ? null : addDays(leg.startDate, day.dayIndex);
   if (date === null) return { day: null, windows: [], spots: [] };
 
-  const windows = lightWindows(leg.anchor, date, offsetMinutes, horizon);
+  // The day's own sun: a day trip happens where it happens (§4.5), and
+  // sixty kilometres west is a different sunset.
+  const windows = lightWindows(day.anchor ?? leg.anchor, date, offsetMinutes, horizon);
   const stops = day.blocks.flatMap((block) => block.stops);
 
   return {
