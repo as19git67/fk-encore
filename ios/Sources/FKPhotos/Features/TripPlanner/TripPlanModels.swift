@@ -185,6 +185,16 @@ struct TripDayAnchor: Codable, Sendable, Equatable {
         return "Hin und zurück \(TripClock.duration(travelMinutes * 2)) (geschätzt)"
     }
 
+    /// The outing as the place picker knows it, so re-opening the sheet
+    /// shows what the day already says instead of an empty search field.
+    ///
+    /// An outing nobody named comes back as "Auswärts" — the word the
+    /// day card already shows for it, so saving it again writes nothing
+    /// the traveller has not been reading all along.
+    var place: TripPlace {
+        TripPlace(name: displayName, subtitle: nil, latitude: lat, longitude: lon)
+    }
+
     /// When the first block can begin: the departure plus the drive.
     ///
     /// Shown next to the hour the traveller typed so the remaining

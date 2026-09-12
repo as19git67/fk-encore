@@ -135,7 +135,7 @@ struct TripDayAnchorSheet: View {
                     .disabled(saving || place == nil || !hoursAddUp)
                 }
             }
-            .onAppear(perform: adoptCurrentHours)
+            .onAppear(perform: adoptCurrent)
         }
     }
 
@@ -191,11 +191,16 @@ struct TripDayAnchorSheet: View {
         TripOutingHours.addUp(depart: departMinutes, back: returnMinutes)
     }
 
-    /// Re-open the sheet on a day that already has hours, and it shows
-    /// them — an outing whose times silently reset on every edit would
-    /// lose them to a change of label.
-    private func adoptCurrentHours() {
+    /// Re-open the sheet on a day that already has an outing, and it
+    /// shows that outing: the place and both hours.
+    ///
+    /// Starting empty was worse than it looked. "Ändern" gave a blank
+    /// search field, so changing only the return hour meant finding
+    /// Pisa again — and leaving without searching would have saved the
+    /// day away from the place it was already on.
+    private func adoptCurrent() {
         guard let current else { return }
+        place = current.place
         if let minutes = current.departMinutes {
             saysDeparture = true
             departure = Self.at(hour: minutes / 60, minute: minutes % 60)
