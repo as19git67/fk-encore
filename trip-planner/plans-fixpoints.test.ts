@@ -211,4 +211,43 @@ describe("POST /trip-planner/plans with fixpoints", () => {
       }),
     ).rejects.toThrow(/kind must be one of/);
   });
+
+  it("ends the day at the departure's place, not back at the hotel", async () => {
+    // The spots run north of the anchor; the station is south of it.
+    // With the last train named *and located*, the evening has to
+    // finish at the platform — the walk back to a hotel already checked
+    // out of is a walk nobody makes (§4.4).
+    const station = { lat: ANCHOR.lat - 2_000 / 111_320, lon: ANCHOR.lon };
+    geo.setSearchSpots(DB, [
+      spot(2),
+      { ...spot(3), osmRef: "node:south", lat: station.lat + 300 / 111_320, lon: station.lon },
+    ]);
+
+    const { plan } = await createTripPlan({
+      legs: [{
+        anchor: ANCHOR,
+        fixpoints: [{
+          dayIndex: 0, label: "Zug 18:40", at: "18:40", kind: "departure",
+          travelMinutes: 15, ...station,
+        }],
+      }],
+    });
+
+    const stops = plan.legs[0].days[0].blocks.flatMap((b) => b.stops);
+    expect(stops.length).toBeGreaterThan(1);
+    expect(stops.at(-1)?.osmRef).toBe("node:south");
+  });
+
+  it("leaves the day alone when the departure names no place", async () => {
+    // Only a time: the frame tightens as it always did, and the day
+    // still comes home. A location is an addition, never a condition.
+    const { plan } = await createTripPlan({
+      legs: [{
+        anchor: ANCHOR,
+        fixpoints: [{ dayIndex: 0, label: "Zug 18:40", at: "18:40", kind: "departure" }],
+      }],
+    });
+
+    expect(plan.legs[0].days[0].blocks.flatMap((b) => b.stops).length).toBeGreaterThan(0);
+  });
 });

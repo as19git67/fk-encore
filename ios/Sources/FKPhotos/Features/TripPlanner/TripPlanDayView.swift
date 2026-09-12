@@ -201,10 +201,8 @@ struct TripPlanDayView: View {
         .sheet(isPresented: $addingFixpoint) {
             TripFixpointSheet(
                 dayLabel: dayLabel(),
-            ) { label, minutes, kind, travelMinutes, durationMinutes in
-                await viewModel.addFixpoint(
-                    label: label, at: minutes, kind: kind,
-                    travelMinutes: travelMinutes, durationMinutes: durationMinutes)
+            ) { draft in
+                await viewModel.addFixpoint(draft)
             }
         }
         .sheet(item: $moving) { move in
@@ -518,12 +516,16 @@ struct TripPlanDayView: View {
             // Where the day begins and ends, said out loud. It is the
             // value the whole plan is measured from (§4.2), and the
             // screen used to show only how the group gets around.
+            //
+            // A located fixpoint moves one of the two ends (§4.4), and
+            // then the anchor alone would be the wrong sentence: on the
+            // day of the last train the evening finishes at the
+            // platform, and a header still promising the hotel is the
+            // one line somebody would plan the evening by.
             HStack(spacing: 6) {
                 Image(systemName: leg.anchorRadiusM == nil ? "house" : "circle.dashed")
-                Text(leg.anchorRadiusM == nil
-                     ? "Start & Ziel: \(leg.anchorTitle)"
-                     : "Rund um \(leg.anchorTitle) · Unterkunft noch offen")
-                    .lineLimit(1)
+                Text(headerLine(leg))
+                    .lineLimit(2)
                 Spacer()
             }
             HStack(spacing: 6) {
@@ -539,6 +541,30 @@ struct TripPlanDayView: View {
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
+    }
+
+    /// "Start: Hauptbahnhof · Ziel: Hotel Adler" — the day's two ends.
+    ///
+    /// Falls back to the sentence it always had, because on nearly
+    /// every day both ends *are* the accommodation and naming it twice
+    /// would be noise.
+    private func headerLine(_ leg: TripLeg) -> String {
+        let anchor = leg.anchorRadiusM == nil
+            ? leg.anchorTitle
+            : "\(leg.anchorTitle) (ungefähr)"
+        let ends = viewModel.day.map(TripDayEnds.of)
+        switch (ends?.start, ends?.end) {
+        case (nil, nil):
+            return leg.anchorRadiusM == nil
+                ? "Start & Ziel: \(anchor)"
+                : "Rund um \(leg.anchorTitle) · Unterkunft noch offen"
+        case let (start?, nil):
+            return "Start: \(start.label) · Ziel: \(anchor)"
+        case let (nil, end?):
+            return "Start: \(anchor) · Ziel: \(end.label)"
+        case let (start?, end?):
+            return "Start: \(start.label) · Ziel: \(end.label)"
+        }
     }
 
     /// Which city of the trip is on screen (§4.2).
@@ -652,6 +678,13 @@ struct TripPlanDayView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        // And what its place does, which is more than
+                        // decoration: it moved the day's route (§4.4).
+                        if let effect = placeEffect(fix) {
+                            Label(effect, systemImage: "mappin.and.ellipse")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Spacer()
                     Button(role: .destructive) {
@@ -682,6 +715,17 @@ struct TripPlanDayView: View {
                     ? AnyShapeStyle(.clear)
                     : AnyShapeStyle(.quaternary.opacity(0.4)),
                     in: .rect(cornerRadius: 12))
+    }
+
+    /// What naming a place did to this day, or nothing when it did
+    /// nothing — a fixpoint in the middle of the day keeps its time and
+    /// moves no route, and claiming otherwise would be the more
+    /// confident of the two lies.
+    private func placeEffect(_ fix: TripFixpoint) -> String? {
+        guard fix.hasPlace, let ends = viewModel.day.map(TripDayEnds.of) else { return nil }
+        if ends.end?.rowId == fix.rowId { return "Der Tag endet hier" }
+        if ends.start?.rowId == fix.rowId { return "Der Tag beginnt hier" }
+        return nil
     }
 
     /// "Tag 3 · Fr, 18.9." — which day the sheet is writing to, so a

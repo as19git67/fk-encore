@@ -281,3 +281,79 @@ describe("solveDay", () => {
     expect(second.travelFromPrevious.minutes).toBe(walkingLeg(north(300), north(600)).minutes);
   });
 });
+
+describe("the two ends of a day (§4.4)", () => {
+  /** South of the anchor by roughly `metres` — the station's side. */
+  function south(metres: number): { lat: number; lon: number } {
+    return { lat: ANCHOR.lat - metres / 111_320, lon: ANCHOR.lon };
+  }
+
+  const STATION = south(1_500);
+
+  it("returns to the anchor when nothing says otherwise", () => {
+    const { blocks } = solveDay({
+      anchor: ANCHOR,
+      blocks: blocksOf(),
+      candidates: [candidate({ osmRef: "node:north", ...north(600) })],
+      maxWalkMinutes: 40,
+    });
+    expect(blocks[0].stops.map((s) => s.osmRef)).toEqual(["node:north"]);
+  });
+
+  it("orders the last block towards where the day ends", () => {
+    // Two spots on opposite sides. Ending at the station makes the
+    // southern one the last stop; ending at the hotel does not.
+    const spots = [
+      candidate({ osmRef: "node:north", ...north(600) }),
+      candidate({ osmRef: "node:south", ...south(600) }),
+    ];
+    const toStation = solveDay({
+      anchor: ANCHOR, end: STATION, blocks: blocksOf(), candidates: spots, maxWalkMinutes: 40,
+    });
+    expect(toStation.blocks[0].stops.at(-1)?.osmRef).toBe("node:south");
+
+    const toHotel = solveDay({
+      anchor: ANCHOR, blocks: blocksOf(), candidates: spots, maxWalkMinutes: 40,
+    });
+    // Symmetric around the anchor, so the tie-break on the ref decides —
+    // what matters is that it is not the station's answer by accident.
+    expect(toHotel.blocks[0].stops.at(-1)?.osmRef).toBe("node:south");
+    expect(toHotel.blocks[0].usedMinutes).not.toBe(toStation.blocks[0].usedMinutes);
+  });
+
+  it("sets off from where the travellers actually are", () => {
+    // Arriving at the station, the spot beside it is the cheap one —
+    // from the hotel it is the far one.
+    const spots = [
+      candidate({ osmRef: "node:by-station", ...south(1_400), dwellMinutes: 90 }),
+      candidate({ osmRef: "node:by-hotel", ...north(200), dwellMinutes: 90 }),
+    ];
+    const tight: BlockTemplate[] = [
+      { id: "morning", label: "Vormittag", kind: "spots", baseBudgetMinutes: 120 },
+    ];
+    const fromStation = solveDay({
+      anchor: ANCHOR, start: STATION, blocks: blocksOf(tight),
+      candidates: spots, maxWalkMinutes: 40,
+    });
+    expect(fromStation.blocks[0].stops.map((s) => s.osmRef)).toEqual(["node:by-station"]);
+
+    const fromHotel = solveDay({
+      anchor: ANCHOR, blocks: blocksOf(tight), candidates: spots, maxWalkMinutes: 40,
+    });
+    expect(fromHotel.blocks[0].stops.map((s) => s.osmRef)).toEqual(["node:by-hotel"]);
+  });
+
+  it("costs the walk to the station rather than the walk home", () => {
+    const spot = candidate({ osmRef: "node:north", ...north(600) });
+    const home = solveDay({
+      anchor: ANCHOR, blocks: blocksOf(), candidates: [spot], maxWalkMinutes: 40,
+    });
+    const station = solveDay({
+      anchor: ANCHOR, end: STATION, blocks: blocksOf(), candidates: [spot], maxWalkMinutes: 40,
+    });
+    // 600 m back to the hotel against 2 100 m on to the platform.
+    expect(station.blocks[0].usedMinutes).toBeGreaterThan(home.blocks[0].usedMinutes);
+    expect(station.blocks[0].usedMinutes - home.blocks[0].usedMinutes)
+      .toBeCloseTo(walkingLeg(spot, STATION).minutes - walkingLeg(spot, ANCHOR).minutes, 0);
+  });
+});
