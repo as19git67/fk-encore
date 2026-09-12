@@ -403,7 +403,7 @@ Budget — und desto eher schlägt die Neuverteilung (§5) vor, etwas zu streich
 Der Puffer ist verhandelbar, aber nie null: Einen Zug zu verpassen ist teurer
 als ein ausgelassener Spot.
 
-### 4.5 Standquartier mit Tagesausflügen (offen)
+### 4.5 Standquartier mit Tagesausflügen
 
 Die Etappe aus §4.2 unterstellt, dass sich der Anker mit dem Quartier bewegt:
 Tokio, dann Osaka, dann Hakata — neues Hotel, neue Etappe, neuer Vorrat. Eine
@@ -424,11 +424,13 @@ in den nichts hineinrutscht. Wer abends zurückfährt, hat nichts davon — und
 „was in Florenz ausfiel, rutscht nicht nach Pisa" wäre eine Regel, die genau
 das Gegenteil des Gemeinten sagt.
 
-**Vorgeschlagen: der Tagesanker.** Ein Tag darf optional einen eigenen Ort und
-Radius tragen. Fehlt er — der Normalfall und die freien Tage in San Gimignano —,
-gilt der Anker der Etappe, und nichts an der bisherigen Rechnung ändert sich.
-Vier Dinge hängen daran, und alle vier sind schon gebaut, nur an einen anderen
-Ort gehängt:
+**Umgesetzt: der Tagesanker** (Migration 0195, `trip-planner/day-anchor.ts`).
+Ein Tag darf optional einen eigenen Ort und Radius tragen. Fehlt er — der
+Normalfall und die freien Tage in San Gimignano —, gilt der Anker der Etappe,
+und nichts an der bisherigen Rechnung ändert sich. Beim Anlegen über
+`dayAnchors` je Etappe, nachträglich über `POST …/plans/:planId/days/anchor`
+(ohne Koordinate: der Tag kommt wieder heim). Vier Dinge hängen daran, und alle
+vier waren schon gebaut, nur an einen anderen Ort gehängt:
 
 - **Der Vorrat des Tages** kommt aus dem Umkreis des Tagesankers. Die
   Regionsauswahl entscheidet ohnehin nach Koordinate (`region-router.ts`), ein
@@ -437,14 +439,27 @@ Ort gehängt:
   dieselbe Rechnung wie beim Anreisetag in §4.2 („kein voller
   Vormittagsblock"). Eine Stunde nach Florenz und eine zurück heißt: Der Tag
   hat sechs Stunden, nicht acht. Das ist der Grund, warum der Tagesanker eine
-  *Planungsangabe* ist und keine Anzeige.
+  *Planungsangabe* ist und keine Anzeige. Die Hinfahrt verschiebt den
+  Tagesbeginn, die Rückfahrt geht vom letzten Block ab, der Orte trägt — ein
+  Essensblock wird nicht gekürzt, sonst verschöbe man ein Abendessen statt
+  einer Fahrt. Bleibt zu wenig übrig, fällt der Block weg und sagt warum.
+  Bewusst **nicht** dem Solver als gewöhnliche Etappe überlassen: Von der
+  Unterkunft aus geplant wäre die Fahrt ein einzelner Hop von zweieinhalb
+  Stunden — über jeder Beinlänge, und das zu Recht, denn *innerhalb* von Pisa
+  wäre ein solcher Hop ein Fehler.
 - **Wetter, Klima und Licht** gelten am Tagesanker, nicht am Quartier. Bei
   achtzig Kilometern ist das gelegentlich ein anderer Tag.
 - **Die Rückfahrt ist ein Fixpunkt-Kandidat** (§4.4): Wer mit dem letzten Zug
   aus Florenz zurückmuss, hat den Nachmittag rückwärts gerechnet.
 
-**Dazu gehört die zweite offene Sache, die dabei auffiel: der Suchradius kennt
-das Verkehrsmittel nicht.** `DEFAULT_SEARCH_RADIUS_M` ist 2 500 Meter, ob zu
+Was der Tagesausflug nicht verbraucht, geht in den Vorrat der Etappe — „was in
+Florenz ausfiel, rutscht nicht nach Pisa" ist genau die Regel, die §4.5
+ablehnt. Und weil zwei Tage in Florenz zwei Tage in derselben Stadt sind, wird
+je Ziel einmal gesucht, nicht je Tag.
+
+**Erledigt: der Suchradius kennt das Verkehrsmittel** (#1202, `search-reach.ts`)
+— zu Fuß 3 km, Rad 8, ÖPNV 18, Auto 25, ein ausdrücklich gesetzter Radius
+sticht ihn weiterhin. Die ursprüngliche Beschreibung des Problems: `DEFAULT_SEARCH_RADIUS_M` ist 2 500 Meter, ob zu
 Fuß oder mit dem Auto. Das Auto ändert heute nur, *wie viel* aus demselben
 Kreis in einen Block passt (schneller je Hop, dafür sechs Minuten Fixkosten
 fürs Holen und Parken) — nicht, *wie weit* der Kreis reicht. Der Tagesausflug

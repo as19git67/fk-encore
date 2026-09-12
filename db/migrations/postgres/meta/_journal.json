@@ -1366,6 +1366,13 @@
       "when": 1788566400015,
       "tag": "0194_meter_report_fixes",
       "breakpoints": true
+    },
+    {
+      "idx": 195,
+      "version": "7",
+      "when": 1788566400016,
+      "tag": "0195_trip_day_anchor",
+      "breakpoints": true
     }
   ]
 }
