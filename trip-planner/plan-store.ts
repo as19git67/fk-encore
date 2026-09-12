@@ -140,6 +140,18 @@ export interface StoredDay {
   blocks: StoredBlock[];
   /** The hard times framing this day (§4.4), earliest binding first. */
   fixpoints: StoredFixpoint[];
+  /**
+   * Where this day happens when it is a day trip (§4.5), null when it
+   * stays at the quarters — which is every ordinary day.
+   */
+  anchor: StoredDayAnchor | null;
+}
+
+export interface StoredDayAnchor {
+  lat: number;
+  lon: number;
+  label: string | null;
+  radiusM: number | null;
 }
 
 export interface StoredFixpoint extends Fixpoint {
@@ -218,6 +230,21 @@ export interface CreateDayInput {
    * ordinary day, which is nearly all of them.
    */
   bufferReason?: string | null;
+  /**
+   * Where *this* day happens, when that is not the quarters (§4.5).
+   * Absent for every ordinary day, which then inherits the leg's
+   * anchor and changes nothing about the arithmetic.
+   */
+  anchor?: DayAnchor | null;
+}
+
+/** A day trip's destination, as stored beside the day. */
+export interface DayAnchor {
+  lat: number;
+  lon: number;
+  label?: string | null;
+  /** Null falls back to the leg's radius, which follows the mode. */
+  radiusM?: number | null;
 }
 
 export interface CreateLegInput {
@@ -494,6 +521,10 @@ async function insertDays(
         day_index: dayIndex,
         detailed: dayInput.detailed ?? true,
         buffer_reason: dayInput.bufferReason ?? null,
+        anchor_lat: dayInput.anchor?.lat ?? null,
+        anchor_lon: dayInput.anchor?.lon ?? null,
+        anchor_label: dayInput.anchor?.label ?? null,
+        anchor_radius_m: dayInput.anchor?.radiusM ?? null,
       })
       .returning({ id: tripPlanDays.id });
 
@@ -929,6 +960,17 @@ export async function loadPlan(
       bufferReason: row.buffer_reason,
       blocks: blocksByDay.get(row.id) ?? [],
       fixpoints: fixpointsByDay.get(row.id) ?? [],
+      // Both or neither: half a coordinate is not a place with a gap
+      // in it, and a day trip to one would be planned off the coast of
+      // Africa.
+      anchor: row.anchor_lat === null || row.anchor_lon === null
+        ? null
+        : {
+          lat: row.anchor_lat,
+          lon: row.anchor_lon,
+          label: row.anchor_label,
+          radiusM: row.anchor_radius_m,
+        },
     });
     daysByLeg.set(row.leg_id, list);
   }
@@ -1284,6 +1326,28 @@ export async function removeFromPool(
  * planner — so this writes the row and nothing else. The caller re-plans
  * afterwards, which reads the fixpoints back and re-frames the day.
  */
+/**
+ * Send one day somewhere else, or call it home (§4.5).
+ *
+ * Null clears all four columns together: a day trip with a label and no
+ * coordinate would be a destination nobody can plan around.
+ */
+export async function setDayAnchor(
+  dayId: number,
+  anchor: DayAnchor | null,
+  db: Db = dbDefault,
+): Promise<void> {
+  await db
+    .update(tripPlanDays)
+    .set({
+      anchor_lat: anchor?.lat ?? null,
+      anchor_lon: anchor?.lon ?? null,
+      anchor_label: anchor?.label ?? null,
+      anchor_radius_m: anchor?.radiusM ?? null,
+    })
+    .where(eq(tripPlanDays.id, dayId));
+}
+
 export async function addFixpoint(
   dayId: number,
   fix: CreateFixpointInput,

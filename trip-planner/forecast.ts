@@ -91,7 +91,11 @@ export const dayForecast = api(
       return { day: null, available: false, overall: null, blocks: [], spots };
     }
 
-    const { byDay } = await forecastFor(leg.anchor, [date]);
+    // The weather of a day trip is the weather where the day happens
+    // (§4.5). At sixty kilometres that is occasionally a different day
+    // — and a forecast for the quarters would send somebody out with
+    // the wrong jacket, confidently.
+    const { byDay } = await forecastFor(day.anchor ?? leg.anchor, [date]);
     const hours = byDay.get(date) ?? [];
 
     const blocks: BlockForecast[] = day.blocks.map((block) => ({

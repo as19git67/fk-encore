@@ -27,6 +27,7 @@ import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { climateForLeg } from "./climate-precautions";
 import { dayEnds, travelPaidByRoute, type LocatedFixpoint } from "./day-ends";
+import { chargeTheWayBack, dayTripOf, type DayTrip } from "./day-anchor";
 import {
   MAX_SEARCH_RADIUS_M,
   mergeByOsmRef,
@@ -48,6 +49,7 @@ import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
 import { legLimitFor, type TransportMode } from "./travel";
 import {
+  DEFAULT_DAY_START_MINUTES,
   parseMinutes,
   scheduleDay,
   type DroppedBlock,
@@ -73,6 +75,7 @@ import {
   type CreateDayInput,
   type CreateFixpointInput,
   type CreateLegInput,
+  type DayAnchor,
   type StoredFixpoint,
   type PlanSummary,
   type StoredPlan,
@@ -126,6 +129,12 @@ export interface LegRequest {
   dayStartsAt?: string;
   /** Hard times that frame individual days of this leg (§4.4). */
   fixpoints?: FixpointRequest[];
+  /**
+   * Days of this leg that happen somewhere else (§4.5) — a base with
+   * day trips out of it. The quarters never move, so this is one leg;
+   * only the day goes to Pisa.
+   */
+  dayAnchors?: DayAnchorRequest[];
   /**
    * The journey *into* this leg.
    *
@@ -189,6 +198,20 @@ export interface FixpointRequest {
   bufferMinutes?: number;
   lat?: number;
   lon?: number;
+}
+
+export interface DayAnchorRequest {
+  /** Which day of this leg, counted from zero. */
+  dayIndex: number;
+  lat: number;
+  lon: number;
+  /** What to call it on the day card — "Pisa". */
+  label?: string;
+  /**
+   * How far to look around it. Omitted falls back to the leg's radius,
+   * which follows the transport mode.
+   */
+  radiusM?: number;
 }
 
 export interface CreatePlanRequest {
@@ -720,6 +743,17 @@ export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegReques
         lat: f.lat ?? undefined,
         lon: f.lon ?? undefined,
       }))),
+    // A day trip survives a re-plan for the same reason a fixpoint
+    // does: it is part of the frame the traveller set, not of the
+    // answer the planner gave (§4.5).
+    dayAnchors: leg.days.flatMap((day) =>
+      day.anchor === null ? [] : [{
+        dayIndex: day.dayIndex,
+        lat: day.anchor.lat,
+        lon: day.anchor.lon,
+        label: day.anchor.label ?? undefined,
+        radiusM: day.anchor.radiusM ?? undefined,
+      }]),
   };
 }
 
@@ -1284,6 +1318,7 @@ async function planLeg(
   const startDate = validateStartDate(legReq.startDate);
   const dayStartMinutes = validateTimeOfDay(legReq.dayStartsAt, "dayStartsAt");
   const fixpointsByDay = groupFixpoints(legReq.fixpoints, dayCount);
+  const dayAnchors = groupDayAnchors(legReq.dayAnchors, dayCount);
 
   // No imported region here yet. The trip is still worth saving: §4.3
   // already has a resolution for "framed but not filled in", and a
@@ -1302,37 +1337,7 @@ async function planLeg(
   //
   // Zero candidates is exactly a frame: the solver fills the budget it
   // is given, and given nothing it produces blocks with no stops.
-  const pages = region
-    ? await Promise.all([
-        searchArea(region.postgresDb, anchor, radiusM, trip.categories, "distance"),
-        searchArea(region.postgresDb, anchor, radiusM, trip.categories, "prominence"),
-      ])
-    : [];
-  // Both searches down is not "this city has nothing". Saving that as a
-  // trip writes a lie into the plan and then hides it behind a day that
-  // looks merely empty — and a re-plan would wipe the spots a working
-  // search had already found. One of the two failing is survivable; the
-  // other page still plans the day.
-  if (pages.length > 0 && pages.every((page) => page.failure !== null)) {
-    throw APIError.unavailable(
-      `Die Umgebungssuche antwortet gerade nicht (${pages[0].failure}). `
-      + "Die Reise wurde nicht gespeichert — bitte später noch einmal versuchen.",
-    );
-  }
-  const spots = mergeByOsmRef(...pages.map((page) => page.spots));
-  // An empty answer from a working search is a fact about the region,
-  // not about the traveller — and the one line somebody needs when a
-  // trip to a city full of sights comes back with nothing. Worth a log
-  // entry precisely because it is rare.
-  if (region && spots.length === 0) {
-    log.warn("area search found nothing", {
-      postgresDb: region.postgresDb,
-      radiusM,
-      lat: anchor.lat,
-      lon: anchor.lon,
-      categories: trip.categories?.join(",") ?? "all",
-    });
-  }
+  const spots = region ? await spotsAround(region.postgresDb, anchor, radiusM, trip.categories) : [];
 
   const scored = toCandidates(spots, {
     interests: trip.interests,
@@ -1352,6 +1357,9 @@ async function planLeg(
   const horizon = await storedHorizon(anchor);
 
   let available = [...rated];
+  // One search per destination, however many days go there. Two days in
+  // Florence are two days in the same city.
+  const dayPools = new Map<string, ScoredCandidate[]>();
   const days: CreateDayInput[] = [];
   const dropped: Array<DroppedBlock & { dayIndex: number }> = [];
 
@@ -1363,9 +1371,16 @@ async function planLeg(
     // An arrival pushes only the first day back; the rest of the leg
     // starts when the leg says it starts.
     const arrival = dayIndex === 0 ? trip.firstDayStartMinutes ?? null : null;
-    const startsAt = arrival !== null
+    // A day trip (§4.5): the quarters stay put, this day happens
+    // elsewhere. The drive there is spent by starting the day later —
+    // the same arithmetic the arrival day uses — and the drive back
+    // comes off the last block that holds places, further down.
+    const dayTrip = dayTripOf(anchor, dayAnchors.get(dayIndex), mode);
+    const withDrive = (startsAt: number | null | undefined) =>
+      dayTrip === null ? startsAt : (startsAt ?? DEFAULT_DAY_START_MINUTES) + dayTrip.travelMinutes;
+    const startsAt = withDrive(arrival !== null
       ? Math.max(arrival, dayStartMinutes ?? 0)
-      : dayStartMinutes;
+      : dayStartMinutes);
     const framed = scheduleDay({
       blocks: trip.shape,
       // Where the route pays the way to the station, the guard must
@@ -1381,6 +1396,15 @@ async function planLeg(
       nominalStartMinutes: arrival !== null ? dayStartMinutes ?? undefined : undefined,
     });
     for (const d of framed.dropped) dropped.push({ ...d, dayIndex });
+
+    // The way home, off the end. Not left to the solver's own per-hop
+    // travel: planned from the quarters with Pisa in the pool, the
+    // drive would be a single hop of two and a half hours — over every
+    // leg limit there is, and rightly so, because inside Pisa a hop
+    // like that is a mistake (`day-anchor.ts`).
+    const home = chargeTheWayBack(framed.blocks, dayTrip?.travelMinutes ?? 0, dayTrip?.label ?? null);
+    for (const d of home.dropped) dropped.push({ ...d, dayIndex });
+    framed.blocks = home.blocks;
 
     // Beyond the detail horizon the day keeps its frame and stays
     // empty: the pool *is* the plan at trip resolution (§4.3), and
@@ -1406,19 +1430,28 @@ async function planLeg(
       continue;
     }
 
+    // A day trip is planned around its own destination, out of its own
+    // pool: the quarters' pool holds San Gimignano, and Florence is not
+    // in it (§4.5). Everything else — the light, the ordering, the way
+    // the blocks are filled — is the same machinery pointed at another
+    // place.
+    const here = dayTrip?.at ?? anchor;
+    const pool = dayTrip === null
+      ? available
+      : await dayTripPool(dayTrip, trip, radiusM, dayPools);
     // The light speaks only for the spots somebody marked as a photo
     // stop, and only on a trip that has a date (§7.3). With none
     // marked this is a no-op, which is the ordinary case.
     const candidatesForDay = startDate
-      ? scoreForLight(available, { date: addDays(startDate, dayIndex), at: anchor })
-      : available;
+      ? scoreForLight(pool, { date: addDays(startDate, dayIndex), at: here })
+      : pool;
     // Where this day really begins and ends (§4.4). An arrival at a
     // station is not the hotel, and after the last train nobody walks
     // back to it — the two days everybody remembers were planned as if
     // they were ordinary ones.
     const ends = dayEnds(locatedFixpoints(framed.fixpoints, fixpoints), framed.blocks);
     const solved = solveDay({
-      anchor,
+      anchor: here,
       start: ends.start ?? undefined,
       end: ends.end ?? undefined,
       blocks: framed.blocks,
@@ -1432,9 +1465,12 @@ async function planLeg(
     const lit = startDate
       ? orderBlocksForLight(solved.blocks, {
         date: addDays(startDate, dayIndex),
-        at: anchor,
+        at: here,
+        // The horizon is the leg's, read once, and a day trip is
+        // beyond what it describes. Better none than one belonging to
+        // a valley sixty kilometres away (§7.3).
+        horizon: dayTrip === null ? horizon : undefined,
         mode,
-        horizon,
         startMinutesByBlock: startsByBlock,
       })
       : solved.blocks;
@@ -1442,9 +1478,20 @@ async function planLeg(
       blocks: lit.map((b) => ({ ...b, startMinutes: startsByBlock.get(b.id) })),
       fixpoints: fixpoints.map((f) => f.stored),
       detailed: true,
+      anchor: dayTrip === null ? null : {
+        lat: dayTrip.at.lat,
+        lon: dayTrip.at.lon,
+        label: dayTrip.label,
+        radiusM: dayTrip.radiusM,
+      },
     });
     const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
-    available = available.filter((c) => !placed.has(c.osmRef));
+    // What the day trip did not use joins the leg's pool rather than
+    // vanishing with the day: "what fell through in Florence does not
+    // carry over" is exactly the rule §4.5 refuses to have.
+    available = dayTrip === null
+      ? available.filter((c) => !placed.has(c.osmRef))
+      : mergeByOsmRef(available, pool).filter((c) => !placed.has(c.osmRef));
   }
 
   return {
@@ -1648,6 +1695,44 @@ function groupFixpoints(
   return byDay;
 }
 
+/**
+ * The day anchors of one leg, by day index (§4.5).
+ *
+ * Refused rather than shrugged at: a day index outside the leg is a
+ * request that means nothing, and silently dropping it would plan the
+ * ordinary day the traveller did not ask for while the app shows an
+ * outing it thinks it saved.
+ */
+function groupDayAnchors(
+  requests: DayAnchorRequest[] | undefined,
+  dayCount: number,
+): Map<number, DayAnchor> {
+  const byDay = new Map<number, DayAnchor>();
+  if (!requests) return byDay;
+  if (!Array.isArray(requests)) {
+    throw APIError.invalidArgument("dayAnchors must be an array");
+  }
+  for (const [i, req] of requests.entries()) {
+    if (!Number.isInteger(req.dayIndex) || req.dayIndex < 0 || req.dayIndex >= dayCount) {
+      throw APIError.invalidArgument(
+        `dayAnchors[${i}].dayIndex must be between 0 and ${dayCount - 1} for this leg`,
+      );
+    }
+    if (byDay.has(req.dayIndex)) {
+      throw APIError.invalidArgument(
+        `dayAnchors[${i}]: day ${req.dayIndex} already has an anchor — a day happens in one place`,
+      );
+    }
+    const at = validateAnchor({ lat: req.lat, lon: req.lon });
+    byDay.set(req.dayIndex, {
+      ...at,
+      label: req.label?.trim() || null,
+      radiusM: req.radiusM === undefined ? null : validateRadius(req.radiusM, undefined),
+    });
+  }
+  return byDay;
+}
+
 function validateTimeOfDay(text: string | undefined, label: string): number | null {
   if (text === undefined) return null;
   const minutes = typeof text === "string" ? parseMinutes(text) : null;
@@ -1822,6 +1907,97 @@ async function searchArea(
     log.warn("area search failed", { rank, radiusM, postgresDb, reason });
     return { spots: [], failure: reason };
   }
+}
+
+/**
+ * The pool of a day trip (§4.5), searched once per destination.
+ *
+ * Its own region lookup: an outing may well cross a regional border,
+ * and the router decides by coordinate anyway. A destination whose
+ * region is not imported yet answers with nothing rather than with the
+ * quarters' spots — a day in Florence planned out of San Gimignano's
+ * pool would be the wrong day, confidently.
+ */
+async function dayTripPool(
+  dayTrip: DayTrip,
+  trip: {
+    categories?: string[];
+    interests?: string[];
+    dwellMinutes?: Record<string, number>;
+    hidden?: ReadonlySet<string>;
+  },
+  legRadiusM: number,
+  cache: Map<string, ScoredCandidate[]>,
+): Promise<ScoredCandidate[]> {
+  const radiusM = dayTrip.radiusM ?? legRadiusM;
+  const key = `${dayTrip.at.lat.toFixed(3)},${dayTrip.at.lon.toFixed(3)}:${radiusM}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+
+  const region = await pickRegion(dayTrip.at.lat, dayTrip.at.lon);
+  if (!region) {
+    // Asked for, so the next re-plan finds it — the same courtesy a
+    // leg gets (§4.3). The day keeps its frame in the meantime.
+    await requestRegion(dayTrip.at);
+    log.info("day trip waits for its region", {
+      lat: dayTrip.at.lat,
+      lon: dayTrip.at.lon,
+      label: dayTrip.label ?? "",
+    });
+    cache.set(key, []);
+    return [];
+  }
+
+  const spots = await spotsAround(region.postgresDb, dayTrip.at, radiusM, trip.categories);
+  const pool = toCandidates(spots, {
+    interests: trip.interests,
+    dwellMinutes: trip.dwellMinutes,
+    requireProminence: true,
+  }).filter((candidate) => !trip.hidden?.has(candidate.osmRef));
+  cache.set(key, pool);
+  return pool;
+}
+
+/**
+ * Everything worth a block around one point, out of both searches.
+ *
+ * Both searches down is not "this city has nothing". Saved as a trip it
+ * writes a lie into the plan and hides it behind a day that looks
+ * merely empty — and a re-plan would wipe the spots a working search
+ * found earlier. One of the two failing is survivable; the other page
+ * still plans the day.
+ */
+async function spotsAround(
+  postgresDb: string,
+  at: { lat: number; lon: number },
+  radiusM: number,
+  categories: string[] | undefined,
+): Promise<GeoPoiSearchSpot[]> {
+  const pages = await Promise.all([
+    searchArea(postgresDb, at, radiusM, categories, "distance"),
+    searchArea(postgresDb, at, radiusM, categories, "prominence"),
+  ]);
+  if (pages.every((page) => page.failure !== null)) {
+    throw APIError.unavailable(
+      `Die Umgebungssuche antwortet gerade nicht (${pages[0].failure}). `
+      + "Die Reise wurde nicht gespeichert — bitte später noch einmal versuchen.",
+    );
+  }
+  const spots = mergeByOsmRef(...pages.map((page) => page.spots));
+  // An empty answer from a working search is a fact about the region,
+  // not about the traveller — and the one line somebody needs when a
+  // trip to a city full of sights comes back with nothing. Worth a log
+  // entry precisely because it is rare.
+  if (spots.length === 0) {
+    log.warn("area search found nothing", {
+      postgresDb,
+      radiusM,
+      lat: at.lat,
+      lon: at.lon,
+      categories: categories?.join(",") ?? "all",
+    });
+  }
+  return spots;
 }
 
 function validateRadius(radiusM: number | undefined, mode: string | undefined): number {
