@@ -386,6 +386,16 @@ den niemand geht, und ließ den weg, den alle gehen. Die Regel steht in
 Ohne Ort bleibt alles wie zuvor: Der Tag beginnt und endet an der Unterkunft.
 Der Ort ist eine Ergänzung, nie eine Bedingung.
 
+**Der Weg wird dann nur einmal bezahlt.** Der Rückwärts-Puffer zieht sonst
+`travelMinutes` vom Budget des letzten Blocks ab — denselben Weg, den die Route
+jetzt als Etappe zum Bahnhof bezahlt. Wo die Route ihn bezahlt, zieht der
+Wächter ihn nicht mehr ab (`travelPaidByRoute`): Die Koordinate ist ohnehin die
+bessere Angabe, weil sie vom tatsächlich letzten Stopp aus misst statt von dem,
+was sich jemand beim Eintragen vorgestellt hat. Ausnahme: Steht hinter dem
+letzten Spots-Block noch ein Block (ein Abendessen etwa), bleibt der Abzug —
+dann ist er das Einzige zwischen einem langen Essen und einem verpassten Zug.
+Der Sicherheitspuffer bleibt in jedem Fall.
+
 Ein Fixpunkt am Tagesende wird **rückwärts** gerechnet: Vom letzten Zug gehen
 der Weg zum Bahnhof und ein Sicherheitspuffer ab, der Rest ist das Budget des
 letzten Blocks. Je näher der Tag an diesen Rand kommt, desto härter greift das
