@@ -19,12 +19,18 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { getGeoClient } from "../osm-admin/geo-client";
+import log from "encore.dev/log";
+import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { climateForLeg } from "./climate-precautions";
+import {
+  MAX_SEARCH_RADIUS_M,
+  mergeByOsmRef,
+  searchRadiusFor,
+} from "./search-reach";
 import { storedHorizon } from "./horizon-store";
 import { fairnessOfPlan, votesOfLeg } from "./vote-store";
 import { orderBlocksForLight } from "./light-replan";
@@ -39,7 +45,7 @@ import { addDays, isCalendarDate, redateLegs } from "./leg-dates";
 import { redistribute, type CurrentBlock, type StopStatus } from "./redistribute";
 import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
-import { DEFAULT_MAX_WALK_MINUTES, type TransportMode } from "./travel";
+import { legLimitFor, type TransportMode } from "./travel";
 import {
   parseMinutes,
   scheduleDay,
@@ -70,8 +76,6 @@ import {
   type StoredPlan,
 } from "./plan-store";
 
-const DEFAULT_SEARCH_RADIUS_M = 2_500;
-const MAX_SEARCH_RADIUS_M = 20_000;
 const CANDIDATE_LIMIT = 150;
 const MAX_DAYS = 14;
 /** More than this is a life, not a trip — and every leg costs a search. */
@@ -197,6 +201,12 @@ export interface CreatePlanRequest {
   /** How many days to plan. One by default. */
   days?: number;
   radiusM?: number;
+  /**
+   * How the day gets around (§4.2). Part of the shorthand because it
+   * decides how far a day reaches: dropping it here planned every
+   * one-city trip on foot, whatever the caller said.
+   */
+  mode?: TransportMode;
   /** These apply to the whole trip: who is travelling and what they like. */
   categories?: string[];
   interests?: string[];
@@ -797,7 +807,7 @@ export const detailTripDay = api(
     const maxWalkMinutes =
       typeof plan.constraints.maxWalkMinutes === "number"
         ? plan.constraints.maxWalkMinutes
-        : DEFAULT_MAX_WALK_MINUTES;
+        : legLimitFor(leg.mode as TransportMode);
 
     // The stored blocks already carry the budgets the fixpoints left
     // them, so the frame does not have to be recomputed here.
@@ -1119,7 +1129,7 @@ export const redistributeDay = api(
     const maxWalkMinutes =
       typeof plan.constraints.maxWalkMinutes === "number"
         ? plan.constraints.maxWalkMinutes
-        : DEFAULT_MAX_WALK_MINUTES;
+        : legLimitFor(leg.mode as TransportMode);
 
     let result;
     try {
@@ -1220,7 +1230,8 @@ async function planLeg(
   legReq: LegRequest,
   trip: {
     shape: ReturnType<typeof shapeDay>;
-    maxWalkMinutes: number;
+    /** Null means: take it from the leg's mode. */
+    maxWalkMinutes: number | null;
     categories?: string[];
     interests?: string[];
     dwellMinutes?: Record<string, number>;
@@ -1256,9 +1267,9 @@ async function planLeg(
   pending: PendingRegion | null;
 }> {
   const anchor = validateAnchor(legReq.anchor);
-  const radiusM = validateRadius(legReq.radiusM);
   const dayCount = validateDays(legReq.days);
   const mode = validateMode(legReq.mode);
+  const radiusM = validateRadius(legReq.radiusM, mode);
   const anchorRadiusM = validateAnchorRadius(legReq.anchorRadiusM);
   const startDate = validateStartDate(legReq.startDate);
   const dayStartMinutes = validateTimeOfDay(legReq.dayStartsAt, "dayStartsAt");
@@ -1272,17 +1283,25 @@ async function planLeg(
   const region = await pickRegion(anchor.lat, anchor.lon);
   const pending = region ? null : await requestRegion(anchor);
 
-  const page = region
-    ? await getGeoClient().searchPois(region.postgresDb, {
-        center: { lat: anchor.lat, lon: anchor.lon, radiusM },
-        categories: trip.categories,
-        limit: CANDIDATE_LIMIT,
-      })
-    // Zero candidates is exactly a frame: the solver fills the budget it
-    // is given, and given nothing it produces blocks with no stops.
-    : { spots: [] };
+  // Asked twice over the same disc, and that is the point (see
+  // `search-reach.ts`): the page is filled nearest-first, so cutting it
+  // by distance and then keeping only what is worth a block keeps
+  // neither — in a dense city the nearest hundred and fifty rows are a
+  // hundred and fifty ordinary ones, and the bridge everybody came for
+  // was never fetched at all.
+  //
+  // Zero candidates is exactly a frame: the solver fills the budget it
+  // is given, and given nothing it produces blocks with no stops.
+  const spots = region
+    ? mergeByOsmRef(
+        ...await Promise.all([
+          searchArea(region.postgresDb, anchor, radiusM, trip.categories, "distance"),
+          searchArea(region.postgresDb, anchor, radiusM, trip.categories, "prominence"),
+        ]),
+      )
+    : [];
 
-  const scored = toCandidates(page.spots, {
+  const scored = toCandidates(spots, {
     interests: trip.interests,
     dwellMinutes: trip.dwellMinutes,
     // This pool is what a day gets built out of, so it holds only what
@@ -1359,7 +1378,7 @@ async function planLeg(
       anchor,
       blocks: framed.blocks,
       candidates: candidatesForDay,
-      maxWalkMinutes: trip.maxWalkMinutes,
+      maxWalkMinutes: trip.maxWalkMinutes ?? legLimitFor(mode),
       mode,
     });
     // The mildest of §7.3's four ways: the viewpoint moves to the end
@@ -1620,7 +1639,7 @@ function normalizeLegs(req: CreatePlanRequest): LegRequest[] {
   if (!req.anchor) {
     throw APIError.invalidArgument("either legs or anchor is required");
   }
-  return [{ anchor: req.anchor, days: req.days, radiusM: req.radiusM }];
+  return [{ anchor: req.anchor, days: req.days, radiusM: req.radiusM, mode: req.mode }];
 }
 
 function validateDetailDays(days: number | undefined): number {
@@ -1681,8 +1700,42 @@ function validateAnchor(anchor: { lat: number; lon: number } | undefined): { lat
   return { lat, lon };
 }
 
-function validateRadius(radiusM: number | undefined): number {
-  if (radiusM === undefined) return DEFAULT_SEARCH_RADIUS_M;
+/**
+ * One page of the area search, by the measure asked for.
+ *
+ * A failure of one of the two searches is not a failure of the trip:
+ * the other page still plans a day, and a leg with half a pool beats a
+ * refusal to save what somebody typed (§4.3).
+ */
+async function searchArea(
+  postgresDb: string,
+  anchor: { lat: number; lon: number },
+  radiusM: number,
+  categories: string[] | undefined,
+  rank: "distance" | "prominence",
+): Promise<GeoPoiSearchSpot[]> {
+  try {
+    const page = await getGeoClient().searchPois(postgresDb, {
+      center: { lat: anchor.lat, lon: anchor.lon, radiusM },
+      categories,
+      rank,
+      limit: CANDIDATE_LIMIT,
+    });
+    return page.spots;
+  } catch (err) {
+    log.warn("area search failed, planning with what the other one found", {
+      rank,
+      reason: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+}
+
+function validateRadius(radiusM: number | undefined, mode: string | undefined): number {
+  // The default follows the mode; an explicit radius always wins,
+  // because somebody who says "two kilometres, we are staying in the
+  // quarter" has answered the question better than a table can.
+  if (radiusM === undefined) return searchRadiusFor(mode);
   if (!Number.isFinite(radiusM) || radiusM <= 0) {
     throw APIError.invalidArgument("radiusM must be a positive number");
   }
@@ -1703,8 +1756,16 @@ function validateDays(days: number | undefined): number {
   return Math.floor(days);
 }
 
-function validateMaxWalk(minutes: number | undefined): number {
-  if (minutes === undefined) return DEFAULT_MAX_WALK_MINUTES;
+/**
+ * The leg cap the traveller set, or null for "whatever the mode says".
+ *
+ * Null rather than the walking default: the cap is a trip-wide
+ * constraint and the mode is per leg (§4.2), so the decision has to
+ * wait until the leg is known. Resolving it here was how a day by car
+ * ended up refusing every hop over forty minutes.
+ */
+function validateMaxWalk(minutes: number | undefined): number | null {
+  if (minutes === undefined) return null;
   if (!Number.isFinite(minutes) || minutes <= 0) {
     throw APIError.invalidArgument("maxWalkMinutes must be a positive number");
   }

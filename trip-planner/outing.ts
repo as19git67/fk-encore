@@ -43,7 +43,7 @@ import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { toCandidates } from "./candidates";
 import { solveDay, type Candidate } from "./solver";
-import { haversineMeters, DEFAULT_MAX_WALK_MINUTES, type TransportMode } from "./travel";
+import { haversineMeters, legLimitFor, type TransportMode } from "./travel";
 
 /** How far "in der Nähe" reaches when nobody says (§20.2). */
 const DEFAULT_NEARBY_RADIUS_M = 5_000;
@@ -56,8 +56,7 @@ export const QUIET_DAYS = 7;
 /** Waved away this often, and it stops being offered (§7.1's "no"). */
 export const DISMISSALS_UNTIL_QUIET = 3;
 const SEARCH_LIMIT = 150;
-/** The longest single hop an outing by car or train may propose. */
-const DRIVING_LEG_MINUTES = 90;
+
 
 export interface IdeaNearbyRequest {
   /** Where you are standing, or the centre of the area you mean. */
@@ -233,8 +232,7 @@ export const proposeOuting = api(
     // half an hour in the car is how you get to the lake, not an
     // unreasonable detour. On foot and by bike the walking figure
     // stands.
-    const maxWalkMinutes = req.maxWalkMinutes
-      ?? (mode === "foot" || mode === "bike" ? DEFAULT_MAX_WALK_MINUTES : DRIVING_LEG_MINUTES);
+    const maxWalkMinutes = req.maxWalkMinutes ?? legLimitFor(mode);
 
     const today = new Date();
     const rows = (await loadIdeas(ownerId))

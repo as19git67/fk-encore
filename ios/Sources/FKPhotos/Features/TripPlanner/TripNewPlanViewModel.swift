@@ -60,7 +60,7 @@ final class TripNewPlanViewModel {
         draft.legs.append(TripDraftLeg(
             days: previous?.days ?? 3,
             mode: previous?.mode ?? .foot,
-            radiusM: previous?.radiusM ?? 3_000,
+            radiusM: previous?.radiusM ?? TripReach.radius(for: .foot),
         ))
     }
 

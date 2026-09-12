@@ -234,6 +234,15 @@ export class InMemoryGeoClient implements GeoClient {
           (n) => typeof n === "string" && n.toLowerCase().includes(wanted),
         ));
     }
+    // The service orders by the prominence proxy when asked, whatever
+    // area clause narrowed the rows — a fake that quietly kept the
+    // nearest-first order would make a test of the two-search pool
+    // agree with a bug (see `trip-planner/search-reach.ts`).
+    if (query.rank === "prominence") {
+      spots = [...spots].sort((a, b) =>
+        prominenceProxy(b) - prominenceProxy(a) || a.osmRef.localeCompare(b.osmRef));
+    }
+
     const offset = query.offset ?? 0;
     const limit = query.limit ?? spots.length;
     const page = spots.slice(offset, offset + limit);
@@ -294,6 +303,15 @@ export class InMemoryGeoClient implements GeoClient {
  * whose job is to apply the filter at all — a test written around the
  * difference would be a test about the earth's shape.
  */
+/**
+ * What the service's centreless order counts: a wikidata id, a
+ * wikipedia article, a name. Spelled out here rather than imported
+ * because the real one is SQL.
+ */
+function prominenceProxy(spot: GeoPoiSearchSpot): number {
+  return (spot.wikidataQid ? 1 : 0) + (spot.wikipedia ? 1 : 0) + (spot.name ? 1 : 0);
+}
+
 function metresBetween(
   a: { lat: number; lon: number },
   b: { lat: number; lon: number },

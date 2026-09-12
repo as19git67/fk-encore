@@ -70,8 +70,8 @@ struct TripNewPlanDraft: Equatable {
     /// error after the fact.
     static let minDays = 1
     static let maxDays = 14
-    static let minRadiusM = 100
-    static let maxRadiusM = 20_000
+    static let minRadiusM = TripReach.minRadiusM
+    static let maxRadiusM = TripReach.maxRadiusM
     /// Mirrors the endpoint: more than this is a life, not a trip.
     static let maxLegs = 10
 
@@ -283,8 +283,16 @@ struct TripDraftLeg: Identifiable, Equatable {
     /// the confident guess §15.3 exists to forbid.
     var place: TripPlace?
     var days: Int = 3
-    var mode: TripTransportMode = .foot
-    var radiusM: Int = 3_000
+    var mode: TripTransportMode = .foot {
+        didSet {
+            // The reach follows the mode unless somebody set it by hand
+            // (`TripReach`): a day by car that still searched three
+            // kilometres was how a week in a big city came back as the
+            // streets around the hotel.
+            radiusM = TripReach.radius(movingFrom: oldValue, to: mode, current: radiusM)
+        }
+    }
+    var radiusM: Int = TripReach.radius(for: .foot)
     /// When you leave the city before this one, as a time of day. Nil
     /// when nobody knows yet — an unknown train is not a train at 00:00.
     var departAt: Date?
