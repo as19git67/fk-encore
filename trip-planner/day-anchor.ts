@@ -48,6 +48,10 @@ export interface DayAnchorInput {
   lon: number;
   label?: string | null;
   radiusM?: number | null;
+  /** When the group leaves the quarters, minutes past midnight. */
+  departMinutes?: number | null;
+  /** When they start back, from the destination. */
+  returnMinutes?: number | null;
 }
 
 export interface DayTrip {
@@ -56,8 +60,18 @@ export interface DayTrip {
   label: string | null;
   /** How far to look around it, when the day said. */
   radiusM: number | null;
-  /** Getting there, in minutes. Same figure back. */
+  /**
+   * Getting there, in minutes. Same figure back.
+   *
+   * An estimate, and the day says so: two speeds and a detour factor,
+   * no routing engine (§12). Where the traveller named a time it is
+   * the time that counts — see the two below.
+   */
   travelMinutes: number;
+  /** When they set off, if anybody said. */
+  departMinutes: number | null;
+  /** When they start back from the destination, if anybody said. */
+  returnMinutes: number | null;
 }
 
 /**
@@ -82,7 +96,65 @@ export function dayTripOf(
     label: day.label?.trim() ? day.label.trim() : null,
     radiusM: day.radiusM ?? null,
     travelMinutes,
+    departMinutes: minuteOfDay(day.departMinutes),
+    returnMinutes: minuteOfDay(day.returnMinutes),
   };
+}
+
+function minuteOfDay(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isFinite(value) || value < 0 || value >= 24 * 60) return null;
+  return Math.round(value);
+}
+
+/**
+ * When the day's blocks may begin, given the drive.
+ *
+ * A named departure plus the way there — the arrival hour is then the
+ * only part still estimated, and it is shown rather than hidden, so
+ * anybody can see the guess and correct it by naming the times.
+ */
+export function startsAtFor(dayTrip: DayTrip, ordinaryStart: number): number {
+  const leaves = dayTrip.departMinutes ?? ordinaryStart;
+  return leaves + dayTrip.travelMinutes;
+}
+
+/**
+ * Cut the day's blocks off at the hour the group starts back.
+ *
+ * With a named return the drive home costs the day nothing further: it
+ * happens *after* the day, exactly as an evening at the quarters
+ * happens after the last block. What matters is that nothing is planned
+ * past the departure — the same rule a departure fixpoint follows
+ * (§4.4), and for the same reason.
+ */
+export function endDayAt<
+  T extends { id: string; label: string; startMinutes: number; budgetMinutes: number },
+>(
+  blocks: readonly T[],
+  returnMinutes: number,
+  destination: string | null,
+): { blocks: T[]; dropped: Array<{ id: string; label: string; reason: string }> } {
+  const where = destination ? ` aus ${destination}` : "";
+  const back = `die Rückfahrt${where} ist um ${formatMinutes(returnMinutes)}`;
+  const kept: T[] = [];
+  const dropped: Array<{ id: string; label: string; reason: string }> = [];
+
+  for (const block of blocks) {
+    const left = Math.min(block.budgetMinutes, returnMinutes - block.startMinutes);
+    if (left < MIN_VIABLE_BLOCK_MINUTES) {
+      dropped.push({ id: block.id, label: block.label, reason: `„${block.label}" fällt weg: ${back}` });
+      continue;
+    }
+    kept.push({ ...block, budgetMinutes: left });
+  }
+  return { blocks: kept, dropped };
+}
+
+/** "17:00" — minutes past midnight as a time somebody reads. */
+function formatMinutes(minutes: number): string {
+  const wrapped = ((minutes % 1440) + 1440) % 1440;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}`;
 }
 
 /**

@@ -107,8 +107,8 @@ struct TripPlanDayView: View {
                             settingDayAnchor = true
                         } label: {
                             Label(viewModel.day?.anchor == nil
-                                  ? "Tagesziel setzen"
-                                  : "Tagesziel ändern",
+                                  ? "Ausflug planen"
+                                  : "Ausflug ändern",
                                   systemImage: "car")
                         }
                         // Who else may plan this trip (§6.2) — a
@@ -219,8 +219,8 @@ struct TripPlanDayView: View {
             TripDayAnchorSheet(
                 dayLabel: dayLabel(),
                 current: viewModel.day?.anchor,
-            ) { place in
-                await viewModel.setDayAnchor(place)
+            ) { draft in
+                await viewModel.setDayAnchor(draft)
             }
         }
         .sheet(isPresented: $addingFixpoint) {
@@ -582,7 +582,7 @@ struct TripPlanDayView: View {
         // A day trip says where the day is, not where the bed is: the
         // anchor is still true and no longer the useful half (§4.5).
         if let trip = viewModel.day?.anchor {
-            return "Tagesziel: \(trip.summary)"
+            return "Ausflug: \(trip.summary)"
         }
         let anchor = leg.anchorRadiusM == nil
             ? leg.anchorTitle

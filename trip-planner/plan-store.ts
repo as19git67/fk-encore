@@ -158,6 +158,10 @@ export interface StoredDayAnchor {
    * could disagree with all three.
    */
   travelMinutes: number;
+  /** When the group sets off, or null when nobody said (§4.5). */
+  departMinutes: number | null;
+  /** When they start back from there. */
+  returnMinutes: number | null;
 }
 
 export interface StoredFixpoint extends Fixpoint {
@@ -251,6 +255,10 @@ export interface DayAnchor {
   label?: string | null;
   /** Null falls back to the leg's radius, which follows the mode. */
   radiusM?: number | null;
+  /** When the group sets off, minutes past midnight (§4.5). */
+  departMinutes?: number | null;
+  /** When they start back from the destination. */
+  returnMinutes?: number | null;
 }
 
 export interface CreateLegInput {
@@ -531,6 +539,8 @@ async function insertDays(
         anchor_lon: dayInput.anchor?.lon ?? null,
         anchor_label: dayInput.anchor?.label ?? null,
         anchor_radius_m: dayInput.anchor?.radiusM ?? null,
+        anchor_depart_minutes: dayInput.anchor?.departMinutes ?? null,
+        anchor_return_minutes: dayInput.anchor?.returnMinutes ?? null,
       })
       .returning({ id: tripPlanDays.id });
 
@@ -976,6 +986,8 @@ export async function loadPlan(
           lon: row.anchor_lon,
           label: row.anchor_label,
           radiusM: row.anchor_radius_m,
+          departMinutes: row.anchor_depart_minutes,
+          returnMinutes: row.anchor_return_minutes,
           // Filled in once the leg's anchor and mode are known.
           travelMinutes: 0,
         },
@@ -1377,6 +1389,8 @@ export async function setDayAnchor(
       anchor_lon: anchor?.lon ?? null,
       anchor_label: anchor?.label ?? null,
       anchor_radius_m: anchor?.radiusM ?? null,
+      anchor_depart_minutes: anchor?.departMinutes ?? null,
+      anchor_return_minutes: anchor?.returnMinutes ?? null,
     })
     .where(eq(tripPlanDays.id, dayId));
 }
