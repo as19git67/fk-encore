@@ -258,8 +258,41 @@ final class TripIdeasViewModel {
             sharedPlace = place
             return
         }
+        // Everything the local reader does not know — which is every
+        // Google Maps link, `geo:`, OpenStreetMap and the short forms
+        // of all of them. The server has read all of these since the
+        // share sheet existed; it was only ever reachable through a
+        // trip, which is the one thing the collection does not have.
+        if let place = await readOnServer(url) {
+            pendingShare = payload
+            sharedPlace = place
+            return
+        }
         pendingShare = nil
         sharedPlace = nil
+    }
+
+    /// Ask the server what the link says.
+    ///
+    /// Deliberately silent on failure: a share that turns out to be an
+    /// article is not an error here, it is a share for a trip's
+    /// analysis (§9.3), and the link stays in the inbox for that.
+    private func readOnServer(_ url: String) async -> TripMapLink.Place? {
+        struct Body: Encodable { let url: String }
+        struct Read: Decodable {
+            let isMapLink: Bool
+            let lat: Double?
+            let lon: Double?
+            let name: String?
+        }
+        do {
+            let read: Read = try await APIClient.shared.post(
+                "/trip-planner/map-link", body: Body(url: url))
+            guard let lat = read.lat, let lon = read.lon else { return nil }
+            return TripMapLink.Place(lat: lat, lon: lon, name: read.name)
+        } catch {
+            return nil
+        }
     }
 
     /// Follow a short link to the address it stands for.
@@ -284,7 +317,7 @@ final class TripIdeasViewModel {
     /// written as the map's name: `q=` is what the sender's app called
     /// it, which is often what *they* call it — and the server decides
     /// separately whether an OSM entry sits within eighty metres.
-    func addShared(note: String?) async {
+    func addShared(note: String?, dwellMinutes: Int) async {
         guard let place = sharedPlace, let payload = pendingShare else { return }
         isAdding = true
         defer { isAdding = false }
@@ -296,6 +329,9 @@ final class TripIdeasViewModel {
             let name: String?
             let note: String?
             let sourceUrl: String?
+            /// See `addHere`: a place the map does not know has no
+            /// duration but the one somebody names.
+            let dwellMinutes: Int
         }
         do {
             let response: TripIdeaAddResponse = try await APIClient.shared.post(
@@ -307,6 +343,7 @@ final class TripIdeasViewModel {
                     name: place.name ?? payload.title,
                     note: note?.isEmpty == true ? nil : note,
                     sourceUrl: payload.url,
+                    dwellMinutes: dwellMinutes,
                 ),
             )
             lastAddition = response.sentence
@@ -353,6 +390,7 @@ final class TripIdeasViewModel {
     ///   isolated.
     func addHere(
         note: String?,
+        dwellMinutes: Int,
         locationProvider: TripLocationProvider? = nil,
     ) async {
         isAdding = true
@@ -370,6 +408,12 @@ final class TripIdeasViewModel {
             let lon: Double
             let ownerId: Int?
             let note: String?
+            /// Asked for, never assumed. Where OpenStreetMap knows the
+            /// spot the server prefers its own figure; where it does
+            /// not, this is the only answer there is — and without it
+            /// the whole call was refused, which is what made "merken"
+            /// look as though it had worked and changed nothing.
+            let dwellMinutes: Int
         }
         do {
             let response: TripIdeaAddResponse = try await APIClient.shared.post(
@@ -379,6 +423,7 @@ final class TripIdeasViewModel {
                     lon: location.coordinate.longitude,
                     ownerId: ownerId,
                     note: note?.isEmpty == true ? nil : note,
+                    dwellMinutes: dwellMinutes,
                 ),
             )
             lastAddition = response.sentence

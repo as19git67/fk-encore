@@ -20,6 +20,11 @@ struct TripShareCaptureView: View {
     @State private var coordinate: (lat: Double, lon: Double, name: String?)?
     @State private var isReading = true
     @State private var readError: String?
+    /// True while the server is being asked what the link says.
+    @State private var isReadingLink = false
+    /// A map link that carried no place, in one sentence — said rather
+    /// than left as a missing row in the picker.
+    @State private var linkNote: String?
 
     // Picker state
     @State private var plans: [SharePlanSummary] = []
@@ -49,8 +54,9 @@ struct TripShareCaptureView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isReading || (isLoadingPlans && plans.isEmpty) {
-                    ProgressView(isReading ? "Wird gelesen\u{2026}" : "L\u{00E4}dt Reisen\u{2026}")
+                if isReading || isReadingLink || (isLoadingPlans && plans.isEmpty) {
+                    ProgressView(isReading || isReadingLink
+                                 ? "Wird gelesen\u{2026}" : "L\u{00E4}dt Reisen\u{2026}")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let error = readError {
                     ContentUnavailableView(
@@ -79,6 +85,9 @@ struct TripShareCaptureView: View {
         }
         .task {
             await read()
+            // Before the picker: whether the collection may be offered
+            // hangs on whether the link named a place.
+            await readLinkOnServer()
             await loadPlans()
         }
     }
@@ -153,8 +162,8 @@ struct TripShareCaptureView: View {
                 if collections.isEmpty && coordinate == nil && !plans.isEmpty {
                     // An article has to be read before it is a place,
                     // and that reading belongs to a trip (\u{00A7}9.3).
-                    Text("Ohne Koordinate im Link geht nur eine Reise \u{2014} dort wird der "
-                         + "Text ausgewertet.")
+                    Text(linkNote ?? "Ohne Koordinate im Link geht nur eine Reise \u{2014} dort "
+                         + "wird der Text ausgewertet.")
                 }
             }
 
@@ -237,6 +246,37 @@ struct TripShareCaptureView: View {
         if let urlString = url, let coord = Self.extractCoordinate(from: urlString) {
             coordinate = coord
             titleText = coord.name ?? ""
+        }
+    }
+
+    /// Ask the server what the link says, when the local reader could
+    /// not tell.
+    ///
+    /// The local reader knows one format — Apple's `ll=` — because it
+    /// is the one that needs no round trip. Everything else out of a
+    /// map app (Google's `/@lat,lon`, `geo:`, OpenStreetMap, and the
+    /// short links all of them hand out) looked to it like a link
+    /// carrying nothing, so the collection was never offered and the
+    /// picker listed trips only.
+    ///
+    /// Following a short link is I/O in any case, and doing it on the
+    /// server keeps the extension from fetching whatever it was handed.
+    private func readLinkOnServer() async {
+        guard coordinate == nil, let urlString = payload?.url else { return }
+        isReadingLink = true
+        defer { isReadingLink = false }
+        guard let read = try? await ShareExtensionAPI.readMapLink(urlString) else { return }
+        if let lat = read.lat, let lon = read.lon {
+            coordinate = (lat, lon, read.name)
+            if titleText.isEmpty { titleText = read.name ?? "" }
+        } else if read.isMapLink {
+            // A map link whose place nobody could work out. Worth
+            // saying, because it reads nothing like an article: the
+            // traveller shared a pin and would otherwise wonder why the
+            // collection is missing.
+            linkNote = read.unresolved
+                ? "Dem Kurzlink konnte gerade nicht gefolgt werden \u{2014} ohne Koordinate geht nur eine Reise."
+                : "In diesem Kartenlink steckt keine Koordinate."
         }
     }
 
