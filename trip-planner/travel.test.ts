@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MAX_WALK_MINUTES,
   DETOUR_FACTOR,
+  OPEN_ROAD_SPEED_M_PER_MIN,
   WALKING_SPEED_M_PER_MIN,
   haversineMeters,
   legLimitFor,
@@ -179,5 +180,59 @@ describe("legLimitFor", () => {
 
   it("refuses the longer hop when nobody said how they travel", () => {
     expect(legLimitFor(undefined)).toBe(DEFAULT_MAX_WALK_MINUTES);
+  });
+});
+
+describe("the open road", () => {
+  /** An invented base and two invented towns, roughly Tuscan distances. */
+  const BASE = { lat: 43.4677, lon: 11.0430 };
+  const SIXTY_KM = { lat: 43.7199, lon: 10.3973 };
+  const FORTY_KM = { lat: 43.7731, lon: 11.2560 };
+
+  it("does not drive sixty kilometres at city speed", () => {
+    // The bug: a day trip out of the base came back as eight and a half
+    // hours in the car for a drive that takes about three, because
+    // every kilometre was priced as one-way streets and traffic lights.
+    const leg = travelLeg(BASE, SIXTY_KM, "car");
+    expect(leg.minutes).toBeGreaterThan(60);
+    expect(leg.minutes).toBeLessThan(110);
+  });
+
+  it("stays pessimistic — never faster than the open-road speed", () => {
+    const leg = travelLeg(BASE, SIXTY_KM, "car");
+    expect(leg.minutes).toBeGreaterThanOrEqual(
+      Math.round(leg.distanceM / OPEN_ROAD_SPEED_M_PER_MIN.car!),
+    );
+  });
+
+  it("prices the nearer town lower than the farther one", () => {
+    expect(travelLeg(BASE, FORTY_KM, "car").minutes)
+      .toBeLessThan(travelLeg(BASE, SIXTY_KM, "car").minutes);
+  });
+
+  it("leaves a hop inside a town exactly as it was", () => {
+    // The town figure still applies to the first kilometres, so nothing
+    // about a city day changes: only the long hops move.
+    const acrossTown = { lat: BASE.lat + 0.018, lon: BASE.lon }; // ~2 km
+    const straight = haversineMeters(BASE, acrossTown);
+    const distanceM = Math.round(straight * 1.4);
+    expect(travelLeg(BASE, acrossTown, "car").minutes)
+      .toBe(Math.round(distanceM / 330 + 6));
+  });
+
+  it("keeps a body at one speed however straight the road", () => {
+    // A pedestrian does not speed up outside the town sign.
+    const leg = walkingLeg(BASE, SIXTY_KM);
+    expect(leg.minutes).toBe(Math.round(leg.distanceM / WALKING_SPEED_M_PER_MIN));
+  });
+
+  it("puts the regional train ahead of the car over the same distance", () => {
+    // Both open up beyond the town; transit keeps its ten minutes of
+    // platform and timetable, so it is dearer here and the estimate
+    // says so rather than pretending the two are the same.
+    const byCar = travelLeg(BASE, SIXTY_KM, "car").minutes;
+    const byTrain = travelLeg(BASE, SIXTY_KM, "transit").minutes;
+    expect(byTrain).toBeGreaterThan(byCar);
+    expect(byTrain).toBeLessThan(3 * byCar);
   });
 });

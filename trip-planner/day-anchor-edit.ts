@@ -20,6 +20,7 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { requireOrganiser } from "./plan-access";
+import { parseMinutes } from "./fixpoints";
 import { loadPlan, setDayAnchor } from "./plan-store";
 import { MAX_SEARCH_RADIUS_M } from "./search-reach";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
@@ -43,6 +44,17 @@ export interface SetDayAnchorRequest {
    * which follows the transport mode (`search-reach.ts`).
    */
   radiusM?: number;
+  /**
+   * When the group leaves the quarters, as HH:MM.
+   *
+   * The drive is an estimate and always will be without a routing
+   * engine (§12). Naming the hours is the traveller's way of saying
+   * what they already know better than any estimate could — and then
+   * the day is planned from what they said, not from the guess.
+   */
+  departAt?: string;
+  /** When they start back from the destination, as HH:MM. */
+  returnAt?: string;
 }
 
 export const setTripDayAnchor = api(
@@ -54,7 +66,7 @@ export const setTripDayAnchor = api(
   },
   async (req: SetDayAnchorRequest): Promise<PlanResponse> => {
     const userId = requireUser();
-    await requireOrganiser(req.planId, userId, "Tagesziele");
+    await requireOrganiser(req.planId, userId, "Ausflüge");
 
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
@@ -101,12 +113,29 @@ function anchorOf(req: SetDayAnchorRequest) {
   if (label && label.length > 120) {
     throw APIError.invalidArgument("label may be at most 120 characters");
   }
+  const departMinutes = timeOfDay(req.departAt, "departAt");
+  const returnMinutes = timeOfDay(req.returnAt, "returnAt");
+  if (departMinutes !== null && returnMinutes !== null && returnMinutes <= departMinutes) {
+    throw APIError.invalidArgument("returnAt must be later than departAt");
+  }
   return {
     lat: req.lat,
     lon: req.lon,
     label: label || null,
     radiusM: req.radiusM === undefined ? null : Math.round(req.radiusM),
+    departMinutes,
+    returnMinutes,
   };
+}
+
+/** An hour the traveller typed, or nothing — never a silent zero. */
+function timeOfDay(text: string | undefined, field: string): number | null {
+  if (text === undefined || text.trim() === "") return null;
+  const minutes = parseMinutes(text);
+  if (minutes === null) {
+    throw APIError.invalidArgument(`${field} must be a time of day as HH:MM, got '${text}'`);
+  }
+  return minutes;
 }
 
 function requireUser(): number {

@@ -62,6 +62,39 @@ export const SPEED_M_PER_MIN: Readonly<Record<TransportMode, number>> = {
 };
 
 /**
+ * How far a hop stays a *town* hop, in metres of road.
+ *
+ * Beyond it the road opens up. The number is the width of a European
+ * town rather than a measurement: what matters is that the first few
+ * kilometres of every drive really are lights and one-way streets, and
+ * that kilometre sixty is not.
+ */
+export const TOWN_PORTION_M = 3_000;
+
+/**
+ * Speeds once out of town, in metres per minute.
+ *
+ * A single speed per mode could not tell a sprint across Florence from
+ * the drive to Pisa, and answered both with the city figure: sixty
+ * kilometres came out as four and a quarter hours each way, so a day
+ * trip cost eight and a half hours of driving that in fact takes about
+ * three. Nobody could plan a base with day trips out of it (§4.5) with
+ * arithmetic like that.
+ *
+ * Still deliberately pessimistic — 72 km/h is a road with villages on
+ * it, not a motorway average — because an overfull block reads as a
+ * plan that failed (§14). Foot and bike keep one speed: a body does not
+ * get faster because the road is straighter.
+ */
+export const OPEN_ROAD_SPEED_M_PER_MIN: Readonly<Partial<Record<TransportMode, number>>> = {
+  // ~72 km/h: country roads and the occasional dual carriageway.
+  car: 1_200,
+  // ~60 km/h door to door on a regional train, which is what a hop
+  // over thirty kilometres by public transport actually is.
+  transit: 1_000,
+};
+
+/**
  * The detour factor per mode. A pedestrian cuts through a passage a car
  * cannot, and transit follows lines rather than the direct way.
  */
@@ -181,8 +214,25 @@ function rawLeg(from: Coordinate, to: Coordinate, mode: TransportMode): TravelLe
   const straight = haversineMeters(from, to);
   const distanceM = Math.round(straight * DETOUR_FACTOR_BY_MODE[mode]);
   const overhead = straight < OVERHEAD_FLOOR_M ? 0 : OVERHEAD_MINUTES[mode];
-  const minutes = Math.round(distanceM / SPEED_M_PER_MIN[mode] + overhead);
+  const minutes = Math.round(movingMinutes(distanceM, mode) + overhead);
   return { distanceM, minutes, travelClass: travelClassFor(minutes, mode) };
+}
+
+/**
+ * Time on the move: the first kilometres through town, the rest on the
+ * open road.
+ *
+ * Two speeds rather than one, because one could not tell a sprint
+ * across town from the drive to the next city and answered both with
+ * the town figure. Two is still coarse — there is no routing engine
+ * here and §12 keeps it that way — but coarse in both directions
+ * instead of wrong in one.
+ */
+function movingMinutes(distanceM: number, mode: TransportMode): number {
+  const town = SPEED_M_PER_MIN[mode];
+  const open = OPEN_ROAD_SPEED_M_PER_MIN[mode];
+  if (open === undefined || distanceM <= TOWN_PORTION_M) return distanceM / town;
+  return TOWN_PORTION_M / town + (distanceM - TOWN_PORTION_M) / open;
 }
 
 /**

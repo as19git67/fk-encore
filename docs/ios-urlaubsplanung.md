@@ -452,6 +452,28 @@ vier waren schon gebaut, nur an einen anderen Ort gehängt:
 - **Die Rückfahrt ist ein Fixpunkt-Kandidat** (§4.4): Wer mit dem letzten Zug
   aus Florenz zurückmuss, hat den Nachmittag rückwärts gerechnet.
 
+**Erledigt: gesagte Zeiten schlagen die Schätzung** (#1209, Migration 0196).
+Der Ausflug darf jetzt eine **Abfahrt** und eine **Rückfahrt** tragen, beide
+freiwillig. Mit Abfahrt beginnt der Tag zur genannten Stunde plus Fahrzeit
+statt zur gewöhnlichen Startzeit plus Fahrzeit; mit Rückfahrt wird nichts mehr
+dahinter geplant — dieselbe Regel wie beim Abfahrts-Fixpunkt (§4.4) —, und die
+Heimfahrt kostet den Tag darüber hinaus nichts mehr, weil sie danach
+stattfindet. Ohne Angabe bleibt alles wie bisher: geschätzt hin, geschätzt
+zurück. Der Grund ist §12: Ohne Router ist die Fahrzeit Luftlinie mal Faktor,
+und wer die Strecke kennt, weiß es besser als jede Arithmetik. Die verbleibende
+Schätzung — die Ankunft — wird deshalb angezeigt und nicht in einen kürzeren
+Nachmittag versteckt.
+
+**Erledigt: zwei Geschwindigkeiten statt einer** (#1209, `travel.ts`). Die
+gemeldete Beobachtung: 8 h 32 min für San Gimignano–Pisa und zurück, real rund
+1 h 30 hin. Ursache war eine einzige Geschwindigkeit je Verkehrsmittel — beim
+Auto 20 km/h für Ampeln und Einbahnstraßen —, mit der auch die sechzig
+Kilometer über Land gerechnet wurden. Jetzt gelten die ersten drei Kilometer
+als Ortsdurchfahrt und der Rest als Landstraße (Auto 72 km/h, ÖPNV 60 km/h);
+zu Fuß und mit dem Rad bleibt es bei einer Geschwindigkeit, denn ein Körper
+wird nicht schneller, weil die Straße gerader wird. Stadtwege ändern sich
+dadurch nicht, Ausflüge um den Faktor drei.
+
 Was der Tagesausflug nicht verbraucht, geht in den Vorrat der Etappe — „was in
 Florenz ausfiel, rutscht nicht nach Pisa" ist genau die Regel, die §4.5
 ablehnt. Und weil zwei Tage in Florenz zwei Tage in derselben Stadt sind, wird
@@ -2133,7 +2155,8 @@ iOS (SwiftUI, Feature „Trip/Planen")
 
 **Das Routing rückt nach hinten.** Weil Blöcke nur Summen brauchen, reicht für
 den ersten Wurf eine Heuristik auf Luftlinie mit Umwegfaktor (Fußweg ≈ Luftlinie
-× 1,3 bei 4,5 km/h). Ein echter Router (Valhalla — ein Container für Fuß, Rad
+× 1,3 bei 4,5 km/h; motorisiert die ersten drei Kilometer als Ortsdurchfahrt,
+der Rest als Landstraße — siehe §4.5). Ein echter Router (Valhalla — ein Container für Fuß, Rad
 und Auto, mit Matrix-API, auf denselben Geofabrik-PBFs, die `osm-admin` schon
 lädt) verbessert das später messbar, ist aber nicht mehr der Blocker, den er im
 ersten Entwurf noch darstellte. GTFS wird von der Voraussetzung zur optionalen
