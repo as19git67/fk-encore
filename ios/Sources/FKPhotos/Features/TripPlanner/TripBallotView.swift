@@ -16,6 +16,15 @@ import SwiftUI
 /// can outvote.
 struct TripBallotView: View {
     let planId: Int
+    /// Which leg is being voted on. The ballot used to default to the
+    /// first one, so on a trip with several cities the Osaka day
+    /// offered Tokyo's spots — and the vote landed on Tokyo.
+    let legIndex: Int
+    /// The leg itself, already loaded by the screen that opened this
+    /// one. Every spot on the ballot is one of its stops or one of its
+    /// pool entries, so the row can say what and where without the
+    /// ballot carrying a second copy of both.
+    let leg: TripLeg?
     var onPlanChanged: (() -> Void)?
 
     @State private var ballot: TripBallot?
@@ -89,9 +98,13 @@ struct TripBallotView: View {
         .task { await load() }
     }
 
-    @ViewBuilder
+    // No `@ViewBuilder` here any more: the row reads what the plan
+    // knows about the spot before it builds anything, and a result
+    // builder cannot hold a `let` and an explicit `return`. It returns
+    // one stack, so the attribute was never earning its place.
     private func row(for entry: TripBallotEntry, heartsLeft: Int) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let details = leg.map { TripBallotDetails.of(entry.osmRef, in: $0) }
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(entry.label)
                 if entry.planned {
@@ -100,7 +113,33 @@ struct TripBallotView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                // Everything the plan knows about the place, one tap
+                // away: voting on a name is voting on a word (§3.8).
+                if let spot = details?.spot, let leg {
+                    NavigationLink {
+                        TripSpotDetailView(
+                            spot: spot,
+                            mode: leg.transportMode,
+                            onSave: nil,
+                        ) { _ in EmptyView() }
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("\(entry.label) — Details")
+                }
                 if busyRef == entry.osmRef { ProgressView() }
+            }
+            // What it is and where it is — the two questions somebody
+            // needs answered before they can mean their vote.
+            if let line = details?.line, !line.isEmpty {
+                Label(line, systemImage: TripCategory.symbol(entry.category))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let note = details?.note {
+                Text(note).font(.caption).italic().foregroundStyle(.secondary)
             }
             if let voices = entry.voices {
                 Text(voices).font(.footnote).foregroundStyle(.secondary)
@@ -140,7 +179,10 @@ struct TripBallotView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            ballot = try await APIClient.shared.get("/trip-planner/plans/\(planId)/votes")
+            ballot = try await APIClient.shared.get(
+                "/trip-planner/plans/\(planId)/votes",
+                query: ["legIndex": String(legIndex)],
+            )
             fairness = try await APIClient.shared.get("/trip-planner/plans/\(planId)/fairness")
             errorMessage = nil
         } catch {
@@ -154,7 +196,12 @@ struct TripBallotView: View {
         do {
             let _: TripCastVoteResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/votes",
-                body: TripCastVoteRequest(osmRef: entry.osmRef, value: vote.rawValue, heart: heart))
+                body: TripCastVoteRequest(
+                    legIndex: legIndex,
+                    osmRef: entry.osmRef,
+                    value: vote.rawValue,
+                    heart: heart,
+                ))
             await load()
         } catch {
             errorMessage = error.localizedDescription
@@ -251,6 +298,10 @@ struct TripFairnessRow: Codable, Identifiable, Sendable {
 }
 
 struct TripCastVoteRequest: Encodable, Sendable {
+    /// Which leg the spot belongs to. Left out, the server assumed the
+    /// first one — so on a trip with several cities a vote cast in
+    /// Osaka was recorded against Tokyo.
+    let legIndex: Int
     let osmRef: String
     let value: String
     let heart: Bool
