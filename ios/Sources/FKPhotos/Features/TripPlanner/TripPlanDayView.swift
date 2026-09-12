@@ -144,7 +144,11 @@ struct TripPlanDayView: View {
                         // (§6.1). Voting does not re-plan; the screen
                         // has a button for that.
                         NavigationLink {
-                            TripBallotView(planId: viewModel.planId) {
+                            TripBallotView(
+                                planId: viewModel.planId,
+                                legIndex: viewModel.legIndex,
+                                leg: viewModel.leg,
+                            ) {
                                 Task { await viewModel.load() }
                             }
                         } label: {
