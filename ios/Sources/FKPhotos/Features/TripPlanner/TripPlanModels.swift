@@ -129,6 +129,12 @@ struct TripDayAnchor: Codable, Sendable, Equatable {
     /// from both anchors and the mode — a second travel model in the
     /// app would be a second set of answers.
     let travelMinutes: Int
+    /// When the group sets off, minutes past midnight, or nil when
+    /// nobody said. Optional so a response from an older server still
+    /// decodes.
+    var departMinutes: Int?
+    /// When they start back from there.
+    var returnMinutes: Int?
 
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
 
@@ -139,11 +145,53 @@ struct TripDayAnchor: Codable, Sendable, Equatable {
         return trimmed?.isEmpty == false ? trimmed! : "Auswärts"
     }
 
-    /// "Pisa · 2 h 20 hin und zurück" — the one line the day card has
-    /// room for, and the half that explains why the day is shorter.
+    /// "Pisa · 8:00–17:00" when the traveller named the hours,
+    /// "Pisa · 2 h 20 hin und zurück" when only the estimate exists.
+    ///
+    /// The named hours win because they are known rather than guessed:
+    /// without a routing engine the drive is arithmetic on a straight
+    /// line (§12), and somebody who has looked it up knows better. The
+    /// estimate stays for the days nobody typed an hour into — it is
+    /// still the half that explains why the day is shorter.
     var summary: String {
+        if let hours = plannedHours { return "\(displayName) · \(hours)" }
         guard travelMinutes > 0 else { return displayName }
         return "\(displayName) · \(TripClock.duration(travelMinutes * 2)) hin und zurück"
+    }
+
+    /// "8:00–17:00", "ab 8:00", "zurück 17:00" — whichever halves were
+    /// said. Nil when neither was.
+    var plannedHours: String? {
+        switch (departMinutes, returnMinutes) {
+        case let (departure?, back?):
+            return "\(TripClock.format(departure))–\(TripClock.format(back))"
+        case let (departure?, nil):
+            return "ab \(TripClock.format(departure))"
+        case let (nil, back?):
+            return "zurück \(TripClock.format(back))"
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    /// What the outing costs the day, under its name in the frame band.
+    ///
+    /// The named hours when they exist, the estimated drive otherwise —
+    /// and the estimate says that it is one. A number that looks
+    /// measured and is not is the reason the hours exist at all.
+    var costLine: String {
+        if let hours = plannedHours { return hours }
+        guard travelMinutes > 0 else { return "Am Quartier" }
+        return "Hin und zurück \(TripClock.duration(travelMinutes * 2)) (geschätzt)"
+    }
+
+    /// When the first block can begin: the departure plus the drive.
+    ///
+    /// Shown next to the hour the traveller typed so the remaining
+    /// guess is visible rather than buried in a shorter afternoon.
+    var arrivalMinutes: Int? {
+        guard let departure = departMinutes, travelMinutes > 0 else { return nil }
+        return departure + travelMinutes
     }
 }
 

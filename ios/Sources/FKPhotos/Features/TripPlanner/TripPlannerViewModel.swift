@@ -586,7 +586,7 @@ final class TripPlannerViewModel {
     /// `nil` clears it. The server re-plans either way: a day whose
     /// destination moved but whose spots did not is a day that no
     /// longer adds up — the pool it was built from is the wrong city's.
-    func setDayAnchor(_ place: TripPlace?) async {
+    func setDayAnchor(_ draft: TripDayAnchorSheet.Draft?) async {
         struct Body: Encodable {
             let legIndex: Int
             let dayIndex: Int
@@ -594,6 +594,10 @@ final class TripPlannerViewModel {
             let lat: Double?
             let lon: Double?
             let label: String?
+            /// The hours the traveller named, as HH:MM. Omitted when
+            /// they named none, and then the planner keeps estimating.
+            let departAt: String?
+            let returnAt: String?
         }
         isSavingFixpoint = true
         defer { isSavingFixpoint = false }
@@ -603,9 +607,11 @@ final class TripPlannerViewModel {
                 body: Body(
                     legIndex: legIndex,
                     dayIndex: dayIndex,
-                    lat: place?.latitude,
-                    lon: place?.longitude,
-                    label: place?.name,
+                    lat: draft?.place.latitude,
+                    lon: draft?.place.longitude,
+                    label: draft?.place.name,
+                    departAt: draft?.departMinutes.map(TripClock.format),
+                    returnAt: draft?.returnMinutes.map(TripClock.format),
                 ),
             )
             apply(response)

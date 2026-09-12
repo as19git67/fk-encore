@@ -27,7 +27,13 @@ import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { climateForLeg } from "./climate-precautions";
 import { dayEnds, travelPaidByRoute, type LocatedFixpoint } from "./day-ends";
-import { chargeTheWayBack, dayTripOf, type DayTrip } from "./day-anchor";
+import {
+  chargeTheWayBack,
+  dayTripOf,
+  endDayAt,
+  startsAtFor,
+  type DayTrip,
+} from "./day-anchor";
 import {
   MAX_SEARCH_RADIUS_M,
   mergeByOsmRef,
@@ -207,6 +213,10 @@ export interface DayAnchorRequest {
   lon: number;
   /** What to call it on the day card — "Pisa". */
   label?: string;
+  /** When the group sets off, as "HH:MM". The estimate fills in without. */
+  departAt?: string;
+  /** When they start back from there, as "HH:MM". */
+  returnAt?: string;
   /**
    * How far to look around it. Omitted falls back to the leg's radius,
    * which follows the transport mode.
@@ -753,6 +763,12 @@ export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegReques
         lon: day.anchor.lon,
         label: day.anchor.label ?? undefined,
         radiusM: day.anchor.radiusM ?? undefined,
+        departAt: day.anchor.departMinutes === null
+          ? undefined
+          : formatMinutesOfDay(day.anchor.departMinutes),
+        returnAt: day.anchor.returnMinutes === null
+          ? undefined
+          : formatMinutesOfDay(day.anchor.returnMinutes),
       }]),
   };
 }
@@ -1389,7 +1405,9 @@ async function planLeg(
     // comes off the last block that holds places, further down.
     const dayTrip = dayTripOf(anchor, dayAnchors.get(dayIndex), mode);
     const withDrive = (startsAt: number | null | undefined) =>
-      dayTrip === null ? startsAt : (startsAt ?? DEFAULT_DAY_START_MINUTES) + dayTrip.travelMinutes;
+      dayTrip === null
+        ? startsAt
+        : startsAtFor(dayTrip, startsAt ?? DEFAULT_DAY_START_MINUTES);
     const startsAt = withDrive(arrival !== null
       ? Math.max(arrival, dayStartMinutes ?? 0)
       : dayStartMinutes);
@@ -1414,7 +1432,14 @@ async function planLeg(
     // drive would be a single hop of two and a half hours — over every
     // leg limit there is, and rightly so, because inside Pisa a hop
     // like that is a mistake (`day-anchor.ts`).
-    const home = chargeTheWayBack(framed.blocks, dayTrip?.travelMinutes ?? 0, dayTrip?.label ?? null);
+    //
+    // A named return hour needs no estimate at all: the day at the
+    // destination simply stops there, and the drive home happens after
+    // it — the traveller's own time beats the planner's arithmetic
+    // every time it exists.
+    const home = dayTrip?.returnMinutes != null
+      ? endDayAt(framed.blocks, dayTrip.returnMinutes, dayTrip.label)
+      : chargeTheWayBack(framed.blocks, dayTrip?.travelMinutes ?? 0, dayTrip?.label ?? null);
     for (const d of home.dropped) dropped.push({ ...d, dayIndex });
     framed.blocks = home.blocks;
 
@@ -1740,6 +1765,8 @@ function groupDayAnchors(
       ...at,
       label: req.label?.trim() || null,
       radiusM: req.radiusM === undefined ? null : validateRadius(req.radiusM, undefined),
+      departMinutes: validateTimeOfDay(req.departAt, `dayAnchors[${i}].departAt`),
+      returnMinutes: validateTimeOfDay(req.returnAt, `dayAnchors[${i}].returnAt`),
     });
   }
   return byDay;
@@ -1929,6 +1956,8 @@ function storedAnchor(dayTrip: DayTrip | null): DayAnchor | null {
     lon: dayTrip.at.lon,
     label: dayTrip.label,
     radiusM: dayTrip.radiusM,
+    departMinutes: dayTrip.departMinutes,
+    returnMinutes: dayTrip.returnMinutes,
   };
 }
 

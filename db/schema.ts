@@ -2902,6 +2902,12 @@ export const tripPlanDays = pgTable(
     anchor_label: text("anchor_label"),
     // Null falls back to the leg's radius, which follows the mode.
     anchor_radius_m: integer("anchor_radius_m"),
+    // When the group sets off and when they start back (migration
+    // 0196). Minutes past midnight, both optional: the estimate fills
+    // in for whichever is missing, and the traveller's own time wins
+    // wherever it is given.
+    anchor_depart_minutes: integer("anchor_depart_minutes"),
+    anchor_return_minutes: integer("anchor_return_minutes"),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );

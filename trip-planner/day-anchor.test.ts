@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chargeTheWayBack, dayTripOf } from "./day-anchor";
+import { chargeTheWayBack, dayTripOf, endDayAt, startsAtFor } from "./day-anchor";
 import { MIN_VIABLE_BLOCK_MINUTES } from "./fixpoints";
 
 /** An invented base and two invented towns, roughly Tuscan distances. */
@@ -21,10 +21,43 @@ describe("dayTripOf", () => {
   });
 
   it("costs an hour or so each way by car", () => {
+    // Sixty kilometres of country road, not sixty kilometres of one-way
+    // streets: the estimate has to land near the hour and a half anyone
+    // driving it would name, not near four hours.
     const trip = dayTripOf(BASE, { ...FAR_TOWN, label: "Pisa" }, "car");
     expect(trip?.label).toBe("Pisa");
-    expect(trip?.travelMinutes).toBeGreaterThan(120);
+    expect(trip?.travelMinutes).toBeGreaterThan(60);
+    expect(trip?.travelMinutes).toBeLessThan(110);
     expect(trip?.at).toEqual(FAR_TOWN);
+  });
+
+  it("keeps the hours the traveller named, and nothing when nobody did", () => {
+    const named = dayTripOf(BASE, { ...FAR_TOWN, departMinutes: 8 * 60, returnMinutes: 17 * 60 }, "car");
+    expect(named?.departMinutes).toBe(8 * 60);
+    expect(named?.returnMinutes).toBe(17 * 60);
+    const silent = dayTripOf(BASE, FAR_TOWN, "car");
+    expect(silent?.departMinutes).toBeNull();
+    expect(silent?.returnMinutes).toBeNull();
+  });
+
+  it("ignores an hour that is not one", () => {
+    const trip = dayTripOf(BASE, { ...FAR_TOWN, departMinutes: -30, returnMinutes: 2_000 }, "car");
+    expect(trip?.departMinutes).toBeNull();
+    expect(trip?.returnMinutes).toBeNull();
+  });
+});
+
+describe("startsAtFor", () => {
+  const trip = { at: FAR_TOWN, label: "Pisa", radiusM: null, travelMinutes: 80 } as const;
+
+  it("adds the drive to the hour the traveller named", () => {
+    expect(startsAtFor({ ...trip, departMinutes: 8 * 60, returnMinutes: null }, 9 * 60))
+      .toBe(8 * 60 + 80);
+  });
+
+  it("falls back to the ordinary start when nobody named one", () => {
+    expect(startsAtFor({ ...trip, departMinutes: null, returnMinutes: null }, 9 * 60))
+      .toBe(9 * 60 + 80);
   });
 
   it("is dearer on foot than by car, for the same town", () => {
@@ -91,5 +124,45 @@ describe("chargeTheWayBack", () => {
   it("leaves a day of nothing but meals alone", () => {
     const meals = [{ id: "lunch", label: "Mittag", kind: "meal", budgetMinutes: 60 }];
     expect(chargeTheWayBack(meals, 45, "Pisa")).toEqual({ blocks: meals, dropped: [] });
+  });
+});
+
+describe("endDayAt", () => {
+  const blocks = [
+    { id: "morning", label: "Vormittag", startMinutes: 9 * 60, budgetMinutes: 180 },
+    { id: "lunch", label: "Mittag", startMinutes: 12 * 60, budgetMinutes: 60 },
+    { id: "afternoon", label: "Nachmittag", startMinutes: 13 * 60, budgetMinutes: 180 },
+  ];
+
+  it("leaves a day that ends before the drive home untouched", () => {
+    const { blocks: out, dropped } = endDayAt(blocks, 18 * 60, "Pisa");
+    expect(out.map((b) => b.budgetMinutes)).toEqual([180, 60, 180]);
+    expect(dropped).toEqual([]);
+  });
+
+  it("cuts the last block off at the hour they start back", () => {
+    const { blocks: out, dropped } = endDayAt(blocks, 15 * 60, "Pisa");
+    expect(out.map((b) => `${b.id}:${b.budgetMinutes}`))
+      .toEqual(["morning:180", "lunch:60", "afternoon:120"]);
+    expect(dropped).toEqual([]);
+  });
+
+  it("drops what the return hour leaves no room for, and says the hour", () => {
+    const { blocks: out, dropped } = endDayAt(blocks, 13 * 60 + 10, "Pisa");
+    expect(out.map((b) => b.id)).toEqual(["morning", "lunch"]);
+    expect(dropped[0].label).toBe("Nachmittag");
+    expect(dropped[0].reason).toContain("13:10");
+    expect(dropped[0].reason).toContain("aus Pisa");
+  });
+
+  it("keeps a block left with exactly enough", () => {
+    const exactly = 13 * 60 + MIN_VIABLE_BLOCK_MINUTES;
+    expect(endDayAt(blocks, exactly, "Pisa").dropped).toEqual([]);
+    expect(endDayAt(blocks, exactly - 1, "Pisa").dropped).toHaveLength(1);
+  });
+
+  it("says the sentence without a name when the day trip has none", () => {
+    const { dropped } = endDayAt(blocks, 13 * 60 + 10, null);
+    expect(dropped[0].reason).toContain("die Rückfahrt ist um");
   });
 });

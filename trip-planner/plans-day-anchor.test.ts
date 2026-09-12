@@ -217,3 +217,74 @@ describe("a base with day trips (§4.5)", () => {
     expect(stopsOf(filled.plan, 1).every((ref) => Number(ref.split(":")[1]) >= 21)).toBe(true);
   });
 });
+
+describe("hours the traveller named (§4.5)", () => {
+  function firstStart(plan: Awaited<ReturnType<typeof createTripPlan>>["plan"]) {
+    return plan.legs[0].days[0].blocks[0]?.startMinutes ?? 0;
+  }
+
+  function lastEnd(plan: Awaited<ReturnType<typeof createTripPlan>>["plan"]) {
+    const blocks = plan.legs[0].days[0].blocks;
+    const last = blocks[blocks.length - 1];
+    return (last.startMinutes ?? 0) + last.budgetMinutes;
+  }
+
+  it("starts the day from the departure the traveller gave, not from the estimate", async () => {
+    const { plan } = await createTripPlan({
+      legs: [{
+        anchor: BASE, days: 1, mode: "car", radiusM: 5_000,
+        dayAnchors: [{ dayIndex: 0, ...TOWN, label: "Nachbarstadt", departAt: "07:00" }],
+      }],
+      detailDays: 1,
+    });
+    const anchor = plan.legs[0].days[0].anchor;
+    expect(anchor?.departMinutes).toBe(7 * 60);
+    // Seven o'clock plus the drive — earlier than an ordinary start
+    // plus the same drive, which is the whole point of saying it.
+    expect(firstStart(plan)).toBe(7 * 60 + (anchor?.travelMinutes ?? 0));
+  });
+
+  it("plans nothing past the hour they start back", async () => {
+    const { plan } = await createTripPlan({
+      legs: [{
+        anchor: BASE, days: 1, mode: "car", radiusM: 5_000,
+        dayAnchors: [{
+          dayIndex: 0, ...TOWN, label: "Nachbarstadt",
+          departAt: "08:00", returnAt: "16:00",
+        }],
+      }],
+      detailDays: 1,
+    });
+    expect(plan.legs[0].days[0].anchor?.returnMinutes).toBe(16 * 60);
+    expect(lastEnd(plan)).toBeLessThanOrEqual(16 * 60);
+  });
+
+  it("keeps the hours through the endpoint, and drops them again", async () => {
+    const created = await createTripPlan({
+      legs: [{ anchor: BASE, days: 2, mode: "car", radiusM: 5_000 }],
+      detailDays: 2,
+    });
+    const planId = created.plan.id;
+
+    const away = await setTripDayAnchor({
+      planId, dayIndex: 1, ...TOWN, label: "Nachbarstadt",
+      departAt: "07:30", returnAt: "17:45",
+    });
+    expect(away.plan.legs[0].days[1].anchor?.departMinutes).toBe(7 * 60 + 30);
+    expect(away.plan.legs[0].days[1].anchor?.returnMinutes).toBe(17 * 60 + 45);
+
+    const quiet = await setTripDayAnchor({ planId, dayIndex: 1, ...TOWN, label: "Nachbarstadt" });
+    expect(quiet.plan.legs[0].days[1].anchor?.departMinutes).toBeNull();
+    expect(quiet.plan.legs[0].days[1].anchor?.returnMinutes).toBeNull();
+  });
+
+  it("refuses an hour that is not one, and a return before the departure", async () => {
+    const created = await createTripPlan({ legs: [{ anchor: BASE, days: 1 }] });
+    const planId = created.plan.id;
+    await expect(setTripDayAnchor({ planId, dayIndex: 0, ...TOWN, departAt: "morgens" }))
+      .rejects.toThrow(/HH:MM/);
+    await expect(
+      setTripDayAnchor({ planId, dayIndex: 0, ...TOWN, departAt: "16:00", returnAt: "09:00" }),
+    ).rejects.toThrow(/later than departAt/);
+  });
+});

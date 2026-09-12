@@ -1373,6 +1373,13 @@
       "when": 1788566400016,
       "tag": "0195_trip_day_anchor",
       "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1788566400017,
+      "tag": "0196_trip_day_anchor_times",
+      "breakpoints": true
     }
   ]
 }

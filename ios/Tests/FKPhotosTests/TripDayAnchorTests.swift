@@ -8,11 +8,18 @@ import XCTest
 /// traveller reads a shrunken afternoon as a planner that gave up.
 final class TripDayAnchorTests: XCTestCase {
 
-    private func anchor(label: String?, travelMinutes: Int) throws -> TripDayAnchor {
+    private func anchor(
+        label: String?,
+        travelMinutes: Int,
+        departMinutes: Int? = nil,
+        returnMinutes: Int? = nil,
+    ) throws -> TripDayAnchor {
         try JSONDecoder().decode(TripDayAnchor.self, from: Data("""
         { "lat": 43.7199, "lon": 10.3973,
           "label": \(label.map { "\"\($0)\"" } ?? "null"),
-          "radiusM": null, "travelMinutes": \(travelMinutes) }
+          "radiusM": null, "travelMinutes": \(travelMinutes),
+          "departMinutes": \(departMinutes.map(String.init) ?? "null"),
+          "returnMinutes": \(returnMinutes.map(String.init) ?? "null") }
         """.utf8))
     }
 
@@ -55,5 +62,68 @@ final class TripDayAnchorTests: XCTestCase {
         XCTAssertEqual(day.anchor?.displayName, "Pisa")
         XCTAssertEqual(day.anchor?.radiusM, 6_000)
         XCTAssertEqual(day.anchor?.coordinate.lat, 43.7199)
+    }
+
+    func testNamedHoursReplaceTheEstimateInTheSentence() throws {
+        // The estimate is arithmetic on a straight line (§12). Somebody
+        // who typed the hours knows the drive better than it does, and
+        // the day card should say what they know, not what it guessed.
+        let outing = try anchor(label: "Pisa", travelMinutes: 82,
+                                departMinutes: 8 * 60, returnMinutes: 17 * 60)
+        XCTAssertEqual(outing.summary, "Pisa · 08:00–17:00")
+    }
+
+    func testOneHourOnItsOwnStillReads() throws {
+        // "We leave at eight" says nothing about coming back, and
+        // holding out for the other half would ask for a plan the
+        // traveller has not made.
+        XCTAssertEqual(try anchor(label: "Pisa", travelMinutes: 82, departMinutes: 8 * 60).summary,
+                       "Pisa · ab 08:00")
+        XCTAssertEqual(try anchor(label: "Pisa", travelMinutes: 82, returnMinutes: 17 * 60).summary,
+                       "Pisa · zurück 17:00")
+    }
+
+    func testWithoutHoursTheEstimateStillExplainsTheShorterDay() throws {
+        let outing = try anchor(label: "Pisa", travelMinutes: 82)
+        XCTAssertNil(outing.plannedHours)
+        XCTAssertEqual(outing.summary, "Pisa · 2 h 44 hin und zurück")
+    }
+
+    func testTheArrivalIsTheDeparturePlusTheDrive() throws {
+        let outing = try anchor(label: "Pisa", travelMinutes: 82, departMinutes: 8 * 60)
+        XCTAssertEqual(outing.arrivalMinutes, 8 * 60 + 82)
+        XCTAssertNil(try anchor(label: "Pisa", travelMinutes: 82).arrivalMinutes)
+    }
+
+    func testADayFromAnOlderServerHasNoHours() throws {
+        // The two fields are optional, so a response written before the
+        // hours existed still decodes — as an outing nobody timed.
+        let older = try JSONDecoder().decode(TripDayAnchor.self, from: Data("""
+        { "lat": 43.7199, "lon": 10.3973, "label": "Pisa",
+          "radiusM": null, "travelMinutes": 82 }
+        """.utf8))
+        XCTAssertNil(older.departMinutes)
+        XCTAssertNil(older.returnMinutes)
+        XCTAssertEqual(older.summary, "Pisa · 2 h 44 hin und zurück")
+    }
+
+    func testTheFrameBandSaysWhatTheOutingCosts() throws {
+        // Under the name in the day's frame band, where it reads like
+        // the hard times it sits beside — because it works like one.
+        XCTAssertEqual(try anchor(label: "Pisa", travelMinutes: 82).costLine,
+                       "Hin und zurück 2 h 44 (geschätzt)")
+        XCTAssertEqual(
+            try anchor(label: "Pisa", travelMinutes: 82,
+                       departMinutes: 8 * 60, returnMinutes: 17 * 60).costLine,
+            "08:00–17:00",
+        )
+    }
+
+    func testTheEstimateAdmitsItIsOne() throws {
+        // The whole reason the hours exist: a number that looks
+        // measured and is not is worse than one that says so.
+        XCTAssertTrue(try anchor(label: "Pisa", travelMinutes: 82).costLine.contains("geschätzt"))
+        XCTAssertFalse(try anchor(label: "Pisa", travelMinutes: 82, departMinutes: 8 * 60)
+            .costLine.contains("geschätzt"))
     }
 }
