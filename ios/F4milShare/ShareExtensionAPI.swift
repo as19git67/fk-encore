@@ -19,12 +19,31 @@ struct SharePlanSummary: Decodable, Identifiable {
 /// The whole point of the idea pool is that it needs no trip, and until
 /// now the share sheet insisted on one: a map link somebody sent could
 /// only be saved into a journey that already existed.
+///
+/// A mirror of the server's `IdeaCollection`, and the mirroring is the
+/// part to be careful about: this file cannot import the app's own
+/// `TripIdeaCollection`, and nothing compiles the two against each
+/// other. This type once declared a `label` the server has never sent,
+/// so every decode threw `keyNotFound`, the list came back empty, and
+/// the picker offered trips only — the exact symptom the collection was
+/// added to remove.
+///
+/// So the fields are the three the server actually sends, and the label
+/// is computed here from them, word for word as the app computes it.
 struct ShareIdeaCollection: Decodable, Identifiable {
     let ownerId: Int
-    let label: String
+    /// Whose it is. Null for one's own — the server names other people,
+    /// not the caller.
+    let ownerName: String?
     let own: Bool
 
     var id: Int { ownerId }
+
+    var label: String {
+        if own { return "Mein Vorrat" }
+        guard let ownerName, !ownerName.isEmpty else { return "Geteilter Vorrat" }
+        return "Vorrat von \(ownerName)"
+    }
 }
 
 /// What the server made of a shared link.
@@ -95,6 +114,14 @@ struct ShareAnalyzeResponse: Decodable, Sendable {
 /// minutes of an access token have run out. Without that, sharing a spot in
 /// the afternoon failed as "not set up" for a session that was perfectly
 /// valid.
+///
+/// **Every wire type above is hand-mirrored and nothing checks it.** The
+/// extension is not part of the SwiftPM package, so CI compiles none of
+/// this, and a mirrored type that names a field the server does not send
+/// still compiles — it fails at run time, inside a `JSONDecoder`, on a
+/// device. So: only fields the server really sends, optionals for
+/// everything the server may omit, and anything derived (a label, a
+/// title) computed here rather than expected from the wire.
 enum ShareExtensionAPI {
     private static var baseURL: URL {
         ShareAuth.serverURL ?? URL(string: "http://localhost:4000")!
