@@ -59,6 +59,30 @@ struct TripExploreResponse: Codable, Sendable {
     let note: String?
 }
 
+/// What became of asking for the maps an area needs (§13.0).
+///
+/// Three outcomes and they read differently, so the sentence is built
+/// here rather than in the view: the maps were already there, the
+/// download has started, or somebody has to approve the size first.
+/// „Angefragt" for all three would be true and useless.
+struct TripExploreRegionResponse: Codable, Sendable {
+    let alreadyThere: Bool
+    let slug: String?
+    let status: String?
+    let autoApproved: Bool
+
+    var sentence: String {
+        if alreadyThere {
+            return "Die Karten f\u{00FC}r diese Gegend sind inzwischen da."
+        }
+        if autoApproved {
+            return "Die Karten werden geladen \u{2014} das dauert eine Weile. "
+                + "Sieh sp\u{00E4}ter noch einmal nach."
+        }
+        return "Angefragt. Diese Region ist gro\u{00DF} genug, dass jemand sie freigeben muss."
+    }
+}
+
 /// Where a browse is centred, and what to call that on screen.
 ///
 /// The interest vocabulary the chips are built from is

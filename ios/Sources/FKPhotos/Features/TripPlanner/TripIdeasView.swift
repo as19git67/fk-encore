@@ -41,21 +41,31 @@ struct TripIdeasView: View {
                 Text(error).font(.footnote).foregroundStyle(.red)
             }
 
-            ForEach(model.entries) { idea in
-                // A row that can only be read is a dead end: what a
-                // place is, where it is and why it was kept are all one
-                // tap away for a planned spot, and an entry here is the
-                // same place before it belongs to a trip.
-                NavigationLink {
-                    TripIdeaDetailView(idea: idea, model: model)
-                } label: {
-                    row(idea)
-                }
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        Task { await model.remove(idea) }
-                    } label: {
-                        Label("Entfernen", systemImage: "trash")
+            // Grouped by where things are, not by when they were
+            // saved (§20.1). A flat list is fine at five entries and
+            // useless at forty: the beer garden two streets away and
+            // the museum in another country read the same, and „was
+            // haben wir hier eigentlich?" needs all of it read.
+            ForEach(model.clusters) { cluster in
+                Section(model.title(of: cluster)) {
+                    ForEach(cluster.ideas) { idea in
+                        // A row that can only be read is a dead end:
+                        // what a place is, where it is and why it was
+                        // kept are all one tap away for a planned spot,
+                        // and an entry here is the same place before it
+                        // belongs to a trip.
+                        NavigationLink {
+                            TripIdeaDetailView(idea: idea, model: model)
+                        } label: {
+                            row(idea)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                Task { await model.remove(idea) }
+                            } label: {
+                                Label("Entfernen", systemImage: "trash")
+                            }
+                        }
                     }
                 }
             }
@@ -172,10 +182,14 @@ struct TripIdeasView: View {
         }
         .task {
             await model.load()
+            await model.nameClusters()
             await model.checkShare()
         }
         .onChange(of: model.ownerId) { _, _ in
-            Task { await model.load() }
+            Task {
+                await model.load()
+                await model.nameClusters()
+            }
         }
         // A link shared while this screen was already open arrives in
         // the inbox with nobody looking: `.task` ran long before the
@@ -191,7 +205,10 @@ struct TripIdeasView: View {
                 TripIdeaNoticeMonitor.shared.stop()
             }
         }
-        .refreshable { await model.load() }
+        .refreshable {
+            await model.load()
+            await model.nameClusters()
+        }
         // A sheet rather than an alert, because an alert cannot ask how
         // long you stay — and without that the server refuses every
         // place OpenStreetMap does not know.

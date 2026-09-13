@@ -434,6 +434,49 @@ final class TripIdeasViewModel {
         }
     }
 
+    // MARK: - Sorted into places (§20.1)
+
+    /// The collection grouped by where things are, newest group first.
+    ///
+    /// Computed rather than stored: it is a reading of `entries`, and a
+    /// second copy would be one more thing to keep in step with adding,
+    /// removing and correcting.
+    var clusters: [TripIdeaCluster] { TripIdeaClusters.group(entries) }
+
+    /// What each group is called, once Apple has said. Keyed by the
+    /// group's id.
+    private(set) var clusterNames: [Int: String] = [:]
+
+    /// Ask the geocoder what these places are called.
+    ///
+    /// Apple names, fk-encore plans (§9.1) — nothing here knows what a
+    /// region is called, and a name derived from the entries would call
+    /// a group of nine after whichever one was saved first.
+    ///
+    /// Sequential and capped: `CLGeocoder` is a shared, rate-limited
+    /// service, and a collection with thirty groups asking at once gets
+    /// every request refused rather than the first few answered. A group
+    /// with no name keeps its count, which is honest and readable.
+    func nameClusters(limit: Int = 8) async {
+        let geocoder = CLGeocoder()
+        for cluster in clusters.prefix(limit) where clusterNames[cluster.id] == nil {
+            let location = CLLocation(latitude: cluster.centre.lat, longitude: cluster.centre.lon)
+            guard let placemark = try? await geocoder.reverseGeocodeLocation(location).first else {
+                continue
+            }
+            let name = placemark.locality
+                ?? placemark.subAdministrativeArea
+                ?? placemark.administrativeArea
+                ?? placemark.country
+            if let name, !name.isEmpty { clusterNames[cluster.id] = name }
+        }
+    }
+
+    /// The heading for one group: the place, or how many are in it.
+    func title(of cluster: TripIdeaCluster) -> String {
+        clusterNames[cluster.id] ?? cluster.fallbackTitle
+    }
+
     // MARK: - Correcting one (§20)
 
     /// Save what somebody changed about a collected place.

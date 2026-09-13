@@ -42,6 +42,7 @@ import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { toCandidates } from "./candidates";
 import { requireAccess } from "./ideas";
+import { requestRegionFor } from "./region-request";
 import { haversineMeters } from "./travel";
 import { emptinessNote, keepsInterest, orderForBrowsing } from "./explore-filter";
 
@@ -199,6 +200,60 @@ export const exploreArea = api(
         kept: ordered.length,
         filtered: interests.length > 0 || query !== null,
       }),
+    };
+  },
+);
+
+/**
+ * Ask for the maps this area needs (§13.0).
+ *
+ * The browse says "diese Gegend ist noch nicht importiert" and stops
+ * there, deliberately: an import is a background job measured in
+ * minutes to hours, and a tap that silently started one would answer a
+ * question with a wait nobody agreed to. This is the tap that does
+ * agree to it.
+ *
+ * Creating a trip has asked on the traveller's behalf since the
+ * planner existed, through this same call, so a browse gets neither a
+ * new policy nor a second queue: a small region starts downloading at
+ * once, a large one waits for an admin, and asking twice for the same
+ * one changes nothing.
+ */
+export interface RequestExploreRegionRequest {
+  position: { lat: number; lon: number };
+}
+
+export interface RequestExploreRegionResponse {
+  /** True when a region already covers this point — nothing was asked for. */
+  alreadyThere: boolean;
+  /** The Geofabrik region, e.g. "europe/italy/toscana". Null when it was there. */
+  slug: string | null;
+  /** pending_approval | importing | … — what the admin queue says. */
+  status: string | null;
+  /** True when nobody has to do anything: it is already downloading. */
+  autoApproved: boolean;
+}
+
+export const requestExploreRegion = api(
+  { expose: true, method: "POST", path: "/trip-planner/explore/region", auth: true },
+  async (req: RequestExploreRegionRequest): Promise<RequestExploreRegionResponse> => {
+    requireUser();
+    const position = validatePosition(req.position);
+
+    // Checked again rather than trusted from the browse: the two calls
+    // are a person's decision apart, and in between an admin may have
+    // approved exactly this region.
+    const region = await pickRegion(position.lat, position.lon);
+    if (region) {
+      return { alreadyThere: true, slug: null, status: null, autoApproved: false };
+    }
+
+    const requested = await requestRegionFor(position);
+    return {
+      alreadyThere: false,
+      slug: requested.slug,
+      status: requested.status,
+      autoApproved: requested.autoApproved,
     };
   },
 );

@@ -16,7 +16,7 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { exploreArea } from "./explore";
+import { exploreArea, requestExploreRegion } from "./explore";
 
 const TOWN = { lat: 43.47, lon: 11.04 };
 const NOWHERE = { lat: -20.5, lon: -70.5 };
@@ -198,6 +198,24 @@ describe("POST /trip-planner/explore", () => {
 
     await expect(exploreArea({ position: TOWN, ownerId: stranger.id }))
       .rejects.toThrow(APIError);
+  });
+
+  it("does not ask for a region on its own", async () => {
+    // A browse is a tap. An import is minutes to hours, and starting
+    // one because somebody looked would answer a question with a wait
+    // nobody agreed to.
+    const res = await exploreArea({ position: NOWHERE });
+
+    expect(res.regionMissing).toBe(true);
+    const rows = await db.select({ slug: osmRegionImports.slug }).from(osmRegionImports);
+    expect(rows.map((r) => r.slug)).toEqual(["europe/italy/toscana"]);
+  });
+
+  it("asks for nothing when the maps are already there", async () => {
+    const res = await requestExploreRegion({ position: TOWN });
+
+    expect(res.alreadyThere).toBe(true);
+    expect(res.slug).toBeNull();
   });
 
   it("says a region is missing rather than answering 'nothing here'", async () => {
