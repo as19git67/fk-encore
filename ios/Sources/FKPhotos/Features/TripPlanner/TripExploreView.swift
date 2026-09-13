@@ -8,25 +8,32 @@ import SwiftUI
 /// databases have been able to answer it since the first import, and
 /// only the solver ever asked.
 ///
-/// Three things the screen insists on.
-///
 /// **It works without a trip.** The area comes from the phone or from a
-/// place picked out of Apple's geocoder, and what is found goes into the
-/// idea collection, which has never needed a journey (§20). Collecting
-/// in March for a holiday booked in July is the ordinary case, not the
-/// exotic one.
+/// place picked out of Apple's geocoder, and what is found goes into
+/// the idea collection, which has never needed a journey (§20).
+/// Collecting in March for a holiday booked in July is the ordinary
+/// case, not the exotic one.
 ///
-/// **A tap is the query.** Interests are chips, not a wheel in a
-/// settings screen, and the list fills with no text typed at all. The
-/// name field stays for the case it was built for — you know what the
-/// place is called — but it is no longer the only way in.
+/// **A tap is the query.** Interests are chips and the list fills with
+/// no text typed at all. The name filter is still there — it is the way
+/// in that has to work when nothing else does — but it lives in the
+/// navigation bar now, where iOS puts one.
+///
+/// The first draft put all of that *into the list*: the location
+/// button, the place field, the name field and the results, as rows of
+/// one form. That reads as a settings screen and it is not what the
+/// platform does — a list of results has a search field above it, not
+/// among it. So the query lives in `.searchable`, the filters ride
+/// under the navigation bar, choosing the area is a sheet, and the list
+/// holds nothing but what was found.
 ///
 /// **An empty list says which kind of empty it is.** A region nobody
 /// imported, a filter too narrow, and an area with nothing in it are
 /// three different answers, and the server names which one this is.
 struct TripExploreView: View {
     @State private var model = TripExploreViewModel()
-    @State private var finder = TripPlaceFinderModel()
+    @State private var isPickingArea = false
+    @State private var opened: TripExploredSpot?
     /// Which collection a find goes into. Nil means one's own.
     let ownerId: Int?
 
@@ -36,89 +43,130 @@ struct TripExploreView: View {
 
     var body: some View {
         List {
-            areaSection
+            if let message = model.lastAddition {
+                Text(message).font(.footnote).foregroundStyle(.secondary)
+            }
+            if let error = model.errorMessage {
+                Text(error).font(.footnote).foregroundStyle(.red)
+            }
+            // Said rather than left blank: the three kinds of empty are
+            // three different things to do next.
+            if let note = model.note, model.spots.isEmpty {
+                Text(note).foregroundStyle(.secondary)
+            }
 
-            if model.area != nil {
-                filterSection
-                resultsSection
+            ForEach(model.spots) { spot in
+                Button { opened = spot } label: { row(spot) }
+                    .buttonStyle(.plain)
+            }
+
+            if model.hasMore {
+                Text("Es gibt mehr — enger eingrenzen hilft.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Entdecken")
+        .listStyle(.plain)
+        // The name filter belongs in the navigation bar, not in a row
+        // of the list it filters.
+        .searchable(text: $model.query, prompt: "Name des Ortes")
+        .onSubmit(of: .search) { Task { await model.load() } }
+        // The chips sit between the bar and the list, which is where a
+        // filter belongs — inside the list they scrolled away with the
+        // results they were filtering.
+        .safeAreaInset(edge: .top) {
+            if model.area != nil && !model.interests.isEmpty {
+                interestChips
+            }
+        }
+        .overlay {
+            if model.area == nil {
+                nothingChosenYet
+            }
+        }
+        .navigationTitle(model.area?.label ?? "Entdecken")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Hier, wo ich bin", systemImage: "location") {
+                        Task { await model.useCurrentLocation() }
+                    }
+                    Button("Andere Gegend\u{2026}", systemImage: "mappin.and.ellipse") {
+                        isPickingArea = true
+                    }
+                    Divider()
+                    Picker("Umkreis", selection: $model.radiusM) {
+                        ForEach(TripExploreDefaults.radiusChoices, id: \.self) { metres in
+                            Text(TripExploreDefaults.radiusLabel(metres)).tag(metres)
+                        }
+                    }
+                } label: {
+                    Label("Gegend", systemImage: "line.3.horizontal.decrease.circle")
+                }
+                .disabled(model.isLocating)
+            }
+        }
         .task {
             model.ownerId = ownerId
             await model.loadInterests()
         }
-    }
-
-    // MARK: - Where to look
-
-    @ViewBuilder
-    private var areaSection: some View {
-        Section {
-            Button {
-                Task { await model.useCurrentLocation() }
-            } label: {
-                Label(model.isLocating ? "Standort wird geholt…" : "Hier, wo ich bin",
-                      systemImage: "location")
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .disabled(model.isLocating)
-
-            // A name is not a place: Apple geocodes, and nothing is
-            // searched until one of its answers has been picked.
-            TripPlaceFinderRows(model: finder, picked: nil) { place in
+        .onChange(of: model.chosenInterests) { _, _ in Task { await model.load() } }
+        .onChange(of: model.radiusM) { _, _ in Task { await model.load() } }
+        .refreshable { await model.load() }
+        .sheet(isPresented: $isPickingArea) {
+            TripExploreAreaSheet { place in
+                isPickingArea = false
                 Task { await model.use(place) }
             }
-        } header: {
-            Text("Gegend")
-        } footer: {
-            if let area = model.area {
-                Text("Gesucht wird um \(area.label).")
-            } else {
-                Text("Kein Trip nötig — was hier gefunden wird, geht in den Ideenvorrat.")
+        }
+        .navigationDestination(item: $opened) { spot in
+            detail(spot)
+        }
+    }
+
+    // MARK: - Before anything was asked
+
+    private var nothingChosenYet: some View {
+        ContentUnavailableView {
+            Label("Wo wollt ihr euch umsehen?", systemImage: "binoculars")
+        } description: {
+            Text("Kein Trip n\u{00F6}tig \u{2014} was hier gefunden wird, geht in den Ideenvorrat.")
+        } actions: {
+            VStack(spacing: 12) {
+                Button {
+                    Task { await model.useCurrentLocation() }
+                } label: {
+                    Label(model.isLocating ? "Standort wird geholt\u{2026}" : "Hier, wo ich bin",
+                          systemImage: "location")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isLocating)
+
+                Button {
+                    isPickingArea = true
+                } label: {
+                    Label("Andere Gegend\u{2026}", systemImage: "mappin.and.ellipse")
+                }
+                .buttonStyle(.bordered)
             }
         }
+        .background(Color(uiColor: .systemGroupedBackground))
     }
 
     // MARK: - What to look for
 
-    @ViewBuilder
-    private var filterSection: some View {
-        Section {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(model.interests) { interest in
-                        chip(interest)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-
-            Picker("Umkreis", selection: $model.radiusM) {
-                ForEach(TripExploreDefaults.radiusChoices, id: \.self) { metres in
-                    Text(TripExploreDefaults.radiusLabel(metres)).tag(metres)
+    private var interestChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(model.interests) { interest in
+                    chip(interest)
                 }
             }
-
-            HStack {
-                TextField("Name (optional)", text: $model.query)
-                    .submitLabel(.search)
-                    .autocorrectionDisabled()
-                    .onSubmit { Task { await model.load() } }
-                if model.isLoading {
-                    ProgressView()
-                } else {
-                    Button("Suchen") { Task { await model.load() } }
-                        .buttonStyle(.borderless)
-                }
-            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
-        .onChange(of: model.chosenInterests) { _, _ in Task { await model.load() } }
-        .onChange(of: model.radiusM) { _, _ in Task { await model.load() } }
+        .background(.bar)
     }
 
     private func chip(_ interest: TripInterestOption) -> some View {
@@ -134,9 +182,10 @@ struct TripExploreView: View {
                 .font(.subheadline)
                 .padding(.horizontal, 14)
                 // 44 pt tall, because Apple's own minimum is the one
-                // number a list of little buttons always gets wrong.
+                // number a row of little buttons always gets wrong.
                 .frame(minHeight: 44)
-                .background(chosen ? Color.accentColor.opacity(0.18) : Color(uiColor: .secondarySystemFill))
+                .background(chosen ? Color.accentColor.opacity(0.18)
+                                   : Color(uiColor: .secondarySystemFill))
                 .foregroundStyle(chosen ? Color.accentColor : Color.primary)
                 .clipShape(Capsule())
         }
@@ -147,39 +196,10 @@ struct TripExploreView: View {
     // MARK: - What is there
 
     @ViewBuilder
-    private var resultsSection: some View {
-        Section {
-            if let message = model.lastAddition {
-                Text(message).font(.footnote).foregroundStyle(.secondary)
-            }
-            if let error = model.errorMessage {
-                Text(error).font(.footnote).foregroundStyle(.red)
-            }
-            // Said rather than left blank: the three kinds of empty are
-            // three different things to do next.
-            if let note = model.note, model.spots.isEmpty {
-                Text(note).foregroundStyle(.secondary)
-            }
-
-            ForEach(model.spots) { spot in
-                row(spot)
-            }
-
-            if model.hasMore {
-                Text("Es gibt mehr — enger eingrenzen hilft.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text(model.spots.isEmpty ? "Ergebnis" : "Gefunden")
-        }
-    }
-
-    @ViewBuilder
     private func row(_ spot: TripExploredSpot) -> some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(spot.displayName)
+                Text(spot.displayName).foregroundStyle(.primary)
                 if let localName = spot.localName, !localName.isEmpty {
                     Text(localName).font(.footnote).foregroundStyle(.secondary)
                 }
@@ -191,32 +211,77 @@ struct TripExploreView: View {
                 }
             }
             Spacer(minLength: 8)
-            collectButton(spot)
+            if model.isCollected(spot) {
+                // Marked, not hidden — and not a button either: there is
+                // nothing left to do to it.
+                Image(systemName: "lightbulb.fill")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("schon im Vorrat")
+            }
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+        .frame(minHeight: 44)
+        .contentShape(.rect)
     }
 
-    @ViewBuilder
-    private func collectButton(_ spot: TripExploredSpot) -> some View {
-        if model.isCollected(spot) {
-            // Marked, not hidden — and not a button either: there is
-            // nothing left to do to it.
-            Label("im Vorrat", systemImage: "checkmark.circle.fill")
-                .labelStyle(.iconOnly)
-                .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
-                .accessibilityLabel("\(spot.displayName) ist schon im Vorrat")
-        } else {
-            Button {
-                Task { await model.collect(spot) }
-            } label: {
-                Image(systemName: "lightbulb")
-                    .frame(width: 44, height: 44)
-                    .contentShape(.rect)
+    /// Everything known about one find, on the screen a planned spot
+    /// already uses — the question "where is that, and is it worth it?"
+    /// does not change because nobody has kept the place yet.
+    private func detail(_ spot: TripExploredSpot) -> some View {
+        TripSpotDetailView(spot: TripSpotDetail(spot)) { close in
+            if model.isCollected(spot) {
+                Label("Schon im Vorrat", systemImage: "lightbulb.fill")
+                    .foregroundStyle(.secondary)
+            } else {
+                Button {
+                    Task {
+                        await model.collect(spot)
+                        close()
+                    }
+                } label: {
+                    Label("In den Vorrat", systemImage: "lightbulb")
+                }
+                .disabled(model.addingRef != nil)
             }
-            .buttonStyle(.plain)
-            .disabled(model.addingRef != nil)
-            .accessibilityLabel("\(spot.displayName) merken")
+        }
+    }
+}
+
+/// Choosing the area to look around.
+///
+/// Its own sheet rather than two more rows on the results screen: a
+/// place search is a search of its own, with its own results to pick
+/// from, and putting those in the same list as the finds would leave
+/// two kinds of row that look alike and mean different things.
+struct TripExploreAreaSheet: View {
+    let onPick: (TripPlace) -> Void
+
+    @State private var finder = TripPlaceFinderModel()
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    // A name is not a place: Apple geocodes, and nothing
+                    // is searched until one of its answers is picked.
+                    TripPlaceFinderRows(model: finder, picked: nil) { place in
+                        onPick(place)
+                    }
+                } footer: {
+                    Text("Die Gegend, in der gesucht wird \u{2014} eine Stadt, ein Ort, eine Region.")
+                }
+            }
+            .navigationTitle("Gegend w\u{00E4}hlen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+            }
         }
     }
 }

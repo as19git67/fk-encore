@@ -42,14 +42,22 @@ struct TripIdeasView: View {
             }
 
             ForEach(model.entries) { idea in
-                row(idea)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            Task { await model.remove(idea) }
-                        } label: {
-                            Label("Entfernen", systemImage: "trash")
-                        }
+                // A row that can only be read is a dead end: what a
+                // place is, where it is and why it was kept are all one
+                // tap away for a planned spot, and an entry here is the
+                // same place before it belongs to a trip.
+                NavigationLink {
+                    TripIdeaDetailView(idea: idea, model: model)
+                } label: {
+                    row(idea)
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        Task { await model.remove(idea) }
+                    } label: {
+                        Label("Entfernen", systemImage: "trash")
                     }
+                }
             }
         }
         // An overlay rather than a row. Inside the list the empty state
@@ -291,6 +299,42 @@ struct TripIdeasView: View {
                 Text("nur bis \(validTo)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+        .frame(minHeight: 44, alignment: .leading)
+    }
+}
+
+/// One collected place, in full, and correctable (§20).
+///
+/// The same screen a planned spot gets — where it is, what it is, why
+/// it was kept, the link it came from — because it is the same place
+/// before it belongs to a trip, and answering "where is that?" twice
+/// would mean two screens drifting apart.
+///
+/// What it adds is the pencil. Until now an entry was whatever it was
+/// on the day somebody saved it: the stay length for a place
+/// OpenStreetMap does not know was a guess (§15.3), the note was
+/// written before anybody had been there, and neither could be
+/// corrected without deleting the entry and collecting it again.
+struct TripIdeaDetailView: View {
+    let idea: TripIdea
+    let model: TripIdeasViewModel
+
+    var body: some View {
+        TripSpotDetailView(
+            spot: TripSpotDetail(idea),
+            onSave: { edit in await model.update(idea, with: edit) },
+        ) { close in
+            Button(role: .destructive) {
+                Task {
+                    await model.remove(idea)
+                    // The screen describes something that is no longer
+                    // there, so it has to take itself away.
+                    close()
+                }
+            } label: {
+                Label("Aus dem Vorrat entfernen", systemImage: "trash")
             }
         }
     }

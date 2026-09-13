@@ -7,7 +7,10 @@ import Foundation
 /// reason two red builds have already made: the view model is
 /// `@MainActor`, and anything on it becomes actor-isolated and
 /// unreachable from a test.
-struct TripExploredSpot: Codable, Identifiable, Sendable {
+/// Hashable as well as Identifiable: `navigationDestination(item:)`
+/// asks for it, and pushing the detail from the row is what the chevron
+/// promises.
+struct TripExploredSpot: Codable, Identifiable, Hashable, Sendable {
     let osmRef: String
     let name: String?
     let localName: String?

@@ -65,6 +65,77 @@ final class TripExploreTests: XCTestCase {
         XCTAssertTrue(TripExploreDefaults.radiusChoices.contains(TripExploreDefaults.radiusM))
     }
 
+    // MARK: - What the detail screen is handed
+
+    func testAFoundPlaceBecomesASpotWithItsReasons() {
+        // The detail screen a planned spot uses, for a place nobody has
+        // kept yet: what it is, where it is, and why it ranked here.
+        let detail = TripSpotDetail(spot(openingHours: "Tu-Su 10:00-17:00"))
+
+        XCTAssertEqual(detail.osmRef, "node:1")
+        XCTAssertEqual(detail.displayName, "Museo Civico")
+        XCTAssertEqual(detail.dwellMinutes, 90)
+        XCTAssertEqual(detail.reasons, ["hat einen Wikipedia-Artikel"])
+        // Nobody has kept it, so none of these can be anybody's yet.
+        XCTAssertNil(detail.title)
+        XCTAssertNil(detail.note)
+        XCTAssertFalse(detail.photoStop)
+        // It came out of the region search, so the map knows it.
+        XCTAssertFalse(detail.unmatched)
+    }
+
+    private func idea(
+        name: String? = "Die Bank am Hang",
+        title: String? = nil,
+        note: String? = nil,
+        unmatched: Bool = true,
+        addedBy: String? = nil,
+    ) -> TripIdea {
+        TripIdea(
+            id: 4,
+            osmRef: "manual:4",
+            name: name,
+            title: title,
+            lat: 43.47,
+            lon: 11.04,
+            category: "viewpoint",
+            dwellMinutes: 20,
+            note: note,
+            sourceUrl: nil,
+            unmatched: unmatched,
+            validFrom: nil,
+            validTo: nil,
+            addedBy: addedBy,
+            addedAt: "2026-09-01T10:00:00Z",
+        )
+    }
+
+    func testACollectedPlaceKeepsWhatSomebodyWroteAboutIt() {
+        let detail = TripSpotDetail(idea(note: "sch\u{00F6}ner Blick", addedBy: "Anna"))
+
+        XCTAssertEqual(detail.note, "sch\u{00F6}ner Blick")
+        // Who kept it is the reason it is on the list (§20.1), so it
+        // goes where the plan puts its scoring reasons.
+        XCTAssertEqual(detail.reasons, ["gemerkt von Anna"])
+        XCTAssertTrue(detail.unmatched)
+    }
+
+    func testTheFamilysNameWinsAndTheMapsNameStays() {
+        // Renaming is the family's shorthand, never a correction of
+        // OpenStreetMap — the ticket desk answers to the other one.
+        let detail = TripSpotDetail(idea(name: "Panoramaweg", title: "Unsere Bank"))
+
+        XCTAssertEqual(detail.displayName, "Unsere Bank")
+        XCTAssertEqual(detail.officialName, "Panoramaweg")
+    }
+
+    func testAnEntryNobodyRenamedShowsNoSecondName() {
+        let detail = TripSpotDetail(idea(name: "Panoramaweg"))
+
+        XCTAssertEqual(detail.displayName, "Panoramaweg")
+        XCTAssertNil(detail.officialName)
+    }
+
     func testAnAreaKnowsWhatToCallItself() {
         let area = TripExploreArea(label: "San Gimignano", lat: 43.47, lon: 11.04)
         XCTAssertEqual(area, TripExploreArea(label: "San Gimignano", lat: 43.47, lon: 11.04))

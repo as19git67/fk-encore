@@ -316,7 +316,15 @@ async function collectionsFor(userId: number): Promise<IdeaCollection[]> {
   ];
 }
 
-async function loadIdeas(ownerId: number, onlyId?: number): Promise<IdeaEntry[]> {
+/**
+ * The collection's entries, newest first — or one of them by id.
+ *
+ * Exported for `idea-edit.ts`, which has to answer with the entry as it
+ * now stands: a screen that saves and then shows what it sent rather
+ * than what was stored is a screen that lies the first time the server
+ * disagrees.
+ */
+export async function loadIdeas(ownerId: number, onlyId?: number): Promise<IdeaEntry[]> {
   const rows = await db
     .select({
       id: ideaPool.id,
