@@ -210,9 +210,16 @@ export function haversineMeters(a: Coordinate, b: Coordinate): number {
 const WALKABLE_MODES: ReadonlySet<TransportMode> = new Set<TransportMode>(["transit"]);
 
 /** Straight line × detour factor ÷ speed + overhead, rounded to a minute. */
-function rawLeg(from: Coordinate, to: Coordinate, mode: TransportMode): TravelLeg {
+function rawLeg(
+  from: Coordinate,
+  to: Coordinate,
+  mode: TransportMode,
+  extraM = 0,
+): TravelLeg {
   const straight = haversineMeters(from, to);
-  const distanceM = Math.round(straight * DETOUR_FACTOR_BY_MODE[mode]);
+  // The way round something is road like any other, and beyond the
+  // town portion `movingMinutes` already drives it at open-road speed.
+  const distanceM = Math.round(straight * DETOUR_FACTOR_BY_MODE[mode]) + Math.round(extraM);
   const overhead = straight < OVERHEAD_FLOOR_M ? 0 : OVERHEAD_MINUTES[mode];
   const minutes = Math.round(movingMinutes(distanceM, mode) + overhead);
   return { distanceM, minutes, travelClass: travelClassFor(minutes, mode) };
@@ -248,11 +255,81 @@ export function travelLeg(
   from: Coordinate,
   to: Coordinate,
   mode: TransportMode = "foot",
+  extraM = 0,
 ): TravelLeg {
-  const ride = rawLeg(from, to, mode);
+  const ride = rawLeg(from, to, mode, extraM);
   if (!WALKABLE_MODES.has(mode)) return ride;
-  const walk = rawLeg(from, to, "foot");
+  const walk = rawLeg(from, to, "foot", extraM);
   return walk.minutes <= ride.minutes ? walk : ride;
+}
+
+/** What is in the way, as `osm-admin/geo-client` reports it. */
+export interface WaterInTheWay {
+  crossedM: number;
+  widestM: number;
+  extentM: number;
+  name: string | null;
+}
+
+export interface WaterDetour {
+  /** Metres to add to the journey. Zero when nothing has to be gone around. */
+  extraM: number;
+  /** What is being gone around, for the sentence the app shows. */
+  around: string | null;
+}
+
+/**
+ * A crossing narrow enough that there is probably a bridge.
+ *
+ * Rivers are the case: they are crossed constantly, they are usually
+ * mapped as `waterway=*` lines rather than as polygons anyway, and
+ * charging a detour for every one would be far wronger than charging
+ * none. Four hundred metres is wider than nearly every bridged river
+ * and narrower than any lake worth going around.
+ */
+export const BRIDGEABLE_CROSSING_M = 400;
+
+/**
+ * How much of the water's own extent the way round costs.
+ *
+ * Crossing a lake near its middle, the road runs to one end and back
+ * down the other shore: that is close to the body's whole long axis,
+ * less what the straight line already covered. Crossing near an end
+ * costs almost nothing. Half the extent is the middle of those two, and
+ * the error is deliberately asymmetric — see below.
+ */
+export const AROUND_FRACTION = 0.5;
+
+/**
+ * What the water in the way adds to a journey (§4.5, §14).
+ *
+ * A per-mode detour factor is an average over a road network that goes
+ * roughly where you want. A lake is not an average: from the east shore
+ * of Lake Garda to Lago d'Idro is twenty kilometres straight, so the
+ * factor says twenty-eight and the road says seventy.
+ *
+ * This is not routing and does not pretend to be. It knows what is in
+ * the way and how big that thing is, and adds half of it. For the Garda
+ * case that lands within a few kilometres of the truth; for a crossing
+ * near one end of a long lake it overestimates.
+ *
+ * **That asymmetry is on purpose.** The estimate does not only draw a
+ * card: the leg limit decides which spots may enter a day at all
+ * (`legLimitFor`). Overestimating leaves out something reachable, which
+ * a person can put back by hand. Underestimating plans an afternoon
+ * around a place on the far side of a lake, which they discover in the
+ * car.
+ */
+export function detourAroundWater(water: WaterInTheWay | null | undefined): WaterDetour {
+  if (!water || water.widestM < BRIDGEABLE_CROSSING_M) return { extraM: 0, around: null };
+  // Never less than swimming it twice: a body with no usable extent —
+  // one mapped as a sliver, or a bounding box that says nothing — still
+  // has to be gone around somehow.
+  const extraM = Math.max(
+    Math.round(water.extentM * AROUND_FRACTION),
+    water.crossedM * 2,
+  );
+  return { extraM, around: water.name };
 }
 
 /** The pedestrian case, which is the default everywhere. */

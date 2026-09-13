@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MAX_WALK_MINUTES,
   DETOUR_FACTOR,
+  detourAroundWater,
   OPEN_ROAD_SPEED_M_PER_MIN,
   WALKING_SPEED_M_PER_MIN,
   haversineMeters,
@@ -234,5 +235,59 @@ describe("the open road", () => {
     const byTrain = travelLeg(BASE, SIXTY_KM, "transit").minutes;
     expect(byTrain).toBeGreaterThan(byCar);
     expect(byTrain).toBeLessThan(3 * byCar);
+  });
+});
+
+describe("water in the way", () => {
+  it("ignores a crossing narrow enough to be bridged", () => {
+    // Rivers are crossed constantly and are usually not polygons at
+    // all; charging a detour for each would be far wronger than none.
+    const detour = detourAroundWater({
+      crossedM: 120, widestM: 120, extentM: 4_000, name: "Beispielfluss",
+    });
+
+    expect(detour.extraM).toBe(0);
+    expect(detour.around).toBeNull();
+  });
+
+  it("adds half a lake's length to go round it", () => {
+    // A crossing near the middle runs to one end and back down the
+    // other shore, which is close to the whole long axis; near an end
+    // it costs almost nothing. Half is the middle of the two.
+    const detour = detourAroundWater({
+      crossedM: 3_000, widestM: 3_000, extentM: 52_000, name: "Beispielsee",
+    });
+
+    expect(detour.extraM).toBe(26_000);
+    expect(detour.around).toBe("Beispielsee");
+  });
+
+  it("never charges less than swimming it twice", () => {
+    // A body whose bounding box says nothing useful still has to be
+    // gone around somehow.
+    const detour = detourAroundWater({
+      crossedM: 5_000, widestM: 5_000, extentM: 0, name: "Beispielsee",
+    });
+
+    expect(detour.extraM).toBe(10_000);
+  });
+
+  it("answers nothing for nothing", () => {
+    expect(detourAroundWater(null).extraM).toBe(0);
+    expect(detourAroundWater({ crossedM: 0, widestM: 0, extentM: 0, name: null }).extraM).toBe(0);
+  });
+
+  it("puts the extra metres into the journey", () => {
+    // Twenty kilometres straight across a lake, twenty-six around it:
+    // the estimate goes from half an hour to well over an hour, which
+    // is the difference between a day trip and a day.
+    const west = { lat: 45.70, lon: 10.60 };
+    const east = { lat: 45.70, lon: 10.86 };
+
+    const straight = travelLeg(west, east, "car");
+    const around = travelLeg(west, east, "car", 26_000);
+
+    expect(around.distanceM - straight.distanceM).toBe(26_000);
+    expect(around.minutes).toBeGreaterThan(straight.minutes + 15);
   });
 });

@@ -135,6 +135,11 @@ struct TripDayAnchor: Codable, Sendable, Equatable {
     var departMinutes: Int?
     /// When they start back from there.
     var returnMinutes: Int?
+    /// What the drive has to go round, when the straight line crosses a
+    /// lake (§4.5). Nil for an ordinary drive — and for a plan made
+    /// before the planner could see water at all, which is why it is
+    /// optional rather than a name and an empty string.
+    var waterAround: String?
 
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
 
@@ -182,7 +187,14 @@ struct TripDayAnchor: Codable, Sendable, Equatable {
     var costLine: String {
         if let hours = plannedHours { return hours }
         guard travelMinutes > 0 else { return "Am Quartier" }
-        return "Hin und zurück \(TripClock.duration(travelMinutes * 2)) (geschätzt)"
+        // Why the drive is longer than the map looks: the estimate has
+        // no route in it, and a lake in the way is the one case where
+        // that is visibly, embarrassingly wrong unless it is said
+        // (§4.5). Naming it turns "why two hours for twenty
+        // kilometres?" into an answer.
+        let round = "Hin und zurück \(TripClock.duration(travelMinutes * 2)) (geschätzt)"
+        guard let waterAround, !waterAround.isEmpty else { return round }
+        return "\(round) — um den \(waterAround) herum"
     }
 
     /// The outing as the place picker knows it, so re-opening the sheet
