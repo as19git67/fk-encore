@@ -22,6 +22,7 @@ import { requirePermission } from "../user/auth-handler";
 import log from "encore.dev/log";
 import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
+import { requestRegionFor } from "./region-request";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
@@ -1354,7 +1355,7 @@ async function planLeg(
   // over a download nobody asked them to arrange. The import is
   // requested, the days get their frame, and the spots come later.
   const region = await pickRegion(anchor.lat, anchor.lon);
-  const pending = region ? null : await requestRegion(anchor);
+  const pending = region ? null : await requestRegionFor(anchor);
 
   // Asked twice over the same disc, and that is the point (see
   // `search-reach.ts`): the page is filled nearest-first, so cutting it
@@ -1561,6 +1562,16 @@ async function planLeg(
   };
 }
 
+/**
+ * What came of asking for a region, as this service's API reports it.
+ *
+ * Structurally the same as `RequestedRegion` in `region-request.ts`,
+ * and declared here on purpose: it is part of this endpoint's published
+ * response, and Encore reads the response schema out of the types it
+ * finds in the file that declares the endpoint. Re-exporting somebody
+ * else's interface to save eight lines would trade a clear schema for a
+ * clever one.
+ */
 export interface PendingRegion {
   /** The Geofabrik region asked for, e.g. "europe/portugal/lisboa". */
   slug: string;
@@ -1569,50 +1580,6 @@ export interface PendingRegion {
   postgresDb: string;
   /** True when nobody has to do anything: it is already downloading. */
   autoApproved: boolean;
-}
-
-/**
- * Ask for the region this anchor needs.
- *
- * Goes through the same `createPending` the region admin uses, and so
- * inherits its policy rather than routing around it: a small region
- * starts importing at once, a large one waits for an admin. A traveller
- * planning a trip does not get to commit the server to a fifty-gigabyte
- * download by typing a city name.
- *
- * Idempotent — a region already tracked comes back with whatever status
- * it has, which is what makes a second trip to the same place cheap.
- */
-async function requestRegion(anchor: { lat: number; lon: number }): Promise<PendingRegion> {
-  let suggestion;
-  try {
-    suggestion = await suggestForCoord(anchor.lat, anchor.lon);
-  } catch (err) {
-    // Working out *which* region is a lookup against Geofabrik's index,
-    // so it can fail for reasons that have nothing to do with the trip.
-    // Saying which beats a five-hundred.
-    throw APIError.unavailable(
-      "das Regionsverzeichnis von Geofabrik ist gerade nicht erreichbar — "
-        + `ohne das lässt sich nicht sagen, welche Karten dieser Ort braucht (${(err as Error).message})`,
-    );
-  }
-  if (!suggestion) {
-    throw APIError.failedPrecondition(
-      "für diesen Ort gibt es keine OpenStreetMap-Region bei Geofabrik — "
-        + "liegt er vielleicht auf dem Meer?",
-    );
-  }
-  // The suggestion already carries the probed size, so the second HEAD
-  // request createPending would make is handed the answer instead.
-  const created = await createPending(suggestion.slug, {
-    probeSize: async () => suggestion.pbfSizeMb,
-  });
-  return {
-    slug: suggestion.slug,
-    status: created.status,
-    postgresDb: slugToPostgresDb(suggestion.slug),
-    autoApproved: created.status === "importing",
-  };
 }
 
 /**
@@ -2004,7 +1971,7 @@ async function dayTripPool(
   if (!region) {
     // Asked for, so the next re-plan finds it — the same courtesy a
     // leg gets (§4.3). The day keeps its frame in the meantime.
-    await requestRegion(dayTrip.at);
+    await requestRegionFor(dayTrip.at);
     log.info("day trip waits for its region", {
       lat: dayTrip.at.lat,
       lon: dayTrip.at.lon,

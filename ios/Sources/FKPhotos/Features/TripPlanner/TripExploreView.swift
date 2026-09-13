@@ -54,6 +54,26 @@ struct TripExploreView: View {
             if let note = model.note, model.spots.isEmpty {
                 Text(note).foregroundStyle(.secondary)
             }
+            // And the one of the three that a person can do something
+            // about gets the something. Creating a trip has asked for
+            // the maps on the traveller's behalf since the planner
+            // existed; a browse hits the same wall and may as well
+            // offer the same way through it.
+            if model.regionMissing {
+                if let note = model.regionNote {
+                    Text(note).font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    Button {
+                        Task { await model.requestRegion() }
+                    } label: {
+                        Label(model.isRequestingRegion
+                              ? "Wird angefragt\u{2026}" : "Karten f\u{00FC}r diese Gegend holen",
+                              systemImage: "square.and.arrow.down")
+                            .frame(minHeight: 44)
+                    }
+                    .disabled(model.isRequestingRegion)
+                }
+            }
 
             ForEach(model.spots) { spot in
                 Button { opened = spot } label: { row(spot) }

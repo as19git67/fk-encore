@@ -32,6 +32,9 @@ final class TripExploreViewModel {
     private(set) var note: String?
     private(set) var isLoading = false
     private(set) var isLocating = false
+    private(set) var isRequestingRegion = false
+    /// What became of asking for the maps, in the server's own terms.
+    private(set) var regionNote: String?
     var errorMessage: String?
     /// What the last "merken" did, in the server's words.
     var lastAddition: String?
@@ -135,8 +138,41 @@ final class TripExploreViewModel {
             errorMessage = nil
             hasSearched = true
             collectedNow = []
+            regionNote = nil
         } catch {
             errorMessage = "Die Suche hat nicht geantwortet. Noch einmal versuchen?"
+        }
+    }
+
+    // MARK: - The maps this area needs (§13.0)
+
+    /// Ask for the region, once somebody has said yes.
+    ///
+    /// Not on opening the screen and not on the browse: an import is a
+    /// background job of minutes to hours, and a browse is a tap. The
+    /// server checks again before asking — the two calls are a person's
+    /// decision apart, and an admin may have approved it in between.
+    func requestRegion() async {
+        guard let area else { return }
+        isRequestingRegion = true
+        defer { isRequestingRegion = false }
+
+        struct Body: Encodable {
+            struct Position: Encodable { let lat: Double; let lon: Double }
+            let position: Position
+        }
+        do {
+            let response: TripExploreRegionResponse = try await APIClient.shared.post(
+                "/trip-planner/explore/region",
+                body: Body(position: .init(lat: area.lat, lon: area.lon)),
+            )
+            regionNote = response.sentence
+            errorMessage = nil
+            // Already there means somebody approved it while this screen
+            // was open, and then the answer is a list, not a sentence.
+            if response.alreadyThere { await load() }
+        } catch {
+            errorMessage = "Die Karten lie\u{00DF}en sich nicht anfordern."
         }
     }
 
