@@ -1,5 +1,5 @@
 import XCTest
-@testable import FKPhotos
+@testable import FKPhotosLib
 
 /// The three answers a day trip may give about its own size (§4.5).
 final class TripOutingReachTests: XCTestCase {
