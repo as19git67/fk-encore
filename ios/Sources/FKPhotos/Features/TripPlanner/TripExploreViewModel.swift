@@ -54,10 +54,13 @@ final class TripExploreViewModel {
     /// be noise.
     func loadInterests() async {
         guard interests.isEmpty else { return }
+        // The same shape the trip settings screen reads, declared where
+        // it is used rather than shared: two callers of one endpoint do
+        // not need a type between them, and `TripInterestOption` — the
+        // part that must not drift — is already one type for both.
+        struct Response: Decodable { let interests: [TripInterestOption] }
         do {
-            let response: TripInterestsResponse = try await APIClient.shared.get(
-                "/trip-planner/interests",
-            )
+            let response: Response = try await APIClient.shared.get("/trip-planner/interests")
             interests = response.interests
         } catch {
             interests = []

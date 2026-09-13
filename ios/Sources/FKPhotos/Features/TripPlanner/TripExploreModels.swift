@@ -56,22 +56,13 @@ struct TripExploreResponse: Codable, Sendable {
     let note: String?
 }
 
-/// One of the interests the planner can actually match (§8.1).
-///
-/// Fetched, never copied into Swift: the list is the contract between
-/// what somebody taps and what the scoring can match, and a second copy
-/// would drift the first time an OSM tag is added to one of them —
-/// silently, which is the bug the vocabulary exists to end.
-struct TripInterestOption: Codable, Identifiable, Hashable, Sendable {
-    let id: String
-    let label: String
-}
-
-struct TripInterestsResponse: Codable, Sendable {
-    let interests: [TripInterestOption]
-}
-
 /// Where a browse is centred, and what to call that on screen.
+///
+/// The interest vocabulary the chips are built from is
+/// `TripInterestOption`, which the trip settings screen already
+/// declares — fetched from `GET /trip-planner/interests` and never
+/// copied into Swift, because a second copy of the list would drift the
+/// first time an OSM tag is added to one of them.
 ///
 /// Two ways to get one and they read differently: the phone knows where
 /// it is, and a name somebody typed has to be turned into a coordinate
