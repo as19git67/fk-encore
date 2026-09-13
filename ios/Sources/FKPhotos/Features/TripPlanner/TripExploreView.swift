@@ -33,6 +33,7 @@ import SwiftUI
 struct TripExploreView: View {
     @State private var model = TripExploreViewModel()
     @State private var isPickingArea = false
+    @State private var isReadingArticle = false
     @State private var opened: TripExploredSpot?
     /// Which collection a find goes into. Nil means one's own.
     let ownerId: Int?
@@ -121,6 +122,15 @@ struct TripExploreView: View {
                             Text(TripExploreDefaults.radiusLabel(metres)).tag(metres)
                         }
                     }
+                    Divider()
+                    // The other half of researching (§9.2 case 2): the
+                    // browse answers "what is here", an article answers
+                    // "what is worth going to", and until now reading
+                    // one meant Safari, the share sheet and a trip.
+                    Button("Artikel auslesen\u{2026}", systemImage: "doc.text.magnifyingglass") {
+                        isReadingArticle = true
+                    }
+                    .disabled(model.area == nil)
                 } label: {
                     Label("Gegend", systemImage: "line.3.horizontal.decrease.circle")
                 }
@@ -134,6 +144,11 @@ struct TripExploreView: View {
         .onChange(of: model.chosenInterests) { _, _ in Task { await model.load() } }
         .onChange(of: model.radiusM) { _, _ in Task { await model.load() } }
         .refreshable { await model.load() }
+        .sheet(isPresented: $isReadingArticle) {
+            if let area = model.area {
+                TripArticleReadView(area: area, ownerId: ownerId)
+            }
+        }
         .sheet(isPresented: $isPickingArea) {
             TripExploreAreaSheet { place in
                 isPickingArea = false
