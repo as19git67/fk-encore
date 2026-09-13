@@ -45,6 +45,12 @@ import { requireAccess } from "./ideas";
 import { requestRegionFor } from "./region-request";
 import { haversineMeters } from "./travel";
 import { emptinessNote, keepsInterest, orderForBrowsing } from "./explore-filter";
+import {
+  answer as answerQuestion,
+  isExploreQuestion,
+  questionLabel,
+  type ExploreQuestion,
+} from "./explore-questions";
 
 /** Wide enough for "die Gegend", narrow enough to mean something. */
 const DEFAULT_RADIUS_M = 5_000;
@@ -73,6 +79,15 @@ export interface ExploreRequest {
   query?: string;
   /** Interest ids from `GET /trip-planner/interests`. */
   interests?: string[];
+  /**
+   * A question rather than a filter (§3.1): `rain`, `fair` or `quick`.
+   *
+   * Answers what a category cannot — "es regnet, was jetzt?" — from
+   * what the planner already derives about a spot. An unknown value is
+   * refused rather than ignored: silently answering a different
+   * question than the one asked is worse than saying no.
+   */
+  question?: string;
   limit?: number;
   /**
    * Which collection to mark against. Your own unless a shared one is
@@ -98,7 +113,13 @@ export interface ExploredSpot {
   openingHours: string | null;
   website: string | null;
   wikipediaUrl: string | null;
-  /** Why it ranks where it does — the same "Warum hier?" the plan shows. */
+  /**
+   * Why it ranks where it does — the same "Warum hier?" the plan shows.
+   *
+   * When a question was asked, its answer comes first: „innen" on a wet
+   * afternoon is the reason this row is on the screen at all, and it
+   * belongs above the reasons the scoring gave.
+   */
   reasons: string[];
   /** Already in the collection this was marked against. */
   collected: boolean;
@@ -129,6 +150,7 @@ export const exploreArea = api(
     const limit = validateLimit(req.limit);
     const query = validateQuery(req.query);
     const interests = (req.interests ?? []).filter((id) => typeof id === "string" && id !== "");
+    const question = validateQuestion(req.question);
     const ownerId = await requireAccess(req.ownerId ?? userId, userId);
 
     const region = await pickRegion(position.lat, position.lon);
@@ -166,10 +188,30 @@ export const exploreArea = api(
     const matching = candidates.filter((candidate) =>
       keepsInterest({ kind: candidate.kind, category: candidate.category }, interests));
 
-    const ordered = orderForBrowsing(matching.map((candidate) => ({
-      ...candidate,
-      distanceM: Math.round(haversineMeters(position, candidate)),
-    })));
+    // The question is answered per spot and decides two things: whether
+    // the spot is part of the answer, and where it sits within it.
+    const answered = matching.flatMap((candidate) => {
+      const verdict = question
+        ? answerQuestion(question, {
+          category: candidate.category,
+          kind: candidate.kind,
+          dwellMinutes: candidate.dwellMinutes,
+        })
+        : { keep: true, note: null, rank: 0 };
+      if (!verdict.keep) return [];
+      return [{
+        ...candidate,
+        distanceM: Math.round(haversineMeters(position, candidate)),
+        reasons: verdict.note ? [verdict.note, ...candidate.reasons] : candidate.reasons,
+        questionRank: verdict.rank,
+      }];
+    });
+
+    // Within the question's answer first, and by prominence inside
+    // that: a wholly indoor place outranks a half-covered one however
+    // famous the half-covered one is.
+    const ordered = orderForBrowsing(answered)
+      .sort((a, b) => a.questionRank - b.questionRank);
 
     const spots: ExploredSpot[] = ordered.slice(0, limit).map((candidate) => ({
       osmRef: candidate.osmRef,
@@ -198,7 +240,11 @@ export const exploreArea = api(
         regionMissing: false,
         found: page.spots.length,
         kept: ordered.length,
-        filtered: interests.length > 0 || query !== null,
+        filtered: interests.length > 0 || query !== null || question !== null,
+        // Named, because "nichts passt zur Auswahl" is unhelpful when
+        // the auswahl is a question: what is missing is somewhere dry,
+        // not a category.
+        question: question ? questionLabel(question) : null,
       }),
     };
   },
@@ -293,6 +339,23 @@ function validatePosition(position: ExploreRequest["position"]): { lat: number; 
     throw APIError.invalidArgument("lon must be between -180 and 180");
   }
   return { lat, lon };
+}
+
+/**
+ * The question asked, or null.
+ *
+ * An unrecognised one is refused rather than dropped: a client that
+ * asks „was ist am Montag offen?" and gets the unfiltered list back has
+ * been answered a different question without being told.
+ */
+function validateQuestion(question: string | undefined): ExploreQuestion | null {
+  if (question === undefined) return null;
+  const trimmed = question.trim();
+  if (trimmed === "") return null;
+  if (!isExploreQuestion(trimmed)) {
+    throw APIError.invalidArgument(`diese Frage kennt der Planer nicht: '${trimmed}'`);
+  }
+  return trimmed;
 }
 
 function validateRadius(radiusM: number | undefined): number {
