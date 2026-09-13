@@ -235,6 +235,56 @@ describe("POST /trip-planner/explore", () => {
     expect(res.note).toContain("passt zur Auswahl");
   });
 
+  it("answers a question instead of a category", async () => {
+    geo.setSearchSpots("nom_toscana", [
+      spot(1, nearby(300), "Stadtmuseum"),
+      spot(2, nearby(400), "Aussichtspunkt", {
+        kind: "tourism=viewpoint",
+        categories: ["viewpoint"],
+      }),
+    ]);
+
+    const res = await exploreArea({ position: TOWN, question: "rain" });
+
+    expect(res.spots.map((s) => s.name)).toEqual(["Stadtmuseum"]);
+    // The answer is the first reason on the row: it is why this row is
+    // on the screen at all.
+    expect(res.spots[0].reasons[0]).toBe("innen");
+  });
+
+  it("keeps the half-covered behind the wholly indoor", async () => {
+    geo.setSearchSpots("nom_toscana", [
+      spot(1, nearby(300), "Burg", { kind: "historic=castle", categories: ["sight"] }),
+      spot(2, nearby(400), "Stadtmuseum"),
+    ]);
+
+    const res = await exploreArea({ position: TOWN, question: "rain" });
+
+    expect(res.spots.map((s) => s.name)).toEqual(["Stadtmuseum", "Burg"]);
+    expect(res.spots[1].reasons[0]).toBe("teils überdacht");
+  });
+
+  it("names the question when nothing answers it", async () => {
+    geo.setSearchSpots("nom_toscana", [
+      spot(1, nearby(300), "Aussichtspunkt", {
+        kind: "tourism=viewpoint",
+        categories: ["viewpoint"],
+      }),
+    ]);
+
+    const res = await exploreArea({ position: TOWN, question: "rain" });
+
+    expect(res.spots).toEqual([]);
+    expect(res.note).toContain("bei Regen");
+  });
+
+  it("refuses a question it cannot answer", async () => {
+    // Silently answering a different question than the one asked is
+    // worse than saying no — there is no opening-hours parser here.
+    await expect(exploreArea({ position: TOWN, question: "montags-offen" }))
+      .rejects.toThrow(APIError);
+  });
+
   it("still searches by name when somebody does type one", async () => {
     geo.setSearchSpots("nom_toscana", [
       spot(1, nearby(300), "Museo Civico"),

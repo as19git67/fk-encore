@@ -65,6 +65,24 @@ final class TripExploreTests: XCTestCase {
         XCTAssertTrue(TripExploreDefaults.radiusChoices.contains(TripExploreDefaults.radiusM))
     }
 
+    // MARK: - The questions (§3.1)
+
+    func testEachQuestionSaysItselfAndCarriesAnIcon() {
+        // Three, fixed, and matching the server's own vocabulary. Not
+        // fetched like the interests: an id the server refuses is a
+        // loud failure, a silently different list is not.
+        XCTAssertEqual(TripExploreQuestion.allCases.map(\.rawValue), ["rain", "fair", "quick"])
+        XCTAssertEqual(TripExploreQuestion.rain.label, "Bei Regen")
+        XCTAssertFalse(TripExploreQuestion.quick.symbolName.isEmpty)
+    }
+
+    func testAQuestionIsItsOwnWireValue() {
+        // What the chip sends is the enum's raw value, so a renamed
+        // label can never quietly change the request.
+        XCTAssertEqual(TripExploreQuestion(rawValue: "fair"), .fair)
+        XCTAssertNil(TripExploreQuestion(rawValue: "montags-offen"))
+    }
+
     // MARK: - What the detail screen is handed
 
     func testAFoundPlaceBecomesASpotWithItsReasons() {
