@@ -8,7 +8,16 @@ import SwiftUI
 /// say" was settled — this file only decides where the lines sit.
 struct TripPinDetailSheet: View {
     let detail: TripPinDetail
+    /// "Not this one, and not next time either" (§5), from the map.
+    ///
+    /// Passed in rather than reached for: the sheet knows which spot
+    /// was tapped and nothing about plans, and the map above it is a
+    /// pure function of its inputs. Nil where nobody can act — a shared
+    /// plan, a preview — and then the section is simply absent instead
+    /// of a button that fails when pressed.
+    var onHide: (@MainActor () async -> Void)?
 
+    @State private var hiding = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
@@ -44,6 +53,33 @@ struct TripPinDetailSheet: View {
                         if let note = detail.note {
                             Text(note)
                         }
+                    }
+                }
+
+                if let onHide {
+                    Section {
+                        Button(role: .destructive) {
+                            hiding = true
+                            Task {
+                                await onHide()
+                                hiding = false
+                                dismiss()
+                            }
+                        } label: {
+                            if hiding {
+                                ProgressView()
+                            } else {
+                                Label("Für diese Reise ausblenden", systemImage: "eye.slash")
+                            }
+                        }
+                        .disabled(hiding)
+                    } footer: {
+                        // The same sentence as in the pool, because it
+                        // is the same "no": it holds for the whole trip
+                        // and it can be taken back.
+                        Text("Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch "
+                             + "beim nächsten Neuplanen nicht. Rückgängig im Vorrat unter "
+                             + "„Ausgeblendet“.")
                     }
                 }
 

@@ -598,6 +598,10 @@ final class TripPlannerViewModel {
             /// they named none, and then the planner keeps estimating.
             let departAt: String?
             let returnAt: String?
+            /// How far to look around the destination. Omitted when the
+            /// traveller left it at the ordinary answer, so the server
+            /// keeps deciding it (§4.5).
+            let radiusM: Int?
         }
         isSavingFixpoint = true
         defer { isSavingFixpoint = false }
@@ -612,6 +616,7 @@ final class TripPlannerViewModel {
                     label: draft?.place.name,
                     departAt: draft?.departMinutes.map(TripClock.format),
                     returnAt: draft?.returnMinutes.map(TripClock.format),
+                    radiusM: draft?.radiusM,
                 ),
             )
             apply(response)

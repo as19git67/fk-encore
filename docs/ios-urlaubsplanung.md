@@ -566,6 +566,43 @@ Spots am Ende nicht auf dem Tag stehen, kann auch das Scoring erledigt haben. Wa
 gar nicht erst in den Pool kommt, kann kein Filter mehr retten — und was
 hineinkommt, kann vorgeschlagen werden.
 
+**Erledigt (2026-09-13): und die App fragt jetzt danach.**
+`radiusM` gab es am Tagesanker, seit es Tagesanker gibt — angeboten hat es nie
+etwas. Damit war die einzige Antwort, die ein Mensch geben konnte, die
+voreingestellte. Das Ausflugs-Sheet hat jetzt drei Auswahlmöglichkeiten:
+**Ortskern** (2 km), **Ort** (Standard) und **Gegend** (25 km).
+
+Drei Knöpfe statt eines Feldes in Metern, weil niemand einen Tag in Metern plant.
+Und **„Ort" schickt nichts** statt 8 000 mitzuschicken: der Standard gehört dem
+Server, und die heutige Zahl in jeden heute geplanten Tag zu schreiben hieße,
+sie dort für immer festzuhalten.
+
+`TripOutingReach.of(radiusM:)` macht den Rückweg — ein gespeicherter Radius öffnet
+das Sheet auf der Auswahl, die ihn geschrieben hat, und ein Radius, den dieses
+Sheet nie geschrieben hat (aus der API, aus einer späteren Version), auf der
+nächstgelegenen. Das Sheet, das immer auf dem Standard aufgeht, würde beim
+nächsten Sichern still einen Tag verbreitern, den jemand absichtlich eng gemacht
+hat — dieselbe Sorte Fehler wie das leere Formular beim Ändern (§15.3).
+
+**Erledigt (2026-09-13): „nicht dieser" geht auch von der Karte aus.**
+Ausblenden (§5) gab es im Tagesplan und im Vorrat — also überall dort, wo ein
+Spot eine Zeile ist. Auf der Karte ist er ein Punkt, und genau dort fällt auf,
+dass einer nicht passt: er liegt sichtbar außerhalb, auf der falschen Seite des
+Flusses, weit weg von allen anderen. Bis hierher hieß das: Karte zu, Spot in der
+Liste suchen, ausblenden, Karte wieder auf.
+
+Das Info-Sheet hinter einem Pin hat jetzt denselben Knopf mit demselben Satz
+darunter — es ist dasselbe „Nein", es gilt für die ganze Reise, und es ist im
+Vorrat unter „Ausgeblendet" rücknehmbar.
+
+Zwei Kleinigkeiten, die dazugehören: `TripPinDetail` trägt jetzt den `osmRef`,
+weil das die Handhabe ist, auf die sich Ausblenden bezieht — ein Sheet, das den
+Punkt zeigt, aber nicht benennen kann, hätte einen Knopf, der beim Drücken
+fehlschlägt. Und die Karte bekommt die Aktion als Closure statt des View-Models:
+sie bleibt eine reine Funktion ihrer Eingaben, und das Einzige, was sie nicht
+selbst ausrechnen kann — was mit der Reise passiert — kommt von dem Screen, dem
+die Reise gehört. Ohne Closure ist das Sheet einfach nur lesbar.
+
 Was es nicht sieht: unbenannte Gewässer (der Import verlangt einen Namen) und
 Flüsse als `waterway`-Linien. Und es weiß nicht, *wo* der Weg herumführt — nur,
 dass er es muss.

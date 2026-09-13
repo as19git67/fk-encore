@@ -60,7 +60,10 @@ struct TripPlanDayView: View {
                     NavigationLink {
                         TripDayMapView(day: day, anchor: leg.anchor,
                                        light: viewModel.light,
-                                       isRunning: leg.schedule(on: Date()).isRunning)
+                                       isRunning: leg.schedule(on: Date()).isRunning,
+                                       onHide: { stop in
+                                           await viewModel.hide(osmRef: stop.osmRef)
+                                       })
                     } label: {
                         Label("Karte", systemImage: "map")
                     }

@@ -158,6 +158,14 @@ final class TripPinDetailTests: XCTestCase {
 
     // MARK: - Handing the place to Apple Maps
 
+    func testItCarriesTheHandleTheTripActsOn() {
+        // "Für diese Reise ausblenden" from the map addresses the spot
+        // by its OSM reference (§5). Without it the sheet could show a
+        // pin it cannot act on — a button that fails when pressed.
+        let detail = TripPinDetail.of(stop(7), number: 1, in: day([stop(7)]))
+        XCTAssertEqual(detail.osmRef, "node:7")
+    }
+
     func testTheMapLinkCarriesTheCoordinateNotASearch() {
         let spot = stop(1, name: nil, category: "viewpoint")
         let url = TripPinDetail.mapsURL(for: TripPinDetail.of(spot, number: 1, in: day([spot])))
