@@ -434,6 +434,52 @@ final class TripIdeasViewModel {
         }
     }
 
+    // MARK: - Correcting one (§20)
+
+    /// Save what somebody changed about a collected place.
+    ///
+    /// Only the fields the sheet carries are sent, and the server
+    /// leaves the rest alone — the entry's dates and its photo-stop
+    /// flag survive a save from a screen that never mentions them.
+    /// Sending them as nulls "for completeness" is how an edit screen
+    /// quietly deletes what another one wrote.
+    func update(_ idea: TripIdea, with edit: TripSpotEdit) async {
+        struct Body: Encodable {
+            let id: Int
+            let ownerId: Int?
+            let title: String
+            let note: String
+            let sourceUrl: String
+            let dwellMinutes: Int
+        }
+        do {
+            let response: TripIdeaUpdateResponse = try await APIClient.shared.patch(
+                "/trip-planner/ideas/\(idea.id)",
+                body: Body(
+                    id: idea.id,
+                    ownerId: ownerId,
+                    // An empty string clears the field, which is what an
+                    // emptied text field means; omitting would leave it.
+                    title: edit.title,
+                    note: edit.note,
+                    sourceUrl: edit.url,
+                    dwellMinutes: edit.dwellMinutes,
+                ),
+            )
+            errorMessage = nil
+            replace(response.entry)
+        } catch {
+            errorMessage = "Die \u{00C4}nderung lie\u{00DF} sich nicht speichern."
+        }
+    }
+
+    /// Put the saved entry back into the list in place of the old one,
+    /// rather than reloading: the list is what the reader is looking at.
+    private func replace(_ entry: TripIdea) {
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries[index] = entry
+    }
+
     func remove(_ idea: TripIdea) async {
         struct Body: Encodable {
             let id: Int

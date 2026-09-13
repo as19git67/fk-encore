@@ -45,6 +45,7 @@ import "./bundle";
 import "./readiness";
 import "./review";
 import "./ideas";
+import "./idea-edit";
 import "./map-link-read";
 import "./outing";
 import "./ideas-trip";

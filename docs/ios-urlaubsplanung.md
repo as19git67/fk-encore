@@ -3818,6 +3818,28 @@ etwas im Umkreis von 50 km"). Das ist der Teil, der aus der Merkliste einen
 Tagesausflugsplaner macht — und er ruft `solveDay` mit dem Standort als Anker
 auf, statt etwas Neues zu erfinden.
 
+**Erledigt (2026-09-13): ein Eintrag ist korrigierbar.**
+Der Vorrat konnte befüllt und geleert werden, dazwischen nichts — ein Eintrag
+war das, was er am Tag des Merkens war. Für einen geplanten Spot gibt es Titel,
+Notiz, Link und Aufenthaltsdauer seit den Spot-Notizen (§9.2); eine Idee ist
+derselbe Ort, bevor er zu einer Reise gehört, und genau die Sätze, die
+entscheiden, ob jemand hingeht („Eingang um die Ecke", „nur bis Ostern"), lernt
+man nach dem Merken.
+
+`PATCH /trip-planner/ideas/:id` ändert Titel, Notiz, Link, Aufenthaltsdauer,
+Gültigkeitsfenster und die Foto-Markierung — alles Spalten, die die Tabelle
+schon hat, also ohne Migration. Weggelassene Felder bleiben, leere werden
+gelöscht: dieselbe Drei-Zustands-Regel wie bei der Spot-Notiz, und sie liegt
+jetzt gemeinsam in `field-edit.ts`, weil zwei leicht verschiedene Lesarten von
+„leer" der Weg sind, auf dem ein Bildschirm löscht, was ein anderer geschrieben
+hat.
+
+In der App ist die Zeile damit kein Sackgassen-Eintrag mehr: sie führt auf
+denselben Detailbildschirm, den ein geplanter Spot bekommt (`TripSpotDetailView`),
+mit Karte, Kategorie, Wikipedia und Route — plus Stift. Die Funde aus
+„Entdecken" (§9.2) führen auf denselben Bildschirm, nur ohne Stift: dort gibt es
+noch nichts zu korrigieren, weil den Ort noch niemand behalten hat.
+
 ### 20.2 Der eigentliche Mechanismus: der Vorrat meldet sich
 
 Die Maschinerie dafür steht bereits vollständig. §7.1 überwacht Regionen um die

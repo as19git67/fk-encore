@@ -38,6 +38,7 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { findSpotNote, loadPlan, saveSpotNote, type SpotNote } from "./plan-store";
+import { resolveDwellMinutes, resolveText, validateUrl } from "./field-edit";
 
 const MAX_TITLE_LENGTH = 120;
 const MAX_NOTE_LENGTH = 1_000;
@@ -101,10 +102,10 @@ export const saveTripSpotNote = api(
 
     const existing = await findSpotNote(leg.id, osmRef);
     const fields = {
-      title: resolve(req.title, existing?.title ?? null, MAX_TITLE_LENGTH, "title"),
-      note: resolve(req.note, existing?.note ?? null, MAX_NOTE_LENGTH, "note"),
-      url: validateUrl(resolve(req.url, existing?.url ?? null, MAX_URL_LENGTH, "url")),
-      dwellMinutes: resolveDwell(req.dwellMinutes, existing?.dwellMinutes ?? null),
+      title: resolveText(req.title, existing?.title ?? null, MAX_TITLE_LENGTH, "title"),
+      note: resolveText(req.note, existing?.note ?? null, MAX_NOTE_LENGTH, "note"),
+      url: validateUrl(resolveText(req.url, existing?.url ?? null, MAX_URL_LENGTH, "url")),
+      dwellMinutes: resolveDwellMinutes(req.dwellMinutes, existing?.dwellMinutes ?? null),
       photoStop: req.photoStop ?? existing?.photoStop ?? false,
     };
 
@@ -125,59 +126,6 @@ function knowsSpot(leg: LegLike, osmRef: string): boolean {
   return leg.days.some((day) =>
     day.blocks.some((block) => block.stops.some((stop) => stop.osmRef === osmRef)),
   );
-}
-
-/**
- * The new value of one field.
- *
- * Omitted leaves what is there; an empty string clears it. The two
- * have to differ, or a screen that edits only the note would wipe the
- * link every time it saved.
- */
-function resolve(
-  incoming: string | null | undefined,
-  current: string | null,
-  max: number,
-  field: string,
-): string | null {
-  if (incoming === undefined) return current;
-  if (incoming === null) return null;
-  const trimmed = incoming.trim();
-  if (!trimmed) return null;
-  if (trimmed.length > max) {
-    throw APIError.invalidArgument(`${field} may be at most ${max} characters`);
-  }
-  return trimmed;
-}
-
-/**
- * A link the app can actually open.
- *
- * Only http and https: a `javascript:` or `data:` string in a field
- * that renders as a tappable link is not a link, and refusing it here
- * is cheaper than remembering to refuse it in every client.
- */
-function validateUrl(url: string | null): string | null {
-  if (url === null) return null;
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw APIError.invalidArgument("url must be a full web address, e.g. https://beispiel.test");
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw APIError.invalidArgument("url must be an http or https address");
-  }
-  return parsed.toString();
-}
-
-function resolveDwell(incoming: number | null | undefined, current: number | null): number | null {
-  if (incoming === undefined) return current;
-  if (incoming === null) return null;
-  if (!Number.isInteger(incoming) || incoming < 5 || incoming > 480) {
-    throw APIError.invalidArgument("dwellMinutes must be an integer between 5 and 480");
-  }
-  return incoming;
 }
 
 function requireUser(): number {

@@ -349,6 +349,53 @@ struct TripSpotDetail: Identifiable, Sendable {
         photoStop = candidate.isPhotoStop
     }
 
+    /// A place the browse turned up (§9.2, case 4 widened).
+    ///
+    /// Nothing here is anybody's yet: no title, no note, no photo stop
+    /// — those are things a person adds after deciding to keep it. What
+    /// it does carry is why it ranked where it did, which is exactly
+    /// what somebody deciding whether to keep it wants to read.
+    init(_ found: TripExploredSpot) {
+        osmRef = found.osmRef
+        name = found.name
+        title = nil
+        localName = found.localName
+        wikipediaUrl = found.wikipediaUrl
+        category = found.category
+        coordinate = TripCoordinate(lat: found.lat, lon: found.lon)
+        dwellMinutes = found.dwellMinutes
+        reasons = found.reasons
+        note = nil
+        sourceUrl = found.website
+        // It came out of the region search, so by definition the map
+        // knows it.
+        unmatched = false
+        photoStop = false
+    }
+
+    /// Something already collected (§20).
+    ///
+    /// The collection's entry is the same place as a planned spot,
+    /// before it belongs to a trip — which is why it gets the same
+    /// screen rather than a thinner one of its own.
+    init(_ idea: TripIdea) {
+        osmRef = idea.osmRef
+        name = idea.name
+        title = idea.title
+        localName = nil
+        wikipediaUrl = nil
+        category = idea.category
+        coordinate = TripCoordinate(lat: idea.lat, lon: idea.lon)
+        dwellMinutes = idea.dwellMinutes
+        // Who collected it, in the place the plan puts its scoring
+        // reasons: on the collection that *is* the reason (§20.1).
+        reasons = idea.addedBy.map { ["gemerkt von \($0)"] } ?? []
+        note = idea.note
+        sourceUrl = idea.sourceUrl
+        unmatched = idea.unmatched
+        photoStop = false
+    }
+
     init(_ stop: TripStop) {
         osmRef = stop.osmRef
         name = stop.name
