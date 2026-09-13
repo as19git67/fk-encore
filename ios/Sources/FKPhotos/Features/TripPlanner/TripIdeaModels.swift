@@ -66,6 +66,16 @@ struct TripIdeaCollection: Codable, Identifiable, Sendable {
     }
 }
 
+/// What came back from correcting an entry (§20).
+///
+/// The entry as the server now holds it, not an echo of what was sent:
+/// a screen that shows its own request back is a screen that lies the
+/// first time the server disagrees — a trimmed title, a cleared field,
+/// a duration it clamped.
+struct TripIdeaUpdateResponse: Codable, Sendable {
+    let entry: TripIdea
+}
+
 struct TripIdeasResponse: Codable, Sendable {
     let entries: [TripIdea]
     let collections: [TripIdeaCollection]
