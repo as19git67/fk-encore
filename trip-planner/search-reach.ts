@@ -84,3 +84,40 @@ export function mergeByOsmRef<T extends { osmRef: string }>(
   }
   return merged;
 }
+
+/**
+ * A day trip is a place, not a driving range.
+ *
+ * The reach above answers "how far does a day out from the hotel go",
+ * and for a leg that is right. Pointed at a day trip it answers the
+ * wrong question: the drive is already spent getting there. Four days
+ * in Malcesine with an outing to the Arena searched 25 km around
+ * Verona — the car's reach, inherited from the leg — and came back with
+ * Gardaland and a safari park, every one of them outside the city the
+ * day was about (§4.5).
+ *
+ * So an outing is planned at the size of the place: far enough to hold
+ * a city with its outskirts, short enough that "we are going to Verona"
+ * still means Verona. A leg that already reaches less keeps its own
+ * number — walking to the day trip and then being offered eight
+ * kilometres of it would be the same mistake mirrored.
+ */
+export const DAY_TRIP_REACH_M = 8_000;
+
+/**
+ * What to search around a day trip's destination.
+ *
+ * An explicit radius wins here too: "we are staying in the old town"
+ * and "we want to drive the whole valley" are both answers this table
+ * cannot give.
+ */
+export function dayTripRadiusFor(
+  explicitM: number | null | undefined,
+  legRadiusM: number,
+): number {
+  if (explicitM !== null && explicitM !== undefined
+      && Number.isFinite(explicitM) && explicitM > 0) {
+    return Math.min(Math.round(explicitM), MAX_SEARCH_RADIUS_M);
+  }
+  return Math.min(legRadiusM, DAY_TRIP_REACH_M);
+}

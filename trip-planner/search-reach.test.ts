@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SEARCH_RADIUS_M, mergeByOsmRef, searchRadiusFor } from "./search-reach";
+import {
+  DAY_TRIP_REACH_M,
+  dayTripRadiusFor,
+  MAX_SEARCH_RADIUS_M,
+  mergeByOsmRef,
+  searchRadiusFor,
+} from "./search-reach";
 
 describe("searchRadiusFor", () => {
   it("keeps the walking radius the planner always used", () => {
@@ -48,5 +54,44 @@ describe("mergeByOsmRef", () => {
     expect(mergeByOsmRef([], prominent)).toHaveLength(2);
     expect(mergeByOsmRef(near, [])).toHaveLength(2);
     expect(mergeByOsmRef([], [])).toEqual([]);
+  });
+});
+
+describe("dayTripRadiusFor", () => {
+  const carLeg = searchRadiusFor("car");
+
+  it("plans an outing at the size of the place, not the car's range", () => {
+    // The bug this exists for: quarters on a lake, a day trip to a city
+    // an hour away, and every proposed spot 20 km outside that city —
+    // the leg's driving reach, inherited by a day that had already
+    // driven.
+    expect(dayTripRadiusFor(null, carLeg)).toBe(DAY_TRIP_REACH_M);
+    expect(dayTripRadiusFor(null, carLeg)).toBeLessThan(carLeg);
+  });
+
+  it("keeps a leg that already reaches less", () => {
+    // Walking to the day trip and then being offered eight kilometres
+    // of it is the same mistake mirrored.
+    expect(dayTripRadiusFor(undefined, searchRadiusFor("foot"))).toBe(3_000);
+    expect(dayTripRadiusFor(undefined, 1_500)).toBe(1_500);
+  });
+
+  it("lets the day say how far it wants to look", () => {
+    // "We are staying in the old town" and "we want to drive the whole
+    // valley" are both answers the table cannot give.
+    expect(dayTripRadiusFor(1_200, carLeg)).toBe(1_200);
+    expect(dayTripRadiusFor(30_000, carLeg)).toBe(30_000);
+  });
+
+  it("never asks for more than the geo service will search", () => {
+    expect(dayTripRadiusFor(MAX_SEARCH_RADIUS_M * 3, carLeg)).toBe(MAX_SEARCH_RADIUS_M);
+  });
+
+  it("falls back to the place-sized default when the stored radius is nonsense", () => {
+    // Under-reaching is the safe error here too: a smaller day beats a
+    // day in the wrong county.
+    expect(dayTripRadiusFor(0, carLeg)).toBe(DAY_TRIP_REACH_M);
+    expect(dayTripRadiusFor(-500, carLeg)).toBe(DAY_TRIP_REACH_M);
+    expect(dayTripRadiusFor(Number.NaN, carLeg)).toBe(DAY_TRIP_REACH_M);
   });
 });
