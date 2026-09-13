@@ -47,8 +47,31 @@ describe("dayTripOf", () => {
   });
 });
 
+describe("a lake in the way", () => {
+  it("adds the way round to the drive", () => {
+    // The reported case: from the east shore of a long lake to
+    // something on the far side, the straight line says one thing and
+    // the road that goes round the end says another.
+    const withoutWater = dayTripOf(BASE, FAR_TOWN, "car");
+    const around = dayTripOf(BASE, FAR_TOWN, "car", { extraM: 26_000, around: "Gardasee" });
+
+    expect(around!.travelMinutes).toBeGreaterThan(withoutWater!.travelMinutes + 15);
+    // Named, so the card can say what it is going round rather than
+    // showing a figure nobody can account for.
+    expect(around!.around).toBe("Gardasee");
+  });
+
+  it("says nothing when nothing is in the way", () => {
+    expect(dayTripOf(BASE, FAR_TOWN, "car")?.around).toBeNull();
+    expect(dayTripOf(BASE, FAR_TOWN, "car", { extraM: 0, around: null })?.around).toBeNull();
+  });
+});
+
 describe("startsAtFor", () => {
-  const trip = { at: FAR_TOWN, label: "Pisa", radiusM: null, travelMinutes: 80 } as const;
+  const trip = {
+    at: FAR_TOWN, label: "Pisa", radiusM: null, travelMinutes: 80,
+    around: null, detourM: 0,
+  } as const;
 
   it("adds the drive to the hour the traveller named", () => {
     expect(startsAtFor({ ...trip, departMinutes: 8 * 60, returnMinutes: null }, 9 * 60))

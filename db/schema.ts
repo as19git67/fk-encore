@@ -2908,6 +2908,13 @@ export const tripPlanDays = pgTable(
     // wherever it is given.
     anchor_depart_minutes: integer("anchor_depart_minutes"),
     anchor_return_minutes: integer("anchor_return_minutes"),
+    // What the planner had to go around, and what it is called
+    // (migration 0197). Null means nobody looked; zero means somebody
+    // looked and the way was clear. Stored rather than recomputed: the
+    // plan was built on this assumption, and the card must not drift
+    // away from the day it describes.
+    anchor_water_detour_m: integer("anchor_water_detour_m"),
+    anchor_water_around: text("anchor_water_around"),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );

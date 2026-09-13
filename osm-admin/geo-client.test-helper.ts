@@ -30,6 +30,7 @@ import type {
   GeoRefreshResult,
   GeoReplicationStatus,
   GeoReverseResult,
+  GeoWaterCrossing,
 } from "./geo-client";
 
 interface ImportEntry {
@@ -261,6 +262,8 @@ export class InMemoryGeoClient implements GeoClient {
   private coverage = new Map<string, Array<{ lat: number; lon: number; radiusM: number }>>();
 
   /** Say that this database really does hold that corner of the world. */
+  private readonly water = new Map<string, GeoWaterCrossing>();
+
   setCoverage(postgresDb: string, at: { lat: number; lon: number }, radiusM = 25_000): void {
     const list = this.coverage.get(postgresDb) ?? [];
     list.push({ ...at, radiusM });
@@ -271,6 +274,27 @@ export class InMemoryGeoClient implements GeoClient {
     const declared = this.coverage.get(postgresDb);
     if (this.coverage.size === 0) return true;
     return (declared ?? []).some((c) => metresBetween(c, { lat, lon }) <= c.radiusM);
+  }
+
+  /**
+   * What lies in the water between two points, declared per region.
+   *
+   * Nothing declared means nothing in the way, which is the right
+   * default: almost every pair of points in almost every test has dry
+   * land between them, and a fake that invented a lake would make the
+   * travel estimates of a hundred unrelated tests wrong.
+   */
+  setWaterCrossing(postgresDb: string, crossing: GeoWaterCrossing): void {
+    this.water.set(postgresDb, crossing);
+  }
+
+  async waterCrossing(
+    postgresDb: string,
+    _from: { lat: number; lon: number },
+    _to: { lat: number; lon: number },
+  ): Promise<GeoWaterCrossing> {
+    return this.water.get(postgresDb)
+      ?? { crossedM: 0, widestM: 0, extentM: 0, name: null };
   }
 
   setPoiCategories(categories: GeoPoiCategory[]): void {

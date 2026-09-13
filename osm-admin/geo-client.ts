@@ -141,6 +141,28 @@ export interface GeoPoiSearchSpot {
   facadeAzimuth: number | null;
 }
 
+/**
+ * How much water lies on the straight line between two points (§4.5).
+ *
+ * The planner has no router: it estimates a journey as the straight
+ * line times a per-mode factor, which is a fair average over a road
+ * network and nonsense across a lake. This is what geo can answer
+ * cheaply from data it already holds — the named water bodies are
+ * imported with their geometry — and it is *not* a route: it says what
+ * is in the way and how big that thing is, and leaves the cost of
+ * going around it to the caller.
+ */
+export interface GeoWaterCrossing {
+  /** Metres of the line that lie on water. Zero when nothing is in the way. */
+  crossedM: number;
+  /** The longest single crossing, when several bodies are in the way. */
+  widestM: number;
+  /** The biggest body's extent, corner to corner of its bounding box. */
+  extentM: number;
+  /** What that body is called. */
+  name: string | null;
+}
+
 export interface GeoPoiSearchPage {
   database: string;
   spots: GeoPoiSearchSpot[];
@@ -213,6 +235,17 @@ export interface GeoClient {
    * Tuscan border.
    */
   hasCoverage(postgresDb: string, lat: number, lon: number): Promise<boolean>;
+  /**
+   * Is there a lake between these two points, and how big is it?
+   *
+   * For the travel estimate, which without a router cannot see that the
+   * road goes round (§4.5, §14).
+   */
+  waterCrossing(
+    postgresDb: string,
+    from: { lat: number; lon: number },
+    to: { lat: number; lon: number },
+  ): Promise<GeoWaterCrossing>;
   /** The category vocabulary `searchPois` accepts. Region-independent. */
   poiCategories(): Promise<GeoPoiCategory[]>;
   /** Per-table size breakdown, for before/after import measurements. */
@@ -336,6 +369,24 @@ export class HttpGeoClient implements GeoClient {
       lon,
     });
     return body.covered === true;
+  }
+
+  async waterCrossing(
+    postgresDb: string,
+    from: { lat: number; lon: number },
+    to: { lat: number; lon: number },
+  ): Promise<GeoWaterCrossing> {
+    const body = await this.postJson<GeoWaterCrossing>("/water", {
+      database: postgresDb,
+      from,
+      to,
+    });
+    return {
+      crossedM: Number(body.crossedM ?? 0),
+      widestM: Number(body.widestM ?? 0),
+      extentM: Number(body.extentM ?? 0),
+      name: body.name ?? null,
+    };
   }
 
   /**

@@ -11,6 +11,8 @@
  *   POST   /pois/search           — area search for trip planning
  *   POST   /coverage              — { database, lat, lon, radiusM? } → is that
  *                                   corner of the world in this database at all
+ *   POST   /water                 — { database, from, to } → how much water the
+ *                                   straight line between them crosses
  *   GET    /pois/categories       — the category vocabulary /pois/search accepts
  *   POST   /import                — { slug, postgresDb, pbfUrl }
  *   DELETE /regions/:database     — drop a region database (admin)
@@ -29,6 +31,7 @@ import { findPoiCandidates } from "./pois.ts";
 import { readRegionStorage } from "./storage.ts";
 import { POI_CATEGORIES } from "./poi-categories.ts";
 import { hasCoverage } from "./coverage.ts";
+import { waterCrossing } from "./water.ts";
 import { PoiSearchError, searchPois, type PoiSearchOptions } from "./poi-search.ts";
 import {
   dropRegion,
@@ -169,6 +172,25 @@ app.post("/coverage", async (req, res, next) => {
     const radiusM = optionalPositiveInt((req.body as Record<string, unknown>)?.radiusM);
     const covered = await hasCoverage(database, lat, lon, radiusM);
     res.json({ database, covered });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Is there a lake in the way?
+ *
+ * The planner has no router and estimates a journey as the straight
+ * line times a factor, which a lake makes nonsense of (see
+ * `water.ts`). This says how much water is on the line and how big the
+ * biggest thing in the way is; what the way round costs is the
+ * caller's estimate.
+ */
+app.post("/water", async (req, res, next) => {
+  try {
+    const { database, from, to } = parseWaterBody(req.body);
+    const crossing = await waterCrossing(database, from, to);
+    res.json({ database, ...crossing });
   } catch (err) {
     next(err);
   }
@@ -320,6 +342,34 @@ function parseLookupBody(body: unknown): { database: string; lat: number; lon: n
   if (lat < -90 || lat > 90) throw new HttpError(400, `lat out of range: ${lat}`);
   if (lon < -180 || lon > 180) throw new HttpError(400, `lon out of range: ${lon}`);
   return { database, lat, lon };
+}
+
+function parseWaterBody(body: unknown): {
+  database: string;
+  from: { lat: number; lon: number };
+  to: { lat: number; lon: number };
+} {
+  if (!body || typeof body !== "object") {
+    throw new HttpError(400, "request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+  const database = requireString(b.database, "database");
+  if (!/^[a-z0-9_]+$/.test(database)) {
+    throw new HttpError(400, `database must match [a-z0-9_]+, got '${database}'`);
+  }
+  return { database, from: requirePoint(b.from, "from"), to: requirePoint(b.to, "to") };
+}
+
+function requirePoint(value: unknown, field: string): { lat: number; lon: number } {
+  if (!value || typeof value !== "object") {
+    throw new HttpError(400, `${field} must be an object with lat and lon`);
+  }
+  const p = value as Record<string, unknown>;
+  const lat = requireFiniteNumber(p.lat, `${field}.lat`);
+  const lon = requireFiniteNumber(p.lon, `${field}.lon`);
+  if (lat < -90 || lat > 90) throw new HttpError(400, `${field}.lat out of range: ${lat}`);
+  if (lon < -180 || lon > 180) throw new HttpError(400, `${field}.lon out of range: ${lon}`);
+  return { lat, lon };
 }
 
 function requireDatabaseName(database: string): string {
