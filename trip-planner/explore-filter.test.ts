@@ -100,6 +100,15 @@ describe("which kind of empty", () => {
     expect(note).toContain("kennt OpenStreetMap nichts");
   });
 
+  it("names the question when one was asked", () => {
+    // "Nothing matches your selection" is unhelpful when the selection
+    // is a question: what is missing is somewhere dry.
+    const note = emptinessNote({
+      regionMissing: false, found: 40, kept: 0, filtered: true, question: "bei Regen",
+    });
+    expect(note).toContain("nichts davon bei Regen");
+  });
+
   it("says nothing when there is something to look at", () => {
     expect(emptinessNote({ regionMissing: false, found: 40, kept: 12, filtered: true })).toBeNull();
   });

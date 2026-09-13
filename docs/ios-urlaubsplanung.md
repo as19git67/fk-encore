@@ -1534,6 +1534,32 @@ Geo-Abfrage: „Burgen und Schlösser" ist eine Menge von OSM-Tags ohne eigene
 Kategorie, und eine nach Kategorien verengte Abfrage würde genau die Burg
 verlieren, die keine trägt.
 
+**Erledigt (2026-09-13): Fragen statt Filter.**
+Die Interessen-Chips beantworten „was für ein Ding", also das, wofür eine
+Kategorie da ist. Was jemand tatsächlich fragt, während er im Regen steht,
+beantworten sie nicht — und genau dort hat der Planer etwas, was eine Karten-App
+nicht hat: er leitet aus Kategorie und OSM-Tag ab, ob ein Spot den Regen
+scheut (§7.2), und er kennt die Aufenthaltsdauer.
+
+Drei Fragen, jede aus vorhandenen Daten beantwortbar: **bei Regen**, **bei
+schönem Wetter**, **nur kurz** (≤ 30 Minuten). „Teils überdacht" bleibt drin und
+wird benannt statt weggefiltert — eine Markthalle oder ein Kreuzgang *ist* eine
+halbe Antwort, und wer im Regen steht, entscheidet besser selbst, ob halb
+reicht. Innerhalb der Antwort steht das ganz Überdachte vor dem halben.
+
+Bewusst **nicht** dabei:
+
+- *„Was ist am Montag offen?"* bräuchte einen Parser für OSMs
+  `opening_hours`-Grammatik. Die Zeichenkette wird gezeigt, nicht gedeutet —
+  halb verstanden ist der Weg zu einem Bildschirm, der ein geschlossenes Museum
+  verspricht (§15.3).
+- *„Zur goldenen Stunde"* braucht ein Datum und die Zeitzone **des Ortes**;
+  `lightWindows` sagt das selbst. Beides hat ein geplanter Tag, eine
+  Gegend-Suche nicht (§7.3).
+- *„Was passt noch in Mittwochnachmittag?"* braucht einen Block mit Budget,
+  gehört also zur Suche innerhalb einer Reise, nicht zu einer Suche, die
+  absichtlich keine hat.
+
 **Erledigt (2026-09-13): der Artikel ist in der App auslesbar.**
 Fall 2 ist der häufigste bei echter Recherche und war der mit den meisten
 Umwegen: Safari öffnen, teilen, eine Reise auswählen. Die Pipeline dahinter ist

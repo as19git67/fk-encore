@@ -24,6 +24,9 @@ final class TripExploreViewModel {
 
     private(set) var interests: [TripInterestOption] = []
     var chosenInterests: Set<String> = []
+    /// The question being asked, if one is. Only one at a time: „bei
+    /// Regen und bei schönem Wetter" is not a question anybody asks.
+    var question: TripExploreQuestion?
 
     private(set) var spots: [TripExploredSpot] = []
     private(set) var hasMore = false
@@ -114,6 +117,7 @@ final class TripExploreViewModel {
             let radiusM: Int
             let query: String?
             let interests: [String]
+            let question: String?
             let ownerId: Int?
         }
         do {
@@ -128,6 +132,7 @@ final class TripExploreViewModel {
                     // a set has no order, and a request that differs by
                     // nothing but field order defeats every cache.
                     interests: chosenInterests.sorted(),
+                    question: question?.rawValue,
                     ownerId: ownerId,
                 ),
             )

@@ -94,15 +94,25 @@ export function emptinessNote(state: {
   regionMissing: boolean;
   /** How many spots the region search returned, before filtering. */
   found: number;
-  /** How many survived the interest filter and the name. */
+  /** How many survived the interest filter, the name and the question. */
   kept: number;
-  /** Whether an interest filter was applied at all. */
+  /** Whether anything narrowed the list at all. */
   filtered: boolean;
+  /**
+   * The question that was asked, in the words the chip used. Named in
+   * the sentence when there was one: „nichts passt zur Auswahl" is
+   * unhelpful when the Auswahl is a question — what is missing is
+   * somewhere dry, not a category.
+   */
+  question?: string | null;
 }): string | null {
   if (state.regionMissing) {
     return "Diese Gegend ist noch nicht importiert — bis dahin weiß der Planer hier nichts.";
   }
   if (state.kept > 0) return null;
+  if (state.found > 0 && state.question) {
+    return `Hier gibt es etwas, aber nichts davon ${state.question}.`;
+  }
   if (state.found > 0 && state.filtered) {
     return "Hier gibt es etwas, aber nichts davon passt zur Auswahl.";
   }

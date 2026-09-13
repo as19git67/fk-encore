@@ -83,6 +83,41 @@ struct TripExploreRegionResponse: Codable, Sendable {
     }
 }
 
+/// A question the browse can answer, as against a category to filter by.
+///
+/// The interest chips answer „was für ein Ding", which is what a
+/// category is for. These answer what somebody standing in the rain
+/// actually asks — and the app can, because it derives whether a spot
+/// minds the wet and how long people stay (§7.2, §3.1).
+///
+/// The list is short and fixed, and matches `explore-questions.ts` on
+/// the server. Unlike the interests it is *not* fetched: three ids that
+/// the server refuses outright if they ever disagree, rather than a
+/// vocabulary that can drift silently.
+enum TripExploreQuestion: String, CaseIterable, Identifiable, Sendable {
+    case rain
+    case fair
+    case quick
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .rain: return "Bei Regen"
+        case .fair: return "Bei schönem Wetter"
+        case .quick: return "Nur kurz"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .rain: return "cloud.rain"
+        case .fair: return "sun.max"
+        case .quick: return "hourglass"
+        }
+    }
+}
+
 /// Where a browse is centred, and what to call that on screen.
 ///
 /// The interest vocabulary the chips are built from is

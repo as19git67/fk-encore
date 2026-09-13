@@ -96,7 +96,7 @@ struct TripExploreView: View {
         // filter belongs — inside the list they scrolled away with the
         // results they were filtering.
         .safeAreaInset(edge: .top) {
-            if model.area != nil && !model.interests.isEmpty {
+            if model.area != nil {
                 interestChips
             }
         }
@@ -142,6 +142,7 @@ struct TripExploreView: View {
             await model.loadInterests()
         }
         .onChange(of: model.chosenInterests) { _, _ in Task { await model.load() } }
+        .onChange(of: model.question) { _, _ in Task { await model.load() } }
         .onChange(of: model.radiusM) { _, _ in Task { await model.load() } }
         .refreshable { await model.load() }
         .sheet(isPresented: $isReadingArticle) {
@@ -194,6 +195,17 @@ struct TripExploreView: View {
     private var interestChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                // The questions come first, and carry an icon so they
+                // do not read as three more categories. „Es regnet, was
+                // jetzt?" is a different kind of thing to tap than
+                // „Museen" — and it is the question this app can answer
+                // and a map app cannot (§3.1).
+                ForEach(TripExploreQuestion.allCases) { question in
+                    questionChip(question)
+                }
+                if !model.interests.isEmpty {
+                    Divider().frame(height: 24)
+                }
                 ForEach(model.interests) { interest in
                     chip(interest)
                 }
@@ -202,6 +214,25 @@ struct TripExploreView: View {
             .padding(.vertical, 8)
         }
         .background(.bar)
+    }
+
+    private func questionChip(_ question: TripExploreQuestion) -> some View {
+        let asked = model.question == question
+        return Button {
+            // One at a time: tapping the asked one puts it away.
+            model.question = asked ? nil : question
+        } label: {
+            Label(question.label, systemImage: question.symbolName)
+                .font(.subheadline)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 44)
+                .background(asked ? Color.accentColor.opacity(0.18)
+                                  : Color(uiColor: .secondarySystemFill))
+                .foregroundStyle(asked ? Color.accentColor : Color.primary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(asked ? AccessibilityTraits.isSelected : [])
     }
 
     private func chip(_ interest: TripInterestOption) -> some View {
