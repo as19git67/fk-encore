@@ -24,6 +24,8 @@ import { setTripDayAnchor } from "./day-anchor-edit";
 /** The base, and a town an hour away by car. */
 const BASE = { lat: 43.4677, lon: 11.0430 };
 const TOWN = { lat: 43.7731, lon: 11.2560 };
+/** Twenty kilometres out of that town: a car's reach, nobody's city. */
+const OUT_OF_TOWN = { lat: 43.7731, lon: 11.5040 };
 const DB = "nom_centro";
 
 function spot(n: number, at: { lat: number; lon: number }): GeoPoiSearchSpot {
@@ -107,6 +109,60 @@ describe("a base with day trips (§4.5)", () => {
     expect(stopsOf(plan, 0).every((ref) => Number(ref.split(":")[1]) <= 8)).toBe(true);
     expect(stopsOf(plan, 1).length).toBeGreaterThan(0);
     expect(stopsOf(plan, 1).every((ref) => Number(ref.split(":")[1]) >= 21)).toBe(true);
+  });
+
+  it("stays in the city the outing is about, not the car's whole range", async () => {
+    // The reported case: quarters on a lake, a day trip to a city an
+    // hour away, and every proposed spot twenty kilometres outside that
+    // city — a theme park and a safari park, found because the day had
+    // inherited the leg's driving reach after the drive was already
+    // over (§4.5).
+    geo.setSearchSpots(DB, [
+      ...Array.from({ length: 8 }, (_, i) => spot(i + 21, TOWN)),
+      // Twenty kilometres further out: inside a car's reach, outside
+      // the city.
+      ...Array.from({ length: 8 }, (_, i) => spot(i + 41, OUT_OF_TOWN)),
+    ]);
+
+    const { plan } = await createTripPlan({
+      legs: [{
+        anchor: BASE, days: 1, mode: "car",
+        dayAnchors: [{ dayIndex: 0, ...TOWN, label: "Nachbarstadt" }],
+      }],
+      detailDays: 1,
+    });
+
+    const planned = stopsOf(plan, 0);
+    expect(planned.length).toBeGreaterThan(0);
+    expect(planned.every((ref) => Number(ref.split(":")[1]) < 41)).toBe(true);
+
+    // And it is the search that stayed small, not the scoring that
+    // happened to drop them: what never enters the pool cannot be
+    // rescued by a filter, and what does can be proposed.
+    const outing = geo.getSearchCalls()
+      .filter((c) => c.query.center
+        && Math.abs(c.query.center.lat - TOWN.lat) < 0.01
+        && Math.abs(c.query.center.lon - TOWN.lon) < 0.01);
+    expect(outing.length).toBeGreaterThan(0);
+    expect(outing.every((c) => (c.query.center?.radiusM ?? 0) <= 8_000)).toBe(true);
+  });
+
+  it("still drives the valley when the day asks for it", async () => {
+    // The other half: an explicit radius is an answer the table cannot
+    // give, and it must survive the new default.
+    geo.setSearchSpots(DB, [
+      ...Array.from({ length: 8 }, (_, i) => spot(i + 41, OUT_OF_TOWN)),
+    ]);
+
+    const { plan } = await createTripPlan({
+      legs: [{
+        anchor: BASE, days: 1, mode: "car",
+        dayAnchors: [{ dayIndex: 0, ...TOWN, label: "Nachbarstadt", radiusM: 25_000 }],
+      }],
+      detailDays: 1,
+    });
+
+    expect(stopsOf(plan, 0).length).toBeGreaterThan(0);
   });
 
   it("keeps the destination on the day, so a re-plan goes back to it", async () => {

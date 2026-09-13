@@ -38,6 +38,7 @@ import {
 } from "./day-anchor";
 import {
   MAX_SEARCH_RADIUS_M,
+  dayTripRadiusFor,
   mergeByOsmRef,
   searchRadiusFor,
 } from "./search-reach";
@@ -1988,7 +1989,10 @@ async function dayTripPool(
   legRadiusM: number,
   cache: Map<string, ScoredCandidate[]>,
 ): Promise<ScoredCandidate[]> {
-  const radiusM = dayTrip.radiusM ?? legRadiusM;
+  // Not the leg's reach: that is how far the car goes from the hotel,
+  // and the car has already gone. An outing is searched at the size of
+  // the place it is about (§4.5).
+  const radiusM = dayTripRadiusFor(dayTrip.radiusM, legRadiusM);
   const key = `${dayTrip.at.lat.toFixed(3)},${dayTrip.at.lon.toFixed(3)}:${radiusM}`;
   const hit = cache.get(key);
   if (hit) return hit;

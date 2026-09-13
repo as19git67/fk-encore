@@ -543,6 +543,29 @@ Die Karte sagt es: „Hin und zurück 2 h 30 (geschätzt) — um den Gardasee he
 Ohne diesen Halbsatz ist eine Zwei-Stunden-Fahrt für zwanzig Kilometer einfach
 ein Planer, dem niemand glaubt.
 
+**Erledigt (2026-09-13): ein Ausflug ist ein Ort, keine Fahrreichweite.**
+Der Suchradius einer Etappe folgt dem Verkehrsmittel (§4.2, `search-reach.ts`):
+im Auto 25 km, weil „ein Tag von hier aus" mit einem Auto so weit reicht. Ein
+Tagesausflug hat diesen Radius geerbt — und damit die falsche Frage beantwortet.
+Vier Tage Quartier am See, ein Tagesausflug in eine Stadt eine Stunde entfernt,
+und vorgeschlagen wurden ein Freizeitpark und ein Wildpark zwanzig Kilometer
+außerhalb dieser Stadt. Die Prominenz-Seite der Suche (§4.2) holt sie zuverlässig
+herein: sie sind bekannter als das halbe Zentrum.
+
+Die Fahrt ist beim Ausflug aber schon bezahlt. Wer nach Verona fährt, läuft dort
+— also wird ein Ausflug in der Größe des Ortes geplant: `DAY_TRIP_REACH_M`
+(8 km), groß genug für eine Stadt samt Rand, klein genug, dass „wir fahren nach
+Verona" noch Verona heißt. Eine Etappe, die ohnehin weniger weit reicht, behält
+ihre Zahl — zu Fuß hinfahren und dann acht Kilometer angeboten bekommen wäre
+derselbe Fehler spiegelverkehrt. Und ein ausdrücklicher `radiusM` am Tagesanker
+gewinnt weiterhin: „wir bleiben in der Altstadt" und „wir fahren das Tal ab" sind
+beides Antworten, die keine Tabelle geben kann.
+
+Der Test dafür misst den Suchradius, nicht die Pins: dass die weit entfernten
+Spots am Ende nicht auf dem Tag stehen, kann auch das Scoring erledigt haben. Was
+gar nicht erst in den Pool kommt, kann kein Filter mehr retten — und was
+hineinkommt, kann vorgeschlagen werden.
+
 Was es nicht sieht: unbenannte Gewässer (der Import verlangt einen Namen) und
 Flüsse als `waterway`-Linien. Und es weiß nicht, *wo* der Weg herumführt — nur,
 dass er es muss.
