@@ -160,10 +160,17 @@ struct TripDayMapView: View {
 
             lightLine
 
+            // No `step:`. It snapped the value *and* drew a tick per
+            // step, and 134 ticks across eleven hours read as one grey
+            // line under the track — the line that has been reported
+            // three times. The snapping moves into the binding, where
+            // it does the wanted half of the job and none of the other.
             Slider(
-                value: $sliderMinutes,
+                value: Binding(
+                    get: { sliderMinutes },
+                    set: { sliderMinutes = TripDayTimeline.snapped($0, within: span) },
+                ),
                 in: Double(span.lowerBound)...Double(span.upperBound),
-                step: 5,
             ) {
                 Text("Uhrzeit")
             } minimumValueLabel: {

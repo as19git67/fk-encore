@@ -18,6 +18,30 @@ import Foundation
 /// Pure and free of dates: minutes past midnight in, a position out.
 enum TripDayTimeline {
 
+    /// How coarse the time slider is, in minutes. Finer than the plan
+    /// can honestly answer for anyway (§4.1).
+    static let sliderStepMinutes = 5
+
+    /// The slider's value, snapped to the step and kept inside the day.
+    ///
+    /// Done in the binding rather than with `Slider(step:)`, and that is
+    /// not a matter of taste. A stepped slider draws a tick per step,
+    /// and a day of eleven hours in five-minute steps has a hundred and
+    /// thirty-odd of them: they merge into what looks like a stray grey
+    /// line under the track — reported three times as "the line under
+    /// the slider", and twice chased in the tab bar, which never drew
+    /// it. The snapping is the part that was wanted; the ticks were
+    /// never asked for.
+    static func snapped(
+        _ minutes: Double,
+        within span: ClosedRange<Int>,
+        step: Int = TripDayTimeline.sliderStepMinutes,
+    ) -> Double {
+        guard step > 0 else { return minutes }
+        let stepped = (minutes / Double(step)).rounded() * Double(step)
+        return min(max(stepped, Double(span.lowerBound)), Double(span.upperBound))
+    }
+
     /// Where the plan has the travellers at `minutes`, if anywhere.
     ///
     /// Within a block, the stops are spread across it in order — the
