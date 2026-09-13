@@ -505,6 +505,48 @@ Reihenfolge, falls es gebaut wird: erst der Modus-Radius (eine Zeile Logik,
 sofort spürbar), dann der Tagesanker (eine Spalte an `trip_plan_days`, ein Feld
 im Tagesrahmen, die Reisezeit aus den Blöcken), zuletzt der Modus im Freitext.
 
+**Erledigt (2026-09-13): der See im Weg.**
+Die Schätzung war Luftlinie × Umwegfaktor (Auto 1,4), und der Faktor ist ein
+Mittelwert über ein Straßennetz, das ungefähr dorthin führt, wo man hinwill. Ein
+See ist kein Mittelwert: vom Ostufer des Gardasees zum Lago d'Idro sind es
+zwanzig Kilometer Luftlinie, also achtundzwanzig laut Planer — und siebzig auf
+der Straße, weil sie um das Nordende führt.
+
+Schlimmer als eine falsche Zahl auf einer Karte: `legLimitFor` entscheidet, was
+überhaupt in einen Tag darf. Eine Unterschätzung lässt Orte zu, die niemand
+erreicht.
+
+Ein Router ist die richtige Antwort und ein großes Stück Arbeit (§14). Das hier
+ist die billige Hälfte, und sie ist möglich, weil die Daten schon da sind:
+benannte Gewässer werden als POIs **mit ihrer Geometrie** importiert (`shape`,
+für geschlossene Ways wie für Multipolygon-Relationen). `POST /water` im
+Geo-Service beantwortet, ob eine Gerade eines kreuzt, wie viel davon und wie
+groß das Ding insgesamt ist; `detourAroundWater` schlägt die Hälfte seiner
+Ausdehnung auf.
+
+Drei Entscheidungen, die dabei zählen:
+
+- **Unter 400 m Kreuzung passiert nichts.** Flüsse werden ständig gequert, haben
+  Brücken und sind ohnehin meist Linien statt Polygone. Für jede einen Umweg zu
+  berechnen wäre weit falscher als für keine.
+- **Der Fehler ist absichtlich einseitig.** Eine Querung nahe dem Seeende kostet
+  kaum etwas, wir rechnen trotzdem die halbe Ausdehnung. Überschätzen lässt
+  etwas Erreichbares weg, das ein Mensch von Hand zurückholt; Unterschätzen
+  plant einen Nachmittag um einen Ort auf der anderen Seite, was man im Auto
+  merkt.
+- **Gespeichert, nicht bei jedem Laden neu geholt** (Migration 0197). Der
+  Lesepfad bedient jeden Planabruf und darf keine HTTP-Anfrage pro Tag machen —
+  und der Plan wurde *unter dieser Annahme* gebaut; sie später neu zu berechnen
+  ließe die Karte von dem Tag abdriften, den sie beschreibt.
+
+Die Karte sagt es: „Hin und zurück 2 h 30 (geschätzt) — um den Gardasee herum".
+Ohne diesen Halbsatz ist eine Zwei-Stunden-Fahrt für zwanzig Kilometer einfach
+ein Planer, dem niemand glaubt.
+
+Was es nicht sieht: unbenannte Gewässer (der Import verlangt einen Namen) und
+Flüsse als `waterway`-Linien. Und es weiß nicht, *wo* der Weg herumführt — nur,
+dass er es muss.
+
 ### 4.6 Der Ausflug, den niemand verlangt hat (offen)
 
 §4.5 macht den Tagesausflug *ausdrückbar*. Der eigentliche Wunsch geht weiter:

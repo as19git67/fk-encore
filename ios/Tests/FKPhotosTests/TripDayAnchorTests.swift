@@ -13,13 +13,15 @@ final class TripDayAnchorTests: XCTestCase {
         travelMinutes: Int,
         departMinutes: Int? = nil,
         returnMinutes: Int? = nil,
+        waterAround: String? = nil,
     ) throws -> TripDayAnchor {
         try JSONDecoder().decode(TripDayAnchor.self, from: Data("""
         { "lat": 43.7199, "lon": 10.3973,
           "label": \(label.map { "\"\($0)\"" } ?? "null"),
           "radiusM": null, "travelMinutes": \(travelMinutes),
           "departMinutes": \(departMinutes.map(String.init) ?? "null"),
-          "returnMinutes": \(returnMinutes.map(String.init) ?? "null") }
+          "returnMinutes": \(returnMinutes.map(String.init) ?? "null"),
+          "waterAround": \(waterAround.map { "\"\($0)\"" } ?? "null") }
         """.utf8))
     }
 
@@ -115,6 +117,35 @@ final class TripDayAnchorTests: XCTestCase {
         XCTAssertEqual(
             try anchor(label: "Pisa", travelMinutes: 82,
                        departMinutes: 8 * 60, returnMinutes: 17 * 60).costLine,
+            "08:00–17:00",
+        )
+    }
+
+    func testItSaysWhatTheDriveHasToGoRound() throws {
+        // Twenty kilometres on the map and two hours in the car is a
+        // planner nobody believes — unless it says there is a lake in
+        // the way (§4.5).
+        XCTAssertEqual(
+            try anchor(label: "Idro", travelMinutes: 75, waterAround: "Gardasee").costLine,
+            "Hin und zurück 2 h 30 (geschätzt) — um den Gardasee herum",
+        )
+    }
+
+    func testAnOrdinaryDriveSaysNothingAboutWater() throws {
+        // Including a plan made before the planner could see water at
+        // all: the field is simply absent, and absent must read as "no
+        // lake" rather than as an empty clause.
+        XCTAssertFalse(try anchor(label: "Pisa", travelMinutes: 82).costLine.contains("herum"))
+        XCTAssertFalse(
+            try anchor(label: "Pisa", travelMinutes: 82, waterAround: "").costLine.contains("herum"))
+    }
+
+    func testTheNamedHoursStillWinOverTheDetour() throws {
+        // A detour explains an estimate. Where the traveller named the
+        // hours there is no estimate left to explain.
+        XCTAssertEqual(
+            try anchor(label: "Idro", travelMinutes: 75, departMinutes: 8 * 60,
+                       returnMinutes: 17 * 60, waterAround: "Gardasee").costLine,
             "08:00–17:00",
         )
     }

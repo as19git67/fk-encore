@@ -23,6 +23,7 @@ import log from "encore.dev/log";
 import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { requestRegionFor } from "./region-request";
+import { waterDetourBetween } from "./water-detour";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
@@ -875,7 +876,18 @@ export const detailTripDay = api(
     // day out of it would produce a day in the wrong city, and the
     // frame it already carries (the later start, the shortened last
     // block) was written for the drive.
-    const dayTrip = dayTripOf(leg.anchor, day.anchor, leg.mode);
+    // Is there a lake between the quarters and where this day happens?
+    // Without a router the estimate is the straight line times a
+    // factor, and a lake makes nonsense of that (§4.5).
+    const dayTrip = dayTripOf(
+      leg.anchor,
+      day.anchor,
+      leg.mode,
+      day.anchor
+        ? await waterDetourBetween(leg.regionDb, leg.anchor,
+                                   { lat: day.anchor.lat, lon: day.anchor.lon })
+        : null,
+    );
     const pool = dayTrip === null
       ? leg.pool
       : await dayTripPool(dayTrip, constraintsOf(plan), leg.radiusM ?? searchRadiusFor(leg.mode),
@@ -1404,7 +1416,17 @@ async function planLeg(
     // elsewhere. The drive there is spent by starting the day later —
     // the same arithmetic the arrival day uses — and the drive back
     // comes off the last block that holds places, further down.
-    const dayTrip = dayTripOf(anchor, dayAnchors.get(dayIndex), mode);
+    const dayAnchor = dayAnchors.get(dayIndex);
+    // Is there a lake between the quarters and where this day happens?
+    // Without a router the estimate is the straight line times a
+    // factor, and a lake makes nonsense of that (§4.5). Asked once per
+    // day trip and stored with the day, so the card and the plan agree
+    // and no plan load has to ask again.
+    const water = dayAnchor
+      ? await waterDetourBetween(region?.postgresDb, anchor,
+                                 { lat: dayAnchor.lat, lon: dayAnchor.lon })
+      : null;
+    const dayTrip = dayTripOf(anchor, dayAnchor, mode, water);
     const withDrive = (startsAt: number | null | undefined) =>
       dayTrip === null
         ? startsAt
@@ -1925,6 +1947,10 @@ function storedAnchor(dayTrip: DayTrip | null): DayAnchor | null {
     radiusM: dayTrip.radiusM,
     departMinutes: dayTrip.departMinutes,
     returnMinutes: dayTrip.returnMinutes,
+    // Stored with the day, so a plan load spends the same detour the
+    // planning did instead of asking the region database again (§4.5).
+    waterDetourM: dayTrip.detourM,
+    waterAround: dayTrip.around,
   };
 }
 

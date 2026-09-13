@@ -162,6 +162,19 @@ export interface StoredDayAnchor {
   departMinutes: number | null;
   /** When they start back from there. */
   returnMinutes: number | null;
+  /**
+   * Extra metres the way round the water costs, as the planner found
+   * it (§4.5). Null means nobody looked — an older plan, or a region
+   * that could not be asked; zero means the way was clear.
+   *
+   * Stored, unlike `travelMinutes`: that one is derived from two
+   * anchors and a mode, all of which are here, while this one is an
+   * answer from the region database that a read must not go and fetch
+   * again on every plan load.
+   */
+  waterDetourM: number | null;
+  /** What is being gone around, for the sentence the app shows. */
+  waterAround: string | null;
 }
 
 export interface StoredFixpoint extends Fixpoint {
@@ -259,6 +272,9 @@ export interface DayAnchor {
   departMinutes?: number | null;
   /** When they start back from the destination. */
   returnMinutes?: number | null;
+  /** What the way round the water costs, once somebody has asked. */
+  waterDetourM?: number | null;
+  waterAround?: string | null;
 }
 
 export interface CreateLegInput {
@@ -540,6 +556,8 @@ async function insertDays(
         anchor_label: dayInput.anchor?.label ?? null,
         anchor_radius_m: dayInput.anchor?.radiusM ?? null,
         anchor_depart_minutes: dayInput.anchor?.departMinutes ?? null,
+        anchor_water_detour_m: dayInput.anchor?.waterDetourM ?? null,
+        anchor_water_around: dayInput.anchor?.waterAround ?? null,
         anchor_return_minutes: dayInput.anchor?.returnMinutes ?? null,
       })
       .returning({ id: tripPlanDays.id });
@@ -988,6 +1006,8 @@ export async function loadPlan(
           radiusM: row.anchor_radius_m,
           departMinutes: row.anchor_depart_minutes,
           returnMinutes: row.anchor_return_minutes,
+          waterDetourM: row.anchor_water_detour_m,
+          waterAround: row.anchor_water_around,
           // Filled in once the leg's anchor and mode are known.
           travelMinutes: 0,
         },
@@ -1372,7 +1392,13 @@ function withTravel(
         ...day,
         anchor: {
           ...day.anchor,
-          travelMinutes: travelLeg(legAnchor, day.anchor, mode).minutes,
+          // The way round whatever the planner found in the water, so
+          // the card and the day it describes carry the same number
+          // (§4.5). Null — nobody looked — costs nothing, which is
+          // what every plan made before this existed assumed.
+          travelMinutes: travelLeg(
+            legAnchor, day.anchor, mode, day.anchor.waterDetourM ?? 0,
+          ).minutes,
         },
       });
 }
@@ -1390,6 +1416,8 @@ export async function setDayAnchor(
       anchor_label: anchor?.label ?? null,
       anchor_radius_m: anchor?.radiusM ?? null,
       anchor_depart_minutes: anchor?.departMinutes ?? null,
+      anchor_water_detour_m: anchor?.waterDetourM ?? null,
+      anchor_water_around: anchor?.waterAround ?? null,
       anchor_return_minutes: anchor?.returnMinutes ?? null,
     })
     .where(eq(tripPlanDays.id, dayId));

@@ -148,6 +148,57 @@ describe("a base with day trips (§4.5)", () => {
     expect(minutes(outing)).toBeLessThan(minutes(plain));
   });
 
+  it("goes round a lake in the way, and says which one", async () => {
+    // The reported case: the quarters on one shore, the day's
+    // destination on the other. The straight line says twenty
+    // kilometres, the road goes round the end and says seventy — and
+    // the leg limit decides what may enter the day at all, so the
+    // difference is not only a number on a card.
+    const clear = await createTripPlan({
+      legs: [{
+        anchor: BASE, days: 1, mode: "car",
+        dayAnchors: [{ dayIndex: 0, ...TOWN, label: "Nachbarstadt" }],
+      }],
+      detailDays: 1,
+    });
+
+    geo.setWaterCrossing(DB, {
+      crossedM: 3_000, widestM: 3_000, extentM: 52_000, name: "Beispielsee",
+    });
+    const around = await createTripPlan({
+      legs: [{
+        anchor: BASE, days: 1, mode: "car",
+        dayAnchors: [{ dayIndex: 0, ...TOWN, label: "Nachbarstadt" }],
+      }],
+      detailDays: 1,
+    });
+
+    const clearAnchor = clear.plan.legs[0].days[0].anchor!;
+    const aroundAnchor = around.plan.legs[0].days[0].anchor!;
+
+    expect(aroundAnchor.travelMinutes).toBeGreaterThan(clearAnchor.travelMinutes + 10);
+    // Named, so the card can answer "why two hours for twenty
+    // kilometres?" instead of leaving it as a figure nobody can
+    // account for.
+    expect(aroundAnchor.waterAround).toBe("Beispielsee");
+    // And it survives the read: a plan load must spend the same detour
+    // the planning did, without asking the region database again.
+    expect(aroundAnchor.waterDetourM).toBe(26_000);
+  });
+
+  it("says nothing about water when the way is clear", async () => {
+    const { plan } = await createTripPlan({
+      legs: [{
+        anchor: BASE, days: 1, mode: "car",
+        dayAnchors: [{ dayIndex: 0, ...TOWN, label: "Nachbarstadt" }],
+      }],
+      detailDays: 1,
+    });
+
+    expect(plan.legs[0].days[0].anchor?.waterAround).toBeNull();
+    expect(plan.legs[0].days[0].anchor?.waterDetourM).toBe(0);
+  });
+
   it("stays at the base when the anchor names the quarters", async () => {
     // "We stay here" is not a day trip, and charging a zero-minute
     // drive to it would cost the day a line and nothing else.

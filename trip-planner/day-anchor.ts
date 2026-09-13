@@ -40,7 +40,7 @@
  */
 
 import { MIN_VIABLE_BLOCK_MINUTES } from "./fixpoints";
-import { travelLeg, type Coordinate, type TransportMode } from "./travel";
+import { travelLeg, type Coordinate, type TransportMode, type WaterDetour } from "./travel";
 
 /** What a day says about where it happens. */
 export interface DayAnchorInput {
@@ -68,6 +68,18 @@ export interface DayTrip {
    * the time that counts — see the two below.
    */
   travelMinutes: number;
+  /**
+   * What is in the way, when something is (§4.5). Null for an ordinary
+   * drive; the name of a lake when the straight line crosses one and
+   * the road has to go round it.
+   */
+  around: string | null;
+  /**
+   * The metres that going round cost, already inside `travelMinutes`.
+   * Carried so the day can be stored with the assumption it was built
+   * on rather than having it looked up again on every read.
+   */
+  detourM: number;
   /** When they set off, if anybody said. */
   departMinutes: number | null;
   /** When they start back from the destination, if anybody said. */
@@ -86,16 +98,23 @@ export function dayTripOf(
   legAnchor: Coordinate,
   day: DayAnchorInput | null | undefined,
   mode: TransportMode,
+  detour?: WaterDetour | null,
 ): DayTrip | null {
   if (!day || !Number.isFinite(day.lat) || !Number.isFinite(day.lon)) return null;
   const at = { lat: day.lat, lon: day.lon };
-  const travelMinutes = travelLeg(legAnchor, at, mode).minutes;
+  // The way round a lake, when the caller looked one up. Passed in
+  // rather than fetched: this stays a pure function, and the lookup is
+  // one HTTP call the planner makes once per day trip
+  // (`water-detour.ts`).
+  const travelMinutes = travelLeg(legAnchor, at, mode, detour?.extraM ?? 0).minutes;
   if (travelMinutes === 0) return null;
   return {
     at,
     label: day.label?.trim() ? day.label.trim() : null,
     radiusM: day.radiusM ?? null,
     travelMinutes,
+    around: detour?.around ?? null,
+    detourM: detour?.extraM ?? 0,
     departMinutes: minuteOfDay(day.departMinutes),
     returnMinutes: minuteOfDay(day.returnMinutes),
   };
