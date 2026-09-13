@@ -273,7 +273,14 @@ export const unshareIdeas = api(
  * The collection is the owner's, and everybody they share it with may
  * write into it — one list, not a copy per person (§20.1).
  */
-async function requireAccess(ownerId: number, userId: number): Promise<number> {
+/**
+ * May this person write into that collection, and which one is it?
+ *
+ * Exported because browsing needs it too (`explore.ts`): a list that
+ * marks what you have already collected has to be sure it is allowed
+ * to look into that collection first.
+ */
+export async function requireAccess(ownerId: number, userId: number): Promise<number> {
   if (ownerId === userId) return ownerId;
   const [share] = await db
     .select({ id: ideaPoolShares.id })

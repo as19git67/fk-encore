@@ -1499,6 +1499,41 @@ eine Notiz an der Zeile hielte genau bis zur nächsten Einstellungsänderung. Da
 Paar (Etappe, Ort) ist das, was ein Mensch meint — und es gilt, ob der Spot
 gerade im Vorrat liegt, auf einem Tag steht oder nirgends.
 
+**Erledigt (2026-09-13): der fünfte Weg — selber nachsehen.**
+Die vier Wege oben setzen alle voraus, dass die Recherche schon stattgefunden
+hat: der Link ist gefunden, der Artikel gelesen, der Name bekannt. Die Frage
+davor — *was gibt es hier überhaupt?* — konnten die Regionsdatenbanken seit dem
+ersten Import beantworten, und gefragt hat sie nur der Solver. Ein Mensch kam an
+dieselben Daten ausschließlich über einen Namensfilter.
+
+`POST /trip-planner/explore` macht daraus einen Weg für Menschen: eine
+Koordinate, ein Umkreis, optional ein paar Interessen aus §8.1 — und heraus
+kommt, was die Gegend hergibt, nach Prominenz sortiert statt nach Entfernung
+(die Kathedrale schlägt die Kapelle nebenan). Der Namensfilter bleibt, ist aber
+nicht mehr die einzige Tür.
+
+Zwei Eigenschaften, die den Unterschied machen:
+
+- **Kein Trip nötig.** Die Suche hing bisher an `plans/:planId/search` und nahm
+  Mittelpunkt und Radius aus der Etappe. Das war nie eine Datenanforderung: eine
+  Region wird in der Regionsverwaltung importiert, nicht beim Anlegen einer
+  Reise. Mittelpunkt und Radius kommen jetzt vom Telefon oder aus einem Ort, den
+  jemand in Apples Geocoder ausgewählt hat, und der Fund geht in den
+  Ideenvorrat (§20), der noch nie eine Reise gebraucht hat. Damit ist der Vorrat
+  zum ersten Mal von innen füllbar — bisher kam nur hinein, was jemand
+  hereingeteilt hat.
+- **Leer ist nicht gleich leer.** Eine nicht importierte Region, ein zu enger
+  Filter und eine Gegend ohne Sehenswürdigkeiten sind drei verschiedene
+  Antworten, und der Server sagt, welche davon zutrifft. Importiert wird dabei
+  nichts von selbst: ein Import ist ein Hintergrundjob von Minuten bis Stunden
+  (§13.0), und ein Tipp, der stillschweigend einen auslöst, beantwortet eine
+  Frage mit einer Wartezeit, der niemand zugestimmt hat.
+
+Die Interessen werden dabei **in der App-Schicht** gefiltert, nicht in der
+Geo-Abfrage: „Burgen und Schlösser" ist eine Menge von OSM-Tags ohne eigene
+Kategorie, und eine nach Kategorien verengte Abfrage würde genau die Burg
+verlieren, die keine trägt.
+
 ### 9.3 Eine Webseite auslesen
 
 Der Weg von einem Reiseblog zu Kandidaten im Vorrat, in vier Stufen. Er ist der
