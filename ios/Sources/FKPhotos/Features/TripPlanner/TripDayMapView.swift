@@ -18,6 +18,13 @@ struct TripDayMapView: View {
     /// user-location puck. Passed in rather than computed here so the
     /// view stays a pure function of its inputs.
     let isRunning: Bool
+    /// Take this spot out of the running for the whole trip (§5).
+    ///
+    /// A closure rather than the plan's view model: the map stays a
+    /// pure function of what it is given, and the one thing it cannot
+    /// compute — what happens to the trip — arrives from the screen
+    /// that owns it. Nil leaves the sheet read-only.
+    var onHide: (@MainActor (TripStop) async -> Void)?
 
     @State private var camera: MapCameraPosition = .automatic
     @State private var sliderMinutes: Double = 0
@@ -77,10 +84,28 @@ struct TripDayMapView: View {
             }
         }
         .sheet(item: $selected) { pick in
-            TripPinDetailSheet(detail: TripPinDetail.of(pick.stop, number: pick.number, in: day))
+            TripPinDetailSheet(
+                detail: TripPinDetail.of(pick.stop, number: pick.number, in: day),
+                onHide: hideAction(for: pick),
+            )
         }
         .onAppear {
             if let span, sliderMinutes == 0 { sliderMinutes = Double(span.lowerBound) }
+        }
+    }
+
+    /// Hiding the tapped spot, or nothing when the screen above gave
+    /// no way to. Written out rather than inlined into the sheet so the
+    /// closure carries its actor: it touches `selected`, which belongs
+    /// to this view.
+    private func hideAction(for pick: Selection) -> (@MainActor () async -> Void)? {
+        guard let onHide else { return nil }
+        return {
+            await onHide(pick.stop)
+            // The pin is gone from the day, so the selection must go
+            // too: it would otherwise re-open a sheet about a stop
+            // this trip no longer has.
+            selected = nil
         }
     }
 
