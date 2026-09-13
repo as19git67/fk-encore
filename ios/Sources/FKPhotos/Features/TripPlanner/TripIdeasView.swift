@@ -68,12 +68,23 @@ struct TripIdeasView: View {
                     Text("Was euch begegnet, sammelt sich hier — ohne dass es "
                          + "schon eine Reise dazu geben muss.")
                 } actions: {
-                    Button {
-                        startAdding()
-                    } label: {
-                        Label("Das hier merken", systemImage: "mappin.and.ellipse")
+                    VStack(spacing: 12) {
+                        Button {
+                            startAdding()
+                        } label: {
+                            Label("Das hier merken", systemImage: "mappin.and.ellipse")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        // An empty collection is exactly when somebody
+                        // has nothing to share into it yet, so the way
+                        // that needs no link belongs here.
+                        NavigationLink {
+                            TripExploreView(ownerId: model.ownerId)
+                        } label: {
+                            Label("Gegend erkunden", systemImage: "binoculars")
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 .background(Color(uiColor: .systemGroupedBackground))
             }
@@ -136,6 +147,18 @@ struct TripIdeasView: View {
                     TripIdeasNearbyView(model: model)
                 } label: {
                     Label("In der Nähe", systemImage: "location.magnifyingglass")
+                }
+            }
+            // The other direction, and the one the collection had no
+            // answer for: not "is anything of ours here" but "what is
+            // here at all" (§9.2). It belongs on this screen because
+            // what it finds needs no trip — which is the whole point of
+            // the collection.
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink {
+                    TripExploreView(ownerId: model.ownerId)
+                } label: {
+                    Label("Entdecken", systemImage: "binoculars")
                 }
             }
         }
