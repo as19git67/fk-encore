@@ -25,6 +25,7 @@ import "./nearby";
 import "./add-find";
 import "./share";
 import "./search";
+import "./explore";
 import "./shares";
 import "./pool";
 import "./legs";

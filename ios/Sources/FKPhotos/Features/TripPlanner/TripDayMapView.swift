@@ -57,10 +57,16 @@ struct TripDayMapView: View {
         .navigationTitle("Karte")
         .navigationBarTitleDisplayMode(.inline)
         // The map panel runs to the bottom edge of the screen. Left
-        // showing, the tab bar draws its own hairline across the slider
-        // and steals the row under it for tabs nobody can reach from a
-        // map anyway.
+        // showing, the tab bar steals the row under the slider for tabs
+        // nobody can reach from a map anyway.
         .toolbar(.hidden, for: .tabBar)
+        // And hiding the bar is not the same as hiding what it draws.
+        // `.toolbar(.hidden,…)` takes away the bar's *content* — the
+        // icons and their labels — while the bar itself keeps painting
+        // its background, and the top edge of that background is a
+        // hairline. It landed just under the slider, which is why the
+        // line survived the fix above: nothing was ever hiding it.
+        .toolbarBackgroundVisibility(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
