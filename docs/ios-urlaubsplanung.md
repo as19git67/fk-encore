@@ -1534,6 +1534,28 @@ Geo-Abfrage: „Burgen und Schlösser" ist eine Menge von OSM-Tags ohne eigene
 Kategorie, und eine nach Kategorien verengte Abfrage würde genau die Burg
 verlieren, die keine trägt.
 
+**Erledigt (2026-09-13): der Artikel ist in der App auslesbar.**
+Fall 2 ist der häufigste bei echter Recherche und war der mit den meisten
+Umwegen: Safari öffnen, teilen, eine Reise auswählen. Die Pipeline dahinter ist
+seit der Share-Extension vollständig (§9.3) — Seite holen, auf Text eindampfen,
+das Modell nennt die Orte, jeder Name wird gegen die Region aufgelöst — und sie
+hing an einem Trip.
+
+Was der Trip beigesteuert hat, war **wo die Namen nachgeschlagen werden**. Das
+kann auch eine Koordinate: die Gegend, die man gerade durchsieht (§9.2 Fall 4),
+und die Region darunter. `POST /trip-planner/explore/article` ist genau diese
+Verdrahtung und sonst nichts; `articleProposals` nimmt jetzt Suchgebiete statt
+eines Plans, und der Trip liefert seine Etappen als solche.
+
+Auf dem Bildschirm steht, was auch beim Teilen steht: jeder Ort mit **dem Satz
+aus dem Artikel, der ihn auf die Liste gebracht hat**. Ein Vorschlag, den
+niemand prüfen kann, ist einer, den niemand annehmen sollte. Drei Sorten, drei
+Konsequenzen: aufgelöst → ein Tipp; mehrdeutig → erst auswählen; von der Region
+nicht gefunden → bleibt Notiz, wird **nicht** übernommen, weil ein Eintrag ohne
+Koordinate nicht wiederfindbar ist. Nach der Dauer gefragt wird nur dort, wo
+kein OSM-Eintrag dahintersteht — sonst liefert die Kategorie sie, und ein
+Vorgabewert würde aus jedem Museum drei Viertelstunden machen.
+
 **Nachtrag (2026-09-13): die fehlende Region ist anforderbar.**
 „Diese Gegend ist noch nicht importiert" war eine Sackgasse, obwohl es seit je
 einen Weg heraus gibt: beim Anlegen einer Reise fordert der Planer die Region

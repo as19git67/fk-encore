@@ -142,11 +142,39 @@ export const analyseShare = api(
       }
     }
 
-    return await articleProposals(url || null, text, plan);
+    return await articleProposals(url || null, text, searchAreasOf(plan));
   },
 );
 
 type LoadedPlan = NonNullable<Awaited<ReturnType<typeof loadPlan>>>;
+
+/**
+ * Where the names in an article are looked up.
+ *
+ * A trip hands over its legs, and each one is a region plus the point
+ * it is planned around. Nothing in the reading needs it to *be* a leg,
+ * though, and §20 has a reader with no trip behind it at all — a
+ * coordinate somebody named and the region under it. So the article
+ * path takes areas, and the trip supplies them rather than being them.
+ *
+ * `position` is what a proposal reports back as its `legIndex`: the leg
+ * it belongs to for a trip, and zero for a single area, where it means
+ * nothing and is ignored.
+ */
+export interface ArticleSearchArea {
+  position: number;
+  regionDb: string;
+  anchor: { lat: number; lon: number };
+}
+
+/** A trip's legs, as areas to search. */
+export function searchAreasOf(plan: LoadedPlan): ArticleSearchArea[] {
+  return plan.legs.map((leg) => ({
+    position: leg.position,
+    regionDb: leg.regionDb,
+    anchor: leg.anchor,
+  }));
+}
 
 /**
  * A shared map pin (§9.2, case 1).
@@ -217,10 +245,10 @@ function firstLine(text: string): string | null {
  * screenshot into text, it is the same problem, and the concept says as
  * much.
  */
-async function articleProposals(
+export async function articleProposals(
   url: string | null,
   sharedText: string,
-  plan: LoadedPlan,
+  areas: readonly ArticleSearchArea[],
 ): Promise<AnalyseShareResponse> {
   const rejected: string[] = [];
   let articleText = sharedText.trim();
@@ -262,7 +290,7 @@ async function articleProposals(
 
   const proposals: ShareProposal[] = [];
   for (const place of extraction.places) {
-    proposals.push(await resolveExtracted(place, plan));
+    proposals.push(await resolveExtracted(place, areas));
   }
 
   return { kind: "article", sourceUrl: url, proposals, rejected };
@@ -270,13 +298,9 @@ async function articleProposals(
 
 async function resolveExtracted(
   place: ExtractedPlace,
-  plan: LoadedPlan,
+  areas: readonly ArticleSearchArea[],
 ): Promise<ShareProposal> {
-  const lookup = await lookupPlace(place.name, plan.legs.map((leg) => ({
-    position: leg.position,
-    regionDb: leg.regionDb,
-    anchor: leg.anchor,
-  })));
+  const lookup = await lookupPlace(place.name, areas);
 
   const base = {
     name: place.name,

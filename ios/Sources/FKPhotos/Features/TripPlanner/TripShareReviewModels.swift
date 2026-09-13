@@ -83,6 +83,30 @@ struct TripShareProposal: Codable, Identifiable, Sendable {
     var isAddable: Bool {
         position != nil || osmRef != nil || kind == .ambiguous
     }
+
+    /// Where this would actually go, once an ambiguous name has been
+    /// decided: the chosen option wins over the proposal's own
+    /// position, because choosing is what the choice was for.
+    ///
+    /// Nil means there is nowhere to put it — a name the region does
+    /// not know, or an ambiguity nobody has resolved yet.
+    func placement(chosen: Option?) -> Coordinate? {
+        if let chosen { return Coordinate(lat: chosen.lat, lon: chosen.lon) }
+        return position
+    }
+
+    /// Whether the one question §9.2 allows has to be asked: how long
+    /// do you stay?
+    ///
+    /// Only where nothing in OpenStreetMap stands behind it. A resolved
+    /// name and a chosen option both carry an OSM reference, and the
+    /// server reads the duration off its category — sending a default
+    /// instead would quietly turn every museum into three quarters of
+    /// an hour.
+    func needsADuration(chosen: Option?) -> Bool {
+        if chosen != nil { return false }
+        return osmRef == nil
+    }
 }
 
 struct TripAnalyseShareResponse: Codable, Sendable {
