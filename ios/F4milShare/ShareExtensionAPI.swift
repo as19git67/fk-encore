@@ -115,13 +115,17 @@ struct ShareAnalyzeResponse: Decodable, Sendable {
 /// the afternoon failed as "not set up" for a session that was perfectly
 /// valid.
 ///
-/// **Every wire type above is hand-mirrored and nothing checks it.** The
-/// extension is not part of the SwiftPM package, so CI compiles none of
-/// this, and a mirrored type that names a field the server does not send
-/// still compiles — it fails at run time, inside a `JSONDecoder`, on a
-/// device. So: only fields the server really sends, optionals for
-/// everything the server may omit, and anything derived (a label, a
-/// title) computed here rather than expected from the wire.
+/// **Every wire type above is hand-mirrored and nothing checks it.** CI
+/// does compile this file — `xcodebuild -target F4milShare`, since
+/// #1120 — but compiling is all it does: the extension has no tests,
+/// and a mirrored type that names a field the server never sends
+/// compiles perfectly. It fails at run time, inside a `JSONDecoder`, on
+/// a device, and a swallowed decoding error then looks like an empty
+/// list rather than a bug (`ShareIdeaCollection` above).
+///
+/// So: only fields the server really sends, optionals for everything it
+/// may omit, and anything derived (a label, a title) computed here
+/// rather than expected from the wire.
 enum ShareExtensionAPI {
     private static var baseURL: URL {
         ShareAuth.serverURL ?? URL(string: "http://localhost:4000")!
