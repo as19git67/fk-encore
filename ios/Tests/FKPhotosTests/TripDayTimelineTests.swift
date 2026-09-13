@@ -235,4 +235,30 @@ final class TripDayTimelineTests: XCTestCase {
         XCTAssertEqual(TripDayTimeline.light(dated, at: 18 * 60 + 30), .window(golden))
         XCTAssertEqual(TripDayTimeline.light(dated, at: 12 * 60), .ordinary)
     }
+
+    // MARK: - The slider's own value
+
+    func testTheSliderSnapsToFiveMinutes() {
+        let day = 11 * 60...22 * 60
+
+        XCTAssertEqual(TripDayTimeline.snapped(11 * 60 + 2, within: day), Double(11 * 60))
+        XCTAssertEqual(TripDayTimeline.snapped(11 * 60 + 3, within: day), Double(11 * 60 + 5))
+        XCTAssertEqual(TripDayTimeline.snapped(14 * 60 + 7.4, within: day), Double(14 * 60 + 5))
+    }
+
+    func testItStaysInsideTheDay() {
+        // Snapping can round past either end; the day cannot grow to
+        // fit it.
+        let day = (11 * 60 + 2)...(22 * 60 + 9)
+
+        XCTAssertEqual(TripDayTimeline.snapped(11 * 60, within: day), Double(11 * 60 + 2))
+        XCTAssertEqual(TripDayTimeline.snapped(23 * 60, within: day), Double(22 * 60 + 9))
+    }
+
+    func testAStepOfNothingChangesNothing() {
+        // Defensive: a zero step would divide by zero and hand the
+        // slider a NaN, which SwiftUI renders as a thumb at the left
+        // edge that cannot be moved.
+        XCTAssertEqual(TripDayTimeline.snapped(613, within: 600...700, step: 0), 613)
+    }
 }
