@@ -26,6 +26,7 @@ import "./add-find";
 import "./share";
 import "./search";
 import "./explore";
+import "./article-read";
 import "./shares";
 import "./pool";
 import "./legs";
