@@ -1534,6 +1534,17 @@ Geo-Abfrage: „Burgen und Schlösser" ist eine Menge von OSM-Tags ohne eigene
 Kategorie, und eine nach Kategorien verengte Abfrage würde genau die Burg
 verlieren, die keine trägt.
 
+**Nachtrag (2026-09-13): die fehlende Region ist anforderbar.**
+„Diese Gegend ist noch nicht importiert" war eine Sackgasse, obwohl es seit je
+einen Weg heraus gibt: beim Anlegen einer Reise fordert der Planer die Region
+selbst an (`requestRegionFor`), mit derselben Freigabe-Politik wie die
+Regionsverwaltung — klein lädt sofort, groß wartet auf einen Admin. Die Suche
+kann das jetzt auch, über `POST /trip-planner/explore/region`, aber **nur auf
+Tipp**: die Suche selbst fordert nichts an, weil ein Import Minuten bis Stunden
+dauert und ein Tipp keine Wartezeit bestellen sollte, der niemand zugestimmt
+hat. Der Bildschirm sagt, was daraus wurde — schon da, lädt gerade, oder wartet
+auf Freigabe.
+
 ### 9.3 Eine Webseite auslesen
 
 Der Weg von einem Reiseblog zu Kandidaten im Vorrat, in vier Stufen. Er ist der
@@ -3839,6 +3850,22 @@ denselben Detailbildschirm, den ein geplanter Spot bekommt (`TripSpotDetailView`
 mit Karte, Kategorie, Wikipedia und Route — plus Stift. Die Funde aus
 „Entdecken" (§9.2) führen auf denselben Bildschirm, nur ohne Stift: dort gibt es
 noch nichts zu korrigieren, weil den Ort noch niemand behalten hat.
+
+**Erledigt (2026-09-13): der Vorrat ist nach Orten gruppiert.**
+Flach ist die Liste bei fünf Einträgen in Ordnung und bei vierzig nutzlos — der
+Biergarten zwei Straßen weiter und das Museum im Nachbarland stehen
+nebeneinander, sortiert danach, wann jemand sie zufällig gemerkt hat. Gruppiert
+wird per Single-Link über 25 km, also über die Ausflugsdistanz aus §20.2 statt
+über eine Stadtgrenze: was zwei Einträge zusammengehören lässt, ist, dass ein
+Nachmittag beide fassen könnte. Eine Kette von Dörfern bleibt damit eine Gruppe,
+auch wenn ihre Enden weiter auseinander liegen als der Radius — die Alternative
+wäre eine Grenze da, wo vor Ort niemand eine zöge.
+
+Benannt werden die Gruppen von **Apples Geocoder**, nicht aus den Einträgen:
+dieselbe Arbeitsteilung wie überall (§9.1), Apple benennt, fk-encore plant. Ein
+aus den Einträgen abgeleiteter Name hieße bei neun Orten nach dem, der zuerst
+gemerkt wurde. Solange keine Antwort da ist, steht die Anzahl da — ehrlich, im
+Gegensatz zu einem erfundenen Ortsnamen.
 
 ### 20.2 Der eigentliche Mechanismus: der Vorrat meldet sich
 
