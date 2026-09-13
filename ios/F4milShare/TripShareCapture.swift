@@ -31,6 +31,10 @@ struct TripShareCaptureView: View {
     @State private var isLoadingPlans = false
     @State private var plansError: String?
     @State private var collections: [ShareIdeaCollection] = []
+    /// Said out loud when the collection could not be fetched. Without
+    /// it a failed request looks exactly like "you have no collection",
+    /// and the picker quietly falls back to demanding a trip.
+    @State private var collectionsError: String?
     @State private var destination: Destination?
 
     /// Where the share is going.
@@ -144,8 +148,7 @@ struct TripShareCaptureView: View {
                     // needs nothing to exist yet, and the one somebody
                     // sharing a link on a Tuesday usually means.
                     ForEach(collections) { collection in
-                        choice(collection.own ? "Ideenvorrat" : collection.label,
-                               systemImage: "lightbulb",
+                        choice(collection.label, systemImage: "lightbulb",
                                value: .ideas(ownerId: collection.ownerId))
                     }
                     ForEach(plans) { plan in
@@ -159,7 +162,9 @@ struct TripShareCaptureView: View {
             } header: {
                 Text("Wohin")
             } footer: {
-                if collections.isEmpty && coordinate == nil && !plans.isEmpty {
+                if let collectionsError {
+                    Text(collectionsError)
+                } else if collections.isEmpty && coordinate == nil && !plans.isEmpty {
                     // An article has to be read before it is a place,
                     // and that reading belongs to a trip (\u{00A7}9.3).
                     Text(linkNote ?? "Ohne Koordinate im Link geht nur eine Reise \u{2014} dort "
@@ -265,7 +270,16 @@ struct TripShareCaptureView: View {
         guard coordinate == nil, let urlString = payload?.url else { return }
         isReadingLink = true
         defer { isReadingLink = false }
-        guard let read = try? await ShareExtensionAPI.readMapLink(urlString) else { return }
+        let read: ShareMapLinkRead
+        do {
+            read = try await ShareExtensionAPI.readMapLink(urlString)
+        } catch {
+            // Same lesson as the collection above: a request that fails
+            // must not look like a link that said nothing.
+            linkNote = "Der Link konnte gerade nicht gelesen werden \u{2014} ohne Koordinate "
+                + "geht nur eine Reise."
+            return
+        }
         if let lat = read.lat, let lon = read.lon {
             coordinate = (lat, lon, read.name)
             if titleText.isEmpty { titleText = read.name ?? "" }
@@ -320,9 +334,21 @@ struct TripShareCaptureView: View {
             // language model, and that path hangs off a trip (§9.3).
             // Offering the collection for one would promise a reading
             // nobody can do there.
-            collections = coordinate == nil
-                ? []
-                : ((try? await ShareExtensionAPI.fetchIdeaCollections()) ?? [])
+            if coordinate == nil {
+                collections = []
+            } else {
+                do {
+                    collections = try await ShareExtensionAPI.fetchIdeaCollections()
+                    collectionsError = nil
+                } catch {
+                    // Not `try?`: swallowing this is what turned a
+                    // decoding bug into "you must pick a trip", with
+                    // nothing anywhere to say why.
+                    collections = []
+                    collectionsError = "Der Ideenvorrat lie\u{00DF} sich nicht laden \u{2014} "
+                        + "hier stehen deshalb nur Reisen."
+                }
+            }
             preselect()
         } catch {
             plansError = error.localizedDescription
