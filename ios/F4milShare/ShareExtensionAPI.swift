@@ -1,108 +1,5 @@
 import Foundation
 
-// MARK: - Models
-
-struct SharePlanSummary: Decodable, Identifiable {
-    let id: Int
-    let title: String?
-    let legTitles: [String?]
-
-    var displayTitle: String {
-        if let title, !title.isEmpty { return title }
-        let named = legTitles.compactMap { $0 }.filter { !$0.isEmpty }
-        return named.isEmpty ? "Reise" : named.joined(separator: " \u{2192} ")
-    }
-}
-
-/// A collection the share may go into instead of a trip (§20).
-///
-/// The whole point of the idea pool is that it needs no trip, and until
-/// now the share sheet insisted on one: a map link somebody sent could
-/// only be saved into a journey that already existed.
-///
-/// A mirror of the server's `IdeaCollection`, and the mirroring is the
-/// part to be careful about: this file cannot import the app's own
-/// `TripIdeaCollection`, and nothing compiles the two against each
-/// other. This type once declared a `label` the server has never sent,
-/// so every decode threw `keyNotFound`, the list came back empty, and
-/// the picker offered trips only — the exact symptom the collection was
-/// added to remove.
-///
-/// So the fields are the three the server actually sends, and the label
-/// is computed here from them, word for word as the app computes it.
-struct ShareIdeaCollection: Decodable, Identifiable {
-    let ownerId: Int
-    /// Whose it is. Null for one's own — the server names other people,
-    /// not the caller.
-    let ownerName: String?
-    let own: Bool
-
-    var id: Int { ownerId }
-
-    var label: String {
-        if own { return "Mein Vorrat" }
-        guard let ownerName, !ownerName.isEmpty else { return "Geteilter Vorrat" }
-        return "Vorrat von \(ownerName)"
-    }
-}
-
-/// What the server made of a shared link.
-///
-/// Three answers, and the caller has to tell them apart: a place, a
-/// page that is not a map link at all, and a short link nobody could
-/// follow — only the last is worth trying again.
-struct ShareMapLinkRead: Decodable, Sendable {
-    let isMapLink: Bool
-    let lat: Double?
-    let lon: Double?
-    let name: String?
-    let unresolved: Bool
-}
-
-struct ShareProposal: Decodable, Identifiable, Sendable {
-    let name: String?
-    let verdict: String
-    let position: Coordinate?
-    let osmRef: String?
-    let categories: [String]
-    let legIndex: Int?
-    let options: [Option]
-    let quote: String?
-    let placeHint: String?
-
-    struct Coordinate: Decodable, Sendable {
-        let lat: Double
-        let lon: Double
-    }
-
-    struct Option: Decodable, Identifiable, Hashable, Sendable {
-        let osmRef: String
-        let name: String?
-        let lat: Double
-        let lon: Double
-        let legIndex: Int
-        let distanceM: Double?
-        var id: String { osmRef }
-    }
-
-    var id: String { "\(verdict)|\(osmRef ?? "")|\(name ?? "")|\(quote ?? "")" }
-
-    var canAdd: Bool { position != nil || osmRef != nil }
-
-    var needsDuration: Bool {
-        verdict == "coordinate" || (verdict == "none" && position != nil)
-    }
-
-    var needsChoice: Bool { verdict == "ambiguous" }
-}
-
-struct ShareAnalyzeResponse: Decodable, Sendable {
-    let kind: String
-    let sourceUrl: String?
-    let proposals: [ShareProposal]
-    let rejected: [String]
-}
-
 // MARK: - API client
 
 /// Minimal HTTP client for the three API calls the share extension makes.
@@ -115,17 +12,14 @@ struct ShareAnalyzeResponse: Decodable, Sendable {
 /// the afternoon failed as "not set up" for a session that was perfectly
 /// valid.
 ///
-/// **Every wire type above is hand-mirrored and nothing checks it.** CI
-/// does compile this file — `xcodebuild -target F4milShare`, since
-/// #1120 — but compiling is all it does: the extension has no tests,
-/// and a mirrored type that names a field the server never sends
-/// compiles perfectly. It fails at run time, inside a `JSONDecoder`, on
-/// a device, and a swallowed decoding error then looks like an empty
-/// list rather than a bug (`ShareIdeaCollection` above).
+/// The types it decodes into live in `ShareWireTypes.swift`, which is
+/// where the rule about mirroring them is written down — and where the
+/// tests that check the mirroring reach them from.
 ///
-/// So: only fields the server really sends, optionals for everything it
-/// may omit, and anything derived (a label, a title) computed here
-/// rather than expected from the wire.
+/// A request that fails is **never** answered with an empty list here.
+/// `try?` around one of these calls is how a decoding bug became "you
+/// have no idea collection, pick a trip" and stayed that way: the
+/// callers show what went wrong instead.
 enum ShareExtensionAPI {
     private static var baseURL: URL {
         ShareAuth.serverURL ?? URL(string: "http://localhost:4000")!
