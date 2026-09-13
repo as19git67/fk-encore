@@ -32,10 +32,15 @@ struct TripDayAnchorSheet: View {
         /// switch off: an hour nobody meant is worse than no hour.
         let departMinutes: Int?
         let returnMinutes: Int?
+        /// How far to look around the place. Nil is the ordinary
+        /// answer: the server's own default, not a number this sheet
+        /// happens to know today.
+        let radiusM: Int?
     }
 
     @State private var finder = TripPlaceFinderModel()
     @State private var place: TripPlace?
+    @State private var reach = TripOutingReach.place
     @State private var saysDeparture = false
     @State private var saysReturn = false
     @State private var departure = Self.defaultDeparture
@@ -89,6 +94,8 @@ struct TripDayAnchorSheet: View {
                          + "Stunde hin und eine zurück heißt: sechs Stunden statt acht.")
                 }
 
+                reachSection
+
                 hours
 
                 if let current {
@@ -125,6 +132,7 @@ struct TripDayAnchorSheet: View {
                                 place: place,
                                 departMinutes: departMinutes,
                                 returnMinutes: returnMinutes,
+                                radiusM: reach.radiusM,
                             ))
                             saving = false
                             dismiss()
@@ -136,6 +144,27 @@ struct TripDayAnchorSheet: View {
                 }
             }
             .onAppear(perform: adoptCurrent)
+        }
+    }
+
+    /// How much of the destination the day is about.
+    ///
+    /// Three choices, not a field in metres: nobody plans a day in
+    /// metres. The sentence below the picker says what the chosen one
+    /// does, because "Ortskern" and "Gegend" are only labels until
+    /// something says what changes.
+    private var reachSection: some View {
+        Section {
+            Picker("Umkreis", selection: $reach.animation()) {
+                ForEach(TripOutingReach.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Wie weit")
+        } footer: {
+            Text(reach.explanation)
         }
     }
 
@@ -201,6 +230,7 @@ struct TripDayAnchorSheet: View {
     private func adoptCurrent() {
         guard let current else { return }
         place = current.place
+        reach = TripOutingReach.of(radiusM: current.radiusM)
         if let minutes = current.departMinutes {
             saysDeparture = true
             departure = Self.at(hour: minutes / 60, minute: minutes % 60)
