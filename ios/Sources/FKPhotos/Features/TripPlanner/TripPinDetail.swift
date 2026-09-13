@@ -14,6 +14,9 @@ import Foundation
 /// let somebody check such claims.
 struct TripPinDetail: Equatable {
     let number: Int
+    /// The spot's handle everywhere else — what "hide this one for the
+    /// whole trip" is addressed to (§5).
+    let osmRef: String
     let title: String
     /// The name on the sign where it is not the name above (§10.4).
     let localName: String?
@@ -46,6 +49,7 @@ struct TripPinDetail: Equatable {
         }
         return TripPinDetail(
             number: number,
+            osmRef: stop.osmRef,
             title: stop.displayName,
             localName: stop.localName.flatMap { $0 == stop.displayName ? nil : $0 },
             category: TripCategory.label(stop.category),
