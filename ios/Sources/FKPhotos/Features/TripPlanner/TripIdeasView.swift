@@ -222,7 +222,7 @@ struct TripIdeasView: View {
             await model.load()
         }
         .navigationDestination(item: $openPlanId) { planId in
-            TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
+            TripPlanDayView(viewModel: TripPlannerViewModel.shared(for: planId))
         }
         // A sheet rather than an alert, because an alert cannot ask how
         // long you stay — and without that the server refuses every

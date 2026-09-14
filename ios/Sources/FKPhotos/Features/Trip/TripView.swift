@@ -114,7 +114,7 @@ struct TripView: View {
             Text(errorMessage ?? "")
         }
         .navigationDestination(item: $openPlanId) { planId in
-            TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
+            TripPlanDayView(viewModel: TripPlannerViewModel.shared(for: planId))
         }
         .onAppear { consumeStartSuggestionHandoff() }
         .task {

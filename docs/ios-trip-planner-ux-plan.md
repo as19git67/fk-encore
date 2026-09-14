@@ -734,7 +734,7 @@ or not at all.
 | 2.8 save paradigm | Auto-saving lists get an undo toast | Participants and travellers stay auto-save with confirmations before removing (and before the first traveller change); no undo toast | The server has no undo for these; a toast that cannot undo would lie |
 | 2.8 draft city | Confirm before deleting a draft city | Confirms only when the row already holds a place; an empty row deletes at once | An empty row has nothing to lose |
 | 2.8 outing budget | "2 h / halber Tag / ganzer Tag" | Segmented `TripOutingBudget` 120 / 240 / 480 min (same labels); the endpoint already accepted `budgetMinutes`, `lat`, `lon` | — |
-| 2.8 X10 | Drop the chip **and** share one view model per plan id | Chip dropped; each navigation still builds its own `TripPlannerViewModel` | Sharing needs a cache keyed by plan id; small, but not done |
+| 2.8 X10 | Drop the chip **and** share one view model per plan id | Both, the second in a follow-up PR: `TripPlannerViewModel.shared(for:)` hands out one model per plan id to every way into a plan; deleting or leaving a plan forgets it | — |
 | 2.8 X13 | `interactiveDismissDisabled` on new-plan and plan-settings forms | New-plan form only (`isDirty` from anchor, title, sentence, cities, interests) | Plan settings have no clean "dirty" baseline yet |
 | 2.9 offline offer | 24 h before a dated trip, offer "Plan fürs Gerät laden" once | "Reisebereit?" is offered inline on the plan-list row two days before departure, and that screen has a prominent "Plan fürs Gerät laden" button when the plan is not stored | The prompt lives where the evening-before checklist already is; no separate scheduling |
 | 2.9 running plan | Fall back to the offline bundle on network error | Keeps the **last known** running plan when the error means unreachable (`TripOfflineReach.meansUnreachable`); a real 404/403 still clears it | Deriving a `TripPlanSummary` from the bundle was more code for the same banner |
@@ -780,4 +780,4 @@ Three things the sandbox (no Swift toolchain) could not catch:
 4. ~~X11 — manual travellers, `shortWalks` per person, organiser hand-over (backend first).~~ Done (see 3.2).
 5. ~~D17 — an observable auto-end monitor so the tab badge can show a pending end suggestion.~~ Done (see 3.1).
 6. ~~E3 — "Das hier merken" as a one-tap action on the Trip tab and as an App Shortcut.~~ Done (see 3.2).
-7. X10 — one `TripPlannerViewModel` per plan id, so the last viewed day survives navigating away.
+7. ~~X10 — one `TripPlannerViewModel` per plan id, so the last viewed day survives navigating away.~~ Done (see 3.1).

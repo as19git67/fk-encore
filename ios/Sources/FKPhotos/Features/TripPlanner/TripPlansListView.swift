@@ -96,7 +96,7 @@ struct TripPlansListView: View {
         .navigationDestination(item: $aux) { aux in
             switch aux.kind {
             case .readiness:
-                TripReadinessView(viewModel: TripPlannerViewModel(planId: aux.planId))
+                TripReadinessView(viewModel: TripPlannerViewModel.shared(for: aux.planId))
             case .review:
                 TripReviewView(planId: aux.planId)
             case .documents:
@@ -104,7 +104,7 @@ struct TripPlansListView: View {
             case .journal:
                 TripJournalView(planId: aux.planId)
             case .offline:
-                TripOfflineView(viewModel: TripPlannerViewModel(planId: aux.planId))
+                TripOfflineView(viewModel: TripPlannerViewModel.shared(for: aux.planId))
             }
         }
         .confirmationDialog("Geteilten Fund verwerfen?", isPresented: $confirmDiscard,
@@ -197,7 +197,7 @@ struct TripPlansListView: View {
         } else {
             List(plans) { plan in
                 NavigationLink {
-                    TripPlanDayView(viewModel: TripPlannerViewModel(planId: plan.id))
+                    TripPlanDayView(viewModel: TripPlannerViewModel.shared(for: plan.id))
                 } label: {
                     row(plan)
                 }
@@ -347,6 +347,7 @@ struct TripPlansListView: View {
             let _: Response = try await APIClient.shared.delete(
                 "/trip-planner/plans/\(plan.id)")
             plans.removeAll { $0.id == plan.id }
+            TripPlannerViewModel.forget(planId: plan.id)
         } catch {
             actionError = TripErrorText.describe(error)
         }
@@ -366,6 +367,7 @@ struct TripPlansListView: View {
             let _: Response = try await APIClient.shared.post(
                 "/trip-planner/plans/\(plan.id)/participants/remove", body: Body(userId: me))
             plans.removeAll { $0.id == plan.id }
+            TripPlannerViewModel.forget(planId: plan.id)
         } catch {
             actionError = TripErrorText.describe(error)
         }
