@@ -47,47 +47,12 @@ struct TripExploreView: View {
 
     var body: some View {
         List {
-            if let message = model.lastAddition {
-                Text(message).font(.footnote).foregroundStyle(.secondary)
-            }
-            // A search that is running looks, without this, exactly like
-            // a search that found nothing.
-            if model.isLoading {
-                HStack { ProgressView(); Text("Wird gesucht\u{2026}") }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            // Said rather than left blank: the three kinds of empty are
-            // three different things to do next.
-            if let note = model.note, model.spots.isEmpty {
-                Text(note).foregroundStyle(.secondary)
-            }
-            // And the one of the three that a person can do something
-            // about gets the something. Creating a trip has asked for
-            // the maps on the traveller's behalf since the planner
-            // existed; a browse hits the same wall and may as well
-            // offer the same way through it.
-            if model.regionMissing {
-                if let note = model.regionNote {
-                    Text(note).font(.footnote).foregroundStyle(.secondary)
-                } else {
-                    Button {
-                        Task { await model.requestRegion() }
-                    } label: {
-                        Label(model.isRequestingRegion
-                              ? "Wird angefragt\u{2026}" : "Karten f\u{00FC}r diese Gegend holen",
-                              systemImage: "square.and.arrow.down")
-                            .frame(minHeight: 44)
-                    }
-                    .disabled(model.isRequestingRegion)
-                }
-            }
-
+            statusRows
+            regionRows
             ForEach(model.spots) { spot in
                 Button { opened = spot } label: { row(spot) }
                     .buttonStyle(.plain)
             }
-
             if model.hasMore {
                 Text("Es gibt mehr — enger eingrenzen hilft.")
                     .font(.footnote)
@@ -303,6 +268,52 @@ struct TripExploreView: View {
     }
 
     // MARK: - What is there
+
+    /// What is going on above the results. Split out of `body`: one
+    /// list with every conditional inline was more than the type
+    /// checker would finish.
+    @ViewBuilder
+    private var statusRows: some View {
+        if let message = model.lastAddition {
+            Text(message).font(.footnote).foregroundStyle(.secondary)
+        }
+        // A search that is running looks, without this, exactly like
+        // a search that found nothing.
+        if model.isLoading {
+            HStack { ProgressView(); Text("Wird gesucht\u{2026}") }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        // Said rather than left blank: the three kinds of empty are
+        // three different things to do next.
+        if let note = model.note, model.spots.isEmpty {
+            Text(note).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The one of the three kinds of empty that a person can do
+    /// something about gets the something. Creating a trip has asked
+    /// for the maps on the traveller's behalf since the planner
+    /// existed; a browse hits the same wall and may as well offer the
+    /// same way through it.
+    @ViewBuilder
+    private var regionRows: some View {
+        if model.regionMissing {
+            if let note = model.regionNote {
+                Text(note).font(.footnote).foregroundStyle(.secondary)
+            } else {
+                Button {
+                    Task { await model.requestRegion() }
+                } label: {
+                    Label(model.isRequestingRegion
+                          ? "Wird angefragt\u{2026}" : "Karten f\u{00FC}r diese Gegend holen",
+                          systemImage: "square.and.arrow.down")
+                        .frame(minHeight: 44)
+                }
+                .disabled(model.isRequestingRegion)
+            }
+        }
+    }
 
     @ViewBuilder
     private func row(_ spot: TripExploredSpot) -> some View {
