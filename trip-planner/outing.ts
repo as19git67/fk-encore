@@ -42,6 +42,7 @@ import { requirePermission } from "../user/auth-handler";
 import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { toCandidates } from "./candidates";
+import { accessibleOwnerIds } from "./ideas";
 import { solveDay, type Candidate } from "./solver";
 import { haversineMeters, legLimitFor, type TransportMode } from "./travel";
 
@@ -102,11 +103,11 @@ export const ideasNearby = api(
   { expose: true, method: "POST", path: "/trip-planner/ideas/nearby", auth: true },
   async (req: IdeaNearbyRequest): Promise<IdeaNearbyResponse> => {
     const userId = requireUser();
-    const ownerId = await requireAccess(req.ownerId ?? userId, userId);
+    const owners = await ownersFor(req.ownerId, userId);
     const position = validatePosition(req);
     const radiusM = validateRadius(req.radiusM, DEFAULT_NEARBY_RADIUS_M);
 
-    const rows = await loadIdeas(ownerId);
+    const rows = await loadIdeas(owners);
     const today = new Date();
     const inRange = rows
       .map((row) => ({ row, distanceM: Math.round(haversineMeters(position, row)) }))
@@ -157,14 +158,14 @@ export const dismissIdea = api(
   { expose: true, method: "POST", path: "/trip-planner/ideas/dismiss", auth: true },
   async (req: IdeaDismissRequest): Promise<{ dismissals: number }> => {
     const userId = requireUser();
-    const ownerId = await requireAccess(req.ownerId ?? userId, userId);
+    const owners = await ownersFor(req.ownerId, userId);
     const [row] = await db
       .update(ideaPool)
       .set({
         dismissed_count: sql`${ideaPool.dismissed_count} + 1`,
         last_suggested_at: new Date().toISOString(),
       })
-      .where(and(eq(ideaPool.id, req.id), eq(ideaPool.owner_id, ownerId)))
+      .where(and(eq(ideaPool.id, req.id), inArray(ideaPool.owner_id, owners)))
       .returning({ dismissals: ideaPool.dismissed_count });
     if (!row) throw APIError.notFound("diese Idee gibt es nicht");
     return { dismissals: row.dismissals };
@@ -222,7 +223,7 @@ export const proposeOuting = api(
   { expose: true, method: "POST", path: "/trip-planner/ideas/outing", auth: true },
   async (req: OutingRequest): Promise<OutingResponse> => {
     const userId = requireUser();
-    const ownerId = await requireAccess(req.ownerId ?? userId, userId);
+    const owners = await ownersFor(req.ownerId, userId);
     const anchor = validatePosition(req);
     const radiusM = validateRadius(req.radiusM, 25_000);
     const budgetMinutes = validateBudget(req.budgetMinutes);
@@ -235,7 +236,7 @@ export const proposeOuting = api(
     const maxWalkMinutes = req.maxWalkMinutes ?? legLimitFor(mode);
 
     const today = new Date();
-    const rows = (await loadIdeas(ownerId))
+    const rows = (await loadIdeas(owners))
       .filter((row) => stillValid(row, today))
       .filter((row) => haversineMeters(anchor, row) <= radiusM);
 
@@ -349,7 +350,17 @@ interface IdeaRow {
   addedBy: string | null;
 }
 
-async function loadIdeas(ownerId: number): Promise<IdeaRow[]> {
+/**
+ * One named collection, or every one the caller may write into. The
+ * household collects separately and looks together (§20.1).
+ */
+async function ownersFor(requested: number | undefined, userId: number): Promise<number[]> {
+  if (requested === undefined) return await accessibleOwnerIds(userId);
+  return [await requireAccess(requested, userId)];
+}
+
+async function loadIdeas(owners: number[]): Promise<IdeaRow[]> {
+  if (owners.length === 0) return [];
   return await db
     .select({
       id: ideaPool.id,
@@ -370,7 +381,7 @@ async function loadIdeas(ownerId: number): Promise<IdeaRow[]> {
     })
     .from(ideaPool)
     .leftJoin(users, eq(users.id, ideaPool.created_by))
-    .where(eq(ideaPool.owner_id, ownerId));
+    .where(inArray(ideaPool.owner_id, owners));
 }
 
 /**

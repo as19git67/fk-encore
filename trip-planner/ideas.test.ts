@@ -19,7 +19,8 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { addIdea, listIdeas, removeIdea, shareIdeas, unshareIdeas } from "./ideas";
+import { addIdea, listIdeaMembers, listIdeas, removeIdea, shareIdeas, unshareIdeas } from "./ideas";
+import { listShareableUsers } from "./household";
 
 const BIERGARTEN = { lat: 48.14, lon: 11.58 };
 const DB = "nom_west";
@@ -212,6 +213,56 @@ describe("one list, not a copy per person", () => {
 
     actAs(papaId);
     await expect(listIdeas({ ownerId: annaId })).rejects.toThrow(/existiert nicht/);
+  });
+
+  it("shows everything you may write into as one list, folded where it overlaps", async () => {
+    // Two people collected separately, then let each other in.
+    await addIdea({ ...BIERGARTEN, note: "Von Anna" });
+    await addIdea({ lat: 47.0, lon: 9.0, name: "Annas Wanderung", dwellMinutes: 180 });
+    await shareIdeas({ userId: papaId });
+
+    actAs(papaId);
+    // Papa has the same beer garden (the map's node) and one of his own.
+    await addIdea({ ...BIERGARTEN, note: "Von Papa" });
+    await addIdea({ lat: 47.5, lon: 9.5, name: "Papas See", dwellMinutes: 120 });
+    await shareIdeas({ userId: annaId });
+
+    const forPapa = await listIdeas({});
+    // Three places, not four: the beer garden is one row, and it is
+    // Papa's own copy because he is the one looking.
+    expect(forPapa.entries.map((e) => e.name ?? e.title).sort()).toEqual(
+      ["Annas Wanderung", "Biergarten am Beispielweg", "Papas See"]);
+    const garden = forPapa.entries.find((e) => e.osmRef === "node:1");
+    expect(garden?.ownerId).toBe(papaId);
+    expect(garden?.note).toBe("Von Papa");
+    // Every row says whose collection it sits in.
+    expect(forPapa.entries.find((e) => e.name === "Annas Wanderung")?.ownerId).toBe(annaId);
+
+    actAs(annaId);
+    const forAnna = await listIdeas({});
+    expect(forAnna.entries).toHaveLength(3);
+    expect(forAnna.entries.find((e) => e.osmRef === "node:1")?.ownerId).toBe(annaId);
+
+    // One collection alone is still available when asked for by name.
+    const onlyMine = await listIdeas({ ownerId: annaId });
+    expect(onlyMine.entries).toHaveLength(2);
+  });
+
+  it("lists who writes into my collection, and the household to pick from", async () => {
+    const before = await listShareableUsers({ forIdeas: true });
+    expect(before.users.map((u) => u.id)).toContain(papaId);
+    expect(before.users.map((u) => u.id)).not.toContain(annaId);
+
+    await shareIdeas({ userId: papaId });
+
+    const { members } = await listIdeaMembers();
+    expect(members.map((m) => m.userId)).toEqual([papaId]);
+    expect(members[0].name).toBe("Papa");
+
+    // Already in: not offered a second time.
+    const after = await listShareableUsers({ forIdeas: true });
+    expect(after.users.map((u) => u.id)).not.toContain(papaId);
+    expect(after.users.map((u) => u.id)).toContain(strangerId);
   });
 
   it("refuses to share a collection with its own owner", async () => {

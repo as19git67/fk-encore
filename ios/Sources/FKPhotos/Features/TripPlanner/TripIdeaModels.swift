@@ -9,6 +9,10 @@ import Foundation
 
 struct TripIdea: Codable, Identifiable, Sendable {
     let id: Int
+    /// Whose collection it sits in. The list is one list across every
+    /// collection you may write into, so editing or removing has to say
+    /// which one. Optional for an older server.
+    let ownerId: Int?
     let osmRef: String
     /// What the map calls it. Null for a place OpenStreetMap does not know.
     let name: String?
@@ -405,4 +409,26 @@ struct TripKeptForNextTimeResponse: Codable, Sendable {
             return "\(kept) gemerkt, \(already) waren schon da."
         }
     }
+}
+
+/// Somebody who writes into my idea collection (§20.1).
+struct TripIdeaMember: Codable, Identifiable, Sendable {
+    let userId: Int
+    let name: String?
+    let email: String
+    var id: Int { userId }
+    var displayName: String { (name?.isEmpty == false ? name : nil) ?? email }
+}
+
+/// A member of the household, as the server offers them for inviting —
+/// the same list the album share uses, minus who is already in.
+struct TripHouseholdUser: Codable, Identifiable, Sendable {
+    let id: Int
+    let name: String?
+    let email: String
+    var displayName: String { (name?.isEmpty == false ? name : nil) ?? email }
+}
+
+struct TripHouseholdUsersResponse: Codable, Sendable {
+    let users: [TripHouseholdUser]
 }

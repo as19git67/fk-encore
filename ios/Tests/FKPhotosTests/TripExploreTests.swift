@@ -111,6 +111,7 @@ final class TripExploreTests: XCTestCase {
     ) -> TripIdea {
         TripIdea(
             id: 4,
+            ownerId: 1,
             osmRef: "manual:4",
             name: name,
             title: title,

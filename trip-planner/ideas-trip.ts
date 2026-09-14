@@ -29,6 +29,7 @@ import db from "../db/database";
 import { ideaPool, ideaPoolShares, tripPlanPool, users } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { addFind } from "./add-find";
+import { accessibleOwnerIds, foldAcrossCollections } from "./ideas";
 import { createTripPlan, detailTripDay } from "./plans";
 import { loadPlan, type StoredLeg, type StoredPlan } from "./plan-store";
 import { haversineMeters, type TransportMode } from "./travel";
@@ -73,7 +74,7 @@ export const acceptOuting = api(
   { expose: true, method: "POST", path: "/trip-planner/ideas/outing/accept", auth: true },
   async (req: AcceptOutingRequest): Promise<AcceptOutingResponse> => {
     const userId = requireUser();
-    const ownerId = await requireAccess(req.ownerId ?? userId, userId);
+    const owners = await ownersFor(req.ownerId, userId);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date)) {
       throw APIError.invalidArgument(`date must be YYYY-MM-DD, got '${req.date}'`);
     }
@@ -85,7 +86,7 @@ export const acceptOuting = api(
     const ideas = await db
       .select()
       .from(ideaPool)
-      .where(and(eq(ideaPool.owner_id, ownerId), inArray(ideaPool.id, req.ideaIds)));
+      .where(and(inArray(ideaPool.owner_id, owners), inArray(ideaPool.id, req.ideaIds)));
     if (ideas.length === 0) throw APIError.notFound("keine dieser Ideen gibt es");
 
     // One leg, one day, one block: an outing is a stretch of time with
@@ -169,14 +170,16 @@ export const ideasForPlan = api(
   { expose: true, method: "GET", path: "/trip-planner/plans/:planId/ideas", auth: true },
   async (req: IdeasForPlanRequest): Promise<IdeasForPlanResponse> => {
     const userId = requireUser();
-    const ownerId = await requireAccess(req.ownerId ?? userId, userId);
+    const owners = await ownersFor(req.ownerId, userId);
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
 
     const inTrip = placesOf(plan.legs);
-    const rows = await db
+    const rowsAcross = await db
       .select({
         id: ideaPool.id,
+        ownerId: ideaPool.owner_id,
+        addedAt: ideaPool.created_at,
         osmRef: ideaPool.osm_ref,
         name: ideaPool.name,
         title: ideaPool.title,
@@ -190,7 +193,9 @@ export const ideasForPlan = api(
       })
       .from(ideaPool)
       .leftJoin(users, eq(users.id, ideaPool.created_by))
-      .where(eq(ideaPool.owner_id, ownerId));
+      .where(inArray(ideaPool.owner_id, owners));
+    // The same place in two collections is one idea for the trip.
+    const rows = foldAcrossCollections(rowsAcross, userId);
 
     const ideas: IdeaForPlan[] = [];
     for (const row of rows) {
@@ -233,11 +238,11 @@ export const takeIdeaIntoPlan = api(
   { expose: true, method: "POST", path: "/trip-planner/plans/:planId/ideas/take", auth: true },
   async (req: TakeIdeaRequest): Promise<{ taken: boolean; osmRef: string | null }> => {
     const userId = requireUser();
-    const ownerId = await requireAccess(req.ownerId ?? userId, userId);
+    const owners = await ownersFor(req.ownerId, userId);
     const [idea] = await db
       .select()
       .from(ideaPool)
-      .where(and(eq(ideaPool.owner_id, ownerId), eq(ideaPool.id, req.id)))
+      .where(and(inArray(ideaPool.owner_id, owners), eq(ideaPool.id, req.id)))
       .limit(1);
     if (!idea) throw APIError.notFound("diese Idee gibt es nicht");
 
@@ -394,6 +399,12 @@ async function requireAccess(ownerId: number, userId: number): Promise<number> {
     .limit(1);
   if (!share) throw APIError.notFound("dieser Ideenvorrat existiert nicht");
   return ownerId;
+}
+
+/** One named collection, or every one the caller may write into. */
+async function ownersFor(requested: number | undefined, userId: number): Promise<number[]> {
+  if (requested === undefined) return await accessibleOwnerIds(userId);
+  return [await requireAccess(requested, userId)];
 }
 
 function requireUser(): number {

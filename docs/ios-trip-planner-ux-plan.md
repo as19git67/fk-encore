@@ -745,7 +745,7 @@ or not at all.
 | ID | Item | Status |
 |---|---|---|
 | D8 | Persist "Warum hier?" reasons on the stop when it leaves the pool (server) | Not done. The question-mark entry is in the stop menu and still appears only while the pool row exists. Needs a server change (copy `reasons` onto the stop) |
-| D11 (ideas) | "Wer schreibt mit" screen for the idea collection with a list of invitees and removal | Not done. The invite alert is unchanged; `/trip-planner/ideas/share` and `/unshare` exist, but there is no list endpoint for invitees yet |
+| D11 (ideas) | "Wer schreibt mit" screen for the idea collection with a list of invitees and removal | Done in a follow-up PR, with a change of model: invitations (trips and ideas) pick from the household like the album share instead of typing an address (`GET /trip-planner/shareable-users`); the ideas list is one list across every collection the person may write into (`GET /ideas` without `ownerId`, folded where two collections hold the same place); `GET /ideas/members` lists who writes into mine. Two people who collected separately and then let each other in see one list; nothing is merged or moved. See `docs/ideenvorrat.md` §4 |
 | D6 | Build the manual-mode selection grid, or hide the toggle | Neither. The toggle stays; the empty state now says truthfully that photos are added by putting them into the iOS album |
 | E3 | "Das hier merken" directly on the Trip tab and as an App Shortcut | Not done; the capture stays behind Ideen → + |
 | X11 | Travellers outside the household, a per-traveller `shortWalks` toggle, transferring the organiser role | Not done; all three need backend support (`travellers.ts` accepts household persons or planning users only; no role-transfer endpoint) |

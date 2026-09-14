@@ -203,6 +203,22 @@ describe("a trip asks about what was collected", () => {
     expect(ideas[0].addedBy).toBe("Papa");
   });
 
+  it("offers what the rest of the household collected too", async () => {
+    await idea(500, "Papas Biergarten");
+    await db.insert(ideaPoolShares).values({ owner_id: papaId, user_id: annaId, invited_by: papaId });
+    await db.insert(ideaPool).values({
+      owner_id: papaId, created_by: papaId, osm_ref: "manual:papas-see", name: "Papas See",
+      lat: HOME.lat, lon: HOME.lon + 0.01, category: "sight", dwell_minutes: 60,
+    });
+    const { plan } = await createTripPlan({
+      legs: [{ title: "Zuhause", anchor: HOME, startDate: "2026-07-04" }],
+    });
+
+    const { ideas } = await ideasForPlan({ planId: plan.id });
+
+    expect(ideas.map((i) => i.name).sort()).toEqual(["Papas Biergarten", "Papas See"]);
+  });
+
   it("takes nothing over by itself", async () => {
     // §20.3: an idea from last year is not this trip's wish.
     await idea(500, "Papas Biergarten");

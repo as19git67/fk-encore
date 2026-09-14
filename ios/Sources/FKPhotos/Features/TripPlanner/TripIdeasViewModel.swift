@@ -444,7 +444,7 @@ final class TripIdeasViewModel {
         do {
             let response: TripIdeaTakeResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(plan.id)/ideas/take",
-                body: Body(id: idea.id, ownerId: ownerId),
+                body: Body(id: idea.id, ownerId: idea.ownerId ?? ownerId),
             )
             errorMessage = nil
             let sentence = response.sentence(idea: idea.displayName, plan: plan.displayTitle)
@@ -598,7 +598,7 @@ final class TripIdeasViewModel {
                 "/trip-planner/ideas/\(idea.id)",
                 body: Body(
                     id: idea.id,
-                    ownerId: ownerId,
+                    ownerId: idea.ownerId ?? ownerId,
                     // An empty string clears the field, which is what an
                     // emptied text field means; omitting would leave it.
                     title: edit.title,
@@ -635,7 +635,7 @@ final class TripIdeasViewModel {
         do {
             let _: [String: Bool] = try await APIClient.shared.post(
                 "/trip-planner/ideas/remove",
-                body: Body(id: idea.id, ownerId: ownerId),
+                body: Body(id: idea.id, ownerId: idea.ownerId ?? ownerId),
             )
             errorMessage = nil
         } catch {
@@ -645,17 +645,58 @@ final class TripIdeasViewModel {
     }
 
     /// Let somebody else write into your own collection (§20.1, §6.2).
-    func share(with email: String) async {
-        struct Body: Encodable { let email: String }
+    // MARK: - Who writes with me (§20.1)
+
+    /// Who I let into my collection.
+    private(set) var members: [TripIdeaMember] = []
+    /// The rest of the household, offered to be let in.
+    private(set) var household: [TripHouseholdUser] = []
+    private(set) var isLoadingMembers = false
+
+    func loadMembers() async {
+        isLoadingMembers = true
+        defer { isLoadingMembers = false }
+        struct MembersResponse: Decodable { let members: [TripIdeaMember] }
+        do {
+            let mine: MembersResponse = try await APIClient.shared.get("/trip-planner/ideas/members")
+            members = mine.members
+            let offered: TripHouseholdUsersResponse = try await APIClient.shared.get(
+                "/trip-planner/shareable-users", query: ["forIdeas": "true"])
+            household = offered.users
+            errorMessage = nil
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// Let somebody from the household write into my collection. Picked
+    /// from a list, like an album share — nobody types an address for a
+    /// person who lives in the same house.
+    func share(with user: TripHouseholdUser) async {
+        struct Body: Encodable { let userId: Int }
         do {
             let _: [String: [TripIdeaCollection]] = try await APIClient.shared.post(
-                "/trip-planner/ideas/share",
-                body: Body(email: email.trimmingCharacters(in: .whitespaces)),
-            )
+                "/trip-planner/ideas/share", body: Body(userId: user.id))
             errorMessage = nil
-            lastAddition = "\(email) schreibt jetzt mit."
+            lastAddition = "\(user.displayName) schreibt jetzt mit."
+            await loadMembers()
+            await load()
         } catch {
-            errorMessage = "Niemand mit dieser Adresse gefunden."
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    /// Take somebody out again. Their own collection is untouched; they
+    /// only stop seeing and writing into mine.
+    func unshare(_ member: TripIdeaMember) async {
+        struct Body: Encodable { let userId: Int }
+        do {
+            let _: [String: Bool] = try await APIClient.shared.post(
+                "/trip-planner/ideas/unshare", body: Body(userId: member.userId))
+            errorMessage = nil
+            await loadMembers()
+        } catch {
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }
