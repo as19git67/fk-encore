@@ -97,7 +97,7 @@ final class TripPlaceSearchViewModel {
             unavailableLegs = response.unavailableLegs
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -114,7 +114,7 @@ final class TripPlaceSearchViewModel {
                 : "im Vorrat"
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 

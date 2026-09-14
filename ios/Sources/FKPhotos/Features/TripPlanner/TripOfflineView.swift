@@ -73,13 +73,9 @@ struct TripOfflineView: View {
                 }
             }
 
-            if let message = viewModel.errorMessage {
-                Section {
-                    Text(message).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Unterwegs ohne Netz")
+        .plannerErrorBanner(viewModel.errorMessage, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
     }
 }

@@ -86,13 +86,9 @@ struct TripBallotView: View {
                 }
             }
 
-            if let errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Abstimmen")
+        .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
@@ -183,7 +179,7 @@ struct TripBallotView: View {
             fairness = try await APIClient.shared.get("/trip-planner/plans/\(planId)/fairness")
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -212,7 +208,7 @@ struct TripBallotView: View {
             try await loadVotes()
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -225,7 +221,7 @@ struct TripBallotView: View {
             await load()
             onPlanChanged?()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

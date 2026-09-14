@@ -56,6 +56,7 @@ struct TripPlanDayView: View {
         // screen behind them is a name that looks lost. The leg is on
         // the picker above when there is more than one.
         .navigationTitle(screenTitle)
+        .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.load() }, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let day = viewModel.day, let leg = viewModel.leg {
@@ -244,7 +245,6 @@ struct TripPlanDayView: View {
                     current: (dayIndex: viewModel.dayIndex, blockId: move.blockId),
                 ) { blockId, dayIndex in
                     await viewModel.move(move.stop, toDayIndex: dayIndex, toBlockId: blockId)
-                    moving = nil
                 }
             }
         }
@@ -402,6 +402,12 @@ struct TripPlanDayView: View {
                 .buttonStyle(.bordered)
                 .disabled(viewModel.isWeatherReplanning)
 
+                if let blocked = viewModel.weatherProposal?.blockedSentence {
+                    Text(blocked)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 if !viewModel.weatherMoves.isEmpty {
                     // What was actually done, by name. A day that
                     // rearranges itself silently is a day nobody trusts.
@@ -417,8 +423,15 @@ struct TripPlanDayView: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 14))
+            // A proposal with nothing in it is a sentence here; only a
+            // real one gets a sheet. Opening a modal that can do nothing
+            // but be closed teaches people to close modals.
             .sheet(item: Binding(
-                get: { viewModel.weatherProposal.map { WeatherOffer(proposal: $0) } },
+                get: {
+                    viewModel.weatherProposal.flatMap {
+                        $0.blockedSentence == nil ? WeatherOffer(proposal: $0) : nil
+                    }
+                },
                 set: { if $0 == nil { viewModel.dismissWeatherProposal() } },
             )) { offer in
                 weatherProposalSheet(offer.proposal, day: day)

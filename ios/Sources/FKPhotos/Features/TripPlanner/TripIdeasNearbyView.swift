@@ -21,9 +21,6 @@ struct TripIdeasNearbyView: View {
 
     var body: some View {
         List {
-            if let error = model.nearbyError {
-                Text(error).font(.footnote).foregroundStyle(.red)
-            }
 
             if model.isLoadingNearby {
                 HStack { ProgressView(); Text("Wird gesucht…") }
@@ -72,6 +69,7 @@ struct TripIdeasNearbyView: View {
             TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
         }
         .navigationTitle("In der Nähe")
+        .plannerErrorBanner(model.nearbyError, retry: { await model.loadNearby() }, dismiss: { model.nearbyError = nil })
         .task { await model.loadNearby() }
         .refreshable { await model.loadNearby() }
     }

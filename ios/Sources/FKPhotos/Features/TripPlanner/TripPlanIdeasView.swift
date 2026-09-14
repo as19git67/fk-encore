@@ -38,6 +38,7 @@ struct TripPlanIdeasView: View {
             }
         }
         .navigationTitle("Aus dem Vorrat")
+        .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.loadIdeasForPlan() }, dismiss: { viewModel.errorMessage = nil })
         .task { await viewModel.loadIdeasForPlan() }
         .refreshable { await viewModel.loadIdeasForPlan() }
     }

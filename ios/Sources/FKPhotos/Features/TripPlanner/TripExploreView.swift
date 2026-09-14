@@ -47,9 +47,6 @@ struct TripExploreView: View {
             if let message = model.lastAddition {
                 Text(message).font(.footnote).foregroundStyle(.secondary)
             }
-            if let error = model.errorMessage {
-                Text(error).font(.footnote).foregroundStyle(.red)
-            }
             // Said rather than left blank: the three kinds of empty are
             // three different things to do next.
             if let note = model.note, model.spots.isEmpty {
@@ -106,6 +103,7 @@ struct TripExploreView: View {
             }
         }
         .navigationTitle(model.area?.label ?? "Entdecken")
+        .plannerErrorBanner(model.errorMessage, retry: { await model.load() }, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

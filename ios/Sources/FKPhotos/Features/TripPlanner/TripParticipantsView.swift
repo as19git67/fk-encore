@@ -71,13 +71,9 @@ struct TripParticipantsView: View {
                 }
             }
 
-            if let errorMessage = model.errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Wer plant mit")
+        .plannerErrorBanner(model.errorMessage, retry: { await model.load() }, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .task {
             model.me = authManager.currentUser?.id
@@ -174,7 +170,7 @@ final class TripParticipantsViewModel {
             youOrganise = response.youOrganise
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -199,7 +195,7 @@ final class TripParticipantsViewModel {
             errorMessage = nil
             await load()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -213,7 +209,7 @@ final class TripParticipantsViewModel {
             errorMessage = nil
             await load()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

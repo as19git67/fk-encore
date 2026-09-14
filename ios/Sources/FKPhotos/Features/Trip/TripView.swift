@@ -253,7 +253,7 @@ struct TripView: View {
         do {
             try await store.startTrip(name: name)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
             showError = true
         }
     }

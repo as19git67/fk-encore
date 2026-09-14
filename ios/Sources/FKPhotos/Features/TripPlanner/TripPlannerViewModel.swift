@@ -147,6 +147,7 @@ final class TripPlannerViewModel {
     /// Put a split block back together (§6.5): the branches go, and the
     /// block is planned once more as one, with the group in one place.
     func removeSplit(_ block: TripBlock) async {
+        guard requireOnline() else { return }
         guard let index = day?.blocks.firstIndex(where: { $0.id == block.id }) else { return }
         do {
             struct Body: Encodable { let dayIndex: Int; let blockIndex: Int }
@@ -156,7 +157,7 @@ final class TripPlannerViewModel {
             plan = response.plan
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -189,7 +190,7 @@ final class TripPlannerViewModel {
                 errorMessage = nil
                 light = snapshot.bundle.lightOfDay(legIndex: legIndex, dayIndex: dayIndex)
             } else {
-                errorMessage = error.localizedDescription
+                errorMessage = TripErrorText.describe(error)
             }
         }
     }
@@ -212,7 +213,7 @@ final class TripPlannerViewModel {
             offlineBundle = bundle
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
             return false
         }
     }
@@ -333,7 +334,7 @@ final class TripPlannerViewModel {
             )
         } catch {
             weatherProposal = nil
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -343,6 +344,7 @@ final class TripPlannerViewModel {
     /// what comes back is what happened — not what was offered a
     /// while ago to a day that may since have moved on.
     func applyWeatherReplan() async {
+        guard requireOnline() else { return }
         guard let plan, plan.legs.contains(where: { $0.position == legIndex }) else { return }
         isWeatherReplanning = true
         defer { isWeatherReplanning = false }
@@ -359,7 +361,7 @@ final class TripPlannerViewModel {
             weatherMoves = response.moves
             weatherProposal = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -391,7 +393,7 @@ final class TripPlannerViewModel {
             )
             apply(response)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -415,7 +417,7 @@ final class TripPlannerViewModel {
         } catch {
             // "die Karten sind noch nicht da" is a state to wait out,
             // not a failure — shown as such rather than in red.
-            fillBlockedReason = error.localizedDescription
+            fillBlockedReason = TripErrorText.describe(error)
         }
     }
 
@@ -425,6 +427,7 @@ final class TripPlannerViewModel {
     /// request to rearrange the afternoon. What it does do is set what a
     /// later redistribution reads as past.
     func mark(_ stop: TripStop, as status: TripStopStatus) async {
+        guard requireOnline() else { return }
         guard let plan else { return }
         struct Body: Encodable {
             let stopId: Int
@@ -437,7 +440,7 @@ final class TripPlannerViewModel {
             )
             apply(response)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -449,6 +452,7 @@ final class TripPlannerViewModel {
     /// whole plan comes back, because a title changes what the day
     /// screen reads too.
     func saveNote(_ edit: TripSpotEdit) async {
+        guard requireOnline() else { return }
         struct Body: Encodable {
             let osmRef: String
             let title: String
@@ -472,7 +476,7 @@ final class TripPlannerViewModel {
             // the pool row, the day row and the detail view.
             await load()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -483,7 +487,9 @@ final class TripPlannerViewModel {
     /// budget, a person picks what they want. An overfull block is
     /// reported and coloured, never refused — §8.4 is explicit that the
     /// app shows the cost of the gesture rather than blocking it.
-    func place(_ candidate: TripCandidate, inBlock blockId: String, onDay day: Int) async {
+    @discardableResult
+    func place(_ candidate: TripCandidate, inBlock blockId: String, onDay day: Int) async -> Bool {
+        guard requireOnline() else { return false }
         struct Body: Encodable {
             let legIndex: Int
             let dayIndex: Int
@@ -503,8 +509,10 @@ final class TripPlannerViewModel {
             plan = response.plan
             overfullBlockIds = Set(response.overfullBlockIds)
             errorMessage = nil
+            return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
+            return false
         }
     }
 
@@ -515,6 +523,7 @@ final class TripPlannerViewModel {
     /// spots nobody could see or undo would be worse than the honest
     /// repeat.
     func drop(_ candidate: TripCandidate) async {
+        guard requireOnline() else { return }
         struct Body: Encodable {
             let legIndex: Int
             let osmRef: String
@@ -531,7 +540,7 @@ final class TripPlannerViewModel {
             plan = response.plan
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -541,6 +550,7 @@ final class TripPlannerViewModel {
     /// it and re-plans, so what comes back is a day whose blocks have
     /// the minutes the train left them.
     func addFixpoint(_ draft: TripFixpointSheet.Draft) async {
+        guard requireOnline() else { return }
         guard let plan, plan.legs.contains(where: { $0.position == legIndex }) else { return }
         struct Body: Encodable {
             let legIndex: Int
@@ -577,7 +587,7 @@ final class TripPlannerViewModel {
             )
             apply(response)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -587,6 +597,7 @@ final class TripPlannerViewModel {
     /// destination moved but whose spots did not is a day that no
     /// longer adds up — the pool it was built from is the wrong city's.
     func setDayAnchor(_ draft: TripDayAnchorSheet.Draft?) async {
+        guard requireOnline() else { return }
         struct Body: Encodable {
             let legIndex: Int
             let dayIndex: Int
@@ -621,7 +632,7 @@ final class TripPlannerViewModel {
             )
             apply(response)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -629,6 +640,7 @@ final class TripPlannerViewModel {
     /// plans it again — a block still shortened for a train nobody
     /// catches would be wrong in the quietest possible way.
     func removeFixpoint(_ fixpoint: TripFixpoint) async {
+        guard requireOnline() else { return }
         struct Body: Encodable { let fixpointId: Int }
         isSavingFixpoint = true
         defer { isSavingFixpoint = false }
@@ -639,7 +651,7 @@ final class TripPlannerViewModel {
             )
             apply(response)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -651,6 +663,7 @@ final class TripPlannerViewModel {
     /// day is not re-planned around the gap: taking one spot out is not
     /// asking for the afternoon to be rearranged.
     func returnToPool(_ stop: TripStop) async {
+        guard requireOnline() else { return }
         struct Body: Encodable { let stopId: Int }
         struct Response: Decodable {
             let plan: TripPlan
@@ -662,7 +675,7 @@ final class TripPlannerViewModel {
             plan = response.plan
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -674,6 +687,7 @@ final class TripPlannerViewModel {
     /// reversible — `hiddenSpots` lists what a trip has turned down and
     /// `unhide` brings one back.
     func hide(osmRef: String) async {
+        guard requireOnline() else { return }
         struct Body: Encodable { let osmRef: String }
         struct Response: Decodable {
             let plan: TripPlan
@@ -687,7 +701,7 @@ final class TripPlannerViewModel {
             hiddenSpots = response.hidden
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -720,6 +734,7 @@ final class TripPlannerViewModel {
     /// one place rather than two. **The idea stays in the collection**:
     /// it is not consumed, only used.
     func takeIdea(_ idea: TripIdeaForPlan) async {
+        guard requireOnline() else { return }
         struct Body: Encodable { let id: Int }
         do {
             let _: [String: String?] = try await APIClient.shared.post(
@@ -740,6 +755,7 @@ final class TripPlannerViewModel {
     /// The honest place for a spot nobody got to: better than a pool
     /// that disappears with the trip it hung off.
     func keepForNextTime(osmRefs: [String]) async {
+        guard requireOnline() else { return }
         guard !osmRefs.isEmpty else { return }
         struct Body: Encodable { let osmRefs: [String] }
         do {
@@ -755,6 +771,7 @@ final class TripPlannerViewModel {
     /// Take the "no" back. The spot may be proposed again from the next
     /// re-plan on; nothing is put on a day here.
     func unhide(osmRef: String) async {
+        guard requireOnline() else { return }
         struct Body: Encodable { let osmRef: String }
         struct Response: Decodable { let hidden: [TripHiddenSpot] }
         do {
@@ -763,7 +780,7 @@ final class TripPlannerViewModel {
             hiddenSpots = response.hidden
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -799,6 +816,7 @@ final class TripPlannerViewModel {
         now: Date = Date(),
         locationProvider: TripLocationProvider? = nil,
     ) async {
+        guard requireOnline() else { return }
         guard let plan, let day else { return }
         redistributeBlockedReason = nil
 
@@ -846,13 +864,14 @@ final class TripPlannerViewModel {
             apply(TripPlanResponse(plan: response.plan, droppedBlocks: nil))
             displaced = response.displaced
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
     /// Drag a spot into another block or day (§8.4).
-    func move(_ stop: TripStop, toDayIndex: Int, toBlockId: String, position: Int? = nil) async {
-        guard let plan else { return }
+    @discardableResult
+    func move(_ stop: TripStop, toDayIndex: Int, toBlockId: String, position: Int? = nil) async -> Bool {
+        guard let plan, requireOnline() else { return false }
         struct Body: Encodable {
             let stopId: Int
             let legIndex: Int
@@ -873,13 +892,16 @@ final class TripPlannerViewModel {
             )
             apply(TripPlanResponse(plan: response.plan, droppedBlocks: nil))
             overfullBlockIds = Set(response.overfullBlockIds)
+            return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
+            return false
         }
     }
 
     /// Pin a spot, or release it (§8.4).
     func setPinned(_ stop: TripStop, _ pinned: Bool) async {
+        guard requireOnline() else { return }
         guard let plan else { return }
         struct Body: Encodable {
             let stopId: Int
@@ -892,8 +914,17 @@ final class TripPlannerViewModel {
             )
             apply(response)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
+    }
+
+    /// A write needs the server. Offline, the banner said so and every
+    /// control kept working — and failing without a word. Now the
+    /// refusal is the same sentence, said at the tap.
+    private func requireOnline() -> Bool {
+        guard offlineSince != nil else { return true }
+        errorMessage = "Offline — Änderungen brauchen eine Verbindung. Der Plan bleibt, wie er ist."
+        return false
     }
 
     func toggleReasons(for osmRef: String) {
