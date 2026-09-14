@@ -38,7 +38,7 @@ struct TripDocumentsView: View {
                 } header: {
                     Text("An dieser Reise")
                 } footer: {
-                    Text("Gelesene Zeiten sind Vorschläge, keine Fixpunkte — eine falsch "
+                    Text("Gelesene Zeiten sind Vorschläge, keine festen Zeiten — eine falsch "
                          + "erkannte Abfahrt fällt sonst erst am Bahnsteig auf.")
                 }
             }

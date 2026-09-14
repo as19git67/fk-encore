@@ -60,9 +60,9 @@ struct TripIdeaCollection: Codable, Identifiable, Sendable {
 
     var id: Int { ownerId }
     var label: String {
-        if own { return "Mein Vorrat" }
-        guard let ownerName, !ownerName.isEmpty else { return "Geteilter Vorrat" }
-        return "Vorrat von \(ownerName)"
+        if own { return "Meine Ideen" }
+        guard let ownerName, !ownerName.isEmpty else { return "Geteilte Ideen" }
+        return "Ideen von \(ownerName)"
     }
 }
 
@@ -103,8 +103,8 @@ struct TripIdeaAddResponse: Codable, Sendable {
     var sentence: String {
         var parts: [String] = [
             merged
-                ? "\(entry.displayName) war schon im Vorrat — ergänzt."
-                : "\(entry.displayName) ist im Vorrat.",
+                ? "\(entry.displayName) war schon bei den Ideen — ergänzt."
+                : "\(entry.displayName) ist bei den Ideen.",
         ]
         if !unknown.isEmpty {
             parts.append("Unbekannt: \(unknown.joined(separator: ", ")).")
@@ -222,7 +222,7 @@ struct TripOutingProposal: Codable, Sendable {
         guard !offered else { return nil }
         switch reason {
         case "no-ideas":
-            return "In der Nähe liegt nichts aus eurem Vorrat — und die Umgebung gibt auch nichts her."
+            return "In der Nähe liegt nichts aus euren Ideen — und die Umgebung gibt auch nichts her."
         case "nothing-fits":
             return "Was hier liegt, passt nicht in die Zeit. Mit mehr Zeit sieht das anders aus."
         default:
@@ -272,8 +272,8 @@ struct TripOutingAcceptResponse: Codable, Sendable {
     var sentence: String {
         if inPool.isEmpty { return "Der Ausflug steht als Reise." }
         let left = inPool.count == 1
-            ? "eine Idee liegt im Vorrat der Reise"
-            : "\(inPool.count) Ideen liegen im Vorrat der Reise"
+            ? "eine Idee liegt bei den Kandidaten der Reise"
+            : "\(inPool.count) Ideen liegen bei den Kandidaten der Reise"
         return "Der Ausflug steht als Reise — \(left)."
     }
 }
@@ -338,10 +338,10 @@ struct TripKeptForNextTimeResponse: Codable, Sendable {
         switch (kept, alreadyThere) {
         case (0, let already) where already > 0:
             return already == 1
-                ? "War schon im Vorrat."
-                : "Waren schon im Vorrat."
+                ? "War schon bei den Ideen."
+                : "Waren schon bei den Ideen."
         case (let kept, 0):
-            return kept == 1 ? "Im Vorrat gemerkt." : "\(kept) Spots im Vorrat gemerkt."
+            return kept == 1 ? "Bei den Ideen gemerkt." : "\(kept) Orte bei den Ideen gemerkt."
         case (let kept, let already):
             return "\(kept) gemerkt, \(already) waren schon da."
         }

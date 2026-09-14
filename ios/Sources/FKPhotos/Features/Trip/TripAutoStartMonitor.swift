@@ -196,7 +196,7 @@ public final class TripAutoStartMonitor {
 
         let content = UNMutableNotificationContent()
         content.title = "Sieht aus, als wärst du unterwegs"
-        content.body = "\(name) – Trip Mode einschalten, damit neue Fotos automatisch ins Reise-Album wandern?"
+        content.body = "\(name) – Trip Mode einschalten, damit neue Fotos automatisch ins Trip-Album wandern?"
         content.categoryIdentifier = Self.notificationCategoryId
         content.sound = .default
 

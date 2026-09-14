@@ -4,6 +4,30 @@ Stand: 2026-09-09 · Status: Ideensammlung / Vorentwurf (Leitentscheidungen in
 §2 gesetzt, sonst offen) — Schritte 1–9 sind ganz oder teilweise gebaut; was
 in §13 unter „Umgesetzt" steht, existiert im Code, alles Übrige ist Entwurf.
 
+## 0. Glossar: die Wörter der App
+
+Ein Begriff pro Sache, in jeder Beschriftung derselbe. Die Spalte
+„ersetzt" nennt, was vorher an derselben Stelle stand; die Codenamen
+(`pool`, `leg`, `fixpoint`, `anchor`) bleiben, die Oberfläche nicht.
+
+| Sache | Wort in der App | ersetzt |
+|---|---|---|
+| Der Fotomodus, der Bilder in ein Album sammelt | **Trip**, Trip-Album | Reise-Album |
+| Das geplante Reiseobjekt | **Reise** | Urlaub, Plan |
+| Die reiseunabhängige Sammlung gemerkter Orte | **Ideen** | Ideenvorrat, Vorrat, Mein Vorrat |
+| Die Orte, aus denen der Planer für eine Stadt wählt | **Kandidaten** | Vorrat |
+| Ein Ort, noch nirgends eingeplant | **Ort** | Idee, Fund, Spot, Kandidat, Pin |
+| Ein Ort in einem Block eines Tages | **Stopp** | Spot; „Fotostopp" bleibt als Eigenschaft |
+| Eine Stadt bzw. Station der Reise (`leg`) | **Stadt** | Etappe |
+| Eine harte Uhrzeit im Tag (`fixpoint`) | **Feste Zeit** | Fixpunkt |
+| Wo jeder Tag beginnt und endet (`leg.anchor`) | **Unterkunft** | Start & Ziel, Anker |
+| Das Ziel eines Tagesausflugs (`day.anchor`) | **Ausflugsziel** | Ausflug |
+| Die Gruppe teilt sich für einen Block | **Gruppe trennen** / **wieder zusammen** | Zweig, Split, Trennen |
+| Wer die Reise mitplanen darf | **Planen mit** | Wer plant mit |
+| Wer mitfährt (Alter, Tempo) | **Reisegruppe** | Wer fährt mit?, Mitreisende |
+| Bestätigen | **Sichern** | Speichern, Hinzufügen, Trennen |
+| Verwerfen | **Abbrechen** | Lassen |
+
 ## 1. Die Idee in einem Satz
 
 Der Nutzer sagt in natürlicher Sprache, was er vorhat — *„ich bin vier Tage in

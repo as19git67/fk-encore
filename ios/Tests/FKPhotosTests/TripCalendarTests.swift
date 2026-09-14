@@ -140,7 +140,7 @@ final class TripCalendarTests: XCTestCase {
 
     func testALegSaysWhichOneItIsWhenNobodyNamedIt() {
         // Never an invented name (§15.3), and never a blank row either:
-        // "Etappe 2" is what the data actually supports.
+        // "Stadt 2" is what the data actually supports.
         let plan = twoLegPlan(firstStart: nil, secondStart: nil)
         XCTAssertEqual(plan.legs[0].displayTitle, "Etappe 0")
         let unnamed = TripLeg(
@@ -148,7 +148,7 @@ final class TripCalendarTests: XCTestCase {
             anchor: TripCoordinate(lat: 48.1, lon: 11.5), anchorRadiusM: nil, anchorLabel: nil, arriveMinutes: nil,
             mode: "foot", regionDb: "nom_test", awaitingRegion: nil,
             startDate: nil, days: [], pool: [])
-        XCTAssertEqual(unnamed.displayTitle, "Etappe 2")
+        XCTAssertEqual(unnamed.displayTitle, "Stadt 2")
     }
 
     func testTheTripsStartDateIsTheEarliestLegThatHasOne() {

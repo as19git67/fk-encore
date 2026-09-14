@@ -118,7 +118,7 @@ struct TripView: View {
             ContentUnavailableView {
                 Label("Kein aktiver Trip", systemImage: "map")
             } description: {
-                Text("Starte einen Trip, damit neue Fotos automatisch in ein gemeinsames Reise-Album synchronisiert werden – ohne vorher ein Album anzulegen.")
+                Text("Starte einen Trip, damit neue Fotos automatisch in ein gemeinsames Trip-Album synchronisiert werden – ohne vorher ein Album anzulegen.")
             } actions: {
                 Button("Trip starten") {
                     startSheetName = nil

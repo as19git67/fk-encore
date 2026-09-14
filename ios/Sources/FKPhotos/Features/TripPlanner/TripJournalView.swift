@@ -144,7 +144,7 @@ struct TripJournalEntry: Codable, Identifiable, Sendable {
     /// Why there is no button, for the one operation that has no inverse.
     var whyNotUndoable: String? {
         guard !undoable, undoneAt == nil, kind == "stop-to-pool" else { return nil }
-        return "Der Tag wurde danach neu gerechnet — den Spot wieder einzuplanen wäre eine "
+        return "Der Tag wurde danach neu gerechnet — den Ort wieder einzuplanen wäre eine "
             + "neue Entscheidung, keine Rücknahme."
     }
 }

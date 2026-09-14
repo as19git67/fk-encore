@@ -51,7 +51,7 @@ struct TripLegsView: View {
                 }
             } footer: {
                 Text("Jede Stadt hat ihren eigenen Ausgangspunkt, ihr eigenes Verkehrsmittel "
-                     + "und ihren eigenen Vorrat. Umverteilt wird immer nur innerhalb einer "
+                     + "und ihre eigenen Kandidaten. Umverteilt wird immer nur innerhalb einer "
                      + "Stadt — was in Tokio nicht mehr passt, rutscht nicht nach Osaka.")
             }
 
@@ -65,7 +65,7 @@ struct TripLegsView: View {
             }
 
         }
-        .navigationTitle("Etappen")
+        .navigationTitle("Städte")
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $adding) {
@@ -81,7 +81,7 @@ struct TripLegsView: View {
             }
             Button("Abbrechen", role: .cancel) { removing = nil }
         } message: { leg in
-            Text("„\(leg.displayTitle)“ wird mit allen Tagen und dem ganzen Vorrat gelöscht — "
+            Text("„\(leg.displayTitle)“ wird mit allen Tagen und allen Kandidaten gelöscht — "
                  + "auch mit dem, was jemand von Hand hinzugefügt hat.")
         }
         .task { await viewModel.load() }
@@ -244,7 +244,7 @@ struct TripLegEditView: View {
     var body: some View {
         Form {
             Section("Name") {
-                TextField("Name der Etappe", text: $title)
+                TextField("Name der Stadt", text: $title)
             }
 
             Section {
@@ -307,7 +307,7 @@ struct TripLegEditView: View {
             }
 
         }
-        .navigationTitle(leg?.displayTitle ?? "Etappe")
+        .navigationTitle(leg?.displayTitle ?? "Stadt")
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -315,7 +315,7 @@ struct TripLegEditView: View {
                 Button {
                     Task { await save() }
                 } label: {
-                    if isSaving { ProgressView() } else { Text("Speichern") }
+                    if isSaving { ProgressView() } else { Text("Sichern") }
                 }
                 .disabled(isSaving)
             }

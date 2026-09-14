@@ -29,7 +29,7 @@ struct TripIdeasNearbyView: View {
                     "Hier nichts von euch",
                     systemImage: "location.magnifyingglass",
                     description: Text(quietSentence
-                                      ?? "Im Umkreis von fünf Kilometern liegt nichts aus eurem Vorrat."),
+                                      ?? "Im Umkreis von fünf Kilometern liegt nichts aus euren Ideen."),
                 )
             }
 
