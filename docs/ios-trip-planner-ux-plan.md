@@ -719,7 +719,7 @@ or not at all.
 
 | Section | Plan | What landed | Why |
 |---|---|---|---|
-| 2.1 badge | Badge also for a pending auto-**end** suggestion | Tab icon fills for trip mode **or** a running plan; the badge still covers trip mode and pending **start** suggestions only | `TripAutoEndPreferences.pendingSuggestion` is a static `UserDefaults` read, not observable; wiring it into the tab bar needs an observable monitor first |
+| 2.1 badge | Badge also for a pending auto-**end** suggestion | Done in a follow-up PR: `TripAutoEndMonitor` is `@Observable` and mirrors the stored suggestion (loaded at init, written through, re-read on foreground); the badge and the banner in `TripView` read the mirror | — |
 | 2.2 tab root | Segmented "Aufnehmen / Planen" or the plan list as tab root | Done in a follow-up PR as the segmented control, in the navigation bar where the title was (`TripTabMode`). The half is remembered; on appearance trip mode wins, then a plan running today opens "Planen", otherwise the remembered half. The Trip tab keeps the permanent "läuft heute" banner and the settings link on "Aufnehmen" | The plan list is embedded rather than pushed, so the tab holds the one destination for an opened plan; the earlier "left for a separate change" was that change |
 | 2.2 menu | Move trip-wide screens **out** of the day menu onto the plan list | Both: the day menu keeps them in a "Rund um die Reise" submenu, and the plan list row offers them as a context menu plus the time-bound inline prompts | Somebody standing in the day screen still needs Dokumente; the submenu keeps them reachable without cluttering the day |
 | 2.2 quick controls | Tempo / Verkehrsmittel as chips in the day header | The header opens the city editor (sheet); tempo stays in Einstellungen | The header already carries the transport; two more controls there fought the day picker for space |
@@ -778,6 +778,6 @@ Three things the sandbox (no Swift toolchain) could not catch:
 2. ~~D11 — invitee list and removal for the idea collection (needs a list endpoint).~~ Done (see 3.2).
 3. ~~S1 — planner and photo mode as peers at the tab root, once the launch routing is revisited.~~ Done (see 3.1).
 4. ~~X11 — manual travellers, `shortWalks` per person, organiser hand-over (backend first).~~ Done (see 3.2).
-5. D17 — an observable auto-end monitor so the tab badge can show a pending end suggestion.
+5. ~~D17 — an observable auto-end monitor so the tab badge can show a pending end suggestion.~~ Done (see 3.1).
 6. E3 — "Das hier merken" as a one-tap action on the Trip tab and as an App Shortcut.
 7. X10 — one `TripPlannerViewModel` per plan id, so the last viewed day survives navigating away.

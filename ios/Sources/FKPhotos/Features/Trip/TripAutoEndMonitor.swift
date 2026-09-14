@@ -14,9 +14,17 @@ import UserNotifications
 /// This is a heuristic layered *on top of* the manual "Beenden" button in
 /// `TripView` — it never replaces it, and doing nothing leaves the trip
 /// running exactly as if the monitor didn't exist.
-@MainActor
+@Observable @MainActor
 public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
     public static let shared = TripAutoEndMonitor()
+
+    /// The raised suggestion, mirrored in memory so SwiftUI can observe it
+    /// — the banner in `TripView` and the tab-bar badge both react to it,
+    /// the way they do to the start suggestion. The UserDefaults copy in
+    /// `TripAutoEndPreferences` is what survives a relaunch (the
+    /// notification action routinely runs in a fresh process); this is
+    /// loaded from it at init and written through on change.
+    private(set) var pendingSuggestion: PendingAutoEndSuggestion?
 
     /// Public so `Main.swift` (the App target, a separate module from
     /// `FKPhotosLib`) can tell this category apart from any future
@@ -28,12 +36,26 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
     nonisolated static let endActionId = "trip.autoend.end"
     nonisolated static let dismissActionId = "trip.autoend.dismiss"
 
-    private let manager = CLLocationManager()
-    private var isMonitoring = false
+    @ObservationIgnored private let manager = CLLocationManager()
+    @ObservationIgnored private var isMonitoring = false
 
     private override init() {
+        pendingSuggestion = TripAutoEndPreferences.pendingSuggestion
         super.init()
         manager.delegate = self
+    }
+
+    private func store(_ suggestion: PendingAutoEndSuggestion?) {
+        pendingSuggestion = suggestion
+        TripAutoEndPreferences.pendingSuggestion = suggestion
+    }
+
+    /// Re-read the stored suggestion. The notification's actions can run
+    /// in a process that is not this one, so what the in-memory mirror
+    /// knows and what the store knows can drift while the app is in the
+    /// background; called on foreground resume.
+    func reloadPendingSuggestion() {
+        pendingSuggestion = TripAutoEndPreferences.pendingSuggestion
     }
 
     /// The auto-end category (its actions). Registered together with every
@@ -127,8 +149,9 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
     /// `endTrip()` runs for any other reason (the suggestion would otherwise
     /// dangle, referencing a trip that no longer exists).
     func dismissSuggestion(forTripAlbumId albumId: String) {
-        guard TripAutoEndPreferences.pendingSuggestion?.tripIosAlbumId == albumId else { return }
-        TripAutoEndPreferences.pendingSuggestion = nil
+        reloadPendingSuggestion()
+        guard pendingSuggestion?.tripIosAlbumId == albumId else { return }
+        store(nil)
         TripAutoEndPreferences.lastSuggestionAt = Date()
         disarm()
     }
@@ -174,7 +197,8 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
         // Switching the suggestions off mid-trip has to take back an ask that
         // is already scheduled, not just stop new ones.
         guard TripSuggestionSettings.enabled else { disarm(); return }
-        guard TripAutoEndPreferences.pendingSuggestion == nil else { return }
+        reloadPendingSuggestion()
+        guard pendingSuggestion == nil else { return }
 
         guard let home = await TripHomeLocation.resolve() else { return }
         // Re-check: `resolve()` can await a network round-trip, and the trip may
@@ -253,9 +277,7 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
     }
 
     private func raiseSuggestion(for trip: ActiveTrip) {
-        TripAutoEndPreferences.pendingSuggestion = PendingAutoEndSuggestion(
-            tripIosAlbumId: trip.iosAlbumId, raisedAt: Date()
-        )
+        store(PendingAutoEndSuggestion(tripIosAlbumId: trip.iosAlbumId, raisedAt: Date()))
         TripAutoEndPreferences.lastSuggestionAt = Date()
 
         // While the app is in the foreground the `TripView` banner already

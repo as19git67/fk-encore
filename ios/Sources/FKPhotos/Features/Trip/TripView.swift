@@ -326,13 +326,18 @@ private struct ActiveTripView: View {
     @State private var isLoading = true
     @State private var showEndConfirm = false
     @State private var showShareSheet = false
-    /// Mirrors `TripAutoEndPreferences.pendingSuggestion` for this trip. Read
-    /// fresh on appear and whenever the app returns to the foreground — the
-    /// suggestion is normally raised and answered via the notification while
-    /// the app isn't running, so this banner is the fallback for when
-    /// notifications are denied or the user opens the app instead of using the
-    /// notification's actions.
-    @State private var autoEndSuggestion: PendingAutoEndSuggestion?
+    /// The auto-end monitor, observed: its suggestion for this trip is the
+    /// banner below. The suggestion is normally raised and answered via the
+    /// notification while the app isn't running, so the banner is the
+    /// fallback for when notifications are denied or the user opens the app
+    /// instead of using the notification's actions — and the same value
+    /// puts the dot on the tab (§2.1).
+    @State private var autoEnd = TripAutoEndMonitor.shared
+
+    private var autoEndSuggestion: PendingAutoEndSuggestion? {
+        let pending = autoEnd.pendingSuggestion
+        return pending?.tripIosAlbumId == trip.iosAlbumId ? pending : nil
+    }
     /// A sync mode waiting for the confirmation below.
     @State private var pendingMode: PhotoSyncMode?
 
@@ -381,9 +386,11 @@ private struct ActiveTripView: View {
         .sheet(isPresented: $showShareSheet) {
             AlbumShareView(albumId: trip.serverAlbumId, albumName: trip.name)
         }
-        .onAppear { refreshAutoEndSuggestion() }
+        .onAppear { autoEnd.reloadPendingSuggestion() }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { refreshAutoEndSuggestion() }
+            // The notification's actions may have run in another process
+            // while this one was in the background.
+            if newPhase == .active { autoEnd.reloadPendingSuggestion() }
         }
         .confirmationDialog(
             "Löschungen übernehmen?",
@@ -400,11 +407,6 @@ private struct ActiveTripView: View {
         } message: {
             Text(Self.modeHint(pendingMode ?? .sync))
         }
-    }
-
-    private func refreshAutoEndSuggestion() {
-        let pending = TripAutoEndPreferences.pendingSuggestion
-        autoEndSuggestion = pending?.tripIosAlbumId == trip.iosAlbumId ? pending : nil
     }
 
     /// The plan behind the photos, while both are happening (§3.7).
@@ -448,14 +450,12 @@ private struct ActiveTripView: View {
                 // a trip from a banner is not a smaller decision than
                 // ending it from a button.
                 Button("Trip beenden") {
-                    TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
-                    autoEndSuggestion = nil
+                    autoEnd.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
                     showEndConfirm = true
                 }
                 .buttonStyle(.borderedProminent)
                 Button("Weiter unterwegs") {
-                    TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
-                    autoEndSuggestion = nil
+                    autoEnd.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
                 }
                 .buttonStyle(.bordered)
                 Spacer()
