@@ -99,13 +99,9 @@ struct TripDayShapeView: View {
                          + "ihr vor Ort.\n\nSpeichern plant die Tage neu.")
                 }
 
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                    }
-                }
             }
             .navigationTitle("Tagesablauf")
+            .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -139,7 +135,7 @@ struct TripDayShapeView: View {
                 "/trip-planner/plans/\(planId)/blocks")
             blocks = response.blocks
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -163,7 +159,7 @@ struct TripDayShapeView: View {
             // The server's refusals are sentences somebody can act on
             // ("mindestens ein Block muss Spots aufnehmen"), so they are
             // shown as they come.
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

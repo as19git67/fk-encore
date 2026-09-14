@@ -74,13 +74,9 @@ struct TripTravellersView: View {
                 }
             }
 
-            if let errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Wer fährt mit?")
+        .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
@@ -146,7 +142,7 @@ struct TripTravellersView: View {
             suggestions = offered.suggestions
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -161,7 +157,7 @@ struct TripTravellersView: View {
             await load()
             onPlanChanged?()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -175,7 +171,7 @@ struct TripTravellersView: View {
             await load()
             onPlanChanged?()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

@@ -25,9 +25,6 @@ struct TripPlaceSearchView: View {
                 HStack { ProgressView(); Text("Wird gesucht…") }
             }
 
-            if let errorMessage = model.errorMessage {
-                Text(errorMessage).font(.footnote).foregroundStyle(.red)
-            }
 
             if model.hasSearched && model.results.isEmpty && !model.isSearching {
                 Text("Nichts gefunden. Vielleicht heißt der Ort in OpenStreetMap anders.")
@@ -56,6 +53,7 @@ struct TripPlaceSearchView: View {
         .searchable(text: $model.query, prompt: "Name des Ortes")
         .onSubmit(of: .search) { Task { await model.search() } }
         .navigationTitle("Ort suchen")
+        .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {

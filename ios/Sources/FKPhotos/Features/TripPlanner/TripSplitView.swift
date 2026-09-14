@@ -95,11 +95,6 @@ struct TripSplitView: View {
                     }
                 }
 
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                    }
-                }
 
                 Section {
                     EmptyView()
@@ -109,6 +104,7 @@ struct TripSplitView: View {
                 }
             }
             .navigationTitle("\(blockLabel): Gruppe trennen")
+            .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -167,7 +163,7 @@ struct TripSplitView: View {
             onPlanChanged?()
             dismiss()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

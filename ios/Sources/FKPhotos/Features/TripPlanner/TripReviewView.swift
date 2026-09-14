@@ -103,13 +103,9 @@ struct TripReviewView: View {
                 }
             }
 
-            if let errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Danach")
+        .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
@@ -122,7 +118,7 @@ struct TripReviewView: View {
             review = try await APIClient.shared.get("/trip-planner/plans/\(planId)/review")
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

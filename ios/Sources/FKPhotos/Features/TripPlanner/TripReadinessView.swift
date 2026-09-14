@@ -76,13 +76,9 @@ struct TripReadinessView: View {
                 }
             }
 
-            if let errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Reisebereit?")
+        .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
@@ -110,7 +106,7 @@ struct TripReadinessView: View {
                 query: ["utcOffsetMinutes": String(TimeZone.current.secondsFromGMT() / 60)])
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

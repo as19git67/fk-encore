@@ -65,13 +65,9 @@ struct TripDocumentsView: View {
                 }
             }
 
-            if let errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Dokumente")
+        .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
@@ -150,7 +146,7 @@ struct TripDocumentsView: View {
             suggestions = offered.suggestions
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -164,7 +160,7 @@ struct TripDocumentsView: View {
                     documentId: suggestion.documentId, role: suggestion.role))
             await load()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -177,7 +173,7 @@ struct TripDocumentsView: View {
                 body: TripDocumentUnlinkRequest(documentId: document.documentId))
             await load()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

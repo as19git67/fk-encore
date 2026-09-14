@@ -37,9 +37,6 @@ struct TripIdeasView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            if let error = model.errorMessage {
-                Text(error).font(.footnote).foregroundStyle(.red)
-            }
 
             // Grouped by where things are, not by when they were
             // saved (§20.1). A flat list is fine at five entries and
@@ -113,6 +110,7 @@ struct TripIdeasView: View {
             }
         }
         .navigationTitle(model.collection?.label ?? "Ideenvorrat")
+        .plannerErrorBanner(model.errorMessage, retry: { await model.load() }, dismiss: { model.errorMessage = nil })
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

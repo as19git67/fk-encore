@@ -80,7 +80,7 @@ final class TripShareReviewViewModel {
             response = result
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -136,6 +136,20 @@ final class TripShareReviewViewModel {
         }
     }
 
+    /// How many proposals could be added right now and have not been.
+    var readyCount: Int {
+        response?.proposals.filter { isReady($0) }.count ?? 0
+    }
+
+    /// Add everything that is ready, one after the other. Stops at the
+    /// first failure so the error refers to one place, not to a batch.
+    func addAllReady() async {
+        for proposal in response?.proposals ?? [] where isReady(proposal) {
+            await add(proposal)
+            if errorMessage != nil { return }
+        }
+    }
+
     /// Add one proposal to the pool.
     func add(_ proposal: TripShareProposal) async {
         guard let request = requestFor(proposal) else { return }
@@ -154,7 +168,7 @@ final class TripShareReviewViewModel {
                 : "im Vorrat")
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
