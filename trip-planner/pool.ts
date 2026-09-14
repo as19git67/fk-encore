@@ -122,6 +122,9 @@ export const placeFromPool = api(
           // returns to the pool as a search result is one the next
           // re-plan deletes.
           origin: candidate.origin,
+          // And "why here?" (§8.3): the day screen promises it on
+          // every stop, and this is the moment it used to be lost.
+          reasons: candidate.reasons,
         },
         toBlockId: req.blockId,
         toPosition: req.position,

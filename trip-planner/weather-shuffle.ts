@@ -470,6 +470,8 @@ function asStop(candidate: Candidate, leg: ReturnType<typeof travelLeg>): Curren
     category: candidate.category,
     dwellMinutes: candidate.dwellMinutes,
     score: candidate.score,
+    reasons: candidate.reasons ?? [],
+    origin: candidate.origin ?? "search",
     travelFromPrevious: leg,
     status: "planned",
     // Placed by the weather, not by a person: a later redistribution
