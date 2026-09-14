@@ -18,9 +18,14 @@ struct TripPoolView: View {
     /// Which leg's pool. Held as a position rather than as the leg so
     /// the list follows the plan after a placement rewrites it.
     let legIndex: Int
+    /// Opened from a block, to fill that block: a tap on a candidate
+    /// then places it there and comes back, without the picker asking
+    /// a question whose answer was the button you came from.
+    var placeInto: TripPoolTarget? = nil
 
     @State private var query = ""
     @State private var placing: TripCandidate?
+    @Environment(\.dismiss) private var dismiss
 
     private var leg: TripLeg? {
         viewModel.plan?.legs.first { $0.position == legIndex }
@@ -30,6 +35,14 @@ struct TripPoolView: View {
         List {
             if let kept = viewModel.keptForNextTime {
                 Text(kept).font(.footnote).foregroundStyle(.secondary)
+            }
+            if let placeInto {
+                Section {
+                    Label("Für \(placeInto.label), Tag \(placeInto.dayIndex + 1) — „Einplanen“ setzt den Ort dorthin.",
+                          systemImage: "calendar.badge.plus")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             if let leg {
                 if leg.pool.isEmpty {
@@ -57,7 +70,7 @@ struct TripPoolView: View {
                 ContentUnavailableView("Etappe nicht gefunden", systemImage: "tray")
             }
         }
-        .navigationTitle("Vorrat")
+        .navigationTitle(placeInto == nil ? "Kandidaten" : "Stopp hinzufügen")
         .plannerErrorBanner(viewModel.errorMessage, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -86,6 +99,20 @@ struct TripPoolView: View {
             }
         }
         .task { if viewModel.plan == nil { await viewModel.load() } }
+    }
+
+    /// Into the block this screen was opened for, or ask which one.
+    /// Returns to the day once the stop is placed — that is where the
+    /// traveller was, and where the stop now is.
+    private func placeOrPick(_ candidate: TripCandidate, then close: (() -> Void)?) async {
+        guard let placeInto else {
+            placing = candidate
+            return
+        }
+        if await viewModel.place(candidate, inBlock: placeInto.blockId, onDay: placeInto.dayIndex) {
+            close?()
+            dismiss()
+        }
     }
 
     /// Name, category and note all count as the thing you remember.
@@ -127,9 +154,17 @@ struct TripPoolView: View {
             ) { closeDetail in
                 Section {
                     Button {
-                        placing = candidate
+                        Task { await placeOrPick(candidate, then: closeDetail) }
                     } label: {
-                        Label("In einen Block setzen", systemImage: "calendar.badge.plus")
+                        Label(placeInto == nil ? "In einen Block setzen" : "Hier einplanen",
+                              systemImage: "calendar.badge.plus")
+                    }
+                    // The same thing the leading swipe does, where it
+                    // can be seen (§20.3).
+                    Button {
+                        Task { await viewModel.keepForNextTime(osmRefs: [candidate.osmRef]) }
+                    } label: {
+                        Label("Für später merken", systemImage: "lightbulb")
                     }
                     if candidate.isManual {
                         // A find somebody brought in themselves is
@@ -162,7 +197,16 @@ struct TripPoolView: View {
                 }
             }
         } label: {
-            label(candidate, leg: leg)
+            HStack {
+                label(candidate, leg: leg)
+                if placeInto != nil {
+                    Button("Einplanen") {
+                        Task { await placeOrPick(candidate, then: nil) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
         }
         .swipeActions(edge: .trailing) {
             if candidate.isManual {
@@ -181,7 +225,7 @@ struct TripPoolView: View {
         }
         .swipeActions(edge: .leading) {
             Button {
-                placing = candidate
+                Task { await placeOrPick(candidate, then: nil) }
             } label: {
                 Label("Einplanen", systemImage: "calendar.badge.plus")
             }
@@ -290,4 +334,11 @@ struct TripHiddenSpotsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadHiddenSpots() }
     }
+}
+
+/// Which block a candidate list was opened to fill.
+struct TripPoolTarget: Hashable {
+    let dayIndex: Int
+    let blockId: String
+    let label: String
 }

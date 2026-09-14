@@ -41,6 +41,13 @@ struct TripLegsView: View {
                             Label("Entfernen", systemImage: "trash")
                         }
                     }
+                    // Adding is a button; removing was a swipe nobody
+                    // finds. A long press is the second way in.
+                    .contextMenu {
+                        Button(role: .destructive) { removing = leg } label: {
+                            Label("Stadt entfernen", systemImage: "trash")
+                        }
+                    }
                 }
             } footer: {
                 Text("Jede Stadt hat ihren eigenen Ausgangspunkt, ihr eigenes Verkehrsmittel "

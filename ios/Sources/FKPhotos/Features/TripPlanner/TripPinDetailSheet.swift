@@ -16,6 +16,11 @@ struct TripPinDetailSheet: View {
     /// plan, a preview — and then the section is simply absent instead
     /// of a button that fails when pressed.
     var onHide: (@MainActor () async -> Void)?
+    /// The stop itself, for the full detail screen. The sheet used to
+    /// be a second, thinner version of it with one action; now it is
+    /// the short answer with the long one a tap away.
+    var stop: TripStop? = nil
+    var mode: TripTransportMode = .foot
 
     @State private var hiding = false
     @Environment(\.dismiss) private var dismiss
@@ -80,6 +85,16 @@ struct TripPinDetailSheet: View {
                         Text("Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch "
                              + "beim nächsten Neuplanen nicht. Rückgängig im Vorrat unter "
                              + "„Ausgeblendet“.")
+                    }
+                }
+
+                if let stop {
+                    Section {
+                        NavigationLink {
+                            TripSpotDetailView(spot: TripSpotDetail(stop), mode: mode)
+                        } label: {
+                            Label("Alle Details", systemImage: "info.circle")
+                        }
                     }
                 }
 
