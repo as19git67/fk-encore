@@ -510,7 +510,7 @@ export async function acceptAiPickLogic(
     // unreviewed queue but don't hide anything.
     await dbExec(
       db.update(photoGroups)
-        .set({ reviewed_at: new Date().toISOString() })
+        .set({ reviewed_at: new Date().toISOString(), review_source: "user" })
         .where(eq(photoGroups.id, groupId)),
     );
     return { success: true, hidden_count: 0 };
@@ -522,13 +522,14 @@ export async function acceptAiPickLogic(
   const nowIso = new Date().toISOString();
   for (const photoId of toHide) {
     await db.execute(sql`
-      INSERT INTO photo_curation (user_id, photo_id, status, updated_at)
-      VALUES (${userId}, ${photoId}, 'hidden', ${nowIso})
+      INSERT INTO photo_curation (user_id, photo_id, status, source, updated_at)
+      VALUES (${userId}, ${photoId}, 'hidden', 'user', ${nowIso})
       ON CONFLICT (user_id, photo_id) DO UPDATE
         SET status = CASE
               WHEN photo_curation.status = 'favorite' THEN 'favorite'
               ELSE 'hidden'
             END,
+            source = 'user',
             updated_at = EXCLUDED.updated_at
     `);
   }
@@ -538,7 +539,7 @@ export async function acceptAiPickLogic(
   // the group reviewed here too.
   await dbExec(
     db.update(photoGroups)
-      .set({ reviewed_at: nowIso })
+      .set({ reviewed_at: nowIso, review_source: "user" })
       .where(eq(photoGroups.id, groupId)),
   );
 
@@ -616,11 +617,12 @@ export async function bulkAcceptHighConfidencePicksLogic(
         WHERE NOT (pgm.photo_id = ANY(t.ai_picked_photo_ids))
       ),
       inserted AS (
-        INSERT INTO photo_curation (user_id, photo_id, status, updated_at)
-        SELECT ${userId}, photo_id, 'hidden', NOW()
+        INSERT INTO photo_curation (user_id, photo_id, status, source, updated_at)
+        SELECT ${userId}, photo_id, 'hidden', 'user', NOW()
         FROM to_hide
         ON CONFLICT (user_id, photo_id) DO UPDATE
-          SET status = CASE
+          SET source = 'user',
+              status = CASE
                 WHEN photo_curation.status = 'favorite' THEN 'favorite'
                 ELSE 'hidden'
               END,
@@ -629,7 +631,7 @@ export async function bulkAcceptHighConfidencePicksLogic(
       ),
       reviewed AS (
         UPDATE photo_groups
-        SET reviewed_at = NOW()
+        SET reviewed_at = NOW(), review_source = 'user'
         WHERE id IN (SELECT group_id FROM targets)
         RETURNING id
       )
@@ -719,6 +721,7 @@ export async function acceptPeerConsensusLogic(
       .from(photoCuration)
       .where(and(
         ne(photoCuration.user_id, userId),
+        eq(photoCuration.source, "user"),
         inArray(photoCuration.photo_id, memberIds),
         sql`EXISTS (
           SELECT 1 FROM ${albumPhotos} ap
@@ -757,13 +760,14 @@ export async function acceptPeerConsensusLogic(
   const nowIso = new Date().toISOString();
   for (const photoId of toHide) {
     await db.execute(sql`
-      INSERT INTO photo_curation (user_id, photo_id, status, updated_at)
-      VALUES (${userId}, ${photoId}, 'hidden', ${nowIso})
+      INSERT INTO photo_curation (user_id, photo_id, status, source, updated_at)
+      VALUES (${userId}, ${photoId}, 'hidden', 'user', ${nowIso})
       ON CONFLICT (user_id, photo_id) DO UPDATE
         SET status = CASE
               WHEN photo_curation.status = 'favorite' THEN 'favorite'
               ELSE 'hidden'
             END,
+            source = 'user',
             updated_at = EXCLUDED.updated_at
     `);
   }
@@ -773,7 +777,7 @@ export async function acceptPeerConsensusLogic(
   // even if every photo turned out to have no peer signal.
   await dbExec(
     db.update(photoGroups)
-      .set({ reviewed_at: nowIso })
+      .set({ reviewed_at: nowIso, review_source: "user" })
       .where(eq(photoGroups.id, groupId)),
   );
 
@@ -1264,6 +1268,7 @@ export async function listReviewQueueLogic(
         .from(photoCuration)
         .where(and(
           ne(photoCuration.user_id, userId),
+          eq(photoCuration.source, "user"),
           inArray(photoCuration.photo_id, photoIdsForPeers),
           sql`EXISTS (
             SELECT 1 FROM ${albumPhotos} ap
