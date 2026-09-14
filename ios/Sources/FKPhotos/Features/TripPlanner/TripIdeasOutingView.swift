@@ -13,10 +13,17 @@ import SwiftUI
 /// The screen shows the proposal and writes nothing. Accepting is a
 /// second, deliberate step, and it produces an ordinary one-day trip
 /// (§20.3) — not a new kind of object with its own rules.
+///
+/// Reached from two places: the nearby list, where the anchor is the
+/// phone, and a group in the collection, where the anchor is the
+/// group's middle. `anchor` says which, and the proposal on hand is only
+/// shown when it was computed for the same one.
 struct TripIdeasOutingView: View {
     @State var model: TripIdeasViewModel
     /// Set when accepting produced a trip, so the caller can open it.
     @Binding var openPlanId: Int?
+    /// Where the outing starts, when it is not where the phone is.
+    var anchor: TripCoordinate? = nil
 
     @State private var date = Date()
     @State private var title = ""
@@ -24,10 +31,27 @@ struct TripIdeasOutingView: View {
 
     var body: some View {
         List {
+            // How big an outing: two hours, the afternoon, the day. A
+            // change recomputes — a budget shown next to a proposal it
+            // was not computed with would be a lie in a segmented
+            // control.
+            Section {
+                Picker("Zeit", selection: budget) {
+                    ForEach(TripOutingBudget.allCases) { size in
+                        Text(size.label).tag(size)
+                    }
+                }
+                .pickerStyle(.segmented)
+            } footer: {
+                Text(anchor == nil
+                     ? "Von hier aus, mit euren Ideen im Umkreis von 25 km."
+                     : "Rund um diese Gruppe, mit euren Ideen im Umkreis von 25 km.")
+            }
+
 
             if model.isProposing {
                 HStack { ProgressView(); Text("Wird gerechnet…") }
-            } else if let outing = model.outing {
+            } else if let outing = model.outing, model.hasOuting(around: anchor) {
                 if let refusal = outing.refusal {
                     ContentUnavailableView(
                         "Kein Ausflug",
@@ -60,13 +84,45 @@ struct TripIdeasOutingView: View {
                         .disabled(model.isAcceptingOuting)
                     }
                 }
+            } else if model.outingError == nil {
+                // Nothing on hand and nothing failed: the first request
+                // has not run, or ran for another anchor. Said, with the
+                // way to change it — a blank list under a title reads as
+                // "the app is stuck".
+                ContentUnavailableView {
+                    Label("Noch nichts gerechnet", systemImage: "figure.walk.motion")
+                } description: {
+                    Text("Der Vorschlag wird aus euren Ideen und der Umgebung gerechnet.")
+                } actions: {
+                    Button("Ausflug vorschlagen") {
+                        Task { await model.proposeOuting(around: anchor) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
         }
         .navigationTitle("Ausflug")
         .plannerErrorBanner(model.outingError, retry: { await model.proposeOuting() }, dismiss: { model.outingError = nil })
         .task {
-            if model.outing == nil { await model.proposeOuting() }
+            if !model.hasOuting(around: anchor) { await model.proposeOuting(around: anchor) }
         }
+        .onChange(of: model.outingBudgetMinutes) { _, _ in
+            Task { await model.proposeOuting(around: anchor) }
+        }
+        .refreshable { await model.proposeOuting(around: anchor) }
+    }
+
+    /// The picker's binding onto the model's minute budget.
+    ///
+    /// The model keeps minutes because that is what the server takes;
+    /// the picker shows sizes because that is what people choose. A
+    /// minute count that is not one of the three sizes reads as the
+    /// default rather than as nothing selected.
+    private var budget: Binding<TripOutingBudget> {
+        Binding(
+            get: { TripOutingBudget(rawValue: model.outingBudgetMinutes) ?? .halfDay },
+            set: { model.outingBudgetMinutes = $0.rawValue },
+        )
     }
 
     private func accept() async {

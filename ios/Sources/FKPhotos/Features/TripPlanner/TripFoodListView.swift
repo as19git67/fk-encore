@@ -13,13 +13,40 @@ import SwiftUI
 /// The attributes are shown only where OSM has them. A missing tag is
 /// unknown, never "no": rendering an untagged place with a grey
 /// crossed-out leaf would invent a fact about it.
+///
+/// Opened from a meal block, it can also **put a place into that
+/// block**: the find goes to the leg's candidates the way a shared link
+/// does (§9.2) and is then placed, so "wir essen hier" is one tap and
+/// not a trip through the pool. Without a block — the view works on its
+/// own — the rows only look and call.
 struct TripFoodListView: View {
     let position: TripCoordinate
+    /// The block this list was opened from, when it was. Nil leaves the
+    /// rows without the way into the plan.
+    var target: BlockTarget? = nil
+    /// Called after a place was put into the block, so the screen that
+    /// owns the plan can reload it.
+    var onPlaced: (() async -> Void)? = nil
+
+    /// Where a chosen place goes: which plan, which leg, which day,
+    /// which block. Everything the two calls need, handed in rather
+    /// than looked up — this view has no plan of its own.
+    struct BlockTarget: Sendable {
+        let planId: Int
+        let legIndex: Int
+        let dayIndex: Int
+        let blockId: String
+    }
 
     @State private var places: [FoodPlace] = []
     @State private var consideredCount = 0
     @State private var isLoading = false
     @State private var errorMessage: String?
+    /// The place being written into the plan, while it is.
+    @State private var placingRef: String?
+    /// What became of a place put into the block, by its ref — shown on
+    /// the row so the list says what it did rather than going quiet.
+    @State private var placed: [String: String] = [:]
 
     @State private var vegetarian = false
     @State private var vegan = false
@@ -104,8 +131,10 @@ struct TripFoodListView: View {
             if let hours = place.openingHours {
                 // Verbatim, because OSM's syntax is the only thing that
                 // is actually true — paraphrasing it into "open now"
-                // would be a claim we cannot stand behind.
-                Text(hours)
+                // would be a claim we cannot stand behind. Prefixed with
+                // where it comes from, so "Mo-Fr 11:00-22:00" reads as
+                // somebody's tag and not as this app's promise.
+                Text("Laut OpenStreetMap: \(hours)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -130,6 +159,29 @@ struct TripFoodListView: View {
             .font(.caption)
             .buttonStyle(.plain)
             .padding(.top, 2)
+
+            if target != nil {
+                if let outcome = placed[place.osmRef] {
+                    Label(outcome, systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                } else {
+                    Button {
+                        Task { await put(place) }
+                    } label: {
+                        if placingRef == place.osmRef {
+                            HStack { ProgressView(); Text("Wird eingetragen\u{2026}") }
+                        } else {
+                            Label("In diesen Block setzen", systemImage: "plus.circle")
+                        }
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .disabled(placingRef != nil)
+                    .padding(.top, 2)
+                }
+            }
         }
         .padding(.vertical, 2)
     }
@@ -154,6 +206,80 @@ struct TripFoodListView: View {
             let item = MKMapItem(placemark: MKPlacemark(coordinate: coordinate.clCoordinate))
             item.name = place.name
             item.openInMaps()
+        }
+    }
+
+    /// Put one place into the block this list was opened from.
+    ///
+    /// Two calls, in the order the plan understands them: first the
+    /// place becomes a candidate of the leg — the find path (§9.2), with
+    /// the leg named so it does not land in whichever leg is nearest —
+    /// then the candidate is placed in the block. If the first succeeds
+    /// and the second does not, the row says so: the place is in the
+    /// candidates, and that is worth knowing rather than a bare error.
+    private func put(_ place: FoodPlace) async {
+        guard let target else { return }
+        placingRef = place.osmRef
+        defer { placingRef = nil }
+
+        struct Added: Decodable {
+            struct Entry: Decodable { let osmRef: String }
+            let entry: Entry
+            let merged: Bool
+        }
+        struct PlaceBody: Encodable {
+            let legIndex: Int
+            let dayIndex: Int
+            let blockId: String
+            let osmRef: String
+        }
+        struct Placed: Decodable {
+            let overfullBlockIds: [String]
+        }
+
+        let added: Added
+        do {
+            added = try await APIClient.shared.post(
+                "/trip-planner/plans/\(target.planId)/finds",
+                body: TripAddFindRequest(
+                    lat: place.lat,
+                    lon: place.lon,
+                    name: place.name,
+                    note: nil,
+                    sourceUrl: nil,
+                    legIndex: target.legIndex,
+                    // An hour: the one figure a meal needs, sent so the
+                    // find is never refused for want of one when the
+                    // map's entry does not match after all.
+                    dwellMinutes: 60,
+                ),
+            )
+        } catch {
+            errorMessage = "\(place.displayName) ließ sich nicht zu den Kandidaten legen."
+            return
+        }
+
+        do {
+            let result: Placed = try await APIClient.shared.post(
+                "/trip-planner/plans/\(target.planId)/pool/place",
+                body: PlaceBody(
+                    legIndex: target.legIndex,
+                    dayIndex: target.dayIndex,
+                    blockId: target.blockId,
+                    osmRef: added.entry.osmRef,
+                ),
+            )
+            // Over budget is said, never hidden (§8.4): the traveller
+            // decided, and the cost of the decision is theirs to see.
+            placed[place.osmRef] = result.overfullBlockIds.contains(target.blockId)
+                ? "Im Block — der ist damit übervoll."
+                : "Im Block."
+            errorMessage = nil
+            await onPlaced?()
+        } catch {
+            placed[place.osmRef] = added.merged
+                ? "Bei den Kandidaten (war schon dabei) — in den Block ließ es sich nicht setzen."
+                : "Bei den Kandidaten — in den Block ließ es sich nicht setzen."
         }
     }
 

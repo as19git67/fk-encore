@@ -1090,7 +1090,21 @@ struct TripPlanDayView: View {
                         .foregroundStyle(.secondary)
                     if let leg = viewModel.leg {
                         NavigationLink {
-                            TripFoodListView(position: leg.anchor)
+                            TripFoodListView(
+                                // Where the block is, not where the quarters
+                                // are: a day trip eats at its destination,
+                                // and an afternoon eats near its last stop.
+                                position: viewModel.day?.anchor?.coordinate
+                                    ?? block.stops.last?.coordinate
+                                    ?? leg.anchor,
+                                target: TripFoodListView.BlockTarget(
+                                    planId: viewModel.planId,
+                                    legIndex: leg.position,
+                                    dayIndex: viewModel.dayIndex,
+                                    blockId: block.id,
+                                ),
+                                onPlaced: { await viewModel.load() },
+                            )
                         } label: {
                             Label("Essen in der Nähe", systemImage: "fork.knife.circle")
                                 .font(.footnote)

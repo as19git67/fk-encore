@@ -82,6 +82,11 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             manager.requestAlwaysAuthorization()
         }
         manager.startMonitoringSignificantLocationChanges()
+
+        // Watching again is a moment with the app up and, usually, a
+        // network — the right moment to send what could not be sent
+        // from the tunnel.
+        Task { await flushQueuedReports() }
     }
 
     /// Stop watching, closing anything still open.
@@ -127,17 +132,9 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             return
         }
 
-        struct Body: Encodable {
-            let stopId: Int?
-            let osmRef: String
-            let name: String?
-            let arrivedAt: String
-            let leftAt: String
-            let dwellMinutes: Int
-            let hasMatchingPhoto: Bool
-        }
         let formatter = ISO8601DateFormatter()
-        let body = Body(
+        let report = TripVisitReport(
+            planId: planId,
             stopId: stopIds[stay.regionId],
             osmRef: region.osmRef,
             name: region.name,
@@ -147,13 +144,38 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             hasMatchingPhoto: TripPhotoSignal.confirms(
                 stay, region: region, photos: recentPhotos()),
         )
+        // Whatever is still waiting goes first, so the diary keeps its
+        // order; then this one. A failed report is not worth surfacing —
+        // the stay is a by-product of walking around, and a network
+        // error while doing so is not something the traveller can act
+        // on — but it is worth **keeping**: a museum visited in the
+        // tunnel is still a visit, and the queue is what the next
+        // successful report or the next `watch` sends it from (§3.9).
+        await flushQueuedReports()
+        if !(await Self.send(report)) {
+            TripVisitReportQueue.append(report)
+        }
+    }
+
+    /// Send what earlier reports left behind, oldest first, stopping
+    /// at the first one that fails again — the network is what it is.
+    private func flushQueuedReports() async {
+        for report in TripVisitReportQueue.load() {
+            guard await Self.send(report) else { return }
+            TripVisitReportQueue.remove(report)
+        }
+    }
+
+    /// One report, one call. True when the server took it.
+    private static func send(_ report: TripVisitReport) async -> Bool {
         struct Ignored: Decodable {}
-        // A failed report is not worth surfacing: the stay is a
-        // by-product of walking around, and a network error while doing
-        // so is not something the traveller can act on. The next sync of
-        // the day's visits will show what was recorded.
-        _ = try? await APIClient.shared.post(
-            "/trip-planner/plans/\(planId)/visits", body: body) as Ignored
+        do {
+            _ = try await APIClient.shared.post(
+                "/trip-planner/plans/\(report.planId)/visits", body: report.body) as Ignored
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: - CLLocationManagerDelegate
@@ -185,5 +207,76 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
         guard state == .inside else { return }
         let now = Date()
         Task { @MainActor in tracker.entered(region.identifier, at: now) }
+    }
+}
+
+/// One stay, ready to be told to the server (§7.1).
+///
+/// Kept whole — plan and all — because it may wait on disk until there
+/// is a network, and by then the monitor may be watching another day.
+/// The wire body is the same shape `visits.ts` has always taken; the
+/// plan id only says which URL it goes to.
+struct TripVisitReport: Codable, Equatable, Sendable {
+    let planId: Int
+    let stopId: Int?
+    let osmRef: String
+    let name: String?
+    let arrivedAt: String
+    let leftAt: String
+    let dwellMinutes: Int
+    let hasMatchingPhoto: Bool
+
+    /// What goes over the wire — everything but the plan id, which is
+    /// in the path.
+    struct Body: Encodable {
+        let stopId: Int?
+        let osmRef: String
+        let name: String?
+        let arrivedAt: String
+        let leftAt: String
+        let dwellMinutes: Int
+        let hasMatchingPhoto: Bool
+    }
+
+    var body: Body {
+        Body(
+            stopId: stopId, osmRef: osmRef, name: name, arrivedAt: arrivedAt,
+            leftAt: leftAt, dwellMinutes: dwellMinutes, hasMatchingPhoto: hasMatchingPhoto,
+        )
+    }
+}
+
+/// Reports that could not be sent, waiting for a network (§3.9).
+///
+/// A small array in the defaults, oldest first. Small on purpose: a
+/// day has a dozen stays at most, and a queue that grew past a hundred
+/// would mean a week offline — at which point the oldest are the ones
+/// least worth keeping, so they are the ones dropped.
+enum TripVisitReportQueue {
+    static let key = "trip.visits.pending"
+    static let capacity = 100
+
+    static func load(from store: UserDefaults = .standard) -> [TripVisitReport] {
+        guard let data = store.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([TripVisitReport].self, from: data)) ?? []
+    }
+
+    static func append(_ report: TripVisitReport, to store: UserDefaults = .standard) {
+        var queue = load(from: store)
+        queue.append(report)
+        if queue.count > capacity { queue.removeFirst(queue.count - capacity) }
+        save(queue, to: store)
+    }
+
+    static func remove(_ report: TripVisitReport, from store: UserDefaults = .standard) {
+        save(load(from: store).filter { $0 != report }, to: store)
+    }
+
+    private static func save(_ queue: [TripVisitReport], to store: UserDefaults) {
+        if queue.isEmpty {
+            store.removeObject(forKey: key)
+        } else if let data = try? JSONEncoder().encode(queue) {
+            store.set(data, forKey: key)
+        }
     }
 }
