@@ -82,7 +82,7 @@ struct TripIdeasNearbyView: View {
             }
         }
         .navigationDestination(item: $openPlanId) { planId in
-            TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
+            TripPlanDayView(viewModel: TripPlannerViewModel.shared(for: planId))
         }
         .navigationTitle("In der Nähe")
         .plannerErrorBanner(model.nearbyError, retry: { await model.loadNearby() }, dismiss: { model.nearbyError = nil })
