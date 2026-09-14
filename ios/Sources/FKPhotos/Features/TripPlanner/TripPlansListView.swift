@@ -18,6 +18,10 @@ struct TripPlansListView: View {
     /// "Verwerfen" on the shared find is the one irreversible tap on
     /// this screen that did not ask. Now it does.
     @State private var confirmDiscard = false
+    /// A trip-wide screen opened from a row — the evening before, the
+    /// week after. They lived only behind a day's "Mehr" menu, which is
+    /// the one place nobody is on those days.
+    @State private var aux: TripPlanAux?
     @Environment(AuthManager.self) private var authManager
     @State private var isCreating = false
     /// Set to the id of a plan just created, so the list opens it
@@ -85,6 +89,20 @@ struct TripPlansListView: View {
         }
         .navigationDestination(item: $openPlanId) { planId in
             TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
+        }
+        .navigationDestination(item: $aux) { aux in
+            switch aux.kind {
+            case .readiness:
+                TripReadinessView(viewModel: TripPlannerViewModel(planId: aux.planId))
+            case .review:
+                TripReviewView(planId: aux.planId)
+            case .documents:
+                TripDocumentsView(planId: aux.planId)
+            case .journal:
+                TripJournalView(planId: aux.planId)
+            case .offline:
+                TripOfflineView(viewModel: TripPlannerViewModel(planId: aux.planId))
+            }
         }
         .confirmationDialog("Geteilten Fund verwerfen?", isPresented: $confirmDiscard,
                             titleVisibility: .visible) {
@@ -180,6 +198,23 @@ struct TripPlansListView: View {
                 } label: {
                     row(plan)
                 }
+                .contextMenu {
+                    Button { aux = TripPlanAux(planId: plan.id, kind: .documents) } label: {
+                        Label("Dokumente", systemImage: "doc.text")
+                    }
+                    Button { aux = TripPlanAux(planId: plan.id, kind: .journal) } label: {
+                        Label("Änderungen", systemImage: "arrow.uturn.backward")
+                    }
+                    Button { aux = TripPlanAux(planId: plan.id, kind: .readiness) } label: {
+                        Label("Reisebereit?", systemImage: "checklist")
+                    }
+                    Button { aux = TripPlanAux(planId: plan.id, kind: .review) } label: {
+                        Label("Danach", systemImage: "clock.arrow.circlepath")
+                    }
+                    Button { aux = TripPlanAux(planId: plan.id, kind: .offline) } label: {
+                        Label("Unterwegs ohne Netz", systemImage: "wifi.slash")
+                    }
+                }
                 .swipeActions(edge: .trailing) {
                     if plan.organises {
                         Button(role: .destructive) {
@@ -267,8 +302,41 @@ struct TripPlansListView: View {
             Text(schedule.label)
                 .font(.caption)
                 .foregroundStyle(schedule.isRunning ? Color.accentColor : .secondary)
+            // Time-bound, so offered when the time is: the evening
+            // before, and the days after.
+            if let prompt = timelyPrompt(for: plan, schedule: schedule) {
+                Button {
+                    aux = TripPlanAux(planId: plan.id, kind: prompt.kind)
+                } label: {
+                    Label(prompt.title, systemImage: prompt.systemImage)
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
         }
         .padding(.vertical, 2)
+    }
+
+    private struct TimelyPrompt {
+        let title: String
+        let systemImage: String
+        let kind: TripPlanAux.Kind
+    }
+
+    /// "Reisebereit?" in the last two days before departure, "Danach"
+    /// for two weeks after the end. Nothing otherwise.
+    private func timelyPrompt(for plan: TripPlanSummary, schedule: TripSchedule) -> TimelyPrompt? {
+        switch schedule {
+        case .upcoming(let days) where days <= 2:
+            return TimelyPrompt(title: "Reisebereit?", systemImage: "checklist", kind: .readiness)
+        case .past(let days) where days <= 14:
+            return TimelyPrompt(title: "Danach: Was war, was nicht", systemImage: "clock.arrow.circlepath",
+                                kind: .review)
+        default:
+            return nil
+        }
     }
 
     /// Delete a trip (§6.2).
@@ -360,4 +428,12 @@ struct TripPlanSummary: Codable, Identifiable, Sendable {
     var dayCountLabel: String {
         dayCount == 1 ? "1 Tag" : "\(dayCount) Tage"
     }
+}
+
+/// A trip-wide screen reached from the plan list.
+struct TripPlanAux: Hashable, Identifiable {
+    enum Kind: Hashable { case readiness, review, documents, journal, offline }
+    let planId: Int
+    let kind: Kind
+    var id: String { "\(planId)-\(kind)" }
 }

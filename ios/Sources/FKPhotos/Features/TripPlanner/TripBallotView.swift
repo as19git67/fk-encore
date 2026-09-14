@@ -140,32 +140,39 @@ struct TripBallotView: View {
             if let voices = entry.voices {
                 Text(voices).font(.footnote).foregroundStyle(.secondary)
             }
-            HStack(spacing: 8) {
+            // Three answers with their words on them, not three glyphs
+            // 28 points wide; the heart on its own line, because it is
+            // a different thing from a vote and it has a quota.
+            Picker("Stimme", selection: Binding(
+                get: { entry.myVote },
+                set: { chosen in
+                    guard let chosen, let vote = TripVote(rawValue: chosen) else { return }
+                    Task { await cast(entry, vote, heart: false) }
+                },
+            )) {
                 ForEach(TripVote.allCases, id: \.rawValue) { vote in
-                    Button {
-                        Task { await cast(entry, vote, heart: false) }
-                    } label: {
-                        Label(vote.label, systemImage: vote.symbolName)
-                            .font(.caption)
-                            .labelStyle(.iconOnly)
-                            .padding(6)
-                            .background(entry.myVote == vote.rawValue && !entry.myHeart
-                                        ? Color.accentColor.opacity(0.2)
-                                        : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.borderless)
+                    Text(vote.label).tag(Optional(vote.rawValue))
                 }
+            }
+            .pickerStyle(.segmented)
+            .disabled(busyRef == entry.osmRef)
+            HStack(spacing: 8) {
                 Button {
                     Task { await cast(entry, .want, heart: !entry.myHeart) }
                 } label: {
-                    Image(systemName: entry.myHeart ? "heart.fill" : "heart")
+                    Label(entry.myHeart ? "Herzenswunsch" : "Zum Herzenswunsch machen",
+                          systemImage: entry.myHeart ? "heart.fill" : "heart")
                         .font(.caption)
-                        .foregroundStyle(entry.myHeart ? .pink : .secondary)
-                        .padding(6)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(entry.myHeart ? .pink : .accentColor)
                 .disabled(!entry.myHeart && heartsLeft == 0)
+                if !entry.myHeart && heartsLeft == 0 {
+                    Text("Keine Herzenswünsche mehr frei")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 2)
