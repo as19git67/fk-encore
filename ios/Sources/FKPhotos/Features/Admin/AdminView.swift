@@ -66,9 +66,9 @@ struct AdminView: View {
                 }
 
                 NavigationLink {
-                    TripMapsSettingsView()
+                    TripSettingsView()
                 } label: {
-                    Label("Karten-App", systemImage: "map")
+                    Label("Trip & Reise", systemImage: "map")
                 }
 
                 Toggle(isOn: $reviewNotificationsEnabled) {

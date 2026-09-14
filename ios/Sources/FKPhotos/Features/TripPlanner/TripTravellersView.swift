@@ -27,6 +27,12 @@ struct TripTravellersView: View {
     @State private var busyId: Int?
     @State private var busyKey: String?
     @State private var errorMessage: String?
+    /// The person about to be added — the first time, the re-plan is
+    /// said out loud (§3.5): a day that got shorter without a word
+    /// reads as a bug.
+    @State private var confirmingAdd: TripTravellerSuggestion?
+    @State private var confirmingRemove: TripTraveller?
+    @AppStorage("trip.travellers.replanExplained") private var replanExplained = false
 
     var body: some View {
         List {
@@ -80,6 +86,28 @@ struct TripTravellersView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
+        .alert("Die Tage werden neu geplant", isPresented: Binding(
+            get: { confirmingAdd != nil }, set: { if !$0 { confirmingAdd = nil } }),
+               presenting: confirmingAdd) { person in
+            Button("\(person.label) eintragen") {
+                replanExplained = true
+                Task { await add(person) }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { _ in
+            Text("Wer mitfährt, bestimmt, wie viel in einen Tag passt. Mit jeder Änderung an "
+                 + "der Reisegruppe werden die Tage neu verteilt; angeheftete Stopps bleiben.")
+        }
+        .confirmationDialog("Aus der Reisegruppe nehmen?", isPresented: Binding(
+            get: { confirmingRemove != nil }, set: { if !$0 { confirmingRemove = nil } }),
+            titleVisibility: .visible, presenting: confirmingRemove) { traveller in
+            Button("\(traveller.label) entfernen", role: .destructive) {
+                Task { await remove(traveller) }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { _ in
+            Text("Die Tage werden danach neu geplant.")
+        }
     }
 
     @ViewBuilder
@@ -93,7 +121,7 @@ struct TripTravellersView: View {
             }
             Spacer()
             Button(role: .destructive) {
-                Task { await remove(traveller) }
+                confirmingRemove = traveller
             } label: {
                 if busyId == traveller.id {
                     ProgressView()
@@ -115,7 +143,11 @@ struct TripTravellersView: View {
             }
             Spacer()
             Button {
-                Task { await add(person) }
+                if replanExplained {
+                    Task { await add(person) }
+                } else {
+                    confirmingAdd = person
+                }
             } label: {
                 if busyKey == person.id {
                     ProgressView()
@@ -134,15 +166,21 @@ struct TripTravellersView: View {
         do {
             let here: TripTravellersResponse = try await APIClient.shared.get(
                 "/trip-planner/plans/\(planId)/travellers")
-            let offered: TripTravellerSuggestionsResponse = try await APIClient.shared.get(
-                "/trip-planner/plans/\(planId)/travellers/suggestions")
             travellers = here.travellers
             effect = here.effect
             startsOn = here.on
-            suggestions = offered.suggestions
             errorMessage = nil
         } catch {
             errorMessage = TripErrorText.describe(error)
+        }
+        // Apart from the list itself: a failing suggestions call used
+        // to empty the working list of travellers too.
+        do {
+            let offered: TripTravellerSuggestionsResponse = try await APIClient.shared.get(
+                "/trip-planner/plans/\(planId)/travellers/suggestions")
+            suggestions = offered.suggestions
+        } catch {
+            if errorMessage == nil { errorMessage = TripErrorText.describe(error) }
         }
     }
 

@@ -148,14 +148,10 @@ struct TripShareReviewView: View {
                 }
             }
         case .howLong:
-            Stepper(value: Binding(
+            TripDurationPicker(minutes: Binding(
                 get: { model.dwellMinutes[proposal.id] ?? TripShareReviewViewModel.suggestedDwellMinutes },
                 set: { model.dwellMinutes[proposal.id] = $0 },
-            ), in: 5...480, step: 5) {
-                let minutes = model.dwellMinutes[proposal.id]
-                    ?? TripShareReviewViewModel.suggestedDwellMinutes
-                Text("Aufenthalt: \(minutes) Min.")
-            }
+            ))
         }
 
         if let outcome = model.added[proposal.id] {
@@ -198,8 +194,10 @@ struct TripShareReviewView: View {
     }
 
     private func optionLabel(_ option: TripShareProposal.Option) -> String {
-        guard let distance = option.distanceM else { return option.name ?? option.osmRef }
-        let name = option.name ?? option.osmRef
+        // Never the reference: nobody chooses between two cafés by
+        // `way:213850482`.
+        let name = option.name ?? "Ort ohne Namen"
+        guard let distance = option.distanceM else { return name }
         return distance >= 1_000
             ? "\(name) — \(String(format: "%.1f", distance / 1_000)) km"
             : "\(name) — \(Int(distance.rounded())) m"

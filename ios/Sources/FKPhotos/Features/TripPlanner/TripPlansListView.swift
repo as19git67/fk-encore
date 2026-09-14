@@ -254,9 +254,10 @@ struct TripPlansListView: View {
             }
             HStack {
                 if plans.isEmpty {
-                    Text("Erst eine Reise anlegen.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // The sentence asked for it; now there is a button.
+                    Button("Reise anlegen") { isCreating = true }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                 } else {
                     Button("Übernehmen") { showingPicker = true }
                         .buttonStyle(.borderedProminent)
@@ -276,20 +277,10 @@ struct TripPlansListView: View {
     private func row(_ plan: TripPlanSummary) -> some View {
         let schedule = plan.schedule(on: Date())
         return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text(plan.displayTitle).font(.headline)
-                if schedule.isRunning {
-                    // Which trip you are actually on, at a glance. It is
-                    // also the trip whose day screen opens on today —
-                    // the two have to agree, so both read the same
-                    // schedule.
-                    Text("läuft")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.accentColor.opacity(0.15), in: Capsule())
-                }
-            }
+            // Which trip you are actually on is said once, by the
+            // schedule line below in the accent colour — a second chip
+            // said the same thing twice in one cell.
+            Text(plan.displayTitle).font(.headline)
             HStack(spacing: 6) {
                 Text(plan.dayCountLabel)
                 if let route = plan.routeLabel {

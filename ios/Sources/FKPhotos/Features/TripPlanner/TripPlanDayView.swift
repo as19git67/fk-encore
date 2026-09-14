@@ -36,6 +36,9 @@ struct TripPlanDayView: View {
     @State private var settingDayAnchor = false
     /// The block being split (§6.5), while its sheet is open.
     @State private var splitting: TripSplitTarget?
+    @State private var confirmRemoveOuting = false
+    /// The city's editor, opened from the header.
+    @State private var editingLeg = false
     @State var viewModel: TripPlannerViewModel
 
     var body: some View {
@@ -208,6 +211,16 @@ struct TripPlanDayView: View {
             if let choice = mapsChoice {
                 Button("Apple Karten") { openMaps(choice, with: .apple) }
                 Button("Google Maps") { openMaps(choice, with: .google) }
+                // The setting was three screens away, in a tab about
+                // something else. Here is where the decision is made.
+                Button("Immer Apple Karten") {
+                    mapsPreference = TripMapsApp.apple.rawValue
+                    openMaps(choice, with: .apple)
+                }
+                Button("Immer Google Maps") {
+                    mapsPreference = TripMapsApp.google.rawValue
+                    openMaps(choice, with: .google)
+                }
                 Button("Abbrechen", role: .cancel) {}
             }
         }
@@ -567,20 +580,25 @@ struct TripPlanDayView: View {
     private func legHeader(_ leg: TripLeg) -> some View {
         // Tappable: the accommodation and the transport are printed
         // here, and changing either used to be five screens away.
-        NavigationLink {
-            TripLegEditView(viewModel: viewModel, legIndex: leg.position)
+        Button {
+            editingLeg = true
         } label: {
             HStack(alignment: .top, spacing: 6) {
                 legHeaderText(leg)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
+                Image(systemName: "square.and.pencil")
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
             }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityHint("Unterkunft und Verkehrsmittel ändern")
+        .sheet(isPresented: $editingLeg) {
+            NavigationStack {
+                TripLegEditView(viewModel: viewModel, legIndex: leg.position)
+            }
+        }
     }
 
     private func legHeaderText(_ leg: TripLeg) -> some View {
@@ -845,7 +863,14 @@ struct TripPlanDayView: View {
                     .frame(minWidth: 44, minHeight: 44)
                     .disabled(viewModel.isSavingFixpoint)
                 removeButton("Ausflugsziel \(outing.displayName) entfernen") {
-                    Task { await viewModel.setDayAnchor(nil) }
+                    confirmRemoveOuting = true
+                }
+                .confirmationDialog("Ausflugsziel entfernen?", isPresented: $confirmRemoveOuting,
+                                    titleVisibility: .visible) {
+                    Button("Entfernen", role: .destructive) { removeOuting() }
+                    Button("Abbrechen", role: .cancel) {}
+                } message: {
+                    Text("Der Tag wird wieder um die Unterkunft herum geplant.")
                 }
             }
             .frame(minHeight: 44)
@@ -854,6 +879,11 @@ struct TripPlanDayView: View {
                 settingDayAnchor = true
             }
         }
+    }
+
+    /// The x-tap's target, kept apart so the confirmation can call it.
+    private func removeOuting() {
+        Task { await viewModel.setDayAnchor(nil) }
     }
 
     /// One way into the day's frame — a full-width row rather than a
