@@ -124,6 +124,22 @@ sie hinzugefügt hat, genau um denselben Kampf mit dem Aussortieren zu vermeiden
 
 ## 7. Manueller Kurationsmodus (Option 5/6)
 
+**Was der Schalter Auto/Manuell entscheidet – und was nicht.** Der Schalter
+betrifft ausschließlich den Weg neuer Fotos *in das iOS-Album*:
+
+- **Automatisch** (`autoAdd = true`): Neu aufgenommene Fotos werden vom
+  Auto-Add-Pass in das iOS-Trip-Album gelegt. Damit greift die
+  Synchronisation ins f4mil-Album.
+- **Manuell** (`autoAdd = false`): Neu aufgenommene Fotos bleiben in der
+  Aufnahmen-Ansicht. Der Nutzer legt selbst in der Fotos-App ins
+  iOS-Trip-Album, was dazugehören soll.
+
+In **beiden** Fällen wird das iOS-Trip-Album nach f4mil synchronisiert –
+auch wenn es im manuellen Modus leer bleibt, solange niemand etwas
+hineingelegt hat. „Manuell" ist also nicht „aus": Sync-Modus
+(copy/sync/bisync) und Album bleiben unverändert aktiv. Die App sagt das in
+der Zeile unter dem Schalter und im Leerzustand des Foto-Grids.
+
 Schalter `autoAdd = false` im Trip. Neben dem Trip-Toggle ein Button →
 Review-View: Grid aller neuen, noch nicht behandelten Trip-Kandidaten
 (Fenster-Regel). Mehrfachauswahl → „Zum Trip-Album hinzufügen"
@@ -410,7 +426,9 @@ Gesperrt am 2026-07-24.
   vergangener/eingefrorener Trips als normale Alben).
 - **Aktiver Trip:** oben die Optionen-Buttons (Trip beenden, Modus
   copy/sync/bisync, Auto/Manuell, Name/Ort bearbeiten), darunter das **Foto-Grid**
-  der Trip-Album-Inhalte. Im manuellen Modus zusätzlich der Button zum
+  der Trip-Album-Inhalte. Unter dem Auto/Manuell-Schalter eine Zeile, die
+  sagt, was er tut (siehe §7: nur der Weg ins iOS-Album, die Synchronisation
+  läuft in beiden Stellungen). Im manuellen Modus zusätzlich der Button zum
   Review-Grid (Etappe 2).
 
 ### 14.3 Start-Flow
