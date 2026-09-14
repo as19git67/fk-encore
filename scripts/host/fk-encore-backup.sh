@@ -3,8 +3,8 @@
 # fk-encore daily backup driver.
 #
 # Runs on the TrueNAS SCALE host as root (via cron or a TrueNAS periodic
-# task). Coordinates with the fk-encore app over HTTP so that the ZFS
-# snapshot taken in step 3 is application-consistent:
+# task, once per day). Coordinates with the fk-encore app over HTTP so that
+# the ZFS snapshot(s) taken in step 3 are application-consistent:
 #
 #   1. POST /internal/backup/start
 #        -> app returns 202 immediately and begins prep in the background:
@@ -16,6 +16,11 @@
 #   3. zfs snapshot -r $ZFS_DATASET@$LABEL
 #        -> host-side snapshot, captures pgdata + photos consistently
 #        -> the pg_dump from step 1 is inside the snapshot too
+#        -> if today matches the weekly/monthly schedule (see
+#           WEEKLY_SNAPSHOT_DOW / MONTHLY_SNAPSHOT_DOM below), one or two
+#           additional recursive snapshots (weekly-*, monthly-*) are taken
+#           right after, at the same point in time, while pg_backup_start()
+#           is still in effect — no second pg_dump / prep cycle needed.
 #   4. POST /internal/backup/stop
 #        -> app calls pg_backup_stop(), resumes scan workers, leaves
 #           maintenance mode
@@ -28,26 +33,49 @@
 #   4  /stop failed
 #   5  /start prep timed out or failed (no phase=ready within deadline)
 #
+# Retention scheme (three independent tiers, one snapshot label prefix
+# each — see "Snapshot tiers" below for how labels/timestamps are formed):
+#
+#   tier      label prefix   taken when                default retention
+#   --------  -------------  -------------------------  -----------------
+#   daily     daily-         every run                  14 days
+#   weekly    weekly-        WEEKLY_SNAPSHOT_DOW matches  8 weeks (56 days)
+#   monthly   monthly-       MONTHLY_SNAPSHOT_DOM matches 12 months (365 days)
+#
 # Configuration (env vars override defaults):
 #   FK_ENCORE_URL           base URL of the app, default http://localhost:8080
 #   FK_BACKUP_TOKEN_FILE    path to token file,  default: ./backup-token next to
 #                           this script (that is where install-backup-hook.sh
 #                           places it — on a ZFS dataset, upgrade-safe)
 #   ZFS_DATASET             dataset for snapshot, default tank/f4mil
-#   LABEL                   snapshot + dump label, default daily-<UTC timestamp>
+#   LABEL                   snapshot + dump label for the daily tier (also
+#                           what /start / /stop and the pg_dump filename use),
+#                           default daily-<UTC timestamp, %Y-%m-%d_%H-%M>
+#   WEEKLY_SNAPSHOT_DOW     day of week (1=Monday .. 7=Sunday, ISO-8601,
+#                           see `date +%u`) on which the weekly-* snapshot is
+#                           additionally taken. Default 1 (Monday).
+#   MONTHLY_SNAPSHOT_DOM    day of month (1-28) on which the monthly-*
+#                           snapshot is additionally taken. Default 1 (1st).
+#                           Keep this <=28 so it fires in every month.
 #   CURL_TIMEOUT            seconds per HTTP call, default 60
 #   READY_TIMEOUT_SEC       overall deadline for prep to reach phase=ready,
 #                           default 7200 (2 h). Must be large enough for the
 #                           slowest expected pg_dump + drain.
 #   READY_POLL_INTERVAL_SEC poll cadence while waiting for phase=ready,
 #                           default 10
-#   SNAPSHOT_RETENTION_DAYS age in days above which `daily-*` snapshots of
-#                           $ZFS_DATASET are pruned after a successful run.
-#                           Default 30. Set to 0 to disable pruning. Only
-#                           snapshots whose label starts with `daily-` are
-#                           ever considered — manual / ad-hoc snapshots are
-#                           left alone. A prune failure is logged as WARN
-#                           but does not fail the backup (the snapshot
+#   DAILY_SNAPSHOT_RETENTION_DAYS    age in days above which `daily-*`
+#                                     snapshots of $ZFS_DATASET are pruned
+#                                     after a successful run. Default 14.
+#   WEEKLY_SNAPSHOT_RETENTION_DAYS   same, for `weekly-*` snapshots.
+#                                     Default 56 (8 weeks).
+#   MONTHLY_SNAPSHOT_RETENTION_DAYS  same, for `monthly-*` snapshots.
+#                                     Default 365 (12 months).
+#                           Set any of the three to 0 to disable pruning for
+#                           that tier. Only snapshots whose label starts with
+#                           the matching prefix are ever considered — manual
+#                           / ad-hoc snapshots, and snapshots taken by this
+#                           run, are left alone. A prune failure is logged as
+#                           WARN but does not fail the backup (the snapshot
 #                           itself was taken successfully).
 #   DUMP_DIR                host-side directory holding the pg_dump files
 #                           (`encore-daily-*.dump`). Default: the parent of
@@ -59,8 +87,12 @@
 #                           this variable is only used for retention.
 #   DUMP_RETENTION_DAYS     age in days above which `encore-daily-*.dump`
 #                           files in $DUMP_DIR are deleted after a successful
-#                           run. Default: same as SNAPSHOT_RETENTION_DAYS,
-#                           so a single override tunes both. Set to 0 to
+#                           run. Default: same as DAILY_SNAPSHOT_RETENTION_DAYS,
+#                           so a single override tunes both (only one pg_dump
+#                           is taken per run, tied to the daily label — the
+#                           weekly/monthly ZFS snapshots simply freeze a copy
+#                           of it alongside the pgdata dataset, so they need
+#                           no separate dump-retention setting). Set to 0 to
 #                           disable. Other dumps (`pre-restore-*.dump`,
 #                           `restored-*.dump`, operator-named files) are
 #                           never touched. A prune failure is logged as WARN
@@ -76,23 +108,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FK_ENCORE_URL="${FK_ENCORE_URL:-http://localhost:8080}"
 FK_BACKUP_TOKEN_FILE="${FK_BACKUP_TOKEN_FILE:-$SCRIPT_DIR/backup-token}"
 ZFS_DATASET="${ZFS_DATASET:-tank/f4mil}"
-LABEL="${LABEL:-daily-$(date -u +%Y%m%d-%H%M%S)}"
+TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M)"
+LABEL="${LABEL:-daily-$TIMESTAMP}"
+WEEKLY_SNAPSHOT_DOW="${WEEKLY_SNAPSHOT_DOW:-1}"
+MONTHLY_SNAPSHOT_DOM="${MONTHLY_SNAPSHOT_DOM:-1}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
 READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-7200}"
 READY_POLL_INTERVAL_SEC="${READY_POLL_INTERVAL_SEC:-10}"
-SNAPSHOT_RETENTION_DAYS="${SNAPSHOT_RETENTION_DAYS:-30}"
+DAILY_SNAPSHOT_RETENTION_DAYS="${DAILY_SNAPSHOT_RETENTION_DAYS:-14}"
+WEEKLY_SNAPSHOT_RETENTION_DAYS="${WEEKLY_SNAPSHOT_RETENTION_DAYS:-56}"
+MONTHLY_SNAPSHOT_RETENTION_DAYS="${MONTHLY_SNAPSHOT_RETENTION_DAYS:-365}"
 DUMP_DIR="${DUMP_DIR:-$(dirname "$SCRIPT_DIR")}"
-DUMP_RETENTION_DAYS="${DUMP_RETENTION_DAYS:-$SNAPSHOT_RETENTION_DAYS}"
+DUMP_RETENTION_DAYS="${DUMP_RETENTION_DAYS:-$DAILY_SNAPSHOT_RETENTION_DAYS}"
 
-if ! [[ "$SNAPSHOT_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
-  printf '[fk-encore-backup] FATAL: SNAPSHOT_RETENTION_DAYS must be a non-negative integer, got %q\n' \
-    "$SNAPSHOT_RETENTION_DAYS" >&2
+for _var in WEEKLY_SNAPSHOT_DOW MONTHLY_SNAPSHOT_DOM \
+            DAILY_SNAPSHOT_RETENTION_DAYS WEEKLY_SNAPSHOT_RETENTION_DAYS \
+            MONTHLY_SNAPSHOT_RETENTION_DAYS DUMP_RETENTION_DAYS; do
+  _val="${!_var}"
+  if ! [[ "$_val" =~ ^[0-9]+$ ]]; then
+    printf '[fk-encore-backup] FATAL: %s must be a non-negative integer, got %q\n' \
+      "$_var" "$_val" >&2
+    exit 1
+  fi
+done
+unset _var _val
+
+if (( WEEKLY_SNAPSHOT_DOW < 1 || WEEKLY_SNAPSHOT_DOW > 7 )); then
+  printf '[fk-encore-backup] FATAL: WEEKLY_SNAPSHOT_DOW must be 1-7 (ISO weekday), got %q\n' \
+    "$WEEKLY_SNAPSHOT_DOW" >&2
   exit 1
 fi
 
-if ! [[ "$DUMP_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
-  printf '[fk-encore-backup] FATAL: DUMP_RETENTION_DAYS must be a non-negative integer, got %q\n' \
-    "$DUMP_RETENTION_DAYS" >&2
+if (( MONTHLY_SNAPSHOT_DOM < 1 || MONTHLY_SNAPSHOT_DOM > 28 )); then
+  printf '[fk-encore-backup] FATAL: MONTHLY_SNAPSHOT_DOM must be 1-28 (to fire in every month), got %q\n' \
+    "$MONTHLY_SNAPSHOT_DOM" >&2
   exit 1
 fi
 
@@ -222,24 +271,24 @@ stop_backup() {
 }
 
 prune_old_snapshots() {
-  # Delete `daily-*` snapshots of $ZFS_DATASET older than N days. Manual /
-  # unrelated snapshots are left untouched (we only match the label prefix
-  # this script itself generates). `zfs snapshot -r` on the root dataset
-  # creates a snapshot with the same name on every child, so destroying
-  # `<root>@<label>` with `-r` cascades across the whole tree.
+  # Delete `<prefix>*` snapshots of $ZFS_DATASET older than N days. Manual /
+  # unrelated snapshots, and snapshots of other tiers, are left untouched
+  # (we only match the given label prefix). `zfs snapshot -r` on the root
+  # dataset creates a snapshot with the same name on every child, so
+  # destroying `<root>@<label>` with `-r` cascades across the whole tree.
   #
   # We enumerate snapshots on the root dataset only (no `-r`) to get one
   # row per label, regardless of how many child datasets carry a copy.
-  local retention_days="$1"
+  local tier="$1" prefix="$2" retention_days="$3"
   if (( retention_days == 0 )); then
-    log "snapshot retention disabled (SNAPSHOT_RETENTION_DAYS=0)"
+    log "$tier snapshot retention disabled (${tier^^}_SNAPSHOT_RETENTION_DAYS=0)"
     return 0
   fi
 
   local now_epoch cutoff_epoch
   now_epoch="$(date -u +%s)"
   cutoff_epoch=$(( now_epoch - retention_days * 86400 ))
-  log "pruning daily-* snapshots of $ZFS_DATASET older than ${retention_days}d (created before $(date -u -d "@$cutoff_epoch" +%FT%TZ))"
+  log "pruning ${prefix}* snapshots of $ZFS_DATASET older than ${retention_days}d (created before $(date -u -d "@$cutoff_epoch" +%FT%TZ))"
 
   local listing
   if ! listing="$(zfs list -H -p -o name,creation -t snapshot "$ZFS_DATASET" 2>&1)"; then
@@ -251,11 +300,15 @@ prune_old_snapshots() {
   while IFS=$'\t' read -r name creation; do
     [[ -z "$name" ]] && continue
     label="${name#*@}"
-    # Only prune labels this script owns. Never touch the snapshot we just
-    # took (even if retention_days=0 would otherwise match in some future
-    # caller — defensive).
-    [[ "$label" == daily-* ]] || continue
-    [[ "$label" == "$LABEL" ]] && continue
+    # Only prune labels this script owns. Never touch a snapshot taken by
+    # this run (even if retention_days=0 would otherwise match in some
+    # future caller — defensive) — see TAKEN_LABELS.
+    [[ "$label" == "$prefix"* ]] || continue
+    local is_own=0
+    for taken in "${TAKEN_LABELS[@]}"; do
+      [[ "$label" == "$taken" ]] && { is_own=1; break; }
+    done
+    (( is_own == 1 )) && continue
     if (( creation < cutoff_epoch )); then
       log "destroying $name (created $(date -u -d "@$creation" +%FT%TZ))"
       if zfs destroy -r "$name"; then
@@ -267,7 +320,7 @@ prune_old_snapshots() {
     fi
   done <<< "$listing"
 
-  log "prune summary: destroyed=$pruned failed=$failed"
+  log "$tier prune summary: destroyed=$pruned failed=$failed"
   (( failed == 0 ))
 }
 
@@ -356,6 +409,35 @@ if ! zfs snapshot -r "$SNAP"; then
   exit 3
 fi
 log "zfs snapshot ok"
+TAKEN_LABELS=("$LABEL")
+
+# Additional tiers: taken at the same point in time (pg_backup_start() is
+# still in effect), so they need no extra /start or pg_dump. Best-effort —
+# a failure here does not fail the backup, since the daily snapshot (the
+# one thing every run must produce) already succeeded.
+DOW="$(date -u +%u)"
+if (( 10#$DOW == 10#$WEEKLY_SNAPSHOT_DOW )); then
+  WEEKLY_LABEL="weekly-$TIMESTAMP"
+  WEEKLY_SNAP="${ZFS_DATASET}@${WEEKLY_LABEL}"
+  log "day-of-week $DOW matches WEEKLY_SNAPSHOT_DOW — creating ZFS snapshot $WEEKLY_SNAP (recursive)"
+  if zfs snapshot -r "$WEEKLY_SNAP"; then
+    TAKEN_LABELS+=("$WEEKLY_LABEL")
+  else
+    log "WARN: weekly ZFS snapshot $WEEKLY_SNAP failed"
+  fi
+fi
+
+DOM="$(date -u +%d)"
+if (( 10#$DOM == 10#$MONTHLY_SNAPSHOT_DOM )); then
+  MONTHLY_LABEL="monthly-$TIMESTAMP"
+  MONTHLY_SNAP="${ZFS_DATASET}@${MONTHLY_LABEL}"
+  log "day-of-month $DOM matches MONTHLY_SNAPSHOT_DOM — creating ZFS snapshot $MONTHLY_SNAP (recursive)"
+  if zfs snapshot -r "$MONTHLY_SNAP"; then
+    TAKEN_LABELS+=("$MONTHLY_LABEL")
+  else
+    log "WARN: monthly ZFS snapshot $MONTHLY_SNAP failed"
+  fi
+fi
 
 # -- 4. /stop -----------------------------------------------------------
 # Handled by the trap; clear STARTED so the trap reports success.
@@ -368,5 +450,7 @@ log "backup complete label=$LABEL"
 # -- 5. retention -------------------------------------------------------
 # Prune best-effort: the backup itself already succeeded, a prune failure
 # must not flip the overall exit code.
-prune_old_snapshots "$SNAPSHOT_RETENTION_DAYS" || true
+prune_old_snapshots daily   "daily-"   "$DAILY_SNAPSHOT_RETENTION_DAYS"   || true
+prune_old_snapshots weekly  "weekly-"  "$WEEKLY_SNAPSHOT_RETENTION_DAYS"  || true
+prune_old_snapshots monthly "monthly-" "$MONTHLY_SNAPSHOT_RETENTION_DAYS" || true
 prune_old_dumps "$DUMP_RETENTION_DAYS" "$DUMP_DIR" || true
