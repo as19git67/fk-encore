@@ -38,6 +38,15 @@ struct TripView: View {
     /// happening (`TripTabMode.initial`).
     @AppStorage("trip.tab.mode") private var mode: TripTabMode = .capture
     @State private var didChooseMode = false
+    /// "Das hier merken" from the tab itself (plan item E3): one tap,
+    /// where the collection used to be two screens away. The view model
+    /// is only ever asked to add; the list it also holds is not shown here.
+    @State private var ideas = TripIdeasViewModel()
+    @State private var isAddingHere = false
+    /// The sentence the server answered the last capture with, shown
+    /// once so the tap is seen to have done something.
+    @State private var lastCapture: String?
+    @State private var captureRequest = TripIdeaCaptureRequest.shared
 
     var body: some View {
         Group {
@@ -72,7 +81,27 @@ struct TripView: View {
                         Label("Einstellungen", systemImage: "gearshape")
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isAddingHere = true
+                    } label: {
+                        Label("Das hier merken", systemImage: "mappin.and.ellipse")
+                    }
+                }
             }
+        }
+        .sheet(isPresented: $isAddingHere) {
+            TripIdeaCaptureSheet(
+                title: "Das hier merken",
+                explanation: "Gespeichert wird, wo ihr gerade steht — in den Ideen.",
+            ) { note, dwellMinutes in
+                await ideas.addHere(note: note, dwellMinutes: dwellMinutes)
+                if ideas.errorMessage == nil { lastCapture = ideas.lastAddition }
+                return ideas.errorMessage == nil
+            }
+        }
+        .onChange(of: captureRequest.isRequested) { _, requested in
+            if requested { consumeCaptureRequest() }
         }
         .sheet(isPresented: $showStartSheet) {
             TripStartSheet(suggestedName: startSheetName) { name in
@@ -91,6 +120,7 @@ struct TripView: View {
         .task {
             await loadRunningPlan()
             chooseModeOnce()
+            consumeCaptureRequest()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -115,13 +145,37 @@ struct TripView: View {
 
     /// Trip mode as it was before the planner moved in beside it.
     @ViewBuilder private var captureHalf: some View {
-        if let trip = store.activeTrip {
-            ActiveTripView(trip: trip, store: store, runningPlan: running.plan) { planId in
-                openPlanId = planId
+        VStack(spacing: 0) {
+            if let lastCapture {
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle").foregroundStyle(.secondary)
+                    Text(lastCapture).font(.footnote)
+                    Spacer()
+                    Button("OK") { self.lastCapture = nil }.font(.footnote)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(.thinMaterial)
+                Divider()
             }
-        } else {
-            noTripView
+            if let trip = store.activeTrip {
+                ActiveTripView(trip: trip, store: store, runningPlan: running.plan) { planId in
+                    openPlanId = planId
+                }
+            } else {
+                noTripView
+            }
         }
+    }
+
+    /// The App Shortcut asked for "Das hier merken": show the half that
+    /// has the button, and open the sheet. Taken once, whichever of the
+    /// two observers gets there first.
+    @MainActor
+    private func consumeCaptureRequest() {
+        guard captureRequest.consume() else { return }
+        mode = .capture
+        isAddingHere = true
     }
 
     /// Which half to show, decided once per appearance of the tab —

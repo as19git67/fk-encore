@@ -66,6 +66,9 @@ struct MainTabView: View {
     @State private var autoStart = TripAutoStartMonitor.shared
     @State private var autoEnd = TripAutoEndMonitor.shared
     @State private var running = TripRunningPlan.shared
+    /// "Das hier merken" asked for by the App Shortcut: the Trip tab
+    /// does the work, so this is where the app goes.
+    @State private var captureRequest = TripIdeaCaptureRequest.shared
     /// Which tab is showing. Held rather than left to SwiftUI so the
     /// app can open on the trip while one is actually happening.
     @State private var selection: MainTab = .feed
@@ -123,6 +126,10 @@ struct MainTabView: View {
         }
         .task {
             await feedViewModel.refreshUnreadCount()
+        }
+        .onChange(of: captureRequest.isRequested, initial: true) { _, requested in
+            // Not a launch decision: the shortcut said where to go.
+            if requested { selection = .trip }
         }
         .task {
             // Where the app opens: on the trip, while there is one. The

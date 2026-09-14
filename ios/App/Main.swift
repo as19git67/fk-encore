@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 import UIKit
 import UserNotifications
@@ -83,6 +84,32 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .sound])
+    }
+}
+
+// MARK: - App Shortcuts
+
+/// The intents live in the package (`TripIntents.swift`); App Intents
+/// finds them through this bridge.
+struct FKPhotosAppIntents: AppIntentsPackage {
+    static var includedPackages: [any AppIntentsPackage.Type] {
+        [FKPhotosIntents.self]
+    }
+}
+
+/// "Das hier merken" from the Shortcuts app, Siri or the Action button
+/// (plan item E3). App Shortcuts must be declared in the app target.
+struct FKPhotosShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: RememberHereIntent(),
+            phrases: [
+                "Das hier merken in \(.applicationName)",
+                "Merke diesen Ort in \(.applicationName)",
+            ],
+            shortTitle: "Das hier merken",
+            systemImageName: "mappin.and.ellipse"
+        )
     }
 }
 
