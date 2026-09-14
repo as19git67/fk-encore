@@ -40,6 +40,15 @@ final class TripIdeasViewModel {
     /// none — a share with no coordinate belongs to a trip's analysis,
     /// not here.
     private(set) var sharedPlace: TripMapLink.Place?
+    /// A shared link that names no place — an article, most likely.
+    /// Set instead of dropping the share silently, so the screen can
+    /// offer the reading it cannot do itself (§9.3).
+    private(set) var sharedArticleUrl: String?
+    /// The share somebody waved away with „Später" in this session, so
+    /// the next `checkShare` does not offer the same link again. Not
+    /// persisted: the link stays in the inbox for the trip picker, and
+    /// a fresh launch may well be the moment it is wanted here.
+    private var dismissedShare: TripSharePayload?
     /// What is near here, once somebody asked (§20.2).
     private(set) var nearby: [TripNearIdea] = []
     /// In range but deliberately not offered — told recently, or waved
@@ -52,6 +61,16 @@ final class TripIdeasViewModel {
     /// Where it would start — kept so accepting uses the same anchor the
     /// proposal was computed from, not wherever the phone is by then.
     private(set) var outingAnchor: CLLocationCoordinate2D?
+    /// The anchor the proposal was *asked* around when it was a group
+    /// of ideas rather than the phone — nil for a proposal from where
+    /// somebody stands. The outing screen compares it with its own to
+    /// tell a stale proposal from one that is its.
+    private(set) var outingRequestedAround: TripCoordinate?
+    /// How long the outing may take. Bound to the screen's picker, and
+    /// re-proposing is the screen's job — a budget that changes under a
+    /// proposal without recomputing would show a day for a different
+    /// afternoon.
+    var outingBudgetMinutes = TripIdeaDefaults.outingBudgetMinutes
     private(set) var isProposing = false
     private(set) var isAcceptingOuting = false
     var outingError: String?
@@ -140,17 +159,32 @@ final class TripIdeasViewModel {
     /// anchor and a time budget *are* the planner's input, and the only
     /// thing missing was the occasion. Nothing is written — the answer
     /// is a proposal, and accepting it is a second, deliberate step.
-    func proposeOuting(locationProvider: TripLocationProvider? = nil) async {
+    ///
+    /// - Parameter around: a place to start from instead of the phone —
+    ///   the middle of a group in the collection, when the question is
+    ///   asked from the list rather than from the street. Nil asks
+    ///   where the phone is.
+    func proposeOuting(
+        around: TripCoordinate? = nil,
+        locationProvider: TripLocationProvider? = nil,
+    ) async {
         isProposing = true
         defer { isProposing = false }
 
-        let provider = locationProvider
-            ?? TripLocationProvider(accuracy: kCLLocationAccuracyHundredMeters)
-        guard let location = await provider.currentLocation() else {
-            outingError = "Ohne Standort lässt sich kein Ausflug vorschlagen."
-            return
+        let anchor: CLLocationCoordinate2D
+        if let around {
+            anchor = CLLocationCoordinate2D(latitude: around.lat, longitude: around.lon)
+        } else {
+            let provider = locationProvider
+                ?? TripLocationProvider(accuracy: kCLLocationAccuracyHundredMeters)
+            guard let location = await provider.currentLocation() else {
+                outingError = "Ohne Standort lässt sich kein Ausflug vorschlagen."
+                return
+            }
+            anchor = location.coordinate
         }
-        outingAnchor = location.coordinate
+        outingAnchor = anchor
+        outingRequestedAround = around
 
         struct Body: Encodable {
             let lat: Double
@@ -163,10 +197,10 @@ final class TripIdeasViewModel {
             outing = try await APIClient.shared.post(
                 "/trip-planner/ideas/outing",
                 body: Body(
-                    lat: location.coordinate.latitude,
-                    lon: location.coordinate.longitude,
+                    lat: anchor.latitude,
+                    lon: anchor.longitude,
                     radiusM: TripIdeaDefaults.outingRadiusM,
-                    budgetMinutes: TripIdeaDefaults.outingBudgetMinutes,
+                    budgetMinutes: outingBudgetMinutes,
                     ownerId: ownerId,
                 ),
             )
@@ -174,6 +208,16 @@ final class TripIdeasViewModel {
         } catch {
             outingError = "Der Ausflug ließ sich nicht berechnen."
         }
+    }
+
+    /// Does the proposal on hand belong to this anchor?
+    ///
+    /// The outing screen is reached from two places — the nearby list,
+    /// which means "here", and a group in the collection, which means
+    /// "there" — and a proposal computed for one must not be shown as
+    /// the answer for the other.
+    func hasOuting(around: TripCoordinate?) -> Bool {
+        outing != nil && outingRequestedAround == around
     }
 
     /// Take the proposal, and get an ordinary one-day trip out of it (§20.3).
@@ -213,7 +257,11 @@ final class TripIdeasViewModel {
                     ownerId: ownerId,
                     date: date,
                     title: title?.isEmpty == true ? nil : title,
-                    budgetMinutes: TripIdeaDefaults.outingBudgetMinutes,
+                    // The budget the proposal was computed with, not the
+                    // picker's current value: accepting means "this day",
+                    // and the two differ the moment somebody moves the
+                    // picker and does not wait for the recomputation.
+                    budgetMinutes: outing.budgetMinutes,
                 ),
             )
             outingError = nil
@@ -242,11 +290,13 @@ final class TripIdeasViewModel {
     /// collection with no trip behind it would promise a reading nobody
     /// can do here.
     func checkShare(_ payload: TripSharePayload? = TripShareInbox.peek()) async {
-        guard let payload, let url = payload.url else {
+        guard let payload, let url = payload.url, payload != dismissedShare else {
             pendingShare = nil
             sharedPlace = nil
+            sharedArticleUrl = nil
             return
         }
+        sharedArticleUrl = nil
         if let place = TripMapLink.place(from: url) {
             pendingShare = payload
             sharedPlace = place
@@ -268,8 +318,13 @@ final class TripIdeasViewModel {
             sharedPlace = place
             return
         }
-        pendingShare = nil
+        // No place in it, by any reader: an article, most likely. Said
+        // rather than dropped — the collection cannot read it (that
+        // needs an area and the language model, §9.3), but it can say
+        // where that reading happens.
+        pendingShare = payload
         sharedPlace = nil
+        sharedArticleUrl = url
     }
 
     /// Ask the server what the link says.
@@ -361,9 +416,44 @@ final class TripIdeasViewModel {
 
     /// "Not into the collection" — the link stays in the inbox for the
     /// trip picker, which is the other thing it could have meant.
+    ///
+    /// Remembered for this session: „Später" answered once is answered,
+    /// and a screen that asks again every time it comes to the front
+    /// has turned a share into nagging.
     func dismissShare() {
+        dismissedShare = pendingShare
         pendingShare = nil
         sharedPlace = nil
+        sharedArticleUrl = nil
+    }
+
+    // MARK: - Into a trip (§20.3)
+
+    /// Take one collected idea into a trip's candidates.
+    ///
+    /// The same endpoint the trip's own „Aus dem Vorrat" screen calls,
+    /// reached from the other end: standing in the collection and
+    /// knowing which trip wants this. The idea stays collected — it is
+    /// used, not consumed. Returns the sentence to show, or nil after a
+    /// failure that `errorMessage` describes.
+    func takeIdea(_ idea: TripIdea, into plan: TripPlanSummary) async -> String? {
+        struct Body: Encodable {
+            let id: Int
+            let ownerId: Int?
+        }
+        do {
+            let response: TripIdeaTakeResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(plan.id)/ideas/take",
+                body: Body(id: idea.id, ownerId: ownerId),
+            )
+            errorMessage = nil
+            let sentence = response.sentence(idea: idea.displayName, plan: plan.displayTitle)
+            lastAddition = sentence
+            return sentence
+        } catch {
+            errorMessage = "\(idea.displayName) ließ sich nicht in die Reise übernehmen."
+            return nil
+        }
     }
 
     func load() async {
@@ -453,24 +543,32 @@ final class TripIdeasViewModel {
     /// region is called, and a name derived from the entries would call
     /// a group of nine after whichever one was saved first.
     ///
-    /// Sequential and capped: `CLGeocoder` is a shared, rate-limited
-    /// service, and a collection with thirty groups asking at once gets
-    /// every request refused rather than the first few answered. A group
-    /// with no name keeps its count, which is honest and readable.
-    func nameClusters(limit: Int = 8) async {
-        let geocoder = CLGeocoder()
-        for cluster in clusters.prefix(limit) where clusterNames[cluster.id] == nil {
-            let location = CLLocation(latitude: cluster.centre.lat, longitude: cluster.centre.lon)
-            guard let placemark = try? await geocoder.reverseGeocodeLocation(location).first else {
-                continue
-            }
-            let name = placemark.locality
-                ?? placemark.subAdministrativeArea
-                ?? placemark.administrativeArea
-                ?? placemark.country
-            if let name, !name.isEmpty { clusterNames[cluster.id] = name }
+    /// One at a time, and only for a group somebody can see: `CLGeocoder`
+    /// is a shared, rate-limited service, and a collection with thirty
+    /// groups asking at once gets every request refused rather than the
+    /// first few answered. The section header asks when it appears, so
+    /// the groups below the fold cost nothing until they are scrolled
+    /// to. A group with no name keeps its count, which is honest and
+    /// readable.
+    func nameCluster(_ cluster: TripIdeaCluster) async {
+        guard clusterNames[cluster.id] == nil, !namingClusters.contains(cluster.id) else { return }
+        namingClusters.insert(cluster.id)
+        defer { namingClusters.remove(cluster.id) }
+
+        let location = CLLocation(latitude: cluster.centre.lat, longitude: cluster.centre.lon)
+        guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first else {
+            return
         }
+        let name = placemark.locality
+            ?? placemark.subAdministrativeArea
+            ?? placemark.administrativeArea
+            ?? placemark.country
+        if let name, !name.isEmpty { clusterNames[cluster.id] = name }
     }
+
+    /// Groups a geocoder request is out for, so a header that appears
+    /// twice while scrolling does not ask twice.
+    private var namingClusters: Set<Int> = []
 
     /// The heading for one group: the place, or how many are in it.
     func title(of cluster: TripIdeaCluster) -> String {

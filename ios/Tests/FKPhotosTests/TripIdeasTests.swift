@@ -71,6 +71,55 @@ final class TripIdeasTests: XCTestCase {
         XCTAssertNil(bare.subtitle)
     }
 
+    // MARK: - Note and author are two lines, not one
+
+    func testTheRowShowsTheNoteAndWhoKeptIt() throws {
+        // „Der Biergarten, den Anna gemerkt hat" is half the information
+        // (§20.1) — a row that drops it as soon as there is a note drops
+        // the person to ask.
+        let noted = try idea("""
+        { "id": 12, "osmRef": "way:46", "name": "Burgruine", "title": null,
+          "lat": 48.1, "lon": 11.5, "category": "sight", "dwellMinutes": 45,
+          "note": "Papa wollte da hin", "sourceUrl": null, "unmatched": false,
+          "validFrom": null, "validTo": null, "addedBy": "Papa",
+          "addedAt": "2026-09-01T10:00:00Z" }
+        """)
+        XCTAssertEqual(noted.noteLine, "Papa wollte da hin")
+        XCTAssertEqual(noted.authorLine, "von Papa")
+    }
+
+    func testABlankNoteIsNoLineAndNoAuthorIsNoLine() throws {
+        let bare = try idea("""
+        { "id": 13, "osmRef": "way:47", "name": "Stadtpark", "title": null,
+          "lat": 48.1, "lon": 11.5, "category": "outdoors", "dwellMinutes": 45,
+          "note": "   ", "sourceUrl": null, "unmatched": false,
+          "validFrom": null, "validTo": null, "addedBy": "",
+          "addedAt": "2026-09-01T10:00:00Z" }
+        """)
+        XCTAssertNil(bare.noteLine)
+        XCTAssertNil(bare.authorLine)
+    }
+
+    // MARK: - Into a trip
+
+    func testTakingAnIdeaSaysWhichTripAndThatItIsACandidate() throws {
+        let taken = try JSONDecoder().decode(
+            TripIdeaTakeResponse.self, from: Data(#"{ "taken": true, "osmRef": "way:42" }"#.utf8))
+        XCTAssertEqual(
+            taken.sentence(idea: "Biergarten Mühlinsel", plan: "Sommer in Musterstadt"),
+            "Biergarten Mühlinsel liegt jetzt bei den Kandidaten von „Sommer in Musterstadt“.")
+    }
+
+    func testAlreadyInTheTripIsAnAnswerNotAFault() throws {
+        // The server says `taken: false` for an idea the trip already
+        // has (§20.3); the sentence must not read as a failure.
+        let already = try JSONDecoder().decode(
+            TripIdeaTakeResponse.self, from: Data(#"{ "taken": false, "osmRef": null }"#.utf8))
+        XCTAssertEqual(
+            already.sentence(idea: "Burgruine", plan: "Herbstreise"),
+            "Burgruine war schon in „Herbstreise“.")
+    }
+
     // MARK: - What the screen says after an addition
 
     private func response(merged: Bool, unknown: [String]) throws -> TripIdeaAddResponse {

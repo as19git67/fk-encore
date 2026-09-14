@@ -31,6 +31,13 @@ struct TripIdeasNearbyView: View {
                     description: Text(quietSentence
                                       ?? "Im Umkreis von fünf Kilometern liegt nichts aus euren Ideen."),
                 )
+                // Why the button in the bar is grey: a control that is
+                // off without a word is a control somebody taps three
+                // times and then gives up on.
+                Text("„Ausflug daraus“ braucht Ideen in der Nähe — hier liegt gerade keine. "
+                     + "Aus einer Gruppe in den Ideen geht es trotzdem.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             ForEach(model.nearby) { idea in

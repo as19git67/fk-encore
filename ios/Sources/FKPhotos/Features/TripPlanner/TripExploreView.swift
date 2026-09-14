@@ -35,6 +35,9 @@ struct TripExploreView: View {
     @State private var isPickingArea = false
     @State private var isReadingArticle = false
     @State private var opened: TripExploredSpot?
+    /// The find being written into the collection with a note, while
+    /// the capture sheet is up.
+    @State private var capturing: TripExploredSpot?
     /// Which collection a find goes into. Nil means one's own.
     let ownerId: Int?
 
@@ -46,6 +49,13 @@ struct TripExploreView: View {
         List {
             if let message = model.lastAddition {
                 Text(message).font(.footnote).foregroundStyle(.secondary)
+            }
+            // A search that is running looks, without this, exactly like
+            // a search that found nothing.
+            if model.isLoading {
+                HStack { ProgressView(); Text("Wird gesucht\u{2026}") }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             // Said rather than left blank: the three kinds of empty are
             // three different things to do next.
@@ -125,10 +135,18 @@ struct TripExploreView: View {
                     // browse answers "what is here", an article answers
                     // "what is worth going to", and until now reading
                     // one meant Safari, the share sheet and a trip.
-                    Button("Artikel auslesen\u{2026}", systemImage: "doc.text.magnifyingglass") {
-                        isReadingArticle = true
+                    if model.area == nil {
+                        // Grey with a reason, not grey alone: the reader
+                        // searches *around* something, and until an area
+                        // is chosen there is nothing to search around.
+                        Button("Artikel auslesen\u{2026}", systemImage: "doc.text.magnifyingglass") {}
+                            .disabled(true)
+                        Text("Erst eine Gegend w\u{00E4}hlen")
+                    } else {
+                        Button("Artikel auslesen\u{2026}", systemImage: "doc.text.magnifyingglass") {
+                            isReadingArticle = true
+                        }
                     }
-                    .disabled(model.area == nil)
                 } label: {
                     Label("Gegend", systemImage: "line.3.horizontal.decrease.circle")
                 }
@@ -152,6 +170,19 @@ struct TripExploreView: View {
             TripExploreAreaSheet { place in
                 isPickingArea = false
                 Task { await model.use(place) }
+            }
+        }
+        // The same sheet the other ways in use, so a find kept from here
+        // can carry a note the way a shared link can. The note may stay
+        // empty; the source — the spot's own website — goes along
+        // regardless.
+        .sheet(item: $capturing) { spot in
+            TripIdeaCaptureSheet(
+                title: spot.displayName,
+                explanation: "Gemerkt wird der Ort aus der Karte"
+                    + (spot.website == nil ? "." : " \u{2014} mit seiner Website als Herkunft."),
+            ) { note, dwellMinutes in
+                await model.collect(spot, note: note, dwellMinutes: dwellMinutes)
             }
         }
         .navigationDestination(item: $opened) { spot in
@@ -183,6 +214,20 @@ struct TripExploreView: View {
                     Label("Andere Gegend\u{2026}", systemImage: "mappin.and.ellipse")
                 }
                 .buttonStyle(.bordered)
+
+                // The third way in, named where the other two are — and
+                // grey with its reason, because the reader needs an area
+                // to search around before it can read anything.
+                Button {
+                    isReadingArticle = true
+                } label: {
+                    Label("Artikel auslesen\u{2026}", systemImage: "doc.text.magnifyingglass")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.area == nil)
+                Text("Erst eine Gegend w\u{00E4}hlen")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -300,11 +345,13 @@ struct TripExploreView: View {
                 Label("Schon bei den Ideen", systemImage: "lightbulb.fill")
                     .foregroundStyle(.secondary)
             } else {
+                // Opens the capture sheet rather than saving outright:
+                // the note is what makes an idea worth more than a pin,
+                // and it is written now or never. The detail stays open
+                // and turns into "Schon im Vorrat" once the save is
+                // through.
                 Button {
-                    Task {
-                        await model.collect(spot)
-                        close()
-                    }
+                    capturing = spot
                 } label: {
                     Label("Zu den Ideen", systemImage: "lightbulb")
                 }

@@ -51,7 +51,16 @@ final class TripRunningPlan {
         } catch {
             // Silent: this is an offer, not a feature. A planner that
             // cannot be reached must not put an error on the tab bar.
-            plan = nil
+            //
+            // And when it cannot be reached, the last answer stands. A
+            // trip that was running at breakfast is still running in
+            // the tunnel; forgetting it there would take the banner
+            // away at the one moment the plan is needed offline (§3.9).
+            // A real "no" from the server — a 404, a 403 — still clears
+            // it, because that is an answer.
+            if !TripOfflineReach.meansUnreachable(error) {
+                plan = nil
+            }
         }
         didLoad = true
     }
