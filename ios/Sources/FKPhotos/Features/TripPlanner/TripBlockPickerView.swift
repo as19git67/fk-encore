@@ -23,16 +23,20 @@ struct TripBlockPickerView: View {
     /// Where the spot is now, so its own block is not offered back to
     /// it. Nil when it is nowhere yet — a candidate from the pool.
     let current: (dayIndex: Int, blockId: String)?
-    let choose: (String, Int) async -> Void
+    /// Answers whether the move happened. The sheet closes only then;
+    /// it used to close either way, leaving the spot where it was with
+    /// nothing said.
+    let choose: (String, Int) async -> Bool
 
     @State private var isWorking = false
+    @State private var failure: String?
     @Environment(\.dismiss) private var dismiss
 
     init(
         title: String,
         leg: TripLeg?,
         current: (dayIndex: Int, blockId: String)? = nil,
-        choose: @escaping (String, Int) async -> Void,
+        choose: @escaping (String, Int) async -> Bool,
     ) {
         self.title = title
         self.leg = leg
@@ -65,8 +69,13 @@ struct TripBlockPickerView: View {
                             Button {
                                 isWorking = true
                                 Task {
-                                    await choose(target.blockId, target.dayIndex)
+                                    let ok = await choose(target.blockId, target.dayIndex)
                                     isWorking = false
+                                    if ok {
+                                        dismiss()
+                                    } else {
+                                        failure = "Das ließ sich nicht verschieben. Noch einmal versuchen?"
+                                    }
                                 }
                             } label: {
                                 HStack {
@@ -89,6 +98,7 @@ struct TripBlockPickerView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .plannerErrorBanner(failure, dismiss: { failure = nil })
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Abbrechen") { dismiss() }

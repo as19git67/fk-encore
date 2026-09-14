@@ -24,9 +24,6 @@ struct TripIdeasOutingView: View {
 
     var body: some View {
         List {
-            if let error = model.outingError {
-                Text(error).font(.footnote).foregroundStyle(.red)
-            }
 
             if model.isProposing {
                 HStack { ProgressView(); Text("Wird gerechnet…") }
@@ -66,6 +63,7 @@ struct TripIdeasOutingView: View {
             }
         }
         .navigationTitle("Ausflug")
+        .plannerErrorBanner(model.outingError, retry: { await model.proposeOuting() }, dismiss: { model.outingError = nil })
         .task {
             if model.outing == nil { await model.proposeOuting() }
         }

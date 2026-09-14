@@ -58,6 +58,7 @@ struct TripPoolView: View {
             }
         }
         .navigationTitle("Vorrat")
+        .plannerErrorBanner(viewModel.errorMessage, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -81,7 +82,6 @@ struct TripPoolView: View {
             NavigationStack {
                 TripBlockPickerView(title: candidate.displayName, leg: leg) { blockId, dayIndex in
                     await viewModel.place(candidate, inBlock: blockId, onDay: dayIndex)
-                    placing = nil
                 }
             }
         }
@@ -286,6 +286,7 @@ struct TripHiddenSpotsView: View {
             }
         }
         .navigationTitle("Ausgeblendet")
+        .plannerErrorBanner(viewModel.errorMessage, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadHiddenSpots() }
     }

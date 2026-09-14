@@ -28,13 +28,9 @@ struct TripNewPlanView: View {
             lengthSection
             styleSection
             sentenceSection
-            if let errorMessage = model.errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Neue Reise")
+        .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

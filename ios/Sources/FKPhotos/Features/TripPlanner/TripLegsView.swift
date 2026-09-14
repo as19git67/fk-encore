@@ -57,13 +57,9 @@ struct TripLegsView: View {
                 .disabled(isWorking || (viewModel.plan?.legs.count ?? 0) >= TripNewPlanDraft.maxLegs)
             }
 
-            if let errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Etappen")
+        .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $adding) {
             NavigationStack {
@@ -125,7 +121,7 @@ struct TripLegsView: View {
             viewModel.replace(with: response)
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }
@@ -149,16 +145,7 @@ struct TripAddLegView: View {
             position: viewModel.plan?.legs.count ?? 1,
             previousName: viewModel.plan?.legs.last?.title,
         )
-        .safeAreaInset(edge: .bottom) {
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(.bar)
-            }
-        }
+        .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Abbrechen") { dismiss() }
@@ -204,7 +191,7 @@ struct TripAddLegView: View {
             viewModel.replace(with: response)
             dismiss()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }
@@ -312,13 +299,9 @@ struct TripLegEditView: View {
                      + "geplant wird ab der ersten.")
             }
 
-            if let errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle(leg?.displayTitle ?? "Etappe")
+        .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -394,7 +377,7 @@ struct TripLegEditView: View {
             viewModel.replace(with: response)
             dismiss()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

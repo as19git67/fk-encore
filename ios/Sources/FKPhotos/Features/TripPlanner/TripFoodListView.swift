@@ -47,8 +47,10 @@ struct TripFoodListView: View {
             Section {
                 if isLoading {
                     ProgressView()
-                } else if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.secondary)
+                } else if errorMessage != nil {
+                    // The banner above says what went wrong; a grey
+                    // "nothing found" here would say something else.
+                    EmptyView()
                 } else if places.isEmpty {
                     Text(anyFilterOn
                          ? "Nichts in der Nähe, das diese Angaben trägt. "
@@ -68,6 +70,7 @@ struct TripFoodListView: View {
             }
         }
         .navigationTitle("Essen in der Nähe")
+        .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .task(id: filterKey) { await load() }
         .refreshable { await load() }
@@ -181,7 +184,7 @@ struct TripFoodListView: View {
             consideredCount = response.consideredCount
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

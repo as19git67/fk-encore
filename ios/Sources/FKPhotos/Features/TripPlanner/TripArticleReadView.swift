@@ -190,9 +190,6 @@ struct TripArticleReadView: View {
                          + "hergibt, hilft Einf\u{00FC}gen.")
                 }
 
-                if let error = model.errorMessage {
-                    Section { Text(error).font(.footnote).foregroundStyle(.red) }
-                }
                 if let message = model.lastAddition {
                     Section { Text(message).font(.footnote).foregroundStyle(.secondary) }
                 }
@@ -219,6 +216,7 @@ struct TripArticleReadView: View {
                 }
             }
             .navigationTitle("Artikel auslesen")
+            .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

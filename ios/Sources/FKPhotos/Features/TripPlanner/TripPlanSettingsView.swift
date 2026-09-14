@@ -136,25 +136,24 @@ struct TripPlanSettingsView: View {
                 }
             }
 
-            if let blocked = model.blockedReason {
-                Section {
-                    Label(blocked, systemImage: "exclamationmark.triangle")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Button("Nur speichern, Tage lassen") {
-                        Task { await save(replan: false) }
-                    }
-                }
-            }
-
-            if let errorMessage = model.errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Einstellungen")
+        .plannerErrorBanner(model.errorMessage)
         .navigationBarTitleDisplayMode(.inline)
+        // The server's refusal to re-plan is a question with two
+        // answers. As a section it sat below the interest list, where
+        // "Speichern" appeared to do nothing.
+        .alert("Tage neu planen?", isPresented: Binding(
+            get: { model.blockedReason != nil },
+            set: { if !$0 { model.clearBlockedReason() } }),
+               presenting: model.blockedReason) { _ in
+            Button("Nur speichern, Tage lassen") {
+                Task { await save(replan: false) }
+            }
+            Button("Abbrechen", role: .cancel) { model.clearBlockedReason() }
+        } message: { reason in
+            Text(reason)
+        }
         .task { await model.loadInterests() }
         .sheet(isPresented: $editingDayShape) {
             TripDayShapeView(planId: planId, onSaved: onSaved)
@@ -205,6 +204,8 @@ final class TripPlanSettingsViewModel {
     /// Set when the server refused to re-plan because the trip has
     /// started. Shown with the way out rather than as a dead end.
     private(set) var blockedReason: String?
+
+    func clearBlockedReason() { blockedReason = nil }
     private(set) var errorMessage: String?
 
     private let planId: Int
@@ -360,7 +361,7 @@ final class TripPlanSettingsViewModel {
             errorMessage = nil
             blockedReason = nil
         } catch {
-            let message = error.localizedDescription
+            let message = TripErrorText.describe(error)
             // The server's refusal is a sentence the traveller can act
             // on, and it comes with an alternative — so it is offered as
             // one rather than shown in red as a failure.
@@ -394,7 +395,7 @@ final class TripPlanSettingsViewModel {
                     "/trip-planner/plans/\(planId)/legs/\(firstLegPosition)",
                     body: LegBody(arriveAt: .some(wantedArrival)))
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = TripErrorText.describe(error)
                 return false
             }
         }

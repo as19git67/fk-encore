@@ -134,7 +134,7 @@ final class TripNewPlanViewModel {
             // not a coordinate, and this screen never pretends it is.
             if draft.anchor == nil { searchPlaceHint() }
         } catch {
-            interpretUnavailable = error.localizedDescription
+            interpretUnavailable = TripErrorText.describe(error)
         }
     }
 
@@ -151,7 +151,7 @@ final class TripNewPlanViewModel {
             errorMessage = nil
             return response.plan.id
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
             return nil
         }
     }

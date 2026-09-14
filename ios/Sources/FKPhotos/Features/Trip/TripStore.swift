@@ -459,7 +459,7 @@ final class TripStore {
                 return shared.id
             }
         } catch {
-            throw TripError.serverAlbum("Server-Alben konnten nicht geladen werden: \(error.localizedDescription)")
+            throw TripError.serverAlbum("Server-Alben konnten nicht geladen werden: \(TripErrorText.describe(error))")
         }
 
         struct Body: Encodable { let name: String; let description: String? }
@@ -470,7 +470,7 @@ final class TripStore {
             )
             return created.id
         } catch {
-            throw TripError.serverAlbum("Album konnte nicht erstellt werden: \(error.localizedDescription)")
+            throw TripError.serverAlbum("Album konnte nicht erstellt werden: \(TripErrorText.describe(error))")
         }
     }
 }

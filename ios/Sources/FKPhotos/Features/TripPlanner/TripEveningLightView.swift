@@ -72,13 +72,9 @@ struct TripEveningLightView: View {
                 }
             }
 
-            if let errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
         .navigationTitle("Abendlicht")
+        .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
@@ -99,7 +95,7 @@ struct TripEveningLightView: View {
             proposals = answer.proposals
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -120,7 +116,7 @@ struct TripEveningLightView: View {
             accepted.insert(proposal.osmRef)
             onPlanChanged?()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

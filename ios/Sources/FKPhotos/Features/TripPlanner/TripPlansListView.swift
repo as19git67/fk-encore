@@ -15,6 +15,9 @@ struct TripPlansListView: View {
     @State private var actionError: String?
     /// The trip the user is about to leave (a companion's "delete").
     @State private var leaving: TripPlanSummary?
+    /// "Verwerfen" on the shared find is the one irreversible tap on
+    /// this screen that did not ask. Now it does.
+    @State private var confirmDiscard = false
     @Environment(AuthManager.self) private var authManager
     @State private var isCreating = false
     /// Set to the id of a plan just created, so the list opens it
@@ -82,6 +85,16 @@ struct TripPlansListView: View {
         }
         .navigationDestination(item: $openPlanId) { planId in
             TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
+        }
+        .confirmationDialog("Geteilten Fund verwerfen?", isPresented: $confirmDiscard,
+                            titleVisibility: .visible) {
+            Button("Verwerfen", role: .destructive) {
+                TripShareInbox.clear()
+                pendingShare = nil
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Der Link ist danach weg. Er lässt sich jederzeit neu teilen.")
         }
         .alert("Das ging nicht", isPresented: Binding(
             get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
@@ -215,12 +228,9 @@ struct TripPlansListView: View {
                         .controlSize(.small)
                 }
                 Spacer()
-                Button("Verwerfen") {
-                    TripShareInbox.clear()
-                    pendingShare = nil
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
+                Button("Verwerfen") { confirmDiscard = true }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
             }
         }
         .padding()
@@ -276,7 +286,7 @@ struct TripPlansListView: View {
                 "/trip-planner/plans/\(plan.id)")
             plans.removeAll { $0.id == plan.id }
         } catch {
-            actionError = error.localizedDescription
+            actionError = TripErrorText.describe(error)
         }
     }
 
@@ -295,7 +305,7 @@ struct TripPlansListView: View {
                 "/trip-planner/plans/\(plan.id)/participants/remove", body: Body(userId: me))
             plans.removeAll { $0.id == plan.id }
         } catch {
-            actionError = error.localizedDescription
+            actionError = TripErrorText.describe(error)
         }
     }
 
@@ -308,7 +318,7 @@ struct TripPlansListView: View {
             plans = response.plans
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = TripErrorText.describe(error)
         }
     }
 }

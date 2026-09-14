@@ -14,6 +14,7 @@ struct TripShareReviewView: View {
     /// Set to true the first time a proposal reaches the pool, so the caller
     /// knows not to discard the inbox entry on dismiss.
     @Binding var didAddAnything: Bool
+    @State private var confirmLeaving = false
 
     init(planId: Int, payload: TripSharePayload,
          userTitle: String = "", userNote: String = "",
@@ -30,18 +31,54 @@ struct TripShareReviewView: View {
             } else if let response = model.response {
                 list(response)
             } else if let errorMessage = model.errorMessage {
-                ContentUnavailableView("Nicht gelesen", systemImage: "link.badge.plus",
-                                       description: Text(errorMessage))
+                // Not a dead end: the find is still in the inbox, and
+                // the analysis can be asked for again.
+                ContentUnavailableView {
+                    Label("Nicht gelesen", systemImage: "link.badge.plus")
+                } description: {
+                    Text(errorMessage + "\n\nDer Fund bleibt gespeichert.")
+                } actions: {
+                    Button("Nochmal versuchen") { Task { await model.analyse() } }
+                        .buttonStyle(.borderedProminent)
+                }
             } else {
                 ProgressView()
             }
         }
         .navigationTitle("Gefunden")
         .navigationBarTitleDisplayMode(.inline)
+        .plannerErrorBanner(model.response == nil ? nil : model.errorMessage,
+                            dismiss: { model.errorMessage = nil })
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Fertig") { dismiss() }
+            if model.readyCount > 1 {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Alle übernehmen") { Task { await model.addAllReady() } }
+                        .disabled(model.addingId != nil)
+                }
             }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Fertig") {
+                    // "Fertig" with nothing taken over used to close
+                    // silently; whoever tapped it expected the places
+                    // to be in the pool.
+                    if model.readyCount > 0 { confirmLeaving = true } else { dismiss() }
+                }
+            }
+        }
+        .confirmationDialog("Noch nichts übernommen", isPresented: $confirmLeaving,
+                            titleVisibility: .visible) {
+            Button(model.readyCount == 1 ? "Übernehmen und schließen" : "Alle übernehmen und schließen") {
+                Task {
+                    await model.addAllReady()
+                    if model.errorMessage == nil { dismiss() }
+                }
+            }
+            Button("Ohne Übernahme schließen", role: .destructive) { dismiss() }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text(model.readyCount == 1
+                 ? "Ein Ort ist bereit, aber noch nicht im Vorrat."
+                 : "\(model.readyCount) Orte sind bereit, aber noch nicht im Vorrat.")
         }
         .task { await model.analyse() }
         .onChange(of: model.added.count) { _, count in
@@ -85,11 +122,6 @@ struct TripShareReviewView: View {
                 }
             }
 
-            if let errorMessage = model.errorMessage {
-                Section {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
-                }
-            }
         }
     }
 
