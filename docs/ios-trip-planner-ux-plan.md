@@ -748,7 +748,7 @@ or not at all.
 | D11 (ideas) | "Wer schreibt mit" screen for the idea collection with a list of invitees and removal | Done in a follow-up PR, with a change of model: invitations (trips and ideas) pick from the household like the album share instead of typing an address (`GET /trip-planner/shareable-users`); the ideas list is one list across every collection the person may write into (`GET /ideas` without `ownerId`, folded where two collections hold the same place); `GET /ideas/members` lists who writes into mine. Two people who collected separately and then let each other in see one list; nothing is merged or moved. See `docs/ideenvorrat.md` §4 |
 | D6 | Build the manual-mode selection grid, or hide the toggle | Neither. The toggle stays; the empty state now says truthfully that photos are added by putting them into the iOS album |
 | E3 | "Das hier merken" directly on the Trip tab and as an App Shortcut | Not done; the capture stays behind Ideen → + |
-| X11 | Travellers outside the household, a per-traveller `shortWalks` toggle, transferring the organiser role | Not done; all three need backend support (`travellers.ts` accepts household persons or planning users only; no role-transfer endpoint) |
+| X11 | Travellers outside the household, a per-traveller `shortWalks` toggle, transferring the organiser role | Done in a follow-up PR: "Jemanden eintragen" (name, optional birth date, "Kürzere Wege") on the Reisegruppe screen; "Kürzere Wege" as a toggle per traveller (`POST /travellers/update`, organiser only, re-plans); "Rolle übergeben" as a swipe action on Planen mit (`POST /participants/hand-over`, a swap: the old organiser stays as participant) |
 | X15 | "§9.1" references in `TripMapsHandoff.swift` / `TripMapsSettingsView.swift` | Dropped: they cite §9.1 of `ios-urlaubsplanung.md` ("Hinaus: was die App abgibt"), which is correct. The finding was wrong |
 | I5 (pin) | Planning-mode "auf der Karte zeigen" bypasses "Jedes Mal fragen" | Kept as is; documented in the maps settings footer (see 3.1) |
 | S1 | Planner as a peer of the photo mode at the tab root | Done in a follow-up PR (see 3.1, 2.2 tab root): "Aufnehmen / Planen" segmented control on the Trip tab, the planner icon is gone |
@@ -777,7 +777,7 @@ Three things the sandbox (no Swift toolchain) could not catch:
 1. ~~D8 — reasons travel with the stop (server + `TripSpotDetail(stop)`).~~ Done (see 3.2).
 2. ~~D11 — invitee list and removal for the idea collection (needs a list endpoint).~~ Done (see 3.2).
 3. ~~S1 — planner and photo mode as peers at the tab root, once the launch routing is revisited.~~ Done (see 3.1).
-4. X11 — manual travellers, `shortWalks` per person, organiser hand-over (backend first).
+4. ~~X11 — manual travellers, `shortWalks` per person, organiser hand-over (backend first).~~ Done (see 3.2).
 5. D17 — an observable auto-end monitor so the tab badge can show a pending end suggestion.
 6. E3 — "Das hier merken" as a one-tap action on the Trip tab and as an App Shortcut.
 7. X10 — one `TripPlannerViewModel` per plan id, so the last viewed day survives navigating away.

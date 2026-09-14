@@ -223,6 +223,68 @@ export const removeFromTrip = api(
   },
 );
 
+export interface HandOverRequest {
+  planId: number;
+  /** Who organises from now on. Must already plan the trip. */
+  userId: number;
+}
+
+export interface HandOverResponse {
+  handedOver: boolean;
+}
+
+/**
+ * "Die Rolle ist übertragbar" (§6.2).
+ *
+ * Exactly one organiser, always — so this is a swap, not a promotion:
+ * the trip changes hands, and the person who held it stays on it as a
+ * participant. Nothing else changes; everything but the frame, the
+ * invitations and the casting vote was everybody's anyway.
+ */
+export const handOverTrip = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/trip-planner/plans/:planId/participants/hand-over",
+    auth: true,
+  },
+  async (req: HandOverRequest): Promise<HandOverResponse> => {
+    const caller = requireUser();
+    await requireOrganiser(req.planId, caller, "Wer die Reise organisiert");
+    if (req.userId === caller) {
+      throw APIError.invalidArgument("du organisierst diese Reise schon");
+    }
+
+    // Only to somebody already on the trip: handing a holiday to a
+    // stranger is not what "übertragbar" means.
+    const [share] = await db
+      .select({ id: tripPlanShares.id })
+      .from(tripPlanShares)
+      .where(and(
+        eq(tripPlanShares.plan_id, req.planId),
+        eq(tripPlanShares.user_id, req.userId),
+      ))
+      .limit(1);
+    if (!share) throw APIError.notFound("diese Person plant diese Reise nicht mit");
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(tripPlans)
+        .set({ owner_id: req.userId, updated_at: new Date().toISOString() })
+        .where(eq(tripPlans.id, req.planId));
+      await tx.delete(tripPlanShares).where(eq(tripPlanShares.id, share.id));
+      await tx.insert(tripPlanShares).values({
+        plan_id: req.planId,
+        user_id: caller,
+        role: "participant",
+        invited_by: req.userId,
+      });
+    });
+
+    return { handedOver: true };
+  },
+);
+
 async function findUser(id: number) {
   const [row] = await db
     .select({ name: users.name, email: users.email })

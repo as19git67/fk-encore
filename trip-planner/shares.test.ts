@@ -18,7 +18,7 @@ import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan, listTripPlans, updateTripSettings } from "./plans";
 import { addFind } from "./add-find";
-import { inviteToTrip, listTripParticipants, removeFromTrip } from "./shares";
+import { handOverTrip, inviteToTrip, listTripParticipants, removeFromTrip } from "./shares";
 
 const WEST = { lat: 48.37, lon: 10.9 };
 
@@ -272,5 +272,47 @@ describe("removing people", () => {
     const plan = await sharedPlan();
     await expect(removeFromTrip({ planId: plan.id, userId: organiserId }))
       .rejects.toThrow(/nicht entfernen/);
+  });
+});
+
+describe("handing the trip over (§6.2, \"übertragbar\")", () => {
+  it("swaps the roles and keeps both people on the trip", async () => {
+    const plan = await sharedPlan();
+
+    const result = await handOverTrip({ planId: plan.id, userId: companionId });
+    expect(result.handedOver).toBe(true);
+
+    const { participants, youOrganise } = await listTripParticipants({ planId: plan.id });
+    expect(participants.map((p) => [p.userId, p.role])).toEqual([
+      [companionId, "organiser"],
+      [organiserId, "participant"],
+    ]);
+    // Exactly one organiser, always — and it is no longer me.
+    expect(youOrganise).toBe(false);
+
+    actAs(companionId);
+    const theirs = await listTripParticipants({ planId: plan.id });
+    expect(theirs.youOrganise).toBe(true);
+    // The new organiser may do what the old one could: change the frame.
+    await expect(updateTripSettings({ planId: plan.id, pace: "relaxed" })).resolves.toBeDefined();
+  });
+
+  it("is the organiser's to give, not a participant's to take", async () => {
+    const plan = await sharedPlan();
+    actAs(companionId);
+    await expect(handOverTrip({ planId: plan.id, userId: companionId }))
+      .rejects.toThrow(/angelegt hat/);
+  });
+
+  it("goes only to somebody already on the trip", async () => {
+    const plan = await sharedPlan();
+    await expect(handOverTrip({ planId: plan.id, userId: strangerId }))
+      .rejects.toThrow(/plant diese Reise nicht mit/);
+  });
+
+  it("refuses to hand the trip to the person who holds it", async () => {
+    const plan = await sharedPlan();
+    await expect(handOverTrip({ planId: plan.id, userId: organiserId }))
+      .rejects.toThrow(/organisierst diese Reise schon/);
   });
 });

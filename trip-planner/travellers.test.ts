@@ -29,6 +29,7 @@ import {
   planTravellers,
   removeTraveller,
   suggestTravellers,
+  updateTraveller,
 } from "./travellers";
 
 const MUNICH = { lat: 48.14, lon: 11.58 };
@@ -290,6 +291,77 @@ describe("a child on the trip shortens the day", () => {
     });
 
     expect((after.constraints.group as Record<string, unknown>).limitedMobility).toBe(true);
+  });
+});
+
+describe("changing what is known about a traveller", () => {
+  it("lets 'kürzere Wege' be said afterwards, and replans", async () => {
+    // The flag was settable only while adding, and nobody asked then.
+    const plan = await trip();
+    const { plan: withOma } = await addTraveller({
+      planId: plan.id, label: "Oma", birthDate: "1944-02-02",
+    });
+    expect((withOma.constraints.group as Record<string, unknown> | undefined)?.limitedMobility).toBeFalsy();
+    const { travellers } = await planTravellers({ planId: plan.id });
+    const oma = travellers.find((t) => t.label === "Oma")!;
+
+    const { plan: after } = await updateTraveller({
+      planId: plan.id, travellerId: oma.id, shortWalks: true,
+    });
+
+    expect((after.constraints.group as Record<string, unknown>).limitedMobility).toBe(true);
+    const { travellers: again } = await planTravellers({ planId: plan.id });
+    expect(again.find((t) => t.id === oma.id)?.shortWalks).toBe(true);
+  });
+
+  it("renames and re-dates somebody entered by hand", async () => {
+    const plan = await trip();
+    await addTraveller({ planId: plan.id, label: "Freundin" });
+    const { travellers } = await planTravellers({ planId: plan.id });
+    const friend = travellers[0];
+
+    await updateTraveller({
+      planId: plan.id, travellerId: friend.id, label: "Tante", birthDate: "1970-05-05",
+    });
+
+    const { travellers: after } = await planTravellers({ planId: plan.id });
+    expect(after[0].label).toBe("Tante");
+    expect(after[0].birthDate).toBe("1970-05-05");
+    expect(after[0].ageAtStart).toBe(57);
+  });
+
+  it("leaves a household entry's birth date to the household", async () => {
+    const child = await household("Kind A", "kind", "2020-06-15");
+    const plan = await trip();
+    await addTraveller({ planId: plan.id, subjectPersonId: child });
+    const { travellers } = await planTravellers({ planId: plan.id });
+
+    await expect(updateTraveller({
+      planId: plan.id, travellerId: travellers[0].id, birthDate: "2019-01-01",
+    })).rejects.toThrow(/aus dem Haushalt/);
+  });
+
+  it("is the organiser's call too", async () => {
+    const plan = await trip();
+    await addTraveller({ planId: plan.id, label: "Oma" });
+    const { travellers } = await planTravellers({ planId: plan.id });
+    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+
+    actAs(otherId);
+    await expect(updateTraveller({
+      planId: plan.id, travellerId: travellers[0].id, shortWalks: true,
+    })).rejects.toThrow(/angelegt hat/);
+  });
+
+  it("refuses an empty name and an empty change", async () => {
+    const plan = await trip();
+    await addTraveller({ planId: plan.id, label: "Oma" });
+    const { travellers } = await planTravellers({ planId: plan.id });
+
+    await expect(updateTraveller({ planId: plan.id, travellerId: travellers[0].id, label: "  " }))
+      .rejects.toThrow(/nicht leer/);
+    await expect(updateTraveller({ planId: plan.id, travellerId: travellers[0].id }))
+      .rejects.toThrow(/nichts zu ändern/);
   });
 });
 

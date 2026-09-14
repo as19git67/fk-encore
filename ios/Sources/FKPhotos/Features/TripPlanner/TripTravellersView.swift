@@ -32,6 +32,9 @@ struct TripTravellersView: View {
     /// reads as a bug.
     @State private var confirmingAdd: TripTravellerSuggestion?
     @State private var confirmingRemove: TripTraveller?
+    /// The form for somebody who is neither in the household nor
+    /// planning the trip — a friend, a grandparent from elsewhere.
+    @State private var enteringByHand = false
     @AppStorage("trip.travellers.replanExplained") private var replanExplained = false
 
     var body: some View {
@@ -80,6 +83,26 @@ struct TripTravellersView: View {
                 }
             }
 
+            if !isLoading {
+                // Not everybody who comes lives here or has a login.
+                Section {
+                    Button {
+                        enteringByHand = true
+                    } label: {
+                        Label("Jemanden eintragen", systemImage: "person.badge.plus")
+                    }
+                } footer: {
+                    Text("Für alle, die weder im Haushalt sind noch mitplanen.")
+                }
+            }
+        }
+        .sheet(isPresented: $enteringByHand) {
+            NavigationStack {
+                TripManualTravellerSheet { entry in
+                    await add(entry)
+                }
+            }
+            .presentationDetents([.medium, .large])
         }
         .navigationTitle("Reisegruppe")
         .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
@@ -120,6 +143,18 @@ struct TripTravellersView: View {
                 }
             }
             Spacer()
+            // A statement about a person, made by a person (§3.5): the
+            // flag was shown but could never be set, so it never was.
+            Toggle(isOn: Binding(
+                get: { traveller.shortWalks },
+                set: { on in Task { await setShortWalks(on, for: traveller) } }
+            )) {
+                Text("Kürzere Wege").font(.footnote)
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(busyId == traveller.id)
             Button(role: .destructive) {
                 confirmingRemove = traveller
             } label: {
@@ -199,6 +234,38 @@ struct TripTravellersView: View {
         }
     }
 
+    /// Somebody entered by hand: a name, perhaps a birth date, perhaps
+    /// shorter walks.
+    private func add(_ entry: TripManualTraveller) async {
+        do {
+            let _: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/travellers",
+                body: TripAddTravellerRequest(
+                    subjectPersonId: nil, userId: nil,
+                    label: entry.name, birthDate: entry.birthDateString,
+                    shortWalks: entry.shortWalks))
+            replanExplained = true
+            await load()
+            onPlanChanged?()
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    private func setShortWalks(_ on: Bool, for traveller: TripTraveller) async {
+        busyId = traveller.id
+        defer { busyId = nil }
+        do {
+            let _: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/travellers/update",
+                body: TripUpdateTravellerRequest(travellerId: traveller.id, shortWalks: on))
+            await load()
+            onPlanChanged?()
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
     private func remove(_ traveller: TripTraveller) async {
         busyId = traveller.id
         defer { busyId = nil }
@@ -228,12 +295,119 @@ struct TripTravellerSuggestionsResponse: Codable, Sendable {
 struct TripAddTravellerRequest: Encodable, Sendable {
     /// One of the household …
     let subjectPersonId: Int?
-    /// … or somebody who plans this trip (§6.2). Exactly one is set.
+    /// … or somebody who plans this trip (§6.2) …
     let userId: Int?
+    /// … or somebody who is neither: a name, perhaps a birth date.
+    /// Exactly one of the three ways is used.
+    var label: String? = nil
+    var birthDate: String? = nil
+    var shortWalks: Bool? = nil
 }
 
 struct TripRemoveTravellerRequest: Encodable, Sendable {
     let travellerId: Int
+}
+
+struct TripUpdateTravellerRequest: Encodable, Sendable {
+    let travellerId: Int
+    let shortWalks: Bool
+}
+
+/// What the form for somebody entered by hand collects (§3.5).
+///
+/// Kept apart from the view so the one piece with a wrong answer — the
+/// date as the server wants it — can be checked without a screen. The
+/// birth date is a date, not an instant: formatted in the local
+/// calendar so somebody born on the 2nd stays born on the 2nd east of
+/// Greenwich.
+struct TripManualTraveller: Sendable, Equatable {
+    var name: String
+    var birthDate: Date?
+    var shortWalks: Bool
+
+    /// The name as it will be sent, or nil when there is none.
+    var trimmedName: String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var isValid: Bool { trimmedName != nil }
+
+    /// `YYYY-MM-DD` in the local calendar, or nil when no date was given.
+    var birthDateString: String? {
+        birthDate.map { Self.isoDate($0) }
+    }
+
+    static func isoDate(_ date: Date, calendar: Calendar = .current) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+}
+
+/// The form behind "Jemanden eintragen".
+struct TripManualTravellerSheet: View {
+    /// Called with the entry once it is saved; the sheet closes after.
+    let onSave: (TripManualTraveller) async -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var knowsBirthDate = false
+    @State private var birthDate = Calendar.current.date(byAdding: .year, value: -30, to: Date()) ?? Date()
+    @State private var shortWalks = false
+    @State private var isSaving = false
+
+    private var entry: TripManualTraveller {
+        TripManualTraveller(
+            name: name,
+            birthDate: knowsBirthDate ? birthDate : nil,
+            shortWalks: shortWalks,
+        )
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Name", text: $name)
+                    .textInputAutocapitalization(.words)
+            }
+            Section {
+                Toggle("Geburtsdatum angeben", isOn: $knowsBirthDate)
+                if knowsBirthDate {
+                    DatePicker("Geburtsdatum", selection: $birthDate,
+                               in: ...Date(), displayedComponents: .date)
+                }
+            } footer: {
+                Text("Mit Geburtsdatum weiß der Planer, ob ein Kind mitfährt. Ohne wird "
+                     + "die Person als erwachsen geplant.")
+            }
+            Section {
+                Toggle("Kürzere Wege", isOn: $shortWalks)
+            } footer: {
+                Text("Wird nie aus dem Alter geschlossen — nur, wenn du es hier sagst.")
+            }
+        }
+        .navigationTitle("Jemanden eintragen")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Abbrechen") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Sichern") {
+                    guard let trimmedName = entry.trimmedName else { return }
+                    isSaving = true
+                    var saved = entry
+                    saved.name = trimmedName
+                    Task {
+                        await onSave(saved)
+                        isSaving = false
+                        dismiss()
+                    }
+                }
+                .disabled(!entry.isValid || isSaving)
+            }
+        }
+    }
 }
 
 struct TripGroupEffect: Codable, Sendable {
