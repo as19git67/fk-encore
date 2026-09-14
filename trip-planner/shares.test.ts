@@ -132,6 +132,32 @@ describe("who is on the trip", () => {
   });
 });
 
+describe("inviting from the household", () => {
+  it("invites by id, from the list the app shows", async () => {
+    const plan = await sharedPlan();
+    const { listShareableUsers } = await import("./household");
+
+    const offered = await listShareableUsers({ planId: plan.id });
+    // The organiser and the companion already on the trip are not
+    // offered; the stranger is.
+    expect(offered.users.map((u) => u.id)).not.toContain(organiserId);
+    expect(offered.users.map((u) => u.id)).not.toContain(companionId);
+    expect(offered.users.map((u) => u.id)).toContain(strangerId);
+
+    const { added, participant } = await inviteToTrip({ planId: plan.id, userId: strangerId });
+    expect(added).toBe(true);
+    expect(participant.userId).toBe(strangerId);
+
+    const after = await listShareableUsers({ planId: plan.id });
+    expect(after.users.map((u) => u.id)).not.toContain(strangerId);
+  });
+
+  it("refuses an invitation that names nobody", async () => {
+    const plan = await sharedPlan();
+    await expect(inviteToTrip({ planId: plan.id })).rejects.toThrow(/userId or email/);
+  });
+});
+
 describe("what a companion may do", () => {
   it("sees the trip in their own list, and can open it", async () => {
     const plan = await sharedPlan();

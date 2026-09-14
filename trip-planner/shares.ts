@@ -93,11 +93,12 @@ export const listTripParticipants = api(
 export interface InviteRequest {
   planId: number;
   /**
-   * Who to invite, by the address they log in with. A name would be
-   * ambiguous in a household with two Antons; an id is not something
-   * anybody knows by heart.
+   * Who to invite: picked from the household by id (the app lists the
+   * household, like the album share does) …
    */
-  email: string;
+  userId?: number;
+  /** … or by the address they log in with. One of the two. */
+  email?: string;
 }
 
 export interface InviteResponse {
@@ -113,16 +114,20 @@ export const inviteToTrip = api(
     await requireOrganiser(req.planId, userId, "Wer mitplant");
 
     const email = typeof req.email === "string" ? req.email.trim().toLowerCase() : "";
-    if (!email) throw APIError.invalidArgument("email is required");
+    if (req.userId === undefined && !email) {
+      throw APIError.invalidArgument("userId or email is required");
+    }
 
     const [invitee] = await db
       .select({ id: users.id, name: users.name, email: users.email })
       .from(users)
-      .where(eq(users.email, email))
+      .where(req.userId !== undefined ? eq(users.id, req.userId) : eq(users.email, email))
       .limit(1);
     if (!invitee) {
       // Naming the address back is not a leak: the caller typed it.
-      throw APIError.notFound(`niemand mit der Adresse ${email} — erst einladen, dann mitplanen`);
+      throw APIError.notFound(req.userId !== undefined
+        ? "diese Person gibt es nicht"
+        : `niemand mit der Adresse ${email} — erst einladen, dann mitplanen`);
     }
 
     const [plan] = await db

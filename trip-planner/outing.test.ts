@@ -135,6 +135,22 @@ describe("is anything we collected near here?", () => {
     expect(ideas[0].addedBy).toBe("Papa");
   });
 
+  it("hears the whole household, not one collection at a time", async () => {
+    // Anna is let into Papa's collection; something he kept near here
+    // is offered to her without her switching collections.
+    await idea(500);
+    actAs(papaId);
+    await db.insert(ideaPoolShares).values({ owner_id: papaId, user_id: annaId, invited_by: papaId });
+    await db.insert(ideaPool).values({
+      owner_id: papaId, created_by: papaId, osm_ref: "manual:papas-see", name: "Papas See",
+      lat: east(800).lat, lon: east(800).lon, category: "sight", dwell_minutes: 60,
+    });
+
+    actAs(annaId);
+    const { ideas } = await ideasNearby({ ...HERE });
+    expect(ideas.map((i) => i.name)).toContain("Papas See");
+  });
+
   it("leaves out what is simply too far", async () => {
     await idea(50_000);
 
