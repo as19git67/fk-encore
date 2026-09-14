@@ -523,6 +523,13 @@ export interface PhotoCurationStats {
   member_count: number;
 }
 
+/**
+ * Per-album override for adopting other people's similar-photo group
+ * reviews (docs/group-review-adoption.md). `null` inherits the user's
+ * global default.
+ */
+export type GroupReviewAdoption = "on" | "off" | null;
+
 export interface AlbumUserSettings {
   album_id: number;
   user_id: number;
@@ -530,6 +537,7 @@ export interface AlbumUserSettings {
   active_view: ActiveView;
   view_config?: ViewConfig | null;
   cover_photo_id?: number;
+  group_review_adoption?: GroupReviewAdoption;
 }
 
 export interface UpdateAlbumUserSettingsRequest {
@@ -538,6 +546,7 @@ export interface UpdateAlbumUserSettingsRequest {
   activeView?: ActiveView;
   viewConfig?: ViewConfig | null;
   coverPhotoId?: number | null;
+  groupReviewAdoption?: GroupReviewAdoption;
 }
 
 export interface CreateAlbumRequest {
@@ -744,6 +753,12 @@ export interface GalleryGridGroup {
   id: number;
   /** True when this photo is the cover_photo_id of the group. */
   is_cover: boolean;
+  /**
+   * True when the group was closed by adopting somebody else's review
+   * rather than by the user themselves. The grid marks those differently:
+   * an adopted stack is done, but not by you.
+   */
+  adopted?: boolean;
   /** Total number of photos in the group. */
   member_count: number;
   /** True when the user has marked the group as reviewed. */
@@ -800,6 +815,12 @@ export interface PhotoGroup {
   user_id: number;
   cover_photo_id?: number;
   reviewed_at?: string;
+  /**
+   * Who closed the group: "user" (the owner did it) or "adopted" (taken
+   * over from a peer's review, docs/group-review-adoption.md). Absent
+   * while the group is still open.
+   */
+  review_source?: "user" | "adopted";
   created_at: string;
   member_count: number;
   photo_ids: number[];

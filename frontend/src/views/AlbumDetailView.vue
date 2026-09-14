@@ -62,6 +62,7 @@ import {
   ignoreFace,
   leaveAlbum,
   listPhotoGroups,
+  reclaimAdoptedGroup,
   reindexPhoto,
   removeAlbumShare,
   shareAlbum,
@@ -1482,11 +1483,41 @@ const albumSettingsDesc = ref('')
 const albumSettingsMapEnabled = ref(false)
 const albumSettingsUpdating = ref(false)
 
+// Per-album override for adopting other people's similar-photo group
+// reviews (docs/group-review-adoption.md). Personal, not an album property,
+// so it saves on change instead of on "Speichern".
+const albumAdoption = ref<'inherit' | 'on' | 'off'>('inherit')
+const albumAdoptionBusy = ref(false)
+const ADOPTION_OPTIONS = [
+  { label: 'Wie global eingestellt', value: 'inherit' },
+  { label: 'Reviews der anderen übernehmen', value: 'on' },
+  { label: 'Selbst entscheiden', value: 'off' },
+]
+
+async function handleAdoptionChange(value: 'inherit' | 'on' | 'off') {
+  if (albumAdoptionBusy.value) return
+  albumAdoptionBusy.value = true
+  try {
+    const updated = await updateAlbumUserSettings(albumId.value, {
+      group_review_adoption: value === 'inherit' ? null : value,
+    })
+    if (album.value?.settings) album.value.settings.group_review_adoption = updated.group_review_adoption
+    // Switching this reopens or closes stacks server-side, so the grid and
+    // the cached group list are both stale now.
+    await refreshGroupsAndPhotos()
+  } catch (err) {
+    console.error('Failed to update group review adoption:', err)
+  } finally {
+    albumAdoptionBusy.value = false
+  }
+}
+
 function openAlbumSettingsDialog() {
   if (!album.value) return
   albumSettingsName.value = album.value.name
   albumSettingsDesc.value = album.value.description || ''
   albumSettingsMapEnabled.value = album.value.display_mode === 'map'
+  albumAdoption.value = (album.value.settings?.group_review_adoption as 'on' | 'off' | null | undefined) ?? 'inherit'
   showAlbumSettingsDialog.value = true
 }
 
@@ -1899,6 +1930,14 @@ function handleGridPhotoClick(entry: GalleryGridEntry) {
 
 async function handleGridStackClick(entry: GalleryGridEntry) {
   if (!entry.group) return
+  if (entry.group.adopted) {
+    // "Selbst prüfen" on an adopted stack: give the photos that were
+    // hidden on the user's behalf back before opening the compare view,
+    // otherwise they would review a group whose members they cannot see
+    // (docs/group-review-adoption.md).
+    await reclaimAdoptedGroup(entry.group.id)
+    await refreshGroupsAndPhotos()
+  }
   let found = photoGroupsList.value.find((g) => g.id === entry.group!.id) ?? null
   if (!found) {
     // The badge can appear (the backend already grouped the upload) before our
@@ -2877,6 +2916,24 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           <Checkbox v-model="albumSettingsMapEnabled" inputId="albumSettingsMap" :binary="true" />
           <label for="albumSettingsMap">Karte aktivieren</label>
         </div>
+        <div v-if="album?.is_shared" class="dialog-field">
+          <label for="albumAdoption">Ähnliche Fotos: Reviews der anderen</label>
+          <Select
+            id="albumAdoption"
+            v-model="albumAdoption"
+            :options="ADOPTION_OPTIONS"
+            optionLabel="label"
+            optionValue="value"
+            :disabled="albumAdoptionBusy"
+            class="dialog-input"
+            @change="handleAdoptionChange(albumAdoption)"
+          />
+          <small class="dialog-hint">
+            Hat jemand anderes einen Stapel schon bereinigt, gilt dessen Ergebnis
+            hier als Voreinstellung. Sobald du einen Stapel selbst prüfst, gehört
+            er dir. Gilt nur für diese Einstellung des Albums.
+          </small>
+        </div>
       </div>
       <template #footer>
         <div class="settings-footer">
@@ -3528,6 +3585,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 .dialog-field label { font-size: 0.9em; font-weight: 500; }
 .dialog-field--row { flex-direction: row; align-items: center; gap: 0.5em; }
 .dialog-input { width: 100%; }
+.dialog-hint { font-size: 0.8em; line-height: 1.35; color: var(--p-text-muted-color); }
 
 /* ── Share dialog ────────────────────────────────────────────────────────── */
 .share-loading { padding: 1rem; text-align: center; }

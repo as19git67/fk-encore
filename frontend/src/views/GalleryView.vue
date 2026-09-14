@@ -96,6 +96,7 @@ import {
 } from '../api/gallery'
 import {
   listPhotoGroups,
+  reclaimAdoptedGroup,
   updatePhotoCuration,
   updatePhotoLinkVisibility,
   setKnownFaceLinkVisibility,
@@ -612,6 +613,15 @@ async function onStackClick(entry: GalleryGridEntry) {
   if (stackBusy.value) return
   stackBusy.value = true
   try {
+    if (entry.group.adopted) {
+      // "Selbst prüfen": the group was closed by adopting somebody else's
+      // review. Take it back first so the photos hidden on the user's
+      // behalf are in the stack again — reviewing a group you cannot see
+      // the members of would be worse than not offering it at all.
+      await reclaimAdoptedGroup(entry.group.id)
+      groupCache.value = null
+      await galleryRef.value?.reload()
+    }
     const groups = await ensureGroupCache()
     const found = groups.find((g) => g.id === entry.group!.id) ?? null
     activeGroup.value = found

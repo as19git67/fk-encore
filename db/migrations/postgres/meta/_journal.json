@@ -1394,6 +1394,13 @@
       "when": 1788566400019,
       "tag": "0198_trip_stop_reasons",
       "breakpoints": true
+    },
+    {
+      "idx": 199,
+      "version": "7",
+      "when": 1788566400020,
+      "tag": "0199_group_review_adoption",
+      "breakpoints": true
     }
   ]
 }

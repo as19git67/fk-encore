@@ -25,6 +25,7 @@
 import { and, eq, inArray, isNull, isNotNull, ne, or, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
+import { scheduleAdoptionForPeers } from "./group-review-adoption.service";
 import {
   aiPickUserWeights,
   albumPhotos,
@@ -510,7 +511,7 @@ export async function acceptAiPickLogic(
     // unreviewed queue but don't hide anything.
     await dbExec(
       db.update(photoGroups)
-        .set({ reviewed_at: new Date().toISOString() })
+        .set({ reviewed_at: new Date().toISOString(), review_source: "user" })
         .where(eq(photoGroups.id, groupId)),
     );
     return { success: true, hidden_count: 0 };
@@ -522,13 +523,14 @@ export async function acceptAiPickLogic(
   const nowIso = new Date().toISOString();
   for (const photoId of toHide) {
     await db.execute(sql`
-      INSERT INTO photo_curation (user_id, photo_id, status, updated_at)
-      VALUES (${userId}, ${photoId}, 'hidden', ${nowIso})
+      INSERT INTO photo_curation (user_id, photo_id, status, source, updated_at)
+      VALUES (${userId}, ${photoId}, 'hidden', 'user', ${nowIso})
       ON CONFLICT (user_id, photo_id) DO UPDATE
         SET status = CASE
               WHEN photo_curation.status = 'favorite' THEN 'favorite'
               ELSE 'hidden'
             END,
+            source = 'user',
             updated_at = EXCLUDED.updated_at
     `);
   }
@@ -538,9 +540,13 @@ export async function acceptAiPickLogic(
   // the group reviewed here too.
   await dbExec(
     db.update(photoGroups)
-      .set({ reviewed_at: nowIso })
+      .set({ reviewed_at: nowIso, review_source: "user" })
       .where(eq(photoGroups.id, groupId)),
   );
+
+  // Accepting a suggestion is a review like any other, so the people who
+  // share these photos may inherit it (docs/group-review-adoption.md).
+  void scheduleAdoptionForPeers(userId, members.map((m) => m.photo_id));
 
   return { success: true, hidden_count: toHide.length };
 }
@@ -592,6 +598,7 @@ export async function bulkAcceptHighConfidencePicksLogic(
 ): Promise<BulkAcceptResult> {
   let totalAccepted = 0;
   let totalHidden = 0;
+  const acceptedGroupIds: number[] = [];
   // Hard cap on iterations as a safety net: with chunk size 500 and the
   // largest plausible rollout (~50k groups), 200 iterations is ample
   // while still preventing a runaway loop if a future bug accidentally
@@ -616,11 +623,12 @@ export async function bulkAcceptHighConfidencePicksLogic(
         WHERE NOT (pgm.photo_id = ANY(t.ai_picked_photo_ids))
       ),
       inserted AS (
-        INSERT INTO photo_curation (user_id, photo_id, status, updated_at)
-        SELECT ${userId}, photo_id, 'hidden', NOW()
+        INSERT INTO photo_curation (user_id, photo_id, status, source, updated_at)
+        SELECT ${userId}, photo_id, 'hidden', 'user', NOW()
         FROM to_hide
         ON CONFLICT (user_id, photo_id) DO UPDATE
-          SET status = CASE
+          SET source = 'user',
+              status = CASE
                 WHEN photo_curation.status = 'favorite' THEN 'favorite'
                 ELSE 'hidden'
               END,
@@ -629,23 +637,36 @@ export async function bulkAcceptHighConfidencePicksLogic(
       ),
       reviewed AS (
         UPDATE photo_groups
-        SET reviewed_at = NOW()
+        SET reviewed_at = NOW(), review_source = 'user'
         WHERE id IN (SELECT group_id FROM targets)
         RETURNING id
       )
       SELECT
         (SELECT COUNT(*) FROM reviewed)::int AS groups_accepted,
         (SELECT COUNT(*) FROM to_hide)::int AS hidden_count,
-        (SELECT COUNT(*) FROM inserted)::int AS rows_written
+        (SELECT COUNT(*) FROM inserted)::int AS rows_written,
+        (SELECT COALESCE(array_agg(id), '{}') FROM reviewed) AS reviewed_ids
     `);
     const row = result.rows[0] as {
       groups_accepted: number;
       hidden_count: number;
       rows_written: number;
+      reviewed_ids: number[] | null;
     };
     if (!row || row.groups_accepted === 0) break;
     totalAccepted += row.groups_accepted;
     totalHidden += row.hidden_count;
+    for (const id of row.reviewed_ids ?? []) acceptedGroupIds.push(id);
+  }
+  if (acceptedGroupIds.length > 0) {
+    // The bulk pass closes many groups at once; the peers who share those
+    // photos inherit the lot (docs/group-review-adoption.md).
+    const touched = await dbAll<{ photo_id: number }>(
+      db.select({ photo_id: photoGroupMembers.photo_id })
+        .from(photoGroupMembers)
+        .where(inArray(photoGroupMembers.group_id, acceptedGroupIds)),
+    );
+    void scheduleAdoptionForPeers(userId, Array.from(new Set(touched.map((t) => t.photo_id))));
   }
   return { groups_accepted: totalAccepted, hidden_count: totalHidden };
 }
@@ -719,6 +740,7 @@ export async function acceptPeerConsensusLogic(
       .from(photoCuration)
       .where(and(
         ne(photoCuration.user_id, userId),
+        eq(photoCuration.source, "user"),
         inArray(photoCuration.photo_id, memberIds),
         sql`EXISTS (
           SELECT 1 FROM ${albumPhotos} ap
@@ -757,13 +779,14 @@ export async function acceptPeerConsensusLogic(
   const nowIso = new Date().toISOString();
   for (const photoId of toHide) {
     await db.execute(sql`
-      INSERT INTO photo_curation (user_id, photo_id, status, updated_at)
-      VALUES (${userId}, ${photoId}, 'hidden', ${nowIso})
+      INSERT INTO photo_curation (user_id, photo_id, status, source, updated_at)
+      VALUES (${userId}, ${photoId}, 'hidden', 'user', ${nowIso})
       ON CONFLICT (user_id, photo_id) DO UPDATE
         SET status = CASE
               WHEN photo_curation.status = 'favorite' THEN 'favorite'
               ELSE 'hidden'
             END,
+            source = 'user',
             updated_at = EXCLUDED.updated_at
     `);
   }
@@ -773,9 +796,11 @@ export async function acceptPeerConsensusLogic(
   // even if every photo turned out to have no peer signal.
   await dbExec(
     db.update(photoGroups)
-      .set({ reviewed_at: nowIso })
+      .set({ reviewed_at: nowIso, review_source: "user" })
       .where(eq(photoGroups.id, groupId)),
   );
+
+  void scheduleAdoptionForPeers(userId, memberIds);
 
   return {
     success: true,
@@ -1264,6 +1289,7 @@ export async function listReviewQueueLogic(
         .from(photoCuration)
         .where(and(
           ne(photoCuration.user_id, userId),
+          eq(photoCuration.source, "user"),
           inArray(photoCuration.photo_id, photoIdsForPeers),
           sql`EXISTS (
             SELECT 1 FROM ${albumPhotos} ap
