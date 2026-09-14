@@ -1,10 +1,15 @@
 import SwiftUI
 
-/// The user's plans — the way into the planner (§8.1).
+/// The user's plans — the "Planen" half of the Trip tab (§8.1).
 ///
 /// A summary per row rather than the plan itself: a twenty-day trip is
 /// hundreds of stops, and choosing between trips needs a name, a length
 /// and a date.
+///
+/// Embedded in `TripView` rather than pushed from it, so the navigation
+/// bar (title, the destination for an opened plan) belongs to the tab:
+/// two views in one stack declaring a destination for the same type
+/// would leave one of them dead.
 struct TripPlansListView: View {
     @State private var plans: [TripPlanSummary] = []
     @State private var isLoading = false
@@ -26,7 +31,9 @@ struct TripPlansListView: View {
     @State private var isCreating = false
     /// Set to the id of a plan just created, so the list opens it
     /// straight away — nobody makes a trip in order to look at a list.
-    @State private var openPlanId: Int?
+    /// Owned by the tab, which also sets it from the "läuft heute"
+    /// banner on the other half and holds the one destination for it.
+    @Binding var openPlanId: Int?
     /// Something the share sheet left for the planner (§9.2). Peeked
     /// rather than taken, so leaving the screen without confirming does
     /// not lose it.
@@ -54,7 +61,6 @@ struct TripPlansListView: View {
             }
             content
         }
-        .navigationTitle("Urlaubsplanung")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -86,9 +92,6 @@ struct TripPlansListView: View {
                 TripSharePickerView(payload: share, plans: plans,
                                     didAddAnything: $reviewAddedAnything)
             }
-        }
-        .navigationDestination(item: $openPlanId) { planId in
-            TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
         }
         .navigationDestination(item: $aux) { aux in
             switch aux.kind {

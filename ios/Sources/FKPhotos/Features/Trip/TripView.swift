@@ -1,12 +1,16 @@
 import Photos
 import SwiftUI
 
-/// Entry point of the "Trip" tab.
+/// Entry point of the "Trip" tab: two halves of the same trip (§8.1).
 ///
-/// Trip-Lebenszyklus (starten/beenden), Modus- und Auto/Manuell-Optionen und
-/// das Foto-Grid des Trip-Albums. Ortsermittlung beim Start liefert den
-/// Namensvorschlag, der automatische Foto-Zuwachs läuft über den Auto-Add-Pass
-/// (siehe `docs/ios-trip-mode.md`).
+/// **Aufnehmen** is trip mode — Lebenszyklus (starten/beenden), Modus-
+/// und Auto/Manuell-Optionen und das Foto-Grid des Trip-Albums.
+/// Ortsermittlung beim Start liefert den Namensvorschlag, der
+/// automatische Foto-Zuwachs läuft über den Auto-Add-Pass (siehe
+/// `docs/ios-trip-mode.md`). **Planen** is the vacation planner
+/// (`TripPlansListView`). A segmented control in the navigation bar
+/// switches; the planner used to hang on one toolbar icon here, four
+/// levels from the tab to a day.
 struct TripView: View {
     @State private var store = TripStore.shared
     @State private var autoStart = TripAutoStartMonitor.shared
@@ -21,40 +25,52 @@ struct TripView: View {
     /// Held centrally so the tab bar and this screen share one answer
     /// (`TripRunningPlan`).
     @State private var running = TripRunningPlan.shared
-    /// The plan the traveller asked to open from the "läuft heute"
-    /// banner. The banner stays; it used to auto-push the day screen
-    /// once per launch, which made the same tap lead somewhere else
-    /// the second time (§8.5).
+    /// The plan the traveller asked to open — from the "läuft heute"
+    /// banner on the capture half, or from the list on the planning
+    /// half. One destination for both, held here, because two in the
+    /// same stack for the same type would leave one dead. The banner
+    /// stays; it used to auto-push the day screen once per launch,
+    /// which made the same tap lead somewhere else the second time
+    /// (§8.5).
     @State private var openPlanId: Int?
+    /// Which half is showing. Stored, so the traveller comes back to
+    /// the half they left; decided once per appearance from what is
+    /// happening (`TripTabMode.initial`).
+    @AppStorage("trip.tab.mode") private var mode: TripTabMode = .capture
+    @State private var didChooseMode = false
 
     var body: some View {
         Group {
-            if let trip = store.activeTrip {
-                ActiveTripView(trip: trip, store: store, runningPlan: running.plan) { planId in
-                    openPlanId = planId
-                }
-            } else {
-                noTripView
+            switch mode {
+            case .capture:
+                captureHalf
+            case .plan:
+                TripPlansListView(openPlanId: $openPlanId)
             }
         }
         .navigationTitle("Trip")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // The vacation planner lives next to trip mode rather than in
-            // a tab of its own: one is the trip you are on, the other the
-            // trip you are planning, and the tab bar is full.
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink {
-                    TripPlansListView()
-                } label: {
-                    Label("Urlaubsplanung", systemImage: "calendar.badge.clock")
+            // The two halves are peers (§8.1): one is the trip you are
+            // on, the other the trip you are planning, and the tab bar
+            // is full. So they share the tab and the switch sits where
+            // the title would.
+            ToolbarItem(placement: .principal) {
+                Picker("Bereich", selection: $mode) {
+                    ForEach(TripTabMode.allCases, id: \.self) { half in
+                        Text(half.title).tag(half)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 240)
             }
-            ToolbarItem(placement: .topBarLeading) {
-                NavigationLink {
-                    TripSettingsView()
-                } label: {
-                    Label("Einstellungen", systemImage: "gearshape")
+            if mode == .capture {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        TripSettingsView()
+                    } label: {
+                        Label("Einstellungen", systemImage: "gearshape")
+                    }
                 }
             }
         }
@@ -72,7 +88,10 @@ struct TripView: View {
             TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
         }
         .onAppear { consumeStartSuggestionHandoff() }
-        .task { await loadRunningPlan() }
+        .task {
+            await loadRunningPlan()
+            chooseModeOnce()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 consumeStartSuggestionHandoff()
@@ -92,6 +111,32 @@ struct TripView: View {
     @MainActor
     private func loadRunningPlan() async {
         await running.refresh()
+    }
+
+    /// Trip mode as it was before the planner moved in beside it.
+    @ViewBuilder private var captureHalf: some View {
+        if let trip = store.activeTrip {
+            ActiveTripView(trip: trip, store: store, runningPlan: running.plan) { planId in
+                openPlanId = planId
+            }
+        } else {
+            noTripView
+        }
+    }
+
+    /// Which half to show, decided once per appearance of the tab —
+    /// after the running plan is known, because that is one of the two
+    /// things it depends on. Re-deciding on every refresh would move
+    /// the screen under somebody's thumb.
+    @MainActor
+    private func chooseModeOnce() {
+        guard !didChooseMode else { return }
+        didChooseMode = true
+        mode = TripTabMode.initial(
+            tripModeActive: store.isActive,
+            planRunningToday: running.plan != nil,
+            remembered: mode,
+        )
     }
 
     /// Opens the prefilled start sheet when the user chose "Trip starten" on
