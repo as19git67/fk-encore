@@ -643,7 +643,7 @@ nicht, sondern kommen mit ihrer Position in `errors` zurück (Muster:
 
 ```
 POST /meters/petrol-prices/fetch    (meters.manage)
-POST /internal/meters/petrol-prices (Job, täglich 04:30 UTC)
+POST /internal/meters/petrol-prices (Job, täglich 08:00 UTC)
 ```
 
 Die Vergleichsrechnung bewertet jeden Bucket mit dem `petrol_price`, der in

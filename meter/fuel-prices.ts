@@ -87,7 +87,7 @@ schedule({
   name: "meter-petrol-prices",
   description: "Fetch monthly petrol prices from the EU Weekly Oil Bulletin for households with a wallbox meter",
   service: "meter",
-  scheduleLabel: "daily 04:30 UTC",
-  nextFire: dailyAtUtc(4, 30),
+  scheduleLabel: "daily 08:00 UTC",
+  nextFire: dailyAtUtc(8, 0),
   run: () => runPetrolPricesJob(),
 });
