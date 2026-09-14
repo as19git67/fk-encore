@@ -152,7 +152,7 @@ On the host, stop the stack and roll the dataset back to the snapshot:
 
 ```bash
 docker compose down
-sudo zfs rollback -r tank/f4mil@daily-20260413-030000
+sudo zfs rollback -r tank/f4mil@daily-2026-04-13_03-00
 docker compose up -d
 ```
 
@@ -173,7 +173,7 @@ another mechanism) but the database needs to roll back.
    the `restore-` prefix:
 
    ```bash
-   cp /mnt/tank/f4mil/backup/encore-daily-20260413-030000.dump \
+   cp /mnt/tank/f4mil/backup/encore-daily-2026-04-13_03-00.dump \
       /mnt/tank/f4mil/backup/restore-20260414-rollback.dump
    ```
 
@@ -196,14 +196,24 @@ another mechanism) but the database needs to roll back.
 
 `fk-encore-backup.sh` accepts overrides via env vars:
 
-| Env var                   | Default                        | Effect |
-|---------------------------|--------------------------------|--------|
-| `FK_ENCORE_URL`           | `http://localhost:8080`        | Where to reach the app. |
-| `FK_BACKUP_TOKEN_FILE`    | `<script-dir>/backup-token`    | Path to the shared secret. The default is the file the installer writes next to the script. |
-| `ZFS_DATASET`             | `tank/f4mil`                 | Dataset for `zfs snapshot -r`. Override via the cron-job command line. |
-| `LABEL`                   | `daily-<UTC timestamp>`        | Snapshot and dump label. |
-| `CURL_TIMEOUT`            | `30`                           | Per-HTTP-call timeout in seconds. |
-| `SNAPSHOT_RETENTION_DAYS` | `30`                           | After a successful backup, destroy `daily-*` snapshots of `$ZFS_DATASET` whose `creation` timestamp is older than N days. Set `0` to disable. Only labels starting with `daily-` are touched — manual snapshots are preserved. The current run's snapshot is always kept. Prune errors are logged as `WARN` and do not fail the backup. |
+| Env var                            | Default                        | Effect |
+|-------------------------------------|--------------------------------|--------|
+| `FK_ENCORE_URL`                     | `http://localhost:8080`        | Where to reach the app. |
+| `FK_BACKUP_TOKEN_FILE`              | `<script-dir>/backup-token`    | Path to the shared secret. The default is the file the installer writes next to the script. |
+| `ZFS_DATASET`                       | `tank/f4mil`                 | Dataset for `zfs snapshot -r`. Override via the cron-job command line. |
+| `LABEL`                             | `daily-<UTC timestamp, %Y-%m-%d_%H-%M>` | Snapshot and dump label for the daily tier (also the /start·/stop label and the pg_dump filename). |
+| `WEEKLY_SNAPSHOT_DOW`               | `1` (Monday)                   | ISO weekday (1=Monday..7=Sunday, see `date +%u`) on which the extra `weekly-*` snapshot is taken, at the same point in time as the daily one. |
+| `MONTHLY_SNAPSHOT_DOM`              | `1`                             | Day of month (1-28) on which the extra `monthly-*` snapshot is taken. Kept ≤28 so it fires in every month. |
+| `CURL_TIMEOUT`                      | `30`                           | Per-HTTP-call timeout in seconds. |
+| `DAILY_SNAPSHOT_RETENTION_DAYS`     | `14`                           | After a successful backup, destroy `daily-*` snapshots of `$ZFS_DATASET` whose `creation` timestamp is older than N days. |
+| `WEEKLY_SNAPSHOT_RETENTION_DAYS`    | `56` (8 weeks)                 | Same, for `weekly-*` snapshots. |
+| `MONTHLY_SNAPSHOT_RETENTION_DAYS`   | `365` (12 months)              | Same, for `monthly-*` snapshots. |
+
+Set any of the three retention vars to `0` to disable pruning for that tier.
+Only snapshots whose label starts with the matching prefix (`daily-`,
+`weekly-`, `monthly-`) are ever touched — manual snapshots, snapshots of
+another tier, and every snapshot taken by the current run are always
+preserved. Prune errors are logged as `WARN` and do not fail the backup.
 
 Override by editing the cron-job **Command** field in the TrueNAS UI:
 

@@ -152,17 +152,28 @@ Next steps — finish the install by:
        Hide Stderr:   no
        Enabled:       yes
 
-     Optional: add SNAPSHOT_RETENTION_DAYS=<n> before the script path to
-     override the default (30 days). Example — keep 14 days of daily-*
-     snapshots and disable retention with 0:
+     Every run always takes a daily-* snapshot; on top of that it also
+     takes a weekly-* snapshot on WEEKLY_SNAPSHOT_DOW (default 1=Monday)
+     and a monthly-* snapshot on MONTHLY_SNAPSHOT_DOM (default 1st) — all
+     at the same point in time, no extra pg_dump needed. Retention for
+     each tier is tunable independently, defaulting to 14 days / 8 weeks /
+     12 months:
 
-       SNAPSHOT_RETENTION_DAYS=14 ZFS_DATASET=$DATASET $DRIVER_SCRIPT
-       SNAPSHOT_RETENTION_DAYS=0  ZFS_DATASET=$DATASET $DRIVER_SCRIPT
+       DAILY_SNAPSHOT_RETENTION_DAYS=14   ZFS_DATASET=$DATASET $DRIVER_SCRIPT
+       WEEKLY_SNAPSHOT_RETENTION_DAYS=56  ZFS_DATASET=$DATASET $DRIVER_SCRIPT
+       MONTHLY_SNAPSHOT_RETENTION_DAYS=365 ZFS_DATASET=$DATASET $DRIVER_SCRIPT
+
+     Set any of the three to 0 to disable pruning for that tier:
+
+       DAILY_SNAPSHOT_RETENTION_DAYS=0 ZFS_DATASET=$DATASET $DRIVER_SCRIPT
 
      Dump retention (encore-daily-*.dump files in the backup directory)
-     defaults to the same value as SNAPSHOT_RETENTION_DAYS, so overriding
-     the snapshot value tunes both. Override DUMP_RETENTION_DAYS=<n> to
-     decouple them, or DUMP_DIR=<path> to point at a non-default location.
+     defaults to the same value as DAILY_SNAPSHOT_RETENTION_DAYS, so
+     overriding it tunes both (there is only ever one pg_dump per run,
+     tied to the daily label — weekly/monthly are just additional ZFS
+     snapshots of the same point in time). Override DUMP_RETENTION_DAYS=<n>
+     to decouple them, or DUMP_DIR=<path> to point at a non-default
+     location.
 
   3. Verify end-to-end (run as root on the host):
 
