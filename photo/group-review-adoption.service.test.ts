@@ -13,7 +13,12 @@ import {
   photos,
   users,
 } from "../db/schema";
-import { revertAdoptionForUser, runAdoptionForUser } from "./group-review-adoption.service";
+import {
+  revertAdoptionForUser,
+  runAdoptionForUser,
+  scheduleAdoptionForPeers,
+  setAdoptionDefaultLogic,
+} from "./group-review-adoption.service";
 import { updatePhotoCurationLogic } from "./photo.service";
 
 async function makeUser(email: string, adopt = true): Promise<number> {
@@ -359,5 +364,58 @@ describe("consensus counters", () => {
     );
     // Two users hide the photo now, but only one of them decided so.
     expect(rows.length).toBe(1);
+  });
+});
+
+describe("triggers and settings", () => {
+  it("fans a finished review out to the peers who share the photos", async () => {
+    const h = await household();
+    await setCuration(h.reviewer, h.p2, "hidden");
+    await makeGroup(h.reviewer, [h.p1, h.p2, h.p3], { reviewedBy: "user" });
+
+    await scheduleAdoptionForPeers(h.reviewer, [h.p1, h.p2, h.p3]);
+
+    expect((await groupOf(h.passiveGroup))?.review_source).toBe("adopted");
+    expect((await curationOf(h.passive, h.p2))?.source).toBe("adopted");
+  });
+
+  it("does not schedule the actor's own library", async () => {
+    // The reviewer's own group stays theirs — the fan-out is for the others.
+    const h = await household();
+    const ownOpenGroup = await makeGroup(h.reviewer, [h.p1, h.p2, h.p3]);
+    await setCuration(h.passive, h.p2, "hidden");
+    await makeGroup(h.passive, [h.p1, h.p2, h.p3], { reviewedBy: "user" });
+
+    await scheduleAdoptionForPeers(h.reviewer, [h.p1, h.p2, h.p3]);
+
+    // The passive user's review does reach the reviewer (they are a peer of
+    // each other), but only because the fan-out excluded the actor and ran
+    // for everyone else — here that set does not contain the reviewer.
+    expect((await groupOf(ownOpenGroup))?.reviewed_at).toBeNull();
+  });
+
+  it("switching the global default off gives the adopted stacks back", async () => {
+    const h = await household();
+    await setCuration(h.reviewer, h.p2, "hidden");
+    await makeGroup(h.reviewer, [h.p1, h.p2, h.p3], { reviewedBy: "user" });
+    await runAdoptionForUser(h.passive);
+
+    await setAdoptionDefaultLogic(h.passive, false);
+
+    expect(await curationOf(h.passive, h.p2)).toBeUndefined();
+    const g = await groupOf(h.passiveGroup);
+    expect(g?.reviewed_at).toBeNull();
+    expect(g?.review_source).toBeNull();
+  });
+
+  it("switching the global default back on closes what the peers answered", async () => {
+    const h = await household({ adopt: false });
+    await setCuration(h.reviewer, h.p2, "hidden");
+    await makeGroup(h.reviewer, [h.p1, h.p2, h.p3], { reviewedBy: "user" });
+
+    const res = await setAdoptionDefaultLogic(h.passive, true);
+
+    expect(res.enabled).toBe(true);
+    expect((await groupOf(h.passiveGroup))?.review_source).toBe("adopted");
   });
 });

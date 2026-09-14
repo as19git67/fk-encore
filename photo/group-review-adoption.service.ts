@@ -367,3 +367,80 @@ export function scheduleAdoption(userId: number): Promise<void> {
   adoptionRunning.set(userId, run);
   return run;
 }
+
+/**
+ * Schedule adoption for everybody who might inherit a review the actor just
+ * made: the peers who share an album with them for one of these photos.
+ *
+ * Resolved here rather than through `getUsersWithPhotoAccess` so this module
+ * stays free of a photo.service import — the review paths that trigger it
+ * live there and in group-auto-pick.service.
+ */
+export async function scheduleAdoptionForPeers(
+  actorUserId: number,
+  photoIds: number[],
+): Promise<void> {
+  if (photoIds.length === 0) return;
+  const idArray = sql`ARRAY[${sql.join(photoIds.map((id) => sql`${id}`), sql`, `)}]::int[]`;
+  const rows = (await db.execute(sql`
+    SELECT DISTINCT u.user_id FROM (
+      SELECT p.user_id FROM photos p WHERE p.id = ANY(${idArray})
+      UNION
+      SELECT a.user_id
+      FROM albums a
+      INNER JOIN album_photos ap ON ap.album_id = a.id
+      WHERE ap.photo_id = ANY(${idArray})
+      UNION
+      SELECT s.user_id
+      FROM album_shares s
+      INNER JOIN album_photos ap ON ap.album_id = s.album_id
+      WHERE ap.photo_id = ANY(${idArray})
+    ) u
+    WHERE u.user_id <> ${actorUserId}
+  `)).rows as Array<{ user_id: number }>;
+
+  // Every caller `void`s this function, so awaiting the scheduled runs here
+  // costs the review request nothing and makes the fan-out deterministic for
+  // tests. Failures are logged, never propagated: a peer's default must not
+  // make the actor's own review fail.
+  await Promise.all(rows.map((r) =>
+    scheduleAdoption(r.user_id).catch((err) => {
+      console.error(`[group-adoption] scheduling failed for user ${r.user_id}:`, err);
+    }),
+  ));
+}
+
+export interface GroupReviewAdoptionSettings {
+  enabled: boolean;
+}
+
+/** The user's global default, as shown in the photo settings. */
+export async function getAdoptionDefaultLogic(userId: number): Promise<GroupReviewAdoptionSettings> {
+  const row = await dbFirst<{ adopt_group_reviews: boolean }>(
+    db.select({ adopt_group_reviews: users.adopt_group_reviews })
+      .from(users)
+      .where(eq(users.id, userId)),
+  );
+  return { enabled: row?.adopt_group_reviews ?? true };
+}
+
+/**
+ * Flip the global default and apply it straight away: switching it off
+ * gives the adopted stacks and their photos back, switching it on closes
+ * the groups the household has already answered. Albums with an explicit
+ * override keep deciding for their own groups either way.
+ */
+export async function setAdoptionDefaultLogic(
+  userId: number,
+  enabled: boolean,
+): Promise<GroupReviewAdoptionSettings> {
+  await dbExec(
+    db.update(users).set({ adopt_group_reviews: enabled }).where(eq(users.id, userId)),
+  );
+  // Revert first in both directions: an album override may still switch a
+  // group off even while the global default is on, and only a fresh pass
+  // can tell which groups those are.
+  await revertAdoptionForUser(userId);
+  await runAdoptionForUser(userId);
+  return { enabled };
+}

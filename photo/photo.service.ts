@@ -84,6 +84,7 @@ function triggerWorkers(): void {
     .catch((err) => console.error("[photo.service] triggerWorkers failed:", err));
 }
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
+import { revertAdoptionForUser, runAdoptionForUser, scheduleAdoptionForPeers } from "./group-review-adoption.service";
 import * as contentFeed from "../feed/content-feed.service";
 import type { IncomingMessage } from "http";
 import { pipeline } from "stream/promises";
@@ -3784,6 +3785,12 @@ export async function updatePhotoCurationLogic(
             .set({ reviewed_at: new Date().toISOString(), review_source: "user" })
             .where(eq(photoGroups.id, group_id))
         );
+        const resolvedMembers = await dbAll<{ photo_id: number }>(
+          db.select({ photo_id: photoGroupMembers.photo_id })
+            .from(photoGroupMembers)
+            .where(eq(photoGroupMembers.group_id, group_id))
+        );
+        void scheduleAdoptionForPeers(userId, resolvedMembers.map((m) => m.photo_id));
       }
     }
   }
@@ -4476,7 +4483,7 @@ export async function getAlbumLogic(
   if (!settings) {
     // Create default settings if they don't exist
     await dbExec(db.insert(albumUserSettings).values({ album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", cover_photo_id: null }));
-    settings = { album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", view_config: null, cover_photo_id: undefined };
+    settings = { album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", view_config: null, cover_photo_id: undefined, group_review_adoption: null };
   }
 
   const viewConfig = resolveViewConfig(settings.active_view, settings.view_config as ViewConfig | null, settings.hide_mode);
@@ -4552,6 +4559,7 @@ export async function getAlbumLogic(
       active_view: settings.active_view as ActiveView,
       view_config: settings.view_config as ViewConfig | null,
       cover_photo_id: settings.cover_photo_id ?? undefined,
+      group_review_adoption: (settings.group_review_adoption as "on" | "off" | null) ?? null,
     },
   };
 
@@ -4757,6 +4765,7 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
   if (req.hideMode) values.hide_mode = req.hideMode;
   if (req.activeView) values.active_view = req.activeView;
   if (req.viewConfig !== undefined) values.view_config = req.viewConfig;
+  if (req.groupReviewAdoption !== undefined) values.group_review_adoption = req.groupReviewAdoption;
   if (req.coverPhotoId !== undefined) {
     if (req.coverPhotoId === null) {
       values.cover_photo_id = null;
@@ -4793,6 +4802,33 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
 
   if (!updated) throw new Error("Settings not found");
 
+  if (req.groupReviewAdoption !== undefined) {
+    // Switching the album's group-review adoption reshapes what the user
+    // sees, so apply it now instead of waiting for the next peer review:
+    // "off" gives the adopted stacks and their photos back, "on" (or back
+    // to inheriting an enabled default) closes what the peers already
+    // answered. Best-effort — the setting itself is saved either way.
+    void (async () => {
+      try {
+        const memberGroupIds = await dbAll<{ id: number }>(
+          db.selectDistinct({ id: photoGroups.id })
+            .from(photoGroups)
+            .innerJoin(photoGroupMembers, eq(photoGroupMembers.group_id, photoGroups.id))
+            .innerJoin(albumPhotos, eq(albumPhotos.photo_id, photoGroupMembers.photo_id))
+            .where(and(
+              eq(photoGroups.user_id, userId),
+              eq(albumPhotos.album_id, req.albumId),
+              eq(photoGroups.review_source, "adopted"),
+            )),
+        );
+        await revertAdoptionForUser(userId, memberGroupIds.map((g) => g.id));
+        await runAdoptionForUser(userId);
+      } catch (err) {
+        console.error(`[group-adoption] applying album setting failed for user ${userId}:`, err);
+      }
+    })();
+  }
+
   return {
     album_id: updated.album_id,
     user_id: updated.user_id,
@@ -4800,6 +4836,7 @@ export async function updateAlbumUserSettingsLogic(userId: number, req: UpdateAl
     active_view: updated.active_view as ActiveView,
     view_config: updated.view_config as ViewConfig | null,
     cover_photo_id: updated.cover_photo_id ?? undefined,
+    group_review_adoption: (updated.group_review_adoption as "on" | "off" | null) ?? null,
   };
 }
 
@@ -6687,6 +6724,14 @@ export function scheduleRegroup(userId: number): Promise<void> {
           await new Promise((r) => setTimeout(r, REGROUP_DEBOUNCE_MS));
         }
       } while (groupingPending.has(userId));
+      // Re-grouping replaced the user's unreviewed groups, so a peer review
+      // that already answers one of them has to be applied again before the
+      // views refresh (docs/group-review-adoption.md).
+      try {
+        await runAdoptionForUser(userId);
+      } catch (err) {
+        console.error(`[group-adoption] post-regroup pass failed for user ${userId}:`, err);
+      }
       // Groups may have changed — tell the user's open views to refresh so new
       // review badges become tappable without a remount.
       notifyUserPhotosScanned(userId);
@@ -7124,7 +7169,7 @@ export async function countUserGroupStats(userId: number): Promise<FindGroupsRes
 export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsResponse> {
   const groups = await dbAll<{
     id: number; user_id: number; cover_photo_id: number | null;
-    reviewed_at: string | null; created_at: string | null;
+    reviewed_at: string | null; review_source: string | null; created_at: string | null;
     ai_picked_photo_ids: number[] | null;
     ai_picked_confidence: string | null;
     ai_picked_at: string | null;
@@ -7135,6 +7180,7 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
         user_id: photoGroups.user_id,
         cover_photo_id: photoGroups.cover_photo_id,
         reviewed_at: photoGroups.reviewed_at,
+        review_source: photoGroups.review_source,
         created_at: photoGroups.created_at,
         ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
         ai_picked_confidence: photoGroups.ai_picked_confidence,
@@ -7159,6 +7205,7 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
       user_id: g.user_id,
       cover_photo_id: g.cover_photo_id ?? undefined,
       reviewed_at: g.reviewed_at ?? undefined,
+      review_source: (g.review_source as "user" | "adopted" | null) ?? undefined,
       created_at: g.created_at ?? "",
       member_count: members.length,
       photo_ids: members.map((m) => m.photo_id),
@@ -7174,7 +7221,7 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
 export async function getNextUnreviewedGroupLogic(userId: number): Promise<PhotoGroup | null> {
   const group = await dbFirst<{
     id: number; user_id: number; cover_photo_id: number | null;
-    reviewed_at: string | null; created_at: string | null;
+    reviewed_at: string | null; review_source: string | null; created_at: string | null;
     ai_picked_photo_ids: number[] | null;
     ai_picked_confidence: string | null;
     ai_picked_at: string | null;
@@ -7185,6 +7232,7 @@ export async function getNextUnreviewedGroupLogic(userId: number): Promise<Photo
         user_id: photoGroups.user_id,
         cover_photo_id: photoGroups.cover_photo_id,
         reviewed_at: photoGroups.reviewed_at,
+        review_source: photoGroups.review_source,
         created_at: photoGroups.created_at,
         ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
         ai_picked_confidence: photoGroups.ai_picked_confidence,
@@ -7260,6 +7308,9 @@ export async function reviewPhotoGroupLogic(
             .set({ reviewed_at: new Date().toISOString(), review_source: "user" })
             .where(eq(photoGroups.id, candidate.id))
         );
+        // The people who share these photos may now inherit this review as
+        // their default (docs/group-review-adoption.md).
+        void scheduleAdoptionForPeers(userId, photoIds);
         return { success: true };
       }
     }
@@ -7275,6 +7326,13 @@ export async function reviewPhotoGroupLogic(
       .set({ reviewed_at: new Date().toISOString(), review_source: "user" })
       .where(eq(photoGroups.id, groupId))
   );
+
+  const reviewedMembers = await dbAll<{ photo_id: number }>(
+    db.select({ photo_id: photoGroupMembers.photo_id })
+      .from(photoGroupMembers)
+      .where(eq(photoGroupMembers.group_id, groupId))
+  );
+  void scheduleAdoptionForPeers(userId, reviewedMembers.map((m) => m.photo_id));
 
   return { success: true };
 }

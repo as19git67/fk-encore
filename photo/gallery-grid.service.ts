@@ -530,6 +530,7 @@ async function loadGroupInfoForPhotos(
     group_id: number;
     is_cover: boolean;
     reviewed: boolean;
+    review_source: string | null;
     ai_picked_photo_ids: number[] | null;
     ai_picked_confidence: string | null;
   }>(
@@ -539,6 +540,7 @@ async function loadGroupInfoForPhotos(
         group_id: photoGroups.id,
         is_cover: sql<boolean>`(${photoGroups.cover_photo_id} = ${photoGroupMembers.photo_id})`,
         reviewed: sql<boolean>`(${photoGroups.reviewed_at} IS NOT NULL)`,
+        review_source: photoGroups.review_source,
         ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
         ai_picked_confidence: photoGroups.ai_picked_confidence,
       })
@@ -600,6 +602,7 @@ async function loadGroupInfoForPhotos(
       member_count: visibleMembers,
       reviewed: c.reviewed,
     };
+    if (c.review_source === "adopted") entry.adopted = true;
     if (c.ai_picked_photo_ids && c.ai_picked_photo_ids.length > 0) {
       entry.ai_picked = c.ai_picked_photo_ids.includes(c.photo_id);
       if (c.ai_picked_confidence === "high" || c.ai_picked_confidence === "medium" || c.ai_picked_confidence === "low") {

@@ -25,6 +25,7 @@
 import { and, eq, inArray, isNull, isNotNull, ne, or, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
+import { scheduleAdoptionForPeers } from "./group-review-adoption.service";
 import {
   aiPickUserWeights,
   albumPhotos,
@@ -543,6 +544,10 @@ export async function acceptAiPickLogic(
       .where(eq(photoGroups.id, groupId)),
   );
 
+  // Accepting a suggestion is a review like any other, so the people who
+  // share these photos may inherit it (docs/group-review-adoption.md).
+  void scheduleAdoptionForPeers(userId, members.map((m) => m.photo_id));
+
   return { success: true, hidden_count: toHide.length };
 }
 
@@ -593,6 +598,7 @@ export async function bulkAcceptHighConfidencePicksLogic(
 ): Promise<BulkAcceptResult> {
   let totalAccepted = 0;
   let totalHidden = 0;
+  const acceptedGroupIds: number[] = [];
   // Hard cap on iterations as a safety net: with chunk size 500 and the
   // largest plausible rollout (~50k groups), 200 iterations is ample
   // while still preventing a runaway loop if a future bug accidentally
@@ -638,16 +644,29 @@ export async function bulkAcceptHighConfidencePicksLogic(
       SELECT
         (SELECT COUNT(*) FROM reviewed)::int AS groups_accepted,
         (SELECT COUNT(*) FROM to_hide)::int AS hidden_count,
-        (SELECT COUNT(*) FROM inserted)::int AS rows_written
+        (SELECT COUNT(*) FROM inserted)::int AS rows_written,
+        (SELECT COALESCE(array_agg(id), '{}') FROM reviewed) AS reviewed_ids
     `);
     const row = result.rows[0] as {
       groups_accepted: number;
       hidden_count: number;
       rows_written: number;
+      reviewed_ids: number[] | null;
     };
     if (!row || row.groups_accepted === 0) break;
     totalAccepted += row.groups_accepted;
     totalHidden += row.hidden_count;
+    for (const id of row.reviewed_ids ?? []) acceptedGroupIds.push(id);
+  }
+  if (acceptedGroupIds.length > 0) {
+    // The bulk pass closes many groups at once; the peers who share those
+    // photos inherit the lot (docs/group-review-adoption.md).
+    const touched = await dbAll<{ photo_id: number }>(
+      db.select({ photo_id: photoGroupMembers.photo_id })
+        .from(photoGroupMembers)
+        .where(inArray(photoGroupMembers.group_id, acceptedGroupIds)),
+    );
+    void scheduleAdoptionForPeers(userId, Array.from(new Set(touched.map((t) => t.photo_id))));
   }
   return { groups_accepted: totalAccepted, hidden_count: totalHidden };
 }
@@ -780,6 +799,8 @@ export async function acceptPeerConsensusLogic(
       .set({ reviewed_at: nowIso, review_source: "user" })
       .where(eq(photoGroups.id, groupId)),
   );
+
+  void scheduleAdoptionForPeers(userId, memberIds);
 
   return {
     success: true,

@@ -6,6 +6,7 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { writeMaintenanceResponseIfActive } from "../backup/maintenance";
 import * as service from "./photo.service";
+import * as adoption from "./group-review-adoption.service";
 import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
@@ -1958,6 +1959,38 @@ export const findPhotoGroups = api(
     // follow-up) before resolving.
     await service.scheduleRegroup(userId);
     return await service.countUserGroupStats(userId);
+  }
+);
+
+/**
+ * The user's global default for adopting other people's group reviews.
+ */
+export const getGroupReviewAdoption = api(
+  { expose: true, method: "GET", path: "/photos/groups/adoption", auth: true },
+  async (): Promise<adoption.GroupReviewAdoptionSettings> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await adoption.getAdoptionDefaultLogic(userId);
+  }
+);
+
+/**
+ * Turn adoption of other people's group reviews on or off globally. The
+ * change is applied immediately: off gives the adopted stacks back, on
+ * closes the groups the household has already answered.
+ */
+export const setGroupReviewAdoption = api(
+  { expose: true, method: "PATCH", path: "/photos/groups/adoption", auth: true },
+  async ({ enabled }: { enabled: boolean }): Promise<adoption.GroupReviewAdoptionSettings> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    // Same gate as marking a group reviewed: the toggle decides whether
+    // photos get hidden on the user's behalf.
+    requirePermission(authData, "photos.delete");
+    return await adoption.setAdoptionDefaultLogic(userId, enabled);
   }
 );
 
