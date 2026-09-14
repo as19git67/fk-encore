@@ -12,6 +12,7 @@ final class TripIdeaClustersTests: XCTestCase {
     private func idea(_ id: Int, lat: Double, lon: Double) -> TripIdea {
         TripIdea(
             id: id,
+            ownerId: 1,
             osmRef: "node:\(id)",
             name: "Ort \(id)",
             title: nil,
