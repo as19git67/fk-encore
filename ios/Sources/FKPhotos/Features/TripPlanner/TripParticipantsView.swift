@@ -17,6 +17,8 @@ struct TripParticipantsView: View {
     @State private var confirmLeaving = false
     /// Somebody about to be removed — asked first, by name.
     @State private var removing: TripParticipant?
+    /// The participant about to become the organiser (§6.2).
+    @State private var handingOverTo: TripParticipant?
 
     init(planId: Int) {
         _model = State(initialValue: TripParticipantsViewModel(planId: planId))
@@ -117,6 +119,17 @@ struct TripParticipantsView: View {
             Text("\(person.displayName) sieht die Reise danach nicht mehr und kann jederzeit "
                  + "wieder eingeladen werden.")
         }
+        .confirmationDialog("Rolle übergeben?", isPresented: Binding(
+            get: { handingOverTo != nil }, set: { if !$0 { handingOverTo = nil } }),
+            titleVisibility: .visible, presenting: handingOverTo) { person in
+            Button("\(person.displayName) organisiert ab jetzt") {
+                Task { await model.handOver(to: person) }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { person in
+            Text("\(person.displayName) ändert danach den Rahmen und lädt ein. Du planst "
+                 + "weiter mit — wie alle anderen.")
+        }
         .confirmationDialog("Reise verlassen?", isPresented: $confirmLeaving,
                             titleVisibility: .visible) {
             Button("Verlassen", role: .destructive) {
@@ -153,6 +166,16 @@ struct TripParticipantsView: View {
                     Label(person.userId == model.me ? "Verlassen" : "Entfernen",
                           systemImage: "person.badge.minus")
                 }
+            }
+            // "Die Rolle ist übertragbar" (§6.2): a swap, so the trip
+            // always has exactly one person who can change its frame.
+            if model.youOrganise, !person.isOrganiser {
+                Button {
+                    handingOverTo = person
+                } label: {
+                    Label("Rolle übergeben", systemImage: "arrow.left.arrow.right")
+                }
+                .tint(.indigo)
             }
         }
     }
@@ -252,6 +275,20 @@ final class TripParticipantsViewModel {
             lastInvitation = response.added
                 ? "\(user.displayName) plant jetzt mit."
                 : "\(user.displayName) ist schon dabei."
+            errorMessage = nil
+            await load()
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    func handOver(to person: TripParticipant) async {
+        struct Body: Encodable { let userId: Int }
+        struct Response: Decodable { let handedOver: Bool }
+        do {
+            let _: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/participants/hand-over",
+                body: Body(userId: person.userId))
             errorMessage = nil
             await load()
         } catch {
