@@ -40,6 +40,10 @@ struct TripDayAnchorSheet: View {
 
     @State private var finder = TripPlaceFinderModel()
     @State private var place: TripPlace?
+    /// Searching for a replacement while the current place stays put.
+    /// "Ändern" used to clear it, so a mis-tap while correcting the
+    /// return time meant searching the place again.
+    @State private var changingPlace = false
     @State private var reach = TripOutingReach.place
     @State private var saysDeparture = false
     @State private var saysReturn = false
@@ -69,17 +73,22 @@ struct TripDayAnchorSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    if let place {
+                    if let place, !changingPlace {
                         HStack {
                             Label(place.name, systemImage: "mappin.circle.fill").lineLimit(2)
                             Spacer()
-                            Button("Ändern") { self.place = nil }
+                            Button("Ändern") { changingPlace = true }
                                 .buttonStyle(.borderless)
                                 .font(.footnote)
                         }
                     } else {
                         TripPlaceFinderRows(model: finder, picked: nil) { picked in
                             place = picked
+                            changingPlace = false
+                        }
+                        if place != nil {
+                            Button("Doch behalten") { changingPlace = false }
+                                .font(.footnote)
                         }
                     }
                 } header: {

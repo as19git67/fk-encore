@@ -9,6 +9,13 @@ struct TripPlansListView: View {
     @State private var plans: [TripPlanSummary] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    /// A delete or leave that the server refused. An alert rather than
+    /// the list's error state: the list is still perfectly good, and
+    /// swapping it for a full-screen error took the way back with it.
+    @State private var actionError: String?
+    /// The trip the user is about to leave (a companion's "delete").
+    @State private var leaving: TripPlanSummary?
+    @Environment(AuthManager.self) private var authManager
     @State private var isCreating = false
     /// Set to the id of a plan just created, so the list opens it
     /// straight away — nobody makes a trip in order to look at a list.
@@ -76,6 +83,23 @@ struct TripPlansListView: View {
         .navigationDestination(item: $openPlanId) { planId in
             TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
         }
+        .alert("Das ging nicht", isPresented: Binding(
+            get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
+        }
+        .alert("Reise verlassen?", isPresented: Binding(
+            get: { leaving != nil }, set: { if !$0 { leaving = nil } }),
+               presenting: leaving) { plan in
+            Button("Verlassen", role: .destructive) {
+                Task { await leave(plan) }
+            }
+            Button("Abbrechen", role: .cancel) { leaving = nil }
+        } message: { plan in
+            Text("„\(plan.displayTitle)“ bleibt für alle anderen bestehen. Du siehst sie "
+                 + "danach nicht mehr.")
+        }
         .alert("Reise löschen?", isPresented: Binding(
             get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                presenting: deleting) { plan in
@@ -84,7 +108,7 @@ struct TripPlansListView: View {
             }
             Button("Abbrechen", role: .cancel) { deleting = nil }
         } message: { plan in
-            Text("„\(plan.displayTitle)“ wird mit allen Tagen, Spots und dem Vorrat gelöscht. "
+            Text("„\(plan.displayTitle)“ wird mit allen Tagen, Stopps und Kandidaten gelöscht. "
                  + "Auch für alle, mit denen die Reise geteilt ist.")
         }
         .task {
@@ -144,14 +168,24 @@ struct TripPlansListView: View {
                     row(plan)
                 }
                 .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        // Asked first, and by name. Everything else in
-                        // the planner is reversible; this is the one
-                        // thing that is not, and it takes the trip away
-                        // from everybody it was shared with.
-                        deleting = plan
-                    } label: {
-                        Label("Löschen", systemImage: "trash")
+                    if plan.organises {
+                        Button(role: .destructive) {
+                            // Asked first, and by name. Everything else in
+                            // the planner is reversible; this is the one
+                            // thing that is not, and it takes the trip away
+                            // from everybody it was shared with.
+                            deleting = plan
+                        } label: {
+                            Label("Löschen", systemImage: "trash")
+                        }
+                    } else {
+                        // A companion cannot delete, and the server said
+                        // so every time. What they can do is leave.
+                        Button(role: .destructive) {
+                            leaving = plan
+                        } label: {
+                            Label("Verlassen", systemImage: "person.badge.minus")
+                        }
                     }
                 }
             }
@@ -241,9 +275,27 @@ struct TripPlansListView: View {
             let _: Response = try await APIClient.shared.delete(
                 "/trip-planner/plans/\(plan.id)")
             plans.removeAll { $0.id == plan.id }
-            errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            actionError = error.localizedDescription
+        }
+    }
+
+    /// Leave a shared trip (§6.2): the same call the participants
+    /// screen makes, for the row you are looking at.
+    private func leave(_ plan: TripPlanSummary) async {
+        leaving = nil
+        guard let me = authManager.currentUser?.id else {
+            actionError = "Ohne Anmeldung lässt sich die Reise nicht verlassen."
+            return
+        }
+        struct Body: Encodable { let userId: Int }
+        struct Response: Decodable { let removed: Bool }
+        do {
+            let _: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(plan.id)/participants/remove", body: Body(userId: me))
+            plans.removeAll { $0.id == plan.id }
+        } catch {
+            actionError = error.localizedDescription
         }
     }
 
@@ -274,6 +326,12 @@ struct TripPlanSummary: Codable, Identifiable, Sendable {
     let dayCount: Int
     let startDate: String?
     let updatedAt: String
+    /// Whether this user created the trip. Optional so a list from an
+    /// older server still decodes; then everybody is treated as the
+    /// organiser, which is what the screen did before.
+    let youOrganise: Bool?
+
+    var organises: Bool { youOrganise ?? true }
 
     /// Falls back to the route, then to a plain label. Never invents a
     /// name for a trip nobody named (§15.3).

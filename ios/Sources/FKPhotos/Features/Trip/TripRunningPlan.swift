@@ -27,6 +27,21 @@ final class TripRunningPlan {
 
     private init() {}
 
+    /// Is the traveller on a trip right now, by either reckoning?
+    ///
+    /// Two halves of the app used to answer this separately: the day
+    /// screen asked trip mode (the photo feature) and the tab bar asked
+    /// the dates. Standing in the planned city on the planned day, with
+    /// no photo album started, the day screen therefore offered "show
+    /// on the map" instead of a route. One answer, from the same rule
+    /// the launch route uses.
+    var isTravelling: Bool {
+        TripLaunchRoute.opensOnTrip(
+            tripModeActive: TripStore.shared.isActive,
+            planRunningToday: plan != nil,
+        )
+    }
+
     func refresh() async {
         do {
             let response: ListTripPlansResponse =

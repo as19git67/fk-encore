@@ -12,6 +12,9 @@ import SwiftUI
 /// distinction it draws is the one that exists: who organises.
 struct TripParticipantsView: View {
     @State private var model: TripParticipantsViewModel
+    @Environment(AuthManager.self) private var authManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmLeaving = false
 
     init(planId: Int) {
         _model = State(initialValue: TripParticipantsViewModel(planId: planId))
@@ -52,6 +55,22 @@ struct TripParticipantsView: View {
                 }
             }
 
+            if let me = model.participants.first(where: { $0.userId == model.me }),
+               !me.isOrganiser {
+                // Leaving is a button, not a swipe nobody finds. The
+                // plan-list delete dialog sends people here to do it.
+                Section {
+                    Button(role: .destructive) {
+                        confirmLeaving = true
+                    } label: {
+                        Label("Reise verlassen", systemImage: "person.badge.minus")
+                    }
+                } footer: {
+                    Text("Die Reise bleibt für alle anderen bestehen. Du siehst sie danach "
+                         + "nicht mehr.")
+                }
+            }
+
             if let errorMessage = model.errorMessage {
                 Section {
                     Text(errorMessage).font(.footnote).foregroundStyle(.red)
@@ -60,8 +79,23 @@ struct TripParticipantsView: View {
         }
         .navigationTitle("Wer plant mit")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await model.load() }
+        .task {
+            model.me = authManager.currentUser?.id
+            await model.load()
+        }
         .refreshable { await model.load() }
+        .confirmationDialog("Reise verlassen?", isPresented: $confirmLeaving,
+                            titleVisibility: .visible) {
+            Button("Verlassen", role: .destructive) {
+                if let me = model.participants.first(where: { $0.userId == model.me }) {
+                    Task {
+                        await model.remove(me)
+                        if model.errorMessage == nil { dismiss() }
+                    }
+                }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        }
     }
 
     @ViewBuilder
@@ -120,9 +154,11 @@ final class TripParticipantsViewModel {
     var email = ""
     var errorMessage: String?
 
-    /// Who is looking. Needed only to label "Verlassen" rather than
-    /// "Entfernen" on your own row.
-    private(set) var me: Int?
+    /// Who is looking — the signed-in user, handed in by the screen.
+    /// Used to label "Verlassen" rather than "Entfernen" on your own
+    /// row and to offer leaving at all. It used to be derived from the
+    /// organiser flag, which left every companion without a way out.
+    var me: Int?
 
     private let planId: Int
 
@@ -136,7 +172,6 @@ final class TripParticipantsViewModel {
                 .get("/trip-planner/plans/\(planId)/participants")
             participants = response.participants
             youOrganise = response.youOrganise
-            if youOrganise { me = participants.first(where: \.isOrganiser)?.userId }
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

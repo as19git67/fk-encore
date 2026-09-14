@@ -96,7 +96,7 @@ public final class TripAutoStartMonitor {
             identifier: dismissActionId, title: "Nicht jetzt", options: []
         )
         let neverHere = UNNotificationAction(
-            identifier: neverHereActionId, title: "Für diesen Ort nicht mehr fragen",
+            identifier: neverHereActionId, title: "In dieser Gegend nicht mehr fragen",
             options: [.destructive]
         )
         return UNNotificationCategory(

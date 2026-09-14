@@ -142,6 +142,19 @@ describe("what a companion may do", () => {
     await expect(getTripPlan({ planId: plan.id })).resolves.toBeTruthy();
   });
 
+  it("is told, in the list, that they are not the organiser", async () => {
+    // The app offers "löschen" to the organiser and "verlassen" to a
+    // companion. Without this flag it offered a delete swipe that the
+    // server then refused.
+    const plan = await sharedPlan();
+    const mine = (await listTripPlans()).plans.find((p) => p.id === plan.id);
+    expect(mine?.youOrganise).toBe(true);
+
+    actAs(companionId);
+    const theirs = (await listTripPlans()).plans.find((p) => p.id === plan.id);
+    expect(theirs?.youOrganise).toBe(false);
+  });
+
   it("may contribute a find — that is the point of sharing (§6.2)", async () => {
     const plan = await sharedPlan();
     actAs(companionId);
