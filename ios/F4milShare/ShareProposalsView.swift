@@ -114,7 +114,7 @@ struct ShareProposalsView: View {
                         Text("Wird \u{00FC}bernommen\u{2026}")
                     }
                 } else {
-                    Label("In den Vorrat", systemImage: "plus.circle")
+                    Label("Zu den Kandidaten", systemImage: "plus.circle")
                 }
             }
             .disabled(!isReady(proposal) || addingId != nil)
@@ -153,7 +153,7 @@ struct ShareProposalsView: View {
             )
             addedOutcome[proposal.id] = merged
                 ? "mit einem vorhandenen Eintrag zusammengef\u{00FC}hrt"
-                : "im Vorrat"
+                : "bei den Kandidaten"
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

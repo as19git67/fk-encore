@@ -57,9 +57,9 @@ struct ShareIdeaCollection: Decodable, Identifiable {
     var id: Int { ownerId }
 
     var label: String {
-        if own { return "Mein Vorrat" }
-        guard let ownerName, !ownerName.isEmpty else { return "Geteilter Vorrat" }
-        return "Vorrat von \(ownerName)"
+        if own { return "Meine Ideen" }
+        guard let ownerName, !ownerName.isEmpty else { return "Geteilte Ideen" }
+        return "Ideen von \(ownerName)"
     }
 }
 
