@@ -237,3 +237,11 @@ Nachgezogen nach der Nachrechnung des Energie-Blocks von Hand:
     den Summen des Fensters, nicht aus dem Mittel der Monatsprozente, und der
     Trend liegt auf der Kalenderachse. Hinter jedem Wert steht seine
     Bezugsgröße (`kWh / Monat`, `€ / 12 Monate`).
+
+11. **Benzinpreise automatisch**: Die datierte Annahme `petrol_price` wird aus
+    dem EU Weekly Oil Bulletin gefüllt (Monatsmittel Euro-Super 95 inkl.
+    Steuern, Bundesdurchschnitt), ab dem ersten Monat mit Wallbox-Ablesung.
+    Damit wird jeder Bucket mit dem Preis seiner eigenen Monate bewertet,
+    ohne dass jemand Jahre von Werten von Hand pflegt. Vorhandene Zeilen
+    bleiben stehen — der Landesdurchschnitt ist eine Modellannahme, nicht der
+    Preis an der eigenen Tankstelle.
