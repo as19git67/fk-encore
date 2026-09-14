@@ -69,6 +69,7 @@ final class TripSpotDetailTests: XCTestCase {
         localName: String? = nil,
         wikipediaUrl: String? = nil,
         photoStop: Bool? = nil,
+        reasons: [String]? = nil,
     ) -> TripStop {
         TripStop(
             rowId: 7,
@@ -87,6 +88,7 @@ final class TripSpotDetailTests: XCTestCase {
             localName: localName,
             wikipediaUrl: wikipediaUrl,
             photoStop: photoStop,
+            reasons: reasons,
         )
     }
 
@@ -123,9 +125,15 @@ final class TripSpotDetailTests: XCTestCase {
         XCTAssertEqual(detail.sourceUrl, "https://beispiel.test/zehn-cafes")
     }
 
-    func testAPlannedStopClaimsNoReasonsItNoLongerHas() {
-        // The scoring reasons lived on the pool entry. An empty section
-        // is honest; a made-up one is not (§10.4).
+    func testAPlannedStopBringsTheReasonsItWasPlacedWith() {
+        // The server copies them off the pool entry on placement (§8.3),
+        // so the question the header promises has an answer here too.
+        let detail = TripSpotDetail(stop(reasons: ["hat einen Wikipedia-Artikel"]))
+        XCTAssertEqual(detail.reasons, ["hat einen Wikipedia-Artikel"])
+    }
+
+    func testAStopFromAnOlderServerClaimsNoReasonsItDoesNotHave() {
+        // An empty section is honest; a made-up one is not (§10.4).
         XCTAssertEqual(TripSpotDetail(stop()).reasons, [])
     }
 

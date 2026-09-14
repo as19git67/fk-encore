@@ -420,11 +420,11 @@ struct TripSpotDetail: Identifiable, Sendable {
         category = stop.category
         coordinate = stop.coordinate
         dwellMinutes = stop.dwellMinutes
-        // The scoring reasons lived on the pool entry, which the
-        // placement deleted. An empty section is better than an
-        // invented one — and the part that actually matters, why a
-        // person saved it, does travel with the stop (§9.2).
-        reasons = []
+        // The scoring reasons travel with the stop since the server
+        // copies them off the pool entry on placement (§8.3). An older
+        // server left them there; then the section is empty rather
+        // than invented.
+        reasons = stop.reasons ?? []
         note = stop.note
         sourceUrl = stop.sourceUrl
         unmatched = false

@@ -337,6 +337,10 @@ struct TripStop: Codable, Identifiable, Sendable {
     /// Marked as a spot you come to for the light (§7.3). Optional so a
     /// response from an older server still decodes.
     let photoStop: Bool?
+    /// "Warum hier?" (§8.3): the scoring's reasons, copied from the
+    /// pool entry when the spot was placed. Optional so a response from
+    /// an older server, which left them on the pool, still decodes.
+    var reasons: [String]? = nil
 
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }

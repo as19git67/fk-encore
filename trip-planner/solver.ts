@@ -56,6 +56,12 @@ export interface Candidate extends Coordinate {
    * of the region search, which is the same thing as "search".
    */
   origin?: string;
+  /**
+   * Why the scoring rates it (§8.3), in the traveller's words. Set by
+   * `scoreCandidate` (see `ScoredCandidate`); carried here so it can
+   * ride along into a stop and back into the pool.
+   */
+  reasons?: string[];
   /** Category id from the geo search, e.g. "museum". */
   category: string;
   /** How long one typically stays, in minutes. */
@@ -79,6 +85,11 @@ export interface PlannedStop {
   photoStop?: boolean;
   /** See `Candidate.origin`. */
   origin?: string;
+  /**
+   * See `Candidate.reasons`. On the stop because the pool row that
+   * knew them is deleted when the spot lands on a day (§8.3).
+   */
+  reasons?: string[];
   lat: number;
   lon: number;
   category: string;
@@ -267,6 +278,7 @@ function fillBlock(args: FillArgs): PlannedBlock {
         category: candidate.category,
         dwellMinutes: candidate.dwellMinutes,
         score: candidate.score,
+        reasons: candidate.reasons ?? [],
         travelFromPrevious: leg,
       });
       from = candidate;

@@ -164,6 +164,23 @@ describe("placing a candidate from the pool", () => {
     expect(placed?.pinned).toBe(true);
   });
 
+  it("takes the reasons along, so \"Warum hier?\" still has an answer", async () => {
+    // The pool row that knew them is deleted a moment later (§8.3).
+    const plan = await plannedTrip();
+    const waiting = plan.legs[0].pool.find((c) => c.reasons.length > 0);
+    if (!waiting) throw new Error("this pool has no candidate with reasons");
+    const block = firstSpotBlock(plan);
+
+    const { plan: after } = await placeFromPool({
+      planId: plan.id, dayIndex: 0, blockId: block.id, osmRef: waiting.osmRef,
+    });
+
+    const placed = after.legs[0].days[0].blocks
+      .flatMap((b) => b.stops)
+      .find((s) => s.osmRef === waiting.osmRef);
+    expect(placed?.reasons).toEqual(waiting.reasons);
+  });
+
   it("recomputes the walk rather than leaving a placeholder", async () => {
     // It goes in with zero travel and the day is rewalked; a zero left
     // standing would make the block look free.

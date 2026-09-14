@@ -609,6 +609,7 @@ async function insertDays(
           // Provenance travels with the spot (§9.2): the pool row that
           // knew it is deleted the moment it lands on a day.
           origin: stop.origin ?? "search",
+          reasons: stop.reasons ?? [],
         });
       }
     }
@@ -812,6 +813,7 @@ export async function saveMovedDays(
           // Provenance travels with the spot (§9.2): the pool row that
           // knew it is deleted the moment it lands on a day.
           origin: stop.origin ?? "search",
+          reasons: stop.reasons ?? [],
         });
       }
     }
@@ -955,6 +957,7 @@ export async function loadPlan(
       },
       status: row.status as StopStatus,
       pinned: row.pinned,
+      reasons: (row.reasons ?? []) as string[],
       // What a person wrote wins over what the find brought with it:
       // the note on the row is provenance from whoever saved the place,
       // and an edit is somebody saying that is not what matters now.
@@ -1150,6 +1153,7 @@ async function rewriteDay(
         facade_azimuth: stop.facadeAzimuth ?? null,
         kind: stop.kind ?? null,
         origin: stop.origin ?? "search",
+        reasons: stop.reasons ?? [],
       });
     }
   }
@@ -1189,7 +1193,10 @@ async function rewriteDay(
           category: c.category,
           dwell_minutes: c.dwellMinutes,
           score: c.score,
-          reasons: [],
+          // "Why here?" survives too (§8.3): a candidate carries its
+          // reasons through the redistribution, and one that does not
+          // keeps what the pool row said before.
+          reasons: c.reasons ?? ((known?.reasons ?? []) as string[]),
           // Provenance survives the rewrite, because it is not the
           // redistribution's to decide (§9.2).
           origin: known?.origin ?? c.origin ?? "search",

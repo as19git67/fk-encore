@@ -964,12 +964,14 @@ final class TripPlannerViewModel {
         }
     }
 
-    /// Why a stop is in the plan. The scoring lives in the pool, so a
-    /// stop's reasons are looked up by reference rather than carried on
-    /// the stop itself — and an unexplained spot honestly has no line
-    /// rather than a made-up one (§15.3).
+    /// Why a stop is in the plan (§8.3). The stop carries its reasons
+    /// since the server copies them off the pool entry on placement; a
+    /// plan from an older server still has them only on the pool, so
+    /// that is the fallback — and an unexplained spot honestly has no
+    /// line rather than a made-up one (§15.3).
     func reasons(for stop: TripStop) -> [String] {
-        leg?.pool.first { $0.osmRef == stop.osmRef }?.reasons ?? []
+        if let own = stop.reasons, !own.isEmpty { return own }
+        return leg?.pool.first { $0.osmRef == stop.osmRef }?.reasons ?? []
     }
 
     /// Take a plan an endpoint just returned.

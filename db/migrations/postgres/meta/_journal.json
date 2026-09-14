@@ -1387,6 +1387,13 @@
       "when": 1788566400018,
       "tag": "0197_trip_day_anchor_water",
       "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1788566400019,
+      "tag": "0198_trip_stop_reasons",
+      "breakpoints": true
     }
   ]
 }

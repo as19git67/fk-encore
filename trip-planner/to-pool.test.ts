@@ -200,6 +200,21 @@ describe("what the pool remembers about a spot", () => {
     expect(after.legs[0].pool.find((c) => c.osmRef === find.osmRef)?.origin).toBe("manual");
   });
 
+  it("brings the reasons back with it", async () => {
+    // A stop that was planned by the solver carries the scoring's
+    // reasons (§8.3); putting it back must not return it unexplained.
+    const plan = await plannedTrip();
+    const { stop } = firstStop(plan);
+    if (stop.reasons === undefined || stop.reasons.length === 0) {
+      throw new Error("the planned stop should carry the reasons it was chosen on");
+    }
+
+    const { plan: after } = await returnStopToPool({ planId: plan.id, stopId: stop.rowId });
+
+    const returned = after.legs[0].pool.find((c) => c.osmRef === stop.osmRef);
+    expect(returned?.reasons).toEqual(stop.reasons);
+  });
+
   it("does not turn everybody's finds into suggestions on a redistribution", async () => {
     // A re-plan keeps exactly the pool rows whose origin is not
     // "search". Rewriting the pool without its provenance therefore

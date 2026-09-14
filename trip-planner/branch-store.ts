@@ -119,6 +119,7 @@ export async function saveBranches(
         facade_azimuth: stop.facadeAzimuth ?? null,
         kind: stop.kind ?? null,
         origin: stop.origin ?? "search",
+        reasons: stop.reasons ?? [],
       });
     }
   }

@@ -35,6 +35,7 @@ final class TripPlanModelsTests: XCTestCase {
                       { "rowId": 51, "osmRef": "node:1", "name": "Stadtmuseum Beispielstadt",
                         "lat": 48.371, "lon": 10.901, "category": "museum",
                         "dwellMinutes": 90, "status": "planned", "pinned": false,
+                        "reasons": ["hat einen Wikipedia-Artikel", "ihr wolltet: Museen"],
                         "travelFromPrevious": { "minutes": 5, "distanceM": 390, "travelClass": "short_walk" } },
                       { "rowId": 52, "osmRef": "node:2", "name": null,
                         "lat": 48.372, "lon": 10.902, "category": "sight",
@@ -79,6 +80,10 @@ final class TripPlanModelsTests: XCTestCase {
         XCTAssertEqual(plan.legs[0].days[0].blocks.count, 2)
         XCTAssertEqual(plan.legs[0].days[0].blocks[0].stops.count, 2)
         XCTAssertEqual(plan.legs[0].days[0].blocks[0].stops[0].name, "Stadtmuseum Beispielstadt")
+        // "Warum hier?" rides on the stop (§8.3); a stop the server sent
+        // without the field still decodes.
+        XCTAssertEqual(plan.legs[0].days[0].blocks[0].stops[0].reasons, ["hat einen Wikipedia-Artikel", "ihr wolltet: Museen"])
+        XCTAssertNil(plan.legs[0].days[0].blocks[0].stops[1].reasons)
     }
 
     func testUndetailedDayKeepsItsFrame() throws {

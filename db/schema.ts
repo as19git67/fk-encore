@@ -3017,6 +3017,11 @@ export const tripPlanStops = pgTable(
     // indoor/outdoor derivation (§7.2). Null for a find brought in by
     // hand, which has no OSM entry.
     kind: text("kind"),
+    // "Warum hier?" (§8.3): the scoring's reasons, copied from the pool
+    // entry the moment the spot is placed (migration 0198). The pool
+    // row that knew them is deleted then, and the screen promises the
+    // answer on every stop, not only on the ones still waiting.
+    reasons: jsonb("reasons").notNull().default([]),
   },
   (table) => [
     uniqueIndex("trip_plan_stops_block_position_key").on(table.block_id, table.position),

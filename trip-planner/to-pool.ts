@@ -82,6 +82,7 @@ export const returnStopToPool = api(
       kind: stop.kind ?? null,
       photoStop: stop.photoStop ?? false,
       origin: stop.origin ?? "search",
+      reasons: stop.reasons ?? [],
       lat: stop.lat,
       lon: stop.lon,
       category: stop.category,

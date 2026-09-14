@@ -171,6 +171,8 @@ function stopToCandidate(stop: CurrentStop): Candidate {
     photoStop: stop.photoStop ?? false,
     // Nor a find into a suggestion (§9.2).
     origin: stop.origin ?? "search",
+    // Nor "why here?" into silence (§8.3).
+    reasons: stop.reasons ?? [],
     lat: stop.lat,
     lon: stop.lon,
     category: stop.category,
