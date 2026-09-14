@@ -574,14 +574,28 @@ private struct ActiveTripView: View {
                 Text(trip.autoAdd ? "Automatisch" : "Manuell")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Toggle("Automatisch hinzufügen", isOn: Binding(
+                Toggle("Neue Fotos automatisch ins Album legen", isOn: Binding(
                     get: { trip.autoAdd },
                     set: { store.setAutoAdd($0) }
                 ))
                 .labelsHidden()
+                .accessibilityHint(Self.autoAddHint(trip.autoAdd, albumName: trip.name))
             }
+
+            // The switch decides one thing only: whether new photos are
+            // put into the iOS album by themselves. The album is synced
+            // to the server either way — "Manuell" is not "aus".
+            Text(Self.autoAddHint(trip.autoAdd, albumName: trip.name))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding()
+    }
+
+    /// One sentence for the auto-add switch, for the caption under it.
+    static func autoAddHint(_ autoAdd: Bool, albumName: String) -> String {
+        TripAutoAddCaption.hint(autoAdd: autoAdd, albumName: albumName)
     }
 
     /// One sentence per sync mode, for the picker's caption.
@@ -605,8 +619,8 @@ private struct ActiveTripView: View {
                 Label("Noch keine Trip-Fotos", systemImage: "photo")
             } description: {
                 Text(trip.autoAdd
-                     ? "Neue Fotos, die du jetzt aufnimmst, werden automatisch hinzugefügt."
-                     : "Im manuellen Modus kommen keine Fotos von selbst dazu. Lege sie in der Fotos-App in das Album „\(trip.name)“, dann werden sie synchronisiert.")
+                     ? "Neue Fotos, die du jetzt aufnimmst, landen von selbst hier und im f4mil-Album."
+                     : "Im manuellen Modus kommt kein Foto von selbst dazu. Das Album wird trotzdem synchronisiert: Lege Fotos in der Fotos-App in das Album „\(trip.name)“, dann landen sie im f4mil-Album.")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -643,5 +657,21 @@ private struct ActiveTripView: View {
                 continuation.resume(returning: list)
             }
         }
+    }
+}
+
+/// The caption under the Auto/Manuell switch (`docs/ios-trip-mode.md` §7).
+///
+/// Both halves say the same second thing on purpose: the switch changes
+/// how photos get *into* the iOS album, never whether the album is
+/// synchronised. Read as "Manuell = nichts passiert", it was being
+/// switched off by people who wanted the opposite. Its own type so the
+/// wording is testable outside the private view.
+enum TripAutoAddCaption {
+    static func hint(autoAdd: Bool, albumName: String) -> String {
+        if autoAdd {
+            return "Automatisch: Neue Fotos landen von selbst im iOS-Album „\(albumName)“ und werden von dort ins f4mil-Album synchronisiert."
+        }
+        return "Manuell: Neue Fotos bleiben in der Aufnahmen-Ansicht. Was du selbst ins iOS-Album „\(albumName)“ legst, wird ins f4mil-Album synchronisiert – auch wenn es bis dahin leer bleibt."
     }
 }
