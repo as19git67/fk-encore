@@ -744,7 +744,7 @@ or not at all.
 
 | ID | Item | Status |
 |---|---|---|
-| D8 | Persist "Warum hier?" reasons on the stop when it leaves the pool (server) | Not done. The question-mark entry is in the stop menu and still appears only while the pool row exists. Needs a server change (copy `reasons` onto the stop) |
+| D8 | Persist "Warum hier?" reasons on the stop when it leaves the pool (server) | Done in a follow-up PR: `trip_plan_stops.reasons` (migration 0198) is written by every path that creates a stop (initial plan, placement from the pool, redistribution, weather shuffle, split branches) and read back on the stop; returning a spot to the pool brings them back. `TripStop.reasons` is optional for an older server, and the day screen falls back to the pool entry then |
 | D11 (ideas) | "Wer schreibt mit" screen for the idea collection with a list of invitees and removal | Done in a follow-up PR, with a change of model: invitations (trips and ideas) pick from the household like the album share instead of typing an address (`GET /trip-planner/shareable-users`); the ideas list is one list across every collection the person may write into (`GET /ideas` without `ownerId`, folded where two collections hold the same place); `GET /ideas/members` lists who writes into mine. Two people who collected separately and then let each other in see one list; nothing is merged or moved. See `docs/ideenvorrat.md` §4 |
 | D6 | Build the manual-mode selection grid, or hide the toggle | Neither. The toggle stays; the empty state now says truthfully that photos are added by putting them into the iOS album |
 | E3 | "Das hier merken" directly on the Trip tab and as an App Shortcut | Not done; the capture stays behind Ideen → + |
@@ -774,8 +774,8 @@ Three things the sandbox (no Swift toolchain) could not catch:
 
 ### 3.5 Open follow-ups, in suggested order
 
-1. D8 — reasons travel with the stop (server + `TripSpotDetail(stop)`).
-2. D11 — invitee list and removal for the idea collection (needs a list endpoint).
+1. ~~D8 — reasons travel with the stop (server + `TripSpotDetail(stop)`).~~ Done (see 3.2).
+2. ~~D11 — invitee list and removal for the idea collection (needs a list endpoint).~~ Done (see 3.2).
 3. S1 — planner and photo mode as peers at the tab root, once the launch routing is revisited.
 4. X11 — manual travellers, `shortWalks` per person, organiser hand-over (backend first).
 5. D17 — an observable auto-end monitor so the tab badge can show a pending end suggestion.
