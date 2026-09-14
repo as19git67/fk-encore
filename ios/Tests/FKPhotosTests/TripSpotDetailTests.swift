@@ -244,6 +244,14 @@ final class TripSpotEditTests: XCTestCase {
         XCTAssertEqual(edit.trimmed.note, "")
     }
 
+    func testTrimmingKeepsThePhotoStop() {
+        // The switch was dropped on the way to the server, so it could
+        // be turned on but never kept.
+        var edit = TripSpotEdit(osmRef: "node:1")
+        edit.photoStop = true
+        XCTAssertTrue(edit.trimmed.photoStop)
+    }
+
     func testAnEmptyLinkIsFineAndAHalfOneIsNot() {
         var edit = TripSpotEdit(osmRef: "node:1")
         XCTAssertTrue(edit.urlIsUsable)

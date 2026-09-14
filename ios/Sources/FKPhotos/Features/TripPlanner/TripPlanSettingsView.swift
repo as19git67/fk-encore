@@ -229,7 +229,6 @@ final class TripPlanSettingsViewModel {
     /// change detection so an untouched arrival is never patched.
     private let originalArriveAt: String?
     /// First leg metadata needed when patching arrival.
-    private let firstLegTitle: String
     private let firstLegPosition: Int
 
     /// Default arrival time (14:00) when "Ankunft ist bekannt" is toggled on.
@@ -272,7 +271,6 @@ final class TripPlanSettingsViewModel {
         // be worse than one that cannot show it.
         self.interests = Set(constraints?.interests ?? [])
         self.maxWalkMinutes = constraints?.maxWalkMinutes
-        self.firstLegTitle = firstLeg?.title ?? ""
         self.firstLegPosition = firstLeg?.position ?? 0
         self.originalArriveAt = firstLeg?.arriveMinutes.map(TripClock.format(_:))
         self.arriveAt = firstLeg?.arriveMinutes.flatMap(Self.time(fromMinutes:))
@@ -379,13 +377,14 @@ final class TripPlanSettingsViewModel {
         // settings endpoint does not own per-leg arrival times.
         let wantedArrival: String? = arriveAt.map(TripDraftTransfer.time(_:))
         if wantedArrival != originalArriveAt {
+            // Only the arrival. The title used to ride along from
+            // whatever it was when the sheet opened, and put a renamed
+            // leg back to its old name.
             struct LegBody: Encodable {
-                let title: String
                 let arriveAt: String??
-                enum CodingKeys: String, CodingKey { case title, arriveAt }
+                enum CodingKeys: String, CodingKey { case arriveAt }
                 func encode(to encoder: Encoder) throws {
                     var c = encoder.container(keyedBy: CodingKeys.self)
-                    try c.encode(title, forKey: .title)
                     if let arriveAt { try c.encode(arriveAt, forKey: .arriveAt) }
                 }
             }
@@ -393,7 +392,7 @@ final class TripPlanSettingsViewModel {
             do {
                 let _: LegResponse = try await APIClient.shared.patch(
                     "/trip-planner/plans/\(planId)/legs/\(firstLegPosition)",
-                    body: LegBody(title: firstLegTitle, arriveAt: .some(wantedArrival)))
+                    body: LegBody(arriveAt: .some(wantedArrival)))
             } catch {
                 errorMessage = error.localizedDescription
                 return false

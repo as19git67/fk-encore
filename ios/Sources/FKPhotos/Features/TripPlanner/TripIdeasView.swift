@@ -83,8 +83,13 @@ struct TripIdeasView: View {
                 ContentUnavailableView {
                     Label("Noch keine Ideen", systemImage: "lightbulb")
                 } description: {
-                    Text("Was euch begegnet, sammelt sich hier — ohne dass es "
-                         + "schon eine Reise dazu geben muss.")
+                    // A successful "merken" whose reload came back
+                    // empty (somebody else's collection, no network)
+                    // used to hide the empty state and show one grey
+                    // line instead. The sentence belongs here.
+                    Text(model.lastAddition
+                         ?? "Was euch begegnet, sammelt sich hier — ohne dass es "
+                            + "schon eine Reise dazu geben muss.")
                 } actions: {
                     VStack(spacing: 12) {
                         Button {
@@ -222,6 +227,7 @@ struct TripIdeasView: View {
                 explanation: "Gespeichert wird, wo ihr gerade steht.",
             ) { note, dwellMinutes in
                 await model.addHere(note: note, dwellMinutes: dwellMinutes)
+                return model.errorMessage == nil
             }
         }
         .sheet(isPresented: $isAddingShared) {
@@ -230,6 +236,7 @@ struct TripIdeasView: View {
                 explanation: "Der Ort aus dem Link wird gemerkt — mit dem Link als Herkunft.",
             ) { note, dwellMinutes in
                 await model.addShared(note: note, dwellMinutes: dwellMinutes)
+                return model.errorMessage == nil
             }
         }
         .alert("Mitschreiben lassen", isPresented: $isSharing) {
@@ -282,7 +289,7 @@ struct TripIdeasView: View {
     /// tapped, dialog gone, list still empty, no word about why.
     private var isEmpty: Bool {
         model.entries.isEmpty && !model.isLoading && model.sharedPlace == nil
-            && model.errorMessage == nil && model.lastAddition == nil
+            && model.errorMessage == nil
     }
 
     private func startAdding() {

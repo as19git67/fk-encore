@@ -203,8 +203,7 @@ struct TripDayMapView: View {
             } maximumValueLabel: {
                 Text(TripClock.format(span.upperBound)).font(.caption2).monospacedDigit()
             } onEditingChanged: { editing in
-                sliderActive = true
-                _ = editing
+                sliderActive = editing
             }
         }
         .padding()

@@ -11,7 +11,7 @@ struct SyncSettingsView: View {
     @AppStorage("sync.excludeScreenshots") private var excludeScreenshots = true
     // Mirrors `TripSuggestionSettings.enabled` — same key, same default, so the
     // toggle and the monitors that read it can never disagree.
-    @AppStorage("trip.suggestions.enabled") private var tripSuggestions = true
+    @AppStorage(TripSuggestionSettings.enabledKey) private var tripSuggestions = true
 
     @State private var showAuthAlert = false
     @State private var refreshTick   = 0  // Bump to re-read status values

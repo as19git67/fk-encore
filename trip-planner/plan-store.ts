@@ -626,6 +626,12 @@ export interface PlanSummary {
   /** The first leg's start date, when the trip has dates at all. */
   startDate: string | null;
   updatedAt: string;
+  /**
+   * Whether the caller created this trip (§6.2). The list needs it to
+   * offer "löschen" to the organiser and "verlassen" to everybody else,
+   * rather than a delete swipe the server then refuses.
+   */
+  youOrganise: boolean;
 }
 
 /**
@@ -680,6 +686,7 @@ export async function listPlans(
       dayCount: legs.reduce((sum, l) => sum + (daysByLeg.get(l.id) ?? 0), 0),
       startDate: legs[0]?.start_date ?? null,
       updatedAt: plan.updated_at,
+      youOrganise: plan.owner_id === ownerId,
     };
   });
 }
