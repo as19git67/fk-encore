@@ -47,7 +47,7 @@ struct TripPoolView: View {
             if let leg {
                 if leg.pool.isEmpty {
                     ContentUnavailableView(
-                        "Der Vorrat ist leer",
+                        "Noch keine Kandidaten",
                         systemImage: "tray",
                         description: Text("Was der Planer findet und was ihr selbst beisteuert, "
                                           + "sammelt sich hier."),
@@ -62,12 +62,12 @@ struct TripPoolView: View {
                     } header: {
                         Text(countLabel(leg))
                     } footer: {
-                        Text("Der Planer wählt aus dem Vorrat, was in einen Block passt. "
+                        Text("Der Planer wählt aus den Kandidaten, was in einen Block passt. "
                              + "Was hier liegt, ist nicht verplant — es steht bereit.")
                     }
                 }
             } else {
-                ContentUnavailableView("Etappe nicht gefunden", systemImage: "tray")
+                ContentUnavailableView("Stadt nicht gefunden", systemImage: "tray")
             }
         }
         .navigationTitle(placeInto == nil ? "Kandidaten" : "Stopp hinzufügen")
@@ -90,7 +90,7 @@ struct TripPoolView: View {
         // A pool of a hundred and fifty candidates is what the planner
         // routinely produces; scrolling it to find the one somebody
         // mentioned at breakfast is not a plan.
-        .searchable(text: $query, prompt: "Im Vorrat suchen")
+        .searchable(text: $query, prompt: "Kandidaten durchsuchen")
         .sheet(item: $placing) { candidate in
             NavigationStack {
                 TripBlockPickerView(title: candidate.displayName, leg: leg) { blockId, dayIndex in
@@ -176,7 +176,7 @@ struct TripPoolView: View {
                                 closeDetail()
                             }
                         } label: {
-                            Label("Aus dem Vorrat entfernen", systemImage: "trash")
+                            Label("Aus den Kandidaten entfernen", systemImage: "trash")
                         }
                     } else {
                         Button(role: .destructive) {

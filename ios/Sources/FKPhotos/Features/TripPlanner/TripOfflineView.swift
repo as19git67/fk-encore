@@ -57,7 +57,7 @@ struct TripOfflineView: View {
             } header: {
                 Text("Ohne Netz")
             } footer: {
-                Text("Geladen werden alle Etappen, Tage, Blöcke, Spots, der Vorrat und die "
+                Text("Geladen werden alle Städte, Tage, Blöcke, Stopps, Kandidaten und die "
                      + "Lichtfenster der ausgeplanten Tage. Nicht dabei: die Karte und die "
                      + "Wettervorhersage — eine drei Tage alte Vorhersage wäre schlechter als "
                      + "gar keine.\n\nÄndern lässt sich ein Plan nur mit Verbindung. Ohne Netz "

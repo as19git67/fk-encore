@@ -166,7 +166,7 @@ struct TripPlanSettingsView: View {
                 Button {
                     Task { await save(replan: true) }
                 } label: {
-                    if model.isSaving { ProgressView() } else { Text("Speichern") }
+                    if model.isSaving { ProgressView() } else { Text("Sichern") }
                 }
                 .disabled(model.isSaving)
             }

@@ -53,7 +53,7 @@ final class ShareWireTypesTests: XCTestCase {
         struct Response: Decodable { let collections: [ShareIdeaCollection] }
         let labels = try decode(Response.self, json).collections.map(\.label)
 
-        XCTAssertEqual(labels, ["Mein Vorrat", "Vorrat von Anna", "Geteilter Vorrat"])
+        XCTAssertEqual(labels, ["Meine Ideen", "Ideen von Anna", "Geteilte Ideen"])
     }
 
     // MARK: - Trips (GET /trip-planner/plans)

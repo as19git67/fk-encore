@@ -27,12 +27,12 @@ struct TripParticipantsView: View {
                     row(person)
                 }
             } header: {
-                Text("Wer plant mit")
+                Text("Planen mit")
             } footer: {
                 // Saying what the role is *for* keeps it from reading as
                 // a hierarchy, which §6.2 explicitly does not want.
                 Text("Wer die Reise angelegt hat, ändert den Rahmen und lädt ein. "
-                     + "Spots beitragen und unterwegs umplanen darf jeder.")
+                     + "Orte beitragen und unterwegs umplanen darf jeder.")
             }
 
             if model.youOrganise {
@@ -72,7 +72,7 @@ struct TripParticipantsView: View {
             }
 
         }
-        .navigationTitle("Wer plant mit")
+        .navigationTitle("Planen mit")
         .plannerErrorBanner(model.errorMessage, retry: { await model.load() }, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .task {

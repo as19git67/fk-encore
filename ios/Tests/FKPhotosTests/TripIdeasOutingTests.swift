@@ -66,7 +66,7 @@ final class TripIdeasOutingTests: XCTestCase {
         { "offered": false, "reason": "no-ideas", "stops": [],
           "usedMinutes": 0, "budgetMinutes": 240, "leftOut": 0 }
         """).refusal
-        XCTAssertEqual(refusal?.contains("nichts aus eurem Vorrat"), true)
+        XCTAssertEqual(refusal?.contains("nichts aus euren Ideen"), true)
     }
 
     func testTooLittleTimeIsADifferentAnswer() throws {
@@ -102,11 +102,11 @@ final class TripIdeasOutingTests: XCTestCase {
         // an idea without anybody noticing.
         XCTAssertEqual(
             accepted(planned: [1], inPool: [2]).sentence,
-            "Der Ausflug steht als Reise — eine Idee liegt im Vorrat der Reise.",
+            "Der Ausflug steht als Reise — eine Idee liegt bei den Kandidaten der Reise.",
         )
         XCTAssertEqual(
             accepted(planned: [1], inPool: [2, 3]).sentence,
-            "Der Ausflug steht als Reise — 2 Ideen liegen im Vorrat der Reise.",
+            "Der Ausflug steht als Reise — 2 Ideen liegen bei den Kandidaten der Reise.",
         )
     }
 

@@ -87,12 +87,12 @@ final class TripIdeasTests: XCTestCase {
         // Otherwise the list does not grow and somebody who just tapped
         // "merken" reads that as a failure.
         let sentence = try response(merged: true, unknown: []).sentence
-        XCTAssertTrue(sentence.contains("war schon im Vorrat"))
+        XCTAssertTrue(sentence.contains("war schon bei den Ideen"))
     }
 
     func testANewEntryIsNotDressedUpAsAMerge() throws {
         let sentence = try response(merged: false, unknown: []).sentence
-        XCTAssertTrue(sentence.contains("ist im Vorrat"))
+        XCTAssertTrue(sentence.contains("ist bei den Ideen"))
         XCTAssertFalse(sentence.contains("schon"))
     }
 
@@ -108,8 +108,8 @@ final class TripIdeasTests: XCTestCase {
         let shared = TripIdeaCollection(ownerId: 2, ownerName: "Anna", own: false)
         let anonymous = TripIdeaCollection(ownerId: 3, ownerName: nil, own: false)
 
-        XCTAssertEqual(own.label, "Mein Vorrat")
-        XCTAssertEqual(shared.label, "Vorrat von Anna")
-        XCTAssertEqual(anonymous.label, "Geteilter Vorrat")
+        XCTAssertEqual(own.label, "Meine Ideen")
+        XCTAssertEqual(shared.label, "Ideen von Anna")
+        XCTAssertEqual(anonymous.label, "Geteilte Ideen")
     }
 }

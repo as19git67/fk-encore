@@ -121,7 +121,7 @@ struct TripShareCaptureView: View {
             } header: {
                 Text("Zum Ort")
             } footer: {
-                Text("Der Titel wird zum Namen im Vorrat. Die Notiz bleibt beim Eintrag.")
+                Text("Der Titel wird zum Namen bei den Kandidaten. Die Notiz bleibt beim Eintrag.")
             }
 
             Section {
@@ -155,7 +155,7 @@ struct TripShareCaptureView: View {
                         choice(plan.displayTitle, systemImage: "map", value: .plan(plan.id))
                     }
                     if plans.isEmpty && collections.isEmpty {
-                        Text("Noch keine Reise und kein Vorrat.")
+                        Text("Noch keine Reise und keine Ideen.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }

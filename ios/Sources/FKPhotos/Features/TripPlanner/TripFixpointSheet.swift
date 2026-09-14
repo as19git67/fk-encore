@@ -177,7 +177,7 @@ struct TripFixpointSheet: View {
                         // where the missing quarter hour went.
                         Text("Vom Plan aus hin. Ein Puffer von 20 Minuten kommt automatisch "
                              + "dazu — einen Zug zu verpassen kostet mehr als einen "
-                             + "ausgelassenen Spot.")
+                             + "ausgelassenen Ort.")
                     }
                 } else {
                     Section {

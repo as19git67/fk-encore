@@ -60,8 +60,8 @@ struct TripBlockPickerView: View {
                         let targets = TripBlockTargets.ofDay(day.dayIndex, in: leg, excluding: current)
                         if targets.isEmpty {
                             Text(current?.dayIndex == day.dayIndex
-                                 ? "Hier steht der Spot schon."
-                                 : "Kein Block, in den ein Spot passt.")
+                                 ? "Hier steht der Stopp schon."
+                                 : "Kein Block, in den ein Stopp passt.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }

@@ -24,23 +24,29 @@ struct TripPlanIdeasView: View {
                 ContentUnavailableView(
                     "Nichts Gesammeltes hier",
                     systemImage: "lightbulb",
-                    description: Text("In den Etappen dieser Reise liegt nichts aus eurem "
-                                      + "Ideenvorrat."),
+                    description: Text("In den Städten dieser Reise liegt nichts aus euren "
+                                      + "Ideen."),
                 )
             }
 
             ForEach(legs, id: \.self) { legIndex in
-                Section("Etappe \(legIndex + 1)") {
+                Section(legTitle(legIndex)) {
                     ForEach(ideas(in: legIndex)) { idea in
                         row(idea)
                     }
                 }
             }
         }
-        .navigationTitle("Aus dem Vorrat")
+        .navigationTitle("Aus den Ideen übernehmen")
         .plannerErrorBanner(viewModel.errorMessage, retry: { await viewModel.loadIdeasForPlan() }, dismiss: { viewModel.errorMessage = nil })
         .task { await viewModel.loadIdeasForPlan() }
         .refreshable { await viewModel.loadIdeasForPlan() }
+    }
+
+    /// The city's own name — legs have one, and "Etappe 2" asked the
+    /// reader to count.
+    private func legTitle(_ legIndex: Int) -> String {
+        viewModel.plan?.legs.first { $0.position == legIndex }?.displayTitle ?? "Stadt \(legIndex + 1)"
     }
 
     private var legs: [Int] {

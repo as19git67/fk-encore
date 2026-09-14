@@ -101,7 +101,7 @@ struct TripIdeasOutingView: View {
                     Image(systemName: "lightbulb.fill")
                         .font(.caption)
                         .foregroundStyle(.tint)
-                        .accessibilityLabel("Aus eurem Vorrat")
+                        .accessibilityLabel("Aus euren Ideen")
                 }
             }
             Text(subtitle(stop))

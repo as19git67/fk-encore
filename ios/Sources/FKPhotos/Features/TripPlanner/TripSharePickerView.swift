@@ -50,7 +50,7 @@ struct TripSharePickerView: View {
                 } header: {
                     Text("Zum Fund")
                 } footer: {
-                    Text("Der Titel wird zum Namen im Vorrat. Die Notiz bleibt am Fund.")
+                    Text("Der Titel wird zum Namen bei den Kandidaten. Die Notiz bleibt am Ort.")
                 }
 
                 Section("Reise") {

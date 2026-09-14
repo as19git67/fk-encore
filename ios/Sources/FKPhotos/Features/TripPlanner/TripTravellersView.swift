@@ -40,7 +40,7 @@ struct TripTravellersView: View {
                         row(for: traveller)
                     }
                 } header: {
-                    Text("Fährt mit")
+                    Text("Reisegruppe")
                 } footer: {
                     if let effect, !effect.reasons.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
@@ -75,7 +75,7 @@ struct TripTravellersView: View {
             }
 
         }
-        .navigationTitle("Wer fährt mit?")
+        .navigationTitle("Reisegruppe")
         .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }

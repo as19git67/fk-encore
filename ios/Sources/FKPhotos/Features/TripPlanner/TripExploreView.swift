@@ -165,7 +165,7 @@ struct TripExploreView: View {
         ContentUnavailableView {
             Label("Wo wollt ihr euch umsehen?", systemImage: "binoculars")
         } description: {
-            Text("Kein Trip n\u{00F6}tig \u{2014} was hier gefunden wird, geht in den Ideenvorrat.")
+            Text("Kein Trip n\u{00F6}tig \u{2014} was hier gefunden wird, geht zu den Ideen.")
         } actions: {
             VStack(spacing: 12) {
                 Button {
@@ -280,7 +280,7 @@ struct TripExploreView: View {
                 // nothing left to do to it.
                 Image(systemName: "lightbulb.fill")
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("schon im Vorrat")
+                    .accessibilityLabel("schon bei den Ideen")
             }
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
@@ -297,7 +297,7 @@ struct TripExploreView: View {
     private func detail(_ spot: TripExploredSpot) -> some View {
         TripSpotDetailView(spot: TripSpotDetail(spot)) { close in
             if model.isCollected(spot) {
-                Label("Schon im Vorrat", systemImage: "lightbulb.fill")
+                Label("Schon bei den Ideen", systemImage: "lightbulb.fill")
                     .foregroundStyle(.secondary)
             } else {
                 Button {
@@ -306,7 +306,7 @@ struct TripExploreView: View {
                         close()
                     }
                 } label: {
-                    Label("In den Vorrat", systemImage: "lightbulb")
+                    Label("Zu den Ideen", systemImage: "lightbulb")
                 }
                 .disabled(model.addingRef != nil)
             }

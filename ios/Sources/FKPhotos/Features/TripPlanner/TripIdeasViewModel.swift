@@ -378,7 +378,7 @@ final class TripIdeasViewModel {
             collections = response.collections
             errorMessage = nil
         } catch {
-            errorMessage = "Der Vorrat ließ sich nicht laden."
+            errorMessage = "Die Ideen ließen sich nicht laden."
         }
     }
 
@@ -399,7 +399,7 @@ final class TripIdeasViewModel {
         let provider = locationProvider
             ?? TripLocationProvider(accuracy: kCLLocationAccuracyNearestTenMeters)
         guard let location = await provider.currentLocation() else {
-            errorMessage = "Ohne Standort lässt sich nichts merken — der Vorrat bräuchte den Ort."
+            errorMessage = "Ohne Standort lässt sich nichts merken — eine Idee braucht ihren Ort."
             return
         }
 

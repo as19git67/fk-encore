@@ -111,7 +111,7 @@ final class TripPlaceSearchViewModel {
             )
             added[place.osmRef] = response.merged
                 ? "mit einem vorhandenen Eintrag zusammengeführt"
-                : "im Vorrat"
+                : "bei den Kandidaten"
             errorMessage = nil
         } catch {
             errorMessage = TripErrorText.describe(error)

@@ -233,7 +233,7 @@ struct TripArticleReadView: View {
             }
             .sheet(item: $asking) { proposal in
                 TripIdeaCaptureSheet(
-                    title: proposal.name ?? "In den Vorrat",
+                    title: proposal.name ?? "Zu den Ideen",
                     explanation: "OpenStreetMap kennt diesen Ort nicht \u{2014} "
                         + "wie lange bleibt ihr?",
                 ) { _, dwellMinutes in
@@ -266,7 +266,7 @@ struct TripArticleReadView: View {
             }
 
             if model.isCollected(proposal) {
-                Label("Im Vorrat", systemImage: "lightbulb.fill")
+                Label("Schon bei den Ideen", systemImage: "lightbulb.fill")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else if model.coordinate(of: proposal) != nil {
@@ -280,7 +280,7 @@ struct TripArticleReadView: View {
                         Task { await model.collect(proposal, dwellMinutes: nil) }
                     }
                 } label: {
-                    Label("In den Vorrat", systemImage: "lightbulb")
+                    Label("Zu den Ideen", systemImage: "lightbulb")
                         .font(.subheadline)
                         .frame(minHeight: 44)
                 }

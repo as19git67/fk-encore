@@ -752,7 +752,7 @@ final class TripPlannerViewModel {
             planIdeas = response.ideas
             errorMessage = nil
         } catch {
-            errorMessage = "Der Ideenvorrat ließ sich nicht abfragen."
+            errorMessage = "Die Ideen ließen sich nicht abfragen."
         }
     }
 

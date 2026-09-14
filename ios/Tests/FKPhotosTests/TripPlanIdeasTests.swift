@@ -62,18 +62,18 @@ final class TripPlanIdeasTests: XCTestCase {
     }
 
     func testOneSpotKeptIsSingular() {
-        XCTAssertEqual(kept(1, alreadyThere: 0).sentence, "Im Vorrat gemerkt.")
+        XCTAssertEqual(kept(1, alreadyThere: 0).sentence, "Bei den Ideen gemerkt.")
     }
 
     func testSeveralKeptAreCounted() {
-        XCTAssertEqual(kept(3, alreadyThere: 0).sentence, "3 Spots im Vorrat gemerkt.")
+        XCTAssertEqual(kept(3, alreadyThere: 0).sentence, "3 Orte bei den Ideen gemerkt.")
     }
 
     func testAlreadyCollectedIsNotAnError() {
         // The endpoint counts it rather than refusing: the trip found it
         // worth keeping and so did somebody earlier (§20.3).
-        XCTAssertEqual(kept(0, alreadyThere: 1).sentence, "War schon im Vorrat.")
-        XCTAssertEqual(kept(0, alreadyThere: 2).sentence, "Waren schon im Vorrat.")
+        XCTAssertEqual(kept(0, alreadyThere: 1).sentence, "War schon bei den Ideen.")
+        XCTAssertEqual(kept(0, alreadyThere: 2).sentence, "Waren schon bei den Ideen.")
     }
 
     func testABatchSaysBothHalves() {
