@@ -87,25 +87,49 @@ describe("decideAdoption", () => {
     expect(d.visibleAfter).toBe(3);
   });
 
-  it("does nothing when fewer than two members would survive", () => {
-    // Adoption may tidy a stack, never empty it — a pair where the peers hid
-    // one side stays open for a real review.
+  it("adopts a burst culled down to a single keeper", () => {
+    // The commonest review outcome there is: three near-identical frames,
+    // the reviewer keeps the good one. An earlier floor of two surviving
+    // members skipped exactly these groups — the ones the feature exists
+    // for — so they kept showing up as open work for everybody else.
+    const d = decideAdoption([
+      m(1),
+      m(2, { peer: { hidden: 1, favorite: 0 } }),
+      m(3, { peer: { hidden: 1, favorite: 0 } }),
+    ]);
+    expect(d.skipped).toBe(false);
+    expect(d.hide).toEqual([2, 3]);
+    expect(d.visibleAfter).toBe(1);
+  });
+
+  it("adopts a pair where the peers hid one side", () => {
     const d = decideAdoption([
       m(1),
       m(2, { peer: { hidden: 1, favorite: 0 } }),
     ]);
-    expect(d.skipped).toBe(true);
-    expect(d.hide).toEqual([]);
+    expect(d.skipped).toBe(false);
+    expect(d.hide).toEqual([2]);
     expect(d.visibleAfter).toBe(1);
   });
 
-  it("counts the user's own hides towards the two-visible floor", () => {
-    // Three members, the user already hid one, the peers hide another: one
-    // photo left, so the group is not closed on their behalf.
+  it("refuses a verdict that would hide every member", () => {
+    // Adoption may tidy a stack, never empty it. Nothing left to look at is
+    // not a review result, so the group stays open.
     const d = decideAdoption([
-      m(1),
-      m(2, { own: { status: "hidden", source: "user" } }),
-      m(3, { peer: { hidden: 1, favorite: 0 } }),
+      m(1, { peer: { hidden: 1, favorite: 0 } }),
+      m(2, { peer: { hidden: 1, favorite: 0 } }),
+    ]);
+    expect(d.skipped).toBe(true);
+    expect(d.hide).toEqual([]);
+    expect(d.visibleAfter).toBe(0);
+  });
+
+  it("counts the user's own hides towards what survives", () => {
+    // The user hid one member themselves and the peers hide the rest —
+    // nothing would be left, so the group stays open.
+    const d = decideAdoption([
+      m(1, { own: { status: "hidden", source: "user" } }),
+      m(2, { peer: { hidden: 1, favorite: 0 } }),
     ]);
     expect(d.skipped).toBe(true);
   });

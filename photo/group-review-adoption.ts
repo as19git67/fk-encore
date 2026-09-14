@@ -36,8 +36,8 @@ export interface AdoptionDecision {
   visibleAfter: number;
   /**
    * True when the rule was not applied at all. Adoption may tidy a stack,
-   * never empty it: if fewer than two members would survive, the group
-   * stays open and nothing is written.
+   * never empty it: if no member would survive, the group stays open and
+   * nothing is written.
    */
   skipped: boolean;
 }
@@ -73,7 +73,7 @@ export function decideAdoption(members: AdoptionMember[]): AdoptionDecision {
     const own = m.own;
     if (own && own.source === "user") {
       // The adopter has spoken. Their row stands; it only counts towards
-      // the "at least two visible members" check.
+      // the "something survives" check below.
       if (own.status !== "hidden") visibleAfter++;
       continue;
     }
@@ -89,9 +89,13 @@ export function decideAdoption(members: AdoptionMember[]): AdoptionDecision {
     }
   }
 
-  // Adoption may tidy a stack, never empty it. A group the rule would
-  // reduce below two visible members is left open for a real review.
-  if (visibleAfter < 2) {
+  // Adoption may tidy a stack, never empty it — but one keeper is the
+  // normal result of a review, not an emptied stack. Culling a burst of
+  // three down to the single good frame is the commonest outcome there is,
+  // so a floor of two visible members would have skipped exactly the groups
+  // the feature exists for. Only a peer verdict that hides *every* member
+  // is refused; the group then stays open for a real review.
+  if (visibleAfter < 1) {
     return { hide: [], revert: [], visibleAfter, skipped: true };
   }
 

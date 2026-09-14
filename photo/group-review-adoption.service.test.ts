@@ -200,8 +200,27 @@ describe("runAdoptionForUser", () => {
     expect((await curationOf(h.passive, h.p3))?.source).toBe("adopted");
   });
 
-  it("leaves a group open when adoption would drop it below two visible members", async () => {
+  it("adopts a burst the reviewer culled down to a single keeper", async () => {
+    // The everyday case: three frames of the same moment, the reviewer keeps
+    // one. This has to reach the others — it is the whole point.
     const h = await household();
+    await setCuration(h.reviewer, h.p2, "hidden");
+    await setCuration(h.reviewer, h.p3, "hidden");
+    await makeGroup(h.reviewer, [h.p1, h.p2, h.p3], { reviewedBy: "user" });
+
+    const res = await runAdoptionForUser(h.passive);
+
+    expect(res.groups_adopted).toBe(1);
+    expect(res.photos_hidden).toBe(2);
+    expect((await curationOf(h.passive, h.p2))?.source).toBe("adopted");
+    expect((await curationOf(h.passive, h.p3))?.source).toBe("adopted");
+    expect(await curationOf(h.passive, h.p1)).toBeUndefined();
+    expect((await groupOf(h.passiveGroup))?.review_source).toBe("adopted");
+  });
+
+  it("leaves a group open when the verdict would hide every member", async () => {
+    const h = await household();
+    await setCuration(h.reviewer, h.p1, "hidden");
     await setCuration(h.reviewer, h.p2, "hidden");
     await setCuration(h.reviewer, h.p3, "hidden");
     await makeGroup(h.reviewer, [h.p1, h.p2, h.p3], { reviewedBy: "user" });
@@ -212,6 +231,26 @@ describe("runAdoptionForUser", () => {
     expect(res.groups_adopted).toBe(0);
     expect(await curationOf(h.passive, h.p2)).toBeUndefined();
     expect((await groupOf(h.passiveGroup))?.reviewed_at).toBeNull();
+  });
+
+  it("adopts only the groups a peer actually answered", async () => {
+    // Several open stacks, one peer review: the covered group closes and the
+    // others stay open. The user's report was the opposite shape — some
+    // groups stayed open although every one of them had been reviewed.
+    const h = await household();
+    const p4 = await makePhoto(h.reviewer);
+    const p5 = await makePhoto(h.reviewer);
+    await dbExec(db.insert(albumPhotos).values({ album_id: h.albumId, photo_id: p4 }));
+    await dbExec(db.insert(albumPhotos).values({ album_id: h.albumId, photo_id: p5 }));
+    const secondGroup = await makeGroup(h.passive, [p4, p5]);
+    await setCuration(h.reviewer, h.p2, "hidden");
+    await makeGroup(h.reviewer, [h.p1, h.p2, h.p3], { reviewedBy: "user" });
+
+    const res = await runAdoptionForUser(h.passive);
+
+    expect(res.groups_adopted).toBe(1);
+    expect((await groupOf(h.passiveGroup))?.review_source).toBe("adopted");
+    expect((await groupOf(secondGroup))?.reviewed_at).toBeNull();
   });
 
   it("ignores a peer group that does not cover the whole group", async () => {

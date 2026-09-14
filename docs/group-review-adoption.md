@@ -112,8 +112,14 @@ Two guards:
 
 - An existing `source = 'user'` curation row is never overwritten. B's own
   favourite stays a favourite, B's own visible tombstone stays visible.
-- If the rule would leave fewer than two visible members, nothing is written at
-  all and the group stays open. Adoption may tidy a stack, never empty it.
+- If the rule would hide **every** member, nothing is written at all and the
+  group stays open. Adoption may tidy a stack, never empty it.
+
+  The floor is one surviving photo, not two. Culling a burst of three down to
+  the single good frame is the commonest review outcome there is, so a floor
+  of two would have skipped exactly the groups this feature exists for — they
+  kept showing up as open work for everyone else, which is how the gap was
+  found.
 
 ## Turning it off
 
@@ -180,7 +186,17 @@ The pass is per user and idempotent, so it can be triggered generously:
 | A user marks a group reviewed, accepts an AI pick or a consensus | every peer sharing an album with the affected photos |
 | Re-grouping finishes (`scheduleRegroup`) | that user |
 | A user switches the setting on | that user |
-| Album share added or revoked | the affected participant |
+| The gallery or an album is opened (`listPhotoGroupsLogic`) | that user |
+
+The last one is what makes the feature self-healing rather than
+event-dependent. The others only fire on a peer's *next* review, so a review
+made before the feature existed — or while this user's own groups were being
+rebuilt — would otherwise never reach them. Because the pass runs on that hot
+path, the covering-peer lookup is one batched query for the whole library:
+the common case, nobody has reviewed anything new, costs a single round trip.
+When a run does change something it publishes the usual
+`photos/scan.updated` event, so the open grid updates instead of waiting for
+a remount.
 
 Runs are serialised per user in the same way `scheduleRegroup` serialises
 re-grouping, and failures are logged rather than blocking the request.
