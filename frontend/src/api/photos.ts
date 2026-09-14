@@ -725,6 +725,11 @@ export interface AlbumUserSettings {
   active_view: ActiveView
   view_config?: ViewConfig | null
   cover_photo_id?: number | null
+  /**
+   * Per-album override for adopting other people's group reviews: null
+   * inherits the global default (docs/group-review-adoption.md).
+   */
+  group_review_adoption?: 'on' | 'off' | null
 }
 
 export interface AlbumPhoto extends Photo {
@@ -924,6 +929,7 @@ export function updateAlbumUserSettings(albumId: number, settings: Partial<Album
   if (rest.active_view) req.activeView = rest.active_view
   if (rest.view_config !== undefined) req.viewConfig = rest.view_config
   if (rest.cover_photo_id !== undefined) req.coverPhotoId = rest.cover_photo_id
+  if (rest.group_review_adoption !== undefined) req.groupReviewAdoption = rest.group_review_adoption
 
   return apiFetch<AlbumUserSettings>(`/albums/${albumId}/settings`, {
     method: 'PATCH',
@@ -938,6 +944,12 @@ export interface PhotoGroup {
   user_id: number
   cover_photo_id?: number
   reviewed_at?: string
+  /**
+   * Who closed the group: 'user' (you did) or 'adopted' (taken over from
+   * somebody else's review — see docs/group-review-adoption.md). Absent
+   * while the group is still open.
+   */
+  review_source?: 'user' | 'adopted'
   created_at: string
   member_count: number
   photo_ids: number[]
@@ -968,6 +980,31 @@ export function reviewPhotoGroup(id: number, photoIds?: number[]) {
     // a missing/empty body against the `{ photoIds?: number[] }`
     // schema and would reject with 400 invalid_argument.
     body: JSON.stringify(photoIds ? { photoIds } : {}),
+  })
+}
+
+// ---------- Adopting other people's group reviews ----------
+
+/**
+ * Take an adopted group back for a real review: the hides made on your
+ * behalf are dropped and the stack reappears as open work.
+ */
+export function reclaimAdoptedGroup(id: number) {
+  return apiFetch<{ groups_reopened: number; photos_restored: number }>(
+    `/photos/groups/${id}/adoption/revert`,
+    { method: 'POST' },
+  )
+}
+
+/** The global default for adopting other people's group reviews. */
+export function getGroupReviewAdoption() {
+  return apiFetch<{ enabled: boolean }>('/photos/groups/adoption')
+}
+
+export function setGroupReviewAdoption(enabled: boolean) {
+  return apiFetch<{ enabled: boolean }>('/photos/groups/adoption', {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
   })
 }
 

@@ -411,6 +411,9 @@ function onTap(entry: GalleryGridEntry | null, event?: MouseEvent) {
 
 function badgeTitle(group: GalleryGridEntry['group'] | null | undefined): string {
   if (!group) return ''
+  if (group.reviewed && group.adopted) {
+    return 'Von jemand anderem bereinigt – tippen, um selbst zu prüfen'
+  }
   if (group.ai_confidence === 'high') return 'KI-Vorschlag mit hoher Sicherheit – bitte prüfen'
   if (group.ai_confidence === 'medium') return 'KI-Vorschlag mit mittlerer Sicherheit – bitte prüfen'
   if (group.ai_confidence === 'low') return 'KI-Vorschlag mit niedriger Sicherheit'
@@ -529,6 +532,21 @@ defineExpose({
               :title="badgeTitle(slot.group)"
             >
               +{{ slot.group.member_count - 1 }}
+            </span>
+            <!-- Adopted stack: somebody else reviewed this group and the
+                 result became this user's default (see
+                 docs/group-review-adoption.md). It is done, but not by
+                 them — so it gets its own quiet marker instead of the open
+                 `+N`, and tapping it takes the group back for a real
+                 review. Only on the cover tile: the other members are
+                 hidden by the adoption anyway. -->
+            <span
+              v-else-if="slot.group && slot.group.adopted && slot.group.is_cover"
+              class="vg-stack-badge vg-stack-badge--adopted"
+              :title="badgeTitle(slot.group)"
+            >
+              <i class="pi pi-users" />
+              <i class="pi pi-check" />
             </span>
             <i
               v-if="slot.curation === 'favorite'"
@@ -723,6 +741,19 @@ defineExpose({
 .vg-stack-badge--ai-low {
   background: rgba(0, 0, 0, 0.55);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+/* Adopted: deliberately quieter than an open stack — it is a statement
+   about who did the work, not a task. The dashed ring separates it from
+   the solid open badge at a glance. */
+.vg-stack-badge--adopted {
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+  border: 1px dashed rgba(255, 255, 255, 0.6);
+  font-size: 0.66rem;
+  padding: 2px 6px;
+}
+.vg-stack-badge--adopted:hover {
+  background: rgba(0, 0, 0, 0.75);
 }
 
 /* Selection / cursor frame. Drawn as a pseudo-element border that sits

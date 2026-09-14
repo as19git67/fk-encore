@@ -139,10 +139,11 @@ User-made rows are untouched.
 
 No per-group flag is needed. "My own action wins" already produces it:
 
-1. B opens an adopted group in the compare view. The adopted hides are shown
-   **greyed out with a label**, not omitted — otherwise B could not disagree
-   with a decision he cannot see.
-2. Un-hiding writes a user tombstone that survives later adoption passes.
+1. B taps the adopted stack. That takes the group back first — the adopted
+   hides are dropped and the full stack is on screen — and only then opens the
+   compare view. B cannot disagree with a decision he cannot see.
+2. Un-hiding an adopted photo anywhere else writes a user tombstone that
+   survives later adoption passes.
 3. "Fertig" sets `review_source = 'user'`. From then on the group is B's, and
    A's later changes no longer reach it.
 
@@ -158,11 +159,17 @@ Adoption is only acceptable if it is never silent.
   distinguishable from one the user closed themselves.
 - **Counters**: "Gruppen bearbeiten (N offen)" and the review queue count
   adopted groups as done; they are not work items any more.
-- **Sidebar**: the existing "Meinungen" block gains a line — "Von jemand
-  anderem bereinigt · 2 Fotos ausgeblendet" with a "Selbst prüfen" action.
-  Anonymous, in line with the existing decision not to name who voted.
-- **Filter**: the hidden-photos filter learns an "übernommen" option, so the
-  user can always see what is being filtered away on their behalf.
+- **Taking a group back**: tapping an adopted badge is "Selbst prüfen". It
+  reverts that one group first (`POST /photos/groups/:id/adoption/revert`)
+  and only then opens the compare view — reviewing a group whose members you
+  cannot see would be worse than not offering it at all. That is also why the
+  compare view needs no special case for adopted hides: by the time it opens,
+  there are none left.
+- **Sidebar** (open): the "Meinungen" block gains a line — "Von jemand
+  anderem bereinigt · 2 Fotos ausgeblendet". Anonymous, in line with the
+  existing decision not to name who voted.
+- **Filter** (open): the hidden-photos filter learns an "übernommen" option,
+  so the user can always see what is being filtered away on their behalf.
 
 ## When adoption runs
 
@@ -184,10 +191,11 @@ re-grouping, and failures are logged rather than blocking the request.
    unit tests for the decision rule and integration tests for the pass.
 2. **Wiring** — triggers on review/AI-pick/consensus/regroup, participant
    aggregates counting user rows only, settings endpoints.
-3. **Frontend** — badge variant, sidebar line, compare-view labels for adopted
-   hides, the two toggles.
-4. **iOS** — the app filters album views locally, so it needs the adopted flags
-   on the wire before it can show the same thing.
+3. **Frontend** — the adopted badge variant, "Selbst prüfen" on it, and the
+   two toggles (global in the profile, per album in the album settings).
+4. **Frontend, remaining** — the sidebar line and the filter option above.
+5. **iOS** — the app filters album views locally, so it needs the adopted
+   flags on the wire before it can show the same thing.
 
 ## Affected files
 
@@ -202,6 +210,9 @@ re-grouping, and failures are logged rather than blocking the request.
 - `photo/group-auto-pick.service.ts` — adopted groups leave the review queue
 
 ### Frontend
-- `frontend/src/api/photos.ts` — `review_source`, adopted flags, settings
-- `frontend/src/views/AlbumDetailView.vue`, `PhotoCompareView.vue`,
-  `PhotoDetailSidebarBase.vue`, `VirtualGallery.vue`
+- `frontend/src/api/photos.ts`, `frontend/src/api/gallery.ts` —
+  `review_source`, the adopted flag, the settings and the revert call
+- `frontend/src/components/VirtualGallery.vue` — the adopted badge
+- `frontend/src/views/GalleryView.vue`, `frontend/src/views/AlbumDetailView.vue`
+  — "Selbst prüfen" and the per-album override
+- `frontend/src/views/ProfileView.vue` — the global default

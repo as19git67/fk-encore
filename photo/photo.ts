@@ -1963,6 +1963,22 @@ export const findPhotoGroups = api(
 );
 
 /**
+ * Take an adopted group back for a real review: the hides made on the
+ * user's behalf are dropped and the stack reappears as open work. This is
+ * the "Selbst prüfen" action behind the adopted stack badge.
+ */
+export const reclaimAdoptedGroup = api(
+  { expose: true, method: "POST", path: "/photos/groups/:id/adoption/revert", auth: true },
+  async ({ id }: { id: number }): Promise<adoption.RevertResult> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.delete");
+    return await adoption.revertAdoptionForUser(userId, [id]);
+  }
+);
+
+/**
  * The user's global default for adopting other people's group reviews.
  */
 export const getGroupReviewAdoption = api(
