@@ -348,6 +348,7 @@ struct TripPlansListView: View {
                 "/trip-planner/plans/\(plan.id)")
             plans.removeAll { $0.id == plan.id }
             TripPlannerViewModel.forget(planId: plan.id)
+            TripIdeasOfferMemory().forget(planId: plan.id)
         } catch {
             actionError = TripErrorText.describe(error)
         }
@@ -368,6 +369,7 @@ struct TripPlansListView: View {
                 "/trip-planner/plans/\(plan.id)/participants/remove", body: Body(userId: me))
             plans.removeAll { $0.id == plan.id }
             TripPlannerViewModel.forget(planId: plan.id)
+            TripIdeasOfferMemory().forget(planId: plan.id)
         } catch {
             actionError = TripErrorText.describe(error)
         }

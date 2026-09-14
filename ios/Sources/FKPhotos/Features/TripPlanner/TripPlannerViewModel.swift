@@ -55,6 +55,13 @@ final class TripPlannerViewModel {
     /// (§20.3). Offered, never taken over by themselves.
     private(set) var planIdeas: [TripIdeaForPlan] = []
     private(set) var isLoadingPlanIdeas = false
+    /// True once the ideas were asked for at least once, so the day
+    /// screen can tell "none" from "not asked yet".
+    private(set) var didLoadPlanIdeas = false
+    /// Bumped when the offer is waved away, so the computed line below
+    /// is re-read.
+    private var ideasOfferDismissals = 0
+    @ObservationIgnored private let ideasOfferMemory = TripIdeasOfferMemory()
     /// What the last "für später merken" did, in words.
     var keptForNextTime: String?
     /// Set while a hard time is being written or removed (§4.4): both
@@ -782,6 +789,42 @@ final class TripPlannerViewModel {
         } catch {
             errorMessage = "Die Ideen ließen sich nicht abfragen."
         }
+    }
+
+    /// The same question, asked quietly on the day screen: no error
+    /// line when it cannot be answered, because it is an offer and the
+    /// day is not about it.
+    func loadIdeasOfferQuietly() async {
+        do {
+            let response: TripIdeasForPlanResponse = try await APIClient.shared.get(
+                "/trip-planner/plans/\(planId)/ideas")
+            planIdeas = response.ideas
+            didLoadPlanIdeas = true
+        } catch {
+            // Silent on purpose.
+        }
+    }
+
+    /// The ideas that lie in a leg and are not in the trip yet.
+    var pendingIdeas: [TripIdeaForPlan] {
+        planIdeas.filter { !$0.alreadyInTrip }
+    }
+
+    /// „Ihr habt vier Ideen für Lissabon gesammelt." — or nil when there
+    /// is nothing new to say, or the same offer was waved away already.
+    var ideasOffer: String? {
+        _ = ideasOfferDismissals
+        let pending = pendingIdeas
+        guard ideasOfferMemory.shouldOffer(planId: planId, pendingCount: pending.count) else { return nil }
+        return TripIdeasOffer.sentence(pending: pending) { legIndex in
+            plan?.legs.first { $0.position == legIndex }?.displayTitle ?? "Stadt \(legIndex + 1)"
+        }
+    }
+
+    /// "Später": this many stay quiet; one more asks again.
+    func dismissIdeasOffer() {
+        ideasOfferMemory.dismiss(planId: planId, pendingCount: pendingIdeas.count)
+        ideasOfferDismissals += 1
     }
 
     /// Take one idea into this trip's pool (§20.3).

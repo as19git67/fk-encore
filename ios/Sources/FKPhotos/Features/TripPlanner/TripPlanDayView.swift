@@ -119,7 +119,10 @@ struct TripPlanDayView: View {
                             NavigationLink {
                                 TripPlanIdeasView(viewModel: viewModel)
                             } label: {
-                                Label("Aus den Ideen übernehmen", systemImage: "lightbulb")
+                                Label(viewModel.didLoadPlanIdeas
+                                      ? "Aus den Ideen übernehmen (\(viewModel.pendingIdeas.count))"
+                                      : "Aus den Ideen übernehmen",
+                                      systemImage: "lightbulb")
                             }
                             // The cities of the trip (§4.2).
                             NavigationLink {
@@ -282,6 +285,7 @@ struct TripPlanDayView: View {
         .task {
             await viewModel.load()
             watchStops()
+            await viewModel.loadIdeasOfferQuietly()
             await viewModel.loadLight()
             await viewModel.loadForecast()
         }
@@ -328,6 +332,7 @@ struct TripPlanDayView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 offlineBanner
+                ideasOfferCard
                 legHeader(leg)
                 if leg.isAwaitingRegion {
                     awaitingRegionCard(leg)
@@ -385,6 +390,36 @@ struct TripPlanDayView: View {
                      + "brauchen eine Verbindung.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 14))
+        }
+    }
+
+    /// „Ihr habt vier Ideen für Lissabon gesammelt." (§20.3)
+    ///
+    /// The one line that says the collection has something for this
+    /// trip. An offer: it leads to the screen where somebody decides,
+    /// and "Später" keeps this many quiet until one more is collected.
+    @ViewBuilder
+    private var ideasOfferCard: some View {
+        if let sentence = viewModel.ideasOffer {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(sentence, systemImage: "lightbulb")
+                    .font(.subheadline.weight(.semibold))
+                HStack(spacing: 8) {
+                    NavigationLink {
+                        TripPlanIdeasView(viewModel: viewModel)
+                    } label: {
+                        Text("Ansehen")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    Button("Später") { viewModel.dismissIdeasOffer() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)

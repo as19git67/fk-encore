@@ -198,6 +198,15 @@ Kein zweiter Mechanismus, sondern eine Quelle mehr — drei Richtungen, alle
 | `POST /plans/:planId/ideas/take` | Idee → **Etappenvorrat** dieser Reise |
 | `POST /plans/:planId/pool/to-ideas` | Übriggebliebenes → **zurück** in die Sammlung |
 
+Beim Anlegen einer Reise wird die Sammlung **nicht** automatisch als
+Kandidatenquelle benutzt — eine Idee vom letzten Jahr ist nicht automatisch der
+Wunsch dieser Reise (§20.3). Damit sie trotzdem nicht unsichtbar bleibt, sagt
+der Tagesbildschirm der App einmal den Satz aus dem Konzept: „Ihr habt vier
+Ideen für Lissabon gesammelt." Die Zeile führt zu „Aus den Ideen übernehmen",
+wo entschieden wird; „Später" lässt genau diese Anzahl still, eine weitere
+gesammelte Idee fragt erneut. Der Menüpunkt trägt die Anzahl der noch nicht
+übernommenen Ideen.
+
 **Angenommener Ausflug.** Eine ganz normale eintägige Reise mit einer Etappe
 und einem Block. Der Tag wird bewusst erst ausgeplant, **nachdem** die
 angenommenen Ideen im Vorrat liegen — sonst plante er sich aus der
