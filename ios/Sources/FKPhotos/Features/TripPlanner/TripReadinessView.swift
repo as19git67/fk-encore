@@ -17,6 +17,10 @@ struct TripReadinessView: View {
     @State private var readiness: TripReadiness?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    /// When the plan was last put on the device, read from the store
+    /// on appearance and again after the button here has done it — so
+    /// the row and the button change under the same finger.
+    @State private var storedAt: Date?
 
     var body: some View {
         List {
@@ -41,6 +45,36 @@ struct TripReadinessView: View {
                 } footer: {
                     Text("Nichts davon ist neu berechnet — es sind vorhandene Zustände an "
                          + "einer Stelle, solange sie noch billig zu ändern sind.")
+                }
+
+                // The one row on this screen that can be fixed from this
+                // screen (§3.9): the evening before is exactly when the
+                // plan should go onto the phone, and a sentence saying it
+                // has not is a sentence with a button missing.
+                if storedAt == nil {
+                    Section {
+                        Button {
+                            Task {
+                                await viewModel.downloadBundle()
+                                storedAt = viewModel.offlineStore.storedAt(planId: viewModel.planId)
+                            }
+                        } label: {
+                            if viewModel.isDownloadingBundle {
+                                HStack { ProgressView(); Text("Wird geladen\u{2026}") }
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            } else {
+                                Label("Plan f\u{00FC}rs Ger\u{00E4}t laden", systemImage: "arrow.down.circle")
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isDownloadingBundle)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    } footer: {
+                        Text("Der ganze Plan, ohne Karten und Wetter — die brauchen Netz. "
+                             + "Was hier gelesen wird, geht dann auch im Ausland ohne.")
+                    }
                 }
 
                 if readiness.packing.isEmpty {
@@ -81,7 +115,10 @@ struct TripReadinessView: View {
         .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
-        .task { await load() }
+        .task {
+            storedAt = viewModel.offlineStore.storedAt(planId: viewModel.planId)
+            await load()
+        }
     }
 
     /// The server's checks plus the one only the phone can answer.
@@ -93,8 +130,7 @@ struct TripReadinessView: View {
     /// is right even when this screen was opened before the day plan
     /// had a chance to look.
     private var offlineRow: TripReadinessCheck {
-        TripReadinessCheck.offline(
-            storedAt: viewModel.offlineStore.storedAt(planId: viewModel.planId))
+        TripReadinessCheck.offline(storedAt: storedAt)
     }
 
     private func load() async {

@@ -190,7 +190,20 @@ final class TripExploreViewModel {
     /// means an entry can never be refused for want of one — which is
     /// exactly how "merken" came to look as though it had worked and
     /// changed nothing.
-    func collect(_ spot: TripExploredSpot) async {
+    ///
+    /// The note and the source go along too. The note is what somebody
+    /// wrote next to the place, which is the half that decides an
+    /// afternoon (§20.1); the source is the spot's own website, so the
+    /// entry can answer "where did we hear of this?" the way a shared
+    /// link can. Neither is required — a find kept with one tap is a
+    /// find kept.
+    ///
+    /// - Parameters:
+    ///   - note: what to remember about it; empty means none.
+    ///   - dwellMinutes: how long to stay, when somebody said. Nil sends
+    ///     the category's figure, which the server prefers for a place
+    ///     the map knows anyway.
+    func collect(_ spot: TripExploredSpot, note: String? = nil, dwellMinutes: Int? = nil) async {
         addingRef = spot.osmRef
         defer { addingRef = nil }
 
@@ -199,8 +212,11 @@ final class TripExploreViewModel {
             let lon: Double
             let ownerId: Int?
             let name: String?
+            let note: String?
+            let sourceUrl: String?
             let dwellMinutes: Int
         }
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             let response: TripIdeaAddResponse = try await APIClient.shared.post(
                 "/trip-planner/ideas",
@@ -209,7 +225,9 @@ final class TripExploreViewModel {
                     lon: spot.lon,
                     ownerId: ownerId,
                     name: spot.name,
-                    dwellMinutes: spot.dwellMinutes,
+                    note: trimmedNote?.isEmpty == false ? trimmedNote : nil,
+                    sourceUrl: spot.website?.isEmpty == false ? spot.website : nil,
+                    dwellMinutes: dwellMinutes ?? spot.dwellMinutes,
                 ),
             )
             lastAddition = response.sentence

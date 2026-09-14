@@ -33,6 +33,11 @@ struct TripDayMapView: View {
     @State private var sliderActive = false
     @State private var selected: Selection?
     @State private var showLegend = false
+    /// Whether the legend has ever been shown. The first map somebody
+    /// opens explains its colours by itself; from then on the button
+    /// does, because a legend that is always open is a map that is
+    /// always smaller.
+    @AppStorage("trip.map.legendSeen") private var legendSeen = false
 
     /// A tapped pin, kept whole: the sheet needs the number as much as
     /// the stop, and re-deriving it from the stop would be the walking
@@ -95,6 +100,10 @@ struct TripDayMapView: View {
         }
         .onAppear {
             if let span, sliderMinutes == 0 { sliderMinutes = Double(span.lowerBound) }
+            if !legendSeen {
+                showLegend = true
+                legendSeen = true
+            }
         }
     }
 

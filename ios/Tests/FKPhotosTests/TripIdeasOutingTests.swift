@@ -129,4 +129,19 @@ final class TripIdeasOutingTests: XCTestCase {
         XCTAssertEqual(TripIdeaDefaults.outingRadiusM, 25_000)
         XCTAssertEqual(TripIdeaDefaults.outingBudgetMinutes, 240)
     }
+
+    // MARK: - How big an outing
+
+    func testTheThreeSizesAreTheMinutesTheServerIsAskedFor() {
+        XCTAssertEqual(TripOutingBudget.twoHours.rawValue, 120)
+        XCTAssertEqual(TripOutingBudget.halfDay.rawValue, 240)
+        XCTAssertEqual(TripOutingBudget.fullDay.rawValue, 480)
+        XCTAssertEqual(TripOutingBudget.allCases.map(\.label), ["2 h", "Halber Tag", "Ganzer Tag"])
+    }
+
+    func testTheDefaultBudgetIsOneOfTheSizes() {
+        // The picker starts on the model's default; a default the picker
+        // cannot show would leave every segment unselected.
+        XCTAssertEqual(TripOutingBudget(rawValue: TripIdeaDefaults.outingBudgetMinutes), .halfDay)
+    }
 }

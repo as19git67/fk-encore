@@ -35,6 +35,9 @@ struct TripExploreView: View {
     @State private var isPickingArea = false
     @State private var isReadingArticle = false
     @State private var opened: TripExploredSpot?
+    /// The find being written into the collection with a note, while
+    /// the capture sheet is up.
+    @State private var capturing: TripExploredSpot?
     /// Which collection a find goes into. Nil means one's own.
     let ownerId: Int?
 
@@ -43,41 +46,20 @@ struct TripExploreView: View {
     }
 
     var body: some View {
-        List {
-            if let message = model.lastAddition {
-                Text(message).font(.footnote).foregroundStyle(.secondary)
-            }
-            // Said rather than left blank: the three kinds of empty are
-            // three different things to do next.
-            if let note = model.note, model.spots.isEmpty {
-                Text(note).foregroundStyle(.secondary)
-            }
-            // And the one of the three that a person can do something
-            // about gets the something. Creating a trip has asked for
-            // the maps on the traveller's behalf since the planner
-            // existed; a browse hits the same wall and may as well
-            // offer the same way through it.
-            if model.regionMissing {
-                if let note = model.regionNote {
-                    Text(note).font(.footnote).foregroundStyle(.secondary)
-                } else {
-                    Button {
-                        Task { await model.requestRegion() }
-                    } label: {
-                        Label(model.isRequestingRegion
-                              ? "Wird angefragt\u{2026}" : "Karten f\u{00FC}r diese Gegend holen",
-                              systemImage: "square.and.arrow.down")
-                            .frame(minHeight: 44)
-                    }
-                    .disabled(model.isRequestingRegion)
-                }
-            }
+        // Split three ways on purpose: one chain from the List to the
+        // last sheet was more than the type checker would finish.
+        withSheets(chrome)
+    }
 
+    /// The list with its search, chips and empty state.
+    private var results: some View {
+        List {
+            statusRows
+            regionRows
             ForEach(model.spots) { spot in
                 Button { opened = spot } label: { row(spot) }
                     .buttonStyle(.plain)
             }
-
             if model.hasMore {
                 Text("Es gibt mehr — enger eingrenzen hilft.")
                     .font(.footnote)
@@ -102,61 +84,97 @@ struct TripExploreView: View {
                 nothingChosenYet
             }
         }
-        .navigationTitle(model.area?.label ?? "Entdecken")
-        .plannerErrorBanner(model.errorMessage, retry: { await model.load() }, dismiss: { model.errorMessage = nil })
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("Hier, wo ich bin", systemImage: "location") {
-                        Task { await model.useCurrentLocation() }
-                    }
-                    Button("Andere Gegend\u{2026}", systemImage: "mappin.and.ellipse") {
-                        isPickingArea = true
-                    }
-                    Divider()
-                    Picker("Umkreis", selection: $model.radiusM) {
-                        ForEach(TripExploreDefaults.radiusChoices, id: \.self) { metres in
-                            Text(TripExploreDefaults.radiusLabel(metres)).tag(metres)
-                        }
-                    }
-                    Divider()
-                    // The other half of researching (§9.2 case 2): the
-                    // browse answers "what is here", an article answers
-                    // "what is worth going to", and until now reading
-                    // one meant Safari, the share sheet and a trip.
-                    Button("Artikel auslesen\u{2026}", systemImage: "doc.text.magnifyingglass") {
-                        isReadingArticle = true
-                    }
-                    .disabled(model.area == nil)
-                } label: {
-                    Label("Gegend", systemImage: "line.3.horizontal.decrease.circle")
+    }
+
+    /// Title, banner, toolbar and the reloads.
+    private var chrome: some View {
+        results
+            .navigationTitle(model.area?.label ?? "Entdecken")
+            .plannerErrorBanner(model.errorMessage, retry: { await model.load() },
+                                dismiss: { model.errorMessage = nil })
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { areaMenu }
+            }
+            .task {
+                model.ownerId = ownerId
+                await model.loadInterests()
+            }
+            .onChange(of: model.chosenInterests) { _, _ in Task { await model.load() } }
+            .onChange(of: model.question) { _, _ in Task { await model.load() } }
+            .onChange(of: model.radiusM) { _, _ in Task { await model.load() } }
+            .refreshable { await model.load() }
+    }
+
+    /// The "Gegend" menu: where to look, how far, and the article reader.
+    private var areaMenu: some View {
+        Menu {
+            Button("Hier, wo ich bin", systemImage: "location") {
+                Task { await model.useCurrentLocation() }
+            }
+            Button("Andere Gegend\u{2026}", systemImage: "mappin.and.ellipse") {
+                isPickingArea = true
+            }
+            Divider()
+            Picker("Umkreis", selection: $model.radiusM) {
+                ForEach(TripExploreDefaults.radiusChoices, id: \.self) { metres in
+                    Text(TripExploreDefaults.radiusLabel(metres)).tag(metres)
                 }
-                .disabled(model.isLocating)
             }
-        }
-        .task {
-            model.ownerId = ownerId
-            await model.loadInterests()
-        }
-        .onChange(of: model.chosenInterests) { _, _ in Task { await model.load() } }
-        .onChange(of: model.question) { _, _ in Task { await model.load() } }
-        .onChange(of: model.radiusM) { _, _ in Task { await model.load() } }
-        .refreshable { await model.load() }
-        .sheet(isPresented: $isReadingArticle) {
-            if let area = model.area {
-                TripArticleReadView(area: area, ownerId: ownerId)
+            Divider()
+            // The other half of researching (§9.2 case 2): the
+            // browse answers "what is here", an article answers
+            // "what is worth going to", and until now reading
+            // one meant Safari, the share sheet and a trip.
+            if model.area == nil {
+                // Grey with a reason, not grey alone: the reader
+                // searches *around* something, and until an area
+                // is chosen there is nothing to search around.
+                Button("Artikel auslesen\u{2026}", systemImage: "doc.text.magnifyingglass") {}
+                    .disabled(true)
+                Text("Erst eine Gegend w\u{00E4}hlen")
+            } else {
+                Button("Artikel auslesen\u{2026}", systemImage: "doc.text.magnifyingglass") {
+                    isReadingArticle = true
+                }
             }
+        } label: {
+            Label("Gegend", systemImage: "line.3.horizontal.decrease.circle")
         }
-        .sheet(isPresented: $isPickingArea) {
-            TripExploreAreaSheet { place in
-                isPickingArea = false
-                Task { await model.use(place) }
+        .disabled(model.isLocating)
+    }
+
+    /// The sheets and the detail destination.
+    private func withSheets<Content: View>(_ content: Content) -> some View {
+        content
+            .sheet(isPresented: $isReadingArticle) {
+                if let area = model.area {
+                    TripArticleReadView(area: area, ownerId: ownerId)
+                }
             }
-        }
-        .navigationDestination(item: $opened) { spot in
-            detail(spot)
-        }
+            .sheet(isPresented: $isPickingArea) {
+                TripExploreAreaSheet { place in
+                    isPickingArea = false
+                    Task { await model.use(place) }
+                }
+            }
+            // The same sheet the other ways in use, so a find kept from here
+            // can carry a note the way a shared link can. The note may stay
+            // empty; the source — the spot's own website — goes along
+            // regardless.
+            .sheet(item: $capturing) { spot in
+                TripIdeaCaptureSheet(
+                    title: spot.displayName,
+                    explanation: "Gemerkt wird der Ort aus der Karte"
+                        + (spot.website == nil ? "." : " \u{2014} mit seiner Website als Herkunft."),
+                ) { note, dwellMinutes in
+                    await model.collect(spot, note: note, dwellMinutes: dwellMinutes)
+                    return model.errorMessage == nil
+                }
+            }
+            .navigationDestination(item: $opened) { spot in
+                detail(spot)
+            }
     }
 
     // MARK: - Before anything was asked
@@ -183,6 +201,20 @@ struct TripExploreView: View {
                     Label("Andere Gegend\u{2026}", systemImage: "mappin.and.ellipse")
                 }
                 .buttonStyle(.bordered)
+
+                // The third way in, named where the other two are — and
+                // grey with its reason, because the reader needs an area
+                // to search around before it can read anything.
+                Button {
+                    isReadingArticle = true
+                } label: {
+                    Label("Artikel auslesen\u{2026}", systemImage: "doc.text.magnifyingglass")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.area == nil)
+                Text("Erst eine Gegend w\u{00E4}hlen")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -259,6 +291,52 @@ struct TripExploreView: View {
 
     // MARK: - What is there
 
+    /// What is going on above the results. Split out of `body`: one
+    /// list with every conditional inline was more than the type
+    /// checker would finish.
+    @ViewBuilder
+    private var statusRows: some View {
+        if let message = model.lastAddition {
+            Text(message).font(.footnote).foregroundStyle(.secondary)
+        }
+        // A search that is running looks, without this, exactly like
+        // a search that found nothing.
+        if model.isLoading {
+            HStack { ProgressView(); Text("Wird gesucht\u{2026}") }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        // Said rather than left blank: the three kinds of empty are
+        // three different things to do next.
+        if let note = model.note, model.spots.isEmpty {
+            Text(note).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The one of the three kinds of empty that a person can do
+    /// something about gets the something. Creating a trip has asked
+    /// for the maps on the traveller's behalf since the planner
+    /// existed; a browse hits the same wall and may as well offer the
+    /// same way through it.
+    @ViewBuilder
+    private var regionRows: some View {
+        if model.regionMissing {
+            if let note = model.regionNote {
+                Text(note).font(.footnote).foregroundStyle(.secondary)
+            } else {
+                Button {
+                    Task { await model.requestRegion() }
+                } label: {
+                    Label(model.isRequestingRegion
+                          ? "Wird angefragt\u{2026}" : "Karten f\u{00FC}r diese Gegend holen",
+                          systemImage: "square.and.arrow.down")
+                        .frame(minHeight: 44)
+                }
+                .disabled(model.isRequestingRegion)
+            }
+        }
+    }
+
     @ViewBuilder
     private func row(_ spot: TripExploredSpot) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -300,11 +378,13 @@ struct TripExploreView: View {
                 Label("Schon bei den Ideen", systemImage: "lightbulb.fill")
                     .foregroundStyle(.secondary)
             } else {
+                // Opens the capture sheet rather than saving outright:
+                // the note is what makes an idea worth more than a pin,
+                // and it is written now or never. The detail stays open
+                // and turns into "Schon im Vorrat" once the save is
+                // through.
                 Button {
-                    Task {
-                        await model.collect(spot)
-                        close()
-                    }
+                    capturing = spot
                 } label: {
                     Label("Zu den Ideen", systemImage: "lightbulb")
                 }

@@ -49,6 +49,25 @@ struct TripIdea: Codable, Identifiable, Sendable {
         if let addedBy, !addedBy.isEmpty { return "von \(addedBy)" }
         return nil
     }
+
+    /// The note as its own line, or nil when nobody wrote one.
+    ///
+    /// Split from `subtitle` so a row can show the note *and* who kept
+    /// the place: „der Biergarten, den Anna gemerkt hat" is half the
+    /// information (§20.1), and a subtitle that shows one or the other
+    /// drops that half as soon as somebody writes a note.
+    var noteLine: String? {
+        guard let note, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return note
+    }
+
+    /// "von Anna", or nil when the server does not say who.
+    var authorLine: String? {
+        guard let addedBy, !addedBy.isEmpty else { return nil }
+        return "von \(addedBy)"
+    }
 }
 
 /// A collection the signed-in person may write into (§20.1).
@@ -129,6 +148,28 @@ enum TripIdeaDefaults {
     static let outingRadiusM = 25_000
     /// Half a day, which is what "ein Nachmittag" means.
     static let outingBudgetMinutes = 240
+}
+
+/// How much of a day the outing may take (§20.2).
+///
+/// Three sizes rather than a stepper: "zwei Stunden", "ein halber Tag"
+/// and "ein ganzer Tag" are the words people use, and a minute count in
+/// between is not a decision anybody makes before lunch. The raw value
+/// is the minute budget the server is asked for.
+enum TripOutingBudget: Int, CaseIterable, Identifiable, Sendable {
+    case twoHours = 120
+    case halfDay = 240
+    case fullDay = 480
+
+    var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .twoHours: return "2 h"
+        case .halfDay: return "Halber Tag"
+        case .fullDay: return "Ganzer Tag"
+        }
+    }
 }
 
 /// An idea near where you are standing (§20.2).
@@ -275,6 +316,24 @@ struct TripOutingAcceptResponse: Codable, Sendable {
             ? "eine Idee liegt bei den Kandidaten der Reise"
             : "\(inPool.count) Ideen liegen bei den Kandidaten der Reise"
         return "Der Ausflug steht als Reise — \(left)."
+    }
+}
+
+/// What taking one idea into a trip produced (§20.3).
+///
+/// The server answers with two facts and no sentence, so the sentence
+/// is composed here — on the response, where it is a pure reading of
+/// what came back and reachable from a test without an actor.
+struct TripIdeaTakeResponse: Codable, Sendable {
+    /// False when the trip already had it, which is an answer and not a
+    /// fault: the idea is in the trip, which is what was wanted.
+    let taken: Bool
+    let osmRef: String?
+
+    func sentence(idea: String, plan: String) -> String {
+        taken
+            ? "\(idea) liegt jetzt bei den Kandidaten von „\(plan)“."
+            : "\(idea) war schon in „\(plan)“."
     }
 }
 
