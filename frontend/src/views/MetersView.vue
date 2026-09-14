@@ -70,6 +70,12 @@ import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 import { decimalInputPt } from '../utils/inputNumberPt'
+import {
+  energyWindowBuckets,
+  periodSpanLabel,
+  periodUnit,
+  summarizeEnergyWindow,
+} from '../utils/energySummary'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -313,12 +319,15 @@ function fmtPercent(value: number | null) {
   })
 }
 
-const energyBuckets = computed(() => {
-  const buckets = energyReport.value?.buckets ?? []
-  const recent = energyGranularity.value === 'month' ? buckets.slice(-12) : buckets
-  // Buckets come from the backend oldest-first; the table shows the newest period on top.
-  return [...recent].reverse()
-})
+/** The periods the block covers, oldest first — the basis of every figure. */
+const energyWindow = computed(() =>
+  energyWindowBuckets(energyReport.value?.buckets ?? [], energyGranularity.value),
+)
+
+const energyBuckets = computed(() =>
+  // The window comes oldest-first; the table shows the newest period on top.
+  [...energyWindow.value].reverse(),
+)
 
 type EnergyBucket = EnergyReport['buckets'][number]
 
@@ -330,72 +339,26 @@ function energyBucketPartialHint(bucket: EnergyBucket) {
   return 'Nicht alle PV-Zähler haben Werte in diesem Zeitraum — fließt nicht in die Summen ein'
 }
 
-function isCurrentPeriod(bucket: EnergyBucket, granularity: MeterReportGranularity, now = new Date()) {
-  if (granularity === 'year') {
-    return bucket.key === String(now.getFullYear())
-  }
-  return bucket.key === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-}
-
-function completedBuckets(buckets: EnergyBucket[], granularity: MeterReportGranularity) {
-  return buckets.filter((bucket) => !isCurrentPeriod(bucket, granularity))
-}
-
-function linearRegressionSlope(values: number[]): number | null {
-  if (values.length < 3) return null
-  const n = values.length
-  const meanX = (n - 1) / 2
-  const meanY = values.reduce((sum, value) => sum + value, 0) / n
-  let numerator = 0
-  let denominator = 0
-  values.forEach((value, index) => {
-    const dx = index - meanX
-    numerator += dx * (value - meanY)
-    denominator += dx * dx
-  })
-  if (denominator === 0) return null
-  return numerator / denominator
-}
-
 function trendLabel() {
   if (energyGranularity.value === 'year') return 'Trend/Jahr'
   return 'Trend/Monat'
 }
 
-const energyAnalysis = computed(() => {
-  const buckets = energyReport.value?.buckets ?? []
-  const completed = completedBuckets(buckets, energyGranularity.value)
-  const trendSource = energyGranularity.value === 'month' ? completed.slice(-12) : completed
-  const avg = (selector: (bucket: EnergyBucket) => number | null) => {
-    const values = completed.map(selector).filter((value): value is number => value !== null)
-    if (values.length === 0) return null
-    return values.reduce((sum, value) => sum + value, 0) / values.length
-  }
-  const trend = (selector: (bucket: EnergyBucket) => number | null) => {
-    const values = trendSource.map(selector).filter((value): value is number => value !== null)
-    return linearRegressionSlope(values)
-  }
-  return {
-    count: completed.length,
-    trendPoints: trendSource.length,
-    avgGridImport: avg((bucket) => bucket.gridImport),
-    avgGridExport: avg((bucket) => bucket.gridExport),
-    avgProduction: avg((bucket) => bucket.production),
-    avgSelfConsumption: avg((bucket) => bucket.selfConsumption),
-    avgAutarky: avg((bucket) => bucket.autarky),
-    avgSelfConsumptionRate: avg((bucket) => bucket.selfConsumptionRate),
-    avgHeatPumpTotal: avg((bucket) => bucket.heatPumpTotal),
-    avgConsumptionWithoutHeatPumpAndEv: avg((bucket) => bucket.consumptionWithoutHeatPumpAndEv),
-    avgHeatHeatingTotal: avg((bucket) => bucket.heatHeatingTotal),
-    avgHeatHeatingPvShare: avg((bucket) => bucket.heatHeatingPvShare),
-    avgHotWaterTotal: avg((bucket) => bucket.hotWaterTotal),
-    avgHotWaterPvShare: avg((bucket) => bucket.hotWaterPvShare),
-    avgEvChargerTotal: avg((bucket) => bucket.evChargerTotal),
-    avgEvChargerPvShare: avg((bucket) => bucket.evChargerPvShare),
-    trendGridImport: trend((bucket) => bucket.gridImport),
-    trendAutarky: trend((bucket) => bucket.autarky),
-  }
-})
+const energyAnalysis = computed(() =>
+  summarizeEnergyWindow(
+    energyWindow.value,
+    energyGranularity.value,
+    energyReport.value?.hasTariffs ?? false,
+  ),
+)
+
+/** "kWh / Monat" — the denominator that turns an average into a rate. */
+const avgPeriodUnit = computed(() => periodUnit(energyGranularity.value))
+
+/** "12 Monate" — the span the cost sums cover. */
+const sumSpanLabel = computed(() =>
+  periodSpanLabel(energyAnalysis.value.count, energyGranularity.value),
+)
 
 const hasHeatPumpBreakdown = computed(() =>
   (energyReport.value?.buckets ?? []).some(
@@ -423,7 +386,8 @@ const energyVisibleRangeLabel = computed(() => {
 })
 
 const energyCostScopeLabel = computed(
-  () => `Summe im angezeigten Zeitraum ${energyVisibleRangeLabel.value}`,
+  () =>
+    `Summe über ${sumSpanLabel.value} mit vollständiger Ablesung (${energyVisibleRangeLabel.value})`,
 )
 
 const energyYtdComparison = computed(() => {
@@ -1128,21 +1092,25 @@ onMounted(load)
           <div class="energy-kpis">
             <div class="energy-kpi">
               <span class="figure-label">Ø Bezug</span>
-              <strong>{{ fmt(energyAnalysis.avgGridImport, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <strong>{{ fmt(energyAnalysis.avgGridImport, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
               <span class="figure-sub">{{ fmtTrend(energyAnalysis.trendGridImport, energyReport.decimals, energyReport.unit) }}</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Ø Einspeisung</span>
-              <strong>{{ fmt(energyAnalysis.avgGridExport, energyReport.decimals) }} {{ energyReport.unit }}</strong>
-              <span class="figure-sub">{{ energyAnalysis.count }} abgeschlossene {{ energyGranularity === 'month' ? 'PV-Monate' : 'PV-Jahre' }}</span>
+              <strong>{{ fmt(energyAnalysis.avgGridExport, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
+              <span class="figure-sub">Basis: {{ sumSpanLabel }} mit vollständiger Ablesung</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Ø Produktion</span>
-              <strong>{{ fmt(energyAnalysis.avgProduction, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <strong>{{ fmt(energyAnalysis.avgProduction, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Ø Eigenverbrauch</span>
-              <strong>{{ fmt(energyAnalysis.avgSelfConsumption, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <strong>{{ fmt(energyAnalysis.avgSelfConsumption, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Gesamtverbrauch</span>
+              <strong>{{ fmt(energyAnalysis.avgTotalConsumption, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Ø Autarkie</span>
@@ -1159,25 +1127,25 @@ onMounted(load)
           <div v-if="hasHeatPumpBreakdown" class="energy-kpis energy-kpis--compact">
             <div class="energy-kpi">
               <span class="figure-label">Ø Verbrauch ohne WP/E-Auto</span>
-              <strong>{{ fmt(energyAnalysis.avgConsumptionWithoutHeatPumpAndEv, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <strong>{{ fmt(energyAnalysis.avgConsumptionWithoutHeatPumpAndEv, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Ø Wärmepumpe gesamt</span>
-              <strong>{{ fmt(energyAnalysis.avgHeatPumpTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <strong>{{ fmt(energyAnalysis.avgHeatPumpTotal, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Ø Heizung gesamt</span>
-              <strong>{{ fmt(energyAnalysis.avgHeatHeatingTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <strong>{{ fmt(energyAnalysis.avgHeatHeatingTotal, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
               <span class="figure-sub">PV-Anteil {{ fmtPercent(energyAnalysis.avgHeatHeatingPvShare) }}</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Ø Warmwasser gesamt</span>
-              <strong>{{ fmt(energyAnalysis.avgHotWaterTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <strong>{{ fmt(energyAnalysis.avgHotWaterTotal, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
               <span class="figure-sub">PV-Anteil {{ fmtPercent(energyAnalysis.avgHotWaterPvShare) }}</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Ø E-Auto/Wallbox gesamt</span>
-              <strong>{{ fmt(energyAnalysis.avgEvChargerTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <strong>{{ fmt(energyAnalysis.avgEvChargerTotal, energyReport.decimals) }} {{ energyReport.unit }} / {{ avgPeriodUnit }}</strong>
               <span class="figure-sub">PV-Anteil {{ fmtPercent(energyAnalysis.avgEvChargerPvShare) }}</span>
             </div>
           </div>
@@ -1188,27 +1156,27 @@ onMounted(load)
             <strong>Autarkie {{ fmtPercentTrend(energyYtdComparison.autarkyDelta).replace(trendLabel(), 'Δ') }}</strong>
           </div>
 
-          <div v-if="energyReport.hasTariffs && energyReport.totals.costs" class="energy-kpis energy-kpis--compact">
+          <div v-if="energyAnalysis.costs" class="energy-kpis energy-kpis--compact">
             <div class="energy-kpi">
               <span class="figure-label">Stromkosten nach Einspeisung</span>
-              <strong>{{ fmtCurrency(energyReport.totals.costs.netElectricityCostEur) }}</strong>
+              <strong>{{ fmtCurrency(energyAnalysis.costs.netElectricityCostEur) }} / {{ sumSpanLabel }}</strong>
               <span class="figure-sub">{{ energyCostScopeLabel }}</span>
               <span class="figure-sub">Bezug + Grundpreis − Einspeisung</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">PV-Nutzen</span>
-              <strong>{{ fmtCurrency(energyReport.totals.costs.pvBenefitEur) }}</strong>
+              <strong>{{ fmtCurrency(energyAnalysis.costs.pvBenefitEur) }} / {{ sumSpanLabel }}</strong>
               <span class="figure-sub">{{ energyCostScopeLabel }}</span>
               <span class="figure-sub">Eigenverbrauch + Einspeiseerlös</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Vermiedener Netzbezug</span>
-              <strong>{{ fmtCurrency(energyReport.totals.costs.avoidedGridCostEur) }}</strong>
+              <strong>{{ fmtCurrency(energyAnalysis.costs.avoidedGridCostEur) }} / {{ sumSpanLabel }}</strong>
               <span class="figure-sub">{{ energyCostScopeLabel }}</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Einspeiseerlös</span>
-              <strong>{{ fmtCurrency(energyReport.totals.costs.feedInRevenueEur) }}</strong>
+              <strong>{{ fmtCurrency(energyAnalysis.costs.feedInRevenueEur) }} / {{ sumSpanLabel }}</strong>
               <span class="figure-sub">{{ energyCostScopeLabel }}</span>
             </div>
           </div>
@@ -1413,9 +1381,17 @@ onMounted(load)
     >
       <div class="energy-help">
         <p>
-          Die Werte beziehen sich auf die aktuell angezeigten vollständigen PV-Zeiträume:
-          <strong>{{ energyVisibleRangeLabel }}</strong>. In der Monatsansicht werden in der
-          Tabelle die letzten 12 Monate gezeigt, in der Jahresansicht die Jahre.
+          Alle Kennzahlen oben beziehen sich auf genau die Zeiträume der Tabelle darunter:
+          <strong>{{ energyVisibleRangeLabel }}</strong>. In der Monatsansicht sind das die
+          letzten 12 Monate, in der Jahresansicht alle Jahre. Zeiträume, die nur teilweise
+          abgelesen sind (in der Tabelle mit <i class="pi pi-exclamation-circle" /> markiert),
+          zählen nicht mit — sonst würde ein halb abgelesener Monat jeden Durchschnitt drücken.
+          Basis sind aktuell <strong>{{ sumSpanLabel }}</strong>.
+        </p>
+        <p>
+          Hinter jedem Wert steht seine Bezugsgröße: Ein Durchschnitt wird als
+          <code>kWh / {{ avgPeriodUnit }}</code> angegeben, eine Summe als
+          <code>€ / {{ sumSpanLabel }}</code>.
         </p>
 
         <h3>Verbrauch und PV</h3>
@@ -1431,9 +1407,13 @@ onMounted(load)
           <dt>Gesamtverbrauch</dt>
           <dd><code>Bezug + Eigenverbrauch</code></dd>
           <dt>Autarkie</dt>
-          <dd><code>1 − Bezug / Gesamtverbrauch</code></dd>
+          <dd>
+            <code>1 − Bezug / Gesamtverbrauch</code>. Die Ø-Kachel rechnet mit den Summen
+            des Zeitraums, nicht mit dem Mittel der Monatsprozente — sonst zählte ein
+            verbrauchsarmer Monat so viel wie ein verbrauchsstarker.
+          </dd>
           <dt>Eigenverbrauchsquote</dt>
-          <dd><code>Eigenverbrauch / Produktion</code></dd>
+          <dd><code>Eigenverbrauch / Produktion</code>, ebenfalls aus den Summen des Zeitraums.</dd>
         </dl>
 
         <h3>Wärmepumpe</h3>

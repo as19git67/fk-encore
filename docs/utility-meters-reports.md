@@ -227,3 +227,13 @@ Nachgezogen nach der Modell-Analyse (PR #1201, Details in
 9. **Wasserrollen** `water_main`/`water_garden` (Grundgebühr einmal, Garten
    ohne Abwasser); Einspeisevergütung nach Generation und Leistungsstufe;
    Jahreskosten aus Monaten; Plausibilitätsgrenzen beim Anlegen von Annahmen.
+
+Nachgezogen nach der Nachrechnung des Energie-Blocks von Hand:
+
+10. **Kennzahlen decken das angezeigte Fenster**: Die Kacheln des Blocks
+    „Energie" aggregieren genau die Zeiträume der Tabelle darunter (12 Monate
+    bzw. alle Jahre) und darin nur die vollständig abgelesenen, statt die
+    `totals` des Reports über die gesamte Historie zu zeigen. Quoten kommen aus
+    den Summen des Fensters, nicht aus dem Mittel der Monatsprozente, und der
+    Trend liegt auf der Kalenderachse. Hinter jedem Wert steht seine
+    Bezugsgröße (`kWh / Monat`, `€ / 12 Monate`).

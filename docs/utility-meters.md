@@ -431,6 +431,31 @@ Kostenrechnung die niedrigste passende Stufe.
 
 Nicht Teil der ersten Ausbaustufe: E-Auto, Gasvergleich/JAZ.
 
+**Kennzahlen im Frontend-Block „Energie"** (`frontend/src/utils/energySummary.ts`):
+Der Report liefert `totals` über *alle* vollständigen Zeiträume seit Beginn der
+Aufzeichnung. Der Block zeigt aber nur ein Fenster — in der Monatsansicht die
+letzten 12 Monate, in der Jahresansicht alle Jahre. Die Kacheln rechnen deshalb
+nicht mit `totals`, sondern aggregieren genau die Buckets dieses Fensters, und
+darin nur die mit `complete === true`; der laufende Monat bzw. das laufende Jahr
+fällt zusätzlich heraus. Sonst steht über den Kosten „Summe im angezeigten
+Zeitraum", während die Zahl zehn Jahre umfasst, und der Durchschnitt lässt sich
+aus der Tabelle darunter nicht nachrechnen.
+
+Im selben Modul:
+
+- **Quoten aus Summen**: Ø Autarkie, Ø Eigenverbrauchsquote und die PV-Anteile
+  kommen aus den Summen des Fensters (`1 − Σ Bezug / Σ Gesamtverbrauch`), nicht
+  aus dem Mittel der Monatsprozente — sonst zählt ein verbrauchsarmer Monat so
+  viel wie ein verbrauchsstarker. Ein PV-Anteil wird nur über Zeiträume gebildet,
+  in denen *beide* Seiten bekannt sind.
+- **Trend über die Kalenderachse** (`slopePerPeriod`): Stützstellen sind
+  `periodOrdinal` (Jahr × 12 + Monat), nicht der Index im Array. Ein fehlender
+  Monat bleibt damit eine Lücke, statt stillschweigend zugezogen zu werden.
+- **Bezugsgröße am Wert**: Ein Durchschnitt wird als `kWh / Monat` bzw.
+  `kWh / Jahr` ausgegeben, eine Summe als `€ / 12 Monate` bzw. `€ / 5 Jahre`
+  (`periodUnit`, `periodSpanLabel`). Die Zahl allein sagt nicht, worauf sie sich
+  bezieht.
+
 ### 5.2.1 Wirtschaftlichkeit
 
 `GET /meters/reports/economics?granularity=month|year&from=&to=`
