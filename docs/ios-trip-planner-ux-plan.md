@@ -720,7 +720,7 @@ or not at all.
 | Section | Plan | What landed | Why |
 |---|---|---|---|
 | 2.1 badge | Badge also for a pending auto-**end** suggestion | Tab icon fills for trip mode **or** a running plan; the badge still covers trip mode and pending **start** suggestions only | `TripAutoEndPreferences.pendingSuggestion` is a static `UserDefaults` read, not observable; wiring it into the tab bar needs an observable monitor first |
-| 2.2 tab root | Segmented "Aufnehmen / Planen" or the plan list as tab root | The planner stays behind the toolbar icon; the Trip tab gained the permanent "läuft heute" banner (both states) and a settings link | Restructuring the tab root touches launch routing and the auto-start flows; left for a separate change |
+| 2.2 tab root | Segmented "Aufnehmen / Planen" or the plan list as tab root | Done in a follow-up PR as the segmented control, in the navigation bar where the title was (`TripTabMode`). The half is remembered; on appearance trip mode wins, then a plan running today opens "Planen", otherwise the remembered half. The Trip tab keeps the permanent "läuft heute" banner and the settings link on "Aufnehmen" | The plan list is embedded rather than pushed, so the tab holds the one destination for an opened plan; the earlier "left for a separate change" was that change |
 | 2.2 menu | Move trip-wide screens **out** of the day menu onto the plan list | Both: the day menu keeps them in a "Rund um die Reise" submenu, and the plan list row offers them as a context menu plus the time-bound inline prompts | Somebody standing in the day screen still needs Dokumente; the submenu keeps them reachable without cluttering the day |
 | 2.2 quick controls | Tempo / Verkehrsmittel as chips in the day header | The header opens the city editor (sheet); tempo stays in Einstellungen | The header already carries the transport; two more controls there fought the day picker for space |
 | 2.3 maps | `pin(...)` honours "Jedes Mal fragen" **or** the footer says only routes ask | Footer says it; `pin(...)` unchanged. The dialog gained "Immer Apple Karten / Immer Google Maps" | Asking on every "auf der Karte zeigen" tap would make the planning-mode button a dialog |
@@ -751,7 +751,7 @@ or not at all.
 | X11 | Travellers outside the household, a per-traveller `shortWalks` toggle, transferring the organiser role | Not done; all three need backend support (`travellers.ts` accepts household persons or planning users only; no role-transfer endpoint) |
 | X15 | "§9.1" references in `TripMapsHandoff.swift` / `TripMapsSettingsView.swift` | Dropped: they cite §9.1 of `ios-urlaubsplanung.md` ("Hinaus: was die App abgibt"), which is correct. The finding was wrong |
 | I5 (pin) | Planning-mode "auf der Karte zeigen" bypasses "Jedes Mal fragen" | Kept as is; documented in the maps settings footer (see 3.1) |
-| S1 | Planner as a peer of the photo mode at the tab root | Not done (see 3.1, 2.2 tab root) |
+| S1 | Planner as a peer of the photo mode at the tab root | Done in a follow-up PR (see 3.1, 2.2 tab root): "Aufnehmen / Planen" segmented control on the Trip tab, the planner icon is gone |
 
 ### 3.3 Added beyond the plan
 
@@ -776,7 +776,7 @@ Three things the sandbox (no Swift toolchain) could not catch:
 
 1. ~~D8 — reasons travel with the stop (server + `TripSpotDetail(stop)`).~~ Done (see 3.2).
 2. ~~D11 — invitee list and removal for the idea collection (needs a list endpoint).~~ Done (see 3.2).
-3. S1 — planner and photo mode as peers at the tab root, once the launch routing is revisited.
+3. ~~S1 — planner and photo mode as peers at the tab root, once the launch routing is revisited.~~ Done (see 3.1).
 4. X11 — manual travellers, `shortWalks` per person, organiser hand-over (backend first).
 5. D17 — an observable auto-end monitor so the tab badge can show a pending end suggestion.
 6. E3 — "Das hier merken" as a one-tap action on the Trip tab and as an App Shortcut.
