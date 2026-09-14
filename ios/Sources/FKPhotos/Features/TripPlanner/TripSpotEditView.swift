@@ -133,9 +133,7 @@ struct TripSpotEditView: View {
             }
 
             Section {
-                Stepper(value: $edit.dwellMinutes, in: 5...480, step: 5) {
-                    Text(TripClock.duration(edit.dwellMinutes))
-                }
+                TripDurationPicker(minutes: $edit.dwellMinutes)
             } header: {
                 Text("Aufenthalt")
             } footer: {

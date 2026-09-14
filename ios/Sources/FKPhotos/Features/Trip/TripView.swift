@@ -50,6 +50,13 @@ struct TripView: View {
                     Label("Urlaubsplanung", systemImage: "calendar.badge.clock")
                 }
             }
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink {
+                    TripSettingsView()
+                } label: {
+                    Label("Einstellungen", systemImage: "gearshape")
+                }
+            }
         }
         .sheet(isPresented: $showStartSheet) {
             TripStartSheet(suggestedName: startSheetName) { name in
@@ -281,6 +288,8 @@ private struct ActiveTripView: View {
     /// notifications are denied or the user opens the app instead of using the
     /// notification's actions.
     @State private var autoEndSuggestion: PendingAutoEndSuggestion?
+    /// A sync mode waiting for the confirmation below.
+    @State private var pendingMode: PhotoSyncMode?
 
     private let columns = [GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)]
 
@@ -330,6 +339,21 @@ private struct ActiveTripView: View {
         .onAppear { refreshAutoEndSuggestion() }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active { refreshAutoEndSuggestion() }
+        }
+        .confirmationDialog(
+            "Löschungen übernehmen?",
+            isPresented: Binding(get: { pendingMode != nil }, set: { if !$0 { pendingMode = nil } }),
+            titleVisibility: .visible,
+        ) {
+            if let pendingMode {
+                Button(pendingMode == .sync ? "Synchronisieren" : "Zwei-Wege") {
+                    store.setMode(pendingMode)
+                    self.pendingMode = nil
+                }
+                Button("Abbrechen", role: .cancel) { self.pendingMode = nil }
+            }
+        } message: {
+            Text(Self.modeHint(pendingMode ?? .sync))
         }
     }
 
@@ -428,7 +452,16 @@ private struct ActiveTripView: View {
             HStack {
                 Picker("Modus", selection: Binding(
                     get: { trip.mode },
-                    set: { store.setMode($0) }
+                    set: { chosen in
+                        // Kopieren → Synchronisieren makes a deletion on
+                        // the phone a deletion in a possibly shared
+                        // album. Once, asked.
+                        if chosen != .copy, trip.mode == .copy {
+                            pendingMode = chosen
+                        } else {
+                            store.setMode(chosen)
+                        }
+                    }
                 )) {
                     Text("Kopieren").tag(PhotoSyncMode.copy)
                     Text("Synchronisieren").tag(PhotoSyncMode.sync)

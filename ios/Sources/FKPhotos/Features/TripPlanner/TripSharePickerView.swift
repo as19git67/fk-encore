@@ -54,6 +54,12 @@ struct TripSharePickerView: View {
                 }
 
                 Section("Reise") {
+                    if plans.isEmpty {
+                        Text("Noch keine Reise. Erst eine anlegen, dann lässt sich der Ort "
+                             + "übernehmen.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     ForEach(plans) { plan in
                         Button {
                             selectedPlanId = plan.id

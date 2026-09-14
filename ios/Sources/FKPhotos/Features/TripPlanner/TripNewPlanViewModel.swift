@@ -33,6 +33,30 @@ final class TripNewPlanViewModel {
     private(set) var isCreating = false
     var errorMessage: String?
 
+    /// The interest vocabulary, from the server. Empty until loaded and
+    /// silently empty on failure: the form works without the section.
+    private(set) var interestOptions: [TripInterestOption] = []
+
+    func loadInterests() async {
+        struct Response: Decodable { let interests: [TripInterestOption] }
+        do {
+            let response: Response = try await APIClient.shared.get("/trip-planner/interests")
+            interestOptions = response.interests
+        } catch {
+            interestOptions = []
+        }
+    }
+
+    /// Has anything been typed or picked? Decides whether "Abbrechen"
+    /// asks first.
+    var isDirty: Bool {
+        draft.anchor != nil
+            || !draft.title.trimmingCharacters(in: .whitespaces).isEmpty
+            || !sentence.trimmingCharacters(in: .whitespaces).isEmpty
+            || draft.legs.count > 1
+            || !draft.interests.isEmpty
+    }
+
     // MARK: - Place search
 
     func pick(_ place: TripPlace) {

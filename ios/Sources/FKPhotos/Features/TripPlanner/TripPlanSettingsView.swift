@@ -92,8 +92,9 @@ struct TripPlanSettingsView: View {
             } header: {
                 Text("Wie?")
             } footer: {
-                Text("Verkehrsmittel, Tempo und Begleitung bestimmen, wie viel an einem Tag "
-                     + "Platz hat. Speichern plant die Tage neu.\n\n"
+                Text("Gilt für alle Städte der Reise; eine einzelne Stadt bekommt ihr eigenes "
+                     + "Verkehrsmittel unter „Städte“. Verkehrsmittel, Tempo und Begleitung "
+                     + "bestimmen, wie viel an einem Tag Platz hat. Sichern plant die Tage neu.\n\n"
                      + "„\(TripTransportMode.transit.label)“ ist der Regelfall in einer Stadt: "
                      + "kurze Wege werden gelaufen, lange gefahren — je Weg das, was schneller "
                      + "ist.")

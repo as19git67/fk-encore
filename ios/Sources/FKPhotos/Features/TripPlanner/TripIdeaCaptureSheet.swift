@@ -49,9 +49,7 @@ struct TripIdeaCaptureSheet: View {
                 }
 
                 Section {
-                    Stepper(value: $dwellMinutes, in: 5...480, step: 5) {
-                        Text("Aufenthalt: \(dwellMinutes) Min.")
-                    }
+                    TripDurationPicker(minutes: $dwellMinutes)
                 } header: {
                     Text("Aufenthaltsdauer")
                 } footer: {

@@ -15,6 +15,8 @@ struct TripParticipantsView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(\.dismiss) private var dismiss
     @State private var confirmLeaving = false
+    /// Somebody about to be removed — asked first, by name.
+    @State private var removing: TripParticipant?
 
     init(planId: Int) {
         _model = State(initialValue: TripParticipantsViewModel(planId: planId))
@@ -36,7 +38,12 @@ struct TripParticipantsView: View {
             }
 
             if model.youOrganise {
-                Section("Einladen") {
+                Section {
+                    if let lastInvitation = model.lastInvitation {
+                        Label(lastInvitation, systemImage: "checkmark.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     HStack {
                         TextField("E-Mail-Adresse", text: $model.email)
                             .textInputAutocapitalization(.never)
@@ -49,9 +56,14 @@ struct TripParticipantsView: View {
                         } else {
                             Button("Einladen") { Task { await model.invite() } }
                                 .buttonStyle(.borderless)
-                                .disabled(model.email.trimmingCharacters(in: .whitespaces).isEmpty)
+                                .disabled(!model.emailLooksValid)
                         }
                     }
+                } header: {
+                    Text("Einladen")
+                } footer: {
+                    Text("Die Adresse, mit der die Person sich anmeldet. Ohne Konto dazu meldet "
+                         + "der Server, dass niemand gefunden wurde.")
                 }
             }
 
@@ -80,6 +92,17 @@ struct TripParticipantsView: View {
             await model.load()
         }
         .refreshable { await model.load() }
+        .confirmationDialog("Aus der Reise entfernen?", isPresented: Binding(
+            get: { removing != nil }, set: { if !$0 { removing = nil } }),
+            titleVisibility: .visible, presenting: removing) { person in
+            Button("\(person.displayName) entfernen", role: .destructive) {
+                Task { await model.remove(person) }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { person in
+            Text("\(person.displayName) sieht die Reise danach nicht mehr und kann jederzeit "
+                 + "wieder eingeladen werden.")
+        }
         .confirmationDialog("Reise verlassen?", isPresented: $confirmLeaving,
                             titleVisibility: .visible) {
             Button("Verlassen", role: .destructive) {
@@ -111,7 +134,7 @@ struct TripParticipantsView: View {
             // to invite anybody back is a dead end.
             if model.mayRemove(person) {
                 Button(role: .destructive) {
-                    Task { await model.remove(person) }
+                    removing = person
                 } label: {
                     Label(person.userId == model.me ? "Verlassen" : "Entfernen",
                           systemImage: "person.badge.minus")
@@ -181,17 +204,35 @@ final class TripParticipantsViewModel {
         return youOrganise || person.userId == me
     }
 
+    /// Enough of a check to catch a typo before the server does: one
+    /// "@", something on both sides, a dot after it.
+    var emailLooksValid: Bool {
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = address.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty else { return false }
+        return parts[1].contains(".") && !parts[1].hasPrefix(".") && !parts[1].hasSuffix(".")
+    }
+
+    /// What the last invitation did, in words — the empty field alone
+    /// looked the same whether it worked or not.
+    private(set) var lastInvitation: String?
+
     func invite() async {
         let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !address.isEmpty else { return }
+        guard emailLooksValid else { return }
         isInviting = true
         defer { isInviting = false }
         struct Body: Encodable { let email: String }
         struct Response: Decodable { let added: Bool }
         do {
-            let _: Response = try await APIClient.shared.post(
+            let response: Response = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/participants", body: Body(email: address))
-            email = ""
+            if response.added {
+                lastInvitation = "\(address) plant jetzt mit."
+                email = ""
+            } else {
+                lastInvitation = "\(address) ist schon dabei."
+            }
             errorMessage = nil
             await load()
         } catch {

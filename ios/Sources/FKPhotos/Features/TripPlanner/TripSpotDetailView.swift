@@ -245,6 +245,14 @@ struct TripSpotDetailView<Actions: View>: View {
             if let choice = routeChoice {
                 Button("Apple Karten") { open(choice, with: .apple) }
                 Button("Google Maps") { open(choice, with: .google) }
+                Button("Immer Apple Karten") {
+                    mapsPreference = TripMapsApp.apple.rawValue
+                    open(choice, with: .apple)
+                }
+                Button("Immer Google Maps") {
+                    mapsPreference = TripMapsApp.google.rawValue
+                    open(choice, with: .google)
+                }
                 Button("Abbrechen", role: .cancel) {}
             }
         }
