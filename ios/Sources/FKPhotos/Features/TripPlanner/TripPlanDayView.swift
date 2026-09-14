@@ -394,8 +394,8 @@ struct TripPlanDayView: View {
                 Label("Das Wetter spricht gegen diesen Tag, so wie er geplant ist.",
                       systemImage: "cloud.rain")
                     .font(.subheadline)
-                Text("Der Planer kann Spots unter Dach nach vorn holen und ausgesetzte "
-                     + "zurück in den Vorrat legen. Er zeigt vorher, was er täte.")
+                Text("Der Planer kann Orte unter Dach nach vorn holen und ausgesetzte "
+                     + "zurück zu den Kandidaten legen. Er zeigt vorher, was er täte.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Button {
@@ -485,7 +485,7 @@ struct TripPlanDayView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Lassen") { viewModel.dismissWeatherProposal() }
+                    Button("Abbrechen") { viewModel.dismissWeatherProposal() }
                 }
                 if proposal.offered {
                     ToolbarItem(placement: .confirmationAction) {
@@ -505,8 +505,8 @@ struct TripPlanDayView: View {
         let from = day.blocks.first { $0.id == move.fromBlockId }?.label ?? move.fromBlockId
         guard let toId = move.toBlockId else {
             return move.reason == "budget"
-                ? "\(from) → Vorrat (der Tag wird bei dem Wetter kürzer)"
-                : "\(from) → Vorrat (zu ausgesetzt für das Wetter)"
+                ? "\(from) → Kandidaten (der Tag wird bei dem Wetter kürzer)"
+                : "\(from) → Kandidaten (zu ausgesetzt für das Wetter)"
         }
         let to = day.blocks.first { $0.id == toId }?.label ?? toId
         return "\(from) → \(to)"
@@ -638,7 +638,7 @@ struct TripPlanDayView: View {
         switch (ends?.start, ends?.end) {
         case (nil, nil):
             return leg.anchorRadiusM == nil
-                ? "Start & Ziel: \(anchor)"
+                ? "Unterkunft: \(anchor)"
                 : "Rund um \(leg.anchorTitle) · Unterkunft noch offen"
         case let (start?, nil):
             return "Start: \(start.label) · Ziel: \(anchor)"
@@ -844,7 +844,7 @@ struct TripPlanDayView: View {
                     .font(.subheadline)
                     .frame(minWidth: 44, minHeight: 44)
                     .disabled(viewModel.isSavingFixpoint)
-                removeButton("Ausflug nach \(outing.displayName) entfernen") {
+                removeButton("Ausflugsziel \(outing.displayName) entfernen") {
                     Task { await viewModel.setDayAnchor(nil) }
                 }
             }
@@ -933,7 +933,7 @@ struct TripPlanDayView: View {
                 .font(.headline)
             Text(day.isBuffer
                  ? (day.bufferReason ?? "")
-                 : "Der Rahmen steht — die Blöcke und ihre Zeiten. Die Spots kommen "
+                 : "Der Rahmen steht — die Blöcke und ihre Zeiten. Die Orte kommen "
                    + "üblicherweise am Vorabend dazu, wenn Wetter und Lust bekannt sind.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1146,7 +1146,7 @@ struct TripPlanDayView: View {
                 // What lost its place. A count would not be reviewable;
                 // the names are (§5).
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Zurück in den Vorrat:").font(.footnote.weight(.semibold))
+                    Text("Zurück zu den Kandidaten:").font(.footnote.weight(.semibold))
                     ForEach(viewModel.displaced) { stop in
                         Text("· \(stop.displayName)").font(.footnote)
                     }
@@ -1317,7 +1317,7 @@ struct TripPlanDayView: View {
                                         closeDetail()
                                     }
                                 } label: {
-                                    Label("Zurück in den Vorrat", systemImage: "tray.and.arrow.down")
+                                    Label("Zurück zu den Kandidaten", systemImage: "tray.and.arrow.down")
                                 }
                             }
                             // "Not this one, and not next time either"
@@ -1336,7 +1336,7 @@ struct TripPlanDayView: View {
                         } footer: {
                             // The two ways out, side by side, because
                             // the difference is the whole point.
-                            Text("Zurück in den Vorrat heißt „nicht heute“ — er bleibt im "
+                            Text("Zurück zu den Kandidaten heißt „nicht heute“ — er bleibt im "
                                  + "Rennen. Ausblenden heißt „nicht auf dieser Reise“.")
                         }
                     }

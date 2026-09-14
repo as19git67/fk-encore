@@ -83,7 +83,7 @@ struct TripPinDetailSheet: View {
                         // is the same "no": it holds for the whole trip
                         // and it can be taken back.
                         Text("Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch "
-                             + "beim nächsten Neuplanen nicht. Rückgängig im Vorrat unter "
+                             + "beim nächsten Neuplanen nicht. Rückgängig bei den Kandidaten unter "
                              + "„Ausgeblendet“.")
                     }
                 }

@@ -89,7 +89,7 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// named (§15.3) — it says which one it is instead.
     var displayTitle: String {
         if let title, !title.isEmpty { return title }
-        return "Etappe \(position + 1)"
+        return "Stadt \(position + 1)"
     }
 }
 

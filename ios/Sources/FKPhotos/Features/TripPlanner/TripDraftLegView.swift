@@ -69,7 +69,7 @@ struct TripDraftLegView: View {
             } header: {
                 Text("Die Fahrt dorthin")
             } footer: {
-                Text("Beides ist freiwillig. Was angegeben ist, wird zum Fixpunkt: nach der "
+                Text("Beides ist freiwillig. Was angegeben ist, wird zu einer festen Zeit: nach der "
                      + "Abfahrt ist der Tag vorbei, vor der Ankunft fängt der nächste nicht an.")
             }
         }

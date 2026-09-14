@@ -44,7 +44,7 @@ struct TripPlaceSearchView: View {
             // Not a footnote: a search that silently skipped a region
             // would answer "nichts gefunden" for a place that is there.
             ForEach(model.unavailableLegs, id: \.self) { leg in
-                Label("Etappe \(leg + 1) konnte nicht durchsucht werden.",
+                Label("Stadt \(leg + 1) konnte nicht durchsucht werden.",
                       systemImage: "exclamationmark.triangle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -83,7 +83,7 @@ struct TripPlaceSearchView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if place.inPool {
-                Label("Schon im Vorrat", systemImage: "tray.full")
+                Label("Schon bei den Kandidaten", systemImage: "tray.full")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if let outcome = model.added[place.osmRef] {
@@ -97,7 +97,7 @@ struct TripPlaceSearchView: View {
                     if model.addingRef == place.osmRef {
                         HStack { ProgressView(); Text("Wird übernommen…") }
                     } else {
-                        Label("In den Vorrat", systemImage: "plus.circle")
+                        Label("Zu den Kandidaten", systemImage: "plus.circle")
                     }
                 }
                 .buttonStyle(.borderless)

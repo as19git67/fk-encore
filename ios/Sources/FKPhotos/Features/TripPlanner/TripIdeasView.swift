@@ -109,7 +109,7 @@ struct TripIdeasView: View {
                 .background(Color(uiColor: .systemGroupedBackground))
             }
         }
-        .navigationTitle(model.collection?.label ?? "Ideenvorrat")
+        .navigationTitle(model.collection?.label ?? "Ideen")
         .plannerErrorBanner(model.errorMessage, retry: { await model.load() }, dismiss: { model.errorMessage = nil })
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -230,7 +230,7 @@ struct TripIdeasView: View {
         }
         .sheet(isPresented: $isAddingShared) {
             TripIdeaCaptureSheet(
-                title: "In den Vorrat",
+                title: "Zu den Ideen",
                 explanation: "Der Ort aus dem Link wird gemerkt — mit dem Link als Herkunft.",
             ) { note, dwellMinutes in
                 await model.addShared(note: note, dwellMinutes: dwellMinutes)
@@ -246,7 +246,7 @@ struct TripIdeasView: View {
                 Task { await model.share(with: shareEmail) }
             }
         } message: {
-            Text("Wer eingeladen ist, schreibt in denselben Vorrat — eine Liste, keine Kopie.")
+            Text("Wer eingeladen ist, schreibt in dieselben Ideen — eine Liste, keine Kopie.")
         }
     }
 
@@ -266,7 +266,7 @@ struct TripIdeasView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             HStack {
-                Button("In den Vorrat") { isAddingShared = true }
+                Button("Zu den Ideen") { isAddingShared = true }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isAdding)
                 Button("Später") { model.dismissShare() }
@@ -356,7 +356,7 @@ struct TripIdeaDetailView: View {
                     close()
                 }
             } label: {
-                Label("Aus dem Vorrat entfernen", systemImage: "trash")
+                Label("Aus den Ideen entfernen", systemImage: "trash")
             }
         }
     }
