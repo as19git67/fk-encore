@@ -102,6 +102,34 @@ final class TripPlannerViewModel {
         self.planId = planId
     }
 
+    // MARK: - One per plan (plan item X10)
+
+    /// The view models in use, by plan id.
+    ///
+    /// Every way into a plan — the list row, the "läuft heute" banner,
+    /// the ideas' "in eine Reise" link, the readiness and offline screens
+    /// — used to build its own model, so the day somebody was looking at
+    /// was lost the moment they went back to the list and returned. One
+    /// model per plan keeps the place (`hasPositioned`) and the loaded
+    /// plan, so the day screen opens where it was left and without a
+    /// spinner.
+    @ObservationIgnored private static var byPlanId: [Int: TripPlannerViewModel] = [:]
+
+    /// The model for this plan, built on first use.
+    static func shared(for planId: Int) -> TripPlannerViewModel {
+        if let existing = byPlanId[planId] { return existing }
+        let fresh = TripPlannerViewModel(planId: planId)
+        byPlanId[planId] = fresh
+        return fresh
+    }
+
+    /// Drop the model — the plan was deleted or left, and a stale one
+    /// must not answer for a plan that is created again under a new id
+    /// (it never would; this keeps the map from growing for good).
+    static func forget(planId: Int) {
+        byPlanId[planId] = nil
+    }
+
     /// Switch to another city of the trip (§4.2).
     ///
     /// Lands on today when that city is the one being travelled and on
