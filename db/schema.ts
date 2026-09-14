@@ -15,6 +15,10 @@ export const users = pgTable("users", {
   notification_prefs: jsonb("notification_prefs").notNull().default({}),
   // Per-user label-printing preferences (e.g. the selected CUPS printer).
   label_prefs: jsonb("label_prefs").notNull().default({}),
+  // Global default for adopting other people's similar-photo group reviews
+  // (docs/group-review-adoption.md). Per-album overrides live on
+  // album_user_settings.group_review_adoption.
+  adopt_group_reviews: boolean("adopt_group_reviews").notNull().default(true),
 });
 
 // ========== Roles ==========
@@ -308,6 +312,12 @@ export const photoCuration = pgTable(
       .notNull()
       .references(() => photos.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("visible"), // 'visible' | 'hidden' | 'favorite'
+    // Provenance of this row: 'user' = the user decided it themselves,
+    // 'adopted' = derived from a peer's group review (see
+    // docs/group-review-adoption.md). Adopted rows are revertible and are
+    // excluded from the anonymised fav/hide consensus counters, so three
+    // passive users can't turn one person's opinion into a fake 4/4.
+    source: text("source").notNull().default("user"), // 'user' | 'adopted'
     updated_at: timestamp("updated_at").defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.user_id, table.photo_id] })]
@@ -323,6 +333,10 @@ export const photoGroups = pgTable("photo_groups", {
   cover_photo_id: integer("cover_photo_id")
     .references(() => photos.id, { onDelete: "set null" }),
   reviewed_at: timestamp("reviewed_at", { mode: "string" }),
+  // Who made the review: 'user' (self) or 'adopted' (taken over from a
+  // peer). NULL while unreviewed. Adopted reviews never cascade on to a
+  // third user — only a real review is worth spreading.
+  review_source: text("review_source"), // 'user' | 'adopted' | null
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   // AI auto-pick (see migration 0075). NULL until the scoring pass has
   // run for this group; user reviewed_at always takes precedence over
@@ -584,6 +598,10 @@ export const albumUserSettings = pgTable(
     hide_mode: text("hide_mode").notNull().default("mine"), // 'mine' | 'all'
     active_view: text("active_view").notNull().default("all"), // 'all' | 'favorites' | 'by_user'
     view_config: jsonb("view_config"),
+    // Per-album override of users.adopt_group_reviews: NULL inherits the
+    // user default, 'on' / 'off' decide for groups whose members live in
+    // this album. 'off' wins over 'on' when several albums disagree.
+    group_review_adoption: text("group_review_adoption"), // 'on' | 'off' | null
         cover_photo_id: integer("cover_photo_id").references(() => photos.id, { onDelete: "set null" }),
   },
   (table) => [primaryKey({ columns: [table.album_id, table.user_id] })]

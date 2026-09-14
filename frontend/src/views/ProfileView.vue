@@ -8,6 +8,7 @@ import Column from 'primevue/column'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Message from 'primevue/message'
+import ToggleSwitch from 'primevue/toggleswitch'
 import { useAuthStore } from '../stores/auth'
 import {
   listPasskeys,
@@ -17,6 +18,7 @@ import {
   type PasskeyInfo,
 } from '../api/passkeys'
 import { changePassword } from '../api/users'
+import { getGroupReviewAdoption, setGroupReviewAdoption } from '../api/photos'
 import { formatDateShort } from '../utils/dateFormat'
 import {
   startRegistration,
@@ -35,6 +37,27 @@ import {
 } from '../api/push'
 
 const auth = useAuthStore()
+
+// ── Adopting other people's group reviews ─────────────────────────────────
+// Global default; docs/group-review-adoption.md. Albums can override it.
+const adoptionEnabled = ref(true)
+const adoptionBusy = ref(false)
+const adoptionError = ref('')
+
+async function handleAdoptionToggle(value: boolean) {
+  adoptionBusy.value = true
+  adoptionError.value = ''
+  try {
+    const res = await setGroupReviewAdoption(value)
+    adoptionEnabled.value = res.enabled
+  } catch (err) {
+    // Put the switch back where it was — the server decides, not the UI.
+    adoptionEnabled.value = !value
+    adoptionError.value = (err as Error).message || 'Einstellung konnte nicht gespeichert werden.'
+  } finally {
+    adoptionBusy.value = false
+  }
+}
 
 const passkeys = ref<PasskeyInfo[]>([])
 const loading = ref(true)
@@ -291,6 +314,12 @@ onMounted(async () => {
   await push.refreshState()
   await loadNotifPrefs()
   await loadServerSubscriptions()
+  try {
+    adoptionEnabled.value = (await getGroupReviewAdoption()).enabled
+  } catch {
+    // A failed read leaves the switch at the server default (on); the
+    // toggle itself still reports its own errors.
+  }
 })
 </script>
 
@@ -348,6 +377,32 @@ onMounted(async () => {
             icon="pi pi-lock"
             :loading="pwLoading"
             @click="handleChangePassword"
+          />
+        </div>
+      </template>
+    </Card>
+
+    <Card class="mb">
+      <template #title>Ähnliche Fotos</template>
+      <template #content>
+        <p class="description">
+          Hat jemand anderes einen Stapel ähnlicher Fotos schon bereinigt, gilt
+          dessen Ergebnis bei dir als Voreinstellung. Sobald du einen Stapel
+          selbst prüfst, gehört er dir. Einzelne Alben können davon abweichen.
+        </p>
+        <Message v-if="adoptionError" severity="error" :closable="false" class="mb">
+          {{ adoptionError }}
+        </Message>
+        <div class="push-row">
+          <span class="push-label">
+            {{ adoptionEnabled
+              ? 'Bereinigte Stapel der anderen werden übernommen.'
+              : 'Du prüfst jeden Stapel selbst.' }}
+          </span>
+          <ToggleSwitch
+            v-model="adoptionEnabled"
+            :disabled="adoptionBusy"
+            @update:modelValue="handleAdoptionToggle"
           />
         </div>
       </template>

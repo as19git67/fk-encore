@@ -29,6 +29,11 @@ export interface GalleryGridGroup {
   member_count: number
   /** True when the user has reviewed the group. */
   reviewed: boolean
+  /**
+   * True when the group was closed by adopting somebody else's review
+   * rather than by the user themselves — done, but not by you.
+   */
+  adopted?: boolean
   // AI auto-pick (Track I). When `ai_confidence` is set the group has
   // been scored and `ai_picked` tells you whether this photo is in the
   // pick list. Reviewed groups still set these to surface the marker.
