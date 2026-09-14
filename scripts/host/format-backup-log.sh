@@ -73,12 +73,14 @@ snap_ok=0
 stop_called_ts=""
 complete_ts=""
 complete=0
-prune_started=0
-prune_cutoff=""
-prune_disabled=0
-prune_destroyed_count=""
-prune_failed_count=""
-destroyed_lines=()      # "ts|name|created"
+extra_snaps=()          # "tier|ts|name" (weekly-*/monthly-* taken this run)
+# Snapshot pruning is tracked per tier (daily/weekly/monthly), since the
+# backup script now runs all three independently in one pass.
+snap_tiers=(daily weekly monthly)
+declare -A prune_started=() prune_cutoff=() prune_disabled=() \
+           prune_destroyed_count=() prune_failed_count=()
+current_prune_tier=""
+destroyed_lines=()      # "tier|ts|name|created"
 dump_prune_started=0
 dump_prune_cutoff=""
 dump_prune_dir=""
@@ -121,21 +123,26 @@ while IFS= read -r line; do
     snap_name="${BASH_REMATCH[1]}"
   elif [[ "$msg" == "zfs snapshot ok" ]]; then
     snap_ok=1
+  elif [[ "$msg" =~ ^day-of-(week|month)\ [0-9]+\ matches\ (WEEKLY|MONTHLY)_SNAPSHOT_DO[WM]\ —\ creating\ ZFS\ snapshot\ ([^[:space:]]+) ]]; then
+    tier="weekly"; [[ "${BASH_REMATCH[1]}" == "month" ]] && tier="monthly"
+    extra_snaps+=("$tier|$ts|${BASH_REMATCH[3]}")
   elif [[ "$msg" == "calling /internal/backup/stop" ]]; then
     stop_called_ts="$ts"
   elif [[ "$msg" =~ ^backup\ complete ]]; then
     complete_ts="$ts"
     complete=1
-  elif [[ "$msg" =~ ^pruning\ daily-\*.*before\ ([0-9T:Z.+-]+)\) ]]; then
-    prune_started=1
-    prune_cutoff="${BASH_REMATCH[1]}"
-  elif [[ "$msg" == "snapshot retention disabled"* ]]; then
-    prune_disabled=1
+  elif [[ "$msg" =~ ^pruning\ (daily|weekly|monthly)-\*.*before\ ([0-9T:Z.+-]+)\) ]]; then
+    tier="${BASH_REMATCH[1]}"
+    current_prune_tier="$tier"
+    prune_started[$tier]=1
+    prune_cutoff[$tier]="${BASH_REMATCH[2]}"
+  elif [[ "$msg" =~ ^(daily|weekly|monthly)\ snapshot\ retention\ disabled ]]; then
+    prune_disabled[${BASH_REMATCH[1]}]=1
   elif [[ "$msg" =~ ^destroying\ ([^[:space:]]+)\ \(created\ ([0-9T:Z.+-]+)\) ]]; then
-    destroyed_lines+=("$ts|${BASH_REMATCH[1]}|${BASH_REMATCH[2]}")
-  elif [[ "$msg" =~ ^prune\ summary:\ destroyed=([0-9]+)\ failed=([0-9]+) ]]; then
-    prune_destroyed_count="${BASH_REMATCH[1]}"
-    prune_failed_count="${BASH_REMATCH[2]}"
+    destroyed_lines+=("${current_prune_tier:-daily}|$ts|${BASH_REMATCH[1]}|${BASH_REMATCH[2]}")
+  elif [[ "$msg" =~ ^(daily|weekly|monthly)\ prune\ summary:\ destroyed=([0-9]+)\ failed=([0-9]+) ]]; then
+    prune_destroyed_count[${BASH_REMATCH[1]}]="${BASH_REMATCH[2]}"
+    prune_failed_count[${BASH_REMATCH[1]}]="${BASH_REMATCH[3]}"
   elif [[ "$msg" =~ ^pruning\ encore-daily-\*\.dump\ files\ in\ (.+)\ older\ than\ .*modified\ before\ ([0-9T:Z.+-]+)\) ]]; then
     dump_prune_started=1
     dump_prune_dir="${BASH_REMATCH[1]}"
@@ -222,33 +229,45 @@ SEP="================================================================"
   [[ -n "$ready_ts"        ]] && printf '  %s  Vorbereitung fertig (pg_dump abgeschlossen)\n' "$(short_time "$ready_ts")"
   if [[ -n "$snap_create_ts" ]]; then
     if (( snap_ok == 1 )); then
-      printf '  %s  ZFS-Snapshot erstellt: %s\n' "$(short_time "$snap_create_ts")" "$snap_name"
+      printf '  %s  ZFS-Snapshot erstellt (daily): %s\n' "$(short_time "$snap_create_ts")" "$snap_name"
     else
-      printf '  %s  ZFS-Snapshot FEHLGESCHLAGEN: %s\n' "$(short_time "$snap_create_ts")" "$snap_name"
+      printf '  %s  ZFS-Snapshot FEHLGESCHLAGEN (daily): %s\n' "$(short_time "$snap_create_ts")" "$snap_name"
     fi
   fi
+  for entry in "${extra_snaps[@]}"; do
+    IFS='|' read -r tier snap_ts snap_nm <<< "$entry"
+    printf '  %s  ZFS-Snapshot erstellt (%s): %s\n' "$(short_time "$snap_ts")" "$tier" "$snap_nm"
+  done
   [[ -n "$stop_called_ts" ]] && printf '  %s  Stop aufgerufen (/internal/backup/stop)\n'      "$(short_time "$stop_called_ts")"
   [[ -n "$complete_ts"    ]] && printf '  %s  Backup abgeschlossen\n'                         "$(short_time "$complete_ts")"
   echo
 
-  if (( prune_started == 1 )) || [[ -n "$prune_destroyed_count" ]]; then
-    echo "Snapshot-Pruning:"
-    [[ -n "$prune_cutoff" ]] && printf '  Schwelle:  älter als %s\n' "$(pretty_ts "$prune_cutoff")"
-    if (( ${#destroyed_lines[@]} > 0 )); then
-      echo "  Gelöscht:"
+  for tier in "${snap_tiers[@]}"; do
+    if [[ -n "${prune_started[$tier]:-}" ]] || [[ -n "${prune_destroyed_count[$tier]:-}" ]]; then
+      echo "Snapshot-Pruning ($tier):"
+      [[ -n "${prune_cutoff[$tier]:-}" ]] && printf '  Schwelle:  älter als %s\n' "$(pretty_ts "${prune_cutoff[$tier]}")"
+      tier_has_destroyed=0
       for entry in "${destroyed_lines[@]}"; do
-        IFS='|' read -r _ name created <<< "$entry"
-        printf '    - %s  (erstellt %s)\n' "$name" "$(pretty_ts "$created")"
+        IFS='|' read -r entry_tier _ _ _ <<< "$entry"
+        [[ "$entry_tier" == "$tier" ]] && { tier_has_destroyed=1; break; }
       done
+      if (( tier_has_destroyed == 1 )); then
+        echo "  Gelöscht:"
+        for entry in "${destroyed_lines[@]}"; do
+          IFS='|' read -r entry_tier _ name created <<< "$entry"
+          [[ "$entry_tier" == "$tier" ]] || continue
+          printf '    - %s  (erstellt %s)\n' "$name" "$(pretty_ts "$created")"
+        done
+      fi
+      if [[ -n "${prune_destroyed_count[$tier]:-}" || -n "${prune_failed_count[$tier]:-}" ]]; then
+        printf '  Summary:   destroyed=%s failed=%s\n' "${prune_destroyed_count[$tier]:-?}" "${prune_failed_count[$tier]:-?}"
+      fi
+      echo
+    elif [[ -n "${prune_disabled[$tier]:-}" ]]; then
+      echo "Snapshot-Pruning ($tier): deaktiviert (${tier^^}_SNAPSHOT_RETENTION_DAYS=0)"
+      echo
     fi
-    if [[ -n "$prune_destroyed_count" || -n "$prune_failed_count" ]]; then
-      printf '  Summary:   destroyed=%s failed=%s\n' "${prune_destroyed_count:-?}" "${prune_failed_count:-?}"
-    fi
-    echo
-  elif (( prune_disabled == 1 )); then
-    echo "Snapshot-Pruning: deaktiviert (SNAPSHOT_RETENTION_DAYS=0)"
-    echo
-  fi
+  done
 
   if (( dump_prune_started == 1 )) || [[ -n "$dump_prune_deleted_count" ]]; then
     echo "Dump-Pruning:"

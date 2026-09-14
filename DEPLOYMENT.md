@@ -459,6 +459,15 @@ Flow:
 A safety timer (default 30 minutes) automatically ends backup mode if
 `/stop` never arrives, so the WAL cannot grow without bound.
 
+Every run produces a `daily-*` snapshot; on top of that, at the same
+point in time, it also takes a `weekly-*` snapshot (default: every
+Monday) and a `monthly-*` snapshot (default: the 1st of the month) — no
+extra `pg_dump`/backup-mode cycle needed. Each tier is pruned on its own
+schedule (defaults: 14 days / 8 weeks / 12 months), configurable via
+`DAILY_SNAPSHOT_RETENTION_DAYS` / `WEEKLY_SNAPSHOT_RETENTION_DAYS` /
+`MONTHLY_SNAPSHOT_RETENTION_DAYS` — see `scripts/host/README.md` for the
+full list of env vars.
+
 **Installation on the host (one time, as root):**
 
 The fk-encore container ships the host-side hook scripts inside the image
@@ -546,7 +555,7 @@ Two paths are supported:
 
 ```bash
 docker compose down
-sudo zfs rollback -r tank/f4mil@daily-20260413-030000
+sudo zfs rollback -r tank/f4mil@daily-2026-04-13_03-00
 docker compose up -d
 ```
 
@@ -555,7 +564,7 @@ docker compose up -d
 ```bash
 # 1. Place the dump file in the backup directory, renamed with the
 #    "restore-" prefix
-cp /mnt/backup/encore-daily-20260413-030000.dump \
+cp /mnt/backup/encore-daily-2026-04-13_03-00.dump \
    /mnt/backup/restore-20260414-rollback.dump
 
 # 2. Restart the container
