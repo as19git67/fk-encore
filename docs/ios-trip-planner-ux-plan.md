@@ -702,3 +702,82 @@ search) and "Schon in den Ideen" (Explore, Article); rename
 Each step should be verified with the Storybook-independent iOS previews
 and, where behaviour changes, a short manual run in the simulator with a
 dated plan whose start date is today.
+
+---
+
+## 3. Implementation status and deviations
+
+Implemented in seven pull requests, merged in order on 2026-09-14:
+#1223 (this plan), #1224 (2.1, 2.6), #1225 (2.5), #1226 (2.2, 2.7),
+#1227 (2.4), #1228 (2.3, 2.8), #1229 (2.8 ideas, 2.9, B8, B12, D9,
+X1–X7). Each was compiled and tested by the iOS CI before merging; the
+backend suite ran before every push. Everything below is a difference
+between chapter 2 and what landed — either done differently, partially,
+or not at all.
+
+### 3.1 Done differently
+
+| Section | Plan | What landed | Why |
+|---|---|---|---|
+| 2.1 badge | Badge also for a pending auto-**end** suggestion | Tab icon fills for trip mode **or** a running plan; the badge still covers trip mode and pending **start** suggestions only | `TripAutoEndPreferences.pendingSuggestion` is a static `UserDefaults` read, not observable; wiring it into the tab bar needs an observable monitor first |
+| 2.2 tab root | Segmented "Aufnehmen / Planen" or the plan list as tab root | The planner stays behind the toolbar icon; the Trip tab gained the permanent "läuft heute" banner (both states) and a settings link | Restructuring the tab root touches launch routing and the auto-start flows; left for a separate change |
+| 2.2 menu | Move trip-wide screens **out** of the day menu onto the plan list | Both: the day menu keeps them in a "Rund um die Reise" submenu, and the plan list row offers them as a context menu plus the time-bound inline prompts | Somebody standing in the day screen still needs Dokumente; the submenu keeps them reachable without cluttering the day |
+| 2.2 quick controls | Tempo / Verkehrsmittel as chips in the day header | The header opens the city editor (sheet); tempo stays in Einstellungen | The header already carries the transport; two more controls there fought the day picker for space |
+| 2.3 maps | `pin(...)` honours "Jedes Mal fragen" **or** the footer says only routes ask | Footer says it; `pin(...)` unchanged. The dialog gained "Immer Apple Karten / Immer Google Maps" | Asking on every "auf der Karte zeigen" tap would make the planning-mode button a dialog |
+| 2.3 home | Show home + radius, "noch nicht bestimmt" while null | As planned, reverse-geocoded to a place name; the radius is the constant `TripAutoEndPreferences.homeArrivalRadiusMeters` | — |
+| 2.4 confirm word | Every confirm is "Sichern" | "Sichern" everywhere except the weather sheet ("Umräumen", its cancel is now "Abbrechen") and the add-city sheet ("Hinzufügen") | Those two name the action; "Sichern" would say less |
+| 2.5 dismiss | Every banner dismissible | Plan settings' banner has no dismiss | `errorMessage` there is `private(set)` on purpose; the sheet closes on save anyway |
+| 2.6 B11 | Apply the vote response locally | Reload only the ballot after a vote; fairness reloads on apply and pull-to-refresh | The entry's `wants`/`hearts` name lists cannot be updated locally without knowing the voter's display name |
+| 2.7 stop row | Name + one menu | Name + one 44 pt menu (also long press), keeping the small pin and camera glyphs as status marks | They are indicators, not targets |
+| 2.7 move | Context menu **and** consider `.draggable` | Context menu / row menu only | Drag between blocks that are not on screen has no natural gesture here |
+| 2.7 shared link | One "Übernehmen" screen with a target choice replacing two banners | "Später" on the ideas screen is remembered for the session; an article link becomes a row leading to Entdecken; the plan-list banner is unchanged | A combined screen needs a shared inbox state machine across two view models |
+| 2.8 save paradigm | Auto-saving lists get an undo toast | Participants and travellers stay auto-save with confirmations before removing (and before the first traveller change); no undo toast | The server has no undo for these; a toast that cannot undo would lie |
+| 2.8 draft city | Confirm before deleting a draft city | Confirms only when the row already holds a place; an empty row deletes at once | An empty row has nothing to lose |
+| 2.8 outing budget | "2 h / halber Tag / ganzer Tag" | Segmented `TripOutingBudget` 120 / 240 / 480 min (same labels); the endpoint already accepted `budgetMinutes`, `lat`, `lon` | — |
+| 2.8 X10 | Drop the chip **and** share one view model per plan id | Chip dropped; each navigation still builds its own `TripPlannerViewModel` | Sharing needs a cache keyed by plan id; small, but not done |
+| 2.8 X13 | `interactiveDismissDisabled` on new-plan and plan-settings forms | New-plan form only (`isDirty` from anchor, title, sentence, cities, interests) | Plan settings have no clean "dirty" baseline yet |
+| 2.9 offline offer | 24 h before a dated trip, offer "Plan fürs Gerät laden" once | "Reisebereit?" is offered inline on the plan-list row two days before departure, and that screen has a prominent "Plan fürs Gerät laden" button when the plan is not stored | The prompt lives where the evening-before checklist already is; no separate scheduling |
+| 2.9 running plan | Fall back to the offline bundle on network error | Keeps the **last known** running plan when the error means unreachable (`TripOfflineReach.meansUnreachable`); a real 404/403 still clears it | Deriving a `TripPlanSummary` from the bundle was more code for the same banner |
+| 2.10 order | 2.1 + B1–B4, then 2.5, then 2.2/2.7, then 2.4, then 2.3/2.8/2.9 | As planned, with 2.8's ideas part, 2.9, B8 and B12 split into a sixth PR | — |
+
+### 3.2 Not done
+
+| ID | Item | Status |
+|---|---|---|
+| D8 | Persist "Warum hier?" reasons on the stop when it leaves the pool (server) | Not done. The question-mark entry is in the stop menu and still appears only while the pool row exists. Needs a server change (copy `reasons` onto the stop) |
+| D11 (ideas) | "Wer schreibt mit" screen for the idea collection with a list of invitees and removal | Not done. The invite alert is unchanged; `/trip-planner/ideas/share` and `/unshare` exist, but there is no list endpoint for invitees yet |
+| D6 | Build the manual-mode selection grid, or hide the toggle | Neither. The toggle stays; the empty state now says truthfully that photos are added by putting them into the iOS album |
+| E3 | "Das hier merken" directly on the Trip tab and as an App Shortcut | Not done; the capture stays behind Ideen → + |
+| X11 | Travellers outside the household, a per-traveller `shortWalks` toggle, transferring the organiser role | Not done; all three need backend support (`travellers.ts` accepts household persons or planning users only; no role-transfer endpoint) |
+| X15 | "§9.1" references in `TripMapsHandoff.swift` / `TripMapsSettingsView.swift` | Dropped: they cite §9.1 of `ios-urlaubsplanung.md` ("Hinaus: was die App abgibt"), which is correct. The finding was wrong |
+| I5 (pin) | Planning-mode "auf der Karte zeigen" bypasses "Jedes Mal fragen" | Kept as is; documented in the maps settings footer (see 3.1) |
+| S1 | Planner as a peer of the photo mode at the tab root | Not done (see 3.1, 2.2 tab root) |
+
+### 3.3 Added beyond the plan
+
+- `TripDurationPicker` and `TripRadiusPicker` (`TripPresetPickers.swift`): preset chips plus a stepper, used in five forms.
+- `TripErrorBanner.swift`: the banner modifier and `TripErrorText`, which maps `URLError` and `APIError` to German sentences; 61 `localizedDescription` uses replaced.
+- `TripSettingsView.swift`: the "Trip & Reise" screen.
+- `TripVisitReportQueue` (in `TripVisitMonitor.swift`): failed visit reports are queued in `UserDefaults` (cap 100) and flushed later.
+- `TripIdeaTakeSheet` (in `TripIdeasView.swift`): the plan picker behind "In eine Reise übernehmen".
+- The share extension's own copy of the collection labels follows the glossary (`F4milShare/ShareWireTypes.swift`, `ShareProposalsView.swift`, `TripShareCapture.swift`).
+- Backend: `youOrganise` on `PlanSummary` (`trip-planner/plan-store.ts`), with a test in `shares.test.ts`.
+- Unit tests: `TripErrorTextTests`, `TripDayNavigationTests`, `TripParticipantsInviteTests`, `TripVisitReportQueueTests`, the organiser-flag decode in `TripPlanModelsTests`, `testTrimmingKeepsThePhotoStop` in `TripSpotDetailTests`, and extensions of `TripIdeasTests` and `TripIdeasOutingTests`.
+
+### 3.4 Found by the iOS CI, fixed before merging
+
+Three things the sandbox (no Swift toolchain) could not catch:
+
+- `TripArticleReadView` and `TripExploreView` called `TripIdeaCaptureSheet` with a closure that returned nothing after its `onSave` was changed to return `Bool`.
+- `ShareWireTypesTests` asserted on the old collection labels once the app-side copy was renamed; the extension's copy had to follow.
+- `TripExploreView.body` grew past what the type checker finishes in time; it is now split into the list, its chrome, the area menu and the sheets.
+
+### 3.5 Open follow-ups, in suggested order
+
+1. D8 — reasons travel with the stop (server + `TripSpotDetail(stop)`).
+2. D11 — invitee list and removal for the idea collection (needs a list endpoint).
+3. S1 — planner and photo mode as peers at the tab root, once the launch routing is revisited.
+4. X11 — manual travellers, `shortWalks` per person, organiser hand-over (backend first).
+5. D17 — an observable auto-end monitor so the tab badge can show a pending end suggestion.
+6. E3 — "Das hier merken" as a one-tap action on the Trip tab and as an App Shortcut.
+7. X10 — one `TripPlannerViewModel` per plan id, so the last viewed day survives navigating away.
