@@ -335,7 +335,7 @@ struct TripManualTraveller: Sendable, Equatable {
 
     /// `YYYY-MM-DD` in the local calendar, or nil when no date was given.
     var birthDateString: String? {
-        birthDate.map(Self.isoDate)
+        birthDate.map { Self.isoDate($0) }
     }
 
     static func isoDate(_ date: Date, calendar: Calendar = .current) -> String {
