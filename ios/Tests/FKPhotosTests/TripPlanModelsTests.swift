@@ -191,14 +191,27 @@ final class TripPlanSummaryTests: XCTestCase {
         let json = """
         { "plans": [
             { "id": 1, "title": "Zwei Städte", "legTitles": ["Beispielstadt", "Musterstadt"],
-              "dayCount": 6, "startDate": "2026-09-03", "updatedAt": "2026-09-01T10:00:00Z" },
+              "dayCount": 6, "startDate": "2026-09-03", "updatedAt": "2026-09-01T10:00:00Z",
+              "youOrganise": true },
             { "id": 2, "title": null, "legTitles": ["Beispieldorf"],
-              "dayCount": 1, "startDate": null, "updatedAt": "2026-08-20T10:00:00Z" },
+              "dayCount": 1, "startDate": null, "updatedAt": "2026-08-20T10:00:00Z",
+              "youOrganise": false },
             { "id": 3, "title": "", "legTitles": [null],
               "dayCount": 3, "startDate": null, "updatedAt": "2026-08-10T10:00:00Z" }
         ] }
         """.data(using: .utf8)!
         return try JSONDecoder().decode(ListTripPlansResponse.self, from: json).plans
+    }
+
+    func testKnowsWhoOrganisesAndAssumesItWhenTheServerIsSilent() throws {
+        // The list offers "löschen" to the organiser and "verlassen" to
+        // everybody else. An older server sends no flag; then the row
+        // behaves as it always did.
+        let plans = try decodeList()
+        XCTAssertTrue(plans[0].organises)
+        XCTAssertFalse(plans[1].organises)
+        XCTAssertNil(plans[2].youOrganise)
+        XCTAssertTrue(plans[2].organises)
     }
 
     func testUsesTheTitleWhenThereIsOne() throws {

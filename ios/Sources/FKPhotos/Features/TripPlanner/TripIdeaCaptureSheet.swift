@@ -21,11 +21,15 @@ struct TripIdeaCaptureSheet: View {
     /// One line on what will be stored — the coordinate you are on, or
     /// the link the place came from. Said before it happens.
     let explanation: String
-    let onSave: (_ note: String, _ dwellMinutes: Int) async -> Void
+    /// Returns whether it worked. The sheet stays open on failure, so
+    /// the error is read where the tap happened rather than as a line
+    /// somewhere in the list behind.
+    let onSave: (_ note: String, _ dwellMinutes: Int) async -> Bool
 
     @State private var note = ""
     @State private var dwellMinutes = TripIdeaCaptureSheet.defaultDwellMinutes
     @State private var saving = false
+    @State private var failed = false
     @Environment(\.dismiss) private var dismiss
 
     /// Three quarters of an hour: long enough for a café or a small
@@ -57,6 +61,15 @@ struct TripIdeaCaptureSheet: View {
                          + "nicht, ist das die einzige Angabe dazu — später planbar bleibt der "
                          + "Eintrag nur mit einer.")
                 }
+
+                if failed {
+                    Section {
+                        Label("Das ließ sich nicht speichern. Noch einmal versuchen?",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -68,9 +81,9 @@ struct TripIdeaCaptureSheet: View {
                     Button {
                         saving = true
                         Task {
-                            await onSave(note, dwellMinutes)
+                            let ok = await onSave(note, dwellMinutes)
                             saving = false
-                            dismiss()
+                            if ok { dismiss() } else { failed = true }
                         }
                     } label: {
                         if saving { ProgressView() } else { Text("Merken") }

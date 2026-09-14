@@ -34,6 +34,8 @@ struct TripPlanDayView: View {
     /// Open while a hard time is being written (§4.4).
     @State private var addingFixpoint = false
     @State private var settingDayAnchor = false
+    /// The block being split (§6.5), while its sheet is open.
+    @State private var splitting: TripSplitTarget?
     @State var viewModel: TripPlannerViewModel
 
     var body: some View {
@@ -49,7 +51,11 @@ struct TripPlanDayView: View {
                 ContentUnavailableView("Kein Plan", systemImage: "map")
             }
         }
-        .navigationTitle(viewModel.leg?.title ?? viewModel.plan?.title ?? "Plan")
+        // The trip's own name first: it is what the plan list shows,
+        // and a name typed into the settings that never appears on the
+        // screen behind them is a name that looks lost. The leg is on
+        // the picker above when there is more than one.
+        .navigationTitle(screenTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let day = viewModel.day, let leg = viewModel.leg {
@@ -205,6 +211,15 @@ struct TripPlanDayView: View {
                 Button("Google Maps") { openMaps(choice, with: .google) }
                 Button("Abbrechen", role: .cancel) {}
             }
+        }
+        .sheet(item: $splitting) { target in
+            TripSplitView(
+                planId: viewModel.planId,
+                dayIndex: viewModel.dayIndex,
+                blockIndex: target.blockIndex,
+                blockLabel: target.blockLabel,
+                candidates: viewModel.leg?.pool ?? [],
+            ) { Task { await viewModel.load() } }
         }
         .sheet(isPresented: $settingDayAnchor) {
             TripDayAnchorSheet(
@@ -924,13 +939,8 @@ struct TripPlanDayView: View {
                     if block.isSplit {
                         Button("Wieder zusammen") { Task { await viewModel.removeSplit(block) } }
                     } else if let index = blockIndex(of: block) {
-                        NavigationLink("Trennen") {
-                            TripSplitView(
-                                planId: viewModel.planId,
-                                dayIndex: viewModel.dayIndex,
-                                blockIndex: index,
-                                blockLabel: block.label,
-                            ) { Task { await viewModel.load() } }
+                        Button("Gruppe trennen") {
+                            splitting = TripSplitTarget(blockIndex: index, blockLabel: block.label)
                         }
                     }
                 } label: {
@@ -938,6 +948,7 @@ struct TripPlanDayView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityLabel(block.isSplit ? "Gruppe wieder zusammenführen" : "Gruppe trennen")
             }
 
             // Who went where, when the group separated (§6.5).
@@ -1277,7 +1288,16 @@ struct TripPlanDayView: View {
         return TripDayTimeline.block(in: day, at: TripDayTimeline.minutesOfDay(Date()))?.id
     }
 
-    private var isTravelling: Bool { TripStore.shared.isActive }
+    /// The trip's name, else the leg's, else a plain word.
+    private var screenTitle: String {
+        if let title = viewModel.plan?.title, !title.isEmpty { return title }
+        if let title = viewModel.leg?.title, !title.isEmpty { return title }
+        return "Plan"
+    }
+
+    /// On the trip by either reckoning — trip mode on, or a planned
+    /// day whose date is today (`TripRunningPlan.isTravelling`).
+    private var isTravelling: Bool { TripRunningPlan.shared.isTravelling }
 
     private func offerMaps(_ choice: TripMapsChoice) {
         let availability = TripMapsAvailability(

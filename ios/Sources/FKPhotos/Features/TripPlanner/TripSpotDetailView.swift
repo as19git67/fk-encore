@@ -221,7 +221,8 @@ struct TripSpotDetailView<Actions: View>: View {
         }
         .sheet(item: $editing) { edit in
             NavigationStack {
-                TripSpotEditView(edit: edit, spotName: spot.name) { saved in
+                TripSpotEditView(edit: edit, spotName: spot.name,
+                                 showsPhotoStop: spot.supportsPhotoStop) { saved in
                     editing = nil
                     await onSave?(saved)
                 } onCancel: {
@@ -322,6 +323,9 @@ struct TripSpotDetail: Identifiable, Sendable {
     let unmatched: Bool
     /// Marked as a spot you come to for the light (§7.3).
     let photoStop: Bool
+    /// Whether the flag can be changed here. False for a collected
+    /// idea, whose endpoint does not take it yet.
+    let supportsPhotoStop: Bool
 
     var id: String { osmRef }
     /// A title the group gave it wins over the map's name: they chose
@@ -347,6 +351,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         sourceUrl = candidate.sourceUrl
         unmatched = candidate.unmatched ?? false
         photoStop = candidate.isPhotoStop
+        supportsPhotoStop = true
     }
 
     /// A place the browse turned up (§9.2, case 4 widened).
@@ -371,6 +376,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         // knows it.
         unmatched = false
         photoStop = false
+        supportsPhotoStop = true
     }
 
     /// Something already collected (§20).
@@ -394,6 +400,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         sourceUrl = idea.sourceUrl
         unmatched = idea.unmatched
         photoStop = false
+        supportsPhotoStop = false
     }
 
     init(_ stop: TripStop) {
@@ -414,6 +421,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         sourceUrl = stop.sourceUrl
         unmatched = false
         photoStop = stop.isPhotoStop
+        supportsPhotoStop = true
     }
 }
 

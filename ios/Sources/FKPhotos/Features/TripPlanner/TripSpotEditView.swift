@@ -71,6 +71,10 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
             note: note.trimmingCharacters(in: .whitespacesAndNewlines),
             url: url.trimmingCharacters(in: .whitespacesAndNewlines),
             dwellMinutes: dwellMinutes,
+            // Carried through on purpose: dropping it here reset the
+            // switch on every save, so "Fotostopp" could be turned on
+            // but never kept.
+            photoStop: photoStop,
         )
     }
 }
@@ -81,6 +85,10 @@ struct TripSpotEditView: View {
     /// What OpenStreetMap calls the place, shown as the fallback the
     /// title field replaces.
     let spotName: String?
+    /// Whether this place can be a photo stop at all. A collected idea
+    /// cannot yet — the ideas endpoint does not take the flag — and a
+    /// switch that is silently ignored is worse than no switch.
+    var showsPhotoStop: Bool = true
     let onSave: (TripSpotEdit) async -> Void
     let onCancel: () -> Void
 
@@ -134,7 +142,7 @@ struct TripSpotEditView: View {
                 Text("Wie lange ihr voraussichtlich dort seid.")
             }
 
-            Section {
+            if showsPhotoStop { Section {
                 Toggle(isOn: $edit.photoStop) {
                     Label("Fotostopp", systemImage: "camera")
                 }
@@ -148,9 +156,9 @@ struct TripSpotEditView: View {
                      + "bevorzugt er diesen Ort, wenn er am Reisetag im goldenen Licht "
                      + "steht — ein Vorzug, kein Termin, und ohne Berücksichtigung von "
                      + "Bergen oder Häusern.")
-            }
+            } }
         }
-        .navigationTitle("Notiz zum Spot")
+        .navigationTitle("Ort bearbeiten")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

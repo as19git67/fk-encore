@@ -87,7 +87,7 @@ struct MainTabView: View {
                 }
             }
 
-            Tab("Trip", systemImage: tripStore.isActive ? "map.fill" : "map", value: MainTab.trip) {
+            Tab("Trip", systemImage: running.isTravelling ? "map.fill" : "map", value: MainTab.trip) {
                 NavigationStack {
                     TripView()
                 }

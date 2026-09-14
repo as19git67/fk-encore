@@ -179,15 +179,22 @@ struct TripBallotView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            ballot = try await APIClient.shared.get(
-                "/trip-planner/plans/\(planId)/votes",
-                query: ["legIndex": String(legIndex)],
-            )
+            try await loadVotes()
             fairness = try await APIClient.shared.get("/trip-planner/plans/\(planId)/fairness")
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// The ballot alone. After a vote only this changes; the fairness
+    /// account is worth a second round trip on apply and on pull, not
+    /// thirty times a minute while somebody swipes through the list.
+    private func loadVotes() async throws {
+        ballot = try await APIClient.shared.get(
+            "/trip-planner/plans/\(planId)/votes",
+            query: ["legIndex": String(legIndex)],
+        )
     }
 
     private func cast(_ entry: TripBallotEntry, _ vote: TripVote, heart: Bool) async {
@@ -202,7 +209,8 @@ struct TripBallotView: View {
                     value: vote.rawValue,
                     heart: heart,
                 ))
-            await load()
+            try await loadVotes()
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }

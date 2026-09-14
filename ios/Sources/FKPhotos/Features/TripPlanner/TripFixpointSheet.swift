@@ -34,6 +34,8 @@ struct TripFixpointSheet: View {
 
     @State private var finder = TripPlaceFinderModel()
     @State private var place: TripPlace?
+    /// See `TripDayAnchorSheet.changingPlace`.
+    @State private var changingPlace = false
     @State private var label = ""
     @State private var kind = Kind.departure
     @State private var time = Self.defaultTime
@@ -94,6 +96,21 @@ struct TripFixpointSheet: View {
                     DatePicker("Uhrzeit", selection: $time, displayedComponents: .hourAndMinute)
                 } header: {
                     Text(dayLabel)
+                } footer: {
+                    if label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        // Why "Sichern" is grey — said next to the field,
+                        // not left to be guessed.
+                        Text("Ein Name ist nötig, damit die Zeit im Tag wiederzuerkennen ist.")
+                    }
+                }
+
+                if kind == .departure, durationMinutes > 0 {
+                    Section {
+                        Text("Eine Abfahrt ist ein Zeitpunkt — die eingetragene Dauer von "
+                             + "\(TripClock.duration(durationMinutes)) entfällt.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if kind == .appointment {
@@ -110,21 +127,26 @@ struct TripFixpointSheet: View {
                 }
 
                 Section {
-                    if let place {
+                    if let place, !changingPlace {
                         HStack {
                             Label(place.name, systemImage: "mappin.circle.fill")
                                 .lineLimit(2)
                             Spacer()
-                            Button("Ändern") { self.place = nil }
+                            Button("Ändern") { changingPlace = true }
                                 .buttonStyle(.borderless)
                                 .font(.footnote)
                         }
                     } else {
                         TripPlaceFinderRows(model: finder, picked: nil) { picked in
                             place = picked
+                            changingPlace = false
                             if label.trimmingCharacters(in: .whitespaces).isEmpty {
                                 label = picked.name
                             }
+                        }
+                        if place != nil {
+                            Button("Doch behalten") { changingPlace = false }
+                                .font(.footnote)
                         }
                     }
                 } header: {

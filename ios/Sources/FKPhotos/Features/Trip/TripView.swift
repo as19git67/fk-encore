@@ -21,15 +21,18 @@ struct TripView: View {
     /// Held centrally so the tab bar and this screen share one answer
     /// (`TripRunningPlan`).
     @State private var running = TripRunningPlan.shared
-    /// The running plan's day, opened once per launch — the day you are
-    /// standing in is what "Reise" means while it is happening (§8.5).
+    /// The plan the traveller asked to open from the "läuft heute"
+    /// banner. The banner stays; it used to auto-push the day screen
+    /// once per launch, which made the same tap lead somewhere else
+    /// the second time (§8.5).
     @State private var openPlanId: Int?
-    @State private var didOpenRunningPlan = false
 
     var body: some View {
         Group {
             if let trip = store.activeTrip {
-                ActiveTripView(trip: trip, store: store)
+                ActiveTripView(trip: trip, store: store, runningPlan: running.plan) { planId in
+                    openPlanId = planId
+                }
             } else {
                 noTripView
             }
@@ -76,16 +79,12 @@ struct TripView: View {
     /// Answered from the dates rather than from anything anybody
     /// pressed. A "start" button would have to be pressed on the one
     /// morning nobody has their phone out, and it would be wrong the
-    /// moment a flight moved.
+    /// moment a flight moved. The answer is shown as a banner and
+    /// never acted on by itself: a screen that moves under the thumb
+    /// is worse than one more tap.
     @MainActor
     private func loadRunningPlan() async {
         await running.refresh()
-        // Straight into the day it is. The plan screen is where the
-        // running trip actually happens now that "Unterwegs" is part of
-        // it — once per launch, so it never fights a tap.
-        guard !didOpenRunningPlan, let plan = running.plan else { return }
-        didOpenRunningPlan = true
-        openPlanId = plan.id
     }
 
     /// Opens the prefilled start sheet when the user chose "Trip starten" on
@@ -101,11 +100,19 @@ struct TripView: View {
 
     @ViewBuilder private var noTripView: some View {
         VStack(spacing: 0) {
+            // One banner, whatever is known. When the photos say
+            // "unterwegs" and the dates say which trip, the trip name
+            // is the prefill — not the geocoded place the photos were
+            // taken at.
             if let suggestion = autoStart.pendingSuggestion {
-                autoStartBanner(suggestion)
+                autoStartBanner(suggestion, plan: running.plan)
                 Divider()
             } else if let runningPlan = running.plan {
                 plannedTripBanner(runningPlan)
+                Divider()
+            }
+            if let closed = store.closedTrips.last {
+                gracePeriodLine(closed)
                 Divider()
             }
             ContentUnavailableView {
@@ -161,16 +168,47 @@ struct TripView: View {
         .background(.thinMaterial)
     }
 
+    /// A trip was ended, and its album is still catching up (§14.6).
+    ///
+    /// For a day after "Beenden" late photos still land in the album
+    /// and no new start is suggested. Both were invisible: the tab said
+    /// "Kein aktiver Trip" and behaved as if it were not quite true.
+    @MainActor
+    private func gracePeriodLine(_ trip: ActiveTrip) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.arrow.circlepath")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("„\(trip.name)“ wurde beendet")
+                    .font(.subheadline.weight(.semibold))
+                Text("Nachzügler-Fotos werden noch bis morgen ergänzt. Bis dahin wird kein neuer Trip vorgeschlagen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding()
+        .background(.thinMaterial)
+    }
+
     /// Fallback for the auto-start suggestion when the notification was denied,
     /// missed or ignored — the mirror of `ActiveTripView`'s auto-end banner.
+    ///
+    /// - Parameter plan: the planned trip running today, if any. Its
+    ///   title wins over the geocoded name: the album should be called
+    ///   what the trip is called.
     @MainActor
-    private func autoStartBanner(_ suggestion: PendingStartSuggestion) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func autoStartBanner(_ suggestion: PendingStartSuggestion,
+                                 plan: TripPlanSummary?) -> some View {
+        let name = plan?.displayTitle ?? suggestion.suggestedName
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 Image(systemName: "airplane.departure")
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Sieht aus, als wärst du unterwegs")
+                    Text(plan == nil
+                         ? "Sieht aus, als wärst du unterwegs"
+                         : "„\(name)“ läuft heute – und du bist unterwegs")
                         .font(.subheadline.weight(.semibold))
                     Text("\(suggestion.suggestedName) – seit \(suggestion.travellingSince.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption)
@@ -180,15 +218,22 @@ struct TripView: View {
             }
             HStack(spacing: 8) {
                 Button("Trip starten") {
-                    startSheetName = suggestion.suggestedName
+                    startSheetName = name
                     autoStart.dismissSuggestion()
                     showStartSheet = true
                 }
                 .buttonStyle(.borderedProminent)
+                if let plan {
+                    Button("Plan öffnen") { openPlanId = plan.id }
+                        .buttonStyle(.bordered)
+                }
                 Button("Nicht jetzt") { autoStart.dismissSuggestion() }
                     .buttonStyle(.bordered)
                 Spacer()
-                Button("Hier nie fragen") { autoStart.suppressCurrentRegion() }
+                // Same words as the notification action, and honest
+                // about the reach: a grid cell of a few kilometres, not
+                // the whole app.
+                Button("In dieser Gegend nicht mehr fragen") { autoStart.suppressCurrentRegion() }
                     .buttonStyle(.borderless)
                     .font(.caption)
             }
@@ -219,6 +264,10 @@ struct TripView: View {
 private struct ActiveTripView: View {
     let trip: ActiveTrip
     let store: TripStore
+    /// The planned trip whose dates say it is today, so the plan is one
+    /// tap away while the photos are being taken — not four screens.
+    let runningPlan: TripPlanSummary?
+    let onOpenPlan: (Int) -> Void
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var assets: [PHAsset] = []
@@ -239,6 +288,10 @@ private struct ActiveTripView: View {
         VStack(spacing: 0) {
             if autoEndSuggestion != nil {
                 autoEndBanner
+                Divider()
+            }
+            if let runningPlan {
+                runningPlanBanner(runningPlan)
                 Divider()
             }
             optionsBar
@@ -285,29 +338,59 @@ private struct ActiveTripView: View {
         autoEndSuggestion = pending?.tripIosAlbumId == trip.iosAlbumId ? pending : nil
     }
 
-    private var autoEndBanner: some View {
+    /// The plan behind the photos, while both are happening (§3.7).
+    @MainActor
+    private func runningPlanBanner(_ plan: TripPlanSummary) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "house.fill")
+            Image(systemName: "calendar.badge.clock")
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Bist du zurück?")
+                Text("„\(plan.displayTitle)“ läuft heute")
                     .font(.subheadline.weight(.semibold))
-                Text("Sieht so aus, als wärst du wieder zuhause.")
+                Text(plan.schedule(on: Date()).label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Beenden") {
-                TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
-                autoEndSuggestion = nil
-                store.endTrip()
+            Button("Plan öffnen") { onOpenPlan(plan.id) }
+                .buttonStyle(.bordered)
+        }
+        .padding()
+        .background(.thinMaterial)
+    }
+
+    private var autoEndBanner: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: "house.fill")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Bist du zurück?")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Sieht so aus, als wärst du wieder zuhause.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
             }
-            .buttonStyle(.borderedProminent)
-            Button("Nein") {
-                TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
-                autoEndSuggestion = nil
+            HStack(spacing: 8) {
+                // Same words as the notification's actions, and the
+                // same confirmation as the toolbar's "Beenden": ending
+                // a trip from a banner is not a smaller decision than
+                // ending it from a button.
+                Button("Trip beenden") {
+                    TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
+                    autoEndSuggestion = nil
+                    showEndConfirm = true
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Weiter unterwegs") {
+                    TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
+                    autoEndSuggestion = nil
+                }
+                .buttonStyle(.bordered)
+                Spacer()
             }
-            .buttonStyle(.bordered)
         }
         .padding()
         .background(.thinMaterial)
@@ -335,6 +418,13 @@ private struct ActiveTripView: View {
                 .buttonStyle(.bordered)
             }
 
+            // What the chosen mode does, in one line under the picker.
+            // "Zwei-Wege" is not a word anybody brings to a holiday.
+            Text(Self.modeHint(trip.mode))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             HStack {
                 Picker("Modus", selection: Binding(
                     get: { trip.mode },
@@ -345,6 +435,7 @@ private struct ActiveTripView: View {
                     Text("Zwei-Wege").tag(PhotoSyncMode.bisync)
                 }
                 .pickerStyle(.menu)
+                .accessibilityHint(Self.modeHint(trip.mode))
 
                 Spacer()
 
@@ -361,6 +452,18 @@ private struct ActiveTripView: View {
         .padding()
     }
 
+    /// One sentence per sync mode, for the picker's caption.
+    static func modeHint(_ mode: PhotoSyncMode) -> String {
+        switch mode {
+        case .copy:
+            return "Kopieren: Neue Fotos gehen ins Album. Was du auf dem iPhone löschst, bleibt dort."
+        case .sync:
+            return "Synchronisieren: Was du auf dem iPhone löschst, verschwindet auch im Album."
+        case .bisync:
+            return "Zwei-Wege: Änderungen in beide Richtungen – auch Löschungen anderer landen auf dem iPhone."
+        }
+    }
+
     @ViewBuilder private var grid: some View {
         if isLoading {
             ProgressView()
@@ -371,7 +474,7 @@ private struct ActiveTripView: View {
             } description: {
                 Text(trip.autoAdd
                      ? "Neue Fotos, die du jetzt aufnimmst, werden automatisch hinzugefügt."
-                     : "Im manuellen Modus fügst du Fotos später über die Auswahl hinzu.")
+                     : "Im manuellen Modus kommen keine Fotos von selbst dazu. Lege sie in der Fotos-App in das Album „\(trip.name)“, dann werden sie synchronisiert.")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

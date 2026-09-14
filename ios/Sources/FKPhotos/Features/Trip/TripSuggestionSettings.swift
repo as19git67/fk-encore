@@ -8,7 +8,7 @@ import Foundation
 /// Defaults to on — the suggestion is the feature; a user who never wants it
 /// finds the switch in the trip settings after the first prompt.
 enum TripSuggestionSettings {
-    private static let enabledKey = "trip.suggestions.enabled"
+    static let enabledKey = "trip.suggestions.enabled"
 
     static var enabled: Bool {
         get {

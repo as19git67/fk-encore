@@ -241,6 +241,7 @@ struct TripArticleReadView: View {
                 ) { _, dwellMinutes in
                     await model.collect(proposal, dwellMinutes: dwellMinutes)
                     asking = nil
+                    return model.errorMessage == nil
                 }
             }
         }
