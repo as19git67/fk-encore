@@ -45,6 +45,15 @@ struct TripIdeasNearbyView: View {
                     }
             }
 
+            if !model.nearby.isEmpty {
+                // The swipe has a lasting consequence (§4.2 of the
+                // ideas concept); it is said here rather than found out.
+                Text("Nach links wischen für „Nicht jetzt“ — der Ort meldet sich später wieder, "
+                     + "nach dem dritten Mal nicht mehr.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             // Said as a number and never as a list: the count is honest
             // about what was held back, the list would be the nagging
             // the rule exists to prevent (§6.4).

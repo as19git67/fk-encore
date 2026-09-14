@@ -124,6 +124,35 @@ final class TripPlannerViewModel {
         plan?.legs.first { $0.position == legIndex }
     }
 
+    /// Show another day of the leg on screen. The one way to change the
+    /// day, so the picker, a swipe and "Heute" cannot drift apart.
+    func select(dayIndex: Int) {
+        guard let leg, leg.days.contains(where: { $0.dayIndex == dayIndex }) else { return }
+        self.dayIndex = dayIndex
+    }
+
+    /// The next or previous day of this leg, if there is one.
+    func step(days delta: Int) {
+        guard let leg else { return }
+        let ordered = leg.days.map(\.dayIndex).sorted()
+        guard let at = ordered.firstIndex(of: dayIndex) else { return }
+        let target = at + delta
+        guard ordered.indices.contains(target) else { return }
+        dayIndex = ordered[target]
+    }
+
+    /// Where today falls in the trip, or nil when it is not a trip day.
+    var todayPosition: TripDayPosition? {
+        plan?.position(on: now())
+    }
+
+    /// Jump to today. Nothing happens when today is not a trip day.
+    func goToToday() {
+        guard let today = todayPosition else { return }
+        legIndex = today.legIndex
+        dayIndex = today.dayIndex
+    }
+
     var day: TripDay? {
         leg?.days.first { $0.dayIndex == dayIndex }
     }

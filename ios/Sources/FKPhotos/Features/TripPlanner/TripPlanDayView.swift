@@ -70,131 +70,129 @@ struct TripPlanDayView: View {
                                        isRunning: leg.schedule(on: Date()).isRunning,
                                        onHide: { stop in
                                            await viewModel.hide(osmRef: stop.osmRef)
-                                       })
+                                       },
+                                       mode: leg.transportMode)
                     } label: {
                         Label("Karte", systemImage: "map")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        // Everything this leg could do, and why (§5).
-                        NavigationLink {
-                            TripPoolView(viewModel: viewModel, legIndex: leg.position)
-                        } label: {
-                            Label("Vorrat (\(leg.pool.count))", systemImage: "tray.full")
+                        // Grouped by what the entry is about. Fourteen
+                        // entries in one column made "Abendlicht" and
+                        // "Dokumente" neighbours, and put the evening
+                        // before the trip behind the same dots as the
+                        // afternoon of it.
+                        Section("Dieser Tag") {
+                            // The way into the candidates that needs
+                            // nothing else — no share sheet, no map
+                            // app, no model (§9.2, case 4).
+                            NavigationLink {
+                                TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position)
+                            } label: {
+                                Label("Ort suchen", systemImage: "magnifyingglass")
+                            }
+                            // When the light is good, after the planned
+                            // day is over (§7.3).
+                            NavigationLink {
+                                TripEveningLightView(
+                                    planId: viewModel.planId,
+                                    legIndex: viewModel.legIndex,
+                                    dayIndex: viewModel.dayIndex,
+                                ) { Task { await viewModel.load() } }
+                            } label: {
+                                Label("Abendlicht", systemImage: "sun.horizon")
+                            }
                         }
-                        // The way into the pool that needs nothing else
-                        // — no share sheet, no map app, no model
-                        // (§9.2, case 4).
-                        NavigationLink {
-                            TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position)
-                        } label: {
-                            Label("Ort suchen", systemImage: "magnifyingglass")
+                        Section("Diese Reise") {
+                            // Everything this leg could do, and why (§5).
+                            NavigationLink {
+                                TripPoolView(viewModel: viewModel, legIndex: leg.position)
+                            } label: {
+                                Label("Kandidaten (\(leg.pool.count))", systemImage: "tray.full")
+                            }
+                            // „Ihr habt vier Ideen für Lissabon gesammelt"
+                            // (§20.3) — offered, never pushed.
+                            NavigationLink {
+                                TripPlanIdeasView(viewModel: viewModel)
+                            } label: {
+                                Label("Aus den Ideen übernehmen", systemImage: "lightbulb")
+                            }
+                            // The cities of the trip (§4.2).
+                            NavigationLink {
+                                TripLegsView(viewModel: viewModel)
+                            } label: {
+                                Label("Städte (\(viewModel.plan?.legs.count ?? 1))",
+                                      systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                            }
+                            // Everybody rates, nobody is averaged away (§6.1).
+                            NavigationLink {
+                                TripBallotView(
+                                    planId: viewModel.planId,
+                                    legIndex: viewModel.legIndex,
+                                    leg: viewModel.leg,
+                                ) {
+                                    Task { await viewModel.load() }
+                                }
+                            } label: {
+                                Label("Abstimmen", systemImage: "hand.thumbsup")
+                            }
+                            Button {
+                                showSettings = true
+                            } label: {
+                                Label("Einstellungen", systemImage: "slider.horizontal.3")
+                            }
                         }
-                        // „Ihr habt vier Ideen für Lissabon gesammelt"
-                        // (§20.3) — offered here rather than pushed at
-                        // the traveller when the trip is created: an
-                        // idea from last year is not automatically the
-                        // wish of this trip.
-                        NavigationLink {
-                            TripPlanIdeasView(viewModel: viewModel)
-                        } label: {
-                            Label("Aus dem Vorrat", systemImage: "lightbulb")
+                        Section("Gruppe") {
+                            // Who may plan (§6.2) and who is coming
+                            // (§3.5) are two questions; next to each
+                            // other they at least read as two.
+                            NavigationLink {
+                                TripParticipantsView(planId: viewModel.planId)
+                            } label: {
+                                Label("Planen mit", systemImage: "person.2")
+                            }
+                            NavigationLink {
+                                TripTravellersView(planId: viewModel.planId) {
+                                    Task { await viewModel.load() }
+                                }
+                            } label: {
+                                Label("Reisegruppe", systemImage: "figure.2.and.child.holdinghands")
+                            }
                         }
-                        // The cities of the trip (§4.2) — add one,
-                        // move an anchor, drop one that fell through.
-                        NavigationLink {
-                            TripLegsView(viewModel: viewModel)
-                        } label: {
-                            Label("Etappen (\(viewModel.plan?.legs.count ?? 1))",
-                                  systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                        }
-                        // Who else may plan this trip (§6.2) — a
-                        // different question from who is coming along
-                        // (§3.5, below), so a different word.
-                        NavigationLink {
-                            TripParticipantsView(planId: viewModel.planId)
-                        } label: {
-                            Label("Wer plant mit", systemImage: "person.2")
-                        }
-                        // When the light is good, after the planned
-                        // day is over (§7.3). A sentence until
-                        // somebody taps.
-                        NavigationLink {
-                            TripEveningLightView(
-                                planId: viewModel.planId,
-                                legIndex: viewModel.legIndex,
-                                dayIndex: viewModel.dayIndex,
-                            ) { Task { await viewModel.load() } }
-                        } label: {
-                            Label("Abendlicht", systemImage: "sun.horizon")
-                        }
-                        // Who changed what, and taking it back
-                        // (§6.3) — several devices, one trip.
-                        NavigationLink {
-                            TripJournalView(planId: viewModel.planId) {
-                                Task { await viewModel.load() }
+                        // What belongs to the trip rather than to the
+                        // day. Also on the plan list, where the evening
+                        // before and the week after are actually spent.
+                        Menu {
+                            NavigationLink {
+                                TripDocumentsView(planId: viewModel.planId)
+                            } label: {
+                                Label("Dokumente", systemImage: "doc.text")
+                            }
+                            NavigationLink {
+                                TripJournalView(planId: viewModel.planId) {
+                                    Task { await viewModel.load() }
+                                }
+                            } label: {
+                                Label("Änderungen", systemImage: "arrow.uturn.backward")
+                            }
+                            NavigationLink {
+                                TripReadinessView(viewModel: viewModel)
+                            } label: {
+                                Label("Reisebereit?", systemImage: "checklist")
+                            }
+                            NavigationLink {
+                                TripReviewView(planId: viewModel.planId)
+                            } label: {
+                                Label("Danach", systemImage: "clock.arrow.circlepath")
+                            }
+                            NavigationLink {
+                                TripOfflineView(viewModel: viewModel)
+                            } label: {
+                                Label("Unterwegs ohne Netz", systemImage: "wifi.slash")
                             }
                         } label: {
-                            Label("Änderungen", systemImage: "arrow.uturn.backward")
-                        }
-                        // Everybody rates, nobody is averaged away
-                        // (§6.1). Voting does not re-plan; the screen
-                        // has a button for that.
-                        NavigationLink {
-                            TripBallotView(
-                                planId: viewModel.planId,
-                                legIndex: viewModel.legIndex,
-                                leg: viewModel.leg,
-                            ) {
-                                Task { await viewModel.load() }
-                            }
-                        } label: {
-                            Label("Abstimmen", systemImage: "hand.thumbsup")
-                        }
-                        // Who is actually coming (§3.5) — a child
-                        // under ten makes the blocks shorter, so this
-                        // re-plans the trip.
-                        NavigationLink {
-                            TripTravellersView(planId: viewModel.planId) {
-                                Task { await viewModel.load() }
-                            }
-                        } label: {
-                            Label("Wer fährt mit?", systemImage: "figure.2.and.child.holdinghands")
-                        }
-                        // The tickets and bookings this trip runs
-                        // on (§3.4) — suggested, never taken over.
-                        NavigationLink {
-                            TripDocumentsView(planId: viewModel.planId)
-                        } label: {
-                            Label("Dokumente", systemImage: "doc.text")
-                        }
-                        // The evening before (§8.6): what is still
-                        // cheap to fix tonight, and what to pack.
-                        NavigationLink {
-                            TripReadinessView(viewModel: viewModel)
-                        } label: {
-                            Label("Reisebereit?", systemImage: "checklist")
-                        }
-                        // And afterwards (§8.7): planned against what
-                        // actually happened.
-                        NavigationLink {
-                            TripReviewView(planId: viewModel.planId)
-                        } label: {
-                            Label("Danach", systemImage: "clock.arrow.circlepath")
-                        }
-                        // Taking the plan along without a connection
-                        // (§3.9) — asked for, never automatic.
-                        NavigationLink {
-                            TripOfflineView(viewModel: viewModel)
-                        } label: {
-                            Label("Unterwegs ohne Netz", systemImage: "wifi.slash")
-                        }
-                        Divider()
-                        Button {
-                            showSettings = true
-                        } label: {
-                            Label("Einstellungen", systemImage: "slider.horizontal.3")
+                            Label("Rund um die Reise", systemImage: "suitcase")
                         }
                     } label: {
                         Label("Mehr", systemImage: "ellipsis.circle")
@@ -333,6 +331,17 @@ struct TripPlanDayView: View {
             }
             .padding()
         }
+        // A horizontal swipe is the next day. Simultaneous with the
+        // vertical scroll, and only counted when it is clearly sideways.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 40)
+                .onEnded { value in
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    guard abs(dx) > abs(dy) * 2 else { return }
+                    withAnimation { viewModel.step(days: dx < 0 ? 1 : -1) }
+                }
+        )
         .safeAreaInset(edge: .top) {
             VStack(spacing: 0) {
                 // Only for a trip that has more than one: a chooser
@@ -556,6 +565,25 @@ struct TripPlanDayView: View {
     }
 
     private func legHeader(_ leg: TripLeg) -> some View {
+        // Tappable: the accommodation and the transport are printed
+        // here, and changing either used to be five screens away.
+        NavigationLink {
+            TripLegEditView(viewModel: viewModel, legIndex: leg.position)
+        } label: {
+            HStack(alignment: .top, spacing: 6) {
+                legHeaderText(leg)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Unterkunft und Verkehrsmittel ändern")
+    }
+
+    private func legHeaderText(_ leg: TripLeg) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             // Where the day begins and ends, said out loud. It is the
             // value the whole plan is measured from (§4.2), and the
@@ -661,11 +689,20 @@ struct TripPlanDayView: View {
     }
 
     private func dayPicker(_ leg: TripLeg) -> some View {
+        ScrollViewReader { proxy in
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                // Back to the day you are standing in, from wherever
+                // the picker wandered. Only while the trip runs and
+                // only when today is not already on screen.
+                if viewModel.todayPosition != nil, !viewModel.isToday {
+                    Button("Heute") { viewModel.goToToday() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
                 ForEach(leg.days) { day in
                     Button {
-                        viewModel.dayIndex = day.dayIndex
+                        viewModel.select(dayIndex: day.dayIndex)
                     } label: {
                         VStack(spacing: 2) {
                             Text("Tag \(day.dayIndex + 1)")
@@ -699,12 +736,21 @@ struct TripPlanDayView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .id(day.dayIndex)
                 }
             }
             .padding(.horizontal)
             .padding(.vertical, 6)
         }
         .background(.bar)
+        // The selected day stays in view. After a leg change the index
+        // jumps, and a fourteen-day leg showed days one to five over a
+        // screen about day eleven.
+        .onAppear { proxy.scrollTo(viewModel.dayIndex, anchor: .center) }
+        .onChange(of: viewModel.dayIndex) { _, day in
+            withAnimation { proxy.scrollTo(day, anchor: .center) }
+        }
+        }
     }
 
     // MARK: - The frame
@@ -1022,22 +1068,14 @@ struct TripPlanDayView: View {
                     }
                 }
             } else if block.stops.isEmpty {
-                // "Nichts geplant" on its own is a dead end: the pool
-                // next door is full of things that would fit, and until
-                // now nothing on this screen said so or led there.
+                // "Nichts geplant" on its own is a dead end: the
+                // candidates next door are full of things that would
+                // fit, and until now nothing on this screen said so.
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Nichts geplant.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    if let leg = viewModel.leg, !leg.pool.isEmpty {
-                        NavigationLink {
-                            TripPoolView(viewModel: viewModel, legIndex: leg.position)
-                        } label: {
-                            Label("Aus dem Vorrat füllen (\(leg.pool.count))",
-                                  systemImage: "tray.full")
-                                .font(.footnote)
-                        }
-                    }
+                    addStopRow(block)
                 }
             } else {
                 ForEach(Array(block.stops.enumerated()), id: \.element.rowId) { index, stop in
@@ -1046,6 +1084,9 @@ struct TripPlanDayView: View {
                     }
                     stopRow(stop, in: block)
                 }
+                // A second stop in a filled block used to take seven
+                // taps through the candidates and the block picker.
+                addStopRow(block)
                 if let leg = viewModel.leg {
                     Button {
                         // The whole block at once: Apple takes an array
@@ -1058,7 +1099,8 @@ struct TripPlanDayView: View {
                               systemImage: "arrow.triangle.turn.up.right.diamond")
                             .font(.footnote)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
 
@@ -1123,6 +1165,105 @@ struct TripPlanDayView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.leading, 4)
+    }
+
+    /// The way into a block, on the block (§8.4). Straight into the
+    /// candidates with this block already chosen, or into the search
+    /// when there are none yet.
+    @ViewBuilder
+    private func addStopRow(_ block: TripBlock) -> some View {
+        if let leg = viewModel.leg {
+            if leg.pool.isEmpty {
+                NavigationLink {
+                    TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position)
+                } label: {
+                    Label("Ort suchen", systemImage: "magnifyingglass")
+                        .font(.footnote)
+                }
+            } else {
+                NavigationLink {
+                    TripPoolView(
+                        viewModel: viewModel,
+                        legIndex: leg.position,
+                        placeInto: TripPoolTarget(dayIndex: viewModel.dayIndex,
+                                                  blockId: block.id, label: block.label),
+                    )
+                } label: {
+                    Label("Stopp hinzufügen", systemImage: "plus.circle")
+                        .font(.footnote)
+                }
+            }
+        }
+    }
+
+    /// Everything one can do with a stop, in one menu. It was six
+    /// separate targets in a row, none of them 44 points wide.
+    @ViewBuilder
+    private func stopMenuItems(_ stop: TripStop, in block: TripBlock, reasons: [String]) -> some View {
+        Section {
+            Button {
+                Task { await viewModel.mark(stop, as: .done) }
+            } label: {
+                Label("Erledigt", systemImage: "checkmark")
+            }
+            Button {
+                Task { await viewModel.mark(stop, as: .skipped) }
+            } label: {
+                Label("Übersprungen", systemImage: "xmark")
+            }
+            if stop.stopStatus != .planned {
+                Button {
+                    Task { await viewModel.mark(stop, as: .planned) }
+                } label: {
+                    Label("Doch wieder offen", systemImage: "arrow.uturn.backward")
+                }
+            }
+        }
+        Section {
+            // Routing somewhere is only useful once you are travelling.
+            // Planning at the kitchen table, "where is that?" is the
+            // question — a route from home to a café you will walk to
+            // next month is a number nobody wants.
+            if isTravelling {
+                Button {
+                    offerMaps(.single(stop.coordinate, mode: viewModel.leg?.transportMode ?? .foot))
+                } label: {
+                    Label("Route hierher", systemImage: "arrow.triangle.turn.up.right.circle")
+                }
+            }
+            Button {
+                TripMapsOpen.pin(stop.coordinate, name: stop.name, using: TripMapsPreference.load())
+            } label: {
+                Label("Auf der Karte zeigen", systemImage: "mappin.circle")
+            }
+        }
+        Section {
+            Button {
+                moving = TripStopMove(stop: stop, blockId: block.id)
+            } label: {
+                Label("In einen anderen Block", systemImage: "calendar")
+            }
+            Button {
+                Task { await viewModel.setPinned(stop, !stop.pinned) }
+            } label: {
+                Label(stop.pinned ? "Nicht mehr anheften" : "Anheften",
+                      systemImage: stop.pinned ? "pin.slash" : "pin")
+            }
+            if stop.stopStatus == .planned {
+                Button {
+                    Task { await viewModel.returnToPool(stop) }
+                } label: {
+                    Label("Zurück zu den Kandidaten", systemImage: "tray.and.arrow.down")
+                }
+            }
+            if !reasons.isEmpty {
+                Button {
+                    viewModel.toggleReasons(for: stop.osmRef)
+                } label: {
+                    Label("Warum hier?", systemImage: "questionmark.circle")
+                }
+            }
+        }
     }
 
     private func stopRow(_ stop: TripStop, in block: TripBlock) -> some View {
@@ -1213,65 +1354,21 @@ struct TripPlanDayView: View {
                 if stop.stopStatus == .done {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 }
-                // Routing somewhere is only useful once you are
-                // travelling. Planning at the kitchen table, the same
-                // tap should answer "where is that?" — a route from
-                // home to a café you will walk to next month is a
-                // number nobody wants.
-                Button {
-                    if isTravelling {
-                        offerMaps(.single(stop.coordinate,
-                                          mode: viewModel.leg?.transportMode ?? .foot))
-                    } else {
-                        TripMapsOpen.pin(stop.coordinate, name: stop.name,
-                                         using: TripMapsPreference.load())
-                    }
-                } label: {
-                    Image(systemName: isTravelling
-                          ? "arrow.triangle.turn.up.right.circle"
-                          : "mappin.circle")
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isTravelling
-                                    ? "Navigation zu \(stop.displayName)"
-                                    : "\(stop.displayName) auf der Karte zeigen")
-                // Ticking a spot off is the gesture of the day itself
-                // (§8.5) — a menu rather than a swipe, because these
-                // rows live in cards, not in a list.
+                // One menu for the stop, 44 points wide. Ticking a spot
+                // off is the gesture of the day itself (§8.5) — a menu
+                // rather than a swipe, because these rows live in
+                // cards, not in a list.
                 Menu {
-                    Button {
-                        Task { await viewModel.mark(stop, as: .done) }
-                    } label: {
-                        Label("Erledigt", systemImage: "checkmark")
-                    }
-                    Button {
-                        Task { await viewModel.mark(stop, as: .skipped) }
-                    } label: {
-                        Label("Übersprungen", systemImage: "xmark")
-                    }
-                    if stop.stopStatus != .planned {
-                        Button {
-                            Task { await viewModel.mark(stop, as: .planned) }
-                        } label: {
-                            Label("Doch wieder offen", systemImage: "arrow.uturn.backward")
-                        }
-                    }
+                    stopMenuItems(stop, in: block, reasons: reasons)
                 } label: {
                     Image(systemName: "ellipsis.circle")
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Was mit \(stop.displayName) ist")
-                if !reasons.isEmpty {
-                    Button {
-                        viewModel.toggleReasons(for: stop.osmRef)
-                    } label: {
-                        Image(systemName: viewModel.expandedReasons.contains(stop.osmRef)
-                              ? "questionmark.circle.fill" : "questionmark.circle")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Warum hier?")
-                }
+                .accessibilityLabel("Mehr zu \(stop.displayName)")
             }
+            .contextMenu { stopMenuItems(stop, in: block, reasons: reasons) }
 
             if viewModel.expandedReasons.contains(stop.osmRef) {
                 VStack(alignment: .leading, spacing: 2) {

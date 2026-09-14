@@ -25,6 +25,8 @@ struct TripDayMapView: View {
     /// compute — what happens to the trip — arrives from the screen
     /// that owns it. Nil leaves the sheet read-only.
     var onHide: (@MainActor (TripStop) async -> Void)?
+    /// How the group moves, for the detail screen's route button.
+    var mode: TripTransportMode = .foot
 
     @State private var camera: MapCameraPosition = .automatic
     @State private var sliderMinutes: Double = 0
@@ -87,6 +89,8 @@ struct TripDayMapView: View {
             TripPinDetailSheet(
                 detail: TripPinDetail.of(pick.stop, number: pick.number, in: day),
                 onHide: hideAction(for: pick),
+                stop: pick.stop,
+                mode: mode,
             )
         }
         .onAppear {
