@@ -30,31 +30,30 @@ struct TripMapsSettingsView: View {
     var body: some View {
         List {
             Section {
+                // All three, always: the one you chose must stay visible
+                // even when Google Maps is not installed right now.
                 Picker("Navigation öffnen mit", selection: selection) {
-                    Text(TripMapsApp.apple.label).tag(TripMapsApp.apple)
-                    if googleInstalled {
-                        Text(TripMapsApp.google.label).tag(TripMapsApp.google)
-                        Text(TripMapsApp.ask.label).tag(TripMapsApp.ask)
+                    ForEach(TripMapsApp.allCases, id: \.self) { app in
+                        Text(app.label).tag(app)
                     }
                 }
                 .pickerStyle(.inline)
-                .labelsHidden()
+            } header: {
+                Text("Navigation öffnen mit")
             } footer: {
-                Text(googleInstalled
-                     ? "Gilt für alles, was an eine Karten-App übergeben wird: Navigation, "
-                       + "ganze Blöcke, Orte nachschlagen und die Essensliste."
-                     : "Google Maps ist auf diesem Gerät nicht installiert. Sobald es da ist, "
-                       + "erscheint es hier zur Auswahl.")
+                Text("Routen und ganze Blöcke folgen dieser Wahl; bei „Jedes Mal fragen“ "
+                     + "fragt der Dialog auch nach „immer“. Einen Ort nachschlagen öffnet die "
+                     + "gewählte App, sonst Apple Karten.")
             }
 
-            if !googleInstalled, currentIsGoogle {
+            if !googleInstalled, currentNeedsGoogle {
                 Section {
                     // The setting can outlive the app being uninstalled.
                     // Saying so is better than silently opening Apple
                     // Maps and letting the traveller wonder.
                     Label(
-                        "Eingestellt ist Google Maps, das gerade fehlt — bis dahin öffnet "
-                            + "sich Apple Karten.",
+                        "Google Maps ist auf diesem Gerät nicht installiert — bis es da ist, "
+                            + "öffnet sich Apple Karten.",
                         systemImage: "exclamationmark.triangle",
                     )
                     .font(.footnote)
@@ -71,7 +70,7 @@ struct TripMapsSettingsView: View {
         }
     }
 
-    private var currentIsGoogle: Bool {
-        (TripMapsApp(rawValue: stored) ?? .apple) == .google
+    private var currentNeedsGoogle: Bool {
+        (TripMapsApp(rawValue: stored) ?? .apple) != .apple
     }
 }

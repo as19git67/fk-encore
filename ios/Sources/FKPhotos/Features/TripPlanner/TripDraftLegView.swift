@@ -34,9 +34,7 @@ struct TripDraftLegView: View {
                         .textInputAutocapitalization(.words)
                     Toggle("Noch nichts gebucht", isOn: $leg.anchorIsApproximate)
                     if leg.anchorIsApproximate {
-                        Stepper(value: $leg.anchorRadiusM, in: 300...10_000, step: 250) {
-                            Text("Ungefähr im Umkreis von \(leg.anchorRadiusM) m")
-                        }
+                        TripRadiusPicker(metres: $leg.anchorRadiusM)
                     }
                 }
             } header: {

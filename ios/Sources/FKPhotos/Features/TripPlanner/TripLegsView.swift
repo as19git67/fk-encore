@@ -24,6 +24,9 @@ struct TripLegsView: View {
 
     @State private var adding = false
     @State private var removing: TripLeg?
+    /// The city whose editor is open — a sheet with Abbrechen/Sichern,
+    /// like every other editor, instead of a push where Back discarded.
+    @State private var editing: TripLeg?
     @State private var isWorking = false
     @State private var errorMessage: String?
 
@@ -31,11 +34,19 @@ struct TripLegsView: View {
         List {
             Section {
                 ForEach(viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []) { leg in
-                    NavigationLink {
-                        TripLegEditView(viewModel: viewModel, legIndex: leg.position)
+                    Button {
+                        editing = leg
                     } label: {
-                        row(leg)
+                        HStack {
+                            row(leg)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(.rect)
                     }
+                    .buttonStyle(.plain)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { removing = leg } label: {
                             Label("Entfernen", systemImage: "trash")
@@ -68,6 +79,11 @@ struct TripLegsView: View {
         .navigationTitle("Städte")
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $editing) { leg in
+            NavigationStack {
+                TripLegEditView(viewModel: viewModel, legIndex: leg.position)
+            }
+        }
         .sheet(isPresented: $adding) {
             NavigationStack {
                 TripAddLegView(viewModel: viewModel)
@@ -263,7 +279,7 @@ struct TripLegEditView: View {
             } header: {
                 Text("Wie lange, wie unterwegs")
             } footer: {
-                Text("Länge und Verkehrsmittel planen die Tage dieser Stadt neu. Name und "
+                Text("Nur diese Stadt. Länge und Verkehrsmittel planen ihre Tage neu, Name und "
                      + "Datum nicht.")
             }
 
@@ -311,6 +327,9 @@ struct TripLegEditView: View {
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Abbrechen") { dismiss() }
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
                     Task { await save() }

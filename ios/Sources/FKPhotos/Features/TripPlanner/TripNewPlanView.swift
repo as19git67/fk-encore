@@ -17,24 +17,59 @@ import SwiftUI
 struct TripNewPlanView: View {
     @State private var model = TripNewPlanViewModel()
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmCancel = false
+    /// The draft city about to be deleted (display offsets, see
+    /// `removeLegs`). A filled-in city is not deleted by one swipe.
+    @State private var removingOffsets: IndexSet?
 
     /// Handed the new plan's id, so the caller can open it.
     let onCreated: (Int) -> Void
 
     var body: some View {
         Form {
+            nameSection
             placeSection
             routeSection
             lengthSection
             styleSection
+            interestsSection
             sentenceSection
+            if !model.draft.isPlannable {
+                Section {
+                    EmptyView()
+                } footer: {
+                    // Why "Planen" is grey — said, not left to be guessed.
+                    Label("Für jede Stadt einen Ort aus der Suche antippen, dann lässt sich planen.",
+                          systemImage: "info.circle")
+                }
+            }
         }
         .navigationTitle("Neue Reise")
         .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
+        .task { await model.loadInterests() }
+        // A filled form is not thrown away by a swipe or a mis-tap.
+        .interactiveDismissDisabled(model.isDirty)
+        .confirmationDialog("Eingaben verwerfen?", isPresented: $confirmCancel,
+                            titleVisibility: .visible) {
+            Button("Verwerfen", role: .destructive) { dismiss() }
+            Button("Weiter bearbeiten", role: .cancel) {}
+        }
+        .alert("Stadt entfernen?", isPresented: Binding(
+            get: { removingOffsets != nil }, set: { if !$0 { removingOffsets = nil } })) {
+            Button("Entfernen", role: .destructive) {
+                if let offsets = removingOffsets { model.removeLegs(displayedAt: offsets) }
+                removingOffsets = nil
+            }
+            Button("Abbrechen", role: .cancel) { removingOffsets = nil }
+        } message: {
+            Text("Ort, Länge und Zeiten dieser Stadt gehen verloren.")
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") { dismiss() }
+                Button("Abbrechen") {
+                    if model.isDirty { confirmCancel = true } else { dismiss() }
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
@@ -56,6 +91,20 @@ struct TripNewPlanView: View {
         }
     }
 
+    // MARK: - Name
+
+    /// The trip's own name, first. It sat under "Wie lange?", which is
+    /// not where anybody looks for it.
+    private var nameSection: some View {
+        Section {
+            TextField("Name der Reise (optional)", text: $model.draft.title)
+        } header: {
+            Text("Name")
+        } footer: {
+            Text("Ohne Namen heißt die Reise nach ihren Städten.")
+        }
+    }
+
     // MARK: - Where
 
     /// Where the trip is based (§4.2).
@@ -72,12 +121,12 @@ struct TripNewPlanView: View {
                 model.pick(place)
             }
             if model.draft.anchor != nil {
-                TextField("Stadt (optional)", text: $model.draft.legs[0].title)
+                TextField("Name der Stadt (optional)", text: $model.draft.legs[0].title)
                     .textInputAutocapitalization(.words)
                 anchorZoneRows(for: 0)
             }
         } header: {
-            Text("Unterkunft")
+            Text("Wo? Die Unterkunft der ersten Stadt")
         } footer: {
             Text("Hotel, Campingplatz oder Adresse — hier fängt jeder Tag an und hier endet "
                  + "er, und von hier aus werden die Wege gerechnet. Eine Stadt geht auch; "
@@ -96,9 +145,7 @@ struct TripNewPlanView: View {
     private func anchorZoneRows(for index: Int) -> some View {
         Toggle("Noch nichts gebucht", isOn: $model.draft.legs[index].anchorIsApproximate)
         if model.draft.legs[index].anchorIsApproximate {
-            Stepper(value: $model.draft.legs[index].anchorRadiusM, in: 300...10_000, step: 250) {
-                Text("Ungefähr im Umkreis von \(model.draft.legs[index].anchorRadiusM) m")
-            }
+            TripRadiusPicker(metres: $model.draft.legs[index].anchorRadiusM)
             Text("Der Planer rechnet mit der Mitte und zeigt die Unterkunft nicht als Adresse an.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -133,8 +180,13 @@ struct TripNewPlanView: View {
             }
             .onDelete { offsets in
                 // These index the *displayed* rows, which start at the
-                // second city — so offset 0 is `legs[1]`.
-                model.removeLegs(displayedAt: offsets)
+                // second city — so offset 0 is `legs[1]`. Asked first
+                // when the row already holds a place.
+                let displayed = Array(model.draft.legs.dropFirst())
+                let holdsSomething = offsets.contains {
+                    displayed.indices.contains($0) && displayed[$0].place != nil
+                }
+                if holdsSomething { removingOffsets = offsets } else { model.removeLegs(displayedAt: offsets) }
             }
 
             Button {
@@ -170,18 +222,28 @@ struct TripNewPlanView: View {
     // MARK: - How long
 
     private var lengthSection: some View {
-        Section("Wie lange?") {
+        Section {
             Stepper(value: $model.draft.days,
                     in: TripNewPlanDraft.minDays...TripNewPlanDraft.maxDays) {
-                Text(model.draft.days == 1 ? "1 Tag" : "\(model.draft.days) Tage")
+                Text(model.draft.legs.count > 1
+                     ? "Erste Stadt: \(model.draft.days == 1 ? "1 Tag" : "\(model.draft.days) Tage")"
+                     : (model.draft.days == 1 ? "1 Tag" : "\(model.draft.days) Tage"))
             }
-            TextField("Name der Reise (optional)", text: $model.draft.title)
             Toggle("Termin steht fest", isOn: $model.draft.isDated)
             if model.draft.isDated {
                 DatePicker("Erster Tag", selection: $model.draft.startDate,
                            displayedComponents: .date)
             }
             arrivalRows(for: 0)
+        } header: {
+            Text("Wie lange?")
+        } footer: {
+            if model.draft.legs.count > 1 {
+                // The stepper above is the first city's; the trip is the
+                // sum, and nothing said so.
+                Text("Insgesamt \(model.draft.totalDays) Tage über \(model.draft.legs.count) Städte. "
+                     + "Die Länge jeder weiteren Stadt steht bei der Stadt.")
+            }
         }
     }
 
@@ -236,8 +298,40 @@ struct TripNewPlanView: View {
         } header: {
             Text("Wie?")
         } footer: {
-            Text("Verkehrsmittel, Tempo und Begleitung bestimmen, wie viel an einem Tag "
+            Text("Gilt für die ganze Reise; jede weitere Stadt kann ihr eigenes Verkehrsmittel "
+                 + "haben. Verkehrsmittel, Tempo und Begleitung bestimmen, wie viel an einem Tag "
                  + "Platz hat. Alles davon lässt sich später in den Einstellungen ändern.")
+        }
+    }
+
+    // MARK: - What counts
+
+    /// The interests, as toggles — the same list the settings show.
+    /// They used to be reachable at creation only through the sentence,
+    /// which needs a model that is often asleep.
+    @ViewBuilder
+    private var interestsSection: some View {
+        if !model.interestOptions.isEmpty {
+            Section {
+                ForEach(model.interestOptions) { option in
+                    Toggle(option.label, isOn: Binding(
+                        get: { model.draft.interests.contains(option.id) },
+                        set: { on in
+                            if on {
+                                if !model.draft.interests.contains(option.id) {
+                                    model.draft.interests.append(option.id)
+                                }
+                            } else {
+                                model.draft.interests.removeAll { $0 == option.id }
+                            }
+                        },
+                    ))
+                }
+            } header: {
+                Text("Was zählt auf dieser Reise?")
+            } footer: {
+                Text("Angekreuztes bewertet der Planer höher — es schließt nichts aus.")
+            }
         }
     }
 

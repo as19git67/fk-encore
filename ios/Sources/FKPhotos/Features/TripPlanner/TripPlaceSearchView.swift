@@ -26,6 +26,17 @@ struct TripPlaceSearchView: View {
             }
 
 
+            if !model.hasSearched && !model.isSearching {
+                // Something before the first search: the screen used to
+                // be a title over nothing.
+                ContentUnavailableView {
+                    Label("Nach Namen suchen", systemImage: "magnifyingglass")
+                } description: {
+                    Text("Ein Museum, ein Café, ein Aussichtspunkt — was ihr findet, kommt zu "
+                         + "den Kandidaten dieser Stadt.")
+                }
+            }
+
             if model.hasSearched && model.results.isEmpty && !model.isSearching {
                 Text("Nichts gefunden. Vielleicht heißt der Ort in OpenStreetMap anders.")
                     .foregroundStyle(.secondary)
