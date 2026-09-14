@@ -18,8 +18,6 @@ import SwiftUI
 struct TripIdeasView: View {
     @State private var model = TripIdeasViewModel()
     @State private var isAddingHere = false
-    @State private var shareEmail = ""
-    @State private var isSharing = false
     /// True while the shared link is being turned into an entry.
     @State private var isAddingShared = false
     /// Whether the collection may speak up on its own (§20.2).
@@ -171,35 +169,19 @@ struct TripIdeasView: View {
                 .background(Color(uiColor: .systemGroupedBackground))
             }
         }
-        .navigationTitle(model.collection?.label ?? "Ideen")
+        .navigationTitle("Ideen")
         .plannerErrorBanner(model.errorMessage, retry: { await model.load() }, dismiss: { model.errorMessage = nil })
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    // Buttons rather than a Picker: switching collection
-                    // reloads, and a menu entry that says which one is
-                    // current reads better than a wheel nobody expects
-                    // in a menu.
-                    if model.collections.count > 1 {
-                        ForEach(model.collections) { collection in
-                            Button {
-                                model.ownerId = collection.ownerId
-                            } label: {
-                                Label(
-                                    collection.label,
-                                    systemImage: isCurrent(collection) ? "checkmark" : "tray",
-                                )
-                            }
-                        }
-                        Divider()
-                    }
-                    Button {
-                        isSharing = true
-                    } label: {
-                        Label("Jemanden mitschreiben lassen", systemImage: "person.badge.plus")
-                    }
+                // One list for the household (§20.1): everything you may
+                // write into, folded where two of you kept the same place,
+                // with "von X" on each row. The collection switcher is
+                // gone with it — two people who collected separately and
+                // then let each other in see one list, not two.
+                NavigationLink {
+                    TripIdeaMembersView(model: model)
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Label("Wer schreibt mit", systemImage: "person.2")
                 }
             }
             // Top bar, not `.bottomBar`: this screen lives inside the
@@ -266,17 +248,6 @@ struct TripIdeasView: View {
                 await model.addShared(note: note, dwellMinutes: dwellMinutes)
                 return model.errorMessage == nil
             }
-        }
-        .alert("Mitschreiben lassen", isPresented: $isSharing) {
-            TextField("E-Mail-Adresse", text: $shareEmail)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.emailAddress)
-            Button("Abbrechen", role: .cancel) {}
-            Button("Einladen") {
-                Task { await model.share(with: shareEmail) }
-            }
-        } message: {
-            Text("Wer eingeladen ist, schreibt in dieselben Ideen — eine Liste, keine Kopie.")
         }
     }
 
@@ -356,9 +327,6 @@ struct TripIdeasView: View {
         isAddingHere = true
     }
 
-    private func isCurrent(_ collection: TripIdeaCollection) -> Bool {
-        model.collection?.ownerId == collection.ownerId
-    }
 
     @ViewBuilder
     private func row(_ idea: TripIdea) -> some View {
@@ -552,6 +520,98 @@ struct TripIdeaTakeSheet: View {
             dismiss()
         } else {
             errorMessage = model.errorMessage
+        }
+    }
+}
+
+/// Who writes into my ideas (§20.1) — the people, and the rest of the
+/// household to pick from.
+///
+/// Modelled on the album share: the household is a known, short list
+/// of accounts, so inviting is a tap on a name, not an address typed
+/// into an alert. Being let in means writing into *my* collection;
+/// their own stays theirs, and both show up in one list for everybody
+/// who may see both.
+struct TripIdeaMembersView: View {
+    let model: TripIdeasViewModel
+    @State private var removing: TripIdeaMember?
+
+    var body: some View {
+        List {
+            Section {
+                if model.isLoadingMembers && model.members.isEmpty {
+                    HStack { ProgressView(); Text("Wird geladen…") }
+                } else if model.members.isEmpty {
+                    Text("Bisher schreibst nur du in deine Ideen.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(model.members) { member in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(member.displayName)
+                            Text(member.email).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            removing = member
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("\(member.displayName) nicht mehr mitschreiben lassen")
+                    }
+                }
+            } header: {
+                Text("Schreiben mit")
+            } footer: {
+                Text("Wer hier steht, sieht deine Ideen in seiner Liste und legt eigene dazu. "
+                     + "Was die Person selbst sammelt, bleibt ihre Sammlung — du siehst sie "
+                     + "mit, sobald sie dich ebenfalls hineinlässt.")
+            }
+
+            if !model.household.isEmpty {
+                Section {
+                    ForEach(model.household) { user in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(user.displayName)
+                                Text(user.email).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                Task { await model.share(with: user) }
+                            } label: {
+                                Image(systemName: "plus.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("\(user.displayName) mitschreiben lassen")
+                        }
+                    }
+                } header: {
+                    Text("Aus dem Haushalt")
+                } footer: {
+                    Text("Antippen lässt die Person in deine Ideen. Kein Link, keine Einladung "
+                         + "per E-Mail — alle hier haben schon ein Konto.")
+                }
+            }
+        }
+        .navigationTitle("Wer schreibt mit")
+        .navigationBarTitleDisplayMode(.inline)
+        .plannerErrorBanner(model.errorMessage, retry: { await model.loadMembers() },
+                            dismiss: { model.errorMessage = nil })
+        .task { await model.loadMembers() }
+        .refreshable { await model.loadMembers() }
+        .confirmationDialog("Nicht mehr mitschreiben lassen?", isPresented: Binding(
+            get: { removing != nil }, set: { if !$0 { removing = nil } }),
+            titleVisibility: .visible, presenting: removing) { member in
+            Button("\(member.displayName) entfernen", role: .destructive) {
+                Task { await model.unshare(member) }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { member in
+            Text("\(member.displayName) sieht deine Ideen danach nicht mehr. Die eigene "
+                 + "Sammlung bleibt unberührt.")
         }
     }
 }

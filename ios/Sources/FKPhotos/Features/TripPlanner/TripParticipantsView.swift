@@ -38,32 +38,46 @@ struct TripParticipantsView: View {
             }
 
             if model.youOrganise {
+                // The household, to pick from — like the album share.
+                // Nobody types an address for a person in the same house.
                 Section {
                     if let lastInvitation = model.lastInvitation {
                         Label(lastInvitation, systemImage: "checkmark.circle")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                    HStack {
-                        TextField("E-Mail-Adresse", text: $model.email)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.emailAddress)
-                            .submitLabel(.done)
-                            .onSubmit { Task { await model.invite() } }
-                        if model.isInviting {
-                            ProgressView()
-                        } else {
-                            Button("Einladen") { Task { await model.invite() } }
+                    if model.household.isEmpty {
+                        Text(model.isLoadingHousehold
+                             ? "Wird geladen…"
+                             : "Alle aus dem Haushalt planen schon mit.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(model.household) { user in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(user.displayName)
+                                Text(user.email).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if model.invitingId == user.id {
+                                ProgressView()
+                            } else {
+                                Button {
+                                    Task { await model.invite(user) }
+                                } label: {
+                                    Image(systemName: "plus.circle")
+                                }
                                 .buttonStyle(.borderless)
-                                .disabled(!model.emailLooksValid)
+                                .accessibilityLabel("\(user.displayName) mitplanen lassen")
+                            }
                         }
                     }
                 } header: {
-                    Text("Einladen")
+                    Text("Aus dem Haushalt")
                 } footer: {
-                    Text("Die Adresse, mit der die Person sich anmeldet. Ohne Konto dazu meldet "
-                         + "der Server, dass niemand gefunden wurde.")
+                    Text("Antippen lässt die Person mitplanen. Alle hier haben schon ein Konto; "
+                         + "eine Einladung per E-Mail braucht es nicht.")
                 }
             }
 
@@ -169,8 +183,11 @@ struct TripParticipantsResponse: Codable, Sendable {
 final class TripParticipantsViewModel {
     private(set) var participants: [TripParticipant] = []
     private(set) var youOrganise = false
-    private(set) var isInviting = false
-    var email = ""
+    /// Who is being invited right now, for the spinner on that row.
+    private(set) var invitingId: Int?
+    /// The rest of the household, offered to plan along.
+    private(set) var household: [TripHouseholdUser] = []
+    private(set) var isLoadingHousehold = false
     var errorMessage: String?
 
     /// Who is looking — the signed-in user, handed in by the screen.
@@ -195,6 +212,7 @@ final class TripParticipantsViewModel {
         } catch {
             errorMessage = TripErrorText.describe(error)
         }
+        if youOrganise { await loadHousehold() }
     }
 
     /// Everyone may leave; only the organiser may remove somebody else;
@@ -204,35 +222,36 @@ final class TripParticipantsViewModel {
         return youOrganise || person.userId == me
     }
 
-    /// Enough of a check to catch a typo before the server does: one
-    /// "@", something on both sides, a dot after it.
-    var emailLooksValid: Bool {
-        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        let parts = address.split(separator: "@", omittingEmptySubsequences: false)
-        guard parts.count == 2, !parts[0].isEmpty else { return false }
-        return parts[1].contains(".") && !parts[1].hasPrefix(".") && !parts[1].hasSuffix(".")
-    }
-
-    /// What the last invitation did, in words — the empty field alone
-    /// looked the same whether it worked or not.
+    /// What the last invitation did, in words.
     private(set) var lastInvitation: String?
 
-    func invite() async {
-        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard emailLooksValid else { return }
-        isInviting = true
-        defer { isInviting = false }
-        struct Body: Encodable { let email: String }
+    /// The household minus who is already on this trip.
+    func loadHousehold() async {
+        isLoadingHousehold = true
+        defer { isLoadingHousehold = false }
+        do {
+            let response: TripHouseholdUsersResponse = try await APIClient.shared.get(
+                "/trip-planner/shareable-users", query: ["planId": String(planId)])
+            household = response.users
+        } catch {
+            // The list of participants above is the screen; the picker
+            // is its second half and may be empty while the first works.
+            household = []
+            if errorMessage == nil { errorMessage = TripErrorText.describe(error) }
+        }
+    }
+
+    func invite(_ user: TripHouseholdUser) async {
+        invitingId = user.id
+        defer { invitingId = nil }
+        struct Body: Encodable { let userId: Int }
         struct Response: Decodable { let added: Bool }
         do {
             let response: Response = try await APIClient.shared.post(
-                "/trip-planner/plans/\(planId)/participants", body: Body(email: address))
-            if response.added {
-                lastInvitation = "\(address) plant jetzt mit."
-                email = ""
-            } else {
-                lastInvitation = "\(address) ist schon dabei."
-            }
+                "/trip-planner/plans/\(planId)/participants", body: Body(userId: user.id))
+            lastInvitation = response.added
+                ? "\(user.displayName) plant jetzt mit."
+                : "\(user.displayName) ist schon dabei."
             errorMessage = nil
             await load()
         } catch {

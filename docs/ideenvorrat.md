@@ -85,18 +85,34 @@ Menschen.
 ## 4. Endpunkte
 
 Alle unter `/trip-planner`, alle mit `auth: true` und der Berechtigung
-`photos.view`. `ownerId` ist überall optional und meint standardmäßig die
-eigene Sammlung.
+`photos.view`. `ownerId` ist überall optional. **Ohne** `ownerId` gilt seit
+der Haushaltsansicht: gelesen wird über **alle Sammlungen, in die man
+hineingelassen wurde** (die eigene zuerst); geschrieben wird in die eigene.
+Mit `ownerId` ist genau diese eine Sammlung gemeint.
+
+**Zwei Sammlungen, eine Sicht.** Jede Person hat ihre eigene Sammlung
+(`idea_pool.owner_id`); hineinlassen (`idea_pool_shares`) gibt der anderen
+Person Schreibrecht in *meine*. Fangen zwei Haushaltsmitglieder getrennt an
+und lassen sich später gegenseitig hinein, wird **nichts umgehängt und nichts
+zusammengeführt**: beide behalten ihre Sammlung, beide sehen ab dann **eine
+Liste** aus beiden — mit „von X“ an jeder Zeile und `ownerId` an jedem Eintrag,
+damit Bearbeiten und Löschen wissen, wohin. Derselbe Ort in zwei Sammlungen
+(gleicher `osm_ref`, oder zwei `manual:`-Einträge innerhalb von 80 m) ist in
+der Liste **eine** Zeile; die eigene Kopie gewinnt, sonst die ältere. Nähe,
+Ausflug, „schon bei den Ideen“ beim Entdecken und „aus den Ideen übernehmen“
+in einer Reise lesen dieselbe Vereinigung.
 
 ### 4.1 Die Sammlung selbst (`ideas.ts`)
 
 | Aufruf | Was er tut |
 | --- | --- |
 | `POST /ideas` | Idee hinzufügen |
-| `GET /ideas` | Einträge plus die Sammlungen, auf die man Zugriff hat |
-| `POST /ideas/remove` | Eintrag löschen |
-| `POST /ideas/share` | jemanden per E-Mail-Adresse hineinlassen |
+| `GET /ideas` | Einträge aller zugänglichen Sammlungen als eine Liste (oder eine per `ownerId`), plus die Sammlungen selbst |
+| `GET /ideas/members` | wer in meine Sammlung schreiben darf |
+| `POST /ideas/remove` | Eintrag löschen (`ownerId` sagt, aus welcher Sammlung) |
+| `POST /ideas/share` | jemanden hineinlassen — per `userId` aus dem Haushalt (die App zeigt die Liste, wie die Albumfreigabe) oder per `email` |
 | `POST /ideas/unshare` | jemanden wieder hinausnehmen |
+| `GET /shareable-users?forIdeas=true` | der Haushalt minus wer schon mitschreibt (`household.ts`; mit `planId` statt `forIdeas` dasselbe für eine Reise) |
 
 Der Weg hinein ist **derselbe wie bei einem Fund** (§9.2), nicht ein zweiter:
 Koordinate, optional Name, Notiz, Herkunft. Im Umkreis von **80 m** wird der

@@ -33,7 +33,7 @@
  */
 
 import { api, APIError } from "encore.dev/api";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
 import { ideaPool } from "../db/schema";
@@ -41,7 +41,7 @@ import { requirePermission } from "../user/auth-handler";
 import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { toCandidates } from "./candidates";
-import { requireAccess } from "./ideas";
+import { accessibleOwnerIds, requireAccess } from "./ideas";
 import { requestRegionFor } from "./region-request";
 import { haversineMeters } from "./travel";
 import { emptinessNote, keepsInterest, orderForBrowsing } from "./explore-filter";
@@ -151,7 +151,11 @@ export const exploreArea = api(
     const query = validateQuery(req.query);
     const interests = (req.interests ?? []).filter((id) => typeof id === "string" && id !== "");
     const question = validateQuestion(req.question);
-    const ownerId = await requireAccess(req.ownerId ?? userId, userId);
+    // Marked as collected if *anybody* in the household has it: the
+    // list is one list across the collections you may write into.
+    const owners = req.ownerId === undefined
+      ? await accessibleOwnerIds(userId)
+      : [await requireAccess(req.ownerId, userId)];
 
     const region = await pickRegion(position.lat, position.lon);
     if (!region) {
@@ -179,7 +183,7 @@ export const exploreArea = api(
       throw APIError.unavailable("die Region antwortet gerade nicht");
     }
 
-    const collected = await collectedRefs(ownerId);
+    const collected = await collectedRefs(owners);
     // The facts the scoring drops on the way: `toCandidates` keeps what
     // ranking needs, and an opening time is not that — but it is the
     // first thing anybody asks of a list they might act on today.
@@ -312,11 +316,12 @@ export const requestExploreRegion = api(
  * region search can produce. A "you have this already" mark that fired
  * on proximity would claim the museum for the bench outside it.
  */
-async function collectedRefs(ownerId: number): Promise<Set<string>> {
+async function collectedRefs(owners: number[]): Promise<Set<string>> {
+  if (owners.length === 0) return new Set();
   const rows = await db
     .select({ osmRef: ideaPool.osm_ref })
     .from(ideaPool)
-    .where(eq(ideaPool.owner_id, ownerId));
+    .where(inArray(ideaPool.owner_id, owners));
   return new Set(rows.map((row) => row.osmRef));
 }
 

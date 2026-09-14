@@ -39,6 +39,7 @@ import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DWELL_MINUTES } from "./candidates";
 import { findDuplicate, manualRef } from "./finds";
 import { displayName } from "./readable-name";
+import { haversineMeters } from "./travel";
 
 /** How far around a coordinate to look for the OSM entry it might be. */
 const MATCH_RADIUS_M = 80;
@@ -46,6 +47,12 @@ const MAX_NOTE_LENGTH = 1_000;
 
 export interface IdeaEntry {
   id: number;
+  /**
+   * Whose collection this entry lives in. The list is one list across
+   * every collection a person may write into, so a row has to say
+   * where it is before it can be edited or removed.
+   */
+  ownerId: number;
   osmRef: string;
   name: string | null;
   /** What the family calls it, when that is not the map's name. */
@@ -183,6 +190,12 @@ export const addIdea = api(
 );
 
 export interface ListIdeasRequest {
+  /**
+   * One collection only. Without it the answer is everything the
+   * caller may write into — their own and every collection they were
+   * let into — as one list, folded where two collections hold the same
+   * place.
+   */
   ownerId?: number;
 }
 
@@ -204,8 +217,37 @@ export const listIdeas = api(
   { expose: true, method: "GET", path: "/trip-planner/ideas", auth: true },
   async (req: ListIdeasRequest): Promise<ListIdeasResponse> => {
     const userId = requireUser();
-    const ownerId = await requireAccess(req.ownerId ?? userId, userId);
-    return { entries: await loadIdeas(ownerId), collections: await collectionsFor(userId) };
+    const owners = req.ownerId === undefined
+      ? await accessibleOwnerIds(userId)
+      : [await requireAccess(req.ownerId, userId)];
+    return {
+      entries: foldAcrossCollections(await loadIdeas(owners), userId),
+      collections: await collectionsFor(userId),
+    };
+  },
+);
+
+export interface IdeaMember {
+  userId: number;
+  name: string | null;
+  email: string;
+}
+
+/**
+ * Who writes into my collection (§20.1) — the list behind "Wer
+ * schreibt mit", so somebody let in can be seen and taken out again.
+ */
+export const listIdeaMembers = api(
+  { expose: true, method: "GET", path: "/trip-planner/ideas/members", auth: true },
+  async (): Promise<{ members: IdeaMember[] }> => {
+    const ownerId = requireUser();
+    const rows = await db
+      .select({ userId: ideaPoolShares.user_id, name: users.name, email: users.email })
+      .from(ideaPoolShares)
+      .innerJoin(users, eq(users.id, ideaPoolShares.user_id))
+      .where(eq(ideaPoolShares.owner_id, ownerId))
+      .orderBy(asc(users.name));
+    return { members: rows };
   },
 );
 
@@ -230,21 +272,17 @@ export const removeIdea = api(
 );
 
 export interface ShareIdeasRequest {
-  /** Who joins the collection, by the address they signed up with. */
-  email: string;
+  /** Who joins the collection, picked from the household by id … */
+  userId?: number;
+  /** … or by the address they signed up with. One of the two. */
+  email?: string;
 }
 
 export const shareIdeas = api(
   { expose: true, method: "POST", path: "/trip-planner/ideas/share", auth: true },
   async (req: ShareIdeasRequest): Promise<{ collections: IdeaCollection[] }> => {
     const userId = requireUser();
-    const email = req.email.trim().toLowerCase();
-    const [invitee] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.email, email))
-      .limit(1);
-    if (!invitee) throw APIError.notFound(`niemand mit der Adresse ${email}`);
+    const invitee = await findInvitee(req);
     if (invitee.id === userId) {
       throw APIError.invalidArgument("dein eigener Vorrat gehört dir bereits");
     }
@@ -269,10 +307,69 @@ export const unshareIdeas = api(
   },
 );
 
+/** The person a share request names — by id, else by address. */
+async function findInvitee(req: ShareIdeasRequest): Promise<{ id: number }> {
+  if (req.userId !== undefined) {
+    const [byId] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, req.userId))
+      .limit(1);
+    if (!byId) throw APIError.notFound("diese Person gibt es nicht");
+    return byId;
+  }
+  const email = (req.email ?? "").trim().toLowerCase();
+  if (!email) throw APIError.invalidArgument("userId or email is required");
+  const [byEmail] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+  if (!byEmail) throw APIError.notFound(`niemand mit der Adresse ${email}`);
+  return byEmail;
+}
+
 /**
- * The collection is the owner's, and everybody they share it with may
- * write into it — one list, not a copy per person (§20.1).
+ * Every collection this person may write into: their own first, then
+ * the ones they were let into. The list, the neighbourhood, the outing
+ * and a trip's "aus den Ideen" all read across these — one household,
+ * one view, while every entry keeps whose collection it sits in.
  */
+export async function accessibleOwnerIds(userId: number): Promise<number[]> {
+  const shared = await db
+    .select({ ownerId: ideaPoolShares.owner_id })
+    .from(ideaPoolShares)
+    .where(eq(ideaPoolShares.user_id, userId))
+    .orderBy(asc(ideaPoolShares.created_at));
+  return [userId, ...shared.map((row) => row.ownerId).filter((id) => id !== userId)];
+}
+
+/**
+ * Two people collecting separately and then letting each other in
+ * often hold the same beer garden twice. Across collections the
+ * unique index does not fold them, so the list does: the same OSM
+ * reference, or two unmatched places within `MATCH_RADIUS_M`, are one
+ * row — the caller's own copy wins, then the earlier one.
+ */
+export function foldAcrossCollections<T extends {
+  ownerId: number; osmRef: string; lat: number; lon: number; addedAt: string;
+}>(entries: T[], userId: number): T[] {
+  const ordered = [...entries].sort((a, b) => {
+    if ((a.ownerId === userId) !== (b.ownerId === userId)) return a.ownerId === userId ? -1 : 1;
+    return a.addedAt < b.addedAt ? -1 : a.addedAt > b.addedAt ? 1 : 0;
+  });
+  const kept: T[] = [];
+  for (const entry of ordered) {
+    const twin = kept.some((seen) =>
+      seen.osmRef === entry.osmRef
+        || (seen.osmRef.startsWith("manual:") && entry.osmRef.startsWith("manual:")
+            && haversineMeters(seen, entry) <= MATCH_RADIUS_M));
+    if (!twin) kept.push(entry);
+  }
+  // Back in the order the list shows: oldest first, like `loadIdeas`.
+  return kept.sort((a, b) => (a.addedAt < b.addedAt ? -1 : a.addedAt > b.addedAt ? 1 : 0));
+}
+
 /**
  * May this person write into that collection, and which one is it?
  *
@@ -324,10 +421,16 @@ async function collectionsFor(userId: number): Promise<IdeaCollection[]> {
  * than what was stored is a screen that lies the first time the server
  * disagrees.
  */
-export async function loadIdeas(ownerId: number, onlyId?: number): Promise<IdeaEntry[]> {
+export async function loadIdeas(
+  owner: number | number[],
+  onlyId?: number,
+): Promise<IdeaEntry[]> {
+  const owners = Array.isArray(owner) ? owner : [owner];
+  if (owners.length === 0) return [];
   const rows = await db
     .select({
       id: ideaPool.id,
+      ownerId: ideaPool.owner_id,
       osmRef: ideaPool.osm_ref,
       name: ideaPool.name,
       title: ideaPool.title,
@@ -347,13 +450,14 @@ export async function loadIdeas(ownerId: number, onlyId?: number): Promise<IdeaE
     .leftJoin(users, eq(users.id, ideaPool.created_by))
     .where(
       onlyId === undefined
-        ? eq(ideaPool.owner_id, ownerId)
-        : and(eq(ideaPool.owner_id, ownerId), eq(ideaPool.id, onlyId)),
+        ? inArray(ideaPool.owner_id, owners)
+        : and(inArray(ideaPool.owner_id, owners), eq(ideaPool.id, onlyId)),
     )
     .orderBy(asc(ideaPool.created_at));
 
   return rows.map((row) => ({
     id: row.id,
+    ownerId: row.ownerId,
     osmRef: row.osmRef,
     name: row.name,
     title: row.title,
