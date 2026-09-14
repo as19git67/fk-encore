@@ -24,6 +24,7 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
+import { notifyUserPhotosScanned } from "./scan-refresh-events";
 import {
   photoCuration,
   photoGroupMembers,
@@ -49,7 +50,7 @@ export interface AdoptionResult {
   photos_reverted: number;
   /**
    * Groups that had a qualifying peer review but were left open because
-   * applying it would have dropped them below two visible members.
+   * applying it would have hidden every member.
    */
   groups_skipped: number;
 }
@@ -75,7 +76,8 @@ async function getAiUserId(): Promise<number | null> {
 }
 
 /**
- * Peer groups that qualify as "somebody already reviewed this".
+ * Peer groups that qualify as "somebody already reviewed this", for every
+ * open group of the user at once.
  *
  * A peer group qualifies when it belongs to a different, non-AI user, was
  * reviewed by that user themselves (`review_source = 'user'` — adopted
@@ -90,38 +92,59 @@ async function getAiUserId(): Promise<number | null> {
  * The privacy boundary is the one `acceptPeerConsensusLogic` and
  * `listReviewQueueLogic` already use: the peer's view of a photo only counts
  * while peer and adopter currently share an album containing it.
+ *
+ * Batched rather than per group because the pass also runs when the user
+ * simply opens an album: one query for the whole library means the common
+ * case — nobody else has reviewed anything new — costs a single round trip
+ * instead of three per open stack.
  */
-async function findCoveringPeerUserIds(
+async function loadCoveringPeersByGroup(
   userId: number,
-  memberIds: number[],
   aiUserId: number | null,
-): Promise<number[]> {
-  const idArray = sql`ARRAY[${sql.join(memberIds.map((id) => sql`${id}`), sql`, `)}]::int[]`;
+): Promise<Map<number, number[]>> {
   const rows = (await db.execute(sql`
-      SELECT g2.user_id
-      FROM photo_group_members m2
-      INNER JOIN photo_groups g2 ON g2.id = m2.group_id
-      WHERE m2.photo_id = ANY(${idArray})
-        AND g2.user_id <> ${userId}
-        ${aiUserId === null ? sql`` : sql`AND g2.user_id <> ${aiUserId}`}
-        AND g2.reviewed_at IS NOT NULL
-        AND g2.review_source = 'user'
-        AND EXISTS (
-          SELECT 1 FROM album_photos ap
-          WHERE ap.photo_id = m2.photo_id
-            AND (
-              EXISTS (SELECT 1 FROM albums a WHERE a.id = ap.album_id AND a.user_id = ${userId})
-              OR EXISTS (SELECT 1 FROM album_shares s WHERE s.album_id = ap.album_id AND s.user_id = ${userId})
-            )
-            AND (
-              EXISTS (SELECT 1 FROM albums a WHERE a.id = ap.album_id AND a.user_id = g2.user_id)
-              OR EXISTS (SELECT 1 FROM album_shares s WHERE s.album_id = ap.album_id AND s.user_id = g2.user_id)
-            )
-        )
-      GROUP BY g2.id, g2.user_id
-      HAVING COUNT(DISTINCT m2.photo_id) = ${memberIds.length}
-    `)).rows as Array<{ user_id: number }>;
-  return Array.from(new Set(rows.map((r) => r.user_id)));
+    WITH mine AS (
+      SELECT g.id AS group_id,
+             m.photo_id,
+             COUNT(*) OVER (PARTITION BY g.id) AS member_count
+      FROM photo_groups g
+      INNER JOIN photo_group_members m ON m.group_id = g.id
+      WHERE g.user_id = ${userId} AND g.reviewed_at IS NULL
+    )
+    SELECT mine.group_id, g2.user_id
+    FROM mine
+    INNER JOIN photo_group_members m2 ON m2.photo_id = mine.photo_id
+    INNER JOIN photo_groups g2 ON g2.id = m2.group_id
+    WHERE g2.user_id <> ${userId}
+      ${aiUserId === null ? sql`` : sql`AND g2.user_id <> ${aiUserId}`}
+      AND g2.reviewed_at IS NOT NULL
+      AND g2.review_source = 'user'
+      AND EXISTS (
+        SELECT 1 FROM album_photos ap
+        WHERE ap.photo_id = m2.photo_id
+          AND (
+            EXISTS (SELECT 1 FROM albums a WHERE a.id = ap.album_id AND a.user_id = ${userId})
+            OR EXISTS (SELECT 1 FROM album_shares s WHERE s.album_id = ap.album_id AND s.user_id = ${userId})
+          )
+          AND (
+            EXISTS (SELECT 1 FROM albums a WHERE a.id = ap.album_id AND a.user_id = g2.user_id)
+            OR EXISTS (SELECT 1 FROM album_shares s WHERE s.album_id = ap.album_id AND s.user_id = g2.user_id)
+          )
+      )
+    GROUP BY mine.group_id, mine.member_count, g2.id, g2.user_id
+    HAVING COUNT(DISTINCT m2.photo_id) = mine.member_count
+  `)).rows as Array<{ group_id: number; user_id: number }>;
+
+  const out = new Map<number, number[]>();
+  for (const r of rows) {
+    const existing = out.get(r.group_id);
+    if (existing) {
+      if (!existing.includes(r.user_id)) existing.push(r.user_id);
+    } else {
+      out.set(r.group_id, [r.user_id]);
+    }
+  }
+  return out;
 }
 
 /**
@@ -169,17 +192,14 @@ export async function runAdoptionForUser(userId: number): Promise<AdoptionResult
   );
   if (!user) return { ...EMPTY };
 
-  const groups = await dbAll<{ id: number }>(
-    db.select({ id: photoGroups.id })
-      .from(photoGroups)
-      .where(and(eq(photoGroups.user_id, userId), isNull(photoGroups.reviewed_at))),
-  );
-  if (groups.length === 0) return { ...EMPTY };
-
   const aiUserId = await getAiUserId();
+  const peersByGroup = await loadCoveringPeersByGroup(userId, aiUserId);
+  if (peersByGroup.size === 0) return { ...EMPTY };
+
   const result: AdoptionResult = { ...EMPTY };
 
-  for (const g of groups) {
+  for (const [groupId, peerUserIds] of peersByGroup) {
+    const g = { id: groupId };
     const members = await dbAll<{ photo_id: number }>(
       db.select({ photo_id: photoGroupMembers.photo_id })
         .from(photoGroupMembers)
@@ -191,9 +211,6 @@ export async function runAdoptionForUser(userId: number): Promise<AdoptionResult
     if (!(await isAdoptionEnabledForGroup(userId, user.adopt_group_reviews, memberIds))) {
       continue;
     }
-
-    const peerUserIds = await findCoveringPeerUserIds(userId, memberIds, aiUserId);
-    if (peerUserIds.length === 0) continue;
 
     // Only the peers' own decisions count. Reading `source = 'adopted'` rows
     // here would let one review echo back and forth between two passive
@@ -272,6 +289,13 @@ export async function runAdoptionForUser(userId: number): Promise<AdoptionResult
     result.groups_adopted++;
     result.photos_hidden += decision.hide.length;
     result.photos_reverted += decision.revert.length;
+  }
+
+  // Stacks closed and photos hidden while the user was looking at the album.
+  // Without this the grid keeps the old badges until a remount, which reads
+  // as the feature not working.
+  if (result.groups_adopted > 0 || result.photos_reverted > 0) {
+    notifyUserPhotosScanned(userId);
   }
 
   return result;

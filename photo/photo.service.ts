@@ -84,7 +84,7 @@ function triggerWorkers(): void {
     .catch((err) => console.error("[photo.service] triggerWorkers failed:", err));
 }
 import { dbFirst, dbAll, dbExec, dbInsertReturning } from '../db/adapter';
-import { revertAdoptionForUser, runAdoptionForUser, scheduleAdoptionForPeers } from "./group-review-adoption.service";
+import { revertAdoptionForUser, runAdoptionForUser, scheduleAdoption, scheduleAdoptionForPeers } from "./group-review-adoption.service";
 import * as contentFeed from "../feed/content-feed.service";
 import type { IncomingMessage } from "http";
 import { pipeline } from "stream/promises";
@@ -7167,6 +7167,15 @@ export async function countUserGroupStats(userId: number): Promise<FindGroupsRes
 }
 
 export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsResponse> {
+  // Opening the gallery or an album is the one moment we know the user is
+  // looking at their stacks, so it is also where adoption has to catch up
+  // (docs/group-review-adoption.md). The event triggers only fire on a peer's
+  // *next* review; without this, reviews made before the feature existed — or
+  // while this user's own groups were being rebuilt — would never reach them.
+  // Fire-and-forget and coalesced: the pass publishes a refresh event when it
+  // changed something, so the view updates without blocking this response.
+  void scheduleAdoption(userId);
+
   const groups = await dbAll<{
     id: number; user_id: number; cover_photo_id: number | null;
     reviewed_at: string | null; review_source: string | null; created_at: string | null;
