@@ -760,6 +760,7 @@ or not at all.
 - `TripSettingsView.swift`: the "Trip & Reise" screen.
 - `TripVisitReportQueue` (in `TripVisitMonitor.swift`): failed visit reports are queued in `UserDefaults` (cap 100) and flushed later.
 - `TripIdeaTakeSheet` (in `TripIdeasView.swift`): the plan picker behind "In eine Reise übernehmen".
+- `TripIdeasOffer` / `TripIdeasOfferMemory`: the day screen says „Ihr habt vier Ideen für Lissabon gesammelt" once per count of not-yet-taken ideas, leading to "Aus den Ideen übernehmen"; that menu entry shows the count. Creating a trip still never takes ideas over by itself (`docs/ideenvorrat.md` §4.3).
 - The share extension's own copy of the collection labels follows the glossary (`F4milShare/ShareWireTypes.swift`, `ShareProposalsView.swift`, `TripShareCapture.swift`).
 - Backend: `youOrganise` on `PlanSummary` (`trip-planner/plan-store.ts`), with a test in `shares.test.ts`.
 - Unit tests: `TripErrorTextTests`, `TripDayNavigationTests`, `TripParticipantsInviteTests`, `TripVisitReportQueueTests`, the organiser-flag decode in `TripPlanModelsTests`, `testTrimmingKeepsThePhotoStop` in `TripSpotDetailTests`, and extensions of `TripIdeasTests` and `TripIdeasOutingTests`.
