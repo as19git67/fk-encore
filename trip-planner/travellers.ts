@@ -108,6 +108,21 @@ export interface RemoveTravellerRequest {
   travellerId: number;
 }
 
+export interface UpdateTravellerRequest {
+  planId: number;
+  travellerId: number;
+  /** "Kürzere Wege" — a statement about a person, so it is asked for. */
+  shortWalks?: boolean;
+  /** A new name for somebody entered by hand. */
+  label?: string;
+  /**
+   * A birth date for somebody entered by hand, or null to take it
+   * away. A household entry's date comes from the household and is
+   * not edited here.
+   */
+  birthDate?: string | null;
+}
+
 /** Who is coming, and what that does to the days. */
 export const planTravellers = api(
   { expose: true, method: "GET", path: "/trip-planner/plans/:planId/travellers", auth: true },
@@ -302,6 +317,63 @@ export const addTraveller = api(
       });
     }
 
+    return await replanWithGroup(req.planId, userId);
+  },
+);
+
+/**
+ * "Oma braucht doch kürzere Wege."
+ *
+ * The flag was settable only at the moment somebody was added, and the
+ * app never asked then — so it was displayed and never true. It is a
+ * statement about a person (§3.5), and people change their minds about
+ * people, so it is editable afterwards like the name of somebody who
+ * has no household entry to carry it.
+ */
+export const updateTraveller = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/trip-planner/plans/:planId/travellers/update",
+    auth: true,
+  },
+  async (req: UpdateTravellerRequest): Promise<PlanResponse> => {
+    const userId = requireUser();
+    await requireOrganiser(req.planId, userId, "Wer mitfährt");
+
+    const [row] = await db
+      .select({
+        id: tripPlanTravellers.id,
+        subjectPersonId: tripPlanTravellers.subject_person_id,
+      })
+      .from(tripPlanTravellers)
+      .where(and(
+        eq(tripPlanTravellers.id, req.travellerId),
+        eq(tripPlanTravellers.plan_id, req.planId),
+      ))
+      .limit(1);
+    if (!row) throw APIError.notFound("diese Person fährt bei dieser Reise nicht mit");
+
+    const patch: Partial<typeof tripPlanTravellers.$inferInsert> = {};
+    if (req.shortWalks !== undefined) patch.short_walks = req.shortWalks;
+    if (req.label !== undefined) {
+      const label = req.label.trim();
+      if (!label) throw APIError.invalidArgument("der Name darf nicht leer sein");
+      patch.label = label;
+    }
+    if (req.birthDate !== undefined) {
+      if (row.subjectPersonId !== null) {
+        throw APIError.failedPrecondition(
+          "das Geburtsdatum kommt aus dem Haushalt und wird dort geändert",
+        );
+      }
+      patch.birth_date = req.birthDate === null ? null : validBirthDate(req.birthDate);
+    }
+    if (Object.keys(patch).length === 0) {
+      throw APIError.invalidArgument("nichts zu ändern");
+    }
+
+    await db.update(tripPlanTravellers).set(patch).where(eq(tripPlanTravellers.id, row.id));
     return await replanWithGroup(req.planId, userId);
   },
 );
