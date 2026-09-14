@@ -50,7 +50,7 @@ export interface AdoptionResult {
   photos_reverted: number;
   /**
    * Groups that had a qualifying peer review but were left open because
-   * applying it would have dropped them below two visible members.
+   * applying it would have hidden every member.
    */
   groups_skipped: number;
 }
