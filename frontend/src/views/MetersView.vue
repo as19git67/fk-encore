@@ -33,6 +33,7 @@ import {
   importElectricityHistory,
   importElectricityPrices,
   importTariffFile,
+  fetchPetrolPrices,
   type TariffImportEntry,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
@@ -1002,6 +1003,42 @@ async function handleTariffFile(event: Event) {
   }
 }
 
+/**
+ * Fills the missing `petrol_price` months from the EU Weekly Oil Bulletin.
+ * The comparison values every bucket with the price of its own months, and
+ * filling years of them by hand is what stops people using the report.
+ */
+const fetchingPetrolPrices = ref(false)
+
+async function handleFetchPetrolPrices() {
+  fetchingPetrolPrices.value = true
+  tariffError.value = ''
+  tariffInfo.value = ''
+  try {
+    const res = await fetchPetrolPrices()
+    if (res.from === null) {
+      tariffInfo.value =
+        'Nichts abzurufen: Es gibt noch keine Ablesungen eines Zählers mit der Rolle „E-Auto/Wallbox gesamt“.'
+    } else if (res.monthsMissing === 0) {
+      tariffInfo.value = `Alle Monate von ${res.from} bis ${res.to} sind bereits vorhanden.`
+    } else {
+      tariffInfo.value =
+        `${res.monthsWritten} von ${res.monthsMissing} fehlenden Monaten (${res.from} bis ${res.to}) abgerufen` +
+        (res.monthsIncomplete > 0
+          ? `, für ${res.monthsIncomplete} hat das Ölbulletin noch zu wenige Wochen.`
+          : '.')
+    }
+    if (res.monthsWritten > 0) {
+      await loadTariffs()
+      await reloadCostReports()
+    }
+  } catch (err: any) {
+    tariffError.value = err?.message || 'Benzinpreise konnten nicht abgerufen werden'
+  } finally {
+    fetchingPetrolPrices.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -1474,6 +1511,15 @@ onMounted(load)
               :loading="importingPrices"
               :disabled="pricesAlreadyImported"
               @click="handleImportPrices"
+            />
+            <Button
+              label="Benzinpreise abrufen"
+              icon="pi pi-cloud-download"
+              severity="secondary"
+              outlined
+              :loading="fetchingPetrolPrices"
+              v-tooltip.bottom="'Monatsmittel aus dem EU-Ölbulletin (Euro-Super 95, Bundesdurchschnitt inkl. Steuern) für jeden Monat mit Wallbox-Ablesung. Vorhandene Werte bleiben unverändert.'"
+              @click="handleFetchPetrolPrices"
             />
             <Button
               label="Datei importieren"

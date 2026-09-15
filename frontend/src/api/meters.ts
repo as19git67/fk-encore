@@ -1107,7 +1107,8 @@ export const ELECTRICITY_TARIFF_KIND_EXPLANATIONS: Record<ElectricityTariffKind,
   ev_charging_loss:
     'Anteil des an der Wallbox gemessenen Stroms, der beim Laden verloren geht (z. B. 0,1 für 10 %). Die Wallbox zählt mehr, als in der Batterie ankommt; ohne diesen Wert werden die gefahrenen Kilometer überschätzt.',
   petrol_consumption: 'Verbrauch eines vergleichbaren Benziners in Liter je 100 km.',
-  petrol_price: 'Benzinpreis pro Liter, für den Vergleich mit einem Verbrenner.',
+  petrol_price:
+    'Benzinpreis pro Liter, für den Vergleich mit einem Verbrenner, „gültig ab“ = Monatserster. Normalerweise nicht nötig: Mit „Benzinpreise abrufen“ werden die Monatsmittel aus dem EU-Ölbulletin geholt (Euro-Super 95, Bundesdurchschnitt inkl. Steuern), ab dem ersten Monat mit Wallbox-Ablesung. Eigene Werte hier oder per Datei-Import bleiben erhalten.',
   grid_co2: 'CO₂-Ausstoß pro kWh Netzstrom (Strommix), für die CO₂-Bilanz.',
   gas_co2: 'CO₂-Ausstoß pro kWh verbranntes Erdgas, für die CO₂-Bilanz.',
   petrol_co2: 'CO₂-Ausstoß pro Liter verbranntes Benzin, für die CO₂-Bilanz.',
@@ -1380,4 +1381,11 @@ export function searchMeterPlaces(q: string) {
 
 export function fetchDegreeDays() {
   return apiFetch<DegreeDaysFillResult>('/meters/degree-days/fetch', { method: 'POST' })
+}
+
+/** Same shape as the degree-day fill: months considered, written, still short. */
+export type FuelPriceFillResult = DegreeDaysFillResult
+
+export function fetchPetrolPrices() {
+  return apiFetch<FuelPriceFillResult>('/meters/petrol-prices/fetch', { method: 'POST' })
 }
