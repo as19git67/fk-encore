@@ -777,7 +777,7 @@ Neuplanung: Einen Spot wieder ins Rennen zu nehmen ist nicht dasselbe, wie ihn
 auf einen Tag zu setzen, und fremde Tage als Nebenwirkung einer Korrektur
 umzubauen wäre die größere Überraschung (§7.1).
 
-### 5.2 Der Vorrat auf der Karte (offen)
+### 5.2 Der Vorrat auf der Karte
 
 Der Vorrat ist eine Liste, sortiert nach Score. Für „was hat der Planer
 gefunden?" reicht das; für die Frage, die man vor dieser Liste tatsächlich
@@ -825,6 +825,19 @@ Zusätzlich sinnvoll, aber nicht Teil dieses Schritts: Die Karte als Ort, an dem
 man einen Kandidaten *findet*, nicht nur ansieht — die Suche aus §9.2 Fall 4 mit
 Pins statt Zeilen. Das ist dieselbe Karte mit einer anderen Quelle und gehört
 zu Entdecken (§9.2), nicht zum Vorrat.
+
+**Umgesetzt:** Die Suche steht dauerhaft über Liste und Karte
+(`.navigationBarDrawer(displayMode: .always)`) und filtert beide durch
+denselben reinen Filter — was aus der Liste verschwindet, verschwindet auch als
+Pin. Der Umschalter Liste/Karte sitzt in der Titelleiste des Vorrats und merkt
+sich die Wahl. Herausgelöst wurden die Karte selbst (`TripSpotMapView`: Haus,
+Pins, Tippen) und das Info-Sheet (`TripPinDetailSheet` mit Aktionen als
+Closures des Screens, dem die Reise gehört); `TripPinDetail` trennt jetzt den
+Teil, der für jeden Ort gilt, von dem optionalen Teil, der nur einem verplanten
+Stopp gehört (Nummer, Block, Hinweg, Status) — das Sheet zeigt, was da ist. Die
+Vorratspins tragen keine Nummern; ihre Farbe sagt, was die Liste in Worten sagt
+(Kandidat, eigener Fund, Fotostopp, schon eingeplant), erklärt von einer
+Legende unter der Karte. Der Slider bleibt beim Tag.
 
 ## 6. Zu mehreren unterwegs: Beiträge, Rollen, Splits
 
