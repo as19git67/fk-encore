@@ -233,7 +233,12 @@ const applicationSumEur = computed(() =>
           <div class="figure-tile">
             <span class="tile-label">PV-Nutzen</span>
             <strong class="tile-value">{{ fmtEur(report.pv.totalPvBenefitEur) }}</strong>
-            <span class="tile-sub">vermiedener Netzbezug + Einspeiseerlös</span>
+            <span class="tile-sub">
+              vermiedener Netzbezug + Einspeiseerlös
+              <template v-if="report.pv.totalSelfConsumptionVatEur">
+                − {{ fmtEur(report.pv.totalSelfConsumptionVatEur) }} USt. auf den Eigenverbrauch
+              </template>
+            </span>
           </div>
         </div>
 
@@ -252,6 +257,9 @@ const applicationSumEur = computed(() =>
             <span class="tile-sub">
               netto {{ fmtEur(amortization.investmentNetEur) }} + MwSt.
               {{ fmtEur(amortization.investmentVatEur) }}
+              <template v-if="amortization.investmentVatRefundedEur">
+                − {{ fmtEur(amortization.investmentVatRefundedEur) }} vom Finanzamt erstattet
+              </template>
             </span>
           </div>
           <div class="figure-tile">

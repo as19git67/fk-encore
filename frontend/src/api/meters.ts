@@ -374,6 +374,8 @@ export interface EnergyTariffCosts {
   baseCostEur: number | null
   feedInRevenueEur: number | null
   avoidedGridCostEur: number | null
+  /** VAT owed on the self-consumed kWh while Regelbesteuerung applies. */
+  selfConsumptionVatEur: number | null
   pvBenefitEur: number | null
   netElectricityCostEur: number | null
   noPvElectricityCostEur: number | null
@@ -468,6 +470,8 @@ export interface PvEconomicsBucket {
   noPvElectricityCostEur: number | null
   savingsEur: number | null
   pvBenefitEur: number | null
+  /** VAT owed on the self-consumed kWh in this period; null while none applies. */
+  selfConsumptionVatEur: number | null
   cumulativeSavingsEur: number | null
   cumulativePvBenefitEur: number | null
   /** Fully measured period with the whole PV set; only these feed the amortisation. */
@@ -477,6 +481,9 @@ export interface PvEconomicsBucket {
 export interface PvAmortization {
   investmentNetEur: number | null
   investmentVatEur: number | null
+  /** Input VAT the tax office paid back; it never has to earn itself back. */
+  investmentVatRefundedEur: number | null
+  /** Out of pocket: net + VAT − refunded VAT. */
   investmentTotalEur: number | null
   /** Expected yearly return of the money, as a ratio (0.05 = 5 %). */
   expectedReturnRate: number | null
@@ -535,6 +542,8 @@ export interface EconomicsReport {
     buckets: PvEconomicsBucket[]
     totalSavingsEur: number | null
     totalPvBenefitEur: number | null
+  /** VAT on the self-consumption already deducted from the benefit above. */
+  totalSelfConsumptionVatEur: number | null
     totalNetElectricityCostEur: number | null
     totalNoPvElectricityCostEur: number | null
     amortization: PvAmortization | null
@@ -834,6 +843,8 @@ export type ElectricityTariffKind =
   | 'self_consumption_value'
   | 'pv_investment_net'
   | 'pv_investment_vat'
+  | 'pv_vat_refunded'
+  | 'self_consumption_vat_rate'
   | 'expected_return_rate'
   // Assumptions for the gas-heating / petrol-car comparisons.
   | 'gas_price'
@@ -1066,6 +1077,8 @@ export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, strin
   self_consumption_value: 'Eigenverbrauchswert',
   pv_investment_net: 'PV-Invest netto',
   pv_investment_vat: 'PV-MwSt.',
+  pv_vat_refunded: 'PV-MwSt. erstattet',
+  self_consumption_vat_rate: 'USt. Eigenverbrauch',
   expected_return_rate: 'Erwartete Rendite/Jahr',
   gas_price: 'Gaspreis',
   gas_base_price: 'Gas-Grundpreis',
@@ -1094,6 +1107,10 @@ export const ELECTRICITY_TARIFF_KIND_EXPLANATIONS: Record<ElectricityTariffKind,
     'Was dir eine selbst verbrauchte PV-kWh wert ist — üblicherweise dein Arbeitspreis Netzbezug, weil genau den sparst du dir.',
   pv_investment_net: 'Anschaffungskosten der PV-Anlage ohne Mehrwertsteuer.',
   pv_investment_vat: 'Mehrwertsteuer auf die Anschaffungskosten der PV-Anlage.',
+  pv_vat_refunded:
+    'Vorsteuer, die das Finanzamt auf die Anlage erstattet hat. Bei Regelbesteuerung ist das in der Regel die volle PV-MwSt. — dann hier denselben Betrag eintragen. Die Amortisation zieht ihn ab: zurückerstattetes Geld muss sich nicht erwirtschaften. Eine Erweiterung bekommt eine eigene Zeile.',
+  self_consumption_vat_rate:
+    'Umsatzsteuersatz auf den Eigenverbrauch (unentgeltliche Wertabgabe), solange Regelbesteuerung gilt — z. B. 0,19. Wird auf den Wert des Eigenverbrauchs gerechnet und vom PV-Nutzen abgezogen. Beim Wechsel zur Kleinunternehmerregelung eine zweite Zeile mit 0 und dem Wechseldatum anlegen; die Jahre davor bleiben unverändert.',
   expected_return_rate:
     'Rendite pro Jahr, die das investierte Geld anderswo erwartungsgemäß gebracht hätte (z. B. 0,05 für 5 %). Daraus werden die Opportunitätskosten der Amortisation berechnet.',
   gas_price: 'Gas-Arbeitspreis pro kWh, für den Vergleich mit einer Gasheizung.',

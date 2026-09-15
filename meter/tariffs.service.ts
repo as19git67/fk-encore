@@ -112,6 +112,12 @@ export interface EnergyTariffCostResult {
   baseCostEur: number | null;
   feedInRevenueEur: number | null;
   avoidedGridCostEur: number | null;
+  /**
+   * VAT owed on self-consumed electricity (unentgeltliche Wertabgabe) while
+   * the household is on Regelbesteuerung — real money out, so it comes off
+   * the PV benefit. Null when no rate is configured for the period.
+   */
+  selfConsumptionVatEur: number | null;
   pvBenefitEur: number | null;
   netElectricityCostEur: number | null;
   noPvElectricityCostEur: number | null;
@@ -124,6 +130,8 @@ const TARIFF_KINDS: ElectricityTariffKind[] = [
   "self_consumption_value",
   "pv_investment_net",
   "pv_investment_vat",
+  "pv_vat_refunded",
+  "self_consumption_vat_rate",
   "expected_return_rate",
   "gas_price",
   "gas_base_price",
@@ -178,6 +186,7 @@ const AMOUNT_BOUNDS: Partial<Record<ElectricityTariffKind, { min: number; max: n
   petrol_consumption: { min: 2, max: 30, hint: "litres per 100 km" },
   ev_charging_loss: { min: 0, max: 0.5, hint: "a ratio such as 0.1" },
   expected_return_rate: { min: 0, max: 0.3, hint: "a ratio such as 0.05" },
+  self_consumption_vat_rate: { min: 0, max: 0.3, hint: "a ratio such as 0.19" },
   grid_co2: { min: 0, max: 2, hint: "kg per kWh" },
   gas_co2: { min: 0, max: 2, hint: "kg per kWh" },
   petrol_co2: { min: 0, max: 5, hint: "kg per litre" },
@@ -688,9 +697,18 @@ export class EnergyTariffTimeline {
       input.selfConsumption !== null && selfConsumptionPrice !== null
         ? input.selfConsumption * selfConsumptionPrice
         : null;
+    // Under Regelbesteuerung the household owes VAT on what it consumes
+    // itself, on the same assumed price that values the saving — so the kWh
+    // is worth its value less that tax. A rate dated 0 from the switch to
+    // Kleinunternehmer ends it without touching the earlier periods.
+    const selfConsumptionVatRate = this.amountAt("self_consumption_vat_rate", input.periodStart);
+    const selfConsumptionVatEur =
+      avoidedGridCostEur !== null && selfConsumptionVatRate !== null
+        ? avoidedGridCostEur * selfConsumptionVatRate
+        : null;
     const pvBenefitEur =
       avoidedGridCostEur !== null && feedInRevenueEur !== null
-        ? avoidedGridCostEur + feedInRevenueEur
+        ? avoidedGridCostEur + feedInRevenueEur - (selfConsumptionVatEur ?? 0)
         : null;
     // A missing standing charge is a charge of zero, not a reason to drop the
     // work-price part of the bill.
@@ -708,6 +726,7 @@ export class EnergyTariffTimeline {
       baseCostEur: roundMoney(baseCostEur),
       feedInRevenueEur: roundMoney(feedInRevenueEur),
       avoidedGridCostEur: roundMoney(avoidedGridCostEur),
+      selfConsumptionVatEur: roundMoney(selfConsumptionVatEur),
       pvBenefitEur: roundMoney(pvBenefitEur),
       netElectricityCostEur: roundMoney(netElectricityCostEur),
       noPvElectricityCostEur: roundMoney(noPvElectricityCostEur),
@@ -728,6 +747,7 @@ export function sumCostResults(results: Array<EnergyTariffCostResult | null>): E
     baseCostEur: sum((r) => r.baseCostEur),
     feedInRevenueEur: sum((r) => r.feedInRevenueEur),
     avoidedGridCostEur: sum((r) => r.avoidedGridCostEur),
+    selfConsumptionVatEur: sum((r) => r.selfConsumptionVatEur),
     pvBenefitEur: sum((r) => r.pvBenefitEur),
     netElectricityCostEur: sum((r) => r.netElectricityCostEur),
     noPvElectricityCostEur: sum((r) => r.noPvElectricityCostEur),
