@@ -2542,6 +2542,15 @@ export type MeterElectricityTariffKind =
   | "self_consumption_value"
   | "pv_investment_net"
   | "pv_investment_vat"
+  // Input VAT the tax office refunded on the investment (migration 0200).
+  // Under Regelbesteuerung that VAT was paid and got back, so the money that
+  // actually has to earn itself back is the net price — the amortization
+  // subtracts these rows from the investment.
+  | "pv_vat_refunded"
+  // VAT rate owed on self-consumed electricity (unentgeltliche Wertabgabe)
+  // while Regelbesteuerung applies (migration 0200). Dated: a row of 0 at the
+  // switch to Kleinunternehmer ends it without rewriting the years before.
+  | "self_consumption_vat_rate"
   // Return the invested money was expected to earn elsewhere, as a ratio per
   // year (0.05 = 5 %). Opportunity cost and amortization are derived from it
   // and the measured PV benefit, never stored (migration 0150).

@@ -42,8 +42,10 @@ export interface PvEconomicsBucket {
   noPvElectricityCostEur: number | null;
   /** Difference of the two — the saving in this period. */
   savingsEur: number | null;
-  /** Avoided grid purchase plus feed-in revenue. */
+  /** Avoided grid purchase plus feed-in revenue, less the VAT owed on the self-consumption. */
   pvBenefitEur: number | null;
+  /** VAT owed on the self-consumed kWh in this period; null while none applies. */
+  selfConsumptionVatEur: number | null;
   cumulativeSavingsEur: number | null;
   cumulativePvBenefitEur: number | null;
   /** Fully measured period with the whole PV set; only these feed the amortisation. */
@@ -53,6 +55,13 @@ export interface PvEconomicsBucket {
 export interface PvAmortization {
   investmentNetEur: number | null;
   investmentVatEur: number | null;
+  /**
+   * Input VAT the tax office paid back. Money that left the account and came
+   * straight back never has to earn itself back, so it is not part of what
+   * the system has to recoup.
+   */
+  investmentVatRefundedEur: number | null;
+  /** What the household is actually out of pocket: net + VAT − refunded VAT. */
   investmentTotalEur: number | null;
   /** Return the money was expected to earn elsewhere, per year (0.05 = 5 %). */
   expectedReturnRate: number | null;
@@ -135,6 +144,8 @@ export interface EconomicsReport {
     buckets: PvEconomicsBucket[];
     totalSavingsEur: number | null;
     totalPvBenefitEur: number | null;
+    /** VAT on the self-consumption already deducted from the benefit above. */
+    totalSelfConsumptionVatEur: number | null;
     totalNetElectricityCostEur: number | null;
     totalNoPvElectricityCostEur: number | null;
     amortization: PvAmortization | null;
@@ -308,6 +319,7 @@ export function buildPvEconomicsBuckets(buckets: EnergyReportBucket[]): PvEconom
       noPvElectricityCostEur: noPv,
       savingsEur: savings,
       pvBenefitEur: benefit,
+      selfConsumptionVatEur: bucket.costs?.selfConsumptionVatEur ?? null,
       cumulativeSavingsEur: sawSavings ? roundMoney(cumulativeSavings) : null,
       cumulativePvBenefitEur: sawBenefit ? roundMoney(cumulativeBenefit) : null,
       complete: bucket.complete,
@@ -360,11 +372,18 @@ export function buildAmortization(
   // two rows and the household paid both.
   const investmentNetEur = timeline.sumUntil("pv_investment_net");
   const investmentVatEur = timeline.sumUntil("pv_investment_vat");
+  // You cannot get back more VAT than you were charged, so a refund larger
+  // than the VAT on record is a typo, not a windfall.
+  const refundedRaw = timeline.sumUntil("pv_vat_refunded");
+  const investmentVatRefundedEur =
+    refundedRaw === null ? null : roundMoney(Math.min(refundedRaw, investmentVatEur ?? 0));
   const expectedReturnRate = timeline.amountOf("expected_return_rate");
   const investmentTotalEur =
     investmentNetEur === null && investmentVatEur === null
       ? null
-      : roundMoney((investmentNetEur ?? 0) + (investmentVatEur ?? 0));
+      : roundMoney(
+          (investmentNetEur ?? 0) + (investmentVatEur ?? 0) - (investmentVatRefundedEur ?? 0),
+        );
 
   const cumulativePvBenefitEur = withBenefit.reduce(
     (sum, bucket) => sum + (bucket.pvBenefitEur ?? 0),
@@ -416,6 +435,7 @@ export function buildAmortization(
   return {
     investmentNetEur,
     investmentVatEur,
+    investmentVatRefundedEur,
     investmentTotalEur,
     expectedReturnRate,
     opportunityCostEur,
@@ -592,6 +612,9 @@ export async function getEconomicsReportForUser(
       // half-read month would otherwise pull the totals down.
       totalSavingsEur: sumOf(completePvBuckets.map((bucket) => bucket.savingsEur)),
       totalPvBenefitEur: sumOf(completePvBuckets.map((bucket) => bucket.pvBenefitEur)),
+      totalSelfConsumptionVatEur: sumOf(
+        completePvBuckets.map((bucket) => bucket.selfConsumptionVatEur),
+      ),
       totalNetElectricityCostEur: sumOf(completePvBuckets.map((bucket) => bucket.netElectricityCostEur)),
       totalNoPvElectricityCostEur: sumOf(
         completePvBuckets.map((bucket) => bucket.noPvElectricityCostEur),

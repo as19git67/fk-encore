@@ -1401,6 +1401,13 @@
       "when": 1788566400020,
       "tag": "0199_group_review_adoption",
       "breakpoints": true
+    },
+    {
+      "idx": 200,
+      "version": "7",
+      "when": 1788566400021,
+      "tag": "0200_meter_vat_handling",
+      "breakpoints": true
     }
   ]
 }

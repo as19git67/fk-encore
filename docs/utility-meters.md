@@ -468,7 +468,8 @@ aus dem Netz gekauft); die Differenz ist `savingsEur`, kumuliert in
 `cumulativeSavingsEur`. Die Summen (`totalSavingsEur` usw.) laufen wie im
 Energie-Report nur über `complete`-Buckets. Die Amortisation stellt der
 Investition (Summe aller `pv_investment_net`- und `pv_investment_vat`-
-Einträge bis heute, eine Erweiterung ist ein zweiter Eintrag) den über die
+Einträge bis heute **abzüglich `pv_vat_refunded`**, eine Erweiterung ist ein
+zweiter Eintrag) den über die
 **gesamte** gemessene Historie kumulierten PV-Nutzen gegenüber — unabhängig
 von `from`/`to`, denn die Frage ist, was die Anlage seit Inbetriebnahme
 eingebracht hat. `measuredMonths` sind die vollständig gemessenen Monate
@@ -494,6 +495,32 @@ keine brauchbare Aussage über die Anlage ist. Mit dem festen Jahresbetrag ist
 die Bedingung wieder einfach: das Datum ist erreichbar, sobald der
 Jahresnutzen (letzte 12 Monate) über den jährlichen Opportunitätskosten
 liegt; sonst wird bewusst **kein** Datum geliefert statt eines geschönten.
+
+**Umsatzsteuer, die nie bezahlt blieb.** Bei Regelbesteuerung holt sich der
+Haushalt die Vorsteuer auf die Anlage vom Finanzamt zurück — dieses Geld muss
+sich nicht erwirtschaften. `pv_vat_refunded` (€, je Investition eine Zeile)
+hält fest, was erstattet wurde, und die Investition ist
+`netto + MwSt. − erstattet`. Mehr als die gebuchte MwSt. wird nie abgezogen:
+zurück gibt es nur, was vorher gezahlt wurde, alles darüber ist ein Tippfehler.
+Ohne Eintrag bleibt die Investition brutto — wer nicht optiert hat, zahlt die
+MwSt. tatsächlich.
+
+Die Gegenseite ist die **unentgeltliche Wertabgabe**: Solange
+Regelbesteuerung gilt, schuldet der Haushalt Umsatzsteuer auf den selbst
+verbrauchten Strom. `self_consumption_vat_rate` (Faktor, z. B. 0,19) wird je
+Bucket zeitgültig ausgewertet und auf den Wert des Eigenverbrauchs gerechnet
+(`self_consumption_value`, laut Quelle genau die Bemessungsgrundlage); das
+Ergebnis steht als `selfConsumptionVatEur` im Kostenergebnis und geht vom
+PV-Nutzen ab. Der Wechsel zur Kleinunternehmerregelung nach fünf Jahren ist
+eine **zweite Zeile mit 0** zum Wechseldatum — die Jahre davor behalten ihre
+Steuer, die danach sind frei davon. Ohne Eintrag wird nichts abgezogen.
+
+Die Einspeisevergütung ist in den importierten Daten bereits **netto**
+hinterlegt (`tax_status` `net`), der Netzbezug **brutto** — beides passt zur
+Regelbesteuerung, in der die Umsatzsteuer auf die Einspeisung ein
+durchlaufender Posten ist. `tax_status` ist dabei Dokumentation der Quelle und
+wird von keiner Rechnung ausgewertet; was steuerlich wirkt, sind die beiden
+Annahmen oben.
 
 **Kosten je Anwendung.** Heizung, Warmwasser, Wärmepumpe (Rest),
 E-Auto/Wallbox und der übrige Haushalt jeweils in €. Eigenverbrauchte kWh

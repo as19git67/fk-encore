@@ -217,6 +217,66 @@ describe("buildAmortization", () => {
     expect(amortization.payoffReached).toBe(false);
   });
 
+  it("leaves the investment gross when no refund is recorded", () => {
+    const amortization = buildAmortization(monthlyBenefit(24, 100), investmentTimeline())!;
+
+    expect(amortization.investmentVatRefundedEur).toBeNull();
+    expect(amortization.investmentTotalEur).toBe(24000);
+  });
+
+  it("takes refunded input VAT out of what has to earn itself back", () => {
+    // Regelbesteuerung: the VAT was paid and the tax office gave it back, so
+    // only the net price is money the household is out of pocket.
+    const timeline = new EnergyTariffTimeline([
+      tariff("grid_import", 0.4, "eur_per_kwh"),
+      tariff("pv_investment_net", 20000, "eur"),
+      tariff("pv_investment_vat", 4000, "eur"),
+      tariff("pv_vat_refunded", 4000, "eur"),
+      tariff("expected_return_rate", 0.04, "ratio"),
+    ]);
+
+    const amortization = buildAmortization(monthlyBenefit(24, 100), timeline)!;
+
+    expect(amortization.investmentVatEur).toBe(4000);
+    expect(amortization.investmentVatRefundedEur).toBe(4000);
+    expect(amortization.investmentTotalEur).toBe(20000);
+    expect(amortization.remainingEur).toBe(17600);
+    // The forgone return shrinks with the investment it is charged on.
+    expect(amortization.opportunityCostEur).toBeCloseTo(20000 * 0.04 * 2, -1);
+  });
+
+  it("sums a refund per investment, like the investments themselves", () => {
+    const timeline = new EnergyTariffTimeline([
+      tariff("pv_investment_net", 20000, "eur"),
+      tariff("pv_investment_vat", 4000, "eur"),
+      tariff("pv_vat_refunded", 4000, "eur"),
+      // A later extension with its own VAT and its own refund.
+      tariff("pv_investment_net", 5000, "eur", "2025-06-01T00:00:00.000Z"),
+      tariff("pv_investment_vat", 950, "eur", "2025-06-01T00:00:00.000Z"),
+      tariff("pv_vat_refunded", 950, "eur", "2025-06-01T00:00:00.000Z"),
+    ]);
+
+    const amortization = buildAmortization(monthlyBenefit(24, 100), timeline)!;
+
+    expect(amortization.investmentVatRefundedEur).toBe(4950);
+    expect(amortization.investmentTotalEur).toBe(25000);
+  });
+
+  it("never refunds more VAT than was charged", () => {
+    // A typo must not turn the investment into a smaller number than the net
+    // price — you cannot get back what you never paid.
+    const timeline = new EnergyTariffTimeline([
+      tariff("pv_investment_net", 20000, "eur"),
+      tariff("pv_investment_vat", 4000, "eur"),
+      tariff("pv_vat_refunded", 40000, "eur"),
+    ]);
+
+    const amortization = buildAmortization(monthlyBenefit(24, 100), timeline)!;
+
+    expect(amortization.investmentVatRefundedEur).toBe(4000);
+    expect(amortization.investmentTotalEur).toBe(20000);
+  });
+
   it("projects the payoff date from the last twelve months", () => {
     const amortization = buildAmortization(monthlyBenefit(24, 100), investmentTimeline())!;
 

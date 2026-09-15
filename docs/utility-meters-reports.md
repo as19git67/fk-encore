@@ -245,3 +245,11 @@ Nachgezogen nach der Nachrechnung des Energie-Blocks von Hand:
     ohne dass jemand Jahre von Werten von Hand pflegt. Vorhandene Zeilen
     bleiben stehen — der Landesdurchschnitt ist eine Modellannahme, nicht der
     Preis an der eigenen Tankstelle.
+
+12. **Umsatzsteuer in der Amortisation**: Die erstattete Vorsteuer
+    (`pv_vat_refunded`) wird von der Investition abgezogen — zurückerstattetes
+    Geld muss sich nicht erwirtschaften. Umgekehrt mindert die Umsatzsteuer auf
+    den Eigenverbrauch (`self_consumption_vat_rate`, unentgeltliche
+    Wertabgabe) den PV-Nutzen, solange Regelbesteuerung gilt; eine zweite
+    Zeile mit 0 zum Wechsel in die Kleinunternehmerregelung beendet sie, ohne
+    die Jahre davor zu verändern.
