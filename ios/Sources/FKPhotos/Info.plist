@@ -6,6 +6,15 @@
 	<array>
 		<string>dev.fk-encore.F4milPhotos.photoSync</string>
 	</array>
+	<!-- Die App ist durchgehend deutsch, und ohne diese Angabe meldet
+	     das Bundle Englisch als einzige unterstützte Sprache. iOS wählt
+	     die Sprache der System-Oberflächen — Ausschneiden/Kopieren/
+	     Einfügen, Tastatur, Standardknöpfe, Foto-Picker, Share-Sheet —
+	     aus der Schnittmenge von Gerätesprache und den Sprachen der App:
+	     Bei "nur Englisch" bleibt dieses Menü englisch, auch auf einem
+	     deutschen iPhone, mitten in deutschen Texten. -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>de</string>
 	<key>CFBundleDisplayName</key>
 	<string>F4mil Photos</string>
 	<key>CFBundleExecutable</key>
