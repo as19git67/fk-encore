@@ -30,6 +30,14 @@ Erweiterungen vorgeschlagen, die nur auf dem Gerät sinnvoll sind.
   `SharedStorage` (geteilt mit der Share-Extension).
 - **App-Targets:** Haupt-App, **Share-Extension** (Code in `F4milShare/`, ihre
   `Info.plist` in `App/ShareExtension/`) zum Hochladen aus anderen Apps.
+- **Sprache:** Die App ist durchgehend deutsch — und sagt das dem System
+  auch: `CFBundleDevelopmentRegion = de` in beiden Info.plists (App und
+  Share-Extension) sowie `developmentRegion`/`knownRegions` im Xcode-Projekt.
+  Ohne diese Angabe meldet das Bundle Englisch als einzige Sprache, und iOS
+  zeichnet daraufhin seine eigenen Oberflächen — Ausschneiden/Kopieren/
+  Einfügen, Tastatur, Standardknöpfe, Foto-Picker, Share-Sheet — englisch,
+  mitten in deutschen Texten. Eigene Strings sind weiterhin hart im Code;
+  für echte Mehrsprachigkeit bräuchte es zusätzlich einen String-Katalog.
 - **Build-Nummer:** `CURRENT_PROJECT_VERSION` wird nicht mehr von Hand
   gepflegt (sie blieb dabei sechzehn Pull Requests zurück), sondern vom
   pre-commit-Hook aus der Commit-Anzahl abgeleitet:
