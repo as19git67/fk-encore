@@ -30,6 +30,16 @@ Erweiterungen vorgeschlagen, die nur auf dem Gerät sinnvoll sind.
   `SharedStorage` (geteilt mit der Share-Extension).
 - **App-Targets:** Haupt-App, **Share-Extension** (Code in `F4milShare/`, ihre
   `Info.plist` in `App/ShareExtension/`) zum Hochladen aus anderen Apps.
+- **Build-Nummer:** `CURRENT_PROJECT_VERSION` wird nicht mehr von Hand
+  gepflegt (sie blieb dabei sechzehn Pull Requests zurück), sondern vom
+  pre-commit-Hook aus der Commit-Anzahl abgeleitet:
+  `scripts/sync-ios-build-number.sh` setzt sie bei jedem Commit, der `ios/`
+  berührt, auf `git rev-list --count HEAD + 1` — in allen vier
+  Build-Konfigurationen gemeinsam, denn App und Share-Extension müssen
+  dieselbe `CFBundleVersion` tragen. Die Nummer wird nie kleiner, und in
+  einem flachen Checkout (CI, `--depth`) passiert nichts, weil die Zählung
+  dort kleiner wäre als die Historie, aus der sie stammt. `MARKETING_VERSION`
+  bleibt eine bewusste Entscheidung von Hand.
 
 ### 1.1 Die Sitzung der Share-Extension
 
