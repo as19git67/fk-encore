@@ -44,6 +44,7 @@ Zwei Eigenschaften unterscheiden ihn von einer Merkliste:
 | Ausflugsvorschlag samt Übernahme als Reise | gebaut (`TripIdeasOutingView`) |
 | Angebot in der Reise + „für später merken" | gebaut (`TripPlanIdeasView`, Vorrat-Wischgeste) |
 | Die Meldung **von selbst** (Standortschleife) | gebaut (`TripIdeaNoticeMonitor`), **standardmäßig aus** |
+| Suche über alle Gruppen, inkl. Gruppenname | gebaut (`TripIdeaSearch`, `TripIdeasView`) |
 | Wege hinein: Artikel, Suche | **nicht gebaut** — brauchen eine Reise (§9.3), siehe §6 |
 
 Der Einstieg steht: In der Urlaubsplanung führt „Ideen" auf eine Liste je
@@ -60,6 +61,15 @@ Wischgeste im Etappenvorrat. „In der Nähe" gibt es als **Frage** (ein
 Bildschirm, den man öffnet, und der deshalb keine Ruhezeit verbraucht) und als
 **Meldung von selbst** — letztere ist ein Schalter im Menü und standardmäßig
 **aus**.
+
+Gesucht wird **über alle Gruppen hinweg**: Das Feld steht dauerhaft über der
+Liste und filtert Name (der eigene wie der auf dem Schild), Notiz, „von wem",
+Art — und den **Namen der Gruppe**. „Lissabon" findet damit alles, was dort
+gemerkt wurde, auch wenn kein einzelner Eintrag das Wort trägt. Die Gruppen
+werden sonst erst benannt, wenn man zu ihnen scrollt (der Geocoder ist
+rate-limitiert); sobald jemand sucht, werden die fehlenden Namen nachgeholt,
+einer nach dem anderen. Gruppen, in denen nichts übrig bleibt, verschwinden;
+eine Zeile oben sagt „3 von 40 Ideen".
 
 ## 3. Datenmodell
 
@@ -258,4 +268,4 @@ andere Zahl hier ließe denselben Biergarten gleichzeitig „schon dabei" und
 | `trip-planner/ideas-trip.ts` | die drei Wege zwischen Vorrat und Reise |
 | `db/migrations/postgres/0179_idea_pool.sql` | `idea_pool`, `idea_pool_shares` |
 | `trip-planner/ideas.test.ts`, `outing.test.ts`, `ideas-trip.test.ts` | Tests |
-| `ios/Sources/FKPhotos/Features/TripPlanner/TripIdea*.swift` | Liste, Modelle, ViewModel |
+| `ios/Sources/FKPhotos/Features/TripPlanner/TripIdea*.swift` | Liste, Modelle, ViewModel, Suche (`TripIdeaSearch`) |
