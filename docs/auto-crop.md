@@ -103,7 +103,8 @@ Migration: `db/migrations/postgres/0010_auto_crop.sql`
 
 ### Data management
 
-In the data management view (DataManagementView) there is a button
+On the photo maintenance page (Fotos › Einstellungen › Wartung,
+`/fotos/einstellungen/wartung`) there is a button
 **"Recompute auto-crop"** that recomputes the focus point for all photos
 based on the existing face data.
 This is needed once for photos that were uploaded before the feature was

@@ -26,6 +26,11 @@ const router = createRouter({
     { path: '/profile', component: { template: '<div />' } },
     // Fotos module
     { path: '/fotos', component: { template: '<div />' } },
+    { path: '/fotos/einstellungen/scan-queue', name: 'fotos-settings-scan-queue', component: { template: '<div />' } },
+    { path: '/fotos/einstellungen/wartung', name: 'fotos-settings-maintenance', component: { template: '<div />' } },
+    { path: '/fotos/einstellungen/bibliotheken', name: 'fotos-settings-libraries', component: { template: '<div />' } },
+    { path: '/fotos/einstellungen/osm', name: 'fotos-settings-osm', component: { template: '<div />' } },
+    { path: '/fotos/einstellungen/gefahrenzone', name: 'fotos-settings-purge', component: { template: '<div />' } },
     { path: '/fotos/alben', component: { template: '<div />' } },
     { path: '/fotos/alben/:id', component: { template: '<div />' } },
     { path: '/albums/shared/:token', component: { template: '<div />' } },
@@ -33,12 +38,16 @@ const router = createRouter({
     // Dokumente module
     { path: '/dokumente', name: 'dokumente-list', component: { template: '<div />' } },
     { path: '/dokumente/upload', name: 'dokumente-upload', component: { template: '<div />' } },
+    { path: '/dokumente/verarbeitung', name: 'dokumente-verarbeitung', component: { template: '<div />' } },
+    { path: '/dokumente/korrespondenten', name: 'dokumente-korrespondenten', component: { template: '<div />' } },
     { path: '/dokumente/:id', name: 'dokumente-detail', component: { template: '<div />' } },
+    // Finanzen module
+    { path: '/finanzen/ki-tagging', name: 'finance-tag-queue', component: { template: '<div />' } },
     // Admin module
     { path: '/admin', component: { template: '<div />' } },
     { path: '/admin/benutzer/:id', component: { template: '<div />' } },
     { path: '/admin/rollen', component: { template: '<div />' } },
-    { path: '/admin/daten', component: { template: '<div />' } },
+    { path: '/admin/status', name: 'admin-status', component: { template: '<div />' } },
     { path: '/:pathMatch(.*)*', component: { template: '<div />' } },
   ],
 })

@@ -164,8 +164,9 @@ cleanup.
 
 ## Frontend UI
 
-The purge is implemented as a dedicated **Danger Zone** section in
-[`frontend/src/views/DataManagementView.vue`](../frontend/src/views/DataManagementView.vue):
+The purge is implemented as a dedicated **Danger Zone** page under
+Fotos › Einstellungen › Gefahrenzone (`/fotos/einstellungen/gefahrenzone`,
+[`frontend/src/components/admin/PhotoPurgePanel.vue`](../frontend/src/components/admin/PhotoPurgePanel.vue)):
 
 1. The section is rendered only if the logged-in user has the
    `photos.purge` permission.
