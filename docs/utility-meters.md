@@ -639,6 +639,50 @@ darf also erneut eingespielt werden. Fehlerhafte Zeilen stoppen den Rest
 nicht, sondern kommen mit ihrer Position in `errors` zurück (Muster:
 `finance/data-import.ts`).
 
+#### 5.2.2.1 Benzinpreise aus dem EU-Ölbulletin
+
+```
+POST /meters/petrol-prices/fetch    (meters.manage)
+POST /internal/meters/petrol-prices (Job, täglich 08:00 UTC)
+```
+
+Die Vergleichsrechnung bewertet jeden Bucket mit dem `petrol_price`, der in
+**seinen** Monaten galt (`weightedAmountForPeriod`, tagesanteilig). Das ist der
+ganze Sinn der datierten Reihe — Sprit kostete 2022 zwei Euro und 2016 einen
+zwanzig; ein einziger aktueller Preis schreibt die Geschichte um. Jahre von
+Monatswerten von Hand zu pflegen macht aber niemand, deshalb holt
+`fuel-prices.service.ts` sie, analog zu den Gradtagzahlen:
+
+- **Quelle**: EU Weekly Oil Bulletin der Kommission (DG ENER), die
+  History-Arbeitsmappe mit Wochenwerten je Mitgliedsstaat zurück bis 2005.
+  Spalte `DE_price_with_tax_euro95`, Euro-Super 95 inkl. aller Steuern und
+  Abgaben, notiert in **EUR je 1000 Liter**. Kein Key nötig; Host in der
+  Netzwerk-Policy: `energy.ec.europa.eu`.
+- **Link statt UUID**: Die Download-URL trägt eine UUID, die sich beim
+  Neu-Hochladen ändert. Der Client liest den Link deshalb von der
+  Bulletin-Seite (`findHistoryWorkbookUrl`), statt ihn fest zu verdrahten.
+- **Plausibilitätsband** 0,20–5,00 €/l nach der Umrechnung: Wechselt die
+  Quelle irgendwann die Einheit, landen die Werte weit daneben und werden
+  verworfen, statt als Preis geschrieben zu werden.
+- **Monatsmittel** aus den Wochenwerten, mindestens `MIN_WEEKS_PER_MONTH` (3)
+  erhobene Wochen. Der laufende Monat ist damit automatisch draußen, und ein
+  halber Monat wird nicht als Monatsmittel ausgegeben.
+- **Bereich**: ab dem Monat der ersten Ablesung des Zählers mit Rolle
+  `ev_charger_total` — vorher gibt es nichts zu vergleichen — bis zum letzten
+  vollständig veröffentlichten Monat. Ohne Wallbox-Zähler passiert nichts, und
+  das Bulletin wird dann auch nicht abgerufen.
+- **Vorhandene Zeilen bleiben unangetastet**, wie bei den Gradtagzahlen. Der
+  Bundesdurchschnitt ist eine Modellannahme, nicht der Preis an der Tankstelle
+  dieses Haushalts — eine Korrektur von Hand muss den Abruf überleben.
+- **Ein Download je Lauf**: Der Job lädt die Mappe einmal und reicht dieselbe
+  Monatsreihe an jeden Haushalt weiter (`loadMonthlyFuelPrices`), statt sie je
+  Nutzer neu zu ziehen.
+- `source` je Zeile hält fest, woher der Wert kommt (`eu-weekly-oil-bulletin`,
+  Land, Kraftstoff, Anzahl Wochen, Abrufzeitpunkt).
+
+Ausfälle der Kommission kommen als `unavailable` zurück, nicht als interner
+Fehler; der Job protokolliert sie und läuft am nächsten Tag wieder.
+
 ### 5.2.3 Anlagenzustand
 
 `GET /meters/reports/equipment?granularity=month|year&from=&to=`
