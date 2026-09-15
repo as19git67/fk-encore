@@ -1,6 +1,12 @@
 import Foundation
 
-/// What a numbered pin on the day map says when you tap it (§8.3).
+/// What a pin on a trip map says when you tap it (§8.3, §5.2).
+///
+/// Two maps use it now: the day, where a pin is a stop with a number,
+/// and the pool, where it is a candidate on no day at all. The place —
+/// name, sign, kind, note, links, coordinate — is the same question in
+/// both; what only a planned stop has sits in `planned`, and is absent
+/// rather than faked where there is no plan.
 ///
 /// Pure, and deliberately so: the map view is a `View` and the sheet it
 /// presents is layout, but *what may honestly stand in that sheet* is a
@@ -13,7 +19,28 @@ import Foundation
 /// the planner never claimed, and the slider above exists precisely to
 /// let somebody check such claims.
 struct TripPinDetail: Equatable {
-    let number: Int
+    /// The half that belongs to a *planned* stop and to nothing else.
+    ///
+    /// The pool has none of it: a candidate has no number, because the
+    /// pool has no order; no block, because it is on no day; and no way
+    /// there, because there is no stop before it. Optional rather than
+    /// filled with placeholders — "0." and "Vormittag" would be the
+    /// sheet inventing a plan the spot is not part of.
+    struct Planned: Equatable {
+        let number: Int
+        let status: TripStopStatus
+        let statusLabel: String
+        /// "etwa 1 h 30 vor Ort" — the dwell time, never a start time.
+        let dwellText: String
+        /// How you get there from the stop before, or nil for the first
+        /// one and for anything the plan gave no travel time.
+        let travelText: String?
+        /// "Vormittag · 09:00 – 12:00", or just the block's name when
+        /// the day carries no hours at all.
+        let blockText: String?
+        let isPinned: Bool
+    }
+
     /// The spot's handle everywhere else — what "hide this one for the
     /// whole trip" is addressed to (§5).
     let osmRef: String
@@ -21,22 +48,14 @@ struct TripPinDetail: Equatable {
     /// The name on the sign where it is not the name above (§10.4).
     let localName: String?
     let category: String
-    let status: TripStopStatus
-    let statusLabel: String
-    /// "etwa 1 h 30 vor Ort" — the dwell time, never a start time.
-    let dwellText: String
-    /// How you get there from the stop before, or nil for the first one
-    /// and for anything the plan gave no travel time.
-    let travelText: String?
-    /// "Vormittag · 09:00 – 12:00", or just the block's name when the
-    /// day carries no hours at all.
-    let blockText: String?
     let note: String?
     let isPhotoStop: Bool
-    let isPinned: Bool
     let wikipediaUrl: URL?
     let sourceUrl: URL?
     let coordinate: TripCoordinate
+    /// Where it sits in the day, or nil for a candidate in the pool
+    /// (§5.2). The sheet shows what is there.
+    let planned: Planned?
 
     /// Everything the map knows about one stop, gathered once.
     ///
@@ -48,22 +67,46 @@ struct TripPinDetail: Equatable {
             block.stops.contains { $0.rowId == stop.rowId }
         }
         return TripPinDetail(
-            number: number,
             osmRef: stop.osmRef,
             title: stop.displayName,
             localName: stop.localName.flatMap { $0 == stop.displayName ? nil : $0 },
             category: TripCategory.label(stop.category),
-            status: stop.stopStatus,
-            statusLabel: stop.stopStatus.label,
-            dwellText: "etwa \(TripClock.duration(max(0, stop.dwellMinutes))) vor Ort",
-            travelText: travelText(stop.travelFromPrevious),
-            blockText: block.map(blockText),
             note: stop.note?.trimmingCharacters(in: .whitespacesAndNewlines).nilWhenEmpty,
             isPhotoStop: stop.isPhotoStop,
-            isPinned: stop.pinned,
             wikipediaUrl: stop.wikipediaUrl.flatMap(URL.init(string:)),
             sourceUrl: stop.sourceUrl.flatMap(URL.init(string:)),
-            coordinate: stop.coordinate
+            coordinate: stop.coordinate,
+            planned: Planned(
+                number: number,
+                status: stop.stopStatus,
+                statusLabel: stop.stopStatus.label,
+                dwellText: "etwa \(TripClock.duration(max(0, stop.dwellMinutes))) vor Ort",
+                travelText: travelText(stop.travelFromPrevious),
+                blockText: block.map(blockText),
+                isPinned: stop.pinned,
+            )
+        )
+    }
+
+    /// The same sheet for a candidate that is on no day yet (§5.2).
+    ///
+    /// Everything a place is, and nothing a plan would add. The dwell
+    /// time is deliberately left out here too: on a planned stop it
+    /// says how much of the block the stop eats, which is a statement
+    /// about that block — in the pool the full detail screen has it,
+    /// in the row where it is an estimate rather than a commitment.
+    static func of(_ candidate: TripCandidate) -> TripPinDetail {
+        TripPinDetail(
+            osmRef: candidate.osmRef,
+            title: candidate.displayName,
+            localName: candidate.localName.flatMap { $0 == candidate.displayName ? nil : $0 },
+            category: TripCategory.label(candidate.category),
+            note: candidate.note?.trimmingCharacters(in: .whitespacesAndNewlines).nilWhenEmpty,
+            isPhotoStop: candidate.isPhotoStop,
+            wikipediaUrl: candidate.wikipediaUrl.flatMap(URL.init(string:)),
+            sourceUrl: candidate.sourceUrl.flatMap(URL.init(string:)),
+            coordinate: candidate.coordinate,
+            planned: nil
         )
     }
 

@@ -67,11 +67,11 @@ final class TripPinDetailTests: XCTestCase {
         let spot = stop(1, dwell: 90)
         let detail = TripPinDetail.of(spot, number: 3, in: day([stop(9, dwell: 30), spot]))
 
-        XCTAssertEqual(detail.blockText, "Vormittag · 09:00 – 12:00")
-        XCTAssertEqual(detail.dwellText, "etwa 1 h 30 vor Ort")
+        XCTAssertEqual(detail.planned?.blockText, "Vormittag · 09:00 – 12:00")
+        XCTAssertEqual(detail.planned?.dwellText, "etwa 1 h 30 vor Ort")
         // The plan never computed "you are there at 10:20"; the sheet
         // must not be the first place that number appears.
-        XCTAssertFalse(detail.dwellText.contains("10:"))
+        XCTAssertEqual(detail.planned?.dwellText.contains("10:"), false)
     }
 
     func testADayWithoutHoursKeepsTheBlockNameAndNothingElse() {
@@ -79,12 +79,12 @@ final class TripPinDetailTests: XCTestCase {
         // true; "Vormittag · 00:00 – 03:00" would not be.
         let spot = stop(1)
         let detail = TripPinDetail.of(spot, number: 1, in: day([spot], start: nil))
-        XCTAssertEqual(detail.blockText, "Vormittag")
+        XCTAssertEqual(detail.planned?.blockText, "Vormittag")
     }
 
     func testAStopNoBlockClaimsHasNoBlockLine() {
         let detail = TripPinDetail.of(stop(42), number: 1, in: day([stop(1)]))
-        XCTAssertNil(detail.blockText)
+        XCTAssertNil(detail.planned?.blockText)
     }
 
     // MARK: - The way there
@@ -92,20 +92,20 @@ final class TripPinDetailTests: XCTestCase {
     func testTheWalkThereIsMinutesAndDistance() {
         let spot = stop(1, travel: 12)
         let detail = TripPinDetail.of(spot, number: 2, in: day([stop(9), spot]))
-        XCTAssertEqual(detail.travelText, "12 min zu Fuß · 900 m")
+        XCTAssertEqual(detail.planned?.travelText, "12 min zu Fuß · 900 m")
     }
 
     func testARideSaysSoInsteadOfWalking() {
         let spot = stop(1, travel: 20, travelClass: "transit")
         let detail = TripPinDetail.of(spot, number: 2, in: day([spot]))
-        XCTAssertEqual(detail.travelText, "20 min mit Bus oder Bahn · 1,5 km")
+        XCTAssertEqual(detail.planned?.travelText, "20 min mit Bus oder Bahn · 1,5 km")
     }
 
     func testNoTravelAtAllIsSilenceRatherThanZeroMinutes() {
         // The first stop of a block, or one next door. "0 min zu Fuß"
         // is a line that says nothing at length.
         let detail = TripPinDetail.of(stop(1, travel: 0), number: 1, in: day([stop(1, travel: 0)]))
-        XCTAssertNil(detail.travelText)
+        XCTAssertNil(detail.planned?.travelText)
     }
 
     // MARK: - What it calls the place
@@ -142,9 +142,9 @@ final class TripPinDetailTests: XCTestCase {
         let spot = stop(1, status: "done", pinned: true, note: "Papa wollte da hin",
                         photoStop: true)
         let detail = TripPinDetail.of(spot, number: 1, in: day([spot]))
-        XCTAssertEqual(detail.status, .done)
-        XCTAssertEqual(detail.statusLabel, "Erledigt")
-        XCTAssertTrue(detail.isPinned)
+        XCTAssertEqual(detail.planned?.status, .done)
+        XCTAssertEqual(detail.planned?.statusLabel, "Erledigt")
+        XCTAssertEqual(detail.planned?.isPinned, true)
         XCTAssertTrue(detail.isPhotoStop)
         XCTAssertEqual(detail.note, "Papa wollte da hin")
     }

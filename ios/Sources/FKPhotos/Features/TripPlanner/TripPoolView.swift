@@ -25,6 +25,16 @@ struct TripPoolView: View {
 
     @State private var query = ""
     @State private var placing: TripCandidate?
+    /// A candidate whose pin was tapped on the map.
+    @State private var inspecting: TripCandidate?
+    /// Set while the pin sheet is still on screen and the traveller has
+    /// asked for the block picker. Two sheets cannot take the stage at
+    /// once, so the picker waits for the first one to leave.
+    @State private var queuedPlacement: TripCandidate?
+    /// List or map, remembered. Somebody who thinks in places thinks in
+    /// places tomorrow too, and re-tapping the switch on every leg is a
+    /// preference the app could simply have kept.
+    @AppStorage("trip.pool.presentation") private var presentation = TripPoolPresentation.list
     @Environment(\.dismiss) private var dismiss
 
     private var leg: TripLeg? {
@@ -32,6 +42,75 @@ struct TripPoolView: View {
     }
 
     var body: some View {
+        Group {
+            switch presentation {
+            case .list: list
+            case .map:  map
+            }
+        }
+        .navigationTitle(placeInto == nil ? "Kandidaten" : "Stopp hinzufügen")
+        .plannerErrorBanner(viewModel.errorMessage, dismiss: { viewModel.errorMessage = nil })
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                // Two shapes of one pool (§5.2): the list answers "what
+                // did the planner find", the map "where is all this" —
+                // and the second question is the one you ask before
+                // deciding what fits into an afternoon (§3.1).
+                Picker("Darstellung", selection: $presentation) {
+                    ForEach(TripPoolPresentation.allCases, id: \.self) { option in
+                        Label(option.label, systemImage: option.symbolName)
+                            .labelStyle(.iconOnly)
+                            .tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                // The anti-pool: what this trip has turned down. It
+                // belongs next to the pool rather than in the settings,
+                // because it is the same question — what may the
+                // planner offer? — with the opposite answer.
+                NavigationLink {
+                    TripHiddenSpotsView(viewModel: viewModel)
+                } label: {
+                    Label("Ausgeblendet", systemImage: "eye.slash")
+                }
+            }
+        }
+        .task { await viewModel.loadHiddenSpots() }
+        // A pool of a hundred and fifty candidates is what the planner
+        // routinely produces; scrolling it to find the one somebody
+        // mentioned at breakfast is not a plan. Always on the screen
+        // rather than hidden above the first row: a search field you
+        // have to know about to pull down is a search field most people
+        // never find (§5.2).
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Kandidaten durchsuchen")
+        .sheet(item: $inspecting, onDismiss: startQueuedPlacement) { candidate in
+            if let leg {
+                TripPinDetailSheet(
+                    detail: TripPinDetail.of(candidate),
+                    actions: pinActions(candidate),
+                    spot: TripSpotDetail(candidate),
+                    mode: leg.transportMode,
+                )
+            }
+        }
+        .sheet(item: $placing) { candidate in
+            NavigationStack {
+                TripBlockPickerView(title: candidate.displayName, leg: leg) { blockId, dayIndex in
+                    await viewModel.place(candidate, inBlock: blockId, onDay: dayIndex)
+                }
+            }
+        }
+        .task { if viewModel.plan == nil { await viewModel.load() } }
+    }
+
+    // MARK: - The pool as a list
+
+    private var list: some View {
         List {
             if let kept = viewModel.keptForNextTime {
                 Text(kept).font(.footnote).foregroundStyle(.secondary)
@@ -70,35 +149,161 @@ struct TripPoolView: View {
                 ContentUnavailableView("Stadt nicht gefunden", systemImage: "tray")
             }
         }
-        .navigationTitle(placeInto == nil ? "Kandidaten" : "Stopp hinzufügen")
-        .plannerErrorBanner(viewModel.errorMessage, dismiss: { viewModel.errorMessage = nil })
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                // The anti-pool: what this trip has turned down. It
-                // belongs next to the pool rather than in the settings,
-                // because it is the same question — what may the
-                // planner offer? — with the opposite answer.
-                NavigationLink {
-                    TripHiddenSpotsView(viewModel: viewModel)
-                } label: {
-                    Label("Ausgeblendet", systemImage: "eye.slash")
-                }
+    }
+
+    // MARK: - The pool as a map
+
+    /// The same pool, as places (§5.2).
+    ///
+    /// No numbers on the pins, because the pool has no order, and no
+    /// slider underneath, because it has no hours either: a control that
+    /// answers "where would I be at three" over a list of things nobody
+    /// has put on a day would be a control that is not operated.
+    @ViewBuilder
+    private var map: some View {
+        if let leg {
+            if leg.pool.isEmpty {
+                ContentUnavailableView(
+                    "Noch keine Kandidaten",
+                    systemImage: "map",
+                    description: Text("Was der Planer findet und was ihr selbst beisteuert, "
+                                      + "sammelt sich hier."),
+                )
+            } else {
+                pins(of: leg)
+            }
+        } else {
+            ContentUnavailableView("Stadt nicht gefunden", systemImage: "map")
+        }
+    }
+
+    private func pins(of leg: TripLeg) -> some View {
+        let shown = matches(in: leg)
+        return VStack(spacing: 0) {
+            TripSpotMapView(
+                anchor: leg.anchor,
+                anchorTitle: leg.anchorTitle,
+                pins: shown.map { pin($0, leg: leg) },
+                showsUserLocation: leg.schedule(on: Date()).isRunning
+            ) { picked in
+                inspecting = shown.first { $0.osmRef == picked.id }
+            }
+            legend(shown: shown.count, of: leg.pool.count)
+        }
+        // The map runs to the bottom edge; the tab bar would steal that
+        // row for tabs no map leads to.
+        .toolbar(.hidden, for: .tabBar)
+        .toolbarBackgroundVisibility(.hidden, for: .tabBar)
+        // A search that matches nothing has to say so here too — an
+        // empty map reads as a leg without candidates.
+        .overlay {
+            if shown.isEmpty {
+                ContentUnavailableView.search(text: query)
+                    .background(.background)
             }
         }
-        .task { await viewModel.loadHiddenSpots() }
-        // A pool of a hundred and fifty candidates is what the planner
-        // routinely produces; scrolling it to find the one somebody
-        // mentioned at breakfast is not a plan.
-        .searchable(text: $query, prompt: "Kandidaten durchsuchen")
-        .sheet(item: $placing) { candidate in
-            NavigationStack {
-                TripBlockPickerView(title: candidate.displayName, leg: leg) { blockId, dayIndex in
-                    await viewModel.place(candidate, inBlock: blockId, onDay: dayIndex)
+    }
+
+    private func pin(_ candidate: TripCandidate, leg: TripLeg) -> TripSpotMapPin {
+        let kind = TripPoolPinKind.of(candidate, plannedRefs: plannedRefs(leg))
+        return TripSpotMapPin(
+            id: candidate.osmRef,
+            coordinate: candidate.coordinate,
+            title: candidate.displayName,
+            symbolName: kind.symbolName,
+            tint: kind.colour,
+        )
+    }
+
+    /// What the colours mean, and how much of the pool is on screen.
+    ///
+    /// Always shown rather than behind a button as on the day map: four
+    /// kinds are one more than three, and the pool map is the first map
+    /// in the app whose colours are not a status somebody just set.
+    private func legend(shown: Int, of total: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(TripPoolFilter.countLabel(shown: shown, of: total))
+                .font(.caption.weight(.semibold))
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading),
+                                GridItem(.flexible(), alignment: .leading)],
+                      alignment: .leading, spacing: 4) {
+                ForEach(TripPoolPinKind.legendOrder, id: \.self) { kind in
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(kind.colour)
+                            .frame(width: 10, height: 10)
+                            .overlay(Circle().stroke(.white, lineWidth: 1))
+                        Text(kind.label)
+                    }
                 }
             }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-        .task { if viewModel.plan == nil { await viewModel.load() } }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
+    }
+
+    /// What a tapped pin can do — the pool's own two gestures (§5.2),
+    /// handed to the sheet, which knows the spot and nothing about the
+    /// trip.
+    private func pinActions(_ candidate: TripCandidate) -> [TripPinSheetAction] {
+        var actions: [TripPinSheetAction] = [
+            TripPinSheetAction(
+                id: "place",
+                title: placeInto == nil ? "In einen Block setzen" : "Hier einplanen",
+                systemImage: "calendar.badge.plus",
+                footer: placeInto.map {
+                    "Für \($0.label), Tag \($0.dayIndex + 1)."
+                },
+                run: {
+                    guard let placeInto else {
+                        // The picker cannot open while this sheet
+                        // is still on screen; it goes up as this one
+                        // comes down.
+                        queuedPlacement = candidate
+                        return
+                    }
+                    if await viewModel.place(candidate, inBlock: placeInto.blockId,
+                                             onDay: placeInto.dayIndex) {
+                        dismiss()
+                    }
+                },
+            ),
+        ]
+        if candidate.isManual {
+            // A find somebody brought in themselves is theirs to
+            // delete: it exists because a person added it, and nothing
+            // will propose it again.
+            actions.append(TripPinSheetAction(
+                id: "drop",
+                title: "Aus den Kandidaten entfernen",
+                systemImage: "trash",
+                role: .destructive,
+                footer: "Selbst hinzugefügt — entfernen heißt hier wirklich weg.",
+                run: { await viewModel.drop(candidate) },
+            ))
+        } else {
+            actions.append(TripPinSheetAction(
+                id: "hide",
+                title: "Für diese Reise ausblenden",
+                systemImage: "eye.slash",
+                role: .destructive,
+                footer: "Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch beim "
+                    + "nächsten Neuplanen nicht. Rückgängig oben unter „Ausgeblendet“.",
+                run: { await viewModel.hide(osmRef: candidate.osmRef) },
+            ))
+        }
+        return actions
+    }
+
+    /// The block picker the pin sheet asked for, once it has left.
+    private func startQueuedPlacement() {
+        guard let queued = queuedPlacement else { return }
+        queuedPlacement = nil
+        placing = queued
     }
 
     /// Into the block this screen was opened for, or ask which one.
@@ -115,33 +320,18 @@ struct TripPoolView: View {
         }
     }
 
-    /// Name, category and note all count as the thing you remember.
-    ///
-    /// The note especially: "beste Pastéis laut Blog" is often the only
-    /// part of a find anybody recalls, and a search that ignored it
-    /// would miss exactly the entries a person added by hand (§9.2).
+    /// The pool as list and map both show it (§5.2) — one filter, so
+    /// what leaves the list leaves the map.
     private func matches(in leg: TripLeg) -> [TripCandidate] {
-        let sorted = leg.pool.sorted {
-            $0.score != $1.score ? $0.score > $1.score : $0.displayName < $1.displayName
-        }
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !needle.isEmpty else { return sorted }
-        return sorted.filter { candidate in
-            [candidate.displayName, TripCategory.label(candidate.category), candidate.note ?? ""]
-                .contains { $0.lowercased().contains(needle) }
-        }
+        TripPoolFilter.matches(in: leg.pool, query: query)
     }
 
     private func countLabel(_ leg: TripLeg) -> String {
-        let shown = matches(in: leg).count
-        if shown == leg.pool.count {
-            return leg.pool.count == 1 ? "1 Kandidat" : "\(leg.pool.count) Kandidaten"
-        }
-        return "\(shown) von \(leg.pool.count)"
+        TripPoolFilter.countLabel(shown: matches(in: leg).count, of: leg.pool.count)
     }
 
     private func plannedRefs(_ leg: TripLeg) -> Set<String> {
-        Set(leg.days.flatMap { $0.blocks }.flatMap { $0.stops }.map(\.osmRef))
+        TripPoolFilter.plannedRefs(of: leg)
     }
 
     @ViewBuilder

@@ -1,4 +1,3 @@
-import MapKit
 import SwiftUI
 
 /// The day on a map, with numbered pins in the order the plan walks
@@ -28,7 +27,6 @@ struct TripDayMapView: View {
     /// How the group moves, for the detail screen's route button.
     var mode: TripTransportMode = .foot
 
-    @State private var camera: MapCameraPosition = .automatic
     @State private var sliderMinutes: Double = 0
     @State private var sliderActive = false
     @State private var selected: Selection?
@@ -93,8 +91,8 @@ struct TripDayMapView: View {
         .sheet(item: $selected) { pick in
             TripPinDetailSheet(
                 detail: TripPinDetail.of(pick.stop, number: pick.number, in: day),
-                onHide: hideAction(for: pick),
-                stop: pick.stop,
+                actions: actions(for: pick),
+                spot: TripSpotDetail(pick.stop),
                 mode: mode,
             )
         }
@@ -107,59 +105,60 @@ struct TripDayMapView: View {
         }
     }
 
-    /// Hiding the tapped spot, or nothing when the screen above gave
-    /// no way to. Written out rather than inlined into the sheet so the
-    /// closure carries its actor: it touches `selected`, which belongs
-    /// to this view.
-    private func hideAction(for pick: Selection) -> (@MainActor () async -> Void)? {
-        guard let onHide else { return nil }
-        return {
-            await onHide(pick.stop)
-            // The pin is gone from the day, so the selection must go
-            // too: it would otherwise re-open a sheet about a stop
-            // this trip no longer has.
-            selected = nil
-        }
+    /// Hiding the tapped spot, or nothing at all when the screen above
+    /// gave no way to (§5).
+    ///
+    /// Written out rather than inlined into the sheet so the closure
+    /// carries its actor: it touches `selected`, which belongs to this
+    /// view.
+    private func actions(for pick: Selection) -> [TripPinSheetAction] {
+        guard let onHide else { return [] }
+        return [
+            TripPinSheetAction(
+                id: "hide",
+                title: "Für diese Reise ausblenden",
+                systemImage: "eye.slash",
+                role: .destructive,
+                // The same sentence as in the pool, because it is the
+                // same "no": it holds for the whole trip and it can be
+                // taken back.
+                footer: "Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch beim "
+                    + "nächsten Neuplanen nicht. Rückgängig bei den Kandidaten unter "
+                    + "„Ausgeblendet“.",
+                run: {
+                    await onHide(pick.stop)
+                    // The pin is gone from the day, so the selection
+                    // must go too: it would otherwise re-open a sheet
+                    // about a stop this trip no longer has.
+                    selected = nil
+                },
+            ),
+        ]
     }
 
     private var map: some View {
-        Map(position: $camera) {
-            if isRunning {
-                UserAnnotation()
-            }
-            // The anchor is where the day starts and ends. Shown as a
-            // house rather than a number: it is not a stop.
-            Annotation("Unterkunft", coordinate: anchor.clCoordinate) {
-                Image(systemName: "house.fill")
-                    .padding(6)
-                    .background(.background, in: .circle)
-                    .overlay(Circle().stroke(.secondary))
-            }
-
-            ForEach(numbered, id: \.stop.rowId) { entry in
-                Annotation(entry.stop.displayName, coordinate: entry.stop.coordinate.clCoordinate) {
-                    Button {
-                        selected = Selection(number: entry.index, stop: entry.stop)
-                    } label: {
-                        pin(entry.index, stop: entry.stop)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(entry.index). \(entry.stop.displayName)")
-                }
+        TripSpotMapView(
+            anchor: anchor,
+            pins: numbered.map(pin),
+            showsUserLocation: isRunning
+        ) { picked in
+            // The pin carries the stop's row id as its handle; the day
+            // still owns the stop itself.
+            if let entry = numbered.first(where: { String($0.stop.rowId) == picked.id }) {
+                selected = Selection(number: entry.index, stop: entry.stop)
             }
         }
-        .mapStyle(.standard)
     }
 
-    private func pin(_ number: Int, stop: TripStop) -> some View {
-        let isHighlighted = highlighted?.stop?.rowId == stop.rowId
-        return Text("\(number)")
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.white)
-            .frame(width: isHighlighted ? 32 : 26, height: isHighlighted ? 32 : 26)
-            .background(pinColour(for: stop), in: .circle)
-            .overlay(Circle().stroke(.white, lineWidth: isHighlighted ? 3 : 2))
-            .animation(.easeInOut(duration: 0.15), value: isHighlighted)
+    private func pin(_ entry: (index: Int, stop: TripStop)) -> TripSpotMapPin {
+        TripSpotMapPin(
+            id: String(entry.stop.rowId),
+            coordinate: entry.stop.coordinate,
+            title: entry.stop.displayName,
+            number: entry.index,
+            tint: pinColour(for: entry.stop),
+            emphasised: highlighted?.stop?.rowId == entry.stop.rowId,
+        )
     }
 
     private func pinColour(for stop: TripStop) -> Color { Self.colour(of: stop.stopStatus) }
@@ -267,11 +266,5 @@ struct TripDayMapView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-    }
-}
-
-extension TripCoordinate {
-    var clCoordinate: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 }
