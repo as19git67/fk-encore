@@ -777,6 +777,55 @@ Neuplanung: Einen Spot wieder ins Rennen zu nehmen ist nicht dasselbe, wie ihn
 auf einen Tag zu setzen, und fremde Tage als Nebenwirkung einer Korrektur
 umzubauen wäre die größere Überraschung (§7.1).
 
+### 5.2 Der Vorrat auf der Karte (offen)
+
+Der Vorrat ist eine Liste, sortiert nach Score. Für „was hat der Planer
+gefunden?" reicht das; für die Frage, die man vor dieser Liste tatsächlich
+stellt, nicht: **wo liegt das alles?** Hundertfünfzig Kandidaten mit Namen und
+Kategorie sagen nicht, dass zwanzig davon in derselben Gasse liegen und drei am
+anderen Ende der Stadt — und genau das entscheidet, was in einen halben Tag
+passt (§3.1). Die Tageskarte (§8.3) beantwortet die Frage für die verplanten
+Spots; für die unverplanten fehlt sie.
+
+Zwei Dinge sollen dazukommen, und eines davon gibt es schon halb:
+
+**Die Suche gibt es** — als Suchfeld über der Liste, das iOS erst beim
+Herunterziehen zeigt. Wer nicht weiß, dass es da ist, findet es nicht, und
+„Im Vorrat suchen" ist in einem Vorrat von hundertfünfzig Einträgen keine
+Nebensache. Es soll dauerhaft sichtbar sein (`.navigationBarDrawer(displayMode:
+.always)`) und für Liste und Karte dasselbe Ergebnis filtern: Was in der Liste
+verschwindet, verschwindet auch als Pin.
+
+**Die Karte ist neu**, als zweite Darstellung desselben Vorrats — ein
+Umschalter Liste/Karte, kein eigener Screen. Sie zeigt die Unterkunft als Haus,
+die Kandidaten als Pins, und beim Tippen auf einen Pin dasselbe Info-Sheet, das
+die Tageskarte seit §5.1 hat: Name, Art, Notiz, Links, „In Karten öffnen" — und
+die Handlungen des Vorrats: **In einen Block setzen** und **Ausblenden** (bzw.
+*Entfernen* am eigenen Fund). Die Pins tragen keine Nummern, weil der Vorrat
+keine Reihenfolge hat; stattdessen kann die Farbe sagen, was die Liste heute in
+Worten sagt — eigener Fund, Fotostopp, schon auf einem Tag.
+
+**Wiederverwendung, und wo sie aufhört.** `TripDayMapView` ist um den Tag
+gebaut: Pins nummeriert in Laufreihenfolge, Farbe nach Status, darunter der
+Slider über die Stunden. Nichts davon hat ein Vorrat. Was beide brauchen, ist
+kleiner und lohnt das Herauslösen: die Karte mit Haus und Pins, das
+Tippen-öffnet-Sheet, und das Sheet selbst. `TripPinDetail` teilt sich dafür in
+den Teil, der für jeden Ort gilt (Name, Schild-Name, Art, Notiz, Links,
+Koordinate, `osmRef`), und den Teil, der nur einem verplanten Stopp gehört
+(Nummer, Block, Hinweg, Status) — letzterer optional, und das Sheet zeigt, was
+da ist. Die Aktionen kommen wie heute als Closures vom Screen, dem die Reise
+gehört: Die Tageskarte reicht *Ausblenden* durch, die Vorratskarte *Setzen* und
+*Ausblenden*. Die Karte selbst bleibt eine reine Funktion ihrer Eingaben.
+
+Was **nicht** wiederverwendet wird: der Slider. Er ist die Antwort auf „wo wäre
+ich um 15 Uhr", und der Vorrat hat keine Uhrzeit. Eine Karte, die ihn zeigt
+und dann nichts damit anfängt, wäre ein Bedienelement, das nicht bedient.
+
+Zusätzlich sinnvoll, aber nicht Teil dieses Schritts: Die Karte als Ort, an dem
+man einen Kandidaten *findet*, nicht nur ansieht — die Suche aus §9.2 Fall 4 mit
+Pins statt Zeilen. Das ist dieselbe Karte mit einer anderen Quelle und gehört
+zu Entdecken (§9.2), nicht zum Vorrat.
+
 ## 6. Zu mehreren unterwegs: Beiträge, Rollen, Splits
 
 Bis hierher liest sich das Konzept, als plante eine Person. Tatsächlich benutzen
