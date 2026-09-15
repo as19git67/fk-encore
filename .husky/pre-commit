@@ -6,6 +6,8 @@
 #   1. SFC parse — catches Vue template attribute / expression errors that
 #      `vue-tsc --noEmit` is too permissive to report. (See scripts/check-sfc.mjs.)
 #   2. Frontend type-check — `vue-tsc --noEmit` over the app config.
+#   3. iOS build number — derives CURRENT_PROJECT_VERSION from the commit
+#      count whenever the commit touches ios/ (see the script's header).
 #
 # Skip with `git commit --no-verify` when you really need to (do not make a
 # habit of it — the same checks run again in CI).
@@ -19,3 +21,8 @@ node scripts/check-sfc.mjs
 # starts with, but without the slower build step. Catches TS errors in any
 # .ts / .tsx / .vue script block under frontend/src.
 ( cd frontend && npx vue-tsc --noEmit -p tsconfig.app.json )
+
+# --- 3. iOS build number --------------------------------------------------
+# A no-op for every commit that does not touch ios/. Amends the staged
+# Xcode project in place, so the new number is part of this commit.
+sh scripts/sync-ios-build-number.sh
