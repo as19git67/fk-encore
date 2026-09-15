@@ -694,6 +694,8 @@ const TARIFF_CATEGORIES: Array<{ key: string; label: string; kinds: ElectricityT
     kinds: [
       'pv_investment_net',
       'pv_investment_vat',
+      'pv_vat_refunded',
+      'self_consumption_vat_rate',
       'expected_return_rate',
       'pv_capacity_kwp',
     ],
@@ -810,6 +812,8 @@ const TARIFF_KIND_DEFAULT_UNIT: Partial<Record<ElectricityTariffKind, Electricit
   water_base_price: 'eur_per_month',
   pv_investment_net: 'eur',
   pv_investment_vat: 'eur',
+  pv_vat_refunded: 'eur',
+  self_consumption_vat_rate: 'ratio',
   expected_return_rate: 'ratio',
   boiler_efficiency: 'ratio',
   heat_pump_scop: 'ratio',

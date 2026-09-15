@@ -211,6 +211,7 @@ export function summarizeEnergyWindow(
           baseCostEur: costSum((costs) => costs.baseCostEur),
           feedInRevenueEur: costSum((costs) => costs.feedInRevenueEur),
           avoidedGridCostEur: costSum((costs) => costs.avoidedGridCostEur),
+          selfConsumptionVatEur: costSum((costs) => costs.selfConsumptionVatEur),
           pvBenefitEur: costSum((costs) => costs.pvBenefitEur),
           netElectricityCostEur: costSum((costs) => costs.netElectricityCostEur),
           noPvElectricityCostEur: costSum((costs) => costs.noPvElectricityCostEur),

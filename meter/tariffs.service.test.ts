@@ -237,6 +237,79 @@ describe("EnergyTariffTimeline — feed-in generations", () => {
   });
 });
 
+describe("EnergyTariffTimeline — VAT on self-consumption", () => {
+  /** 1000 kWh self-consumed at 0.20 €/kWh, 500 kWh exported at 0.08 €/kWh. */
+  const pvMonth = {
+    ...JAN,
+    gridImport: 0,
+    gridExport: 500,
+    selfConsumption: 1000,
+    totalConsumption: 1000,
+  };
+
+  function pvTimeline(extra: ElectricityTariff[] = []) {
+    return new EnergyTariffTimeline([
+      entry("grid_import", "2020-01-01", 0.4),
+      entry("self_consumption_value", "2020-01-01", 0.2),
+      entry("feed_in", "2020-01-01", 0.08),
+      ...extra,
+    ]);
+  }
+
+  it("leaves the benefit untouched when no rate is configured", () => {
+    const costs = pvTimeline().costsForBucket(pvMonth);
+
+    expect(costs.selfConsumptionVatEur).toBeNull();
+    expect(costs.avoidedGridCostEur).toBe(200);
+    expect(costs.feedInRevenueEur).toBe(40);
+    expect(costs.pvBenefitEur).toBe(240);
+  });
+
+  it("charges the rate on the value of the self-consumed kWh", () => {
+    // Unentgeltliche Wertabgabe: 1000 kWh x 0.20 € x 19 % = 38 € owed, so the
+    // 240 € the PV was worth is really 202 €.
+    const costs = pvTimeline([
+      { ...entry("self_consumption_vat_rate", "2020-01-01", 0.19), unit: "ratio" },
+    ]).costsForBucket(pvMonth);
+
+    expect(costs.selfConsumptionVatEur).toBe(38);
+    expect(costs.avoidedGridCostEur).toBe(200);
+    expect(costs.pvBenefitEur).toBe(202);
+  });
+
+  it("stops charging it from the switch to Kleinunternehmer on", () => {
+    // Five years of Regelbesteuerung, then a row of 0 — the years before keep
+    // their tax, the years after are free of it.
+    const timeline = pvTimeline([
+      { ...entry("self_consumption_vat_rate", "2021-07-01", 0.19), unit: "ratio" },
+      { ...entry("self_consumption_vat_rate", "2026-07-01", 0), unit: "ratio" },
+    ]);
+
+    const before = timeline.costsForBucket(pvMonth);
+    const after = timeline.costsForBucket({
+      ...pvMonth,
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-09-01T00:00:00.000Z",
+    });
+
+    expect(before.selfConsumptionVatEur).toBe(38);
+    expect(before.pvBenefitEur).toBe(202);
+    expect(after.selfConsumptionVatEur).toBe(0);
+    expect(after.pvBenefitEur).toBe(240);
+  });
+
+  it("does not touch the grid bill — the tax is on the PV side", () => {
+    const costs = pvTimeline([
+      { ...entry("self_consumption_vat_rate", "2020-01-01", 0.19), unit: "ratio" },
+    ]).costsForBucket({ ...pvMonth, gridImport: 100, totalConsumption: 1100 });
+
+    expect(costs.gridImportCostEur).toBe(40);
+    // Grid work price minus the feed-in revenue; the Wertabgabe is not a
+    // part of the electricity bill.
+    expect(costs.netElectricityCostEur).toBe(0);
+  });
+});
+
 describe("EnergyTariffTimeline — periods the tariff only partly covers", () => {
   it("prices a period whose tariff starts in the middle instead of dropping it", () => {
     const timeline = new EnergyTariffTimeline([entry("grid_import", "2026-07-01", 0.4)]);
