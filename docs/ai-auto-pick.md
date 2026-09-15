@@ -101,7 +101,7 @@ Lernt aus den bereits reviewten Gruppen welche Signale dem User wichtig sind.
 
 Safeguard `MIN_PAIRS_FOR_FIT` (10): Branches mit zu wenig Daten behalten die Defaults — ein halbtrainierter User soll nicht den anderen Branch verschlechtern.
 
-Trigger: Button **"KI auf meine Vorlieben kalibrieren"** in der `DataManagementView`. Nach einem Fit zeigt der Server pro Branch die Top-1-Trefferquote vor/nach dem Fit (Vergleich gegen die Defaults), die UI rendert das als Info-Message.
+Trigger: Button **"KI auf meine Vorlieben kalibrieren"** unter Fotos › Einstellungen › Wartung. Nach einem Fit zeigt der Server pro Branch die Top-1-Trefferquote vor/nach dem Fit (Vergleich gegen die Defaults), die UI rendert das als Info-Message.
 
 Reversibel: `DELETE FROM ai_pick_user_weights WHERE user_id = X` stellt die Defaults wieder her.
 
@@ -248,7 +248,7 @@ statt der Aktionsleiste.
 - **"KI-Vorschlag übernehmen"** wenn die Gruppe einen Pick hat → ruft `POST /photos/groups/:id/accept-ai-pick` → hidet jedes Nicht-Picked-Mitglied via `photo_curation` (Favoriten geschützt). Group wird `reviewed_at` gesetzt.
 - Sobald die Compare-View zugemacht wird **nach** einem echten Review, lädt die Galerie automatisch nach (`compareNeedsReload`-Flag). Pure Dismiss (X / Esc) bleibt ohne Reload.
 
-### Admin (`DataManagementView.vue`)
+### Admin (Fotos › Einstellungen › Wartung, `PhotoMaintenanceView.vue`)
 
 - **"Gruppen neu berechnen"** — Re-Clustering (DINOv2 + pgvector). Triggert implizit Re-Scoring.
 - **"KI-Picks neu berechnen"** — server-weit alle unreviewten Gruppen mit aktuellen Gewichten.
@@ -414,7 +414,7 @@ Auf den Befund "53 % der Gruppen sind low und die KI hilft dort gar nicht" wurde
 
 Nach dem ersten Live-Test der Rapid-Review wurden mehrere UX-Findings adressiert:
 
-- **Konsolidierung**: doppelte Einstiege weggeräumt — der "Gruppen bearbeiten"-Button im Gallery-Header und der Bulk-Accept-Button in der Datenverwaltung waren redundant zur neuen Review-Queue. Naming auf "Sicher" / "Alle Sicheren bestätigen" vereinheitlicht.
+- **Konsolidierung**: doppelte Einstiege weggeräumt — der "Gruppen bearbeiten"-Button im Gallery-Header und der Bulk-Accept-Button in der Foto-Wartung waren redundant zur neuen Review-Queue. Naming auf "Sicher" / "Alle Sicheren bestätigen" vereinheitlicht.
 - **Lightbox**: Strip-Thumbs sind zu klein (~80 px) zur echten Beurteilung. Tap öffnet Bildschirmfüllend; Klick irgendwo schließt.
 - **KI-Pick-Markierung im Compare-View**: Tile mit `isAiPicked()` bekommt grünes Chip — sichtbar, was die KI behalten würde.
 - **`singleGroupMode`-Prop**: Compare-View aus der Queue zeigt kein "Fertig + Weiter" — schließen kehrt zur Queue zurück.
@@ -449,7 +449,7 @@ Nach dem ersten Live-Test der Rapid-Review wurden mehrere UX-Findings adressiert
 #### Niedrig hängend
 - **D (eyes_open ersetzen)**: Mediapipe Face Landmarks → Eye Aspect Ratio. Echtes bimodales Signal. Würde Burst-Tiebreaking bei Portraits deutlich verbessern. Aufwand: 1 PR im `embedding_service` + Re-Scan. Risiko niedrig — nur ein Signal wird besser.
 - **F/G/H (Schwellen-Tuning)**: nach dem nächsten Kalibrierungs-Export bewerten, ob die aktuellen Defaults zu konservativ/aggressiv sind. Eine Konstante zu drehen ist trivial.
-- **I (Calibration-Report-Endpoint)**: `GET /photos/groups/ai-pick-stats` mit aktuellen Trefferquoten pro Confidence-Stufe + Verteilungen. Card in DataManagement, täglich aktualisiert. Aufwand: ~1 PR.
+- **I (Calibration-Report-Endpoint)**: `GET /photos/groups/ai-pick-stats` mit aktuellen Trefferquoten pro Confidence-Stufe + Verteilungen. Card unter Fotos › Einstellungen › Wartung, täglich aktualisiert. Aufwand: ~1 PR.
 
 #### Mittel
 - **B aus Phase 4 (Keyboard-Walk)**: Power-User-Modus für das Review-Queue-View. Eine Karte pro Bildschirm, Leertaste = Accept, ↑ = Skip, Enter = Manual. 1 Sekunde pro Gruppe machbar.
@@ -503,7 +503,7 @@ Frontend:
 - `frontend/src/api/gallery.ts` — `GalleryGridGroup` mit `ai_picked` / `ai_confidence`
 - `frontend/src/views/GalleryView.vue` — Hauptgalerie, Wiring von Compare-Dialog + Soft-Reload
 - `frontend/src/views/ReviewQueueView.vue` — **Rapid-Review-UI** (Stufe A + C + D)
-- `frontend/src/views/DataManagementView.vue` — Admin-Buttons
+- `frontend/src/components/admin/PhotoGroupingPanel.vue` — Admin-Buttons (Fotos › Einstellungen › Wartung)
 - `frontend/src/components/VirtualGallery.vue` — Marker-Rendering im Haupt-Grid
 - `frontend/src/components/FullscreenOverlay.vue` — Fullscreen-Marker
 - `frontend/src/components/FilterMenu.vue` — "KI-ausgeblendete anzeigen"-Toggle

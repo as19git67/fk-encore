@@ -113,17 +113,16 @@ const subMenuItems = computed(() => {
     .filter((item) => item.routeName || item.children)
 })
 
-// The documents module swaps its basket and settings controls: the basket
-// (Einkaufswagen) sits at the end of the submenu strip where the settings
-// gear used to be, and the gear joins the meta icons in navbar-end.
-const docSettingsGroup = computed(() =>
-  activeModule.value?.id === 'dokumente'
-    ? subMenuItems.value.find((item) => item.children)
-    : undefined,
-)
+// A module's settings group is lifted out of the submenu strip and rendered
+// as a gear among the meta icons in navbar-end. The documents module was the
+// first to have one; photos and finance now do too, so the rule is the same
+// everywhere: the first group in a module's menu becomes that module's gear.
+// (Documents additionally swaps in its basket at the strip's end, where the
+// gear used to sit.)
+const settingsGroup = computed(() => subMenuItems.value.find((item) => item.children))
 const stripItems = computed(() =>
-  docSettingsGroup.value
-    ? subMenuItems.value.filter((item) => item !== docSettingsGroup.value)
+  settingsGroup.value
+    ? subMenuItems.value.filter((item) => item !== settingsGroup.value)
     : subMenuItems.value,
 )
 
@@ -254,16 +253,16 @@ async function handleLogout() {
         <!-- Right: profile + logout (icons only) -->
         <div class="navbar-end">
           <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
-          <!-- Documents: settings gear where the basket used to sit -->
+          <!-- Settings gear for the active module (documents: where the basket used to sit) -->
           <Button
-            v-if="docSettingsGroup?.children"
-            :icon="docSettingsGroup.icon"
+            v-if="settingsGroup?.children"
+            :icon="settingsGroup.icon"
             text
             rounded
-            :severity="isGroupActive(docSettingsGroup.children) ? 'primary' : 'secondary'"
-            :aria-label="docSettingsGroup.label"
-            v-tooltip.bottom="docSettingsGroup.label"
-            @click="openGroupMenu($event, docSettingsGroup.children)"
+            :severity="isGroupActive(settingsGroup.children) ? 'primary' : 'secondary'"
+            :aria-label="settingsGroup.label"
+            v-tooltip.bottom="settingsGroup.label"
+            @click="openGroupMenu($event, settingsGroup.children)"
           />
           <Button
             icon="pi pi-user"

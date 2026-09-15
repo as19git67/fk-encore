@@ -41,7 +41,11 @@ export const MOCK_USER: UserWithRoles = {
     'photos.libraries.manage',
     'people.view',
     'data.manage',
+    'photos.refresh_metadata',
+    'osm.admin',
     'documents.view', 'documents.upload', 'documents.edit', 'documents.delete',
+    'documents.manage_taxonomy',
+    'module.finance', 'finance.view', 'finance.accounts.manage',
     'module.meters', 'meters.view', 'meters.read_entry', 'meters.manage',
   ],
 }

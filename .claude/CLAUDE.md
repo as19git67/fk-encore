@@ -1093,6 +1093,7 @@ The conversation with the user stays in whatever language the user is using — 
 ## Aktive Feature-Pläne
 
 - **Dokumentenverwaltung** (neues Modul neben Fotos, lokale KI-Klassifikation via llm-service): `/root/.claude/plans/ein-weiteres-modul-in-peaceful-robin.md`. Wird iterativ in Etappen umgesetzt (DB/Seed → llm-service → documents-Service → Watcher → Suche → Frontend → Infra).
+- **Admin-Aktionen in die Module verschieben** — **umgesetzt**. Datenverwaltung, Bibliotheken, Taxonomie-Cockpit/-Tools und KI-Modell liegen jetzt unter Fotos/Dokumente/Finanzen › Einstellungen; Admin behält Benutzer, Rollen, Jobs und die neue Systemstatus-Seite. Die Panels der früheren `DataManagementView` liegen unter `frontend/src/components/admin/`. Plan und Umsetzungsstand: `.claude/plans/admin-datenverwaltung-aufteilung.md`.
 
 ## Keine personenbezogenen Daten (PII) im Repo
 

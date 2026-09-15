@@ -325,7 +325,7 @@ die Werte lesen, statt sie bei jedem Betrachten neu zu berechnen.
 - Gemessen wird beim Scan (`detectPhotoFaces`) und für den Bestand per
   `POST /photos/backfill-face-sharpness` — foto-weise gebündelt (ein Decode
   bedient alle Gesichter eines Fotos), fortsetzbar über einen Cursor, mit
-  Button „Gesichtsschärfe nachtragen" in der Datenverwaltung.
+  Button „Gesichtsschärfe nachtragen" unter Fotos › Einstellungen › Wartung.
 - Stimmt die Orientierung des eigenen Decodes nicht mit der des Detektors
   überein, bleibt der Wert `NULL` statt plausibel falsch zu sein.
 

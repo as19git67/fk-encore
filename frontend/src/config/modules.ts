@@ -81,6 +81,36 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/ReviewQueueView.vue'),
         meta: { permission: 'photos.view' },
       },
+      {
+        path: 'einstellungen/scan-queue',
+        name: 'fotos-settings-scan-queue',
+        component: () => import('../views/PhotoScanQueueView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+      {
+        path: 'einstellungen/wartung',
+        name: 'fotos-settings-maintenance',
+        component: () => import('../views/PhotoMaintenanceView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+      {
+        path: 'einstellungen/bibliotheken',
+        name: 'fotos-settings-libraries',
+        component: () => import('../views/LibrariesView.vue'),
+        meta: { permission: 'photos.libraries.manage' },
+      },
+      {
+        path: 'einstellungen/osm',
+        name: 'fotos-settings-osm',
+        component: () => import('../views/OsmRegionsView.vue'),
+        meta: { permission: 'osm.admin' },
+      },
+      {
+        path: 'einstellungen/gefahrenzone',
+        name: 'fotos-settings-purge',
+        component: () => import('../views/PhotoPurgeView.vue'),
+        meta: { permission: 'photos.purge' },
+      },
     ],
     menuItems: [
       { label: 'Feed', icon: 'pi pi-home', routeName: 'fotos-stream', permission: 'photos.view' },
@@ -90,6 +120,17 @@ export const modules: ModuleConfig[] = [
       { label: 'Rückblicke', icon: 'pi pi-history', routeName: 'fotos-recaps', permission: 'photos.view' },
       { label: 'Personen', icon: 'pi pi-users', routeName: 'fotos-people', permission: 'people.view' },
       { label: 'Gruppen-Review', icon: 'pi pi-bolt', routeName: 'fotos-review-queue', permission: 'photos.view' },
+      {
+        label: 'Einstellungen',
+        icon: 'pi pi-cog',
+        children: [
+          { label: 'Scan-Queue', icon: 'pi pi-spinner', routeName: 'fotos-settings-scan-queue', permission: 'data.manage' },
+          { label: 'Wartung', icon: 'pi pi-wrench', routeName: 'fotos-settings-maintenance', permission: 'data.manage' },
+          { label: 'Externe Bibliotheken', icon: 'pi pi-folder', routeName: 'fotos-settings-libraries', permission: 'photos.libraries.manage' },
+          { label: 'OSM-Regionen', icon: 'pi pi-map', routeName: 'fotos-settings-osm', permission: 'osm.admin' },
+          { label: 'Gefahrenzone', icon: 'pi pi-exclamation-triangle', routeName: 'fotos-settings-purge', permission: 'photos.purge' },
+        ],
+      },
     ],
   },
   {
@@ -178,6 +219,38 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'groups.view' },
       },
       {
+        path: 'verarbeitung',
+        name: 'dokumente-verarbeitung',
+        component: () => import('../views/DocumentProcessingView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+      {
+        path: 'korrespondenten',
+        name: 'dokumente-korrespondenten',
+        component: () => import('../views/CorrespondentOverridesView.vue'),
+        meta: { permission: 'documents.manage_taxonomy' },
+      },
+      {
+        path: 'taxonomie-cockpit',
+        name: 'dokumente-taxonomie-cockpit',
+        component: () => import('../views/TaxonomyCockpitView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+      {
+        path: 'taxonomie-tools',
+        name: 'dokumente-taxonomie-tools',
+        component: () => import('../views/TaxonomyToolsView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+      {
+        path: 'ki-modell',
+        name: 'dokumente-ki-modell',
+        component: () => import('../views/LlmModelsView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+      {
+        // Must stay last — this route would otherwise swallow every
+        // sibling path above it.
         path: ':id',
         name: 'dokumente-detail',
         component: () => import('../views/DocumentDetailView.vue'),
@@ -197,8 +270,13 @@ export const modules: ModuleConfig[] = [
           { label: 'Kategorie-Vorschläge', icon: 'pi pi-folder-open', routeName: 'dokumente-kategorie-vorschlaege', permission: 'documents.manage_taxonomy' },
           { label: 'Steuer-Hints', icon: 'pi pi-sparkles', routeName: 'dokumente-steuer-hints', permission: 'documents.manage_taxonomy' },
           { label: 'Hint-Vorschläge', icon: 'pi pi-lightbulb', routeName: 'dokumente-hint-vorschlaege', permission: 'documents.manage_taxonomy' },
+          { label: 'Korrespondenten', icon: 'pi pi-at', routeName: 'dokumente-korrespondenten', permission: 'documents.manage_taxonomy' },
           { label: 'Bezugspersonen', icon: 'pi pi-id-card', routeName: 'dokumente-bezugspersonen', permission: 'documents.view' },
           { label: 'Gruppen', icon: 'pi pi-users', routeName: 'dokumente-gruppen', permission: 'groups.view' },
+          { label: 'Verarbeitung', icon: 'pi pi-file', routeName: 'dokumente-verarbeitung', permission: 'data.manage' },
+          { label: 'Taxonomie-Cockpit', icon: 'pi pi-chart-line', routeName: 'dokumente-taxonomie-cockpit', permission: 'data.manage' },
+          { label: 'Taxonomie-Tools', icon: 'pi pi-wrench', routeName: 'dokumente-taxonomie-tools', permission: 'data.manage' },
+          { label: 'KI-Modell', icon: 'pi pi-microchip-ai', routeName: 'dokumente-ki-modell', permission: 'data.manage' },
           { label: 'Hilfe', icon: 'pi pi-question-circle', routeName: 'dokumente-hilfe', permission: 'documents.view' },
         ],
       },
@@ -306,6 +384,12 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/finance/BankcontactsHelpView.vue'),
         meta: { permission: 'finance.accounts.manage' },
       },
+      {
+        path: 'ki-tagging',
+        name: 'finance-tag-queue',
+        component: () => import('../views/finance/TagQueueView.vue'),
+        meta: { permission: 'data.manage' },
+      },
     ],
     menuItems: [
       { label: 'Übersicht', icon: 'pi pi-th-large', routeName: 'finance-overview', permission: 'finance.view' },
@@ -314,7 +398,14 @@ export const modules: ModuleConfig[] = [
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
       { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
       { label: 'Belegabgleich', icon: 'pi pi-receipt', routeName: 'finance-receipt-enrichment', permission: 'finance.view' },
-      { label: 'Konto-Zugriff', icon: 'pi pi-key', routeName: 'finance-admin-access', permission: 'finance.admin' },
+      {
+        label: 'Einstellungen',
+        icon: 'pi pi-cog',
+        children: [
+          { label: 'Konto-Zugriff', icon: 'pi pi-key', routeName: 'finance-admin-access', permission: 'finance.admin' },
+          { label: 'KI-Tagging', icon: 'pi pi-tags', routeName: 'finance-tag-queue', permission: 'data.manage' },
+        ],
+      },
     ],
   },
   {
@@ -412,51 +503,31 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'roles.list' },
       },
       {
-        path: 'daten',
-        name: 'admin-data',
-        component: () => import('../views/DataManagementView.vue'),
-        meta: { permission: 'data.manage' },
-      },
-      {
-        path: 'bibliotheken',
-        name: 'admin-libraries',
-        component: () => import('../views/LibrariesView.vue'),
-        meta: { permission: 'photos.libraries.manage' },
-      },
-      {
         path: 'jobs',
         name: 'admin-scheduled-jobs',
         component: () => import('../views/ScheduledJobsView.vue'),
         meta: { permission: 'data.manage' },
       },
       {
-        path: 'tools',
-        name: 'admin-tools',
-        component: () => import('../views/AdminToolsView.vue'),
+        path: 'status',
+        name: 'admin-status',
+        component: () => import('../views/SystemStatusView.vue'),
         meta: { permission: 'data.manage' },
       },
-      {
-        path: 'taxonomie-cockpit',
-        name: 'admin-taxonomy-cockpit',
-        component: () => import('../views/TaxonomyCockpitView.vue'),
-        meta: { permission: 'data.manage' },
-      },
-      {
-        path: 'ki-modell',
-        name: 'admin-llm-models',
-        component: () => import('../views/LlmModelsView.vue'),
-        meta: { permission: 'data.manage' },
-      },
+
+      // Everything module-specific moved into the module it belongs to.
+      // These redirects keep old bookmarks and deep links working.
+      { path: 'daten', redirect: { name: 'admin-status' } },
+      { path: 'bibliotheken', redirect: { name: 'fotos-settings-libraries' } },
+      { path: 'tools', redirect: { name: 'dokumente-taxonomie-tools' } },
+      { path: 'taxonomie-cockpit', redirect: { name: 'dokumente-taxonomie-cockpit' } },
+      { path: 'ki-modell', redirect: { name: 'dokumente-ki-modell' } },
     ],
     menuItems: [
       { label: 'Benutzer', icon: 'pi pi-users', routeName: 'admin-users', permission: 'users.list' },
       { label: 'Rollen', icon: 'pi pi-shield', routeName: 'admin-roles', permission: 'roles.list' },
-      { label: 'Datenverwaltung', icon: 'pi pi-database', routeName: 'admin-data', permission: 'data.manage' },
-      { label: 'Externe Bibliotheken', icon: 'pi pi-folder', routeName: 'admin-libraries', permission: 'photos.libraries.manage' },
       { label: 'Eingeplante Jobs', icon: 'pi pi-clock', routeName: 'admin-scheduled-jobs', permission: 'data.manage' },
-      { label: 'Taxonomie-Cockpit', icon: 'pi pi-chart-line', routeName: 'admin-taxonomy-cockpit', permission: 'data.manage' },
-      { label: 'Taxonomie-Tools', icon: 'pi pi-wrench', routeName: 'admin-tools', permission: 'data.manage' },
-      { label: 'KI-Modell', icon: 'pi pi-microchip-ai', routeName: 'admin-llm-models', permission: 'data.manage' },
+      { label: 'Systemstatus', icon: 'pi pi-gauge', routeName: 'admin-status', permission: 'data.manage' },
     ],
   },
 ]

@@ -72,7 +72,7 @@ const router = createRouter({
     { path: '/users', redirect: '/admin' },
     { path: '/users/:id', redirect: (to) => `/admin/benutzer/${to.params.id}` },
     { path: '/roles', redirect: '/admin/rollen' },
-    { path: '/data-management', redirect: '/admin/daten' },
+    { path: '/data-management', redirect: '/admin/status' },
   ],
 })
 

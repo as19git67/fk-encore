@@ -56,9 +56,39 @@ describe('moduleEntryPath', () => {
       'Kategorie-Vorschläge',
       'Steuer-Hints',
       'Hint-Vorschläge',
+      'Korrespondenten',
       'Bezugspersonen',
       'Gruppen',
+      'Verarbeitung',
+      'Taxonomie-Cockpit',
+      'Taxonomie-Tools',
+      'KI-Modell',
       'Hilfe',
     ])
+  })
+
+  it('puts the photo admin actions behind a settings gear', () => {
+    const settings = fotos.menuItems.at(-1)
+    expect(settings?.label).toBe('Einstellungen')
+    expect(settings?.children?.map((item) => [item.label, item.permission])).toEqual([
+      ['Scan-Queue', 'data.manage'],
+      ['Wartung', 'data.manage'],
+      ['Externe Bibliotheken', 'photos.libraries.manage'],
+      ['OSM-Regionen', 'osm.admin'],
+      ['Gefahrenzone', 'photos.purge'],
+    ])
+  })
+
+  it('leaves the admin module with only cross-module entries', () => {
+    const admin = modules.find((m) => m.id === 'admin')!
+    expect(admin.menuItems.map((item) => item.label)).toEqual([
+      'Benutzer',
+      'Rollen',
+      'Eingeplante Jobs',
+      'Systemstatus',
+    ])
+    // No module-specific page is left behind, so none of them can be
+    // reachable without the module's own permission.
+    expect(admin.menuItems.some((item) => item.children)).toBe(false)
   })
 })
