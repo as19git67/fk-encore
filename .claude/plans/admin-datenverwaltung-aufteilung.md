@@ -1,6 +1,39 @@
 # Admin-Aktionen in die Module verschieben, Admin-Seite „Datenverwaltung" auflösen
 
-Status: **Plan** · Branch: `claude/admin-page-section-split-06k81e`
+Status: **Umgesetzt** · Branch: `claude/admin-page-section-split-06k81e`
+
+## Umsetzungsstand
+
+- ✅ **Etappe 1 — Vorbereitung**: `components/admin/adminPanels.css`, `AdminPage.vue`,
+  `composables/usePolling.ts`, `composables/useScanQueueStatus.ts`,
+  `config/queueOverview.ts` (+ Test), Mock-Rechte, Zahnrad-Gruppe in `App.vue`
+  für alle Module verallgemeinert.
+- ✅ **Etappe 2 — Panels**: elf Panels unter `components/admin/` plus
+  `OsmRegionStorageDialog.vue`, 1:1 aus der alten View übernommen.
+- ✅ **Etappe 3 — Fotos › Einstellungen**: Scan-Queue, Wartung, Externe
+  Bibliotheken, OSM-Regionen, Gefahrenzone.
+- ✅ **Etappe 4 — Dokumente/Finanzen**: Verarbeitung, Korrespondenten,
+  Taxonomie-Cockpit, Taxonomie-Tools, KI-Modell; Finanzen-Gruppe mit
+  Konto-Zugriff und KI-Tagging.
+- ✅ **Etappe 5 — Admin › Systemstatus**: `SystemStatusView`, Weiterleitungen,
+  `DataManagementView` gelöscht, Stories je Seite neu, Doku nachgezogen.
+
+Tests: Backend 312 Dateien / 4282 grün, Frontend 63 / 562 grün.
+
+Abweichungen vom ursprünglichen Entwurf:
+
+- Statt `AdminSection.vue` (Wrapper mit Slot) gibt es `AdminPage.vue` (Seiten-
+  Rahmen mit `<h1>`) und `adminPanels.css`. Scoped Styles greifen nicht in
+  Slot-Inhalte hinein, ein Wrapper hätte die Panels also nicht stylen können;
+  die Panels importieren das gemeinsame CSS stattdessen selbst per
+  `<style scoped src="./adminPanels.css">`, was den Scope-Hash behält.
+- Zusätzlich entstand `useScanQueueStatus`: die Wartungs-Aktionen sperren sich
+  bei laufender Scan-Queue und lasen das früher aus derselben Seite. Jetzt
+  teilen sich alle Panels einen Status statt fünf Requests zu stellen.
+- Die Wartungs-Buttons prüfen nur noch `isActive` statt zusätzlich der lokalen
+  `rescanLoading`/`retryLoading`-Flags — diese gehören zur Scan-Queue-Seite und
+  sind von der Wartungsseite aus nicht mehr sichtbar. Ein gestarteter Rescan
+  setzt die Queue praktisch sofort auf aktiv, die Sperre greift also weiterhin.
 
 ## Ziel in einem Satz
 
@@ -138,9 +171,9 @@ Alle Backend-Pfade bleiben unverändert (auch `/admin/tools/*`,
 | `/dokumente/verarbeitung` | `dokumente-verarbeitung` | `DocumentProcessingView` | `data.manage` | Abschnitt 3 |
 | `/dokumente/korrespondenten` | `dokumente-korrespondenten` | `CorrespondentOverridesView` | `documents.manage_taxonomy` | Abschnitt 4 |
 | `/dokumente/taxonomie-cockpit` | `dokumente-taxonomie-cockpit` | `TaxonomyCockpitView` (verschoben) | `data.manage` | unverändert |
-| `/dokumente/taxonomie-tools` | `dokumente-taxonomie-tools` | `AdminToolsView` → umbenannt `TaxonomyToolsView` | `data.manage` | unverändert |
+| `/dokumente/taxonomie-tools` | `dokumente-taxonomie-tools` | `TaxonomyToolsView` (aus `AdminToolsView` umbenannt) | `data.manage` | unverändert |
 | `/dokumente/ki-modell` | `dokumente-ki-modell` | `LlmModelsView` (verschoben) | `data.manage` | unverändert |
-| `/finanzen/ki-tagging` | `finance-tag-queue` | `FinanceTagQueueView` | `data.manage` | Abschnitt 2 |
+| `/finanzen/ki-tagging` | `finance-tag-queue` | `finance/TagQueueView` | `data.manage` | Abschnitt 2 |
 | `/admin/status` | `admin-status` | `SystemStatusView` | `data.manage` | Queue-Zahlen aller drei Warteschlangen mit Links, Build-Nummer (Abschnitt 12) |
 
 Reihenfolge in `modules.ts` beachten: Die neuen Dokumente-Routen müssen
@@ -215,10 +248,12 @@ API-Aufrufe, kein Prop-Drilling):
 
 Gemeinsame Bausteine:
 
-- `AdminSection.vue`: Wrapper mit Titel, Beschreibung und Slot; übernimmt
-  `.data-management-group`, `.danger-zone` und die Hilfsklassen aus dem
-  `<style scoped>`-Block (Zeilen 2100–2640). Farben nur über semantische
-  PrimeVue-Variablen (siehe `css_style_guide` in der CLAUDE.md).
+- `adminPanels.css`: die gemeinsamen Regeln (`.data-management-group`,
+  Queue-Tabellen und -Karten, Badges, `.button-row`) aus dem alten
+  `<style scoped>`-Block. Jedes Panel bindet sie per
+  `<style scoped src="./adminPanels.css">` ein, behält also seinen Scope-Hash.
+  `AdminPage.vue` liefert nur den Seitenrahmen mit `<h1>`. Farben nur über
+  semantische PrimeVue-Variablen (siehe `css_style_guide` in der CLAUDE.md).
 - `usePolling(fn, intervalMs)`: Composable für den OSM-Timer (Start in
   `onMounted`, Stopp in `onBeforeUnmount`). Der Poll läuft dann nur noch
   auf der OSM-Seite.

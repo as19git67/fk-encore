@@ -833,8 +833,9 @@ onMounted(() => {
       <p v-else>
         Du hast noch keine eigenen Gewichte kalibriert — die KI nutzt
         gerade die globalen Defaults. Klicke vorher "KI auf meine
-        Vorlieben kalibrieren" im DataManagement, falls die Treffer-
-        Quote auf deinen Daten bewertet werden soll.
+        Vorlieben kalibrieren" unter
+        <RouterLink :to="{ name: 'fotos-settings-maintenance' }">Einstellungen › Wartung</RouterLink>,
+        falls die Treffer-Quote auf deinen Daten bewertet werden soll.
       </p>
       <p v-if="userCalibration" class="rq-calib-detail">
         Personen-Bursts:
