@@ -26,7 +26,21 @@ struct TripIdeasView: View {
     /// screen can open it — nobody makes a trip in order to look at a
     /// list.
     @State private var openPlanId: Int?
+    /// What somebody is looking for, across every group (§20.1).
+    @State private var query = ""
     @Environment(\.scenePhase) private var scenePhase
+
+    /// Whether the list is currently answering a search rather than
+    /// showing the collection.
+    private var isSearching: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The groups as this search leaves them — all of them when nobody
+    /// is searching.
+    private var visibleClusters: [TripIdeaCluster] {
+        TripIdeaSearch.filter(model.clusters, query: query) { model.clusterName(of: $0) }
+    }
 
     var body: some View {
         List {
@@ -48,7 +62,7 @@ struct TripIdeasView: View {
             // etwas von uns?" (§20.2) and "was ist hier überhaupt?"
             // (§9.2) are the reasons to open this screen, and a row with
             // a name is found where an icon has to be guessed.
-            if !model.entries.isEmpty {
+            if !model.entries.isEmpty, !isSearching {
                 Section {
                     NavigationLink {
                         TripIdeasNearbyView(model: model)
@@ -63,12 +77,24 @@ struct TripIdeasView: View {
                 }
             }
 
+            // How much of the collection the search left, said once at
+            // the top: a screen that quietly shows three of forty reads
+            // as a collection that lost something.
+            if isSearching,
+               let count = TripIdeaSearch.countLabel(
+                   shown: visibleClusters.reduce(0) { $0 + $1.ideas.count },
+                   of: model.entries.count) {
+                Text(count)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             // Grouped by where things are, not by when they were
             // saved (§20.1). A flat list is fine at five entries and
             // useless at forty: the beer garden two streets away and
             // the museum in another country read the same, and „was
             // haben wir hier eigentlich?" needs all of it read.
-            ForEach(model.clusters) { cluster in
+            ForEach(visibleClusters) { cluster in
                 Section {
                     ForEach(cluster.ideas) { idea in
                         // A row that can only be read is a dead end:
@@ -94,12 +120,18 @@ struct TripIdeasView: View {
                     // case is visible: a group *is* that case, and until
                     // now the question could only be asked from the
                     // street, about wherever the phone happened to be.
-                    NavigationLink {
-                        TripIdeasOutingView(model: model, openPlanId: $openPlanId,
-                                            anchor: cluster.centre)
-                    } label: {
-                        Label("Ausflug daraus", systemImage: "figure.walk.motion")
-                            .font(.footnote)
+                    // Not while searching: the group on screen is then
+                    // the part of itself that matched, and an afternoon
+                    // proposed from a filtered group would be about
+                    // entries the reader cannot see.
+                    if !isSearching {
+                        NavigationLink {
+                            TripIdeasOutingView(model: model, openPlanId: $openPlanId,
+                                                anchor: cluster.centre)
+                        } label: {
+                            Label("Ausflug daraus", systemImage: "figure.walk.motion")
+                                .font(.footnote)
+                        }
                     }
                 } header: {
                     Text(model.title(of: cluster))
@@ -116,7 +148,7 @@ struct TripIdeasView: View {
             // permission. Out of the overflow menu and onto the list,
             // with the terms said next to it — a switch whose effect is
             // a surprise is not a switch anybody leaves on.
-            if !model.entries.isEmpty {
+            if !model.entries.isEmpty, !isSearching {
                 Section {
                     Toggle(isOn: $noticesEnabled) {
                         Label("Von selbst melden", systemImage: "bell")
@@ -132,7 +164,10 @@ struct TripIdeasView: View {
         // squeezing its button into a column of single letters — the
         // one control the screen has, unreadable.
         .overlay {
-            if isEmpty {
+            if isSearching, visibleClusters.isEmpty, !model.entries.isEmpty {
+                ContentUnavailableView.search(text: query)
+                    .background(Color(uiColor: .systemGroupedBackground))
+            } else if isEmpty {
                 // The empty state carries the way in rather than only
                 // describing one. A screen that says "nothing here yet"
                 // and leaves the reader to find the button is a screen
@@ -170,6 +205,19 @@ struct TripIdeasView: View {
             }
         }
         .navigationTitle("Ideen")
+        // Across every group, because "wo war noch mal dieser
+        // Biergarten?" is not a question about one place (§20.1). Always
+        // on screen rather than hidden above the first row: a field you
+        // have to know about to pull down is a field most people never
+        // find.
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Ideen und Orte durchsuchen")
+        // The names are asked for lazily while reading, which is right
+        // until somebody types: a search for "Lissabon" has to reach the
+        // groups nobody has scrolled to yet.
+        .onChange(of: isSearching) { _, searching in
+            if searching { Task { await model.nameAllClusters() } }
+        }
         .plannerErrorBanner(model.errorMessage, retry: { await model.load() }, dismiss: { model.errorMessage = nil })
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

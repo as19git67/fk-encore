@@ -575,6 +575,30 @@ final class TripIdeasViewModel {
         clusterNames[cluster.id] ?? cluster.fallbackTitle
     }
 
+    /// What Apple called this group, or nothing yet.
+    ///
+    /// Distinct from `title(of:)`, which always has an answer: the
+    /// search may only match on a real place name — "3 Orte" is what
+    /// the screen says while it waits, not something anybody is
+    /// looking for.
+    func clusterName(of cluster: TripIdeaCluster) -> String? {
+        clusterNames[cluster.id]
+    }
+
+    /// Name every group, not just the ones somebody scrolled to.
+    ///
+    /// The lazy naming is right for reading the list: a group below the
+    /// fold needs no name yet, and the geocoder is rate-limited. It is
+    /// wrong the moment somebody searches, because typing "Lissabon"
+    /// has to reach the groups that are off screen — that is what a
+    /// search across groups is for. Still one at a time, and each group
+    /// only once, so this costs nothing for the groups already named.
+    func nameAllClusters() async {
+        for cluster in clusters where clusterNames[cluster.id] == nil {
+            await nameCluster(cluster)
+        }
+    }
+
     // MARK: - Correcting one (§20)
 
     /// Save what somebody changed about a collected place.
