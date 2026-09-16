@@ -1304,18 +1304,35 @@ export const planPendingTrip = api(
     const waiting: string[] = [];
     for (const leg of plan.legs) {
       if (await pickRegion(leg.anchor.lat, leg.anchor.lon)) continue;
-      waiting.push(leg.title ?? `Etappe ${leg.position + 1}`);
+      // Asked for, not only reported. A plan made while the router
+      // still took the neighbouring region for this shore has never
+      // requested the right one; telling its owner to wait for an
+      // import nobody started would be a wait without an end. The
+      // request is idempotent, so a region already queued costs a
+      // lookup and nothing else.
+      const requested = await requestRegionFor(leg.anchor);
+      const title = leg.title ?? `Etappe ${leg.position + 1}`;
+      waiting.push(`${title} (${requested.slug}: ${describeRegionStatus(requested.status)})`);
     }
     if (waiting.length > 0) {
       throw APIError.failedPrecondition(
-        `die Karten für ${waiting.join(", ")} sind noch nicht da — `
-          + "der Import läuft oder wartet auf Freigabe.",
+        `die Karten für ${waiting.join(", ")} sind noch nicht da.`,
       );
     }
 
     return await replanFromStoredSettings(plan, userId);
   },
 );
+
+/** What the import queue's status means, for a sentence to the traveller. */
+function describeRegionStatus(status: string): string {
+  switch (status) {
+    case "pending_approval": return "wartet auf Freigabe";
+    case "importing": return "Import läuft";
+    case "failed": return "Import fehlgeschlagen";
+    default: return status;
+  }
+}
 
 /**
  * One leg's search and solve. Days are solved one after another out of
