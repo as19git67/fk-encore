@@ -382,6 +382,22 @@ function openCollageDialog() {
 
 // ── Share selected photos (1..n) ─────────────────────────────────────────────
 const sharingPhotos = ref(false)
+/**
+ * Share exactly one photo — from the fullscreen toolbar or the detail
+ * sidebar, without going through select mode first (#1048).
+ */
+async function shareSinglePhoto(id: number) {
+  if (sharingPhotos.value) return
+  sharingPhotos.value = true
+  try {
+    await sharePhotos([id])
+  } catch (err: any) {
+    error.value = err?.message ?? 'Das Foto konnte nicht geteilt werden.'
+  } finally {
+    sharingPhotos.value = false
+  }
+}
+
 async function shareSelectedPhotos() {
   const ids = Array.from(selectedIds.value)
   if (ids.length === 0 || sharingPhotos.value) return
@@ -1774,6 +1790,8 @@ void refreshReviewSequence()
           @ignore-face="onSidebarIgnoreFace"
           @reindex="onSidebarReindex"
           @link-visibility-changed="onLinkVisibilityChanged"
+          @share="shareSinglePhoto"
+          :sharing="sharingPhotos"
         />
       </aside>
     </div>
@@ -1802,6 +1820,8 @@ void refreshReviewSequence()
       :next-photo="cursorNext"
       :can-delete="canDelete"
       :details-active="detailsActive"
+      :can-share="true"
+      :sharing="sharingPhotos"
       :auto-advance-ms="5000"
       :current-index="(cursorIndex ?? 0) + 1"
       :total-count="galleryTotal"
@@ -1816,6 +1836,7 @@ void refreshReviewSequence()
       @show-details="onShowDetails"
       @open-group-review="onFullscreenOpenGroupReview"
       @toggle-link-visibility="onFullscreenToggleLinkVisibility"
+      @share="shareSinglePhoto"
     >
       <template #details-flyout="{ readOnly, detailsOpen, imageReady }">
         <PhotoDetailSidebar
@@ -1848,6 +1869,8 @@ void refreshReviewSequence()
           @ignore-face="onSidebarIgnoreFace"
           @reindex="onSidebarReindex"
           @link-visibility-changed="onLinkVisibilityChanged"
+          @share="shareSinglePhoto"
+          :sharing="sharingPhotos"
         />
       </template>
     </FullscreenOverlay>

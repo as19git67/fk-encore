@@ -36,6 +36,14 @@ const props = withDefaults(defineProps<{
   canDelete?: boolean
   /** Control visibility of the details (ⓘ) button. Default: true. */
   showDetailsButton?: boolean
+  /**
+   * Offer the share button for the photo on screen (#1048). Off by default:
+   * the guest view of a shared album has no session to fetch originals with,
+   * so only the signed-in views turn it on.
+   */
+  canShare?: boolean
+  /** True while the host is fetching/handing over the photo. */
+  sharing?: boolean
   /** When true the details icon switches to a close icon (✕). Default: false. */
   detailsActive?: boolean
   /**
@@ -86,6 +94,7 @@ const hasActionBar = computed(() => {
   if (slots['actions'] || slots['actions-before']) return true
   if (props.showDetailsButton !== false) return true
   if (props.canDelete) return true
+  if (props.canShare) return true
   if (canEditTransform.value) return true
   if (canSlideshow.value) return true
   return fullscreenSupported.value
@@ -169,6 +178,8 @@ const emit = defineEmits<{
   'toggle-cover': [id: number]
   /** Requested public-link visibility for the current photo (see utils/linkVisibility). */
   'toggle-link-visibility': [id: number, visibility: PhotoLinkVisibility]
+  /** Share the photo on screen — the host owns the actual share/download. */
+  'share': [id: number]
   /** Fired when the user clicks the +N marker → parent opens review. */
   'open-group-review': []
   /** Fired once the current photo's image is actually decoded on screen, so
@@ -1164,6 +1175,15 @@ onUnmounted(() => {
               :severity="shownViaLink ? 'secondary' : 'danger'"
               @click="emitLinkVisibility"
               v-tooltip.top="linkVisibilityTooltip + ' (L)'"
+            />
+            <Button
+              v-if="canShare"
+              icon="pi pi-share-alt"
+              rounded text
+              severity="secondary"
+              :loading="props.sharing"
+              @click="emit('share', photo.id)"
+              v-tooltip.top="'Foto teilen'"
             />
             <Button
               v-if="canEditTransform"

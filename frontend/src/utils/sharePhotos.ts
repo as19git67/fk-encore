@@ -88,18 +88,35 @@ export async function sharePhotos(photoIds: number[]): Promise<SharePhotosResult
       if (err instanceof DOMException && err.name === 'AbortError') {
         return { shared: false, downloaded: false }
       }
+      // iOS revokes the transient activation while the photo is being
+      // fetched, and then refuses the share (see shareFile.ts). The user
+      // pressed a share button and deserves the photo either way, so fall
+      // back to saving it rather than surfacing a failure they cannot act on.
+      if (err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'InvalidStateError')) {
+        downloadFiles(files)
+        return { shared: false, downloaded: true }
+      }
       throw err
     }
   }
 
   // No Web Share API (or no file sharing) → download the file(s).
+  downloadFiles(files)
+  return { shared: false, downloaded: true }
+}
+
+/** Save files through synthesized download links. */
+function downloadFiles(files: File[]): void {
   for (const file of files) {
     const url = URL.createObjectURL(file)
     const a = document.createElement('a')
     a.href = url
     a.download = file.name
+    // Firefox ignores a click on an anchor that is not in the document.
+    a.style.display = 'none'
+    document.body.appendChild(a)
     a.click()
+    a.remove()
     URL.revokeObjectURL(url)
   }
-  return { shared: false, downloaded: true }
 }
