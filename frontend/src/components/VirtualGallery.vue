@@ -83,7 +83,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   'photo-click': [entry: GalleryGridEntry]
   'stack-click': [entry: GalleryGridEntry]
-  'toggle-select': [entry: GalleryGridEntry]
+  /**
+   * Select-mode tap. `context.index` is the photo's absolute position in the
+   * current grid order and `context.range` says the user held shift, i.e.
+   * asked for everything between the last plain click and this one (#830).
+   */
+  'toggle-select': [entry: GalleryGridEntry, context: { index: number; range: boolean }]
   /** Fires after a (re)load completes so the parent can show toasts etc. */
   'loaded': [info: { total: number; offset: number }]
   /**
@@ -389,10 +394,13 @@ watch(
 )
 
 // ── Click handling ──────────────────────────────────────────────────────────
-function onTap(entry: GalleryGridEntry | null, event?: MouseEvent) {
+function onTap(entry: GalleryGridEntry | null, event?: MouseEvent, index?: number) {
   if (!entry) return
   if (props.selectMode) {
-    emit('toggle-select', entry)
+    emit('toggle-select', entry, {
+      index: index ?? findLoadedIndexById(entry.id) ?? -1,
+      range: !!event?.shiftKey,
+    })
     return
   }
   // Track-I semantics (see docs/ai-auto-pick.md): only a tap on the
@@ -505,7 +513,7 @@ defineExpose({
               'vg-cell--cursor': cursorIndex === row.index * cols + i,
             }"
             :style="{ height: `${cellSize}px` }"
-            @click="onTap(slot, $event)"
+            @click="onTap(slot, $event, row.index * cols + i)"
           >
             <img
               :src="thumbnailSrc(slot)"

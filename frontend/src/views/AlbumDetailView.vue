@@ -84,6 +84,7 @@ import {
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
+import { useRangeSelect } from '../composables/useRangeSelect'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
@@ -396,8 +397,23 @@ const preReviewPhotoId = ref<number | null>(null)
 // ── Multi-select (mirrors GalleryView; album-context adds "Aus Album entfernen") ──
 const confirm = useConfirm()
 const selectMode = ref(false)
-const selectedIds = ref<Set<number>>(new Set())
-const selectedCount = computed(() => selectedIds.value.size)
+// Selection Set plus the anchor a shift-click measures its range from (#830).
+const {
+  selectedIds,
+  selectedCount,
+  rangeBusy: rangeSelectBusy,
+  clear: clearSelectedIds,
+  replace: replaceSelectedIds,
+  onToggleSelect,
+} = useRangeSelect({
+  loadEntryAt: async (index: number) => galleryRef.value?.loadEntryAt(index) ?? null,
+  fetchAllIds: async () => (await getGalleryIds({
+    filter: albumGridFilter.value,
+    sortBy: sortByForGallery.value,
+    sortDir: sortDirForGallery.value,
+    photoIds: searchPhotoIds.value ?? undefined,
+  })).ids,
+})
 const curationBusy = ref(false)
 const linkVisibilityBusy = ref(false)
 const knownFaceLinkBusy = ref(false)
@@ -411,22 +427,14 @@ const albumDialogPhotoIds = computed(() => Array.from(selectedIds.value))
 
 function enterSelectMode() {
   selectMode.value = true
-  selectedIds.value = new Set()
+  clearSelectedIds()
 }
 function exitSelectMode() {
   selectMode.value = false
-  selectedIds.value = new Set()
+  clearSelectedIds()
 }
 function clearSelection() {
-  selectedIds.value = new Set()
-}
-function onToggleSelect(entry: GalleryGridEntry) {
-  // Replace the Set so reactivity fires (Set internal mutations are not
-  // tracked unless the ref reference itself changes).
-  const next = new Set(selectedIds.value)
-  if (next.has(entry.id)) next.delete(entry.id)
-  else next.add(entry.id)
-  selectedIds.value = next
+  clearSelectedIds()
 }
 
 const selectionMenu = ref<{ toggle: (event: Event) => void } | null>(null)
@@ -447,7 +455,7 @@ async function selectAll() {
       sortDir: sortDirForGallery.value,
       photoIds: searchPhotoIds.value ?? undefined,
     })
-    selectedIds.value = new Set(res.ids)
+    replaceSelectedIds(res.ids)
   } catch {
     // silently ignore — user can retry
   } finally {
@@ -494,6 +502,22 @@ async function onCollageSaved() {
 
 // ── Share selected photos (1..n) ─────────────────────────────────────────────
 const sharingPhotos = ref(false)
+/**
+ * Share exactly one photo — from the fullscreen toolbar or the detail
+ * sidebar, without going through select mode first (#1048).
+ */
+async function shareSinglePhoto(id: number) {
+  if (sharingPhotos.value) return
+  sharingPhotos.value = true
+  try {
+    await sharePhotos([id])
+  } catch (err: any) {
+    error.value = err?.message ?? 'Das Foto konnte nicht geteilt werden.'
+  } finally {
+    sharingPhotos.value = false
+  }
+}
+
 async function shareSelectedPhotos() {
   const ids = Array.from(selectedIds.value)
   if (ids.length === 0 || sharingPhotos.value) return
@@ -919,8 +943,9 @@ async function activateCursor() {
   if (selectMode.value) {
     // In select mode Space/Enter toggles selection of the cursor cell
     // instead of opening fullscreen — mirrors GalleryView's behaviour.
-    const entry = await galleryRef.value.loadEntryAt(cursorIndex.value)
-    if (entry) onToggleSelect(entry)
+    const idx = cursorIndex.value
+    const entry = await galleryRef.value.loadEntryAt(idx)
+    if (entry) await onToggleSelect(entry, { index: idx, range: false })
     return
   }
   await openGridFullscreenAt(cursorIndex.value)
@@ -2691,6 +2716,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
           @link-visibility-changed="onLinkVisibilityChanged"
+          @share="shareSinglePhoto"
+          :sharing="sharingPhotos"
         />
       </div>
     </div>
@@ -2700,10 +2727,17 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     <!-- Compact selection tray (grid mode only). Its popup holds the batch
          actions, so selecting photos no longer consumes a multi-row footer. -->
     <div v-if="selectMode && viewMode === 'grid'" class="select-bar">
+      <!-- The shift hint appears exactly when it becomes useful — one photo
+           is selected, so there is an anchor to span from — and goes away
+           again as soon as the user has clearly found the feature. -->
       <span class="select-count">
-        <i class="pi pi-check-square" />
+        <i :class="rangeSelectBusy ? 'pi pi-spin pi-spinner' : 'pi pi-check-square'" />
         {{
-          selectedCount > 0
+          rangeSelectBusy
+          ? 'Bereich wird ausgewählt …'
+          : selectedCount === 1
+          ? '1 ausgewählt · Umschalt+Klick wählt den Bereich'
+          : selectedCount > 0
           ? `${selectedCount} ausgewählt`
           : 'Fotos antippen zum Auswählen'
         }}
@@ -2753,6 +2787,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       :currentIndex="(cursorIndex ?? 0) + 1"
       :totalCount="albumPhotos.length"
       :group="cursorGroup"
+      :can-share="true"
+      :sharing="sharingPhotos"
       @close="closeGridFullscreen"
       @prev="gridGoPrev"
       @next="gridGoNext"
@@ -2763,6 +2799,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
       @toggle-link-visibility="onFullscreenToggleLinkVisibility"
+      @share="shareSinglePhoto"
       @open-group-review="onFullscreenOpenGroupReview"
     >
       <template #actions-before>
@@ -2811,6 +2848,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
           @link-visibility-changed="onLinkVisibilityChanged"
+          @share="shareSinglePhoto"
+          :sharing="sharingPhotos"
         />
       </template>
     </FullscreenOverlay>
@@ -2830,6 +2869,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       :markDayChanges="true"
       :currentIndex="mapFullscreenIndex + 1"
       :totalCount="mapFullscreenPhotos.length"
+      :can-share="true"
+      :sharing="sharingPhotos"
       @close="closeMapFullscreen(); fullscreenDetailsOpen = false"
       @prev="mapFullscreenIndex--"
       @next="mapFullscreenIndex++"
@@ -2840,6 +2881,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
       @toggle-link-visibility="onFullscreenToggleLinkVisibility"
+      @share="shareSinglePhoto"
     >
       <template #actions-before>
         <Button
@@ -2886,6 +2928,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
           @link-visibility-changed="onLinkVisibilityChanged"
+          @share="shareSinglePhoto"
+          :sharing="sharingPhotos"
         />
       </template>
     </FullscreenOverlay>

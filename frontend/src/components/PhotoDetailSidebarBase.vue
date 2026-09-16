@@ -85,6 +85,8 @@ const props = defineProps<{
    *  album, face actions). Driven by a running fullscreen slideshow — paused
    *  slideshow makes the panel editable again. */
   readOnly?: boolean
+  /** True while the host is fetching this photo for the share sheet (#1048). */
+  sharing?: boolean
   /** Text recognised inside the photo (#1029); null = not scanned (yet). */
   ocr?: PhotoOcrResult | null
   loadingOcr?: boolean
@@ -336,6 +338,8 @@ const emit = defineEmits<{
   'navigate-to-photo': [id: number]
   'comment-count-change': [payload: { photoId: number; delta: number }]
   'link-visibility-changed': [id: number, visibility: PhotoLinkVisibility]
+  /** Share this photo — the view owns the actual share/download (#1048). */
+  'share': [id: number]
 }>()
 
 function formatPhotoDateDisplay(photo: Photo) {
@@ -484,6 +488,7 @@ watch(() => props.readOnly, (ro) => {
 
       <div v-if="!inFlyout" class="quick-actions">
         <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
+        <Button icon="pi pi-share-alt" v-tooltip.bottom="'Foto teilen'" @click="emit('share', photo.id)" severity="secondary" text rounded :loading="props.sharing" />
         <Button v-if="canUpload" icon="pi pi-sliders-h" v-tooltip.bottom="'Schnitt &amp; Belichtung bearbeiten'" @click="transformEditorVisible = true" severity="secondary" text rounded />
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
         <template v-if="canDelete">
