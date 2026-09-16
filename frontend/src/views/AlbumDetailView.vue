@@ -502,6 +502,22 @@ async function onCollageSaved() {
 
 // ── Share selected photos (1..n) ─────────────────────────────────────────────
 const sharingPhotos = ref(false)
+/**
+ * Share exactly one photo — from the fullscreen toolbar or the detail
+ * sidebar, without going through select mode first (#1048).
+ */
+async function shareSinglePhoto(id: number) {
+  if (sharingPhotos.value) return
+  sharingPhotos.value = true
+  try {
+    await sharePhotos([id])
+  } catch (err: any) {
+    error.value = err?.message ?? 'Das Foto konnte nicht geteilt werden.'
+  } finally {
+    sharingPhotos.value = false
+  }
+}
+
 async function shareSelectedPhotos() {
   const ids = Array.from(selectedIds.value)
   if (ids.length === 0 || sharingPhotos.value) return
@@ -2700,6 +2716,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
           @link-visibility-changed="onLinkVisibilityChanged"
+          @share="shareSinglePhoto"
+          :sharing="sharingPhotos"
         />
       </div>
     </div>
@@ -2769,6 +2787,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       :currentIndex="(cursorIndex ?? 0) + 1"
       :totalCount="albumPhotos.length"
       :group="cursorGroup"
+      :can-share="true"
+      :sharing="sharingPhotos"
       @close="closeGridFullscreen"
       @prev="gridGoPrev"
       @next="gridGoNext"
@@ -2779,6 +2799,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
       @toggle-link-visibility="onFullscreenToggleLinkVisibility"
+      @share="shareSinglePhoto"
       @open-group-review="onFullscreenOpenGroupReview"
     >
       <template #actions-before>
@@ -2827,6 +2848,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
           @link-visibility-changed="onLinkVisibilityChanged"
+          @share="shareSinglePhoto"
+          :sharing="sharingPhotos"
         />
       </template>
     </FullscreenOverlay>
@@ -2846,6 +2869,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       :markDayChanges="true"
       :currentIndex="mapFullscreenIndex + 1"
       :totalCount="mapFullscreenPhotos.length"
+      :can-share="true"
+      :sharing="sharingPhotos"
       @close="closeMapFullscreen(); fullscreenDetailsOpen = false"
       @prev="mapFullscreenIndex--"
       @next="mapFullscreenIndex++"
@@ -2856,6 +2881,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
       @toggle-link-visibility="onFullscreenToggleLinkVisibility"
+      @share="shareSinglePhoto"
     >
       <template #actions-before>
         <Button
@@ -2902,6 +2928,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
           @link-visibility-changed="onLinkVisibilityChanged"
+          @share="shareSinglePhoto"
+          :sharing="sharingPhotos"
         />
       </template>
     </FullscreenOverlay>
