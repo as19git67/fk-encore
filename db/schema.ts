@@ -706,9 +706,55 @@ export const photoPoiMatches = pgTable("photo_poi_matches", {
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
 });
 
+// ========== Photo OCR (text in photos) ==========
+
+/**
+ * One recognised line of text in a photo, with its geometry relative to the
+ * image (0..1 on both axes) so it survives thumbnails, fullscreen and the
+ * downscale the OCR service applies before recognition.
+ *
+ * `polygon` is the detector's own quadrilateral — text on a sign photographed
+ * at an angle is not axis-aligned — and the box is the rectangle around it,
+ * for callers that only need a rough position.
+ */
+export interface PhotoOcrBlock {
+  text: string;
+  /** Recogniser confidence for this line, 0..1. */
+  confidence: number;
+  /** Four [x, y] corner points, relative to the image. */
+  polygon: [number, number][];
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+// One row per photo that went through text recognition — including photos
+// with no text on them, which is what tells the queue not to look again.
+// `blocks` holds the recognised lines with their geometry, relative to the
+// image (0..1) so the frontend can map them onto whatever size it renders.
+// `full_text` is the same text as one string, and is what search reads: the
+// `text_tsv` column and its GIN index are added by migration 0201 and
+// maintained by a trigger (drizzle has no first-class tsvector support, and a
+// generated column fails the whole INSERT on Postgres's 1 MB lexeme cap — see
+// migration 0155 for that lesson in the documents table).
+export const photoOcr = pgTable("photo_ocr", {
+  photo_id: integer("photo_id")
+    .primaryKey()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  blocks: jsonb("blocks").$type<PhotoOcrBlock[]>().notNull().default(sql`'[]'::jsonb`),
+  full_text: text("full_text").notNull().default(""),
+  /** Character-weighted mean confidence over all recognised lines (0..1). */
+  mean_confidence: real("mean_confidence").notNull().default(0),
+  /** Long edge the photo was scaled to for recognition, for later re-runs. */
+  scanned_long_side: integer("scanned_long_side"),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
+
 // ========== Scan Queue ==========
 
-export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection"]);
+export const scanServiceEnum = pgEnum("scan_service", ["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection", "text_ocr"]);
 export const scanStatusEnum = pgEnum("scan_status", ["pending", "processing", "failed", "done"]);
 
 export const photoScanQueue = pgTable("photo_scan_queue", {

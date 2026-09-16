@@ -15,7 +15,7 @@ import {
   linkVisibilityTooltip as tooltipForLinkVisibility,
 } from '../utils/linkVisibility'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
-import type { Photo, Face, PoiMatchItem, Person, CurationStatus, PhotoLinkVisibility } from '../api/photos'
+import type { Photo, Face, PoiMatchItem, Person, CurationStatus, PhotoLinkVisibility, PhotoOcrResult } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
 import {
@@ -85,6 +85,9 @@ const props = defineProps<{
    *  album, face actions). Driven by a running fullscreen slideshow — paused
    *  slideshow makes the panel editable again. */
   readOnly?: boolean
+  /** Text recognised inside the photo (#1029); null = not scanned (yet). */
+  ocr?: PhotoOcrResult | null
+  loadingOcr?: boolean
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -296,6 +299,26 @@ async function toggleLinkVisibility() {
     togglingLinkVisibility.value = false
   }
 }
+
+// ── Text in the photo (#1029) ───────────────────────────────────────────
+const ocrLines = computed(() => props.ocr?.blocks.map(b => b.text) ?? [])
+const ocrCopied = ref(false)
+let ocrCopiedTimer: ReturnType<typeof setTimeout> | null = null
+
+async function copyOcrText() {
+  const text = props.ocr?.full_text ?? ocrLines.value.join('\n')
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ocrCopied.value = true
+    if (ocrCopiedTimer) clearTimeout(ocrCopiedTimer)
+    ocrCopiedTimer = setTimeout(() => { ocrCopied.value = false }, 2000)
+  } catch (err) {
+    console.error('Failed to copy recognised text:', err)
+  }
+}
+
+watch(() => props.photo.id, () => { ocrCopied.value = false })
 
 onMounted(loadAlbums)
 
@@ -650,6 +673,35 @@ watch(() => props.readOnly, (ro) => {
         </div>
       </template>
 
+      <!-- Text recognised inside the photo (#1029): a whiteboard, a sign, a
+           menu. Only shown when there is something to show — a photo without
+           text would otherwise carry an empty section forever. -->
+      <template v-if="loadingOcr || ocrLines.length > 0">
+        <div class="sidebar-divider" />
+        <div class="sidebar-section">
+          <div class="section-label">
+            <i class="pi pi-align-left" /> Text im Bild
+            <Button
+              v-if="ocrLines.length > 0"
+              :icon="ocrCopied ? 'pi pi-check' : 'pi pi-copy'"
+              v-tooltip.bottom="ocrCopied ? 'Kopiert' : 'Text kopieren'"
+              severity="secondary"
+              text
+              rounded
+              size="small"
+              class="ocr-copy-btn"
+              @click="copyOcrText"
+            />
+          </div>
+          <div v-if="loadingOcr" class="ocr-loading">
+            <i class="pi pi-spin pi-spinner" /> Text wird gesucht …
+          </div>
+          <div v-else class="ocr-lines">
+            <p v-for="(line, i) in ocrLines" :key="i" class="ocr-line">{{ line }}</p>
+          </div>
+        </div>
+      </template>
+
       <template v-if="showPersons !== false">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
@@ -758,6 +810,30 @@ watch(() => props.readOnly, (ro) => {
 </template>
 
 <style scoped>
+.ocr-copy-btn {
+  margin-left: auto;
+}
+.ocr-loading {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+.ocr-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  /* Selectable on purpose: copying one line out of a whiteboard photo is the
+     common case, "copy all" the exception. */
+  user-select: text;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+.ocr-line {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: var(--p-text-color);
+  overflow-wrap: anywhere;
+}
 .details-sidebar {
   width: 280px;
   flex-shrink: 0;

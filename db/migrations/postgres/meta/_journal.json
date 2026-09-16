@@ -1408,6 +1408,13 @@
       "when": 1788566400021,
       "tag": "0200_meter_vat_handling",
       "breakpoints": true
+    },
+    {
+      "idx": 201,
+      "version": "7",
+      "when": 1788652800021,
+      "tag": "0201_photo_ocr",
+      "breakpoints": true
     }
   ]
 }

@@ -450,6 +450,7 @@ export interface ScanQueueServiceStatus {
     | 'geocoding'
     | 'thumbnail'
     | 'poi_detection'
+    | 'text_ocr'
   pending: number
   processing: number
   failed: number
@@ -1279,6 +1280,37 @@ export interface PoiMatchItem {
 
 export function getPhotoPoiMatches(id: number) {
   return apiFetch<{ matches: PoiMatchItem[] }>(`/photos/${id}/poi-matches`)
+}
+
+// ---------- Text in photos (OCR) ----------
+
+/** One recognised line, positioned relative to the image (0..1 on both axes). */
+export interface PhotoOcrBlock {
+  text: string
+  confidence: number
+  /** Four [x, y] corner points — the detector's quad, not an aligned box. */
+  polygon: [number, number][]
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+export interface PhotoOcrResult {
+  photo_id: number
+  blocks: PhotoOcrBlock[]
+  full_text: string
+  mean_confidence: number
+  scanned_at: string
+}
+
+/**
+ * The text recognised inside a photo. `ocr` is null when the photo has not
+ * been through recognition yet — which the UI shows differently from a photo
+ * that was scanned and simply has no text on it.
+ */
+export function getPhotoOcr(id: number) {
+  return apiFetch<{ ocr: PhotoOcrResult | null }>(`/photos/${id}/ocr`)
 }
 
 // ---------- Service Health ----------
