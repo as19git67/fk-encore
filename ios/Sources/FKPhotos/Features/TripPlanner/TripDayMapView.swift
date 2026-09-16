@@ -11,7 +11,10 @@ import SwiftUI
 /// slider only makes them meet.
 struct TripDayMapView: View {
     let day: TripDay
-    let anchor: TripCoordinate
+    /// Where the day starts and ends — the quarters, or the outing's
+    /// destination on a day trip (§4.5). Decided by `TripMapAnchor`
+    /// rather than here: the map draws, it does not know what a day is.
+    let anchor: TripMapAnchor
     let light: TripDayLight?
     /// True when the leg's dates put today inside the trip — drives the
     /// user-location puck. Passed in rather than computed here so the
@@ -138,7 +141,9 @@ struct TripDayMapView: View {
 
     private var map: some View {
         TripSpotMapView(
-            anchor: anchor,
+            anchor: anchor.coordinate,
+            anchorTitle: anchor.label,
+            anchorSymbol: anchor.symbolName,
             pins: numbered.map(pin),
             showsUserLocation: isRunning
         ) { picked in

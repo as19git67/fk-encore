@@ -26,6 +26,7 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
+import { dayWalkOfStored } from "./day-walk";
 import { insertStop, MoveError } from "./move";
 import {
   findInPool,
@@ -128,7 +129,9 @@ export const placeFromPool = api(
         },
         toBlockId: req.blockId,
         toPosition: req.position,
-        anchor: leg.anchor,
+        // The day's own two ends, not the leg's anchor: an outing is
+        // walked around its destination (§4.5).
+        walk: dayWalkOfStored(leg.anchor, day),
         mode: leg.mode,
       });
     } catch (err) {

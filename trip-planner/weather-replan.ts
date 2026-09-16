@@ -31,6 +31,7 @@ import { loadPlan, saveRedistribution, type StoredPlan } from "./plan-store";
 import type { CurrentBlock } from "./redistribute";
 import { hoursWithin, summarise, type BlockWeather } from "./weather";
 import { forecastFor } from "./weather-service";
+import { dayWalkOfStored } from "./day-walk";
 import { shuffleForWeather, type WeatherMove } from "./weather-shuffle";
 
 export interface WeatherReplanRequest {
@@ -190,7 +191,9 @@ async function prepare(
       blocks: day.blocks,
       pool: leg.pool,
       weather,
-      anchor: leg.anchor,
+      // This day's own ends (§4.5): a rainy afternoon in Verona is
+      // reshuffled around Verona, not around the quarters.
+      walk: dayWalkOfStored(leg.anchor, day),
       mode: leg.mode,
       maxWalkMinutes,
     },

@@ -27,6 +27,7 @@
  * Pure: coordinates and minutes in, blocks out. No clock, no database.
  */
 
+import type { DayWalk } from "./day-walk";
 import type { CurrentBlock, CurrentStop } from "./redistribute";
 import { travelLeg, type Coordinate, type TransportMode } from "./travel";
 
@@ -54,8 +55,19 @@ export interface MoveStopRequest {
    * means last.
    */
   toPosition?: number;
-  /** Where the day starts and the last block returns to. */
-  anchor: Coordinate;
+  /**
+   * Where the day the stop **leaves** begins and ends (§4.5).
+   *
+   * Not a single anchor: a day trip happens around its destination and
+   * a departure day ends at the platform, and rewalking either from the
+   * quarters puts an hour of driving into a morning block.
+   */
+  walk: DayWalk;
+  /**
+   * The same for the day it joins, when that is another day. Omitted
+   * means "the same day", which is what a move within one day is.
+   */
+  toWalk?: DayWalk;
   mode?: TransportMode;
 }
 
@@ -97,8 +109,10 @@ export function moveStop(req: MoveStopRequest): MoveStopResult {
   const at = clampPosition(req.toPosition, target.stops.length);
   target.stops.splice(at, 0, stop);
 
-  recomputeDay(from, req.anchor, mode);
-  if (!sameDay) recomputeDay(to, req.anchor, mode);
+  recomputeDay(from, req.walk, mode);
+  // Two days, two walks: moving a spot from the hotel day onto the
+  // Verona day has to rewalk each around its own place.
+  if (!sameDay) recomputeDay(to, req.toWalk ?? req.walk, mode);
 
   const overfull = [...new Set([...from, ...to])]
     .filter((b) => b.usedMinutes > b.budgetMinutes)
@@ -116,7 +130,8 @@ export interface InsertStopRequest {
   toBlockId: string;
   /** Where in that block, from zero. Past the end, or omitted, means last. */
   toPosition?: number;
-  anchor: Coordinate;
+  /** Where this day begins and ends (§4.5) — see `MoveStopRequest`. */
+  walk: DayWalk;
   mode?: TransportMode;
 }
 
@@ -160,7 +175,7 @@ export function insertStop(req: InsertStopRequest): InsertStopResult {
   const at = clampPosition(req.toPosition, target.stops.length);
   target.stops.splice(at, 0, { ...req.stop });
 
-  recomputeDay(blocks, req.anchor, mode);
+  recomputeDay(blocks, req.walk, mode);
 
   return {
     blocks,
@@ -170,16 +185,21 @@ export function insertStop(req: InsertStopRequest): InsertStopResult {
 
 /**
  * Rewalk a whole day: each block starts where the previous one left
- * off, and the last block with spots pays for the way back to the
- * anchor — the same shape the solver builds, so a moved day and a
+ * off, and the last block with spots pays for the way to where the day
+ * has to end — the same shape the solver builds, so a moved day and a
  * freshly solved one describe the same walk.
+ *
+ * The two ends come from `dayWalkOf` rather than from a single anchor,
+ * for the reason that module is about: the quarters are both ends only
+ * on an ordinary day, and the days they are not are the ones people
+ * remember (§4.4, §4.5).
  */
 export function recomputeDay(
   blocks: CurrentBlock[],
-  anchor: Coordinate,
+  walk: DayWalk,
   mode: TransportMode = "foot",
 ): void {
-  let position: Coordinate = anchor;
+  let position: Coordinate = walk.start;
   const lastWithStops = lastIndexWithStops(blocks);
 
   blocks.forEach((block, index) => {
@@ -193,7 +213,7 @@ export function recomputeDay(
       position = { lat: stop.lat, lon: stop.lon };
     }
     if (index === lastWithStops) {
-      used += travelLeg(position, anchor, mode).minutes;
+      used += travelLeg(position, walk.end, mode).minutes;
     }
     block.usedMinutes = used;
   });
