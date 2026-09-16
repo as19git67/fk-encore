@@ -346,6 +346,43 @@ Umwegrechnung. Wie viel Zeit dabei überhaupt zur Verfügung steht, ergibt sich 
 den Fixpunkten der Etappe — eine Anreise mit Check-in erst ab 15 Uhr *schafft*
 den Zwischenstopp, statt ihn zu verhindern.
 
+**Erledigt (2026-09-16): der See als Grenze — welche Regionsdatenbank eine
+Etappe bekommt.** Der Router wählt die Datenbank nach dem Rechteck um die
+Region, und ein Rechteck sagt „vielleicht", nie „ja": Geofabrik schneidet entlang
+Verwaltungsgrenzen, und das Rechteck um Nord-Ovest reicht bis hinter Pisa. Für
+Pisa kam deshalb einmal ein leerer Plan zurück; die Antwort darauf war eine
+Datenprobe — „hält diese Datenbank irgendeinen POI im Umkreis von 25 km?" —, die
+Pisa fängt, hundert Kilometer hinter der Grenze.
+
+Den Gardasee fängt sie nicht. Der See **ist** die Grenze: Lombardei am Westufer,
+Venetien und Trentino am Ost- und Nordufer, fünf bis zehn Kilometer Wasser
+dazwischen. Von Malcesine aus fand die Probe die POIs des Westufers gut innerhalb
+von 25 km, sagte „abgedeckt", und der Planer füllte vier Tage aus einer
+Datenbank, die östlich des Wassers nichts hat — über hundert Spots, jeder auf
+der falschen Seite. Von Riva und Rovereto aus wurde dieselbe Datenbank gewählt,
+und weil dort in Laufweite nichts liegt, kam ein leerer Plan zurück — **ohne die
+Region anzufordern, die er gebraucht hätte**, denn aus Sicht des Routers hatte
+er eine.
+
+Die Frage geht jetzt an die Instanz, die die Extrakte geschnitten hat: Geofabrik
+veröffentlicht zu jedem Extrakt das Polygon, und der Index liegt für den
+Regionsvorschlag ohnehin auf der Platte. „Welche Extrakte enthalten diesen
+Punkt" ist ein Punkt-in-Polygon-Test über diesen Index, exakt bis zur
+Verwaltungsgrenze — ein Rechteck-Kandidat, dessen Extrakt den Punkt nicht
+enthält, scheidet aus, was auch immer die Probe sagt. Die Probe bleibt dahinter
+für das eine, was sie kann: ein Extrakt, der den Punkt enthält, dessen Import
+aber leer zurückkam. Ist der Index gar nicht zu haben — kein Cache, kein Netz —,
+enthält sich das Polygon und die Probe entscheidet allein, wie bisher: Ein
+Router, der wegen eines Drittanbieter-Ausfalls jede Region ablehnt, macht aus
+einem Ausfall hundert Importanfragen.
+
+Dazu gehört: „Jetzt nachsehen" an einem wartenden Plan **fordert die Region
+an**, statt nur zu berichten, dass sie fehlt. Ein Plan, der entstanden ist,
+während der Router für dieses Ufer noch den Nachbarn nahm, hat die richtige
+Region nie angefordert — auf einen Import zu warten, den niemand gestartet hat,
+wäre ein Warten ohne Ende. Die Antwort nennt jetzt Region und Stand
+(„europe/italy/nord-est: wartet auf Freigabe").
+
 ### 4.3 Zwei Auflösungen: grob für die Reise, fein für morgen
 
 Zwanzig Tage sind rund sechzig Blöcke. Die will niemand vorab durchsehen, und
