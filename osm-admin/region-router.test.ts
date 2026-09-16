@@ -7,6 +7,7 @@ import {
   geohash7,
   markUsed,
   pickRegion,
+  setRegionIndexSource,
 } from "./region-router";
 import { resetGeoClient, setGeoClient } from "./geo-client";
 import { InMemoryGeoClient } from "./geo-client.test-helper";
@@ -36,6 +37,9 @@ beforeEach(async () => {
   // holds that corner of the world. Left unset it would answer "yes" to
   // everything, which is the fiction these tests are about.
   setGeoClient(new InMemoryGeoClient());
+  // No opinion on which extract contains the point unless a test says
+  // so — the polygon is its own subject below.
+  setRegionIndexSource(null);
   return () => resetGeoClient();
 });
 
@@ -100,6 +104,100 @@ describe("pickRegion", () => {
     // A point far away must miss the cache and hit the DB cleanly.
     const m2 = await pickRegion(35.5, -2);
     expect(m2).toBeNull();
+  });
+});
+
+describe("pickRegion and the extract's border", () => {
+  /**
+   * A lake as the border. One region imported, on the west shore; its
+   * rectangle reaches across the water, and so does the 25 km data
+   * probe — the far shore is five kilometres away. Only the polygon
+   * knows which side is which.
+   */
+  const WEST_SHORE = { lat: 45.8, lon: 10.70 };
+  const EAST_SHORE = { lat: 45.8, lon: 10.90 };
+
+  function lakeIndex() {
+    setRegionIndexSource({
+      containing: async (_lat, lon) =>
+        lon < 10.8 ? ["europe", "europe/italy", "europe/italy/nord-ovest"]
+                   : ["europe", "europe/italy", "europe/italy/nord-est"],
+    });
+  }
+
+  it("rejects a region whose rectangle contains the point but whose extract does not", async () => {
+    // The reported case: four days on the east shore were planned out
+    // of the west shore's database, a hundred spots on the wrong side
+    // of the water, because the bbox and the probe both said yes.
+    await seed({ slug: "europe/italy/nord-ovest", bbox: [45.0, 7.0, 46.7, 11.5] });
+    lakeIndex();
+
+    expect(await pickRegion(EAST_SHORE.lat, EAST_SHORE.lon)).toBeNull();
+  });
+
+  it("keeps the region whose extract contains the point", async () => {
+    await seed({ slug: "europe/italy/nord-ovest", bbox: [45.0, 7.0, 46.7, 11.5] });
+    lakeIndex();
+
+    expect((await pickRegion(WEST_SHORE.lat, WEST_SHORE.lon))?.slug)
+      .toBe("europe/italy/nord-ovest");
+  });
+
+  it("picks the far shore's own region once it is imported", async () => {
+    // Both shores imported, both rectangles reaching across: the
+    // polygon sends each point home, and the smaller-bbox rule never
+    // gets to choose between two wrong answers.
+    await seed({ slug: "europe/italy/nord-ovest", bbox: [45.0, 7.0, 46.7, 11.5] });
+    await seed({ slug: "europe/italy/nord-est", bbox: [44.0, 10.3, 47.1, 13.9] });
+    lakeIndex();
+
+    expect((await pickRegion(EAST_SHORE.lat, EAST_SHORE.lon))?.slug)
+      .toBe("europe/italy/nord-est");
+    expect((await pickRegion(WEST_SHORE.lat, WEST_SHORE.lon))?.slug)
+      .toBe("europe/italy/nord-ovest");
+  });
+
+  it("accepts an enclosing extract as well as the exact one", async () => {
+    // Extracts nest. A point in Bayern is also in Germany and in
+    // Europe, and whichever of those is imported holds it.
+    await seed({ slug: "europe/germany", bbox: [47, 5, 55, 16] });
+    setRegionIndexSource({
+      containing: async () => ["europe", "europe/germany", "europe/germany/bayern"],
+    });
+
+    expect((await pickRegion(48.137, 11.575))?.slug).toBe("europe/germany");
+  });
+
+  it("leaves the decision to the probe when the index has no opinion", async () => {
+    // No cache, no network: the polygon abstains rather than refusing
+    // every region and turning an outage into a queue of imports.
+    await seed({ slug: "europe/italy/nord-ovest", bbox: [45.0, 7.0, 46.7, 11.5] });
+    setRegionIndexSource(null);
+
+    expect((await pickRegion(EAST_SHORE.lat, EAST_SHORE.lon))?.slug)
+      .toBe("europe/italy/nord-ovest");
+  });
+
+  it("treats a failing index the same as an absent one", async () => {
+    await seed({ slug: "europe/italy/nord-ovest", bbox: [45.0, 7.0, 46.7, 11.5] });
+    setRegionIndexSource({
+      containing: async () => { throw new Error("index-v1.json: ECONNRESET"); },
+    });
+
+    expect((await pickRegion(EAST_SHORE.lat, EAST_SHORE.lon))?.slug)
+      .toBe("europe/italy/nord-ovest");
+  });
+
+  it("still asks the data once the border agrees", async () => {
+    // The probe keeps its one job: an extract that contains the point
+    // but whose import came back empty.
+    await seed({ slug: "europe/italy/nord-ovest", bbox: [45.0, 7.0, 46.7, 11.5] });
+    lakeIndex();
+    const geo = new InMemoryGeoClient();
+    geo.setCoverage("nom_europe_italy_nord_ovest", { lat: 44.0, lon: 8.0 }, 10_000);
+    setGeoClient(geo);
+
+    expect(await pickRegion(WEST_SHORE.lat, WEST_SHORE.lon)).toBeNull();
   });
 });
 

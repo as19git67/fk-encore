@@ -153,3 +153,12 @@ setElevationClient({
     throw new Error("no elevation client installed in this test");
   },
 });
+
+// Which Geofabrik extract contains a point is read from Geofabrik's
+// index — a megabyte fetched once a week and cached on disk. In a test
+// there is no cache and must be no fetch, so the router gets a source
+// with no opinion: the routing falls back on the data probe, which is
+// what every test that is not about the polygon expects. Tests about
+// the polygon install their own.
+const { setRegionIndexSource } = await import("./osm-admin/region-router");
+setRegionIndexSource(null);
