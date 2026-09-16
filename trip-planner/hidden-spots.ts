@@ -35,6 +35,7 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
+import { dayWalkOfStored } from "./day-walk";
 import { recomputeDay } from "./move";
 import {
   hideSpot,
@@ -100,7 +101,7 @@ export const hideTripSpot = api(
         for (const day of leg.days) {
           if (!dayIds.includes(day.id)) continue;
           const blocks = day.blocks.map((b) => ({ ...b, stops: [...b.stops] }));
-          recomputeDay(blocks, leg.anchor, leg.mode);
+          recomputeDay(blocks, dayWalkOfStored(leg.anchor, day), leg.mode);
           await saveRedistribution(withDays.id, leg.id, day, blocks, leg.pool);
         }
       }

@@ -30,10 +30,12 @@ struct TripSpotMapPin: Identifiable, Equatable {
 /// pins and hands back the one that was tapped, and knows nothing about
 /// plans, pools or what tapping is good for.
 struct TripSpotMapView: View {
-    /// Where every day of the leg starts and ends — drawn as a house,
-    /// because it is not a stop.
+    /// Where the day (or the pool's leg) starts and ends — drawn with
+    /// its own symbol, because it is not a stop.
     let anchor: TripCoordinate
     var anchorTitle: String = "Unterkunft"
+    /// A house for the quarters; a day out is not a house (§4.5).
+    var anchorSymbol: String = "house.fill"
     let pins: [TripSpotMapPin]
     /// True when the trip is running: then the blue dot is an answer to
     /// "where am I in all this" rather than a dot in another country.
@@ -47,10 +49,10 @@ struct TripSpotMapView: View {
             if showsUserLocation {
                 UserAnnotation()
             }
-            // The anchor is where the day starts and ends. Shown as a
-            // house rather than a number: it is not a stop.
+            // The anchor is where the day starts and ends. Shown with
+            // its own symbol rather than a number: it is not a stop.
             Annotation(anchorTitle, coordinate: anchor.clCoordinate) {
-                Image(systemName: "house.fill")
+                Image(systemName: anchorSymbol)
                     .padding(6)
                     .background(.background, in: .circle)
                     .overlay(Circle().stroke(.secondary))
