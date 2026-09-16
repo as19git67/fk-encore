@@ -2,6 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Die App ist durchgehend deutsch, und ohne diese Angabe meldet
+	     das Bundle Englisch als einzige unterstützte Sprache. iOS wählt
+	     die Sprache der System-Oberflächen — Ausschneiden/Kopieren/
+	     Einfügen, Tastatur, Standardknöpfe, Foto-Picker, Share-Sheet —
+	     aus der Schnittmenge von Gerätesprache und den Sprachen der App:
+	     Bei "nur Englisch" bleibt dieses Menü englisch, auch auf einem
+	     deutschen iPhone, mitten in deutschen Texten. -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>de</string>
 	<key>CFBundleDisplayName</key>
 	<string>F4mil</string>
 	<key>CFBundleExecutable</key>
