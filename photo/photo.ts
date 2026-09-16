@@ -11,6 +11,7 @@ import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
 import { denyPhotoFileRequest } from "./photo-file-access";
+import { getPhotoOcrLogic, type PhotoOcrResult } from "./photo-ocr.service";
 import {
   setKnownFaceLinkVisibilityLogic,
   setPhotoLinkVisibilityLogic,
@@ -2419,6 +2420,23 @@ export const getPhotoPoiMatches = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
     return await service.getPoiMatchesForPhotoLogic(id);
+  }
+);
+
+/**
+ * Text recognised inside a photo (#1029) — the lines with their geometry,
+ * relative to the image, plus the whole text for copying.
+ *
+ * `null` means the photo has not been through recognition yet, which the UI
+ * shows differently from a photo that was scanned and simply carries no text.
+ */
+export const getPhotoOcr = api(
+  { expose: true, method: "GET", path: "/photos/:id/ocr", auth: true },
+  async ({ id }: { id: number }): Promise<{ ocr: PhotoOcrResult | null }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return { ocr: await getPhotoOcrLogic(id) };
   }
 );
 

@@ -12,7 +12,7 @@
 import { eq, and, inArray, sql, not, isNull } from "drizzle-orm";
 import db from "../db/database";
 import { photoScanQueue, photos, faces } from "../db/schema";
-import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
+import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM, ENABLE_TEXT_OCR } from "./scan-config";
 import { notifyScanQueueChanged } from "./scan-queue-events";
 
 // `landmark` is retained in the type union and GLOBAL_SERVICES set so
@@ -21,14 +21,14 @@ import { notifyScanQueueChanged } from "./scan-queue-events";
 // landmark jobs — the Grounding-DINO worker has been retired in favour
 // of osm-admin POI detection (Epic #383); the photo_landmarks table has
 // been dropped.
-export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail" | "poi_detection";
+export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail" | "poi_detection" | "text_ocr";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
 /** Every value of the `scan_service` enum, for runtime validation of
  *  untrusted input (e.g. a `service` query parameter). */
 export const ALL_SCAN_SERVICES: readonly ScanService[] = [
   "embedding", "face_detection", "face_assignment", "landmark",
-  "quality", "geocoding", "thumbnail", "poi_detection",
+  "quality", "geocoding", "thumbnail", "poi_detection", "text_ocr",
 ];
 
 export function isScanService(value: string): value is ScanService {
@@ -39,7 +39,7 @@ export type QueueServiceId = ScanService;
 
 /** Services that run once per photo (no user_id in queue). */
 const GLOBAL_SERVICES: ReadonlySet<ScanService> = new Set([
-  "face_detection", "embedding", "landmark", "quality", "geocoding", "thumbnail", "poi_detection",
+  "face_detection", "embedding", "landmark", "quality", "geocoding", "thumbnail", "poi_detection", "text_ocr",
 ]);
 
 /** Services that run once per user per photo. */
@@ -90,6 +90,7 @@ function enabledServices(): ScanService[] {
   if (ENABLE_POI_DETECTION) services.push("poi_detection");
   if (ENABLE_QUALITY) services.push("quality");
   if (ENABLE_THUMBNAIL_PREWARM) services.push("thumbnail");
+  if (ENABLE_TEXT_OCR) services.push("text_ocr");
   return services;
 }
 
@@ -355,13 +356,13 @@ export async function getQueueStatus(userId: number | null): Promise<QueueStatus
   const rows = await db.execute<{ service: ScanService; status: ScanStatus; count: string }>(sql`
     SELECT service, status, COUNT(*)::int as count
     FROM photo_scan_queue
-    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail', 'poi_detection'))
+    WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail', 'poi_detection', 'text_ocr'))
        OR ${faceAssignmentFilter}
     GROUP BY service, status
   `);
 
   const map = new Map<QueueServiceId, QueueServiceStatus>();
-  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection"] as ScanService[])) {
+  for (const svc of (["embedding", "face_detection", "face_assignment", "landmark", "quality", "geocoding", "thumbnail", "poi_detection", "text_ocr"] as ScanService[])) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
 

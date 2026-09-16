@@ -121,6 +121,9 @@ const EXPENSIVE_SERVICES: Partial<Record<ScanService, true>> = {
   face_detection: true,
   // landmark: retired
   quality: true,
+  // Recognition is a remote CPU pass on a full photo; it holds a DB slot
+  // while it waits, so it steps aside under event-loop pressure like the rest.
+  text_ocr: true,
 };
 
 /**
@@ -384,6 +387,21 @@ class ScanWorker {
       case "thumbnail":
         await indexPhotoThumbnails(job.photo_id);
         break;
+      case "text_ocr": {
+        const { indexPhotoText, PhotoOcrUnavailableError } = await import("./photo-ocr.service");
+        try {
+          await indexPhotoText(job.photo_id);
+        } catch (err) {
+          // The OCR service serialises inference and answers 503 once its
+          // single slot has been taken for 30 s — that is congestion, not a
+          // failure of this photo, so requeue without burning an attempt.
+          if (err instanceof PhotoOcrUnavailableError) {
+            throw new DeferJobError(`photo OCR service unavailable: ${err.message}`);
+          }
+          throw err;
+        }
+        break;
+      }
       case "poi_detection": {
         const { detectPoisForPhoto } = await import("../osm-admin/poi-detection");
         const outcome = await detectPoisForPhoto(job.photo_id);
@@ -539,6 +557,9 @@ const thumbnailWorker = new ScanWorker("thumbnail", thumbnailConcurrency);
 // endpoint + optional Wikidata SPARQL + DINOv2 embedding compare;
 // fan-out beyond 1 mostly contends on the embedding service anyway.
 const poiDetectionWorker = new ScanWorker("poi_detection", 1);
+// Text OCR: one job at a time, because the OCR service runs its inference
+// through a single slot anyway — a second worker would only collect 503s.
+const textOcrWorker = new ScanWorker("text_ocr", 1);
 const libraryScanWorker = new LibraryScanWorker();
 
 /** Wake all workers to check for new work. Non-blocking. */
@@ -568,6 +589,7 @@ const ALL_WORKERS: Array<{ stop(): void; start(): void; inFlight(): number }> = 
   geocodingWorker,
   thumbnailWorker,
   poiDetectionWorker,
+  textOcrWorker,
   libraryScanWorker,
 ];
 
@@ -632,9 +654,10 @@ export async function startWorkers(): Promise<void> {
   geocodingWorker.start();
   thumbnailWorker.start();
   poiDetectionWorker.start();
+  textOcrWorker.start();
   libraryScanWorker.start();
   console.log(
-    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), thumbnail(c=${thumbnailConcurrency}), poi_detection(c=1), library_scan(c=1)`,
+    `[scan-worker] embedding(c=${embeddingConcurrency}), face_detection(c=${faceConcurrency}), face_assignment(c=${faceAssignConcurrency}), quality(c=${qualityConcurrency}), geocoding(c=1), thumbnail(c=${thumbnailConcurrency}), poi_detection(c=1), text_ocr(c=1), library_scan(c=1)`,
   );
 }
 
