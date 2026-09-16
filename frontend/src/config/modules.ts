@@ -440,6 +440,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'meters.view' },
       },
       {
+        path: 'auswertungen',
+        name: 'zaehler-auswertungen',
+        component: () => import('../views/MeterReportsView.vue'),
+        meta: { permission: 'meters.view' },
+      },
+      {
         path: 'schnellerfassung',
         name: 'zaehler-schnellerfassung',
         component: () => import('../views/MeterQuickEntryView.vue'),
@@ -473,6 +479,7 @@ export const modules: ModuleConfig[] = [
     ],
     menuItems: [
       { label: 'Zähler', icon: 'pi pi-gauge', routeName: 'zaehler-list', permission: 'meters.view' },
+      { label: 'Auswertungen', icon: 'pi pi-chart-line', routeName: 'zaehler-auswertungen', permission: 'meters.view' },
       { label: 'Schnellerfassung', icon: 'pi pi-list-check', routeName: 'zaehler-schnellerfassung', permission: 'meters.read_entry' },
       { label: 'Auffälligkeiten', icon: 'pi pi-exclamation-triangle', routeName: 'zaehler-anomalien', permission: 'meters.view' },
     ],
