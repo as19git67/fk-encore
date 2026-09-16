@@ -3,9 +3,11 @@ import { computed, ref, watch } from 'vue'
 import PhotoDetailSidebarBase from './PhotoDetailSidebarBase.vue'
 import {
   getPhotoDetailsBatch,
+  getPhotoOcr,
   type CurationStatus,
   type Face,
   type Photo,
+  type PhotoOcrResult,
   type PhotoLinkVisibility,
   type Person,
   type PoiMatchItem,
@@ -68,6 +70,12 @@ const emit = defineEmits<{
 // (description, owner, filename, GPS/location/map, quality, curation, albums…).
 const hydratedPhoto = ref<Photo | null>(null)
 const internalPoiMatches = ref<PoiMatchItem[]>([])
+// Recognised text is loaded here rather than by every host: the sidebar is
+// the only place that shows it, and it is a per-photo GET like the POI
+// matches next to it (#1029).
+const internalOcr = ref<PhotoOcrResult | null>(null)
+const internalLoadingOcr = ref(false)
+let ocrToken = 0
 const internalLoadingPoiMatches = ref(false)
 let hydrateToken = 0
 let poiToken = 0
@@ -135,6 +143,24 @@ const effectivePhoto = computed<Photo>(() => {
   }
 })
 
+watch(() => props.photo.id, async (id) => {
+  const token = ++ocrToken
+  internalOcr.value = null
+  internalLoadingOcr.value = false
+  if (!id) return
+
+  internalLoadingOcr.value = true
+  try {
+    const res = await getPhotoOcr(id)
+    if (token !== ocrToken) return
+    internalOcr.value = res.ocr
+  } catch {
+    if (token === ocrToken) internalOcr.value = null
+  } finally {
+    if (token === ocrToken) internalLoadingOcr.value = false
+  }
+}, { immediate: true })
+
 const effectivePoiMatches = computed(() => props.poiMatches ?? internalPoiMatches.value)
 const effectiveLoadingPoiMatches = computed(() => props.loadingPoiMatches ?? internalLoadingPoiMatches.value)
 </script>
@@ -145,6 +171,8 @@ const effectiveLoadingPoiMatches = computed(() => props.loadingPoiMatches ?? int
     :selected-photo-ids="selectedPhotoIds"
     :faces="faces"
     :loading-faces="loadingFaces"
+    :ocr="internalOcr"
+    :loading-ocr="internalLoadingOcr"
     :poi-matches="effectivePoiMatches"
     :loading-poi-matches="effectiveLoadingPoiMatches"
     :persons="persons"

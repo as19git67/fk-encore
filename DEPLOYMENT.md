@@ -704,6 +704,10 @@ the photo UI responsive under sustained scan load.
 | `ML_CONCURRENCY_EMBEDDING`       | `1`     | Max parallel requests to the embedding container. `embedding` and `quality` workers share this slot, so the default serializes them. Raise only with GPU. |
 | `ML_CONCURRENCY_INSIGHTFACE`     | `1`     | Max parallel requests to the insightface container. |
 | `ENABLE_POI_DETECTION`           | `false` | Turn on the osm-admin POI matcher. Off by default — only useful once at least one OSM region has been imported via the admin UI. See [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md). |
+| `ENABLE_TEXT_OCR`                | `false` | Recognise text inside photos (signs, whiteboards, menus) via the receipt-ocr container, making it searchable and copyable. Off by default: the detection pass runs over every photo. |
+| `PHOTO_OCR_LONG_SIDE`            | `1600`  | Long edge a photo is scaled to before recognition. Detection cost grows with area; legibility of scene text does not. |
+| `PHOTO_OCR_MIN_CONFIDENCE`       | `0.5`   | Lines below this confidence are discarded — scene-text detection finds "text" in brickwork, and that noise costs search more than it adds. |
+| `PHOTO_OCR_TIMEOUT_MS`           | `120000` | Per-request timeout for a photo OCR call. The service serialises inference, so a call may wait behind a receipt. |
 | `GEO_SERVICE_URL`                | `http://geo:8080` | Base URL the app uses to reach the geo service. Override only when running the app outside the compose stack. |
 | `GEO_SHARED_SECRET`              | _(empty)_ | Optional bearer token; if set, every geo HTTP call must present `Authorization: Bearer <secret>`. |
 | `GEO_DB_PASSWORD`                | `postgres` | Postgres superuser password inside the `geo-db` container. |

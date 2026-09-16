@@ -40,3 +40,13 @@ export const THUMBNAIL_PREWARM_WIDTHS: number[] = (process.env.THUMBNAIL_PREWARM
   .split(",")
   .map((s) => parseInt(s.trim(), 10))
   .filter((n) => Number.isFinite(n) && n > 0);
+
+/**
+ * Enable text recognition inside photos (issue #1029): every photo goes
+ * through PaddleOCR in the receipt-ocr-service, and whatever text is found —
+ * a sign, a whiteboard, a menu — becomes searchable and copyable.
+ *
+ * Off by default: it only works where that service is reachable, and the
+ * detection pass costs CPU on every photo in the library.
+ */
+export const ENABLE_TEXT_OCR = process.env.ENABLE_TEXT_OCR === "true";

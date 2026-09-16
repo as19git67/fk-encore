@@ -68,6 +68,12 @@ LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
 
 OCR_LANG = os.environ.get("OCR_LANG", "latin")
 OCR_MAX_LONG_SIDE = _env_int("OCR_MAX_LONG_SIDE", 2000)
+# Long edge a *photo* is scaled down to before OCR (issue #1029). Photos out of
+# a phone camera are 4000 px and wider, and detection cost grows with area for
+# no gain: scene text that matters — a sign, a whiteboard, a menu — is still
+# tens of pixels tall at 1600. Separate from OCR_MAX_LONG_SIDE, which is the
+# receipt pipeline's budget for a till roll photographed close up.
+PHOTO_OCR_LONG_SIDE = _env_int("PHOTO_OCR_LONG_SIDE", 1600)
 # Set to "0" to disable contour-based auto-crop + perspective correction.
 OCR_AUTOCROP = os.environ.get("OCR_AUTOCROP", "1") == "1"
 # Set to "0" to disable 90/180/270 orientation normalization. When on, the
@@ -1346,6 +1352,161 @@ async def ocr_page(file: UploadFile = File(...)) -> PageOcrResult:
         len(result["lines"]), result["mean_confidence"], result["processing_ms"],
     )
     return PageOcrResult(**result)
+
+
+def scale_to_long_side(
+    img: np.ndarray, max_long_side: int
+) -> tuple[np.ndarray, float]:
+    """Shrink an image so its longer edge is at most `max_long_side`.
+
+    Returns the image and the factor it was scaled by (1.0 when untouched);
+    it never enlarges, because upsampling invents no text.
+    """
+    if max_long_side <= 0:
+        return img, 1.0
+    height, width = img.shape[:2]
+    longest = max(height, width)
+    if longest <= max_long_side:
+        return img, 1.0
+    scale = max_long_side / longest
+    resized = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    return resized, scale
+
+
+def normalise_ocr_lines(
+    lines: list[dict[str, Any]], width: int, height: int
+) -> list[dict[str, Any]]:
+    """Turn PaddleOCR's pixel geometry into 0..1 coordinates.
+
+    Relative coordinates are what make the downscale above invisible to the
+    caller: the frontend maps them onto whatever size it renders — thumbnail,
+    fullscreen, rotated — without knowing what resolution the OCR ran at.
+
+    The quadrilateral is kept as it comes (detection is segmentation-based and
+    emits real quads for skewed text, which is the whole reason for using this
+    engine over an axis-aligned one); the bounding box is carried alongside for
+    callers that only want a rectangle. Both are clamped into the image, since
+    a detected box may stick out by a pixel or two.
+    """
+    if width <= 0 or height <= 0:
+        return []
+
+    def _clamp(value: float) -> float:
+        return round(min(1.0, max(0.0, value)), 5)
+
+    out: list[dict[str, Any]] = []
+    for line in lines:
+        text = str(line.get("text", "")).strip()
+        if not text:
+            continue
+        polygon = [
+            [_clamp(float(point[0]) / width), _clamp(float(point[1]) / height)]
+            for point in line.get("box", [])
+        ]
+        out.append({
+            "text": text,
+            "confidence": round(float(line.get("confidence", 0.0)), 4),
+            "polygon": polygon,
+            "left": _clamp(float(line["left"]) / width),
+            "top": _clamp(float(line["top"]) / height),
+            "right": _clamp(float(line["right"]) / width),
+            "bottom": _clamp(float(line["bottom"]) / height),
+        })
+    return out
+
+
+def char_weighted_confidence(lines: list[dict[str, Any]]) -> float:
+    """Mean confidence weighted by character count.
+
+    A long line read badly matters more than a two-character line read
+    perfectly — same weighting as _ocr_quality and /ocr/page.
+    """
+    chars = sum(len(re.sub(r"\s+", "", entry["text"])) for entry in lines)
+    if not chars:
+        return 0.0
+    total = sum(
+        entry["confidence"] * len(re.sub(r"\s+", "", entry["text"])) for entry in lines
+    )
+    return round(total / chars, 4)
+
+
+class PhotoOcrLine(BaseModel):
+    text: str
+    confidence: float
+    """Four corner points, each [x, y] relative to the image (0..1)."""
+    polygon: list[list[float]] = Field(default_factory=list)
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+
+class PhotoOcrResult(BaseModel):
+    lines: list[PhotoOcrLine] = Field(default_factory=list)
+    full_text: str = ""
+    mean_confidence: float = 0.0
+    processing_ms: int = 0
+
+
+@app.post("/ocr", response_model=PhotoOcrResult)
+async def ocr_photo(
+    file: UploadFile = File(...),
+    max_long_side: int | None = Form(None),
+) -> PhotoOcrResult:
+    """Read the text in an ordinary photo — a sign, a whiteboard, a menu.
+
+    Deliberately neither /extract nor /ocr/page. /extract is receipt-shaped
+    (perspective correction onto a till roll, paper cropping, amount
+    heuristics, an LLM pass); /ocr/page assumes a page already rasterised at a
+    known DPI and pre-cleaned by the caller, and answers in pixels.
+
+    A photo is neither. It arrives at whatever resolution the camera produced,
+    the text in it sits at an angle more often than not, and the caller renders
+    it at a size this service knows nothing about. So: scale the long edge down
+    to a budget (detection cost grows with area, legibility does not), run the
+    engine on the sharp colour original with no preprocessing, and answer in
+    coordinates relative to the image.
+
+    The enhancement ladder the receipt path uses is left out on purpose: it
+    exists for faint thermal print, and on a photo it mostly costs three extra
+    passes for the same reading.
+    """
+
+    t0 = time.monotonic()
+    img_bytes = await file.read()
+    if len(img_bytes) == 0:
+        raise HTTPException(status_code=400, detail="empty file")
+    if len(img_bytes) > 30 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="file too large (max 30 MB)")
+
+    budget = PHOTO_OCR_LONG_SIDE if max_long_side is None else max(0, int(max_long_side))
+
+    def _pipeline(data: bytes) -> dict[str, Any]:
+        buf = np.frombuffer(data, dtype=np.uint8)
+        img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        if img is None:
+            raise HTTPException(status_code=400, detail="undecodable image")
+
+        scaled, _factor = scale_to_long_side(img, budget)
+        height, width = scaled.shape[:2]
+        _full_text, lines, _rows = run_ocr(scaled)
+        out = normalise_ocr_lines(lines, width, height)
+        return {
+            "lines": out,
+            # Reading order, not receipt rows: run_ocr already sorted the lines
+            # top-to-bottom, left-to-right, and a photo has no columns to
+            # reconstruct.
+            "full_text": "\n".join(entry["text"] for entry in out),
+            "mean_confidence": char_weighted_confidence(out),
+        }
+
+    result = await _run_blocking(_pipeline, img_bytes)
+    result["processing_ms"] = int((time.monotonic() - t0) * 1000)
+    log.info(
+        "Photo OCR: %d line(s) mean_conf=%.3f time=%dms",
+        len(result["lines"]), result["mean_confidence"], result["processing_ms"],
+    )
+    return PhotoOcrResult(**result)
 
 
 @app.get("/healthz")

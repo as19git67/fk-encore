@@ -167,6 +167,7 @@ import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletabl
 // `photo.service` (most notably `service.convertHeicToJpeg` in
 // photo.ts) keep working.
 import { convertHeicToJpeg } from "./heic-convert.service";
+import { ocrTextMatches } from "./photo-ocr-search";
 import { knownFaceExistsSql, linkVisiblePhotoSql } from "./link-visibility.service";
 export { convertHeicToJpeg, isHeicBuffer } from "./heic-convert.service";
 import {
@@ -8309,6 +8310,8 @@ export async function searchPhotosNaturalLogic(
             SELECT 1 FROM ${photoPoiMatches} ppm
             WHERE ppm.photo_id = ${photos.id} AND (ppm.name ILIKE ${pattern} OR ppm.name_de ILIKE ${pattern})
           )`,
+          // Text recognised inside the photo — a whiteboard, a sign, a menu (#1029).
+          ocrTextMatches(pattern),
         )
       );
     }
