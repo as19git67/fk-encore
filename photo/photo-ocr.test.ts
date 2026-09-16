@@ -36,8 +36,18 @@ describe("toStoredBlocks", () => {
   it("keeps a confident line with its geometry", () => {
     const [block] = toStoredBlocks([line()]);
     expect(block.text).toBe("Hauptbahnhof");
-    expect(block.polygon).toEqual([[0.1, 0.2], [0.6, 0.2], [0.6, 0.3], [0.1, 0.3]]);
+    expect(block.polygon).toEqual([
+      { x: 0.1, y: 0.2 },
+      { x: 0.6, y: 0.2 },
+      { x: 0.6, y: 0.3 },
+      { x: 0.1, y: 0.3 },
+    ]);
     expect(block.left).toBe(0.1);
+  });
+
+  it("drops a corner the service could not express as a point", () => {
+    const [block] = toStoredBlocks([line({ polygon: [[0.1, 0.2], [Number.NaN, 0.2], [0.6, 0.3]] })]);
+    expect(block.polygon).toEqual([{ x: 0.1, y: 0.2 }, { x: 0.6, y: 0.3 }]);
   });
 
   it("drops what the detector only half-believes", () => {
@@ -117,6 +127,7 @@ describe("stored OCR", () => {
     const stored = await getPhotoOcrLogic(photoId);
     expect(stored?.full_text).toBe("Gleis 3");
     expect(stored?.blocks[0].polygon).toHaveLength(4);
+    expect(stored?.blocks[0].polygon[0]).toEqual({ x: 0.1, y: 0.2 });
     expect(stored?.mean_confidence).toBeCloseTo(0.92, 2);
   });
 

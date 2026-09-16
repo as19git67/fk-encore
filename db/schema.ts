@@ -717,12 +717,23 @@ export const photoPoiMatches = pgTable("photo_poi_matches", {
  * at an angle is not axis-aligned — and the box is the rectangle around it,
  * for callers that only need a rough position.
  */
+/** A point on a photo, relative to its width and height (0..1). */
+export interface PhotoOcrPoint {
+  x: number;
+  y: number;
+}
+
 export interface PhotoOcrBlock {
   text: string;
   /** Recogniser confidence for this line, 0..1. */
   confidence: number;
-  /** Four [x, y] corner points, relative to the image. */
-  polygon: [number, number][];
+  /**
+   * The four corner points, relative to the image. Objects rather than [x, y]
+   * pairs: this shape is returned by GET /photos/:id/ocr, and Encore's schema
+   * parser takes neither tuples nor bare nested arrays in an API payload —
+   * the same reason photos.auto_crop is an object.
+   */
+  polygon: PhotoOcrPoint[];
   left: number;
   top: number;
   right: number;

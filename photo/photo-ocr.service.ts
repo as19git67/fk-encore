@@ -18,7 +18,7 @@ import { eq, sql } from "drizzle-orm";
 
 import db from "../db/database";
 import { dbExec, dbFirst } from "../db/adapter";
-import { photoOcr, photos, type PhotoOcrBlock } from "../db/schema";
+import { photoOcr, photos, type PhotoOcrBlock, type PhotoOcrPoint } from "../db/schema";
 import { ENABLE_TEXT_OCR } from "./scan-config";
 import { convertHeicToJpeg } from "./heic-convert.service";
 import { getPhotoDiskPath, UPLOAD_DIR } from "./photo.service";
@@ -47,6 +47,16 @@ function mimeTypeFor(filePath: string): string {
   return "image/jpeg";
 }
 
+/**
+ * The OCR service sends each corner as an [x, y] pair; stored and served they
+ * are named points. Malformed pairs are dropped rather than stored as NaN.
+ */
+function toPoints(polygon: number[][]): PhotoOcrPoint[] {
+  return polygon
+    .filter((point) => point.length >= 2 && Number.isFinite(point[0]) && Number.isFinite(point[1]))
+    .map((point) => ({ x: point[0], y: point[1] }));
+}
+
 /** Keep the confident lines, in reading order, as stored blocks. */
 export function toStoredBlocks(lines: PhotoOcrLine[], minConfidence = MIN_LINE_CONFIDENCE): PhotoOcrBlock[] {
   return lines
@@ -54,7 +64,7 @@ export function toStoredBlocks(lines: PhotoOcrLine[], minConfidence = MIN_LINE_C
     .map((line) => ({
       text: line.text.trim(),
       confidence: line.confidence,
-      polygon: line.polygon,
+      polygon: toPoints(line.polygon),
       left: line.left,
       top: line.top,
       right: line.right,

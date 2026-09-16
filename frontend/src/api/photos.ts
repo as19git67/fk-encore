@@ -1288,8 +1288,8 @@ export function getPhotoPoiMatches(id: number) {
 export interface PhotoOcrBlock {
   text: string
   confidence: number
-  /** Four [x, y] corner points — the detector's quad, not an aligned box. */
-  polygon: [number, number][]
+  /** The four corner points — the detector's quad, not an aligned box. */
+  polygon: { x: number; y: number }[]
   left: number
   top: number
   right: number
