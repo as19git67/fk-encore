@@ -16,6 +16,8 @@ import { travelLeg } from "./travel";
 
 /** Invented spots strung north of an invented anchor. */
 const ANCHOR = { lat: 48.37, lon: 10.9 };
+/** The ordinary day: out of the quarters in the morning, back at night. */
+const HOME = { start: ANCHOR, end: ANCHOR };
 
 function north(metres: number) {
   return { lat: ANCHOR.lat + metres / 111_320, lon: ANCHOR.lon };
@@ -57,7 +59,7 @@ describe("moving a spot within a day", () => {
       osmRef: "node:a",
       toBlockId: "afternoon",
       toPosition: 0,
-      anchor: ANCHOR,
+      walk: HOME,
     });
 
     expect(res.fromBlocks[0].stops.map((s) => s.osmRef)).toEqual(["node:b"]);
@@ -74,7 +76,7 @@ describe("moving a spot within a day", () => {
       toBlocks: blocks,
       osmRef: "node:a",
       toBlockId: "afternoon",
-      anchor: ANCHOR,
+      walk: HOME,
     });
     expect(res.fromBlocks[2].stops.map((s) => s.osmRef)).toEqual(["node:c", "node:a"]);
   });
@@ -87,7 +89,7 @@ describe("moving a spot within a day", () => {
       osmRef: "node:a",
       toBlockId: "afternoon",
       toPosition: 99,
-      anchor: ANCHOR,
+      walk: HOME,
     });
     expect(res.fromBlocks[2].stops.map((s) => s.osmRef)).toEqual(["node:c", "node:a"]);
   });
@@ -106,7 +108,7 @@ describe("moving a spot within a day", () => {
       osmRef: "node:b",
       toBlockId: "afternoon",
       toPosition: 1,
-      anchor: ANCHOR,
+      walk: HOME,
     });
 
     const afternoonFirst = res.fromBlocks[2].stops[0];
@@ -128,7 +130,7 @@ describe("moving a spot to another day", () => {
       osmRef: "node:a",
       toBlockId: "morning",
       toPosition: 0,
-      anchor: ANCHOR,
+      walk: HOME,
     });
 
     expect(res.fromBlocks[0].stops.map((s) => s.osmRef)).toEqual(["node:b"]);
@@ -145,7 +147,7 @@ describe("moving a spot to another day", () => {
       osmRef: "node:a",
       toBlockId: "morning",
       toPosition: 0,
-      anchor: ANCHOR,
+      walk: HOME,
     });
 
     // The day it left: the morning now walks anchor → node:b.
@@ -158,10 +160,77 @@ describe("moving a spot to another day", () => {
   it("does not touch the array it was handed", () => {
     const from = day();
     const to = [block("morning", 210, [stop("node:x", 200)])];
-    moveStop({ fromBlocks: from, toBlocks: to, osmRef: "node:a", toBlockId: "morning", anchor: ANCHOR });
+    moveStop({ fromBlocks: from, toBlocks: to, osmRef: "node:a", toBlockId: "morning", walk: HOME });
 
     expect(from[0].stops.map((s) => s.osmRef)).toEqual(["node:a", "node:b"]);
     expect(to[0].stops.map((s) => s.osmRef)).toEqual(["node:x"]);
+  });
+});
+
+describe("two days that happen in different places (§4.5)", () => {
+  /** An outing forty kilometres north: its own day, its own walk. */
+  const OUTING = north(40_000);
+  const AWAY = { start: OUTING, end: OUTING };
+
+  /** A spot `metres` beyond the outing, so it is a walk once you are there. */
+  function outingStop(ref: string, metres: number): CurrentStop {
+    return { ...stop(ref, 0), ...north(40_000 + metres) };
+  }
+
+  it("rewalks the day that received the spot around its own ends", () => {
+    const source = [block("morning", 210, [outingStop("node:a", 300)])];
+    const target = [block("morning", 210, [outingStop("node:x", 600)])];
+
+    const res = moveStop({
+      fromBlocks: source,
+      toBlocks: target,
+      osmRef: "node:a",
+      toBlockId: "morning",
+      walk: AWAY,
+      toWalk: AWAY,
+    });
+
+    // Both spots are within a kilometre of the outing, so the morning
+    // is two short walks and the way back.
+    expect(res.toBlocks[0].usedMinutes).toBeLessThan(90);
+  });
+
+  it("would charge the drive twice if the target kept the quarters", () => {
+    // What the bug did: the receiving day was rewalked from the leg's
+    // anchor, so its first leg became the forty-kilometre drive and its
+    // last block paid for the way back as well.
+    const source = [block("morning", 210, [outingStop("node:a", 300)])];
+    const target = [block("morning", 210, [outingStop("node:x", 600)])];
+
+    const wrong = moveStop({
+      fromBlocks: source,
+      toBlocks: target,
+      osmRef: "node:a",
+      toBlockId: "morning",
+      walk: AWAY,
+      toWalk: HOME,
+    });
+
+    expect(wrong.toBlocks[0].usedMinutes).toBeGreaterThan(400);
+  });
+
+  it("uses one walk for both when the move stays inside a day", () => {
+    // `toWalk` omitted is what a move within one day is, and the day
+    // must not fall back on the quarters because of it.
+    const blocks = [
+      block("morning", 210, [outingStop("node:a", 300)]),
+      block("afternoon", 210, [outingStop("node:b", 600)]),
+    ];
+
+    const res = moveStop({
+      fromBlocks: blocks,
+      toBlocks: blocks,
+      osmRef: "node:a",
+      toBlockId: "afternoon",
+      walk: AWAY,
+    });
+
+    expect(res.fromBlocks[1].usedMinutes).toBeLessThan(120);
   });
 });
 
@@ -179,7 +248,7 @@ describe("an overfull block", () => {
       toBlocks: blocks,
       osmRef: "node:a",
       toBlockId: "afternoon",
-      anchor: ANCHOR,
+      walk: HOME,
     });
 
     expect(res.overfullBlockIds).toEqual(["afternoon"]);
@@ -194,7 +263,7 @@ describe("an overfull block", () => {
       toBlocks: blocks,
       osmRef: "node:a",
       toBlockId: "afternoon",
-      anchor: ANCHOR,
+      walk: HOME,
     });
     expect(res.overfullBlockIds).toEqual([]);
   });
@@ -206,21 +275,21 @@ describe("what cannot be dropped where", () => {
     // Accepting a museum into it would quietly make it something else.
     const blocks = day();
     expect(() =>
-      moveStop({ fromBlocks: blocks, toBlocks: blocks, osmRef: "node:a", toBlockId: "midday", anchor: ANCHOR }),
+      moveStop({ fromBlocks: blocks, toBlocks: blocks, osmRef: "node:a", toBlockId: "midday", walk: HOME }),
     ).toThrow(MoveError);
   });
 
   it("refuses a stop that is not in the source day", () => {
     const blocks = day();
     expect(() =>
-      moveStop({ fromBlocks: blocks, toBlocks: blocks, osmRef: "node:zzz", toBlockId: "afternoon", anchor: ANCHOR }),
+      moveStop({ fromBlocks: blocks, toBlocks: blocks, osmRef: "node:zzz", toBlockId: "afternoon", walk: HOME }),
     ).toThrow(/not in this day/);
   });
 
   it("refuses a block the target day does not have", () => {
     const blocks = day();
     expect(() =>
-      moveStop({ fromBlocks: blocks, toBlocks: blocks, osmRef: "node:a", toBlockId: "evening", anchor: ANCHOR }),
+      moveStop({ fromBlocks: blocks, toBlocks: blocks, osmRef: "node:a", toBlockId: "evening", walk: HOME }),
     ).toThrow(/no block 'evening'/);
   });
 });
@@ -228,7 +297,7 @@ describe("what cannot be dropped where", () => {
 describe("recomputing a day", () => {
   it("charges the way back to the anchor to the last block with spots", () => {
     const blocks = day();
-    recomputeDay(blocks, ANCHOR);
+    recomputeDay(blocks, HOME);
 
     // The afternoon holds the last spot, so it pays for the walk home.
     const walkHome = travelLeg(north(900), ANCHOR).minutes;
@@ -249,7 +318,7 @@ describe("recomputing a day", () => {
     const blocks = [
       block("morning", 210, [stop("node:a", 300, 90, "done"), stop("node:b", 600, 90)]),
     ];
-    recomputeDay(blocks, ANCHOR);
+    recomputeDay(blocks, HOME);
 
     const [a, b] = blocks[0].stops;
     const walkHome = travelLeg(north(600), ANCHOR).minutes;
@@ -260,7 +329,7 @@ describe("recomputing a day", () => {
 
   it("leaves an empty day at zero", () => {
     const blocks = [block("morning", 210)];
-    recomputeDay(blocks, ANCHOR);
+    recomputeDay(blocks, HOME);
     expect(blocks[0].usedMinutes).toBe(0);
   });
 });

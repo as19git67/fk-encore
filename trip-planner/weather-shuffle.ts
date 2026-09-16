@@ -27,6 +27,7 @@
  * the device in a dead spot like everything else in §5.
  */
 
+import type { DayWalk } from "./day-walk";
 import { recomputeDay } from "./move";
 import { DISPLACEMENT_BOOST, type CurrentBlock, type CurrentStop } from "./redistribute";
 import { exposure, shelterOf, type Shelter } from "./shelter";
@@ -40,7 +41,12 @@ export interface WeatherShuffleRequest {
   pool: readonly Candidate[];
   /** Per block id. A block with no forecast is left exactly as it is. */
   weather: ReadonlyMap<string, BlockWeather>;
-  anchor: Coordinate;
+  /**
+   * Where this day begins and ends (`day-walk.ts`) — the quarters on an
+   * ordinary day, the outing's destination on a day trip, the platform
+   * on the day the train leaves.
+   */
+  walk: DayWalk;
   mode?: TransportMode;
   maxWalkMinutes: number;
 }
@@ -74,6 +80,13 @@ export interface WeatherDay {
   /** The day's index within the leg — how the plan addresses it. */
   id: number;
   blocks: readonly CurrentBlock[];
+  /**
+   * Where the day begins and ends (`day-walk.ts`). Two days only trade
+   * when these agree: a day out in Verona and a day at the quarters are
+   * sixty kilometres apart, and exchanging their spots would put every
+   * one of them out of reach on both days.
+   */
+  walk?: DayWalk;
 }
 
 export interface WholeDaySwapRequest {
@@ -86,7 +99,10 @@ export interface WholeDaySwapRequest {
    * day nobody knows anything about (§15.3).
    */
   weatherByDay: ReadonlyMap<number, number>;
-  /** Where both days start and end — the leg's anchor. */
+  /**
+   * Where both days start and end, for a day that does not say (older
+   * callers, and every ordinary day) — the leg's anchor.
+   */
   anchor: Coordinate;
   mode?: TransportMode;
 }
@@ -97,7 +113,8 @@ export type DaySwapReason =
   | "nothing-wet"
   | "nothing-drier"
   | "day-is-underway"
-  | "different-frames";
+  | "different-frames"
+  | "different-places";
 
 export interface WholeDaySwapResult {
   days: WeatherDay[];
@@ -143,6 +160,12 @@ export function swapRainyDay(req: WholeDaySwapRequest): WholeDaySwapResult {
   if (score(rainy) - score(dry) < 1) return nothing("nothing-drier");
   if (!allMovable(rainy) || !allMovable(dry)) return nothing("day-is-underway");
   if (!sameShape(rainy, dry)) return nothing("different-frames");
+  // A rainy day out in Florence cannot trade with a dry day at the
+  // quarters: the spots would land an hour's drive from the day that
+  // received them (§4.5). Refused rather than half-done, like every
+  // other mismatch here — which of the two days to move is a decision
+  // for the traveller.
+  if (!samePlaces(walkOf(rainy, req), walkOf(dry, req))) return nothing("different-places");
 
   const mode = req.mode ?? "foot";
   const swapped = new Map<number, WeatherDay>();
@@ -153,8 +176,8 @@ export function swapRainyDay(req: WholeDaySwapRequest): WholeDaySwapResult {
 
   fillFrom(rainyCopy, dryStops);
   fillFrom(dryCopy, rainyStops);
-  recomputeDay(rainyCopy.blocks as CurrentBlock[], req.anchor, mode);
-  recomputeDay(dryCopy.blocks as CurrentBlock[], req.anchor, mode);
+  recomputeDay(rainyCopy.blocks as CurrentBlock[], walkOf(rainy, req), mode);
+  recomputeDay(dryCopy.blocks as CurrentBlock[], walkOf(dry, req), mode);
   swapped.set(rainy.id, rainyCopy);
   swapped.set(dry.id, dryCopy);
 
@@ -164,6 +187,20 @@ export function swapRainyDay(req: WholeDaySwapRequest): WholeDaySwapResult {
     toDayId: dry.id,
     reason: "ok",
   };
+}
+
+/** The day's own two ends, or the leg's anchor where it names none. */
+function walkOf(day: WeatherDay, req: WholeDaySwapRequest): DayWalk {
+  return day.walk ?? { start: req.anchor, end: req.anchor };
+}
+
+/** Within a hundred metres is the same place; GPS noise is not a move. */
+function samePlaces(a: DayWalk, b: DayWalk): boolean {
+  return nearly(a.start, b.start) && nearly(a.end, b.end);
+}
+
+function nearly(a: Coordinate, b: Coordinate): boolean {
+  return travelLeg(a, b, "foot").distanceM <= 100;
 }
 
 /** Nothing on the day is done, skipped or pinned (§4.4, §5). */
@@ -313,7 +350,7 @@ export function shuffleForWeather(req: WeatherShuffleRequest): WeatherShuffleRes
       // pool rather than overfilling somebody else's morning.
       const donor = blocks.find((b) => b.id === replacement.fromBlockId)!;
       remove(donor, replacement.candidate.osmRef);
-      const leg = travelLeg(lastPosition(donor, req.anchor), stop, mode);
+      const leg = travelLeg(lastPosition(donor, req.walk.start), stop, mode);
       const fits = leg.minutes <= req.maxWalkMinutes
         && used(donor) + stop.dwellMinutes + leg.minutes
           <= weatheredBudget(donor, req.weather.get(donor.id));
@@ -340,7 +377,7 @@ export function shuffleForWeather(req: WeatherShuffleRequest): WeatherShuffleRes
     }
   }
 
-  recomputeDay(blocks, req.anchor, mode);
+  recomputeDay(blocks, req.walk, mode);
   return { blocks, pool, moves, unchanged: moves.length === 0 };
 }
 
@@ -384,7 +421,7 @@ function bestReplacement(
   // The budget the block has once this spot has left it.
   const budget = weatheredBudget(block, req.weather.get(block.id));
   const without = used(block) - stop.dwellMinutes - stop.travelFromPrevious.minutes;
-  const from = lastPositionWithout(block, stop.osmRef, req.anchor);
+  const from = lastPositionWithout(block, stop.osmRef, req.walk.start);
 
   let best: Replacement | null = null;
   let bestFit = Number.NEGATIVE_INFINITY;
@@ -427,18 +464,19 @@ function move(
   return { osmRef: spot.osmRef, name: spot.name, fromBlockId, toBlockId, reason };
 }
 
+/** Where a block leaves you — its start when it holds nothing. */
 function lastPositionWithout(
   block: CurrentBlock,
   osmRef: string,
-  anchor: Coordinate,
+  start: Coordinate,
 ): Coordinate {
   const last = block.stops.filter((stop) => stop.osmRef !== osmRef).at(-1);
-  return last ? { lat: last.lat, lon: last.lon } : anchor;
+  return last ? { lat: last.lat, lon: last.lon } : start;
 }
 
-function lastPosition(block: CurrentBlock, anchor: Coordinate): Coordinate {
+function lastPosition(block: CurrentBlock, start: Coordinate): Coordinate {
   const last = block.stops.at(-1);
-  return last ? { lat: last.lat, lon: last.lon } : anchor;
+  return last ? { lat: last.lat, lon: last.lon } : start;
 }
 
 function stopToCandidate(stop: CurrentStop): Candidate {

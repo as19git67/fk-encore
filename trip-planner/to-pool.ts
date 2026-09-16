@@ -23,6 +23,7 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
+import { dayWalkOfStored } from "./day-walk";
 import { recomputeDay } from "./move";
 import { loadPlan, saveRedistribution, type StoredPlan } from "./plan-store";
 import { DISPLACEMENT_BOOST } from "./redistribute";
@@ -71,7 +72,7 @@ export const returnStopToPool = api(
     // The walk either side of the gap has changed, so the day is
     // rewalked before it is written — a block that still counted the
     // old detour would be over budget for a spot nobody visits (§8.4).
-    recomputeDay(blocks, leg.anchor, leg.mode);
+    recomputeDay(blocks, dayWalkOfStored(leg.anchor, day), leg.mode);
 
     const returning: Candidate = {
       osmRef: stop.osmRef,

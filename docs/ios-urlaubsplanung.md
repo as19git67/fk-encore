@@ -631,6 +631,50 @@ Was es nicht sieht: unbenannte Gewässer (der Import verlangt einen Namen) und
 Flüsse als `waterway`-Linien. Und es weiß nicht, *wo* der Weg herumführt — nur,
 dass er es muss.
 
+**Erledigt (2026-09-16): der Tag wird überall um denselben Ort herum gelaufen.**
+`solveDay` weiß seit langem, dass ein Tag keine Schleife um das Quartier sein
+muss: er nimmt `anchor`, `start` und `end`, und der Planer füllt alle drei — das
+Ausflugsziel beim Tagesausflug, den Bahnhof am Ankunftstag, den Bahnsteig am
+Abreisetag (§4.4).
+
+Alles, was den Tag **danach** anfasst, kannte nur den einen Anker.
+`recomputeDay` — das Nachlaufen hinter Verschieben, Ausblenden,
+Zurück-in-den-Vorrat und dem Wetter-Tausch — bekam eine einzige Koordinate und
+benutzte sie als beide Enden. Am gewöhnlichen Tag ist das richtig, und deshalb
+ist es nie aufgefallen. An den Tagen, an denen es falsch ist, ist es doppelt
+falsch:
+
+- **Tagesausflug.** Der Tag wurde um Verona herum geplant; ein Verschieben
+  rechnete ihn vom Quartier aus nach — die erste Etappe war die Stunde Autofahrt,
+  und der letzte Block zahlte sie noch einmal. Danach stand auf der Karte, der
+  Vormittag sei übervoll, weil jemand einen Spot darin verschoben hatte.
+- **Ankunft und Abfahrt.** Der vom Bahnhof aus geplante Tag wurde von einem Hotel
+  aus nachgerechnet, das noch niemand erreicht hat; der Tag, der am Bahnsteig
+  endet, bekam den Rückweg zu einem Hotel, aus dem man ausgecheckt ist.
+
+Die Frage „wo fängt dieser Tag an und wo muss er enden" hat jetzt **eine**
+Antwort an **einer** Stelle (`day-walk.ts`), und der Solver wie jedes Nachlaufen
+fragen dieselbe Funktion. Die Rangfolge: ein Fixpunkt mit Ort schlägt den
+Tagesanker, der schlägt den Etappenanker — und beide Enden werden getrennt
+entschieden, weil eine Ankunft etwas über den Morgen sagt und nichts über den
+Abend.
+
+Zwei Folgen, die dazugehören:
+
+- **Ein Verschieben zwischen zwei Tagen rechnet jeden Tag um seinen eigenen Ort
+  nach.** Vorher bekamen Quell- und Zieltag denselben Anker.
+- **Der Wetter-Tausch verweigert Tage an verschiedenen Orten** (`different-places`).
+  Ein verregneter Ausflugstag kann seine Spots nicht gegen einen trockenen Tag am
+  Quartier tauschen: sie lägen danach eine Autostunde vom Tag entfernt, der sie
+  bekommen hat. Abgelehnt statt halb gemacht, wie jede andere Unverträglichkeit
+  dort auch — welcher der beiden Tage umzieht, entscheidet der Mensch.
+
+**In der App** zeigte die Tageskarte dasselbe Missverständnis: das Haus stand
+immer am Quartier, auch an einem Tag, dessen Route um Verona herum gerechnet
+wurde. `TripMapAnchor` entscheidet jetzt Punkt, Beschriftung und Symbol —
+Ausflugsziel mit eigenem Symbol statt eines Hauses, das dort keines ist, und ein
+unbenannter Ausflug heißt „Ausflugsziel" statt „Unterkunft" (§15.3).
+
 ### 4.6 Der Ausflug, den niemand verlangt hat (offen)
 
 §4.5 macht den Tagesausflug *ausdrückbar*. Der eigentliche Wunsch geht weiter:

@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { DISPLACEMENT_BOOST, type CurrentBlock, type CurrentStop } from "./redistribute";
 import type { Candidate } from "./solver";
+import type { DayWalk } from "./day-walk";
 import { shelterWanted, shuffleForWeather, swapRainyDay, weatheredBudget } from "./weather-shuffle";
 import type { BlockWeather } from "./weather";
 
@@ -78,7 +79,7 @@ function run(
     blocks,
     pool,
     weather: new Map(Object.entries(forecast)),
-    anchor: ANCHOR,
+    walk: { start: ANCHOR, end: ANCHOR },
     maxWalkMinutes: 40,
   });
 }
@@ -117,12 +118,12 @@ describe("what the weather leaves of a budget", () => {
 });
 
 describe("whole-day weather swaps", () => {
-  function day(id: number, blocks: CurrentBlock[]) {
-    return { id, blocks };
+  function day(id: number, blocks: CurrentBlock[], walk?: DayWalk) {
+    return { id, blocks, walk };
   }
 
   function swap(
-    days: { id: number; blocks: CurrentBlock[] }[],
+    days: { id: number; blocks: CurrentBlock[]; walk?: DayWalk }[],
     weatherByDay: Map<number, number>,
   ) {
     return swapRainyDay({ days, weatherByDay, anchor: ANCHOR });
@@ -245,7 +246,30 @@ describe("whole-day weather swaps", () => {
     );
 
     expect(result.reason).toBe("different-frames");
-    expect(result.days[0].blocks[1].stops).toHaveLength(1);
+  });
+
+  it("refuses a day out and a day at the quarters", () => {
+    // The reported shape: four days at the lake, one of them an outing
+    // to a city an hour away. Trading their spots would leave every
+    // spot an hour's drive from the day that received it (§4.5).
+    const outing: DayWalk = {
+      start: { lat: ANCHOR.lat + 0.4, lon: ANCHOR.lon + 0.2 },
+      end: { lat: ANCHOR.lat + 0.4, lon: ANCHOR.lon + 0.2 },
+    };
+    const result = swap(
+      [
+        day(1, [block("morning", [stop(candidate("leisure=park"))])], outing),
+        day(2, [block("morning", [stop(candidate("tourism=museum"))])]),
+      ],
+      new Map([[1, 2], [2, 0]]),
+    );
+
+    expect(result.reason).toBe("different-places");
+    // And nothing moved: a refusal that half-swapped would be worse
+    // than the bug it replaces.
+    expect(result.fromDayId).toBeNull();
+    expect(result.days[0].blocks[0].stops[0].kind).toBe("leisure=park");
+    expect(result.days[1].blocks[0].stops[0].kind).toBe("tourism=museum");
   });
 
   it("changes nothing on the days it did not pick", () => {

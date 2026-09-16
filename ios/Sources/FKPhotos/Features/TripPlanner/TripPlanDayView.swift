@@ -68,7 +68,8 @@ struct TripPlanDayView: View {
                 // five icons across a title bar is a puzzle.
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
-                        TripDayMapView(day: day, anchor: leg.anchor,
+                        TripDayMapView(day: day,
+                                       anchor: TripMapAnchor.of(day: day, legAnchor: leg.anchor),
                                        light: viewModel.light,
                                        isRunning: leg.schedule(on: Date()).isRunning,
                                        onHide: { stop in

@@ -21,6 +21,7 @@ import { addDays } from "./leg-dates";
 import { loadPlan, saveRedistribution, type StoredPlan } from "./plan-store";
 import { forecastFor } from "./weather-service";
 import { hoursWithin, summarise } from "./weather";
+import { dayWalkOfStored } from "./day-walk";
 import { swapRainyDay, type DaySwapReason, type WeatherDay } from "./weather-shuffle";
 
 export interface WeatherDaySwapRequest {
@@ -132,7 +133,13 @@ async function prepare(req: WeatherDaySwapRequest, userId: number): Promise<Prep
   // Only days that are planned down to spots can trade: a day at trip
   // resolution has a frame and nothing in it (§4.3).
   const storedDays = leg.days.filter((day) => day.detailed);
-  const days: WeatherDay[] = storedDays.map((day) => ({ id: day.dayIndex, blocks: day.blocks }));
+  const days: WeatherDay[] = storedDays.map((day) => ({
+    id: day.dayIndex,
+    blocks: day.blocks,
+    // Each day's own two ends, so a day out and a day at the quarters
+    // are recognised as the different places they are (§4.5).
+    walk: dayWalkOfStored(leg.anchor, day),
+  }));
   const base = { plan, leg, anchor: leg.anchor, mode: leg.mode };
   if (days.length < 2) return { ...base, days, weatherByDay: new Map() };
 

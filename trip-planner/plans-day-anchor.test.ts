@@ -20,6 +20,7 @@ import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, detailTripDay } from "./plans";
 import { setTripDayAnchor } from "./day-anchor-edit";
+import { hideTripSpot } from "./hidden-spots";
 
 /** The base, and a town an hour away by car. */
 const BASE = { lat: 43.4677, lon: 11.0430 };
@@ -240,6 +241,33 @@ describe("a base with day trips (§4.5)", () => {
     // And it survives the read: a plan load must spend the same detour
     // the planning did, without asking the region database again.
     expect(aroundAnchor.waterDetourM).toBe(26_000);
+  });
+
+  it("rewalks the day around the outing, not around the quarters", async () => {
+    // The day was planned around the town; hiding one of its spots
+    // rewalked it from the base — so the first leg of the morning
+    // became the forty-kilometre drive, and the block went over budget
+    // because somebody removed a spot from it (§4.5).
+    const { plan } = await createTripPlan({
+      legs: [{
+        anchor: BASE, days: 1, mode: "car",
+        dayAnchors: [{ dayIndex: 0, ...TOWN, label: "Nachbarstadt" }],
+      }],
+      detailDays: 1,
+    });
+
+    const planned = stopsOf(plan, 0);
+    expect(planned.length).toBeGreaterThan(1);
+
+    const after = await hideTripSpot({ planId: plan.id, osmRef: planned[0] });
+    const day = after.plan.legs[0].days[0];
+    const first = day.blocks.flatMap((b) => b.stops)[0];
+
+    // Walking distance inside one town, not the drive out to it. The
+    // drive is charged to the day's frame instead, which is where it
+    // belongs (§4.5).
+    expect(first.travelFromPrevious.minutes).toBeLessThan(20);
+    expect(day.anchor?.label).toBe("Nachbarstadt");
   });
 
   it("says nothing about water when the way is clear", async () => {

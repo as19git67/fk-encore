@@ -29,6 +29,7 @@ import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { climateForLeg } from "./climate-precautions";
 import { dayEnds, travelPaidByRoute, type LocatedFixpoint } from "./day-ends";
+import { dayWalkOf, dayWalkOfStored } from "./day-walk";
 import {
   chargeTheWayBack,
   dayTripOf,
@@ -893,10 +894,14 @@ export const detailTripDay = api(
       ? leg.pool
       : await dayTripPool(dayTrip, constraintsOf(plan), leg.radiusM ?? searchRadiusFor(leg.mode),
                           new Map());
+    // The same two ends every rewalk of this day will ask for
+    // (`day-walk.ts`), so a day filled here and a day moved around
+    // later describe the same route.
+    const walk = dayWalkOf(leg.anchor, day.anchor, ends);
     const solved = solveDay({
       anchor: dayTrip?.at ?? leg.anchor,
-      start: ends.start ?? undefined,
-      end: ends.end ?? undefined,
+      start: walk.start,
+      end: walk.end,
       blocks: day.blocks.map((b) => ({
         id: b.id,
         label: b.label,
@@ -1090,7 +1095,11 @@ export const moveTripStop = api(
         osmRef,
         toBlockId: req.toBlockId,
         toPosition: req.toPosition,
-        anchor: leg.anchor,
+        // Each day around its own place: the source may be the outing
+        // to Verona and the target an ordinary day at the quarters
+        // (§4.5).
+        walk: dayWalkOfStored(leg.anchor, sourceDay),
+        toWalk: dayWalkOfStored(leg.anchor, targetDay),
         mode: leg.mode,
       });
     } catch (err) {
@@ -1225,7 +1234,9 @@ export const redistributeDay = api(
         // one missed in Tokyo (§4.2).
         pool: leg.pool,
         position,
-        anchor: leg.anchor,
+        // Where *this day* ends, which is not the quarters on a day
+        // trip or on the day the train leaves (§4.4, §4.5).
+        anchor: dayWalkOfStored(leg.anchor, day).end,
         currentBlockId: req.currentBlockId,
         remainingMinutes: Math.round(req.remainingMinutes),
         maxWalkMinutes,
@@ -1516,10 +1527,11 @@ async function planLeg(
     // back to it — the two days everybody remembers were planned as if
     // they were ordinary ones.
     const ends = dayEnds(locatedFixpoints(framed.fixpoints, fixpoints), framed.blocks);
+    const walk = dayWalkOf(here, null, ends);
     const solved = solveDay({
       anchor: here,
-      start: ends.start ?? undefined,
-      end: ends.end ?? undefined,
+      start: walk.start,
+      end: walk.end,
       blocks: framed.blocks,
       candidates: candidatesForDay,
       maxWalkMinutes: trip.maxWalkMinutes ?? legLimitFor(mode),
