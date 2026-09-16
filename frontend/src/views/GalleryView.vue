@@ -71,6 +71,7 @@ import { useFilter } from '../composables/useFilter'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
+import { useRangeSelect } from '../composables/useRangeSelect'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import {
@@ -293,27 +294,34 @@ function onJumpEnd() {
 
 // ── Selection ───────────────────────────────────────────────────────────────
 const selectMode = ref(false)
-const selectedIds = ref<Set<number>>(new Set())
-const selectedCount = computed(() => selectedIds.value.size)
+// Selection Set plus the anchor a shift-click measures its range from (#830).
+const {
+  selectedIds,
+  selectedCount,
+  rangeBusy: rangeSelectBusy,
+  clear: clearSelectedIds,
+  replace: replaceSelectedIds,
+  onToggleSelect,
+} = useRangeSelect({
+  loadEntryAt: async (index: number) => galleryRef.value?.loadEntryAt(index) ?? null,
+  fetchAllIds: async () => (await getGalleryIds({
+    filter: filter.value,
+    sortBy: sortByForGallery.value,
+    sortDir: sortDirForGallery.value,
+    photoIds: searchPhotoIds.value ?? undefined,
+  })).ids,
+})
 
 function enterSelectMode() {
   selectMode.value = true
-  selectedIds.value = new Set()
+  clearSelectedIds()
 }
 function exitSelectMode() {
   selectMode.value = false
-  selectedIds.value = new Set()
+  clearSelectedIds()
 }
 function clearSelection() {
-  selectedIds.value = new Set()
-}
-function onToggleSelect(entry: GalleryGridEntry) {
-  // Replace the Set so reactivity fires (Set internal mutations are not
-  // tracked unless the ref reference itself changes).
-  const next = new Set(selectedIds.value)
-  if (next.has(entry.id)) next.delete(entry.id)
-  else next.add(entry.id)
-  selectedIds.value = next
+  clearSelectedIds()
 }
 
 // Keep the selection controls present without permanently reserving a full
@@ -339,7 +347,7 @@ async function selectAll() {
       sortDir: sortDirForGallery.value,
       photoIds: searchPhotoIds.value ?? undefined,
     })
-    selectedIds.value = new Set(res.ids)
+    replaceSelectedIds(res.ids)
   } catch {
     // silently ignore — user can retry
   } finally {
@@ -1445,7 +1453,7 @@ async function activateCursor() {
     // rather than opening fullscreen — power users selecting a batch via
     // keyboard expect this.
     const entry = await galleryRef.value.loadEntryAt(idx)
-    if (entry) onToggleSelect(entry)
+    if (entry) await onToggleSelect(entry, { index: idx, range: false })
     return
   }
   await openFullscreenAt(idx)
@@ -1878,10 +1886,17 @@ void refreshReviewSequence()
     <!-- Compact selection tray. Actions stay available in the popup without
          taking a full, multi-row strip away from the photo grid. -->
     <div v-if="selectMode" class="select-bar">
+      <!-- The shift hint appears exactly when it becomes useful — one photo
+           is selected, so there is an anchor to span from — and goes away
+           again as soon as the user has clearly found the feature. -->
       <span class="select-count">
-        <i class="pi pi-check-square" />
+        <i :class="rangeSelectBusy ? 'pi pi-spin pi-spinner' : 'pi pi-check-square'" />
         {{
-          selectedCount > 0
+          rangeSelectBusy
+          ? 'Bereich wird ausgewählt …'
+          : selectedCount === 1
+          ? '1 ausgewählt · Umschalt+Klick wählt den Bereich'
+          : selectedCount > 0
           ? `${selectedCount} ausgewählt`
           : 'Fotos antippen zum Auswählen'
         }}
