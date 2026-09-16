@@ -953,7 +953,8 @@ Neue Views unter `frontend/src/views/meters/`, Navigation gated auf
 
 | View | Recht | Inhalt |
 |---|---|---|
-| `MetersView.vue` | `meters.view` | Kachel-/Listenübersicht: Name, Typ-Icon, Standort, letzter Stand + Datum, Absolutstand, Anomalie-Badge; Schnellaktion „Ablesen“ |
+| `MetersView.vue` | `meters.view` | Kachel-/Listenübersicht: Name, Typ-Icon, Standort, letzter Stand + Datum, Absolutstand, Anomalie-Badge; Schnellaktion „Ablesen“. Sortiert nach Typ (Reihenfolge von `METER_TYPE_LABELS`), dann Name (`frontend/src/utils/meterSort.ts`) |
+| `MeterReportsView.vue` | `meters.view` | Alle Auswertungen: Trend-Kacheln, Energie-Report, Wirtschaftlichkeit, Vergleichsrechnungen, Anlagenzustand, Saisonprofil, Heizung witterungsbereinigt, Abschläge — plus der Dialog „Tarife & Annahmen“ |
 | `MeterDetailView.vue` | `meters.view` | Stammdaten, Gerätehistorie (Tabelle wie im Issue-Beispiel), Ablesungsliste, Verbrauchs-Chart mit Vorjahresvergleich, verknüpfte Zahlungen |
 | `MeterQuickEntryView.vue` | `meters.read_entry` | Schnelle Ablesemaske mit einem gemeinsamen Datum für alle konfigurierten Zähler und OCR-Kamera je Zählerzeile |
 | `MeterQuickEntryConfigView.vue` | `meters.read_entry` | Persönliche Konfigurationsseite für Zählerauswahl/Reihenfolge (`meter_quick_entry_items`), erreichbar über das Zahnrad in der Schnell-Erfassung |
@@ -961,6 +962,15 @@ Neue Views unter `frontend/src/views/meters/`, Navigation gated auf
 | `MetersAdminView.vue` | `meters.manage` | Zähler-CRUD, Gerät ersetzen (Wizard: Endstand alt → Startwert neu), API-Key-Verwaltung |
 | `MeterAnomaliesView.vue` | `meters.view` (Status setzen: `meters.read_entry`) | Auffälligkeiten-Postfach (§5.3), Badge im Modulmenü |
 | `MeterDegreeDaysHelpView.vue` | `meters.view` | Online-Hilfe zu Gradtagen und Witterungsbereinigung (§5.2.6), verlinkt aus dem Heizungs-Report (Muster: `finance/BankcontactsHelpView.vue`) |
+
+**Zähler und Auswertungen sind zwei Seiten.** Die Zählerseite (`/zaehler`)
+verwaltet Stammdaten und Ablesungen — Liste, Anlegen/Bearbeiten, Historien-
+Import; die Auswertungsseite (`/zaehler/auswertungen`) trägt jeden Report.
+Beides auf einer Seite hieß: erst an sieben Panels vorbeiscrollen, um an die
+Zählerliste zu kommen. Die Tarife und Annahmen liegen bei den Auswertungen,
+weil sie nur dort wirken — jede Preisänderung lädt die Kosten-Reports neu.
+Beide Seiten verlinken aufeinander in der Kopfzeile, und das Modulmenü führt
+beide.
 
 Design: nur semantische PrimeVue-CSS-Variablen (CSS-Style-Guide),
 Datums-Handling über `frontend/src/utils/dateFormat.ts`
