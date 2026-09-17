@@ -28,6 +28,16 @@ describe('isFullscreenInteractiveTarget', () => {
     expect(isFullscreenInteractiveTarget(root.querySelector('#img'))).toBe(false)
   })
 
+  it('matches a line of recognised text — a press there starts a selection, not a swipe (#1029)', () => {
+    const root = mount('<div class="photo-text-layer"><span class="photo-text-line" id="l">Gleis 3</span></div>')
+    expect(isFullscreenInteractiveTarget(root.querySelector('#l'))).toBe(true)
+  })
+
+  it('does NOT match the gap between text lines — that still pans the photo', () => {
+    const root = mount('<div class="photo-text-layer" id="g"><span class="photo-text-line">x</span></div>')
+    expect(isFullscreenInteractiveTarget(root.querySelector('#g'))).toBe(false)
+  })
+
   it('returns false for null / non-element targets', () => {
     expect(isFullscreenInteractiveTarget(null)).toBe(false)
     expect(isFullscreenInteractiveTarget(document)).toBe(false)

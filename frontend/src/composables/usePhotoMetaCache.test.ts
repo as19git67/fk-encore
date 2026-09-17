@@ -4,11 +4,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const getPhotoFaces = vi.fn()
 const getPhotoPoiMatches = vi.fn()
 const getPhotosAlbums = vi.fn()
+const getPhotoOcr = vi.fn()
 
 vi.mock('../api/photos', () => ({
   getPhotoFaces: (id: number) => getPhotoFaces(id),
   getPhotoPoiMatches: (id: number) => getPhotoPoiMatches(id),
   getPhotosAlbums: (ids: number[]) => getPhotosAlbums(ids),
+  getPhotoOcr: (id: number) => getPhotoOcr(id),
 }))
 
 import {
@@ -25,6 +27,8 @@ import {
   refreshPhotoPoiMatches,
   peekPhotoFacesCached,
   peekPhotoPoiMatchesCached,
+  getPhotoOcrCached,
+  peekPhotoOcrCached,
 } from './usePhotoMetaCache'
 
 beforeEach(() => {
@@ -152,5 +156,44 @@ describe('usePhotoMetaCache', () => {
     prefetchPhotoMeta(NaN)
     expect(getPhotoFaces).not.toHaveBeenCalled()
     expect(getPhotosAlbums).not.toHaveBeenCalled()
+  })
+})
+
+describe('recognised text (#1029)', () => {
+  beforeEach(() => { getPhotoOcr.mockReset() })
+
+  it('loads once and serves the sidebar and the overlay from the same entry', async () => {
+    getPhotoOcr.mockResolvedValue({ ocr: { photo_id: 201, blocks: [], full_text: '', mean_confidence: 0, scanned_at: 't' } })
+    const a = await getPhotoOcrCached(201)
+    const b = await getPhotoOcrCached(201)
+    expect(a).toBe(b)
+    expect(getPhotoOcr).toHaveBeenCalledTimes(1)
+  })
+
+  it('remembers "not scanned yet" instead of asking again', async () => {
+    // null is an answer, not a miss: the photo simply has no result yet.
+    getPhotoOcr.mockResolvedValue({ ocr: null })
+    expect(await getPhotoOcrCached(202)).toBeNull()
+    expect(peekPhotoOcrCached(202)).toBeNull()
+    await getPhotoOcrCached(202)
+    expect(getPhotoOcr).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports never-loaded as undefined', () => {
+    expect(peekPhotoOcrCached(203)).toBeUndefined()
+  })
+
+  it('is dropped with the rest of the photo meta', async () => {
+    getPhotoOcr.mockResolvedValue({ ocr: null })
+    await getPhotoOcrCached(204)
+    invalidatePhotoMeta(204)
+    expect(peekPhotoOcrCached(204)).toBeUndefined()
+  })
+
+  it('does not cache a failure', async () => {
+    getPhotoOcr.mockRejectedValueOnce(new Error('boom'))
+    await expect(getPhotoOcrCached(205)).rejects.toThrow('boom')
+    getPhotoOcr.mockResolvedValue({ ocr: null })
+    await expect(getPhotoOcrCached(205)).resolves.toBeNull()
   })
 })

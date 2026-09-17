@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import PhotoDetailSidebarBase from './PhotoDetailSidebarBase.vue'
 import {
   getPhotoDetailsBatch,
-  getPhotoOcr,
   type CurationStatus,
   type Face,
   type Photo,
@@ -15,6 +14,8 @@ import {
 import {
   peekPhotoPoiMatchesCached,
   refreshPhotoPoiMatches,
+  getPhotoOcrCached,
+  peekPhotoOcrCached,
 } from '../composables/usePhotoMetaCache'
 
 const props = defineProps<{
@@ -149,11 +150,17 @@ watch(() => props.photo.id, async (id) => {
   internalLoadingOcr.value = false
   if (!id) return
 
+  const cached = peekPhotoOcrCached(id)
+  if (cached !== undefined) {
+    internalOcr.value = cached
+    return
+  }
+
   internalLoadingOcr.value = true
   try {
-    const res = await getPhotoOcr(id)
+    const ocr = await getPhotoOcrCached(id)
     if (token !== ocrToken) return
-    internalOcr.value = res.ocr
+    internalOcr.value = ocr
   } catch {
     if (token === ocrToken) internalOcr.value = null
   } finally {

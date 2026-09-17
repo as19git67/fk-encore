@@ -81,6 +81,14 @@ struct PhotoFullscreenView: View {
     /// the recaps use.
     @State private var showSlideshow = false
 
+    /// Text mode (#1029): the recognised text is laid over the photo as
+    /// selectable text. A per-viewer setting rather than per page — who turns
+    /// it on for one sign wants it on for the next.
+    @State private var textMode = false
+    /// What each page reported once its recognition result arrived, so the
+    /// toolbar knows whether the current photo has text to offer at all.
+    @State private var ocrByPhoto: [Int: PhotoOcrResult] = [:]
+
     // Person context (when navigated from PersonDetailView)
     private let personId: Int?
     private let onPersonRenamed: ((String) -> Void)?
@@ -151,6 +159,20 @@ struct PhotoFullscreenView: View {
         photos.indices.contains(currentIndex) ? photos[currentIndex] : nil
     }
 
+    /// The recognised text of the photo on screen, or nil when there is none
+    /// (not scanned, or scanned and empty) — then the text toggle stays away.
+    private var currentOcrText: String? {
+        guard let photo = currentPhoto, let ocr = ocrByPhoto[photo.id], !ocr.blocks.isEmpty else { return nil }
+        let text = ocr.full_text.isEmpty ? PhotoOcrLayout.fullText(ocr.blocks) : ocr.full_text
+        return text.isEmpty ? nil : text
+    }
+
+    private func copyRecognisedText() {
+        guard let text = currentOcrText else { return }
+        UIPasteboard.general.string = text
+        toastMessage = .success("Text kopiert")
+    }
+
     private var currentCuration: CurationStatus {
         guard let photo = currentPhoto else { return .visible }
         return curationOverrides[photo.id] ?? photo.curation_status
@@ -188,7 +210,11 @@ struct PhotoFullscreenView: View {
                     faceBBox: index < bboxes.count ? bboxes[index] : nil,
                     showDetails: $showDetails,
                     curationStatus: curationBinding(for: photos[index]),
-                    curationStats: curationStats[photos[index].id]
+                    curationStats: curationStats[photos[index].id],
+                    textMode: $textMode,
+                    onOcrLoaded: { id, result in
+                        if let result { ocrByPhoto[id] = result } else { ocrByPhoto.removeValue(forKey: id) }
+                    }
                 )
                 .tag(index)
             }
@@ -350,6 +376,30 @@ struct PhotoFullscreenView: View {
                             Image(systemName: showDetails ? "info.circle.fill" : "info.circle")
                                 .font(.title2)
                                 .foregroundStyle(showDetails ? Color.accentColor : .primary)
+                        }
+
+                        // Text in the photo (#1029): only offered when the
+                        // photo has recognised text, so the button never
+                        // promises a layer that is empty.
+                        if currentOcrText != nil {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { textMode.toggle() }
+                            } label: {
+                                Image(systemName: "text.viewfinder")
+                                    .font(.title2)
+                                    .foregroundStyle(textMode ? Color.accentColor : .primary)
+                            }
+                            .accessibilityLabel(textMode ? "Textauswahl beenden" : "Text im Bild auswählen")
+
+                            if textMode {
+                                Button {
+                                    copyRecognisedText()
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.title2)
+                                }
+                                .accessibilityLabel("Gesamten Text kopieren")
+                            }
                         }
 
                         // Hands off to the full-screen player; the interval
@@ -611,12 +661,17 @@ private struct PhotoPageView: View {
     /// Anonymized opinion counters for this photo, or nil outside a shared
     /// album — then the "Meinungen" block is omitted entirely.
     let curationStats: PhotoCurationStats?
+    /// Reports the recognition result once it is known, so the viewer's
+    /// toolbar can offer the text toggle for this page.
+    let onOcrLoaded: ((Int, PhotoOcrResult?) -> Void)?
 
     @State private var loader: ThumbnailLoader
     @State private var viewModel: PhotoMetadataViewModel
     @Binding var showDetails: Bool
     @Binding var curationStatus: CurationStatus
+    @Binding var textMode: Bool
     @State private var showAllAlbums = false
+    @State private var ocrCopied = false
     @State private var showDatePicker = false
     @State private var editedDate = Date()
     @State private var isEditingDescription = false
@@ -627,11 +682,15 @@ private struct PhotoPageView: View {
         faceBBox: FaceBBox? = nil,
         showDetails: Binding<Bool>,
         curationStatus: Binding<CurationStatus>,
-        curationStats: PhotoCurationStats? = nil
+        curationStats: PhotoCurationStats? = nil,
+        textMode: Binding<Bool> = .constant(false),
+        onOcrLoaded: ((Int, PhotoOcrResult?) -> Void)? = nil
     ) {
         self.photo = photo
         self.faceBBox = faceBBox
         self.curationStats = curationStats
+        self.onOcrLoaded = onOcrLoaded
+        _textMode = textMode
         // A face box is in the *original*'s coordinates, so a page that draws
         // one has to show the original — a recipe-cropped render would put the
         // box somewhere else entirely.
@@ -670,6 +729,9 @@ private struct PhotoPageView: View {
         .onChange(of: showDetails) { _, isShowing in
             if !isShowing { showAllAlbums = false }
         }
+        .onChange(of: viewModel.ocr) { _, result in
+            onOcrLoaded?(photo.id, result)
+        }
         .task {
             async let meta: Void = viewModel.loadAll()
             await loader.load()
@@ -692,8 +754,13 @@ private struct PhotoPageView: View {
             // Photo (bbox rendered inside ZoomableImageView so it follows zoom/pan)
             Group {
                 if let image = loader.image {
-                    ZoomableImageView(image: image, faceBBox: faceBBox)
-                        .frame(width: geo.size.width, height: height)
+                    ZoomableImageView(
+                        image: image,
+                        faceBBox: faceBBox,
+                        textLines: textLines,
+                        textMode: textMode
+                    )
+                    .frame(width: geo.size.width, height: height)
                 } else if loader.hasError {
                     Color(.systemBackground)
                         .frame(width: geo.size.width, height: height)
@@ -710,6 +777,37 @@ private struct PhotoPageView: View {
             }
         }
         .frame(height: height)
+    }
+
+    /// The recognised lines, mapped onto whatever the loader put on screen.
+    ///
+    /// With a saved recipe the pixels are crop-then-rotation of the original
+    /// while the text is stored against the original, so the lines are
+    /// re-based onto the crop and turned with it. Until the recipe itself has
+    /// arrived nothing is laid out — a guessed placement would put the words
+    /// somewhere else entirely.
+    private var textLines: [PhotoOcrLayout.Line] {
+        guard let ocr = viewModel.ocr, !ocr.blocks.isEmpty else { return [] }
+        if loader.isRecipeRendered {
+            guard let recipe = viewModel.myRecipe else { return [] }
+            return PhotoOcrLayout.lines(
+                ocr.blocks,
+                view: PhotoOcrLayout.Viewport(crop: recipe.crop, rotation: recipe.rotation)
+            )
+        }
+        return PhotoOcrLayout.lines(ocr.blocks)
+    }
+
+    private func copyOcrText() {
+        guard let ocr = viewModel.ocr else { return }
+        let text = ocr.full_text.isEmpty ? PhotoOcrLayout.fullText(ocr.blocks) : ocr.full_text
+        guard !text.isEmpty else { return }
+        UIPasteboard.general.string = text
+        ocrCopied = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            ocrCopied = false
+        }
     }
 
     // MARK: - Details Panel
@@ -782,6 +880,30 @@ private struct PhotoPageView: View {
                                         .clipShape(Capsule())
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Text in the photo (#1029) — only when there is some; a
+                // photo without text would otherwise carry an empty section.
+                if viewModel.hasOcrText, let ocr = viewModel.ocr {
+                    sectionHeader("Text im Bild")
+                    detailRow {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(ocr.blocks.enumerated()), id: \.offset) { _, block in
+                                Text(block.text)
+                                    .font(.subheadline)
+                                    .textSelection(.enabled)
+                            }
+                            Button {
+                                copyOcrText()
+                            } label: {
+                                Label(ocrCopied ? "Kopiert!" : "Text kopieren",
+                                      systemImage: ocrCopied ? "checkmark" : "doc.on.doc")
+                                    .font(.subheadline)
+                                    .foregroundStyle(ocrCopied ? Color.green : Color.accentColor)
+                            }
+                            .padding(.top, 4)
                         }
                     }
                 }

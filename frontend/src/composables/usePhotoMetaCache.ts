@@ -18,8 +18,10 @@ import {
   getPhotoFaces,
   getPhotoPoiMatches,
   getPhotosAlbums,
+  getPhotoOcr,
   type Face,
   type PoiMatchItem,
+  type PhotoOcrResult,
 } from '../api/photos'
 
 const facesCache = new Map<number, Face[]>()
@@ -28,6 +30,10 @@ const poiCache = new Map<number, PoiMatchItem[]>()
 const poiInFlight = new Map<number, Promise<PoiMatchItem[]>>()
 const albumsCache = new Map<number, number[]>()
 const albumsInFlight = new Map<number, Promise<number[]>>()
+// Recognised text (#1029). `null` is a real, cacheable answer — "not scanned
+// yet" — distinct from a miss, and `cached()` only treats `undefined` as one.
+const ocrCache = new Map<number, PhotoOcrResult | null>()
+const ocrInFlight = new Map<number, Promise<PhotoOcrResult | null>>()
 
 // Generic cache-with-dedup. Successful results are cached; failures reject
 // (and clear the in-flight slot) so they can be retried and are never cached
@@ -68,6 +74,18 @@ export function getPhotoPoiMatchesCached(id: number): Promise<PoiMatchItem[]> {
     const res = await getPhotoPoiMatches(i)
     return res.matches ?? []
   })
+}
+
+export function getPhotoOcrCached(id: number): Promise<PhotoOcrResult | null> {
+  return cached(id, ocrCache, ocrInFlight, async (i) => {
+    const res = await getPhotoOcr(i)
+    return res.ocr ?? null
+  })
+}
+
+/** Synchronously read a cached OCR entry; `undefined` = never loaded. */
+export function peekPhotoOcrCached(id: number): PhotoOcrResult | null | undefined {
+  return ocrCache.get(id)
 }
 
 export function getPhotoAlbumsCached(id: number): Promise<number[]> {
@@ -115,6 +133,8 @@ export function invalidatePhotoMeta(id: number): void {
   invalidatePhotoAlbums(id)
   poiCache.delete(id)
   poiInFlight.delete(id)
+  ocrCache.delete(id)
+  ocrInFlight.delete(id)
 }
 
 /** Warm faces + POI + album membership for a photo. Fire-and-forget: errors
@@ -124,6 +144,7 @@ export function prefetchPhotoMeta(id: number): void {
   void getPhotoFacesCached(id).catch(() => {})
   void getPhotoPoiMatchesCached(id).catch(() => {})
   void getPhotoAlbumsCached(id).catch(() => {})
+  void getPhotoOcrCached(id).catch(() => {})
 }
 
 // Force a fresh fetch, discarding any cached (possibly stale-empty) entry first.
