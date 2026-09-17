@@ -125,6 +125,70 @@ export function mapBlockIntoCrop(block: PhotoOcrBlock, crop: RelRect): PhotoOcrB
   return { ...block, polygon, left: tl.x, top: tl.y, right: br.x, bottom: br.y }
 }
 
+/** The user's saved rotation: quarter turns, clockwise, as the server renders them. */
+export type QuarterTurn = 0 | 90 | 180 | 270
+
+/**
+ * What the fullscreen image actually shows once a saved recipe is applied:
+ * the server extracts the crop from the upright original and then turns the
+ * result clockwise by the rotation. Both optional — an absent crop is the
+ * whole image, an absent rotation is none.
+ */
+export interface ViewTransform {
+  crop?: RelRect | null
+  rotation?: number | null
+}
+
+/** Normalise any stored rotation value to one of the four the server accepts. */
+export function quarterTurn(rotation: number | null | undefined): QuarterTurn {
+  if (!rotation || !Number.isFinite(rotation)) return 0
+  const turn = ((Math.round(rotation / 90) * 90) % 360 + 360) % 360
+  return turn as QuarterTurn
+}
+
+/**
+ * Rotate a point inside the unit square clockwise by a quarter turn, the way
+ * the server turns the cropped image: what was the top-left corner ends up
+ * top-right after 90°.
+ */
+export function rotatePoint(p: Point, rotation: number | null | undefined): Point {
+  switch (quarterTurn(rotation)) {
+    case 90: return { x: 1 - p.y, y: p.x }
+    case 180: return { x: 1 - p.x, y: 1 - p.y }
+    case 270: return { x: p.y, y: 1 - p.x }
+    default: return p
+  }
+}
+
+/**
+ * A block as it appears in the rendered view: re-based onto the crop, then
+ * turned with it. The bounding box is recomputed from the turned corners,
+ * because a turned rectangle's left is no longer its old left.
+ */
+export function mapBlockIntoView(block: PhotoOcrBlock, view: ViewTransform): PhotoOcrBlock {
+  const cropped = view.crop ? mapBlockIntoCrop(block, view.crop) : block
+  const turn = quarterTurn(view.rotation)
+  if (turn === 0) return cropped
+
+  const polygon = cropped.polygon.map(p => rotatePoint(p, turn))
+  const corners = [
+    { x: cropped.left, y: cropped.top },
+    { x: cropped.right, y: cropped.top },
+    { x: cropped.right, y: cropped.bottom },
+    { x: cropped.left, y: cropped.bottom },
+  ].map(p => rotatePoint(p, turn))
+  const xs = corners.map(p => p.x)
+  const ys = corners.map(p => p.y)
+  return {
+    ...cropped,
+    polygon,
+    left: Math.min(...xs),
+    top: Math.min(...ys),
+    right: Math.max(...xs),
+    bottom: Math.max(...ys),
+  }
+}
+
 /**
  * True when a line is at least partly inside the visible area. A line the
  * crop cut off entirely has nothing to select, so it is not laid out — it

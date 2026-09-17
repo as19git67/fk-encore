@@ -6,6 +6,9 @@ import {
   mapPointIntoCrop,
   mapBlockIntoCrop,
   isVisibleLayout,
+  quarterTurn,
+  rotatePoint,
+  mapBlockIntoView,
 } from './ocrLayout'
 import type { PhotoOcrBlock } from '../api/photos'
 
@@ -149,5 +152,85 @@ describe('isVisibleLayout', () => {
     expect(isVisibleLayout({ x: -0.5, y: 0.1, width: 0.2, height: 0.05, angle: 0 })).toBe(false)
     expect(isVisibleLayout({ x: 1.2, y: 0.1, width: 0.2, height: 0.05, angle: 0 })).toBe(false)
     expect(isVisibleLayout({ x: 0.1, y: 1.5, width: 0.2, height: 0.05, angle: 0 })).toBe(false)
+  })
+})
+
+describe('rotation', () => {
+  it('normalises whatever the server stored to a quarter turn', () => {
+    expect(quarterTurn(0)).toBe(0)
+    expect(quarterTurn(90)).toBe(90)
+    expect(quarterTurn(270)).toBe(270)
+    expect(quarterTurn(360)).toBe(0)
+    expect(quarterTurn(-90)).toBe(270)
+    expect(quarterTurn(null)).toBe(0)
+    expect(quarterTurn(undefined)).toBe(0)
+  })
+
+  it('turns the top-left corner clockwise around the square', () => {
+    const tl = { x: 0, y: 0 }
+    expect(rotatePoint(tl, 90)).toEqual({ x: 1, y: 0 })
+    expect(rotatePoint(tl, 180)).toEqual({ x: 1, y: 1 })
+    expect(rotatePoint(tl, 270)).toEqual({ x: 0, y: 1 })
+    expect(rotatePoint(tl, 0)).toEqual(tl)
+  })
+
+  it('keeps the centre where it is', () => {
+    const c = { x: 0.5, y: 0.5 }
+    for (const r of [90, 180, 270]) expect(rotatePoint(c, r)).toEqual(c)
+  })
+
+  it('is the identity after four quarter turns', () => {
+    const p = { x: 0.2, y: 0.7 }
+    let q = p
+    for (let i = 0; i < 4; i++) q = rotatePoint(q, 90)
+    expect(q.x).toBeCloseTo(p.x)
+    expect(q.y).toBeCloseTo(p.y)
+  })
+})
+
+describe('mapBlockIntoView', () => {
+  const level = block()
+
+  it('is the identity without a recipe', () => {
+    expect(mapBlockIntoView(level, {})).toEqual(level)
+    expect(mapBlockIntoView(level, { crop: null, rotation: 0 })).toEqual(level)
+  })
+
+  it('turns a level line into a vertical one under 90°', () => {
+    const turned = mapBlockIntoView(level, { rotation: 90 })
+    // A line that ran left→right along y=0.2 now runs top→bottom along x=0.8.
+    const layout = lineLayout(turned)
+    expect(layout.angle).toBeCloseTo(Math.PI / 2, 6)
+    expect(turned.left).toBeCloseTo(0.7)
+    expect(turned.right).toBeCloseTo(0.8)
+    expect(turned.top).toBeCloseTo(0.1)
+    expect(turned.bottom).toBeCloseTo(0.5)
+  })
+
+  it('reads upside down under 180°', () => {
+    const turned = mapBlockIntoView(level, { rotation: 180 })
+    expect(lineLayout(turned).angle).toBeCloseTo(Math.PI, 6)
+    expect(turned.left).toBeCloseTo(0.5)
+    expect(turned.right).toBeCloseTo(0.9)
+  })
+
+  it('crops first and turns second, like the server', () => {
+    // Crop the right half, then turn it. The line at x 0.1–0.5 of the
+    // original lies entirely in the left half, so it is off the crop —
+    // and after the turn it still has to be off the view, not back in it.
+    const crop = { x: 0.5, y: 0, w: 0.5, h: 1 }
+    const turned = mapBlockIntoView(level, { crop, rotation: 90 })
+    expect(isVisibleLayout(lineLayout(turned))).toBe(false)
+
+    // A line inside the right half stays visible and lands where the
+    // rotated crop puts it.
+    const inside = block({
+      polygon: [{ x: 0.6, y: 0.2 }, { x: 0.9, y: 0.2 }, { x: 0.9, y: 0.3 }, { x: 0.6, y: 0.3 }],
+      left: 0.6, top: 0.2, right: 0.9, bottom: 0.3,
+    })
+    const mapped = mapBlockIntoView(inside, { crop, rotation: 90 })
+    expect(isVisibleLayout(lineLayout(mapped))).toBe(true)
+    expect(mapped.polygon[0]?.x).toBeCloseTo(0.8)
+    expect(mapped.polygon[0]?.y).toBeCloseTo(0.2)
   })
 })

@@ -1829,6 +1829,7 @@ void refreshReviewSequence()
       :can-delete="canDelete"
       :details-active="detailsActive"
       :can-share="true"
+      :text-layer="true"
       :sharing="sharingPhotos"
       :auto-advance-ms="5000"
       :current-index="(cursorIndex ?? 0) + 1"
