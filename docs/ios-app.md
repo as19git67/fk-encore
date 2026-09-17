@@ -633,10 +633,10 @@ dokumentiert**:
     Menüpunkt in `frontend/src/config/modules.ts`.
   - **Banner im Feed**, wenn etwas offen ist, mit Sprung direkt ins Review;
     lässt sich für die aktuelle Sitzung ausblenden.
-  - **Deep Link** `f4milphotos://review-queue` (`ReviewDeepLink`,
+  - **Deep Link** `f4milphotos://review-queue` (`AppDeepLink`,
     `CFBundleURLTypes` in `Info.plist`), geroutet über einen `fullScreenCover`
-    in `ContentView` statt über einen Tab, weil die Review-Queue zu keinem Tab
-    gehört.
+    in `MainTabView` statt über einen Tab, weil die Review-Queue zu keinem Tab
+    gehört. Seit #768 §5a ist das ein Fall unter mehreren — siehe 2.11.
   - **Lokale Benachrichtigung** (`ReviewQueueNotifier`), nach jedem
     Hintergrund-Sync geprüft: nur wenn die Zahl gegenüber dem letzten
     mitgeteilten Stand gestiegen ist, nie beim allerersten Stand nach der
@@ -653,6 +653,47 @@ dokumentiert**:
 - **Benutzerverwaltung** (`UsersListView`) und **Rollen & Berechtigungen**
   (`RolesView`) – Basis-Admin.
 - Sync-Einstellungen (Upload/Download), Server-Verbindung, Abmelden.
+
+### 2.11 Deep Links und Universal Links (#768 §5a)
+
+- **Ein Parser, ein Router.** `AppDeepLink` (`App/AppDeepLink.swift`) liest
+  zwei URL-Formen auf dieselben Ziele: das eigene Schema
+  (`f4milphotos://album/12`, `photo/34`, `person/5`, `recap/7`, `recaps`,
+  `feed`, `review-queue`, `shared-album/<token>`) und die Web-Routen des
+  konfigurierten Servers (`https://<server>/app/fotos/alben/12`,
+  `/app/albums/shared/<token>`, `/app/fotos/personen?personId=5`,
+  `/app/fotos/rueckblicke[?recapId=7]`, `/app/fotos/feed`,
+  `/app/fotos/review-queue`, `/app/fotos/galerie?photoId=34` sowie die
+  Legacy-Redirects `/app/albums/:id` und `/app/photos?photoId=`). Eine
+  Web-URL auf einem **anderen Host** wird verworfen: die App darf nicht auf
+  fremde Seiten reagieren, die zufällig dieselbe Pfadstruktur haben. Parsing
+  ist rein und in `AppDeepLinkTests` abgedeckt, inklusive Round-Trip der
+  erzeugten URLs (`AppDeepLink.url(for:)`, `webURL(for:serverURL:)`).
+- **`AppDeepLinkRouter`** hält den Link in `pending`, bis die Tab-Leiste
+  existiert — ein Link, der auf dem Login-Bildschirm ankommt, landet nach
+  der Anmeldung dort, wo er hinwollte, statt im Feed. `MainTabView` nimmt
+  ihn ab: Album und Person werden im Alben-Tab über dessen `NavigationPath`
+  gepusht (`[PersonsRef, PersonRef]` in einem Zug, deshalb ist das
+  `PersonRef`-Ziel jetzt an der Stack-Wurzel `AlbumsListView` registriert),
+  Rückblicke im Feed-Tab (`RecapsRef`), Foto, Rückblick-Player und
+  Review-Queue als `fullScreenCover`, weil sie zu keinem Tab gehören.
+- **Geteilte Alben** (`/app/albums/shared/<token>`): der Token wird über
+  `/albums/public/<token>` aufgelöst; ist die angemeldete Person Mitglied
+  (`GET /albums/:id` antwortet), öffnet die eigene Album-Ansicht, sonst die
+  öffentliche Web-Seite in einem `SFSafariViewController` (`SafariSheet`) —
+  nicht in Safari selbst, denn das ist ein Universal Link, und Safari gäbe
+  ihn sofort zurück.
+- **Universal Links** brauchen zwei Seiten: der Server veröffentlicht
+  `/.well-known/apple-app-site-association` (`web/app-site-association.ts`,
+  gesteuert über `APPLE_APP_IDS`; ohne die Variable 404 und alles bleibt im
+  Browser), und die App trägt `applinks:$(F4MIL_ASSOCIATED_DOMAIN)` in
+  `FKPhotos.entitlements`. Der Host ist pro Haushalt verschieden und daher ein
+  Build-Setting im Xcode-Projekt, kein Code. Beansprucht werden nur Pfade, die
+  die App wirklich öffnen kann — Dokumente, Finanzen und die nackte Galerie
+  bleiben Safari. Einrichtung: `DEPLOYMENT.md`, „iOS universal links".
+- **Alle „öffne X"-Quellen** — Benachrichtigung (`ReviewQueueNotifier`),
+  künftig Widgets, Spotlight und App Intents — erzeugen nur noch eine URL und
+  geben sie `AppDeepLinkRouter.shared.handle(_:)`.
 
 ---
 

@@ -287,6 +287,7 @@
 				CURRENT_PROJECT_VERSION = 1593;
 				DEVELOPMENT_TEAM = 3PQ498L3V8;
 				ENABLE_PREVIEWS = YES;
+				F4MIL_ASSOCIATED_DOMAIN = photos.example.invalid;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/FKPhotos/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "F4mil Photos";
@@ -326,6 +327,7 @@
 				CURRENT_PROJECT_VERSION = 1593;
 				DEVELOPMENT_TEAM = 3PQ498L3V8;
 				ENABLE_PREVIEWS = YES;
+				F4MIL_ASSOCIATED_DOMAIN = photos.example.invalid;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/FKPhotos/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "F4mil Photos";

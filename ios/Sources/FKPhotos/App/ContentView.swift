@@ -3,10 +3,11 @@ import SwiftUI
 public struct ContentView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(\.scenePhase) private var scenePhase
-    /// Where a review-queue deep link (a notification tap, or the
-    /// `f4milphotos://review-queue` URL) should land — see the router's own
-    /// comment (#968, proposal 6).
-    @State private var deepLinkRouter = ReviewDeepLinkRouter.shared
+    /// Where a deep link (a notification tap, a universal link, an
+    /// `f4milphotos://…` URL) should land — see the router's own comment
+    /// (#768 §5a). The tab bar takes it once it exists, so a link that
+    /// arrives on the login screen is kept until after sign-in.
+    @State private var deepLinkRouter = AppDeepLinkRouter.shared
 
     public init() {}
 
@@ -49,19 +50,21 @@ public struct ContentView: View {
                 Task { await CommentBadge.shared.refresh() }
             }
         }
+        // Both the app scheme and universal links (`https://<server>/app/…`)
+        // arrive here under the SwiftUI lifecycle.
         .onOpenURL { url in
             deepLinkRouter.handle(url)
-        }
-        .fullScreenCover(isPresented: $deepLinkRouter.isPresentingReviewQueue) {
-            NavigationStack {
-                ReviewQueueView()
-            }
         }
     }
 }
 
 struct MainTabView: View {
     @State private var feedViewModel = FeedViewModel()
+    /// Deep links land here: the tab bar is the one place that can pick a
+    /// tab, push a screen and present a cover (#768 §5a).
+    @State private var router = AppDeepLinkRouter.shared
+    @State private var feedPath = NavigationPath()
+    @State private var albumsPath = NavigationPath()
     @State private var tripStore = TripStore.shared
     @State private var autoStart = TripAutoStartMonitor.shared
     @State private var autoEnd = TripAutoEndMonitor.shared
@@ -79,14 +82,14 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selection) {
             Tab("Feed", systemImage: "house", value: MainTab.feed) {
-                NavigationStack {
+                NavigationStack(path: $feedPath) {
                     FeedView(viewModel: feedViewModel)
                 }
             }
             .badge(feedViewModel.unreadCount)
 
             Tab("Alben", systemImage: "rectangle.stack", value: MainTab.albums) {
-                NavigationStack {
+                NavigationStack(path: $albumsPath) {
                     AlbumsListView()
                 }
             }
@@ -130,6 +133,58 @@ struct MainTabView: View {
         .onChange(of: captureRequest.isRequested, initial: true) { _, requested in
             // Not a launch decision: the shortcut said where to go.
             if requested { selection = .trip }
+        }
+        .onChange(of: router.pending, initial: true) { _, pending in
+            guard pending != nil else { return }
+            // A link said where to go; the launch rule below must not move
+            // the screen again afterwards.
+            didChooseTab = true
+            guard let navigation = router.takePending() else { return }
+            switch navigation {
+            case .album(let id):
+                selection = .albums
+                albumsPath = NavigationPath([id])
+            case .person(let id):
+                selection = .albums
+                var path = NavigationPath()
+                path.append(PersonsRef())
+                path.append(PersonRef(id: id))
+                albumsPath = path
+            case .recaps:
+                selection = .feed
+                feedPath = NavigationPath([RecapsRef()])
+            case .feed:
+                selection = .feed
+                feedPath = NavigationPath()
+            }
+        }
+        .fullScreenCover(isPresented: $router.isPresentingReviewQueue) {
+            NavigationStack {
+                ReviewQueueView()
+            }
+        }
+        .fullScreenCover(item: $router.presentedPhoto) { photo in
+            NavigationStack {
+                PhotoFullscreenView(photo: photo)
+            }
+        }
+        .fullScreenCover(item: $router.presentedRecap) { item in
+            RecapPlayerView(recapId: item.id)
+        }
+        .sheet(item: $router.browserURL) { item in
+            SafariSheet(url: item.url) { router.browserURL = nil }
+                .ignoresSafeArea()
+        }
+        .alert(
+            "Link konnte nicht geöffnet werden",
+            isPresented: Binding(
+                get: { router.resolveError != nil },
+                set: { if !$0 { router.resolveError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(router.resolveError ?? "")
         }
         .task {
             // Where the app opens: on the trip, while there is one. The

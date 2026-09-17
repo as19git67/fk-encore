@@ -65,7 +65,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             Task { @MainActor in
                 if let urlString = response.notification.request.content.userInfo["url"] as? String,
                    let url = URL(string: urlString) {
-                    ReviewDeepLinkRouter.shared.handle(url)
+                    AppDeepLinkRouter.shared.handle(url)
                 }
                 completionHandler()
             }
