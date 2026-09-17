@@ -828,7 +828,10 @@ struct TripPlanDayView: View {
         // do the separating. Six points between two footnote-sized
         // labels looked like one paragraph and hit like one target.
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(day.fixpoints) { fix in
+            // A fixpoint that frames a block is that block's hours and
+            // is shown there (§7.3); listing it here as well would be
+            // the two places this band was accused of.
+            ForEach(day.fixpoints.filter { !$0.framesBlock }) { fix in
                 HStack(spacing: 8) {
                     Image(systemName: fix.isDeparture ? "arrow.right.to.line" : "calendar.badge.clock")
                         .foregroundStyle(fix.isDeparture ? .orange : .secondary)
@@ -1039,6 +1042,16 @@ struct TripPlanDayView: View {
         viewModel.day?.blocks.firstIndex { $0.id == block.id }
     }
 
+    /// The fixpoint that frames this block, if any (§7.3).
+    private func frame(of block: TripBlock) -> TripFixpoint? {
+        viewModel.day?.fixpoints.first { $0.framesBlock && $0.blockId == block.id }
+    }
+
+    /// True for the stop a frame placed: the block is at its hour for it.
+    private func isFramed(_ stop: TripStop) -> Bool {
+        viewModel.day?.fixpoints.contains { $0.framesBlock && $0.spotRef == stop.osmRef } ?? false
+    }
+
     private func blockCard(_ block: TripBlock) -> some View {
         let isCurrent = currentBlockId == block.id
         return VStack(alignment: .leading, spacing: 12) {
@@ -1074,6 +1087,23 @@ struct TripPlanDayView: View {
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityLabel(block.isSplit ? "Gruppe wieder zusammenführen" : "Gruppe trennen")
+            }
+
+            // The frame this block was accepted at (§7.3): the evening
+            // light, said on the block it shapes — and taken off here,
+            // which hands the block its ordinary hours back and the spot
+            // its place in the pool.
+            if let frame = frame(of: block) {
+                HStack(spacing: 8) {
+                    Label("Abendlicht · \(frame.windowText)", systemImage: "sun.horizon")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    removeButton("Abendtermin entfernen") {
+                        Task { await viewModel.removeFixpoint(frame) }
+                    }
+                }
+                .frame(minHeight: 44)
             }
 
             // Who went where, when the group separated (§6.5).
@@ -1329,7 +1359,10 @@ struct TripPlanDayView: View {
                 Label(stop.pinned ? "Nicht mehr anheften" : "Anheften",
                       systemImage: stop.pinned ? "pin.slash" : "pin")
             }
-            if stop.stopStatus == .planned {
+            // Not for the stop a frame placed (§7.3): "not today" is
+            // said by taking the outing off the block, and the server
+            // refuses the shortcut with the same sentence.
+            if stop.stopStatus == .planned && !isFramed(stop) {
                 Button {
                     Task { await viewModel.returnToPool(stop) }
                 } label: {
@@ -1386,7 +1419,7 @@ struct TripPlanDayView: View {
                             }
                             // "Nicht heute Nachmittag" (§8.4): out of
                             // the day, back into the running.
-                            if stop.stopStatus == .planned {
+                            if stop.stopStatus == .planned && !isFramed(stop) {
                                 Button {
                                     // Back to the day afterwards: this
                                     // screen would otherwise go on

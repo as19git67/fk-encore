@@ -84,6 +84,20 @@ export interface Fixpoint {
   travelMinutes?: number;
   /** Safety margin in front. Defaults to 20, floored at 5. */
   bufferMinutes?: number;
+  /**
+   * The block this fixpoint *is* the frame of, when it is one (§7.3).
+   *
+   * An ordinary appointment sits beside the blocks and cuts them
+   * short. An evening outing accepted for the light does something
+   * else: it says when the day's last block happens and what it holds.
+   * Bound to a block, the fixpoint places that block at its own hour
+   * with its own length, and `spotRef` names the one stop the block is
+   * for — so the plan has one place for the outing, not a block here
+   * and a time over there.
+   */
+  blockId?: string | null;
+  /** The spot the bound block is planned around, by its OSM reference. */
+  spotRef?: string | null;
 }
 
 export interface ScheduledBlock extends PlannedBlockShape {
@@ -196,6 +210,42 @@ export function scheduleDay(opts: ScheduleDayOptions): ScheduledDay {
       continue;
     }
 
+    // A block with a frame of its own (§7.3): the accepted evening
+    // outing says when this block happens and how long it lasts, and
+    // the flow of the day does not get a vote. It begins when the way
+    // there begins and ends when the light does — no viability floor,
+    // because a quarter of an hour of blue hour is exactly what was
+    // asked for.
+    const frame = fixpoints.find(
+      (f) => f.kind === "appointment" && f.blockId === shape.id,
+    );
+    if (frame) {
+      const startMinutes = frame.startMinutes - frame.travelMinutes;
+      const budget = frame.travelMinutes + frame.durationMinutes;
+      // A train that leaves before the light is done still leaves: the
+      // frame cannot put an evening behind it.
+      const leaving = fixpoints.find(
+        (f) => f.kind === "departure" && f.guardStartMinutes < startMinutes + budget,
+      );
+      if (leaving) {
+        dropped.push({
+          id: shape.id,
+          label: shape.label,
+          reason: `${leaving.label} beendet den Tag vor „${shape.label}"`,
+        });
+        continue;
+      }
+      blocks.push({
+        ...shape,
+        budgetMinutes: budget,
+        originalBudgetMinutes: shape.budgetMinutes,
+        startMinutes,
+      });
+      cursor = Math.max(cursor, startMinutes + budget);
+      started = true;
+      continue;
+    }
+
     // An appointment already under way pushes the block back: nobody
     // leaves the booked tour early to start the afternoon on time.
     for (const fix of fixpoints) {
@@ -216,7 +266,9 @@ export function scheduleDay(opts: ScheduleDayOptions): ScheduledDay {
 
     // Each fixpoint that starts inside this block's span cuts it short.
     // Taking the earliest such cut is what makes the last train bind
-    // harder than the dinner reservation after it.
+    // harder than the dinner reservation after it. A frame cuts the
+    // blocks before its own like any appointment — leaving for the
+    // terrace ends the afternoon — and its own block is placed above.
     for (const fix of fixpoints) {
       if (fix.guardStartMinutes <= cursor) continue;
       const available = fix.guardStartMinutes - cursor;

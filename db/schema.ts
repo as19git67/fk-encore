@@ -3025,6 +3025,10 @@ export const tripPlanFixpoints = pgTable(
     // Where it happens, when that is known.
     lat: doublePrecision("lat"),
     lon: doublePrecision("lon"),
+    // The block this fixpoint frames and the spot that block is for
+    // (§7.3, migration 0202) — null for an ordinary appointment.
+    block_id: text("block_id"),
+    spot_ref: text("spot_ref"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("trip_plan_fixpoints_day_idx").on(table.day_id, table.start_minutes)]

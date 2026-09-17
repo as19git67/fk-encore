@@ -42,11 +42,13 @@ import {
   listHiddenSpots,
   loadPlan,
   purgeSpot,
+  removeFixpointsBoundTo,
   saveRedistribution,
   unhideSpot,
   type HiddenSpot,
   type StoredPlan,
 } from "./plan-store";
+import { replanAfterFrameChange } from "./plans";
 
 export interface HideSpotRequest {
   planId: number;
@@ -90,6 +92,15 @@ export const hideTripSpot = api(
 
     await hideSpot(plan.id, osmRef, known.name, userId);
     const { dayIds } = await purgeSpot(plan.id, osmRef);
+    // An evening framed around this spot (§7.3) goes with it: a block
+    // at 20:10 for a place the trip turned down would be an evening
+    // for nothing.
+    let framesGone = 0;
+    for (const leg of plan.legs) {
+      for (const day of leg.days) {
+        framesGone += await removeFixpointsBoundTo(day.id, osmRef);
+      }
+    }
 
     // Every day that lost a stop is rewalked: the walk either side of
     // the gap has changed, and a day still describing the old one is
@@ -109,8 +120,12 @@ export const hideTripSpot = api(
 
     const updated = await loadPlan(plan.id, userId);
     if (!updated) throw APIError.internal("plan vanished while hiding a spot");
+    // A frame that went takes the block's hours with it, and only a
+    // re-plan hands the evening back its ordinary shape — the same
+    // step removing any fixed time takes (`fixpoint-edit.ts`).
+    const plan2 = framesGone > 0 ? (await replanAfterFrameChange(updated, userId)).plan : updated;
     return {
-      plan: updated,
+      plan: plan2,
       hidden: await listHiddenSpots(plan.id),
       wasPlanned: dayIds.length > 0,
     };

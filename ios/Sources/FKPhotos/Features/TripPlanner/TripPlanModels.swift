@@ -377,8 +377,20 @@ struct TripFixpoint: Codable, Identifiable, Sendable, Equatable {
     let bufferMinutes: Int
     let lat: Double?
     let lon: Double?
+    /// The block this fixpoint frames and the spot that block is for
+    /// (§7.3) — an accepted evening outing. Nil for an ordinary
+    /// appointment, and for a plan from a server that did not know.
+    var blockId: String?
+    var spotRef: String?
 
     var id: Int { rowId }
+    /// True for the frame of a block: shown on the block as its hours,
+    /// not in the band of fixed times — one place for one outing.
+    var framesBlock: Bool { blockId != nil && spotRef != nil }
+    /// "20:10–21:00" — the window the framed block is planned for.
+    var windowText: String {
+        "\(TripClock.format(startMinutes))–\(TripClock.format(startMinutes + durationMinutes))"
+    }
     /// After an appointment the day goes on; after a departure it is
     /// over (§4.4).
     var isDeparture: Bool { kind == "departure" }

@@ -1384,6 +1384,35 @@ an zwei Stellen falsch machen zu können. Vorgeschlagen wird **einer**: Ein Aben
 trägt einen Ausflug, und eine Liste von fünf wäre eine Entscheidung statt eines
 Hinweises.
 
+**Geändert (2026-09-17): der Abendtermin ist ein Block, kein Termin daneben.**
+Der Absatz oben hat den gewöhnlichen Fixpunkt damit begründet, dass ein
+Abendtermin kein neuer Begriff sei. Das Argument hat den Server einfach
+gehalten und die Rechnung dem Reisenden gegeben: Der Termin stand als Zeile im
+Band „Feste Zeiten", der Spot blieb im Vorrat oder in einem Nachmittagsblock —
+**zwei Stellen für einen Abend**. Und der Termin wusste nicht, dass er ein Spot
+ist: kein Pin, kein Abhaken, keine Notiz, und der Vorrat hielt die Terrasse für
+ungeplant, sodass die nächste Neuplanung sie ein zweites Mal setzen konnte, im
+falschen Licht. Die App hatte obendrein die Koordinate nie mitgeschickt.
+
+Jetzt **rahmt** der Fixpunkt den letzten Block des Tages (`block_id`, `spot_ref`,
+Migration 0202): `scheduleDay` legt diesen Block auf das Lichtfenster — Beginn
+mit dem Weg dorthin, Länge des Fensters — und der Planer setzt den Spot bei
+jeder Planung und Neuplanung als **angehefteten Stopp** hinein
+(`frame-spots.ts`). Drei Regeln, alle darüber, dass der Solver sich heraushält:
+Der gerahmte Block wird nur von seinem Spot gefüllt (der Solver sieht ihn ohne
+Budget), der Spot ist vor dem ersten Tag reserviert (sonst nimmt ihn der
+Dienstagnachmittag zuerst), und der Stopp ist angeheftet (eine Umverteilung
+bewegt die Wahl des Solvers, nicht das, was jemand zu einer Uhrzeit angenommen
+hat).
+
+Eine Stelle: Der Block „Abend · 20:10–21:00" mit der Terrasse darin, nummeriert
+auf der Karte, abhakbar, mit Notiz und Fotostopp-Zeichen. Das Band zeigt gerahmte
+Fixpunkte nicht; der Block trägt seinen Rahmen als Zeile mit dem einen Knopf,
+ihn wieder abzunehmen. Ausblenden oder Zurücklegen des Spots nimmt den Rahmen
+mit und plant den Tag neu; Verschieben aus dem Block heraus wird verweigert,
+mit dem Hinweis, erst den Termin abzunehmen. Der Fixpunkt bleibt dabei das
+Element mit der Uhrzeit (§4.4) — nur sitzt er jetzt am Block statt daneben.
+
 Dass das Lichtfenster minutengenau ist, während der Plan grob bleibt, ist kein
 Widerspruch zu Leitentscheidung 1: Es ist ein **Hinweis, kein Termin**. Eine
 Uhrzeit, die man verpassen kann, entsteht erst, wenn der Nutzer Vorschlag 3
