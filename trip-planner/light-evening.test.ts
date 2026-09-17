@@ -15,10 +15,13 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { eveningLight } from "./light-evening";
-import { loadPlan } from "./plan-store";
-import { createTripPlan } from "./plans";
+import { acceptEveningLight, eveningLight } from "./light-evening";
+import { loadPlan, type StoredPlan } from "./plan-store";
+import { createTripPlan, moveTripStop } from "./plans";
 import { saveTripSpotNote } from "./spot-notes";
+import { addTripFixpoint } from "./fixpoint-edit";
+import { hideTripSpot } from "./hidden-spots";
+import { returnStopToPool } from "./to-pool";
 
 /** Munich in July: the sun sets late, so the evening is a real one. */
 const MUNICH = { lat: 48.14, lon: 11.58 };
@@ -196,5 +199,143 @@ describe("the evening proposal", () => {
     const stops = after!.legs[0].days[0].blocks.flatMap((b) => b.stops.map((s) => s.osmRef));
     expect(stops).toEqual(
       stored!.legs[0].days[0].blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
+  });
+});
+
+describe("accepting the evening (§7.3)", () => {
+  /** A trip with one photo stop and the proposal it produces. */
+  async function proposed() {
+    const plan = await trip();
+    const stored = await loadPlan(plan.id, ownerId);
+    const anySpot = stored!.legs[0].pool[0] ?? stored!.legs[0].days[0].blocks
+      .flatMap((b) => b.stops)[0];
+    await markPhotoStop(plan.id, anySpot.osmRef);
+    const { proposals } = await eveningLight({ planId: plan.id, utcOffsetMinutes: 120 });
+    expect(proposals).toHaveLength(1);
+    return { plan, proposal: proposals[0] };
+  }
+
+  const eveningOf = (p: StoredPlan) =>
+    [...p.legs[0].days[0].blocks].reverse().find((b) => b.kind === "spots")!;
+
+  it("puts the spot into the day's last block, at the window, pinned", async () => {
+    // The complaint this answers: the outing used to be a line in the
+    // band of fixed times while the spot stayed in the pool — two
+    // places to watch for one evening.
+    const { plan, proposal } = await proposed();
+
+    const { plan: after } = await acceptEveningLight({
+      planId: plan.id, dayIndex: 0, osmRef: proposal.osmRef, utcOffsetMinutes: 120,
+    });
+
+    const evening = eveningOf(after);
+    expect(evening.stops.map((s) => s.osmRef)).toEqual([proposal.osmRef]);
+    expect(evening.stops[0].pinned).toBe(true);
+    // For as long as the light lasts, and the block ends when it does.
+    expect(evening.stops[0].dwellMinutes).toBe(proposal.toMinutes - proposal.fromMinutes);
+    expect(evening.startMinutes! + evening.budgetMinutes).toBe(proposal.toMinutes);
+    expect(evening.startMinutes!).toBeLessThanOrEqual(proposal.fromMinutes);
+  });
+
+  it("is one place: not in the pool, not on another block, framed on this one", async () => {
+    const { plan, proposal } = await proposed();
+
+    const { plan: after } = await acceptEveningLight({
+      planId: plan.id, dayIndex: 0, osmRef: proposal.osmRef, utcOffsetMinutes: 120,
+    });
+
+    const day = after.legs[0].days[0];
+    expect(after.legs[0].pool.map((c) => c.osmRef)).not.toContain(proposal.osmRef);
+    const elsewhere = day.blocks
+      .filter((b) => b.id !== eveningOf(after).id)
+      .flatMap((b) => b.stops.map((s) => s.osmRef));
+    expect(elsewhere).not.toContain(proposal.osmRef);
+    // The fixpoint says which block it frames and for which spot — the
+    // band can leave it out and the block can show it.
+    const frames = day.fixpoints.filter((f) => f.blockId);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].blockId).toBe(eveningOf(after).id);
+    expect(frames[0].spotRef).toBe(proposal.osmRef);
+    expect(frames[0].lat).toBeCloseTo(proposal.lat, 5);
+  });
+
+  it("stops proposing once the evening is planned", async () => {
+    // The planned day now ends when the light does; a proposal for the
+    // same window would be the app talking about its own plan.
+    const { plan, proposal } = await proposed();
+    await acceptEveningLight({
+      planId: plan.id, dayIndex: 0, osmRef: proposal.osmRef, utcOffsetMinutes: 120,
+    });
+
+    const { proposals } = await eveningLight({ planId: plan.id, utcOffsetMinutes: 120 });
+    expect(proposals).toEqual([]);
+  });
+
+  it("survives the next re-plan", async () => {
+    // A frame is part of what the traveller set, not of what the solver
+    // chose: any re-plan — here, a breakfast booking — has to hand the
+    // evening back with its spot in it.
+    const { plan, proposal } = await proposed();
+    await acceptEveningLight({
+      planId: plan.id, dayIndex: 0, osmRef: proposal.osmRef, utcOffsetMinutes: 120,
+    });
+
+    const { plan: after } = await addTripFixpoint({
+      planId: plan.id, dayIndex: 0, label: "Frühstück", at: "08:00", durationMinutes: 30,
+    });
+
+    const evening = eveningOf(after);
+    expect(evening.stops.map((s) => s.osmRef)).toEqual([proposal.osmRef]);
+    expect(evening.stops[0].pinned).toBe(true);
+  });
+
+  it("refuses a spot that is not in this evening's light", async () => {
+    const { plan } = await proposed();
+    await expect(acceptEveningLight({
+      planId: plan.id, dayIndex: 0, osmRef: "way:999", utcOffsetMinutes: 120,
+    })).rejects.toThrow(/nicht mehr im Licht/);
+  });
+
+  it("will not let the spot be dragged out of the block it frames", async () => {
+    const { plan, proposal } = await proposed();
+    const { plan: after } = await acceptEveningLight({
+      planId: plan.id, dayIndex: 0, osmRef: proposal.osmRef, utcOffsetMinutes: 120,
+    });
+    const stop = eveningOf(after).stops[0];
+    const other = after.legs[0].days[0].blocks.find((b) => b.kind === "spots" && b.id !== eveningOf(after).id)!;
+
+    await expect(moveTripStop({
+      planId: plan.id, stopId: stop.rowId, toDayIndex: 0, toBlockId: other.id,
+    })).rejects.toThrow(/Abendtermin/);
+  });
+
+  it("takes the frame away with a hidden spot", async () => {
+    const { plan, proposal } = await proposed();
+    await acceptEveningLight({
+      planId: plan.id, dayIndex: 0, osmRef: proposal.osmRef, utcOffsetMinutes: 120,
+    });
+
+    const { plan: after } = await hideTripSpot({ planId: plan.id, osmRef: proposal.osmRef });
+
+    const day = after.legs[0].days[0];
+    expect(day.fixpoints.filter((f) => f.blockId)).toEqual([]);
+    // And the evening is an ordinary evening again, not a block at
+    // 20:10 with nothing in it.
+    const evening = eveningOf(after);
+    expect(evening.startMinutes).toBeLessThan(proposal.fromMinutes);
+  });
+
+  it("will not return the spot to the pool underneath its frame", async () => {
+    // "Not today" is said by taking the outing off the block; a stop
+    // returned underneath the frame would leave an evening at 20:10
+    // with nothing in it.
+    const { plan, proposal } = await proposed();
+    const { plan: after } = await acceptEveningLight({
+      planId: plan.id, dayIndex: 0, osmRef: proposal.osmRef, utcOffsetMinutes: 120,
+    });
+    const stop = eveningOf(after).stops[0];
+
+    await expect(returnStopToPool({ planId: plan.id, stopId: stop.rowId }))
+      .rejects.toThrow(/Abendtermin/);
   });
 });

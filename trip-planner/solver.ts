@@ -102,6 +102,12 @@ export interface PlannedStop {
   score: number;
   /** The walk from the previous position (the block's start for the first). */
   travelFromPrevious: TravelLeg;
+  /**
+   * Kept where it is by a redistribution (§8.4). Never set by the
+   * solver, which places nothing it would not move again; set by the
+   * frame for a stop the traveller accepted at an hour (`frame-spots.ts`).
+   */
+  pinned?: boolean;
 }
 
 export interface PlannedBlock {

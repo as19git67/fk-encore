@@ -174,6 +174,80 @@ describe("several fixpoints in one day", () => {
   });
 });
 
+describe("a block with a frame of its own (§7.3)", () => {
+  /** The terrace at its best from 20:10 to 21:00, twelve minutes away. */
+  const terrace = {
+    id: "t",
+    label: "Aussichtsterrasse",
+    kind: "appointment" as const,
+    startMinutes: at(20, 10),
+    durationMinutes: 50,
+    travelMinutes: 12,
+    blockId: "evening",
+    spotRef: "way:7",
+  };
+
+  it("places the block at the frame's hour, the way there included", () => {
+    const { blocks, dropped } = scheduleDay({ blocks: DAY, fixpoints: [terrace] });
+    const evening = blocks.find((b) => b.id === "evening")!;
+
+    expect(dropped).toEqual([]);
+    expect(evening.startMinutes).toBe(at(19, 58));
+    expect(evening.budgetMinutes).toBe(62);
+    // The shape's own length is kept for the record.
+    expect(evening.originalBudgetMinutes).toBe(120);
+  });
+
+  it("leaves the afternoon where it was", () => {
+    // The frame is far enough after the afternoon that its guard cuts
+    // nothing; the day simply has a gap before the evening, which is
+    // dinner.
+    const { blocks } = scheduleDay({ blocks: DAY, fixpoints: [terrace] });
+    const afternoon = blocks.find((b) => b.id === "afternoon")!;
+
+    expect(afternoon.startMinutes).toBe(at(14));
+    expect(afternoon.budgetMinutes).toBe(210);
+  });
+
+  it("still cuts the block before it when the light comes early", () => {
+    // Blue hour at half past five: leaving for the terrace ends the
+    // afternoon, as any appointment would.
+    const early = { ...terrace, startMinutes: at(17, 30), durationMinutes: 30 };
+    const { blocks } = scheduleDay({ blocks: DAY, fixpoints: [early] });
+    const afternoon = blocks.find((b) => b.id === "afternoon")!;
+    const evening = blocks.find((b) => b.id === "evening")!;
+
+    // Guard: 17:30 − 12 − 20 = 16:58.
+    expect(afternoon.budgetMinutes).toBe(at(16, 58) - at(14));
+    expect(evening.startMinutes).toBe(at(17, 18));
+    expect(evening.budgetMinutes).toBe(42);
+  });
+
+  it("keeps a short window rather than dropping it as unviable", () => {
+    // A quarter of an hour of blue hour is what was asked for; the
+    // floor that drops a squeezed afternoon does not apply.
+    const brief = { ...terrace, durationMinutes: 15, travelMinutes: 0 };
+    const { blocks, dropped } = scheduleDay({ blocks: DAY, fixpoints: [brief] });
+
+    expect(dropped).toEqual([]);
+    expect(blocks.find((b) => b.id === "evening")!.budgetMinutes).toBe(15);
+  });
+
+  it("is still ended by a train that leaves before it", () => {
+    const train = { id: "z", label: "Zug", kind: "departure" as const, startMinutes: at(19), travelMinutes: 20 };
+    const { blocks, dropped } = scheduleDay({ blocks: DAY, fixpoints: [terrace, train] });
+
+    expect(blocks.find((b) => b.id === "evening")).toBeUndefined();
+    expect(dropped.map((d) => d.id)).toContain("evening");
+  });
+
+  it("carries the binding through resolution", () => {
+    const [resolved] = resolveFixpoints([terrace]);
+    expect(resolved.blockId).toBe("evening");
+    expect(resolved.spotRef).toBe("way:7");
+  });
+});
+
 describe("the buffer", () => {
   it("defaults to twenty minutes", () => {
     const [fix] = resolveFixpoints([{ id: "x", label: "x", startMinutes: at(18) }]);

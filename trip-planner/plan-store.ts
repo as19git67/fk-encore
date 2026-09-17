@@ -573,6 +573,8 @@ async function insertDays(
         buffer_minutes: fix.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
         lat: fix.lat ?? null,
         lon: fix.lon ?? null,
+        block_id: fix.blockId ?? null,
+        spot_ref: fix.spotRef ?? null,
       });
     }
 
@@ -610,6 +612,9 @@ async function insertDays(
           // knew it is deleted the moment it lands on a day.
           origin: stop.origin ?? "search",
           reasons: stop.reasons ?? [],
+          // A stop the frame placed stays where it is (§7.3); the
+          // solver's own choices are free to move.
+          pinned: stop.pinned ?? false,
         });
       }
     }
@@ -918,6 +923,8 @@ export async function loadPlan(
       bufferMinutes: row.buffer_minutes,
       lat: row.lat,
       lon: row.lon,
+      blockId: row.block_id,
+      spotRef: row.spot_ref,
     });
     fixpointsByDay.set(row.day_id, list);
   }
@@ -1454,9 +1461,44 @@ export async function addFixpoint(
       buffer_minutes: fix.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
       lat: fix.lat ?? null,
       lon: fix.lon ?? null,
+      block_id: fix.blockId ?? null,
+      spot_ref: fix.spotRef ?? null,
     })
     .returning({ id: tripPlanFixpoints.id });
   return row.id;
+}
+
+/** The frame of one block on one day, if it has one (§7.3). */
+export async function removeFixpointsFramingBlock(
+  dayId: number,
+  blockId: string,
+  db: Db = dbDefault,
+): Promise<number> {
+  const gone = await db
+    .delete(tripPlanFixpoints)
+    .where(and(eq(tripPlanFixpoints.day_id, dayId), eq(tripPlanFixpoints.block_id, blockId)))
+    .returning({ id: tripPlanFixpoints.id });
+  return gone.length;
+}
+
+/**
+ * Take away the frames bound to one spot on one day (§7.3).
+ *
+ * The block a frame placed exists for its spot; a spot that leaves the
+ * trip — hidden, put back in the pool — leaves the frame describing an
+ * evening for nothing. Returns how many went, so the caller knows
+ * whether the day has to be framed again.
+ */
+export async function removeFixpointsBoundTo(
+  dayId: number,
+  osmRef: string,
+  db: Db = dbDefault,
+): Promise<number> {
+  const gone = await db
+    .delete(tripPlanFixpoints)
+    .where(and(eq(tripPlanFixpoints.day_id, dayId), eq(tripPlanFixpoints.spot_ref, osmRef)))
+    .returning({ id: tripPlanFixpoints.id });
+  return gone.length;
 }
 
 /**

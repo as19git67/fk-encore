@@ -31,6 +31,13 @@ import { climateForLeg } from "./climate-precautions";
 import { dayEnds, travelPaidByRoute, type LocatedFixpoint } from "./day-ends";
 import { dayWalkOf, dayWalkOfStored } from "./day-walk";
 import {
+  budgetsForSolver,
+  framedSpotsOf,
+  placeFramed,
+  withoutFramed,
+  type FramedSpot,
+} from "./frame-spots";
+import {
   chargeTheWayBack,
   dayTripOf,
   endDayAt,
@@ -208,6 +215,14 @@ export interface FixpointRequest {
   bufferMinutes?: number;
   lat?: number;
   lon?: number;
+  /**
+   * The block this fixpoint frames and the spot that block is for
+   * (§7.3) — an accepted evening outing. Written by the light
+   * proposal's accept call and replayed on every re-plan; not meant
+   * for the sheet, which makes ordinary appointments.
+   */
+  blockId?: string;
+  spotRef?: string;
 }
 
 export interface DayAnchorRequest {
@@ -756,6 +771,8 @@ export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegReques
         bufferMinutes: f.bufferMinutes,
         lat: f.lat ?? undefined,
         lon: f.lon ?? undefined,
+        blockId: f.blockId ?? undefined,
+        spotRef: f.spotRef ?? undefined,
       }))),
     // A day trip survives a re-plan for the same reason a fixpoint
     // does: it is part of the frame the traveller set, not of the
@@ -898,23 +915,38 @@ export const detailTripDay = api(
     // (`day-walk.ts`), so a day filled here and a day moved around
     // later describe the same route.
     const walk = dayWalkOf(leg.anchor, day.anchor, ends);
+    // The stored blocks already carry the frame's budget; the solver is
+    // shown a framed block as full, and the frame's spot goes in after
+    // it (`frame-spots.ts`).
+    const framedToday = framedSpotsOf(day.fixpoints);
+    const shapes = day.blocks.map((b) => ({
+      id: b.id,
+      label: b.label,
+      kind: b.kind,
+      baseBudgetMinutes: b.budgetMinutes,
+      budgetMinutes: b.budgetMinutes,
+    }));
     const solved = solveDay({
       anchor: dayTrip?.at ?? leg.anchor,
       start: walk.start,
       end: walk.end,
-      blocks: day.blocks.map((b) => ({
-        id: b.id,
-        label: b.label,
-        kind: b.kind,
-        baseBudgetMinutes: b.budgetMinutes,
-        budgetMinutes: b.budgetMinutes,
-      })),
-      candidates: pool,
+      blocks: budgetsForSolver(shapes, framedToday),
+      candidates: withoutFramed(pool, framedToday),
       maxWalkMinutes,
       mode: leg.mode,
     });
+    const withFrames = placeFramed(
+      solved.blocks, framedToday, mergeByOsmRef(pool, leg.pool), shapes, walk, leg.mode,
+    );
+    for (const lost of withFrames.missing) {
+      log.warn("a framed spot is not among this day's candidates; its block stays empty", {
+        dayIndex: day.dayIndex,
+        blockId: lost.blockId,
+        osmRef: lost.osmRef,
+      });
+    }
 
-    const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((st) => st.osmRef)));
+    const placed = new Set(withFrames.blocks.flatMap((b) => b.stops.map((st) => st.osmRef)));
     // What the outing did not use joins the leg's pool rather than
     // vanishing with the day (§4.5).
     const remaining = mergeByOsmRef(leg.pool, pool).filter((c) => !placed.has(c.osmRef));
@@ -923,14 +955,14 @@ export const detailTripDay = api(
     // filled in later must not come out differently from one filled in
     // at the start.
     const lit = leg.startDate
-      ? orderBlocksForLight(solved.blocks, {
+      ? orderBlocksForLight(withFrames.blocks, {
         date: addDays(leg.startDate, day.dayIndex),
         at: leg.anchor,
         mode: leg.mode,
         horizon: await storedHorizon(leg.anchor),
         startMinutesByBlock: new Map(day.blocks.map((b) => [b.id, b.startMinutes])),
       })
-      : solved.blocks;
+      : withFrames.blocks;
 
     await saveDayDetail(
       plan.id,
@@ -938,7 +970,12 @@ export const detailTripDay = api(
       day,
       lit.map((b) => ({
         ...b,
-        stops: b.stops.map((st) => ({ ...st, status: "planned" as const, pinned: false })),
+        stops: b.stops.map((st) => ({
+          ...st,
+          status: "planned" as const,
+          // The frame's stop stays put; the solver's are free (§8.4).
+          pinned: st.pinned ?? false,
+        })),
       })),
       remaining,
     );
@@ -1086,6 +1123,17 @@ export const moveTripStop = api(
     const osmRef = sourceDay.blocks
       .flatMap((b) => b.stops)
       .find((s) => s.rowId === req.stopId)!.osmRef;
+
+    // A stop the frame placed is the reason its block is at that hour
+    // (§7.3). Dragging it elsewhere would leave an evening framed for
+    // nothing; the way out is to take the outing off the block first.
+    const frame = sourceDay.fixpoints.find((f) => f.spotRef === osmRef && f.blockId);
+    if (frame && (sourceDay.id !== targetDay.id || req.toBlockId !== frame.blockId)) {
+      throw APIError.failedPrecondition(
+        `„${frame.label}" ist als Abendtermin eingeplant — der Block gehört zu diesem Spot. `
+          + "Erst den Termin am Block entfernen, dann verschieben.",
+      );
+    }
 
     let moved;
     try {
@@ -1427,6 +1475,16 @@ async function planLeg(
   const horizon = await storedHorizon(anchor);
 
   let available = [...rated];
+  // The spots a frame has spoken for, on any day of this leg (§7.3).
+  // Taken out before the first day is solved: otherwise the Tuesday
+  // afternoon plans the terrace first, and the Thursday evening it was
+  // accepted for finds it gone — or plans it a second time.
+  const framedByDay = new Map<number, FramedSpot[]>();
+  for (const [dayIndex, list] of fixpointsByDay) {
+    framedByDay.set(dayIndex, framedSpotsOf(list.map((f) => f.fixpoint)));
+  }
+  const reserved = new Set([...framedByDay.values()].flat().map((f) => f.osmRef));
+  available = available.filter((c) => !reserved.has(c.osmRef));
   // One search per destination, however many days go there. Two days in
   // Florence are two days in the same city.
   const dayPools = new Map<string, ScoredCandidate[]>();
@@ -1545,20 +1603,32 @@ async function planLeg(
     // they were ordinary ones.
     const ends = dayEnds(locatedFixpoints(framed.fixpoints, fixpoints), framed.blocks);
     const walk = dayWalkOf(here, null, ends);
+    // A framed block is its spot's and nobody else's (`frame-spots.ts`).
+    const framedToday = framedByDay.get(dayIndex) ?? [];
     const solved = solveDay({
       anchor: here,
       start: walk.start,
       end: walk.end,
-      blocks: framed.blocks,
+      blocks: budgetsForSolver(framed.blocks, framedToday),
       candidates: candidatesForDay,
       maxWalkMinutes: trip.maxWalkMinutes ?? legLimitFor(mode),
       mode,
     });
+    // The frame's own stop goes in after the solver is done, out of the
+    // leg's full pool — it was reserved out of `available` above.
+    const withFrames = placeFramed(solved.blocks, framedToday, rated, framed.blocks, walk, mode);
+    for (const lost of withFrames.missing) {
+      log.warn("a framed spot is not among this leg's candidates; its block stays empty", {
+        dayIndex,
+        blockId: lost.blockId,
+        osmRef: lost.osmRef,
+      });
+    }
     // The mildest of §7.3's four ways: the viewpoint moves to the end
     // of the afternoon, the shaded alley to midday. Same spots, same
     // budget — only the sequence, and only when it costs nothing.
     const lit = startDate
-      ? orderBlocksForLight(solved.blocks, {
+      ? orderBlocksForLight(withFrames.blocks, {
         date: addDays(startDate, dayIndex),
         at: here,
         // The horizon is the leg's, read once, and a day trip is
@@ -1568,14 +1638,14 @@ async function planLeg(
         mode,
         startMinutesByBlock: startsByBlock,
       })
-      : solved.blocks;
+      : withFrames.blocks;
     days.push({
       blocks: lit.map((b) => ({ ...b, startMinutes: startsByBlock.get(b.id) })),
       fixpoints: fixpoints.map((f) => f.stored),
       detailed: true,
       anchor: storedAnchor(dayTrip),
     });
-    const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
+    const placed = new Set(withFrames.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
     // What the day trip did not use joins the leg's pool rather than
     // vanishing with the day: "what fell through in Florence does not
     // carry over" is exactly the rule §4.5 refuses to have.
@@ -1739,6 +1809,10 @@ function groupFixpoints(
       bufferMinutes: req.bufferMinutes === undefined
         ? undefined
         : nonNegativeMinutes(req.bufferMinutes, `fixpoints[${i}].bufferMinutes`),
+      // Both or neither: a frame without a spot is a block with no
+      // budget and nothing in it.
+      blockId: req.blockId && req.spotRef ? req.blockId : null,
+      spotRef: req.blockId && req.spotRef ? req.spotRef : null,
     };
 
     const list = byDay.get(req.dayIndex) ?? [];

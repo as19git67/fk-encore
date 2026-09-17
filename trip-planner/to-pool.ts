@@ -56,6 +56,17 @@ export const returnStopToPool = api(
     if (!found) throw APIError.notFound("stop not found in this plan");
     const { leg, day, stop } = found;
 
+    // A stop the frame placed is the reason its block is at that hour
+    // (§7.3). "Not today" is said by taking the outing off the block,
+    // which re-plans the day; returning the stop underneath the frame
+    // would leave an evening at 20:10 with nothing in it.
+    const frame = day.fixpoints.find((f) => f.spotRef === stop.osmRef && f.blockId);
+    if (frame) {
+      throw APIError.failedPrecondition(
+        `„${frame.label}" ist als Abendtermin eingeplant — erst den Termin am Block entfernen`,
+      );
+    }
+
     if (stop.status !== "planned") {
       // A stop that is done or skipped is the beginning of the travel
       // diary (§5), not scheduling material. Moving it back into the

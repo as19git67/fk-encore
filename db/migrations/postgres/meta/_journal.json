@@ -1415,6 +1415,13 @@
       "when": 1788652800021,
       "tag": "0201_photo_ocr",
       "breakpoints": true
+    },
+    {
+      "idx": 202,
+      "version": "7",
+      "when": 1788652800022,
+      "tag": "0202_trip_fixpoint_frames_block",
+      "breakpoints": true
     }
   ]
 }

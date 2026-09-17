@@ -8,11 +8,11 @@ import SwiftUI
 /// about half past eight, the planned day ended at six, and nobody has
 /// to do anything about that.
 ///
-/// Accepting makes a fixpoint (§4.4), which is the same call the rest
-/// of the app uses for a booked slot or the last train. That is
-/// deliberate: an evening appointment is not a new kind of thing, and
-/// giving it its own mechanism would mean two places to get the same
-/// rule wrong.
+/// Accepting frames the day's last block around the spot (§7.3): the
+/// block moves to the window, the spot goes into it as a pinned stop,
+/// and that block is the one place the outing is shown. It used to be
+/// a fixpoint beside the blocks, and the traveller watched two lists
+/// for one evening.
 struct TripEveningLightView: View {
     let planId: Int
     let legIndex: Int
@@ -49,7 +49,7 @@ struct TripEveningLightView: View {
                 Section {
                     Text(proposal.sentence).font(.callout)
                     if accepted.contains(proposal.osmRef) {
-                        Label("Als Abendtermin eingeplant", systemImage: "checkmark.circle")
+                        Label("Im Abend-Block eingeplant", systemImage: "checkmark.circle")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
@@ -103,16 +103,18 @@ struct TripEveningLightView: View {
         busyRef = proposal.osmRef
         defer { busyRef = nil }
         do {
+            // Not an appointment beside the blocks any more: the server
+            // frames the day's last block around this spot and puts the
+            // spot into it (§7.3). The window is computed again there
+            // — a stale proposal cannot frame an evening around light
+            // that is gone.
             let _: TripPlanResponse = try await APIClient.shared.post(
-                "/trip-planner/plans/\(planId)/fixpoints",
-                body: TripEveningFixpointRequest(
+                "/trip-planner/plans/\(planId)/light/evening/accept",
+                body: TripEveningAcceptRequest(
                     legIndex: legIndex,
                     dayIndex: dayIndex,
-                    label: proposal.label,
-                    at: proposal.clockFrom,
-                    // The window's own length: an appointment that ends
-                    // when the light does, rather than a guess.
-                    durationMinutes: max(15, proposal.toMinutes - proposal.fromMinutes)))
+                    osmRef: proposal.osmRef,
+                    utcOffsetMinutes: TimeZone.current.secondsFromGMT() / 60))
             accepted.insert(proposal.osmRef)
             onPlanChanged?()
         } catch {
@@ -148,10 +150,9 @@ struct TripEveningProposal: Codable, Identifiable, Sendable {
     var symbolName: String { kind == "blue" ? "moon.stars" : "sun.horizon" }
 }
 
-struct TripEveningFixpointRequest: Encodable, Sendable {
+struct TripEveningAcceptRequest: Encodable, Sendable {
     let legIndex: Int
     let dayIndex: Int
-    let label: String
-    let at: String
-    let durationMinutes: Int
+    let osmRef: String
+    let utcOffsetMinutes: Int
 }
