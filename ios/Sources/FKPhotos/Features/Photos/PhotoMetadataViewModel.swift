@@ -15,6 +15,16 @@ final class PhotoMetadataViewModel {
 
     var namedFaces: [NamedFace] = []
     var facesLoadFailed = false
+    /// Text recognised inside the photo (#1029). nil until loaded, and nil
+    /// for a photo that has not been through recognition — which the UI
+    /// shows differently from a scanned photo with no text (`blocks` empty).
+    var ocr: PhotoOcrResult?
+    var ocrLoadFailed = false
+    var isLoadingOcr = false
+    /// This user's saved recipe, if any. The viewer shows a recipe-cropped
+    /// render, and text stored against the original has to follow the crop.
+    var myRecipe: PhotoTransforms.Row?
+    var hasOcrText: Bool { !(ocr?.blocks.isEmpty ?? true) }
     var sortedAlbums: [Album] = []
     var photoAlbumIds: Set<Int> = []
     var pendingAdds: Set<Int> = []
@@ -54,7 +64,8 @@ final class PhotoMetadataViewModel {
         async let facesTask: Void = loadFaces()
         async let albumsTask: Void = loadAlbums()
         async let detailsTask: Void = loadDetails()
-        _ = await (facesTask, albumsTask, detailsTask)
+        async let ocrTask: Void = loadOcr()
+        _ = await (facesTask, albumsTask, detailsTask, ocrTask)
     }
 
     @MainActor
@@ -79,6 +90,22 @@ final class PhotoMetadataViewModel {
                 }
         } catch {
             facesLoadFailed = true
+        }
+    }
+
+    @MainActor
+    private func loadOcr() async {
+        isLoadingOcr = true
+        ocrLoadFailed = false
+        defer { isLoadingOcr = false }
+        do {
+            async let ocrReq: PhotoOcrResponse = APIClient.shared.get("/photos/\(photo.id)/ocr")
+            async let recipeReq: PhotoTransforms.Bundle = APIClient.shared.get("/photos/\(photo.id)/transforms")
+            let (ocrResponse, bundle) = try await (ocrReq, recipeReq)
+            ocr = ocrResponse.ocr
+            myRecipe = bundle.mine
+        } catch {
+            ocrLoadFailed = true
         }
     }
 

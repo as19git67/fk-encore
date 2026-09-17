@@ -5,7 +5,10 @@ import Select from 'primevue/select'
 import Menu from 'primevue/menu'
 import HeicImage from './HeicImage.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
-import { getPhotoUrl, type Photo, type CurationStatus, type PhotoLinkVisibility } from '../api/photos'
+import PhotoTextLayer from './PhotoTextLayer.vue'
+import { getPhotoOcrCached } from '../composables/usePhotoMetaCache'
+import type { ViewTransform } from '../utils/ocrLayout'
+import { getPhotoUrl, type Photo, type CurationStatus, type PhotoLinkVisibility, type PhotoOcrBlock } from '../api/photos'
 import {
   isVisibleViaLink,
   nextLinkVisibility,
@@ -44,6 +47,13 @@ const props = withDefaults(defineProps<{
   canShare?: boolean
   /** True while the host is fetching/handing over the photo. */
   sharing?: boolean
+  /**
+   * Offer the selectable text layer (#1029): recognised text laid over the
+   * photo, with a text-mode toggle and copy-all in the toolbar. Off by
+   * default — the guest view of a shared album has no session to load the
+   * recognition result with, so only the signed-in views turn it on.
+   */
+  textLayer?: boolean
   /** When true the details icon switches to a close icon (✕). Default: false. */
   detailsActive?: boolean
   /**
@@ -95,6 +105,7 @@ const hasActionBar = computed(() => {
   if (props.showDetailsButton !== false) return true
   if (props.canDelete) return true
   if (props.canShare) return true
+  if (props.textLayer) return true
   if (canEditTransform.value) return true
   if (canSlideshow.value) return true
   return fullscreenSupported.value
@@ -246,6 +257,62 @@ const canEditTransform = computed(() => auth.hasPermission('photos.upload'))
 const transformEditorVisible = ref(false)
 function onTransformSaved() {
   invalidateUserTransform(props.photo.id)
+}
+
+// ── Text in the photo (#1029, stage 5) ───────────────────────────────────
+// The recognition result is loaded per photo through the shared meta cache
+// (the sidebar reads the same entry, so opening details costs no second
+// request). Text mode is a per-session toggle that outlives navigation: who
+// turns it on for one sign wants it on for the next.
+const ocrBlocks = ref<PhotoOcrBlock[]>([])
+let ocrToken = 0
+watch(() => [props.textLayer, props.photo.id] as const, async ([enabled, id]) => {
+  const token = ++ocrToken
+  ocrBlocks.value = []
+  if (!enabled || !id) return
+  try {
+    const ocr = await getPhotoOcrCached(id)
+    if (token !== ocrToken) return
+    ocrBlocks.value = ocr?.blocks ?? []
+  } catch {
+    if (token === ocrToken) ocrBlocks.value = []
+  }
+}, { immediate: true })
+
+const hasTextLayer = computed(() => props.textLayer === true && ocrBlocks.value.length > 0)
+const textMode = ref(false)
+const textLayerRef = ref<InstanceType<typeof PhotoTextLayer> | null>(null)
+
+/**
+ * What the image on screen was rendered with. With a saved recipe the server
+ * shows crop-then-rotation of the original, and the text — stored against
+ * the original — has to follow it; without one the layer maps 1:1.
+ */
+const textLayerView = computed<ViewTransform | null>(() => {
+  const r = userRecipe.value
+  if (!r) return null
+  return { crop: r.crop ?? null, rotation: r.rotation ?? 0 }
+})
+
+function toggleTextMode() {
+  if (!hasTextLayer.value) return
+  textMode.value = !textMode.value
+  if (!textMode.value) window.getSelection?.()?.removeAllRanges()
+}
+
+const textCopied = ref(false)
+let textCopiedTimer: ReturnType<typeof setTimeout> | null = null
+async function copyAllText() {
+  const text = textLayerRef.value?.fullText ?? ocrBlocks.value.map(b => b.text).join('\n')
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    textCopied.value = true
+    if (textCopiedTimer) clearTimeout(textCopiedTimer)
+    textCopiedTimer = setTimeout(() => { textCopied.value = false }, 2000)
+  } catch (err) {
+    console.error('Failed to copy recognised text:', err)
+  }
 }
 
 // Track-I marker semantics — mirrors VirtualGallery's badge logic. No
@@ -580,6 +647,13 @@ function handleKeydown(e: KeyboardEvent) {
     e.stopImmediatePropagation()
     e.preventDefault()
     emit('toggle-cover', props.photo.id)
+  } else if (e.key === 't' || e.key === 'T') {
+    if (!hasTextLayer.value) return
+    const tag = (document.activeElement as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    toggleTextMode()
   } else if (e.key === 's' || e.key === 'S') {
     // Start / pause the slideshow (only where one is available).
     if (!canSlideshow.value) return
@@ -1035,6 +1109,13 @@ onUnmounted(() => {
             @load="onCurrentImageLoad"
           >
             <slot />
+            <PhotoTextLayer
+              v-if="hasTextLayer"
+              ref="textLayerRef"
+              :blocks="ocrBlocks"
+              :view="textLayerView"
+              :active="textMode"
+            />
           </HeicImage>
         </div>
         <div
@@ -1077,6 +1158,13 @@ onUnmounted(() => {
           >
             <!-- Allow caller to inject overlays (e.g. face box) -->
             <slot />
+            <PhotoTextLayer
+              v-if="hasTextLayer"
+              ref="textLayerRef"
+              :blocks="ocrBlocks"
+              :view="textLayerView"
+              :active="textMode"
+            />
           </HeicImage>
         </div>
       </div>
@@ -1184,6 +1272,25 @@ onUnmounted(() => {
               :loading="props.sharing"
               @click="emit('share', photo.id)"
               v-tooltip.top="'Foto teilen'"
+            />
+            <!-- Text mode (#1029): only offered when the photo has recognised
+                 text, so the button never promises a layer that is empty. -->
+            <Button
+              v-if="hasTextLayer"
+              icon="pi pi-align-left"
+              rounded text
+              :severity="textMode ? 'primary' : 'secondary'"
+              :class="{ 'fs-toolbar-btn--active': textMode }"
+              @click="toggleTextMode"
+              v-tooltip.top="(textMode ? 'Textauswahl beenden' : 'Text im Bild auswählen') + ' (T)'"
+            />
+            <Button
+              v-if="hasTextLayer && textMode"
+              :icon="textCopied ? 'pi pi-check' : 'pi pi-copy'"
+              rounded text
+              severity="secondary"
+              @click="copyAllText"
+              v-tooltip.top="textCopied ? 'Kopiert' : 'Gesamten Text kopieren'"
             />
             <Button
               v-if="canEditTransform"

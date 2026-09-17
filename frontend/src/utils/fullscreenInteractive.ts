@@ -3,6 +3,9 @@
  * toolbar (`.fs-topbar`), bottom action bar (`.fs-actions-bar`), the stack
  * badge, the details flyout, and any plain button / link / form field.
  *
+ * `.photo-text-line` is a line of recognised text laid over the photo in
+ * text mode (#1029): a press on it starts a text selection, not a swipe.
+ *
  * Taps and gestures that start on these must NOT be hijacked by the photo's
  * swipe/zoom touch handling — in particular the content-level `touchmove`
  * preventDefault(), which otherwise cancels the synthetic click and makes the
@@ -10,7 +13,7 @@
  * where the bars sit over the photo pane).
  */
 export const FULLSCREEN_INTERACTIVE_SELECTOR =
-  'button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar, .fs-actions-bar'
+  'button, a, input, textarea, .fs-stack-badge, .fs-details-flyout, .fs-topbar, .fs-actions-bar, .photo-text-line'
 
 export function isFullscreenInteractiveTarget(el: EventTarget | null): boolean {
   return el instanceof Element && el.closest(FULLSCREEN_INTERACTIVE_SELECTOR) !== null
