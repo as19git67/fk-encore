@@ -9,6 +9,7 @@ import SwiftUI
 /// reimplement.
 struct SearchView: View {
     @State private var viewModel = SearchViewModel()
+    @State private var router = AppDeepLinkRouter.shared
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -94,6 +95,14 @@ struct SearchView: View {
         // a query no longer on screen.
         .onChange(of: viewModel.query) { _, text in
             if text.isEmpty { viewModel.clear() }
+        }
+        // A query handed in from outside — „Suche in F4mil Photos nach …"
+        // (#766) — is submitted as if typed. `initial` covers the tab being
+        // created for it; `onChange` covers it already being on screen.
+        .onChange(of: router.pendingSearchQuery, initial: true) { _, pending in
+            guard pending != nil, let query = router.takeSearchQuery() else { return }
+            viewModel.query = query
+            Task { await viewModel.search() }
         }
         .navigationTitle("Suche")
         // The same viewer the album, the grid, the timeline, the person view,

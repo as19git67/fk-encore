@@ -79,13 +79,16 @@ struct FeedView: View {
                 )
             }
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink {
-                    RecapsListView()
-                } label: {
+                NavigationLink(value: RecapsRef()) {
                     Image(systemName: "sparkles")
                 }
                 .accessibilityLabel("Rückblicke")
             }
+        }
+        // Value-based so a deep link (#768 §5a) can push the list from the
+        // tab bar's `NavigationPath`.
+        .navigationDestination(for: RecapsRef.self) { _ in
+            RecapsListView()
         }
         .refreshable {
             await viewModel.loadInitial()

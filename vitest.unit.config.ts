@@ -23,6 +23,7 @@ export default defineConfig({
       "documents/text-extract-warning.test.ts",
       "finance/sepa-parser.test.ts",
       "web/static-cache.test.ts",
+      "web/app-site-association-doc.test.ts",
     ],
     exclude: ["node_modules/**", "encore.gen/**", "frontend/**"],
     fileParallelism: false,

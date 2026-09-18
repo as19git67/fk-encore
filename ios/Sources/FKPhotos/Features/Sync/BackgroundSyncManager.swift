@@ -74,6 +74,9 @@ public final class BackgroundSyncManager {
         // Observe photo-library changes so a running trip picks up freshly-taken
         // photos promptly (Trip Mode Etappe 1c). No-op until a trip is active.
         TripPhotoLibraryObserver.shared.startIfNeeded()
+        // Under limited photo access, an extended selection is the only way a
+        // new photo can appear; sync it without waiting for a restart (#768).
+        LimitedLibraryChangeObserver.shared.startIfNeeded()
 
         // Re-arm the auto-end location monitor if a trip was already active
         // before this launch — `TripAutoEndMonitor.isMonitoring` resets to
@@ -466,6 +469,10 @@ public final class BackgroundSyncManager {
         // the moment to notice and say so (#968, proposal 5). Silent unless
         // the queue actually grew since the user was last told.
         await ReviewQueueNotifier.checkAndNotify()
+        // Freshly uploaded photos get their text recognised server-side; a
+        // sync is the natural moment to pull the delta into Spotlight
+        // (#768). Rate-limited inside, and a no-op unless opted in.
+        await SpotlightIndexer.shared.syncPhotos()
     }
 
     /// Ends a `beginBackgroundTask` assertion exactly once, however many

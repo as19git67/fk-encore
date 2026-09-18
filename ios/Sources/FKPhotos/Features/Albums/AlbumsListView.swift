@@ -233,6 +233,13 @@ struct AlbumsListView: View {
         .navigationDestination(for: PersonsRef.self) { _ in
             PersonsListView()
         }
+        // Registered here, not in `PersonsListView`: a deep link to a person
+        // (#768 §5a) pushes `[PersonsRef, PersonRef]` in one go, and the
+        // destination for the second value has to exist before the first
+        // screen has appeared.
+        .navigationDestination(for: PersonRef.self) { ref in
+            PersonDetailView(personId: ref.id)
+        }
         .navigationDestination(for: GroupReviewRef.self) { _ in
             ReviewQueueView()
         }

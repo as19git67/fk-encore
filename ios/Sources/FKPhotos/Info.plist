@@ -17,6 +17,37 @@
 	<string>de</string>
 	<key>CFBundleDisplayName</key>
 	<string>F4mil Photos</string>
+	<!--
+	  How Siri hears the app (#766). The display name has a digit in the
+	  middle of a word, and Siri's pronunciation of "F4mil" is anyone's guess.
+	  CFBundleSpokenName tells it how the name sounds; INAlternativeAppNames
+	  are further names the App Shortcuts answer to, each with the way it is
+	  said. Together, "Famil Photos", "Famil" and "Familienfotos" all reach
+	  the same shortcuts.
+	-->
+	<key>CFBundleSpokenName</key>
+	<string>Famil Photos</string>
+	<key>INAlternativeAppNames</key>
+	<array>
+		<dict>
+			<key>INAlternativeAppName</key>
+			<string>Famil Photos</string>
+			<key>INAlternativeAppNamePronunciationHint</key>
+			<string>Famil Fotos</string>
+		</dict>
+		<dict>
+			<key>INAlternativeAppName</key>
+			<string>Famil</string>
+			<key>INAlternativeAppNamePronunciationHint</key>
+			<string>Famil</string>
+		</dict>
+		<dict>
+			<key>INAlternativeAppName</key>
+			<string>Familienfotos</string>
+			<key>INAlternativeAppNamePronunciationHint</key>
+			<string>Familienfotos</string>
+		</dict>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -61,6 +92,14 @@
 	<string>Zum Speichern aufgenommener Fotos in deiner Mediathek</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Zum Hochladen von Fotos in F4mil Photos</string>
+	<!--
+	  Under limited photo access iOS would otherwise put its own „Weiterhin
+	  beschränken / Mehr auswählen" alert over the app on every launch. The
+	  app says it itself, where the sync is configured (#768 §4a,
+	  LimitedLibraryAccess.swift).
+	-->
+	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

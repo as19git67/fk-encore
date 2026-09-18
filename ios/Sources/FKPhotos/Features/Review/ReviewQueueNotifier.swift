@@ -70,7 +70,7 @@ enum ReviewQueueNotifier {
         content.categoryIdentifier = ReviewQueueNotice.notificationCategoryId
         // What a tap opens. A cold launch has no view to route to, so the
         // target travels as the deep link the notification carries.
-        content.userInfo = ["url": ReviewDeepLink.reviewQueueURL.absoluteString]
+        content.userInfo = ["url": AppDeepLink.reviewQueueURL.absoluteString]
 
         // A fixed identifier, so a second round of new groups replaces the
         // first notice instead of stacking a pile of them in Notification

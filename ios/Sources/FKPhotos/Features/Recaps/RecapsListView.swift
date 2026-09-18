@@ -49,6 +49,10 @@ struct RecapsListView: View {
     }
 }
 
+/// Navigation value for the recaps list, so the feed's toolbar link and a
+/// deep link push the same screen.
+struct RecapsRef: Hashable {}
+
 /// Identifiable wrapper so `fullScreenCover(item:)` can present the player.
 struct RecapPlayerItem: Identifiable {
     let id: Int

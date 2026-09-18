@@ -14,6 +14,8 @@ final class AlbumsViewModel {
         do {
             let response: ListAlbumsResponse = try await APIClient.shared.get("/albums")
             albums = response.albums
+            // Album titles into the system search (#768).
+            await SpotlightIndexer.shared.indexAlbums(response.albums)
         } catch {
             errorMessage = error.localizedDescription
         }

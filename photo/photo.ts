@@ -12,6 +12,8 @@ import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
 import { denyPhotoFileRequest } from "./photo-file-access";
 import { getPhotoOcrLogic, type PhotoOcrResult } from "./photo-ocr.service";
+import * as spotlight from "./photo-spotlight.service";
+import type { SpotlightIdsResponse, SpotlightIndexResponse } from "./photo-spotlight.service";
 import {
   setKnownFaceLinkVisibilityLogic,
   setPhotoLinkVisibilityLogic,
@@ -2437,6 +2439,39 @@ export const getPhotoOcr = api(
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
     return { ocr: await getPhotoOcrLogic(id) };
+  }
+);
+
+// ---------- Spotlight index feed (iOS, #768) ----------
+
+/**
+ * Photos with text — recognised or described — that changed since `cursor`,
+ * oldest change first. The iOS app keeps its Core Spotlight index in step
+ * with this; see `photo-spotlight.service.ts`.
+ */
+export const listSpotlightChanges = api(
+  { expose: true, method: "GET", path: "/photos/spotlight-index", auth: true },
+  async ({ cursor, limit }: { cursor?: Query<string>; limit?: Query<number> }): Promise<SpotlightIndexResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await spotlight.listChangedLogic(userId, cursor, limit);
+  }
+);
+
+/**
+ * Every photo id the Spotlight index should hold. The delta above cannot
+ * report deletions, so the app diffs its index against this list.
+ */
+export const listSpotlightIds = api(
+  { expose: true, method: "GET", path: "/photos/spotlight-index/ids", auth: true },
+  async (): Promise<SpotlightIdsResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await spotlight.listIdsLogic(userId);
   }
 );
 

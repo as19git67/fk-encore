@@ -54,9 +54,8 @@ struct PersonsListView: View {
             }
         }
         .navigationTitle("Personen")
-        .navigationDestination(for: PersonRef.self) { ref in
-            PersonDetailView(personId: ref.id)
-        }
+        // The `PersonRef` destination lives in `AlbumsListView`, the stack's
+        // root, so a deep link can push straight to a person.
         .refreshable {
             await viewModel.loadPersons()
         }
