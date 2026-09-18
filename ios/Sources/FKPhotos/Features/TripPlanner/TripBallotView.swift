@@ -101,14 +101,17 @@ struct TripBallotView: View {
     private func row(for entry: TripBallotEntry, heartsLeft: Int) -> some View {
         let details = leg.map { TripBallotDetails.of(entry.osmRef, in: $0) }
         return VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            // The name first, and with the width to be read: a long
+            // one („Église Saint-Nicolas-des-Champs") was sharing the
+            // line with a badge and an icon, and SwiftUI answered by
+            // giving each its share — the title wrapped into a narrow
+            // column and broke mid-word. The priority says which of
+            // the three the reader came for.
+            HStack(alignment: .firstTextBaseline) {
                 Text(entry.label)
-                if entry.planned {
-                    Text("im Plan")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                Spacer(minLength: 8)
                 // Everything the plan knows about the place, one tap
                 // away: voting on a name is voting on a word (§3.8).
                 if let spot = details?.spot, let leg {
@@ -129,8 +132,19 @@ struct TripBallotView: View {
             }
             // What it is and where it is — the two questions somebody
             // needs answered before they can mean their vote.
+            //
+            // For a spot that is on a day this line ends in „Tag 1,
+            // Vormittag", which is „im Plan" with the day in it. The
+            // badge that used to sit beside the name said the same
+            // thing less precisely, and cost the name the width it
+            // needed. It stays only for the case the line cannot
+            // cover: a vote about a spot the leg no longer has.
             if let line = details?.line, !line.isEmpty {
                 Label(line, systemImage: TripCategory.symbol(entry.category))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if entry.planned {
+                Text("im Plan")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
