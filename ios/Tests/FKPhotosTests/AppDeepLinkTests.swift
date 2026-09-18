@@ -135,7 +135,13 @@ final class AppDeepLinkTests: XCTestCase {
     func testARelativePathFromANotificationResolvesAgainstTheServer() {
         let resolved = AppDeepLinkRouter.resolve("/app/fotos/alben/12?photoId=34", serverURL: server)
         XCTAssertEqual(resolved?.absoluteString, "https://photos.example.test/app/fotos/alben/12?photoId=34")
-        XCTAssertEqual(AppDeepLink.parse(resolved!, serverURL: server), .photo(id: 34))
+        // An album link with a photo anchor opens the album, as the web
+        // route does; the photo id is the anchor, not the target.
+        XCTAssertEqual(AppDeepLink.parse(resolved!, serverURL: server), .album(id: 12))
+        XCTAssertEqual(
+            AppDeepLink.parse(AppDeepLinkRouter.resolve("/app/fotos/galerie?photoId=34", serverURL: server)!, serverURL: server),
+            .photo(id: 34)
+        )
         XCTAssertNil(AppDeepLinkRouter.resolve("/app/fotos/feed", serverURL: nil))
         XCTAssertEqual(
             AppDeepLinkRouter.resolve("f4milphotos://review-queue", serverURL: nil)?.absoluteString,

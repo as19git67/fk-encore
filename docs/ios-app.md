@@ -681,12 +681,22 @@ dokumentiert**:
   erzeugten URLs (`AppDeepLink.url(for:)`, `webURL(for:serverURL:)`).
 - **`AppDeepLinkRouter`** hält den Link in `pending`, bis die Tab-Leiste
   existiert — ein Link, der auf dem Login-Bildschirm ankommt, landet nach
-  der Anmeldung dort, wo er hinwollte, statt im Feed. `MainTabView` nimmt
-  ihn ab: Album und Person werden im Alben-Tab über dessen `NavigationPath`
-  gepusht (`[PersonsRef, PersonRef]` in einem Zug, deshalb ist das
-  `PersonRef`-Ziel jetzt an der Stack-Wurzel `AlbumsListView` registriert),
-  Rückblicke im Feed-Tab (`RecapsRef`), Foto, Rückblick-Player und
-  Review-Queue als `fullScreenCover`, weil sie zu keinem Tab gehören.
+  der Anmeldung dort, wo er hinwollte, statt im Feed. `MainTabView` wählt
+  nur den Tab; der Push selbst passiert an dessen Wurzel über
+  `navigationDestination(item:)` (`albumToOpen`, `personToOpen`,
+  `recapsToOpen` im Router, gebunden in `AlbumsListView` bzw. `FeedView`).
+  Foto, Rückblick-Player und Review-Queue kommen als `fullScreenCover`, weil
+  sie zu keinem Tab gehören.
+- **Die Tab-Stacks bleiben bewusst ohne `NavigationPath`-Binding.** Der erste
+  Wurf band die Stacks an einen Pfad, um Deep Links hineinzuschreiben — und
+  damit verlor das Album-Grid nach jedem Vollbild-Besuch seine
+  Scroll-Position: die Grids pushen den Viewer per
+  `navigationDestination(item:)`, und in einem pfadgebundenen Stack baut
+  SwiftUI die Quell-View beim Zurückgehen neu auf. Ungebundene Stacks plus
+  Item-Ziele an der Wurzel sind dasselbe Muster, das die Grids selbst
+  benutzen. Preis: ein Deep Link pusht über den aktuellen Zustand des Tabs
+  statt ihn zu ersetzen, und eine Person kommt direkt (ohne die Liste
+  dazwischen).
 - **Geteilte Alben** (`/app/albums/shared/<token>`): der Token wird über
   `/albums/public/<token>` aufgelöst; ist die angemeldete Person Mitglied
   (`GET /albums/:id` antwortet), öffnet die eigene Album-Ansicht, sonst die
