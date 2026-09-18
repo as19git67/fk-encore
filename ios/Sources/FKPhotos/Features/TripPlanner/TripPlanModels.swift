@@ -275,6 +275,8 @@ enum TripCategory {
         "cafe": "Café",
         "essentials": "Alltägliches",
         "outdoors": "Park oder Natur",
+        // A spot whose way is the point (§4.7).
+        "route": "Strecke",
     ]
 
     static func label(_ id: String) -> String {
@@ -300,6 +302,7 @@ enum TripCategory {
         "cafe": "cup.and.saucer",
         "essentials": "cart",
         "outdoors": "tree",
+        "route": "figure.hiking",
     ]
 
     static func symbol(_ id: String) -> String {
@@ -341,6 +344,9 @@ struct TripStop: Codable, Identifiable, Sendable {
     /// pool entry when the spot was placed. Optional so a response from
     /// an older server, which left them on the pool, still decodes.
     var reasons: [String]? = nil
+    /// Where it finishes, when that is not where it starts (§4.7). Nil
+    /// for the ordinary point, and for a plan from an older server.
+    var extent: TripSpotExtent? = nil
 
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }
@@ -428,6 +434,8 @@ struct TripCandidate: Codable, Identifiable, Sendable {
     let wikipediaUrl: String?
     /// See `TripStop.photoStop`.
     let photoStop: Bool?
+    /// See `TripStop.extent`.
+    var extent: TripSpotExtent? = nil
 
     var id: String { osmRef }
     var isPhotoStop: Bool { photoStop == true }
@@ -846,4 +854,36 @@ struct MoveStopResponse: Codable, Sendable {
     let plan: TripPlan
     /// Blocks now over their budget — the ones the day view turns red.
     let overfullBlockIds: [String]
+}
+
+/// A spot with an extent (§4.7): where it finishes and, where known,
+/// how long and how steep the way is.
+///
+/// The one thing that makes a route different from a point, as far as
+/// the app is concerned: the next leg of the day sets off from `end`,
+/// and the map draws a line rather than a dot. Everything else — pool,
+/// day, hiding, voting — treats it as the spot it is.
+struct TripSpotExtent: Codable, Sendable, Equatable {
+    let end: TripCoordinate
+    let lengthM: Int?
+    let ascentM: Int?
+
+    /// "Strecke · 10 km · 600 Hm" — the parts that are known, and no
+    /// placeholder for the ones that are not.
+    var summary: String {
+        var parts = ["Strecke"]
+        if let lengthM { parts.append(Self.kilometres(lengthM)) }
+        if let ascentM, ascentM > 0 { parts.append("\(ascentM) Hm") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// "10 km", "2,5 km", "800 m" — the precision the number deserves.
+    static func kilometres(_ metres: Int) -> String {
+        if metres < 1_000 { return "\(metres) m" }
+        let km = Double(metres) / 1_000
+        if km >= 10 || km == km.rounded() {
+            return "\(Int(km.rounded())) km"
+        }
+        return String(format: "%.1f km", km).replacingOccurrences(of: ".", with: ",")
+    }
 }

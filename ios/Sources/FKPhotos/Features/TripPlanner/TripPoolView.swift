@@ -212,6 +212,7 @@ struct TripPoolView: View {
             title: candidate.displayName,
             symbolName: kind.symbolName,
             tint: kind.colour,
+            extentEnd: candidate.extent?.end,
         )
     }
 
@@ -456,6 +457,9 @@ struct TripPoolView: View {
                 Text(TripClock.duration(candidate.dwellMinutes))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            if let extent = candidate.extent {
+                Text(extent.summary).font(.caption).foregroundStyle(.secondary)
             }
 
             // What somebody wrote next to it, which is the part that
