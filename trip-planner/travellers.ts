@@ -1,18 +1,24 @@
 /**
  * The travel group, from the people rather than from a sentence (§3.5).
  *
- * Three calls and one rule. The rule is that this is not the guest
- * list: `trip_plan_shares` holds the people who may *plan* the trip
- * (§6.2), and this holds the people who are *on* it — a four-year-old
- * has no account and still decides how long the afternoon may be.
+ * One rule: whoever plans the trip is on it. The accounts on the trip
+ * (`trip_plan_shares` and the organiser) are the travel group's fixed
+ * part — made and removed with the invitation, never by hand here.
+ * Everybody without an account is the other part: a four-year-old has
+ * no login and still decides how long the afternoon may be, so they
+ * are entered by name and, if known, birth date.
+ *
+ * It used to be three lists — accounts, the organiser's household from
+ * the documents module, and hand entries — and the first two describe
+ * the same adults twice, joined by nothing better than a name. The
+ * household is gone from here; the album share picks from accounts,
+ * and so does this.
  *
  * What it changes: `blocks.ts` has always shrunk a block's budget for
  * `withChildren` and again for `limitedMobility`, and the packing list
- * reads the same flags. Until now they came from a sentence somebody
- * typed once. Now they are derived from who is coming, for the date the
- * trip starts — so a child who has had two birthdays since the trip was
- * described is planned for as the child they are, not the one they
- * were.
+ * reads the same flags. They are derived from who is coming, for the
+ * date the trip starts — so a child who has had two birthdays since
+ * the trip was described is planned for as the child they are.
  *
  * Adding or removing a traveller therefore re-plans the trip, exactly
  * as a fixpoint or a pace change does: the blocks have different
@@ -23,7 +29,8 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import db from "../db/database";
 import {
   tripPlanShares,
@@ -32,7 +39,7 @@ import {
   users,
 } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
-import { isOnTrip, requireOrganiser } from "./plan-access";
+import { requireOrganiser } from "./plan-access";
 import { loadPlan, type StoredPlan } from "./plan-store";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
 import {
@@ -42,7 +49,9 @@ import {
   type GroupReading,
   type Traveller,
 } from "./travel-group";
-import { samePerson } from "./same-person";
+
+/** `users` a second time: who added a hand entry, beside who the row is. */
+const addedByUser = alias(users, "added_by_user");
 
 export interface TravellersRequest {
   planId: number;
@@ -50,11 +59,20 @@ export interface TravellersRequest {
 
 export interface TripTraveller {
   id: number;
-  /** The household entry this is, when it is one. */
-  subjectPersonId: number | null;
+  /**
+   * The account, when this traveller has one. Such a row is on the
+   * trip because they plan it, and leaves with the invitation.
+   */
+  userId: number | null;
   label: string;
-  /** From the household entry, or the row's own. Null when unknown. */
+  /**
+   * For an account: from their own household entry when they keep one,
+   * else what was entered here. For everybody else: the row's own.
+   * Null when unknown.
+   */
   birthDate: string | null;
+  /** True when the date comes from the account's own household. */
+  birthDateFromHousehold: boolean;
   /** Set by a person, never derived (§3.5). */
   shortWalks: boolean;
   /** Age at the start of the trip, which is the age that plans it. */
@@ -70,35 +88,10 @@ export interface TravellersResponse {
   effect: { withChildren: boolean; limitedMobility: boolean; reasons: string[] };
 }
 
-export interface TravellerSuggestion {
-  /**
-   * The household entry, when this suggestion is one. Null for a
-   * participant of the trip who is not in the household list: an
-   * account is a person too, and having to type their name again
-   * because they happen to hold a login is the kind of gap that makes
-   * an app feel unfinished.
-   */
-  subjectPersonId: number | null;
-  /** The account, when the suggestion is a fellow planner (§6.2). */
-  userId: number | null;
-  label: string;
-  relation: string;
-  birthDate: string | null;
-  ageAtStart: number | null;
-}
-
-export interface TravellerSuggestionsResponse {
-  suggestions: TravellerSuggestion[];
-}
-
 export interface AddTravellerRequest {
   planId: number;
-  /** One of the household, by its id. */
-  subjectPersonId?: number;
-  /** Or somebody who plans this trip, by their account (§6.2). */
-  userId?: number;
-  /** Or somebody who is not: their name, and optionally a birth date. */
-  label?: string;
+  /** Somebody without an account: their name, and optionally a birth date. */
+  label: string;
   birthDate?: string;
   /** "Mehr Zeit einplanen" — a statement about a person, so it is asked for. */
   shortWalks?: boolean;
@@ -117,9 +110,8 @@ export interface UpdateTravellerRequest {
   /** A new name for somebody entered by hand. */
   label?: string;
   /**
-   * A birth date for somebody entered by hand, or null to take it
-   * away. A household entry's date comes from the household and is
-   * not edited here.
+   * A birth date, or null to take it away. Not for an account whose
+   * own household knows the date: that is where a correction lands.
    */
   birthDate?: string | null;
 }
@@ -135,92 +127,7 @@ export const planTravellers = api(
   },
 );
 
-/**
- * The household, as people who could be coming.
- *
- * Offered, not added: a trip is not automatically everybody who lives
- * in the house, and taking the household along by default would make
- * "wer fährt mit" a question the app answered for itself.
- */
-export const suggestTravellers = api(
-  {
-    expose: true,
-    method: "GET",
-    path: "/trip-planner/plans/:planId/travellers/suggestions",
-    auth: true,
-  },
-  async (req: TravellersRequest): Promise<TravellerSuggestionsResponse> => {
-    const userId = requireUser();
-    const plan = await loadPlan(req.planId, userId);
-    if (!plan) throw APIError.notFound("plan not found");
-
-    const already = new Set(
-      (await db
-        .select({ id: tripPlanTravellers.subject_person_id })
-        .from(tripPlanTravellers)
-        .where(eq(tripPlanTravellers.plan_id, req.planId)))
-        .map((row) => row.id)
-        .filter((id): id is number => id !== null),
-    );
-
-    const household = await householdOf(userId);
-
-    // The people who plan this trip are people on it too (§6.2, §3.5).
-    // Leaving them out meant an adult with a login had to be entered
-    // twice — once by e-mail as a planner, once by hand as a traveller.
-    const planners = await plannersOf(plan);
-    const alreadyByUser = new Set(
-      (await db
-        .select({ id: tripPlanTravellers.added_for_user_id })
-        .from(tripPlanTravellers)
-        .where(eq(tripPlanTravellers.plan_id, req.planId)))
-        .map((row) => row.id)
-        .filter((id): id is number => id !== null),
-    );
-    // A planner who is also in the household appears once, as the
-    // household entry: that one knows their birth date. "Also in the
-    // household" is decided by `same-person.ts`, not by an exact name:
-    // the organiser is "Max Beispiel (Ehemann)" in their own household
-    // and "Max" as an account, and was offered twice.
-    const inHousehold = (planner: (typeof planners)[number]) =>
-      household.some((person) => samePerson(person, planner));
-    // Already on the trip under the other record: the account was
-    // added, so its household entry is not offered — and the other way
-    // round.
-    const onTripAsAccount = (person: (typeof household)[number]) =>
-      planners.some((planner) => alreadyByUser.has(planner.id) && samePerson(person, planner));
-
-    const on = startOf(plan);
-    return {
-      suggestions: [
-        ...household
-          .filter((person) => !already.has(person.id))
-          .filter((person) => !onTripAsAccount(person))
-          .map((person) => ({
-            subjectPersonId: person.id,
-            userId: null,
-            label: person.name,
-            relation: person.relation,
-            birthDate: person.birthDate,
-            ageAtStart: on === null ? null : ageOn(person.birthDate, on),
-          })),
-        ...planners
-          .filter((person) => !alreadyByUser.has(person.id))
-          .filter((person) => !inHousehold(person))
-          .map((person) => ({
-            subjectPersonId: null,
-            userId: person.id,
-            label: person.name,
-            relation: "plant mit",
-            birthDate: null,
-            ageAtStart: null,
-          })),
-      ],
-    };
-  },
-);
-
-/** "Die Kinder kommen mit." */
+/** "Die Kinder kommen mit." — somebody without an account. */
 export const addTraveller = api(
   { expose: true, method: "POST", path: "/trip-planner/plans/:planId/travellers", auth: true },
   async (req: AddTravellerRequest): Promise<PlanResponse> => {
@@ -230,103 +137,29 @@ export const addTraveller = api(
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
 
-    const label = req.label?.trim();
-    if (req.subjectPersonId === undefined && req.userId === undefined && !label) {
-      throw APIError.invalidArgument("entweder subjectPersonId, userId oder ein Name");
-    }
+    const label = typeof req.label === "string" ? req.label.trim() : "";
+    if (!label) throw APIError.invalidArgument("ein Name wird gebraucht");
 
-    if (req.userId !== undefined) {
-      // Only somebody who is actually on this trip: an account id from
-      // elsewhere must not turn into a name on somebody's travel list.
-      const [planner] = await db
-        .select({ id: users.id, name: users.name })
-        .from(users)
-        .where(eq(users.id, req.userId))
-        .limit(1);
-      if (!planner || !(await isOnTrip(req.planId, planner.id))) {
-        throw APIError.notFound("diese Person plant diese Reise nicht mit");
-      }
-      const [existing] = await db
-        .select({ id: tripPlanTravellers.id })
-        .from(tripPlanTravellers)
-        .where(and(
-          eq(tripPlanTravellers.plan_id, req.planId),
-          eq(tripPlanTravellers.added_for_user_id, planner.id),
-        ))
-        .limit(1);
-      if (existing) throw APIError.alreadyExists("diese Person fährt schon mit");
-      // Or already on the trip as their household entry: one human, one
-      // row (`same-person.ts`).
-      const twin = (await householdOf(userId)).find((person) => samePerson(person, planner));
-      if (twin && await isTravellerBySubject(req.planId, twin.id)) {
-        throw APIError.alreadyExists("diese Person fährt schon mit — als Haushaltseintrag");
-      }
-
-      await db.insert(tripPlanTravellers).values({
-        plan_id: req.planId,
-        added_for_user_id: planner.id,
-        label: label || planner.name,
-        short_walks: req.shortWalks === true,
-        added_by: userId,
-      });
-      return await replanWithGroup(req.planId, userId);
-    }
-
-    if (req.subjectPersonId !== undefined) {
-      // Only the caller's own household: an id from somewhere else must
-      // not turn into a name on somebody's trip.
-      const person = (await householdOf(userId, false)).find((p) => p.id === req.subjectPersonId);
-      if (!person) throw APIError.notFound("person not found");
-
-      if (await isTravellerBySubject(req.planId, person.id)) {
-        throw APIError.alreadyExists("diese Person fährt schon mit");
-      }
-      // Or already on the trip as their account (`same-person.ts`).
-      const asAccount = (await plannersOf(plan)).find((planner) => samePerson(person, planner));
-      if (asAccount) {
-        const [viaAccount] = await db
-          .select({ id: tripPlanTravellers.id })
-          .from(tripPlanTravellers)
-          .where(and(
-            eq(tripPlanTravellers.plan_id, req.planId),
-            eq(tripPlanTravellers.added_for_user_id, asAccount.id),
-          ))
-          .limit(1);
-        if (viaAccount) {
-          throw APIError.alreadyExists("diese Person fährt schon mit — über ihr Konto");
-        }
-      }
-
-      await db.insert(tripPlanTravellers).values({
-        plan_id: req.planId,
-        subject_person_id: person.id,
-        // Copied so the row stays readable if the household entry goes.
-        label: label || person.name,
-        short_walks: req.shortWalks === true,
-        added_by: userId,
-      });
-    } else {
-      await db.insert(tripPlanTravellers).values({
-        plan_id: req.planId,
-        label: label as string,
-        birth_date: validBirthDate(req.birthDate),
-        short_walks: req.shortWalks === true,
-        added_by: userId,
-      });
-    }
+    await db.insert(tripPlanTravellers).values({
+      plan_id: req.planId,
+      label,
+      birth_date: validBirthDate(req.birthDate),
+      short_walks: req.shortWalks === true,
+      added_by: userId,
+    });
 
     return await replanWithGroup(req.planId, userId);
   },
 );
 
 /**
- * "Oma braucht doch kürzere Wege."
+ * "Oma braucht doch mehr Zeit."
  *
  * The flag was settable only at the moment somebody was added, and the
  * app never asked then — so it was displayed and never true. It is a
  * statement about a person (§3.5), and people change their minds about
- * people, so it is editable afterwards like the name of somebody who
- * has no household entry to carry it.
+ * people, so it is editable afterwards, like the name and birth date
+ * of somebody entered by hand.
  */
 export const updateTraveller = api(
   {
@@ -342,7 +175,7 @@ export const updateTraveller = api(
     const [row] = await db
       .select({
         id: tripPlanTravellers.id,
-        subjectPersonId: tripPlanTravellers.subject_person_id,
+        userId: tripPlanTravellers.added_for_user_id,
       })
       .from(tripPlanTravellers)
       .where(and(
@@ -355,14 +188,17 @@ export const updateTraveller = api(
     const patch: Partial<typeof tripPlanTravellers.$inferInsert> = {};
     if (req.shortWalks !== undefined) patch.short_walks = req.shortWalks;
     if (req.label !== undefined) {
+      if (row.userId !== null) {
+        throw APIError.failedPrecondition("der Name kommt aus dem Konto und wird dort geändert");
+      }
       const label = req.label.trim();
       if (!label) throw APIError.invalidArgument("der Name darf nicht leer sein");
       patch.label = label;
     }
     if (req.birthDate !== undefined) {
-      if (row.subjectPersonId !== null) {
+      if (row.userId !== null && (await ownBirthDateOf(row.userId)) !== null) {
         throw APIError.failedPrecondition(
-          "das Geburtsdatum kommt aus dem Haushalt und wird dort geändert",
+          "das Geburtsdatum kommt aus dem eigenen Haushalt der Person und wird dort geändert",
         );
       }
       patch.birth_date = req.birthDate === null ? null : validBirthDate(req.birthDate);
@@ -376,7 +212,7 @@ export const updateTraveller = api(
   },
 );
 
-/** "Doch ohne die Kinder." */
+/** "Doch ohne die Kinder." — somebody without an account. */
 export const removeTraveller = api(
   {
     expose: true,
@@ -388,17 +224,25 @@ export const removeTraveller = api(
     const userId = requireUser();
     await requireOrganiser(req.planId, userId, "Wer mitfährt");
 
-    const gone = await db
-      .delete(tripPlanTravellers)
+    const [row] = await db
+      .select({ id: tripPlanTravellers.id, userId: tripPlanTravellers.added_for_user_id })
+      .from(tripPlanTravellers)
       .where(and(
         eq(tripPlanTravellers.plan_id, req.planId),
         eq(tripPlanTravellers.id, req.travellerId),
       ))
-      .returning({ id: tripPlanTravellers.id });
-    if (gone.length === 0) {
-      throw APIError.notFound("diese Person fährt bei dieser Reise nicht mit");
+      .limit(1);
+    if (!row) throw APIError.notFound("diese Person fährt bei dieser Reise nicht mit");
+    if (row.userId !== null) {
+      // Whoever plans is on the trip. Taking them off the trip while
+      // they still plan it would be two answers to one question; the
+      // invitation is where they leave.
+      throw APIError.failedPrecondition(
+        "wer mitplant, fährt mit — unter „Planen mit“ entfernen",
+      );
     }
 
+    await db.delete(tripPlanTravellers).where(eq(tripPlanTravellers.id, row.id));
     return await replanWithGroup(req.planId, userId);
   },
 );
@@ -411,8 +255,11 @@ export const removeTraveller = api(
  * re-planner reads each leg back as the request that would produce it,
  * and a stale copy would plan the days around a group that changed a
  * moment ago.
+ *
+ * Exported for the invitation: somebody joining or leaving the planners
+ * joins or leaves the group, and the days follow.
  */
-async function replanWithGroup(planId: number, userId: number): Promise<PlanResponse> {
+export async function replanWithGroup(planId: number, userId: number): Promise<PlanResponse> {
   const plan = await loadPlan(planId, userId);
   if (!plan) throw APIError.internal("plan vanished while changing the travel group");
   const { effect } = await travellersOf(plan);
@@ -424,43 +271,56 @@ async function replanWithGroup(planId: number, userId: number): Promise<PlanResp
 }
 
 /**
- * The trip's travellers, with the household's birth dates joined in.
+ * The trip's travellers: the accounts that plan it, then everybody
+ * entered by hand.
  *
  * Exported so the readiness screen and the settings screen can show the
  * same sentences without a second reading of the same rule.
  */
 export async function travellersOf(plan: StoredPlan): Promise<TravellersResponse> {
+  await syncPlanners(plan);
+
   const rows = await db
     .select({
       id: tripPlanTravellers.id,
-      subjectPersonId: tripPlanTravellers.subject_person_id,
+      userId: tripPlanTravellers.added_for_user_id,
       label: tripPlanTravellers.label,
+      accountName: users.name,
       ownBirthDate: tripPlanTravellers.birth_date,
       shortWalks: tripPlanTravellers.short_walks,
-      householdBirthDate: userSubjectPersons.birth_date,
-      addedBy: users.name,
+      addedBy: addedByUser.name,
     })
     .from(tripPlanTravellers)
-    .leftJoin(userSubjectPersons, eq(userSubjectPersons.id, tripPlanTravellers.subject_person_id))
-    .leftJoin(users, eq(users.id, tripPlanTravellers.added_by))
+    .leftJoin(users, eq(users.id, tripPlanTravellers.added_for_user_id))
+    .leftJoin(addedByUser, eq(addedByUser.id, tripPlanTravellers.added_by))
     .where(eq(tripPlanTravellers.plan_id, plan.id))
-    .orderBy(asc(tripPlanTravellers.created_at));
+    .orderBy(asc(tripPlanTravellers.created_at), asc(tripPlanTravellers.id));
+
+  // An account's own household knows their birth date, when they keep
+  // one; a correction lands there, so it wins over what was typed here.
+  const householdDates = await ownBirthDatesOf(
+    rows.map((row) => row.userId).filter((id): id is number => id !== null),
+  );
 
   const on = startOf(plan);
-  const people: Traveller[] = rows.map((row) => ({
-    label: row.label,
-    // The household entry wins: that is where a correction lands.
-    birthDate: row.householdBirthDate ?? row.ownBirthDate,
-    shortWalks: row.shortWalks,
-  }));
+  const people: (Traveller & { fromHousehold: boolean })[] = rows.map((row) => {
+    const fromHousehold = row.userId !== null ? householdDates.get(row.userId) ?? null : null;
+    return {
+      label: row.accountName ?? row.label,
+      birthDate: fromHousehold ?? row.ownBirthDate,
+      fromHousehold: fromHousehold !== null,
+      shortWalks: row.shortWalks,
+    };
+  });
   const reading: GroupReading = readGroup(people, on);
 
   return {
     travellers: rows.map((row, i) => ({
       id: row.id,
-      subjectPersonId: row.subjectPersonId,
-      label: row.label,
+      userId: row.userId,
+      label: people[i].label,
       birthDate: people[i].birthDate ?? null,
+      birthDateFromHousehold: people[i].fromHousehold,
       shortWalks: row.shortWalks,
       ageAtStart: on === null ? null : ageOn(people[i].birthDate, on),
       addedBy: row.addedBy,
@@ -474,32 +334,19 @@ export async function travellersOf(plan: StoredPlan): Promise<TravellersResponse
   };
 }
 
-/** The trip's first dated day — the age that plans it (§3.5). */
 /**
- * The caller's household as the travel group sees it — with the
- * relation kind, which is the one field that can say "this is me".
+ * Whoever plans the trip is on it: one row per account on the trip,
+ * no row for an account that left.
+ *
+ * Done on every read rather than only at the invitation, so a trip
+ * whose planners changed some other way — a hand-over, an older
+ * database — is right the next time anybody looks. Idempotent: the
+ * unique index on (plan_id, added_for_user_id) makes a second insert
+ * a no-op.
  */
-async function householdOf(userId: number, onlyInHousehold = true) {
-  const rows = await db
-    .select({
-      id: userSubjectPersons.id,
-      name: userSubjectPersons.full_name,
-      relation: userSubjectPersons.relation_tag,
-      relationKind: userSubjectPersons.relation_kind,
-      birthDate: userSubjectPersons.birth_date,
-    })
-    .from(userSubjectPersons)
-    .where(onlyInHousehold
-      ? and(eq(userSubjectPersons.user_id, userId), eq(userSubjectPersons.in_household, true))
-      : eq(userSubjectPersons.user_id, userId))
-    .orderBy(asc(userSubjectPersons.full_name));
-  return rows.map((row) => ({ ...row, ownerId: userId }));
-}
-
-/** The accounts that plan this trip: the organiser and everybody shared with. */
-async function plannersOf(plan: StoredPlan) {
-  return await db
-    .select({ id: users.id, name: users.name })
+async function syncPlanners(plan: StoredPlan): Promise<void> {
+  const planners = await db
+    .select({ id: users.id, name: users.name, email: users.email })
     .from(users)
     .where(inArray(users.id, [
       plan.ownerId,
@@ -508,20 +355,58 @@ async function plannersOf(plan: StoredPlan) {
         .from(tripPlanShares)
         .where(eq(tripPlanShares.plan_id, plan.id))).map((row) => row.id),
     ]));
-}
+  const plannerIds = planners.map((planner) => planner.id);
 
-async function isTravellerBySubject(planId: number, subjectPersonId: number): Promise<boolean> {
-  const [row] = await db
-    .select({ id: tripPlanTravellers.id })
-    .from(tripPlanTravellers)
+  if (planners.length > 0) {
+    await db
+      .insert(tripPlanTravellers)
+      .values(planners.map((planner) => ({
+        plan_id: plan.id,
+        added_for_user_id: planner.id,
+        label: planner.name ?? planner.email,
+        added_by: plan.ownerId,
+      })))
+      .onConflictDoNothing();
+  }
+  // Somebody who stopped planning stopped travelling. Their votes by
+  // proxy and branch memberships go with the row (ON DELETE CASCADE);
+  // a person who is not on the trip has no say on it.
+  await db
+    .delete(tripPlanTravellers)
     .where(and(
-      eq(tripPlanTravellers.plan_id, planId),
-      eq(tripPlanTravellers.subject_person_id, subjectPersonId),
-    ))
-    .limit(1);
-  return row !== undefined;
+      eq(tripPlanTravellers.plan_id, plan.id),
+      isNotNull(tripPlanTravellers.added_for_user_id),
+      plannerIds.length > 0
+        ? notInArray(tripPlanTravellers.added_for_user_id, plannerIds)
+        : sql`true`,
+    ));
 }
 
+/** The birth date each account keeps for itself in its own household. */
+async function ownBirthDatesOf(userIds: number[]): Promise<Map<number, string>> {
+  if (userIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      userId: userSubjectPersons.user_id,
+      birthDate: userSubjectPersons.birth_date,
+    })
+    .from(userSubjectPersons)
+    .where(and(
+      inArray(userSubjectPersons.user_id, userIds),
+      eq(userSubjectPersons.relation_kind, "self"),
+    ));
+  const dates = new Map<number, string>();
+  for (const row of rows) {
+    if (row.birthDate) dates.set(row.userId, row.birthDate);
+  }
+  return dates;
+}
+
+async function ownBirthDateOf(userId: number): Promise<string | null> {
+  return (await ownBirthDatesOf([userId])).get(userId) ?? null;
+}
+
+/** The trip's first dated day — the age that plans it (§3.5). */
 function startOf(plan: StoredPlan): string | null {
   return plan.legs
     .map((leg) => leg.startDate)

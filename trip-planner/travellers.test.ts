@@ -1,10 +1,11 @@
 /**
  * Who is coming, and what the planner does about it (§3.5).
  *
- * The three things worth pinning down: the household is offered rather
- * than taken along, adding a small child actually shortens the day
- * (otherwise the whole feature is a label), and "wer mitfährt" is the
- * organiser's call — it is the frame, not a contribution.
+ * The three things worth pinning down: whoever plans the trip is on it
+ * (and nobody else with an account is), adding a small child actually
+ * shortens the day (otherwise the whole feature is a label), and "wer
+ * mitfährt" is the organiser's call — it is the frame, not a
+ * contribution.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,12 +24,12 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { createTripPlan } from "./plans";
+import { createTripPlan, getTripPlan } from "./plans";
+import { inviteToTrip, removeFromTrip } from "./shares";
 import {
   addTraveller,
   planTravellers,
   removeTraveller,
-  suggestTravellers,
   updateTraveller,
 } from "./travellers";
 
@@ -139,156 +140,167 @@ beforeEach(async () => {
   return () => resetGeoClient();
 });
 
-describe("the household is offered, not taken along", () => {
-  it("suggests the people who live here, with their age at the start", async () => {
-    await household("Kind A", "kind", "2020-06-15");
-    const plan = await trip();
-
-    const { suggestions } = await suggestTravellers({ planId: plan.id });
-
-    const fromHousehold = suggestions.filter((s) => s.subjectPersonId !== null);
-    expect(fromHousehold).toHaveLength(1);
-    expect(fromHousehold[0].label).toBe("Kind A");
-    expect(fromHousehold[0].ageAtStart).toBe(7);
-  });
-
-  it("leaves out somebody who does not live here", async () => {
-    await household("Weit weg", "sonstige", "1970-01-01", false);
-    const plan = await trip();
-
-    const { suggestions } = await suggestTravellers({ planId: plan.id });
-    expect(suggestions.filter((s) => s.subjectPersonId !== null)).toEqual([]);
-  });
-
-  it("takes nobody along by itself", async () => {
-    await household("Kind A", "kind", "2020-06-15");
+describe("whoever plans the trip is on it", () => {
+  it("has the organiser on the trip from the start, as their account", async () => {
     const plan = await trip();
 
     const { travellers } = await planTravellers({ planId: plan.id });
 
-    expect(travellers).toEqual([]);
+    expect(travellers).toHaveLength(1);
+    expect(travellers[0].userId).toBe(ownerId);
+    expect(travellers[0].label).toBe("Planerin");
   });
 
-  it("offers the people who plan the trip, so nobody is typed in twice", async () => {
-    // An adult with a login is a person on the trip too (§3.5, §6.2);
-    // having to enter them by e-mail and then again by hand was a gap,
-    // not a distinction.
+  it("puts a fellow planner on the trip with the invitation, and takes them off with it", async () => {
+    // An adult with a login is a person on the trip (§3.5, §6.2):
+    // there is no second list to type them into, and nothing to match
+    // by name.
     const plan = await trip();
-    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
 
-    const { suggestions } = await suggestTravellers({ planId: plan.id });
+    await inviteToTrip({ planId: plan.id, userId: otherId });
+    let { travellers } = await planTravellers({ planId: plan.id });
+    expect(travellers.map((t) => t.userId)).toEqual([ownerId, otherId]);
+    expect(travellers[1].label).toBe("Mitreisender");
 
-    const planner = suggestions.find((s) => s.userId === otherId);
-    expect(planner?.label).toBe("Mitreisender");
-    expect(planner?.relation).toBe("plant mit");
-    expect(suggestions.some((s) => s.userId === ownerId)).toBe(true);
+    await removeFromTrip({ planId: plan.id, userId: otherId });
+    ({ travellers } = await planTravellers({ planId: plan.id }));
+    expect(travellers.map((t) => t.userId)).toEqual([ownerId]);
   });
 
-  it("takes a planner along, and stops offering them afterwards", async () => {
+  it("shows an account by its live name, not the name it joined with", async () => {
     const plan = await trip();
-    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+    await planTravellers({ planId: plan.id });
 
-    await addTraveller({ planId: plan.id, userId: otherId });
+    await db.update(users).set({ name: "Planerin Beispiel" }).where(eq(users.id, ownerId));
 
     const { travellers } = await planTravellers({ planId: plan.id });
-    expect(travellers.map((t) => t.label)).toContain("Mitreisender");
-    const { suggestions } = await suggestTravellers({ planId: plan.id });
-    expect(suggestions.some((s) => s.userId === otherId)).toBe(false);
+    expect(travellers[0].label).toBe("Planerin Beispiel");
   });
 
-  it("does not offer the same person twice when they are also in the household", async () => {
-    await household("Planerin", "selbst", "1985-03-02");
+  it("takes an account's birth date from its own household, and plans with it", async () => {
+    // Every account keeps a household of its own with a `self` entry;
+    // the date there is theirs, and a correction lands there.
+    await household("Planerin Beispiel", "selbst", "2020-06-15", true, "self");
     const plan = await trip();
 
-    const { suggestions } = await suggestTravellers({ planId: plan.id });
+    const { travellers, effect } = await planTravellers({ planId: plan.id });
 
-    expect(suggestions.filter((s) => s.label === "Planerin")).toHaveLength(1);
-    expect(suggestions.find((s) => s.label === "Planerin")?.subjectPersonId).not.toBeNull();
+    expect(travellers[0].birthDate).toBe("2020-06-15");
+    expect(travellers[0].birthDateFromHousehold).toBe(true);
+    expect(travellers[0].ageAtStart).toBe(7);
+    expect(effect.withChildren).toBe(true);
   });
 
-  it("knows the organiser's own household entry is the organiser, whatever the names", async () => {
-    // The reported case: "Max Beispiel (Ehemann)" in the household the
-    // organiser keeps, "Max" as the account — one human, offered twice.
-    // The household's `self` entry is the account; the name is not the
-    // key.
-    const self = await household("Planerin Beispiel", "Ehefrau", "1985-03-02", true, "self");
+  it("does not take a birth date from somebody else's entry in the household", async () => {
+    // The organiser's household lists the spouse with a date; that is
+    // not the organiser's date, and not the spouse's account's either.
+    await household("Mitreisender Beispiel", "Ehemann", "1984-05-06", true, "spouse");
     const plan = await trip();
+    await inviteToTrip({ planId: plan.id, userId: otherId });
 
-    const { suggestions } = await suggestTravellers({ planId: plan.id });
+    const { travellers } = await planTravellers({ planId: plan.id });
 
-    expect(suggestions.some((s) => s.userId === ownerId)).toBe(false);
-    const asHousehold = suggestions.filter((s) => s.subjectPersonId === self);
-    expect(asHousehold).toHaveLength(1);
-    // Offered as the household entry, which is the one that knows the
-    // birth date.
-    expect(asHousehold[0].ageAtStart).toBe(42);
+    expect(travellers.every((t) => t.birthDate === null)).toBe(true);
   });
 
-  it("does not hand the organiser's self entry to a namesake who plans along", async () => {
-    // Two people called the same: the self entry is the owner's, and a
-    // fellow planner with the same display name is still somebody else.
-    await household("Mitreisender", "Ich", null, true, "self");
+  it("cannot take a planner off the trip here — that is the invitation's job", async () => {
     const plan = await trip();
-    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+    const { travellers } = await planTravellers({ planId: plan.id });
 
-    const { suggestions } = await suggestTravellers({ planId: plan.id });
-
-    expect(suggestions.some((s) => s.userId === otherId)).toBe(true);
+    await expect(removeTraveller({ planId: plan.id, travellerId: travellers[0].id }))
+      .rejects.toThrow(/Planen mit/);
   });
 
-  it("stops offering the household entry once the account is on the trip, and vice versa", async () => {
-    const self = await household("Planerin Beispiel", "Ich", "1985-03-02", true, "self");
+  it("keeps a planner's name to the account", async () => {
     const plan = await trip();
+    const { travellers } = await planTravellers({ planId: plan.id });
 
-    await addTraveller({ planId: plan.id, userId: ownerId });
-    let { suggestions } = await suggestTravellers({ planId: plan.id });
-    expect(suggestions.some((s) => s.subjectPersonId === self)).toBe(false);
-    expect(suggestions.some((s) => s.userId === ownerId)).toBe(false);
-
-    // One human, one row: the other record is refused, not added.
-    await expect(addTraveller({ planId: plan.id, subjectPersonId: self }))
-      .rejects.toThrow(/fährt schon mit/);
-
-    await db.delete(tripPlanTravellers);
-    await addTraveller({ planId: plan.id, subjectPersonId: self });
-    ({ suggestions } = await suggestTravellers({ planId: plan.id }));
-    expect(suggestions.some((s) => s.userId === ownerId)).toBe(false);
-    await expect(addTraveller({ planId: plan.id, userId: ownerId }))
-      .rejects.toThrow(/fährt schon mit/);
+    await expect(updateTraveller({
+      planId: plan.id, travellerId: travellers[0].id, label: "Anders",
+    })).rejects.toThrow(/aus dem Konto/);
   });
 
-  it("refuses an account that does not plan this trip", async () => {
+  it("lets 'mehr Zeit' be said about a planner, and a birth date their household lacks", async () => {
     const plan = await trip();
+    const { travellers } = await planTravellers({ planId: plan.id });
 
-    await expect(addTraveller({ planId: plan.id, userId: otherId }))
-      .rejects.toThrow(/plant diese Reise nicht mit/);
+    const { plan: after } = await updateTraveller({
+      planId: plan.id, travellerId: travellers[0].id, shortWalks: true, birthDate: "1944-02-02",
+    });
+
+    expect((after.constraints.group as Record<string, unknown>).limitedMobility).toBe(true);
+    const { travellers: again } = await planTravellers({ planId: plan.id });
+    expect(again[0].shortWalks).toBe(true);
+    expect(again[0].birthDate).toBe("1944-02-02");
+    expect(again[0].birthDateFromHousehold).toBe(false);
   });
 
-  it("refuses the same account twice", async () => {
+  it("leaves a birth date the household knows to the household", async () => {
+    await household("Planerin Beispiel", "selbst", "1985-03-02", true, "self");
     const plan = await trip();
-    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
-    await addTraveller({ planId: plan.id, userId: otherId });
+    const { travellers } = await planTravellers({ planId: plan.id });
 
-    await expect(addTraveller({ planId: plan.id, userId: otherId }))
-      .rejects.toThrow(/fährt schon mit/);
+    await expect(updateTraveller({
+      planId: plan.id, travellerId: travellers[0].id, birthDate: "1990-01-01",
+    })).rejects.toThrow(/eigenen Haushalt/);
   });
 
-  it("stops offering somebody who is already coming", async () => {
-    const child = await household("Kind A", "kind", "2020-06-15");
+  it("re-plans the days when a planner joins or leaves", async () => {
+    // Somebody whose own household says they are a child shortens the
+    // day the moment they are invited, and gives it back when they go.
+    actAs(otherId);
+    await db.insert(userSubjectPersons).values({
+      user_id: otherId, full_name: "Mitreisender Beispiel", relation_tag: "selbst",
+      relation_kind: "self", birth_date: "2020-06-15", in_household: true,
+    });
+    actAs(ownerId);
     const plan = await trip();
-    await addTraveller({ planId: plan.id, subjectPersonId: child });
+    const before = budget(plan);
 
-    const { suggestions } = await suggestTravellers({ planId: plan.id });
-    expect(suggestions.filter((s) => s.subjectPersonId !== null)).toEqual([]);
+    await inviteToTrip({ planId: plan.id, userId: otherId });
+    const { plan: withChild } = await getTripPlan({ planId: plan.id });
+    expect(budget(withChild)).toBeLessThan(before);
+
+    await removeFromTrip({ planId: plan.id, userId: otherId });
+    const { plan: after } = await getTripPlan({ planId: plan.id });
+    expect(budget(after)).toBe(before);
+  });
+});
+
+describe("somebody without an account is entered by hand", () => {
+  it("is on the trip with their name, and their age at the start", async () => {
+    const plan = await trip();
+
+    await addTraveller({ planId: plan.id, label: "Kind A", birthDate: "2020-06-15" });
+
+    const { travellers } = await planTravellers({ planId: plan.id });
+    const child = travellers.find((t) => t.label === "Kind A");
+    expect(child?.userId).toBeNull();
+    expect(child?.ageAtStart).toBe(7);
+  });
+
+  it("refuses a traveller without a name", async () => {
+    const plan = await trip();
+
+    await expect(addTraveller({ planId: plan.id, label: "  " }))
+      .rejects.toThrow(/ein Name/);
+  });
+
+  it("refuses a birth date that is not a date", async () => {
+    const plan = await trip();
+
+    await expect(addTraveller({ planId: plan.id, label: "Kind A", birthDate: "15.06.2020" }))
+      .rejects.toThrow(/YYYY-MM-DD/);
   });
 });
 
 describe("a child on the trip shortens the day", () => {
+  const child = { label: "Kind A", birthDate: "2020-06-15" };
+
   it("writes the flag into the trip and says why", async () => {
-    const child = await household("Kind A", "kind", "2020-06-15");
     const plan = await trip();
 
-    const { plan: after } = await addTraveller({ planId: plan.id, subjectPersonId: child });
+    const { plan: after } = await addTraveller({ planId: plan.id, ...child });
 
     expect((after.constraints.group as Record<string, unknown>).withChildren).toBe(true);
     const { effect } = await planTravellers({ planId: plan.id });
@@ -298,24 +310,20 @@ describe("a child on the trip shortens the day", () => {
 
   it("actually plans a smaller day, not just a label", async () => {
     // §3.5's whole point: the group works on the block's time budget.
-    const child = await household("Kind A", "kind", "2020-06-15");
     const plan = await trip();
     const before = budget(plan);
 
-    const { plan: after } = await addTraveller({ planId: plan.id, subjectPersonId: child });
+    const { plan: after } = await addTraveller({ planId: plan.id, ...child });
 
     expect(budget(after)).toBeLessThan(before);
   });
 
   it("gives the minutes back when the child stays at home", async () => {
-    const child = await household("Kind A", "kind", "2020-06-15");
     const plan = await trip();
     const before = budget(plan);
-    const { plan: withChild } = await addTraveller({ planId: plan.id, subjectPersonId: child });
-    const [row] = await db
-      .select({ id: tripPlanTravellers.id })
-      .from(tripPlanTravellers)
-      .where(eq(tripPlanTravellers.plan_id, plan.id));
+    const { plan: withChild } = await addTraveller({ planId: plan.id, ...child });
+    const { travellers } = await planTravellers({ planId: plan.id });
+    const row = travellers.find((t) => t.label === "Kind A")!;
 
     const { plan: after } = await removeTraveller({ planId: plan.id, travellerId: row.id });
 
@@ -325,17 +333,18 @@ describe("a child on the trip shortens the day", () => {
   });
 
   it("counts the age at the start, so a grown-up child changes nothing", async () => {
-    const grown = await household("Kind B", "kind", "2004-06-15");
     const plan = await trip();
     const before = budget(plan);
 
-    const { plan: after } = await addTraveller({ planId: plan.id, subjectPersonId: grown });
+    const { plan: after } = await addTraveller({
+      planId: plan.id, label: "Kind B", birthDate: "2004-06-15",
+    });
 
     expect(budget(after)).toBe(before);
     expect(after.constraints.group).toBeUndefined();
   });
 
-  it("takes 'kürzere Wege' from the person who said it", async () => {
+  it("takes 'mehr Zeit' from the person who said it", async () => {
     const plan = await trip();
 
     const { plan: after } = await addTraveller({
@@ -347,7 +356,7 @@ describe("a child on the trip shortens the day", () => {
 });
 
 describe("changing what is known about a traveller", () => {
-  it("lets 'kürzere Wege' be said afterwards, and replans", async () => {
+  it("lets 'mehr Zeit' be said afterwards, and replans", async () => {
     // The flag was settable only while adding, and nobody asked then.
     const plan = await trip();
     const { plan: withOma } = await addTraveller({
@@ -370,38 +379,29 @@ describe("changing what is known about a traveller", () => {
     const plan = await trip();
     await addTraveller({ planId: plan.id, label: "Freundin" });
     const { travellers } = await planTravellers({ planId: plan.id });
-    const friend = travellers[0];
+    const friend = travellers.find((t) => t.label === "Freundin")!;
 
     await updateTraveller({
       planId: plan.id, travellerId: friend.id, label: "Tante", birthDate: "1970-05-05",
     });
 
     const { travellers: after } = await planTravellers({ planId: plan.id });
-    expect(after[0].label).toBe("Tante");
-    expect(after[0].birthDate).toBe("1970-05-05");
-    expect(after[0].ageAtStart).toBe(57);
-  });
-
-  it("leaves a household entry's birth date to the household", async () => {
-    const child = await household("Kind A", "kind", "2020-06-15");
-    const plan = await trip();
-    await addTraveller({ planId: plan.id, subjectPersonId: child });
-    const { travellers } = await planTravellers({ planId: plan.id });
-
-    await expect(updateTraveller({
-      planId: plan.id, travellerId: travellers[0].id, birthDate: "2019-01-01",
-    })).rejects.toThrow(/aus dem Haushalt/);
+    const aunt = after.find((t) => t.id === friend.id)!;
+    expect(aunt.label).toBe("Tante");
+    expect(aunt.birthDate).toBe("1970-05-05");
+    expect(aunt.ageAtStart).toBe(57);
   });
 
   it("is the organiser's call too", async () => {
     const plan = await trip();
     await addTraveller({ planId: plan.id, label: "Oma" });
     const { travellers } = await planTravellers({ planId: plan.id });
+    const oma = travellers.find((t) => t.label === "Oma")!;
     await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
 
     actAs(otherId);
     await expect(updateTraveller({
-      planId: plan.id, travellerId: travellers[0].id, shortWalks: true,
+      planId: plan.id, travellerId: oma.id, shortWalks: true,
     })).rejects.toThrow(/angelegt hat/);
   });
 
@@ -409,55 +409,35 @@ describe("changing what is known about a traveller", () => {
     const plan = await trip();
     await addTraveller({ planId: plan.id, label: "Oma" });
     const { travellers } = await planTravellers({ planId: plan.id });
+    const oma = travellers.find((t) => t.label === "Oma")!;
 
-    await expect(updateTraveller({ planId: plan.id, travellerId: travellers[0].id, label: "  " }))
+    await expect(updateTraveller({ planId: plan.id, travellerId: oma.id, label: "  " }))
       .rejects.toThrow(/nicht leer/);
-    await expect(updateTraveller({ planId: plan.id, travellerId: travellers[0].id }))
+    await expect(updateTraveller({ planId: plan.id, travellerId: oma.id }))
       .rejects.toThrow(/nichts zu ändern/);
   });
 });
 
 describe("who may say who comes", () => {
   it("is the organiser's call, like the pace (§6.2)", async () => {
-    const child = await household("Kind A", "kind", "2020-06-15");
     const plan = await trip();
     await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
 
     actAs(otherId);
-    await expect(addTraveller({ planId: plan.id, subjectPersonId: child }))
+    await expect(addTraveller({ planId: plan.id, label: "Kind A", birthDate: "2020-06-15" }))
       .rejects.toThrow(/angelegt hat/);
   });
 
-  it("does not take a person out of somebody else's household", async () => {
+  it("does not let a fellow planner take somebody off", async () => {
     const plan = await trip();
+    await addTraveller({ planId: plan.id, label: "Oma" });
+    const { travellers } = await planTravellers({ planId: plan.id });
+    const oma = travellers.find((t) => t.label === "Oma")!;
+    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+
     actAs(otherId);
-    const [stranger] = await db
-      .insert(userSubjectPersons)
-      .values({
-        user_id: otherId, full_name: "Fremdes Kind", relation_tag: "kind",
-        relation_kind: "child", birth_date: "2020-01-01", in_household: true,
-      })
-      .returning({ id: userSubjectPersons.id });
-
-    actAs(ownerId);
-    await expect(addTraveller({ planId: plan.id, subjectPersonId: stranger.id }))
-      .rejects.toThrow(/person not found/);
-  });
-
-  it("refuses a traveller with neither a person nor a name", async () => {
-    const plan = await trip();
-
-    await expect(addTraveller({ planId: plan.id }))
-      .rejects.toThrow(/subjectPersonId, userId oder ein Name/);
-  });
-
-  it("refuses the same person twice", async () => {
-    const child = await household("Kind A", "kind", "2020-06-15");
-    const plan = await trip();
-    await addTraveller({ planId: plan.id, subjectPersonId: child });
-
-    await expect(addTraveller({ planId: plan.id, subjectPersonId: child }))
-      .rejects.toThrow(/fährt schon mit/);
+    await expect(removeTraveller({ planId: plan.id, travellerId: oma.id }))
+      .rejects.toThrow(/angelegt hat/);
   });
 });
 
