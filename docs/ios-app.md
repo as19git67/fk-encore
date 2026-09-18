@@ -38,6 +38,16 @@ Erweiterungen vorgeschlagen, die nur auf dem Gerät sinnvoll sind.
   Einfügen, Tastatur, Standardknöpfe, Foto-Picker, Share-Sheet — englisch,
   mitten in deutschen Texten. Eigene Strings sind weiterhin hart im Code;
   für echte Mehrsprachigkeit bräuchte es zusätzlich einen String-Katalog.
+- **Keine XML-Kommentare in `Info.plist` und `.entitlements`.** Xcode
+  schreibt Property Lists beim Öffnen des Targets in seiner kanonischen Form
+  zurück — Schlüssel alphabetisch sortiert, Kommentare entfernt. Weicht die
+  Datei im Repo davon ab, steht nach jedem Build ein Diff im Arbeitsbaum,
+  der vor dem nächsten `git pull` zurückgesetzt werden muss (so geschehen ab
+  #1252, als der erste Kommentar hineinkam). Was ein Schlüssel bedeutet,
+  steht deshalb hier bzw. in `ios/App/ShareExtension/README.md`:
+  `PHPhotoLibraryPreventAutomaticLimitedAccessAlert` in 2.13,
+  `CFBundleSpokenName`/`INAlternativeAppNames` in 2.14, das
+  `applinks:`-Entitlement in 2.11.
 - **Build-Nummer:** `CURRENT_PROJECT_VERSION` wird nicht mehr von Hand
   gepflegt (sie blieb dabei sechzehn Pull Requests zurück), sondern vom
   pre-commit-Hook aus der Commit-Anzahl abgeleitet:
