@@ -24,6 +24,7 @@ export default defineConfig({
       "finance/sepa-parser.test.ts",
       "web/static-cache.test.ts",
       "web/app-site-association-doc.test.ts",
+      "push/apns-payload.test.ts",
     ],
     exclude: ["node_modules/**", "encore.gen/**", "frontend/**"],
     fileParallelism: false,

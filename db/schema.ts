@@ -1670,6 +1670,28 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   last_used_at: timestamp("last_used_at", { mode: "string", withTimezone: true }),
 });
 
+// iOS device tokens for APNs (#765) — the app's counterpart to
+// push_subscriptions. One row per device; `token` is globally unique so a
+// re-registration from the same phone upserts. `environment` is
+// 'production' or 'sandbox' (an Xcode build registers against the sandbox
+// gateway, and the two do not accept each other's tokens).
+export const apnsDeviceTokens = pgTable("apns_device_tokens", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  environment: text("environment").notNull().default("production"),
+  device_name: text("device_name"),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  last_used_at: timestamp("last_used_at", { mode: "string", withTimezone: true }),
+});
+
 export const photoComments = pgTable("photo_comments", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   photo_id: integer("photo_id")

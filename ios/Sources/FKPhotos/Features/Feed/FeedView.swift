@@ -11,6 +11,8 @@ struct FeedView: View {
     /// reminder and this is the loud one.
     @State private var bannerDismissed = false
     @State private var openReview = false
+    /// Deep-link pushes waiting at this root (#768 §5a).
+    @State private var router = AppDeepLinkRouter.shared
 
     private var pendingGroups: Int {
         reviewCount.pending ?? 0
@@ -85,9 +87,12 @@ struct FeedView: View {
                 .accessibilityLabel("Rückblicke")
             }
         }
-        // Value-based so a deep link (#768 §5a) can push the list from the
-        // tab bar's `NavigationPath`.
         .navigationDestination(for: RecapsRef.self) { _ in
+            RecapsListView()
+        }
+        // A deep link to the recaps (#768 §5a) pushes the same list from
+        // here; item destination, not a path binding — see `AppDeepLinkRouter`.
+        .navigationDestination(item: $router.recapsToOpen) { _ in
             RecapsListView()
         }
         .refreshable {

@@ -22,6 +22,26 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         return true
     }
 
+    // MARK: - Remote notifications (#765)
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        Task { @MainActor in
+            RemotePushManager.shared.didRegister(deviceToken: deviceToken)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        Task { @MainActor in
+            RemotePushManager.shared.didFailToRegister(error)
+        }
+    }
+
     func applicationDidEnterBackground(_ application: UIApplication) {
         // Schedule the next sync whenever the app moves to the background.
         BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
@@ -59,18 +79,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 TripAutoStartMonitor.shared.handleNotificationAction(action)
                 completionHandler()
             }
-        case ReviewQueueNotice.notificationCategoryId:
-            // No action buttons on this one — any tap on it means „show me",
-            // which is the deep link it was posted with (#968).
+        default:
+            // Everything else carries where a tap should land as `url`: the
+            // review notice its app-scheme link (#968), a remote push from
+            // the server the web-relative path of the album or feed (#765).
+            // Both go through the one router.
             Task { @MainActor in
-                if let urlString = response.notification.request.content.userInfo["url"] as? String,
-                   let url = URL(string: urlString) {
-                    AppDeepLinkRouter.shared.handle(url)
+                if let urlString = response.notification.request.content.userInfo["url"] as? String {
+                    AppDeepLinkRouter.shared.handle(urlString: urlString)
                 }
                 completionHandler()
             }
-        default:
-            completionHandler()
         }
     }
 

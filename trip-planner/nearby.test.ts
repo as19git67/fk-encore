@@ -9,6 +9,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
 import { osmRegionImports, tripPlans, users } from "../db/schema";
@@ -62,7 +63,7 @@ beforeEach(async () => {
   clearRouterCache();
   const [user] = await db
     .insert(users)
-    .values({ email: `near-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `near-${randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   vi.mocked(getAuthData).mockReturnValue({
     userID: String(user.id),

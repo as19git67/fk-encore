@@ -43,13 +43,23 @@ public final class AppDeepLinkRouter {
 
     /// Where the tab bar should navigate. Distinct from the covers above
     /// because a push needs the tab's own `NavigationPath`.
+    /// Which tab a link needs. The push itself happens at that tab's root
+    /// view through the `*ToOpen` items below.
     enum Navigation: Equatable {
-        case album(id: Int)
-        case person(id: Int)
-        case recaps
+        case albums
         case feed
         case search
     }
+
+    /// Pushes waiting at a tab's root, bound to `navigationDestination(item:)`
+    /// there. Item destinations rather than a `NavigationPath` binding on
+    /// the stacks: with a bound path, the grids' own item-based pushes (the
+    /// fullscreen viewer) rebuild their source view on pop and lose its
+    /// scroll position — the tab stacks stay unbound, and a deep link is
+    /// one more item destination at the root.
+    var albumToOpen: AlbumOpen?
+    var personToOpen: PersonOpen?
+    var recapsToOpen: RecapsOpen?
 
     /// A query waiting for the search tab (an App Intent, #766). The tab
     /// takes it when it appears; a flag rather than a call because the tab
@@ -74,6 +84,25 @@ public final class AppDeepLinkRouter {
     public func handle(_ url: URL) {
         guard let link = AppDeepLink.parse(url, serverURL: serverURL) else { return }
         open(link)
+    }
+
+    /// A URL as text — from a notification payload. A web-relative path
+    /// (`/app/fotos/alben/12`, what the server's push payloads carry) is
+    /// resolved against the configured server first, so the server never
+    /// needs to know its own origin.
+    public func handle(urlString: String) {
+        guard let url = Self.resolve(urlString, serverURL: serverURL) else { return }
+        handle(url)
+    }
+
+    /// Pure, hence `nonisolated`: the class is main-actor bound, and a test
+    /// wants to call this without an actor hop.
+    nonisolated static func resolve(_ urlString: String, serverURL: URL?) -> URL? {
+        if urlString.hasPrefix("/") {
+            guard let serverURL else { return nil }
+            return URL(string: urlString, relativeTo: serverURL)?.absoluteURL
+        }
+        return URL(string: urlString)
     }
 
     /// Open a target the app produced itself (a Spotlight hit, an intent).
@@ -102,11 +131,14 @@ public final class AppDeepLinkRouter {
             Task { await resolveSharedAlbum(token) }
             return nil
         case .album(let id):
-            return .album(id: id)
+            albumToOpen = AlbumOpen(id: id)
+            return .albums
         case .person(let id):
-            return .person(id: id)
+            personToOpen = PersonOpen(id: id)
+            return .albums
         case .recaps:
-            return .recaps
+            recapsToOpen = RecapsOpen()
+            return .feed
         case .feed:
             return .feed
         case .search(let query):
@@ -155,4 +187,17 @@ public final class AppDeepLinkRouter {
 struct BrowserURL: Identifiable {
     let url: URL
     var id: String { url.absoluteString }
+}
+
+/// Items for the deep-link destinations at the tab roots.
+struct AlbumOpen: Identifiable, Hashable {
+    let id: Int
+}
+
+struct PersonOpen: Identifiable, Hashable {
+    let id: Int
+}
+
+struct RecapsOpen: Identifiable, Hashable {
+    var id: Int { 0 }
 }
