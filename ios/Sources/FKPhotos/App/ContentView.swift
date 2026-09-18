@@ -171,6 +171,9 @@ struct MainTabView: View {
             case .feed:
                 selection = .feed
                 feedPath = NavigationPath()
+            case .search:
+                // The query waits in the router; `SearchView` takes it.
+                selection = .search
             }
         }
         .fullScreenCover(isPresented: $router.isPresentingReviewQueue) {

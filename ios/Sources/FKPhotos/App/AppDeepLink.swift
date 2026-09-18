@@ -38,6 +38,9 @@ enum AppDeepLink: Equatable, Sendable {
     case recaps
     /// `f4milphotos://feed` · `/app/fotos/feed`
     case feed
+    /// `f4milphotos://search?q=…` — the search tab with the query submitted.
+    /// App scheme only: the web has no URL for a search.
+    case search(query: String)
 
     static let scheme = "f4milphotos"
 
@@ -63,6 +66,12 @@ enum AppDeepLink: Equatable, Sendable {
         case .recap(let id): hostAndPath = "recap/\(id)"
         case .recaps: hostAndPath = "recaps"
         case .feed: hostAndPath = "feed"
+        case .search(let query):
+            var components = URLComponents()
+            components.scheme = scheme
+            components.host = "search"
+            components.queryItems = [URLQueryItem(name: "q", value: query)]
+            return components.url!
         }
         return URL(string: "\(scheme)://\(hostAndPath)")!
     }
@@ -71,6 +80,7 @@ enum AppDeepLink: Equatable, Sendable {
     /// „im Browser öffnen" use. `nil` when there is no server configured.
     static func webURL(for link: AppDeepLink, serverURL: URL?) -> URL? {
         guard let serverURL else { return nil }
+        if case .search = link { return nil }
         let origin = serverURL.absoluteString
             .replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
         let path: String
@@ -83,6 +93,7 @@ enum AppDeepLink: Equatable, Sendable {
         case .recap(let id): path = "/fotos/rueckblicke?recapId=\(id)"
         case .recaps: path = "/fotos/rueckblicke"
         case .feed: path = "/fotos/feed"
+        case .search: return nil
         }
         return URL(string: "\(origin)\(appBasePath)\(path)")
     }
@@ -114,7 +125,11 @@ enum AppDeepLink: Equatable, Sendable {
     /// than depending on how the link was typed or generated.
     private static func parseAppScheme(_ url: URL) -> AppDeepLink? {
         var raw = url.absoluteString.dropFirst("\(scheme):".count)
-        if let q = raw.firstIndex(of: "?") { raw = raw[..<q] }
+        var queryString: Substring?
+        if let q = raw.firstIndex(of: "?") {
+            queryString = raw[raw.index(after: q)...]
+            raw = raw[..<q]
+        }
         let segments = raw
             .split(separator: "/", omittingEmptySubsequences: true)
             .map { $0.removingPercentEncoding ?? String($0) }
@@ -125,6 +140,12 @@ enum AppDeepLink: Equatable, Sendable {
         case ("review-queue", nil): return .reviewQueue
         case ("recaps", nil): return .recaps
         case ("feed", nil): return .feed
+        case ("search", nil):
+            var components = URLComponents()
+            components.percentEncodedQuery = queryString.map(String.init)
+            let query = components.queryItems?.first { $0.name == "q" }?.value?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return query.isEmpty ? nil : .search(query: query)
         case ("album", let id?): return Int(id).map { .album(id: $0) }
         case ("photo", let id?): return Int(id).map { .photo(id: $0) }
         case ("person", let id?): return Int(id).map { .person(id: $0) }

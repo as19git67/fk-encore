@@ -42,6 +42,21 @@ final class AppDeepLinkTests: XCTestCase {
         )
     }
 
+    func testASearchLinkCarriesItsQuery() {
+        XCTAssertEqual(
+            AppDeepLink.parse(URL(string: "f4milphotos://search?q=Kirchen%20in%20M%C3%BCnchen")!),
+            .search(query: "Kirchen in München")
+        )
+        XCTAssertNil(AppDeepLink.parse(URL(string: "f4milphotos://search")!))
+        XCTAssertNil(AppDeepLink.parse(URL(string: "f4milphotos://search?q=%20")!))
+    }
+
+    func testASearchLinkRoundTripsAndHasNoWebForm() {
+        let link = AppDeepLink.search(query: "Kirchen in München 2004")
+        XCTAssertEqual(AppDeepLink.parse(AppDeepLink.url(for: link)), link)
+        XCTAssertNil(AppDeepLink.webURL(for: link, serverURL: server))
+    }
+
     func testANonNumericIdIsRejected() {
         XCTAssertNil(AppDeepLink.parse(URL(string: "f4milphotos://album/twelve")!))
         XCTAssertNil(AppDeepLink.parse(URL(string: "f4milphotos://album")!))

@@ -48,6 +48,17 @@ public final class AppDeepLinkRouter {
         case person(id: Int)
         case recaps
         case feed
+        case search
+    }
+
+    /// A query waiting for the search tab (an App Intent, #766). The tab
+    /// takes it when it appears; a flag rather than a call because the tab
+    /// may not exist yet when the intent fires.
+    private(set) var pendingSearchQuery: String?
+
+    func takeSearchQuery() -> String? {
+        defer { pendingSearchQuery = nil }
+        return pendingSearchQuery
     }
 
     public init() {}
@@ -98,6 +109,9 @@ public final class AppDeepLinkRouter {
             return .recaps
         case .feed:
             return .feed
+        case .search(let query):
+            pendingSearchQuery = query
+            return .search
         }
     }
 

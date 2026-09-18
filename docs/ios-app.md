@@ -764,6 +764,38 @@ dokumentiert**:
   zu warten. Getrennt vom `TripPhotoLibraryObserver`, der etwas anderes
   entscheidet.
 
+### 2.14 App Intents / Siri-Shortcuts (#766)
+
+- **Die Intents** (`App/PhotoIntents.swift`, im Paket, damit `FKPhotosIntents`
+  sie in das App-Target trägt; die App-Shortcuts selbst sind in `Main.swift`
+  deklariert, weil App Intents das so verlangt):
+  - **Jetzt sichern** (`BackUpNowIntent`, ohne App-Öffnen): prüft Schalter,
+    Netzwerk-Gate und laufende Sicherung und **startet** dann `runFullSync`,
+    ohne darauf zu warten — ein Erstlauf dauert Minuten, ein Intent hat
+    Sekunden; die Sync-Engine hält ihre eigene Background-Task-Assertion.
+    Geantwortet wird, was sofort feststeht: gestartet, oder warum nicht.
+  - **Fotos suchen** (`SearchPhotosIntent`, Parameter `query`): öffnet den
+    Such-Tab mit abgeschickter Anfrage. Neuer `AppDeepLink.search(query:)`
+    (`f4milphotos://search?q=…`, nur App-Schema — das Web hat keine
+    Such-URL); der Router hält die Anfrage in `pendingSearchQuery`, `SearchView`
+    nimmt sie ab, als wäre sie getippt.
+  - **Rückblick zeigen** (`ShowLatestRecapIntent`): holt `/recaps`, öffnet den
+    neuesten nicht verworfenen im Player; ohne Rückblick oder offline die
+    Liste mit gesprochener Erklärung.
+  - **Album öffnen** / **Fotos einer Person zeigen** (`OpenAlbumIntent`,
+    `ShowPersonIntent`) über `AlbumEntity` / `PersonEntity` mit
+    `EntityStringQuery`: Siri und Shortcuts fragen die Listen vom Server ab,
+    Namen werden akzent- und schreibweisenunabhängig gematcht („urlaub" findet
+    „Urlaub 2024"). Unbenannte Personen tauchen nicht auf.
+  - **Gruppen-Review öffnen** (`OpenReviewQueueIntent`).
+- **Alles Sichtbare geht über den Router** (2.11): ein Intent erzeugt einen
+  `AppDeepLink` und sonst nichts, also landet „Zeige Album Urlaub" per Siri
+  auf demselben Bildschirm wie ein Spotlight-Treffer oder ein Link.
+- **Nicht als App-Shortcut deklariert** sind die entity-nehmenden Intents:
+  eine Shortcut-Phrase kann eine Entity nur als aufzählbaren Parameter tragen,
+  Alben sind offen. Über die Kurzbefehle-App und Siris eigene Auflösung
+  bleiben sie erreichbar.
+
 ---
 
 ## 3. Vergleich: Web-Foto-Bereich ↔ iOS
@@ -940,17 +972,20 @@ eine echte Bereicherung:
 2. **Home-Screen-Widgets** – „An diesem Tag" / letzter Rückblick / neueste
    Feed-Aktivität (WidgetKit).
 3. **Live Activity / Dynamic Island** für Backup-Fortschritt.
-4. **App Intents / Siri-Shortcuts** – „Jetzt sichern", „Suche nach …",
-   „Zeige Rückblick".
+4. ✅ **App Intents / Siri-Shortcuts** – „Jetzt sichern", „Suche nach …",
+   „Zeige Rückblick", Album/Person als Entity — siehe 2.14.
 5. **Lokale Benachrichtigungen** – Backup abgeschlossen, neue Kommentare/Likes
    (bis Remote-Push via APNs steht).
 6. **Remote-Push (APNs)** – Gegenstück zum bestehenden `push`-Service & PWA-Push
    (zählt auch zur Parität, ist aber iOS-Plattformarbeit).
-7. **Spotlight-Indexierung** von Personen/Alben für die System-Suche.
+7. ✅ **Spotlight-Indexierung** — Fotos mit erkanntem Text (Opt-in),
+   Personen und Alben — siehe 2.12.
 8. **Live Photos** – Erfassung/Upload von Bewegungsanteil (sobald das Backend
    Video/Motion unterstützt; aktuell rein fotobasiert).
-9. **Limited-Library-Picker-Politur** (PhotoKit) und Focus-Filter.
-10. **Handoff & Deep Links** zwischen iOS und Web.
+9. ✅ **Limited-Library-Picker-Politur** (PhotoKit) — siehe 2.13. Focus-Filter
+   bewusst offen (#768 §4b).
+10. ✅ **Deep Links & Universal Links** zwischen iOS und Web — siehe 2.11.
+    Handoff offen (#768 §5b).
 
 ---
 
