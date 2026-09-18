@@ -4,7 +4,7 @@ import XCTest
 /// The travel group, as the screen reads it (§3.5).
 ///
 /// What matters here is what is *not* shown: no age where no birth date
-/// was given, and no "kürzere Wege" that nobody set. Both would be the
+/// was given, and no "mehr Zeit" that nobody set. Both would be the
 /// app making a statement about a person on its own.
 final class TripTravellersTests: XCTestCase {
 
@@ -41,7 +41,9 @@ final class TripTravellersTests: XCTestCase {
         let oma = try answer().travellers[1]
 
         XCTAssertNil(oma.ageAtStart)
-        XCTAssertEqual(oma.subtitle(startsOn: "2027-07-01"), "kürzere Wege")
+        // The time flag is the switch's to show, not the subtitle's.
+        XCTAssertTrue(oma.shortWalks)
+        XCTAssertNil(oma.subtitle(startsOn: "2027-07-01"))
     }
 
     func testTheEffectIsCarriedInWordsNotOnlyAsFlags() throws {

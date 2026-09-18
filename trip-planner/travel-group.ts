@@ -23,7 +23,7 @@
  *   - **Age is derived, and only for children.** How long a small child
  *     lasts before a break is a fact about small children, and reading
  *     it off a birth date is what dates are for.
- *   - **"Kürzere Wege" is never derived.** Not from an age, not from a
+ *   - **"Mehr Zeit einplanen" is never derived.** Not from an age, not from a
  *     relationship. That is a statement about a person, and it belongs
  *     to whoever it is about — a seventy-year-old who walks fifteen
  *     kilometres would rightly be insulted by an app that quietly
@@ -113,8 +113,12 @@ export function readGroup(
   const shorter = travellers.filter((t) => t.shortWalks === true);
   if (shorter.length > 0) {
     group.limitedMobility = true;
-    reasons.push(`Für ${shorter.map((t) => t.label).join(", ")} ist „kürzere Wege" `
-      + "eingetragen — Gehstrecke und Steigung zählen als harte Grenze, nicht als Hinweis.");
+    // Said as what it does. The sentence used to promise that distance
+    // and gradient count as a hard limit — nothing reads the flag that
+    // way; it scales the block budgets (`blocks.ts`) and nothing else.
+    reasons.push(`Für ${shorter.map((t) => t.label).join(", ")} ist „mehr Zeit einplanen" `
+      + "gesetzt — jeder Block bekommt 30 % weniger Programm, also mehr Zeit pro Ort und "
+      + "mehr Pausen. Die Weglängen ändert das nicht.");
   }
 
   // Said out loud rather than left blank: a trip with people on it and

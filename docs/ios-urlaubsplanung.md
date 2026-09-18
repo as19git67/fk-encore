@@ -151,13 +151,25 @@ optionalem Geburtsdatum dazu.
 
 Drei Entscheidungen:
 
-- **Das Alter wird abgeleitet, das „kürzere Wege" nie.** Wie lange ein kleines
-  Kind durchhält, ist eine Tatsache über kleine Kinder, und dafür sind
-  Geburtsdaten da. „Braucht kürzere Wege" ist dagegen eine Aussage über einen
+- **Das Alter wird abgeleitet, das „mehr Zeit einplanen" nie.** Wie lange ein
+  kleines Kind durchhält, ist eine Tatsache über kleine Kinder, und dafür sind
+  Geburtsdaten da. „Braucht mehr Zeit" ist dagegen eine Aussage über einen
   Menschen und gehört dem, um den es geht — eine Siebzigjährige, die
   fünfzehn Kilometer geht, wäre zu Recht beleidigt, wenn die App ihr still den
   Tag halbiert. Das Feld wird also gesetzt, nicht geschlossen; §3.5s „Großeltern
   dabei" ist ein Anlass zu fragen, keine Erlaubnis anzunehmen.
+
+  **Geändert (2026-09-18): der Schalter heißt, was er tut.** Er hieß „Kürzere
+  Wege" und versprach damit etwas, das er nie getan hat: Er ändert keine
+  Weglänge und keine Etappengrenze, er gibt jedem Block **30 % weniger
+  Programm** (`blocks.ts`, Faktor 0,7) — mehr Zeit pro Ort, mehr Pausen. Der
+  Begründungssatz behauptete sogar, Gehstrecke und Steigung zählten als „harte
+  Grenze"; nichts hat das je gelesen. Jetzt „Mehr Zeit einplanen", mit dem Satz
+  darunter, der genau das sagt. Und ein gewöhnlicher Schalter statt des
+  umrandeten Knopfes, dessen Zustand nur eine Tönung war — die HIG hat für
+  „an oder aus" einen Schalter, aus gutem Grund. Wer wirklich kürzere Wege
+  braucht, hat dafür das Etappenlimit (`maxWalkMinutes`); eine Wirkung des
+  Schalters auf Wege oder Barrierefreiheit (`wheelchair`-Tag) bleibt offen.
 - **Gerechnet wird auf den Reisebeginn, nicht auf heute.** Eine im Januar für
   August geplante Reise ist eine Reise mit dem Kind, das im August schon
   Geburtstag hatte.
