@@ -110,6 +110,11 @@ struct TripSpotDetailView<Actions: View>: View {
                     }
                 }
                 LabeledContent("Aufenthalt", value: TripClock.duration(spot.dwellMinutes))
+                if let extent = spot.extent {
+                    // The way is the point: the day goes on from its end,
+                    // not from where it starts (§4.7).
+                    LabeledContent("Strecke", value: extent.summary)
+                }
                 if spot.name == nil {
                     // Said rather than papered over: OpenStreetMap has no
                     // name for this, and the app does not invent one
@@ -352,6 +357,8 @@ struct TripSpotDetail: Identifiable, Sendable {
     /// Whether the flag can be changed here. False for a collected
     /// idea, whose endpoint does not take it yet.
     let supportsPhotoStop: Bool
+    /// Where it finishes, when the way is the point (§4.7).
+    var extent: TripSpotExtent? = nil
 
     var id: String { osmRef }
     /// A title the group gave it wins over the map's name: they chose
@@ -378,6 +385,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         unmatched = candidate.unmatched ?? false
         photoStop = candidate.isPhotoStop
         supportsPhotoStop = true
+        extent = candidate.extent
     }
 
     /// A place the browse turned up (§9.2, case 4 widened).
@@ -448,6 +456,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         unmatched = false
         photoStop = stop.isPhotoStop
         supportsPhotoStop = true
+        extent = stop.extent
     }
 }
 

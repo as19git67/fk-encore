@@ -128,6 +128,12 @@ struct TripAddFindRequest: Encodable, Sendable {
     let sourceUrl: String?
     let legIndex: Int?
     let dwellMinutes: Int?
+    /// A route's far end, with its length and ascent where known
+    /// (§4.7). Nil for the ordinary place, which is every proposal a
+    /// share or a search produces.
+    var end: TripCoordinate? = nil
+    var lengthM: Int? = nil
+    var ascentM: Int? = nil
 }
 
 struct TripAddFindResponse: Decodable, Sendable {

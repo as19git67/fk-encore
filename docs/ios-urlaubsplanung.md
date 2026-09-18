@@ -896,9 +896,12 @@ geschlossen. Die Kategorie heißt `route`, im Freien (§7.2).
   Blockbudgets. Bei einer Strecke müsste es die Dauer selbst skalieren, und
   eingeschränkte Mobilität würde sie ganz ausschließen. Beides wartet, bis
   die Reisegruppe Fortbewegungsarten kennt.
-- **In der App**: Eingabe der Strecke beim Fund (Endpunkt auf der Karte,
-  Dauer), die Linie statt des Pins, das Etikett „Strecke · 10 km · 600 Hm ·
-  3 h" auf der Karte und im Block. Etappe 2.
+**In der App (Etappe 2, umgesetzt):** „Strecke anlegen" im Menü des Tages —
+Name, Start und Ende über die Ortssuche des Geräts, Dauer, optional Länge
+und Anstieg. Kandidatenliste, Tagesplan, Pin-Sheet und Detail zeigen
+„Strecke · 10 km · 600 Hm"; beide Karten zeichnen vom Punkt zum Ende eine
+gestrichelte Luftlinie mit Zielflagge — gestrichelt, weil die App keinen
+Router hat und das nicht verschweigt (§9.5).
 
 **Was es nicht werden soll:** ein Tourenplaner mit Höhenprofil und
 GPX-Navigation. Die Grenze aus §9.5 gilt: Die App sagt „heute Vormittag die
@@ -3787,8 +3790,8 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
 14. **Strecken** (§4.7) — ein Spot mit Ausdehnung: Endpunkt, Länge, Anstieg,
     eigene Dauer. **Etappe 1 umgesetzt:** das Feld auf Vorrat und Stopp, der
     Fund mit Endpunkt, und jeder Rewalk — Solver, Verschieben, Umverteilung,
-    Wetter, Licht — geht am Ende der Strecke weiter. Etappe 2 ist die
-    Eingabe und die Linie in der App; danach die offenen Punkte aus §4.7
+    Wetter, Licht — geht am Ende der Strecke weiter. Etappe 2 (Eingabe
+    und Linie in der App) ebenfalls umgesetzt; danach die offenen Punkte aus §4.7
     (zwei Blöcke am Stück, Korridor, Import aus OSM-Routenrelationen).
 
 Schritte 1–3 sind der ehrliche Test — und sie kommen **ohne einen einzigen

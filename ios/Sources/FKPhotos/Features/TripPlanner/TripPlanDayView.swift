@@ -96,6 +96,13 @@ struct TripPlanDayView: View {
                             } label: {
                                 Label("Ort suchen", systemImage: "magnifyingglass")
                             }
+                            // A spot whose way is the point (§4.7): the
+                            // import knows only points, so it comes by hand.
+                            NavigationLink {
+                                TripRouteEntryView(planId: viewModel.planId, legIndex: leg.position)
+                            } label: {
+                                Label("Strecke anlegen", systemImage: "figure.hiking")
+                            }
                             // When the light is good, after the planned
                             // day is over (§7.3).
                             NavigationLink {
@@ -1461,7 +1468,8 @@ struct TripPlanDayView: View {
                         // at the door (§10.4).
                         Text(TripSpotName.line(stop.displayName, local: stop.localName))
                             .strikethrough(stop.stopStatus == .skipped)
-                        Text(TripClock.duration(stop.dwellMinutes))
+                        Text(stop.extent.map { "\($0.summary) · \(TripClock.duration(stop.dwellMinutes))" }
+                             ?? TripClock.duration(stop.dwellMinutes))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
