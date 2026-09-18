@@ -786,9 +786,15 @@ dokumentiert**:
 
 ### 2.14 App Intents / Siri-Shortcuts (#766)
 
-- **Die Intents** (`App/PhotoIntents.swift`, im Paket, damit `FKPhotosIntents`
-  sie in das App-Target trägt; die App-Shortcuts selbst sind in `Main.swift`
-  deklariert, weil App Intents das so verlangt):
+- **Die Intents liegen im App-Target** (`ios/App/Intents.swift`), nicht im
+  Paket. Sie lagen zuerst im Paket und wurden über ein `AppIntentsPackage`
+  hinübergereicht — das funktionierte aus Xcode, aber nicht aus TestFlight:
+  Die Metadaten-Extraktion des Archivs ließ die Paket-Intents aus, und die
+  installierte App hatte in der Kurzbefehle-App keine einzige Aktion. Im
+  App-Target werden sie bei jedem Build auf dem normalen Weg extrahiert. Jeder
+  Intent ist ein Aufruf in `IntentActions` (`Sources/FKPhotos/App/
+  IntentActions.swift`, öffentliche Fassade); die Arbeit bleibt im Paket. Die
+  App-Shortcuts stehen in derselben Datei.
   - **Jetzt sichern** (`BackUpNowIntent`, ohne App-Öffnen): prüft Schalter,
     Netzwerk-Gate und laufende Sicherung und **startet** dann `runFullSync`,
     ohne darauf zu warten — ein Erstlauf dauert Minuten, ein Intent hat
