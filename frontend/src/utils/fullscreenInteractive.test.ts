@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { isFullscreenInteractiveTarget, isFullscreenToolbarTarget } from './fullscreenInteractive'
+import { hasActiveTextSelection, isFullscreenInteractiveTarget, isFullscreenToolbarTarget } from './fullscreenInteractive'
 
 describe('isFullscreenInteractiveTarget', () => {
   afterEach(() => { document.body.innerHTML = '' })
@@ -71,5 +71,42 @@ describe('isFullscreenToolbarTarget (slideshow idle-reset exclusion)', () => {
   it('does NOT match the bare photo pane', () => {
     const root = mount('<div class="fs-split-photo"><img id="img" /></div>')
     expect(isFullscreenToolbarTarget(root.querySelector('#img'))).toBe(false)
+  })
+})
+
+describe('hasActiveTextSelection', () => {
+  afterEach(() => {
+    document.getSelection()?.removeAllRanges()
+    document.body.innerHTML = ''
+  })
+
+  it('is false when nothing is selected', () => {
+    expect(hasActiveTextSelection()).toBe(false)
+  })
+
+  it('is false for a collapsed selection (a bare caret)', () => {
+    const span = document.createElement('span')
+    span.textContent = 'Gleis 3'
+    document.body.appendChild(span)
+    const range = document.createRange()
+    range.setStart(span.firstChild!, 2)
+    range.collapse(true)
+    document.getSelection()!.addRange(range)
+    expect(hasActiveTextSelection()).toBe(false)
+  })
+
+  it('is true while a word of the text layer is selected (#1029)', () => {
+    const span = document.createElement('span')
+    span.className = 'photo-text-line'
+    span.textContent = 'Gleis 3'
+    document.body.appendChild(span)
+    const range = document.createRange()
+    range.selectNodeContents(span)
+    document.getSelection()!.addRange(range)
+    expect(hasActiveTextSelection()).toBe(true)
+  })
+
+  it('tolerates a document without getSelection', () => {
+    expect(hasActiveTextSelection({} as Document)).toBe(false)
   })
 })

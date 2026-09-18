@@ -20,7 +20,7 @@ import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
-import { isFullscreenInteractiveTarget, isFullscreenToolbarTarget } from '../utils/fullscreenInteractive'
+import { hasActiveTextSelection, isFullscreenInteractiveTarget, isFullscreenToolbarTarget } from '../utils/fullscreenInteractive'
 import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, shouldShowCaption, type SlideshowState } from '../utils/slideshow'
 import {
   SLIDESHOW_INTERVAL_OPTIONS_MS,
@@ -138,6 +138,9 @@ function handlePhotoTouchStart(e: TouchEvent) {
 
 function handlePhotoTouchEnd(e: TouchEvent) {
   if (!e.changedTouches.length) return
+  // Text mode (#1029): a double-tap selects a word and dragging a selection
+  // handle looks exactly like a swipe — never navigate from a gesture here.
+  if (textMode.value) return
   const t = e.changedTouches[0]!
   const dx = t.clientX - photoTouchStartX.value
   const dy = t.clientY - photoTouchStartY.value
@@ -170,6 +173,7 @@ function handlePhotoTouchEnd(e: TouchEvent) {
 // suppression window set in handlePhotoTouchEnd.
 function handlePhotoClick(e: MouseEvent) {
   if (performance.now() < suppressNextClickUntil) return
+  if (textMode.value) return
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   if (e.clientX < rect.left + rect.width / 2) {
     if (props.prevPhoto) emit('prev')
@@ -450,11 +454,14 @@ function handleTouchStart(e: TouchEvent) {
     panStartX.value = panX.value
     panStartY.value = panY.value
 
-    // Double-tap to reset zoom
+    // Double-tap to reset zoom. Not in text mode (#1029), where a double-tap
+    // is the browser's "select this word" gesture on the text layer.
     const now = Date.now()
     const dx = t.clientX - lastTapX
     const dy = t.clientY - lastTapY
-    if (now - lastTapTime < 300 && Math.hypot(dx, dy) < 40) {
+    if (textMode.value) {
+      lastTapTime = 0
+    } else if (now - lastTapTime < 300 && Math.hypot(dx, dy) < 40) {
       resetZoom()
       lastTapTime = 0
     } else {
@@ -489,6 +496,11 @@ function handleTouchMove(e: TouchEvent) {
   // most visibly in landscape, where the bars sit over the photo pane and the
   // tiniest finger movement during a tap reaches this handler.
   if (isFullscreenInteractiveTarget(e.target)) return
+  // Text mode (#1029): while a selection exists, a one-finger drag is the
+  // user moving a selection handle. The browser reports it on whatever sits
+  // under the finger (usually the photo, not a text line), and preventDefault
+  // would cancel the native handle drag — so leave it entirely to the browser.
+  if (textMode.value && e.touches.length === 1 && hasActiveTextSelection()) return
   // Always prevent default so iOS Safari doesn't re-acquire the gesture.
   // The listener is registered { passive: false } so this call is permitted.
   // Without it, a 1-finger swipe at zoom=1 fires touchcancel instead of touchend.
@@ -527,6 +539,10 @@ function handleTouchEnd(e: TouchEvent) {
   // Don't swipe / tap-navigate between photos when zoomed in
   if (zoomLevel.value > 1) return
   if (!e.changedTouches.length) return
+  // Text mode (#1029): taps select / deselect words and a selection-handle
+  // drag is indistinguishable from a swipe — gestures never navigate here.
+  // The arrow keys and the on-screen prev/next buttons still do.
+  if (textMode.value) return
 
   const touch = e.changedTouches[0]!
   const dx = touch.clientX - touchStartX.value
@@ -552,7 +568,9 @@ function handleTouchEnd(e: TouchEvent) {
   }
 
   // Swipe: keep horizontal-dominant gestures with at least 40 px of
-  // travel as the explicit prev/next signal.
+  // travel as the explicit prev/next signal — unless it started on an
+  // interactive control, which owns its own drag semantics.
+  if (isFullscreenInteractiveTarget(e.target)) return
   if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
     if (dx > 0 && props.prevPhoto) emit('prev')
     else if (dx < 0 && props.nextPhoto) emit('next')
@@ -565,6 +583,10 @@ function handleContentClick(e: MouseEvent) {
   if (splitMode.value) return
   if (zoomLevel.value > 1) return
   if (performance.now() < suppressNextClickUntil) return
+  // Text mode (#1029): a mouse drag that selects text and ends on the photo
+  // still fires a click on the common ancestor — that must not navigate,
+  // and neither should the click that clears the selection afterwards.
+  if (textMode.value) return
   // Skip the navigation when the click landed on an interactive
   // element — its own @click handler should take precedence.
   if (isFullscreenInteractiveTarget(e.target)) return
