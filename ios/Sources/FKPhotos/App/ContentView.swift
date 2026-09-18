@@ -1,3 +1,4 @@
+import CoreSpotlight
 import SwiftUI
 
 public struct ContentView: View {
@@ -54,6 +55,20 @@ public struct ContentView: View {
         // arrive here under the SwiftUI lifecycle.
         .onOpenURL { url in
             deepLinkRouter.handle(url)
+        }
+        // A tap on a Spotlight result (#768 §2) carries the item's unique
+        // identifier; it becomes the same deep link every other source uses.
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            guard let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
+                  let link = SpotlightItems.deepLink(forIdentifier: identifier) else { return }
+            deepLinkRouter.open(link)
+        }
+        .task(id: authManager.currentUser?.id) {
+            // The text index follows the library; a launch is a cheap
+            // moment to catch up on what was recognised since. Rate-limited
+            // and opt-in inside.
+            guard authManager.currentUser != nil else { return }
+            await SpotlightIndexer.shared.syncPhotos()
         }
     }
 }

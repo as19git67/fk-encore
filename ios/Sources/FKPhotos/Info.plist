@@ -61,6 +61,14 @@
 	<string>Zum Speichern aufgenommener Fotos in deiner Mediathek</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Zum Hochladen von Fotos in F4mil Photos</string>
+	<!--
+	  Under limited photo access iOS would otherwise put its own „Weiterhin
+	  beschränken / Mehr auswählen" alert over the app on every launch. The
+	  app says it itself, where the sync is configured (#768 §4a,
+	  LimitedLibraryAccess.swift).
+	-->
+	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

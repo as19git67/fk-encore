@@ -30,6 +30,9 @@ struct SyncSettingsView: View {
                 Text("Verknüpfte Alben werden automatisch im Hintergrund synchronisiert. Welche Alben – und ob Kopieren, Synchronisieren oder Zwei-Wege – legst du in der iPhone-Mediathek über „\(SyncWording.linkFromLibrary)“ fest.")
             }
 
+            // ── Limited photo access (#768 §4a) ────────────────────────
+            LimitedLibraryAccessSection()
+
             // ── Manual trigger ─────────────────────────────────────────
             if syncEnabled {
                 Section {
@@ -199,6 +202,8 @@ struct SyncSettingsView: View {
         .onAppear {
             refreshTick += 1
             queueObserver.startObserving()
+            // Access may have changed in Settings while the app was away.
+            LimitedLibraryAccess.shared.refresh()
         }
         .alert("Zugriff verweigert", isPresented: $showAuthAlert) {
             Button("Einstellungen öffnen") {

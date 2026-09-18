@@ -253,6 +253,9 @@ public final class AuthManager: @unchecked Sendable {
         Task { @MainActor in
             currentUser = nil
             isAuthenticated = false
+            // The Spotlight index is per device, the library per user: the
+            // next account on this phone must not find this one's photos.
+            await SpotlightIndexer.shared.wipeAll()
         }
     }
 }

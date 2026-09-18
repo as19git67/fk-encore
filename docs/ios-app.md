@@ -692,8 +692,77 @@ dokumentiert**:
   die App wirklich öffnen kann — Dokumente, Finanzen und die nackte Galerie
   bleiben Safari. Einrichtung: `DEPLOYMENT.md`, „iOS universal links".
 - **Alle „öffne X"-Quellen** — Benachrichtigung (`ReviewQueueNotifier`),
-  künftig Widgets, Spotlight und App Intents — erzeugen nur noch eine URL und
-  geben sie `AppDeepLinkRouter.shared.handle(_:)`.
+  Spotlight (`SpotlightItems.deepLink(forIdentifier:)`), künftig Widgets und
+  App Intents — erzeugen nur noch eine URL bzw. einen `AppDeepLink` und geben
+  ihn `AppDeepLinkRouter.shared`.
+
+### 2.12 Spotlight: Fotos mit Text, Personen, Alben (#768 §2)
+
+- **Was im Index landet** (`Features/Spotlight/SpotlightIndexer.swift`):
+  Fotos mit erkanntem Text (`photo_ocr`, #1029) oder einer Beschreibung, dazu
+  Personen und Alben. Fotos ohne Text kommen nicht hinein — es gäbe nichts,
+  worauf Spotlight matchen könnte; die semantische Suche bleibt in der App.
+  Bei ~75 000 Fotos ist das ein Bruchteil, und Core Spotlight hat für die
+  Anzahl keine Grenze, wohl aber für Thumbnails: Foto-Einträge tragen
+  **keine**, ein Treffer zeigt App-Icon, Textausschnitt und Datum.
+- **Delta statt Vollabgleich.** `GET /photos/spotlight-index?cursor=&limit=`
+  (`photo/photo-spotlight.service.ts`) liefert Einträge, die sich seit dem
+  Cursor geändert haben — `GREATEST(photos.updated_at, photo_ocr.updated_at)`,
+  mikrosekundengenau, mit Foto-ID als Tie-Break —, seitenweise und in
+  Änderungsreihenfolge. Der Client speichert nach **jedem** Batch Cursor und
+  ID-Menge (`SpotlightIndexState`, die IDs als kompaktes `Data`), sodass ein
+  abgebrochener Erstlauf dort weitermacht. Löschungen und verlorener Zugriff
+  können nicht durch ein Delta reisen (die OCR-Zeile stirbt mit dem Foto),
+  deshalb wird nach jedem Lauf `GET /photos/spotlight-index/ids` gegen die
+  gehaltene ID-Menge gediffed und der Rest entfernt.
+- **Sichtbarkeit wie `/photos/details`:** eigene Fotos und Fotos in Alben,
+  die man besitzt oder in die man eingeladen ist. Personennamen kommen aus den
+  eigenen Gesichtszuordnungen, denn eine Person ist pro Nutzer.
+- **Eintragsform** (`SpotlightItems`, getestet in `SpotlightItemsTests`):
+  Titel = erste Textzeile (oder die Beschreibung), Body = Rest, `textContent`
+  = alles (das ist, worauf Spotlight Volltext matcht), Personennamen als
+  Keywords, Aufnahmedatum als `contentCreationDate`, `expirationDate` =
+  unendlich — der Standard ist ein Monat, danach vergisst Spotlight still
+  alles. Text ist serverseitig auf 2000 Zeichen gekappt.
+- **Wann gelaufen wird:** nach jedem Sync (`BackgroundSyncManager`) und beim
+  App-Start, höchstens alle 15 Minuten; „Jetzt aktualisieren" in den
+  Einstellungen erzwingt es. Personen und Alben werden beim Laden der Listen
+  komplett ersetzt (`replaceDomain`), damit Zusammenführen und Löschen
+  mitziehen. Eigene Domänen `photo`/`person`/`album`, einzeln löschbar.
+- **Datenschutz:** Erkannter Text ist genau die Art Inhalt, die
+  personenbezogene Daten trägt (fotografierte Briefe, Rechnungen,
+  Visitenkarten). Der Index bleibt auf dem Gerät, aber die iPhone-Suche zeigt
+  die Schnipsel jedem, der das Telefon hält. Deshalb ist „Text in Fotos"
+  **Opt-in** (Einstellungen → „Suche auf dem iPhone", `SpotlightSettingsView`),
+  getrennt von „Personen und Alben" (an); Ausschalten löscht die Domäne,
+  Abmelden löscht alles (`wipeAll`), weil der Index pro Gerät ist und die API
+  pro Nutzer.
+- **Ein Treffer öffnet** über `onContinueUserActivity(CSSearchableItemActionType)`
+  in `ContentView`: `photo:<id>` / `person:<id>` / `album:<id>` werden zum
+  `AppDeepLink` und gehen denselben Weg wie jeder andere Link (2.11).
+- **Nicht gebaut:** eine Spotlight-Index-Extension
+  (`CSIndexExtensionRequestHandler`), mit der iOS nach Verlust des
+  Systemindex ohne App-Start neu aufbauen lassen könnte — sie braucht ein
+  eigenes Extension-Target; bis dahin baut der nächste App-Start neu auf.
+
+### 2.13 Eingeschränkter Fotozugriff (#768 §4a)
+
+- Der Sync akzeptierte `.limited` von Anfang an, sagte es aber nirgends:
+  „Alle Fotos hochladen" hieß still „alle *freigegebenen* Fotos", und iOS
+  legte bei jedem Start seinen eigenen „Weiterhin beschränken / Mehr
+  auswählen"-Alert über die App — was wie ein Fehler der App las.
+- `PHPhotoLibraryPreventAutomaticLimitedAccessAlert` in der `Info.plist`
+  schaltet den System-Alert ab; stattdessen zeigt `LimitedLibraryAccessSection`
+  in den Sync-Einstellungen den Zustand mit den zwei Auswegen: „Auswahl
+  ändern…" (`presentLimitedLibraryPicker`, präsentiert vom vordersten
+  View-Controller, weil SwiftUI keinen hergibt) und „Vollen Zugriff erlauben"
+  (Systemeinstellungen). Der Fußtext benennt die Folge für verknüpfte Alben.
+- `LimitedLibraryChangeObserver` hört auf Mediathek-Änderungen: unter
+  eingeschränktem Zugriff ist eine erweiterte Auswahl der einzige Weg, auf dem
+  ein neues Foto erscheinen kann, also läuft danach (3 s entprellt, nur bei
+  aktivem Sync) ein `runFullSync`, statt auf den nächsten Vordergrund-Zyklus
+  zu warten. Getrennt vom `TripPhotoLibraryObserver`, der etwas anderes
+  entscheidet.
 
 ---
 
