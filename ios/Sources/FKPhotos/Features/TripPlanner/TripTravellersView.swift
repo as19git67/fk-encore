@@ -10,12 +10,18 @@ import SwiftUI
 /// follows from them in words: a day that got shorter without saying
 /// why reads as a bug (§3.8).
 ///
+/// One rule decides who is here: whoever plans the trip is on it. The
+/// accounts come and go with "Planen mit" and cannot be removed here;
+/// everybody without an account — a child, a grandmother from
+/// elsewhere — is entered by hand. (It used to offer the household from
+/// the documents module too, and offered every adult twice, once as an
+/// account and once as a household entry, joined by nothing better
+/// than a name.)
+///
 /// The one thing it never does is conclude "mehr Zeit einplanen" from an
 /// age. How long a small child lasts is a fact about small children;
 /// needing more time is a statement about a person, and it is asked
-/// for, not assumed. (The switch was called "Kürzere Wege" once, which
-/// promised something it never did: it shortens the blocks, not the
-/// walks.)
+/// for, not assumed.
 struct TripTravellersView: View {
     let planId: Int
     /// Called after a change, because adding somebody re-plans the trip.
@@ -23,25 +29,18 @@ struct TripTravellersView: View {
 
     @State private var travellers: [TripTraveller] = []
     @State private var effect: TripGroupEffect?
-    @State private var suggestions: [TripTravellerSuggestion] = []
     @State private var startsOn: String?
     @State private var isLoading = true
     @State private var busyId: Int?
-    @State private var busyKey: String?
     @State private var errorMessage: String?
-    /// The person about to be added — the first time, the re-plan is
-    /// said out loud (§3.5): a day that got shorter without a word
-    /// reads as a bug.
-    @State private var confirmingAdd: TripTravellerSuggestion?
     @State private var confirmingRemove: TripTraveller?
-    /// The form for somebody who is neither in the household nor
-    /// planning the trip — a friend, a grandparent from elsewhere.
+    /// The form for somebody who has no account.
     @State private var enteringByHand = false
     @AppStorage("trip.travellers.replanExplained") private var replanExplained = false
 
     var body: some View {
         List {
-            if isLoading && travellers.isEmpty && suggestions.isEmpty {
+            if isLoading && travellers.isEmpty {
                 Section { ProgressView() }
             }
 
@@ -53,8 +52,10 @@ struct TripTravellersView: View {
                 } header: {
                     Text("Reisegruppe")
                 } footer: {
-                    if let effect, !effect.reasons.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Wer mitplant, fährt mit. Wer nicht mehr mitfahren soll, wird unter "
+                             + "„Planen mit“ entfernt.")
+                        if let effect, !effect.reasons.isEmpty {
                             ForEach(Array(effect.reasons.enumerated()), id: \.offset) { _, reason in
                                 Text(reason)
                             }
@@ -63,30 +64,8 @@ struct TripTravellersView: View {
                 }
             }
 
-            if !suggestions.isEmpty {
-                Section {
-                    ForEach(suggestions) { person in
-                        suggestionRow(for: person)
-                    }
-                } header: {
-                    Text("Aus dem Haushalt")
-                } footer: {
-                    Text("Vorgeschlagen, nicht eingetragen — eine Reise ist nicht automatisch "
-                         + "jeder, der hier wohnt.")
-                }
-            }
-
-            if !isLoading && travellers.isEmpty && suggestions.isEmpty {
-                Section {
-                    Text("Für diese Reise ist noch niemand eingetragen. Die Tage werden dann "
-                         + "geplant, als wären alle erwachsen und gut zu Fuß.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             if !isLoading {
-                // Not everybody who comes lives here or has a login.
+                // Not everybody who comes has a login.
                 Section {
                     Button {
                         enteringByHand = true
@@ -94,7 +73,8 @@ struct TripTravellersView: View {
                         Label("Jemanden eintragen", systemImage: "person.badge.plus")
                     }
                 } footer: {
-                    Text("Für alle, die weder im Haushalt sind noch mitplanen.")
+                    Text("Für alle ohne Konto — ein Kind, eine Oma von auswärts. Mit Geburtsdatum "
+                         + "weiß der Planer, ob ein Kind mitfährt.")
                 }
             }
         }
@@ -111,18 +91,6 @@ struct TripTravellersView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
-        .alert("Die Tage werden neu geplant", isPresented: Binding(
-            get: { confirmingAdd != nil }, set: { if !$0 { confirmingAdd = nil } }),
-               presenting: confirmingAdd) { person in
-            Button("\(person.label) eintragen") {
-                replanExplained = true
-                Task { await add(person) }
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: { _ in
-            Text("Wer mitfährt, bestimmt, wie viel in einen Tag passt. Mit jeder Änderung an "
-                 + "der Reisegruppe werden die Tage neu verteilt; angeheftete Stopps bleiben.")
-        }
         .confirmationDialog("Aus der Reisegruppe nehmen?", isPresented: Binding(
             get: { confirmingRemove != nil }, set: { if !$0 { confirmingRemove = nil } }),
             titleVisibility: .visible, presenting: confirmingRemove) { traveller in
@@ -166,42 +134,19 @@ struct TripTravellersView: View {
         .padding(.vertical, 2)
         // Taking somebody off the trip is the row's swipe, as a list
         // has it — not a minus button beside the switch, where a thumb
-        // aiming for one landed on the other. The confirmation stays;
-        // a swipe is not a decision about the days.
+        // aiming for one landed on the other. Only for a hand entry: an
+        // account leaves with its invitation, under "Planen mit". The
+        // confirmation stays; a swipe is not a decision about the days.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                confirmingRemove = traveller
-            } label: {
-                Label("Entfernen", systemImage: "minus.circle")
-            }
-            .disabled(busyId == traveller.id)
-        }
-    }
-
-    @ViewBuilder
-    private func suggestionRow(for person: TripTravellerSuggestion) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(person.label)
-                Text(person.subtitle).font(.footnote).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button {
-                if replanExplained {
-                    Task { await add(person) }
-                } else {
-                    confirmingAdd = person
+            if traveller.isRemovableHere {
+                Button(role: .destructive) {
+                    confirmingRemove = traveller
+                } label: {
+                    Label("Entfernen", systemImage: "minus.circle")
                 }
-            } label: {
-                if busyKey == person.id {
-                    ProgressView()
-                } else {
-                    Image(systemName: "plus.circle")
-                }
+                .disabled(busyId == traveller.id)
             }
-            .buttonStyle(.borderless)
         }
-        .padding(.vertical, 2)
     }
 
     private func load() async {
@@ -217,40 +162,15 @@ struct TripTravellersView: View {
         } catch {
             errorMessage = TripErrorText.describe(error)
         }
-        // Apart from the list itself: a failing suggestions call used
-        // to empty the working list of travellers too.
-        do {
-            let offered: TripTravellerSuggestionsResponse = try await APIClient.shared.get(
-                "/trip-planner/plans/\(planId)/travellers/suggestions")
-            suggestions = offered.suggestions
-        } catch {
-            if errorMessage == nil { errorMessage = TripErrorText.describe(error) }
-        }
-    }
-
-    private func add(_ person: TripTravellerSuggestion) async {
-        busyKey = person.id
-        defer { busyKey = nil }
-        do {
-            let _: TripPlanResponse = try await APIClient.shared.post(
-                "/trip-planner/plans/\(planId)/travellers",
-                body: TripAddTravellerRequest(
-                    subjectPersonId: person.subjectPersonId, userId: person.userId))
-            await load()
-            onPlanChanged?()
-        } catch {
-            errorMessage = TripErrorText.describe(error)
-        }
     }
 
     /// Somebody entered by hand: a name, perhaps a birth date, perhaps
-    /// shorter walks.
+    /// more time.
     private func add(_ entry: TripManualTraveller) async {
         do {
             let _: TripPlanResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/travellers",
                 body: TripAddTravellerRequest(
-                    subjectPersonId: nil, userId: nil,
                     label: entry.name, birthDate: entry.birthDateString,
                     shortWalks: entry.shortWalks))
             replanExplained = true
@@ -297,18 +217,9 @@ struct TripTravellersResponse: Codable, Sendable {
     let effect: TripGroupEffect
 }
 
-struct TripTravellerSuggestionsResponse: Codable, Sendable {
-    let suggestions: [TripTravellerSuggestion]
-}
-
 struct TripAddTravellerRequest: Encodable, Sendable {
-    /// One of the household …
-    let subjectPersonId: Int?
-    /// … or somebody who plans this trip (§6.2) …
-    let userId: Int?
-    /// … or somebody who is neither: a name, perhaps a birth date.
-    /// Exactly one of the three ways is used.
-    var label: String? = nil
+    /// Somebody without an account: a name, perhaps a birth date.
+    let label: String
     var birthDate: String? = nil
     var shortWalks: Bool? = nil
 }
@@ -378,6 +289,9 @@ struct TripManualTravellerSheet: View {
             Section {
                 TextField("Name", text: $name)
                     .textInputAutocapitalization(.words)
+            } footer: {
+                Text("Wer ein Konto hat, wird nicht hier eingetragen, sondern unter „Planen mit“ "
+                     + "eingeladen — und fährt damit mit.")
             }
             Section {
                 Toggle("Geburtsdatum angeben", isOn: $knowsBirthDate)
@@ -433,7 +347,9 @@ struct TripGroupEffect: Codable, Sendable {
 
 struct TripTraveller: Codable, Identifiable, Sendable {
     let id: Int
-    let subjectPersonId: Int?
+    /// The account, when this traveller has one: on the trip because
+    /// they plan it, and gone with the invitation.
+    let userId: Int?
     let label: String
     let birthDate: String?
     /// Set by a person, never derived from an age.
@@ -441,33 +357,21 @@ struct TripTraveller: Codable, Identifiable, Sendable {
     /// Age at the start of the trip — the age that plans it.
     let ageAtStart: Int?
 
+    /// Only somebody without an account is taken off the trip here;
+    /// an account leaves under "Planen mit".
+    var isRemovableHere: Bool { userId == nil }
+
     /// What is known about them, and nothing that is not: no age when
     /// no birth date was given, rather than a guess. The time flag is
     /// not repeated here — the switch on the row says it, and a line
-    /// that says it again is noise.
+    /// that says it again is noise. An account says so, so the row
+    /// reads as "plant mit" rather than as a hand entry.
     func subtitle(startsOn: String?) -> String? {
-        guard let ageAtStart else { return nil }
-        return startsOn == nil ? "\(ageAtStart)" : "\(ageAtStart) bei Reisebeginn"
-    }
-}
-
-struct TripTravellerSuggestion: Codable, Identifiable, Sendable {
-    /// Household entries and accounts are numbered separately, so the
-    /// row id says which kind this is rather than colliding with it.
-    var id: String {
-        subjectPersonId.map { "person:\($0)" } ?? userId.map { "user:\($0)" } ?? label
-    }
-    /// The household entry, when this is one …
-    let subjectPersonId: Int?
-    /// … or the account of somebody who plans the trip (§6.2).
-    let userId: Int?
-    let label: String
-    let relation: String
-    let birthDate: String?
-    let ageAtStart: Int?
-
-    var subtitle: String {
-        guard let ageAtStart else { return relation }
-        return "\(relation) · \(ageAtStart) bei Reisebeginn"
+        var parts: [String] = []
+        if userId != nil { parts.append("plant mit") }
+        if let ageAtStart {
+            parts.append(startsOn == nil ? "\(ageAtStart)" : "\(ageAtStart) bei Reisebeginn")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

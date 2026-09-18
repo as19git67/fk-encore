@@ -23,6 +23,7 @@ import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { tripPlanShares, tripPlans, users } from "../db/schema";
 import { isOnTrip, requireOrganiser } from "./plan-access";
+import { replanWithGroup } from "./travellers";
 
 export interface TripParticipant {
   userId: number;
@@ -93,8 +94,8 @@ export const listTripParticipants = api(
 export interface InviteRequest {
   planId: number;
   /**
-   * Who to invite: picked from the household by id (the app lists the
-   * household, like the album share does) …
+   * Who to invite: picked from the accounts by id (the app lists them,
+   * like the album share does) …
    */
   userId?: number;
   /** … or by the address they log in with. One of the two. */
@@ -155,6 +156,10 @@ export const inviteToTrip = api(
         user_id: invitee.id,
         invited_by: userId,
       });
+      // Whoever plans is on the trip (§3.5): they join the travel
+      // group with the invitation, and the days are planned for the
+      // group as it is now.
+      await replanWithGroup(req.planId, userId);
     }
 
     return {
@@ -218,6 +223,11 @@ export const removeFromTrip = api(
         eq(tripPlanShares.user_id, req.userId),
       ))
       .returning({ id: tripPlanShares.id });
+
+    // Leaving the planners is leaving the trip (§3.5). As the
+    // organiser, because the caller may just have left and can no
+    // longer read the plan.
+    if (deleted.length > 0) await replanWithGroup(req.planId, plan.ownerId);
 
     return { removed: deleted.length > 0 };
   },

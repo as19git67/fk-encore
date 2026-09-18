@@ -5,16 +5,19 @@ import XCTest
 ///
 /// What matters here is what is *not* shown: no age where no birth date
 /// was given, and no "mehr Zeit" that nobody set. Both would be the
-/// app making a statement about a person on its own.
+/// app making a statement about a person on its own. And who may be
+/// taken off here: only somebody without an account.
 final class TripTravellersTests: XCTestCase {
 
     private let json = """
     {
       "travellers": [
-        { "id": 1, "subjectPersonId": 7, "label": "Kind A",
-          "birthDate": "2020-06-15", "shortWalks": false, "ageAtStart": 7 },
-        { "id": 2, "subjectPersonId": null, "label": "Oma",
-          "birthDate": null, "shortWalks": true, "ageAtStart": null }
+        { "id": 1, "userId": 3, "label": "Papa",
+          "birthDate": null, "birthDateFromHousehold": false, "shortWalks": false, "ageAtStart": null },
+        { "id": 2, "userId": null, "label": "Kind A",
+          "birthDate": "2020-06-15", "birthDateFromHousehold": false, "shortWalks": false, "ageAtStart": 7 },
+        { "id": 3, "userId": null, "label": "Oma",
+          "birthDate": null, "birthDateFromHousehold": false, "shortWalks": true, "ageAtStart": null }
       ],
       "on": "2027-07-01",
       "effect": {
@@ -34,16 +37,39 @@ final class TripTravellersTests: XCTestCase {
         // child they will be by then.
         let travellers = try answer().travellers
 
-        XCTAssertEqual(travellers[0].subtitle(startsOn: "2027-07-01"), "7 bei Reisebeginn")
+        XCTAssertEqual(travellers[1].subtitle(startsOn: "2027-07-01"), "7 bei Reisebeginn")
     }
 
     func testSomebodyWithoutABirthDateGetsNoInventedAge() throws {
-        let oma = try answer().travellers[1]
+        let oma = try answer().travellers[2]
 
         XCTAssertNil(oma.ageAtStart)
         // The time flag is the switch's to show, not the subtitle's.
         XCTAssertTrue(oma.shortWalks)
         XCTAssertNil(oma.subtitle(startsOn: "2027-07-01"))
+    }
+
+    func testAnAccountSaysSoAndCannotBeTakenOffHere() throws {
+        // Whoever plans is on the trip; they leave under "Planen mit",
+        // not by a swipe on this screen.
+        let papa = try answer().travellers[0]
+
+        XCTAssertEqual(papa.subtitle(startsOn: "2027-07-01"), "plant mit")
+        XCTAssertFalse(papa.isRemovableHere)
+        XCTAssertTrue(try answer().travellers[1].isRemovableHere)
+    }
+
+    func testAnAccountWithABirthDateShowsBoth() throws {
+        let json = """
+        { "travellers": [ { "id": 4, "userId": 5, "label": "Kind C",
+            "birthDate": "2020-06-15", "birthDateFromHousehold": true, "shortWalks": false, "ageAtStart": 7 } ],
+          "on": "2027-07-01",
+          "effect": { "withChildren": true, "limitedMobility": false, "reasons": [] } }
+        """
+        let answer = try JSONDecoder()
+            .decode(TripTravellersResponse.self, from: Data(json.utf8))
+
+        XCTAssertEqual(answer.travellers[0].subtitle(startsOn: "2027-07-01"), "plant mit · 7 bei Reisebeginn")
     }
 
     func testTheEffectIsCarriedInWordsNotOnlyAsFlags() throws {
@@ -58,8 +84,8 @@ final class TripTravellersTests: XCTestCase {
 
     func testAnUndatedTripShowsNoAgesAtAll() throws {
         let json = """
-        { "travellers": [ { "id": 3, "subjectPersonId": null, "label": "Kind B",
-            "birthDate": "2020-06-15", "shortWalks": false, "ageAtStart": null } ],
+        { "travellers": [ { "id": 3, "userId": null, "label": "Kind B",
+            "birthDate": "2020-06-15", "birthDateFromHousehold": false, "shortWalks": false, "ageAtStart": null } ],
           "on": null,
           "effect": { "withChildren": false, "limitedMobility": false,
                       "reasons": ["Ohne Reisedatum lässt sich kein Alter ausrechnen."] } }
@@ -70,31 +96,5 @@ final class TripTravellersTests: XCTestCase {
         XCTAssertNil(answer.on)
         XCTAssertNil(answer.travellers[0].subtitle(startsOn: nil))
         XCTAssertFalse(answer.effect.withChildren)
-    }
-
-    func testASuggestionSaysHowItIsRelatedAndHowOld() throws {
-        let json = """
-        { "suggestions": [ { "subjectPersonId": 7, "userId": null, "label": "Kind A",
-            "relation": "kind", "birthDate": "2020-06-15", "ageAtStart": 7 } ] }
-        """
-        let offered = try JSONDecoder()
-            .decode(TripTravellerSuggestionsResponse.self, from: Data(json.utf8))
-
-        XCTAssertEqual(offered.suggestions[0].id, "person:7")
-        XCTAssertEqual(offered.suggestions[0].subtitle, "kind · 7 bei Reisebeginn")
-    }
-
-    func testSomebodyWhoPlansTheTripIsOfferedToo() throws {
-        // An adult with a login is a person on the trip as well; being
-        // asked to type their name again would be a gap, not a rule.
-        let json = """
-        { "suggestions": [ { "subjectPersonId": null, "userId": 3, "label": "Papa",
-            "relation": "plant mit", "birthDate": null, "ageAtStart": null } ] }
-        """
-        let offered = try JSONDecoder()
-            .decode(TripTravellerSuggestionsResponse.self, from: Data(json.utf8))
-
-        XCTAssertEqual(offered.suggestions[0].id, "user:3")
-        XCTAssertEqual(offered.suggestions[0].subtitle, "plant mit")
     }
 }
