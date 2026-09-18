@@ -1018,6 +1018,20 @@ Zwei Dinge, die dabei bewusst *nicht* passieren: Abstimmen plant **nicht** neu
 dafür einen Knopf), und ein Spot, über den niemand geredet hat, wird nicht
 abgewertet: Schweigen ist keine Ablehnung.
 
+**Suchen statt scrollen.** Ein Vorrat von dreißig oder vierzig Spots macht die
+Liste beim ersten Durchgang richtig und beim zweiten unbrauchbar: „wie hatte ich
+noch mal für das Museum gestimmt?" heißt sonst, an allem anderen vorbeizuscrollen.
+Der Bildschirm hat deshalb dieselbe Suche wie die Ideensammlung (§20.1) — immer
+sichtbar, nicht über der ersten Zeile versteckt. Gesucht wird alles, was die
+Zeile ohnehin sagt: Name und Ortsname, die Art des Ortes, Tag und Block
+beziehungsweise Entfernung, die Notiz — **und die Namen der Abstimmenden**, denn
+„was will eigentlich Alex?" ist eine Frage, die nur dieser Bildschirm beantworten
+kann. Was nicht geht, und zwar absichtlich: nach *Stimmen* filtern. Eine Liste,
+die Zeilen nach ihrem Abstimmungsergebnis ausblendet, wäre ein Ranking durch die
+Hintertür — genau das, was dieses Kapitel vermeidet. Während gesucht wird, treten
+die Abschnitte über die Etappe als Ganzes (neu planen, Fairness, wer noch
+schweigt) zurück, damit die gesuchte Zeile oben steht.
+
 **Dabei aufgefallen und mitgeändert:** Der Solver füllte einen Tag bis zur
 Budgetgrenze mit allem, was noch hineinpasste — auch mit einem Spot, dessen
 Bewertung unter null gefallen war. Platz im Tag ist aber kein Grund, irgendwohin

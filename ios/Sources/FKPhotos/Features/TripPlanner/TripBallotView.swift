@@ -33,6 +33,27 @@ struct TripBallotView: View {
     @State private var isApplying = false
     @State private var busyRef: String?
     @State private var errorMessage: String?
+    @State private var query = ""
+
+    /// Somebody is looking for one spot rather than working through the
+    /// whole list. Whitespace is trimmed here as well as in the filter:
+    /// a field holding one space is not a search.
+    private var isSearching: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// What the leg knows about a spot. The row shows it and the search
+    /// reads the same thing, so both are about one place.
+    private func details(for entry: TripBallotEntry) -> TripBallotDetails.Details? {
+        leg.map { TripBallotDetails.of(entry.osmRef, in: $0) }
+    }
+
+    /// The rows the search leaves. Computed outside the body rather
+    /// than bound inside it: a `let` in a result builder is one of the
+    /// things that reads fine and compiles differently.
+    private var visibleEntries: [TripBallotEntry] {
+        TripBallotSearch.filter(ballot?.entries ?? [], query: query) { details(for: $0) }
+    }
 
     var body: some View {
         List {
@@ -41,23 +62,32 @@ struct TripBallotView: View {
             }
 
             if let ballot {
-                Section {
-                    Button {
-                        Task { await apply() }
-                    } label: {
-                        HStack {
-                            Label("Damit neu planen", systemImage: "arrow.triangle.2.circlepath")
-                            Spacer()
-                            if isApplying { ProgressView() }
+                // The three sections above the list are about the
+                // ballot as a whole — re-planning the leg, the fairness
+                // account, who has not said anything yet. While
+                // somebody is searching, the screen is about one spot,
+                // and they would push the row that was asked for off
+                // the top.
+                if !isSearching {
+                    Section {
+                        Button {
+                            Task { await apply() }
+                        } label: {
+                            HStack {
+                                Label("Damit neu planen",
+                                      systemImage: "arrow.triangle.2.circlepath")
+                                Spacer()
+                                if isApplying { ProgressView() }
+                            }
                         }
+                        .disabled(isApplying)
+                    } footer: {
+                        Text("Abstimmen ändert den Plan nicht von selbst — sonst wäre er nach "
+                             + "jedem Wisch ein anderer.")
                     }
-                    .disabled(isApplying)
-                } footer: {
-                    Text("Abstimmen ändert den Plan nicht von selbst — sonst wäre er nach "
-                         + "jedem Wisch ein anderer.")
                 }
 
-                if let sentence = fairness?.sentence {
+                if !isSearching, let sentence = fairness?.sentence {
                     Section {
                         Text(sentence).font(.footnote)
                     } header: {
@@ -65,7 +95,7 @@ struct TripBallotView: View {
                     }
                 }
 
-                if !ballot.silent.isEmpty {
+                if !isSearching, !ballot.silent.isEmpty {
                     Section {
                         Text("Noch nichts gesagt haben: \(ballot.silent.joined(separator: ", "))")
                             .font(.footnote)
@@ -74,12 +104,22 @@ struct TripBallotView: View {
                 }
 
                 Section {
-                    ForEach(ballot.entries) { entry in
+                    ForEach(visibleEntries) { entry in
                         row(for: entry, heartsLeft: ballot.heartsLeft)
                     }
                 } header: {
-                    Text("\(ballot.entries.count) Vorschläge · "
-                         + "\(ballot.heartsLeft) von \(ballot.heartQuota) Herzenswünschen frei")
+                    // How much of the ballot the search left, said in
+                    // the header it would otherwise contradict: a list
+                    // that says "30 Vorschläge" and shows two reads as
+                    // a ballot that lost something.
+                    if let count = TripBallotSearch.countLabel(
+                        shown: visibleEntries.count, of: ballot.entries.count) {
+                        Text(count)
+                    } else {
+                        Text("\(ballot.entries.count) Vorschläge · "
+                             + "\(ballot.heartsLeft) von \(ballot.heartQuota) "
+                             + "Herzenswünschen frei")
+                    }
                 } footer: {
                     Text("Ein Herzenswunsch kommt in den Plan, solange er zeitlich möglich ist "
                          + "— unabhängig von der Mehrheit.")
@@ -87,7 +127,23 @@ struct TripBallotView: View {
             }
 
         }
+        // An overlay rather than a row: inside the list the empty state
+        // gets a row's width and squeezes itself into a column of
+        // single letters.
+        .overlay {
+            if let ballot, isSearching, visibleEntries.isEmpty, !ballot.entries.isEmpty {
+                ContentUnavailableView.search(text: query)
+                    .background(Color(uiColor: .systemGroupedBackground))
+            }
+        }
         .navigationTitle("Abstimmen")
+        // Always on screen rather than hidden above the first row: a
+        // field you have to know about to pull down is a field most
+        // people never find. Everything the row says is searched —
+        // including who wanted what, which is the question a ballot is
+        // the only screen able to answer.
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Vorschläge, Orte und Namen durchsuchen")
         .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
