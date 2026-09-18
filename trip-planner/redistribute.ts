@@ -28,6 +28,7 @@
 
 import type { PlannedBlockShape } from "./blocks";
 import { solveDay, type Candidate, type PlannedBlock, type PlannedStop } from "./solver";
+import { leaveFrom } from "./extent";
 import { travelLeg, type Coordinate, type TransportMode } from "./travel";
 
 /**
@@ -166,6 +167,7 @@ function stopToCandidate(stop: CurrentStop): Candidate {
     wikipediaUrl: stop.wikipediaUrl ?? null,
     facadeAzimuth: stop.facadeAzimuth ?? null,
     kind: stop.kind ?? null,
+    extent: stop.extent ?? null,
     // The flag travels with the spot: a redistribution must not turn a
     // photo stop back into an ordinary one on its way to the pool.
     photoStop: stop.photoStop ?? false,
@@ -212,7 +214,7 @@ function rebuildBlocks(
       stops.push(stop);
       // A done or skipped stop does not move the group on from here —
       // the reported position already accounts for it.
-      if (stop.status === "planned") from = { lat: stop.lat, lon: stop.lon };
+      if (stop.status === "planned") from = leaveFrom(stop);
     }
     for (const stop of solved[offset]?.stops ?? []) {
       stops.push({
@@ -221,7 +223,7 @@ function rebuildBlocks(
         status: "planned",
         pinned: false,
       });
-      from = { lat: stop.lat, lon: stop.lon };
+      from = leaveFrom(stop);
     }
 
     out.push({

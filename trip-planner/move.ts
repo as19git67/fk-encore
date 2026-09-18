@@ -29,6 +29,7 @@
 
 import type { DayWalk } from "./day-walk";
 import type { CurrentBlock, CurrentStop } from "./redistribute";
+import { leaveFrom } from "./extent";
 import { travelLeg, type Coordinate, type TransportMode } from "./travel";
 
 export class MoveError extends Error {}
@@ -210,7 +211,8 @@ export function recomputeDay(
       // A done or skipped stop is past: it is still on the card and
       // still on the way, but it no longer spends the budget (§5).
       if (stop.status === "planned") used += stop.dwellMinutes + leg.minutes;
-      position = { lat: stop.lat, lon: stop.lon };
+      // A route is left at its far end (§4.7).
+      position = leaveFrom(stop);
     }
     if (index === lastWithStops) {
       used += travelLeg(position, walk.end, mode).minutes;

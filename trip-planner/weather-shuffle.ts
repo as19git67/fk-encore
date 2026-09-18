@@ -32,6 +32,7 @@ import { recomputeDay } from "./move";
 import { DISPLACEMENT_BOOST, type CurrentBlock, type CurrentStop } from "./redistribute";
 import { exposure, shelterOf, type Shelter } from "./shelter";
 import type { Candidate } from "./solver";
+import { leaveFrom } from "./extent";
 import { travelLeg, type Coordinate, type TransportMode } from "./travel";
 import type { BlockWeather } from "./weather";
 
@@ -471,12 +472,12 @@ function lastPositionWithout(
   start: Coordinate,
 ): Coordinate {
   const last = block.stops.filter((stop) => stop.osmRef !== osmRef).at(-1);
-  return last ? { lat: last.lat, lon: last.lon } : start;
+  return last ? leaveFrom(last) : start;
 }
 
 function lastPosition(block: CurrentBlock, start: Coordinate): Coordinate {
   const last = block.stops.at(-1);
-  return last ? { lat: last.lat, lon: last.lon } : start;
+  return last ? leaveFrom(last) : start;
 }
 
 function stopToCandidate(stop: CurrentStop): Candidate {
@@ -487,6 +488,7 @@ function stopToCandidate(stop: CurrentStop): Candidate {
     wikipediaUrl: stop.wikipediaUrl ?? null,
     facadeAzimuth: stop.facadeAzimuth ?? null,
     kind: stop.kind ?? null,
+    extent: stop.extent ?? null,
     lat: stop.lat,
     lon: stop.lon,
     category: stop.category,
@@ -503,6 +505,7 @@ function asStop(candidate: Candidate, leg: ReturnType<typeof travelLeg>): Curren
     wikipediaUrl: candidate.wikipediaUrl ?? null,
     facadeAzimuth: candidate.facadeAzimuth ?? null,
     kind: candidate.kind ?? null,
+    extent: candidate.extent ?? null,
     lat: candidate.lat,
     lon: candidate.lon,
     category: candidate.category,

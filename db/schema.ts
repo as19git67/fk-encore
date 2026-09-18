@@ -1,6 +1,17 @@
 import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint, date } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+/**
+ * A spot with an extent (trip-planner/extent.ts): where it finishes and,
+ * where known, how long and how steep the way is. Kept as one JSON
+ * value because the three belong together and are absent together.
+ */
+export type SpotExtentColumn = {
+  end: { lat: number; lon: number };
+  lengthM?: number | null;
+  ascentM?: number | null;
+};
+
 // ========== Users ==========
 
 export const users = pgTable("users", {
@@ -3105,6 +3116,11 @@ export const tripPlanStops = pgTable(
     // indoor/outdoor derivation (§7.2). Null for a find brought in by
     // hand, which has no OSM entry.
     kind: text("kind"),
+    // Where the spot finishes when that is not where it begins (§4.7,
+    // migration 0203): a route along a lake, a way up a hill. The next
+    // leg of the day sets off from its end. Null for the ordinary point,
+    // which is every spot the region import knows.
+    extent: jsonb("extent").$type<SpotExtentColumn>(),
     // "Warum hier?" (§8.3): the scoring's reasons, copied from the pool
     // entry the moment the spot is placed (migration 0198). The pool
     // row that knew them is deleted then, and the screen promises the
@@ -3202,6 +3218,8 @@ export const tripPlanPool = pgTable(
     facade_azimuth: real("facade_azimuth"),
     /** See `trip_plan_stops.kind`. */
     kind: text("kind"),
+    /** See `trip_plan_stops.extent`. */
+    extent: jsonb("extent").$type<SpotExtentColumn>(),
   },
   (table) => [uniqueIndex("trip_plan_pool_leg_ref_key").on(table.leg_id, table.osm_ref)]
 );

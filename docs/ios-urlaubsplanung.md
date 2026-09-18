@@ -18,6 +18,7 @@ Ein Begriff pro Sache, in jeder Beschriftung derselbe. Die Spalte
 | Die Orte, aus denen der Planer für eine Stadt wählt | **Kandidaten** | Vorrat |
 | Ein Ort, noch nirgends eingeplant | **Ort** | Idee, Fund, Spot, Kandidat, Pin |
 | Ein Ort in einem Block eines Tages | **Stopp** | Spot; „Fotostopp" bleibt als Eigenschaft |
+| Ein Ort, dessen Weg das Ziel ist (`extent`, §4.7) | **Strecke** | Aktivität, Tour, Route |
 | Eine Stadt bzw. Station der Reise (`leg`) | **Stadt** | Etappe |
 | Eine harte Uhrzeit im Tag (`fixpoint`) | **Feste Zeit** | Fixpunkt |
 | Wo jeder Tag beginnt und endet (`leg.anchor`) | **Unterkunft** | Start & Ziel, Anker |
@@ -793,6 +794,94 @@ Voraussetzung ist §4.5: Ohne Tagesanker gibt es nichts, worin ein angenommener
 Vorschlag landen könnte. In der Reihenfolge dort steht er hinter dem
 Tagesanker — und er ist der Teil, der aus „vier Tage in San Gimignano" das
 macht, was der Reisende eigentlich gemeint hat.
+
+### 4.7 Strecken: der Weg ist das Ziel
+
+Ein Spot ist ein Punkt: hingehen, bleiben, von dort weitergehen. Die
+Ponalestraße über dem Gardasee ist keiner. Sie beginnt in Riva, endet am
+Ledrosee, dauert so lang, wie sie dauert — und der nächste Weg des Tages
+beginnt an ihrem **Ende**, nicht an ihrem Anfang. Dasselbe gilt für den
+Höhenweg, die Panoramastraße, die Fähre als Ausflug statt als Transfer, die
+Seilbahn mit Wanderung oben. Die Frage war: Sonderfall oder eigentlich nur
+ein Spot, bei dem zusätzlich „der Weg ist das Ziel" zählt?
+
+**Die Antwort: ein Spot mit Ausdehnung, keine zweite Entität.** Alles, was
+ein Spot kann — im Vorrat liegen, bewertet, ausgeblendet, abgestimmt,
+verschoben werden, auf der Karte stehen — kann eine Strecke auch, und das
+soll sie, ohne dass irgendwo ein zweiter Pfad gebaut wird. Was sie vom Punkt
+unterscheidet, sind genau drei Dinge, in dieser Reihenfolge der Wichtigkeit:
+
+1. **Start und Ende sind verschieden.** Die Tagesroute geht Unterkunft →
+   Stopp 1 → Stopp n → Unterkunft (§4.5). Bei einer Strecke liegt der
+   nächste Weg nicht am Spot, sondern an dessen Ende. Ein Punkt kann das
+   nicht ausdrücken; ein Tag, der ab dem Start einer 10-km-Strecke
+   weitergerechnet wird, belastet den Nachmittag mit einem Weg, den niemand
+   geht — oder lässt einen zu, den niemand schafft.
+2. **Die Dauer ist eine Eigenschaft der Sache, nicht der Kategorie.** Ein
+   Museum sind 90 Minuten, ein Aussichtspunkt 20 (§4.1). Zehn Kilometer mit
+   600 Höhenmetern sind zu Fuß vier Stunden und mit dem Rad eineinhalb. Keine
+   Kategorie weiß das; die Strecke muss es selbst sagen.
+3. **Sie enthält Spots.** Die Aussichtspunkte und Tunnel entlang der Ponale
+   sind in OSM eigene Punkte. Der Planer würde sie zusätzlich einplanen,
+   obwohl sie unterwegs sowieso passiert werden.
+
+Dazu kommen Bedingungen, die ein Punkt nicht hat: das Verkehrsmittel (Rad
+vorhanden oder Verleih), das Wetter (Regen streicht die Strecke, ein Museum
+nicht — §7.2), das Tageslicht (die Strecke muss vor Dunkelheit zu Ende sein),
+und das Fotolicht nicht an einem Ort, sondern entlang einer Ausrichtung.
+
+**Das Datenmodell:** Ein Spot trägt optional eine `extent` — den Endpunkt
+und, wo bekannt, Länge und Anstieg in Metern. Fehlt sie, ist er der Punkt,
+der er immer war; fehlt nur der Endpunkt, ist es ein Rundweg und braucht
+keine `extent`. Die Dauer ist die des Spots (`dwellMinutes`), gesetzt beim
+Anlegen oder überschrieben per Notiz (§9.2) — nie aus der Kategorie
+geschlossen. Die Kategorie heißt `route`, im Freien (§7.2).
+
+**Was der Planer damit tut (Etappe 1, umgesetzt):**
+
+- **Der Tag geht am Ende weiter.** Im Solver, beim Verschieben, bei der
+  Umverteilung, beim Wetter- und beim Licht-Umbau: jede Stelle, die „wo
+  stehen wir nach diesem Stopp" fragt, bekommt eine Antwort (`leaveFrom`).
+  Der Rückweg zur Unterkunft — oder zum Ausflugsziel, zum Bahnsteig
+  (§4.4, §4.5) — wird vom Ende gemessen. Damit stimmt das Blockbudget, und
+  der Aussichtspunkt 300 m hinter dem Ende ist ein kurzer Fußweg statt eines
+  Zweistundenmarsches, den kein Block zulässt.
+- **Eine Strecke kommt als Fund** (§9.2): `POST …/finds` nimmt `end`,
+  `lengthM`, `ascentM` und verlangt dazu `dwellMinutes`. Der OSM-Eintrag am
+  Startpunkt wird bewusst *nicht* zugeordnet — er ist der Aussichtspunkt,
+  von dem sie losgeht, nicht der Weg selbst — und eine Strecke wird nie in
+  den Punkt hineingemischt, an dem sie beginnt, auch nicht unter gleichem
+  Namen. Zwei Enden weiter als 80 km auseinander werden abgewiesen: das ist
+  ein Transfer (§4.2), keine Strecke in einem Block.
+
+**Was bewusst noch nicht gebaut ist:**
+
+- **Zwei Blöcke am Stück.** Eine Vier-Stunden-Wanderung passt in keinen
+  Vormittag. Vorerst gilt: Blöcke sind editierbar (§4.1, bis 600 Minuten) —
+  wer den Tag um die Ponale plant, legt Vormittag und Mittag zusammen. Ob der
+  Solver das selbst tun soll, wenn eine Strecke sonst nirgends Platz findet,
+  ist offen; es wäre der erste Fall, in dem ein Kandidat die Tagesform
+  ändert statt sie zu füllen.
+- **Spots im Korridor schlucken.** Die Aussichtspunkte entlang der Strecke
+  sollen als „unterwegs" gelten statt eingeplant zu werden. Die
+  Korridor-Suche (`corridor.ts`, Ellipse um zwei Enden) ist die Mechanik
+  dafür und liegt bereit; sie ist noch nicht an die Strecke gehängt.
+- **Aus dem Import.** OSM kennt Wander- und Radrouten als Relationen
+  (`route=hiking`, `route=bicycle`), oft mit Name, Länge und Schwierigkeit.
+  Der Importer kennt nur Punkte. Das ist die eine echte neue Arbeit; bis
+  dahin kommt eine Strecke von Hand.
+- **Die Dauer nach Reisegruppe.** „Mehr Zeit einplanen" (§3.5) skaliert
+  Blockbudgets. Bei einer Strecke müsste es die Dauer selbst skalieren, und
+  eingeschränkte Mobilität würde sie ganz ausschließen. Beides wartet, bis
+  die Reisegruppe Fortbewegungsarten kennt.
+- **In der App**: Eingabe der Strecke beim Fund (Endpunkt auf der Karte,
+  Dauer), die Linie statt des Pins, das Etikett „Strecke · 10 km · 600 Hm ·
+  3 h" auf der Karte und im Block. Etappe 2.
+
+**Was es nicht werden soll:** ein Tourenplaner mit Höhenprofil und
+GPX-Navigation. Die Grenze aus §9.5 gilt: Die App sagt „heute Vormittag die
+Ponale, ab Riva, ca. 3 h, Ende am Ledrosee" und übergibt für den Weg selbst
+nach draußen (§9.1).
 
 ## 5. Umplanen als Kernmechanik
 
@@ -3626,6 +3715,13 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     Bewusst nach Schritt 8: Er lebt von der Standortschleife, und ohne sie
     wäre er eine Merkliste. Veranstaltungen (§20.4) hängen an einer Quelle,
     die es noch nicht gibt, und sind deshalb kein Teil dieses Schritts.
+
+14. **Strecken** (§4.7) — ein Spot mit Ausdehnung: Endpunkt, Länge, Anstieg,
+    eigene Dauer. **Etappe 1 umgesetzt:** das Feld auf Vorrat und Stopp, der
+    Fund mit Endpunkt, und jeder Rewalk — Solver, Verschieben, Umverteilung,
+    Wetter, Licht — geht am Ende der Strecke weiter. Etappe 2 ist die
+    Eingabe und die Linie in der App; danach die offenen Punkte aus §4.7
+    (zwei Blöcke am Stück, Korridor, Import aus OSM-Routenrelationen).
 
 Schritte 1–3 sind der ehrliche Test — und sie kommen **ohne einen einzigen
 Neuimport** aus: Liefert die Maschine für *einen* Tag in

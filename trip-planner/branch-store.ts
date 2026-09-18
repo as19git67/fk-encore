@@ -16,6 +16,7 @@ import {
   tripPlanTravellers,
   users,
 } from "../db/schema";
+import { storedExtent } from "./extent";
 import type { PlannedStop } from "./solver";
 import { travelClassFor } from "./travel";
 
@@ -118,6 +119,7 @@ export async function saveBranches(
         wikipedia_url: stop.wikipediaUrl ?? null,
         facade_azimuth: stop.facadeAzimuth ?? null,
         kind: stop.kind ?? null,
+        extent: stop.extent ?? null,
         origin: stop.origin ?? "search",
         reasons: stop.reasons ?? [],
       });
@@ -196,6 +198,7 @@ export async function loadBranches(
           wikipediaUrl: stop.wikipedia_url,
           facadeAzimuth: stop.facade_azimuth,
           kind: stop.kind,
+          extent: storedExtent(stop.extent),
           origin: stop.origin,
           lat: stop.lat,
           lon: stop.lon,

@@ -92,6 +92,7 @@ export const returnStopToPool = api(
       wikipediaUrl: stop.wikipediaUrl ?? null,
       facadeAzimuth: stop.facadeAzimuth ?? null,
       kind: stop.kind ?? null,
+      extent: stop.extent ?? null,
       photoStop: stop.photoStop ?? false,
       origin: stop.origin ?? "search",
       reasons: stop.reasons ?? [],

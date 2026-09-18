@@ -28,6 +28,7 @@ import { loadPlan } from "./plan-store";
 import { addPoolEntry, mergeIntoPoolEntry, type StoredPoolEntry } from "./find-store";
 import { DEFAULT_DWELL_MINUTES } from "./candidates";
 import { chooseLeg, findDuplicate, manualRef } from "./finds";
+import { extentOf, type SpotExtent } from "./extent";
 
 /** How far around a find to look for the OSM entry it might be. */
 const MATCH_RADIUS_M = 80;
@@ -53,6 +54,18 @@ export interface AddFindRequest {
    * that is the one question §9.2 has the planner ask.
    */
   dwellMinutes?: number;
+  /**
+   * Where it finishes, when the way is the point (§4.7): a route along
+   * a lake, a path up a hill. The day goes on from here rather than
+   * from the start. Omitted for the ordinary place, which finishes
+   * where it began. Give `dwellMinutes` with it: a route takes as long
+   * as it takes, and no category knows how long that is.
+   */
+  end?: { lat: number; lon: number };
+  /** How long the way is, in metres, where known. Only with `end`. */
+  lengthM?: number;
+  /** How much of it climbs, in metres, where known. Only with `end`. */
+  ascentM?: number;
 }
 
 export interface AddFindResponse {
@@ -77,6 +90,7 @@ export const addFind = api(
     const userId = requireUser();
     const position = validatePosition(req);
     const note = validateNote(req.note);
+    const extent = validateExtent(position, req);
 
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
@@ -86,18 +100,23 @@ export const addFind = api(
     const leg = plan.legs.find((l) => l.position === legIndex);
     if (!leg) throw APIError.notFound(`leg ${legIndex} not found in this plan`);
 
-    // 5. Try for an OSM entry, and be explicit when there is none.
-    const match = await matchOsmEntry(position, req.name);
+    // 5. Try for an OSM entry, and be explicit when there is none. Not
+    // for a route: the entry at its start is the viewpoint it sets off
+    // from, not the way itself, and lending the way that entry would
+    // give it the viewpoint's reference and hours (§4.7).
+    const match = extent ? null : await matchOsmEntry(position, req.name);
 
     // 3. Already there? Merge rather than add.
+    // A route and the point it starts from are two things, even under
+    // one name: only entries of the same shape can be the same entry.
     const existing = [
-      ...leg.pool.map((c) => ({ osmRef: c.osmRef, name: c.name, lat: c.lat, lon: c.lon })),
+      ...leg.pool.map((c) => ({ osmRef: c.osmRef, name: c.name, lat: c.lat, lon: c.lon, extent: c.extent })),
       ...leg.days.flatMap((d) =>
         d.blocks.flatMap((b) =>
-          b.stops.map((s) => ({ osmRef: s.osmRef, name: s.name, lat: s.lat, lon: s.lon })),
+          b.stops.map((s) => ({ osmRef: s.osmRef, name: s.name, lat: s.lat, lon: s.lon, extent: s.extent })),
         ),
       ),
-    ];
+    ].filter((e) => Boolean(e.extent) === Boolean(extent));
     const duplicate = findDuplicate(
       { osmRef: match?.osmRef, name: req.name ?? match?.name, ...position },
       existing,
@@ -128,7 +147,9 @@ export const addFind = api(
       };
     }
 
-    const category = match ? match.categories[0] ?? null : null;
+    // A route is its own category (§4.7): outdoors, and as long as it
+    // takes — the duration was required above.
+    const category = extent ? "route" : match ? match.categories[0] ?? null : null;
     const dwellMinutes = resolveDwell(req.dwellMinutes, category);
     if (dwellMinutes === null) {
       // The one question §9.2 has the planner ask. Asking beats
@@ -157,7 +178,10 @@ export const addFind = api(
       note,
       sourceUrl: req.sourceUrl ?? null,
       addedBy: userId,
-      unmatched: match === null,
+      // A route has no OSM entry to match and nothing guessed for it
+      // either: its category and duration are stated, not inferred.
+      unmatched: match === null && !extent,
+      extent,
     });
 
     return {
@@ -165,7 +189,7 @@ export const addFind = api(
       legIndex: leg.position,
       merged: false,
       matchedOsmRef: match?.osmRef ?? null,
-      unknown: match ? [] : ["Öffnungszeiten", "Kategorie"],
+      unknown: match || extent ? [] : ["Öffnungszeiten", "Kategorie"],
     };
   },
 );
@@ -291,4 +315,30 @@ function validateNote(note: string | undefined): string | null {
     throw APIError.invalidArgument(`note may be at most ${MAX_NOTE_LENGTH} characters`);
   }
   return trimmed;
+}
+
+/**
+ * The route's far end, checked (§4.7), or null for a point.
+ *
+ * A route is planned on its own duration, never a category's, so an
+ * extent without a duration is refused up front — otherwise a matched
+ * viewpoint at the start would lend a four-hour ride its twenty
+ * minutes.
+ */
+function validateExtent(
+  start: { lat: number; lon: number },
+  req: AddFindRequest,
+): SpotExtent | null {
+  let extent: SpotExtent | null;
+  try {
+    extent = extentOf(start, { end: req.end, lengthM: req.lengthM, ascentM: req.ascentM });
+  } catch (err) {
+    throw APIError.invalidArgument(err instanceof Error ? err.message : String(err));
+  }
+  if (extent && req.dwellMinutes === undefined) {
+    throw APIError.invalidArgument(
+      "eine Strecke braucht ihre Dauer — bitte dwellMinutes mitgeben",
+    );
+  }
+  return extent;
 }

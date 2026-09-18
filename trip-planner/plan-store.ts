@@ -30,6 +30,7 @@ import {
   tripSpotNotes,
   tripHiddenSpots,
 } from "../db/schema";
+import { storedExtent } from "./extent";
 import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
@@ -367,6 +368,7 @@ export async function insertLeg(
         wikipedia_url: c.wikipediaUrl ?? null,
         facade_azimuth: c.facadeAzimuth ?? null,
         kind: c.kind ?? null,
+        extent: c.extent ?? null,
         lat: c.lat,
         lon: c.lon,
         category: c.category,
@@ -608,6 +610,7 @@ async function insertDays(
           wikipedia_url: stop.wikipediaUrl ?? null,
           facade_azimuth: stop.facadeAzimuth ?? null,
           kind: stop.kind ?? null,
+          extent: stop.extent ?? null,
           // Provenance travels with the spot (§9.2): the pool row that
           // knew it is deleted the moment it lands on a day.
           origin: stop.origin ?? "search",
@@ -815,6 +818,7 @@ export async function saveMovedDays(
           wikipedia_url: stop.wikipediaUrl ?? null,
           facade_azimuth: stop.facadeAzimuth ?? null,
           kind: stop.kind ?? null,
+          extent: stop.extent ?? null,
           // Provenance travels with the spot (§9.2): the pool row that
           // knew it is deleted the moment it lands on a day.
           origin: stop.origin ?? "search",
@@ -950,6 +954,7 @@ export async function loadPlan(
       wikipediaUrl: row.wikipedia_url,
       facadeAzimuth: row.facade_azimuth,
       kind: row.kind,
+      extent: storedExtent(row.extent),
       lat: row.lat,
       lon: row.lon,
       category: row.category,
@@ -1043,6 +1048,7 @@ export async function loadPlan(
       wikipediaUrl: row.wikipedia_url,
       facadeAzimuth: row.facade_azimuth,
       kind: row.kind,
+      extent: storedExtent(row.extent),
       lat: row.lat,
       lon: row.lon,
       category: row.category,
@@ -1159,6 +1165,7 @@ async function rewriteDay(
         wikipedia_url: stop.wikipediaUrl ?? null,
         facade_azimuth: stop.facadeAzimuth ?? null,
         kind: stop.kind ?? null,
+        extent: stop.extent ?? null,
         origin: stop.origin ?? "search",
         reasons: stop.reasons ?? [],
       });
@@ -1195,6 +1202,7 @@ async function rewriteDay(
           wikipedia_url: c.wikipediaUrl ?? null,
           facade_azimuth: c.facadeAzimuth ?? null,
           kind: c.kind ?? null,
+          extent: c.extent ?? null,
           lat: c.lat,
           lon: c.lon,
           category: c.category,
@@ -1267,6 +1275,7 @@ export async function replanPlan(
           wikipedia_url: c.wikipediaUrl ?? null,
           facade_azimuth: c.facadeAzimuth ?? null,
           kind: c.kind ?? null,
+          extent: c.extent ?? null,
           lat: c.lat,
           lon: c.lon,
           category: c.category,
@@ -1768,6 +1777,7 @@ export async function findInPool(
     wikipediaUrl: row.wikipedia_url,
     facadeAzimuth: row.facade_azimuth,
     kind: row.kind,
+    extent: storedExtent(row.extent),
     lat: row.lat,
     lon: row.lon,
     category: row.category,

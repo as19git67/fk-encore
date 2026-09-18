@@ -9,6 +9,7 @@
 import { and, eq } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { tripPlanPool } from "../db/schema";
+import { storedExtent, type SpotExtent } from "./extent";
 
 type Db = typeof dbDefault;
 
@@ -28,6 +29,8 @@ export interface StoredPoolEntry {
   addedBy: number | null;
   /** True when no OSM entry could be matched (§9.2, rule 5). */
   unmatched: boolean;
+  /** Where it finishes, when that is not where it begins (§4.7). */
+  extent: SpotExtent | null;
 }
 
 export interface AddPoolEntryInput {
@@ -45,6 +48,8 @@ export interface AddPoolEntryInput {
   sourceUrl: string | null;
   addedBy: number;
   unmatched: boolean;
+  /** See `StoredPoolEntry.extent`. Omitted for the ordinary point. */
+  extent?: SpotExtent | null;
 }
 
 export async function addPoolEntry(
@@ -68,6 +73,7 @@ export async function addPoolEntry(
       source_url: input.sourceUrl,
       added_by: input.addedBy,
       unmatched: input.unmatched,
+      extent: input.extent ?? null,
     })
     .returning();
   return toStoredPoolEntry(row);
@@ -151,5 +157,6 @@ function toStoredPoolEntry(row: typeof tripPlanPool.$inferSelect): StoredPoolEnt
     sourceUrl: row.source_url,
     addedBy: row.added_by,
     unmatched: row.unmatched,
+    extent: storedExtent(row.extent),
   };
 }

@@ -22,7 +22,7 @@ export type Shelter = "indoor" | "partly" | "outdoor";
 /** Categories that are indoors unless the tag says otherwise. */
 const INDOOR_CATEGORIES: ReadonlySet<string> = new Set(["museum", "theatre", "cafe", "food"]);
 /** Categories that are outdoors unless the tag says otherwise. */
-const OUTDOOR_CATEGORIES: ReadonlySet<string> = new Set(["viewpoint", "outdoors"]);
+const OUTDOOR_CATEGORIES: ReadonlySet<string> = new Set(["viewpoint", "outdoors", "route"]);
 
 /**
  * Tags that settle it, whatever the category says.
