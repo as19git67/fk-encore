@@ -241,8 +241,17 @@ export interface CreateFixpointInput extends Fixpoint {
   lon?: number | null;
 }
 
-/** A block as it goes in, with the hour the frame gave it. */
-export type CreateBlockInput = PlannedBlock & { startMinutes?: number };
+/**
+ * A block as it goes in, with the hour the frame gave it.
+ *
+ * `extends` rather than `PlannedBlock & { startMinutes }` for the reason
+ * given at `StoredBranchStop` (branch-store.ts): the stops inside carry
+ * a field that is an interface or null, and Encore's parser cannot
+ * distribute an intersection over that.
+ */
+export interface CreateBlockInput extends PlannedBlock {
+  startMinutes?: number;
+}
 
 export interface CreateDayInput {
   blocks: readonly CreateBlockInput[];
