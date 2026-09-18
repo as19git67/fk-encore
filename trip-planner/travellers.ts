@@ -100,7 +100,7 @@ export interface AddTravellerRequest {
   /** Or somebody who is not: their name, and optionally a birth date. */
   label?: string;
   birthDate?: string;
-  /** "Kürzere Wege" — a statement about a person, so it is asked for. */
+  /** "Mehr Zeit einplanen" — a statement about a person, so it is asked for. */
   shortWalks?: boolean;
 }
 
@@ -112,7 +112,7 @@ export interface RemoveTravellerRequest {
 export interface UpdateTravellerRequest {
   planId: number;
   travellerId: number;
-  /** "Kürzere Wege" — a statement about a person, so it is asked for. */
+  /** "Mehr Zeit einplanen" — a statement about a person, so it is asked for. */
   shortWalks?: boolean;
   /** A new name for somebody entered by hand. */
   label?: string;
