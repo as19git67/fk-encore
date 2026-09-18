@@ -164,14 +164,6 @@ struct TripSpotDetailView<Actions: View>: View {
                 }
             }
 
-            if !spot.reasons.isEmpty {
-                Section("Warum hier?") {
-                    ForEach(spot.reasons, id: \.self) { reason in
-                        Text(reason).font(.callout)
-                    }
-                }
-            }
-
             Section {
                 // Only show a source link when it adds information: a maps
                 // URL from Apple or Google Maps opens the same place as
@@ -207,6 +199,19 @@ struct TripSpotDetailView<Actions: View>: View {
             }
 
             actions({ dismiss() })
+
+            // Last, and deliberately so. It is the one part of this
+            // screen nobody opens it for: what the place is, where it
+            // is and what you can do with it come first, and the
+            // planner's reasoning is what you read afterwards when you
+            // disagree with it (§3.8).
+            if !spot.reasons.isEmpty {
+                Section("Warum hier?") {
+                    ForEach(spot.reasons, id: \.self) { reason in
+                        Text(reason).font(.callout)
+                    }
+                }
+            }
         }
         .navigationTitle(spot.displayName)
         .navigationBarTitleDisplayMode(.inline)
