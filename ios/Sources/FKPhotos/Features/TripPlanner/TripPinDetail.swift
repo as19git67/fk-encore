@@ -56,6 +56,9 @@ struct TripPinDetail: Equatable {
     /// Where it sits in the day, or nil for a candidate in the pool
     /// (§5.2). The sheet shows what is there.
     let planned: Planned?
+    /// "Strecke · 10 km · 600 Hm" for a spot whose way is the point
+    /// (§4.7); nil for a place.
+    var extentText: String? = nil
 
     /// Everything the map knows about one stop, gathered once.
     ///
@@ -84,7 +87,8 @@ struct TripPinDetail: Equatable {
                 travelText: travelText(stop.travelFromPrevious),
                 blockText: block.map(blockText),
                 isPinned: stop.pinned,
-            )
+            ),
+            extentText: stop.extent?.summary
         )
     }
 
@@ -106,7 +110,8 @@ struct TripPinDetail: Equatable {
             wikipediaUrl: candidate.wikipediaUrl.flatMap(URL.init(string:)),
             sourceUrl: candidate.sourceUrl.flatMap(URL.init(string:)),
             coordinate: candidate.coordinate,
-            planned: nil
+            planned: nil,
+            extentText: candidate.extent?.summary
         )
     }
 

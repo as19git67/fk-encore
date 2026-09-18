@@ -21,6 +21,9 @@ struct TripSpotMapPin: Identifiable, Equatable {
     /// Drawn larger: the day's slider marks where the plan says you
     /// would be at that hour.
     var emphasised: Bool = false
+    /// Where the spot finishes when it is a route (§4.7): the map draws
+    /// the way from the dot to here, and the day goes on from here.
+    var extentEnd: TripCoordinate? = nil
 }
 
 /// The map both trip maps are made of: the base, the pins, the tap.
@@ -56,6 +59,23 @@ struct TripSpotMapView: View {
                     .padding(6)
                     .background(.background, in: .circle)
                     .overlay(Circle().stroke(.secondary))
+            }
+
+            // A route is a line, not a dot (§4.7). As the crow flies —
+            // the app has no router and says so by drawing it dashed.
+            ForEach(pins.filter { $0.extentEnd != nil }) { pin in
+                if let end = pin.extentEnd {
+                    MapPolyline(coordinates: [pin.coordinate.clCoordinate, end.clCoordinate])
+                        .stroke(pin.tint, style: StrokeStyle(lineWidth: 3, dash: [6, 4]))
+                    Annotation("Ende: \(pin.title)", coordinate: end.clCoordinate) {
+                        Image(systemName: "flag.checkered")
+                            .font(.caption2)
+                            .padding(4)
+                            .background(.background, in: .circle)
+                            .overlay(Circle().stroke(pin.tint))
+                    }
+                    .annotationTitles(.hidden)
+                }
             }
 
             ForEach(pins) { pin in

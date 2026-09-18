@@ -86,10 +86,16 @@ struct TripPinDetailSheet: View {
                         }
                         LabeledContent("Status", value: planned.statusLabel)
                         LabeledContent("Art", value: detail.category)
+                        if let extentText = detail.extentText {
+                            LabeledContent("Strecke", value: extentText)
+                        }
                     }
                 } else {
                     Section {
                         LabeledContent("Art", value: detail.category)
+                        if let extentText = detail.extentText {
+                            LabeledContent("Strecke", value: extentText)
+                        }
                     } footer: {
                         // Why the lines above are missing, said once:
                         // an empty sheet reads as a sheet that failed
