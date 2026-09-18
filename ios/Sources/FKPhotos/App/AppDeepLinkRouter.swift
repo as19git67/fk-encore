@@ -76,6 +76,23 @@ public final class AppDeepLinkRouter {
         open(link)
     }
 
+    /// A URL as text — from a notification payload. A web-relative path
+    /// (`/app/fotos/alben/12`, what the server's push payloads carry) is
+    /// resolved against the configured server first, so the server never
+    /// needs to know its own origin.
+    public func handle(urlString: String) {
+        guard let url = Self.resolve(urlString, serverURL: serverURL) else { return }
+        handle(url)
+    }
+
+    static func resolve(_ urlString: String, serverURL: URL?) -> URL? {
+        if urlString.hasPrefix("/") {
+            guard let serverURL else { return nil }
+            return URL(string: urlString, relativeTo: serverURL)?.absoluteURL
+        }
+        return URL(string: urlString)
+    }
+
     /// Open a target the app produced itself (a Spotlight hit, an intent).
     func open(_ link: AppDeepLink) {
         pending = link

@@ -128,6 +128,21 @@ final class AppDeepLinkTests: XCTestCase {
         XCTAssertNil(AppDeepLink.parse(URL(string: "mailto:review-queue")!))
     }
 
+    // MARK: - Notification payloads
+
+    /// A push payload carries the web-relative path (`/app/fotos/alben/12`);
+    /// the router resolves it against the configured server before parsing.
+    func testARelativePathFromANotificationResolvesAgainstTheServer() {
+        let resolved = AppDeepLinkRouter.resolve("/app/fotos/alben/12?photoId=34", serverURL: server)
+        XCTAssertEqual(resolved?.absoluteString, "https://photos.example.test/app/fotos/alben/12?photoId=34")
+        XCTAssertEqual(AppDeepLink.parse(resolved!, serverURL: server), .photo(id: 34))
+        XCTAssertNil(AppDeepLinkRouter.resolve("/app/fotos/feed", serverURL: nil))
+        XCTAssertEqual(
+            AppDeepLinkRouter.resolve("f4milphotos://review-queue", serverURL: nil)?.absoluteString,
+            "f4milphotos://review-queue"
+        )
+    }
+
     // MARK: - Web URLs the app generates
 
     func testTheGeneratedWebURLsParseBackToThemselves() {

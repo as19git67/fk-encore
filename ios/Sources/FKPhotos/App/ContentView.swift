@@ -70,6 +70,12 @@ public struct ContentView: View {
             guard authManager.currentUser != nil else { return }
             await SpotlightIndexer.shared.syncPhotos()
         }
+        .task(id: authManager.currentUser?.id) {
+            // The device token can change between launches; the server only
+            // knows the last one it was told (#765). Quiet unless opted in.
+            guard authManager.currentUser != nil else { return }
+            await RemotePushManager.shared.registerIfEnabled()
+        }
     }
 }
 

@@ -813,6 +813,38 @@ dokumentiert**:
   Alben sind offen. Über die Kurzbefehle-App und Siris eigene Auflösung
   bleiben sie erreichbar.
 
+### 2.15 Remote-Push über APNs (#765)
+
+- **Ein Absender, zwei Kanäle.** `sendToUser` im `push`-Service schickt
+  dieselbe Benachrichtigung über Web Push an Browser und über APNs an
+  iPhones; Präferenzen, Entprellung, Online-Unterdrückung und Digest davor
+  sind gemeinsam. Details: `docs/push-notifications.md`, „iOS: APNs".
+- **`RemotePushManager`** (`Features/Push/`): Opt-in wie im Web. Beim
+  Einschalten Berechtigung erfragen, Token holen
+  (`registerForRemoteNotifications`), an `POST /push/apns/register` geben —
+  und das **bei jedem Start** erneut, weil sich der Token ändern kann und
+  der Server nur den letzten kennt. Ausschalten und Abmelden rufen
+  `/push/apns/unregister`, damit ein zweites Konto auf demselben Telefon
+  nicht die Mitteilungen des ersten bekommt. Sandbox oder Produktion
+  entscheidet die Build-Konfiguration (`#if DEBUG`), genau wie Xcode das
+  `aps-environment`-Entitlement vergibt.
+- **Ein Tipp öffnet die Stelle.** Der Payload trägt den web-relativen Pfad
+  (`/app/fotos/alben/12?photoId=34`), den jede Feed-Benachrichtigung ohnehin
+  hat; `AppDeepLinkRouter.handle(urlString:)` löst ihn gegen den
+  konfigurierten Server auf und routet ihn wie einen Universal Link (2.11).
+  Der `default`-Zweig des Notification-Delegates in `Main.swift` gilt damit
+  für Remote-Push und die lokale Review-Mitteilung gleichermaßen.
+- **`PushSettingsView`** (Einstellungen → Benachrichtigungen): der Schalter
+  für dieses iPhone mit Status (aktiv, wird registriert, in iOS verweigert,
+  Fehler), die Arten wie im Web-Profil (`/push/preferences`, ein Satz für alle
+  Geräte, nur die Foto-Arten — Dokumente hat die App nicht) und der Schalter
+  für die lokale Gruppen-Mitteilung, der vorher in der Hauptliste stand.
+  Ist der Server nicht eingerichtet (`GET /push/apns/status`), ist der
+  Schalter aus und sagt warum.
+- **Entitlement** `aps-environment = development` in `FKPhotos.entitlements`
+  (Xcode setzt es beim Archivieren auf `production`). Die Push-Capability
+  am App-ID legt Xcode mit automatischem Signing an.
+
 ---
 
 ## 3. Vergleich: Web-Foto-Bereich ↔ iOS
@@ -889,7 +921,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Foto-Stream (chronologisch) | ✅ `PhotoFeedView` | 🔶 (Feed = Aktivität) |
 | Reaktionen / Likes | ✅ | ✅ |
 | Kommentare (lesen + schreiben) | ✅ | ✅ |
-| Push-Benachrichtigungen | ✅ (PWA-Push) | ❌ |
+| Push-Benachrichtigungen | ✅ (PWA-Push) | ✅ (APNs, #765 — siehe 2.15) |
 
 ### 3.8 Rückblicke & Review
 | Feature | Web | iOS |
@@ -991,10 +1023,11 @@ eine echte Bereicherung:
 3. **Live Activity / Dynamic Island** für Backup-Fortschritt.
 4. ✅ **App Intents / Siri-Shortcuts** – „Jetzt sichern", „Suche nach …",
    „Zeige Rückblick", Album/Person als Entity — siehe 2.14.
-5. **Lokale Benachrichtigungen** – Backup abgeschlossen, neue Kommentare/Likes
-   (bis Remote-Push via APNs steht).
-6. **Remote-Push (APNs)** – Gegenstück zum bestehenden `push`-Service & PWA-Push
-   (zählt auch zur Parität, ist aber iOS-Plattformarbeit).
+5. **Lokale Benachrichtigungen** – „neue Gruppen warten" ist umgesetzt
+   (`ReviewQueueNotifier`, 2.9); „Backup abgeschlossen" bewusst nicht — wer
+   die Sicherung sehen will, sieht sie künftig in der Live Activity (#768 §1).
+6. ✅ **Remote-Push (APNs)** – Gegenstück zum bestehenden `push`-Service &
+   PWA-Push — siehe 2.15.
 7. ✅ **Spotlight-Indexierung** — Fotos mit erkanntem Text (Opt-in),
    Personen und Alben — siehe 2.12.
 8. **Live Photos** – Erfassung/Upload von Bewegungsanteil (sobald das Backend
