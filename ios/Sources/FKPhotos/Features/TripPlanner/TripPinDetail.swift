@@ -87,7 +87,6 @@ struct TripPinDetail: Equatable {
                 travelText: travelText(stop.travelFromPrevious),
                 blockText: block.map(blockText),
                 isPinned: stop.pinned,
-            )
             ),
             extentText: stop.extent?.summary
         )
