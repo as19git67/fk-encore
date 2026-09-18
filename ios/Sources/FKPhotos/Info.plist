@@ -6,27 +6,35 @@
 	<array>
 		<string>dev.fk-encore.F4milPhotos.photoSync</string>
 	</array>
-	<!-- Die App ist durchgehend deutsch, und ohne diese Angabe meldet
-	     das Bundle Englisch als einzige unterstützte Sprache. iOS wählt
-	     die Sprache der System-Oberflächen — Ausschneiden/Kopieren/
-	     Einfügen, Tastatur, Standardknöpfe, Foto-Picker, Share-Sheet —
-	     aus der Schnittmenge von Gerätesprache und den Sprachen der App:
-	     Bei "nur Englisch" bleibt dieses Menü englisch, auch auf einem
-	     deutschen iPhone, mitten in deutschen Texten. -->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>de</string>
 	<key>CFBundleDisplayName</key>
 	<string>F4mil Photos</string>
-	<!--
-	  How Siri hears the app (#766). The display name has a digit in the
-	  middle of a word, and Siri's pronunciation of "F4mil" is anyone's guess.
-	  CFBundleSpokenName tells it how the name sounds; INAlternativeAppNames
-	  are further names the App Shortcuts answer to, each with the way it is
-	  said. Together, "Famil Photos", "Famil" and "Familienfotos" all reach
-	  the same shortcuts.
-	-->
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleSpokenName</key>
 	<string>Famil Photos</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>f4milphotos</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>INAlternativeAppNames</key>
 	<array>
 		<dict>
@@ -48,56 +56,24 @@
 			<string>Familienfotos</string>
 		</dict>
 	</array>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>f4milphotos</string>
-			</array>
-		</dict>
-	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<!-- Without this, canOpenURL("comgooglemaps://") always answers "no"
-	     however the device is set up, and the Google Maps option in the
-	     planner's handoff vanishes with no error anywhere (§9.1). -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.photography</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>comgooglemaps</string>
 	</array>
-	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.photography</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Zum direkten Aufnehmen von Fotos für den Upload</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Um beim Start eines Trips den Ort für einen Namensvorschlag zu ermitteln und neue Fotos dem richtigen Reise-Album zuzuordnen</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Damit F4mil Photos während eines laufenden Trips vorschlagen kann, den Trip zu beenden, sobald du wieder zuhause bist – auch wenn die App gerade nicht geöffnet ist</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Um beim Start eines Trips den Ort für einen Namensvorschlag zu ermitteln und neue Fotos dem richtigen Reise-Album zuzuordnen</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Zum Speichern aufgenommener Fotos in deiner Mediathek</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Zum Hochladen von Fotos in F4mil Photos</string>
-	<!--
-	  Under limited photo access iOS would otherwise put its own „Weiterhin
-	  beschränken / Mehr auswählen" alert over the app on every launch. The
-	  app says it itself, where the sync is configured (#768 §4a,
-	  LimitedLibraryAccess.swift).
-	-->
 	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
