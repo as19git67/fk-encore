@@ -89,6 +89,7 @@ async function household(
   relationTag: string,
   birthDate: string | null,
   inHousehold = true,
+  relationKind: "self" | "spouse" | "child" | "other" = relationTag === "kind" ? "child" : "other",
 ): Promise<number> {
   const [row] = await db
     .insert(userSubjectPersons)
@@ -96,7 +97,7 @@ async function household(
       user_id: ownerId,
       full_name: name,
       relation_tag: relationTag,
-      relation_kind: relationTag === "kind" ? "child" : "other",
+      relation_kind: relationKind,
       birth_date: birthDate,
       in_household: inHousehold,
     })
@@ -203,6 +204,57 @@ describe("the household is offered, not taken along", () => {
 
     expect(suggestions.filter((s) => s.label === "Planerin")).toHaveLength(1);
     expect(suggestions.find((s) => s.label === "Planerin")?.subjectPersonId).not.toBeNull();
+  });
+
+  it("knows the organiser's own household entry is the organiser, whatever the names", async () => {
+    // The reported case: "Max Beispiel (Ehemann)" in the household the
+    // organiser keeps, "Max" as the account — one human, offered twice.
+    // The household's `self` entry is the account; the name is not the
+    // key.
+    const self = await household("Planerin Beispiel", "Ehefrau", "1985-03-02", true, "self");
+    const plan = await trip();
+
+    const { suggestions } = await suggestTravellers({ planId: plan.id });
+
+    expect(suggestions.some((s) => s.userId === ownerId)).toBe(false);
+    const asHousehold = suggestions.filter((s) => s.subjectPersonId === self);
+    expect(asHousehold).toHaveLength(1);
+    // Offered as the household entry, which is the one that knows the
+    // birth date.
+    expect(asHousehold[0].ageAtStart).toBe(42);
+  });
+
+  it("does not hand the organiser's self entry to a namesake who plans along", async () => {
+    // Two people called the same: the self entry is the owner's, and a
+    // fellow planner with the same display name is still somebody else.
+    await household("Mitreisender", "Ich", null, true, "self");
+    const plan = await trip();
+    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+
+    const { suggestions } = await suggestTravellers({ planId: plan.id });
+
+    expect(suggestions.some((s) => s.userId === otherId)).toBe(true);
+  });
+
+  it("stops offering the household entry once the account is on the trip, and vice versa", async () => {
+    const self = await household("Planerin Beispiel", "Ich", "1985-03-02", true, "self");
+    const plan = await trip();
+
+    await addTraveller({ planId: plan.id, userId: ownerId });
+    let { suggestions } = await suggestTravellers({ planId: plan.id });
+    expect(suggestions.some((s) => s.subjectPersonId === self)).toBe(false);
+    expect(suggestions.some((s) => s.userId === ownerId)).toBe(false);
+
+    // One human, one row: the other record is refused, not added.
+    await expect(addTraveller({ planId: plan.id, subjectPersonId: self }))
+      .rejects.toThrow(/fährt schon mit/);
+
+    await db.delete(tripPlanTravellers);
+    await addTraveller({ planId: plan.id, subjectPersonId: self });
+    ({ suggestions } = await suggestTravellers({ planId: plan.id }));
+    expect(suggestions.some((s) => s.userId === ownerId)).toBe(false);
+    await expect(addTraveller({ planId: plan.id, userId: ownerId }))
+      .rejects.toThrow(/fährt schon mit/);
   });
 
   it("refuses an account that does not plan this trip", async () => {

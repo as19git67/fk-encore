@@ -42,6 +42,7 @@ import {
   type GroupReading,
   type Traveller,
 } from "./travel-group";
+import { samePerson } from "./same-person";
 
 export interface TravellersRequest {
   planId: number;
@@ -162,33 +163,12 @@ export const suggestTravellers = api(
         .filter((id): id is number => id !== null),
     );
 
-    const household = await db
-      .select({
-        id: userSubjectPersons.id,
-        name: userSubjectPersons.full_name,
-        relation: userSubjectPersons.relation_tag,
-        birthDate: userSubjectPersons.birth_date,
-      })
-      .from(userSubjectPersons)
-      .where(and(
-        eq(userSubjectPersons.user_id, userId),
-        eq(userSubjectPersons.in_household, true),
-      ))
-      .orderBy(asc(userSubjectPersons.full_name));
+    const household = await householdOf(userId);
 
     // The people who plan this trip are people on it too (§6.2, §3.5).
     // Leaving them out meant an adult with a login had to be entered
     // twice — once by e-mail as a planner, once by hand as a traveller.
-    const planners = await db
-      .select({ id: users.id, name: users.name })
-      .from(users)
-      .where(inArray(users.id, [
-        plan.ownerId,
-        ...(await db
-          .select({ id: tripPlanShares.user_id })
-          .from(tripPlanShares)
-          .where(eq(tripPlanShares.plan_id, req.planId))).map((row) => row.id),
-      ]));
+    const planners = await plannersOf(plan);
     const alreadyByUser = new Set(
       (await db
         .select({ id: tripPlanTravellers.added_for_user_id })
@@ -198,14 +178,24 @@ export const suggestTravellers = api(
         .filter((id): id is number => id !== null),
     );
     // A planner who is also in the household appears once, as the
-    // household entry: that one knows their birth date.
-    const householdNames = new Set(household.map((person) => person.name.toLowerCase()));
+    // household entry: that one knows their birth date. "Also in the
+    // household" is decided by `same-person.ts`, not by an exact name:
+    // the organiser is "Max Beispiel (Ehemann)" in their own household
+    // and "Max" as an account, and was offered twice.
+    const inHousehold = (planner: (typeof planners)[number]) =>
+      household.some((person) => samePerson(person, planner));
+    // Already on the trip under the other record: the account was
+    // added, so its household entry is not offered — and the other way
+    // round.
+    const onTripAsAccount = (person: (typeof household)[number]) =>
+      planners.some((planner) => alreadyByUser.has(planner.id) && samePerson(person, planner));
 
     const on = startOf(plan);
     return {
       suggestions: [
         ...household
           .filter((person) => !already.has(person.id))
+          .filter((person) => !onTripAsAccount(person))
           .map((person) => ({
             subjectPersonId: person.id,
             userId: null,
@@ -216,7 +206,7 @@ export const suggestTravellers = api(
           })),
         ...planners
           .filter((person) => !alreadyByUser.has(person.id))
-          .filter((person) => !householdNames.has(person.name.toLowerCase()))
+          .filter((person) => !inHousehold(person))
           .map((person) => ({
             subjectPersonId: null,
             userId: person.id,
@@ -265,6 +255,12 @@ export const addTraveller = api(
         ))
         .limit(1);
       if (existing) throw APIError.alreadyExists("diese Person fährt schon mit");
+      // Or already on the trip as their household entry: one human, one
+      // row (`same-person.ts`).
+      const twin = (await householdOf(userId)).find((person) => samePerson(person, planner));
+      if (twin && await isTravellerBySubject(req.planId, twin.id)) {
+        throw APIError.alreadyExists("diese Person fährt schon mit — als Haushaltseintrag");
+      }
 
       await db.insert(tripPlanTravellers).values({
         plan_id: req.planId,
@@ -279,25 +275,27 @@ export const addTraveller = api(
     if (req.subjectPersonId !== undefined) {
       // Only the caller's own household: an id from somewhere else must
       // not turn into a name on somebody's trip.
-      const [person] = await db
-        .select({ id: userSubjectPersons.id, name: userSubjectPersons.full_name })
-        .from(userSubjectPersons)
-        .where(and(
-          eq(userSubjectPersons.id, req.subjectPersonId),
-          eq(userSubjectPersons.user_id, userId),
-        ))
-        .limit(1);
+      const person = (await householdOf(userId, false)).find((p) => p.id === req.subjectPersonId);
       if (!person) throw APIError.notFound("person not found");
 
-      const [existing] = await db
-        .select({ id: tripPlanTravellers.id })
-        .from(tripPlanTravellers)
-        .where(and(
-          eq(tripPlanTravellers.plan_id, req.planId),
-          eq(tripPlanTravellers.subject_person_id, person.id),
-        ))
-        .limit(1);
-      if (existing) throw APIError.alreadyExists("diese Person fährt schon mit");
+      if (await isTravellerBySubject(req.planId, person.id)) {
+        throw APIError.alreadyExists("diese Person fährt schon mit");
+      }
+      // Or already on the trip as their account (`same-person.ts`).
+      const asAccount = (await plannersOf(plan)).find((planner) => samePerson(person, planner));
+      if (asAccount) {
+        const [viaAccount] = await db
+          .select({ id: tripPlanTravellers.id })
+          .from(tripPlanTravellers)
+          .where(and(
+            eq(tripPlanTravellers.plan_id, req.planId),
+            eq(tripPlanTravellers.added_for_user_id, asAccount.id),
+          ))
+          .limit(1);
+        if (viaAccount) {
+          throw APIError.alreadyExists("diese Person fährt schon mit — über ihr Konto");
+        }
+      }
 
       await db.insert(tripPlanTravellers).values({
         plan_id: req.planId,
@@ -477,6 +475,53 @@ export async function travellersOf(plan: StoredPlan): Promise<TravellersResponse
 }
 
 /** The trip's first dated day — the age that plans it (§3.5). */
+/**
+ * The caller's household as the travel group sees it — with the
+ * relation kind, which is the one field that can say "this is me".
+ */
+async function householdOf(userId: number, onlyInHousehold = true) {
+  const rows = await db
+    .select({
+      id: userSubjectPersons.id,
+      name: userSubjectPersons.full_name,
+      relation: userSubjectPersons.relation_tag,
+      relationKind: userSubjectPersons.relation_kind,
+      birthDate: userSubjectPersons.birth_date,
+    })
+    .from(userSubjectPersons)
+    .where(onlyInHousehold
+      ? and(eq(userSubjectPersons.user_id, userId), eq(userSubjectPersons.in_household, true))
+      : eq(userSubjectPersons.user_id, userId))
+    .orderBy(asc(userSubjectPersons.full_name));
+  return rows.map((row) => ({ ...row, ownerId: userId }));
+}
+
+/** The accounts that plan this trip: the organiser and everybody shared with. */
+async function plannersOf(plan: StoredPlan) {
+  return await db
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .where(inArray(users.id, [
+      plan.ownerId,
+      ...(await db
+        .select({ id: tripPlanShares.user_id })
+        .from(tripPlanShares)
+        .where(eq(tripPlanShares.plan_id, plan.id))).map((row) => row.id),
+    ]));
+}
+
+async function isTravellerBySubject(planId: number, subjectPersonId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ id: tripPlanTravellers.id })
+    .from(tripPlanTravellers)
+    .where(and(
+      eq(tripPlanTravellers.plan_id, planId),
+      eq(tripPlanTravellers.subject_person_id, subjectPersonId),
+    ))
+    .limit(1);
+  return row !== undefined;
+}
+
 function startOf(plan: StoredPlan): string | null {
   return plan.legs
     .map((leg) => leg.startDate)
