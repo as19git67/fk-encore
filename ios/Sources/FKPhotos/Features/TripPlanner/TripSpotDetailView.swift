@@ -125,12 +125,25 @@ struct TripSpotDetailView<Actions: View>: View {
                 }
             }
 
-            if spot.wikipediaUrl != nil {
-                Section("Wikipedia") {
+            if let article = spot.wikipediaUrl, let articleURL = URL(string: article) {
+                Section {
                     Button {
                         showingWikipedia = true
                     } label: {
                         Label("Artikel lesen", systemImage: "book")
+                    }
+                } header: {
+                    Text("Wikipedia")
+                } footer: {
+                    // Said before the tap, not after it. The server
+                    // links the German article wherever OpenStreetMap
+                    // knows of one; where it does not, the article is
+                    // still worth reading and iOS can translate it —
+                    // but „Artikel lesen“ alone would promise a page
+                    // nobody in the car can read (§10.4).
+                    if let language = TripArticleLanguage.name(of: articleURL) {
+                        Text("Auf Deutsch gibt es dazu nichts — der Artikel ist auf "
+                             + "\(language). Im Lesen bietet iOS „Übersetzen“ an.")
                     }
                 }
             }

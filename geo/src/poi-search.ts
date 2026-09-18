@@ -110,7 +110,10 @@ export interface PoiSearchResult {
   /** Category ids this POI satisfies. */
   categories: string[];
   wikidataQid: string | null;
+  /** The `wikipedia` tag: the article in the **local** language. */
   wikipedia: string | null;
+  /** The `wikipedia:de` tag: the German article for the same place. */
+  wikipediaDe: string | null;
   /**
    * Planning attributes, straight from OSM and unverified. Coarse on
    * purpose — the plan asks "open in the morning?", not "open at 09:47"
@@ -175,6 +178,7 @@ type Row = {
   name: string | null;
   name_de: string | null;
   name_en: string | null;
+  wikipedia_de: string | null;
   kind: string | null;
   tags: Record<string, string> | null;
   wikidata: string | null;
@@ -252,6 +256,10 @@ export async function searchPois(
       tags,
       tags->>'wikidata' AS wikidata,
       tags->>'wikipedia' AS wikipedia,
+      -- The German article for the same place, where a mapper has
+      -- linked one: the plain wikipedia tag is the article in the
+      -- local language, and this is the convention for every other one.
+      tags->>'wikipedia:de' AS wikipedia_de,
       tags->>'opening_hours'   AS opening_hours,
       tags->>'cuisine'         AS cuisine,
       tags->>'wheelchair'      AS wheelchair,
@@ -530,6 +538,7 @@ function toResult(row: Row, requested: readonly string[]): PoiSearchResult {
     categories: matchedCategories(row.tags ?? {}, requested),
     wikidataQid: row.wikidata,
     wikipedia: row.wikipedia,
+    wikipediaDe: row.wikipedia_de,
     openingHours: row.opening_hours,
     cuisine: row.cuisine,
     wheelchair: row.wheelchair,

@@ -438,7 +438,10 @@ struct TripPoolView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Label {
-                    Text(candidate.displayName).font(.headline)
+                    // „Kolosseum (Colosseo)“: the name to plan with
+                    // and the name on the sign, in one line (§10.4).
+                    Text(TripSpotName.line(candidate.displayName, local: candidate.localName))
+                        .font(.headline)
                 } icon: {
                     Image(systemName: TripCategory.symbol(candidate.category))
                         .foregroundStyle(.secondary)

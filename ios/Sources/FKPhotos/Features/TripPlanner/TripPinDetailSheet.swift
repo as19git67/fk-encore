@@ -150,7 +150,13 @@ struct TripPinDetailSheet: View {
                     }
                     if let wikipediaUrl = detail.wikipediaUrl {
                         Link(destination: wikipediaUrl) {
-                            Label("Wikipedia", systemImage: "book")
+                            // With the language where it is not German:
+                            // the sheet has one line per link, so it
+                            // goes on the label rather than under it
+                            // (§10.4).
+                            Label(TripArticleLanguage.name(of: wikipediaUrl)
+                                    .map { "Wikipedia (\($0))" } ?? "Wikipedia",
+                                  systemImage: "book")
                         }
                     }
                     if let sourceUrl = detail.sourceUrl {

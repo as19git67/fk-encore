@@ -2096,6 +2096,38 @@ nicht je eine eigene zusammensetzen) und in der Detailansicht verlinkt. Ohne
 Sprachpräfix im Tag gibt es keinen Link: „de" für einen Ort in Kyoto zu raten
 führt auf einen Artikel, den es nicht gibt (§15.3).
 
+**Nachgereicht: der deutsche Name, wo es einen gibt.** Die Schriftregel oben
+greift erst, wenn der lokale Name *unlesbar* ist — in Rom blieb also `Colosseo`
+stehen, obwohl `name:de=Kolosseum` im Tag steht und niemand auf Deutsch etwas
+anderes sagt. Jetzt gewinnt der deutsche Name auch dann, wenn beide lateinisch
+geschrieben sind, und der lokale wandert daneben: „Kolosseum (Colosseo)",
+„Prag (Praha)". In den Zeilen, die nur eine Zeile haben (Tagesplan, Vorrat),
+steht er in Klammern dahinter; wo Platz für zwei ist, bleibt es bei „Vor Ort".
+
+Die Regel ist bewusst eng: Sie gilt nur für Orte mit einem `wikidata`- oder
+`wikipedia`-Tag. Ein Exonym hat, worüber die Welt geschrieben hat; ohne eines
+dieser Tags ist ein `name:de` meist die gutgemeinte Wort-für-Wort-Übersetzung
+einer Dorfkirche — „Kirche des heiligen Nikolaus" für `Église Saint-Nicolas` —,
+die auf keinem Schild steht und auf keiner Karte, die die Reisenden dabeihaben.
+Verglichen wird gefaltet (`name-fold.ts`), damit „Cafe central" nicht als
+anderer Name durchgeht als `Café Central`. Englisch bekommt diese Beförderung
+nie: `name:en` ist oft nur ein Etikett für Touristen. Und `name:de` ist keine
+Übersetzung von uns — es ist, was die Mapper selbst eingetragen haben (§15.3).
+
+**Nachgereicht: der Artikel auf Deutsch.** Das `wikipedia`-Tag nennt den Artikel
+in der **Landessprache**; in Rom führt der Link also ins Italienische. OSM kennt
+dafür die Konvention `wikipedia:de` — derselbe Ort, der deutsche Artikel —, und
+die wird jetzt bevorzugt. Wo es sie nicht gibt, bleibt der lokale Artikel und
+**die App sagt vorher, in welcher Sprache er ist** („der Artikel ist auf
+Italienisch"); die Sprache wird aus der Adresse gelesen, nicht ein zweites Mal
+gespeichert. Übersetzt wird nichts von uns: iOS bietet im Lesen „Übersetzen" an.
+Einen deutschen Titel aus einem italienischen zu raten wäre ein erfundener Link,
+und ein Link ins Leere ist schlechter als einer in der falschen Sprache (§15.3).
+
+Für Bestandsreisen ändert sich nichts rückwirkend: Namen und Artikel-URL stehen
+am geplanten Spot, wie sie bei der Suche galten. Neu gesuchte Spots tragen die
+neue Regel.
+
 ### 10.5 Wo dieselbe Datenbasis glänzt
 
 Apotheke, Supermarkt, Bäckerei, öffentliche Toilette, Trinkbrunnen, Spielplatz,

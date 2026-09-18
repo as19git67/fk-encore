@@ -50,6 +50,43 @@ export function wikipediaUrl(tag: string | null | undefined): string | null {
 }
 
 /**
+ * The article for a spot, in German where German exists (§10.4).
+ *
+ * The `wikipedia` tag names the article **in the local language** — in
+ * Rome `it:Colosseo`, in Lisbon `pt:Mosteiro dos Jerónimos`. That is
+ * the right link for somebody who reads Italian and a dead end for
+ * everybody else, and the answer is usually right there in the data:
+ * OpenStreetMap's convention is a second tag, `wikipedia:de`, holding
+ * the title of the German article for the same place.
+ *
+ * So German wins when it exists, and nothing is guessed when it does
+ * not: the local article stays, and the app says which language it is
+ * in rather than sending somebody into a page they cannot read without
+ * warning. Deriving a German title from an Italian one — or assuming
+ * the same title exists on de.wikipedia — would be inventing a link,
+ * and a link that 404s is worse than one in the wrong language
+ * (§15.3).
+ */
+export function articleUrl(tags: {
+  wikipedia?: string | null;
+  /** The `wikipedia:de` tag: a bare title, occasionally `de:Title`. */
+  wikipediaDe?: string | null;
+}): string | null {
+  const german = (tags.wikipediaDe ?? "").trim();
+  if (german) {
+    // The tag is a bare title by convention, but `de:Kolosseum` and a
+    // full URL both turn up. `wikipediaUrl` already knows the last two
+    // shapes, so only the bare title needs prefixing.
+    const qualified = /^https?:\/\//i.test(german) || /^[A-Za-z]{2,3}(-[A-Za-z0-9-]+)?:/.test(german)
+      ? german
+      : `de:${german}`;
+    const url = wikipediaUrl(qualified);
+    if (url) return url;
+  }
+  return wikipediaUrl(tags.wikipedia);
+}
+
+/**
  * Percent-encoding as MediaWiki writes it: spaces become underscores,
  * and the punctuation that appears in article titles unescaped stays
  * unescaped, so the link reads like the article it points at.
