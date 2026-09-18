@@ -298,6 +298,26 @@ describe("the quota is per leg, not per swipe", () => {
 });
 
 describe("a voice held for somebody else", () => {
+  it("is only held for somebody without an account", async () => {
+    // A planner is on the trip as a traveller too (§3.5) and speaks
+    // under their own id; a second voice by proxy would count twice.
+    const plan = await trip();
+    const refs = pooled(plan);
+    // The row may already be there: whoever plans is on the trip.
+    await db
+      .insert(tripPlanTravellers)
+      .values({ plan_id: plan.id, label: "Anna", added_for_user_id: annaId, added_by: annaId })
+      .onConflictDoNothing();
+    const [self] = await db
+      .select({ id: tripPlanTravellers.id })
+      .from(tripPlanTravellers)
+      .where(eq(tripPlanTravellers.added_for_user_id, annaId));
+
+    await expect(castVote({
+      planId: plan.id, osmRef: refs[0], value: "want", forTravellerId: self.id,
+    })).rejects.toThrow(/stimmt selbst ab/);
+  });
+
   it("counts as theirs, not as the holder's", async () => {
     const plan = await trip();
     const [child] = await db

@@ -17,10 +17,14 @@ import UserNotifications
 /// payload — the web-relative path every feed notification already carries
 /// — resolved against the configured server and routed through
 /// `AppDeepLink`, so a push lands on the same screen a link would.
+// Public because `Main.swift` — the app target, a separate module the
+// package's own build never compiles — hands the app-delegate callbacks to
+// it. Same lesson as `AppDeepLinkRouter`: what the app target calls has to
+// be public, and only Xcode notices when it is not.
 @MainActor
 @Observable
-final class RemotePushManager {
-    static let shared = RemotePushManager()
+public final class RemotePushManager {
+    public static let shared = RemotePushManager()
 
     enum State: Equatable {
         /// Not asked yet, or the server has no APNs credentials.
@@ -101,14 +105,14 @@ final class RemotePushManager {
 
     /// iOS handed over the token. Sent to the server as hex; the same
     /// token again is an upsert there.
-    func didRegister(deviceToken: Data) {
+    public func didRegister(deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         UserDefaults.standard.set(token, forKey: Self.tokenKey)
         guard RemotePushPreferences.isEnabled else { return }
         Task { await upload(token: token) }
     }
 
-    func didFailToRegister(_ error: Error) {
+    public func didFailToRegister(_ error: Error) {
         state = .failed(error.localizedDescription)
     }
 

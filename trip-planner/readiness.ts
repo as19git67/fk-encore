@@ -29,7 +29,7 @@
 
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import db from "../db/database";
 import {
   osmRegionImports,
@@ -246,10 +246,12 @@ async function voteCheck(plan: StoredPlan): Promise<ReadinessCheck> {
   for (const person of participants) {
     if (!spoke.has(`user:${person.id}`)) silent.push(person.name);
   }
+  // Only the travellers without an account: a planner is on the trip
+  // as a traveller too, and was counted above under their own voice.
   const travellers = await db
     .select({ id: tripPlanTravellers.id, label: tripPlanTravellers.label })
     .from(tripPlanTravellers)
-    .where(eq(tripPlanTravellers.plan_id, plan.id));
+    .where(and(eq(tripPlanTravellers.plan_id, plan.id), isNull(tripPlanTravellers.added_for_user_id)));
   for (const traveller of travellers) {
     if (!spoke.has(`traveller:${traveller.id}`)) silent.push(traveller.label);
   }

@@ -213,11 +213,13 @@ export const castVote = api(
     }
 
     // A proxy voice belongs to a traveller on *this* trip; anything
-    // else would let one trip's ids vote in another's.
+    // else would let one trip's ids vote in another's. And only to
+    // somebody without an account: a planner speaks for themselves,
+    // under their own id, and a second voice by proxy would count twice.
     let travellerId: number | null = null;
     if (req.forTravellerId !== undefined) {
       const [traveller] = await db
-        .select({ id: tripPlanTravellers.id })
+        .select({ id: tripPlanTravellers.id, userId: tripPlanTravellers.added_for_user_id })
         .from(tripPlanTravellers)
         .where(and(
           eq(tripPlanTravellers.id, req.forTravellerId),
@@ -225,6 +227,9 @@ export const castVote = api(
         ))
         .limit(1);
       if (!traveller) throw APIError.notFound("diese Person fährt bei dieser Reise nicht mit");
+      if (traveller.userId !== null) {
+        throw APIError.failedPrecondition("diese Person hat ein Konto und stimmt selbst ab");
+      }
       travellerId = traveller.id;
     }
 
@@ -320,10 +325,12 @@ async function silentVoices(
     if (!spoke.has(`user:${person.id}`)) silent.push(person.name);
   }
 
+  // Only the travellers without an account: a planner is on the trip
+  // as a traveller too, and was counted above under their own voice.
   const travellers = await db
     .select({ id: tripPlanTravellers.id, label: tripPlanTravellers.label })
     .from(tripPlanTravellers)
-    .where(eq(tripPlanTravellers.plan_id, plan.id));
+    .where(and(eq(tripPlanTravellers.plan_id, plan.id), isNull(tripPlanTravellers.added_for_user_id)));
   for (const traveller of travellers) {
     if (!spoke.has(`traveller:${traveller.id}`)) silent.push(traveller.label);
   }

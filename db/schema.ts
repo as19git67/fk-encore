@@ -3466,14 +3466,14 @@ export const tripPlanTravellers = pgTable(
     plan_id: integer("plan_id")
       .notNull()
       .references(() => tripPlans.id, { onDelete: "cascade" }),
-    subject_person_id: integer("subject_person_id")
-      .references(() => userSubjectPersons.id, { onDelete: "set null" }),
+    // What the trip calls them; for an account, the account's name at
+    // the time it joined (the live name is read from `users`).
     label: text("label").notNull(),
     birth_date: text("birth_date"),
     short_walks: boolean("short_walks").notNull().default(false),
-    // Set when this traveller is also one of the trip's planners
-    // (migration 0185), so an adult with a login is entered once
-    // rather than twice.
+    // Set for everybody who plans the trip: whoever plans is on it
+    // (migration 0204). Null marks somebody entered by hand — a child,
+    // a friend — who has no account.
     added_for_user_id: integer("added_for_user_id")
       .references(() => users.id, { onDelete: "set null" }),
     added_by: integer("added_by").references(() => users.id, { onDelete: "set null" }),
