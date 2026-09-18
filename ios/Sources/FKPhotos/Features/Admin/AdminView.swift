@@ -71,6 +71,12 @@ struct AdminView: View {
                     Label("Trip & Reise", systemImage: "map")
                 }
 
+                NavigationLink {
+                    SpotlightSettingsView()
+                } label: {
+                    Label("Suche auf dem iPhone", systemImage: "magnifyingglass.circle")
+                }
+
                 Toggle(isOn: $reviewNotificationsEnabled) {
                     Label("Hinweis auf neue Gruppen", systemImage: "checklist")
                 }

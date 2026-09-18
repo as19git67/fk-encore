@@ -633,10 +633,10 @@ dokumentiert**:
     Menüpunkt in `frontend/src/config/modules.ts`.
   - **Banner im Feed**, wenn etwas offen ist, mit Sprung direkt ins Review;
     lässt sich für die aktuelle Sitzung ausblenden.
-  - **Deep Link** `f4milphotos://review-queue` (`ReviewDeepLink`,
+  - **Deep Link** `f4milphotos://review-queue` (`AppDeepLink`,
     `CFBundleURLTypes` in `Info.plist`), geroutet über einen `fullScreenCover`
-    in `ContentView` statt über einen Tab, weil die Review-Queue zu keinem Tab
-    gehört.
+    in `MainTabView` statt über einen Tab, weil die Review-Queue zu keinem Tab
+    gehört. Seit #768 §5a ist das ein Fall unter mehreren — siehe 2.11.
   - **Lokale Benachrichtigung** (`ReviewQueueNotifier`), nach jedem
     Hintergrund-Sync geprüft: nur wenn die Zahl gegenüber dem letzten
     mitgeteilten Stand gestiegen ist, nie beim allerersten Stand nach der
@@ -653,6 +653,155 @@ dokumentiert**:
 - **Benutzerverwaltung** (`UsersListView`) und **Rollen & Berechtigungen**
   (`RolesView`) – Basis-Admin.
 - Sync-Einstellungen (Upload/Download), Server-Verbindung, Abmelden.
+
+### 2.11 Deep Links und Universal Links (#768 §5a)
+
+- **Ein Parser, ein Router.** `AppDeepLink` (`App/AppDeepLink.swift`) liest
+  zwei URL-Formen auf dieselben Ziele: das eigene Schema
+  (`f4milphotos://album/12`, `photo/34`, `person/5`, `recap/7`, `recaps`,
+  `feed`, `review-queue`, `shared-album/<token>`) und die Web-Routen des
+  konfigurierten Servers (`https://<server>/app/fotos/alben/12`,
+  `/app/albums/shared/<token>`, `/app/fotos/personen?personId=5`,
+  `/app/fotos/rueckblicke[?recapId=7]`, `/app/fotos/feed`,
+  `/app/fotos/review-queue`, `/app/fotos/galerie?photoId=34` sowie die
+  Legacy-Redirects `/app/albums/:id` und `/app/photos?photoId=`). Eine
+  Web-URL auf einem **anderen Host** wird verworfen: die App darf nicht auf
+  fremde Seiten reagieren, die zufällig dieselbe Pfadstruktur haben. Parsing
+  ist rein und in `AppDeepLinkTests` abgedeckt, inklusive Round-Trip der
+  erzeugten URLs (`AppDeepLink.url(for:)`, `webURL(for:serverURL:)`).
+- **`AppDeepLinkRouter`** hält den Link in `pending`, bis die Tab-Leiste
+  existiert — ein Link, der auf dem Login-Bildschirm ankommt, landet nach
+  der Anmeldung dort, wo er hinwollte, statt im Feed. `MainTabView` nimmt
+  ihn ab: Album und Person werden im Alben-Tab über dessen `NavigationPath`
+  gepusht (`[PersonsRef, PersonRef]` in einem Zug, deshalb ist das
+  `PersonRef`-Ziel jetzt an der Stack-Wurzel `AlbumsListView` registriert),
+  Rückblicke im Feed-Tab (`RecapsRef`), Foto, Rückblick-Player und
+  Review-Queue als `fullScreenCover`, weil sie zu keinem Tab gehören.
+- **Geteilte Alben** (`/app/albums/shared/<token>`): der Token wird über
+  `/albums/public/<token>` aufgelöst; ist die angemeldete Person Mitglied
+  (`GET /albums/:id` antwortet), öffnet die eigene Album-Ansicht, sonst die
+  öffentliche Web-Seite in einem `SFSafariViewController` (`SafariSheet`) —
+  nicht in Safari selbst, denn das ist ein Universal Link, und Safari gäbe
+  ihn sofort zurück.
+- **Universal Links** brauchen zwei Seiten: der Server veröffentlicht
+  `/.well-known/apple-app-site-association` (`web/app-site-association.ts`,
+  gesteuert über `APPLE_APP_IDS`; ohne die Variable 404 und alles bleibt im
+  Browser), und die App trägt `applinks:$(F4MIL_ASSOCIATED_DOMAIN)` in
+  `FKPhotos.entitlements`. Der Host ist pro Haushalt verschieden und daher ein
+  Build-Setting im Xcode-Projekt, kein Code. Beansprucht werden nur Pfade, die
+  die App wirklich öffnen kann — Dokumente, Finanzen und die nackte Galerie
+  bleiben Safari. Einrichtung: `DEPLOYMENT.md`, „iOS universal links".
+- **Alle „öffne X"-Quellen** — Benachrichtigung (`ReviewQueueNotifier`),
+  Spotlight (`SpotlightItems.deepLink(forIdentifier:)`), künftig Widgets und
+  App Intents — erzeugen nur noch eine URL bzw. einen `AppDeepLink` und geben
+  ihn `AppDeepLinkRouter.shared`.
+
+### 2.12 Spotlight: Fotos mit Text, Personen, Alben (#768 §2)
+
+- **Was im Index landet** (`Features/Spotlight/SpotlightIndexer.swift`):
+  Fotos mit erkanntem Text (`photo_ocr`, #1029) oder einer Beschreibung, dazu
+  Personen und Alben. Fotos ohne Text kommen nicht hinein — es gäbe nichts,
+  worauf Spotlight matchen könnte; die semantische Suche bleibt in der App.
+  Bei ~75 000 Fotos ist das ein Bruchteil, und Core Spotlight hat für die
+  Anzahl keine Grenze, wohl aber für Thumbnails: Foto-Einträge tragen
+  **keine**, ein Treffer zeigt App-Icon, Textausschnitt und Datum.
+- **Delta statt Vollabgleich.** `GET /photos/spotlight-index?cursor=&limit=`
+  (`photo/photo-spotlight.service.ts`) liefert Einträge, die sich seit dem
+  Cursor geändert haben — `GREATEST(photos.updated_at, photo_ocr.updated_at)`,
+  mikrosekundengenau, mit Foto-ID als Tie-Break —, seitenweise und in
+  Änderungsreihenfolge. Der Client speichert nach **jedem** Batch Cursor und
+  ID-Menge (`SpotlightIndexState`, die IDs als kompaktes `Data`), sodass ein
+  abgebrochener Erstlauf dort weitermacht. Löschungen und verlorener Zugriff
+  können nicht durch ein Delta reisen (die OCR-Zeile stirbt mit dem Foto),
+  deshalb wird nach jedem Lauf `GET /photos/spotlight-index/ids` gegen die
+  gehaltene ID-Menge gediffed und der Rest entfernt.
+- **Sichtbarkeit wie `/photos/details`:** eigene Fotos und Fotos in Alben,
+  die man besitzt oder in die man eingeladen ist. Personennamen kommen aus den
+  eigenen Gesichtszuordnungen, denn eine Person ist pro Nutzer.
+- **Eintragsform** (`SpotlightItems`, getestet in `SpotlightItemsTests`):
+  Titel = erste Textzeile (oder die Beschreibung), Body = Rest, `textContent`
+  = alles (das ist, worauf Spotlight Volltext matcht), Personennamen als
+  Keywords, Aufnahmedatum als `contentCreationDate`, `expirationDate` =
+  unendlich — der Standard ist ein Monat, danach vergisst Spotlight still
+  alles. Text ist serverseitig auf 2000 Zeichen gekappt.
+- **Wann gelaufen wird:** nach jedem Sync (`BackgroundSyncManager`) und beim
+  App-Start, höchstens alle 15 Minuten; „Jetzt aktualisieren" in den
+  Einstellungen erzwingt es. Personen und Alben werden beim Laden der Listen
+  komplett ersetzt (`replaceDomain`), damit Zusammenführen und Löschen
+  mitziehen. Eigene Domänen `photo`/`person`/`album`, einzeln löschbar.
+- **Datenschutz:** Erkannter Text ist genau die Art Inhalt, die
+  personenbezogene Daten trägt (fotografierte Briefe, Rechnungen,
+  Visitenkarten). Der Index bleibt auf dem Gerät, aber die iPhone-Suche zeigt
+  die Schnipsel jedem, der das Telefon hält. Deshalb ist „Text in Fotos"
+  **Opt-in** (Einstellungen → „Suche auf dem iPhone", `SpotlightSettingsView`),
+  getrennt von „Personen und Alben" (an); Ausschalten löscht die Domäne,
+  Abmelden löscht alles (`wipeAll`), weil der Index pro Gerät ist und die API
+  pro Nutzer.
+- **Ein Treffer öffnet** über `onContinueUserActivity(CSSearchableItemActionType)`
+  in `ContentView`: `photo:<id>` / `person:<id>` / `album:<id>` werden zum
+  `AppDeepLink` und gehen denselben Weg wie jeder andere Link (2.11).
+- **Nicht gebaut:** eine Spotlight-Index-Extension
+  (`CSIndexExtensionRequestHandler`), mit der iOS nach Verlust des
+  Systemindex ohne App-Start neu aufbauen lassen könnte — sie braucht ein
+  eigenes Extension-Target; bis dahin baut der nächste App-Start neu auf.
+
+### 2.13 Eingeschränkter Fotozugriff (#768 §4a)
+
+- Der Sync akzeptierte `.limited` von Anfang an, sagte es aber nirgends:
+  „Alle Fotos hochladen" hieß still „alle *freigegebenen* Fotos", und iOS
+  legte bei jedem Start seinen eigenen „Weiterhin beschränken / Mehr
+  auswählen"-Alert über die App — was wie ein Fehler der App las.
+- `PHPhotoLibraryPreventAutomaticLimitedAccessAlert` in der `Info.plist`
+  schaltet den System-Alert ab; stattdessen zeigt `LimitedLibraryAccessSection`
+  in den Sync-Einstellungen den Zustand mit den zwei Auswegen: „Auswahl
+  ändern…" (`presentLimitedLibraryPicker`, präsentiert vom vordersten
+  View-Controller, weil SwiftUI keinen hergibt) und „Vollen Zugriff erlauben"
+  (Systemeinstellungen). Der Fußtext benennt die Folge für verknüpfte Alben.
+- `LimitedLibraryChangeObserver` hört auf Mediathek-Änderungen: unter
+  eingeschränktem Zugriff ist eine erweiterte Auswahl der einzige Weg, auf dem
+  ein neues Foto erscheinen kann, also läuft danach (3 s entprellt, nur bei
+  aktivem Sync) ein `runFullSync`, statt auf den nächsten Vordergrund-Zyklus
+  zu warten. Getrennt vom `TripPhotoLibraryObserver`, der etwas anderes
+  entscheidet.
+
+### 2.14 App Intents / Siri-Shortcuts (#766)
+
+- **Die Intents** (`App/PhotoIntents.swift`, im Paket, damit `FKPhotosIntents`
+  sie in das App-Target trägt; die App-Shortcuts selbst sind in `Main.swift`
+  deklariert, weil App Intents das so verlangt):
+  - **Jetzt sichern** (`BackUpNowIntent`, ohne App-Öffnen): prüft Schalter,
+    Netzwerk-Gate und laufende Sicherung und **startet** dann `runFullSync`,
+    ohne darauf zu warten — ein Erstlauf dauert Minuten, ein Intent hat
+    Sekunden; die Sync-Engine hält ihre eigene Background-Task-Assertion.
+    Geantwortet wird, was sofort feststeht: gestartet, oder warum nicht.
+  - **Fotos suchen** (`SearchPhotosIntent`, Parameter `query`): öffnet den
+    Such-Tab mit abgeschickter Anfrage. Neuer `AppDeepLink.search(query:)`
+    (`f4milphotos://search?q=…`, nur App-Schema — das Web hat keine
+    Such-URL); der Router hält die Anfrage in `pendingSearchQuery`, `SearchView`
+    nimmt sie ab, als wäre sie getippt.
+  - **Rückblick zeigen** (`ShowLatestRecapIntent`): holt `/recaps`, öffnet den
+    neuesten nicht verworfenen im Player; ohne Rückblick oder offline die
+    Liste mit gesprochener Erklärung.
+  - **Album öffnen** / **Fotos einer Person zeigen** (`OpenAlbumIntent`,
+    `ShowPersonIntent`) über `AlbumEntity` / `PersonEntity` mit
+    `EntityStringQuery`: Siri und Shortcuts fragen die Listen vom Server ab,
+    Namen werden akzent- und schreibweisenunabhängig gematcht („urlaub" findet
+    „Urlaub 2024"). Unbenannte Personen tauchen nicht auf.
+  - **Gruppen-Review öffnen** (`OpenReviewQueueIntent`).
+- **Alles Sichtbare geht über den Router** (2.11): ein Intent erzeugt einen
+  `AppDeepLink` und sonst nichts, also landet „Zeige Album Urlaub" per Siri
+  auf demselben Bildschirm wie ein Spotlight-Treffer oder ein Link.
+- **Wie Siri die App hört:** Der Anzeigename „F4mil Photos" hat eine Ziffer
+  mitten im Wort, und wie Siri das ausspricht, ist nicht vorhersagbar.
+  `CFBundleSpokenName` („Famil Photos") sagt es ihr, und
+  `INAlternativeAppNames` in der `Info.plist` lässt die Shortcuts zusätzlich
+  auf „Famil Photos", „Famil" und „Familienfotos" reagieren, jeweils mit
+  Aussprache-Hinweis. Ohne diese Schlüssel müsste man den Namen so sprechen,
+  wie Siri ihn sich gerade vorstellt.
+- **Nicht als App-Shortcut deklariert** sind die entity-nehmenden Intents:
+  eine Shortcut-Phrase kann eine Entity nur als aufzählbaren Parameter tragen,
+  Alben sind offen. Über die Kurzbefehle-App und Siris eigene Auflösung
+  bleiben sie erreichbar.
 
 ---
 
@@ -830,17 +979,20 @@ eine echte Bereicherung:
 2. **Home-Screen-Widgets** – „An diesem Tag" / letzter Rückblick / neueste
    Feed-Aktivität (WidgetKit).
 3. **Live Activity / Dynamic Island** für Backup-Fortschritt.
-4. **App Intents / Siri-Shortcuts** – „Jetzt sichern", „Suche nach …",
-   „Zeige Rückblick".
+4. ✅ **App Intents / Siri-Shortcuts** – „Jetzt sichern", „Suche nach …",
+   „Zeige Rückblick", Album/Person als Entity — siehe 2.14.
 5. **Lokale Benachrichtigungen** – Backup abgeschlossen, neue Kommentare/Likes
    (bis Remote-Push via APNs steht).
 6. **Remote-Push (APNs)** – Gegenstück zum bestehenden `push`-Service & PWA-Push
    (zählt auch zur Parität, ist aber iOS-Plattformarbeit).
-7. **Spotlight-Indexierung** von Personen/Alben für die System-Suche.
+7. ✅ **Spotlight-Indexierung** — Fotos mit erkanntem Text (Opt-in),
+   Personen und Alben — siehe 2.12.
 8. **Live Photos** – Erfassung/Upload von Bewegungsanteil (sobald das Backend
    Video/Motion unterstützt; aktuell rein fotobasiert).
-9. **Limited-Library-Picker-Politur** (PhotoKit) und Focus-Filter.
-10. **Handoff & Deep Links** zwischen iOS und Web.
+9. ✅ **Limited-Library-Picker-Politur** (PhotoKit) — siehe 2.13. Focus-Filter
+   bewusst offen (#768 §4b).
+10. ✅ **Deep Links & Universal Links** zwischen iOS und Web — siehe 2.11.
+    Handoff offen (#768 §5b).
 
 ---
 

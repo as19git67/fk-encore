@@ -235,6 +235,10 @@ services:
       # or menus in it.
       ENABLE_TEXT_OCR: ${ENABLE_TEXT_OCR:-false}
       PHOTO_OCR_LONG_SIDE: ${PHOTO_OCR_LONG_SIDE:-1600}
+      # iOS universal links (#768): the Apple Team ID + bundle id of the
+      # household's own build of the iOS app, published at
+      # /.well-known/apple-app-site-association. Unset = links open in Safari.
+      APPLE_APP_IDS: ${APPLE_APP_IDS:-}
       # Geo service (reverse geocoding + POI lookup). Talks to the geo
       # container over the compose default network. The shared secret is
       # mandatory: geo publishes no host port, but a container on the same

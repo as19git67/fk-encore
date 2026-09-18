@@ -14,6 +14,9 @@ final class PersonsViewModel {
         do {
             let response: ListPersonsResponse = try await APIClient.shared.get("/persons", query: ["limit": "500"])
             persons = response.persons
+            // Names into the system search (#768); a merge or an ignore
+            // drops out of the index with the next load.
+            await SpotlightIndexer.shared.indexPersons(response.persons)
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -65,7 +65,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             Task { @MainActor in
                 if let urlString = response.notification.request.content.userInfo["url"] as? String,
                    let url = URL(string: urlString) {
-                    ReviewDeepLinkRouter.shared.handle(url)
+                    AppDeepLinkRouter.shared.handle(url)
                 }
                 completionHandler()
             }
@@ -97,8 +97,16 @@ struct FKPhotosAppIntents: AppIntentsPackage {
     }
 }
 
-/// "Das hier merken" from the Shortcuts app, Siri or the Action button
-/// (plan item E3). App Shortcuts must be declared in the app target.
+/// The app's shortcuts for the Shortcuts app, Siri, Spotlight and the Action
+/// button. App Shortcuts must be declared in the app target; the intents
+/// live in the package (`TripIntents.swift`, `PhotoIntents.swift`).
+///
+/// Phrases are what Siri listens for; each must contain the app name.
+/// Entity-taking intents (album, person) are not listed here on purpose:
+/// an App Shortcut phrase can carry an entity only as an enumerated
+/// parameter, and albums are open-ended. They stay reachable through the
+/// Shortcuts app and through Siri's own „Öffne Album Urlaub in F4mil Photos"
+/// resolution once the app has been used once.
 struct FKPhotosShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -109,6 +117,45 @@ struct FKPhotosShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Das hier merken",
             systemImageName: "mappin.and.ellipse"
+        )
+        AppShortcut(
+            intent: BackUpNowIntent(),
+            phrases: [
+                "Jetzt sichern mit \(.applicationName)",
+                "Fotos sichern mit \(.applicationName)",
+                "\(.applicationName) synchronisieren",
+            ],
+            shortTitle: "Jetzt sichern",
+            systemImageName: "arrow.triangle.2.circlepath"
+        )
+        AppShortcut(
+            intent: SearchPhotosIntent(),
+            // A phrase may carry a parameter only when it is an AppEnum or
+            // AppEntity; the free-text query is asked for after the phrase.
+            phrases: [
+                "Suche in \(.applicationName)",
+                "Fotos suchen in \(.applicationName)",
+            ],
+            shortTitle: "Fotos suchen",
+            systemImageName: "magnifyingglass"
+        )
+        AppShortcut(
+            intent: ShowLatestRecapIntent(),
+            phrases: [
+                "Zeige den Rückblick in \(.applicationName)",
+                "Rückblick in \(.applicationName)",
+            ],
+            shortTitle: "Rückblick zeigen",
+            systemImageName: "sparkles"
+        )
+        AppShortcut(
+            intent: OpenReviewQueueIntent(),
+            phrases: [
+                "Gruppen-Review in \(.applicationName)",
+                "Fotos aussortieren in \(.applicationName)",
+            ],
+            shortTitle: "Gruppen-Review",
+            systemImageName: "checklist"
         )
     }
 }

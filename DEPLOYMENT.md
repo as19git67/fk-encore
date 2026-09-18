@@ -434,6 +434,46 @@ skips the push leg entirely.
 See `docs/push-notifications.md` for architecture, subscription
 lifecycle and troubleshooting.
 
+### iOS universal links (optional)
+
+A link to an album, a photo, a person or the feed
+(`https://<your host>/app/fotos/…`) opens in the F4mil Photos app rather
+than in Safari once the server publishes an Apple App Site Association
+document naming the app. Without it, links simply keep opening in the
+browser; nothing else changes.
+
+1. Find the **Team ID** the iOS app is signed with (Xcode → target
+   → Signing & Capabilities, or `DEVELOPMENT_TEAM` in
+   `ios/FKPhotos.xcodeproj/project.pbxproj`) and the bundle id
+   (`de.f4mil.photos` unless you changed it).
+
+2. Add them to `.env` as `TEAMID.bundle.id`:
+
+   ```env
+   APPLE_APP_IDS=ABCDE12345.de.f4mil.photos
+   ```
+
+3. Restart the app and check the document is served — it must come
+   back as `application/json` over HTTPS, without a redirect:
+
+   ```bash
+   docker compose up -d --no-deps app
+   curl -si https://<your host>/.well-known/apple-app-site-association
+   ```
+
+4. Build the app with the matching **associated domain**: set
+   `F4MIL_ASSOCIATED_DOMAIN` in the app target's build settings (or
+   `ios/App/FKPhotos.entitlements` directly) to your host, e.g.
+   `photos.example.com`. The entitlement is `applinks:<host>`; the
+   Associated Domains capability must be enabled on the App ID, which
+   Xcode does on its own with automatic signing.
+
+iOS fetches the document when the app is installed (via Apple's CDN,
+which can lag by up to a day). The paths the app claims are listed in
+`web/app-site-association.ts`; the app's own routing of them is in
+`ios/Sources/FKPhotos/App/AppDeepLink.swift`. Everything outside the
+photo module stays in the browser.
+
 ## Data & volumes
 
 | Volume             | Contents                                   |
@@ -708,6 +748,7 @@ the photo UI responsive under sustained scan load.
 | `PHOTO_OCR_LONG_SIDE`            | `1600`  | Long edge a photo is scaled to before recognition. Detection cost grows with area; legibility of scene text does not. |
 | `PHOTO_OCR_MIN_CONFIDENCE`       | `0.5`   | Lines below this confidence are discarded — scene-text detection finds "text" in brickwork, and that noise costs search more than it adds. |
 | `PHOTO_OCR_TIMEOUT_MS`           | `120000` | Per-request timeout for a photo OCR call. The service serialises inference, so a call may wait behind a receipt. |
+| `APPLE_APP_IDS`                  | _(empty)_ | `TEAMID.bundle.id` of the household's iOS app build (comma-separated for several). Publishes `/.well-known/apple-app-site-association` so `/app/fotos/…` links open in the app. See [iOS universal links](#ios-universal-links-optional). |
 | `GEO_SERVICE_URL`                | `http://geo:8080` | Base URL the app uses to reach the geo service. Override only when running the app outside the compose stack. |
 | `GEO_SHARED_SECRET`              | _(empty)_ | Optional bearer token; if set, every geo HTTP call must present `Authorization: Bearer <secret>`. |
 | `GEO_DB_PASSWORD`                | `postgres` | Postgres superuser password inside the `geo-db` container. |

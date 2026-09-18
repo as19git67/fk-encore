@@ -6,5 +6,16 @@
 	<array>
 		<string>group.de.f4mil.photos</string>
 	</array>
+	<!--
+	  Universal links (#768 §5a): https://<host>/app/fotos/… opens in the app
+	  when <host> serves /.well-known/apple-app-site-association naming this
+	  build (DEPLOYMENT.md, "iOS universal links"). The host is per household,
+	  so it comes from the F4MIL_ASSOCIATED_DOMAIN build setting in
+	  project.pbxproj rather than being spelled out here.
+	-->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:$(F4MIL_ASSOCIATED_DOMAIN)</string>
+	</array>
 </dict>
 </plist>
