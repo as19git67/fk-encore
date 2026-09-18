@@ -19,6 +19,7 @@
  */
 
 import type { PlannedBlockShape } from "./blocks";
+import { leaveFrom, type SpotExtent } from "./extent";
 import { travelLeg, type Coordinate, type TransportMode, type TravelLeg } from "./travel";
 
 /** Above this many stops, exhaustive ordering stops being free. */
@@ -62,6 +63,19 @@ export interface Candidate extends Coordinate {
    * ride along into a stop and back into the pool.
    */
   reasons?: string[];
+  /**
+   * Where the spot finishes, when that is not where it starts (§4.7):
+   * a route along a lake, a way up a hill. The next leg sets off from
+   * its end. Absent for the ordinary point.
+   *
+   * Optional, never `| null`: Encore's schema parser intersects the
+   * element types when an interface narrows an inherited array field
+   * (`StoredBlock extends CurrentBlock { stops: StoredStop[] }`), and
+   * `(SpotExtent | null) & (SpotExtent | null)` distributes into a
+   * `SpotExtent & null` it cannot resolve. A plain optional interface
+   * intersects with itself cleanly.
+   */
+  extent?: SpotExtent;
   /** Category id from the geo search, e.g. "museum". */
   category: string;
   /** How long one typically stays, in minutes. */
@@ -89,6 +103,8 @@ export interface PlannedStop {
    * See `Candidate.reasons`. On the stop because the pool row that
    * knew them is deleted when the spot lands on a day (§8.3).
    */
+  /** See `Candidate.extent`. */
+  extent?: SpotExtent;
   reasons?: string[];
   lat: number;
   lon: number;
@@ -194,7 +210,7 @@ export function solveDay(opts: SolveOptions): SolvedDay {
     blocks.push(filled);
     if (filled.stops.length > 0) {
       const last = filled.stops[filled.stops.length - 1];
-      position = { lat: last.lat, lon: last.lon };
+      position = leaveFrom(last);
     }
   });
 
@@ -281,13 +297,14 @@ function fillBlock(args: FillArgs): PlannedBlock {
         kind: candidate.kind ?? null,
         lat: candidate.lat,
         lon: candidate.lon,
+        extent: candidate.extent,
         category: candidate.category,
         dwellMinutes: candidate.dwellMinutes,
         score: candidate.score,
         reasons: candidate.reasons ?? [],
         travelFromPrevious: leg,
       });
-      from = candidate;
+      from = leaveFrom(candidate);
     }
   }
 
@@ -352,7 +369,9 @@ function measureRoute(
     const leg = travelLeg(from, stop, mode);
     total += leg.minutes + stop.dwellMinutes;
     longest = Math.max(longest, leg.minutes);
-    from = stop;
+    // A route is left at its far end, and the way on is measured from
+    // there (§4.7).
+    from = leaveFrom(stop);
   }
   if (returnTo) {
     const back = travelLeg(from, returnTo, mode);

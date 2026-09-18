@@ -333,3 +333,27 @@ describe("recomputing a day", () => {
     expect(blocks[0].usedMinutes).toBe(0);
   });
 });
+
+describe("rewalking a day with a route in it (§4.7)", () => {
+  it("goes on from the route's end, and pays the way home from there", () => {
+    const routeEnd = north(8_000);
+    const route: CurrentStop = {
+      ...stop("manual:route", 200, 90),
+      category: "route",
+      extent: { end: routeEnd },
+    };
+    const beyond = stop("node:beyond", 8_300);
+    const blocks = [block("morning", 600, [route, beyond])];
+
+    recomputeDay(blocks, HOME);
+
+    // The viewpoint just past the end is a short walk from it — not
+    // the eight kilometres it is from the route's start.
+    expect(blocks[0].stops[1].travelFromPrevious.distanceM).toBeLessThan(600);
+    // And the day's last leg home is measured from where the group is.
+    const home = travelLeg(north(8_300), ANCHOR).minutes;
+    const walkIn = blocks[0].stops[0].travelFromPrevious.minutes;
+    const walkOn = blocks[0].stops[1].travelFromPrevious.minutes;
+    expect(blocks[0].usedMinutes).toBe(walkIn + 90 + walkOn + 30 + home);
+  });
+});

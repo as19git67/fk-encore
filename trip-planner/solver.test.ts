@@ -357,3 +357,74 @@ describe("the two ends of a day (§4.4)", () => {
       .toBeCloseTo(walkingLeg(spot, STATION).minutes - walkingLeg(spot, ANCHOR).minutes, 0);
   });
 });
+
+describe("a spot with an extent (§4.7)", () => {
+  // A route: it starts near the anchor and finishes eight kilometres
+  // north. The day goes on from where it ends, not from where it began.
+  const ROUTE_END = north(8_000);
+  const route = candidate({
+    osmRef: "manual:route",
+    ...north(200),
+    category: "route",
+    dwellMinutes: 90,
+    score: 5,
+    extent: { end: ROUTE_END, lengthM: 10_000 },
+  });
+
+  it("measures the next walk from the route's end", () => {
+    // A viewpoint 300 m beyond the route's end: from the end it is a
+    // short walk, from the start it would be a two-hour march no block
+    // allows. Only the first reading lets it into the day.
+    const beyond = candidate({ osmRef: "node:beyond", ...north(8_300), score: 3 });
+    const { blocks } = solveDay({
+      anchor: ANCHOR,
+      // The day ends where the route does — a car left at the far end.
+      end: ROUTE_END,
+      blocks: blocksOf([
+        { id: "morning", label: "Vormittag", kind: "spots", baseBudgetMinutes: 240 },
+      ]),
+      candidates: [route, beyond],
+      maxWalkMinutes: 40,
+    });
+    const refs = blocks[0].stops.map((s) => s.osmRef);
+    expect(refs).toEqual(["manual:route", "node:beyond"]);
+    const walkOn = blocks[0].stops[1].travelFromPrevious;
+    expect(walkOn.distanceM).toBeLessThan(600);
+    // And the extent rides along on the stop, for the rewalks after.
+    expect(blocks[0].stops[0].extent).toEqual({ end: ROUTE_END, lengthM: 10_000 });
+  });
+
+  it("charges the way back from the route's end, not its start", () => {
+    // The route alone in a block that must return to the anchor: the
+    // eight-kilometre walk back is what the block pays for. Measured
+    // from the start it would cost nothing and the block would lie.
+    const { blocks } = solveDay({
+      anchor: ANCHOR,
+      blocks: blocksOf([
+        { id: "morning", label: "Vormittag", kind: "spots", baseBudgetMinutes: 600 },
+      ]),
+      candidates: [route],
+      maxWalkMinutes: 400,
+    });
+    expect(blocks[0].stops.map((s) => s.osmRef)).toEqual(["manual:route"]);
+    const back = walkingLeg(ROUTE_END, ANCHOR).minutes;
+    expect(blocks[0].usedMinutes).toBeGreaterThanOrEqual(90 + back);
+  });
+
+  it("hands the next block on from the route's end", () => {
+    const beyond = candidate({ osmRef: "node:beyond", ...north(8_300), score: 3 });
+    const { blocks } = solveDay({
+      anchor: ANCHOR,
+      end: ROUTE_END,
+      blocks: blocksOf([
+        { id: "morning", label: "Vormittag", kind: "spots", baseBudgetMinutes: 100 },
+        { id: "afternoon", label: "Nachmittag", kind: "spots", baseBudgetMinutes: 100 },
+      ]),
+      candidates: [route, beyond],
+      maxWalkMinutes: 40,
+    });
+    expect(blocks[0].stops.map((s) => s.osmRef)).toEqual(["manual:route"]);
+    expect(blocks[1].stops.map((s) => s.osmRef)).toEqual(["node:beyond"]);
+    expect(blocks[1].stops[0].travelFromPrevious.distanceM).toBeLessThan(600);
+  });
+});
