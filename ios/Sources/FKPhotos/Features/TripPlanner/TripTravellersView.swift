@@ -146,16 +146,9 @@ struct TripTravellersView: View {
                     }
                 }
                 Spacer()
-                Button(role: .destructive) {
-                    confirmingRemove = traveller
-                } label: {
-                    if busyId == traveller.id {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "minus.circle")
-                    }
+                if busyId == traveller.id {
+                    ProgressView()
                 }
-                .buttonStyle(.borderless)
             }
             // A statement about a person, made by a person (§3.5). A
             // plain switch, as the HIG has it for a setting that is on
@@ -171,6 +164,18 @@ struct TripTravellersView: View {
             .disabled(busyId == traveller.id)
         }
         .padding(.vertical, 2)
+        // Taking somebody off the trip is the row's swipe, as a list
+        // has it — not a minus button beside the switch, where a thumb
+        // aiming for one landed on the other. The confirmation stays;
+        // a swipe is not a decision about the days.
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                confirmingRemove = traveller
+            } label: {
+                Label("Entfernen", systemImage: "minus.circle")
+            }
+            .disabled(busyId == traveller.id)
+        }
     }
 
     @ViewBuilder

@@ -238,11 +238,7 @@ export const addTraveller = api(
     if (req.userId !== undefined) {
       // Only somebody who is actually on this trip: an account id from
       // elsewhere must not turn into a name on somebody's travel list.
-      const [planner] = await db
-        .select({ id: users.id, name: users.name })
-        .from(users)
-        .where(eq(users.id, req.userId))
-        .limit(1);
+      const [planner] = await accountsOf([req.userId]);
       if (!planner || !(await isOnTrip(req.planId, planner.id))) {
         throw APIError.notFound("diese Person plant diese Reise nicht mit");
       }
@@ -498,16 +494,45 @@ async function householdOf(userId: number, onlyInHousehold = true) {
 
 /** The accounts that plan this trip: the organiser and everybody shared with. */
 async function plannersOf(plan: StoredPlan) {
-  return await db
+  return await accountsOf([
+    plan.ownerId,
+    ...(await db
+      .select({ id: tripPlanShares.user_id })
+      .from(tripPlanShares)
+      .where(eq(tripPlanShares.plan_id, plan.id))).map((row) => row.id),
+  ]);
+}
+
+/**
+ * Accounts as `same-person.ts` wants them: the display name, and the
+ * full name and birth date from the account's own household `self`
+ * entry. That entry is how a fellow planner's household entry in the
+ * organiser's household is recognised as them — "Erika Beispiel", not
+ * the "Erika" typed at signup.
+ */
+async function accountsOf(ids: number[]) {
+  if (ids.length === 0) return [];
+  const accounts = await db
     .select({ id: users.id, name: users.name })
     .from(users)
-    .where(inArray(users.id, [
-      plan.ownerId,
-      ...(await db
-        .select({ id: tripPlanShares.user_id })
-        .from(tripPlanShares)
-        .where(eq(tripPlanShares.plan_id, plan.id))).map((row) => row.id),
-    ]));
+    .where(inArray(users.id, ids));
+  const selves = await db
+    .select({
+      ownerId: userSubjectPersons.user_id,
+      name: userSubjectPersons.full_name,
+      birthDate: userSubjectPersons.birth_date,
+    })
+    .from(userSubjectPersons)
+    .where(and(
+      inArray(userSubjectPersons.user_id, ids),
+      eq(userSubjectPersons.relation_kind, "self"),
+    ));
+  const selfOf = new Map(selves.map((row) => [row.ownerId, row]));
+  return accounts.map((account) => ({
+    ...account,
+    selfName: selfOf.get(account.id)?.name ?? null,
+    selfBirthDate: selfOf.get(account.id)?.birthDate ?? null,
+  }));
 }
 
 async function isTravellerBySubject(planId: number, subjectPersonId: number): Promise<boolean> {

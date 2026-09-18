@@ -184,6 +184,27 @@ nicht, geht nicht mehr auf. Aus demselben Grund ist es Sache der Organisatorin
 *mitfahren* — ein Vierjähriger hat keinen Zugang und entscheidet trotzdem, wie
 lang der Nachmittag sein darf.
 
+**Ein Mensch, zwei Datensätze (2026-09-18).** Wer plant, wird auch als
+Mitreisender angeboten — und steht meist zugleich im Haushalt: die
+Organisatorin als „Max Beispiel (Ehemann)" im eigenen Haushalt und als „Max"
+im Konto, die mitplanende Ehefrau als „Erika Beispiel (Ehefrau)" im Haushalt
+der Organisatorin und als „Erika" im Konto. Beide wurden zweimal angeboten,
+weil der einzige Schlüssel der Name war, und Kontoname und voller Name
+stimmen selten überein. `same-person.ts` entscheidet jetzt in drei Stufen:
+Der `self`-Eintrag eines Haushalts *ist* das Konto, dem der Haushalt gehört
+(erledigt die Organisatorin). Für alle anderen wird der Haushaltseintrag gegen
+den **vollen Namen aus dem eigenen Haushalt des Kontos** verglichen — jedes
+Konto hat einen `self`-Eintrag mit vollem Namen und Geburtsdatum, und so nennt
+der Haushalt der Organisatorin die Ehefrau auch (erledigt die Mitplanenden);
+gleiche Namen mit **verschiedenem Geburtsdatum** sind zwei Menschen. Erst
+zuletzt zählt der Anzeigename, für ein Konto ohne eigenen Haushalt. Wer nach
+dieser Regel derselbe ist, wird einmal angeboten — als Haushaltseintrag, der
+das Geburtsdatum kennt — und kann nur einmal mitfahren.
+
+Auf dem Bildschirm sitzt das Entfernen aus der Gruppe jetzt als **Wischgeste**
+an der Zeile, nicht mehr als Minus-Knopf neben dem Schalter, wo der Daumen
+das eine traf, wenn er das andere meinte. Die Rückfrage bleibt.
+
 ### 3.6 Familienabstimmung mit vorhandener Mechanik
 Das Album-Voting (Nutzer **und** KI stimmen über Fotos ab) ist eins zu eins auf
 Spot-Kandidaten übertragbar: Jeder wischt vor der Reise durch die Vorschläge,

@@ -224,6 +224,55 @@ describe("the household is offered, not taken along", () => {
     expect(asHousehold[0].ageAtStart).toBe(42);
   });
 
+  it("offers a fellow planner once, even when their account name is not their full name", async () => {
+    // The second reported case: the spouse plans along as
+    // "Mitreisender" (the account) and is "Mitreisender Beispiel
+    // (Ehemann)" in the organiser's household — offered twice, once
+    // from each list. Their own household's self entry carries the
+    // full name; that is the join.
+    const spouse = await household("Mitreisender Beispiel", "Ehemann", "1984-05-06", true, "spouse");
+    await db.insert(userSubjectPersons).values({
+      user_id: otherId,
+      full_name: "Mitreisender Beispiel",
+      relation_tag: "selbst",
+      relation_kind: "self",
+      birth_date: "1984-05-06",
+      in_household: true,
+    });
+    const plan = await trip();
+    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+
+    const { suggestions } = await suggestTravellers({ planId: plan.id });
+
+    expect(suggestions.some((s) => s.userId === otherId)).toBe(false);
+    expect(suggestions.filter((s) => s.subjectPersonId === spouse)).toHaveLength(1);
+
+    // One human, one row: once on the trip as the household entry, the
+    // account is refused — and no longer offered.
+    await addTraveller({ planId: plan.id, subjectPersonId: spouse });
+    await expect(addTraveller({ planId: plan.id, userId: otherId }))
+      .rejects.toThrow(/fährt schon mit/);
+  });
+
+  it("keeps a namesake planner with another birthday apart", async () => {
+    const spouse = await household("Mitreisender Beispiel", "Ehemann", "1984-05-06", true, "spouse");
+    await db.insert(userSubjectPersons).values({
+      user_id: otherId,
+      full_name: "Mitreisender Beispiel",
+      relation_tag: "selbst",
+      relation_kind: "self",
+      birth_date: "1990-01-01",
+      in_household: true,
+    });
+    const plan = await trip();
+    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+
+    const { suggestions } = await suggestTravellers({ planId: plan.id });
+
+    expect(suggestions.some((s) => s.userId === otherId)).toBe(true);
+    expect(suggestions.some((s) => s.subjectPersonId === spouse)).toBe(true);
+  });
+
   it("does not hand the organiser's self entry to a namesake who plans along", async () => {
     // Two people called the same: the self entry is the owner's, and a
     // fellow planner with the same display name is still somebody else.
