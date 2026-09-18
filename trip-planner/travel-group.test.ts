@@ -58,14 +58,17 @@ describe("what the group does to the days", () => {
     expect(reading.group.limitedMobility).toBeUndefined();
   });
 
-  it("takes 'kürzere Wege' as a hard limit when a person set it", () => {
+  it("shortens every block when a person set 'mehr Zeit einplanen'", () => {
     const reading = readGroup(
       [{ label: "Oma", birthDate: "1944-02-02", shortWalks: true }],
       "2026-07-01",
     );
 
     expect(reading.group.limitedMobility).toBe(true);
-    expect(reading.reasons.join(" ")).toContain("harte Grenze");
+    // And says what it does — not "a hard limit on distance", which
+    // nothing ever enforced.
+    expect(reading.reasons.join(" ")).toContain("weniger Programm");
+    expect(reading.reasons.join(" ")).toContain("Weglängen ändert das nicht");
   });
 
   it("says when it knows nothing rather than looking like an empty trip", () => {

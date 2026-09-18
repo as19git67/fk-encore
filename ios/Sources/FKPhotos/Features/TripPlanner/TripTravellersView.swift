@@ -10,10 +10,12 @@ import SwiftUI
 /// follows from them in words: a day that got shorter without saying
 /// why reads as a bug (§3.8).
 ///
-/// The one thing it never does is conclude "kürzere Wege" from an age.
-/// How long a small child lasts is a fact about small children; needing
-/// shorter distances is a statement about a person, and it is asked
-/// for, not assumed.
+/// The one thing it never does is conclude "mehr Zeit einplanen" from an
+/// age. How long a small child lasts is a fact about small children;
+/// needing more time is a statement about a person, and it is asked
+/// for, not assumed. (The switch was called "Kürzere Wege" once, which
+/// promised something it never did: it shortens the blocks, not the
+/// walks.)
 struct TripTravellersView: View {
     let planId: Int
     /// Called after a change, because adding somebody re-plans the trip.
@@ -135,36 +137,38 @@ struct TripTravellersView: View {
 
     @ViewBuilder
     private func row(for traveller: TripTraveller) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(traveller.label)
-                if let subtitle = traveller.subtitle(startsOn: startsOn) {
-                    Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(traveller.label)
+                    if let subtitle = traveller.subtitle(startsOn: startsOn) {
+                        Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
+                Spacer()
+                Button(role: .destructive) {
+                    confirmingRemove = traveller
+                } label: {
+                    if busyId == traveller.id {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "minus.circle")
+                    }
+                }
+                .buttonStyle(.borderless)
             }
-            Spacer()
-            // A statement about a person, made by a person (§3.5): the
-            // flag was shown but could never be set, so it never was.
+            // A statement about a person, made by a person (§3.5). A
+            // plain switch, as the HIG has it for a setting that is on
+            // or off: the bordered button it used to be showed its
+            // state as a tint only, and nobody could tell which way it
+            // stood.
             Toggle(isOn: Binding(
                 get: { traveller.shortWalks },
                 set: { on in Task { await setShortWalks(on, for: traveller) } }
             )) {
-                Text("Kürzere Wege").font(.footnote)
+                Text("Mehr Zeit einplanen").font(.subheadline)
             }
-            .toggleStyle(.button)
-            .buttonStyle(.bordered)
-            .controlSize(.small)
             .disabled(busyId == traveller.id)
-            Button(role: .destructive) {
-                confirmingRemove = traveller
-            } label: {
-                if busyId == traveller.id {
-                    ProgressView()
-                } else {
-                    Image(systemName: "minus.circle")
-                }
-            }
-            .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
     }
@@ -381,9 +385,14 @@ struct TripManualTravellerSheet: View {
                      + "die Person als erwachsen geplant.")
             }
             Section {
-                Toggle("Kürzere Wege", isOn: $shortWalks)
+                Toggle("Mehr Zeit einplanen", isOn: $shortWalks)
             } footer: {
-                Text("Wird nie aus dem Alter geschlossen — nur, wenn du es hier sagst.")
+                // What it does, in the terms the plan uses: less in a
+                // block, not shorter walks — the name it had once
+                // promised the latter.
+                Text("Jeder Block bekommt dann weniger Programm — mehr Zeit pro Ort, mehr "
+                     + "Pausen. Die Weglängen ändert das nicht. Wird nie aus dem Alter "
+                     + "geschlossen — nur, wenn du es hier sagst.")
             }
         }
         .navigationTitle("Jemanden eintragen")
@@ -428,14 +437,12 @@ struct TripTraveller: Codable, Identifiable, Sendable {
     let ageAtStart: Int?
 
     /// What is known about them, and nothing that is not: no age when
-    /// no birth date was given, rather than a guess.
+    /// no birth date was given, rather than a guess. The time flag is
+    /// not repeated here — the switch on the row says it, and a line
+    /// that says it again is noise.
     func subtitle(startsOn: String?) -> String? {
-        var parts: [String] = []
-        if let ageAtStart {
-            parts.append(startsOn == nil ? "\(ageAtStart)" : "\(ageAtStart) bei Reisebeginn")
-        }
-        if shortWalks { parts.append("kürzere Wege") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        guard let ageAtStart else { return nil }
+        return startsOn == nil ? "\(ageAtStart)" : "\(ageAtStart) bei Reisebeginn"
     }
 }
 
