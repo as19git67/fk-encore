@@ -11,7 +11,7 @@
  */
 
 import { readableName } from "./readable-name";
-import { wikipediaUrl } from "./spot-links";
+import { articleUrl } from "./spot-links";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import type { Candidate } from "./solver";
 import { matchedInterests } from "./interests";
@@ -213,13 +213,19 @@ export function toCandidates(
     // app keeps the pool, the day and the search saying the same thing
     // about the same place — and the local name comes along, because
     // it is the one written on the building.
+    // Where the place has a German name of its own — Kolosseum for
+    // Colosseo — that one goes on the card and the local one comes
+    // along; `readable-name.ts` decides which is which out of the
+    // spot's own tags.
     const names = readableName(spot);
 
     candidates.push({
       osmRef: spot.osmRef,
       name: names.display,
       localName: names.local,
-      wikipediaUrl: wikipediaUrl(spot.wikipedia),
+      // German where the map knows a German article, the local one
+      // otherwise — never a guessed title (§10.4).
+      wikipediaUrl: articleUrl(spot),
       // Which way it faces, for the light hint (§7.3). Computed once
       // at import time; here it is only carried along.
       facadeAzimuth: spot.facadeAzimuth,

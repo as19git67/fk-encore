@@ -70,4 +70,79 @@ describe("readableName", () => {
     // Nothing is gained by printing the same string twice.
     expect(readableName({ name: "Marienplatz", nameDe: null, nameEn: null }).local).toBeNull();
   });
+
+  describe("German exonyms (§10.4)", () => {
+    it("shows the German name of a place that has one, with the local one beside it", () => {
+      // Nobody standing in Rome says "wir gehen zum Colosseo" — but
+      // that is what the ticket says, so it comes along.
+      expect(readableName({
+        name: "Colosseo",
+        nameDe: "Kolosseum",
+        nameEn: "Colosseum",
+        wikidataQid: "Q10285",
+      })).toEqual({ display: "Kolosseum", local: "Colosseo" });
+    });
+
+    it("counts a Wikipedia article as the same kind of evidence", () => {
+      expect(readableName({
+        name: "Praha",
+        nameDe: "Prag",
+        nameEn: "Prague",
+        wikipedia: "cs:Praha",
+      })).toEqual({ display: "Prag", local: "Praha" });
+    });
+
+    it("leaves an ordinary place alone, whatever somebody translated it to", () => {
+      // A village church with a helpfully translated name:de. The
+      // translation stands on no sign and is on no map the traveller
+      // will hold, so the local name stays.
+      expect(readableName({
+        name: "Église Saint-Nicolas",
+        nameDe: "Kirche des heiligen Nikolaus",
+        nameEn: null,
+      })).toEqual({ display: "Église Saint-Nicolas", local: null });
+    });
+
+    it("does not print one name twice when German and local agree", () => {
+      expect(readableName({
+        name: "Marienplatz",
+        nameDe: "Marienplatz",
+        nameEn: null,
+        wikidataQid: "Q161819",
+      })).toEqual({ display: "Marienplatz", local: null });
+    });
+
+    it("ignores a German name that differs only in accents or case", () => {
+      // "Cafe Central" is the worse spelling of the same name, not a
+      // different one — promoting it would drop the accent and then
+      // claim the accented form is something else.
+      expect(readableName({
+        name: "Café Central",
+        nameDe: "Cafe central",
+        nameEn: null,
+        wikidataQid: "Q42",
+      })).toEqual({ display: "Café Central", local: null });
+    });
+
+    it("never promotes an English name over the local one", () => {
+      // `name:en` is often a label added for tourists; the sign, the
+      // map and everybody nearby say the local one.
+      expect(readableName({
+        name: "Piazza del Duomo",
+        nameDe: null,
+        nameEn: "Cathedral Square",
+        wikidataQid: "Q42",
+      })).toEqual({ display: "Piazza del Duomo", local: null });
+    });
+
+    it("still reaches for German where the script cannot be read at all", () => {
+      // The older rule, unchanged: prominence has nothing to do with
+      // whether somebody can read 東京国立博物館.
+      expect(readableName({
+        name: "東京国立博物館",
+        nameDe: "Nationalmuseum Tokio",
+        nameEn: "Tokyo National Museum",
+      })).toEqual({ display: "Nationalmuseum Tokio", local: "東京国立博物館" });
+    });
+  });
 });

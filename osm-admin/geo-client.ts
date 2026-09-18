@@ -125,7 +125,16 @@ export interface GeoPoiSearchSpot {
   kind: string | null;
   categories: string[];
   wikidataQid: string | null;
+  /** The `wikipedia` tag: the article in the **local** language. */
   wikipedia: string | null;
+  /**
+   * The `wikipedia:de` tag — the German article for the same place,
+   * where a mapper has linked one (§10.4). Optional because a geo
+   * container from before this field simply does not send it, and a
+   * missing German article is exactly what `undefined` should mean
+   * here.
+   */
+  wikipediaDe?: string | null;
   /** Straight from OSM and unverified — absent means unknown, not "no". */
   openingHours: string | null;
   cuisine: string | null;

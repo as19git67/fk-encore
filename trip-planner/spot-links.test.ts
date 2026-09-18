@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { wikipediaUrl } from "./spot-links";
+import { articleUrl, wikipediaUrl } from "./spot-links";
 
 describe("wikipediaUrl", () => {
   it("builds the article URL from the language-prefixed tag", () => {
@@ -48,5 +48,50 @@ describe("wikipediaUrl", () => {
     expect(wikipediaUrl(undefined)).toBeNull();
     expect(wikipediaUrl("   ")).toBeNull();
     expect(wikipediaUrl("de:  ")).toBeNull();
+  });
+});
+
+describe("articleUrl (§10.4)", () => {
+  it("prefers the German article where the map knows one", () => {
+    // The plain tag names the Italian article; wikipedia:de names the
+    // German one for the same building.
+    expect(articleUrl({ wikipedia: "it:Colosseo", wikipediaDe: "Kolosseum" })).toBe(
+      "https://de.wikipedia.org/wiki/Kolosseum",
+    );
+  });
+
+  it("takes the German tag with its language already on it", () => {
+    expect(articleUrl({ wikipedia: "it:Colosseo", wikipediaDe: "de:Kolosseum" })).toBe(
+      "https://de.wikipedia.org/wiki/Kolosseum",
+    );
+  });
+
+  it("takes a full URL in the German tag", () => {
+    expect(articleUrl({
+      wikipedia: "it:Colosseo",
+      wikipediaDe: "https://de.wikipedia.org/wiki/Kolosseum",
+    })).toBe("https://de.wikipedia.org/wiki/Kolosseum");
+  });
+
+  it("keeps the local article when there is no German one", () => {
+    // Nothing is guessed: de.wikipedia.org/wiki/Colosseo may not
+    // exist, and a link that 404s is worse than one in Italian.
+    expect(articleUrl({ wikipedia: "it:Colosseo" })).toBe(
+      "https://it.wikipedia.org/wiki/Colosseo",
+    );
+    expect(articleUrl({ wikipedia: "it:Colosseo", wikipediaDe: "   " })).toBe(
+      "https://it.wikipedia.org/wiki/Colosseo",
+    );
+  });
+
+  it("falls back to the local article when the German tag is nonsense", () => {
+    expect(articleUrl({ wikipedia: "it:Colosseo", wikipediaDe: "https://example.test/x" })).toBe(
+      "https://it.wikipedia.org/wiki/Colosseo",
+    );
+  });
+
+  it("says nothing when the map knows no article at all", () => {
+    expect(articleUrl({})).toBeNull();
+    expect(articleUrl({ wikipedia: null, wikipediaDe: null })).toBeNull();
   });
 });
