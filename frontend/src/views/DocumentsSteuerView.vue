@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
@@ -18,11 +18,22 @@ import {
   type TaxYearCount,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import { useScrollRestore } from '../composables/useScrollRestore'
 import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
+import {
+  consumeTaxListFocus,
+  focusTaxListItem,
+  rememberTaxListFocus,
+  taxEntryKey,
+} from '../utils/taxListFocus'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+// Returning from a document must land back where the user left, not at the
+// top of the list. The row anchor does the precise work; the raw offset is
+// the fallback for when that row is gone (re-classified, filtered away).
+const { restore: restoreScroll } = useScrollRestore('documents-tax-list')
 
 // Persisted in the URL (year/review) so the back arrow from the document
 // detail view restores the same filter instead of resetting to the newest
@@ -150,11 +161,28 @@ async function onBackfill() {
   }
 }
 
-async function openDocument(docId: number) {
+async function openDocument(sectionSlug: string, docId: number) {
+  rememberTaxListFocus(sectionSlug, docId)
   // Wait for any pending filter write so the back arrow's history entry
   // captures the current year/review filter instead of a stale query.
   await waitForPendingQueryUpdate(router)
   router.push({ name: 'dokumente-detail', params: { id: docId } })
+}
+
+/**
+ * Put the user back on the row they opened the document from. Returns false
+ * when that row is not on screen, and the caller falls back to the offset.
+ */
+async function restoreFocusToLastOpened(): Promise<boolean> {
+  const focus = consumeTaxListFocus()
+  if (!focus) return false
+  await nextTick()
+  await nextTick()
+  const el = focusTaxListItem(document, focus)
+  if (!el) return false
+  el.classList.add('document-card--highlight')
+  setTimeout(() => el.classList.remove('document-card--highlight'), 1500)
+  return true
 }
 
 function confidencePercent(c: number | null): string {
@@ -189,6 +217,9 @@ onMounted(async () => {
     subjectPersons.value = []
   }
   await loadData()
+  // Returning from detail: centre, highlight and restore actual keyboard
+  // focus. Only use the generic scroll offset when there is no row anchor.
+  if (!(await restoreFocusToLastOpened())) restoreScroll()
 })
 </script>
 
@@ -298,8 +329,10 @@ onMounted(async () => {
               :key="`${sec.slug}:${entry.document.id}`"
               class="document-card"
               tabindex="0"
-              @click="openDocument(entry.document.id)"
-              @keydown.enter="openDocument(entry.document.id)"
+              :data-doc-id="entry.document.id"
+              :data-tax-entry="taxEntryKey(sec.slug, entry.document.id)"
+              @click="openDocument(sec.slug, entry.document.id)"
+              @keydown.enter="openDocument(sec.slug, entry.document.id)"
             >
               <div class="document-icon"><i class="pi pi-file-pdf" /></div>
               <div class="document-body">
@@ -435,6 +468,14 @@ onMounted(async () => {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
   outline: 2px solid var(--p-primary-color);
   outline-offset: 2px;
+}
+
+.document-card--highlight {
+  animation: card-flash 1.5s ease-out;
+}
+@keyframes card-flash {
+  0%   { box-shadow: 0 0 0 3px var(--p-primary-color); }
+  100% { box-shadow: none; }
 }
 
 .document-icon {
