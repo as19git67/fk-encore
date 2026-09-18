@@ -70,6 +70,12 @@ public struct ContentView: View {
             guard authManager.currentUser != nil else { return }
             await SpotlightIndexer.shared.syncPhotos()
         }
+        .task(id: authManager.currentUser?.id) {
+            // The device token can change between launches; the server only
+            // knows the last one it was told (#765). Quiet unless opted in.
+            guard authManager.currentUser != nil else { return }
+            await RemotePushManager.shared.registerIfEnabled()
+        }
     }
 }
 
@@ -78,8 +84,6 @@ struct MainTabView: View {
     /// Deep links land here: the tab bar is the one place that can pick a
     /// tab, push a screen and present a cover (#768 §5a).
     @State private var router = AppDeepLinkRouter.shared
-    @State private var feedPath = NavigationPath()
-    @State private var albumsPath = NavigationPath()
     @State private var tripStore = TripStore.shared
     @State private var autoStart = TripAutoStartMonitor.shared
     @State private var autoEnd = TripAutoEndMonitor.shared
@@ -96,15 +100,20 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selection) {
+            // The stacks are deliberately not bound to a `NavigationPath`:
+            // the grids push the fullscreen viewer with item destinations,
+            // and a bound path makes SwiftUI rebuild the grid on the way
+            // back, dropping its scroll position. Deep links push through
+            // item destinations at each root instead (`AppDeepLinkRouter`).
             Tab("Feed", systemImage: "house", value: MainTab.feed) {
-                NavigationStack(path: $feedPath) {
+                NavigationStack {
                     FeedView(viewModel: feedViewModel)
                 }
             }
             .badge(feedViewModel.unreadCount)
 
             Tab("Alben", systemImage: "rectangle.stack", value: MainTab.albums) {
-                NavigationStack(path: $albumsPath) {
+                NavigationStack {
                     AlbumsListView()
                 }
             }
@@ -154,26 +163,14 @@ struct MainTabView: View {
             // A link said where to go; the launch rule below must not move
             // the screen again afterwards.
             didChooseTab = true
+            // The router has already queued the push (album, person,
+            // recaps, search query) for the tab's root view; only the tab
+            // is chosen here.
             guard let navigation = router.takePending() else { return }
             switch navigation {
-            case .album(let id):
-                selection = .albums
-                albumsPath = NavigationPath([id])
-            case .person(let id):
-                selection = .albums
-                var path = NavigationPath()
-                path.append(PersonsRef())
-                path.append(PersonRef(id: id))
-                albumsPath = path
-            case .recaps:
-                selection = .feed
-                feedPath = NavigationPath([RecapsRef()])
-            case .feed:
-                selection = .feed
-                feedPath = NavigationPath()
-            case .search:
-                // The query waits in the router; `SearchView` takes it.
-                selection = .search
+            case .albums: selection = .albums
+            case .feed: selection = .feed
+            case .search: selection = .search
             }
         }
         .fullScreenCover(isPresented: $router.isPresentingReviewQueue) {

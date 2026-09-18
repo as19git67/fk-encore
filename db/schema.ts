@@ -1681,6 +1681,28 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   last_used_at: timestamp("last_used_at", { mode: "string", withTimezone: true }),
 });
 
+// iOS device tokens for APNs (#765) — the app's counterpart to
+// push_subscriptions. One row per device; `token` is globally unique so a
+// re-registration from the same phone upserts. `environment` is
+// 'production' or 'sandbox' (an Xcode build registers against the sandbox
+// gateway, and the two do not accept each other's tokens).
+export const apnsDeviceTokens = pgTable("apns_device_tokens", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  environment: text("environment").notNull().default("production"),
+  device_name: text("device_name"),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  last_used_at: timestamp("last_used_at", { mode: "string", withTimezone: true }),
+});
+
 export const photoComments = pgTable("photo_comments", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   photo_id: integer("photo_id")
@@ -3117,7 +3139,7 @@ export const tripPlanStops = pgTable(
     // hand, which has no OSM entry.
     kind: text("kind"),
     // Where the spot finishes when that is not where it begins (§4.7,
-    // migration 0203): a route along a lake, a way up a hill. The next
+    // migration 0205): a route along a lake, a way up a hill. The next
     // leg of the day sets off from its end. Null for the ordinary point,
     // which is every spot the region import knows.
     extent: jsonb("extent").$type<SpotExtentColumn>(),
@@ -3462,14 +3484,14 @@ export const tripPlanTravellers = pgTable(
     plan_id: integer("plan_id")
       .notNull()
       .references(() => tripPlans.id, { onDelete: "cascade" }),
-    subject_person_id: integer("subject_person_id")
-      .references(() => userSubjectPersons.id, { onDelete: "set null" }),
+    // What the trip calls them; for an account, the account's name at
+    // the time it joined (the live name is read from `users`).
     label: text("label").notNull(),
     birth_date: text("birth_date"),
     short_walks: boolean("short_walks").notNull().default(false),
-    // Set when this traveller is also one of the trip's planners
-    // (migration 0185), so an adult with a login is entered once
-    // rather than twice.
+    // Set for everybody who plans the trip: whoever plans is on it
+    // (migration 0204). Null marks somebody entered by hand — a child,
+    // a friend — who has no account.
     added_for_user_id: integer("added_for_user_id")
       .references(() => users.id, { onDelete: "set null" }),
     added_by: integer("added_by").references(() => users.id, { onDelete: "set null" }),

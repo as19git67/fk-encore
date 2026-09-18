@@ -17,6 +17,7 @@ import { secret } from "encore.dev/config";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
 import { pushSubscriptions, users } from "../db/schema";
+import { sendToUserDevices } from "./apns.service";
 
 // ---------- VAPID ----------
 
@@ -219,11 +220,24 @@ export interface PushPayload {
 }
 
 /**
- * Send a notification to every subscription belonging to a user.
+ * Send a notification to every device of a user: browser subscriptions
+ * over Web Push, iOS devices over APNs (#765). Each leg is skipped when
+ * its credentials are missing, so a deployment can run either one alone.
  * Errors are logged but never thrown — push is best-effort. Gone
- * endpoints (404/410) are pruned so we don't waste requests later.
+ * endpoints and dead tokens are pruned so we don't waste requests later.
  */
 export async function sendToUser(
+  userId: number,
+  payload: PushPayload,
+): Promise<{ sent: number; pruned: number }> {
+  const [web, ios] = await Promise.all([
+    sendToUserBrowsers(userId, payload),
+    sendToUserDevices(userId, payload),
+  ]);
+  return { sent: web.sent + ios.sent, pruned: web.pruned + ios.pruned };
+}
+
+async function sendToUserBrowsers(
   userId: number,
   payload: PushPayload,
 ): Promise<{ sent: number; pruned: number }> {

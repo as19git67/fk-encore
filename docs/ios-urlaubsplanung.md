@@ -133,8 +133,8 @@ Großeltern dabei → Gehstrecke und Steigung als harte Nebenbedingung statt als
 Sternchen-Hinweis. Das wirkt direkt auf das Zeitbudget eines Blocks.
 
 **Umgesetzt:** `GET`/`POST /trip-planner/plans/:planId/travellers`,
-`GET …/travellers/suggestions`, `POST …/travellers/remove` und der Bildschirm
-„Wer fährt mit?".
+`POST …/travellers/update`, `POST …/travellers/remove` und der Bildschirm
+„Reisegruppe".
 
 Die Wirkung gab es von Anfang an — `blocks.ts` schrumpft das Budget jedes Blocks
 bei `withChildren` und noch einmal bei `limitedMobility`, die Packliste liest
@@ -144,11 +144,15 @@ nächsten falsch — ein Kind, das beim Beschreiben acht war, ist zwei Jahre sp�
 elf, und niemand hat es gemerkt.
 
 Jetzt stehen die **Personen** in der Reise, und die Flags sind eine Folgerung
-daraus, frisch gezogen für das Datum, an dem die Reise beginnt. Die Quelle liegt
-schon im Haus: `user_subject_persons` (die Bezugspersonen des Dokumentenmoduls)
-kennt Verwandtschaft und meistens ein Geburtsdatum. Wer dort nicht steht — ein
-befreundetes Kind, eine Oma ohne Papierkram hier — kommt mit eigenem Namen und
-optionalem Geburtsdatum dazu.
+daraus, frisch gezogen für das Datum, an dem die Reise beginnt. Die Reisegruppe
+hat zwei Teile und eine Regel: **Wer mitplant, fährt mit.** Jedes Konto auf der
+Reise (Organisatorin und alle unter „Planen mit") ist damit Teil der Gruppe,
+kommt mit der Einladung und geht mit ihr — auf dem Reisegruppe-Bildschirm lässt
+sich ein Konto nicht entfernen. Wer kein Konto hat — ein Kind, eine Oma von
+auswärts — wird von Hand eingetragen, mit Namen und optionalem Geburtsdatum.
+Das Geburtsdatum eines Kontos kommt aus dessen **eigenem** Haushalt
+(`user_subject_persons`, der `self`-Eintrag), sonst lässt es sich an der Reise
+nachtragen.
 
 Drei Entscheidungen:
 
@@ -174,8 +178,17 @@ Drei Entscheidungen:
 - **Gerechnet wird auf den Reisebeginn, nicht auf heute.** Eine im Januar für
   August geplante Reise ist eine Reise mit dem Kind, das im August schon
   Geburtstag hatte.
-- **Vorgeschlagen, nicht mitgenommen.** Der Haushalt wird angeboten; eine Reise
-  ist nicht automatisch jeder, der hier wohnt.
+- **Konten statt Haushalt (2026-09-18).** Die Gruppe zog anfangs aus drei
+  Listen: Konten, dem Haushalt der Organisatorin aus dem Dokumentenmodul und
+  Handeinträgen. Konten und Haushalt beschreiben dieselben Erwachsenen zweimal
+  — „Erika" als Konto, „Erika Beispiel (Ehefrau)" im Haushalt — und der einzige
+  Schlüssel zwischen beiden war ein Name. Jeder Versuch, das abzugleichen
+  (`self`-Eintrag, voller Name aus dem eigenen Haushalt, Geburtsdatum), blieb
+  ein Umweg um eine Verknüpfung, die es in der Datenbank nicht gibt. Jetzt ist
+  es so einfach wie die Album-Freigabe: Konten werden unter „Planen mit" aus
+  der Kontoliste gewählt und sind damit in der Gruppe; der Haushalt wird nicht
+  mehr angeboten. Verloren geht das Übernehmen eines Kindes aus dem Haushalt
+  mit einem Tipp — Kinder werden einmal pro Reise eingetragen.
 
 Eine Änderung an der Gruppe plant die Reise neu — die Blöcke haben danach andere
 Budgets, und ein Tag, dessen Budgets sich verschoben haben, dessen Spots aber
@@ -184,6 +197,15 @@ nicht, geht nicht mehr auf. Aus demselben Grund ist es Sache der Organisatorin
 `trip_plan_shares` sind die, die *planen* dürfen, `trip_plan_travellers` die, die
 *mitfahren* — ein Vierjähriger hat keinen Zugang und entscheidet trotzdem, wie
 lang der Nachmittag sein darf.
+
+**Reisegruppe und Abstimmung.** Ein Konto steht als Mitreisender an der
+Reise und stimmt unter seinem eigenen Konto ab; eine Stimme „in Vertretung"
+(`forTravellerId`) gibt es nur für Handeinträge, und die Frage „wer hat noch
+nicht abgestimmt" zählt ein Konto einmal.
+
+Auf dem Bildschirm sitzt das Entfernen eines Handeintrags als **Wischgeste**
+an der Zeile, nicht mehr als Minus-Knopf neben dem Schalter, wo der Daumen
+das eine traf, wenn er das andere meinte. Die Rückfrage bleibt.
 
 ### 3.6 Familienabstimmung mit vorhandener Mechanik
 Das Album-Voting (Nutzer **und** KI stimmen über Fotos ab) ist eins zu eins auf

@@ -1,4 +1,3 @@
-import AppIntents
 import SwiftUI
 import UIKit
 import UserNotifications
@@ -20,6 +19,26 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // app isn't running — the system launches it headless to deliver them.
         UNUserNotificationCenter.current().delegate = self
         return true
+    }
+
+    // MARK: - Remote notifications (#765)
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        Task { @MainActor in
+            RemotePushManager.shared.didRegister(deviceToken: deviceToken)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        Task { @MainActor in
+            RemotePushManager.shared.didFailToRegister(error)
+        }
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
@@ -59,18 +78,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 TripAutoStartMonitor.shared.handleNotificationAction(action)
                 completionHandler()
             }
-        case ReviewQueueNotice.notificationCategoryId:
-            // No action buttons on this one — any tap on it means „show me",
-            // which is the deep link it was posted with (#968).
+        default:
+            // Everything else carries where a tap should land as `url`: the
+            // review notice its app-scheme link (#968), a remote push from
+            // the server the web-relative path of the album or feed (#765).
+            // Both go through the one router.
             Task { @MainActor in
-                if let urlString = response.notification.request.content.userInfo["url"] as? String,
-                   let url = URL(string: urlString) {
-                    AppDeepLinkRouter.shared.handle(url)
+                if let urlString = response.notification.request.content.userInfo["url"] as? String {
+                    AppDeepLinkRouter.shared.handle(urlString: urlString)
                 }
                 completionHandler()
             }
-        default:
-            completionHandler()
         }
     }
 
@@ -84,79 +102,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .sound])
-    }
-}
-
-// MARK: - App Shortcuts
-
-/// The intents live in the package (`TripIntents.swift`); App Intents
-/// finds them through this bridge.
-struct FKPhotosAppIntents: AppIntentsPackage {
-    static var includedPackages: [any AppIntentsPackage.Type] {
-        [FKPhotosIntents.self]
-    }
-}
-
-/// The app's shortcuts for the Shortcuts app, Siri, Spotlight and the Action
-/// button. App Shortcuts must be declared in the app target; the intents
-/// live in the package (`TripIntents.swift`, `PhotoIntents.swift`).
-///
-/// Phrases are what Siri listens for; each must contain the app name.
-/// Entity-taking intents (album, person) are not listed here on purpose:
-/// an App Shortcut phrase can carry an entity only as an enumerated
-/// parameter, and albums are open-ended. They stay reachable through the
-/// Shortcuts app and through Siri's own „Öffne Album Urlaub in F4mil Photos"
-/// resolution once the app has been used once.
-struct FKPhotosShortcuts: AppShortcutsProvider {
-    static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: RememberHereIntent(),
-            phrases: [
-                "Das hier merken in \(.applicationName)",
-                "Merke diesen Ort in \(.applicationName)",
-            ],
-            shortTitle: "Das hier merken",
-            systemImageName: "mappin.and.ellipse"
-        )
-        AppShortcut(
-            intent: BackUpNowIntent(),
-            phrases: [
-                "Jetzt sichern mit \(.applicationName)",
-                "Fotos sichern mit \(.applicationName)",
-                "\(.applicationName) synchronisieren",
-            ],
-            shortTitle: "Jetzt sichern",
-            systemImageName: "arrow.triangle.2.circlepath"
-        )
-        AppShortcut(
-            intent: SearchPhotosIntent(),
-            // A phrase may carry a parameter only when it is an AppEnum or
-            // AppEntity; the free-text query is asked for after the phrase.
-            phrases: [
-                "Suche in \(.applicationName)",
-                "Fotos suchen in \(.applicationName)",
-            ],
-            shortTitle: "Fotos suchen",
-            systemImageName: "magnifyingglass"
-        )
-        AppShortcut(
-            intent: ShowLatestRecapIntent(),
-            phrases: [
-                "Zeige den Rückblick in \(.applicationName)",
-                "Rückblick in \(.applicationName)",
-            ],
-            shortTitle: "Rückblick zeigen",
-            systemImageName: "sparkles"
-        )
-        AppShortcut(
-            intent: OpenReviewQueueIntent(),
-            phrases: [
-                "Gruppen-Review in \(.applicationName)",
-                "Fotos aussortieren in \(.applicationName)",
-            ],
-            shortTitle: "Gruppen-Review",
-            systemImageName: "checklist"
-        )
     }
 }
 

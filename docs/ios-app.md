@@ -681,12 +681,22 @@ dokumentiert**:
   erzeugten URLs (`AppDeepLink.url(for:)`, `webURL(for:serverURL:)`).
 - **`AppDeepLinkRouter`** hält den Link in `pending`, bis die Tab-Leiste
   existiert — ein Link, der auf dem Login-Bildschirm ankommt, landet nach
-  der Anmeldung dort, wo er hinwollte, statt im Feed. `MainTabView` nimmt
-  ihn ab: Album und Person werden im Alben-Tab über dessen `NavigationPath`
-  gepusht (`[PersonsRef, PersonRef]` in einem Zug, deshalb ist das
-  `PersonRef`-Ziel jetzt an der Stack-Wurzel `AlbumsListView` registriert),
-  Rückblicke im Feed-Tab (`RecapsRef`), Foto, Rückblick-Player und
-  Review-Queue als `fullScreenCover`, weil sie zu keinem Tab gehören.
+  der Anmeldung dort, wo er hinwollte, statt im Feed. `MainTabView` wählt
+  nur den Tab; der Push selbst passiert an dessen Wurzel über
+  `navigationDestination(item:)` (`albumToOpen`, `personToOpen`,
+  `recapsToOpen` im Router, gebunden in `AlbumsListView` bzw. `FeedView`).
+  Foto, Rückblick-Player und Review-Queue kommen als `fullScreenCover`, weil
+  sie zu keinem Tab gehören.
+- **Die Tab-Stacks bleiben bewusst ohne `NavigationPath`-Binding.** Der erste
+  Wurf band die Stacks an einen Pfad, um Deep Links hineinzuschreiben — und
+  damit verlor das Album-Grid nach jedem Vollbild-Besuch seine
+  Scroll-Position: die Grids pushen den Viewer per
+  `navigationDestination(item:)`, und in einem pfadgebundenen Stack baut
+  SwiftUI die Quell-View beim Zurückgehen neu auf. Ungebundene Stacks plus
+  Item-Ziele an der Wurzel sind dasselbe Muster, das die Grids selbst
+  benutzen. Preis: ein Deep Link pusht über den aktuellen Zustand des Tabs
+  statt ihn zu ersetzen, und eine Person kommt direkt (ohne die Liste
+  dazwischen).
 - **Geteilte Alben** (`/app/albums/shared/<token>`): der Token wird über
   `/albums/public/<token>` aufgelöst; ist die angemeldete Person Mitglied
   (`GET /albums/:id` antwortet), öffnet die eigene Album-Ansicht, sonst die
@@ -776,9 +786,15 @@ dokumentiert**:
 
 ### 2.14 App Intents / Siri-Shortcuts (#766)
 
-- **Die Intents** (`App/PhotoIntents.swift`, im Paket, damit `FKPhotosIntents`
-  sie in das App-Target trägt; die App-Shortcuts selbst sind in `Main.swift`
-  deklariert, weil App Intents das so verlangt):
+- **Die Intents liegen im App-Target** (`ios/App/Intents.swift`), nicht im
+  Paket. Sie lagen zuerst im Paket und wurden über ein `AppIntentsPackage`
+  hinübergereicht — das funktionierte aus Xcode, aber nicht aus TestFlight:
+  Die Metadaten-Extraktion des Archivs ließ die Paket-Intents aus, und die
+  installierte App hatte in der Kurzbefehle-App keine einzige Aktion. Im
+  App-Target werden sie bei jedem Build auf dem normalen Weg extrahiert. Jeder
+  Intent ist ein Aufruf in `IntentActions` (`Sources/FKPhotos/App/
+  IntentActions.swift`, öffentliche Fassade); die Arbeit bleibt im Paket. Die
+  App-Shortcuts stehen in derselben Datei.
   - **Jetzt sichern** (`BackUpNowIntent`, ohne App-Öffnen): prüft Schalter,
     Netzwerk-Gate und laufende Sicherung und **startet** dann `runFullSync`,
     ohne darauf zu warten — ein Erstlauf dauert Minuten, ein Intent hat
@@ -812,6 +828,38 @@ dokumentiert**:
   eine Shortcut-Phrase kann eine Entity nur als aufzählbaren Parameter tragen,
   Alben sind offen. Über die Kurzbefehle-App und Siris eigene Auflösung
   bleiben sie erreichbar.
+
+### 2.15 Remote-Push über APNs (#765)
+
+- **Ein Absender, zwei Kanäle.** `sendToUser` im `push`-Service schickt
+  dieselbe Benachrichtigung über Web Push an Browser und über APNs an
+  iPhones; Präferenzen, Entprellung, Online-Unterdrückung und Digest davor
+  sind gemeinsam. Details: `docs/push-notifications.md`, „iOS: APNs".
+- **`RemotePushManager`** (`Features/Push/`): Opt-in wie im Web. Beim
+  Einschalten Berechtigung erfragen, Token holen
+  (`registerForRemoteNotifications`), an `POST /push/apns/register` geben —
+  und das **bei jedem Start** erneut, weil sich der Token ändern kann und
+  der Server nur den letzten kennt. Ausschalten und Abmelden rufen
+  `/push/apns/unregister`, damit ein zweites Konto auf demselben Telefon
+  nicht die Mitteilungen des ersten bekommt. Sandbox oder Produktion
+  entscheidet die Build-Konfiguration (`#if DEBUG`), genau wie Xcode das
+  `aps-environment`-Entitlement vergibt.
+- **Ein Tipp öffnet die Stelle.** Der Payload trägt den web-relativen Pfad
+  (`/app/fotos/alben/12?photoId=34`), den jede Feed-Benachrichtigung ohnehin
+  hat; `AppDeepLinkRouter.handle(urlString:)` löst ihn gegen den
+  konfigurierten Server auf und routet ihn wie einen Universal Link (2.11).
+  Der `default`-Zweig des Notification-Delegates in `Main.swift` gilt damit
+  für Remote-Push und die lokale Review-Mitteilung gleichermaßen.
+- **`PushSettingsView`** (Einstellungen → Benachrichtigungen): der Schalter
+  für dieses iPhone mit Status (aktiv, wird registriert, in iOS verweigert,
+  Fehler), die Arten wie im Web-Profil (`/push/preferences`, ein Satz für alle
+  Geräte, nur die Foto-Arten — Dokumente hat die App nicht) und der Schalter
+  für die lokale Gruppen-Mitteilung, der vorher in der Hauptliste stand.
+  Ist der Server nicht eingerichtet (`GET /push/apns/status`), ist der
+  Schalter aus und sagt warum.
+- **Entitlement** `aps-environment = development` in `FKPhotos.entitlements`
+  (Xcode setzt es beim Archivieren auf `production`). Die Push-Capability
+  am App-ID legt Xcode mit automatischem Signing an.
 
 ---
 
@@ -889,7 +937,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Foto-Stream (chronologisch) | ✅ `PhotoFeedView` | 🔶 (Feed = Aktivität) |
 | Reaktionen / Likes | ✅ | ✅ |
 | Kommentare (lesen + schreiben) | ✅ | ✅ |
-| Push-Benachrichtigungen | ✅ (PWA-Push) | ❌ |
+| Push-Benachrichtigungen | ✅ (PWA-Push) | ✅ (APNs, #765 — siehe 2.15) |
 
 ### 3.8 Rückblicke & Review
 | Feature | Web | iOS |
@@ -991,10 +1039,11 @@ eine echte Bereicherung:
 3. **Live Activity / Dynamic Island** für Backup-Fortschritt.
 4. ✅ **App Intents / Siri-Shortcuts** – „Jetzt sichern", „Suche nach …",
    „Zeige Rückblick", Album/Person als Entity — siehe 2.14.
-5. **Lokale Benachrichtigungen** – Backup abgeschlossen, neue Kommentare/Likes
-   (bis Remote-Push via APNs steht).
-6. **Remote-Push (APNs)** – Gegenstück zum bestehenden `push`-Service & PWA-Push
-   (zählt auch zur Parität, ist aber iOS-Plattformarbeit).
+5. **Lokale Benachrichtigungen** – „neue Gruppen warten" ist umgesetzt
+   (`ReviewQueueNotifier`, 2.9); „Backup abgeschlossen" bewusst nicht — wer
+   die Sicherung sehen will, sieht sie künftig in der Live Activity (#768 §1).
+6. ✅ **Remote-Push (APNs)** – Gegenstück zum bestehenden `push`-Service &
+   PWA-Push — siehe 2.15.
 7. ✅ **Spotlight-Indexierung** — Fotos mit erkanntem Text (Opt-in),
    Personen und Alben — siehe 2.12.
 8. **Live Photos** – Erfassung/Upload von Bewegungsanteil (sobald das Backend
