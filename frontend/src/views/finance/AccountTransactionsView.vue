@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageLayout from '../../components/layout/PageLayout.vue'
 /**
  * Buchungsliste — entweder für ein einzelnes Konto (`/finanzen/uebersicht/konto/:id`)
  * oder für alle Konten einer Sektion (`/finanzen/uebersicht/sektion/:name`).
@@ -197,6 +198,10 @@ const taxRelevantOptions = [
 ]
 
 const hasActiveFilters = computed(() => filtersStore.hasActiveFilters)
+/** Balance and its date, one muted line under the title. */
+const headerHint = computed(() =>
+  [headerBalance.value, headerDate.value].filter((part): part is string => !!part).join(' · '),
+)
 
 function isoDate(d: Date): string {
   const y = d.getFullYear()
@@ -1178,122 +1183,70 @@ function goBack() {
 </script>
 
 <template>
-  <div class="page">
-    <Teleport to="#module-subheaders">
-      <header class="tx-header" data-testid="finance-transaction-header">
-      <Button
-        icon="pi pi-chevron-left"
-        severity="secondary"
-        rounded
-        aria-label="Zurück"
-        @click="goBack"
-      />
-      <template v-if="selectMode">
-        <div class="tx-header-title">
-          <h1>Σ: {{ formatSelectionSum() }}</h1>
-        </div>
-        <div class="tx-header-meta">
-          <span class="tx-header-date">
-            {{ localSelectionCount }} Buchung{{ localSelectionCount === 1 ? '' : 'en' }}
-          </span>
-        </div>
-      </template>
-      <template v-else-if="hasActiveFilters">
-        <div class="tx-header-title">
-          <h1>Σ: {{ formatFilteredSum() }}</h1>
-        </div>
-        <div class="tx-header-meta">
-          <span class="tx-header-date">
-            {{ txStore.items.length }} Buchung{{ txStore.items.length === 1 ? '' : 'en' }}
-          </span>
-        </div>
-      </template>
-      <template v-else>
-        <div class="tx-header-title">
-          <h1>{{ headerTitle }}</h1>
-        </div>
-        <div class="tx-header-meta">
-          <span v-if="headerBalance" class="tx-header-balance">
-            {{ headerBalance }}
-          </span>
-          <span v-if="headerDate" class="tx-header-date">{{ headerDate }}</span>
-        </div>
-      </template>
-      <div v-if="!isDepot" class="tx-header-actions">
+  <PageLayout :title="headerTitle" :hint="headerHint || undefined" :ready="!txStore.loading">
+    <!-- Sticky part (lifted into the app stack by PageLayout): the account
+         toolbar, the filter panel while open, and the selection bar while
+         selecting. The running sums live up here so they stay visible while
+         the list scrolls. -->
+    <template #toolbar>
+      <div class="tx-toolbar" data-testid="finance-transaction-header">
         <Button
-          v-if="canAddCashTransaction"
-          icon="pi pi-money-bill"
+          icon="pi pi-chevron-left"
           severity="secondary"
+          text
           rounded
-          aria-label="Bargeldbuchung erfassen"
-          title="Bargeldbuchung erfassen"
-          @click="openCashTransactionForm"
+          aria-label="Zurück"
+          @click="goBack"
         />
-        <Button
-          icon="pi pi-filter"
-          severity="secondary"
-          rounded
-          aria-label="Filter"
-          :class="{
-            'tx-icon-active': filterPanelOpen,
-            'tx-icon-applied': hasActiveFilters && !filterPanelOpen,
-          }"
-          @click="filterPanelOpen = !filterPanelOpen"
-        />
-        <Button
-          icon="pi pi-list"
-          severity="secondary"
-          rounded
-          aria-label="Liste der ausgewählten Buchungen"
-          :disabled="!selectMode || localSelectionCount === 0"
-          :class="{ 'tx-icon-active': selectMode && localSelectionCount > 0 }"
-          @click="openSelectionPopover"
-        />
-        <Button
-          icon="pi pi-check-square"
-          severity="secondary"
-          rounded
-          aria-label="Auswählen"
-          :class="{ 'tx-icon-active': selectMode }"
-          @click="toggleSelectMode"
-        />
+        <div class="tx-toolbar-summary">
+          <template v-if="hasActiveFilters">
+            <span class="tx-summary-sum">Σ {{ formatFilteredSum() }}</span>
+            <span class="tx-summary-count">
+              {{ txStore.items.length }} Buchung{{ txStore.items.length === 1 ? '' : 'en' }}
+            </span>
+          </template>
+        </div>
+        <div v-if="!isDepot" class="tx-toolbar-actions">
+          <Button
+            v-if="canAddCashTransaction"
+            icon="pi pi-money-bill"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Bargeldbuchung erfassen"
+            v-tooltip.bottom="'Bargeldbuchung erfassen'"
+            @click="openCashTransactionForm"
+          />
+          <Button
+            :icon="hasActiveFilters ? 'pi pi-filter-fill' : 'pi pi-filter'"
+            :severity="filterPanelOpen || hasActiveFilters ? 'primary' : 'secondary'"
+            text
+            rounded
+            aria-label="Filter"
+            v-tooltip.bottom="hasActiveFilters ? 'Filter aktiv' : 'Filter'"
+            @click="filterPanelOpen = !filterPanelOpen"
+          />
+          <Button
+            icon="pi pi-list"
+            :severity="selectMode && localSelectionCount > 0 ? 'primary' : 'secondary'"
+            text
+            rounded
+            aria-label="Liste der ausgewählten Buchungen"
+            v-tooltip.bottom="'Ausgewählte Buchungen'"
+            :disabled="!selectMode || localSelectionCount === 0"
+            @click="openSelectionPopover"
+          />
+          <Button
+            icon="pi pi-check-square"
+            :severity="selectMode ? 'primary' : 'secondary'"
+            text
+            rounded
+            aria-label="Auswählen"
+            v-tooltip.bottom="selectMode ? 'Auswahl beenden' : 'Auswählen'"
+            @click="toggleSelectMode"
+          />
+        </div>
       </div>
-      </header>
-
-    <!--
-      Selection popover (anchored to the list-button). Mirrors the
-      mock: each selected transaction with a counterparty + purpose
-      preview and an X to deselect individually.
-    -->
-    <Popover ref="selectionPopover" class="tx-selection-popover">
-      <h3 class="tx-selection-title">Ausgewählte Buchungen:</h3>
-      <ul class="tx-selection-list">
-        <li
-          v-for="tx in localSelectedItems"
-          :key="tx.id"
-          class="tx-selection-row"
-        >
-          <div class="tx-selection-body">
-            <div class="tx-selection-name">
-              {{ tx.counterparty || '(ohne Gegenseite)' }}
-            </div>
-            <div v-if="tx.purpose" class="tx-selection-purpose">
-              {{ tx.purpose }}
-            </div>
-          </div>
-          <div class="tx-selection-x">
-            <Button
-              icon="pi pi-times-circle"
-              severity="secondary"
-              text
-              rounded
-              aria-label="Buchung aus Auswahl entfernen"
-              @click="toggleLocalSelection(tx)"
-            />
-          </div>
-        </li>
-      </ul>
-    </Popover>
 
       <section v-if="filterPanelOpen" class="tx-filter-panel" data-testid="finance-filter-subheader">
       <div class="tx-filter-fields">
@@ -1355,20 +1308,24 @@ function goBack() {
       </div>
       </section>
 
-    <!-- Tristate "select all" + batch actions, only in select mode. -->
+    </template>
+
+    <template #selection>
+      <!-- Tristate "select all" + running sum + batch actions, only in select mode. -->
       <div v-if="selectMode" class="tx-select-bar" data-testid="finance-selection-subheader">
-      <div class="tx-select-bar-left">
-        <Checkbox
-          :model-value="selectAllState === true"
-          :indeterminate="selectAllState === null"
-          :binary="true"
-          aria-label="Alle Buchungen auswählen"
-          @update:model-value="toggleSelectAll"
-        />
-        <span class="tx-select-count">
-          {{ localSelectionCount }} ausgewählt
-        </span>
-      </div>
+        <div class="tx-select-bar-left">
+          <Checkbox
+            :model-value="selectAllState === true"
+            :indeterminate="selectAllState === null"
+            :binary="true"
+            aria-label="Alle Buchungen auswählen"
+            @update:model-value="toggleSelectAll"
+          />
+          <span class="tx-select-count">
+            {{ localSelectionCount }} ausgewählt
+          </span>
+          <span v-if="localSelectionCount > 0" class="tx-summary-sum">Σ {{ formatSelectionSum() }}</span>
+        </div>
       <div class="tx-select-bar-actions">
         <Button
             icon="pi pi-tag"
@@ -1394,7 +1351,43 @@ function goBack() {
         />
       </div>
       </div>
-    </Teleport>
+    </template>
+
+    <!--
+      Selection popover (anchored to the list-button). Mirrors the
+      mock: each selected transaction with a counterparty + purpose
+      preview and an X to deselect individually.
+    -->
+    <Popover ref="selectionPopover" class="tx-selection-popover">
+      <h3 class="tx-selection-title">Ausgewählte Buchungen:</h3>
+      <ul class="tx-selection-list">
+        <li
+          v-for="tx in localSelectedItems"
+          :key="tx.id"
+          class="tx-selection-row"
+        >
+          <div class="tx-selection-body">
+            <div class="tx-selection-name">
+              {{ tx.counterparty || '(ohne Gegenseite)' }}
+            </div>
+            <div v-if="tx.purpose" class="tx-selection-purpose">
+              {{ tx.purpose }}
+            </div>
+          </div>
+          <div class="tx-selection-x">
+            <Button
+              icon="pi pi-times-circle"
+              severity="secondary"
+              text
+              rounded
+              aria-label="Buchung aus Auswahl entfernen"
+              @click="toggleLocalSelection(tx)"
+            />
+          </div>
+        </li>
+      </ul>
+    </Popover>
+
 
     <!-- ── Holdings table (depot accounts only) ─────────────────────── -->
     <section v-if="isDepot" class="holdings-section">
@@ -1838,54 +1831,41 @@ function goBack() {
       :transactions="localSelectedItems"
       @applied="refreshAfterTagChange"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem;
-}
-@media (max-width: 640px) {
-  .page {
-    padding: 0.5rem;
-  }
-}
+/* Page frame and title: PageLayout (issue #1272). What follows styles only
+   the content this view puts into its slots. */
 
-/* ── Header ─────────────────────────────────────────────────────────── */
-.tx-header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    'back title actions'
-    'back meta  actions';
+/* ── Toolbar (in the sticky stack) ───────────────────────────────────── */
+.tx-toolbar {
+  display: flex;
   align-items: center;
-  gap: 0.5rem 0.75rem;
-  background: var(--p-primary-color);
-  color: var(--p-primary-contrast-color);
-  padding: 0.6rem 0.75rem;
-  border-radius: 0.5rem;
+  gap: var(--space-2);
+  min-width: 0;
 }
-.tx-header :deep(.p-button) {
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid transparent;
-  color: var(--p-primary-contrast-color);
+.tx-toolbar-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
-.tx-header :deep(.p-button:hover) {
-  background: rgba(255, 255, 255, 0.3);
+.tx-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
 }
-.tx-header :deep(.p-button.tx-icon-active) {
-  background: var(--p-warn-color, #f97316);
-  color: #fff;
+.tx-summary-sum {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
-.tx-header :deep(.p-button.tx-icon-applied) {
-  background: var(--p-warn-color, #f97316);
-  color: #fff;
-}
-.tx-header :deep(.p-button:disabled) {
-  opacity: 0.55;
+.tx-summary-count {
+  color: var(--p-text-muted-color);
+  font-size: 0.8125rem;
 }
 
 /* ── Select-mode bar (tristate + batch actions) ───────────────────── */
@@ -2006,39 +1986,6 @@ function goBack() {
   min-width: 2.5rem;
   height: 2.5rem;
 }
-.tx-header > :first-child {
-  grid-area: back;
-}
-.tx-header-title {
-  grid-area: title;
-  min-width: 0;
-}
-.tx-header-title h1 {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tx-header-meta {
-  grid-area: meta;
-  display: flex;
-  flex-direction: column;
-  font-variant-numeric: tabular-nums;
-  font-size: 0.85rem;
-  opacity: 0.95;
-}
-.tx-header-balance {
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-.tx-header-actions {
-  grid-area: actions;
-  display: flex;
-  gap: 0.35rem;
-}
-
 /* ── Day groups + transaction cards ───────────────────────────────── */
 .tx-day {
   display: flex;

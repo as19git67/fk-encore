@@ -1,6 +1,28 @@
 # Web-UI vereinheitlichen: Seitenaufbau, Toolbar, Navigation, Selektion
 
-Status: **Konzept** · Issue: [#1272](https://github.com/as19git67/fk-encore/issues/1272) · Branch: `claude/web-app-ui-consistency-h0wd56`
+Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encore/issues/1272) · Branch: `claude/web-app-ui-consistency-h0wd56`
+
+## Umsetzungsstand
+
+- ✅ **Etappe 1 — Fundament** (#1276): Tokens in `style.css`,
+  `components/layout/PageLayout.vue` + `pageLayout.ts`, `ScrollX.vue`,
+  Overflow-Guard, `.scroll-anchor`, Untermenü als eigene Zeile in `App.vue`,
+  `--app-stack-height` per `ResizeObserver`, Breiten-Check im
+  Storybook-Test-Runner (`utils/overflowCheck.ts`), Pilot-Views
+  `DocumentsView` und `finance/AccountTransactionsView`, Stories
+  `Layout/PageLayout`, `Layout/ScrollX`, `Layout/AppShell`.
+- ⬜ Etappen 2 bis 6: siehe Sub-Issues #1277 bis #1281.
+
+Abweichungen vom Entwurf (Etappe 1):
+
+- Der Basket-Indicator sitzt bereits in `navbar-end` (Dokumente und
+  Finanzen); die gemeinsame Komponente kommt in Etappe 5.
+- Die Overflow-Prüfung misst nicht `scrollWidth` des Dokuments (mit
+  `overflow-x: clip` bliebe die Seite ohnehin unscrollbar), sondern sucht
+  Elemente, die ohne klippenden Vorfahren über den 360px-Viewport ragen.
+  Das findet abgeschnittene Inhalte, nicht nur scrollbare Seiten.
+- `PageLayout` rendert seinen Sticky-Teil inline, wenn `#module-subheaders`
+  fehlt (Storybook, Tests), statt einen Teleport-Fehler zu werfen.
 
 Dieses Dokument trifft die Entscheidungen, die das Issue offen lässt, damit
 jede Etappe reine Umsetzung ist. Was hier steht, ist verbindlich für alle

@@ -1073,6 +1073,32 @@ Damit der Screenshot-Lauf in Web-Sessions funktioniert, muss **`cdn.playwright.d
 
 Orientierungsabhängige Layouts (z. B. der Fullscreen-Split) können pro Story über den `testViewport`-Parameter (`.storybook/test-runner.ts`) eine feste Viewport-Größe erzwingen, damit Portrait/Landscape im Screenshot korrekt erscheinen.
 
+## Seitenskelett im Frontend (`PageLayout`)
+
+Jede View unter `frontend/src/views/` baut ihre Seite mit
+`components/layout/PageLayout.vue` (Issue #1272, Konzept in
+`.claude/plans/web-ui-vereinheitlichung.md`). Die View liefert `title` (wird
+einziger `<h1>` und `document.title` im Format `Seite · Modul · F4mil`),
+optional `hint`, `scroll="page|self"`, `width="normal|wide|full"` und
+`ready`, und füllt die Slots `actions`, `toolbar`, `notice`, `selection` und
+den Inhalt. `toolbar`, `notice` und `selection` hebt `PageLayout` in den
+einen Sticky-Stack der App (`#module-subheaders` in `App.vue`).
+
+Regeln:
+
+- Keine View definiert eigenes Header-/Toolbar-Layout, `position: sticky`
+  oder `top:`-Offsets. Die Stack-Höhe liefert `--app-stack-height`
+  (von `App.vue` gemessen); `--menubar-height` ist nur noch ein Alias für
+  noch nicht migrierte Views.
+- Die Seite scrollt nie horizontal (`overflow-x: clip` auf `body`). Breite
+  Inhalte (Tabellen, Streifen) gehören in `components/layout/ScrollX.vue`.
+- Abstände aus `--space-1` … `--space-6`, Seitenränder aus `--page-gutter`.
+- Der Storybook-Test-Runner prüft jede Story bei 360px Breite auf
+  Elemente, die ohne eigenen horizontalen Scroller über den Rand ragen
+  (`src/utils/overflowCheck.ts`). Eine Story einer noch nicht migrierten
+  View darf mit `parameters: { overflowCheck: false }` und Begründung
+  aussetzen.
+
 ## Date-only values in the frontend
 
 For date-only values (no time component), always use the helpers from `frontend/src/utils/dateFormat.ts`:
