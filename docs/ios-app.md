@@ -791,6 +791,13 @@ dokumentiert**:
 - **Alles Sichtbare geht über den Router** (2.11): ein Intent erzeugt einen
   `AppDeepLink` und sonst nichts, also landet „Zeige Album Urlaub" per Siri
   auf demselben Bildschirm wie ein Spotlight-Treffer oder ein Link.
+- **Wie Siri die App hört:** Der Anzeigename „F4mil Photos" hat eine Ziffer
+  mitten im Wort, und wie Siri das ausspricht, ist nicht vorhersagbar.
+  `CFBundleSpokenName` („Famil Photos") sagt es ihr, und
+  `INAlternativeAppNames` in der `Info.plist` lässt die Shortcuts zusätzlich
+  auf „Famil Photos", „Famil" und „Familienfotos" reagieren, jeweils mit
+  Aussprache-Hinweis. Ohne diese Schlüssel müsste man den Namen so sprechen,
+  wie Siri ihn sich gerade vorstellt.
 - **Nicht als App-Shortcut deklariert** sind die entity-nehmenden Intents:
   eine Shortcut-Phrase kann eine Entity nur als aufzählbaren Parameter tragen,
   Alben sind offen. Über die Kurzbefehle-App und Siris eigene Auflösung
