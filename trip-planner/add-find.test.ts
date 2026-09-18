@@ -283,3 +283,76 @@ describe("POST /trip-planner/plans/:planId/finds", () => {
     ).rejects.toThrow(/plan not found/);
   });
 });
+
+describe("a find with an extent (§4.7)", () => {
+  const ROUTE_END = { lat: WEST.lat + 0.07, lon: WEST.lon };
+
+  it("saves the route with its end, as its own category", async () => {
+    // The OSM entry at the start is a viewpoint. The route is not that
+    // viewpoint: it keeps its own reference and category rather than
+    // borrowing the viewpoint's twenty minutes and opening hours.
+    const plan = await twoLegPlan();
+    geo.setSearchSpots("nom_west", [spot(1, WEST, "Belvedere Beispiel")]);
+    const res = await addFind({
+      planId: plan.id,
+      ...WEST,
+      name: "Panoramaweg Beispiel",
+      dwellMinutes: 180,
+      end: ROUTE_END,
+      lengthM: 10_000,
+      ascentM: 600,
+    });
+
+    expect(res.matchedOsmRef).toBeNull();
+    expect(res.unknown).toEqual([]);
+    expect(res.entry.category).toBe("route");
+    expect(res.entry.unmatched).toBe(false);
+    expect(res.entry.dwellMinutes).toBe(180);
+    expect(res.entry.extent).toEqual({ end: ROUTE_END, lengthM: 10_000, ascentM: 600 });
+
+    const { plan: after } = await getTripPlan({ planId: plan.id });
+    const stored = poolOf(after, 0).find((c) => c.osmRef === res.entry.osmRef);
+    expect((stored as { extent?: unknown } | undefined)?.extent).toEqual({
+      end: ROUTE_END,
+      lengthM: 10_000,
+      ascentM: 600,
+    });
+  });
+
+  it("does not merge a route into the point it starts from", async () => {
+    // Same name, same spot on the map — but one is a place and the
+    // other is a way. Two entries, not one.
+    const plan = await twoLegPlan();
+    await addFind({ planId: plan.id, ...WEST, name: "Ponale Beispiel", dwellMinutes: 20 });
+    const res = await addFind({
+      planId: plan.id,
+      ...WEST,
+      name: "Ponale Beispiel",
+      dwellMinutes: 180,
+      end: ROUTE_END,
+    });
+    expect(res.merged).toBe(false);
+    const { plan: after } = await getTripPlan({ planId: plan.id });
+    expect(poolOf(after, 0)).toHaveLength(2);
+  });
+
+  it("asks for the route's duration rather than lending it a category's", async () => {
+    const plan = await twoLegPlan();
+    await expect(
+      addFind({ planId: plan.id, ...WEST, name: "Panoramaweg Beispiel", end: ROUTE_END }),
+    ).rejects.toThrow(/Dauer/);
+  });
+
+  it("refuses an end that makes it a transfer, not a route", async () => {
+    const plan = await twoLegPlan();
+    await expect(
+      addFind({
+        planId: plan.id,
+        ...WEST,
+        name: "Zu weit",
+        dwellMinutes: 180,
+        end: { lat: WEST.lat + 1.5, lon: WEST.lon },
+      }),
+    ).rejects.toThrow(/Transfer/);
+  });
+});

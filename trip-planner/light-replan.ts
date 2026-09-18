@@ -18,6 +18,7 @@
  *     wrong.
  */
 
+import { leaveFrom } from "./extent";
 import type { Coordinate } from "./travel";
 import { travelLeg, type TransportMode } from "./travel";
 import { lightWindows, type HorizonProfile } from "./sun";
@@ -83,7 +84,7 @@ export function orderBlocksForLight(
       budgetMinutes: block.budgetMinutes,
       travelMinutes: (from, to) => {
         const target = byRef.get(to)!;
-        const start = from === null ? context.at : byRef.get(from)!;
+        const start = from === null ? context.at : leaveFrom(byRef.get(from)!);
         return travelLeg(start, target, context.mode ?? "foot").minutes;
       },
     });
@@ -96,7 +97,7 @@ export function orderBlocksForLight(
     const stops: PlannedStop[] = result.stops.map((ordered) => {
       const stop = byRef.get(ordered.osmRef)!;
       const leg = travelLeg(position, stop, context.mode ?? "foot");
-      position = { lat: stop.lat, lon: stop.lon };
+      position = leaveFrom(stop);
       used += leg.minutes + stop.dwellMinutes;
       return { ...stop, travelFromPrevious: leg };
     });

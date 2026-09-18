@@ -16,6 +16,7 @@ import {
   tripPlanTravellers,
   users,
 } from "../db/schema";
+import { storedExtent } from "./extent";
 import type { PlannedStop } from "./solver";
 import { travelClassFor } from "./travel";
 
@@ -40,7 +41,20 @@ export interface StoredBranch {
   meetingMinutes: number;
   budgetMinutes: number;
   members: BranchMember[];
-  stops: Array<PlannedStop & { rowId: number }>;
+  stops: StoredBranchStop[];
+}
+
+/**
+ * A stop on a branch, with its row.
+ *
+ * An interface rather than `PlannedStop & { rowId }`: Encore's schema
+ * parser distributes an intersection over the fields of the interface,
+ * and stumbles on a field that is itself an interface or null
+ * (`extent`, §4.7) — it reads it as `SpotExtent & null` and refuses to
+ * build the app. `extends` says the same thing in a form it can read.
+ */
+export interface StoredBranchStop extends PlannedStop {
+  rowId: number;
 }
 
 export interface NewBranch {
@@ -118,6 +132,7 @@ export async function saveBranches(
         wikipedia_url: stop.wikipediaUrl ?? null,
         facade_azimuth: stop.facadeAzimuth ?? null,
         kind: stop.kind ?? null,
+        extent: stop.extent,
         origin: stop.origin ?? "search",
         reasons: stop.reasons ?? [],
       });
@@ -196,6 +211,7 @@ export async function loadBranches(
           wikipediaUrl: stop.wikipedia_url,
           facadeAzimuth: stop.facade_azimuth,
           kind: stop.kind,
+          extent: storedExtent(stop.extent),
           origin: stop.origin,
           lat: stop.lat,
           lon: stop.lon,

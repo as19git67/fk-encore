@@ -150,6 +150,7 @@ function stopFor(candidate: Candidate, dwellMinutes: number): PlannedStop {
     wikipediaUrl: candidate.wikipediaUrl ?? null,
     facadeAzimuth: candidate.facadeAzimuth ?? null,
     kind: candidate.kind ?? null,
+    extent: candidate.extent,
     photoStop: candidate.photoStop,
     origin: candidate.origin,
     reasons: candidate.reasons ?? [],

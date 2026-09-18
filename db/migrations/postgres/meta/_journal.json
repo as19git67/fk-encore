@@ -1436,6 +1436,13 @@
       "when": 1788652800024,
       "tag": "0204_travel_group_is_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 205,
+      "version": "7",
+      "when": 1788652800025,
+      "tag": "0205_trip_spot_extent",
+      "breakpoints": true
     }
   ]
 }

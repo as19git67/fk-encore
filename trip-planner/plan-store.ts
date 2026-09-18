@@ -30,6 +30,7 @@ import {
   tripSpotNotes,
   tripHiddenSpots,
 } from "../db/schema";
+import { storedExtent } from "./extent";
 import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
@@ -240,8 +241,17 @@ export interface CreateFixpointInput extends Fixpoint {
   lon?: number | null;
 }
 
-/** A block as it goes in, with the hour the frame gave it. */
-export type CreateBlockInput = PlannedBlock & { startMinutes?: number };
+/**
+ * A block as it goes in, with the hour the frame gave it.
+ *
+ * `extends` rather than `PlannedBlock & { startMinutes }` for the reason
+ * given at `StoredBranchStop` (branch-store.ts): the stops inside carry
+ * a field that is an interface or null, and Encore's parser cannot
+ * distribute an intersection over that.
+ */
+export interface CreateBlockInput extends PlannedBlock {
+  startMinutes?: number;
+}
 
 export interface CreateDayInput {
   blocks: readonly CreateBlockInput[];
@@ -367,6 +377,7 @@ export async function insertLeg(
         wikipedia_url: c.wikipediaUrl ?? null,
         facade_azimuth: c.facadeAzimuth ?? null,
         kind: c.kind ?? null,
+        extent: c.extent,
         lat: c.lat,
         lon: c.lon,
         category: c.category,
@@ -608,6 +619,7 @@ async function insertDays(
           wikipedia_url: stop.wikipediaUrl ?? null,
           facade_azimuth: stop.facadeAzimuth ?? null,
           kind: stop.kind ?? null,
+          extent: stop.extent,
           // Provenance travels with the spot (§9.2): the pool row that
           // knew it is deleted the moment it lands on a day.
           origin: stop.origin ?? "search",
@@ -815,6 +827,7 @@ export async function saveMovedDays(
           wikipedia_url: stop.wikipediaUrl ?? null,
           facade_azimuth: stop.facadeAzimuth ?? null,
           kind: stop.kind ?? null,
+          extent: stop.extent,
           // Provenance travels with the spot (§9.2): the pool row that
           // knew it is deleted the moment it lands on a day.
           origin: stop.origin ?? "search",
@@ -950,6 +963,7 @@ export async function loadPlan(
       wikipediaUrl: row.wikipedia_url,
       facadeAzimuth: row.facade_azimuth,
       kind: row.kind,
+      extent: storedExtent(row.extent),
       lat: row.lat,
       lon: row.lon,
       category: row.category,
@@ -1043,6 +1057,7 @@ export async function loadPlan(
       wikipediaUrl: row.wikipedia_url,
       facadeAzimuth: row.facade_azimuth,
       kind: row.kind,
+      extent: storedExtent(row.extent),
       lat: row.lat,
       lon: row.lon,
       category: row.category,
@@ -1159,6 +1174,7 @@ async function rewriteDay(
         wikipedia_url: stop.wikipediaUrl ?? null,
         facade_azimuth: stop.facadeAzimuth ?? null,
         kind: stop.kind ?? null,
+        extent: stop.extent,
         origin: stop.origin ?? "search",
         reasons: stop.reasons ?? [],
       });
@@ -1195,6 +1211,7 @@ async function rewriteDay(
           wikipedia_url: c.wikipediaUrl ?? null,
           facade_azimuth: c.facadeAzimuth ?? null,
           kind: c.kind ?? null,
+          extent: c.extent,
           lat: c.lat,
           lon: c.lon,
           category: c.category,
@@ -1267,6 +1284,7 @@ export async function replanPlan(
           wikipedia_url: c.wikipediaUrl ?? null,
           facade_azimuth: c.facadeAzimuth ?? null,
           kind: c.kind ?? null,
+          extent: c.extent,
           lat: c.lat,
           lon: c.lon,
           category: c.category,
@@ -1768,6 +1786,7 @@ export async function findInPool(
     wikipediaUrl: row.wikipedia_url,
     facadeAzimuth: row.facade_azimuth,
     kind: row.kind,
+    extent: storedExtent(row.extent),
     lat: row.lat,
     lon: row.lon,
     category: row.category,
