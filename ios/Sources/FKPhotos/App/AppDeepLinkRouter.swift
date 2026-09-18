@@ -85,7 +85,9 @@ public final class AppDeepLinkRouter {
         handle(url)
     }
 
-    static func resolve(_ urlString: String, serverURL: URL?) -> URL? {
+    /// Pure, hence `nonisolated`: the class is main-actor bound, and a test
+    /// wants to call this without an actor hop.
+    nonisolated static func resolve(_ urlString: String, serverURL: URL?) -> URL? {
         if urlString.hasPrefix("/") {
             guard let serverURL else { return nil }
             return URL(string: urlString, relativeTo: serverURL)?.absoluteURL
