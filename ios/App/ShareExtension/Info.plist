@@ -2,13 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Die App ist durchgehend deutsch, und ohne diese Angabe meldet
-	     das Bundle Englisch als einzige unterstützte Sprache. iOS wählt
-	     die Sprache der System-Oberflächen — Ausschneiden/Kopieren/
-	     Einfügen, Tastatur, Standardknöpfe, Foto-Picker, Share-Sheet —
-	     aus der Schnittmenge von Gerätesprache und den Sprachen der App:
-	     Bei "nur Englisch" bleibt dieses Menü englisch, auch auf einem
-	     deutschen iPhone, mitten in deutschen Texten. -->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>de</string>
 	<key>CFBundleDisplayName</key>
@@ -37,25 +30,13 @@
 			<dict>
 				<key>NSExtensionActivationSupportsImageWithMaxCount</key>
 				<integer>50</integer>
-				<!-- A shared link is the clearest way a find reaches the
-				     trip planner: a map pin, or an article about a city
-				     (docs/ios-urlaubsplanung.md §9.2, cases 1 and 2). -->
-				<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
-				<integer>1</integer>
-				<!-- Selected text, and anything a chat app shares as
-				     plain text rather than as a link. -->
 				<key>NSExtensionActivationSupportsText</key>
 				<true/>
-				<!-- Lets Safari run the preprocessing script below in the
-				     page that is already open, so its visible text comes
-				     across without the server having to fetch anything
-				     (§9.3 Stufe 1). -->
 				<key>NSExtensionActivationSupportsWebPageWithMaxCount</key>
 				<integer>1</integer>
+				<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
+				<integer>1</integer>
 			</dict>
-			<!-- Without the .js: the value is the file's base name, and
-			     the file itself is a resource of the F4milShare target
-			     (ios/F4milShare/TripSharePageReading.js). -->
 			<key>NSExtensionJavaScriptPreprocessingFile</key>
 			<string>TripSharePageReading</string>
 		</dict>
