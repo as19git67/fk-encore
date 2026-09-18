@@ -1455,7 +1455,11 @@ struct TripPlanDayView: View {
                     }
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(stop.displayName)
+                        // The readable name, with the one on the
+                        // building behind it: „Kolosseum (Colosseo)“
+                        // is what you plan with and what you ask for
+                        // at the door (§10.4).
+                        Text(TripSpotName.line(stop.displayName, local: stop.localName))
                             .strikethrough(stop.stopStatus == .skipped)
                         Text(TripClock.duration(stop.dwellMinutes))
                             .font(.caption)
