@@ -434,6 +434,51 @@ skips the push leg entirely.
 See `docs/push-notifications.md` for architecture, subscription
 lifecycle and troubleshooting.
 
+### iOS push notifications (optional)
+
+The iOS app receives the same feed notifications the browser does
+(comments, new photos in shared albums, shares) over Apple's push
+service once the server has an APNs key. Without it the app's switch
+under Einstellungen → Benachrichtigungen stays off with an explanation;
+Web Push is unaffected.
+
+1. In the Apple developer account (Certificates, Identifiers &
+   Profiles → Keys) create a key with **Apple Push Notifications
+   service (APNs)** enabled and download the `.p8` file. Note the
+   **Key ID** shown next to it and your **Team ID** (Membership page,
+   or `DEVELOPMENT_TEAM` in `ios/FKPhotos.xcodeproj/project.pbxproj`).
+   The `.p8` can be downloaded only once; keep it somewhere safe.
+
+2. Add the three values to `.env` next to `docker-compose.yml`. The
+   PEM goes on one line with `\n` for its line breaks:
+
+   ```env
+   APNS_KEY_ID=ABCDE12345
+   APNS_TEAM_ID=ABCDE12345
+   APNS_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIGT…\n-----END PRIVATE KEY-----\n
+   ```
+
+   If the app is built under a different bundle id, add
+   `APNS_BUNDLE_ID=<that id>` — it is the topic every notification is
+   sent under, and Apple rejects a token registered by another bundle.
+
+3. Restart the app:
+
+   ```bash
+   docker compose up -d --no-deps app
+   ```
+
+4. The iOS app needs the **Push Notifications** capability on its App
+   ID; the `aps-environment` entitlement is in
+   `ios/App/FKPhotos.entitlements`, and Xcode enables the capability on
+   the App ID with automatic signing. A build from Xcode registers a
+   sandbox token, TestFlight and App Store builds a production token;
+   the server keeps both apart, no configuration needed.
+
+Users then opt in per phone under **Einstellungen → Benachrichtigungen**.
+The per-kind preferences on that screen are the same the web profile
+edits. See `docs/push-notifications.md`, "iOS: APNs".
+
 ### iOS universal links (optional)
 
 A link to an album, a photo, a person or the feed
@@ -748,6 +793,8 @@ the photo UI responsive under sustained scan load.
 | `PHOTO_OCR_LONG_SIDE`            | `1600`  | Long edge a photo is scaled to before recognition. Detection cost grows with area; legibility of scene text does not. |
 | `PHOTO_OCR_MIN_CONFIDENCE`       | `0.5`   | Lines below this confidence are discarded — scene-text detection finds "text" in brickwork, and that noise costs search more than it adds. |
 | `PHOTO_OCR_TIMEOUT_MS`           | `120000` | Per-request timeout for a photo OCR call. The service serialises inference, so a call may wait behind a receipt. |
+| `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_PRIVATE_KEY` | _(empty)_ | APNs key for push to the iOS app (Key ID, Team ID, `.p8` contents). Empty = no iOS push; Web Push is unaffected. See [iOS push notifications](#ios-push-notifications-optional). |
+| `APNS_BUNDLE_ID`                 | `de.f4mil.photos` | Bundle id of the household's iOS build — the `apns-topic`. |
 | `APPLE_APP_IDS`                  | _(empty)_ | `TEAMID.bundle.id` of the household's iOS app build (comma-separated for several). Publishes `/.well-known/apple-app-site-association` so `/app/fotos/…` links open in the app. See [iOS universal links](#ios-universal-links-optional). |
 | `GEO_SERVICE_URL`                | `http://geo:8080` | Base URL the app uses to reach the geo service. Override only when running the app outside the compose stack. |
 | `GEO_SHARED_SECRET`              | _(empty)_ | Optional bearer token; if set, every geo HTTP call must present `Authorization: Bearer <secret>`. |

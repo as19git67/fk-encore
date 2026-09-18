@@ -10,6 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
 import { PageFetchError } from "./page-fetch";
@@ -21,7 +22,7 @@ afterEach(() => setRedirectResolver(null));
 beforeEach(async () => {
   const [user] = await db
     .insert(users)
-    .values({ email: `maplink-${Date.now()}@test.invalid`, name: "P", password_hash: "x" })
+    .values({ email: `maplink-${randomUUID()}@test.invalid`, name: "P", password_hash: "x" })
     .returning({ id: users.id });
   vi.mocked(getAuthData).mockReturnValue({
     userID: String(user.id),

@@ -18,6 +18,8 @@ struct AlbumsListView: View {
     @State private var syncLinkAlbum: Album?
     /// The phone's own albums, shown modally (#1115 §5).
     @State private var showLibraryBrowser = false
+    /// Deep-link pushes waiting at this root (#768 §5a).
+    @State private var router = AppDeepLinkRouter.shared
 
     private var filteredAlbums: [Album] {
         let filtered = viewModel.albums.filter { filterSort.appliedFilter.matches($0) }
@@ -233,12 +235,20 @@ struct AlbumsListView: View {
         .navigationDestination(for: PersonsRef.self) { _ in
             PersonsListView()
         }
-        // Registered here, not in `PersonsListView`: a deep link to a person
-        // (#768 §5a) pushes `[PersonsRef, PersonRef]` in one go, and the
-        // destination for the second value has to exist before the first
-        // screen has appeared.
+        // Registered at the stack root rather than in `PersonsListView`, so
+        // a person can be reached from more than one screen.
         .navigationDestination(for: PersonRef.self) { ref in
             PersonDetailView(personId: ref.id)
+        }
+        // Deep links (#768 §5a): an album or a person asked for from outside
+        // — a link, Spotlight, Siri — is pushed from here, over whatever the
+        // tab is showing. Item destinations, not a path binding on the
+        // stack; see `AppDeepLinkRouter`.
+        .navigationDestination(item: $router.albumToOpen) { target in
+            AlbumDetailView(albumId: target.id)
+        }
+        .navigationDestination(item: $router.personToOpen) { target in
+            PersonDetailView(personId: target.id)
         }
         .navigationDestination(for: GroupReviewRef.self) { _ in
             ReviewQueueView()

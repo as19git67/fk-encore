@@ -208,6 +208,65 @@ The worker calls `skipWaiting()` on install and `clients.claim()` on
 activate so a freshly installed SW starts delivering push events
 immediately without a full page reload.
 
+## iOS: APNs (#765)
+
+The iOS app has no browser and no service worker, so it cannot hold a
+Web Push subscription. It has the platform's own channel instead, and
+the server sends to both from the same place: `sendToUser` runs the
+Web Push leg over `push_subscriptions` and the APNs leg over
+`apns_device_tokens`, each skipped when its credentials are missing.
+Everything upstream of `sendToUser` — preferences, the per-recipient
+debounce, online-suppression, digests — is shared, so an iPhone gets
+the same notification the browser would, at the same moment.
+
+### Components
+
+| Component | Purpose |
+|-----------|---------|
+| `push/apns-jwt.ts` | The provider token: an ES256 JWT over the .p8 key, Key ID in the header, Team ID + `iat` in the claims. Cached 50 minutes (Apple's ceiling is 60 and it throttles providers that mint per request). |
+| `push/apns-payload.ts` | `PushPayload` → `aps` dictionary plus the custom `url` and `data` keys; `thread-id` and `apns-collapse-id` from the web's `tag`. Device-token normalisation and the "is this token dead?" rule. Pure; unit-tested. |
+| `push/apns-client.ts` | HTTP/2 to `api.push.apple.com` / `api.sandbox.push.apple.com` via `node:http2` (`fetch` has no HTTP/2). One session per gateway, reopened when Apple closes it. Retries once on `ExpiredProviderToken`. |
+| `push/apns.service.ts` | Token rows: upsert on register (a token follows the account that last registered it), scoped removal, pruning on `410` / `BadDeviceToken` / `DeviceTokenNotForTopic`. |
+| `push/push.ts` | `GET /push/apns/status`, `POST /push/apns/register`, `POST /push/apns/unregister`. |
+| `db/apns_device_tokens` | `user_id`, `token` (unique), `environment` (`production` \| `sandbox`), `device_name`, timestamps. |
+| iOS `RemotePushManager` | Asks for permission and a device token, uploads it on every launch while the switch is on, unregisters on switch-off and sign-out. |
+| iOS `PushSettingsView` | Einstellungen → Benachrichtigungen: the switch for this phone, the per-kind preferences (`/push/preferences`, shared with the web), the local review notice. |
+
+### The deep link
+
+A feed notification's `url` is the web-relative path
+(`/app/fotos/alben/12?photoId=34`). The iOS app resolves it against its
+configured server (`AppDeepLinkRouter.handle(urlString:)`) and routes it
+through `AppDeepLink` like any universal link, so a tap on the push
+lands where a tap on the same link in a message would. The server never
+needs to know its own origin.
+
+### Sandbox vs. production
+
+Apple runs two gateways and they do not accept each other's tokens. A
+build from Xcode carries the development `aps-environment` and its
+token is a sandbox token; TestFlight and App Store builds are
+production. The app reports which one it is (`#if DEBUG`), the row
+remembers it, and the sender picks the gateway per row. A token sent
+to the wrong gateway is answered `BadDeviceToken` and pruned, after
+which the app re-registers at its next launch.
+
+### Operator setup
+
+Three Encore secrets, mapped in `infra-config.json` like the VAPID ones:
+
+| Secret name | Env variable | Value |
+|-------------|--------------|-------|
+| `ApnsKeyId` | `APNS_KEY_ID` | 10-character Key ID of an APNs key |
+| `ApnsTeamId` | `APNS_TEAM_ID` | 10-character Apple Team ID |
+| `ApnsPrivateKey` | `APNS_PRIVATE_KEY` | Contents of the downloaded `.p8` (PEM); `\n` for line breaks in an env file is accepted |
+
+Plus `APNS_BUNDLE_ID` (default `de.f4mil.photos`), the `apns-topic`,
+which must be the bundle id of the build installed on the phones. See
+`DEPLOYMENT.md`, "iOS push notifications". Without the three secrets
+`/push/apns/status` answers `enabled: false`, the app's switch is
+disabled with an explanation, and the APNs leg is a no-op.
+
 ## Testing
 
 - Unit tests mock `~encore/clients` in `vitest.setup.ts`, so

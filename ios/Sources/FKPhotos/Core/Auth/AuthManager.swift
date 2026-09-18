@@ -125,6 +125,9 @@ public final class AuthManager: @unchecked Sendable {
 
     @MainActor
     func logout() async {
+        // The server must stop pushing to this phone before the session that
+        // could tell it so is gone (#765).
+        await RemotePushManager.shared.handleSignOut()
         // Try server-side logout, but don't block on failure
         let body = LogoutRequest(refreshToken: refreshToken)
         try? await APIClient.shared.post("/auth/logout", body: body) as SuccessResponse

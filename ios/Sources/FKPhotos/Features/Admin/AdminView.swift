@@ -2,12 +2,6 @@ import SwiftUI
 
 struct AdminView: View {
     @Environment(AuthManager.self) private var authManager
-    /// Whether new similar-photo groups are announced (#968, proposal 5).
-    /// Backed by `UserDefaults` directly rather than by a view model, the same
-    /// way `AlbumPinPreferences` and the trip preferences are — a one-value
-    /// setting a view model would only forward.
-    @State private var reviewNotificationsEnabled = ReviewQueueNotificationPreferences.isEnabled
-
     var body: some View {
         List {
             // Profile section
@@ -77,11 +71,12 @@ struct AdminView: View {
                     Label("Suche auf dem iPhone", systemImage: "magnifyingglass.circle")
                 }
 
-                Toggle(isOn: $reviewNotificationsEnabled) {
-                    Label("Hinweis auf neue Gruppen", systemImage: "checklist")
-                }
-                .onChange(of: reviewNotificationsEnabled) { _, enabled in
-                    ReviewQueueNotificationPreferences.isEnabled = enabled
+                // Push (#765) and the local review notice (#968) share one
+                // screen: both answer "when does this app speak up?".
+                NavigationLink {
+                    PushSettingsView()
+                } label: {
+                    Label("Benachrichtigungen", systemImage: "bell.badge")
                 }
             }
 

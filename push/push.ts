@@ -7,6 +7,9 @@
  *   POST /push/unsubscribe        → remove a browser subscription.
  *   GET  /push/preferences        → get per-type notification preferences.
  *   PUT  /push/preferences        → update per-type notification preferences.
+ *   GET  /push/apns/status        → whether APNs is configured (iOS, #765).
+ *   POST /push/apns/register      → register an iOS device token.
+ *   POST /push/apns/unregister    → remove an iOS device token.
  *
  * Internal endpoints (expose: false) invoked via ~encore/clients:
  *   fanoutFeed                    → send a feed notification to a user.
@@ -16,6 +19,7 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import * as svc from "./push.service";
+import * as apns from "./apns.service";
 import { scheduleFeedPush } from "./feed-push-debounce";
 import type { FeedItemKind } from "../feed/feed.service";
 
@@ -118,6 +122,67 @@ export const removeAllSubscriptions = api(
   async (): Promise<{ removed: number }> => {
     const userId = requireUserId();
     return await svc.removeAllSubscriptionsForUser(userId);
+  },
+);
+
+// ---------- APNs (iOS) ----------
+
+interface ApnsStatusResponse {
+  enabled: boolean;
+}
+
+/** Whether the server can reach Apple — the app shows its toggle only then. */
+export const apnsStatus = api(
+  { expose: true, method: "GET", path: "/push/apns/status", auth: true },
+  async (): Promise<ApnsStatusResponse> => {
+    requireUserId();
+    return { enabled: apns.apnsEnabled() };
+  },
+);
+
+interface RegisterDeviceRequest {
+  /** Hex device token as iOS hands it to the app. */
+  token: string;
+  /** "production" (App Store / TestFlight) or "sandbox" (Xcode build). */
+  environment?: "production" | "sandbox";
+  deviceName?: string;
+}
+
+interface RegisterDeviceResponse {
+  id: number;
+}
+
+/**
+ * Register (or refresh) an iOS device. Idempotent per token: the app calls
+ * this on every launch, since the token can change after a restore.
+ */
+export const registerDevice = api(
+  { expose: true, method: "POST", path: "/push/apns/register", auth: true },
+  async (req: RegisterDeviceRequest): Promise<RegisterDeviceResponse> => {
+    const userId = requireUserId();
+    if (!apns.apnsEnabled()) {
+      throw APIError.failedPrecondition("APNs is not configured on this server");
+    }
+    const saved = await apns.saveDeviceToken(userId, {
+      token: req.token,
+      environment: req.environment,
+      deviceName: req.deviceName ?? null,
+    });
+    if (!saved) throw APIError.invalidArgument("not a device token");
+    return saved;
+  },
+);
+
+interface UnregisterDeviceRequest {
+  token: string;
+}
+
+/** The app turned push off, or signed out: stop sending to this device. */
+export const unregisterDevice = api(
+  { expose: true, method: "POST", path: "/push/apns/unregister", auth: true },
+  async (req: UnregisterDeviceRequest): Promise<{ removed: number }> => {
+    const userId = requireUserId();
+    return await apns.removeDeviceToken(userId, req.token);
   },
 );
 
