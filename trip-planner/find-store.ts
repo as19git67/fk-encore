@@ -30,7 +30,7 @@ export interface StoredPoolEntry {
   /** True when no OSM entry could be matched (§9.2, rule 5). */
   unmatched: boolean;
   /** Where it finishes, when that is not where it begins (§4.7). */
-  extent: SpotExtent | null;
+  extent?: SpotExtent;
 }
 
 export interface AddPoolEntryInput {
@@ -49,7 +49,7 @@ export interface AddPoolEntryInput {
   addedBy: number;
   unmatched: boolean;
   /** See `StoredPoolEntry.extent`. Omitted for the ordinary point. */
-  extent?: SpotExtent | null;
+  extent?: SpotExtent;
 }
 
 export async function addPoolEntry(
@@ -73,7 +73,7 @@ export async function addPoolEntry(
       source_url: input.sourceUrl,
       added_by: input.addedBy,
       unmatched: input.unmatched,
-      extent: input.extent ?? null,
+      extent: input.extent,
     })
     .returning();
   return toStoredPoolEntry(row);

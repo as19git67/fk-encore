@@ -66,9 +66,16 @@ export interface Candidate extends Coordinate {
   /**
    * Where the spot finishes, when that is not where it starts (§4.7):
    * a route along a lake, a way up a hill. The next leg sets off from
-   * its end. Absent or null for the ordinary point.
+   * its end. Absent for the ordinary point.
+   *
+   * Optional, never `| null`: Encore's schema parser intersects the
+   * element types when an interface narrows an inherited array field
+   * (`StoredBlock extends CurrentBlock { stops: StoredStop[] }`), and
+   * `(SpotExtent | null) & (SpotExtent | null)` distributes into a
+   * `SpotExtent & null` it cannot resolve. A plain optional interface
+   * intersects with itself cleanly.
    */
-  extent?: SpotExtent | null;
+  extent?: SpotExtent;
   /** Category id from the geo search, e.g. "museum". */
   category: string;
   /** How long one typically stays, in minutes. */
@@ -97,7 +104,7 @@ export interface PlannedStop {
    * knew them is deleted when the spot lands on a day (§8.3).
    */
   /** See `Candidate.extent`. */
-  extent?: SpotExtent | null;
+  extent?: SpotExtent;
   reasons?: string[];
   lat: number;
   lon: number;
@@ -290,7 +297,7 @@ function fillBlock(args: FillArgs): PlannedBlock {
         kind: candidate.kind ?? null,
         lat: candidate.lat,
         lon: candidate.lon,
-        extent: candidate.extent ?? null,
+        extent: candidate.extent,
         category: candidate.category,
         dwellMinutes: candidate.dwellMinutes,
         score: candidate.score,

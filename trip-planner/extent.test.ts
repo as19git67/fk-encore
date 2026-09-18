@@ -66,12 +66,12 @@ describe("extentOf", () => {
 });
 
 describe("storedExtent", () => {
-  it("reads back what was written, and a point for anything else", () => {
+  it("reads back what was written, and nothing for anything else", () => {
     const end = north(8_000);
     expect(storedExtent({ end, lengthM: 10_000 })).toEqual({ end, lengthM: 10_000 });
-    expect(storedExtent(null)).toBeNull();
-    expect(storedExtent(undefined)).toBeNull();
-    expect(storedExtent({})).toBeNull();
-    expect(storedExtent({ end: { lat: "x" } })).toBeNull();
+    expect(storedExtent(null)).toBeUndefined();
+    expect(storedExtent(undefined)).toBeUndefined();
+    expect(storedExtent({})).toBeUndefined();
+    expect(storedExtent({ end: { lat: "x" } })).toBeUndefined();
   });
 });

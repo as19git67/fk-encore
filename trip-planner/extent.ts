@@ -109,14 +109,14 @@ export function extentOf(start: Coordinate, input: ExtentInput | undefined): Spo
 
 /**
  * An extent as it comes back out of a JSON column: whatever was
- * stored, or null. Written by `extentOf`, so it is not re-validated —
+ * stored, or undefined. Written by `extentOf`, so it is not re-validated —
  * only shaped, so a row from before the column existed reads as a
  * point.
  */
-export function storedExtent(value: unknown): SpotExtent | null {
-  if (!value || typeof value !== "object") return null;
+export function storedExtent(value: unknown): SpotExtent | undefined {
+  if (!value || typeof value !== "object") return undefined;
   const raw = value as Partial<SpotExtent>;
-  if (!raw.end || !isCoordinate(raw.end)) return null;
+  if (!raw.end || !isCoordinate(raw.end)) return undefined;
   const extent: SpotExtent = { end: { lat: raw.end.lat, lon: raw.end.lon } };
   if (typeof raw.lengthM === "number") extent.lengthM = raw.lengthM;
   if (typeof raw.ascentM === "number") extent.ascentM = raw.ascentM;

@@ -132,7 +132,7 @@ export async function saveBranches(
         wikipedia_url: stop.wikipediaUrl ?? null,
         facade_azimuth: stop.facadeAzimuth ?? null,
         kind: stop.kind ?? null,
-        extent: stop.extent ?? null,
+        extent: stop.extent,
         origin: stop.origin ?? "search",
         reasons: stop.reasons ?? [],
       });

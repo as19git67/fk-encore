@@ -181,7 +181,7 @@ export const addFind = api(
       // A route has no OSM entry to match and nothing guessed for it
       // either: its category and duration are stated, not inferred.
       unmatched: match === null && !extent,
-      extent,
+      extent: extent ?? undefined,
     });
 
     return {

@@ -97,7 +97,7 @@ export const placeFromPool = api(
           wikipediaUrl: candidate.wikipediaUrl ?? null,
           facadeAzimuth: candidate.facadeAzimuth ?? null,
           kind: candidate.kind ?? null,
-          extent: candidate.extent ?? null,
+          extent: candidate.extent,
           lat: candidate.lat,
           lon: candidate.lon,
           category: candidate.category,
