@@ -35,3 +35,16 @@ export const FULLSCREEN_TOOLBAR_SELECTOR = '.fs-topbar, .fs-actions-bar'
 export function isFullscreenToolbarTarget(el: EventTarget | null): boolean {
   return el instanceof Element && el.closest(FULLSCREEN_TOOLBAR_SELECTOR) !== null
 }
+
+/**
+ * True while the user has a non-empty text selection on the page — e.g. a
+ * word double-tapped in the photo's text layer (#1029), or a selection whose
+ * handles are being dragged. On touch devices the handle drag itself arrives
+ * as ordinary touch events on whatever element sits under the finger, so the
+ * photo's swipe / tap handling must consult this instead of the event target
+ * to leave the gesture to the browser.
+ */
+export function hasActiveTextSelection(doc: Document = document): boolean {
+  const sel = doc.getSelection?.()
+  return !!sel && !sel.isCollapsed && sel.rangeCount > 0
+}
