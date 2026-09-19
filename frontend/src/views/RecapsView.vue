@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import RecapPlayer from '../components/RecapPlayer.vue'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   listRecaps,
   getRecap,
@@ -520,9 +521,8 @@ async function playFromCard(r: RecapSummary, e: Event) {
 </script>
 
 <template>
-  <div class="recaps-view">
-    <header class="recaps-header">
-      <h1>Rückblicke</h1>
+  <PageLayout title="Rückblicke" width="full" :ready="!loading">
+    <template #actions>
       <Button
         icon="pi pi-refresh"
         label="Aktualisieren"
@@ -530,9 +530,11 @@ async function playFromCard(r: RecapSummary, e: Event) {
         :loading="rebuilding"
         @click="handleRebuild"
       />
-    </header>
+    </template>
 
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    </template>
 
     <div v-if="loading" class="recaps-empty">Lade Rückblicke …</div>
 
@@ -680,28 +682,11 @@ async function playFromCard(r: RecapSummary, e: Event) {
       @change-music="changePlayerMusic"
       @exclude-photo="handlePlayerExclude"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.recaps-view {
-  padding: 1.5rem;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.recaps-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1.25rem;
-}
-
-.recaps-header h1 {
-  margin: 0;
-  font-size: 1.75rem;
-}
-
+/* Page frame and title: PageLayout (issue #1272). */
 .recaps-empty {
   padding: 3rem 1rem;
   text-align: center;

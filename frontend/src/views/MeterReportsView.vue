@@ -55,6 +55,8 @@ import MeterEquipmentPanel from '../components/MeterEquipmentPanel.vue'
 import MeterSeasonProfilePanel from '../components/MeterSeasonProfilePanel.vue'
 import MeterHeatingWeatherPanel from '../components/MeterHeatingWeatherPanel.vue'
 import MeterAdvancePaymentsPanel from '../components/MeterAdvancePaymentsPanel.vue'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
@@ -798,28 +800,27 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="meters-view">
-    <div class="header">
-      <h1>Auswertungen</h1>
-      <div class="header-actions">
-        <Button
-          label="Zähler"
-          icon="pi pi-gauge"
-          severity="secondary"
-          text
-          @click="router.push({ name: 'zaehler-list' })"
-        />
-        <Button
-          v-if="canManage"
-          label="Tarife & Annahmen"
-          icon="pi pi-euro"
-          severity="secondary"
-          @click="openTariffs"
-        />
-      </div>
-    </div>
+  <PageLayout title="Auswertungen" width="normal" :ready="!loading">
+    <template #actions>
+      <Button
+        label="Zähler"
+        icon="pi pi-gauge"
+        severity="secondary"
+        text
+        @click="router.push({ name: 'zaehler-list' })"
+      />
+      <Button
+        v-if="canManage"
+        label="Tarife & Annahmen"
+        icon="pi pi-euro"
+        severity="secondary"
+        @click="openTariffs"
+      />
+    </template>
 
-    <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
+    </template>
 
     <div v-if="loading" class="info"><i class="pi pi-spin pi-spinner" /> Auswertungen werden geladen…</div>
     <div v-else-if="meters.length === 0" class="info">
@@ -960,7 +961,7 @@ onMounted(load)
             </div>
           </div>
 
-          <div class="energy-table-wrap">
+          <ScrollX class="energy-table-wrap">
             <table class="energy-table">
               <thead>
                 <tr>
@@ -1020,7 +1021,7 @@ onMounted(load)
                 </tr>
               </tbody>
             </table>
-          </div>
+          </ScrollX>
         </template>
         <div v-else class="info info-compact">
           Noch keine vollständigen PV-Zeiträume mit Bezug, Einspeisung und Produktion vorhanden.
@@ -1266,29 +1267,11 @@ onMounted(load)
         </div>
       </div>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.meters-view {
-  padding: 1rem;
-  max-width: 1100px;
-  margin: 0 auto;
-}
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1rem;
-}
-.header h1 {
-  margin: 0;
-}
-.header-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 .info {
   padding: 2rem;
   text-align: center;
@@ -1374,7 +1357,6 @@ onMounted(load)
 }
 .energy-table-wrap {
   max-width: 100%;
-  overflow-x: auto;
 }
 .energy-table {
   width: 100%;

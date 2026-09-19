@@ -11,6 +11,7 @@ import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   listMeters,
   createMeter,
@@ -304,43 +305,42 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="meters-view">
-    <div class="header">
-      <h1>Zähler</h1>
-      <div class="header-actions">
-        <Button
-          v-if="showElecImport"
-          label="Strom-Historie importieren"
-          icon="pi pi-upload"
-          severity="secondary"
-          :loading="importingElec"
-          @click="handleImportElec"
-        />
-        <Button
-          v-if="showWaterImport"
-          label="Wasser-Historie importieren"
-          icon="pi pi-upload"
-          severity="secondary"
-          :loading="importingWater"
-          @click="handleImportWater"
-        />
-        <Button
-          label="Auswertungen"
-          icon="pi pi-chart-line"
-          severity="secondary"
-          @click="router.push({ name: 'zaehler-auswertungen' })"
-        />
-        <Button
-          v-if="canManage"
-          label="Neuer Zähler"
-          icon="pi pi-plus"
-          @click="openCreate"
-        />
-      </div>
-    </div>
+  <PageLayout title="Zähler" width="normal" :ready="!loading">
+    <template #actions>
+      <Button
+        v-if="showElecImport"
+        label="Strom-Historie importieren"
+        icon="pi pi-upload"
+        severity="secondary"
+        :loading="importingElec"
+        @click="handleImportElec"
+      />
+      <Button
+        v-if="showWaterImport"
+        label="Wasser-Historie importieren"
+        icon="pi pi-upload"
+        severity="secondary"
+        :loading="importingWater"
+        @click="handleImportWater"
+      />
+      <Button
+        label="Auswertungen"
+        icon="pi pi-chart-line"
+        severity="secondary"
+        @click="router.push({ name: 'zaehler-auswertungen' })"
+      />
+      <Button
+        v-if="canManage"
+        label="Neuer Zähler"
+        icon="pi pi-plus"
+        @click="openCreate"
+      />
+    </template>
 
-    <Message v-if="importMsg" severity="success" @close="importMsg = ''" closable>{{ importMsg }}</Message>
-    <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
+    <template #notice>
+      <Message v-if="importMsg" severity="success" @close="importMsg = ''" closable>{{ importMsg }}</Message>
+      <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
+    </template>
 
     <div v-if="loading" class="info"><i class="pi pi-spin pi-spinner" /> Zähler werden geladen…</div>
     <div v-else-if="meters.length === 0" class="info">Noch keine Zähler angelegt.</div>
@@ -432,29 +432,11 @@ onMounted(load)
         <Button label="Speichern" icon="pi pi-check" :loading="saving" @click="handleSave" />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.meters-view {
-  padding: 1rem;
-  max-width: 1100px;
-  margin: 0 auto;
-}
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1rem;
-}
-.header h1 {
-  margin: 0;
-}
-.header-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 .info {
   padding: 2rem;
   text-align: center;

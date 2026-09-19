@@ -6,6 +6,8 @@ import Column from 'primevue/column'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
+import PageLayout from '../../components/layout/PageLayout.vue'
+import ScrollX from '../../components/layout/ScrollX.vue'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
 import type { Bankcontact, SyncSlot } from '../../api/finance'
 import TanDialog from '../../components/finance/TanDialog.vue'
@@ -183,32 +185,31 @@ function openDetail(id: number) {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Bankkontakte</h1>
-      <div class="header-actions">
-        <Button
-          icon="pi pi-question-circle"
-          severity="secondary"
-          text
-          aria-label="Hilfe"
-          v-tooltip.bottom="'Hilfe / Wie funktioniert das?'"
-          @click="router.push({ name: 'finance-bankcontacts-help' })"
-        />
-        <Button
-          label="Neu anlegen"
-          icon="pi pi-plus"
-          @click="router.push({ name: 'finance-bankcontact-new' })"
-        />
-      </div>
-    </header>
+  <PageLayout title="Bankkontakte" width="wide" :ready="!store.loading">
+    <template #actions>
+      <Button
+        icon="pi pi-question-circle"
+        severity="secondary"
+        text
+        aria-label="Hilfe"
+        v-tooltip.bottom="'Hilfe / Wie funktioniert das?'"
+        @click="router.push({ name: 'finance-bankcontacts-help' })"
+      />
+      <Button
+        label="Neu anlegen"
+        icon="pi pi-plus"
+        @click="router.push({ name: 'finance-bankcontact-new' })"
+      />
+    </template>
 
-    <Message v-if="store.error" severity="error" :closable="false">
-      {{ store.error }}
-    </Message>
-    <Message v-if="syncError" severity="error" :closable="true" @close="syncError = null">
-      {{ syncError }}
-    </Message>
+    <template #notice>
+      <Message v-if="store.error" severity="error" :closable="false">
+        {{ store.error }}
+      </Message>
+      <Message v-if="syncError" severity="error" :closable="true" @close="syncError = null">
+        {{ syncError }}
+      </Message>
+    </template>
 
     <section v-if="store.items.length > 0" class="overview">
       <button
@@ -235,6 +236,7 @@ function openDetail(id: number) {
       </div>
     </section>
 
+    <ScrollX>
     <DataTable
       :value="store.items"
       :loading="store.loading"
@@ -274,39 +276,16 @@ function openDetail(id: number) {
         </template>
       </Column>
     </DataTable>
+    </ScrollX>
 
     <TanDialog />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.5rem;
-}
-/* Mobile: tighter padding so the list reaches the viewport edges. */
-@media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
-    gap: 0.75rem;
-  }
-}
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.page-header h1 {
-  margin: 0;
-}
-.header-actions {
-  display: flex;
-  gap: 0.25rem;
-  align-items: center;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 .overview {
+  margin-bottom: 1rem;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
   gap: 0.75rem;

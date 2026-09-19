@@ -19,14 +19,14 @@ const meta: Meta<typeof DocumentDetailView> = {
   component: DocumentDetailView,
   decorators: [
     (story) => ({
-      components: { Story: story() },
       setup() {
+        const StoryComponent = story()
         const router = useRouter()
         const target = '/dokumente/1'
         if (router.currentRoute.value.fullPath !== target) {
           router.push(target).catch(() => {})
         }
-        return () => h('Story')
+        return () => h(StoryComponent)
       },
     }),
   ],
@@ -111,13 +111,13 @@ export const NurLesend: Story = {
   name: 'Nur lesender Betrachter',
   decorators: [
     (story) => ({
-      components: { Story: story() },
       setup() {
+        const StoryComponent = story()
         const auth = useAuthStore()
         onMounted(() => {
           auth.user = { ...MOCK_USER, permissions: ['documents.view'] }
         })
-        return () => h('Story')
+        return () => h(StoryComponent)
       },
     }),
   ],

@@ -11,13 +11,13 @@ const meta: Meta<typeof AlbumDetailView> = {
   component: AlbumDetailView,
   decorators: [
     (story) => ({
-      components: { Story: story() },
       setup() {
+        const StoryComponent = story()
         const router = useRouter()
         if (router.currentRoute.value.path !== '/fotos/alben/1') {
           router.push('/fotos/alben/1').catch(() => {})
         }
-        return () => h('Story')
+        return () => h(StoryComponent)
       },
     }),
   ],
