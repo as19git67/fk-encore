@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>F4mil Photos</title>
-<meta name="description" content="F4mil Photos – die iOS-App für die eigene, selbst gehostete Foto-, Dokumenten- und Finanzverwaltung der Familie.">
+<meta name="description" content="F4mil Photos – die iOS-App für die eigene, selbst gehostete Fotoverwaltung der Familie. Ohne eigenen fk-encore-Server ist die App funktionslos.">
 <style>
   :root {
     --bg-dark: #0c2f33;
@@ -35,12 +35,62 @@
     background-attachment: fixed;
     min-height: 100vh;
     line-height: 1.55;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Faceted corner shapes echoing the app icon's angular background planes */
+  .facets {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .facets span {
+    position: absolute;
+    display: block;
+  }
+
+  .facets .f1 {
+    top: -12%;
+    right: -14%;
+    width: 55vw;
+    height: 55vw;
+    max-width: 620px;
+    max-height: 620px;
+    clip-path: polygon(0 0, 100% 0, 100% 60%, 40% 100%, 0 40%);
+    background: linear-gradient(135deg, rgba(122, 167, 201, 0.16), rgba(43, 36, 64, 0.10));
+  }
+
+  .facets .f2 {
+    bottom: -18%;
+    left: -16%;
+    width: 60vw;
+    height: 60vw;
+    max-width: 680px;
+    max-height: 680px;
+    clip-path: polygon(0 30%, 45% 0, 100% 0, 100% 100%, 0 100%);
+    background: linear-gradient(150deg, rgba(111, 216, 198, 0.14), transparent 70%);
+  }
+
+  .facets .f3 {
+    bottom: -10%;
+    right: -10%;
+    width: 40vw;
+    height: 40vw;
+    max-width: 420px;
+    max-height: 420px;
+    clip-path: polygon(100% 100%, 0 100%, 60% 30%, 100% 0);
+    background: linear-gradient(200deg, rgba(242, 168, 62, 0.14), transparent 70%);
   }
 
   .wrap {
     max-width: 760px;
     margin: 0 auto;
     padding: 56px 20px 80px;
+    position: relative;
   }
 
   header.hero {
@@ -53,14 +103,16 @@
     height: 108px;
     border-radius: 26px;
     margin: 0 auto 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(150deg, #0d3b3e 0%, #163a55 60%, #2b2440 100%);
+    overflow: hidden;
     box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255,255,255,0.06);
   }
 
-  .icon svg { display: block; }
+  .icon img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
 
   h1 {
     font-size: 2.1rem;
@@ -153,48 +205,55 @@
 </style>
 </head>
 <body>
+  <div class="facets" aria-hidden="true">
+    <span class="f1"></span>
+    <span class="f2"></span>
+    <span class="f3"></span>
+  </div>
   <div class="wrap">
     <header class="hero">
-      <div class="icon" aria-hidden="true">
-        <svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M18 8h20c5 0 9 3.6 9 9s-4 9-9 9H28v22c0 5-4 8-9 8s-9-3-9-8V16c0-4.4 3.6-8 8-8z" fill="#f5f1e6"/>
-          <rect x="30" y="12" width="14" height="10" rx="5" fill="#f2a83e"/>
-          <circle cx="32" cy="30" r="6" fill="#6fd8c6"/>
-          <circle cx="27" cy="30" r="4.2" fill="#1c3a40"/>
-          <circle cx="27" cy="30" r="1.8" fill="#f5f1e6"/>
-        </svg>
+      <div class="icon">
+        <img
+          src="assets/app-icon.png"
+          srcset="assets/app-icon.png 256w, assets/app-icon@2x.png 512w"
+          sizes="108px"
+          width="256"
+          height="256"
+          alt="App-Icon von F4mil Photos"
+        >
       </div>
       <h1>F4mil Photos</h1>
-      <p class="tagline">Die iOS-App für das eigene, selbst gehostete Familienarchiv.</p>
+      <p class="tagline">Die iOS-App für die eigene, selbst gehostete Fotosammlung der Familie.</p>
     </header>
+
+    <section class="warning">
+      <h2>Voraussetzung: ein eigener fk-encore-Server</h2>
+      <p>
+        <strong>F4mil Photos ist ohne einen eigenen, selbst gehosteten fk-encore-Server komplett
+        wertlos.</strong> Die App ist ausschließlich der Client für dieses Backend, das jede
+        Familie selbst betreiben muss – es gibt keine Cloud, keinen zentralen Anbieter und keine
+        Registrierung bei uns. Ohne eine erreichbare eigene Server-Installation lässt sich in der
+        App weder ein Konto anlegen noch ein einziges Foto hochladen, ansehen oder verwalten.
+      </p>
+      <p>
+        Wer die App installiert, ohne Zugriff auf einen eigenen fk-encore-Server zu haben, kann sie
+        <strong>nicht sinnvoll nutzen</strong>. Sämtliche Verarbeitung – inklusive aller
+        KI-Funktionen wie Gesichtserkennung und Bildsuche – läuft ausschließlich auf diesem
+        eigenen Server, niemals in der App selbst und niemals bei einem Drittanbieter.
+      </p>
+    </section>
 
     <section>
       <h2>Was die App kann</h2>
       <ul class="features">
-        <li><span class="dot"></span> Fotos automatisch hochladen und in Alben organisieren – gemeinsam mit der ganzen Familie kuratiert.</li>
-        <li><span class="dot"></span> Gesichter, Orte und Motive werden per KI erkannt, damit sich Bilder in natürlicher Sprache durchsuchen lassen.</li>
-        <li><span class="dot"></span> Dokumente per Foto oder Upload erfassen, automatisch klassifizieren und nach Steuerrelevanz sortieren.</li>
-        <li><span class="dot"></span> Konten und Buchungen im Blick behalten, mit KI-gestützten Vorschlägen zur Kategorisierung.</li>
-        <li><span class="dot"></span> Rückblicke, Duplikaterkennung und Qualitätsbewertung sorgen dafür, dass die Sammlung übersichtlich bleibt.</li>
+        <li><span class="dot"></span> Fotos und Videos aus der Kamerarolle automatisch im Hintergrund auf den eigenen Server sichern, inklusive Zwei-Wege-Sync.</li>
+        <li><span class="dot"></span> Fototimeline nach Jahren und Monaten sowie Alben, die gemeinsam mit der Familie kuratiert werden.</li>
+        <li><span class="dot"></span> Gesichter und Personen werden erkannt, damit sich Bilder in natürlicher Sprache durchsuchen lassen.</li>
+        <li><span class="dot"></span> Automatisch erstellte Rückblicke sowie ein Trip-Modus mit Karte für Reisen.</li>
+        <li><span class="dot"></span> Kommentare und Reaktionen auf Fotos innerhalb der Familie, gemeinsame Kuratierung im Gruppen-Review.</li>
         <li><span class="dot"></span> Teilen einzelner Alben per Link, wenn gewünscht – ansonsten bleibt alles privat.</li>
+        <li><span class="dot"></span> Anmeldung per Passkey oder Passwort, Teilen aus anderen Apps über eine Share-Extension.</li>
       </ul>
-    </section>
-
-    <section class="warning">
-      <h2>Wichtiger Hinweis</h2>
-      <p>
-        <strong>F4mil Photos ist ohne den eigenen Server komplett wertlos.</strong>
-        Die App ist lediglich die Oberfläche für ein selbst gehostetes Backend, das jede Familie
-        selbst betreiben muss. Es gibt keine Cloud, keinen zentralen Anbieter und keine
-        Registrierung bei uns – ohne eine erreichbare eigene Installation lassen sich weder Fotos
-        hochladen noch Dokumente oder Finanzen verwalten.
-      </p>
-      <p>
-        Wer die App installiert, ohne Zugriff auf eine eigene F4mil-Instanz zu haben, kann sie
-        <strong>nicht sinnvoll nutzen</strong>. Die gesamte Verarbeitung – inklusive aller
-        KI-Funktionen – läuft lokal auf dem eigenen Server, nicht in der App und nicht bei einem
-        Drittanbieter.
-      </p>
     </section>
 
     <footer>
