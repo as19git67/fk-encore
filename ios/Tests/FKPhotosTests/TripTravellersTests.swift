@@ -17,12 +17,14 @@ final class TripTravellersTests: XCTestCase {
         { "id": 2, "userId": null, "label": "Kind A",
           "birthDate": "2020-06-15", "birthDateFromHousehold": false, "shortWalks": false, "ageAtStart": 7 },
         { "id": 3, "userId": null, "label": "Oma",
-          "birthDate": null, "birthDateFromHousehold": false, "shortWalks": true, "ageAtStart": null }
+          "birthDate": null, "birthDateFromHousehold": false, "shortWalks": true,
+          "getsAbout": "wheelchair", "ageAtStart": null }
       ],
       "on": "2027-07-01",
       "effect": {
         "withChildren": true,
         "limitedMobility": true,
+        "onWheels": true,
         "reasons": ["Kind A ist bei Reisebeginn unter 10 — kürzere Blöcke und Pausen."]
       }
     }
@@ -96,5 +98,34 @@ final class TripTravellersTests: XCTestCase {
         XCTAssertNil(answer.on)
         XCTAssertNil(answer.travellers[0].subtitle(startsOn: nil))
         XCTAssertFalse(answer.effect.withChildren)
+    }
+
+    func testHowSomebodyGetsAboutIsRead() throws {
+        let answer = try answer()
+
+        XCTAssertEqual(TripGetsAbout.from(answer.travellers[2].getsAbout), .wheelchair)
+        XCTAssertEqual(answer.effect.onWheels, true)
+    }
+
+    func testABackendThatDoesNotKnowTheFieldStillDecodes() throws {
+        // A self-hosted server is updated when its owner gets round to
+        // it, so the app has to read the older answer — and read it as
+        // "on foot", which plans exactly as before.
+        let old = """
+        {
+          "travellers": [
+            { "id": 1, "userId": null, "label": "Oma", "birthDate": null,
+              "birthDateFromHousehold": false, "shortWalks": false, "ageAtStart": null }
+          ],
+          "on": null,
+          "effect": { "withChildren": false, "limitedMobility": false, "reasons": [] }
+        }
+        """
+        let answer = try JSONDecoder().decode(
+            TripTravellersResponse.self, from: Data(old.utf8))
+
+        XCTAssertNil(answer.travellers[0].getsAbout)
+        XCTAssertEqual(TripGetsAbout.from(answer.travellers[0].getsAbout), .foot)
+        XCTAssertNil(answer.effect.onWheels)
     }
 }

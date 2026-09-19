@@ -432,7 +432,9 @@ struct TripGroupEffect: Codable, Sendable {
     let withChildren: Bool
     let limitedMobility: Bool
     /// Somebody is on wheels: routes that climb are out (§4.7).
-    let onWheels: Bool
+    /// Absent from an older backend, which is not the same as false
+    /// but plans identically.
+    let onWheels: Bool?
     /// Why the days look the way they do, in words (§3.8).
     let reasons: [String]
 }
@@ -448,7 +450,12 @@ struct TripTraveller: Codable, Identifiable, Sendable {
     let shortWalks: Bool
     /// foot | wheelchair | pram — how they get about (§3.5). Set by a
     /// person too: being seventy says nothing about it.
-    let getsAbout: String
+    ///
+    /// Optional because a backend older than this app does not send it,
+    /// and a self-hosted server is updated when its owner gets round to
+    /// it. Absent reads as on foot, which is the answer that changes
+    /// nothing.
+    let getsAbout: String?
     /// Age at the start of the trip — the age that plans it.
     let ageAtStart: Int?
 
