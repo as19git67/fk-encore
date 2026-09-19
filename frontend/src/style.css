@@ -28,6 +28,54 @@
   --grid-gap: 1rem;
   --grid-gap-compact: 4px;
   --grid-min-col: 200px;
+
+  /* ── Design Tokens: Page layout (issue #1272, stage 1) ─────────────────────
+     The single source for everything a view used to compute on its own:
+     the sticky stack's height, the spacing scale and the content widths.
+     `--app-stack-height` is measured by App.vue (ResizeObserver) and written
+     onto `.app-container`; the value here is only the fallback for a page
+     rendered outside the app shell (Storybook, tests). */
+  --app-navbar-height: 3.5rem;
+  --app-submenu-height: 2.5rem;
+  --app-stack-height: calc(var(--app-navbar-height) + var(--app-submenu-height));
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --page-gutter: 16px;
+  --page-max-normal: 1200px;
+  --page-max-wide: 1600px;
+}
+@media (min-width: 768px) {
+  :root {
+    --page-gutter: 24px;
+  }
+}
+
+/* ── No horizontal scrolling of the whole page ──────────────────────────────
+   An over-wide element (a table, a long toolbar) must never widen the
+   document. `clip` rather than `hidden`: it does not turn html/body into a
+   scroll container, so `position: sticky` inside keeps working. Wide content
+   scrolls inside its own wrapper (see components/layout/ScrollX.vue). */
+html,
+body {
+  overflow-x: clip;
+}
+
+/* Anything scrolled into view (a list row on the way back from a detail
+   page, a heading anchor) has to land below the sticky stack, not under it. */
+.scroll-anchor {
+  scroll-margin-top: calc(var(--app-stack-height) + var(--space-2));
+}
+
+/* Visible keyboard focus, one look everywhere. */
+.scroll-anchor:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
 }
 *,
 *::before,

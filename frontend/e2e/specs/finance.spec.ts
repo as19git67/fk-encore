@@ -119,6 +119,12 @@ test.describe('Finance-Subheader und Analysezeitraum', () => {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
     const stackTop = await stack.evaluate((element) => element.parentElement!.getBoundingClientRect().top)
     expect(Math.abs(stackTop)).toBeLessThanOrEqual(1)
+
+    // The page's <h1> is content, not part of the stack; the sub-menu row
+    // sits between the navbar and the lifted toolbar (issue #1272).
+    await expect(stack.locator('h1')).toHaveCount(0)
+    await expect(page.getByTestId('app-submenu')).toBeVisible()
+    await expect(page).not.toHaveTitle('F4mil')
   })
 
   test('N-Jahre-Feld akzeptiert zweistellige Werte ohne Abschneiden', async ({ page }) => {

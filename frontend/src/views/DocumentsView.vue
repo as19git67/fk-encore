@@ -10,6 +10,7 @@ import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
 import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
 import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
+import PageLayout from '../components/layout/PageLayout.vue'
 import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
@@ -700,14 +701,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="documents-view">
-    <!-- Everything above the list stays put while the list scrolls, the way
-         Fotos does it: the view is exactly one viewport tall, this block does
-         not shrink, and the region below owns the scrollbar. -->
-    <div class="subheader">
-    <div class="header">
-      <h1 class="title">Dokumente</h1>
-      <div class="header-actions">
+  <PageLayout title="Dokumente" scroll="self" width="full" :ready="!loading">
+    <template #actions>
         <Button
           icon="pi pi-question-circle"
           text
@@ -731,48 +726,11 @@ onMounted(async () => {
           icon="pi pi-upload"
           @click="router.push({ name: 'dokumente-upload' })"
         />
-      </div>
-    </div>
+    </template>
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-    <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
-
-    <!-- Scan queue status panel -->
-    <DocumentScanQueuePanel />
-
-    <!-- Batch actions bar -->
-    <div v-if="selectedIds.size > 0" class="batch-bar">
-      <span class="batch-count">
-        <i class="pi pi-check-square" />
-        {{ selectedIds.size }} ausgewählt
-      </span>
-      <div class="batch-actions">
-        <Button
-          label="In den Basket"
-          icon="pi pi-shopping-cart"
-          size="small"
-          v-tooltip.bottom="'Auswahl in den Basket legen (oben rechts) — dort werden Tags, Kategorie, Datum, Steuer, Sichtbarkeit und OCR/KI gemeinsam bearbeitet oder durchblättert.'"
-          @click="addSelectionToBasket"
-        />
-        <Button
-          label="In Sammelmappe"
-          icon="pi pi-folder"
-          size="small"
-          severity="secondary"
-          v-tooltip.bottom="'Auswahl in eine Sammelmappe legen — mehrere Dokumente als ein PDF weitergeben.'"
-          @click="addToCollectionOpen = true"
-        />
-        <Button
-          label="Auswahl aufheben"
-          icon="pi pi-times"
-          size="small"
-          severity="secondary"
-          text
-          @click="clearSelection"
-        />
-      </div>
-    </div>
-
+    <!-- Sticky part (lifted into the app stack by PageLayout): toolbar,
+         active filter chips, the selection bar and the notices. -->
+    <template #toolbar>
     <!-- Toolbar: search + filter/sort/view controls -->
     <div class="toolbar">
       <div class="search-row">
@@ -933,8 +891,49 @@ onMounted(async () => {
         @click="() => { filter.reset(); load() }"
       />
     </div>
+    </template>
 
+    <template #selection>
+    <!-- Batch actions bar -->
+    <div v-if="selectedIds.size > 0" class="batch-bar">
+      <span class="batch-count">
+        <i class="pi pi-check-square" />
+        {{ selectedIds.size }} ausgewählt
+      </span>
+      <div class="batch-actions">
+        <Button
+          label="In den Basket"
+          icon="pi pi-shopping-cart"
+          size="small"
+          v-tooltip.bottom="'Auswahl in den Basket legen (oben rechts) — dort werden Tags, Kategorie, Datum, Steuer, Sichtbarkeit und OCR/KI gemeinsam bearbeitet oder durchblättert.'"
+          @click="addSelectionToBasket"
+        />
+        <Button
+          label="In Sammelmappe"
+          icon="pi pi-folder"
+          size="small"
+          severity="secondary"
+          v-tooltip.bottom="'Auswahl in eine Sammelmappe legen — mehrere Dokumente als ein PDF weitergeben.'"
+          @click="addToCollectionOpen = true"
+        />
+        <Button
+          label="Auswahl aufheben"
+          icon="pi pi-times"
+          size="small"
+          severity="secondary"
+          text
+          @click="clearSelection"
+        />
+      </div>
     </div>
+
+    </template>
+
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+      <DocumentScanQueuePanel />
+    </template>
 
     <!-- Loading / empty state -->
     <div v-if="loading" class="info-text">
@@ -1211,7 +1210,7 @@ onMounted(async () => {
       @apply="applySortMenu"
       @reset="resetSortMenu"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
@@ -1380,62 +1379,17 @@ onMounted(async () => {
 .grid-card-collections i {
   margin-right: 3px;
 }
-.documents-view {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  /* Exactly one viewport below the app bar, so the subheader can stay put and
-     the region below owns the scrollbar — the arrangement the photo gallery
-     uses. `100dvh` follows the dynamic viewport (the iOS URL bar); `100vh`
-     resolves to the large viewport and would push the bottom out of reach.
-     The module's submenu strip sits inside the navbar, so `--menubar-height`
-     is the whole offset. */
-  height: calc(100dvh - var(--menubar-height, 3.5rem));
-  overflow: hidden;
-}
-
-/* The block that stays put: title, messages, queue panel, batch bar, toolbar
-   and the active filter chips. */
-.subheader {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.5rem 0.5em;
-  background: var(--p-content-background);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-  z-index: 1;
-}
+/* Page frame, title, sticky subheader: all PageLayout now (issue #1272).
+   Only the list region below keeps its own scrolling columns. */
 
 @media (min-width: 800px) {
-  .subheader { padding-inline: 1em; }
   .list-region { padding-inline: 1em; }
-}
-
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-block: 0.25rem 0;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
 }
 
 /* ── Toolbar ────────────────────────────────────────────────────── */
 /* One row: the search on the left, the filter/sort/view controls on the
-   right. No longer sticky on its own — the whole subheader above the list is
-   fixed now, and a second sticky layer inside it would only fight the first
-   (#651 is served by the subheader). */
+   right. Lives in the app's sticky stack through PageLayout's toolbar slot,
+   so it needs no sticky positioning of its own (#651). */
 .toolbar {
   display: flex;
   flex-direction: row;
