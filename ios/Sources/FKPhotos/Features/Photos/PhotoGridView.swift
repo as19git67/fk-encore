@@ -76,13 +76,7 @@ struct PhotoGridView: View {
                     .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
                 }
             }
-            .onChange(of: scrollTarget) { _, id in
-                guard let id else { return }
-                withAnimation {
-                    proxy.scrollTo(id, anchor: .center)
-                }
-                scrollTarget = nil
-            }
+            .scrollsBack(to: $scrollTarget, in: proxy)
         }
         .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : "Fotos")
         .toolbar {
@@ -164,16 +158,8 @@ struct PhotoGridView: View {
                 onPhotoRemoved: { id in viewModel.photos.removeAll { $0.id == id } }
             )
         }
-        .onChange(of: fullscreenNav) { _, nav in
-            if nav == nil, !viewModel.photos.isEmpty {
-                let idx = min(selectedIndex, viewModel.photos.count - 1)
-                let photoId = viewModel.photos[idx].id
-                // Delay until the dismiss animation completes so the grid is fully visible.
-                Task {
-                    try? await Task.sleep(for: .milliseconds(400))
-                    scrollTarget = photoId
-                }
-            }
+        .remembersGridPosition(whenClosing: fullscreenNav, target: $scrollTarget) {
+            GridScroll.target(index: selectedIndex, in: viewModel.photos)
         }
         .refreshable {
             await viewModel.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort)

@@ -111,11 +111,7 @@ struct PhotoMonthGridView: View {
                     .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
                 }
             }
-            .onChange(of: scrollTarget) { _, id in
-                guard let id else { return }
-                withAnimation { proxy.scrollTo(id, anchor: .center) }
-                scrollTarget = nil
-            }
+            .scrollsBack(to: $scrollTarget, in: proxy)
         }
         .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : title)
         .navigationBarTitleDisplayMode(.large)
@@ -179,15 +175,8 @@ struct PhotoMonthGridView: View {
                 onPhotoRemoved: { id in photos.removeAll { $0.id == id } }
             )
         }
-        .onChange(of: fullscreenNav) { _, nav in
-            if nav == nil, !photos.isEmpty {
-                let idx = min(selectedIndex, photos.count - 1)
-                let photoId = photos[idx].id
-                Task {
-                    try? await Task.sleep(for: .milliseconds(400))
-                    scrollTarget = photoId
-                }
-            }
+        .remembersGridPosition(whenClosing: fullscreenNav, target: $scrollTarget) {
+            GridScroll.target(index: selectedIndex, in: photos)
         }
         .sheet(isPresented: $showUpload) {
             PhotoUploadView { Task { await loadPhotos() } }
