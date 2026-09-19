@@ -25,6 +25,7 @@ import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
+import { loadPlan } from "./plan-store";
 import { inviteToTrip, removeFromTrip } from "./shares";
 import {
   addTraveller,
@@ -513,6 +514,16 @@ describe("how somebody gets about (§3.5)", () => {
     const after = budget((await getTripPlan({ planId: plain.id })).plan);
 
     expect(before).toBe(after);
+  });
+
+  it("carries the fact into the trip, where a route can read it", async () => {
+    // The derivation is only worth having if it reaches the plan: the
+    // route search reads `constraints.group` and nothing else (§4.7).
+    const plan = await trip();
+    await addTraveller({ planId: plan.id, label: "Oma Beispiel", getsAbout: "wheelchair" });
+
+    const stored = await loadPlan(plan.id, ownerId);
+    expect((stored?.constraints.group as { onWheels?: boolean })?.onWheels).toBe(true);
   });
 
   it("refuses a mode nobody defined", async () => {

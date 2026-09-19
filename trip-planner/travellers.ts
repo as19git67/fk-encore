@@ -283,6 +283,7 @@ export async function replanWithGroup(planId: number, userId: number): Promise<P
   const constraints = withGroup(plan.constraints, {
     withChildren: effect.withChildren || undefined,
     limitedMobility: effect.limitedMobility || undefined,
+    onWheels: effect.onWheels || undefined,
   });
   return await replanAfterFrameChange(plan, userId, constraints);
 }
