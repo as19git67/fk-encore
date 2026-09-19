@@ -4,13 +4,19 @@
  * counterpart of the finance anomalies view. Findings of the daily job are
  * confirmed (worth a look, keep it) or dismissed.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
-import Message from 'primevue/message'
+import Popover from 'primevue/popover'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useListToolbar, useListView } from '../composables/useListToolbar'
+import type { FilterChip } from '../components/layout/listToolbar'
 import {
   listMeterAnomalies,
   setMeterAnomalyStatus,
@@ -36,8 +42,6 @@ const loading = ref(false)
 const running = ref(false)
 const error = ref<string | null>(null)
 const busy = ref<Set<number>>(new Set())
-const scope = ref<'pending' | 'all'>('pending')
-const typeFilter = ref<'all' | MeterAnomalyType>('all')
 
 const scopeOptions = [
   { label: 'Offen', value: 'pending' },
@@ -51,11 +55,75 @@ const typeOptions = [
   })),
 ]
 
+// Both dropdowns live in the URL, so a reload — or a link someone shared —
+// reproduces the list that was on screen. `scope` costs a round trip,
+// `type` narrows what is already loaded.
+const scopeView = useListView({ options: scopeOptions, defaultValue: 'pending', key: 'scope' })
+const scopeValue = scopeView.value
+const scope = computed(() => scopeValue.value as 'pending' | 'all')
+
+const typeView = useListView({ options: typeOptions, defaultValue: 'all', key: 'type' })
+const typeValue = typeView.value
+const typeFilter = computed(() => typeValue.value as 'all' | MeterAnomalyType)
+
 const filtered = computed(() =>
   typeFilter.value === 'all'
     ? anomalies.value
     : anomalies.value.filter((item) => item.type === typeFilter.value),
 )
+
+// Covers the dropdown as well as browser back/forward, which write the
+// query key without going through the control.
+watch(scope, () => load())
+
+const filterPopover = ref<InstanceType<typeof Popover> | null>(null)
+function openFilterMenu(event: Event) {
+  filterPopover.value?.toggle(event)
+}
+
+function labelOf(options: { label: string; value: string }[], value: string): string {
+  return options.find((o) => o.value === value)?.label ?? value
+}
+
+const filterChips = computed<FilterChip[]>(() => {
+  const chips: FilterChip[] = []
+  if (scopeValue.value !== 'pending') {
+    chips.push({
+      key: 'scope',
+      label: `Umfang: ${labelOf(scopeOptions, scopeValue.value)}`,
+      remove: () => { scopeValue.value = 'pending' },
+    })
+  }
+  if (typeValue.value !== 'all') {
+    chips.push({
+      key: 'type',
+      label: `Art: ${labelOf(typeOptions, typeValue.value)}`,
+      remove: () => { typeValue.value = 'all' },
+    })
+  }
+  return chips
+})
+
+function clearFilters() {
+  scopeValue.value = 'pending'
+  typeValue.value = 'all'
+}
+
+const toolbar = useListToolbar({
+  filter: {
+    chips: filterChips,
+    activeCount: () => filterChips.value.length,
+    open: openFilterMenu,
+    clearAll: clearFilters,
+  },
+  result: {
+    loaded: () => filtered.value.length,
+    // The type filter narrows client-side, so the loaded count is "of what
+    // the scope returned".
+    total: () => anomalies.value.length,
+    loading: () => loading.value,
+  },
+})
 
 async function load() {
   loading.value = true
@@ -177,14 +245,31 @@ function statusLabel(status: MeterAnomalyStatus) {
     </template>
 
     <template #toolbar>
-      <div class="filter-row">
-        <Select v-model="scope" :options="scopeOptions" option-label="label" option-value="value" class="filter-select" @change="load" />
-        <Select v-model="typeFilter" :options="typeOptions" option-label="label" option-value="value" class="filter-select" />
-      </div>
+      <ListToolbar :model="toolbar" />
+      <Popover ref="filterPopover">
+        <div class="filter-fields">
+          <Select
+            v-model="scopeValue"
+            :options="scopeOptions"
+            option-label="label"
+            option-value="value"
+            aria-label="Umfang"
+            class="filter-select"
+          />
+          <Select
+            v-model="typeValue"
+            :options="typeOptions"
+            option-label="label"
+            option-value="value"
+            aria-label="Art der Auffälligkeit"
+            class="filter-select"
+          />
+        </div>
+      </Popover>
     </template>
 
     <template #notice>
-      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = null" />
     </template>
 
     <p class="intro-hint">
@@ -193,12 +278,18 @@ function statusLabel(status: MeterAnomalyStatus) {
       hält eine echte Auffälligkeit fest, <strong>Verwerfen</strong> räumt sie aus dem Postfach.
     </p>
 
-    <div v-if="loading && anomalies.length === 0" class="loading">Lädt …</div>
+    <PageSkeleton v-if="loading && anomalies.length === 0" variant="list" :count="6" />
 
-    <section v-else-if="filtered.length === 0" class="empty">
-      <i class="pi pi-check-circle empty-icon" />
-      <p>Keine {{ scope === 'pending' ? 'offenen ' : '' }}Auffälligkeiten.</p>
-    </section>
+    <EmptyState
+      v-else-if="filtered.length === 0"
+      icon="pi pi-check-circle"
+      :title="scope === 'pending' ? 'Keine offenen Auffälligkeiten' : 'Keine Auffälligkeiten'"
+      :message="filterChips.length > 0
+        ? 'Mit anderen Filtereinstellungen findet sich vielleicht etwas.'
+        : 'Die tägliche Prüfung hat nichts gefunden.'"
+      :filtered="filterChips.length > 0"
+      @clear-filters="clearFilters"
+    />
 
     <ul v-else class="anomaly-list">
       <li v-for="item in filtered" :key="item.id" :class="['anomaly-card', severityClass(item.type)]">
@@ -267,25 +358,14 @@ function statusLabel(status: MeterAnomalyStatus) {
   color: var(--p-text-muted-color);
   max-width: 80ch;
 }
-.filter-row {
+.filter-fields {
   display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
 }
 .filter-select {
-  min-width: 11rem;
-}
-.loading,
-.empty {
-  text-align: center;
-  color: var(--p-text-muted-color);
-  padding: 2rem 0;
-}
-.empty-icon {
-  font-size: 2rem;
-  color: var(--p-tag-success-color);
-  display: block;
-  margin-bottom: 0.5rem;
+  min-width: 13rem;
 }
 .anomaly-list {
   list-style: none;

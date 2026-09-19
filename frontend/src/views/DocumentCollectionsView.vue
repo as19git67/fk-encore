@@ -6,7 +6,7 @@
  * a landlord. This view is the entry point to building one; the ordering,
  * page selection and export live in the detail view.
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -15,6 +15,11 @@ import Message from 'primevue/message'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import {
   createCollection,
   deleteCollection,
@@ -33,6 +38,29 @@ const createOpen = ref(false)
 const creating = ref(false)
 const newTitle = ref('')
 const newNotes = ref('')
+
+// The whole list arrives in one response, so filtering stays client-side.
+const search = useListSearch({
+  placeholder: 'Mappen filtern…',
+  storageKey: 'collections.search',
+})
+
+const visibleItems = computed(() => {
+  const term = search.term.value.trim().toLowerCase()
+  if (!term) return items.value
+  return items.value.filter((c) =>
+    [c.title, c.summary, c.notes].some((field) => field?.toLowerCase().includes(term)),
+  )
+})
+
+const toolbar = useListToolbar({
+  search,
+  result: {
+    loaded: () => visibleItems.value.length,
+    total: () => items.value.length,
+    loading: () => loading.value,
+  },
+})
 
 async function load() {
   loading.value = true
@@ -97,7 +125,7 @@ onMounted(load)
 <template>
   <PageLayout
     title="Sammelmappen"
-    :hint="`${items.length} Mappen · Mehrere Dokumente zusammenfassen und als ein PDF weitergeben. Ein Dokument darf in mehreren Mappen liegen.`"
+    hint="Mehrere Dokumente zusammenfassen und als ein PDF weitergeben. Ein Dokument darf in mehreren Mappen liegen."
     width="normal"
     :ready="!loading"
   >
@@ -106,21 +134,37 @@ onMounted(load)
       <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
     </template>
 
+    <template #toolbar>
+      <ListToolbar :model="toolbar" />
+    </template>
+
     <template #notice>
       <Message v-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
-      <Message v-if="loadError" severity="error" closable @close="loadError = ''">
-        {{ loadError }}
-      </Message>
+      <ErrorBanner
+        v-if="loadError"
+        :message="loadError"
+        closable
+        @retry="load"
+        @close="loadError = ''"
+      />
     </template>
 
     <div class="content">
-    <div v-if="!loading && items.length === 0 && !loadError" class="cv-empty">
-      <i class="pi pi-folder" />
-      <p>Noch keine Sammelmappe angelegt.</p>
-    </div>
+    <PageSkeleton v-if="loading && items.length === 0" variant="list" :count="6" />
 
-    <ul class="cv-list">
-      <li v-for="c in items" :key="c.id" class="cv-card">
+    <EmptyState
+      v-else-if="visibleItems.length === 0 && !loadError"
+      icon="pi pi-folder"
+      :title="search.term.value ? 'Keine Mappe passt zur Suche' : 'Noch keine Sammelmappe angelegt'"
+      :message="search.term.value
+        ? 'Andere Wörter finden vielleicht mehr.'
+        : 'Lege eine Mappe an und lege Dokumente hinein — daraus wird ein PDF.'"
+      :filtered="!!search.term.value"
+      @clear-filters="search.clear"
+    />
+
+    <ul v-else class="cv-list">
+      <li v-for="c in visibleItems" :key="c.id" class="cv-card">
         <button type="button" class="cv-body" @click="open(c.id)">
           <div class="cv-line">
             <span class="cv-name">{{ c.title }}</span>
@@ -186,15 +230,6 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-.cv-empty {
-  text-align: center;
-  color: var(--p-text-muted-color);
-  padding: 48px 16px;
-}
-.cv-empty .pi-folder {
-  font-size: 2.5rem;
-  margin-bottom: 12px;
 }
 .cv-list {
   list-style: none;

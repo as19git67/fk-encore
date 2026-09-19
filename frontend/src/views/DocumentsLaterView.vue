@@ -6,11 +6,16 @@
  * when the document returns to the work-item basket and lets the user cancel
  * the follow-up (returning it to the basket immediately) or open the document.
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import {
   listDocumentFollowUps,
@@ -26,6 +31,32 @@ const loading = ref(false)
 const loadError = ref('')
 const info = ref('')
 const removing = ref<Set<number>>(new Set())
+
+// The endpoint hands over every pending follow-up at once, so the search
+// narrows what is already on screen.
+const search = useListSearch({
+  placeholder: 'Wiedervorlagen filtern…',
+  storageKey: 'documents.later.search',
+})
+
+const visibleItems = computed(() => {
+  const term = search.term.value.trim().toLowerCase()
+  if (!term) return items.value
+  return items.value.filter((f) =>
+    [f.document.title, f.document.original_filename, f.document.sender, f.note].some((field) =>
+      field?.toLowerCase().includes(term),
+    ),
+  )
+})
+
+const toolbar = useListToolbar({
+  search,
+  result: {
+    loaded: () => visibleItems.value.length,
+    total: () => items.value.length,
+    loading: () => loading.value,
+  },
+})
 
 async function load() {
   loading.value = true
@@ -79,7 +110,7 @@ onMounted(load)
 <template>
   <PageLayout
     title="Später"
-    :hint="`${items.length} Dokumente · Auf Wiedervorlage, sortiert nach Fälligkeit.`"
+    hint="Auf Wiedervorlage, sortiert nach Fälligkeit."
     width="normal"
     :ready="!loading"
   >
@@ -87,23 +118,39 @@ onMounted(load)
       <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
     </template>
 
+    <template #toolbar>
+      <ListToolbar :model="toolbar" />
+    </template>
+
     <template #notice>
       <Message v-if="info" severity="success" :closable="true" @close="info = ''">
         {{ info }}
       </Message>
-      <Message v-if="loadError" severity="error" :closable="true" @close="loadError = ''">
-        {{ loadError }}
-      </Message>
+      <ErrorBanner
+        v-if="loadError"
+        :message="loadError"
+        closable
+        @retry="load"
+        @close="loadError = ''"
+      />
     </template>
 
     <div class="content">
-    <div v-if="!loading && items.length === 0 && !loadError" class="lv-empty">
-      <i class="pi pi-clock" />
-      <p>Keine Wiedervorlagen geplant.</p>
-    </div>
+    <PageSkeleton v-if="loading && items.length === 0" variant="list" :count="6" />
 
-    <ul class="lv-list">
-      <li v-for="f in items" :key="f.document.id" class="lv-card">
+    <EmptyState
+      v-else-if="visibleItems.length === 0 && !loadError"
+      icon="pi pi-clock"
+      :title="search.term.value ? 'Keine Wiedervorlage passt zur Suche' : 'Keine Wiedervorlagen geplant'"
+      :message="search.term.value
+        ? 'Andere Wörter finden vielleicht mehr.'
+        : 'Lege ein Dokument auf Wiedervorlage, dann taucht es hier auf.'"
+      :filtered="!!search.term.value"
+      @clear-filters="search.clear"
+    />
+
+    <ul v-else class="lv-list">
+      <li v-for="f in visibleItems" :key="f.document.id" class="lv-card">
         <button type="button" class="lv-thumb" @click="openDoc(f.document.id)">
           <DocumentThumbnail :id="f.document.id" :alt="f.document.title ?? f.document.original_filename" />
         </button>
@@ -136,15 +183,6 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-.lv-empty {
-  text-align: center;
-  color: var(--p-text-muted-color);
-  padding: 48px 16px;
-}
-.lv-empty .pi-clock {
-  font-size: 2.5rem;
-  margin-bottom: 12px;
 }
 .lv-list {
   list-style: none;

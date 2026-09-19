@@ -16,7 +16,16 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
   laufen über `PageLayout`; `AdminPage` ist ein dünner Wrapper; View-eigene
   Sticky-Header, `top:`-Offsets und `calc(100dvh - …)` sind weg, der Alias
   `--menubar-height` ist entfernt. `DataTable`s liegen in `ScrollX`.
-- ⬜ Etappen 3 bis 6: siehe Sub-Issues #1278 bis #1281.
+- ✅ **Etappe 3 — Toolbar-Vertrag** (#1278): `components/layout/ListToolbar.vue`
+  + `listToolbar.ts` (Typen, `formatResultCount`, `isSearchHotkey`),
+  `composables/useListToolbar.ts` (`useListSearch`, `useListView`,
+  `useListToolbar`), generische `FilterChips`, Chip-Mappings in `useFilter`
+  (`usePhotoFilterChips`) und `useDocumentFilter` (`useDocumentFilterChips`),
+  `EmptyState`, `PageSkeleton`, `ErrorBanner`. Suche liegt in `?q=`,
+  Sortierung in `?sortBy/?sortDir`, Ansicht in `?view=`; `useSort` liefert
+  zusätzlich `fields` und `select()`, damit die Toolbar das Sortiermenü selbst
+  rendert. Stories `Layout/ListToolbar` und `Layout/Listenzustände`.
+- ⬜ Etappen 4 bis 6: siehe Sub-Issues #1279 bis #1281.
 
 Abweichungen vom Entwurf (Etappe 1):
 
@@ -41,6 +50,36 @@ Abweichungen vom Entwurf (Etappe 2):
   zusätzlich zum Overlay der Karte.
 - Ein Seitentitel enthält keine Zähler mehr (die stehen im `hint`), damit
   `document.title` stabil bleibt.
+
+Abweichungen vom Entwurf (Etappe 3):
+
+- `ListToolbar` liegt in `components/layout/` statt direkt in `components/`,
+  zusammen mit `PageLayout`, `ScrollX`, `EmptyState`, `PageSkeleton` und
+  `ErrorBanner` — es ist dieselbe Familie.
+- Statt `ResponsiveToolbar`-Overflow verlieren Filter/Sortierung/Ansicht/
+  Auswahl unter `sm` nur ihre Beschriftung und bleiben als Icons in der Zeile.
+  Ein Filter-Knopf, der im „…"-Menü verschwindet, ist schlechter zu finden als
+  ein Icon. Für die *Aktionen* einer View (Upload, Sprung, Karte) bleibt
+  `ResponsiveToolbar` im `#actions`-Slot der Toolbar.
+- Die Toolbar hat immer zwei Zeilen (Bedienelemente / Chips + Zähler) statt
+  einer auf breiten Schirmen. Das kostet ~1,5rem Höhe, dafür springt beim
+  Setzen eines Filters nichts um.
+- `search` im Modell ist optional: Listen ohne Suchfeld (Rollen, Jobs) nutzen
+  dieselbe Toolbar für Zähler und Zustände.
+- Statt `natural?: boolean` hat `ListToolbar` einen `search`-Slot. Galerie und
+  Albumdetail setzen dort ihre `NaturalSearchBar` ein; `useListSearch({ manual:
+  true })` schreibt den Begriff erst beim Absenden in die URL, weil jede
+  Ausführung einen Backend-Roundtrip kostet.
+- Ergebniszahl: „Keine Treffer" / „{n} Treffer" / „{loaded} von {total}". Der
+  Entwurf nannte durchgehend „{loaded} von {total}"; sobald alles geladen ist,
+  liest sich „12 von 12" wie ein Rest, der noch fehlt.
+- `DocumentsView` hat seinen kombinierten Query-Writer (`syncQueryParams`)
+  verloren. Die Race aus #651 ist strukturell weg, weil Suche, Filter,
+  Sortierung und Ansicht alle über `updateRouteQuery` schreiben und das die
+  Navigationen serialisiert.
+- Der „zuletzt verwendet"-Fallback der Suche liegt in `sessionStorage`, nicht
+  in `localStorage`: ein Suchbegriff ist ein „woran ich gerade war", keine
+  Einstellung, die einen am nächsten Tag wieder begrüßen soll.
 
 Dieses Dokument trifft die Entscheidungen, die das Issue offen lässt, damit
 jede Etappe reine Umsetzung ist. Was hier steht, ist verbindlich für alle

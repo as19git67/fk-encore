@@ -1,7 +1,8 @@
 import { ref, computed, watch } from 'vue'
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
+import type { FilterChip } from '../components/layout/listToolbar'
 
 const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
@@ -263,4 +264,83 @@ export function useDocumentFilter(): UseDocumentFilterReturn {
   }
 
   return { applied, draft, activeCount, openEdit, apply, reset, removeKey, removeTag }
+}
+
+/**
+ * Resolvers for the parts of a document filter that are stored as an id or
+ * a slug. Each one is optional; without it the chip falls back to the raw
+ * value, which is still removable.
+ */
+export interface DocumentFilterChipLabels {
+  category?: (value: string) => string
+  documentType?: (slug: string) => string
+  correspondent?: (slug: string) => string
+  subjectPerson?: (id: number) => string
+  collection?: (id: number) => string
+}
+
+const COLLECTION_SCOPE_LABELS: Record<DocumentCollectionScope, string> = {
+  without: 'Ohne Sammelmappen-Inhalte',
+  with: 'Inkl. Sammelmappen-Inhalte',
+  only: 'Nur Sammelmappen-Inhalte',
+}
+
+/**
+ * The applied document filter as removable chips for the shared
+ * `ListToolbar` (issue #1272, stage 3). Every criterion `countActiveDocFilters`
+ * counts gets a chip, so the badge on the filter button and the chip row can
+ * never disagree.
+ */
+export function useDocumentFilterChips(
+  filter: UseDocumentFilterReturn,
+  labels: DocumentFilterChipLabels = {},
+): ComputedRef<FilterChip[]> {
+  return computed<FilterChip[]>(() => {
+    const f = filter.applied.value
+    const out: FilterChip[] = []
+    const add = (key: string, label: string, keys: Array<keyof DocumentFilter>) => {
+      out.push({ key, label, remove: () => filter.removeKey(keys) })
+    }
+
+    if (f.category) {
+      add('category', `Kategorie: ${labels.category?.(f.category) ?? f.category}`, ['category'])
+    }
+    if (f.documentType) {
+      const label = labels.documentType?.(f.documentType) ?? f.documentType
+      add('documentType', `Dokumentart: ${label}`, ['documentType'])
+    }
+    if (f.status) add('status', `Status: ${f.status}`, ['status'])
+    for (const tag of f.tags ?? []) {
+      out.push({ key: `tag:${tag}`, label: `Tag: ${tag}`, remove: () => filter.removeTag(tag) })
+    }
+    if (f.sender) add('sender', `Absender: ${f.sender}`, ['sender'])
+    if (f.correspondent) {
+      const label = labels.correspondent?.(f.correspondent) ?? f.correspondent
+      add('correspondent', `Korrespondent: ${label}`, ['correspondent'])
+    }
+    if (f.dateFrom || f.dateTo) {
+      add('date', `Datum: ${f.dateFrom ?? '…'} – ${f.dateTo ?? '…'}`, ['dateFrom', 'dateTo'])
+    }
+    if (f.taxRelevant !== undefined) {
+      add('taxRelevant', `Steuerrelevant: ${f.taxRelevant ? 'Ja' : 'Nein'}`, ['taxRelevant'])
+    }
+    if (f.subjectPersonId) {
+      const label = labels.subjectPerson?.(f.subjectPersonId) ?? `#${f.subjectPersonId}`
+      add('subjectPerson', `Person: ${label}`, ['subjectPersonId'])
+    }
+    if (f.categorySource) {
+      add('categorySource', `Quelle: ${f.categorySource}`, ['categorySource'])
+    }
+    if (f.needs_review) add('needs_review', 'Nur zu prüfen', ['needs_review'])
+    if (f.unreviewed) add('unreviewed', 'Nur neue', ['unreviewed'])
+    // A named folder supersedes the scope, so only one of the two is shown —
+    // mirroring how `countActiveDocFilters` counts them as a single facet.
+    if (f.collectionId) {
+      const label = labels.collection?.(f.collectionId) ?? `#${f.collectionId}`
+      add('collection', `Sammelmappe: ${label}`, ['collectionId'])
+    } else if (f.collectionScope && f.collectionScope !== 'without') {
+      add('collectionScope', COLLECTION_SCOPE_LABELS[f.collectionScope], ['collectionScope'])
+    }
+    return out
+  })
 }
