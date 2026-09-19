@@ -13,8 +13,9 @@ Each imported region (e.g. `europe/germany/bayern`) is realised as
 `osm2pgsql` and `osm2pgsql-replication` binaries plus a small Node
 HTTP service. On `POST /import` the geo service downloads the
 Geofabrik PBF, creates the database, imports it through a Lua-driven
-Flex style that keeps only the three tables the runtime queries
-(`osm_highways`, `osm_pois`, `osm_admin`), wires up replication, and
+Flex style that keeps only the four tables the runtime queries
+(`osm_highways`, `osm_pois`, `osm_admin`, `osm_routes`), wires up
+replication, and
 returns 202 immediately — the actual osm2pgsql work runs in the
 background and the importer tick in `osm-admin` polls
 `GET /imports/:postgresDb` for progress. Deleting a region =
@@ -68,13 +69,29 @@ The `osm_region_imports.postgres_db` column is the source of truth.
 | `europe/austria` | `nom_europe_austria` |
 
 Inside each DB the osm2pgsql Flex style (`geo/src/osm2pgsql.lua`)
-creates three tables:
+creates four tables:
 
 | Table | Use |
 |---|---|
 | `osm_highways` | Nearest-street lookup for the `road` / `house_number` parts of `/reverse`. |
-| `osm_pois` | Radius candidates for `/pois`; also feeds the `tourism` / `amenity` / `building` parts of `/reverse`. |
-| `osm_admin` | Containment lookup for the `country` / `state` / `city` parts of `/reverse`. |
+| `osm_pois` | Radius candidates for `/pois`; also feeds the `tourism` / `amenity` / `building` parts of `/reverse`. Also what the trip planner counts when it asks whether a place would carry a day out (`/day-targets/search`). |
+| `osm_admin` | Containment lookup for the `country` / `state` / `city` parts of `/reverse`; also names the day-trip destinations. |
+| `osm_routes` | Waymarked walking and cycling routes as relations, for the trip planner's "Strecken in der Nähe" (`/routes/search`). **Added later than the other three — see below.** |
+
+### A region imported before routes existed
+
+`osm_routes` arrived with the trip planner's route support, so a region
+imported before that has the other three tables and not this one. That
+is an older import rather than a broken one, and it is visible rather
+than silent: `/routes/search` answers `imported: false`, and the app
+offers a re-import instead of an empty list that would read as "there
+are no waymarked routes here".
+
+Nothing else degrades. The readiness check still requires only the
+original three tables on purpose, so such a region keeps working
+untouched; reverse geocoding, the POI search and the day-trip
+suggestion (which reads `osm_pois` and `osm_admin`) all answer exactly
+as before. **Only "Strecken in der Nähe" needs the region re-imported.**
 
 Every table has a GIST index on `geom`; `osm_pois.tags` additionally
 has a GIN index so the POI matcher's `tags ? 'historic'` predicate
@@ -173,8 +190,9 @@ The PostGIS footprint per region with the Flex style is typically
 mid-import. Rows that fail the pre-check land in status `blocked_disk`
 and the admin UI surfaces the shortfall.
 
-Rough reference (real osm2pgsql Flex imports of the three runtime
-tables):
+Rough reference (real osm2pgsql Flex imports, measured before
+`osm_routes` joined the style — route relations are few beside the POIs
+and add little):
 
 | Region | PBF (~MB) | geo-db footprint (~MB) |
 |---|---|---|
