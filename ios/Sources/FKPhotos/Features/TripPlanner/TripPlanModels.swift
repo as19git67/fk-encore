@@ -238,6 +238,11 @@ struct TripBlock: Codable, Identifiable, Sendable {
     /// separates — so a card that knows nothing about splits still
     /// reads the day correctly.
     var branches: [TripBranch]?
+    /// Minutes of an earlier block's overrun that land in this one, so
+    /// how much later it begins than the day's shape says (§4.7). Nil
+    /// for a plan from a server that did not yet carry them, which
+    /// reads the same as a day where nothing ran over.
+    var carriedInMinutes: Int?
 
     /// A meal block holds time and a rough area, not a venue (§10.3).
     var isMeal: Bool { kind == "meal" }
@@ -248,6 +253,15 @@ struct TripBlock: Codable, Identifiable, Sendable {
 
     /// When the block ends, if it has an hour at all.
     var endMinutes: Int? { startMinutes.map { $0 + budgetMinutes } }
+
+    /// How much later this block begins because an earlier one ran over.
+    var startsLateMinutes: Int { max(0, carriedInMinutes ?? 0) }
+
+    /// How far this block runs past its own end: a stop somebody
+    /// planned that the block is too short for (§4.7). The next block
+    /// inherits exactly these minutes, which is why the budget is where
+    /// the block was *meant* to end rather than a wall.
+    var overrunMinutes: Int { max(0, startsLateMinutes + usedMinutes - budgetMinutes) }
 
     /// "ca. 3 h von 3,5 h" — the utilisation line under a block (§8.3).
     var utilisation: Double {
