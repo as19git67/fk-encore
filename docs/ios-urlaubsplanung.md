@@ -846,9 +846,30 @@ Luftlinienschätzung im Modus der Etappe (§12); zwei Stunden je Richtung sind
 die Grenze, darunter müssen mindestens vier Stunden vor Ort bleiben, und drei
 Spots sind nie ein Tag.
 
-**Noch offen (Etappe 2):** das Annehmen per Tipp (es setzt den Tagesanker aus
-§4.5, der Endpunkt dafür steht), das gemerkte „nein" (§6.4, §7.1) und der
-Bildschirm in der App.
+**Etappe 2 umgesetzt: annehmen, ablehnen, anzeigen.**
+
+`POST …/plans/:planId/day-trip` nimmt den Vorschlag an — und zwar, indem es
+`setTripDayAnchor` aufruft: dieselbe Organisatorregel, dieselbe Prüfung,
+dieselbe Neuplanung wie beim Tagesanker von Hand (§4.5). Das Ziel wird dabei
+**erneut nachgeschlagen** statt aus dem Request gelesen, aus demselben Grund
+wie bei der Streckenübernahme (§4.7): Wo ein Tag stattfindet, entscheidet,
+aus welchem Vorrat er gebaut wird und wie viele Minuten seine Blöcke haben.
+Ein Vorschlag, der nicht mehr gilt, wird abgelehnt statt auf das angewandt,
+was der Client zuletzt gesehen hat.
+
+`POST …/day-trip/dismiss` merkt sich das „nein" (§6.4, §7.1) — an der
+**Etappe**, nicht an der Reise, weil eine Reise an einem Ort untervorrätig
+und am nächsten voll sein kann; die Etappenzeile überlebt eine Neuplanung,
+die Antwort also auch. Abgelehnt wird ein Ort, nicht die Frage: Der nächste
+Vorschlag kommt sofort, und ein Ziel ohne Verwaltungsgrenze wird über seine
+gerundete Position gemerkt, weil es keine Referenz hat.
+
+In der App: „Tagesausflug" im Menü der Etappe, ein Bildschirm in der Form des
+Abendlichts (§7.3) — ein Ziel, was dort steht, was es kostet, zwei Knöpfe.
+Dazu die Rechnung im Klartext („nicht verplant", „noch im Vorrat", „bliebe
+trotzdem leer"), weil „wir empfehlen" nichts ist, dem jemand widersprechen
+kann, und drei Zahlen schon. Der häufigste Fall — diese Etappe trägt ihre
+Tage — ist ein eigener Zustand und keine leere Liste.
 
 ### 4.7 Strecken: der Weg ist das Ziel
 
@@ -3935,8 +3956,9 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     leer, selbst wenn der übrige Vorrat eingeplant würde?), die Tagesziele aus
     `osm_admin` und einem Raster ohne Neuimport (`geo/src/day-targets.ts`) und
     der lesende Vorschlag `GET …/plans/:planId/day-trip`, der nichts schreibt
-    und **ein** Ziel nennt. Offen: das Annehmen per Tipp auf den Tagesanker
-    (§4.5), das gemerkte „nein" (§6.4) und der Bildschirm.
+    und **ein** Ziel nennt. **Etappe 2 ebenfalls umgesetzt:** das Annehmen
+    über den Tagesanker (§4.5), das an der Etappe gemerkte „nein" (§6.4) und
+    der Bildschirm „Tagesausflug". Damit ist §4.6 durch.
     Bewusst nach Schritt 14: Er setzt §4.5 voraus, und bis das Maß stand, wäre
     jeder Vorschlag geraten gewesen.
 
