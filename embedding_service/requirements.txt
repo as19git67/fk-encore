@@ -15,7 +15,7 @@ pgvector==0.3.2
 
 # ML – install CPU torch by default; override with GPU wheel in Dockerfile if needed
 torch==2.12.1+cpu
-torchvision==0.25.0+cpu
+torchvision==0.27.1+cpu
 
 # OpenCLIP
 open-clip-torch==2.26.1
