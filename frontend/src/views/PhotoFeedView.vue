@@ -7,6 +7,7 @@ import PhotoFeedCard from '../components/PhotoFeedCard.vue'
 import RecapFeedStrip from '../components/RecapFeedStrip.vue'
 import FeedFullscreen from '../components/FeedFullscreen.vue'
 import FeedUploadAlbumDialog from '../components/FeedUploadAlbumDialog.vue'
+import PageLayout from '../components/layout/PageLayout.vue'
 import { listPhotoFeed, type FeedPhotoItem, type PhotoFeedCursor } from '../api/photoFeed'
 import { updatePhotoCuration, listAlbums, uploadPhoto, batchUpdateAlbumPhotos, computeFileHash, checkPhotoHash } from '../api/photos'
 import {
@@ -329,39 +330,39 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="photo-feed">
-    <div class="header">
-      <h1 class="title">Feed</h1>
-      <div class="header-actions">
-        <Button
-          v-if="hasNew"
-          label="Neue Aktivität"
-          icon="pi pi-arrow-up"
-          size="small"
-          rounded
-          @click="refresh"
-        />
-        <input
-          ref="fileInput"
-          type="file"
-          accept="image/*"
-          multiple
-          class="upload-input-hidden"
-          @change="onFilesSelected"
-        />
-        <Button
-          icon="pi pi-upload"
-          :label="uploading ? 'Lädt…' : 'Hochladen'"
-          size="small"
-          :loading="uploading"
-          :disabled="uploading"
-          @click="pickFiles"
-        />
-      </div>
-    </div>
+  <PageLayout title="Feed" width="full" :ready="!loading">
+    <template #actions>
+      <Button
+        v-if="hasNew"
+        label="Neue Aktivität"
+        icon="pi pi-arrow-up"
+        size="small"
+        rounded
+        @click="refresh"
+      />
+      <input
+        ref="fileInput"
+        type="file"
+        accept="image/*"
+        multiple
+        class="upload-input-hidden"
+        @change="onFilesSelected"
+      />
+      <Button
+        icon="pi pi-upload"
+        :label="uploading ? 'Lädt…' : 'Hochladen'"
+        size="small"
+        :loading="uploading"
+        :disabled="uploading"
+        @click="pickFiles"
+      />
+    </template>
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    </template>
 
+    <div class="photo-feed">
     <RecapFeedStrip />
 
     <div v-if="loading" class="info-text">
@@ -405,10 +406,13 @@ onBeforeUnmount(() => {
       :alt="fullscreenItem.description ?? fullscreenItem.filename"
       @close="closeFullscreen"
     />
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
+/* Page frame and title: PageLayout (issue #1272). */
+/* The stream itself stays a narrow, centred column. */
 .photo-feed {
   display: flex;
   flex-direction: column;
@@ -416,25 +420,6 @@ onBeforeUnmount(() => {
   width: 100%;
   max-width: 600px;
   margin-inline: auto;
-  padding-inline: 0.5em;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-block: 0.25rem 0.25rem;
-}
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
-}
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
 }
 .upload-input-hidden {
   display: none;

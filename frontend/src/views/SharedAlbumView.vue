@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import GuestStatusBanner from '../components/GuestStatusBanner.vue'
@@ -503,21 +504,17 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="shared-album-view" :class="{ 'shared-album-view--grid': !isMapView }">
-    <div v-if="loading" class="info-text">
-      <i class="pi pi-spin pi-spinner" /> Album wird geladen…
-    </div>
+  <PageLayout :title="album?.name || 'Geteiltes Album'" scroll="self" width="full" :ready="!loading">
+    <template #notice>
+      <Message v-if="error" severity="error">{{ error }}</Message>
 
-    <Message v-if="error" severity="error">{{ error }}</Message>
-
-    <template v-if="album">
       <!-- The full-width banner is only shown in grid view. In map
            view it would eat viewport space the map needs, so we
            replace it with compact action pills in TripMap's stats
            overlay: "Anmelden" for anonymous visitors, a user icon
            opening the account dialog for registered guests. -->
       <GuestStatusBanner
-        v-if="!isMapView && !bannerDismissed"
+        v-if="album && !isMapView && !bannerDismissed"
         :guest="guestSession.guest.value"
         :loading="guestSession.loading.value"
         :togglingNotify="guestSession.togglingNotify.value"
@@ -531,9 +528,43 @@ onUnmounted(() => {
         @toggle-push="handleTogglePush"
         @dismiss="dismissGuestBanner"
       />
+    </template>
 
-      <div v-if="!isMapView" class="shared-header">
-        <h1 class="title">{{ album.name }}</h1>
+    <template #actions>
+      <!-- Always-visible Anmelden / Account button. Mirrors the
+           guest banner CTA so the call-to-action stays reachable
+           even after the user dismissed the banner. Icon-only —
+           matches the dense look of the view-mode switch. -->
+      <button
+        v-if="album && !isMapView"
+        type="button"
+        class="shared-header-account-btn"
+        :class="{ 'shared-header-account-btn--warn': guestSession.guest.value && !guestSession.isVerified.value }"
+        :aria-label="guestSession.guest.value
+          ? (guestSession.isVerified.value
+              ? `Konto von ${guestSession.guest.value.display_name}`
+              : 'E-Mail bestätigen')
+          : 'Anmelden'"
+        :title="guestSession.guest.value
+          ? (guestSession.isVerified.value
+              ? `Konto von ${guestSession.guest.value.display_name}`
+              : 'E-Mail bestätigen')
+          : 'Anmelden'"
+        @click="guestSession.guest.value ? openAccountDialog() : openRegisterDialog()"
+      >
+        <i
+          :class="!guestSession.guest.value
+            ? 'pi pi-sign-in'
+            : guestSession.isVerified.value
+              ? 'pi pi-user'
+              : 'pi pi-exclamation-circle'"
+          aria-hidden="true"
+        />
+      </button>
+    </template>
+
+    <template #toolbar>
+      <div v-if="album && !isMapView" class="shared-header">
         <p v-if="album.description" class="description">{{ album.description }}</p>
         <span class="meta">
           {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
@@ -563,38 +594,15 @@ onUnmounted(() => {
             <span>Karte</span>
           </button>
         </div>
-
-        <!-- Always-visible Anmelden / Account button. Mirrors the
-             guest banner CTA so the call-to-action stays reachable
-             even after the user dismissed the banner. Icon-only —
-             matches the dense look of the view-mode switch. -->
-        <button
-          type="button"
-          class="shared-header-account-btn"
-          :class="{ 'shared-header-account-btn--warn': guestSession.guest.value && !guestSession.isVerified.value }"
-          :aria-label="guestSession.guest.value
-            ? (guestSession.isVerified.value
-                ? `Konto von ${guestSession.guest.value.display_name}`
-                : 'E-Mail bestätigen')
-            : 'Anmelden'"
-          :title="guestSession.guest.value
-            ? (guestSession.isVerified.value
-                ? `Konto von ${guestSession.guest.value.display_name}`
-                : 'E-Mail bestätigen')
-            : 'Anmelden'"
-          @click="guestSession.guest.value ? openAccountDialog() : openRegisterDialog()"
-        >
-          <i
-            :class="!guestSession.guest.value
-              ? 'pi pi-sign-in'
-              : guestSession.isVerified.value
-                ? 'pi pi-user'
-                : 'pi pi-exclamation-circle'"
-            aria-hidden="true"
-          />
-        </button>
       </div>
+    </template>
 
+    <div class="shared-album-body" :class="{ 'shared-album-view--grid': !isMapView }">
+    <div v-if="loading" class="info-text">
+      <i class="pi pi-spin pi-spinner" /> Album wird geladen…
+    </div>
+
+    <template v-if="album">
       <!-- Map mode -->
       <TripMap
         v-if="isMapView && album.photos.length > 0"
@@ -767,34 +775,33 @@ onUnmounted(() => {
       @toggle-notify="(v) => guestSession.toggleNotifyOptIn(v)"
       @toggle-push="handleTogglePush"
     />
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.shared-album-view {
+/* Page frame and title: PageLayout (issue #1272). */
+
+/* The one flex region below the title: the map or the virtualized grid
+   fill it and scroll on their own (scroll="self"). Carries the former
+   root state class `shared-album-view--grid`. */
+.shared-album-body {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  overflow: hidden;
-  /* --p-surface-ground/-card don't exist in Aura v4, so the old values
-     fell back to hardcoded light colours and never followed the theme.
-     --p-content-background is the semantic surface and adapts to dark. */
-  background: var(--p-content-background);
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
 }
 
 .shared-header {
-  /* Compact single-row header in raster view. The album name, photo
-     count and (when present) the raster/map switch share a flex row;
-     the description wraps onto its own line below only if it exists.
-     Far less vertical space than the previous centred stack. */
+  /* Compact single-row toolbar in raster view (PageLayout's #toolbar
+     slot): description, photo count and (when present) the raster/map
+     switch share a flex row. */
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.5rem 0.75rem;
-  padding: 0.4rem 0.75rem;
-  background: var(--p-content-background);
-  border-bottom: 1px solid var(--p-content-border-color);
-  flex-shrink: 0;
+  min-width: 0;
 }
 
 .trip-stats-sep {
@@ -851,17 +858,6 @@ onUnmounted(() => {
 
 .map-filter-button .pi {
   font-size: 0.9em;
-}
-
-.shared-header .title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin: 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1 1 auto;
 }
 
 .shared-header .description {
@@ -971,8 +967,7 @@ onUnmounted(() => {
   /* Shared header on phones: hide the view-mode button labels (icons
      stay) and tighten the description so the whole header stays on
      one or two lines. */
-  .shared-header { padding: 0.35rem 0.6rem; gap: 0.35rem 0.5rem; }
-  .shared-header .title { font-size: 1rem; }
+  .shared-header { gap: 0.35rem 0.5rem; }
   .shared-header .description {
     overflow: hidden;
     text-overflow: ellipsis;

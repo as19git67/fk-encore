@@ -1,7 +1,11 @@
 <script setup lang="ts">
+import PageLayout from '../layout/PageLayout.vue'
+
 /**
  * Page shell for the admin/settings pages that were carved out of the old
- * DataManagementView: the flex column, the page padding and the <h1>.
+ * DataManagementView. Since issue #1272 it is a thin wrapper around
+ * PageLayout (the title, the width, the document title all come from
+ * there); what remains here is the column of panels.
  *
  * The per-section look lives in `adminPanels.css` and is imported by the
  * panels themselves rather than applied from here — scoped styles do not
@@ -11,29 +15,18 @@ defineProps<{ title: string }>()
 </script>
 
 <template>
-  <div class="data-management-view">
-    <h1 class="title">{{ title }}</h1>
-    <slot />
-  </div>
+  <PageLayout :title="title" width="normal">
+    <div class="admin-panels">
+      <slot />
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.data-management-view {
-  gap: 1rem;
+.admin-panels {
   display: flex;
   flex-direction: column;
-  padding-inline: 0.25em;
-}
-
-@media (min-width: 800px) {
-  .data-management-view {
-    margin-inline: 0.5em;
-  }
-}
-
-.data-management-view .title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
+  gap: var(--space-4);
+  min-width: 0;
 }
 </style>

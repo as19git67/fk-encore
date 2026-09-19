@@ -8,6 +8,8 @@
  * page linked from the feature, not a module manual.
  */
 import Button from 'primevue/button'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import { useModuleBack } from '../composables/useModuleBack'
 
 const { goBack } = useModuleBack('/zaehler', 'zaehler-list')
@@ -22,11 +24,10 @@ const examples = [
 </script>
 
 <template>
-  <div class="help-view">
-    <div class="header">
+  <PageLayout title="Gradtage und Witterungsbereinigung" width="normal">
+    <template #actions>
       <Button icon="pi pi-arrow-left" label="Zurück" text @click="goBack" />
-      <h1 class="title"><i class="pi pi-question-circle" /> Gradtage und Witterungsbereinigung</h1>
-    </div>
+    </template>
 
     <p class="intro">
       „Wir haben mehr geheizt als letztes Jahr“ heißt meistens nur: es war
@@ -55,7 +56,7 @@ const examples = [
           Tagesmittel draußen.
         </li>
       </ul>
-      <div class="table-scroll">
+      <ScrollX class="table-scroll">
         <table class="help-table">
           <thead>
             <tr>
@@ -72,7 +73,7 @@ const examples = [
             </tr>
           </tbody>
         </table>
-      </div>
+      </ScrollX>
       <p class="hint">
         Zur Einordnung: Ein deutscher Januar liegt meist zwischen 500 und
         650 Kd, der Juli nahe null, ein ganzes Jahr etwa zwischen 3000 und
@@ -192,39 +193,15 @@ const examples = [
         </div>
       </div>
     </section>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.help-view {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  width: 100%;
-  max-width: 880px;
-  margin: 0 auto;
-  padding-inline: 0.5em;
-}
-
-@media (min-width: 800px) {
-  .help-view { padding-inline: 1em; }
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-block: 0.25rem 0.5rem;
-  flex-wrap: wrap;
-}
-
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
+/* Page frame and title: PageLayout (issue #1272). */
+/* The old root was a flex column with gap: 1rem; keep that rhythm. */
+.intro,
+.help-section {
+  margin-bottom: 1rem;
 }
 
 .intro {
@@ -283,8 +260,6 @@ const examples = [
 }
 
 .table-scroll {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
   margin: 0.4rem 0;
 }
 

@@ -7,6 +7,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
+import PageLayout from '../../components/layout/PageLayout.vue'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import {
@@ -428,9 +429,8 @@ async function del() {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>{{ isNew ? 'Bankkontakt anlegen' : bc?.name ?? 'Bankkontakt' }}</h1>
+  <PageLayout :title="isNew ? 'Bankkontakt anlegen' : bc?.name ?? 'Bankkontakt'" width="normal">
+    <template #actions>
       <Button
         label="Zurück"
         icon="pi pi-arrow-left"
@@ -438,11 +438,13 @@ async function del() {
         text
         @click="router.push({ name: 'finance-bankcontacts' })"
       />
-    </header>
+    </template>
 
-    <Message v-if="errorMsg" severity="error" :closable="true" @close="errorMsg = null">
-      {{ errorMsg }}
-    </Message>
+    <template #notice>
+      <Message v-if="errorMsg" severity="error" :closable="true" @close="errorMsg = null">
+        {{ errorMsg }}
+      </Message>
+    </template>
 
     <section class="card">
       <h2>Stammdaten</h2>
@@ -643,22 +645,12 @@ async function del() {
     </section>
 
     <TanDialog />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.5rem;
-  max-width: 48rem;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 @media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
-    gap: 0.75rem;
-  }
   .card {
     padding: 0.75rem;
   }
@@ -680,13 +672,8 @@ async function del() {
     min-width: 0;
   }
 }
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.page-header h1 {
-  margin: 0;
+.card + .card {
+  margin-top: 1rem;
 }
 .card {
   border: 1px solid var(--p-content-border-color);
@@ -856,5 +843,10 @@ async function del() {
 }
 .danger-zone {
   border-color: var(--p-red-500);
+}
+@media (max-width: 640px) {
+  .card + .card {
+    margin-top: 0.75rem;
+  }
 }
 </style>

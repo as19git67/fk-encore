@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
+import PageLayout from '../../components/layout/PageLayout.vue'
 import { useModuleBack } from '../../composables/useModuleBack'
 
 const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
 </script>
 
 <template>
-  <div class="help-view">
-    <div class="header">
+  <PageLayout title="Bankkontakte – Hilfe" width="normal">
+    <template #actions>
       <Button icon="pi pi-arrow-left" label="Zurück" text @click="goBack" />
-      <h1 class="title"><i class="pi pi-question-circle" /> Bankkontakte – Hilfe</h1>
-    </div>
+    </template>
 
     <p class="intro">
       Ein <strong>Bankkontakt</strong> ist die Verbindung von fk-encore zur
@@ -209,41 +209,13 @@ const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
         </li>
       </ul>
     </section>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.help-view {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  width: 100%;
-  max-width: 880px;
-  margin: 0 auto;
-  padding-inline: 0.5em;
-}
-
-@media (min-width: 800px) {
-  .help-view { padding-inline: 1em; }
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-block: 0.25rem 0.5rem;
-  flex-wrap: wrap;
-}
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
+/* Page frame and title: PageLayout (issue #1272). */
 .intro {
+  margin: 0 0 1rem;
   font-size: 1rem;
   line-height: 1.5;
   color: var(--p-text-color);
@@ -254,6 +226,7 @@ const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
 }
 
 .help-section {
+  margin-bottom: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;

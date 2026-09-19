@@ -1088,8 +1088,7 @@ Regeln:
 
 - Keine View definiert eigenes Header-/Toolbar-Layout, `position: sticky`
   oder `top:`-Offsets. Die Stack-Höhe liefert `--app-stack-height`
-  (von `App.vue` gemessen); `--menubar-height` ist nur noch ein Alias für
-  noch nicht migrierte Views.
+  (von `App.vue` gemessen). `--menubar-height` gibt es nicht mehr.
 - Die Seite scrollt nie horizontal (`overflow-x: clip` auf `body`). Breite
   Inhalte (Tabellen, Streifen) gehören in `components/layout/ScrollX.vue`.
 - Abstände aus `--space-1` … `--space-6`, Seitenränder aus `--page-gutter`.

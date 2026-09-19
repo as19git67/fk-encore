@@ -24,6 +24,7 @@ import FilterMenu from '../components/FilterMenu.vue'
 import FilterChips from '../components/FilterChips.vue'
 import SortMenu from '../components/SortMenu.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
+import PageLayout from '../components/layout/PageLayout.vue'
 import { useFilter } from '../composables/useFilter'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { matchesPhotoFilter, type PhotoFilterContext } from '../utils/photoFilter'
@@ -174,6 +175,17 @@ const headerDateRange = computed(() => {
     return `${start} – ${end}`
   }
   return `${od.toLocaleDateString()} – ${nd.toLocaleDateString()}`
+})
+
+/** Photo count and date range under the title (PageLayout's hint line). */
+const headerHint = computed(() => {
+  if (!album.value) return undefined
+  const count = galleryTotal.value || album.value.photo_count
+  let hint = `${count} ${count === 1 ? 'Foto' : 'Fotos'}`
+  if (album.value.oldest_photo_at && album.value.newest_photo_at) {
+    hint += ` \u2022 ${headerDateRange.value}`
+  }
+  return hint
 })
 
 // Per-album persisted view mode (raster vs map) for map-enabled albums, so
@@ -2480,51 +2492,39 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 </script>
 
 <template>
-  <div
-    class="album-detail-view"
+  <PageLayout
+    :title="album ? album.name : 'Album'"
+    :hint="headerHint"
+    scroll="self"
+    width="full"
+    :ready="!loading"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Drag overlay -->
-    <div v-if="isDragging" class="drag-overlay">
-      <div class="drag-message">
-        <i class="pi pi-upload" />
-        <span>Fotos zum Hochladen hier ablegen</span>
-      </div>
-    </div>
+    <template #actions>
+      <template v-if="album">
+        <Button
+          icon="pi pi-arrow-left"
+          size="small"
+          text
+          rounded
+          class="header__back"
+          :aria-label="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
+          v-tooltip="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
+          @click="navigateBackToAlbums"
+        />
+        <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
+      </template>
+    </template>
 
-    <ServiceStatusBar />
-
-    <div v-if="album" class="subheader">
-      <div class="header">
-        <!-- 1. Album name + role badge -->
-        <div class="header__title-group">
-          <Button
-            icon="pi pi-arrow-left"
-            size="small"
-            text
-            rounded
-            class="header__back"
-            :aria-label="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
-            v-tooltip="cameFromFeed ? 'Zurück zum Feed' : 'Zurück zur Albumübersicht'"
-            @click="navigateBackToAlbums"
-          />
-          <h1 class="header__title">{{ album.name }}</h1>
-          <span :class="['header__badge', `header__badge--${album.role}`]">{{ album.role }}</span>
-        </div>
-
-        <!-- 2. Metadata -->
-        <div class="header__meta">
-          {{ galleryTotal || album.photo_count }}<span class="header__meta-unit">&nbsp;{{ (galleryTotal || album.photo_count) === 1 ? 'Foto' : 'Fotos' }}</span>
-          <template v-if="album.oldest_photo_at && album.newest_photo_at">
-            &bull; {{ headerDateRange }}
-          </template>
-        </div>
-
-        <!-- 5./6. Combined toolbar: filter/sort controls and album actions
-             share the full width and overflow into a dropdown when tight. -->
+    <!-- Sticky part (lifted into the app stack by PageLayout): the combined
+         filter/sort/actions toolbar, the album search and the chips. -->
+    <template #toolbar>
+      <template v-if="album">
+        <!-- Combined toolbar: filter/sort controls and album actions share
+             the full width and overflow into a dropdown when tight. -->
         <ResponsiveToolbar class="header__toolbar" :items="toolbarItems" />
 
         <!-- Hidden file input driven by the "Hochladen" toolbar item. -->
@@ -2554,20 +2554,42 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           />
           <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
         </div>
-      </div>
 
-      <div v-if="activeCount > 0 || !isSortDefault" class="chip-row">
-        <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
-        <Chip
-          v-if="!isSortDefault"
-          :label="sortChipLabel"
-          removable
-          @remove="onResetSort"
-        />
-        <Chip
-          v-if="activeCount > 0 && rawAlbumPhotos.length > 0"
-          :label="`${filteredAlbumPhotoCount} von ${rawAlbumPhotos.length}`"
-        />
+        <div v-if="activeCount > 0 || !isSortDefault" class="chip-row">
+          <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
+          <Chip
+            v-if="!isSortDefault"
+            :label="sortChipLabel"
+            removable
+            @remove="onResetSort"
+          />
+          <Chip
+            v-if="activeCount > 0 && rawAlbumPhotos.length > 0"
+            :label="`${filteredAlbumPhotoCount} von ${rawAlbumPhotos.length}`"
+          />
+        </div>
+      </template>
+    </template>
+
+    <template #notice>
+      <ServiceStatusBar />
+      <Message v-if="error" severity="error" @close="error = ''; uploadErrors = []">
+        {{ error }}
+        <button
+          v-if="uploadErrors.length > 3"
+          class="error-flyout-btn"
+          @click="showErrorFlyout = !showErrorFlyout"
+        >
+          <i class="pi pi-list" /> Details anzeigen
+        </button>
+      </Message>
+    </template>
+
+    <!-- Drag overlay -->
+    <div v-if="isDragging" class="drag-overlay">
+      <div class="drag-message">
+        <i class="pi pi-upload" />
+        <span>Fotos zum Hochladen hier ablegen</span>
       </div>
     </div>
 
@@ -2591,17 +2613,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @reset="onResetSort"
     />
 
-    <Message v-if="error" severity="error" @close="error = ''; uploadErrors = []">
-      {{ error }}
-      <button
-        v-if="uploadErrors.length > 3"
-        class="error-flyout-btn"
-        @click="showErrorFlyout = !showErrorFlyout"
-      >
-        <i class="pi pi-list" /> Details anzeigen
-      </button>
-    </Message>
-
     <!-- Error flyout -->
     <div
       v-if="showErrorFlyout && uploadErrors.length > 0"
@@ -2621,148 +2632,153 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       </div>
     </div>
 
-    <!-- Upload progress bar — sticky so it stays visible while scrolling on iOS -->
-    <div v-if="uploading" class="upload-progress-bar">
-      <div class="upload-progress-bar__info">
-        <i class="pi pi-upload" />
-        <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
-        <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
-      </div>
-      <div class="upload-progress-bar__track">
-        <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
-      </div>
-    </div>
-
-    <!-- Upload success message -->
-    <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
-      <i class="pi pi-check-circle" />
-      <span>{{ uploadResultMessage }}</span>
-    </div>
-
-    <div v-if="loading && !album" class="info-text">
-      <i class="pi pi-spin pi-spinner" /> Album wird geladen…
-    </div>
-
-    <!-- Map mode -->
-    <TripMap
-      v-if="album && viewMode === 'map' && albumPhotos.length > 0"
-      ref="tripMapRef"
-      :photos="albumPhotosFiltered"
-      :albumName="album.name"
-      :albumDescription="album.description"
-      @open-fullscreen="handleMapFullscreen"
-      @stop-selected="handleMapStopSelected"
-    />
-
-    <!-- Two-column layout: VirtualGallery | Sidebar -->
-    <div v-else-if="album" class="gallery-layout">
-      <!-- CENTER: virtualized photo grid -->
-      <div class="grid-area">
-        <VirtualGallery
-          ref="galleryRef"
-          :around-photo-id="galleryAnchorPhotoId"
-          :filter="albumGridFilter"
-          :sort-by="sortByForGallery"
-          :sort-dir="sortDirForGallery"
-          :search-photo-ids="searchPhotoIds"
-          :select-mode="selectMode"
-          :selected-ids="selectedIds"
-          :cursor-index="cursorIndex"
-          @photo-click="handleGridPhotoClick"
-          @stack-click="handleGridStackClick"
-          @toggle-select="onToggleSelect"
-          @loaded="onGalleryLoaded"
-          @ends-changed="onGridEndsChanged"
-        />
-      </div>
-
-      <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
-      <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
-        <div class="sidebar-sheet-header">
-          <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
-            <i class="pi pi-times" />
-          </button>
+    <!-- In-flow body: progress bars, map or grid row and the floating
+         selection tray. The wrapper is the positioned box the tray is
+         anchored to. -->
+    <div class="album-body">
+      <!-- Upload progress bar — sticky so it stays visible while scrolling on iOS -->
+      <div v-if="uploading" class="upload-progress-bar">
+        <div class="upload-progress-bar__info">
+          <i class="pi pi-upload" />
+          <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
+          <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
         </div>
-        <PhotoDetailSidebar
-          v-if="cursorPhoto"
-          :photo="cursorPhoto"
-          :curation-stats="cursorCurationStats"
-          :can-delete="canDeletePhotos || canWrite"
-          :can-upload="canUploadPhotos"
-          :faces="detectedFaces"
-          :is-editing-date="isEditingDate"
-          v-model:editDate="editDate"
-          :loading-faces="loadingFaces"
-          :poi-matches="detectedPoiMatches"
-          :loading-poi-matches="loadingPoiMatches"
-          :persons="persons"
-          :reindexing-photo="reindexingPhoto"
-          :updating-date="updatingDate"
-          :album-id="albumId"
-          :cover-photo-id="effectiveCoverPhotoId"
-          :album-role="album.role"
-          :show-persons="showPersons"
-          :limit-albums-shown="true"
-          :face-service-available="serviceHealth.faceServiceAvailable"
-          @update:cover-photo-id="handleCoverPhotoIdUpdate"
-          @fullscreen="cursorIndex !== null && openGridFullscreenAt(cursorIndex)"
-          @toggle-favorite="handleToggleFavorite"
-          @comment-count-change="onCommentCountChange"
-          @hide="handleHidePhoto"
-          @restore="handleRestorePhoto"
-          @start-edit-date="startEditingDate"
-          @update-date="handleUpdateDate"
-          @cancel-edit-date="isEditingDate = false"
-          @ignore-face="handleIgnoreFaceInSidebar"
-          @reindex="handleReindexPhoto"
-          @link-visibility-changed="onLinkVisibilityChanged"
-          @share="shareSinglePhoto"
-          :sharing="sharingPhotos"
-        />
+        <div class="upload-progress-bar__track">
+          <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
+        </div>
       </div>
-    </div>
 
-    <div v-else-if="album" class="info-text">Keine Fotos in dieser Ansicht.</div>
-
-    <!-- Compact selection tray (grid mode only). Its popup holds the batch
-         actions, so selecting photos no longer consumes a multi-row footer. -->
-    <div v-if="selectMode && viewMode === 'grid'" class="select-bar">
-      <!-- The shift hint appears exactly when it becomes useful — one photo
-           is selected, so there is an anchor to span from — and goes away
-           again as soon as the user has clearly found the feature. -->
-      <span class="select-count">
-        <i :class="rangeSelectBusy ? 'pi pi-spin pi-spinner' : 'pi pi-check-square'" />
-        {{
-          rangeSelectBusy
-          ? 'Bereich wird ausgewählt …'
-          : selectedCount === 1
-          ? '1 ausgewählt · Umschalt+Klick wählt den Bereich'
-          : selectedCount > 0
-          ? `${selectedCount} ausgewählt`
-          : 'Fotos antippen zum Auswählen'
-        }}
-      </span>
-      <div class="select-actions">
-        <Button
-          label="Aktionen"
-          icon="pi pi-ellipsis-v"
-          size="small"
-          severity="secondary"
-          outlined
-          @click="toggleSelectionMenu"
-        />
-        <Button
-          icon="pi pi-times"
-          size="small"
-          severity="secondary"
-          text
-          rounded
-          aria-label="Auswahl beenden"
-          v-tooltip.top="'Auswahl beenden'"
-          @click="exitSelectMode"
-        />
+      <!-- Upload success message -->
+      <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
+        <i class="pi pi-check-circle" />
+        <span>{{ uploadResultMessage }}</span>
       </div>
-      <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" :pt="{ root: { class: 'selection-actions-menu' } }" />
+
+      <div v-if="loading && !album" class="info-text">
+        <i class="pi pi-spin pi-spinner" /> Album wird geladen…
+      </div>
+
+      <!-- Map mode -->
+      <TripMap
+        v-if="album && viewMode === 'map' && albumPhotos.length > 0"
+        ref="tripMapRef"
+        :photos="albumPhotosFiltered"
+        :albumName="album.name"
+        :albumDescription="album.description"
+        @open-fullscreen="handleMapFullscreen"
+        @stop-selected="handleMapStopSelected"
+      />
+
+      <!-- Two-column layout: VirtualGallery | Sidebar -->
+      <div v-else-if="album" class="gallery-layout">
+        <!-- CENTER: virtualized photo grid -->
+        <div class="grid-area">
+          <VirtualGallery
+            ref="galleryRef"
+            :around-photo-id="galleryAnchorPhotoId"
+            :filter="albumGridFilter"
+            :sort-by="sortByForGallery"
+            :sort-dir="sortDirForGallery"
+            :search-photo-ids="searchPhotoIds"
+            :select-mode="selectMode"
+            :selected-ids="selectedIds"
+            :cursor-index="cursorIndex"
+            @photo-click="handleGridPhotoClick"
+            @stack-click="handleGridStackClick"
+            @toggle-select="onToggleSelect"
+            @loaded="onGalleryLoaded"
+            @ends-changed="onGridEndsChanged"
+          />
+        </div>
+
+        <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
+        <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+          <div class="sidebar-sheet-header">
+            <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
+              <i class="pi pi-times" />
+            </button>
+          </div>
+          <PhotoDetailSidebar
+            v-if="cursorPhoto"
+            :photo="cursorPhoto"
+            :curation-stats="cursorCurationStats"
+            :can-delete="canDeletePhotos || canWrite"
+            :can-upload="canUploadPhotos"
+            :faces="detectedFaces"
+            :is-editing-date="isEditingDate"
+            v-model:editDate="editDate"
+            :loading-faces="loadingFaces"
+            :poi-matches="detectedPoiMatches"
+            :loading-poi-matches="loadingPoiMatches"
+            :persons="persons"
+            :reindexing-photo="reindexingPhoto"
+            :updating-date="updatingDate"
+            :album-id="albumId"
+            :cover-photo-id="effectiveCoverPhotoId"
+            :album-role="album.role"
+            :show-persons="showPersons"
+            :limit-albums-shown="true"
+            :face-service-available="serviceHealth.faceServiceAvailable"
+            @update:cover-photo-id="handleCoverPhotoIdUpdate"
+            @fullscreen="cursorIndex !== null && openGridFullscreenAt(cursorIndex)"
+            @toggle-favorite="handleToggleFavorite"
+            @comment-count-change="onCommentCountChange"
+            @hide="handleHidePhoto"
+            @restore="handleRestorePhoto"
+            @start-edit-date="startEditingDate"
+            @update-date="handleUpdateDate"
+            @cancel-edit-date="isEditingDate = false"
+            @ignore-face="handleIgnoreFaceInSidebar"
+            @reindex="handleReindexPhoto"
+            @link-visibility-changed="onLinkVisibilityChanged"
+            @share="shareSinglePhoto"
+            :sharing="sharingPhotos"
+          />
+        </div>
+      </div>
+
+      <div v-else-if="album" class="info-text">Keine Fotos in dieser Ansicht.</div>
+
+      <!-- Compact selection tray (grid mode only). Its popup holds the batch
+           actions, so selecting photos no longer consumes a multi-row footer. -->
+      <div v-if="selectMode && viewMode === 'grid'" class="select-bar">
+        <!-- The shift hint appears exactly when it becomes useful — one photo
+             is selected, so there is an anchor to span from — and goes away
+             again as soon as the user has clearly found the feature. -->
+        <span class="select-count">
+          <i :class="rangeSelectBusy ? 'pi pi-spin pi-spinner' : 'pi pi-check-square'" />
+          {{
+            rangeSelectBusy
+            ? 'Bereich wird ausgewählt …'
+            : selectedCount === 1
+            ? '1 ausgewählt · Umschalt+Klick wählt den Bereich'
+            : selectedCount > 0
+            ? `${selectedCount} ausgewählt`
+            : 'Fotos antippen zum Auswählen'
+          }}
+        </span>
+        <div class="select-actions">
+          <Button
+            label="Aktionen"
+            icon="pi pi-ellipsis-v"
+            size="small"
+            severity="secondary"
+            outlined
+            @click="toggleSelectionMenu"
+          />
+          <Button
+            icon="pi pi-times"
+            size="small"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Auswahl beenden"
+            v-tooltip.top="'Auswahl beenden'"
+            @click="exitSelectMode"
+          />
+        </div>
+        <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" :pt="{ root: { class: 'selection-actions-menu' } }" />
+      </div>
     </div>
 
     <!-- Mobile: Backdrop zum Schließen von Drawern -->
@@ -3166,8 +3182,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         <Button label="OK" @click="showDeleteSkippedDialog = false" />
       </template>
     </Dialog>
-
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
@@ -3189,32 +3204,16 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   border-top: 1px solid var(--p-content-border-color);
 }
 
-.album-detail-view {
+/* Page frame and title: PageLayout (issue #1272). */
+
+/* The in-flow body below the sticky stack: the positioned box the floating
+   selection tray is anchored to; map or grid row inside takes the rest. */
+.album-body {
+  position: relative;
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - var(--menubar-height, 3.5em));
-  overflow: hidden;
-  position: relative;
-}
-
-@media (min-width: 800px) {
-  .album-detail-view { margin-inline: 0.5em; }
-}
-
-.subheader {
-  flex-shrink: 0;
-  background: var(--p-content-background);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-}
-
-/* ── Flat header flex container ────────────────────────────────────────── */
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75em 1em;
-  gap: 0.5em 0.75em;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .header__actions { display: flex; align-items: center; gap: 0.25em; flex-wrap: wrap; }
@@ -3392,18 +3391,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 .settings-footer { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
 .settings-footer__spacer { flex: 1; }
 
-.header__title-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-}
-
-.header__title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin: 0;
-}
-
 .header__badge {
   font-size: 0.75em;
   padding: 0.2em 0.5em;
@@ -3419,33 +3406,24 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   .header__badge--contributor { background: var(--p-green-900); color: var(--p-green-200); }
 }
 
-.header__meta {
-  font-size: 0.85em;
-  color: var(--p-text-muted-color);
-  white-space: nowrap;
-}
-
 .header__filter { display: flex; align-items: center; gap: 0.5em; }
 
-/* The responsive toolbar takes its own full-width row inside the wrapping
-   header, so its items span the whole width and overflow into a dropdown. */
-.header__toolbar { flex-basis: 100%; }
+/* The responsive toolbar spans the sticky row, so its items take the whole
+   width and overflow into a dropdown. */
+.header__toolbar { flex-basis: 100%; min-width: 0; }
 
 .chip-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
-  padding: 0 1em 0.5em;
 }
 
-/* ── Album-scoped natural search bar (inside subheader) ──────────────────── */
+/* ── Album-scoped natural search bar (in the sticky toolbar) ──────────────────── */
 .album-search {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  /* Own full-width row below the toolbar inside the wrapping header. */
-  flex-basis: 100%;
 }
 
 /* ── Two-column layout ──────────────────────────────────────────────────── */
@@ -3483,19 +3461,14 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 }
 
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
-/* Phone + portrait: compact the header metadata so it stops wrapping onto a
-   second line. The "Fotos" unit word is dropped here (the count alone is
-   clear) and the role badge shrinks; the date range is shortened in
+/* Phone + portrait: the role badge shrinks; the date range is shortened in
    `headerDateRange` (kept in sync with this same media query). */
 @media (max-width: 768px) and (orientation: portrait) {
   .header__badge { font-size: 0.6em; }
-  .header__meta-unit { display: none; }
 }
 
 @media (max-width: 768px) {
   .mobile-backdrop { display: block; }
-
-  .album-detail-view { margin-inline: 0; }
 
   .sidebar-sheet {
     display: block;
@@ -3503,7 +3476,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     bottom: 0;
     left: 0;
     right: 0;
-    max-height: calc(100dvh - var(--menubar-height, 3.5em));
+    max-height: calc(100dvh - var(--app-stack-height, 0px));
     z-index: var(--z-mobile-drawer);
     background: var(--p-content-background);
     border-radius: 16px 16px 0 0;
@@ -3552,10 +3525,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
   /* Put action icons on the same row as the filter button */
   .header__actions { order: 11; }
-
-  /* Compact header on mobile */
-  .header { padding: 0.35em 0.65em; gap: 0.25em 0.5em; }
-  .header__title { font-size: 1.1em; }
 
   /* Icon-only filter & sort buttons on mobile — labels would push the
      header onto a second row on phones. The aria-label / tooltip

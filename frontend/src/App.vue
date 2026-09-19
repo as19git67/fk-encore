@@ -201,8 +201,7 @@ async function handleLogout() {
 // Navbar, submenu row and whatever the active view lifted into
 // #module-subheaders form one sticky block. Its height is measured here and
 // published as `--app-stack-height`, so no view computes a `top:` or a
-// `calc(100dvh - …)` of its own. `--menubar-height` stays as an alias for the
-// views not yet on PageLayout (issue #1272, stage 2 removes it).
+// `calc(100dvh - …)` of its own.
 const appContainerRef = ref<HTMLElement | null>(null)
 const toolbarStackRef = ref<HTMLElement | null>(null)
 let stackObserver: ResizeObserver | null = null
@@ -213,7 +212,6 @@ function publishStackHeight() {
   const height = toolbarStackRef.value?.getBoundingClientRect().height ?? 0
   const value = `${Math.round(height)}px`
   container.style.setProperty('--app-stack-height', value)
-  container.style.setProperty('--menubar-height', value)
 }
 
 function observeStack() {

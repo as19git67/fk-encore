@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   listTaxHints,
   updateTaxHint,
@@ -143,20 +144,21 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="tax-hints-view">
-    <h1 class="title">Steuer-Hints für die Klassifizierung</h1>
+  <PageLayout title="Steuer-Hints für die Klassifizierung" width="normal" :ready="!loading">
+    <template #notice>
+      <Message v-if="!canManage" severity="warn" :closable="false" class="mb">
+        Keine Berechtigung (documents.manage_taxonomy).
+      </Message>
+      <Message v-if="error" severity="error" :closable="false" class="mb">{{ error }}</Message>
+      <Message v-if="infoMessage" severity="success" :closable="true" class="mb">{{ infoMessage }}</Message>
+    </template>
+
     <p class="subtitle">
       Diese Texte werden dem LLM pro Anlage als Beispielbeschreibung mitgegeben.
       Je konkreter der Hint (typische Belege, Absender, Abgrenzungen), desto
       zuverlässiger landet ein Dokument in der richtigen Anlage. Änderungen
       wirken sofort beim nächsten Klassifizierungslauf.
     </p>
-
-    <Message v-if="!canManage" severity="warn" :closable="false" class="mb">
-      Keine Berechtigung (documents.manage_taxonomy).
-    </Message>
-    <Message v-if="error" severity="error" :closable="false" class="mb">{{ error }}</Message>
-    <Message v-if="infoMessage" severity="success" :closable="true" class="mb">{{ infoMessage }}</Message>
 
     <div v-if="loading" class="loading">Lade …</div>
 
@@ -241,21 +243,11 @@ onMounted(loadData)
         />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.tax-hints-view {
-  padding: 1rem;
-  max-width: 960px;
-}
-
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
-}
-
+/* Page frame and title: PageLayout (issue #1272). */
 .subtitle {
   color: var(--p-text-muted-color);
   max-width: 70ch;

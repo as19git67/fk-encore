@@ -14,6 +14,7 @@ import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   createCollection,
   deleteCollection,
@@ -94,29 +95,25 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="collections-view">
-    <header class="cv-header">
-      <div>
-        <h2 class="cv-title">
-          Sammelmappen
-          <span class="cv-count">({{ items.length }})</span>
-        </h2>
-        <p class="cv-sub">
-          Mehrere Dokumente zusammenfassen und als ein PDF weitergeben.
-          Ein Dokument darf in mehreren Mappen liegen.
-        </p>
-      </div>
-      <div class="cv-header-actions">
-        <Button icon="pi pi-plus" label="Neue Mappe" @click="openCreate" />
-        <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
-      </div>
-    </header>
+  <PageLayout
+    title="Sammelmappen"
+    :hint="`${items.length} Mappen · Mehrere Dokumente zusammenfassen und als ein PDF weitergeben. Ein Dokument darf in mehreren Mappen liegen.`"
+    width="normal"
+    :ready="!loading"
+  >
+    <template #actions>
+      <Button icon="pi pi-plus" label="Neue Mappe" @click="openCreate" />
+      <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
+    </template>
 
-    <Message v-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
-    <Message v-if="loadError" severity="error" closable @close="loadError = ''">
-      {{ loadError }}
-    </Message>
+    <template #notice>
+      <Message v-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
+      <Message v-if="loadError" severity="error" closable @close="loadError = ''">
+        {{ loadError }}
+      </Message>
+    </template>
 
+    <div class="content">
     <div v-if="!loading && items.length === 0 && !loadError" class="cv-empty">
       <i class="pi pi-folder" />
       <p>Noch keine Sammelmappe angelegt.</p>
@@ -155,6 +152,7 @@ onMounted(load)
         />
       </li>
     </ul>
+    </div>
 
     <Dialog
       v-model:visible="createOpen"
@@ -179,44 +177,15 @@ onMounted(load)
         />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.collections-view {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px;
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-.cv-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-.cv-header-actions {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.cv-title {
-  font-size: 1.4rem;
-  font-weight: 600;
-  margin: 0;
-}
-.cv-count {
-  font-weight: 400;
-  color: var(--p-text-muted-color);
-  margin-left: 6px;
-}
-.cv-sub {
-  margin: 4px 0 0;
-  color: var(--p-text-muted-color);
-  font-size: 0.85rem;
-  max-width: 62ch;
 }
 .cv-empty {
   text-align: center;

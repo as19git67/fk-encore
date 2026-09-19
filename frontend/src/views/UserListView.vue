@@ -9,6 +9,8 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import {
   listUsers,
   listInvites,
@@ -95,9 +97,8 @@ function onRowClick(event: any) {
 </script>
 
 <template>
-  <div class="user-list-view">
-    <div class="header">
-      <h1 class="title">Benutzer</h1>
+  <PageLayout title="Benutzer" width="wide" :ready="!loading">
+    <template #actions>
       <Button
         v-if="mayInvite"
         label="Einladen"
@@ -105,17 +106,21 @@ function onRowClick(event: any) {
         size="small"
         @click="openInviteDialog"
       />
-    </div>
+    </template>
 
-    <Message
-      v-if="inviteNotice"
-      severity="success"
-      :closable="true"
-      @close="inviteNotice = ''"
-    >
-      {{ inviteNotice }}
-    </Message>
+    <template #notice>
+      <Message
+        v-if="inviteNotice"
+        severity="success"
+        :closable="true"
+        @close="inviteNotice = ''"
+      >
+        {{ inviteNotice }}
+      </Message>
+    </template>
 
+    <div class="user-list-view">
+    <ScrollX>
     <DataTable
       :value="users"
       :loading="loading"
@@ -142,9 +147,11 @@ function onRowClick(event: any) {
         </template>
       </Column>
     </DataTable>
+    </ScrollX>
 
     <section v-if="mayInvite && invites.length > 0" class="invites">
       <h2 class="subtitle">Einladungen</h2>
+      <ScrollX>
       <DataTable :value="invites" :loading="invitesLoading" striped-rows>
         <Column field="email" header="E-Mail" />
         <Column header="Status" style="width: 10rem">
@@ -170,6 +177,7 @@ function onRowClick(event: any) {
           </template>
         </Column>
       </DataTable>
+      </ScrollX>
     </section>
 
     <Dialog v-model:visible="dialogOpen" modal header="Benutzer einladen" :style="{ width: '26rem' }">
@@ -188,33 +196,16 @@ function onRowClick(event: any) {
         <Button type="submit" label="Einladung verschicken" icon="pi pi-send" :loading="inviting" fluid />
       </form>
     </Dialog>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
+/* Page frame and title: PageLayout (issue #1272). */
 .user-list-view {
   gap: 1rem;
   display: flex;
   flex-direction: column;
-}
-
-@media (min-width: 800px) {
-  .user-list-view {
-    margin-inline: 0.5em;
-  }
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.user-list-view .title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
 }
 
 .subtitle {

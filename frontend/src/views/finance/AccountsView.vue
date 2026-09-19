@@ -10,6 +10,8 @@ import Select from 'primevue/select'
 import ToggleSwitch from 'primevue/toggleswitch'
 import DatePicker from 'primevue/datepicker'
 import Message from 'primevue/message'
+import PageLayout from '../../components/layout/PageLayout.vue'
+import ScrollX from '../../components/layout/ScrollX.vue'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
 import { useAuthStore } from '../../stores/auth'
@@ -165,27 +167,28 @@ function goToManualBooking() {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Konten</h1>
+  <PageLayout title="Konten" width="wide" :ready="!store.loading">
+    <template #actions>
       <Button
         v-if="canWrite"
         label="Neues Konto"
         icon="pi pi-plus"
         @click="openEdit()"
       />
-    </header>
+    </template>
 
-    <Message v-if="store.error" severity="error" :closable="false">
-      {{ store.error }}
-    </Message>
+    <template #notice>
+      <Message v-if="store.error" severity="error" :closable="false">
+        {{ store.error }}
+      </Message>
+      <Message v-if="showAclEmptyHint" severity="info" :closable="false">
+        Du hast noch keine Konten freigeschaltet. Bitte wende dich an einen
+        Administrator — er kann dir über „Konto-Zugriff" Lese- oder
+        Schreibrechte für einzelne Konten vergeben.
+      </Message>
+    </template>
 
-    <Message v-if="showAclEmptyHint" severity="info" :closable="false">
-      Du hast noch keine Konten freigeschaltet. Bitte wende dich an einen
-      Administrator — er kann dir über „Konto-Zugriff" Lese- oder
-      Schreibrechte für einzelne Konten vergeben.
-    </Message>
-
+    <ScrollX>
     <DataTable
       :value="store.items"
       :loading="store.loading"
@@ -225,6 +228,7 @@ function goToManualBooking() {
         </template>
       </Column>
     </DataTable>
+    </ScrollX>
 
     <Dialog
       v-model:visible="editDialogVisible"
@@ -325,33 +329,11 @@ function goToManualBooking() {
         />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.5rem;
-}
-/* Tight padding on narrow screens — same pattern as the photo/album
- * views, so the grid meets the viewport edges instead of wasting half
- * the screen on chrome. */
-@media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
-    gap: 0.75rem;
-  }
-}
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.page-header h1 {
-  margin: 0;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 .manual-hint {
   color: var(--p-text-muted-color);
   font-style: italic;

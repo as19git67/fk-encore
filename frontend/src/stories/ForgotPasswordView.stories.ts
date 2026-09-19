@@ -18,13 +18,13 @@ type Story = StoryObj<typeof ForgotPasswordView>
 
 function withRoute(targetPath: string) {
   return (story: any) => ({
-    components: { Story: story() },
     setup() {
+      const StoryComponent = story()
       const router = useRouter()
       if (router.currentRoute.value.fullPath !== targetPath) {
         router.push(targetPath).catch(() => {})
       }
-      return () => h('Story')
+      return () => h(StoryComponent)
     },
   })
 }

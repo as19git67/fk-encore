@@ -12,6 +12,8 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import Chip from 'primevue/chip'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import {
   listLibraries,
   listAvailablePaths,
@@ -374,9 +376,26 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="libraries-view">
-    <h1 class="title">Externe Bibliotheken</h1>
+  <PageLayout title="Externe Bibliotheken" width="normal" :ready="!loading">
+    <template #actions>
+      <Button
+        v-if="auth.hasPermission('photos.libraries.manage')"
+        label="Neue Bibliothek"
+        icon="pi pi-plus"
+        @click="openCreateDialog"
+      />
+    </template>
 
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="true" class="multiline" @close="error = ''">
+        {{ error }}
+      </Message>
+      <Message v-if="info" severity="success" :closable="true" class="multiline" @close="info = ''">
+        {{ info }}
+      </Message>
+    </template>
+
+    <div class="libraries-view">
     <p class="hint">
       Externe Bibliotheken importieren Fotos aus Verzeichnissen unterhalb von
       <code>PHOTO_LIBRARIES_ROOT</code>. Im Modus
@@ -384,17 +403,7 @@ onMounted(loadData)
       <strong>Verschieben</strong> wird sie in das Upload-Verzeichnis übernommen.
     </p>
 
-    <Message v-if="error" severity="error" :closable="true" class="mb multiline" @close="error = ''">
-      {{ error }}
-    </Message>
-    <Message v-if="info" severity="success" :closable="true" class="mb multiline" @close="info = ''">
-      {{ info }}
-    </Message>
-
-    <div v-if="auth.hasPermission('photos.libraries.manage')" class="toolbar mb">
-      <Button label="Neue Bibliothek" icon="pi pi-plus" @click="openCreateDialog" />
-    </div>
-
+    <ScrollX>
     <DataTable
       :value="libraries"
       :loading="loading"
@@ -544,6 +553,7 @@ onMounted(loadData)
         <div class="empty">Keine Bibliotheken konfiguriert.</div>
       </template>
     </DataTable>
+    </ScrollX>
 
     <!-- Create / Edit Dialog -->
     <Dialog
@@ -836,26 +846,16 @@ onMounted(loadData)
         <Button label="Schließen" severity="secondary" @click="showErrorDialog = false" />
       </template>
     </Dialog>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
+/* Page frame and title: PageLayout (issue #1272). */
 .libraries-view {
   gap: 1rem;
   display: flex;
   flex-direction: column;
-}
-
-@media (min-width: 800px) {
-  .libraries-view {
-    margin-inline: 0.5em;
-  }
-}
-
-.libraries-view .title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
 }
 
 .hint {
@@ -867,16 +867,6 @@ onMounted(loadData)
 .hint code {
   font-family: monospace;
   font-size: 0.85rem;
-}
-
-.toolbar {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.mb {
-  margin-bottom: 0.5rem;
 }
 
 .multiline :deep(.p-message-text) {

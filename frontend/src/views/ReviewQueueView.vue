@@ -25,6 +25,8 @@ import SelectButton from 'primevue/selectbutton'
 import Dialog from 'primevue/dialog'
 import { useConfirm } from 'primevue/useconfirm'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import {
   getReviewQueue,
   acceptAiPick,
@@ -509,75 +511,72 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="review-queue-view">
-    <header class="rq-header">
-      <div class="rq-header-left">
-        <Button
-          icon="pi pi-arrow-left"
-          text rounded
-          v-tooltip.bottom="'Zurück zur Galerie'"
-          @click="backToGallery"
-        />
-        <h2 class="rq-title">
-          Gruppen-Review
-          <span class="rq-count">({{ total }} offen)</span>
-        </h2>
-      </div>
-      <div class="rq-header-right">
-        <Button
-          icon="pi pi-check-circle"
-          severity="success"
-          outlined
-          :label="highConfidenceTotal > 0
-            ? `Alle Sicheren bestätigen (${highConfidenceTotal})`
-            : 'Alle Sicheren bestätigen'"
-          :loading="bulkBusy"
-          :disabled="bulkBusy || loading || highConfidenceTotal === 0"
-          @click="askBulkAcceptHigh"
-        />
-      </div>
-    </header>
-
-    <div class="rq-filter">
-      <SelectButton
-        v-model="confidenceFilter"
-        :options="filterOptions"
-        option-label="label"
-        option-value="value"
-        :allow-empty="false"
-        @update:model-value="onChangeFilter"
+  <PageLayout title="Gruppen-Review" :hint="`${total} offen`" width="normal" :ready="!loading">
+    <template #actions>
+      <Button
+        icon="pi pi-arrow-left"
+        text rounded
+        v-tooltip.bottom="'Zurück zur Galerie'"
+        @click="backToGallery"
       />
-    </div>
+      <Button
+        icon="pi pi-check-circle"
+        severity="success"
+        outlined
+        :label="highConfidenceTotal > 0
+          ? `Alle Sicheren bestätigen (${highConfidenceTotal})`
+          : 'Alle Sicheren bestätigen'"
+        :loading="bulkBusy"
+        :disabled="bulkBusy || loading || highConfidenceTotal === 0"
+        @click="askBulkAcceptHigh"
+      />
+    </template>
 
-    <Message
-      v-if="bulkResult"
-      severity="info"
-      :closable="true"
-      @close="bulkResult = null"
-    >
-      {{ bulkResult.groups_accepted }} Gruppen bestätigt,
-      {{ bulkResult.hidden_count }} Fotos ausgeblendet.
-    </Message>
+    <template #toolbar>
+      <div class="rq-filter">
+        <SelectButton
+          v-model="confidenceFilter"
+          :options="filterOptions"
+          option-label="label"
+          option-value="value"
+          :allow-empty="false"
+          @update:model-value="onChangeFilter"
+        />
+      </div>
+    </template>
 
-    <Message
-      v-if="duplicateDeleteResult"
-      severity="success"
-      :closable="true"
-      @close="duplicateDeleteResult = null"
-    >
-      {{ duplicateDeleteResult.deleted }} {{ duplicateDeleteResult.deleted === 1 ? 'Duplikat' : 'Duplikate' }}
-      endgültig gelöscht, {{ fmtBytes(duplicateDeleteResult.freedBytes) }} freigegeben.
-    </Message>
+    <template #notice>
+      <Message
+        v-if="bulkResult"
+        severity="info"
+        :closable="true"
+        @close="bulkResult = null"
+      >
+        {{ bulkResult.groups_accepted }} Gruppen bestätigt,
+        {{ bulkResult.hidden_count }} Fotos ausgeblendet.
+      </Message>
 
-    <Message
-      v-if="loadError"
-      severity="error"
-      :closable="true"
-      @close="loadError = ''"
-    >
-      {{ loadError }}
-    </Message>
+      <Message
+        v-if="duplicateDeleteResult"
+        severity="success"
+        :closable="true"
+        @close="duplicateDeleteResult = null"
+      >
+        {{ duplicateDeleteResult.deleted }} {{ duplicateDeleteResult.deleted === 1 ? 'Duplikat' : 'Duplikate' }}
+        endgültig gelöscht, {{ fmtBytes(duplicateDeleteResult.freedBytes) }} freigegeben.
+      </Message>
 
+      <Message
+        v-if="loadError"
+        severity="error"
+        :closable="true"
+        @close="loadError = ''"
+      >
+        {{ loadError }}
+      </Message>
+    </template>
+
+    <div class="review-queue-view">
     <div v-if="!loading && groups.length === 0 && !loadError" class="rq-empty">
       <i class="pi pi-check-circle" />
       <p>Keine offenen Gruppen.</p>
@@ -699,7 +698,7 @@ onMounted(() => {
                corner — red for "another album-member hid this", gold
                for "another favourited this". Tap any thumb to open in
                the fullscreen lightbox. -->
-          <div v-if="group.photos.length > 1" class="rq-card-strip">
+          <ScrollX v-if="group.photos.length > 1" class="rq-card-strip">
             <button
               v-for="photo in group.photos"
               :key="photo.id"
@@ -745,7 +744,7 @@ onMounted(() => {
                 ★
               </span>
             </button>
-          </div>
+          </ScrollX>
         </template>
 
         <div class="rq-card-actions">
@@ -962,40 +961,16 @@ onMounted(() => {
         class="rq-lightbox-img"
       />
     </div>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
+/* Page frame and title: PageLayout (issue #1272). */
 .review-queue-view {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.rq-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.rq-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.rq-title {
-  font-size: 1.4rem;
-  font-weight: 600;
-  margin: 0;
-}
-.rq-count {
-  font-weight: 400;
-  color: var(--p-text-muted-color);
-  margin-left: 6px;
 }
 
 .rq-filter {
@@ -1191,7 +1166,6 @@ onMounted(() => {
 .rq-card-strip {
   display: flex;
   gap: 6px;
-  overflow-x: auto;
   padding-bottom: 4px;
 }
 .rq-thumb {

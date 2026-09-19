@@ -894,7 +894,7 @@ onBeforeUnmount(() => {
   /* When the whole page scrolls, a jumped-to page has to clear the app's
      sticky navbar. Layouts that scroll the panel itself override this via
      `--pdf-scroll-margin` — there is no navbar in the way. */
-  scroll-margin-top: var(--pdf-scroll-margin, calc(var(--menubar-height, 3.5rem) + 0.5rem));
+  scroll-margin-top: var(--pdf-scroll-margin, calc(var(--app-stack-height) + var(--space-2)));
 }
 
 .page-caption {

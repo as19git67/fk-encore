@@ -14,6 +14,8 @@ import Chart from 'primevue/chart'
 import Dialog from 'primevue/dialog'
 import Tag from 'primevue/tag'
 import ProgressSpinner from 'primevue/progressspinner'
+import PageLayout from '../../components/layout/PageLayout.vue'
+import ScrollX from '../../components/layout/ScrollX.vue'
 import { toLocalIsoDate, parseLocalDate } from '../../utils/dateFormat'
 import {
   analysisAggregate,
@@ -702,19 +704,17 @@ const tagChartOptions = computed(() => {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Analyse</h1>
-    </header>
+  <PageLayout title="Analyse" width="wide">
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="true" @close="error = null">{{ error }}</Message>
 
-    <Message v-if="error" severity="error" :closable="true" @close="error = null">{{ error }}</Message>
-
-    <Message v-if="retrying" severity="warn" :closable="false">
-      <div class="retry-row">
-        <span>LLM-Service ausgelastet — wird automatisch in {{ retryCountdown }} s erneut versucht.</span>
-        <Button label="Abbrechen" size="small" severity="secondary" @click="cancelRetry" />
-      </div>
-    </Message>
+      <Message v-if="retrying" severity="warn" :closable="false">
+        <div class="retry-row">
+          <span>LLM-Service ausgelastet — wird automatisch in {{ retryCountdown }} s erneut versucht.</span>
+          <Button label="Abbrechen" size="small" severity="secondary" @click="cancelRetry" />
+        </div>
+      </Message>
+    </template>
 
     <!-- Saved Analyses / Finanz-Rückblicke -->
     <section class="card">
@@ -978,8 +978,8 @@ const tagChartOptions = computed(() => {
           <Chart type="bar" :data="chartData" :options="chartOptions" />
         </div>
         <p v-else class="hint">Keine Buchungen im gewählten Zeitraum.</p>
+        <ScrollX v-if="result.byPeriod.length > 0">
         <DataTable
-          v-if="result.byPeriod.length > 0"
           :value="result.byPeriod"
           stripedRows
           rowHover
@@ -1007,6 +1007,7 @@ const tagChartOptions = computed(() => {
             </template>
           </Column>
         </DataTable>
+        </ScrollX>
       </template>
     </section>
 
@@ -1023,6 +1024,7 @@ const tagChartOptions = computed(() => {
 
     <section v-if="result && result.topCounterparties.length > 0" class="card">
       <h2>Top Gegenseiten</h2>
+      <ScrollX>
       <DataTable :value="result.topCounterparties" stripedRows>
         <Column field="name" header="Gegenseite" />
         <Column header="Summe">
@@ -1030,6 +1032,7 @@ const tagChartOptions = computed(() => {
         </Column>
         <Column field="count" header="Anzahl" />
       </DataTable>
+      </ScrollX>
     </section>
 
     <!-- Tag drill-down dialog -->
@@ -1184,28 +1187,23 @@ const tagChartOptions = computed(() => {
         <Button :label="isUpdate ? 'Aktualisieren' : 'Speichern'" :loading="saving" :disabled="!saveName.trim()" @click="doSave" />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.5rem;
-  max-width: 64rem;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 @media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
-    gap: 0.75rem;
-  }
   .card {
     padding: 0.75rem;
   }
 }
-.page-header h1 {
-  margin: 0;
+.card + .card {
+  margin-top: 1rem;
+}
+@media (max-width: 640px) {
+  .card + .card {
+    margin-top: 0.75rem;
+  }
 }
 .card {
   border: 1px solid var(--p-content-border-color);

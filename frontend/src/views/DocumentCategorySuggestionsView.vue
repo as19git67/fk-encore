@@ -7,6 +7,7 @@ import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   acceptCategorySuggestion,
   listCategorySuggestions,
@@ -145,9 +146,8 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="suggestions-view">
-    <div class="header">
-      <h1 class="title">Kategorie-Vorschläge</h1>
+  <PageLayout title="Kategorie-Vorschläge" width="normal" :ready="!loading">
+    <template #toolbar>
       <SelectButton
         v-model="filter"
         :options="filterOptions"
@@ -155,16 +155,19 @@ onMounted(load)
         optionValue="value"
         :allowEmpty="false"
       />
-    </div>
+    </template>
 
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    </template>
+
+    <div class="content">
     <p class="hint">
       Die KI schlägt neue Kategorien vor, wenn Dokumente nicht sicher in die
       bestehende Taxonomie fallen. Akzeptierte Vorschläge legen einen neuen
       Eintrag in der Kategorie-Hierarchie an.
     </p>
-
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-    <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
 
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Vorschläge werden geladen…
@@ -229,6 +232,7 @@ onMounted(load)
         </div>
       </div>
     </div>
+    </div>
 
     <Dialog
       v-model:visible="showAcceptDialog"
@@ -265,34 +269,15 @@ onMounted(load)
         />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.suggestions-view {
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  width: 100%;
-  padding-inline: 0.5em;
-}
-
-@media (min-width: 800px) {
-  .suggestions-view { padding-inline: 1em; }
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
 }
 
 .hint {

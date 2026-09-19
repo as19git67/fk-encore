@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import InputNumber from 'primevue/inputnumber'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   addReading,
   getQuickEntryConfig,
@@ -164,20 +165,20 @@ onMounted(load)
 </script>
 
 <template>
-  <main class="quick-entry">
-    <section class="page-head">
-      <div>
-        <p class="eyebrow">Zähler</p>
-        <h1>Schnellerfassung</h1>
-        <p class="muted">Erfasse deine vorbereitete Ablese-Liste mit einem gemeinsamen Datum.</p>
-      </div>
-      <div class="head-actions">
-        <Button icon="pi pi-cog" severity="secondary" outlined rounded v-tooltip.bottom="'Schnellerfassung konfigurieren'" @click="openConfig" />
-      </div>
-    </section>
+  <PageLayout
+    title="Schnellerfassung"
+    hint="Erfasse deine vorbereitete Ablese-Liste mit einem gemeinsamen Datum."
+    width="normal"
+    :ready="!loading"
+  >
+    <template #actions>
+      <Button icon="pi pi-cog" severity="secondary" outlined rounded v-tooltip.bottom="'Schnellerfassung konfigurieren'" @click="openConfig" />
+    </template>
 
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
-    <Message v-else-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+      <Message v-else-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
+    </template>
 
     <section class="card capture-card">
       <div class="capture-head">
@@ -250,55 +251,36 @@ onMounted(load)
     </section>
 
     <input ref="ocrFileInput" type="file" accept="image/*" capture="environment" class="hidden-file" @change="handleOcrFile" />
-  </main>
+  </PageLayout>
 </template>
 
 <style scoped>
-.quick-entry {
-  max-width: 980px;
-  margin: 0 auto;
-  padding: 1rem;
-}
-
-.page-head,
+/* Page frame and title: PageLayout (issue #1272). */
 .capture-head,
 .entry-main,
 .entry-input,
-.head-actions,
 .capture-footer {
   display: flex;
   gap: 0.75rem;
   align-items: center;
 }
 
-.page-head,
 .capture-head {
   justify-content: space-between;
 }
 
-.eyebrow,
-.muted,
 .capture-head p,
 .entry-title small,
 .row-info {
   color: var(--text-color-secondary);
 }
 
-.eyebrow {
-  margin: 0 0 0.2rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 0.8rem;
-}
-
-h1,
 h2,
 p {
   margin-top: 0;
 }
 
 .card {
-  margin-top: 1rem;
   padding: 1rem;
   border: 1px solid var(--surface-border);
   border-radius: 16px;
@@ -413,13 +395,7 @@ p {
 }
 
 @media (max-width: 760px) {
-  .quick-entry {
-    padding: 0.75rem;
-  }
-
-  .page-head,
   .capture-head,
-  .head-actions,
   .empty-config {
     align-items: stretch;
     flex-direction: column;

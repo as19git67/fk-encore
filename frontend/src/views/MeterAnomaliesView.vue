@@ -10,6 +10,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   listMeterAnomalies,
   setMeterAnomalyStatus,
@@ -147,49 +148,50 @@ function statusLabel(status: MeterAnomalyStatus) {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Zähler-Auffälligkeiten</h1>
-      <div class="header-actions">
-        <Button
-          icon="pi pi-refresh"
-          label="Aktualisieren"
-          severity="secondary"
-          text
-          :disabled="loading"
-          @click="load"
-        />
-        <Button
-          v-if="canRun"
-          icon="pi pi-play"
-          label="Jetzt prüfen"
-          severity="secondary"
-          :loading="running"
-          v-tooltip.bottom="'Die tägliche Prüfung sofort ausführen'"
-          @click="runNow"
-        />
-        <Button
-          v-if="canResolve && filtered.some((a) => a.status === 'pending')"
-          icon="pi pi-check"
-          label="Alle verwerfen"
-          severity="secondary"
-          @click="dismissAll"
-        />
-      </div>
-    </header>
+  <PageLayout title="Zähler-Auffälligkeiten" width="normal" :ready="!loading">
+    <template #actions>
+      <Button
+        icon="pi pi-refresh"
+        label="Aktualisieren"
+        severity="secondary"
+        text
+        :disabled="loading"
+        @click="load"
+      />
+      <Button
+        v-if="canRun"
+        icon="pi pi-play"
+        label="Jetzt prüfen"
+        severity="secondary"
+        :loading="running"
+        v-tooltip.bottom="'Die tägliche Prüfung sofort ausführen'"
+        @click="runNow"
+      />
+      <Button
+        v-if="canResolve && filtered.some((a) => a.status === 'pending')"
+        icon="pi pi-check"
+        label="Alle verwerfen"
+        severity="secondary"
+        @click="dismissAll"
+      />
+    </template>
 
-    <p class="page-hint">
+    <template #toolbar>
+      <div class="filter-row">
+        <Select v-model="scope" :options="scopeOptions" option-label="label" option-value="value" class="filter-select" @change="load" />
+        <Select v-model="typeFilter" :options="typeOptions" option-label="label" option-value="value" class="filter-select" />
+      </div>
+    </template>
+
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    </template>
+
+    <p class="intro-hint">
       Die tägliche Prüfung vergleicht den Tagesverbrauch der letzten Ableseintervalle mit dem
       bisherigen Verlauf und mit dem gleichen Zeitraum des Vorjahres. <strong>Bestätigen</strong>
       hält eine echte Auffälligkeit fest, <strong>Verwerfen</strong> räumt sie aus dem Postfach.
     </p>
-
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
-
-    <div class="filter-row">
-      <Select v-model="scope" :options="scopeOptions" option-label="label" option-value="value" class="filter-select" @change="load" />
-      <Select v-model="typeFilter" :options="typeOptions" option-label="label" option-value="value" class="filter-select" />
-    </div>
 
     <div v-if="loading && anomalies.length === 0" class="loading">Lädt …</div>
 
@@ -254,33 +256,12 @@ function statusLabel(status: MeterAnomalyStatus) {
         </div>
       </li>
     </ul>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  padding: 1rem;
-  max-width: 64rem;
-  margin: 0 auto;
-}
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
-}
-.page-header h1 {
-  margin: 0;
-  font-size: 1.4rem;
-}
-.header-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.page-hint {
+/* Page frame and title: PageLayout (issue #1272). */
+.intro-hint {
   margin: 0 0 1rem;
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
@@ -289,7 +270,6 @@ function statusLabel(status: MeterAnomalyStatus) {
 .filter-row {
   display: flex;
   gap: 0.5rem;
-  margin-bottom: 1rem;
   flex-wrap: wrap;
 }
 .filter-select {

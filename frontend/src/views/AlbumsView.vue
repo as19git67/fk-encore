@@ -38,6 +38,7 @@ import {
   type AlbumsPersistedState,
 } from '../utils/albumsViewState'
 import ServiceStatusBar from "../components/ServiceStatusBar.vue";
+import PageLayout from "../components/layout/PageLayout.vue";
 
 // The list shares the app-wide cache with album pickers and filters. This
 // avoids a second expensive request when the album route opens, while the
@@ -437,72 +438,74 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="albums-view">
+  <PageLayout title="Meine Alben" scroll="self" width="full" :ready="!loading">
+    <template #actions>
+      <Button v-if="canManageAlbums" label="Neues Album" icon="pi pi-plus" @click="showCreateDialog = true"/>
+    </template>
 
-    <!-- Service status warning bar -->
-    <ServiceStatusBar />
-
-    <div class="subheader">
-      <div class="header">
-        <h1 class="title">Meine Alben</h1>
-        <Button v-if="canManageAlbums" label="Neues Album" icon="pi pi-plus" @click="showCreateDialog = true"/>
-      </div>
-      <div v-if="!loading && albums.length > 0" class="filter-row">
-        <span class="p-input-icon-left filter-input-wrapper">
-          <i class="pi pi-search filter-icon" />
-          <InputText
-              v-model="filterQuery"
-              placeholder="Alben filtern…"
-              class="filter-input"
-              aria-label="Alben filtern"
-          />
-          <Button
-              v-if="filterQuery"
-              icon="pi pi-times"
-              text
-              rounded
-              size="small"
-              class="filter-clear"
-              v-tooltip="'Filter zurücksetzen'"
-              aria-label="Filter zurücksetzen"
-              @click="filterQuery = ''"
-          />
-        </span>
-        <Button
-          :icon="activeAlbumFilterCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
-          :label="activeAlbumFilterCount > 0 ? `Filter (${activeAlbumFilterCount})` : 'Filter'"
-          size="small"
-          :severity="activeAlbumFilterCount > 0 ? 'primary' : 'secondary'"
-          :outlined="activeAlbumFilterCount === 0"
-          @click="openAlbumFilterMenu"
+    <!-- Sticky part (lifted into the app stack by PageLayout): filter row
+         and the active filter/sort chips. -->
+    <template #toolbar>
+    <div v-if="!loading && albums.length > 0" class="filter-row">
+      <span class="p-input-icon-left filter-input-wrapper">
+        <i class="pi pi-search filter-icon" />
+        <InputText
+            v-model="filterQuery"
+            placeholder="Alben filtern…"
+            class="filter-input"
+            aria-label="Alben filtern"
         />
         <Button
-          icon="pi pi-sort-alt"
-          label="Sortierung"
-          size="small"
-          :severity="isAlbumSortDefault ? 'secondary' : 'primary'"
-          :outlined="isAlbumSortDefault"
-          @click="openAlbumSortMenu"
+            v-if="filterQuery"
+            icon="pi pi-times"
+            text
+            rounded
+            size="small"
+            class="filter-clear"
+            v-tooltip="'Filter zurücksetzen'"
+            aria-label="Filter zurücksetzen"
+            @click="filterQuery = ''"
         />
-      </div>
-      <div v-if="activeAlbumFilterCount > 0 || !isAlbumSortDefault" class="album-filter-chips">
-        <Chip
-          v-for="(chip, i) in albumFilterChips()"
-          :key="`f-${i}`"
-          :label="chip.label"
-          removable
-          @remove="chip.clear()"
-        />
-        <Chip
-          v-if="!isAlbumSortDefault"
-          :label="albumSortChipLabel"
-          removable
-          @remove="resetAlbumSort()"
-        />
-      </div>
+      </span>
+      <Button
+        :icon="activeAlbumFilterCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+        :label="activeAlbumFilterCount > 0 ? `Filter (${activeAlbumFilterCount})` : 'Filter'"
+        size="small"
+        :severity="activeAlbumFilterCount > 0 ? 'primary' : 'secondary'"
+        :outlined="activeAlbumFilterCount === 0"
+        @click="openAlbumFilterMenu"
+      />
+      <Button
+        icon="pi pi-sort-alt"
+        label="Sortierung"
+        size="small"
+        :severity="isAlbumSortDefault ? 'secondary' : 'primary'"
+        :outlined="isAlbumSortDefault"
+        @click="openAlbumSortMenu"
+      />
     </div>
+    <div v-if="activeAlbumFilterCount > 0 || !isAlbumSortDefault" class="album-filter-chips">
+      <Chip
+        v-for="(chip, i) in albumFilterChips()"
+        :key="`f-${i}`"
+        :label="chip.label"
+        removable
+        @remove="chip.clear()"
+      />
+      <Chip
+        v-if="!isAlbumSortDefault"
+        :label="albumSortChipLabel"
+        removable
+        @remove="resetAlbumSort()"
+      />
+    </div>
+    </template>
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    <template #notice>
+      <!-- Service status warning bar -->
+      <ServiceStatusBar />
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    </template>
 
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner"/> Alben werden geladen…
@@ -600,7 +603,7 @@ onMounted(async () => {
       @apply="applyAlbumSort"
       @reset="resetAlbumSort"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
@@ -615,61 +618,20 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-.albums-view {
-  display: flex;
-  flex-direction: column;
-  /* `100dvh` (not `100vh`) so the view matches the visible viewport on mobile;
-     `100vh` is the large viewport and made the page scroll under the navbar. */
-  height: calc(100dvh - var(--menubar-height, 3.5rem));
-  /* The VirtualAlbumGrid is the scroll container — keep this one static so
-     the subheader stays pinned to the top without sticky-positioning hacks. */
-  overflow: hidden;
-  margin-inline: -0.25em;
-  padding-inline: 0.5em;
-  width: 100%;
-}
-
-@media (min-width: 800px) {
-  .albums-view {
-    margin-inline: -0.5em;
-    padding-inline: 1em;
-  }
-}
-
-.albums-view .title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-block: 0.25rem;
-}
+/* Page frame and title: PageLayout (issue #1272). The VirtualAlbumGrid is
+   the scroll container inside PageLayout's `.page-content`. */
 
 .filter-row {
-  margin-block: 0.5rem 1rem;
   display: flex;
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
 }
 
-.subheader {
-  /* The albums view no longer scrolls — the subheader is just normal flow
-     above the (scrollable) VirtualAlbumGrid. */
-  flex: none;
-  background: var(--p-content-background);
-  padding-bottom: 0.25rem;
-}
-
 .album-filter-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-block: 0 0.75rem;
 }
 
 .album-filter-menu { display: flex; flex-direction: column; gap: 1rem; }

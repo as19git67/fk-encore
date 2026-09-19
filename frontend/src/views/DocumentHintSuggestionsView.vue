@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   acceptHintSuggestion,
   listHintSuggestions,
@@ -114,9 +115,8 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="hints-view">
-    <div class="header">
-      <h1 class="title">Hint-Vorschläge</h1>
+  <PageLayout title="Hint-Vorschläge" width="normal" :ready="!loading">
+    <template #toolbar>
       <div class="filters">
         <SelectButton
           v-model="filter"
@@ -133,19 +133,22 @@ onMounted(load)
           :allowEmpty="false"
         />
       </div>
-    </div>
+    </template>
 
+    <template #notice>
+      <Message v-if="!canManage" severity="warn" :closable="false">
+        Keine Berechtigung (documents.manage_taxonomy).
+      </Message>
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    </template>
+
+    <div class="content">
     <p class="subtitle">
       Die wöchentliche Analyse geprüfter Dokumente leitet typische Absender und
       Schlüsselwörter pro Steuer-Anlage und Kategorie ab. Die Vorschläge dienen
       als Orientierung, welche Hints verbessert werden könnten.
     </p>
-
-    <Message v-if="!canManage" severity="warn" :closable="false">
-      Keine Berechtigung (documents.manage_taxonomy).
-    </Message>
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-    <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
 
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Vorschläge werden geladen…
@@ -215,34 +218,16 @@ onMounted(load)
         </div>
       </div>
     </div>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.hints-view {
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  width: 100%;
-  padding-inline: 0.5em;
-}
-
-@media (min-width: 800px) {
-  .hints-view { padding-inline: 1em; }
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
 }
 
 .filters {

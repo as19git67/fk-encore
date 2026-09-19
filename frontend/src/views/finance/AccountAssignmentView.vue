@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import PageLayout from '../../components/layout/PageLayout.vue'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import * as financeApi from '../../api/finance'
 import * as usersApi from '../../api/users'
@@ -152,31 +153,29 @@ async function save() {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Konto-Zugriff (Admin)</h1>
-    </header>
-
-    <Message v-if="error" severity="error" :closable="true" @close="error = null">
-      {{ error }}
-    </Message>
-    <Message
-      v-if="diff"
-      severity="success"
-      :closable="true"
-      @close="diff = null"
-    >
-      Gespeichert: +{{ diff.inserted }} / ~{{ diff.updated }} / −{{ diff.deleted }}
-    </Message>
-    <Message
-      v-if="unassignedCount > 0"
-      severity="warn"
-      :closable="false"
-    >
-      {{ unassignedCount }} {{ unassignedCount === 1 ? 'Konto' : 'Konten' }}
-      ohne Zuweisung — für non-admin User unsichtbar, bis hier Zugriffe
-      vergeben sind.
-    </Message>
+  <PageLayout title="Konto-Zugriff (Admin)" width="normal" :ready="!loading">
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="true" @close="error = null">
+        {{ error }}
+      </Message>
+      <Message
+        v-if="diff"
+        severity="success"
+        :closable="true"
+        @close="diff = null"
+      >
+        Gespeichert: +{{ diff.inserted }} / ~{{ diff.updated }} / −{{ diff.deleted }}
+      </Message>
+      <Message
+        v-if="unassignedCount > 0"
+        severity="warn"
+        :closable="false"
+      >
+        {{ unassignedCount }} {{ unassignedCount === 1 ? 'Konto' : 'Konten' }}
+        ohne Zuweisung — für non-admin User unsichtbar, bis hier Zugriffe
+        vergeben sind.
+      </Message>
+    </template>
 
     <section class="card">
       <label>
@@ -248,28 +247,18 @@ async function save() {
         />
       </div>
     </section>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.5rem;
-  max-width: 48rem;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 @media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
-    gap: 0.75rem;
-  }
   .card {
     padding: 0.75rem;
   }
 }
-.page-header h1 {
-  margin: 0;
+.card + .card {
+  margin-top: 1rem;
 }
 .card {
   border: 1px solid var(--p-content-border-color);

@@ -6,6 +6,7 @@ import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import { useAuthStore } from '../stores/auth'
 import { checkInvite } from '../api/users'
 
@@ -60,9 +61,9 @@ async function handleRegister() {
 </script>
 
 <template>
+  <PageLayout title="Konto anlegen" width="normal">
   <div class="register-container">
     <Card class="register-card">
-      <template #title>Konto anlegen</template>
       <template #content>
         <p v-if="checking" class="info-text">
           <i class="pi pi-spin pi-spinner" /> Einladung wird geprüft…
@@ -101,6 +102,7 @@ async function handleRegister() {
       </template>
     </Card>
   </div>
+  </PageLayout>
 </template>
 
 <style scoped>
