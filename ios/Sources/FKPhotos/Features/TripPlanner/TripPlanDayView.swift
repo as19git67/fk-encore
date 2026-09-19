@@ -103,6 +103,13 @@ struct TripPlanDayView: View {
                             } label: {
                                 Label("Strecke anlegen", systemImage: "figure.hiking")
                             }
+                            // What the map already knows (§4.7) — with
+                            // its length, its climb and its course.
+                            NavigationLink {
+                                TripNearbyRoutesView(planId: viewModel.planId, legIndex: leg.position)
+                            } label: {
+                                Label("Strecken in der Nähe", systemImage: "map")
+                            }
                             // When the light is good, after the planned
                             // day is over (§7.3).
                             NavigationLink {
@@ -1500,6 +1507,14 @@ struct TripPlanDayView: View {
                              ?? TripClock.duration(stop.dwellMinutes))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        // What the route takes in on its way (§4.7).
+                        // Said on the stop, because it is the answer to
+                        // "why is the viewpoint not in the plan?".
+                        if let passed = TripPassedSpot.line(stop.passes ?? []) {
+                            Text(passed)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .buttonStyle(.plain)
