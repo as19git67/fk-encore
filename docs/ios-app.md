@@ -332,6 +332,14 @@ dokumentiert**:
   Gerenderte Fotos tragen Nutzer und eine Revision im Schlüssel, und die
   Revision reist auch in der Query mit: die Render-Route antwortet
   `Cache-Control: immutable`, `URLSession` hielte sonst die alten Bytes.
+- **Der Platten-Cache hat eine Grenze (500 MB).** Bis dahin hatte er keine —
+  jedes je geladene Thumbnail blieb, `clearDisk()` rief niemand auf.
+  `ImageCache.enforceDiskCacheLimit()` löscht die am längsten nicht mehr
+  angesehenen Dateien, bis die Grenze wieder unterschritten ist; ein
+  Platten-Treffer in `image(forKey:)` setzt das Änderungsdatum der Datei auf
+  jetzt, das ist das LRU-Signal. `runMaintenanceIfNeeded()` läuft dafür
+  höchstens einmal pro Tag, angestoßen aus `ContentView` beim Start — kein
+  Verzeichnis-Scan bei jedem Öffnen der App.
 - Bewusst beim Original bleiben: eine Vollbildseite, die einen Gesichtsrahmen
   zeichnet (der Rahmen liegt in den Koordinaten des Originals), und der
   Download in die Gerätemediathek (das Original ist die Archivkopie). Wo

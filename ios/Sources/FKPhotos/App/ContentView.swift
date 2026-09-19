@@ -25,6 +25,14 @@ public struct ContentView: View {
             // Inject the AuthManager into APIClient so requests can attach the token.
             await APIClient.shared.setAuthManager(authManager)
         }
+        .task {
+            // The thumbnail disk cache has no bound otherwise — nothing ever
+            // called `clearDisk()`. Rate-limited inside, so this is a cheap
+            // UserDefaults read on the common "ran recently" launch and a
+            // real cleanup at most once a day. Runs regardless of sign-in
+            // state: the cache is not per-user.
+            await ImageCache.shared.runMaintenanceIfNeeded()
+        }
         .task(id: authManager.currentUser?.id) {
             // Which photos this user has edited, fetched once for the whole
             // app. Recipes are per user, so signing in as someone else has to
