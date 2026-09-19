@@ -1098,6 +1098,32 @@ Regeln:
   View darf mit `parameters: { overflowCheck: false }` und Begründung
   aussetzen.
 
+## Listen im Frontend (`ListToolbar`)
+
+Jede Listen-View legt `components/layout/ListToolbar.vue` in den
+`#toolbar`-Slot von `PageLayout` (Issue #1278). Die View baut das Modell mit
+`useListToolbar()` aus `composables/useListToolbar.ts` und füllt nur, was sie
+hat: `search`, `filter`, `sort`, `view`, `result`, `selection`.
+
+Regeln:
+
+- Suchbegriff, Filter, Sortierung und Ansicht leben in `route.query`
+  (`q`, die Filter-Keys der Domäne, `sortBy`/`sortDir`, `view`). Ein Reload
+  oder ein geteilter Link zeigt dieselbe Liste. `localStorage`/`sessionStorage`
+  nur als „zuletzt verwendet", wenn die Liste ohne Query betreten wird.
+- Die Suche kommt aus `useListSearch()`: `value` hängt am Eingabefeld, `term`
+  ist der entprellte Wert in der URL. Geladen wird immer mit `term`.
+- Jede View definiert ihre Chips selbst (`usePhotoFilterChips`,
+  `useDocumentFilterChips` oder ein eigenes `computed<FilterChip[]>`). Die
+  Zahl der Chips und der Zähler am Filter-Knopf müssen übereinstimmen.
+- Kein eigenes Suchfeld, kein eigenes Sortiermenü, keine eigene Ergebniszahl
+  mehr in einer View. Die Toolbar rendert das Sortiermenü aus `sort.fields`.
+- Leere Liste, erster Ladevorgang und Ladefehler laufen über
+  `EmptyState`, `PageSkeleton` und `ErrorBanner` aus `components/layout/`.
+  Ladefehler gehören in den `#notice`-Slot, nie in einen Toast.
+- Tastatur überall gleich: `/` fokussiert die Suche, `Esc` im Suchfeld leert
+  sie, `Esc` außerhalb beendet den Auswahlmodus.
+
 ## Date-only values in the frontend
 
 For date-only values (no time component), always use the helpers from `frontend/src/utils/dateFormat.ts`:

@@ -3,11 +3,9 @@ import { computed, defineAsyncComponent, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
-import Chip from 'primevue/chip'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Menu from 'primevue/menu'
-import Message from 'primevue/message'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import { useConfirm } from 'primevue/useconfirm'
@@ -21,11 +19,14 @@ import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDial
 import CollageDialog from '../components/CollageDialog.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import FilterMenu from '../components/FilterMenu.vue'
-import FilterChips from '../components/FilterChips.vue'
-import SortMenu from '../components/SortMenu.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
-import { useFilter } from '../composables/useFilter'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
+import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { matchesPhotoFilter, type PhotoFilterContext } from '../utils/photoFilter'
 import {
@@ -234,8 +235,12 @@ let curationVersion = 0
 // Client-side filter over the album photos returned by the server. The backend
 // always serves the complete album (see `loadData` where settings.active_view
 // is forced to "all"); filtering happens here via FilterMenu.
-const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: applyFilter, reset: resetFilter, removeKey } =
-  useFilter({ preserveKeys: ['photoId'] })
+const albumFilter = useFilter({ preserveKeys: ['photoId'] })
+const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: applyFilter, reset: resetFilter } =
+  albumFilter
+// Removable summaries of the applied filter; the shared toolbar renders them
+// and every chip carries its own `remove()`.
+const filterChips = usePhotoFilterChips(albumFilter)
 const filterMenuOpen = ref(false)
 // Lazy-Mount: siehe GalleryView. Spart /persons + /albums beim Album-Öffnen.
 const filterMenuMounted = ref(false)
@@ -266,9 +271,6 @@ function onApplyFilter() {
 function onResetFilter() {
   resetFilter()
 }
-function onRemoveFilterKey(keys: Array<keyof typeof filter.value>) {
-  removeKey(keys)
-}
 
 // Server-side filter for VirtualGallery: user's filter + album scope.
 // `albumScopeId` (not `albumIds`) tells the grid endpoint this is the
@@ -291,32 +293,10 @@ const SORT_FIELDS: SortField[] = [
   { value: 'size', label: 'Dateigröße' },
 ]
 const DEFAULT_SORT: SortState = { field: 'taken_at', direction: 'asc' }
-const {
-  applied: sort,
-  draft: sortDraft,
-  isDefault: isSortDefault,
-  fieldLabel: sortFieldLabel,
-  openEdit: openSortEdit,
-  apply: applySort,
-  reset: resetSort,
-} = useSort({ fields: SORT_FIELDS, defaultState: DEFAULT_SORT })
-const sortMenuOpen = ref(false)
-
-function openSortMenu() {
-  openSortEdit()
-  sortMenuOpen.value = true
-}
-function onApplySort() {
-  applySort()
-  sortMenuOpen.value = false
-}
-function onResetSort() {
-  resetSort()
-  sortMenuOpen.value = false
-}
-const sortChipLabel = computed(() =>
-  `Sortierung: ${sortFieldLabel.value} ${sort.value.direction === 'asc' ? '↑' : '↓'}`
-)
+// The shared toolbar renders the sort menu from `sortControl.fields` and
+// applies a pick straight away, so the view keeps no draft or dialog state.
+const sortControl = useSort({ fields: SORT_FIELDS, defaultState: DEFAULT_SORT })
+const sort = sortControl.applied
 
 // ── Jump to newest / oldest (mirrors GalleryView) ────────────────────────────
 // "Newest / oldest" only has a meaningful semantic for date sorts.
@@ -447,6 +427,16 @@ function exitSelectMode() {
 }
 function clearSelection() {
   clearSelectedIds()
+}
+function toggleSelectMode() {
+  if (selectMode.value) {
+    exitSelectMode()
+    return
+  }
+  // Selection lives over the grid — the map has no cells to tick — so
+  // starting it from the map view switches to the grid first.
+  if (viewMode.value === 'map') viewMode.value = 'grid'
+  enterSelectMode()
 }
 
 const selectionMenu = ref<{ toggle: (event: Event) => void } | null>(null)
@@ -787,8 +777,18 @@ const filteredAlbumPhotoCount = computed(() =>
 
 
 // ── Search ────────────────────────────────────────────────────────────────────
+// A natural-language search costs a backend round trip, so the term is only
+// committed on submit (`manual: true`). The committed term lives in `?q=`,
+// which makes a searched album deep-linkable and lets back/forward
+// reproduce it.
+const search = useListSearch({
+  placeholder: 'Fotos in diesem Album suchen…',
+  manual: true,
+})
+/** Raw input of the search bar; `search.term` is what actually gets searched. */
+const searchInput = search.value
+
 const {
-  searchQuery,
   searchResultIds,
   loading: searchLoading,
   error: searchError,
@@ -798,7 +798,25 @@ const {
   dateChip,
   semanticChip,
   hasParsedChips,
-} = useNaturalSearch()
+} = useNaturalSearch(search.value)
+
+// The committed term is the single driver of the search — including the one
+// already in the URL on first paint. Clearing goes through `search.clear()`
+// so the URL never keeps a term the album no longer applies.
+watch(
+  search.term,
+  (term) => {
+    if (term) void executeSearch(term)
+    else clearSearch()
+  },
+  { immediate: true },
+)
+
+/** Re-run the committed search after a failure. */
+function retrySearch() {
+  const term = search.term.value
+  if (term) void executeSearch(term)
+}
 
 // Count of hits that actually land in this album (global search minus
 // photos from other albums) so the displayed number matches what the user
@@ -818,6 +836,25 @@ const albumPhotosFiltered = computed<Photo[]>(() => {
   if (ids === null) return albumPhotos.value
   const hitSet = new Set(ids)
   return albumPhotos.value.filter(p => hitSet.has(p.id))
+})
+
+// The shared list toolbar's model. Declared here because `useListToolbar`
+// reads the refs eagerly — everything it references exists by now.
+const toolbar = useListToolbar({
+  search,
+  filter: {
+    chips: filterChips,
+    activeCount,
+    open: openFilterMenu,
+    clearAll: () => resetFilter(),
+  },
+  sort: sortControl,
+  result: {
+    loaded: () => filteredAlbumPhotoCount.value,
+    total: () => rawAlbumPhotos.value.length,
+    loading: () => loading.value,
+  },
+  selection: { active: selectMode, toggle: toggleSelectMode },
 })
 
 // ── Manual group review order ──
@@ -2240,8 +2277,9 @@ function triggerFileSelect() {
   fileInputRef.value?.click()
 }
 
-// All toolbar buttons — filter/sort controls *and* album actions — as a single
-// flat list. ResponsiveToolbar lays them out across the full width and pushes
+// The album's own actions (jump, group review, map, cover, share, settings,
+// upload, leave) as a flat list. Filter, sort and select mode are no longer
+// here — they are part of the shared toolbar. ResponsiveToolbar pushes
 // whatever does not fit into an overflow dropdown. Order = reading order.
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
@@ -2255,38 +2293,6 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
       severity: 'secondary',
       outlined: true,
       command: onJumpEnd,
-    })
-  }
-
-  items.push({
-    key: 'filter',
-    label: activeCount.value > 0 ? `Filter (${activeCount.value})` : 'Filter',
-    title: activeCount.value > 0 ? `Filter (${activeCount.value})` : 'Filter',
-    icon: activeCount.value > 0 ? 'pi pi-filter-fill' : 'pi pi-filter',
-    severity: activeCount.value > 0 ? 'primary' : 'secondary',
-    outlined: activeCount.value === 0,
-    command: openFilterMenu,
-  })
-
-  items.push({
-    key: 'sort',
-    label: isSortDefault.value ? 'Sortierung' : `Sortierung: ${sortFieldLabel.value}`,
-    title: isSortDefault.value ? 'Sortierung' : `Sortierung: ${sortFieldLabel.value}`,
-    icon: 'pi pi-sort-alt',
-    severity: isSortDefault.value ? 'secondary' : 'primary',
-    outlined: isSortDefault.value,
-    command: openSortMenu,
-  })
-
-  if (viewMode.value !== 'map') {
-    items.push({
-      key: 'select',
-      label: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
-      title: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
-      icon: selectMode.value ? 'pi pi-times' : 'pi pi-check-square',
-      severity: selectMode.value ? 'danger' : 'secondary',
-      outlined: !selectMode.value,
-      command: () => (selectMode.value ? exitSelectMode() : enterSelectMode()),
     })
   }
 
@@ -2519,62 +2525,67 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       </template>
     </template>
 
-    <!-- Sticky part (lifted into the app stack by PageLayout): the combined
-         filter/sort/actions toolbar, the album search and the chips. -->
+    <!-- Sticky part (lifted into the app stack by PageLayout): the shared
+         list toolbar. The album-scoped natural search replaces its plain
+         input, the album's own actions sit in its actions slot; filter,
+         sort, the chips, the count and select mode are the toolbar's own. -->
     <template #toolbar>
-      <template v-if="album">
-        <!-- Combined toolbar: filter/sort controls and album actions share
-             the full width and overflow into a dropdown when tight. -->
-        <ResponsiveToolbar class="header__toolbar" :items="toolbarItems" />
-
-        <!-- Hidden file input driven by the "Hochladen" toolbar item. -->
-        <input
-          v-if="canUpload"
-          ref="fileInputRef"
-          type="file"
-          accept="image/*"
-          multiple
-          class="upload-input-hidden"
-          @change="onFileInputChange"
-        />
-
-        <!-- Natural-language search: global search, results filtered to this album -->
-        <div v-if="albumPhotos.length > 0" class="album-search">
+      <ListToolbar v-if="album" :model="toolbar">
+        <template #search>
+          <!-- Natural-language search: global search, results filtered to this album -->
           <NaturalSearchBar
-            v-model="searchQuery"
+            v-model="searchInput"
+            class="album-search"
             :loading="searchLoading"
             :result-count="searchResultCountInAlbum"
             :has-parsed-chips="hasParsedChips"
             :location-chip="locationChip"
             :date-chip="dateChip"
             :semantic-chip="semanticChip"
-            placeholder="Fotos in diesem Album suchen…"
-            @search="executeSearch"
-            @clear="clearSearch"
+            :placeholder="search.placeholder"
+            @search="search.submit()"
+            @clear="search.clear()"
+            @keydown.escape.stop
           />
-          <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
-        </div>
+        </template>
 
-        <div v-if="activeCount > 0 || !isSortDefault" class="chip-row">
-          <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
-          <Chip
-            v-if="!isSortDefault"
-            :label="sortChipLabel"
-            removable
-            @remove="onResetSort"
+        <template #actions>
+          <!-- Album actions only; they share the row and overflow into a
+               dropdown when tight. -->
+          <ResponsiveToolbar class="header__toolbar" :items="toolbarItems" />
+
+          <!-- Hidden file input driven by the "Hochladen" toolbar item. -->
+          <input
+            v-if="canUpload"
+            ref="fileInputRef"
+            type="file"
+            accept="image/*"
+            multiple
+            class="upload-input-hidden"
+            @change="onFileInputChange"
           />
-          <Chip
-            v-if="activeCount > 0 && rawAlbumPhotos.length > 0"
-            :label="`${filteredAlbumPhotoCount} von ${rawAlbumPhotos.length}`"
-          />
-        </div>
-      </template>
+        </template>
+      </ListToolbar>
     </template>
 
     <template #notice>
       <ServiceStatusBar />
-      <Message v-if="error" severity="error" @close="error = ''; uploadErrors = []">
-        {{ error }}
+      <ErrorBanner
+        v-if="searchError"
+        :message="searchError"
+        closable
+        @retry="retrySearch"
+        @close="searchError = ''"
+      />
+      <!-- Upload / share / delete failures: nothing to retry generically,
+           so the banner only explains and offers the error list. -->
+      <ErrorBanner
+        v-if="error"
+        :message="error"
+        :retryable="false"
+        closable
+        @close="error = ''; uploadErrors = []"
+      >
         <button
           v-if="uploadErrors.length > 3"
           class="error-flyout-btn"
@@ -2582,7 +2593,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         >
           <i class="pi pi-list" /> Details anzeigen
         </button>
-      </Message>
+      </ErrorBanner>
     </template>
 
     <!-- Drag overlay -->
@@ -2603,14 +2614,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         : undefined"
       @apply="onApplyFilter"
       @reset="onResetFilter"
-    />
-
-    <SortMenu
-      v-model:visible="sortMenuOpen"
-      v-model:draft="sortDraft"
-      :fields="SORT_FIELDS"
-      @apply="onApplySort"
-      @reset="onResetSort"
     />
 
     <!-- Error flyout -->
@@ -2654,19 +2657,37 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         <span>{{ uploadResultMessage }}</span>
       </div>
 
-      <div v-if="loading && !album" class="info-text">
-        <i class="pi pi-spin pi-spinner" /> Album wird geladen…
-      </div>
+      <PageSkeleton v-if="loading && !album" variant="grid" :count="12" />
+
+      <!-- An album with no photos at all — the filter cannot be the cause,
+           so there is nothing to clear. -->
+      <EmptyState
+        v-else-if="album && rawAlbumPhotos.length === 0"
+        icon="pi pi-images"
+        title="Noch keine Fotos in diesem Album"
+        message="Lade Fotos hoch oder füge welche aus der Galerie hinzu."
+      />
 
       <!-- Map mode -->
       <TripMap
-        v-if="album && viewMode === 'map' && albumPhotos.length > 0"
+        v-else-if="album && viewMode === 'map' && albumPhotos.length > 0"
         ref="tripMapRef"
         :photos="albumPhotosFiltered"
         :albumName="album.name"
         :albumDescription="album.description"
         @open-fullscreen="handleMapFullscreen"
         @stop-selected="handleMapStopSelected"
+      />
+
+      <!-- Map mode with every photo filtered away. The grid mode below
+           renders its own empty state inside VirtualGallery. -->
+      <EmptyState
+        v-else-if="album && viewMode === 'map'"
+        icon="pi pi-map"
+        title="Keine Fotos in dieser Ansicht"
+        message="Der aktive Filter blendet alle Fotos dieses Albums aus."
+        :filtered="activeCount > 0"
+        @clear-filters="onResetFilter"
       />
 
       <!-- Two-column layout: VirtualGallery | Sidebar -->
@@ -2736,8 +2757,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           />
         </div>
       </div>
-
-      <div v-else-if="album" class="info-text">Keine Fotos in dieser Ansicht.</div>
 
       <!-- Compact selection tray (grid mode only). Its popup holds the batch
            actions, so selecting photos no longer consumes a multi-row footer. -->
@@ -3408,22 +3427,15 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
 .header__filter { display: flex; align-items: center; gap: 0.5em; }
 
-/* The responsive toolbar spans the sticky row, so its items take the whole
-   width and overflow into a dropdown. */
-.header__toolbar { flex-basis: 100%; min-width: 0; }
+/* The action toolbar inside ListToolbar's actions slot: it takes the space
+   the shared controls leave and spills items into its overflow dropdown
+   instead of wrapping. */
+.header__toolbar { flex: 1 1 16rem; min-width: 0; }
 
-.chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-/* ── Album-scoped natural search bar (in the sticky toolbar) ──────────────────── */
+/* ── Album-scoped natural search bar (in the toolbar's search area) ──────── */
 .album-search {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ── Two-column layout ──────────────────────────────────────────────────── */
@@ -3440,11 +3452,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   overflow: hidden;
 }
 
-.info-text {
-  text-align: center;
-  padding: 3em 1em;
-  color: var(--p-text-muted-color);
-}
 
 /* ── Sidebar Sheet Wrapper ───────────────────────────────────────────────── */
 .sidebar-sheet { display: contents; }

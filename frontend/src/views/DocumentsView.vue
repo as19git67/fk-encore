@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, computed, watch, nextTick } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
-import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Chip from 'primevue/chip'
@@ -11,11 +10,14 @@ import Tag from 'primevue/tag'
 import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
 import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
 import { listCollections, type DocumentCollection } from '../api/collections'
-import SortMenu from '../components/SortMenu.vue'
 import {
   listDocuments,
   listDocumentCategories,
@@ -43,11 +45,12 @@ import DocumentPreviewPane from '../components/documents/DocumentPreviewPane.vue
 import { useSort, type SortField } from '../composables/useSort'
 import {
   collectionQueryParams,
-  DOCUMENT_FILTER_QUERY_KEYS,
   effectiveCollectionScope,
   useDocumentFilter,
+  useDocumentFilterChips,
 } from '../composables/useDocumentFilter'
-import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
+import { useListSearch, useListToolbar, useListView } from '../composables/useListToolbar'
+import { waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
 import {
   consumeListFocus,
   focusListItem,
@@ -56,7 +59,6 @@ import {
 } from '../utils/documentListFocus'
 
 const router = useRouter()
-const route = useRoute()
 const auth = useAuthStore()
 // The list scrolls inside its own column now, so window.scrollY is always 0
 // and the offset has to be read from that element.
@@ -81,9 +83,15 @@ const info = ref('')
 
 // ─── View mode ──────────────────────────────────────────────────────────────
 type ViewMode = 'list' | 'grid'
-const VIEW_MODE_KEY = 'documents.viewMode'
-const viewMode = ref<ViewMode>((localStorage.getItem(VIEW_MODE_KEY) as ViewMode) || 'list')
-watch(viewMode, (v) => localStorage.setItem(VIEW_MODE_KEY, v))
+const view = useListView({
+  options: [
+    { value: 'list', label: 'Liste', icon: 'pi pi-list' },
+    { value: 'grid', label: 'Kacheln', icon: 'pi pi-th-large' },
+  ],
+  defaultValue: 'list',
+  storageKey: 'documents.viewMode',
+})
+const viewMode = computed<ViewMode>(() => view.value.value as ViewMode)
 
 // ─── Search ─────────────────────────────────────────────────────────────────
 const SEARCH_MODE_STORAGE_KEY = 'documents.searchMode'
@@ -92,7 +100,12 @@ function loadStoredSearchMode(): SearchMode {
   return raw === 'fts' || raw === 'semantic' || raw === 'hybrid' ? raw : 'hybrid'
 }
 
-const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
+const search = useListSearch({
+  placeholder: 'Suche in Dokumenten…',
+  storageKey: 'documents.search',
+})
+/** The settled search term; the list and the search endpoint both read this. */
+const q = search.term
 const searchMode = ref<SearchMode>(loadStoredSearchMode())
 watch(searchMode, (v) => localStorage.setItem(SEARCH_MODE_STORAGE_KEY, v))
 
@@ -102,19 +115,9 @@ const searchModeOptions = [
   { label: 'Bedeutung', value: 'semantic' },
 ]
 
-async function triggerSearch() {
-  await syncQueryParams()
-  load()
-}
-
-function handleSearchKeydown(ev: KeyboardEvent) {
-  if (ev.key === 'Enter') triggerSearch()
-}
-
-function clearSearch() {
-  q.value = ''
-  triggerSearch()
-}
+// The term settles 300 ms after the last keystroke (and on back/forward);
+// that is the moment to ask the backend again.
+watch(q, () => load())
 
 // ─── Sort ───────────────────────────────────────────────────────────────────
 const sortFields: SortField[] = [
@@ -130,33 +133,17 @@ const sort = useSort({
   defaultState: { field: 'uploaded_at', direction: 'desc' },
   storageKey: 'documents.sort',
 })
-const sortMenuVisible = ref(false)
-
-function openSortMenu() {
-  sort.openEdit()
-  sortMenuVisible.value = true
-}
-function applySortMenu() {
-  sort.apply()
-  sortMenuVisible.value = false
-  load()
-}
-function resetSortMenu() {
-  sort.reset()
-  sortMenuVisible.value = false
-  load()
-}
+// The shared toolbar applies a sort immediately, so the list follows the
+// applied state rather than a menu's "Anwenden".
+watch(() => [sort.applied.value.field, sort.applied.value.direction].join(':'), () => load())
 
 // ─── Filter ─────────────────────────────────────────────────────────────────
 const filter = useDocumentFilter()
 
-// `useSort` and `useDocumentFilter` each restore from localStorage and write
-// their slice of the URL on mount. Written separately they race: the filter's
-// write lands last and drops `?sortBy/?sortDir`, after which the sort watcher
-// resets to the default — so returning from another view (e.g. Kategorie-
-// Vorschläge) lost the sorting while the filter survived. Writing the *combined*
-// query once here makes it the final navigation, so both are preserved. (#651)
-syncQueryParams()
+// Search, filter, sort and view each own their slice of the URL and write it
+// through `updateRouteQuery`, which serialises the navigations — so the
+// mount-time restores can no longer overwrite one another the way they did
+// before the combined writer existed (#651).
 
 const filterMenuVisible = ref(false)
 
@@ -397,40 +384,6 @@ function formatSize(bytes: number): string {
 
 // ─── Data loading ───────────────────────────────────────────────────────────
 
-function syncQueryParams() {
-  const query: Record<string, string> = {}
-  if (q.value.trim()) query.q = q.value.trim()
-  // Merge filter and sort into query
-  const fq = filter.applied.value
-  if (fq.category) query.category = fq.category
-  if (fq.tags && fq.tags.length > 0) query.tags = fq.tags.join(',')
-  if (fq.status) query.status = fq.status
-  if (fq.needs_review) query.review = '1'
-  if (fq.unreviewed) query.neu = '1'
-  if (fq.sender) query.sender = fq.sender
-  if (fq.correspondent) query.correspondent = fq.correspondent
-  if (fq.dateFrom) query.dateFrom = fq.dateFrom
-  if (fq.dateTo) query.dateTo = fq.dateTo
-  if (fq.taxRelevant !== undefined) query.taxRelevant = String(fq.taxRelevant)
-  if (fq.subjectPersonId) query.subjectPerson = String(fq.subjectPersonId)
-  if (fq.collectionScope && fq.collectionScope !== 'without') {
-    query.collectionScope = fq.collectionScope
-  }
-  if (fq.collectionId) query.collection = String(fq.collectionId)
-  const s = sort.applied.value
-  if (s.field !== 'uploaded_at' || s.direction !== 'desc') {
-    query.sortBy = s.field
-    query.sortDir = s.direction
-  }
-  return updateRouteQuery(router, (current) =>
-    replaceQuerySlice(
-      current,
-      ['q', 'sortBy', 'sortDir', ...DOCUMENT_FILTER_QUERY_KEYS],
-      query,
-    ),
-  )
-}
-
 /** One backend page; the API clamps `limit` to 200 per request. */
 const PAGE_SIZE = 200
 /** Best-N cap of the search endpoint (it has no offset paging). */
@@ -440,6 +393,32 @@ const SEARCH_LIMIT = 100
 const total = ref(0)
 const loadingMore = ref(false)
 const isSearchActive = computed(() => q.value.trim().length > 0)
+
+const filterChips = useDocumentFilterChips(filter, {
+  documentType: documentTypeLabel,
+  correspondent: correspondentLabel,
+  subjectPerson: (id) => subjectPeople.value.find((p) => p.id === id)?.full_name ?? `#${id}`,
+  collection: (id) => collections.value.find((c) => c.id === id)?.title ?? `#${id}`,
+})
+
+const toolbar = useListToolbar({
+  search,
+  filter: {
+    chips: filterChips,
+    activeCount: filter.activeCount,
+    open: openFilterMenu,
+    clearAll: () => { filter.reset(); load() },
+  },
+  sort,
+  view,
+  result: {
+    loaded: () => items.value.length,
+    // The search endpoint returns the best N without a total, so the count
+    // says "N Treffer" there instead of "N von M".
+    total: () => (isSearchActive.value ? undefined : total.value),
+    loading: () => loading.value,
+  },
+})
 const hasMore = computed(() => !isSearchActive.value && items.value.length < total.value)
 
 function currentFilterParams() {
@@ -731,166 +710,22 @@ onMounted(async () => {
     <!-- Sticky part (lifted into the app stack by PageLayout): toolbar,
          active filter chips, the selection bar and the notices. -->
     <template #toolbar>
-    <!-- Toolbar: search + filter/sort/view controls -->
-    <div class="toolbar">
-      <div class="search-row">
-        <span class="p-input-icon-left search-wrapper">
-          <i class="pi pi-search" />
-          <InputText
-            v-model="q"
-            placeholder="Suche in Dokumenten…"
-            class="search-input"
-            @keydown="handleSearchKeydown"
-          />
-        </span>
-        <Button
-          icon="pi pi-search"
-          aria-label="Suche starten"
-          :disabled="q.trim().length === 0"
-          @click="triggerSearch"
-        />
-        <Button
-          v-if="q.trim().length > 0"
-          icon="pi pi-times"
-          text
-          rounded
-          severity="secondary"
-          aria-label="Suche löschen"
-          @click="clearSearch"
-        />
-      </div>
-
-      <div class="toolbar-controls">
-        <SelectButton
-          v-if="q.trim().length > 0"
-          v-model="searchMode"
-          :options="searchModeOptions"
-          optionLabel="label"
-          optionValue="value"
-          :allowEmpty="false"
-          class="search-mode-btn"
-          v-tooltip.bottom="'Suchmodus'"
-          @update:model-value="triggerSearch"
-        />
-
-        <Button
-          :icon="filter.activeCount.value > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
-          text
-          rounded
-          aria-label="Filter"
-          v-tooltip.bottom="filter.activeCount.value > 0 ? `${filter.activeCount.value} Filter aktiv` : 'Filter'"
-          :badge="filter.activeCount.value > 0 ? String(filter.activeCount.value) : undefined"
-          badge-severity="info"
-          :severity="filter.activeCount.value > 0 ? undefined : 'secondary'"
-          @click="openFilterMenu"
-        />
-
-        <Button
-          :icon="sort.isDefault.value ? 'pi pi-sort-amount-down' : 'pi pi-sort-amount-down'"
-          text
-          rounded
-          aria-label="Sortierung"
-          v-tooltip.bottom="sort.isDefault.value ? 'Sortierung' : `Sortiert: ${sort.fieldLabel.value}`"
-          :severity="sort.isDefault.value ? 'secondary' : undefined"
-          @click="openSortMenu"
-        />
-
-        <div class="view-toggle">
-          <Button
-            icon="pi pi-list"
-            :text="viewMode !== 'list'"
-            :outlined="viewMode === 'list'"
+      <ListToolbar :model="toolbar">
+        <template #actions>
+          <SelectButton
+            v-if="isSearchActive"
+            v-model="searchMode"
+            :options="searchModeOptions"
+            optionLabel="label"
+            optionValue="value"
+            :allowEmpty="false"
             size="small"
-            :severity="viewMode === 'list' ? undefined : 'secondary'"
-            aria-label="Listenansicht"
-            v-tooltip.bottom="'Liste'"
-            @click="viewMode = 'list'"
+            class="search-mode-btn"
+            v-tooltip.bottom="'Suchmodus'"
+            @update:model-value="load"
           />
-          <Button
-            icon="pi pi-th-large"
-            :text="viewMode !== 'grid'"
-            :outlined="viewMode === 'grid'"
-            size="small"
-            :severity="viewMode === 'grid' ? undefined : 'secondary'"
-            aria-label="Kachelansicht"
-            v-tooltip.bottom="'Kacheln'"
-            @click="viewMode = 'grid'"
-          />
-        </div>
-      </div>
-    </div>
-
-    <!-- Active filter chips -->
-    <div v-if="filter.activeCount.value > 0" class="filter-chips">
-      <Chip
-        v-if="filter.applied.value.category"
-        :label="`Kategorie: ${filter.applied.value.category}`"
-        removable
-        @remove="filter.removeKey(['category'])"
-      />
-      <Chip
-        v-if="filter.applied.value.documentType"
-        :label="`Dokumentart: ${documentTypeLabel(filter.applied.value.documentType)}`"
-        removable
-        @remove="filter.removeKey(['documentType'])"
-      />
-      <Chip
-        v-if="filter.applied.value.status"
-        :label="`Status: ${filter.applied.value.status}`"
-        removable
-        @remove="filter.removeKey(['status'])"
-      />
-      <Chip
-        v-for="tag in (filter.applied.value.tags ?? [])"
-        :key="'tag-' + tag"
-        :label="`Tag: ${tag}`"
-        removable
-        @remove="filter.removeTag(tag)"
-      />
-      <Chip
-        v-if="filter.applied.value.sender"
-        :label="`Absender: ${filter.applied.value.sender}`"
-        removable
-        @remove="filter.removeKey(['sender'])"
-      />
-      <Chip
-        v-if="filter.applied.value.correspondent"
-        :label="`Korrespondent: ${correspondentLabel(filter.applied.value.correspondent)}`"
-        removable
-        @remove="filter.removeKey(['correspondent'])"
-      />
-      <Chip
-        v-if="filter.applied.value.dateFrom || filter.applied.value.dateTo"
-        :label="`Datum: ${filter.applied.value.dateFrom ?? '…'} – ${filter.applied.value.dateTo ?? '…'}`"
-        removable
-        @remove="filter.removeKey(['dateFrom', 'dateTo'])"
-      />
-      <Chip
-        v-if="filter.applied.value.taxRelevant !== undefined"
-        :label="`Steuerrelevant: ${filter.applied.value.taxRelevant ? 'Ja' : 'Nein'}`"
-        removable
-        @remove="filter.removeKey(['taxRelevant'])"
-      />
-      <Chip
-        v-if="filter.applied.value.needs_review"
-        label="Nur zu prüfen"
-        removable
-        @remove="filter.removeKey(['needs_review'])"
-      />
-      <Chip
-        v-if="filter.applied.value.unreviewed"
-        label="Nur neue"
-        removable
-        @remove="filter.removeKey(['unreviewed'])"
-      />
-      <Button
-        label="Alle Filter löschen"
-        text
-        size="small"
-        severity="secondary"
-        @click="() => { filter.reset(); load() }"
-      />
-    </div>
+        </template>
+      </ListToolbar>
     </template>
 
     <template #selection>
@@ -930,32 +765,30 @@ onMounted(async () => {
     </template>
 
     <template #notice>
-      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = ''" />
       <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
       <DocumentScanQueuePanel />
     </template>
 
-    <!-- Loading / empty state -->
-    <div v-if="loading" class="info-text">
-      <i class="pi pi-spin pi-spinner" /> Dokumente werden geladen…
-    </div>
-    <div v-else-if="items.length === 0" class="info-text">
-      <template v-if="q.trim().length > 0">Keine Treffer für „{{ q }}".</template>
-      <template v-else>Noch keine Dokumente vorhanden.</template>
-    </div>
+    <PageSkeleton v-if="loading && items.length === 0" variant="list" :count="8" />
+    <EmptyState
+      v-else-if="items.length === 0"
+      icon="pi pi-file"
+      :title="isSearchActive ? `Keine Treffer für „${q}“` : 'Noch keine Dokumente vorhanden'"
+      :message="isSearchActive
+        ? 'Andere Wörter oder ein anderer Suchmodus finden vielleicht mehr.'
+        : 'Lade ein Dokument hoch oder lass den Scan-Ordner überwachen.'"
+      :filtered="filter.activeCount.value > 0"
+      @clear-filters="() => { filter.reset(); load() }"
+    />
 
     <!-- List and, on a wide landscape screen, the preview beside it (#735).
          The header and toolbar above stay full width: a filter panel squeezed
          into a 600px column is worse than one that spans the page. -->
     <div class="list-region" :class="{ 'list-region--split': isSplit }">
       <div ref="listColumn" class="list-column">
-    <!-- Result count + whole-result-list basket action -->
+    <!-- Whole-result-list basket action; the count lives in the toolbar. -->
     <div v-if="!loading && items.length > 0" class="results-bar">
-      <span class="results-count">
-        <template v-if="isSearchActive">{{ items.length }} beste Treffer</template>
-        <template v-else-if="total > items.length">{{ items.length }} von {{ total }} Dokumenten</template>
-        <template v-else>{{ items.length }} Dokument{{ items.length === 1 ? '' : 'e' }}</template>
-      </span>
       <Button
         :label="allLoadedSelected ? 'Auswahl aufheben' : 'Alle auswählen'"
         :icon="allLoadedSelected ? 'pi pi-times' : 'pi pi-check-square'"
@@ -1202,14 +1035,6 @@ onMounted(async () => {
       @apply="applyFilterMenu"
       @reset="resetFilterMenu"
     />
-
-    <SortMenu
-      v-model:visible="sortMenuVisible"
-      v-model:draft="sort.draft.value"
-      :fields="sortFields"
-      @apply="applySortMenu"
-      @reset="resetSortMenu"
-    />
   </PageLayout>
 </template>
 
@@ -1386,69 +1211,7 @@ onMounted(async () => {
   .list-region { padding-inline: 1em; }
 }
 
-/* ── Toolbar ────────────────────────────────────────────────────── */
-/* One row: the search on the left, the filter/sort/view controls on the
-   right. Lives in the app's sticky stack through PageLayout's toolbar slot,
-   so it needs no sticky positioning of its own (#651). */
-.toolbar {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.search-row {
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-  /* Grows to fill a narrow row, capped so it leaves the controls their space
-     on a wide one: a search field stretched across 1600px buys nothing. */
-  flex: 1 1 320px;
-  max-width: 460px;
-}
-
-.search-wrapper {
-  flex: 1;
-  min-width: 140px;
-  position: relative;
-}
-.search-wrapper i {
-  position: absolute;
-  left: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--p-text-muted-color);
-  pointer-events: none;
-}
-.search-input {
-  width: 100%;
-  padding-left: 2rem;
-}
-
-.toolbar-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex-wrap: wrap;
-}
-
 .search-mode-btn { flex-shrink: 0; }
-
-.view-toggle {
-  display: inline-flex;
-  margin-left: auto;
-  gap: 0;
-}
-
-/* ── Filter chips ──────────────────────────────────────────────── */
-.filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: center;
-}
 
 /* ── Batch bar ─────────────────────────────────────────────────── */
 .batch-bar {
@@ -1476,13 +1239,6 @@ onMounted(async () => {
   margin-left: auto;
 }
 
-/* ── Loading / empty ───────────────────────────────────────────── */
-.info-text {
-  text-align: center;
-  margin-top: 4rem;
-  color: var(--p-text-muted-color);
-}
-
 /* ── Results bar / pagination ──────────────────────────────────── */
 .results-bar {
   display: flex;
@@ -1490,10 +1246,6 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 0.5rem;
   flex-wrap: wrap;
-}
-.results-count {
-  color: var(--p-text-muted-color);
-  font-size: 0.85rem;
 }
 .load-more-row {
   display: flex;
@@ -1712,10 +1464,6 @@ onMounted(async () => {
   .document-grid {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 0.5rem;
-  }
-  .toolbar-controls {
-    width: 100%;
-    justify-content: flex-start;
   }
 }
 </style>

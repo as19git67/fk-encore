@@ -7,7 +7,6 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import SelectButton from 'primevue/selectbutton'
 import InputNumber from 'primevue/inputnumber'
-import Chip from 'primevue/chip'
 import { useConfirm } from 'primevue/useconfirm'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import FacePhotoGrid from '../components/FacePhotoGrid.vue'
@@ -15,14 +14,17 @@ import PersonsGrid from '../components/PersonsGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
-import SortMenu from '../components/SortMenu.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import type { FilterChip } from '../components/layout/listToolbar'
 import DateRangePresets from '../components/DateRangePresets.vue'
 import FilterMenu from '../components/FilterMenu.vue'
-import FilterChips from '../components/FilterChips.vue'
-import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
-import { useFilter } from '../composables/useFilter'
+import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
+import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { matchesPhotoFilter } from '../utils/photoFilter'
-import type { SortField, SortState } from '../composables/useSort'
+import type { SortField, SortState, UseSortReturn } from '../composables/useSort'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
@@ -65,11 +67,18 @@ const selectedPersonDetail = ref<PersonDetails | null>(null)
 const loadingDetails = ref(false)
 const isFullscreen = ref(false)
 const selectedIndex = ref(-1)
-const nameFilter = ref('')
+
+// The grid's name filter lives in `?q=` since stage 3, so a reload and a
+// shared link reproduce the same list. The shared toolbar owns the input.
+const search = useListSearch({
+  placeholder: 'Nach Namen filtern…',
+  storageKey: 'persons.search',
+})
 
 // ── Photo-level filter (detail view of a selected person) ───────────────────
 // Replaces the former `showHidden` toggle: hiddenMode + a handful of
 // photo-level criteria. Only shown when a person is opened.
+const photoFilterApi = useFilter({ preserveKeys: ['personId', 'photoId', 'q'] })
 const {
   applied: photoFilter,
   draft: photoFilterDraft,
@@ -77,8 +86,9 @@ const {
   openEdit: openPhotoFilterEdit,
   apply: applyPhotoFilter,
   reset: resetPhotoFilter,
-  removeKey: removePhotoFilterKey,
-} = useFilter({ preserveKeys: ['personId', 'photoId'] })
+} = photoFilterApi
+/** The applied photo filter as the shared toolbar's removable chips. */
+const photoFilterChips = usePhotoFilterChips(photoFilterApi)
 const photoFilterMenuOpen = ref(false)
 // Lazy-Mount: siehe GalleryView. Beim Öffnen einer Personenseite vermeiden wir
 // dadurch einen unnötigen /albums- und /persons-Roundtrip.
@@ -99,51 +109,6 @@ function onApplyPhotoFilter() {
 function onResetPhotoFilter() {
   resetPhotoFilter()
 }
-function onRemovePhotoFilterKey(keys: Array<keyof PhotoFilter>) {
-  removePhotoFilterKey(keys)
-}
-
-// ── Responsive toolbar ────────────────────────────────────────────────────────
-// Person-detail actions (Filter / Umbenennen / Ignorieren) share the available
-// width and overflow into a dropdown when tight. Order = reading order.
-const toolbarItems = computed<ToolbarItem[]>(() => {
-  const items: ToolbarItem[] = []
-
-  if (selectedPersonDetail.value) {
-    items.push({
-      key: 'filter',
-      label: photoFilterActiveCount.value > 0 ? `Filter (${photoFilterActiveCount.value})` : 'Filter',
-      title: photoFilterActiveCount.value > 0 ? `Filter (${photoFilterActiveCount.value})` : 'Filter',
-      icon: photoFilterActiveCount.value > 0 ? 'pi pi-filter-fill' : 'pi pi-filter',
-      severity: photoFilterActiveCount.value > 0 ? 'primary' : 'secondary',
-      outlined: photoFilterActiveCount.value === 0,
-      command: openPhotoFilterMenu,
-    })
-  }
-
-  const person = selectedPerson.value
-  if (person) {
-    items.push({
-      key: 'rename',
-      label: 'Umbenennen',
-      title: 'Umbenennen',
-      icon: 'pi pi-pencil',
-      outlined: true,
-      command: () => openRename(person),
-    })
-    items.push({
-      key: 'ignore',
-      label: 'Ignorieren',
-      title: 'Person und alle Gesichter dauerhaft ignorieren',
-      icon: 'pi pi-trash',
-      severity: 'danger',
-      outlined: true,
-      command: () => void handleIgnorePerson(person),
-    })
-  }
-
-  return items
-})
 
 // ── Person filter menu ──────────────────────────────────────────────────────
 type PersonNamedFilter = 'all' | 'named' | 'unnamed'
@@ -200,29 +165,33 @@ function resetPersonFilter() {
   appliedPersonFilter.value = { ...EMPTY_PERSON_FILTER }
 }
 
-function personFilterChips(): Array<{ label: string; clear: () => void }> {
+/** The applied person filter as the shared toolbar's removable chips. */
+const personFilterChips = computed<FilterChip[]>(() => {
   const f = appliedPersonFilter.value
-  const chips: Array<{ label: string; clear: () => void }> = []
+  const chips: FilterChip[] = []
   if (f.named !== 'all') {
     chips.push({
-      label: f.named === 'named' ? 'Mit Namen' : 'Unbenannt',
-      clear: () => { appliedPersonFilter.value = { ...f, named: 'all' } },
+      key: 'named',
+      label: `Benennung: ${f.named === 'named' ? 'Mit Namen' : 'Unbenannt'}`,
+      remove: () => { appliedPersonFilter.value = { ...f, named: 'all' } },
     })
   }
   if (f.faceCountMin !== undefined) {
     chips.push({
-      label: `Mind. ${f.faceCountMin} Fotos`,
-      clear: () => { appliedPersonFilter.value = { ...f, faceCountMin: undefined } },
+      key: 'faceCountMin',
+      label: `Mindestanzahl Fotos: ${f.faceCountMin}`,
+      remove: () => { appliedPersonFilter.value = { ...f, faceCountMin: undefined } },
     })
   }
   if (f.dateFrom || f.dateTo) {
     chips.push({
-      label: `Foto ${f.dateFrom ?? '…'} – ${f.dateTo ?? '…'}`,
-      clear: () => { appliedPersonFilter.value = { ...f, dateFrom: undefined, dateTo: undefined } },
+      key: 'date',
+      label: `Fotodatum: ${f.dateFrom ?? '…'} – ${f.dateTo ?? '…'}`,
+      remove: () => { appliedPersonFilter.value = { ...f, dateFrom: undefined, dateTo: undefined } },
     })
   }
   return chips
-}
+})
 
 function matchesPersonFilter(p: Person, f: PersonFilter): boolean {
   const isUnnamed = !p.name || p.name === 'Unbenannt'
@@ -254,7 +223,6 @@ const PERSON_SORT_FIELDS: SortField[] = [
 const DEFAULT_PERSON_SORT: SortState = { field: 'faceCount', direction: 'desc' }
 const appliedPersonSort = ref<SortState>({ ...DEFAULT_PERSON_SORT })
 const draftPersonSort = ref<SortState>({ ...DEFAULT_PERSON_SORT })
-const showPersonSortMenu = ref(false)
 
 const isPersonSortDefault = computed(() =>
   appliedPersonSort.value.field === DEFAULT_PERSON_SORT.field &&
@@ -263,22 +231,33 @@ const isPersonSortDefault = computed(() =>
 const personSortFieldLabel = computed(() =>
   PERSON_SORT_FIELDS.find(f => f.value === appliedPersonSort.value.field)?.label ?? appliedPersonSort.value.field
 )
-const personSortChipLabel = computed(() =>
-  `Sortierung: ${personSortFieldLabel.value} ${appliedPersonSort.value.direction === 'asc' ? '↑' : '↓'}`
-)
 
-function openPersonSortMenu() {
-  draftPersonSort.value = { ...appliedPersonSort.value }
-  showPersonSortMenu.value = true
-}
-function applyPersonSort() {
-  appliedPersonSort.value = { ...draftPersonSort.value }
-  showPersonSortMenu.value = false
-}
-function resetPersonSort() {
-  draftPersonSort.value = { ...DEFAULT_PERSON_SORT }
-  appliedPersonSort.value = { ...DEFAULT_PERSON_SORT }
-  showPersonSortMenu.value = false
+/**
+ * The shared toolbar's sort contract, served from this view's own state.
+ * The person sort is in-memory only (it is not mirrored to the URL), so
+ * `useSort` — which owns `sortBy`/`sortDir` there — would collide with the
+ * photo filter that already writes this view's query.
+ */
+const personSort: UseSortReturn = {
+  fields: PERSON_SORT_FIELDS,
+  applied: appliedPersonSort,
+  draft: draftPersonSort,
+  isDefault: isPersonSortDefault,
+  fieldLabel: personSortFieldLabel,
+  openEdit: () => { draftPersonSort.value = { ...appliedPersonSort.value } },
+  apply: () => { appliedPersonSort.value = { ...draftPersonSort.value } },
+  reset: () => {
+    draftPersonSort.value = { ...DEFAULT_PERSON_SORT }
+    appliedPersonSort.value = { ...DEFAULT_PERSON_SORT }
+  },
+  // Picking the active field again flips the direction.
+  select: (field: string) => {
+    const direction = appliedPersonSort.value.field === field
+      ? (appliedPersonSort.value.direction === 'asc' ? 'desc' : 'asc')
+      : DEFAULT_PERSON_SORT.direction
+    draftPersonSort.value = { field, direction }
+    appliedPersonSort.value = { field, direction }
+  },
 }
 
 function comparePersonsByField(a: Person, b: Person, field: string): number {
@@ -311,7 +290,7 @@ const sortedPersons = computed(() => {
 })
 
 const filteredPersons = computed(() => {
-  const q = nameFilter.value.trim().toLocaleLowerCase()
+  const q = search.term.value.trim().toLocaleLowerCase()
   const f = appliedPersonFilter.value
   return sortedPersons.value.filter(p => {
     if (q && !p.name.toLocaleLowerCase().includes(q)) return false
@@ -695,6 +674,40 @@ async function handleIgnorePerson(person: Person) {
   })
 }
 
+// ── Shared list toolbar (#1272, stage 3) ─────────────────────────────────────
+// Two lists live in this view, so each mode gets its own model: the person
+// grid searches and sorts people, the person detail filters that person's
+// photos. Declared last — `useListToolbar` reads the refs eagerly.
+const gridToolbar = useListToolbar({
+  search,
+  filter: {
+    chips: personFilterChips,
+    activeCount: activePersonFilterCount,
+    open: openPersonFilterMenu,
+    clearAll: resetPersonFilter,
+  },
+  sort: personSort,
+  result: {
+    loaded: () => filteredPersons.value.length,
+    total: () => persons.value.length,
+    loading: () => loading.value,
+  },
+})
+
+const detailToolbar = useListToolbar({
+  filter: {
+    chips: photoFilterChips,
+    activeCount: photoFilterActiveCount,
+    open: openPhotoFilterMenu,
+    clearAll: onResetPhotoFilter,
+  },
+  result: {
+    loaded: () => uniquePhotoFaceItems.value.length,
+    total: () => allUniquePhotoFaceItems.value.length,
+    loading: () => loadingDetails.value,
+  },
+})
+
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileSidebarOpen = ref(false)
 
@@ -744,82 +757,41 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       />
     </template>
 
-    <!-- Sticky part (lifted into the app stack by PageLayout): the
-         person-detail toolbar and its chips, or the person-grid filter bar. -->
+    <!-- Sticky part (lifted into the app stack by PageLayout): one shared
+         toolbar per mode — the person grid, or the opened person's photos. -->
     <template #toolbar>
-      <!-- Person-detail actions: filter + actions share the remaining width
-           and overflow into a dropdown when tight. -->
-      <ResponsiveToolbar
-        v-if="selectedPersonDetail || selectedPerson"
-        class="header__toolbar"
-        :items="toolbarItems"
-      />
-      <div v-if="selectedPersonDetail && photoFilterActiveCount > 0" class="person-photo-filter-chips">
-        <FilterChips :filter="photoFilter" @remove="onRemovePhotoFilterKey" />
-        <Chip :label="`${uniquePhotoFaceItems.length} von ${allUniquePhotoFaceItems.length}`" />
-      </div>
+      <!-- LEVEL 2: the opened person's photos. Rename / Ignorieren are this
+           person's own actions and ride in the toolbar's actions slot. -->
+      <ListToolbar v-if="selectedPerson" :model="detailToolbar">
+        <template #actions>
+          <Button
+            label="Umbenennen"
+            icon="pi pi-pencil"
+            size="small"
+            outlined
+            severity="secondary"
+            v-tooltip.bottom="'Umbenennen'"
+            @click="openRename(selectedPerson)"
+          />
+          <Button
+            label="Ignorieren"
+            icon="pi pi-trash"
+            size="small"
+            outlined
+            severity="danger"
+            v-tooltip.bottom="'Person und alle Gesichter dauerhaft ignorieren'"
+            @click="handleIgnorePerson(selectedPerson)"
+          />
+        </template>
+      </ListToolbar>
 
-      <!-- LEVEL 1 filter bar: only while the person grid is shown -->
-      <template v-if="!selectedPerson && persons.length > 0">
-        <div class="persons-filter-bar">
-          <div class="persons-filter-input">
-            <i class="pi pi-search persons-filter-icon" />
-            <InputText
-              v-model="nameFilter"
-              placeholder="Nach Namen filtern…"
-              fluid
-              autocomplete="off"
-            />
-            <Button
-              v-if="nameFilter"
-              class="persons-filter-clear"
-              icon="pi pi-times"
-              text rounded size="small"
-              aria-label="Filter löschen"
-              @click="nameFilter = ''"
-            />
-          </div>
-          <Button
-            :icon="activePersonFilterCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
-            :label="activePersonFilterCount > 0 ? `Filter (${activePersonFilterCount})` : 'Filter'"
-            size="small"
-            :severity="activePersonFilterCount > 0 ? 'primary' : 'secondary'"
-            :outlined="activePersonFilterCount === 0"
-            @click="openPersonFilterMenu"
-          />
-          <Button
-            icon="pi pi-sort-alt"
-            label="Sortierung"
-            size="small"
-            :severity="isPersonSortDefault ? 'secondary' : 'primary'"
-            :outlined="isPersonSortDefault"
-            @click="openPersonSortMenu"
-          />
-          <span class="persons-filter-count">
-            {{ filteredPersons.length }} von {{ persons.length }}
-          </span>
-        </div>
-        <div v-if="activePersonFilterCount > 0 || !isPersonSortDefault" class="persons-filter-chips">
-          <Chip
-            v-for="(chip, i) in personFilterChips()"
-            :key="`f-${i}`"
-            :label="chip.label"
-            removable
-            @remove="chip.clear()"
-          />
-          <Chip
-            v-if="!isPersonSortDefault"
-            :label="personSortChipLabel"
-            removable
-            @remove="resetPersonSort()"
-          />
-        </div>
-      </template>
+      <!-- LEVEL 1: the person grid. -->
+      <ListToolbar v-else :model="gridToolbar" />
     </template>
 
     <template #notice>
       <ServiceStatusBar />
-      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="loadData" @close="error = ''" />
     </template>
 
     <FilterMenu
@@ -831,10 +803,13 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       @reset="onResetPhotoFilter"
     />
 
-    <div v-if="loading && persons.length === 0" class="info-text">
-      <i class="pi pi-spin pi-spinner" /> Personen werden geladen…
-    </div>
-    <div v-else-if="!loading && persons.length === 0" class="info-text">Keine Personen erkannt.</div>
+    <PageSkeleton v-if="loading && persons.length === 0" variant="grid" :count="12" />
+    <EmptyState
+      v-else-if="persons.length === 0"
+      icon="pi pi-users"
+      title="Keine Personen erkannt"
+      message="Sobald die Gesichtserkennung mehrere Aufnahmen derselben Person gefunden hat, erscheint sie hier."
+    />
 
     <!-- LEVEL 1: Person grid (default) ─────────────────────────────────────── -->
     <div v-else-if="!selectedPerson" class="persons-grid-layout">
@@ -982,39 +957,12 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       </template>
     </Dialog>
 
-    <SortMenu
-      v-model:visible="showPersonSortMenu"
-      v-model:draft="draftPersonSort"
-      :fields="PERSON_SORT_FIELDS"
-      @apply="applyPersonSort"
-      @reset="resetPersonSort"
-    />
   </PageLayout>
 </template>
 
 <style scoped>
-/* Page frame and title: PageLayout (issue #1272). */
-
-/* Toolbar spans the sticky row; min-width:0 lets it shrink and spill items
-   into its overflow dropdown instead of wrapping. */
-.header__toolbar {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.person-photo-filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.info-text {
-  display: flex;
-  justify-content: center;
-  gap: 0.5em;
-  padding: 3rem 1rem;
-  color: var(--p-text-muted-color);
-}
+/* Page frame and title: PageLayout (issue #1272). Search, filter, sort and
+   the result count: ListToolbar (issue #1278). */
 
 .gallery-layout {
   display: flex;
@@ -1034,57 +982,9 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
   overflow: hidden;
 }
 
-.persons-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-}
-
-.persons-filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
 .person-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
 .pfm-row { display: flex; flex-direction: column; gap: 0.5rem; }
 .pfm-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
-
-.persons-filter-input {
-  position: relative;
-  flex: 1;
-  max-width: 28rem;
-  display: flex;
-  align-items: center;
-}
-.persons-filter-input :deep(.p-inputtext) {
-  padding-left: 2.25rem;
-  padding-right: 2.25rem;
-  width: 100%;
-}
-.persons-filter-icon {
-  position: absolute;
-  left: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--p-text-muted-color);
-  pointer-events: none;
-  font-size: 0.9rem;
-}
-.persons-filter-clear {
-  position: absolute;
-  right: 0.25rem;
-  top: 50%;
-  transform: translateY(-50%);
-}
-.persons-filter-count {
-  font-size: 0.85rem;
-  color: var(--p-text-muted-color);
-  white-space: nowrap;
-}
-
 
 /* ── Person Sidebar Sheet Wrapper ────────────────────────────────────────── */
 .person-sidebar-sheet {

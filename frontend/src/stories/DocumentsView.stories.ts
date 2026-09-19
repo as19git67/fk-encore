@@ -82,12 +82,13 @@ export const Suchergebnis: Story = {
     },
   },
   play: async ({ canvasElement }) => {
-    const input = canvasElement.querySelector<HTMLInputElement>('input.search-input')
-    if (input) {
-      input.focus()
-      input.value = 'Energiekosten'
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    }
+    const input = canvasElement.querySelector<HTMLInputElement>('[data-testid="list-search"]')
+    if (!input) throw new Error('search input not found')
+    input.focus()
+    input.value = 'Energiekosten'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    // The shared toolbar debounces the term by 300 ms before it searches.
+    await new Promise((resolve) => setTimeout(resolve, 500))
   },
 }
 
@@ -104,11 +105,12 @@ export const KeineTreffer: Story = {
     },
   },
   play: async ({ canvasElement }) => {
-    const input = canvasElement.querySelector<HTMLInputElement>('input.search-input')
-    if (input) {
-      input.focus()
-      input.value = 'Unbekanntes Schlagwort'
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    }
+    const input = canvasElement.querySelector<HTMLInputElement>('[data-testid="list-search"]')
+    if (!input) throw new Error('search input not found')
+    input.focus()
+    input.value = 'Unbekanntes Schlagwort'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    // The shared toolbar debounces the term by 300 ms before it searches.
+    await new Promise((resolve) => setTimeout(resolve, 500))
   },
 }

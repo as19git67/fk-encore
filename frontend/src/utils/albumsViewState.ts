@@ -1,10 +1,14 @@
 import type { SortState } from '../composables/useSort'
 
-// Filter / sort / search state that the albums list renders from. Extracted
-// into a pure module so AlbumDetailView can hand the same query params back
-// to the router when navigating to the list — without that, leaving an album
-// would briefly drop the user onto an unfiltered list before the list view
+// Filter / sort state that the albums list renders from. Extracted into a
+// pure module so AlbumDetailView can hand the same query params back to the
+// router when navigating to the list — without that, leaving an album would
+// briefly drop the user onto an unfiltered list before the list view
 // re-applied state from localStorage on its own mount.
+//
+// The search term is NOT part of this state: since the shared list toolbar
+// (#1272, stage 3) `useListSearch` owns the `q` query key and remembers the
+// last term itself, so this module neither reads nor writes `q`.
 
 export type AlbumOwnerFilter = 'all' | 'mine' | 'shared'
 export type AlbumDisplayFilter = 'all' | 'grid' | 'map'
@@ -40,14 +44,17 @@ export const ALBUM_SORT_FIELD_VALUES: ReadonlyArray<string> = [
 export interface AlbumsPersistedState {
   filter: AlbumFilter
   sort: SortState
-  searchQuery: string
 }
 
 export const ALBUMS_STATE_STORAGE_KEY = 'albums_view_state'
 export const LAST_FOCUSED_ALBUM_KEY = 'albums_last_focused_album_id'
 
-const FILTER_QUERY_KEYS = [
-  'q', 'owner', 'display', 'emptyMode', 'sharedByMe', 'sharedWithMe',
+/**
+ * The query keys this module owns. Everything else in the URL — `q` above
+ * all — belongs to someone else and must survive a filter/sort write.
+ */
+export const ALBUMS_STATE_QUERY_KEYS = [
+  'owner', 'display', 'emptyMode', 'sharedByMe', 'sharedWithMe',
   'dateFrom', 'dateTo', 'sortBy', 'sortDir',
 ] as const
 
@@ -55,7 +62,6 @@ export function defaultAlbumsState(): AlbumsPersistedState {
   return {
     filter: { ...EMPTY_ALBUM_FILTER },
     sort: { ...DEFAULT_ALBUM_SORT },
-    searchQuery: '',
   }
 }
 
@@ -91,7 +97,6 @@ export function loadAlbumsStateFromStorage(): AlbumsPersistedState {
     return {
       filter: sanitizeAlbumFilter(parsed?.filter),
       sort: sanitizeAlbumSort(parsed?.sort),
-      searchQuery: typeof parsed?.searchQuery === 'string' ? parsed.searchQuery : '',
     }
   } catch {
     return defaultAlbumsState()
@@ -105,7 +110,7 @@ export function saveAlbumsStateToStorage(state: AlbumsPersistedState): void {
 }
 
 export function hasAnyAlbumsFilterQueryParam(q: Record<string, unknown>): boolean {
-  return FILTER_QUERY_KEYS.some(k => typeof q[k] === 'string' && (q[k] as string).length > 0)
+  return ALBUMS_STATE_QUERY_KEYS.some(k => typeof q[k] === 'string' && (q[k] as string).length > 0)
 }
 
 export function parseAlbumsStateFromQuery(q: Record<string, unknown>): AlbumsPersistedState {
@@ -122,14 +127,12 @@ export function parseAlbumsStateFromQuery(q: Record<string, unknown>): AlbumsPer
     field: typeof q.sortBy === 'string' ? q.sortBy : undefined,
     direction: (q.sortDir === 'asc' || q.sortDir === 'desc') ? q.sortDir : undefined,
   })
-  const searchQuery = typeof q.q === 'string' ? q.q : ''
-  return { filter, sort, searchQuery }
+  return { filter, sort }
 }
 
 export function albumsStateToQuery(state: AlbumsPersistedState): Record<string, string> {
   const out: Record<string, string> = {}
-  const { filter, sort, searchQuery } = state
-  if (searchQuery) out.q = searchQuery
+  const { filter, sort } = state
   if (filter.owner !== 'all') out.owner = filter.owner
   if (filter.display !== 'all') out.display = filter.display
   if (filter.emptyMode !== 'any') out.emptyMode = filter.emptyMode
@@ -173,7 +176,7 @@ export function albumMenuTarget(
 
 /**
  * Builds the URL query that the albums list would render with right now,
- * using the persisted filter/sort/search. Used by callers that navigate TO
+ * using the persisted filter/sort. Used by callers that navigate TO
  * the list (e.g. the back arrow in AlbumDetailView) so the URL reflects the
  * user's last filters from the start, instead of relying on AlbumsView's
  * mount-time URL rewrite which can flash an unfiltered list.

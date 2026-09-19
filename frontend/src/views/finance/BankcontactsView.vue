@@ -5,9 +5,13 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
-import Message from 'primevue/message'
 import PageLayout from '../../components/layout/PageLayout.vue'
 import ScrollX from '../../components/layout/ScrollX.vue'
+import ListToolbar from '../../components/layout/ListToolbar.vue'
+import EmptyState from '../../components/layout/EmptyState.vue'
+import PageSkeleton from '../../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../../components/layout/ErrorBanner.vue'
+import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
 import type { Bankcontact, SyncSlot } from '../../api/finance'
 import TanDialog from '../../components/finance/TanDialog.vue'
@@ -31,6 +35,35 @@ onMounted(() => {
 })
 onUnmounted(() => {
   if (tickHandle !== null) clearInterval(tickHandle)
+})
+
+// ─── Shared list toolbar (#1272, stage 3) ───────────────────────────
+// The store holds every bank contact, so the search narrows the table in
+// place — over the contact's name and the bank code behind it. The
+// overview cards above keep summarising *all* contacts, filtered or not.
+const search = useListSearch({
+  placeholder: 'Bankkontakt oder BLZ suchen',
+  storageKey: 'finance.bankcontacts.search',
+})
+
+const searching = computed(() => search.term.value.trim().length > 0)
+
+const visibleContacts = computed<Bankcontact[]>(() => {
+  const term = search.term.value.trim().toLowerCase()
+  if (!term) return store.items
+  return store.items.filter(
+    (bc) =>
+      bc.name.toLowerCase().includes(term) || (bc.blz ?? '').toLowerCase().includes(term),
+  )
+})
+
+const toolbar = useListToolbar({
+  search,
+  result: {
+    loaded: () => visibleContacts.value.length,
+    total: () => store.items.length,
+    loading: () => store.loading,
+  },
 })
 
 // ----- Overview-Widget (oberhalb der Tabelle) -------------------------
@@ -202,13 +235,21 @@ function openDetail(id: number) {
       />
     </template>
 
+    <template #toolbar>
+      <ListToolbar :model="toolbar" />
+    </template>
+
     <template #notice>
-      <Message v-if="store.error" severity="error" :closable="false">
-        {{ store.error }}
-      </Message>
-      <Message v-if="syncError" severity="error" :closable="true" @close="syncError = null">
-        {{ syncError }}
-      </Message>
+      <ErrorBanner v-if="store.error" :message="store.error" @retry="store.refresh()" />
+      <!-- A failed sync is not a failed load: retrying belongs on the row's
+           own sync button, so this banner only offers to go away. -->
+      <ErrorBanner
+        v-if="syncError"
+        :message="syncError"
+        :retryable="false"
+        closable
+        @close="syncError = null"
+      />
     </template>
 
     <section v-if="store.items.length > 0" class="overview">
@@ -236,9 +277,24 @@ function openDetail(id: number) {
       </div>
     </section>
 
-    <ScrollX>
+    <PageSkeleton v-if="store.loading && store.items.length === 0" variant="table" :count="6" />
+
+    <EmptyState
+      v-else-if="visibleContacts.length === 0"
+      icon="pi pi-building-columns"
+      :title="searching ? 'Keine Treffer' : 'Keine Bankkontakte'"
+      :message="
+        searching
+          ? 'Zu diesem Suchbegriff passt kein Bankkontakt.'
+          : 'Es ist noch kein Bankzugang angelegt — damit holt F4mil Umsätze automatisch ab.'
+      "
+      :filtered="searching"
+      @clear-filters="search.clear()"
+    />
+
+    <ScrollX v-else>
     <DataTable
-      :value="store.items"
+      :value="visibleContacts"
       :loading="store.loading"
       dataKey="id"
       :rowHover="true"

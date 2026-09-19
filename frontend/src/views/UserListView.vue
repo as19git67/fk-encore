@@ -11,6 +11,11 @@ import Message from 'primevue/message'
 import Tag from 'primevue/tag'
 import PageLayout from '../components/layout/PageLayout.vue'
 import ScrollX from '../components/layout/ScrollX.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import {
   listUsers,
   listInvites,
@@ -26,6 +31,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const users = ref<UserWithRoles[]>([])
 const loading = ref(true)
+const error = ref('')
 
 // Accounts are created by invitation only, so this list is the one place
 // where new ones start. Without users.create there is nothing to show.
@@ -38,13 +44,49 @@ const inviteError = ref('')
 const inviteNotice = ref('')
 const inviting = ref(false)
 
-onMounted(async () => {
+// ─── Shared list toolbar (#1272, stage 3) ───────────────────────────────────
+// The whole list is in memory, so the search filters the rows right here —
+// it runs over exactly the two identifying columns the table shows.
+const search = useListSearch({
+  placeholder: 'Name oder E-Mail suchen',
+  storageKey: 'admin.users.search',
+})
+
+const searching = computed(() => search.term.value.trim().length > 0)
+
+const visibleUsers = computed(() => {
+  const term = search.term.value.trim().toLowerCase()
+  if (!term) return users.value
+  return users.value.filter(
+    (user) =>
+      user.name.toLowerCase().includes(term) || user.email.toLowerCase().includes(term),
+  )
+})
+
+const toolbar = useListToolbar({
+  search,
+  result: {
+    loaded: () => visibleUsers.value.length,
+    total: () => users.value.length,
+    loading: () => loading.value,
+  },
+})
+
+async function loadUsers() {
+  loading.value = true
+  error.value = ''
   try {
     const res = await listUsers()
     users.value = res.users
+  } catch (err: any) {
+    error.value = err?.message || 'Benutzer konnten nicht geladen werden'
   } finally {
     loading.value = false
   }
+}
+
+onMounted(async () => {
+  await loadUsers()
   if (mayInvite.value) await loadInvites()
 })
 
@@ -108,7 +150,18 @@ function onRowClick(event: any) {
       />
     </template>
 
+    <template #toolbar>
+      <ListToolbar :model="toolbar" />
+    </template>
+
     <template #notice>
+      <ErrorBanner
+        v-if="error"
+        :message="error"
+        closable
+        @retry="loadUsers"
+        @close="error = ''"
+      />
       <Message
         v-if="inviteNotice"
         severity="success"
@@ -120,9 +173,24 @@ function onRowClick(event: any) {
     </template>
 
     <div class="user-list-view">
-    <ScrollX>
+    <PageSkeleton v-if="loading && users.length === 0" variant="table" :count="8" />
+
+    <EmptyState
+      v-else-if="visibleUsers.length === 0"
+      icon="pi pi-users"
+      :title="searching ? 'Keine Treffer' : 'Keine Benutzer'"
+      :message="
+        searching
+          ? 'Zu diesem Suchbegriff passt kein Benutzer.'
+          : 'Es ist noch kein Benutzerkonto angelegt — neue Konten entstehen über eine Einladung.'
+      "
+      :filtered="searching"
+      @clear-filters="search.clear()"
+    />
+
+    <ScrollX v-else>
     <DataTable
-      :value="users"
+      :value="visibleUsers"
       :loading="loading"
       striped-rows
       hover

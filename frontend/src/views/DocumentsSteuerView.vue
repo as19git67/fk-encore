@@ -4,9 +4,14 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
 import Message from 'primevue/message'
-import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useListToolbar } from '../composables/useListToolbar'
+import type { FilterChip } from '../components/layout/listToolbar'
 import {
   backfillDocumentTax,
   listSubjectPersons,
@@ -101,10 +106,68 @@ const grouped = computed(() => {
   return buckets
 })
 
-const totalDocsLabel = computed(() => {
-  const n = data.value?.total_documents ?? 0
-  if (n === 0) return ''
-  return n === 1 ? '1 Dokument' : `${n} Dokumente`
+// ─── Toolbar (issue #1272, stage 3) ─────────────────────────────────────────
+// The filter rows stay where they are, always visible; the toolbar adds the
+// shared chips and the result count around them. It renders no filter button
+// here, because there is no menu to open.
+
+const personLabel = (id: number) =>
+  subjectPersons.value.find((p) => p.id === id)?.full_name ?? `#${id}`
+
+const filterChips = computed<FilterChip[]>(() => {
+  const out: FilterChip[] = []
+  if (selectedYear.value != null) {
+    out.push({
+      key: 'year',
+      label: `Steuerjahr: ${selectedYear.value}`,
+      remove: () => { selectedYear.value = null },
+    })
+  }
+  if (reviewNeededOnly.value) {
+    out.push({
+      key: 'review',
+      label: 'Status: Nur zu prüfen',
+      remove: () => { reviewNeededOnly.value = false },
+    })
+  }
+  if (taxReturnPersonId.value != null) {
+    out.push({
+      key: 'person',
+      label: `Steuerakte: ${personLabel(taxReturnPersonId.value)}`,
+      remove: () => { taxReturnPersonId.value = null },
+    })
+  }
+  return out
+})
+
+const activeFilterCount = computed(() => filterChips.value.length)
+
+function clearFilters() {
+  selectedYear.value = null
+  reviewNeededOnly.value = false
+  taxReturnPersonId.value = null
+}
+
+const toolbar = useListToolbar({
+  filter: {
+    chips: filterChips,
+    activeCount: activeFilterCount,
+    clearAll: clearFilters,
+  },
+  result: {
+    // The tax list arrives whole — no paging, so loaded is the total.
+    loaded: () => data.value?.total_documents ?? 0,
+    loading: () => loading.value,
+  },
+})
+
+/** The two wordings the empty list has: nothing recognised yet, or nothing for this filter. */
+const emptyMessage = computed(() => {
+  if (years.value.length > 0) return 'Für dieses Jahr wurden keine Steuer-Dokumente gefunden.'
+  const base = 'Es wurden noch keine steuerlich relevanten Dokumente erkannt.'
+  return auth.hasPermission('documents.edit')
+    ? `${base} Falls du bereits ältere Dokumente hochgeladen hast, starte oben die „KI-Analyse nachholen“.`
+    : base
 })
 
 async function loadYears() {
@@ -137,6 +200,13 @@ async function loadData() {
   } finally {
     loading.value = false
   }
+}
+
+/** Retry for the error banner: the year list may have failed too. */
+async function reload() {
+  error.value = ''
+  await loadYears()
+  await loadData()
 }
 
 async function onBackfill() {
@@ -204,9 +274,12 @@ function formatDate(dateStr: string | null): string {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-watch(selectedYear, () => { syncQueryParams(); loadData() })
-watch(reviewNeededOnly, () => { syncQueryParams(); loadData() })
-watch(taxReturnPersonId, () => { syncQueryParams(); loadData() })
+// One watcher over all three so clearing several at once (the toolbar's
+// "Alle entfernen") reloads once instead of three times.
+watch([selectedYear, reviewNeededOnly, taxReturnPersonId], () => {
+  syncQueryParams()
+  loadData()
+})
 
 onMounted(async () => {
   await loadYears()
@@ -239,82 +312,79 @@ onMounted(async () => {
     </template>
 
     <template #notice>
-      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="reload" @close="error = ''" />
       <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
     </template>
 
     <template #toolbar>
-    <div v-if="years.length > 0" class="year-filters">
-      <span class="year-filters-label">Steuerjahr:</span>
-      <Button
-        :label="`Alle${years.length > 1 ? ` (${years.reduce((s, y) => s + y.count, 0)})` : ''}`"
-        size="small"
-        :severity="selectedYear === null ? 'primary' : 'secondary'"
-        :outlined="selectedYear !== null"
-        @click="selectedYear = null"
-      />
-      <Button
-        v-for="y in years"
-        :key="y.year"
-        :label="`${y.year} (${y.count})`"
-        size="small"
-        :severity="selectedYear === y.year ? 'primary' : 'secondary'"
-        :outlined="selectedYear !== y.year"
-        @click="selectedYear = y.year"
-      />
-      <Button
-        label="Nur zu prüfen"
-        icon="pi pi-question-circle"
-        size="small"
-        severity="warn"
-        :outlined="!reviewNeededOnly"
-        title="Nur Dokumente einer Bezugsperson mit absetzbarer Position, bei denen noch offen ist, ob du die Ausgabe getragen hast."
-        @click="reviewNeededOnly = !reviewNeededOnly"
-      />
-    </div>
+      <ListToolbar :model="toolbar">
+        <template #actions>
+          <div class="steuer-filters">
+            <div v-if="years.length > 0" class="year-filters">
+              <span class="year-filters-label">Steuerjahr:</span>
+              <Button
+                :label="`Alle${years.length > 1 ? ` (${years.reduce((s, y) => s + y.count, 0)})` : ''}`"
+                size="small"
+                :severity="selectedYear === null ? 'primary' : 'secondary'"
+                :outlined="selectedYear !== null"
+                @click="selectedYear = null"
+              />
+              <Button
+                v-for="y in years"
+                :key="y.year"
+                :label="`${y.year} (${y.count})`"
+                size="small"
+                :severity="selectedYear === y.year ? 'primary' : 'secondary'"
+                :outlined="selectedYear !== y.year"
+                @click="selectedYear = y.year"
+              />
+              <Button
+                label="Nur zu prüfen"
+                icon="pi pi-question-circle"
+                size="small"
+                severity="warn"
+                :outlined="!reviewNeededOnly"
+                title="Nur Dokumente einer Bezugsperson mit absetzbarer Position, bei denen noch offen ist, ob du die Ausgabe getragen hast."
+                @click="reviewNeededOnly = !reviewNeededOnly"
+              />
+            </div>
 
-    <div v-if="ownReturnPersons.length > 0" class="year-filters">
-      <span class="year-filters-label">Steuerakte:</span>
-      <Button
-        label="Meine Erklärung"
-        size="small"
-        :severity="taxReturnPersonId === null ? 'primary' : 'secondary'"
-        :outlined="taxReturnPersonId !== null"
-        @click="taxReturnPersonId = null"
-      />
-      <Button
-        v-for="p in ownReturnPersons"
-        :key="p.id"
-        :label="p.full_name"
-        size="small"
-        :severity="taxReturnPersonId === p.id ? 'primary' : 'secondary'"
-        :outlined="taxReturnPersonId !== p.id"
-        :title="`Eigene Steuererklärung ab Steuerjahr ${p.own_tax_return_from_tax_year}`"
-        @click="taxReturnPersonId = p.id"
-      />
-    </div>
+            <div v-if="ownReturnPersons.length > 0" class="year-filters">
+              <span class="year-filters-label">Steuerakte:</span>
+              <Button
+                label="Meine Erklärung"
+                size="small"
+                :severity="taxReturnPersonId === null ? 'primary' : 'secondary'"
+                :outlined="taxReturnPersonId !== null"
+                @click="taxReturnPersonId = null"
+              />
+              <Button
+                v-for="p in ownReturnPersons"
+                :key="p.id"
+                :label="p.full_name"
+                size="small"
+                :severity="taxReturnPersonId === p.id ? 'primary' : 'secondary'"
+                :outlined="taxReturnPersonId !== p.id"
+                :title="`Eigene Steuererklärung ab Steuerjahr ${p.own_tax_return_from_tax_year}`"
+                @click="taxReturnPersonId = p.id"
+              />
+            </div>
+          </div>
+        </template>
+      </ListToolbar>
     </template>
 
     <div class="content">
-    <div v-if="totalDocsLabel" class="total-label">{{ totalDocsLabel }}</div>
+    <PageSkeleton v-if="loading && !data" variant="list" :count="6" />
 
-    <div v-if="loading" class="info-text">
-      <ProgressSpinner style="width:1.5rem;height:1.5rem" strokeWidth="4" />
-      <span>Steuer-Dokumente werden geladen…</span>
-    </div>
-
-    <div v-else-if="!data || data.sections.length === 0" class="info-text">
-      <template v-if="years.length === 0">
-        Es wurden noch keine steuerlich relevanten Dokumente erkannt.
-        <span v-if="auth.hasPermission('documents.edit')"><br>
-          Falls du bereits ältere Dokumente hochgeladen hast, starte oben die
-          „KI-Analyse nachholen".
-        </span>
-      </template>
-      <template v-else>
-        Für dieses Jahr wurden keine Steuer-Dokumente gefunden.
-      </template>
-    </div>
+    <EmptyState
+      v-else-if="!data || data.sections.length === 0"
+      icon="pi pi-percentage"
+      title="Keine Steuer-Dokumente"
+      :message="emptyMessage"
+      :filtered="activeFilterCount > 0"
+      @clear-filters="clearFilters"
+    />
 
     <div v-else class="groups">
       <section v-for="group in grouped" :key="group.group" class="group">
@@ -384,31 +454,26 @@ onMounted(async () => {
   gap: 1rem;
 }
 
+/* The filter rows fill the toolbar's action area instead of being pushed
+   to its right edge, so they keep reading as two left-aligned rows. */
+.steuer-filters {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
 .year-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: var(--space-1);
   align-items: center;
 }
 .year-filters-label {
   font-size: 0.9rem;
   color: var(--p-text-muted-color);
   margin-right: 0.25rem;
-}
-
-.total-label {
-  font-size: 0.9rem;
-  color: var(--p-text-muted-color);
-}
-
-.info-text {
-  text-align: center;
-  margin-top: 3rem;
-  color: var(--p-text-muted-color);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 .groups { display: flex; flex-direction: column; gap: 2rem; }
