@@ -4,6 +4,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import OsmRegionStorageDialog from './OsmRegionStorageDialog.vue'
+import ScrollX from '../layout/ScrollX.vue'
 import {
   listOsmRegions, suggestOsmRegion, createOsmRegion,
   approveOsmRegion, deleteOsmRegion, reverseGeocodeViaOsm,
@@ -318,42 +319,76 @@ usePolling(fetchOsmRegions, 5_000)
           </span>
           {{ bulkSuggestResult.suggestions.length }} Regionen vorgeschlagen.
         </p>
-        <table class="osm-bulk-table">
-          <thead>
-            <tr>
-              <th>Region</th>
-              <th>Fotos</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="s in bulkSuggestResult.suggestions" :key="s.slug">
-              <td>
-                <code>{{ s.slug }}</code>
-                <span class="osm-bulk-name">{{ s.name }}</span>
-              </td>
-              <td>{{ s.photoCount.toLocaleString('de-DE') }}</td>
-              <td>
-                <span v-if="s.existing"
-                  class="osm-status"
-                  :class="`osm-status--${s.existingStatus}`"
-                >{{ osmStatusLabels[s.existingStatus ?? ''] ?? s.existingStatus }}</span>
-                <span v-else class="text-secondary">–</span>
-              </td>
-              <td>
-                <Button
-                  v-if="!s.existing"
-                  label="Anlegen"
-                  icon="pi pi-plus"
-                  size="small"
-                  :loading="osmLoading"
-                  @click="handleBulkCreate(s)"
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <!-- Vorschlags-Tabelle (breite Schirme) -->
+        <div class="queue-table-wrapper">
+          <ScrollX>
+            <table class="osm-bulk-table">
+              <thead>
+                <tr>
+                  <th>Region</th>
+                  <th>Fotos</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in bulkSuggestResult.suggestions" :key="s.slug">
+                  <td>
+                    <code>{{ s.slug }}</code>
+                    <span class="osm-bulk-name">{{ s.name }}</span>
+                  </td>
+                  <td>{{ s.photoCount.toLocaleString('de-DE') }}</td>
+                  <td>
+                    <span v-if="s.existing"
+                      class="osm-status"
+                      :class="`osm-status--${s.existingStatus}`"
+                    >{{ osmStatusLabels[s.existingStatus ?? ''] ?? s.existingStatus }}</span>
+                    <span v-else class="text-secondary">–</span>
+                  </td>
+                  <td>
+                    <Button
+                      v-if="!s.existing"
+                      label="Anlegen"
+                      icon="pi pi-plus"
+                      size="small"
+                      :loading="osmLoading"
+                      @click="handleBulkCreate(s)"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </ScrollX>
+        </div>
+
+        <!-- Vorschlags-Karten (schmale Schirme) -->
+        <div class="queue-cards">
+          <div v-for="s in bulkSuggestResult.suggestions" :key="s.slug" class="queue-card osm-card">
+            <div class="queue-card__header">
+              <code>{{ s.slug }}</code>
+              <span class="osm-bulk-name">{{ s.name }}</span>
+            </div>
+            <div class="osm-card__row">
+              <span v-if="s.existing"
+                class="osm-status"
+                :class="`osm-status--${s.existingStatus}`"
+              >{{ osmStatusLabels[s.existingStatus ?? ''] ?? s.existingStatus }}</span>
+              <span v-else class="text-secondary">Noch nicht angelegt</span>
+              <span class="osm-card__pbf">
+                {{ s.photoCount.toLocaleString('de-DE') }} Fotos
+              </span>
+            </div>
+            <div v-if="!s.existing" class="osm-card__actions">
+              <Button
+                label="Anlegen"
+                icon="pi pi-plus"
+                size="small"
+                :loading="osmLoading"
+                @click="handleBulkCreate(s)"
+              />
+            </div>
+          </div>
+        </div>
 
         <!-- Lösch-Kandidaten -->
         <div v-if="bulkSuggestResult.redundantRegions.length > 0" class="osm-redundant">
@@ -414,6 +449,7 @@ usePolling(fetchOsmRegions, 5_000)
       holen und dann „Anlegen" klicken.
     </div>
     <div v-else class="queue-table-wrapper">
+      <ScrollX>
       <table class="queue-table mb-4">
         <thead>
           <tr>
@@ -484,6 +520,7 @@ usePolling(fetchOsmRegions, 5_000)
           </tr>
         </tbody>
       </table>
+      </ScrollX>
     </div>
 
     <!-- Region-Karten (Mobil) — visible only when osmRegions.length > 0;
@@ -626,6 +663,30 @@ usePolling(fetchOsmRegions, 5_000)
   display: block;
   font-size: 0.8rem;
   color: var(--p-text-muted-color);
+}
+
+/* Both tables live in a ScrollX, so they keep a readable column width and
+   scroll sideways instead of being squashed — or, with `overflow-x: clip`
+   on the page, silently cut off on a phone held sideways. Below 600px the
+   cards take over and the tables are hidden. */
+.queue-table,
+.osm-bulk-table {
+  min-width: 34rem;
+}
+
+/* The region is the row's name, so it stays put while the rest scrolls.
+   `border-collapse: collapse` draws the row separator on the table, not the
+   cell, and a sticky cell paints over it — the inset shadows put the bottom
+   line and the pinned column's edge back. */
+.queue-table th:first-child,
+.queue-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--p-content-background);
+  box-shadow:
+    inset 0 -1px 0 var(--p-content-border-color),
+    inset -1px 0 0 var(--p-content-border-color);
 }
 
 .osm-redundant {
