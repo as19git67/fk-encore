@@ -31,6 +31,7 @@ import type {
   GeoDayTarget,
   GeoDayTargetPage,
   GeoDayTargetQuery,
+  GeoRegionTables,
   GeoRouteSearchQuery,
   GeoPoiSearchSpot,
   GeoRefreshResult,
@@ -59,6 +60,9 @@ export class InMemoryGeoClient implements GeoClient {
   private routes = new Map<string, GeoRoute[]>();
   private routesImported = new Set<string>();
   private dayTargets = new Map<string, GeoDayTarget[]>();
+  private tables = new Map<string, string[]>();
+  private failingTableProbes = new Set<string>();
+  private failingDrops = new Set<string>();
   private refreshResults = new Map<string, GeoRefreshResult>();
   private replicationStatuses = new Map<string, GeoReplicationStatus>();
   private droppedRegions: string[] = [];
@@ -254,6 +258,37 @@ export class InMemoryGeoClient implements GeoClient {
     this.dayTargets.set(postgresDb, targets);
   }
 
+  /**
+   * Which style tables a region has. A region nobody has called this
+   * for reads as a complete, current import — the ordinary case.
+   */
+  setRegionTables(postgresDb: string, present: string[]): void {
+    this.tables.set(postgresDb, present);
+  }
+
+  /** A region the geo service cannot answer for — it is down, or gone. */
+  failTableProbe(postgresDb: string): void {
+    this.failingTableProbes.add(postgresDb);
+  }
+
+  /** A drop that does not go through, so the caller's order can be tested. */
+  failDrop(postgresDb: string): void {
+    this.failingDrops.add(postgresDb);
+  }
+
+  async regionTables(postgresDb: string): Promise<GeoRegionTables> {
+    if (this.failingTableProbes.has(postgresDb)) {
+      throw new Error(`geo: GET /regions/${postgresDb}/tables → connect ECONNREFUSED`);
+    }
+    const all = ["osm_pois", "osm_highways", "osm_admin", "osm_routes"];
+    const present = this.tables.get(postgresDb) ?? all;
+    return {
+      database: postgresDb,
+      present,
+      missing: all.filter((t) => !present.includes(t)),
+    };
+  }
+
   async searchDayTargets(
     postgresDb: string,
     query: GeoDayTargetQuery,
@@ -417,6 +452,9 @@ export class InMemoryGeoClient implements GeoClient {
   }
 
   async dropRegion(postgresDb: string): Promise<boolean> {
+    if (this.failingDrops.has(postgresDb)) {
+      throw new Error(`geo: DELETE /regions/${postgresDb} → HTTP 500`);
+    }
     this.droppedRegions.push(postgresDb);
     const had = this.imports.delete(postgresDb);
     this.reverseResults.delete(postgresDb);

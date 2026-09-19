@@ -8,6 +8,8 @@ import {
   listOsmRegions, suggestOsmRegion, createOsmRegion,
   approveOsmRegion, deleteOsmRegion, reverseGeocodeViaOsm,
   bulkSuggestOsmRegions, refreshOsmRegion, getOsmRegionStorage,
+  getOutdatedOsmRegions, reimportOutdatedOsmRegions,
+  type OutdatedRegionsResult, type ReimportOutdatedResult,
   type OsmRegionImport, type RegionSuggestion,
   type BulkSuggestResult, type BulkRegionSuggestion, type RedundantRegion,
   type RegionStorage,
@@ -34,6 +36,14 @@ const reverseLoading = ref(false)
 
 const bulkSuggestResult = ref<BulkSuggestResult | null>(null)
 const bulkLoading = ref(false)
+
+// Regions an older osm2pgsql style built. osm2pgsql applies a style on
+// --create only, so such a region cannot gain a table any other way
+// than by being imported again (docs/ios-urlaubsplanung.md §4.7).
+const outdated = ref<OutdatedRegionsResult | null>(null)
+const outdatedLoading = ref(false)
+const reimportResult = ref<ReimportOutdatedResult | null>(null)
+const reimportLoading = ref(false)
 
 const redundantSlugSet = computed<Set<string>>(() => {
   if (!bulkSuggestResult.value) return new Set()
@@ -183,6 +193,46 @@ async function handleBulkSuggest() {
   }
 }
 
+async function handleCheckOutdated() {
+  outdatedLoading.value = true
+  reimportResult.value = null
+  try {
+    outdated.value = await getOutdatedOsmRegions()
+    osmError.value = ''
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  } finally {
+    outdatedLoading.value = false
+  }
+}
+
+async function handleReimportOutdated() {
+  const list = outdated.value?.outdated ?? []
+  if (list.length === 0) return
+  // Named one by one rather than counted: this drops databases, and
+  // "vier Regionen" is not something anybody can check before saying
+  // yes to it.
+  const names = list.map((r) => `· ${r.slug} (fehlt: ${r.missing.join(', ')})`).join('\n')
+  if (!window.confirm(
+    `${list.length} Region(en) neu importieren?\n\n${names}\n\n`
+    + 'Die PostGIS-Datenbank wird jeweils gelöscht und der Import neu gestartet. '
+    + 'Das dauert pro Region 10–30 Minuten, und solange ist sie nicht verfügbar. '
+    + 'Die PBF-Datei bleibt im Cache — es wird nichts neu heruntergeladen, der '
+    + 'Import hat damit aber auch denselben Datenstand wie zuvor.',
+  )) return
+
+  reimportLoading.value = true
+  try {
+    reimportResult.value = await reimportOutdatedOsmRegions()
+    await Promise.all([fetchOsmRegions(), handleCheckOutdated()])
+    osmError.value = ''
+  } catch (err) {
+    osmError.value = (err as Error).message ?? String(err)
+  } finally {
+    reimportLoading.value = false
+  }
+}
+
 async function handleBulkCreate(s: BulkRegionSuggestion) {
   if (s.existing) return
   osmLoading.value = true
@@ -294,6 +344,66 @@ usePolling(fetchOsmRegions, 5_000)
       <strong>Reverse-Geocode-Antwort</strong> (über
       Region <code>{{ reverseResult.regionSlug }}</code>):
       <pre>{{ JSON.stringify(reverseResult.result, null, 2) }}</pre>
+    </div>
+
+    <!-- Regionen, die ein älterer osm2pgsql-Style gebaut hat -->
+    <div class="osm-outdated">
+      <Button
+        label="Ältere Importe suchen"
+        icon="pi pi-history"
+        severity="secondary"
+        :loading="outdatedLoading"
+        @click="handleCheckOutdated"
+      />
+
+      <template v-if="outdated">
+        <p v-if="outdated.outdated.length === 0" class="osm-outdated__none">
+          Alle {{ outdated.checked }} fertigen Region(en) sind auf dem Stand des
+          aktuellen Imports.
+        </p>
+        <template v-else>
+          <p>
+            <strong>{{ outdated.outdated.length }}</strong> von
+            {{ outdated.checked }} fertigen Region(en) wurden mit einem älteren
+            Style importiert. Nur ein Neuimport bringt die fehlenden Tabellen —
+            osm2pgsql legt sie ausschließlich beim Neuanlegen an, und die
+            Replikation hängt nur Änderungen an das an, was schon da ist.
+          </p>
+          <ul class="osm-outdated__list">
+            <li v-for="r in outdated.outdated" :key="r.slug">
+              <code>{{ r.slug }}</code> — fehlt:
+              <code>{{ r.missing.join(', ') }}</code>
+            </li>
+          </ul>
+          <Button
+            label="Diese Regionen neu importieren"
+            icon="pi pi-refresh"
+            severity="danger"
+            :loading="reimportLoading"
+            @click="handleReimportOutdated"
+          />
+        </template>
+
+        <p v-if="outdated.unknown.length > 0" class="osm-outdated__unknown">
+          Nicht prüfbar:
+          <span v-for="u in outdated.unknown" :key="u.slug">
+            <code>{{ u.slug }}</code> ({{ u.reason }})
+          </span>
+        </p>
+      </template>
+
+      <div v-if="reimportResult" class="osm-outdated__result">
+        <p>
+          <strong>{{ reimportResult.started.filter((r) => r.started).length }}</strong>
+          Region(en) werden neu importiert, {{ reimportResult.skipped }} waren
+          bereits aktuell.
+        </p>
+        <ul>
+          <li v-for="r in reimportResult.started.filter((x) => !x.started)" :key="r.slug">
+            <code>{{ r.slug }}</code> — nicht gestartet: {{ r.reason }}
+          </li>
+        </ul>
+      </div>
     </div>
 
     <!-- Bulk-Suggest für Bestandsfotos -->
@@ -675,6 +785,32 @@ usePolling(fetchOsmRegions, 5_000)
   padding: 0.05rem 0.45rem;
   border-radius: 4px;
 }
+.osm-outdated {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+  margin-top: var(--space-4, 1rem);
+}
+
+.osm-outdated__none {
+  color: var(--p-text-muted-color);
+}
+
+.osm-outdated__list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.osm-outdated__unknown {
+  color: var(--p-text-muted-color);
+  font-size: 0.9em;
+}
+
+.osm-outdated__result {
+  border-top: 1px solid var(--p-content-border-color);
+  padding-top: var(--space-2, 0.5rem);
+}
+
 .osm-redundant__verdict--delete {
   background: var(--p-tag-success-background, rgba(0,128,0,0.12));
   color: var(--p-tag-success-color);

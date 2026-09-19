@@ -205,6 +205,62 @@ async function runImport(req: ImportRequest): Promise<RunResult> {
   };
 }
 
+/**
+ * The tables the current Flex style creates (`osm2pgsql.lua`).
+ *
+ * Kept here rather than read back out of the Lua because it answers a
+ * question the Lua cannot: **is a given region's database still what
+ * this style would produce?** osm2pgsql applies a style on `--create`
+ * only — it never migrates an existing database — so a region imported
+ * before a table joined the style simply does not have it, for as long
+ * as nobody re-imports.
+ *
+ * The readiness check above deliberately still asks for only the
+ * original three: a region without `osm_routes` works for everything
+ * except one screen, and declaring it broken would take a working
+ * region away over a feature its owner may not use (§15.3).
+ */
+export const STYLE_TABLES = [
+  "osm_pois",
+  "osm_highways",
+  "osm_admin",
+  "osm_routes",
+] as const;
+
+export interface RegionTables {
+  database: string;
+  /** Which of `STYLE_TABLES` this database has. */
+  present: string[];
+  /**
+   * Which it lacks — non-empty means the region was imported under an
+   * older style and a re-import would give it more than it has.
+   */
+  missing: string[];
+}
+
+/**
+ * Which of the style's tables a region database actually has.
+ *
+ * `to_regclass` returns null rather than raising for a table that does
+ * not exist, so this answers for a half-imported region too instead of
+ * failing the call.
+ */
+export async function regionTables(database: string): Promise<RegionTables> {
+  const pool = poolFor(database);
+  const res = await pool.query<{ table: string }>(
+    `SELECT t.name AS table
+       FROM unnest($1::text[]) AS t(name)
+      WHERE to_regclass(t.name) IS NOT NULL`,
+    [[...STYLE_TABLES]],
+  );
+  const present = res.rows.map((r) => r.table);
+  return {
+    database,
+    present,
+    missing: STYLE_TABLES.filter((t) => !present.includes(t)),
+  };
+}
+
 export async function dropRegion(postgresDb: string): Promise<boolean> {
   // node-pg can't run DROP DATABASE while clients are connected, so we
   // terminate them first via pg_terminate_backend.
