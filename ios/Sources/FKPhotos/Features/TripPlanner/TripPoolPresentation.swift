@@ -58,6 +58,20 @@ enum TripPoolFilter {
         return "\(shown) von \(total)"
     }
 
+    /// Is this candidate longer than any single block of the day can
+    /// hold (§4.7)?
+    ///
+    /// The planner fills each block inside its budget, so a four-hour
+    /// walk in a day of three-and-a-half-hour blocks will never be
+    /// chosen — it has to be planned by hand, and then it runs into the
+    /// block after it. Only blocks that take spots are asked: a meal
+    /// block holds time, not places (§10.3).
+    static func needsMoreThanOneBlock(_ candidate: TripCandidate, in leg: TripLeg) -> Bool {
+        let holders = leg.days.flatMap(\.blocks).filter { !$0.isMeal }
+        guard !holders.isEmpty else { return false }
+        return holders.allSatisfy { $0.budgetMinutes < candidate.dwellMinutes }
+    }
+
     /// Which spots of the leg are already on a day.
     static func plannedRefs(of leg: TripLeg) -> Set<String> {
         Set(leg.days.flatMap { $0.blocks }.flatMap { $0.stops }.map(\.osmRef))

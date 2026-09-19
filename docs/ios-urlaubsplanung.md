@@ -876,14 +876,46 @@ geschlossen. Die Kategorie heißt `route`, im Freien (§7.2).
   Namen. Zwei Enden weiter als 80 km auseinander werden abgewiesen: das ist
   ein Transfer (§4.2), keine Strecke in einem Block.
 
+**Länger als ein Block (Etappe 3, umgesetzt):**
+
+Eine Vier-Stunden-Wanderung passt in keinen Vormittag. Die offene Frage war,
+ob der Solver dann zwei Blöcke zusammenlegt — es wäre der erste Fall, in dem
+ein Kandidat die Tagesform ändert, statt sie zu füllen.
+
+**Die Antwort ist nein.** Das Budget eines Blocks ist keine Wand, sondern die
+Stelle, an der er enden sollte. Ein Stopp darf darüber hinauslaufen; was
+folgt, beginnt dann später, und der Plan sagt das. Die Tagesform bleibt, was
+der Reisende gezeichnet hat: Der Vormittag bleibt der Vormittag, das
+Mittagessen bleibt das Mittagessen — es fängt nur um halb zwei an. Genau das
+passiert, wenn man die Ponale läuft, und es ist ein Satz, den man am Tag
+nachprüfen kann.
+
+Wer das darf, ist der Kern der Entscheidung:
+
+- **Der Planer nicht.** `solveDay` füllt jeden Block innerhalb seines Budgets
+  wie bisher. Die Maschine hält den Rahmen ein, den sie bekommen hat; ein
+  Spot, der nirgends hineinpasst, bleibt im Vorrat.
+- **Ein Mensch schon.** Einplanen und Verschieben haben einen übervollen
+  Block noch nie verweigert (§5: „ein roter Block sagt mehr als eine
+  abgelehnte Geste"). Nur verschwanden die Minuten bisher — der Nachmittag
+  wurde gerechnet, als wäre der Vormittag pünktlich zu Ende gegangen. Jetzt
+  werden sie weitergereicht (`spill.ts`): Jeder Block weiß, um wie viel
+  später er beginnt, ein leerer Block schluckt den Überlauf (deshalb hat ein
+  Tag eine Mittagspause), und was hinter dem letzten Block landet, ist Zeit,
+  die der Tag nicht hat.
+
+In der App: Der Block, der überzieht, sagt „zieht ca. 30 min über — der
+nächste Block beginnt später"; der, der es abbekommt, sagt „beginnt ca. 30
+min später". Der Budgetbalken wird rot, wenn ein Block **mitsamt seinem
+verspäteten Beginn** überzieht — nicht erst, wenn sein eigener Inhalt zu viel
+ist. Und in der Kandidatenliste sagt eine Strecke, die in keinen Block passt,
+warum sie dort liegen bleibt, statt übergangen auszusehen.
+
+Damit bleibt das Zusammenlegen von Blöcken das, was es war: eine Sache des
+Reisenden über den Bildschirm „Tagesablauf" (§4.1), nicht des Planers.
+
 **Was bewusst noch nicht gebaut ist:**
 
-- **Zwei Blöcke am Stück.** Eine Vier-Stunden-Wanderung passt in keinen
-  Vormittag. Vorerst gilt: Blöcke sind editierbar (§4.1, bis 600 Minuten) —
-  wer den Tag um die Ponale plant, legt Vormittag und Mittag zusammen. Ob der
-  Solver das selbst tun soll, wenn eine Strecke sonst nirgends Platz findet,
-  ist offen; es wäre der erste Fall, in dem ein Kandidat die Tagesform
-  ändert statt sie zu füllen.
 - **Spots im Korridor schlucken.** Die Aussichtspunkte entlang der Strecke
   sollen als „unterwegs" gelten statt eingeplant zu werden. Die
   Korridor-Suche (`corridor.ts`, Ellipse um zwei Enden) ist die Mechanik
@@ -3791,8 +3823,9 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     eigene Dauer. **Etappe 1 umgesetzt:** das Feld auf Vorrat und Stopp, der
     Fund mit Endpunkt, und jeder Rewalk — Solver, Verschieben, Umverteilung,
     Wetter, Licht — geht am Ende der Strecke weiter. Etappe 2 (Eingabe
-    und Linie in der App) ebenfalls umgesetzt; danach die offenen Punkte aus §4.7
-    (zwei Blöcke am Stück, Korridor, Import aus OSM-Routenrelationen).
+    und Linie in der App) und Etappe 3 (ein Stopp darf über das Blockende
+    hinauslaufen, `spill.ts`) ebenfalls umgesetzt; offen bleiben aus §4.7 der
+    Korridor und der Import aus OSM-Routenrelationen.
 
 Schritte 1–3 sind der ehrliche Test — und sie kommen **ohne einen einzigen
 Neuimport** aus: Liefert die Maschine für *einen* Tag in

@@ -30,6 +30,7 @@
 import type { DayWalk } from "./day-walk";
 import type { CurrentBlock, CurrentStop } from "./redistribute";
 import { leaveFrom } from "./extent";
+import { spillOver } from "./spill";
 import { travelLeg, type Coordinate, type TransportMode } from "./travel";
 
 export class MoveError extends Error {}
@@ -194,6 +195,11 @@ export function insertStop(req: InsertStopRequest): InsertStopResult {
  * for the reason that module is about: the quarters are both ends only
  * on an ordinary day, and the days they are not are the ones people
  * remember (§4.4, §4.5).
+ *
+ * A block that runs over hands the surplus to the next one rather than
+ * dropping it (§4.7): the four-hour walk somebody planned into a
+ * three-and-a-half-hour Vormittag makes lunch late, and the day now
+ * says so instead of pretending the afternoon began on time.
  */
 export function recomputeDay(
   blocks: CurrentBlock[],
@@ -218,6 +224,14 @@ export function recomputeDay(
       used += travelLeg(position, walk.end, mode).minutes;
     }
     block.usedMinutes = used;
+  });
+
+  // How far each block has slipped, once every block knows what is in
+  // it — a forward pass of its own rather than a running total above,
+  // because the overrun of a block is only known after its last stop.
+  const spill = spillOver(blocks);
+  blocks.forEach((block, index) => {
+    block.carriedInMinutes = spill.blocks[index].carriedInMinutes;
   });
 }
 
