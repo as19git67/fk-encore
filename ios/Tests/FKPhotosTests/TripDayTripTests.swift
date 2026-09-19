@@ -1,6 +1,19 @@
 import XCTest
 @testable import FKPhotosLib
 
+/// The suggestion as the server sends it. A file-level constant rather
+/// than a static member: a default argument expression can reference
+/// neither `Self` nor an unqualified static of the enclosing type.
+private let tripDayTripSuggestionJSON = """
+{ "dayIndex": 2,
+  "target": { "name": "Beispielstadt", "source": "admin", "key": "area:900",
+              "osmRef": "area:900", "lat": 44.01, "lon": 11.04,
+              "distanceM": 60000, "travelMinutes": 60,
+              "dayAtTargetMinutes": 360, "spotCount": 40,
+              "examples": ["Dom zu Beispielstadt", "Stadtmuseum Beispiel"] },
+  "sentence": "Vor Ort tragen die Vorschläge zwei eurer vier Tage." }
+"""
+
 /// The day trip nobody asked for (§4.6), as the app reads it.
 ///
 /// The answer is "nothing to say" far more often than not, and the
@@ -12,7 +25,7 @@ final class TripDayTripTests: XCTestCase {
 
     private func answer(
         undersupplied: Bool = true,
-        suggestion: String = Self.SUGGESTION,
+        suggestion: String = tripDayTripSuggestionJSON,
         note: String? = nil,
     ) throws -> TripDayTripAnswer {
         func quoted(_ value: String?) -> String {
@@ -25,16 +38,6 @@ final class TripDayTripTests: XCTestCase {
           "dayMinutes": 480, "suggestion": \(suggestion), "note": \(quoted(note)) }
         """.utf8))
     }
-
-    private static let SUGGESTION = """
-    { "dayIndex": 2,
-      "target": { "name": "Beispielstadt", "source": "admin", "key": "area:900",
-                  "osmRef": "area:900", "lat": 44.01, "lon": 11.04,
-                  "distanceM": 60000, "travelMinutes": 60,
-                  "dayAtTargetMinutes": 360, "spotCount": 40,
-                  "examples": ["Dom zu Beispielstadt", "Stadtmuseum Beispiel"] },
-      "sentence": "Vor Ort tragen die Vorschläge zwei eurer vier Tage." }
-    """
 
     func testAnUndersuppliedLegArrivesWithItsOneDestination() throws {
         let decoded = try answer()

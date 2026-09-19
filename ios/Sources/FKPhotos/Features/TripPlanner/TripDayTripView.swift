@@ -147,10 +147,15 @@ struct TripDayTripView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            answer = try await APIClient.shared.get(
+            // Through an explicit non-optional local, the way every
+            // other screen here does it: assigning straight into the
+            // optional would let the generic infer an Optional as the
+            // decoded type.
+            let loaded: TripDayTripAnswer = try await APIClient.shared.get(
                 "/trip-planner/plans/\(planId)/day-trip",
                 query: ["legIndex": String(legIndex)],
             )
+            answer = loaded
             errorMessage = nil
         } catch {
             errorMessage = TripErrorText.describe(error)
