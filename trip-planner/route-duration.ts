@@ -20,6 +20,13 @@
  * (§9.2's note on the spot). Two groups with the same route walk it in
  * different times, and no formula settles that.
  *
+ * What the formula *can* take account of is who is walking: the figures
+ * below are an adult hiker's, and a group with a small child in it does
+ * not walk them. `paceFactor` is that correction, worked out from the
+ * travel group rather than from the route (`blocks.ts`,
+ * `groupPaceFactor`) — because how fast you walk is a fact about the
+ * walkers and not about the path.
+ *
  * Pure: metres in, minutes out.
  */
 
@@ -70,6 +77,7 @@ export function routeMinutes(
   lengthM: number,
   ascentM: number | null | undefined,
   mode: TransportMode = "foot",
+  paceFactor = 1,
 ): number {
   const key = mode === "bike" ? "bike" : "foot";
   const length = Number.isFinite(lengthM) && lengthM > 0 ? lengthM : 0;
@@ -81,6 +89,11 @@ export function routeMinutes(
   // The rule of the two times: the greater at full value, the lesser
   // at half. You climb while you walk along, but not for nothing.
   const hours = Math.max(flatHours, climbHours) + Math.min(flatHours, climbHours) / 2;
-  const minutes = Math.round(hours * 60);
+  // Who is walking, applied to the whole rather than to the flat part
+  // alone: a group that walks three kilometres an hour along also
+  // climbs slower, and splitting the correction would claim a
+  // precision nobody has measured.
+  const pace = Number.isFinite(paceFactor) && paceFactor > 0 ? paceFactor : 1;
+  const minutes = Math.round(hours * 60 * pace);
   return Math.min(MAX_ROUTE_MINUTES, Math.max(MIN_ROUTE_MINUTES, minutes));
 }

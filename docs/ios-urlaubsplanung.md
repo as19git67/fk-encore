@@ -1070,13 +1070,28 @@ leere Liste zu zeigen, die wie „hier gibt es nichts" aussieht.
 
 **Was bewusst noch nicht gebaut ist:**
 
-- **Die Dauer nach Reisegruppe.** „Mehr Zeit einplanen" (§3.5) skaliert
-  Blockbudgets. Bei einer Strecke müsste es die Dauer selbst skalieren, und
-  eingeschränkte Mobilität würde sie ganz ausschließen. **Die Voraussetzung
-  steht seit 2026-09-19:** Die Reisegruppe kennt Fortbewegungsarten, und aus
-  ihr folgen `onWheels` (schließt aus) und ein Gehtempo (skaliert). Was noch
-  fehlt, ist die Anwendung auf die Strecke selbst — `route-duration.ts` und
-  die Streckensuche lesen beides noch nicht.
+- **Die Dauer nach Reisegruppe — umgesetzt (2026-09-19).** „Mehr Zeit
+  einplanen" (§3.5) skaliert Blockbudgets; bei einer Strecke skaliert es jetzt
+  die Dauer selbst, und wer auf Rädern unterwegs ist, bekommt sie gar nicht
+  erst vorgeschlagen.
+
+  - **Das Tempo** (`routeMinutes(…, paceFactor)`): Das Ganze wird skaliert,
+    nicht nur der ebene Teil — eine Gruppe, die drei Kilometer in der Stunde
+    geht, steigt auch langsamer, und eine getrennte Korrektur behauptete eine
+    Genauigkeit, die niemand gemessen hat.
+  - **Der Ausschluss** (`rollable()` in `routes.ts`): entschieden nach den
+    Worten der Karte statt nach einem Urteil über Menschen. `hiking` und `mtb`
+    sind über Boden ausgeschildert, der für Stiefel und Reifen gewählt wurde;
+    dazu fällt alles mit bekanntem Anstieg weg. Eine Seepromenade als `foot`
+    ohne Anstieg bleibt — mit der ehrlichen Grenze, dass OSM keinen Belag
+    verspricht, weshalb die App von einer gefilterten Liste spricht und nicht
+    von einer Zusage.
+  - **Gesagt wird es immer** (`omittedForWheels` samt Satz): Eine still kürzer
+    gewordene Liste liest sich wie eine Gegend ohne Strecken, und eine leere
+    nach dem Filtern wie eine Gegend ohne Strecken *für uns* — zwei
+    verschiedene Sätze (§15.3).
+  - **Übernehmen filtert nicht.** Wer eine Strecke ausdrücklich holt, wird
+    nicht überstimmt: Die Liste ist ein Vorschlag, kein Tor (§7.1).
 
 **In der App (Etappe 2, umgesetzt):** „Strecke anlegen" im Menü des Tages —
 Name, Start und Ende über die Ortssuche des Geräts, Dauer, optional Länge
@@ -3978,8 +3993,10 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     passiert, `on-the-way.ts`) und Etappe 5 (Import der OSM-Routenrelationen,
     `osm_routes` samt Suche, Dauer-Schätzung und „Strecken in der Nähe")
     ebenfalls umgesetzt. Damit ist §4.7 inhaltlich durch; offen bleibt dort
-    nur noch die Dauer nach Reisegruppe — deren Voraussetzung, die
-    Fortbewegungsarten in §3.5, seit 2026-09-19 steht.
+    auch die Dauer nach Reisegruppe (2026-09-19): Die Fortbewegungsarten in
+    §3.5 stehen, das Gehtempo skaliert die Streckendauer, und wer auf Rädern
+    unterwegs ist, bekommt Strecken mit Anstieg nicht vorgeschlagen. Damit ist
+    §4.7 vollständig.
 
 15. **Der Ausflug, den niemand verlangt hat** (§4.6) — „vier Tage in San
     Gimignano", und Florenz kommt trotzdem vor. **Etappe 1 umgesetzt:** das
