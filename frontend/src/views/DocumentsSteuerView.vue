@@ -6,6 +6,7 @@ import Chip from 'primevue/chip'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   backfillDocumentTax,
   listSubjectPersons,
@@ -224,25 +225,25 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="tax-view">
-    <div class="header">
-      <h1 class="title">Steuer</h1>
-      <div class="header-actions">
-        <Button
-          v-if="auth.hasPermission('documents.edit')"
-          icon="pi pi-sync"
-          label="KI-Analyse nachholen"
-          text
-          :loading="backfilling"
-          title="Bestehende Dokumente erneut vom Klassifier analysieren lassen, um fehlende Steuer-Daten zu ergänzen."
-          @click="onBackfill"
-        />
-      </div>
-    </div>
+  <PageLayout title="Steuer" width="wide" scroll="page" :ready="!loading">
+    <template #actions>
+      <Button
+        v-if="auth.hasPermission('documents.edit')"
+        icon="pi pi-sync"
+        label="KI-Analyse nachholen"
+        text
+        :loading="backfilling"
+        title="Bestehende Dokumente erneut vom Klassifier analysieren lassen, um fehlende Steuer-Daten zu ergänzen."
+        @click="onBackfill"
+      />
+    </template>
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-    <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    </template>
 
+    <template #toolbar>
     <div v-if="years.length > 0" class="year-filters">
       <span class="year-filters-label">Steuerjahr:</span>
       <Button
@@ -292,7 +293,9 @@ onMounted(async () => {
         @click="taxReturnPersonId = p.id"
       />
     </div>
+    </template>
 
+    <div class="content">
     <div v-if="totalDocsLabel" class="total-label">{{ totalDocsLabel }}</div>
 
     <div v-if="loading" class="info-text">
@@ -369,27 +372,17 @@ onMounted(async () => {
         </section>
       </section>
     </div>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.tax-view {
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  width: 100%;
-  padding-inline: 0.5em;
 }
-@media (min-width: 800px) { .tax-view { padding-inline: 1em; } }
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-block: 0.25rem 0.5rem;
-}
-.title { font-size: 1.5em; font-weight: 600; margin-block: 0.25em; }
-.header-actions { display: flex; gap: 0.25rem; }
 
 .year-filters {
   display: flex;

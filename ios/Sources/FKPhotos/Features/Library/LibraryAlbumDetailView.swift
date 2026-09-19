@@ -241,7 +241,10 @@ struct LibraryAlbumDetailView: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading {
+        // Only while the grid has nothing to show. Reloading over a
+        // grid that is already there would throw its scroll offset away
+        // — the same trap the album grid fell into (GridScroll).
+        if isLoading && assets.isEmpty {
             ProgressView("Fotos laden…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if assets.isEmpty {

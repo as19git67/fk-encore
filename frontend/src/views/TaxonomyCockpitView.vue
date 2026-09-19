@@ -4,6 +4,7 @@ import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import Chart from 'primevue/chart'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   getTaxonomyCockpit,
   triggerSnapshot,
@@ -170,9 +171,8 @@ function severityTag(sev: Recommendation['severity']): "danger" | "warn" | "info
 </script>
 
 <template>
-  <div class="cockpit-view">
-    <div class="cockpit-header">
-      <h2>Taxonomie-Cockpit</h2>
+  <PageLayout title="Taxonomie-Cockpit" width="normal" :ready="!loading">
+    <template #actions>
       <Button
         label="Snapshot jetzt"
         icon="pi pi-refresh"
@@ -180,9 +180,11 @@ function severityTag(sev: Recommendation['severity']): "danger" | "warn" | "info
         :loading="snapshotting"
         @click="onTriggerSnapshot"
       />
-    </div>
+    </template>
 
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    </template>
 
     <div v-if="loading" class="cockpit-loading">
       <i class="pi pi-spin pi-spinner" style="font-size: 2rem"></i>
@@ -295,26 +297,11 @@ function severityTag(sev: Recommendation['severity']): "danger" | "warn" | "info
         Noch keine Snapshots vorhanden. Klicke auf "Snapshot jetzt", um den ersten zu erfassen.
       </Message>
     </template>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.cockpit-view {
-  padding: 1.5rem;
-  max-width: 1200px;
-}
-
-.cockpit-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1.5rem;
-}
-.cockpit-header h2 {
-  margin: 0;
-  color: var(--p-text-color);
-}
-
+/* Page frame and title: PageLayout (issue #1272). */
 .cockpit-loading {
   display: flex;
   justify-content: center;
@@ -399,7 +386,7 @@ function severityTag(sev: Recommendation['severity']): "danger" | "warn" | "info
 
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
   gap: 1.5rem;
 }
 

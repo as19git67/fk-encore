@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F4mil Photos</title>
+<meta name="description" content="F4mil Photos – die iOS-App für die eigene, selbst gehostete Fotoverwaltung der Familie. Ohne eigenen fk-encore-Server ist die App funktionslos.">
+<style>
+  :root {
+    --bg-dark: #0c2f33;
+    --bg-navy: #14263a;
+    --card-bg: #f5f1e6;
+    --ink: #1c2b2e;
+    --ink-muted: #48585b;
+    --accent-orange: #f2a83e;
+    --accent-teal: #6fd8c6;
+    --accent-navy: #1c3a40;
+    --border: rgba(255, 255, 255, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #f0ece0;
+    background:
+      radial-gradient(circle at 15% 10%, rgba(111, 216, 198, 0.18), transparent 40%),
+      radial-gradient(circle at 90% 85%, rgba(242, 168, 62, 0.16), transparent 45%),
+      linear-gradient(160deg, var(--bg-dark) 0%, var(--bg-navy) 55%, #0a1c28 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    line-height: 1.55;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Faceted corner shapes echoing the app icon's angular background planes */
+  .facets {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .facets span {
+    position: absolute;
+    display: block;
+  }
+
+  .facets .f1 {
+    top: -12%;
+    right: -14%;
+    width: 55vw;
+    height: 55vw;
+    max-width: 620px;
+    max-height: 620px;
+    clip-path: polygon(0 0, 100% 0, 100% 60%, 40% 100%, 0 40%);
+    background: linear-gradient(135deg, rgba(122, 167, 201, 0.16), rgba(43, 36, 64, 0.10));
+  }
+
+  .facets .f2 {
+    bottom: -18%;
+    left: -16%;
+    width: 60vw;
+    height: 60vw;
+    max-width: 680px;
+    max-height: 680px;
+    clip-path: polygon(0 30%, 45% 0, 100% 0, 100% 100%, 0 100%);
+    background: linear-gradient(150deg, rgba(111, 216, 198, 0.14), transparent 70%);
+  }
+
+  .facets .f3 {
+    bottom: -10%;
+    right: -10%;
+    width: 40vw;
+    height: 40vw;
+    max-width: 420px;
+    max-height: 420px;
+    clip-path: polygon(100% 100%, 0 100%, 60% 30%, 100% 0);
+    background: linear-gradient(200deg, rgba(242, 168, 62, 0.14), transparent 70%);
+  }
+
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 56px 20px 80px;
+    position: relative;
+  }
+
+  header.hero {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  .icon {
+    width: 108px;
+    height: 108px;
+    border-radius: 26px;
+    margin: 0 auto 22px;
+    overflow: hidden;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255,255,255,0.06);
+  }
+
+  .icon img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  h1 {
+    font-size: 2.1rem;
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .tagline {
+    color: #c9d3d2;
+    font-size: 1.05rem;
+    margin: 0;
+  }
+
+  section {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 28px 28px;
+    margin-bottom: 24px;
+    backdrop-filter: blur(6px);
+  }
+
+  h2 {
+    font-size: 1.05rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-teal);
+    margin: 0 0 16px;
+  }
+
+  ul.features {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 14px;
+  }
+
+  ul.features li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    color: #dfe6e4;
+  }
+
+  ul.features li .dot {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-top: 6px;
+    background: var(--accent-orange);
+  }
+
+  ul.features li:nth-child(3n+2) .dot { background: var(--accent-teal); }
+  ul.features li:nth-child(3n+3) .dot { background: #7ba7c9; }
+
+  .warning {
+    background: linear-gradient(135deg, rgba(242, 168, 62, 0.16), rgba(242, 168, 62, 0.06));
+    border: 1px solid rgba(242, 168, 62, 0.45);
+  }
+
+  .warning h2 {
+    color: var(--accent-orange);
+  }
+
+  .warning p {
+    margin: 0 0 12px;
+    color: #f4e9d6;
+  }
+
+  .warning p:last-child { margin-bottom: 0; }
+
+  .warning strong {
+    color: #fff;
+  }
+
+  footer {
+    text-align: center;
+    color: #7c8a8c;
+    font-size: 0.85rem;
+    margin-top: 40px;
+  }
+
+  @media (max-width: 520px) {
+    h1 { font-size: 1.7rem; }
+    section { padding: 22px 20px; }
+  }
+</style>
+</head>
+<body>
+  <div class="facets" aria-hidden="true">
+    <span class="f1"></span>
+    <span class="f2"></span>
+    <span class="f3"></span>
+  </div>
+  <div class="wrap">
+    <header class="hero">
+      <div class="icon">
+        <img
+          src="assets/app-icon.png"
+          srcset="assets/app-icon.png 256w, assets/app-icon@2x.png 512w"
+          sizes="108px"
+          width="256"
+          height="256"
+          alt="App-Icon von F4mil Photos"
+        >
+      </div>
+      <h1>F4mil Photos</h1>
+      <p class="tagline">Die iOS-App für die eigene, selbst gehostete Fotosammlung der Familie.</p>
+    </header>
+
+    <section class="warning">
+      <h2>Voraussetzung: ein eigener fk-encore-Server</h2>
+      <p>
+        <strong>F4mil Photos ist ohne einen eigenen, selbst gehosteten fk-encore-Server komplett
+        wertlos.</strong> Die App ist ausschließlich der Client für dieses Backend, das jede
+        Familie selbst betreiben muss – es gibt keine Cloud, keinen zentralen Anbieter und keine
+        Registrierung bei uns. Ohne eine erreichbare eigene Server-Installation lässt sich in der
+        App weder ein Konto anlegen noch ein einziges Foto hochladen, ansehen oder verwalten.
+      </p>
+      <p>
+        Wer die App installiert, ohne Zugriff auf einen eigenen fk-encore-Server zu haben, kann sie
+        <strong>nicht sinnvoll nutzen</strong>. Sämtliche Verarbeitung – inklusive aller
+        KI-Funktionen wie Gesichtserkennung und Bildsuche – läuft ausschließlich auf diesem
+        eigenen Server, niemals in der App selbst und niemals bei einem Drittanbieter.
+      </p>
+    </section>
+
+    <section>
+      <h2>Was die App kann</h2>
+      <ul class="features">
+        <li><span class="dot"></span> Fotos und Videos aus der Kamerarolle automatisch im Hintergrund auf den eigenen Server sichern, inklusive Zwei-Wege-Sync.</li>
+        <li><span class="dot"></span> Fototimeline nach Jahren und Monaten sowie Alben, die gemeinsam mit der Familie kuratiert werden.</li>
+        <li><span class="dot"></span> Gesichter und Personen werden erkannt, damit sich Bilder in natürlicher Sprache durchsuchen lassen.</li>
+        <li><span class="dot"></span> Automatisch erstellte Rückblicke sowie ein Trip-Modus mit Karte für Reisen.</li>
+        <li><span class="dot"></span> Kommentare und Reaktionen auf Fotos innerhalb der Familie, gemeinsame Kuratierung im Gruppen-Review.</li>
+        <li><span class="dot"></span> Teilen einzelner Alben per Link, wenn gewünscht – ansonsten bleibt alles privat.</li>
+        <li><span class="dot"></span> Anmeldung per Passkey oder Passwort, Teilen aus anderen Apps über eine Share-Extension.</li>
+      </ul>
+    </section>
+
+    <footer>
+      F4mil Photos ist ein privates, selbst gehostetes Projekt – kein kommerzieller Dienst.
+    </footer>
+  </div>
+</body>
+</html>

@@ -13,6 +13,7 @@ import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
 import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
@@ -94,42 +95,39 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="basket-view">
-    <header class="bv-header">
-      <div class="bv-header-left">
-        <h2 class="bv-title">
-          Arbeitskorb
-          <span class="bv-count">({{ total }})</span>
-        </h2>
-        <p class="bv-sub">
-          Neu eingescannte Dokumente mit niedriger KI-Konfidenz oder Fehlern.
-        </p>
-      </div>
-      <div class="bv-header-right">
-        <Button
-          icon="pi pi-clock"
-          label="Wiedervorlage"
-          :disabled="selectedIds.length === 0"
-          @click="followUpOpen = true"
-        />
-        <Button
-          icon="pi pi-folder"
-          label="In Sammelmappe"
-          severity="secondary"
-          :disabled="selectedIds.length === 0"
-          @click="addToCollectionOpen = true"
-        />
-        <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
-      </div>
-    </header>
+  <PageLayout
+    title="Arbeitskorb"
+    :hint="`${total} Dokumente · Neu eingescannte Dokumente mit niedriger KI-Konfidenz oder Fehlern.`"
+    width="normal"
+    :ready="!loading"
+  >
+    <template #actions>
+      <Button
+        icon="pi pi-clock"
+        label="Wiedervorlage"
+        :disabled="selectedIds.length === 0"
+        @click="followUpOpen = true"
+      />
+      <Button
+        icon="pi pi-folder"
+        label="In Sammelmappe"
+        severity="secondary"
+        :disabled="selectedIds.length === 0"
+        @click="addToCollectionOpen = true"
+      />
+      <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
+    </template>
 
-    <Message v-if="info" severity="success" :closable="true" @close="info = ''">
-      {{ info }}
-    </Message>
-    <Message v-if="loadError" severity="error" :closable="true" @close="loadError = ''">
-      {{ loadError }}
-    </Message>
+    <template #notice>
+      <Message v-if="info" severity="success" :closable="true" @close="info = ''">
+        {{ info }}
+      </Message>
+      <Message v-if="loadError" severity="error" :closable="true" @close="loadError = ''">
+        {{ loadError }}
+      </Message>
+    </template>
 
+    <div class="content">
     <div v-if="items.length > 0" class="bv-selectall">
       <Checkbox
         :model-value="allSelected"
@@ -179,6 +177,7 @@ onMounted(load)
         </div>
       </li>
     </ul>
+    </div>
 
     <DocumentFollowUpDialog
       v-model:visible="followUpOpen"
@@ -191,44 +190,15 @@ onMounted(load)
       :document-ids="selectedIds"
       @added="onAddedToCollection"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.basket-view {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px;
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-.bv-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.bv-title {
-  font-size: 1.4rem;
-  font-weight: 600;
-  margin: 0;
-}
-.bv-count {
-  font-weight: 400;
-  color: var(--p-text-muted-color);
-  margin-left: 6px;
-}
-.bv-sub {
-  margin: 4px 0 0;
-  color: var(--p-text-muted-color);
-  font-size: 0.85rem;
-}
-.bv-header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 .bv-selectall {
   display: flex;

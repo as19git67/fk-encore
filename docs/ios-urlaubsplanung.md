@@ -914,20 +914,86 @@ warum sie dort liegen bleibt, statt übergangen auszusehen.
 Damit bleibt das Zusammenlegen von Blöcken das, was es war: eine Sache des
 Reisenden über den Bildschirm „Tagesablauf" (§4.1), nicht des Planers.
 
+**Was unterwegs mitgenommen wird (Etappe 4, umgesetzt):**
+
+Die Aussichtspunkte und Tunnel entlang der Ponale sind in OSM eigene Punkte.
+Der Planer hat sie als eigene Kandidaten gesehen und ihnen einen eigenen
+Block gegeben — obwohl man beim Gehen der Strecke an allen vorbeikommt. Wer
+sie zusätzlich einplant, verplant dieselbe Stunde zweimal.
+
+Ein Spot, der auf einer Strecke des Tages liegt, gilt deshalb als
+**passiert, nicht geplant** (`on-the-way.ts`): Er kostet kein Budget, belegt
+keinen Platz im Block, und die Strecke sagt, dass er kommt („unterwegs:
+Belvedere Beispiel und 2 weitere"). Nichts wird versteckt und nichts
+endgültig entschieden — der Spot bleibt im Vorrat, und ein Tag ohne diese
+Strecke bietet ihn wieder an wie jeden anderen. Das gilt für den ganzen Tag,
+nicht nur für den Block: Man kommt einmal vorbei, und ein Nachmittag, der
+einplant, was der Vormittag durchlaufen hat, ist derselbe Fehler einen Block
+später.
+
+**Nicht die Ellipse der Korridor-Suche.** `corridor.ts` fragt, was ein Stopp
+einer Fahrt an Metern hinzufügt, und nimmt alles unter einem Budget. Das ist
+die richtige Frage für einen Transfer, wo die Straße unbekannt ist und ein
+paar Kilometer Umweg der Sinn der Sache sind. Hier ist sie falsch, weil die
+Ellipse mit der Länge breiter wird: 400 m Umweg reichen über eine 8-km-Strecke
+mehr als einen Kilometer neben die Linie. Weil diese Regel ungefragt etwas aus
+dem Tag nimmt, ist sie die engere und schlichtere — 250 m neben der Linie
+zwischen den beiden Enden.
+
+**Was sie noch nicht kann:** Die Linie zwischen den Enden ist nicht der Weg.
+Die Ponale steigt in Serpentinen, die eine Sehne geradeaus durchschneidet —
+ein Aussichtspunkt in der dritten Kehre wird nicht erkannt. Das ist die sichere
+Richtung des Irrtums: Ein nicht erkannter Spot wird einfach geplant wie
+bisher. Es ist zugleich der Grund, warum der Import der echten Geometrie
+der nächste Schritt ist; dieselbe Breite an der echten Linie nimmt auf, was
+die Sehne durchlassen muss.
+
+**Strecken aus dem Import (Etappe 5, umgesetzt):**
+
+OSM kennt ausgeschilderte Wege als Relationen (`route=hiking`, `foot`,
+`bicycle`, `mtb`) — mit Namen, Verlauf, Länge und oft Anstieg. Der Importer
+nimmt sie jetzt mit (`osm_routes`), und der Planer bietet sie an:
+„Strecken in der Nähe" im Tagesmenü listet, was an der Stadt vorbeiläuft,
+und ein Tippen übernimmt sie in die Kandidaten — über denselben Fund-Weg wie
+jeder andere Ort (§9.2), nur mit Enden, Länge, Anstieg und Verlauf im Gepäck.
+
+Drei Dinge werden dabei aus der Geometrie gelesen statt beim Import
+eingefroren, weil nur die Geometrie ehrlich bleibt:
+
+- **Die Länge** ist die echte Länge des Weges, nicht das `distance`-Tag
+  (eine gerundete Angabe, die oft fehlt).
+- **Die beiden Enden** kommen aus `ST_LineMerge`. Fügen sich die Teile einer
+  Relation zusammen, hat sie ein Ende; tun sie es nicht — Lücken, Abzweige,
+  ausgeschilderte Varianten —, dann hat sie keins, das man nennen könnte,
+  und das wird gesagt statt ein loses Ende zum Ziel zu erklären (§15.3). Ein
+  **Rundweg endet, wo er beginnt**: Das ist sein Ende, und so bleiben Länge
+  und Verlauf erhalten, die ein bloßer Punkt wegwerfen würde.
+- **Der Verlauf**, vereinfacht auf höchstens 64 Punkte, damit ein Plan ihn
+  offline mitnehmen kann. Er ist es, der den Korridor aus Etappe 4 der echten
+  Linie folgen lässt statt der Sehne — der Aussichtspunkt in der dritten Kehre
+  wird jetzt erkannt.
+
+**Die Dauer rechnet der Weg selbst aus** (`route-duration.ts`). §4.7 sagt:
+„Keine Kategorie weiß das; die Strecke muss es selbst sagen" — und sie sagt
+es in den zwei Zahlen, aus denen Stunden folgen. Verwendet wird die
+Wanderzeitformel (DIN 33466): waagerechte Zeit und senkrechte Zeit, davon die
+größere ganz und die kleinere zur Hälfte. Zehn Kilometer mit 600 Höhenmetern
+ergeben so 3,5 Stunden zu Fuß und 1 Stunde 50 mit dem Rad — genau das
+Beispiel oben. Es ist eine Startzahl, kein Urteil: Wer die Strecke übernimmt,
+kann sie ändern, und dann gilt seine.
+
+**Betrieblich:** Die Routentabelle entsteht beim Import. Bestehende Regionen
+haben sie nicht, und das ist kein Fehler, sondern ein älterer Import — die
+Suche sagt es (`imported: false`) und bietet den Neuimport an, statt eine
+leere Liste zu zeigen, die wie „hier gibt es nichts" aussieht.
+
 **Was bewusst noch nicht gebaut ist:**
 
-- **Spots im Korridor schlucken.** Die Aussichtspunkte entlang der Strecke
-  sollen als „unterwegs" gelten statt eingeplant zu werden. Die
-  Korridor-Suche (`corridor.ts`, Ellipse um zwei Enden) ist die Mechanik
-  dafür und liegt bereit; sie ist noch nicht an die Strecke gehängt.
-- **Aus dem Import.** OSM kennt Wander- und Radrouten als Relationen
-  (`route=hiking`, `route=bicycle`), oft mit Name, Länge und Schwierigkeit.
-  Der Importer kennt nur Punkte. Das ist die eine echte neue Arbeit; bis
-  dahin kommt eine Strecke von Hand.
 - **Die Dauer nach Reisegruppe.** „Mehr Zeit einplanen" (§3.5) skaliert
   Blockbudgets. Bei einer Strecke müsste es die Dauer selbst skalieren, und
   eingeschränkte Mobilität würde sie ganz ausschließen. Beides wartet, bis
   die Reisegruppe Fortbewegungsarten kennt.
+
 **In der App (Etappe 2, umgesetzt):** „Strecke anlegen" im Menü des Tages —
 Name, Start und Ende über die Ortssuche des Geräts, Dauer, optional Länge
 und Anstieg. Kandidatenliste, Tagesplan, Pin-Sheet und Detail zeigen
@@ -3824,8 +3890,11 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     Fund mit Endpunkt, und jeder Rewalk — Solver, Verschieben, Umverteilung,
     Wetter, Licht — geht am Ende der Strecke weiter. Etappe 2 (Eingabe
     und Linie in der App) und Etappe 3 (ein Stopp darf über das Blockende
-    hinauslaufen, `spill.ts`) ebenfalls umgesetzt; offen bleiben aus §4.7 der
-    Korridor und der Import aus OSM-Routenrelationen.
+    hinauslaufen, `spill.ts`) und Etappe 4 (Spots auf der Strecke gelten als
+    passiert, `on-the-way.ts`) und Etappe 5 (Import der OSM-Routenrelationen,
+    `osm_routes` samt Suche, Dauer-Schätzung und „Strecken in der Nähe")
+    ebenfalls umgesetzt. Damit ist §4.7 inhaltlich durch; offen bleibt dort
+    nur noch die Dauer nach Reisegruppe, die auf §3.5 wartet.
 
 Schritte 1–3 sind der ehrliche Test — und sie kommen **ohne einen einzigen
 Neuimport** aus: Liefert die Maschine für *einen* Tag in
@@ -4047,7 +4116,9 @@ während der Umsetzung entstehen, gehören hier ergänzt.
 
 Drei durchgespielte Fälle prüfen die Mechanik an ihren Rändern: eine lange
 Mehrstädtereise (§16), ein Kurztrip mit dem Auto und geplanter Anreise (§17) und
-ein einzelner Tagesausflug (§18). Jeder hat das Konzept verändert.
+ein einzelner Tagesausflug (§18). Jeder hat das Konzept verändert. Ein vierter
+steht aus und ist in §21 festgehalten: eine Kreuzfahrt, bei der die Unterkunft
+mitfährt und die Hälfte der Tage keinen Ort hat.
 
 Zuerst der lange Fall — **3.9. bis 22.9.2027,
 Tokio, Osaka und Hakata, zu zweit**. Bewusst ein harter Fall: lang, mehrere
@@ -4595,3 +4666,105 @@ Wenig, und fast alles davon existiert:
 Das ist der Grund, warum diese Erweiterung trotz ihres Umfangs spät und
 billig ist: Sie erfindet keinen Mechanismus, sie gibt den vorhandenen einen
 zweiten Anlass.
+
+---
+
+## 21. Offen durchzuspielen: 22 Tage Kreuzfahrt
+
+Die Fälle in §16 bis §18 sind durchgespielt und haben das Konzept verändert.
+Dieser ist es **noch nicht** — er steht hier, weil er an einer Stelle drückt,
+an der die bisherige Mechanik nicht nur knapp wird, sondern etwas anderes
+meint.
+
+**Der Fall:** eine Kreuzfahrt, 22 Tage, Hamburg nach New York. Dazwischen
+Häfen mit Landgang und Seetage ohne. Davor ein bis mehrere Nächte in Hamburg,
+weil man nicht am Ablegetag anreist.
+
+### 21.1 Die Grundsatzfrage: eine Reise oder viele?
+
+Die naheliegende Abkürzung wäre, jeden Landgang als eigene kleine Reise zu
+planen — ein Tagesausflug wie Nürnberg in §18, zehnmal. Das **funktioniert
+heute schon**, ohne eine Zeile Umbau, und ist bis auf Weiteres der ehrliche
+Behelf.
+
+Trotzdem ist es die falsche Antwort. **Es ist eine Reise.** Alles, was an
+einer Reise hängt, hängt an dieser einen: die Reisegruppe (§3.5), wer
+mitplant (§6), der gemeinsame Vorrat, die Packliste (§8.6), die
+Reisebereitschaft, der Rückblick (§8.7) und das Offline-Bündel (§3.9). Zehn
+Reisen bedeuten zehn Packlisten und zehn Rückblicke für eine Fahrt. Und der
+eine Faden, den man auf keinen Fall verlieren darf — wann das Schiff ablegt —
+gehört dem Ganzen, nicht zehn Einzeltagen.
+
+§4.2 sagt es bereits: Eine Etappe ist „eine Stadt bzw. **Station** der Reise".
+Ein Hafentag ist eine Station. Die Struktur ist also: Hamburg (Hotel) als
+gewöhnliche Etappe, danach je Hafen eine Etappe mit genau einem Tag, dazwischen
+die Seetage.
+
+### 21.2 Was schon passt
+
+Mehr, als man erwarten würde — was für die Etappen-Mechanik spricht:
+
+- **Ein Hafentag ist eine Etappe mit einem Tag.** §18 hat genau das bewiesen:
+  Anker ist nicht das Hotel, sondern der Bahnhof. Hier ist er der Liegeplatz.
+- **Ankunft und Abfahrt** sind da: `arriveMinutes` je Etappe (§4.2) und der
+  `departure`-Fixpunkt (§4.4), nach dem der Tag vorbei ist. „Ab 8 Uhr an
+  Land, 16:30 zurück an Bord" ist genau diese Form.
+- **Ein gebuchter Landausflug** ist ein Fixpunkt, der einen Block rahmt und
+  seinen Spot mitbringt — dieselbe Mechanik wie das Abendlicht in §7.3
+  (`blockId` + `spotRef`).
+- **Ein Vorrat je Etappe** (§4.2) heißt: je Hafen eigene Kandidaten. Richtig.
+- **Offline** (§3.9) ist hier wichtiger als irgendwo sonst: Auf See gibt es
+  kein Netz, und Roaming im Hafen ist teuer.
+
+### 21.3 Was fehlt, und warum es kein Detail ist
+
+Sechs Punkte. Die ersten drei sind Modellfragen, nicht Bequemlichkeiten:
+
+1. **Ein Tag ohne Ort.** Ein Seetag hat keinen Anker, keine Region, keinen
+   Vorrat — und mitten im Atlantik gibt es kein Geofabrik-Extrakt. Heute
+   braucht jede Etappe einen Anker, und der Regionen-Router würde für diese
+   Koordinate nichts finden und das als Fehler melden. Der Puffertag aus §7.2
+   ist das Nächstliegende, meint aber etwas anderes („wegen Wetter frei
+   gelassen"). Ein Seetag ist kein leerer Tag: Er ist ein Tag **an Bord**, mit
+   eigenem Programm, nur ohne Landkarte.
+
+2. **Die Unterkunft fährt mit.** Im Glossar ist der Anker „die Unterkunft",
+   wo jeder Tag beginnt und endet. Auf einem Schiff ist die Unterkunft 21 Tage
+   lang dieselbe und trotzdem jeden Tag woanders. Für den einzelnen Hafentag
+   stimmt der Liegeplatz als Anker — aber alles, was „Etappenwechsel heißt
+   Hotelwechsel" annimmt (§8.6 Vorabend, die Transfers in §4.2), stimmt dann
+   nicht mehr.
+
+3. **Der Transfer ist das Quartier.** §4.2 behandelt den Weg zwischen zwei
+   Etappen als Planungsobjekt mit Korridor-Suche. Zwischen zwei Häfen ist der
+   Transfer das Schiff, über Nacht, und es gibt unterwegs nichts. Die
+   Korridor-Suche würde Spots mitten auf dem Atlantik suchen. Ein Transfer
+   muss sagen dürfen: *dieser hier wird nicht geplant.*
+
+4. **Die Abfahrt ist eine Deadline, keine Abfahrt.** Ein verpasster Zug
+   kostet eine Stunde; ein verpasstes Schiff kostet die Reise. Der
+   Standardpuffer von 20 Minuten (§4.4) ist hier um eine Größenordnung
+   daneben, und bei Tenderhäfen kommt die Bootsfahrt an Land und zurück
+   obendrauf. Das ist keine Zahl, die man ändert, sondern eine Eigenschaft,
+   die der Fixpunkt kennen muss.
+
+5. **Zeitzonen wandern mitten in der Reise.** Hamburg nach New York sind fünf
+   bis sechs, und das Schiff verstellt die Uhr über Nacht. Fixpunkte liegen
+   als Minuten nach Mitternacht **lokal zur Etappe** — die richtige Form. Aber
+   ein Tag mit 25 Stunden kommt im Konzept nirgends vor.
+
+6. **Zehn Häfen sind zehn Regionen.** Lissabon, Azoren, Bermuda, US-Nordosten
+   — jeweils ein eigenes Extrakt, Wochen vorher importiert. Das ist das
+   Admin-Problem aus §16.1, mal zehn, und der Grund, warum die Vorbereitung
+   hier früher anfängt als die Planung.
+
+### 21.4 Was daraus folgt
+
+Kein Umbau, bevor der Fall wirklich durchgespielt ist — §16 bis §18 haben
+gezeigt, dass das Durchspielen die Lücken findet und nicht das Nachdenken
+darüber. Festzuhalten ist die Richtung: **eine Reise mit Stationen**, und die
+drei Modellfragen oben (ortloser Tag, mitfahrende Unterkunft, ungeplanter
+Transfer) sind zusammen eine Etappe für sich — nicht drei kleine Ergänzungen.
+
+Bis dahin gilt der Behelf aus §21.1: die Landgänge einzeln planen und wissen,
+was einem dabei fehlt.
