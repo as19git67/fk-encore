@@ -106,8 +106,14 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      # GitHub withholds repository secrets from workflow runs triggered by
+      # Dependabot (it treats them like fork PRs for secret access), so on
+      # a dependabot/* PR secrets.WATCHTOWER_URL_TEST resolves to an empty
+      # string and curl fails with "missing URL". Skip the deploy in that
+      # case; there is nothing meaningful to smoke-test on the test system
+      # for a dependency-bump-only PR anyway.
       - name: Deploy to TrueNAS (test)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
         run: |
           curl -f -X POST \
             --retry 5 \
