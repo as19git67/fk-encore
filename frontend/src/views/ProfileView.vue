@@ -9,6 +9,8 @@ import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import { useAuthStore } from '../stores/auth'
 import {
   listPasskeys,
@@ -324,10 +326,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div>
-    <h1>Mein Profil</h1>
-
-    <Message v-if="error" severity="error" :closable="false" class="mb">{{ error }}</Message>
+  <PageLayout title="Mein Profil" width="normal" :ready="!loading">
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    </template>
 
     <Card class="mb">
       <template #title>Kontoinformationen</template>
@@ -533,6 +535,7 @@ onMounted(async () => {
           />
         </div>
 
+        <ScrollX>
         <DataTable
           :value="passkeys"
           :loading="loading"
@@ -568,16 +571,18 @@ onMounted(async () => {
             </template>
           </Column>
         </DataTable>
+        </ScrollX>
       </template>
     </Card>
 
     <Message v-else severity="warn" :closable="false">
       Ihr Browser unterstützt keine Passkeys.
     </Message>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
+/* Page frame and title: PageLayout (issue #1272). */
 .detail-grid {
   display: grid;
   grid-template-columns: 8rem 1fr;

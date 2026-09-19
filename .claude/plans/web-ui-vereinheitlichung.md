@@ -11,7 +11,12 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
   Storybook-Test-Runner (`utils/overflowCheck.ts`), Pilot-Views
   `DocumentsView` und `finance/AccountTransactionsView`, Stories
   `Layout/PageLayout`, `Layout/ScrollX`, `Layout/AppShell`.
-- ⬜ Etappen 2 bis 6: siehe Sub-Issues #1277 bis #1281.
+- ✅ **Etappe 2 — alle Views auf `PageLayout`** (#1277): alle 62 Views unter
+  `views/` (inkl. Login/Registrierung/Passwort und `SharedAlbumView`)
+  laufen über `PageLayout`; `AdminPage` ist ein dünner Wrapper; View-eigene
+  Sticky-Header, `top:`-Offsets und `calc(100dvh - …)` sind weg, der Alias
+  `--menubar-height` ist entfernt. `DataTable`s liegen in `ScrollX`.
+- ⬜ Etappen 3 bis 6: siehe Sub-Issues #1278 bis #1281.
 
 Abweichungen vom Entwurf (Etappe 1):
 
@@ -23,6 +28,19 @@ Abweichungen vom Entwurf (Etappe 1):
   Das findet abgeschnittene Inhalte, nicht nur scrollbare Seiten.
 - `PageLayout` rendert seinen Sticky-Teil inline, wenn `#module-subheaders`
   fehlt (Storybook, Tests), statt einen Teleport-Fehler zu werfen.
+
+Abweichungen vom Entwurf (Etappe 2):
+
+- Vier `position: sticky`-Stellen bleiben bewusst im Inhalt: die
+  Upload-Fortschrittsbalken in Galerie und Albumdetail (`top: 0` im
+  scrollenden Inhalt, iOS) und der Schließen-Knopf der mobilen Bottom-Sheets
+  in Albumdetail und Personen (innerhalb des fixen Sheets). Keine davon ist
+  ein Header oder eine Toolbar.
+- `SharedAlbumView` (ohne Login, also ohne App-Shell) zeigt den Albumtitel
+  als `h1` über Karte bzw. Raster; im Kartenmodus erscheint der Name damit
+  zusätzlich zum Overlay der Karte.
+- Ein Seitentitel enthält keine Zähler mehr (die stehen im `hint`), damit
+  `document.title` stabil bleibt.
 
 Dieses Dokument trifft die Entscheidungen, die das Issue offen lässt, damit
 jede Etappe reine Umsetzung ist. Was hier steht, ist verbindlich für alle

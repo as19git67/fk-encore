@@ -60,6 +60,7 @@ import FilterMenu from '../components/FilterMenu.vue'
 import FilterChips from '../components/FilterChips.vue'
 import SortMenu from '../components/SortMenu.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
+import PageLayout from '../components/layout/PageLayout.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
@@ -1604,39 +1605,31 @@ void refreshReviewSequence()
 </script>
 
 <template>
-  <div
-    class="gallery-view"
+  <PageLayout
+    title="Fotos"
+    scroll="self"
+    width="full"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Drag overlay -->
-    <div v-if="isDragging" class="drag-overlay">
-      <div class="drag-message">
-        <i class="pi pi-upload" />
-        <span>Fotos zum Hochladen hier ablegen</span>
-      </div>
-    </div>
-
-    <!-- Subheader: title + actions -->
-    <div class="subheader">
-      <div class="header">
-        <h1 class="title">Fotos</h1>
-        <!-- Combined toolbar: filter/sort controls and actions share the
-             remaining width and overflow into a dropdown when tight. -->
-        <ResponsiveToolbar class="header__toolbar" :items="toolbarItems" />
-        <!-- Hidden file input driven by the "Hochladen" toolbar item. -->
-        <input
-          v-if="canUpload"
-          ref="fileInputRef"
-          type="file"
-          accept="image/*"
-          multiple
-          class="upload-input-hidden"
-          @change="onFileInputChange"
-        />
-      </div>
+    <!-- Sticky part (lifted into the app stack by PageLayout): the combined
+         filter/sort/actions toolbar, the natural search and the chips. -->
+    <template #toolbar>
+      <!-- Combined toolbar: filter/sort controls and actions share the
+           full width and overflow into a dropdown when tight. -->
+      <ResponsiveToolbar class="header__toolbar" :items="toolbarItems" />
+      <!-- Hidden file input driven by the "Hochladen" toolbar item. -->
+      <input
+        v-if="canUpload"
+        ref="fileInputRef"
+        type="file"
+        accept="image/*"
+        multiple
+        class="upload-input-hidden"
+        @change="onFileInputChange"
+      />
 
       <NaturalSearchBar
         v-model="searchQuery"
@@ -1657,6 +1650,32 @@ void refreshReviewSequence()
           v-if="activeCount > 0 && searchResultIds === null && unfilteredGalleryTotal !== null"
           :label="`${galleryTotal} von ${unfilteredGalleryTotal}`"
         />
+      </div>
+    </template>
+
+    <template #notice>
+      <Message v-if="searchError" severity="error" @close="searchError = ''">{{ searchError }}</Message>
+      <Message
+        v-if="error"
+        severity="error"
+        @close="error = ''; uploadErrors = []"
+      >
+        {{ error }}
+        <button
+          v-if="uploadErrors.length > 3"
+          class="error-flyout-btn"
+          @click="showErrorFlyout = !showErrorFlyout"
+        >
+          <i class="pi pi-list" /> Details anzeigen
+        </button>
+      </Message>
+    </template>
+
+    <!-- Drag overlay -->
+    <div v-if="isDragging" class="drag-overlay">
+      <div class="drag-message">
+        <i class="pi pi-upload" />
+        <span>Fotos zum Hochladen hier ablegen</span>
       </div>
     </div>
 
@@ -1679,22 +1698,6 @@ void refreshReviewSequence()
       @reset="onResetSort"
     />
 
-    <Message v-if="searchError" severity="error" @close="searchError = ''">{{ searchError }}</Message>
-    <Message
-      v-if="error"
-      severity="error"
-      @close="error = ''; uploadErrors = []"
-    >
-      {{ error }}
-      <button
-        v-if="uploadErrors.length > 3"
-        class="error-flyout-btn"
-        @click="showErrorFlyout = !showErrorFlyout"
-      >
-        <i class="pi pi-list" /> Details anzeigen
-      </button>
-    </Message>
-
     <!-- Error flyout -->
     <div
       v-if="showErrorFlyout && uploadErrors.length > 0"
@@ -1714,94 +1717,139 @@ void refreshReviewSequence()
       </div>
     </div>
 
-    <!-- Upload progress bar — sticky so it stays visible while scrolling on iOS -->
-    <div v-if="uploading" class="upload-progress-bar">
-      <div class="upload-progress-bar__info">
-        <i class="pi pi-upload" />
-        <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
-        <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
-      </div>
-      <div class="upload-progress-bar__track">
-        <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
-      </div>
-    </div>
-
-    <!-- Upload success message -->
-    <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
-      <i class="pi pi-check-circle" />
-      <span>{{ uploadResultMessage }}</span>
-    </div>
-
-    <!-- Delete progress bar (#299) -->
-    <div v-if="deleteBusy" class="delete-progress-bar">
-      <div class="delete-progress-bar__info">
-        <i class="pi pi-spin pi-spinner" />
-        <span>{{ deleteCount }} {{ deleteCount === 1 ? 'Foto' : 'Fotos' }} werden gelöscht…</span>
-      </div>
-      <div class="delete-progress-bar__track">
-        <div class="delete-progress-bar__fill" />
-      </div>
-    </div>
-
-    <!-- Grid + persistent desktop detail panel. On <768px the panel is
-         hidden via CSS so the grid takes the full width and details
-         remain reachable via the fullscreen flyout. -->
-    <div class="content-row">
-      <div class="grid-area">
-        <VirtualGallery
-          ref="galleryRef"
-          :around-photo-id="initialAnchor"
-          :filter="filter"
-          :sort-by="sortByForGallery"
-          :sort-dir="sortDirForGallery"
-          :search-photo-ids="searchPhotoIds"
-          :select-mode="selectMode"
-          :selected-ids="selectedIds"
-          :cursor-index="cursorIndex"
-          @photo-click="onPhotoClick"
-          @stack-click="onStackClick"
-          @toggle-select="onToggleSelect"
-          @loaded="onGalleryLoaded"
-          @ends-changed="onEndsChanged"
-        />
+    <!-- In-flow body: progress bars, the grid row and the floating selection
+         tray. The wrapper is the positioned box the tray is anchored to. -->
+    <div class="gallery-body">
+      <!-- Upload progress bar — sticky so it stays visible while scrolling on iOS -->
+      <div v-if="uploading" class="upload-progress-bar">
+        <div class="upload-progress-bar__info">
+          <i class="pi pi-upload" />
+          <span>{{ uploadCurrent }} von {{ uploadTotal }} Fotos werden hochgeladen…</span>
+          <span class="upload-progress-bar__pct">{{ uploadProgress }}%</span>
+        </div>
+        <div class="upload-progress-bar__track">
+          <div class="upload-progress-bar__fill" :style="{ width: uploadProgress + '%' }" />
+        </div>
       </div>
 
-      <!-- Desktop detail panel — same component as the fullscreen flyout
-           but always visible on desktop, driven by the cursor cell. The
-           reactive cursor → hydrate flow keeps it in sync with grid
-           clicks, keyboard navigation, and fullscreen prev/next. -->
-      <aside v-if="cursorPhoto" class="desktop-sidebar">
-        <PhotoDetailSidebar
-          :photo="cursorPhoto"
-          :selected-photo-ids="selectMode && selectedCount > 1 ? Array.from(selectedIds) : undefined"
-          :faces="detectedFaces"
-          :loading-faces="loadingFaces"
-          :poi-matches="detectedPoiMatches"
-          :loading-poi-matches="loadingPoiMatches"
-          :persons="persons"
-          :can-delete="canDelete"
-          :can-upload="canUpload"
-          :reindexing-photo="reindexingPhoto"
-          :is-editing-date="isEditingDate"
-          v-model:editDate="editDate"
-          :updating-date="updatingDate"
-          :show-persons="showPersons"
-          :limit-albums-shown="true"
-          :face-service-available="serviceHealth.faceServiceAvailable"
-          :location-menu-exclude-all-photos="true"
-          @toggle-favorite="onFullscreenToggleFavorite"
-          @hide="onFullscreenHide"
-          @restore="onFullscreenRestore"
-          @start-edit-date="onSidebarStartEditDate"
-          @update-date="onSidebarUpdateDate"
-          @cancel-edit-date="onSidebarCancelEditDate"
-          @ignore-face="onSidebarIgnoreFace"
-          @reindex="onSidebarReindex"
-          @link-visibility-changed="onLinkVisibilityChanged"
-          @share="shareSinglePhoto"
-          :sharing="sharingPhotos"
-        />
-      </aside>
+      <!-- Upload success message -->
+      <div v-if="uploadResultMessage && !uploading" class="upload-result-bar">
+        <i class="pi pi-check-circle" />
+        <span>{{ uploadResultMessage }}</span>
+      </div>
+
+      <!-- Delete progress bar (#299) -->
+      <div v-if="deleteBusy" class="delete-progress-bar">
+        <div class="delete-progress-bar__info">
+          <i class="pi pi-spin pi-spinner" />
+          <span>{{ deleteCount }} {{ deleteCount === 1 ? 'Foto' : 'Fotos' }} werden gelöscht…</span>
+        </div>
+        <div class="delete-progress-bar__track">
+          <div class="delete-progress-bar__fill" />
+        </div>
+      </div>
+
+      <!-- Grid + persistent desktop detail panel. On <768px the panel is
+           hidden via CSS so the grid takes the full width and details
+           remain reachable via the fullscreen flyout. -->
+      <div class="content-row">
+        <div class="grid-area">
+          <VirtualGallery
+            ref="galleryRef"
+            :around-photo-id="initialAnchor"
+            :filter="filter"
+            :sort-by="sortByForGallery"
+            :sort-dir="sortDirForGallery"
+            :search-photo-ids="searchPhotoIds"
+            :select-mode="selectMode"
+            :selected-ids="selectedIds"
+            :cursor-index="cursorIndex"
+            @photo-click="onPhotoClick"
+            @stack-click="onStackClick"
+            @toggle-select="onToggleSelect"
+            @loaded="onGalleryLoaded"
+            @ends-changed="onEndsChanged"
+          />
+        </div>
+
+        <!-- Desktop detail panel — same component as the fullscreen flyout
+             but always visible on desktop, driven by the cursor cell. The
+             reactive cursor → hydrate flow keeps it in sync with grid
+             clicks, keyboard navigation, and fullscreen prev/next. -->
+        <aside v-if="cursorPhoto" class="desktop-sidebar">
+          <PhotoDetailSidebar
+            :photo="cursorPhoto"
+            :selected-photo-ids="selectMode && selectedCount > 1 ? Array.from(selectedIds) : undefined"
+            :faces="detectedFaces"
+            :loading-faces="loadingFaces"
+            :poi-matches="detectedPoiMatches"
+            :loading-poi-matches="loadingPoiMatches"
+            :persons="persons"
+            :can-delete="canDelete"
+            :can-upload="canUpload"
+            :reindexing-photo="reindexingPhoto"
+            :is-editing-date="isEditingDate"
+            v-model:editDate="editDate"
+            :updating-date="updatingDate"
+            :show-persons="showPersons"
+            :limit-albums-shown="true"
+            :face-service-available="serviceHealth.faceServiceAvailable"
+            :location-menu-exclude-all-photos="true"
+            @toggle-favorite="onFullscreenToggleFavorite"
+            @hide="onFullscreenHide"
+            @restore="onFullscreenRestore"
+            @start-edit-date="onSidebarStartEditDate"
+            @update-date="onSidebarUpdateDate"
+            @cancel-edit-date="onSidebarCancelEditDate"
+            @ignore-face="onSidebarIgnoreFace"
+            @reindex="onSidebarReindex"
+            @link-visibility-changed="onLinkVisibilityChanged"
+            @share="shareSinglePhoto"
+            :sharing="sharingPhotos"
+          />
+        </aside>
+      </div>
+
+      <!-- Compact selection tray. Actions stay available in the popup without
+           taking a full, multi-row strip away from the photo grid. -->
+      <div v-if="selectMode" class="select-bar">
+        <!-- The shift hint appears exactly when it becomes useful — one photo
+             is selected, so there is an anchor to span from — and goes away
+             again as soon as the user has clearly found the feature. -->
+        <span class="select-count">
+          <i :class="rangeSelectBusy ? 'pi pi-spin pi-spinner' : 'pi pi-check-square'" />
+          {{
+            rangeSelectBusy
+            ? 'Bereich wird ausgewählt …'
+            : selectedCount === 1
+            ? '1 ausgewählt · Umschalt+Klick wählt den Bereich'
+            : selectedCount > 0
+            ? `${selectedCount} ausgewählt`
+            : 'Fotos antippen zum Auswählen'
+          }}
+        </span>
+        <div class="select-actions">
+          <Button
+            label="Aktionen"
+            icon="pi pi-ellipsis-v"
+            size="small"
+            severity="secondary"
+            outlined
+            @click="toggleSelectionMenu"
+          />
+          <Button
+            icon="pi pi-times"
+            size="small"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Auswahl beenden"
+            v-tooltip.top="'Auswahl beenden'"
+            @click="exitSelectMode"
+          />
+        </div>
+        <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" :pt="{ root: { class: 'selection-actions-menu' } }" />
+      </div>
     </div>
 
     <!-- Stack compare overlay -->
@@ -1884,47 +1932,6 @@ void refreshReviewSequence()
       </template>
     </FullscreenOverlay>
 
-    <!-- Compact selection tray. Actions stay available in the popup without
-         taking a full, multi-row strip away from the photo grid. -->
-    <div v-if="selectMode" class="select-bar">
-      <!-- The shift hint appears exactly when it becomes useful — one photo
-           is selected, so there is an anchor to span from — and goes away
-           again as soon as the user has clearly found the feature. -->
-      <span class="select-count">
-        <i :class="rangeSelectBusy ? 'pi pi-spin pi-spinner' : 'pi pi-check-square'" />
-        {{
-          rangeSelectBusy
-          ? 'Bereich wird ausgewählt …'
-          : selectedCount === 1
-          ? '1 ausgewählt · Umschalt+Klick wählt den Bereich'
-          : selectedCount > 0
-          ? `${selectedCount} ausgewählt`
-          : 'Fotos antippen zum Auswählen'
-        }}
-      </span>
-      <div class="select-actions">
-        <Button
-          label="Aktionen"
-          icon="pi pi-ellipsis-v"
-          size="small"
-          severity="secondary"
-          outlined
-          @click="toggleSelectionMenu"
-        />
-        <Button
-          icon="pi pi-times"
-          size="small"
-          severity="secondary"
-          text
-          rounded
-          aria-label="Auswahl beenden"
-          v-tooltip.top="'Auswahl beenden'"
-          @click="exitSelectMode"
-        />
-      </div>
-      <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" :pt="{ root: { class: 'selection-actions-menu' } }" />
-    </div>
-
     <!-- Mobile entry point for the album batch dialog. Reused on desktop
          too — the sidebar's "Alben bearbeiten" button still works, but
          on mobile (where the desktop sidebar is hidden) this is the only
@@ -1976,19 +1983,20 @@ void refreshReviewSequence()
         <Button label="OK" @click="showDeleteSkippedDialog = false" />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.gallery-view {
+/* Page frame and title: PageLayout (issue #1272). */
+
+/* The in-flow body below the sticky stack: the positioned box the floating
+   selection tray is anchored to; the content row inside takes the rest. */
+.gallery-body {
+  position: relative;
   display: flex;
   flex-direction: column;
-  /* `100dvh` follows the dynamic viewport (URL bar collapse/expand on iOS
-     Safari); `100vh` returned the large viewport size and pushed the
-     sticky bottom select-bar off-screen until the page itself scrolled. */
-  height: calc(100dvh - var(--menubar-height, 3.5rem));
-  overflow: hidden;
-  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ── Content row: grid + persistent desktop sidebar ──────────────────── */
@@ -2023,39 +2031,8 @@ void refreshReviewSequence()
   .desktop-sidebar { display: none; }
 }
 
-/* ── Subheader ─────────────────────────────────────────────────────────── */
-.subheader {
-  flex-shrink: 0;
-  background: var(--p-content-background);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-  padding: 0.5rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin: 0;
-}
-
-.actions {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-/* Toolbar fills the row beside the title; min-width:0 lets it shrink and
-   spill items into its overflow dropdown instead of wrapping. */
+/* Toolbar spans the sticky row; min-width:0 lets it shrink and spill items
+   into its overflow dropdown instead of wrapping. */
 .header__toolbar {
   flex: 1 1 auto;
   min-width: 0;
@@ -2330,12 +2307,6 @@ void refreshReviewSequence()
 
 /* ── Mobile breakpoint ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .subheader {
-    padding: 0.375rem 0.75rem;
-  }
-  .title {
-    font-size: 1.2rem;
-  }
   .select-bar {
     bottom: calc(0.65rem + env(safe-area-inset-bottom, 0px));
   }

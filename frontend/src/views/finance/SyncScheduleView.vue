@@ -6,6 +6,7 @@ import Select from 'primevue/select'
 import Checkbox from 'primevue/checkbox'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import PageLayout from '../../components/layout/PageLayout.vue'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
 import { useSyncScheduleStore } from '../../stores/finance/syncSchedule'
 import type { SyncSlot } from '../../api/finance'
@@ -99,9 +100,8 @@ async function save() {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Sync-Zeiten{{ bankcontact ? ' — ' + bankcontact.name : '' }}</h1>
+  <PageLayout :title="'Sync-Zeiten' + (bankcontact ? ' — ' + bankcontact.name : '')" width="normal">
+    <template #actions>
       <Button
         label="Zurück"
         icon="pi pi-arrow-left"
@@ -109,9 +109,11 @@ async function save() {
         text
         @click="router.push({ name: 'finance-bankcontact-detail', params: { id: bankcontactId } })"
       />
-    </header>
+    </template>
 
-    <Message v-if="error" severity="error" :closable="true" @close="error = null">{{ error }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="true" @close="error = null">{{ error }}</Message>
+    </template>
 
     <section class="card">
       <div class="field">
@@ -145,33 +147,18 @@ async function save() {
         <Button label="Speichern" :loading="saving" @click="save" />
       </div>
     </section>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.5rem;
-  max-width: 48rem;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 @media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
-    gap: 0.75rem;
-  }
   .card {
     padding: 0.75rem;
   }
 }
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.page-header h1 {
-  margin: 0;
+.card + .card {
+  margin-top: 1rem;
 }
 .card {
   border: 1px solid var(--p-content-border-color);

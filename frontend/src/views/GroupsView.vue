@@ -8,6 +8,8 @@ import Select from 'primevue/select'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import {
   listGroups,
   createGroup,
@@ -136,13 +138,14 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="groups-view">
-    <div class="header">
-      <h1>Gruppen</h1>
+  <PageLayout title="Gruppen" width="normal" :ready="!loading">
+    <template #actions>
       <Button label="Neu" icon="pi pi-plus" @click="showCreateDialog = true" />
-    </div>
+    </template>
 
-    <Message v-if="error" severity="error" @close="error = ''" sticky>{{ error }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''" sticky>{{ error }}</Message>
+    </template>
 
     <div class="layout">
       <!-- Sidebar: List -->
@@ -186,6 +189,7 @@ onMounted(load)
             />
           </div>
 
+          <ScrollX>
           <DataTable :value="selectedGroup.members" size="small">
             <Column field="email" header="E-Mail" />
             <Column field="name" header="Name" />
@@ -208,6 +212,7 @@ onMounted(load)
               </template>
             </Column>
           </DataTable>
+          </ScrollX>
         </div>
         <div v-else class="info-centered">Wähle eine Gruppe aus, um Details anzuzeigen.</div>
       </div>
@@ -263,30 +268,22 @@ onMounted(load)
         <Button label="Hinzufügen" icon="pi pi-check" :loading="addingMember" :disabled="!selectedUser" @click="handleAddMember" />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.groups-view {
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  height: 100%;
-}
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.header h1 { margin: 0; font-size: 1.5rem; }
-
+/* Page frame and title: PageLayout (issue #1272). */
 .layout {
   display: grid;
   grid-template-columns: 300px 1fr;
   gap: 1.5rem;
   flex: 1;
   min-height: 0;
+}
+@media (max-width: 767px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .list-panel {

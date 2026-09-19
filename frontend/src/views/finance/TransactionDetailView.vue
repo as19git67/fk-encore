@@ -13,6 +13,7 @@ import SplitTransactionDialog from '../../components/finance/SplitTransactionDia
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
 import DocumentThumbnail from '../../components/DocumentThumbnail.vue'
+import PageLayout from '../../components/layout/PageLayout.vue'
 import { useConfirm } from 'primevue/useconfirm'
 import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
@@ -685,8 +686,8 @@ const extractedFields = computed(() => {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
+  <PageLayout :title="tx?.counterparty || 'Buchung'" width="normal" :ready="!!tx">
+    <template #actions>
       <Button
         v-if="isDirty"
         label="Abbrechen"
@@ -702,7 +703,6 @@ const extractedFields = computed(() => {
         aria-label="Zurück"
         @click="goBack"
       />
-      <h1>{{ tx?.counterparty || 'Buchung' }}</h1>
       <Button
         v-if="tx"
         v-tooltip.bottom="inBasket ? 'Aus Basket entfernen' : 'In Basket legen'"
@@ -724,11 +724,13 @@ const extractedFields = computed(() => {
         :loading="saving"
         @click="save"
       />
-    </header>
+    </template>
+
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="true" @close="error = null">{{ error }}</Message>
+    </template>
 
     <div v-if="copyToast" class="copy-toast">{{ copyToast }}</div>
-
-    <Message v-if="error" severity="error" :closable="true" @close="error = null">{{ error }}</Message>
 
     <section v-if="tx" class="card">
       <dl class="details">
@@ -1262,49 +1264,18 @@ const extractedFields = computed(() => {
       :transaction="tx"
       @saved="onSplitSaved"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.5rem;
-  max-width: 48rem;
+/* Page frame and title: PageLayout (issue #1272). */
+.card + .card {
+  margin-top: 1rem;
 }
 @media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
-    gap: 0.75rem;
+  .card + .card {
+    margin-top: 0.75rem;
   }
-}
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  position: sticky;
-  top: var(--menubar-height, 3.5rem);
-  z-index: 100;
-  background: var(--p-content-hover-background);
-  margin: -1.5rem -1.5rem 0;
-  padding: 0.75rem 1.5rem;
-}
-@media (max-width: 640px) {
-  .page-header {
-    margin: -0.75rem -0.75rem 0;
-    padding: 0.5rem 0.75rem;
-  }
-}
-.page-header h1 {
-  margin: 0;
-  font-size: 1.15rem;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
 }
 .card {
   border: 1px solid var(--p-content-border-color);

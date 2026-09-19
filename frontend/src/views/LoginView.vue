@@ -6,6 +6,7 @@ import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import Divider from 'primevue/divider'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import { useAuthStore } from '../stores/auth'
 import { browserSupportsWebAuthn } from '@simplewebauthn/browser'
 
@@ -52,9 +53,9 @@ async function handlePasskeyLogin() {
 </script>
 
 <template>
+  <PageLayout title="Anmelden" width="normal">
   <div class="login-container">
     <Card class="login-card">
-      <template #title>Anmelden</template>
       <template #content>
         <Message v-if="error" severity="error" :closable="false" class="mb">{{ error }}</Message>
 
@@ -107,6 +108,7 @@ async function handlePasskeyLogin() {
       </template>
     </Card>
   </div>
+  </PageLayout>
 </template>
 
 <style scoped>

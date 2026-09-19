@@ -10,6 +10,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import {
   listDocumentFollowUps,
@@ -76,25 +77,26 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="later-view">
-    <header class="lv-header">
-      <div>
-        <h2 class="lv-title">
-          Später
-          <span class="lv-count">({{ items.length }})</span>
-        </h2>
-        <p class="lv-sub">Dokumente auf Wiedervorlage — sortiert nach Fälligkeit.</p>
-      </div>
+  <PageLayout
+    title="Später"
+    :hint="`${items.length} Dokumente · Auf Wiedervorlage, sortiert nach Fälligkeit.`"
+    width="normal"
+    :ready="!loading"
+  >
+    <template #actions>
       <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
-    </header>
+    </template>
 
-    <Message v-if="info" severity="success" :closable="true" @close="info = ''">
-      {{ info }}
-    </Message>
-    <Message v-if="loadError" severity="error" :closable="true" @close="loadError = ''">
-      {{ loadError }}
-    </Message>
+    <template #notice>
+      <Message v-if="info" severity="success" :closable="true" @close="info = ''">
+        {{ info }}
+      </Message>
+      <Message v-if="loadError" severity="error" :closable="true" @close="loadError = ''">
+        {{ loadError }}
+      </Message>
+    </template>
 
+    <div class="content">
     <div v-if="!loading && items.length === 0 && !loadError" class="lv-empty">
       <i class="pi pi-clock" />
       <p>Keine Wiedervorlagen geplant.</p>
@@ -124,38 +126,16 @@ onMounted(load)
         />
       </li>
     </ul>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.later-view {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px;
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-.lv-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-.lv-title {
-  font-size: 1.4rem;
-  font-weight: 600;
-  margin: 0;
-}
-.lv-count {
-  font-weight: 400;
-  color: var(--p-text-muted-color);
-  margin-left: 6px;
-}
-.lv-sub {
-  margin: 4px 0 0;
-  color: var(--p-text-muted-color);
-  font-size: 0.85rem;
 }
 .lv-empty {
   text-align: center;
