@@ -21,7 +21,7 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
+    "@types/bcryptjs": "^3.0.0",
     "@types/dockerode": "^4.0.1",
     "@types/node": "^20.5.7",
     "@types/nodemailer": "^7.0.11",
