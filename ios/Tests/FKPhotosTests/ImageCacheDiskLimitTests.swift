@@ -67,6 +67,11 @@ final class ImageCacheDiskLimitTests: XCTestCase {
         // (tiny) JPEG. Its exact size is whatever the encoder produces; the
         // cap below is built from that measured size, not a guessed constant.
         let jpeg = try XCTUnwrap(UIImage(systemName: "photo")?.jpegData(compressionQuality: 0.5))
+        // Constructing the cache is what creates `directory` — do this before
+        // writing anything into it (unlike the other tests, this one writes
+        // outside of `writeFiles`, which is easy to get backwards).
+        let cache = ImageCache(directory: directory, maxDiskBytes: jpeg.count + 50, defaults: defaults)
+
         let touchedURL = directory.appendingPathComponent("touched")
         try jpeg.write(to: touchedURL)
         try FileManager.default.setAttributes(
@@ -75,7 +80,6 @@ final class ImageCacheDiskLimitTests: XCTestCase {
         )
         writeFiles([100, 100]) // file-0 @ t=0, file-1 @ t=1 — both newer than "touched", for now.
 
-        let cache = ImageCache(directory: directory, maxDiskBytes: jpeg.count + 50, defaults: defaults)
         _ = await cache.image(forKey: "touched")
 
         await cache.enforceDiskCacheLimit()
