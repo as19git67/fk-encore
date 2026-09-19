@@ -5,6 +5,12 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import PageLayout from '../../components/layout/PageLayout.vue'
+import ListToolbar from '../../components/layout/ListToolbar.vue'
+import EmptyState from '../../components/layout/EmptyState.vue'
+import PageSkeleton from '../../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../../components/layout/ErrorBanner.vue'
+import { useListToolbar, useListView } from '../../composables/useListToolbar'
+import type { FilterChip } from '../../components/layout/listToolbar'
 import {
   listAnomalies,
   acknowledgeAnomaly,
@@ -27,7 +33,6 @@ const expandedHistory = ref<Set<number>>(new Set())
 const historyByAnomaly = ref<Map<number, MandateHistoryItem[]>>(new Map())
 const loadingHistory = ref<Set<number>>(new Set())
 
-const typeFilter = ref<string>('all')
 const typeOptions = [
   { label: 'Alle', value: 'all' },
   { label: 'Betragsänderung', value: 'amount_change' },
@@ -36,11 +41,45 @@ const typeOptions = [
   { label: 'Erwartete Buchung fehlt', value: 'missing_transaction' },
 ]
 
+// In the URL, so a reload or a shared link reproduces the same list. The
+// whole list is loaded once; the filter only narrows what is on screen.
+const typeView = useListView({ options: typeOptions, defaultValue: 'all', key: 'type' })
+const typeFilter = typeView.value
+
 const filtered = computed(() =>
   typeFilter.value === 'all'
     ? anomalies.value
     : anomalies.value.filter((a) => a.type === typeFilter.value),
 )
+
+function clearFilters() {
+  typeFilter.value = 'all'
+}
+
+const filterChips = computed<FilterChip[]>(() =>
+  typeFilter.value === 'all'
+    ? []
+    : [
+        {
+          key: 'type',
+          label: `Art: ${typeOptions.find((o) => o.value === typeFilter.value)?.label ?? typeFilter.value}`,
+          remove: clearFilters,
+        },
+      ],
+)
+
+const toolbar = useListToolbar({
+  filter: {
+    chips: filterChips,
+    activeCount: () => filterChips.value.length,
+    clearAll: clearFilters,
+  },
+  result: {
+    loaded: () => filtered.value.length,
+    total: () => anomalies.value.length,
+    loading: () => loading.value,
+  },
+})
 
 async function load() {
   loading.value = true
@@ -218,19 +257,23 @@ function formatAmountChange(item: AnomalyItem): string | null {
     </template>
 
     <template #toolbar>
-      <div class="filter-row">
-        <Select
-          v-model="typeFilter"
-          :options="typeOptions"
-          option-label="label"
-          option-value="value"
-          class="filter-select"
-        />
-      </div>
+      <ListToolbar :model="toolbar">
+        <template #actions>
+          <Select
+            v-model="typeFilter"
+            :options="typeOptions"
+            option-label="label"
+            option-value="value"
+            size="small"
+            aria-label="Art der Anomalie"
+            class="filter-select"
+          />
+        </template>
+      </ListToolbar>
     </template>
 
     <template #notice>
-      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = null" />
       <Message
         v-if="basketError"
         severity="error"
@@ -241,12 +284,18 @@ function formatAmountChange(item: AnomalyItem): string | null {
       </Message>
     </template>
 
-    <div v-if="loading && anomalies.length === 0" class="loading">Lädt …</div>
+    <PageSkeleton v-if="loading && anomalies.length === 0" variant="list" :count="6" />
 
-    <section v-else-if="filtered.length === 0" class="empty">
-      <i class="pi pi-check-circle empty-icon" />
-      <p>Keine offenen Anomalien.</p>
-    </section>
+    <EmptyState
+      v-else-if="filtered.length === 0"
+      icon="pi pi-check-circle"
+      title="Keine offenen Anomalien"
+      :message="filterChips.length > 0
+        ? 'Mit einer anderen Art findet sich vielleicht etwas.'
+        : 'Es liegt nichts zum Quittieren bereit.'"
+      :filtered="filterChips.length > 0"
+      @clear-filters="clearFilters"
+    />
 
     <ul v-else class="anomaly-list">
       <li
@@ -386,23 +435,15 @@ function formatAmountChange(item: AnomalyItem): string | null {
 
 <style scoped>
 /* Page frame and title: PageLayout (issue #1272). */
-.loading,
-.empty {
-  text-align: center;
-  padding: 3rem 1rem;
-  color: var(--p-text-muted-color);
+.filter-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.empty-icon {
-  font-size: 2.5rem;
-  display: block;
-  margin-bottom: 0.5rem;
-  color: var(--p-primary-color);
-}
-
-.filter-row .filter-select {
-  width: 100%;
-  max-width: 300px;
+.filter-select {
+  min-width: 15rem;
 }
 
 .anomaly-list {

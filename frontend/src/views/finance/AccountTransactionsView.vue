@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import PageLayout from '../../components/layout/PageLayout.vue'
+import ListToolbar from '../../components/layout/ListToolbar.vue'
+import EmptyState from '../../components/layout/EmptyState.vue'
+import PageSkeleton from '../../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 /**
  * Buchungsliste — entweder für ein einzelnes Konto (`/finanzen/uebersicht/konto/:id`)
  * oder für alle Konten einer Sektion (`/finanzen/uebersicht/sektion/:name`).
@@ -13,6 +17,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScrollRestore } from '../../composables/useScrollRestore'
 import { useModuleBack } from '../../composables/useModuleBack'
+import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
+import type { FilterChip } from '../../components/layout/listToolbar'
 import Button from 'primevue/button'
 import Chart from 'primevue/chart'
 import Message from 'primevue/message'
@@ -182,7 +188,6 @@ function formatShortDate(iso: string | null): string | null {
 
 const filterPanelOpen = ref(false)
 
-const formQuery = computed({ get: () => filtersStore.formQuery, set: (v) => { filtersStore.formQuery = v } })
 const formTags = computed({ get: () => filtersStore.formTags, set: (v) => { filtersStore.formTags = v } })
 const formFrom = computed({ get: () => filtersStore.formFrom, set: (v) => { filtersStore.formFrom = v } })
 const formTo = computed({ get: () => filtersStore.formTo, set: (v) => { filtersStore.formTo = v } })
@@ -255,14 +260,78 @@ async function loadTransactions() {
 
 function applyFilters() {
   filtersStore.apply()
+  filterPanelOpen.value = false
   void loadTransactions()
 }
 
 function clearFilters() {
   filtersStore.clear()
+  search.clear()
   filterPanelOpen.value = false
   void loadTransactions()
 }
+
+// ─── Shared list toolbar (#1272, stage 3) ───────────────────────────────────
+const search = useListSearch({
+  placeholder: 'Text oder Betrag suchen',
+  storageKey: 'finance.tx.search',
+})
+
+// The store still owns the request parameters; the toolbar owns the term.
+// Seeded before the first load so a deep link searches straight away.
+filtersStore.formQuery = search.term.value
+filtersStore.appliedQuery = search.term.value
+
+watch(search.term, (term) => {
+  filtersStore.formQuery = term
+  filtersStore.appliedQuery = term
+  void loadTransactions()
+})
+
+/** Facets other than the search term — those the filter panel edits. */
+const facetCount = computed(() => {
+  let n = 0
+  if (filtersStore.appliedTags.length > 0) n++
+  if (filtersStore.appliedTaxRelevant !== null) n++
+  if (filtersStore.appliedFrom || filtersStore.appliedTo) n++
+  return n
+})
+
+const filterChips = computed<FilterChip[]>(() => {
+  const out: FilterChip[] = []
+  for (const tag of filtersStore.appliedTags) {
+    out.push({
+      key: `tag:${tag}`,
+      label: `Tag: ${tag}`,
+      remove: () => {
+        filtersStore.formTags = filtersStore.appliedTags.filter((t) => t !== tag)
+        applyFilters()
+      },
+    })
+  }
+  if (filtersStore.appliedTaxRelevant !== null) {
+    out.push({
+      key: 'taxRelevant',
+      label: `Steuerrelevant: ${filtersStore.appliedTaxRelevant ? 'Ja' : 'Nein'}`,
+      remove: () => { filtersStore.formTaxRelevant = null; applyFilters() },
+    })
+  }
+  if (filtersStore.appliedFrom || filtersStore.appliedTo) {
+    const from = filtersStore.appliedFrom ? isoDate(filtersStore.appliedFrom) : '…'
+    const to = filtersStore.appliedTo ? isoDate(filtersStore.appliedTo) : '…'
+    out.push({
+      key: 'date',
+      label: `Datum: ${from} – ${to}`,
+      remove: () => {
+        filtersStore.formFrom = null
+        filtersStore.formTo = null
+        applyFilters()
+      },
+    })
+  }
+  return out
+})
+
 
 onMounted(async () => {
   if (!overviewStore.data) await overviewStore.refresh()
@@ -1062,6 +1131,22 @@ function toggleSelectMode() {
   }
 }
 
+const toolbar = useListToolbar({
+  search,
+  filter: {
+    chips: filterChips,
+    activeCount: facetCount,
+    open: () => { filterPanelOpen.value = !filterPanelOpen.value },
+    clearAll: clearFilters,
+  },
+  result: {
+    loaded: () => txStore.items.length,
+    // The transactions endpoint pages without reporting a grand total.
+    loading: () => txStore.loading,
+  },
+  selection: { active: selectMode, toggle: toggleSelectMode },
+})
+
 /**
  * Tristate state for the "select all" checkbox above the list:
  *   - true   → every visible transaction is selected
@@ -1198,75 +1283,38 @@ function goBack() {
           aria-label="Zurück"
           @click="goBack"
         />
-        <div class="tx-toolbar-summary">
-          <template v-if="hasActiveFilters">
-            <span class="tx-summary-sum">Σ {{ formatFilteredSum() }}</span>
-            <span class="tx-summary-count">
-              {{ txStore.items.length }} Buchung{{ txStore.items.length === 1 ? '' : 'en' }}
-            </span>
+        <ListToolbar :model="toolbar" class="tx-toolbar-list">
+          <template #actions>
+            <span v-if="hasActiveFilters" class="tx-summary-sum">Σ {{ formatFilteredSum() }}</span>
+            <Button
+              v-if="canAddCashTransaction && !isDepot"
+              icon="pi pi-money-bill"
+              severity="secondary"
+              size="small"
+              text
+              rounded
+              aria-label="Bargeldbuchung erfassen"
+              v-tooltip.bottom="'Bargeldbuchung erfassen'"
+              @click="openCashTransactionForm"
+            />
+            <Button
+              v-if="!isDepot"
+              icon="pi pi-list"
+              :severity="selectMode && localSelectionCount > 0 ? 'primary' : 'secondary'"
+              size="small"
+              text
+              rounded
+              aria-label="Liste der ausgewählten Buchungen"
+              v-tooltip.bottom="'Ausgewählte Buchungen'"
+              :disabled="!selectMode || localSelectionCount === 0"
+              @click="openSelectionPopover"
+            />
           </template>
-        </div>
-        <div v-if="!isDepot" class="tx-toolbar-actions">
-          <Button
-            v-if="canAddCashTransaction"
-            icon="pi pi-money-bill"
-            severity="secondary"
-            text
-            rounded
-            aria-label="Bargeldbuchung erfassen"
-            v-tooltip.bottom="'Bargeldbuchung erfassen'"
-            @click="openCashTransactionForm"
-          />
-          <Button
-            :icon="hasActiveFilters ? 'pi pi-filter-fill' : 'pi pi-filter'"
-            :severity="filterPanelOpen || hasActiveFilters ? 'primary' : 'secondary'"
-            text
-            rounded
-            aria-label="Filter"
-            v-tooltip.bottom="hasActiveFilters ? 'Filter aktiv' : 'Filter'"
-            @click="filterPanelOpen = !filterPanelOpen"
-          />
-          <Button
-            icon="pi pi-list"
-            :severity="selectMode && localSelectionCount > 0 ? 'primary' : 'secondary'"
-            text
-            rounded
-            aria-label="Liste der ausgewählten Buchungen"
-            v-tooltip.bottom="'Ausgewählte Buchungen'"
-            :disabled="!selectMode || localSelectionCount === 0"
-            @click="openSelectionPopover"
-          />
-          <Button
-            icon="pi pi-check-square"
-            :severity="selectMode ? 'primary' : 'secondary'"
-            text
-            rounded
-            aria-label="Auswählen"
-            v-tooltip.bottom="selectMode ? 'Auswahl beenden' : 'Auswählen'"
-            @click="toggleSelectMode"
-          />
-        </div>
+        </ListToolbar>
       </div>
 
       <section v-if="filterPanelOpen" class="tx-filter-panel" data-testid="finance-filter-subheader">
       <div class="tx-filter-fields">
-        <div class="tx-filter-row">
-          <InputText
-            v-model="formQuery"
-            placeholder="Text oder Betrag suchen"
-            class="tx-filter-input"
-            @keyup.enter="applyFilters"
-          />
-          <Button
-            v-if="formQuery.length > 0"
-            icon="pi pi-times"
-            severity="secondary"
-            text
-            rounded
-            aria-label="Suchtext leeren"
-            @click="formQuery = ''"
-          />
-        </div>
         <MultiSelect
           v-model="formTags"
           :options="tagOptions"
@@ -1302,7 +1350,7 @@ function goBack() {
           icon="pi pi-times"
           severity="secondary"
           aria-label="Filter zurücksetzen"
-          :disabled="!hasActiveFilters && formQuery.length === 0 && formTags.length === 0 && !formFrom && !formTo && formTaxRelevant === null"
+          :disabled="!hasActiveFilters && formTags.length === 0 && !formFrom && !formTo && formTaxRelevant === null"
           @click="clearFilters"
         />
       </div>
@@ -1750,18 +1798,24 @@ function goBack() {
       </p>
     </section>
 
-    <Message v-if="txStore.error" severity="error" :closable="false">
-      {{ txStore.error }}
-    </Message>
+    <ErrorBanner
+      v-if="txStore.error"
+      :message="txStore.error"
+      @retry="loadTransactions"
+    />
 
-    <div v-if="txStore.loading" class="tx-loading">Lädt …</div>
+    <PageSkeleton v-if="txStore.loading && txStore.items.length === 0" variant="table" :count="8" />
 
-    <div
+    <EmptyState
       v-else-if="groupedTransactions.length === 0 && !isDepot"
-      class="tx-empty"
-    >
-      Keine Buchungen vorhanden.
-    </div>
+      icon="pi pi-wallet"
+      title="Keine Buchungen vorhanden"
+      :message="hasActiveFilters
+        ? 'Für diese Suche gibt es in diesem Konto nichts.'
+        : 'Sobald Umsätze importiert sind, stehen sie hier.'"
+      :filtered="hasActiveFilters"
+      @clear-filters="clearFilters"
+    />
 
     <template v-else>
       <section
@@ -1845,29 +1899,14 @@ function goBack() {
   gap: var(--space-2);
   min-width: 0;
 }
-.tx-toolbar-summary {
+.tx-toolbar-list {
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-.tx-toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-shrink: 0;
 }
 .tx-summary-sum {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.tx-summary-count {
-  color: var(--p-text-muted-color);
-  font-size: 0.8125rem;
-}
-
 /* ── Select-mode bar (tristate + batch actions) ───────────────────── */
 .tx-select-bar {
   display: flex;

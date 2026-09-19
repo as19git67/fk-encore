@@ -2,8 +2,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
-import Message from 'primevue/message'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import {
   listScheduledJobs,
   pauseScheduledJob,
@@ -79,9 +83,34 @@ onUnmounted(() => {
   if (tickTimer) clearInterval(tickTimer)
 })
 
+// ─── Shared list toolbar (#1272, stage 3) ───────────────────────────
+// Every registered job is already in memory, so the search narrows the
+// cards right here — by the job name, the one thing the cards are keyed on.
+const search = useListSearch({
+  placeholder: 'Job suchen',
+  storageKey: 'admin.jobs.search',
+})
+
+const searching = computed(() => search.term.value.trim().length > 0)
+
+const visibleJobs = computed(() => {
+  const term = search.term.value.trim().toLowerCase()
+  if (!term) return jobs.value
+  return jobs.value.filter((job) => job.name.toLowerCase().includes(term))
+})
+
+const toolbar = useListToolbar({
+  search,
+  result: {
+    loaded: () => visibleJobs.value.length,
+    total: () => jobs.value.length,
+    loading: () => loading.value,
+  },
+})
+
 const grouped = computed(() => {
   const map = new Map<string, ScheduledJob[]>()
-  for (const job of jobs.value) {
+  for (const job of visibleJobs.value) {
     const key = job.service ?? 'andere'
     if (!map.has(key)) map.set(key, [])
     map.get(key)!.push(job)
@@ -152,10 +181,12 @@ function formatDuration(ms: number | null): string {
       />
     </template>
 
+    <template #toolbar>
+      <ListToolbar :model="toolbar" />
+    </template>
+
     <template #notice>
-      <Message v-if="error" severity="error" :closable="true" @close="error = ''">
-        {{ error }}
-      </Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="fetchJobs" @close="error = ''" />
     </template>
 
     <div class="jobs-page">
@@ -166,9 +197,20 @@ function formatDuration(ms: number | null): string {
       den Job sofort, unabhängig vom nächsten Slot.
     </p>
 
-    <div v-if="!loading && jobs.length === 0" class="empty-state">
-      Noch keine Jobs registriert.
-    </div>
+    <PageSkeleton v-if="loading && jobs.length === 0" variant="list" :count="6" />
+
+    <EmptyState
+      v-else-if="visibleJobs.length === 0"
+      icon="pi pi-clock"
+      :title="searching ? 'Keine Treffer' : 'Keine Jobs registriert'"
+      :message="
+        searching
+          ? 'Zu diesem Suchbegriff passt kein Job.'
+          : 'Noch keine Jobs registriert — sobald ein Dienst einen Hintergrund-Job anmeldet, steht er hier.'
+      "
+      :filtered="searching"
+      @clear-filters="search.clear()"
+    />
 
     <div v-for="[service, list] in grouped" :key="service" class="group">
       <h2 class="group-title">{{ service }}</h2>
@@ -268,13 +310,6 @@ function formatDuration(ms: number | null): string {
   color: var(--p-text-muted-color);
   margin: 0;
   font-size: 0.85rem;
-}
-.empty-state {
-  padding: 2rem;
-  text-align: center;
-  color: var(--p-text-muted-color);
-  border: 1px dashed var(--p-content-border-color);
-  border-radius: 0.5rem;
 }
 .group {
   display: flex;

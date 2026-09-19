@@ -6,6 +6,8 @@ import {
   albumsStateToQuery,
   albumsViewQueryFromStorage,
   defaultAlbumsState,
+  DEFAULT_ALBUM_SORT,
+  EMPTY_ALBUM_FILTER,
   hasAnyAlbumsFilterQueryParam,
   loadAlbumsStateFromStorage,
   parseAlbumsStateFromQuery,
@@ -127,8 +129,13 @@ describe('albumsViewState', () => {
 
     it('returns true when any filter key is present', () => {
       expect(hasAnyAlbumsFilterQueryParam({ owner: 'mine' })).toBe(true)
-      expect(hasAnyAlbumsFilterQueryParam({ q: 'urlaub' })).toBe(true)
       expect(hasAnyAlbumsFilterQueryParam({ sortBy: 'name' })).toBe(true)
+    })
+
+    // `q` belongs to the shared list toolbar's `useListSearch`, not to this
+    // module — a search term alone says nothing about filter/sort state.
+    it('ignores the search term', () => {
+      expect(hasAnyAlbumsFilterQueryParam({ q: 'urlaub' })).toBe(false)
     })
 
     it('treats empty strings as absent', () => {
@@ -149,7 +156,6 @@ describe('albumsViewState', () => {
           dateTo: '2024-12-31',
         },
         sort: { field: 'name', direction: 'asc' as const },
-        searchQuery: 'urlaub',
       }
       const query = albumsStateToQuery(state)
       const parsed = parseAlbumsStateFromQuery(query)
@@ -159,6 +165,19 @@ describe('albumsViewState', () => {
     it('omits default-valued keys from the query', () => {
       const query = albumsStateToQuery(defaultAlbumsState())
       expect(query).toEqual({})
+    })
+
+    // The search term round-trips through `useListSearch`; this module must
+    // neither emit `q` nor pick one up from the URL.
+    it('leaves the search term alone', () => {
+      expect(albumsStateToQuery({
+        filter: { ...EMPTY_ALBUM_FILTER, owner: 'mine' },
+        sort: { field: 'name', direction: 'asc' },
+      })).not.toHaveProperty('q')
+      expect(parseAlbumsStateFromQuery({ q: 'urlaub', owner: 'mine' })).toEqual({
+        filter: { ...EMPTY_ALBUM_FILTER, owner: 'mine', dateFrom: undefined, dateTo: undefined },
+        sort: { ...DEFAULT_ALBUM_SORT },
+      })
     })
   })
 
@@ -180,7 +199,6 @@ describe('albumsViewState', () => {
           dateTo: undefined,
         },
         sort: { field: 'photo_count', direction: 'asc' as const },
-        searchQuery: 'foo',
       }
       saveAlbumsStateToStorage(state)
       const loaded = loadAlbumsStateFromStorage()
@@ -225,7 +243,6 @@ describe('albumsViewState', () => {
           sharedWithMe: false,
         },
         sort: { field: 'name', direction: 'asc' },
-        searchQuery: '',
       })
       expect(albumsViewQueryFromStorage()).toEqual({
         owner: 'mine',

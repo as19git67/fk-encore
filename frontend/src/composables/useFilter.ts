@@ -1,8 +1,10 @@
 import { ref, computed, watch } from 'vue'
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { LocationQueryRaw } from 'vue-router'
 import type { PhotoFilter, HiddenMode, MembershipMode, MediaType } from '../api/photos'
+import type { FilterChip } from '../components/layout/listToolbar'
+import { useReferenceData } from './useReferenceData'
 
 /**
  * Filter composable with draft/applied semantics and URL query‑string sync.
@@ -262,4 +264,87 @@ export function useFilter(opts: UseFilterOptions = {}): UseFilterReturn {
   }
 
   return { applied, draft, activeCount, openEdit, apply, reset, removeKey }
+}
+
+/**
+ * The applied photo filter as removable chips for the shared `ListToolbar`
+ * (issue #1272, stage 3). Lived in `FilterChips.vue` until that component
+ * became generic; the mapping is photo-specific and belongs here.
+ */
+export function usePhotoFilterChips(filter: UseFilterReturn): ComputedRef<FilterChip[]> {
+  // Album and person names come from the app-wide cache. The fetch is only
+  // triggered when the filter actually names one — otherwise a passive chip
+  // row would pull the expensive /albums and /persons endpoints on every
+  // gallery load.
+  const { albums, persons, fetchAlbums, fetchPersons } = useReferenceData()
+
+  watch(
+    () => [
+      filter.applied.value.albumIds?.length ?? 0,
+      filter.applied.value.personIds?.length ?? 0,
+    ] as const,
+    ([albumCount, personCount]) => {
+      if (albumCount > 0) void fetchAlbums().catch(() => { /* ignore */ })
+      if (personCount > 0) void fetchPersons().catch(() => { /* ignore */ })
+    },
+    { immediate: true },
+  )
+
+  return computed<FilterChip[]>(() => {
+    const f = filter.applied.value
+    const out: FilterChip[] = []
+    const add = (label: string, keys: Array<keyof PhotoFilter>) => {
+      out.push({ key: keys.join(','), label, remove: () => filter.removeKey(keys) })
+    }
+
+    if (f.hiddenMode === 'include') add('Inkl. Ausgeblendet', ['hiddenMode'])
+    else if (f.hiddenMode === 'only') add('Nur Ausgeblendet', ['hiddenMode'])
+    if (f.favorite) add('Favorit', ['favorite'])
+    if (f.albumHighlight) add('Album-Highlight', ['albumHighlight'])
+    if (f.groupHighlight) add('Gruppen-Highlight', ['groupHighlight'])
+    if (f.inGroup) add('In Gruppe', ['inGroup'])
+    if (f.othersFavorited) add('Von anderen favorisiert', ['othersFavorited'])
+    if (f.othersHidden) add('Von anderen ausgeblendet', ['othersHidden'])
+    if (f.notInAnyAlbum) add('Nicht in Album', ['notInAnyAlbum'])
+
+    if (f.qualityMin !== undefined || f.qualityMax !== undefined) {
+      add(`Qualität ${f.qualityMin ?? 0}–${f.qualityMax ?? 100}%`, ['qualityMin', 'qualityMax'])
+    }
+    if (f.albumIds?.length) {
+      const names = f.albumIds.map((id) => albums.value.find((a) => a.id === id)?.name ?? `#${id}`)
+      const prefix = f.albumMode === 'exclude' ? 'Nicht in Album' : 'In Album'
+      add(`${prefix}: ${names.join(', ')}`, ['albumIds', 'albumMode'])
+    }
+    if (f.personIds?.length) {
+      const names = f.personIds.map((id) => persons.value.find((p) => p.id === id)?.name ?? `#${id}`)
+      const prefix = f.personMode === 'exclude' ? 'Ohne Person' : 'Mit Person'
+      add(`${prefix}: ${names.join(', ')}`, ['personIds', 'personMode'])
+    }
+    if (f.ownerIds?.length) {
+      add(`Besitzer: ${f.ownerIds.map((id) => `#${id}`).join(', ')}`, ['ownerIds'])
+    }
+    if (f.mediaTypes?.length) {
+      const labels: Record<string, string> = { photo: 'Foto', video: 'Video', raw: 'RAW' }
+      add(`Medientyp: ${f.mediaTypes.map((t) => labels[t] ?? t).join(', ')}`, ['mediaTypes'])
+    }
+    if (f.hasGps !== undefined) add(f.hasGps ? 'Mit GPS' : 'Ohne GPS', ['hasGps'])
+    if (f.hasFaces !== undefined) add(f.hasFaces ? 'Mit Gesichtern' : 'Ohne Gesichter', ['hasFaces'])
+    if (f.hasAssignedPerson !== undefined) {
+      add(
+        f.hasAssignedPerson ? 'Mit zugeordneter Person' : 'Ohne zugeordnete Person',
+        ['hasAssignedPerson'],
+      )
+    }
+    if (f.dateFrom || f.dateTo) {
+      add(`Datum ${f.dateFrom ?? '…'} – ${f.dateTo ?? '…'}`, ['dateFrom', 'dateTo'])
+    }
+    if (f.importedDaysAgo !== undefined) {
+      add(`Letzte ${f.importedDaysAgo} Tage`, ['importedDaysAgo'])
+    }
+    if (f.nearLat !== undefined && f.nearLon !== undefined) {
+      add(`In der Nähe (${f.nearRadiusKm ?? 10} km)`, ['nearLat', 'nearLon', 'nearRadiusKm'])
+    }
+    if (f.showAiHidden) add('Inkl. KI-ausgeblendete', ['showAiHidden'])
+    return out
+  })
 }

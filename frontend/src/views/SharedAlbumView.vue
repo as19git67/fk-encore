@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import Message from 'primevue/message'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import GuestStatusBanner from '../components/GuestStatusBanner.vue'
@@ -14,7 +17,10 @@ import VirtualPhotoGrid from '../components/VirtualPhotoGrid.vue'
 import { getPublicAlbum, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
 import { setActiveShareToken } from '../api/client'
 import { matchesPhotoFilter } from '../utils/photoFilter'
-import { countActiveFilters } from '../composables/useFilter'
+import { countActiveFilters, usePhotoFilterChips } from '../composables/useFilter'
+import type { UseFilterReturn } from '../composables/useFilter'
+import { useListToolbar, useListView } from '../composables/useListToolbar'
+import type { ListToolbarModel } from '../components/layout/listToolbar'
 import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
 import { useGuestSession } from '../composables/useGuestSession'
 import { useGuestPushNotifications } from '../composables/useGuestPushNotifications'
@@ -43,7 +49,19 @@ onUnmounted(() => setActiveShareToken(null))
  * grid view.
  */
 const mapEnabled = computed(() => album.value?.display_mode === 'map')
-const viewMode = ref<'grid' | 'map'>('grid')
+
+const view = useListView({
+  options: [
+    { value: 'grid', label: 'Raster', icon: 'pi pi-th-large' },
+    { value: 'map', label: 'Karte', icon: 'pi pi-map' },
+  ],
+  defaultValue: 'grid',
+  key: 'view',
+})
+const viewMode = computed<'grid' | 'map'>(() => (view.value.value === 'map' ? 'map' : 'grid'))
+/** A `?view=` in the link is the visitor's explicit choice and outranks the
+ *  per-share value we remembered locally. */
+const viewCameFromQuery = typeof route.query.view === 'string'
 
 // Persist the visitor's raster/map choice per share token (works for
 // anonymous visitors too — no account needed), so reopening the link
@@ -74,14 +92,17 @@ watch(album, (a) => {
   // Map disabled → lock to grid. Map enabled → restore the visitor's last
   // choice for this share, falling back to grid: Raster is the default view
   // even when the album has the map enabled.
-  viewMode.value = a.display_mode === 'map'
-    ? (loadPersistedViewMode() ?? 'grid')
-    : 'grid'
+  if (a.display_mode !== 'map') {
+    view.value.value = 'grid'
+    return
+  }
+  if (viewCameFromQuery) return
+  view.value.value = loadPersistedViewMode() ?? 'grid'
 }, { immediate: true })
 
 // Persist the choice per share token (map-enabled albums only).
-watch(viewMode, (mode) => {
-  if (mapEnabled.value) persistViewMode(mode)
+watch(view.value, (mode) => {
+  if (mapEnabled.value && (mode === 'grid' || mode === 'map')) persistViewMode(mode)
 })
 
 /**
@@ -276,6 +297,59 @@ const filteredMapPhotos = computed<Photo[]>(() => {
   return albumPhotosAsPhoto.value.filter(p => matchesPhotoFilter(p, filter.value, ctx))
 })
 
+/**
+ * The shared filter contract over this view's local state.
+ *
+ * A guest has no account and no URL filter — the choice is kept per share
+ * token in localStorage — so `useFilter` (which mirrors to the query string)
+ * is not used here. This adapter gives the shared toolbar the same shape,
+ * chips included.
+ */
+const filterApi: UseFilterReturn = {
+  applied: filter,
+  draft: filterDraft,
+  activeCount,
+  openEdit: () => { filterDraft.value = { ...filter.value } },
+  apply: onApplyFilter,
+  reset: onResetFilter,
+  removeKey: (keys) => {
+    const next = { ...filter.value }
+    for (const k of keys) delete (next as Record<string, unknown>)[k as string]
+    filter.value = next
+    filterDraft.value = { ...next }
+    persistFilter(next)
+  },
+}
+const filterChips = usePhotoFilterChips(filterApi)
+
+/**
+ * The shared toolbar. Both optional parts depend on the album, which only
+ * arrives after the first render, so the model is swapped through a computed:
+ * the view switch appears once the album turns out to have its map enabled,
+ * the filter once there is at least one criterion worth offering.
+ */
+const baseToolbar = useListToolbar({
+  filter: {
+    chips: filterChips,
+    activeCount,
+    open: openFilterMenu,
+    clearAll: onResetFilter,
+  },
+  view,
+  result: {
+    // The grid shows every photo; only the map view is filtered.
+    loaded: () => (isMapView.value ? filteredMapPhotos.value.length : albumPhotosAsPhoto.value.length),
+    total: () => album.value?.photo_count,
+    loading: () => loading.value,
+  },
+})
+
+const toolbar = computed<ListToolbarModel>(() => ({
+  ...baseToolbar,
+  filter: filterButtonVisible.value ? baseToolbar.filter : undefined,
+  view: mapEnabled.value ? baseToolbar.view : undefined,
+}))
+
 // Fullscreen state — uses full Photo type so FullscreenOverlay works directly
 const isFullscreen = ref(false)
 const fullscreenIndex = ref(0)
@@ -451,14 +525,15 @@ watch(
   },
 )
 
-onMounted(async () => {
-  document.addEventListener('keydown', handleKeydown)
+async function loadAlbum() {
   const token = route.params.token as string
   if (!token) {
     error.value = 'Kein gültiger Link'
     loading.value = false
     return
   }
+  loading.value = true
+  error.value = ''
   try {
     album.value = await getPublicAlbum(token)
   } catch (err: any) {
@@ -492,6 +567,11 @@ onMounted(async () => {
     // once the album content is available.
     openPhotoFromQuery()
   }
+}
+
+onMounted(async () => {
+  document.addEventListener('keydown', handleKeydown)
+  await loadAlbum()
   // Guest state loads in parallel — failures don't block the album
   // view; the banner just shows the anonymous CTA.
   void guestSession.refresh()
@@ -506,7 +586,7 @@ onUnmounted(() => {
 <template>
   <PageLayout :title="album?.name || 'Geteiltes Album'" scroll="self" width="full" :ready="!loading">
     <template #notice>
-      <Message v-if="error" severity="error">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" @retry="loadAlbum" />
 
       <!-- The full-width banner is only shown in grid view. In map
            view it would eat viewport space the map needs, so we
@@ -563,76 +643,43 @@ onUnmounted(() => {
       </button>
     </template>
 
+    <!-- Sticky part (lifted into the app stack by PageLayout): the album's
+         own line, then the shared toolbar. The description is grid-only —
+         in map view every row above the map is a row the map loses. -->
     <template #toolbar>
-      <div v-if="album && !isMapView" class="shared-header">
+      <div v-if="album && !isMapView && (album.description || album.oldest_photo_at)" class="shared-header">
         <p v-if="album.description" class="description">{{ album.description }}</p>
-        <span class="meta">
-          {{ album.photo_count }} {{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}
-          <template v-if="album.oldest_photo_at && album.newest_photo_at">
-            · {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
-          </template>
+        <span v-if="album.oldest_photo_at && album.newest_photo_at" class="meta">
+          {{ new Date(album.oldest_photo_at).toLocaleDateString() }} – {{ new Date(album.newest_photo_at).toLocaleDateString() }}
         </span>
-        <div v-if="mapEnabled" class="shared-view-mode-switch">
-          <button
-            type="button"
-            class="shared-view-mode-btn"
-            :class="{ 'is-active': viewMode === 'grid' }"
-            aria-label="Raster anzeigen"
-            @click="viewMode = 'grid'"
-          >
-            <i class="pi pi-th-large" />
-            <span>Raster</span>
-          </button>
-          <button
-            type="button"
-            class="shared-view-mode-btn"
-            :class="{ 'is-active': viewMode === 'map' }"
-            aria-label="Karte anzeigen"
-            @click="viewMode = 'map'"
-          >
-            <i class="pi pi-map" />
-            <span>Karte</span>
-          </button>
-        </div>
       </div>
+      <ListToolbar v-if="album" :model="toolbar" />
     </template>
 
     <div class="shared-album-body" :class="{ 'shared-album-view--grid': !isMapView }">
-    <div v-if="loading" class="info-text">
-      <i class="pi pi-spin pi-spinner" /> Album wird geladen…
-    </div>
+    <PageSkeleton v-if="loading && !album" variant="grid" :count="9" />
 
     <template v-if="album">
+      <EmptyState
+        v-if="album.photos.length === 0"
+        icon="pi pi-images"
+        title="Dieses Album enthält keine Fotos"
+        message="Sobald Fotos hinzugefügt werden, erscheinen sie hier."
+      />
+
       <!-- Map mode -->
       <TripMap
-        v-if="isMapView && album.photos.length > 0"
+        v-else-if="isMapView"
         ref="tripMapRef"
         :photos="filteredMapPhotos"
         :albumName="album.name"
         :albumDescription="album.description"
         @open-fullscreen="handleMapFullscreen"
       >
+        <!-- Raster/Karte and the filter live in the shared toolbar above the
+             map now; what stays here is the guest call-to-action, which has
+             no toolbar equivalent. -->
         <template #stats-addon>
-          <button
-            type="button"
-            class="map-filter-button"
-            aria-label="Raster anzeigen"
-            @click="viewMode = 'grid'"
-          >
-            <i class="pi pi-th-large" />
-            <span>Raster</span>
-          </button>
-          <button
-            v-if="filterButtonVisible"
-            type="button"
-            class="map-filter-button"
-            :class="{ 'is-active': activeCount > 0 }"
-            :aria-label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
-            @click="openFilterMenu"
-          >
-            <i :class="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'" />
-            <span>{{ activeCount > 0 ? `Filter (${activeCount})` : 'Filter' }}</span>
-          </button>
           <button
             v-if="isMapAnonymous"
             type="button"
@@ -794,9 +841,8 @@ onUnmounted(() => {
 }
 
 .shared-header {
-  /* Compact single-row toolbar in raster view (PageLayout's #toolbar
-     slot): description, photo count and (when present) the raster/map
-     switch share a flex row. */
+  /* The album's own line above the shared toolbar (PageLayout's #toolbar
+     slot): description and date range share a flex row. */
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -825,12 +871,6 @@ onUnmounted(() => {
 
 .map-filter-button:hover {
   background: rgba(255, 255, 255, 0.08);
-}
-
-.map-filter-button.is-active {
-  background: var(--p-primary-color, #3b82f6);
-  border-color: var(--p-primary-color, #3b82f6);
-  color: var(--p-primary-contrast-color, #fff);
 }
 
 /* "Anmelden" pill: stays inside the dark stats overlay so it uses
@@ -879,48 +919,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-/* Toggle between raster + map for albums where the owner enabled the map.
-   Lives inline in the compact header at the right edge. */
-.shared-view-mode-switch {
-  display: inline-flex;
-  flex-shrink: 0;
-  margin-left: auto;
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 999px;
-  padding: 2px;
-  gap: 2px;
-  background: var(--p-content-background, #fff);
-}
-
-.shared-view-mode-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.75rem;
-  border: none;
-  background: transparent;
-  color: var(--p-text-color);
-  font: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-  border-radius: 999px;
-}
-
-.shared-view-mode-btn .pi {
-  font-size: 0.85em;
-}
-
-.shared-view-mode-btn:hover {
-  background: var(--p-content-hover-background);
-}
-
-.shared-view-mode-btn.is-active {
-  background: var(--p-primary-color);
-  color: var(--p-primary-contrast-color);
-}
-
-/* Compact Anmelden / Account icon button to the right of the
-   view-mode switch. Stays visible even after the user dismissed the
+/* Compact Anmelden / Account icon button in the page header. Stays visible even after the user dismissed the
    guest banner — primary call-to-action that mustn't disappear. */
 .shared-header-account-btn {
   display: inline-flex;
@@ -964,9 +963,8 @@ onUnmounted(() => {
    which row virtualization requires. */
 
 @media (max-width: 768px) {
-  /* Shared header on phones: hide the view-mode button labels (icons
-     stay) and tighten the description so the whole header stays on
-     one or two lines. */
+  /* Shared header on phones: tighten the description so the header stays
+     on one or two lines. */
   .shared-header { gap: 0.35rem 0.5rem; }
   .shared-header .description {
     overflow: hidden;
@@ -975,15 +973,6 @@ onUnmounted(() => {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
   }
-  .shared-view-mode-btn { padding: 0.25rem 0.5rem; }
-  .shared-view-mode-btn span { display: none; }
-  .shared-view-mode-btn .pi { font-size: 1em; }
-}
-
-.info-text {
-  text-align: center;
-  margin-top: 4rem;
-  color: var(--p-text-muted-color);
 }
 </style>
 

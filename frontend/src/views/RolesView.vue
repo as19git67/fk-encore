@@ -7,9 +7,13 @@ import Button from 'primevue/button'
 import Chip from 'primevue/chip'
 import Dialog from 'primevue/dialog'
 import Checkbox from 'primevue/checkbox'
-import Message from 'primevue/message'
 import PageLayout from '../components/layout/PageLayout.vue'
 import ScrollX from '../components/layout/ScrollX.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useListToolbar } from '../composables/useListToolbar'
 import {
   listRoles,
   createRole,
@@ -48,6 +52,17 @@ const permissionGroups = computed(() => {
     groups.get(domain)!.push(p)
   }
   return Array.from(groups.entries()).map(([domain, perms]) => ({ domain, perms }))
+})
+
+// ─── Shared list toolbar (#1272, stage 3) ───────────────────────────
+// No search: a role is a bundle of permissions, and a household has a
+// handful of them — a filter field over five rows would be in the way.
+// The toolbar still carries the count, so the frame stays the same.
+const toolbar = useListToolbar({
+  result: {
+    loaded: () => roles.value.length,
+    loading: () => loading.value,
+  },
 })
 
 function roleHasPermission(permId: number): boolean {
@@ -132,8 +147,12 @@ onMounted(loadData)
 
 <template>
   <PageLayout title="Rollen & Berechtigungen" width="wide" :ready="!loading">
+    <template #toolbar>
+      <ListToolbar :model="toolbar" />
+    </template>
+
     <template #notice>
-      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="loadData" @close="error = ''" />
     </template>
 
     <div v-if="auth.hasPermission('roles.create')" class="create-form mb">
@@ -148,7 +167,16 @@ onMounted(loadData)
       />
     </div>
 
-    <ScrollX>
+    <PageSkeleton v-if="loading && roles.length === 0" variant="table" :count="6" />
+
+    <EmptyState
+      v-else-if="roles.length === 0"
+      icon="pi pi-shield"
+      title="Keine Rollen"
+      message="Es ist noch keine Rolle angelegt — lege eine an und statte sie mit Berechtigungen aus."
+    />
+
+    <ScrollX v-else>
     <DataTable
       :value="roles"
       :loading="loading"

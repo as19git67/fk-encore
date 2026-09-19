@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import path from 'node:path'
 
 test.describe('Dokumenten-Modul (Drag-and-Drop + Tastatur)', () => {
-  test('Suchfeld ist per Tastatur erreichbar und löst Suche per Button aus', async ({ page }) => {
+  test('Suchfeld ist per Tastatur erreichbar und schreibt den Begriff in die URL', async ({ page }) => {
     await page.goto('dokumente')
     await expect(page.getByRole('heading', { name: 'Dokumente' })).toBeVisible()
 
@@ -13,13 +13,19 @@ test.describe('Dokumenten-Modul (Drag-and-Drop + Tastatur)', () => {
     await page.keyboard.type('rechnung', { delay: 40 })
     await expect(search).toHaveValue('rechnung')
 
-    // The search button should be enabled when the search field has text.
-    const searchBtn = page.getByRole('button', { name: 'Suche starten' })
-    await expect(searchBtn).toBeEnabled()
+    // The shared toolbar has no submit button: the term settles 300 ms after
+    // the last keystroke and is mirrored to ?q=, so the list can be
+    // reproduced from its URL (issue #1278).
+    await expect(page).toHaveURL(/[?&]q=rechnung/)
 
     // The filter button is always present in the toolbar.
     const filterBtn = page.getByRole('button', { name: 'Filter' })
     await expect(filterBtn).toBeVisible()
+
+    // Escape inside the search clears it, here and on every other list.
+    await page.keyboard.press('Escape')
+    await expect(search).toHaveValue('')
+    await expect(page).not.toHaveURL(/[?&]q=/)
   })
 
   test('Zur Upload-Seite navigieren und Datei per File-Input wählen', async ({ page }) => {

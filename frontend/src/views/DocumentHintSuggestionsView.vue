@@ -6,6 +6,11 @@ import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Tag from 'primevue/tag'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useListToolbar, useListView } from '../composables/useListToolbar'
 import {
   acceptHintSuggestion,
   listHintSuggestions,
@@ -25,19 +30,35 @@ const loading = ref(true)
 const error = ref('')
 const info = ref('')
 
-const filter = ref<CategorySuggestionStatus>('open')
 const filterOptions: Array<{ label: string; value: CategorySuggestionStatus }> = [
   { label: 'Offen', value: 'open' },
   { label: 'Akzeptiert', value: 'accepted' },
   { label: 'Abgelehnt', value: 'rejected' },
 ]
 
-const kindFilter = ref<HintSuggestionKind | ''>('')
 const kindOptions: Array<{ label: string; value: HintSuggestionKind | '' }> = [
   { label: 'Alle', value: '' },
   { label: 'Steuer-Hints', value: 'tax-section' },
   { label: 'Kategorie-Hints', value: 'category' },
 ]
+
+// Both pickers live in the URL (`?status=`, `?kind=`) so a reload or a
+// shared link opens the same list (issue #1272, stage 3).
+const statusView = useListView({
+  options: filterOptions,
+  defaultValue: 'open',
+  key: 'status',
+})
+const filter = statusView.value
+const status = computed(() => filter.value as CategorySuggestionStatus)
+
+const kindView = useListView({
+  options: kindOptions,
+  defaultValue: '',
+  key: 'kind',
+})
+const kindFilter = kindView.value
+const kind = computed(() => (kindFilter.value || undefined) as HintSuggestionKind | undefined)
 
 const acceptingById = ref<Record<number, boolean>>({})
 const rejectingById = ref<Record<number, boolean>>({})
@@ -46,10 +67,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const res = await listHintSuggestions(
-      filter.value,
-      kindFilter.value || undefined,
-    )
+    const res = await listHintSuggestions(status.value, kind.value)
     items.value = res.items
   } catch (err: any) {
     error.value = err.message || 'Vorschläge konnten nicht geladen werden'
@@ -59,6 +77,25 @@ async function load() {
 }
 
 watch([filter, kindFilter], load)
+
+const toolbar = useListToolbar({
+  result: {
+    // The endpoint returns the whole bucket at once.
+    loaded: () => items.value.length,
+    loading: () => loading.value,
+  },
+})
+
+/** One wording per status — an empty "Offen" means something else than an empty "Abgelehnt". */
+const emptyState = computed(() => {
+  if (status.value === 'open') {
+    return { title: 'Keine offenen Hint-Vorschläge', message: undefined }
+  }
+  if (status.value === 'accepted') {
+    return { title: 'Noch keine Vorschläge akzeptiert', message: undefined }
+  }
+  return { title: 'Noch keine Vorschläge abgelehnt', message: undefined }
+})
 
 function kindLabel(kind: HintSuggestionKind): string {
   return kind === 'tax-section' ? 'Steuer-Anlage' : 'Kategorie'
@@ -117,29 +154,35 @@ onMounted(load)
 <template>
   <PageLayout title="Hint-Vorschläge" width="normal" :ready="!loading">
     <template #toolbar>
-      <div class="filters">
-        <SelectButton
-          v-model="filter"
-          :options="filterOptions"
-          optionLabel="label"
-          optionValue="value"
-          :allowEmpty="false"
-        />
-        <SelectButton
-          v-model="kindFilter"
-          :options="kindOptions"
-          optionLabel="label"
-          optionValue="value"
-          :allowEmpty="false"
-        />
-      </div>
+      <ListToolbar :model="toolbar">
+        <template #actions>
+          <SelectButton
+            v-model="filter"
+            :options="filterOptions"
+            optionLabel="label"
+            optionValue="value"
+            :allowEmpty="false"
+            size="small"
+            v-tooltip.bottom="'Status'"
+          />
+          <SelectButton
+            v-model="kindFilter"
+            :options="kindOptions"
+            optionLabel="label"
+            optionValue="value"
+            :allowEmpty="false"
+            size="small"
+            v-tooltip.bottom="'Art des Hints'"
+          />
+        </template>
+      </ListToolbar>
     </template>
 
     <template #notice>
       <Message v-if="!canManage" severity="warn" :closable="false">
         Keine Berechtigung (documents.manage_taxonomy).
       </Message>
-      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = ''" />
       <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
     </template>
 
@@ -150,14 +193,14 @@ onMounted(load)
       als Orientierung, welche Hints verbessert werden könnten.
     </p>
 
-    <div v-if="loading" class="info-text">
-      <i class="pi pi-spin pi-spinner" /> Vorschläge werden geladen…
-    </div>
-    <div v-else-if="items.length === 0" class="info-text">
-      <template v-if="filter === 'open'">Keine offenen Hint-Vorschläge.</template>
-      <template v-else-if="filter === 'accepted'">Noch keine Vorschläge akzeptiert.</template>
-      <template v-else>Noch keine Vorschläge abgelehnt.</template>
-    </div>
+    <PageSkeleton v-if="loading && items.length === 0" variant="list" :count="5" />
+
+    <EmptyState
+      v-else-if="items.length === 0"
+      icon="pi pi-lightbulb"
+      :title="emptyState.title"
+      :message="emptyState.message"
+    />
 
     <div v-else class="suggestion-list">
       <div v-for="s in items" :key="s.id" class="suggestion-card">
@@ -230,23 +273,11 @@ onMounted(load)
   gap: 1rem;
 }
 
-.filters {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
 .subtitle {
   font-size: 0.9rem;
   color: var(--p-text-muted-color);
   margin: 0;
   max-width: 70ch;
-}
-
-.info-text {
-  text-align: center;
-  margin-top: 4rem;
-  color: var(--p-text-muted-color);
 }
 
 .suggestion-list {

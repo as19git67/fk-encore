@@ -4,14 +4,17 @@ import {useRouter, useRoute} from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
-import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Checkbox from 'primevue/checkbox'
-import Chip from 'primevue/chip'
 import DateRangePresets from '../components/DateRangePresets.vue'
-import SortMenu from '../components/SortMenu.vue'
 import VirtualAlbumGrid from '../components/VirtualAlbumGrid.vue'
-import type { SortField, SortState } from '../composables/useSort'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import type { FilterChip } from '../components/layout/listToolbar'
+import { useListSearch, useListToolbar } from '../composables/useListToolbar'
+import type { SortField, SortState, UseSortReturn } from '../composables/useSort'
 import {
   type Album,
   createAlbum,
@@ -21,8 +24,10 @@ import { usePhotoNavStore } from '../stores/photoNav'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useReferenceData } from '../composables/useReferenceData'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
+import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 import {
   albumsStateToQuery,
+  ALBUMS_STATE_QUERY_KEYS,
   DEFAULT_ALBUM_SORT,
   EMPTY_ALBUM_FILTER,
   hasAnyAlbumsFilterQueryParam,
@@ -69,7 +74,12 @@ function openAlbum(album: Album) {
   router.push(`/fotos/alben/${album.id}`)
 }
 
-const filterQuery = ref('')
+// The search term lives in `?q=` and is remembered for the session; the
+// shared toolbar owns the input, the clear button and the `/` shortcut.
+const search = useListSearch({
+  placeholder: 'Alben filtern…',
+  storageKey: 'albums.search',
+})
 
 // ── Album filter menu ────────────────────────────────────────────────────────
 const appliedAlbumFilter = ref<AlbumFilter>({ ...EMPTY_ALBUM_FILTER })
@@ -128,31 +138,40 @@ function resetAlbumFilter() {
   appliedAlbumFilter.value = { ...EMPTY_ALBUM_FILTER }
 }
 
-function albumFilterChips(): Array<{ label: string; clear: () => void }> {
+/**
+ * The applied album filter as the shared toolbar's removable chips. One chip
+ * per criterion, in the same order the filter dialog lists them, so the chip
+ * row and the "Filter (n)" badge always agree.
+ */
+function albumFilterChips(): FilterChip[] {
   const f = appliedAlbumFilter.value
-  const chips: Array<{ label: string; clear: () => void }> = []
+  const chips: FilterChip[] = []
   if (f.owner !== 'all') {
     chips.push({
-      label: f.owner === 'mine' ? 'Eigene' : 'Geteilt mit mir',
-      clear: () => { appliedAlbumFilter.value = { ...f, owner: 'all' } },
+      key: 'owner',
+      label: `Besitzer: ${f.owner === 'mine' ? 'Eigene' : 'Geteilt mit mir'}`,
+      remove: () => { appliedAlbumFilter.value = { ...f, owner: 'all' } },
     })
   }
   if (f.display !== 'all') {
     chips.push({
-      label: f.display === 'grid' ? 'Ohne Karte' : 'Mit Karte',
-      clear: () => { appliedAlbumFilter.value = { ...f, display: 'all' } },
+      key: 'display',
+      label: `Darstellung: ${f.display === 'grid' ? 'Ohne Karte' : 'Mit Karte'}`,
+      remove: () => { appliedAlbumFilter.value = { ...f, display: 'all' } },
     })
   }
   if (f.dateFrom || f.dateTo) {
     chips.push({
-      label: `Neuestes ${f.dateFrom ?? '…'} – ${f.dateTo ?? '…'}`,
-      clear: () => { appliedAlbumFilter.value = { ...f, dateFrom: undefined, dateTo: undefined } },
+      key: 'date',
+      label: `Neuestes Foto: ${f.dateFrom ?? '…'} – ${f.dateTo ?? '…'}`,
+      remove: () => { appliedAlbumFilter.value = { ...f, dateFrom: undefined, dateTo: undefined } },
     })
   }
   if (f.emptyMode !== 'any') {
     chips.push({
-      label: f.emptyMode === 'only' ? 'Nur leere Alben' : 'Ohne leere Alben',
-      clear: () => { appliedAlbumFilter.value = { ...f, emptyMode: 'any' } },
+      key: 'emptyMode',
+      label: `Leere Alben: ${f.emptyMode === 'only' ? 'Nur leere' : 'Ohne leere'}`,
+      remove: () => { appliedAlbumFilter.value = { ...f, emptyMode: 'any' } },
     })
   }
   if (f.sharedByMe || f.sharedWithMe) {
@@ -160,12 +179,15 @@ function albumFilterChips(): Array<{ label: string; clear: () => void }> {
     if (f.sharedByMe) parts.push('von mir')
     if (f.sharedWithMe) parts.push('mit mir')
     chips.push({
+      key: 'shared',
       label: `Geteilt: ${parts.join(' & ')}`,
-      clear: () => { appliedAlbumFilter.value = { ...f, sharedByMe: false, sharedWithMe: false } },
+      remove: () => { appliedAlbumFilter.value = { ...f, sharedByMe: false, sharedWithMe: false } },
     })
   }
   return chips
 }
+
+const albumFilterChipList = computed<FilterChip[]>(() => albumFilterChips())
 
 function matchesAlbumFilter(album: Album, f: AlbumFilter): boolean {
   const userId = auth.user?.id
@@ -203,7 +225,6 @@ const ALBUM_SORT_FIELDS: SortField[] = [
 ]
 const appliedAlbumSort = ref<SortState>({ ...DEFAULT_ALBUM_SORT })
 const draftAlbumSort = ref<SortState>({ ...DEFAULT_ALBUM_SORT })
-const showAlbumSortMenu = ref(false)
 
 const isAlbumSortDefault = computed(() =>
   appliedAlbumSort.value.field === DEFAULT_ALBUM_SORT.field &&
@@ -212,22 +233,37 @@ const isAlbumSortDefault = computed(() =>
 const albumSortFieldLabel = computed(() =>
   ALBUM_SORT_FIELDS.find(f => f.value === appliedAlbumSort.value.field)?.label ?? appliedAlbumSort.value.field
 )
-const albumSortChipLabel = computed(() =>
-  `Sortierung: ${albumSortFieldLabel.value} ${appliedAlbumSort.value.direction === 'asc' ? '↑' : '↓'}`
-)
 
-function openAlbumSortMenu() {
-  draftAlbumSort.value = { ...appliedAlbumSort.value }
-  showAlbumSortMenu.value = true
-}
-function applyAlbumSort() {
-  appliedAlbumSort.value = { ...draftAlbumSort.value }
-  showAlbumSortMenu.value = false
-}
-function resetAlbumSort() {
-  draftAlbumSort.value = { ...DEFAULT_ALBUM_SORT }
-  appliedAlbumSort.value = { ...DEFAULT_ALBUM_SORT }
-  showAlbumSortMenu.value = false
+/**
+ * The shared toolbar's sort contract, served from this view's own state.
+ *
+ * `useSort` is not used here on purpose: the album sort travels in the URL
+ * *and* in localStorage together with the filter, and `utils/albumsViewState`
+ * owns that serialization so AlbumDetailView can rebuild the same query when
+ * navigating back. This adapter hands the toolbar the same shape without a
+ * second writer for `sortBy`/`sortDir`.
+ */
+const albumSort: UseSortReturn = {
+  fields: ALBUM_SORT_FIELDS,
+  applied: appliedAlbumSort,
+  draft: draftAlbumSort,
+  isDefault: isAlbumSortDefault,
+  fieldLabel: albumSortFieldLabel,
+  openEdit: () => { draftAlbumSort.value = { ...appliedAlbumSort.value } },
+  apply: () => { appliedAlbumSort.value = { ...draftAlbumSort.value } },
+  reset: () => {
+    draftAlbumSort.value = { ...DEFAULT_ALBUM_SORT }
+    appliedAlbumSort.value = { ...DEFAULT_ALBUM_SORT }
+  },
+  // Picking the active field again flips the direction — same gesture as
+  // every other list.
+  select: (field: string) => {
+    const direction = appliedAlbumSort.value.field === field
+      ? (appliedAlbumSort.value.direction === 'asc' ? 'desc' : 'asc')
+      : DEFAULT_ALBUM_SORT.direction
+    draftAlbumSort.value = { field, direction }
+    appliedAlbumSort.value = { field, direction }
+  },
 }
 
 function compareAlbumsByField(a: Album, b: Album, field: string): number {
@@ -262,7 +298,7 @@ const sortedAlbums = computed(() => {
 })
 
 const filteredAlbums = computed(() => {
-  const q = filterQuery.value.trim().toLocaleLowerCase()
+  const q = search.term.value.trim().toLocaleLowerCase()
   const f = appliedAlbumFilter.value
   return sortedAlbums.value.filter(album => {
     if (q) {
@@ -304,24 +340,17 @@ function currentState(): AlbumsPersistedState {
   return {
     filter: { ...appliedAlbumFilter.value },
     sort: { ...appliedAlbumSort.value },
-    searchQuery: filterQuery.value,
   }
 }
 
-let syncingUrl = false
 async function persistState() {
   const state = currentState()
   saveAlbumsStateToStorage(state)
-  if (syncingUrl) return
-  syncingUrl = true
-  try {
-    const next = albumsStateToQuery(state)
-    if (JSON.stringify(next) !== JSON.stringify(route.query)) {
-      await router.replace({ query: next })
-    }
-  } finally {
-    syncingUrl = false
-  }
+  // Only the keys this view owns are rewritten — `q` belongs to
+  // `useListSearch` and must survive a filter or sort change.
+  await updateRouteQuery(router, (current) =>
+    replaceQuerySlice(current, ALBUMS_STATE_QUERY_KEYS, albumsStateToQuery(state)),
+  )
 }
 
 async function loadData(force = false) {
@@ -397,7 +426,6 @@ useRealtimeEvent('albums', 'photo_added', (ev) => {
   draftAlbumFilter.value = { ...initial.filter }
   appliedAlbumSort.value = initial.sort
   draftAlbumSort.value = { ...initial.sort }
-  filterQuery.value = initial.searchQuery
   // Mirror the restored state to the URL so a copy-paste or share of the
   // address bar shows the same filters the view is rendering.
   void persistState()
@@ -406,7 +434,6 @@ useRealtimeEvent('albums', 'photo_added', (ev) => {
 // Keep URL + localStorage in sync whenever the applied state changes.
 watch(appliedAlbumFilter, () => persistState(), { deep: true })
 watch(appliedAlbumSort, () => persistState(), { deep: true })
-watch(filterQuery, () => persistState())
 
 // Whenever the filter / sort / search-query changes, the visible album
 // set changes. `useVirtualizer` keeps its scroll offset in absolute
@@ -415,10 +442,28 @@ watch(filterQuery, () => persistState())
 // previously-selected album well out of view. Hand control back to the
 // grid so it re-anchors on the remembered album. Run after Vue applies
 // the new `filteredAlbums` so the row math sees the new layout.
-watch([appliedAlbumFilter, appliedAlbumSort, filterQuery], async () => {
+watch([appliedAlbumFilter, appliedAlbumSort, search.term], async () => {
   await nextTick()
   await gridRef.value?.rescrollToRemembered({ highlight: false })
 }, { deep: true })
+
+// Declared last: `useListToolbar` reads the refs eagerly, so everything it
+// points at has to exist by now.
+const toolbar = useListToolbar({
+  search,
+  filter: {
+    chips: albumFilterChipList,
+    activeCount: activeAlbumFilterCount,
+    open: openAlbumFilterMenu,
+    clearAll: resetAlbumFilter,
+  },
+  sort: albumSort,
+  result: {
+    loaded: () => filteredAlbums.value.length,
+    total: () => albums.value.length,
+    loading: () => loading.value,
+  },
+})
 
 onMounted(async () => {
   // If the user had selected a photo inside an album and then navigated to the
@@ -443,79 +488,39 @@ onMounted(async () => {
       <Button v-if="canManageAlbums" label="Neues Album" icon="pi pi-plus" @click="showCreateDialog = true"/>
     </template>
 
-    <!-- Sticky part (lifted into the app stack by PageLayout): filter row
-         and the active filter/sort chips. -->
+    <!-- Sticky part (lifted into the app stack by PageLayout): the shared
+         list toolbar with search, filter, sort, chips and the result count. -->
     <template #toolbar>
-    <div v-if="!loading && albums.length > 0" class="filter-row">
-      <span class="p-input-icon-left filter-input-wrapper">
-        <i class="pi pi-search filter-icon" />
-        <InputText
-            v-model="filterQuery"
-            placeholder="Alben filtern…"
-            class="filter-input"
-            aria-label="Alben filtern"
-        />
-        <Button
-            v-if="filterQuery"
-            icon="pi pi-times"
-            text
-            rounded
-            size="small"
-            class="filter-clear"
-            v-tooltip="'Filter zurücksetzen'"
-            aria-label="Filter zurücksetzen"
-            @click="filterQuery = ''"
-        />
-      </span>
-      <Button
-        :icon="activeAlbumFilterCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
-        :label="activeAlbumFilterCount > 0 ? `Filter (${activeAlbumFilterCount})` : 'Filter'"
-        size="small"
-        :severity="activeAlbumFilterCount > 0 ? 'primary' : 'secondary'"
-        :outlined="activeAlbumFilterCount === 0"
-        @click="openAlbumFilterMenu"
-      />
-      <Button
-        icon="pi pi-sort-alt"
-        label="Sortierung"
-        size="small"
-        :severity="isAlbumSortDefault ? 'secondary' : 'primary'"
-        :outlined="isAlbumSortDefault"
-        @click="openAlbumSortMenu"
-      />
-    </div>
-    <div v-if="activeAlbumFilterCount > 0 || !isAlbumSortDefault" class="album-filter-chips">
-      <Chip
-        v-for="(chip, i) in albumFilterChips()"
-        :key="`f-${i}`"
-        :label="chip.label"
-        removable
-        @remove="chip.clear()"
-      />
-      <Chip
-        v-if="!isAlbumSortDefault"
-        :label="albumSortChipLabel"
-        removable
-        @remove="resetAlbumSort()"
-      />
-    </div>
+      <ListToolbar :model="toolbar" />
     </template>
 
     <template #notice>
       <!-- Service status warning bar -->
       <ServiceStatusBar />
-      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="loadData(true)" @close="error = ''" />
     </template>
 
-    <div v-if="loading" class="info-text">
-      <i class="pi pi-spin pi-spinner"/> Alben werden geladen…
-    </div>
-    <div v-else-if="albums.length === 0" class="info-text">
-      Keine Alben vorhanden. Erstelle dein erstes Album!
-    </div>
-    <div v-else-if="filteredAlbums.length === 0" class="info-text">
-      Keine Alben passen zum Filter „{{ filterQuery }}“.
-    </div>
+    <PageSkeleton v-if="loading && albums.length === 0" variant="grid" :count="8" />
+    <EmptyState
+      v-else-if="filteredAlbums.length === 0"
+      icon="pi pi-images"
+      :title="albums.length === 0 ? 'Noch keine Alben vorhanden' : 'Keine Alben passen zur Suche'"
+      :message="albums.length === 0
+        ? 'Erstelle dein erstes Album, um Fotos zu sammeln.'
+        : 'Ein anderer Suchbegriff oder weniger Filter finden vielleicht mehr.'"
+      :filtered="activeAlbumFilterCount > 0"
+      @clear-filters="resetAlbumFilter"
+    >
+      <template #action>
+        <Button
+          v-if="albums.length === 0 && canManageAlbums"
+          label="Neues Album"
+          icon="pi pi-plus"
+          size="small"
+          @click="showCreateDialog = true"
+        />
+      </template>
+    </EmptyState>
 
     <VirtualAlbumGrid
       v-else
@@ -596,13 +601,6 @@ onMounted(async () => {
       </template>
     </Dialog>
 
-    <SortMenu
-      v-model:visible="showAlbumSortMenu"
-      v-model:draft="draftAlbumSort"
-      :fields="ALBUM_SORT_FIELDS"
-      @apply="applyAlbumSort"
-      @reset="resetAlbumSort"
-    />
   </PageLayout>
 </template>
 
@@ -621,55 +619,11 @@ onMounted(async () => {
 /* Page frame and title: PageLayout (issue #1272). The VirtualAlbumGrid is
    the scroll container inside PageLayout's `.page-content`. */
 
-.filter-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.album-filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
 .album-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
 .afm-row { display: flex; flex-direction: column; gap: 0.5rem; }
 .afm-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
 .afm-checks { display: flex; gap: 1rem; flex-wrap: wrap; }
 .afm-check { display: flex; align-items: center; gap: 0.5rem; }
 
-.filter-input-wrapper {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  width: min(100%, 24rem);
-}
-
-.filter-icon {
-  position: absolute;
-  left: 0.65rem;
-  color: var(--p-text-muted-color);
-  pointer-events: none;
-}
-
-.filter-input {
-  width: 100%;
-  padding-left: 2rem;
-  padding-right: 2.25rem;
-}
-
-.filter-clear {
-  position: absolute;
-  right: 0.25rem;
-}
-
 /* Album card / cover / info / actions styles live in VirtualAlbumGrid. */
-
-.info-text {
-  text-align: center;
-  margin-top: 4rem;
-  color: var(--p-text-muted-color);
-}
 </style>

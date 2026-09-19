@@ -17,7 +17,7 @@
  * the user wants to drill in (button "Manuell prüfen"), so this view
  * doesn't have to reinvent the per-photo hide/keep UX.
  */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
@@ -26,7 +26,12 @@ import Dialog from 'primevue/dialog'
 import { useConfirm } from 'primevue/useconfirm'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import ScrollX from '../components/layout/ScrollX.vue'
+import { useListToolbar, useListView } from '../composables/useListToolbar'
 import {
   getReviewQueue,
   acceptAiPick,
@@ -61,7 +66,6 @@ const loading = ref(false)
 const loadError = ref('')
 const userCalibration = ref<ReviewQueueUserCalibration | null>(null)
 type ConfidenceFilter = 'all' | 'high' | 'medium' | 'low'
-const confidenceFilter = ref<ConfidenceFilter>('all')
 
 const filterOptions: Array<{ label: string; value: ConfidenceFilter }> = [
   { label: 'Alle', value: 'all' },
@@ -69,6 +73,18 @@ const filterOptions: Array<{ label: string; value: ConfidenceFilter }> = [
   { label: 'Mittel', value: 'medium' },
   { label: 'Unsicher', value: 'low' },
 ]
+
+// The confidence picker lives in the URL (`?confidence=`) so a reload or a
+// shared link reproduces the same slice of the queue instead of falling
+// back to "Alle" (issue #1272, stage 3).
+const confidenceView = useListView({
+  options: filterOptions,
+  defaultValue: 'all',
+  key: 'confidence',
+})
+const confidenceFilter = confidenceView.value
+const confidence = computed(() => confidenceFilter.value as ConfidenceFilter)
+const confidenceFiltered = computed(() => confidence.value !== 'all')
 
 const bulkBusy = ref(false)
 const bulkConfirmOpen = ref(false)
@@ -122,7 +138,7 @@ async function loadInitial() {
     const res = await getReviewQueue({
       offset: 0,
       limit: PAGE_SIZE,
-      confidence: confidenceFilter.value === 'all' ? undefined : confidenceFilter.value,
+      confidence: confidence.value === 'all' ? undefined : confidence.value,
     })
     groups.value = res.groups
     total.value = res.total
@@ -144,7 +160,7 @@ async function loadMore() {
     const res = await getReviewQueue({
       offset: offset.value,
       limit: PAGE_SIZE,
-      confidence: confidenceFilter.value === 'all' ? undefined : confidenceFilter.value,
+      confidence: confidence.value === 'all' ? undefined : confidence.value,
     })
     groups.value = [...groups.value, ...res.groups]
     total.value = res.total
@@ -157,9 +173,24 @@ async function loadMore() {
   }
 }
 
-function onChangeFilter() {
-  void loadInitial()
+// Covers both the picker and browser back/forward, which rewrite the ref
+// from the URL without emitting a change event.
+watch(confidenceFilter, () => { void loadInitial() })
+
+function clearConfidenceFilter() {
+  if (!confidenceFiltered.value) return
+  confidenceFilter.value = 'all'
 }
+
+// The queue has nothing to search or sort; the shared toolbar carries the
+// confidence picker and the "how many are still open" count.
+const toolbar = useListToolbar({
+  result: {
+    loaded: () => groups.value.length,
+    total: () => total.value,
+    loading: () => loading.value,
+  },
+})
 
 async function onAccept(group: ReviewQueueGroup) {
   if (group.duplicate_candidate && group.duplicate_recommended_photo_id != null) {
@@ -511,7 +542,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <PageLayout title="Gruppen-Review" :hint="`${total} offen`" width="normal" :ready="!loading">
+  <PageLayout title="Gruppen-Review" width="normal" :ready="!loading">
     <template #actions>
       <Button
         icon="pi pi-arrow-left"
@@ -533,16 +564,19 @@ onMounted(() => {
     </template>
 
     <template #toolbar>
-      <div class="rq-filter">
-        <SelectButton
-          v-model="confidenceFilter"
-          :options="filterOptions"
-          option-label="label"
-          option-value="value"
-          :allow-empty="false"
-          @update:model-value="onChangeFilter"
-        />
-      </div>
+      <ListToolbar :model="toolbar">
+        <template #actions>
+          <SelectButton
+            v-model="confidenceFilter"
+            :options="filterOptions"
+            option-label="label"
+            option-value="value"
+            :allow-empty="false"
+            size="small"
+            v-tooltip.bottom="'Sicherheit der KI-Auswahl'"
+          />
+        </template>
+      </ListToolbar>
     </template>
 
     <template #notice>
@@ -566,22 +600,32 @@ onMounted(() => {
         endgültig gelöscht, {{ fmtBytes(duplicateDeleteResult.freedBytes) }} freigegeben.
       </Message>
 
-      <Message
+      <ErrorBanner
         v-if="loadError"
-        severity="error"
-        :closable="true"
+        :message="loadError"
+        closable
+        @retry="loadInitial"
         @close="loadError = ''"
-      >
-        {{ loadError }}
-      </Message>
+      />
     </template>
 
     <div class="review-queue-view">
-    <div v-if="!loading && groups.length === 0 && !loadError" class="rq-empty">
-      <i class="pi pi-check-circle" />
-      <p>Keine offenen Gruppen.</p>
-      <Button text label="Zurück zur Galerie" @click="backToGallery" />
-    </div>
+    <PageSkeleton v-if="loading && groups.length === 0" variant="list" :count="6" />
+
+    <EmptyState
+      v-else-if="groups.length === 0 && !loadError"
+      icon="pi pi-check-circle"
+      title="Keine offenen Gruppen"
+      :message="confidenceFiltered
+        ? 'Für diese Sicherheitsstufe ist nichts mehr zu prüfen.'
+        : 'Alle ähnlichen Gruppen sind geprüft.'"
+      :filtered="confidenceFiltered"
+      @clear-filters="clearConfidenceFilter"
+    >
+      <template #action>
+        <Button text label="Zurück zur Galerie" @click="backToGallery" />
+      </template>
+    </EmptyState>
 
     <ul class="rq-list">
       <li
@@ -971,22 +1015,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.rq-filter {
-  display: flex;
-  justify-content: center;
-}
-
-.rq-empty {
-  text-align: center;
-  color: var(--p-text-muted-color);
-  padding: 48px 16px;
-}
-.rq-empty .pi-check-circle {
-  font-size: 2.5rem;
-  color: var(--p-green-500, #22c55e);
-  margin-bottom: 12px;
 }
 
 .rq-list {

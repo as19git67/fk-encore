@@ -50,17 +50,15 @@
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
-import Chip from 'primevue/chip'
 import Dialog from 'primevue/dialog'
 import Menu from 'primevue/menu'
-import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
 import VirtualGallery from '../components/VirtualGallery.vue'
 import FilterMenu from '../components/FilterMenu.vue'
-import FilterChips from '../components/FilterChips.vue'
-import SortMenu from '../components/SortMenu.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
@@ -68,7 +66,8 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDialog.vue'
 import CollageDialog from '../components/CollageDialog.vue'
-import { useFilter } from '../composables/useFilter'
+import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
+import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
@@ -159,6 +158,7 @@ if (route.query.photoId !== undefined) {
 }
 
 // ── Filter ──────────────────────────────────────────────────────────────────
+const photoFilter = useFilter({ preserveKeys: ['photoId', 'sortBy', 'sortDir'] })
 const {
   applied: filter,
   draft: filterDraft,
@@ -166,8 +166,10 @@ const {
   openEdit: openFilterEdit,
   apply: applyFilter,
   reset: resetFilter,
-  removeKey,
-} = useFilter({ preserveKeys: ['photoId', 'sortBy', 'sortDir'] })
+} = photoFilter
+// Removable summaries of the applied filter; the shared toolbar renders them
+// and every chip carries its own `remove()`.
+const filterChips = usePhotoFilterChips(photoFilter)
 const filterMenuOpen = ref(false)
 // Lazy-mount the filter menu so its onMounted-prefetch (/persons, /albums)
 // only runs when the user actually opens it — not on gallery boot.
@@ -186,9 +188,6 @@ function onApplyFilter() {
 function onResetFilter() {
   resetFilter()
 }
-function onRemoveFilterKey(keys: Array<keyof typeof filter.value>) {
-  removeKey(keys)
-}
 
 // ── Sort ────────────────────────────────────────────────────────────────────
 const SORT_FIELDS: SortField[] = [
@@ -199,36 +198,24 @@ const SORT_FIELDS: SortField[] = [
   { value: 'size', label: 'Dateigröße' },
 ]
 const DEFAULT_SORT: SortState = { field: 'taken_at', direction: 'asc' }
-const {
-  applied: sort,
-  draft: sortDraft,
-  isDefault: isSortDefault,
-  fieldLabel: sortFieldLabel,
-  openEdit: openSortEdit,
-  apply: applySort,
-  reset: resetSort,
-} = useSort({ fields: SORT_FIELDS, defaultState: DEFAULT_SORT })
-const sortMenuOpen = ref(false)
-const sortChipLabel = computed(
-  () => `Sortierung: ${sortFieldLabel.value} ${sort.value.direction === 'asc' ? '↑' : '↓'}`,
-)
-
-function openSortMenu() {
-  openSortEdit()
-  sortMenuOpen.value = true
-}
-function onApplySort() {
-  applySort()
-  sortMenuOpen.value = false
-}
-function onResetSort() {
-  resetSort()
-  sortMenuOpen.value = false
-}
+// The shared toolbar renders the sort menu from `sortControl.fields` and
+// applies a pick straight away, so the view keeps no draft or dialog state.
+const sortControl = useSort({ fields: SORT_FIELDS, defaultState: DEFAULT_SORT })
+const sort = sortControl.applied
 
 // ── Search ──────────────────────────────────────────────────────────────────
+// A natural-language search costs a backend round trip, so the term is only
+// committed on submit (`manual: true`). The committed term lives in `?q=`,
+// which makes a searched gallery deep-linkable and lets back/forward
+// reproduce it.
+const search = useListSearch({
+  placeholder: 'z.B. „Kirchen in München von 2004 bis 2017“',
+  manual: true,
+})
+/** Raw input of the search bar; `search.term` is what actually gets searched. */
+const searchInput = search.value
+
 const {
-  searchQuery,
   searchResultIds,
   loading: searchLoading,
   error: searchError,
@@ -238,7 +225,25 @@ const {
   dateChip,
   semanticChip,
   hasParsedChips,
-} = useNaturalSearch()
+} = useNaturalSearch(search.value)
+
+// The committed term is the single driver of the search — including the one
+// already in the URL on first paint. Clearing goes through `search.clear()`
+// so the URL never keeps a term the gallery no longer applies.
+watch(
+  search.term,
+  (term) => {
+    if (term) void executeSearch(term)
+    else clearSearch()
+  },
+  { immediate: true },
+)
+
+/** Re-run the committed search after a failure. */
+function retrySearch() {
+  const term = search.term.value
+  if (term) void executeSearch(term)
+}
 
 const searchResultCount = computed(() => searchResultIds.value?.length ?? 0)
 
@@ -324,6 +329,10 @@ function exitSelectMode() {
 function clearSelection() {
   clearSelectedIds()
 }
+function toggleSelectMode() {
+  if (selectMode.value) exitSelectMode()
+  else enterSelectMode()
+}
 
 // Keep the selection controls present without permanently reserving a full
 // button row. The popup contains the same actions as the former action bar;
@@ -338,6 +347,28 @@ const galleryTotal = ref(0)
 const unfilteredGalleryTotal = ref<number | null>(null)
 let galleryTotalRequest = 0
 const allSelected = computed(() => galleryTotal.value > 0 && selectedCount.value === galleryTotal.value)
+
+// The shared list toolbar's model. Declared here because `useListToolbar`
+// reads the refs eagerly — everything it references exists by now.
+const toolbar = useListToolbar({
+  search,
+  filter: {
+    chips: filterChips,
+    activeCount,
+    open: openFilterMenu,
+    clearAll: () => resetFilter(),
+  },
+  sort: sortControl,
+  result: {
+    // The grid reports how many photos the active query yields; the
+    // denominator is the whole library and only known while a plain filter
+    // (no search) is active — otherwise the count reads "N Treffer".
+    loaded: () => galleryTotal.value,
+    total: () => unfilteredGalleryTotal.value ?? undefined,
+    loading: () => searchLoading.value,
+  },
+  selection: { active: selectMode, toggle: toggleSelectMode },
+})
 
 async function selectAll() {
   selectAllBusy.value = true
@@ -925,9 +956,10 @@ function triggerFileSelect() {
   fileInputRef.value?.click()
 }
 
-// Filter/sort controls and gallery actions as a single flat list. The
-// ResponsiveToolbar lays them out across the full width and pushes whatever
-// does not fit into an overflow dropdown. Order = reading order.
+// The gallery's own actions (jump, group review, upload) as a flat list.
+// Filter, sort and select mode are no longer here — they are part of the
+// shared toolbar. ResponsiveToolbar pushes whatever does not fit into an
+// overflow dropdown. Order = reading order.
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
 
@@ -942,37 +974,6 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
       command: onJumpEnd,
     })
   }
-
-  items.push({
-    key: 'filter',
-    label: activeCount.value > 0 ? `Filter (${activeCount.value})` : 'Filter',
-    title: activeCount.value > 0 ? `Filter (${activeCount.value})` : 'Filter',
-    icon: activeCount.value > 0 ? 'pi pi-filter-fill' : 'pi pi-filter',
-    severity: activeCount.value > 0 ? 'primary' : 'secondary',
-    outlined: activeCount.value === 0,
-    command: openFilterMenu,
-  })
-
-  items.push({
-    key: 'sort',
-    label: isSortDefault.value ? 'Sortierung' : `Sortierung: ${sortFieldLabel.value}`,
-    title: isSortDefault.value ? 'Sortierung' : `Sortierung: ${sortFieldLabel.value}`,
-    icon: 'pi pi-sort-alt',
-    severity: isSortDefault.value ? 'secondary' : 'primary',
-    outlined: isSortDefault.value,
-    command: openSortMenu,
-  })
-
-  items.push({
-    key: 'select',
-    label: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
-    title: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
-    icon: selectMode.value ? 'pi pi-times' : 'pi pi-check-square',
-    severity: selectMode.value ? 'danger' : 'secondary',
-    outlined: !selectMode.value,
-    itemClass: 'desktop-select-toggle',
-    command: () => (selectMode.value ? exitSelectMode() : enterSelectMode()),
-  })
 
   if (canReviewGroups.value && totalUnreviewed.value > 0) {
     items.push({
@@ -1468,7 +1469,6 @@ useGalleryKeyboard({
   isBlocked: () => isFullscreen.value
     || activeGroup.value !== null
     || filterMenuOpen.value
-    || sortMenuOpen.value
     || isEditingDate.value,
   onLeft: () => moveCursor(-1, false),
   onRight: () => moveCursor(+1, false),
@@ -1614,53 +1614,64 @@ void refreshReviewSequence()
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Sticky part (lifted into the app stack by PageLayout): the combined
-         filter/sort/actions toolbar, the natural search and the chips. -->
+    <!-- Sticky part (lifted into the app stack by PageLayout): the shared
+         list toolbar. The natural search replaces its plain input, the
+         gallery's own actions sit in its actions slot; filter, sort, the
+         chips, the count and select mode are the toolbar's own. -->
     <template #toolbar>
-      <!-- Combined toolbar: filter/sort controls and actions share the
-           full width and overflow into a dropdown when tight. -->
-      <ResponsiveToolbar class="header__toolbar" :items="toolbarItems" />
-      <!-- Hidden file input driven by the "Hochladen" toolbar item. -->
-      <input
-        v-if="canUpload"
-        ref="fileInputRef"
-        type="file"
-        accept="image/*"
-        multiple
-        class="upload-input-hidden"
-        @change="onFileInputChange"
-      />
+      <ListToolbar :model="toolbar">
+        <template #search>
+          <NaturalSearchBar
+            v-model="searchInput"
+            class="gallery-search"
+            :loading="searchLoading"
+            :result-count="searchResultIds !== null ? searchResultCount : null"
+            :has-parsed-chips="hasParsedChips"
+            :location-chip="locationChip"
+            :date-chip="dateChip"
+            :semantic-chip="semanticChip"
+            :placeholder="search.placeholder"
+            @search="search.submit()"
+            @clear="search.clear()"
+            @keydown.escape.stop
+          />
+        </template>
 
-      <NaturalSearchBar
-        v-model="searchQuery"
-        :loading="searchLoading"
-        :result-count="searchResultIds !== null ? searchResultCount : null"
-        :has-parsed-chips="hasParsedChips"
-        :location-chip="locationChip"
-        :date-chip="dateChip"
-        :semantic-chip="semanticChip"
-        @search="executeSearch"
-        @clear="clearSearch"
-      />
-
-      <div class="chip-row">
-        <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
-        <Chip v-if="!isSortDefault" :label="sortChipLabel" removable @remove="onResetSort" />
-        <Chip
-          v-if="activeCount > 0 && searchResultIds === null && unfilteredGalleryTotal !== null"
-          :label="`${galleryTotal} von ${unfilteredGalleryTotal}`"
-        />
-      </div>
+        <template #actions>
+          <!-- Gallery actions only; they share the row and overflow into a
+               dropdown when tight. -->
+          <ResponsiveToolbar class="header__toolbar" :items="toolbarItems" />
+          <!-- Hidden file input driven by the "Hochladen" toolbar item. -->
+          <input
+            v-if="canUpload"
+            ref="fileInputRef"
+            type="file"
+            accept="image/*"
+            multiple
+            class="upload-input-hidden"
+            @change="onFileInputChange"
+          />
+        </template>
+      </ListToolbar>
     </template>
 
     <template #notice>
-      <Message v-if="searchError" severity="error" @close="searchError = ''">{{ searchError }}</Message>
-      <Message
+      <ErrorBanner
+        v-if="searchError"
+        :message="searchError"
+        closable
+        @retry="retrySearch"
+        @close="searchError = ''"
+      />
+      <!-- Upload / share / delete failures: nothing to retry generically,
+           so the banner only explains and offers the error list. -->
+      <ErrorBanner
         v-if="error"
-        severity="error"
+        :message="error"
+        :retryable="false"
+        closable
         @close="error = ''; uploadErrors = []"
       >
-        {{ error }}
         <button
           v-if="uploadErrors.length > 3"
           class="error-flyout-btn"
@@ -1668,7 +1679,7 @@ void refreshReviewSequence()
         >
           <i class="pi pi-list" /> Details anzeigen
         </button>
-      </Message>
+      </ErrorBanner>
     </template>
 
     <!-- Drag overlay -->
@@ -1688,14 +1699,6 @@ void refreshReviewSequence()
         : undefined"
       @apply="onApplyFilter"
       @reset="onResetFilter"
-    />
-
-    <SortMenu
-      v-model:visible="sortMenuOpen"
-      v-model:draft="sortDraft"
-      :fields="SORT_FIELDS"
-      @apply="onApplySort"
-      @reset="onResetSort"
     />
 
     <!-- Error flyout -->
@@ -2031,18 +2034,18 @@ void refreshReviewSequence()
   .desktop-sidebar { display: none; }
 }
 
-/* Toolbar spans the sticky row; min-width:0 lets it shrink and spill items
-   into its overflow dropdown instead of wrapping. */
+/* The action toolbar inside ListToolbar's actions slot: it takes the space
+   the shared controls leave and spills items into its overflow dropdown
+   instead of wrapping. */
 .header__toolbar {
-  flex: 1 1 auto;
+  flex: 1 1 16rem;
   min-width: 0;
 }
 
-.chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  align-items: center;
+/* The natural search fills the toolbar's search area. */
+.gallery-search {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ── Drag overlay ─────────────────────────────────────────────────────── */

@@ -28,6 +28,8 @@ export interface UseSortOptions {
 }
 
 export interface UseSortReturn {
+  /** The fields the list can be sorted by, so a shared toolbar can render the menu. */
+  fields: SortField[]
   applied: Ref<SortState>
   draft: Ref<SortState>
   /** True when the applied sort matches the configured default. */
@@ -40,6 +42,8 @@ export interface UseSortReturn {
   apply: () => void
   /** Reset to the default and sync to URL. */
   reset: () => void
+  /** Sort by this field; picking the active field again flips the direction. */
+  select: (field: string) => void
 }
 
 const SORT_QUERY_KEYS = ['sortBy', 'sortDir'] as const
@@ -134,5 +138,14 @@ export function useSort(opts: UseSortOptions): UseSortReturn {
     void syncUrl(applied.value)
   }
 
-  return { applied, draft, isDefault, fieldLabel, openEdit, apply, reset }
+  /** Apply one field directly (shared toolbar): same field toggles direction. */
+  function select(field: string) {
+    const direction: SortDirection = applied.value.field === field
+      ? (applied.value.direction === 'asc' ? 'desc' : 'asc')
+      : opts.defaultState.direction
+    draft.value = { field, direction }
+    apply()
+  }
+
+  return { fields: opts.fields, applied, draft, isDefault, fieldLabel, openEdit, apply, reset, select }
 }

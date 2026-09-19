@@ -12,6 +12,11 @@ import DatePicker from 'primevue/datepicker'
 import Message from 'primevue/message'
 import PageLayout from '../../components/layout/PageLayout.vue'
 import ScrollX from '../../components/layout/ScrollX.vue'
+import ListToolbar from '../../components/layout/ListToolbar.vue'
+import EmptyState from '../../components/layout/EmptyState.vue'
+import PageSkeleton from '../../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../../components/layout/ErrorBanner.vue'
+import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
 import { useAuthStore } from '../../stores/auth'
@@ -36,6 +41,35 @@ const showAclEmptyHint = computed(
 onMounted(() => {
   void store.refresh()
   void bankcontactsStore.refresh()
+})
+
+// ─── Shared list toolbar (#1272, stage 3) ───────────────────────────
+// The store holds every account the user may see, so the search narrows
+// the table in place — over the account's own name and the bank behind it.
+const search = useListSearch({
+  placeholder: 'Konto oder Bank suchen',
+  storageKey: 'finance.accounts.search',
+})
+
+const searching = computed(() => search.term.value.trim().length > 0)
+
+const visibleAccounts = computed(() => {
+  const term = search.term.value.trim().toLowerCase()
+  if (!term) return store.items
+  return store.items.filter(
+    (acc) =>
+      acc.label.toLowerCase().includes(term) ||
+      (acc.bankcontact_name ?? '').toLowerCase().includes(term),
+  )
+})
+
+const toolbar = useListToolbar({
+  search,
+  result: {
+    loaded: () => visibleAccounts.value.length,
+    total: () => store.items.length,
+    loading: () => store.loading,
+  },
 })
 
 function formatIban(iban: string | null): string {
@@ -177,10 +211,12 @@ function goToManualBooking() {
       />
     </template>
 
+    <template #toolbar>
+      <ListToolbar :model="toolbar" />
+    </template>
+
     <template #notice>
-      <Message v-if="store.error" severity="error" :closable="false">
-        {{ store.error }}
-      </Message>
+      <ErrorBanner v-if="store.error" :message="store.error" @retry="store.refresh()" />
       <Message v-if="showAclEmptyHint" severity="info" :closable="false">
         Du hast noch keine Konten freigeschaltet. Bitte wende dich an einen
         Administrator — er kann dir über „Konto-Zugriff" Lese- oder
@@ -188,9 +224,24 @@ function goToManualBooking() {
       </Message>
     </template>
 
-    <ScrollX>
+    <PageSkeleton v-if="store.loading && store.items.length === 0" variant="table" :count="8" />
+
+    <EmptyState
+      v-else-if="visibleAccounts.length === 0"
+      icon="pi pi-wallet"
+      :title="searching ? 'Keine Treffer' : 'Keine Konten'"
+      :message="
+        searching
+          ? 'Zu diesem Suchbegriff passt kein Konto.'
+          : 'Es ist noch kein Konto angelegt — erst mit einem Konto lassen sich Buchungen zuordnen.'
+      "
+      :filtered="searching"
+      @clear-filters="search.clear()"
+    />
+
+    <ScrollX v-else>
     <DataTable
-      :value="store.items"
+      :value="visibleAccounts"
       :loading="store.loading"
       dataKey="id"
       :rowHover="true"
