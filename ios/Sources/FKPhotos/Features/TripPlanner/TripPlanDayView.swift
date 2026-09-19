@@ -129,6 +129,18 @@ struct TripPlanDayView: View {
                             } label: {
                                 Label("Kandidaten (\(leg.pool.count))", systemImage: "tray.full")
                             }
+                            // „Vier Tage in San Gimignano" — and the
+                            // city an hour away (§4.6). About the leg
+                            // rather than this day, because it is the
+                            // leg whose pool does not carry its days.
+                            NavigationLink {
+                                TripDayTripView(
+                                    planId: viewModel.planId,
+                                    legIndex: leg.position,
+                                ) { Task { await viewModel.load() } }
+                            } label: {
+                                Label("Tagesausflug", systemImage: "car")
+                            }
                             // „Ihr habt vier Ideen für Lissabon gesammelt"
                             // (§20.3) — offered, never pushed.
                             NavigationLink {

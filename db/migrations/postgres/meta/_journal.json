@@ -1443,6 +1443,13 @@
       "when": 1788652800025,
       "tag": "0205_trip_spot_extent",
       "breakpoints": true
+    },
+    {
+      "idx": 206,
+      "version": "7",
+      "when": 1788652800026,
+      "tag": "0206_trip_day_trip_dismissals",
+      "breakpoints": true
     }
   ]
 }

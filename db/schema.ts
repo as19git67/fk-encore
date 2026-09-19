@@ -3411,6 +3411,41 @@ export const ideaPool = pgTable(
   ]
 );
 
+/**
+ * A day-trip suggestion somebody waved away (§4.6).
+ *
+ * The planner may say once that the city an hour away would carry one
+ * of the days this leg's own pool cannot. Saying it every time the
+ * screen opens is nagging, and both §6.4 and §7.1 are explicit that a
+ * "no" is remembered rather than forgotten.
+ *
+ * On the leg, not the plan: a trip may be short of things to do in one
+ * place and full in the next, and the answer was about one of them.
+ * The leg row survives a re-plan — only its days and its pool are
+ * rewritten — so the answer survives with it.
+ */
+export const tripPlanDayTripDismissals = pgTable(
+  "trip_plan_day_trip_dismissals",
+  {
+    id: serial("id").primaryKey(),
+    leg_id: integer("leg_id")
+      .notNull()
+      .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
+    // The area's OSM reference where a boundary named the destination,
+    // its rounded position where it is a cluster no municipality is.
+    // Both survive re-planning, which a row id would not.
+    target_key: text("target_key").notNull(),
+    name: text("name"),
+    dismissed_by: integer("dismissed_by").references(() => users.id, { onDelete: "set null" }),
+    dismissed_at: timestamp("dismissed_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("trip_day_trip_dismissals_leg_target_key").on(table.leg_id, table.target_key),
+  ]
+);
+
 /** Who else writes into a collection — the same shape as a trip's shares (§6.2). */
 export const ideaPoolShares = pgTable(
   "idea_pool_shares",
