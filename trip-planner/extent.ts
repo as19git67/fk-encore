@@ -38,6 +38,22 @@ export interface SpotExtent {
   lengthM?: number | null;
   /** How much of it goes uphill, in metres, where known. */
   ascentM?: number | null;
+  /**
+   * The way itself, coarsely (§4.7): the points a route actually runs
+   * through, as the OSM relation has them, thinned to something a plan
+   * can carry offline.
+   *
+   * Absent for a route somebody entered by hand, which knows only its
+   * two ends. What it buys is the corridor: the line between the ends
+   * cuts straight through the Ponale's switchbacks, and a viewpoint on
+   * the third bend is only recognised as "on the way" against the real
+   * shape (`on-the-way.ts`).
+   *
+   * Never `| null`: Encore's schema parser cannot intersect an
+   * interface with null when one interface narrows another's array
+   * field — see the note on `Candidate.extent` in solver.ts.
+   */
+  via?: Coordinate[];
 }
 
 /**
@@ -48,6 +64,14 @@ export interface SpotExtent {
  * not, and the latter is a transfer (§4.2) wearing the wrong coat.
  */
 export const MAX_EXTENT_M = 80_000;
+
+/**
+ * The most points a route's shape may carry.
+ *
+ * The same ceiling geo thins to: enough to follow a way's bends, few
+ * enough that a fortnight of them still fits in an offline bundle.
+ */
+export const MAX_VIA_POINTS = 64;
 
 /** The place the day goes on from after this stop. */
 export function leaveFrom(stop: Coordinate & { extent?: SpotExtent | null }): Coordinate {
@@ -60,6 +84,8 @@ export interface ExtentInput {
   end?: { lat: number; lon: number } | null;
   lengthM?: number | null;
   ascentM?: number | null;
+  /** The way's own shape, where it came from an OSM relation (§4.7). */
+  via?: readonly { lat: number; lon: number }[] | null;
 }
 
 /**
@@ -104,6 +130,16 @@ export function extentOf(start: Coordinate, input: ExtentInput | undefined): Spo
     }
     extent.ascentM = Math.round(ascentM);
   }
+  // A shape of one point is not a way; anything that is not a run of
+  // coordinates is dropped rather than half-kept, and the route falls
+  // back on the line between its ends.
+  const via = (input.via ?? []).filter(isCoordinate);
+  if (via.length >= 2) {
+    if (via.length > MAX_VIA_POINTS) {
+      throw new Error(`der Verlauf hat mehr als ${MAX_VIA_POINTS} Punkte`);
+    }
+    extent.via = via.map((p) => ({ lat: p.lat, lon: p.lon }));
+  }
   return extent;
 }
 
@@ -120,6 +156,8 @@ export function storedExtent(value: unknown): SpotExtent | undefined {
   const extent: SpotExtent = { end: { lat: raw.end.lat, lon: raw.end.lon } };
   if (typeof raw.lengthM === "number") extent.lengthM = raw.lengthM;
   if (typeof raw.ascentM === "number") extent.ascentM = raw.ascentM;
+  const via = Array.isArray(raw.via) ? raw.via.filter(isCoordinate) : [];
+  if (via.length >= 2) extent.via = via.map((p) => ({ lat: p.lat, lon: p.lon }));
   return extent;
 }
 

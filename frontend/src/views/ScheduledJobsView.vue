@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   listScheduledJobs,
   pauseScheduledJob,
@@ -139,9 +140,8 @@ function formatDuration(ms: number | null): string {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Eingeplante Jobs</h1>
+  <PageLayout title="Eingeplante Jobs" width="normal" :ready="!loading">
+    <template #actions>
       <Button
         icon="pi pi-refresh"
         label="Aktualisieren"
@@ -150,18 +150,21 @@ function formatDuration(ms: number | null): string {
         :loading="loading"
         @click="fetchJobs"
       />
-    </header>
+    </template>
 
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="true" @close="error = ''">
+        {{ error }}
+      </Message>
+    </template>
+
+    <div class="jobs-page">
     <p class="hint">
       Liste aller Hintergrund-Jobs des lokalen Schedulers. Status-Updates kommen live
       über WebSocket — kein Refresh nötig. „Pausieren" überspringt nur den Handler-Aufruf,
       der Timer bleibt armiert; „Resume" setzt sofort fort. „Jetzt ausführen" startet
       den Job sofort, unabhängig vom nächsten Slot.
     </p>
-
-    <Message v-if="error" severity="error" :closable="true" @close="error = ''">
-      {{ error }}
-    </Message>
 
     <div v-if="!loading && jobs.length === 0" class="empty-state">
       Noch keine Jobs registriert.
@@ -250,27 +253,16 @@ function formatDuration(ms: number | null): string {
         </li>
       </ul>
     </div>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
+/* Page frame and title: PageLayout (issue #1272). */
+.jobs-page {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding: 1.5rem;
-  max-width: 1280px;
-}
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.page-header h1 {
-  margin: 0;
-  font-size: 1.5rem;
 }
 .hint {
   color: var(--p-text-muted-color);
@@ -380,12 +372,8 @@ code.error {
  * 2-row stack instead of a 2-column grid (which gets cramped under
  * ~340px). Remove the page padding so cards reach the screen edges. */
 @media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
+  .jobs-page {
     gap: 0.75rem;
-  }
-  .page-header h1 {
-    font-size: 1.25rem;
   }
   .job-list {
     grid-template-columns: 1fr;

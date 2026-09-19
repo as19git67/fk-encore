@@ -10,6 +10,8 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import {
   createSubjectPerson,
   deleteSubjectPerson,
@@ -237,9 +239,14 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="subject-persons-view">
-    <header class="page-header">
-      <h1>Bezugspersonen &amp; Haushalt</h1>
+  <PageLayout title="Bezugspersonen & Haushalt" width="normal" :ready="!loading">
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    </template>
+
+    <div class="content">
+    <div class="page-intro">
       <p class="page-hint">
         Personen, die auf deinen Dokumenten vorkommen. Der Klassifizierer erkennt
         ihre Namen und ergänzt automatisch das Beziehungs-Tag. Die Beziehungsart
@@ -252,10 +259,7 @@ onMounted(load)
         ab diesem Jahr wandern in die eigene Steuerakte der Person statt in deine
         Prüf-Liste. Ältere Jahre bleiben unverändert bei dir.
       </p>
-    </header>
-
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-    <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    </div>
 
     <!-- Assessment type -->
     <section class="assessment-section" aria-labelledby="assessment-heading">
@@ -430,6 +434,7 @@ onMounted(load)
     </details>
 
     <!-- Table -->
+    <ScrollX>
     <DataTable
       :value="persons"
       :loading="loading"
@@ -533,21 +538,22 @@ onMounted(load)
         </template>
       </Column>
     </DataTable>
-  </div>
+    </ScrollX>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.subject-persons-view {
-  max-width: 72rem;
-  margin: 0 auto;
-  padding: 1rem;
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
-
-.page-header h1 {
-  margin: 0 0 0.25rem;
+.page-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 .page-hint {
   margin: 0;

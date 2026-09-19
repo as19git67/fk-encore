@@ -14,6 +14,7 @@ import FacePhotoGrid from '../components/FacePhotoGrid.vue'
 import PersonsGrid from '../components/PersonsGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
+import PageLayout from '../components/layout/PageLayout.vue'
 import SortMenu from '../components/SortMenu.vue'
 import DateRangePresets from '../components/DateRangePresets.vue'
 import FilterMenu from '../components/FilterMenu.vue'
@@ -726,35 +727,100 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 </script>
 
 <template>
-  <div class="persons-view">
-    <ServiceStatusBar />
+  <PageLayout
+    :title="selectedPersonDetail ? selectedPersonDetail.name : 'Personen'"
+    scroll="self"
+    width="full"
+    :ready="!loading"
+  >
+    <template #actions>
+      <Button
+        v-if="selectedPerson"
+        icon="pi pi-arrow-left"
+        text rounded
+        aria-label="Zurück zur Übersicht"
+        v-tooltip="'Zurück zur Übersicht'"
+        @click="backToGrid"
+      />
+    </template>
 
-    <div class="subheader">
-      <div class="header">
-        <div class="header-left">
-          <Button
-            v-if="selectedPerson"
-            icon="pi pi-arrow-left"
-            text rounded
-            aria-label="Zurück zur Übersicht"
-            v-tooltip="'Zurück zur Übersicht'"
-            @click="backToGrid"
-          />
-          <h1 class="title">{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
-        </div>
-        <!-- Person-detail actions: filter + actions share the remaining width
-             and overflow into a dropdown when tight. -->
-        <ResponsiveToolbar
-          v-if="selectedPersonDetail || selectedPerson"
-          class="header__toolbar"
-          :items="toolbarItems"
-        />
-      </div>
+    <!-- Sticky part (lifted into the app stack by PageLayout): the
+         person-detail toolbar and its chips, or the person-grid filter bar. -->
+    <template #toolbar>
+      <!-- Person-detail actions: filter + actions share the remaining width
+           and overflow into a dropdown when tight. -->
+      <ResponsiveToolbar
+        v-if="selectedPersonDetail || selectedPerson"
+        class="header__toolbar"
+        :items="toolbarItems"
+      />
       <div v-if="selectedPersonDetail && photoFilterActiveCount > 0" class="person-photo-filter-chips">
         <FilterChips :filter="photoFilter" @remove="onRemovePhotoFilterKey" />
         <Chip :label="`${uniquePhotoFaceItems.length} von ${allUniquePhotoFaceItems.length}`" />
       </div>
-    </div>
+
+      <!-- LEVEL 1 filter bar: only while the person grid is shown -->
+      <template v-if="!selectedPerson && persons.length > 0">
+        <div class="persons-filter-bar">
+          <div class="persons-filter-input">
+            <i class="pi pi-search persons-filter-icon" />
+            <InputText
+              v-model="nameFilter"
+              placeholder="Nach Namen filtern…"
+              fluid
+              autocomplete="off"
+            />
+            <Button
+              v-if="nameFilter"
+              class="persons-filter-clear"
+              icon="pi pi-times"
+              text rounded size="small"
+              aria-label="Filter löschen"
+              @click="nameFilter = ''"
+            />
+          </div>
+          <Button
+            :icon="activePersonFilterCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+            :label="activePersonFilterCount > 0 ? `Filter (${activePersonFilterCount})` : 'Filter'"
+            size="small"
+            :severity="activePersonFilterCount > 0 ? 'primary' : 'secondary'"
+            :outlined="activePersonFilterCount === 0"
+            @click="openPersonFilterMenu"
+          />
+          <Button
+            icon="pi pi-sort-alt"
+            label="Sortierung"
+            size="small"
+            :severity="isPersonSortDefault ? 'secondary' : 'primary'"
+            :outlined="isPersonSortDefault"
+            @click="openPersonSortMenu"
+          />
+          <span class="persons-filter-count">
+            {{ filteredPersons.length }} von {{ persons.length }}
+          </span>
+        </div>
+        <div v-if="activePersonFilterCount > 0 || !isPersonSortDefault" class="persons-filter-chips">
+          <Chip
+            v-for="(chip, i) in personFilterChips()"
+            :key="`f-${i}`"
+            :label="chip.label"
+            removable
+            @remove="chip.clear()"
+          />
+          <Chip
+            v-if="!isPersonSortDefault"
+            :label="personSortChipLabel"
+            removable
+            @remove="resetPersonSort()"
+          />
+        </div>
+      </template>
+    </template>
+
+    <template #notice>
+      <ServiceStatusBar />
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    </template>
 
     <FilterMenu
       v-if="photoFilterMenuMounted"
@@ -765,8 +831,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       @reset="onResetPhotoFilter"
     />
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-
     <div v-if="loading && persons.length === 0" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Personen werden geladen…
     </div>
@@ -774,60 +838,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 
     <!-- LEVEL 1: Person grid (default) ─────────────────────────────────────── -->
     <div v-else-if="!selectedPerson" class="persons-grid-layout">
-      <div class="persons-filter-bar">
-        <div class="persons-filter-input">
-          <i class="pi pi-search persons-filter-icon" />
-          <InputText
-            v-model="nameFilter"
-            placeholder="Nach Namen filtern…"
-            fluid
-            autocomplete="off"
-          />
-          <Button
-            v-if="nameFilter"
-            class="persons-filter-clear"
-            icon="pi pi-times"
-            text rounded size="small"
-            aria-label="Filter löschen"
-            @click="nameFilter = ''"
-          />
-        </div>
-        <Button
-          :icon="activePersonFilterCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
-          :label="activePersonFilterCount > 0 ? `Filter (${activePersonFilterCount})` : 'Filter'"
-          size="small"
-          :severity="activePersonFilterCount > 0 ? 'primary' : 'secondary'"
-          :outlined="activePersonFilterCount === 0"
-          @click="openPersonFilterMenu"
-        />
-        <Button
-          icon="pi pi-sort-alt"
-          label="Sortierung"
-          size="small"
-          :severity="isPersonSortDefault ? 'secondary' : 'primary'"
-          :outlined="isPersonSortDefault"
-          @click="openPersonSortMenu"
-        />
-        <span class="persons-filter-count">
-          {{ filteredPersons.length }} von {{ persons.length }}
-        </span>
-      </div>
-      <div v-if="activePersonFilterCount > 0 || !isPersonSortDefault" class="persons-filter-chips">
-        <Chip
-          v-for="(chip, i) in personFilterChips()"
-          :key="`f-${i}`"
-          :label="chip.label"
-          removable
-          @remove="chip.clear()"
-        />
-        <Chip
-          v-if="!isPersonSortDefault"
-          :label="personSortChipLabel"
-          removable
-          @remove="resetPersonSort()"
-        />
-      </div>
-
       <PersonsGrid
         ref="personsGridRef"
         :persons="filteredPersons"
@@ -979,46 +989,14 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       @apply="applyPersonSort"
       @reset="resetPersonSort"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.persons-view {
-  display: flex;
-  flex-direction: column;
-  /* `100dvh` (not `100vh`) so the view matches the visible viewport on mobile;
-     `100vh` is the large viewport and made the page scroll under the navbar. */
-  height: calc(100dvh - var(--menubar-height, 3.5rem));
-  overflow: hidden;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 
-.persons-view .title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin: 0;
-}
-
-.subheader {
-  flex-shrink: 0;
-  background: var(--p-content-background);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-  padding: 0.5rem 1rem;
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.header-left { display: flex; align-items: center; gap: 0.5rem; }
-
-.actions { display: flex; gap: 0.5rem; align-items: center; }
-
-/* Toolbar fills the row beside the title; min-width:0 lets it shrink and
-   spill items into its overflow dropdown instead of wrapping. */
+/* Toolbar spans the sticky row; min-width:0 lets it shrink and spill items
+   into its overflow dropdown instead of wrapping. */
 .header__toolbar {
   flex: 1 1 auto;
   min-width: 0;
@@ -1028,7 +1006,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  padding-top: 0.4rem;
 }
 
 .info-text {
@@ -1069,7 +1046,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-block: 0.25rem 0.5rem;
 }
 
 .person-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
@@ -1138,7 +1114,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
     bottom: 0;
     left: 0;
     right: 0;
-    max-height: calc(100dvh - var(--menubar-height, 3.5rem));
+    max-height: calc(100dvh - var(--app-stack-height, 0px));
     z-index: 500;
     background: var(--p-content-background);
     border-radius: 16px 16px 0 0;
@@ -1184,13 +1160,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
   }
   .sidebar-sheet-close:hover {
     background: var(--p-content-hover-background);
-  }
-
-  .subheader {
-    padding: 0.375rem 0.75rem;
-  }
-  .persons-view .title {
-    font-size: 1.2rem;
   }
 
 }

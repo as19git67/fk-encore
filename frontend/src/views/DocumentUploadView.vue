@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import ProgressBar from 'primevue/progressbar'
+import PageLayout from '../components/layout/PageLayout.vue'
 import { uploadDocument } from '../api/documents'
 
 interface QueuedFile {
@@ -87,12 +88,20 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
 </script>
 
 <template>
-  <div class="upload-view">
-    <div class="header">
-      <h1 class="title">Dokument hochladen</h1>
+  <!-- The `upload-view` class stays on the root so the Storybook story can
+       still find the hidden file input (`.upload-view input[type=file]`). -->
+  <PageLayout title="Dokument hochladen" width="normal" class="upload-view">
+    <template #actions>
       <Button icon="pi pi-arrow-left" label="Zurück" text @click="goToList" />
-    </div>
+    </template>
 
+    <template #notice>
+      <Message v-if="doneCount() > 0 && pendingCount() === 0 && !uploading" severity="success">
+        {{ doneCount() }} Dokument(e) hochgeladen. Klassifikation läuft im Hintergrund.
+      </Message>
+    </template>
+
+    <div class="content">
     <div
       class="dropzone"
       :class="{ active: dragActive }"
@@ -176,29 +185,17 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
         </div>
       </div>
     </div>
-
-    <Message v-if="doneCount() > 0 && pendingCount() === 0 && !uploading" severity="success">
-      {{ doneCount() }} Dokument(e) hochgeladen. Klassifikation läuft im Hintergrund.
-    </Message>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.upload-view {
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding-inline: 0.5em;
-  max-width: 860px;
-  margin: 0 auto;
-  width: 100%;
 }
-
-@media (min-width: 800px) { .upload-view { padding-inline: 1em; } }
-
-.title { font-size: 1.5em; font-weight: 600; margin-block: 0.25em; }
-
-.header { display: flex; justify-content: space-between; align-items: center; }
 
 .dropzone {
   border: 2px dashed var(--p-content-border-color);

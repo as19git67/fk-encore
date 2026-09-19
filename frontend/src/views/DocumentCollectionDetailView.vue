@@ -22,6 +22,7 @@ import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
+import PageLayout from '../components/layout/PageLayout.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import CollectionPageSelector from '../components/documents/CollectionPageSelector.vue'
 import {
@@ -239,8 +240,8 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="collection-view">
-    <header class="cd-header">
+  <PageLayout :title="collection?.title || 'Sammelmappe'" width="normal" :ready="!loading">
+    <template #actions>
       <Button
         icon="pi pi-arrow-left"
         text
@@ -248,6 +249,17 @@ onMounted(load)
         aria-label="Zurück"
         @click="goBack"
       />
+    </template>
+
+    <template #notice>
+      <Message v-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
+      <Message v-if="loadError" severity="error" closable @close="loadError = ''">
+        {{ loadError }}
+      </Message>
+    </template>
+
+    <div class="content">
+    <div class="cd-title-row">
       <InputText
         v-model="titleDraft"
         class="cd-title-input"
@@ -261,12 +273,7 @@ onMounted(load)
         icon="pi pi-users"
         severity="info"
       />
-    </header>
-
-    <Message v-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
-    <Message v-if="loadError" severity="error" closable @close="loadError = ''">
-      {{ loadError }}
-    </Message>
+    </div>
 
     <section class="cd-panel">
       <label for="cd-notes">Notiz</label>
@@ -462,6 +469,7 @@ onMounted(load)
       {{ exportSkipped === 1 ? 'Dokument konnte' : 'Dokumente konnten' }} nicht übernommen werden
       (Datei fehlt, alle Seiten abgewählt oder nicht sichtbar).
     </Message>
+    </div>
 
     <CollectionPageSelector
       v-if="pageSelectorItem"
@@ -471,19 +479,18 @@ onMounted(load)
       :excluded-pages="pageSelectorItem.excluded_pages"
       @save="savePageSelection"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.collection-view {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px;
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
-.cd-header {
+/* Editable title (the h1 above shows the saved one). */
+.cd-title-row {
   display: flex;
   align-items: center;
   gap: 8px;

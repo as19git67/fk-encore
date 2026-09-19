@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
+import PageLayout from '../../components/layout/PageLayout.vue'
 import {
   listAnomalies,
   acknowledgeAnomaly,
@@ -197,47 +198,48 @@ function formatAmountChange(item: AnomalyItem): string | null {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Finanz-Anomalien</h1>
-      <div class="header-actions">
-        <Button
-          icon="pi pi-refresh"
-          label="Aktualisieren"
-          severity="secondary"
-          text
-          :disabled="loading"
-          @click="load"
-        />
-        <Button
-          v-if="filtered.length > 0"
-          icon="pi pi-check"
-          label="Alle quittieren"
-          severity="secondary"
-          @click="acknowledgeAll"
+  <PageLayout title="Finanz-Anomalien" width="wide" :ready="!loading">
+    <template #actions>
+      <Button
+        icon="pi pi-refresh"
+        label="Aktualisieren"
+        severity="secondary"
+        text
+        :disabled="loading"
+        @click="load"
+      />
+      <Button
+        v-if="filtered.length > 0"
+        icon="pi pi-check"
+        label="Alle quittieren"
+        severity="secondary"
+        @click="acknowledgeAll"
+      />
+    </template>
+
+    <template #toolbar>
+      <div class="filter-row">
+        <Select
+          v-model="typeFilter"
+          :options="typeOptions"
+          option-label="label"
+          option-value="value"
+          class="filter-select"
         />
       </div>
-    </header>
+    </template>
 
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
-    <Message
-      v-if="basketError"
-      severity="error"
-      :closable="true"
-      @close="basketError = null"
-    >
-      {{ basketError }}
-    </Message>
-
-    <div class="filter-row">
-      <Select
-        v-model="typeFilter"
-        :options="typeOptions"
-        option-label="label"
-        option-value="value"
-        class="filter-select"
-      />
-    </div>
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+      <Message
+        v-if="basketError"
+        severity="error"
+        :closable="true"
+        @close="basketError = null"
+      >
+        {{ basketError }}
+      </Message>
+    </template>
 
     <div v-if="loading && anomalies.length === 0" class="loading">Lädt …</div>
 
@@ -379,40 +381,11 @@ function formatAmountChange(item: AnomalyItem): string | null {
         </div>
       </li>
     </ul>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.5rem;
-}
-@media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
-    gap: 0.75rem;
-  }
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.page-header h1 {
-  margin: 0;
-}
-
-.header-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
+/* Page frame and title: PageLayout (issue #1272). */
 .loading,
 .empty {
   text-align: center;
@@ -645,6 +618,12 @@ function formatAmountChange(item: AnomalyItem): string | null {
   .history-purpose {
     grid-column: 1 / -1;
     white-space: normal;
+  }
+  .dup-row {
+    grid-template-columns: 1fr auto;
+  }
+  .dup-row > * {
+    min-width: 0;
   }
 }
 </style>
