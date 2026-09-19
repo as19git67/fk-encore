@@ -10,6 +10,8 @@ struct PersonDetailView: View {
     @State private var fullscreenPhotos: [PhotoWithCuration] = []
     @State private var fullscreenBBoxes: [FaceBBox?] = []
     @State private var fullscreenNav: FullscreenNav? = nil
+    /// Where to put the grid back after the viewer closes (GridScroll).
+    @State private var scrollTarget: Int?
     @State private var isIgnoringAll = false
     @State private var showIgnoreAllConfirmation = false
     @State private var faceIdToIgnore: Int? = nil
@@ -109,6 +111,8 @@ struct PersonDetailView: View {
                     FaceThumbnailView(filename: face.photo!.filename, bbox: face.bbox)
                 }
                 .buttonStyle(.plain)
+                // What the proxy scrolls back to.
+                .id(face.id)
                 .contextMenu {
                     Button(role: .destructive) {
                         faceIdToIgnore = face.id
@@ -145,39 +149,45 @@ struct PersonDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            if isLoading {
-                ProgressView()
-                    .padding(.top, 100)
-            } else if let error = errorMessage {
-                ContentUnavailableView {
-                    Label("Fehler", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(error)
-                } actions: {
-                    Button("Erneut versuchen") {
-                        Task { await loadPerson() }
-                    }
-                }
-            } else if visibleFaces.isEmpty {
-                ContentUnavailableView {
-                    Label("Keine Fotos", systemImage: "person.crop.rectangle")
-                } description: {
-                    Text("Keine Fotos für diese Person gefunden.")
-                }
-            } else {
-                LazyVStack(spacing: 8, pinnedViews: [.sectionHeaders]) {
-                    if availableYears.count > 1 {
-                        Section {
-                            faceGrid
-                        } header: {
-                            yearSelector
+        ScrollViewReader { proxy in
+            ScrollView {
+                // See AlbumDetailView: a spinner in place of the grid loses
+                // the scroll offset, so a reload only blanks the screen
+                // while there is nothing else to put there (GridScroll).
+                if isLoading && faces.isEmpty {
+                    ProgressView()
+                        .padding(.top, 100)
+                } else if let error = errorMessage {
+                    ContentUnavailableView {
+                        Label("Fehler", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Erneut versuchen") {
+                            Task { await loadPerson() }
                         }
-                    } else {
-                        faceGrid
+                    }
+                } else if visibleFaces.isEmpty {
+                    ContentUnavailableView {
+                        Label("Keine Fotos", systemImage: "person.crop.rectangle")
+                    } description: {
+                        Text("Keine Fotos für diese Person gefunden.")
+                    }
+                } else {
+                    LazyVStack(spacing: 8, pinnedViews: [.sectionHeaders]) {
+                        if availableYears.count > 1 {
+                            Section {
+                                faceGrid
+                            } header: {
+                                yearSelector
+                            }
+                        } else {
+                            faceGrid
+                        }
                     }
                 }
             }
+            .scrollsBack(to: $scrollTarget, in: proxy)
         }
         .navigationTitle(isUnnamed ? "Unbekannt" : personName)
         .navigationBarTitleDisplayMode(.large)
@@ -282,6 +292,11 @@ struct PersonDetailView: View {
                     onPhotoRemoved: { id in fullscreenPhotos.removeAll { $0.id == id } }
                 )
             }
+        }
+        // The viewer pages through the faces on screen, so it is the face
+        // grid the proxy aims back at — not the photo the face sits in.
+        .remembersGridPosition(whenClosing: fullscreenNav, target: $scrollTarget) {
+            GridScroll.target(index: fullscreenIndex, in: displayedFaces)
         }
         .task {
             await loadPerson()

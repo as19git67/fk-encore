@@ -19,61 +19,68 @@ struct SearchView: View {
     /// result set, so the next hit is a swipe away.
     @State private var fullscreenIndex = 0
     @State private var fullscreenNav: FullscreenNav?
+    /// Where to put the grid back after the viewer closes (GridScroll).
+    @State private var scrollTarget: Int?
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                // What the server made of the query. Only drawn once a search
-                // has actually returned something to report.
-                if !viewModel.isSearching && !viewModel.chips.isEmpty {
-                    SearchParseChips(chips: viewModel.chips)
-                        .padding(.horizontal)
-                }
-
-                // Results
-                if viewModel.isSearching {
-                    ProgressView("Suche...")
-                        .padding(.top, 48)
-                } else if viewModel.hasSearched && viewModel.results.isEmpty {
-                    ContentUnavailableView {
-                        Label("Keine Ergebnisse", systemImage: "magnifyingglass")
-                    } description: {
-                        Text("Keine Fotos für „\(viewModel.parsedQuery)“ gefunden.")
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 16) {
+                    // What the server made of the query. Only drawn once a search
+                    // has actually returned something to report.
+                    if !viewModel.isSearching && !viewModel.chips.isEmpty {
+                        SearchParseChips(chips: viewModel.chips)
+                            .padding(.horizontal)
                     }
-                } else if !viewModel.results.isEmpty {
-                    Text("\(viewModel.results.count) Ergebnis(se)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
 
-                    LazyVGrid(columns: columns, spacing: 2) {
-                        ForEach(viewModel.results) { photo in
-                            Button {
-                                fullscreenIndex = viewModel.results
-                                    .firstIndex(where: { $0.id == photo.id }) ?? 0
-                                fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
-                            } label: {
-                                PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
-                                    .aspectRatio(1, contentMode: .fill)
-                                    .clipped()
-                            }
-                            .buttonStyle(.plain)
+                    // Results
+                    if viewModel.isSearching {
+                        ProgressView("Suche...")
+                            .padding(.top, 48)
+                    } else if viewModel.hasSearched && viewModel.results.isEmpty {
+                        ContentUnavailableView {
+                            Label("Keine Ergebnisse", systemImage: "magnifyingglass")
+                        } description: {
+                            Text("Keine Fotos für „\(viewModel.parsedQuery)“ gefunden.")
                         }
-                    }
-                    .padding(.horizontal, 2)
-                }
-                // Nothing below the field before a search: the example
-                // queries that used to sit here read as results rather than
-                // as suggestions, and an empty field explains itself.
+                    } else if !viewModel.results.isEmpty {
+                        Text("\(viewModel.results.count) Ergebnis(se)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
 
-                if let error = viewModel.errorMessage {
-                    Text(error)
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                        .padding(.horizontal)
+                        LazyVGrid(columns: columns, spacing: 2) {
+                            ForEach(viewModel.results) { photo in
+                                Button {
+                                    fullscreenIndex = viewModel.results
+                                        .firstIndex(where: { $0.id == photo.id }) ?? 0
+                                    fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
+                                } label: {
+                                    PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
+                                        .aspectRatio(1, contentMode: .fill)
+                                        .clipped()
+                                }
+                                .buttonStyle(.plain)
+                                // What the proxy scrolls back to.
+                                .id(photo.id)
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                    // Nothing below the field before a search: the example
+                    // queries that used to sit here read as results rather than
+                    // as suggestions, and an empty field explains itself.
+
+                    if let error = viewModel.errorMessage {
+                        Text(error)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .padding(.horizontal)
+                    }
                 }
             }
+            .scrollsBack(to: $scrollTarget, in: proxy)
         }
         .searchable(
             text: $viewModel.query,
@@ -115,6 +122,9 @@ struct SearchView: View {
                 currentIndex: $fullscreenIndex,
                 onPhotoRemoved: { id in viewModel.remove(photoId: id) }
             )
+        }
+        .remembersGridPosition(whenClosing: fullscreenNav, target: $scrollTarget) {
+            GridScroll.target(index: fullscreenIndex, in: viewModel.results)
         }
     }
 

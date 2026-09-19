@@ -30,6 +30,8 @@ struct AlbumDetailView: View {
     @State private var isDeleting = false
     @State private var fullscreenIndex: Int = 0
     @State private var fullscreenNav: FullscreenNav? = nil
+    /// Where to put the grid back after the viewer closes (GridScroll).
+    @State private var scrollTarget: Int?
     @State private var filterSort = FilterSortViewModel()
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
@@ -111,98 +113,108 @@ struct AlbumDetailView: View {
     private var canLinkToIPhone: Bool { canEditAlbum }
 
     var body: some View {
-        ScrollView {
-            if isLoading {
-                ProgressView()
-                    .padding(.top, 100)
-            } else if photos.isEmpty {
-                ContentUnavailableView {
-                    Label("Leer", systemImage: "photo.on.rectangle.angled")
-                } description: {
-                    Text("Dieses Album enthält noch keine Fotos.")
-                }
-            } else if isEmptiedByView {
-                ContentUnavailableView {
-                    Label("Nichts in dieser Ansicht", systemImage: viewFilter.mode.systemImage)
-                } description: {
-                    Text("Kein Foto erfüllt die Kriterien von „\(viewFilter.mode.label)“.")
-                } actions: {
-                    Button("Alle Fotos anzeigen") { selectViewMode(.all) }
-                }
-                .padding(.top, 60)
-            } else {
-                LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(displayedPhotos) { photo in
-                        PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
-                            .overlay(alignment: .topLeading) {
-                                if isSelecting {
-                                    SelectionCheckmark(isSelected: selectedIds.contains(photo.id))
-                                        .padding(4)
-                                }
-                            }
-                            .overlay(alignment: .bottomTrailing) {
-                                if !isSelecting, let stats = curationStats[photo.id] {
-                                    CurationStatsBadges(stats: stats)
-                                }
-                            }
-                            .overlay(alignment: .topTrailing) {
-                                if !isSelecting, curation(photo) == .favorite {
-                                    Image(systemName: "heart.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(.pink)
-                                        .shadow(radius: 2)
-                                        .padding(4)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if isSelecting {
-                                    toggleSelection(photo.id)
-                                } else {
-                                    fullscreenIndex = displayedPhotos.firstIndex(where: { $0.id == photo.id }) ?? 0
-                                    fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
-                                }
-                            }
-                            .onLongPressGesture {
-                                if !isSelecting {
-                                    isSelecting = true
-                                    selectedIds = [photo.id]
-                                }
-                            }
-                            // Casting a vote without leaving the grid is the
-                            // point of the consensus feature — the fullscreen
-                            // viewer's heart is one tap too deep when you're
-                            // going through an album (issue #760).
-                            .contextMenu {
-                                if !isSelecting {
-                                    Button {
-                                        Task { await toggleFavorite(photo) }
-                                    } label: {
-                                        Label(
-                                            curation(photo) == .favorite
-                                                ? "Favorit entfernen"
-                                                : "Als Favorit markieren",
-                                            systemImage: curation(photo) == .favorite ? "heart.slash" : "heart"
-                                        )
+        ScrollViewReader { proxy in
+            ScrollView {
+                // Only while there is nothing to show. A reload that still
+                // has the album in hand leaves it on screen: swapping the
+                // grid for a spinner throws the scroll offset away, so
+                // coming back from the viewer — which re-runs the task
+                // below — used to land at the top (GridScroll).
+                if isLoading && photos.isEmpty {
+                    ProgressView()
+                        .padding(.top, 100)
+                } else if photos.isEmpty {
+                    ContentUnavailableView {
+                        Label("Leer", systemImage: "photo.on.rectangle.angled")
+                    } description: {
+                        Text("Dieses Album enthält noch keine Fotos.")
+                    }
+                } else if isEmptiedByView {
+                    ContentUnavailableView {
+                        Label("Nichts in dieser Ansicht", systemImage: viewFilter.mode.systemImage)
+                    } description: {
+                        Text("Kein Foto erfüllt die Kriterien von „\(viewFilter.mode.label)“.")
+                    } actions: {
+                        Button("Alle Fotos anzeigen") { selectViewMode(.all) }
+                    }
+                    .padding(.top, 60)
+                } else {
+                    LazyVGrid(columns: columns, spacing: 2) {
+                        ForEach(displayedPhotos) { photo in
+                            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
+                                .overlay(alignment: .topLeading) {
+                                    if isSelecting {
+                                        SelectionCheckmark(isSelected: selectedIds.contains(photo.id))
+                                            .padding(4)
                                     }
-                                    if canEditAlbum {
-                                        coverButtons(for: photo)
+                                }
+                                .overlay(alignment: .bottomTrailing) {
+                                    if !isSelecting, let stats = curationStats[photo.id] {
+                                        CurationStatsBadges(stats: stats)
                                     }
-                                    if let stats = curationStats[photo.id], stats.hasSignal {
-                                        Section("Meinungen") {
-                                            Text(consensusSummary(stats))
+                                }
+                                .overlay(alignment: .topTrailing) {
+                                    if !isSelecting, curation(photo) == .favorite {
+                                        Image(systemName: "heart.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(.pink)
+                                            .shadow(radius: 2)
+                                            .padding(4)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if isSelecting {
+                                        toggleSelection(photo.id)
+                                    } else {
+                                        fullscreenIndex = displayedPhotos.firstIndex(where: { $0.id == photo.id }) ?? 0
+                                        fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
+                                    }
+                                }
+                                .onLongPressGesture {
+                                    if !isSelecting {
+                                        isSelecting = true
+                                        selectedIds = [photo.id]
+                                    }
+                                }
+                                // Casting a vote without leaving the grid is the
+                                // point of the consensus feature — the fullscreen
+                                // viewer's heart is one tap too deep when you're
+                                // going through an album (issue #760).
+                                .contextMenu {
+                                    if !isSelecting {
+                                        Button {
+                                            Task { await toggleFavorite(photo) }
+                                        } label: {
+                                            Label(
+                                                curation(photo) == .favorite
+                                                    ? "Favorit entfernen"
+                                                    : "Als Favorit markieren",
+                                                systemImage: curation(photo) == .favorite ? "heart.slash" : "heart"
+                                            )
+                                        }
+                                        if canEditAlbum {
+                                            coverButtons(for: photo)
+                                        }
+                                        if let stats = curationStats[photo.id], stats.hasSignal {
+                                            Section("Meinungen") {
+                                                Text(consensusSummary(stats))
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            .reportPhotoFrame(id: photo.id, space: "albumGrid")
+                                .reportPhotoFrame(id: photo.id, space: "albumGrid")
+                                // What the proxy scrolls back to.
+                                .id(photo.id)
+                        }
                     }
+                    .padding(.horizontal, 2)
+                    .coordinateSpace(name: "albumGrid")
+                    .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
+                    .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
                 }
-                .padding(.horizontal, 2)
-                .coordinateSpace(name: "albumGrid")
-                .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-                .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
             }
+            .scrollsBack(to: $scrollTarget, in: proxy)
         }
         .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : (album?.name ?? "Album"))
         .navigationBarTitleDisplayMode(.large)
@@ -214,6 +226,9 @@ struct AlbumDetailView: View {
                 curationStats: curationStats,
                 onPhotoRemoved: { id in photos.removeAll { $0.id == id } }
             )
+        }
+        .remembersGridPosition(whenClosing: fullscreenNav, target: $scrollTarget) {
+            GridScroll.target(index: fullscreenIndex, in: displayedPhotos)
         }
         .fullScreenCover(isPresented: $showSlideshow) {
             PhotoSlideshowView(photos: slideshowPhotos, title: album?.name ?? "")
