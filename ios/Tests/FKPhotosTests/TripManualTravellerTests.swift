@@ -29,3 +29,37 @@ final class TripManualTravellerTests: XCTestCase {
         XCTAssertFalse(TripManualTraveller(name: "   ", birthDate: nil, shortWalks: false).isValid)
     }
 }
+
+/// How somebody gets about (§3.5), as the app reads and writes it.
+final class TripGetsAboutTests: XCTestCase {
+
+    func testOnFootIsTheAnswerNobodyHasToGive() {
+        XCTAssertEqual(TripGetsAbout.from(nil), .foot)
+        XCTAssertEqual(TripGetsAbout.from("foot"), .foot)
+        // A value from a newer server must not read as something else.
+        XCTAssertEqual(TripGetsAbout.from("hoverboard"), .foot)
+        XCTAssertFalse(TripGetsAbout.foot.isOnWheels)
+    }
+
+    func testAWheelchairAndAPramAreTheSameAnswerToARoute() {
+        // The plan tells "on foot" from "on wheels" and no finer; the
+        // two entries exist so nobody has to tick the wrong word.
+        XCTAssertTrue(TripGetsAbout.wheelchair.isOnWheels)
+        XCTAssertTrue(TripGetsAbout.pram.isOnWheels)
+        XCTAssertNotEqual(TripGetsAbout.wheelchair.label, TripGetsAbout.pram.label)
+    }
+
+    func testEveryModeIsOfferedAndCarriesItsOwnWord() {
+        XCTAssertEqual(TripGetsAbout.allCases.count, 3)
+        for mode in TripGetsAbout.allCases {
+            XCTAssertFalse(mode.label.isEmpty)
+            XCTAssertFalse(mode.symbolName.isEmpty)
+            XCTAssertEqual(mode.id, mode.rawValue)
+        }
+    }
+
+    func testAHandEntryIsOnFootUnlessSomebodySaysOtherwise() {
+        let entry = TripManualTraveller(name: "Oma", birthDate: nil, shortWalks: false)
+        XCTAssertEqual(entry.getsAbout, .foot)
+    }
+}

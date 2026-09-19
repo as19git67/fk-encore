@@ -43,6 +43,15 @@ export interface GroupProfile {
   withChildren?: boolean;
   /** Someone whose walking distance is limited. */
   limitedMobility?: boolean;
+  /**
+   * Somebody comes on wheels — a wheelchair, a rollator, a pram (§3.5).
+   *
+   * Unlike the two above this changes no budget. It is the one thing
+   * about a group that a *route* has to respect rather than shorten:
+   * a way that climbs is not a slower day out, it is not a day out
+   * (§4.7).
+   */
+  onWheels?: boolean;
 }
 
 export function groupFactor(group: GroupProfile | undefined): number {
@@ -51,6 +60,33 @@ export function groupFactor(group: GroupProfile | undefined): number {
   if (group?.limitedMobility) factor *= 0.7;
   return factor;
 }
+
+/**
+ * How much longer this group takes over the same ground (§4.7).
+ *
+ * The walkers' formula behind a route's duration assumes an adult
+ * hiker — four kilometres an hour along, three hundred metres of climb
+ * an hour up (`route-duration.ts`). A group with a small child in it,
+ * or with somebody for whom "mehr Zeit einplanen" is set, does not walk
+ * that, and a route timed as though it did is the one number in the day
+ * that cannot be absorbed by a shorter block: the walk takes what it
+ * takes, and the afternoon behind it is wrong.
+ *
+ * **Not a product, unlike `groupFactor`.** Two reasons to be slower do
+ * not make a group slower still — the pace is the slowest walker's, and
+ * they are only one person. The budget factor above compounds because
+ * it is about how much programme a day carries, which two reasons
+ * genuinely do reduce twice.
+ */
+export function groupPaceFactor(group: GroupProfile | undefined): number {
+  return group?.withChildren || group?.limitedMobility ? SLOWER_WALKING : 1;
+}
+
+/**
+ * Three kilometres an hour rather than four, which is what a group
+ * walking with a five-year-old actually covers.
+ */
+const SLOWER_WALKING = 1.4;
 
 export interface PlannedBlockShape extends BlockTemplate {
   /** Budget after pace and group scaling. */

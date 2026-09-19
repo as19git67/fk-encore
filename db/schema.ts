@@ -3524,6 +3524,11 @@ export const tripPlanTravellers = pgTable(
     label: text("label").notNull(),
     birth_date: text("birth_date"),
     short_walks: boolean("short_walks").notNull().default(false),
+    // foot | wheelchair | pram — how this person gets about (§3.5).
+    // Like `short_walks` it is set by a person and never derived; the
+    // planner tells "on foot" from "on wheels" and no finer, which is
+    // as far as what it can do with the answer reaches (§4.7).
+    gets_about: text("gets_about").notNull().default("foot"),
     // Set for everybody who plans the trip: whoever plans is on it
     // (migration 0204). Null marks somebody entered by hand — a child,
     // a friend — who has no account.

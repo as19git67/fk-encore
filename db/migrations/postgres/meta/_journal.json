@@ -1450,6 +1450,13 @@
       "when": 1788652800026,
       "tag": "0206_trip_day_trip_dismissals",
       "breakpoints": true
+    },
+    {
+      "idx": 207,
+      "version": "7",
+      "when": 1788652800027,
+      "tag": "0207_trip_traveller_gets_about",
+      "breakpoints": true
     }
   ]
 }
