@@ -72,3 +72,32 @@ final class TripSpotExtentTests: XCTestCase {
         XCTAssertEqual(TripRouteEntryModel.metres(fromKilometres: "10.5"), 10_500)
     }
 }
+
+/// What a route walks past (§4.7), as the block card says it.
+@MainActor
+final class TripPassedSpotTests: XCTestCase {
+
+    private func spot(_ name: String?) -> TripPassedSpot {
+        TripPassedSpot(osmRef: "node:\(name ?? "none")", name: name)
+    }
+
+    func testNothingPassedSaysNothing() {
+        XCTAssertNil(TripPassedSpot.line([]))
+    }
+
+    func testOneAndTwoAreNamed() {
+        XCTAssertEqual(TripPassedSpot.line([spot("Belvedere Beispiel")]),
+                       "unterwegs: Belvedere Beispiel")
+        XCTAssertEqual(TripPassedSpot.line([spot("Belvedere Beispiel"), spot("Tunnel Beispiel")]),
+                       "unterwegs: Belvedere Beispiel und Tunnel Beispiel")
+    }
+
+    func testMoreThanTwoNamesTheFirstAndCountsTheRest() {
+        let passed = [spot("Belvedere Beispiel"), spot("Tunnel Beispiel"), spot("Brücke Beispiel")]
+        XCTAssertEqual(TripPassedSpot.line(passed), "unterwegs: Belvedere Beispiel und 2 weitere")
+    }
+
+    func testAnUnnamedSpotSaysSoRatherThanBeingBlank() {
+        XCTAssertEqual(TripPassedSpot.line([spot(nil)]), "unterwegs: ein Ort ohne Namen")
+    }
+}

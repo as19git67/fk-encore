@@ -1500,6 +1500,14 @@ struct TripPlanDayView: View {
                              ?? TripClock.duration(stop.dwellMinutes))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        // What the route takes in on its way (§4.7).
+                        // Said on the stop, because it is the answer to
+                        // "why is the viewpoint not in the plan?".
+                        if let passed = TripPassedSpot.line(stop.passes ?? []) {
+                            Text(passed)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .buttonStyle(.plain)

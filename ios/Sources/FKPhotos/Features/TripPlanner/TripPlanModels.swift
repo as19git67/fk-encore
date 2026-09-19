@@ -361,6 +361,10 @@ struct TripStop: Codable, Identifiable, Sendable {
     /// Where it finishes, when that is not where it starts (§4.7). Nil
     /// for the ordinary point, and for a plan from an older server.
     var extent: TripSpotExtent? = nil
+    /// What this stop walks past on its way (§4.7): spots that lie on a
+    /// route and are therefore seen without being planned. Nil or empty
+    /// for every ordinary stop.
+    var passes: [TripPassedSpot]? = nil
 
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }
@@ -868,6 +872,34 @@ struct MoveStopResponse: Codable, Sendable {
     let plan: TripPlan
     /// Blocks now over their budget — the ones the day view turns red.
     let overfullBlockIds: [String]
+}
+
+/// A spot a route walks past (§4.7).
+///
+/// Named rather than counted: "unterwegs: Ponale-Aussicht" is the
+/// sentence that stops somebody planning it a second time, and a bare
+/// number would not be.
+struct TripPassedSpot: Codable, Sendable, Equatable, Identifiable {
+    let osmRef: String
+    /// What OpenStreetMap calls it, or nil where it has no name.
+    let name: String?
+
+    var id: String { osmRef }
+    /// What to show for a spot the map left unnamed (§15.3).
+    var displayName: String { name ?? "ein Ort ohne Namen" }
+
+    /// "unterwegs: Ponale-Aussicht und 2 weitere" — one line under the
+    /// route, because that is all a block card has room for. Names the
+    /// first, counts the rest: the count alone would not stop anybody
+    /// planning the one they had in mind.
+    static func line(_ passed: [TripPassedSpot]) -> String? {
+        guard let first = passed.first else { return nil }
+        switch passed.count {
+        case 1: return "unterwegs: \(first.displayName)"
+        case 2: return "unterwegs: \(first.displayName) und \(passed[1].displayName)"
+        default: return "unterwegs: \(first.displayName) und \(passed.count - 1) weitere"
+        }
+    }
 }
 
 /// A spot with an extent (§4.7): where it finishes and, where known,

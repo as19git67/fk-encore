@@ -914,12 +914,42 @@ warum sie dort liegen bleibt, statt übergangen auszusehen.
 Damit bleibt das Zusammenlegen von Blöcken das, was es war: eine Sache des
 Reisenden über den Bildschirm „Tagesablauf" (§4.1), nicht des Planers.
 
+**Was unterwegs mitgenommen wird (Etappe 4, umgesetzt):**
+
+Die Aussichtspunkte und Tunnel entlang der Ponale sind in OSM eigene Punkte.
+Der Planer hat sie als eigene Kandidaten gesehen und ihnen einen eigenen
+Block gegeben — obwohl man beim Gehen der Strecke an allen vorbeikommt. Wer
+sie zusätzlich einplant, verplant dieselbe Stunde zweimal.
+
+Ein Spot, der auf einer Strecke des Tages liegt, gilt deshalb als
+**passiert, nicht geplant** (`on-the-way.ts`): Er kostet kein Budget, belegt
+keinen Platz im Block, und die Strecke sagt, dass er kommt („unterwegs:
+Belvedere Beispiel und 2 weitere"). Nichts wird versteckt und nichts
+endgültig entschieden — der Spot bleibt im Vorrat, und ein Tag ohne diese
+Strecke bietet ihn wieder an wie jeden anderen. Das gilt für den ganzen Tag,
+nicht nur für den Block: Man kommt einmal vorbei, und ein Nachmittag, der
+einplant, was der Vormittag durchlaufen hat, ist derselbe Fehler einen Block
+später.
+
+**Nicht die Ellipse der Korridor-Suche.** `corridor.ts` fragt, was ein Stopp
+einer Fahrt an Metern hinzufügt, und nimmt alles unter einem Budget. Das ist
+die richtige Frage für einen Transfer, wo die Straße unbekannt ist und ein
+paar Kilometer Umweg der Sinn der Sache sind. Hier ist sie falsch, weil die
+Ellipse mit der Länge breiter wird: 400 m Umweg reichen über eine 8-km-Strecke
+mehr als einen Kilometer neben die Linie. Weil diese Regel ungefragt etwas aus
+dem Tag nimmt, ist sie die engere und schlichtere — 250 m neben der Linie
+zwischen den beiden Enden.
+
+**Was sie noch nicht kann:** Die Linie zwischen den Enden ist nicht der Weg.
+Die Ponale steigt in Serpentinen, die eine Sehne geradeaus durchschneidet —
+ein Aussichtspunkt in der dritten Kehre wird nicht erkannt. Das ist die sichere
+Richtung des Irrtums: Ein nicht erkannter Spot wird einfach geplant wie
+bisher. Es ist zugleich der Grund, warum der Import der echten Geometrie
+der nächste Schritt ist; dieselbe Breite an der echten Linie nimmt auf, was
+die Sehne durchlassen muss.
+
 **Was bewusst noch nicht gebaut ist:**
 
-- **Spots im Korridor schlucken.** Die Aussichtspunkte entlang der Strecke
-  sollen als „unterwegs" gelten statt eingeplant zu werden. Die
-  Korridor-Suche (`corridor.ts`, Ellipse um zwei Enden) ist die Mechanik
-  dafür und liegt bereit; sie ist noch nicht an die Strecke gehängt.
 - **Aus dem Import.** OSM kennt Wander- und Radrouten als Relationen
   (`route=hiking`, `route=bicycle`), oft mit Name, Länge und Schwierigkeit.
   Der Importer kennt nur Punkte. Das ist die eine echte neue Arbeit; bis
@@ -3824,8 +3854,9 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     Fund mit Endpunkt, und jeder Rewalk — Solver, Verschieben, Umverteilung,
     Wetter, Licht — geht am Ende der Strecke weiter. Etappe 2 (Eingabe
     und Linie in der App) und Etappe 3 (ein Stopp darf über das Blockende
-    hinauslaufen, `spill.ts`) ebenfalls umgesetzt; offen bleiben aus §4.7 der
-    Korridor und der Import aus OSM-Routenrelationen.
+    hinauslaufen, `spill.ts`) und Etappe 4 (Spots auf der Strecke gelten als
+    passiert, `on-the-way.ts`) ebenfalls umgesetzt; offen bleibt aus §4.7 der
+    Import aus OSM-Routenrelationen.
 
 Schritte 1–3 sind der ehrliche Test — und sie kommen **ohne einen einzigen
 Neuimport** aus: Liefert die Maschine für *einen* Tag in
