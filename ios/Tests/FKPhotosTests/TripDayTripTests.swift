@@ -12,7 +12,7 @@ final class TripDayTripTests: XCTestCase {
 
     private func answer(
         undersupplied: Bool = true,
-        suggestion: String = SUGGESTION,
+        suggestion: String = Self.SUGGESTION,
         note: String? = nil,
     ) throws -> TripDayTripAnswer {
         func quoted(_ value: String?) -> String {

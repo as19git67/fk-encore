@@ -104,7 +104,7 @@ struct TripDayTripView: View {
             Label(suggestion.target.name, systemImage: suggestion.target.symbolName)
         } footer: {
             Text("Die Fahrzeit ist geschätzt — ohne Routenplaner kann eine Stunde auch "
-                 + "neunzig Minuten sein. „Nein danke" wird gemerkt und nicht noch einmal "
+                 + "neunzig Minuten sein. „Nein danke“ wird gemerkt und nicht noch einmal "
                  + "gefragt.")
         }
     }
