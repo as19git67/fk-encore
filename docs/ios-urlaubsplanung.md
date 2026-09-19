@@ -747,7 +747,7 @@ wurde. `TripMapAnchor` entscheidet jetzt Punkt, Beschriftung und Symbol —
 Ausflugsziel mit eigenem Symbol statt eines Hauses, das dort keines ist, und ein
 unbenannter Ausflug heißt „Ausflugsziel" statt „Unterkunft" (§15.3).
 
-### 4.6 Der Ausflug, den niemand verlangt hat (offen)
+### 4.6 Der Ausflug, den niemand verlangt hat
 
 §4.5 macht den Tagesausflug *ausdrückbar*. Der eigentliche Wunsch geht weiter:
 
@@ -816,6 +816,39 @@ Voraussetzung ist §4.5: Ohne Tagesanker gibt es nichts, worin ein angenommener
 Vorschlag landen könnte. In der Reihenfolge dort steht er hinter dem
 Tagesanker — und er ist der Teil, der aus „vier Tage in San Gimignano" das
 macht, was der Reisende eigentlich gemeint hat.
+
+**Etappe 1 umgesetzt: gemessen und vorgeschlagen.**
+
+Der Auslöser ist jetzt eine Rechnung statt einer Einschätzung
+(`trip-planner/thin-pool.ts`). Die Frage lautet nicht „ist der Ort klein",
+sondern: **Bliebe ein ganzer Tag dieser Etappe leer, selbst wenn alles, was
+noch im Vorrat liegt, eingeplant würde?** Beide Seiten sind Minuten, die der
+Plan ohnehin kennt — unverplantes Blockbudget gegen die Aufenthaltsdauer des
+übrigen Vorrats —, und genau der Vergleich ist es, der den Fall vom knappen
+Nachmittag trennt: Wer zwanzig Spots übrig hat, hat seine leeren Blöcke aus
+einem anderen Grund, und den beantwortet kein Ausflug. Ein Tagesausflugstag
+(§4.5) und der Puffertag (§7.2) zählen auf keiner Seite mit; eine Etappe von
+einem Tag wird nie gefragt, weil es nichts gibt, *statt dessen* man führe.
+
+Die Kandidaten kommen wie beschrieben ohne Neuimport aus der Region
+(`geo/src/day-targets.ts`): prominente Spots in einem **Ring** um den Anker —
+innen die eigene Suchweite der Etappe, damit nicht vorgeschlagen wird, wo man
+schon ist — gruppiert nach der lokalsten benannten Verwaltungsfläche
+(`osm_admin`, Ebene 7–9, weil „Firenze" ein Ziel ist und „Toscana" keines) und,
+für alles, was in keiner liegt, nach einem groben Raster. Beide Wege zählen
+dasselbe: was ein Tag dort trüge. Die Region zählt, sie entscheidet nicht.
+
+`GET …/plans/:planId/day-trip` schreibt nichts. Es prüft drei Dinge in dieser
+Reihenfolge — tragen die Tage, gibt es etwas in Reichweite, bliebe davon ein
+Tag übrig — und antwortet mit **einem** Ziel oder keinem, samt dem Satz aus
+§4.6: warum gefragt wird, was dort steht, was es kostet. Die Fahrzeit ist die
+Luftlinienschätzung im Modus der Etappe (§12); zwei Stunden je Richtung sind
+die Grenze, darunter müssen mindestens vier Stunden vor Ort bleiben, und drei
+Spots sind nie ein Tag.
+
+**Noch offen (Etappe 2):** das Annehmen per Tipp (es setzt den Tagesanker aus
+§4.5, der Endpunkt dafür steht), das gemerkte „nein" (§6.4, §7.1) und der
+Bildschirm in der App.
 
 ### 4.7 Strecken: der Weg ist das Ziel
 
@@ -3859,8 +3892,8 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     (§6.2, §6.4). Dazu die **feingranulare Zusammenführung** (§6.3) — gepufferte
     Vorgänge, idempotent nachgespielt, mit Journal und Rücknahme — und die
     **Splits** (§6.5): Zweige an einem Block, Budget vom Treffpunkt rückwärts,
-    Vorschlag aus den Stimmen. Damit ist Schritt 11 inhaltlich durch; was auf der
-    iOS-Seite dazu noch fehlt, sind die Bildschirme für Journal und Split.
+    Vorschlag aus den Stimmen. Beides hat auch seinen Bildschirm in der App
+    (`TripJournalView`, `TripSplitView`); damit ist Schritt 11 durch.
 12. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
    Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
 
@@ -3895,6 +3928,17 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     `osm_routes` samt Suche, Dauer-Schätzung und „Strecken in der Nähe")
     ebenfalls umgesetzt. Damit ist §4.7 inhaltlich durch; offen bleibt dort
     nur noch die Dauer nach Reisegruppe, die auf §3.5 wartet.
+
+15. **Der Ausflug, den niemand verlangt hat** (§4.6) — „vier Tage in San
+    Gimignano", und Florenz kommt trotzdem vor. **Etappe 1 umgesetzt:** das
+    Maß für die untervorrätige Etappe (`thin-pool.ts` — bliebe ein ganzer Tag
+    leer, selbst wenn der übrige Vorrat eingeplant würde?), die Tagesziele aus
+    `osm_admin` und einem Raster ohne Neuimport (`geo/src/day-targets.ts`) und
+    der lesende Vorschlag `GET …/plans/:planId/day-trip`, der nichts schreibt
+    und **ein** Ziel nennt. Offen: das Annehmen per Tipp auf den Tagesanker
+    (§4.5), das gemerkte „nein" (§6.4) und der Bildschirm.
+    Bewusst nach Schritt 14: Er setzt §4.5 voraus, und bis das Maß stand, wäre
+    jeder Vorschlag geraten gewesen.
 
 Schritte 1–3 sind der ehrliche Test — und sie kommen **ohne einen einzigen
 Neuimport** aus: Liefert die Maschine für *einen* Tag in

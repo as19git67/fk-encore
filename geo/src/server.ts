@@ -34,6 +34,7 @@ import { hasCoverage } from "./coverage.ts";
 import { waterCrossing } from "./water.ts";
 import { PoiSearchError, searchPois, type PoiSearchOptions } from "./poi-search.ts";
 import { RouteSearchError, searchRoutes, type RouteSearchOptions } from "./route-search.ts";
+import { DayTargetError, searchDayTargets, type DayTargetOptions } from "./day-targets.ts";
 import {
   dropRegion,
   getImportStatus,
@@ -227,6 +228,21 @@ app.post("/routes/search", async (req, res, next) => {
   }
 });
 
+// What lies within reach that would carry a day of its own (§4.6).
+// Neither a POI search nor a route search: the answer is a *place*,
+// counted out of the spots standing in it, and it exists so a planner
+// can say "Florence is an hour away" instead of stretching four days
+// out of a pool that carries two.
+app.post("/day-targets/search", async (req, res, next) => {
+  try {
+    const { database, options } = parseDayTargetBody(req.body);
+    const page = await searchDayTargets(database, options);
+    res.json({ database, ...page });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post("/import", async (req, res, next) => {
   try {
     const body = req.body as Partial<ImportRequest>;
@@ -303,7 +319,8 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   }
   // Rejected search arguments (bad bbox, unknown category, oversized
   // radius) are the caller's mistake, not ours — 400, not 500.
-  if (err instanceof PoiSearchError || err instanceof RouteSearchError) {
+  if (err instanceof PoiSearchError || err instanceof RouteSearchError
+      || err instanceof DayTargetError) {
     res.status(400).json({ error: err.message });
     return;
   }
@@ -432,6 +449,35 @@ function parseRouteSearchBody(
       },
       radiusM: requireFiniteNumber(b.radiusM, "radiusM"),
       kinds: Array.isArray(b.kinds) ? b.kinds.map(String) : undefined,
+      limit: optionalPositiveInt(b.limit),
+    },
+  };
+}
+
+function parseDayTargetBody(
+  body: unknown,
+): { database: string; options: DayTargetOptions } {
+  if (!body || typeof body !== "object") {
+    throw new HttpError(400, "request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+  const database = requireString(b.database, "database");
+  if (!/^[a-z0-9_]+$/.test(database)) {
+    throw new HttpError(400, `database must match [a-z0-9_]+, got '${database}'`);
+  }
+  if (b.center === undefined || b.center === null) {
+    throw new HttpError(400, "center is required");
+  }
+  const center = b.center as Record<string, unknown>;
+  return {
+    database,
+    options: {
+      center: {
+        lat: requireFiniteNumber(center.lat, "center.lat"),
+        lon: requireFiniteNumber(center.lon, "center.lon"),
+      },
+      minRadiusM: requireFiniteNumber(b.minRadiusM, "minRadiusM"),
+      maxRadiusM: requireFiniteNumber(b.maxRadiusM, "maxRadiusM"),
       limit: optionalPositiveInt(b.limit),
     },
   };

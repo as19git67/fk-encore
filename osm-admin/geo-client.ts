@@ -270,6 +270,36 @@ export interface GeoRouteSearchPage {
   imported: boolean;
 }
 
+export interface GeoDayTargetQuery {
+  center: { lat: number; lon: number };
+  /** Nothing nearer than this: below it lies the leg's own pool. */
+  minRadiusM: number;
+  maxRadiusM: number;
+  limit?: number;
+}
+
+export interface GeoDayTarget {
+  name: string;
+  /** "admin" when a named area holds it, "cluster" when the grid found it. */
+  source: string;
+  osmRef: string | null;
+  adminLevel: number | null;
+  /** Where the spots stand, not where the boundary's middle is. */
+  at: { lat: number; lon: number };
+  distanceM: number;
+  /** How many spots worth a block are there. */
+  spotCount: number;
+  /** How many of those carry a Wikidata or Wikipedia link. */
+  linkedCount: number;
+  examples: string[];
+}
+
+export interface GeoDayTargetPage {
+  database: string;
+  targets: GeoDayTarget[];
+  hasMore: boolean;
+}
+
 export interface GeoClient {
   health(): Promise<boolean>;
   startImport(req: GeoImportRequest): Promise<GeoImportStatus>;
@@ -286,6 +316,8 @@ export interface GeoClient {
   searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage>;
   /** Walking and cycling routes near a place (§4.7). */
   searchRoutes(postgresDb: string, query: GeoRouteSearchQuery): Promise<GeoRouteSearchPage>;
+  /** Places within reach that would carry a day of their own (§4.6). */
+  searchDayTargets(postgresDb: string, query: GeoDayTargetQuery): Promise<GeoDayTargetPage>;
   /**
    * Is this corner of the world in that database at all (§4.3)?
    *
@@ -439,6 +471,27 @@ export class HttpGeoClient implements GeoClient {
       center: query.center,
       radiusM: query.radiusM,
       kinds: query.kinds,
+      limit: query.limit,
+    });
+  }
+
+  /**
+   * What lies within reach that would carry a day of its own (§4.6).
+   *
+   * Neither a POI search nor a route search: the answer is a *place*,
+   * counted out of the spots standing in it. It exists so the planner
+   * can say "Florence is an hour away" rather than stretch four days
+   * out of a pool that carries two.
+   */
+  async searchDayTargets(
+    postgresDb: string,
+    query: GeoDayTargetQuery,
+  ): Promise<GeoDayTargetPage> {
+    return await this.postJson<GeoDayTargetPage>("/day-targets/search", {
+      database: postgresDb,
+      center: query.center,
+      minRadiusM: query.minRadiusM,
+      maxRadiusM: query.maxRadiusM,
       limit: query.limit,
     });
   }
