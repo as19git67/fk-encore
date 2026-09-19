@@ -13,9 +13,19 @@
  * planner invents no appointments** (§7.1). Sixty kilometres are not a
  * side effect of a place search, they are a decision about a day. The
  * resolution is the same one the evening light (§7.3) and the outing
- * from the collection (§20.2) use: **suggest, do not plan.** This
- * endpoint writes nothing at all. Accepting is a second call, the one
- * that sets the day's anchor (§4.5) — which is a thing a person does.
+ * from the collection (§20.2) use: **suggest, do not plan.**
+ *
+ * So there are three calls, and the split between them is the feature:
+ *
+ *   - **Looking** writes nothing at all, and most legs never get past
+ *     its first question.
+ *   - **Accepting** sets the day's anchor (§4.5) — the same call a
+ *     person makes by hand, with the same organiser rule and the same
+ *     re-plan afterwards. The destination is looked up again rather
+ *     than taken from the request: where a day happens is not
+ *     something a client should be able to state.
+ *   - **Waving it away** is remembered (§6.4, §7.1). Said once, the
+ *     suggestion does not come back for that place.
  *
  * ## Three questions, in this order, and each may end it
  *
@@ -43,13 +53,18 @@
  */
 
 import { api, APIError } from "encore.dev/api";
+import { eq } from "drizzle-orm";
 import { getAuthData } from "~encore/auth";
+import db from "../db/database";
+import { tripPlanDayTripDismissals } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { getGeoClient, type GeoDayTarget } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { loadPlan, type StoredLeg } from "./plan-store";
+import { setTripDayAnchor } from "./day-anchor-edit";
 import { measureThinPool, type ThinPoolVerdict } from "./thin-pool";
 import { searchRadiusFor } from "./search-reach";
+import type { PlanResponse } from "./plans";
 import { haversineMeters, travelLeg, type Coordinate, type TransportMode } from "./travel";
 
 /**
@@ -92,6 +107,12 @@ export interface DayTripTarget {
   name: string;
   /** "admin" when a named place holds it, "cluster" when it is a landscape. */
   source: string;
+  /**
+   * How this destination is referred to when accepting or refusing it:
+   * the area's OSM reference, or its rounded position where no
+   * boundary names it.
+   */
+  key: string;
   osmRef: string | null;
   lat: number;
   lon: number;
@@ -137,78 +158,202 @@ export const dayTripSuggestion = api(
   { expose: true, method: "GET", path: "/trip-planner/plans/:planId/day-trip", auth: true },
   async (req: DayTripSuggestionRequest): Promise<DayTripSuggestionResponse> => {
     const userId = requireUser();
-    const plan = await loadPlan(req.planId, userId);
-    if (!plan) throw APIError.notFound("plan not found");
+    const { leg, legIndex } = await legOf(req.planId, userId, req.legIndex);
+    const found = await suggestFor(leg);
 
-    const legIndex = req.legIndex ?? 0;
-    const leg = plan.legs.find((l) => l.position === legIndex);
-    if (!leg) throw APIError.notFound(`leg ${legIndex} not found in this plan`);
-
-    const measure = measureThinPool({
-      days: leg.days.map((day) => ({
-        dayIndex: day.dayIndex,
-        hasOwnAnchor: day.anchor !== null,
-        bufferReason: day.bufferReason,
-        blocks: day.blocks,
-      })),
-      pool: leg.pool,
-    });
-
-    const answer = (
-      suggestion: DayTripSuggestion | null,
-      note: string | null,
-    ): DayTripSuggestionResponse => ({
+    return {
       legIndex,
-      undersupplied: measure.thin,
-      emptyMinutes: measure.emptyMinutes,
-      poolMinutes: measure.poolMinutes,
-      uncoveredMinutes: measure.uncoveredMinutes,
-      dayMinutes: measure.dayMinutes,
-      suggestion,
-      note,
-    });
-
-    // The days carry: there is nothing to suggest anything *for*, and
-    // this is where most legs stop (§4.6 — no outing as a gap filler).
-    if (!measure.thin) return answer(null, noteForFullLeg(measure));
-
-    const region = await pickRegion(leg.anchor.lat, leg.anchor.lon);
-    if (!region) {
-      return answer(null, "Für diese Stadt ist noch keine Region importiert.");
-    }
-
-    const mode = leg.mode;
-    // The ring starts outside the leg's own search, or the suggestion
-    // would be a trip to where the travellers already are.
-    const minRadiusM = leg.radiusM ?? searchRadiusFor(mode);
-    const maxRadiusM = reachWithin(leg.anchor, mode, MAX_TRIP_TRAVEL_MINUTES);
-    if (maxRadiusM <= minRadiusM) {
-      return answer(null, noteForUnreachable(mode));
-    }
-
-    let page;
-    try {
-      page = await getGeoClient().searchDayTargets(region.postgresDb, {
-        center: { lat: leg.anchor.lat, lon: leg.anchor.lon },
-        minRadiusM,
-        maxRadiusM,
-      });
-    } catch {
-      throw APIError.unavailable("die Region antwortet gerade nicht");
-    }
-
-    const dayIndex = measure.freeDays[0];
-    const target = pickTarget(page.targets, leg.anchor, mode, measure.dayMinutes);
-    if (!target) {
-      return answer(null, "In erreichbarer Entfernung liegt nichts, was einen ganzen Tag trägt.");
-    }
-
-    return answer(
-      { dayIndex, target, sentence: sentenceFor(measure, target, leg) },
-      null,
-    );
+      undersupplied: found.measure.thin,
+      emptyMinutes: found.measure.emptyMinutes,
+      poolMinutes: found.measure.poolMinutes,
+      uncoveredMinutes: found.measure.uncoveredMinutes,
+      dayMinutes: found.measure.dayMinutes,
+      suggestion: found.suggestion,
+      note: found.note,
+    };
   },
 );
+
+export interface AcceptDayTripRequest {
+  planId: number;
+  legIndex?: number;
+  /** The destination as the suggestion named it. */
+  key: string;
+  /**
+   * Which day it becomes. Omitted takes the one the suggestion named,
+   * which is the emptiest of the leg.
+   */
+  dayIndex?: number;
+}
+
+/**
+ * Turn the suggestion into a day trip (§4.6, §4.5).
+ *
+ * Nothing new happens here: it is the day anchor a person sets by
+ * hand, with the same organiser rule and the same re-plan afterwards.
+ * What is deliberate is that the destination is **looked up again**
+ * rather than read out of the request. Where a day happens decides
+ * which pool it is built from and how many minutes its blocks have,
+ * and a request is not where that should come from — the same reason
+ * taking a route in re-reads the route (§4.7).
+ */
+export const acceptDayTrip = api(
+  { expose: true, method: "POST", path: "/trip-planner/plans/:planId/day-trip", auth: true },
+  async (req: AcceptDayTripRequest): Promise<PlanResponse> => {
+    const userId = requireUser();
+    const { leg, legIndex } = await legOf(req.planId, userId, req.legIndex);
+    const found = await suggestFor(leg);
+
+    const suggestion = found.suggestion;
+    if (!suggestion || suggestion.target.key !== req.key) {
+      throw APIError.failedPrecondition(
+        "dieser Vorschlag gilt nicht mehr — der Plan hat sich inzwischen geändert",
+      );
+    }
+
+    const dayIndex = req.dayIndex ?? suggestion.dayIndex;
+    if (!leg.days.some((day) => day.dayIndex === dayIndex)) {
+      throw APIError.notFound(`day ${dayIndex} not found in leg ${legIndex}`);
+    }
+
+    // The organiser rule, the validation and the re-plan all live in
+    // the day-anchor call; going round it would mean keeping a second
+    // copy of them in step (§4.5).
+    return await setTripDayAnchor({
+      planId: req.planId,
+      legIndex,
+      dayIndex,
+      lat: suggestion.target.lat,
+      lon: suggestion.target.lon,
+      label: suggestion.target.name,
+    });
+  },
+);
+
+export interface DismissDayTripRequest {
+  planId: number;
+  legIndex?: number;
+  /** The destination as the suggestion named it. */
+  key: string;
+  /** What it was called, so the answer can be read back later. */
+  name?: string;
+}
+
+export interface DismissDayTripResponse {
+  legIndex: number;
+  key: string;
+  dismissed: boolean;
+}
+
+/**
+ * "No thanks" — remembered, not forgotten (§6.4, §7.1).
+ *
+ * Saying once that the city is an hour away is a service; saying it
+ * every time the screen opens is nagging. The place stays reachable by
+ * every other route into the planner: this is an answer about a
+ * suggestion, not a ban on a city.
+ */
+export const dismissDayTrip = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/trip-planner/plans/:planId/day-trip/dismiss",
+    auth: true,
+  },
+  async (req: DismissDayTripRequest): Promise<DismissDayTripResponse> => {
+    const userId = requireUser();
+    const { leg, legIndex } = await legOf(req.planId, userId, req.legIndex);
+    const key = req.key?.trim();
+    if (!key) throw APIError.invalidArgument("key is required");
+
+    // Said twice is said once.
+    await db
+      .insert(tripPlanDayTripDismissals)
+      .values({
+        leg_id: leg.id,
+        target_key: key,
+        name: req.name?.trim() || null,
+        dismissed_by: userId,
+      })
+      .onConflictDoNothing();
+
+    return { legIndex, key, dismissed: true };
+  },
+);
+
+interface FoundSuggestion {
+  measure: ThinPoolVerdict;
+  suggestion: DayTripSuggestion | null;
+  note: string | null;
+}
+
+/**
+ * The three questions, asked once, for every caller that needs them.
+ *
+ * Shared deliberately: looking and accepting must never disagree about
+ * what is being suggested, and the only way to guarantee that is for
+ * both to work it out the same way.
+ */
+async function suggestFor(leg: StoredLeg): Promise<FoundSuggestion> {
+  const measure = measureThinPool({
+    days: leg.days.map((day) => ({
+      dayIndex: day.dayIndex,
+      hasOwnAnchor: day.anchor !== null,
+      bufferReason: day.bufferReason,
+      blocks: day.blocks,
+    })),
+    pool: leg.pool,
+  });
+
+  // The days carry: there is nothing to suggest anything *for*, and
+  // this is where most legs stop (§4.6 — no outing as a gap filler).
+  if (!measure.thin) return { measure, suggestion: null, note: noteForFullLeg(measure) };
+
+  const region = await pickRegion(leg.anchor.lat, leg.anchor.lon);
+  if (!region) {
+    return { measure, suggestion: null, note: "Für diese Stadt ist noch keine Region importiert." };
+  }
+
+  const mode = leg.mode;
+  // The ring starts outside the leg's own search, or the suggestion
+  // would be a trip to where the travellers already are.
+  const minRadiusM = leg.radiusM ?? searchRadiusFor(mode);
+  const maxRadiusM = reachWithin(leg.anchor, mode, MAX_TRIP_TRAVEL_MINUTES);
+  if (maxRadiusM <= minRadiusM) {
+    return { measure, suggestion: null, note: noteForUnreachable(mode) };
+  }
+
+  let page;
+  try {
+    page = await getGeoClient().searchDayTargets(region.postgresDb, {
+      center: { lat: leg.anchor.lat, lon: leg.anchor.lon },
+      minRadiusM,
+      maxRadiusM,
+    });
+  } catch {
+    throw APIError.unavailable("die Region antwortet gerade nicht");
+  }
+
+  const refused = await dismissedKeys(leg.id);
+  const target = pickTarget(page.targets, leg.anchor, mode, measure.dayMinutes, refused);
+  if (!target) {
+    return {
+      measure,
+      suggestion: null,
+      note: "In erreichbarer Entfernung liegt nichts, was einen ganzen Tag trägt.",
+    };
+  }
+
+  return {
+    measure,
+    suggestion: {
+      dayIndex: measure.freeDays[0],
+      target,
+      sentence: sentenceFor(measure, target, leg),
+    },
+    note: null,
+  };
+}
 
 /**
  * The strongest destination that would actually be a day.
@@ -222,8 +367,11 @@ function pickTarget(
   anchor: Coordinate,
   mode: TransportMode,
   dayMinutes: number,
+  refused: ReadonlySet<string>,
 ): DayTripTarget | null {
   for (const target of targets) {
+    const key = keyFor(target);
+    if (refused.has(key)) continue;
     const travelMinutes = travelLeg(anchor, target.at, mode).minutes;
     if (travelMinutes > MAX_TRIP_TRAVEL_MINUTES) continue;
     const dayAtTargetMinutes = dayMinutes - 2 * travelMinutes;
@@ -240,6 +388,7 @@ function pickTarget(
     return {
       name: target.name,
       source: target.source,
+      key,
       osmRef: target.osmRef,
       lat: target.at.lat,
       lon: target.at.lon,
@@ -254,6 +403,28 @@ function pickTarget(
 }
 
 /**
+ * How a destination is named across calls.
+ *
+ * The area's own reference where a boundary named it; its rounded
+ * position — about a hundred metres — where the destination is a
+ * cluster of spots that no municipality is. Both survive a re-plan,
+ * which is the point: a "no" said on Tuesday has to still hold on
+ * Friday, after the days have been rebuilt twice.
+ */
+function keyFor(target: GeoDayTarget): string {
+  if (target.osmRef) return target.osmRef;
+  return `at:${target.at.lat.toFixed(3)},${target.at.lon.toFixed(3)}`;
+}
+
+async function dismissedKeys(legId: number): Promise<ReadonlySet<string>> {
+  const rows = await db
+    .select({ key: tripPlanDayTripDismissals.target_key })
+    .from(tripPlanDayTripDismissals)
+    .where(eq(tripPlanDayTripDismissals.leg_id, legId));
+  return new Set(rows.map((row) => row.key));
+}
+
+/**
  * The sentence §4.6 asks for, and it names three things: why the
  * question comes up at all, what is there, and what it costs.
  */
@@ -262,7 +433,6 @@ function sentenceFor(
   target: DayTripTarget,
   leg: StoredLeg,
 ): string {
-  const here = leg.title?.trim() || leg.anchorLabel?.trim() || "vor Ort";
   const days = Math.max(1, Math.round(measure.uncoveredMinutes / Math.max(1, measure.dayMinutes)));
   const carried = countWord(Math.max(0, leg.days.length - days));
   const dayWord = days === 1 ? "einen Tag" : `${countWord(days)} Tage`;
@@ -275,20 +445,12 @@ function sentenceFor(
 
 /** Why a leg that carries its days hears nothing. */
 function noteForFullLeg(measure: ThinPoolVerdict): string | null {
-  switch (measure.reason) {
-    case "too-few-days":
-      return null;
-    case "days-are-full":
-      return null;
-    case "pool-has-more":
-      // Worth saying: the blocks *are* empty, and the reason is not a
-      // thin pool, so a day trip would answer the wrong question.
-      return measure.emptyMinutes > 0
-        ? "Es ist noch Platz im Plan, aber auch noch genug im Vorrat dafür."
-        : null;
-    default:
-      return null;
-  }
+  if (measure.reason !== "pool-has-more") return null;
+  // Worth saying: the blocks *are* empty, and the reason is not a thin
+  // pool, so a day trip would answer the wrong question.
+  return measure.emptyMinutes > 0
+    ? "Es ist noch Platz im Plan, aber auch noch genug im Vorrat dafür."
+    : null;
 }
 
 function noteForUnreachable(mode: TransportMode): string {
@@ -328,6 +490,19 @@ function roughTime(minutes: number): string {
   if (halves === 1.5) return "eineinhalb Stunden";
   if (Number.isInteger(halves)) return `${countWord(halves)} Stunden`;
   return `${String(halves).replace(".", ",")} Stunden`;
+}
+
+async function legOf(
+  planId: number,
+  userId: number,
+  legIndex: number | undefined,
+): Promise<{ leg: StoredLeg; legIndex: number }> {
+  const plan = await loadPlan(planId, userId);
+  if (!plan) throw APIError.notFound("plan not found");
+  const position = legIndex ?? 0;
+  const leg = plan.legs.find((l) => l.position === position);
+  if (!leg) throw APIError.notFound(`leg ${position} not found in this plan`);
+  return { leg, legIndex: position };
 }
 
 function requireUser(): number {

@@ -997,3 +997,85 @@ struct TripSpotExtent: Codable, Sendable, Equatable {
         return String(format: "%.1f km", km).replacingOccurrences(of: ".", with: ",")
     }
 }
+
+/// A day trip the planner brings up by itself (§4.6).
+///
+/// It exists only for a leg whose own pool does not carry its days —
+/// four days in a town of seven thousand — and it is a sentence until
+/// somebody taps. `suggestion` is nil far more often than not, which
+/// is the point: most legs are not short of anything.
+struct TripDayTripAnswer: Codable, Sendable {
+    let legIndex: Int
+    /// True when this leg's own pool does not carry its days.
+    let undersupplied: Bool
+    /// Block budget the pool could not fill, over the whole leg.
+    let emptyMinutes: Int
+    /// What the pool could still put into it.
+    let poolMinutes: Int
+    /// What would stay empty even then — the measure §4.6 turns on.
+    let uncoveredMinutes: Int
+    /// A day of this leg, in minutes.
+    let dayMinutes: Int
+    let suggestion: TripDayTripSuggestion?
+    /// Why there is nothing to suggest, in the server's words.
+    let note: String?
+}
+
+struct TripDayTripSuggestion: Codable, Sendable {
+    /// Which day it would be — the emptiest of the leg.
+    let dayIndex: Int
+    let target: TripDayTripTarget
+    /// Why it comes up, what is there, what it costs — all in one.
+    let sentence: String
+}
+
+struct TripDayTripTarget: Codable, Identifiable, Sendable {
+    let name: String
+    /// "admin" when a named place holds it, "cluster" when it is a
+    /// landscape no municipality is.
+    let source: String
+    /// How the destination is named when accepting or refusing it.
+    let key: String
+    let osmRef: String?
+    let lat: Double
+    let lon: Double
+    let distanceM: Int
+    /// One way, estimated — never a timetable (§12).
+    let travelMinutes: Int
+    /// What is left of the day once both ways are paid for.
+    let dayAtTargetMinutes: Int
+    let spotCount: Int
+    /// A few of what is there, by name.
+    let examples: [String]
+
+    var id: String { key }
+    var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
+
+    /// A boundary named it, or it is a stretch of landscape.
+    var symbolName: String { source == "admin" ? "building.2" : "mountain.2" }
+
+    /// "1 h hin · 6 h vor Ort" — the cost and what remains of it.
+    var costSummary: String {
+        "\(TripClock.duration(travelMinutes)) hin · "
+        + "\(TripClock.duration(dayAtTargetMinutes)) vor Ort"
+    }
+}
+
+struct TripAcceptDayTripRequest: Codable, Sendable {
+    let legIndex: Int
+    let key: String
+    /// Nil takes the day the suggestion named.
+    var dayIndex: Int? = nil
+}
+
+struct TripDismissDayTripRequest: Codable, Sendable {
+    let legIndex: Int
+    let key: String
+    var name: String? = nil
+}
+
+struct TripDismissDayTripResponse: Codable, Sendable {
+    let legIndex: Int
+    let key: String
+    let dismissed: Bool
+}

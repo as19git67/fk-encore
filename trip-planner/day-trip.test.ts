@@ -14,7 +14,7 @@ import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan } from "./plans";
 import { setTripDayAnchor } from "./day-anchor-edit";
-import { dayTripSuggestion } from "./day-trip";
+import { acceptDayTrip, dayTripSuggestion, dismissDayTrip } from "./day-trip";
 
 vi.mock("~encore/auth", () => ({ getAuthData: vi.fn() }));
 
@@ -286,5 +286,104 @@ describe("the frame around it", () => {
   it("refuses a leg this trip does not have", async () => {
     const p = await thinPlan();
     await expect(dayTripSuggestion({ planId: p.id, legIndex: 7 })).rejects.toThrow(/leg 7/);
+  });
+});
+
+describe("accepting it", () => {
+  it("turns the suggestion into that day's trip", async () => {
+    const p = await thinPlan();
+    geo.setDayTargets("nom_centro", [target()]);
+    const before = await dayTripSuggestion({ planId: p.id });
+    const key = before.suggestion!.target.key;
+    const dayIndex = before.suggestion!.dayIndex;
+
+    const after = await acceptDayTrip({ planId: p.id, key });
+
+    const day = after.plan.legs[0].days.find((d) => d.dayIndex === dayIndex);
+    expect(day?.anchor?.label).toBe("Beispielstadt");
+    expect(day?.anchor?.lat).toBeCloseTo(CITY.lat, 4);
+  });
+
+  it("puts it on the day somebody picked, when they picked one", async () => {
+    const p = await thinPlan();
+    geo.setDayTargets("nom_centro", [target()]);
+    const key = (await dayTripSuggestion({ planId: p.id })).suggestion!.target.key;
+
+    const after = await acceptDayTrip({ planId: p.id, key, dayIndex: 3 });
+
+    expect(after.plan.legs[0].days.find((d) => d.dayIndex === 3)?.anchor?.label)
+      .toBe("Beispielstadt");
+  });
+
+  it("refuses a suggestion that no longer stands", async () => {
+    // Where a day happens is not something a request may state, so the
+    // destination is looked up again — and if it is gone, so is the
+    // acceptance (§4.5).
+    const p = await thinPlan();
+    geo.setDayTargets("nom_centro", [target()]);
+    await expect(acceptDayTrip({ planId: p.id, key: "area:999" }))
+      .rejects.toThrow(/gilt nicht mehr/);
+  });
+
+  it("refuses a day this leg does not have", async () => {
+    const p = await thinPlan();
+    geo.setDayTargets("nom_centro", [target()]);
+    const key = (await dayTripSuggestion({ planId: p.id })).suggestion!.target.key;
+    await expect(acceptDayTrip({ planId: p.id, key, dayIndex: 9 }))
+      .rejects.toThrow(/day 9/);
+  });
+});
+
+describe("waving it away", () => {
+  it("does not come back with the same place", async () => {
+    const p = await thinPlan();
+    geo.setDayTargets("nom_centro", [target()]);
+    const key = (await dayTripSuggestion({ planId: p.id })).suggestion!.target.key;
+
+    await dismissDayTrip({ planId: p.id, key, name: "Beispielstadt" });
+
+    const again = await dayTripSuggestion({ planId: p.id });
+    expect(again.suggestion).toBeNull();
+    // Still undersupplied — the leg did not get better, the planner
+    // just stopped asking (§6.4).
+    expect(again.undersupplied).toBe(true);
+  });
+
+  it("offers the next place instead of going quiet altogether", async () => {
+    const p = await thinPlan();
+    geo.setDayTargets("nom_centro", [
+      target(),
+      target({ name: "Zweitstadt Beispiel", osmRef: "area:901", spotCount: 30 }),
+    ]);
+    const key = (await dayTripSuggestion({ planId: p.id })).suggestion!.target.key;
+
+    await dismissDayTrip({ planId: p.id, key });
+
+    expect((await dayTripSuggestion({ planId: p.id })).suggestion?.target.name)
+      .toBe("Zweitstadt Beispiel");
+  });
+
+  it("takes the same no twice without piling up", async () => {
+    const p = await thinPlan();
+    geo.setDayTargets("nom_centro", [target()]);
+    const key = (await dayTripSuggestion({ planId: p.id })).suggestion!.target.key;
+
+    await dismissDayTrip({ planId: p.id, key });
+    const second = await dismissDayTrip({ planId: p.id, key });
+    expect(second.dismissed).toBe(true);
+  });
+
+  it("names a place with no boundary by where it is", async () => {
+    // A cluster has no OSM reference to remember it by, so the key is
+    // its rounded position — and it has to survive a re-plan.
+    const p = await thinPlan();
+    geo.setDayTargets("nom_centro", [
+      target({ name: "Beispieltal", source: "cluster", osmRef: null }),
+    ]);
+    const key = (await dayTripSuggestion({ planId: p.id })).suggestion!.target.key;
+    expect(key).toMatch(/^at:/);
+
+    await dismissDayTrip({ planId: p.id, key });
+    expect((await dayTripSuggestion({ planId: p.id })).suggestion).toBeNull();
   });
 });
