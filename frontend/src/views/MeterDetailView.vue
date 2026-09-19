@@ -48,6 +48,8 @@ import {
 } from '../api/meters'
 import { listGroups, type GroupSummary } from '../api/documents'
 import MeterReadingTransactionsDialog from '../components/MeterReadingTransactionsDialog.vue'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 import { decimalInputPt } from '../utils/inputNumberPt'
@@ -757,25 +759,27 @@ watch(meterId, () => loadDetail())
 </script>
 
 <template>
-  <div class="meter-detail-view">
+  <PageLayout :title="detail?.name ?? 'Zähler'" width="normal" :ready="!loading">
+    <template #actions>
+      <Button class="back-button" icon="pi pi-arrow-left" text rounded severity="secondary" @click="router.push({ name: 'zaehler-list' })" v-tooltip.right="'Zurück'" />
+      <template v-if="!loading && detail">
+        <Button v-if="canEnter" label="Neue Ablesung" icon="pi pi-plus" size="small" @click="openReadingEntry" />
+        <Button v-if="canManage" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit" />
+        <Button v-if="canManage" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete" />
+      </template>
+    </template>
+
+    <template #notice>
+      <Message v-if="!loading && detail && error" severity="error" @close="error = ''" closable>{{ error }}</Message>
+    </template>
+
     <div v-if="loading" class="info"><i class="pi pi-spin pi-spinner" /> Wird geladen…</div>
     <template v-else-if="detail">
-      <!-- Header -->
-      <div class="detail-top">
-        <Button class="back-button" icon="pi pi-arrow-left" text rounded severity="secondary" @click="router.push({ name: 'zaehler-list' })" v-tooltip.right="'Zurück'" />
-        <div class="detail-top-actions">
-          <Button v-if="canEnter" label="Neue Ablesung" icon="pi pi-plus" size="small" @click="openReadingEntry" />
-          <Button v-if="canManage" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit" />
-          <Button v-if="canManage" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete" />
-        </div>
-        <div class="detail-title">
-          <h1><i :class="typeIcon(detail.type)" /> <span class="meter-name">{{ detail.name }}</span></h1>
-          <div class="detail-subtitle">
-            <Tag :value="typeLabel(detail.type)" severity="secondary" />
-            <Tag v-if="detail.role" :value="roleLabel(detail.role)" severity="info" />
-            <span v-if="detail.location"><i class="pi pi-map-marker" /> {{ detail.location }}</span>
-          </div>
-        </div>
+      <div class="detail-subtitle">
+        <i :class="typeIcon(detail.type)" />
+        <Tag :value="typeLabel(detail.type)" severity="secondary" />
+        <Tag v-if="detail.role" :value="roleLabel(detail.role)" severity="info" />
+        <span v-if="detail.location"><i class="pi pi-map-marker" /> {{ detail.location }}</span>
       </div>
 
       <!-- Figures -->
@@ -794,8 +798,6 @@ watch(meterId, () => loadDetail())
           <span class="figure-value figure-value--wrap">{{ detail.activeDeviceSerial ?? '–' }}</span>
         </div>
       </div>
-
-      <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
 
       <!-- Report -->
       <div class="section-header">
@@ -821,7 +823,8 @@ watch(meterId, () => loadDetail())
         <div v-if="reportChartData" class="report-chart">
           <Chart type="bar" :data="reportChartData" :options="reportChartOptions" />
         </div>
-        <DataTable :value="reportTableBuckets" size="small" class="report-table">
+        <ScrollX class="report-table">
+        <DataTable :value="reportTableBuckets" size="small">
           <Column field="label" :header="METER_REPORT_GRANULARITY_LABELS[reportGranularity]">
             <template #body="{ data }">
               {{ data.label }}
@@ -862,6 +865,7 @@ watch(meterId, () => loadDetail())
             <template #body="{ data }">{{ fmtReportDate(data.endReadingAt) }}</template>
           </Column>
         </DataTable>
+        </ScrollX>
       </div>
 
       <!-- Device history -->
@@ -869,7 +873,8 @@ watch(meterId, () => loadDetail())
         <h2><i class="pi pi-cog" /> Gerätehistorie</h2>
         <Button v-if="canManage" label="Gerät ersetzen" icon="pi pi-refresh" size="small" @click="openReplace" />
       </div>
-      <DataTable :value="detail.devices" size="small" class="device-table">
+      <ScrollX class="device-table">
+      <DataTable :value="detail.devices" size="small">
         <Column field="serialNumber" header="Seriennummer">
           <template #body="{ data }">{{ data.serialNumber ?? '–' }}</template>
         </Column>
@@ -908,6 +913,7 @@ watch(meterId, () => loadDetail())
           </template>
         </Column>
       </DataTable>
+      </ScrollX>
 
       <!-- Readings -->
       <div class="section-header">
@@ -916,7 +922,8 @@ watch(meterId, () => loadDetail())
       </div>
       <div v-if="loadingReadings" class="info"><i class="pi pi-spin pi-spinner" /> Ablesungen…</div>
       <div v-else-if="readings.length === 0" class="info">Noch keine Ablesungen erfasst.</div>
-      <DataTable v-else :value="readings" size="small" class="readings-table" lazy paginator :rows="readingsRows" :total-records="totalReadings" :first="readingsFirst" @page="onReadingsPage">
+      <ScrollX v-else class="readings-table">
+      <DataTable :value="readings" size="small" lazy paginator :rows="readingsRows" :total-records="totalReadings" :first="readingsFirst" @page="onReadingsPage">
         <Column header="Datum">
           <template #body="{ data }">{{ fmtDateTime(data.takenAt) }}</template>
         </Column>
@@ -957,6 +964,7 @@ watch(meterId, () => loadDetail())
           </template>
         </Column>
       </DataTable>
+      </ScrollX>
 
       <!-- API keys -->
       <template v-if="canManage">
@@ -966,7 +974,8 @@ watch(meterId, () => loadDetail())
         </div>
         <div v-if="loadingKeys" class="info"><i class="pi pi-spin pi-spinner" /> Keys…</div>
         <div v-else-if="apiKeys.length === 0" class="info">Keine API-Keys vorhanden.</div>
-        <DataTable v-else :value="apiKeys" size="small" class="keys-table">
+        <ScrollX v-else class="keys-table">
+        <DataTable :value="apiKeys" size="small">
           <Column field="name" header="Name" />
           <Column header="Erstellt">
             <template #body="{ data }">{{ fmtDateTime(data.createdAt) }}</template>
@@ -985,6 +994,7 @@ watch(meterId, () => loadDetail())
             </template>
           </Column>
         </DataTable>
+        </ScrollX>
       </template>
     </template>
     <div v-else class="info">Zähler nicht gefunden.</div>
@@ -1146,70 +1156,27 @@ watch(meterId, () => loadDetail())
         </template>
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.meter-detail-view {
-  padding: 1rem;
-  max-width: 1100px;
-  margin: 0 auto;
-  overflow-x: clip;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 .info {
   padding: 2rem;
   text-align: center;
   color: var(--p-text-muted-color);
 }
-.detail-top {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
-.detail-title {
-  flex: 1 1 16rem;
-  min-width: 0;
-  margin-left: auto;
-  text-align: right;
-}
-.detail-title h1 {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 0;
-  font-size: 1.4rem;
-  line-height: 1.2;
-}
-.detail-title h1 i {
-  flex: 0 0 auto;
-}
-.meter-name {
-  min-width: 0;
-  overflow-wrap: break-word;
-  word-break: normal;
-}
 .detail-subtitle {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 0.75rem;
-  margin-top: 0.25rem;
+  margin-bottom: 1rem;
   color: var(--p-text-muted-color);
   font-size: 0.85rem;
   flex-wrap: wrap;
 }
 .detail-subtitle i {
   margin-right: 0.2rem;
-}
-.detail-top-actions {
-  display: flex;
-  gap: 0.25rem;
-  align-items: center;
-  flex-wrap: wrap;
-  min-width: 0;
 }
 .figures-bar {
   display: flex;
@@ -1278,21 +1245,15 @@ watch(meterId, () => loadDetail())
 .report-table {
   margin-top: 1rem;
 }
-.meter-detail-view :deep(.p-datatable) {
-  max-width: 100%;
-}
-/* Narrow screens: scroll the table horizontally instead of squeezing every
-   column until headers overlap and values break apart character by character. */
-.meter-detail-view :deep(.p-datatable-table-container) {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.meter-detail-view :deep(.p-datatable-table) {
+/* Narrow screens: the ScrollX wrapper scrolls the table horizontally instead
+   of squeezing every column until headers overlap and values break apart
+   character by character. */
+:deep(.p-datatable-table) {
   width: 100%;
   table-layout: auto;
 }
-.meter-detail-view :deep(.p-datatable-thead > tr > th),
-.meter-detail-view :deep(.p-datatable-tbody > tr > td) {
+:deep(.p-datatable-thead > tr > th),
+:deep(.p-datatable-tbody > tr > td) {
   white-space: nowrap;
 }
 .report-table :deep(.p-datatable-table) {
@@ -1315,18 +1276,6 @@ watch(meterId, () => loadDetail())
   vertical-align: bottom;
 }
 @media (max-width: 560px) {
-  .detail-title {
-    flex-basis: 100%;
-    margin-left: 0;
-    text-align: left;
-  }
-  .detail-title h1,
-  .detail-subtitle {
-    justify-content: flex-start;
-  }
-  .detail-top-actions :deep(.p-button-label) {
-    display: none;
-  }
   .section-header {
     align-items: flex-start;
     gap: 0.75rem;

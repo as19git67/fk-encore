@@ -7,6 +7,7 @@ import Select from 'primevue/select'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import { getUser, deleteUser, type UserWithRoles } from '../api/users'
 import { listRoles, assignRole, removeRole } from '../api/roles'
 import type { Role } from '../api/users'
@@ -97,15 +98,18 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div v-if="loading" class="loading">Laden...</div>
-  <div class="user-detail-view" v-else-if="user">
-    <div class="header-row">
-      <h1 class="title">{{ user.name }}</h1>
-      <Button v-if="auth.hasPermission('users.delete')" label="Benutzer löschen" icon="pi pi-trash" severity="danger" outlined @click="showDeleteConfirm = true" />
-    </div>
+  <PageLayout :title="user?.name ?? 'Benutzer'" width="normal" :ready="!loading">
+    <template #actions>
+      <Button v-if="!loading && user && auth.hasPermission('users.delete')" label="Benutzer löschen" icon="pi pi-trash" severity="danger" outlined @click="showDeleteConfirm = true" />
+    </template>
 
-    <Message v-if="error" severity="error" :closable="false" class="mb">{{ error }}</Message>
+    <template #notice>
+      <Message v-if="!loading && user && error" severity="error" :closable="false">{{ error }}</Message>
+      <Message v-if="!loading && !user" severity="error" :closable="false">Benutzer nicht gefunden.</Message>
+    </template>
 
+    <div v-if="loading" class="loading">Laden...</div>
+    <div class="user-detail-view" v-else-if="user">
     <!-- Confirm Delete Dialog -->
     <Dialog v-model:visible="showDeleteConfirm" header="Benutzer löschen" :modal="true" :style="{ width: '400px' }">
       <p>Benutzer <strong>{{ user.name }}</strong> wirklich löschen?</p>
@@ -173,37 +177,16 @@ onMounted(loadData)
         </div>
       </template>
     </Card>
-  </div>
-  <div v-else>
-    <Message severity="error" :closable="false">Benutzer nicht gefunden.</Message>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
+/* Page frame and title: PageLayout (issue #1272). */
 .user-detail-view {
   gap: 1rem;
   display: flex;
   flex-direction: column;
-}
-
-@media (min-width: 800px) {
-  .user-detail-view {
-    margin-inline: 0.5em;
-  }
-}
-
-.user-detail-view .title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
-}
-
-.header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-block: 0.25rem;
-  margin-bottom: 1rem;
 }
 
 .detail-grid {

@@ -32,6 +32,7 @@ import {
 } from "../db/schema";
 import { storedExtent } from "./extent";
 import { spillOver } from "./spill";
+import { passedBy } from "./on-the-way";
 import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
@@ -1110,9 +1111,12 @@ export async function loadPlan(
       // all three. The app needs it for one sentence — "Pisa · 1 h 10
       // hin und zurück" — and computing it a second time in Swift would
       // be a second travel model (§4.5).
-      days: withTravel(daysByLeg.get(l.id) ?? [],
-                       { lat: l.anchor_lat, lon: l.anchor_lon },
-                       l.mode as TransportMode),
+      days: withPassed(
+        withTravel(daysByLeg.get(l.id) ?? [],
+                   { lat: l.anchor_lat, lon: l.anchor_lon },
+                   l.mode as TransportMode),
+        poolByLeg.get(l.id) ?? [],
+      ),
       pool: poolByLeg.get(l.id) ?? [],
     })),
   };
@@ -1452,6 +1456,39 @@ function withTravel(
           ).minutes,
         },
       });
+}
+
+/**
+ * What each route on these days walks past (§4.7).
+ *
+ * Derived here rather than stored on the stop, for the reason the
+ * travel time above is: it follows from the route's two ends and the
+ * pool beside it, and a stored copy would drift the moment somebody
+ * added a find along the way. The planner leaves these candidates in
+ * the pool on purpose — they are passed, not turned down — so they are
+ * still here to be named.
+ */
+function withPassed(days: StoredDay[], pool: readonly StoredCandidate[]): StoredDay[] {
+  if (pool.length === 0) return days;
+  return days.map((day) => ({
+    ...day,
+    blocks: day.blocks.map((block) => ({
+      ...block,
+      stops: block.stops.map((stop) => {
+        if (!stop.extent?.end) return stop;
+        const passed = passedBy(stop, pool);
+        return passed.length === 0
+          ? stop
+          : {
+            ...stop,
+            passes: passed.map((p) => {
+              const entry = pool.find((c) => c.osmRef === p.osmRef);
+              return { osmRef: p.osmRef, name: entry?.title ?? entry?.name ?? null };
+            }),
+          };
+      }),
+    })),
+  }));
 }
 
 export async function setDayAnchor(

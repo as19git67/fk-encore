@@ -2,6 +2,7 @@
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
@@ -17,12 +18,12 @@ function goBack() {
 </script>
 
 <template>
-  <div class="help-view">
-    <div class="header">
+  <PageLayout title="Dokumente – Hilfe" width="normal">
+    <template #actions>
       <Button icon="pi pi-arrow-left" label="Zurück" text @click="goBack" />
-      <h1 class="title"><i class="pi pi-question-circle" /> Dokumente – Hilfe</h1>
-    </div>
+    </template>
 
+    <div class="content">
     <p class="intro">
       Das Dokumente-Modul verwaltet PDFs deiner Gruppen. Nach dem Upload
       werden Text extrahiert und Inhalte von einer lokalen KI klassifiziert:
@@ -344,38 +345,16 @@ function goBack() {
         @click="router.push({ name: 'dokumente-list' })"
       />
     </div>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.help-view {
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  width: 100%;
-  max-width: 880px;
-  margin: 0 auto;
-  padding-inline: 0.5em;
-}
-
-@media (min-width: 800px) {
-  .help-view { padding-inline: 1em; }
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-block: 0.25rem 0.5rem;
-  flex-wrap: wrap;
-}
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
 }
 
 .intro {

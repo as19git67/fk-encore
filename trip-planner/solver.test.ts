@@ -428,3 +428,68 @@ describe("a spot with an extent (§4.7)", () => {
     expect(blocks[1].stops[0].travelFromPrevious.distanceM).toBeLessThan(600);
   });
 });
+
+describe("what a route walks past (§4.7)", () => {
+  const ROUTE_END = north(8_000);
+  /** East of a point by roughly `metres`, at this latitude. */
+  function east(of: { lat: number; lon: number }, metres: number) {
+    return { lat: of.lat, lon: of.lon + metres / (111_320 * Math.cos((of.lat * Math.PI) / 180)) };
+  }
+  const route = candidate({
+    osmRef: "manual:route",
+    ...north(200),
+    category: "route",
+    dwellMinutes: 90,
+    score: 5,
+    extent: { end: ROUTE_END },
+  });
+
+  it("does not also plan a viewpoint that lies on the route", () => {
+    // Eighty metres off the line, halfway along: you walk past it.
+    const onTheWay = candidate({ osmRef: "node:on", ...east(north(4_000), 80), score: 4 });
+    const { blocks, unplaced } = solveDay({
+      anchor: ANCHOR,
+      end: ROUTE_END,
+      blocks: blocksOf([
+        { id: "morning", label: "Vormittag", kind: "spots", baseBudgetMinutes: 600 },
+      ]),
+      candidates: [route, onTheWay],
+      maxWalkMinutes: 400,
+    });
+    expect(blocks[0].stops.map((s) => s.osmRef)).toEqual(["manual:route"]);
+    // Passed, not turned down: it stays available, so a day without
+    // the route can still offer it.
+    expect(unplaced.map((c) => c.osmRef)).toEqual(["node:on"]);
+  });
+
+  it("still plans a spot that is merely nearby", () => {
+    const beside = candidate({ osmRef: "node:beside", ...east(north(4_000), 900), score: 4 });
+    const { blocks } = solveDay({
+      anchor: ANCHOR,
+      end: ROUTE_END,
+      blocks: blocksOf([
+        { id: "morning", label: "Vormittag", kind: "spots", baseBudgetMinutes: 600 },
+      ]),
+      candidates: [route, beside],
+      maxWalkMinutes: 400,
+    });
+    expect(blocks[0].stops.map((s) => s.osmRef).sort()).toEqual(["manual:route", "node:beside"]);
+  });
+
+  it("keeps a passed spot out of every later block too", () => {
+    // You walk past it in the morning; planning it after lunch is the
+    // same mistake one block later.
+    const onTheWay = candidate({ osmRef: "node:on", ...east(north(4_000), 80), score: 4 });
+    const { blocks } = solveDay({
+      anchor: ANCHOR,
+      end: ROUTE_END,
+      blocks: blocksOf([
+        { id: "morning", label: "Vormittag", kind: "spots", baseBudgetMinutes: 300 },
+        { id: "afternoon", label: "Nachmittag", kind: "spots", baseBudgetMinutes: 300 },
+      ]),
+      candidates: [route, onTheWay],
+      maxWalkMinutes: 400,
+    });
+    expect(blocks.flatMap((b) => b.stops).map((s) => s.osmRef)).toEqual(["manual:route"]);
+  });
+});

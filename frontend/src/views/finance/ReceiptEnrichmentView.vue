@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
+import PageLayout from '../../components/layout/PageLayout.vue'
 import DocumentThumbnail from '../../components/DocumentThumbnail.vue'
 import * as api from '../../api/finance'
 import type { ReceiptEnrichmentItem } from '../../api/finance'
@@ -175,28 +176,24 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="re-view">
-    <header class="re-header">
-      <div class="re-header-left">
-        <h2 class="re-title">
-          Belegabgleich
-          <span v-if="pendingCount" class="re-count">({{ pendingCount }})</span>
-        </h2>
-        <p class="re-sub">
-          Buchungen mit fotografierten Belegen, die vom Server erkannt wurden.
-        </p>
-      </div>
-      <div class="re-header-right">
-        <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
-      </div>
-    </header>
+  <PageLayout
+    :title="pendingCount ? `Belegabgleich (${pendingCount})` : 'Belegabgleich'"
+    hint="Buchungen mit fotografierten Belegen, die vom Server erkannt wurden."
+    width="normal"
+    :ready="!loading"
+  >
+    <template #actions>
+      <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
+    </template>
 
-    <Message v-if="info" severity="success" :closable="true" @close="info = ''">
-      {{ info }}
-    </Message>
-    <Message v-if="loadError" severity="error" :closable="true" @close="loadError = ''">
-      {{ loadError }}
-    </Message>
+    <template #notice>
+      <Message v-if="info" severity="success" :closable="true" @close="info = ''">
+        {{ info }}
+      </Message>
+      <Message v-if="loadError" severity="error" :closable="true" @close="loadError = ''">
+        {{ loadError }}
+      </Message>
+    </template>
 
     <div v-if="!loading && items.length === 0 && !loadError" class="re-empty">
       <i class="pi pi-check-circle" />
@@ -268,45 +265,11 @@ onMounted(load)
       {{ processingCount }} {{ processingCount === 1 ? 'Beleg wird' : 'Belege werden' }} noch verarbeitet.
       Die Ergebnisse erscheinen hier automatisch.
     </div>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.re-view {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.re-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.re-title {
-  font-size: 1.4rem;
-  font-weight: 600;
-  margin: 0;
-}
-.re-count {
-  font-weight: 400;
-  color: var(--p-text-muted-color);
-  margin-left: 6px;
-}
-.re-sub {
-  margin: 4px 0 0;
-  color: var(--p-text-muted-color);
-  font-size: 0.85rem;
-}
-.re-header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+/* Page frame and title: PageLayout (issue #1272). */
 .re-empty {
   text-align: center;
   color: var(--p-text-muted-color);

@@ -6,6 +6,7 @@ import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
+import PageLayout from '../../components/layout/PageLayout.vue'
 import { useOverviewStore } from '../../stores/finance/overview'
 import { useAnomalyStore } from '../../stores/finance/anomalies'
 import { useAuthStore } from '../../stores/auth'
@@ -182,10 +183,22 @@ async function saveConfig() {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Übersicht</h1>
-    </header>
+  <PageLayout title="Übersicht" width="wide" :ready="!(store.loading && !store.data)">
+    <template #notice>
+      <Message v-if="store.error" severity="error" :closable="false">
+        {{ store.error }}
+      </Message>
+
+      <Message
+        v-if="store.data?.is_default && !store.error"
+        severity="info"
+        :closable="false"
+      >
+        Diese Übersicht wird gerade aus deinen Kontotypen abgeleitet. Über
+        „Übersicht konfigurieren" kannst du eigene Gruppen anlegen und die
+        Reihenfolge anpassen.
+      </Message>
+    </template>
 
     <div
       v-if="anomalyStore.count > 0"
@@ -210,20 +223,6 @@ async function saveConfig() {
       </div>
       <i class="pi pi-chevron-right tile-chevron" />
     </div>
-
-    <Message v-if="store.error" severity="error" :closable="false">
-      {{ store.error }}
-    </Message>
-
-    <Message
-      v-if="store.data?.is_default && !store.error"
-      severity="info"
-      :closable="false"
-    >
-      Diese Übersicht wird gerade aus deinen Kontotypen abgeleitet. Über
-      „Übersicht konfigurieren" kannst du eigene Gruppen anlegen und die
-      Reihenfolge anpassen.
-    </Message>
 
     <div v-if="store.loading && !store.data" class="loading">Lädt …</div>
 
@@ -442,18 +441,13 @@ async function saveConfig() {
         />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  padding: 1.5rem;
-}
-
+/* Page frame and title: PageLayout (issue #1272). */
 .anomaly-tile {
+  margin-bottom: 1.25rem;
   display: flex;
   align-items: center;
   gap: 0.85rem;
@@ -490,24 +484,6 @@ async function saveConfig() {
 .anomaly-tile .tile-chevron {
   color: var(--p-text-muted-color);
 }
-@media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
-    gap: 1rem;
-  }
-}
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.page-header h1 {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
 .loading,
 .empty {
   color: var(--p-text-muted-color);
@@ -517,6 +493,9 @@ async function saveConfig() {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+.overview-section + .overview-section {
+  margin-top: 1.25rem;
 }
 .overview-section h2 {
   margin: 0;
@@ -700,5 +679,14 @@ async function saveConfig() {
 .cfg-pool-title {
   font-size: 1rem;
   margin: 1rem 0 0.5rem;
+}
+/* Tighter vertical rhythm on narrow screens (was the page gap). */
+@media (max-width: 640px) {
+  .anomaly-tile {
+    margin-bottom: 1rem;
+  }
+  .overview-section + .overview-section {
+    margin-top: 1rem;
+  }
 }
 </style>

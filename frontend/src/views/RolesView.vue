@@ -8,6 +8,8 @@ import Chip from 'primevue/chip'
 import Dialog from 'primevue/dialog'
 import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
 import {
   listRoles,
   createRole,
@@ -129,10 +131,10 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="role-management-view">
-    <h1 class="title">Rollen & Berechtigungen</h1>
-
-    <Message v-if="error" severity="error" :closable="false" class="mb">{{ error }}</Message>
+  <PageLayout title="Rollen & Berechtigungen" width="wide" :ready="!loading">
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    </template>
 
     <div v-if="auth.hasPermission('roles.create')" class="create-form mb">
       <InputText v-model="newRoleName" placeholder="Rollenname" />
@@ -146,6 +148,7 @@ onMounted(loadData)
       />
     </div>
 
+    <ScrollX>
     <DataTable
       :value="roles"
       :loading="loading"
@@ -188,6 +191,7 @@ onMounted(loadData)
         </template>
       </Column>
     </DataTable>
+    </ScrollX>
 
     <!-- Delete Confirmation Dialog -->
     <Dialog v-model:visible="showDeleteConfirm" header="Rolle löschen" :modal="true" :style="{ width: '400px' }">
@@ -223,28 +227,11 @@ onMounted(loadData)
         </div>
       </div>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.role-management-view {
-  gap: 1rem;
-  display: flex;
-  flex-direction: column;
-}
-
-@media (min-width: 800px) {
-  .role-management-view {
-    margin-inline: 0.5em;
-  }
-}
-
-.role-management-view .title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
-}
-
+/* Page frame and title: PageLayout (issue #1272). */
 .create-form {
   display: flex;
   gap: 0.5rem;
