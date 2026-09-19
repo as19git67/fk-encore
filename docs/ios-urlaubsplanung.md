@@ -3210,6 +3210,11 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    ist das der richtige Tausch, und wenn ein Router kommt, bleibt die
    Ellipse der billige Vorfilter davor.
 
+   **Was daran noch fehlt, ist der Fall und nicht die Rechnung** (§22):
+   Keine Oberfläche ruft den Endpunkt auf, und es führt kein Weg von einem
+   gefundenen Spot zu einem Stopp im Anreisetag. Woran das hängt — ein Stopp,
+   der unterwegs liegt und damit keiner Etappe gehört — steht in §22.4.
+
    **Teilweise umgesetzt — Etappen.** Ein Plan ist jetzt eine Liste von
    Etappen statt eines einzelnen Ankers. Jede Etappe hat eigenen Anker,
    eigenen Fortbewegungsmodus, eigene Regionsdatenbank, optionales
@@ -4397,6 +4402,10 @@ gebuchte Unterkünfte, der **Modus je Etappe** samt Moduswechsel als Fixpunkt,
 und die **Korridorsuche mit Umwegbudget** samt der Ellipsen-Vorfilterung, die
 ohne Router auskommt.
 
+Von den dreien ist die Korridorsuche die einzige, die gebaut wurde und trotzdem
+niemanden erreicht: Der Zwischenstopp oben lässt sich heute nicht anbieten und
+nicht annehmen. §22 sagt, was dafür fehlt.
+
 ---
 
 ## 18. Durchgespielt: ein Tag Nürnberg mit dem Zug
@@ -4882,3 +4891,95 @@ Transfer) sind zusammen eine Etappe für sich — nicht drei kleine Ergänzungen
 
 Bis dahin gilt der Behelf aus §21.1: die Landgänge einzeln planen und wissen,
 was einem dabei fehlt.
+
+---
+
+## 22. Offen: Spots auf dem Weg — der gebaute Mechanismus ohne seinen Fall
+
+> Wir fahren mit dem Auto hin. Unterwegs kommen wir doch an interessanten
+> Dingen vorbei — ein kleiner Umweg wäre uns das wert.
+
+Dieser Wunsch ist im Konzept schon zweimal beantwortet, und trotzdem kann
+ihn heute niemand benutzen. Das ist der Grund, warum er hier als eigener
+offener Fall steht und nicht als neue Idee: Was fehlt, ist nicht der
+schwierige Teil.
+
+### 22.1 Was es schon gibt
+
+- **Die Rechnung** (§4.2): Spots, die die Fahrt um höchstens *n* Minuten
+  verlängern, sind die Punkte innerhalb einer **Ellipse mit Start und Ziel
+  als Brennpunkten**. Eine einzige Bedingung in PostGIS, die aus einem ganzen
+  Land ein schmales Band schneidet, ganz ohne Router.
+- **Der durchgespielte Tag** (§17.2): Augsburg–Prag, Check-in erst ab 15 Uhr.
+  Der Check-in ist dort nicht das Hindernis, sondern die **Quelle** des freien
+  Fensters — wer um acht losfährt, stünde sonst um zwölf vor einer
+  verschlossenen Rezeption. Der Zwischenstopp von rund zwei Stunden liegt im
+  Mittagsblock, und die Umwegzeit steht als Kennzahl am Vorschlag („+5 Min.",
+  „+25 Min.").
+- **Der Endpunkt**: `POST /trip-planner/corridor`, samt der drei Entscheidungen
+  in §13.1 Schritt 6 — das Budget zählt hin **und** zurück, die Ellipse reicht
+  über beide Brennpunkte hinaus, und beide Enden müssen in derselben
+  importierten Region liegen.
+
+### 22.2 Warum der Fall trotzdem offen ist
+
+**Niemand ruft ihn auf.** Weder die iOS-App noch das Web kennen den Endpunkt.
+Ein gebauter Endpunkt, den keine Oberfläche erreicht, ist für den Reisenden
+kein Feature — er ist eine Zusicherung, die niemand einlösen kann.
+
+**Und es führt kein Weg vom Ergebnis in den Tag.** Die Antwort ist eine Liste.
+§17.2 sagt „ein kleiner Vorrat …, über den ihr entscheidet" — nur gibt es
+nichts zu entscheiden: Kein Aufruf macht aus einem gefundenen Spot einen
+Stopp im Anreisetag.
+
+### 22.3 Was der Fall verlangt
+
+Vier Dinge, und nur das letzte ist schwierig:
+
+1. **Der Anlass, nicht die Suche.** Gefragt wird, weil ein Transfer ansteht und
+   der Tag Luft hat — nicht, weil jemand einen Suchbildschirm öffnet. §4.6 hat
+   die Form gerade vorgemacht: messen, dann einen Vorschlag, der nichts
+   schreibt.
+2. **Das Budget aus dem Tag, nicht aus der Luft.** Nicht „n Minuten" als
+   gesetzte Zahl, sondern was die Fixpunkte hergeben: Abfahrt plus Fahrzeit
+   gegen den Check-in. §17.2 rechnet genau das vor — und dieselbe Rechnung
+   gilt am Abreisetag rückwärts (§4.4).
+3. **Die Kennzahl am Vorschlag.** „+25 Min." ist das, woran man einen Umweg
+   abwägt, und es muss dort stehen, wo entschieden wird.
+4. **Wohin der Stopp gehört.** Hier liegt die eigentliche Frage.
+
+### 22.4 Die Modellfrage: ein Stopp, der keiner Etappe gehört
+
+Heute hängt ein Stopp an einem Block, ein Block an einem Tag, ein Tag an einer
+Etappe — und eine Etappe an ihrem Anker. Ein Korridorstopp passt in keines
+davon: Er findet **unterwegs** statt, zwischen zwei Ankern, und der Tag fährt
+danach weiter.
+
+Der Tagesanker (§4.5) ist das Nächstliegende und meint etwas anderes: „dieser
+Tag findet dort statt", mit Hin- und Rückweg aus den Blöcken dieses Tages. Ein
+Zwischenstopp ist kein Ziel, sondern eine Unterbrechung.
+
+Damit stehen zwei Wege offen, und es ist dieselbe Art von Frage wie in §21:
+
+- **Der Transfer lernt, Stopps zu tragen.** §4.2 nennt ihn bereits ein
+  Planungsobjekt; heute ist er ein Fixpunkt, der einen halben Tag frisst, und
+  trägt nichts. Das wäre die ehrliche Stelle — und §21.3 will vom Transfer
+  ohnehin, dass er mehr sagen kann als heute (dort: *dieser wird nicht
+  geplant*).
+- **Der Anreisetag bekennt sich zu einem Block, dessen Ort nicht am Anker
+  liegt.** Weniger Umbau, aber es weicht die Regel auf, dass ein Tag um einen
+  Ort herum geplant wird — und genau die trägt die Blockbudgets.
+
+### 22.5 Was daraus folgt
+
+Der schwierige Teil ist erledigt: Die Ellipse steht, ist getestet und kommt
+ohne Router aus. Was fehlt, ist der Weg vom Endpunkt in den Tag, und der hängt
+an der Frage aus §22.4 — die mit §21s „ortlosem Tag" und der „mitfahrenden
+Unterkunft" eine gemeinsame Wurzel hat: **Das Modell kennt Orte, an denen man
+bleibt, und keine, an denen man vorbeikommt.**
+
+Bis dahin der Behelf, und er ist brauchbar: den Zwischenstopp als Fund anlegen
+(§9.2) und von Hand in einen Block des Anreisetags legen. Die Fahrzeit rechnet
+der Plan dann falsch — er misst vom Anker der Etappe statt von der Strecke —,
+aber der Stopp steht im Tag, mit Namen und Dauer, und niemand vergisst ihn
+unterwegs.
