@@ -103,35 +103,63 @@ final class TripPassedSpotTests: XCTestCase {
 }
 
 /// A signposted way out of OpenStreetMap (§4.7), as the list shows it.
+///
+/// Built from named parameters rather than by appending to a JSON
+/// string, because appending cannot override a key that is already
+/// there: `JSONDecoder` keeps the first of two, so the override is
+/// silently ignored and the test asserts against the default.
 @MainActor
 final class TripNearbyRouteTests: XCTestCase {
 
-    private func route(_ extra: String) throws -> TripNearbyRoute {
-        try JSONDecoder().decode(TripNearbyRoute.self, from: Data("""
-        { "osmRef": "relation:1", "name": "Panoramaweg Beispiel", "route": "hiking",
-          "network": null, "ref": null, "lengthM": 10400, "ascentM": 600,
-          "distanceM": 500, "estimatedMinutes": 210, "roundtrip": false,
-          "joined": true, "website": null, "difficulty": null, "inPool": false\(extra) }
-        """.utf8))
+    private func route(
+        kind: String = "hiking",
+        lengthM: Int = 10_400,
+        ascentM: Int? = 600,
+        roundtrip: Bool = false,
+        difficulty: String? = nil,
+        network: String? = nil
+    ) throws -> TripNearbyRoute {
+        func quoted(_ value: String?) -> String {
+            guard let value else { return "null" }
+            return "\"\(value)\""
+        }
+        func number(_ value: Int?) -> String {
+            guard let value else { return "null" }
+            return "\(value)"
+        }
+        let json = """
+        { "osmRef": "relation:1", "name": "Panoramaweg Beispiel",
+          "route": "\(kind)", "network": \(quoted(network)), "ref": null,
+          "lengthM": \(lengthM), "ascentM": \(number(ascentM)),
+          "distanceM": 500, "estimatedMinutes": 210,
+          "roundtrip": \(roundtrip), "joined": true, "website": null,
+          "difficulty": \(quoted(difficulty)), "inPool": false }
+        """
+        return try JSONDecoder().decode(TripNearbyRoute.self, from: Data(json.utf8))
     }
 
     func testTheSummarySaysWhatIsKnown() throws {
-        XCTAssertEqual(try route("").summary, "10,4 km · 600 Hm")
+        // Ten kilometres and up read as whole ones — the shared helper's
+        // rule, and the reason this is not "10,4 km".
+        XCTAssertEqual(try route().summary, "10 km · 600 Hm")
+        XCTAssertEqual(try route(lengthM: 2_500).summary, "2,5 km · 600 Hm")
     }
 
     func testItLeavesOutWhatTheMapDoesNotSay() throws {
         // No climb tagged: saying "0 Hm" would claim the way is flat.
-        XCTAssertEqual(try route(", \"ascentM\": null").summary, "10,4 km")
+        XCTAssertEqual(try route(ascentM: nil).summary, "10 km")
+        XCTAssertEqual(try route(ascentM: 0).summary, "10 km")
     }
 
     func testALoopAndItsGradeAreNamed() throws {
-        let loop = try route(", \"roundtrip\": true, \"difficulty\": \"T2\", \"network\": \"lwn\"")
-        XCTAssertEqual(loop.summary, "10,4 km · 600 Hm · Rundweg · T2 · LWN")
+        let loop = try route(roundtrip: true, difficulty: "T2", network: "lwn")
+        XCTAssertEqual(loop.summary, "10 km · 600 Hm · Rundweg · T2 · LWN")
     }
 
     func testWalkingAndRidingLookDifferent() throws {
-        XCTAssertEqual(try route("").symbolName, "figure.hiking")
-        XCTAssertEqual(try route(", \"route\": \"bicycle\"").symbolName, "bicycle")
-        XCTAssertEqual(try route(", \"route\": \"mtb\"").symbolName, "bicycle")
+        XCTAssertEqual(try route().symbolName, "figure.hiking")
+        XCTAssertEqual(try route(kind: "foot").symbolName, "figure.hiking")
+        XCTAssertEqual(try route(kind: "bicycle").symbolName, "bicycle")
+        XCTAssertEqual(try route(kind: "mtb").symbolName, "bicycle")
     }
 }
