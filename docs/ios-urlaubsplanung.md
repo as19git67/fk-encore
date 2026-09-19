@@ -4116,7 +4116,9 @@ während der Umsetzung entstehen, gehören hier ergänzt.
 
 Drei durchgespielte Fälle prüfen die Mechanik an ihren Rändern: eine lange
 Mehrstädtereise (§16), ein Kurztrip mit dem Auto und geplanter Anreise (§17) und
-ein einzelner Tagesausflug (§18). Jeder hat das Konzept verändert.
+ein einzelner Tagesausflug (§18). Jeder hat das Konzept verändert. Ein vierter
+steht aus und ist in §21 festgehalten: eine Kreuzfahrt, bei der die Unterkunft
+mitfährt und die Hälfte der Tage keinen Ort hat.
 
 Zuerst der lange Fall — **3.9. bis 22.9.2027,
 Tokio, Osaka und Hakata, zu zweit**. Bewusst ein harter Fall: lang, mehrere
@@ -4664,3 +4666,105 @@ Wenig, und fast alles davon existiert:
 Das ist der Grund, warum diese Erweiterung trotz ihres Umfangs spät und
 billig ist: Sie erfindet keinen Mechanismus, sie gibt den vorhandenen einen
 zweiten Anlass.
+
+---
+
+## 21. Offen durchzuspielen: 22 Tage Kreuzfahrt
+
+Die Fälle in §16 bis §18 sind durchgespielt und haben das Konzept verändert.
+Dieser ist es **noch nicht** — er steht hier, weil er an einer Stelle drückt,
+an der die bisherige Mechanik nicht nur knapp wird, sondern etwas anderes
+meint.
+
+**Der Fall:** eine Kreuzfahrt, 22 Tage, Hamburg nach New York. Dazwischen
+Häfen mit Landgang und Seetage ohne. Davor ein bis mehrere Nächte in Hamburg,
+weil man nicht am Ablegetag anreist.
+
+### 21.1 Die Grundsatzfrage: eine Reise oder viele?
+
+Die naheliegende Abkürzung wäre, jeden Landgang als eigene kleine Reise zu
+planen — ein Tagesausflug wie Nürnberg in §18, zehnmal. Das **funktioniert
+heute schon**, ohne eine Zeile Umbau, und ist bis auf Weiteres der ehrliche
+Behelf.
+
+Trotzdem ist es die falsche Antwort. **Es ist eine Reise.** Alles, was an
+einer Reise hängt, hängt an dieser einen: die Reisegruppe (§3.5), wer
+mitplant (§6), der gemeinsame Vorrat, die Packliste (§8.6), die
+Reisebereitschaft, der Rückblick (§8.7) und das Offline-Bündel (§3.9). Zehn
+Reisen bedeuten zehn Packlisten und zehn Rückblicke für eine Fahrt. Und der
+eine Faden, den man auf keinen Fall verlieren darf — wann das Schiff ablegt —
+gehört dem Ganzen, nicht zehn Einzeltagen.
+
+§4.2 sagt es bereits: Eine Etappe ist „eine Stadt bzw. **Station** der Reise".
+Ein Hafentag ist eine Station. Die Struktur ist also: Hamburg (Hotel) als
+gewöhnliche Etappe, danach je Hafen eine Etappe mit genau einem Tag, dazwischen
+die Seetage.
+
+### 21.2 Was schon passt
+
+Mehr, als man erwarten würde — was für die Etappen-Mechanik spricht:
+
+- **Ein Hafentag ist eine Etappe mit einem Tag.** §18 hat genau das bewiesen:
+  Anker ist nicht das Hotel, sondern der Bahnhof. Hier ist er der Liegeplatz.
+- **Ankunft und Abfahrt** sind da: `arriveMinutes` je Etappe (§4.2) und der
+  `departure`-Fixpunkt (§4.4), nach dem der Tag vorbei ist. „Ab 8 Uhr an
+  Land, 16:30 zurück an Bord" ist genau diese Form.
+- **Ein gebuchter Landausflug** ist ein Fixpunkt, der einen Block rahmt und
+  seinen Spot mitbringt — dieselbe Mechanik wie das Abendlicht in §7.3
+  (`blockId` + `spotRef`).
+- **Ein Vorrat je Etappe** (§4.2) heißt: je Hafen eigene Kandidaten. Richtig.
+- **Offline** (§3.9) ist hier wichtiger als irgendwo sonst: Auf See gibt es
+  kein Netz, und Roaming im Hafen ist teuer.
+
+### 21.3 Was fehlt, und warum es kein Detail ist
+
+Sechs Punkte. Die ersten drei sind Modellfragen, nicht Bequemlichkeiten:
+
+1. **Ein Tag ohne Ort.** Ein Seetag hat keinen Anker, keine Region, keinen
+   Vorrat — und mitten im Atlantik gibt es kein Geofabrik-Extrakt. Heute
+   braucht jede Etappe einen Anker, und der Regionen-Router würde für diese
+   Koordinate nichts finden und das als Fehler melden. Der Puffertag aus §7.2
+   ist das Nächstliegende, meint aber etwas anderes („wegen Wetter frei
+   gelassen"). Ein Seetag ist kein leerer Tag: Er ist ein Tag **an Bord**, mit
+   eigenem Programm, nur ohne Landkarte.
+
+2. **Die Unterkunft fährt mit.** Im Glossar ist der Anker „die Unterkunft",
+   wo jeder Tag beginnt und endet. Auf einem Schiff ist die Unterkunft 21 Tage
+   lang dieselbe und trotzdem jeden Tag woanders. Für den einzelnen Hafentag
+   stimmt der Liegeplatz als Anker — aber alles, was „Etappenwechsel heißt
+   Hotelwechsel" annimmt (§8.6 Vorabend, die Transfers in §4.2), stimmt dann
+   nicht mehr.
+
+3. **Der Transfer ist das Quartier.** §4.2 behandelt den Weg zwischen zwei
+   Etappen als Planungsobjekt mit Korridor-Suche. Zwischen zwei Häfen ist der
+   Transfer das Schiff, über Nacht, und es gibt unterwegs nichts. Die
+   Korridor-Suche würde Spots mitten auf dem Atlantik suchen. Ein Transfer
+   muss sagen dürfen: *dieser hier wird nicht geplant.*
+
+4. **Die Abfahrt ist eine Deadline, keine Abfahrt.** Ein verpasster Zug
+   kostet eine Stunde; ein verpasstes Schiff kostet die Reise. Der
+   Standardpuffer von 20 Minuten (§4.4) ist hier um eine Größenordnung
+   daneben, und bei Tenderhäfen kommt die Bootsfahrt an Land und zurück
+   obendrauf. Das ist keine Zahl, die man ändert, sondern eine Eigenschaft,
+   die der Fixpunkt kennen muss.
+
+5. **Zeitzonen wandern mitten in der Reise.** Hamburg nach New York sind fünf
+   bis sechs, und das Schiff verstellt die Uhr über Nacht. Fixpunkte liegen
+   als Minuten nach Mitternacht **lokal zur Etappe** — die richtige Form. Aber
+   ein Tag mit 25 Stunden kommt im Konzept nirgends vor.
+
+6. **Zehn Häfen sind zehn Regionen.** Lissabon, Azoren, Bermuda, US-Nordosten
+   — jeweils ein eigenes Extrakt, Wochen vorher importiert. Das ist das
+   Admin-Problem aus §16.1, mal zehn, und der Grund, warum die Vorbereitung
+   hier früher anfängt als die Planung.
+
+### 21.4 Was daraus folgt
+
+Kein Umbau, bevor der Fall wirklich durchgespielt ist — §16 bis §18 haben
+gezeigt, dass das Durchspielen die Lücken findet und nicht das Nachdenken
+darüber. Festzuhalten ist die Richtung: **eine Reise mit Stationen**, und die
+drei Modellfragen oben (ortloser Tag, mitfahrende Unterkunft, ungeplanter
+Transfer) sind zusammen eine Etappe für sich — nicht drei kleine Ergänzungen.
+
+Bis dahin gilt der Behelf aus §21.1: die Landgänge einzeln planen und wissen,
+was einem dabei fehlt.
