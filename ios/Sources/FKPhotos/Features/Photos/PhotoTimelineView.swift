@@ -43,11 +43,7 @@ struct PhotoTimelineView: View {
                     timelineContent
                 }
             }
-            .onChange(of: scrollTarget) { _, id in
-                guard let id else { return }
-                withAnimation { proxy.scrollTo(id, anchor: .center) }
-                scrollTarget = nil
-            }
+            .scrollsBack(to: $scrollTarget, in: proxy)
         }
         .navigationTitle(selection.isSelecting ? selection.title : "Fotos")
         .navigationDestination(item: $fullscreenNav) { _ in
@@ -125,15 +121,8 @@ struct PhotoTimelineView: View {
         .sheet(isPresented: $showUpload) {
             PhotoUploadView { Task { await reload() } }
         }
-        .onChange(of: fullscreenNav) { _, nav in
-            if nav == nil, !photosVM.photos.isEmpty {
-                let idx = min(fullscreenIndex, photosVM.photos.count - 1)
-                let photoId = photosVM.photos[idx].id
-                Task {
-                    try? await Task.sleep(for: .milliseconds(400))
-                    scrollTarget = photoId
-                }
-            }
+        .remembersGridPosition(whenClosing: fullscreenNav, target: $scrollTarget) {
+            GridScroll.target(index: fullscreenIndex, in: photosVM.photos)
         }
         .refreshable { await reload() }
         .task { await reload() }

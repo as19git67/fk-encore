@@ -9,6 +9,7 @@ import Button from 'primevue/button'
 import AutoComplete from 'primevue/autocomplete'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Message from 'primevue/message'
+import PageLayout from '../../components/layout/PageLayout.vue'
 import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
@@ -260,17 +261,20 @@ async function save() {
 </script>
 
 <template>
-  <div class="page">
+  <PageLayout title="Bargeldbuchung erfassen" width="normal">
+    <template #notice>
+      <Message v-if="cashAccounts.length === 0" severity="warn" :closable="false">
+        Kein Bargeldkonto (Typ „bargeld") vorhanden. Bitte zuerst ein Konto anlegen.
+      </Message>
+      <Message v-if="error" severity="error" :closable="true" @close="error = null">
+        {{ error }}
+      </Message>
+    </template>
+
+    <div class="tx-form">
     <div v-if="cashAccounts.length > 0" class="account-name-top">
       Konto: <strong>{{ accountsStore.byId(accountId ?? -1)?.label ?? '…' }}</strong>
     </div>
-    <Message v-else severity="warn" :closable="false">
-      Kein Bargeldkonto (Typ „bargeld") vorhanden. Bitte zuerst ein Konto anlegen.
-    </Message>
-
-    <Message v-if="error" severity="error" :closable="true" @close="error = null">
-      {{ error }}
-    </Message>
 
     <!-- Betrag + Vorzeichen -->
     <div class="field">
@@ -469,21 +473,17 @@ async function save() {
         </button>
       </div>
     </div>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
+/* Page frame and title: PageLayout (issue #1272). */
+.tx-form {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding: 1.25rem;
   max-width: 38rem;
-}
-@media (max-width: 480px) {
-  .page {
-    padding: 0.75rem;
-  }
 }
 .account-select {
   width: 100%;

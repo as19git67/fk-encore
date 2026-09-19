@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   getQuickEntryConfig,
   saveQuickEntryConfig,
@@ -95,20 +96,20 @@ onMounted(load)
 </script>
 
 <template>
-  <main class="quick-config">
-    <section class="page-head">
-      <div>
-        <p class="eyebrow">Zähler</p>
-        <h1>Schnellerfassung konfigurieren</h1>
-        <p class="muted">Wähle die Zähler aus, die in der Schnell-Erfassung erscheinen sollen, und sortiere sie in deiner Ablese-Reihenfolge.</p>
-      </div>
-      <div class="head-actions">
-        <Button icon="pi pi-arrow-left" label="Zur Erfassung" severity="secondary" outlined @click="router.push({ name: 'zaehler-schnellerfassung' })" />
-      </div>
-    </section>
+  <PageLayout
+    title="Schnellerfassung konfigurieren"
+    hint="Wähle die Zähler aus, die in der Schnell-Erfassung erscheinen sollen, und sortiere sie in deiner Ablese-Reihenfolge."
+    width="normal"
+    :ready="!loading"
+  >
+    <template #actions>
+      <Button icon="pi pi-arrow-left" label="Zur Erfassung" severity="secondary" outlined @click="router.push({ name: 'zaehler-schnellerfassung' })" />
+    </template>
 
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
-    <Message v-else-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+      <Message v-else-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
+    </template>
 
     <section class="card">
       <div class="section-title">
@@ -150,53 +151,34 @@ onMounted(load)
         </li>
       </ol>
     </section>
-  </main>
+  </PageLayout>
 </template>
 
 <style scoped>
-.quick-config {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 1rem;
-}
-
-.page-head,
+/* Page frame and title: PageLayout (issue #1272). */
 .section-title,
 .add-row,
-.config-list li,
-.head-actions {
+.config-list li {
   display: flex;
   gap: 0.75rem;
   align-items: center;
 }
 
-.page-head,
 .section-title {
   justify-content: space-between;
 }
 
-.eyebrow,
-.muted,
 .section-title p,
 .config-name small {
   color: var(--text-color-secondary);
 }
 
-.eyebrow {
-  margin: 0 0 0.2rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 0.8rem;
-}
-
-h1,
 h2,
 p {
   margin-top: 0;
 }
 
 .card {
-  margin-top: 1rem;
   padding: 1rem;
   border: 1px solid var(--surface-border);
   border-radius: 16px;
@@ -261,14 +243,8 @@ p {
 }
 
 @media (max-width: 760px) {
-  .quick-config {
-    padding: 0.75rem;
-  }
-
-  .page-head,
   .section-title,
-  .add-row,
-  .head-actions {
+  .add-row {
     align-items: stretch;
     flex-direction: column;
   }

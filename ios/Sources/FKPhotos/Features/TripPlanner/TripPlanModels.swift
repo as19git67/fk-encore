@@ -361,6 +361,10 @@ struct TripStop: Codable, Identifiable, Sendable {
     /// Where it finishes, when that is not where it starts (§4.7). Nil
     /// for the ordinary point, and for a plan from an older server.
     var extent: TripSpotExtent? = nil
+    /// What this stop walks past on its way (§4.7): spots that lie on a
+    /// route and are therefore seen without being planned. Nil or empty
+    /// for every ordinary stop.
+    var passes: [TripPassedSpot]? = nil
 
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }
@@ -868,6 +872,98 @@ struct MoveStopResponse: Codable, Sendable {
     let plan: TripPlan
     /// Blocks now over their budget — the ones the day view turns red.
     let overfullBlockIds: [String]
+}
+
+/// A signposted way near the city, out of OpenStreetMap (§4.7).
+struct TripNearbyRoute: Codable, Sendable, Identifiable {
+    let osmRef: String
+    let name: String
+    /// hiking | foot | bicycle | mtb.
+    let route: String
+    let network: String?
+    let ref: String?
+    let lengthM: Int
+    /// Metres of climb where the relation says so — never guessed.
+    let ascentM: Int?
+    /// How close the way passes to the city.
+    let distanceM: Int
+    /// What it would take, from the way's own length and climb.
+    let estimatedMinutes: Int
+    let roundtrip: Bool
+    /// False when the relation's members do not join into one way.
+    let joined: Bool
+    let website: String?
+    let difficulty: String?
+    let inPool: Bool
+
+    var id: String { osmRef }
+
+    /// Walking and riding are different enough to be worth an icon.
+    var symbolName: String {
+        route == "bicycle" || route == "mtb" ? "bicycle" : "figure.hiking"
+    }
+
+    /// "10 km · 600 Hm · Rundweg · T2" — what is known, and nothing in
+    /// place of what is not.
+    var summary: String {
+        var parts = [TripSpotExtent.kilometres(lengthM)]
+        if let ascentM, ascentM > 0 { parts.append("\(ascentM) Hm") }
+        if roundtrip { parts.append("Rundweg") }
+        if let difficulty, !difficulty.isEmpty { parts.append(difficulty) }
+        if let network, !network.isEmpty { parts.append(network.uppercased()) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+struct TripNearbyRoutesResponse: Codable, Sendable {
+    let legIndex: Int
+    let region: String?
+    /// False when the region predates the route import.
+    let imported: Bool
+    let routes: [TripNearbyRoute]
+    let hasMore: Bool
+    let note: String?
+}
+
+struct TripTakeRouteRequest: Encodable, Sendable {
+    let osmRef: String
+    let legIndex: Int
+}
+
+struct TripTakeRouteResponse: Decodable, Sendable {
+    let osmRef: String
+    let name: String
+    let legIndex: Int
+    let dwellMinutes: Int
+    let roundtrip: Bool
+}
+
+/// A spot a route walks past (§4.7).
+///
+/// Named rather than counted: "unterwegs: Ponale-Aussicht" is the
+/// sentence that stops somebody planning it a second time, and a bare
+/// number would not be.
+struct TripPassedSpot: Codable, Sendable, Equatable, Identifiable {
+    let osmRef: String
+    /// What OpenStreetMap calls it, or nil where it has no name.
+    let name: String?
+
+    var id: String { osmRef }
+    /// What to show for a spot the map left unnamed (§15.3).
+    var displayName: String { name ?? "ein Ort ohne Namen" }
+
+    /// "unterwegs: Ponale-Aussicht und 2 weitere" — one line under the
+    /// route, because that is all a block card has room for. Names the
+    /// first, counts the rest: the count alone would not stop anybody
+    /// planning the one they had in mind.
+    static func line(_ passed: [TripPassedSpot]) -> String? {
+        guard let first = passed.first else { return nil }
+        switch passed.count {
+        case 1: return "unterwegs: \(first.displayName)"
+        case 2: return "unterwegs: \(first.displayName) und \(passed[1].displayName)"
+        default: return "unterwegs: \(first.displayName) und \(passed.count - 1) weitere"
+        }
+    }
 }
 
 /// A spot with an extent (§4.7): where it finishes and, where known,

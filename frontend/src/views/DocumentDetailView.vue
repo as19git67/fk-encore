@@ -51,6 +51,7 @@ import { useAuthStore } from '../stores/auth'
 import { useDocSelectionStore } from '../stores/documents/selection'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useModuleBack } from '../composables/useModuleBack'
+import PageLayout from '../components/layout/PageLayout.vue'
 import PdfViewer from '../components/PdfViewer.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
 import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
@@ -745,163 +746,170 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="document-detail-view">
-    <div class="header">
-      <Button icon="pi pi-arrow-left" label="Zurück" aria-label="Zurück" text @click="goBack" />
-      <div v-if="basketIndex >= 0" class="basket-nav" aria-label="Navigation durch den Basket">
-        <Button
-          icon="pi pi-chevron-left"
-          text
-          rounded
-          :disabled="!basketPrev"
-          aria-label="Vorheriges Dokument im Basket"
-          v-tooltip.bottom="'Vorheriges Dokument im Basket'"
-          @click="basketPrev && goBasketDoc(basketPrev.id)"
-        />
-        <span class="basket-nav-pos">
-          <i class="pi pi-shopping-cart" /> {{ basketIndex + 1 }}&hairsp;/&hairsp;{{ basket.count }}
-        </span>
-        <Button
-          icon="pi pi-chevron-right"
-          text
-          rounded
-          :disabled="!basketNext"
-          aria-label="Nächstes Dokument im Basket"
-          v-tooltip.bottom="'Nächstes Dokument im Basket'"
-          @click="basketNext && goBasketDoc(basketNext.id)"
-        />
+  <PageLayout
+    :title="doc ? (doc.title || doc.original_filename) : 'Dokument'"
+    scroll="self"
+    width="full"
+    :ready="!loading"
+  >
+    <template #actions>
+      <div class="detail-actions">
+        <Button icon="pi pi-arrow-left" label="Zurück" aria-label="Zurück" text @click="goBack" />
+        <div v-if="basketIndex >= 0" class="basket-nav" aria-label="Navigation durch den Basket">
+          <Button
+            icon="pi pi-chevron-left"
+            text
+            rounded
+            :disabled="!basketPrev"
+            aria-label="Vorheriges Dokument im Basket"
+            v-tooltip.bottom="'Vorheriges Dokument im Basket'"
+            @click="basketPrev && goBasketDoc(basketPrev.id)"
+          />
+          <span class="basket-nav-pos">
+            <i class="pi pi-shopping-cart" /> {{ basketIndex + 1 }}&hairsp;/&hairsp;{{ basket.count }}
+          </span>
+          <Button
+            icon="pi pi-chevron-right"
+            text
+            rounded
+            :disabled="!basketNext"
+            aria-label="Nächstes Dokument im Basket"
+            v-tooltip.bottom="'Nächstes Dokument im Basket'"
+            @click="basketNext && goBasketDoc(basketNext.id)"
+          />
+        </div>
+          <Button
+            v-if="doc"
+            :icon="inBasket ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
+            :label="inBasket ? 'Im Basket' : 'In den Basket'"
+            :aria-label="inBasket ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
+            text
+            :severity="inBasket ? 'success' : undefined"
+            v-tooltip.bottom="inBasket ? 'Aus dem Basket entfernen' : 'Dokument in den Basket legen'"
+            @click="toggleBasket"
+          />
+          <Button
+            v-if="auth.hasPermission('documents.edit') && doc"
+            icon="pi pi-refresh"
+            label="Neu klassifizieren"
+            aria-label="Neu klassifizieren"
+            text
+            :loading="saving"
+            @click="onReclassify()"
+          />
+          <Button
+            v-if="auth.hasPermission('documents.edit') && doc"
+            icon="pi pi-eye"
+            label="OCR erzwingen"
+            aria-label="OCR erzwingen"
+            text
+            :loading="saving"
+            title="Text-Layer der PDF ignorieren und komplett per OCR neu einlesen (hilft bei Scans mit fehlenden Leerzeichen)."
+            @click="onReclassify({ forceOcr: true })"
+          />
+          <Button
+            v-if="auth.hasPermission('documents.edit') && doc"
+            :icon="doc.teacher_requested ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
+            :label="doc.teacher_requested ? 'Vorgemerkt' : 'Für Cloud-Lehrer vormerken'"
+            :aria-label="doc.teacher_requested ? 'Vormerkung aufheben' : 'Für Cloud-Lehrer vormerken'"
+            text
+            :loading="saving"
+            :title="doc.teacher_requested
+              ? 'Dieses Dokument ist für den nächsten Cloud-Lehrer-Lauf vorgemerkt. Klicken zum Aufheben.'
+              : 'Schwer einzuordnen? Für den nächsten Cloud-Lehrer-Lauf vormerken — die Cloud klassifiziert es dann vorrangig.'"
+            @click="onToggleTeacherRequested"
+          />
+          <Button
+            v-if="doc"
+            icon="pi pi-download"
+            label="Herunterladen"
+            aria-label="Herunterladen"
+            text
+            :loading="downloading"
+            title="Dokument herunterladen — mit durchsuchbarer Textebene (wird bei reinen Scans bei Bedarf erzeugt)."
+            @click="onDownload"
+          />
+          <Button
+            v-if="doc"
+            icon="pi pi-clock"
+            label="Wiedervorlage"
+            aria-label="Wiedervorlage"
+            text
+            title="Dokument auf Wiedervorlage legen — es taucht am gewählten Datum wieder im Arbeitskorb auf."
+            @click="followUpOpen = true"
+          />
+          <Button
+            v-if="auth.hasPermission('documents.delete') && doc"
+            icon="pi pi-trash"
+            severity="danger"
+            text
+            label="Löschen"
+            aria-label="Löschen"
+            @click="onDelete"
+          />
+          <Button
+            icon="pi pi-question-circle"
+            aria-label="Hilfe zu den Aktionen"
+            text
+            class="help-trigger"
+            @click="toggleHelp"
+          />
+          <Popover ref="helpPopover">
+            <div class="help-flyout">
+              <h3 class="help-flyout__title">Aktionen</h3>
+              <ul class="help-flyout__list">
+                <li>
+                  <i class="pi pi-arrow-left" aria-hidden="true" />
+                  <div>
+                    <strong>Zurück</strong>
+                    <span>Zur Dokumentenliste zurückkehren.</span>
+                  </div>
+                </li>
+                <li>
+                  <i class="pi pi-shopping-cart" aria-hidden="true" />
+                  <div>
+                    <strong>In den Basket</strong>
+                    <span>Dokument in den Basket legen bzw. wieder entfernen — für Stapelbearbeitung oder als Navigationsliste.</span>
+                  </div>
+                </li>
+                <li v-if="auth.hasPermission('documents.edit')">
+                  <i class="pi pi-refresh" aria-hidden="true" />
+                  <div>
+                    <strong>Neu klassifizieren</strong>
+                    <span>KI analysiert Kategorie, Datum, Absender und Zusammenfassung erneut.</span>
+                  </div>
+                </li>
+                <li v-if="auth.hasPermission('documents.edit')">
+                  <i class="pi pi-eye" aria-hidden="true" />
+                  <div>
+                    <strong>OCR erzwingen</strong>
+                    <span>Text-Layer der PDF ignorieren und komplett per OCR neu einlesen — hilft bei Scans mit fehlenden Leerzeichen.</span>
+                  </div>
+                </li>
+                <li>
+                  <i class="pi pi-download" aria-hidden="true" />
+                  <div>
+                    <strong>Herunterladen</strong>
+                    <span>Dokument als Datei speichern — mit durchsuchbarer Textebene. Bei reinen Scans wird die Textebene bei Bedarf per OCR erzeugt.</span>
+                  </div>
+                </li>
+                <li v-if="auth.hasPermission('documents.delete')">
+                  <i class="pi pi-trash" aria-hidden="true" />
+                  <div>
+                    <strong>Löschen</strong>
+                    <span>Dokument dauerhaft entfernen.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </Popover>
       </div>
-      <div class="header-actions">
-        <Button
-          v-if="doc"
-          :icon="inBasket ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
-          :label="inBasket ? 'Im Basket' : 'In den Basket'"
-          :aria-label="inBasket ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
-          text
-          :severity="inBasket ? 'success' : undefined"
-          v-tooltip.bottom="inBasket ? 'Aus dem Basket entfernen' : 'Dokument in den Basket legen'"
-          @click="toggleBasket"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.edit') && doc"
-          icon="pi pi-refresh"
-          label="Neu klassifizieren"
-          aria-label="Neu klassifizieren"
-          text
-          :loading="saving"
-          @click="onReclassify()"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.edit') && doc"
-          icon="pi pi-eye"
-          label="OCR erzwingen"
-          aria-label="OCR erzwingen"
-          text
-          :loading="saving"
-          title="Text-Layer der PDF ignorieren und komplett per OCR neu einlesen (hilft bei Scans mit fehlenden Leerzeichen)."
-          @click="onReclassify({ forceOcr: true })"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.edit') && doc"
-          :icon="doc.teacher_requested ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
-          :label="doc.teacher_requested ? 'Vorgemerkt' : 'Für Cloud-Lehrer vormerken'"
-          :aria-label="doc.teacher_requested ? 'Vormerkung aufheben' : 'Für Cloud-Lehrer vormerken'"
-          text
-          :loading="saving"
-          :title="doc.teacher_requested
-            ? 'Dieses Dokument ist für den nächsten Cloud-Lehrer-Lauf vorgemerkt. Klicken zum Aufheben.'
-            : 'Schwer einzuordnen? Für den nächsten Cloud-Lehrer-Lauf vormerken — die Cloud klassifiziert es dann vorrangig.'"
-          @click="onToggleTeacherRequested"
-        />
-        <Button
-          v-if="doc"
-          icon="pi pi-download"
-          label="Herunterladen"
-          aria-label="Herunterladen"
-          text
-          :loading="downloading"
-          title="Dokument herunterladen — mit durchsuchbarer Textebene (wird bei reinen Scans bei Bedarf erzeugt)."
-          @click="onDownload"
-        />
-        <Button
-          v-if="doc"
-          icon="pi pi-clock"
-          label="Wiedervorlage"
-          aria-label="Wiedervorlage"
-          text
-          title="Dokument auf Wiedervorlage legen — es taucht am gewählten Datum wieder im Arbeitskorb auf."
-          @click="followUpOpen = true"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.delete') && doc"
-          icon="pi pi-trash"
-          severity="danger"
-          text
-          label="Löschen"
-          aria-label="Löschen"
-          @click="onDelete"
-        />
-        <Button
-          icon="pi pi-question-circle"
-          aria-label="Hilfe zu den Aktionen"
-          text
-          class="help-trigger"
-          @click="toggleHelp"
-        />
-        <Popover ref="helpPopover">
-          <div class="help-flyout">
-            <h3 class="help-flyout__title">Aktionen</h3>
-            <ul class="help-flyout__list">
-              <li>
-                <i class="pi pi-arrow-left" aria-hidden="true" />
-                <div>
-                  <strong>Zurück</strong>
-                  <span>Zur Dokumentenliste zurückkehren.</span>
-                </div>
-              </li>
-              <li>
-                <i class="pi pi-shopping-cart" aria-hidden="true" />
-                <div>
-                  <strong>In den Basket</strong>
-                  <span>Dokument in den Basket legen bzw. wieder entfernen — für Stapelbearbeitung oder als Navigationsliste.</span>
-                </div>
-              </li>
-              <li v-if="auth.hasPermission('documents.edit')">
-                <i class="pi pi-refresh" aria-hidden="true" />
-                <div>
-                  <strong>Neu klassifizieren</strong>
-                  <span>KI analysiert Kategorie, Datum, Absender und Zusammenfassung erneut.</span>
-                </div>
-              </li>
-              <li v-if="auth.hasPermission('documents.edit')">
-                <i class="pi pi-eye" aria-hidden="true" />
-                <div>
-                  <strong>OCR erzwingen</strong>
-                  <span>Text-Layer der PDF ignorieren und komplett per OCR neu einlesen — hilft bei Scans mit fehlenden Leerzeichen.</span>
-                </div>
-              </li>
-              <li>
-                <i class="pi pi-download" aria-hidden="true" />
-                <div>
-                  <strong>Herunterladen</strong>
-                  <span>Dokument als Datei speichern — mit durchsuchbarer Textebene. Bei reinen Scans wird die Textebene bei Bedarf per OCR erzeugt.</span>
-                </div>
-              </li>
-              <li v-if="auth.hasPermission('documents.delete')">
-                <i class="pi pi-trash" aria-hidden="true" />
-                <div>
-                  <strong>Löschen</strong>
-                  <span>Dokument dauerhaft entfernen.</span>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </Popover>
-      </div>
-    </div>
+    </template>
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-    <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    </template>
 
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Dokument wird geladen…
@@ -914,7 +922,6 @@ onBeforeUnmount(() => {
 
       <div class="meta-panel">
         <div class="meta-top">
-          <h1 class="doc-title">{{ doc.title || doc.original_filename }}</h1>
           <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
         </div>
 
@@ -1512,28 +1519,11 @@ onBeforeUnmount(() => {
         />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.document-detail-view {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  width: 100%;
-  /* Without this any min-content blowout inside (long filename in
-     extra-info, unbreakable text in the preview) can push the page
-     past 100vw and produce horizontal scroll on the whole app. */
-  max-width: 100%;
-  min-width: 0;
-  padding-inline: 0.5em;
-  box-sizing: border-box;
-}
-/* The whole page is the only scroll container: neither the PDF
-   preview nor the metadata pane has its own scrollbar. On wide
-   viewports the panes still sit side by side via the grid below,
-   they just grow with their content and the page scrolls if needed. */
-@media (min-width: 800px) { .document-detail-view { padding-inline: 1em; } }
+/* Page frame and title: PageLayout (issue #1272). */
 
 .propose-link {
   align-self: flex-start;
@@ -1565,14 +1555,14 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
 }
 
-.header {
+/* Back button, basket navigation and the action buttons, all in
+   PageLayout's #actions slot. */
+.detail-actions {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.25rem;
   flex-wrap: wrap;
 }
-.header-actions { display: flex; gap: 0.25rem; flex-wrap: wrap; }
 .basket-nav {
   display: inline-flex;
   align-items: center;
@@ -1655,10 +1645,10 @@ onBeforeUnmount(() => {
    OCR erzwingen / Löschen) overflow the viewport. Hide the labels and
    tighten padding so the row stays icon-only and fits comfortably. */
 @media (max-width: 640px) {
-  .header :deep(.p-button-label) {
+  .detail-actions :deep(.p-button-label) {
     display: none;
   }
-  .header :deep(.p-button) {
+  .detail-actions :deep(.p-button) {
     padding: 0.45rem 0.55rem;
   }
 }
@@ -1672,25 +1662,19 @@ onBeforeUnmount(() => {
      past the container's width. */
   grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
-  flex: 1;
+  /* Fills PageLayout's `.page-content` (scroll="self"); `min-height: 0`
+     lets the panels below shrink to the viewport instead of growing it. */
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
 }
 
 /* ── Desktop: die Seite selbst scrollt nicht ────────────────────────────────
-   Auf breiten Viewports füllt die Detailansicht exakt die Höhe unter der
-   App-Navbar. Gescrollt wird ausschließlich *innerhalb* der beiden Panels:
-   links Seite für Seite durch das PDF, rechts durch die Attribute. Kopfzeile
-   und Menü bleiben dabei stehen. (#919)
-
-   Der einzige Offset ist die Navbar: `#module-subheaders` ist auf dieser
-   Route leer (die Ansicht teleportiert nichts dorthin) und `main.content`
-   hat weder Padding noch Margin. */
+   Auf breiten Viewports füllt die Detailansicht exakt die Höhe unter dem
+   Sticky-Stack (PageLayout, scroll="self"). Gescrollt wird ausschließlich
+   *innerhalb* der beiden Panels: links Seite für Seite durch das PDF, rechts
+   durch die Attribute. Kopfzeile und Menü bleiben dabei stehen. (#919) */
 @media (min-width: 1000px) {
-  .document-detail-view {
-    height: calc(100dvh - var(--menubar-height, 3.5rem));
-    overflow: hidden;
-  }
   .detail-grid {
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
     min-height: 0;
@@ -1744,7 +1728,6 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
 }
-.doc-title { font-size: 1.25rem; font-weight: 600; flex: 1; min-width: 0; }
 
 .replace-file-error {
   display: flex;

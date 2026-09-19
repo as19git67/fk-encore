@@ -148,7 +148,8 @@ defineExpose({ contentEl })
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
   flex-shrink: 0;
   min-width: 0;
 }
@@ -167,13 +168,18 @@ defineExpose({ contentEl })
   color: var(--p-text-muted-color);
   font-size: 0.8125rem;
 }
+/* Actions wrap below the title on a narrow screen instead of pushing past
+   the viewport edge; each button then wraps within the row. */
 .page-actions {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   flex-wrap: wrap;
   justify-content: flex-end;
+  margin-left: auto;
 }
 
 .page-content {
@@ -193,6 +199,10 @@ defineExpose({ contentEl })
 .page-stack--inline {
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--p-content-border-color);
+}
+/* …unless every slot is currently v-if'd away: then no strip at all. */
+.page-stack--inline:not(:has(.page-toolbar:not(:empty), .page-selection:not(:empty), .page-notice:not(:empty))) {
+  display: none;
 }
 .page-toolbar,
 .page-selection,

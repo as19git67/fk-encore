@@ -10,6 +10,7 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import { useConfirm } from 'primevue/useconfirm'
+import PageLayout from '../components/layout/PageLayout.vue'
 import { useAuthStore } from '../stores/auth'
 import {
   listLabelPrinters,
@@ -523,18 +524,18 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="label-view">
-    <header class="page-header">
-      <h1>Label drucken</h1>
-      <p class="page-hint">
-        Vorlage wählen oder Text eingeben, Format und Drucker festlegen und auf
-        <strong>Drucken</strong> tippen. Vorlagen können dynamische Platzhalter
-        wie das aktuelle Datum enthalten.
-      </p>
-    </header>
+  <PageLayout title="Label drucken" width="normal">
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    </template>
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
-    <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
+    <div class="content">
+    <p class="page-hint">
+      Vorlage wählen oder Text eingeben, Format und Drucker festlegen und auf
+      <strong>Drucken</strong> tippen. Vorlagen können dynamische Platzhalter
+      wie das aktuelle Datum enthalten.
+    </p>
 
     <section class="form">
       <div class="field template-field">
@@ -749,6 +750,7 @@ onMounted(() => {
         Dir fehlt die Berechtigung <code>label.print</code> zum Drucken.
       </p>
     </section>
+    </div>
 
     <Dialog
       v-model:visible="templateDialogVisible"
@@ -850,22 +852,17 @@ onMounted(() => {
         />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.label-view {
-  max-width: 40rem;
-  margin: 0 auto;
-  padding: 1rem;
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 
-.page-header h1 {
-  margin: 0 0 0.25rem;
-}
 .page-hint {
   margin: 0;
   color: var(--p-text-muted-color);

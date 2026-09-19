@@ -42,8 +42,8 @@ export const MitDateien: Story = {
   name: 'Dateien in Warteschlange',
   decorators: [
     (story) => ({
-      components: { Story: story() },
       setup() {
+        const StoryComponent = story()
         onMounted(() => {
           const input = document.querySelector<HTMLInputElement>('.upload-view input[type=file]')
           if (input) {
@@ -54,7 +54,7 @@ export const MitDateien: Story = {
             input.dispatchEvent(new Event('change', { bubbles: true }))
           }
         })
-        return () => h('Story')
+        return () => h(StoryComponent)
       },
     }),
   ],
