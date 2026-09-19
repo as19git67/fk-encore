@@ -948,16 +948,52 @@ bisher. Es ist zugleich der Grund, warum der Import der echten Geometrie
 der nächste Schritt ist; dieselbe Breite an der echten Linie nimmt auf, was
 die Sehne durchlassen muss.
 
+**Strecken aus dem Import (Etappe 5, umgesetzt):**
+
+OSM kennt ausgeschilderte Wege als Relationen (`route=hiking`, `foot`,
+`bicycle`, `mtb`) — mit Namen, Verlauf, Länge und oft Anstieg. Der Importer
+nimmt sie jetzt mit (`osm_routes`), und der Planer bietet sie an:
+„Strecken in der Nähe" im Tagesmenü listet, was an der Stadt vorbeiläuft,
+und ein Tippen übernimmt sie in die Kandidaten — über denselben Fund-Weg wie
+jeder andere Ort (§9.2), nur mit Enden, Länge, Anstieg und Verlauf im Gepäck.
+
+Drei Dinge werden dabei aus der Geometrie gelesen statt beim Import
+eingefroren, weil nur die Geometrie ehrlich bleibt:
+
+- **Die Länge** ist die echte Länge des Weges, nicht das `distance`-Tag
+  (eine gerundete Angabe, die oft fehlt).
+- **Die beiden Enden** kommen aus `ST_LineMerge`. Fügen sich die Teile einer
+  Relation zusammen, hat sie ein Ende; tun sie es nicht — Lücken, Abzweige,
+  ausgeschilderte Varianten —, dann hat sie keins, das man nennen könnte,
+  und das wird gesagt statt ein loses Ende zum Ziel zu erklären (§15.3). Ein
+  **Rundweg endet, wo er beginnt**: Das ist sein Ende, und so bleiben Länge
+  und Verlauf erhalten, die ein bloßer Punkt wegwerfen würde.
+- **Der Verlauf**, vereinfacht auf höchstens 64 Punkte, damit ein Plan ihn
+  offline mitnehmen kann. Er ist es, der den Korridor aus Etappe 4 der echten
+  Linie folgen lässt statt der Sehne — der Aussichtspunkt in der dritten Kehre
+  wird jetzt erkannt.
+
+**Die Dauer rechnet der Weg selbst aus** (`route-duration.ts`). §4.7 sagt:
+„Keine Kategorie weiß das; die Strecke muss es selbst sagen" — und sie sagt
+es in den zwei Zahlen, aus denen Stunden folgen. Verwendet wird die
+Wanderzeitformel (DIN 33466): waagerechte Zeit und senkrechte Zeit, davon die
+größere ganz und die kleinere zur Hälfte. Zehn Kilometer mit 600 Höhenmetern
+ergeben so 3,5 Stunden zu Fuß und 1 Stunde 50 mit dem Rad — genau das
+Beispiel oben. Es ist eine Startzahl, kein Urteil: Wer die Strecke übernimmt,
+kann sie ändern, und dann gilt seine.
+
+**Betrieblich:** Die Routentabelle entsteht beim Import. Bestehende Regionen
+haben sie nicht, und das ist kein Fehler, sondern ein älterer Import — die
+Suche sagt es (`imported: false`) und bietet den Neuimport an, statt eine
+leere Liste zu zeigen, die wie „hier gibt es nichts" aussieht.
+
 **Was bewusst noch nicht gebaut ist:**
 
-- **Aus dem Import.** OSM kennt Wander- und Radrouten als Relationen
-  (`route=hiking`, `route=bicycle`), oft mit Name, Länge und Schwierigkeit.
-  Der Importer kennt nur Punkte. Das ist die eine echte neue Arbeit; bis
-  dahin kommt eine Strecke von Hand.
 - **Die Dauer nach Reisegruppe.** „Mehr Zeit einplanen" (§3.5) skaliert
   Blockbudgets. Bei einer Strecke müsste es die Dauer selbst skalieren, und
   eingeschränkte Mobilität würde sie ganz ausschließen. Beides wartet, bis
   die Reisegruppe Fortbewegungsarten kennt.
+
 **In der App (Etappe 2, umgesetzt):** „Strecke anlegen" im Menü des Tages —
 Name, Start und Ende über die Ortssuche des Geräts, Dauer, optional Länge
 und Anstieg. Kandidatenliste, Tagesplan, Pin-Sheet und Detail zeigen
@@ -3855,8 +3891,10 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     Wetter, Licht — geht am Ende der Strecke weiter. Etappe 2 (Eingabe
     und Linie in der App) und Etappe 3 (ein Stopp darf über das Blockende
     hinauslaufen, `spill.ts`) und Etappe 4 (Spots auf der Strecke gelten als
-    passiert, `on-the-way.ts`) ebenfalls umgesetzt; offen bleibt aus §4.7 der
-    Import aus OSM-Routenrelationen.
+    passiert, `on-the-way.ts`) und Etappe 5 (Import der OSM-Routenrelationen,
+    `osm_routes` samt Suche, Dauer-Schätzung und „Strecken in der Nähe")
+    ebenfalls umgesetzt. Damit ist §4.7 inhaltlich durch; offen bleibt dort
+    nur noch die Dauer nach Reisegruppe, die auf §3.5 wartet.
 
 Schritte 1–3 sind der ehrliche Test — und sie kommen **ohne einen einzigen
 Neuimport** aus: Liefert die Maschine für *einen* Tag in

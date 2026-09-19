@@ -21,15 +21,16 @@
  * hundred extra metres over an eight-kilometre route reaches more than
  * a kilometre off the line. This rule takes something out of the day
  * without being asked, so it is the tighter and plainer one — within
- * `CORRIDOR_HALF_WIDTH_M` of the line between the two ends.
+ * `CORRIDOR_HALF_WIDTH_M` of the way itself, whatever its length.
  *
- * **What it cannot do yet.** The line between the ends is not the path:
- * the Ponale climbs in switchbacks that a chord cuts straight through,
- * so a viewpoint on the third bend is missed. That is the safe
- * direction to be wrong in — a spot not absorbed is simply planned the
- * way it always was. It is also why importing the route's own geometry
- * is the next step (§4.7): the same width against the real polyline
- * absorbs what this rule has to let through.
+ * **Against the way, where the way is known.** A route imported from
+ * an OSM relation carries its own shape (`extent.via`), and the
+ * corridor is measured against that: the Ponale climbs in switchbacks
+ * that a chord cuts straight through, and a viewpoint on the third
+ * bend is only found against the real line. A route somebody entered
+ * by hand knows only its two ends, so there the chord is all there is
+ * — which under-absorbs, and that is the safe direction to be wrong
+ * in: a spot not taken in is simply planned the way it always was.
  *
  * Pure: coordinates in, references out.
  */
@@ -58,7 +59,7 @@ export interface Positioned extends Coordinate {
 }
 
 /**
- * How far `spot` lies from the way between `from` and `to`, in metres.
+ * How far `spot` lies from the straight run from `from` to `to`.
  *
  * Distance to the *segment*, not to the infinite line: a spot in line
  * with the route but well beyond its end is not on the way, it is
@@ -67,7 +68,7 @@ export interface Positioned extends Coordinate {
  * enough — and the last step is a haversine, so the number agrees with
  * every other distance the planner quotes.
  */
-export function distanceToWayMetres(
+export function distanceToSegmentMetres(
   from: Coordinate,
   to: Coordinate,
   spot: Coordinate,
@@ -82,17 +83,51 @@ export function distanceToWayMetres(
   const b = point(to);
   const p = point(spot);
   const lengthSquared = b.x * b.x + b.y * b.y;
-  // A route whose ends coincide is a point; the distance to it is the
-  // distance to that point.
+  // A segment whose ends coincide is a point; the distance to it is
+  // the distance to that point.
   if (lengthSquared === 0) return haversineMeters(from, spot);
 
-  // Where along the way the spot sits, clamped to its two ends.
+  // Where along the segment the spot sits, clamped to its two ends.
   const t = Math.max(0, Math.min(1, (p.x * b.x + p.y * b.y) / lengthSquared));
   const nearest: Coordinate = {
     lat: from.lat + (t * b.y) / latScale,
     lon: from.lon + (t * b.x) / lonScale,
   };
   return haversineMeters(nearest, spot);
+}
+
+/**
+ * How far `spot` lies from a way, in metres.
+ *
+ * The way is a run of points — the route's own shape where the import
+ * knew it, and otherwise just its two ends. The answer is the distance
+ * to whichever of its stretches passes closest.
+ */
+export function distanceToWayMetres(way: readonly Coordinate[], spot: Coordinate): number {
+  if (way.length === 0) return Number.POSITIVE_INFINITY;
+  if (way.length === 1) return haversineMeters(way[0], spot);
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < way.length - 1; i += 1) {
+    nearest = Math.min(nearest, distanceToSegmentMetres(way[i], way[i + 1], spot));
+    // Nothing further along can beat a spot already on the line.
+    if (nearest === 0) break;
+  }
+  return nearest;
+}
+
+/**
+ * The run of points this stop travels, or empty when it travels none.
+ *
+ * The route's own shape where the relation gave one, and the line
+ * between its two ends otherwise — see the note at the top of the file
+ * on what that costs.
+ */
+export function wayOf(stop: Positioned): Coordinate[] {
+  const end = stop.extent?.end;
+  if (!end) return [];
+  const via = stop.extent?.via ?? [];
+  if (via.length >= 2) return [...via];
+  return [{ lat: stop.lat, lon: stop.lon }, { lat: end.lat, lon: end.lon }];
 }
 
 /**
@@ -112,16 +147,22 @@ export function passedBy(
   candidates: readonly Positioned[],
   halfWidthM: number = CORRIDOR_HALF_WIDTH_M,
 ): Positioned[] {
-  const end = stop.extent?.end;
-  if (!end) return [];
-  const start: Coordinate = { lat: stop.lat, lon: stop.lon };
-  if (haversineMeters(start, end) < MIN_ROUTE_LENGTH_M) return [];
+  const way = wayOf(stop);
+  if (way.length < 2) return [];
+  if (wayLengthMetres(way) < MIN_ROUTE_LENGTH_M) return [];
 
   return candidates.filter((candidate) => {
     if (candidate.osmRef === stop.osmRef) return false;
     if (candidate.extent?.end) return false;
-    return distanceToWayMetres(start, end, candidate) <= halfWidthM;
+    return distanceToWayMetres(way, candidate) <= halfWidthM;
   });
+}
+
+/** How long a run of points is, end to end. */
+function wayLengthMetres(way: readonly Coordinate[]): number {
+  let total = 0;
+  for (let i = 0; i < way.length - 1; i += 1) total += haversineMeters(way[i], way[i + 1]);
+  return total;
 }
 
 /**

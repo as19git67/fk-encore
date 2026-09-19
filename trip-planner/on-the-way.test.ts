@@ -3,7 +3,13 @@
  * place is invented.
  */
 import { describe, expect, it } from "vitest";
-import { CORRIDOR_HALF_WIDTH_M, distanceToWayMetres, isPassedByAny, passedBy } from "./on-the-way";
+import {
+  CORRIDOR_HALF_WIDTH_M,
+  distanceToWayMetres,
+  isPassedByAny,
+  passedBy,
+  wayOf,
+} from "./on-the-way";
 
 const START = { lat: 45.88, lon: 10.84 };
 
@@ -29,24 +35,33 @@ function spot(osmRef: string, at: { lat: number; lon: number }) {
 
 describe("distanceToWayMetres", () => {
   it("is nothing for a spot on the line", () => {
-    expect(distanceToWayMetres(START, ROUTE_END, north(4_000))).toBeLessThan(1);
+    expect(distanceToWayMetres([START, ROUTE_END], north(4_000))).toBeLessThan(1);
   });
 
   it("is the step off the line, whatever the route's length", () => {
     // The point of a fixed corridor: two hundred metres aside is two
     // hundred metres, on a short way and on a long one alike.
-    expect(distanceToWayMetres(START, ROUTE_END, east(north(4_000), 200))).toBeCloseTo(200, -1);
+    expect(distanceToWayMetres([START, ROUTE_END], east(north(4_000), 200))).toBeCloseTo(200, -1);
     const shortEnd = north(1_000);
-    expect(distanceToWayMetres(START, shortEnd, east(north(500), 200))).toBeCloseTo(200, -1);
+    expect(distanceToWayMetres([START, shortEnd], east(north(500), 200))).toBeCloseTo(200, -1);
   });
 
   it("measures to the way's ends, not along an endless line", () => {
     // In line with the route but four kilometres past its finish.
-    expect(distanceToWayMetres(START, ROUTE_END, north(12_000))).toBeCloseTo(4_000, -2);
+    expect(distanceToWayMetres([START, ROUTE_END], north(12_000))).toBeCloseTo(4_000, -2);
   });
 
   it("answers the distance to the point when a route has no length", () => {
-    expect(distanceToWayMetres(START, START, east(START, 300))).toBeCloseTo(300, -1);
+    expect(distanceToWayMetres([START, START], east(START, 300))).toBeCloseTo(300, -1);
+  });
+
+  it("measures to whichever stretch of the way passes closest", () => {
+    // A way that turns east halfway: a spot beside the second leg is
+    // close to the way and far from the line between its two ends.
+    const bend = [START, north(4_000), east(north(4_000), 4_000)];
+    const besideTheBend = east(north(4_000), 2_000);
+    expect(distanceToWayMetres(bend, besideTheBend)).toBeLessThan(50);
+    expect(distanceToWayMetres([bend[0], bend[2]], besideTheBend)).toBeGreaterThan(1_000);
   });
 });
 
@@ -109,5 +124,36 @@ describe("isPassedByAny", () => {
     expect(isPassedByAny([route()], onTheWay)).toBe(true);
     expect(isPassedByAny([{ osmRef: "node:museum", ...START }], onTheWay)).toBe(false);
     expect(isPassedByAny([], onTheWay)).toBe(false);
+  });
+});
+
+describe("wayOf", () => {
+  it("is the route's own shape where the import knew it", () => {
+    const bend = [START, north(4_000), east(north(4_000), 4_000)];
+    const imported = { osmRef: "relation:1", ...START, extent: { end: bend[2], via: bend } };
+    expect(wayOf(imported)).toEqual(bend);
+  });
+
+  it("falls back on the line between the ends", () => {
+    expect(wayOf(route())).toEqual([START, ROUTE_END]);
+  });
+
+  it("is empty for a spot that goes nowhere", () => {
+    expect(wayOf({ osmRef: "node:museum", ...START })).toEqual([]);
+  });
+});
+
+describe("a route that bends (§4.7)", () => {
+  it("takes in what the chord would have walked straight past", () => {
+    // The Ponale in miniature: the way climbs north, then turns east.
+    // A viewpoint on the second leg is two kilometres from the line
+    // between the two ends and right beside the actual path.
+    const bend = [START, north(4_000), east(north(4_000), 4_000)];
+    const viewpoint = spot("node:bend", east(north(4_000), 2_000));
+    const byHand = { osmRef: "manual:route", ...START, extent: { end: bend[2] } };
+    const imported = { osmRef: "relation:1", ...START, extent: { end: bend[2], via: bend } };
+
+    expect(passedBy(byHand, [viewpoint])).toEqual([]);
+    expect(passedBy(imported, [viewpoint]).map((p) => p.osmRef)).toEqual(["node:bend"]);
   });
 });

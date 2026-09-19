@@ -103,6 +103,13 @@ struct TripPlanDayView: View {
                             } label: {
                                 Label("Strecke anlegen", systemImage: "figure.hiking")
                             }
+                            // What the map already knows (§4.7) — with
+                            // its length, its climb and its course.
+                            NavigationLink {
+                                TripNearbyRoutesView(planId: viewModel.planId, legIndex: leg.position)
+                            } label: {
+                                Label("Strecken in der Nähe", systemImage: "map")
+                            }
                             // When the light is good, after the planned
                             // day is over (§7.3).
                             NavigationLink {

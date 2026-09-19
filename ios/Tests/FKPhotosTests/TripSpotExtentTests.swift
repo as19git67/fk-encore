@@ -101,3 +101,37 @@ final class TripPassedSpotTests: XCTestCase {
         XCTAssertEqual(TripPassedSpot.line([spot(nil)]), "unterwegs: ein Ort ohne Namen")
     }
 }
+
+/// A signposted way out of OpenStreetMap (§4.7), as the list shows it.
+@MainActor
+final class TripNearbyRouteTests: XCTestCase {
+
+    private func route(_ extra: String) throws -> TripNearbyRoute {
+        try JSONDecoder().decode(TripNearbyRoute.self, from: Data("""
+        { "osmRef": "relation:1", "name": "Panoramaweg Beispiel", "route": "hiking",
+          "network": null, "ref": null, "lengthM": 10400, "ascentM": 600,
+          "distanceM": 500, "estimatedMinutes": 210, "roundtrip": false,
+          "joined": true, "website": null, "difficulty": null, "inPool": false\(extra) }
+        """.utf8))
+    }
+
+    func testTheSummarySaysWhatIsKnown() throws {
+        XCTAssertEqual(try route("").summary, "10,4 km · 600 Hm")
+    }
+
+    func testItLeavesOutWhatTheMapDoesNotSay() throws {
+        // No climb tagged: saying "0 Hm" would claim the way is flat.
+        XCTAssertEqual(try route(", \"ascentM\": null").summary, "10,4 km")
+    }
+
+    func testALoopAndItsGradeAreNamed() throws {
+        let loop = try route(", \"roundtrip\": true, \"difficulty\": \"T2\", \"network\": \"lwn\"")
+        XCTAssertEqual(loop.summary, "10,4 km · 600 Hm · Rundweg · T2 · LWN")
+    }
+
+    func testWalkingAndRidingLookDifferent() throws {
+        XCTAssertEqual(try route("").symbolName, "figure.hiking")
+        XCTAssertEqual(try route(", \"route\": \"bicycle\"").symbolName, "bicycle")
+        XCTAssertEqual(try route(", \"route\": \"mtb\"").symbolName, "bicycle")
+    }
+}

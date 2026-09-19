@@ -220,6 +220,56 @@ export interface GeoReplicationStatus {
   timestamp: string | null;
 }
 
+/** A signposted walking or cycling route (§4.7). */
+export interface GeoRouteSearchQuery {
+  center: { lat: number; lon: number };
+  radiusM: number;
+  /** hiking | foot | bicycle | mtb. Omitted = all four. */
+  kinds?: string[];
+  limit?: number;
+}
+
+export interface GeoRoutePoint {
+  lat: number;
+  lon: number;
+}
+
+export interface GeoRoute {
+  osmRef: string;
+  id: number;
+  name: string;
+  route: string;
+  network: string | null;
+  ref: string | null;
+  /** The real length of the way, in metres. */
+  lengthM: number;
+  /** Metres of climb where the relation says so — never guessed. */
+  ascentM: number | null;
+  /** How close the way passes to the centre of the search. */
+  distanceM: number;
+  start: GeoRoutePoint;
+  /** Null for a loop and for a relation whose members do not join up. */
+  end: GeoRoutePoint | null;
+  /** A simplified shape; empty where the members do not join up. */
+  via: GeoRoutePoint[];
+  joined: boolean;
+  roundtrip: boolean;
+  website: string | null;
+  wikipedia: string | null;
+  difficulty: string | null;
+}
+
+export interface GeoRouteSearchPage {
+  database: string;
+  routes: GeoRoute[];
+  hasMore: boolean;
+  /**
+   * False when the region was imported before routes were part of the
+   * style — an older import, not an empty landscape.
+   */
+  imported: boolean;
+}
+
 export interface GeoClient {
   health(): Promise<boolean>;
   startImport(req: GeoImportRequest): Promise<GeoImportStatus>;
@@ -234,6 +284,8 @@ export interface GeoClient {
   ): Promise<GeoPoiCandidate[]>;
   /** Area search for trip planning — see the method on HttpGeoClient. */
   searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage>;
+  /** Walking and cycling routes near a place (§4.7). */
+  searchRoutes(postgresDb: string, query: GeoRouteSearchQuery): Promise<GeoRouteSearchPage>;
   /**
    * Is this corner of the world in that database at all (§4.3)?
    *
@@ -368,6 +420,26 @@ export class HttpGeoClient implements GeoClient {
       rank: query.rank,
       limit: query.limit,
       offset: query.offset,
+    });
+  }
+
+  /**
+   * Walking and cycling routes near a place (§4.7).
+   *
+   * Its own call rather than a category of `searchPois`, because a
+   * route is a way rather than a point: it answers with two ends, a
+   * length and a shape, none of which a POI has.
+   */
+  async searchRoutes(
+    postgresDb: string,
+    query: GeoRouteSearchQuery,
+  ): Promise<GeoRouteSearchPage> {
+    return await this.postJson<GeoRouteSearchPage>("/routes/search", {
+      database: postgresDb,
+      center: query.center,
+      radiusM: query.radiusM,
+      kinds: query.kinds,
+      limit: query.limit,
     });
   }
 

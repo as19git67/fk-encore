@@ -874,6 +874,70 @@ struct MoveStopResponse: Codable, Sendable {
     let overfullBlockIds: [String]
 }
 
+/// A signposted way near the city, out of OpenStreetMap (§4.7).
+struct TripNearbyRoute: Codable, Sendable, Identifiable {
+    let osmRef: String
+    let name: String
+    /// hiking | foot | bicycle | mtb.
+    let route: String
+    let network: String?
+    let ref: String?
+    let lengthM: Int
+    /// Metres of climb where the relation says so — never guessed.
+    let ascentM: Int?
+    /// How close the way passes to the city.
+    let distanceM: Int
+    /// What it would take, from the way's own length and climb.
+    let estimatedMinutes: Int
+    let roundtrip: Bool
+    /// False when the relation's members do not join into one way.
+    let joined: Bool
+    let website: String?
+    let difficulty: String?
+    let inPool: Bool
+
+    var id: String { osmRef }
+
+    /// Walking and riding are different enough to be worth an icon.
+    var symbolName: String {
+        route == "bicycle" || route == "mtb" ? "bicycle" : "figure.hiking"
+    }
+
+    /// "10 km · 600 Hm · Rundweg · T2" — what is known, and nothing in
+    /// place of what is not.
+    var summary: String {
+        var parts = [TripSpotExtent.kilometres(lengthM)]
+        if let ascentM, ascentM > 0 { parts.append("\(ascentM) Hm") }
+        if roundtrip { parts.append("Rundweg") }
+        if let difficulty, !difficulty.isEmpty { parts.append(difficulty) }
+        if let network, !network.isEmpty { parts.append(network.uppercased()) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+struct TripNearbyRoutesResponse: Codable, Sendable {
+    let legIndex: Int
+    let region: String?
+    /// False when the region predates the route import.
+    let imported: Bool
+    let routes: [TripNearbyRoute]
+    let hasMore: Bool
+    let note: String?
+}
+
+struct TripTakeRouteRequest: Encodable, Sendable {
+    let osmRef: String
+    let legIndex: Int
+}
+
+struct TripTakeRouteResponse: Decodable, Sendable {
+    let osmRef: String
+    let name: String
+    let legIndex: Int
+    let dwellMinutes: Int
+    let roundtrip: Bool
+}
+
 /// A spot a route walks past (§4.7).
 ///
 /// Named rather than counted: "unterwegs: Ponale-Aussicht" is the
