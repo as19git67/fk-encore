@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Button from 'primevue/button'
 import Menu from 'primevue/menu'
@@ -196,13 +196,46 @@ async function handleLogout() {
   await auth.logout()
   router.push('/login')
 }
+
+// ── Sticky stack height ──────────────────────────────────────────────────────
+// Navbar, submenu row and whatever the active view lifted into
+// #module-subheaders form one sticky block. Its height is measured here and
+// published as `--app-stack-height`, so no view computes a `top:` or a
+// `calc(100dvh - …)` of its own. `--menubar-height` stays as an alias for the
+// views not yet on PageLayout (issue #1272, stage 2 removes it).
+const appContainerRef = ref<HTMLElement | null>(null)
+const toolbarStackRef = ref<HTMLElement | null>(null)
+let stackObserver: ResizeObserver | null = null
+
+function publishStackHeight() {
+  const container = appContainerRef.value
+  if (!container) return
+  const height = toolbarStackRef.value?.getBoundingClientRect().height ?? 0
+  const value = `${Math.round(height)}px`
+  container.style.setProperty('--app-stack-height', value)
+  container.style.setProperty('--menubar-height', value)
+}
+
+function observeStack() {
+  stackObserver?.disconnect()
+  stackObserver = null
+  publishStackHeight()
+  if (typeof ResizeObserver === 'undefined' || !toolbarStackRef.value) return
+  stackObserver = new ResizeObserver(publishStackHeight)
+  stackObserver.observe(toolbarStackRef.value)
+}
+
+onMounted(observeStack)
+// The stack mounts and unmounts with the session (v-if on isAuthenticated).
+watch(toolbarStackRef, observeStack)
+onBeforeUnmount(() => stackObserver?.disconnect())
 </script>
 
 <template>
-  <div class="app-container">
-    <div v-if="auth.isAuthenticated" class="app-toolbar-stack">
-      <nav class="sticky-navbar">
-        <!-- Left: hamburger + active module sub-menu -->
+  <div ref="appContainerRef" class="app-container">
+    <div v-if="auth.isAuthenticated" ref="toolbarStackRef" class="app-toolbar-stack">
+      <!-- Row 1: main menu. Left: module switcher + active module; right: meta icons. -->
+      <nav class="sticky-navbar app-navbar" aria-label="Hauptmenü">
         <div class="navbar-start">
           <Button
             icon="pi pi-bars"
@@ -214,46 +247,16 @@ async function handleLogout() {
             @click="toggleHamburgerMenu"
           />
           <Menu ref="hamburgerMenuRef" :model="moduleMenuItems" :popup="true" />
-
-          <!-- Sub-menu items shown inline when inside a module -->
-          <div v-if="activeModule && subMenuItems.length" class="submenu-strip">
-            <template v-for="item in stripItems" :key="item.routeName || item.label">
-              <!-- Group header (e.g. the Dokumente "Einstellungen" gear) -->
-              <Button
-                v-if="item.children"
-                :label="item.label"
-                :icon="item.icon"
-                text
-                size="small"
-                :severity="isGroupActive(item.children) ? 'primary' : 'secondary'"
-                :class="{ 'submenu-item--active': isGroupActive(item.children) }"
-                @click="openGroupMenu($event, item.children)"
-              />
-              <!-- Plain link -->
-              <Button
-                v-else
-                :label="item.label"
-                :icon="item.icon"
-                :badge="item.badge"
-                text
-                size="small"
-                :severity="route.name === item.routeName ? 'primary' : 'secondary'"
-                :class="{ 'submenu-item--active': route.name === item.routeName }"
-                @pointerenter="prefetchSubMenu(item.routeName)"
-                @focus="prefetchSubMenu(item.routeName)"
-                @click="navigateSubMenu(item.routeName)"
-              />
-            </template>
-            <!-- Documents: basket at the strip's end (where the gear used to sit) -->
-            <DocBasketIndicator v-if="activeModule?.id === 'dokumente'" />
-            <Menu ref="groupMenuRef" :model="groupMenuModel" :popup="true" />
-          </div>
+          <span v-if="activeModule" class="navbar-module" data-testid="navbar-module">
+            <i :class="activeModule.icon" aria-hidden="true" />
+            <span class="navbar-module-label">{{ activeModule.label }}</span>
+          </span>
         </div>
 
-        <!-- Right: profile + logout (icons only) -->
         <div class="navbar-end">
+          <DocBasketIndicator v-if="activeModule?.id === 'dokumente'" />
           <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
-          <!-- Settings gear for the active module (documents: where the basket used to sit) -->
+          <!-- Settings gear for the active module -->
           <Button
             v-if="settingsGroup?.children"
             :icon="settingsGroup.icon"
@@ -284,8 +287,52 @@ async function handleLogout() {
           />
         </div>
       </nav>
-      <!-- Route views can teleport conditional toolbars here. Keeping all
-           subheaders in this single sticky stack avoids competing top offsets. -->
+
+      <!-- Row 2: the active module's sub-menu. Always one row of fixed height;
+           it scrolls sideways inside itself on a narrow screen, never the page. -->
+      <nav
+        v-if="activeModule && stripItems.length"
+        class="app-submenu"
+        data-testid="app-submenu"
+        :aria-label="`Untermenü ${activeModule.label}`"
+      >
+        <div class="submenu-strip">
+          <template v-for="item in stripItems" :key="item.routeName || item.label">
+            <!-- Group header (a submenu that opens a popup) -->
+            <Button
+              v-if="item.children"
+              :label="item.label"
+              :icon="item.icon"
+              text
+              size="small"
+              :severity="isGroupActive(item.children) ? 'primary' : 'secondary'"
+              class="submenu-item"
+              :class="{ 'submenu-item--active': isGroupActive(item.children) }"
+              @click="openGroupMenu($event, item.children)"
+            />
+            <!-- Plain link -->
+            <Button
+              v-else
+              :label="item.label"
+              :icon="item.icon"
+              :badge="item.badge"
+              text
+              size="small"
+              :severity="route.name === item.routeName ? 'primary' : 'secondary'"
+              class="submenu-item"
+              :class="{ 'submenu-item--active': route.name === item.routeName }"
+              :aria-current="route.name === item.routeName ? 'page' : undefined"
+              @pointerenter="prefetchSubMenu(item.routeName)"
+              @focus="prefetchSubMenu(item.routeName)"
+              @click="navigateSubMenu(item.routeName)"
+            />
+          </template>
+        </div>
+      </nav>
+      <Menu ref="groupMenuRef" :model="groupMenuModel" :popup="true" />
+
+      <!-- Row 3: what the active view lifts up here through PageLayout
+           (toolbar, notices, selection bar). One stack, no competing offsets. -->
       <div id="module-subheaders" class="module-subheaders" data-testid="module-subheaders" />
     </div>
 
@@ -312,7 +359,7 @@ body {
      navbar. Views that need to scroll their own content use min-height as a
      floor and grow beyond the viewport as before. */
   min-height: 100dvh;
-  --menubar-height: 3.5rem;
+  min-width: 0;
 }
 
 /* ── Sticky application toolbar stack ─────────────────────────────────────── */
@@ -327,7 +374,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: var(--menubar-height);
+  height: var(--app-navbar-height);
   padding: 0 0.5rem;
   background: var(--p-content-background);
   border-bottom: 1px solid var(--p-content-border-color);
@@ -362,25 +409,62 @@ body {
   flex-shrink: 0;
 }
 
-/* ── Inline sub-menu strip ──────────────────────────────────────────────────── */
+.navbar-module {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  padding-left: 0.25rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+.navbar-module-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Sub-menu row ───────────────────────────────────────────────────────────── */
+.app-submenu {
+  height: var(--app-submenu-height);
+  display: flex;
+  align-items: stretch;
+  padding: 0 0.5rem;
+  background: var(--p-content-background);
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
 .submenu-strip {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow-x: auto;
   scrollbar-width: none;
-  padding-left: 0.25rem;
-  border-left: 1px solid var(--p-content-border-color);
-  margin-left: 0.25rem;
 }
 
 .submenu-strip::-webkit-scrollbar {
   display: none;
 }
 
-/* Active submenu item gets a stronger visual */
-.submenu-item--active {
-  font-weight: 600;
+.submenu-item {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: 0;
+}
+
+/* The current page: an underline in the primary colour, not bold text, so
+   the row does not shift width when the selection moves. */
+.submenu-item--active::after {
+  content: '';
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--p-primary-color);
 }
 
 /* Ensure PrimeVue popup menu appears above everything */
@@ -399,20 +483,24 @@ body {
   position: relative;
   z-index: 0;
   max-width: none;
+  min-width: 0;
   margin: 0 auto;
   padding: 0;
 }
 
-/* On mobile (≤768 px) show only icons in the sub-menu strip */
+/* On mobile (≤768 px) the sub-menu keeps its labels (they are what makes a
+   row of icons readable) but tightens the buttons; the row scrolls sideways
+   inside itself if it still does not fit. The module name next to the
+   hamburger goes, the sub-menu already says where the user is. */
 @media (max-width: 768px) {
   .module-subheaders {
     padding: 0.5rem;
   }
-  .submenu-strip .p-button-label {
+  .navbar-module-label {
     display: none;
   }
   .submenu-strip .p-button {
-    padding: 0.5rem;
+    padding: 0.4rem 0.6rem;
   }
 }
 </style>
