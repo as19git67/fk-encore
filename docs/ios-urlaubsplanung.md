@@ -175,6 +175,33 @@ Drei Entscheidungen:
   „an oder aus" einen Schalter, aus gutem Grund. Wer wirklich kürzere Wege
   braucht, hat dafür das Etappenlimit (`maxWalkMinutes`); eine Wirkung des
   Schalters auf Wege oder Barrierefreiheit (`wheelchair`-Tag) bleibt offen.
+- **Wie jemand unterwegs ist, ist eine zweite Frage** (2026-09-19). „Mehr Zeit
+  einplanen" und „mit Rollstuhl unterwegs" klingen verwandt und sind es nicht:
+  Das eine macht den Tag dünner, das andere schließt eine Art von Ziel aus. Eine
+  Strecke mit 600 Höhenmetern ist für jemanden im Rollstuhl kein langsamerer
+  Ausflug, sondern keiner (§4.7) — und das ist kein Faktor, sondern ein
+  Ausschluss. Deshalb trägt jede Person jetzt zusätzlich eine
+  **Fortbewegungsart**: `foot`, `wheelchair` oder `pram`.
+
+  Die Kürze ist Absicht. Ein Wort verdient seinen Platz dadurch, was der Planer
+  damit *tut*, und der unterscheidet „zu Fuß" von „auf Rädern" und nicht feiner.
+  Rollstuhl und Kinderwagen stehen nur deshalb getrennt da, damit eine Familie
+  mit Kinderwagen nicht „Rollstuhl" ankreuzen muss; dass der Plan beide gleich
+  behandelt, sagt der Bildschirm dazu. Gesetzt wird auch das von einem Menschen,
+  nie aus einem Alter geschlossen — dieselbe Regel wie beim Zeit-Schalter.
+
+  Daraus folgen zwei Dinge, und sie liegen bewusst auseinander:
+
+  - **`onWheels`** an der Reise, sobald jemand auf Rädern unterwegs ist. Es
+    ändert **kein** Blockbudget; es ist das, was eine Strecke hören muss.
+  - **Ein Gehtempo** (`groupPaceFactor` in `blocks.ts`): Die Wanderzeitformel
+    hinter der Streckendauer rechnet mit einem erwachsenen Wanderer — 4 km/h
+    eben, 300 Hm/h bergauf. Eine Gruppe mit einem kleinen Kind oder mit
+    gesetztem „mehr Zeit einplanen" geht das nicht, also Faktor 1,4 (≈ 3 km/h).
+    **Kein Produkt**, anders als beim Budgetfaktor: Zwei Gründe, langsamer zu
+    sein, machen eine Gruppe nicht noch langsamer — das Tempo ist das des
+    langsamsten Menschen, und den gibt es nur einmal. Das Budget schrumpft
+    dagegen zweimal, weil es um Programmdichte geht und nicht um Geschwindigkeit.
 - **Gerechnet wird auf den Reisebeginn, nicht auf heute.** Eine im Januar für
   August geplante Reise ist eine Reise mit dem Kind, das im August schon
   Geburtstag hatte.
@@ -1043,10 +1070,28 @@ leere Liste zu zeigen, die wie „hier gibt es nichts" aussieht.
 
 **Was bewusst noch nicht gebaut ist:**
 
-- **Die Dauer nach Reisegruppe.** „Mehr Zeit einplanen" (§3.5) skaliert
-  Blockbudgets. Bei einer Strecke müsste es die Dauer selbst skalieren, und
-  eingeschränkte Mobilität würde sie ganz ausschließen. Beides wartet, bis
-  die Reisegruppe Fortbewegungsarten kennt.
+- **Die Dauer nach Reisegruppe — umgesetzt (2026-09-19).** „Mehr Zeit
+  einplanen" (§3.5) skaliert Blockbudgets; bei einer Strecke skaliert es jetzt
+  die Dauer selbst, und wer auf Rädern unterwegs ist, bekommt sie gar nicht
+  erst vorgeschlagen.
+
+  - **Das Tempo** (`routeMinutes(…, paceFactor)`): Das Ganze wird skaliert,
+    nicht nur der ebene Teil — eine Gruppe, die drei Kilometer in der Stunde
+    geht, steigt auch langsamer, und eine getrennte Korrektur behauptete eine
+    Genauigkeit, die niemand gemessen hat.
+  - **Der Ausschluss** (`rollable()` in `routes.ts`): entschieden nach den
+    Worten der Karte statt nach einem Urteil über Menschen. `hiking` und `mtb`
+    sind über Boden ausgeschildert, der für Stiefel und Reifen gewählt wurde;
+    dazu fällt alles mit bekanntem Anstieg weg. Eine Seepromenade als `foot`
+    ohne Anstieg bleibt — mit der ehrlichen Grenze, dass OSM keinen Belag
+    verspricht, weshalb die App von einer gefilterten Liste spricht und nicht
+    von einer Zusage.
+  - **Gesagt wird es immer** (`omittedForWheels` samt Satz): Eine still kürzer
+    gewordene Liste liest sich wie eine Gegend ohne Strecken, und eine leere
+    nach dem Filtern wie eine Gegend ohne Strecken *für uns* — zwei
+    verschiedene Sätze (§15.3).
+  - **Übernehmen filtert nicht.** Wer eine Strecke ausdrücklich holt, wird
+    nicht überstimmt: Die Liste ist ein Vorschlag, kein Tor (§7.1).
 
 **In der App (Etappe 2, umgesetzt):** „Strecke anlegen" im Menü des Tages —
 Name, Start und Ende über die Ortssuche des Geräts, Dauer, optional Länge
@@ -3948,7 +3993,10 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     passiert, `on-the-way.ts`) und Etappe 5 (Import der OSM-Routenrelationen,
     `osm_routes` samt Suche, Dauer-Schätzung und „Strecken in der Nähe")
     ebenfalls umgesetzt. Damit ist §4.7 inhaltlich durch; offen bleibt dort
-    nur noch die Dauer nach Reisegruppe, die auf §3.5 wartet.
+    auch die Dauer nach Reisegruppe (2026-09-19): Die Fortbewegungsarten in
+    §3.5 stehen, das Gehtempo skaliert die Streckendauer, und wer auf Rädern
+    unterwegs ist, bekommt Strecken mit Anstieg nicht vorgeschlagen. Damit ist
+    §4.7 vollständig.
 
 15. **Der Ausflug, den niemand verlangt hat** (§4.6) — „vier Tage in San
     Gimignano", und Florenz kommt trotzdem vor. **Etappe 1 umgesetzt:** das

@@ -44,8 +44,11 @@ import { loadPlan, type StoredPlan } from "./plan-store";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
 import {
   ageOn,
+  GETS_ABOUT,
+  isGetsAbout,
   readGroup,
   withGroup,
+  type GetsAbout,
   type GroupReading,
   type Traveller,
 } from "./travel-group";
@@ -75,6 +78,8 @@ export interface TripTraveller {
   birthDateFromHousehold: boolean;
   /** Set by a person, never derived (§3.5). */
   shortWalks: boolean;
+  /** foot | wheelchair | pram — how they get about (§3.5). */
+  getsAbout: string;
   /** Age at the start of the trip, which is the age that plans it. */
   ageAtStart: number | null;
   addedBy: string | null;
@@ -85,7 +90,13 @@ export interface TravellersResponse {
   /** The date the ages were computed against, or null when undated. */
   on: string | null;
   /** What follows from the group, and why (§3.8). */
-  effect: { withChildren: boolean; limitedMobility: boolean; reasons: string[] };
+  effect: {
+    withChildren: boolean;
+    limitedMobility: boolean;
+    /** Somebody is on wheels: routes that climb are out (§4.7). */
+    onWheels: boolean;
+    reasons: string[];
+  };
 }
 
 export interface AddTravellerRequest {
@@ -95,6 +106,8 @@ export interface AddTravellerRequest {
   birthDate?: string;
   /** "Mehr Zeit einplanen" — a statement about a person, so it is asked for. */
   shortWalks?: boolean;
+  /** foot | wheelchair | pram. Omitted means on foot (§3.5). */
+  getsAbout?: string;
 }
 
 export interface RemoveTravellerRequest {
@@ -107,6 +120,8 @@ export interface UpdateTravellerRequest {
   travellerId: number;
   /** "Mehr Zeit einplanen" — a statement about a person, so it is asked for. */
   shortWalks?: boolean;
+  /** foot | wheelchair | pram (§3.5). */
+  getsAbout?: string;
   /** A new name for somebody entered by hand. */
   label?: string;
   /**
@@ -145,6 +160,7 @@ export const addTraveller = api(
       label,
       birth_date: validBirthDate(req.birthDate),
       short_walks: req.shortWalks === true,
+      gets_about: validGetsAbout(req.getsAbout),
       added_by: userId,
     });
 
@@ -187,6 +203,7 @@ export const updateTraveller = api(
 
     const patch: Partial<typeof tripPlanTravellers.$inferInsert> = {};
     if (req.shortWalks !== undefined) patch.short_walks = req.shortWalks;
+    if (req.getsAbout !== undefined) patch.gets_about = validGetsAbout(req.getsAbout);
     if (req.label !== undefined) {
       if (row.userId !== null) {
         throw APIError.failedPrecondition("der Name kommt aus dem Konto und wird dort geändert");
@@ -266,6 +283,7 @@ export async function replanWithGroup(planId: number, userId: number): Promise<P
   const constraints = withGroup(plan.constraints, {
     withChildren: effect.withChildren || undefined,
     limitedMobility: effect.limitedMobility || undefined,
+    onWheels: effect.onWheels || undefined,
   });
   return await replanAfterFrameChange(plan, userId, constraints);
 }
@@ -288,6 +306,7 @@ export async function travellersOf(plan: StoredPlan): Promise<TravellersResponse
       accountName: users.name,
       ownBirthDate: tripPlanTravellers.birth_date,
       shortWalks: tripPlanTravellers.short_walks,
+      getsAbout: tripPlanTravellers.gets_about,
       addedBy: addedByUser.name,
     })
     .from(tripPlanTravellers)
@@ -310,6 +329,7 @@ export async function travellersOf(plan: StoredPlan): Promise<TravellersResponse
       birthDate: fromHousehold ?? row.ownBirthDate,
       fromHousehold: fromHousehold !== null,
       shortWalks: row.shortWalks,
+      getsAbout: row.getsAbout,
     };
   });
   const reading: GroupReading = readGroup(people, on);
@@ -322,6 +342,7 @@ export async function travellersOf(plan: StoredPlan): Promise<TravellersResponse
       birthDate: people[i].birthDate ?? null,
       birthDateFromHousehold: people[i].fromHousehold,
       shortWalks: row.shortWalks,
+      getsAbout: row.getsAbout,
       ageAtStart: on === null ? null : ageOn(people[i].birthDate, on),
       addedBy: row.addedBy,
     })),
@@ -329,6 +350,7 @@ export async function travellersOf(plan: StoredPlan): Promise<TravellersResponse
     effect: {
       withChildren: reading.group.withChildren === true,
       limitedMobility: reading.group.limitedMobility === true,
+      onWheels: reading.group.onWheels === true,
       reasons: reading.reasons,
     },
   };
@@ -412,6 +434,20 @@ function startOf(plan: StoredPlan): string | null {
     .map((leg) => leg.startDate)
     .filter((date): date is string => date !== null)
     .sort()[0] ?? null;
+}
+
+/**
+ * The mode, or a refusal. Absent is "on foot", which is the ordinary
+ * answer and the one nobody has to give.
+ */
+function validGetsAbout(value: string | undefined): GetsAbout {
+  if (value === undefined) return "foot";
+  const trimmed = value.trim();
+  if (trimmed === "") return "foot";
+  if (!isGetsAbout(trimmed)) {
+    throw APIError.invalidArgument(`getsAbout must be one of ${GETS_ABOUT.join(", ")}`);
+  }
+  return trimmed;
 }
 
 function validBirthDate(value: string | undefined): string | null {

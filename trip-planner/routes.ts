@@ -33,6 +33,7 @@ import { requirePermission } from "../user/auth-handler";
 import { getGeoClient, type GeoRoute } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { addFind } from "./add-find";
+import { groupPaceFactor, type GroupProfile } from "./blocks";
 import { MAX_VIA_POINTS } from "./extent";
 import { loadPlan } from "./plan-store";
 import { routeMinutes } from "./route-duration";
@@ -95,6 +96,12 @@ export interface NearbyRoutesResponse {
   hasMore: boolean;
   /** Why the list is empty, in the traveller's words, or null. */
   note: string | null;
+  /**
+   * How many ways were left out because somebody on this trip is on
+   * wheels (§3.5). Said rather than silently subtracted: a list that
+   * quietly got shorter looks like a region with nothing in it.
+   */
+  omittedForWheels: number;
 }
 
 export const nearbyRoutes = api(
@@ -140,13 +147,25 @@ export const nearbyRoutes = api(
       }
     }
 
+    // Who is coming decides two things here, and only one of them is a
+    // number (§3.5). The pace stretches every estimate; being on
+    // wheels takes whole ways off the list, because a path that climbs
+    // is not a slower day out for a wheelchair, it is not a day out.
+    const group = (plan.constraints.group ?? undefined) as GroupProfile | undefined;
+    const pace = groupPaceFactor(group);
+    const offered = group?.onWheels
+      ? page.routes.filter((route) => rollable(route))
+      : page.routes;
+    const omittedForWheels = page.routes.length - offered.length;
+
     return {
       legIndex,
       region: region.postgresDb,
       imported: page.imported,
-      routes: page.routes.map((route) => toNearby(route, leg.mode, inPool)),
+      routes: offered.map((route) => toNearby(route, leg.mode, inPool, pace)),
       hasMore: page.hasMore,
-      note: noteFor(page.imported, page.routes.length),
+      note: noteFor(page.imported, offered.length, omittedForWheels),
+      omittedForWheels,
     };
   },
 );
@@ -248,7 +267,12 @@ export const takeRoute = api(
   },
 );
 
-function toNearby(route: GeoRoute, mode: TransportMode, inPool: ReadonlySet<string>): NearbyRoute {
+function toNearby(
+  route: GeoRoute,
+  mode: TransportMode,
+  inPool: ReadonlySet<string>,
+  paceFactor: number,
+): NearbyRoute {
   return {
     osmRef: route.osmRef,
     name: route.name,
@@ -258,7 +282,7 @@ function toNearby(route: GeoRoute, mode: TransportMode, inPool: ReadonlySet<stri
     lengthM: route.lengthM,
     ascentM: route.ascentM,
     distanceM: route.distanceM,
-    estimatedMinutes: estimateFor(route, mode),
+    estimatedMinutes: estimateFor(route, mode, paceFactor),
     roundtrip: route.roundtrip,
     joined: route.joined,
     website: route.website,
@@ -274,22 +298,55 @@ function toNearby(route: GeoRoute, mode: TransportMode, inPool: ReadonlySet<stri
  * Gardesana on a leg that happens to be on foot — and a walking route
  * is walked even on a leg that gets about by car.
  */
-function estimateFor(route: GeoRoute, mode: TransportMode): number {
+function estimateFor(route: GeoRoute, mode: TransportMode, paceFactor = 1): number {
   const byRoute: TransportMode | null = route.route === "bicycle" || route.route === "mtb"
     ? "bike"
     : route.route === "hiking" || route.route === "foot"
       ? "foot"
       : null;
-  return routeMinutes(route.lengthM, route.ascentM, byRoute ?? mode);
+  return routeMinutes(route.lengthM, route.ascentM, byRoute ?? mode, paceFactor);
 }
 
-function noteFor(imported: boolean, found: number): string | null {
+function noteFor(imported: boolean, found: number, omittedForWheels: number): string | null {
   if (!imported) {
     return "Diese Region wurde importiert, bevor der Planer Strecken kannte — "
       + "ein neuer Import bringt sie mit.";
   }
+  // Said whichever way it turned out: a list that quietly got shorter
+  // reads as a region with nothing in it, and an empty one after
+  // filtering reads as a region with nothing in it *for us*, which is
+  // a different sentence (§15.3).
+  if (found === 0 && omittedForWheels > 0) {
+    return `In der Nähe sind nur Strecken mit Anstieg erfasst (${omittedForWheels}) — `
+      + "die schlägt der Planer nicht vor, weil jemand mit Rollstuhl, Rollator oder "
+      + "Kinderwagen mitfährt.";
+  }
   if (found === 0) return "In der Nähe ist keine ausgeschilderte Strecke erfasst.";
+  if (omittedForWheels > 0) {
+    return `${omittedForWheels} Strecke${omittedForWheels === 1 ? "" : "n"} mit Anstieg `
+      + "ist nicht dabei — jemand fährt mit Rollstuhl, Rollator oder Kinderwagen mit.";
+  }
   return null;
+}
+
+/**
+ * Is this a way somebody on wheels could actually take?
+ *
+ * Two things rule one out, and both are the map's own words rather
+ * than a judgement about a person:
+ *
+ *   - **It climbs.** Where the relation says how much, any climb at
+ *     all is enough: pushing a wheelchair up a hundred metres of
+ *     ascent is not a gentler version of the same outing.
+ *   - **It is a path.** `hiking` and `mtb` are waymarked over ground
+ *     chosen for boots and tyres. `foot` and `bicycle` routes are
+ *     ordinarily made ways, so they stay — with the honest limit that
+ *     OpenStreetMap does not promise a surface, and the app says the
+ *     list was filtered rather than pretending it is a guarantee.
+ */
+function rollable(route: GeoRoute): boolean {
+  if (route.route === "hiking" || route.route === "mtb") return false;
+  return (route.ascentM ?? 0) <= 0;
 }
 
 function validateRadius(radiusM: number | undefined): number {

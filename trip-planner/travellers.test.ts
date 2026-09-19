@@ -25,6 +25,7 @@ import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
+import { loadPlan } from "./plan-store";
 import { inviteToTrip, removeFromTrip } from "./shares";
 import {
   addTraveller,
@@ -458,3 +459,76 @@ describe("a trip without dates", () => {
 function budget(plan: { legs: { days: { blocks: { budgetMinutes: number }[] }[] }[] }): number {
   return plan.legs[0].days[0].blocks.reduce((sum, block) => sum + block.budgetMinutes, 0);
 }
+
+describe("how somebody gets about (§3.5)", () => {
+  it("defaults to on foot, which is the answer nobody has to give", async () => {
+    const plan = await trip();
+    await addTraveller({ planId: plan.id, label: "Oma Beispiel" });
+
+    const { travellers, effect } = await planTravellers({ planId: plan.id });
+
+    expect(travellers.find((t) => t.label === "Oma Beispiel")?.getsAbout).toBe("foot");
+    expect(effect.onWheels).toBe(false);
+  });
+
+  it("takes a wheelchair in, and says what it rules out", async () => {
+    const plan = await trip();
+    await addTraveller({
+      planId: plan.id,
+      label: "Oma Beispiel",
+      getsAbout: "wheelchair",
+    });
+
+    const { travellers, effect } = await planTravellers({ planId: plan.id });
+
+    expect(travellers.find((t) => t.label === "Oma Beispiel")?.getsAbout).toBe("wheelchair");
+    expect(effect.onWheels).toBe(true);
+    expect(effect.reasons.join(" ")).toContain("Strecken mit Anstieg");
+  });
+
+  it("can be changed afterwards, like everything else about a person", async () => {
+    const plan = await trip();
+    await addTraveller({ planId: plan.id, label: "Oma Beispiel" });
+    const before = await planTravellers({ planId: plan.id });
+    const oma = before.travellers.find((t) => t.label === "Oma Beispiel")!;
+
+    await updateTraveller({ planId: plan.id, travellerId: oma.id, getsAbout: "pram" });
+
+    const { travellers, effect } = await planTravellers({ planId: plan.id });
+    expect(travellers.find((t) => t.id === oma.id)?.getsAbout).toBe("pram");
+    expect(effect.onWheels).toBe(true);
+  });
+
+  it("does not shorten the day — that is a different question", async () => {
+    // A wheelchair rules a route out; it does not mean less programme
+    // (§4.7). Only "mehr Zeit einplanen" does that.
+    const plan = await trip();
+    const before = budget((await addTraveller({
+      planId: plan.id,
+      label: "Oma Beispiel",
+      getsAbout: "wheelchair",
+    })).plan);
+
+    const plain = await trip();
+    await addTraveller({ planId: plain.id, label: "Oma Beispiel" });
+    const after = budget((await getTripPlan({ planId: plain.id })).plan);
+
+    expect(before).toBe(after);
+  });
+
+  it("carries the fact into the trip, where a route can read it", async () => {
+    // The derivation is only worth having if it reaches the plan: the
+    // route search reads `constraints.group` and nothing else (§4.7).
+    const plan = await trip();
+    await addTraveller({ planId: plan.id, label: "Oma Beispiel", getsAbout: "wheelchair" });
+
+    const stored = await loadPlan(plan.id, ownerId);
+    expect((stored?.constraints.group as { onWheels?: boolean })?.onWheels).toBe(true);
+  });
+
+  it("refuses a mode nobody defined", async () => {
+    const plan = await trip();
+    await expect(addTraveller({ planId: plan.id, label: "X", getsAbout: "hoverboard" }))
+      .rejects.toThrow(/getsAbout/);
+  });
+});

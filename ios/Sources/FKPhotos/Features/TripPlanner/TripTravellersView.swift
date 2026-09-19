@@ -130,6 +130,23 @@ struct TripTravellersView: View {
                 Text("Mehr Zeit einplanen").font(.subheadline)
             }
             .disabled(busyId == traveller.id)
+
+            // A second question, not a second phrasing of the first:
+            // "mehr Zeit" makes a day carry less, this rules a kind of
+            // route out (§4.7). Also a statement about a person, so it
+            // is asked and never concluded from an age.
+            Picker(selection: Binding(
+                get: { TripGetsAbout.from(traveller.getsAbout) },
+                set: { mode in Task { await setGetsAbout(mode, for: traveller) } }
+            )) {
+                ForEach(TripGetsAbout.allCases) { mode in
+                    Label(mode.label, systemImage: mode.symbolName).tag(mode)
+                }
+            } label: {
+                Text("Unterwegs").font(.subheadline)
+            }
+            .pickerStyle(.menu)
+            .disabled(busyId == traveller.id)
         }
         .padding(.vertical, 2)
         // Taking somebody off the trip is the row's swipe, as a list
@@ -195,6 +212,22 @@ struct TripTravellersView: View {
         }
     }
 
+    private func setGetsAbout(_ mode: TripGetsAbout, for traveller: TripTraveller) async {
+        guard mode != TripGetsAbout.from(traveller.getsAbout) else { return }
+        busyId = traveller.id
+        defer { busyId = nil }
+        do {
+            let _: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/travellers/update",
+                body: TripUpdateTravellerRequest(
+                    travellerId: traveller.id, getsAbout: mode.rawValue))
+            await load()
+            onPlanChanged?()
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
     private func remove(_ traveller: TripTraveller) async {
         busyId = traveller.id
         defer { busyId = nil }
@@ -222,6 +255,7 @@ struct TripAddTravellerRequest: Encodable, Sendable {
     let label: String
     var birthDate: String? = nil
     var shortWalks: Bool? = nil
+    var getsAbout: String? = nil
 }
 
 struct TripRemoveTravellerRequest: Encodable, Sendable {
@@ -230,7 +264,8 @@ struct TripRemoveTravellerRequest: Encodable, Sendable {
 
 struct TripUpdateTravellerRequest: Encodable, Sendable {
     let travellerId: Int
-    let shortWalks: Bool
+    var shortWalks: Bool? = nil
+    var getsAbout: String? = nil
 }
 
 /// What the form for somebody entered by hand collects (§3.5).
@@ -244,6 +279,8 @@ struct TripManualTraveller: Sendable, Equatable {
     var name: String
     var birthDate: Date?
     var shortWalks: Bool
+    /// How they get about; on foot unless somebody says otherwise.
+    var getsAbout: TripGetsAbout = .foot
 
     /// The name as it will be sent, or nil when there is none.
     var trimmedName: String? {
@@ -274,6 +311,7 @@ struct TripManualTravellerSheet: View {
     @State private var knowsBirthDate = false
     @State private var birthDate = Calendar.current.date(byAdding: .year, value: -30, to: Date()) ?? Date()
     @State private var shortWalks = false
+    @State private var getsAbout = TripGetsAbout.foot
     @State private var isSaving = false
 
     private var entry: TripManualTraveller {
@@ -281,6 +319,7 @@ struct TripManualTravellerSheet: View {
             name: name,
             birthDate: knowsBirthDate ? birthDate : nil,
             shortWalks: shortWalks,
+            getsAbout: getsAbout,
         )
     }
 
@@ -302,6 +341,17 @@ struct TripManualTravellerSheet: View {
             } footer: {
                 Text("Mit Geburtsdatum weiß der Planer, ob ein Kind mitfährt. Ohne wird "
                      + "die Person als erwachsen geplant.")
+            }
+            Section {
+                Picker("Unterwegs", selection: $getsAbout) {
+                    ForEach(TripGetsAbout.allCases) { mode in
+                        Label(mode.label, systemImage: mode.symbolName).tag(mode)
+                    }
+                }
+            } footer: {
+                Text("Mit Rollstuhl, Rollator oder Kinderwagen schlägt der Planer keine "
+                     + "Strecken mit Anstieg vor. Die beiden unterscheidet er nicht — "
+                     + "für einen Weg, der bergauf geht, ist es dieselbe Antwort.")
             }
             Section {
                 Toggle("Mehr Zeit einplanen", isOn: $shortWalks)
@@ -338,9 +388,53 @@ struct TripManualTravellerSheet: View {
     }
 }
 
+/// How somebody gets about (§3.5).
+///
+/// Three entries, and the shortness is deliberate: the plan tells "on
+/// foot" from "on wheels" and no finer. Wheelchair and pram are listed
+/// separately only so that a family with a pram is not asked to tick a
+/// box that says wheelchair — the footnote says plainly that the plan
+/// treats them alike.
+enum TripGetsAbout: String, CaseIterable, Identifiable, Sendable {
+    case foot
+    case wheelchair
+    case pram
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .foot: return "Zu Fuß"
+        case .wheelchair: return "Rollstuhl oder Rollator"
+        case .pram: return "Kinderwagen"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .foot: return "figure.walk"
+        case .wheelchair: return "figure.roll"
+        case .pram: return "stroller"
+        }
+    }
+
+    /// What the plan actually acts on: a way that climbs is out (§4.7).
+    var isOnWheels: Bool { self != .foot }
+
+    /// Anything the app does not know reads as on foot, which is the
+    /// answer that changes nothing.
+    static func from(_ raw: String?) -> TripGetsAbout {
+        TripGetsAbout(rawValue: raw ?? "") ?? .foot
+    }
+}
+
 struct TripGroupEffect: Codable, Sendable {
     let withChildren: Bool
     let limitedMobility: Bool
+    /// Somebody is on wheels: routes that climb are out (§4.7).
+    /// Absent from an older backend, which is not the same as false
+    /// but plans identically.
+    let onWheels: Bool?
     /// Why the days look the way they do, in words (§3.8).
     let reasons: [String]
 }
@@ -354,6 +448,14 @@ struct TripTraveller: Codable, Identifiable, Sendable {
     let birthDate: String?
     /// Set by a person, never derived from an age.
     let shortWalks: Bool
+    /// foot | wheelchair | pram — how they get about (§3.5). Set by a
+    /// person too: being seventy says nothing about it.
+    ///
+    /// Optional because a backend older than this app does not send it,
+    /// and a self-hosted server is updated when its owner gets round to
+    /// it. Absent reads as on foot, which is the answer that changes
+    /// nothing.
+    let getsAbout: String?
     /// Age at the start of the trip — the age that plans it.
     let ageAtStart: Int?
 

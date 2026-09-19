@@ -60,3 +60,33 @@ describe("the ends of the scale", () => {
     expect(routeMinutes(-5_000, -600)).toBe(MIN_ROUTE_MINUTES);
   });
 });
+
+describe("who is walking (§3.5)", () => {
+  it("takes longer for a group that walks slower", () => {
+    // 10 km with 600 m of climb is 3.5 h for an adult hiker; a group
+    // walking three kilometres an hour rather than four needs 1.4 of
+    // that.
+    expect(routeMinutes(10_000, 600, "foot", 1.4)).toBe(294);
+  });
+
+  it("leaves an ordinary group exactly where it was", () => {
+    expect(routeMinutes(10_000, 600, "foot", 1)).toBe(routeMinutes(10_000, 600, "foot"));
+  });
+
+  it("slows the climbing with the walking, not one of them", () => {
+    // Splitting the correction would claim a precision nobody has
+    // measured: the whole is scaled.
+    const plain = routeMinutes(2_000, 900, "foot");
+    expect(routeMinutes(2_000, 900, "foot", 1.4)).toBe(Math.round(plain * 1.4));
+  });
+
+  it("still never proposes more than a day, however slow the group", () => {
+    expect(routeMinutes(200_000, 8_000, "foot", 1.4)).toBe(MAX_ROUTE_MINUTES);
+  });
+
+  it("treats a nonsensical pace as no correction rather than as a number", () => {
+    expect(routeMinutes(10_000, 600, "foot", 0)).toBe(routeMinutes(10_000, 600, "foot"));
+    expect(routeMinutes(10_000, 600, "foot", Number.NaN)).toBe(routeMinutes(10_000, 600, "foot"));
+    expect(routeMinutes(10_000, 600, "foot", -2)).toBe(routeMinutes(10_000, 600, "foot"));
+  });
+});
