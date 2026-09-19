@@ -165,6 +165,48 @@ export async function seedRoutes(name: string, routes: readonly SeedRoute[]): Pr
   }
 }
 
+export interface SeedAdminArea {
+  osmId: number;
+  name: string;
+  adminLevel: number;
+  /** WKT MULTIPOLYGON or POLYGON in EPSG:4326. */
+  wkt: string;
+}
+
+/**
+ * Add an `osm_admin` table shaped like the one osm2pgsql produces and
+ * seed it (§4.6).
+ *
+ * Kept apart from `createSeededRegion` for the same reason the routes
+ * are: a test that wants "these spots lie in no named place" simply
+ * does not seed an area around them, and the day-target search has to
+ * find them through the grid instead.
+ */
+export async function seedAdmin(name: string, areas: readonly SeedAdminArea[]): Promise<void> {
+  const client = new pg.Client({ host: HOST, port: PORT, user: USER, password: PASSWORD, database: name });
+  await client.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS osm_admin (
+        osm_id      bigint,
+        name        text,
+        admin_level int,
+        geom        geometry(MultiPolygon, 4326) NOT NULL
+      )
+    `);
+    await client.query("CREATE INDEX IF NOT EXISTS osm_admin_geom_idx ON osm_admin USING GIST (geom)");
+    for (const area of areas) {
+      await client.query(
+        `INSERT INTO osm_admin (osm_id, name, admin_level, geom)
+         VALUES ($1, $2, $3, ST_Multi(ST_SetSRID(ST_GeomFromText($4), 4326)))`,
+        [area.osmId, area.name, area.adminLevel, area.wkt],
+      );
+    }
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
 /** Drop the database and the service's cached pool for it. */
 export async function dropRegion(name: string): Promise<void> {
   await dropPool(name).catch(() => {});

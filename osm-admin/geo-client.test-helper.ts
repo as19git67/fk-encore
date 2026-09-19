@@ -28,6 +28,9 @@ import type {
   GeoPoiSearchQuery,
   GeoRoute,
   GeoRouteSearchPage,
+  GeoDayTarget,
+  GeoDayTargetPage,
+  GeoDayTargetQuery,
   GeoRouteSearchQuery,
   GeoPoiSearchSpot,
   GeoRefreshResult,
@@ -55,6 +58,7 @@ export class InMemoryGeoClient implements GeoClient {
   private searchCalls: Array<{ postgresDb: string; query: GeoPoiSearchQuery }> = [];
   private routes = new Map<string, GeoRoute[]>();
   private routesImported = new Set<string>();
+  private dayTargets = new Map<string, GeoDayTarget[]>();
   private refreshResults = new Map<string, GeoRefreshResult>();
   private replicationStatuses = new Map<string, GeoReplicationStatus>();
   private droppedRegions: string[] = [];
@@ -237,6 +241,36 @@ export class InMemoryGeoClient implements GeoClient {
       routes: within.slice(0, limit),
       hasMore: within.length > limit,
       imported: true,
+    };
+  }
+
+  /**
+   * What would carry a day within reach of this region (§4.6).
+   *
+   * A region nobody has called this for holds nothing, which is the
+   * ordinary case: most legs are not undersupplied and never ask.
+   */
+  setDayTargets(postgresDb: string, targets: GeoDayTarget[]): void {
+    this.dayTargets.set(postgresDb, targets);
+  }
+
+  async searchDayTargets(
+    postgresDb: string,
+    query: GeoDayTargetQuery,
+  ): Promise<GeoDayTargetPage> {
+    if (this.failingSearches.has(postgresDb)) {
+      throw new Error(`geo: POST /day-targets/search → connect ECONNREFUSED (${postgresDb})`);
+    }
+    const all = this.dayTargets.get(postgresDb) ?? [];
+    const within = all.filter(
+      (target) => target.distanceM > query.minRadiusM && target.distanceM <= query.maxRadiusM,
+    );
+    const limit = query.limit ?? 10;
+    const ranked = [...within].sort((a, b) => b.spotCount - a.spotCount);
+    return {
+      database: postgresDb,
+      targets: ranked.slice(0, limit),
+      hasMore: ranked.length > limit,
     };
   }
 
