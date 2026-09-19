@@ -38,8 +38,12 @@ export interface ListToolbarSearch {
 export interface ListToolbarFilter {
   chips: ComputedRef<FilterChip[]>
   activeCount: ComputedRef<number>
-  /** Open the view's own filter menu, anchored at the event's target. */
-  open: (event: Event) => void
+  /**
+   * Open the view's own filter menu, anchored at the event's target. Leave
+   * it out when the list has no menu to open — its controls sit in the
+   * toolbar's `actions` slot instead — and no filter button is rendered.
+   */
+  open?: (event: Event) => void
   clearAll: () => void
 }
 

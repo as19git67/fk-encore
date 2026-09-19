@@ -257,7 +257,8 @@ export interface ListToolbarParts {
   filter?: {
     chips: Source<FilterChip[]>
     activeCount: Source<number>
-    open: (event: Event) => void
+    /** Omit when the list has no filter menu; then no filter button appears. */
+    open?: (event: Event) => void
     clearAll: () => void
   }
   sort?: UseSortReturn

@@ -80,6 +80,25 @@ Abweichungen vom Entwurf (Etappe 3):
 - Der „zuletzt verwendet"-Fallback der Suche liegt in `sessionStorage`, nicht
   in `localStorage`: ein Suchbegriff ist ein „woran ich gerade war", keine
   Einstellung, die einen am nächsten Tag wieder begrüßen soll.
+- `filter.open` ist optional. Listen, deren Filter als Dropdown direkt in der
+  Toolbar stehen (Zähler- und Finanz-Auffälligkeiten, Steuerliste), liefern
+  kein `open` und bekommen keinen Filter-Knopf — nur Chips und Zähler.
+- `AlbumsView` und `PersonsView` nutzen weiter ihren eigenen Sortierzustand
+  (`utils/albumsViewState.ts` bzw. lokale Refs) und reichen der Toolbar ein
+  handgebautes `UseSortReturn`. `useSort` wäre ein zweiter Schreiber für
+  `sortBy`/`sortDir` geworden.
+- `utils/albumsViewState.ts` besitzt `q` nicht mehr; der Begriff gehört
+  `useListSearch`. Ein Link mit nur `?q=` setzt Filter und Sortierung daher
+  nicht mehr auf die Voreinstellung zurück.
+- `SharedAlbumView` zeigt die Toolbar auch im Kartenmodus. Der Fotofilter
+  wirkt dort nur auf die Karte; die Filter- und Raster-Pillen im
+  Karten-Overlay entfallen dafür.
+- `components/SortMenu.vue` ist gelöscht — die Toolbar rendert das
+  Sortiermenü, niemand rief die Komponente mehr auf.
+- `UserListView` hatte gar keinen Ladefehler-Zustand (kein `catch`); er kommt
+  mit dem `ErrorBanner` neu dazu.
+- Die Ergebniszahl ersetzt die bisherigen sechs Formulierungen („N beste
+  Treffer", „N von M Dokumenten", „N Buchungen", „N offen", …).
 
 Dieses Dokument trifft die Entscheidungen, die das Issue offen lässt, damit
 jede Etappe reine Umsetzung ist. Was hier steht, ist verbindlich für alle

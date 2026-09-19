@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import type { Ref } from 'vue'
 import { searchPhotosNatural, type ParsedQuery } from '../api/photos'
 
 /**
@@ -11,16 +12,21 @@ import { searchPhotosNatural, type ParsedQuery } from '../api/photos'
  *   - call `executeSearch()` on submit
  *   - feed `searchResultIds` into usePhotoGrouping's searchResultIds option
  *   - render `parsed` as chips for transparency
+ *
+ * `externalQuery` lets a view own the query ref elsewhere — the shared
+ * toolbar's `useListSearch`, whose value is mirrored to `?q=` so a reload
+ * reproduces the search. Without it the composable keeps its own ref.
  */
-export function useNaturalSearch() {
-  const searchQuery = ref('')
+export function useNaturalSearch(externalQuery?: Ref<string>) {
+  const searchQuery = externalQuery ?? ref('')
   const searchResultIds = ref<number[] | null>(null)
   const parsed = ref<ParsedQuery | null>(null)
   const loading = ref(false)
   const error = ref('')
 
-  async function executeSearch() {
-    const q = searchQuery.value.trim()
+  /** Run the search for `query`, or for the current `searchQuery` when omitted. */
+  async function executeSearch(query?: string) {
+    const q = (query ?? searchQuery.value).trim()
     if (!q) { clearSearch(); return }
     loading.value = true
     error.value = ''

@@ -8,6 +8,11 @@ import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Tag from 'primevue/tag'
 import PageLayout from '../components/layout/PageLayout.vue'
+import ListToolbar from '../components/layout/ListToolbar.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import PageSkeleton from '../components/layout/PageSkeleton.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { useListToolbar, useListView } from '../composables/useListToolbar'
 import {
   acceptCategorySuggestion,
   listCategorySuggestions,
@@ -28,12 +33,21 @@ const loading = ref(true)
 const error = ref('')
 const info = ref('')
 
-const filter = ref<CategorySuggestionStatus>('open')
 const filterOptions: Array<{ label: string; value: CategorySuggestionStatus }> = [
   { label: 'Offen', value: 'open' },
   { label: 'Akzeptiert', value: 'accepted' },
   { label: 'Abgelehnt', value: 'rejected' },
 ]
+
+// The status picker lives in `?status=` so a reload or a shared link opens
+// the same list instead of snapping back to "Offen" (issue #1272, stage 3).
+const statusView = useListView({
+  options: filterOptions,
+  defaultValue: 'open',
+  key: 'status',
+})
+const filter = statusView.value
+const status = computed(() => filter.value as CategorySuggestionStatus)
 
 const showAcceptDialog = ref(false)
 const editing = ref<CategorySuggestion | null>(null)
@@ -46,7 +60,7 @@ async function load() {
   error.value = ''
   try {
     const [suggestionsRes, categoriesRes] = await Promise.all([
-      listCategorySuggestions(filter.value),
+      listCategorySuggestions(status.value),
       categoriesBySlug.value.size === 0 ? listDocumentCategories() : Promise.resolve(null),
     ])
     items.value = suggestionsRes.items
@@ -63,6 +77,25 @@ async function load() {
 }
 
 watch(filter, load)
+
+const toolbar = useListToolbar({
+  result: {
+    // The endpoint returns the whole status bucket at once.
+    loaded: () => items.value.length,
+    loading: () => loading.value,
+  },
+})
+
+/** One wording per status — an empty "Offen" means something else than an empty "Abgelehnt". */
+const emptyState = computed(() => {
+  if (status.value === 'open') {
+    return { title: 'Keine offenen Vorschläge', message: 'Die Taxonomie ist aktuell.' }
+  }
+  if (status.value === 'accepted') {
+    return { title: 'Noch keine Vorschläge akzeptiert', message: undefined }
+  }
+  return { title: 'Noch keine Vorschläge abgelehnt', message: undefined }
+})
 
 function parentLabel(slug: string | null): string {
   if (!slug) return 'Wurzel'
@@ -148,17 +181,23 @@ onMounted(load)
 <template>
   <PageLayout title="Kategorie-Vorschläge" width="normal" :ready="!loading">
     <template #toolbar>
-      <SelectButton
-        v-model="filter"
-        :options="filterOptions"
-        optionLabel="label"
-        optionValue="value"
-        :allowEmpty="false"
-      />
+      <ListToolbar :model="toolbar">
+        <template #actions>
+          <SelectButton
+            v-model="filter"
+            :options="filterOptions"
+            optionLabel="label"
+            optionValue="value"
+            :allowEmpty="false"
+            size="small"
+            v-tooltip.bottom="'Status'"
+          />
+        </template>
+      </ListToolbar>
     </template>
 
     <template #notice>
-      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+      <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = ''" />
       <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
     </template>
 
@@ -169,14 +208,14 @@ onMounted(load)
       Eintrag in der Kategorie-Hierarchie an.
     </p>
 
-    <div v-if="loading" class="info-text">
-      <i class="pi pi-spin pi-spinner" /> Vorschläge werden geladen…
-    </div>
-    <div v-else-if="items.length === 0" class="info-text">
-      <template v-if="filter === 'open'">Keine offenen Vorschläge — die Taxonomie ist aktuell.</template>
-      <template v-else-if="filter === 'accepted'">Noch keine Vorschläge akzeptiert.</template>
-      <template v-else>Noch keine Vorschläge abgelehnt.</template>
-    </div>
+    <PageSkeleton v-if="loading && items.length === 0" variant="list" :count="5" />
+
+    <EmptyState
+      v-else-if="items.length === 0"
+      icon="pi pi-folder-open"
+      :title="emptyState.title"
+      :message="emptyState.message"
+    />
 
     <div v-else class="suggestion-list">
       <div v-for="s in items" :key="s.id" class="suggestion-card">
@@ -284,12 +323,6 @@ onMounted(load)
   font-size: 0.9rem;
   color: var(--p-text-muted-color);
   margin: 0;
-}
-
-.info-text {
-  text-align: center;
-  margin-top: 4rem;
-  color: var(--p-text-muted-color);
 }
 
 .suggestion-list {

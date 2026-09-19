@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import Popover from 'primevue/popover'
 import Select from 'primevue/select'
 import PageLayout from '../../components/layout/PageLayout.vue'
 import ListToolbar from '../../components/layout/ListToolbar.vue'
@@ -53,11 +52,6 @@ const filtered = computed(() =>
     : anomalies.value.filter((a) => a.type === typeFilter.value),
 )
 
-const filterPopover = ref<InstanceType<typeof Popover> | null>(null)
-function openFilterMenu(event: Event) {
-  filterPopover.value?.toggle(event)
-}
-
 function clearFilters() {
   typeFilter.value = 'all'
 }
@@ -78,7 +72,6 @@ const toolbar = useListToolbar({
   filter: {
     chips: filterChips,
     activeCount: () => filterChips.value.length,
-    open: openFilterMenu,
     clearAll: clearFilters,
   },
   result: {
@@ -264,19 +257,19 @@ function formatAmountChange(item: AnomalyItem): string | null {
     </template>
 
     <template #toolbar>
-      <ListToolbar :model="toolbar" />
-      <Popover ref="filterPopover">
-        <div class="filter-fields">
+      <ListToolbar :model="toolbar">
+        <template #actions>
           <Select
             v-model="typeFilter"
             :options="typeOptions"
             option-label="label"
             option-value="value"
+            size="small"
             aria-label="Art der Anomalie"
             class="filter-select"
           />
-        </div>
-      </Popover>
+        </template>
+      </ListToolbar>
     </template>
 
     <template #notice>

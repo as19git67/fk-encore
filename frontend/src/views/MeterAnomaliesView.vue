@@ -7,7 +7,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
-import Popover from 'primevue/popover'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import PageLayout from '../components/layout/PageLayout.vue'
@@ -76,11 +75,6 @@ const filtered = computed(() =>
 // query key without going through the control.
 watch(scope, () => load())
 
-const filterPopover = ref<InstanceType<typeof Popover> | null>(null)
-function openFilterMenu(event: Event) {
-  filterPopover.value?.toggle(event)
-}
-
 function labelOf(options: { label: string; value: string }[], value: string): string {
   return options.find((o) => o.value === value)?.label ?? value
 }
@@ -113,7 +107,6 @@ const toolbar = useListToolbar({
   filter: {
     chips: filterChips,
     activeCount: () => filterChips.value.length,
-    open: openFilterMenu,
     clearAll: clearFilters,
   },
   result: {
@@ -245,14 +238,14 @@ function statusLabel(status: MeterAnomalyStatus) {
     </template>
 
     <template #toolbar>
-      <ListToolbar :model="toolbar" />
-      <Popover ref="filterPopover">
-        <div class="filter-fields">
+      <ListToolbar :model="toolbar">
+        <template #actions>
           <Select
             v-model="scopeValue"
             :options="scopeOptions"
             option-label="label"
             option-value="value"
+            size="small"
             aria-label="Umfang"
             class="filter-select"
           />
@@ -261,11 +254,12 @@ function statusLabel(status: MeterAnomalyStatus) {
             :options="typeOptions"
             option-label="label"
             option-value="value"
+            size="small"
             aria-label="Art der Auffälligkeit"
             class="filter-select"
           />
-        </div>
-      </Popover>
+        </template>
+      </ListToolbar>
     </template>
 
     <template #notice>

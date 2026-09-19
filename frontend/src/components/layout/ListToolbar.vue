@@ -31,6 +31,7 @@ const props = defineProps<{
 const slots = useSlots()
 
 const searchInput = ref<HTMLInputElement | null>(null)
+const searchArea = ref<HTMLElement | null>(null)
 const sortMenu = ref<InstanceType<typeof Menu> | null>(null)
 
 const chips = computed(() => props.model.filter?.chips.value ?? [])
@@ -97,11 +98,19 @@ function onViewChange(value: unknown) {
  * `Esc` inside it clears, `Esc` outside leaves select mode. While any
  * dialog is open its own Esc handling wins.
  */
+function focusableSearch(): HTMLInputElement | null {
+  // A view that fills the `search` slot (the gallery's natural-language bar)
+  // brings its own input; the hotkey must still land in it.
+  return searchInput.value ?? searchArea.value?.querySelector('input') ?? null
+}
+
 function onDocumentKeydown(event: KeyboardEvent) {
-  if (isSearchHotkey(event) && searchInput.value) {
+  if (isSearchHotkey(event)) {
+    const input = focusableSearch()
+    if (!input) return
     event.preventDefault()
-    searchInput.value.focus()
-    searchInput.value.select()
+    input.focus()
+    input.select()
     return
   }
   if (event.key !== 'Escape') return
@@ -120,7 +129,12 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
 <template>
   <div class="list-toolbar" data-testid="list-toolbar">
     <div class="list-toolbar__main">
-      <div v-if="slots.search || model.search" class="list-toolbar__search">
+      <div
+        v-if="slots.search || model.search"
+        ref="searchArea"
+        class="list-toolbar__search"
+        :class="{ 'list-toolbar__search--custom': !!slots.search }"
+      >
         <slot name="search">
           <i class="pi pi-search list-toolbar__search-icon" aria-hidden="true" />
           <input
@@ -148,7 +162,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
 
       <div class="list-toolbar__controls">
         <Button
-          v-if="model.filter"
+          v-if="model.filter?.open"
           icon="pi pi-filter"
           label="Filter"
           :badge="filterBadge"
@@ -160,7 +174,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
           data-testid="list-filter"
           :aria-label="filterTooltip"
           v-tooltip.bottom="filterTooltip"
-          @click="model.filter.open($event)"
+          @click="model.filter!.open!($event)"
         />
 
         <template v-if="model.sort">
@@ -256,6 +270,13 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   flex: 1 1 14rem;
   min-width: 0;
   max-width: 32rem;
+}
+/* A slotted bar brings its own layout (the natural-language search carries a
+   button and its parsed chips), so it is not squeezed into the plain input's
+   width. */
+.list-toolbar__search--custom {
+  flex-basis: 24rem;
+  max-width: none;
 }
 
 .list-toolbar__search-icon {
