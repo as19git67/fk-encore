@@ -93,6 +93,44 @@ untouched; reverse geocoding, the POI search and the day-trip
 suggestion (which reads `osm_pois` and `osm_admin`) all answer exactly
 as before. **Only "Strecken in der Nähe" needs the region re-imported.**
 
+### Finding and re-importing those regions
+
+**Aktualisieren is not it.** That button runs the replication update
+(`osm2pgsql-replication update`, i.e. `osm2pgsql --append`): it applies
+the changes since the last sequence against the schema that is there.
+The waymarked ways were never imported, so there is nothing to append.
+
+The only way is a fresh `--create`, which means dropping the database
+and importing again. Admin › OSM-Regionen does it for all affected
+regions at once:
+
+1. **Ältere Importe suchen** (`GET /osm/regions/outdated`) asks every
+   ready region which of the style's tables it has, and names the ones
+   that lack any. Read-only.
+2. **Diese Regionen neu importieren**
+   (`POST /osm/regions/reimport-outdated`) drops each database and puts
+   the row back to `importing`; the importer worker takes it from there.
+
+The order inside is the error handling: the database is dropped
+**first**, then the row moves. A drop that fails leaves the region
+ready and usable rather than stranding it in `importing` with a
+database the importer would refuse to replace.
+
+Two things worth knowing before pressing it:
+
+- **Nothing is downloaded again.** The PBF stays cached in the geo
+  volume — which also means the re-import reproduces that extract's
+  age. For fresh data, delete `/data/pbf/<slug-with-underscores>.pbf`
+  in the geo container first.
+- **The region is unavailable while it runs** (10–30 minutes for a
+  German Bundesland). A trip anchored there says so rather than
+  failing (§4.3), and recovers by itself when the import finishes.
+
+`ready_running → importing` is a real edge in the region state machine
+and exists for this one purpose. "Freigeben" deliberately refuses a
+region that is already ready, because approving is a button on the
+wrong row — only the re-import path, which drops first, may use it.
+
 Every table has a GIST index on `geom`; `osm_pois.tags` additionally
 has a GIN index so the POI matcher's `tags ? 'historic'` predicate
 plans well even on regions with millions of rows.

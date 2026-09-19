@@ -34,19 +34,27 @@ describe("canTransition", () => {
 
   it("blocks illegal transitions", () => {
     expect(canTransition("pending_approval", "ready_running")).toBe(false);
-    expect(canTransition("ready_running", "importing")).toBe(false);
+    expect(canTransition("ready_running", "pending_approval")).toBe(false);
     expect(canTransition("ready_stopped", "pending_approval")).toBe(false);
   });
 });
 
 describe("assertTransition", () => {
   it("throws with an explanatory message on illegal transitions", () => {
-    expect(() => assertTransition("ready_running", "importing")).toThrow(
-      /invalid region status transition: ready_running → importing/,
+    expect(() => assertTransition("ready_running", "pending_approval")).toThrow(
+      /invalid region status transition: ready_running → pending_approval/,
     );
   });
 
   it("returns silently on legal transitions", () => {
     expect(() => assertTransition("pending_approval", "importing")).not.toThrow();
+  });
+
+  it("lets a ready region be imported again", () => {
+    // The one way a region imported under an older osm2pgsql style can
+    // gain what the style has learned since (`reimport.ts`). Narrow on
+    // purpose: a deliberate admin action, not a retry path.
+    expect(() => assertTransition("ready_running", "importing")).not.toThrow();
+    expect(() => assertTransition("ready_stopped", "importing")).not.toThrow();
   });
 });

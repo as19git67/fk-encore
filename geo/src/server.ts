@@ -15,6 +15,7 @@
  *                                   straight line between them crosses
  *   GET    /pois/categories       — the category vocabulary /pois/search accepts
  *   POST   /import                — { slug, postgresDb, pbfUrl }
+ *   GET    /regions/:database/tables — which style tables it has
  *   DELETE /regions/:database     — drop a region database (admin)
  *
  * Authentication: the geo service runs on a Docker-internal network
@@ -39,6 +40,7 @@ import {
   dropRegion,
   getImportStatus,
   reconcileImportStatus,
+  regionTables,
   startImport,
   type ImportRequest,
 } from "./import.ts";
@@ -294,6 +296,24 @@ app.post("/refresh", async (req, res, next) => {
     const pbfUrl = typeof body.pbfUrl === "string" ? body.pbfUrl : undefined;
     const result = await runReplicationUpdate(postgresDb, pbfUrl);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Which of the current style's tables a region database has (§4.7).
+//
+// osm2pgsql applies a style on --create only, so a region imported
+// before a table joined the style does not have it and never will
+// without a re-import. This is how the admin side finds those regions
+// without guessing from an import date.
+app.get("/regions/:database/tables", async (req, res, next) => {
+  try {
+    const database = req.params.database ?? "";
+    if (!/^[a-z0-9_]+$/.test(database)) {
+      throw new HttpError(400, `database must match [a-z0-9_]+, got '${database}'`);
+    }
+    res.json(await regionTables(database));
   } catch (err) {
     next(err);
   }

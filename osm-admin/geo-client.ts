@@ -300,6 +300,17 @@ export interface GeoDayTargetPage {
   hasMore: boolean;
 }
 
+export interface GeoRegionTables {
+  database: string;
+  /** Which of the current style's tables this region database has. */
+  present: string[];
+  /**
+   * Which it lacks. Non-empty means the region was imported under an
+   * older style — a re-import would give it more than it has.
+   */
+  missing: string[];
+}
+
 export interface GeoClient {
   health(): Promise<boolean>;
   startImport(req: GeoImportRequest): Promise<GeoImportStatus>;
@@ -318,6 +329,8 @@ export interface GeoClient {
   searchRoutes(postgresDb: string, query: GeoRouteSearchQuery): Promise<GeoRouteSearchPage>;
   /** Places within reach that would carry a day of their own (§4.6). */
   searchDayTargets(postgresDb: string, query: GeoDayTargetQuery): Promise<GeoDayTargetPage>;
+  /** Which of the current style's tables a region database has. */
+  regionTables(postgresDb: string): Promise<GeoRegionTables>;
   /**
    * Is this corner of the world in that database at all (§4.3)?
    *
@@ -494,6 +507,24 @@ export class HttpGeoClient implements GeoClient {
       maxRadiusM: query.maxRadiusM,
       limit: query.limit,
     });
+  }
+
+  /**
+   * Which of the current style's tables a region database has.
+   *
+   * osm2pgsql applies a style on `--create` only and never migrates an
+   * existing database, so a region imported before a table joined the
+   * style does not have it. This is how "that region is an older
+   * import" becomes a fact rather than a guess from a date.
+   */
+  async regionTables(postgresDb: string): Promise<GeoRegionTables> {
+    const path = `/regions/${encodeURIComponent(postgresDb)}/tables`;
+    const res = await this.fetcher(`${this.baseUrl}${path}`, {
+      headers: this.headers(),
+      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`geo: GET ${path} → HTTP ${res.status}`);
+    return (await res.json()) as GeoRegionTables;
   }
 
   async hasCoverage(postgresDb: string, lat: number, lon: number): Promise<boolean> {

@@ -6,6 +6,7 @@
  *                                              └─ err  ──► failed
  *   ready_running    ── idle    ──► ready_stopped
  *   ready_stopped    ── use     ──► ready_running
+ *   ready_*          ── reimport ─► importing
  *   blocked_disk     ── retry   ──► pending_approval
  *   failed           ── retry   ──► pending_approval | importing
  *
@@ -34,11 +35,18 @@ export const REGION_STATUSES: readonly RegionStatus[] = [
   "failed",
 ];
 
+// A ready region may go back to `importing`, and only for one reason:
+// osm2pgsql applies its style on `--create`, so a region imported
+// under an older style can gain what the style has learned since in no
+// other way (`reimport.ts`). The edge is narrow on purpose — it is not
+// a retry path, and nothing but a deliberate, admin-triggered
+// re-import uses it. Everything else that wants a ready region built
+// again goes through `failed` or a delete, as before.
 const TRANSITIONS: Record<RegionStatus, RegionStatus[]> = {
   pending_approval: ["importing", "failed"],
   importing: ["ready_running", "blocked_disk", "failed"],
-  ready_running: ["ready_stopped", "failed"],
-  ready_stopped: ["ready_running", "failed"],
+  ready_running: ["ready_stopped", "importing", "failed"],
+  ready_stopped: ["ready_running", "importing", "failed"],
   blocked_disk: ["pending_approval", "failed"],
   failed: ["pending_approval", "importing"],
 };

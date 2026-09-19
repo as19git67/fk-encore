@@ -30,6 +30,12 @@ import {
   type BulkSuggestResult,
 } from "./bulk-suggest";
 import { refreshRegion, type RefreshResult } from "./refresh";
+import {
+  outdatedRegions,
+  reimportOutdated,
+  type OutdatedRegion,
+  type ReimportedRegion,
+} from "./reimport";
 import type { RegionStatus } from "./state-machine";
 
 export interface OsmRegionImport {
@@ -232,6 +238,56 @@ export const refreshRegionEndpoint = api(
       if (msg.includes("status")) throw APIError.failedPrecondition(msg);
       throw err;
     }
+  },
+);
+
+export interface OutdatedRegionsResponse {
+  outdated: OutdatedRegion[];
+  checked: number;
+  unknown: UnknownRegion[];
+}
+
+export interface UnknownRegion {
+  slug: string;
+  reason: string;
+}
+
+/**
+ * Which ready regions an older osm2pgsql style built (`reimport.ts`).
+ *
+ * Read-only, and separate from the doing on purpose: "this will drop
+ * four databases and re-import them over the next hour" is a sentence
+ * somebody should read before it happens.
+ */
+export const outdatedRegionsEndpoint = api(
+  { expose: true, auth: true, method: "GET", path: "/osm/regions/outdated" },
+  async (): Promise<OutdatedRegionsResponse> => {
+    requirePermission(getAuthData()!, "osm.admin");
+    return await outdatedRegions();
+  },
+);
+
+export interface ReimportOutdatedResponse {
+  started: ReimportedRegion[];
+  skipped: number;
+  unknown: UnknownRegion[];
+}
+
+/**
+ * Drop and import again every ready region an older style built.
+ *
+ * The one way such a region can gain what the style has learned since:
+ * osm2pgsql applies a style on `--create` only, and replication is an
+ * append against the schema that is there (§4.7, `reimport.ts`).
+ *
+ * The PBF stays cached, so nothing is downloaded again — and the
+ * re-import therefore reproduces that extract's age.
+ */
+export const reimportOutdatedEndpoint = api(
+  { expose: true, auth: true, method: "POST", path: "/osm/regions/reimport-outdated" },
+  async (): Promise<ReimportOutdatedResponse> => {
+    requirePermission(getAuthData()!, "osm.admin");
+    return await reimportOutdated();
   },
 );
 

@@ -110,6 +110,50 @@ export async function refreshOsmRegion(slug: string): Promise<RefreshOsmRegionRe
   })
 }
 
+/** A ready region that an older osm2pgsql style built. */
+export interface OutdatedRegion {
+  slug: string
+  postgresDb: string
+  status: string
+  /** Style tables it lacks — why it is on the list. */
+  missing: string[]
+}
+
+export interface UnknownRegion {
+  slug: string
+  reason: string
+}
+
+export interface OutdatedRegionsResult {
+  outdated: OutdatedRegion[]
+  checked: number
+  /** Regions that could not be asked, and why. */
+  unknown: UnknownRegion[]
+}
+
+export interface ReimportedRegion {
+  slug: string
+  missing: string[]
+  started: boolean
+  reason?: string
+}
+
+export interface ReimportOutdatedResult {
+  started: ReimportedRegion[]
+  skipped: number
+  unknown: UnknownRegion[]
+}
+
+/** Which ready regions an older style built. Changes nothing. */
+export async function getOutdatedOsmRegions(): Promise<OutdatedRegionsResult> {
+  return apiFetch('/osm/regions/outdated')
+}
+
+/** Drop and import those regions again. */
+export async function reimportOutdatedOsmRegions(): Promise<ReimportOutdatedResult> {
+  return apiFetch('/osm/regions/reimport-outdated', { method: 'POST' })
+}
+
 export interface BulkRegionSuggestion {
   slug: string
   name: string
