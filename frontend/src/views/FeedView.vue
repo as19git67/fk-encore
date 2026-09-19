@@ -3,6 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   listFeed,
   markFeedSeen,
@@ -128,13 +129,14 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="feed-view">
-    <div class="header">
-      <h1 class="title">Feed</h1>
+  <PageLayout title="Feed" width="full" :ready="!loading">
+    <template #actions>
       <span v-if="feedBadgeStore.count > 0" class="badge">{{ feedBadgeStore.count }} neu</span>
-    </div>
+    </template>
 
-    <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    <template #notice>
+      <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+    </template>
 
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Feed wird geladen…
@@ -182,35 +184,11 @@ onMounted(() => {
         />
       </div>
     </div>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.feed-view {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  width: 100%;
-  padding-inline: 0.5em;
-}
-
-@media (min-width: 800px) {
-  .feed-view { padding-inline: 1em; }
-}
-
-.title {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-block: 0.25em;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-block: 0.25rem 0.5rem;
-}
-
+/* Page frame and title: PageLayout (issue #1272). */
 .badge {
   display: inline-flex;
   align-items: center;

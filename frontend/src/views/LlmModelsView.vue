@@ -10,6 +10,7 @@ import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   activateLlmConfig,
   cancelLlmDownload,
@@ -274,22 +275,25 @@ function formatEta(seconds: number | null): string {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>KI-Modell</h1>
-      <div class="header-actions">
-        <Button
-          icon="pi pi-refresh"
-          label="Aktualisieren"
-          text
-          size="small"
-          :loading="loading"
-          @click="refresh(true)"
-        />
-        <Button icon="pi pi-plus" label="Neue Konfiguration" size="small" @click="openEditor(null)" />
-      </div>
-    </header>
+  <PageLayout title="KI-Modell" width="normal" :ready="!loading">
+    <template #actions>
+      <Button
+        icon="pi pi-refresh"
+        label="Aktualisieren"
+        text
+        size="small"
+        :loading="loading"
+        @click="refresh(true)"
+      />
+      <Button icon="pi pi-plus" label="Neue Konfiguration" size="small" @click="openEditor(null)" />
+    </template>
 
+    <template #notice>
+      <Message v-if="error" severity="error" closable @close="error = ''">{{ error }}</Message>
+      <Message v-if="notice" severity="success" closable @close="notice = ''">{{ notice }}</Message>
+    </template>
+
+    <div class="content">
     <p class="hint">
       Legt fest, welches Modell der llm-service lädt. Solange hier nichts aktiviert ist,
       gilt die Konfiguration aus <code>docker-compose</code>/<code>.env</code> — „Auf Umgebung
@@ -297,9 +301,6 @@ function formatEta(seconds: number | null): string {
       Klassifikation ist dabei einige Minuten nicht verfügbar, Dokumente werden solange
       zurückgestellt. Einbettungen laufen unverändert weiter.
     </p>
-
-    <Message v-if="error" severity="error" closable @close="error = ''">{{ error }}</Message>
-    <Message v-if="notice" severity="success" closable @close="notice = ''">{{ notice }}</Message>
 
     <!-- ── Live status ───────────────────────────────────────────────────── -->
     <section v-if="status" class="card status-card">
@@ -541,6 +542,7 @@ function formatEta(seconds: number | null): string {
       </ul>
       <div v-if="files.files.length === 0" class="empty-state">Keine Modelldateien vorhanden.</div>
     </section>
+    </div>
 
     <!-- ── Activation confirm ────────────────────────────────────────────── -->
     <Dialog
@@ -723,28 +725,17 @@ function formatEta(seconds: number | null): string {
         />
       </template>
     </Dialog>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  padding: 1.5rem;
-  max-width: 1280px;
 }
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.page-header h1 {
-  margin: 0;
-  font-size: 1.5rem;
-}
+/* Still used by the "Modelldateien" group header inside the content. */
 .header-actions {
   display: flex;
   align-items: center;
@@ -836,7 +827,7 @@ function formatEta(seconds: number | null): string {
 }
 .config-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(400px, 100%), 1fr));
   gap: 0.75rem;
 }
 .config-title {

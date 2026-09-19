@@ -6,6 +6,7 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
 import Tag from 'primevue/tag'
+import PageLayout from '../components/layout/PageLayout.vue'
 import {
   runTool,
   cancelTool,
@@ -421,9 +422,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Taxonomie-Tools</h1>
+  <PageLayout title="Taxonomie-Tools" width="normal">
+    <template #actions>
       <Button
         icon="pi pi-refresh"
         label="Status"
@@ -431,8 +431,15 @@ onUnmounted(() => {
         size="small"
         @click="refreshAll"
       />
-    </header>
+    </template>
 
+    <template #notice>
+      <Message v-if="error" severity="error" :closable="true" @close="error = ''">
+        {{ error }}
+      </Message>
+    </template>
+
+    <div class="content">
     <p class="hint">
       Offline-Werkzeuge für die Dokument-Taxonomie. Diagnose, Audit und Scoreboard sind read-only;
       der Cloud-Teacher schreibt Labels in die Datenbank. Logs werden live über WebSocket gestreamt.
@@ -441,10 +448,6 @@ onUnmounted(() => {
       dann je Kandidat Modell unter <em>Admin → KI-Modell</em> aktivieren, Stichprobe neu
       klassifizieren lassen und das <strong>Scoreboard</strong> mit einem Label laufen lassen.
     </p>
-
-    <Message v-if="error" severity="error" :closable="true" @close="error = ''">
-      {{ error }}
-    </Message>
 
     <div class="tools-grid">
       <div v-for="tool in tools" :key="tool.name" class="tool-card">
@@ -640,27 +643,16 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-  </div>
+    </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.page {
+/* Page frame and title: PageLayout (issue #1272). */
+.content {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding: 1.5rem;
-  max-width: 1280px;
-}
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.page-header h1 {
-  margin: 0;
-  font-size: 1.5rem;
 }
 .hint {
   color: var(--p-text-muted-color);
@@ -775,12 +767,8 @@ onUnmounted(() => {
 }
 
 @media (max-width: 640px) {
-  .page {
-    padding: 0.75rem;
+  .content {
     gap: 0.75rem;
-  }
-  .page-header h1 {
-    font-size: 1.25rem;
   }
   /* Stack label over a full-width field so nothing can run off the right
      edge on a phone. */

@@ -6,6 +6,7 @@ import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import PageLayout from '../components/layout/PageLayout.vue'
 import { requestPasswordReset, resetPassword } from '../api/users'
 
 const route = useRoute()
@@ -63,10 +64,10 @@ async function handleResetPassword() {
 </script>
 
 <template>
+  <PageLayout :title="token ? 'Neues Passwort setzen' : 'Passwort vergessen'" width="normal">
   <div class="forgot-password-container">
     <!-- Reset form (when token is present) -->
     <Card v-if="token" class="forgot-password-card">
-      <template #title>Neues Passwort setzen</template>
       <template #content>
         <div v-if="resetSuccess" class="success-message">
           <Message severity="success" :closable="false">
@@ -95,7 +96,6 @@ async function handleResetPassword() {
 
     <!-- Request form (no token) -->
     <Card v-else class="forgot-password-card">
-      <template #title>Passwort vergessen</template>
       <template #content>
         <Message v-if="requestError" severity="error" :closable="false" class="mb">{{ requestError }}</Message>
         <Message v-if="requestSuccess" severity="success" :closable="false" class="mb">{{ requestSuccess }}</Message>
@@ -114,6 +114,7 @@ async function handleResetPassword() {
       </template>
     </Card>
   </div>
+  </PageLayout>
 </template>
 
 <style scoped>
