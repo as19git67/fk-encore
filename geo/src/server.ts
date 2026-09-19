@@ -33,6 +33,7 @@ import { POI_CATEGORIES } from "./poi-categories.ts";
 import { hasCoverage } from "./coverage.ts";
 import { waterCrossing } from "./water.ts";
 import { PoiSearchError, searchPois, type PoiSearchOptions } from "./poi-search.ts";
+import { RouteSearchError, searchRoutes, type RouteSearchOptions } from "./route-search.ts";
 import {
   dropRegion,
   getImportStatus,
@@ -212,6 +213,20 @@ app.post("/pois/search", async (req, res, next) => {
   }
 });
 
+// Signposted walking and cycling routes near a place (§4.7). Its own
+// endpoint rather than a category of /pois/search, because a route is
+// a way rather than a point: it answers with two ends, a length and a
+// shape, none of which a POI has.
+app.post("/routes/search", async (req, res, next) => {
+  try {
+    const { database, options } = parseRouteSearchBody(req.body);
+    const page = await searchRoutes(database, options);
+    res.json({ database, ...page });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post("/import", async (req, res, next) => {
   try {
     const body = req.body as Partial<ImportRequest>;
@@ -288,7 +303,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   }
   // Rejected search arguments (bad bbox, unknown category, oversized
   // radius) are the caller's mistake, not ours — 400, not 500.
-  if (err instanceof PoiSearchError) {
+  if (err instanceof PoiSearchError || err instanceof RouteSearchError) {
     res.status(400).json({ error: err.message });
     return;
   }
@@ -391,6 +406,35 @@ function requireFiniteNumber(v: unknown, field: string): number {
     throw new HttpError(400, `${field} must be a finite number`);
   }
   return v;
+}
+
+function parseRouteSearchBody(
+  body: unknown,
+): { database: string; options: RouteSearchOptions } {
+  if (!body || typeof body !== "object") {
+    throw new HttpError(400, "request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+  const database = requireString(b.database, "database");
+  if (!/^[a-z0-9_]+$/.test(database)) {
+    throw new HttpError(400, `database must match [a-z0-9_]+, got '${database}'`);
+  }
+  if (b.center === undefined || b.center === null) {
+    throw new HttpError(400, "center is required");
+  }
+  const center = b.center as Record<string, unknown>;
+  return {
+    database,
+    options: {
+      center: {
+        lat: requireFiniteNumber(center.lat, "center.lat"),
+        lon: requireFiniteNumber(center.lon, "center.lon"),
+      },
+      radiusM: requireFiniteNumber(b.radiusM, "radiusM"),
+      kinds: Array.isArray(b.kinds) ? b.kinds.map(String) : undefined,
+      limit: optionalPositiveInt(b.limit),
+    },
+  };
 }
 
 function parseSearchBody(body: unknown): { database: string; options: PoiSearchOptions } {

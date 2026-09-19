@@ -323,6 +323,11 @@ async function postImportIndexes(database: string): Promise<void> {
   );
   await pool.query(`CREATE INDEX IF NOT EXISTS osm_admin_level_idx   ON osm_admin (admin_level)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS osm_highways_name_idx ON osm_highways (name)`);
+  // Routes are searched by "what is near here" (§4.7), so the spatial
+  // index is the one that matters; the kind narrows a set already cut
+  // down by it.
+  await pool.query(`CREATE INDEX IF NOT EXISTS osm_routes_geom_idx ON osm_routes USING GIST (geom)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS osm_routes_route_idx ON osm_routes (route)`);
 }
 
 async function runAnalyze(database: string): Promise<void> {

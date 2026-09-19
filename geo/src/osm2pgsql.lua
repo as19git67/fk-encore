@@ -1,9 +1,10 @@
 -- osm2pgsql Flex configuration for the fk-encore geo service.
 --
--- Produces three tables per region database:
+-- Produces four tables per region database:
 --   osm_highways  (lines, used by /reverse street lookup)
 --   osm_pois      (points, used by /reverse POI lookup and /pois)
 --   osm_admin     (multipolygons, used by /reverse city/country lookup)
+--   osm_routes    (multilinestrings, used by /routes/search)
 --
 -- The filter set mirrors what the application actually queries — we
 -- intentionally drop everything else so the database stays small and
@@ -42,6 +43,27 @@ tables.pois = osm2pgsql.define_table({
     -- columns no longer match the style.
     { column = 'shape', type = 'geometry', projection = 4326 },
     { column = 'facade_azimuth', type = 'real' },
+  },
+})
+
+-- Signposted walking and cycling routes (docs/ios-urlaubsplanung.md
+-- §4.7). A relation rather than a point, because the thing being
+-- planned is the way itself: it starts in one place, ends in another,
+-- and the day carries on from its far end.
+--
+-- Kept as the geometry OSM has rather than reduced to two points at
+-- import time. The ends, the length and a simplified shape are all
+-- read out of it at query time (route-search.ts), and which of them a
+-- given relation can answer depends on whether its members join up —
+-- a question no import-time column could keep honest.
+tables.routes = osm2pgsql.define_table({
+  name = 'osm_routes',
+  ids = { type = 'relation', id_column = 'osm_id' },
+  columns = {
+    { column = 'route', type = 'text' },
+    { column = 'name',  type = 'text' },
+    { column = 'tags',  type = 'jsonb' },
+    { column = 'geom',  type = 'multilinestring', projection = 4326, not_null = true },
   },
 })
 
@@ -156,6 +178,38 @@ local poi_tag_allowlist = {
   ['diet:vegetarian'] = true, ['diet:vegan'] = true,
 }
 
+-- Which route relations are worth an outing.
+--
+-- Walking and cycling only: `route=road` is a numbered motor road and
+-- `route=bus` a timetable, neither of which anybody plans a morning
+-- around. `mtb` and `foot` are the two other spellings in live use for
+-- the same two ideas.
+local route_values = {
+  hiking = true, foot = true, bicycle = true, mtb = true,
+}
+
+-- Tag keys kept on a route. Length and ascent are the two numbers a
+-- planner cannot work out for itself (§4.7): ten kilometres with six
+-- hundred metres of climb is four hours on foot and ninety minutes on
+-- a bike, and no category knows that.
+local route_tag_allowlist = {
+  ['name'] = true, ['name:de'] = true, ['name:en'] = true,
+  ['route'] = true, ['network'] = true, ['ref'] = true,
+  ['distance'] = true, ['ascent'] = true, ['descent'] = true,
+  ['roundtrip'] = true, ['osmc:symbol'] = true, ['symbol'] = true,
+  ['sac_scale'] = true, ['mtb:scale'] = true, ['difficulty'] = true,
+  ['website'] = true, ['wikidata'] = true, ['wikipedia'] = true,
+  ['wheelchair'] = true,
+}
+
+local function route_tag_subset(tags)
+  local out = {}
+  for k, v in pairs(tags) do
+    if route_tag_allowlist[k] then out[k] = v end
+  end
+  return out
+end
+
 local function matches_poi(tags)
   for key, allowed in pairs(poi_filters) do
     local v = tags[key]
@@ -226,6 +280,26 @@ function osm2pgsql.process_relation(object)
         admin_level = lvl,
         geom = object:as_multipolygon(),
       })
+    end
+  end
+
+  -- Signposted walking and cycling routes → osm_routes (§4.7).
+  --
+  -- Named only, and for the same reason landscape POIs are: an unnamed
+  -- relation is a fragment somebody is still mapping, not a way anybody
+  -- was told to walk. There are a great many of them.
+  if object.tags.type == 'route' and route_values[object.tags.route] then
+    local name = object.tags.name
+    if name ~= nil and name ~= '' then
+      local line = object:as_multilinestring()
+      if line and not line:is_null() then
+        tables.routes:insert({
+          route = object.tags.route,
+          name  = name,
+          tags  = route_tag_subset(object.tags),
+          geom  = line,
+        })
+      end
     end
   end
 

@@ -120,6 +120,51 @@ export async function createSeededRegion(name: string, pois: readonly SeedPoi[])
   }
 }
 
+export interface SeedRoute {
+  osmId: number;
+  /** hiking | foot | bicycle | mtb. */
+  route: string;
+  name: string;
+  tags?: Record<string, string>;
+  /** WKT MULTILINESTRING in EPSG:4326 — the geometry osm2pgsql writes. */
+  wkt: string;
+}
+
+/**
+ * Add an `osm_routes` table shaped like the one osm2pgsql produces and
+ * seed it (§4.7).
+ *
+ * Separate from `createSeededRegion` on purpose: a region imported
+ * before routes existed has no such table, and the search has to
+ * answer that case rather than fall over. A test wanting that case
+ * simply does not call this.
+ */
+export async function seedRoutes(name: string, routes: readonly SeedRoute[]): Promise<void> {
+  const client = new pg.Client({ host: HOST, port: PORT, user: USER, password: PASSWORD, database: name });
+  await client.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS osm_routes (
+        osm_id bigint,
+        route  text,
+        name   text,
+        tags   jsonb,
+        geom   geometry(MultiLineString, 4326) NOT NULL
+      )
+    `);
+    await client.query("CREATE INDEX IF NOT EXISTS osm_routes_geom_idx ON osm_routes USING GIST (geom)");
+    for (const route of routes) {
+      await client.query(
+        `INSERT INTO osm_routes (osm_id, route, name, tags, geom)
+         VALUES ($1, $2, $3, $4::jsonb, ST_Multi(ST_SetSRID(ST_GeomFromText($5), 4326)))`,
+        [route.osmId, route.route, route.name, JSON.stringify(route.tags ?? {}), route.wkt],
+      );
+    }
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
 /** Drop the database and the service's cached pool for it. */
 export async function dropRegion(name: string): Promise<void> {
   await dropPool(name).catch(() => {});

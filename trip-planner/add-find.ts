@@ -66,6 +66,22 @@ export interface AddFindRequest {
   lengthM?: number;
   /** How much of it climbs, in metres, where known. Only with `end`. */
   ascentM?: number;
+  /**
+   * The way's own shape, where it came from an OSM relation (§4.7).
+   * Only with `end`, and only from the route import — a find somebody
+   * placed by hand knows its two ends and no more.
+   */
+  via?: { lat: number; lon: number }[];
+  /**
+   * The OpenStreetMap reference this find already has (§4.7).
+   *
+   * Set when the find came off the map rather than off a tap — a route
+   * relation the planner offered. It keeps its own reference instead of
+   * being given a made-up one, which is what lets the trip recognise it
+   * again: hide it, notice it is already in the pool, refuse to take it
+   * in twice. A tap on a map has no such reference and gets one made.
+   */
+  osmRef?: string;
 }
 
 export interface AddFindResponse {
@@ -104,7 +120,9 @@ export const addFind = api(
     // for a route: the entry at its start is the viewpoint it sets off
     // from, not the way itself, and lending the way that entry would
     // give it the viewpoint's reference and hours (§4.7).
-    const match = extent ? null : await matchOsmEntry(position, req.name);
+    // A find that already knows its reference needs no lookup: the
+    // caller took it off the map, not off a tap.
+    const match = extent || req.osmRef ? null : await matchOsmEntry(position, req.name);
 
     // 3. Already there? Merge rather than add.
     // A route and the point it starts from are two things, even under
@@ -118,7 +136,7 @@ export const addFind = api(
       ),
     ].filter((e) => Boolean(e.extent) === Boolean(extent));
     const duplicate = findDuplicate(
-      { osmRef: match?.osmRef, name: req.name ?? match?.name, ...position },
+      { osmRef: req.osmRef ?? match?.osmRef, name: req.name ?? match?.name, ...position },
       existing,
     );
 
@@ -162,7 +180,8 @@ export const addFind = api(
 
     const entry = await addPoolEntry({
       legId: leg.id,
-      osmRef: match?.osmRef ?? manualRef(`${Date.now()}-${Math.round(position.lat * 1e5)}`),
+      osmRef: req.osmRef ?? match?.osmRef
+        ?? manualRef(`${Date.now()}-${Math.round(position.lat * 1e5)}`),
       name: req.name ?? match?.name ?? null,
       lat: position.lat,
       lon: position.lon,
@@ -180,7 +199,7 @@ export const addFind = api(
       addedBy: userId,
       // A route has no OSM entry to match and nothing guessed for it
       // either: its category and duration are stated, not inferred.
-      unmatched: match === null && !extent,
+      unmatched: match === null && !extent && req.osmRef === undefined,
       extent: extent ?? undefined,
     });
 
@@ -189,7 +208,7 @@ export const addFind = api(
       legIndex: leg.position,
       merged: false,
       matchedOsmRef: match?.osmRef ?? null,
-      unknown: match || extent ? [] : ["Öffnungszeiten", "Kategorie"],
+      unknown: match || extent || req.osmRef ? [] : ["Öffnungszeiten", "Kategorie"],
     };
   },
 );
@@ -331,7 +350,12 @@ function validateExtent(
 ): SpotExtent | null {
   let extent: SpotExtent | null;
   try {
-    extent = extentOf(start, { end: req.end, lengthM: req.lengthM, ascentM: req.ascentM });
+    extent = extentOf(start, {
+      end: req.end,
+      lengthM: req.lengthM,
+      ascentM: req.ascentM,
+      via: req.via,
+    });
   } catch (err) {
     throw APIError.invalidArgument(err instanceof Error ? err.message : String(err));
   }

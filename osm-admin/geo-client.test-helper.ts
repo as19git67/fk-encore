@@ -26,6 +26,9 @@ import type {
   GeoPoiSearchPage,
   GeoRegionStorage,
   GeoPoiSearchQuery,
+  GeoRoute,
+  GeoRouteSearchPage,
+  GeoRouteSearchQuery,
   GeoPoiSearchSpot,
   GeoRefreshResult,
   GeoReplicationStatus,
@@ -50,6 +53,8 @@ export class InMemoryGeoClient implements GeoClient {
   private categories: GeoPoiCategory[] = [];
   private storage = new Map<string, GeoRegionStorage>();
   private searchCalls: Array<{ postgresDb: string; query: GeoPoiSearchQuery }> = [];
+  private routes = new Map<string, GeoRoute[]>();
+  private routesImported = new Set<string>();
   private refreshResults = new Map<string, GeoRefreshResult>();
   private replicationStatuses = new Map<string, GeoReplicationStatus>();
   private droppedRegions: string[] = [];
@@ -192,6 +197,49 @@ export class InMemoryGeoClient implements GeoClient {
    * approximately right is worth a great deal here; being absent is
    * worth less than nothing.
    */
+  /**
+   * What routes this region holds (§4.7).
+   *
+   * A region nobody has called this for reads as one imported before
+   * routes existed — which is the state every region is in until it is
+   * re-imported, and the one callers most need to handle.
+   */
+  setRoutes(postgresDb: string, routes: GeoRoute[]): void {
+    this.routes.set(postgresDb, routes);
+    this.routesImported.add(postgresDb);
+  }
+
+  /** Mark a region as re-imported but genuinely without routes. */
+  setNoRoutes(postgresDb: string): void {
+    this.routes.set(postgresDb, []);
+    this.routesImported.add(postgresDb);
+  }
+
+  async searchRoutes(
+    postgresDb: string,
+    query: GeoRouteSearchQuery,
+  ): Promise<GeoRouteSearchPage> {
+    if (this.failingSearches.has(postgresDb)) {
+      throw new Error(`geo: POST /routes/search → connect ECONNREFUSED (${postgresDb})`);
+    }
+    if (!this.routesImported.has(postgresDb)) {
+      return { database: postgresDb, routes: [], hasMore: false, imported: false };
+    }
+    const all = this.routes.get(postgresDb) ?? [];
+    const kinds = new Set(query.kinds ?? []);
+    const within = all.filter((route) => {
+      if (kinds.size > 0 && !kinds.has(route.route)) return false;
+      return route.distanceM <= query.radiusM;
+    });
+    const limit = query.limit ?? 50;
+    return {
+      database: postgresDb,
+      routes: within.slice(0, limit),
+      hasMore: within.length > limit,
+      imported: true,
+    };
+  }
+
   async searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage> {
     this.searchCalls.push({ postgresDb, query });
     if (this.failingSearches.has(postgresDb)

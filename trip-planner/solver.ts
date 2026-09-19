@@ -20,6 +20,7 @@
 
 import type { PlannedBlockShape } from "./blocks";
 import { leaveFrom, type SpotExtent } from "./extent";
+import { isPassedByAny, passedBy } from "./on-the-way";
 import { travelLeg, type Coordinate, type TransportMode, type TravelLeg } from "./travel";
 
 /** Above this many stops, exhaustive ordering stops being free. */
@@ -124,6 +125,19 @@ export interface PlannedStop {
    * frame for a stop the traveller accepted at an hour (`frame-spots.ts`).
    */
   pinned?: boolean;
+  /**
+   * What this stop walks past on its way (§4.7): spots that lie on a
+   * route and are therefore seen without being planned. Only ever set
+   * on a stop with an extent, and derived rather than stored — see
+   * `withPassed` in plan-store.ts.
+   */
+  passes?: PassedSpot[];
+}
+
+/** A spot a route walks past, named for the card that says so. */
+export interface PassedSpot {
+  osmRef: string;
+  name: string | null;
 }
 
 export interface PlannedBlock {
@@ -188,6 +202,11 @@ export function solveDay(opts: SolveOptions): SolvedDay {
   const decay = opts.diversityDecay ?? DEFAULT_DIVERSITY_DECAY;
   const mode = opts.mode ?? "foot";
   const remaining = new Map(opts.candidates.map((c) => [c.osmRef, c]));
+  // Spots this day walks past (§4.7). Kept apart from `remaining`
+  // rather than removed from it: they are passed, not turned down, and
+  // they have to come back out in `unplaced` so the pool still holds
+  // them — a day without that route offers them like any other.
+  const passed = new Set<string>();
   const blocks: PlannedBlock[] = [];
 
   // Each block picks up where the previous one left off; only the last
@@ -208,7 +227,7 @@ export function solveDay(opts: SolveOptions): SolvedDay {
     const filled = fillBlock({
       shape,
       start: position,
-      candidates: [...remaining.values()],
+      candidates: [...remaining.values()].filter((c) => !passed.has(c.osmRef)),
       maxWalkMinutes: opts.maxWalkMinutes,
       mode,
       diversityDecay: decay,
@@ -216,6 +235,15 @@ export function solveDay(opts: SolveOptions): SolvedDay {
     });
 
     for (const stop of filled.stops) remaining.delete(stop.osmRef);
+    // A spot the day now walks past is not a spot the day still has to
+    // plan (§4.7). Noted for the whole day rather than the block: you
+    // pass it once, and an afternoon that plans what the morning walked
+    // through is the same mistake one block later.
+    for (const stop of filled.stops) {
+      for (const seen of passedBy(stop, [...remaining.values()])) {
+        passed.add(seen.osmRef);
+      }
+    }
     blocks.push(filled);
     if (filled.stops.length > 0) {
       const last = filled.stops[filled.stops.length - 1];
@@ -261,6 +289,10 @@ function fillBlock(args: FillArgs): PlannedBlock {
 
     for (const candidate of pool) {
       if (chosen.includes(candidate)) continue;
+      // Already on the way: a viewpoint along a route this block holds
+      // is coming anyway, and spending budget on it buys nothing
+      // (§4.7).
+      if (isPassedByAny(chosen, candidate)) continue;
       const trial = [...chosen, candidate];
       const route = bestRoute(args.start, trial, args.returnTo, args.mode);
       if (route === null) continue;
