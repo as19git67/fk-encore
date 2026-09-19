@@ -23,6 +23,14 @@ function placeholderSvg(filename: string): string {
 }
 
 export const defaultHandlers = [
+  // ── Secondary lookups the detail views load beside their main record ──────
+  // (empty by default so a story renders without a per-story handler).
+  http.get('/api/documents/tax/sections', () => HttpResponse.json({ items: [] })),
+  http.get('/api/groups', () => HttpResponse.json({ items: [] })),
+  http.get('/api/documents/:id/collections', () => HttpResponse.json({ items: [] })),
+  http.get('/api/finance/documents/:id/transactions', () => HttpResponse.json({ items: [] })),
+  http.get('/api/albums/:id/photos', () => HttpResponse.json({ photos: [] })),
+  http.get('/api/gallery/grid', () => HttpResponse.json({ total: 0, offset: 0, photos: [] })),
   // ── Users ──────────────────────────────────────────────────────────────────
   http.get('/api/users', () => HttpResponse.json({ users: MOCK_USERS })),
   http.get('/api/users/:id', () => HttpResponse.json(MOCK_USER)),
@@ -283,10 +291,12 @@ export const defaultHandlers = [
   http.get('/api/document-queue/status', () =>
     HttpResponse.json(MOCK_DOCUMENT_QUEUE_IDLE),
   ),
+  http.get('/api/documents/subject-persons', () => HttpResponse.json({ items: [] })),
   http.get('/api/documents/:id', ({ params }) => {
     const id = Number(params.id)
     const summary = MOCK_DOCUMENTS.find((d) => d.id === id) ?? MOCK_DOCUMENTS[0]!
     return HttpResponse.json({
+      ...MOCK_DOCUMENT_DETAIL,
       ...summary,
       summary: MOCK_DOCUMENT_DETAIL.summary,
       extracted_text_preview: MOCK_DOCUMENT_DETAIL.extracted_text_preview,

@@ -11,8 +11,8 @@ const meta: Meta<typeof SharedAlbumView> = {
   component: SharedAlbumView,
   decorators: [
     (story, ctx) => ({
-      components: { Story: story() },
       setup() {
+        const StoryComponent = story()
         const router = useRouter()
         // A story can request a deep-link target (e.g. `?photoId=1`) to
         // open the fullscreen overlay straight away. Falls back to the
@@ -23,7 +23,7 @@ const meta: Meta<typeof SharedAlbumView> = {
         if (router.currentRoute.value.fullPath !== target) {
           router.push(target).catch(() => {})
         }
-        return () => h('Story')
+        return () => h(StoryComponent)
       },
     }),
   ],
