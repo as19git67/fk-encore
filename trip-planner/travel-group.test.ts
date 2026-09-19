@@ -106,3 +106,48 @@ describe("writing the group back into the trip's constraints", () => {
     expect("group" in next).toBe(false);
   });
 });
+
+describe("how somebody gets about (§3.5)", () => {
+  it("reads a wheelchair as a group on wheels", () => {
+    const reading = readGroup(
+      [{ label: "Oma" , getsAbout: "wheelchair" }, { label: "Erika" }],
+      "2026-07-01",
+    );
+
+    expect(reading.group.onWheels).toBe(true);
+    // Not a budget: a route that climbs is out, the day is not shorter.
+    expect(reading.group.limitedMobility).toBeUndefined();
+    expect(reading.reasons.join(" ")).toContain("Strecken mit Anstieg");
+    expect(reading.reasons.join(" ")).toContain("Blockbudgets wirkt das nicht");
+  });
+
+  it("treats a pram the same, because the plan cannot tell them apart", () => {
+    const pram = readGroup([{ label: "Jemand", getsAbout: "pram" }], "2026-07-01");
+    expect(pram.group.onWheels).toBe(true);
+  });
+
+  it("leaves a group on foot alone", () => {
+    const reading = readGroup(
+      [{ label: "Jemand", getsAbout: "foot" }, { label: "Noch jemand" }],
+      "2026-07-01",
+    );
+    expect(reading.group.onWheels).toBeUndefined();
+  });
+
+  it("never infers it from an age", () => {
+    // Being seventy is not a statement about how somebody gets about,
+    // and the group must not make one (§3.5).
+    const reading = readGroup([{ label: "Oma", birthDate: "1956-03-04" }], "2026-07-01");
+    expect(reading.group.onWheels).toBeUndefined();
+  });
+
+  it("does not report a silent group as having nothing to say", () => {
+    const reading = readGroup([{ label: "Oma", getsAbout: "wheelchair" }], "2026-07-01");
+    expect(reading.reasons.join(" ")).not.toContain("ergibt sich nichts");
+  });
+
+  it("carries the fact into the trip's constraints", () => {
+    const next = withGroup({ pace: "normal" }, { onWheels: true });
+    expect(next.group).toEqual({ onWheels: true });
+  });
+});

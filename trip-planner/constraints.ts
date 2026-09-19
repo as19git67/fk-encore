@@ -173,7 +173,8 @@ function normalizeGroup(raw: unknown, rejected: string[]): GroupProfile | undefi
   // shape the day identically (blocks.ts), so there is nothing to store.
   if (g.withChildren === true) group.withChildren = true;
   if (g.limitedMobility === true) group.limitedMobility = true;
-  return group.withChildren || group.limitedMobility ? group : undefined;
+  if (g.onWheels === true) group.onWheels = true;
+  return group.withChildren || group.limitedMobility || group.onWheels ? group : undefined;
 }
 
 function trimmedString(v: unknown): string | undefined {

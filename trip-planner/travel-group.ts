@@ -39,6 +39,28 @@
 /** Under this many years, a traveller counts as a child (§3.5). */
 export const CHILD_UNDER_YEARS = 10;
 
+/**
+ * How somebody gets about, in the only distinction the planner can act
+ * on today (§3.5).
+ *
+ * Deliberately short. A vocabulary earns a value by what the planner
+ * *does* with it, and what it does is one thing: a way that climbs is
+ * not a slower day out for somebody on wheels, it is not a day out
+ * (§4.7). "Kinderwagen" and "Rollstuhl" are therefore the same answer
+ * to the planner — they are two entries only so that a family with a
+ * pram does not have to tick a box that says wheelchair, and the app
+ * says plainly that the plan treats them alike.
+ */
+export const GETS_ABOUT = ["foot", "wheelchair", "pram"] as const;
+export type GetsAbout = (typeof GETS_ABOUT)[number];
+
+/** Which of them mean the group is not walking up anything (§4.7). */
+const ON_WHEELS = new Set<string>(["wheelchair", "pram"]);
+
+export function isGetsAbout(value: unknown): value is GetsAbout {
+  return typeof value === "string" && (GETS_ABOUT as readonly string[]).includes(value);
+}
+
 export interface Traveller {
   /** What the trip calls them. Never shown to anybody but the trip. */
   label: string;
@@ -49,12 +71,27 @@ export interface Traveller {
    * distances and gentler ground.
    */
   shortWalks?: boolean;
+  /**
+   * How they get about. Absent and "foot" mean the same thing, which
+   * is the ordinary case and the one nobody has to fill in.
+   *
+   * Never inferred — not from an age, not from a relationship. It is a
+   * fact about a person and belongs to whoever it is about, exactly
+   * like `shortWalks` (§3.5).
+   */
+  getsAbout?: string | null;
 }
 
 export interface DerivedGroup {
   /** What `blocks.ts` and `packing.ts` read. */
   withChildren?: boolean;
   limitedMobility?: boolean;
+  /**
+   * Somebody is on wheels. Alone among the three this changes no
+   * budget — it rules a kind of route out rather than making the day
+   * shorter (§4.7).
+   */
+  onWheels?: boolean;
 }
 
 export interface GroupReading {
@@ -121,10 +158,22 @@ export function readGroup(
       + "mehr Pausen. Die Weglängen ändert das nicht.");
   }
 
+  const onWheels = travellers.filter((t) => ON_WHEELS.has(t.getsAbout ?? "foot"));
+  if (onWheels.length > 0) {
+    group.onWheels = true;
+    // Named as what it rules out, not as a property of the people. The
+    // planner cannot tell a pram from a wheelchair and does not
+    // pretend to: both mean the same thing to a route that climbs.
+    reasons.push(`${onWheels.map((t) => t.label).join(", ")} ist mit Rollstuhl, Rollator `
+      + "oder Kinderwagen unterwegs — Strecken mit Anstieg werden nicht vorgeschlagen. "
+      + "Auf die Blockbudgets wirkt das nicht.");
+  }
+
   // Said out loud rather than left blank: a trip with people on it and
   // no birth dates looks exactly like a trip nobody filled in, and only
   // one of the two is worth doing something about.
-  if (date !== null && travellers.length > 0 && children.length === 0 && shorter.length === 0) {
+  if (date !== null && travellers.length > 0 && children.length === 0
+      && shorter.length === 0 && onWheels.length === 0) {
     const unknown = travellers.filter((t) => ageOn(t.birthDate, date) === null);
     reasons.push(unknown.length === travellers.length && unknown.length > 0
       ? "Von niemandem ist ein Geburtsdatum hinterlegt — die Tage werden geplant, als "
@@ -157,6 +206,7 @@ export function withGroup(
   const flags: Record<string, boolean> = {};
   if (group.withChildren) flags.withChildren = true;
   if (group.limitedMobility) flags.limitedMobility = true;
+  if (group.onWheels) flags.onWheels = true;
   if (Object.keys(flags).length === 0) delete next.group;
   else next.group = flags;
   return next;

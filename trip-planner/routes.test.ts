@@ -13,6 +13,7 @@ import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
 import { nearbyRoutes, takeRoute } from "./routes";
+import { addTraveller } from "./travellers";
 
 vi.mock("~encore/auth", () => ({ getAuthData: vi.fn() }));
 
@@ -217,5 +218,75 @@ describe("POST /trip-planner/plans/:planId/routes", () => {
     const p = await plan();
     await expect(takeRoute({ planId: p.id, osmRef: "relation:1" }))
       .rejects.toThrow(/noch keine Strecken importiert/);
+  });
+});
+
+describe("who is coming, and what that does to the list (§3.5)", () => {
+  it("stretches every estimate for a group that walks slower", async () => {
+    // Dated on purpose: an age is computed against the trip's start,
+    // and without a date the group derives nothing (§3.5).
+    const { plan: p } = await createTripPlan({
+      legs: [{ title: "Beispielstadt", anchor: ANCHOR, startDate: "2027-06-01" }],
+    });
+    geo.setRoutes("nom_garda", [route({ osmRef: "relation:1" })]);
+    const before = (await nearbyRoutes({ planId: p.id })).routes[0].estimatedMinutes;
+
+    // A five-year-old: the group walks three kilometres an hour, not
+    // four, and the way takes what it takes.
+    await addTraveller({ planId: p.id, label: "Kind Beispiel", birthDate: "2021-06-15" });
+
+    const after = (await nearbyRoutes({ planId: p.id })).routes[0].estimatedMinutes;
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBe(Math.round(before * 1.4));
+  });
+
+  it("leaves a hiking route off the list when somebody is on wheels", async () => {
+    const p = await plan();
+    geo.setRoutes("nom_garda", [route({ osmRef: "relation:1" })]);
+    await addTraveller({ planId: p.id, label: "Oma Beispiel", getsAbout: "wheelchair" });
+
+    const res = await nearbyRoutes({ planId: p.id });
+
+    expect(res.routes).toEqual([]);
+    expect(res.omittedForWheels).toBe(1);
+    // Never silently: an empty list reads as a region with nothing in
+    // it, which is a different thing (§15.3).
+    expect(res.note).toMatch(/Rollstuhl/);
+  });
+
+  it("keeps a level way on made ground", async () => {
+    const p = await plan();
+    geo.setRoutes("nom_garda", [
+      route({ osmRef: "relation:1", name: "Seepromenade Beispiel", route: "foot", ascentM: 0 }),
+      route({ osmRef: "relation:2", name: "Bergweg Beispiel", ascentM: 600 }),
+    ]);
+    await addTraveller({ planId: p.id, label: "Oma Beispiel", getsAbout: "pram" });
+
+    const res = await nearbyRoutes({ planId: p.id });
+
+    expect(res.routes.map((r) => r.name)).toEqual(["Seepromenade Beispiel"]);
+    expect(res.omittedForWheels).toBe(1);
+  });
+
+  it("changes nothing for an ordinary group", async () => {
+    const p = await plan();
+    geo.setRoutes("nom_garda", [route({ osmRef: "relation:1" })]);
+
+    const res = await nearbyRoutes({ planId: p.id });
+
+    expect(res.routes).toHaveLength(1);
+    expect(res.omittedForWheels).toBe(0);
+    expect(res.note).toBeNull();
+  });
+
+  it("still lets somebody take a way in deliberately", async () => {
+    // The list is a suggestion, not a gate: refusing what a person
+    // asked for by name would be the planner overruling them (§7.1).
+    const p = await plan();
+    geo.setRoutes("nom_garda", [route({ osmRef: "relation:1" })]);
+    await addTraveller({ planId: p.id, label: "Oma Beispiel", getsAbout: "wheelchair" });
+
+    const res = await takeRoute({ planId: p.id, osmRef: "relation:1" });
+    expect(res.name).toBe("Panoramaweg Beispiel");
   });
 });
