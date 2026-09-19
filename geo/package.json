@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "express": "^4.21.1",
+    "express": "^4.22.3",
     "pg": "^8.13.1",
     "tsx": "^4.19.2"
   },
