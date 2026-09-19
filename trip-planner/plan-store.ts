@@ -31,6 +31,7 @@ import {
   tripHiddenSpots,
 } from "../db/schema";
 import { storedExtent } from "./extent";
+import { spillOver } from "./spill";
 import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
@@ -1013,6 +1014,17 @@ export async function loadPlan(
       branches: branchesByBlock.get(row.id) ?? [],
     });
     blocksByDay.set(row.day_id, list);
+  }
+
+  // How far each block of a day has slipped, when somebody planned a
+  // stop longer than the block it sits in (§4.7). Derived rather than
+  // stored: it follows from the budgets and what is in them, and a
+  // stored copy would drift the moment a stop moved.
+  for (const blocks of blocksByDay.values()) {
+    const spill = spillOver(blocks);
+    blocks.forEach((block, index) => {
+      block.carriedInMinutes = spill.blocks[index].carriedInMinutes;
+    });
   }
 
   const daysByLeg = new Map<number, StoredDay[]>();

@@ -357,3 +357,30 @@ describe("rewalking a day with a route in it (§4.7)", () => {
     expect(blocks[0].usedMinutes).toBe(walkIn + 90 + walkOn + 30 + home);
   });
 });
+
+describe("a stop that runs past the end of its block (§4.7)", () => {
+  it("makes the next block begin late rather than dropping the minutes", () => {
+    // A four-hour walk planned into a three-and-a-half-hour Vormittag.
+    // Lunch starts late; the day no longer pretends otherwise.
+    const walk: CurrentStop = { ...stop("manual:route", 200, 240), category: "route" };
+    const blocks = [
+      block("morning", 210, [walk]),
+      block("midday", 90, [], "meal"),
+      block("afternoon", 210, [stop("node:c", 900)]),
+    ];
+
+    recomputeDay(blocks, HOME);
+
+    expect(blocks[0].usedMinutes).toBeGreaterThan(210);
+    expect(blocks[1].carriedInMinutes).toBe(blocks[0].usedMinutes - 210);
+    // Ninety minutes of lunch swallow the overrun, so the afternoon
+    // starts on time.
+    expect(blocks[2].carriedInMinutes).toBe(0);
+  });
+
+  it("leaves an ordinary day carrying nothing", () => {
+    const blocks = day();
+    recomputeDay(blocks, HOME);
+    expect(blocks.map((b) => b.carriedInMinutes)).toEqual([0, 0, 0]);
+  });
+});

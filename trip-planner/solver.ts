@@ -131,8 +131,17 @@ export interface PlannedBlock {
   label: string;
   kind: PlannedBlockShape["kind"];
   budgetMinutes: number;
-  /** Travel plus dwell actually used. Never exceeds the budget. */
+  /**
+   * Travel plus dwell actually in it. The solver never exceeds the
+   * budget; a stop a person placed may (§4.7, `spill.ts`).
+   */
   usedMinutes: number;
+  /**
+   * Minutes of an earlier block's overrun that land in this one — how
+   * much later it begins than the day's shape says (§4.7). Absent
+   * where nothing overran, which is every ordinary day.
+   */
+  carriedInMinutes?: number;
   stops: PlannedStop[];
 }
 

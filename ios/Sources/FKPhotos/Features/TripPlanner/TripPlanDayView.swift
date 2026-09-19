@@ -1059,6 +1059,30 @@ struct TripPlanDayView: View {
         viewModel.day?.fixpoints.contains { $0.framesBlock && $0.spotRef == stop.osmRef } ?? false
     }
 
+    /// How far a stop has pushed the day back (§4.7).
+    ///
+    /// Both halves, because they are two different things to decide
+    /// about: the block that runs over is where somebody planned
+    /// something long, and the block that starts late is what it costs.
+    /// One function rather than two rows in the card, which is already
+    /// at the view builder's ten.
+    @ViewBuilder
+    private func spillRows(_ block: TripBlock) -> some View {
+        if block.startsLateMinutes > 0 {
+            Label("beginnt ca. \(TripClock.duration(block.startsLateMinutes)) später",
+                  systemImage: "clock.arrow.circlepath")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        if block.overrunMinutes > 0 {
+            Label("zieht ca. \(TripClock.duration(block.overrunMinutes)) über — "
+                  + "der nächste Block beginnt später",
+                  systemImage: "arrow.turn.down.right")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func blockCard(_ block: TripBlock) -> some View {
         let isCurrent = currentBlockId == block.id
         return VStack(alignment: .leading, spacing: 12) {
@@ -1096,6 +1120,8 @@ struct TripPlanDayView: View {
                 .accessibilityLabel(block.isSplit ? "Gruppe wieder zusammenführen" : "Gruppe trennen")
             }
 
+            spillRows(block)
+
             // The frame this block was accepted at (§7.3): the evening
             // light, said on the block it shapes — and taken off here,
             // which hands the block its ordinary hours back and the spot
@@ -1131,7 +1157,9 @@ struct TripPlanDayView: View {
                 // Over budget is the one state that has to be
                 // unmistakable, because it is the one the traveller has
                 // to decide about (§8.4).
-                .tint(block.utilisation > 1 ? .red : .accentColor)
+                // Over budget counts the late start too: a block that
+                // begins half an hour behind has half an hour less.
+                .tint(block.overrunMinutes > 0 ? .red : .accentColor)
 
             // What the sky is expected to do over this block (§7.2).
             // Said, not acted on: nothing here reorders the block, and

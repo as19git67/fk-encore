@@ -462,6 +462,17 @@ struct TripPoolView: View {
                 Text(extent.summary).font(.caption).foregroundStyle(.secondary)
             }
 
+            // A stop longer than every block that takes spots is never
+            // chosen by the planner — it keeps to the frame it was
+            // given (§4.7). Said here, because otherwise the walk just
+            // sits in the list looking passed over.
+            if TripPoolFilter.needsMoreThanOneBlock(candidate, in: leg) {
+                Label("länger als jeder Block — selbst einplanen, sie läuft dann in den nächsten hinein",
+                      systemImage: "arrow.turn.down.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             // What somebody wrote next to it, which is the part that
             // actually decides an afternoon (§9.2).
             if let note = candidate.note, !note.isEmpty {
