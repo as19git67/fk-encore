@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F4mil Photos</title>
+<meta name="description" content="F4mil Photos – die iOS-App für die eigene, selbst gehostete Foto-, Dokumenten- und Finanzverwaltung der Familie.">
+<style>
+  :root {
+    --bg-dark: #0c2f33;
+    --bg-navy: #14263a;
+    --card-bg: #f5f1e6;
+    --ink: #1c2b2e;
+    --ink-muted: #48585b;
+    --accent-orange: #f2a83e;
+    --accent-teal: #6fd8c6;
+    --accent-navy: #1c3a40;
+    --border: rgba(255, 255, 255, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #f0ece0;
+    background:
+      radial-gradient(circle at 15% 10%, rgba(111, 216, 198, 0.18), transparent 40%),
+      radial-gradient(circle at 90% 85%, rgba(242, 168, 62, 0.16), transparent 45%),
+      linear-gradient(160deg, var(--bg-dark) 0%, var(--bg-navy) 55%, #0a1c28 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    line-height: 1.55;
+  }
+
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 56px 20px 80px;
+  }
+
+  header.hero {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  .icon {
+    width: 108px;
+    height: 108px;
+    border-radius: 26px;
+    margin: 0 auto 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(150deg, #0d3b3e 0%, #163a55 60%, #2b2440 100%);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255,255,255,0.06);
+  }
+
+  .icon svg { display: block; }
+
+  h1 {
+    font-size: 2.1rem;
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .tagline {
+    color: #c9d3d2;
+    font-size: 1.05rem;
+    margin: 0;
+  }
+
+  section {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 28px 28px;
+    margin-bottom: 24px;
+    backdrop-filter: blur(6px);
+  }
+
+  h2 {
+    font-size: 1.05rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-teal);
+    margin: 0 0 16px;
+  }
+
+  ul.features {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 14px;
+  }
+
+  ul.features li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    color: #dfe6e4;
+  }
+
+  ul.features li .dot {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-top: 6px;
+    background: var(--accent-orange);
+  }
+
+  ul.features li:nth-child(3n+2) .dot { background: var(--accent-teal); }
+  ul.features li:nth-child(3n+3) .dot { background: #7ba7c9; }
+
+  .warning {
+    background: linear-gradient(135deg, rgba(242, 168, 62, 0.16), rgba(242, 168, 62, 0.06));
+    border: 1px solid rgba(242, 168, 62, 0.45);
+  }
+
+  .warning h2 {
+    color: var(--accent-orange);
+  }
+
+  .warning p {
+    margin: 0 0 12px;
+    color: #f4e9d6;
+  }
+
+  .warning p:last-child { margin-bottom: 0; }
+
+  .warning strong {
+    color: #fff;
+  }
+
+  footer {
+    text-align: center;
+    color: #7c8a8c;
+    font-size: 0.85rem;
+    margin-top: 40px;
+  }
+
+  @media (max-width: 520px) {
+    h1 { font-size: 1.7rem; }
+    section { padding: 22px 20px; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="icon" aria-hidden="true">
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M18 8h20c5 0 9 3.6 9 9s-4 9-9 9H28v22c0 5-4 8-9 8s-9-3-9-8V16c0-4.4 3.6-8 8-8z" fill="#f5f1e6"/>
+          <rect x="30" y="12" width="14" height="10" rx="5" fill="#f2a83e"/>
+          <circle cx="32" cy="30" r="6" fill="#6fd8c6"/>
+          <circle cx="27" cy="30" r="4.2" fill="#1c3a40"/>
+          <circle cx="27" cy="30" r="1.8" fill="#f5f1e6"/>
+        </svg>
+      </div>
+      <h1>F4mil Photos</h1>
+      <p class="tagline">Die iOS-App für das eigene, selbst gehostete Familienarchiv.</p>
+    </header>
+
+    <section>
+      <h2>Was die App kann</h2>
+      <ul class="features">
+        <li><span class="dot"></span> Fotos automatisch hochladen und in Alben organisieren – gemeinsam mit der ganzen Familie kuratiert.</li>
+        <li><span class="dot"></span> Gesichter, Orte und Motive werden per KI erkannt, damit sich Bilder in natürlicher Sprache durchsuchen lassen.</li>
+        <li><span class="dot"></span> Dokumente per Foto oder Upload erfassen, automatisch klassifizieren und nach Steuerrelevanz sortieren.</li>
+        <li><span class="dot"></span> Konten und Buchungen im Blick behalten, mit KI-gestützten Vorschlägen zur Kategorisierung.</li>
+        <li><span class="dot"></span> Rückblicke, Duplikaterkennung und Qualitätsbewertung sorgen dafür, dass die Sammlung übersichtlich bleibt.</li>
+        <li><span class="dot"></span> Teilen einzelner Alben per Link, wenn gewünscht – ansonsten bleibt alles privat.</li>
+      </ul>
+    </section>
+
+    <section class="warning">
+      <h2>Wichtiger Hinweis</h2>
+      <p>
+        <strong>F4mil Photos ist ohne den eigenen Server komplett wertlos.</strong>
+        Die App ist lediglich die Oberfläche für ein selbst gehostetes Backend, das jede Familie
+        selbst betreiben muss. Es gibt keine Cloud, keinen zentralen Anbieter und keine
+        Registrierung bei uns – ohne eine erreichbare eigene Installation lassen sich weder Fotos
+        hochladen noch Dokumente oder Finanzen verwalten.
+      </p>
+      <p>
+        Wer die App installiert, ohne Zugriff auf eine eigene F4mil-Instanz zu haben, kann sie
+        <strong>nicht sinnvoll nutzen</strong>. Die gesamte Verarbeitung – inklusive aller
+        KI-Funktionen – läuft lokal auf dem eigenen Server, nicht in der App und nicht bei einem
+        Drittanbieter.
+      </p>
+    </section>
+
+    <footer>
+      F4mil Photos ist ein privates, selbst gehostetes Projekt – kein kommerzieller Dienst.
+    </footer>
+  </div>
+</body>
+</html>
