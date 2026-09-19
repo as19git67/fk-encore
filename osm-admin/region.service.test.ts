@@ -214,8 +214,11 @@ describe("approve", () => {
     await db
       .update(osmRegionImports)
       .set({ status: "ready_running" });
+    // The state machine does have a ready_* → importing edge, but it
+    // belongs to the deliberate re-import, which drops the database
+    // first. Approve is a button on the wrong row here.
     await expect(approve("europe/germany/bayern")).rejects.toThrow(
-      /invalid region status transition: ready_running → importing/,
+      /already ready_running; use the re-import action/,
     );
   });
 

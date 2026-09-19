@@ -201,6 +201,18 @@ export async function approve(
   }
   if (current === "importing") return current;
 
+  // The state machine has an edge from ready_* to importing, and it
+  // belongs to the deliberate re-import (`reimport.ts`), which drops
+  // the database first. Approving a region that is already ready is
+  // not that — it is a button pressed on the wrong row — and letting
+  // it through would put a working region into `importing` with its
+  // database still there.
+  if (current === "ready_running" || current === "ready_stopped") {
+    throw new Error(
+      `region ${slug} is already ${current}; use the re-import action to build it again`,
+    );
+  }
+
   assertTransition(current, "importing");
   await db
     .update(osmRegionImports)
