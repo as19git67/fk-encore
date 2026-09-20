@@ -58,21 +58,29 @@ function toggleMenu(event: Event) {
 
 // The last counts this toolbar applied (newest last, at most two). A width
 // measurement that asks to flip straight back to the one before is the
-// toolbar reacting to its own layout, not to the viewport — see
-// `continuesOscillation`. Once that happens the decision is frozen at the
-// narrower of the two until the items themselves change, so the row (and
-// everything the sticky stack pushes below it) stops moving.
+// toolbar reacting to its own layout rather than to the viewport — see
+// `continuesOscillation`. Settling in takes a flip or two of its own (the
+// first measurement runs before the buttons have their final width), so the
+// decision is only frozen once the flipping keeps up, and then at the
+// narrower of the two counts — so the row, and everything the sticky stack
+// pushes below it, stops moving.
+const OSCILLATION_LIMIT = 4
+
 let applied: number[] = []
+let flips = 0
 let frozen = false
 
 function apply(count: number) {
-  if (count === visibleCount.value) return
-  if (frozen) return
+  if (frozen || count === visibleCount.value) return
   if (continuesOscillation(applied, count)) {
-    frozen = true
-    const previous = applied[applied.length - 1] ?? count
-    visibleCount.value = Math.min(count, previous)
-    return
+    flips++
+    if (flips >= OSCILLATION_LIMIT) {
+      frozen = true
+      visibleCount.value = Math.min(count, applied[applied.length - 1] ?? count)
+      return
+    }
+  } else {
+    flips = 0
   }
   applied = [...applied.slice(-1), count]
   visibleCount.value = count
@@ -128,6 +136,7 @@ watch(
     // A different set of items is a fresh layout question, so any earlier
     // freeze is lifted.
     applied = []
+    flips = 0
     frozen = false
     void nextTick(recompute)
   },

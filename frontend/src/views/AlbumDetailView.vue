@@ -363,6 +363,25 @@ const rawAlbumPhotos = computed<Photo[]>(() =>
   [...((album.value?.photos ?? []) as Photo[])].sort(comparePhotos)
 )
 
+/**
+ * How many photos the album holds, as the album itself reports it.
+ *
+ * `loadData` deliberately fetches the album *without* its photo array — the
+ * grid paints from `/gallery/grid`, not from this array — and hydrates
+ * `album.photos` in the background afterwards. So `rawAlbumPhotos` is empty
+ * for a moment after every load, and stays empty for good if that background
+ * request fails. Nothing that asks "does this album have any photos" may
+ * read its length; that question is answered here, and the maximum keeps the
+ * answer right both while `photo_count` is stale (just uploaded) and while
+ * the array is still on its way.
+ */
+const albumPhotoTotal = computed(() =>
+  Math.max(album.value?.photo_count ?? 0, rawAlbumPhotos.value.length),
+)
+
+/** Whether the background photo hydration has finished (successfully or not). */
+const photosHydrated = ref(false)
+
 const curationStatsMap = computed(() => {
   const m = new Map<number, { fav_count: number; hide_count: number }>()
   for (const p of (album.value?.photos ?? [])) {
@@ -855,7 +874,7 @@ const toolbar = useListToolbar({
   sort: sortControl,
   result: {
     loaded: () => filteredAlbumPhotoCount.value,
-    total: () => rawAlbumPhotos.value.length,
+    total: () => albumPhotoTotal.value,
     loading: () => loading.value,
   },
   selection: { active: selectMode, toggle: toggleSelectMode },
@@ -1263,12 +1282,16 @@ async function loadData() {
 // album object; guarded so a stale response for a previous album is dropped.
 async function hydrateAlbumPhotos() {
   const targetId = albumId.value
+  photosHydrated.value = false
   try {
     const { photos } = await getAlbumPhotos(targetId)
     if (album.value && album.value.id === targetId) {
       album.value = { ...album.value, photos }
     }
   } catch { /* grid stays usable; stacks/map just won't populate */ }
+  finally {
+    if (albumId.value === targetId) photosHydrated.value = true
+  }
 }
 
 async function loadPersons() {
@@ -2664,9 +2687,10 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       <PageSkeleton v-if="loading && !album" variant="grid" :count="12" />
 
       <!-- An album with no photos at all — the filter cannot be the cause,
-           so there is nothing to clear. -->
+           so there is nothing to clear. Decided on the album's own count, not
+           on the photo array: that one arrives later (or not at all). -->
       <EmptyState
-        v-else-if="album && rawAlbumPhotos.length === 0"
+        v-else-if="album && albumPhotoTotal === 0"
         icon="pi pi-images"
         title="Noch keine Fotos in diesem Album"
         message="Lade Fotos hoch oder füge welche aus der Galerie hinzu."
@@ -2683,13 +2707,23 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         @stop-selected="handleMapStopSelected"
       />
 
+      <!-- Map mode, photo array still on its way: the map draws from it, so
+           it has nothing to show yet — and that is not an empty album. -->
+      <PageSkeleton
+        v-else-if="album && viewMode === 'map' && !photosHydrated"
+        variant="grid"
+        :count="6"
+      />
+
       <!-- Map mode with every photo filtered away. The grid mode below
            renders its own empty state inside VirtualGallery. -->
       <EmptyState
         v-else-if="album && viewMode === 'map'"
         icon="pi pi-map"
         title="Keine Fotos in dieser Ansicht"
-        message="Der aktive Filter blendet alle Fotos dieses Albums aus."
+        :message="activeCount > 0
+          ? 'Der aktive Filter blendet alle Fotos dieses Albums aus.'
+          : 'Die Fotos dieses Albums konnten nicht geladen werden. Lade die Seite neu.'"
         :filtered="activeCount > 0"
         @clear-filters="onResetFilter"
       />

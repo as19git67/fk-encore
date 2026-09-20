@@ -22,6 +22,20 @@ function placeholderSvg(filename: string): string {
   </svg>`
 }
 
+/**
+ * The album detail as the real backend hands it over.
+ *
+ * `AlbumDetailView` first asks for metadata only (`?includePhotos=false`) and
+ * hydrates the photo array in a second request, so a handler that always
+ * returns photos gives a story an array the app does not have yet — and
+ * hides everything that goes wrong while it is missing.
+ */
+export function albumDetail(request: Request, overrides: Record<string, unknown> = {}) {
+  const withPhotos = new URL(request.url).searchParams.get('includePhotos') !== 'false'
+  const detail = { ...MOCK_ALBUM_DETAIL, ...overrides }
+  return withPhotos ? detail : { ...detail, photos: [] }
+}
+
 export const defaultHandlers = [
   // ── Secondary lookups the detail views load beside their main record ──────
   // (empty by default so a story renders without a per-story handler).
@@ -204,7 +218,7 @@ export const defaultHandlers = [
   http.get('/api/albums', () => HttpResponse.json({ albums: MOCK_ALBUMS })),
   http.post('/api/albums', () => HttpResponse.json(MOCK_ALBUMS[0]!)),
   http.patch('/api/albums', () => HttpResponse.json(MOCK_ALBUMS[0]!)),
-  http.get('/api/albums/:id', () => HttpResponse.json(MOCK_ALBUM_DETAIL)),
+  http.get('/api/albums/:id', ({ request }) => HttpResponse.json(albumDetail(request))),
   http.delete('/api/albums/:id', () =>
     HttpResponse.json({ success: true, message: 'Gelöscht' }),
   ),
