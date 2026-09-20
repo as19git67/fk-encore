@@ -972,13 +972,14 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 }
 
 /* ── Person Grid (Level 1) ──────────────────────────────────────────────── */
+/* No side padding of its own: the page gutter (`--page-gutter`, PageLayout)
+   is the one margin, so the person tiles line up with the gallery's and the
+   album grid's — all three grids add the same 6px inside their scroller. */
 .persons-grid-layout {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 0.75rem 0.75rem 0;
-  gap: 0.5rem;
   overflow: hidden;
 }
 

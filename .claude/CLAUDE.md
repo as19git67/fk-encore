@@ -1092,6 +1092,10 @@ Regeln:
 - Die Seite scrollt nie horizontal (`overflow-x: clip` auf `body`). Breite
   Inhalte (Tabellen, Streifen) gehören in `components/layout/ScrollX.vue`.
 - Abstände aus `--space-1` … `--space-6`, Seitenränder aus `--page-gutter`.
+  Keine View legt einen zweiten Seitenrand darüber: Listen und Raster
+  beginnen am Gutter, damit Fotos, Alben, Personen und Dokumente auf
+  derselben Kante stehen. Innenabstand der virtuellen Raster (`6px`) gehört
+  in die Grid-Komponente, nicht in die View.
 - Der Storybook-Test-Runner prüft jede Story bei 360px Breite auf
   Elemente, die ohne eigenen horizontalen Scroller über den Rand ragen
   (`src/utils/overflowCheck.ts`). Eine Story einer noch nicht migrierten
