@@ -26,8 +26,11 @@ import {
 } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { formatDateShort } from '../utils/dateFormat'
+import { anchorKey, saveListAnchor } from '../utils/listAnchor'
 
 const router = useRouter()
+/** Schlüssel für Anker und Scroll-Offset dieser Liste (#1279). */
+const ANCHOR_KEY = 'admin-users'
 const auth = useAuthStore()
 const users = ref<UserWithRoles[]>([])
 const loading = ref(true)
@@ -134,12 +137,28 @@ function formatDate(dateStr: string) {
 }
 
 function onRowClick(event: any) {
+  // Merken, aus welcher Zeile heraus die Detailseite geöffnet wurde, damit
+  // der Weg zurück wieder dort landet statt am Listenanfang.
+  saveListAnchor(ANCHOR_KEY, { kind: 'user', id: event.data.id })
   router.push(`/admin/benutzer/${event.data.id}`)
+}
+
+/**
+ * Eine `DataTable`-Zeile nimmt kein gebundenes Attribut entgegen wie ein
+ * `v-for`-Element — nur der Passthrough kommt an das `<tr>` heran, und die
+ * Zeilendaten stecken dort in den Props der Zeilenkomponente.
+ */
+function anchorRowAttrs(options: { props?: { rowData?: UserWithRoles } }) {
+  const id = options.props?.rowData?.id
+  if (!id) return {}
+  // `tabindex="-1"`, weil ein `<tr>` sonst keinen Fokus annehmen kann und die
+  // Rückkehr nur scrollen, aber nicht weitertippen ließe.
+  return { 'data-anchor': anchorKey('user', id), class: 'scroll-anchor', tabindex: '-1' }
 }
 </script>
 
 <template>
-  <PageLayout title="Benutzer" width="wide" :ready="!loading">
+  <PageLayout title="Benutzer" width="wide" :ready="!loading" :anchor-key="ANCHOR_KEY">
     <template #actions>
       <Button
         v-if="mayInvite"
@@ -198,6 +217,7 @@ function onRowClick(event: any) {
       :rows="10"
       @row-click="onRowClick"
       :row-class="() => 'cursor-pointer'"
+      :pt="{ bodyRow: anchorRowAttrs }"
     >
       <Column field="id" header="ID" sortable style="width: 5rem" class="mobile-hidden" headerClass="mobile-hidden" />
       <Column field="name" header="Name" sortable />

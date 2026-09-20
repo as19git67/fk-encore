@@ -38,7 +38,6 @@ import {
 import { useAuthStore } from '../stores/auth'
 import { useDocSelectionStore } from '../stores/documents/selection'
 import { useRealtimeEvent } from '../composables/useRealtime'
-import { useScrollRestore } from '../composables/useScrollRestore'
 import { useSplitView } from '../composables/useSplitView'
 import { resolveActiveId, stepActiveId } from '../utils/activeListItem'
 import DocumentPreviewPane from '../components/documents/DocumentPreviewPane.vue'
@@ -51,21 +50,19 @@ import {
 } from '../composables/useDocumentFilter'
 import { useListSearch, useListToolbar, useListView } from '../composables/useListToolbar'
 import { waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
-import {
-  consumeListFocus,
-  focusListItem,
-  rememberCollectionListFocus,
-  rememberDocumentListFocus,
-} from '../utils/documentListFocus'
+import { anchorKey, focusListAnchor, saveListAnchor } from '../utils/listAnchor'
+import type { ListAnchor } from '../utils/listAnchor'
 
 const router = useRouter()
 const auth = useAuthStore()
-// The list scrolls inside its own column now, so window.scrollY is always 0
-// and the offset has to be read from that element.
+/**
+ * The list scrolls inside its own column (the preview pane sits beside it),
+ * so the page's offset has to be read from that element. `PageLayout` saves
+ * and restores it; the view only points at it.
+ */
 const listColumn = ref<HTMLElement | null>(null)
-const { restore: restoreScroll } = useScrollRestore('documents-list', {
-  getScroller: () => listColumn.value,
-})
+/** The list's own key for the anchor and the offset — one per list, not per filter. */
+const ANCHOR_KEY = 'dokumente'
 
 const items = ref<DocumentSummary[]>([])
 const categories = ref<DocumentCategory[]>([])
@@ -265,7 +262,7 @@ async function openCollection(id: number) {
   // it, and let a still-pending filter/sort URL write settle first — a write
   // that resolves after this push would overwrite the history entry the back
   // arrow returns to, dropping the filter and the position with it.
-  rememberCollectionListFocus(id)
+  saveListAnchor(ANCHOR_KEY, { kind: 'collection', id })
   await waitForPendingQueryUpdate(router)
   router.push({ name: 'dokumente-mappe', params: { id } })
 }
@@ -612,7 +609,7 @@ async function openDocument(doc: DocumentSummary) {
     activeDocId.value = doc.id
     return
   }
-  rememberDocumentListFocus(doc.id)
+  saveListAnchor(ANCHOR_KEY, { kind: 'document', id: doc.id })
   // Applying a filter/sort writes the URL asynchronously (fire-and-forget,
   // see routeQueryUpdate.ts) — wait for it to land first, otherwise a
   // still-pending write can resolve after this push and silently overwrite
@@ -623,21 +620,25 @@ async function openDocument(doc: DocumentSummary) {
 
 /**
  * Put the user back on the row they left from — a document or a Sammelmappe.
- * Returns false when that row is not on screen (deleted, filtered away, on a
- * page not loaded yet), and the caller falls back to the raw scroll offset.
+ * `PageLayout` asks once the list has loaded and scrolls and focuses whatever
+ * comes back; returning null means the row is not on screen (deleted,
+ * filtered away, on a page not loaded yet) and the saved offset is used.
+ *
+ * The flash is this list's own: it says "here you were" on a page full of
+ * near-identical rows.
  */
-async function restoreFocusToLastOpened(): Promise<boolean> {
-  const focus = consumeListFocus()
-  if (!focus) return false
+async function resolveListAnchor(anchor: ListAnchor | null): Promise<HTMLElement | null> {
+  if (!anchor) return null
+  // One more tick than PageLayout waits: the rows render from `items`, which
+  // the filter watcher can still be rewriting.
   await nextTick()
-  await nextTick()
-  const el = focusListItem(document, focus)
-  if (!el) return false
+  const el = focusListAnchor(document, anchor)
+  if (!el) return null
   const highlight =
-    focus.kind === 'collection' ? 'collection-row--highlight' : 'document-card--highlight'
+    anchor.kind === 'collection' ? 'collection-row--highlight' : 'document-card--highlight'
   el.classList.add(highlight)
   setTimeout(() => el.classList.remove(highlight), 1500)
-  return true
+  return el
 }
 
 useRealtimeEvent('documents', 'status.changed', (ev) => {
@@ -673,14 +674,20 @@ watch(
 
 onMounted(async () => {
   await Promise.all([loadCategories(), loadDocumentTypes(), loadGroups(), loadSubjectPeople(), loadCorrespondents(), load()])
-  // Returning from detail: center, highlight and restore actual keyboard
-  // focus. Only use the generic scroll offset when there is no item anchor.
-  if (!(await restoreFocusToLastOpened())) restoreScroll()
 })
 </script>
 
 <template>
-  <PageLayout title="Dokumente" scroll="self" width="full" :ready="!loading">
+  <PageLayout
+    title="Dokumente"
+    scroll="self"
+    width="full"
+    :ready="!loading"
+    :anchor-key="ANCHOR_KEY"
+    legacy-anchor-key="documents"
+    :scroller="listColumn"
+    :resolve-anchor="resolveListAnchor"
+  >
     <template #actions>
         <Button
           icon="pi pi-question-circle"
@@ -805,8 +812,9 @@ onMounted(async () => {
         v-for="c in visibleCollections"
         :key="c.id"
         :data-collection-id="c.id"
+        :data-anchor="anchorKey('collection', c.id)"
         type="button"
-        class="collection-row"
+        class="collection-row scroll-anchor"
         @click="openCollection(c.id)"
       >
         <span class="collection-icon"><i class="pi pi-folder" /></span>
@@ -847,7 +855,8 @@ onMounted(async () => {
         v-for="doc in items"
         :key="doc.id"
         :data-doc-id="doc.id"
-        class="document-card"
+        :data-anchor="anchorKey('document', doc.id)"
+        class="document-card scroll-anchor"
         :class="{
           'document-card--selected': isSelected(doc.id),
           'document-card--active': isSplit && activeDocId === doc.id,
@@ -937,7 +946,8 @@ onMounted(async () => {
         v-for="doc in items"
         :key="doc.id"
         :data-doc-id="doc.id"
-        class="grid-card"
+        :data-anchor="anchorKey('document', doc.id)"
+        class="grid-card scroll-anchor"
         :class="{
           'grid-card--selected': isSelected(doc.id),
           'grid-card--active': isSplit && activeDocId === doc.id,

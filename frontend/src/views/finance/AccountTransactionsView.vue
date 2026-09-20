@@ -15,7 +15,6 @@ import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useScrollRestore } from '../../composables/useScrollRestore'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
 import type { FilterChip } from '../../components/layout/listToolbar'
@@ -59,18 +58,26 @@ import {
   listDepotTransactions,
   listHoldings,
 } from '../../api/finance'
+import { anchorKey, saveListAnchor } from '../../utils/listAnchor'
 
 const route = useRoute()
 const router = useRouter()
 const txStore = useTransactionsStore()
 const overviewStore = useOverviewStore()
 const tagsStore = useTagsStore()
-const { restore: restoreScroll } = useScrollRestore('finance-transactions')
 const selectionStore = useTxSelectionStore()
 const filtersStore = useTxFiltersStore()
 const authStore = useAuthStore()
 
 const PAGE_LIMIT = 500
+
+/**
+ * One key for this list, whatever account or filter it currently shows —
+ * the user left from exactly one booking, so a second key would only put a
+ * stale anchor up against a fresh one. PageLayout stores the scroll offset
+ * under it as well.
+ */
+const ANCHOR_KEY = 'finance-transactions'
 
 // ── Mode resolution ───────────────────────────────────────────────────
 //
@@ -341,7 +348,6 @@ onMounted(async () => {
     await tagsStore.refresh('all')
   }
   await loadTransactions()
-  restoreScroll()
 })
 
 // React to route changes (navigating from one section/account to
@@ -1090,6 +1096,10 @@ function openTransaction(tx: Transaction) {
     toggleLocalSelection(tx)
     return
   }
+  // Remember the row itself: the list reloads on the way back and a booking
+  // that gained a tag shifts everything below it, so the offset alone would
+  // land beside the booking the user was looking at.
+  saveListAnchor(ANCHOR_KEY, { kind: 'transaction', id: tx.id })
   void router.push({
     name: 'finance-transaction-detail',
     params: { id: tx.id },
@@ -1268,7 +1278,12 @@ function goBack() {
 </script>
 
 <template>
-  <PageLayout :title="headerTitle" :hint="headerHint || undefined" :ready="!txStore.loading">
+  <PageLayout
+    :title="headerTitle"
+    :hint="headerHint || undefined"
+    :ready="!txStore.loading"
+    :anchor-key="ANCHOR_KEY"
+  >
     <!-- Sticky part (lifted into the app stack by PageLayout): the account
          toolbar, the filter panel while open, and the selection bar while
          selecting. The running sums live up here so they stay visible while
@@ -1828,12 +1843,16 @@ function goBack() {
           <li
             v-for="tx in group.items"
             :key="tx.id"
-            class="tx-card"
+            :data-anchor="anchorKey('transaction', tx.id)"
+            class="tx-card scroll-anchor"
             :class="{
               'tx-card-selected': isLocallySelected(tx.id),
               'tx-card-select-mode': selectMode,
             }"
+            tabindex="0"
             @click="openTransaction(tx)"
+            @keydown.enter="openTransaction(tx)"
+            @keydown.space.prevent="openTransaction(tx)"
           >
             <div v-if="selectMode" class="tx-card-lead" @click.stop>
               <Checkbox

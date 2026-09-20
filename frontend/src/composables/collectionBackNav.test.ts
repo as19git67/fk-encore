@@ -4,10 +4,7 @@ import { createRouter, createWebHistory, type Router } from 'vue-router'
 import { useDocumentFilter, type UseDocumentFilterReturn } from './useDocumentFilter'
 import { useModuleBack } from './useModuleBack'
 import { waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
-import {
-  consumeListFocus,
-  rememberCollectionListFocus,
-} from '../utils/documentListFocus'
+import { saveListAnchor, takeListAnchor } from '../utils/listAnchor'
 
 /**
  * Jumping from the document list into a Sammelmappe and back has to land on
@@ -96,14 +93,14 @@ describe('back from a Sammelmappe returns to the document list', () => {
     await router.push('/dokumente')
     await router.isReady()
 
-    rememberCollectionListFocus(7)
+    saveListAnchor('dokumente', { kind: 'collection', id: 7 })
     await router.push({ name: 'dokumente-mappe', params: { id: '7' } })
 
     const detail = mountComposable(router, () => useModuleBack('/dokumente', 'dokumente-mappen'))
     detail.exposed.goBack()
     await waitForRoute(router, 'dokumente-list')
 
-    expect(consumeListFocus()).toEqual({ kind: 'collection', id: 7 })
+    expect(takeListAnchor('dokumente')).toEqual({ kind: 'collection', id: 7 })
   })
 
   it('returns to the folder list when the folder was opened from outside the module', async () => {

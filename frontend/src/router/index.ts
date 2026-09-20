@@ -8,6 +8,7 @@ import ForgotPasswordView from '../views/ForgotPasswordView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import SharedAlbumView from '../views/SharedAlbumView.vue'
 import { isStaleChunkLoadError } from '../utils/appUpdate'
+import { markNavigation, saveScrollOffset } from '../utils/scrollMemory'
 
 // ── Last-view persistence ────────────────────────────────────────────────────
 // We save the most recent authenticated route path to localStorage so that
@@ -39,6 +40,17 @@ const moduleRoutes: RouteRecordRaw[] = modules.map((mod) => ({
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+  /**
+   * Scrolling is decided in one place (issue #1272, stage 4). The offset of
+   * the page being left is saved below; putting it back is `PageLayout`'s
+   * job, because only the view knows when its list is tall enough to hold
+   * that offset. Here we only record how we got here — a saved position means
+   * back or forward, anything else is a fresh start at the top.
+   */
+  scrollBehavior(_to, _from, savedPosition) {
+    markNavigation(savedPosition !== null)
+    return savedPosition ?? { top: 0 }
+  },
   routes: [
     // Default: restore the most recently open view, falling back to the
     // content feed (the app "home") for first-time visitors. Older accounts
@@ -74,6 +86,13 @@ const router = createRouter({
     { path: '/roles', redirect: '/admin/rollen' },
     { path: '/data-management', redirect: '/admin/status' },
   ],
+})
+
+// Remember where the page being left was scrolled to, before the new one
+// takes the stage. Keyed by the full path, so the same list under a different
+// filter keeps its own position.
+router.beforeEach((to, from) => {
+  if (from.name && from.fullPath !== to.fullPath) saveScrollOffset(from.fullPath)
 })
 
 router.beforeEach((to) => {

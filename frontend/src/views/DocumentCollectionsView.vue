@@ -26,8 +26,12 @@ import {
   listCollections,
   type DocumentCollection,
 } from '../api/collections'
+import { anchorKey, saveListAnchor } from '../utils/listAnchor'
 
 const router = useRouter()
+
+/** One key for this list — anchor and scroll offset are stored under it. */
+const ANCHOR_KEY = 'dokumente-mappen'
 
 const items = ref<DocumentCollection[]>([])
 const loading = ref(false)
@@ -75,6 +79,9 @@ async function load() {
 }
 
 function open(id: number) {
+  // The row, not the offset: a mappe that gained a summary while it was open
+  // changes the height of everything below it.
+  saveListAnchor(ANCHOR_KEY, { kind: 'collection', id })
   router.push({ name: 'dokumente-mappe', params: { id } })
 }
 
@@ -128,6 +135,7 @@ onMounted(load)
     hint="Mehrere Dokumente zusammenfassen und als ein PDF weitergeben. Ein Dokument darf in mehreren Mappen liegen."
     width="normal"
     :ready="!loading"
+    :anchor-key="ANCHOR_KEY"
   >
     <template #actions>
       <Button icon="pi pi-plus" label="Neue Mappe" @click="openCreate" />
@@ -164,7 +172,12 @@ onMounted(load)
     />
 
     <ul v-else class="cv-list">
-      <li v-for="c in visibleItems" :key="c.id" class="cv-card">
+      <li
+        v-for="c in visibleItems"
+        :key="c.id"
+        :data-anchor="anchorKey('collection', c.id)"
+        class="cv-card scroll-anchor"
+      >
         <button type="button" class="cv-body" @click="open(c.id)">
           <div class="cv-line">
             <span class="cv-name">{{ c.title }}</span>
