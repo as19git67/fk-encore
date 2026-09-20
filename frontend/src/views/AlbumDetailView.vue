@@ -303,17 +303,21 @@ const sort = sortControl.applied
 const isDateSort = computed(
   () => sort.value.field === 'taken_at' || sort.value.field === 'created_at',
 )
-const scrollEnds = ref({ atStart: true, atEnd: false })
-function onGridEndsChanged(ends: { atStart: boolean; atEnd: boolean }) {
-  scrollEnds.value = ends
+// Which half of the grid the user is in, not whether the scroll touches an
+// end: an at-an-end flag flips whenever the container changes height, and a
+// phone changes it on every scroll as the URL bar collapses — which made the
+// label, and with it the whole toolbar, flicker.
+const pastHalf = ref(false)
+function onGridPositionChanged(position: { pastHalf: boolean }) {
+  pastHalf.value = position.pastHalf
 }
 const jumpButton = computed(() => {
   if (!isDateSort.value) return null
   const ascending = sort.value.direction === 'asc'
   // Newest sits at the end for asc, at the start for desc; the icon points at
   // the list edge the jump lands on (fast-backward = start, fast-forward = end).
-  const atNewest = ascending ? scrollEnds.value.atEnd : scrollEnds.value.atStart
-  if (atNewest) {
+  const inNewestHalf = ascending ? pastHalf.value : !pastHalf.value
+  if (inNewestHalf) {
     return { label: 'Zum ältesten', icon: ascending ? 'pi pi-fast-backward' : 'pi pi-fast-forward', target: 'oldest' as const }
   }
   return { label: 'Zum neuesten', icon: ascending ? 'pi pi-fast-forward' : 'pi pi-fast-backward', target: 'newest' as const }
@@ -2708,7 +2712,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             @stack-click="handleGridStackClick"
             @toggle-select="onToggleSelect"
             @loaded="onGalleryLoaded"
-            @ends-changed="onGridEndsChanged"
+            @position-changed="onGridPositionChanged"
           />
         </div>
 
