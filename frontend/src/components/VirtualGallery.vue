@@ -54,6 +54,7 @@ import { useAuthStore } from '../stores/auth'
 import { useGallerySource, GALLERY_PAGE_SIZE } from '../composables/useGallerySource'
 import type { PhotoFilter } from '../api/photos'
 import { autoCropThumbnailStyle } from '../utils/faceBbox'
+import { isPastHalf } from '../utils/galleryJump'
 
 const props = defineProps<{
   /** Photo to land on initially. Null = land on the last (newest in ASC) page. */
@@ -92,11 +93,12 @@ const emit = defineEmits<{
   /** Fires after a (re)load completes so the parent can show toasts etc. */
   'loaded': [info: { total: number; offset: number }]
   /**
-   * Fires whenever the scroll container's at-start / at-end state
-   * changes. Lets the parent's "jump to newest / oldest" toolbar
-   * button flip its label without polling.
+   * Fires when the viewport crosses the middle of the list. Lets the
+   * parent's "jump to newest / oldest" toolbar button flip its label
+   * without polling — and, unlike an at-an-end flag, without flipping
+   * when the container merely changes height (see below).
    */
-  'ends-changed': [ends: { atStart: boolean; atEnd: boolean }]
+  'position-changed': [position: { pastHalf: boolean }]
 }>()
 
 // ── Data source ─────────────────────────────────────────────────────────────
@@ -179,23 +181,27 @@ const overscan = computed(() => {
   return 4
 })
 
-// ── Scroll-end detection ────────────────────────────────────────────────────
+// ── Scroll-position detection ───────────────────────────────────────────────
 // Tracked reactively so the parent's "jump to newest / oldest" toolbar
-// button can flip its label/icon based on which end of the scroll
-// container the user is currently parked at. Updated on every scroll
-// event (passive listener) plus once after each (re)load so the initial
-// scroll-to-anchor settles cleanly.
-let lastEnds: { atStart: boolean; atEnd: boolean } = { atStart: true, atEnd: false }
-function updateScrollEnds() {
+// button can flip its label/icon. Updated on every scroll event (passive
+// listener) plus once after each (re)load so the initial scroll-to-anchor
+// settles cleanly.
+//
+// Which half the viewport is in, not whether it touches an end: a phone
+// collapses and restores its URL bar while scrolling, which changes
+// `clientHeight` by ~60px. An at-an-end flag flips on every one of those,
+// the label flips with it, and the toolbar redraws in a loop — the flicker
+// reported for the album grid. Halfway is far from both edges, so a height
+// change of that size cannot cross it, and the band below keeps the
+// crossing itself from chattering.
+let lastPastHalf = false
+function updateScrollPosition() {
   const el = scrollRef.value
   if (!el) return
-  const next = {
-    atStart: el.scrollTop <= 1,
-    atEnd: Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight - 1,
-  }
-  if (next.atStart !== lastEnds.atStart || next.atEnd !== lastEnds.atEnd) {
-    lastEnds = next
-    emit('ends-changed', next)
+  const next = isPastHalf(el.scrollTop, el.clientHeight, el.scrollHeight, lastPastHalf)
+  if (next !== lastPastHalf) {
+    lastPastHalf = next
+    emit('position-changed', { pastHalf: next })
   }
 }
 
@@ -209,7 +215,7 @@ onMounted(() => {
       if (entry) recalcLayout(entry.contentRect.width)
     })
     resizeObs.observe(scrollRef.value)
-    scrollRef.value.addEventListener('scroll', updateScrollEnds, { passive: true })
+    scrollRef.value.addEventListener('scroll', updateScrollPosition, { passive: true })
   }
 })
 
@@ -217,7 +223,7 @@ onBeforeUnmount(() => {
   loadGeneration++
   resizeObs?.disconnect()
   resizeObs = null
-  scrollRef.value?.removeEventListener('scroll', updateScrollEnds)
+  scrollRef.value?.removeEventListener('scroll', updateScrollPosition)
   if (trailingTimer) {
     clearTimeout(trailingTimer)
     trailingTimer = null
@@ -339,7 +345,7 @@ async function loadAndScroll(anchor: number | null | undefined) {
   // labels itself correctly without waiting for the user's first scroll.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
   if (generation !== loadGeneration) return
-  updateScrollEnds()
+  updateScrollPosition()
 
   // Allow prefetches to start after initial positioning is done.
   await new Promise<void>((r) => setTimeout(r, 200))
@@ -457,7 +463,7 @@ async function reload(opts?: { aroundPhotoId?: number | null }): Promise<void> {
   await source.reload(opts)
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
   runPrefetch()
-  updateScrollEnds()
+  updateScrollPosition()
 }
 
 defineExpose({

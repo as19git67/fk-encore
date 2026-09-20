@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeVisibleCount } from './toolbarOverflow'
+import { computeVisibleCount, continuesOscillation } from './toolbarOverflow'
 
 describe('computeVisibleCount', () => {
   it('keeps every item inline when they all fit', () => {
@@ -32,5 +32,20 @@ describe('computeVisibleCount', () => {
   it('ignores the gap before the first inline item', () => {
     // Single item, no leading gap: 90 + gap(10) + toggle(30) = 130 ≤ 130
     expect(computeVisibleCount([90, 90], 30, 130, 10)).toBe(1)
+  })
+})
+
+describe('continuesOscillation', () => {
+  it('is quiet while the count settles', () => {
+    expect(continuesOscillation([], 3)).toBe(false)
+    expect(continuesOscillation([3], 2)).toBe(false)
+    expect(continuesOscillation([5, 3], 2)).toBe(false)
+    expect(continuesOscillation([3, 3], 3)).toBe(false)
+  })
+
+  it('flags a measurement that flips back to the previous layout', () => {
+    // 5 → 2 → 5 → …: the toolbar is measuring its own effect.
+    expect(continuesOscillation([5, 2], 5)).toBe(true)
+    expect(continuesOscillation([2, 5], 2)).toBe(true)
   })
 })

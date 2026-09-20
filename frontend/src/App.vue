@@ -306,6 +306,8 @@ onBeforeUnmount(() => stackObserver?.disconnect())
               :severity="isGroupActive(item.children) ? 'primary' : 'secondary'"
               class="submenu-item"
               :class="{ 'submenu-item--active': isGroupActive(item.children) }"
+              :aria-label="item.label"
+              v-tooltip.bottom="item.label"
               @click="openGroupMenu($event, item.children)"
             />
             <!-- Plain link -->
@@ -320,6 +322,8 @@ onBeforeUnmount(() => stackObserver?.disconnect())
               class="submenu-item"
               :class="{ 'submenu-item--active': route.name === item.routeName }"
               :aria-current="route.name === item.routeName ? 'page' : undefined"
+              :aria-label="item.label"
+              v-tooltip.bottom="item.label"
               @pointerenter="prefetchSubMenu(item.routeName)"
               @focus="prefetchSubMenu(item.routeName)"
               @click="navigateSubMenu(item.routeName)"
@@ -486,19 +490,29 @@ body {
   padding: 0;
 }
 
-/* On mobile (≤768 px) the sub-menu keeps its labels (they are what makes a
-   row of icons readable) but tightens the buttons; the row scrolls sideways
-   inside itself if it still does not fit. The module name next to the
-   hamburger goes, the sub-menu already says where the user is. */
 @media (max-width: 768px) {
   .module-subheaders {
     padding: 0.5rem;
   }
-  .navbar-module-label {
-    display: none;
-  }
   .submenu-strip .p-button {
     padding: 0.4rem 0.6rem;
+  }
+}
+
+/* Below sm — a phone held upright — the sub-menu drops to icons so the whole
+   module fits one row without scrolling sideways. The name of each entry
+   stays in `aria-label` and in the tooltip, so nothing is lost to a screen
+   reader or to a long press. The module name in the navbar above stays
+   written out: it is the one label that says where you are. */
+@media (max-width: 639px) {
+  .submenu-item .p-button-label {
+    display: none;
+  }
+  .submenu-item .p-button-icon {
+    margin: 0;
+  }
+  .submenu-strip .p-button {
+    padding: 0.4rem 0.75rem;
   }
 }
 </style>
