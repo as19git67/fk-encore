@@ -253,14 +253,15 @@ const searchPhotoIds = computed<number[] | null>(() => searchResultIds.value)
 
 // ── Jump-to-end button ──────────────────────────────────────────────────────
 // Toolbar button that takes the user to the newest or oldest photo.
-// Label and direction depend on which end of the grid the scroll is
-// currently parked at — VirtualGallery emits `ends-changed` whenever
-// that flips. Hidden when the active sort isn't date-based, since
-// "newest / oldest" only has a meaningful semantic for `taken_at` and
-// `created_at`.
-const scrollEnds = ref({ atStart: true, atEnd: false })
-function onEndsChanged(ends: { atStart: boolean; atEnd: boolean }) {
-  scrollEnds.value = ends
+// Label and direction follow which half of the grid the user is in —
+// VirtualGallery emits `position-changed` when that flips. Deliberately
+// not "am I at an end": that flips whenever the container changes height,
+// which a phone does on every scroll as its URL bar collapses. Hidden when
+// the active sort isn't date-based, since "newest / oldest" only has a
+// meaningful semantic for `taken_at` and `created_at`.
+const pastHalf = ref(false)
+function onPositionChanged(position: { pastHalf: boolean }) {
+  pastHalf.value = position.pastHalf
 }
 
 const isDateSort = computed(
@@ -273,8 +274,8 @@ const jumpButton = computed(() => {
   // With ASC sort: oldest at top (index 0), newest at bottom (last index).
   // With DESC: oldest at bottom, newest at top. The icon points at the list
   // edge the jump lands on — fast-backward = to the start, fast-forward = end.
-  const atNewest = ascending ? scrollEnds.value.atEnd : scrollEnds.value.atStart
-  if (atNewest) {
+  const inNewestHalf = ascending ? pastHalf.value : !pastHalf.value
+  if (inNewestHalf) {
     return {
       label: 'Zum ältesten',
       icon: ascending ? 'pi pi-fast-backward' : 'pi pi-fast-forward',
@@ -1771,7 +1772,7 @@ void refreshReviewSequence()
             @stack-click="onStackClick"
             @toggle-select="onToggleSelect"
             @loaded="onGalleryLoaded"
-            @ends-changed="onEndsChanged"
+            @position-changed="onPositionChanged"
           />
         </div>
 

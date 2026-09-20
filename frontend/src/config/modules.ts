@@ -569,16 +569,44 @@ function isRestorableAppPath(raw: string | null): raw is string {
   return true
 }
 
+/** The module that owns the route of this name, if any. */
+function moduleOfRouteName(name: string): ModuleConfig | null {
+  return modules.find((m) => m.routes.some((r) => r.name === name)) ?? null
+}
+
+/**
+ * The module a path actually lands in — which is not always the module its
+ * prefix names. Pages that moved out of Admin into the module they belong to
+ * left redirects behind (`/admin/tools` → Dokumente), so a remembered
+ * `/admin/…` entry can throw the user into another module entirely.
+ */
+export function landingModule(path: string): ModuleConfig | null {
+  const mod = detectModule(path.split(/[?#]/)[0] ?? path)
+  if (!mod) return null
+  const clean = (path.split(/[?#]/)[0] ?? path).slice(mod.basePath.length).replace(/^\//, '')
+  const redirect = mod.routes.find((r) => r.path === clean)?.redirect
+  if (redirect && typeof redirect === 'object' && 'name' in redirect && typeof redirect.name === 'string') {
+    return moduleOfRouteName(redirect.name) ?? mod
+  }
+  return mod
+}
+
 /**
  * The path to navigate to when the user picks a module from the main menu:
  * the last route they had open in that module, falling back to the module's
  * base path the first time around. Guards against stale entries that point
- * at a different module or a public route.
+ * at a different module or a public route — including one that only reaches
+ * another module through a redirect, which is what a remembered page from
+ * before the admin split does. Such an entry is dropped, so the module opens
+ * on its own ground from now on.
  */
 export function moduleEntryPath(mod: ModuleConfig): string {
   const raw = localStorage.getItem(MODULE_ROUTE_KEY_PREFIX + mod.id)
   if (isRestorableAppPath(raw) && detectModule(raw)?.id === mod.id) {
-    return raw
+    if (landingModule(raw)?.id === mod.id) return raw
+    try {
+      localStorage.removeItem(MODULE_ROUTE_KEY_PREFIX + mod.id)
+    } catch { /* private mode — the fallback below is enough */ }
   }
   return mod.basePath
 }

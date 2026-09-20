@@ -320,13 +320,17 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   background: var(--p-content-hover-background);
 }
 
+/* The controls take the row that is left beside the search, and below `sm`
+   the whole next row. Their width comes from the layout, never from what
+   they contain: a content-sized row plus a toolbar that decides its contents
+   from the width it gets is a loop, and the page flickers. */
 .list-toolbar__controls {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-1);
+  flex: 1 1 18rem;
   min-width: 0;
-  margin-left: auto;
 }
 
 .list-toolbar__meta {
@@ -365,9 +369,6 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   .list-toolbar__search {
     flex-basis: 100%;
     max-width: none;
-  }
-  .list-toolbar__controls {
-    margin-left: 0;
   }
   .list-toolbar__button :deep(.p-button-label),
   .list-toolbar__view-label {

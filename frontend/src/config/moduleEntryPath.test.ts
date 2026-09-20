@@ -3,6 +3,7 @@ import { moduleEntryPath, MODULE_ROUTE_KEY_PREFIX, modules } from './modules'
 
 const dokumente = modules.find((m) => m.id === 'dokumente')!
 const fotos = modules.find((m) => m.id === 'fotos')!
+const admin = modules.find((m) => m.id === 'admin')!
 
 describe('moduleEntryPath', () => {
   beforeEach(() => {
@@ -27,6 +28,30 @@ describe('moduleEntryPath', () => {
     // A stale entry pointing outside the module must not leak across.
     localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'dokumente', '/fotos/galerie')
     expect(moduleEntryPath(dokumente)).toBe(dokumente.basePath)
+  })
+
+  it('forgets an admin page that has moved into another module', () => {
+    // Pages like the taxonomy tools left Admin and only redirect from there.
+    // Restoring such an entry threw the user into Dokumente every time they
+    // picked Admin from the module menu.
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'admin', '/admin/tools')
+    expect(moduleEntryPath(admin)).toBe(admin.basePath)
+    expect(localStorage.getItem(MODULE_ROUTE_KEY_PREFIX + 'admin')).toBeNull()
+  })
+
+  it('still restores an admin page that redirects within Admin', () => {
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'admin', '/admin/daten')
+    expect(moduleEntryPath(admin)).toBe('/admin/daten')
+  })
+
+  it('keeps a remembered admin page that is still an admin page', () => {
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'admin', '/admin/rollen')
+    expect(moduleEntryPath(admin)).toBe('/admin/rollen')
+  })
+
+  it('ignores a query string when deciding where a path lands', () => {
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'admin', '/admin/ki-modell?tab=1')
+    expect(moduleEntryPath(admin)).toBe(admin.basePath)
   })
 
   it('ignores non-app / public paths', () => {
