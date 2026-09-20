@@ -168,7 +168,7 @@ struct TripPlanDayView: View {
                                     Task { await viewModel.load() }
                                 }
                             } label: {
-                                Label("Abstimmen", systemImage: "hand.thumbsup")
+                                Label("Wünsche", systemImage: "heart")
                             }
                             Button {
                                 showSettings = true

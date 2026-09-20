@@ -82,7 +82,7 @@ struct TripBallotView: View {
                         }
                         .disabled(isApplying)
                     } footer: {
-                        Text("Abstimmen ändert den Plan nicht von selbst — sonst wäre er nach "
+                        Text("Wünsche ändern den Plan nicht von selbst — sonst wäre er nach "
                              + "jedem Wisch ein anderer.")
                     }
                 }
@@ -136,7 +136,7 @@ struct TripBallotView: View {
                     .background(Color(uiColor: .systemGroupedBackground))
             }
         }
-        .navigationTitle("Abstimmen")
+        .navigationTitle("Wünsche")
         // Always on screen rather than hidden above the first row: a
         // field you have to know about to pull down is a field most
         // people never find. Everything the row says is searched —
@@ -213,7 +213,7 @@ struct TripBallotView: View {
             // Three answers with their words on them, not three glyphs
             // 28 points wide; the heart on its own line, because it is
             // a different thing from a vote and it has a quota.
-            Picker("Stimme", selection: Binding(
+            Picker("Wunsch", selection: Binding(
                 get: { entry.myVote },
                 set: { chosen in
                     guard let chosen, let vote = TripVote(rawValue: chosen) else { return }
