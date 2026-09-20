@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Menu from 'primevue/menu'
-import { computeVisibleCount } from '../utils/toolbarOverflow'
+import { computeVisibleCount, continuesOscillation } from '../utils/toolbarOverflow'
 
 /**
  * A single button inside the responsive toolbar.
@@ -56,6 +56,28 @@ function toggleMenu(event: Event) {
   menuRef.value?.toggle(event)
 }
 
+// The last counts this toolbar applied (newest last, at most two). A width
+// measurement that asks to flip straight back to the one before is the
+// toolbar reacting to its own layout, not to the viewport — see
+// `continuesOscillation`. Once that happens the decision is frozen at the
+// narrower of the two until the items themselves change, so the row (and
+// everything the sticky stack pushes below it) stops moving.
+let applied: number[] = []
+let frozen = false
+
+function apply(count: number) {
+  if (count === visibleCount.value) return
+  if (frozen) return
+  if (continuesOscillation(applied, count)) {
+    frozen = true
+    const previous = applied[applied.length - 1] ?? count
+    visibleCount.value = Math.min(count, previous)
+    return
+  }
+  applied = [...applied.slice(-1), count]
+  visibleCount.value = count
+}
+
 /**
  * Measure the (always-rendered, hidden) measurement row and decide how many
  * items fit inline. The last child of the measurement row is a sample of the
@@ -68,7 +90,7 @@ function recompute() {
 
   const children = Array.from(measure.children) as HTMLElement[]
   if (children.length <= 1) {
-    visibleCount.value = props.items.length
+    apply(props.items.length)
     return
   }
 
@@ -80,12 +102,7 @@ function recompute() {
   const overflowWidth = overflowSample ? overflowSample.offsetWidth : 0
   const itemWidths = children.slice(0, -1).map((el) => el.offsetWidth)
 
-  visibleCount.value = computeVisibleCount(
-    itemWidths,
-    overflowWidth,
-    container.clientWidth,
-    gap,
-  )
+  apply(computeVisibleCount(itemWidths, overflowWidth, container.clientWidth, gap))
 }
 
 let resizeObserver: ResizeObserver | null = null
@@ -107,7 +124,13 @@ onBeforeUnmount(() => {
 // button's label, e.g. "Auswählen" ⇄ "Auswahl beenden", changes its width.
 watch(
   () => props.items.map((i) => `${i.key}:${i.label ?? ''}`).join('|'),
-  () => void nextTick(recompute),
+  () => {
+    // A different set of items is a fresh layout question, so any earlier
+    // freeze is lifted.
+    applied = []
+    frozen = false
+    void nextTick(recompute)
+  },
 )
 </script>
 
@@ -168,6 +191,14 @@ watch(
   gap: 0.5em;
   width: 100%;
   min-width: 0;
+  /* The toolbar decides what it shows from the width it is given, so that
+     width must never depend on what it shows. Without containment the row is
+     a flex item whose max-content size grows with every inline button: in a
+     wrapping toolbar row that changes the available width, which changes the
+     button count, which changes the width again — a loop that keeps flipping
+     the layout (and shifting everything the sticky stack pushes below it)
+     while the page just sits there. */
+  contain: inline-size;
 }
 
 /* Push the overflow toggle to the far right so the inline items use the
@@ -189,6 +220,10 @@ watch(
   position: absolute;
   top: 0;
   left: 0;
+  /* Natural widths, never squeezed into the container: an absolutely
+     positioned box shrinks to fit its containing block, which would make the
+     measured widths depend on the very width being measured. */
+  width: max-content;
   display: flex;
   flex-wrap: nowrap;
   gap: 0.5em;
