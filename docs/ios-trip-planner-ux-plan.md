@@ -36,7 +36,7 @@ hardest to reach.
 
 **S3 — One "More" menu with 14 flat entries.**
 `TripPlanDayView.swift:72-194`: Vorrat, Ort suchen, Aus dem Vorrat, Etappen,
-Wer plant mit, Abendlicht, Änderungen, Abstimmen, Wer fährt mit?, Dokumente,
+Wer plant mit, Abendlicht, Änderungen, Wünsche, Wer fährt mit?, Dokumente,
 Reisebereit?, Danach, Unterwegs ohne Netz, Einstellungen. One divider. Day
 actions sit next to trip administration. "Reisebereit?" (the evening before)
 and "Danach" (after the trip) are hidden exactly when they are needed, and
@@ -505,7 +505,7 @@ fixes that can be done in any order.
   card at the top. Either way the planner stops being an icon.
 - Restructure the More menu into `Section`s:
   - **Dieser Tag**: Karte, Ort suchen, Abendlicht, Feste Zeit, Ausflug.
-  - **Diese Reise**: Vorrat, Aus der Ideensammlung, Etappen, Abstimmen,
+  - **Diese Reise**: Vorrat, Aus der Ideensammlung, Etappen, Wünsche,
     Einstellungen.
   - **Gruppe**: Planen mit, Reisegruppe.
 - Move trip-wide, time-bound screens out of the day menu and onto the plan

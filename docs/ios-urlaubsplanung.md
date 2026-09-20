@@ -1282,7 +1282,7 @@ Ein *lieber nicht* ist ein starkes Minus, aber kein Veto. Echte Ausschlüsse
 
 **Umgesetzt:** `GET`/`POST /trip-planner/plans/:planId/votes`,
 `POST …/votes/apply`, `GET …/fairness` (Migration 0182) und der Bildschirm
-„Abstimmen". Die Aggregation steht in `votes.ts` und ist rein: Stimmen rein,
+„Wünsche". Die Aggregation steht in `votes.ts` und ist rein: Stimmen rein,
 Zuschläge und Sätze raus.
 
 - **Summe statt Mittelwert.** Zwei „will ich" schlagen eines, und drei
@@ -1301,6 +1301,17 @@ Zuschläge und Sätze raus.
 - **Zwei Arten von Stimme.** Ein Konto oder eine stellvertretend geführte Stimme
   (§6.1, kleine Kinder) — technisch die Mitfahrenden aus §3.5. Wer sie abgegeben
   hat, wird mitgeschrieben; gezählt wird sie als die des Kindes.
+
+**Der Bildschirm heißt „Wünsche", nicht „Abstimmen".** „Abstimmen" verspricht
+ein Ergebnis, das hier absichtlich nicht herauskommt: es wird nichts entschieden
+und nichts von selbst neu geplant, es wird gesagt, was man will. Und es versprach
+das Ergebnis ausgerechnet dem, der allein plant — für eine Person ist eine
+Abstimmung ein Menüpunkt, den man nicht antippt. „Wünsche" stimmt in beiden
+Fällen: allein sind es meine, zu fünft sind es die aller, und der Satz „noch
+nichts gesagt haben: …" liest sich darunter genauso richtig. Das Wort liegt
+außerdem schon auf dem Bildschirm — der Herzenswunsch ist seine stärkste Stimme.
+Intern bleibt alles, wie es heißt: die Mechanik *ist* eine Abstimmung
+(`votes.ts`, `TripBallotView`), nur muss das niemand wissen, der sie benutzt.
 
 Zwei Dinge, die dabei bewusst *nicht* passieren: Abstimmen plant **nicht** neu
 (dreißig Wischer wären sonst dreißig verschiedene Reisen — der Bildschirm hat
