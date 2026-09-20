@@ -1050,7 +1050,6 @@ onMounted(async () => {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  padding-inline: 0.5em;
 }
 .list-region--split {
   display: grid;
@@ -1206,10 +1205,6 @@ onMounted(async () => {
 }
 /* Page frame, title, sticky subheader: all PageLayout now (issue #1272).
    Only the list region below keeps its own scrolling columns. */
-
-@media (min-width: 800px) {
-  .list-region { padding-inline: 1em; }
-}
 
 .search-mode-btn { flex-shrink: 0; }
 
