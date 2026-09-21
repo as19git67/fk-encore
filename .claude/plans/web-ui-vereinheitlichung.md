@@ -119,7 +119,18 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
     darüber ist dieselbe Markup eine normale Spalte. Story
     `Views/RecapsView` (inkl. „Detail geöffnet") macht den gemeldeten Fall
     überhaupt erst prüfbar.
-  - ⬜ Stories je Seitenzustand.
+  - 🔄 Stories je Seitenzustand. Gerüst steht:
+    `stories/storyRoute.ts` (`routeFromParameters`) setzt den Stub-Router auf
+    die Route einer Story und hält die View zurück, bis die Navigation steht
+    — sonst lädt eine View in `onMounted` gegen die Route, auf der sie
+    zufällig gemountet wurde, und die „keine Treffer"-Story zeigte die
+    ungefilterte Liste. `stories/finance-mock-data.ts` sammelt die
+    Finanz-Fixtures. Bisher: `AccountTransactionsView` (eine der beiden
+    Pilot-Views, bis jetzt ohne Story), `AccountsView`, `RecapsView` — je mit
+    Inhalt, leer, lädt, Fehler und Telefonbreite. Dazu `OverviewView` und
+    `BankcontactsView`. `TagQueueView` braucht keine: die zehn Zeilen sind
+    ein Rahmen um `FinanceTagQueuePanel`, das seine Story schon hat.
+  - ⬜ Die übrigen 32 Views ohne Story.
 
 Abweichungen vom Entwurf (Etappe 1):
 
