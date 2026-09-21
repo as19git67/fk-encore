@@ -232,6 +232,47 @@ describe("content feed: photo_feed_entries maintenance", () => {
     expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBeGreaterThan(new Date(old).getTime());
   });
 
+  /// The first like puts the photo in the feed; the ones after it only raise
+  /// the counter under the picture. Otherwise every household member liking
+  /// the same photo re-floats it for everybody, over and over.
+  it("does NOT bump when a second person likes an already-liked photo", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    const p = await uploadPhoto(owner.id, "a.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
+
+    await photo.updatePhotoCurationLogic(owner.id, p.id, "favorite");
+
+    const old = "2000-01-01T00:00:00.000Z";
+    await backdate(owner.id, p.id, old);
+    await backdate(friend.id, p.id, old);
+
+    await photo.updatePhotoCurationLogic(friend.id, p.id, "favorite");
+
+    expect(new Date(await entryTs(owner.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
+    expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
+  });
+
+  /// A photo nobody holds as a favourite any more can be floated again — the
+  /// first like is what counts, not the first like ever.
+  it("bumps again once the earlier favourite is gone", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    const p = await uploadPhoto(owner.id, "a.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
+
+    await photo.updatePhotoCurationLogic(owner.id, p.id, "favorite");
+    await photo.updatePhotoCurationLogic(owner.id, p.id, "visible");
+
+    const old = "2000-01-01T00:00:00.000Z";
+    await backdate(owner.id, p.id, old);
+    await backdate(friend.id, p.id, old);
+
+    await photo.updatePhotoCurationLogic(friend.id, p.id, "favorite");
+
+    expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBeGreaterThan(new Date(old).getTime());
+  });
+
   /// Changing your mind must not re-float the photo a second time.
   it("does NOT bump on un-favouriting", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });

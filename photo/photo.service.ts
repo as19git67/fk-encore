@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { createRequire } from "module";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
-import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
+import { eq, and, or, sql, inArray, notInArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, enqueuePoiDetectionForMissingMatches, enqueuePoiDetectionForEmptyMatches, DeferJobError } from "./scan-queue";
 import { notifyUserPhotosScanned } from "./scan-refresh-events";
@@ -3592,6 +3592,31 @@ export async function deleteDuplicateGroupLogic(
   };
 }
 
+/**
+ * Whether anybody other than `exceptUserId` currently holds this photo as a
+ * favourite. Read right after the actor's own row was written, so their fresh
+ * row is excluded instead of counting itself.
+ *
+ * The AI's quality vote writes a `favorite` row too (see `indexPhotoQuality`),
+ * but a score above the threshold is not somebody picking a photo out — it
+ * must never make the first human like look like a second one.
+ */
+async function favoritedBySomeoneElse(photoId: number, exceptUserId: number): Promise<boolean> {
+  const aiUserId = await getAiUserId();
+  const notThese = aiUserId != null ? [exceptUserId, aiUserId] : [exceptUserId];
+  const row = await dbFirst<{ user_id: number }>(
+    db.select({ user_id: photoCuration.user_id })
+      .from(photoCuration)
+      .where(and(
+        eq(photoCuration.photo_id, photoId),
+        eq(photoCuration.status, "favorite"),
+        notInArray(photoCuration.user_id, notThese),
+      ))
+      .limit(1),
+  );
+  return row !== undefined;
+}
+
 export async function updatePhotoCurationLogic(
   userId: number,
   photoId: number,
@@ -3715,10 +3740,16 @@ export async function updatePhotoCurationLogic(
     }
 
     // A favourite is one of the four acts that put a photo in the content
-    // feed, so it bumps for everyone who can see it — including the actor,
-    // whose own feed should show what they just picked out. Only on the way
-    // *into* favourite: un-favouriting must not re-float anything.
-    if (status === "favorite") {
+    // feed, so the *first* one floats it for everyone who can see it —
+    // including the actor, whose own feed should show what they just picked
+    // out. Every like after that only raises the counter under the photo.
+    //
+    // With a like button on every feed card, one bump per like kept the same
+    // photos cycling back to the top of the whole household's feed: each
+    // member liking the same picture over a week re-floated it as many times,
+    // and because bumps are monotonic it stayed there in between. Only on the
+    // way *into* favourite either, so a change of mind re-floats nothing.
+    if (status === "favorite" && !(await favoritedBySomeoneElse(photoId, userId))) {
       await contentFeed.onFavorite(photoId);
     }
 

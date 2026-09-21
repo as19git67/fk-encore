@@ -155,8 +155,9 @@ async function doUpload(albumIds: number[]) {
     error.value = `${failed} von ${files.length} Foto(s) konnten nicht verarbeitet werden.`
   }
   if (photoIds.length > 0) {
-    // The added photos bump our own feed server-side; reload to show them on top.
-    await refresh()
+    // The added photos bump our own feed server-side; reload and go up to
+    // show them — the user just uploaded, so that is what they are waiting for.
+    await refreshAndJumpToTop()
   }
 }
 
@@ -269,8 +270,6 @@ async function refresh() {
         hasNew.value = false
         error.value = ''
         feedCache.clear()
-        await nextTick()
-        window.scrollTo({ top: 0 })
       } catch (err: any) {
         error.value = err.message || 'Feed konnte nicht aktualisiert werden'
       }
@@ -282,15 +281,21 @@ async function refresh() {
   return refreshPromise
 }
 
-// Live activity: a bump elsewhere may reorder the feed. Rather than yanking
-// the user's scroll position, surface a "neue Aktivität" pill they can tap to
-// refresh — but only once they're not already at the very top.
+// Jumping to the top is only ever something the user asked for: tapping the
+// pill, or having just uploaded. Reordering the list under their eyes is not.
+async function refreshAndJumpToTop() {
+  await refresh()
+  await nextTick()
+  window.scrollTo({ top: 0 })
+}
+
+// Live activity: a bump elsewhere may reorder the feed. That never moves the
+// page by itself — not even when the user happens to be at the very top,
+// where an automatic refresh used to pull the bumped photo up under their
+// finger, including the one their own like had just caused. The pill sits in
+// the header and waits for them instead.
 useRealtimeEvent('feed', 'photo.changed', () => {
-  if (window.scrollY < 200) {
-    void refresh()
-  } else {
-    hasNew.value = true
-  }
+  hasNew.value = true
 })
 
 onMounted(async () => {
@@ -338,7 +343,7 @@ onBeforeUnmount(() => {
         icon="pi pi-arrow-up"
         size="small"
         rounded
-        @click="refresh"
+        @click="refreshAndJumpToTop"
       />
       <input
         ref="fileInput"
