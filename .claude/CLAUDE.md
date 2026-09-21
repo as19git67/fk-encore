@@ -1148,6 +1148,27 @@ Regeln:
 - Tastatur überall gleich: `/` fokussiert die Suche, `Esc` im Suchfeld leert
   sie, `Esc` außerhalb beendet den Auswahlmodus.
 
+## Auswahl und Basket im Frontend (`useListSelection`, `SelectionBar`)
+
+Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
+
+- Die View holt sich `useListSelection({ loadedIds, total?, loadEntryAt?,
+  fetchAllIds? })` aus `composables/useListSelection.ts` und reicht
+  `selection: { active: selectMode, toggle: toggleMode }` an `useListToolbar`.
+  Damit zeigt die Toolbar den „Auswählen"-Knopf und `Esc` beendet den Modus.
+- Die Zeile `components/layout/SelectionBar.vue` gehört in den
+  `#selection`-Slot von `PageLayout`, `v-if="selectMode"`. Keine View baut
+  eigene Auswahlzeilen mehr. Aktionen kommen als `ToolbarItem[]`; was die View
+  sonst sagen will (Summe) gehört in `#info`, ihre Hauptaktion in `#primary`.
+- Den Modus zu verlassen leert die Auswahl — nie den Basket. Die Auswahl ist,
+  worauf der Nutzer gerade zeigt; der Basket ist, was er beiseitegelegt hat.
+- `Ctrl/Cmd+A` wählt alles (das Composable bindet es selbst),
+  Umschalt+Klick den Bereich, `Esc` beendet.
+- Der Basket-Knopf mit Schublade ist `components/BasketIndicator.vue`. Ein
+  Modul liefert nur `#rows` (je ein `<li class="basket-row">`), optional
+  `#before-rows`, `#subtitle` und `#footer`. Durch den Basket blättert
+  `composables/useBasketNavigation.ts`.
+
 ## Date-only values in the frontend
 
 For date-only values (no time component), always use the helpers from `frontend/src/utils/dateFormat.ts`:

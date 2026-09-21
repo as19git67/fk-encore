@@ -48,7 +48,10 @@ import {
   useDocumentFilter,
   useDocumentFilterChips,
 } from '../composables/useDocumentFilter'
+import SelectionBar from '../components/layout/SelectionBar.vue'
 import { useListSearch, useListToolbar, useListView } from '../composables/useListToolbar'
+import { useListSelection } from '../composables/useListSelection'
+import type { ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
 import { anchorKey, focusListAnchor, saveListAnchor } from '../utils/listAnchor'
 import type { ListAnchor } from '../utils/listAnchor'
@@ -164,7 +167,17 @@ function resetFilterMenu() {
 // "In den Basket" hands them to the basket, and every batch edit
 // (Tags/Kategorie/Sichtbarkeit/OCR/…) lives in the basket drawer. The list
 // itself no longer edits documents.
-const selectedIds = ref<Set<number>>(new Set())
+//
+// Since issue #1272 (stage 5) the picking is the app's shared one and, like
+// every other list, it happens in a mode: permanently visible checkboxes made
+// this the only list where every row carried selection furniture whether or
+// not anyone was selecting.
+const selection = useListSelection({
+  loadedIds: () => items.value.map((d) => d.id),
+  // Only what is loaded can be selected — "Mehr laden" first, then select.
+  total: () => items.value.length,
+})
+const { selectMode, selectedIds } = selection
 const defaultsDialogVisible = ref(false)
 
 function isSelected(id: number) {
@@ -172,14 +185,11 @@ function isSelected(id: number) {
 }
 
 function toggleSelected(id: number, checked: boolean) {
-  const next = new Set(selectedIds.value)
-  if (checked) next.add(id)
-  else next.delete(id)
-  selectedIds.value = next
+  selection.toggleId(id, checked)
 }
 
 function clearSelection() {
-  selectedIds.value = new Set()
+  selection.clear()
 }
 
 /**
@@ -307,25 +317,6 @@ function addSelectionToBasket() {
   clearSelection()
 }
 
-/** True when every currently loaded document is already selected. */
-const allLoadedSelected = computed(
-  () => items.value.length > 0 && items.value.every((d) => selectedIds.value.has(d.id)),
-)
-
-/**
- * Select (or deselect) every document on screen. Works on the loaded page(s)
- * only — use "Mehr laden" first to pull in more, then select. From the
- * selection the batch bar's "In den Basket" moves them into the basket, so
- * "select all → basket" is two explicit clicks rather than one magic action.
- */
-function toggleSelectAll() {
-  if (allLoadedSelected.value) {
-    clearSelection()
-  } else {
-    selectedIds.value = new Set(items.value.map((d) => d.id))
-  }
-}
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
 /** "New" = ready, but no human has approved the AI attribution yet (#635). */
 function isNew(doc: DocumentSummary): boolean {
@@ -415,7 +406,25 @@ const toolbar = useListToolbar({
     total: () => (isSearchActive.value ? undefined : total.value),
     loading: () => loading.value,
   },
+  // Gives the toolbar its "Auswählen" toggle and the shared Esc handling.
+  selection: { active: selectMode, toggle: selection.toggleMode },
 })
+
+/**
+ * Batch actions on the picked documents. Everything that edits a document
+ * lives in the basket, so the bar only offers the two hand-overs.
+ */
+const selectionActions = computed<ToolbarItem[]>(() => [
+  {
+    key: 'collection',
+    label: 'In Sammelmappe',
+    title: 'Auswahl in eine Sammelmappe legen — mehrere Dokumente als ein PDF weitergeben.',
+    icon: 'pi pi-folder',
+    severity: 'secondary',
+    disabled: selection.selectedCount.value === 0,
+    command: () => { addToCollectionOpen.value = true },
+  },
+])
 const hasMore = computed(() => !isSearchActive.value && items.value.length < total.value)
 
 function currentFilterParams() {
@@ -736,39 +745,24 @@ onMounted(async () => {
     </template>
 
     <template #selection>
-    <!-- Batch actions bar -->
-    <div v-if="selectedIds.size > 0" class="batch-bar">
-      <span class="batch-count">
-        <i class="pi pi-check-square" />
-        {{ selectedIds.size }} ausgewählt
-      </span>
-      <div class="batch-actions">
-        <Button
-          label="In den Basket"
-          icon="pi pi-shopping-cart"
-          size="small"
-          v-tooltip.bottom="'Auswahl in den Basket legen (oben rechts) — dort werden Tags, Kategorie, Datum, Steuer, Sichtbarkeit und OCR/KI gemeinsam bearbeitet oder durchblättert.'"
-          @click="addSelectionToBasket"
-        />
-        <Button
-          label="In Sammelmappe"
-          icon="pi pi-folder"
-          size="small"
-          severity="secondary"
-          v-tooltip.bottom="'Auswahl in eine Sammelmappe legen — mehrere Dokumente als ein PDF weitergeben.'"
-          @click="addToCollectionOpen = true"
-        />
-        <Button
-          label="Auswahl aufheben"
-          icon="pi pi-times"
-          size="small"
-          severity="secondary"
-          text
-          @click="clearSelection"
-        />
-      </div>
-    </div>
-
+      <!-- The shared bar; the basket hand-over is this list's own action. -->
+      <SelectionBar
+        v-if="selectMode"
+        :selection="selection"
+        :actions="selectionActions"
+        noun="Dokumente"
+      >
+        <template #primary>
+          <Button
+            label="In den Basket"
+            icon="pi pi-shopping-cart"
+            size="small"
+            :disabled="selectedIds.size === 0"
+            v-tooltip.bottom="'Auswahl in den Basket legen (oben rechts) — dort werden Tags, Kategorie, Datum, Steuer, Sichtbarkeit und OCR/KI gemeinsam bearbeitet oder durchblättert.'"
+            @click="addSelectionToBasket"
+          />
+        </template>
+      </SelectionBar>
     </template>
 
     <template #notice>
@@ -794,18 +788,6 @@ onMounted(async () => {
          into a 600px column is worse than one that spans the page. -->
     <div class="list-region" :class="{ 'list-region--split': isSplit }">
       <div ref="listColumn" class="list-column">
-    <!-- Whole-result-list basket action; the count lives in the toolbar. -->
-    <div v-if="!loading && items.length > 0" class="results-bar">
-      <Button
-        :label="allLoadedSelected ? 'Auswahl aufheben' : 'Alle auswählen'"
-        :icon="allLoadedSelected ? 'pi pi-times' : 'pi pi-check-square'"
-        size="small"
-        text
-        v-tooltip.bottom="'Alle geladenen Dokumente markieren — danach über die Aktionsleiste in den Basket legen oder direkt bearbeiten.'"
-        @click="toggleSelectAll"
-      />
-    </div>
-
     <!-- Sammelmappen: an extra layer above the documents, never a replacement -->
     <div v-if="!loading && visibleCollections.length > 0" class="collection-strip">
       <button
@@ -864,7 +846,7 @@ onMounted(async () => {
         :aria-current="isSplit && activeDocId === doc.id ? 'true' : undefined"
       >
         <div class="document-header">
-          <div class="document-checkbox" @click.stop>
+          <div v-if="selectMode" class="document-checkbox" @click.stop>
             <Checkbox
               :modelValue="isSelected(doc.id)"
               :binary="true"
@@ -956,7 +938,7 @@ onMounted(async () => {
         @click="openDocument(doc)"
         @keydown.enter="openDocument(doc)"
       >
-        <div class="grid-card-checkbox" @click.stop>
+        <div v-if="selectMode" class="grid-card-checkbox" @click.stop>
           <Checkbox
             :modelValue="isSelected(doc.id)"
             :binary="true"
@@ -1218,40 +1200,7 @@ onMounted(async () => {
 
 .search-mode-btn { flex-shrink: 0; }
 
-/* ── Batch bar ─────────────────────────────────────────────────── */
-.batch-bar {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding: 0.6rem 0.9rem;
-  border: 1px solid var(--p-primary-color);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
-}
-
-.batch-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-weight: 600;
-}
-
-.batch-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-left: auto;
-}
-
-/* ── Results bar / pagination ──────────────────────────────────── */
-.results-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
+/* ── Pagination ────────────────────────────────────────────────── */
 .load-more-row {
   display: flex;
   justify-content: center;

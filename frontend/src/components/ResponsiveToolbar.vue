@@ -24,6 +24,8 @@ export interface ToolbarItem {
   text?: boolean
   /** Extra class applied to the *inline* button only (e.g. test hooks). */
   itemClass?: string
+  /** Greyed out and unclickable, inline as well as in the overflow menu. */
+  disabled?: boolean
   command: () => void
 }
 
@@ -48,6 +50,7 @@ const menuModel = computed(() =>
   overflowItems.value.map((item) => ({
     label: item.title,
     icon: item.icon,
+    disabled: item.disabled,
     command: () => item.command(),
   })),
 )
@@ -154,6 +157,7 @@ watch(
       :severity="item.severity"
       :outlined="item.outlined"
       :text="item.text"
+      :disabled="item.disabled"
       :class="['responsive-toolbar__item', item.itemClass]"
       v-tooltip.bottom="item.title"
       @click="item.command"

@@ -5,7 +5,6 @@ import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
-import Menu from 'primevue/menu'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import { useConfirm } from 'primevue/useconfirm'
@@ -21,6 +20,7 @@ import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
+import SelectionBar from '../components/layout/SelectionBar.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
@@ -86,7 +86,7 @@ import {
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
-import { useRangeSelect } from '../composables/useRangeSelect'
+import { useListSelection } from '../composables/useListSelection'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
@@ -411,16 +411,12 @@ const preReviewPhotoId = ref<number | null>(null)
 
 // ── Multi-select (mirrors GalleryView; album-context adds "Aus Album entfernen") ──
 const confirm = useConfirm()
-const selectMode = ref(false)
-// Selection Set plus the anchor a shift-click measures its range from (#830).
-const {
-  selectedIds,
-  selectedCount,
-  rangeBusy: rangeSelectBusy,
-  clear: clearSelectedIds,
-  replace: replaceSelectedIds,
-  onToggleSelect,
-} = useRangeSelect({
+// Dieselbe Auswahl wie in der Galerie (#1272, Etappe 5): die geladenen Ids
+// des virtuellen Rasters zum Umkehren, die Gesamtzahl für "alles gewählt"
+// und der Weg zum Backend, damit "alles auswählen" das ganze Album meint.
+const selection = useListSelection({
+  loadedIds: () => galleryRef.value?.getLoadedIds() ?? [],
+  total: () => galleryTotal.value,
   loadEntryAt: async (index: number) => galleryRef.value?.loadEntryAt(index) ?? null,
   fetchAllIds: async () => (await getGalleryIds({
     filter: albumGridFilter.value,
@@ -429,6 +425,10 @@ const {
     photoIds: searchPhotoIds.value ?? undefined,
   })).ids,
 })
+const { selectMode, selectedIds, selectedCount } = selection
+const exitSelectMode = selection.exit
+// Das Raster kennt die Signatur aus #830 unverändert.
+const onToggleSelect = selection.toggle
 const curationBusy = ref(false)
 const linkVisibilityBusy = ref(false)
 const knownFaceLinkBusy = ref(false)
@@ -440,17 +440,6 @@ const showDeleteSkippedDialog = ref(false)
 const albumDialogVisible = ref(false)
 const albumDialogPhotoIds = computed(() => Array.from(selectedIds.value))
 
-function enterSelectMode() {
-  selectMode.value = true
-  clearSelectedIds()
-}
-function exitSelectMode() {
-  selectMode.value = false
-  clearSelectedIds()
-}
-function clearSelection() {
-  clearSelectedIds()
-}
 function toggleSelectMode() {
   if (selectMode.value) {
     exitSelectMode()
@@ -459,34 +448,10 @@ function toggleSelectMode() {
   // Selection lives over the grid — the map has no cells to tick — so
   // starting it from the map view switches to the grid first.
   if (viewMode.value === 'map') viewMode.value = 'grid'
-  enterSelectMode()
+  selection.enter()
 }
 
-const selectionMenu = ref<{ toggle: (event: Event) => void } | null>(null)
-function toggleSelectionMenu(event: Event) {
-  selectionMenu.value?.toggle(event)
-}
-
-const selectAllBusy = ref(false)
 const galleryTotal = ref(0)
-const allSelected = computed(() => galleryTotal.value > 0 && selectedCount.value === galleryTotal.value)
-
-async function selectAll() {
-  selectAllBusy.value = true
-  try {
-    const res = await getGalleryIds({
-      filter: albumGridFilter.value,
-      sortBy: sortByForGallery.value,
-      sortDir: sortDirForGallery.value,
-      photoIds: searchPhotoIds.value ?? undefined,
-    })
-    replaceSelectedIds(res.ids)
-  } catch {
-    // silently ignore — user can retry
-  } finally {
-    selectAllBusy.value = false
-  }
-}
 
 function openAlbumDialog() {
   if (selectedIds.value.size === 0) return
@@ -689,51 +654,49 @@ async function performRemoveFromAlbum(ids: number[]) {
   }
 }
 
-// The popup preserves every batch action from the former multi-row bar, but
-// lets the photo grid retain its height while selection mode is active.
-const selectionMenuItems = computed(() => {
-  const items: Array<Record<string, unknown>> = []
-  if (!allSelected.value) {
-    items.push({
-      label: galleryTotal.value > 0 ? `Alle (${galleryTotal.value}) auswählen` : 'Alle auswählen',
-      icon: 'pi pi-check-double',
-      disabled: selectAllBusy.value,
-      command: () => void selectAll(),
-    })
-  }
-  if (selectedCount.value === 0) return items
+// Was die Auswahlleiste mit den gewählten Fotos anbietet. "Alle auswählen"
+// und "Auswahl aufheben" fehlen hier, weil das die eigenen Bedienelemente der
+// Leiste sind; alles andere bleibt wie gehabt, samt Rechteprüfung.
+const selectionActions = computed<ToolbarItem[]>(() => {
+  if (selectedCount.value === 0) return []
+  const items: ToolbarItem[] = []
+  const push = (item: ToolbarItem) => items.push({ ...item, label: item.title })
 
-  items.push({ label: selectedCount.value === 1 ? 'Foto teilen' : 'Fotos teilen', icon: 'pi pi-share-alt', disabled: sharingPhotos.value, command: () => void shareSelectedPhotos() })
-  if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
+  push({
+    key: 'share',
+    title: selectedCount.value === 1 ? 'Foto teilen' : 'Fotos teilen',
+    icon: 'pi pi-share-alt',
+    disabled: sharingPhotos.value,
+    command: () => void shareSelectedPhotos(),
+  })
+  if (canShowCollage.value) push({ key: 'collage', title: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
   if (canUploadPhotos.value && canReuseAlbumPhotos.value) {
-    items.push({ label: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
+    push({ key: 'albums', title: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
   }
   if (canUploadPhotos.value) {
-    items.push({ label: 'Beschreibung bearbeiten', icon: 'pi pi-align-left', command: openDescriptionDialog })
+    push({ key: 'description', title: 'Beschreibung bearbeiten', icon: 'pi pi-align-left', command: openDescriptionDialog })
   }
   if (canDeletePhotos.value || canWrite.value) {
-    items.push(
-      { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
-      { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
-    )
+    push({ key: 'favorite', title: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') })
+    push({ key: 'hide', title: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') })
   }
   if (canWrite.value) {
-    items.push(
-      { label: 'Über Freigabe-Link freigeben', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('visible') },
-      { label: 'Vom Freigabe-Link ausnehmen', icon: 'pi pi-link-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') },
-      { label: 'Link-Sichtbarkeit automatisch', icon: 'pi pi-sparkles', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('auto') },
-    )
+    push({ key: 'link-visible', title: 'Über Freigabe-Link freigeben', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('visible') })
+    push({ key: 'link-hidden', title: 'Vom Freigabe-Link ausnehmen', icon: 'pi pi-link-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') })
+    push({ key: 'link-auto', title: 'Link-Sichtbarkeit automatisch', icon: 'pi pi-sparkles', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('auto') })
+    push({ key: 'remove-from-album', title: 'Aus diesem Album entfernen', icon: 'pi pi-minus-circle', disabled: removeBusy.value, command: removeFromAlbumSelection })
   }
-  if (canWrite.value) {
-    items.push({ label: 'Aus diesem Album entfernen', icon: 'pi pi-minus-circle', disabled: removeBusy.value, command: removeFromAlbumSelection })
-  }
-  items.push({ label: 'Auswahl aufheben', icon: 'pi pi-replay', command: clearSelection })
   if (canDeletePhotos.value) {
-    items.push({ separator: true })
-    items.push({ label: 'Ausgewählte Fotos löschen', icon: 'pi pi-trash', disabled: deleteBusy.value || curationBusy.value, command: deleteFromSelection })
+    push({ key: 'delete', title: 'Ausgewählte Fotos löschen', icon: 'pi pi-trash', severity: 'danger', disabled: deleteBusy.value || curationBusy.value, command: deleteFromSelection })
   }
   return items
 })
+
+// Der Hinweis erscheint genau dann, wenn er nützt: ein Foto ist gewählt, es
+// gibt also einen Anker, von dem aus ein Bereich spannt.
+const selectionHint = computed(() =>
+  selectedCount.value === 1 ? 'Umschalt+Klick wählt den Bereich' : undefined,
+)
 
 const albumPhotoIds = computed(() => new Set(rawAlbumPhotos.value.map(p => p.id)))
 
@@ -2595,6 +2558,18 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       </ListToolbar>
     </template>
 
+    <!-- Auswahlleiste: eine für alle Listen, im Sticky-Stack der Seite
+         (auf dem Telefon am unteren Rand). -->
+    <template #selection>
+      <SelectionBar
+        v-if="selectMode"
+        :selection="selection"
+        :actions="selectionActions"
+        noun="Fotos"
+        :hint="selectionHint"
+      />
+    </template>
+
     <template #notice>
       <ServiceStatusBar />
       <ErrorBanner
@@ -2794,47 +2769,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             :sharing="sharingPhotos"
           />
         </div>
-      </div>
-
-      <!-- Compact selection tray (grid mode only). Its popup holds the batch
-           actions, so selecting photos no longer consumes a multi-row footer. -->
-      <div v-if="selectMode && viewMode === 'grid'" class="select-bar">
-        <!-- The shift hint appears exactly when it becomes useful — one photo
-             is selected, so there is an anchor to span from — and goes away
-             again as soon as the user has clearly found the feature. -->
-        <span class="select-count">
-          <i :class="rangeSelectBusy ? 'pi pi-spin pi-spinner' : 'pi pi-check-square'" />
-          {{
-            rangeSelectBusy
-            ? 'Bereich wird ausgewählt …'
-            : selectedCount === 1
-            ? '1 ausgewählt · Umschalt+Klick wählt den Bereich'
-            : selectedCount > 0
-            ? `${selectedCount} ausgewählt`
-            : 'Fotos antippen zum Auswählen'
-          }}
-        </span>
-        <div class="select-actions">
-          <Button
-            label="Aktionen"
-            icon="pi pi-ellipsis-v"
-            size="small"
-            severity="secondary"
-            outlined
-            @click="toggleSelectionMenu"
-          />
-          <Button
-            icon="pi pi-times"
-            size="small"
-            severity="secondary"
-            text
-            rounded
-            aria-label="Auswahl beenden"
-            v-tooltip.top="'Auswahl beenden'"
-            @click="exitSelectMode"
-          />
-        </div>
-        <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" :pt="{ root: { class: 'selection-actions-menu' } }" />
       </div>
     </div>
 
@@ -3587,55 +3521,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   .header__upload-btn :deep(.p-button-label) { display: none; }
   .header__upload-btn :deep(.p-button-icon) { margin-right: 0; }
 
-  /* Keep the tray clear of the iOS home indicator. */
-  .select-bar {
-    bottom: calc(0.65rem + env(safe-area-inset-bottom, 0px));
-  }
-  .select-count {
-    max-width: calc(100vw - 11.5rem);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
-/* ── Compact selection tray ─────────────────────────────────────────────── */
-.select-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.35rem 0.45rem 0.35rem 0.75rem;
-  background: var(--p-primary-50, #eff6ff);
-  border: 1px solid var(--p-primary-200, #bfdbfe);
-  border-radius: 999px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
-  gap: 0.6rem;
-  position: absolute;
-  z-index: 30;
-  bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: calc(100% - 1.5rem);
-}
-.select-count {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--p-primary-700, #1d4ed8);
-}
-.select-actions {
-  display: flex;
-  gap: 0.2rem;
-  flex-shrink: 0;
-}
-.p-dark .select-bar {
-  background: var(--p-primary-900, #1e3a8a);
-  border-top-color: var(--p-primary-700);
-}
-.p-dark .select-count {
-  color: var(--p-primary-200, #bfdbfe);
 }
 
 /* ── Delete / settings dialog ───────────────────────────────────────────── */

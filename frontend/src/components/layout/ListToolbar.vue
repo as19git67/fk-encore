@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useSlots } from 'vue'
 import Button from 'primevue/button'
+import IconField from 'primevue/iconfield'
+import InputIcon from 'primevue/inputicon'
+import InputText from 'primevue/inputtext'
 import Menu from 'primevue/menu'
 import SelectButton from 'primevue/selectbutton'
 import FilterChips from '../FilterChips.vue'
@@ -30,7 +33,8 @@ const props = defineProps<{
 
 const slots = useSlots()
 
-const searchInput = ref<HTMLInputElement | null>(null)
+/** PrimeVue's own types do not surface `$el`, so it is named here. */
+const searchInput = ref<{ $el?: unknown } | null>(null)
 const searchArea = ref<HTMLElement | null>(null)
 const sortMenu = ref<InstanceType<typeof Menu> | null>(null)
 
@@ -68,17 +72,23 @@ const sortItems = computed(() => {
 
 const sortLabel = computed(() => props.model.sort?.fieldLabel.value ?? 'Sortierung')
 
-function onSearchInput(event: Event) {
+function onSearchInput(value: string | undefined) {
   const search = props.model.search
   if (!search) return
-  search.value.value = (event.target as HTMLInputElement).value
+  search.value.value = value ?? ''
+}
+
+/** The field is a component, so the element to focus sits behind its `$el`. */
+function searchElement(): HTMLInputElement | null {
+  const el = searchInput.value?.$el
+  return el instanceof HTMLInputElement ? el : null
 }
 
 function clearSearch() {
   const search = props.model.search
   if (!search) return
   search.value.value = ''
-  searchInput.value?.focus()
+  searchElement()?.focus()
 }
 
 function toggleSortMenu(event: Event) {
@@ -101,7 +111,7 @@ function onViewChange(value: unknown) {
 function focusableSearch(): HTMLInputElement | null {
   // A view that fills the `search` slot (the gallery's natural-language bar)
   // brings its own input; the hotkey must still land in it.
-  return searchInput.value ?? searchArea.value?.querySelector('input') ?? null
+  return searchElement() ?? searchArea.value?.querySelector('input') ?? null
 }
 
 function onDocumentKeydown(event: KeyboardEvent) {
@@ -136,27 +146,31 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
         :class="{ 'list-toolbar__search--custom': !!slots.search }"
       >
         <slot name="search">
-          <i class="pi pi-search list-toolbar__search-icon" aria-hidden="true" />
-          <input
-            ref="searchInput"
-            type="text"
-            class="list-toolbar__search-input"
-            :value="model.search!.value.value"
-            :placeholder="model.search!.placeholder"
-            :aria-label="model.search!.placeholder"
-            data-testid="list-search"
-            @input="onSearchInput"
-            @keydown.escape.stop.prevent="clearSearch"
-          />
-          <button
-            v-if="model.search!.value.value"
-            type="button"
-            class="list-toolbar__search-clear"
-            aria-label="Suche leeren"
-            @click="clearSearch"
-          >
-            <i class="pi pi-times" aria-hidden="true" />
-          </button>
+          <!-- PrimeVue's own field, so the search sits at the same height, in
+               the same rounding and with the same focus ring as the buttons
+               beside it — a hand-styled input drifted from the theme. -->
+          <IconField class="list-toolbar__field">
+            <InputIcon class="pi pi-search" />
+            <InputText
+              ref="searchInput"
+              size="small"
+              :model-value="model.search!.value.value"
+              :placeholder="model.search!.placeholder"
+              :aria-label="model.search!.placeholder"
+              data-testid="list-search"
+              @update:model-value="onSearchInput"
+              @keydown.escape.stop.prevent="clearSearch"
+            />
+            <InputIcon
+              v-if="model.search!.value.value"
+              class="pi pi-times list-toolbar__search-clear"
+              role="button"
+              tabindex="0"
+              aria-label="Suche leeren"
+              @click="clearSearch"
+              @keydown.enter.prevent="clearSearch"
+            />
+          </IconField>
         </slot>
       </div>
 
@@ -279,45 +293,21 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   max-width: none;
 }
 
-.list-toolbar__search-icon {
-  position: absolute;
-  left: 0.75rem;
-  color: var(--p-text-muted-color);
-  pointer-events: none;
-  font-size: 0.9rem;
-}
-
-.list-toolbar__search-input {
+.list-toolbar__field {
   width: 100%;
   min-width: 0;
-  padding: 0.5rem 2.25rem;
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 6px;
-  background: var(--p-content-background);
-  color: var(--p-text-color);
-  font-size: 0.95rem;
-  outline: none;
-  box-sizing: border-box;
 }
-.list-toolbar__search-input:focus {
-  border-color: var(--p-primary-color);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--p-primary-color) 25%, transparent);
+.list-toolbar__field :deep(input) {
+  width: 100%;
 }
 
+/* The clear icon is an icon slot, so it has to be told it is a control. */
 .list-toolbar__search-clear {
-  position: absolute;
-  right: 0.5rem;
-  display: flex;
-  padding: 0.2rem;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: var(--p-text-muted-color);
+  pointer-events: auto;
   cursor: pointer;
 }
 .list-toolbar__search-clear:hover {
   color: var(--p-text-color);
-  background: var(--p-content-hover-background);
 }
 
 /* The controls take the row that is left beside the search, and below `sm`
