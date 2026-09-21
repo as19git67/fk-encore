@@ -6,6 +6,7 @@ import Message from 'primevue/message'
 import HeicImage from '../components/HeicImage.vue'
 import RecapPlayer from '../components/RecapPlayer.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import {
   listRecaps,
   getRecap,
@@ -270,6 +271,16 @@ async function handlePlayerExclude(photoId: number) {
     error.value = err?.message ?? 'Foto konnte nicht entfernt werden.'
   }
 }
+
+/**
+ * The detail is a dialog in everything but name, so it owes the keyboard
+ * what a dialog owes it (issue #1281): the focus moves in when it opens,
+ * stays inside while it is open, and goes back to the recap that was clicked
+ * when it closes.
+ */
+const detailOverlay = ref<HTMLElement | null>(null)
+const detailOpen = computed(() => activeRecapId.value != null)
+useFocusTrap(detailOverlay, detailOpen, { onEscape: closeDetail })
 
 function openRecap(id: number) {
   router.push({ path: route.path, query: { ...route.query, id: String(id) } })
@@ -590,7 +601,14 @@ async function playFromCard(r: RecapSummary, e: Event) {
          stacking context (z-index: 0) and renders above the toolbar (z-index: 1100). -->
     <Teleport to="body">
       <div v-if="activeRecapId != null" class="recap-detail-overlay" @click.self="closeDetail">
-        <div class="recap-detail">
+        <div
+          ref="detailOverlay"
+          class="recap-detail"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="detail?.title ?? 'Rückblick'"
+          tabindex="-1"
+        >
           <header class="recap-detail-header">
             <div>
               <h2 v-if="detail">{{ detail.title }}</h2>
