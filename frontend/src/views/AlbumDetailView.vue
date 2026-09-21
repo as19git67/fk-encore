@@ -2947,7 +2947,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     />
 
     <!-- Album settings dialog -->
-    <Dialog v-model:visible="showAlbumSettingsDialog" header="Album-Einstellungen" :modal="true" style="width: min(100%, 36rem)">
+    <Dialog v-model:visible="showAlbumSettingsDialog" header="Album-Einstellungen" :modal="true" class="dialog-md">
       <div class="dialog-body">
         <div class="dialog-field">
           <label for="albumSettingsName">Name</label>
@@ -2998,7 +2998,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     </Dialog>
 
     <!-- Share dialog -->
-    <Dialog v-model:visible="showShareDialog" header="Album freigeben" modal style="width: min(100%, 480px)">
+    <Dialog v-model:visible="showShareDialog" header="Album freigeben" modal class="dialog-sm">
       <div v-if="loadingShares" class="share-loading"><i class="pi pi-spin pi-spinner" /> Lädt…</div>
       <template v-else>
         <div class="share-section">
@@ -3091,7 +3091,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     </Dialog>
 
     <!-- Delete album confirmation dialog -->
-    <Dialog v-model:visible="showDeleteDialog" header="Album löschen" :modal="true" style="width: min(100%, 28rem)">
+    <Dialog v-model:visible="showDeleteDialog" header="Album löschen" :modal="true" class="dialog-sm">
       <div class="dialog-body">
         <p>Willst du dieses Album wirklich löschen?</p>
         <p class="muted">Es werden keine Fotos gelöscht. Sie bleiben unter <b>Alle Fotos</b> erhalten.</p>
@@ -3103,7 +3103,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     </Dialog>
 
     <!-- Leave album share confirmation dialog -->
-    <Dialog v-model:visible="showLeaveDialog" header="Freigabe verlassen" :modal="true" style="width: min(100%, 28rem)">
+    <Dialog v-model:visible="showLeaveDialog" header="Freigabe verlassen" :modal="true" class="dialog-sm">
       <div class="dialog-body">
         <p>Willst du die Freigabe dieses Albums wirklich verlassen?</p>
         <p class="muted">Du verlierst den Zugriff auf dieses Album. Der Eigentümer kann dich später erneut einladen.</p>
@@ -3137,10 +3137,10 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
     <!-- Warning dialog when a batch delete skipped some photos -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="showDeleteSkippedDialog"
       :modal="true"
       header="Einige Fotos wurden übersprungen"
-      :style="{ width: '26rem' }"
       :closable="true"
     >
       <div style="display: flex; flex-direction: column; gap: 0.5rem;">

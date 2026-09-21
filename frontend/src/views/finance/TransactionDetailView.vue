@@ -1242,10 +1242,10 @@ const extractedFields = computed(() => {
 
     <!-- Recurring transaction popup -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="recurringPopupVisible"
       modal
       header="Wiederkehrende Buchung"
-      :style="{ width: '30rem' }"
     >
       <div v-if="recurringPopupLoading" class="hint">Lädt …</div>
       <template v-if="recurringPopupTx">
@@ -1284,6 +1284,13 @@ const extractedFields = computed(() => {
         </dl>
       </template>
       <template #footer>
+        <!-- Secondary left, primary right, like every other dialog. -->
+        <Button
+          label="Transaktion öffnen"
+          severity="secondary"
+          size="small"
+          @click="navigateToRecurringTx"
+        />
         <Button
           v-if="recurringPopupTx && recurringPopupTx.tags.filter(t => t.source === 'user').length > 0"
           label="Tags übernehmen"
@@ -1291,12 +1298,6 @@ const extractedFields = computed(() => {
           size="small"
           :loading="copyingTags"
           @click="copyTagsFromRecurring"
-        />
-        <Button
-          label="Transaktion öffnen"
-          severity="secondary"
-          size="small"
-          @click="navigateToRecurringTx"
         />
       </template>
     </Dialog>

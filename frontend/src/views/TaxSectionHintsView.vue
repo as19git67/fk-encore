@@ -218,10 +218,10 @@ onMounted(loadData)
     </template>
 
     <Dialog
+    class="dialog-sm"
       :visible="reclassifyDialog !== null"
       :header="'Neu klassifizieren: ' + (reclassifyDialog?.entry.name ?? '')"
       :modal="true"
-      :style="{ width: '480px' }"
       @update:visible="(v) => { if (!v) reclassifyDialog = null }"
     >
       <p>

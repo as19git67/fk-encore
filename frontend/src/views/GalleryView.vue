@@ -1882,10 +1882,10 @@ void refreshReviewSequence()
 
     <!-- Warning dialog: skipped photos after batch delete -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="showDeleteSkippedDialog"
       :modal="true"
       header="Einige Fotos wurden übersprungen"
-      :style="{ width: '26rem' }"
       :closable="true"
     >
       <div style="display: flex; flex-direction: column; gap: 0.5rem;">

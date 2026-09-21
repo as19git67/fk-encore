@@ -753,10 +753,10 @@ onMounted(() => {
     </div>
 
     <Dialog
+    class="dialog-md"
       v-model:visible="templateDialogVisible"
       modal
       :header="editingTemplateId ? 'Vorlage bearbeiten' : 'Vorlage erstellen'"
-      :style="{ width: '36rem', maxWidth: 'calc(100vw - 2rem)' }"
       :closable="!templatesSaving"
     >
       <div class="template-dialog-form">

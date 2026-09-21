@@ -446,11 +446,11 @@ function close() {
 
 <template>
   <Dialog
+    class="dialog-md"
     :visible="props.visible"
     @update:visible="(v: boolean) => emit('update:visible', v)"
     header="Filter"
     modal
-    :style="{ width: 'min(100%, 720px)' }"
   >
     <div class="filter-menu">
       <!-- Tri-state: Hidden -->

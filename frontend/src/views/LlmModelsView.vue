@@ -546,10 +546,10 @@ function formatEta(seconds: number | null): string {
 
     <!-- ── Activation confirm ────────────────────────────────────────────── -->
     <Dialog
+    class="dialog-sm"
       :visible="confirmActivate !== null"
       modal
       header="Modell wechseln"
-      :style="{ width: '32rem' }"
       @update:visible="confirmActivate = null"
     >
       <p>
@@ -569,10 +569,10 @@ function formatEta(seconds: number | null): string {
 
     <!-- ── Editor ────────────────────────────────────────────────────────── -->
     <Dialog
+    class="dialog-md"
       v-model:visible="editorOpen"
       modal
       :header="editing ? 'Konfiguration bearbeiten' : 'Neue Konfiguration'"
-      :style="{ width: '46rem' }"
     >
       <div class="form">
         <h3>Modell</h3>
@@ -694,7 +694,8 @@ function formatEta(seconds: number | null): string {
     </Dialog>
 
     <!-- ── Download ──────────────────────────────────────────────────────── -->
-    <Dialog v-model:visible="downloadOpen" modal header="Modell laden" :style="{ width: '40rem' }">
+    <Dialog
+    class="dialog-md" v-model:visible="downloadOpen" modal header="Modell laden">
       <div class="form-grid">
         <label class="form-field span-2">
           <span>URL</span>

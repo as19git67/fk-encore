@@ -15,10 +15,10 @@ defineEmits<{ 'update:visible': [value: boolean] }>()
 
 <template>
   <Dialog
+    class="dialog-md"
     :visible="visible"
     modal
     header="Datenbankgröße"
-    :style="{ width: 'min(560px, 92vw)' }"
     @update:visible="$emit('update:visible', $event)"
   >
     <div v-if="loading" class="storage-dialog__loading">

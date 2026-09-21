@@ -274,10 +274,10 @@ onMounted(load)
     </div>
 
     <Dialog
+    class="dialog-sm"
       v-model:visible="showAcceptDialog"
       header="Kategorie anlegen"
       modal
-      :style="{ width: 'min(90vw, 480px)' }"
     >
       <div class="dialog-form">
         <label>

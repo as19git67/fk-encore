@@ -1169,6 +1169,35 @@ das Paar heißt also `(max-width: 767px)` / `(min-width: 768px)` — nie
   pro Spalte braucht), bleibt eine Zahl in dieser Komponente. Die fünf Namen
   gehören der Seite.
 
+## Dialoge im Frontend
+
+Ein Dialog ist PrimeVues `Dialog` (oder `ConfirmDialog`), nie ein eigenes
+Modal, und er hat genau eine von drei Breiten (Issue #1281) — als Klasse,
+nicht als `:style`:
+
+- `dialog-sm` (420px) — Bestätigung, ein Feld
+- `dialog-md` (640px) — Formular
+- `dialog-lg` (960px) — Vorschau, Tabelle
+
+Die Klassen deckeln die Breite selbst am Viewport minus Seitenrand, also
+braucht kein Dialog ein eigenes `maxWidth` oder ein `breakpoints`-Prop.
+Unter `sm` nimmt ein Dialog die ganze Breite und höchstens `90dvh` — auf
+360px gibt es kein „neben der Seite". Eine Ausnahme ist der Fotoeditor: der
+ist absichtlich Vollbild und gehört zu keiner der drei Größen.
+
+Fußzeile: links Sekundär/Abbrechen, rechts Primär. Eine destruktive Aktion
+steht ganz links, durch einen Spacer von dem Paar getrennt, und fragt über
+`ConfirmDialog` nach, wobei benannt wird, was gelöscht wird.
+
+## Detailseiten im Frontend
+
+Jede Detailseite beginnt ihren `#actions`-Slot mit demselben Ausgang:
+`<Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" />`, der
+`goBack` aus `useModuleBack(basePath, fallbackRouteName)` aufruft — History,
+wenn die vorige Seite im selben Modul lag, sonst die Liste des Moduls.
+Danach kommen Vor/Zurück durch den Basket (wo es einen gibt) und erst dann
+die Aktionen der Seite.
+
 ## Zurück-Navigation im Frontend (`listAnchor`, `scrollMemory`)
 
 Wo der Nutzer war, merkt sich die App an einer Stelle (Issue #1279):

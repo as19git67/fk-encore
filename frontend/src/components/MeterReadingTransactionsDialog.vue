@@ -135,10 +135,10 @@ watch(
 
 <template>
   <Dialog
+    class="dialog-md"
     :visible="visible"
     header="Zahlungen zur Ablesung"
     modal
-    :style="{ width: '40rem', maxWidth: '95vw' }"
     @update:visible="emit('update:visible', $event)"
   >
     <p v-if="reading" class="hint">

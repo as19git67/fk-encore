@@ -548,7 +548,8 @@ async function compareSnapshots() {
       :transaction-ids="selectionStore.ids"
       @applied="onNoticeApplied"
     />
-    <Dialog v-model:visible="counterpartyDialogVisible" header="Gegenseiten vereinheitlichen" modal :style="{ width: 'min(30rem, calc(100vw - 2rem))' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="counterpartyDialogVisible" header="Gegenseiten vereinheitlichen" modal>
       <div class="counterparty-form">
         <label>Kanonischer Name<InputText v-model="canonicalCounterparty" /></label>
         <label>IBAN nachziehen (optional)<InputText v-model="canonicalIban" /></label>
@@ -561,7 +562,8 @@ async function compareSnapshots() {
         <Button label="Vereinheitlichen" icon="pi pi-check" :loading="batchBusy" :disabled="!canonicalCounterparty.trim()" @click="saveCounterpartyMerge" />
       </template>
     </Dialog>
-    <Dialog v-model:visible="snapshotDialogVisible" header="Benannte Baskets" modal :style="{ width: 'min(34rem, calc(100vw - 2rem))' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="snapshotDialogVisible" header="Benannte Baskets" modal>
       <div class="counterparty-form">
         <Message v-if="snapshotLoading" severity="info" :closable="false">Gespeicherte Baskets werden geladen…</Message>
         <Message v-if="snapshotError" severity="error" :closable="false">Baskets konnten nicht geladen werden: {{ snapshotError }}</Message>
@@ -572,13 +574,15 @@ async function compareSnapshots() {
         <Button label="Baskets vergleichen" icon="pi pi-chart-bar" outlined :disabled="snapshots.length < 2" @click="compareDialogVisible = true" />
       </div>
     </Dialog>
-    <Dialog v-model:visible="compareDialogVisible" header="Basket-Vergleich nach Gegenseite" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="compareDialogVisible" header="Basket-Vergleich nach Gegenseite" modal>
       <div class="basket-match-actions"><Select v-model="compareA" :options="snapshots" option-label="name" option-value="id" placeholder="Basket A" /><Select v-model="compareB" :options="snapshots" option-label="name" option-value="id" placeholder="Basket B" /></div>
       <Button label="Vergleichen" :disabled="!compareA || !compareB || compareA === compareB" @click="compareSnapshots" />
       <Message v-if="comparisonCurrencyMismatch" severity="warn" :closable="false">Die Baskets enthalten unterschiedliche Währungen; es wird keine irreführende Gesamtsumme gebildet.</Message>
       <ul class="basket-analysis-list"><li v-for="row in comparisonRows" :key="row.label" class="basket-analysis-row"><span>{{ row.label }}</span><span>{{ formatAnalysisAmount(row.a) }} → {{ formatAnalysisAmount(row.b) }} (Δ {{ formatAnalysisAmount(row.b - row.a) }})</span></li></ul>
     </Dialog>
-    <Dialog v-model:visible="pdfDialogVisible" header="PDF exportieren" modal :style="{ width: 'min(32rem, calc(100vw - 2rem))' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="pdfDialogVisible" header="PDF exportieren" modal>
       <div class="counterparty-form">
         <label>
           Überschrift

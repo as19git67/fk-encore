@@ -73,10 +73,10 @@ async function save() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     modal
     header="Beschreibung bearbeiten"
-    :style="{ width: 'min(32rem, calc(100vw - 2rem))' }"
     :closable="!saving"
     @update:visible="emit('update:visible', $event)"
   >

@@ -934,7 +934,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
     </FullscreenOverlay>
 
     <!-- Rename dialog -->
-    <Dialog v-model:visible="showRenameDialog" header="Person umbenennen" :modal="true" style="width: min(100%, 28rem)" @show="onRenameDialogShow">
+    <Dialog v-model:visible="showRenameDialog" header="Person umbenennen" :modal="true" class="dialog-sm" @show="onRenameDialogShow">
       <div class="dialog-body">
         <div class="rename-row">
           <label for="rename-name" class="dialog-label">Name</label>
@@ -954,7 +954,8 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
     </Dialog>
 
     <!-- Person filter dialog -->
-    <Dialog v-model:visible="showPersonFilterMenu" header="Filter" modal :style="{ width: 'min(100%, 480px)' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showPersonFilterMenu" header="Filter" modal>
       <div class="person-filter-menu">
         <div class="pfm-row">
           <label class="pfm-label">Benennung</label>

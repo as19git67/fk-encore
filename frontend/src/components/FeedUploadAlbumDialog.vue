@@ -53,11 +53,10 @@ function cancel() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     modal
     header="In welche Alben aufnehmen?"
-    :style="{ width: '28rem' }"
-    :breakpoints="{ '640px': '92vw' }"
     :dismissableMask="true"
     @update:visible="(v) => emit('update:visible', v)"
   >

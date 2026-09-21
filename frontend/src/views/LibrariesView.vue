@@ -557,10 +557,10 @@ onMounted(loadData)
 
     <!-- Create / Edit Dialog -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="showEditDialog"
       :header="editingId === null ? 'Neue Bibliothek' : 'Bibliothek bearbeiten'"
       :modal="true"
-      :style="{ width: '500px' }"
     >
       <div class="form">
         <div class="field">
@@ -815,10 +815,10 @@ onMounted(loadData)
 
     <!-- Delete Confirmation Dialog -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="showDeleteConfirm"
       header="Bibliothek entfernen"
       :modal="true"
-      :style="{ width: '440px' }"
     >
       <p>
         Bibliothek <strong>{{ libraryToDelete?.name }}</strong> wirklich entfernen?
@@ -836,10 +836,10 @@ onMounted(loadData)
 
     <!-- Scan Error Detail Dialog -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="showErrorDialog"
       header="Fehlerdetails"
       :modal="true"
-      :style="{ width: '520px' }"
     >
       <pre class="error-detail">{{ errorDialogMsg }}</pre>
       <template #footer>

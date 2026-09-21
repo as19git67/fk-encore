@@ -83,10 +83,10 @@ async function apply() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     modal
     header="Notiz auf Auswahl anwenden"
-    :style="{ width: '32rem' }"
     :closable="!saving"
     @update:visible="emit('update:visible', $event)"
   >

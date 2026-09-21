@@ -219,7 +219,8 @@ onMounted(load)
     </div>
 
     <!-- Create Dialog -->
-    <Dialog v-model:visible="showCreateDialog" header="Neue Gruppe" :modal="true" :style="{ width: '400px' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showCreateDialog" header="Neue Gruppe" :modal="true">
       <div class="field">
         <label for="name" class="block">Name der Gruppe</label>
         <InputText id="name" v-model="newGroupName" autofocus class="w-full" @keyup.enter="handleCreate" />
@@ -231,7 +232,8 @@ onMounted(load)
     </Dialog>
 
     <!-- Member Dialog -->
-    <Dialog v-model:visible="showMemberDialog" header="Mitglied hinzufügen" :modal="true" :style="{ width: '400px' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showMemberDialog" header="Mitglied hinzufügen" :modal="true">
       <div class="field mb-3">
         <label for="user" class="block">Benutzer auswählen</label>
         <Select

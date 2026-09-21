@@ -115,10 +115,10 @@ function save() {
 
 <template>
   <Dialog
+    class="dialog-lg"
     :visible="visible"
     modal
     :header="`Seiten wählen — ${title}`"
-    :style="{ width: 'min(900px, 96vw)' }"
     @update:visible="emit('update:visible', $event)"
   >
     <Message v-if="error" severity="warn" :closable="false">{{ error }}</Message>

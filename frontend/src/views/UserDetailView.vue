@@ -8,6 +8,7 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import PageLayout from '../components/layout/PageLayout.vue'
+import { useModuleBack } from '../composables/useModuleBack'
 import { getUser, deleteUser, type UserWithRoles } from '../api/users'
 import { listRoles, assignRole, removeRole } from '../api/roles'
 import type { Role } from '../api/users'
@@ -17,6 +18,9 @@ import { useAuthStore } from '../stores/auth'
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+// Every detail page opens with the same way out (issue #1281). History when
+// the previous page was inside Admin, the user list otherwise.
+const { goBack } = useModuleBack('/admin', 'admin-users')
 
 const user = ref<UserWithRoles | null>(null)
 const allRoles = ref<Role[]>([])
@@ -100,6 +104,7 @@ onMounted(loadData)
 <template>
   <PageLayout :title="user?.name ?? 'Benutzer'" width="normal" :ready="!loading">
     <template #actions>
+      <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
       <Button v-if="!loading && user && auth.hasPermission('users.delete')" label="Benutzer löschen" icon="pi pi-trash" severity="danger" outlined @click="showDeleteConfirm = true" />
     </template>
 
@@ -111,7 +116,8 @@ onMounted(loadData)
     <div v-if="loading" class="loading">Laden...</div>
     <div class="user-detail-view" v-else-if="user">
     <!-- Confirm Delete Dialog -->
-    <Dialog v-model:visible="showDeleteConfirm" header="Benutzer löschen" :modal="true" :style="{ width: '400px' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showDeleteConfirm" header="Benutzer löschen" :modal="true">
       <p>Benutzer <strong>{{ user.name }}</strong> wirklich löschen?</p>
       <template #footer>
         <Button label="Abbrechen" severity="secondary" @click="showDeleteConfirm = false" />
@@ -120,7 +126,8 @@ onMounted(loadData)
     </Dialog>
 
     <!-- Confirm Remove Role Dialog -->
-    <Dialog v-model:visible="showRemoveRoleConfirm" header="Rolle entfernen" :modal="true" :style="{ width: '400px' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showRemoveRoleConfirm" header="Rolle entfernen" :modal="true">
       <p>Rolle <strong>{{ roleToRemove?.name }}</strong> von Benutzer <strong>{{ user.name }}</strong> wirklich entfernen?</p>
       <template #footer>
         <Button label="Abbrechen" severity="secondary" @click="showRemoveRoleConfirm = false" />

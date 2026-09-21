@@ -209,6 +209,39 @@ a:hover {
   max-width: min(calc(100vw - 1rem), 32rem);
 }
 
+/* ── Dialogs: three sizes (issue #1281) ──────────────────────────────────────
+ * The app had forty different ways of writing a dialog's width — `26rem`,
+ * `min(520px, 92vw)`, `92vw` with a `maxWidth`, and so on — which is forty
+ * decisions nobody made twice. There are three:
+ *
+ *   sm  420px  a confirmation, a single field
+ *   md  640px  a form
+ *   lg  960px  a preview, a table
+ *
+ * The width is capped at the viewport less a gutter on each side, so no
+ * dialog needs a `maxWidth` or a `breakpoints` prop of its own.
+ *
+ * Below `sm` a dialog takes the screen: at 360px there is no such thing as a
+ * dialog "beside" the page, and a 420px box on a 360px screen is a box with
+ * its edges cut off. It keeps a little room at the top so the page behind it
+ * still shows, which is what tells the reader this is a layer and not a
+ * navigation. */
+.p-dialog.dialog-sm { width: min(420px, calc(100vw - 2 * var(--page-gutter))); }
+.p-dialog.dialog-md { width: min(640px, calc(100vw - 2 * var(--page-gutter))); }
+.p-dialog.dialog-lg { width: min(960px, calc(100vw - 2 * var(--page-gutter))); }
+
+@media (max-width: 639px) {
+  .p-dialog.dialog-sm,
+  .p-dialog.dialog-md,
+  .p-dialog.dialog-lg {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 90dvh;
+    margin: 0;
+    border-radius: 12px 12px 0 0;
+  }
+}
+
 /* ── Tables: room for the focus ring in the scroller ────────────────────────
  * PrimeVue's DataTable puts the table in its own scroll container, and a
  * sortable header cell is focusable. The first row of cells sits flush with

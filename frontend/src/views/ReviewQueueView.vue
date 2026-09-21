@@ -863,10 +863,10 @@ onMounted(() => {
          agreement rate on already-reviewed groups so they know the
          risk before committing a non-trivial batch action. -->
     <Dialog
+    class="dialog-md"
       v-model:visible="bulkConfirmOpen"
       modal
       header="Alle hochkonfidenten Gruppen bestätigen?"
-      :style="{ width: 'min(560px, 92vw)' }"
     >
       <p v-if="calibrationAccuracyAvg != null">
         Bei deinen bisher reviewten Gruppen hat die KI in
@@ -910,11 +910,11 @@ onMounted(() => {
          result/preview state inside one slot rather than nesting
          <template #footer> inside a v-if. -->
     <Dialog
+      class="dialog-sm"
       :visible="consensusGroup != null"
       @update:visible="(v: boolean) => { if (!v) closeConsensusDialog() }"
       modal
       header="Entscheidungen anderer übernehmen?"
-      :style="{ width: 'min(520px, 92vw)' }"
     >
       <p v-if="consensusResult">
         <strong>{{ consensusResult.hidden_count }}</strong>

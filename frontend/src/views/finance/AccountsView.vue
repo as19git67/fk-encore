@@ -282,10 +282,10 @@ function goToManualBooking() {
     </ScrollX>
 
     <Dialog
+    class="dialog-sm"
       v-model:visible="editDialogVisible"
       modal
       :header="editId ? 'Stammdaten bearbeiten' : 'Neues Konto'"
-      :style="{ width: '30rem' }"
     >
       <Message v-if="editErrorMsg" severity="error" :closable="false">
         {{ editErrorMsg }}

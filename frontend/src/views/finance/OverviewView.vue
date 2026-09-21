@@ -312,10 +312,10 @@ async function saveConfig() {
     </template>
 
     <Dialog
+    class="dialog-md"
       v-model:visible="dialogVisible"
       modal
       header="Übersicht konfigurieren"
-      :style="{ width: '40rem', maxWidth: '95vw' }"
     >
       <Message v-if="dialogError" severity="error" :closable="false">
         {{ dialogError }}

@@ -222,7 +222,8 @@ onMounted(loadData)
     </ScrollX>
 
     <!-- Delete Confirmation Dialog -->
-    <Dialog v-model:visible="showDeleteConfirm" header="Rolle löschen" :modal="true" :style="{ width: '400px' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showDeleteConfirm" header="Rolle löschen" :modal="true">
       <p>Rolle <strong>{{ roleToDelete?.name }}</strong> wirklich löschen?</p>
       <template #footer>
         <Button label="Abbrechen" severity="secondary" @click="showDeleteConfirm = false" />
@@ -232,10 +233,10 @@ onMounted(loadData)
 
     <!-- Permission-Dialog -->
     <Dialog
+    class="dialog-md"
       v-model:visible="showPermDialog"
       :header="'Berechtigungen: ' + (selectedRole?.name ?? '')"
       :modal="true"
-      :style="{ width: '550px' }"
     >
       <div v-if="selectedRole" class="perm-dialog-content">
         <div v-for="group in permissionGroups" :key="group.domain" class="perm-group">

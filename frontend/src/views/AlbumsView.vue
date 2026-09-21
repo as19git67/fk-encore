@@ -578,7 +578,8 @@ onMounted(async () => {
     </Dialog>
 
     <!-- Album filter dialog -->
-    <Dialog v-model:visible="showAlbumFilterMenu" header="Filter" modal :style="{ width: 'min(100%, 560px)' }">
+    <Dialog
+    class="dialog-md" v-model:visible="showAlbumFilterMenu" header="Filter" modal>
       <div class="album-filter-menu">
         <div class="afm-row">
           <label class="afm-label">Besitzer</label>

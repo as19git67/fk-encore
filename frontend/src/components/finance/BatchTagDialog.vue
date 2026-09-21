@@ -217,9 +217,10 @@ async function save() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     modal
-    :style="{ width: '32rem', maxHeight: '85vh' }"
+    :style="{ maxHeight: '85vh' }"
     :closable="!saving"
     :dismissable-mask="!saving"
     @update:visible="emit('update:visible', $event)"

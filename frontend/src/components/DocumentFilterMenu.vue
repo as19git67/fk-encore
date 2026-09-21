@@ -207,11 +207,11 @@ function handleReset() {
 
 <template>
   <Dialog
+    class="dialog-md"
     :visible="props.visible"
     @update:visible="(v: boolean) => emit('update:visible', v)"
     header="Filter"
     modal
-    :style="{ width: 'min(100%, 560px)' }"
   >
     <div class="filter-menu">
       <div class="filter-row">
