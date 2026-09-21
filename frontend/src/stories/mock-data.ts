@@ -15,6 +15,8 @@ import type {
   Face,
 } from '../api/photos'
 import type { RoleWithPermissions, Permission } from '../api/roles'
+import type { MeterListItem } from '../api/meters'
+import type { DocumentCollection } from '../api/collections'
 import type { PasskeyInfo } from '../api/passkeys'
 import type { PhotoLibrary, AvailablePathsResponse } from '../api/libraries'
 import type {
@@ -765,5 +767,110 @@ export const MOCK_DOCUMENT_COLLECTIONS = [
     item_count: 4,
     included_count: 4,
     can_administer: false,
+  },
+]
+
+/**
+ * Sammelmappen fixtures (issue #1281). One folder is finished, one is still
+ * waiting for its summary, and one asked for a summary and did not get it —
+ * the three states the list draws differently.
+ */
+export const MOCK_COLLECTIONS: DocumentCollection[] = [
+  {
+    id: 1,
+    title: 'Steuer 2024',
+    notes: 'Alles, was zur Erklärung gehört.',
+    summary: 'Belege zur Einkommensteuererklärung 2024, sortiert nach Abschnitt.',
+    summary_stale: false,
+    summary_error: null,
+    summary_generated_at: '2025-05-02T08:00:00.000Z',
+    include_cover: true,
+    include_toc: true,
+    include_summary: true,
+    visibility: 'private',
+    group_id: null,
+    created_at: '2025-04-01T08:00:00.000Z',
+    updated_at: '2025-05-02T08:00:00.000Z',
+    item_count: 12,
+    included_count: 11,
+    can_administer: true,
+  },
+  {
+    id: 2,
+    title: 'Hausverwaltung',
+    notes: null,
+    summary: null,
+    summary_stale: true,
+    summary_error: null,
+    summary_generated_at: null,
+    include_cover: true,
+    include_toc: false,
+    include_summary: true,
+    visibility: 'private',
+    group_id: null,
+    created_at: '2025-05-20T08:00:00.000Z',
+    updated_at: '2025-05-20T08:00:00.000Z',
+    item_count: 4,
+    included_count: 4,
+    can_administer: true,
+  },
+  {
+    id: 3,
+    title: 'Fahrzeug',
+    notes: 'Wartung und Versicherung.',
+    summary: null,
+    summary_stale: false,
+    summary_error: 'Das Modell hat nicht geantwortet.',
+    summary_generated_at: null,
+    include_cover: false,
+    include_toc: false,
+    include_summary: false,
+    visibility: 'private',
+    group_id: null,
+    created_at: '2025-03-11T08:00:00.000Z',
+    updated_at: '2025-03-11T08:00:00.000Z',
+    item_count: 2,
+    included_count: 2,
+    can_administer: false,
+  },
+]
+
+/**
+ * Two meters, one of each kind the reports treat differently (issue #1281):
+ * a water meter counting whole units and an electricity meter with a
+ * decimal place.
+ */
+export const MOCK_METERS: MeterListItem[] = [
+  {
+    id: 1,
+    name: 'Wasser Haupt',
+    type: 'water',
+    role: null,
+    unit: 'm³',
+    location: 'Keller',
+    notes: null,
+    decimals: 0,
+    groupId: null,
+    ownerUserId: 1,
+    activeDeviceSerial: 'NEW-7',
+    lastReadingValue: 45,
+    lastReadingAt: '2026-01-01T08:00:00Z',
+    absoluteTotal: 674,
+  },
+  {
+    id: 2,
+    name: 'Strom Wärmepumpe',
+    type: 'electricity',
+    role: null,
+    unit: 'kWh',
+    location: 'Hauswirtschaftsraum',
+    notes: null,
+    decimals: 1,
+    groupId: null,
+    ownerUserId: 1,
+    activeDeviceSerial: 'E-100',
+    lastReadingValue: 12345.6,
+    lastReadingAt: '2026-02-15T09:30:00Z',
+    absoluteTotal: 12345.6,
   },
 ]
