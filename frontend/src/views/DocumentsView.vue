@@ -1058,7 +1058,12 @@ onMounted(async () => {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding-block: 0.75rem;
+  /* A Sammelmappe row fills this column, so its focus ring lands on the
+     column's edge — which `overflow-y: auto` clips, horizontally too, and
+     the last row's ring falls off the bottom of the scrollable canvas.
+     Room on every side, taken straight back off the outside. */
+  padding: calc(0.75rem + var(--focus-ring-reach)) var(--focus-ring-reach);
+  margin: calc(-1 * var(--focus-ring-reach));
 }
 .list-region--split .detail-column {
   min-height: 0;

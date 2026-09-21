@@ -722,3 +722,48 @@ export const MOCK_DOCUMENT_QUEUE_BUSY: DocumentQueueStatus = {
     },
   ],
 }
+
+/**
+ * Sammelmappen for the documents list. No real names or numbers — the repo
+ * keeps no personal data, so a folder is called what a folder is called.
+ */
+export const MOCK_DOCUMENT_COLLECTIONS = [
+  {
+    id: 1,
+    title: 'Unterlagen Steuerberater 2024',
+    notes: null,
+    summary: 'Rechnungen und Belege, die zur Steuererklärung gehören.',
+    summary_stale: false,
+    summary_error: null,
+    summary_generated_at: '2026-02-01T10:00:00.000Z',
+    include_cover: true,
+    include_toc: true,
+    include_summary: true,
+    visibility: 'private' as const,
+    group_id: null,
+    created_at: '2026-01-15T09:00:00.000Z',
+    updated_at: '2026-02-01T10:00:00.000Z',
+    item_count: 12,
+    included_count: 11,
+    can_administer: true,
+  },
+  {
+    id: 2,
+    title: 'Hausverwaltung',
+    notes: null,
+    summary: null,
+    summary_stale: true,
+    summary_error: null,
+    summary_generated_at: null,
+    include_cover: false,
+    include_toc: true,
+    include_summary: false,
+    visibility: 'group' as const,
+    group_id: 3,
+    created_at: '2026-01-20T09:00:00.000Z',
+    updated_at: '2026-01-20T09:00:00.000Z',
+    item_count: 4,
+    included_count: 4,
+    can_administer: false,
+  },
+]

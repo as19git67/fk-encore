@@ -2,7 +2,11 @@ import type { Meta, StoryObj } from '@storybook/vue3'
 import DocumentsView from '../views/DocumentsView.vue'
 import { defaultHandlers } from './handlers'
 import { http, HttpResponse } from 'msw'
-import { MOCK_DOCUMENTS, MOCK_DOCUMENT_CATEGORIES } from './mock-data'
+import {
+  MOCK_DOCUMENTS,
+  MOCK_DOCUMENT_CATEGORIES,
+  MOCK_DOCUMENT_COLLECTIONS,
+} from './mock-data'
 
 const meta: Meta<typeof DocumentsView> = {
   title: 'Views/DocumentsView',
@@ -30,6 +34,29 @@ export const GeteilteAnsicht: Story = {
   name: 'Geteilte Ansicht (breiter Bildschirm)',
   parameters: {
     testViewport: { width: 1600, height: 900 },
+  },
+}
+
+/**
+ * Sammelmappen sit above the documents as full-width rows. They are their own
+ * story because they are the widest thing on the page: a row that reaches the
+ * page gutter is where a focus ring drawn *around* an element runs out of
+ * room (issue #1281).
+ */
+export const MitSammelmappen: Story = {
+  name: 'Mit Sammelmappen',
+  parameters: {
+    // A row that fills the scrolling column is where the ring ran out of
+    // room; this story is the guard against that coming back.
+    focusRingCheck: true,
+    msw: {
+      handlers: [
+        http.get('/api/document-collections', () =>
+          HttpResponse.json({ items: MOCK_DOCUMENT_COLLECTIONS }),
+        ),
+        ...defaultHandlers,
+      ],
+    },
   },
 }
 

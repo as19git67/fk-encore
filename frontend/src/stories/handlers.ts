@@ -42,6 +42,7 @@ export const defaultHandlers = [
   http.get('/api/documents/tax/sections', () => HttpResponse.json({ items: [] })),
   http.get('/api/groups', () => HttpResponse.json({ items: [] })),
   http.get('/api/documents/:id/collections', () => HttpResponse.json({ items: [] })),
+  http.get('/api/document-collections', () => HttpResponse.json({ items: [] })),
   http.get('/api/finance/documents/:id/transactions', () => HttpResponse.json({ items: [] })),
   http.get('/api/albums/:id/photos', () => HttpResponse.json({ photos: [] })),
   http.get('/api/gallery/grid', () => HttpResponse.json({ total: 0, offset: 0, photos: [] })),

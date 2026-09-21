@@ -76,8 +76,19 @@
      One ring everywhere. An element that turns the browser's own outline off
      draws this one back — `outline: none` without a replacement leaves a
      keyboard user with no idea where they are. */
-  --focus-ring: 2px solid var(--p-primary-color);
+  --focus-ring-width: 2px;
+  --focus-ring: var(--focus-ring-width) solid var(--p-primary-color);
   --focus-ring-offset: 2px;
+  /* How far past its element the ring reaches. A container that clips —
+     a scroller, a fixed-height row — has to leave this much room, or the
+     ring of a child that fills it is cut off. */
+  --focus-ring-reach: calc(var(--focus-ring-offset) + var(--focus-ring-width));
+
+  /* PrimeVue draws its own ring on its own components. It used to be 1px
+     where the app's was 2px, so a button and the row it sat in were focused
+     differently. Same width, same colour, same offset, one look. */
+  --p-focus-ring-width: var(--focus-ring-width);
+  --p-focus-ring-offset: var(--focus-ring-offset);
 
   --page-gutter: 16px;
   --page-max-normal: 1200px;

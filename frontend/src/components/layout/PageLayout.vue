@@ -235,6 +235,13 @@ defineExpose({ contentEl })
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  /* A scroller clips what reaches past it, and a focus ring reaches 4px
+     past its element. A row that fills this column loses the ring on the
+     sides; the last row loses it at the bottom, where no amount of
+     scrolling brings it back. Room on every side, taken straight off
+     again as a negative margin, so nothing moves. */
+  padding: var(--focus-ring-reach);
+  margin: calc(-1 * var(--focus-ring-reach));
 }
 
 .page-header {

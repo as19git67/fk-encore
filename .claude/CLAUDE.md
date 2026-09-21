@@ -50,7 +50,23 @@ Kontext.
 Fokus sieht überall gleich aus: `outline: var(--focus-ring)` und
 `outline-offset: var(--focus-ring-offset)`. Wer `outline: none` setzt, zeichnet
 den Ring im selben Atemzug wieder — sonst weiß ein Tastaturnutzer nicht, wo er
-ist.
+ist. PrimeVues eigene Ring-Variablen (`--p-focus-ring-*`) zeigen auf dieselben
+Werte, damit ein Knopf und die Zeile, in der er sitzt, gleich aussehen.
+
+Der Ring wird **außerhalb** seines Elements gezeichnet und reicht
+`var(--focus-ring-reach)` (4px) hinaus. Ein Container, der klippt — ein
+Scroller, eine Zeile mit fester Höhe —, schneidet ihn ab. Platz macht der
+Container, nicht das Element:
+
+```css
+padding: var(--focus-ring-reach);
+margin: calc(-1 * var(--focus-ring-reach));
+```
+
+Das Padding gibt dem Ring Raum, der negative Rand nimmt ihn außen wieder weg,
+also verschiebt sich nichts. `utils/focusRingCheck.ts` findet die Stellen, an
+denen das fehlt; eine Story schaltet die Prüfung mit
+`parameters: { focusRingCheck: true }` scharf.
 
 Das prüft `scripts/check-css-tokens.mjs` (Issue #1281): es liest die
 `<style>`-Blöcke unter `frontend/src` und lehnt `--p-surface-<n>`, feste

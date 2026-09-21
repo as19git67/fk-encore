@@ -75,6 +75,18 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
   - ✅ Eine Route-Transition in `App.vue`: 120ms Überblendung, `out-in`
     (zwei gleichzeitig gemountete Seiten würden je eine Toolbar in den
     Sticky-Stack teleportieren), und bei `prefers-reduced-motion` gar keine.
+  - ✅ Abgeschnittene Fokusringe (Meldung aus dem Betrieb): der Ring reicht
+    4px über sein Element hinaus, also schneidet ihn jeder klippende
+    Container ab. Betroffen waren das Hamburger-Icon (`.navbar-start` hatte
+    ein `overflow: hidden`, das es nicht braucht), die Untermenü-Einträge
+    (der Streifen scrollt waagrecht und klippt damit auch senkrecht) und die
+    Sammelmappen-Zeilen (füllen die scrollende Spalte). Platz macht jetzt der
+    Container über `--focus-ring-reach`. `utils/focusRingCheck.ts` prüft das;
+    Stories schalten es mit `focusRingCheck: true` scharf (AppShell und
+    Dokumente sind es).
+  - ⬜ Übrige abgeschnittene Ringe: Dialogfußzeilen, `photo-mini-map-wrap`,
+    `meta-panel`, `ScrollX`, TripMap und die DataTable-Kopfzeile. Gemessen,
+    aber noch nicht behoben — deshalb ist die Prüfung noch opt-in.
   - ⬜ Dialoge, Detailseiten-Aktionen, Stories je Seitenzustand.
 
 Abweichungen vom Entwurf (Etappe 1):
