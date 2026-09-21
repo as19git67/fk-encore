@@ -35,6 +35,7 @@ const router = createRouter({
     { path: '/fotos/alben/:id', component: { template: '<div />' } },
     { path: '/albums/shared/:token', component: { template: '<div />' } },
     { path: '/fotos/personen', component: { template: '<div />' } },
+    { path: '/fotos/rueckblicke', name: 'fotos-recaps', component: { template: '<div />' } },
     // Dokumente module
     { path: '/dokumente', name: 'dokumente-list', component: { template: '<div />' } },
     { path: '/dokumente/upload', name: 'dokumente-upload', component: { template: '<div />' } },
