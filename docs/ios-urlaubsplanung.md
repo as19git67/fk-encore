@@ -4645,11 +4645,16 @@ und das **Gültigkeitsfenster** für Termine (§20.4) liegen schon in der
 Tabelle, damit „einmal gemeldet" haltbar ist, wenn §20.2 gebaut wird —
 gemerkt statt gelöscht, wie §7.1 ein „nein" merkt.
 
-**Noch offen aus §20.2:** dass der Vorrat sich von selbst meldet, der
+**Erledigt (§20.2):** dass der Vorrat sich von selbst meldet, der
 Tourvorschlag aus mehreren nahen Einträgen und die Gebietssuche („such uns
 etwas im Umkreis von 50 km"). Das ist der Teil, der aus der Merkliste einen
 Tagesausflugsplaner macht — und er ruft `solveDay` mit dem Standort als Anker
-auf, statt etwas Neues zu erfinden.
+auf, statt etwas Neues zu erfinden. Gebaut als `POST …/ideas/nearby`
+(ein Spot, ein Satz, mit Ruhezeit), `POST …/ideas/dismiss` und
+`POST …/ideas/outing`; die Gebietssuche ist derselbe Aufruf mit genanntem
+Mittelpunkt statt gemessenem, denn der Auslöser ist dann die freie Zeit und
+nicht der Ort. In der App: `TripIdeasNearbyView`, `TripIdeasOutingView` und
+`TripIdeaNoticeMonitor`.
 
 **Erledigt (2026-09-13): ein Eintrag ist korrigierbar.**
 Der Vorrat konnte befüllt und geleert werden, dazwischen nichts — ein Eintrag
