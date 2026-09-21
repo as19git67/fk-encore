@@ -104,6 +104,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
+      - name: Compile the widgets extension
+        # Same gap as the share extension above: the widgets/Live Activity
+        # extension in App/Widgets/ (#764, #768 §1) is its own target of
+        # the app project, outside the SwiftPM package the unit tests
+        # build, so without this step CI would never compile it at all.
+        run: |
+          xcodebuild build \
+            -project FKPhotos.xcodeproj \
+            -target FKPhotosWidgets \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

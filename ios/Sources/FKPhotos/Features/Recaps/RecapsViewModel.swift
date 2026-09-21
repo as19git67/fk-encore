@@ -23,6 +23,9 @@ final class RecapsViewModel {
             let response: ListRecapsResponse = try await APIClient.shared.get("/recaps")
             recaps = response.recaps
             await loadCovers(for: response.recaps)
+            // The same list feeds the "latest recap" and "On this day"
+            // home-screen widgets (#764) — one fetch, two more answers.
+            WidgetSnapshotStore.updateFromRecaps(response.recaps)
         } catch {
             errorMessage = error.localizedDescription
         }

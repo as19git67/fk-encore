@@ -84,6 +84,18 @@ public struct ContentView: View {
             guard authManager.currentUser != nil else { return }
             await RemotePushManager.shared.registerIfEnabled()
         }
+        .task(id: authManager.currentUser?.id) {
+            // Keeps a running trip's Live Activity in step (#768 §1).
+            // ActivityKit itself throttles content updates to roughly
+            // once a minute, so polling any faster would buy nothing;
+            // `refresh()` is what starts, updates and ends the Activity
+            // — there is nothing more to do while signed out.
+            guard authManager.currentUser != nil else { return }
+            while !Task.isCancelled {
+                await TripDayActivityManager.shared.refresh()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
     }
 }
 
@@ -179,6 +191,7 @@ struct MainTabView: View {
             case .albums: selection = .albums
             case .feed: selection = .feed
             case .search: selection = .search
+            case .trip: selection = .trip
             }
         }
         .fullScreenCover(isPresented: $router.isPresentingReviewQueue) {

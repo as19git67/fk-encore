@@ -49,6 +49,7 @@ public final class AppDeepLinkRouter {
         case albums
         case feed
         case search
+        case trip
     }
 
     /// Pushes waiting at a tab's root, bound to `navigationDestination(item:)`
@@ -60,6 +61,9 @@ public final class AppDeepLinkRouter {
     var albumToOpen: AlbumOpen?
     var personToOpen: PersonOpen?
     var recapsToOpen: RecapsOpen?
+    /// A trip plan to open on its running day — from a Live Activity or
+    /// a widget tap (#768 §1).
+    var tripPlanToOpen: TripPlanOpen?
 
     /// A query waiting for the search tab (an App Intent, #766). The tab
     /// takes it when it appears; a flag rather than a call because the tab
@@ -144,6 +148,9 @@ public final class AppDeepLinkRouter {
         case .search(let query):
             pendingSearchQuery = query
             return .search
+        case .tripDay(let id):
+            tripPlanToOpen = TripPlanOpen(id: id)
+            return .trip
         }
     }
 
@@ -200,4 +207,8 @@ struct PersonOpen: Identifiable, Hashable {
 
 struct RecapsOpen: Identifiable, Hashable {
     var id: Int { 0 }
+}
+
+struct TripPlanOpen: Identifiable, Hashable {
+    let id: Int
 }

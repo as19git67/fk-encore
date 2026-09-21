@@ -1042,14 +1042,42 @@ eine echte Bereicherung:
 
 1. **„Speicher freigeben"** – bereits gesicherte Original-Fotos vom Gerät
    entfernen (Immich-Stil), inkl. „nur bestätigt hochgeladene".
-2. **Home-Screen-Widgets** – „An diesem Tag" / letzter Rückblick / neueste
-   Feed-Aktivität (WidgetKit).
-3. **Live Activity / Dynamic Island** für Backup-Fortschritt.
+2. ✅ **Home-Screen-Widgets** (#764) – „An diesem Tag", letzter Rückblick,
+   neueste Feed-Aktivität. Eigenes WidgetKit-Extension-Target
+   `FKPhotosWidgets` (`App/Widgets/`), das sich das Extension-Target mit der
+   Live Activity (Punkt 3) teilt statt ein zweites zu eröffnen. v1 bewusst
+   textbasiert (Titel/Untertitel/SF-Symbol, kein Foto-Thumbnail) — der
+   Disk-Cache aus #1293 liegt im privaten, nicht in der App Group
+   sichtbaren Caches-Verzeichnis der App; ein gemeinsamer Bild-Cache für
+   Widgets ist als Fast-Follow offen, kein Blocker. Die Daten kommen ohne
+   neuen Server-Code: `WidgetSnapshotStore` (im Package) schreibt bei jedem
+   ohnehin stattfindenden Laden von Rückblicken/Feed einen kleinen
+   JSON-Snapshot in dieselbe App-Group-`UserDefaults`-Suite, die die Share
+   Extension schon nutzt (`SharedStorage`, `group.de.f4mil.photos`); die
+   Extension liest nur. „An diesem Tag" und „letzter Rückblick" übernehmen
+   dieselbe Auswahlregel wie der App Intent „Rückblick zeigen" (2.14):
+   ungesehen zuerst, sonst der neueste.
+3. ✅ **Live Activity / Dynamic Island** (#768 §1) — für den laufenden Tag
+   eines Reiseplans, nicht für den Backup-Fortschritt (dafür gibt es kein
+   Bedürfnis: das Backup läuft unauffällig im Hintergrund, ein Reisetag
+   dagegen ist die Situation, in der ein Blick aufs Sperrbildschirm-Widget
+   tatsächlich hilft). Zeigt den aktuellen Block, den bestätigten oder
+   vermuteten Stopp, eine Verspätungsanzeige und einen Licht-Hinweis, wenn
+   einer noch bevorsteht. `TripDayActivityManager` (im Package) hält die
+   Activity per 60-Sekunden-Polling im Vordergrund aktuell — ActivityKit
+   drosselt Updates ohnehin auf ungefähr eine Minute, häufigeres Aufrufen
+   kostet also nichts zusätzlich — und beendet sie von selbst, sobald der
+   Tag vorbei ist oder kein Plan mehr läuft; kein Server-Push nötig, da
+   alles lokal aus dem ohnehin für den Offline-Gebrauch ladbaren
+   Plan-Bundle berechnet wird (§3.9). `TripVisitMonitor.openStopOsmRef`
+   liefert den geofence-bestätigten Stopp und gewinnt gegenüber der reinen
+   Uhrzeit-Vermutung des Plans.
 4. ✅ **App Intents / Siri-Shortcuts** – „Jetzt sichern", „Suche nach …",
    „Zeige Rückblick", Album/Person als Entity — siehe 2.14.
 5. **Lokale Benachrichtigungen** – „neue Gruppen warten" ist umgesetzt
-   (`ReviewQueueNotifier`, 2.9); „Backup abgeschlossen" bewusst nicht — wer
-   die Sicherung sehen will, sieht sie künftig in der Live Activity (#768 §1).
+   (`ReviewQueueNotifier`, 2.9); „Backup abgeschlossen" bewusst nicht, da es
+   dafür kein Widget/keine Live Activity gibt (siehe Punkt 3) — ein Push
+   bei Bedarf würde hier ausreichen, ist aber nicht Teil dieser Etappe.
 6. ✅ **Remote-Push (APNs)** – Gegenstück zum bestehenden `push`-Service &
    PWA-Push — siehe 2.15.
 7. ✅ **Spotlight-Indexierung** — Fotos mit erkanntem Text (Opt-in),
