@@ -119,8 +119,8 @@ watch(() => [props.latitude, props.longitude], () => {
     />
 
     <div class="photo-mini-map-zoom">
-      <button type="button" class="photo-mini-map-zoom-btn" @click.stop.prevent="zoomIn" aria-label="Zoom in">+</button>
-      <button type="button" class="photo-mini-map-zoom-btn" @click.stop.prevent="zoomOut" aria-label="Zoom out">−</button>
+      <button type="button" class="photo-mini-map-zoom-btn" @click.stop.prevent="zoomIn" aria-label="Vergrößern">+</button>
+      <button type="button" class="photo-mini-map-zoom-btn" @click.stop.prevent="zoomOut" aria-label="Verkleinern">−</button>
     </div>
   </div>
 </template>
