@@ -51,6 +51,12 @@ const router = createRouter({
     { path: '/finanzen/bankkontakte', name: 'finance-bankcontacts', component: { template: '<div />' } },
     { path: '/finanzen/bankkontakte/:id', name: 'finance-bankcontact-detail', component: { template: '<div />' } },
     { path: '/finanzen/ki-tagging', name: 'finance-tag-queue', component: { template: '<div />' } },
+    { path: '/finanzen/anomalien', name: 'finance-anomalies', component: { template: '<div />' } },
+    { path: '/finanzen/analyse', name: 'finance-analysis', component: { template: '<div />' } },
+    { path: '/finanzen/belegabgleich', name: 'finance-receipt-enrichment', component: { template: '<div />' } },
+    { path: '/finanzen/umsaetze/neu', name: 'finance-transaction-new', component: { template: '<div />' } },
+    { path: '/finanzen/bankkontakte/:id/zeiten', name: 'finance-bankcontact-schedule', component: { template: '<div />' } },
+    { path: '/finanzen/admin/zugriff', name: 'finance-account-assignment', component: { template: '<div />' } },
     // Admin module
     { path: '/admin', component: { template: '<div />' } },
     { path: '/admin/benutzer/:id', component: { template: '<div />' } },

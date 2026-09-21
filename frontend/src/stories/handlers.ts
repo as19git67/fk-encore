@@ -222,6 +222,14 @@ export const defaultHandlers = [
     })
   }),
 
+  // ── Document thumbnails ───────────────────────────────────────────────────
+  // `DocumentThumbnail` fetches this itself; without a handler the request
+  // leaves the page short of `networkidle` and the test runner waits it out.
+  http.get('/api/documents/:id/thumbnail', ({ params }) => {
+    const svg = placeholderSvg(`dokument-${params.id as string}`)
+    return new HttpResponse(svg, { headers: { 'Content-Type': 'image/svg+xml' } })
+  }),
+
   // ── Persons & Faces ────────────────────────────────────────────────────────
   http.get('/api/persons', () =>
     HttpResponse.json({ persons: MOCK_PERSONS, enableLocalFaces: false }),
