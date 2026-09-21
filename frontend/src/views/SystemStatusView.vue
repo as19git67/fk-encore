@@ -153,7 +153,7 @@ function open(entry: QueueOverviewEntry) {
 
 .status-tile__desc {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 
@@ -170,14 +170,14 @@ function open(entry: QueueOverviewEntry) {
 }
 
 .status-tile__counts dt {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   text-transform: uppercase;
   color: var(--p-text-muted-color);
 }
 
 .status-tile__counts dd {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: var(--text-xl);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }

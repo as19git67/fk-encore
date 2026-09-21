@@ -871,7 +871,7 @@ onBeforeUnmount(() => {
 .collage-hint {
   margin: 0 0 1rem;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .collage-variants {
@@ -916,7 +916,7 @@ onBeforeUnmount(() => {
 }
 .collage-variant-name {
   text-align: center;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-color);
 }
 
@@ -1046,7 +1046,7 @@ onBeforeUnmount(() => {
   gap: 0.35rem;
 }
 .collage-text-editor__label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .collage-text-editor__actions {
@@ -1103,7 +1103,7 @@ onBeforeUnmount(() => {
 
 .collage-text-icon {
   font-family: 'Times New Roman', Times, serif;
-  font-size: 1.15rem;
+  font-size: var(--text-xl);
   font-weight: 700;
   line-height: 1;
 }

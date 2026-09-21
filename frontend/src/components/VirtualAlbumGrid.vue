@@ -318,8 +318,8 @@ watch(
 
 .album-card:focus,
 .album-card.album-card--restored-focus {
-  outline: 3px solid var(--p-focus-ring-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .shared-badge {
@@ -327,7 +327,7 @@ watch(
   top: 0.5rem;
   left: 0.5rem;
   z-index: 1;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: white;
   background: rgba(0, 0, 0, 0.55);
   border-radius: 50%;
@@ -346,7 +346,7 @@ watch(
   height: 100%;
 }
 .album-icon {
-  font-size: 3rem;
+  font-size: var(--text-7xl);
   color: var(--p-primary-color);
   display: flex;
   align-items: center;
@@ -369,21 +369,21 @@ watch(
 }
 .album-name {
   font-weight: 500;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .album-desc {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: rgba(255, 255, 255, 0.8);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .album-meta {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: rgba(255, 255, 255, 0.75);
   white-space: nowrap;
   overflow: hidden;

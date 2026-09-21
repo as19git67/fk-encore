@@ -92,7 +92,7 @@
 .queue-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .queue-table th,
 .queue-table td {
@@ -103,7 +103,7 @@
 .queue-table th {
   color: var(--p-text-muted-color);
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   text-transform: uppercase;
 }
 
@@ -114,7 +114,7 @@
 }
 .queue-card__header {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   margin-bottom: 0.4rem;
 }
 .queue-card__stats {
@@ -126,11 +126,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .queue-card__label {
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 
 /* ── Count badges ─────────────────────────────────────────────────────────── */
@@ -141,12 +141,15 @@
   gap: 0.3rem;
   padding: 0.15rem 0.5rem;
   border-radius: 1rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   font-weight: 600;
 }
-.badge-pending  { background: var(--blue-100);   color: var(--blue-700); }
-.badge-processing { background: var(--yellow-100); color: var(--yellow-700); }
-.badge-failed   { background: var(--red-100);    color: var(--red-700); }
+/* PrimeVue 3 names (`--blue-100` & co.) used to stand here; they resolve to
+   nothing in PrimeVue 4, so the badges were unstyled chips. The Tag tokens
+   are the same three severities, and they follow the theme. */
+.badge-pending    { background: var(--p-tag-info-background);    color: var(--p-tag-info-color); }
+.badge-processing { background: var(--p-tag-warn-background);    color: var(--p-tag-warn-color); }
+.badge-failed     { background: var(--p-tag-danger-background);  color: var(--p-tag-danger-color); }
 
 /* A badge rendered as a <button> — clickable "Fehler" count that
    opens the failed-jobs detail dialog. */
@@ -160,6 +163,6 @@
   filter: brightness(0.92);
 }
 .badge-button:focus-visible {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 1px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }

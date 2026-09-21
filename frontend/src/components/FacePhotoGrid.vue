@@ -381,7 +381,7 @@ function openPhoto(idx: number) {
 .favorite-badge, .hidden-badge {
   position: absolute;
   top: 6px; right: 6px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   text-shadow: 0 1px 3px rgba(0,0,0,0.7);
   z-index: 5;
   pointer-events: none;

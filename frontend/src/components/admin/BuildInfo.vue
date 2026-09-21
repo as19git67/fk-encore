@@ -19,7 +19,7 @@ onMounted(() => {
 <style scoped src="./adminPanels.css"></style>
 <style scoped>
 .build-number {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   font-family: monospace;
 }

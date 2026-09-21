@@ -482,7 +482,7 @@ onMounted(load)
 }
 .meter-meta {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   min-height: 1.2rem;
   margin-bottom: 0.75rem;
 }
@@ -500,15 +500,15 @@ onMounted(load)
 }
 
 .figure-label {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .figure-value {
   font-weight: 600;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
 }
 .figure-sub {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
 }
 
@@ -532,7 +532,7 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   min-width: 0;
 }

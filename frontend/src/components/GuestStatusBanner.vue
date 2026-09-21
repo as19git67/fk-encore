@@ -220,7 +220,7 @@ const pushTooltip = computed<string | null>(() => {
   color: inherit;
   opacity: 0.6;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .guest-banner__dismiss:hover,

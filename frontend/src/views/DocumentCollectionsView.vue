@@ -285,7 +285,7 @@ onMounted(load)
 .cv-summary {
   margin: 6px 0 0;
   color: var(--p-text-muted-color);
-  font-size: 0.84rem;
+  font-size: var(--text-md);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
@@ -301,7 +301,7 @@ onMounted(load)
   gap: 12px;
   margin-top: 6px;
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .cv-meta i {
   margin-right: 3px;
@@ -312,7 +312,7 @@ onMounted(load)
   gap: 6px;
 }
 .cv-form label {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   margin-top: 6px;
 }

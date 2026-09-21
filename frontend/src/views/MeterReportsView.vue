@@ -1298,7 +1298,7 @@ onMounted(load)
 }
 .energy-report-head h2 {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: var(--text-xl);
 }
 .energy-report-head h2 i {
   margin-right: 0.35rem;
@@ -1306,7 +1306,7 @@ onMounted(load)
 .energy-report-head p {
   margin: 0.25rem 0 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .energy-report-actions {
   display: flex;
@@ -1350,7 +1350,7 @@ onMounted(load)
   border-radius: 8px;
   background: var(--p-content-hover-background);
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .energy-ytd strong {
   color: var(--p-text-color);
@@ -1361,7 +1361,7 @@ onMounted(load)
 .energy-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .energy-table th,
 .energy-table td {
@@ -1383,7 +1383,7 @@ onMounted(load)
 .partial-marker,
 .warning-marker {
   margin-left: 0.35rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .warning-marker {
@@ -1398,7 +1398,7 @@ onMounted(load)
 }
 .energy-help h3 {
   margin: 1rem 0 0.5rem;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .energy-help dl {
   display: grid;
@@ -1436,12 +1436,12 @@ onMounted(load)
 }
 
 .figure-label {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
 .figure-sub {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
 }
 
@@ -1459,7 +1459,7 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   min-width: 0;
 }
@@ -1497,7 +1497,7 @@ onMounted(load)
 .tariff-toolbar p {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   max-width: 32rem;
 }
 /* Both import buttons stack on a narrow screen instead of being squeezed. */
@@ -1523,7 +1523,7 @@ onMounted(load)
   border-radius: 6px;
   background: var(--p-highlight-background);
   color: var(--p-highlight-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .tariff-form-actions {
   display: flex;
@@ -1538,7 +1538,7 @@ onMounted(load)
 }
 .tariff-group-title {
   margin: 0 0 0.4rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--p-text-muted-color);
   text-transform: uppercase;
@@ -1587,7 +1587,7 @@ onMounted(load)
   display: flex;
   flex-wrap: wrap;
   gap: 0 0.4rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .tariff-card-actions {

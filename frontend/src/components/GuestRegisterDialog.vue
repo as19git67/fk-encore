@@ -205,7 +205,7 @@ function handleDialogShow() {
   font-size: 0.9em;
 }
 .guest-dialog__success i {
-  font-size: 1.25rem;
+  font-size: var(--text-2xl);
   color: var(--p-primary-color);
   margin-top: 0.1em;
 }

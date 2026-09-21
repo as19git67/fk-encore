@@ -251,7 +251,7 @@ defineExpose({ contentEl })
 }
 .page-title {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
   font-weight: 600;
   line-height: 1.3;
   overflow-wrap: anywhere;
@@ -259,7 +259,7 @@ defineExpose({ contentEl })
 .page-hint {
   margin: var(--space-1) 0 0;
   color: var(--p-text-muted-color);
-  font-size: 0.8125rem;
+  font-size: var(--text-md);
 }
 /* Actions wrap below the title on a narrow screen instead of pushing past
    the viewport edge; each button then wraps within the row. */
@@ -316,7 +316,7 @@ defineExpose({ contentEl })
 
 @media (max-width: 639px) {
   .page-title {
-    font-size: 1.25rem;
+    font-size: var(--text-2xl);
   }
 }
 </style>

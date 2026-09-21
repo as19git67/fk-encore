@@ -217,14 +217,14 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
   background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
   outline: none;
 }
-.dropzone-icon { font-size: 2.5rem; color: var(--p-primary-color); }
+.dropzone-icon { font-size: var(--text-6xl); color: var(--p-primary-color); }
 .dropzone-text {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
-.dropzone-text strong { font-size: 1rem; }
-.dropzone-text span { color: var(--p-text-muted-color); font-size: 0.9rem; }
+.dropzone-text strong { font-size: var(--text-lg); }
+.dropzone-text span { color: var(--p-text-muted-color); font-size: var(--text-base); }
 
 .queue-block {
   display: flex;
@@ -249,7 +249,7 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
 }
-.file-icon { font-size: 1.25rem; color: var(--p-primary-color); }
+.file-icon { font-size: var(--text-2xl); color: var(--p-primary-color); }
 .queue-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 .queue-item-title {
   font-weight: 500;
@@ -257,7 +257,7 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.queue-item-sub { display: flex; gap: 0.75rem; font-size: 0.85rem; color: var(--p-text-muted-color); flex-wrap: wrap; }
+.queue-item-sub { display: flex; gap: 0.75rem; font-size: var(--text-base); color: var(--p-text-muted-color); flex-wrap: wrap; }
 .queue-item-sub span { display: inline-flex; align-items: center; gap: 0.25rem; }
 .status-done { color: var(--p-green-500); }
 .status-duplicate { color: var(--p-yellow-600); }

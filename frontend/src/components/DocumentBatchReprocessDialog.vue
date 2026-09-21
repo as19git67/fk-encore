@@ -104,11 +104,11 @@ async function apply() {
 .count {
   margin: 0 0 0.75rem;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .hint {
   margin: 0 0 1rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   line-height: 1.4;
 }
 .option {
@@ -123,7 +123,7 @@ async function apply() {
   gap: 0.25rem;
 }
 .option-sub {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   font-weight: 400;
 }

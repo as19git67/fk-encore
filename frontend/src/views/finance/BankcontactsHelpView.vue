@@ -216,7 +216,7 @@ const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
 /* Page frame and title: PageLayout (issue #1272). */
 .intro {
   margin: 0 0 1rem;
-  font-size: 1rem;
+  font-size: var(--text-lg);
   line-height: 1.5;
   color: var(--p-text-color);
   padding: 0.75rem 1rem;
@@ -237,7 +237,7 @@ const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
 }
 
 .help-section h2 {
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   font-weight: 600;
   margin: 0 0 0.25rem;
   display: inline-flex;
@@ -270,7 +270,7 @@ const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
 }
 
 .hint {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   font-style: italic;
 }
@@ -286,7 +286,7 @@ const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
   margin-top: 0.5rem;
 }
 .callout > i {
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   color: var(--p-yellow-700);
   margin-top: 0.15rem;
 }

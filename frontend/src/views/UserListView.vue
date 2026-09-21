@@ -332,12 +332,12 @@ function anchorRowAttrs(options: { props?: { rowData?: UserWithRoles } }) {
 
 .field label {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 
 .hint {
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 
 .mb {

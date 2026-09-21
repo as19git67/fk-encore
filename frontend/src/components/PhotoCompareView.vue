@@ -1743,7 +1743,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   cursor: default;
   margin-left: 0.5rem;
@@ -1751,7 +1751,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
 
 .no-suggestion-hint {
   color: var(--p-text-muted-color);
-  font-size: 0.82rem;
+  font-size: var(--text-md);
 }
 
 /* ── Side-by-side (compare phase) ── */
@@ -1873,7 +1873,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
 }
 .compare-commit-overlay-label {
   color: var(--p-zinc-100);
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   max-width: 22rem;
 }
 
@@ -1928,7 +1928,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
   color: var(--p-green-500);
   padding: 0.15rem 0.5rem;
   border-radius: 1rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -1951,7 +1951,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
 
 .help-popover h4 {
   margin: 0 0 0.75rem 0;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--p-text-color);
 }
@@ -1959,7 +1959,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
 .help-table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
 }
 
 .help-table tr + tr td {
@@ -1978,7 +1978,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
 kbd {
   display: inline-block;
   padding: 0.1rem 0.35rem;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   font-family: monospace;
   background: var(--p-content-hover-background);
   border: 1px solid var(--p-content-border-color);
@@ -2000,7 +2000,7 @@ kbd {
   gap: 0.25rem;
   padding: 0.15rem 0.45rem;
   border-radius: 1rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
@@ -2048,7 +2048,7 @@ kbd {
   gap: 1rem;
   margin: 0.15rem 0 0.8rem;
   color: var(--p-zinc-300);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 
 .quality-comparison__legend span {
@@ -2084,7 +2084,7 @@ kbd {
 .quality-row__label {
   overflow-wrap: anywhere;
   color: var(--p-zinc-200);
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
 }
 
 .quality-row__bars {
@@ -2111,7 +2111,7 @@ kbd {
 .quality-value {
   width: 2.5rem;
   color: var(--p-zinc-50);
-  font-size: 0.72rem;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -2143,7 +2143,7 @@ kbd {
   gap: 0.2rem;
   padding: 0.1rem 0.4rem;
   border-radius: 1rem;
-  font-size: 0.72rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
@@ -2169,7 +2169,7 @@ kbd {
   gap: 0.25rem;
   padding: 0.15rem 0.5rem;
   border-radius: 1rem;
-  font-size: 0.72rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--p-green-50);
   background: rgba(34, 197, 94, 0.85);
@@ -2191,7 +2191,7 @@ kbd {
   gap: 0.25rem;
   padding: 0.15rem 0.5rem;
   border-radius: 1rem;
-  font-size: 0.72rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--p-red-100);
   background: rgba(239, 68, 68, 0.7);
@@ -2207,7 +2207,7 @@ kbd {
 }
 
 .review-eyes-closed {
-  font-size: 0.65rem;
+  font-size: var(--text-xs);
   padding: 0.1rem 0.4rem;
 }
 
@@ -2256,7 +2256,7 @@ kbd {
   margin-bottom: 2px;
   padding: 0 0.25rem;
   border-radius: 3px;
-  font-size: 0.65rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;

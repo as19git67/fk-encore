@@ -236,6 +236,38 @@ describe('useListToolbar', () => {
     expect(model.result.loaded.value).toBe(5)
   })
 
+  it('follows a filter panel that stays open, and stays quiet without one', async () => {
+    const router = makeRouter()
+    await router.push('/dokumente')
+    const panelOpen = ref(false)
+    const { exposed: model } = mountComposable(router, () =>
+      useListToolbar({
+        filter: {
+          chips: () => [],
+          activeCount: () => 0,
+          open: () => { panelOpen.value = !panelOpen.value },
+          expanded: panelOpen,
+          clearAll: () => {},
+        },
+        result: { loaded: () => 1, loading: () => false },
+      }),
+    )
+
+    expect(model.filter?.expanded?.value).toBe(false)
+    panelOpen.value = true
+    expect(model.filter?.expanded?.value).toBe(true)
+
+    // A list whose filters open as a menu overlay says nothing about being
+    // expanded — the overlay is its own signal.
+    const { exposed: menuModel } = mountComposable(router, () =>
+      useListToolbar({
+        filter: { chips: () => [], activeCount: () => 0, open: () => {}, clearAll: () => {} },
+        result: { loaded: () => 1, loading: () => false },
+      }),
+    )
+    expect(menuModel.filter?.expanded).toBeUndefined()
+  })
+
   it('reports an unknown total when none is given', async () => {
     const router = makeRouter()
     await router.push('/dokumente')

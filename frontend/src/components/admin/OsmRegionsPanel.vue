@@ -719,7 +719,7 @@ usePolling(fetchOsmRegions, 5_000)
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .osm-form label span {
@@ -744,7 +744,7 @@ usePolling(fetchOsmRegions, 5_000)
   margin-top: 0.5rem;
   max-height: 200px;
   overflow: auto;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .osm-bulk {
@@ -760,7 +760,7 @@ usePolling(fetchOsmRegions, 5_000)
   width: 100%;
   border-collapse: collapse;
   margin-top: 0.5rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .osm-bulk-table th,
 .osm-bulk-table td {
@@ -771,7 +771,7 @@ usePolling(fetchOsmRegions, 5_000)
 }
 .osm-bulk-name {
   display: block;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 
@@ -808,7 +808,7 @@ usePolling(fetchOsmRegions, 5_000)
 }
 .osm-redundant__title {
   margin: 0 0 0.4rem;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--p-tag-warn-color);
   display: flex;
@@ -817,7 +817,7 @@ usePolling(fetchOsmRegions, 5_000)
 }
 .osm-redundant__desc {
   margin: 0 0 0.6rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .osm-redundant__list {
@@ -832,7 +832,7 @@ usePolling(fetchOsmRegions, 5_000)
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .osm-redundant__head {
   display: flex;
@@ -841,7 +841,7 @@ usePolling(fetchOsmRegions, 5_000)
   gap: 0.4rem;
 }
 .osm-redundant__verdict {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   padding: 0.05rem 0.45rem;
   border-radius: 4px;
@@ -885,11 +885,11 @@ usePolling(fetchOsmRegions, 5_000)
   color: var(--p-text-muted-color);
 }
 .osm-redundant__sizes {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .osm-redundant__children {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 
@@ -900,7 +900,7 @@ usePolling(fetchOsmRegions, 5_000)
   margin-left: 0.5rem;
   padding: 0.1rem 0.45rem;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   background: var(--p-tag-warn-background, rgba(255,160,0,0.2));
   color: var(--p-tag-warn-color);
@@ -927,7 +927,7 @@ usePolling(fetchOsmRegions, 5_000)
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .osm-actions {
@@ -939,7 +939,7 @@ usePolling(fetchOsmRegions, 5_000)
   display: inline-block;
   padding: 0.1rem 0.5rem;
   border-radius: 4px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   background: var(--p-content-hover-background);
 }
 
@@ -957,11 +957,11 @@ usePolling(fetchOsmRegions, 5_000)
 }
 .osm-card__pbf {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .osm-card__error {
   margin: 0.35rem 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   word-break: break-word;
 }
@@ -969,7 +969,7 @@ usePolling(fetchOsmRegions, 5_000)
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   margin: 0.35rem 0;
 }

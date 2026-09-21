@@ -83,7 +83,7 @@ onBeforeUnmount(() => {
   object-position: top center;
 }
 .doc-thumb-fallback {
-  font-size: 2.5rem;
+  font-size: var(--text-6xl);
   color: var(--p-text-muted-color);
 }
 </style>

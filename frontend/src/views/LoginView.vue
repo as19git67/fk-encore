@@ -138,7 +138,7 @@ async function handlePasskeyLogin() {
 
 .field label {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 
 .link {
@@ -148,7 +148,7 @@ async function handlePasskeyLogin() {
 
 .link.muted {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .mb {

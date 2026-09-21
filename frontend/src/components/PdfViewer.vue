@@ -797,7 +797,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-color);
 }
 
@@ -809,7 +809,7 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   background: var(--p-surface-card);
   color: inherit;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .page-input:disabled { opacity: 0.5; }
@@ -822,7 +822,7 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   background: transparent;
   color: inherit;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .zoom-display:hover:not(:disabled) {
@@ -845,7 +845,7 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--p-content-border-color);
 }
 .chunk-label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -898,7 +898,7 @@ onBeforeUnmount(() => {
 }
 
 .page-caption {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   font-variant-numeric: tabular-nums;
 }
@@ -998,8 +998,8 @@ onBeforeUnmount(() => {
   text-align: center;
   padding: 1rem;
 }
-.state-overlay.password i { font-size: 1.5rem; }
-.password-error { color: var(--p-red-400); font-size: 0.85rem; }
+.state-overlay.password i { font-size: var(--text-3xl); }
+.password-error { color: var(--p-red-400); font-size: var(--text-base); }
 .password-form { display: flex; gap: 0.5rem; margin-top: 0.25rem; flex-wrap: wrap; justify-content: center; }
 .password-input {
   padding: 0.35rem 0.6rem;

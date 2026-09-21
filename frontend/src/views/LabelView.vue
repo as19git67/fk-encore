@@ -866,7 +866,7 @@ onMounted(() => {
 .page-hint {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   line-height: 1.4;
 }
 
@@ -892,7 +892,7 @@ onMounted(() => {
 }
 
 .label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 
@@ -982,7 +982,7 @@ onMounted(() => {
   min-width: 2.5rem;
 }
 .font-sample small {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
 }
 .align-label {
@@ -997,7 +997,7 @@ onMounted(() => {
 }
 .printer-option__state {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .actions {
@@ -1035,12 +1035,12 @@ onMounted(() => {
 .hint-muted {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .hint-warn {
   margin: 0;
   color: var(--p-message-warn-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .hint-muted code {
   background: rgba(0, 0, 0, 0.05);

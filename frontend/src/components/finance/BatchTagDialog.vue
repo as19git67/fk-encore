@@ -365,12 +365,12 @@ async function save() {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .bt-ai-hint {
   flex-basis: 100%;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 

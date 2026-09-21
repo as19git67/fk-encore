@@ -79,19 +79,19 @@ defineEmits<{ 'update:visible': [value: boolean] }>()
   margin-bottom: 0.75rem;
 }
 .storage-dialog__total {
-  font-size: 1.25rem;
+  font-size: var(--text-2xl);
   font-weight: 600;
 }
 .storage-dialog__table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   margin-bottom: 1rem;
 }
 .storage-dialog__table th {
   color: var(--p-text-muted-color);
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   text-transform: uppercase;
   text-align: left;
   padding-bottom: 0.3rem;
@@ -104,16 +104,16 @@ defineEmits<{ 'update:visible': [value: boolean] }>()
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .storage-dialog__hint {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .storage-dialog__kinds {
   margin: 0.3rem 0 0;
   padding-left: 1.2rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 </style>

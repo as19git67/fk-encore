@@ -235,7 +235,7 @@ onMounted(load)
   gap: 12px;
   margin-top: 4px;
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .lv-meta i {
   margin-right: 3px;

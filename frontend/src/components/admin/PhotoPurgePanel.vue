@@ -224,7 +224,7 @@ const purgeDbTotals = computed(() => {
   gap: 0.15rem;
 }
 .purge-dialog__hint {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .purge-dialog__confirm {
@@ -233,7 +233,7 @@ const purgeDbTotals = computed(() => {
   gap: 0.35rem;
 }
 .purge-dialog__confirm label {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 /* Purge result */
@@ -245,7 +245,7 @@ const purgeDbTotals = computed(() => {
 .purge-result__table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .purge-result__table th,
 .purge-result__table td {
@@ -256,12 +256,12 @@ const purgeDbTotals = computed(() => {
 .purge-result__table th {
   color: var(--p-text-muted-color);
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   text-transform: uppercase;
 }
 .purge-result__files,
 .purge-result__embeddings {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .purge-result__warn {
   color: var(--p-red-600);

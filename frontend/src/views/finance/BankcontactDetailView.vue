@@ -685,7 +685,7 @@ async function del() {
 }
 .card h2 {
   margin: 0 0 0.5rem;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .field {
   display: flex;
@@ -721,7 +721,7 @@ async function del() {
   gap: 0.25rem;
 }
 .sync-errors__item {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .tan-method-row {
   display: flex;
@@ -744,7 +744,7 @@ async function del() {
   min-width: 0;
 }
 .cred-tag {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   margin-left: 0.4rem;
   vertical-align: middle;
 }
@@ -790,7 +790,7 @@ async function del() {
 }
 .account-meta {
   color: var(--p-text-muted-color);
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
@@ -799,7 +799,7 @@ async function del() {
   font-variant: tabular-nums;
 }
 .type-tag {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 .pending-list {
   list-style: none;
@@ -825,7 +825,7 @@ async function del() {
 }
 .pending-meta {
   color: var(--p-text-muted-color);
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   display: flex;
   gap: 0.75rem;
 }

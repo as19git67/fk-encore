@@ -661,11 +661,11 @@ onMounted(async () => {
 
 .notif-types-title {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .notif-types-hint {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 
@@ -695,12 +695,12 @@ onMounted(async () => {
 }
 
 .notif-type-label {
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   font-weight: 500;
 }
 
 .notif-type-desc {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
@@ -720,7 +720,7 @@ onMounted(async () => {
 
 .device-list-title {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .device-list-items {
@@ -749,19 +749,19 @@ onMounted(async () => {
 }
 
 .device-name {
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   font-weight: 500;
 }
 
 .device-current {
   margin-left: 0.35rem;
   font-weight: 400;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-primary-color);
 }
 
 .device-meta {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 </style>

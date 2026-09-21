@@ -334,20 +334,20 @@ function severityTag(sev: Recommendation['severity']): "danger" | "warn" | "info
 }
 
 .kpi-label {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
 
 .kpi-value {
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
   font-weight: 600;
   color: var(--p-text-color);
 }
 
 .kpi-delta {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   font-weight: 500;
 }
 .kpi-delta.delta-positive {
@@ -399,7 +399,7 @@ function severityTag(sev: Recommendation['severity']): "danger" | "warn" | "info
 .chart-card h4 {
   margin: 0 0 0.75rem;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .chart-container {

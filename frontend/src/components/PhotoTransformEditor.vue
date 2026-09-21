@@ -768,7 +768,7 @@ onMounted(() => {
 
 .control-section h4 {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--p-text-muted-color);
 }
@@ -815,19 +815,19 @@ onMounted(() => {
 }
 
 .suggestion-row .hint {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   flex: 1 1 100%;
 }
 
 .hint {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
 .hint .pi-sparkles {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-primary-color);
   vertical-align: -1px;
 }
@@ -840,7 +840,7 @@ onMounted(() => {
 }
 
 .slider-row label {
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 
 .slider-row .slider {
@@ -848,7 +848,7 @@ onMounted(() => {
 }
 
 .slider-row .slider-value {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   text-align: right;
   font-variant-numeric: tabular-nums;

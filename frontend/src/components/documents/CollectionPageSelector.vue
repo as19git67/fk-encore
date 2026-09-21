@@ -191,7 +191,7 @@ function save() {
 }
 .cps-count {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .cps-toolbar-actions {
   display: flex;
@@ -239,7 +239,7 @@ function save() {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   background: var(--p-primary-color);
   color: var(--p-primary-contrast-color);
 }
@@ -253,7 +253,7 @@ function save() {
   left: 6px;
   padding: 1px 7px;
   border-radius: 10px;
-  font-size: 0.72rem;
+  font-size: var(--text-sm);
   /* The label floats on the page thumbnail, not on a themed surface: the
      dark scrim gives it its own background in both themes, so the text
      stays white either way. */

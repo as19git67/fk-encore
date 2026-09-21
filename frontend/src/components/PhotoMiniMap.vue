@@ -168,7 +168,7 @@ watch(() => [props.latitude, props.longitude], () => {
   border: 1px solid var(--p-content-border-color);
   background: var(--p-content-background);
   color: var(--p-text-color);
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 700;
   line-height: 1;
   border-radius: 4px;

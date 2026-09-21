@@ -144,11 +144,11 @@ async function handleResetPassword() {
 
 .field label {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 
 .hint {
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   margin: 0 0 0.5rem;
 }

@@ -276,7 +276,7 @@ onMounted(load)
   padding: 48px 16px;
 }
 .re-empty .pi-check-circle {
-  font-size: 2.5rem;
+  font-size: var(--text-6xl);
   color: var(--p-green-500);
   margin-bottom: 12px;
 }
@@ -327,14 +327,14 @@ onMounted(load)
 }
 .re-amount {
   font-weight: 600;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
 }
 .re-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .re-meta i {
   margin-right: 3px;
@@ -346,7 +346,7 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .re-field {
   display: flex;
@@ -367,12 +367,12 @@ onMounted(load)
   color: var(--p-primary-color);
 }
 .re-arrow {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
 }
 .re-processing {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .re-actions {
   display: flex;
@@ -383,7 +383,7 @@ onMounted(load)
 .re-hint {
   text-align: center;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   padding: 16px;
 }
 .re-hint i {

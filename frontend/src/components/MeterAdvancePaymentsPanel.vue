@@ -98,7 +98,7 @@ const rows = computed(() =>
 }
 .advance-head h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
   display: flex;
   align-items: center;
@@ -106,7 +106,7 @@ const rows = computed(() =>
 }
 .advance-head p {
   margin: 0.25rem 0 0.75rem;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   max-width: 80ch;
 }
@@ -123,14 +123,14 @@ const rows = computed(() =>
 .partial-marker {
   margin-left: 0.25rem;
   color: var(--p-tag-warn-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .advance-table :deep(.p-datatable-table-container) {
   overflow-x: auto;
 }
 .info {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .info-compact {
   margin-top: 0.75rem;

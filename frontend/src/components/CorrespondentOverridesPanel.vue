@@ -153,7 +153,7 @@ onMounted(load)
 }
 .hint {
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   margin: 0;
 }
 .add-row {
@@ -167,7 +167,7 @@ onMounted(load)
 }
 .msg {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .msg.error {
   color: var(--p-red-500);
@@ -235,10 +235,10 @@ onMounted(load)
     display: flex;
     flex-direction: column;
     gap: 0.05rem;
-    font-size: 0.9rem;
+    font-size: var(--text-base);
   }
   .ovr-card__label {
-    font-size: 0.75rem;
+    font-size: var(--text-sm);
     text-transform: uppercase;
     color: var(--p-text-muted-color);
   }

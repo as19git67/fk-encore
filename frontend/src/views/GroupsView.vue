@@ -309,7 +309,7 @@ onMounted(load)
 }
 .h-info { display: flex; flex-direction: column; gap: 0.25rem; }
 .h-name { font-weight: 600; }
-.h-meta { font-size: 0.85rem; opacity: 0.8; }
+.h-meta { font-size: var(--text-base); opacity: 0.8; }
 
 .detail-panel {
   background: var(--p-content-background);
@@ -325,7 +325,7 @@ onMounted(load)
   align-items: flex-start;
   margin-bottom: 1.5rem;
 }
-.detail-header h2 { margin: 0; font-size: 1.25rem; }
+.detail-header h2 { margin: 0; font-size: var(--text-2xl); }
 
 .info, .info-centered {
   padding: 2rem;

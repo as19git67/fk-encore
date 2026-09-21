@@ -926,7 +926,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   border-radius: 8px;
   padding: 6px 12px;
   color: rgba(255, 255, 255, 0.9);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .trip-stats-row {
@@ -958,14 +958,14 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 }
 
 .trip-timeline-album-name {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-weight: 600;
   flex-shrink: 0;
   color: var(--p-text-color);
 }
 
 .trip-timeline-album-desc {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: color-mix(in srgb, var(--p-text-color) 70%, transparent);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1086,7 +1086,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 }
 
 .trip-timeline-label {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -1095,12 +1095,12 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 }
 
 .trip-timeline-date {
-  font-size: 0.65rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
 }
 
 .trip-timeline-count {
-  font-size: 0.6rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
 }
 
@@ -1136,7 +1136,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
   color: var(--p-primary-color);
   border: 2px solid var(--p-primary-color);
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
   margin-bottom: 0.3rem;
 }
 
@@ -1177,7 +1177,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   .trip-timeline-item--overview .trip-timeline-overview-icon {
     width: 44px;
     height: 44px;
-    font-size: 1.15rem;
+    font-size: var(--text-xl);
   }
 
   .trip-timeline-connector {
@@ -1252,7 +1252,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   right: -4px;
   background: var(--p-primary-color);
   color: white;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   min-width: 18px;
   height: 18px;

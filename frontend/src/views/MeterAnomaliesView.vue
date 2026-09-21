@@ -348,7 +348,7 @@ function statusLabel(status: MeterAnomalyStatus) {
 /* Page frame and title: PageLayout (issue #1272). */
 .intro-hint {
   margin: 0 0 1rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   max-width: 80ch;
 }
@@ -390,7 +390,7 @@ function statusLabel(status: MeterAnomalyStatus) {
   border-left-color: var(--p-tag-info-color);
 }
 .card-icon {
-  font-size: 1.2rem;
+  font-size: var(--text-2xl);
   color: var(--p-text-muted-color);
   padding-top: 0.15rem;
 }
@@ -402,7 +402,7 @@ function statusLabel(status: MeterAnomalyStatus) {
   align-items: center;
   gap: 0.6rem;
   flex-wrap: wrap;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .card-type {
   font-weight: 600;
@@ -428,12 +428,12 @@ function statusLabel(status: MeterAnomalyStatus) {
 }
 .card-message {
   margin: 0.35rem 0 0;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-color);
 }
 .card-detail {
   margin-top: 0.25rem;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .card-actions {

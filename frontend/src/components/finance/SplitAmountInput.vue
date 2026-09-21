@@ -78,6 +78,6 @@ function onBlur() {
 .split-amount-currency {
   flex: 0 0 auto;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 </style>

@@ -111,12 +111,12 @@ function openRecap(r: RecapSummary) {
 
 .recap-strip-header h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
 .recap-strip-all {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-primary-color);
   text-decoration: none;
 }
@@ -178,7 +178,7 @@ function openRecap(r: RecapSummary) {
   align-items: center;
   justify-content: center;
   color: var(--p-text-muted-color);
-  font-size: 2rem;
+  font-size: var(--text-5xl);
 }
 
 .recap-strip-kind {
@@ -189,7 +189,7 @@ function openRecap(r: RecapSummary) {
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.65);
   color: #fff; /* audit-ok: chip on its own dark pill above the cover photo — white in both themes */
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
 }
 
 .recap-strip-play {
@@ -204,7 +204,7 @@ function openRecap(r: RecapSummary) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   backdrop-filter: blur(4px);
 }
 
@@ -214,7 +214,7 @@ function openRecap(r: RecapSummary) {
 
 .recap-strip-title {
   margin-top: 0.4rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -222,7 +222,7 @@ function openRecap(r: RecapSummary) {
 }
 
 .recap-strip-subtitle {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   overflow: hidden;
   text-overflow: ellipsis;

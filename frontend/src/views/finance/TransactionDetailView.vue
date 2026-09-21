@@ -1323,7 +1323,7 @@ const extractedFields = computed(() => {
   align-items: center;
   gap: 0.35rem;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -1347,7 +1347,7 @@ const extractedFields = computed(() => {
 }
 .card h2 {
   margin: 0.25rem 0 0.25rem;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--p-text-muted-color);
   text-transform: uppercase;
@@ -1361,7 +1361,7 @@ const extractedFields = computed(() => {
 }
 .details dt {
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   align-self: center;
 }
 .details dd {
@@ -1384,7 +1384,7 @@ const extractedFields = computed(() => {
 }
 .document-links-title {
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .linked-documents {
   display: flex;
@@ -1412,7 +1412,7 @@ const extractedFields = computed(() => {
 .document-info {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .document-link-panel {
   box-sizing: border-box;
@@ -1430,7 +1430,7 @@ const extractedFields = computed(() => {
 .document-panel-section h3 {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 .document-search-row {
@@ -1500,8 +1500,8 @@ const extractedFields = computed(() => {
   cursor: pointer;
 }
 .document-suggestion-preview--interactive:focus-visible {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .document-preview-tags {
   display: flex;
@@ -1521,7 +1521,7 @@ const extractedFields = computed(() => {
   grid-template-columns: auto 1fr;
   gap: 0.25rem 0.6rem;
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .document-preview-meta dt {
   color: var(--p-text-muted-color);
@@ -1532,7 +1532,7 @@ const extractedFields = computed(() => {
 .document-preview-text {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   line-height: 1.35;
 }
 .document-result-actions {
@@ -1597,7 +1597,7 @@ const extractedFields = computed(() => {
 }
 .copy-field:hover { text-decoration: underline; }
 .copy-icon {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   flex-shrink: 0;
 }
@@ -1614,7 +1614,7 @@ const extractedFields = computed(() => {
 }
 .tag-remove {
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 .field {
   display: flex;
@@ -1697,7 +1697,7 @@ const extractedFields = computed(() => {
 }
 .hint {
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .page-actions {
   display: flex;
@@ -1726,7 +1726,7 @@ const extractedFields = computed(() => {
   border-radius: 0.25rem;
   cursor: pointer;
   align-items: baseline;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .recurring-row:hover {
   background: var(--p-content-hover-background);
@@ -1765,7 +1765,7 @@ const extractedFields = computed(() => {
   padding: 0.3rem 0;
   cursor: pointer;
   color: var(--p-primary-color, var(--p-text-color));
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   font-family: inherit;
   margin-top: 0.25rem;
 }
@@ -1783,7 +1783,7 @@ const extractedFields = computed(() => {
   color: var(--p-primary-contrast-color);
   padding: 0.5rem 1.25rem;
   border-radius: 2rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   z-index: 9999;
   pointer-events: none;
 }

@@ -394,7 +394,7 @@ function goToManualBooking() {
   margin-left: 0.5rem;
   padding: 0.05rem 0.5rem;
   border-radius: 0.5rem;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   background: rgba(0, 0, 0, 0.06);
@@ -419,7 +419,7 @@ function goToManualBooking() {
 }
 .hint-error {
   color: var(--p-red-500);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .footer-leading-btn {
   margin-right: auto;

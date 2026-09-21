@@ -474,7 +474,7 @@ function formatRelative(iso: string): string {
   padding: 0.45rem 0.7rem;
   line-height: 1.3;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .reactions__toggle {

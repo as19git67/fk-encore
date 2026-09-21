@@ -363,23 +363,23 @@ function openDetail(id: number) {
 }
 .overview-card > i {
   grid-row: 1 / span 2;
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
   color: var(--p-text-muted-color);
 }
 .overview-card__label {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 .overview-card__value {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   line-height: 1.25;
 }
 .overview-card__value small {
   display: block;
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   margin-top: 0.1rem;
 }
 .overview-card--tan {

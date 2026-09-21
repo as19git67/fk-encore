@@ -465,7 +465,7 @@ async function saveConfig() {
   outline: none;
 }
 .anomaly-tile .tile-icon {
-  font-size: 1.4rem;
+  font-size: var(--text-3xl);
   color: var(--p-yellow-500);
   flex: 0 0 auto;
 }
@@ -478,7 +478,7 @@ async function saveConfig() {
   color: var(--p-text-color);
 }
 .anomaly-tile .tile-sub {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .anomaly-tile .tile-chevron {
@@ -499,7 +499,7 @@ async function saveConfig() {
 }
 .overview-section h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   font-weight: 600;
   color: var(--p-text-color);
 }
@@ -564,8 +564,8 @@ async function saveConfig() {
   text-decoration: underline;
 }
 .row-link:focus-visible {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
   border-radius: 0.125rem;
 }
 .row-badge {
@@ -578,13 +578,13 @@ async function saveConfig() {
   border-radius: 999px;
   background: var(--p-primary-500);
   color: var(--p-primary-contrast-color);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   line-height: 1;
 }
 .row-sub {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .balance {
   font-variant-numeric: tabular-nums;
@@ -677,7 +677,7 @@ async function saveConfig() {
   padding: 0.25rem 0.5rem;
 }
 .cfg-pool-title {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   margin: 1rem 0 0.5rem;
 }
 /* Tighter vertical rhythm on narrow screens (was the page gap). */

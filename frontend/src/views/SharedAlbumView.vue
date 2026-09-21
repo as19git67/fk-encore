@@ -903,7 +903,7 @@ onUnmounted(() => {
 .shared-header .description {
   color: var(--p-text-muted-color);
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -913,7 +913,7 @@ onUnmounted(() => {
 }
 
 .shared-header .meta {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   white-space: nowrap;
   flex-shrink: 0;
@@ -934,7 +934,7 @@ onUnmounted(() => {
   background: var(--p-content-background);
   color: var(--p-primary-color);
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   line-height: 1;
 }
 
@@ -1034,7 +1034,7 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   line-height: 1.4;
   color: var(--p-text-color);
 }
@@ -1043,7 +1043,7 @@ onUnmounted(() => {
   margin-top: 0.15rem;
   opacity: 0.6;
   flex-shrink: 0;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
 }
 
 .info-row > span,
@@ -1095,7 +1095,7 @@ onUnmounted(() => {
   }
 
   .info-row {
-    font-size: 0.9rem;
+    font-size: var(--text-base);
   }
 }
 </style>

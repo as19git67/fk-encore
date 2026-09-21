@@ -309,7 +309,7 @@ function formatDuration(ms: number | null): string {
 .hint {
   color: var(--p-text-muted-color);
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .group {
   display: flex;
@@ -318,7 +318,7 @@ function formatDuration(ms: number | null): string {
 }
 .group-title {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--p-text-muted-color);
@@ -371,7 +371,7 @@ function formatDuration(ms: number | null): string {
   grid-column: 1 / -1;
 }
 .field dt {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--p-text-muted-color);
@@ -389,7 +389,7 @@ function formatDuration(ms: number | null): string {
 }
 code.error {
   color: var(--p-red-500);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   white-space: pre-wrap;
   word-break: break-word;
 }

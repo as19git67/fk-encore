@@ -1545,7 +1545,7 @@ onBeforeUnmount(() => {
 .propose-hint {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .propose-checkbox {
   display: flex;
@@ -1572,7 +1572,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.35rem;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -1606,7 +1606,7 @@ onBeforeUnmount(() => {
 }
 .help-flyout__title {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
 }
 .help-flyout__list {
@@ -1632,11 +1632,11 @@ onBeforeUnmount(() => {
 .help-flyout__list strong {
   display: block;
   color: var(--p-text-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .help-flyout__list span {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   line-height: 1.35;
 }
 
@@ -1757,7 +1757,7 @@ onBeforeUnmount(() => {
   padding: 0.6rem 0.75rem;
   background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
   border-radius: 6px;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   line-height: 1.4;
 }
 .meta-summary i { color: var(--p-primary-color); flex-shrink: 0; margin-top: 0.15rem; }
@@ -1773,7 +1773,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--p-content-border-color);
   border-radius: 6px;
   background: var(--p-content-hover-background);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-color);
 }
 .retention-hint .pi-clock { color: var(--p-text-muted-color); margin-top: 0.15rem; }
@@ -1791,7 +1791,7 @@ onBeforeUnmount(() => {
   flex: 1 1 12rem;
   min-width: 0;
 }
-.label { font-size: 0.85rem; color: var(--p-text-muted-color); }
+.label { font-size: var(--text-base); color: var(--p-text-muted-color); }
 
 .current-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; }
 
@@ -1812,7 +1812,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .group-select {
@@ -1822,7 +1822,7 @@ onBeforeUnmount(() => {
   gap: 0.25rem;
 }
 .hint {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   margin: 0;
 }
@@ -1842,7 +1842,7 @@ onBeforeUnmount(() => {
 }
 
 .extra-info {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   display: flex;
   flex-direction: column;
@@ -1860,7 +1860,7 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   align-items: baseline;
   margin-top: 0.25rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .letterhead__label {
@@ -1878,7 +1878,7 @@ onBeforeUnmount(() => {
 
 .letterhead__caption {
   color: var(--p-text-muted-color);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 
 .letterhead__value--none {
@@ -1888,7 +1888,7 @@ onBeforeUnmount(() => {
 
 .letterhead__hint {
   margin: 0.4rem 0 0;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
@@ -1899,7 +1899,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--p-content-border-color);
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 180px;
@@ -1927,7 +1927,7 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
 }
 .collections-title {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0;
   display: inline-flex;
@@ -1948,7 +1948,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--p-content-border-color);
   background: var(--p-content-hover-background);
   color: var(--p-text-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   cursor: pointer;
 }
 .collection-chip--off {
@@ -1957,7 +1957,7 @@ onBeforeUnmount(() => {
 .collections-empty {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.82rem;
+  font-size: var(--text-md);
 }
 .tax-card {
   display: flex;
@@ -1976,7 +1976,7 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
 }
 .tax-card-title {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0;
   display: inline-flex;
@@ -1998,7 +1998,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 0.5rem;
   align-items: baseline;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .tax-sections-view {
   display: flex;
@@ -2014,7 +2014,7 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--p-green-500) 18%, transparent);
 }
 .tax-empty-hint {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 
@@ -2026,7 +2026,7 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   background: var(--p-content-hover-background);
   border: 1px solid var(--p-content-border-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-color);
 }
 .tax-review-hint .pi {
@@ -2062,7 +2062,7 @@ onBeforeUnmount(() => {
 }
 .tax-section-group-label {
   width: 100%;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--p-primary-color);
   text-transform: uppercase;
@@ -2072,7 +2072,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 </style>

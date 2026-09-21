@@ -1054,7 +1054,7 @@ onMounted(() => {
   font-weight: 700;
 }
 .rq-conf {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 700;
   padding: 3px 10px;
   border-radius: 999px;
@@ -1076,7 +1076,7 @@ onMounted(() => {
 }
 .rq-card-count {
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 /* Confidence-bar (Stufe D): horizontal pill that fills proportionally
@@ -1107,7 +1107,7 @@ onMounted(() => {
 }
 
 .rq-calib-detail {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   margin: 8px 0 0 0;
 }
@@ -1172,7 +1172,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   pointer-events: none;
 }
 
@@ -1212,8 +1212,8 @@ onMounted(() => {
   cursor: zoom-in;
 }
 .rq-thumb:focus-visible {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .rq-thumb img {
   width: 100%;
@@ -1238,7 +1238,7 @@ onMounted(() => {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  font-size: 0.65rem;
+  font-size: var(--text-xs);
   font-weight: 700;
   color: #fff; /* audit-ok: count on the solid peer-signal dot over the photo */
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
@@ -1263,7 +1263,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
 }
 
 /* AI quality rating chip. Top-left so it clears the pick-check (top-right)
@@ -1278,14 +1278,14 @@ onMounted(() => {
   gap: 3px;
   padding: 1px 6px;
   border-radius: 9px;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   font-weight: 700;
   color: #fff; /* audit-ok: chip on a dark scrim over the photo */
   background: rgba(0, 0, 0, 0.6);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
 }
 .rq-quality--strip {
-  font-size: 0.6rem;
+  font-size: var(--text-xs);
   padding: 0 4px;
 }
 .rq-quality--good { color: var(--p-green-400); }
@@ -1316,7 +1316,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
 }
 .rq-consensus-dot {
   display: inline-block;
@@ -1364,7 +1364,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
 }
 .rq-lightbox-close:hover {
   background: rgba(255, 255, 255, 0.25);
@@ -1381,6 +1381,6 @@ onMounted(() => {
   background: rgba(34, 197, 94, 0.9);
   color: #fff; /* audit-ok: badge on the solid green pill in the lightbox */
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 </style>

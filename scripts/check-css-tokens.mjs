@@ -16,6 +16,16 @@
  *      translucent overlay darkens or lightens whatever is underneath, so it
  *      works in both themes. That is the escape hatch CLAUDE.md names for
  *      the cases the theme has no variable for.
+ *   4. A PrimeVue 3 variable name (`--surface-border`, `--text-color-secondary`,
+ *      `--blue-100`). PrimeVue 4 prefixes everything with `--p-`, so the old
+ *      names resolve to nothing — the rule silently does not apply, or the
+ *      hard-coded fallback behind it renders instead. Neither follows the
+ *      theme, and neither looks broken enough to notice.
+ *
+ * It also refuses a literal `font-size` (issue #1281): sizes come from the
+ * type scale in style.css (`--text-xs` … `--text-7xl`), so a size is a
+ * decision about role and not a number somebody typed. Relative units (`em`,
+ * `%`, `inherit`) are untouched — they scale with their context by design.
  *
  * Only `<style>` blocks are read: a hex inside an inline SVG, a chart's data
  * colours in a script or a colour typed by the user are not theme styling.
@@ -81,6 +91,22 @@ const RULES = [
       if (!Number.isFinite(alpha)) return false
       return raw.includes('%') ? alpha < 100 : alpha < 1
     },
+  },
+  {
+    id: 'legacy-token',
+    // PrimeVue 3's unprefixed vocabulary. `--text-xs` … `--text-7xl` and
+    // `--focus-ring*` are this app's own tokens, so `--text-color` and
+    // `--text-color-secondary` are named exactly rather than by prefix.
+    pattern:
+      /--(?:surface-(?:border|card|ground|hover|section|overlay|[a-d])|text-color(?:-secondary)?|primary-color(?:-text)?|highlight-(?:bg|text-color)|(?:red|green|blue|yellow|orange|purple|pink|cyan|teal|indigo|gray|bluegray)-\d+)\b/g,
+    message: 'PrimeVue 3 name — PrimeVue 4 prefixes everything with --p-, so this resolves to nothing',
+  },
+  {
+    id: 'font-size-literal',
+    // `font-size: 0.85rem` / `13px`. `em`, `%`, `inherit`, `clamp()` and a
+    // var() are all fine: they are relative, or already a token.
+    pattern: /font-size:\s*(\d*\.?\d+(?:rem|px|pt))/g,
+    message: 'literal size — name a rung of the type scale (--text-xs … --text-7xl)',
   },
 ]
 
@@ -171,10 +197,11 @@ for (const file of files) {
 
 if (offending > 0) {
   console.error(
-    `\n${offending} file(s) name colours instead of asking the theme.\n` +
-      'Use a semantic --p-* variable, or rgba() with alpha where none fits.\n' +
+    `\n${offending} file(s) name values the theme or the scale should have chosen.\n` +
+      'Use a semantic --p-* variable, or rgba() with alpha where none fits;\n' +
+      'sizes come from --text-xs … --text-7xl.\n' +
       'A line that genuinely has to keep its value ends in /* audit-ok: why */.',
   )
   process.exit(1)
 }
-console.log(`Colour audit clean (${files.length} files).`)
+console.log(`Style audit clean (${files.length} files).`)

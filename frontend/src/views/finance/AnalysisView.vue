@@ -1215,11 +1215,11 @@ const tagChartOptions = computed(() => {
 }
 .card h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .subhead {
   margin: 0.25rem 0 0;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--p-text-muted-color);
 }
@@ -1273,12 +1273,12 @@ const tagChartOptions = computed(() => {
 }
 .stat .label {
   color: var(--p-text-muted-color);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
 .stat .value {
-  font-size: 1.25rem;
+  font-size: var(--text-2xl);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -1297,7 +1297,7 @@ const tagChartOptions = computed(() => {
   white-space: nowrap;
 }
 .relative-hint {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   font-style: italic;
 }
@@ -1351,12 +1351,12 @@ const tagChartOptions = computed(() => {
 }
 .detail-card-purpose {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   word-break: break-word;
 }
 .detail-card-date {
   color: var(--p-text-muted-color);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 .detail-card-amount {
   font-variant-numeric: tabular-nums;
@@ -1373,7 +1373,7 @@ const tagChartOptions = computed(() => {
   color: var(--p-primary-color);
 }
 .stat-primary .value {
-  font-size: 1.75rem;
+  font-size: var(--text-4xl);
 }
 
 /* --- Retry message --- */
@@ -1391,14 +1391,14 @@ const tagChartOptions = computed(() => {
   gap: 0.75rem;
 }
 .tx-detail-amount {
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .tx-detail-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 .tx-detail-table th {
   text-align: left;
@@ -1415,7 +1415,7 @@ const tagChartOptions = computed(() => {
 }
 .tx-detail-table .mono {
   font-family: monospace;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .tx-detail-tags {
   display: flex;
@@ -1445,7 +1445,7 @@ const tagChartOptions = computed(() => {
   padding: 0.125rem 0;
 }
 .connector-op {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   font-weight: 700;
   text-transform: uppercase;
   color: var(--p-primary-color);
@@ -1453,7 +1453,7 @@ const tagChartOptions = computed(() => {
 }
 .group-op-btn {
   min-width: 3.5rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 .tag-group-actions {
   display: flex;
@@ -1467,7 +1467,7 @@ const tagChartOptions = computed(() => {
   gap: 0.5rem;
 }
 .group-op-label {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .timespan-select {
@@ -1531,14 +1531,14 @@ const tagChartOptions = computed(() => {
 }
 .saved-card-name {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
 }
 .saved-card-badge {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   font-weight: 700;
   padding: 0.125rem 0.375rem;
@@ -1553,11 +1553,11 @@ const tagChartOptions = computed(() => {
   font-variant-numeric: tabular-nums;
 }
 .saved-card-sum {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 .saved-card-count {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .saved-card-footer {
@@ -1566,7 +1566,7 @@ const tagChartOptions = computed(() => {
   justify-content: space-between;
 }
 .saved-card-date {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
 }
 .saved-card-delete {

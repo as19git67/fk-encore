@@ -316,7 +316,7 @@ async function handleCancel() {
 <style scoped>
 .poi-redetect-result {
   margin: 0.5rem 0 0;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 </style>

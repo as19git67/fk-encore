@@ -86,7 +86,7 @@ function cancel() {
 .hint {
   margin: 0 0 0.6rem;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .search {
   display: flex;
@@ -101,7 +101,7 @@ function cancel() {
 }
 .no-match {
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   padding: 0.5rem 0.4rem;
 }
 .album-list {

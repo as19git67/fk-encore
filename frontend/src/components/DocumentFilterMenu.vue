@@ -362,6 +362,6 @@ function handleReset() {
 <style scoped>
 .filter-menu { display: flex; flex-direction: column; gap: 1.25rem; }
 .filter-row { display: flex; flex-direction: column; gap: 0.5rem; }
-.filter-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
+.filter-label { font-weight: 500; font-size: var(--text-base); color: var(--p-text-muted-color); }
 .filter-switch { display: flex; align-items: center; gap: 0.6rem; }
 </style>

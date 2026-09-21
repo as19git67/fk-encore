@@ -272,7 +272,7 @@ onMounted(load)
 .capture-head p,
 .entry-title small,
 .row-info {
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 h2,
@@ -282,16 +282,16 @@ p {
 
 .card {
   padding: 1rem;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 16px;
-  background: var(--surface-card);
+  background: var(--p-content-background);
 }
 
 .empty {
   padding: 1rem;
-  border: 1px dashed var(--surface-border);
+  border: 1px dashed var(--p-content-border-color);
   border-radius: 12px;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .empty-config {
@@ -302,9 +302,9 @@ p {
 }
 
 .entry-row {
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 14px;
-  background: var(--surface-ground);
+  background: var(--p-content-hover-background);
 }
 
 .meter-icon {
@@ -314,8 +314,8 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--primary-color);
-  background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+  color: var(--p-primary-color);
+  background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
   flex: 0 0 auto;
 }
 
@@ -350,11 +350,11 @@ p {
 }
 
 .entry-row.saved {
-  border-color: color-mix(in srgb, var(--green-500) 55%, var(--surface-border));
+  border-color: color-mix(in srgb, var(--p-green-500) 55%, var(--p-content-border-color));
 }
 
 .unit {
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   min-width: 2.5rem;
   flex: 0 0 auto;
 }

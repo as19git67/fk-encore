@@ -657,7 +657,7 @@ onUnmounted(() => {
 .hint {
   color: var(--p-text-muted-color);
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .tools-grid {
   display: flex;
@@ -701,7 +701,7 @@ onUnmounted(() => {
   max-width: 100%;
 }
 .option-row label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   white-space: nowrap;
   flex-shrink: 0;
   color: var(--p-text-muted-color);
@@ -733,7 +733,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 .reports-label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   flex-shrink: 0;
 }
@@ -759,7 +759,7 @@ onUnmounted(() => {
 }
 .log-content {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;

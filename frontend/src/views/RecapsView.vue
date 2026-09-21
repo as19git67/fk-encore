@@ -696,7 +696,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
 .recaps-empty .hint {
   max-width: 520px;
   margin: 0.5rem auto 0;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .recaps-grid {
@@ -748,7 +748,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   /* Placeholder glyph on the fixed dark letterbox — a translucent white keeps
      the same grey there and needs no fixed colour of its own. */
   color: rgba(255, 255, 255, 0.28);
-  font-size: 3rem;
+  font-size: var(--text-7xl);
 }
 
 .recap-kind-badge {
@@ -759,7 +759,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   background: rgba(0, 0, 0, 0.65);
   color: #fff; /* audit-ok: label on a dark scrim over the photo, white in both themes */
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 
 .recap-card-play {
@@ -772,7 +772,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   border: none;
   background: rgba(0, 0, 0, 0.65);
   color: #fff; /* audit-ok: play icon on a dark scrim over the cover photo */
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -799,7 +799,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   background: var(--p-primary-color);
   color: var(--p-primary-contrast-color);
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: 0.02em;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -811,18 +811,18 @@ async function playFromCard(r: RecapSummary, e: Event) {
 
 .recap-title {
   font-weight: 600;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
 }
 
 .recap-subtitle {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   margin-top: 2px;
 }
 
 .recap-count {
   margin-top: 0.4rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 
@@ -858,7 +858,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
 
 .recap-detail-header h2 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
   min-width: 0;
   word-break: break-word;
 }
@@ -945,7 +945,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
     border-radius: 10px;
   }
   .recap-detail-header h2 {
-    font-size: 1.2rem;
+    font-size: var(--text-2xl);
   }
   .recap-detail-actions :deep(.p-button-label) {
     display: none;

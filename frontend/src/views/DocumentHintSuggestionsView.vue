@@ -274,7 +274,7 @@ onMounted(load)
 }
 
 .subtitle {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   margin: 0;
   max-width: 70ch;
@@ -304,12 +304,12 @@ onMounted(load)
 }
 
 .slug {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 
 .date {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   margin-left: auto;
 }
@@ -322,7 +322,7 @@ onMounted(load)
 
 .draft-text {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   padding: 0.5rem 0.75rem;
   background: var(--p-content-hover-background);
   border-radius: 6px;
@@ -331,7 +331,7 @@ onMounted(load)
 
 .rationale {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   display: inline-flex;
   align-items: flex-start;
@@ -346,12 +346,12 @@ onMounted(load)
 }
 
 .label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 
 .more {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 

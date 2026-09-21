@@ -58,8 +58,8 @@ defineExpose({ el, update })
   scrollbar-width: thin;
 }
 .scroll-x:focus-visible {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 /* Edge fades: a hint that the row continues, without a second scrollbar. */
 .scroll-x--more-start {

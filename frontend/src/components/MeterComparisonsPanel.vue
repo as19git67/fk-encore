@@ -299,7 +299,7 @@ function savingWord(value: number | null) {
 
 .comparisons-head h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
   display: flex;
   align-items: center;
@@ -308,7 +308,7 @@ function savingWord(value: number | null) {
 
 .comparisons-head p {
   margin: 0.25rem 0 0;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   max-width: 70ch;
 }
@@ -316,7 +316,7 @@ function savingWord(value: number | null) {
 .comparisons-empty {
   margin: 0.75rem 0 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   max-width: 80ch;
 }
 
@@ -326,7 +326,7 @@ function savingWord(value: number | null) {
 
 .comparison-block h3 {
   margin: 0 0 0.6rem;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
   display: flex;
   align-items: baseline;
@@ -335,7 +335,7 @@ function savingWord(value: number | null) {
 }
 
 .comparison-period {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   font-weight: normal;
   color: var(--p-text-muted-color);
 }
@@ -361,24 +361,24 @@ function savingWord(value: number | null) {
 }
 
 .tile-label {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
 .tile-value {
-  font-size: 1.25rem;
+  font-size: var(--text-2xl);
   font-variant-numeric: tabular-nums;
   color: var(--p-text-color);
 }
 
 .tile-sub {
-  font-size: 0.74rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
 .comparison-note {
   margin: 0.6rem 0 0;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
@@ -390,7 +390,7 @@ function savingWord(value: number | null) {
   border: none;
   background: none;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-primary-color);
   cursor: pointer;
 }
@@ -398,7 +398,7 @@ function savingWord(value: number | null) {
 .assumptions-list {
   margin: 0.5rem 0 0;
   padding-left: 1.2rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 

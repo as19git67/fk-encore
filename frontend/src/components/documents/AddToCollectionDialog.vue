@@ -141,7 +141,7 @@ async function createAndAdd() {
 .atc-lead {
   margin: 0 0 12px;
   color: var(--p-text-muted-color);
-  font-size: 0.86rem;
+  font-size: var(--text-base);
 }
 .atc-new {
   display: flex;
@@ -188,14 +188,14 @@ async function createAndAdd() {
 .atc-meta {
   flex: 0 0 auto;
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .atc-meta i {
   margin-left: 6px;
 }
 .atc-empty {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   margin: 0;
 }
 </style>

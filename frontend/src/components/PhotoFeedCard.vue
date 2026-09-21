@@ -367,15 +367,15 @@ async function submitComment() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   font-weight: 700;
   text-transform: uppercase;
   flex-shrink: 0;
 }
 .head-text { min-width: 0; }
-.owner { font-weight: 600; font-size: 0.95rem; }
+.owner { font-weight: 600; font-size: var(--text-lg); }
 .sub {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   display: flex;
   gap: 0.35rem;
@@ -406,7 +406,7 @@ async function submitComment() {
   position: absolute;
   top: 0.6rem;
   right: 0.6rem;
-  font-size: 1.4rem;
+  font-size: var(--text-3xl);
   color: #fff; /* audit-ok: badge lies on the photo itself, kept legible by the dark shadow below */
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
   pointer-events: none;
@@ -424,7 +424,7 @@ async function submitComment() {
   border: none;
   cursor: pointer;
   padding: 0.35rem 0.6rem;
-  font-size: 1.4rem;
+  font-size: var(--text-3xl);
   line-height: 1;
   color: var(--p-text-color);
   border-radius: 999px;
@@ -433,12 +433,12 @@ async function submitComment() {
 .icon-btn.liked { color: var(--p-red-500); }
 .icon-btn.hidden { color: var(--p-primary-color); }
 .icon-btn .count {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   font-weight: 600;
   min-width: 0.6em;
 }
 .icon-btn.small {
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   padding: 0.3rem 0.4rem;
 }
 .icon-btn:disabled {
@@ -461,13 +461,13 @@ async function submitComment() {
 .caption {
   margin: 0.15rem 0;
   padding: 0 0.8rem;
-  font-size: 0.92rem;
+  font-size: var(--text-base);
   line-height: 1.35;
 }
 .owner-inline { font-weight: 600; margin-right: 0.3rem; }
 /* Edit pencil sized to the caption text and vertically centered with it. */
 .icon-btn.caption-edit {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   padding: 0.1rem 0.3rem;
   vertical-align: middle;
 }
@@ -475,7 +475,7 @@ async function submitComment() {
 .comment-preview {
   margin: 0.1rem 0;
   padding: 0 0.8rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .add-comment {
   display: flex;
@@ -504,20 +504,20 @@ async function submitComment() {
 }
 .comment-row {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 .comment-info {
   padding: 0.4rem 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   text-align: center;
 }
 .comment-error {
   margin: 0;
   padding: 0 0.8rem 0.6rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-red-500);
 }
 </style>
