@@ -339,7 +339,15 @@ onBeforeUnmount(() => stackObserver?.disconnect())
     </div>
 
     <main class="content">
-      <router-view />
+      <!-- The app's one route transition (issue #1281): a 120ms cross-fade,
+           `out-in` so only one page exists at a time — two would each teleport
+           a toolbar into the sticky stack, and the incoming one would restore
+           its scroll position against the outgoing one's height. -->
+      <router-view v-slot="{ Component, route }">
+        <Transition name="route-fade" mode="out-in">
+          <component :is="Component" :key="route.path" />
+        </Transition>
+      </router-view>
     </main>
     <ConfirmDialog />
   </div>
@@ -490,7 +498,7 @@ body {
   padding: 0;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .module-subheaders {
     padding: 0.5rem;
   }

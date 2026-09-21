@@ -25,6 +25,7 @@ import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import { upTo, useMediaQuery } from '../composables/useBreakpoint'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
@@ -152,16 +153,7 @@ const error = ref('')
 // onto a second line. There we compact it: drop the "Fotos" unit word (CSS) and
 // shorten the date range (start without year, end with a 2-digit year), e.g.
 // "484 • 1.1. – 1.6.26" instead of "484 Fotos • 1.1.2026 – 1.6.2026".
-const compactHeader = ref(false)
-const headerMql = typeof window !== 'undefined'
-  ? window.matchMedia('(max-width: 768px) and (orientation: portrait)')
-  : null
-function syncCompactHeader() {
-  compactHeader.value = headerMql?.matches ?? false
-}
-syncCompactHeader()
-onMounted(() => headerMql?.addEventListener('change', syncCompactHeader))
-onUnmounted(() => headerMql?.removeEventListener('change', syncCompactHeader))
+const compactHeader = useMediaQuery(`${upTo('md')} and (orientation: portrait)`)
 
 const headerDateRange = computed(() => {
   const o = album.value?.oldest_photo_at
@@ -3442,11 +3434,11 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
 /* Phone + portrait: the role badge shrinks; the date range is shortened in
    `headerDateRange` (kept in sync with this same media query). */
-@media (max-width: 768px) and (orientation: portrait) {
+@media (max-width: 767px) and (orientation: portrait) {
   .header__badge { font-size: 0.6em; }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .mobile-backdrop { display: block; }
 
   .sidebar-sheet {

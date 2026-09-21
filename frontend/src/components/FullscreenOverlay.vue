@@ -1987,7 +1987,7 @@ onUnmounted(() => {
   pointer-events: auto;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .fs-details-flyout {
     /* Mobile: arrows are hidden (touch uses tap/swipe), so the flyout
        can stretch the full width. Keeps clear of the bottom action bar
@@ -2071,7 +2071,7 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.18);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   /* Datum in TopBar kürzer */
   .fs-date-bar { font-size: 0.8em; }
 }

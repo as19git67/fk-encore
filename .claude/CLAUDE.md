@@ -1126,6 +1126,24 @@ Regeln:
   View darf mit `parameters: { overflowCheck: false }` und Begründung
   aussetzen.
 
+## Breakpoints im Frontend (`useBreakpoint`)
+
+Die Breiten, an denen die App ihr Layout ändert, stehen in
+`composables/useBreakpoint.ts` (Issue #1281): `xs` 480, `sm` 640, `md` 768,
+`lg` 1024, `xl` 1280. Jede Zahl ist die erste Breite des *größeren* Layouts,
+das Paar heißt also `(max-width: 767px)` / `(min-width: 768px)` — nie
+`max-width: 768px`, das beide Seiten für sich beanspruchte.
+
+- Im Skript nie `window.matchMedia` von Hand: `useMediaQuery(query)`,
+  `useAtLeast(name)` oder `useBelow(name)`. Die bauen die Abfrage aus
+  denselben Zahlen und räumen ihren Listener selbst ab.
+- In CSS muss die Zahl wiederholt werden (eine Media Query liest keine
+  Custom Property) — dann `from()`/`upTo()` als Vorlage nehmen, die Liste
+  steht als Kommentar in `style.css`.
+- Eine Schwelle, die nur eine Komponente betrifft (eine Tabelle, die 560px
+  pro Spalte braucht), bleibt eine Zahl in dieser Komponente. Die fünf Namen
+  gehören der Seite.
+
 ## Zurück-Navigation im Frontend (`listAnchor`, `scrollMemory`)
 
 Wo der Nutzer war, merkt sich die App an einer Stelle (Issue #1279):

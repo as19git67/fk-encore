@@ -64,8 +64,18 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
   - ✅ `filter.expanded`: der Filter-Knopf der Transaktionsliste schaltet ein
     Panel um, sah aber offen wie geschlossen aus. Jetzt gefüllt statt
     umrandet, mit `aria-expanded`; Views mit Overlay-Menü lassen es weg.
-  - ⬜ Dialoge, Detailseiten-Aktionen, Breakpoint-Konstanten,
-    Route-Transition, Stories je Seitenzustand.
+  - ✅ `composables/useBreakpoint.ts`: `BREAKPOINTS` (xs 480, sm 640, md 768,
+    lg 1024, xl 1280), `from()`/`upTo()`, `useMediaQuery`, `useAtLeast`,
+    `useBelow`. Die fünf handgebauten `matchMedia`-Blöcke (Galerie,
+    Albumdetail, Zählerdetail, `useSplitView`) benutzen es. Die Grenze bei
+    768px war widersprüchlich: `max-width: 768px` und `min-width: 768px`
+    beanspruchten dieselbe Breite, bei genau 768px galt gleichzeitig der
+    Desktop-Rand und `.mobile-hidden`. Jetzt trennt jede Grenze sauber
+    (`767`/`768`, `639`/`640`).
+  - ✅ Eine Route-Transition in `App.vue`: 120ms Überblendung, `out-in`
+    (zwei gleichzeitig gemountete Seiten würden je eine Toolbar in den
+    Sticky-Stack teleportieren), und bei `prefers-reduced-motion` gar keine.
+  - ⬜ Dialoge, Detailseiten-Aktionen, Stories je Seitenzustand.
 
 Abweichungen vom Entwurf (Etappe 1):
 

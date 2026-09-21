@@ -1643,7 +1643,7 @@ onBeforeUnmount(() => {
 /* On phones the four labelled buttons (Zurück / Neu klassifizieren /
    OCR erzwingen / Löschen) overflow the viewport. Hide the labels and
    tighten padding so the row stays icon-only and fits comfortably. */
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .detail-actions :deep(.p-button-label) {
     display: none;
   }

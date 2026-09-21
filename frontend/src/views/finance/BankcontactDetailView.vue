@@ -650,7 +650,7 @@ async function del() {
 
 <style scoped>
 /* Page frame and title: PageLayout (issue #1272). */
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .card {
     padding: 0.75rem;
   }
@@ -844,7 +844,7 @@ async function del() {
 .danger-zone {
   border-color: var(--p-red-500);
 }
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .card + .card {
     margin-top: 0.75rem;
   }

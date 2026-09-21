@@ -1028,7 +1028,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 }
 
 /* ── Mobile Breakpoint ───────────────────────────────────────────────────── */
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .mobile-backdrop { display: block; }
 
   /* Person Sidebar Sheet → Bottom Sheet */

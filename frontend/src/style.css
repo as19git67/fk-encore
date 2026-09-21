@@ -83,6 +83,38 @@
   --page-max-normal: 1200px;
   --page-max-wide: 1600px;
 }
+
+/* ── Breakpoints (issue #1281) ───────────────────────────────────────────────
+   A media query cannot read a custom property, so the numbers are repeated in
+   every stylesheet. They come from one place all the same:
+   `composables/useBreakpoint.ts` names them, and script and stylesheet must
+   use the same edges.
+
+     xs  480   sm  640   md  768   lg 1024   xl 1280
+
+   Each number is the first width of the *larger* layout, so the pair is
+   `(max-width: 767px)` / `(min-width: 768px)` — never `max-width: 768px`,
+   which used to claim 768 for both sides at once. A threshold that belongs to
+   one component (a table that needs 560px) stays a number in that component;
+   these five are the page's.
+
+   The route transition below is the app's only one: a short cross-fade, so a
+   new page does not appear mid-scroll without anything having visibly
+   happened. It is skipped outright for a reader who asked for less motion. */
+.route-fade-enter-active,
+.route-fade-leave-active {
+  transition: opacity 120ms ease;
+}
+.route-fade-enter-from,
+.route-fade-leave-to {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-fade-enter-active,
+  .route-fade-leave-active {
+    transition: none;
+  }
+}
 @media (min-width: 768px) {
   :root {
     --page-gutter: 24px;
@@ -130,7 +162,7 @@ a:hover {
 .my-xl { margin-top: var(--spacing-xl); margin-bottom: var(--spacing-xl); }
 
 /* ── Visibility utility classes ────────────────────────────────────────── */
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .mobile-hidden {
     display: none !important;
   }
