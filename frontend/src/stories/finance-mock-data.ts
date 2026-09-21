@@ -1,4 +1,4 @@
-import type { Account, OverviewResponse, Tag, Transaction } from '../api/finance'
+import type { Account, Bankcontact, OverviewResponse, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -165,3 +165,34 @@ export const MOCK_OVERVIEW: OverviewResponse = {
   ],
   unassigned: [],
 }
+
+export const MOCK_BANKCONTACTS: Bankcontact[] = [
+  {
+    id: 1,
+    name: 'Beispielbank',
+    blz: '00000000',
+    login: 'beispiel-login',
+    server_url: 'https://fints.beispiel.test/',
+    tan_method: '942',
+    credentials_set: true,
+    last_sync_at: '2026-03-02T05:30:00.000Z',
+    last_sync_status: 'ok',
+    created_at: '2024-01-01T00:00:00.000Z',
+    available_tan_methods: [{ id: 942, name: 'Beispiel-TAN (Push)', isDecoupled: true }],
+    sync_times: [{ weekdays: [1, 3, 5], time: '06:00', tz: 'Europe/Berlin' }],
+  },
+  {
+    id: 2,
+    name: 'Zweitbank',
+    blz: '00000001',
+    login: 'zweit-login',
+    server_url: 'https://fints.zweitbank.test/',
+    tan_method: null,
+    credentials_set: false,
+    last_sync_at: null,
+    last_sync_status: null,
+    created_at: '2025-06-01T00:00:00.000Z',
+    available_tan_methods: [],
+    sync_times: [],
+  },
+]

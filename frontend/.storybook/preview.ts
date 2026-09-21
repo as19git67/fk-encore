@@ -48,6 +48,8 @@ const router = createRouter({
     { path: '/finanzen/uebersicht/sektion/:name', name: 'finance-section-transactions', component: { template: '<div />' } },
     { path: '/finanzen/konten', name: 'finance-accounts', component: { template: '<div />' } },
     { path: '/finanzen/umsaetze/:id', name: 'finance-transaction-detail', component: { template: '<div />' } },
+    { path: '/finanzen/bankkontakte', name: 'finance-bankcontacts', component: { template: '<div />' } },
+    { path: '/finanzen/bankkontakte/:id', name: 'finance-bankcontact-detail', component: { template: '<div />' } },
     { path: '/finanzen/ki-tagging', name: 'finance-tag-queue', component: { template: '<div />' } },
     // Admin module
     { path: '/admin', component: { template: '<div />' } },
