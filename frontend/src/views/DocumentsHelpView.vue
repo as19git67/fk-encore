@@ -358,7 +358,7 @@ function goBack() {
 }
 
 .intro {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   line-height: 1.5;
   color: var(--p-text-color);
   padding: 0.75rem 1rem;
@@ -378,7 +378,7 @@ function goBack() {
 }
 
 .help-section h2 {
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   font-weight: 600;
   margin: 0 0 0.25rem;
   display: inline-flex;
@@ -388,7 +388,7 @@ function goBack() {
 .help-section h2 i { color: var(--p-primary-color); }
 
 .help-section h3 {
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0.5rem 0 0.25rem;
 }
@@ -431,7 +431,7 @@ function goBack() {
 }
 
 .hint {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   font-style: italic;
 }

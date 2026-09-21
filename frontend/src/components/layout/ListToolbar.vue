@@ -50,6 +50,14 @@ const filterTooltip = computed(() =>
   activeFilters.value > 0 ? `${activeFilters.value} Filter aktiv` : 'Filter',
 )
 
+/**
+ * A filter panel that stays open makes the button a toggle, and a toggle has
+ * to look switched on — otherwise the only thing that changed on click is
+ * somewhere else on the page. Filled instead of outlined, the same way the
+ * view switcher marks its active option.
+ */
+const filterExpanded = computed(() => props.model.filter?.expanded?.value ?? false)
+
 const countLabel = computed(() =>
   formatResultCount(props.model.result.loaded.value, props.model.result.total.value),
 )
@@ -182,11 +190,12 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
           :badge="filterBadge"
           badge-severity="info"
           size="small"
-          outlined
+          :outlined="!filterExpanded"
           :severity="activeFilters > 0 ? 'primary' : 'secondary'"
           class="list-toolbar__button"
           data-testid="list-filter"
           :aria-label="filterTooltip"
+          :aria-expanded="model.filter.expanded ? filterExpanded : undefined"
           v-tooltip.bottom="filterTooltip"
           @click="model.filter!.open!($event)"
         />
@@ -338,7 +347,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
 .list-toolbar__count {
   margin-left: auto;
   color: var(--p-text-muted-color);
-  font-size: 0.8125rem;
+  font-size: var(--text-md);
   white-space: nowrap;
 }
 

@@ -649,7 +649,7 @@ onMounted(async () => {
 
 .album-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
 .afm-row { display: flex; flex-direction: column; gap: 0.5rem; }
-.afm-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
+.afm-label { font-weight: 500; font-size: var(--text-base); color: var(--p-text-muted-color); }
 .afm-checks { display: flex; gap: 1rem; flex-wrap: wrap; }
 .afm-check { display: flex; align-items: center; gap: 0.5rem; }
 

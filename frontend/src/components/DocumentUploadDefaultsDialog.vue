@@ -145,13 +145,13 @@ async function save() {
 .hint {
   margin: 0 0 1rem;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .loading-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .option {

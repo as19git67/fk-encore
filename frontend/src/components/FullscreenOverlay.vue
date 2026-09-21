@@ -1648,7 +1648,7 @@ onUnmounted(() => {
   gap: 6px;
   background: rgba(0,0,0,0.65);
   color: #fff; /* audit-ok: badge on its own dark pill over the photo */
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-weight: 700;
   padding: 6px 12px;
   border: none;
@@ -1720,7 +1720,7 @@ onUnmounted(() => {
   justify-content: center;
   z-index: 5;
   color: #fff; /* audit-ok: spinner over the black photo stage */
-  font-size: 2.5rem;
+  font-size: var(--text-6xl);
   pointer-events: none;
 }
 

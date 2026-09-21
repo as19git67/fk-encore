@@ -477,7 +477,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
 
 .card-icon {
   flex: 0 0 auto;
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
   color: var(--p-text-muted-color);
 }
 .sev-warn .card-icon { color: var(--p-yellow-500); }
@@ -501,14 +501,14 @@ function formatAmountChange(item: AnomalyItem): string | null {
 
 .type-label {
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   text-transform: uppercase;
   letter-spacing: 0.02em;
   color: var(--p-text-muted-color);
 }
 
 .date {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 
@@ -519,7 +519,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
 
 .diff {
   font-family: monospace;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   color: var(--p-text-muted-color);
 }
 
@@ -547,7 +547,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
   border-radius: 0.25rem;
   cursor: pointer;
   align-items: center;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .dup-row:hover {
   background: var(--p-content-hover-background);
@@ -573,7 +573,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
 }
 
 .dup-label {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   text-transform: uppercase;
   color: var(--p-text-muted-color);
@@ -588,7 +588,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
   border: none;
   padding: 0.25rem 0;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -606,7 +606,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
 
 .history-loading,
 .history-empty {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   padding: 0.4rem 0;
 }
@@ -627,7 +627,7 @@ function formatAmountChange(item: AnomalyItem): string | null {
   border-radius: 0.25rem;
   cursor: pointer;
   align-items: baseline;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .history-row:hover {
   background: var(--p-content-hover-background);

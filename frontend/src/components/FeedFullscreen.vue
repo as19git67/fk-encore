@@ -240,7 +240,7 @@ onUnmounted(() => {
   border-radius: 999px;
   color: #fff; /* audit-ok: chrome on the black stage */
   background: rgba(0, 0, 0, 0.45);
-  font-size: 1.25rem;
+  font-size: var(--text-2xl);
   cursor: pointer;
 }
 </style>

@@ -49,6 +49,36 @@
   --space-5: 24px;
   --space-6: 32px;
 
+  /* ── Design Tokens: Type scale (issue #1281) ──────────────────────────────
+     Every `font-size` in the app's own styles names a rung here, so a size is
+     a decision about role ("this is meta text") and not a number somebody
+     typed. The twenty-odd sizes that grew over time were rounded to the
+     nearest rung; no site moved by more than ~1.5px, so this is a change of
+     vocabulary, not of layout.
+
+     `xs`–`xl` are text. `2xl` up are display sizes: page and card titles, the
+     big amounts on the finance cards, and the decorative icons that are sized
+     by font-size (empty states, drop zones). */
+  --text-xs: 0.6875rem;   /* 11px — badges, timestamps */
+  --text-sm: 0.75rem;     /* 12px — chips, captions */
+  --text-md: 0.8125rem;   /* 13px — meta lines, counters */
+  --text-base: 0.875rem;  /* 14px — dense body text, list rows */
+  --text-lg: 1rem;        /* 16px — body */
+  --text-xl: 1.125rem;    /* 18px — section headings */
+  --text-2xl: 1.25rem;    /* 20px — card and dialog titles */
+  --text-3xl: 1.5rem;     /* 24px — page title */
+  --text-4xl: 1.75rem;
+  --text-5xl: 2rem;
+  --text-6xl: 2.5rem;
+  --text-7xl: 3rem;
+
+  /* ── Design Tokens: Focus ────────────────────────────────────────────────
+     One ring everywhere. An element that turns the browser's own outline off
+     draws this one back — `outline: none` without a replacement leaves a
+     keyboard user with no idea where they are. */
+  --focus-ring: 2px solid var(--p-primary-color);
+  --focus-ring-offset: 2px;
+
   --page-gutter: 16px;
   --page-max-normal: 1200px;
   --page-max-wide: 1600px;
@@ -77,8 +107,8 @@ body {
 
 /* Visible keyboard focus, one look everywhere. */
 .scroll-anchor:focus-visible {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 *,
 *::before,

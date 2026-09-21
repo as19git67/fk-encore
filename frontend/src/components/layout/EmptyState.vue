@@ -60,14 +60,14 @@ defineEmits<{
 }
 
 .empty-state__icon {
-  font-size: 2rem;
+  font-size: var(--text-5xl);
   color: var(--p-text-muted-color);
   opacity: 0.7;
 }
 
 .empty-state__title {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--p-text-color);
 }
@@ -76,7 +76,7 @@ defineEmits<{
   margin: 0;
   max-width: 34rem;
   color: var(--p-text-muted-color);
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   line-height: 1.5;
 }
 

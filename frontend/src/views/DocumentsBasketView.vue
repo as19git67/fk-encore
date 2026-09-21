@@ -204,7 +204,7 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .bv-empty {
@@ -213,7 +213,7 @@ onMounted(load)
   padding: 48px 16px;
 }
 .bv-empty .pi-check-circle {
-  font-size: 2.5rem;
+  font-size: var(--text-6xl);
   color: var(--p-green-500);
   margin-bottom: 12px;
 }
@@ -272,7 +272,7 @@ onMounted(load)
   gap: 12px;
   margin-top: 4px;
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .bv-meta i {
   margin-right: 3px;

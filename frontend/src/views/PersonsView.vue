@@ -1008,7 +1008,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 
 .person-filter-menu { display: flex; flex-direction: column; gap: 1rem; }
 .pfm-row { display: flex; flex-direction: column; gap: 0.5rem; }
-.pfm-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
+.pfm-label { font-weight: 500; font-size: var(--text-base); color: var(--p-text-muted-color); }
 
 /* ── Person Sidebar Sheet Wrapper ────────────────────────────────────────── */
 .person-sidebar-sheet {
@@ -1074,7 +1074,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
     color: var(--p-text-color);
     padding: 0;
     border-radius: 50%;
-    font-size: 0.85rem;
+    font-size: var(--text-base);
     width: 1.75rem;
     height: 1.75rem;
     margin-top: 0.5rem;
@@ -1100,7 +1100,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 }
 
 .fs-person-name {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--p-text-color);
 }
@@ -1108,6 +1108,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 /* ── Rename dialog ───────────────────────────────────────────────────────── */
 .dialog-body { display: flex; flex-direction: column; gap: 1rem; padding: 0.5rem 0; }
 .rename-row { display: flex; flex-direction: column; gap: 0.4rem; }
-.dialog-label { font-weight: 500; font-size: 0.9rem; }
+.dialog-label { font-weight: 500; font-size: var(--text-base); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; padding-top: 0.5rem; }
 </style>

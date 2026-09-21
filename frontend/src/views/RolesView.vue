@@ -278,13 +278,13 @@ onMounted(loadData)
 }
 
 .perm-chip {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 
 .no-perms {
   color: var(--p-text-muted-color);
   font-style: italic;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .action-buttons {
@@ -306,7 +306,7 @@ onMounted(loadData)
 
 .group-title {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   text-transform: uppercase;
   color: var(--p-text-muted-color);
   letter-spacing: 0.05em;
@@ -329,12 +329,12 @@ onMounted(loadData)
 
 .perm-key {
   font-family: monospace;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 
 .perm-desc {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 </style>

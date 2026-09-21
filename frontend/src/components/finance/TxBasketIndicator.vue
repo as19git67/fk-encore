@@ -605,7 +605,7 @@ async function compareSnapshots() {
   flex: 0 0 auto;
   color: var(--p-text-muted-color);
   font-variant-numeric: tabular-nums;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
 }
 .counterparty-form { display: grid; gap: .85rem; }
 .counterparty-form label { display: grid; gap: .35rem; font-weight: 600; }
@@ -633,15 +633,15 @@ async function compareSnapshots() {
 .basket-analysis-tab { border: 0; border-radius: .3rem; background: transparent; padding: .25rem .45rem; cursor: pointer; color: var(--p-text-muted-color); }
 .basket-analysis-tab.active { color: var(--p-primary-color); background: var(--p-highlight-background); font-weight: 600; }
 .basket-analysis-list { list-style: none; padding: 0; margin: 0; }
-.basket-analysis-row { display: flex; justify-content: space-between; gap: .5rem; padding: .18rem 0; font-size: .85rem; }
+.basket-analysis-row { display: flex; justify-content: space-between; gap: .5rem; padding: .18rem 0; font-size: var(--text-base); }
 .basket-analysis-row small { color: var(--p-text-muted-color); }
-.basket-analysis-hint { margin: 0 0 .4rem; color: var(--p-text-muted-color); font-size: .78rem; }
+.basket-analysis-hint { margin: 0 0 .4rem; color: var(--p-text-muted-color); font-size: var(--text-sm); }
 .ai-tag { color: var(--p-primary-color) !important; }
 .basket-row-head {
   display: flex;
   justify-content: space-between;
   gap: 0.5rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .basket-row-date {
   color: var(--p-text-muted-color);
@@ -664,7 +664,7 @@ async function compareSnapshots() {
 .basket-row-purpose {
   margin-top: 0.1rem;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

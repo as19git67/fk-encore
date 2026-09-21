@@ -1023,7 +1023,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.65);
   color: #fff; /* audit-ok: player chrome on a dark pill (see .recap-player) */
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   white-space: nowrap;
   backdrop-filter: blur(4px);
@@ -1047,12 +1047,12 @@ onBeforeUnmount(() => {
 }
 
 .recap-player-title-text {
-  font-size: 1.6rem;
+  font-size: var(--text-3xl);
   font-weight: 600;
 }
 
 .recap-player-subtitle {
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   opacity: 0.9;
   margin-top: 0.25rem;
 }
@@ -1125,7 +1125,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   backdrop-filter: blur(4px);
 }
 
@@ -1136,7 +1136,7 @@ onBeforeUnmount(() => {
 .recap-player-btn-pause {
   width: 58px;
   height: 58px;
-  font-size: 1.35rem;
+  font-size: var(--text-2xl);
 }
 
 .recap-player-btn-heart.is-favorite {
@@ -1163,7 +1163,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 1rem;
+  font-size: var(--text-lg);
   transition: opacity 0.4s ease;
 }
 

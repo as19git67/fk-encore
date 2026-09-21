@@ -130,7 +130,7 @@ async function apply() {
 .count {
   margin: 0 0 1rem;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .field {
   display: block;
@@ -138,7 +138,7 @@ async function apply() {
 }
 .label {
   display: block;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   font-weight: 600;
   margin-bottom: 0.35rem;
   color: var(--p-text-muted-color);

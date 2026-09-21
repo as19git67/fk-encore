@@ -182,7 +182,7 @@ async function submit() {
   image-rendering: crisp-edges;
 }
 .tan-photo__caption {
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   text-align: center;
 }

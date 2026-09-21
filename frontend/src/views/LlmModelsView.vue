@@ -745,7 +745,7 @@ function formatEta(seconds: number | null): string {
 .hint {
   color: var(--p-text-muted-color);
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .empty-state {
   padding: 2rem;
@@ -771,7 +771,7 @@ function formatEta(seconds: number | null): string {
 }
 .card-header h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
 }
 .card-actions {
   display: flex;
@@ -792,7 +792,7 @@ function formatEta(seconds: number | null): string {
 }
 .group-title {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--p-text-muted-color);
@@ -810,7 +810,7 @@ function formatEta(seconds: number | null): string {
   min-width: 0;
 }
 .field dt {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--p-text-muted-color);
@@ -888,7 +888,7 @@ function formatEta(seconds: number | null): string {
 }
 .form h3 {
   margin: 0.75rem 0 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--p-text-muted-color);
@@ -905,7 +905,7 @@ function formatEta(seconds: number | null): string {
   min-width: 0;
 }
 .form-field > span {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .form-field.span-2 {

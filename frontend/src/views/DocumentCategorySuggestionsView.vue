@@ -320,7 +320,7 @@ onMounted(load)
 }
 
 .hint {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   margin: 0;
 }
@@ -349,7 +349,7 @@ onMounted(load)
 }
 
 .suggestion-name {
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   font-weight: 600;
   margin: 0;
   display: inline-flex;
@@ -358,19 +358,19 @@ onMounted(load)
 }
 
 .suggestion-date {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   margin-left: auto;
 }
 
 .suggestion-meta {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 
 .rationale {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   display: inline-flex;
   align-items: flex-start;
   gap: 0.4rem;
@@ -384,7 +384,7 @@ onMounted(load)
 }
 
 .label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 
@@ -406,7 +406,7 @@ onMounted(load)
 }
 .dialog-hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .warn {
@@ -414,6 +414,6 @@ onMounted(load)
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 </style>

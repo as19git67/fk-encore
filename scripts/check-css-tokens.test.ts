@@ -114,6 +114,35 @@ describe("colour audit", () => {
     expect(code).toBe(0);
   });
 
+  it("refuses a PrimeVue 3 name, which resolves to nothing today", () => {
+    for (const name of ["--surface-border", "--text-color-secondary", "--blue-100"]) {
+      const { code, output } = check("legacy.vue", `<style>.a { color: var(${name}); }</style>`);
+      expect(code, name).toBe(1);
+      expect(output).toContain(name);
+    }
+  });
+
+  it("keeps this app's own tokens, which start the same way", () => {
+    const { code } = check(
+      "own-tokens.vue",
+      `<style scoped>
+.a { font-size: var(--text-md); outline: var(--focus-ring); }
+.b { font-size: var(--text-7xl); outline-offset: var(--focus-ring-offset); }
+</style>`,
+    );
+    expect(code).toBe(0);
+  });
+
+  it("refuses a literal size, and leaves relative ones alone", () => {
+    expect(check("size.vue", `<style>.a { font-size: 0.85rem; }</style>`).code).toBe(1);
+    expect(check("size-px.vue", `<style>.a { font-size: 13px; }</style>`).code).toBe(1);
+    // `em` and `%` scale with their context by design, `inherit` takes what
+    // it is given, and a var() is already a token.
+    expect(check("size-em.vue", `<style>.a { font-size: 0.9em; }</style>`).code).toBe(0);
+    expect(check("size-inherit.vue", `<style>.a { font-size: inherit; }</style>`).code).toBe(0);
+    expect(check("size-var.vue", `<style>.a { font-size: var(--text-base); }</style>`).code).toBe(0);
+  });
+
   it("names the file and the line it found it on", () => {
     const { output } = check(
       "located.vue",

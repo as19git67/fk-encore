@@ -144,7 +144,7 @@ function onSelectAllChange(value: unknown) {
 
 .selection-bar__hint {
   color: var(--p-text-muted-color);
-  font-size: 0.8125rem;
+  font-size: var(--text-md);
   min-width: 0;
 }
 

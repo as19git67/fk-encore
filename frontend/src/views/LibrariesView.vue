@@ -861,12 +861,12 @@ onMounted(loadData)
 .hint {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .hint code {
   font-family: monospace;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .multiline :deep(.p-message-text) {
@@ -875,7 +875,7 @@ onMounted(loadData)
 
 .path {
   font-family: monospace;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .muted {
@@ -883,7 +883,7 @@ onMounted(loadData)
 }
 
 .small {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .empty {
@@ -930,13 +930,13 @@ onMounted(loadData)
 }
 
 .field label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 
 .hint-small {
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 
 .hint-small code {
@@ -971,7 +971,7 @@ onMounted(loadData)
   align-items: center;
   gap: 0;
   font-family: monospace;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .breadcrumb .sep {
@@ -1044,7 +1044,7 @@ onMounted(loadData)
   align-items: center;
   gap: 0.4rem;
   color: inherit;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   flex: 1;
   text-align: left;
 }
@@ -1057,7 +1057,7 @@ onMounted(loadData)
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 
@@ -1081,7 +1081,7 @@ onMounted(loadData)
 .error-detail {
   margin: 0;
   font-family: monospace;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--p-text-color);
@@ -1122,7 +1122,7 @@ onMounted(loadData)
 }
 
 .excl-tag {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 
 .excluded-chips {

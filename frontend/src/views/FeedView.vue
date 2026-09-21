@@ -226,8 +226,8 @@ onMounted(() => {
 .feed-card:focus-visible {
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .feed-card--unseen {
@@ -251,7 +251,7 @@ onMounted(() => {
   object-fit: cover;
 }
 .feed-thumb--placeholder i {
-  font-size: 1.75rem;
+  font-size: var(--text-4xl);
   color: var(--p-text-muted-color);
 }
 
@@ -265,7 +265,7 @@ onMounted(() => {
 }
 
 .feed-text {
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -274,7 +274,7 @@ onMounted(() => {
 }
 
 .feed-description {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-color);
   font-style: italic;
   overflow: hidden;
@@ -285,7 +285,7 @@ onMounted(() => {
 }
 
 .feed-meta {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 

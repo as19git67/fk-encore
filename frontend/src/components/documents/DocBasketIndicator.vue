@@ -648,7 +648,7 @@ function handleReprocessDone(payload: { affected: number }) {
   margin-left: 0.35rem;
   padding: 0.05rem 0.4rem;
   border-radius: 0.6rem;
-  font-size: 0.72rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--p-primary-color);
   background: var(--p-highlight-background);
@@ -670,7 +670,7 @@ function handleReprocessDone(payload: { affected: number }) {
 .dialog-hint {
   margin: 0 0 0.75rem;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .dialog-field {
   width: 100%;

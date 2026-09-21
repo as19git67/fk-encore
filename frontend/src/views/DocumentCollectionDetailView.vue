@@ -498,7 +498,7 @@ onMounted(load)
 .cd-title-input {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 1.15rem;
+  font-size: var(--text-xl);
   font-weight: 600;
 }
 .cd-panel {
@@ -512,7 +512,7 @@ onMounted(load)
 }
 .cd-panel label,
 .cd-panel-label {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .cd-panel-head {
@@ -535,11 +535,11 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-color);
 }
 .cd-list-title {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0 0 8px;
 }
@@ -547,11 +547,11 @@ onMounted(load)
   font-weight: 400;
   color: var(--p-text-muted-color);
   margin-left: 6px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .cd-empty {
   color: var(--p-text-muted-color);
-  font-size: 0.86rem;
+  font-size: var(--text-base);
   margin: 0;
 }
 .cd-list {
@@ -579,7 +579,7 @@ onMounted(load)
   width: 20px;
   text-align: right;
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .cd-thumb {
   flex: 0 0 44px;
@@ -615,7 +615,7 @@ onMounted(load)
   gap: 10px;
   margin-top: 3px;
   color: var(--p-text-muted-color);
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
 }
 .cd-meta i {
   margin-right: 3px;

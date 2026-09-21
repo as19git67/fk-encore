@@ -182,7 +182,7 @@ defineExpose({
 }
 .drawer-count {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .basket-empty {
@@ -191,12 +191,12 @@ defineExpose({
   padding: 2rem 1rem;
 }
 .basket-empty-icon {
-  font-size: 2rem;
+  font-size: var(--text-5xl);
   display: block;
   margin-bottom: 0.75rem;
 }
 .basket-empty .hint {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   margin-top: 0.25rem;
 }
 
@@ -261,7 +261,7 @@ defineExpose({
   flex-wrap: wrap;
   gap: 0.5rem;
   color: var(--p-text-muted-color);
-  font-size: 0.82rem;
+  font-size: var(--text-md);
 }
 .basket-drawer .basket-row-meta span {
   display: inline-flex;

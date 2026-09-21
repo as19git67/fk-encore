@@ -204,13 +204,13 @@ const hasTrends = computed(() => props.trends.length > 0)
 
 .trend-head h3 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
 }
 
 .trend-sub {
   margin: 0.25rem 0 0;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   max-width: 60ch;
 }
@@ -218,7 +218,7 @@ const hasTrends = computed(() => props.trends.length > 0)
 .trend-empty {
   margin: 0.75rem 0 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .trend-grid {
@@ -249,7 +249,7 @@ const hasTrends = computed(() => props.trends.length > 0)
 }
 
 .trend-label {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   line-height: 1.25;
 }
@@ -261,12 +261,12 @@ const hasTrends = computed(() => props.trends.length > 0)
 }
 
 .trend-value strong {
-  font-size: 1.35rem;
+  font-size: var(--text-2xl);
   font-variant-numeric: tabular-nums;
 }
 
 .trend-unit {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 
@@ -275,7 +275,7 @@ const hasTrends = computed(() => props.trends.length > 0)
   align-items: center;
   flex-wrap: wrap;
   gap: 0.35rem;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   font-variant-numeric: tabular-nums;
   padding: 0.15rem 0.45rem;
   border-radius: var(--p-tag-border-radius);
@@ -284,7 +284,7 @@ const hasTrends = computed(() => props.trends.length > 0)
 
 .trend-change-caption {
   flex-basis: 100%;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   font-variant-numeric: normal;
   opacity: 0.8;
 }
@@ -320,7 +320,7 @@ const hasTrends = computed(() => props.trends.length > 0)
 }
 
 .trend-foot {
-  font-size: 0.74rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 </style>

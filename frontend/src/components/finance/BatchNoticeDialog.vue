@@ -166,7 +166,7 @@ async function apply() {
 .mode-option .hint {
   color: var(--p-text-muted-color);
   margin-left: 0.25rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 .notice-input {
   width: 100%;

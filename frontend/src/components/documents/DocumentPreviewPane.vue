@@ -240,7 +240,7 @@ function formatDate(value: string | null): string {
   color: var(--p-text-muted-color);
 }
 .pane-empty .pi-file {
-  font-size: 2rem;
+  font-size: var(--text-5xl);
 }
 /* Stays put while the body below it scrolls — that is what makes the jump
    button worth having on a document of many pages. */
@@ -256,7 +256,7 @@ function formatDate(value: string | null): string {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -297,7 +297,7 @@ function formatDate(value: string | null): string {
   flex-wrap: wrap;
   gap: 0.75rem;
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .pane-meta i {
   margin-right: 0.2rem;
@@ -307,7 +307,7 @@ function formatDate(value: string | null): string {
 }
 .pane-summary {
   margin: 0;
-  font-size: 0.86rem;
+  font-size: var(--text-base);
   color: var(--p-text-color);
 }
 .pane-chips {
@@ -316,6 +316,6 @@ function formatDate(value: string | null): string {
   gap: 0.3rem;
 }
 .pane-chips :deep(.p-chip) {
-  font-size: 0.74rem;
+  font-size: var(--text-sm);
 }
 </style>
