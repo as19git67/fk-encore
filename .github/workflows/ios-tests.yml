@@ -109,12 +109,19 @@ jobs:
         # extension in App/Widgets/ (#764, #768 §1) is its own target of
         # the app project, outside the SwiftPM package the unit tests
         # build, so without this step CI would never compile it at all.
+        #
+        # Unlike F4milShare, this target links FKPhotosLib directly (it
+        # needs the package's trip/recap/feed models), which pulls in the
+        # package's OpenAPIGenerator build-tool plugin — xcodebuild
+        # refuses to run an unapproved plugin non-interactively, so this
+        # needs the same flag the package test run above already passes.
         run: |
           xcodebuild build \
             -project FKPhotos.xcodeproj \
             -target FKPhotosWidgets \
             -sdk iphonesimulator \
             -configuration Debug \
+            -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
