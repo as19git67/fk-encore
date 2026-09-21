@@ -35,6 +35,14 @@ Prefer semantic variables such as:
 - --p-tag-*-background / --p-tag-*-color (tag chips)
 
 If a desired semantic variable does not exist, use a CSS alpha overlay (e.g. rgba(0,0,0,0.05)) rather than a fixed surface scale value.
+
+Das prüft `scripts/check-css-tokens.mjs` (Issue #1281): es liest die
+`<style>`-Blöcke unter `frontend/src` und lehnt `--p-surface-<n>`, feste
+Hex-Farben und deckende `rgb()` ab. Der pre-commit-Hook ruft es für die
+gestageten Dateien auf; der ganze Baum geht mit `node
+scripts/check-css-tokens.mjs`. Eine Fläche, die in beiden Themes dieselbe
+sein soll (der schwarze Vollbild-Betrachter), behält ihren Wert und endet in
+`/* audit-ok: kurze Begründung */`.
 </css_style_guide>
 <encore_ts_domain_knowledge>
 <api_definition>

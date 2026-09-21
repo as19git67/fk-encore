@@ -1487,7 +1487,7 @@ onUnmounted(() => {
    the photo sits on a solid background. */
 .fullscreen-overlay:fullscreen,
 .fullscreen-overlay:-webkit-full-screen {
-  background: #000;
+  background: #000; /* audit-ok: the photo stage is black in both themes */
 }
 
 .fullscreen-content {
@@ -1538,7 +1538,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #000;
+  background: #000; /* audit-ok: letterbox around the photo, black in both themes */
   /* Keep the image clear of the overlaid topbar. */
   padding-top: 2.75em;
   box-sizing: border-box;
@@ -1647,7 +1647,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   background: rgba(0,0,0,0.65);
-  color: #fff;
+  color: #fff; /* audit-ok: badge on its own dark pill over the photo */
   font-size: 0.85rem;
   font-weight: 700;
   padding: 6px 12px;
@@ -1662,16 +1662,16 @@ onUnmounted(() => {
   outline: none;
 }
 .fs-stack-badge--ai-high {
-  background: var(--p-red-500, #ef4444);
+  background: var(--p-red-500);
 }
 .fs-stack-badge--ai-high:hover {
-  background: var(--p-red-600, #dc2626);
+  background: var(--p-red-600);
 }
 .fs-stack-badge--ai-medium {
-  background: var(--p-orange-500, #f97316);
+  background: var(--p-orange-500);
 }
 .fs-stack-badge--ai-medium:hover {
-  background: var(--p-orange-600, #ea580c);
+  background: var(--p-orange-600);
 }
 .fs-stack-badge--ai-low {
   background: rgba(0,0,0,0.5);
@@ -1719,7 +1719,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   z-index: 5;
-  color: #fff;
+  color: #fff; /* audit-ok: spinner over the black photo stage */
   font-size: 2.5rem;
   pointer-events: none;
 }
@@ -1814,7 +1814,7 @@ onUnmounted(() => {
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(8px);
-  color: #fff;
+  color: #fff; /* audit-ok: pill text on its own translucent dark backdrop */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1845,7 +1845,9 @@ onUnmounted(() => {
 
 .fs-counter {
   font-size: 0.8em;
-  color: var(--p-text-color, #fff);
+  /* Die Pille ist in beiden Themes dunkel, also gehört ihr Text nicht der
+     Seitenfarbe: im hellen Theme wäre --p-text-color dunkel auf dunkel. */
+  color: #fff; /* audit-ok: Text auf der festen dunklen Pille über dem Foto */
   background: rgba(0, 0, 0, 0.35);
   border-radius: 999px;
   padding: 0.2em 0.65em;
@@ -1862,7 +1864,7 @@ onUnmounted(() => {
   max-width: min(20rem, calc(100vw - 2rem));
   padding: 0.5em 0.8em;
   background: rgba(0, 0, 0, 0.82);
-  color: #fff;
+  color: #fff; /* audit-ok: hint bubble on its own dark backdrop over the photo */
   font-size: 0.85em;
   line-height: 1.3;
   text-align: center;
@@ -1918,7 +1920,7 @@ onUnmounted(() => {
 }
 .fs-play-progress__bar {
   fill: none;
-  stroke: var(--p-primary-color, #fff);
+  stroke: var(--p-primary-color);
   stroke-width: 2;
   stroke-linecap: round;
   /* r=16 → circumference = 2·π·16 ≈ 100.53 */
@@ -1949,7 +1951,7 @@ onUnmounted(() => {
 }
 .fs-interval-select :deep(.p-select-dropdown) {
   width: 100%;
-  color: var(--p-text-color, #fff);
+  color: var(--p-text-color);
 }
 
 /* ── Details flyout ─────────────────────────────────────────────────────── */
@@ -1961,8 +1963,8 @@ onUnmounted(() => {
   right: calc(1rem + 2.5em + 0.5rem);
   bottom: 1rem;
   width: min(380px, calc(100vw - 1rem - 2.5em - 1rem));
-  background: var(--p-content-background, #fff);
-  color: var(--p-text-color, #222);
+  background: var(--p-content-background);
+  color: var(--p-text-color);
   border: 1px solid var(--p-content-border-color, rgba(0, 0, 0, 0.1));
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -2061,7 +2063,7 @@ onUnmounted(() => {
 .fs-actions-bar :deep(.p-button-rounded) {
   width: 2.5em;
   height: 2.5em;
-  color: #fff;
+  color: #fff; /* audit-ok: icons on the dark action bar over the photo */
 }
 
 /* Highlighted state for toggle buttons (e.g. Details when open). */

@@ -455,7 +455,7 @@ async function saveConfig() {
   border-radius: 0.5rem;
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
-  border-left: 4px solid var(--p-yellow-500, #f59e0b);
+  border-left: 4px solid var(--p-yellow-500);
   cursor: pointer;
   transition: background-color 120ms;
 }
@@ -466,7 +466,7 @@ async function saveConfig() {
 }
 .anomaly-tile .tile-icon {
   font-size: 1.4rem;
-  color: var(--p-yellow-500, #f59e0b);
+  color: var(--p-yellow-500);
   flex: 0 0 auto;
 }
 .anomaly-tile .tile-body {
@@ -576,8 +576,8 @@ async function saveConfig() {
   height: 1.25rem;
   padding: 0 0.4rem;
   border-radius: 999px;
-  background: var(--p-primary-500, #4caf50);
-  color: var(--p-primary-contrast-color, #fff);
+  background: var(--p-primary-500);
+  color: var(--p-primary-contrast-color);
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1;
@@ -594,7 +594,7 @@ async function saveConfig() {
   color: var(--p-text-color);
 }
 .balance-negative {
-  color: var(--p-red-500, #d32f2f);
+  color: var(--p-red-500);
 }
 .balance-neutral {
   color: var(--p-text-muted-color);

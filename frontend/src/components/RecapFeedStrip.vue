@@ -117,7 +117,7 @@ function openRecap(r: RecapSummary) {
 
 .recap-strip-all {
   font-size: 0.85rem;
-  color: var(--p-primary-color, #2563eb);
+  color: var(--p-primary-color);
   text-decoration: none;
 }
 
@@ -157,7 +157,7 @@ function openRecap(r: RecapSummary) {
   height: 190px;
   border-radius: 12px;
   overflow: hidden;
-  background: var(--p-content-hover-background, #222);
+  background: var(--p-content-hover-background);
 }
 
 .recap-strip-cover :deep(img),
@@ -177,7 +177,7 @@ function openRecap(r: RecapSummary) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--p-text-muted-color, #777);
+  color: var(--p-text-muted-color);
   font-size: 2rem;
 }
 
@@ -188,7 +188,7 @@ function openRecap(r: RecapSummary) {
   padding: 2px 8px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  color: #fff; /* audit-ok: chip on its own dark pill above the cover photo — white in both themes */
   font-size: 0.7rem;
 }
 
@@ -200,7 +200,7 @@ function openRecap(r: RecapSummary) {
   height: 34px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  color: #fff; /* audit-ok: play icon on its own dark pill above the cover photo */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -209,7 +209,7 @@ function openRecap(r: RecapSummary) {
 }
 
 .recap-strip-card:hover .recap-strip-play {
-  background: var(--p-primary-color, #2563eb);
+  background: var(--p-primary-color);
 }
 
 .recap-strip-title {
@@ -223,7 +223,7 @@ function openRecap(r: RecapSummary) {
 
 .recap-strip-subtitle {
   font-size: 0.78rem;
-  color: var(--p-text-muted-color, #999);
+  color: var(--p-text-muted-color);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

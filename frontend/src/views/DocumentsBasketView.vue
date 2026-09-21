@@ -214,7 +214,7 @@ onMounted(load)
 }
 .bv-empty .pi-check-circle {
   font-size: 2.5rem;
-  color: var(--p-green-500, #22c55e);
+  color: var(--p-green-500);
   margin-bottom: 12px;
 }
 .bv-list {
@@ -278,6 +278,6 @@ onMounted(load)
   margin-right: 3px;
 }
 .bv-error {
-  color: var(--p-red-500, #ef4444);
+  color: var(--p-red-500);
 }
 </style>

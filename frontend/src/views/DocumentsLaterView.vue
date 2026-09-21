@@ -241,7 +241,7 @@ onMounted(load)
   margin-right: 3px;
 }
 .lv-date--due {
-  color: var(--p-orange-500, #f97316);
+  color: var(--p-orange-500);
   font-weight: 600;
 }
 </style>

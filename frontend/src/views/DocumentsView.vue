@@ -1307,8 +1307,10 @@ onMounted(async () => {
   align-items: center;
   gap: 0.4rem;
   font-size: 0.85rem;
-  color: var(--p-red-600, #c0392b);
-  background: var(--p-red-50, #fdecea);
+  color: var(--p-red-600);
+  /* A translucent red tint instead of red-50: the fixed light tint would stay
+     a bright patch on a dark page, the tint takes the page's own surface. */
+  background: color-mix(in srgb, var(--p-red-500) 12%, transparent);
   padding: 0.3rem 0.5rem;
   border-radius: 6px;
   word-break: break-word;

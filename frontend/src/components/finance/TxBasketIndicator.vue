@@ -653,7 +653,7 @@ async function compareSnapshots() {
   font-weight: 600;
 }
 .amount-pos { color: var(--p-text-color); }
-.amount-neg { color: var(--p-red-600, #c0392b); }
+.amount-neg { color: var(--p-red-600); }
 .basket-row-name {
   margin-top: 0.15rem;
   font-weight: 500;

@@ -1365,7 +1365,7 @@ const tagChartOptions = computed(() => {
   flex-shrink: 0;
 }
 .amount-negative {
-  color: var(--p-red-600, #c0392b);
+  color: var(--p-red-600);
 }
 
 /* --- stat-primary (avg prominent for ongoing) --- */

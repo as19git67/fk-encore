@@ -206,7 +206,7 @@ onUnmounted(() => {
   display: grid;
   place-items: center;
   overflow: hidden;
-  background: #000;
+  background: #000; /* audit-ok: fullscreen photo viewer — a black stage in both themes */
   touch-action: none;
   user-select: none;
 }
@@ -238,8 +238,8 @@ onUnmounted(() => {
   place-items: center;
   border: 0;
   border-radius: 999px;
-  color: #fff;
-  background: rgb(0 0 0 / 45%);
+  color: #fff; /* audit-ok: chrome on the black stage */
+  background: rgba(0, 0, 0, 0.45);
   font-size: 1.25rem;
   cursor: pointer;
 }

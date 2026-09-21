@@ -3556,7 +3556,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 .public-link-input { flex: 1; font-size: 0.8rem; }
 .public-link-meta { display: flex; align-items: center; gap: 0.5rem; }
 .public-link-expiry { font-size: 0.8rem; color: var(--p-text-muted-color); display: flex; align-items: center; gap: 0.3rem; }
-.public-link-expiry--expired { color: var(--p-red-500, #ef4444); font-weight: 500; }
+.public-link-expiry--expired { color: var(--p-red-500); font-weight: 500; }
 .public-link-create { display: flex; flex-direction: column; gap: 0.4rem; }
 .public-link-create-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .link-expiry-select { min-width: 140px; }
