@@ -144,6 +144,58 @@ describe("content feed: photo_feed_entries maintenance", () => {
     expect(new Date(await entryTs(owner.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
   });
 
+  /// No client compares the text before sending it, so opening the editor and
+  /// confirming without a change reaches the server as a full write. Saving
+  /// the same words again is not writing a description.
+  it("does NOT bump when the same description is saved again", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    const p = await uploadPhoto(owner.id, "a.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
+    await photo.updatePhotoDescriptionLogic(owner.id, p.id, "Abendessen am See");
+
+    const old = "2000-01-01T00:00:00.000Z";
+    await backdate(owner.id, p.id, old);
+    await backdate(friend.id, p.id, old);
+
+    // Same words, plus the whitespace an editor leaves behind.
+    await photo.updatePhotoDescriptionLogic(owner.id, p.id, "  Abendessen am See  ");
+
+    expect(new Date(await entryTs(owner.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
+    expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
+  });
+
+  /// A sync only carries the caption the phone already holds across. That is
+  /// bookkeeping, like a corrected capture date — the text still lands, but
+  /// the photo does not climb back to the top of everyone's feed for it.
+  it("does NOT bump when a device sync carries a caption across", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    const p = await uploadPhoto(owner.id, "a.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
+
+    // The phone identifies the photo by its pixel hash on a metadata-only sync.
+    await db.update(photos).set({ image_data_hash: "pixelhash-1" }).where(eq(photos.id, p.id));
+
+    const old = "2000-01-01T00:00:00.000Z";
+    await backdate(owner.id, p.id, old);
+    await backdate(friend.id, p.id, old);
+
+    const match = await photo.tryMetadataOnlySync(owner.id, {
+      imageDataHash: "pixelhash-1",
+      description: "Abendessen am See",
+    });
+    expect(match?.photoId).toBe(p.id);
+
+    // The caption is stored — only the feed bump is withheld.
+    const stored = await db.select({ description: photos.description })
+      .from(photos).where(eq(photos.id, p.id));
+    expect(stored[0]?.description).toBe("Abendessen am See");
+
+    expect(new Date(await entryTs(owner.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
+    expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
+  });
+
   /// Only four acts put a photo in the feed — a favourite, a comment, a
   /// description, an album. Correcting a capture date is bookkeeping.
   it("does NOT bump on a corrected capture date", async () => {

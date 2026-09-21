@@ -2083,7 +2083,9 @@ export async function mergeUploadMetadataIntoExisting(
   // a hiccup here must not fail the duplicate response.
   if (pendingDescription !== undefined) {
     try {
-      await updatePhotoDescriptionLogic(userId, existingPhotoId, pendingDescription);
+      await updatePhotoDescriptionLogic(userId, existingPhotoId, pendingDescription, {
+        fromDeviceSync: true,
+      });
     } catch (err) {
       console.error(`Duplicate upload: description update failed for photo ${existingPhotoId}:`, err);
     }
@@ -2236,7 +2238,7 @@ export async function tryMetadataOnlySync(
     const incoming = input.description?.trim() || null;
     if (incoming !== (existing.description ?? null)) {
       try {
-        await updatePhotoDescriptionLogic(userId, existing.id, incoming);
+        await updatePhotoDescriptionLogic(userId, existing.id, incoming, { fromDeviceSync: true });
       } catch (err) {
         console.error(`Metadata sync: description update failed for photo ${existing.id}:`, err);
       }
@@ -3989,10 +3991,21 @@ export async function updatePhotoDateLogic(
   return { success: true, taken_at: takenAt };
 }
 
+export interface UpdateDescriptionOptions {
+  /**
+   * Set by the device-sync paths, which re-apply the caption the phone
+   * already holds. That is bookkeeping, not somebody writing something for
+   * the household to read, so it never puts the photo back into the content
+   * feed — same reasoning as a corrected capture date.
+   */
+  fromDeviceSync?: boolean;
+}
+
 export async function updatePhotoDescriptionLogic(
   userId: number,
   photoId: number,
-  description: string | null
+  description: string | null,
+  opts: UpdateDescriptionOptions = {}
 ): Promise<{ success: boolean; description: string | null }> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
@@ -4003,14 +4016,21 @@ export async function updatePhotoDescriptionLogic(
   }
 
   const trimmed = description?.trim() || null;
+  // Compared trimmed on both sides: a legacy import whose stored text only
+  // differs in surrounding whitespace is being normalised here, not written.
+  const isNewText = trimmed !== null && trimmed !== (photo.description?.trim() || null);
 
   // 1. Update database
   await dbExec(db.update(photos).set({ description: trimmed }).where(eq(photos.id, photoId)));
 
-  // Content feed: a written description bumps the photo for everyone who
-  // sees it. Clearing one does not — there is nothing new to read, and
-  // re-floating a photo because its text was deleted reads as a mistake.
-  if (trimmed) {
+  // Content feed: a *newly written* description bumps the photo for everyone
+  // who sees it. Three cases deliberately do not. Clearing the text: there is
+  // nothing new to read, and re-floating a photo because its text was deleted
+  // reads as a mistake. Saving the same text again: no client compares before
+  // sending, so opening the editor and confirming without a change used to
+  // re-float the photo for the whole household. And a device sync, which only
+  // carries the phone's existing caption across.
+  if (isNewText && !opts.fromDeviceSync) {
     await contentFeed.onDescriptionWritten(photoId);
   }
 
