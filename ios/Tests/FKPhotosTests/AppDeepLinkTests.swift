@@ -40,6 +40,15 @@ final class AppDeepLinkTests: XCTestCase {
             AppDeepLink.parse(URL(string: "f4milphotos://shared-album/abc_DEF-123")!),
             .sharedAlbum(token: "abc_DEF-123")
         )
+        XCTAssertEqual(AppDeepLink.parse(URL(string: "f4milphotos://trip-day/12")!), .tripDay(planId: 12))
+    }
+
+    /// A Live Activity or a widget carries this; the web trip planner has
+    /// nothing to map it onto.
+    func testATripDayLinkRoundTripsAndHasNoWebForm() {
+        let link = AppDeepLink.tripDay(planId: 9)
+        XCTAssertEqual(AppDeepLink.parse(AppDeepLink.url(for: link)), link)
+        XCTAssertNil(AppDeepLink.webURL(for: link, serverURL: server))
     }
 
     func testASearchLinkCarriesItsQuery() {
@@ -71,7 +80,7 @@ final class AppDeepLinkTests: XCTestCase {
     func testTheGeneratedURLsParseBackToThemselves() {
         let links: [AppDeepLink] = [
             .reviewQueue, .album(id: 1), .sharedAlbum(token: "tok-1"), .photo(id: 2),
-            .person(id: 3), .recap(id: 4), .recaps, .feed,
+            .person(id: 3), .recap(id: 4), .recaps, .feed, .tripDay(planId: 5),
         ]
         for link in links {
             XCTAssertEqual(AppDeepLink.parse(AppDeepLink.url(for: link)), link)
