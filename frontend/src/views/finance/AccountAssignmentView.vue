@@ -270,7 +270,7 @@ async function save() {
 }
 .card h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .card label {
   display: flex;
@@ -311,7 +311,7 @@ async function save() {
 .entry .email {
   color: var(--p-text-muted-color);
   margin-left: 0.5rem;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 .entry-actions {
   display: flex;

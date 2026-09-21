@@ -639,7 +639,7 @@ defineExpose({
   padding: 2rem 1rem;
   text-align: center;
   color: var(--p-text-muted-color);
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
 }
 
 .vg-state--error {
@@ -705,7 +705,7 @@ defineExpose({
   position: absolute;
   top: 6px;
   right: 6px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-yellow-400);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
   pointer-events: none;
@@ -715,7 +715,7 @@ defineExpose({
   position: absolute;
   top: 6px;
   right: 6px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: rgba(255, 255, 255, 0.85);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
   pointer-events: none;
@@ -729,7 +729,7 @@ defineExpose({
   left: 6px;
   background: rgba(0, 0, 0, 0.7);
   color: #fff; /* audit-ok: badge on its own dark pill over the thumbnail */
-  font-size: 0.72rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   padding: 3px 8px;
   border-radius: 999px;
@@ -771,7 +771,7 @@ defineExpose({
   background: rgba(0, 0, 0, 0.45);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45) inset;
   border: 1px dashed rgba(255, 255, 255, 0.6);
-  font-size: 0.66rem;
+  font-size: var(--text-xs);
   padding: 2px 6px;
 }
 .vg-stack-badge--adopted:hover {
@@ -808,7 +808,7 @@ defineExpose({
   pointer-events: none;
 }
 .vg-comment-icon {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: rgba(255, 255, 255, 0.95);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
@@ -823,7 +823,7 @@ defineExpose({
   pointer-events: none;
 }
 .vg-link-icon {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   /* The "is shared" case is the unremarkable one in a shared album, so it
    * stays quiet; the withheld one is what the owner needs to spot. */
   color: rgba(255, 255, 255, 0.6);
@@ -837,7 +837,7 @@ defineExpose({
   position: absolute;
   bottom: 6px;
   right: 6px;
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   color: #fff; /* audit-ok: icon on its own dark disc over the thumbnail */
   background: rgba(0, 0, 0, 0.5);
   border-radius: 50%;

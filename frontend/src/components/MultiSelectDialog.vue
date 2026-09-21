@@ -255,7 +255,7 @@ function onClose() {
 .subject-line {
   margin: 0 0 0.75rem;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .search-row {
@@ -270,7 +270,7 @@ function onClose() {
   transform: translateY(-50%);
   color: var(--p-text-muted-color);
   pointer-events: none;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .search-input {
@@ -293,7 +293,7 @@ function onClose() {
   gap: 0.5rem;
   padding: 0.4rem 0.5rem;
   border-radius: 4px;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .checkbox-row label {
@@ -308,7 +308,7 @@ function onClose() {
   padding: 1rem 0.5rem;
   text-align: center;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 .create-row {

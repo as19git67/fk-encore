@@ -380,7 +380,7 @@ const applicationSumEur = computed(() =>
 
 .economics-head h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
   display: flex;
   align-items: center;
@@ -389,7 +389,7 @@ const applicationSumEur = computed(() =>
 
 .economics-head p {
   margin: 0.25rem 0 0;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   max-width: 70ch;
 }
@@ -397,7 +397,7 @@ const applicationSumEur = computed(() =>
 .economics-empty {
   margin: 0.75rem 0 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .economics-block {
@@ -406,7 +406,7 @@ const applicationSumEur = computed(() =>
 
 .economics-block h3 {
   margin: 0 0 0.6rem;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
 }
 
@@ -427,18 +427,18 @@ const applicationSumEur = computed(() =>
 }
 
 .tile-label {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
 .tile-value {
-  font-size: 1.3rem;
+  font-size: var(--text-2xl);
   font-variant-numeric: tabular-nums;
   color: var(--p-text-color);
 }
 
 .tile-sub {
-  font-size: 0.74rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
@@ -463,7 +463,7 @@ const applicationSumEur = computed(() =>
 
 .economics-note {
   margin: 0.6rem 0 0;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   max-width: 80ch;
 }

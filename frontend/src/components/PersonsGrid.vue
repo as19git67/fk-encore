@@ -295,7 +295,7 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 3rem;
+  font-size: var(--text-7xl);
   color: var(--p-text-muted-color);
 }
 
@@ -315,7 +315,7 @@ watch(
 }
 
 .person-card-name {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -324,7 +324,7 @@ watch(
 }
 
 .person-card-count {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: rgba(255, 255, 255, 0.8);
   flex-shrink: 0;
 }

@@ -259,6 +259,8 @@ export interface ListToolbarParts {
     activeCount: Source<number>
     /** Omit when the list has no filter menu; then no filter button appears. */
     open?: (event: Event) => void
+    /** Whether a filter panel that stays open is showing — see ListToolbarFilter. */
+    expanded?: Source<boolean>
     clearAll: () => void
   }
   sort?: UseSortReturn
@@ -282,6 +284,7 @@ export function useListToolbar(parts: ListToolbarParts): ListToolbarModel {
         chips: toComputed(parts.filter.chips),
         activeCount: toComputed(parts.filter.activeCount),
         open: parts.filter.open,
+        expanded: parts.filter.expanded ? toComputed(parts.filter.expanded) : undefined,
         clearAll: parts.filter.clearAll,
       }
     : undefined

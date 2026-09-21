@@ -89,7 +89,7 @@ defineEmits<{
   transform: translateY(-50%);
   color: var(--p-text-muted-color);
   pointer-events: none;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .ns__input {
@@ -99,14 +99,20 @@ defineEmits<{
   border-radius: 6px;
   background: var(--p-content-background);
   color: var(--p-text-color);
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   outline: none;
   box-sizing: border-box;
 }
 
+/* The field turns the browser's own outline off, so it draws the app's ring
+   back — and on `:focus`, not `:focus-visible`: a text field that was clicked
+   into still has to show where the caret went. `--primary-200` used to sit
+   here, a PrimeVue 3 name that resolves to nothing today, so what actually
+   rendered was the hard-coded indigo behind it. */
 .ns__input:focus {
   border-color: var(--p-primary-color);
-  box-shadow: 0 0 0 2px var(--primary-200, rgba(99, 102, 241, 0.2));
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .ns__clear {
@@ -125,7 +131,7 @@ defineEmits<{
 .ns__clear:hover { color: var(--p-text-color); background: var(--p-content-hover-background); }
 
 .ns__count {
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   white-space: nowrap;
 }
@@ -138,7 +144,7 @@ defineEmits<{
   align-items: center;
   gap: 0.375rem;
   padding: 0.375rem 0 0;
-  font-size: 0.8125rem;
+  font-size: var(--text-md);
 }
 
 .ns__chips-label {
@@ -159,7 +165,7 @@ defineEmits<{
   white-space: nowrap;
 }
 
-.ns__chip i { font-size: 0.75rem; opacity: 0.85; }
+.ns__chip i { font-size: var(--text-sm); opacity: 0.85; }
 .ns__chip--location { border-color: var(--p-primary-color); }
 .ns__chip--date     { border-color: var(--p-primary-color); }
 .ns__chip--semantic { font-style: italic; }

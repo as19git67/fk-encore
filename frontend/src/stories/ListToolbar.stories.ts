@@ -30,6 +30,8 @@ interface ModelOptions {
   withView?: boolean
   withSelection?: boolean
   term?: string
+  /** A filter panel that stays open, so the button reads as pressed. */
+  filterOpen?: boolean
 }
 
 function makeModel(options: ModelOptions = {}): ListToolbarModel {
@@ -52,6 +54,7 @@ function makeModel(options: ModelOptions = {}): ListToolbarModel {
       chips,
       activeCount: computed(() => chipLabels.value.length),
       open: () => { /* the view opens its own filter menu */ },
+      expanded: options.filterOpen ? ref(true) : undefined,
       clearAll: () => { chipLabels.value = [] },
     },
     sort: {
@@ -118,6 +121,17 @@ export const Laedt: Story = {
 export const OhneTreffer: Story = {
   name: 'Ohne Treffer',
   render: render({ chips: ['Tag: Unbekannt'], loaded: 0, total: 0, term: 'xyz' }),
+}
+
+export const FilterOffen: Story = {
+  name: 'Filterpanel offen',
+  render: render({
+    chips: ['Tag: Strom'],
+    loaded: 200,
+    total: 4567,
+    filterOpen: true,
+    withSelection: true,
+  }),
 }
 
 export const Schmal: Story = {

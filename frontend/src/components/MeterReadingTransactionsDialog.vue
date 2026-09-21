@@ -218,16 +218,16 @@ watch(
 <style scoped>
 .hint {
   margin: 0 0 0.75rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 h3 {
   margin: 1rem 0 0.4rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-color);
 }
 .info {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .tx-list {
@@ -247,7 +247,7 @@ h3 {
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
   background: var(--p-content-hover-background);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .tx-date {
   color: var(--p-text-muted-color);
@@ -265,7 +265,7 @@ h3 {
   white-space: nowrap;
 }
 .tx-purpose {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .tx-amount {

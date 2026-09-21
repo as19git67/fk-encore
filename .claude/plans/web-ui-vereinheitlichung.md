@@ -52,8 +52,20 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
     `var(--p-token, #hex)`-Rückfallwerte, der Rest sind Palettentoken
     (`--p-red-500` & Co.), `color-mix()`-Tönungen statt fester heller Tints,
     oder bewusst feste Medienflächen mit `/* audit-ok: … */`.
-  - ⬜ Typografie-Skala, Fokusring, Dialoge, Detailseiten-Aktionen,
-    Breakpoint-Konstanten, Route-Transition, Stories je Seitenzustand.
+  - ✅ Typo-Skala `--text-xs` … `--text-7xl` in `style.css`; die ~20 über die
+    Zeit gewachsenen Größen sind auf die nächste Sprosse gerundet (keine
+    Stelle verschiebt sich um mehr als ~1,5px). Fokus überall als
+    `var(--focus-ring)` / `var(--focus-ring-offset)`; `NaturalSearchBar` hatte
+    `outline: none` ohne Ersatz und einen toten `--primary-200`-Schatten. Das
+    Audit lehnt jetzt zusätzlich literale `font-size`-Werte und
+    PrimeVue-3-Namen ab — davon steckten noch 33 im Baum
+    (`MeterQuickEntryView`, `MeterQuickEntryConfigView`, die Job-Badges in
+    `adminPanels.css`).
+  - ✅ `filter.expanded`: der Filter-Knopf der Transaktionsliste schaltet ein
+    Panel um, sah aber offen wie geschlossen aus. Jetzt gefüllt statt
+    umrandet, mit `aria-expanded`; Views mit Overlay-Menü lassen es weg.
+  - ⬜ Dialoge, Detailseiten-Aktionen, Breakpoint-Konstanten,
+    Route-Transition, Stories je Seitenzustand.
 
 Abweichungen vom Entwurf (Etappe 1):
 

@@ -1172,7 +1172,7 @@ watch(meterId, () => loadDetail())
   gap: 0.75rem;
   margin-bottom: 1rem;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   flex-wrap: wrap;
 }
 .detail-subtitle i {
@@ -1195,18 +1195,18 @@ watch(meterId, () => loadDetail())
   min-width: 120px;
 }
 .figure-label {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .figure-value {
   font-weight: 600;
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
 }
 .figure-value--wrap {
   overflow-wrap: anywhere;
 }
 .figure-sub {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
 }
 .section-header {
@@ -1217,7 +1217,7 @@ watch(meterId, () => loadDetail())
 }
 .section-header h2 {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: var(--text-xl);
 }
 .section-header h2 i {
   margin-right: 0.4rem;
@@ -1236,7 +1236,7 @@ watch(meterId, () => loadDetail())
   margin-bottom: 1rem;
 }
 .report-summary strong {
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
 }
 .report-chart {
   height: 260px;
@@ -1315,7 +1315,7 @@ watch(meterId, () => loadDetail())
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   min-width: 0;
 }
@@ -1335,7 +1335,7 @@ watch(meterId, () => loadDetail())
 }
 .hint {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   margin: 0 0 0.75rem;
 }
 .ocr-row {
@@ -1362,11 +1362,11 @@ watch(meterId, () => loadDetail())
 }
 .token-display code {
   flex: 1;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .partial-marker {
   margin-left: 0.35rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .muted {

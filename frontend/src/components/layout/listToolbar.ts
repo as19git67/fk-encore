@@ -44,6 +44,13 @@ export interface ListToolbarFilter {
    * toolbar's `actions` slot instead — and no filter button is rendered.
    */
   open?: (event: Event) => void
+  /**
+   * Whether that surface is showing, for a list whose filters live in a panel
+   * that stays open (the transactions list). The button then reads as pressed
+   * instead of looking exactly as it did before the click. A list that opens
+   * a menu overlay leaves it out: the overlay says so itself.
+   */
+  expanded?: Ref<boolean> | ComputedRef<boolean>
   clearAll: () => void
 }
 

@@ -482,7 +482,7 @@ onMounted(async () => {
   align-items: center;
 }
 .year-filters-label {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   margin-right: 0.25rem;
 }
@@ -491,7 +491,7 @@ onMounted(async () => {
 
 .group { display: flex; flex-direction: column; gap: 1rem; }
 .group-heading {
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   font-weight: 600;
   margin: 0;
   padding-bottom: 0.25rem;
@@ -501,7 +501,7 @@ onMounted(async () => {
 
 .section { display: flex; flex-direction: column; gap: 0.5rem; }
 .section-heading {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0;
   display: flex;
@@ -510,7 +510,7 @@ onMounted(async () => {
   color: var(--p-text-color);
 }
 .section-count {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   font-weight: 400;
   color: var(--p-text-muted-color);
 }
@@ -535,8 +535,8 @@ onMounted(async () => {
 .document-card:focus-visible {
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .document-card--highlight {
@@ -548,7 +548,7 @@ onMounted(async () => {
 }
 
 .document-icon {
-  font-size: 2rem;
+  font-size: var(--text-5xl);
   color: var(--p-primary-color);
   flex-shrink: 0;
 }
@@ -570,7 +570,7 @@ onMounted(async () => {
   min-width: 0;
 }
 .confidence {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 
@@ -578,7 +578,7 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .document-meta span { display: inline-flex; align-items: center; gap: 0.25rem; }

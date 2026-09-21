@@ -313,8 +313,8 @@ onBeforeUnmount(() => {
 }
 
 .cropper-wrap:focus-visible {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .cropper-img {

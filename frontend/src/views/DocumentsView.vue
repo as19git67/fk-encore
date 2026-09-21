@@ -1110,7 +1110,7 @@ onMounted(async () => {
 .collection-icon {
   flex: 0 0 auto;
   color: var(--p-primary-color);
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
 }
 .collection-body {
   flex: 1 1 auto;
@@ -1127,7 +1127,7 @@ onMounted(async () => {
 }
 .collection-summary {
   color: var(--p-text-muted-color);
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
@@ -1136,7 +1136,7 @@ onMounted(async () => {
 }
 .collection-meta {
   color: var(--p-text-muted-color);
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
 }
 .collection-meta i {
   margin-right: 3px;
@@ -1148,7 +1148,7 @@ onMounted(async () => {
 .collection-hidden-note {
   margin: 0 0 12px;
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .collection-hidden-note i {
   margin-right: 4px;
@@ -1178,7 +1178,7 @@ onMounted(async () => {
   border: 1px solid var(--p-content-border-color);
   background: var(--p-content-hover-background);
   color: var(--p-text-muted-color);
-  font-size: 0.74rem;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .collection-chip:hover {
@@ -1187,7 +1187,7 @@ onMounted(async () => {
 }
 .grid-card-collections {
   color: var(--p-text-muted-color);
-  font-size: 0.74rem;
+  font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1228,8 +1228,8 @@ onMounted(async () => {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 .document-card--selected {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
   background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-content-background));
 }
 .document-card--highlight {
@@ -1254,7 +1254,7 @@ onMounted(async () => {
 }
 
 .document-icon {
-  font-size: 2rem;
+  font-size: var(--text-5xl);
   line-height: 1;
   color: var(--p-primary-color);
   flex-shrink: 0;
@@ -1295,7 +1295,7 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 .document-meta span { display: inline-flex; align-items: center; gap: 0.25rem; }
@@ -1306,7 +1306,7 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-red-600);
   /* A translucent red tint instead of red-50: the fixed light tint would stay
      a bright patch on a dark page, the tint takes the page's own surface. */
@@ -1346,12 +1346,12 @@ onMounted(async () => {
   transform: translateY(-1px);
 }
 .grid-card:focus-visible {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .grid-card--selected {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
   background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-content-background));
 }
 
@@ -1380,7 +1380,7 @@ onMounted(async () => {
 
 .grid-card-title {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1390,12 +1390,12 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 
 .grid-card-category {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   display: flex;
   align-items: center;
@@ -1408,9 +1408,9 @@ onMounted(async () => {
   gap: 0.2rem;
   margin-top: auto;
 }
-.grid-card-tags :deep(.p-chip) { font-size: 0.75rem; }
+.grid-card-tags :deep(.p-chip) { font-size: var(--text-sm); }
 .more-tags {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   align-self: center;
 }

@@ -34,7 +34,7 @@ const serviceLabels: Record<string, string> = {
   padding: 0.4rem 1rem;
   background: var(--p-yellow-100);
   border-bottom: 1px solid var(--p-yellow-300);
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-yellow-900);
 }
 

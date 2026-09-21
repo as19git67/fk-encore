@@ -819,7 +819,7 @@ watch(() => props.readOnly, (ro) => {
   margin-left: auto;
 }
 .ocr-loading {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .ocr-lines {
@@ -834,7 +834,7 @@ watch(() => props.readOnly, (ro) => {
 }
 .ocr-line {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   line-height: 1.35;
   color: var(--p-text-color);
   overflow-wrap: anywhere;
@@ -924,7 +924,7 @@ watch(() => props.readOnly, (ro) => {
   opacity: 0;
   transition: opacity 0.2s;
   color: white;
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
 }
 .preview-container:hover .preview-overlay { opacity: 1; }
 
@@ -947,7 +947,7 @@ watch(() => props.readOnly, (ro) => {
 .sidebar-section { padding: 0.75rem 1rem; }
 
 .section-label {
-  font-size: 0.72rem;
+  font-size: var(--text-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
@@ -957,7 +957,7 @@ watch(() => props.readOnly, (ro) => {
   align-items: center;
   gap: 0.4rem;
 }
-.section-label .pi { font-size: 0.75rem; }
+.section-label .pi { font-size: var(--text-sm); }
 /* Label on the left, an inline action (e.g. the jump-to menu) on the
    right. The action button keeps its own normal-case styling. */
 .section-label--with-action {
@@ -980,11 +980,11 @@ watch(() => props.readOnly, (ro) => {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 
 .meta-icon {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   flex-shrink: 0;
 }
@@ -998,7 +998,7 @@ watch(() => props.readOnly, (ro) => {
 
 .meta-value--mono {
   font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   word-break: break-all;
 }
@@ -1065,12 +1065,12 @@ watch(() => props.readOnly, (ro) => {
   background: var(--p-tag-warn-background, rgba(255,160,0,0.2));
   color: var(--p-tag-warn-color);
   border-radius: 0.5rem;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
 }
 .poi-meta {
   display: flex;
   gap: 0.4rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .poi-score { font-variant-numeric: tabular-nums; }
@@ -1084,7 +1084,7 @@ watch(() => props.readOnly, (ro) => {
   border: 1px solid var(--p-content-border-color);
   border-radius: 1rem;
   padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   cursor: default;
 }
 
@@ -1092,12 +1092,12 @@ watch(() => props.readOnly, (ro) => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 
 .empty-hint {
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   font-style: italic;
 }
@@ -1112,8 +1112,8 @@ watch(() => props.readOnly, (ro) => {
   border-radius: 6px;
   border: 1px solid var(--p-content-border-color);
 }
-.person-icon { font-size: 0.8rem; color: var(--p-text-muted-color); }
-.person-name { flex: 1; font-size: 0.875rem; }
+.person-icon { font-size: var(--text-md); color: var(--p-text-muted-color); }
+.person-name { flex: 1; font-size: var(--text-base); }
 
 .description-editor {
   display: flex;
@@ -1124,14 +1124,14 @@ watch(() => props.readOnly, (ro) => {
 .description-textarea {
   width: 100%;
   resize: vertical;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   padding: 0.5rem;
   border-radius: 6px;
   font-family: inherit;
 }
 
 .description-text {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1150,7 +1150,7 @@ watch(() => props.readOnly, (ro) => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   font-style: italic;
 }
@@ -1183,11 +1183,11 @@ watch(() => props.readOnly, (ro) => {
   border: 1px solid var(--p-content-border-color);
   border-radius: 1rem;
   padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 
 .album-chip .pi-book {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
 }
 
@@ -1203,7 +1203,7 @@ watch(() => props.readOnly, (ro) => {
 }
 
 .album-chip-jump :deep(.p-button-icon) {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 
 .album-edit-btn {
@@ -1223,7 +1223,7 @@ watch(() => props.readOnly, (ro) => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 
 .opinion-label {
@@ -1232,10 +1232,10 @@ watch(() => props.readOnly, (ro) => {
   gap: 0.3rem;
   min-width: 7rem;
   color: var(--p-text-muted-color);
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
 }
 
-.opinion-icon { font-size: 0.75rem; }
+.opinion-icon { font-size: var(--text-sm); }
 .opinion-icon--fav { color: var(--p-orange-400); }
 .opinion-icon--hide { color: var(--p-red-400); }
 .opinion-icon--ai { color: var(--p-yellow-500); }
@@ -1259,7 +1259,7 @@ watch(() => props.readOnly, (ro) => {
 .opinion-bar-fill--ai { background: var(--p-yellow-500); }
 
 .opinion-count {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   min-width: 3.5rem;
   text-align: right;

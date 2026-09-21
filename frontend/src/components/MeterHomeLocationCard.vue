@@ -272,7 +272,7 @@ async function fetchNow() {
 }
 .home-head h3 {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
   display: flex;
   align-items: center;
@@ -280,7 +280,7 @@ async function fetchNow() {
 }
 .home-head p {
   margin: 0.25rem 0 0.6rem;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   max-width: 80ch;
 }
@@ -293,7 +293,7 @@ async function fetchNow() {
   margin-bottom: 0.6rem;
 }
 .home-label {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--p-text-color);
 }
 .home-actions {
@@ -338,7 +338,7 @@ async function fetchNow() {
 }
 .candidate .muted {
   margin-left: auto;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   white-space: nowrap;
 }
@@ -353,11 +353,11 @@ async function fetchNow() {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .info {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 </style>

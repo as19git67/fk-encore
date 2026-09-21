@@ -689,7 +689,7 @@ function close() {
 <style scoped>
 .filter-menu { display: flex; flex-direction: column; gap: 1.25rem; }
 .filter-row { display: flex; flex-direction: column; gap: 0.5rem; }
-.filter-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
+.filter-label { font-weight: 500; font-size: var(--text-base); color: var(--p-text-muted-color); }
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.75rem; }
 .filter-switch { display: flex; align-items: center; gap: 0.6rem; }
 .filter-slider { margin: 0.5rem 0.25rem; }

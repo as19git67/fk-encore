@@ -36,13 +36,29 @@ Prefer semantic variables such as:
 
 If a desired semantic variable does not exist, use a CSS alpha overlay (e.g. rgba(0,0,0,0.05)) rather than a fixed surface scale value.
 
+Namen aus PrimeVue 3 (`--surface-border`, `--text-color-secondary`,
+`--blue-100`) gibt es nicht mehr: PrimeVue 4 stellt allem `--p-` voran, die
+alte Schreibweise löst sich also zu nichts auf. Entweder greift die Regel
+still nicht, oder der Hex-Fallback dahinter rendert — beides sieht nicht
+kaputt genug aus, um aufzufallen.
+
+Schriftgrößen kommen aus der Typo-Skala in `frontend/src/style.css`
+(`--text-xs` … `--text-7xl`), nie als Zahl im Style. Relative Angaben (`em`,
+`%`, `inherit`) bleiben erlaubt — sie skalieren absichtlich mit ihrem
+Kontext.
+
+Fokus sieht überall gleich aus: `outline: var(--focus-ring)` und
+`outline-offset: var(--focus-ring-offset)`. Wer `outline: none` setzt, zeichnet
+den Ring im selben Atemzug wieder — sonst weiß ein Tastaturnutzer nicht, wo er
+ist.
+
 Das prüft `scripts/check-css-tokens.mjs` (Issue #1281): es liest die
 `<style>`-Blöcke unter `frontend/src` und lehnt `--p-surface-<n>`, feste
-Hex-Farben und deckende `rgb()` ab. Der pre-commit-Hook ruft es für die
-gestageten Dateien auf; der ganze Baum geht mit `node
-scripts/check-css-tokens.mjs`. Eine Fläche, die in beiden Themes dieselbe
-sein soll (der schwarze Vollbild-Betrachter), behält ihren Wert und endet in
-`/* audit-ok: kurze Begründung */`.
+Hex-Farben, deckende `rgb()`, PrimeVue-3-Namen und literale `font-size`-Werte
+ab. Der pre-commit-Hook ruft es für die gestageten Dateien auf; der ganze Baum
+geht mit `node scripts/check-css-tokens.mjs`. Eine Fläche, die in beiden Themes
+dieselbe sein soll (der schwarze Vollbild-Betrachter), behält ihren Wert und
+endet in `/* audit-ok: kurze Begründung */`.
 </css_style_guide>
 <encore_ts_domain_knowledge>
 <api_definition>
@@ -1150,6 +1166,10 @@ Regeln:
   Zahl der Chips und der Zähler am Filter-Knopf müssen übereinstimmen.
 - Kein eigenes Suchfeld, kein eigenes Sortiermenü, keine eigene Ergebniszahl
   mehr in einer View. Die Toolbar rendert das Sortiermenü aus `sort.fields`.
+- Bleibt der Filter als Panel offen (Transaktionsliste), reicht die View
+  `filter.expanded` mit — der Knopf ist dann ein Schalter und sieht
+  eingeschaltet aus (gefüllt statt umrandet, `aria-expanded`). Wer ein
+  Overlay-Menü öffnet, lässt es weg: das Menü sagt es selbst.
 - Leere Liste, erster Ladevorgang und Ladefehler laufen über
   `EmptyState`, `PageSkeleton` und `ErrorBanner` aus `components/layout/`.
   Ladefehler gehören in den `#notice`-Slot, nie in einen Toast.

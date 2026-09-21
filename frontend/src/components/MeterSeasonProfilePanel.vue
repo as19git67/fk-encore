@@ -121,7 +121,7 @@ function bestMonth(metric: SeasonProfileMetric): string | null {
 }
 .season-head h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
   display: flex;
   align-items: center;
@@ -129,7 +129,7 @@ function bestMonth(metric: SeasonProfileMetric): string | null {
 }
 .season-head p {
   margin: 0.25rem 0 0;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   max-width: 70ch;
 }
@@ -138,7 +138,7 @@ function bestMonth(metric: SeasonProfileMetric): string | null {
 }
 .season-block h3 {
   margin: 0 0 0.6rem;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
   display: flex;
   align-items: baseline;
@@ -146,7 +146,7 @@ function bestMonth(metric: SeasonProfileMetric): string | null {
   flex-wrap: wrap;
 }
 .season-sub {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   font-weight: normal;
   color: var(--p-text-muted-color);
 }
@@ -157,7 +157,7 @@ function bestMonth(metric: SeasonProfileMetric): string | null {
 .heatmap {
   border-collapse: separate;
   border-spacing: 3px;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   min-width: 36rem;
 }
@@ -198,7 +198,7 @@ function bestMonth(metric: SeasonProfileMetric): string | null {
 }
 .info {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .info-compact {
   margin-top: 0.75rem;

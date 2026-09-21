@@ -170,7 +170,7 @@ onMounted(load)
 
 .section-title p,
 .config-name small {
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 h2,
@@ -180,9 +180,9 @@ p {
 
 .card {
   padding: 1rem;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 16px;
-  background: var(--surface-card);
+  background: var(--p-content-background);
 }
 
 .add-select {
@@ -192,9 +192,9 @@ p {
 
 .empty {
   padding: 1rem;
-  border: 1px dashed var(--surface-border);
+  border: 1px dashed var(--p-content-border-color);
   border-radius: 12px;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
 }
 
 .config-list {
@@ -207,9 +207,9 @@ p {
 
 .config-list li {
   padding: 0.65rem;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 14px;
-  background: var(--surface-ground);
+  background: var(--p-content-hover-background);
 }
 
 .meter-icon {
@@ -219,8 +219,8 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--primary-color);
-  background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+  color: var(--p-primary-color);
+  background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
   flex: 0 0 auto;
 }
 

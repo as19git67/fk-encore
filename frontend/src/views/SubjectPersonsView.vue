@@ -558,7 +558,7 @@ onMounted(load)
 .page-hint {
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   line-height: 1.4;
 }
 .page-hint code {
@@ -577,7 +577,7 @@ onMounted(load)
 }
 .assessment-section h2 {
   margin: 0 0 0.5rem;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .assessment-form {
   display: flex;
@@ -607,7 +607,7 @@ onMounted(load)
 }
 .add-form h2 {
   margin: 0 0 0.5rem;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .add-form__grid {
   display: flex;
@@ -646,7 +646,7 @@ onMounted(load)
   padding-bottom: 0.05rem;
 }
 .label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
 }
 
@@ -667,7 +667,7 @@ onMounted(load)
   gap: 0.4rem;
 }
 .override-tag {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
 }
 
 .tax-review-select {
@@ -702,7 +702,7 @@ onMounted(load)
 }
 .column-legend summary {
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--p-text-muted-color);
   user-select: none;
@@ -721,13 +721,13 @@ onMounted(load)
 }
 .legend-item dt {
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   min-width: 10rem;
   color: var(--p-text-color);
 }
 .legend-item dd {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--p-text-muted-color);
   line-height: 1.4;
   flex: 1 1 20rem;
@@ -744,10 +744,10 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .legend-tag-sample {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   flex-shrink: 0;
 }
 </style>

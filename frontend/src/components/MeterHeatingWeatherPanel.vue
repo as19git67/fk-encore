@@ -181,7 +181,7 @@ function riskClass(value: number | null | undefined) {
 }
 .heating-head h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
   display: flex;
   align-items: center;
@@ -189,7 +189,7 @@ function riskClass(value: number | null | undefined) {
 }
 .heating-head p {
   margin: 0.25rem 0 0;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   max-width: 80ch;
 }
@@ -198,7 +198,7 @@ function riskClass(value: number | null | undefined) {
 }
 .heating-block h3 {
   margin: 0 0 0.6rem;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   color: var(--p-text-color);
 }
 .figures-row {
@@ -217,16 +217,16 @@ function riskClass(value: number | null | undefined) {
   background: var(--p-content-hover-background);
 }
 .tile-label {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .tile-value {
-  font-size: 1.25rem;
+  font-size: var(--text-2xl);
   font-variant-numeric: tabular-nums;
   color: var(--p-text-color);
 }
 .tile-sub {
-  font-size: 0.74rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .is-worse {
@@ -243,7 +243,7 @@ function riskClass(value: number | null | undefined) {
 }
 .info {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .info-compact {
   margin-top: 0.75rem;

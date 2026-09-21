@@ -1154,6 +1154,7 @@ const toolbar = useListToolbar({
     chips: filterChips,
     activeCount: facetCount,
     open: () => { filterPanelOpen.value = !filterPanelOpen.value },
+    expanded: filterPanelOpen,
     clearAll: clearFilters,
   },
   result: {
@@ -1907,7 +1908,7 @@ function goBack() {
 }
 .tx-selection-title {
   margin: 0 0 0.5rem;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 .tx-selection-list {
@@ -1945,7 +1946,7 @@ function goBack() {
 }
 .tx-selection-purpose {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 /* ── Filter panel (conditional finance toolbar subheader) ─────────── */
@@ -1992,7 +1993,7 @@ function goBack() {
 }
 .tx-day-header {
   margin: 0.75rem 0 0.25rem;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   font-weight: 700;
   color: var(--p-text-color);
 }
@@ -2037,7 +2038,7 @@ function goBack() {
 }
 .tx-purpose {
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   font-family: monospace;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2047,7 +2048,7 @@ function goBack() {
   align-items: baseline;
   gap: 0.35rem;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-style: italic;
   word-break: break-word;
 }
@@ -2056,7 +2057,7 @@ function goBack() {
   align-items: baseline;
   gap: 0.35rem;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .tx-tags {
   display: flex;
@@ -2068,7 +2069,7 @@ function goBack() {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   font-weight: 600;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .tx-amount-positive {
   color: var(--p-text-color);
@@ -2113,12 +2114,12 @@ function goBack() {
 }
 .tx-cap-hint {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   text-align: center;
   margin: 1rem 0 0;
 }
 .tx-dummy {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 
 /* ── Holdings table ──────────────────────────────────────────────── */
@@ -2136,7 +2137,7 @@ function goBack() {
   min-width: 0;
 }
 .realized-year-title {
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0 0 0.5rem;
 }
@@ -2170,12 +2171,12 @@ function goBack() {
 }
 .realized-year-count {
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   white-space: nowrap;
 }
 .realized-year-note {
   margin: 0.5rem 0 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 .holdings-section-head {
@@ -2186,14 +2187,14 @@ function goBack() {
   margin-bottom: 0.75rem;
 }
 .holdings-title {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0;
 }
 .holdings-date {
   font-weight: 400;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .holdings-table-wrap {
   /* No horizontal scroll — narrow viewports shrink the table via the
@@ -2203,7 +2204,7 @@ function goBack() {
 .holdings-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   table-layout: auto;
 }
 .holdings-table th {
@@ -2234,7 +2235,7 @@ function goBack() {
 }
 .holdings-isin {
   display: block;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .holdings-value {
@@ -2247,7 +2248,7 @@ function goBack() {
 }
 .holdings-cost-source {
   margin-left: 0.25rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   cursor: help;
 }
@@ -2256,7 +2257,7 @@ function goBack() {
 }
 .holdings-gain-pct {
   display: block;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   opacity: 0.85;
 }
 .holdings-gain-pos {
@@ -2285,7 +2286,7 @@ function goBack() {
 
 @media (max-width: 640px) {
   .holdings-table {
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
   }
   .holdings-table th,
   .holdings-table td {
@@ -2309,7 +2310,7 @@ function goBack() {
     overflow-wrap: anywhere;
   }
   .holdings-isin {
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     overflow-wrap: anywhere;
   }
   .thead-full {
@@ -2332,7 +2333,7 @@ function goBack() {
   margin-bottom: 0.25rem;
 }
 .holdings-history-label {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2345,7 +2346,7 @@ function goBack() {
 }
 .holdings-history-empty {
   margin: 0.25rem 0 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
 }
 
@@ -2357,7 +2358,7 @@ function goBack() {
   margin: 0.5rem 0 0;
   padding: 0.4rem 0 0;
   border-top: 1px solid var(--p-content-border-color);
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
 }
 .holdings-fact {
   display: flex;
@@ -2399,7 +2400,7 @@ function goBack() {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .depot-tx-field :deep(.p-inputtext),
@@ -2419,7 +2420,7 @@ function goBack() {
 .depot-tx-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   margin-top: 0.25rem;
 }
 .depot-tx-table th {
@@ -2436,7 +2437,7 @@ function goBack() {
 .depot-tx-source {
   display: inline-block;
   margin-left: 0.35rem;
-  font-size: 0.65rem;
+  font-size: var(--text-xs);
   color: var(--p-text-muted-color);
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -2452,7 +2453,7 @@ function goBack() {
 }
 .depot-history-hint {
   margin: 0 0 1rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   font-style: italic;
 }

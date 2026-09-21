@@ -175,7 +175,7 @@ async function save() {
 }
 .card-head h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .field {
   display: flex;
@@ -200,7 +200,7 @@ async function save() {
   display: flex;
   gap: 0.25rem;
   align-items: center;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 .time-input {
   width: 6rem;

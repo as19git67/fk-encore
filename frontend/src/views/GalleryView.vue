@@ -2011,12 +2011,12 @@ void refreshReviewSequence()
   align-items: center;
   gap: 1rem;
   color: var(--p-primary-color);
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
   font-weight: 600;
 }
 
 .drag-message .pi {
-  font-size: 3rem;
+  font-size: var(--text-7xl);
 }
 
 /* ── Upload bars ──────────────────────────────────────────────────────── */
@@ -2033,7 +2033,7 @@ void refreshReviewSequence()
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   color: var(--p-blue-700);
   margin-bottom: 0.35rem;
 }
@@ -2062,7 +2062,7 @@ void refreshReviewSequence()
   background: var(--p-green-50);
   border-bottom: 1px solid var(--p-green-200);
   color: var(--p-green-700);
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 .upload-result-bar .pi-check-circle {
   color: var(--p-green-500);
@@ -2098,7 +2098,7 @@ void refreshReviewSequence()
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   color: var(--p-red-700);
   margin-bottom: 0.35rem;
 }
@@ -2139,7 +2139,7 @@ void refreshReviewSequence()
   gap: 0.3rem;
   margin-left: 0.75rem;
   padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   font-weight: 500;
   background: rgba(255, 255, 255, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.3);
@@ -2179,7 +2179,7 @@ void refreshReviewSequence()
   align-items: center;
   padding: 0.75rem 1rem;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   border-bottom: 1px solid var(--p-content-border-color);
   flex-shrink: 0;
 }
@@ -2207,7 +2207,7 @@ void refreshReviewSequence()
 
 .error-flyout-list li {
   padding: 0.5rem 1rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   border-bottom: 1px solid var(--p-content-hover-background);
 }
 

@@ -231,7 +231,7 @@ onUnmounted(() => {
 .queue-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   margin-bottom: 0.5rem;
 }
 .queue-table th, .queue-table td {
@@ -247,13 +247,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-weight: 600;
   margin-bottom: 0.25rem;
 }
 .stuck-hint {
   margin: 0 0 0.4rem;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 .doc-status { margin-left: 0.35rem; color: var(--p-text-muted-color); }

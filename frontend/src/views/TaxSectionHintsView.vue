@@ -268,7 +268,7 @@ onMounted(loadData)
 }
 
 .group-title {
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -301,7 +301,7 @@ onMounted(loadData)
 
 .hint-slug {
   font-family: monospace;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--p-text-muted-color);
 }
 
@@ -310,7 +310,7 @@ onMounted(loadData)
 }
 
 .badge {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 0.15rem 0.5rem;
@@ -336,7 +336,7 @@ onMounted(loadData)
 }
 
 .default-hint {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   margin-top: 0.4rem;
   color: var(--p-text-muted-color);
   display: flex;
@@ -359,6 +359,6 @@ onMounted(loadData)
   align-items: center;
   gap: 0.5rem;
   margin-top: 0.75rem;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 </style>

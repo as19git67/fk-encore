@@ -117,7 +117,7 @@ function formatDate(iso: string | null): string {
 .qed-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .qed-table th,

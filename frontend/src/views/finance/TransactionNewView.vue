@@ -489,7 +489,7 @@ async function save() {
   width: 100%;
 }
 .account-name-top {
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--p-content-border-color);
   margin-bottom: 0.5rem;
@@ -508,7 +508,7 @@ async function save() {
   flex: 1;
 }
 .amount-input :deep(.amount-number) {
-  font-size: 1.6rem;
+  font-size: var(--text-3xl);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   width: 100%;
@@ -520,7 +520,7 @@ async function save() {
   gap: 0.35rem;
 }
 .field-label {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--p-text-muted-color);
 }
@@ -529,7 +529,7 @@ async function save() {
 }
 .recipient-input {
   width: 100%;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .recipient-new {
   font-style: italic;
@@ -539,14 +539,14 @@ async function save() {
 .save-btn {
   flex: 2 2 auto;
   padding: 0.85rem;
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin-top: 0.25rem;
 }
 .cancel-btn {
   flex: 1 1 auto;
   padding: 0.85rem;
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin-top: 0.25rem;
 }
@@ -554,7 +554,7 @@ async function save() {
   margin-top: 0.5rem;
 }
 .recent-label {
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--p-text-muted-color);
   margin: 0 0 0.5rem;
   text-transform: uppercase;
@@ -596,12 +596,12 @@ async function save() {
 }
 .section-title {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 .section-hint {
   margin: 0.2rem 0 0;
   color: var(--p-text-muted-color);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   line-height: 1.35;
 }
 .document-count {
@@ -630,7 +630,7 @@ async function save() {
 .document-success,
 .document-error {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .document-info {
   color: var(--p-text-muted-color);
@@ -706,7 +706,7 @@ async function save() {
   background: var(--p-highlight-background);
   border: 1px solid var(--p-content-border-color);
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-family: inherit;
   color: var(--p-highlight-color);
   transition: all 0.1s;
@@ -717,6 +717,6 @@ async function save() {
 }
 .recent-tags {
   color: var(--p-text-muted-color);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 </style>
