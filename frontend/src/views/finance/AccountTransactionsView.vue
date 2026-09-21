@@ -2284,7 +2284,7 @@ function goBack() {
   display: none;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .holdings-table {
     font-size: var(--text-sm);
   }

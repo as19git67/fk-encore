@@ -1332,7 +1332,7 @@ const extractedFields = computed(() => {
 .card + .card {
   margin-top: 1rem;
 }
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .card + .card {
     margin-top: 0.75rem;
   }

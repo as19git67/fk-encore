@@ -152,7 +152,7 @@ async function save() {
 
 <style scoped>
 /* Page frame and title: PageLayout (issue #1272). */
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .card {
     padding: 0.75rem;
   }

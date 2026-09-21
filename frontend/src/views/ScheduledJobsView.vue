@@ -406,7 +406,7 @@ code.error {
 /* Mobile: stack everything single-column, fields become a tighter
  * 2-row stack instead of a 2-column grid (which gets cramped under
  * ~340px). Remove the page padding so cards reach the screen edges. */
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .jobs-page {
     gap: 0.75rem;
   }

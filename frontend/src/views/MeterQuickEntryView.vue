@@ -394,7 +394,7 @@ p {
   display: none;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .capture-head,
   .empty-config {
     align-items: stretch;

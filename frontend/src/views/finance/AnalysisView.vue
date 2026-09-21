@@ -1192,7 +1192,7 @@ const tagChartOptions = computed(() => {
 
 <style scoped>
 /* Page frame and title: PageLayout (issue #1272). */
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .card {
     padding: 0.75rem;
   }
@@ -1200,7 +1200,7 @@ const tagChartOptions = computed(() => {
 .card + .card {
   margin-top: 1rem;
 }
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .card + .card {
     margin-top: 0.75rem;
   }

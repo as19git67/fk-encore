@@ -242,7 +242,7 @@ p {
   align-items: center;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .section-title,
   .add-row {
     align-items: stretch;

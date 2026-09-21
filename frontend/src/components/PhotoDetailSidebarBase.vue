@@ -869,7 +869,7 @@ watch(() => props.readOnly, (ro) => {
   margin-bottom: 0.5rem;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   /* Als Bottom-Sheet: volle Breite und undurchsichtiger Hintergrund */
   .details-sidebar {
     width: 100%;
@@ -908,7 +908,7 @@ watch(() => props.readOnly, (ro) => {
   max-height: 280px !important; /* = Sidebar-Breite auf Desktop */
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .preview-container :deep(.image-content-wrapper) {
     max-height: 100vw !important; /* = volle Sheet-Breite auf Mobile */
   }

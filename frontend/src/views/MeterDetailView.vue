@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useMediaQuery } from '../composables/useBreakpoint'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
@@ -100,11 +101,11 @@ function fmtDateTime(iso: string | null) {
   if (!iso) return '–'
   return new Date(iso).toLocaleString('de-DE')
 }
-const isNarrowScreen = ref(false)
-let narrowMedia: MediaQueryList | null = null
-function updateNarrowScreen() {
-  isNarrowScreen.value = narrowMedia?.matches ?? false
-}
+/* Narrower than this the reading table drops to one column — a threshold of
+   this view, not of the page, so it keeps its own number. The stylesheet at
+   the bottom of this file uses the same one. */
+const NARROW_METER_LAYOUT = '(max-width: 560px)'
+const isNarrowScreen = useMediaQuery(NARROW_METER_LAYOUT)
 function fmtReportDate(iso: string | null) {
   if (!iso) return '–'
   const date = new Date(iso)
@@ -744,15 +745,8 @@ function copyToken() {
 }
 
 onMounted(async () => {
-  narrowMedia = window.matchMedia('(max-width: 560px)')
-  updateNarrowScreen()
-  narrowMedia.addEventListener('change', updateNarrowScreen)
   groups.value = await loadGroups()
   await loadDetail()
-})
-
-onUnmounted(() => {
-  narrowMedia?.removeEventListener('change', updateNarrowScreen)
 })
 
 watch(meterId, () => loadDetail())

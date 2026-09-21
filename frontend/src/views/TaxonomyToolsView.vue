@@ -766,7 +766,7 @@ onUnmounted(() => {
   color: var(--p-text-color);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .content {
     gap: 0.75rem;
   }

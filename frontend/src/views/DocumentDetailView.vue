@@ -1643,7 +1643,7 @@ onBeforeUnmount(() => {
 /* On phones the four labelled buttons (Zurück / Neu klassifizieren /
    OCR erzwingen / Löschen) overflow the viewport. Hide the labels and
    tighten padding so the row stays icon-only and fits comfortably. */
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .detail-actions :deep(.p-button-label) {
     display: none;
   }
@@ -1716,8 +1716,15 @@ onBeforeUnmount(() => {
   .meta-panel {
     min-height: 0;
     overflow-y: auto;
-    /* Platz für die Scrollbar, damit sie nicht auf den Eingabefeldern liegt. */
+    /* Rechts Platz für die Scrollbar, damit sie nicht auf den Eingabefeldern
+       liegt. Links der Fokusring: die Felder füllen die Spalte, und
+       `overflow-y: auto` klippt auch waagrecht — ohne diesen Rand fehlt dem
+       Ring seine linke Seite. Der negative Rand nimmt ihn außen wieder weg. */
     padding-right: 0.5rem;
+    padding-left: var(--focus-ring-reach);
+    padding-bottom: var(--focus-ring-reach);
+    margin-left: calc(-1 * var(--focus-ring-reach));
+    margin-bottom: calc(-1 * var(--focus-ring-reach));
   }
 }
 
