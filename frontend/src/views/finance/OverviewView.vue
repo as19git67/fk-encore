@@ -681,7 +681,7 @@ async function saveConfig() {
   margin: 1rem 0 0.5rem;
 }
 /* Tighter vertical rhythm on narrow screens (was the page gap). */
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   .anomaly-tile {
     margin-bottom: 1rem;
   }

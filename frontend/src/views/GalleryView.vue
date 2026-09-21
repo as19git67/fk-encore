@@ -66,6 +66,7 @@ import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDialog.vue'
 import CollageDialog from '../components/CollageDialog.vue'
+import { useAtLeast } from '../composables/useBreakpoint'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
@@ -1040,26 +1041,10 @@ let curationVersion = 0
 // the previous photo can't overwrite the current one's lists.
 const detailsActive = ref(false)
 
-// The persistent desktop detail panel is mounted on ≥768px viewports
-// (hidden via CSS below the breakpoint). Track that reactively so we only
-// fetch faces / POI matches when something will actually show them —
-// see `detailsVisible`.
-const DESKTOP_SIDEBAR_MQ = '(min-width: 769px)'
-const desktopSidebarVisible = ref(
-  typeof window !== 'undefined' && window.matchMedia(DESKTOP_SIDEBAR_MQ).matches,
-)
-let sidebarMql: MediaQueryList | null = null
-function onSidebarMqChange(e: MediaQueryListEvent) {
-  desktopSidebarVisible.value = e.matches
-}
-onMounted(() => {
-  sidebarMql = window.matchMedia(DESKTOP_SIDEBAR_MQ)
-  desktopSidebarVisible.value = sidebarMql.matches
-  sidebarMql.addEventListener('change', onSidebarMqChange)
-})
-onUnmounted(() => {
-  sidebarMql?.removeEventListener('change', onSidebarMqChange)
-})
+// The persistent desktop detail panel is mounted from `md` up (hidden via
+// CSS below it). Track that reactively so we only fetch faces / POI matches
+// when something will actually show them — see `detailsVisible`.
+const desktopSidebarVisible = useAtLeast('md')
 
 // Whether the per-photo details (faces / POI) are currently
 // on screen for the cursor photo. In fullscreen the desktop sidebar is
@@ -1969,7 +1954,7 @@ void refreshReviewSequence()
   overflow-x: hidden;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .desktop-sidebar { display: none; }
 }
 

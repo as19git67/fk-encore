@@ -76,12 +76,60 @@
      One ring everywhere. An element that turns the browser's own outline off
      draws this one back — `outline: none` without a replacement leaves a
      keyboard user with no idea where they are. */
-  --focus-ring: 2px solid var(--p-primary-color);
+  --focus-ring-width: 2px;
+  --focus-ring: var(--focus-ring-width) solid var(--p-primary-color);
   --focus-ring-offset: 2px;
+  /* How far past its element the ring reaches. A container that clips —
+     a scroller, a fixed-height row — has to leave this much room, or the
+     ring of a child that fills it is cut off. */
+  --focus-ring-reach: calc(var(--focus-ring-offset) + var(--focus-ring-width));
+  /* Where the clipping is the point — a rounded map that crops its tiles, an
+     overlay that covers a surface edge to edge — the container cannot give
+     room, so the ring goes *inside* the element instead. Only for something
+     that fills its container; anywhere else it would sit on the content. */
+  --focus-ring-offset-inset: calc(-1 * var(--focus-ring-width));
+
+  /* PrimeVue draws its own ring on its own components. It used to be 1px
+     where the app's was 2px, so a button and the row it sat in were focused
+     differently. Same width, same colour, same offset, one look. */
+  --p-focus-ring-width: var(--focus-ring-width);
+  --p-focus-ring-offset: var(--focus-ring-offset);
 
   --page-gutter: 16px;
   --page-max-normal: 1200px;
   --page-max-wide: 1600px;
+}
+
+/* ── Breakpoints (issue #1281) ───────────────────────────────────────────────
+   A media query cannot read a custom property, so the numbers are repeated in
+   every stylesheet. They come from one place all the same:
+   `composables/useBreakpoint.ts` names them, and script and stylesheet must
+   use the same edges.
+
+     xs  480   sm  640   md  768   lg 1024   xl 1280
+
+   Each number is the first width of the *larger* layout, so the pair is
+   `(max-width: 767px)` / `(min-width: 768px)` — never `max-width: 768px`,
+   which used to claim 768 for both sides at once. A threshold that belongs to
+   one component (a table that needs 560px) stays a number in that component;
+   these five are the page's.
+
+   The route transition below is the app's only one: a short cross-fade, so a
+   new page does not appear mid-scroll without anything having visibly
+   happened. It is skipped outright for a reader who asked for less motion. */
+.route-fade-enter-active,
+.route-fade-leave-active {
+  transition: opacity 120ms ease;
+}
+.route-fade-enter-from,
+.route-fade-leave-to {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-fade-enter-active,
+  .route-fade-leave-active {
+    transition: none;
+  }
 }
 @media (min-width: 768px) {
   :root {
@@ -130,7 +178,7 @@ a:hover {
 .my-xl { margin-top: var(--spacing-xl); margin-bottom: var(--spacing-xl); }
 
 /* ── Visibility utility classes ────────────────────────────────────────── */
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .mobile-hidden {
     display: none !important;
   }
@@ -159,6 +207,18 @@ a:hover {
   /* Cap panel width so a verbose option doesn't stretch the overlay
    * beyond the visible page; options inside wrap to multiple lines. */
   max-width: min(calc(100vw - 1rem), 32rem);
+}
+
+/* ── Tables: room for the focus ring in the scroller ────────────────────────
+ * PrimeVue's DataTable puts the table in its own scroll container, and a
+ * sortable header cell is focusable. The first row of cells sits flush with
+ * the top of that container and the first column with its left edge, so the
+ * ring drawn around them is cut off. The container makes room; the negative
+ * margin takes it straight back, so the table does not move.
+ * (Global because it is PrimeVue's own element, in every table the app has.) */
+.p-datatable-table-container {
+  padding: var(--focus-ring-reach);
+  margin: calc(-1 * var(--focus-ring-reach));
 }
 
 /* ── Photos: "not shared via link" icon ──────────────────────────────────────

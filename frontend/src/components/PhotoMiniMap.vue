@@ -150,6 +150,19 @@ watch(() => [props.latitude, props.longitude], () => {
   z-index: 650;
   cursor: pointer;
   text-decoration: none;
+  /* The wrapper's `overflow: hidden` is what rounds the map's corners, so it
+     cannot make room for a ring drawn around this link — and the link covers
+     the wrapper edge to edge. The ring goes inside instead, just within the
+     rounded edge. Declared here rather than only under `:focus-visible` so
+     the offset is the element's stated intent at all times: an outline of
+     `none` is unaffected by an offset, and `focusRingCheck` reads it to know
+     this ring cannot be clipped. */
+  outline-offset: var(--focus-ring-offset-inset);
+  border-radius: 8px;
+}
+
+.photo-mini-map-link:focus-visible {
+  outline: var(--focus-ring);
 }
 
 .photo-mini-map-zoom {

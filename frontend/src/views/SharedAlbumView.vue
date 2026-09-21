@@ -962,7 +962,7 @@ onUnmounted(() => {
    fixed-height flex-column layout (no whole-page scroll) on every viewport,
    which row virtualization requires. */
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   /* Shared header on phones: tighten the description so the header stays
      on one or two lines. */
   .shared-header { gap: 0.35rem 0.5rem; }
@@ -1088,7 +1088,7 @@ onUnmounted(() => {
   border-top: 1px solid var(--p-content-border-color);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .guest-photo-details {
     padding: 1rem;
     gap: 0.75rem;

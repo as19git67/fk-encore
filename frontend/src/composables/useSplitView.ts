@@ -1,4 +1,5 @@
-import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { type Ref } from 'vue'
+import { useMediaQuery } from './useBreakpoint'
 
 /**
  * When a screen is wide enough to show a list and a detail side by side.
@@ -33,24 +34,5 @@ export function viewportTakesSplit(width: number, height: number): boolean {
  * worse than a single frame of single-column on a wide one.
  */
 export function useSplitView(): { isSplit: Ref<boolean> } {
-  const isSplit = ref(false)
-  let mql: MediaQueryList | null = null
-
-  function apply(event: MediaQueryList | MediaQueryListEvent) {
-    isSplit.value = event.matches
-  }
-
-  onMounted(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    mql = window.matchMedia(SPLIT_VIEW_MEDIA_QUERY)
-    apply(mql)
-    mql.addEventListener('change', apply)
-  })
-
-  onBeforeUnmount(() => {
-    mql?.removeEventListener('change', apply)
-    mql = null
-  })
-
-  return { isSplit }
+  return { isSplit: useMediaQuery(SPLIT_VIEW_MEDIA_QUERY) }
 }

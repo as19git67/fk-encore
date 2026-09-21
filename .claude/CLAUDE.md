@@ -50,7 +50,32 @@ Kontext.
 Fokus sieht überall gleich aus: `outline: var(--focus-ring)` und
 `outline-offset: var(--focus-ring-offset)`. Wer `outline: none` setzt, zeichnet
 den Ring im selben Atemzug wieder — sonst weiß ein Tastaturnutzer nicht, wo er
-ist.
+ist. PrimeVues eigene Ring-Variablen (`--p-focus-ring-*`) zeigen auf dieselben
+Werte, damit ein Knopf und die Zeile, in der er sitzt, gleich aussehen.
+
+Der Ring wird **außerhalb** seines Elements gezeichnet und reicht
+`var(--focus-ring-reach)` (4px) hinaus. Ein Container, der klippt — ein
+Scroller, eine Zeile mit fester Höhe —, schneidet ihn ab. Platz macht der
+Container, nicht das Element:
+
+```css
+padding: var(--focus-ring-reach);
+margin: calc(-1 * var(--focus-ring-reach));
+```
+
+Das Padding gibt dem Ring Raum, der negative Rand nimmt ihn außen wieder weg,
+also verschiebt sich nichts.
+
+Wo das Klippen der Zweck ist — eine gerundete Karte, die ihre Kacheln
+beschneidet — und das Element den Container randlos ausfüllt, kann der
+Container keinen Platz machen. Dann zeichnet das Element den Ring in sich
+selbst: `outline-offset: var(--focus-ring-offset-inset)`, und zwar
+unabhängig von `:focus-visible`, damit die Absicht jederzeit am Element
+steht.
+
+Der Storybook-Test-Runner prüft das in jeder Story
+(`utils/focusRingCheck.ts`). Eine Story setzt
+`parameters: { focusRingCheck: false }` nur mit Begründung aus.
 
 Das prüft `scripts/check-css-tokens.mjs` (Issue #1281): es liest die
 `<style>`-Blöcke unter `frontend/src` und lehnt `--p-surface-<n>`, feste
@@ -1125,6 +1150,24 @@ Regeln:
   (`src/utils/overflowCheck.ts`). Eine Story einer noch nicht migrierten
   View darf mit `parameters: { overflowCheck: false }` und Begründung
   aussetzen.
+
+## Breakpoints im Frontend (`useBreakpoint`)
+
+Die Breiten, an denen die App ihr Layout ändert, stehen in
+`composables/useBreakpoint.ts` (Issue #1281): `xs` 480, `sm` 640, `md` 768,
+`lg` 1024, `xl` 1280. Jede Zahl ist die erste Breite des *größeren* Layouts,
+das Paar heißt also `(max-width: 767px)` / `(min-width: 768px)` — nie
+`max-width: 768px`, das beide Seiten für sich beanspruchte.
+
+- Im Skript nie `window.matchMedia` von Hand: `useMediaQuery(query)`,
+  `useAtLeast(name)` oder `useBelow(name)`. Die bauen die Abfrage aus
+  denselben Zahlen und räumen ihren Listener selbst ab.
+- In CSS muss die Zahl wiederholt werden (eine Media Query liest keine
+  Custom Property) — dann `from()`/`upTo()` als Vorlage nehmen, die Liste
+  steht als Kommentar in `style.css`.
+- Eine Schwelle, die nur eine Komponente betrifft (eine Tabelle, die 560px
+  pro Spalte braucht), bleibt eine Zahl in dieser Komponente. Die fünf Namen
+  gehören der Seite.
 
 ## Zurück-Navigation im Frontend (`listAnchor`, `scrollMemory`)
 

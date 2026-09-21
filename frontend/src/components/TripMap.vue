@@ -994,7 +994,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   pointer-events: none;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .trip-timeline::before,
   .trip-timeline::after {
     flex: 0 0 calc(50% - 38px);
@@ -1159,7 +1159,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   border: 0;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .trip-map-container {
     border-radius: 0;
   }

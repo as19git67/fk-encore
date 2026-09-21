@@ -339,7 +339,15 @@ onBeforeUnmount(() => stackObserver?.disconnect())
     </div>
 
     <main class="content">
-      <router-view />
+      <!-- The app's one route transition (issue #1281): a 120ms cross-fade,
+           `out-in` so only one page exists at a time — two would each teleport
+           a toolbar into the sticky stack, and the incoming one would restore
+           its scroll position against the outgoing one's height. -->
+      <router-view v-slot="{ Component, route }">
+        <Transition name="route-fade" mode="out-in">
+          <component :is="Component" :key="route.path" />
+        </Transition>
+      </router-view>
     </main>
     <ConfirmDialog />
   </div>
@@ -401,7 +409,9 @@ body {
   align-items: center;
   gap: 0.25rem;
   min-width: 0;
-  overflow: hidden;
+  /* No `overflow: hidden` here: it cut the hamburger's focus ring off on the
+     left and at the top. The module label truncates itself — the ellipsis
+     comes from its own `overflow`, not from this one. */
 }
 
 .navbar-end {
@@ -444,6 +454,11 @@ body {
   flex: 1 1 auto;
   overflow-x: auto;
   scrollbar-width: none;
+  /* The items are as tall as this strip and the first one starts at its
+     left edge, so their focus rings fall exactly where the scroller clips.
+     Room on every side, pulled back off the outside. */
+  padding: var(--focus-ring-reach);
+  margin: calc(-1 * var(--focus-ring-reach));
 }
 
 .submenu-strip::-webkit-scrollbar {
@@ -490,7 +505,7 @@ body {
   padding: 0;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .module-subheaders {
     padding: 0.5rem;
   }
