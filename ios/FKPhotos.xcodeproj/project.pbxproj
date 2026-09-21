@@ -623,7 +623,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = App/Widgets/Info.plist;
+				INFOPLIST_FILE = App/WidgetsInfo/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "F4mil Photos Widgets";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
@@ -695,7 +695,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = App/Widgets/Info.plist;
+				INFOPLIST_FILE = App/WidgetsInfo/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "F4mil Photos Widgets";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
