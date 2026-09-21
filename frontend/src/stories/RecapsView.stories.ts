@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/vue3'
-import { h } from 'vue'
-import { useRouter } from 'vue-router'
 import RecapsView from '../views/RecapsView.vue'
+import { routeFromParameters } from './storyRoute'
 import { defaultHandlers } from './handlers'
 import { http, HttpResponse } from 'msw'
 import { MOCK_PHOTOS } from './mock-data'
@@ -55,24 +54,10 @@ const recapHandlers = [
   ...defaultHandlers,
 ]
 
-/** Puts the stub router on the view's own route, optionally with a query. */
-function atRoute(target: string) {
-  return (story: () => unknown) => ({
-    setup() {
-      const StoryComponent = story()
-      const router = useRouter()
-      if (router.currentRoute.value.fullPath !== target) {
-        router.push(target).catch(() => {})
-      }
-      return () => h(StoryComponent as never)
-    },
-  })
-}
-
 const meta: Meta<typeof RecapsView> = {
   title: 'Views/RecapsView',
   component: RecapsView,
-  decorators: [atRoute('/fotos/rueckblicke')],
+  decorators: [routeFromParameters('/fotos/rueckblicke')],
   parameters: { msw: { handlers: recapHandlers } },
 }
 
@@ -101,5 +86,5 @@ export const LeereListe: Story = {
  */
 export const DetailOffen: Story = {
   name: 'Detail geöffnet',
-  decorators: [atRoute('/fotos/rueckblicke?id=1')],
+  parameters: { route: '/fotos/rueckblicke?id=1' },
 }
