@@ -25,7 +25,17 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
   Sortierung in `?sortBy/?sortDir`, Ansicht in `?view=`; `useSort` liefert
   zusätzlich `fields` und `select()`, damit die Toolbar das Sortiermenü selbst
   rendert. Stories `Layout/ListToolbar` und `Layout/Listenzustände`.
-- ⬜ Etappen 4 bis 6: siehe Sub-Issues #1279 bis #1281.
+- ✅ **Etappe 4 — Navigations-Gedächtnis** (#1279): `utils/listAnchor.ts`
+  (`saveListAnchor`, `takeListAnchor`, `anchorKey`, `focusListAnchor`) und
+  `utils/scrollMemory.ts` (Offset je Route, Herkunft der Navigation).
+  `router.scrollBehavior` merkt sich nur, ob die Navigation aus der History
+  kam; den Offset schreibt ein `beforeEach` beim Verlassen. `PageLayout`
+  stellt beides wieder her, sobald `ready` wahr ist: erst die Zeile
+  (`resolveAnchor` oder `data-anchor` im Seiteninhalt), sonst der Offset —
+  und den nur bei Zurück/Vorwärts. Angeschlossen: Dokumente, Steuerliste,
+  Sammelmappen, Buchungen, Zähler, Alben, Personen, Admin-Benutzer.
+  `useScrollRestore`, `documentListFocus` und `taxListFocus` sind gelöscht.
+- ⬜ Etappen 5 und 6: siehe Sub-Issues #1280 und #1281.
 
 Abweichungen vom Entwurf (Etappe 1):
 
@@ -99,6 +109,28 @@ Abweichungen vom Entwurf (Etappe 3):
   mit dem `ErrorBanner` neu dazu.
 - Die Ergebniszahl ersetzt die bisherigen sechs Formulierungen („N beste
   Treffer", „N von M Dokumenten", „N Buchungen", „N offen", …).
+
+Abweichungen vom Entwurf (Etappe 4):
+
+- `resolveAnchor` meldet `true` statt eines Index. Ein virtuelles Raster hat
+  seine Zelle noch gar nicht im DOM; `scrollToAlbum`/`scrollToPerson`/
+  `scrollToIndex` können das, `PageLayout` nicht. Die View sagt also „erledigt",
+  statt `PageLayout` eine Grid-API beizubringen.
+- Die Galerie und das Album-Raster bekommen keinen Zeilen-Anker: dort ist der
+  Cursor (`?photoId`, `aroundPhotoId`) das Gedächtnis, und ein roher Offset in
+  einer virtuellen, seitenweise geladenen Liste zeigt ohnehin auf nichts.
+  Das im Issue genannte „bis zu 5 Seiten nachladen" entfällt damit.
+- Der gemerkte Anker ist einmalig und liegt in `sessionStorage`; das
+  langlebige „zuletzt geöffnetes Album/zuletzt gewählte Person"
+  (`localStorage`, `photoNav`) bleibt daneben bestehen — es beantwortet die
+  andere Frage, nämlich womit die Liste beim frischen Betreten aufmacht.
+- Statt Storybook-Interaktionstests je Listentyp prüfen Vitest-Tests den
+  Vertrag (`PageLayout.test.ts`: Zeile schlägt Offset, Offset nur aus der
+  History, nichts vor `ready`; `listAnchor.test.ts`, `scrollMemory.test.ts`).
+  Der Rundweg Liste → Detail → zurück hängt an echter History; der bestehende
+  `collectionBackNav.test.ts` fährt ihn gegen einen echten Router.
+- `finance/AccountsView` bekommt keinen Anker: seine Zeilen öffnen einen
+  Dialog, keine Route.
 
 Dieses Dokument trifft die Entscheidungen, die das Issue offen lässt, damit
 jede Etappe reine Umsetzung ist. Was hier steht, ist verbindlich für alle

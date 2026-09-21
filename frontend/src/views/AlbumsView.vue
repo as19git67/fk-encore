@@ -44,6 +44,8 @@ import {
 } from '../utils/albumsViewState'
 import ServiceStatusBar from "../components/ServiceStatusBar.vue";
 import PageLayout from "../components/layout/PageLayout.vue";
+import { saveListAnchor } from '../utils/listAnchor'
+import type { ListAnchor } from '../utils/listAnchor'
 
 // The list shares the app-wide cache with album pickers and filters. This
 // avoids a second expensive request when the album route opens, while the
@@ -69,9 +71,28 @@ const canManageAlbums = computed(() => auth.hasPermission('albums.manage'))
 const rememberedAlbumId = ref<number | null>(readRememberedAlbumId() ?? photoNav.selectedAlbumId)
 const gridRef = ref<InstanceType<typeof VirtualAlbumGrid> | null>(null)
 
+/** This list's key for the anchor and the scroll offset (issue #1272, stage 4). */
+const ANCHOR_KEY = 'fotos-alben'
+
 function openAlbum(album: Album) {
   rememberFocusedAlbumId(album.id)
+  saveListAnchor(ANCHOR_KEY, { kind: 'album', id: album.id })
   router.push(`/fotos/alben/${album.id}`)
+}
+
+/**
+ * Put the user back on the album tile they opened. The grid is virtual, so
+ * the tile usually is not in the DOM yet — `scrollToAlbum` finds its index,
+ * scrolls there and focuses it, which is more than PageLayout could do with
+ * an element, hence the `true`.
+ *
+ * `rememberedAlbumId` stays as it is: that one outlives the session and
+ * highlights the last album when the list is entered fresh, which is a
+ * different question from "where did I just come back from".
+ */
+function resolveAlbumAnchor(anchor: ListAnchor | null): boolean {
+  if (!anchor || anchor.kind !== 'album') return false
+  return gridRef.value?.scrollToAlbum(anchor.id, { highlight: true, focus: true }) ?? false
 }
 
 // The search term lives in `?q=` and is remembered for the session; the
@@ -483,7 +504,14 @@ onMounted(async () => {
 </script>
 
 <template>
-  <PageLayout title="Meine Alben" scroll="self" width="full" :ready="!loading">
+  <PageLayout
+    title="Meine Alben"
+    scroll="self"
+    width="full"
+    :ready="!loading"
+    :anchor-key="ANCHOR_KEY"
+    :resolve-anchor="resolveAlbumAnchor"
+  >
     <template #actions>
       <Button v-if="canManageAlbums" label="Neues Album" icon="pi pi-plus" @click="showCreateDialog = true"/>
     </template>

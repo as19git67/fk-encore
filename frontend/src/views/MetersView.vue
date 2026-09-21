@@ -31,6 +31,10 @@ import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 import { decimalInputPt } from '../utils/inputNumberPt'
 import { sortMetersByTypeAndName } from '../utils/meterSort'
+import { anchorKey, saveListAnchor } from '../utils/listAnchor'
+
+/** One key for this list — anchor and scroll offset are stored under it. */
+const ANCHOR_KEY = 'zaehler'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -113,6 +117,9 @@ function fmtDateTime(iso: string | null) {
   return new Date(iso).toLocaleString('de-DE')
 }
 function openDetail(m: MeterListItem) {
+  // Remember the card, not just the offset: a new reading changes the card's
+  // height, so the way back would otherwise land next to it.
+  saveListAnchor(ANCHOR_KEY, { kind: 'meter', id: m.id })
   router.push({ name: 'zaehler-detail', params: { id: m.id } })
 }
 
@@ -305,7 +312,7 @@ onMounted(load)
 </script>
 
 <template>
-  <PageLayout title="Zähler" width="normal" :ready="!loading">
+  <PageLayout title="Zähler" width="normal" :ready="!loading" :anchor-key="ANCHOR_KEY">
     <template #actions>
       <Button
         v-if="showElecImport"
@@ -350,8 +357,12 @@ onMounted(load)
       <div
         v-for="m in sortedMeters"
         :key="m.id"
-        class="meter-card"
+        :data-anchor="anchorKey('meter', m.id)"
+        class="meter-card scroll-anchor"
+        tabindex="0"
         @click="openDetail(m)"
+        @keydown.enter="openDetail(m)"
+        @keydown.space.prevent="openDetail(m)"
       >
         <div class="meter-card-head">
           <i :class="typeIcon(m.type)" />

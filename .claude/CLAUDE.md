@@ -1102,6 +1102,26 @@ Regeln:
   View darf mit `parameters: { overflowCheck: false }` und Begründung
   aussetzen.
 
+## Zurück-Navigation im Frontend (`listAnchor`, `scrollMemory`)
+
+Wo der Nutzer war, merkt sich die App an einer Stelle (Issue #1279):
+
+- Eine Liste speichert beim Öffnen eines Eintrags
+  `saveListAnchor(ANCHOR_KEY, { kind, id })` aus `utils/listAnchor.ts` und
+  gibt `PageLayout` denselben `anchor-key`. Die Zeile trägt
+  `:data-anchor="anchorKey(kind, id)"` und die Klasse `scroll-anchor`
+  (liefert `scroll-margin-top` unter dem Sticky-Stack und den Fokusring).
+- `PageLayout` stellt wieder her, sobald `ready` wahr ist — also erst, wenn
+  die Liste die Höhe hat, die der Offset voraussetzt. Jede Listen-View setzt
+  deshalb `:ready`.
+- Ohne `resolveAnchor` sucht `PageLayout` die Zeile selbst. Eine View braucht
+  `resolveAnchor` nur, wenn sie mehr tut (Hervorheben) oder wenn ein
+  virtuelles Raster die Zelle erst erzeugen muss; dann scrollt die View selbst
+  und meldet `true`.
+- Den Scroll-Offset schreibt der Router beim Verlassen und `PageLayout` stellt
+  ihn nur bei Zurück/Vorwärts her. Keine View ruft `useScrollRestore` —
+  das Composable gibt es nicht mehr.
+
 ## Listen im Frontend (`ListToolbar`)
 
 Jede Listen-View legt `components/layout/ListToolbar.vue` in den

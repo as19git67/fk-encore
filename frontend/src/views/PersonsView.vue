@@ -14,6 +14,8 @@ import PersonsGrid from '../components/PersonsGrid.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
+import { saveListAnchor } from '../utils/listAnchor'
+import type { ListAnchor } from '../utils/listAnchor'
 import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
@@ -303,6 +305,8 @@ const filteredPersons = computed(() => {
 // for a person is no longer tracked separately — the shared photoNav store is
 // the single source of truth for that.
 const LAST_PERSON_KEY = 'persons_last_selected_id'
+/** This list's key for the anchor and the scroll offset (issue #1272, stage 4). */
+const ANCHOR_KEY = 'fotos-personen'
 const personsGridRef = ref<InstanceType<typeof PersonsGrid> | null>(null)
 // ID of the last person the user opened — drives scroll restoration when
 // returning to the persons grid after viewing a person's detail page.
@@ -546,11 +550,28 @@ async function loadData() {
   }
 }
 
+/**
+ * Put the user back on the person tile they opened. The grid is virtual, so
+ * the tile is usually not in the DOM yet — `scrollToPerson` finds its index,
+ * scrolls there and focuses it, which is why this reports back `true` rather
+ * than handing an element to PageLayout. While a person is open (level 2)
+ * there is no grid to scroll, and the person's own view is what the user
+ * wanted anyway.
+ */
+function resolvePersonAnchor(anchor: ListAnchor | null): boolean {
+  if (!anchor || anchor.kind !== 'person' || selectedPerson.value) return false
+  return personsGridRef.value?.scrollToPerson(anchor.id, { highlight: true, focus: true }) ?? false
+}
+
 async function selectPersonItem(person: Person, focusPhotoId?: number) {
   const alreadyLoaded = selectedPerson.value?.id === person.id && !!selectedPersonDetail.value
   if (!alreadyLoaded) {
     selectedPerson.value = person
     rememberedPersonId.value = person.id
+    // Opening a person is a step away from the grid, even though it stays on
+    // the same route: coming back from the person's photos has to land on the
+    // tile again (issue #1272, stage 4).
+    saveListAnchor(ANCHOR_KEY, { kind: 'person', id: person.id })
     localStorage.setItem(LAST_PERSON_KEY, String(person.id))
     selectedIndex.value = -1
     detectedFaces.value = []
@@ -745,6 +766,8 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
     scroll="self"
     width="full"
     :ready="!loading"
+    :anchor-key="ANCHOR_KEY"
+    :resolve-anchor="resolvePersonAnchor"
   >
     <template #actions>
       <Button

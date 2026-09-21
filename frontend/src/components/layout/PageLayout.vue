@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, provide, ref, useSlots, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, useSlots, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { PAGE_SCROLLER_KEY, STACK_TARGET_ID, formatDocumentTitle } from './pageLayout'
+import type { AnchorResolution } from './pageLayout'
+import { focusListAnchor, takeListAnchor } from '../../utils/listAnchor'
+import type { ListAnchor } from '../../utils/listAnchor'
+import {
+  clearPageScroller,
+  navigatedFromHistory,
+  readScrollOffset,
+  setPageScroller,
+} from '../../utils/scrollMemory'
 
 /**
  * The one page skeleton every view fills (issue #1272, stage 1).
@@ -39,12 +48,44 @@ const props = withDefaults(
     scroll?: PageScroll
     width?: PageWidth
     /**
-     * Whether the view's data has arrived. Exposed as `data-page-ready` so
-     * a test runner can wait for it; stage 4 restores scroll/focus on it.
+     * Whether the view's data has arrived. Exposed as `data-page-ready` so a
+     * test runner can wait for it, and the moment the page is put back where
+     * the user left it — a list cannot scroll to 3000px while it is still two
+     * rows tall.
      */
     ready?: boolean
+    /**
+     * Put the user back on the row they opened (stage 4). Called once the
+     * page is `ready`, with the anchor this list saved or `null` when there
+     * is none. See `AnchorResolution` for what to return; leave it out and
+     * the row is looked up by its `data-anchor` attribute.
+     */
+    resolveAnchor?: (anchor: ListAnchor | null) => AnchorResolution | Promise<AnchorResolution>
+    /**
+     * Key the anchor and the scroll offset are stored under. Defaults to the
+     * route's name, which is what a list wants: the same list under a
+     * different filter is still the same list.
+     */
+    anchorKey?: string
+    /** Read an older build's anchor key once, so an open tab keeps working. */
+    legacyAnchorKey?: 'documents'
+    /**
+     * The element that actually scrolls, when it is not the page content —
+     * a list column beside a detail pane, say. Only needed for the offset
+     * fallback; the anchor is looked up in the whole page either way.
+     */
+    scroller?: HTMLElement | null
   }>(),
-  { hint: undefined, scroll: 'page', width: 'normal', ready: true },
+  {
+    hint: undefined,
+    scroll: 'page',
+    width: 'normal',
+    ready: true,
+    resolveAnchor: undefined,
+    anchorKey: undefined,
+    legacyAnchorKey: undefined,
+    scroller: undefined,
+  },
 )
 
 const slots = useSlots()
@@ -74,6 +115,58 @@ watch(
   },
   { immediate: true },
 )
+
+// ── Scroll and focus restore (issue #1272, stage 4) ──────────────────────────
+// The page that is on screen owns the app's scroll position, so it registers
+// its scroller; the router saves that offset when a navigation leaves.
+const scroller = () => props.scroller ?? (props.scroll === 'self' ? contentEl.value : null)
+
+const restoreKey = computed(() => props.anchorKey ?? String(route?.name ?? route?.path ?? ''))
+
+let restored = false
+
+/**
+ * Put the user back: on the row they opened if it is still there, otherwise
+ * on the offset they left behind — and only then if they came back by going
+ * back. Opening the same page from a menu starts at the top.
+ */
+async function restorePosition() {
+  if (restored) return
+  restored = true
+  const anchor = takeListAnchor(restoreKey.value, props.legacyAnchorKey)
+  await nextTick()
+  if (props.resolveAnchor) {
+    const resolved = await props.resolveAnchor(anchor)
+    if (resolved === true) return
+    if (resolved instanceof HTMLElement) {
+      resolved.scrollIntoView({ block: 'center', behavior: 'instant' })
+      resolved.focus?.({ preventScroll: true })
+      return
+    }
+  } else if (anchor && focusListAnchor(contentEl.value ?? document, anchor)) {
+    return
+  }
+  if (!navigatedFromHistory()) return
+  const top = readScrollOffset(route?.fullPath ?? restoreKey.value)
+  if (top === null) return
+  const el = scroller()
+  requestAnimationFrame(() => {
+    if (el) el.scrollTo({ top, behavior: 'instant' })
+    else window.scrollTo({ top, behavior: 'instant' })
+  })
+}
+
+onMounted(() => {
+  setPageScroller(scroller)
+  if (props.ready) void restorePosition()
+})
+watch(
+  () => props.ready,
+  (ready) => {
+    if (ready) void restorePosition()
+  },
+)
+onBeforeUnmount(() => clearPageScroller(scroller))
 
 defineExpose({ contentEl })
 </script>

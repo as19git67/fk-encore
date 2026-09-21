@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createApp, defineComponent, h, nextTick, type App } from 'vue'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import PageLayout from './PageLayout.vue'
 import { STACK_TARGET_ID, formatDocumentTitle } from './pageLayout'
+import { saveListAnchor, takeListAnchor } from '../../utils/listAnchor'
+import type { ListAnchor } from '../../utils/listAnchor'
+import { markNavigation, saveScrollOffset, setPageScroller } from '../../utils/scrollMemory'
 
 /**
  * The page skeleton's two contracts with the app shell: the sticky part
@@ -43,6 +46,9 @@ async function mountPage(router: Router, props: Record<string, unknown>, slots: 
 beforeEach(() => {
   host = document.createElement('div')
   document.body.appendChild(host)
+  sessionStorage.clear()
+  setPageScroller(null)
+  markNavigation(false)
 })
 
 afterEach(() => {
@@ -116,5 +122,120 @@ describe('PageLayout', () => {
     expect(page.classList.contains('page--scroll-self')).toBe(true)
     expect(page.classList.contains('page--width-full')).toBe(true)
     expect(page.getAttribute('data-page-ready')).toBe('false')
+  })
+})
+
+/**
+ * Coming back from a detail page (issue #1272, stage 4). The row wins over
+ * the offset, the offset only counts when the user actually came back, and a
+ * page that is not ready yet is not scrolled at all — its list is still two
+ * rows tall.
+ */
+describe('PageLayout restore', () => {
+  /** jsdom lays nothing out, so record what the page asked for instead. */
+  function spyOnScrolling() {
+    const scrollIntoView = vi.fn()
+    const focus = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView as unknown as typeof Element.prototype.scrollIntoView
+    HTMLElement.prototype.focus = focus as unknown as typeof HTMLElement.prototype.focus
+    const scrollTo = vi.fn()
+    window.scrollTo = scrollTo as unknown as typeof window.scrollTo
+    return { scrollIntoView, focus, scrollTo }
+  }
+
+  function rowSlot(anchor: string) {
+    return {
+      default: () => h('div', { 'data-anchor': anchor, class: 'row' }, 'Zeile'),
+    }
+  }
+
+  it('scrolls the anchored row into view and focuses it', async () => {
+    const spies = spyOnScrolling()
+    const router = makeRouter()
+    await router.push('/dokumente')
+    saveListAnchor('dokumente', { kind: 'document', id: 7 })
+
+    await mountPage(router, { title: 'Dokumente', anchorKey: 'dokumente' }, rowSlot('document:7'))
+    await nextTick()
+    await nextTick()
+
+    expect(spies.scrollIntoView).toHaveBeenCalled()
+    expect(spies.focus).toHaveBeenCalled()
+    // Used up: entering the list again from a menu starts unanchored.
+    expect(takeListAnchor('dokumente')).toBeNull()
+  })
+
+  it('waits for the page to be ready before it restores anything', async () => {
+    const spies = spyOnScrolling()
+    const router = makeRouter()
+    await router.push('/dokumente')
+    saveListAnchor('dokumente', { kind: 'document', id: 7 })
+
+    const seen: Array<ListAnchor | null> = []
+    const el = await mountPage(
+      router,
+      {
+        title: 'Dokumente',
+        anchorKey: 'dokumente',
+        ready: false,
+        resolveAnchor: (anchor: ListAnchor | null) => {
+          seen.push(anchor)
+          return true
+        },
+      },
+      rowSlot('document:7'),
+    )
+    await nextTick()
+    expect(seen).toEqual([])
+    expect(spies.scrollIntoView).not.toHaveBeenCalled()
+    expect(el.querySelector('.page')?.getAttribute('data-page-ready')).toBe('false')
+  })
+
+  it('lets a virtual list place itself and then stays out of the way', async () => {
+    const spies = spyOnScrolling()
+    const router = makeRouter()
+    await router.push('/dokumente')
+    saveListAnchor('fotos-alben', { kind: 'album', id: 3 })
+    saveScrollOffset('/dokumente', 900)
+    markNavigation(true)
+
+    const seen: Array<ListAnchor | null> = []
+    await mountPage(router, {
+      title: 'Alben',
+      anchorKey: 'fotos-alben',
+      resolveAnchor: (anchor: ListAnchor | null) => {
+        seen.push(anchor)
+        return true
+      },
+    })
+    await nextTick()
+    await nextTick()
+
+    expect(seen).toEqual([{ kind: 'album', id: 3 }])
+    // The grid reported it had scrolled, so the offset must not fight it.
+    expect(spies.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the offset when the row is gone, but only on the way back', async () => {
+    const spies = spyOnScrolling()
+    const router = makeRouter()
+    await router.push('/dokumente')
+    saveScrollOffset('/dokumente', 900)
+
+    // Picked from a menu: a fresh start at the top.
+    markNavigation(false)
+    await mountPage(router, { title: 'Dokumente', anchorKey: 'dokumente' })
+    await nextTick()
+    await nextTick()
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+    expect(spies.scrollTo).not.toHaveBeenCalled()
+
+    // Came back through history: put the page where it was.
+    markNavigation(true)
+    await mountPage(router, { title: 'Dokumente', anchorKey: 'dokumente' })
+    await nextTick()
+    await nextTick()
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+    expect(spies.scrollTo).toHaveBeenCalledWith({ top: 900, behavior: 'instant' })
   })
 })

@@ -24,22 +24,27 @@ import {
   type TaxYearCount,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
-import { useScrollRestore } from '../composables/useScrollRestore'
 import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
-import {
-  consumeTaxListFocus,
-  focusTaxListItem,
-  rememberTaxListFocus,
-  taxEntryKey,
-} from '../utils/taxListFocus'
+import { anchorKey, focusListAnchor, saveListAnchor } from '../utils/listAnchor'
+import type { ListAnchor } from '../utils/listAnchor'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-// Returning from a document must land back where the user left, not at the
-// top of the list. The row anchor does the precise work; the raw offset is
-// the fallback for when that row is gone (re-classified, filtered away).
-const { restore: restoreScroll } = useScrollRestore('documents-tax-list')
+/**
+ * Returning from a document must land back where the user left, not at the
+ * top of the list. `PageLayout` does that: the row anchor below does the
+ * precise work, the raw offset is its fallback for when that row is gone
+ * (re-classified, filtered away).
+ *
+ * The same document can sit in two sections, so the section belongs in the
+ * anchor — a bare document id would send the user to whichever copy comes
+ * first, which is not where they were.
+ */
+const ANCHOR_KEY = 'dokumente-steuer'
+function taxAnchorKind(sectionSlug: string): string {
+  return `tax-${sectionSlug}`
+}
 
 // Persisted in the URL (year/review) so the back arrow from the document
 // detail view restores the same filter instead of resetting to the newest
@@ -233,7 +238,7 @@ async function onBackfill() {
 }
 
 async function openDocument(sectionSlug: string, docId: number) {
-  rememberTaxListFocus(sectionSlug, docId)
+  saveListAnchor(ANCHOR_KEY, { kind: taxAnchorKind(sectionSlug), id: docId })
   // Wait for any pending filter write so the back arrow's history entry
   // captures the current year/review filter instead of a stale query.
   await waitForPendingQueryUpdate(router)
@@ -241,19 +246,21 @@ async function openDocument(sectionSlug: string, docId: number) {
 }
 
 /**
- * Put the user back on the row they opened the document from. Returns false
- * when that row is not on screen, and the caller falls back to the offset.
+ * Put the user back on the row they opened the document from. `PageLayout`
+ * asks once the list is there; returning null means the row is gone and the
+ * saved offset is used instead. The flash says "here you were" in a list of
+ * near-identical rows.
  */
-async function restoreFocusToLastOpened(): Promise<boolean> {
-  const focus = consumeTaxListFocus()
-  if (!focus) return false
+async function resolveListAnchor(anchor: ListAnchor | null): Promise<HTMLElement | null> {
+  if (!anchor) return null
+  // One tick more than PageLayout waits: the sections render from the data
+  // the year/review watcher may still be replacing.
   await nextTick()
-  await nextTick()
-  const el = focusTaxListItem(document, focus)
-  if (!el) return false
+  const el = focusListAnchor(document, anchor)
+  if (!el) return null
   el.classList.add('document-card--highlight')
   setTimeout(() => el.classList.remove('document-card--highlight'), 1500)
-  return true
+  return el
 }
 
 function confidencePercent(c: number | null): string {
@@ -291,14 +298,18 @@ onMounted(async () => {
     subjectPersons.value = []
   }
   await loadData()
-  // Returning from detail: centre, highlight and restore actual keyboard
-  // focus. Only use the generic scroll offset when there is no row anchor.
-  if (!(await restoreFocusToLastOpened())) restoreScroll()
 })
 </script>
 
 <template>
-  <PageLayout title="Steuer" width="wide" scroll="page" :ready="!loading">
+  <PageLayout
+    title="Steuer"
+    width="wide"
+    scroll="page"
+    :ready="!loading"
+    :anchor-key="ANCHOR_KEY"
+    :resolve-anchor="resolveListAnchor"
+  >
     <template #actions>
       <Button
         v-if="auth.hasPermission('documents.edit')"
@@ -400,10 +411,10 @@ onMounted(async () => {
             <div
               v-for="entry in sec.documents"
               :key="`${sec.slug}:${entry.document.id}`"
-              class="document-card"
+              class="document-card scroll-anchor"
               tabindex="0"
               :data-doc-id="entry.document.id"
-              :data-tax-entry="taxEntryKey(sec.slug, entry.document.id)"
+              :data-anchor="anchorKey(taxAnchorKind(sec.slug), entry.document.id)"
               @click="openDocument(sec.slug, entry.document.id)"
               @keydown.enter="openDocument(sec.slug, entry.document.id)"
             >
