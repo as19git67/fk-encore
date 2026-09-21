@@ -1576,7 +1576,7 @@ const extractedFields = computed(() => {
   font-weight: 600;
 }
 .amount-pos { color: var(--p-text-color); }
-.amount-neg { color: var(--p-red-600, #c0392b); }
+.amount-neg { color: var(--p-red-600); }
 .multiline {
   font-family: monospace;
   white-space: pre-wrap;
@@ -1777,8 +1777,10 @@ const extractedFields = computed(() => {
   bottom: 1.5rem;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--p-primary-700, #1f6e3a);
-  color: #fff;
+  /* Paar aus Primärfarbe und ihrer Kontrastfarbe: das Theme garantiert den
+     Kontrast in hell und dunkel — ein fester Ton mit weißer Schrift nicht. */
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
   padding: 0.5rem 1.25rem;
   border-radius: 2rem;
   font-size: 0.9rem;

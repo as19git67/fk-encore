@@ -240,7 +240,7 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--p-content-border-color);
 }
 .queue-table th { font-weight: 600; color: var(--p-text-muted-color); }
-.error-cell { color: var(--p-red-500, #e74c3c); font-weight: 600; }
+.error-cell { color: var(--p-red-500); font-weight: 600; }
 .queue-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .stuck-block { margin-bottom: 0.75rem; }
 .stuck-title {

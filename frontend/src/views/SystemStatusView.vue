@@ -183,6 +183,6 @@ function open(entry: QueueOverviewEntry) {
 }
 
 .status-tile__count--bad dd {
-  color: var(--p-tag-danger-color, #c62828);
+  color: var(--p-tag-danger-color);
 }
 </style>

@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
 .recap-map-intro {
   position: absolute;
   inset: 0;
-  background: #000;
+  background: #000; /* audit-ok: the recap player is a dark media stage in both themes */
 }
 
 /* The player is dark; tone the light map tiles down a little. */
@@ -184,7 +184,7 @@ onBeforeUnmount(() => {
 
 .recap-map-intro :deep(.recap-map-label) {
   background: rgba(0, 0, 0, 0.75);
-  color: #fff;
+  color: #fff; /* audit-ok: label on its own dark pill over the map, like the rest of the player chrome */
   border: none;
   border-radius: 6px;
   padding: 3px 10px;

@@ -931,7 +931,7 @@ onUnmounted(() => {
   padding: 0;
   border: 1px solid var(--p-content-border-color);
   border-radius: 50%;
-  background: var(--p-content-background, #fff);
+  background: var(--p-content-background);
   color: var(--p-primary-color);
   cursor: pointer;
   font-size: 0.95rem;
@@ -953,7 +953,7 @@ onUnmounted(() => {
 .shared-header-account-btn--warn:hover,
 .shared-header-account-btn--warn:focus-visible {
   background: var(--p-amber-500);
-  color: var(--p-amber-50, #fff);
+  color: var(--p-amber-50);
   border-color: var(--p-amber-500);
 }
 

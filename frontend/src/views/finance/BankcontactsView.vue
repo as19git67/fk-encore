@@ -387,13 +387,16 @@ function openDetail(id: number) {
 }
 .overview-card--tan.is-clickable {
   cursor: pointer;
-  background: var(--p-yellow-50, #fffbe6);
-  border-color: var(--p-yellow-300, #facc15);
+  /* Translucent yellow over the card's own surface, like the callout in
+     BankcontactsHelpView: yellow-50/-100 are fixed light tints and would stay
+     bright patches on a dark page. */
+  background: color-mix(in srgb, var(--p-yellow-500) 10%, transparent);
+  border-color: var(--p-yellow-400);
 }
 .overview-card--tan.is-clickable > i {
-  color: var(--p-yellow-700, #a16207);
+  color: var(--p-yellow-700);
 }
 .overview-card--tan.is-clickable:hover {
-  background: var(--p-yellow-100, #fef3c7);
+  background: color-mix(in srgb, var(--p-yellow-500) 18%, transparent);
 }
 </style>

@@ -2074,7 +2074,7 @@ function goBack() {
   color: var(--p-text-color);
 }
 .tx-amount-negative {
-  color: var(--p-red-600, #c0392b);
+  color: var(--p-red-600);
 }
 .tx-amount-neutral {
   color: var(--p-text-muted-color);
@@ -2097,11 +2097,11 @@ function goBack() {
 }
 .p-tag-info.tag-chip {
   background: var(--p-tag-info-background, rgba(59, 130, 246, 0.15));
-  color: var(--p-tag-info-color, var(--p-blue-600, #2563eb));
+  color: var(--p-tag-info-color, var(--p-blue-600));
 }
 .p-tag-success.tag-chip {
   background: var(--p-tag-success-background, rgba(34, 197, 94, 0.15));
-  color: var(--p-tag-success-color, var(--p-green-600, #16a34a));
+  color: var(--p-tag-success-color, var(--p-green-600));
 }
 
 /* ── Empty / loading / dummy states ───────────────────────────────── */
@@ -2260,10 +2260,10 @@ function goBack() {
   opacity: 0.85;
 }
 .holdings-gain-pos {
-  color: var(--p-green-600, #16a34a);
+  color: var(--p-green-600);
 }
 .holdings-gain-neg {
-  color: var(--p-red-600, #dc2626);
+  color: var(--p-red-600);
 }
 .holdings-gain-flat {
   color: var(--p-text-muted-color);

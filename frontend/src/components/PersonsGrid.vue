@@ -311,7 +311,7 @@ watch(
   bottom: 0;
   left: 0;
   right: 0;
-  color: #fff;
+  color: #fff; /* audit-ok: label sits on the dark scrim over the face thumbnail, white in both themes */
 }
 
 .person-card-name {

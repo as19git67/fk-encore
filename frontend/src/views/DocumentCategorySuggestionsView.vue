@@ -410,7 +410,7 @@ onMounted(load)
   color: var(--p-text-muted-color);
 }
 .warn {
-  color: var(--p-orange-600, #d68910);
+  color: var(--p-orange-600);
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;

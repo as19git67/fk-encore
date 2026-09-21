@@ -944,7 +944,7 @@ onMounted(loadData)
 }
 
 .mount-ok {
-  color: var(--p-green-500, #22c55e);
+  color: var(--p-green-500);
 }
 
 .mount-unknown {
@@ -952,7 +952,7 @@ onMounted(loadData)
 }
 
 .mount-warn {
-  color: var(--p-orange-500, #f59e0b);
+  color: var(--p-orange-500);
 }
 
 .picker {
@@ -985,7 +985,7 @@ onMounted(loadData)
   padding: 0.1rem 0.25rem;
   margin: 0;
   font: inherit;
-  color: var(--p-primary-color, #3b82f6);
+  color: var(--p-primary-color);
   cursor: pointer;
   border-radius: 3px;
 }

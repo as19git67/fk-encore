@@ -1091,7 +1091,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 /* ── Face bbox overlay (fullscreen only) ─────────────────────────────────── */
 .face-box-fullscreen {
   position: absolute;
-  border: 3px solid #eab308;
+  border: 3px solid var(--p-yellow-500);
   box-sizing: border-box;
   pointer-events: none;
   z-index: 2;
