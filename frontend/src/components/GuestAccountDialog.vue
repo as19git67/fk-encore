@@ -72,10 +72,10 @@ function onLogout() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     modal
     :header="header"
-    :style="{ width: 'min(420px, 92vw)' }"
     @update:visible="emit('update:visible', $event)"
   >
     <div v-if="!guest" class="guest-account__empty">

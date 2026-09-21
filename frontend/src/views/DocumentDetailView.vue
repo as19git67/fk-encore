@@ -1480,10 +1480,10 @@ onBeforeUnmount(() => {
     />
 
     <Dialog
+    class="dialog-sm"
       v-model:visible="proposeOpen"
       modal
       header="Neue Kategorie vorschlagen"
-      :style="{ width: '30rem', maxWidth: '95vw' }"
     >
       <div class="propose-dialog">
         <p class="propose-hint">

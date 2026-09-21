@@ -1001,7 +1001,8 @@ watch(meterId, () => loadDetail())
     />
 
     <!-- Edit dialog -->
-    <Dialog v-model:visible="showEdit" header="Zähler bearbeiten" modal :style="{ width: '32rem', maxWidth: '95vw' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showEdit" header="Zähler bearbeiten" modal>
       <div class="form-grid">
         <label>Name
           <InputText v-model="editForm.name" autofocus />
@@ -1035,7 +1036,8 @@ watch(meterId, () => loadDetail())
     </Dialog>
 
     <!-- Replace device dialog -->
-    <Dialog v-model:visible="showReplace" header="Gerät ersetzen" modal :style="{ width: '30rem', maxWidth: '95vw' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showReplace" header="Gerät ersetzen" modal>
       <p class="hint">
         Das aktuelle Gerät wird mit dem Endstand abgeschlossen; das neue Gerät startet
         beim angegebenen Wert. Der absolute Gesamtstand bleibt dadurch fortlaufend.
@@ -1061,7 +1063,8 @@ watch(meterId, () => loadDetail())
     </Dialog>
 
     <!-- Edit device dialog -->
-    <Dialog v-model:visible="showDeviceEdit" header="Gerät bearbeiten" modal :style="{ width: '30rem', maxWidth: '95vw' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showDeviceEdit" header="Gerät bearbeiten" modal>
       <div class="form-grid">
         <label>Seriennummer
           <InputText v-model="deviceForm.serialNumber" autofocus />
@@ -1090,10 +1093,10 @@ watch(meterId, () => loadDetail())
 
     <!-- Reading entry / edit dialog -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="showReading"
       :header="readingForm.id === null ? 'Neue Ablesung' : 'Ablesung bearbeiten'"
       modal
-      :style="{ width: '26rem', maxWidth: '95vw' }"
     >
       <div class="form-grid form-grid--stack">
         <label>Zeitpunkt
@@ -1125,7 +1128,8 @@ watch(meterId, () => loadDetail())
     </Dialog>
 
     <!-- Create API key dialog -->
-    <Dialog v-model:visible="showCreateKey" header="Neuer API-Key" modal :style="{ width: '28rem', maxWidth: '95vw' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="showCreateKey" header="Neuer API-Key" modal>
       <template v-if="!newKeyToken">
         <div class="form-grid form-grid--stack">
           <label>Bezeichnung

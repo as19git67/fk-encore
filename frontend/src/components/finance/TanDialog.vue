@@ -83,10 +83,10 @@ async function submit() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     v-model:visible="visible"
     :closable="false"
     :modal="true"
-    :style="{ width: '30rem' }"
     :header="`TAN erforderlich${store.pendingTan?.tanMediaName ? ' — ' + store.pendingTan.tanMediaName : ''}`"
     @show="focusTanInput"
   >

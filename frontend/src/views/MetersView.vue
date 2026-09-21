@@ -394,10 +394,10 @@ onMounted(load)
 
     <!-- Create / edit dialog -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="showForm"
       :header="form.id === null ? 'Neuer Zähler' : 'Zähler bearbeiten'"
       modal
-      :style="{ width: '32rem', maxWidth: '95vw' }"
     >
       <div class="form-grid">
         <label>Name

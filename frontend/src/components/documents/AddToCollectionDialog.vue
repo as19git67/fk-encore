@@ -93,10 +93,10 @@ async function createAndAdd() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     modal
     header="In Sammelmappe legen"
-    :style="{ width: 'min(520px, 94vw)' }"
     @update:visible="emit('update:visible', $event)"
   >
     <p class="atc-lead">

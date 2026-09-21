@@ -1037,11 +1037,11 @@ const tagChartOptions = computed(() => {
 
     <!-- Tag drill-down dialog -->
     <Dialog
+    class="dialog-md"
       v-model:visible="detailVisible"
       modal
       dismissableMask
       :header="`Buchungen · ${detailTag}`"
-      :style="{ width: '46rem', maxWidth: '95vw' }"
     >
       <div v-if="detailLoading" class="detail-loading">
         <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
@@ -1069,11 +1069,11 @@ const tagChartOptions = computed(() => {
 
     <!-- Period drill-down dialog -->
     <Dialog
+    class="dialog-md"
       v-model:visible="periodDetailVisible"
       modal
       dismissableMask
       :header="`Buchungen · ${periodDetailLabel}`"
-      :style="{ width: '46rem', maxWidth: '95vw' }"
     >
       <div v-if="periodDetailLoading" class="detail-loading">
         <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
@@ -1101,11 +1101,11 @@ const tagChartOptions = computed(() => {
 
     <!-- Transaction full detail popup -->
     <Dialog
+    class="dialog-md"
       v-model:visible="txDetailVisible"
       modal
       dismissableMask
       header="Buchungsdetails"
-      :style="{ width: '38rem', maxWidth: '95vw' }"
     >
       <div v-if="txDetailLoading" class="detail-loading">
         <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
@@ -1166,10 +1166,10 @@ const tagChartOptions = computed(() => {
 
     <!-- Save dialog -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="saveDialogVisible"
       modal
       :header="isUpdate ? 'Analyse aktualisieren' : 'Analyse speichern'"
-      :style="{ width: '24rem', maxWidth: '90vw' }"
     >
       <div class="save-dialog-body">
         <label>

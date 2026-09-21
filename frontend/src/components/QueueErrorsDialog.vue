@@ -58,11 +58,11 @@ function formatDate(iso: string | null): string {
 
 <template>
   <Dialog
+    class="dialog-md"
     :visible="visible"
     @update:visible="emit('update:visible', $event)"
     modal
     :header="title"
-    :style="{ width: 'min(760px, 94vw)' }"
   >
     <div v-if="loading" class="qed-center">
       <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />

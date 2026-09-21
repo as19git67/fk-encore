@@ -105,11 +105,10 @@ async function apply() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     :modal="true"
     :closable="!saving"
-    :style="{ width: '28rem' }"
-    :breakpoints="{ '768px': '95vw' }"
     header="Sichtbarkeit ändern"
     @update:visible="(v: boolean) => emit('update:visible', v)"
   >
