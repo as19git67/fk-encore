@@ -1278,45 +1278,49 @@ function goBack() {
          toolbar, the filter panel while open, and the selection bar while
          selecting. The running sums live up here so they stay visible while
          the list scrolls. -->
+    <!-- Back sits with the title, like on every detail page (concept §7).
+         In front of the toolbar it pushed the search field and the filter
+         buttons inwards, so they no longer lined up with the list below. -->
+    <template #actions>
+      <Button
+        icon="pi pi-arrow-left"
+        label="Zurück"
+        text
+        aria-label="Zurück zur Kontoübersicht"
+        v-tooltip.bottom="'Zurück zur Kontoübersicht'"
+        @click="goBack"
+      />
+    </template>
+
     <template #toolbar>
-      <div class="tx-toolbar" data-testid="finance-transaction-header">
-        <Button
-          icon="pi pi-chevron-left"
-          severity="secondary"
-          text
-          rounded
-          aria-label="Zurück"
-          @click="goBack"
-        />
-        <ListToolbar :model="toolbar" class="tx-toolbar-list">
-          <template #actions>
-            <span v-if="hasActiveFilters" class="tx-summary-sum">Σ {{ formatFilteredSum() }}</span>
-            <Button
-              v-if="canAddCashTransaction && !isDepot"
-              icon="pi pi-money-bill"
-              severity="secondary"
-              size="small"
-              text
-              rounded
-              aria-label="Bargeldbuchung erfassen"
-              v-tooltip.bottom="'Bargeldbuchung erfassen'"
-              @click="openCashTransactionForm"
-            />
-            <Button
-              v-if="!isDepot"
-              icon="pi pi-list"
-              :severity="selectMode && localSelectionCount > 0 ? 'primary' : 'secondary'"
-              size="small"
-              text
-              rounded
-              aria-label="Liste der ausgewählten Buchungen"
-              v-tooltip.bottom="'Ausgewählte Buchungen'"
-              :disabled="!selectMode || localSelectionCount === 0"
-              @click="openSelectionPopover"
-            />
-          </template>
-        </ListToolbar>
-      </div>
+      <ListToolbar :model="toolbar" data-testid="finance-transaction-header">
+        <template #actions>
+          <span v-if="hasActiveFilters" class="tx-summary-sum">Σ {{ formatFilteredSum() }}</span>
+          <Button
+            v-if="canAddCashTransaction && !isDepot"
+            icon="pi pi-money-bill"
+            severity="secondary"
+            size="small"
+            text
+            rounded
+            aria-label="Bargeldbuchung erfassen"
+            v-tooltip.bottom="'Bargeldbuchung erfassen'"
+            @click="openCashTransactionForm"
+          />
+          <Button
+            v-if="!isDepot"
+            icon="pi pi-list"
+            :severity="selectMode && localSelectionCount > 0 ? 'primary' : 'secondary'"
+            size="small"
+            text
+            rounded
+            aria-label="Liste der ausgewählten Buchungen"
+            v-tooltip.bottom="'Ausgewählte Buchungen'"
+            :disabled="!selectMode || localSelectionCount === 0"
+            @click="openSelectionPopover"
+          />
+        </template>
+      </ListToolbar>
 
       <section v-if="filterPanelOpen" class="tx-filter-panel" data-testid="finance-filter-subheader">
       <div class="tx-filter-fields">
@@ -1883,16 +1887,6 @@ function goBack() {
    the content this view puts into its slots. */
 
 /* ── Toolbar (in the sticky stack) ───────────────────────────────────── */
-.tx-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-.tx-toolbar-list {
-  flex: 1 1 auto;
-  min-width: 0;
-}
 .tx-summary-sum {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
