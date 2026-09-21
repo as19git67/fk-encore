@@ -95,12 +95,61 @@ jobs:
         # `-target` rather than `-scheme`: the project ships no shared
         # schemes, so there is no scheme to name. No tests run here; the
         # extension has none, and it is the compile that was missing.
+        #
+        # SYMROOT/OBJROOT are set explicitly because a target-based
+        # build (as opposed to a scheme-based one) defaults SYMROOT to
+        # `$(SRCROOT)/build` — and for a SwiftPM dependency that SRCROOT
+        # is the package's own checkout, so Xcode tries to create
+        # `SourcePackages/checkouts/<pkg>/build/`. Yams ships a Bazel
+        # file named `BUILD` at its root, and macOS filesystems are
+        # case-insensitive, so that directory cannot be created:
+        # "File exists but is not a directory: .../checkouts/Yams/build".
+        # Pointing both roots outside the checkouts avoids writing
+        # anything into them (and keeps `ios/build/` out of the
+        # working tree while we are at it).
         run: |
           xcodebuild build \
             -project FKPhotos.xcodeproj \
             -target F4milShare \
             -sdk iphonesimulator \
             -configuration Debug \
+            SYMROOT="$RUNNER_TEMP/xcbuild" \
+            OBJROOT="$RUNNER_TEMP/xcbuild/Intermediates" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Compile the widgets extension
+        # Same gap as the share extension above: the widgets/Live Activity
+        # extension in App/Widgets/ (#764, #768 §1) is its own target of
+        # the app project, outside the SwiftPM package the unit tests
+        # build, so without this step CI would never compile it at all.
+        #
+        # Unlike F4milShare, this target links FKPhotosLib directly (it
+        # needs the package's trip/recap/feed models), which pulls in the
+        # package's OpenAPIGenerator build-tool plugin — xcodebuild
+        # refuses to run an unapproved plugin non-interactively, so this
+        # needs the same flag the package test run above already passes.
+        #
+        # `-scheme` rather than `-target`, unlike the share extension:
+        # a target-based build compiles the whole package graph for the
+        # run destination's SDK, and that graph includes the build-tool
+        # plugin's own executable. Built for iOS, swift-openapi-
+        # generator refuses outright — `_OpenAPIGeneratorCore` carries
+        # an `#error` for exactly this ("only to be used by
+        # swift-openapi-generator itself"), since a plugin's tool has
+        # to be built for the host. A scheme-based build makes that
+        # host/target split correctly, which is why the package test
+        # step above never hit this. Hence the shared scheme checked in
+        # at FKPhotos.xcodeproj/xcshareddata/xcschemes/ — the project
+        # had none, and this step needs one to exist.
+        run: |
+          xcodebuild build \
+            -project FKPhotos.xcodeproj \
+            -scheme FKPhotosWidgets \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -configuration Debug \
+            -skipPackagePluginValidation \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 

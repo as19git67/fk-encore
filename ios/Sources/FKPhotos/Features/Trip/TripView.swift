@@ -33,6 +33,10 @@ struct TripView: View {
     /// which made the same tap lead somewhere else the second time
     /// (§8.5).
     @State private var openPlanId: Int?
+    /// A deep link's target plan (Live Activity or widget tap, #768 §1) —
+    /// its own item rather than routed through `openPlanId`, so it can
+    /// be bound the way every other tab root binds its deep-link item.
+    @State private var router = AppDeepLinkRouter.shared
     /// Which half is showing. Stored, so the traveller comes back to
     /// the half they left; decided once per appearance from what is
     /// happening (`TripTabMode.initial`).
@@ -115,6 +119,9 @@ struct TripView: View {
         }
         .navigationDestination(item: $openPlanId) { planId in
             TripPlanDayView(viewModel: TripPlannerViewModel.shared(for: planId))
+        }
+        .navigationDestination(item: $router.tripPlanToOpen) { open in
+            TripPlanDayView(viewModel: TripPlannerViewModel.shared(for: open.id))
         }
         .onAppear { consumeStartSuggestionHandoff() }
         .task {

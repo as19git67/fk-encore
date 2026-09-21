@@ -820,8 +820,11 @@ enum TripTransportMode: String, CaseIterable, Sendable {
 /// Kept here rather than as a `Date` on purpose: a fixpoint is "the
 /// 18:40 train", not an instant on a global clock, and formatting it
 /// through a timezone would move it.
-enum TripClock {
-    static func format(_ minutes: Int) -> String {
+public enum TripClock {
+    /// `public`: the trip-day Live Activity widget (`ios/App/Widgets/`,
+    /// a separate module) formats block times the same way the day
+    /// screen does — one clock, not two spellings of "18:40".
+    public static func format(_ minutes: Int) -> String {
         let wrapped = ((minutes % 1440) + 1440) % 1440
         return String(format: "%02d:%02d", wrapped / 60, wrapped % 60)
     }

@@ -30,6 +30,8 @@ final class FeedViewModel {
             items = response.items
             nextCursor = response.nextCursor
             hasMore = response.nextCursor != nil
+            // Feeds the "recent feed activity" home-screen widget (#764).
+            WidgetSnapshotStore.updateFromFeed(response.items)
 
             await markDisplayedFeedSeen()
         } catch {
