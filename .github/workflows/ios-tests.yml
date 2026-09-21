@@ -85,6 +85,22 @@ jobs:
         # the only thing in CI that looks at them at all.
         run: mv "$RUNNER_TEMP/FKPhotos.xcodeproj" FKPhotos.xcodeproj
 
+      - name: Clear DerivedData before the target-based builds
+        # `-derivedDataPath` can't fix this: xcodebuild rejects it
+        # together with `-target` ("-scheme ... required when
+        # specifying -derivedDataPath"), and neither compile step below
+        # has a scheme to give it (the project ships none). The default
+        # location (~/Library/Developer/Xcode/DerivedData/<hash>) has
+        # been observed left behind with a corrupted package checkout
+        # (`SourcePackages/checkouts/.../build` existing as a plain file
+        # instead of a directory) after a prior attempt — the runner's
+        # home directory is evidently not fully wiped between re-runs —
+        # which then fails every subsequent build that resolves
+        # packages. Clearing it before these two steps removes whatever
+        # a previous attempt left behind; a fresh runner has nothing
+        # here anyway, so this is a no-op on the common path.
+        run: rm -rf ~/Library/Developer/Xcode/DerivedData
+
       - name: Compile the share extension
         # The unit tests above build only the SwiftPM package
         # (Sources/FKPhotos). The share extension in F4milShare/ is a
@@ -95,22 +111,12 @@ jobs:
         # `-target` rather than `-scheme`: the project ships no shared
         # schemes, so there is no scheme to name. No tests run here; the
         # extension has none, and it is the compile that was missing.
-        #
-        # `-derivedDataPath` pins a fresh, job-local directory: the
-        # default (~/Library/Developer/Xcode/DerivedData/<hash>) has been
-        # observed left behind with a corrupted package checkout
-        # (`SourcePackages/checkouts/.../build` existing as a plain file
-        # instead of a directory) on a re-run, which fails every build
-        # that resolves packages until that directory is gone — the
-        # runner's home directory is evidently not fully wiped between
-        # attempts. $RUNNER_TEMP is documented to start empty each job.
         run: |
           xcodebuild build \
             -project FKPhotos.xcodeproj \
             -target F4milShare \
             -sdk iphonesimulator \
             -configuration Debug \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
@@ -125,7 +131,6 @@ jobs:
         # package's OpenAPIGenerator build-tool plugin — xcodebuild
         # refuses to run an unapproved plugin non-interactively, so this
         # needs the same flag the package test run above already passes.
-        # Same `-derivedDataPath` reasoning as the share extension step.
         run: |
           xcodebuild build \
             -project FKPhotos.xcodeproj \
@@ -133,7 +138,6 @@ jobs:
             -sdk iphonesimulator \
             -configuration Debug \
             -skipPackagePluginValidation \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
