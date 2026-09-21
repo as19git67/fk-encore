@@ -129,18 +129,27 @@ jobs:
         # package's OpenAPIGenerator build-tool plugin — xcodebuild
         # refuses to run an unapproved plugin non-interactively, so this
         # needs the same flag the package test run above already passes.
-        # It is also the target that actually trips the SYMROOT problem
-        # described in the share extension step, since it is the one
-        # with package dependencies to build.
+        #
+        # `-scheme` rather than `-target`, unlike the share extension:
+        # a target-based build compiles the whole package graph for the
+        # run destination's SDK, and that graph includes the build-tool
+        # plugin's own executable. Built for iOS, swift-openapi-
+        # generator refuses outright — `_OpenAPIGeneratorCore` carries
+        # an `#error` for exactly this ("only to be used by
+        # swift-openapi-generator itself"), since a plugin's tool has
+        # to be built for the host. A scheme-based build makes that
+        # host/target split correctly, which is why the package test
+        # step above never hit this. Hence the shared scheme checked in
+        # at FKPhotos.xcodeproj/xcshareddata/xcschemes/ — the project
+        # had none, and this step needs one to exist.
         run: |
           xcodebuild build \
             -project FKPhotos.xcodeproj \
-            -target FKPhotosWidgets \
-            -sdk iphonesimulator \
+            -scheme FKPhotosWidgets \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
             -configuration Debug \
             -skipPackagePluginValidation \
-            SYMROOT="$RUNNER_TEMP/xcbuild" \
-            OBJROOT="$RUNNER_TEMP/xcbuild/Intermediates" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
