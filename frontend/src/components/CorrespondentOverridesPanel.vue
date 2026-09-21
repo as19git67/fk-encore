@@ -170,7 +170,7 @@ onMounted(load)
   font-size: 0.9rem;
 }
 .msg.error {
-  color: var(--p-red-500, #ef4444);
+  color: var(--p-red-500);
 }
 .msg.info {
   color: var(--p-text-muted-color);

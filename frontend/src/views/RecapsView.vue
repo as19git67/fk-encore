@@ -690,7 +690,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
 .recaps-empty {
   padding: 3rem 1rem;
   text-align: center;
-  color: var(--p-text-muted-color, #888);
+  color: var(--p-text-muted-color);
 }
 
 .recaps-empty .hint {
@@ -710,7 +710,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   flex-direction: column;
   border: none;
   padding: 0;
-  background: var(--p-content-background, #1e1e1e);
+  background: var(--p-content-background);
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
@@ -727,7 +727,9 @@ async function playFromCard(r: RecapSummary, e: Event) {
 .recap-cover {
   position: relative;
   aspect-ratio: 4 / 3;
-  background: #111;
+  /* Letterbox behind the cover photo: stays dark in both themes, otherwise a
+     portrait cover would sit on a bright page in light mode. */
+  background: #111; /* audit-ok: fixed letterbox behind the photo, not a page surface */
 }
 
 .recap-cover :deep(img),
@@ -743,7 +745,9 @@ async function playFromCard(r: RecapSummary, e: Event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #555;
+  /* Placeholder glyph on the fixed dark letterbox — a translucent white keeps
+     the same grey there and needs no fixed colour of its own. */
+  color: rgba(255, 255, 255, 0.28);
   font-size: 3rem;
 }
 
@@ -753,7 +757,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   left: 8px;
   padding: 2px 10px;
   background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  color: #fff; /* audit-ok: label on a dark scrim over the photo, white in both themes */
   border-radius: 999px;
   font-size: 0.75rem;
 }
@@ -767,7 +771,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   border-radius: 999px;
   border: none;
   background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  color: #fff; /* audit-ok: play icon on a dark scrim over the cover photo */
   font-size: 1.1rem;
   cursor: pointer;
   display: inline-flex;
@@ -778,7 +782,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
 }
 
 .recap-card-play:hover:not(:disabled) {
-  background: var(--p-primary-color, #2563eb);
+  background: var(--p-primary-color);
   transform: scale(1.06);
 }
 
@@ -792,8 +796,8 @@ async function playFromCard(r: RecapSummary, e: Event) {
   top: 8px;
   right: 8px;
   padding: 2px 10px;
-  background: var(--p-primary-color, #2563eb);
-  color: var(--p-primary-contrast-color, #fff);
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 600;
@@ -811,7 +815,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
 }
 
 .recap-subtitle {
-  color: var(--p-text-muted-color, #aaa);
+  color: var(--p-text-muted-color);
   font-size: 0.85rem;
   margin-top: 2px;
 }
@@ -819,7 +823,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
 .recap-count {
   margin-top: 0.4rem;
   font-size: 0.8rem;
-  color: var(--p-text-muted-color, #888);
+  color: var(--p-text-muted-color);
 }
 
 .recap-detail-overlay {
@@ -836,7 +840,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
 }
 
 .recap-detail {
-  background: var(--p-content-background, #1e1e1e);
+  background: var(--p-content-background);
   border-radius: 14px;
   width: min(1200px, 100%);
   padding: 1.25rem 1.5rem 2rem;
@@ -876,7 +880,8 @@ async function playFromCard(r: RecapSummary, e: Event) {
   aspect-ratio: 1 / 1;
   overflow: hidden;
   border-radius: 8px;
-  background: #111;
+  /* Same letterbox as the cover: the thumbnail is a photo, not a page area. */
+  background: #111; /* audit-ok: fixed letterbox behind the photo, not a page surface */
   cursor: pointer;
   transition: transform 0.15s ease;
 }
@@ -897,7 +902,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   border: none;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  color: #fff; /* audit-ok: icon on a dark scrim over the photo */
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s ease, background 0.15s ease;

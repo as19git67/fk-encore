@@ -45,7 +45,15 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
   und Schublade; Dokumente und Finanzen füllen nur noch Zeilen und Fußzeile.
   `composables/useBasketNavigation.ts` blättert im Basket — jetzt auch in der
   Buchungsdetailseite. `useRangeSelect` ist gelöscht.
-- ⬜ Etappe 6: siehe Sub-Issue #1281.
+- 🔄 **Etappe 6 — Feinschliff** (#1281), in Arbeit:
+  - ✅ Farb-Audit `scripts/check-css-tokens.mjs` (Surface-Skala, Hex, deckendes
+    `rgb()`), im pre-commit-Hook über die gestageten Styles, mit eigenen Tests.
+    Die 235 Fundstellen in 49 Dateien sind bereinigt: fast alle waren
+    `var(--p-token, #hex)`-Rückfallwerte, der Rest sind Palettentoken
+    (`--p-red-500` & Co.), `color-mix()`-Tönungen statt fester heller Tints,
+    oder bewusst feste Medienflächen mit `/* audit-ok: … */`.
+  - ⬜ Typografie-Skala, Fokusring, Dialoge, Detailseiten-Aktionen,
+    Breakpoint-Konstanten, Route-Transition, Stories je Seitenzustand.
 
 Abweichungen vom Entwurf (Etappe 1):
 

@@ -1624,15 +1624,18 @@ function compareTileSrc(photo: Photo, width?: number): string {
 
 <style scoped>
 .compare-overlay {
-  --compare-first-color: #38bdf8;
-  --compare-first-hover: #0ea5e9;
-  --compare-second-color: #f59e0b;
-  --compare-second-hover: #d97706;
-  --compare-center-color: #a78bfa;
-  --compare-center-hover: #8b5cf6;
+  /* The three decision groups (left photo / right photo / neutral centre) are
+     told apart by hue, not by role, so they come from the theme's palette
+     rather than from the semantic surface tokens. */
+  --compare-first-color: var(--p-sky-400);
+  --compare-first-hover: var(--p-sky-500);
+  --compare-second-color: var(--p-amber-500);
+  --compare-second-hover: var(--p-amber-600);
+  --compare-center-color: var(--p-violet-400);
+  --compare-center-hover: var(--p-violet-500);
   position: fixed;
   inset: 0;
-  background: #0a0a0a;
+  background: #0a0a0a; /* audit-ok: photo-comparison stage, near-black in both themes so only the photos carry colour */
   z-index: 1200;
   display: flex;
   flex-direction: column;
@@ -1641,7 +1644,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
 
 :deep(.compare-thumb-action--first.p-button) {
   border-color: var(--compare-first-color);
-  color: #082f49;
+  color: var(--p-sky-950);
   background: var(--compare-first-color);
 }
 
@@ -1652,7 +1655,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
 
 :deep(.compare-thumb-action--second.p-button) {
   border-color: var(--compare-second-color);
-  color: #451a03;
+  color: var(--p-amber-950);
   background: var(--compare-second-color);
 }
 
@@ -1665,7 +1668,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
    text variants retain their affordance while sharing the same purple hue. */
 :deep(.compare-center-action.p-button) {
   border-color: var(--compare-center-color);
-  color: #2e1065;
+  color: var(--p-violet-950);
   background: var(--compare-center-color);
 }
 
@@ -1686,7 +1689,8 @@ function compareTileSrc(photo: Photo, width?: number): string {
 
 :deep(.compare-center-action.p-button.p-button-outlined:not(:disabled):hover),
 :deep(.compare-center-action.p-button.p-button-text:not(:disabled):hover) {
-  color: #fff;
+  /* Lightest tint of the same hue — reads as white on the filled button. */
+  color: var(--p-violet-50);
 }
 
 /* ── Header (shared between phases) ── */
@@ -1776,7 +1780,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: #111;
+  background: #111; /* audit-ok: letterbox behind the photo, dark in both themes */
   transition: opacity 0.2s;
 }
 
@@ -1811,7 +1815,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
   right: 0.5rem;
   z-index: 4;
   background: rgba(0, 0, 0, 0.55) !important;
-  color: #fff !important;
+  color: #fff !important; /* audit-ok: button on its own dark disc over the photo */
 }
 
 .side-by-side-image :deep(.heic-image-container) {
@@ -1868,7 +1872,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
   padding: 1.5rem;
 }
 .compare-commit-overlay-label {
-  color: #f4f4f5;
+  color: var(--p-zinc-100);
   font-size: 0.95rem;
   max-width: 22rem;
 }
@@ -1890,7 +1894,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
 .review-photo {
   border-radius: 8px;
   overflow: hidden;
-  background: #1a1a1a;
+  background: #1a1a1a; /* audit-ok: letterbox behind the photo tile on the dark overlay */
   transition: opacity 0.2s, box-shadow 0.2s;
 }
 
@@ -1921,7 +1925,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
   top: 0.4rem;
   right: 0.4rem;
   background: rgba(0, 0, 0, 0.7);
-  color: #22c55e;
+  color: var(--p-green-500);
   padding: 0.15rem 0.5rem;
   border-radius: 1rem;
   font-size: 0.8rem;
@@ -1930,7 +1934,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
 }
 
 .review-score.negative {
-  color: #ef4444;
+  color: var(--p-red-500);
 }
 
 .review-photo-controls {
@@ -1976,8 +1980,8 @@ kbd {
   padding: 0.1rem 0.35rem;
   font-size: 0.78rem;
   font-family: monospace;
-  background: var(--p-surface-100, #f3f4f6);
-  border: 1px solid var(--p-surface-300, #d1d5db);
+  background: var(--p-content-hover-background);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 4px;
   line-height: 1.4;
 }
@@ -2015,7 +2019,9 @@ kbd {
   padding: 0.9rem 1rem 1rem;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 0.75rem;
-  color: #f4f4f5;
+  /* The popover keeps its own dark card on top of the dark overlay, so its
+     text comes from the palette rather than from --p-text-color. */
+  color: var(--p-zinc-100);
   background: rgba(24, 24, 27, 0.96);
   box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.5);
 }
@@ -2041,7 +2047,7 @@ kbd {
   justify-content: flex-end;
   gap: 1rem;
   margin: 0.15rem 0 0.8rem;
-  color: #d4d4d8;
+  color: var(--p-zinc-300);
   font-size: 0.75rem;
 }
 
@@ -2077,7 +2083,7 @@ kbd {
 
 .quality-row__label {
   overflow-wrap: anywhere;
-  color: #e4e4e7;
+  color: var(--p-zinc-200);
   font-size: 0.78rem;
 }
 
@@ -2104,14 +2110,14 @@ kbd {
 }
 .quality-value {
   width: 2.5rem;
-  color: #fafafa;
+  color: var(--p-zinc-50);
   font-size: 0.72rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 .quality-comparison__empty {
   margin: 0.5rem 0 0;
-  color: #a1a1aa;
+  color: var(--p-zinc-400);
   text-align: center;
 }
 
@@ -2120,10 +2126,12 @@ kbd {
   .quality-row { grid-template-columns: minmax(5.25rem, 6.5rem) 1fr; gap: 0.45rem; }
 }
 
-.ai-quality-badge.ai-score-good  { color: #22c55e; }
-.ai-quality-badge.ai-score-medium { color: #eab308; }
-.ai-quality-badge.ai-score-poor  { color: #ef4444; }
-.ai-quality-badge.ai-score-unknown { color: #9ca3af; }
+/* Traffic-light scoring: a measurement, so it comes from the palette and
+   reads the same on top of any photo. */
+.ai-quality-badge.ai-score-good  { color: var(--p-green-500); }
+.ai-quality-badge.ai-score-medium { color: var(--p-yellow-500); }
+.ai-quality-badge.ai-score-poor  { color: var(--p-red-500); }
+.ai-quality-badge.ai-score-unknown { color: var(--p-gray-400); }
 
 /* ── AI score in review grid ── */
 .review-ai-score {
@@ -2142,10 +2150,10 @@ kbd {
   cursor: help;
 }
 
-.review-ai-score.ai-score-good   { color: #22c55e; }
-.review-ai-score.ai-score-medium { color: #eab308; }
-.review-ai-score.ai-score-poor   { color: #ef4444; }
-.review-ai-score.ai-score-unknown { color: #9ca3af; }
+.review-ai-score.ai-score-good   { color: var(--p-green-500); }
+.review-ai-score.ai-score-medium { color: var(--p-yellow-500); }
+.review-ai-score.ai-score-poor   { color: var(--p-red-500); }
+.review-ai-score.ai-score-unknown { color: var(--p-gray-400); }
 
 /* ── KI-Pick badge ── Marks the photo(s) the auto-pick would keep, so
    the user can see in the side-by-side / review grid whether their
@@ -2163,7 +2171,7 @@ kbd {
   border-radius: 1rem;
   font-size: 0.72rem;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--p-green-50);
   background: rgba(34, 197, 94, 0.85);
   backdrop-filter: blur(4px);
   cursor: help;
@@ -2185,7 +2193,7 @@ kbd {
   border-radius: 1rem;
   font-size: 0.72rem;
   font-weight: 600;
-  color: #fee2e2;
+  color: var(--p-red-100);
   background: rgba(239, 68, 68, 0.7);
   backdrop-filter: blur(4px);
   cursor: help;
@@ -2193,7 +2201,7 @@ kbd {
 }
 
 .eyes-closed-badge--standout {
-  color: #ffffff;
+  color: var(--p-red-50);
   background: rgba(220, 38, 38, 0.95);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 2px 8px rgba(220, 38, 38, 0.45);
 }
@@ -2204,9 +2212,10 @@ kbd {
 }
 
 /* ── Focus peaking (#873) ── Traffic-light frames around detected faces.
-   The colours are deliberately literal (green / yellow / red) rather than
-   theme-semantic: they encode a measurement, not a surface, and have to
-   read the same on top of any photo in light and dark mode.
+   The colours come from the theme's palette (green / yellow / red) rather
+   than from the semantic surface tokens: they encode a measurement, not a
+   surface, and have to read the same on top of any photo in light and dark
+   mode.
 
    The box lives inside the zoom-to-face wrapper, so its rectangle scales
    with the zoom transform — correctly, since it has to keep tracing the
@@ -2229,15 +2238,15 @@ kbd {
 }
 
 .focus-peak-box--sharp {
-  --focus-peak-color: #22c55e;
+  --focus-peak-color: var(--p-green-500);
 }
 
 .focus-peak-box--medium {
-  --focus-peak-color: #eab308;
+  --focus-peak-color: var(--p-yellow-500);
 }
 
 .focus-peak-box--unsharp {
-  --focus-peak-color: #ef4444;
+  --focus-peak-color: var(--p-red-500);
 }
 
 .focus-peak-label {
@@ -2251,7 +2260,8 @@ kbd {
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;
-  color: #0b0b0b;
+  /* Near-black label text on the bright traffic-light colour. */
+  color: var(--p-zinc-950);
   background: var(--focus-peak-color);
   /* Scale the whole label (text, padding, radius) as one unit instead of
      compensating each property — bottom-left anchor keeps it pinned just

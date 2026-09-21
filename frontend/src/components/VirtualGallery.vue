@@ -627,7 +627,7 @@ defineExpose({
   width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--p-content-background, #fff);
+  background: var(--p-content-background);
   -webkit-overflow-scrolling: touch;
   contain: layout size style;
   scrollbar-gutter: stable;
@@ -638,12 +638,12 @@ defineExpose({
 .vg-state {
   padding: 2rem 1rem;
   text-align: center;
-  color: var(--p-text-muted-color, #6b7280);
+  color: var(--p-text-muted-color);
   font-size: 0.95rem;
 }
 
 .vg-state--error {
-  color: var(--p-red-500, #ef4444);
+  color: var(--p-red-500);
 }
 
 .vg-inner {
@@ -669,7 +669,7 @@ defineExpose({
   border: none;
   padding: 0;
   margin: 0;
-  background: var(--p-content-hover-background, #f3f4f6);
+  background: var(--p-content-hover-background);
   cursor: pointer;
   border-radius: 4px;
   overflow: hidden;
@@ -692,7 +692,7 @@ defineExpose({
   width: 100%;
   height: 100%;
   object-fit: cover;
-  background: var(--p-content-hover-background, #f3f4f6);
+  background: var(--p-content-hover-background);
 }
 
 /* Curation styling — favorites show only a gold heart, no frame (#342) */
@@ -706,7 +706,7 @@ defineExpose({
   top: 6px;
   right: 6px;
   font-size: 0.85rem;
-  color: var(--p-yellow-400, #facc15);
+  color: var(--p-yellow-400);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
   pointer-events: none;
 }
@@ -728,7 +728,7 @@ defineExpose({
   top: 6px;
   left: 6px;
   background: rgba(0, 0, 0, 0.7);
-  color: #fff;
+  color: #fff; /* audit-ok: badge on its own dark pill over the thumbnail */
   font-size: 0.72rem;
   font-weight: 600;
   padding: 3px 8px;
@@ -747,18 +747,18 @@ defineExpose({
   background: rgba(0, 0, 0, 0.9);
 }
 .vg-stack-badge--ai-high {
-  background: var(--p-red-500, #ef4444);
-  color: #fff;
+  background: var(--p-red-500);
+  color: #fff; /* audit-ok: text on the solid red status badge, white in both themes */
 }
 .vg-stack-badge--ai-high:hover {
-  background: var(--p-red-600, #dc2626);
+  background: var(--p-red-600);
 }
 .vg-stack-badge--ai-medium {
-  background: var(--p-orange-500, #f97316);
-  color: #fff;
+  background: var(--p-orange-500);
+  color: #fff; /* audit-ok: text on the solid orange status badge, white in both themes */
 }
 .vg-stack-badge--ai-medium:hover {
-  background: var(--p-orange-600, #ea580c);
+  background: var(--p-orange-600);
 }
 .vg-stack-badge--ai-low {
   background: rgba(0, 0, 0, 0.55);
@@ -838,7 +838,7 @@ defineExpose({
   bottom: 6px;
   right: 6px;
   font-size: 1.1rem;
-  color: #fff;
+  color: #fff; /* audit-ok: icon on its own dark disc over the thumbnail */
   background: rgba(0, 0, 0, 0.5);
   border-radius: 50%;
   padding: 1px;
@@ -846,7 +846,8 @@ defineExpose({
 }
 
 .vg-cell--selected .vg-select-icon {
-  color: #fff;
-  background: var(--p-primary-500, #3b82f6);
+  /* The theme knows which text colour reads on its brand colour. */
+  color: var(--p-primary-contrast-color);
+  background: var(--p-primary-500);
 }
 </style>

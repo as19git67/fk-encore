@@ -880,8 +880,10 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   z-index: 1500;
-  background: #000;
-  color: #fff;
+  /* The recap player is a dark media stage with white chrome — identical in
+     light and dark, like a cinema screen. */
+  background: #000; /* audit-ok: media stage, deliberately black in both themes */
+  color: #fff; /* audit-ok: chrome on the black stage */
   overflow: hidden;
   user-select: none;
   touch-action: none;
@@ -1020,7 +1022,7 @@ onBeforeUnmount(() => {
   padding: 4px 14px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  color: #fff; /* audit-ok: player chrome on a dark pill (see .recap-player) */
   font-size: 0.95rem;
   font-weight: 600;
   white-space: nowrap;
@@ -1118,7 +1120,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   border: none;
   background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  color: #fff; /* audit-ok: player chrome on a dark pill (see .recap-player) */
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1138,7 +1140,8 @@ onBeforeUnmount(() => {
 }
 
 .recap-player-btn-heart.is-favorite {
-  color: #f43f5e;
+  /* Favourite accent from the theme palette instead of a literal rose. */
+  color: var(--p-rose-500);
 }
 
 .recap-player-btn-heart:disabled {
@@ -1155,7 +1158,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   border: none;
   background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  color: #fff; /* audit-ok: player chrome on a dark pill (see .recap-player) */
   cursor: pointer;
   display: inline-flex;
   align-items: center;

@@ -277,7 +277,7 @@ onMounted(load)
 }
 .re-empty .pi-check-circle {
   font-size: 2.5rem;
-  color: var(--p-green-500, #22c55e);
+  color: var(--p-green-500);
   margin-bottom: 12px;
 }
 .re-list {

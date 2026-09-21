@@ -190,7 +190,7 @@ function rowPhotos(rowIndex: number): Photo[] {
   overflow: hidden;
   cursor: pointer;
   border-radius: var(--radius-sm);
-  background: var(--p-content-hover-background, #eee);
+  background: var(--p-content-hover-background);
 }
 
 .vpg__item :deep(.heic-image-container) {

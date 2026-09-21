@@ -466,13 +466,13 @@ function formatAmountChange(item: AnomalyItem): string | null {
 }
 
 .anomaly-card.sev-warn {
-  border-left-color: var(--p-yellow-500, #f59e0b);
+  border-left-color: var(--p-yellow-500);
 }
 .anomaly-card.sev-danger {
-  border-left-color: var(--p-red-500, #ef4444);
+  border-left-color: var(--p-red-500);
 }
 .anomaly-card.sev-info {
-  border-left-color: var(--p-blue-500, #3b82f6);
+  border-left-color: var(--p-blue-500);
 }
 
 .card-icon {
@@ -480,9 +480,9 @@ function formatAmountChange(item: AnomalyItem): string | null {
   font-size: 1.5rem;
   color: var(--p-text-muted-color);
 }
-.sev-warn .card-icon { color: var(--p-yellow-500, #f59e0b); }
-.sev-danger .card-icon { color: var(--p-red-500, #ef4444); }
-.sev-info .card-icon { color: var(--p-blue-500, #3b82f6); }
+.sev-warn .card-icon { color: var(--p-yellow-500); }
+.sev-danger .card-icon { color: var(--p-red-500); }
+.sev-info .card-icon { color: var(--p-blue-500); }
 
 .card-body {
   flex: 1;

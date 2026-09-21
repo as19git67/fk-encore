@@ -132,7 +132,7 @@ watch(() => [props.latitude, props.longitude], () => {
   height: 160px;
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid var(--p-content-border-color, #dee2e6);
+  border: 1px solid var(--p-content-border-color);
   background: var(--p-content-hover-background);
 }
 
@@ -165,9 +165,9 @@ watch(() => [props.latitude, props.longitude], () => {
 .photo-mini-map-zoom-btn {
   width: 26px;
   height: 26px;
-  border: 1px solid var(--p-content-border-color, #ccc);
-  background: var(--p-content-background, #fff);
-  color: var(--p-text-color, #222);
+  border: 1px solid var(--p-content-border-color);
+  background: var(--p-content-background);
+  color: var(--p-text-color);
   font-size: 1rem;
   font-weight: 700;
   line-height: 1;
@@ -181,7 +181,7 @@ watch(() => [props.latitude, props.longitude], () => {
 }
 
 .photo-mini-map-zoom-btn:hover {
-  background: var(--p-content-hover-background, #f4f4f4);
+  background: var(--p-content-hover-background);
 }
 
 .photo-mini-map-zoom-btn:active {
@@ -208,7 +208,7 @@ watch(() => [props.latitude, props.longitude], () => {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--p-primary-color, #4285F4);
+  background: var(--p-primary-color);
   border: 2px solid white;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }

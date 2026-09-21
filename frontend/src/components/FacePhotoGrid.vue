@@ -386,12 +386,12 @@ function openPhoto(idx: number) {
   z-index: 5;
   pointer-events: none;
 }
-.favorite-badge { color: var(--p-yellow-400, #facc15); }
+.favorite-badge { color: var(--p-yellow-400); }
 .hidden-badge { color: rgba(255, 255, 255, 0.85); }
 
 .face-box {
   position: absolute;
-  border: 2px solid var(--p-yellow-500, #eab308);
+  border: 2px solid var(--p-yellow-500);
   box-sizing: border-box;
   pointer-events: none;
   z-index: 2;

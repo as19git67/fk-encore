@@ -20,7 +20,7 @@ onMounted(() => {
 <style scoped>
 .build-number {
   font-size: 0.85rem;
-  color: var(--p-text-muted-color, #888);
+  color: var(--p-text-muted-color);
   font-family: monospace;
 }
 </style>

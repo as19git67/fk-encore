@@ -254,7 +254,10 @@ function save() {
   padding: 1px 7px;
   border-radius: 10px;
   font-size: 0.72rem;
+  /* The label floats on the page thumbnail, not on a themed surface: the
+     dark scrim gives it its own background in both themes, so the text
+     stays white either way. */
   background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  color: #fff; /* audit-ok: white on the fixed dark scrim above, not on a theme surface */
 }
 </style>

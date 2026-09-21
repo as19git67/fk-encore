@@ -1050,7 +1050,7 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  color: var(--p-orange-700, #c2410c);
+  color: var(--p-orange-700);
   font-weight: 700;
 }
 .rq-conf {
@@ -1063,11 +1063,11 @@ onMounted(() => {
 }
 .rq-conf--high {
   background: var(--p-green-100, rgba(34,197,94,0.16));
-  color: var(--p-green-700, #15803d);
+  color: var(--p-green-700);
 }
 .rq-conf--medium {
   background: var(--p-orange-100, rgba(249,115,22,0.16));
-  color: var(--p-orange-700, #c2410c);
+  color: var(--p-orange-700);
 }
 .rq-conf--low,
 .rq-conf--unknown {
@@ -1097,10 +1097,10 @@ onMounted(() => {
   transition: width 0.2s;
 }
 .rq-confbar--high .rq-confbar-fill {
-  background: var(--p-green-500, #22c55e);
+  background: var(--p-green-500);
 }
 .rq-confbar--medium .rq-confbar-fill {
-  background: var(--p-orange-500, #f97316);
+  background: var(--p-orange-500);
 }
 .rq-confbar--low .rq-confbar-fill {
   background: var(--p-text-muted-color);
@@ -1134,7 +1134,7 @@ onMounted(() => {
   transition: border-color 0.15s, transform 0.1s;
 }
 .rq-oneclick-tile:hover:not(:disabled) {
-  border-color: var(--p-primary-400, #60a5fa);
+  border-color: var(--p-primary-400);
 }
 .rq-oneclick-tile:active:not(:disabled) {
   transform: scale(0.99);
@@ -1150,22 +1150,22 @@ onMounted(() => {
   object-fit: contain;
 }
 .rq-oneclick-tile--ai-pick {
-  border-color: var(--p-green-500, #22c55e);
+  border-color: var(--p-green-500);
 }
 
 .rq-oneclick-tile--duplicate-pick {
-  box-shadow: inset 0 0 0 3px var(--p-orange-500, #f97316);
+  box-shadow: inset 0 0 0 3px var(--p-orange-500);
 }
 
 .rq-thumb--duplicate-pick {
-  box-shadow: 0 0 0 3px var(--p-orange-500, #f97316);
+  box-shadow: 0 0 0 3px var(--p-orange-500);
 }
 .rq-oneclick-check {
   position: absolute;
   top: 8px;
   right: 8px;
-  background: var(--p-green-500, #22c55e);
-  color: #fff;
+  background: var(--p-green-500);
+  color: #fff; /* audit-ok: check mark on the solid green badge, white in both themes */
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -1225,7 +1225,7 @@ onMounted(() => {
   filter: grayscale(0.3);
 }
 .rq-thumb--picked {
-  outline: 2px solid var(--p-green-500, #22c55e);
+  outline: 2px solid var(--p-green-500);
   outline-offset: -2px;
 }
 .rq-peer-dot {
@@ -1240,7 +1240,7 @@ onMounted(() => {
   border-radius: 9px;
   font-size: 0.65rem;
   font-weight: 700;
-  color: #fff;
+  color: #fff; /* audit-ok: count on the solid peer-signal dot over the photo */
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
 }
 .rq-peer-dot--hidden {
@@ -1255,8 +1255,8 @@ onMounted(() => {
   position: absolute;
   top: 4px;
   right: 4px;
-  background: var(--p-green-500, #22c55e);
-  color: #fff;
+  background: var(--p-green-500);
+  color: #fff; /* audit-ok: check mark on the solid green badge, white in both themes */
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -1280,7 +1280,7 @@ onMounted(() => {
   border-radius: 9px;
   font-size: 0.7rem;
   font-weight: 700;
-  color: #fff;
+  color: #fff; /* audit-ok: chip on a dark scrim over the photo */
   background: rgba(0, 0, 0, 0.6);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
 }
@@ -1288,9 +1288,9 @@ onMounted(() => {
   font-size: 0.6rem;
   padding: 0 4px;
 }
-.rq-quality--good { color: #4ade80; }
-.rq-quality--medium { color: #fde047; }
-.rq-quality--poor { color: #f87171; }
+.rq-quality--good { color: var(--p-green-400); }
+.rq-quality--medium { color: var(--p-yellow-300); }
+.rq-quality--poor { color: var(--p-red-400); }
 
 .rq-card-actions {
   display: flex;
@@ -1359,7 +1359,7 @@ onMounted(() => {
   border-radius: 50%;
   border: 0;
   background: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  color: #fff; /* audit-ok: lightbox chrome over the photo, dark in both themes */
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1379,7 +1379,7 @@ onMounted(() => {
   padding: 0.3rem 0.7rem;
   border-radius: 1rem;
   background: rgba(34, 197, 94, 0.9);
-  color: #fff;
+  color: #fff; /* audit-ok: badge on the solid green pill in the lightbox */
   font-weight: 600;
   font-size: 0.85rem;
 }

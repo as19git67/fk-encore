@@ -313,7 +313,7 @@ onBeforeUnmount(() => {
 }
 
 .cropper-wrap:focus-visible {
-  outline: 2px solid var(--p-primary-color, #6366f1);
+  outline: 2px solid var(--p-primary-color);
   outline-offset: 2px;
 }
 
@@ -339,7 +339,7 @@ onBeforeUnmount(() => {
 }
 
 .crop-rect.dragging {
-  border-color: var(--p-primary-color, #6366f1);
+  border-color: var(--p-primary-color);
 }
 
 .rot-grid {

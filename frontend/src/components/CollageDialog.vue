@@ -976,7 +976,7 @@ onBeforeUnmount(() => {
   padding: 0.05em 0.3em;
   transform: translate(-50%, -50%);
   margin: 0;
-  color: #fff;
+  color: #fff; /* audit-ok: caption burned onto the photo itself — white with a dark halo, independent of the app theme */
   font-weight: 700;
   line-height: 1.25;
   /* Legible over any photo: soft dark halo around white glyphs. */

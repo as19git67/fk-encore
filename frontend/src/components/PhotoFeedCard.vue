@@ -407,7 +407,7 @@ async function submitComment() {
   top: 0.6rem;
   right: 0.6rem;
   font-size: 1.4rem;
-  color: #fff;
+  color: #fff; /* audit-ok: badge lies on the photo itself, kept legible by the dark shadow below */
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
@@ -430,7 +430,7 @@ async function submitComment() {
   border-radius: 999px;
 }
 .icon-btn:hover { background: var(--p-content-hover-background); }
-.icon-btn.liked { color: var(--p-red-500, #e0245e); }
+.icon-btn.liked { color: var(--p-red-500); }
 .icon-btn.hidden { color: var(--p-primary-color); }
 .icon-btn .count {
   font-size: 0.9rem;
@@ -518,6 +518,6 @@ async function submitComment() {
   margin: 0;
   padding: 0 0.8rem 0.6rem;
   font-size: 0.85rem;
-  color: var(--p-red-500, #e0245e);
+  color: var(--p-red-500);
 }
 </style>

@@ -1025,7 +1025,9 @@ onMounted(() => {
   display: block;
   width: 100%;
   height: auto;
-  background: #fff;
+  /* The preview shows the label as it will be printed: the sheet is white
+     paper in either theme, so it must not follow the page surface. */
+  background: #fff; /* audit-ok: printed paper, white regardless of theme */
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.25rem;
 }
@@ -1037,7 +1039,7 @@ onMounted(() => {
 }
 .hint-warn {
   margin: 0;
-  color: var(--p-message-warn-color, #b45309);
+  color: var(--p-message-warn-color);
   font-size: 0.85rem;
 }
 .hint-muted code {

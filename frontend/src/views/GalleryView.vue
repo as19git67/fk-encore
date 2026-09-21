@@ -1964,7 +1964,7 @@ void refreshReviewSequence()
   width: 280px;
   flex-shrink: 0;
   border-left: 1px solid var(--p-content-border-color, rgba(0, 0, 0, 0.08));
-  background: var(--p-content-background, #fff);
+  background: var(--p-content-background);
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -2068,19 +2068,25 @@ void refreshReviewSequence()
   color: var(--p-green-500);
 }
 
-.p-dark .upload-progress-bar {
-  background: var(--p-blue-900);
-  border-color: var(--p-blue-700);
+/* Das Theme läuft mit `darkModeSelector: 'system'` (main.ts), setzt also
+   keine `.p-dark`-Klasse — diese Regeln hingen ins Leere und die hellen
+   Balken blieben im Dunkelmodus hell. Die Albumdetailseite schreibt dieselben
+   Balken seit jeher mit der Media Query; hier steht jetzt dasselbe. */
+@media (prefers-color-scheme: dark) {
+  .upload-progress-bar {
+    background: var(--p-blue-900);
+    border-color: var(--p-blue-700);
+  }
+  .upload-progress-bar__info { color: var(--p-blue-200); }
+  .upload-progress-bar__track { background: var(--p-blue-800); }
+  .upload-progress-bar__fill  { background: var(--p-blue-400); }
+  .upload-result-bar {
+    background: var(--p-green-900);
+    border-color: var(--p-green-700);
+    color: var(--p-green-200);
+  }
+  .upload-result-bar .pi-check-circle { color: var(--p-green-400); }
 }
-.p-dark .upload-progress-bar__info { color: var(--p-blue-200); }
-.p-dark .upload-progress-bar__track { background: var(--p-blue-800); }
-.p-dark .upload-progress-bar__fill  { background: var(--p-blue-400); }
-.p-dark .upload-result-bar {
-  background: var(--p-green-900);
-  border-color: var(--p-green-700);
-  color: var(--p-green-200);
-}
-.p-dark .upload-result-bar .pi-check-circle { color: var(--p-green-400); }
 
 /* ── Delete progress bar (#299) ───────────────────────────────────────── */
 .delete-progress-bar {
@@ -2113,13 +2119,15 @@ void refreshReviewSequence()
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
-.p-dark .delete-progress-bar {
-  background: var(--p-red-900);
-  border-color: var(--p-red-700);
+@media (prefers-color-scheme: dark) {
+  .delete-progress-bar {
+    background: var(--p-red-900);
+    border-color: var(--p-red-700);
+  }
+  .delete-progress-bar__info { color: var(--p-red-200); }
+  .delete-progress-bar__track { background: var(--p-red-800); }
+  .delete-progress-bar__fill  { background: var(--p-red-400); }
 }
-.p-dark .delete-progress-bar__info { color: var(--p-red-200); }
-.p-dark .delete-progress-bar__track { background: var(--p-red-800); }
-.p-dark .delete-progress-bar__fill  { background: var(--p-red-400); }
 
 .upload-button-label { display: inline-flex; cursor: pointer; }
 .upload-input-hidden { display: none; }

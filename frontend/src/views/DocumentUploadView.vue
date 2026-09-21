@@ -259,9 +259,9 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
 }
 .queue-item-sub { display: flex; gap: 0.75rem; font-size: 0.85rem; color: var(--p-text-muted-color); flex-wrap: wrap; }
 .queue-item-sub span { display: inline-flex; align-items: center; gap: 0.25rem; }
-.status-done { color: var(--p-green-500, #10b981); }
-.status-duplicate { color: var(--p-yellow-600, #d97706); }
-.status-error { color: var(--p-red-500, #ef4444); }
+.status-done { color: var(--p-green-500); }
+.status-duplicate { color: var(--p-yellow-600); }
+.status-error { color: var(--p-red-500); }
 .status-uploading { color: var(--p-primary-color); }
 
 .queue-progress {

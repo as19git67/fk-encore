@@ -189,13 +189,13 @@ const purgeDbTotals = computed(() => {
 <style scoped>
 .danger-zone {
   margin-top: 1rem;
-  border: 1px solid var(--p-red-400, #e34c4c);
+  border: 1px solid var(--p-red-400);
   border-radius: 0.5rem;
   padding: 0.75rem 1rem;
-  background: color-mix(in srgb, var(--p-red-50, #fff5f5) 60%, transparent);
+  background: color-mix(in srgb, var(--p-red-50) 60%, transparent);
 }
 .danger-zone__title {
-  color: var(--p-red-600, #c62828);
+  color: var(--p-red-600);
 }
 
 /* Purge dialog */
@@ -264,6 +264,6 @@ const purgeDbTotals = computed(() => {
   font-size: 0.9rem;
 }
 .purge-result__warn {
-  color: var(--p-red-600, #c62828);
+  color: var(--p-red-600);
 }
 </style>

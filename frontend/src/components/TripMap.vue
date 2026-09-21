@@ -943,8 +943,8 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 /* ── Timeline strip ─────────────────────────────────────────────────────── */
 .trip-timeline-wrapper {
   flex-shrink: 0;
-  background: var(--p-surface-card, #fff);
-  border-top: 1px solid var(--p-content-border-color, #dee2e6);
+  background: var(--p-surface-card);
+  border-top: 1px solid var(--p-content-border-color);
 }
 
 .trip-timeline-header {
@@ -1019,7 +1019,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 }
 
 .trip-timeline::-webkit-scrollbar-thumb {
-  background: var(--p-content-border-color, #ccc);
+  background: var(--p-content-border-color);
   border-radius: 2px;
 }
 
@@ -1043,7 +1043,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 
 .trip-timeline-item--selected {
   background: var(--p-primary-50, rgba(66,133,244,0.1));
-  outline: 2px solid var(--p-primary-color, #4285F4);
+  outline: 2px solid var(--p-primary-color);
   outline-offset: -2px;
 }
 
@@ -1052,7 +1052,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   height: 56px;
   border-radius: 50%;
   overflow: hidden;
-  border: 2px solid var(--p-content-border-color, #dee2e6);
+  border: 2px solid var(--p-content-border-color);
   flex-shrink: 0;
   margin-bottom: 0.3rem;
 }
@@ -1060,13 +1060,13 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 /* First stop of a day: ring the cover in the day's colour so day
    boundaries stay readable in the continuous, always-expanded sequence. */
 .trip-timeline-item--day-first .trip-timeline-thumb {
-  border-color: var(--day-color, var(--p-content-border-color, #dee2e6));
+  border-color: var(--day-color, var(--p-content-border-color));
 }
 
 /* Selection wins over the day-colour ring (declared afterwards, equal
    specificity). */
 .trip-timeline-item--selected .trip-timeline-thumb {
-  border-color: var(--p-primary-color, #4285F4);
+  border-color: var(--p-primary-color);
 }
 
 .trip-timeline-thumb img {
@@ -1096,12 +1096,12 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 
 .trip-timeline-date {
   font-size: 0.65rem;
-  color: var(--p-text-muted-color, #999);
+  color: var(--p-text-muted-color);
 }
 
 .trip-timeline-count {
   font-size: 0.6rem;
-  color: var(--p-text-muted-color, #aaa);
+  color: var(--p-text-muted-color);
 }
 
 .trip-timeline-connector {
@@ -1134,15 +1134,17 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
-  color: var(--p-primary-color, #4285F4);
-  border: 2px solid var(--p-primary-color, #4285F4);
+  color: var(--p-primary-color);
+  border: 2px solid var(--p-primary-color);
   font-size: 1.5rem;
   margin-bottom: 0.3rem;
 }
 
 .trip-timeline-item--overview.trip-timeline-item--selected .trip-timeline-overview-icon {
-  background: var(--p-primary-color, #4285F4);
-  color: #fff;
+  background: var(--p-primary-color);
+  /* Contrast colour of the brand colour — the theme knows whether that is
+     light or dark text. */
+  color: var(--p-primary-contrast-color);
 }
 
 .sr-only {
@@ -1208,7 +1210,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 }
 
 .trip-pin-selected .trip-pin-thumbnail {
-  border-color: var(--p-primary-color, #4285F4);
+  border-color: var(--p-primary-color);
   box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.3), 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
@@ -1219,7 +1221,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   overflow: hidden;
   border: 3px solid white;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  background: #333;
+  background: #333; /* audit-ok: backdrop of the pin photo, which rides on the map tiles — fixed in both themes, like the white ring around it */
 }
 
 .trip-pin-thumbnail img {
@@ -1241,14 +1243,14 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 }
 
 .trip-pin-selected .trip-pin-pointer {
-  border-top-color: var(--p-primary-color, #4285F4);
+  border-top-color: var(--p-primary-color);
 }
 
 .trip-pin-badge {
   position: absolute;
   top: -4px;
   right: -4px;
-  background: var(--p-primary-color, #4285F4);
+  background: var(--p-primary-color);
   color: white;
   font-size: 0.7rem;
   font-weight: 600;

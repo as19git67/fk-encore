@@ -878,7 +878,7 @@ function formatEta(seconds: number | null): string {
   gap: 0.35rem;
 }
 .error {
-  color: var(--p-red-500, #ef4444);
+  color: var(--p-red-500);
   word-break: break-word;
 }
 .form {

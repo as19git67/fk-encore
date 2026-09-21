@@ -280,14 +280,14 @@ const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
   gap: 0.5rem;
   align-items: flex-start;
   padding: 0.6rem 0.85rem;
-  background: color-mix(in srgb, var(--p-yellow-500, #facc15) 10%, transparent);
-  border-left: 3px solid var(--p-yellow-500, #facc15);
+  background: color-mix(in srgb, var(--p-yellow-500) 10%, transparent);
+  border-left: 3px solid var(--p-yellow-500);
   border-radius: 6px;
   margin-top: 0.5rem;
 }
 .callout > i {
   font-size: 1.1rem;
-  color: var(--p-yellow-700, #a16207);
+  color: var(--p-yellow-700);
   margin-top: 0.15rem;
 }
 </style>

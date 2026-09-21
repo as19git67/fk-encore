@@ -689,7 +689,7 @@ function close() {
 <style scoped>
 .filter-menu { display: flex; flex-direction: column; gap: 1.25rem; }
 .filter-row { display: flex; flex-direction: column; gap: 0.5rem; }
-.filter-label { font-weight: 500; font-size: 0.9rem; color: var(--text-color-secondary, #555); }
+.filter-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.75rem; }
 .filter-switch { display: flex; align-items: center; gap: 0.6rem; }
 .filter-slider { margin: 0.5rem 0.25rem; }
@@ -697,8 +697,8 @@ function close() {
 .filter-daterange > * { flex: 1 1 140px; }
 .mode-toggle { margin-top: 0.4rem; align-self: flex-start; }
 .near-location-controls { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-.filter-hint { color: var(--text-color-secondary, #555); }
-.location-error { color: var(--red-500, #d32f2f); }
-.location-picker-map { height: 260px; border: 1px solid var(--p-content-border-color, #dee2e6); border-radius: 6px; }
+.filter-hint { color: var(--p-text-muted-color); }
+.location-error { color: var(--p-red-500); }
+.location-picker-map { height: 260px; border: 1px solid var(--p-content-border-color); border-radius: 6px; }
 :deep(.location-picker-pin-icon) { background: transparent; border: 0; }
 </style>

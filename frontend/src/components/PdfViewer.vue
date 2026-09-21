@@ -866,7 +866,7 @@ onBeforeUnmount(() => {
   overflow: auto;
   display: flex;
   padding: 0.5rem;
-  background: var(--p-surface-ground, #2a2a2a);
+  background: var(--p-surface-ground);
   /* Allow one-finger panning natively, but keep two-finger pinch under our
      own control (the app disables native viewport zoom globally). */
   touch-action: pan-x pan-y;
@@ -984,10 +984,10 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   color: var(--p-text-muted-color);
   pointer-events: none;
-  background: color-mix(in srgb, var(--p-surface-ground, #000) 60%, transparent);
+  background: color-mix(in srgb, var(--p-surface-ground) 60%, transparent);
   z-index: 2;
 }
-.state-overlay.error { color: var(--p-red-400, #f87171); }
+.state-overlay.error { color: var(--p-red-400); }
 
 /* The password prompt is interactive, so it opts back into pointer events
    and stacks its controls vertically. */
@@ -999,7 +999,7 @@ onBeforeUnmount(() => {
   padding: 1rem;
 }
 .state-overlay.password i { font-size: 1.5rem; }
-.password-error { color: var(--p-red-400, #f87171); font-size: 0.85rem; }
+.password-error { color: var(--p-red-400); font-size: 0.85rem; }
 .password-form { display: flex; gap: 0.5rem; margin-top: 0.25rem; flex-wrap: wrap; justify-content: center; }
 .password-input {
   padding: 0.35rem 0.6rem;
@@ -1013,7 +1013,7 @@ onBeforeUnmount(() => {
   border: 1px solid transparent;
   border-radius: 4px;
   background: var(--p-primary-color);
-  color: var(--p-primary-contrast-color, #fff);
+  color: var(--p-primary-contrast-color);
   cursor: pointer;
 }
 .password-submit:disabled { opacity: 0.5; cursor: default; }

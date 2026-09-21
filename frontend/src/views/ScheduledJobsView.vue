@@ -385,10 +385,10 @@ function formatDuration(ms: number | null): string {
   display: block;
 }
 .has-errors {
-  color: var(--p-red-500, #ef4444);
+  color: var(--p-red-500);
 }
 code.error {
-  color: var(--p-red-500, #ef4444);
+  color: var(--p-red-500);
   font-size: 0.8rem;
   white-space: pre-wrap;
   word-break: break-word;

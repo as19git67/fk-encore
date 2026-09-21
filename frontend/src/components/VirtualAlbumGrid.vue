@@ -365,7 +365,7 @@ watch(
   gap: 0.1rem;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
-  color: #fff;
+  color: #fff; /* audit-ok: label sits on the dark scrim over the cover photo, white in both themes */
 }
 .album-name {
   font-weight: 500;
