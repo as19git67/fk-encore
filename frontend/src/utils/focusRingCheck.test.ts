@@ -71,6 +71,8 @@ function scene(container: Spec, child: Spec) {
       visibility: 'visible',
       display: 'block',
       outlineOffset: '2px',
+      borderTopWidth: '0px',
+      borderLeftWidth: '0px',
     }),
   })
 }
@@ -159,6 +161,8 @@ describe('findClippedFocusRings', () => {
         display: 'block',
         // The negative offset is the element saying "my ring is inside me".
         outlineOffset: el === link ? '-2px' : '2px',
+        borderTopWidth: '0px',
+        borderLeftWidth: '0px',
       }),
     })
     expect(found).toEqual([])
@@ -172,6 +176,45 @@ describe('findClippedFocusRings', () => {
       { box: column, overflow: 'auto', scrollWidth: 200 },
       { box: { left: 20, top: 10, right: 260, bottom: 50 } },
     )
+    expect(found).toEqual([])
+  })
+
+  it('measures from inside the border, where the canvas actually starts', () => {
+    // `scrollHeight` spans the padding box. A card with a 1px border and
+    // exactly 4px of padding below its last button has the room; measuring
+    // from the border box instead loses that border and reports it anyway.
+    const root = document.createElement('div')
+    const card = document.createElement('div')
+    const button = document.createElement('button')
+    card.appendChild(button)
+    root.appendChild(card)
+    const place = (el: Element, b: Box, scrollHeight?: number) => {
+      Object.defineProperty(el, 'getBoundingClientRect', {
+        value: () => ({ ...b, width: b.right - b.left, height: b.bottom - b.top, x: b.left, y: b.top, toJSON: () => b }),
+      })
+      Object.defineProperty(el, 'scrollHeight', { value: scrollHeight ?? b.bottom - b.top, configurable: true })
+      Object.defineProperty(el, 'scrollWidth', { value: b.right - b.left, configurable: true })
+      Object.defineProperty(el, 'scrollTop', { value: 0, configurable: true })
+      Object.defineProperty(el, 'scrollLeft', { value: 0, configurable: true })
+    }
+    // Border box 0–102, 1px border each side, so the canvas is 1–101.
+    place(card, { left: 0, top: 0, right: 200, bottom: 102 }, 100)
+    // The button ends 4px above the canvas bottom (101 - 4 = 97).
+    place(button, { left: 20, top: 60, right: 180, bottom: 97 })
+
+    const found = findClippedFocusRings(root, {
+      reach: 4,
+      getStyle: (el) => ({
+        overflowX: el === card ? 'hidden' : 'visible',
+        overflowY: el === card ? 'hidden' : 'visible',
+        overflow: el === card ? 'hidden' : 'visible',
+        visibility: 'visible',
+        display: 'block',
+        outlineOffset: '2px',
+        borderTopWidth: el === card ? '1px' : '0px',
+        borderLeftWidth: el === card ? '1px' : '0px',
+      }),
+    })
     expect(found).toEqual([])
   })
 

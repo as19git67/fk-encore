@@ -713,6 +713,7 @@ onMounted(loadData)
             />
             <Button
               icon="pi pi-plus"
+              aria-label="Pfad zur Ausschlussliste hinzufügen"
               size="small"
               :disabled="!exclManualInput.trim()"
               @click="addManualExcludedDir"

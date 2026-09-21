@@ -1169,6 +1169,19 @@ das Paar heißt also `(max-width: 767px)` / `(min-width: 768px)` — nie
   pro Spalte braucht), bleibt eine Zahl in dieser Komponente. Die fünf Namen
   gehören der Seite.
 
+## Knöpfe im Frontend
+
+Ein Knopf, der nur ein Icon zeigt, braucht ein `aria-label` (oder ein
+`v-tooltip`, das PrimeVue ebenfalls an Hilfstechnik weitergibt) — sonst
+liest ein Screenreader „Schaltfläche" vor und sonst nichts (Issue #1281).
+Das Label benennt die Aktion, nicht das Piktogramm: „Rolle entziehen", nicht
+„Kreuz". Bei einem Umschalter hängt es am Zustand:
+`:aria-label="hidden ? 'Wieder einblenden' : 'Ausblenden'"`.
+
+`scripts/check-button-labels.mjs` prüft das, im pre-commit-Hook über die
+gestageten `.vue`-Dateien. Ausgenommen ist nur, was in einem
+`aria-hidden`-Teilbaum liegt (die Messzeile in `ResponsiveToolbar`).
+
 ## Dialoge im Frontend
 
 Ein Dialog ist PrimeVues `Dialog` (oder `ConfirmDialog`), nie ein eigenes

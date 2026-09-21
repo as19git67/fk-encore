@@ -162,6 +162,7 @@ onMounted(loadData)
             <Button
               v-if="auth.hasPermission('roles.revoke')"
               icon="pi pi-times"
+              aria-label="Rolle entziehen"
               severity="danger"
               text
               rounded

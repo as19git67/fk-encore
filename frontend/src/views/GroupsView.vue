@@ -166,6 +166,7 @@ onMounted(load)
           <Button
             v-if="h.my_role === 'owner'"
             icon="pi pi-trash"
+            aria-label="Gruppe löschen"
             severity="secondary"
             text
             rounded

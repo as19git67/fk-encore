@@ -775,6 +775,7 @@ const tagChartOptions = computed(() => {
             <span class="saved-card-date">{{ formatRelativeDate(item.createdAt) }}</span>
             <Button
               icon="pi pi-trash"
+              aria-label="Gespeicherte Auswertung löschen"
               text
               rounded
               size="small"
@@ -802,6 +803,7 @@ const tagChartOptions = computed(() => {
           />
           <Button
             icon="pi pi-search"
+            aria-label="Frage auswerten"
             :loading="parsing"
             :disabled="!question.trim()"
             @click="submitQuestion"
@@ -850,6 +852,7 @@ const tagChartOptions = computed(() => {
             <Button
               v-if="tagGroups.length > 1"
               icon="pi pi-times"
+              aria-label="Tag-Gruppe entfernen"
               text
               rounded
               size="small"

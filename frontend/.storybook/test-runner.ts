@@ -1,5 +1,6 @@
 import type { TestRunnerConfig } from '@storybook/test-runner'
 import { getStoryContext, waitForPageReady } from '@storybook/test-runner'
+import type { Page } from 'playwright'
 import path from 'path'
 import fs from 'fs'
 import { findOverflowingElements } from '../src/utils/overflowCheck'
@@ -8,13 +9,37 @@ import { findClippedFocusRings } from '../src/utils/focusRingCheck'
 /** The narrowest phone the app is expected to fit (issue #1272, stage 1). */
 const PHONE_VIEWPORT = { width: 360, height: 740 }
 
+/**
+ * Wait until the preview's story store exists, then read the context.
+ *
+ * The runner's own `getStoryContext` calls `storyStore.loadStory()` straight
+ * away, while the story run first waits for Storybook to come up. Between
+ * those two moments `preview.storyStore` is a proxy that throws
+ * `StoryStoreAccessedBeforeInitializationError` — which is not a story
+ * failing, it is this hook arriving early. It showed up on a different
+ * handful of stories every run, so it read like flakiness rather than a
+ * race. `storyStoreValue` is the field that proxy checks.
+ */
+async function storyContextWhenReady(page: Page, context: Parameters<typeof getStoryContext>[1]) {
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        (globalThis as unknown as { __STORYBOOK_PREVIEW__?: { storyStoreValue?: unknown } })
+          .__STORYBOOK_PREVIEW__?.storyStoreValue,
+      ),
+    undefined,
+    { timeout: 30_000 },
+  )
+  return getStoryContext(page, context)
+}
+
 const config: TestRunnerConfig = {
   async preVisit(page, context) {
     // Allow a story to pin the browser viewport via a `testViewport`
     // parameter (e.g. to force portrait vs. landscape for orientation-driven
     // layouts like the fullscreen split view). Falls back to a stable
     // landscape default so all other screenshots stay consistent.
-    const storyContext = await getStoryContext(page, context)
+    const storyContext = await storyContextWhenReady(page, context)
     const testViewport = (storyContext.parameters?.testViewport ?? {}) as {
       width?: number
       height?: number
@@ -47,7 +72,7 @@ const config: TestRunnerConfig = {
     // sticks out of a 360px viewport is a layout bug. A story may opt out
     // with `parameters: { overflowCheck: false }` while its view is not yet
     // on PageLayout (issue #1272, stage 2); the exemption must say why.
-    const storyContext = await getStoryContext(page, context)
+    const storyContext = await storyContextWhenReady(page, context)
 
     // ── No focus ring clipped away (issue #1281) ──────────────────────────
     // The ring is drawn outside its element and reaches 4px past it, so a
@@ -58,7 +83,19 @@ const config: TestRunnerConfig = {
     // A story may opt out with `parameters: { focusRingCheck: false }`; the
     // exemption has to say why.
     if (storyContext.parameters?.focusRingCheck !== false) {
-      const clipped = await page.evaluate(findClippedFocusRings)
+      // Twice, a beat apart, and only what both readings agree on. A page
+      // still settling reports a row that has not grown into its container
+      // yet — measured under load, that produced a finding the same page
+      // contradicted a moment later. A ring that is genuinely clipped stays
+      // clipped.
+      const first = await page.evaluate(findClippedFocusRings)
+      let clipped: typeof first = []
+      if (first.length > 0) {
+        await page.waitForTimeout(500)
+        const second = await page.evaluate(findClippedFocusRings)
+        const seen = new Set(second.map((c) => `${c.path}|${c.sides.join(',')}`))
+        clipped = first.filter((c) => seen.has(`${c.path}|${c.sides.join(',')}`))
+      }
       if (clipped.length > 0) {
         const list = clipped
           .slice(0, 8)

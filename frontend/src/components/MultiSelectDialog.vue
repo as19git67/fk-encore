@@ -206,6 +206,7 @@ function onClose() {
         />
         <Button
           icon="pi pi-check"
+          aria-label="Anlegen"
           size="small"
           :loading="creating"
           :disabled="!newName.trim()"
@@ -213,6 +214,7 @@ function onClose() {
         />
         <Button
           icon="pi pi-times"
+          aria-label="Abbrechen"
           size="small"
           text
           :disabled="creating"

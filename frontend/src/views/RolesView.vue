@@ -210,6 +210,7 @@ onMounted(loadData)
             <Button
               v-if="auth.hasPermission('roles.delete')"
               icon="pi pi-trash"
+              aria-label="Rolle löschen"
               severity="danger"
               text
               rounded

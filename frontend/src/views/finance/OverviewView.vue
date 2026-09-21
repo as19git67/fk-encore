@@ -341,6 +341,7 @@ async function saveConfig() {
           <div class="cfg-section-actions">
             <Button
               icon="pi pi-arrow-up"
+              aria-label="Abschnitt nach oben"
               severity="secondary"
               text
               :disabled="idx === 0"
@@ -348,6 +349,7 @@ async function saveConfig() {
             />
             <Button
               icon="pi pi-arrow-down"
+              aria-label="Abschnitt nach unten"
               severity="secondary"
               text
               :disabled="idx === draft.length - 1"
@@ -355,6 +357,7 @@ async function saveConfig() {
             />
             <Button
               icon="pi pi-trash"
+              aria-label="Abschnitt entfernen"
               severity="danger"
               text
               @click="removeSection(idx)"
@@ -371,18 +374,21 @@ async function saveConfig() {
             <span class="cfg-row-actions">
               <Button
                 icon="pi pi-arrow-up"
+                aria-label="Konto nach oben"
                 severity="secondary"
                 text
                 @click="moveAccountWithinSection(idx, accId, -1)"
               />
               <Button
                 icon="pi pi-arrow-down"
+                aria-label="Konto nach unten"
                 severity="secondary"
                 text
                 @click="moveAccountWithinSection(idx, accId, 1)"
               />
               <Button
                 icon="pi pi-times"
+                aria-label="Konto aus dem Abschnitt nehmen"
                 severity="secondary"
                 text
                 @click="moveAccountToUnassigned(accId)"

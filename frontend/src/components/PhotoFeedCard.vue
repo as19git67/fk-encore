@@ -387,6 +387,11 @@ async function submitComment() {
 .media {
   position: relative;
   width: 100%;
+  /* The card's `overflow: hidden` is what rounds its corners, and this photo
+     fills the card from edge to edge — so a ring drawn around it would be
+     cut off and the card cannot give room without losing the rounding. The
+     ring goes inside instead (issue #1281). */
+  outline-offset: var(--focus-ring-offset-inset);
   /* Height follows aspect-ratio (set inline). No fixed max-height clamp — a
      clamp shorter than the aspect ratio would make object-fit: cover crop
      portraits top/bottom. Extreme verticals are bounded in JS instead. */
@@ -414,7 +419,9 @@ async function submitComment() {
 .actions {
   display: flex;
   gap: 0.25rem;
-  padding: 0.35rem 0.5rem 0.1rem;
+  /* The bottom padding is the focus ring's reach: less than that and the
+     card's `overflow: hidden` clips the ring of the last row of buttons. */
+  padding: 0.35rem 0.5rem var(--focus-ring-reach);
 }
 .icon-btn {
   display: inline-flex;

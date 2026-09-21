@@ -50,6 +50,8 @@ export interface FocusRingCheckOptions {
     visibility: string
     display: string
     outlineOffset: string
+    borderTopWidth: string
+    borderLeftWidth: string
   }
 }
 
@@ -126,10 +128,17 @@ export function findClippedFocusRings(
         node = node.parentElement
         continue
       }
+      // `scrollWidth`/`scrollHeight` span the padding box, so the canvas
+      // starts inside the border. Measuring from the border box instead put
+      // the canvas edge a border-width too high and reported rings that had
+      // their room.
+      const style = getStyle(node)
+      const borderTop = Number.parseFloat(style.borderTopWidth) || 0
+      const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0
       if (clips(node, 'x')) {
         // Where the scrollable canvas starts and ends, in viewport
         // coordinates — scrolled back to position zero.
-        const canvasLeft = box.left - node.scrollLeft
+        const canvasLeft = box.left + borderLeft - node.scrollLeft
         const canvasRight = canvasLeft + node.scrollWidth
         // The bug is an element sitting flush with an edge *from the
         // inside*: there is no room left for its ring and no scrolling that
@@ -142,7 +151,7 @@ export function findClippedFocusRings(
         if (insideRight >= -tolerance && insideRight < reach - tolerance) sides.add('right')
       }
       if (clips(node, 'y')) {
-        const canvasTop = box.top - node.scrollTop
+        const canvasTop = box.top + borderTop - node.scrollTop
         const canvasBottom = canvasTop + node.scrollHeight
         const insideTop = rect.top - canvasTop
         const insideBottom = canvasBottom - rect.bottom
