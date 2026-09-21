@@ -3,6 +3,7 @@ import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import { defaultHandlers } from './handlers'
 import { MOCK_PHOTOS, MOCK_FACES, MOCK_PERSONS } from './mock-data'
+import { faceBoxStyle } from '../utils/faceBbox'
 
 // Phone viewports used to exercise the split-detail layout. The split's
 // portrait/landscape branch keys off the `(orientation: …)` media query, i.e.
@@ -158,4 +159,91 @@ export const OhneLoeschrechte: Story = {
     nextPhoto: null,
     canDelete: false,
   },
+}
+
+/**
+ * The yellow face rectangle over the fullscreen photo, as PersonsView draws
+ * it. The bbox is normalized against the *photo*, so the rectangle has to
+ * line up with the rendered picture — not with the box the picture is
+ * letterboxed into. The play function measures exactly that: where the
+ * rendered image actually is (from its natural aspect ratio inside its own
+ * box) versus where the rectangle sits.
+ *
+ * The mock photo is 4:3 while the viewport is 16:9, so the picture is
+ * letterboxed left and right — the case the user reported as "das Rechteck
+ * ist horizontal versetzt".
+ */
+const FACE_BBOX = { x: 0.25, y: 0.3, width: 0.2, height: 0.25 }
+
+export const Gesichtsrechteck: Story = {
+  name: 'Mit Gesichtsrechteck (4:3 in 16:9)',
+  parameters: { testViewport: { width: 1280, height: 720 } },
+  args: {
+    photo: { ...MOCK_PHOTOS[0]!, filename: 'hochformat-test.jpg' },
+    prevPhoto: null,
+    nextPhoto: null,
+  },
+  render: (args) => ({
+    components: { FullscreenOverlay },
+    setup: () => ({
+      args,
+      // Same geometry the views use, with PersonsView's own look inlined so
+      // the story needs no stylesheet of its own.
+      boxStyle: {
+        ...faceBoxStyle(FACE_BBOX),
+        position: 'absolute',
+        border: '3px solid var(--p-yellow-500)',
+        boxSizing: 'border-box',
+        pointerEvents: 'none',
+        zIndex: '2',
+      },
+    }),
+    template: `
+      <FullscreenOverlay v-bind="args">
+        <div class="face-box-story" :style="boxStyle" />
+      </FullscreenOverlay>
+    `,
+  }),
+  play: async () => {
+    // The overlay teleports out of the story canvas, so measure in the document.
+    await expectFaceBoxOnImage(document.body)
+  },
+}
+
+async function expectFaceBoxOnImage(root: HTMLElement) {
+  const box = await waitFor(() => root.querySelector<HTMLElement>('.face-box-story'))
+  const img = await waitFor(() =>
+    Array.from(root.querySelectorAll('img')).find(
+      (i) => i.complete && i.naturalWidth > 0 && i.clientWidth > 0,
+    ),
+  )
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+
+  // Where the picture really is: object-fit contain inside the img box.
+  const r = img.getBoundingClientRect()
+  const scale = Math.min(r.width / img.naturalWidth, r.height / img.naturalHeight)
+  const w = img.naturalWidth * scale
+  const h = img.naturalHeight * scale
+  const imageLeft = r.left + (r.width - w) / 2
+  const imageTop = r.top + (r.height - h) / 2
+
+  const b = box.getBoundingClientRect()
+  const dx = b.left - (imageLeft + FACE_BBOX.x * w)
+  const dy = b.top - (imageTop + FACE_BBOX.y * h)
+  if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+    throw new Error(
+      `face box off the photo by dx=${dx.toFixed(1)}px dy=${dy.toFixed(1)}px ` +
+        `(picture ${w.toFixed(0)}×${h.toFixed(0)} in a ${r.width.toFixed(0)}×${r.height.toFixed(0)} box)`,
+    )
+  }
+}
+
+async function waitFor<T>(read: () => T | null | undefined, timeoutMs = 5000): Promise<T> {
+  const started = Date.now()
+  for (;;) {
+    const value = read()
+    if (value) return value
+    if (Date.now() - started > timeoutMs) throw new Error('timed out waiting for the element')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
 }

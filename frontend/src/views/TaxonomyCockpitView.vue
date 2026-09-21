@@ -395,6 +395,11 @@ function severityTag(sev: Recommendation['severity']): "danger" | "warn" | "info
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
   padding: 1rem;
+  /* A grid item is as wide as its content unless told otherwise, and the
+     chart canvas carries the pixel width it was first drawn at. Without
+     this the card refused to narrow on a phone and the chart hung over the
+     edge of the page. */
+  min-width: 0;
 }
 .chart-card h4 {
   margin: 0 0 0.75rem;
@@ -405,6 +410,13 @@ function severityTag(sev: Recommendation['severity']): "danger" | "warn" | "info
 .chart-container {
   height: 250px;
   position: relative;
+}
+
+/* Chart.js writes the canvas size in pixels and only corrects it once its
+   own observer has seen the new box. Until then — the moment a phone is
+   turned, say — the drawing would stick out over the page edge. */
+.chart-container :deep(canvas) {
+  max-width: 100%;
 }
 
 .no-trend {
