@@ -1,0 +1,127 @@
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+/**
+ * The colour audit is what keeps dark mode from breaking one view at a time
+ * (issue #1281), and it runs in the pre-commit hook — so it has to be exact
+ * about what it refuses. A false positive there stops a commit for nothing;
+ * a false negative lets a hard-coded grey through.
+ */
+
+const SCRIPT = join(import.meta.dirname, "check-css-tokens.mjs");
+let dir: string;
+
+function check(name: string, content: string): { code: number; output: string } {
+  const file = join(dir, name);
+  writeFileSync(file, content, "utf8");
+  try {
+    const stdout = execFileSync("node", [SCRIPT, file], { encoding: "utf8" });
+    return { code: 0, output: stdout };
+  } catch (err) {
+    const e = err as { status: number; stdout: string; stderr: string };
+    return { code: e.status, output: `${e.stdout}${e.stderr}` };
+  }
+}
+
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "css-audit-"));
+});
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+describe("colour audit", () => {
+  it("passes styles that ask the theme", () => {
+    const { code } = check(
+      "clean.vue",
+      `<template><i /></template>
+<style scoped>
+.card {
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  color: var(--p-text-muted-color);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  outline-color: rgb(0 0 0 / 45%);
+}
+</style>`,
+    );
+    expect(code).toBe(0);
+  });
+
+  it("refuses a rung of the surface scale", () => {
+    const { code, output } = check(
+      "surface.vue",
+      `<style scoped>.a { background: var(--p-surface-100); }</style>`,
+    );
+    expect(code).toBe(1);
+    expect(output).toContain("--p-surface-100");
+  });
+
+  it("refuses a hard-coded colour in any of its spellings", () => {
+    for (const colour of ["#fff", "#1f2937", "#11223344"]) {
+      const { code, output } = check("hex.vue", `<style>.a { color: ${colour}; }</style>`);
+      expect(code, colour).toBe(1);
+      expect(output).toContain(colour);
+    }
+  });
+
+  it("refuses an opaque rgb, and accepts a translucent one", () => {
+    expect(check("opaque.vue", `<style>.a { color: rgb(17, 24, 39); }</style>`).code).toBe(1);
+    expect(check("opaque2.vue", `<style>.a { color: rgba(17, 24, 39, 1); }</style>`).code).toBe(1);
+    expect(check("alpha.vue", `<style>.a { color: rgba(17, 24, 39, 0.4); }</style>`).code).toBe(0);
+    expect(check("alpha2.vue", `<style>.a { color: rgb(17 24 39 / 40%); }</style>`).code).toBe(0);
+  });
+
+  it("reads styles only — a colour in the markup or the script is not styling", () => {
+    const { code } = check(
+      "elsewhere.vue",
+      `<script setup lang="ts">const seriesColour = '#2563eb'</script>
+<template><svg><path fill="#ff0000" /></svg></template>
+<style scoped>.a { color: var(--p-text-color); }</style>`,
+    );
+    expect(code).toBe(0);
+  });
+
+  it("does not mistake an issue number in a comment for a colour", () => {
+    const { code } = check(
+      "comment.vue",
+      `<style scoped>
+/* Lifted into the sticky stack (#1272), see also #736 and #1281. */
+.a { color: var(--p-text-color); }
+</style>`,
+    );
+    expect(code).toBe(0);
+  });
+
+  it("does not mistake an id selector for a colour", () => {
+    const { code } = check(
+      "selector.vue",
+      `<style>#module-subheaders { position: sticky; }</style>`,
+    );
+    expect(code).toBe(0);
+  });
+
+  it("lets a line opt out when it says why", () => {
+    const { code } = check(
+      "exempt.vue",
+      `<style scoped>
+.viewer { background: #000; } /* audit-ok: a photo viewer is black in both themes */
+</style>`,
+    );
+    expect(code).toBe(0);
+  });
+
+  it("names the file and the line it found it on", () => {
+    const { output } = check(
+      "located.vue",
+      `<style scoped>
+.a { color: var(--p-text-color); }
+.b { color: #abcdef; }
+</style>`,
+    );
+    expect(output).toMatch(/located\.vue:3\s+#abcdef/);
+  });
+});
