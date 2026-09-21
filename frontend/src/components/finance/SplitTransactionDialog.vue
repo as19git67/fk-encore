@@ -156,10 +156,10 @@ async function save() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     header="Buchung aufteilen"
     modal
-    :style="{ width: 'min(46rem, calc(100vw - 2rem))' }"
     @update:visible="emit('update:visible', $event)"
   >
     <div class="split-form">

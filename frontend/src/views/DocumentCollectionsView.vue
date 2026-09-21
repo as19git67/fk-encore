@@ -212,10 +212,10 @@ onMounted(load)
     </div>
 
     <Dialog
+    class="dialog-sm"
       v-model:visible="createOpen"
       modal
       header="Neue Sammelmappe"
-      :style="{ width: 'min(480px, 94vw)' }"
     >
       <div class="cv-form">
         <label for="cv-new-title">Titel</label>

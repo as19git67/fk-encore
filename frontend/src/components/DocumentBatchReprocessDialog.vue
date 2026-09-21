@@ -52,11 +52,10 @@ async function apply() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     :modal="true"
     :closable="!saving"
-    :style="{ width: '30rem' }"
-    :breakpoints="{ '768px': '95vw' }"
     header="OCR & KI neu starten"
     @update:visible="(v: boolean) => emit('update:visible', v)"
   >

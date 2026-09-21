@@ -117,10 +117,10 @@ const allPhotosDest = () => destinations.value.find((d): d is Extract<Destinatio
   />
   </slot>
   <Dialog
+    class="dialog-sm"
     v-model:visible="dialogVisible"
     modal
     header="Foto anzeigen in…"
-    :style="{ width: 'min(100%, 28rem)' }"
     :dismissable-mask="true"
     :draggable="false"
   >

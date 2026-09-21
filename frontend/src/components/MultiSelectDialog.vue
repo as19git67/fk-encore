@@ -151,11 +151,10 @@ function onClose() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     :modal="true"
     :closable="!saving"
-    :style="{ width: '32rem' }"
-    :breakpoints="{ '768px': '95vw' }"
     :header="title"
     @update:visible="(v: boolean) => emit('update:visible', v)"
   >

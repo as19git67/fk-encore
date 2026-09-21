@@ -79,11 +79,10 @@ async function apply() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     :modal="true"
     :closable="!saving"
-    :style="{ width: '26rem' }"
-    :breakpoints="{ '768px': '95vw' }"
     header="Wiedervorlage"
     @update:visible="(v: boolean) => emit('update:visible', v)"
   >

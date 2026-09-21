@@ -598,10 +598,10 @@ onBeforeUnmount(() => {
 
 <template>
   <Dialog
+    class="dialog-lg"
     :visible="visible"
     modal
     :header="dialogHeader"
-    :style="{ width: '92vw', maxWidth: '900px' }"
     :dismissable-mask="true"
     @update:visible="(v) => emit('update:visible', v)"
   >

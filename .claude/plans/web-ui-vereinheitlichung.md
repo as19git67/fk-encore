@@ -92,7 +92,17 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
     Screenreader-Feldern, Elemente mit Ring nach innen, und Elemente, die
     über den Rand *hinaus*ragen — das ist Überlauf und hat seine eigene
     Prüfung.
-  - ⬜ Dialoge, Detailseiten-Aktionen, Stories je Seitenzustand.
+  - ✅ Dialoge: 40 verschiedene Breitenschreibweisen sind drei Klassen
+    geworden (`dialog-sm` 420, `dialog-md` 640, `dialog-lg` 960), die selbst
+    am Viewport minus Seitenrand deckeln; kein Dialog trägt mehr ein eigenes
+    `maxWidth` oder `breakpoints`. Unter `sm` nimmt ein Dialog die ganze
+    Breite und höchstens `90dvh`. Der Fotoeditor bleibt Vollbild.
+    Fußzeilen waren schon zu 52 von 66 richtig herum; die eine echte
+    Vertauschung (`TransactionDetailView`) ist gedreht. Die vermeintlichen
+    Ausreißer mit drei Knöpfen sind `v-if`-Zustände und damit in Ordnung.
+  - ✅ Detailseiten: `UserDetailView` hatte als einzige keinen
+    Zurück-Knopf — jetzt derselbe wie überall, über `useModuleBack`.
+  - ⬜ Stories je Seitenzustand.
 
 Abweichungen vom Entwurf (Etappe 1):
 

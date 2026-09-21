@@ -1068,10 +1068,10 @@ onMounted(load)
     </template>
 
     <Dialog
+    class="dialog-md"
       v-model:visible="showEnergyHelp"
       header="Energie-Kennzahlen"
       modal
-      :style="{ width: '44rem', maxWidth: '95vw' }"
     >
       <div class="energy-help">
         <p>
@@ -1145,10 +1145,10 @@ onMounted(load)
     </Dialog>
 
     <Dialog
+    class="dialog-md"
       v-model:visible="showTariffs"
       header="Tarife & Annahmen verwalten"
       modal
-      :style="{ width: '46rem', maxWidth: '95vw' }"
     >
       <div class="tariff-dialog">
         <div class="tariff-toolbar">

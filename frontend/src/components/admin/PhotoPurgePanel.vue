@@ -70,12 +70,12 @@ const purgeDbTotals = computed(() => {
 
     <!-- Purge Confirmation Dialog -->
     <Dialog
+    class="dialog-sm"
       v-model:visible="purgeDialogVisible"
       modal
       :closable="!purgeLoading"
       :closeOnEscape="!purgeLoading"
       header="Alle Fotodaten löschen"
-      :style="{ width: 'min(520px, 92vw)' }"
     >
       <div v-if="!purgeResult" class="purge-dialog">
         <Message severity="error" :closable="false" class="purge-dialog__warn">

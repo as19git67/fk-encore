@@ -77,11 +77,10 @@ async function save() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     :modal="true"
     :closable="!saving"
-    :style="{ width: '28rem' }"
-    :breakpoints="{ '768px': '95vw' }"
     header="Standard für neue Dokumente"
     @update:visible="(v: boolean) => emit('update:visible', v)"
   >

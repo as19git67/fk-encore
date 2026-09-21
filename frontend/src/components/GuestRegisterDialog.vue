@@ -95,10 +95,10 @@ function handleDialogShow() {
 
 <template>
   <Dialog
+    class="dialog-sm"
     :visible="visible"
     modal
     header="Anmelden"
-    :style="{ width: 'min(420px, 92vw)' }"
     :closable="!submitting"
     @update:visible="emit('update:visible', $event)"
     @show="handleDialogShow"

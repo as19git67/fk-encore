@@ -268,7 +268,8 @@ function anchorRowAttrs(options: { props?: { rowData?: UserWithRoles } }) {
       </ScrollX>
     </section>
 
-    <Dialog v-model:visible="dialogOpen" modal header="Benutzer einladen" :style="{ width: '26rem' }">
+    <Dialog
+    class="dialog-sm" v-model:visible="dialogOpen" modal header="Benutzer einladen">
       <Message v-if="inviteError" severity="error" :closable="false" class="mb">
         {{ inviteError }}
       </Message>
