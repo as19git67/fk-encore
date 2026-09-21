@@ -96,6 +96,35 @@ describe("GET /trip-planner/plans/:planId/routes", () => {
     expect(res.note).toBeNull();
   });
 
+  it("carries the course, so the list can be looked at rather than read", async () => {
+    // A row of names is not a decision: two ten-kilometre walks out
+    // of the same town are not the same walk, and only the shape
+    // says which is which (§4.7).
+    const p = await plan();
+    geo.setRoutes("nom_garda", [route({ osmRef: "relation:1" })]);
+
+    const res = await nearbyRoutes({ planId: p.id });
+
+    expect(res.routes[0].via).toHaveLength(3);
+    expect(res.routes[0].via[0]).toEqual({ lat: ANCHOR.lat, lon: ANCHOR.lon });
+    expect(res.routes[0].start).toEqual({ lat: ANCHOR.lat, lon: ANCHOR.lon });
+  });
+
+  it("names the start even for a way with no course", async () => {
+    // A relation whose members do not join up has no shape to draw.
+    // Where it begins is then the one thing known about it, and the
+    // screen shows that rather than nothing.
+    const p = await plan();
+    geo.setRoutes("nom_garda", [
+      route({ osmRef: "relation:1", via: [], end: null, joined: false }),
+    ]);
+
+    const res = await nearbyRoutes({ planId: p.id });
+
+    expect(res.routes[0].via).toEqual([]);
+    expect(res.routes[0].start).toEqual({ lat: ANCHOR.lat, lon: ANCHOR.lon });
+  });
+
   it("estimates a duration from the way's own numbers", async () => {
     // Ten kilometres with six hundred metres of climb: the concept's
     // own example, three and a half hours on foot.

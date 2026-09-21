@@ -259,6 +259,33 @@ export interface GeoRoute {
   difficulty: string | null;
 }
 
+/**
+ * One route's course in full, for export (§4.7).
+ *
+ * A different answer from the `via` on `GeoRoute`, and deliberately so:
+ * that one is simplified to fifty metres and thinned to sixty-four
+ * points, which is right for a map and wrong for a file somebody walks
+ * by. This is the geometry as imported.
+ */
+export interface GeoRouteGeometry {
+  osmRef: string;
+  id: number;
+  name: string;
+  route: string;
+  lengthM: number;
+  ascentM: number | null;
+  network: string | null;
+  ref: string | null;
+  website: string | null;
+  /**
+   * The course, one array per connected part. Several parts mean the
+   * relation has gaps — they are pieces of one route in order along
+   * it, not alternatives.
+   */
+  parts: GeoRoutePoint[][];
+  joined: boolean;
+}
+
 export interface GeoRouteSearchPage {
   database: string;
   routes: GeoRoute[];
@@ -327,6 +354,11 @@ export interface GeoClient {
   searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage>;
   /** Walking and cycling routes near a place (§4.7). */
   searchRoutes(postgresDb: string, query: GeoRouteSearchQuery): Promise<GeoRouteSearchPage>;
+  /**
+   * One route's full course, unsimplified — null when that region has
+   * no such relation (§4.7).
+   */
+  routeGeometry(postgresDb: string, osmId: number): Promise<GeoRouteGeometry | null>;
   /** Places within reach that would carry a day of their own (§4.6). */
   searchDayTargets(postgresDb: string, query: GeoDayTargetQuery): Promise<GeoDayTargetPage>;
   /** Which of the current style's tables a region database has. */
@@ -486,6 +518,27 @@ export class HttpGeoClient implements GeoClient {
       kinds: query.kinds,
       limit: query.limit,
     });
+  }
+
+  /**
+   * One route's full course, for export (§4.7).
+   *
+   * Not a mode of `searchRoutes`: that answers with a shape simplified
+   * to fifty metres and thinned to sixty-four points, which is right
+   * for a map and wrong for a track somebody follows. Null when the
+   * region has no such relation any more — a saved link outliving a
+   * re-import is ordinary, not an error.
+   */
+  async routeGeometry(postgresDb: string, osmId: number): Promise<GeoRouteGeometry | null> {
+    const path = `/regions/${encodeURIComponent(postgresDb)}`
+      + `/routes/${encodeURIComponent(String(osmId))}/geometry`;
+    const res = await this.fetcher(`${this.baseUrl}${path}`, {
+      headers: this.headers(),
+      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`geo: GET ${path} → HTTP ${res.status}`);
+    return (await res.json()) as GeoRouteGeometry;
   }
 
   /**

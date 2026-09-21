@@ -90,8 +90,15 @@ final class TripNearbyRoutesModel {
 
 struct TripNearbyRoutesView: View {
     @State private var model: TripNearbyRoutesModel
+    /// Carried alongside the model so the course screen can ask for
+    /// the file: the export goes through the plan, never through a
+    /// region and a relation id somebody names.
+    private let planId: Int
+    private let legIndex: Int
 
     init(planId: Int, legIndex: Int) {
+        self.planId = planId
+        self.legIndex = legIndex
         _model = State(initialValue: TripNearbyRoutesModel(planId: planId, legIndex: legIndex))
     }
 
@@ -121,19 +128,49 @@ struct TripNearbyRoutesView: View {
         .refreshable { await model.load() }
     }
 
+    /// Taking the way in, from the course screen — or nothing to do,
+    /// because it is already in the pool.
+    ///
+    /// Written out rather than as a ternary with `nil` on one side: a
+    /// closure in a ternary is one of the places Swift's inference
+    /// gives up, and the type here is not one anybody should have to
+    /// spell twice.
+    private func takeAction(for route: TripNearbyRoute) -> (() async -> Void)? {
+        if model.isInPool(route) { return nil }
+        return { await model.take(route) }
+    }
+
     @ViewBuilder
     private func row(_ route: TripNearbyRoute) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Label {
                     Text(route.name).font(.headline)
                 } icon: {
                     Image(systemName: route.symbolName).foregroundStyle(.secondary)
                 }
-                Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+                Spacer(minLength: 8)
                 Text(TripClock.duration(route.estimatedMinutes))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // Where it runs, one tap away. A row of names is not
+                // a decision: two ten-kilometre walks out of the same
+                // town are not the same walk, and only the map says
+                // which is which.
+                NavigationLink {
+                    TripRouteCourseView(
+                        planId: planId,
+                        legIndex: legIndex,
+                        route: route,
+                        onTake: takeAction(for: route),
+                    )
+                } label: {
+                    Image(systemName: "map").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("\(route.name) — Verlauf auf der Karte")
             }
 
             Text(route.summary)

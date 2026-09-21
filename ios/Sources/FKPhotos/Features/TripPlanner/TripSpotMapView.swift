@@ -24,6 +24,12 @@ struct TripSpotMapPin: Identifiable, Equatable {
     /// Where the spot finishes when it is a route (§4.7): the map draws
     /// the way from the dot to here, and the day goes on from here.
     var extentEnd: TripCoordinate? = nil
+    /// How the way runs between the two, where the map knows it.
+    ///
+    /// Empty falls back to the straight line, drawn dashed — which is
+    /// what every route looked like before the course came through,
+    /// and what a relation with gaps in it still looks like.
+    var course: [TripCoordinate] = []
 }
 
 /// The map both trip maps are made of: the base, the pins, the tap.
@@ -61,12 +67,26 @@ struct TripSpotMapView: View {
                     .overlay(Circle().stroke(.secondary))
             }
 
-            // A route is a line, not a dot (§4.7). As the crow flies —
-            // the app has no router and says so by drawing it dashed.
+            // A route is a line, not a dot (§4.7).
+            //
+            // Two lines, and which one you get says how much is known.
+            // Where OpenStreetMap has the course it is drawn solid,
+            // because that is where the way runs. Where it does not —
+            // a relation whose members do not join up, a plan made
+            // before the course came through — it falls back to the
+            // straight line between the ends, drawn dashed, because
+            // the app has no router and should not pretend otherwise.
             ForEach(pins.filter { $0.extentEnd != nil }) { pin in
                 if let end = pin.extentEnd {
-                    MapPolyline(coordinates: [pin.coordinate.clCoordinate, end.clCoordinate])
-                        .stroke(pin.tint, style: StrokeStyle(lineWidth: 3, dash: [6, 4]))
+                    if pin.course.count >= 2 {
+                        MapPolyline(coordinates: pin.course.map(\.clCoordinate))
+                            .stroke(pin.tint, style: StrokeStyle(lineWidth: 3,
+                                                                 lineCap: .round,
+                                                                 lineJoin: .round))
+                    } else {
+                        MapPolyline(coordinates: [pin.coordinate.clCoordinate, end.clCoordinate])
+                            .stroke(pin.tint, style: StrokeStyle(lineWidth: 3, dash: [6, 4]))
+                    }
                     Annotation("Ende: \(pin.title)", coordinate: end.clCoordinate) {
                         Image(systemName: "flag.checkered")
                             .font(.caption2)

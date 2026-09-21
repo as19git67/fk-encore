@@ -81,6 +81,42 @@ export interface NearbyRoute {
   difficulty: string | null;
   /** True when this trip already holds it. */
   inPool: boolean;
+  /**
+   * Where the way begins.
+   *
+   * Carried even for a relation whose members do not join up, which
+   * has no course at all: the screen can then still say *where* it
+   * starts, which is the one thing that is known about it.
+   */
+  start: RouteVia;
+  /**
+   * The course, simplified — what the map draws before anybody decides
+   * (§4.7).
+   *
+   * A list of ways is a list of names until you can see where they
+   * run; two ten-kilometre walks from the same town are not the same
+   * decision, and only the shape says so. At most sixty-four points,
+   * simplified to about fifty metres, which is what `geo` hands out:
+   * enough to recognise a way, deliberately not enough to follow one.
+   * A file somebody walks by comes from the export, which fetches the
+   * geometry again and unsimplified (`route-export.ts`).
+   *
+   * Empty where the relation's members do not join up — there is then
+   * no course we can state.
+   */
+  via: RouteVia[];
+}
+
+/**
+ * A point of a route's course.
+ *
+ * Its own interface rather than a reused `Coordinate`: Encore's schema
+ * parser reads this type into the client, and a name that says what it
+ * is beats one that says what it is made of.
+ */
+export interface RouteVia {
+  lat: number;
+  lon: number;
 }
 
 export interface NearbyRoutesResponse {
@@ -288,6 +324,8 @@ function toNearby(
     website: route.website,
     difficulty: route.difficulty,
     inPool: inPool.has(route.osmRef),
+    start: { lat: route.start.lat, lon: route.start.lon },
+    via: route.via.map((p) => ({ lat: p.lat, lon: p.lon })),
   };
 }
 

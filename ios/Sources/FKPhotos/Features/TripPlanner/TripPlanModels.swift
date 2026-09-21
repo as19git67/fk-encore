@@ -895,8 +895,34 @@ struct TripNearbyRoute: Codable, Sendable, Identifiable {
     let website: String?
     let difficulty: String?
     let inPool: Bool
+    /// The course, simplified — see `TripSpotExtent.via`. Optional so
+    /// an answer from a backend older than this app still decodes.
+    var via: [TripCoordinate]? = nil
+    /// Where the way begins. Known even for a relation with no course
+    /// at all, and then the only thing that is.
+    var start: TripCoordinate? = nil
 
     var id: String { osmRef }
+
+    /// The relation id behind the ref, for the export and for a link
+    /// into OpenStreetMap. Nil for anything that is not a relation.
+    var relationId: Int? {
+        guard osmRef.hasPrefix("relation:") else { return nil }
+        return Int(osmRef.dropFirst("relation:".count))
+    }
+
+    /// True when there is a course worth drawing. A relation whose
+    /// members do not join up has none.
+    var hasCourse: Bool { (via?.count ?? 0) >= 2 }
+
+    /// What a map can show of this way: its course, or failing that
+    /// the one point that is known, or nothing at all from a backend
+    /// older than either.
+    var mapPoints: [TripCoordinate] {
+        if let via, via.count >= 2 { return via }
+        if let start { return [start] }
+        return via ?? []
+    }
 
     /// Walking and riding are different enough to be worth an icon.
     var symbolName: String {
@@ -977,6 +1003,16 @@ struct TripSpotExtent: Codable, Sendable, Equatable {
     let end: TripCoordinate
     let lengthM: Int?
     let ascentM: Int?
+    /// How the way actually runs, where the map knows (§4.7).
+    ///
+    /// At most sixty-four points, simplified to about fifty metres —
+    /// enough to draw the way instead of a straight line between its
+    /// ends, deliberately not enough to walk by. The file for that
+    /// comes from the export, which fetches the geometry again.
+    ///
+    /// Optional because a plan made before this existed has none, and
+    /// an answer from an older backend must still decode.
+    var via: [TripCoordinate]? = nil
 
     /// "Strecke · 10 km · 600 Hm" — the parts that are known, and no
     /// placeholder for the ones that are not.

@@ -213,6 +213,7 @@ struct TripPoolView: View {
             symbolName: kind.symbolName,
             tint: kind.colour,
             extentEnd: candidate.extent?.end,
+            course: candidate.extent?.via ?? [],
         )
     }
 

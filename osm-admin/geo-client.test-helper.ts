@@ -27,6 +27,8 @@ import type {
   GeoRegionStorage,
   GeoPoiSearchQuery,
   GeoRoute,
+  GeoRouteGeometry,
+  GeoRoutePoint,
   GeoRouteSearchPage,
   GeoDayTarget,
   GeoDayTargetPage,
@@ -245,6 +247,44 @@ export class InMemoryGeoClient implements GeoClient {
       routes: within.slice(0, limit),
       hasMore: within.length > limit,
       imported: true,
+    };
+  }
+
+  /**
+   * One route's full course (§4.7).
+   *
+   * Derived from what `setRoutes` was given rather than stored
+   * separately: a double whose export could disagree with its search
+   * about where a way runs would hide exactly the bug worth catching.
+   * The `via` of a seeded route stands in for the full geometry — a
+   * test asserting that the export is *finer* than the map's shape
+   * belongs against real PostGIS, and lives there
+   * (`geo/src/route-geometry.test.ts`).
+   */
+  async routeGeometry(postgresDb: string, osmId: number): Promise<GeoRouteGeometry | null> {
+    if (this.failingSearches.has(postgresDb)) {
+      throw new Error(
+        `geo: GET /regions/${postgresDb}/routes/${osmId}/geometry → connect ECONNREFUSED`,
+      );
+    }
+    if (!this.routesImported.has(postgresDb)) return null;
+    const route = (this.routes.get(postgresDb) ?? []).find((r) => r.id === osmId);
+    if (!route) return null;
+    const course = route.via.length >= 2
+      ? route.via
+      : [route.start, route.end].filter((p): p is GeoRoutePoint => p !== null);
+    return {
+      osmRef: route.osmRef,
+      id: route.id,
+      name: route.name,
+      route: route.route,
+      lengthM: route.lengthM,
+      ascentM: route.ascentM,
+      network: route.network,
+      ref: route.ref,
+      website: route.website,
+      parts: course.length >= 2 ? [course] : [],
+      joined: route.joined,
     };
   }
 
