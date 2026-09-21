@@ -38,6 +38,10 @@
  *                                    slot is still null. Used by the
  *                                    fullscreen viewer to navigate beyond the
  *                                    currently-loaded window.
+ *   - `getLoadedIds()`            — the ids of the cells the grid currently
+ *                                    holds, in display order. The selection
+ *                                    needs them to invert a selection without
+ *                                    asking the backend for the whole result.
  *   - `findLoadedIndexById(id)`   — linear scan over loaded entries; returns
  *                                    `null` for ids that aren't in the
  *                                    currently loaded window. Used to map a
@@ -474,6 +478,10 @@ defineExpose({
   loadEntryAt: source.loadEntryAt,
   findLoadedIndexById,
   scrollToIndex,
+  // Only the cells that are actually loaded — a sparse window in a grid that
+  // may be far larger. Everything else would have to be fetched first.
+  getLoadedIds: () =>
+    source.entries.value.filter((e): e is GalleryGridEntry => e !== null).map((e) => e.id),
   // Getter style (rather than raw refs) so the parent reads the value with
   // a simple call instead of `.value.ref.value` chains.
   getTotal: () => total.value,

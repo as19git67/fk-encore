@@ -30,6 +30,7 @@ function build(html: string): HTMLElement {
 const styleOf = (el: Element) => ({
   overflowX: (el as HTMLElement).dataset?.overflowX ?? 'visible',
   overflow: 'visible',
+  visibility: (el as HTMLElement).dataset?.visibility ?? 'visible',
 })
 
 afterEach(() => {
@@ -37,6 +38,16 @@ afterEach(() => {
 })
 
 describe('findOverflowingElements', () => {
+  it('ignores what is hidden, and what sits inside something hidden', () => {
+    // A measurement row renders at its natural width to be measured; nobody
+    // ever sees it, so its width cannot cut anything off.
+    const root = build(`
+      <div class="measure" data-visibility="hidden" data-left="0" data-width="500">
+        <button class="sample" data-left="0" data-width="420"></button>
+      </div>`)
+    expect(findOverflowingElements(root, { viewportWidth: VIEWPORT, getStyle: styleOf })).toEqual([])
+  })
+
   it('reports an element that sticks out of the viewport', () => {
     const root = build(`<div class="wide" data-left="0" data-width="500"></div>`)
     const found = findOverflowingElements(root, { viewportWidth: VIEWPORT, getStyle: styleOf })

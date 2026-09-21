@@ -35,7 +35,17 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
   und den nur bei Zurück/Vorwärts. Angeschlossen: Dokumente, Steuerliste,
   Sammelmappen, Buchungen, Zähler, Alben, Personen, Admin-Benutzer.
   `useScrollRestore`, `documentListFocus` und `taxListFocus` sind gelöscht.
-- ⬜ Etappen 5 und 6: siehe Sub-Issues #1280 und #1281.
+- ✅ **Etappe 5 — Auswahl und Basket** (#1280): `composables/useListSelection.ts`
+  (Auswahlmodus, Bereich per Umschalt-Klick, Alle/Umkehren/Aufheben,
+  `Ctrl/Cmd+A`) ersetzt die drei eigenen Implementierungen;
+  `components/layout/SelectionBar.vue` ist die eine Auswahlzeile im
+  `#selection`-Slot — auf dem Telefon am unteren Rand. Aktionen kommen als
+  `ToolbarItem[]` und laufen über `ResponsiveToolbar`.
+  `components/BasketIndicator.vue` ist die gemeinsame Hülle für Knopf, Badge
+  und Schublade; Dokumente und Finanzen füllen nur noch Zeilen und Fußzeile.
+  `composables/useBasketNavigation.ts` blättert im Basket — jetzt auch in der
+  Buchungsdetailseite. `useRangeSelect` ist gelöscht.
+- ⬜ Etappe 6: siehe Sub-Issue #1281.
 
 Abweichungen vom Entwurf (Etappe 1):
 
@@ -131,6 +141,30 @@ Abweichungen vom Entwurf (Etappe 4):
   `collectionBackNav.test.ts` fährt ihn gegen einen echten Router.
 - `finance/AccountsView` bekommt keinen Anker: seine Zeilen öffnen einen
   Dialog, keine Route.
+
+Abweichungen vom Entwurf (Etappe 5):
+
+- Die Auswahlzeile *ersetzt* die Toolbar-Zeile nicht, sie kommt darunter. Ein
+  Wechsel der Zeilenzahl im Sticky-Stack ändert dessen Höhe und damit die
+  Höhe jeder scrollenden Seite — genau die Bewegung, die #1311 abgestellt hat.
+- Dokumente bekommen einen echten Auswahlmodus: die Kästchen erscheinen erst
+  mit „Auswählen". Vorher waren sie immer sichtbar, was die eine Liste war,
+  die sich anders anfühlte.
+- „Aufheben" leert in Finanzen die Auswahl und beendet den Modus nicht mehr;
+  das X beendet ihn. Vorher tat derselbe Knopf beides.
+- Ein Long-Press auf Touch startet den Auswahlmodus weiterhin nicht. Die
+  Raster benutzen Tippen im Modus, und ein Long-Press kollidiert dort mit dem
+  Kontextmenü des Browsers; das bleibt für Etappe 6, falls es fehlt.
+- `ToolbarItem` hat ein `disabled` bekommen: die Aktionen der Galerie sind
+  während einer laufenden Stapelaktion gesperrt, und dieser Zustand wäre beim
+  Umzug in die Bar sonst verloren gegangen.
+- Die beiden Basket-Stores bleiben, wie sie sind. Der Entwurf wollte eine
+  Fabrik; sie unterscheiden sich aber nur in zwei Domänen-Zusätzen (`sum` und
+  `currency` hier, `addAll` und `indexOf` dort), und eine Fabrik mit zwei
+  Sonderfällen ist mehr Gerüst als Ersparnis. Doppelt war die *Oberfläche* —
+  die liegt jetzt in `BasketIndicator`.
+- `DocumentsBasketView` (der Arbeitskorb, #750) bleibt außen vor: er ist eine
+  Warteschlange, kein Basket, und teilt sich mit ihm nur das Wort.
 
 Dieses Dokument trifft die Entscheidungen, die das Issue offen lässt, damit
 jede Etappe reine Umsetzung ist. Was hier steht, ist verbindlich für alle
@@ -498,8 +532,12 @@ Etappe im PR.
 
 ## 9. Offene Punkte
 
-- Ob Fotos einen eigenen Basket bekommen (Etappe 5/6) oder die Alben-Dialoge
-  weiter direkt auf der transienten Auswahl arbeiten. Entscheidung nach
-  Etappe 5, wenn die Selection-Bar steht.
+- ~~Ob Fotos einen eigenen Basket bekommen~~ — **entschieden (Etappe 5): nein.**
+  Die Foto-Aktionen (Alben, Collage, Freigabe, Kuratierung) arbeiten alle auf
+  der Auswahl, die gerade sichtbar ist; ein persistenter Korb zahlt sich erst
+  aus, wenn man Fotos aus mehreren Alben zusammenträgt, und dafür gibt es
+  bisher keinen Weg in der Oberfläche. Die Selection-Bar liefert jetzt alles,
+  was die Dialoge brauchen. Kommt der albumübergreifende Fall, ist
+  `useSelection` mit einem `storageKey` alles, was fehlt.
 - `SharedAlbumView` (ohne Login) nutzt `PageLayout` ohne Untermenü; ob die
   Navbar dort überhaupt erscheint, wird in Etappe 2 entschieden.

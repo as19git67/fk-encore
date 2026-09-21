@@ -49,6 +49,7 @@ import {
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { useDocSelectionStore } from '../stores/documents/selection'
+import { useBasketNavigation } from '../composables/useBasketNavigation'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useModuleBack } from '../composables/useModuleBack'
 import PageLayout from '../components/layout/PageLayout.vue'
@@ -70,23 +71,21 @@ const docId = computed(() => parseInt(route.params.id as string, 10))
 
 // ─── Basket navigation (issue #736) ─────────────────────────────────────────
 // When the open document is in the basket, the basket doubles as a result
-// list: prev/next step through it in order.
+// list: prev/next step through it in order. The stepping itself is shared
+// with the transaction detail view (#1280).
 const basket = useDocSelectionStore()
-const basketIndex = computed(() => basket.indexOf(docId.value))
-const basketPrev = computed(() =>
-  basketIndex.value > 0 ? basket.items[basketIndex.value - 1] : null,
-)
-const basketNext = computed(() =>
-  basketIndex.value >= 0 && basketIndex.value < basket.count - 1
-    ? basket.items[basketIndex.value + 1]
-    : null,
-)
+const basketItems = computed(() => basket.items)
+const {
+  inBasket,
+  position: basketPosition,
+  total: basketTotal,
+  previous: basketPrev,
+  next: basketNext,
+} = useBasketNavigation(basketItems, docId)
 
 function goBasketDoc(id: number) {
   router.push({ name: 'dokumente-detail', params: { id } })
 }
-
-const inBasket = computed(() => basketIndex.value >= 0)
 
 function toggleBasket() {
   if (!doc.value) return
@@ -755,7 +754,7 @@ onBeforeUnmount(() => {
     <template #actions>
       <div class="detail-actions">
         <Button icon="pi pi-arrow-left" label="Zurück" aria-label="Zurück" text @click="goBack" />
-        <div v-if="basketIndex >= 0" class="basket-nav" aria-label="Navigation durch den Basket">
+        <div v-if="inBasket" class="basket-nav" aria-label="Navigation durch den Basket">
           <Button
             icon="pi pi-chevron-left"
             text
@@ -766,7 +765,7 @@ onBeforeUnmount(() => {
             @click="basketPrev && goBasketDoc(basketPrev.id)"
           />
           <span class="basket-nav-pos">
-            <i class="pi pi-shopping-cart" /> {{ basketIndex + 1 }}&hairsp;/&hairsp;{{ basket.count }}
+            <i class="pi pi-shopping-cart" /> {{ basketPosition }}&hairsp;/&hairsp;{{ basketTotal }}
           </span>
           <Button
             icon="pi pi-chevron-right"

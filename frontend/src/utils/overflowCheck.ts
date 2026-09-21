@@ -23,7 +23,7 @@ export interface OverflowCheckOptions {
   /** Tolerance in px for sub-pixel rounding. */
   tolerance?: number
   /** Defaults to getComputedStyle; injectable for jsdom. */
-  getStyle?: (el: Element) => { overflowX: string; overflow: string }
+  getStyle?: (el: Element) => { overflowX: string; overflow: string; visibility: string }
 }
 
 export function findOverflowingElements(
@@ -54,6 +54,20 @@ export function findOverflowingElements(
     return parts.join(' > ')
   }
 
+  /**
+   * Hidden means hidden: a measurement row rendered at its natural width
+   * (`ResponsiveToolbar` keeps one to decide what fits) paints nothing and
+   * takes no clicks, so its width is not something the user can lose.
+   */
+  const isInvisible = (el: Element): boolean => {
+    let node: Element | null = el
+    while (node && node !== document.body) {
+      if (getStyle(node).visibility === 'hidden') return true
+      node = node.parentElement
+    }
+    return false
+  }
+
   const clipsHorizontally = (el: Element): boolean => {
     const style = getStyle(el)
     return CLIPPING.has(style.overflowX) || CLIPPING.has(style.overflow)
@@ -76,6 +90,7 @@ export function findOverflowingElements(
     // Off-screen on purpose (a closed drawer parked to the right).
     if (rect.left >= viewportWidth) continue
     if (hasClippingAncestor(el)) continue
+    if (isInvisible(el)) continue
     found.push({ path: describe(el), right: Math.round(rect.right) })
   }
   return found

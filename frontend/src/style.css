@@ -22,6 +22,9 @@
   --z-mobile-backdrop: 490;
   --z-mobile-fab: 495;
   --z-mobile-drawer: 500;
+  /* The selection bar sits above the page and its drawers on a phone, where
+     it is fixed to the bottom edge, but below a fullscreen photo. */
+  --z-selection-bar: 510;
   --z-fullscreen: 1200;
 
   /* ── Design Tokens: Grid ────────────────────────────────────────────────── */
