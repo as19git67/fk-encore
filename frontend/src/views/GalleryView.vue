@@ -51,12 +51,12 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
-import Menu from 'primevue/menu'
 import { useConfirm } from 'primevue/useconfirm'
 import VirtualGallery from '../components/VirtualGallery.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
+import SelectionBar from '../components/layout/SelectionBar.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
@@ -71,7 +71,7 @@ import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
-import { useRangeSelect } from '../composables/useRangeSelect'
+import { useListSelection } from '../composables/useListSelection'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import {
@@ -300,16 +300,20 @@ function onJumpEnd() {
 }
 
 // ── Selection ───────────────────────────────────────────────────────────────
-const selectMode = ref(false)
-// Selection Set plus the anchor a shift-click measures its range from (#830).
-const {
-  selectedIds,
-  selectedCount,
-  rangeBusy: rangeSelectBusy,
-  clear: clearSelectedIds,
-  replace: replaceSelectedIds,
-  onToggleSelect,
-} = useRangeSelect({
+// Wie viele Fotos die aktive Abfrage liefert — das Raster meldet es nach
+// jedem Laden. Die Auswahl braucht die Zahl, um "alles ausgewählt" von
+// "die geladene Seite ausgewählt" zu unterscheiden.
+const galleryTotal = ref(0)
+const unfilteredGalleryTotal = ref<number | null>(null)
+let galleryTotalRequest = 0
+
+// Eine Auswahl für jede Liste der App (#1272, Etappe 5). Das virtuelle Raster
+// hält immer nur ein Fenster der Abfrage, deshalb bekommt die Auswahl beides:
+// die geladenen Ids für das Umkehren und den Weg zum Backend, damit "alles
+// auswählen" die ganze Abfrage meint und nicht den gerade sichtbaren Teil.
+const selection = useListSelection({
+  loadedIds: () => galleryRef.value?.getLoadedIds() ?? [],
+  total: () => galleryTotal.value,
   loadEntryAt: async (index: number) => galleryRef.value?.loadEntryAt(index) ?? null,
   fetchAllIds: async () => (await getGalleryIds({
     filter: filter.value,
@@ -318,36 +322,12 @@ const {
     photoIds: searchPhotoIds.value ?? undefined,
   })).ids,
 })
-
-function enterSelectMode() {
-  selectMode.value = true
-  clearSelectedIds()
-}
-function exitSelectMode() {
-  selectMode.value = false
-  clearSelectedIds()
-}
-function clearSelection() {
-  clearSelectedIds()
-}
-function toggleSelectMode() {
-  if (selectMode.value) exitSelectMode()
-  else enterSelectMode()
-}
-
-// Keep the selection controls present without permanently reserving a full
-// button row. The popup contains the same actions as the former action bar;
-// permissions and selection-dependent availability remain unchanged.
-const selectionMenu = ref<{ toggle: (event: Event) => void } | null>(null)
-function toggleSelectionMenu(event: Event) {
-  selectionMenu.value?.toggle(event)
-}
-
-const selectAllBusy = ref(false)
-const galleryTotal = ref(0)
-const unfilteredGalleryTotal = ref<number | null>(null)
-let galleryTotalRequest = 0
-const allSelected = computed(() => galleryTotal.value > 0 && selectedCount.value === galleryTotal.value)
+const { selectMode, selectedIds, selectedCount } = selection
+const exitSelectMode = selection.exit
+const toggleSelectMode = selection.toggleMode
+// Das Raster kennt die Signatur aus #830 unverändert: Eintrag plus Position
+// und ob die Umschalttaste gedrückt war.
+const onToggleSelect = selection.toggle
 
 // The shared list toolbar's model. Declared here because `useListToolbar`
 // reads the refs eagerly — everything it references exists by now.
@@ -371,24 +351,7 @@ const toolbar = useListToolbar({
   selection: { active: selectMode, toggle: toggleSelectMode },
 })
 
-async function selectAll() {
-  selectAllBusy.value = true
-  try {
-    const res = await getGalleryIds({
-      filter: filter.value,
-      sortBy: sortByForGallery.value,
-      sortDir: sortDirForGallery.value,
-      photoIds: searchPhotoIds.value ?? undefined,
-    })
-    replaceSelectedIds(res.ids)
-  } catch {
-    // silently ignore — user can retry
-  } finally {
-    selectAllBusy.value = false
-  }
-}
-
-// ── Album batch dialog (entry point for the mobile select-bar where the
+// ── Album batch dialog (entry point for the selection bar, where the
 //    desktop sidebar is hidden) ────────────────────────────────────────────
 const albumDialogVisible = ref(false)
 const albumDialogPhotoIds = computed(() => Array.from(selectedIds.value))
@@ -554,39 +517,43 @@ async function performBatchDelete(ids: number[]) {
   }
 }
 
-const selectionMenuItems = computed(() => {
-  const items: Array<Record<string, unknown>> = []
-  if (!allSelected.value) {
-    items.push({
-      label: galleryTotal.value > 0 ? `Alle (${galleryTotal.value}) auswählen` : 'Alle auswählen',
-      icon: 'pi pi-check-double',
-      disabled: selectAllBusy.value,
-      command: () => void selectAll(),
-    })
-  }
-  if (selectedCount.value === 0) return items
+// Was die Leiste mit den gewählten Fotos anbietet. "Alle auswählen" und
+// "Auswahl aufheben" stehen nicht mehr darunter: das sind jetzt die eigenen
+// Bedienelemente der Leiste (Kästchen und "Aufheben"). Alles andere bleibt
+// wie gehabt, samt Rechteprüfung — nur überläuft es in das Menü der
+// ResponsiveToolbar, statt selbst eines zu öffnen.
+const selectionActions = computed<ToolbarItem[]>(() => {
+  if (selectedCount.value === 0) return []
+  const items: ToolbarItem[] = []
+  const push = (item: ToolbarItem) => items.push({ ...item, label: item.title })
 
-  items.push({ label: selectedCount.value === 1 ? 'Foto teilen' : 'Fotos teilen', icon: 'pi pi-share-alt', disabled: sharingPhotos.value, command: () => void shareSelectedPhotos() })
-  if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
-  if (canUpload.value) items.push({ label: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
-  if (canUpload.value) items.push({ label: 'Beschreibung bearbeiten', icon: 'pi pi-align-left', command: openDescriptionDialog })
+  push({
+    key: 'share',
+    title: selectedCount.value === 1 ? 'Foto teilen' : 'Fotos teilen',
+    icon: 'pi pi-share-alt',
+    disabled: sharingPhotos.value,
+    command: () => void shareSelectedPhotos(),
+  })
+  if (canShowCollage.value) push({ key: 'collage', title: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
+  if (canUpload.value) push({ key: 'albums', title: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
+  if (canUpload.value) push({ key: 'description', title: 'Beschreibung bearbeiten', icon: 'pi pi-align-left', command: openDescriptionDialog })
   if (canDelete.value) {
-    items.push(
-      { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
-      { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
-      { label: 'Über Freigabe-Links freigeben', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('visible') },
-      { label: 'Von Freigabe-Links ausnehmen', icon: 'pi pi-link-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') },
-      { label: 'Link-Sichtbarkeit automatisch', icon: 'pi pi-sparkles', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('auto') },
-      { label: 'Alle Fotos mit bekannten Gesichtern freigeben', icon: 'pi pi-users', disabled: linkVisibilityBusy.value, command: () => void applyKnownFaceLinkVisibility('visible') },
-    )
-  }
-  items.push({ label: 'Auswahl aufheben', icon: 'pi pi-replay', command: clearSelection })
-  if (canDelete.value) {
-    items.push({ separator: true })
-    items.push({ label: 'Ausgewählte Fotos löschen', icon: 'pi pi-trash', disabled: deleteBusy.value || curationBusy.value, command: deleteFromSelection })
+    push({ key: 'favorite', title: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') })
+    push({ key: 'hide', title: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') })
+    push({ key: 'link-visible', title: 'Über Freigabe-Links freigeben', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('visible') })
+    push({ key: 'link-hidden', title: 'Von Freigabe-Links ausnehmen', icon: 'pi pi-link-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') })
+    push({ key: 'link-auto', title: 'Link-Sichtbarkeit automatisch', icon: 'pi pi-sparkles', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('auto') })
+    push({ key: 'link-known-faces', title: 'Alle Fotos mit bekannten Gesichtern freigeben', icon: 'pi pi-users', disabled: linkVisibilityBusy.value, command: () => void applyKnownFaceLinkVisibility('visible') })
+    push({ key: 'delete', title: 'Ausgewählte Fotos löschen', icon: 'pi pi-trash', severity: 'danger', disabled: deleteBusy.value || curationBusy.value, command: deleteFromSelection })
   }
   return items
 })
+
+// Der Hinweis erscheint genau dann, wenn er etwas nützt: ein Foto ist
+// gewählt, es gibt also einen Anker, von dem aus ein Bereich spannt.
+const selectionHint = computed(() =>
+  selectedCount.value === 1 ? 'Umschalt+Klick wählt den Bereich' : undefined,
+)
 
 // ── Stacks (compare view) ───────────────────────────────────────────────────
 // The cache backs the per-stack click handler (tap on a stacked tile in
@@ -1656,6 +1623,18 @@ void refreshReviewSequence()
       </ListToolbar>
     </template>
 
+    <!-- Auswahlleiste: eine für alle Listen, im Sticky-Stack der Seite
+         (auf dem Telefon am unteren Rand). -->
+    <template #selection>
+      <SelectionBar
+        v-if="selectMode"
+        :selection="selection"
+        :actions="selectionActions"
+        noun="Fotos"
+        :hint="selectionHint"
+      />
+    </template>
+
     <template #notice>
       <ErrorBanner
         v-if="searchError"
@@ -1813,47 +1792,6 @@ void refreshReviewSequence()
           />
         </aside>
       </div>
-
-      <!-- Compact selection tray. Actions stay available in the popup without
-           taking a full, multi-row strip away from the photo grid. -->
-      <div v-if="selectMode" class="select-bar">
-        <!-- The shift hint appears exactly when it becomes useful — one photo
-             is selected, so there is an anchor to span from — and goes away
-             again as soon as the user has clearly found the feature. -->
-        <span class="select-count">
-          <i :class="rangeSelectBusy ? 'pi pi-spin pi-spinner' : 'pi pi-check-square'" />
-          {{
-            rangeSelectBusy
-            ? 'Bereich wird ausgewählt …'
-            : selectedCount === 1
-            ? '1 ausgewählt · Umschalt+Klick wählt den Bereich'
-            : selectedCount > 0
-            ? `${selectedCount} ausgewählt`
-            : 'Fotos antippen zum Auswählen'
-          }}
-        </span>
-        <div class="select-actions">
-          <Button
-            label="Aktionen"
-            icon="pi pi-ellipsis-v"
-            size="small"
-            severity="secondary"
-            outlined
-            @click="toggleSelectionMenu"
-          />
-          <Button
-            icon="pi pi-times"
-            size="small"
-            severity="secondary"
-            text
-            rounded
-            aria-label="Auswahl beenden"
-            v-tooltip.top="'Auswahl beenden'"
-            @click="exitSelectMode"
-          />
-        </div>
-        <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" :pt="{ root: { class: 'selection-actions-menu' } }" />
-      </div>
     </div>
 
     <!-- Stack compare overlay -->
@@ -1951,7 +1889,7 @@ void refreshReviewSequence()
       @saved="onDescriptionsSaved"
     />
 
-    <!-- Collage creator (gallery select-bar entry point) -->
+    <!-- Collage creator (entry point in the gallery's selection bar) -->
     <CollageDialog
       v-model:visible="collageDialogVisible"
       :photo-ids="collagePhotoIds"
@@ -2267,58 +2205,4 @@ void refreshReviewSequence()
 
 .error-flyout-list li:last-child { border-bottom: none; }
 
-/* ── Compact selection tray ────────────────────────────────────────────── */
-.select-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.35rem 0.45rem 0.35rem 0.75rem;
-  background: var(--p-primary-50, #eff6ff);
-  border: 1px solid var(--p-primary-200, #bfdbfe);
-  border-radius: 999px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
-  gap: 0.6rem;
-  position: absolute;
-  z-index: 30;
-  bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: calc(100% - 1.5rem);
-}
-
-.select-count {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--p-primary-700, #1d4ed8);
-}
-
-.select-actions {
-  display: flex;
-  gap: 0.2rem;
-  flex-shrink: 0;
-}
-
-.p-dark .select-bar {
-  background: var(--p-primary-900, #1e3a8a);
-  border-top-color: var(--p-primary-700);
-}
-.p-dark .select-count {
-  color: var(--p-primary-200, #bfdbfe);
-}
-
-/* ── Mobile breakpoint ────────────────────────────────────────────────── */
-@media (max-width: 768px) {
-  .select-bar {
-    bottom: calc(0.65rem + env(safe-area-inset-bottom, 0px));
-  }
-  .select-count {
-    max-width: calc(100vw - 11.5rem);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
 </style>

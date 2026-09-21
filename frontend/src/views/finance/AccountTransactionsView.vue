@@ -4,6 +4,7 @@ import ListToolbar from '../../components/layout/ListToolbar.vue'
 import EmptyState from '../../components/layout/EmptyState.vue'
 import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
+import SelectionBar from '../../components/layout/SelectionBar.vue'
 /**
  * Buchungsliste — entweder für ein einzelnes Konto (`/finanzen/uebersicht/konto/:id`)
  * oder für alle Konten einer Sektion (`/finanzen/uebersicht/sektion/:name`).
@@ -17,7 +18,9 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
+import { useListSelection } from '../../composables/useListSelection'
 import type { FilterChip } from '../../components/layout/listToolbar'
+import type { ToolbarItem } from '../../components/ResponsiveToolbar.vue'
 import Button from 'primevue/button'
 import Chart from 'primevue/chart'
 import Message from 'primevue/message'
@@ -1112,34 +1115,38 @@ function openTransaction(tx: Transaction) {
 // basket. Picking/un-picking transactions here only affects the list's
 // own working set; nothing flows into the basket until the user
 // explicitly hits the "in den Warenkorb" action.
+//
+// The behaviour itself is the shared one (issue #1272, stage 5): this list
+// used to roll its own Set, its own tristate and its own "clear also leaves
+// the mode". Now it only says which ids it holds.
 
-const selectMode = ref(false)
 const selectionPopover = ref<InstanceType<typeof Popover> | null>(null)
-const localSelectedIds = ref<Set<number>>(new Set())
+
+const selection = useListSelection({
+  loadedIds: () => txStore.items.map((tx) => tx.id),
+  // The transactions endpoint pages without reporting a grand total, so
+  // "all" can only mean the page the user is looking at.
+  total: () => txStore.items.length,
+})
+const { selectMode, selectedIds, selectedCount: localSelectionCount, exit, toggleMode } = selection
+
+// The popover lists the picked rows, so it has nothing left to show once the
+// selection is emptied or the mode ends.
+watch([selectMode, localSelectionCount], ([mode, count]) => {
+  if (!mode || count === 0) selectionPopover.value?.hide()
+})
 
 function isLocallySelected(id: number): boolean {
-  return localSelectedIds.value.has(id)
+  return selectedIds.value.has(id)
 }
 
 function toggleLocalSelection(tx: Transaction) {
-  const next = new Set(localSelectedIds.value)
-  if (next.has(tx.id)) next.delete(tx.id)
-  else next.add(tx.id)
-  localSelectedIds.value = next
+  selection.toggleId(tx.id)
 }
 
 const localSelectedItems = computed<Transaction[]>(() =>
-  txStore.items.filter((tx) => localSelectedIds.value.has(tx.id)),
+  txStore.items.filter((tx) => selectedIds.value.has(tx.id)),
 )
-const localSelectionCount = computed(() => localSelectedItems.value.length)
-
-function toggleSelectMode() {
-  selectMode.value = !selectMode.value
-  if (!selectMode.value) {
-    localSelectedIds.value = new Set()
-    selectionPopover.value?.hide()
-  }
-}
 
 const toolbar = useListToolbar({
   search,
@@ -1154,41 +1161,8 @@ const toolbar = useListToolbar({
     // The transactions endpoint pages without reporting a grand total.
     loading: () => txStore.loading,
   },
-  selection: { active: selectMode, toggle: toggleSelectMode },
+  selection: { active: selectMode, toggle: toggleMode },
 })
-
-/**
- * Tristate state for the "select all" checkbox above the list:
- *   - true   → every visible transaction is selected
- *   - false  → none selected
- *   - null   → at least one is selected (Checkbox renders the
- *              indeterminate/dash glyph)
- */
-const selectAllState = computed<boolean | null>(() => {
-  const visibleCount = txStore.items.length
-  const selectedCount = txStore.items.filter((tx) =>
-    localSelectedIds.value.has(tx.id),
-  ).length
-  if (selectedCount === 0) return false
-  if (selectedCount === visibleCount && visibleCount > 0) return true
-  return null
-})
-
-function toggleSelectAll(checked: boolean | null) {
-  // PrimeVue's binary checkbox emits true/false; we never expect null
-  // here. Treat anything truthy as "select all visible", else clear.
-  if (checked) {
-    localSelectedIds.value = new Set(txStore.items.map((tx) => tx.id))
-  } else {
-    localSelectedIds.value = new Set()
-  }
-}
-
-function clearSelection() {
-  localSelectedIds.value = new Set()
-  selectionPopover.value?.hide()
-  selectMode.value = false
-}
 
 function openSelectionPopover(event: Event) {
   if (localSelectionCount.value === 0) return
@@ -1249,6 +1223,23 @@ function formatFilteredSum(): string {
 
 const batchTagDialogVisible = ref(false)
 
+/**
+ * What the bar can do with the picked bookings. Tagging goes through the
+ * shared toolbar so it folds into the overflow menu on a narrow screen;
+ * "in den Warenkorb" stays the view's own primary action.
+ */
+const selectionActions = computed<ToolbarItem[]>(() => [
+  {
+    key: 'tag',
+    label: 'Verschlagworten',
+    title: 'Tags auf Auswahl anwenden',
+    icon: 'pi pi-tag',
+    severity: 'secondary',
+    disabled: localSelectionCount.value === 0,
+    command: openBatchTagEditor,
+  },
+])
+
 function openBatchTagEditor() {
   if (localSelectionCount.value === 0) return
   selectionPopover.value?.hide()
@@ -1269,8 +1260,7 @@ function goBack() {
   if (selectMode.value) {
     // Leaving select mode is the more useful action than navigating
     // away when the user expects "Zurück" → list-without-selection.
-    selectMode.value = false
-    localSelectedIds.value = new Set()
+    exit()
     return
   }
   moduleBack()
@@ -1374,45 +1364,26 @@ function goBack() {
     </template>
 
     <template #selection>
-      <!-- Tristate "select all" + running sum + batch actions, only in select mode. -->
-      <div v-if="selectMode" class="tx-select-bar" data-testid="finance-selection-subheader">
-        <div class="tx-select-bar-left">
-          <Checkbox
-            :model-value="selectAllState === true"
-            :indeterminate="selectAllState === null"
-            :binary="true"
-            aria-label="Alle Buchungen auswählen"
-            @update:model-value="toggleSelectAll"
-          />
-          <span class="tx-select-count">
-            {{ localSelectionCount }} ausgewählt
-          </span>
-          <span v-if="localSelectionCount > 0" class="tx-summary-sum">Σ {{ formatSelectionSum() }}</span>
-        </div>
-      <div class="tx-select-bar-actions">
-        <Button
-            icon="pi pi-tag"
-            severity="secondary"
-            aria-label="Tags auf Auswahl anwenden"
-            :disabled="localSelectionCount === 0"
-            @click="openBatchTagEditor"
-        />
-        <Button
-            icon="pi pi-shopping-cart"
-            severity="secondary"
-            aria-label="Auswahl in den Warenkorb geben"
-            title="Auswahl in den Warenkorb geben"
-            :disabled="localSelectionCount === 0"
-            @click="addLocalSelectionToBasket"
-        />
-        <Button
-            icon="pi pi-times"
-            severity="secondary"
-            aria-label="Nichts auswählen"
-            :disabled="localSelectionCount === 0"
-            @click="clearSelection"
-        />
-      </div>
+      <!-- The shared bar; the running sum and the basket handover are the
+           only things this list adds to it. -->
+      <div v-if="selectMode" data-testid="finance-selection-subheader">
+        <SelectionBar :selection="selection" :actions="selectionActions" noun="Buchungen">
+          <template #info>
+            <span v-if="localSelectionCount > 0" class="tx-summary-sum">Σ {{ formatSelectionSum() }}</span>
+          </template>
+          <template #primary>
+            <Button
+              icon="pi pi-shopping-cart"
+              label="In den Warenkorb"
+              size="small"
+              severity="secondary"
+              aria-label="Auswahl in den Warenkorb geben"
+              v-tooltip.bottom="'Auswahl in den Warenkorb geben'"
+              :disabled="localSelectionCount === 0"
+              @click="addLocalSelectionToBasket"
+            />
+          </template>
+        </SelectionBar>
       </div>
     </template>
 
@@ -1926,31 +1897,6 @@ function goBack() {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-/* ── Select-mode bar (tristate + batch actions) ───────────────────── */
-.tx-select-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--p-content-hover-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 0.5rem;
-}
-.tx-select-bar-left {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-.tx-select-count {
-  font-weight: 600;
-  color: var(--p-text-color);
-}
-.tx-select-bar-actions {
-  display: flex;
-  gap: 0.4rem;
-}
-
 /* ── Per-card lead slot (selection checkbox) ─────────────────────── */
 .tx-card-lead {
   display: flex;

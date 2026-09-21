@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
-import Drawer from 'primevue/drawer'
+import BasketIndicator from '../BasketIndicator.vue'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import Checkbox from 'primevue/checkbox'
@@ -30,7 +30,6 @@ import { compareBasketCounterparties } from '../../utils/financeBasketCompare'
 const selectionStore = useTxSelectionStore()
 const txStore = useTransactionsStore()
 const confirm = useConfirm()
-const drawerVisible = ref(false)
 const tagDialogVisible = ref(false)
 const noticeDialogVisible = ref(false)
 const csvExporting = ref(false)
@@ -387,43 +386,25 @@ async function compareSnapshots() {
 </script>
 
 <template>
-  <div class="basket-indicator">
-    <Button
-      v-tooltip.bottom="count === 0 ? 'Basket (leer)' : `Basket · ${count} Buchung${count === 1 ? '' : 'en'}`"
-      icon="pi pi-shopping-cart"
-      severity="secondary"
-      text
-      rounded
-      :badge="count > 0 ? String(count) : undefined"
-      badge-severity="info"
-      aria-label="Basket öffnen"
-      class="basket-button"
-      @click="drawerVisible = true"
-    />
+  <BasketIndicator
+    singular="Buchung"
+    plural="Buchungen"
+    :title="drawerTitle"
+    :count="count"
+    empty-text="Noch keine Buchungen im Basket."
+    empty-hint="Lege Buchungen aus der Liste, der Detailansicht oder den Anomalien ab, um sie hier zu sammeln."
+    :info="actionInfo"
+    :error="actionError"
+    @update:info="actionInfo = null"
+    @update:error="actionError = null"
+  >
+    <template #subtitle>
+      <span v-if="count > 0" class="drawer-sum">{{ sumLabel }}</span>
+    </template>
 
-    <Drawer
-      v-model:visible="drawerVisible"
-      position="right"
-      header="Basket"
-      class="basket-drawer"
-    >
-      <template #header>
-        <div class="drawer-header">
-          <span class="drawer-title" :title="drawerTitle">{{ drawerTitle }}</span>
-          <span v-if="count > 0" class="drawer-sum">{{ sumLabel }}</span>
-        </div>
-      </template>
-
-      <div v-if="count === 0" class="basket-empty">
-        <i class="pi pi-shopping-cart basket-empty-icon" />
-        <p>Noch keine Buchungen im Basket.</p>
-        <p class="hint">
-          Lege Buchungen aus der Liste, der Detailansicht oder den Anomalien
-          ab, um sie hier zu sammeln.
-        </p>
-      </div>
-
-      <div v-else>
+    <!-- Belegzuordnung, Auswertung und Wiederholungen stehen über der Liste:
+         sie beschreiben den ganzen Basket, nicht eine einzelne Buchung. -->
+    <template #before-rows>
       <section class="basket-matches">
         <div class="basket-match-actions">
           <Button label="Verknüpfen" icon="pi pi-link" size="small" @click="openManualLink" />
@@ -444,8 +425,7 @@ async function compareSnapshots() {
         </p>
         <p v-if="matchMetrics" class="basket-match-metrics">Trefferquote (hoch): {{ matchMetrics.high.accepted }} angenommen / {{ matchMetrics.high.rejected }} abgelehnt</p>
       </section>
-      <ul class="basket-list">
-        <section class="basket-analysis" aria-label="Auswertung der Auswahl">
+      <section class="basket-analysis" aria-label="Auswertung der Auswahl">
           <div class="basket-analysis-tabs" role="tablist" aria-label="Auswertung gruppieren nach">
             <button v-for="view in [{ id: 'tags', label: 'Tags' }, { id: 'counterparties', label: 'Gegenseite' }, { id: 'months', label: 'Monat' }]" :key="view.id" type="button" class="basket-analysis-tab" :class="{ active: analysisView === view.id }" @click="analysisView = view.id as 'tags' | 'counterparties' | 'months'">{{ view.label }}</button>
           </div>
@@ -465,12 +445,15 @@ async function compareSnapshots() {
               <span>Ø {{ group.averageIntervalDays }} Tage</span>
             </li>
           </ul>
-        </section>
-        <li
-          v-for="tx in items"
-          :key="tx.id"
-          class="basket-row"
-        >
+      </section>
+    </template>
+
+    <template #rows>
+      <li
+        v-for="tx in items"
+        :key="tx.id"
+        class="basket-row"
+      >
           <div class="basket-row-body">
             <div class="basket-row-head">
               <span class="basket-row-date">{{ formatDate(tx.booking_date) }}</span>
@@ -496,22 +479,10 @@ async function compareSnapshots() {
           >
             <i class="pi pi-times-circle" />
           </button>
-        </li>
-      </ul>
-      </div>
+      </li>
+    </template>
 
-      <template #footer>
-        <div class="drawer-footer">
-          <Message v-if="actionInfo" severity="success" :closable="true" class="action-error" @close="actionInfo = null">{{ actionInfo }}</Message>
-          <Message
-            v-if="actionError"
-            severity="error"
-            :closable="true"
-            class="action-error"
-            @close="actionError = null"
-          >
-            {{ actionError }}
-          </Message>
+    <template #footer>
           <div class="drawer-actions">
             <Button
               :label="majorityReviewed ? 'Prüfvermerk entfernen' : 'Als geprüft markieren'"
@@ -565,12 +536,13 @@ async function compareSnapshots() {
               :disabled="count === 0"
               @click="clearBasket"
             />
-          </div>
-        </div>
-      </template>
-    </Drawer>
+      </div>
+    </template>
+  </BasketIndicator>
 
-    <BatchTagDialog v-model:visible="tagDialogVisible" />
+  <!-- Die Dialoge hängen an keiner Schublade: PrimeVue teleportiert sie, und
+       sie sollen auch offen bleiben, wenn der Basket zugeht. -->
+  <BatchTagDialog v-model:visible="tagDialogVisible" />
     <BatchNoticeDialog
       v-model:visible="noticeDialogVisible"
       :transaction-ids="selectionStore.ids"
@@ -626,53 +598,14 @@ async function compareSnapshots() {
         <Button label="PDF erstellen" icon="pi pi-file-pdf" :loading="pdfExporting" :disabled="count === 0" @click="exportPdf" />
       </template>
     </Dialog>
-  </div>
 </template>
 
 <style scoped>
-.basket-indicator {
-  position: relative;
-  display: inline-flex;
-}
-
-.drawer-header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  min-width: 0;
-  width: 100%;
-}
-.drawer-title {
-  flex: 1 1 auto;
-  font-weight: 600;
-  font-size: 1.05rem;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .drawer-sum {
   flex: 0 0 auto;
   color: var(--p-text-muted-color);
   font-variant-numeric: tabular-nums;
   font-size: 0.95rem;
-}
-
-.basket-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 2rem 1rem;
-  color: var(--p-text-muted-color);
-}
-.basket-empty-icon {
-  font-size: 2rem;
-  margin-bottom: 0.5rem;
-}
-.basket-empty .hint {
-  font-size: 0.85rem;
-  margin-top: 0.25rem;
 }
 .counterparty-form { display: grid; gap: .85rem; }
 .counterparty-form label { display: grid; gap: .35rem; font-weight: 600; }
@@ -695,13 +628,6 @@ async function compareSnapshots() {
 .basket-document-search { display: flex; gap: .5rem; margin-bottom: .5rem; min-width: 0; }
 .basket-document-search :deep(.p-inputtext) { flex: 1; min-width: 0; }
 .basket-document-search :deep(.p-button) { flex-shrink: 0; }
-.basket-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-}
 .basket-analysis { margin: 0 0 .75rem; padding: .6rem; border: 1px solid var(--p-content-border-color); border-radius: .4rem; }
 .basket-analysis-tabs { display: flex; gap: .25rem; margin-bottom: .5rem; }
 .basket-analysis-tab { border: 0; border-radius: .3rem; background: transparent; padding: .25rem .45rem; cursor: pointer; color: var(--p-text-muted-color); }
@@ -711,20 +637,6 @@ async function compareSnapshots() {
 .basket-analysis-row small { color: var(--p-text-muted-color); }
 .basket-analysis-hint { margin: 0 0 .4rem; color: var(--p-text-muted-color); font-size: .78rem; }
 .ai-tag { color: var(--p-primary-color) !important; }
-.basket-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-start;
-  padding: 0.6rem 0.25rem;
-  border-bottom: 1px solid var(--p-content-border-color);
-}
-.basket-row:last-child {
-  border-bottom: none;
-}
-.basket-row-body {
-  flex: 1;
-  min-width: 0;
-}
 .basket-row-head {
   display: flex;
   justify-content: space-between;
@@ -756,25 +668,6 @@ async function compareSnapshots() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.basket-row-remove {
-  background: none;
-  border: none;
-  padding: 0.25rem;
-  cursor: pointer;
-  color: var(--p-text-muted-color);
-  border-radius: 0.25rem;
-  flex-shrink: 0;
-}
-.basket-row-remove:hover {
-  color: var(--p-text-color);
-  background: var(--p-content-hover-background);
-}
-
-.drawer-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 .action-error {
   margin: 0;

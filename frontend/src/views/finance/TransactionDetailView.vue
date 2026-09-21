@@ -21,6 +21,7 @@ import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
+import { useBasketNavigation } from '../../composables/useBasketNavigation'
 import type { MandateHistoryItem, Transaction } from '../../api/finance'
 import * as api from '../../api/finance'
 import { searchDocuments, uploadReceiptCapture, type SearchDocumentSummary } from '../../api/documents'
@@ -267,7 +268,23 @@ const numFormAmount = computed({
 const account = computed(() => tx.value ? accountsStore.byId(tx.value.account_id) : undefined)
 const isCash = computed(() => account.value?.type_kind === 'bargeld')
 
-const inBasket = computed(() => !!tx.value && selectionStore.has(tx.value.id))
+// Ein Basket ist eine Reihenfolge, keine Menge: wer sich Buchungen zur Seite
+// legt, arbeitet sie nacheinander ab. Die Dokumentdetailseite kann das seit
+// #736, die Buchungsdetailseite bekommt es hier (#1280) — mit demselben
+// Composable, damit "3 / 7" in beiden Modulen dasselbe heißt.
+const basketItems = computed(() => selectionStore.items)
+const currentTxId = computed(() => tx.value?.id ?? null)
+const {
+  inBasket,
+  position: basketPosition,
+  total: basketTotal,
+  previous: basketPrev,
+  next: basketNext,
+} = useBasketNavigation(basketItems, currentTxId)
+
+function goBasketTx(id: number) {
+  router.push({ name: 'finance-transaction-detail', params: { id } })
+}
 
 function toggleBasket() {
   if (!tx.value) return
@@ -703,6 +720,31 @@ const extractedFields = computed(() => {
         aria-label="Zurück"
         @click="goBack"
       />
+      <div v-if="inBasket" class="basket-nav" aria-label="Navigation durch den Basket">
+        <Button
+          icon="pi pi-chevron-left"
+          text
+          rounded
+          size="small"
+          :disabled="!basketPrev"
+          aria-label="Vorherige Buchung im Basket"
+          v-tooltip.bottom="'Vorherige Buchung im Basket'"
+          @click="basketPrev && goBasketTx(basketPrev.id)"
+        />
+        <span class="basket-nav-pos">
+          <i class="pi pi-shopping-cart" /> {{ basketPosition }}&hairsp;/&hairsp;{{ basketTotal }}
+        </span>
+        <Button
+          icon="pi pi-chevron-right"
+          text
+          rounded
+          size="small"
+          :disabled="!basketNext"
+          aria-label="Nächste Buchung im Basket"
+          v-tooltip.bottom="'Nächste Buchung im Basket'"
+          @click="basketNext && goBasketTx(basketNext.id)"
+        />
+      </div>
       <Button
         v-if="tx"
         v-tooltip.bottom="inBasket ? 'Aus Basket entfernen' : 'In Basket legen'"
@@ -1268,6 +1310,24 @@ const extractedFields = computed(() => {
 </template>
 
 <style scoped>
+
+/* Schritt für Schritt durch den Basket — gleiche Optik wie in der
+   Dokumentdetailseite, damit "3 / 7" überall gleich aussieht. */
+.basket-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.basket-nav-pos {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* Page frame and title: PageLayout (issue #1272). */
 .card + .card {
   margin-top: 1rem;

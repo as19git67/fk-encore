@@ -5,9 +5,8 @@ import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
-import Drawer from 'primevue/drawer'
+import BasketIndicator from '../BasketIndicator.vue'
 import InputNumber from 'primevue/inputnumber'
-import Message from 'primevue/message'
 import MultiSelect from 'primevue/multiselect'
 import SelectButton from 'primevue/selectbutton'
 import TreeSelect from 'primevue/treeselect'
@@ -50,7 +49,8 @@ const auth = useAuthStore()
 const selectionStore = useDocSelectionStore()
 const canEdit = computed(() => auth.hasPermission('documents.edit'))
 
-const drawerVisible = ref(false)
+/** Die Hülle besitzt die Sichtbarkeit; hierüber wird sie geschlossen. */
+const shell = ref<InstanceType<typeof BasketIndicator> | null>(null)
 const actionError = ref<string | null>(null)
 const actionInfo = ref<string | null>(null)
 
@@ -65,7 +65,7 @@ function formatDate(iso: string | null): string {
 }
 
 function openDocument(doc: DocumentSummary) {
-  drawerVisible.value = false
+  shell.value?.close()
   router.push({ name: 'dokumente-detail', params: { id: doc.id } })
 }
 
@@ -399,40 +399,19 @@ function handleReprocessDone(payload: { affected: number }) {
 </script>
 
 <template>
-  <div class="basket-indicator">
-    <Button
-      v-tooltip.bottom="count === 0 ? 'Basket (leer)' : `Basket · ${count} Dokument${count === 1 ? '' : 'e'}`"
-      icon="pi pi-shopping-cart"
-      severity="secondary"
-      text
-      rounded
-      :badge="count > 0 ? String(count) : undefined"
-      badge-severity="info"
-      aria-label="Basket öffnen"
-      class="basket-button"
-      @click="drawerVisible = true"
-    />
-
-    <Drawer v-model:visible="drawerVisible" position="right" header="Basket" class="basket-drawer">
-      <template #header>
-        <div class="drawer-header">
-          <span class="drawer-title">Basket</span>
-          <span v-if="count > 0" class="drawer-count">{{ count }} Dokument{{ count === 1 ? '' : 'e' }}</span>
-        </div>
-      </template>
-
-      <div v-if="count === 0" class="basket-empty">
-        <i class="pi pi-shopping-cart basket-empty-icon" />
-        <p>Noch keine Dokumente im Basket.</p>
-        <p class="hint">
-          Lege Dokumente aus der Liste ab — einzeln über die Auswahl oder die
-          ganze Trefferliste eines Filters — um sie hier gemeinsam zu bearbeiten
-          oder nacheinander durchzugehen.
-        </p>
-      </div>
-
-      <ul v-else class="basket-list">
-        <li v-for="doc in items" :key="doc.id" class="basket-row">
+  <BasketIndicator
+    ref="shell"
+    singular="Dokument"
+    plural="Dokumente"
+    :count="count"
+    empty-hint="Lege Dokumente aus der Liste ab — einzeln über die Auswahl oder die ganze Trefferliste eines Filters — um sie hier gemeinsam zu bearbeiten oder nacheinander durchzugehen."
+    :info="actionInfo"
+    :error="actionError"
+    @update:info="actionInfo = null"
+    @update:error="actionError = null"
+  >
+    <template #rows>
+      <li v-for="doc in items" :key="doc.id" class="basket-row">
           <button
             type="button"
             class="basket-row-body"
@@ -462,13 +441,10 @@ function handleReprocessDone(payload: { affected: number }) {
           >
             <i class="pi pi-times-circle" />
           </button>
-        </li>
-      </ul>
+      </li>
+    </template>
 
-      <template #footer>
-        <div class="drawer-footer">
-          <Message v-if="actionInfo" severity="success" :closable="true" class="action-message" @close="actionInfo = null">{{ actionInfo }}</Message>
-          <Message v-if="actionError" severity="error" :closable="true" class="action-message" @close="actionError = null">{{ actionError }}</Message>
+    <template #footer>
           <div v-if="canEdit" class="action-row">
             <Button label="Tags" icon="pi pi-tag" size="small" :disabled="count === 0" @click="openTagDialog" />
             <Button label="Kategorie" icon="pi pi-folder" size="small" :disabled="count === 0" @click="openCategoryDialog" />
@@ -504,22 +480,23 @@ function handleReprocessDone(payload: { affected: number }) {
               @click="approveAttribution"
             />
           </div>
-          <div class="clear-row">
-            <Button
-              label="Alles leeren"
-              icon="pi pi-times"
-              severity="secondary"
-              text
-              size="small"
-              :disabled="count === 0"
-              @click="selectionStore.clear()"
-            />
-          </div>
-        </div>
-      </template>
-    </Drawer>
+      <div class="clear-row">
+        <Button
+          label="Alles leeren"
+          icon="pi pi-times"
+          severity="secondary"
+          text
+          size="small"
+          :disabled="count === 0"
+          @click="selectionStore.clear()"
+        />
+      </div>
+    </template>
+  </BasketIndicator>
 
-    <MultiSelectDialog
+  <!-- Die Dialoge hängen an keiner Schublade: PrimeVue teleportiert sie, und
+       sie sollen auch offen bleiben, wenn der Basket zugeht. -->
+  <MultiSelectDialog
       v-model:visible="tagDialogVisible"
       title="Tags auf Basket anwenden"
       :items="tagDialogItems"
@@ -660,99 +637,9 @@ function handleReprocessDone(payload: { affected: number }) {
       :document-ids="selectionStore.ids as number[]"
       @done="handleReprocessDone"
     />
-  </div>
 </template>
 
 <style scoped>
-.basket-indicator {
-  position: relative;
-  display: inline-flex;
-}
-
-.drawer-header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-}
-.drawer-title {
-  font-weight: 600;
-  font-size: 1.05rem;
-}
-.drawer-count {
-  color: var(--p-text-muted-color);
-  font-size: 0.95rem;
-}
-
-.basket-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 2rem 1rem;
-  color: var(--p-text-muted-color);
-}
-.basket-empty-icon {
-  font-size: 2rem;
-  margin-bottom: 0.5rem;
-}
-.basket-empty .hint {
-  font-size: 0.85rem;
-  margin-top: 0.25rem;
-}
-
-.basket-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-}
-.basket-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-start;
-  padding: 0.35rem 0;
-  border-bottom: 1px solid var(--p-content-border-color);
-}
-.basket-row:last-child {
-  border-bottom: none;
-}
-.basket-row-body {
-  appearance: none;
-  background: none;
-  border: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  flex: 1;
-  min-width: 0;
-  padding: 0.25rem;
-  border-radius: 0.35rem;
-}
-.basket-row-body:hover,
-.basket-row-body:focus-visible {
-  background: var(--p-content-hover-background);
-}
-.basket-row-title {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.basket-row-meta {
-  margin-top: 0.1rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  color: var(--p-text-muted-color);
-  font-size: 0.82rem;
-}
-.basket-row-meta span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
 .tax-badge {
   color: var(--p-primary-color);
 }
@@ -766,36 +653,6 @@ function handleReprocessDone(payload: { affected: number }) {
   color: var(--p-primary-color);
   background: var(--p-highlight-background);
   vertical-align: text-bottom;
-}
-.basket-row-remove {
-  background: none;
-  border: none;
-  padding: 0.25rem;
-  cursor: pointer;
-  color: var(--p-text-muted-color);
-  border-radius: 0.25rem;
-  flex-shrink: 0;
-}
-.basket-row-remove:hover {
-  color: var(--p-text-color);
-  background: var(--p-content-hover-background);
-}
-
-.drawer-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.action-message {
-  margin: 0;
-}
-.action-row {
-  display: flex;
-  gap: 0.5rem;
-}
-.action-row :deep(.p-button) {
-  flex: 1;
-  min-width: 0;
 }
 /* Buttons share the row equally; clip an over-long label ("Kategorie") with
    an ellipsis instead of forcing the row wider or wrapping the text. */
