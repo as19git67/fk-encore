@@ -1,4 +1,4 @@
-import type { Account, Bankcontact, OverviewResponse, Tag, Transaction } from '../api/finance'
+import type { Account, AnomalyItem, Bankcontact, OverviewResponse, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -194,5 +194,61 @@ export const MOCK_BANKCONTACTS: Bankcontact[] = [
     created_at: '2025-06-01T00:00:00.000Z',
     available_tan_methods: [],
     sync_times: [],
+  },
+]
+
+/**
+ * Anomalies as the detector reports them — one of each kind the list draws
+ * differently: a standing order that got dearer, a duplicate booking, a
+ * mandate seen for the first time, and one that failed to show up at all.
+ */
+export const MOCK_ANOMALIES: AnomalyItem[] = [
+  {
+    id: 1,
+    type: 'amount_change',
+    score: 0.92,
+    details: { previous_amount: '-48.90', current_amount: '-79.90' },
+    created_at: '2025-06-10T06:00:00.000Z',
+    transaction_id: 1,
+    mandate_id: 11,
+    counterparty: 'Beispiel Energie GmbH',
+    message: 'Der Betrag ist von 48,90 € auf 79,90 € gestiegen.',
+  },
+  {
+    id: 2,
+    type: 'duplicate',
+    score: 0.81,
+    details: {},
+    created_at: '2025-06-09T06:00:00.000Z',
+    transaction_id: 2,
+    mandate_id: null,
+    counterparty: 'Musterladen KG',
+    message: 'Zwei Buchungen am selben Tag über denselben Betrag.',
+    duplicate_transactions: [
+      { id: 2, booking_date: '2025-06-08', amount: '-24.99', purpose: 'Einkauf' },
+      { id: 3, booking_date: '2025-06-08', amount: '-24.99', purpose: 'Einkauf' },
+    ],
+  },
+  {
+    id: 3,
+    type: 'new_mandate',
+    score: 0.5,
+    details: {},
+    created_at: '2025-06-08T06:00:00.000Z',
+    transaction_id: 4,
+    mandate_id: 12,
+    counterparty: 'Beispiel Streaming BV',
+    message: 'Ein neues Lastschriftmandat wurde zum ersten Mal eingelöst.',
+  },
+  {
+    id: 4,
+    type: 'missing_transaction',
+    score: 0.74,
+    details: { expected_on: '2025-06-01' },
+    created_at: '2025-06-07T06:00:00.000Z',
+    transaction_id: null,
+    mandate_id: 13,
+    counterparty: 'Beispiel Versicherung AG',
+    message: 'Die monatliche Buchung ist im Juni ausgeblieben.',
   },
 ]
