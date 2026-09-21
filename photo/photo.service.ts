@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { createRequire } from "module";
 import exifr from "exifr";
 import { exiftool } from "exiftool-vendored";
-import { eq, and, or, sql, inArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
+import { eq, and, or, sql, inArray, notInArray, ilike, isNull, isNotNull, desc, gt } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import { enqueuePhotoScan, enqueuePhotoScanBulkPerUser, enqueuePoiDetectionForMissingMatches, enqueuePoiDetectionForEmptyMatches, DeferJobError } from "./scan-queue";
 import { notifyUserPhotosScanned } from "./scan-refresh-events";
@@ -2083,7 +2083,9 @@ export async function mergeUploadMetadataIntoExisting(
   // a hiccup here must not fail the duplicate response.
   if (pendingDescription !== undefined) {
     try {
-      await updatePhotoDescriptionLogic(userId, existingPhotoId, pendingDescription);
+      await updatePhotoDescriptionLogic(userId, existingPhotoId, pendingDescription, {
+        fromDeviceSync: true,
+      });
     } catch (err) {
       console.error(`Duplicate upload: description update failed for photo ${existingPhotoId}:`, err);
     }
@@ -2236,7 +2238,7 @@ export async function tryMetadataOnlySync(
     const incoming = input.description?.trim() || null;
     if (incoming !== (existing.description ?? null)) {
       try {
-        await updatePhotoDescriptionLogic(userId, existing.id, incoming);
+        await updatePhotoDescriptionLogic(userId, existing.id, incoming, { fromDeviceSync: true });
       } catch (err) {
         console.error(`Metadata sync: description update failed for photo ${existing.id}:`, err);
       }
@@ -3590,6 +3592,31 @@ export async function deleteDuplicateGroupLogic(
   };
 }
 
+/**
+ * Whether anybody other than `exceptUserId` currently holds this photo as a
+ * favourite. Read right after the actor's own row was written, so their fresh
+ * row is excluded instead of counting itself.
+ *
+ * The AI's quality vote writes a `favorite` row too (see `indexPhotoQuality`),
+ * but a score above the threshold is not somebody picking a photo out — it
+ * must never make the first human like look like a second one.
+ */
+async function favoritedBySomeoneElse(photoId: number, exceptUserId: number): Promise<boolean> {
+  const aiUserId = await getAiUserId();
+  const notThese = aiUserId != null ? [exceptUserId, aiUserId] : [exceptUserId];
+  const row = await dbFirst<{ user_id: number }>(
+    db.select({ user_id: photoCuration.user_id })
+      .from(photoCuration)
+      .where(and(
+        eq(photoCuration.photo_id, photoId),
+        eq(photoCuration.status, "favorite"),
+        notInArray(photoCuration.user_id, notThese),
+      ))
+      .limit(1),
+  );
+  return row !== undefined;
+}
+
 export async function updatePhotoCurationLogic(
   userId: number,
   photoId: number,
@@ -3713,10 +3740,16 @@ export async function updatePhotoCurationLogic(
     }
 
     // A favourite is one of the four acts that put a photo in the content
-    // feed, so it bumps for everyone who can see it — including the actor,
-    // whose own feed should show what they just picked out. Only on the way
-    // *into* favourite: un-favouriting must not re-float anything.
-    if (status === "favorite") {
+    // feed, so the *first* one floats it for everyone who can see it —
+    // including the actor, whose own feed should show what they just picked
+    // out. Every like after that only raises the counter under the photo.
+    //
+    // With a like button on every feed card, one bump per like kept the same
+    // photos cycling back to the top of the whole household's feed: each
+    // member liking the same picture over a week re-floated it as many times,
+    // and because bumps are monotonic it stayed there in between. Only on the
+    // way *into* favourite either, so a change of mind re-floats nothing.
+    if (status === "favorite" && !(await favoritedBySomeoneElse(photoId, userId))) {
       await contentFeed.onFavorite(photoId);
     }
 
@@ -3989,10 +4022,21 @@ export async function updatePhotoDateLogic(
   return { success: true, taken_at: takenAt };
 }
 
+export interface UpdateDescriptionOptions {
+  /**
+   * Set by the device-sync paths, which re-apply the caption the phone
+   * already holds. That is bookkeeping, not somebody writing something for
+   * the household to read, so it never puts the photo back into the content
+   * feed — same reasoning as a corrected capture date.
+   */
+  fromDeviceSync?: boolean;
+}
+
 export async function updatePhotoDescriptionLogic(
   userId: number,
   photoId: number,
-  description: string | null
+  description: string | null,
+  opts: UpdateDescriptionOptions = {}
 ): Promise<{ success: boolean; description: string | null }> {
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
@@ -4003,14 +4047,21 @@ export async function updatePhotoDescriptionLogic(
   }
 
   const trimmed = description?.trim() || null;
+  // Compared trimmed on both sides: a legacy import whose stored text only
+  // differs in surrounding whitespace is being normalised here, not written.
+  const isNewText = trimmed !== null && trimmed !== (photo.description?.trim() || null);
 
   // 1. Update database
   await dbExec(db.update(photos).set({ description: trimmed }).where(eq(photos.id, photoId)));
 
-  // Content feed: a written description bumps the photo for everyone who
-  // sees it. Clearing one does not — there is nothing new to read, and
-  // re-floating a photo because its text was deleted reads as a mistake.
-  if (trimmed) {
+  // Content feed: a *newly written* description bumps the photo for everyone
+  // who sees it. Three cases deliberately do not. Clearing the text: there is
+  // nothing new to read, and re-floating a photo because its text was deleted
+  // reads as a mistake. Saving the same text again: no client compares before
+  // sending, so opening the editor and confirming without a change used to
+  // re-float the photo for the whole household. And a device sync, which only
+  // carries the phone's existing caption across.
+  if (isNewText && !opts.fromDeviceSync) {
     await contentFeed.onDescriptionWritten(photoId);
   }
 
