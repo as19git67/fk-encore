@@ -164,6 +164,7 @@ struct TripDayMapView: View {
             tint: pinColour(for: entry.stop),
             emphasised: highlighted?.stop?.rowId == entry.stop.rowId,
             extentEnd: entry.stop.extent?.end,
+            course: entry.stop.extent?.via ?? [],
         )
     }
 

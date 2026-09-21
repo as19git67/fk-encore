@@ -16,6 +16,8 @@
  *   GET    /pois/categories       — the category vocabulary /pois/search accepts
  *   POST   /import                — { slug, postgresDb, pbfUrl }
  *   GET    /regions/:database/tables — which style tables it has
+ *   GET    /regions/:database/routes/:osmId/geometry — one route's full
+ *                                   course, unsimplified, for export
  *   DELETE /regions/:database     — drop a region database (admin)
  *
  * Authentication: the geo service runs on a Docker-internal network
@@ -35,6 +37,7 @@ import { hasCoverage } from "./coverage.ts";
 import { waterCrossing } from "./water.ts";
 import { PoiSearchError, searchPois, type PoiSearchOptions } from "./poi-search.ts";
 import { RouteSearchError, searchRoutes, type RouteSearchOptions } from "./route-search.ts";
+import { routeGeometry } from "./route-geometry.ts";
 import { DayTargetError, searchDayTargets, type DayTargetOptions } from "./day-targets.ts";
 import {
   dropRegion,
@@ -314,6 +317,34 @@ app.get("/regions/:database/tables", async (req, res, next) => {
       throw new HttpError(400, `database must match [a-z0-9_]+, got '${database}'`);
     }
     res.json(await regionTables(database));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// One route's course in full, for export (§4.7).
+//
+// Deliberately not a mode of /routes/search: that answers with a shape
+// simplified to fifty metres and thinned to sixty-four points, which is
+// right for a map and wrong for a file somebody follows. Sixty-four
+// points across twenty kilometres cut every switchback off a mountain
+// path. This reads the geometry as imported.
+app.get("/regions/:database/routes/:osmId/geometry", async (req, res, next) => {
+  try {
+    const database = req.params.database ?? "";
+    if (!/^[a-z0-9_]+$/.test(database)) {
+      throw new HttpError(400, `database must match [a-z0-9_]+, got '${database}'`);
+    }
+    const osmId = Number(req.params.osmId);
+    if (!Number.isInteger(osmId) || osmId <= 0) {
+      throw new HttpError(400, `osmId must be a positive integer, got '${req.params.osmId}'`);
+    }
+    const geometry = await routeGeometry(database, osmId);
+    // A relation that is no longer in the region — a re-import dropped
+    // it, a mapper deleted it — is a 404 rather than an empty course,
+    // so a saved link says what happened.
+    if (!geometry) throw new HttpError(404, `no route ${osmId} in ${database}`);
+    res.json(geometry);
   } catch (err) {
     next(err);
   }
