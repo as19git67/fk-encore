@@ -7,10 +7,11 @@ const props = defineProps<{
   loading?: 'lazy' | 'eager';
   objectFit?: 'cover' | 'contain' | 'fill' | 'none' | 'scale-down';
   imageStyle?: any;
-  /** When true, the slot container stays at 0/0/100%/100% and skips the
-   *  getBoundingClientRect() recalculation. Use this inside a CSS-transformed
-   *  ancestor (e.g. pinch-to-zoom wrapper) where getBoundingClientRect returns
-   *  scaled values that would misplace the slot. */
+  /** When true, the slot container is measured from layout sizes only
+   *  (`clientWidth` / `offsetLeft`), never from getBoundingClientRect(). Use
+   *  this inside a CSS-transformed ancestor (e.g. pinch-to-zoom wrapper),
+   *  where getBoundingClientRect() returns screen pixels that the slot — laid
+   *  out inside that same transform — would scale a second time. */
   staticSlot?: boolean;
 }>();
 
@@ -170,19 +171,38 @@ const getRenderedObjectRectInImageBox = (img: HTMLImageElement) => {
   };
 };
 
+const fullSlot = {
+  top: '0px',
+  left: '0px',
+  width: '100%',
+  height: '100%',
+};
+
 const updateSlotBounds = () => {
+  const wrapper = imageContentWrapperRef.value;
+  const img = imgRef.value;
+
+  // Inside a transformed ancestor the slot is laid out in the same transformed
+  // frame as the image, so layout pixels are the ones that line up; asking
+  // getBoundingClientRect() would return screen pixels the transform then
+  // applies a second time. The rendered picture is what the slot has to cover:
+  // under `object-fit: contain` the image box is regularly wider than the
+  // picture in it, and a slot spanning the box put every overlay — the face
+  // rectangle, the text layer — beside the thing it marks.
   if (props.staticSlot) {
+    if (!img || !img.clientWidth || !img.clientHeight) {
+      slotContainerStyle.value = { ...fullSlot };
+      return;
+    }
+    const rendered = getRenderedObjectRectInImageBox(img);
     slotContainerStyle.value = {
-      top: '0px',
-      left: '0px',
-      width: '100%',
-      height: '100%',
+      left: `${img.offsetLeft + rendered.x}px`,
+      top: `${img.offsetTop + rendered.y}px`,
+      width: `${rendered.width}px`,
+      height: `${rendered.height}px`,
     };
     return;
   }
-
-  const wrapper = imageContentWrapperRef.value;
-  const img = imgRef.value;
 
   if (!wrapper || !img) {
     slotContainerStyle.value = {
