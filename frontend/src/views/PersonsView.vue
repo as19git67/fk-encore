@@ -23,6 +23,8 @@ import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import type { FilterChip } from '../components/layout/listToolbar'
 import DateRangePresets from '../components/DateRangePresets.vue'
 import FilterMenu from '../components/FilterMenu.vue'
+import { useBelow } from '../composables/useBreakpoint'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { matchesPhotoFilter } from '../utils/photoFilter'
@@ -730,7 +732,20 @@ const detailToolbar = useListToolbar({
 })
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
+const sheetBelowMd = useBelow('md')
 const mobileSidebarOpen = ref(false)
+
+/**
+ * Below `md` the sidebar is a bottom sheet over the page — a modal, so the
+ * keyboard belongs to it while it is up (issue #1281). Above that breakpoint
+ * the same markup is just a column beside the content, and trapping there
+ * would lock the reader out of the rest of the page.
+ */
+const personSidebarSheet = ref<HTMLElement | null>(null)
+const sheetIsModal = computed(() => mobileSidebarOpen.value && sheetBelowMd.value)
+useFocusTrap(personSidebarSheet, sheetIsModal, {
+  onEscape: () => { mobileSidebarOpen.value = false },
+})
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadData()
@@ -860,7 +875,15 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       />
 
       <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
-      <div class="person-sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+      <div
+          ref="personSidebarSheet"
+          class="person-sidebar-sheet"
+          :class="{ 'is-open': mobileSidebarOpen }"
+          :role="sheetIsModal ? 'dialog' : undefined"
+          :aria-modal="sheetIsModal ? 'true' : undefined"
+          aria-label="Fotodetails"
+          tabindex="-1"
+        >
         <div class="sidebar-sheet-header">
           <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
             <i class="pi pi-times" />

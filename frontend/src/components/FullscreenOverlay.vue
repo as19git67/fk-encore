@@ -6,6 +6,7 @@ import Menu from 'primevue/menu'
 import HeicImage from './HeicImage.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import PhotoTextLayer from './PhotoTextLayer.vue'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { getPhotoOcrCached } from '../composables/usePhotoMetaCache'
 import type { ViewTransform } from '../utils/ocrLayout'
 import { getPhotoUrl, type Photo, type CurationStatus, type PhotoLinkVisibility, type PhotoOcrBlock } from '../api/photos'
@@ -955,6 +956,19 @@ function locationLabel(photo: Photo) {
 // the element to the real screen, hiding everything else. We toggle it
 // on the outer overlay element so the toolbar / nav stays inside.
 const overlayRef = ref<HTMLElement | null>(null)
+
+/**
+ * The viewer covers the page, so the keyboard belongs to it while it is open
+ * (issue #1281). No `onEscape` here: this component already handles Escape
+ * itself, together with the arrows and its hotkeys, and closes the details
+ * flyout first when that is open. The trap starts on the close button rather
+ * than the first control — that is the one a reader arriving by keyboard
+ * wants, and it is the way back out.
+ */
+const overlayOpen = ref(true) // this component only exists while open
+useFocusTrap(overlayRef, overlayOpen, {
+  initialFocus: () => overlayRef.value?.querySelector<HTMLElement>('.fs-topbar button') ?? null,
+})
 const isRealFullscreen = ref(false)
 const fullscreenSupported = ref(detectFullscreenSupport())
 
@@ -1073,7 +1087,15 @@ onUnmounted(() => {
 
 <template>
   <Teleport to="body">
-  <div ref="overlayRef" class="fullscreen-overlay" @click="closeOverlay">
+  <div
+    ref="overlayRef"
+    class="fullscreen-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Foto im Vollbild"
+    tabindex="-1"
+    @click="closeOverlay"
+  >
     <!-- Preload neighbours only after current image has loaded -->
     <div v-if="currentLoaded" style="display: none">
       <HeicImage v-if="prevPhoto" :src="neighbourPreloadSrc(prevPhoto)" />

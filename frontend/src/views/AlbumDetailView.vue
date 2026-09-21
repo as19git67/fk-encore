@@ -25,7 +25,8 @@ import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
-import { upTo, useMediaQuery } from '../composables/useBreakpoint'
+import { upTo, useBelow, useMediaQuery } from '../composables/useBreakpoint'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
@@ -2368,7 +2369,20 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
 
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
+const sheetBelowMd = useBelow('md')
 const mobileSidebarOpen = ref(false)
+
+/**
+ * Below `md` the sidebar is a bottom sheet over the page — a modal, so the
+ * keyboard belongs to it while it is up (issue #1281). Above that breakpoint
+ * the same markup is just a column beside the content, and trapping there
+ * would lock the reader out of the rest of the page.
+ */
+const sidebarSheet = ref<HTMLElement | null>(null)
+const sheetIsModal = computed(() => mobileSidebarOpen.value && sheetBelowMd.value)
+useFocusTrap(sidebarSheet, sheetIsModal, {
+  onEscape: () => { mobileSidebarOpen.value = false },
+})
 /** Whether the details flyout inside the fullscreen overlay is open.
  *  Shared between the grid- and map-mode fullscreens (only one is ever
  *  visible at a time). Kept as a persistent ref so that navigating
@@ -2718,7 +2732,15 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         </div>
 
         <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
-        <div class="sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+        <div
+          ref="sidebarSheet"
+          class="sidebar-sheet"
+          :class="{ 'is-open': mobileSidebarOpen }"
+          :role="sheetIsModal ? 'dialog' : undefined"
+          :aria-modal="sheetIsModal ? 'true' : undefined"
+          aria-label="Fotodetails"
+          tabindex="-1"
+        >
           <div class="sidebar-sheet-header">
             <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
               <i class="pi pi-times" />

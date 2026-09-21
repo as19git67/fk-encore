@@ -110,6 +110,15 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
     in einem Handler beendete den Tag-Match zu früh. Der Parser achtet jetzt
     auf Anführungszeichen; ein Knopf in einem `aria-hidden`-Teilbaum
     (`ResponsiveToolbar`s Messzeile) ist ausgenommen.
+  - ✅ `composables/useFocusTrap.ts` (aus dem Betrieb gemeldet): Der
+    Rückblick-„Dialog" war gar keiner — ein handgebautes `<div>` über der
+    Seite, ohne `role`, ohne Fokus, ohne Escape. PrimeVues `Dialog` macht das
+    alles von sich aus (nachgemessen), die handgebauten Overlays nicht.
+    Angeschlossen: Rückblick-Detail, Vollbild, Fotovergleich und die
+    Bottom-Sheets in Albumdetail und Personen — letztere nur unterhalb `md`,
+    darüber ist dieselbe Markup eine normale Spalte. Story
+    `Views/RecapsView` (inkl. „Detail geöffnet") macht den gemeldeten Fall
+    überhaupt erst prüfbar.
   - ⬜ Stories je Seitenzustand.
 
 Abweichungen vom Entwurf (Etappe 1):

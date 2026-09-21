@@ -16,6 +16,7 @@ import {
   type Face,
 } from '../api/photos'
 import type { FeedPhotoItem } from '../api/photoFeed'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { getPhotoFacesCached } from '../composables/usePhotoMetaCache'
 import { useFocusPeaking } from '../composables/useFocusPeaking'
@@ -658,6 +659,16 @@ function handleCancel() {
   emit('close')
 }
 
+/**
+ * The comparison covers the page, so the keyboard belongs to it while it is
+ * open (issue #1281). No `onEscape`: the handler below already owns Escape
+ * and unwinds the right layer — the quality panel, then a zoom, then the
+ * view itself.
+ */
+const compareRoot = ref<HTMLElement | null>(null)
+const compareOpen = ref(true) // this component only exists while open
+useFocusTrap(compareRoot, compareOpen)
+
 // ── Keyboard shortcuts ──
 
 function handleKeydown(e: KeyboardEvent) {
@@ -1227,7 +1238,14 @@ function compareTileSrc(photo: Photo, width?: number): string {
 
 <template>
   <Teleport to="body">
-    <div class="compare-overlay">
+    <div
+      ref="compareRoot"
+      class="compare-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Fotos vergleichen"
+      tabindex="-1"
+    >
 
       <!-- ── COMPARE PHASE ── -->
       <template v-if="phase === 'compare' && currentPair">

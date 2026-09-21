@@ -1198,6 +1198,17 @@ Unter `sm` nimmt ein Dialog die ganze Breite und höchstens `90dvh` — auf
 360px gibt es kein „neben der Seite". Eine Ausnahme ist der Fotoeditor: der
 ist absichtlich Vollbild und gehört zu keiner der drei Größen.
 
+Wer die Seite überdeckt, schuldet der Tastatur dreierlei (Issue #1281):
+beim Öffnen wandert der Fokus hinein, Tab und Umschalt+Tab laufen darin im
+Kreis, und beim Schließen kehrt der Fokus dorthin zurück, von wo aus
+geöffnet wurde. PrimeVues `Dialog` erledigt das selbst. Ein handgebautes
+Overlay nimmt `useFocusTrap(container, active, { onEscape })` aus
+`composables/useFocusTrap.ts` und trägt `role="dialog"`, `aria-modal="true"`,
+ein `aria-label` und `tabindex="-1"`. Wer Escape schon selbst behandelt (das
+Vollbild, der Fotovergleich), lässt `onEscape` weg. Ein Bereich, der nur
+unterhalb eines Breakpoints modal ist (die Bottom-Sheets), gibt ein `active`
+mit, das genau dann wahr ist — darüber wäre die Falle ein Käfig.
+
 Fußzeile: links Sekundär/Abbrechen, rechts Primär. Eine destruktive Aktion
 steht ganz links, durch einen Spacer von dem Paar getrennt, und fragt über
 `ConfirmDialog` nach, wobei benannt wird, was gelöscht wird.
