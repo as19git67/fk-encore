@@ -115,7 +115,7 @@ onMounted(load)
         :disabled="selectedIds.length === 0"
         @click="addToCollectionOpen = true"
       />
-      <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
+      <Button icon="pi pi-refresh" aria-label="Liste neu laden" v-tooltip.bottom="'Neu laden'" text rounded :loading="loading" @click="load" />
     </template>
 
     <template #notice>

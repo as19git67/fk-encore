@@ -102,6 +102,14 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
     Ausreißer mit drei Knöpfen sind `v-if`-Zustände und damit in Ordnung.
   - ✅ Detailseiten: `UserDetailView` hatte als einzige keinen
     Zurück-Knopf — jetzt derselbe wie überall, über `useModuleBack`.
+  - ✅ 46 Icon-Knöpfe ohne Beschriftung haben ein `aria-label` bekommen —
+    Löschen, Umbenennen, Verschieben, Absenden waren für einen Screenreader
+    alle „Schaltfläche". Umschalter (Favorit, Ausblenden) benennen ihren
+    Zustand. `scripts/check-button-labels.mjs` hält das, im pre-commit-Hook,
+    mit eigenen Tests. Die erste Zählung lag bei 48 und war falsch: ein `=>`
+    in einem Handler beendete den Tag-Match zu früh. Der Parser achtet jetzt
+    auf Anführungszeichen; ein Knopf in einem `aria-hidden`-Teilbaum
+    (`ResponsiveToolbar`s Messzeile) ist ausgenommen.
   - ⬜ Stories je Seitenzustand.
 
 Abweichungen vom Entwurf (Etappe 1):

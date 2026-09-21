@@ -140,7 +140,7 @@ async function save() {
           </label>
         </div>
         <InputText v-model="slot.time" placeholder="HH:MM" class="time-input" />
-        <Button icon="pi pi-trash" severity="danger" text @click="removeSlot(i)" />
+        <Button icon="pi pi-trash" aria-label="Zeitpunkt entfernen" severity="danger" text @click="removeSlot(i)" />
       </div>
 
       <div class="actions">

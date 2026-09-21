@@ -632,7 +632,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
                 :disabled="!detail"
                 @click="detail && handleDismiss(detail)"
               />
-              <Button icon="pi pi-times" severity="secondary" text @click="closeDetail" />
+              <Button icon="pi pi-times" aria-label="Schließen" severity="secondary" text @click="closeDetail" />
             </div>
           </header>
 

@@ -8,6 +8,8 @@
 #   2. Frontend type-check — `vue-tsc --noEmit` over the app config.
 #   2b. Colour audit — styles must ask the theme, not name colours, or dark
 #      mode breaks one view at a time. (See scripts/check-css-tokens.mjs.)
+#   2c. Button labels — an icon button that says nothing is a button a screen
+#      reader cannot announce. (See scripts/check-button-labels.mjs.)
 #   3. iOS build number — derives CURRENT_PROJECT_VERSION from the commit
 #      count whenever the commit touches ios/ (see the script's header).
 #
@@ -31,6 +33,15 @@ STAGED_STYLES=$(git diff --cached --name-only --diff-filter=ACM -- 'frontend/src
 if [ -n "$STAGED_STYLES" ]; then
   # shellcheck disable=SC2086 -- the list is newline-separated paths, no globs
   node scripts/check-css-tokens.mjs $STAGED_STYLES
+fi
+
+# --- 2c. Button labels ----------------------------------------------------
+# Same idea, same staged files: an icon button needs an aria-label or a
+# tooltip, or nothing announces what it does.
+STAGED_VUE=$(git diff --cached --name-only --diff-filter=ACM -- 'frontend/src/**/*.vue')
+if [ -n "$STAGED_VUE" ]; then
+  # shellcheck disable=SC2086 -- the list is newline-separated paths, no globs
+  node scripts/check-button-labels.mjs $STAGED_VUE
 fi
 
 # --- 3. iOS build number --------------------------------------------------

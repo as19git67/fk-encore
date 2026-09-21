@@ -246,6 +246,7 @@ function formatRelative(iso: string): string {
             <div class="reactions__edit-actions">
               <Button
                 icon="pi pi-check"
+                aria-label="Kommentar speichern"
                 severity="success"
                 text
                 rounded
@@ -254,6 +255,7 @@ function formatRelative(iso: string): string {
               />
               <Button
                 icon="pi pi-times"
+                aria-label="Bearbeiten abbrechen"
                 severity="secondary"
                 text
                 rounded

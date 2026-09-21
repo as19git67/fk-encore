@@ -531,19 +531,19 @@ watch(() => props.readOnly, (ro) => {
         <div v-if="isEditingDescription" class="description-editor">
           <textarea v-model="descriptionText" class="p-inputtext description-textarea" rows="3" placeholder="Beschreibung eingeben…" @keydown.escape="cancelEditDescription" />
           <div class="edit-actions">
-            <Button icon="pi pi-check" severity="success" text rounded @click="saveDescription" :loading="savingDescription" />
-            <Button icon="pi pi-times" severity="danger" text rounded @click="cancelEditDescription" :disabled="savingDescription" />
+            <Button icon="pi pi-check" aria-label="Beschreibung speichern" severity="success" text rounded @click="saveDescription" :loading="savingDescription" />
+            <Button icon="pi pi-times" aria-label="Bearbeiten abbrechen" severity="danger" text rounded @click="cancelEditDescription" :disabled="savingDescription" />
           </div>
         </div>
         <div v-else-if="photo.description" class="description-text">
           <i class="pi pi-align-left meta-icon description-icon" />
           <span class="description-body">{{ photo.description }}</span>
-          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" aria-label="Beschreibung bearbeiten" text rounded size="small" @click="startEditDescription" class="edit-btn" />
         </div>
         <div v-else class="empty-description">
           <i class="pi pi-align-left meta-icon description-icon" />
           <span class="empty-description-text">Keine Beschreibung</span>
-          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" text rounded size="small" @click="startEditDescription" class="edit-btn" />
+          <Button v-if="canEditPhotoMeta" icon="pi pi-pencil" aria-label="Beschreibung hinzufügen" text rounded size="small" @click="startEditDescription" class="edit-btn" />
         </div>
       </div>
 
@@ -603,13 +603,13 @@ watch(() => props.readOnly, (ro) => {
         <div class="meta-row">
           <i class="pi pi-calendar meta-icon" />
           <span class="meta-value date-value">{{ formatPhotoDateDisplay(photo) }}</span>
-          <Button v-if="canEditPhotoMeta && !isEditingDate" icon="pi pi-pencil" text rounded size="small" @click="emit('start-edit-date')" class="edit-btn" />
+          <Button v-if="canEditPhotoMeta && !isEditingDate" icon="pi pi-pencil" aria-label="Aufnahmedatum bearbeiten" text rounded size="small" @click="emit('start-edit-date')" class="edit-btn" />
         </div>
         <div v-if="isEditingDate" class="date-editor">
           <DatePicker v-model="editDate" showTime hourFormat="24" fluid />
           <div class="edit-actions">
-            <Button icon="pi pi-check" severity="success" text rounded @click="emit('update-date')" :loading="updatingDate" />
-            <Button icon="pi pi-times" severity="danger" text rounded @click="emit('cancel-edit-date')" :disabled="updatingDate" />
+            <Button icon="pi pi-check" aria-label="Datum speichern" severity="success" text rounded @click="emit('update-date')" :loading="updatingDate" />
+            <Button icon="pi pi-times" aria-label="Bearbeiten abbrechen" severity="danger" text rounded @click="emit('cancel-edit-date')" :disabled="updatingDate" />
           </div>
         </div>
       </div>

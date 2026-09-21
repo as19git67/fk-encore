@@ -1218,7 +1218,7 @@ onUnmounted(() => {
 
       <!-- Top bar: back + date/location (centered) + counter -->
       <div class="fs-topbar" @click.stop>
-        <Button icon="pi pi-arrow-left" rounded text @click="closeOverlay" />
+        <Button icon="pi pi-arrow-left" aria-label="Vollbild schließen" rounded text @click="closeOverlay" />
 
         <div class="fs-center">
           <!-- Slot for custom center content (e.g. person name + rename btn) -->
@@ -1440,6 +1440,7 @@ onUnmounted(() => {
       <Button
         v-if="prevPhoto"
         icon="pi pi-chevron-left"
+        aria-label="Vorheriges Foto"
         class="fs-nav fs-nav-left"
         rounded text
         @click.stop="emit('prev')"
@@ -1447,6 +1448,7 @@ onUnmounted(() => {
       <Button
         v-if="nextPhoto"
         icon="pi pi-chevron-right"
+        aria-label="Nächstes Foto"
         class="fs-nav fs-nav-right"
         rounded text
         @click.stop="emit('next')"
