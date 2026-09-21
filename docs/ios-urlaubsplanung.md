@@ -1096,13 +1096,72 @@ leere Liste zu zeigen, die wie „hier gibt es nichts" aussieht.
 **In der App (Etappe 2, umgesetzt):** „Strecke anlegen" im Menü des Tages —
 Name, Start und Ende über die Ortssuche des Geräts, Dauer, optional Länge
 und Anstieg. Kandidatenliste, Tagesplan, Pin-Sheet und Detail zeigen
-„Strecke · 10 km · 600 Hm"; beide Karten zeichnen vom Punkt zum Ende eine
-gestrichelte Luftlinie mit Zielflagge — gestrichelt, weil die App keinen
-Router hat und das nicht verschweigt (§9.5).
+„Strecke · 10 km · 600 Hm".
 
-**Was es nicht werden soll:** ein Tourenplaner mit Höhenprofil und
-GPX-Navigation. Die Grenze aus §9.5 gilt: Die App sagt „heute Vormittag die
-Ponale, ab Riva, ca. 3 h, Ende am Ledrosee" und übergibt für den Weg selbst
+**Der Verlauf auf der Karte (Etappe 6, umgesetzt):**
+
+Der Verlauf lag seit Etappe 5 in der Datenbank und kam nie auf einem
+Bildschirm an: Die Suchantwort trug ihn nicht, das Swift-Modell hatte kein
+Feld dafür, und beide Karten zeichneten weiter die gestrichelte Luftlinie von
+Etappe 2 — obwohl die App wusste, wo der Weg wirklich läuft.
+
+Jetzt tragen ihn beide Antworten, und **welche Linie man sieht, sagt, wie viel
+bekannt ist**: Wo OSM den Verlauf hat, wird er durchgezogen gezeichnet, weil
+das der Weg ist. Wo nicht — eine Relation mit Lücken, ein Plan von vor dieser
+Etappe —, bleibt die gestrichelte Sehne mit Zielflagge, weil die App keinen
+Router hat und das nicht verschweigt (§9.5). Dieselbe Unterscheidung wie bei
+`imported: false`: zwei verschiedene Antworten, zwei verschiedene Bilder.
+
+Dazu führt jede Zeile in „Strecken in der Nähe" auf einen eigenen Bildschirm
+mit der Karte. Eine Liste von Namen ist keine Entscheidung — zwei
+Zehn-Kilometer-Wanderungen aus derselben Stadt sind nicht dieselbe Wanderung,
+und erst der Verlauf sagt, welche am See bleibt und welche über den Grat geht.
+
+**Die Strecke mitnehmen (Etappe 7, umgesetzt):**
+
+Der Planer entscheidet, *welcher* Weg einen Tag wert ist; gegangen wird er mit
+etwas anderem. Komoot, Organic Maps, Outdooractive und ein Garmin können das,
+und alle lesen GPX — also gibt es auf dem Streckenbildschirm „Als GPX
+exportieren", und das Teilen-Menü übergibt die Datei an die App, die sie
+haben will. Das ist keine Aufweichung der Grenze aus §9.5, sondern genau sie:
+übergeben statt selbst navigieren (§9.1).
+
+Drei Entscheidungen stecken darin, und jede ist eine, bei der das Naheliegende
+falsch wäre:
+
+- **Die Geometrie wird noch einmal geholt, unvereinfacht**
+  (`geo/src/route-geometry.ts`). Der Verlauf im Plan ist auf 50 m vereinfacht
+  und auf 64 Punkte ausgedünnt — richtig für eine Karte, falsch für eine
+  Datei, der jemand folgt: 64 Punkte über zwanzig Kilometer schneiden jede
+  Serpentine ab, und wer dem Ergebnis folgt, verlässt den Weg. Deshalb ist es
+  eine eigene Abfrage und nicht ein Modus der Suche — damit niemand
+  versehentlich die Kartenlinie exportiert.
+- **Ein `<trk>`, nie ein `<rte>`.** Eine `<rte>` ist eine Liste von Punkten,
+  *zwischen denen* die lesende App selbst routet — bei einem ausgeschilderten
+  Weg heißt das: sie schlägt einen anderen vor. Ein `<trk>` ist der Verlauf
+  selbst.
+- **Lücken bleiben Lücken.** Eine Relation, deren Teile sich nicht schließen,
+  wird zu mehreren `<trkseg>` in einem `<trk>`. Ein durchgezogener Strich über
+  das Loch wäre eine Linie, die niemand gehen kann, ausgegeben als
+  ausgeschilderter Weg (§15.3). Steht auch in der Beschreibung der Datei, denn
+  wer sie in sechs Wochen öffnet, erinnert sich nicht.
+
+Keine Höhenwerte: Die Relation trägt *eine* Zahl für den ganzen Weg, und die
+Geometrie hat kein z. Ein `<ele>` pro Punkt wäre ein erfundenes Profil. Die
+Gesamtsumme steht in der Beschreibung, wo sie nicht mit einer Messung
+verwechselt werden kann.
+
+Der Weg zur Datei führt **durch den Plan** (`GET /trip-planner/routes/gpx` mit
+`planId`, `legIndex`, `osmRef`): ein Plan, den der Aufrufende sehen darf, eine
+Etappe, die es gibt, eine Region, die den Ort abdeckt. Niemand nennt eine
+Regionsdatenbank und eine Relations-ID und bekommt sie ausgelesen. Jedes
+„Nein", das man dabei erreichen kann, hat einen eigenen Satz: kein Plan, keine
+Etappe, keine importierte Region, eine Relation, die ein Neuimport hat fallen
+lassen, und eine ohne brauchbaren Verlauf.
+
+**Was es weiterhin nicht werden soll:** ein Tourenplaner mit Höhenprofil und
+eigener Navigation. Die App sagt „heute Vormittag die Ponale, ab Riva, ca. 3 h,
+Ende am Ledrosee", zeigt, wo sie langgeht, und übergibt für den Weg selbst
 nach draußen (§9.1).
 
 ## 5. Umplanen als Kernmechanik
