@@ -81,12 +81,17 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
     ein `overflow: hidden`, das es nicht braucht), die Untermenü-Einträge
     (der Streifen scrollt waagrecht und klippt damit auch senkrecht) und die
     Sammelmappen-Zeilen (füllen die scrollende Spalte). Platz macht jetzt der
-    Container über `--focus-ring-reach`. `utils/focusRingCheck.ts` prüft das;
-    Stories schalten es mit `focusRingCheck: true` scharf (AppShell und
-    Dokumente sind es).
-  - ⬜ Übrige abgeschnittene Ringe: Dialogfußzeilen, `photo-mini-map-wrap`,
-    `meta-panel`, `ScrollX`, TripMap und die DataTable-Kopfzeile. Gemessen,
-    aber noch nicht behoben — deshalb ist die Prüfung noch opt-in.
+    Container über `--focus-ring-reach`.
+  - ✅ Die übrigen Stellen: `meta-panel` (Dokumentdetail), die
+    DataTable-Kopfzeile (global, PrimeVues eigener Scroller), `ScrollX` und
+    die Foto-Minikarte. Letztere kann keinen Platz machen — ihr
+    `overflow: hidden` rundet die Kacheln —, also zeichnet der Link seinen
+    Ring innen (`--focus-ring-offset-inset`). Alle Stories sind sauber, die
+    Prüfung (`utils/focusRingCheck.ts`) läuft jetzt für jede Story statt
+    opt-in. Was sie nicht mehr meldet: 1px-Container von
+    Screenreader-Feldern, Elemente mit Ring nach innen, und Elemente, die
+    über den Rand *hinaus*ragen — das ist Überlauf und hat seine eigene
+    Prüfung.
   - ⬜ Dialoge, Detailseiten-Aktionen, Stories je Seitenzustand.
 
 Abweichungen vom Entwurf (Etappe 1):

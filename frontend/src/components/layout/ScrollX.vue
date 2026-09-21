@@ -56,6 +56,12 @@ defineExpose({ el, update })
   min-width: 0;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
+  /* This is a scroller, so it clips — and the last tile in the strip sits
+     flush with the end of the scrollable canvas, where no amount of
+     scrolling brings its focus ring back. Room on every side (the vertical
+     axis clips too), taken straight off again on the outside. */
+  padding: var(--focus-ring-reach);
+  margin: calc(-1 * var(--focus-ring-reach));
 }
 .scroll-x:focus-visible {
   outline: var(--focus-ring);

@@ -70,6 +70,7 @@ function scene(container: Spec, child: Spec) {
       overflow: styles.get(el) ?? 'visible',
       visibility: 'visible',
       display: 'block',
+      outlineOffset: '2px',
     }),
   })
 }
@@ -131,6 +132,47 @@ describe('findClippedFocusRings', () => {
     )
     expect(found).toHaveLength(1)
     expect(found[0].sides).toEqual(['top'])
+  })
+
+  it('says nothing about an element that draws its ring inside itself', () => {
+    const root = document.createElement('div')
+    const box = document.createElement('div')
+    const link = document.createElement('a')
+    link.setAttribute('href', '#')
+    box.appendChild(link)
+    root.appendChild(box)
+    const rect = (el: Element, b: Box) =>
+      Object.defineProperty(el, 'getBoundingClientRect', {
+        value: () => ({ ...b, width: b.right - b.left, height: b.bottom - b.top, x: b.left, y: b.top, toJSON: () => b }),
+      })
+    // The link covers the box edge to edge, and the box clips on purpose.
+    rect(box, column)
+    rect(link, column)
+
+    const found = findClippedFocusRings(root, {
+      reach: 4,
+      getStyle: (el) => ({
+        overflowX: el === box ? 'hidden' : 'visible',
+        overflowY: el === box ? 'hidden' : 'visible',
+        overflow: el === box ? 'hidden' : 'visible',
+        visibility: 'visible',
+        display: 'block',
+        // The negative offset is the element saying "my ring is inside me".
+        outlineOffset: el === link ? '-2px' : '2px',
+      }),
+    })
+    expect(found).toEqual([])
+  })
+
+  it('leaves an element that reaches past the edge alone — that is overflow', () => {
+    // Sticking out is a different bug, and the canvas numbers do not
+    // describe such an element: reporting it produces a finding that the
+    // padding fix cannot resolve.
+    const found = scene(
+      { box: column, overflow: 'auto', scrollWidth: 200 },
+      { box: { left: 20, top: 10, right: 260, bottom: 50 } },
+    )
+    expect(found).toEqual([])
   })
 
   it('ignores an element nobody can focus or see', () => {

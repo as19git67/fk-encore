@@ -19,6 +19,12 @@
  * fold is not clipped — it is one scroll away. A row flush with the start or
  * the end of the canvas is: there is nothing left to scroll to.
  *
+ * The walk stops at `<body>`. The page itself clips sideways on purpose
+ * (`overflow-x: clip`, so nothing can scroll the document), but a real page
+ * keeps its content a gutter away from that edge — only a component story,
+ * rendered bare at x=0, ends up flush against it, and that is Storybook's
+ * layout rather than the app's.
+ *
  * Written to run inside `page.evaluate` as well as under jsdom: no imports,
  * no module-level helpers, and the style lookup is injectable.
  */
@@ -43,6 +49,7 @@ export interface FocusRingCheckOptions {
     overflow: string
     visibility: string
     display: string
+    outlineOffset: string
   }
 }
 
@@ -96,34 +103,51 @@ export function findClippedFocusRings(
     if ((el as HTMLElement & { disabled?: boolean }).disabled) continue
     const rect = el.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) continue
+    // A screen-reader-only input (PrimeVue puts one behind every Select and
+    // Checkbox) is a 1px box nobody ever sees a ring on; the visible control
+    // beside it is what gets focused.
+    if (rect.width <= 2 || rect.height <= 2) continue
     if (isInvisible(el)) continue
+    // An element that draws its ring *inside* itself cannot have it clipped
+    // by anything outside. That is the answer where the clipping is the
+    // point — a rounded map cropping its tiles — and it needs no annotation:
+    // the negative offset says so.
+    if (Number.parseFloat(getStyle(el).outlineOffset) < 0) continue
 
     const sides = new Set<string>()
     let culprit: Element | null = null
     let node = el.parentElement
-    while (node && node !== document.documentElement) {
+    while (node && node !== document.body && node !== document.documentElement) {
       const box = node.getBoundingClientRect()
+      // A container smaller than the ring itself is not hiding anything a
+      // user can see — it is the 1px box a screen-reader-only control sits
+      // in. Nothing to make room in.
+      if (box.width <= reach || box.height <= reach) {
+        node = node.parentElement
+        continue
+      }
       if (clips(node, 'x')) {
         // Where the scrollable canvas starts and ends, in viewport
         // coordinates — scrolled back to position zero.
         const canvasLeft = box.left - node.scrollLeft
         const canvasRight = canvasLeft + node.scrollWidth
-        // An element lying wholly outside the canvas is not described by
-        // these numbers at all: it is positioned out of flow, or the
-        // metrics have not caught up. Guessing from them produces findings
-        // nobody can act on, so this axis is left alone.
-        if (rect.right >= canvasLeft && rect.left <= canvasRight) {
-          if (rect.left - canvasLeft < reach - tolerance) sides.add('left')
-          if (canvasRight - rect.right < reach - tolerance) sides.add('right')
-        }
+        // The bug is an element sitting flush with an edge *from the
+        // inside*: there is no room left for its ring and no scrolling that
+        // reveals it. An element reaching past the edge is a different
+        // problem — real overflow, which the 360px guard reports — and the
+        // canvas numbers do not describe it, so this side is left alone.
+        const insideLeft = rect.left - canvasLeft
+        const insideRight = canvasRight - rect.right
+        if (insideLeft >= -tolerance && insideLeft < reach - tolerance) sides.add('left')
+        if (insideRight >= -tolerance && insideRight < reach - tolerance) sides.add('right')
       }
       if (clips(node, 'y')) {
         const canvasTop = box.top - node.scrollTop
         const canvasBottom = canvasTop + node.scrollHeight
-        if (rect.bottom >= canvasTop && rect.top <= canvasBottom) {
-          if (rect.top - canvasTop < reach - tolerance) sides.add('top')
-          if (canvasBottom - rect.bottom < reach - tolerance) sides.add('bottom')
-        }
+        const insideTop = rect.top - canvasTop
+        const insideBottom = canvasBottom - rect.bottom
+        if (insideTop >= -tolerance && insideTop < reach - tolerance) sides.add('top')
+        if (insideBottom >= -tolerance && insideBottom < reach - tolerance) sides.add('bottom')
       }
       if (sides.size > 0 && !culprit) culprit = node
       node = node.parentElement

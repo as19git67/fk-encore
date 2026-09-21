@@ -50,14 +50,14 @@ const config: TestRunnerConfig = {
     const storyContext = await getStoryContext(page, context)
 
     // ── No focus ring clipped away (issue #1281) ──────────────────────────
-    // The ring is drawn outside its element, so a container that clips cuts
-    // it off — invisible until someone navigates by keyboard. Opt-in for
-    // now: the check is accurate, but the tree still has places that have
-    // not been given room (dialog footers, the photo mini map, the DataTable
-    // header row). A story turns it on with
-    // `parameters: { focusRingCheck: true }` once its view is clean, and
-    // then it cannot come back.
-    if (storyContext.parameters?.focusRingCheck === true) {
+    // The ring is drawn outside its element and reaches 4px past it, so a
+    // container that clips cuts it off — invisible until someone navigates
+    // by keyboard. The container makes room; where the clipping is the point
+    // (a rounded map cropping its tiles) the element draws its ring inside
+    // itself instead, and says so with a negative `outline-offset`.
+    // A story may opt out with `parameters: { focusRingCheck: false }`; the
+    // exemption has to say why.
+    if (storyContext.parameters?.focusRingCheck !== false) {
       const clipped = await page.evaluate(findClippedFocusRings)
       if (clipped.length > 0) {
         const list = clipped

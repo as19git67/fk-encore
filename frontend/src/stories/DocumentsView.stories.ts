@@ -46,9 +46,6 @@ export const GeteilteAnsicht: Story = {
 export const MitSammelmappen: Story = {
   name: 'Mit Sammelmappen',
   parameters: {
-    // A row that fills the scrolling column is where the ring ran out of
-    // room; this story is the guard against that coming back.
-    focusRingCheck: true,
     msw: {
       handlers: [
         http.get('/api/document-collections', () =>

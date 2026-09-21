@@ -51,12 +51,6 @@ function shellAt(path: string) {
 
 const meta: Meta = {
   title: 'Layout/AppShell',
-  parameters: {
-    // The navbar and the submenu strip both used to clip a focus ring —
-    // the hamburger lost its left side, the submenu items their top and
-    // bottom (issue #1281). Guarded here so they cannot lose it again.
-    focusRingCheck: true,
-  },
 }
 
 export default meta

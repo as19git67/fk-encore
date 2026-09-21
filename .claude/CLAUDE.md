@@ -64,9 +64,18 @@ margin: calc(-1 * var(--focus-ring-reach));
 ```
 
 Das Padding gibt dem Ring Raum, der negative Rand nimmt ihn außen wieder weg,
-also verschiebt sich nichts. `utils/focusRingCheck.ts` findet die Stellen, an
-denen das fehlt; eine Story schaltet die Prüfung mit
-`parameters: { focusRingCheck: true }` scharf.
+also verschiebt sich nichts.
+
+Wo das Klippen der Zweck ist — eine gerundete Karte, die ihre Kacheln
+beschneidet — und das Element den Container randlos ausfüllt, kann der
+Container keinen Platz machen. Dann zeichnet das Element den Ring in sich
+selbst: `outline-offset: var(--focus-ring-offset-inset)`, und zwar
+unabhängig von `:focus-visible`, damit die Absicht jederzeit am Element
+steht.
+
+Der Storybook-Test-Runner prüft das in jeder Story
+(`utils/focusRingCheck.ts`). Eine Story setzt
+`parameters: { focusRingCheck: false }` nur mit Begründung aus.
 
 Das prüft `scripts/check-css-tokens.mjs` (Issue #1281): es liest die
 `<style>`-Blöcke unter `frontend/src` und lehnt `--p-surface-<n>`, feste
