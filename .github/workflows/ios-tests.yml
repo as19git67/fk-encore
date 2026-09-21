@@ -85,22 +85,6 @@ jobs:
         # the only thing in CI that looks at them at all.
         run: mv "$RUNNER_TEMP/FKPhotos.xcodeproj" FKPhotos.xcodeproj
 
-      - name: Clear DerivedData before the target-based builds
-        # `-derivedDataPath` can't fix this: xcodebuild rejects it
-        # together with `-target` ("-scheme ... required when
-        # specifying -derivedDataPath"), and neither compile step below
-        # has a scheme to give it (the project ships none). The default
-        # location (~/Library/Developer/Xcode/DerivedData/<hash>) has
-        # been observed left behind with a corrupted package checkout
-        # (`SourcePackages/checkouts/.../build` existing as a plain file
-        # instead of a directory) after a prior attempt — the runner's
-        # home directory is evidently not fully wiped between re-runs —
-        # which then fails every subsequent build that resolves
-        # packages. Clearing it before these two steps removes whatever
-        # a previous attempt left behind; a fresh runner has nothing
-        # here anyway, so this is a no-op on the common path.
-        run: rm -rf ~/Library/Developer/Xcode/DerivedData
-
       - name: Compile the share extension
         # The unit tests above build only the SwiftPM package
         # (Sources/FKPhotos). The share extension in F4milShare/ is a
@@ -111,11 +95,24 @@ jobs:
         # `-target` rather than `-scheme`: the project ships no shared
         # schemes, so there is no scheme to name. No tests run here; the
         # extension has none, and it is the compile that was missing.
+        #
+        # `-destination` rather than bare `-sdk iphonesimulator`:
+        # without it, ONLY_ACTIVE_ARCH=YES can't resolve a single active
+        # architecture and xcodebuild builds arm64 and x86_64 at once
+        # ("building for all applicable architectures"). That parallel
+        # build races on creating the SwiftPM package checkout
+        # directories (`SourcePackages/checkouts/<pkg>/build/...`) and
+        # reliably corrupts one into a plain file instead of a
+        # directory — "File exists but is not a directory", reproduced
+        # twice in a row including from an already-cleared DerivedData,
+        # so it's a race inherent to this build, not leftover state.
+        # Pinning one simulator, like the test step above already does,
+        # avoids the concurrent architectures entirely.
         run: |
           xcodebuild build \
             -project FKPhotos.xcodeproj \
             -target F4milShare \
-            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
@@ -131,11 +128,12 @@ jobs:
         # package's OpenAPIGenerator build-tool plugin — xcodebuild
         # refuses to run an unapproved plugin non-interactively, so this
         # needs the same flag the package test run above already passes.
+        # Same `-destination` reasoning as the share extension step.
         run: |
           xcodebuild build \
             -project FKPhotos.xcodeproj \
             -target FKPhotosWidgets \
-            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
             -configuration Debug \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
