@@ -148,6 +148,22 @@ const RULES = [
     },
   },
   {
+    id: 'dead-surface-name',
+    /*
+     * `--p-surface-card`, `--p-surface-ground`, `--p-surface-section` and
+     * their kin wear the PrimeVue 4 prefix and look current, but the theme
+     * defines no such tokens — only the numbered scale (which `surface-scale`
+     * above refuses) and the `--p-content-*` semantics. So the declaration
+     * resolves to nothing and the element simply has no background: it looked
+     * right on a white page and would have looked "right" on a dark one too,
+     * for the wrong reason. Twenty-one of them sat in the tree, including the
+     * PDF viewer's toolbar, which a sticky header then showed through.
+     */
+    pattern: /--p-surface-(?:card|ground|section|overlay|hover|border(?:-color)?|[a-d])\b/g,
+    message:
+      'no such token — PrimeVue 4 has --p-content-background / -hover-background / -border-color',
+  },
+  {
     id: 'legacy-token',
     // PrimeVue 3's unprefixed vocabulary. `--text-xs` … `--text-7xl` and
     // `--focus-ring*` are this app's own tokens, so `--text-color` and

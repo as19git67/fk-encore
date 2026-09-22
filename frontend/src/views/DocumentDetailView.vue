@@ -1687,7 +1687,7 @@ onBeforeUnmount(() => {
 }
 
 .pdf-panel {
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
   /* Clip the panel to its grid track so a wide (zoomed) page can't blow
@@ -1698,21 +1698,27 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/* ── Phone and tablet: the preview needs a height of its own ────────────────
-   One column, and the page no longer scrolls as a whole (PageLayout,
-   scroll="self"), so this panel is a grid item in a box that is already as
-   tall as the viewport. The viewer inside may shrink to nothing — every
-   level of it carries `min-height: 0` so the page stack, and not the
-   document, scrolls — and with nothing asking for height it did exactly
-   that: the panel collapsed to its two borders and `overflow: hidden` took
-   the rendered pages with it. There was no preview on a phone at all.
+/* ── Phone and tablet: one column, one scrollbar ────────────────────────────
+   Everything below each other, in `.page-content`: the pages of the current
+   chunk, the pagination to the next 25, then the document's attributes. The
+   viewer's head stays pinned under the app's stack while they go past.
 
-   A share of the screen, with the stack scrolling inside as on the wide
-   layout. Letting it grow with the pages instead would push the document's
-   own attributes past thirty page-heights of scrolling. */
+   That needs the grid to grow with its content rather than fill the
+   viewport — as a viewport-tall box it left the panel nothing to stretch
+   to, and since every level inside the viewer may shrink to nothing (that
+   is what lets the stack scroll in the wide layout) the preview collapsed
+   to its two borders. `overflow-x: clip` keeps a zoomed page from widening
+   the column; unlike `hidden` it does not make the panel a scroll container,
+   which would pin the head to the panel instead of to the page. */
 @media (max-width: 999px) {
+  .detail-grid {
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
   .pdf-panel {
-    height: 70dvh;
+    overflow-x: clip;
+    overflow-y: visible;
   }
 }
 
@@ -1830,7 +1836,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem;
-  background: var(--p-surface-ground);
+  background: rgba(0, 0, 0, 0.05);
   border-radius: 6px;
   border: 1px solid var(--p-content-border-color);
 }
@@ -1925,7 +1931,7 @@ onBeforeUnmount(() => {
 .text-preview p {
   margin: 0.25rem 0 0;
   padding: 0.5rem;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

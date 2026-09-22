@@ -943,7 +943,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
 /* ── Timeline strip ─────────────────────────────────────────────────────── */
 .trip-timeline-wrapper {
   flex-shrink: 0;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border-top: 1px solid var(--p-content-border-color);
 }
 

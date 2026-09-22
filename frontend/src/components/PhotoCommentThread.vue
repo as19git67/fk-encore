@@ -484,7 +484,7 @@ function formatRelative(iso: string): string {
   align-items: center;
   gap: 0.2rem;
   padding: 0.35rem 0.5rem;
-  border: 1px solid var(--p-surface-border-color, transparent);
+  border: 1px solid var(--p-content-border-color);
   border-radius: 999px;
   background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
   color: var(--p-text-color);

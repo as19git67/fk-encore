@@ -305,7 +305,7 @@ onMounted(load)
   align-items: center;
   transition: background 0.2s;
 }
-.group-item:hover { background: var(--p-surface-ground); }
+.group-item:hover { background: var(--p-content-hover-background); }
 .group-item.active {
   background: var(--p-highlight-background);
   color: var(--p-highlight-color);
