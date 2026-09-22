@@ -216,7 +216,7 @@ onMounted(() => {
   display: flex;
   gap: 0.75rem;
   padding: 0.6rem 0.75rem;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -240,7 +240,7 @@ onMounted(() => {
   border-radius: 6px;
   overflow: hidden;
   flex-shrink: 0;
-  background: var(--p-surface-ground);
+  background: rgba(0, 0, 0, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;

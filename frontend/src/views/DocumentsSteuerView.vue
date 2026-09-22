@@ -525,7 +525,7 @@ onMounted(async () => {
   display: flex;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
   cursor: pointer;

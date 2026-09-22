@@ -336,7 +336,7 @@ onMounted(load)
   flex-direction: column;
   gap: 0.5rem;
   padding: 1rem;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
 }
