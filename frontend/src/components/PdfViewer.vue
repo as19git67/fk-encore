@@ -46,7 +46,6 @@ const pdfDoc = shallowRef<PDFDocumentProxy | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 /** Page navigation, zoom and chunk pagination — sticky in the tall layout. */
 const headRef = ref<HTMLDivElement | null>(null)
-const rootRef = ref<HTMLDivElement | null>(null)
 
 const totalPages = ref(0)
 const chunkIndex = ref(0)
@@ -77,7 +76,6 @@ const pendingPages = new Set<number>()
 const renderingPages = new Set<number>()
 
 let resizeObserver: ResizeObserver | null = null
-let headObserver: ResizeObserver | null = null
 let resizeRaf = 0
 let scanRaf = 0
 /** Guards against a superseded chunk build finishing after a newer one. */
@@ -432,13 +430,45 @@ function clampedPage(value: number): number {
   return Math.min(Math.max(1, Math.floor(value)), Math.max(1, totalPages.value))
 }
 
+/** The nearest ancestor that can actually scroll vertically. */
+function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  let node = el.parentElement
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY
+    if (/auto|scroll|overlay/.test(overflowY) && node.scrollHeight - node.clientHeight > 1) return node
+    node = node.parentElement
+  }
+  return null
+}
+
 function scrollToPageElement(pageNumber: number) {
   const el = pageEls.get(pageNumber)
   if (!el) return
+  // One scroller, by hand, rather than `scrollIntoView`: that walks the whole
+  // ancestor chain and scrolls every box on it that can move. In the tall
+  // layout the page's own scroller is the outer one, and dragging it along
+  // took the pinned head up with it — the controls left the screen on the way
+  // to the page they were used to reach.
+  const scroller = scrollParentOf(el)
+  if (!scroller) return
+  // The head only has to be cleared where it is pinned *over* the scrollport:
+  // in the tall layout the scroller is the page, and the head floats at its
+  // top edge. Where the pages scroll inside their own box the head stands
+  // above it and takes no room at all — subtracting it there left a gap the
+  // size of the toolbar over every page jumped to.
+  const head = scroller.contains(headRef.value) ? headRef.value : null
+  const headHeight = head ? head.getBoundingClientRect().height : 0
+  const margin = Number.parseFloat(getComputedStyle(el).scrollMarginTop) || 0
+  const top =
+    scroller.scrollTop +
+    el.getBoundingClientRect().top -
+    scroller.getBoundingClientRect().top -
+    headHeight -
+    margin
   // Deliberately instant: smooth-scrolling across a 25-page stack drags the
   // visible band over every page in between, which would rasterise the whole
   // chunk on the way to the target.
-  el.scrollIntoView({ block: 'start' })
+  scroller.scrollTo({ top: Math.max(0, top), behavior: 'instant' })
 }
 
 async function goToPage(value: number) {
@@ -561,30 +591,11 @@ watch(() => props.data, (bytes) => {
 
 watch(zoom, () => { void relayout() })
 
-/**
- * Publish the head's height, so a page jumped to comes to rest below it
- * rather than behind it. It changes with the viewport — at phone width the
- * toolbar wraps onto three rows — so it is measured rather than guessed.
- */
-function onHeadResize() {
-  const head = headRef.value
-  const root = rootRef.value
-  if (!head || !root) return
-  // On the root, not the head: the pages that read it are the head's
-  // siblings, and a custom property only reaches what is inside.
-  root.style.setProperty('--pdf-head-height', `${Math.round(head.getBoundingClientRect().height)}px`)
-}
-
 onMounted(() => {
   if (props.data) void loadDocument(props.data)
   if (containerRef.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(onContainerResize)
     resizeObserver.observe(containerRef.value)
-  }
-  if (headRef.value && typeof ResizeObserver !== 'undefined') {
-    headObserver = new ResizeObserver(onHeadResize)
-    headObserver.observe(headRef.value)
-    onHeadResize()
   }
   // Capture phase: `scroll` doesn't bubble, but it does travel the capture
   // path — so one listener catches both the page scrolling (narrow layout)
@@ -597,7 +608,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('scroll', scheduleScan, { capture: true })
   window.removeEventListener('resize', scheduleScan)
   if (resizeObserver) resizeObserver.disconnect()
-  if (headObserver) headObserver.disconnect()
   if (resizeRaf) cancelAnimationFrame(resizeRaf)
   if (scanRaf) cancelAnimationFrame(scanRaf)
   void destroyDoc()
@@ -605,7 +615,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootRef" class="pdf-viewer">
+  <div class="pdf-viewer">
     <!-- Page navigation, zoom and the chunk pagination travel together: in
          the tall layout they stay put while the pages scroll past under
          them. -->
@@ -812,7 +822,10 @@ onBeforeUnmount(() => {
    it, so this costs nothing there. */
 .viewer-head {
   position: sticky;
-  top: 0;
+  /* Where the scroller's own padding sits between its edge and the pinned
+     head, the layout around the viewer says so — `PageLayout` keeps 4px
+     there for focus rings, and sticky measures from inside it. */
+  top: var(--pdf-head-top, 0px);
   z-index: 3;
   flex-shrink: 0;
 }
@@ -952,13 +965,9 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   gap: 0.25rem;
-  /* A page jumped to has to clear whatever is pinned above it: the head,
-     always, plus the app's sticky stack when the page itself is what
-     scrolls. Layouts that scroll the panel from inside override the second
-     part via `--pdf-scroll-margin` — no navbar is in the way there. */
-  scroll-margin-top: calc(
-    var(--pdf-head-height, 0px) + var(--pdf-scroll-margin, calc(var(--app-stack-height) + var(--space-2)))
-  );
+  /* How much room a page jumped to keeps above it, on top of whatever the
+     pinned head needs — `scrollToPageElement` measures that part itself. */
+  scroll-margin-top: var(--pdf-scroll-margin, var(--space-2));
 }
 
 .page-caption {
