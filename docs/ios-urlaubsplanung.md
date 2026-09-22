@@ -1117,6 +1117,33 @@ mit der Karte. Eine Liste von Namen ist keine Entscheidung — zwei
 Zehn-Kilometer-Wanderungen aus derselben Stadt sind nicht dieselbe Wanderung,
 und erst der Verlauf sagt, welche am See bleibt und welche über den Grat geht.
 
+**Wie weit gesucht wird (Etappe 8, umgesetzt):**
+
+Der Umkreis lag bei 15 km und war nicht verstellbar — der Endpunkt konnte seit
+Etappe 5 mehr (bis 50 km), nur schickte die App nie einen Wert. Jetzt steht
+über der Liste ein Wähler mit **15 / 25 / 50 km**.
+
+Drei Stufen statt eines Schiebers, weil zu der Zahl niemand eine Meinung hat:
+Ob 23 oder 27 Kilometer ist keine Entscheidung, „um die Stadt herum", „kurze
+Anfahrt" und „Tagesausflug mit dem Auto" sind eine. 50 ist das Ende der Skala,
+weil es die Grenze des Servers ist (`MAX_RADIUS_M`, und geo weist mehr ab) —
+eine vierte Stufe wäre eine Option, die als Fehler zurückkommt.
+
+Zwei Sätze stehen dabei, die sonst niemand erraten kann:
+
+- **Gemessen wird vom Ausgangspunkt der Etappe bis zur nächsten Stelle der
+  Strecke**, nicht bis zu ihrem Anfang. Eine 60-km-Weitwanderung, die acht
+  Kilometer an der Stadt vorbeiläuft, ist in der Liste, auch wenn ihr Start
+  hundert Kilometer entfernt liegt.
+- **Wenn mehr da ist als die 40 der Antwort**, sagt die Liste es am Ende statt
+  stillschweigend abzuschneiden (§15.3). Mit 50 km passiert das schnell, und
+  eine Liste, die bei vierzig aufhört, liest sich sonst wie eine Gegend mit
+  vierzig Strecken.
+
+Die Wahl merkt sich das Gerät (`trip.routes.radiusKm`): Wie weit jemand zu
+fahren bereit ist, ist eine Gewohnheit und keine Entscheidung über eine Stadt.
+Sie ändert keinen Plan und keine Liste außer der eigenen.
+
 **Die Strecke mitnehmen (Etappe 7, umgesetzt):**
 
 Der Planer entscheidet, *welcher* Weg einen Tag wert ist; gegangen wird er mit

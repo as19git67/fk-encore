@@ -117,6 +117,44 @@ final class TripRouteCourseTests: XCTestCase {
     }
 }
 
+/// How far the route search looks (§4.7).
+///
+/// Three steps, and the end of the scale is not a taste: fifty is the
+/// server's limit, so a fourth step would be an option that comes back
+/// as an error.
+final class TripRouteRadiusTests: XCTestCase {
+
+    func testTheStepsAreTheOnesTheServerAccepts() {
+        XCTAssertEqual(TripRouteRadius.allCases.map(\.km), [15, 25, 50])
+        XCTAssertEqual(TripRouteRadius.far.km, 50, "50 km is MAX_RADIUS_M in routes.ts")
+    }
+
+    func testTheDefaultIsWhatTheSearchDidBefore() {
+        // Nobody who never touches the picker should see a different
+        // list than they saw yesterday.
+        XCTAssertEqual(TripRouteRadius.standard.km, 15)
+    }
+
+    func testMetresAreWhatTheRequestCarries() {
+        XCTAssertEqual(TripRouteRadius.standard.metres, 15_000)
+        XCTAssertEqual(TripRouteRadius.far.metres, 50_000)
+    }
+
+    func testTheLabelIsReadable() {
+        XCTAssertEqual(TripRouteRadius.wider.label, "25 km")
+    }
+
+    func testAStoredNumberNobodyOffersFallsBackRatherThanVanishing() {
+        // A value from an older build, or one edited by hand: the
+        // picker showing nothing selected would be worse than showing
+        // the default.
+        XCTAssertEqual(TripRouteRadius.of(km: 25), .wider)
+        XCTAssertEqual(TripRouteRadius.of(km: 37), .standard)
+        XCTAssertEqual(TripRouteRadius.of(km: 0), .standard)
+        XCTAssertEqual(TripRouteRadius.of(km: -5), .standard)
+    }
+}
+
 /// The file name, which lands in somebody's downloads folder.
 final class TripGpxNameTests: XCTestCase {
 

@@ -21,6 +21,37 @@ import SwiftUI
 ///   - **What the region does not know.** A region imported before the
 ///     planner knew about ways holds none, which is a different answer
 ///     from "there are none here" and is said as one (§15.3).
+/// How far around the city to look for signposted ways (§4.7).
+///
+/// Three steps rather than a slider, and the reason is what the number
+/// means: it is the distance from the leg's anchor to the *nearest
+/// point of the way*, and nobody has an opinion about 23 kilometres
+/// versus 27. What people do have an opinion about is "around town",
+/// "a short drive" and "a day out with the car" — which is what these
+/// three are.
+///
+/// Fifty is the end of the scale because it is the server's limit
+/// (`MAX_RADIUS_M` in `routes.ts`, and geo refuses more); offering
+/// sixty would be an option that comes back as an error.
+enum TripRouteRadius: Int, CaseIterable, Identifiable, Sendable {
+    /// What the search did before anybody could choose.
+    case standard = 15
+    case wider = 25
+    case far = 50
+
+    var id: Int { rawValue }
+    var km: Int { rawValue }
+    var metres: Int { rawValue * 1_000 }
+    var label: String { "\(rawValue) km" }
+
+    /// The step a stored number stands for, falling back to the
+    /// default: a value from an older build — or a hand-edited one —
+    /// should not leave the picker showing nothing.
+    static func of(km: Int) -> TripRouteRadius {
+        TripRouteRadius(rawValue: km) ?? .standard
+    }
+}
+
 @Observable @MainActor
 final class TripNearbyRoutesModel {
     private(set) var routes: [TripNearbyRoute] = []
@@ -37,6 +68,12 @@ final class TripNearbyRoutesModel {
 
     /// Which kinds to ask for. Empty means all four.
     var kinds: Set<String> = []
+    /// How far to look. The screen owns the choice and remembers it;
+    /// the model only carries it into the request.
+    var radius: TripRouteRadius = .standard
+    /// True when the region holds more ways than the answer carried.
+    /// Worth saying, because a wider radius makes it likely.
+    private(set) var hasMore = false
 
     private let planId: Int
     private let legIndex: Int
@@ -53,7 +90,10 @@ final class TripNearbyRoutesModel {
             hasLoaded = true
         }
         do {
-            var query = ["legIndex": String(legIndex)]
+            var query = [
+                "legIndex": String(legIndex),
+                "radiusM": String(radius.metres),
+            ]
             if !kinds.isEmpty { query["kinds"] = kinds.sorted().joined(separator: ",") }
             let response: TripNearbyRoutesResponse = try await APIClient.shared.get(
                 "/trip-planner/plans/\(planId)/routes",
@@ -62,6 +102,7 @@ final class TripNearbyRoutesModel {
             routes = response.routes
             imported = response.imported
             note = response.note
+            hasMore = response.hasMore
             errorMessage = nil
         } catch {
             errorMessage = TripErrorText.describe(error)
@@ -96,14 +137,54 @@ struct TripNearbyRoutesView: View {
     private let planId: Int
     private let legIndex: Int
 
+    /// Remembered per device, because how far somebody is willing to
+    /// drive is a habit rather than a decision about one city. Per
+    /// viewer and nowhere else: it changes no plan and nobody else's
+    /// list.
+    @AppStorage("trip.routes.radiusKm") private var radiusKm = TripRouteRadius.standard.km
+
     init(planId: Int, legIndex: Int) {
         self.planId = planId
         self.legIndex = legIndex
         _model = State(initialValue: TripNearbyRoutesModel(planId: planId, legIndex: legIndex))
     }
 
+    /// The picker's selection, which also reloads.
+    ///
+    /// Through a binding rather than `onChange`: choosing a radius
+    /// *is* asking again, and one place that both stores the choice
+    /// and sends the request cannot get out of step with itself.
+    private var radius: Binding<TripRouteRadius> {
+        Binding(
+            get: { TripRouteRadius.of(km: radiusKm) },
+            set: { chosen in
+                guard chosen.km != radiusKm else { return }
+                radiusKm = chosen.km
+                model.radius = chosen
+                Task { await model.load() }
+            },
+        )
+    }
+
     var body: some View {
         List {
+            Section {
+                Picker("Umkreis", selection: radius) {
+                    ForEach(TripRouteRadius.allCases) { step in
+                        Text(step.label).tag(step)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(model.isLoading)
+            } footer: {
+                // What the number measures, because it is not the
+                // obvious thing: a sixty-kilometre trail that passes
+                // eight kilometres from town is in the list, and its
+                // start may be a hundred kilometres away.
+                Text("Gemessen vom Ausgangspunkt der Etappe bis zur nächsten Stelle "
+                     + "der Strecke — nicht bis zu ihrem Anfang.")
+            }
+
             if model.isLoading && model.routes.isEmpty {
                 HStack { ProgressView(); Text("Wird gesucht…") }
             }
@@ -120,11 +201,28 @@ struct TripNearbyRoutesView: View {
             ForEach(model.routes) { route in
                 row(route)
             }
+
+            // A list that silently stops at forty looks like a region
+            // with forty ways in it. Said at the bottom, where the
+            // list actually ends (§15.3).
+            if model.hasMore {
+                Label("Es gibt mehr als diese — gezeigt werden die, die am nächsten "
+                      + "vorbeilaufen. Ein kleinerer Umkreis macht die Liste schärfer.",
+                      systemImage: "ellipsis.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
         .navigationTitle("Strecken in der Nähe")
         .navigationBarTitleDisplayMode(.inline)
         .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
-        .task { if !model.hasLoaded { await model.load() } }
+        .task {
+            // The remembered radius has to reach the model before the
+            // first request, or the first list would be 15 km and the
+            // picker would say 50.
+            model.radius = TripRouteRadius.of(km: radiusKm)
+            if !model.hasLoaded { await model.load() }
+        }
         .refreshable { await model.load() }
     }
 
