@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, useSlots,
 import { useRoute } from 'vue-router'
 import { PAGE_SCROLLER_KEY, STACK_TARGET_ID, formatDocumentTitle } from './pageLayout'
 import type { AnchorResolution } from './pageLayout'
-import { focusListAnchor, takeListAnchor } from '../../utils/listAnchor'
+import { clearListAnchor, focusListAnchor, takeListAnchor } from '../../utils/listAnchor'
 import type { ListAnchor } from '../../utils/listAnchor'
 import {
   clearPageScroller,
@@ -133,6 +133,14 @@ let restored = false
 async function restorePosition() {
   if (restored) return
   restored = true
+  // Coming back is what earns a restore. Entering the list from the menu is a
+  // fresh start, and the anchor the last visit left behind would otherwise
+  // drag the reader onto a row they had forgotten about — so it is dropped
+  // rather than used, exactly as `listAnchor` describes.
+  if (!navigatedFromHistory()) {
+    clearListAnchor(restoreKey.value, props.legacyAnchorKey)
+    return
+  }
   const anchor = takeListAnchor(restoreKey.value, props.legacyAnchorKey)
   await nextTick()
   if (props.resolveAnchor) {
@@ -146,7 +154,6 @@ async function restorePosition() {
   } else if (anchor && focusListAnchor(contentEl.value ?? document, anchor)) {
     return
   }
-  if (!navigatedFromHistory()) return
   const top = readScrollOffset(route?.fullPath ?? restoreKey.value)
   if (top === null) return
   const el = scroller()

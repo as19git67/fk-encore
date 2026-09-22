@@ -83,6 +83,29 @@ describe('useMediaQuery', () => {
     unmount()
   })
 
+  it('knows the width before the first render, not one frame later', () => {
+    // `matchMedia` answers on the spot, so waiting for `onMounted` only ever
+    // bought a first frame laid out for the wrong screen: the gallery
+    // measured its grid without the sidebar it was about to get, and a phone
+    // rendered the desktop branch of every `useBelow` before correcting it.
+    for (const [width, wide] of [[1000, true], [390, false]] as const) {
+      const media = fakeMatchMedia(width)
+      vi.stubGlobal('matchMedia', media.impl)
+
+      let duringSetup: { wide: boolean; narrow: boolean } | undefined
+      const { unmount } = mountWith(() => {
+        const atLeast = useAtLeast('md')
+        const below = useBelow('md')
+        duringSetup = { wide: atLeast.value, narrow: below.value }
+        return atLeast
+      })
+
+      expect(duringSetup, `${width}px`).toEqual({ wide, narrow: !wide })
+      unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('reads the current width on mount and follows a resize', async () => {
     const media = fakeMatchMedia(1000)
     vi.stubGlobal('matchMedia', media.impl)

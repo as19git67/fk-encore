@@ -192,6 +192,52 @@ describe('useFocusTrap', () => {
     unmount()
   })
 
+  it('gives the focus back when the overlay is unmounted instead of closed', async () => {
+    // How nearly every one of these overlays actually closes: the parent
+    // `v-if`s it away, so `active` stays true to the last and the watcher
+    // never sees a change. Without the unmount hook the focus was left on
+    // <body> and the reader started again at the top of the page.
+    const { opener, overlay } = scene()
+    opener.focus()
+    const unmount = mountTrap(ref(true), ref(overlay))
+
+    await nextTick()
+    await nextTick()
+    expect(document.activeElement?.id).toBe('a')
+
+    unmount()
+    expect(document.activeElement?.id).toBe('opener')
+  })
+
+  it('leaves a dialog that opened on top of it to itself', async () => {
+    // A PrimeVue Dialog opened from inside the overlay is teleported to
+    // <body>, so it sits outside the container although it is the surface
+    // the user is on. Reclaiming its keys made it unusable: Tab was pulled
+    // back into the overlay and Escape closed the overlay underneath it.
+    const { overlay } = scene()
+    const onEscape = vi.fn()
+    const unmount = mountTrap(ref(true), ref(overlay), { onEscape })
+
+    const dialog = document.createElement('div')
+    dialog.className = 'p-dialog'
+    const field = document.createElement('input')
+    dialog.appendChild(field)
+    document.body.appendChild(dialog)
+    field.getClientRects = () => [{}] as unknown as DOMRectList
+    field.focus()
+
+    const tabEvent = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    field.dispatchEvent(tabEvent)
+    expect(tabEvent.defaultPrevented).toBe(false)
+    expect(document.activeElement).toBe(field)
+
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(onEscape).not.toHaveBeenCalled()
+
+    dialog.remove()
+    unmount()
+  })
+
   it('calls onEscape, and only while open', async () => {
     const { overlay } = scene()
     const onEscape = vi.fn()

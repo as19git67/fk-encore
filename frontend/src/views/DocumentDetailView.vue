@@ -1709,6 +1709,13 @@ onBeforeUnmount(() => {
      grid track wider than the container. */
   min-width: 0;
   padding-right: 0.25rem;
+  /* On a phone this column is what overflows the page's scroller, and a
+     scroller takes its scrollable height from the overflowing child's border
+     box — the padding `PageLayout` puts at its own bottom never counts. So
+     the last control in here, the "show all text" button, had nothing left
+     below it and lost the bottom of its focus ring. The room belongs on this
+     box, where it does end up in the canvas. */
+  padding-bottom: var(--focus-ring-reach);
 }
 
 /* Eigener Scroll-Bereich neben dem PDF — siehe den Block weiter oben. */

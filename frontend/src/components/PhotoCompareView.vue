@@ -1748,6 +1748,24 @@ function compareTileSrc(photo: Photo, width?: number): string {
   white-space: nowrap;
 }
 
+/* Under 500px the header's eight buttons and the counter add up to more than
+   the screen is wide, so the last button was pushed past the right edge — off
+   screen, since the overlay clips, and its focus ring with it. Tighter gaps
+   and a smaller side margin buy the ~50px that were missing, which keeps the
+   toolbar on one row (issue #1281, review follow-up). */
+@media (max-width: 499px) {
+  .compare-header {
+    padding-inline: 0.25rem;
+    gap: 0.25rem;
+  }
+
+  .compare-header-left,
+  .compare-header-center,
+  .compare-header-right {
+    gap: 0.25rem;
+  }
+}
+
 .compare-progress {
   color: var(--p-slate-950);
   font-variant-numeric: tabular-nums;

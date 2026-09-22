@@ -42,13 +42,23 @@ export function upTo(name: BreakpointName): string {
 /**
  * Whether a media query matches, kept in step with the browser.
  *
- * Starts `false` and only listens once mounted: a test or a server render
- * without `matchMedia` has to produce the narrow layout rather than throw,
- * and one frame of the narrow layout on a wide screen is cheaper than a
- * wrongly-wide first paint on a phone.
+ * Read once up front, then listened to from `onMounted`. `matchMedia` answers
+ * synchronously, so waiting for the mount hook only bought a first frame laid
+ * out for the wrong screen: the gallery measured its virtual grid without the
+ * sidebar it was about to get, and a phone rendered the desktop branch of
+ * every `useBelow` before correcting itself.
+ *
+ * Where `matchMedia` does not exist — a server render, a jsdom test that has
+ * not stubbed it — the answer is `false` rather than a thrown error, which
+ * makes `useAtLeast` the narrow layout and `useBelow` the wide one.
  */
+function currentlyMatches(query: string): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia(query).matches
+}
+
 export function useMediaQuery(query: string): Ref<boolean> {
-  const matches = ref(false)
+  const matches = ref(currentlyMatches(query))
   let mql: MediaQueryList | null = null
 
   function apply(event: MediaQueryList | MediaQueryListEvent) {

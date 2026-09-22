@@ -254,6 +254,17 @@ a:hover {
   margin: calc(-1 * var(--focus-ring-reach));
 }
 
+/* ── Charts: never wider than the box they sit in ───────────────────────────
+ * Chart.js writes the canvas size into the element in pixels and only
+ * corrects it once its own ResizeObserver has seen the new box. Between the
+ * two — the moment a phone is turned, or a panel collapses — the drawing
+ * keeps the width it was made at and hangs over the page edge. The cap
+ * costs nothing while the two agree.
+ * (Global because it is PrimeVue's own element, in every chart the app has.) */
+.p-chart canvas {
+  max-width: 100%;
+}
+
 /* ── Photos: "not shared via link" icon ──────────────────────────────────────
  * PrimeIcons ships pi-link but no struck-through variant, so the slash is
  * drawn as a pseudo-element over the link glyph. Defined globally because it

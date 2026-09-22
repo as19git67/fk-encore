@@ -154,6 +154,7 @@ describe('PageLayout restore', () => {
     const router = makeRouter()
     await router.push('/dokumente')
     saveListAnchor('dokumente', { kind: 'document', id: 7 })
+    markNavigation(true)
 
     await mountPage(router, { title: 'Dokumente', anchorKey: 'dokumente' }, rowSlot('document:7'))
     await nextTick()
@@ -170,6 +171,7 @@ describe('PageLayout restore', () => {
     const router = makeRouter()
     await router.push('/dokumente')
     saveListAnchor('dokumente', { kind: 'document', id: 7 })
+    markNavigation(true)
 
     const seen: Array<ListAnchor | null> = []
     const el = await mountPage(
@@ -214,6 +216,25 @@ describe('PageLayout restore', () => {
     expect(seen).toEqual([{ kind: 'album', id: 3 }])
     // The grid reported it had scrolled, so the offset must not fight it.
     expect(spies.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('drops the anchor when the list is entered from a menu', async () => {
+    // The anchor is a promise about going back, not a bookmark. Someone who
+    // picks "Dokumente" from the menu after reading a document wants the top
+    // of the list, not the row they happened to open a while ago.
+    const spies = spyOnScrolling()
+    const router = makeRouter()
+    await router.push('/dokumente')
+    saveListAnchor('dokumente', { kind: 'document', id: 7 })
+    markNavigation(false)
+
+    await mountPage(router, { title: 'Dokumente', anchorKey: 'dokumente' }, rowSlot('document:7'))
+    await nextTick()
+    await nextTick()
+
+    expect(spies.scrollIntoView).not.toHaveBeenCalled()
+    // And it is gone, so it cannot ambush the next visit either.
+    expect(takeListAnchor('dokumente')).toBeNull()
   })
 
   it('falls back to the offset when the row is gone, but only on the way back', async () => {

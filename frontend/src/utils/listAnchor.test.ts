@@ -70,6 +70,15 @@ describe('listAnchor', () => {
     expect(takeListAnchor('l')).toBeNull()
   })
 
+  it('drops an older build\'s keys with it', () => {
+    // A tab upgraded mid-session: those keys would otherwise sit and wait to
+    // anchor a visit that entered the list from the menu.
+    sessionStorage.setItem('documents.listFocus', JSON.stringify({ kind: 'document', id: 9 }))
+    sessionStorage.setItem('documents.listFocusId', '11')
+    clearListAnchor('dokumente', 'documents')
+    expect(takeListAnchor('dokumente', 'documents')).toBeNull()
+  })
+
   it('builds the marker a row carries', () => {
     expect(anchorKey('document', 42)).toBe('document:42')
     expect(anchorSelector({ kind: 'album', id: 7 })).toBe('[data-anchor="album:7"]')
