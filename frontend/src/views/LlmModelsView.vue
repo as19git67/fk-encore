@@ -532,6 +532,7 @@ function formatEta(seconds: number | null): string {
           <span class="hint">{{ formatBytes(file.size_bytes) }}</span>
           <Button
             icon="pi pi-trash"
+            aria-label="Modelldatei löschen"
             size="small"
             severity="danger"
             text

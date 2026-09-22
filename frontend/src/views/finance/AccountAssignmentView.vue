@@ -210,6 +210,7 @@ async function save() {
             />
             <Button
               icon="pi pi-trash"
+              aria-label="Zuordnung entfernen"
               severity="danger"
               text
               size="small"
@@ -235,7 +236,7 @@ async function save() {
           optionLabel="label"
           optionValue="value"
         />
-        <Button icon="pi pi-plus" @click="addEntry" />
+        <Button icon="pi pi-plus" aria-label="Zuordnung hinzufügen" @click="addEntry" />
       </div>
 
       <div class="actions">

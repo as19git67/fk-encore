@@ -177,6 +177,7 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
           <Button
             v-if="item.status !== 'uploading'"
             icon="pi pi-times"
+            aria-label="Aus der Warteschlange entfernen"
             text
             rounded
             size="small"

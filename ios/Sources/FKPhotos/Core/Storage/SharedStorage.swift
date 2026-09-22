@@ -21,7 +21,11 @@ import Foundation
 /// session, and `AuthManager.restoreSession()` mirrors it here on every
 /// launch. Correcting the id is enough for the extension to find a
 /// token again the next time the app starts.
-enum SharedStorage {
+/// `public`, and so is `defaults`: `WidgetSnapshotStore`'s public readers
+/// default to `SharedStorage.defaults` (#764), and a default argument value
+/// must be at least as accessible as the function it belongs to, even
+/// though the function body itself never leaves this module.
+public enum SharedStorage {
     static let appGroupID        = "group.de.f4mil.photos"
     static let tokenKey          = "shared.auth_token"
     static let refreshTokenKey   = "shared.refresh_token"
@@ -34,7 +38,7 @@ enum SharedStorage {
 
     /// Returns the App Group UserDefaults suite, falling back to `.standard`
     /// if the entitlement is not configured (e.g. in unit tests).
-    static var defaults: UserDefaults {
+    public static var defaults: UserDefaults {
         UserDefaults(suiteName: appGroupID) ?? .standard
     }
 

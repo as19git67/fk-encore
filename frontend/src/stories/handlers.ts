@@ -36,6 +36,19 @@ export function albumDetail(request: Request, overrides: Record<string, unknown>
   return withPhotos ? detail : { ...detail, photos: [] }
 }
 
+/**
+ * What `public/mock-photos` actually contains. A name that is not in here
+ * gets the generated placeholder — which is what a story wants anyway, and
+ * keeps the handler from asking the network for something that is not there.
+ */
+const MOCK_PHOTO_FILES = new Set([
+  'castle.jpg',
+  'fish.jpg',
+  'museum.jpg',
+  'seagull.jpg',
+  'steak.jpg',
+])
+
 export const defaultHandlers = [
   // ── Secondary lookups the detail views load beside their main record ──────
   // (empty by default so a story renders without a per-story handler).
@@ -183,21 +196,38 @@ export const defaultHandlers = [
   // ── Photo thumbnails: serve from /mock-photos/ or generated SVG ────────────
   http.get('/api/photos/file/:filename', async ({ params }) => {
     const filename = params.filename as string
-    try {
-      const res = await fetch(`/mock-photos/${filename}`)
-      if (res.ok) {
-        const blob = await res.blob()
-        return new Response(blob, {
-          headers: { 'Content-Type': blob.type || 'image/jpeg' },
-        })
+    // Only ask for a file that is actually in `public/mock-photos`. Fetching
+    // a missing one from inside a handler leaves a request the service worker
+    // never settles: the page then never goes quiet, and the test runner gave
+    // up after 15 seconds waiting for `networkidle`. Three of the filenames
+    // the stories use describe a photo nobody ever added — they were always
+    // meant to fall through to the placeholder, and now they do so without
+    // touching the network.
+    if (MOCK_PHOTO_FILES.has(filename)) {
+      try {
+        const res = await fetch(`/mock-photos/${filename}`)
+        if (res.ok) {
+          const blob = await res.blob()
+          return new Response(blob, {
+            headers: { 'Content-Type': blob.type || 'image/jpeg' },
+          })
+        }
+      } catch {
+        // fall through to placeholder
       }
-    } catch {
-      // fall through to placeholder
     }
     const svg = placeholderSvg(filename)
     return new HttpResponse(svg, {
       headers: { 'Content-Type': 'image/svg+xml' },
     })
+  }),
+
+  // ── Document thumbnails ───────────────────────────────────────────────────
+  // `DocumentThumbnail` fetches this itself; without a handler the request
+  // leaves the page short of `networkidle` and the test runner waits it out.
+  http.get('/api/documents/:id/thumbnail', ({ params }) => {
+    const svg = placeholderSvg(`dokument-${params.id as string}`)
+    return new HttpResponse(svg, { headers: { 'Content-Type': 'image/svg+xml' } })
   }),
 
   // ── Persons & Faces ────────────────────────────────────────────────────────

@@ -41,6 +41,14 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
     /// two versions of one rule.
     var recentPhotos: () -> [TripPhotoSignal.Photo] = { [] }
 
+    /// The `osmRef` of the stop currently open — a fence was entered
+    /// and has not been exited — or nil between stops. The honest
+    /// answer to "where are we", for `TripDayActivityManager` (#768 §1)
+    /// to prefer over the plan's own clock arithmetic: a museum visit
+    /// does not end the moment its budget runs out, and a stop is not
+    /// "reached" just because the clock says it should be by now.
+    private(set) var openStopOsmRef: String?
+
     private override init() {
         super.init()
         manager.delegate = self
@@ -64,6 +72,7 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
         for (identifier, region) in regions where !wantedIds.contains(identifier) {
             stopMonitoring(region)
             if let stay = tracker.exited(identifier, at: Date()) {
+                if openStopOsmRef == identifier { openStopOsmRef = nil }
                 Task { await report(stay) }
             }
         }
@@ -95,6 +104,7 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
         let closing = tracker.closeAll(at: Date())
         regions.removeAll()
         stopIds.removeAll()
+        openStopOsmRef = nil
         manager.stopMonitoringSignificantLocationChanges()
         for stay in closing {
             Task { await report(stay) }
@@ -185,12 +195,16 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
 
     nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         let now = Date()
-        Task { @MainActor in tracker.entered(region.identifier, at: now) }
+        Task { @MainActor in
+            tracker.entered(region.identifier, at: now)
+            openStopOsmRef = region.identifier
+        }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         let now = Date()
         Task { @MainActor in
+            if openStopOsmRef == region.identifier { openStopOsmRef = nil }
             guard let stay = tracker.exited(region.identifier, at: now) else { return }
             await report(stay)
         }
@@ -206,7 +220,10 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
         // region already open, so this cannot restart a running clock.
         guard state == .inside else { return }
         let now = Date()
-        Task { @MainActor in tracker.entered(region.identifier, at: now) }
+        Task { @MainActor in
+            tracker.entered(region.identifier, at: now)
+            openStopOsmRef = region.identifier
+        }
     }
 }
 

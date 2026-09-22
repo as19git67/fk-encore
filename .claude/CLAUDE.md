@@ -1169,6 +1169,19 @@ das Paar heißt also `(max-width: 767px)` / `(min-width: 768px)` — nie
   pro Spalte braucht), bleibt eine Zahl in dieser Komponente. Die fünf Namen
   gehören der Seite.
 
+## Knöpfe im Frontend
+
+Ein Knopf, der nur ein Icon zeigt, braucht ein `aria-label` (oder ein
+`v-tooltip`, das PrimeVue ebenfalls an Hilfstechnik weitergibt) — sonst
+liest ein Screenreader „Schaltfläche" vor und sonst nichts (Issue #1281).
+Das Label benennt die Aktion, nicht das Piktogramm: „Rolle entziehen", nicht
+„Kreuz". Bei einem Umschalter hängt es am Zustand:
+`:aria-label="hidden ? 'Wieder einblenden' : 'Ausblenden'"`.
+
+`scripts/check-button-labels.mjs` prüft das, im pre-commit-Hook über die
+gestageten `.vue`-Dateien. Ausgenommen ist nur, was in einem
+`aria-hidden`-Teilbaum liegt (die Messzeile in `ResponsiveToolbar`).
+
 ## Dialoge im Frontend
 
 Ein Dialog ist PrimeVues `Dialog` (oder `ConfirmDialog`), nie ein eigenes
@@ -1184,6 +1197,17 @@ braucht kein Dialog ein eigenes `maxWidth` oder ein `breakpoints`-Prop.
 Unter `sm` nimmt ein Dialog die ganze Breite und höchstens `90dvh` — auf
 360px gibt es kein „neben der Seite". Eine Ausnahme ist der Fotoeditor: der
 ist absichtlich Vollbild und gehört zu keiner der drei Größen.
+
+Wer die Seite überdeckt, schuldet der Tastatur dreierlei (Issue #1281):
+beim Öffnen wandert der Fokus hinein, Tab und Umschalt+Tab laufen darin im
+Kreis, und beim Schließen kehrt der Fokus dorthin zurück, von wo aus
+geöffnet wurde. PrimeVues `Dialog` erledigt das selbst. Ein handgebautes
+Overlay nimmt `useFocusTrap(container, active, { onEscape })` aus
+`composables/useFocusTrap.ts` und trägt `role="dialog"`, `aria-modal="true"`,
+ein `aria-label` und `tabindex="-1"`. Wer Escape schon selbst behandelt (das
+Vollbild, der Fotovergleich), lässt `onEscape` weg. Ein Bereich, der nur
+unterhalb eines Breakpoints modal ist (die Bottom-Sheets), gibt ein `active`
+mit, das genau dann wahr ist — darüber wäre die Falle ein Käfig.
 
 Fußzeile: links Sekundär/Abbrechen, rechts Primär. Eine destruktive Aktion
 steht ganz links, durch einen Spacer von dem Paar getrennt, und fragt über

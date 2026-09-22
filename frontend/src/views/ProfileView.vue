@@ -563,6 +563,7 @@ onMounted(async () => {
             <template #body="{ data }">
               <Button
                 icon="pi pi-trash"
+                aria-label="Passkey löschen"
                 severity="danger"
                 text
                 rounded

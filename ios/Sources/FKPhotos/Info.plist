@@ -74,6 +74,8 @@
 	<string>Zum Speichern aufgenommener Fotos in deiner Mediathek</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Zum Hochladen von Fotos in F4mil Photos</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

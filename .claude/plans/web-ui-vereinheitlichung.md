@@ -1,6 +1,6 @@
 # Web-UI vereinheitlichen: Seitenaufbau, Toolbar, Navigation, Selektion
 
-Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encore/issues/1272) · Branch: `claude/web-app-ui-consistency-h0wd56`
+Status: **Umgesetzt** · Issue: [#1272](https://github.com/as19git67/fk-encore/issues/1272) · Branch: `claude/web-app-ui-consistency-h0wd56`
 
 ## Umsetzungsstand
 
@@ -45,7 +45,7 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
   und Schublade; Dokumente und Finanzen füllen nur noch Zeilen und Fußzeile.
   `composables/useBasketNavigation.ts` blättert im Basket — jetzt auch in der
   Buchungsdetailseite. `useRangeSelect` ist gelöscht.
-- 🔄 **Etappe 6 — Feinschliff** (#1281), in Arbeit:
+- ✅ **Etappe 6 — Feinschliff** (#1281):
   - ✅ Farb-Audit `scripts/check-css-tokens.mjs` (Surface-Skala, Hex, deckendes
     `rgb()`), im pre-commit-Hook über die gestageten Styles, mit eigenen Tests.
     Die 235 Fundstellen in 49 Dateien sind bereinigt: fast alle waren
@@ -102,7 +102,53 @@ Status: **In Umsetzung** · Issue: [#1272](https://github.com/as19git67/fk-encor
     Ausreißer mit drei Knöpfen sind `v-if`-Zustände und damit in Ordnung.
   - ✅ Detailseiten: `UserDetailView` hatte als einzige keinen
     Zurück-Knopf — jetzt derselbe wie überall, über `useModuleBack`.
-  - ⬜ Stories je Seitenzustand.
+  - ✅ 46 Icon-Knöpfe ohne Beschriftung haben ein `aria-label` bekommen —
+    Löschen, Umbenennen, Verschieben, Absenden waren für einen Screenreader
+    alle „Schaltfläche". Umschalter (Favorit, Ausblenden) benennen ihren
+    Zustand. `scripts/check-button-labels.mjs` hält das, im pre-commit-Hook,
+    mit eigenen Tests. Die erste Zählung lag bei 48 und war falsch: ein `=>`
+    in einem Handler beendete den Tag-Match zu früh. Der Parser achtet jetzt
+    auf Anführungszeichen; ein Knopf in einem `aria-hidden`-Teilbaum
+    (`ResponsiveToolbar`s Messzeile) ist ausgenommen.
+  - ✅ `composables/useFocusTrap.ts` (aus dem Betrieb gemeldet): Der
+    Rückblick-„Dialog" war gar keiner — ein handgebautes `<div>` über der
+    Seite, ohne `role`, ohne Fokus, ohne Escape. PrimeVues `Dialog` macht das
+    alles von sich aus (nachgemessen), die handgebauten Overlays nicht.
+    Angeschlossen: Rückblick-Detail, Vollbild, Fotovergleich und die
+    Bottom-Sheets in Albumdetail und Personen — letztere nur unterhalb `md`,
+    darüber ist dieselbe Markup eine normale Spalte. Story
+    `Views/RecapsView` (inkl. „Detail geöffnet") macht den gemeldeten Fall
+    überhaupt erst prüfbar.
+  - ✅ Stories je Seitenzustand — jede der 64 Views hat jetzt eine
+    (79 Story-Dateien, 303 Prüfungen im Test-Runner). Gerüst:
+    `stories/storyRoute.ts` (`routeFromParameters`) setzt den Stub-Router auf
+    die Route einer Story und hält die View zurück, bis die Navigation steht
+    — sonst lädt eine View in `onMounted` gegen die Route, auf der sie
+    zufällig gemountet wurde, und die „keine Treffer"-Story zeigte die
+    ungefilterte Liste. `stories/finance-mock-data.ts` sammelt die
+    Finanz-Fixtures. Bisher: `AccountTransactionsView` (eine der beiden
+    Pilot-Views, bis jetzt ohne Story), `AccountsView`, `RecapsView` — je mit
+    Inhalt, leer, lädt, Fehler und Telefonbreite. Dazu `OverviewView` und
+    `BankcontactsView`. `TagQueueView` braucht keine: die zehn Zeilen sind
+    ein Rahmen um `FinanceTagQueuePanel`, das seine Story schon hat.
+    Danach der Rest in Etappen: die übrigen Finanzen-Seiten, Dokumente
+    (Korb, Mappen, Später, Steuerakte, die beiden Vorschlagslisten, die
+    Abschnittshinweise), Zähler (Auswertungen, Auffälligkeiten,
+    Schnellerfassung), Fotos (Galerie, Feed, Review-Queue, Gefahrenzone),
+    Etiketten und die Admin-Seiten (Gruppen, Bezugspersonen, Jobs,
+    KI-Modell, Taxonomie-Cockpit und -Tools). Jede Seite mit Inhalt, ohne
+    Inhalt, im Ladevorgang und — wo die Seite ihn zeichnet — mit
+    Ladefehler.
+
+    Gefunden hat das zwei echte Fehler: das Diagramm im Taxonomie-Cockpit
+    ragte bei 360px über den Seitenrand (Chart.js schreibt die
+    Canvas-Größe in Pixel und korrigiert sie erst, wenn sein Observer die
+    neue Box gesehen hat), und das Gesichtsrechteck im Vollbild saß neben
+    dem Gesicht, sobald das Foto seitlich schwarze Balken hatte: der
+    Slot-Container von `HeicImage` spannte im `staticSlot`-Fall über die
+    Bildbox statt über das Bild. Beides behoben, beides von einer Story
+    gemessen statt vermutet (`Components/FullscreenOverlay` → „Mit
+    Gesichtsrechteck", `Components/FacePhotoGrid`).
 
 Abweichungen vom Entwurf (Etappe 1):
 

@@ -20,7 +20,7 @@ import Foundation
 ///
 /// Parsing is pure so the accepted and rejected shapes are testable without
 /// an app around them.
-enum AppDeepLink: Equatable, Sendable {
+public enum AppDeepLink: Equatable, Sendable {
     /// `f4milphotos://review-queue` · `/app/fotos/review-queue`
     case reviewQueue
     /// `f4milphotos://album/12` · `/app/fotos/alben/12` · `/app/albums/12`
@@ -41,6 +41,12 @@ enum AppDeepLink: Equatable, Sendable {
     /// `f4milphotos://search?q=…` — the search tab with the query submitted.
     /// App scheme only: the web has no URL for a search.
     case search(query: String)
+    /// `f4milphotos://trip-day/12` — the trip planner's day screen,
+    /// opened on whichever day of plan 12 is running today (the day
+    /// view model already defaults there). App scheme only: what a
+    /// Live Activity or a widget carries; the web trip planner has no
+    /// matching route to map onto.
+    case tripDay(planId: Int)
 
     static let scheme = "f4milphotos"
 
@@ -55,7 +61,7 @@ enum AppDeepLink: Equatable, Sendable {
 
     /// The app-scheme URL for a target — what notifications, widgets and
     /// Spotlight items carry. Round-trips through `parse`.
-    static func url(for link: AppDeepLink) -> URL {
+    public static func url(for link: AppDeepLink) -> URL {
         let hostAndPath: String
         switch link {
         case .reviewQueue: hostAndPath = "review-queue"
@@ -66,6 +72,7 @@ enum AppDeepLink: Equatable, Sendable {
         case .recap(let id): hostAndPath = "recap/\(id)"
         case .recaps: hostAndPath = "recaps"
         case .feed: hostAndPath = "feed"
+        case .tripDay(let id): hostAndPath = "trip-day/\(id)"
         case .search(let query):
             var components = URLComponents()
             components.scheme = scheme
@@ -93,7 +100,7 @@ enum AppDeepLink: Equatable, Sendable {
         case .recap(let id): path = "/fotos/rueckblicke?recapId=\(id)"
         case .recaps: path = "/fotos/rueckblicke"
         case .feed: path = "/fotos/feed"
-        case .search: return nil
+        case .search, .tripDay: return nil
         }
         return URL(string: "\(origin)\(appBasePath)\(path)")
     }
@@ -146,6 +153,7 @@ enum AppDeepLink: Equatable, Sendable {
             let query = components.queryItems?.first { $0.name == "q" }?.value?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return query.isEmpty ? nil : .search(query: query)
+        case ("trip-day", let id?): return Int(id).map { .tripDay(planId: $0) }
         case ("album", let id?): return Int(id).map { .album(id: $0) }
         case ("photo", let id?): return Int(id).map { .photo(id: $0) }
         case ("person", let id?): return Int(id).map { .person(id: $0) }

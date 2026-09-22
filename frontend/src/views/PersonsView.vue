@@ -23,6 +23,8 @@ import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import type { FilterChip } from '../components/layout/listToolbar'
 import DateRangePresets from '../components/DateRangePresets.vue'
 import FilterMenu from '../components/FilterMenu.vue'
+import { useBelow } from '../composables/useBreakpoint'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { matchesPhotoFilter } from '../utils/photoFilter'
@@ -730,7 +732,20 @@ const detailToolbar = useListToolbar({
 })
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
+const sheetBelowMd = useBelow('md')
 const mobileSidebarOpen = ref(false)
+
+/**
+ * Below `md` the sidebar is a bottom sheet over the page — a modal, so the
+ * keyboard belongs to it while it is up (issue #1281). Above that breakpoint
+ * the same markup is just a column beside the content, and trapping there
+ * would lock the reader out of the rest of the page.
+ */
+const personSidebarSheet = ref<HTMLElement | null>(null)
+const sheetIsModal = computed(() => mobileSidebarOpen.value && sheetBelowMd.value)
+useFocusTrap(personSidebarSheet, sheetIsModal, {
+  onEscape: () => { mobileSidebarOpen.value = false },
+})
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadData()
@@ -860,7 +875,15 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       />
 
       <!-- RIGHT: Details sidebar – auf Mobile als Bottom-Sheet -->
-      <div class="person-sidebar-sheet" :class="{ 'is-open': mobileSidebarOpen }">
+      <div
+          ref="personSidebarSheet"
+          class="person-sidebar-sheet"
+          :class="{ 'is-open': mobileSidebarOpen }"
+          :role="sheetIsModal ? 'dialog' : undefined"
+          :aria-modal="sheetIsModal ? 'true' : undefined"
+          aria-label="Fotodetails"
+          tabindex="-1"
+        >
         <div class="sidebar-sheet-header">
           <button class="sidebar-sheet-close" @click="mobileSidebarOpen = false" aria-label="Schließen">
             <i class="pi pi-times" />
@@ -922,13 +945,13 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       <div class="face-box face-box-fullscreen" :style="faceBoxStyle(selectedPersonFace?.bbox)" />
       <template #topbar-center>
         <span class="fs-person-name">{{ selectedPerson?.name }}</span>
-        <Button v-if="selectedPerson" icon="pi pi-pencil" rounded text size="small" @click.stop="openRename(selectedPerson)" />
+        <Button v-if="selectedPerson" icon="pi pi-pencil" aria-label="Person umbenennen" rounded text size="small" @click.stop="openRename(selectedPerson)" />
       </template>
       <template #actions>
         <Button icon="pi pi-images" rounded text severity="secondary" v-tooltip.bottom="'In Fotos anzeigen'" @click.stop="navigateToPhoto(selectedPhoto.id)" />
         <Button icon="pi pi-info-circle" rounded text severity="secondary" v-tooltip.bottom="'Details'" @click.stop="isFullscreen = false; mobileSidebarOpen = true" />
-        <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'" rounded text :severity="selectedPhoto.curation_status === 'hidden' ? 'danger' : 'secondary'" @click.stop="selectedPhoto.curation_status === 'hidden' ? handleRestorePhoto(selectedPhoto.id) : handleHidePhoto(selectedPhoto.id)" />
-        <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" rounded text :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" @click.stop="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" />
+        <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'" :aria-label="selectedPhoto.curation_status === 'hidden' ? 'Wieder einblenden' : 'Foto ausblenden'" rounded text :severity="selectedPhoto.curation_status === 'hidden' ? 'danger' : 'secondary'" @click.stop="selectedPhoto.curation_status === 'hidden' ? handleRestorePhoto(selectedPhoto.id) : handleHidePhoto(selectedPhoto.id)" />
+        <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" :aria-label="selectedPhoto.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren'" rounded text :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" @click.stop="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" />
         <Button v-if="selectedPersonFace" icon="pi pi-trash" rounded text severity="danger" v-tooltip.bottom="'Gesicht ignorieren'" @click.stop="handleIgnoreFace(selectedPersonFace.id)" />
       </template>
     </FullscreenOverlay>

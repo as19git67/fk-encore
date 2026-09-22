@@ -260,6 +260,7 @@ function openPhoto(idx: number) {
                 v-if="canDelete"
                 size="small"
                 :icon="effectiveStatus(item) === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+                :aria-label="effectiveStatus(item) === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren'"
                 :severity="effectiveStatus(item) === 'favorite' ? 'warn' : 'secondary'"
                 text rounded
                 @click.stop="emit('toggle-favorite', item.photo.id, effectiveStatus(item))"
@@ -268,6 +269,7 @@ function openPhoto(idx: number) {
                 v-if="canDelete"
                 size="small"
                 :icon="effectiveStatus(item) === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'"
+                :aria-label="effectiveStatus(item) === 'hidden' ? 'Wieder einblenden' : 'Foto ausblenden'"
                 :severity="effectiveStatus(item) === 'hidden' ? 'danger' : 'secondary'"
                 text rounded
                 @click.stop="effectiveStatus(item) === 'hidden' ? emit('restore', item.photo.id) : emit('hide', item.photo.id)"

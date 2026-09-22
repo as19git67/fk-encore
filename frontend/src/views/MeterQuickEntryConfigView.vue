@@ -144,9 +144,9 @@ onMounted(load)
             <small>{{ METER_TYPE_LABELS[meter.type] }} · {{ meter.unit }}</small>
           </span>
           <div class="config-actions">
-            <Button icon="pi pi-arrow-up" text rounded severity="secondary" :disabled="index === 0 || saving" @click="moveConfiguredMeter(index, -1)" />
-            <Button icon="pi pi-arrow-down" text rounded severity="secondary" :disabled="index === configuredItems.length - 1 || saving" @click="moveConfiguredMeter(index, 1)" />
-            <Button icon="pi pi-times" text rounded severity="danger" :disabled="saving" @click="removeConfiguredMeter(index)" />
+            <Button icon="pi pi-arrow-up" aria-label="Zähler nach oben" text rounded severity="secondary" :disabled="index === 0 || saving" @click="moveConfiguredMeter(index, -1)" />
+            <Button icon="pi pi-arrow-down" aria-label="Zähler nach unten" text rounded severity="secondary" :disabled="index === configuredItems.length - 1 || saving" @click="moveConfiguredMeter(index, 1)" />
+            <Button icon="pi pi-times" aria-label="Zähler aus der Schnellerfassung nehmen" text rounded severity="danger" :disabled="saving" @click="removeConfiguredMeter(index)" />
           </div>
         </li>
       </ol>
