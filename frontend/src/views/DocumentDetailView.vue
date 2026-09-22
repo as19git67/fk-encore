@@ -1719,6 +1719,10 @@ onBeforeUnmount(() => {
   .pdf-panel {
     overflow-x: clip;
     overflow-y: visible;
+    /* The page's scroller keeps `--focus-ring-reach` of padding at its top,
+       and a sticky element measures from inside that padding — which left a
+       sliver of page showing above the head. Pull it back out. */
+    --pdf-head-top: calc(-1 * var(--focus-ring-reach));
   }
 }
 
