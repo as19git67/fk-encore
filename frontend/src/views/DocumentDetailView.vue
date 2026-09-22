@@ -1696,8 +1696,24 @@ onBeforeUnmount(() => {
   overflow: hidden;
   display: flex;
   min-width: 0;
-  /* Grows with the rendered PDF page; the surrounding page is the
-     scroll container, not this panel. */
+}
+
+/* ── Phone and tablet: the preview needs a height of its own ────────────────
+   One column, and the page no longer scrolls as a whole (PageLayout,
+   scroll="self"), so this panel is a grid item in a box that is already as
+   tall as the viewport. The viewer inside may shrink to nothing — every
+   level of it carries `min-height: 0` so the page stack, and not the
+   document, scrolls — and with nothing asking for height it did exactly
+   that: the panel collapsed to its two borders and `overflow: hidden` took
+   the rendered pages with it. There was no preview on a phone at all.
+
+   A share of the screen, with the stack scrolling inside as on the wide
+   layout. Letting it grow with the pages instead would push the document's
+   own attributes past thirty page-heights of scrolling. */
+@media (max-width: 999px) {
+  .pdf-panel {
+    height: 70dvh;
+  }
 }
 
 .meta-panel {
