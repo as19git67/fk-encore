@@ -187,6 +187,27 @@ export const Telefonbreite: Story = {
     if (getComputedStyle(head).position !== 'sticky') {
       throw new Error(`the viewer head is ${getComputedStyle(head).position}, not sticky`)
     }
+
+    // And it stays put when the pagination jumps: the jump moves the page's
+    // scroller, which used to carry the head away with it — the controls
+    // left the screen on the way to the page they were used to reach.
+    const scroller = await waitFor(() => document.querySelector<HTMLElement>('.page-content'))
+    const input = await waitFor(() => head.querySelector<HTMLInputElement>('.page-input'))
+    input.value = '5'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 600))
+
+    const pinned = head.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+    if (pinned > 8) {
+      throw new Error(`after the jump the head sits ${Math.round(pinned)}px into the scroller`)
+    }
+    const target = document.querySelector<HTMLElement>('[data-page-number="5"]')
+    if (!target) throw new Error('the page jumped to is not in the stack')
+    const gap = target.getBoundingClientRect().top - head.getBoundingClientRect().bottom
+    if (gap < -1 || gap > 40) {
+      throw new Error(`the page jumped to sits ${Math.round(gap)}px from the head, not just below it`)
+    }
   },
 }
 
