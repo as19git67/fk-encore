@@ -412,12 +412,6 @@ function severityTag(sev: Recommendation['severity']): "danger" | "warn" | "info
   position: relative;
 }
 
-/* Chart.js writes the canvas size in pixels and only corrects it once its
-   own observer has seen the new box. Until then — the moment a phone is
-   turned, say — the drawing would stick out over the page edge. */
-.chart-container :deep(canvas) {
-  max-width: 100%;
-}
 
 .no-trend {
   margin-top: 1rem;

@@ -145,3 +145,50 @@ export const Schmal: Story = {
     withSelection: true,
   }),
 }
+
+/**
+ * Escape belongs to whatever opened last (issue #1281, review follow-up).
+ *
+ * The toolbar listens for Escape on the document to leave select mode, and
+ * the sort menu is dismissed with the same key — so closing the menu used to
+ * take the whole selection with it. The play function opens the menu, presses
+ * Escape, and fails if select mode ended.
+ */
+export const EscImSortiermenue: Story = {
+  name: 'Esc im Sortiermenü',
+  render: () => ({
+    components: { ListToolbar },
+    setup() {
+      const active = ref(true)
+      const model = makeModel({ loaded: 42, total: 42, withSelection: true })
+      model.selection = { active, toggle: () => { active.value = !active.value } }
+      return { model, active }
+    },
+    template: `
+      <div>
+        <ListToolbar :model="model" />
+        <p data-testid="select-mode" style="padding: 8px 0">
+          Auswahlmodus: {{ active ? 'an' : 'aus' }}
+        </p>
+      </div>
+    `,
+  }),
+  play: async ({ canvasElement }) => {
+    const sortButton = canvasElement.querySelector<HTMLElement>('[data-testid="list-sort"]')
+    if (!sortButton) throw new Error('no sort button')
+    sortButton.click()
+    await new Promise((resolve) => setTimeout(resolve, 150))
+
+    const menu = document.querySelector('.p-menu-overlay')
+    if (!menu) throw new Error('the sort menu did not open')
+
+    const target = menu.querySelector('[role="menu"]') ?? menu
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await new Promise((resolve) => setTimeout(resolve, 150))
+
+    const state = canvasElement.querySelector('[data-testid="select-mode"]')?.textContent ?? ''
+    if (!state.includes('an')) {
+      throw new Error(`Escape closed the sort menu and left select mode: "${state.trim()}"`)
+    }
+  },
+}
