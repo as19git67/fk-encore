@@ -122,3 +122,58 @@ export const NurLesend: Story = {
     }),
   ],
 }
+
+/**
+ * The preview on a phone (issue: "bei den Dokumenten wird auf dem Handy keine
+ * PDF-Vorschau angezeigt").
+ *
+ * One column, and the page no longer scrolls as a whole, so the panel is a
+ * grid item in a box that is already viewport-tall. Everything inside the
+ * viewer may shrink to nothing — that is what lets the page stack scroll
+ * rather than the document — so with nothing asking for height the panel
+ * collapsed to its two borders and clipped the rendered pages away.
+ *
+ * The play function measures what a reader actually sees: how much of the
+ * first page lies inside the panel.
+ */
+export const Telefonbreite: Story = {
+  name: 'Telefonbreite (PDF-Vorschau)',
+  parameters: {
+    testViewport: { width: 360, height: 740 },
+    msw: {
+      handlers: [
+        http.get('/api/documents/:id/file', () =>
+          new HttpResponse(buildMultiPagePdf(6), {
+            headers: { 'Content-Type': 'application/pdf' },
+          }),
+        ),
+        ...defaultHandlers,
+      ],
+    },
+  },
+  play: async () => {
+    const panel = await waitFor(() => document.querySelector<HTMLElement>('.pdf-panel'))
+    const canvas = await waitFor(() =>
+      Array.from(panel.querySelectorAll('canvas')).find((c) => c.getBoundingClientRect().height > 50),
+    )
+    const page = canvas.getBoundingClientRect()
+    const box = panel.getBoundingClientRect()
+    const shown = Math.max(0, Math.min(page.bottom, box.bottom) - Math.max(page.top, box.top))
+    if (shown < 200) {
+      throw new Error(
+        `only ${Math.round(shown)}px of the first page are inside the preview ` +
+          `(panel ${Math.round(box.height)}px, page ${Math.round(page.height)}px)`,
+      )
+    }
+  },
+}
+
+async function waitFor<T>(read: () => T | null | undefined, timeoutMs = 10_000): Promise<T> {
+  const started = Date.now()
+  for (;;) {
+    const value = read()
+    if (value) return value
+    if (Date.now() - started > timeoutMs) throw new Error('timed out waiting for the PDF to render')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+}
