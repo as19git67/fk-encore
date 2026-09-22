@@ -372,7 +372,7 @@ function goBack() {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.85rem 1rem;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
 }
@@ -443,7 +443,7 @@ kbd {
   border: 1px solid var(--p-content-border-color);
   border-bottom-width: 2px;
   border-radius: 4px;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
 }
 
 .footer-nav {

@@ -124,17 +124,18 @@ export const NurLesend: Story = {
 }
 
 /**
- * The preview on a phone (issue: "bei den Dokumenten wird auf dem Handy keine
- * PDF-Vorschau angezeigt").
+ * The preview on a phone: one column, one scrollbar.
  *
- * One column, and the page no longer scrolls as a whole, so the panel is a
- * grid item in a box that is already viewport-tall. Everything inside the
- * viewer may shrink to nothing — that is what lets the page stack scroll
- * rather than the document — so with nothing asking for height the panel
- * collapsed to its two borders and clipped the rendered pages away.
+ * Everything below each other — the pages of the current chunk, the
+ * pagination to the next 25, then the document's attributes — inside the
+ * page's own scroller, with the viewer's head pinned under the app's stack
+ * while they go past.
  *
- * The play function measures what a reader actually sees: how much of the
- * first page lies inside the panel.
+ * Two things went wrong here before. The panel had nothing to stretch to in
+ * a viewport-tall grid and, since every level inside the viewer may shrink
+ * to nothing, collapsed to its two borders: no preview at all. Giving it a
+ * fixed height instead bought a scroll container inside a scroll container,
+ * which is what this story now rules out.
  */
 export const Telefonbreite: Story = {
   name: 'Telefonbreite (PDF-Vorschau)',
@@ -153,17 +154,38 @@ export const Telefonbreite: Story = {
   },
   play: async () => {
     const panel = await waitFor(() => document.querySelector<HTMLElement>('.pdf-panel'))
-    const canvas = await waitFor(() =>
+    const wrapper = await waitFor(() => panel.querySelector<HTMLElement>('.canvas-wrapper'))
+    await waitFor(() =>
       Array.from(panel.querySelectorAll('canvas')).find((c) => c.getBoundingClientRect().height > 50),
     )
-    const page = canvas.getBoundingClientRect()
-    const box = panel.getBoundingClientRect()
-    const shown = Math.max(0, Math.min(page.bottom, box.bottom) - Math.max(page.top, box.top))
-    if (shown < 200) {
+
+    // The pages stand in the page's own scroller, so nothing inside the
+    // viewer scrolls vertically on its own.
+    const nested = wrapper.scrollHeight - wrapper.clientHeight
+    if (nested > 4) {
+      throw new Error(`the page stack scrolls inside the panel as well (${nested}px of it)`)
+    }
+
+    // And they are all there to scroll past, not clipped to a sliver.
+    const stack = Array.from(panel.querySelectorAll<HTMLElement>('.page-item'))
+    const stackHeight = stack.reduce((sum, el) => sum + el.getBoundingClientRect().height, 0)
+    if (stack.length < 6 || panel.getBoundingClientRect().height < stackHeight) {
       throw new Error(
-        `only ${Math.round(shown)}px of the first page are inside the preview ` +
-          `(panel ${Math.round(box.height)}px, page ${Math.round(page.height)}px)`,
+        `the panel is ${Math.round(panel.getBoundingClientRect().height)}px for ` +
+          `${stack.length} pages worth ${Math.round(stackHeight)}px`,
       )
+    }
+
+    // The attributes follow the pages rather than sitting beside them.
+    const meta = await waitFor(() => document.querySelector<HTMLElement>('.meta-panel'))
+    if (meta.getBoundingClientRect().top < panel.getBoundingClientRect().bottom) {
+      throw new Error('the attributes do not follow the preview')
+    }
+
+    // The head is pinned, so the controls stay reachable while they do.
+    const head = await waitFor(() => panel.querySelector<HTMLElement>('.viewer-head'))
+    if (getComputedStyle(head).position !== 'sticky') {
+      throw new Error(`the viewer head is ${getComputedStyle(head).position}, not sticky`)
     }
   },
 }

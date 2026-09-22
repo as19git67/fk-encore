@@ -207,7 +207,7 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
   align-items: center;
   gap: 0.75rem;
   cursor: pointer;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   transition: border-color 0.2s, background 0.2s;
   text-align: center;
 }
@@ -246,7 +246,7 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
   gap: 0.75rem;
   align-items: center;
   padding: 0.6rem 0.8rem;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
 }

@@ -130,6 +130,19 @@ describe("colour audit", () => {
     expect(code).toBe(0);
   });
 
+  it("refuses a surface name PrimeVue 4 never defined", () => {
+    // `--p-surface-card` and friends wear the current prefix and resolve to
+    // nothing, so the element ends up with no background at all.
+    for (const name of ["card", "ground", "section", "overlay", "border-color"]) {
+      const { code, output } = check(
+        `dead-${name}.vue`,
+        `<style>.a { background: var(--p-surface-${name}); }</style>`,
+      );
+      expect(code, name).toBe(1);
+      expect(output).toContain("--p-content-background");
+    }
+  });
+
   it("refuses a PrimeVue 3 name, which resolves to nothing today", () => {
     for (const name of ["--surface-border", "--text-color-secondary", "--blue-100"]) {
       const { code, output } = check("legacy.vue", `<style>.a { color: var(${name}); }</style>`);
