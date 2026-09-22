@@ -96,6 +96,25 @@ describe("GET /trip-planner/plans/:planId/routes", () => {
     expect(res.note).toBeNull();
   });
 
+  it("looks further when asked, up to the limit", async () => {
+    // What the radius picker in the app sends. The 40-km way is out
+    // of the default 15 km and inside 50, which is the server's
+    // ceiling — a bigger number is clamped rather than refused.
+    const p = await plan();
+    geo.setRoutes("nom_garda", [
+      route({ osmRef: "relation:1" }),
+      route({ osmRef: "relation:2", name: "Fernweg Beispiel", distanceM: 40_000 }),
+    ]);
+
+    const near = await nearbyRoutes({ planId: p.id, radiusM: 15_000 });
+    const far = await nearbyRoutes({ planId: p.id, radiusM: 50_000 });
+    const clamped = await nearbyRoutes({ planId: p.id, radiusM: 500_000 });
+
+    expect(near.routes.map((r) => r.osmRef)).toEqual(["relation:1"]);
+    expect(far.routes.map((r) => r.osmRef)).toEqual(["relation:1", "relation:2"]);
+    expect(clamped.routes.map((r) => r.osmRef)).toEqual(["relation:1", "relation:2"]);
+  });
+
   it("carries the course, so the list can be looked at rather than read", async () => {
     // A row of names is not a decision: two ten-kilometre walks out
     // of the same town are not the same walk, and only the shape
