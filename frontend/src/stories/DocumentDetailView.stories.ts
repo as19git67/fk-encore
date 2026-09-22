@@ -202,6 +202,14 @@ export const Telefonbreite: Story = {
     if (pinned > 8) {
       throw new Error(`after the jump the head sits ${Math.round(pinned)}px into the scroller`)
     }
+    // And nothing of the document shows above it: the skeleton's gap under
+    // the title used to let the pages slide past in an 8px slot.
+    const header = await waitFor(() => document.querySelector<HTMLElement>('.page-header'))
+    const sliver = head.getBoundingClientRect().top - header.getBoundingClientRect().bottom
+    if (sliver > 1) {
+      throw new Error(`${Math.round(sliver)}px of the document shows above the pinned head`)
+    }
+
     const target = document.querySelector<HTMLElement>('[data-page-number="5"]')
     if (!target) throw new Error('the page jumped to is not in the stack')
     const gap = target.getBoundingClientRect().top - head.getBoundingClientRect().bottom
