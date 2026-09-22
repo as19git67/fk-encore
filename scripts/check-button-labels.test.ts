@@ -94,6 +94,64 @@ describe("icon button labels", () => {
     expect(output).not.toContain("ellipsis");
   });
 
+  it("keeps the hidden subtree open across a child of the same name", () => {
+    // Looking for the first `</div>` ended the subtree at the inner row, so
+    // the second button was reported although nothing announces it.
+    const { code } = check(
+      "nested-hidden.vue",
+      `<template>
+        <div aria-hidden="true">
+          <div class="row"><Button icon="pi pi-a" /></div>
+          <Button icon="pi pi-b" />
+        </div>
+      </template>`,
+    );
+    expect(code).toBe(0);
+  });
+
+  it("recognises the hidden container even with a > in an earlier attribute", () => {
+    // The marker regex could not pass a `>` inside an attribute value, so a
+    // handler written before `aria-hidden` hid the container from the check
+    // — the same pitfall the tag walker was written to avoid.
+    const { code } = check(
+      "hidden-arrow.vue",
+      `<template>
+        <div @click="() => open()" aria-hidden="true"><Button icon="pi pi-c" /></div>
+      </template>`,
+    );
+    expect(code).toBe(0);
+  });
+
+  it("counts the text between the tags as the label", () => {
+    const { code } = check(
+      "slot-text.vue",
+      `<template>
+        <Button icon="pi pi-plus">Neu anlegen</Button>
+        <Button icon="pi pi-tag">{{ label }}</Button>
+      </template>`,
+    );
+    expect(code).toBe(0);
+  });
+
+  it("is not fooled by an icon standing in for the text", () => {
+    const { code, output } = check(
+      "slot-icon.vue",
+      `<template><Button icon="pi pi-cog"><i class="pi pi-inner" /></Button></template>`,
+    );
+    expect(code).toBe(1);
+    expect(output).toContain("pi pi-cog");
+  });
+
+  it("leaves a ButtonGroup alone, which only starts the same way", () => {
+    const { code } = check(
+      "group.vue",
+      `<template>
+        <ButtonGroup icon="pi pi-x"><Button icon="pi pi-y" aria-label="Ypsilon" /></ButtonGroup>
+      </template>`,
+    );
+    expect(code).toBe(0);
+  });
+
   it("names the file and the line", () => {
     const { output } = check(
       "located.vue",
