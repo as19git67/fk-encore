@@ -101,10 +101,20 @@ export function takeListAnchor(routeKey: string, legacyKey?: 'documents'): ListA
   }
 }
 
-/** Forget the anchor without using it (the list was entered from a menu). */
-export function clearListAnchor(routeKey: string): void {
+/**
+ * Forget the anchor without using it (the list was entered from a menu).
+ *
+ * Takes the same `legacyKey` as `takeListAnchor`, so a tab that was upgraded
+ * mid-session drops the old build's keys here too — otherwise they would sit
+ * and wait to anchor a visit that never asked for it.
+ */
+export function clearListAnchor(routeKey: string, legacyKey?: 'documents'): void {
   try {
     sessionStorage.removeItem(PREFIX + routeKey)
+    if (legacyKey === 'documents') {
+      sessionStorage.removeItem(LEGACY_DOCUMENTS_KEY)
+      sessionStorage.removeItem(LEGACY_DOCUMENTS_ID_KEY)
+    }
   } catch {
     /* nothing stored, nothing to lose */
   }

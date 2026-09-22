@@ -9,6 +9,7 @@ import SelectButton from 'primevue/selectbutton'
 import FilterChips from '../FilterChips.vue'
 import { formatResultCount, isSearchHotkey } from './listToolbar'
 import type { ListToolbarModel } from './listToolbar'
+import { hasOpenOverlay, overlayAbove } from '../../utils/overlayLayer'
 
 /**
  * The one toolbar every list view puts in `PageLayout`'s `#toolbar` slot
@@ -132,7 +133,12 @@ function onDocumentKeydown(event: KeyboardEvent) {
     return
   }
   if (event.key !== 'Escape') return
-  if (typeof document !== 'undefined' && document.querySelector('[role="dialog"]')) return
+  // Escape belongs to whatever opened last. A dialog is not the only thing
+  // above the list: closing the toolbar's own sort menu used to leave select
+  // mode as well, so a menu dismissed by accident took the whole selection
+  // with it.
+  if (typeof document === 'undefined') return
+  if (overlayAbove(event.target) || hasOpenOverlay()) return
   const selection = props.model.selection
   if (selection?.active.value) {
     event.preventDefault()

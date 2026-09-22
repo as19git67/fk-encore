@@ -1,4 +1,5 @@
 import { nextTick, onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
+import { overlayAbove } from '../utils/overlayLayer'
 
 /**
  * Keeps the keyboard inside an overlay while it is open (issue #1281).
@@ -75,6 +76,13 @@ export function useFocusTrap(
     const root = container.value
     if (!root) return
 
+    // A dialog, menu or dropdown opened from inside this overlay lies above
+    // it. PrimeVue teleports those to `<body>`, so they look like an escape
+    // from the trap when they are the opposite: the surface the user is on.
+    // Reclaiming their keys made them unusable — Tab was pulled back here,
+    // and Escape closed this overlay out from under the one on top.
+    if (overlayAbove(event.target, root)) return
+
     if (event.key === 'Escape') {
       if (!options.onEscape) return
       event.preventDefault()
@@ -144,8 +152,14 @@ export function useFocusTrap(
     if (active.value) void enter()
   })
 
-  if (typeof document !== 'undefined') {
-    document.addEventListener('keydown', onKeydown, true)
-    onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, true))
-  }
+  if (typeof document !== 'undefined') document.addEventListener('keydown', onKeydown, true)
+
+  onBeforeUnmount(() => {
+    if (typeof document !== 'undefined') document.removeEventListener('keydown', onKeydown, true)
+    // Those same `v-if`-ed overlays never set `active` to false — they stop
+    // existing instead, and the watcher has nothing to react to. Obligation 3
+    // is owed all the same: without this the fullscreen viewer left the focus
+    // on `<body>`, at the top of a page the reader had scrolled far down.
+    if (active.value) leave()
+  })
 }
