@@ -28,19 +28,34 @@ const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..')
 const FRONTEND_SRC = join(REPO_ROOT, 'frontend', 'src')
 
 /**
- * Walk the tags of one element type, respecting quotes.
+ * Walk every tag in the markup, respecting quotes.
  *
  * A regex cannot do this: `@click="(v) => f(v)"` contains a `>` that ends
  * the match early and silently truncates the attribute list — which is how
  * a first version of this check both missed real cases and invented others.
+ *
+ * Yields opening, closing and self-closing tags alike, so a caller can keep
+ * track of where it is in the tree.
  */
-function* tagsOf(source, name) {
-  const open = `<${name}`
+function* tagsIn(source) {
   let i = 0
   for (;;) {
-    i = source.indexOf(open, i)
+    i = source.indexOf('<', i)
     if (i === -1) return
-    let j = i + open.length
+    // A comment holds markup that never renders — and a `</div>` in there
+    // would close a subtree that is still open in the real tree.
+    if (source.startsWith('<!--', i)) {
+      const end = source.indexOf('-->', i)
+      if (end === -1) return
+      i = end + 3
+      continue
+    }
+    const nameMatch = /^<(\/?)([A-Za-z][\w.-]*)/.exec(source.slice(i, i + 64))
+    if (!nameMatch) {
+      i += 1
+      continue
+    }
+    let j = i + nameMatch[0].length
     let quote = null
     for (; j < source.length; j++) {
       const c = source[j]
@@ -52,10 +67,36 @@ function* tagsOf(source, name) {
         break
       }
     }
-    yield { start: i, end: j + 1, text: source.slice(i, j + 1) }
+    const text = source.slice(i, j + 1)
+    yield {
+      start: i,
+      end: j + 1,
+      name: nameMatch[2],
+      closing: nameMatch[1] === '/',
+      selfClosing: /\/\s*>$/.test(text),
+      text,
+    }
     i = j + 1
   }
 }
+
+/**
+ * The opening tags of one element type.
+ *
+ * The name has to match to its end: `<ButtonGroup` starts with `<Button`,
+ * and a prefix test checked it as if it were a Button.
+ */
+function* tagsOf(source, name) {
+  for (const tag of tagsIn(source)) {
+    if (!tag.closing && tag.name === name) yield tag
+  }
+}
+
+/** Elements that never have a closing tag, so they never open a subtree. */
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+])
 
 /** Attribute names on a tag, ignoring anything inside a quoted value. */
 function attributesOf(tag) {
@@ -72,31 +113,62 @@ function attributesOf(tag) {
 }
 
 /**
- * Whether the tag sits inside an `aria-hidden="true"` element. Approximated
- * by depth: walk back through the markup counting how many aria-hidden
- * openings are still unclosed. Good enough for the one case that needs it
- * and never wrong in the other direction — a stray `aria-hidden` on a
- * self-closing tag before the button does not open a subtree.
+ * Whether the tag sits inside an `aria-hidden="true"` element.
+ *
+ * Walks the tree up to `index` keeping a stack of what is open, so a hidden
+ * container that holds another element of the same name is still recognised
+ * as open afterwards. Looking for the first `</div>` instead — as a first
+ * version did — ended the subtree at a nested child and reported buttons
+ * that nothing ever announces.
  */
 function insideAriaHidden(source, index) {
-  const before = source.slice(0, index)
-  const marker = /<(\w+)([^>]*\saria-hidden="true"[^>]*)>/g
-  let m
-  while ((m = marker.exec(before)) !== null) {
-    if (m[2].trimEnd().endsWith('/')) continue
-    const close = before.indexOf(`</${m[1]}>`, m.index)
-    if (close === -1) return true // still open where the button is
+  const stack = []
+  for (const tag of tagsIn(source)) {
+    if (tag.start >= index) break
+    if (VOID_ELEMENTS.has(tag.name.toLowerCase())) continue
+    if (tag.closing) {
+      // Pop to the matching name: unclosed markup must not unwind the stack
+      // past the element that actually owns this position.
+      const at = stack.map((e) => e.name).lastIndexOf(tag.name)
+      if (at !== -1) stack.length = at
+    } else if (!tag.selfClosing) {
+      stack.push({ name: tag.name, hidden: /\saria-hidden\s*=\s*"true"/.test(tag.text) })
+    }
   }
-  return false
+  return stack.some((e) => e.hidden)
+}
+
+/**
+ * The text a button shows between its tags, with nested markup removed.
+ *
+ * `<Button icon="pi pi-plus">Neu anlegen</Button>` is an icon button with a
+ * visible, announced label — judging it by its opening tag alone blocked a
+ * commit for a button that says exactly what it does. A `{{ expression }}`
+ * counts: it renders as text. An icon element on its own does not.
+ */
+function slotTextOf(source, tag) {
+  if (tag.selfClosing) return ''
+  let depth = 1
+  for (const next of tagsIn(source.slice(tag.end))) {
+    if (next.name !== tag.name || next.selfClosing) continue
+    depth += next.closing ? -1 : 1
+    if (depth === 0) {
+      const inner = source.slice(tag.end, tag.end + next.start)
+      return inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    }
+  }
+  return ''
 }
 
 function findUnlabelled(source) {
   const found = []
-  for (const { start, text } of tagsOf(source, 'Button')) {
+  for (const tag of tagsOf(source, 'Button')) {
+    const { start, text } = tag
     const attrs = attributesOf(text)
     const hasIcon = attrs.has('icon') || attrs.has(':icon')
     const hasLabel = attrs.has('label') || attrs.has(':label')
     if (!hasIcon || hasLabel) continue
+    if (slotTextOf(source, tag)) continue
     const named = [...attrs].some(
       (a) => a.startsWith('aria-label') || a.startsWith(':aria-label') || a.startsWith('v-tooltip'),
     )
