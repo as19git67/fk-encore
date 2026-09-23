@@ -27,6 +27,8 @@ import type {
   GeoRegionStorage,
   GeoPoiSearchQuery,
   GeoRoute,
+  GeoAlongSubject,
+  GeoRouteAlong,
   GeoRouteGeometry,
   GeoRoutePoint,
   GeoRouteSearchPage,
@@ -292,6 +294,35 @@ export class InMemoryGeoClient implements GeoClient {
       website: route.website,
       parts: course.length >= 2 ? [course] : [],
       joined: route.joined,
+    };
+  }
+
+  private alongSubjects = new Map<string, GeoAlongSubject[]>();
+
+  /** The Wikidata items `routeAlong` reports beside one way. */
+  setAlongSubjects(postgresDb: string, osmId: number, subjects: GeoAlongSubject[]): void {
+    this.alongSubjects.set(`${postgresDb}/${osmId}`, subjects);
+  }
+
+  /**
+   * The things beside a way, and points along it (§4.7).
+   *
+   * The points are the seeded route's `via` — its shape — so a test
+   * can tell which points the photo search was sent to. Which stretch
+   * of a long way counts as "near here" is geometry, and is tested
+   * against PostGIS (`geo/src/route-along.test.ts`).
+   */
+  async routeAlong(postgresDb: string, osmId: number): Promise<GeoRouteAlong | null> {
+    if (this.failingSearches.has(postgresDb)) {
+      throw new Error("geo: POST /routes/along → connect ECONNREFUSED");
+    }
+    if (!this.routesImported.has(postgresDb)) return null;
+    const route = (this.routes.get(postgresDb) ?? []).find((r) => r.id === osmId);
+    if (!route) return null;
+    return {
+      osmRef: route.osmRef,
+      subjects: this.alongSubjects.get(`${postgresDb}/${osmId}`) ?? [],
+      samples: route.via.length > 0 ? [...route.via] : [route.start],
     };
   }
 

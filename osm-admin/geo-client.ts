@@ -288,6 +288,26 @@ export interface GeoRoute {
   worth?: number;
 }
 
+/** A thing beside a way that has a Wikidata item, for its picture. */
+export interface GeoAlongSubject {
+  /** peak | viewpoint | water | castle | … — the ranking's categories. */
+  category: string;
+  name: string | null;
+  /** Bare QID, "Q123". */
+  wikidata: string;
+  lat: number;
+  lon: number;
+}
+
+/** What to look at along one way near a centre (§4.7). */
+export interface GeoRouteAlong {
+  osmRef: string;
+  /** Most striking first. */
+  subjects: GeoAlongSubject[];
+  /** A handful of points spread over the stretch near the centre. */
+  samples: GeoRoutePoint[];
+}
+
 /**
  * One route's course in full, for export (§4.7).
  *
@@ -388,6 +408,16 @@ export interface GeoClient {
    * no such relation (§4.7).
    */
   routeGeometry(postgresDb: string, osmId: number): Promise<GeoRouteGeometry | null>;
+  /**
+   * The Wikidata items beside one way and points along it, near a
+   * centre — the keys to its pictures (§4.7). Null when the region has
+   * no such relation.
+   */
+  routeAlong(
+    postgresDb: string,
+    osmId: number,
+    near: { center: { lat: number; lon: number }; radiusM: number },
+  ): Promise<GeoRouteAlong | null>;
   /** Places within reach that would carry a day of their own (§4.6). */
   searchDayTargets(postgresDb: string, query: GeoDayTargetQuery): Promise<GeoDayTargetPage>;
   /** Which of the current style's tables a region database has. */
@@ -570,6 +600,29 @@ export class HttpGeoClient implements GeoClient {
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`geo: GET ${path} → HTTP ${res.status}`);
     return (await res.json()) as GeoRouteGeometry;
+  }
+
+  async routeAlong(
+    postgresDb: string,
+    osmId: number,
+    near: { center: { lat: number; lon: number }; radiusM: number },
+  ): Promise<GeoRouteAlong | null> {
+    const path = "/routes/along";
+    const res = await this.fetcher(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers: { ...this.headers(), "content-type": "application/json" },
+      body: JSON.stringify({
+        database: postgresDb,
+        osmId,
+        center: near.center,
+        radiusM: near.radiusM,
+      }),
+      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+    });
+    // A relation a re-import dropped — the same answer the export gets.
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`geo: POST ${path} → HTTP ${res.status}`);
+    return (await res.json()) as GeoRouteAlong;
   }
 
   /**

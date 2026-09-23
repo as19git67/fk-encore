@@ -981,6 +981,44 @@ struct TripNearbyRoute: Codable, Sendable, Identifiable {
     }
 }
 
+/// One picture along a way, from Wikimedia Commons (§4.7).
+///
+/// Author and licence are not decoration: a free licence is free on
+/// condition of saying whose picture it is, so the app shows both
+/// wherever it shows the picture.
+struct TripRoutePhoto: Codable, Sendable, Hashable, Identifiable {
+    let thumbUrl: String
+    let thumbWidth: Int
+    let thumbHeight: Int
+    /// The file's page on Commons, with the full picture.
+    let pageUrl: String
+    /// What it shows, where known — the summit's name.
+    let caption: String?
+    let author: String?
+    let license: String?
+
+    var id: String { pageUrl }
+
+    /// "Foto: Name · CC BY-SA 4.0", with what is known.
+    var credit: String {
+        var parts: [String] = []
+        if let author, !author.isEmpty { parts.append("Foto: \(author)") }
+        if let license, !license.isEmpty { parts.append(license) }
+        return parts.isEmpty ? "Wikimedia Commons" : parts.joined(separator: " · ")
+    }
+
+    /// Width over height, for a frame that does not jump when the
+    /// picture arrives.
+    var aspectRatio: Double {
+        guard thumbWidth > 0, thumbHeight > 0 else { return 4.0 / 3.0 }
+        return Double(thumbWidth) / Double(thumbHeight)
+    }
+}
+
+struct TripRoutePhotosResponse: Codable, Sendable {
+    let photos: [TripRoutePhoto]
+}
+
 /// Something a way passes near the city (§4.7).
 ///
 /// The row shows these instead of a score. A number would ask to be
