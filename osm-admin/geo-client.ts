@@ -224,6 +224,12 @@ export interface GeoReplicationStatus {
 export interface GeoRouteSearchQuery {
   center: { lat: number; lon: number };
   radiusM: number;
+  /**
+   * The near edge of a ring, in metres. Omitted or 0 searches a full
+   * circle — see `RouteSearchOptions` in geo for why a band beats a
+   * bigger circle once somebody has worked through what is close.
+   */
+  minRadiusM?: number;
   /** hiking | foot | bicycle | mtb. Omitted = all four. */
   kinds?: string[];
   limit?: number;
@@ -515,6 +521,7 @@ export class HttpGeoClient implements GeoClient {
       database: postgresDb,
       center: query.center,
       radiusM: query.radiusM,
+      minRadiusM: query.minRadiusM,
       kinds: query.kinds,
       limit: query.limit,
     });

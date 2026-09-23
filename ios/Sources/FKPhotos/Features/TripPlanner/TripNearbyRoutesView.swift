@@ -21,34 +21,95 @@ import SwiftUI
 ///   - **What the region does not know.** A region imported before the
 ///     planner knew about ways holds none, which is a different answer
 ///     from "there are none here" and is said as one (§15.3).
-/// How far around the city to look for signposted ways (§4.7).
+/// Which slice of the map to look in for signposted ways (§4.7).
 ///
-/// Three steps rather than a slider, and the reason is what the number
-/// means: it is the distance from the leg's anchor to the *nearest
-/// point of the way*, and nobody has an opinion about 23 kilometres
-/// versus 27. What people do have an opinion about is "around town",
-/// "a short drive" and "a day out with the car" — which is what these
-/// three are.
+/// A **band**, not a ceiling, and that is the whole point. The answer
+/// is ordered by distance and capped at forty, so raising a ceiling
+/// alone hands back the same near ways and reports that there are
+/// more. Somebody who has worked through what is close needs those
+/// *gone*, not outnumbered.
 ///
-/// Fifty is the end of the scale because it is the server's limit
-/// (`MAX_RADIUS_M` in `routes.ts`, and geo refuses more); offering
-/// sixty would be an option that comes back as an error.
-enum TripRouteRadius: Int, CaseIterable, Identifiable, Sendable {
-    /// What the search did before anybody could choose.
-    case standard = 15
-    case wider = 25
+/// Three bands rather than a slider, because nobody has an opinion
+/// about 23 kilometres versus 27. What people do have an opinion about
+/// is "around town", "a short drive" and "a day out with the car".
+///
+/// The near bands are the narrow ones: ways are dense close to a town
+/// and thin out, so equal thirds would leave the first band overfull
+/// and the last one empty. Fifty is the end of the scale because it is
+/// the server's limit (`MAX_RADIUS_M` in `routes.ts`, and geo refuses
+/// more); a fourth band would be an option that comes back as an
+/// error.
+enum TripRouteBand: Int, CaseIterable, Identifiable, Sendable {
+    /// What the search did before bands existed, near enough.
+    case near = 20
+    case middle = 35
     case far = 50
 
     var id: Int { rawValue }
-    var km: Int { rawValue }
-    var metres: Int { rawValue * 1_000 }
-    var label: String { "\(rawValue) km" }
+    /// The far edge, which is also the stored value.
+    var toKm: Int { rawValue }
+    var fromKm: Int {
+        switch self {
+        case .near: return 0
+        case .middle: return 20
+        case .far: return 35
+        }
+    }
 
-    /// The step a stored number stands for, falling back to the
-    /// default: a value from an older build — or a hand-edited one —
+    var fromMetres: Int { fromKm * 1_000 }
+    var toMetres: Int { toKm * 1_000 }
+
+    /// "bis 20 km", "20–35 km". The first band has no near edge worth
+    /// naming — "0–20 km" reads like a measurement rather than a
+    /// choice.
+    var label: String { fromKm == 0 ? "bis \(toKm) km" : "\(fromKm)–\(toKm) km" }
+
+    /// The band a stored number stands for, falling back to the
+    /// nearest: a value from an older build — or a hand-edited one —
     /// should not leave the picker showing nothing.
-    static func of(km: Int) -> TripRouteRadius {
-        TripRouteRadius(rawValue: km) ?? .standard
+    static func of(km: Int) -> TripRouteBand {
+        TripRouteBand(rawValue: km) ?? .near
+    }
+}
+
+/// The four kinds of way OpenStreetMap signposts, as the filter shows
+/// them (§4.7).
+///
+/// Worth de-selecting because they are not variations of one thing: a
+/// mountain-bike route and a riverside promenade are different days
+/// out, and somebody who does not cycle wants the list without them
+/// rather than sorted around them.
+///
+/// The raw values are what the endpoint takes; the labels are what a
+/// traveller calls them.
+enum TripRouteKind: String, CaseIterable, Identifiable, Sendable {
+    case hiking, foot, bicycle, mtb
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .hiking: return "Wandern"
+        case .foot: return "Spazieren"
+        case .bicycle: return "Radfahren"
+        case .mtb: return "Mountainbike"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .hiking, .foot: return "figure.hiking"
+        case .bicycle, .mtb: return "bicycle"
+        }
+    }
+
+    /// What the filter says when some kinds are off — the counter on
+    /// the button, in words. Nil when everything is shown, because a
+    /// filter that changes nothing should not announce itself.
+    static func summary(of chosen: Set<String>) -> String? {
+        if chosen.isEmpty || chosen.count == allCases.count { return nil }
+        let names = allCases.filter { chosen.contains($0.rawValue) }.map(\.label)
+        return names.joined(separator: ", ")
     }
 }
 
@@ -68,9 +129,9 @@ final class TripNearbyRoutesModel {
 
     /// Which kinds to ask for. Empty means all four.
     var kinds: Set<String> = []
-    /// How far to look. The screen owns the choice and remembers it;
-    /// the model only carries it into the request.
-    var radius: TripRouteRadius = .standard
+    /// Which band to look in. The screen owns the choice and
+    /// remembers it; the model only carries it into the request.
+    var band: TripRouteBand = .near
     /// True when the region holds more ways than the answer carried.
     /// Worth saying, because a wider radius makes it likely.
     private(set) var hasMore = false
@@ -92,8 +153,12 @@ final class TripNearbyRoutesModel {
         do {
             var query = [
                 "legIndex": String(legIndex),
-                "radiusM": String(radius.metres),
+                "radiusM": String(band.toMetres),
             ]
+            // Left out for the first band rather than sent as zero: a
+            // request without a near edge is the one every older
+            // backend understands.
+            if band.fromMetres > 0 { query["minRadiusM"] = String(band.fromMetres) }
             if !kinds.isEmpty { query["kinds"] = kinds.sorted().joined(separator: ",") }
             let response: TripNearbyRoutesResponse = try await APIClient.shared.get(
                 "/trip-planner/plans/\(planId)/routes",
@@ -141,7 +206,15 @@ struct TripNearbyRoutesView: View {
     /// drive is a habit rather than a decision about one city. Per
     /// viewer and nowhere else: it changes no plan and nobody else's
     /// list.
-    @AppStorage("trip.routes.radiusKm") private var radiusKm = TripRouteRadius.standard.km
+    ///
+    /// A new key rather than the old `radiusKm`: the numbers look
+    /// alike but no longer mean the same thing — 50 used to be "up to
+    /// 50 km" and is now "35 to 50" — and inheriting that silently
+    /// would hide near ways from somebody who never chose to.
+    @AppStorage("trip.routes.bandToKm") private var bandToKm = TripRouteBand.near.toKm
+    /// Which kinds are shown. Empty means all four, which is also what
+    /// the endpoint reads an absent list as.
+    @AppStorage("trip.routes.kinds") private var kindsRaw = ""
 
     init(planId: Int, legIndex: Int) {
         self.planId = planId
@@ -151,30 +224,87 @@ struct TripNearbyRoutesView: View {
 
     /// The picker's selection, which also reloads.
     ///
-    /// Through a binding rather than `onChange`: choosing a radius
-    /// *is* asking again, and one place that both stores the choice
-    /// and sends the request cannot get out of step with itself.
-    private var radius: Binding<TripRouteRadius> {
+    /// Through a binding rather than `onChange`: choosing a band *is*
+    /// asking again, and one place that both stores the choice and
+    /// sends the request cannot get out of step with itself.
+    private var band: Binding<TripRouteBand> {
         Binding(
-            get: { TripRouteRadius.of(km: radiusKm) },
+            get: { TripRouteBand.of(km: bandToKm) },
             set: { chosen in
-                guard chosen.km != radiusKm else { return }
-                radiusKm = chosen.km
-                model.radius = chosen
+                guard chosen.toKm != bandToKm else { return }
+                bandToKm = chosen.toKm
+                model.band = chosen
                 Task { await model.load() }
             },
         )
     }
 
+    /// The kinds currently shown, read out of the stored string.
+    private var chosenKinds: Set<String> {
+        Set(kindsRaw.split(separator: ",").map(String.init))
+    }
+
+    /// Turn one kind on or off and ask again.
+    ///
+    /// Turning the last one off would answer with an empty list for a
+    /// reason nobody would guess, so it is read as "all of them" —
+    /// the same thing the endpoint does with an absent list.
+    private func toggle(_ kind: TripRouteKind) {
+        var chosen = chosenKinds.isEmpty
+            ? Set(TripRouteKind.allCases.map(\.rawValue))
+            : chosenKinds
+        if chosen.contains(kind.rawValue) {
+            chosen.remove(kind.rawValue)
+        } else {
+            chosen.insert(kind.rawValue)
+        }
+        if chosen.isEmpty || chosen.count == TripRouteKind.allCases.count {
+            kindsRaw = ""
+            model.kinds = []
+        } else {
+            kindsRaw = chosen.sorted().joined(separator: ",")
+            model.kinds = chosen
+        }
+        Task { await model.load() }
+    }
+
+    private func showAllKinds() {
+        guard !kindsRaw.isEmpty else { return }
+        kindsRaw = ""
+        model.kinds = []
+        Task { await model.load() }
+    }
+
     var body: some View {
         List {
             Section {
-                Picker("Umkreis", selection: radius) {
-                    ForEach(TripRouteRadius.allCases) { step in
+                Picker("Entfernung", selection: band) {
+                    ForEach(TripRouteBand.allCases) { step in
                         Text(step.label).tag(step)
                     }
                 }
                 .pickerStyle(.segmented)
+                .disabled(model.isLoading)
+
+                Menu {
+                    ForEach(TripRouteKind.allCases) { kind in
+                        Button {
+                            toggle(kind)
+                        } label: {
+                            Label(kind.label,
+                                  systemImage: shows(kind) ? "checkmark" : kind.symbolName)
+                        }
+                    }
+                    if !kindsRaw.isEmpty {
+                        Divider()
+                        Button("Alle zeigen", systemImage: "arrow.counterclockwise") {
+                            showAllKinds()
+                        }
+                    }
+                } label: {
+                    LabeledContent("Arten",
+                                   value: TripRouteKind.summary(of: chosenKinds) ?? "alle")
+                }
                 .disabled(model.isLoading)
             } footer: {
                 // What the number measures, because it is not the
@@ -182,7 +312,8 @@ struct TripNearbyRoutesView: View {
                 // eight kilometres from town is in the list, and its
                 // start may be a hundred kilometres away.
                 Text("Gemessen vom Ausgangspunkt der Etappe bis zur nächsten Stelle "
-                     + "der Strecke — nicht bis zu ihrem Anfang.")
+                     + "der Strecke — nicht bis zu ihrem Anfang. Ein weiter entferntes "
+                     + "Band zeigt andere Strecken, nicht mehr davon.")
             }
 
             if model.isLoading && model.routes.isEmpty {
@@ -206,8 +337,9 @@ struct TripNearbyRoutesView: View {
             // with forty ways in it. Said at the bottom, where the
             // list actually ends (§15.3).
             if model.hasMore {
-                Label("Es gibt mehr als diese — gezeigt werden die, die am nächsten "
-                      + "vorbeilaufen. Ein kleinerer Umkreis macht die Liste schärfer.",
+                Label("In diesem Band gibt es mehr als diese — gezeigt werden die, die "
+                      + "am nächsten vorbeilaufen. Ein Band weiter draußen zeigt die "
+                      + "übrigen.",
                       systemImage: "ellipsis.circle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -216,14 +348,34 @@ struct TripNearbyRoutesView: View {
         .navigationTitle("Strecken in der Nähe")
         .navigationBarTitleDisplayMode(.inline)
         .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    TripRoutesMapView(planId: planId,
+                                      legIndex: legIndex,
+                                      routes: model.routes)
+                } label: {
+                    Image(systemName: "map")
+                }
+                .accessibilityLabel("Alle Strecken auf der Karte")
+                .disabled(model.routes.isEmpty)
+            }
+        }
         .task {
-            // The remembered radius has to reach the model before the
-            // first request, or the first list would be 15 km and the
-            // picker would say 50.
-            model.radius = TripRouteRadius.of(km: radiusKm)
+            // The remembered choices have to reach the model before
+            // the first request, or the first list would be the
+            // default while the controls showed something else.
+            model.band = TripRouteBand.of(km: bandToKm)
+            model.kinds = chosenKinds
             if !model.hasLoaded { await model.load() }
         }
         .refreshable { await model.load() }
+    }
+
+    /// Is this kind in the list right now? Nothing chosen means all
+    /// four, so every kind shows.
+    private func shows(_ kind: TripRouteKind) -> Bool {
+        chosenKinds.isEmpty || chosenKinds.contains(kind.rawValue)
     }
 
     /// Taking the way in, from the course screen — or nothing to do,
