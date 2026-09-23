@@ -220,7 +220,13 @@ defineExpose({ contentEl })
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  /* The space between the title row and the content. A view whose content
+     begins with a bar of its own that pins itself under the app's stack
+     (the document viewer's head) closes it by setting `--page-gap`, so
+     nothing of the content shows through above that bar while it scrolls
+     past. On `scroll="self"` the content is inset by `--focus-ring-reach`
+     and pulled back out again, so that much gap reads as none. */
+  gap: var(--page-gap, var(--space-3));
   width: 100%;
   min-width: 0;
   padding: var(--space-3) var(--page-gutter) var(--space-5);

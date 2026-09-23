@@ -487,6 +487,11 @@ async function goToPage(value: number) {
 function nextPage() { void goToPage(currentPage.value + 1) }
 function prevPage() { void goToPage(currentPage.value - 1) }
 
+// Both ends of a long document, without paging through the chunks in
+// between: `goToPage` switches chunks by itself.
+function firstPage() { void goToPage(1) }
+function lastPage() { void goToPage(totalPages.value) }
+
 function onPageInputCommit() {
   void goToPage(parseInt(pageInput.value, 10))
 }
@@ -623,6 +628,15 @@ onBeforeUnmount(() => {
       <div class="toolbar">
         <div class="toolbar-group">
           <Button
+            icon="pi pi-step-backward"
+            text
+            rounded
+            class="edge-button"
+            aria-label="Erste Seite"
+            :disabled="currentPage <= 1 || totalPages === 0"
+            @click="firstPage"
+          />
+          <Button
             icon="pi pi-chevron-left"
             text
             rounded
@@ -653,6 +667,15 @@ onBeforeUnmount(() => {
             aria-label="Nächste Seite"
             :disabled="currentPage >= totalPages || totalPages === 0"
             @click="nextPage"
+          />
+          <Button
+            icon="pi pi-step-forward"
+            text
+            rounded
+            class="edge-button"
+            aria-label="Letzte Seite"
+            :disabled="currentPage >= totalPages || totalPages === 0"
+            @click="lastPage"
           />
         </div>
 
@@ -912,6 +935,39 @@ onBeforeUnmount(() => {
 
   .toolbar-group {
     gap: 0;
+  }
+
+  /* Five controls where there were three (first and last page joined the
+     row), and a 360px phone gives the toolbar 318px to put them in. Every
+     button gives up 4px, the jumps to either end another 4 (they sit at the
+     ends of the row, where a mis-tap hits nothing, and they are not what a
+     reader reaches for page by page), and the two readouts some of their
+     slack. That keeps page navigation and zoom on one line: a second pinned
+     row would cost 40px of document on every screen, all the way down. */
+  .toolbar-group :deep(.p-button) {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  /* Beats the rule above, which is one class more specific than the
+     component's own. */
+  .toolbar-group :deep(.p-button.edge-button) {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .page-indicator {
+    gap: 0.2rem;
+  }
+
+  .page-input {
+    width: 2.5rem;
+    padding: 0.2rem 0.2rem;
+  }
+
+  .zoom-display {
+    min-width: 2.75rem;
+    padding: 0.25rem 0.2rem;
   }
 
   .chunk-bar {
