@@ -467,6 +467,7 @@ struct TripNearbyRoutesView: View {
                         legIndex: legIndex,
                         route: route,
                         onTake: takeAction(for: route),
+                        radiusM: TripRouteBand.of(km: bandToKm).toMetres,
                     )
                 } label: {
                     Image(systemName: "map").foregroundStyle(.secondary)

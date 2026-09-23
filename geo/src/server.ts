@@ -16,6 +16,8 @@
  *   GET    /pois/categories       — the category vocabulary /pois/search accepts
  *   POST   /import                — { slug, postgresDb, pbfUrl }
  *   GET    /regions/:database/tables — which style tables it has
+ *   POST   /routes/along — Wikidata subjects and sample points along one
+ *          way near a centre, for its pictures (§4.7)
  *   GET    /regions/:database/routes/:osmId/geometry — one route's full
  *                                   course, unsimplified, for export
  *   DELETE /regions/:database     — drop a region database (admin)
@@ -43,6 +45,7 @@ import {
   type RouteSearchOptions,
 } from "./route-search.ts";
 import { routeGeometry } from "./route-geometry.ts";
+import { routeAlong } from "./route-along.ts";
 import { DayTargetError, searchDayTargets, type DayTargetOptions } from "./day-targets.ts";
 import {
   dropRegion,
@@ -350,6 +353,35 @@ app.get("/regions/:database/routes/:osmId/geometry", async (req, res, next) => {
     // so a saved link says what happened.
     if (!geometry) throw new HttpError(404, `no route ${osmId} in ${database}`);
     res.json(geometry);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// What to look at along one way, for its pictures (§4.7): the
+// Wikidata items beside it and points along the stretch near the leg.
+// A POST because it carries a centre and a radius, like the search.
+app.post("/routes/along", async (req, res, next) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const database = requireString(b.database, "database");
+    if (!/^[a-z0-9_]+$/.test(database)) {
+      throw new HttpError(400, `database must match [a-z0-9_]+, got '${database}'`);
+    }
+    const osmId = Number(b.osmId);
+    if (!Number.isInteger(osmId) || osmId <= 0) {
+      throw new HttpError(400, `osmId must be a positive integer, got '${String(b.osmId)}'`);
+    }
+    const center = (b.center ?? {}) as Record<string, unknown>;
+    const along = await routeAlong(database, osmId, {
+      center: {
+        lat: requireFiniteNumber(center.lat, "center.lat"),
+        lon: requireFiniteNumber(center.lon, "center.lon"),
+      },
+      radiusM: requireFiniteNumber(b.radiusM, "radiusM"),
+    });
+    if (!along) throw new HttpError(404, `no route ${osmId} in ${database}`);
+    res.json(along);
   } catch (err) {
     next(err);
   }

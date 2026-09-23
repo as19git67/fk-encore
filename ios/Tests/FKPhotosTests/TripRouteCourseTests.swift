@@ -252,6 +252,40 @@ final class TripRouteHighlightTests: XCTestCase {
     }
 }
 
+/// Pictures along a way, and what the licence asks to be said (§4.7).
+final class TripRoutePhotoTests: XCTestCase {
+
+    private func photos(_ json: String) throws -> [TripRoutePhoto] {
+        try JSONDecoder().decode(TripRoutePhotosResponse.self, from: Data(json.utf8)).photos
+    }
+
+    func testAPictureDecodesWithItsCredit() throws {
+        let decoded = try photos("""
+        { "photos": [{ "thumbUrl": "https://upload.example.test/a.jpg",
+                       "thumbWidth": 640, "thumbHeight": 480,
+                       "pageUrl": "https://commons.example.test/a",
+                       "caption": "Monte Beispiel",
+                       "author": "Beispiel Fotograf", "license": "CC BY-SA 4.0" }] }
+        """)
+        XCTAssertEqual(decoded.first?.credit, "Foto: Beispiel Fotograf · CC BY-SA 4.0")
+        XCTAssertEqual(decoded.first?.aspectRatio ?? 0, 4.0 / 3.0, accuracy: 0.001)
+    }
+
+    func testACreditSaysWhatIsKnownAndNeverNothing() throws {
+        let decoded = try photos("""
+        { "photos": [{ "thumbUrl": "t", "thumbWidth": 0, "thumbHeight": 0,
+                       "pageUrl": "p", "caption": null, "author": null, "license": null }] }
+        """)
+        // Where it came from, at the very least.
+        XCTAssertEqual(decoded.first?.credit, "Wikimedia Commons")
+        XCTAssertEqual(decoded.first?.aspectRatio ?? 0, 4.0 / 3.0, accuracy: 0.001)
+    }
+
+    func testNoPicturesIsAnEmptyList() throws {
+        XCTAssertEqual(try photos(#"{ "photos": [] }"#).count, 0)
+    }
+}
+
 /// The file name, which lands in somebody's downloads folder.
 final class TripGpxNameTests: XCTestCase {
 

@@ -62,10 +62,10 @@ export const ROUNDTRIP_TOLERANCE_M = 150;
  * corridor the planner measures with, and it turns a relation of ten
  * thousand nodes into something a plan can carry offline.
  */
-const SIMPLIFY_TOLERANCE_DEG = 0.0005;
+export const SIMPLIFY_TOLERANCE_DEG = 0.0005;
 
 /** Vertices per piece when looking along a line for highlights. */
-const SUBDIVIDE_VERTICES = 32;
+export const SUBDIVIDE_VERTICES = 32;
 
 /** At most this many points in the shape, however long the way. */
 export const MAX_VIA_POINTS = 64;
@@ -406,7 +406,7 @@ function thinned(points: readonly RoutePoint[]): RoutePoint[] {
 const EARTH_RADIUS_M = 6_371_008;
 
 /** Half the side of the square around the centre, in degrees. */
-function searchBox(center: RoutePoint, radiusM: number): { dLat: number; dLon: number } {
+export function searchBox(center: RoutePoint, radiusM: number): { dLat: number; dLon: number } {
   return { dLat: radiusM / 111_132, dLon: degreesFor(radiusM, center.lat) };
 }
 
@@ -415,7 +415,7 @@ function searchBox(center: RoutePoint, radiusM: number): { dLat: number; dLon: n
  * two, so a pre-filter built from it never cuts off what the exact
  * test would keep.
  */
-function degreesFor(metres: number, lat: number): number {
+export function degreesFor(metres: number, lat: number): number {
   const cos = Math.max(Math.cos((lat * Math.PI) / 180), 0.05);
   return metres / (111_320 * cos);
 }
@@ -476,7 +476,7 @@ function validateMinRadius(minRadiusM: number | undefined, radiusM: number): num
   return rounded;
 }
 
-function validateRadius(radiusM: number): number {
+export function validateRadius(radiusM: number): number {
   if (!Number.isFinite(radiusM) || radiusM <= 0) {
     throw new RouteSearchError("radiusM must be a positive number");
   }
@@ -486,7 +486,7 @@ function validateRadius(radiusM: number): number {
   return Math.round(radiusM);
 }
 
-function validatePoint(point: { lat: number; lon: number } | undefined): void {
+export function validatePoint(point: { lat: number; lon: number } | undefined): void {
   if (!point || typeof point !== "object") {
     throw new RouteSearchError("center is required");
   }

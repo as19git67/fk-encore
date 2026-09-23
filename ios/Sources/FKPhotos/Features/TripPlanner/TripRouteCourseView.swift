@@ -30,11 +30,17 @@ struct TripRouteCourseView: View {
     /// Nil when the route is already in the pool — then there is
     /// nothing to take in.
     var onTake: (() async -> Void)?
+    /// How far around the leg the pictures are looked for — the band
+    /// the list was searched in. Nil lets the server choose.
+    var radiusM: Int? = nil
 
     @State private var isTaking = false
     @State private var isExporting = false
     @State private var exported: ExportedFile?
     @State private var errorMessage: String?
+    @State private var photos: [TripRoutePhoto] = []
+    @State private var photosLoaded = false
+    @State private var shownPhoto: TripRoutePhoto?
 
     /// A downloaded file, kept whole so the sheet can be `item`-bound:
     /// a `URL` alone is not `Identifiable`.
@@ -62,6 +68,25 @@ struct TripRouteCourseView: View {
                      ? "Der Verlauf kommt aus OpenStreetMap und ist für die Karte vereinfacht."
                      : "Für diese Strecke hat OpenStreetMap keinen zusammenhängenden Verlauf "
                        + "— gezeigt wird höchstens, wo sie beginnt.")
+            }
+
+            // Pictures, where Wikimedia has any. No section at all when
+            // it has none: an empty strip or an apology would take the
+            // space the facts below need (§15.3).
+            if !photosLoaded {
+                Section {
+                    HStack { ProgressView(); Text("Bilder werden gesucht…").foregroundStyle(.secondary) }
+                }
+            } else if !photos.isEmpty {
+                Section {
+                    photoStrip()
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                } header: {
+                    Text("Bilder")
+                } footer: {
+                    Text("Von Wikimedia Commons: Fotos der Orte am Weg und solche, die in "
+                         + "seiner Nähe aufgenommen wurden. Nicht jedes zeigt den Weg selbst.")
+                }
             }
 
             // What the way passes near the city, named where the map
@@ -167,6 +192,73 @@ struct TripRouteCourseView: View {
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .sheet(item: $exported) { file in
             TripFileShareSheet(url: file.url)
+        }
+        .sheet(item: $shownPhoto) { photo in
+            TripRoutePhotoView(photo: photo)
+        }
+        .task { await loadPhotos() }
+    }
+
+    // MARK: - The pictures
+
+    @ViewBuilder
+    private func photoStrip() -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(alignment: .top, spacing: 10) {
+                ForEach(photos) { photo in
+                    Button {
+                        shownPhoto = photo
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            AsyncImage(url: URL(string: photo.thumbUrl)) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                case .failure:
+                                    Image(systemName: "photo")
+                                        .foregroundStyle(.secondary)
+                                default:
+                                    ProgressView()
+                                }
+                            }
+                            .frame(width: 200, height: 150)
+                            .background(.quaternary)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            Text(photo.caption ?? photo.credit)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .frame(width: 200, alignment: .leading)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(photo.caption.map { "Bild: \($0)" } ?? "Bild entlang der Strecke")
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .frame(height: 176)
+    }
+
+    /// Quietly: a way without pictures, or a Commons that is down, is
+    /// a screen without the strip — not an error over a route that is
+    /// otherwise all there.
+    private func loadPhotos() async {
+        guard !photosLoaded else { return }
+        defer { photosLoaded = true }
+        var query = [
+            "osmRef": route.osmRef,
+            "legIndex": String(legIndex),
+        ]
+        if let radiusM { query["radiusM"] = String(radiusM) }
+        do {
+            let response: TripRoutePhotosResponse = try await APIClient.shared.get(
+                "/trip-planner/plans/\(planId)/routes/photos",
+                query: query,
+            )
+            photos = response.photos
+        } catch {
+            photos = []
         }
     }
 
@@ -278,6 +370,53 @@ struct TripRouteCourseView: View {
         let url = folder.appendingPathComponent(TripGpxName.file(for: route.name))
         try data.write(to: url, options: .atomic)
         return url
+    }
+}
+
+/// One picture, large, with whose it is and where it came from.
+struct TripRoutePhotoView: View {
+    let photo: TripRoutePhoto
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    AsyncImage(url: URL(string: photo.thumbUrl)) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFit()
+                        case .failure:
+                            Label("Bild konnte nicht geladen werden", systemImage: "photo")
+                                .foregroundStyle(.secondary)
+                        default:
+                            ProgressView()
+                        }
+                    }
+                    .aspectRatio(CGFloat(photo.aspectRatio), contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+
+                    if let caption = photo.caption {
+                        Text(caption).font(.headline)
+                    }
+                    Text(photo.credit)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if let url = URL(string: photo.pageUrl) {
+                        Link(destination: url) {
+                            Label("Auf Wikimedia Commons ansehen", systemImage: "safari")
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fertig") { dismiss() }
+                }
+            }
+        }
     }
 }
 

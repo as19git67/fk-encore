@@ -1117,6 +1117,50 @@ mit der Karte. Eine Liste von Namen ist keine Entscheidung — zwei
 Zehn-Kilometer-Wanderungen aus derselben Stadt sind nicht dieselbe Wanderung,
 und erst der Verlauf sagt, welche am See bleibt und welche über den Grat geht.
 
+**Bilder entlang der Strecke (Etappe 11, umgesetzt — im Praxistest):**
+
+Komoot zeigt zu jeder Tour die Fotos derer, die sie gegangen sind.
+OpenStreetMap hat keine Fotos, und die von Komoot gibt es nicht offen. Was es
+offen gibt, ist Wikimedia Commons: Millionen Fotos mit Aufnahmeort, frei
+lizenziert, ohne Schlüssel abfragbar — und Wikidata, das für viele Gipfel und
+Burgen *ein* ausgewähltes Bild (P18) kennt.
+
+Die Detailansicht einer Strecke hat deshalb eine Bildleiste, gefüllt in zwei
+Schritten:
+
+1. `geo` nennt die Dinge am Weg, die einen Wikidata-Eintrag haben — dieselben
+   Kategorien und dieselben 150 m wie die Bewertung aus Etappe 10 —, und ein
+   paar Punkte verteilt über das Stück in der Nähe (`POST /routes/along`,
+   `geo/src/route-along.ts`).
+2. Der trip-planner holt zuerst die ausgewählten Bilder dieser Dinge (das beste
+   Bild eines Gipfels ist das beste Bild dieses Teils der Wanderung, mit dem
+   Namen als Bildunterschrift), dann per Geosuche Fotos, die bis 300 m von den
+   Punkten aufgenommen wurden — reihum über die Punkte, damit die Leiste den Weg
+   entlanggeht statt vier Bilder vom ersten Parkplatz zu zeigen
+   (`trip-planner/route-photos.ts`, `commons-client.ts`).
+
+Nur JPEG und WebP ab 800 px Breite: PNG und SVG sind auf Commons weit öfter
+Karten, Wappen und Diagramme als Fotos. Urheber und Lizenz stehen unter jedem
+Bild und in der Großansicht, mit Link auf die Commons-Seite — freie Lizenzen
+sind frei unter der Bedingung, dass man sagt, wessen Bild es ist. Die Antwort
+wird einen Tag pro Strecke und Stück gehalten; Wikimedia bittet darum, nicht
+zweimal zu fragen. Was das Haus verlässt, sind Koordinaten entlang eines
+öffentlichen Wegs und IDs öffentlicher Orte; die Bilder lädt das Telefon direkt
+von Wikimedia.
+
+Ehrlich über die Grenze: Die Bilder zeigen eher die Orte am Weg als den Weg
+selbst. Eine bekannte Strecke bekommt eine volle Leiste, ein namenloser Waldweg
+oft keine — und dann zeigt die App **keinen Abschnitt**, keine Entschuldigung
+(§15.3). Kein Neuimport nötig.
+
+*Falls sich das im Praxistest nicht bewährt*, ist die Alternative das
+„raus-und-rein"-Muster, das der Planer bei Karten-Apps schon nutzt: aus der App
+heraus Komoot (oder Outdooractive, AllTrails) an der Koordinate der Etappe
+öffnen, dort Touren mit Fotos und Bewertungen suchen, und eine gewählte Tour als
+GPX zurück in den Planer holen — über den Teilen-Dialog, den die Share
+Extension schon bedient (§9.3). Der Planer bräuchte dafür einen GPX-Import als
+Kandidat (ein Track statt einer Relation), keine Anbindung an die Portale.
+
 **Welche sich lohnen (Etappe 10, umgesetzt):**
 
 Nach Etappe 9 gab es genug Strecken, aber die Liste sagte nur, wo sie liegen,
