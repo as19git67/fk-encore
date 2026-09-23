@@ -98,6 +98,40 @@ describe("GET /trip-planner/plans/:planId/routes", () => {
     expect(res.routes.map((r) => r.osmRef).sort()).toEqual(["relation:2", "relation:3"]);
   });
 
+  it("puts the most rewarding first when asked, and says why", async () => {
+    // The near way has nothing along it; the one further out passes a
+    // summit. Ordered by distance the dull one leads, by worth the
+    // summit — and the row carries what it passes, not a score.
+    const p = await plan();
+    geo.setRoutes("nom_garda", [
+      route({ osmRef: "relation:1", distanceM: 300, worth: 0, highlights: [] }),
+      route({
+        osmRef: "relation:2",
+        distanceM: 4_000,
+        worth: 4,
+        highlights: [{ category: "peak", count: 1, names: ["Monte Beispiel"] }],
+      }),
+    ]);
+
+    const near = await nearbyRoutes({ planId: p.id });
+    const worth = await nearbyRoutes({ planId: p.id, order: "worth" });
+
+    expect(near.routes.map((r) => r.osmRef)).toEqual(["relation:1", "relation:2"]);
+    expect(worth.routes.map((r) => r.osmRef)).toEqual(["relation:2", "relation:1"]);
+    expect(worth.routes[0].highlights).toEqual([
+      { category: "peak", count: 1, names: ["Monte Beispiel"] },
+    ]);
+    expect(worth.routes[0]).not.toHaveProperty("worth");
+  });
+
+  it("reads a geo answer without highlights as nothing known", async () => {
+    // A geo service deployed before the ranking sends none.
+    const p = await plan();
+    geo.setRoutes("nom_garda", [route({ osmRef: "relation:1" })]);
+    const res = await nearbyRoutes({ planId: p.id });
+    expect(res.routes[0].highlights).toEqual([]);
+  });
+
   it("refuses an unknown kind as a bad request, not as an outage", async () => {
     const p = await plan();
     await expect(nearbyRoutes({ planId: p.id, kinds: ["hiking,skiing"] }))

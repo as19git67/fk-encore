@@ -233,6 +233,20 @@ export interface GeoRouteSearchQuery {
   /** hiking | foot | bicycle | mtb. Omitted = all four. */
   kinds?: string[];
   limit?: number;
+  /**
+   * `distance` (default) or `worth` — the most rewarding first, by
+   * what the way passes and its network (geo `route-worth.ts`).
+   */
+  order?: "distance" | "worth";
+}
+
+/** Something a way passes, as geo counts it (§4.7). */
+export interface GeoRouteHighlight {
+  /** peak | viewpoint | water | castle | historic | nature | tower | sight | food. */
+  category: string;
+  count: number;
+  /** Up to three names. */
+  names: string[];
 }
 
 export interface GeoRoutePoint {
@@ -262,7 +276,16 @@ export interface GeoRoute {
   roundtrip: boolean;
   website: string | null;
   wikipedia: string | null;
+  /** Absent from a geo service older than §4.7's ranking. */
+  wikidata?: string | null;
   difficulty: string | null;
+  /**
+   * What the way passes near the search centre. Absent from a geo
+   * service older than §4.7's ranking — read as nothing known.
+   */
+  highlights?: GeoRouteHighlight[];
+  /** geo's sort key for `order: "worth"`. */
+  worth?: number;
 }
 
 /**
@@ -524,6 +547,7 @@ export class HttpGeoClient implements GeoClient {
       minRadiusM: query.minRadiusM,
       kinds: query.kinds,
       limit: query.limit,
+      order: query.order,
     });
   }
 

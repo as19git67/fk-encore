@@ -904,8 +904,45 @@ struct TripNearbyRoute: Codable, Sendable, Identifiable {
     /// Where the way begins. Known even for a relation with no course
     /// at all, and then the only thing that is.
     var start: TripCoordinate? = nil
+    /// What it passes near the city — summits, viewpoints, water,
+    /// somewhere to eat. Optional so an answer from a backend older
+    /// than the ranking still decodes; nil then reads as nothing known.
+    var highlights: [TripRouteHighlight]? = nil
+    /// The article, as the `wikipedia` tag has it ("de:Titel").
+    var wikipedia: String? = nil
 
     var id: String { osmRef }
+
+    /// "Gipfel · 2 Aussichtspunkte · Einkehr", or nil when nothing is
+    /// known — the row then says nothing rather than "nichts".
+    var highlightLine: String? {
+        let phrases = (highlights ?? []).compactMap(\.phrase)
+        return phrases.isEmpty ? nil : phrases.joined(separator: " · ")
+    }
+
+    /// The network as somebody would say it. Local ways say nothing:
+    /// every signposted path is local to somewhere.
+    var networkLabel: String? {
+        switch network {
+        case "iwn": return "Fernwanderweg"
+        case "icn": return "Fernradweg"
+        case "nwn", "ncn": return "national"
+        case "rwn", "rcn": return "regional"
+        default: return nil
+        }
+    }
+
+    /// Where the Wikipedia article is, from the tag's "lang:Title".
+    var wikipediaURL: URL? {
+        guard let wikipedia, let colon = wikipedia.firstIndex(of: ":") else { return nil }
+        let lang = wikipedia[..<colon]
+        let title = wikipedia[wikipedia.index(after: colon)...]
+            .replacingOccurrences(of: " ", with: "_")
+        guard !lang.isEmpty, !title.isEmpty,
+              let encoded = title.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+        else { return nil }
+        return URL(string: "https://\(lang).wikipedia.org/wiki/\(encoded)")
+    }
 
     /// The relation id behind the ref, for the export and for a link
     /// into OpenStreetMap. Nil for anything that is not a relation.
@@ -939,9 +976,59 @@ struct TripNearbyRoute: Codable, Sendable, Identifiable {
         if let ascentM, ascentM > 0 { parts.append("\(ascentM) Hm") }
         if roundtrip { parts.append("Rundweg") }
         if let difficulty, !difficulty.isEmpty { parts.append(difficulty) }
-        if let network, !network.isEmpty { parts.append(network.uppercased()) }
+        if let networkLabel { parts.append(networkLabel) }
         return parts.joined(separator: " · ")
     }
+}
+
+/// Something a way passes near the city (§4.7).
+///
+/// The row shows these instead of a score. A number would ask to be
+/// trusted; "Gipfel, 2 Aussichtspunkte" lets the traveller weigh it
+/// for their own reasons — somebody with children wants the lake,
+/// somebody else the summit.
+struct TripRouteHighlight: Codable, Sendable, Hashable {
+    /// peak | viewpoint | water | castle | historic | nature | tower | sight | food.
+    let category: String
+    let count: Int
+    let names: [String]
+
+    /// "Gipfel", "2 Aussichtspunkte", "Einkehr" — nil for a category
+    /// this app does not know yet, so a newer server adds to the list
+    /// without putting a raw word into it.
+    var phrase: String? {
+        guard count > 0, let words = Self.words[category] else { return nil }
+        // Somewhere to eat is a yes or no; "3 Einkehr" says nothing more.
+        if category == "food" { return words.one }
+        return count == 1 ? words.one : "\(count) \(words.many)"
+    }
+
+    /// The icon for the detail list.
+    var symbolName: String {
+        switch category {
+        case "peak": return "mountain.2"
+        case "viewpoint": return "binoculars"
+        case "water": return "drop"
+        case "castle": return "building.columns"
+        case "historic": return "building.columns"
+        case "nature": return "leaf"
+        case "tower": return "building"
+        case "food": return "fork.knife"
+        default: return "star"
+        }
+    }
+
+    private static let words: [String: (one: String, many: String)] = [
+        "peak": ("Gipfel", "Gipfel"),
+        "viewpoint": ("Aussichtspunkt", "Aussichtspunkte"),
+        "water": ("am Wasser", "Gewässer"),
+        "castle": ("Burg", "Burgen"),
+        "historic": ("Historisches", "historische Orte"),
+        "nature": ("Naturschutzgebiet", "Naturschutzgebiete"),
+        "tower": ("Turm", "Türme"),
+        "sight": ("Sehenswürdigkeit", "Sehenswürdigkeiten"),
+        "food": ("Einkehr", "Einkehr"),
+    ]
 }
 
 struct TripNearbyRoutesResponse: Codable, Sendable {

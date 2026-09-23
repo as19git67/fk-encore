@@ -244,6 +244,10 @@ export class InMemoryGeoClient implements GeoClient {
       if ((query.minRadiusM ?? 0) > 0 && route.distanceM <= query.minRadiusM!) return false;
       return route.distanceM <= query.radiusM;
     });
+    if (query.order === "worth") {
+      // The same order geo applies: its sort key, nearer first on a tie.
+      within.sort((a, b) => (b.worth ?? 0) - (a.worth ?? 0) || a.distanceM - b.distanceM);
+    }
     const limit = query.limit ?? 50;
     return {
       database: postgresDb,

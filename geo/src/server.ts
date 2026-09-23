@@ -36,7 +36,12 @@ import { POI_CATEGORIES } from "./poi-categories.ts";
 import { hasCoverage } from "./coverage.ts";
 import { waterCrossing } from "./water.ts";
 import { PoiSearchError, searchPois, type PoiSearchOptions } from "./poi-search.ts";
-import { RouteSearchError, searchRoutes, type RouteSearchOptions } from "./route-search.ts";
+import {
+  RouteSearchError,
+  searchRoutes,
+  type RouteOrder,
+  type RouteSearchOptions,
+} from "./route-search.ts";
 import { routeGeometry } from "./route-geometry.ts";
 import { DayTargetError, searchDayTargets, type DayTargetOptions } from "./day-targets.ts";
 import {
@@ -508,6 +513,8 @@ function parseRouteSearchBody(
         : requireFiniteNumber(b.minRadiusM, "minRadiusM"),
       kinds: Array.isArray(b.kinds) ? b.kinds.map(String) : undefined,
       limit: optionalPositiveInt(b.limit),
+      // Checked by searchRoutes, which knows the vocabulary.
+      order: typeof b.order === "string" ? (b.order as RouteOrder) : undefined,
     },
   };
 }

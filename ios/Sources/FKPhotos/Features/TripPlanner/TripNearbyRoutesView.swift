@@ -72,6 +72,26 @@ enum TripRouteBand: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Which ways come first (§4.7).
+///
+/// Two answers to two questions. "What is close" is distance; "what
+/// is worth the drive" is what the way passes and how much it matters
+/// to its network, which the server weighs over a pool bigger than
+/// the page (geo `route-worth.ts`).
+enum TripRouteOrder: String, CaseIterable, Identifiable, Sendable {
+    case worth
+    case distance
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .worth: return "Lohnendste zuerst"
+        case .distance: return "Nächste zuerst"
+        }
+    }
+}
+
 /// The four kinds of way OpenStreetMap signposts, as the filter shows
 /// them (§4.7).
 ///
@@ -132,6 +152,8 @@ final class TripNearbyRoutesModel {
     /// Which band to look in. The screen owns the choice and
     /// remembers it; the model only carries it into the request.
     var band: TripRouteBand = .near
+    /// Which ways come first. Same ownership as the band.
+    var order: TripRouteOrder = .worth
     /// True when the region holds more ways than the answer carried.
     /// Worth saying, because a wider radius makes it likely.
     private(set) var hasMore = false
@@ -160,6 +182,7 @@ final class TripNearbyRoutesModel {
             // backend understands.
             if band.fromMetres > 0 { query["minRadiusM"] = String(band.fromMetres) }
             if !kinds.isEmpty { query["kinds"] = kinds.sorted().joined(separator: ",") }
+            query["order"] = order.rawValue
             let response: TripNearbyRoutesResponse = try await APIClient.shared.get(
                 "/trip-planner/plans/\(planId)/routes",
                 query: query,
@@ -215,6 +238,9 @@ struct TripNearbyRoutesView: View {
     /// Which kinds are shown. Empty means all four, which is also what
     /// the endpoint reads an absent list as.
     @AppStorage("trip.routes.kinds") private var kindsRaw = ""
+    /// Which ways come first. Worth by default: somebody opening this
+    /// list is choosing, and the nearest is only the easiest.
+    @AppStorage("trip.routes.order") private var orderRaw = TripRouteOrder.worth.rawValue
 
     init(planId: Int, legIndex: Int) {
         self.planId = planId
@@ -234,6 +260,20 @@ struct TripNearbyRoutesView: View {
                 guard chosen.toKm != bandToKm else { return }
                 bandToKm = chosen.toKm
                 model.band = chosen
+                Task { await model.load() }
+            },
+        )
+    }
+
+    /// The order picker's selection, which also reloads — the same
+    /// shape as `band`, for the same reason.
+    private var order: Binding<TripRouteOrder> {
+        Binding(
+            get: { TripRouteOrder(rawValue: orderRaw) ?? .worth },
+            set: { chosen in
+                guard chosen.rawValue != orderRaw else { return }
+                orderRaw = chosen.rawValue
+                model.order = chosen
                 Task { await model.load() }
             },
         )
@@ -306,6 +346,13 @@ struct TripNearbyRoutesView: View {
                                    value: TripRouteKind.summary(of: chosenKinds) ?? "alle")
                 }
                 .disabled(model.isLoading)
+
+                Picker("Reihenfolge", selection: order) {
+                    ForEach(TripRouteOrder.allCases) { choice in
+                        Text(choice.label).tag(choice)
+                    }
+                }
+                .disabled(model.isLoading)
             } footer: {
                 // What the number measures, because it is not the
                 // obvious thing: a sixty-kilometre trail that passes
@@ -337,9 +384,13 @@ struct TripNearbyRoutesView: View {
             // with forty ways in it. Said at the bottom, where the
             // list actually ends (§15.3).
             if model.hasMore {
-                Label("In diesem Band gibt es mehr als diese — gezeigt werden die, die "
-                      + "am nächsten vorbeilaufen. Ein Band weiter draußen zeigt die "
-                      + "übrigen.",
+                Label(TripRouteOrder(rawValue: orderRaw) == .distance
+                      ? "In diesem Band gibt es mehr als diese — gezeigt werden die, die "
+                        + "am nächsten vorbeilaufen. Ein Band weiter draußen zeigt die "
+                        + "übrigen."
+                      : "In diesem Band gibt es mehr als diese — gezeigt werden die "
+                        + "lohnendsten unter denen, die am nächsten vorbeilaufen. Ein Band "
+                        + "weiter draußen zeigt andere.",
                       systemImage: "ellipsis.circle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -367,6 +418,7 @@ struct TripNearbyRoutesView: View {
             // default while the controls showed something else.
             model.band = TripRouteBand.of(km: bandToKm)
             model.kinds = chosenKinds
+            model.order = TripRouteOrder(rawValue: orderRaw) ?? .worth
             if !model.hasLoaded { await model.load() }
         }
         .refreshable { await model.load() }
@@ -426,6 +478,13 @@ struct TripNearbyRoutesView: View {
             Text(route.summary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            // Why it might be worth it, in things rather than stars.
+            if let highlights = route.highlightLine {
+                Label(highlights, systemImage: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             // A relation whose members do not join up has no course we
             // can state, so it arrives as a place rather than a way.

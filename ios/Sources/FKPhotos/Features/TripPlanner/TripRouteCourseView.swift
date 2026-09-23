@@ -64,6 +64,35 @@ struct TripRouteCourseView: View {
                        + "— gezeigt wird höchstens, wo sie beginnt.")
             }
 
+            // What the way passes near the city, named where the map
+            // has a name. Only the stretch near here: a long-distance
+            // trail passes everything somewhere.
+            if let highlights = route.highlights, !highlights.isEmpty {
+                Section {
+                    ForEach(highlights, id: \.self) { highlight in
+                        if let phrase = highlight.phrase {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(phrase)
+                                    if !highlight.names.isEmpty {
+                                        Text(highlight.names.joined(separator: ", "))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            } icon: {
+                                Image(systemName: highlight.symbolName)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Unterwegs")
+                } footer: {
+                    Text("Was OpenStreetMap bis 150 m neben der Strecke kennt, "
+                         + "im Umkreis der Etappe.")
+                }
+            }
+
             Section("Die Strecke") {
                 LabeledContent("Länge", value: TripSpotExtent.kilometres(route.lengthM))
                 if let ascentM = route.ascentM, ascentM > 0 {
@@ -81,6 +110,11 @@ struct TripRouteCourseView: View {
                 if let website = route.website, let url = URL(string: website) {
                     Link(destination: url) {
                         Label("Website der Strecke", systemImage: "safari")
+                    }
+                }
+                if let wikipediaURL = route.wikipediaURL {
+                    Link(destination: wikipediaURL) {
+                        Label("Wikipedia-Artikel", systemImage: "book")
                     }
                 }
                 if let osmURL = openStreetMapURL {
