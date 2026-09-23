@@ -48,7 +48,13 @@ export interface NearbyRoutesRequest {
   planId: number;
   /** Which city of the trip. Defaults to the first. */
   legIndex?: number;
-  /** hiking | foot | bicycle | mtb. Omitted = all four. */
+  /**
+   * hiking | foot | bicycle | mtb. Omitted = all four.
+   *
+   * Taken both as repeated parameters and as one comma-separated
+   * value: the app sends `kinds=bicycle,mtb`, which arrives here as a
+   * single entry. See `resolveKinds`.
+   */
   kinds?: string[];
   /** The far edge of the band, in metres. */
   radiusM?: number;
@@ -163,6 +169,7 @@ export const nearbyRoutes = api(
 
     const radiusM = validateRadius(req.radiusM);
     const minRadiusM = validateMinRadius(req.minRadiusM, radiusM);
+    const kinds = resolveKinds(req.kinds);
     const region = await pickRegion(leg.anchor.lat, leg.anchor.lon);
     if (!region) {
       return {
@@ -181,7 +188,7 @@ export const nearbyRoutes = api(
         center: { lat: leg.anchor.lat, lon: leg.anchor.lon },
         radiusM,
         minRadiusM,
-        kinds: req.kinds,
+        kinds,
         limit: DEFAULT_LIMIT,
       });
     } catch {
@@ -426,6 +433,36 @@ function validateMinRadius(minRadiusM: number | undefined, radiusM: number): num
   }
   const rounded = Math.round(minRadiusM);
   return rounded >= radiusM ? 0 : rounded;
+}
+
+const ROUTE_KINDS = ["hiking", "foot", "bicycle", "mtb"] as const;
+
+/**
+ * The kinds asked for, one per entry, or undefined for all four.
+ *
+ * A query string has two ways to carry a list and both reach this
+ * endpoint: repeated parameters and one comma-separated value. The
+ * app sends the second, and without splitting it `"bicycle,mtb"`
+ * went on to geo as one unknown kind — which geo rightly refused, and
+ * which then surfaced as a region that was not answering.
+ *
+ * An unknown kind is refused here, as the caller's mistake it is,
+ * rather than passed on to fail as an outage.
+ */
+export function resolveKinds(kinds: string[] | undefined): string[] | undefined {
+  if (!kinds) return undefined;
+  const split = kinds
+    .flatMap((entry) => entry.split(","))
+    .map((kind) => kind.trim())
+    .filter((kind) => kind.length > 0);
+  if (split.length === 0) return undefined;
+  const unknown = split.filter((k) => !(ROUTE_KINDS as readonly string[]).includes(k));
+  if (unknown.length > 0) {
+    throw APIError.invalidArgument(
+      `unknown route kind(s): ${unknown.join(", ")} — known: ${ROUTE_KINDS.join(", ")}`,
+    );
+  }
+  return [...new Set(split)];
 }
 
 function validateRadius(radiusM: number | undefined): number {

@@ -12,7 +12,7 @@ import type { GeoRoute } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
-import { nearbyRoutes, takeRoute } from "./routes";
+import { nearbyRoutes, resolveKinds, takeRoute } from "./routes";
 import { addTraveller } from "./travellers";
 
 vi.mock("~encore/auth", () => ({ getAuthData: vi.fn() }));
@@ -83,6 +83,27 @@ async function plan() {
 }
 
 describe("GET /trip-planner/plans/:planId/routes", () => {
+  it("takes the kinds the way the app sends them, comma-separated", async () => {
+    // The app sends `kinds=bicycle,mtb` — one query value. Read as one
+    // kind it matched nothing, and geo refused it as unknown.
+    const p = await plan();
+    geo.setRoutes("nom_garda", [
+      route({ osmRef: "relation:1", route: "hiking" }),
+      route({ osmRef: "relation:2", route: "bicycle" }),
+      route({ osmRef: "relation:3", route: "mtb" }),
+    ]);
+
+    const res = await nearbyRoutes({ planId: p.id, kinds: ["bicycle,mtb"] });
+
+    expect(res.routes.map((r) => r.osmRef).sort()).toEqual(["relation:2", "relation:3"]);
+  });
+
+  it("refuses an unknown kind as a bad request, not as an outage", async () => {
+    const p = await plan();
+    await expect(nearbyRoutes({ planId: p.id, kinds: ["hiking,skiing"] }))
+      .rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
   it("answers the ways that pass near the city", async () => {
     const p = await plan();
     geo.setRoutes("nom_garda", [
@@ -226,6 +247,20 @@ describe("GET /trip-planner/plans/:planId/routes", () => {
 
     await takeRoute({ planId: p.id, osmRef: "relation:1" });
     expect((await nearbyRoutes({ planId: p.id })).routes[0].inPool).toBe(true);
+  });
+});
+
+describe("reading the kinds", () => {
+  it("splits, trims and deduplicates", () => {
+    expect(resolveKinds(["foot, hiking", "hiking"])).toEqual(["foot", "hiking"]);
+    expect(resolveKinds(["hiking", "mtb"])).toEqual(["hiking", "mtb"]);
+  });
+
+  it("reads nothing chosen as all four", () => {
+    expect(resolveKinds(undefined)).toBeUndefined();
+    expect(resolveKinds([])).toBeUndefined();
+    expect(resolveKinds([""])).toBeUndefined();
+    expect(resolveKinds([","])).toBeUndefined();
   });
 });
 
