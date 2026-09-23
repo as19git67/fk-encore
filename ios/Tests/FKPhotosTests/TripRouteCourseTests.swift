@@ -117,41 +117,88 @@ final class TripRouteCourseTests: XCTestCase {
     }
 }
 
-/// How far the route search looks (§4.7).
+/// Which slice of the map the route search looks in (§4.7).
 ///
-/// Three steps, and the end of the scale is not a taste: fifty is the
-/// server's limit, so a fourth step would be an option that comes back
-/// as an error.
-final class TripRouteRadiusTests: XCTestCase {
+/// A band, not a ceiling: the answer is ordered by distance and
+/// capped, so a bigger circle alone hands back the same near ways
+/// again. The numbers here have to agree with the server's, because a
+/// band it refuses is an error the traveller never asked for.
+final class TripRouteBandTests: XCTestCase {
 
-    func testTheStepsAreTheOnesTheServerAccepts() {
-        XCTAssertEqual(TripRouteRadius.allCases.map(\.km), [15, 25, 50])
-        XCTAssertEqual(TripRouteRadius.far.km, 50, "50 km is MAX_RADIUS_M in routes.ts")
+    func testTheBandsTileTheScaleWithoutGaps() {
+        // A gap would be ways nobody can reach through any band.
+        let bands = TripRouteBand.allCases
+        XCTAssertEqual(bands.map(\.fromKm), [0, 20, 35])
+        XCTAssertEqual(bands.map(\.toKm), [20, 35, 50])
+        for (band, next) in zip(bands, bands.dropFirst()) {
+            XCTAssertEqual(band.toKm, next.fromKm, "no gap between \(band) and \(next)")
+        }
     }
 
-    func testTheDefaultIsWhatTheSearchDidBefore() {
-        // Nobody who never touches the picker should see a different
-        // list than they saw yesterday.
-        XCTAssertEqual(TripRouteRadius.standard.km, 15)
+    func testTheScaleEndsWhereTheServerDoes() {
+        XCTAssertEqual(TripRouteBand.far.toKm, 50, "50 km is MAX_RADIUS_M in routes.ts")
+    }
+
+    func testTheFirstBandHasNoNearEdge() {
+        // Nothing is excluded there, so the request carries no near
+        // edge at all — which is what an older backend understands.
+        XCTAssertEqual(TripRouteBand.near.fromMetres, 0)
+        XCTAssertEqual(TripRouteBand.near.toMetres, 20_000)
     }
 
     func testMetresAreWhatTheRequestCarries() {
-        XCTAssertEqual(TripRouteRadius.standard.metres, 15_000)
-        XCTAssertEqual(TripRouteRadius.far.metres, 50_000)
+        XCTAssertEqual(TripRouteBand.middle.fromMetres, 20_000)
+        XCTAssertEqual(TripRouteBand.middle.toMetres, 35_000)
     }
 
-    func testTheLabelIsReadable() {
-        XCTAssertEqual(TripRouteRadius.wider.label, "25 km")
+    func testTheLabelNamesARangeExceptForTheFirst() {
+        // "0–20 km" reads like a measurement; "bis 20 km" reads like
+        // a choice.
+        XCTAssertEqual(TripRouteBand.near.label, "bis 20 km")
+        XCTAssertEqual(TripRouteBand.middle.label, "20–35 km")
+        XCTAssertEqual(TripRouteBand.far.label, "35–50 km")
     }
 
     func testAStoredNumberNobodyOffersFallsBackRatherThanVanishing() {
-        // A value from an older build, or one edited by hand: the
-        // picker showing nothing selected would be worse than showing
-        // the default.
-        XCTAssertEqual(TripRouteRadius.of(km: 25), .wider)
-        XCTAssertEqual(TripRouteRadius.of(km: 37), .standard)
-        XCTAssertEqual(TripRouteRadius.of(km: 0), .standard)
-        XCTAssertEqual(TripRouteRadius.of(km: -5), .standard)
+        XCTAssertEqual(TripRouteBand.of(km: 35), .middle)
+        XCTAssertEqual(TripRouteBand.of(km: 25), .near, "25 was a radius, not a band")
+        XCTAssertEqual(TripRouteBand.of(km: 0), .near)
+        XCTAssertEqual(TripRouteBand.of(km: -5), .near)
+    }
+}
+
+/// The kinds of way, as the filter shows them (§4.7).
+final class TripRouteKindTests: XCTestCase {
+
+    func testTheRawValuesAreWhatTheEndpointTakes() {
+        // These four strings are the vocabulary in osm2pgsql.lua and
+        // in ROUTE_KINDS; a fifth would come back as an error.
+        XCTAssertEqual(TripRouteKind.allCases.map(\.rawValue),
+                       ["hiking", "foot", "bicycle", "mtb"])
+    }
+
+    func testNothingChosenAnnouncesNothing() {
+        // A filter that changes nothing should not claim to.
+        XCTAssertNil(TripRouteKind.summary(of: []))
+    }
+
+    func testEveryKindChosenIsAlsoNothingToAnnounce() {
+        XCTAssertNil(TripRouteKind.summary(of: ["hiking", "foot", "bicycle", "mtb"]))
+    }
+
+    func testASubsetIsNamed() {
+        // Named rather than counted: "2 von 4" says nothing about
+        // what is missing.
+        XCTAssertEqual(TripRouteKind.summary(of: ["hiking"]), "Wandern")
+        XCTAssertEqual(TripRouteKind.summary(of: ["bicycle", "hiking"]),
+                       "Wandern, Radfahren")
+    }
+
+    func testTheNamesKeepTheOrderOfTheMenu() {
+        // Whatever order a Set hands back, the sentence reads the
+        // same as the list it describes.
+        XCTAssertEqual(TripRouteKind.summary(of: ["mtb", "foot"]),
+                       "Spazieren, Mountainbike")
     }
 }
 

@@ -1117,6 +1117,53 @@ mit der Karte. Eine Liste von Namen ist keine Entscheidung — zwei
 Zehn-Kilometer-Wanderungen aus derselben Stadt sind nicht dieselbe Wanderung,
 und erst der Verlauf sagt, welche am See bleibt und welche über den Grat geht.
 
+**Ein Band statt einer Obergrenze, Arten zum Abwählen, und eine Karte
+(Etappe 9, umgesetzt):**
+
+Etappe 8 hat den Umkreis verstellbar gemacht, und im Gebrauch zeigte sich, dass
+das Verstellen nichts bringt: Die Antwort ist nach Entfernung sortiert und bei
+40 gedeckelt, also liefert ein größerer Kreis dieselben nahen Strecken noch
+einmal und sagt dazu, dass es mehr gäbe. Wer die nahen abgegrast hat, braucht
+sie **weg**, nicht überzählig.
+
+Deshalb ist der Wähler jetzt ein **Band**: bis 20 km / 20–35 km / 35–50 km.
+Jedes Band hat seine eigenen 40 Plätze, und „das Nahe kenne ich, zeig mir den
+nächsten Ring" funktioniert wirklich. Die nahen Bänder sind die schmalen, weil
+Strecken um eine Stadt dicht liegen und nach außen ausdünnen — gleich große
+Drittel ließen das erste überlaufen und das letzte leer.
+
+In `geo` ist das eine Bedingung: `ST_DWithin(…max) AND NOT ST_DWithin(…min)`,
+dasselbe Muster wie der Ring der Tagesziele (§4.6), und als negierte
+Enthaltenseins-Prüfung statt als Abstandsvergleich, damit der Index greift.
+Zwei Regeln dazu, und sie stehen mit Absicht an verschiedenen Stellen: **geo
+weist ein Band ab, das nichts fassen kann** (40 bis 40), denn eine leere Liste
+läse sich wie eine Gegend ohne Strecken; **der trip-planner deckelt es
+stillschweigend auf den vollen Kreis**, denn dort kommt es aus einem Wähler,
+und zwei Zahlen, die nicht mehr zusammenpassen, sind ein Fehler der App und
+nicht des Reisenden.
+
+Eine leere Antwort sagt jetzt auch, *warum* sie leer ist: „In diesem
+Entfernungsbereich ist keine Strecke erfasst — näher dran vielleicht schon" ist
+eine andere Auskunft als „in der Nähe gibt es keine", und nur eine davon ist ein
+Grund, den Filter zu ändern (§15.3).
+
+**Die Arten sind abwählbar.** `kinds` konnte der Endpunkt seit Etappe 5, nur gab
+es keinen Knopf: Wandern, Spazieren, Radfahren, Mountainbike, einzeln an und
+aus. Wer alle abwählt, bekommt alle — dasselbe, was der Endpunkt aus einer
+fehlenden Liste liest, statt einer leeren Liste aus einem Grund, den niemand
+erraten würde. Der Knopf nennt die gewählten Arten beim Namen statt sie zu
+zählen; „2 von 4" sagt nicht, welche fehlen.
+
+**Und es gibt die Karte** (`TripRoutesMapView`). Vierzig Zeilen Namen zeigen
+nicht, dass drei davon demselben Tal folgen und die vierte als einzige
+herausführt — die Formen zeigen es auf einen Blick. Angetippt wird dabei ein
+**Pin, nicht die Linie**: SwiftUIs `Map` zeichnet eine `MapPolyline`, lässt aber
+nur eine `Annotation` eine Geste annehmen. Dieselbe Arbeitsteilung wie auf der
+Tageskarte, wo die Linie zum Pin gehört und nicht umgekehrt. Die Farbe sagt die
+Art — grün zu Fuß, blau mit dem Rad —, zwei Farben für vier Arten, weil auf
+einer Karte zählt, was man täte, und `hiking` gegen `foot` eine Frage für die
+Zeile ist.
+
 **Wie weit gesucht wird (Etappe 8, umgesetzt):**
 
 Der Umkreis lag bei 15 km und war nicht verstellbar — der Endpunkt konnte seit

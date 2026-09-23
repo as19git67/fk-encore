@@ -115,7 +115,48 @@ describe("GET /trip-planner/plans/:planId/routes", () => {
     expect(clamped.routes.map((r) => r.osmRef)).toEqual(["relation:1", "relation:2"]);
   });
 
-  it("carries the course, so the list can be looked at rather than read", async () => {
+  it("leaves out what is nearer than the band, so a second look finds new ways", async () => {
+    // The reason bands exist: the answer is ordered by distance and
+    // capped, so a wider circle hands back the same near ways again.
+    const p = await plan();
+    geo.setRoutes("nom_garda", [
+      route({ osmRef: "relation:1", distanceM: 2_000 }),
+      route({ osmRef: "relation:2", name: "Mittelweg Beispiel", distanceM: 30_000 }),
+    ]);
+
+    const near = await nearbyRoutes({ planId: p.id, radiusM: 50_000 });
+    const band = await nearbyRoutes({ planId: p.id, radiusM: 50_000, minRadiusM: 20_000 });
+
+    expect(near.routes.map((r) => r.osmRef)).toEqual(["relation:1", "relation:2"]);
+    expect(band.routes.map((r) => r.osmRef)).toEqual(["relation:2"]);
+  });
+
+  it("says an empty band is not an empty region", async () => {
+    // Two different answers: one is worth changing the filter over,
+    // the other is not (§15.3).
+    const p = await plan();
+    geo.setRoutes("nom_garda", [route({ osmRef: "relation:1", distanceM: 2_000 })]);
+
+    const band = await nearbyRoutes({ planId: p.id, radiusM: 50_000, minRadiusM: 20_000 });
+
+    expect(band.routes).toEqual([]);
+    expect(band.note).toMatch(/Entfernungsbereich/);
+    expect(band.note).not.toMatch(/^In der Nähe ist keine/);
+  });
+
+  it("reads a band that cannot hold anything as no band at all", async () => {
+    // Two numbers from the app that no longer agree. A full circle is
+    // the harmless reading; an empty list would look like a region
+    // without ways.
+    const p = await plan();
+    geo.setRoutes("nom_garda", [route({ osmRef: "relation:1", distanceM: 2_000 })]);
+
+    const res = await nearbyRoutes({ planId: p.id, radiusM: 15_000, minRadiusM: 15_000 });
+
+    expect(res.routes.map((r) => r.osmRef)).toEqual(["relation:1"]);
+  });
+
+  it("carries the course, so the list can be looked at rather than read", async () =>{
     // A row of names is not a decision: two ten-kilometre walks out
     // of the same town are not the same walk, and only the shape
     // says which is which (§4.7).

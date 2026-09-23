@@ -50,7 +50,17 @@ export interface NearbyRoutesRequest {
   legIndex?: number;
   /** hiking | foot | bicycle | mtb. Omitted = all four. */
   kinds?: string[];
+  /** The far edge of the band, in metres. */
   radiusM?: number;
+  /**
+   * The near edge, in metres. Omitted or 0 searches a full circle.
+   *
+   * A band exists because the answer is capped at `DEFAULT_LIMIT` and
+   * ordered by distance: raising `radiusM` alone hands back the same
+   * near ways and reports that there are more. Somebody who has
+   * worked through what is close needs those gone, not outnumbered.
+   */
+  minRadiusM?: number;
 }
 
 export interface NearbyRoute {
@@ -152,6 +162,7 @@ export const nearbyRoutes = api(
     if (!leg) throw APIError.notFound(`leg ${legIndex} not found in this plan`);
 
     const radiusM = validateRadius(req.radiusM);
+    const minRadiusM = validateMinRadius(req.minRadiusM, radiusM);
     const region = await pickRegion(leg.anchor.lat, leg.anchor.lon);
     if (!region) {
       return {
@@ -169,6 +180,7 @@ export const nearbyRoutes = api(
       page = await getGeoClient().searchRoutes(region.postgresDb, {
         center: { lat: leg.anchor.lat, lon: leg.anchor.lon },
         radiusM,
+        minRadiusM,
         kinds: req.kinds,
         limit: DEFAULT_LIMIT,
       });
@@ -200,7 +212,7 @@ export const nearbyRoutes = api(
       imported: page.imported,
       routes: offered.map((route) => toNearby(route, leg.mode, inPool, pace)),
       hasMore: page.hasMore,
-      note: noteFor(page.imported, offered.length, omittedForWheels),
+      note: noteFor(page.imported, offered.length, omittedForWheels, minRadiusM),
       omittedForWheels,
     };
   },
@@ -345,7 +357,12 @@ function estimateFor(route: GeoRoute, mode: TransportMode, paceFactor = 1): numb
   return routeMinutes(route.lengthM, route.ascentM, byRoute ?? mode, paceFactor);
 }
 
-function noteFor(imported: boolean, found: number, omittedForWheels: number): string | null {
+function noteFor(
+  imported: boolean,
+  found: number,
+  omittedForWheels: number,
+  minRadiusM = 0,
+): string | null {
   if (!imported) {
     return "Diese Region wurde importiert, bevor der Planer Strecken kannte — "
       + "ein neuer Import bringt sie mit.";
@@ -358,6 +375,12 @@ function noteFor(imported: boolean, found: number, omittedForWheels: number): st
     return `In der Nähe sind nur Strecken mit Anstieg erfasst (${omittedForWheels}) — `
       + "die schlägt der Planer nicht vor, weil jemand mit Rollstuhl, Rollator oder "
       + "Kinderwagen mitfährt.";
+  }
+  // An empty band and an empty region are different answers, and only
+  // one of them is worth changing the filter over (§15.3).
+  if (found === 0 && minRadiusM > 0) {
+    return "In diesem Entfernungsbereich ist keine ausgeschilderte Strecke erfasst — "
+      + "näher dran vielleicht schon.";
   }
   if (found === 0) return "In der Nähe ist keine ausgeschilderte Strecke erfasst.";
   if (omittedForWheels > 0) {
@@ -385,6 +408,24 @@ function noteFor(imported: boolean, found: number, omittedForWheels: number): st
 function rollable(route: GeoRoute): boolean {
   if (route.route === "hiking" || route.route === "mtb") return false;
   return (route.ascentM ?? 0) <= 0;
+}
+
+/**
+ * The band's near edge.
+ *
+ * Clamped rather than refused where it exceeds the far edge: unlike
+ * geo, this is reached from a picker, and a band that cannot hold
+ * anything means the app sent two numbers that no longer agree — a
+ * full circle is then the harmless reading, and geo still refuses a
+ * genuinely impossible one.
+ */
+function validateMinRadius(minRadiusM: number | undefined, radiusM: number): number {
+  if (minRadiusM === undefined) return 0;
+  if (!Number.isFinite(minRadiusM) || minRadiusM < 0) {
+    throw APIError.invalidArgument("minRadiusM must be zero or a positive number");
+  }
+  const rounded = Math.round(minRadiusM);
+  return rounded >= radiusM ? 0 : rounded;
 }
 
 function validateRadius(radiusM: number | undefined): number {
