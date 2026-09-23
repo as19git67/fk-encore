@@ -1711,6 +1711,15 @@ onBeforeUnmount(() => {
    the column; unlike `hidden` it does not make the panel a scroll container,
    which would pin the head to the panel instead of to the page. */
 @media (max-width: 999px) {
+  /* The head pins itself right under the app's stack, so anything the
+     skeleton leaves between the title row and the scroller is a slot the
+     PDF slides through while the page scrolls. `--focus-ring-reach` reads
+     as no gap here: the scroller is inset by that much and pulled back out
+     again, and `--pdf-head-top` below lifts the head out of the same inset. */
+  .page {
+    --page-gap: var(--focus-ring-reach);
+  }
+
   .detail-grid {
     flex: 0 0 auto;
     min-height: auto;
