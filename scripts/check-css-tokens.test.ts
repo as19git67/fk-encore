@@ -75,6 +75,22 @@ describe("colour audit", () => {
     expect(check("alpha2.vue", `<style>.a { color: rgb(17 24 39 / 40%); }</style>`).code).toBe(0);
   });
 
+  it("reads the alpha through a var(), where the closing bracket is not the last", () => {
+    // `[^)]*` stopped at the bracket closing `var(`, so the alpha was never
+    // seen and the very escape hatch CLAUDE.md prescribes was refused.
+    expect(
+      check("varalpha.vue", `<style>.a { box-shadow: 0 0 0 3px rgba(var(--p-primary-500-rgb), 0.35); }</style>`)
+        .code,
+    ).toBe(0);
+    expect(
+      check("relative.vue", `<style>.a { color: rgb(from var(--p-primary-color) r g b / 50%); }</style>`).code,
+    ).toBe(0);
+    // And an opaque one written the same way is still refused.
+    expect(
+      check("varopaque.vue", `<style>.a { color: rgba(var(--p-primary-500-rgb), 1); }</style>`).code,
+    ).toBe(1);
+  });
+
   it("reads styles only — a colour in the markup or the script is not styling", () => {
     const { code } = check(
       "elsewhere.vue",
@@ -112,6 +128,19 @@ describe("colour audit", () => {
 </style>`,
     );
     expect(code).toBe(0);
+  });
+
+  it("refuses a surface name PrimeVue 4 never defined", () => {
+    // `--p-surface-card` and friends wear the current prefix and resolve to
+    // nothing, so the element ends up with no background at all.
+    for (const name of ["card", "ground", "section", "overlay", "border-color"]) {
+      const { code, output } = check(
+        `dead-${name}.vue`,
+        `<style>.a { background: var(--p-surface-${name}); }</style>`,
+      );
+      expect(code, name).toBe(1);
+      expect(output).toContain("--p-content-background");
+    }
   });
 
   it("refuses a PrimeVue 3 name, which resolves to nothing today", () => {

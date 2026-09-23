@@ -44,6 +44,8 @@ interface PageEntry {
 
 const pdfDoc = shallowRef<PDFDocumentProxy | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
+/** Page navigation, zoom and chunk pagination — sticky in the tall layout. */
+const headRef = ref<HTMLDivElement | null>(null)
 
 const totalPages = ref(0)
 const chunkIndex = ref(0)
@@ -428,13 +430,45 @@ function clampedPage(value: number): number {
   return Math.min(Math.max(1, Math.floor(value)), Math.max(1, totalPages.value))
 }
 
+/** The nearest ancestor that can actually scroll vertically. */
+function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  let node = el.parentElement
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY
+    if (/auto|scroll|overlay/.test(overflowY) && node.scrollHeight - node.clientHeight > 1) return node
+    node = node.parentElement
+  }
+  return null
+}
+
 function scrollToPageElement(pageNumber: number) {
   const el = pageEls.get(pageNumber)
   if (!el) return
+  // One scroller, by hand, rather than `scrollIntoView`: that walks the whole
+  // ancestor chain and scrolls every box on it that can move. In the tall
+  // layout the page's own scroller is the outer one, and dragging it along
+  // took the pinned head up with it — the controls left the screen on the way
+  // to the page they were used to reach.
+  const scroller = scrollParentOf(el)
+  if (!scroller) return
+  // The head only has to be cleared where it is pinned *over* the scrollport:
+  // in the tall layout the scroller is the page, and the head floats at its
+  // top edge. Where the pages scroll inside their own box the head stands
+  // above it and takes no room at all — subtracting it there left a gap the
+  // size of the toolbar over every page jumped to.
+  const head = scroller.contains(headRef.value) ? headRef.value : null
+  const headHeight = head ? head.getBoundingClientRect().height : 0
+  const margin = Number.parseFloat(getComputedStyle(el).scrollMarginTop) || 0
+  const top =
+    scroller.scrollTop +
+    el.getBoundingClientRect().top -
+    scroller.getBoundingClientRect().top -
+    headHeight -
+    margin
   // Deliberately instant: smooth-scrolling across a 25-page stack drags the
   // visible band over every page in between, which would rasterise the whole
   // chunk on the way to the target.
-  el.scrollIntoView({ block: 'start' })
+  scroller.scrollTo({ top: Math.max(0, top), behavior: 'instant' })
 }
 
 async function goToPage(value: number) {
@@ -452,6 +486,11 @@ async function goToPage(value: number) {
 
 function nextPage() { void goToPage(currentPage.value + 1) }
 function prevPage() { void goToPage(currentPage.value - 1) }
+
+// Both ends of a long document, without paging through the chunks in
+// between: `goToPage` switches chunks by itself.
+function firstPage() { void goToPage(1) }
+function lastPage() { void goToPage(totalPages.value) }
 
 function onPageInputCommit() {
   void goToPage(parseInt(pageInput.value, 10))
@@ -582,90 +621,113 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="pdf-viewer">
-    <div class="toolbar">
-      <div class="toolbar-group">
-        <Button
-          icon="pi pi-chevron-left"
-          text
-          rounded
-          aria-label="Vorherige Seite"
-          :disabled="currentPage <= 1 || totalPages === 0"
-          @click="prevPage"
-        />
-        <div class="page-indicator">
-          <input
-            class="page-input"
-            type="text"
-            inputmode="numeric"
-            aria-label="Seite"
-            :value="pageInput"
-            :disabled="totalPages === 0"
-            @input="(e) => (pageInput = (e.target as HTMLInputElement).value)"
-            @focus="pageInputFocused = true"
-            @blur="pageInputFocused = false"
-            @change="onPageInputCommit"
-            @keydown.enter="onPageInputCommit"
+    <!-- Page navigation, zoom and the chunk pagination travel together: in
+         the tall layout they stay put while the pages scroll past under
+         them. -->
+    <div ref="headRef" class="viewer-head">
+      <div class="toolbar">
+        <div class="toolbar-group">
+          <Button
+            icon="pi pi-step-backward"
+            text
+            rounded
+            class="edge-button"
+            aria-label="Erste Seite"
+            :disabled="currentPage <= 1 || totalPages === 0"
+            @click="firstPage"
           />
-          <span class="page-total">/ {{ totalPages || '–' }}</span>
+          <Button
+            icon="pi pi-chevron-left"
+            text
+            rounded
+            aria-label="Vorherige Seite"
+            :disabled="currentPage <= 1 || totalPages === 0"
+            @click="prevPage"
+          />
+          <div class="page-indicator">
+            <input
+              class="page-input"
+              type="text"
+              inputmode="numeric"
+              aria-label="Seite"
+              :value="pageInput"
+              :disabled="totalPages === 0"
+              @input="(e) => (pageInput = (e.target as HTMLInputElement).value)"
+              @focus="pageInputFocused = true"
+              @blur="pageInputFocused = false"
+              @change="onPageInputCommit"
+              @keydown.enter="onPageInputCommit"
+            />
+            <span class="page-total">/ {{ totalPages || '–' }}</span>
+          </div>
+          <Button
+            icon="pi pi-chevron-right"
+            text
+            rounded
+            aria-label="Nächste Seite"
+            :disabled="currentPage >= totalPages || totalPages === 0"
+            @click="nextPage"
+          />
+          <Button
+            icon="pi pi-step-forward"
+            text
+            rounded
+            class="edge-button"
+            aria-label="Letzte Seite"
+            :disabled="currentPage >= totalPages || totalPages === 0"
+            @click="lastPage"
+          />
         </div>
-        <Button
-          icon="pi pi-chevron-right"
-          text
-          rounded
-          aria-label="Nächste Seite"
-          :disabled="currentPage >= totalPages || totalPages === 0"
-          @click="nextPage"
-        />
+
+        <div class="toolbar-group">
+          <Button
+            icon="pi pi-search-minus"
+            text
+            rounded
+            aria-label="Verkleinern"
+            :disabled="totalPages === 0"
+            @click="zoomOut"
+          />
+          <button
+            type="button"
+            class="zoom-display"
+            :disabled="totalPages === 0"
+            aria-label="An Breite anpassen"
+            @click="fitWidth"
+          >
+            {{ Math.round(effectiveZoom * 100) }}%
+          </button>
+          <Button
+            icon="pi pi-search-plus"
+            text
+            rounded
+            aria-label="Vergrößern"
+            :disabled="totalPages === 0"
+            @click="zoomIn"
+          />
+        </div>
       </div>
 
-      <div class="toolbar-group">
+      <!-- Chunk pagination: only documents longer than one chunk need it. -->
+      <div v-if="paginated" class="chunk-bar">
         <Button
-          icon="pi pi-search-minus"
+          icon="pi pi-angle-double-left"
           text
-          rounded
-          aria-label="Verkleinern"
-          :disabled="totalPages === 0"
-          @click="zoomOut"
+          size="small"
+          aria-label="Vorherige Seiten"
+          :disabled="!hasPrevChunk"
+          @click="prevChunk"
         />
-        <button
-          type="button"
-          class="zoom-display"
-          :disabled="totalPages === 0"
-          aria-label="An Breite anpassen"
-          @click="fitWidth"
-        >
-          {{ Math.round(effectiveZoom * 100) }}%
-        </button>
+        <span class="chunk-label">{{ rangeLabel }}</span>
         <Button
-          icon="pi pi-search-plus"
+          icon="pi pi-angle-double-right"
           text
-          rounded
-          aria-label="Vergrößern"
-          :disabled="totalPages === 0"
-          @click="zoomIn"
+          size="small"
+          aria-label="Nächste Seiten"
+          :disabled="!hasNextChunk"
+          @click="nextChunk"
         />
       </div>
-    </div>
-
-    <!-- Chunk pagination: only documents longer than one chunk need it. -->
-    <div v-if="paginated" class="chunk-bar">
-      <Button
-        icon="pi pi-angle-double-left"
-        text
-        size="small"
-        aria-label="Vorherige Seiten"
-        :disabled="!hasPrevChunk"
-        @click="prevChunk"
-      />
-      <span class="chunk-label">{{ rangeLabel }}</span>
-      <Button
-        icon="pi pi-angle-double-right"
-        text
-        size="small"
-        aria-label="Nächste Seiten"
-        :disabled="!hasNextChunk"
-        @click="nextChunk"
-      />
     </div>
 
     <div
@@ -776,6 +838,21 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+/* Page navigation, zoom and chunk pagination, as one block.
+   Sticky at the top of whatever scrolls: in the tall layout that is the
+   page, and the controls stay reachable while the stack scrolls past. Where
+   the panel scrolls its own pages (the wide layout) nothing ever moves past
+   it, so this costs nothing there. */
+.viewer-head {
+  position: sticky;
+  /* Where the scroller's own padding sits between its edge and the pinned
+     head, the layout around the viewer says so — `PageLayout` keeps 4px
+     there for focus rings, and sticky measures from inside it. */
+  top: var(--pdf-head-top, 0px);
+  z-index: 3;
+  flex-shrink: 0;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -784,7 +861,7 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 0.4rem 0.5rem;
   border-bottom: 1px solid var(--p-content-border-color);
-  background: var(--p-surface-section, var(--p-surface-card));
+  background: var(--p-content-background);
 }
 
 .toolbar-group {
@@ -807,7 +884,7 @@ onBeforeUnmount(() => {
   text-align: center;
   border: 1px solid var(--p-content-border-color);
   border-radius: 4px;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   color: inherit;
   font-size: var(--text-base);
 }
@@ -838,11 +915,64 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   padding: 0.3rem 0.5rem;
   border-bottom: 1px solid var(--p-content-border-color);
-  background: var(--p-surface-section, var(--p-surface-card));
+  background: var(--p-content-background);
 }
 .chunk-bar--bottom {
   border-bottom: none;
   border-top: 1px solid var(--p-content-border-color);
+}
+
+/* On a phone the head is pinned, so every row of it is a row the reader
+   never gets back. Page navigation and zoom miss sharing one row by nine
+   pixels — the padding and the gaps between the buttons, which carry their
+   own generous hit area anyway. Tightening those takes the head from three
+   rows to two. */
+@media (max-width: 499px) {
+  .toolbar {
+    gap: 0.25rem;
+    padding: 0.3rem 0.25rem;
+  }
+
+  .toolbar-group {
+    gap: 0;
+  }
+
+  /* Five controls where there were three (first and last page joined the
+     row), and a 360px phone gives the toolbar 318px to put them in. Every
+     button gives up 4px, the jumps to either end another 4 (they sit at the
+     ends of the row, where a mis-tap hits nothing, and they are not what a
+     reader reaches for page by page), and the two readouts some of their
+     slack. That keeps page navigation and zoom on one line: a second pinned
+     row would cost 40px of document on every screen, all the way down. */
+  .toolbar-group :deep(.p-button) {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  /* Beats the rule above, which is one class more specific than the
+     component's own. */
+  .toolbar-group :deep(.p-button.edge-button) {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .page-indicator {
+    gap: 0.2rem;
+  }
+
+  .page-input {
+    width: 2.5rem;
+    padding: 0.2rem 0.2rem;
+  }
+
+  .zoom-display {
+    min-width: 2.75rem;
+    padding: 0.25rem 0.2rem;
+  }
+
+  .chunk-bar {
+    padding: 0.2rem 0.25rem;
+  }
 }
 .chunk-label {
   font-size: var(--text-base);
@@ -866,7 +996,7 @@ onBeforeUnmount(() => {
   overflow: auto;
   display: flex;
   padding: 0.5rem;
-  background: var(--p-surface-ground);
+  background: rgba(0, 0, 0, 0.05);
   /* Allow one-finger panning natively, but keep two-finger pinch under our
      own control (the app disables native viewport zoom globally). */
   touch-action: pan-x pan-y;
@@ -891,10 +1021,9 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   gap: 0.25rem;
-  /* When the whole page scrolls, a jumped-to page has to clear the app's
-     sticky navbar. Layouts that scroll the panel itself override this via
-     `--pdf-scroll-margin` — there is no navbar in the way. */
-  scroll-margin-top: var(--pdf-scroll-margin, calc(var(--app-stack-height) + var(--space-2)));
+  /* How much room a page jumped to keeps above it, on top of whatever the
+     pinned head needs — `scrollToPageElement` measures that part itself. */
+  scroll-margin-top: var(--pdf-scroll-margin, var(--space-2));
 }
 
 .page-caption {
@@ -984,7 +1113,7 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   color: var(--p-text-muted-color);
   pointer-events: none;
-  background: color-mix(in srgb, var(--p-surface-ground) 60%, transparent);
+  background: color-mix(in srgb, var(--p-content-background) 75%, transparent);
   z-index: 2;
 }
 .state-overlay.error { color: var(--p-red-400); }
@@ -1005,7 +1134,7 @@ onBeforeUnmount(() => {
   padding: 0.35rem 0.6rem;
   border: 1px solid var(--p-content-border-color);
   border-radius: 4px;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   color: var(--p-text-color);
 }
 .password-submit {

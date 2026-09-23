@@ -58,6 +58,63 @@ const ALLOWED = new Map([
 /** A line ending in this comment is exempt — say why in the same breath. */
 const INLINE_EXEMPTION = /\/\*\s*audit-ok:/
 
+/**
+ * A `name(…)` call from `start` to its own closing bracket, brackets
+ * balanced, plus what stands between them.
+ *
+ * `[^)]*` used to do this, and stopped at the first `)` — which in
+ * `rgba(var(--p-primary-500-rgb), 0.35)` is the one closing `var(`. The
+ * alpha was never seen, so the translucent overlay CLAUDE.md prescribes was
+ * refused as opaque and the hook steered people towards typing the channel
+ * numbers instead.
+ */
+function balancedCall(text, start) {
+  const open = text.indexOf('(', start)
+  if (open === -1) return null
+  let depth = 0
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '(') depth++
+    else if (text[i] === ')' && --depth === 0) {
+      return { text: text.slice(start, i + 1), inner: text.slice(open + 1, i) }
+    }
+  }
+  return null
+}
+
+/** Split on `sep`, ignoring any that sits inside a nested call. */
+function splitTop(inner, sep) {
+  const parts = []
+  let depth = 0
+  let from = 0
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i]
+    if (c === '(') depth++
+    else if (c === ')') depth--
+    else if (c === sep && depth === 0) {
+      parts.push(inner.slice(from, i))
+      from = i + 1
+    }
+  }
+  parts.push(inner.slice(from))
+  return parts
+}
+
+/**
+ * The alpha a colour carries, as written, or null when it has none.
+ *
+ * Three shapes reach here: `rgb(r g b / a)` puts it behind a slash,
+ * `rgba(r, g, b, a)` makes it the fourth part, and
+ * `rgba(var(--channels), a)` bundles the channels into one variable and
+ * leaves the alpha as the second. Anything else has no alpha and is opaque.
+ */
+function alphaOf(inner) {
+  const slashed = splitTop(inner, '/')
+  if (slashed.length === 2) return slashed[1].trim() || null
+  const parts = splitTop(inner, ',')
+  if (parts.length === 4 || parts.length === 2) return parts[parts.length - 1].trim() || null
+  return null
+}
+
 const RULES = [
   {
     id: 'surface-scale',
@@ -73,24 +130,38 @@ const RULES = [
   },
   {
     id: 'opaque-rgb',
-    // rgb(…) always, and rgba(…) whose alpha is 1.
-    pattern: /\brgba?\(([^)]*)\)/g,
+    // The call itself; `extend` below takes it to its matching bracket.
+    pattern: /\brgba?\(/g,
+    extend: balancedCall,
     message: 'opaque colour — a translucent rgba() overlay works in both themes, this does not',
     /**
      * `rgba(0, 0, 0, 0.35)` and `rgb(0 0 0 / 45%)` are the documented escape
-     * hatch — both spellings, since CSS takes either. A fourth part of `1`
-     * (or none at all) is an opaque colour wearing the other syntax.
+     * hatch — both spellings, since CSS takes either. An alpha of `1` (or
+     * none at all) is an opaque colour wearing the other syntax.
      */
     accepts: (_match, inner) => {
-      // Two spellings: `rgb(r g b / a)` puts the alpha behind a slash,
-      // `rgba(r, g, b, a)` makes it the fourth comma-separated part.
-      const [channels, behindSlash] = inner.split('/')
-      const raw = (behindSlash ?? channels.split(',')[3] ?? '').trim()
+      const raw = alphaOf(inner)
       if (!raw) return false
       const alpha = Number.parseFloat(raw)
       if (!Number.isFinite(alpha)) return false
       return raw.includes('%') ? alpha < 100 : alpha < 1
     },
+  },
+  {
+    id: 'dead-surface-name',
+    /*
+     * `--p-surface-card`, `--p-surface-ground`, `--p-surface-section` and
+     * their kin wear the PrimeVue 4 prefix and look current, but the theme
+     * defines no such tokens — only the numbered scale (which `surface-scale`
+     * above refuses) and the `--p-content-*` semantics. So the declaration
+     * resolves to nothing and the element simply has no background: it looked
+     * right on a white page and would have looked "right" on a dark one too,
+     * for the wrong reason. Twenty-one of them sat in the tree, including the
+     * PDF viewer's toolbar, which a sticky header then showed through.
+     */
+    pattern: /--p-surface-(?:card|ground|section|overlay|hover|border(?:-color)?|[a-d])\b/g,
+    message:
+      'no such token — PrimeVue 4 has --p-content-background / -hover-background / -border-color',
   },
   {
     id: 'legacy-token',
@@ -149,12 +220,16 @@ function findViolations(file, source) {
       rule.pattern.lastIndex = 0
       let match
       while ((match = rule.pattern.exec(region.text)) !== null) {
-        if (rule.accepts?.(match[0], match[1] ?? '')) continue
+        // A rule whose construct can nest brackets says where it really ends.
+        const whole = rule.extend?.(region.text, match.index)
+        const text = whole?.text ?? match[0]
+        const inner = whole ? whole.inner : match[1] ?? ''
+        if (rule.accepts?.(text, inner)) continue
         const absolute = region.start + match.index
         const line = lineOf(source, absolute)
         const lineText = source.split('\n')[line - 1] ?? ''
         if (INLINE_EXEMPTION.test(lineText)) continue
-        found.push({ line, rule: rule.id, text: match[0], message: rule.message })
+        found.push({ line, rule: rule.id, text, message: rule.message })
       }
     }
   }

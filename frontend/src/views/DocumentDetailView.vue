@@ -1687,7 +1687,7 @@ onBeforeUnmount(() => {
 }
 
 .pdf-panel {
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
   /* Clip the panel to its grid track so a wide (zoomed) page can't blow
@@ -1696,8 +1696,43 @@ onBeforeUnmount(() => {
   overflow: hidden;
   display: flex;
   min-width: 0;
-  /* Grows with the rendered PDF page; the surrounding page is the
-     scroll container, not this panel. */
+}
+
+/* ── Phone and tablet: one column, one scrollbar ────────────────────────────
+   Everything below each other, in `.page-content`: the pages of the current
+   chunk, the pagination to the next 25, then the document's attributes. The
+   viewer's head stays pinned under the app's stack while they go past.
+
+   That needs the grid to grow with its content rather than fill the
+   viewport — as a viewport-tall box it left the panel nothing to stretch
+   to, and since every level inside the viewer may shrink to nothing (that
+   is what lets the stack scroll in the wide layout) the preview collapsed
+   to its two borders. `overflow-x: clip` keeps a zoomed page from widening
+   the column; unlike `hidden` it does not make the panel a scroll container,
+   which would pin the head to the panel instead of to the page. */
+@media (max-width: 999px) {
+  /* The head pins itself right under the app's stack, so anything the
+     skeleton leaves between the title row and the scroller is a slot the
+     PDF slides through while the page scrolls. `--focus-ring-reach` reads
+     as no gap here: the scroller is inset by that much and pulled back out
+     again, and `--pdf-head-top` below lifts the head out of the same inset. */
+  .page {
+    --page-gap: var(--focus-ring-reach);
+  }
+
+  .detail-grid {
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
+  .pdf-panel {
+    overflow-x: clip;
+    overflow-y: visible;
+    /* The page's scroller keeps `--focus-ring-reach` of padding at its top,
+       and a sticky element measures from inside that padding — which left a
+       sliver of page showing above the head. Pull it back out. */
+    --pdf-head-top: calc(-1 * var(--focus-ring-reach));
+  }
 }
 
 .meta-panel {
@@ -1814,7 +1849,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem;
-  background: var(--p-surface-ground);
+  background: rgba(0, 0, 0, 0.05);
   border-radius: 6px;
   border: 1px solid var(--p-content-border-color);
 }
@@ -1909,7 +1944,7 @@ onBeforeUnmount(() => {
 .text-preview p {
   margin: 0.25rem 0 0;
   padding: 0.5rem;
-  background: var(--p-surface-card);
+  background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

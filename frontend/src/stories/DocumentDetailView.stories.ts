@@ -105,6 +105,39 @@ export const MehrseitigesDokument: Story = {
       ],
     },
   },
+  play: async () => {
+    const head = await waitFor(() => document.querySelector<HTMLElement>('.viewer-head'))
+    await waitFor(() =>
+      Array.from(document.querySelectorAll('canvas')).find((c) => c.getBoundingClientRect().height > 50),
+    )
+    const input = await waitFor(() => head.querySelector<HTMLInputElement>('.page-input'))
+    const first = await waitFor(() =>
+      head.querySelector<HTMLButtonElement>('[aria-label="Erste Seite"]'),
+    )
+    const last = await waitFor(() =>
+      head.querySelector<HTMLButtonElement>('[aria-label="Letzte Seite"]'),
+    )
+
+    // Page one is where the document opens, so there is nowhere to go back to.
+    if (!first.disabled) throw new Error('the jump to the first page is offered on page 1')
+
+    // The jump to the end crosses the 25-page chunk boundary on its own:
+    // stepping there page by page would have meant the pagination first.
+    last.click()
+    await waitFor(() => (input.value === '30' ? true : null))
+    await waitFor(() => document.querySelector('[data-page-number="30"]'))
+    if (document.querySelector('[data-page-number="1"]')) {
+      throw new Error('the last page arrived without leaving the first chunk')
+    }
+    if (!last.disabled) throw new Error('the jump to the last page is offered on the last page')
+
+    last.click()
+    await waitFor(() => (input.value === '30' ? true : null))
+
+    first.click()
+    await waitFor(() => (input.value === '1' ? true : null))
+    await waitFor(() => document.querySelector('[data-page-number="1"]'))
+  },
 }
 
 export const NurLesend: Story = {
@@ -121,4 +154,120 @@ export const NurLesend: Story = {
       },
     }),
   ],
+}
+
+/**
+ * The preview on a phone: one column, one scrollbar.
+ *
+ * Everything below each other — the pages of the current chunk, the
+ * pagination to the next 25, then the document's attributes — inside the
+ * page's own scroller, with the viewer's head pinned under the app's stack
+ * while they go past.
+ *
+ * Two things went wrong here before. The panel had nothing to stretch to in
+ * a viewport-tall grid and, since every level inside the viewer may shrink
+ * to nothing, collapsed to its two borders: no preview at all. Giving it a
+ * fixed height instead bought a scroll container inside a scroll container,
+ * which is what this story now rules out.
+ */
+export const Telefonbreite: Story = {
+  name: 'Telefonbreite (PDF-Vorschau)',
+  parameters: {
+    testViewport: { width: 360, height: 740 },
+    msw: {
+      handlers: [
+        http.get('/api/documents/:id/file', () =>
+          new HttpResponse(buildMultiPagePdf(6), {
+            headers: { 'Content-Type': 'application/pdf' },
+          }),
+        ),
+        ...defaultHandlers,
+      ],
+    },
+  },
+  play: async () => {
+    const panel = await waitFor(() => document.querySelector<HTMLElement>('.pdf-panel'))
+    const wrapper = await waitFor(() => panel.querySelector<HTMLElement>('.canvas-wrapper'))
+    await waitFor(() =>
+      Array.from(panel.querySelectorAll('canvas')).find((c) => c.getBoundingClientRect().height > 50),
+    )
+
+    // The pages stand in the page's own scroller, so nothing inside the
+    // viewer scrolls vertically on its own.
+    const nested = wrapper.scrollHeight - wrapper.clientHeight
+    if (nested > 4) {
+      throw new Error(`the page stack scrolls inside the panel as well (${nested}px of it)`)
+    }
+
+    // And they are all there to scroll past, not clipped to a sliver.
+    const stack = Array.from(panel.querySelectorAll<HTMLElement>('.page-item'))
+    const stackHeight = stack.reduce((sum, el) => sum + el.getBoundingClientRect().height, 0)
+    if (stack.length < 6 || panel.getBoundingClientRect().height < stackHeight) {
+      throw new Error(
+        `the panel is ${Math.round(panel.getBoundingClientRect().height)}px for ` +
+          `${stack.length} pages worth ${Math.round(stackHeight)}px`,
+      )
+    }
+
+    // The attributes follow the pages rather than sitting beside them.
+    const meta = await waitFor(() => document.querySelector<HTMLElement>('.meta-panel'))
+    if (meta.getBoundingClientRect().top < panel.getBoundingClientRect().bottom) {
+      throw new Error('the attributes do not follow the preview')
+    }
+
+    // The head is pinned, so the controls stay reachable while they do.
+    const head = await waitFor(() => panel.querySelector<HTMLElement>('.viewer-head'))
+    if (getComputedStyle(head).position !== 'sticky') {
+      throw new Error(`the viewer head is ${getComputedStyle(head).position}, not sticky`)
+    }
+
+    // Page navigation and zoom share that row even at 360px: every row of a
+    // pinned head is a row the reader never gets back.
+    const toolbar = await waitFor(() => head.querySelector<HTMLElement>('.toolbar'))
+    const rows = new Set(
+      Array.from(toolbar.children).map((child) => Math.round(child.getBoundingClientRect().top)),
+    )
+    if (rows.size > 1) {
+      throw new Error(`the head takes ${rows.size} rows at 360px`)
+    }
+
+    // And it stays put when the pagination jumps: the jump moves the page's
+    // scroller, which used to carry the head away with it — the controls
+    // left the screen on the way to the page they were used to reach.
+    const scroller = await waitFor(() => document.querySelector<HTMLElement>('.page-content'))
+    const input = await waitFor(() => head.querySelector<HTMLInputElement>('.page-input'))
+    input.value = '5'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 600))
+
+    const pinned = head.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+    if (pinned > 8) {
+      throw new Error(`after the jump the head sits ${Math.round(pinned)}px into the scroller`)
+    }
+    // And nothing of the document shows above it: the skeleton's gap under
+    // the title used to let the pages slide past in an 8px slot.
+    const header = await waitFor(() => document.querySelector<HTMLElement>('.page-header'))
+    const sliver = head.getBoundingClientRect().top - header.getBoundingClientRect().bottom
+    if (sliver > 1) {
+      throw new Error(`${Math.round(sliver)}px of the document shows above the pinned head`)
+    }
+
+    const target = document.querySelector<HTMLElement>('[data-page-number="5"]')
+    if (!target) throw new Error('the page jumped to is not in the stack')
+    const gap = target.getBoundingClientRect().top - head.getBoundingClientRect().bottom
+    if (gap < -1 || gap > 40) {
+      throw new Error(`the page jumped to sits ${Math.round(gap)}px from the head, not just below it`)
+    }
+  },
+}
+
+async function waitFor<T>(read: () => T | null | undefined, timeoutMs = 10_000): Promise<T> {
+  const started = Date.now()
+  for (;;) {
+    const value = read()
+    if (value) return value
+    if (Date.now() - started > timeoutMs) throw new Error('timed out waiting for the PDF to render')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
 }
