@@ -67,6 +67,28 @@ export interface NearbyRoutesRequest {
    * worked through what is close needs those gone, not outnumbered.
    */
   minRadiusM?: number;
+  /**
+   * `distance` (default) or `worth`: the most rewarding first, judged
+   * by what the way passes and how much it matters to its network.
+   * The pool geo weighs is bigger than the page, so a better way a
+   * little further out can climb past the dull near ones.
+   */
+  order?: "distance" | "worth";
+}
+
+/**
+ * Something a way passes near the city (§4.7).
+ *
+ * What the row says instead of a score: "Gipfel, 2 Aussichtspunkte,
+ * Einkehr" lets the traveller decide for their own reasons, where a
+ * number would only ask to be trusted.
+ */
+export interface RouteHighlight {
+  /** peak | viewpoint | water | castle | historic | nature | tower | sight | food. */
+  category: string;
+  count: number;
+  /** Up to three names, for the row to quote. */
+  names: string[];
 }
 
 export interface NearbyRoute {
@@ -94,7 +116,11 @@ export interface NearbyRoute {
    */
   joined: boolean;
   website: string | null;
+  /** The article, as the `wikipedia` tag has it ("de:Titel"). */
+  wikipedia: string | null;
   difficulty: string | null;
+  /** What it passes near the city, most striking first. */
+  highlights: RouteHighlight[];
   /** True when this trip already holds it. */
   inPool: boolean;
   /**
@@ -190,6 +216,7 @@ export const nearbyRoutes = api(
         minRadiusM,
         kinds,
         limit: DEFAULT_LIMIT,
+        order: req.order,
       });
     } catch {
       throw APIError.unavailable("die Region antwortet gerade nicht");
@@ -341,7 +368,13 @@ function toNearby(
     roundtrip: route.roundtrip,
     joined: route.joined,
     website: route.website,
+    wikipedia: route.wikipedia,
     difficulty: route.difficulty,
+    highlights: (route.highlights ?? []).map((h) => ({
+      category: h.category,
+      count: h.count,
+      names: [...h.names],
+    })),
     inPool: inPool.has(route.osmRef),
     start: { lat: route.start.lat, lon: route.start.lon },
     via: route.via.map((p) => ({ lat: p.lat, lon: p.lon })),
