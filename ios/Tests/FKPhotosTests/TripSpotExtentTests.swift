@@ -153,7 +153,18 @@ final class TripNearbyRouteTests: XCTestCase {
 
     func testALoopAndItsGradeAreNamed() throws {
         let loop = try route(roundtrip: true, difficulty: "T2", network: "lwn")
-        XCTAssertEqual(loop.summary, "10 km · 600 Hm · Rundweg · T2 · LWN")
+        // A local network says nothing: every signposted way is local
+        // to somewhere. "LWN" said it in a code.
+        XCTAssertEqual(loop.summary, "10 km · 600 Hm · Rundweg · T2")
+    }
+
+    func testTheNetworkIsSaidInWords() throws {
+        XCTAssertEqual(try route(network: "iwn").summary, "10 km · 600 Hm · Fernwanderweg")
+        XCTAssertEqual(try route(network: "icn").networkLabel, "Fernradweg")
+        XCTAssertEqual(try route(network: "nwn").networkLabel, "national")
+        XCTAssertEqual(try route(network: "rcn").networkLabel, "regional")
+        XCTAssertNil(try route(network: "lcn").networkLabel)
+        XCTAssertNil(try route(network: nil).networkLabel)
     }
 
     func testWalkingAndRidingLookDifferent() throws {

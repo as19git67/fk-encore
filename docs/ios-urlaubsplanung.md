@@ -1117,6 +1117,46 @@ mit der Karte. Eine Liste von Namen ist keine Entscheidung — zwei
 Zehn-Kilometer-Wanderungen aus derselben Stadt sind nicht dieselbe Wanderung,
 und erst der Verlauf sagt, welche am See bleibt und welche über den Grat geht.
 
+**Welche sich lohnen (Etappe 10, umgesetzt):**
+
+Nach Etappe 9 gab es genug Strecken, aber die Liste sagte nur, wo sie liegen,
+nicht welche man gehen sollte. Die Tourenportale wissen das — Bewertungen,
+Fotos, Highlights —, geben es aber nicht heraus (Komoot und Outdooractive nur
+über Partner-APIs, AllTrails und Strava gar nicht). OpenStreetMap bewertet
+nicht, weiß aber zwei Dinge, die dafür gut genug einstehen:
+
+- **Was die Strecke passiert.** Gipfel, Aussichtspunkte, Seen, Burgen, Ruinen,
+  eine Einkehr — bis 150 m neben der Linie. Das ist das Meiste von dem, was ein
+  Portal „Highlights" nennt, und es liegt als POI schon im Import; die Suche
+  muss nur entlang der Linie schauen. Gezählt wird **nur auf dem Stück im
+  Umkreis der Etappe** (`ST_ClipByBox2D`): ein tausend Kilometer langer
+  Radfernweg passiert irgendwo alles, wichtig ist, was er *hier* passiert.
+- **Wie viel sie ihrem Netz bedeutet.** Europäischer Fernweg vor nationalem vor
+  regionalem vor lokalem (`iwn`/`nwn`/`rwn`/`lwn`, dieselben Buchstaben mit `c`
+  fürs Rad), und ein Wikipedia-Artikel als dasselbe Signal von außerhalb.
+
+Daraus bildet `geo/src/route-worth.ts` einen Sortierschlüssel. Die Obergrenzen
+je Kategorie zählen dabei mehr als die Gewichte: ohne sie gewinnt ein Radweg
+durch einen Uferort mit dreißig Cafés, und eine Kette von Weihern schlägt den
+Weg auf den Gipfel. Kirchen und Wegkreuze zählen nicht — jedes Dorf hat eine,
+und ein Weg durch fünf Dörfer ist nicht fünfmal so gut —, ein namenloser Turm
+auch nicht (oft ein Funkmast); ein namenloser Aussichtspunkt schon.
+
+Damit die Reihenfolge etwas bringt, wird **nicht nur die erste Seite
+umsortiert**: geo wiegt die 200 nächsten Strecken im Band und gibt die 40
+lohnendsten zurück. Sonst hätte man die Liste, die man schon langweilig fand,
+nur neu gemischt.
+
+Die App zeigt **keine Punktzahl**, sondern die Dinge: „Gipfel · 2
+Aussichtspunkte · Einkehr" in der Zeile, im Detail mit Namen, dazu das Netz in
+Worten („Fernwanderweg", „regional" statt „RWN") und der Wikipedia-Artikel als
+Link. Eine Zahl wollte geglaubt werden; die Dinge kann man für sich selbst
+gewichten — wer mit Kindern unterwegs ist, will den See, jemand anderes den
+Gipfel. Die Reihenfolge ist wählbar („Lohnendste zuerst" / „Nächste zuerst")
+und steht auf „lohnend": wer diese Liste öffnet, wählt aus, und das Nächste ist
+nur das Bequemste. Kein Neuimport nötig — alles, was gezählt wird, ist schon
+importiert.
+
 **Ein Band statt einer Obergrenze, Arten zum Abwählen, und eine Karte
 (Etappe 9, umgesetzt):**
 

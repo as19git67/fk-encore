@@ -202,6 +202,56 @@ final class TripRouteKindTests: XCTestCase {
     }
 }
 
+/// What a way passes, as the row says it (§4.7).
+final class TripRouteHighlightTests: XCTestCase {
+
+    private func route(_ extra: String) throws -> TripNearbyRoute {
+        let json = """
+        { "osmRef": "relation:7", "name": "Gipfelweg Beispiel", "route": "hiking",
+          "network": "lwn", "ref": null, "lengthM": 10000, "ascentM": 600,
+          "distanceM": 500, "estimatedMinutes": 210, "roundtrip": false,
+          "joined": true, "website": null, "difficulty": null, "inPool": false\(extra) }
+        """
+        return try JSONDecoder().decode(TripNearbyRoute.self, from: Data(json.utf8))
+    }
+
+    func testTheLineNamesWhatIsPassed() throws {
+        let decoded = try route("""
+        , "highlights": [
+            { "category": "peak", "count": 1, "names": ["Monte Beispiel"] },
+            { "category": "viewpoint", "count": 2, "names": [] },
+            { "category": "food", "count": 3, "names": ["Rifugio Beispiel"] } ]
+        """)
+        XCTAssertEqual(decoded.highlightLine, "Gipfel · 2 Aussichtspunkte · Einkehr")
+    }
+
+    func testAnOlderBackendSaysNothingRatherThanNothingThere() throws {
+        // Nil, not "nichts": a backend from before the ranking does
+        // not know, which is different from a way that passes nothing.
+        XCTAssertNil(try route("").highlightLine)
+        XCTAssertNil(try route(#", "highlights": []"#).highlightLine)
+    }
+
+    func testACategoryFromANewerServerIsLeftOut() throws {
+        // A raw word like "waterfall" in a German sentence would be
+        // worse than one thing fewer.
+        let decoded = try route(#", "highlights": [{ "category": "waterfall", "count": 1, "names": [] }]"#)
+        XCTAssertNil(decoded.highlightLine)
+    }
+
+    func testTheArticleBecomesALink() throws {
+        let decoded = try route(#", "wikipedia": "de:Gipfelweg Beispiel""#)
+        XCTAssertEqual(decoded.wikipediaURL?.absoluteString,
+                       "https://de.wikipedia.org/wiki/Gipfelweg_Beispiel")
+        XCTAssertNil(try route(#", "wikipedia": "kein Artikel""#).wikipediaURL)
+        XCTAssertNil(try route("").wikipediaURL)
+    }
+
+    func testTheOrderIsWhatTheEndpointTakes() {
+        XCTAssertEqual(TripRouteOrder.allCases.map(\.rawValue), ["worth", "distance"])
+    }
+}
+
 /// The file name, which lands in somebody's downloads folder.
 final class TripGpxNameTests: XCTestCase {
 

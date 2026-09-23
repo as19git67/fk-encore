@@ -27,6 +27,15 @@
  */
 
 import { poolFor } from "./db.ts";
+import {
+  HIGHLIGHT_ALONG_M,
+  HIGHLIGHT_KINDS,
+  highlightsFrom,
+  type KindCount,
+  type RouteHighlight,
+  routeWorth,
+  UNNAMED_HIGHLIGHT_KINDS,
+} from "./route-worth.ts";
 
 export class RouteSearchError extends Error {}
 
@@ -55,6 +64,9 @@ export const ROUNDTRIP_TOLERANCE_M = 150;
  */
 const SIMPLIFY_TOLERANCE_DEG = 0.0005;
 
+/** Vertices per piece when looking along a line for highlights. */
+const SUBDIVIDE_VERTICES = 32;
+
 /** At most this many points in the shape, however long the way. */
 export const MAX_VIA_POINTS = 64;
 
@@ -75,7 +87,26 @@ export interface RouteSearchOptions {
   /** Omitted means all four kinds. */
   kinds?: readonly string[];
   limit?: number;
+  /**
+   * `distance` (the default, and all a caller from before §4.7's
+   * ranking knows) or `worth`: the most rewarding first, by what the
+   * way passes and how much it matters to its network (`route-worth.ts`).
+   */
+  order?: RouteOrder;
 }
+
+export const ROUTE_ORDERS = ["distance", "worth"] as const;
+export type RouteOrder = (typeof ROUTE_ORDERS)[number];
+
+/**
+ * How many of the nearest ways are weighed when the order is `worth`.
+ *
+ * Ranking only the forty nearest would reorder the list somebody
+ * already found dull. A pool five times the page lets a better way a
+ * little further out climb past the near ones, while each candidate's
+ * look along its line stays one indexed query.
+ */
+export const WORTH_POOL = 200;
 
 export interface RoutePoint {
   lat: number;
@@ -112,8 +143,20 @@ export interface RouteSearchResult {
   roundtrip: boolean;
   website: string | null;
   wikipedia: string | null;
+  wikidata: string | null;
   /** How hard it is, in whatever scale the relation uses. */
   difficulty: string | null;
+  /**
+   * What the way passes near the search centre: summits, viewpoints,
+   * water, castles, somewhere to eat (`route-worth.ts`).
+   *
+   * Counted on the stretch inside the search's square only. A
+   * thousand-kilometre cycle route passes everything; what matters to
+   * somebody staying here is what it passes *here*.
+   */
+  highlights: RouteHighlight[];
+  /** The sort key behind `order: "worth"`. Not meant to be shown. */
+  worth: number;
 }
 
 export interface RouteSearchPage {
@@ -139,6 +182,7 @@ interface Row {
   end_lat: number | null;
   end_lon: number | null;
   shape: string | null;
+  highlights: KindCount[] | null;
 }
 
 export async function searchRoutes(
@@ -151,25 +195,60 @@ export async function searchRoutes(
   const kinds = resolveKinds(opts.kinds);
   const minRadiusM = validateMinRadius(opts.minRadiusM, radiusM);
 
-  const centre = `ST_SetSRID(ST_Point($1, $2), 4326)::geography`;
+  const order = resolveOrder(opts.order);
+
+  // Numbered as they are pushed, so a clause that is only sometimes
+  // there cannot leave a gap: Postgres refuses a bind with more
+  // parameters than the statement references.
+  const params: unknown[] = [];
+  const param = (value: unknown): string => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  const lon = param(opts.center.lon);
+  const lat = param(opts.center.lat);
+  const centre = `ST_SetSRID(ST_Point(${lon}, ${lat}), 4326)::geography`;
+  const far = param(radiusM);
+  const kindList = param(kinds);
+  const pool = param(order === "worth" ? Math.max(WORTH_POOL, limit) + 1 : limit + 1);
   // The near edge, as a negated containment rather than a distance
   // comparison: `NOT ST_DWithin` uses the same index as the far edge,
   // where `ST_Distance(...) > n` would scan. The same shape as the ring
   // in `day-targets.ts`.
   const nearEdge = minRadiusM > 0
-    ? `\n         AND NOT ST_DWithin(geom::geography, ${centre}, $6)`
+    ? `\n         AND NOT ST_DWithin(geom::geography, ${centre}, ${param(minRadiusM)})`
     : "";
+
+  // The square the highlights are counted in: the search's own reach,
+  // in degrees, so the clip is a box operation and not a buffer.
+  const box = searchBox(opts.center, radiusM);
+  const boxDx = param(box.dLon);
+  const boxDy = param(box.dLat);
+  const highlightKinds = param(Object.keys(HIGHLIGHT_KINDS));
+  const unnamedKinds = param(UNNAMED_HIGHLIGHT_KINDS);
+  const along = param(HIGHLIGHT_ALONG_M);
+  // An index-friendly pre-filter a little wider than `along` at any
+  // latitude a region is imported for.
+  const alongDeg = param(degreesFor(HIGHLIGHT_ALONG_M, opts.center.lat));
+
   const sql = `
     WITH near AS (
       SELECT osm_id, route, name, tags, geom,
              ST_Distance(geom::geography, ${centre}) AS distance_m
         FROM osm_routes
-       WHERE ST_DWithin(geom::geography, ${centre}, $3)
-         AND route = ANY($4::text[])${nearEdge}
+       WHERE ST_DWithin(geom::geography, ${centre}, ${far})
+         AND route = ANY(${kindList}::text[])${nearEdge}
        ORDER BY distance_m, osm_id
-       LIMIT $5
+       LIMIT ${pool}
     ), merged AS (
-      SELECT near.*, ST_LineMerge(geom) AS line FROM near
+      SELECT near.*,
+             ST_LineMerge(geom) AS line,
+             ST_ClipByBox2D(
+               geom,
+               ST_Expand(ST_SetSRID(ST_Point(${lon}, ${lat}), 4326), ${boxDx}, ${boxDy})::box2d
+             ) AS local
+        FROM near
     )
     SELECT
       osm_id::text AS osm_id,
@@ -187,23 +266,36 @@ export async function searchRoutes(
            THEN ST_X(ST_EndPoint(line)) END AS end_lon,
       CASE WHEN GeometryType(line) = 'LINESTRING'
            THEN ST_AsGeoJSON(ST_SimplifyPreserveTopology(line, ${SIMPLIFY_TOLERANCE_DEG}))
-           END AS shape
+           END AS shape,
+      passed.highlights
       FROM merged
+      LEFT JOIN LATERAL (
+        SELECT json_agg(json_build_object('kind', kind, 'count', n, 'names', names))
+                 AS highlights
+          FROM (
+            SELECT p.kind,
+                   count(DISTINCT (p.osm_type, p.osm_id))::int AS n,
+                   (array_agg(DISTINCT p.name) FILTER (WHERE p.name IS NOT NULL))[1:3]
+                     AS names
+              -- In short pieces, so each index lookup is a narrow box
+              -- along the line rather than the whole square the line
+              -- spans — in a city that square holds thousands of cafés
+              -- the exact test would otherwise measure one by one.
+              -- The DISTINCT above undoes a thing near two pieces.
+              FROM ST_Subdivide(merged.local, ${SUBDIVIDE_VERTICES}) AS piece
+              JOIN osm_pois p ON p.geom && ST_Expand(piece, ${alongDeg})
+             WHERE p.kind = ANY(${highlightKinds}::text[])
+               AND (p.name IS NOT NULL OR p.kind = ANY(${unnamedKinds}::text[]))
+               AND ST_DWithin(p.geom::geography, piece::geography, ${along})
+             GROUP BY p.kind
+          ) kinds
+      ) passed ON true
      ORDER BY distance_m, osm_id
   `;
 
   let rows: Row[];
   try {
-    const res = await poolFor(database).query<Row>(sql, [
-      opts.center.lon,
-      opts.center.lat,
-      radiusM,
-      kinds,
-      limit + 1,
-      // Only when the SQL above actually mentions $6: Postgres refuses
-      // a bind with more parameters than the statement references.
-      ...(minRadiusM > 0 ? [minRadiusM] : []),
-    ]);
+    const res = await poolFor(database).query<Row>(sql, params);
     rows = res.rows;
   } catch (err) {
     // 42P01: the region was imported before routes were part of the
@@ -214,9 +306,14 @@ export async function searchRoutes(
     throw err;
   }
 
-  const hasMore = rows.length > limit;
+  const results = rows.map(toResult);
+  if (order === "worth") {
+    // Stable on distance: of two equally rewarding ways, the nearer.
+    results.sort((a, b) => b.worth - a.worth || a.distanceM - b.distanceM);
+  }
+  const hasMore = results.length > limit;
   return {
-    routes: (hasMore ? rows.slice(0, limit) : rows).map(toResult),
+    routes: results.slice(0, limit),
     hasMore,
     imported: true,
   };
@@ -233,6 +330,8 @@ function toResult(row: Row): RouteSearchResult {
   const roundtrip = finish !== null
     ? metresBetween(start, finish) <= ROUNDTRIP_TOLERANCE_M
     : tags.roundtrip === "yes";
+
+  const highlights = highlightsFrom(row.highlights);
 
   return {
     osmRef: `relation:${row.osm_id}`,
@@ -251,7 +350,15 @@ function toResult(row: Row): RouteSearchResult {
     roundtrip,
     website: tags.website ?? null,
     wikipedia: tags.wikipedia ?? null,
+    wikidata: tags.wikidata ?? null,
     difficulty: tags.sac_scale ?? tags["mtb:scale"] ?? tags.difficulty ?? null,
+    highlights,
+    worth: routeWorth({
+      network: tags.network ?? null,
+      wikipedia: tags.wikipedia ?? null,
+      wikidata: tags.wikidata ?? null,
+      highlights,
+    }),
   };
 }
 
@@ -297,6 +404,29 @@ function thinned(points: readonly RoutePoint[]): RoutePoint[] {
 }
 
 const EARTH_RADIUS_M = 6_371_008;
+
+/** Half the side of the square around the centre, in degrees. */
+function searchBox(center: RoutePoint, radiusM: number): { dLat: number; dLon: number } {
+  return { dLat: radiusM / 111_132, dLon: degreesFor(radiusM, center.lat) };
+}
+
+/**
+ * Metres as degrees of longitude at this latitude — the wider of the
+ * two, so a pre-filter built from it never cuts off what the exact
+ * test would keep.
+ */
+function degreesFor(metres: number, lat: number): number {
+  const cos = Math.max(Math.cos((lat * Math.PI) / 180), 0.05);
+  return metres / (111_320 * cos);
+}
+
+function resolveOrder(order: string | undefined): RouteOrder {
+  if (order === undefined) return "distance";
+  if (!(ROUTE_ORDERS as readonly string[]).includes(order)) {
+    throw new RouteSearchError(`order must be one of ${ROUTE_ORDERS.join(", ")}`);
+  }
+  return order as RouteOrder;
+}
 
 function metresBetween(a: RoutePoint, b: RoutePoint): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
