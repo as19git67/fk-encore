@@ -499,6 +499,13 @@ function parseRouteSearchBody(
         lon: requireFiniteNumber(center.lon, "center.lon"),
       },
       radiusM: requireFiniteNumber(b.radiusM, "radiusM"),
+      // The ring's near edge. Left undefined when absent so a caller
+      // from before bands existed searches a full circle, and passed
+      // through as given otherwise — searchRoutes is where a band
+      // that cannot hold anything is refused.
+      minRadiusM: b.minRadiusM === undefined || b.minRadiusM === null
+        ? undefined
+        : requireFiniteNumber(b.minRadiusM, "minRadiusM"),
       kinds: Array.isArray(b.kinds) ? b.kinds.map(String) : undefined,
       limit: optionalPositiveInt(b.limit),
     },

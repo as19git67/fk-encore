@@ -239,6 +239,9 @@ export class InMemoryGeoClient implements GeoClient {
     const kinds = new Set(query.kinds ?? []);
     const within = all.filter((route) => {
       if (kinds.size > 0 && !kinds.has(route.route)) return false;
+      // The band, the same way the day-target double reads its ring:
+      // the near edge excludes, the far one includes.
+      if ((query.minRadiusM ?? 0) > 0 && route.distanceM <= query.minRadiusM!) return false;
       return route.distanceM <= query.radiusM;
     });
     const limit = query.limit ?? 50;

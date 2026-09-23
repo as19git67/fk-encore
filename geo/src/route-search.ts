@@ -61,6 +61,17 @@ export const MAX_VIA_POINTS = 64;
 export interface RouteSearchOptions {
   center: { lat: number; lon: number };
   radiusM: number;
+  /**
+   * The near edge of a ring, in metres. Omitted or 0 searches a full
+   * circle, which is what every caller did before rings existed.
+   *
+   * A ring rather than a bigger circle, because the answer is capped
+   * and ordered by distance: raising `radiusM` alone hands back the
+   * same near ways again and says there are more. Somebody who has
+   * worked through what is close needs the near ones *gone*, not
+   * outnumbered.
+   */
+  minRadiusM?: number;
   /** Omitted means all four kinds. */
   kinds?: readonly string[];
   limit?: number;
@@ -138,15 +149,23 @@ export async function searchRoutes(
   const radiusM = validateRadius(opts.radiusM);
   const limit = clampLimit(opts.limit);
   const kinds = resolveKinds(opts.kinds);
+  const minRadiusM = validateMinRadius(opts.minRadiusM, radiusM);
 
   const centre = `ST_SetSRID(ST_Point($1, $2), 4326)::geography`;
+  // The near edge, as a negated containment rather than a distance
+  // comparison: `NOT ST_DWithin` uses the same index as the far edge,
+  // where `ST_Distance(...) > n` would scan. The same shape as the ring
+  // in `day-targets.ts`.
+  const nearEdge = minRadiusM > 0
+    ? `\n         AND NOT ST_DWithin(geom::geography, ${centre}, $6)`
+    : "";
   const sql = `
     WITH near AS (
       SELECT osm_id, route, name, tags, geom,
              ST_Distance(geom::geography, ${centre}) AS distance_m
         FROM osm_routes
        WHERE ST_DWithin(geom::geography, ${centre}, $3)
-         AND route = ANY($4::text[])
+         AND route = ANY($4::text[])${nearEdge}
        ORDER BY distance_m, osm_id
        LIMIT $5
     ), merged AS (
@@ -181,6 +200,9 @@ export async function searchRoutes(
       radiusM,
       kinds,
       limit + 1,
+      // Only when the SQL above actually mentions $6: Postgres refuses
+      // a bind with more parameters than the statement references.
+      ...(minRadiusM > 0 ? [minRadiusM] : []),
     ]);
     rows = res.rows;
   } catch (err) {
@@ -302,6 +324,26 @@ function clampLimit(limit: number | undefined): number {
     throw new RouteSearchError("limit must be a positive number");
   }
   return Math.min(Math.floor(limit), MAX_ROUTE_LIMIT);
+}
+
+/**
+ * The ring's near edge.
+ *
+ * Zero is the ordinary case and means a full circle. A near edge that
+ * reaches the far one is refused rather than quietly emptied: a band
+ * from 40 to 40 is somebody's mistake, and an empty list would look
+ * like a region without ways.
+ */
+function validateMinRadius(minRadiusM: number | undefined, radiusM: number): number {
+  if (minRadiusM === undefined) return 0;
+  if (!Number.isFinite(minRadiusM) || minRadiusM < 0) {
+    throw new RouteSearchError("minRadiusM must be zero or a positive number");
+  }
+  const rounded = Math.round(minRadiusM);
+  if (rounded >= radiusM) {
+    throw new RouteSearchError("minRadiusM must be smaller than radiusM");
+  }
+  return rounded;
 }
 
 function validateRadius(radiusM: number): number {

@@ -89,13 +89,27 @@ const FAR: SeedRoute = {
   wkt: wkt([[offset(40_000, 40_000), offset(41_000, 40_000)]]),
 };
 
+/**
+ * A way at thirty-five kilometres: far enough to fall outside a band's
+ * near edge, near enough to stay inside the fifty-kilometre ceiling
+ * the search enforces. `FAR` sits beyond that ceiling and so cannot
+ * show what a ring does.
+ */
+const MIDDLE: SeedRoute = {
+  osmId: 5,
+  route: "bicycle",
+  name: "Mittelweg Beispiel",
+  tags: { name: "Mittelweg Beispiel" },
+  wkt: wkt([[offset(35_000, 0), offset(36_000, 0)]]),
+};
+
 let available = false;
 
 before(async () => {
   available = await postgisAvailable();
   if (!available) return;
   await createSeededRegion(DB, []);
-  await seedRoutes(DB, [PANORAMA, LOOP, GAPPED, FAR]);
+  await seedRoutes(DB, [PANORAMA, LOOP, GAPPED, FAR, MIDDLE]);
   await createSeededRegion(OLD_DB, []);
 });
 
@@ -193,6 +207,70 @@ test("says a region predating the route import has none, rather than failing", a
   const page = await searchRoutes(OLD_DB, { center: BASE, radiusM: 10_000 });
   assert.equal(page.imported, false);
   assert.deepEqual(page.routes, []);
+});
+
+test("a ring leaves out what is nearer than its edge", async (t) => {
+  if (!available) return t.skip("no PostGIS available");
+
+  // The point of a band: somebody who has worked through what is
+  // close needs the near ways *gone*, not outnumbered. The answer is
+  // ordered by distance and capped, so a wider circle alone would
+  // hand back the same near ways again.
+  const circle = await searchRoutes(DB, { center: BASE, radiusM: 50_000 });
+  const ring = await searchRoutes(DB, {
+    center: BASE,
+    radiusM: 50_000,
+    minRadiusM: 30_000,
+  });
+
+  assert.ok(circle.routes.some((r) => r.id === 1), "the near way is in the circle");
+  assert.ok(circle.routes.some((r) => r.id === 5), "so is the one at 35 km");
+  assert.deepEqual(ring.routes.map((r) => r.id), [5], "only the far one is in the ring");
+});
+
+test("a ring measures to the nearest part of a way, like the circle does", async (t) => {
+  if (!available) return t.skip("no PostGIS available");
+
+  // PANORAMA runs north from the centre, so its nearest point is at
+  // the centre itself: a band starting at 1 km must not contain it,
+  // however far its other end reaches.
+  const ring = await searchRoutes(DB, {
+    center: BASE,
+    radiusM: 50_000,
+    minRadiusM: 1_000,
+  });
+
+  assert.ok(!ring.routes.some((r) => r.id === 1));
+});
+
+test("a full circle is what a band of zero means", async (t) => {
+  if (!available) return t.skip("no PostGIS available");
+
+  // Every caller from before rings existed passes nothing, and has to
+  // keep getting what it got.
+  const plain = await searchRoutes(DB, { center: BASE, radiusM: 50_000 });
+  const zero = await searchRoutes(DB, { center: BASE, radiusM: 50_000, minRadiusM: 0 });
+
+  assert.deepEqual(zero.routes.map((r) => r.id), plain.routes.map((r) => r.id));
+});
+
+test("refuses a band that cannot hold anything", async (t) => {
+  if (!available) return t.skip("no PostGIS available");
+
+  // An empty answer would read as a region without ways; being told
+  // the band is nonsense is the more useful answer (§15.3).
+  await assert.rejects(
+    () => searchRoutes(DB, { center: BASE, radiusM: 10_000, minRadiusM: 10_000 }),
+    RouteSearchError,
+  );
+  await assert.rejects(
+    () => searchRoutes(DB, { center: BASE, radiusM: 10_000, minRadiusM: 20_000 }),
+    RouteSearchError,
+  );
+  await assert.rejects(
+    () => searchRoutes(DB, { center: BASE, radiusM: 10_000, minRadiusM: -1 }),
+    RouteSearchError,
+  );
 });
 
 test("refuses arguments it cannot work with", async (t) => {
