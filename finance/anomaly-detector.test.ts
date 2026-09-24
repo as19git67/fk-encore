@@ -31,6 +31,13 @@ async function ensureUser(id: number): Promise<void> {
   await db.execute(
     sql`INSERT INTO users (id, email, name, password_hash) VALUES (${id}, ${`u${id}@test.local`}, ${`User${id}`}, 'x') ON CONFLICT (id) DO NOTHING`,
   );
+  // An id written by hand leaves the sequence where it was, so a suite
+  // running beside this one and inserting a user the normal way draws the
+  // same id and dies on the primary key. Move the sequence past what is
+  // there.
+  await db.execute(
+    sql`SELECT setval(pg_get_serial_sequence('users', 'id'), GREATEST((SELECT MAX(id) FROM users), 1))`,
+  );
 }
 
 async function anyTypeId(): Promise<number> {
@@ -772,6 +779,161 @@ describe("finance/anomaly-detector — missing_transaction", () => {
           isNull(financeAnomaly.acknowledged_at),
         ),
       );
+    expect(stillOpen).toHaveLength(0);
+  });
+});
+
+describe("finance/anomaly-detector — SEPA identity arriving mid-series", () => {
+  it("keeps one mandate when a creditor starts sending its mandate reference", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    // Years of bookings the bank delivered with a name and nothing else.
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(300 - i * 30),
+        amount: "-60.00",
+        counterparty: "Musterverlag Medien GmbH + Co. KG",
+        entryText: "Lastschrift",
+      });
+    }
+    await runAnomalyDetection([accountId]);
+
+    // Then the same subscription arrives with its SEPA mandate data — and,
+    // as banks do, the name in capitals.
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(30),
+      amount: "-60.00",
+      counterparty: "MUSTERVERLAG MEDIEN GMBH + CO. KG",
+      mandateRef: "537-4711-2",
+      creditorId: "DE00ZZZ00000000000",
+      entryText: "Lastschrift",
+    });
+    await runAnomalyDetection([accountId]);
+
+    const mandates = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(eq(financeRecurringMandate.account_id, accountId));
+    expect(mandates).toHaveLength(1);
+    // The series carried on: its history is intact and it now knows the
+    // mandate the next booking will name.
+    expect(mandates[0].mandate_ref).toBe("537-4711-2");
+    expect(mandates[0].creditor_id).toBe("DE00ZZZ00000000000");
+    // The whole history stayed with it — the booking joined the series
+    // rather than starting one. (A run counts every transaction again, so
+    // the tally is "at least the nine bookings", not exactly nine.)
+    expect(mandates[0].transaction_count).toBeGreaterThanOrEqual(9);
+    expect(mandates[0].first_seen).toBe(daysAgo(300));
+    expect(mandates[0].last_seen).toBe(daysAgo(30));
+  });
+
+  it("does not take over a mandate that already belongs to another creditor", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(60),
+      amount: "-60.00",
+      counterparty: "Musterverlag Medien GmbH + Co. KG",
+      mandateRef: "OLD-1",
+      creditorId: "DE00ZZZ00000000001",
+      entryText: "Lastschrift",
+    });
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(30),
+      amount: "-60.00",
+      counterparty: "Musterverlag Medien GmbH + Co. KG",
+      mandateRef: "NEW-1",
+      creditorId: "DE00ZZZ00000000002",
+      entryText: "Lastschrift",
+    });
+    await runAnomalyDetection([accountId]);
+
+    const mandates = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(eq(financeRecurringMandate.account_id, accountId));
+    expect(mandates.map((m) => m.mandate_ref).sort()).toEqual(["NEW-1", "OLD-1"]);
+  });
+
+  it("matches a booking that names its mandate but not its creditor", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    for (let i = 0; i < 3; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(90 - i * 30),
+        amount: "-19.99",
+        counterparty: "Beispieldienst AG",
+        mandateRef: "M-1",
+        entryText: "Lastschrift",
+      });
+    }
+    await runAnomalyDetection([accountId]);
+
+    const mandates = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(eq(financeRecurringMandate.account_id, accountId));
+    expect(mandates).toHaveLength(1);
+    expect(mandates[0].transaction_count).toBe(3);
+  });
+});
+
+describe("finance/anomaly-detector — a missing alert the booking answered", () => {
+  it("closes the alert once the late booking arrives", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    // Monthly series whose last booking is 45 days old: the expected slot
+    // is two weeks past its grace window.
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(45 + i * 30),
+        amount: "-49.90",
+        counterparty: "Beispielversicherung AG",
+        mandateRef: "M-LATE",
+        creditorId: "DE00ZZZ00000000003",
+      });
+    }
+    await runAnomalyDetection([accountId]);
+
+    const open = await db
+      .select()
+      .from(financeAnomaly)
+      .where(
+        and(
+          eq(financeAnomaly.account_id, accountId),
+          eq(financeAnomaly.type, "missing_transaction"),
+          isNull(financeAnomaly.acknowledged_at),
+        ),
+      );
+    expect(open).toHaveLength(1);
+    const alertId = open[0].id;
+
+    // The booking turns up late. The next expected date now lies a month
+    // ahead, so nothing else in the pass would look at this mandate again.
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(1),
+      amount: "-49.90",
+      counterparty: "Beispielversicherung AG",
+      mandateRef: "M-LATE",
+      creditorId: "DE00ZZZ00000000003",
+    });
+    await runAnomalyDetection([accountId]);
+
+    const stillOpen = await db
+      .select()
+      .from(financeAnomaly)
+      .where(and(eq(financeAnomaly.id, alertId), isNull(financeAnomaly.acknowledged_at)));
     expect(stillOpen).toHaveLength(0);
   });
 });
