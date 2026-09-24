@@ -144,6 +144,7 @@ struct TripRunningDay {
     /// computed it.
     let light: TripDayLight?
 
+    @MainActor
     static func load(now: Date = Date()) async -> TripRunningDay? {
         guard let planId = TripRunningPlan.shared.plan?.id else { return nil }
         let bundle: TripOfflineBundle
