@@ -87,9 +87,6 @@ const displayValue = computed<SuggestionItem[]>(() =>
     <template #option="{ option }">
       <span :class="option.isNew ? 'tag-ac-new' : ''">{{ option.label }}</span>
     </template>
-    <template #chip="{ value }">
-      <span class="p-tag p-tag-warn tag-chip">{{ value.label }}</span>
-    </template>
   </AutoComplete>
 </template>
 
@@ -100,22 +97,15 @@ const displayValue = computed<SuggestionItem[]>(() =>
   font-weight: 600;
 }
 
-/* Make selected tags clearly look like badges/pills */
-.tag-ac :deep(.p-autocomplete-multiple-container) {
-  gap: 0.375rem;
-  flex-wrap: wrap;
-}
-.tag-ac :deep(.p-autocomplete-token) {
-  background: var(--p-highlight-background);
+/* A selected tag is PrimeVue's own chip: rounded, filled, with the remove
+   button beside its label. A custom `#chip` slot used to replace it with
+   bare text, and the rules meant to dress that text up named PrimeVue 3's
+   `.p-autocomplete-token*`, which PrimeVue 4 no longer emits — so the tags
+   ran together as one line of words with no way to take one back off.
+   Only the outline is ours: the chip carries the same border as every other
+   field, so where one tag ends and the next begins is visible in both
+   themes, whatever the fill. */
+.tag-ac :deep(.p-autocomplete-chip) {
   border: 1px solid var(--p-content-border-color);
-  color: var(--p-highlight-color);
-  border-radius: 999px;
-  padding: 0.15rem 0.5rem;
-}
-.tag-ac :deep(.p-autocomplete-token-label) {
-  margin-right: 0.25rem;
-}
-.tag-ac :deep(.p-autocomplete-token-icon) {
-  color: var(--p-highlight-color);
 }
 </style>
