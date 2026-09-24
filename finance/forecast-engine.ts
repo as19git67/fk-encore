@@ -193,6 +193,18 @@ export type ForecastItem =
   | LifeInsuranceItem
   | PensionItem;
 
+// Spelled out rather than `ForecastItem["type"]`: Encore's parser does not
+// resolve an indexed access on a union, and this name reaches the API.
+export type ItemType =
+  | "salary"
+  | "income"
+  | "expense"
+  | "living_expense"
+  | "health_insurance"
+  | "asset"
+  | "life_insurance"
+  | "pension";
+
 export interface SpendingPhase {
   /** Age of the reference person from which this factor applies. */
   fromAge: number;
@@ -252,7 +264,7 @@ export interface FlowSource {
   key: string;
   label: string;
   personId: number | null;
-  kind: ForecastItem["type"] | "care" | "tax" | "surrender";
+  kind: ItemType | "care" | "tax" | "surrender";
 }
 
 export interface YearRow {

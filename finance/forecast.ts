@@ -30,6 +30,7 @@ import {
   type ForecastMilestone,
   type ForecastPerson,
   type ForecastScenario,
+  type ItemType,
   type MatrixCell,
   type MilestoneKind,
   type SimulationResult,
@@ -58,7 +59,6 @@ export interface MilestoneDto {
   age: number | null;
 }
 
-export type ItemType = ForecastItem["type"];
 
 export interface ItemDto {
   id: number;
@@ -102,8 +102,13 @@ interface PersonInput {
   sortOrder?: number;
 }
 
-interface PersonUpdate extends Partial<PersonInput> {
+// Update shapes are spelled out: Encore's parser reads these interfaces
+// itself and utility types like Partial<> are not something to lean on there.
+interface PersonUpdate {
   id: number;
+  label?: string;
+  birthDate?: string;
+  sortOrder?: number;
 }
 
 interface MilestoneInput {
@@ -114,8 +119,13 @@ interface MilestoneInput {
   age?: number | null;
 }
 
-interface MilestoneUpdate extends Partial<MilestoneInput> {
+interface MilestoneUpdate {
   id: number;
+  personId?: number;
+  kind?: MilestoneKind;
+  label?: string;
+  date?: string | null;
+  age?: number | null;
 }
 
 interface ItemInput {
@@ -127,8 +137,14 @@ interface ItemInput {
   sortOrder?: number;
 }
 
-interface ItemUpdate extends Partial<ItemInput> {
+interface ItemUpdate {
   id: number;
+  personId?: number | null;
+  type?: ItemType;
+  label?: string;
+  data?: Record<string, unknown>;
+  linkedAccountId?: number | null;
+  sortOrder?: number;
 }
 
 interface ScenarioInput {
@@ -136,8 +152,10 @@ interface ScenarioInput {
   config: Record<string, unknown>;
 }
 
-interface ScenarioUpdate extends Partial<ScenarioInput> {
+interface ScenarioUpdate {
   id: number;
+  name?: string;
+  config?: Record<string, unknown>;
 }
 
 interface IdRequest {
@@ -157,11 +175,22 @@ export interface SimulateRequest {
   compareScenarioIds?: number[];
 }
 
+export interface EarliestResult {
+  personId: number;
+  age: number | null;
+}
+
+export interface ComparisonRun {
+  scenarioId: number;
+  name: string;
+  result: SimulationResult;
+}
+
 export interface SimulateResponse {
   result: SimulationResult;
-  earliest: { personId: number; age: number | null } | null;
+  earliest: EarliestResult | null;
   matrix: MatrixCell[] | null;
-  comparisons: Array<{ scenarioId: number; name: string; result: SimulationResult }>;
+  comparisons: ComparisonRun[];
 }
 
 // -----------------------------------------------------------------------
