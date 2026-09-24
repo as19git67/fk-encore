@@ -16,7 +16,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -588,7 +588,7 @@ async function findMandate(
   // Kartenzahlung to the same counterparty form separate mandates.
   // Legacy mandates (payment_channel IS NULL) match any channel so
   // existing data keeps working without a backfill.
-  if (key.mandate_ref && key.creditor_id) {
+  if (key.mandate_ref) {
     const [row] = await db
       .select()
       .from(financeRecurringMandate)
@@ -596,11 +596,30 @@ async function findMandate(
         and(
           eq(financeRecurringMandate.account_id, accountId),
           eq(financeRecurringMandate.mandate_ref, key.mandate_ref),
-          eq(financeRecurringMandate.creditor_id, key.creditor_id),
+          // The creditor id narrows the match only where both sides carry
+          // one. Requiring it outright meant a booking that names its
+          // mandate but not its creditor matched nothing and started a new
+          // mandate — every single time it was booked.
+          sql`(
+            ${financeRecurringMandate.creditor_id} IS NULL
+            OR ${key.creditor_id ?? null}::text IS NULL
+            OR ${financeRecurringMandate.creditor_id} = ${key.creditor_id ?? null}
+          )`,
         )
       )
       .limit(1);
     if (row) return row;
+  }
+
+  // A creditor can start sending its SEPA mandate data mid-series: the same
+  // subscription, from the same bank, suddenly carries a mandate reference
+  // and a creditor id where every earlier booking carried only a name. The
+  // tier above then finds nothing, a second mandate is created beside the
+  // first, and the old one falls silent — reported as a missing booking
+  // while the new one starts counting from zero.
+  if (key.mandate_ref || key.creditor_id) {
+    const adopted = await adoptIdentitylessMandate(accountId, key);
+    if (adopted) return adopted;
   }
 
   if (key.counterparty_iban && !key.mandate_ref && !key.creditor_id) {
@@ -627,7 +646,7 @@ async function findMandate(
       .where(
         and(
           eq(financeRecurringMandate.account_id, accountId),
-          eq(financeRecurringMandate.counterparty, key.counterparty),
+          sameCounterpartyName(key.counterparty),
           isNull(financeRecurringMandate.mandate_ref),
           isNull(financeRecurringMandate.creditor_id),
           isNull(financeRecurringMandate.counterparty_iban),
@@ -647,6 +666,80 @@ async function findMandate(
  */
 function paymentChannelMatch(channel: PaymentChannel) {
   return sql`(${financeRecurringMandate.payment_channel} = ${channel} OR ${financeRecurringMandate.payment_channel} IS NULL)`;
+}
+
+/**
+ * SQL condition: the mandate names the same counterparty, give or take
+ * the spelling a bank happens to send. The same creditor arrives as
+ * "Heise Medien GmbH + Co. KG" one year and "HEISE MEDIEN GMBH + CO. KG"
+ * the next; the successor check has always compared names this way.
+ */
+function sameCounterpartyName(counterparty: string) {
+  return sql`LOWER(TRIM(${financeRecurringMandate.counterparty})) = LOWER(TRIM(${counterparty}))`;
+}
+
+/**
+ * The mandate a booking that has just gained SEPA identity belongs to:
+ * one for the same counterparty (by IBAN, else by name) on the same
+ * channel that carries no identity of its own. It takes the booking's
+ * mandate reference and creditor id and carries on, so the series keeps
+ * its history instead of splitting in two.
+ *
+ * Only an identity-less mandate can be adopted — another creditor's
+ * mandate is never taken over — and `upsertMandate`'s inactivity gate
+ * still decides whether the series really continues or starts afresh.
+ */
+async function adoptIdentitylessMandate(
+  accountId: number,
+  key: MandateKey,
+): Promise<typeof financeRecurringMandate.$inferSelect | undefined> {
+  const identityless = and(
+    eq(financeRecurringMandate.account_id, accountId),
+    isNull(financeRecurringMandate.mandate_ref),
+    isNull(financeRecurringMandate.creditor_id),
+    paymentChannelMatch(key.payment_channel),
+  );
+
+  // The IBAN names the payee outright; the name is what is left when it
+  // does not. Most recently seen first: a merchant may have several old
+  // series, and the live one is the one this booking continues.
+  const matches = [
+    key.counterparty_iban
+      ? eq(financeRecurringMandate.counterparty_iban, key.counterparty_iban)
+      : null,
+    key.counterparty ? sameCounterpartyName(key.counterparty) : null,
+  ].filter((m): m is NonNullable<typeof m> => m !== null);
+
+  for (const match of matches) {
+    const [row] = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(and(identityless, match))
+      .orderBy(desc(financeRecurringMandate.last_seen))
+      .limit(1);
+    if (!row) continue;
+
+    await db
+      .update(financeRecurringMandate)
+      .set({
+        mandate_ref: key.mandate_ref,
+        creditor_id: key.creditor_id,
+        counterparty_iban: row.counterparty_iban ?? key.counterparty_iban,
+        counterparty: row.counterparty ?? key.counterparty,
+        updated_at: sql`NOW()`,
+      })
+      .where(eq(financeRecurringMandate.id, row.id));
+
+    return {
+      ...row,
+      mandate_ref: key.mandate_ref,
+      creditor_id: key.creditor_id,
+      counterparty_iban: row.counterparty_iban ?? key.counterparty_iban,
+      counterparty: row.counterparty ?? key.counterparty,
+    };
+  }
+
+  return undefined;
 }
 
 /**
@@ -883,6 +976,16 @@ async function detectMissingForAccount(accountId: number): Promise<number> {
   // daily, so this is the most current view available.
   const today = new Date();
   const todayStr = toIsoDate(today);
+
+  // An alert names one date, and the booking that fills it answers it —
+  // whether it arrived on time, a week late or a month. Nothing else closed
+  // it: the next run computed the *new* expected date from the booking that
+  // had just landed, found it comfortably in the future and skipped the
+  // mandate, so "expected booking missing" sat in the inbox beside the very
+  // booking it asked for. Likewise for a mandate the inactivity gate has
+  // since restarted — its counters no longer qualify, so the loop below
+  // never reaches it again.
+  await acknowledgeFilledMissingForAccount(accountId);
 
   const mandates = await db
     .select()
@@ -1146,6 +1249,25 @@ async function acknowledgeNewMandateForMandate(mandateId: number): Promise<void>
  * whose recurring series has been resumed under a different mandate
  * identity. Idempotent — if nothing is open, this is a no-op.
  */
+/**
+ * Close every open missing alert on this account whose slot the mandate has
+ * since filled: the mandate was seen again on or after the date the alert
+ * named. One statement for the account rather than a write per mandate.
+ */
+async function acknowledgeFilledMissingForAccount(accountId: number): Promise<void> {
+  await db.execute(sql`
+    UPDATE finance_anomaly a
+    SET acknowledged_at = NOW()
+    FROM finance_recurring_mandate m
+    WHERE a.mandate_id = m.id
+      AND m.account_id = ${accountId}
+      AND a.type = 'missing_transaction'
+      AND a.acknowledged_at IS NULL
+      AND m.last_seen IS NOT NULL
+      AND a.details->>'expected_date' <= m.last_seen::text
+  `);
+}
+
 async function acknowledgeStaleMissingForMandate(mandateId: number): Promise<void> {
   await db
     .update(financeAnomaly)
