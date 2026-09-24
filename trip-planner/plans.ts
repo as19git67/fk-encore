@@ -1223,6 +1223,11 @@ export interface RedistributeRequestBody {
   visited?: number[];
   /** Stop row ids to skip. */
   skipped?: number[];
+  /**
+   * The group only just arrived: the blocks before the current one
+   * never happened, and their stops go back to the pool (§5).
+   */
+  arrivedLate?: boolean;
 }
 
 export interface RedistributeResponseBody {
@@ -1289,6 +1294,7 @@ export const redistributeDay = api(
         remainingMinutes: Math.round(req.remainingMinutes),
         maxWalkMinutes,
         mode: leg.mode,
+        arrivedLate: req.arrivedLate === true,
       });
     } catch (err) {
       throw APIError.invalidArgument((err as Error).message);

@@ -78,6 +78,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 TripAutoStartMonitor.shared.handleNotificationAction(action)
                 completionHandler()
             }
+        case TripDayNotices.notificationCategoryId:
+            // "Umplanen" on the day's offer (§7.1): the day screen runs
+            // it, because that is where the position and the plan are.
+            Task { @MainActor in
+                TripDayNotices.shared.handleNotificationAction(
+                    action, userInfo: response.notification.request.content.userInfo)
+                completionHandler()
+            }
         default:
             // Everything else carries where a tap should land as `url`: the
             // review notice its app-scheme link (#968), a remote push from

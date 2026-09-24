@@ -29,48 +29,50 @@ final class TripDayActivityManager {
 
     /// Call on app foreground and on a repeating timer while foregrounded
     /// (ActivityKit itself throttles updates to roughly once a minute, so
-    /// calling this more often costs nothing extra), and immediately after
-    /// `TripVisitMonitor` confirms or clears a dwell.
+    /// calling this more often costs nothing extra), and from every
+    /// background wake the visit monitor gets — a fence, a significant
+    /// move. Those wakes are the only updates the Activity sees while
+    /// the app is not in front, so each one counts.
     func refresh() async {
-        guard let planId = TripRunningPlan.shared.plan?.id else {
-            await end()
-            return
-        }
+        await refresh(await TripRunningDay.load())
+    }
 
-        guard let bundle = try? await Self.fetchBundle(planId: planId),
-              let position = bundle.plan.position(on: Date()),
-              let leg = bundle.plan.legs.first(where: { $0.position == position.legIndex }),
-              let day = leg.days.first(where: { $0.dayIndex == position.dayIndex }),
-              day.detailed
-        else {
+    /// The same, from a day already loaded (`TripDayPulse`).
+    func refresh(_ running: TripRunningDay?) async {
+        guard let running else {
             await end()
             return
         }
+        let planId = running.plan.id
+        let day = running.day
+        let now = Date()
 
         let confirmedName = TripVisitMonitor.shared.openStopOsmRef.flatMap { osmRef in
             day.blocks.flatMap(\.stops).first { $0.osmRef == osmRef }?.displayName
         }
-        let light = bundle.lightOfDay(legIndex: position.legIndex, dayIndex: position.dayIndex)
         guard let content = TripDayActivityContent.build(
-            day: day, at: TripDayTimeline.minutesOfDay(Date()), confirmedStopName: confirmedName, lightHint: light
+            day: day, at: TripDayTimeline.minutesOfDay(now), confirmedStopName: confirmedName, lightHint: running.light
         ) else {
             // Before the first block or after the last: nothing to show
             // for a day that has not started, or is already over.
             await end()
             return
         }
+        // Stale at the block's end: what the Lock Screen shows after
+        // that is marked as old rather than passed off as current.
+        let staleDate = TripDayActivityContent.staleDate(blockEndMinutes: content.blockEndMinutes, now: now)
 
         if let activity, activePlanId == planId {
-            await activity.update(.init(state: content, staleDate: nil))
+            await activity.update(.init(state: content, staleDate: staleDate))
             return
         }
 
         await end()
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let attributes = TripDayActivityAttributes(planId: planId, dayTitle: leg.anchorTitle)
+        let attributes = TripDayActivityAttributes(planId: planId, dayTitle: running.leg.anchorTitle)
         activity = try? Activity.request(
             attributes: attributes,
-            content: .init(state: content, staleDate: nil)
+            content: .init(state: content, staleDate: staleDate)
         )
         activePlanId = activity != nil ? planId : nil
     }
@@ -84,12 +86,5 @@ final class TripDayActivityManager {
         await activity.end(nil, dismissalPolicy: .immediate)
         self.activity = nil
         activePlanId = nil
-    }
-
-    private static func fetchBundle(planId: Int) async throws -> TripOfflineBundle {
-        try await APIClient.shared.get(
-            "/trip-planner/plans/\(planId)/bundle",
-            query: ["utcOffsetMinutes": String(TimeZone.current.secondsFromGMT() / 60)],
-        )
     }
 }

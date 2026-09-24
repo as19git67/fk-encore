@@ -47,6 +47,27 @@ enum TripGeofencePlan {
         }
     }
 
+    /// The fence around the quarters (§4.2).
+    ///
+    /// Where every day begins and ends — and on the arrival day the one
+    /// place that can say "we are here now", which the stops' fences
+    /// cannot: a family whose plane landed five hours late reaches the
+    /// hotel first and its stops never (§5). A zone anchor keeps its
+    /// own radius; an address gets a generous hundred and fifty metres,
+    /// because a hotel's fence is crossed on the way to the door.
+    static let anchorRadius: CLLocationDistance = 150
+
+    static func anchorRegion(legId: Int, anchor: TripCoordinate, radiusM: Int?) -> TripMonitoredRegion {
+        TripMonitoredRegion(
+            osmRef: "anchor:\(legId)",
+            name: nil,
+            center: CLLocationCoordinate2D(latitude: anchor.lat, longitude: anchor.lon),
+            radius: max(anchorRadius, CLLocationDistance(radiusM ?? 0)),
+            plannedMinutes: 0,
+            kind: .quarters,
+        )
+    }
+
     /// The stops to monitor, in the order they matter.
     ///
     /// Anything already settled is skipped — done *or* skipped. A fence
@@ -76,6 +97,11 @@ enum TripGeofencePlan {
 /// One fence, and what the visit rule needs to know about the place
 /// behind it.
 struct TripMonitoredRegion: Equatable, Sendable {
+    /// A stop of the day, or the quarters. A stay at the quarters is
+    /// not a visit and is never reported; being there at all is what
+    /// the arrival day wants to know.
+    enum Kind: Sendable { case stop, quarters }
+
     let osmRef: String
     let name: String?
     let center: CLLocationCoordinate2D
@@ -83,6 +109,7 @@ struct TripMonitoredRegion: Equatable, Sendable {
     /// What the plan allowed for it. The dwell threshold is a quarter
     /// of this, floored at ten minutes (`visits.ts`).
     let plannedMinutes: Int
+    var kind: Kind = .stop
 
     /// The identifier the region is monitored under. The `osmRef` is
     /// already unique within a plan and is what the visit report is

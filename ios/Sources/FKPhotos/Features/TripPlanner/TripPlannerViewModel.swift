@@ -912,7 +912,12 @@ final class TripPlannerViewModel {
     ///   rather than as a default argument because default arguments are
     ///   evaluated outside the actor, and `TripLocationProvider` is
     ///   main-actor isolated.
+    /// - Parameter arrivedLate: the group only just got here (§5): the
+    ///   blocks the day ran past never happened, and their stops go
+    ///   back to the candidates instead of standing as a morning that
+    ///   did not take place.
     func redistributeNow(
+        arrivedLate: Bool = false,
         now: Date = Date(),
         locationProvider: TripLocationProvider? = nil,
     ) async {
@@ -946,6 +951,7 @@ final class TripPlannerViewModel {
             let currentBlockId: String
             let remainingMinutes: Int
             let position: TripCoordinate
+            let arrivedLate: Bool
         }
         do {
             let response: RedistributeResponse = try await APIClient.shared.post(
@@ -959,6 +965,7 @@ final class TripPlannerViewModel {
                         lat: location.coordinate.latitude,
                         lon: location.coordinate.longitude,
                     ),
+                    arrivedLate: arrivedLate,
                 ),
             )
             apply(TripPlanResponse(plan: response.plan, droppedBlocks: nil))
