@@ -34,6 +34,9 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
     /// the stop rather than only a coordinate.
     private var stopIds: [String: Int] = [:]
     private var planId: Int?
+    /// Which day of the plan the fences are for — what a sighting at
+    /// the quarters is remembered under.
+    private var dayIndex: Int?
 
     /// Photos the trip collected, for signal 2. Supplied by the caller
     /// rather than read here: which photos belong to the trip is Trip
@@ -61,12 +64,23 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
     /// dropped. Open stays for a dropped fence are closed rather than
     /// forgotten — standing in a museum when the plan changes is still
     /// a visit.
-    func watch(planId: Int, stops: [TripStop], stopIdsByRef: [String: Int]) {
+    ///
+    /// `quarters` is the fence around the anchor (§4.2): crossed on
+    /// arrival, which on the first day of a leg is the moment the day
+    /// can be replanned from where the group actually is (§5).
+    func watch(
+        planId: Int,
+        dayIndex: Int,
+        stops: [TripStop],
+        stopIdsByRef: [String: Int],
+        quarters: TripMonitoredRegion? = nil,
+    ) {
         guard CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else { return }
         self.planId = planId
+        self.dayIndex = dayIndex
         self.stopIds = stopIdsByRef
 
-        let wanted = TripGeofencePlan.regions(for: stops)
+        let wanted = TripGeofencePlan.regions(for: stops) + (quarters.map { [$0] } ?? [])
         let wantedIds = Set(wanted.map(\.identifier))
 
         for (identifier, region) in regions where !wantedIds.contains(identifier) {
@@ -91,6 +105,12 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             manager.requestAlwaysAuthorization()
         }
         manager.startMonitoringSignificantLocationChanges()
+        // Whether the phone is already inside a fence — an app opened
+        // at the hotel gets no entry event for a fence it is standing
+        // in, and the arrival day needs to know.
+        for region in manager.monitoredRegions where wantedIds.contains(region.identifier) {
+            manager.requestState(for: region)
+        }
 
         // Watching again is a moment with the app up and, usually, a
         // network — the right moment to send what could not be sent
@@ -110,6 +130,26 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             Task { await report(stay) }
         }
         planId = nil
+        dayIndex = nil
+    }
+
+    /// Is this the quarters' fence rather than a stop's?
+    private func isQuarters(_ identifier: String) -> Bool {
+        regions[identifier]?.kind == .quarters
+    }
+
+    /// The phone is at the quarters: remembered for the arrival day's
+    /// question, and the day is woken to ask it.
+    private func sawQuarters() {
+        guard let planId, let dayIndex else { return }
+        TripDayNotices.shared.noteAtQuarters(planId: planId, dayIndex: dayIndex)
+    }
+
+    /// Whatever woke the app also moved the day on: the Live Activity
+    /// and the offers are re-read from the same wake (§7.1). This is
+    /// the only update either gets while the app is not in front.
+    private func pulse(_ reason: TripDayNotices.Wake) {
+        Task { await TripDayPulse.tick(reason) }
     }
 
     private func startMonitoring(_ region: TripMonitoredRegion) {
@@ -137,7 +177,7 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
     /// product decision and one that lives in two places drifts
     /// (`visits.ts`).
     private func report(_ stay: TripStay) async {
-        guard let planId, let region = regions[stay.regionId] else { return }
+        guard let planId, let region = regions[stay.regionId], region.kind == .stop else { return }
         guard TripDwellRule.isWorthReporting(stay, plannedMinutes: region.plannedMinutes) else {
             return
         }
@@ -196,17 +236,43 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         let now = Date()
         Task { @MainActor in
-            tracker.entered(region.identifier, at: now)
-            openStopOsmRef = region.identifier
+            if isQuarters(region.identifier) {
+                sawQuarters()
+            } else {
+                tracker.entered(region.identifier, at: now)
+                openStopOsmRef = region.identifier
+            }
+            pulse(.fenceEntered)
         }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         let now = Date()
         Task { @MainActor in
+            defer { pulse(.fenceExited) }
+            guard !isQuarters(region.identifier) else { return }
             if openStopOsmRef == region.identifier { openStopOsmRef = nil }
             guard let stay = tracker.exited(region.identifier, at: now) else { return }
             await report(stay)
+        }
+    }
+
+    /// The significant-change service: a fix every few hundred metres
+    /// of movement, delivered to an app that is not running. Started
+    /// since the fences exist and, until the first trial, never read —
+    /// so the one heartbeat the day had in the background went unused.
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        Task { @MainActor in
+            // A fix inside the quarters' fence counts as being there:
+            // region entry is not delivered when the phone was inside
+            // before the fence was set.
+            if let quarters = regions.values.first(where: { $0.kind == .quarters }),
+               location.distance(from: CLLocation(latitude: quarters.center.latitude,
+                                                  longitude: quarters.center.longitude)) <= quarters.radius {
+                sawQuarters()
+            }
+            pulse(.location)
         }
     }
 
@@ -221,8 +287,13 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
         guard state == .inside else { return }
         let now = Date()
         Task { @MainActor in
-            tracker.entered(region.identifier, at: now)
-            openStopOsmRef = region.identifier
+            if isQuarters(region.identifier) {
+                sawQuarters()
+            } else {
+                tracker.entered(region.identifier, at: now)
+                openStopOsmRef = region.identifier
+            }
+            pulse(.fenceEntered)
         }
     }
 }

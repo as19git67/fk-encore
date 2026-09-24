@@ -92,7 +92,10 @@ public struct ContentView: View {
             // — there is nothing more to do while signed out.
             guard authManager.currentUser != nil else { return }
             while !Task.isCancelled {
-                await TripDayActivityManager.shared.refresh()
+                // The offers (§7.1) read the same day, in the same
+                // breath — so a trip behind schedule is noticed from
+                // any tab, not only from the day screen.
+                await TripDayPulse.tick(.minute)
                 try? await Task.sleep(for: .seconds(60))
             }
         }

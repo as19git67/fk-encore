@@ -2131,6 +2131,61 @@ dem Tagesplan des laufenden Tages statt im Feed. Einmal beim Start, nicht
 später: Ein Bildschirm, der sich unter dem Daumen bewegt, ist schlimmer als
 einer, der falsch anfängt.
 
+**Aus der Erprobung: der Tag bewegte sich nicht (Etappe 12, umgesetzt).**
+Vier Tage Malcesine, Ankunft für 12 Uhr eingetragen, tatsächlich um 17 Uhr am
+Hotel. Die App fragte nichts, plante nichts um, und die Live Activity zeigte den
+ganzen Nachmittag „Mittag bis 14:00 · unterwegs". Vier Ursachen, die zusammen
+einen statischen Tag ergaben, obwohl sich Ort und Zeit die ganze Zeit änderten:
+
+1. **Die Live Activity wurde nur im Vordergrund aktualisiert** — ein Zähler alle
+   60 Sekunden in `ContentView`. Im Hintergrund kam kein Anstoß: keine
+   `staleDate`, keine Auffrischung bei Geofence- oder Standortereignissen.
+   Jetzt trägt jeder Inhalt das Blockende als `staleDate` (iOS zeigt ihn danach
+   als veraltet statt als Wahrheit, §15.3), und **jedes Wecken der App
+   aktualisiert sie**: Zaun betreten, Zaun verlassen, deutliche Bewegung.
+2. **Die Umplan-Nachfrage aus §7.1 war gebaut und nirgends angeschlossen.**
+   `TripArrivalHeuristic` — „was übrig ist, passt nicht mehr in das, was übrig
+   ist" — hatte Tests und keinen Aufrufer. `TripBehindCheck` stellt ihr jetzt die
+   Frage aus dem Tag und der Minute; die Antwort ist eine Karte über dem Block
+   („Die 2 offenen Stopps brauchen noch etwa 80 Minuten, der Block hat noch 30.
+   Umplanen?") und, wenn die App nicht vorne ist, eine Benachrichtigung mit
+   „Umplanen" und „Später". Einmal pro Block, wie das Konzept es verlangt.
+3. **Die verspätete Ankunft bemerkte nichts.** Die geplante Ankunft war der Rahmen
+   von Tag 1, aber keine Regel verglich sie mit dem Tag, wie er lief. Der
+   Standortdienst, der die App im Hintergrund weckt, wurde gestartet und nie
+   gelesen. Jetzt liegt am gelebten Tag ein **Zaun um die Unterkunft** (150 m,
+   oder der Radius der Zone), und `TripLateArrival` ist die Regel des
+   Ankunftstags: geplante Ankunft mehr als eine halbe Stunde vorbei, noch nichts
+   abgehakt, das Telefon an der Unterkunft — „Angekommen um 17:05 statt 12:00.
+   Den Tag ab jetzt umplanen?" Vor dem Zaun stellt die App nur die offene Frage
+   („Seid ihr schon da?") und nur als Karte, nie als Banner: eine
+   Benachrichtigung auf der Autobahn wäre das Nörgeln aus §6.4. Und solange am
+   Ankunftstag die Unterkunft nicht erreicht ist, schweigt Punkt 2 — „ihr hängt
+   beim Mittag zurück" ist auf der Autobahn wahr und nutzlos, und eine
+   Neuverteilung von dort plante den Nachmittag um eine Raststätte herum.
+4. **Der Tagesbildschirm hatte keine Uhr.** „jetzt" am Block wurde beim
+   Zeichnen berechnet und nie wieder. Er tickt jetzt minütlich, solange der Tag
+   auf dem Schirm der heutige ist — und fragt dabei den Tag, ob er etwas zu
+   sagen hat.
+
+**„Ab jetzt umplanen" nach später Ankunft** ist dieselbe Neuverteilung wie der
+Knopf am Block, mit einer Ergänzung im Server (`arrivedLate`): Die Blöcke, an
+denen der Tag vorbeigelaufen ist, haben nicht stattgefunden. Ihre geplanten
+Stopps gehen zurück zu den Kandidaten — mit dem Bonus der Verdrängten —, statt
+als ein Vormittag stehen zu bleiben, den es nie gab; abgehakt oder
+übersprungen bleibt. Nur dieser Tag; die übrigen Tage der Etappe bleiben, wie
+sie waren. (Die Ankunftszeit über die Etappe zu ändern hätte alle vier Tage
+neu gelöst.)
+
+Zwei Dinge bleiben absichtlich offen. **Die Live Activity in einem Museum**: Wer
+zwei Stunden drin steht, bewegt sich nicht und wird nicht geweckt; der Inhalt
+ist dann als veraltet markiert, aber nicht neu. Die saubere Lösung ist ein
+Push an die Activity zu jedem Blockwechsel — die Push-Infrastruktur gibt es
+(#765), der `liveactivity`-Pushtyp und die Activity-Tokens noch nicht. Und
+**die Zäune gehören jetzt der Reise, nicht dem Bildschirm**: Sie fielen bisher,
+sobald man den Tagesplan verließ, und blieben nur, solange man ihn ansah — ein
+Zaun, der im Hintergrund nichts meldet, weil er dort nie stand.
+
 ### 8.6 Der Vorabend: Reisebereitschaft und Packliste
 
 Zwischen „Plan steht" und „erster Reisetag" liegt ein Moment, in dem sich die

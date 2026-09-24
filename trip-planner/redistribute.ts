@@ -81,6 +81,18 @@ export interface RedistributeRequest {
   maxWalkMinutes: number;
   /** How the group gets around on this leg (§4.2). On foot by default. */
   mode?: TransportMode;
+  /**
+   * The group only just got here — the blocks before the current one
+   * never happened (§5, arrival day).
+   *
+   * Ordinarily earlier blocks are the beginning of the travel diary
+   * and are left alone. A family whose plane landed five hours late
+   * has no diary for those blocks: the stops planned in them were
+   * never reached, and leaving them "planned" would show a morning
+   * that did not take place. So they go back to the pool like any
+   * displaced stop, and what is done or skipped stays.
+   */
+  arrivedLate?: boolean;
 }
 
 export interface RedistributeResult {
@@ -95,13 +107,26 @@ export function redistribute(req: RedistributeRequest): RedistributeResult {
   const currentIndex = req.blocks.findIndex((b) => b.id === req.currentBlockId);
   if (currentIndex < 0) throw new Error(`unknown block: ${req.currentBlockId}`);
 
-  const untouched = req.blocks.slice(0, currentIndex);
   const rest = req.blocks.slice(currentIndex);
 
   // Settled or pinned stays; everything else returns to the running for
   // its place, together with the pool.
   const keptPerBlock: CurrentStop[][] = [];
   const freed: Candidate[] = [];
+
+  // The blocks the day ran past. Untouched — unless the group was not
+  // here for them, in which case their planned stops were never
+  // visited and return to the pool; a pinned one too, because a pin
+  // holds a place in a block, and the block is gone.
+  const untouched = req.blocks.slice(0, currentIndex).map((block) => {
+    if (!req.arrivedLate) return block;
+    const stops = block.stops.filter((stop) => {
+      if (stop.status !== "planned") return true;
+      freed.push(stopToCandidate(stop));
+      return false;
+    });
+    return { ...block, stops, usedMinutes: 0 };
+  });
 
   for (const block of rest) {
     const kept: CurrentStop[] = [];

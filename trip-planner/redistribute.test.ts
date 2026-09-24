@@ -67,6 +67,54 @@ describe("redistribute", () => {
     expect(blocks[0]).toBe(morning);
   });
 
+  it("frees the blocks a late arrival never reached", () => {
+    // Landed at five instead of noon: the morning's stops were never
+    // visited, and a diary that says they were would be a lie. They go
+    // back to the pool with the boost; what was actually done stays.
+    const morning = block("morning", [
+      stop("node:a", 200),
+      stop("node:done", 300, { status: "done" }),
+      stop("node:pinned", 350, { pinned: true }),
+    ]);
+    const afternoon = block("afternoon", [stop("node:b", 400)]);
+
+    // No time left today, so nothing freed can find a new place and
+    // every freed stop has to show up in the pool.
+    const { blocks, pool, displaced } = redistribute({
+      ...BASE,
+      blocks: [morning, afternoon],
+      pool: [],
+      currentBlockId: "afternoon",
+      remainingMinutes: 0,
+      arrivedLate: true,
+    });
+
+    expect(blocks[0].stops.map((s) => s.osmRef)).toEqual(["node:done"]);
+    expect(blocks[0].usedMinutes).toBe(0);
+    const freed = pool.filter((c) => c.osmRef === "node:a" || c.osmRef === "node:pinned");
+    expect(freed).toHaveLength(2);
+    expect(freed.every((c) => c.score === 2 + DISPLACEMENT_BOOST)).toBe(true);
+    // Reported as displaced, so the traveller hears what fell out.
+    expect(displaced.map((c) => c.osmRef)).toEqual(
+      expect.arrayContaining(["node:a", "node:pinned"]),
+    );
+  });
+
+  it("leaves the blocks a late arrival never reached alone unless told", () => {
+    // Without the flag the earlier block is the diary and stays as it
+    // is — this is the ordinary "we are here, it is now".
+    const morning = block("morning", [stop("node:a", 200)]);
+    const afternoon = block("afternoon", [stop("node:b", 400)]);
+    const { blocks } = redistribute({
+      ...BASE,
+      blocks: [morning, afternoon],
+      pool: [],
+      currentBlockId: "afternoon",
+      remainingMinutes: 60,
+    });
+    expect(blocks[0].stops.map((s) => s.osmRef)).toEqual(["node:a"]);
+  });
+
   it("keeps done and skipped stops exactly where they are", () => {
     const done = stop("node:seen", 150, { status: "done" });
     const skipped = stop("node:passed", 180, { status: "skipped" });
