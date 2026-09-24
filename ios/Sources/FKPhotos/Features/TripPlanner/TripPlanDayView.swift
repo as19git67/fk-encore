@@ -39,6 +39,13 @@ struct TripPlanDayView: View {
     @State private var confirmRemoveOuting = false
     /// The city's editor, opened from the header.
     @State private var editingLeg = false
+    /// The minute the screen is drawn for. Ticks while the day on
+    /// screen is today, so "jetzt" moves along the blocks instead of
+    /// staying on the one the screen was opened on — the first trial's
+    /// complaint in one sentence.
+    @State private var clock = Date()
+    /// The day's offers: behind on a block, arrived late (§7.1).
+    @State private var notices = TripDayNotices.shared
     @State var viewModel: TripPlannerViewModel
 
     var body: some View {
@@ -312,11 +319,37 @@ struct TripPlanDayView: View {
         .task {
             await viewModel.load()
             watchStops()
+            runPendingReplan()
+            // The banners need permission; asked on the trip, where a
+            // "yes" means something, not in the planning month.
+            if isTravelling { await notices.requestNotificationAuthorizationIfNeeded() }
             await viewModel.loadIdeasOfferQuietly()
             await viewModel.loadLight()
             await viewModel.loadForecast()
         }
-        .onDisappear { TripVisitMonitor.shared.stop() }
+        .task(id: viewModel.isToday) {
+            // The screen's own minute, only on the day being lived:
+            // the current block moves, and the day is asked whether
+            // it has something to say (§7.1). Not a timer of the
+            // day's — the phone keeps the clock; this only looks at it.
+            guard viewModel.isToday else { return }
+            while !Task.isCancelled {
+                clock = Date()
+                if let plan = viewModel.plan, isTravelling,
+                   let running = TripRunningDay.of(plan: plan, light: viewModel.light, now: clock) {
+                    notices.evaluate(running)
+                }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+        .onChange(of: notices.pendingReplan) { _, _ in runPendingReplan() }
+        .onDisappear {
+            // The fences belong to the trip, not to this screen: while
+            // a trip runs they stay up so a Lock Screen and a background
+            // wake still know where the group is. Off the trip they are
+            // wake-ups that buy nothing.
+            if !TripRunningPlan.shared.isTravelling { TripVisitMonitor.shared.stop() }
+        }
         .onChange(of: viewModel.dayIndex) { _, _ in
             watchStops()
             // A different day is a different sun, and a different sky.
@@ -342,15 +375,21 @@ struct TripPlanDayView: View {
     /// keeping a second copy of "which day are we looking at".
     private func watchStops() {
         let stops = viewModel.stopsOfDay
-        guard !stops.isEmpty else {
+        guard let leg = viewModel.leg, !stops.isEmpty || viewModel.isToday else {
             TripVisitMonitor.shared.stop()
             return
         }
         TripVisitMonitor.shared.watch(
             planId: viewModel.planId,
+            dayIndex: viewModel.dayIndex,
             stops: stops,
             stopIdsByRef: Dictionary(stops.map { ($0.osmRef, $0.rowId) },
                                      uniquingKeysWith: { first, _ in first }),
+            // The quarters too, on the day being lived: crossing that
+            // fence is what the arrival day waits for (§5).
+            quarters: viewModel.isToday
+                ? TripGeofencePlan.anchorRegion(legId: leg.id, anchor: leg.anchor, radiusM: leg.anchorRadiusM)
+                : nil,
         )
     }
 
@@ -365,6 +404,7 @@ struct TripPlanDayView: View {
                     awaitingRegionCard(leg)
                 }
                 fixpointBand(day)
+                dayOfferCards
                 if day.detailed {
                     weatherOfferCard(day)
                     ForEach(day.blocks) { block in
@@ -1575,7 +1615,76 @@ struct TripPlanDayView: View {
     /// month, which is exactly the claim §15.3 warns against.
     private var currentBlockId: String? {
         guard isTravelling, let day = viewModel.day, viewModel.isToday else { return nil }
-        return TripDayTimeline.block(in: day, at: TripDayTimeline.minutesOfDay(Date()))?.id
+        return TripDayTimeline.block(in: day, at: TripDayTimeline.minutesOfDay(clock))?.id
+    }
+
+    /// What the day has to say about itself right now (§7.1): behind
+    /// on the block, or arrived later than planned. Offered on the day
+    /// it concerns and nowhere else — a card about today on tomorrow's
+    /// screen would be a riddle.
+    @ViewBuilder
+    private var dayOfferCards: some View {
+        if viewModel.isToday {
+            let offers = [notices.lateArrival, notices.behind].compactMap { $0 }
+                .filter { $0.planId == viewModel.planId && $0.dayIndex == viewModel.dayIndex }
+            ForEach(offers) { offer in
+                offerCard(offer)
+            }
+        }
+    }
+
+    private func offerCard(_ offer: TripDayOffer) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(offer.sentence,
+                  systemImage: offer.kind == .lateArrival ? "clock.badge.exclamationmark" : "hourglass")
+                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 8) {
+                Button {
+                    Task { await replan(from: offer) }
+                } label: {
+                    if viewModel.isRedistributing {
+                        ProgressView()
+                    } else {
+                        Text("Ab jetzt umplanen")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(viewModel.isRedistributing)
+                // "Lassen" for the arrival — it is asked once a day —
+                // and "Später" for the block, which is asked once a block.
+                Button(offer.kind == .lateArrival ? "Lassen" : "Später") { notices.dismiss(offer) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.tint.opacity(0.08), in: .rect(cornerRadius: 14))
+    }
+
+    /// The offer taken: the same redistribution as the button on the
+    /// block, from where the group stands. A late arrival also lets
+    /// the blocks that never happened go (§5).
+    private func replan(from offer: TripDayOffer) async {
+        await viewModel.redistributeNow(arrivedLate: offer.kind == .lateArrival)
+        if viewModel.redistributeBlockedReason == nil { notices.clearAfterReplan() }
+    }
+
+    /// "Umplanen" pressed on a notification while this screen was not
+    /// up: carried out here, once the plan is loaded, on the day the
+    /// notification was about.
+    private func runPendingReplan() {
+        guard let pending = notices.pendingReplan,
+              pending.planId == viewModel.planId,
+              viewModel.plan != nil
+        else { return }
+        notices.pendingReplan = nil
+        viewModel.goToToday()
+        Task {
+            await viewModel.redistributeNow(arrivedLate: pending.arrivedLate)
+            if viewModel.redistributeBlockedReason == nil { notices.clearAfterReplan() }
+        }
     }
 
     /// The trip's name, else the leg's, else a plain word.

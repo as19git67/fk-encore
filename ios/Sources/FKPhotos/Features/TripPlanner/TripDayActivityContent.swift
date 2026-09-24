@@ -109,4 +109,21 @@ enum TripDayActivityContent {
             lightHintText: lightHintText
         )
     }
+
+    /// When the content stops being true: the end of the block it
+    /// describes. iOS then shows the Activity as stale rather than as
+    /// the truth — the honest thing to do with a clock nobody has
+    /// updated (§15.3). Out of the first trial: "Mittag bis 14:00" was
+    /// still on the Lock Screen at dinner, because nothing in the
+    /// background ever told it otherwise.
+    ///
+    /// Nil for a block without an end (a plan from before block times).
+    /// Never earlier than a minute from now, so content built as the
+    /// block ends does not arrive already stale.
+    static func staleDate(blockEndMinutes: Int?, now: Date, calendar: Calendar = .current) -> Date? {
+        guard let end = blockEndMinutes else { return nil }
+        let start = calendar.startOfDay(for: now)
+        guard let date = calendar.date(byAdding: .minute, value: end, to: start) else { return nil }
+        return max(date, now.addingTimeInterval(60))
+    }
 }
