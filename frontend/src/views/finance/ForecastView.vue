@@ -1250,8 +1250,17 @@ const ready = computed(() => !loading.value)
 }
 .phase {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-2);
+}
+/* PrimeVue's number input keeps its intrinsic width; in a grid cell it
+   has to give way, or the right column runs past the card. */
+.phase :deep(.p-inputnumber),
+.phase :deep(.p-inputnumber-input),
+.field :deep(.p-inputnumber),
+.field :deep(.p-inputnumber-input) {
+  width: 100%;
+  min-width: 0;
 }
 .scenario-actions {
   display: flex;
