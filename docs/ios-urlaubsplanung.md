@@ -1757,9 +1757,19 @@ Die App kennt den Standort und nutzt ihn für vier Dinge:
 - **Wegschätzung ab dem echten Standort** statt ab dem geplanten Punkt.
 
 **Technisch batterieschonend:** kein Dauer-GPS, sondern Region Monitoring
-(Geofences um die nächsten ein bis zwei Stopps) plus *significant location
+(Geofences um die offenen Stopps des Tages) plus *significant location
 change*. iOS weckt die App bei Bedarf; dazwischen kostet es praktisch nichts.
 Der Trip Mode holt sich ohnehin schon eine `CLLocation` beim Start.
+
+*Nachgereicht aus der Erprobung:* Ursprünglich lagen die Zäune nur um die
+nächsten ein bis zwei Stopps — „ein Zaun, in dessen Nähe man nicht ist, ist ein
+Wecken, das nichts bringt". Der erste Reisetag hat gezeigt, welcher Tag zählt:
+Die Familie schlenderte ohne Plan durch den Ort, kam an Stopp fünf vorbei, und
+nichts fragte, weil nur eins und zwei einen Zaun hatten. Region Monitoring
+kostet für neunzehn Zäune dasselbe wie für zwei — das Funkmodul wacht bei
+Zellwechseln ohnehin auf —, also liegen sie jetzt um **alle offenen Stopps des
+Tages**, bis zur Grenze der Plattform (zwanzig je App, einer davon die
+Unterkunft, §4.2).
 
 **Datenschutz:** Der Standort bleibt für die Planung auf dem Gerät — der Vorrat
 liegt lokal, die Neuverteilung rechnet lokal (§12). Zum eigenen Server geht er
@@ -2236,15 +2246,12 @@ Drei Lücken, alle zwischen Konzept und Code:
    bestätigter Besuch (zwei Signale oder ein Ja) hakt den Stopp jetzt auch im
    Plan ab, statt nur im Tagebuch zu stehen.
 
-Was sich nicht meldet, und warum: **Vorbeigehen ist kein Besuch.** Die Zäune
-liegen um die nächsten ein bis zwei geplanten Stopps (§7.1), und gefragt wird
-erst nach einem Aufenthalt von zehn Minuten oder einem Viertel der geplanten
-Zeit (§6.4). Wer an der Kirche vorbeischlendert, wird nicht gefragt; wer
-zwanzig Minuten darin steht, schon — sofern sie einer der nächsten zwei Stopps
-war. Ob die Zäune am gelebten Tag um *alle* offenen Stopps liegen sollen (iOS
-erlaubt zwanzig), ist eine offene Entscheidung: §7.1 sagt aus Batteriegründen
-ein bis zwei; für einen Tag ohne Plan wären alle das, was „zufällig
-vorbeikommen" braucht.
+Was sich nicht meldet, und warum: **Vorbeigehen ist kein Besuch.** Gefragt
+wird erst nach einem Aufenthalt von zehn Minuten oder einem Viertel der
+geplanten Zeit (§6.4). Wer an der Kirche vorbeischlendert, wird nicht gefragt;
+wer zwanzig Minuten darin steht, schon — an jedem offenen Stopp des Tages,
+seit die Zäune um alle liegen und nicht mehr nur um die nächsten zwei (§7.1,
+entschieden nach dem ersten Reisetag).
 
 ### 8.6 Der Vorabend: Reisebereitschaft und Packliste
 
