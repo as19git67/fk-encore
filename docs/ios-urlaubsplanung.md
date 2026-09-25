@@ -5345,3 +5345,44 @@ Bis dahin der Behelf, und er ist brauchbar: den Zwischenstopp als Fund anlegen
 der Plan dann falsch — er misst vom Anker der Etappe statt von der Strecke —,
 aber der Stopp steht im Tag, mit Namen und Dauer, und niemand vergisst ihn
 unterwegs.
+
+## 23. Idee für später: die Hörtour
+
+*Aus der Erprobung, als Wunsch notiert — nicht geplant, nicht begonnen.*
+
+Es gibt Apps wie „Lauschtour": Eine Tour ist vorgegeben, man braucht nur
+Kopfhörer, ein Text sagt, wohin man gehen soll, und sobald man den nächsten
+Spot erreicht, meldet sich die App von selbst und erzählt, was man gerade vor
+sich hat. So etwas gehört auch in den Planer: Der geplante Tag *ist* schon eine
+Tour — eine Folge von Stopps mit Wegen dazwischen —, und die Zäune um die
+Stopps (§7.1) sind genau der Auslöser, den eine Hörtour braucht.
+
+Was schon da wäre:
+
+- **Die Tour**: der Tag mit seiner Reihenfolge, die Wege dazwischen, und
+  „Warum hier?" je Spot (§3.8) als Kern dessen, was zu sagen wäre.
+- **Der Auslöser**: der Zaun um jeden offenen Stopp des Tages (§7.1) — heute
+  fragt er „wart ihr hier?", er könnte ebenso gut „ihr seid da, hört mal" sagen.
+- **Die Sprachausgabe**: iOS liest Text vor (AVSpeechSynthesizer), mit
+  Kopfhörern und im Hintergrund, ohne dass die App vorne sein muss.
+
+Was offen ist, und zwar die Hauptsache: **Woher kommen die Texte?** Die
+Kandidaten, jeder mit einem Haken:
+
+- **Wikipedia** (§10.4 verlinkt den Artikel schon): frei, oft vorhanden, aber
+  ein Lexikonartikel ist kein Erzähltext für einen Spaziergang.
+- **Der lokale Sprachmodelldienst** (llm-service, §9.3 nutzt ihn zum Lesen):
+  könnte aus Wikipedia und den Gründen des Planers einen Hörtext machen — mit
+  dem Risiko, das §15.3 benennt: eine erfundene Jahreszahl klingt vorgelesen
+  so sicher wie eine richtige.
+- **Eigene Texte**: die Familie schreibt oder diktiert vor der Reise etwas zu
+  jedem Spot — ehrlich, aber Arbeit, und für den zufälligen Spot unterwegs
+  nicht da.
+- **Fremde Hörtouren**: Lauschtour und ähnliche sind Inhalte, nicht offene
+  Daten; einbinden ließe sich höchstens ein Link („hier gibt es eine
+  Hörtour").
+
+Bis das entschieden ist, bleibt es eine Idee. Der billige erste Schritt, falls
+er je gewollt wird: Beim Betreten des Zauns den Namen des Spots und sein
+„Warum hier?" vorlesen — das ist keine Hörtour, aber es ist das Gerüst, in das
+eine hineinpasst.
