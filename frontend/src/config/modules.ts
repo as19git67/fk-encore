@@ -361,6 +361,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
+        path: 'prognose',
+        name: 'finance-forecast',
+        component: () => import('../views/finance/ForecastView.vue'),
+        meta: { permission: 'finance.view' },
+      },
+      {
         path: 'anomalien',
         name: 'finance-anomalies',
         component: () => import('../views/finance/AnomaliesView.vue'),
@@ -396,6 +402,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Konten', icon: 'pi pi-wallet', routeName: 'finance-accounts', permission: 'finance.view' },
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
+      { label: 'Prognose', icon: 'pi pi-chart-line', routeName: 'finance-forecast', permission: 'finance.view' },
       { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
       { label: 'Belegabgleich', icon: 'pi pi-receipt', routeName: 'finance-receipt-enrichment', permission: 'finance.view' },
       {
