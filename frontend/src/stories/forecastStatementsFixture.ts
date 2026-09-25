@@ -6,8 +6,8 @@ export const STATEMENTS: ForecastItemStatements[] = [
     itemId: 106,
     contractNo: 'X-000111',
     links: [
-      { id: 1, documentId: 501, title: 'Standmitteilung 2026', docDate: '2026-02-10', documentType: 'standmitteilung', matchKind: 'tag', status: 'confirmed' },
-      { id: 2, documentId: 502, title: 'Jahresinformation', docDate: '2025-02-12', documentType: 'standmitteilung', matchKind: 'text', status: 'suggested' },
+      { id: 1, documentId: 501, title: 'Standmitteilung 2026', docDate: '2026-02-10', documentType: 'standmitteilung', matchKind: 'tag', status: 'confirmed', kind: 'statement', kindByUser: false },
+      { id: 2, documentId: 502, title: 'Jahresinformation', docDate: '2025-02-12', documentType: 'standmitteilung', matchKind: 'text', status: 'suggested', kind: 'statement', kindByUser: false },
     ],
     latest: {
       id: 31,
@@ -40,6 +40,7 @@ export const STATEMENTS: ForecastItemStatements[] = [
     valuesSource: { kind: 'import', updatedAt: '2026-09-20T10:00:00Z' },
     overdue: false,
     reading: false,
+    notes: [],
   },
   {
     itemId: 112,
@@ -51,5 +52,6 @@ export const STATEMENTS: ForecastItemStatements[] = [
     valuesSource: { kind: 'manual', updatedAt: '2026-08-01T10:00:00Z' },
     overdue: false,
     reading: false,
+    notes: [],
   },
 ]

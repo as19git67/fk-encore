@@ -1471,6 +1471,13 @@
       "when": 1788652800029,
       "tag": "0209_finance_forecast_statements",
       "breakpoints": true
+    },
+    {
+      "idx": 210,
+      "version": "7",
+      "when": 1788652800030,
+      "tag": "0210_finance_forecast_document_kind",
+      "breakpoints": true
     }
   ]
 }

@@ -3,12 +3,15 @@ import { describe, it, expect } from "vitest";
 import {
   EMPTY_VALUES,
   applyProposals,
+  classifyDocument,
   computeProposals,
   contractKey,
+  contractPattern,
   hasAnyValue,
   isSearchableKey,
   mergeStatementValues,
   parseGermanAmount,
+  parseLlmKind,
   parseLlmStatement,
   parseStatementText,
   validateValues,
@@ -231,3 +234,46 @@ describe("contract keys", () => {
     expect(isSearchableKey("abcdefg")).toBe(false);
   });
 });
+
+describe("forecast-statements-extract — contract numbers in text", () => {
+  const hit = (key: string, text: string) => new RegExp(contractPattern(key), "i").test(text);
+
+  it("matches however the number is spaced, dotted or dashed", () => {
+    expect(hit("l1234567", "Vers.-Nr. L 1.234.567 vom")).toBe(true);
+    expect(hit("l1234567", "Vertrag L1234567")).toBe(true);
+    expect(hit("l1234567", "Nummer 1 234 567,")).toBe(true); // prefix left out
+    expect(hit("x00011101", "X-000111-01")).toBe(true);
+  });
+
+  it("does not match inside a longer number or a different suffix", () => {
+    expect(hit("l1234567", "91234567")).toBe(false);
+    expect(hit("l1234567", "L 12345678")).toBe(false);
+    expect(hit("x00011101", "X-000111-02")).toBe(false);
+    expect(hit("x00011101", "Betrag 1.234,56")).toBe(false);
+  });
+});
+
+describe("forecast-statements-extract — kinds of documents", () => {
+  it("tells an announcement from a confirmed decline", () => {
+    const increase = "Planmäßige Erhöhung (Dynamik). Wenn Sie die Erhöhung nicht wünschen, können Sie widersprechen. Nach zwei Widersprüchen entfällt das Recht.";
+    expect(classifyDocument(increase, null)).toBe("dynamic_increase");
+    expect(classifyDocument("Ihren Widerspruch gegen die Dynamikerhöhung haben wir erhalten.", null)).toBe("dynamic_declined");
+    expect(classifyDocument("Die Erhöhung wird nicht durchgeführt.", null)).toBe("dynamic_declined");
+    expect(classifyDocument("Stand 01.01.2026, Rückkaufswert 1.000,00 EUR", null)).toBe("statement");
+    // A Standmitteilung mentioning its Dynamik stays a statement.
+    expect(classifyDocument("Ihr Vertrag enthält eine Dynamik von 5 %.", "standmitteilung")).toBe("statement");
+  });
+
+  it("takes the model's kind only when it is one of the four", () => {
+    expect(parseLlmKind({ documentKind: "dynamik_abgelehnt" })).toBe("dynamic_declined");
+    expect(parseLlmKind({ documentKind: "Dynamik_Erhöhung" })).toBe("dynamic_increase");
+    expect(parseLlmKind({ documentKind: "brief" })).toBeNull();
+    expect(parseLlmKind(null)).toBeNull();
+  });
+
+  it("reads the new premium of an increase, not the old one", () => {
+    const v = parseStatementText("Ihr bisheriger monatlicher Beitrag 241,02 EUR\nIhr neuer monatlicher Beitrag ab 01.12.2025 253,07 EUR");
+    expect(v.premiumMonthly).toBe(253.07);
+  });
+});
+

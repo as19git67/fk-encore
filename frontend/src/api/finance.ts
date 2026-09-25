@@ -1723,6 +1723,17 @@ export interface ForecastStatementLink {
   documentType: string | null
   matchKind: 'tag' | 'text' | 'user'
   status: 'suggested' | 'confirmed' | 'rejected'
+  kind: ForecastDocKind
+  kindByUser: boolean
+}
+
+export type ForecastDocKind = 'statement' | 'dynamic_increase' | 'dynamic_declined' | 'other'
+
+export interface ForecastDocumentCandidate {
+  id: number
+  title: string | null
+  docDate: string | null
+  documentType: string | null
 }
 
 export interface ForecastStatement {
@@ -1760,6 +1771,7 @@ export interface ForecastItemStatements {
   valuesSource: ForecastValuesSource | null
   overdue: boolean
   reading: boolean
+  notes: string[]
 }
 
 export interface ForecastScanSummary {
@@ -1797,4 +1809,19 @@ export async function acceptForecastStatement(id: number, fields?: string[]): Pr
 
 export async function rejectForecastStatement(id: number): Promise<ForecastStatement> {
   return apiFetch(`/finance/forecast/statements/${id}/reject`, { method: 'POST' })
+}
+
+export async function setForecastStatementLinkKind(id: number, kind: ForecastDocKind): Promise<ForecastStatementLink> {
+  return apiFetch(`/finance/forecast/statement-links/${id}/kind`, { method: 'POST', body: JSON.stringify({ kind }) })
+}
+
+export async function searchForecastStatementDocuments(q: string): Promise<{ documents: ForecastDocumentCandidate[] }> {
+  return apiFetch(`/finance/forecast/statement-documents?q=${encodeURIComponent(q)}`)
+}
+
+export async function linkForecastStatementDocument(itemId: number, documentId: number): Promise<void> {
+  return apiFetch(`/finance/forecast/items/${itemId}/statement-links`, {
+    method: 'POST',
+    body: JSON.stringify({ documentId }),
+  })
 }

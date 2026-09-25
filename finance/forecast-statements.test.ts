@@ -28,7 +28,17 @@ import {
   users,
 } from "../db/schema";
 import { createItem, createPerson, updateItem } from "./forecast";
-import { acceptStatement, decideStatementLink, getStatements, rejectStatement, rereadStatementLink, scanStatements } from "./forecast-statements";
+import {
+  acceptStatement,
+  decideStatementLink,
+  getStatements,
+  linkStatementDocument,
+  rejectStatement,
+  rereadStatementLink,
+  scanStatements,
+  searchStatementDocuments,
+  setStatementLinkKind,
+} from "./forecast-statements";
 import { onDocumentClassified, scanForUser } from "./forecast-statements.service";
 import { extractStatementValues } from "./llm-client";
 
@@ -44,6 +54,18 @@ Monatlicher Beitrag            241,02 EUR
 Rückkaufswert                  77.508,29 EUR
 Garantierte Ablaufleistung     55.000,00 EUR
 Voraussichtliche Ablaufleistung inkl. Überschussbeteiligung   132.442,77 EUR`;
+
+// An announced premium increase and the confirmation that it will not take place.
+const INCREASE_TEXT = `Beispiel Lebensversicherung AG
+Vers.-Nr. X 000111 01
+Planmäßige Erhöhung Ihrer Versicherung (Dynamik)
+Ihr bisheriger monatlicher Beitrag   241,02 EUR
+Ihr neuer monatlicher Beitrag ab 01.12.2025   253,07 EUR
+Wenn Sie die Erhöhung nicht wünschen, können Sie innerhalb eines Monats widersprechen.`;
+
+const DECLINED_TEXT = `Beispiel Lebensversicherung AG
+Vers.-Nr. X 000111 01
+Ihren Widerspruch gegen die Erhöhung haben wir erhalten. Ihr Beitrag bleibt unverändert.`;
 
 function setAuth(userID: string, perms: string[]) {
   vi.mocked(getAuthData).mockReturnValue({ userID, permissions: perms });
@@ -67,6 +89,8 @@ async function addDocument(opts: {
   visibility?: "private" | "group";
   groupId?: number | null;
   docDate?: string;
+  documentType?: string | null;
+  title?: string;
 }): Promise<number> {
   seq++;
   const [doc] = await db
@@ -79,9 +103,9 @@ async function addDocument(opts: {
       size_bytes: 1000,
       disk_path: `/tmp/forecast-statement-test-${seq}.pdf`,
       status: "ready",
-      title: `Standmitteilung ${seq}`,
+      title: opts.title ?? `Standmitteilung ${seq}`,
       doc_date: opts.docDate ?? "2025-12-01",
-      document_type: "standmitteilung",
+      document_type: opts.documentType === undefined ? "standmitteilung" : opts.documentType,
       extracted_text: opts.text,
       visibility: opts.visibility ?? "private",
       group_id: opts.groupId ?? null,
@@ -221,6 +245,78 @@ describe("finance/forecast-statements — linking", () => {
     expect(state.latest).toMatchObject({ method: "llm" });
     expect(state.latest?.values.surrenderValue).toBe(78000);
     expect(state.latest?.values.projectedPayout).toBe(132442.77); // filled in from the patterns
+  });
+});
+
+describe("finance/forecast-statements — premium increases and finding more", () => {
+  it("finds a letter by its text even when the statement was found by tag, however the number is spaced", async () => {
+    const { item } = await lifeInsurance();
+    await addDocument({ userId: 1, text: LIFE_TEXT, tags: ["versicherungsnr:x-000111-01"] });
+    const letter = await addDocument({ userId: 1, text: INCREASE_TEXT, documentType: null, title: "Dynamik", docDate: "2025-11-01" });
+    // A number that only looks alike stays out.
+    await addDocument({ userId: 1, text: "Vers.-Nr. X 000111 02", documentType: null });
+    const summary = await scanForUser(1, null, { wait: true });
+    expect(summary).toMatchObject({ linkedByTag: 1, suggestedByText: 1 });
+    const state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
+    expect(state.links.find((l) => l.documentId === letter)).toMatchObject({ matchKind: "text", status: "suggested" });
+  });
+
+  it("recognises an increase, and a later declined increase holds the premium back", async () => {
+    const { item } = await lifeInsurance();
+    const increase = await addDocument({ userId: 1, text: INCREASE_TEXT, documentType: null, tags: ["versicherungsnr:x-000111-01"], docDate: "2025-11-01" });
+    await scanForUser(1, null, { wait: true });
+    let state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
+    expect(state.links[0]).toMatchObject({ documentId: increase, kind: "dynamic_increase", kindByUser: false });
+    expect(state.latest?.values.premiumMonthly).toBe(253.07); // the new premium, not the old one
+    expect(state.proposals.map((p) => p.field)).toContain("monthlyPremium");
+
+    // The confirmation that the increase will not take place, classified later.
+    const declined = await addDocument({ userId: 1, text: DECLINED_TEXT, documentType: null, tags: ["versicherungsnr:x-000111-01"], docDate: "2025-11-20" });
+    await onDocumentClassified(declined);
+    state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
+    expect(state.links.find((l) => l.documentId === declined)?.kind).toBe("dynamic_declined");
+    expect(state.proposals.map((p) => p.field)).not.toContain("monthlyPremium");
+    expect(state.notes[0]).toMatch(/Beitragserhöhung wurde abgelehnt.*20\.11\.2025/);
+    // Accepting takes nothing held back.
+    await acceptStatement({ id: state.latest!.id });
+    const [row] = await db.select().from(financeForecastItem).where(eq(financeForecastItem.id, item.id));
+    expect(row.data.monthlyPremium).toBe(241.02);
+  });
+
+  it("lets the user set the kind, which reading again keeps", async () => {
+    const { item } = await lifeInsurance();
+    // A letter the patterns take for an increase; the user knows it was declined.
+    await addDocument({ userId: 1, text: LIFE_TEXT, tags: ["versicherungsnr:x-000111-01"], docDate: "2025-12-01" });
+    const letter = await addDocument({ userId: 1, text: INCREASE_TEXT, documentType: null, tags: ["versicherungsnr:x-000111-01"], docDate: "2025-12-15" });
+    await scanForUser(1, null, { wait: true });
+    let state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
+    const link = state.links.find((l) => l.documentId === letter)!;
+    expect(link.kind).toBe("dynamic_increase");
+
+    const updated = await setStatementLinkKind({ id: link.id, kind: "dynamic_declined" });
+    expect(updated).toMatchObject({ kind: "dynamic_declined", kindByUser: true });
+    await rereadStatementLink({ id: link.id });
+    state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
+    expect(state.links.find((l) => l.documentId === letter)?.kind).toBe("dynamic_declined");
+    // The statement is the latest that counts, and its premium stays where the user said.
+    expect(state.latest?.documentId).not.toBe(letter);
+    expect(state.proposals.map((p) => p.field)).not.toContain("monthlyPremium");
+    await expect(setStatementLinkKind({ id: link.id, kind: "bogus" as never })).rejects.toThrow(/kind/);
+  });
+
+  it("finds documents to link by hand and links them, but only visible ones", async () => {
+    const { item } = await lifeInsurance();
+    const mine = await addDocument({ userId: 1, text: "Schreiben ohne Nummer zur Dynamik", documentType: null, title: "Nachtrag Dynamik" });
+    const foreign = await addDocument({ userId: 2, text: "Nachtrag Dynamik", documentType: null, title: "Nachtrag Dynamik" });
+    const found = await searchStatementDocuments({ q: "nachtrag" });
+    expect(found.documents.map((d) => d.id)).toEqual([mine]);
+
+    await linkStatementDocument({ id: item.id, documentId: mine });
+    const state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
+    expect(state.links[0]).toMatchObject({ documentId: mine, matchKind: "user", status: "confirmed" });
+    await expect(linkStatementDocument({ id: item.id, documentId: foreign })).rejects.toThrow(/not found/);
+    setAuth("2", ["finance.view"]);
+    await expect(linkStatementDocument({ id: item.id, documentId: foreign })).rejects.toThrow(/not found/);
   });
 });
 
