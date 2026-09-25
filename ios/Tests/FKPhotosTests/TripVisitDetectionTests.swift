@@ -52,12 +52,21 @@ final class TripGeofencePlanTests: XCTestCase {
         XCTAssertLessThan(unknown, TripGeofencePlan.radius(for: "outdoors"))
     }
 
-    func testOnlyTheNextFewStopsAreWatched() {
-        // Fencing the whole day is continuous tracking arrived at by a
-        // different route (§7.1).
+    func testEveryOpenStopOfTheDayIsWatched() {
+        // Out of the first trial: a stroll without the plan passed stop
+        // five, and only stops one and two had a fence.
         let regions = TripGeofencePlan.regions(for: (1...6).map { stop($0) })
+        XCTAssertEqual(regions.map(\.osmRef), (1...6).map { "node:\($0)" })
+    }
+
+    func testTheCapIsThePlatformsAndLeavesRoomForTheQuarters() {
+        // iOS allows twenty regions per app; one is the quarters' fence.
+        XCTAssertEqual(TripGeofencePlan.maximumRegions, 19)
+        let regions = TripGeofencePlan.regions(for: (1...25).map { stop($0) })
         XCTAssertEqual(regions.count, TripGeofencePlan.maximumRegions)
-        XCTAssertEqual(regions.map(\.osmRef), ["node:1", "node:2"])
+        // In plan order, so what is cut is the end of the day.
+        XCTAssertEqual(regions.first?.osmRef, "node:1")
+        XCTAssertEqual(regions.last?.osmRef, "node:19")
     }
 
     func testSettledStopsAreNotWatched() {
