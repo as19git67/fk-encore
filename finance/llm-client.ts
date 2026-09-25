@@ -657,3 +657,43 @@ ${counterpartyBlock}
 Bestehende Analysen (NICHT erneut vorschlagen):
 ${existingBlock}`;
 }
+
+// -----------------------------------------------------------------------
+// /json-prompt (retirement forecast — values from an insurer statement, #1343)
+// -----------------------------------------------------------------------
+
+/** Statement texts run long; the values sit on the first pages. */
+const STATEMENT_TEXT_LIMIT = 12_000;
+
+/**
+ * Asks the model for the values a pension or insurance statement states.
+ * Returns the raw JSON object; forecast-statements-extract.ts validates it.
+ * `fields` maps each key to a German description (LLM_FIELDS there).
+ */
+export async function extractStatementValues(
+  text: string,
+  fields: Record<string, string>,
+  hint: { itemLabel: string; contractNo: string | null },
+): Promise<Record<string, unknown>> {
+  const keys = Object.entries(fields)
+    .map(([k, d]) => `- "${k}": ${d}`)
+    .join("\n");
+  const system =
+    "Du liest Standmitteilungen, Renteninformationen und Leistungsmitteilungen deutscher Versicherer und Versorgungseinrichtungen. " +
+    "Antworte ausschließlich mit einem JSON-Objekt. Übernimm nur Werte, die wörtlich im Text stehen; erfinde nichts. " +
+    "Fehlt ein Wert, setze null. Beträge als Zahl in Euro ohne Tausenderpunkte (z. B. 77508.29), Datumsangaben als YYYY-MM-DD.";
+  const prompt =
+    `Vertrag: ${hint.itemLabel}${hint.contractNo ? ` (Nummer ${hint.contractNo})` : ""}\n` +
+    `Gib ein JSON-Objekt mit genau diesen Schlüsseln zurück:\n${keys}\n\n` +
+    `Text der Mitteilung:\n"""\n${text.slice(0, STATEMENT_TEXT_LIMIT)}\n"""`;
+  const resp = await postJson<JsonPromptRequest, Record<string, unknown>>("/json-prompt", {
+    prompt,
+    system,
+    temperature: 0,
+    max_tokens: 600,
+  });
+  if (!resp || typeof resp !== "object") {
+    throw new LlmServiceUnavailableError("/json-prompt returned no object for the statement");
+  }
+  return resp;
+}

@@ -88,6 +88,11 @@ watch(type, (t, old) => {
 
 const isPersonal = computed(() => PERSONAL_ITEM_TYPES.has(type.value))
 
+/** Types that stand for a contract with a number; any item that already carries one shows it too. */
+const hasContract = computed(
+  () => ['life_insurance', 'pension', 'health_insurance', 'expense', 'income'].includes(type.value) || !!data.value.contractNo,
+)
+
 const typeOptions = ITEM_GROUPS.map((g) => ({
   label: g.label,
   items: g.types.map((t) => ({ value: t, label: ITEM_TYPE_LABELS[t] })),
@@ -395,6 +400,18 @@ function save() {
         </div>
       </div>
     </template>
+
+    <!-- Contract reference: links the item to its statements in the documents module (#1343) -->
+    <div v-if="hasContract" class="grid2">
+      <div class="field">
+        <label for="fc-contract">Vertrags- / Versicherungsnummer</label>
+        <InputText id="fc-contract" :model-value="s('contractNo') ?? ''" @update:model-value="set('contractNo', ($event ?? '').trim() || null)" />
+      </div>
+      <div class="field">
+        <label for="fc-insurer">Versicherer / Anbieter</label>
+        <InputText id="fc-insurer" :model-value="s('insurer') ?? ''" @update:model-value="set('insurer', ($event ?? '').trim() || null)" />
+      </div>
+    </div>
 
     <!-- Common start / end -->
     <div v-if="type !== 'pension' && type !== 'life_insurance'" class="grid2">
