@@ -298,6 +298,19 @@ function matchPerson(label: string, detail: ImportDetail | null, persons: Import
 }
 
 const isZero = (n: number | null) => n == null || Math.abs(n) < 0.005;
+
+/**
+ * A contract number written into the row label ("V-0000-01 (BU)",
+ * "Anbieter 123456789 Name", "L 1.234.567"): a token with at least five
+ * digits, optionally led by a short letter prefix.
+ */
+export function contractNoFromLabel(label: string): string | null {
+  // Prefix: letters joined by a dash ("V-…"), or a single letter and a space ("L 1.234.567").
+  const m = /(?:\b[A-Za-z]{1,4}-|\b[A-Za-z] )?\d[\d./-]{3,}[\dA-Za-z]*/.exec(label);
+  if (!m) return null;
+  const token = m[0].trim();
+  return (token.match(/\d/g) ?? []).length >= 5 ? token : null;
+}
 const yearStart = (y: number) => `${y}-01-01`;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -364,7 +377,14 @@ export function buildImportItem(
 
   if (PERSONAL.has(type) && personId == null) return { error: "Dieser Eintrag braucht eine Person" };
 
-  const item = (data: Record<string, unknown>): BuiltItem => ({ type, label, personId, data });
+  // The contract number is what later links the item to its statements in
+  // the documents module (#1343); keep it on every item that has one.
+  // A detail sheet may say "V-0000-03 (BU)"; the number alone is what documents carry.
+  const contractNo = (detail?.contractNo ? contractNoFromLabel(detail.contractNo) ?? detail.contractNo : null) ?? contractNoFromLabel(label);
+  const ref: Record<string, unknown> = {};
+  if (contractNo) ref.contractNo = contractNo;
+  if (detail?.insurer) ref.insurer = detail.insurer;
+  const item = (data: Record<string, unknown>): BuiltItem => ({ type, label, personId, data: { ...data, ...ref } });
 
   switch (type) {
     case "salary":

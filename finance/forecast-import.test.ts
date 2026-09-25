@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
 
-import { buildImportItem, readImportWorkbook, suggestType, type ImportRaw } from "./forecast-import";
+import { buildImportItem, contractNoFromLabel, readImportWorkbook, suggestType, type ImportRaw } from "./forecast-import";
 
 // The workbook below is invented: labels, contract numbers and amounts are
 // made up and only mimic the shape of a household overview.
@@ -218,6 +218,46 @@ describe("buildImportItem", () => {
     expect(buildImportItem("X", raw({ expenseYearly: -100, once: 5000 }), "life_insurance", 1, opts)).toEqual({ error: "Ablaufjahr fehlt" });
     expect(buildImportItem("X", raw({ incomeYearly: 1000 }), "pension", 1, opts)).toEqual({ error: "Rentenbeginn fehlt" });
     expect(buildImportItem("X", raw({}), "income", null, opts)).toEqual({ error: "Keine Einnahme" });
+  });
+});
+
+describe("contract numbers", () => {
+  it("finds a contract number in the label", () => {
+    expect(contractNoFromLabel("X-000111")).toBe("X-000111");
+    expect(contractNoFromLabel("Q-12345678-02 (BU)")).toBe("Q-12345678-02");
+    expect(contractNoFromLabel("Anbieter 987654321 Kind")).toBe("987654321");
+    expect(contractNoFromLabel("Tarif L 1.234.567 (Alex)")).toBe("L 1.234.567");
+    expect(contractNoFromLabel("123456")).toBe("123456");
+    expect(contractNoFromLabel("Rente Alex")).toBeNull();
+    expect(contractNoFromLabel("Kredit 2025")).toBeNull();
+  });
+
+  it("stores the contract number and insurer on the built item", () => {
+    const opts = { currentYear: 2026, pensionGrowthRate: 0.015 };
+    const base: ImportRaw = { amount: null, incomeYearly: null, expenseYearly: -1200, once: 30000, contributionUntilYear: null, payoutYear: 2036, note: null, detail: null };
+    // From the detail sheet, which wins over the label.
+    const fromDetail = buildImportItem(
+      "LV 555555",
+      { ...base, detail: { contractNo: "X-000111", insuredPerson: null, insurer: "Beispiel Leben AG", maturity: null, premiumEnd: null, currentValue: 1000 } },
+      "life_insurance",
+      1,
+      opts,
+    );
+    expect(fromDetail).toMatchObject({ data: { contractNo: "X-000111", insurer: "Beispiel Leben AG" } });
+    // A suffix on the detail sheet's number is dropped.
+    const suffixed = buildImportItem(
+      "Zusatz",
+      { ...base, detail: { contractNo: "X-000222-03 (BU)", insuredPerson: null, insurer: null, maturity: null, premiumEnd: null, currentValue: null } },
+      "life_insurance",
+      1,
+      opts,
+    );
+    expect(suffixed).toMatchObject({ data: { contractNo: "X-000222-03" } });
+    // From the label when there is no detail sheet.
+    expect(buildImportItem("LV 555555", base, "life_insurance", 1, opts)).toMatchObject({ data: { contractNo: "555555" } });
+    // Nothing when neither has one.
+    const none = buildImportItem("Haftpflicht", { ...base, once: null, payoutYear: null }, "expense", null, opts);
+    expect("error" in none ? none : none.data.contractNo).toBeUndefined();
   });
 });
 
