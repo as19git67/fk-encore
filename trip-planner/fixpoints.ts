@@ -53,6 +53,12 @@ export const MIN_BUFFER_MINUTES = 5;
  * than showing a "Nachmittag" with room for nothing.
  */
 export const MIN_VIABLE_BLOCK_MINUTES = 20;
+/**
+ * How much of a block an arrival must leave for the block to count:
+ * one part in this many. A third of an afternoon is an afternoon; a
+ * seventh of a morning is a coffee before the next block.
+ */
+export const CAUGHT_BLOCK_SHARE = 3;
 
 /**
  * The two shapes a hard time comes in, and the difference is the whole
@@ -258,11 +264,24 @@ export function scheduleDay(opts: ScheduleDayOptions): ScheduledDay {
     // The first block the day still catches is entered part-way
     // through: arriving at 16:00 leaves ninety minutes of an afternoon
     // that nominally ran to 17:30, not a fresh full one.
-    let budget =
-      !started && nominalStart < cursor
-        ? Math.max(0, nominalEnd - cursor)
-        : shape.budgetMinutes;
+    const caught = !started && nominalStart < cursor;
+    let budget = caught ? Math.max(0, nominalEnd - cursor) : shape.budgetMinutes;
     let blame: ResolvedFixpoint | null = null;
+
+    // But a sliver is not a block. Arriving at noon left thirty minutes
+    // of a "Vormittag" that nominally ran to 12:30, and the plan showed
+    // a morning for a day that had none — out of the first trial. What
+    // is left has to be a real share of the block; below a third it
+    // goes, and the next block begins at the arrival instead.
+    if (caught && budget < Math.max(MIN_VIABLE_BLOCK_MINUTES, Math.ceil(shape.budgetMinutes / CAUGHT_BLOCK_SHARE))) {
+      dropped.push({
+        id: shape.id,
+        label: shape.label,
+        reason: `der Tag beginnt erst um ${formatMinutes(cursor)}, von „${shape.label}" `
+          + `blieben nur ${budget} Minuten`,
+      });
+      continue;
+    }
 
     // Each fixpoint that starts inside this block's span cuts it short.
     // Taking the earliest such cut is what makes the last train bind

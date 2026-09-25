@@ -200,6 +200,18 @@ describe("a transfer between two legs", () => {
     }
   });
 
+  it("does not keep a sliver of the morning for an arrival at noon", async () => {
+    // Out of the first trial: arrival at 12:00 left a thirty-minute
+    // "Vormittag" in the plan, and the Lock Screen said "Mittag" all
+    // afternoon after it.
+    const { plan } = await createTripPlan({
+      legs: [{ title: "Weststadt", anchor: WEST, days: 2, transfer: { arriveAt: "12:00" } }],
+    });
+    const first = plan.legs[0].days[0];
+    expect(first.blocks.map((b) => b.id)).not.toContain("morning");
+    expect(first.blocks[0].startMinutes).toBe(12 * 60);
+  });
+
   it("keeps the arrival across a re-plan", async () => {
     // It used to live in the request and nowhere else, so the next
     // settings change quietly handed the morning back (migration 0169).

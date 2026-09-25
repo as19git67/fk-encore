@@ -3564,6 +3564,13 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    dann ganzer Abend). Das greift nur beim Ankunftstag; danach ist der Tag
    wieder relativ und Fixpunkte schieben ihn frei.
 
+   **Nachgereicht aus der Erprobung (Etappe 12): ein Splitter ist kein Block.**
+   Ankunft um 12:00 ließ vom Vormittag, der nominal bis 12:30 läuft, dreißig
+   Minuten übrig — und der Plan zeigte einen „Vormittag 12:00–12:30" für einen
+   Tag, der keinen hatte. Angebrochen wird ein Block jetzt nur, wenn mindestens
+   ein Drittel von ihm bleibt; sonst fällt er weg und der nächste beginnt an
+   der Ankunft (`CAUGHT_BLOCK_SHARE` in `fixpoints.ts`).
+
    **Nachgereicht: die Ankunft gilt auch für die erste Etappe.** „In den
    Reisebeginn transferiert niemand" stimmt für die *Abfahrt* — es gibt keinen
    Tag davor, auf den ein Fixpunkt könnte. Für die *Ankunft* stimmt es nicht:
