@@ -34,6 +34,12 @@ struct TripBallotView: View {
     @State private var busyRef: String?
     @State private var errorMessage: String?
     @State private var query = ""
+    /// List or map (§5.2). Remembered like the pool's: whoever votes
+    /// from the map once will want to again.
+    @AppStorage("trip.ballot.presentation") private var presentation: TripPoolPresentation = .list
+    /// The pin that was tapped: its row opens over the map, so the
+    /// vote and the details are the same tap away as in the list.
+    @State private var inspecting: TripBallotEntry?
 
     /// Somebody is looking for one spot rather than working through the
     /// whole list. Whitespace is trimmed here as well as in the filter:
@@ -56,6 +62,125 @@ struct TripBallotView: View {
     }
 
     var body: some View {
+        Group {
+            switch presentation {
+            case .list: list
+            case .map: map
+            }
+        }
+        .navigationTitle("Wünsche")
+        // Always on screen rather than hidden above the first row: a
+        // field you have to know about to pull down is a field most
+        // people never find. Everything the row says is searched —
+        // including who wanted what, which is the question a ballot is
+        // the only screen able to answer.
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Vorschläge, Orte und Namen durchsuchen")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                // The same two shapes the pool has (§5.2): the list
+                // answers "what is up for a vote", the map "where is
+                // all this" — and three wishes in one lane are a
+                // morning, which no list can show.
+                Picker("Darstellung", selection: $presentation) {
+                    ForEach(TripPoolPresentation.allCases, id: \.self) { option in
+                        Label(option.label, systemImage: option.symbolName)
+                            .labelStyle(.iconOnly)
+                            .tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+        }
+        .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $inspecting) { tapped in
+            // The row itself, over the map — read fresh from the ballot
+            // rather than from the pin, so the vote just cast shows.
+            NavigationStack {
+                List {
+                    if let ballot, let entry = ballot.entries.first(where: { $0.osmRef == tapped.osmRef }) {
+                        row(for: entry, heartsLeft: ballot.heartsLeft)
+                    }
+                }
+                .navigationTitle(tapped.label)
+                .navigationBarTitleDisplayMode(.inline)
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .refreshable { await load() }
+        .task { await load() }
+    }
+
+    // MARK: - The ballot as a map
+
+    @ViewBuilder
+    private var map: some View {
+        if let leg, let ballot {
+            let shown = visibleEntries
+            VStack(spacing: 0) {
+                TripSpotMapView(
+                    anchor: leg.anchor,
+                    anchorTitle: leg.anchorTitle,
+                    pins: TripBallotMap.pins(for: shown, in: leg),
+                    showsUserLocation: leg.schedule(on: Date()).isRunning,
+                ) { picked in
+                    inspecting = shown.first { $0.osmRef == picked.id }
+                }
+                legend(shown: shown, of: ballot)
+            }
+            // The map runs to the bottom edge; the tab bar would steal
+            // that row for tabs no map leads to.
+            .toolbar(.hidden, for: .tabBar)
+            .toolbarBackgroundVisibility(.hidden, for: .tabBar)
+            .overlay {
+                if isSearching, shown.isEmpty, !ballot.entries.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                        .background(.background)
+                }
+            }
+        } else if isLoading {
+            ProgressView()
+        } else {
+            ContentUnavailableView("Kein Stimmzettel", systemImage: "map")
+        }
+    }
+
+    /// What the colours mean, and how much of the ballot is on screen.
+    private func legend(shown: [TripBallotEntry], of ballot: TripBallot) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(TripBallotSearch.countLabel(shown: shown.count, of: ballot.entries.count)
+                 ?? "\(ballot.entries.count) Vorschläge · \(ballot.heartsLeft) von "
+                    + "\(ballot.heartQuota) Herzenswünschen frei")
+                .font(.caption.weight(.semibold))
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading),
+                                GridItem(.flexible(), alignment: .leading)],
+                      alignment: .leading, spacing: 4) {
+                ForEach(TripBallotPinKind.legendOrder, id: \.self) { kind in
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(kind.colour)
+                            .frame(width: 10, height: 10)
+                            .overlay(Circle().stroke(.white, lineWidth: 1))
+                        Text(kind.label)
+                    }
+                }
+            }
+            .font(.caption)
+            Text("Antippen: abstimmen, Herzenswunsch setzen, Details lesen.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.bar)
+    }
+
+    // MARK: - The ballot as a list
+
+    private var list: some View {
         List {
             if isLoading && ballot == nil {
                 Section { ProgressView() }
@@ -136,18 +261,6 @@ struct TripBallotView: View {
                     .background(Color(uiColor: .systemGroupedBackground))
             }
         }
-        .navigationTitle("Wünsche")
-        // Always on screen rather than hidden above the first row: a
-        // field you have to know about to pull down is a field most
-        // people never find. Everything the row says is searched —
-        // including who wanted what, which is the question a ballot is
-        // the only screen able to answer.
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "Vorschläge, Orte und Namen durchsuchen")
-        .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
-        .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await load() }
-        .task { await load() }
     }
 
     // No `@ViewBuilder` here any more: the row reads what the plan

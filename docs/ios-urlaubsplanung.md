@@ -1653,6 +1653,17 @@ Ereignis „X war an Spot Y", nie ein laufender Standort; pro Person abschaltbar
 die Sichtbarkeit endet mit dem Trip. Eine Live-Karte mit den Punkten der
 Familie ist ein anderes Produkt.
 
+**Aus der Erprobung: die Wünsche auf der Karte (umgesetzt).** Die Liste
+sagt in Worten, was und wo; die Karte sagt es auf einen Blick — drei „will
+ich" in derselben Gasse sind ein Vormittag, das „lieber nicht" am anderen Ufer
+ein Nachmittag, den niemand will. Der Stimmzettel hat deshalb oben denselben
+Umschalter wie der Vorrat (§5.2): Liste oder Karte. Die Karte ist die
+Vorrats-Karte mit der eigenen Antwort als Farbe (offen, will ich,
+Herzenswunsch, egal, lieber nicht), die Suche gilt für beide, und ein Tipp auf
+einen Pin öffnet dieselbe Zeile wie in der Liste — drei Antworten, das Herz und
+die Details hinter dem Info-Knopf —, frisch aus dem Stimmzettel gelesen, damit
+die eben abgegebene Stimme auch auf der Karte steht (`TripBallotMap`).
+
 ### 6.5 Splits: getrennt unterwegs, gemeinsam geplant
 
 Der Fall ist häufiger als gedacht: Einer ins Technikmuseum, die anderen auf den
