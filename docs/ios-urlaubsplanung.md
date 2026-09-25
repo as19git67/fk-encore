@@ -2122,6 +2122,13 @@ laufen.
   überfüllter Block wird rot.
 - Chat für alles, was sich nicht ziehen lässt.
 
+**Aus der Erprobung: abhaken von der Karte aus (umgesetzt).** Wer auf der
+Tageskarte einen Pin antippt, sah alles über den Stopp und konnte nur eines
+nicht sagen: dass er ihn gerade gesehen hat. Das Blatt hinter dem Pin bietet
+jetzt dasselbe wie das Menü der Zeile — Erledigt, Übersprungen, und bei einem
+abgehakten Stopp „Doch wieder offen" —, dieselbe Schreibung, kein Neuplanen.
+Das Blatt schließt sich, der Pin wechselt die Farbe: das ist die Bestätigung.
+
 **Aus der Erprobung: die Vergangenheit ist kein Ziel (umgesetzt).** Am zweiten
 Tag bot „In anderen Block verschieben" noch Tag 1 an. Der Blockwähler lässt
 jetzt weg, was vorbei ist — gestern ganz, und heute die Blöcke, an denen die

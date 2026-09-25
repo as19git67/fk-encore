@@ -84,6 +84,11 @@ struct TripPlanDayView: View {
                                        onHide: { stop in
                                            await viewModel.hide(osmRef: stop.osmRef)
                                        },
+                                       // The same write the row's menu makes
+                                       // (§8.5): one status, no replan.
+                                       onMark: { stop, status in
+                                           await viewModel.mark(stop, as: status)
+                                       },
                                        mode: leg.transportMode)
                     } label: {
                         Label("Karte", systemImage: "map")

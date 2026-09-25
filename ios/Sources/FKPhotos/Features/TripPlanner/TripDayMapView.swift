@@ -27,6 +27,13 @@ struct TripDayMapView: View {
     /// compute — what happens to the trip — arrives from the screen
     /// that owns it. Nil leaves the sheet read-only.
     var onHide: (@MainActor (TripStop) async -> Void)?
+    /// Tick a stop off, skip it, or reopen it — from the pin (§8.5).
+    ///
+    /// Out of the first trial: the map is where you stand when you
+    /// have just seen the place, and the sheet could show everything
+    /// about the stop except let you say so. Nil leaves the sheet
+    /// read-only, as for `onHide`.
+    var onMark: (@MainActor (TripStop, TripStopStatus) async -> Void)?
     /// How the group moves, for the detail screen's route button.
     var mode: TripTransportMode = .foot
 
@@ -115,8 +122,35 @@ struct TripDayMapView: View {
     /// carries its actor: it touches `selected`, which belongs to this
     /// view.
     private func actions(for pick: Selection) -> [TripPinSheetAction] {
-        guard let onHide else { return [] }
-        return [
+        var actions: [TripPinSheetAction] = []
+        // The status first: it is what somebody standing at the place
+        // reaches for. Both answers are offered while the stop is
+        // open; a settled one offers the way back instead. The sheet
+        // closes on either — the pin changes colour behind it, which
+        // is the confirmation.
+        if let onMark {
+            let status = pick.stop.stopStatus
+            if status != .done {
+                actions.append(TripPinSheetAction(
+                    id: "done", title: "Erledigt", systemImage: "checkmark",
+                    run: { await onMark(pick.stop, .done); selected = nil },
+                ))
+            }
+            if status != .skipped {
+                actions.append(TripPinSheetAction(
+                    id: "skipped", title: "Übersprungen", systemImage: "xmark",
+                    run: { await onMark(pick.stop, .skipped); selected = nil },
+                ))
+            }
+            if status != .planned {
+                actions.append(TripPinSheetAction(
+                    id: "reopen", title: "Doch wieder offen", systemImage: "arrow.uturn.backward",
+                    run: { await onMark(pick.stop, .planned); selected = nil },
+                ))
+            }
+        }
+        guard let onHide else { return actions }
+        return actions + [
             TripPinSheetAction(
                 id: "hide",
                 title: "Für diese Reise ausblenden",
