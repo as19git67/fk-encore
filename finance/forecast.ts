@@ -46,6 +46,7 @@ import {
   type ImportPreview,
   type ImportRaw,
 } from "./forecast-import";
+import { scanForUser, type ScanSummary } from "./forecast-statements.service";
 
 console.log("[boot] finance/forecast.ts: all imports resolved");
 
@@ -722,6 +723,22 @@ export const deleteMilestone = api(
 
 const PERSONAL_TYPES: ReadonlySet<ItemType> = new Set(["salary", "health_insurance", "life_insurance", "pension"]);
 
+/** Fields a statement can state; a hand edit of one of them makes the hand the source. */
+const VALUE_FIELDS = [
+  "surrenderValue",
+  "guaranteedPayout",
+  "projectedPayout",
+  "monthlyPremium",
+  "monthlyAmount",
+  "lumpSumOption",
+  "currentValue",
+  "amount",
+];
+
+function manualSource(): Record<string, unknown> {
+  return { kind: "manual", updatedAt: new Date().toISOString() };
+}
+
 function itemDto(row: typeof financeForecastItem.$inferSelect, balance: number | null): ItemDto {
   return {
     id: row.id,
@@ -767,7 +784,8 @@ export const createItem = api(
     if (personId != null) await ownPerson(userId, personId);
     const linked = req.type === "asset" ? (req.linkedAccountId ?? null) : null;
     if (linked != null) await ownAccount(userId, isAdmin, linked);
-    const candidate = { id: 0, person_id: personId, type: req.type, label: req.label.trim(), data: req.data, linked_account_id: linked };
+    const data = req.data.valuesSource ? req.data : { ...req.data, valuesSource: manualSource() };
+    const candidate = { id: 0, person_id: personId, type: req.type, label: req.label.trim(), data, linked_account_id: linked };
     assertSimulatable(candidate);
     const [row] = await db
       .insert(financeForecastItem)
@@ -776,7 +794,7 @@ export const createItem = api(
         person_id: personId,
         type: req.type,
         label: candidate.label,
-        data: req.data,
+        data,
         linked_account_id: linked,
         sort_order: req.sortOrder ?? 0,
       })
@@ -801,7 +819,9 @@ export const updateItem = api(
     }
     if (req.data !== undefined) {
       if (!req.data || typeof req.data !== "object") throw APIError.invalidArgument("data must be an object");
-      next.data = req.data;
+      // Editing a value by hand makes the hand the source; editing the label or dates does not.
+      const changed = VALUE_FIELDS.some((k) => JSON.stringify(req.data![k] ?? null) !== JSON.stringify(existing.data[k] ?? null));
+      next.data = changed ? { ...req.data, valuesSource: manualSource() } : { ...req.data, valuesSource: existing.data.valuesSource ?? req.data.valuesSource };
     }
     if (req.personId !== undefined) {
       if (req.personId != null) await ownPerson(userId, req.personId);
@@ -986,6 +1006,8 @@ interface ImportCommitRequest {
 
 interface ImportCommitResponse {
   created: number;
+  /** The search for the imported contracts' statements (#1343); reading continues in the background. */
+  statements: ScanSummary;
 }
 
 interface ImportEvaluateResponse {
@@ -1086,8 +1108,8 @@ export const commitImport = api(
       throw APIError.invalidArgument(`Import abgebrochen, nichts übernommen: ${problems.join("; ")}`);
     }
 
-    await db.transaction(async (tx) => {
-      await tx.insert(financeForecastItem).values(
+    const inserted = await db.transaction(async (tx) => {
+      return tx.insert(financeForecastItem).values(
         built.map((b, i) => ({
           user_id: userId,
           person_id: b.personId,
@@ -1097,9 +1119,11 @@ export const commitImport = api(
           linked_account_id: null,
           sort_order: i,
         })),
-      );
+      ).returning({ id: financeForecastItem.id });
     });
-    return { created: built.length };
+    // Right after the import, look for the statements of the imported contracts.
+    const statements = await scanForUser(userId, inserted.map((r) => r.id));
+    return { created: built.length, statements };
   },
 );
 

@@ -23,6 +23,7 @@ export default defineConfig({
       "documents/text-extract-warning.test.ts",
       "finance/forecast-engine.test.ts",
       "finance/forecast-import.test.ts",
+      "finance/forecast-statements-extract.test.ts",
       "finance/sepa-parser.test.ts",
       "web/static-cache.test.ts",
       "web/app-site-association-doc.test.ts",

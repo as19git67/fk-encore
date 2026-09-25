@@ -384,6 +384,7 @@ export function buildImportItem(
   const ref: Record<string, unknown> = {};
   if (contractNo) ref.contractNo = contractNo;
   if (detail?.insurer) ref.insurer = detail.insurer;
+  ref.valuesSource = { kind: "import", updatedAt: new Date().toISOString() };
   const item = (data: Record<string, unknown>): BuiltItem => ({ type, label, personId, data: { ...data, ...ref } });
 
   switch (type) {

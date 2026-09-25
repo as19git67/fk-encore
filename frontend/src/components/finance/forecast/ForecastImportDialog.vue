@@ -17,6 +17,7 @@ import {
   type ForecastImportRaw,
   type ForecastItemType,
   type ForecastPerson,
+  type ForecastScanSummary,
 } from '../../../api/finance'
 import { ITEM_TYPE_LABELS, PERSONAL_ITEM_TYPES, formatPct } from './forecastModel'
 
@@ -36,7 +37,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:visible', v: boolean): void
-  (e: 'imported', count: number): void
+  (e: 'imported', count: number, statements: ForecastScanSummary): void
   (e: 'apply-inflation', rate: number): void
 }>()
 
@@ -200,7 +201,7 @@ async function commit() {
   error.value = null
   try {
     const res = await commitForecastImport(chosen, growth.value)
-    emit('imported', res.created)
+    emit('imported', res.created, res.statements)
     emit('update:visible', false)
   } catch (err) {
     error.value = message(err)
