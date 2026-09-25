@@ -3657,3 +3657,118 @@ export const tripPlanBranchMembers = pgTable(
   },
   (table) => [index("trip_plan_branch_members_branch_idx").on(table.branch_id)]
 );
+
+// ---------- Finance: retirement forecast (issue #1337) ----------
+//
+// A household of persons with milestones; items hang on milestones and
+// scenarios override milestones. Item fields differ per type and live in
+// a jsonb `data` column — the shape is `ForecastItem` in
+// finance/forecast-engine.ts, minus id/label/personId/linkedAccountId,
+// which are columns so they can be queried and joined.
+
+export const financeForecastPerson = pgTable(
+  "finance_forecast_person",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    birth_date: date("birth_date").notNull(),
+    sort_order: integer("sort_order").notNull().default(0),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("idx_finance_forecast_person_user").on(table.user_id)]
+);
+
+export const financeForecastMilestone = pgTable(
+  "finance_forecast_milestone",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    person_id: integer("person_id")
+      .notNull()
+      .references(() => financeForecastPerson.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().$type<
+      | "leave_work"
+      | "statutory_pension"
+      | "company_pension"
+      | "private_pension"
+      | "life_insurance_maturity"
+      | "custom"
+    >(),
+    label: text("label").notNull(),
+    // Exactly one of the two is set (CHECK in the migration).
+    date: date("date"),
+    age: integer("age"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("idx_finance_forecast_milestone_person").on(table.person_id)]
+);
+
+export const financeForecastItem = pgTable(
+  "finance_forecast_item",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // null = household item.
+    person_id: integer("person_id").references(() => financeForecastPerson.id, {
+      onDelete: "cascade",
+    }),
+    type: text("type").notNull().$type<
+      | "salary"
+      | "income"
+      | "expense"
+      | "living_expense"
+      | "health_insurance"
+      | "asset"
+      | "life_insurance"
+      | "pension"
+    >(),
+    label: text("label").notNull(),
+    data: jsonb("data").notNull().$type<Record<string, unknown>>(),
+    // An asset can take its current value from a finance account.
+    linked_account_id: integer("linked_account_id").references(() => financeAccount.id, {
+      onDelete: "set null",
+    }),
+    sort_order: integer("sort_order").notNull().default(0),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("idx_finance_forecast_item_user").on(table.user_id)]
+);
+
+export const financeForecastScenario = pgTable(
+  "finance_forecast_scenario",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // `ForecastScenario` from finance/forecast-engine.ts without id/name.
+    config: jsonb("config").notNull().$type<Record<string, unknown>>(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("idx_finance_forecast_scenario_user").on(table.user_id)]
+);

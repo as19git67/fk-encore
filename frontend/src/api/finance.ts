@@ -1360,3 +1360,264 @@ export async function dismissReceiptEnrichment(transactionId: number): Promise<{
 
 export async function unlinkTransactionDocument(transaction_id: number, document_id: number) { return apiFetch<{ ok: boolean }>('/finance/document-matches/unlink', { method: 'POST', body: JSON.stringify({ transaction_id, document_id }) }) }
 export async function linkDocumentsToTransactions(transaction_ids: number[], document_ids: number[]) { return apiFetch<{ linked: number }>('/finance/document-matches/link', { method: 'POST', body: JSON.stringify({ transaction_ids, document_ids }) }) }
+
+// ----------------------------------------------------------------------
+// Retirement forecast (issue #1337) — mirrors finance/forecast.ts
+// ----------------------------------------------------------------------
+
+export type ForecastMilestoneKind =
+  | 'leave_work'
+  | 'statutory_pension'
+  | 'company_pension'
+  | 'private_pension'
+  | 'life_insurance_maturity'
+  | 'custom'
+
+export type ForecastItemType =
+  | 'salary'
+  | 'income'
+  | 'expense'
+  | 'living_expense'
+  | 'health_insurance'
+  | 'asset'
+  | 'life_insurance'
+  | 'pension'
+
+export type ForecastPot = 'cash' | 'depot' | 'real_estate' | 'other' | 'insurance'
+
+export type ForecastTimeRef =
+  | { kind: 'milestone'; milestoneId: number }
+  | { kind: 'date'; date: string }
+  | { kind: 'age'; personId: number; age: number }
+
+export interface ForecastPerson {
+  id: number
+  label: string
+  birthDate: string
+  sortOrder: number
+}
+
+export interface ForecastMilestone {
+  id: number
+  personId: number
+  kind: ForecastMilestoneKind
+  label: string
+  date: string | null
+  age: number | null
+}
+
+export interface ForecastItem {
+  id: number
+  personId: number | null
+  type: ForecastItemType
+  label: string
+  data: Record<string, unknown>
+  linkedAccountId: number | null
+  linkedAccountBalance: number | null
+  sortOrder: number
+}
+
+export interface ForecastScenarioConfig {
+  inflationRate: number
+  defaultReturnRate: number
+  capitalGainsTaxRate: number
+  depotGainShare: number
+  minLiquidWealth: number
+  endAge: number
+  milestoneOverrides: Record<string, { date?: string | null; age?: number | null }>
+  withdrawalOrder: Array<Exclude<ForecastPot, 'insurance'>>
+  allowSurrender: boolean
+  spendingCurve: {
+    referencePersonId: number | null
+    phases: Array<{ fromAge: number; factor: number }>
+    careFromAge: number | null
+    careMonthly: number
+  }
+  healthInsurance: { rate: number; minMonthly: number }
+  offsetDeductions: number[]
+}
+
+export interface ForecastScenario {
+  id: number
+  name: string
+  config: ForecastScenarioConfig
+  updatedAt: string
+}
+
+export interface ForecastLinkableAccount {
+  id: number
+  label: string
+  balance: number | null
+}
+
+export interface ForecastBundle {
+  persons: ForecastPerson[]
+  milestones: ForecastMilestone[]
+  items: ForecastItem[]
+  scenarios: ForecastScenario[]
+  accounts: ForecastLinkableAccount[]
+  defaultScenario: ForecastScenarioConfig
+}
+
+export interface ForecastFlowSource {
+  key: string
+  label: string
+  personId: number | null
+  kind: ForecastItemType | 'care' | 'tax' | 'surrender'
+}
+
+export interface ForecastYearRow {
+  year: number
+  ages: Record<string, number>
+  income: Record<string, number>
+  expenses: Record<string, number>
+  contributions: number
+  returns: number
+  taxes: number
+  withdrawals: Record<string, number>
+  pots: Record<string, number>
+  wealthEnd: number
+  liquidEnd: number
+  totalIncome: number
+  totalExpenses: number
+  deficit: boolean
+}
+
+export interface ForecastBridge {
+  personId: number | null
+  fromYear: number
+  toYear: number
+  need: number
+  liquidAtStart: number
+  covered: boolean
+}
+
+export interface ForecastResolvedMilestone {
+  id: number
+  personId: number
+  kind: ForecastMilestoneKind
+  label: string
+  date: string
+  year: number
+  age: number
+}
+
+export interface ForecastSimulation {
+  startYear: number
+  endYear: number
+  years: ForecastYearRow[]
+  sources: ForecastFlowSource[]
+  pots: ForecastPot[]
+  milestones: ForecastResolvedMilestone[]
+  bridges: ForecastBridge[]
+  ok: boolean
+  failYear: number | null
+  potDryYear: Record<string, number | null>
+  finalWealth: number
+}
+
+export interface ForecastMatrixCell {
+  ageA: number
+  ageB: number
+  ok: boolean
+  finalWealth: number
+  failYear: number | null
+}
+
+export interface ForecastSimulateRequest {
+  scenarioId?: number
+  scenario?: ForecastScenarioConfig
+  earliestFor?: number
+  matrix?: { personA: number; personB: number; fromAge: number; toAge: number }
+  compareScenarioIds?: number[]
+}
+
+export interface ForecastSimulateResponse {
+  result: ForecastSimulation
+  earliest: { personId: number; age: number | null } | null
+  matrix: ForecastMatrixCell[] | null
+  comparisons: Array<{ scenarioId: number; name: string; result: ForecastSimulation }>
+}
+
+export async function getForecast(): Promise<ForecastBundle> {
+  return apiFetch('/finance/forecast')
+}
+
+export async function simulateForecast(req: ForecastSimulateRequest): Promise<ForecastSimulateResponse> {
+  return apiFetch('/finance/forecast/simulate', { method: 'POST', body: JSON.stringify(req) })
+}
+
+export async function createForecastPerson(body: { label: string; birthDate: string }): Promise<ForecastPerson> {
+  return apiFetch('/finance/forecast/persons', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function updateForecastPerson(
+  id: number,
+  body: Partial<{ label: string; birthDate: string; sortOrder: number }>,
+): Promise<ForecastPerson> {
+  return apiFetch(`/finance/forecast/persons/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export async function deleteForecastPerson(id: number): Promise<void> {
+  return apiFetch(`/finance/forecast/persons/${id}`, { method: 'DELETE' })
+}
+
+export async function createForecastMilestone(body: {
+  personId: number
+  kind: ForecastMilestoneKind
+  label?: string
+  date?: string | null
+  age?: number | null
+}): Promise<ForecastMilestone> {
+  return apiFetch('/finance/forecast/milestones', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function updateForecastMilestone(
+  id: number,
+  body: Partial<{ kind: ForecastMilestoneKind; label: string; date: string | null; age: number | null }>,
+): Promise<ForecastMilestone> {
+  return apiFetch(`/finance/forecast/milestones/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export async function deleteForecastMilestone(id: number): Promise<void> {
+  return apiFetch(`/finance/forecast/milestones/${id}`, { method: 'DELETE' })
+}
+
+export interface ForecastItemInput {
+  personId?: number | null
+  type: ForecastItemType
+  label: string
+  data: Record<string, unknown>
+  linkedAccountId?: number | null
+  sortOrder?: number
+}
+
+export async function createForecastItem(body: ForecastItemInput): Promise<ForecastItem> {
+  return apiFetch('/finance/forecast/items', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function updateForecastItem(id: number, body: Partial<ForecastItemInput>): Promise<ForecastItem> {
+  return apiFetch(`/finance/forecast/items/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export async function deleteForecastItem(id: number): Promise<void> {
+  return apiFetch(`/finance/forecast/items/${id}`, { method: 'DELETE' })
+}
+
+export async function createForecastScenario(body: {
+  name: string
+  config: ForecastScenarioConfig
+}): Promise<ForecastScenario> {
+  return apiFetch('/finance/forecast/scenarios', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function updateForecastScenario(
+  id: number,
+  body: Partial<{ name: string; config: ForecastScenarioConfig }>,
+): Promise<ForecastScenario> {
+  return apiFetch(`/finance/forecast/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export async function deleteForecastScenario(id: number): Promise<void> {
+  return apiFetch(`/finance/forecast/scenarios/${id}`, { method: 'DELETE' })
+}

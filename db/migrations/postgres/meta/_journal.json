@@ -1457,6 +1457,13 @@
       "when": 1788652800027,
       "tag": "0207_trip_traveller_gets_about",
       "breakpoints": true
+    },
+    {
+      "idx": 208,
+      "version": "7",
+      "when": 1788652800028,
+      "tag": "0208_finance_forecast",
+      "breakpoints": true
     }
   ]
 }
