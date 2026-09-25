@@ -33,6 +33,46 @@ const DAY: PlannedBlockShape[] = [
   block("evening", 120),
 ];
 
+describe("a day the group only reaches later", () => {
+  it("keeps the block the arrival lands in when a real share of it is left", () => {
+    // 16:00: the afternoon nominally runs to 17:30, ninety minutes of
+    // it survive, the evening is whole.
+    const { blocks, dropped } = scheduleDay({ blocks: DAY, dayStartMinutes: at(16), nominalStartMinutes: at(9) });
+    expect(blocks.map((b) => [b.id, b.startMinutes, b.budgetMinutes])).toEqual([
+      ["afternoon", at(16), 90],
+      ["evening", at(17, 30), 120],
+    ]);
+    expect(dropped.map((d) => d.id)).toEqual(["morning", "midday"]);
+  });
+
+  it("drops a sliver rather than calling it a morning", () => {
+    // Noon: thirty minutes of a "Vormittag" that ran to 12:30 are not
+    // a morning. The day begins with the midday block, at the arrival.
+    const { blocks, dropped } = scheduleDay({ blocks: DAY, dayStartMinutes: at(12), nominalStartMinutes: at(9) });
+    expect(blocks.map((b) => [b.id, b.startMinutes, b.budgetMinutes])).toEqual([
+      ["midday", at(12), 90],
+      ["afternoon", at(13, 30), 210],
+      ["evening", at(17), 120],
+    ]);
+    expect(dropped[0].id).toBe("morning");
+    expect(dropped[0].reason).toContain("30 Minuten");
+  });
+
+  it("draws the line at a third of the block", () => {
+    // 70 of 210 minutes is the third: kept. One minute less: gone.
+    const kept = scheduleDay({ blocks: DAY, dayStartMinutes: at(11, 20), nominalStartMinutes: at(9) });
+    expect(kept.blocks[0]).toMatchObject({ id: "morning", budgetMinutes: 70 });
+    const gone = scheduleDay({ blocks: DAY, dayStartMinutes: at(11, 21), nominalStartMinutes: at(9) });
+    expect(gone.blocks[0].id).toBe("midday");
+  });
+
+  it("leaves a day that starts on time untouched", () => {
+    const { blocks, dropped } = scheduleDay({ blocks: DAY, dayStartMinutes: at(9), nominalStartMinutes: at(9) });
+    expect(dropped).toEqual([]);
+    expect(blocks.map((b) => b.budgetMinutes)).toEqual([210, 90, 210, 120]);
+  });
+});
+
 describe("a day with no fixpoints", () => {
   it("leaves every budget exactly as it was", () => {
     const { blocks, dropped } = scheduleDay({ blocks: DAY });

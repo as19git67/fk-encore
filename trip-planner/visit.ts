@@ -16,7 +16,7 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { loadPlan } from "./plan-store";
+import { loadPlan, setStopStatus } from "./plan-store";
 import { answerVisit, listVisits, recordVisit, type StoredVisit } from "./visit-store";
 import { assessVisit, isOnTheWay, type VisitVerdict } from "./visits";
 
@@ -124,6 +124,13 @@ export const reportVisit = api(
       confirmed: assessment.verdict === "confirmed",
     });
 
+    // "Zwei Signale setzen den Status stumm" (§6.4) — the second half
+    // of that sentence. The diary row alone left the stop "planned",
+    // so a visit two signals agreed on still had to be ticked by hand.
+    if (assessment.verdict === "confirmed" && stop) {
+      await setStopStatus(req.planId, userId, stop.stop.rowId, "done");
+    }
+
     return {
       verdict: assessment.verdict,
       thresholdMinutes: assessment.thresholdMinutes,
@@ -167,6 +174,10 @@ export const answerTripVisit = api(
     const userId = requireUser();
     const visit = await answerVisit(req.planId, userId, req.visitId, req.confirmed === true);
     if (!visit) throw APIError.notFound("visit not found");
+    // A yes is the tick: the answer was asked for exactly this.
+    if (visit.confirmed && visit.stopId !== null) {
+      await setStopStatus(req.planId, userId, visit.stopId, "done");
+    }
     return { visit };
   },
 );

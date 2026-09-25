@@ -217,11 +217,29 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
     }
 
     /// One report, one call. True when the server took it.
+    ///
+    /// And what it made of it is read, not thrown away: one signal is
+    /// a question the traveller gets right now — "wart ihr hier?" —
+    /// and two signals ticked the stop, which the day and the Lock
+    /// Screen should show (§6.4). Until the first trial the verdict
+    /// was decoded into nothing, and the question the server had
+    /// written down was never asked.
     private static func send(_ report: TripVisitReport) async -> Bool {
-        struct Ignored: Decodable {}
         do {
-            _ = try await APIClient.shared.post(
-                "/trip-planner/plans/\(report.planId)/visits", body: report.body) as Ignored
+            let response: TripVisitReportResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(report.planId)/visits", body: report.body)
+            await MainActor.run {
+                switch response.verdict {
+                case "suggested":
+                    if let visit = response.visit {
+                        TripDayNotices.shared.offerVisit(visit, planId: report.planId)
+                    }
+                case "confirmed":
+                    Task { await TripDayPulse.tick(.fenceExited) }
+                default:
+                    break
+                }
+            }
             return true
         } catch {
             return false

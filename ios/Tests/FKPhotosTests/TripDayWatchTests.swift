@@ -219,3 +219,127 @@ final class TripDayNoticePreferencesTests: XCTestCase {
         )
     }
 }
+
+/// What a day that is over left behind (§5).
+final class TripLeftoverTests: XCTestCase {
+
+    private func stop(_ id: Int, status: String) -> TripStop {
+        TripStop(
+            rowId: id, osmRef: "node:\(id)", name: "Ort \(id)", lat: 45.88, lon: 10.84,
+            category: "sight", dwellMinutes: 30,
+            travelFromPrevious: TripTravel(minutes: 5, distanceM: 400, travelClass: "short_walk"),
+            status: status, pinned: false, note: nil, sourceUrl: nil, title: nil, localName: nil,
+            wikipediaUrl: nil, photoStop: nil,
+        )
+    }
+
+    private func day(_ index: Int, detailed: Bool = true, stops: [TripStop]) -> TripDay {
+        let block = TripBlock(
+            id: "afternoon", rowId: index * 10, label: "Nachmittag", kind: "spots", budgetMinutes: 210,
+            usedMinutes: 0, startMinutes: 14 * 60, stops: stops, branches: nil,
+        )
+        return TripDay(id: index, dayIndex: index, detailed: detailed, bufferReason: nil, blocks: [block], fixpoints: [])
+    }
+
+    private func leg(_ days: [TripDay]) -> TripLeg {
+        TripLeg(
+            id: 1, position: 0, title: "Beispielstadt", anchor: TripCoordinate(lat: 45.88, lon: 10.84),
+            anchorRadiusM: nil, anchorLabel: nil, arriveMinutes: nil, mode: "foot", regionDb: "nom_x",
+            awaitingRegion: nil, startDate: "2026-09-24", days: days, pool: [],
+        )
+    }
+
+    func testTheDayBeforeTodayWithOpenStopsIsFound() throws {
+        // The trial's case: day one strolled through without the plan,
+        // every stop still "planned" on it the next morning.
+        let found = try XCTUnwrap(TripLeftover.find(
+            in: leg([day(0, stops: [stop(1, status: "planned"), stop(2, status: "done")]), day(1, stops: [])]),
+            todayIndex: 1,
+            dismissed: { _ in false },
+        ))
+        XCTAssertEqual(found.dayIndex, 0)
+        XCTAssertEqual(found.stops.map(\.rowId), [1])
+    }
+
+    func testADayThatWasLivedLeavesNothing() {
+        XCTAssertNil(TripLeftover.find(
+            in: leg([day(0, stops: [stop(1, status: "done"), stop(2, status: "skipped")]), day(1, stops: [])]),
+            todayIndex: 1,
+            dismissed: { _ in false },
+        ))
+    }
+
+    func testTodayAndTomorrowAreNotOver() {
+        XCTAssertNil(TripLeftover.find(
+            in: leg([day(0, stops: [stop(1, status: "planned")]), day(1, stops: [stop(2, status: "planned")])]),
+            todayIndex: 0,
+            dismissed: { _ in false },
+        ))
+    }
+
+    func testAnAnsweredDayIsNotAskedAgain() {
+        XCTAssertNil(TripLeftover.find(
+            in: leg([day(0, stops: [stop(1, status: "planned")]), day(1, stops: [])]),
+            todayIndex: 1,
+            dismissed: { $0 == 0 },
+        ))
+    }
+
+    func testTheMostRecentDayComesFirst() throws {
+        let found = try XCTUnwrap(TripLeftover.find(
+            in: leg([day(0, stops: [stop(1, status: "planned")]), day(1, stops: [stop(2, status: "planned")]), day(2, stops: [])]),
+            todayIndex: 2,
+            dismissed: { _ in false },
+        ))
+        XCTAssertEqual(found.dayIndex, 1)
+    }
+
+    func testADayAtTripResolutionHasNothingToLeave() {
+        XCTAssertNil(TripLeftover.find(
+            in: leg([day(0, detailed: false, stops: []), day(1, stops: [])]),
+            todayIndex: 1,
+            dismissed: { _ in false },
+        ))
+    }
+
+    func testTheSentenceNamesAFewAndCounts() {
+        let one = TripLeftover.sentence(dayNumber: 1, date: "24.09.", names: ["Kirche Beispiel"])
+        XCTAssertTrue(one.contains("Von Tag 1 (24.09.) blieb 1 Spot liegen: Kirche Beispiel"), one)
+        let many = TripLeftover.sentence(dayNumber: 2, date: nil, names: ["A", "B", "C", "D", "E"])
+        XCTAssertTrue(many.contains("Von Tag 2 blieben 5 Spots liegen: A, B, C …"), many)
+    }
+}
+
+/// The diary's open questions, as the app reads them (§6.4).
+final class TripVisitSuggestionTests: XCTestCase {
+
+    func testOnlyAnUnansweredStayAtAPlannedStopIsAQuestion() throws {
+        let visits = try JSONDecoder().decode(TripVisitsResponse.self, from: Data("""
+        { "visits": [
+          { "id": 1, "stopId": 7, "osmRef": "node:7", "name": "Kirche Beispiel",
+            "arrivedAt": "2026-09-24T10:00:00Z", "leftAt": "2026-09-24T10:20:00Z",
+            "confirmed": false, "dismissed": false },
+          { "id": 2, "stopId": 8, "osmRef": "node:8", "name": "Museum Beispiel",
+            "arrivedAt": "2026-09-24T11:00:00Z", "leftAt": null,
+            "confirmed": true, "dismissed": false },
+          { "id": 3, "stopId": null, "osmRef": null, "name": null,
+            "arrivedAt": "2026-09-24T12:00:00Z", "leftAt": null,
+            "confirmed": false, "dismissed": false } ] }
+        """.utf8)).visits
+        XCTAssertEqual(visits.filter { $0.isOpen && $0.stopId != nil }.map(\.id), [1])
+        XCTAssertEqual(visits[2].displayName, "diesem Ort")
+    }
+
+    func testTheReportAnswerCarriesTheVerdict() throws {
+        let response = try JSONDecoder().decode(TripVisitReportResponse.self, from: Data("""
+        { "verdict": "suggested", "visit": { "id": 1, "stopId": 7, "osmRef": "node:7",
+          "name": "Kirche Beispiel", "arrivedAt": "2026-09-24T10:00:00Z", "leftAt": null,
+          "confirmed": false, "dismissed": false } }
+        """.utf8))
+        XCTAssertEqual(response.verdict, "suggested")
+        XCTAssertEqual(response.visit?.name, "Kirche Beispiel")
+        let none = try JSONDecoder().decode(TripVisitReportResponse.self,
+                                            from: Data(#"{ "verdict": "none", "visit": null }"#.utf8))
+        XCTAssertNil(none.visit)
+    }
+}

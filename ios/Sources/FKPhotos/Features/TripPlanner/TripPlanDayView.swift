@@ -46,6 +46,8 @@ struct TripPlanDayView: View {
     @State private var clock = Date()
     /// The day's offers: behind on a block, arrived late (§7.1).
     @State private var notices = TripDayNotices.shared
+    /// What the last "Zurücklegen" put back, for the sentence under it.
+    @State private var carriedBack: [TripDisplacedStop] = []
     @State var viewModel: TripPlannerViewModel
 
     var body: some View {
@@ -338,6 +340,7 @@ struct TripPlanDayView: View {
                 if let plan = viewModel.plan, isTravelling,
                    let running = TripRunningDay.of(plan: plan, light: viewModel.light, now: clock) {
                     notices.evaluate(running)
+                    await notices.loadVisits(planId: plan.id)
                 }
                 try? await Task.sleep(for: .seconds(60))
             }
@@ -1630,7 +1633,77 @@ struct TripPlanDayView: View {
             ForEach(offers) { offer in
                 offerCard(offer)
             }
+            // What an earlier day left behind is today's question, on
+            // today's screen — the day it is about is over.
+            if let leftover = notices.leftover, leftover.planId == viewModel.planId {
+                leftoverCard(leftover)
+            }
+            ForEach(notices.pendingVisits) { visit in
+                visitCard(visit)
+            }
         }
+    }
+
+    /// "Von Tag 1 blieben 5 Spots liegen — zurück zu den Kandidaten?" (§5)
+    private func leftoverCard(_ offer: TripDayOffer) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(offer.sentence, systemImage: "tray.and.arrow.down")
+                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 8) {
+                Button("Zurücklegen") {
+                    Task {
+                        do {
+                            let response = try await notices.carryOver(offer)
+                            await viewModel.load()
+                            carriedBack = response.carried
+                        } catch {
+                            viewModel.errorMessage = TripErrorText.describe(error)
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                Button("Lassen") { notices.dismiss(offer) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            if !carriedBack.isEmpty {
+                Text("Zurück bei den Kandidaten: "
+                     + carriedBack.map(\.displayName).joined(separator: ", "))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.tint.opacity(0.08), in: .rect(cornerRadius: 14))
+    }
+
+    /// "Wart ihr hier?" (§6.4): one signal, so the traveller decides.
+    private func visitCard(_ visit: TripVisitSuggestion) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Wart ihr an \(visit.displayName)? Dann wird der Stopp abgehakt.",
+                  systemImage: "checkmark.circle")
+                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 8) {
+                Button("Ja, waren wir") {
+                    Task {
+                        await notices.answerVisit(visit, planId: viewModel.planId, yes: true)
+                        await viewModel.load()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                Button("Nein") {
+                    Task { await notices.answerVisit(visit, planId: viewModel.planId, yes: false) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.tint.opacity(0.08), in: .rect(cornerRadius: 14))
     }
 
     private func offerCard(_ offer: TripDayOffer) -> some View {

@@ -184,7 +184,8 @@ export function redistribute(req: RedistributeRequest): RedistributeResult {
   return { blocks: [...untouched, ...blocks], pool, displaced };
 }
 
-function stopToCandidate(stop: CurrentStop): Candidate {
+/** A stop as a candidate again, with everything it carried (§9.2, §8.3). */
+export function stopToCandidate(stop: CurrentStop): Candidate {
   return {
     osmRef: stop.osmRef,
     name: stop.name,

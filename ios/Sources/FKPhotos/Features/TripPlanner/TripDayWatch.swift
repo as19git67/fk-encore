@@ -111,9 +111,50 @@ enum TripLateArrival {
     }
 }
 
+/// What a day that is over left behind (§5).
+///
+/// The concept's rule — nothing is deleted, what no longer fits goes
+/// back to the pool with a priority for the days that follow — fired
+/// only when somebody pressed "umplanen". A day nobody replanned kept
+/// its stops as "planned" on a day that was over, and the next days had
+/// been planned without them. Out of the first trial: "the planned
+/// spots feel lost".
+enum TripLeftover {
+    struct Found {
+        let dayIndex: Int
+        let stops: [TripStop]
+    }
+
+    /// The most recent day before today that still has open stops,
+    /// unless it was already answered. Only days that were detailed:
+    /// a day at trip resolution has nothing to leave behind.
+    static func find(in leg: TripLeg, todayIndex: Int, dismissed: (Int) -> Bool) -> Found? {
+        leg.days
+            .filter { $0.dayIndex < todayIndex && $0.detailed && !dismissed($0.dayIndex) }
+            .sorted { $0.dayIndex > $1.dayIndex }
+            .lazy
+            .compactMap { day -> Found? in
+                let open = day.blocks.flatMap(\.stops).filter { $0.stopStatus == .planned }
+                return open.isEmpty ? nil : Found(dayIndex: day.dayIndex, stops: open)
+            }
+            .first
+    }
+
+    /// "Von Tag 1 blieben 5 Spots liegen: A, B, C … — zurück zu den
+    /// Kandidaten? Dann kommen sie an den nächsten Tagen zuerst dran."
+    static func sentence(dayNumber: Int, date: String?, names: [String]) -> String {
+        let count = names.count
+        let shown = names.prefix(3).joined(separator: ", ") + (count > 3 ? " …" : "")
+        let when = date.map { "Tag \(dayNumber) (\($0))" } ?? "Tag \(dayNumber)"
+        let what = count == 1 ? "blieb 1 Spot liegen" : "blieben \(count) Spots liegen"
+        return "Von \(when) \(what): \(shown) — zurück zu den Kandidaten? "
+            + "Dann kommen sie an den nächsten Tagen zuerst dran."
+    }
+}
+
 /// One offer the day makes, in the words to show.
 struct TripDayOffer: Equatable, Identifiable {
-    enum Kind: String { case behind, lateArrival }
+    enum Kind: String { case behind, lateArrival, leftover }
     let kind: Kind
     let planId: Int
     let legIndex: Int
@@ -194,6 +235,7 @@ enum TripDayPulse {
         await TripDayActivityManager.shared.refresh(running)
         if let running {
             TripDayNotices.shared.evaluate(running)
+            await TripDayNotices.shared.loadVisits(planId: running.plan.id)
         } else {
             TripDayNotices.shared.clearOffers()
         }
@@ -223,6 +265,12 @@ enum TripDayNoticePreferences {
 
     static func quartersKey(planId: Int, dayIndex: Int, on day: String) -> String {
         "quarters/\(planId)/\(day)/\(dayIndex)"
+    }
+
+    /// Once per day of the plan, not per calendar day: a day that is
+    /// over stays over.
+    static func leftoverKey(planId: Int, dayIndex: Int) -> String {
+        "leftover/\(planId)/\(dayIndex)"
     }
 
     static func wasNotified(_ key: String, store: UserDefaults = .standard) -> Bool {
@@ -278,6 +326,10 @@ public final class TripDayNotices {
     private(set) var behind: TripDayOffer?
     /// "Arrived at five instead of noon — replan from here?"
     private(set) var lateArrival: TripDayOffer?
+    /// "Yesterday left five spots behind — back to the candidates?"
+    private(set) var leftover: TripDayOffer?
+    /// "Wart ihr hier?" — stays the diary is not sure about (§6.4).
+    private(set) var pendingVisits: [TripVisitSuggestion] = []
     /// A "Umplanen" from a notification, for the day screen to run.
     var pendingReplan: TripPendingReplan?
 
@@ -296,6 +348,8 @@ public final class TripDayNotices {
     func clearOffers() {
         behind = nil
         lateArrival = nil
+        leftover = nil
+        pendingVisits = []
     }
 
     /// Look at the day and decide whether it has something to say.
@@ -308,6 +362,8 @@ public final class TripDayNotices {
         let dayIndex = running.day.dayIndex
         let arrivalKey = TripDayNoticePreferences.arrivalKey(planId: planId, dayIndex: dayIndex, on: isoDay)
         let quartersKey = TripDayNoticePreferences.quartersKey(planId: planId, dayIndex: dayIndex, on: isoDay)
+
+        evaluateLeftover(running)
 
         // The arrival first: on a day nobody has reached yet, "you are
         // behind on the Mittag block" is true and useless — the group
@@ -389,6 +445,96 @@ public final class TripDayNotices {
         }
     }
 
+    /// What the days before today left behind (§5). Independent of the
+    /// clock: a day that is over is over at any hour.
+    private func evaluateLeftover(_ running: TripRunningDay) {
+        let planId = running.plan.id
+        guard let found = TripLeftover.find(
+            in: running.leg,
+            todayIndex: running.day.dayIndex,
+            dismissed: { TripDayNoticePreferences.wasDismissed(
+                TripDayNoticePreferences.leftoverKey(planId: planId, dayIndex: $0)) },
+        ) else {
+            leftover = nil
+            return
+        }
+        let offer = TripDayOffer(
+            kind: .leftover,
+            planId: planId,
+            legIndex: running.position.legIndex,
+            dayIndex: found.dayIndex,
+            blockId: nil,
+            sentence: TripLeftover.sentence(
+                dayNumber: found.dayIndex + 1,
+                date: running.leg.date(ofDayIndex: found.dayIndex),
+                names: found.stops.map(\.displayName),
+            ),
+        )
+        leftover = offer
+        let key = TripDayNoticePreferences.leftoverKey(planId: planId, dayIndex: found.dayIndex)
+        if !TripDayNoticePreferences.wasNotified(key) {
+            TripDayNoticePreferences.markNotified(key)
+            // A plain banner: tapping it opens the day, where the card
+            // asks the question with its two answers.
+            post(title: "Nicht alles geschafft", body: offer.sentence, category: nil,
+                 userInfo: ["url": AppDeepLink.url(for: .tripDay(planId: planId)).absoluteString])
+        }
+    }
+
+    /// "Zurücklegen": the day's open stops go back to the pool with a
+    /// head start (§5). The caller reloads the plan.
+    func carryOver(_ offer: TripDayOffer) async throws -> TripCarryOverResponse {
+        struct Body: Encodable {
+            let legIndex: Int
+            let dayIndex: Int
+        }
+        let response: TripCarryOverResponse = try await APIClient.shared.post(
+            "/trip-planner/plans/\(offer.planId)/days/carry-over",
+            body: Body(legIndex: offer.legIndex, dayIndex: offer.dayIndex),
+        )
+        TripDayNoticePreferences.markDismissed(key(of: offer))
+        if leftover == offer { leftover = nil }
+        return response
+    }
+
+    // MARK: - "Wart ihr hier?"
+
+    /// The stays the diary is not sure about (§6.4): one signal, no
+    /// answer yet. Only stays at a planned stop — an unplanned one is
+    /// a diary entry, not a tick to give.
+    func loadVisits(planId: Int) async {
+        guard let response: TripVisitsResponse = try? await APIClient.shared.get(
+            "/trip-planner/plans/\(planId)/visits") else { return }
+        pendingVisits = response.visits.filter { $0.isOpen && $0.stopId != nil }
+    }
+
+    /// A stay the visit monitor just reported and the server was not
+    /// sure about: asked right away, as a banner when the app is not
+    /// in front — this is the moment somebody is walking away from
+    /// the place and still knows whether they were in it.
+    func offerVisit(_ visit: TripVisitSuggestion, planId: Int) {
+        guard visit.isOpen, visit.stopId != nil else { return }
+        if !pendingVisits.contains(where: { $0.id == visit.id }) { pendingVisits.append(visit) }
+        post(title: "Wart ihr hier?",
+             body: "\(visit.displayName) — als gesehen abhaken?",
+             category: Self.visitCategoryId,
+             userInfo: ["planId": planId, "visitId": visit.id])
+    }
+
+    /// Yes or no. A no is remembered by the server, so the same stay
+    /// is not asked about again.
+    func answerVisit(_ visit: TripVisitSuggestion, planId: Int, yes: Bool) async {
+        struct Body: Encodable {
+            let visitId: Int
+            let confirmed: Bool
+        }
+        struct Ignored: Decodable {}
+        _ = try? await APIClient.shared.post(
+            "/trip-planner/plans/\(planId)/visits/answer",
+            body: Body(visitId: visit.id, confirmed: yes)) as Ignored
+        pendingVisits.removeAll { $0.id == visit.id }
+    }
+
     /// The phone was seen at the quarters today. From the anchor fence
     /// or a significant-change fix inside it.
     func noteAtQuarters(planId: Int, dayIndex: Int) {
@@ -403,6 +549,7 @@ public final class TripDayNotices {
         TripDayNoticePreferences.markDismissed(key(of: offer))
         if behind == offer { behind = nil }
         if lateArrival == offer { lateArrival = nil }
+        if leftover == offer { leftover = nil }
     }
 
     /// The day screen ran the redistribution: what was offered is
@@ -424,6 +571,8 @@ public final class TripDayNotices {
                 planId: offer.planId, dayIndex: offer.dayIndex, blockId: offer.blockId ?? "-", on: isoDay)
         case .lateArrival:
             return TripDayNoticePreferences.arrivalKey(planId: offer.planId, dayIndex: offer.dayIndex, on: isoDay)
+        case .leftover:
+            return TripDayNoticePreferences.leftoverKey(planId: offer.planId, dayIndex: offer.dayIndex)
         }
     }
 
@@ -460,17 +609,64 @@ public final class TripDayNotices {
     }
 
     private func notify(title: String, offer: TripDayOffer, arrivedLate: Bool) {
-        // In front, the card is already on the day screen; a banner
-        // over it would be the app talking over itself.
+        post(title: title, body: offer.sentence, category: Self.notificationCategoryId,
+             userInfo: ["planId": offer.planId, "arrivedLate": arrivedLate])
+    }
+
+    /// One banner, only when the app is not in front: there the card
+    /// is already on the day screen, and a banner over it would be the
+    /// app talking over itself.
+    private func post(title: String, body: String, category: String?, userInfo: [AnyHashable: Any]) {
         guard UIApplication.shared.applicationState != .active else { return }
         let content = UNMutableNotificationContent()
         content.title = title
-        content.body = offer.sentence
-        content.categoryIdentifier = Self.notificationCategoryId
+        content.body = body
+        if let category { content.categoryIdentifier = category }
         content.sound = .default
-        content.userInfo = ["planId": offer.planId, "arrivedLate": arrivedLate]
-        let request = UNNotificationRequest(identifier: Self.notificationId, content: content, trigger: nil)
+        content.userInfo = userInfo
+        let request = UNNotificationRequest(
+            identifier: "\(Self.notificationId).\(category ?? "plain").\(UUID().uuidString)",
+            content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    public nonisolated static let visitCategoryId = "trip.visit"
+    nonisolated static let visitYesActionId = "trip.visit.yes"
+    nonisolated static let visitNoActionId = "trip.visit.no"
+
+    /// "Wart ihr hier?" with its two answers on the banner itself.
+    nonisolated static func visitNotificationCategory() -> UNNotificationCategory {
+        let yes = UNNotificationAction(identifier: visitYesActionId, title: "Ja, waren wir", options: [])
+        let no = UNNotificationAction(identifier: visitNoActionId, title: "Nein", options: [])
+        return UNNotificationCategory(
+            identifier: visitCategoryId,
+            actions: [yes, no],
+            intentIdentifiers: [],
+            options: [],
+        )
+    }
+
+    /// From the app delegate: an answer on the visit banner. A plain
+    /// tap opens the app, where the card still asks.
+    public func handleVisitAction(_ actionIdentifier: String, userInfo: [AnyHashable: Any]) async {
+        guard let planId = userInfo["planId"] as? Int, let visitId = userInfo["visitId"] as? Int else { return }
+        let yes: Bool
+        switch actionIdentifier {
+        case Self.visitYesActionId: yes = true
+        case Self.visitNoActionId: yes = false
+        default: return
+        }
+        struct Body: Encodable {
+            let visitId: Int
+            let confirmed: Bool
+        }
+        struct Ignored: Decodable {}
+        _ = try? await APIClient.shared.post(
+            "/trip-planner/plans/\(planId)/visits/answer",
+            body: Body(visitId: visitId, confirmed: yes)) as Ignored
+        pendingVisits.removeAll { $0.id == visitId }
+        // A yes ticked a stop: the day and the Lock Screen changed.
+        if yes { await TripDayPulse.tick(.foreground) }
     }
 
     /// Ask once. A denial means the offers only ever appear as cards
