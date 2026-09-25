@@ -2112,6 +2112,14 @@ laufen.
   überfüllter Block wird rot.
 - Chat für alles, was sich nicht ziehen lässt.
 
+**Aus der Erprobung: die Vergangenheit ist kein Ziel (umgesetzt).** Am zweiten
+Tag bot „In anderen Block verschieben" noch Tag 1 an. Der Blockwähler lässt
+jetzt weg, was vorbei ist — gestern ganz, und heute die Blöcke, an denen die
+Uhr vorbei ist —, sobald die Reise ein Datum hat (`TripBlockTargets.all(…,
+now:)`). Eine Reise ohne Datum hat kein Heute und deshalb auch kein Gestern;
+dort bleibt jeder Block wählbar. Dasselbe gilt für „Einplanen" aus dem Vorrat,
+weil beide denselben Wähler benutzen (§8.4).
+
 ### 8.5 Modus „Heute"
 Der unterwegs wichtigste Screen: aktueller Block, was noch drin ist, wie viel
 Budget übrig ist. Ein großer Knopf **„umplanen"** (siehe §5) und pro Spot ein

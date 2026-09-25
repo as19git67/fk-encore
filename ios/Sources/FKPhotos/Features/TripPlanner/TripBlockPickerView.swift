@@ -44,9 +44,28 @@ struct TripBlockPickerView: View {
         self.choose = choose
     }
 
+    /// The moment the picker is opened: what is past then stays out
+    /// of the list. Read once — a sheet that loses a block while it is
+    /// open would be worse than one that is a minute out of date.
+    private let now = Date()
+
+    /// The days still ahead, today included. Yesterday is not a place
+    /// a spot can go, and listing it as one was the trial's complaint.
+    private var daysAhead: [TripDay] {
+        guard let leg else { return [] }
+        return leg.days.filter { !TripBlockTargets.isPast($0.dayIndex, in: leg, now: now) }
+    }
+
     var body: some View {
         List {
-            ForEach(leg?.days ?? []) { day in
+            if let leg, daysAhead.count < leg.days.count {
+                Text(daysAhead.isEmpty
+                     ? "Die Reise ist vorbei — es gibt keinen Tag mehr, in den ein Stopp passt."
+                     : "Vergangene Tage werden nicht angeboten.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(daysAhead) { day in
                 Section {
                     if !day.detailed {
                         // A day at trip resolution has a frame and no
@@ -57,11 +76,13 @@ struct TripBlockPickerView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
-                        let targets = TripBlockTargets.ofDay(day.dayIndex, in: leg, excluding: current)
+                        let targets = TripBlockTargets.ofDay(day.dayIndex, in: leg, excluding: current, now: now)
                         if targets.isEmpty {
                             Text(current?.dayIndex == day.dayIndex
                                  ? "Hier steht der Stopp schon."
-                                 : "Kein Block, in den ein Stopp passt.")
+                                 : leg.flatMap { TripBlockTargets.todayIndex(in: $0, now: now) } == day.dayIndex
+                                     ? "Heute ist kein Block mehr übrig."
+                                     : "Kein Block, in den ein Stopp passt.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
