@@ -1621,3 +1621,77 @@ export async function updateForecastScenario(
 export async function deleteForecastScenario(id: number): Promise<void> {
   return apiFetch(`/finance/forecast/scenarios/${id}`, { method: 'DELETE' })
 }
+
+// Retirement forecast — one-time spreadsheet import (finance/forecast-import.ts)
+
+export interface ForecastImportDetail {
+  contractNo: string | null
+  insuredPerson: string | null
+  insurer: string | null
+  maturity: string | null
+  premiumEnd: string | null
+  currentValue: number | null
+}
+
+export interface ForecastImportRaw {
+  amount: number | null
+  incomeYearly: number | null
+  expenseYearly: number | null
+  once: number | null
+  contributionUntilYear: number | null
+  payoutYear: number | null
+  note: string | null
+  detail: ForecastImportDetail | null
+}
+
+export interface ForecastImportRow {
+  row: number
+  label: string
+  raw: ForecastImportRaw
+  suggestion: {
+    type: ForecastItemType | null
+    personId: number | null
+    include: boolean
+    reason: string | null
+  }
+  summary: string | null
+}
+
+export interface ForecastImportPreview {
+  sheet: string
+  rows: ForecastImportRow[]
+  inflationRate: number | null
+  pensionGrowthRate: number | null
+  warnings: string[]
+}
+
+export interface ForecastImportChoice {
+  label: string
+  type: ForecastItemType
+  personId: number | null
+  raw: ForecastImportRaw
+}
+
+export async function previewForecastImport(fileBase64: string): Promise<ForecastImportPreview> {
+  return apiFetch('/finance/forecast/import/preview', { method: 'POST', body: JSON.stringify({ fileBase64 }) })
+}
+
+export async function evaluateForecastImport(
+  rows: ForecastImportChoice[],
+  pensionGrowthRate: number | null,
+): Promise<{ rows: Array<{ summary: string | null; error: string | null }> }> {
+  return apiFetch('/finance/forecast/import/evaluate', {
+    method: 'POST',
+    body: JSON.stringify({ rows, pensionGrowthRate }),
+  })
+}
+
+export async function commitForecastImport(
+  rows: ForecastImportChoice[],
+  pensionGrowthRate: number | null,
+): Promise<{ created: number }> {
+  return apiFetch('/finance/forecast/import/commit', {
+    method: 'POST',
+    body: JSON.stringify({ rows, pensionGrowthRate }),
+  })
+}

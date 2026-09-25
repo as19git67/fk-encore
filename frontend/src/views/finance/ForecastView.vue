@@ -21,6 +21,7 @@ import ForecastItemDialog from '../../components/finance/forecast/ForecastItemDi
 import ForecastTimeline from '../../components/finance/forecast/ForecastTimeline.vue'
 import ForecastCharts from '../../components/finance/forecast/ForecastCharts.vue'
 import ForecastMatrix from '../../components/finance/forecast/ForecastMatrix.vue'
+import ForecastImportDialog from '../../components/finance/forecast/ForecastImportDialog.vue'
 import {
   ITEM_TYPE_LABELS,
   MILESTONE_KIND_LABELS,
@@ -449,6 +450,20 @@ function removeMilestone() {
 
 // ---- items ---------------------------------------------------------------------------------
 
+// ---- spreadsheet import -------------------------------------------------------------------
+
+const importDialog = ref(false)
+const importNotice = ref<string | null>(null)
+
+async function onImported(count: number) {
+  importNotice.value = `${count} Einträge aus der Excel-Datei übernommen.`
+  await load()
+}
+
+function applyInflation(rate: number) {
+  if (config.value) config.value.inflationRate = rate
+}
+
 const itemDialog = ref(false)
 const itemEdit = ref<ForecastItem | null>(null)
 const itemPreset = ref<ForecastItemType | null>(null)
@@ -606,12 +621,14 @@ const ready = computed(() => !loading.value)
   >
     <template #actions>
       <Button label="Person" icon="pi pi-user-plus" size="small" outlined @click="openPerson(null)" />
+      <Button label="Import" icon="pi pi-file-import" size="small" outlined :disabled="persons.length === 0" @click="importDialog = true" />
       <Button label="Eintrag" icon="pi pi-plus" size="small" :disabled="persons.length === 0" @click="openItem(null)" />
     </template>
 
     <template #notice>
       <ErrorBanner v-if="error" :message="error" @retry="load" />
       <ErrorBanner v-else-if="simError" :message="simError" @retry="runSimulation" />
+      <Message v-if="importNotice" severity="success" :closable="true" @close="importNotice = null">{{ importNotice }}</Message>
     </template>
 
     <PageSkeleton v-if="loading && !bundle" variant="list" :count="4" />
@@ -927,6 +944,13 @@ const ready = computed(() => !loading.value)
         <Button label="Speichern" icon="pi pi-check" :loading="msSaving" :disabled="msPerson == null || (msMode === 'age' ? msAge == null : !msDate)" @click="saveMilestone" />
       </template>
     </Dialog>
+
+    <ForecastImportDialog
+      v-model:visible="importDialog"
+      :persons="persons"
+      @imported="onImported"
+      @apply-inflation="applyInflation"
+    />
 
     <ForecastItemDialog
       v-model:visible="itemDialog"
