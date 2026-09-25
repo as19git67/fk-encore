@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw'
 import ForecastView from '../views/finance/ForecastView.vue'
 import { defaultHandlers } from './handlers'
 import { routeFromParameters } from './storyRoute'
+import { STATEMENTS } from './forecastStatementsFixture'
 import type {
   ForecastBundle,
   ForecastSimulateRequest,
@@ -246,6 +247,7 @@ function simulateHandler(req: ForecastSimulateRequest): ForecastSimulateResponse
 
 const handlers = [
   http.get('/api/finance/forecast', () => HttpResponse.json(BUNDLE)),
+  http.get('/api/finance/forecast/statements', () => HttpResponse.json({ items: STATEMENTS })),
   http.post('/api/finance/forecast/simulate', async ({ request }) =>
     HttpResponse.json(simulateHandler((await request.json()) as ForecastSimulateRequest)),
   ),

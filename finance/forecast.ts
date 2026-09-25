@@ -36,6 +36,17 @@ import {
   type SimulationResult,
   type TimeRef,
 } from "./forecast-engine";
+import {
+  buildImportItem,
+  evaluateImportRow,
+  ImportFormatError,
+  readImportWorkbook,
+  type BuiltItem,
+  type ImportEvaluation,
+  type ImportPreview,
+  type ImportRaw,
+} from "./forecast-import";
+import { scanForUser, type ScanSummary } from "./forecast-statements.service";
 
 console.log("[boot] finance/forecast.ts: all imports resolved");
 
@@ -712,6 +723,22 @@ export const deleteMilestone = api(
 
 const PERSONAL_TYPES: ReadonlySet<ItemType> = new Set(["salary", "health_insurance", "life_insurance", "pension"]);
 
+/** Fields a statement can state; a hand edit of one of them makes the hand the source. */
+const VALUE_FIELDS = [
+  "surrenderValue",
+  "guaranteedPayout",
+  "projectedPayout",
+  "monthlyPremium",
+  "monthlyAmount",
+  "lumpSumOption",
+  "currentValue",
+  "amount",
+];
+
+function manualSource(): Record<string, unknown> {
+  return { kind: "manual", updatedAt: new Date().toISOString() };
+}
+
 function itemDto(row: typeof financeForecastItem.$inferSelect, balance: number | null): ItemDto {
   return {
     id: row.id,
@@ -757,7 +784,8 @@ export const createItem = api(
     if (personId != null) await ownPerson(userId, personId);
     const linked = req.type === "asset" ? (req.linkedAccountId ?? null) : null;
     if (linked != null) await ownAccount(userId, isAdmin, linked);
-    const candidate = { id: 0, person_id: personId, type: req.type, label: req.label.trim(), data: req.data, linked_account_id: linked };
+    const data = req.data.valuesSource ? req.data : { ...req.data, valuesSource: manualSource() };
+    const candidate = { id: 0, person_id: personId, type: req.type, label: req.label.trim(), data, linked_account_id: linked };
     assertSimulatable(candidate);
     const [row] = await db
       .insert(financeForecastItem)
@@ -766,7 +794,7 @@ export const createItem = api(
         person_id: personId,
         type: req.type,
         label: candidate.label,
-        data: req.data,
+        data,
         linked_account_id: linked,
         sort_order: req.sortOrder ?? 0,
       })
@@ -791,7 +819,9 @@ export const updateItem = api(
     }
     if (req.data !== undefined) {
       if (!req.data || typeof req.data !== "object") throw APIError.invalidArgument("data must be an object");
-      next.data = req.data;
+      // Editing a value by hand makes the hand the source; editing the label or dates does not.
+      const changed = VALUE_FIELDS.some((k) => JSON.stringify(req.data![k] ?? null) !== JSON.stringify(existing.data[k] ?? null));
+      next.data = changed ? { ...req.data, valuesSource: manualSource() } : { ...req.data, valuesSource: existing.data.valuesSource ?? req.data.valuesSource };
     }
     if (req.personId !== undefined) {
       if (req.personId != null) await ownPerson(userId, req.personId);
@@ -948,5 +978,169 @@ export const runSimulation = api(
     }
 
     return { result, earliest, matrix, comparisons };
+  },
+);
+
+// -----------------------------------------------------------------------
+// One-time import from a spreadsheet overview (see forecast-import.ts)
+// -----------------------------------------------------------------------
+
+interface ImportPreviewRequest {
+  /** The .xlsx file, base64-encoded. */
+  fileBase64: string;
+}
+
+interface ImportCommitRow {
+  label: string;
+  type: ItemType;
+  personId: number | null;
+  /** The row as the preview returned it; the user may have corrected the years. */
+  raw: ImportRaw;
+}
+
+interface ImportCommitRequest {
+  rows: ImportCommitRow[];
+  /** Yearly pension adjustment the preview found in the workbook; applied to imported pensions. */
+  pensionGrowthRate?: number | null;
+}
+
+interface ImportCommitResponse {
+  created: number;
+  /** The search for the imported contracts' statements (#1343); reading continues in the background. */
+  statements: ScanSummary;
+}
+
+interface ImportEvaluateResponse {
+  rows: ImportEvaluation[];
+}
+
+function importOptions(growth: number | null | undefined) {
+  return {
+    currentYear: new Date().getFullYear(),
+    pensionGrowthRate: typeof growth === "number" && growth >= 0 && growth < 0.2 ? growth : 0.02,
+  };
+}
+
+/** 10 MB of workbook is far beyond any household overview. */
+const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
+
+export const previewImport = api(
+  { expose: true, method: "POST", path: "/finance/forecast/import/preview", auth: true },
+  async (req: ImportPreviewRequest): Promise<ImportPreview> => {
+    const { userId } = authed();
+    if (!req.fileBase64 || typeof req.fileBase64 !== "string") throw APIError.invalidArgument("fileBase64 is required");
+    const buffer = Buffer.from(req.fileBase64, "base64");
+    if (buffer.length === 0) throw APIError.invalidArgument("the file is empty");
+    if (buffer.length > MAX_IMPORT_BYTES) throw APIError.invalidArgument("the file is larger than 10 MB");
+    const [persons, items] = await Promise.all([
+      db
+        .select({ id: financeForecastPerson.id, label: financeForecastPerson.label })
+        .from(financeForecastPerson)
+        .where(eq(financeForecastPerson.user_id, userId))
+        .orderBy(asc(financeForecastPerson.sort_order), asc(financeForecastPerson.id)),
+      db.select({ label: financeForecastItem.label }).from(financeForecastItem).where(eq(financeForecastItem.user_id, userId)),
+    ]);
+    try {
+      return await readImportWorkbook(
+        buffer,
+        persons,
+        items.map((i) => i.label),
+        new Date().getFullYear(),
+      );
+    } catch (err) {
+      if (err instanceof ImportFormatError) throw APIError.invalidArgument(err.message);
+      throw err;
+    }
+  },
+);
+
+export const commitImport = api(
+  { expose: true, method: "POST", path: "/finance/forecast/import/commit", auth: true },
+  async (req: ImportCommitRequest): Promise<ImportCommitResponse> => {
+    const { userId } = authed();
+    if (!Array.isArray(req.rows) || req.rows.length === 0) throw APIError.invalidArgument("rows must be a non-empty list");
+    if (req.rows.length > 500) throw APIError.invalidArgument("at most 500 rows per import");
+
+    const ownPersons = new Set(
+      (
+        await db
+          .select({ id: financeForecastPerson.id })
+          .from(financeForecastPerson)
+          .where(eq(financeForecastPerson.user_id, userId))
+      ).map((p) => p.id),
+    );
+    const opts = importOptions(req.pensionGrowthRate);
+
+    // Build and check every row before writing any: an import is all or nothing,
+    // so a second attempt after a fix does not duplicate what the first wrote.
+    const built: BuiltItem[] = [];
+    const problems: string[] = [];
+    for (const row of req.rows) {
+      const label = typeof row.label === "string" ? row.label.trim() : "";
+      if (!label) {
+        problems.push("Zeile ohne Bezeichnung");
+        continue;
+      }
+      if (!ITEM_TYPES.includes(row.type)) {
+        problems.push(`${label}: unbekannte Art`);
+        continue;
+      }
+      if (row.personId != null && !ownPersons.has(row.personId)) {
+        problems.push(`${label}: Person nicht gefunden`);
+        continue;
+      }
+      if (!row.raw || typeof row.raw !== "object") {
+        problems.push(`${label}: keine Daten`);
+        continue;
+      }
+      const b = buildImportItem(label, row.raw, row.type, row.personId ?? null, opts);
+      if ("error" in b) {
+        problems.push(`${label}: ${b.error}`);
+        continue;
+      }
+      if (toEngineItem({ id: 0, person_id: b.personId, type: b.type, label: b.label, data: b.data, linked_account_id: null }, null) === null) {
+        problems.push(`${label}: unvollständig`);
+        continue;
+      }
+      built.push(b);
+    }
+    if (problems.length > 0) {
+      throw APIError.invalidArgument(`Import abgebrochen, nichts übernommen: ${problems.join("; ")}`);
+    }
+
+    const inserted = await db.transaction(async (tx) => {
+      return tx.insert(financeForecastItem).values(
+        built.map((b, i) => ({
+          user_id: userId,
+          person_id: b.personId,
+          type: b.type,
+          label: b.label,
+          data: b.data,
+          linked_account_id: null,
+          sort_order: i,
+        })),
+      ).returning({ id: financeForecastItem.id });
+    });
+    // Right after the import, look for the statements of the imported contracts.
+    const statements = await scanForUser(userId, inserted.map((r) => r.id));
+    return { created: built.length, statements };
+  },
+);
+
+/** Re-describes rows after the user changed a type, a person or a year in the preview. */
+export const evaluateImport = api(
+  { expose: true, method: "POST", path: "/finance/forecast/import/evaluate", auth: true },
+  async (req: ImportCommitRequest): Promise<ImportEvaluateResponse> => {
+    authed();
+    if (!Array.isArray(req.rows)) throw APIError.invalidArgument("rows must be a list");
+    if (req.rows.length > 500) throw APIError.invalidArgument("at most 500 rows per import");
+    const opts = importOptions(req.pensionGrowthRate);
+    return {
+      rows: req.rows.map((row) =>
+        ITEM_TYPES.includes(row.type) && row.raw && typeof row.raw === "object"
+          ? evaluateImportRow(String(row.label ?? ""), row.raw, row.type, row.personId ?? null, opts)
+          : { summary: null, error: "unbekannte Art" },
+      ),
+    };
   },
 );
