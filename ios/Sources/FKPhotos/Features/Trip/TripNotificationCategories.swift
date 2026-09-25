@@ -21,6 +21,7 @@ enum TripNotificationCategories {
             TripAutoStartMonitor.notificationCategory(),
             ReviewQueueNotifier.notificationCategory(),
             TripDayNotices.notificationCategory(),
+            TripDayNotices.visitNotificationCategory(),
         ])
     }
 }

@@ -16,7 +16,7 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { createTripPlan } from "./plans";
+import { createTripPlan, getTripPlan } from "./plans";
 import { answerTripVisit, listTripVisits, reportVisit } from "./visit";
 
 const ANCHOR = { lat: 48.37, lon: 10.9 };
@@ -133,6 +133,11 @@ describe("POST /trip-planner/plans/:planId/visits", () => {
     expect(res.verdict).toBe("confirmed");
     expect(res.visit?.confirmed).toBe(true);
     expect(res.visit?.sources).toEqual(["dwell", "photo"]);
+    // "Zwei Signale setzen den Status stumm" — the stop itself is done,
+    // not only the diary row.
+    const after = await getTripPlan({ planId: plan.id });
+    expect(after.plan.legs[0].days[0].blocks.flatMap((b) => b.stops)
+      .find((s) => s.rowId === stops[0].rowId)?.status).toBe("done");
   });
 
   it("works out the verdict itself rather than believing the device", async () => {
@@ -291,6 +296,10 @@ describe('answering „wart ihr hier?“', () => {
     const res = await answerTripVisit({ planId: plan.id, visitId: visit!.id, confirmed: true });
     expect(res.visit.confirmed).toBe(true);
     expect(res.visit.dismissed).toBe(false);
+    // A yes is the tick.
+    const after = await getTripPlan({ planId: plan.id });
+    expect(after.plan.legs[0].days[0].blocks.flatMap((b) => b.stops)
+      .find((s) => s.rowId === stops[0].rowId)?.status).toBe("done");
   });
 
   it("remembers a no rather than forgetting the stay", async () => {

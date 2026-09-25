@@ -2186,6 +2186,47 @@ Push an die Activity zu jedem Blockwechsel — die Push-Infrastruktur gibt es
 sobald man den Tagesplan verließ, und blieben nur, solange man ihn ansah — ein
 Zaun, der im Hintergrund nichts meldet, weil er dort nie stand.
 
+**Aus der Erprobung, zweiter Tag: nichts geht verloren, und die App fragt
+(Etappe 13, umgesetzt).** Am ersten Tag wurde kein einziger Stopp abgehakt —
+die Familie ist ohne Plan durch den Ort geschlendert, wie Familien das tun.
+Am nächsten Morgen standen die Stopps noch als „geplant" auf einem Tag, der
+vorbei war, und die folgenden Tage waren ohne sie geplant worden: „die Spots
+sind verloren". Und die Frage: hätte sich die App gemeldet, wäre man zufällig
+an einem der Spots vorbeigekommen?
+
+Drei Lücken, alle zwischen Konzept und Code:
+
+1. **Die Regel aus §5 galt nur beim Umplanen.** „Nichts wird gelöscht, alles
+   wandert in den Vorrat zurück, mit erhöhter Priorität für die Folgetage" —
+   nur wer „umplanen" drückte, bekam das. Jetzt gibt es
+   `POST …/days/carry-over` (`carry-over.ts`): Die offenen Stopps eines Tages
+   gehen mit dem Bonus der Verdrängten zurück in den Vorrat der Etappe, Erledigtes
+   und Übersprungenes bleibt als Tagebuch. Die App bietet es am Morgen danach
+   an — Karte auf dem heutigen Tag, ein Banner beim ersten Wecken —: „Von Tag 1
+   blieben 5 Spots liegen: A, B, C … — zurück zu den Kandidaten? Dann kommen
+   sie an den nächsten Tagen zuerst dran." Angeboten, nicht getan (§7.1). Das
+   nächste „Ab hier umplanen" und jeder Tag, der ausgeplant wird, nimmt sie
+   dann zuerst.
+2. **„Wart ihr hier?" wurde geschrieben und nie gefragt.** Der Server legte bei
+   einem Signal die Frage als Tagebuchzeile an (`visits.ts`), die App schickte
+   den Aufenthalt und warf die Antwort weg. Jetzt liest sie das Urteil: Bei
+   „suggested" kommt ein Banner mit „Ja, waren wir" / „Nein" — in dem Moment,
+   in dem man vom Ort weggeht und noch weiß, ob man drin war — und eine Karte
+   auf dem Tagesbildschirm. Ein Nein merkt sich der Server (§6.4).
+3. **„Zwei Signale setzen den Status stumm" — die zweite Hälfte fehlte.** Ein
+   bestätigter Besuch (zwei Signale oder ein Ja) hakt den Stopp jetzt auch im
+   Plan ab, statt nur im Tagebuch zu stehen.
+
+Was sich nicht meldet, und warum: **Vorbeigehen ist kein Besuch.** Die Zäune
+liegen um die nächsten ein bis zwei geplanten Stopps (§7.1), und gefragt wird
+erst nach einem Aufenthalt von zehn Minuten oder einem Viertel der geplanten
+Zeit (§6.4). Wer an der Kirche vorbeischlendert, wird nicht gefragt; wer
+zwanzig Minuten darin steht, schon — sofern sie einer der nächsten zwei Stopps
+war. Ob die Zäune am gelebten Tag um *alle* offenen Stopps liegen sollen (iOS
+erlaubt zwanzig), ist eine offene Entscheidung: §7.1 sagt aus Batteriegründen
+ein bis zwei; für einen Tag ohne Plan wären alle das, was „zufällig
+vorbeikommen" braucht.
+
 ### 8.6 Der Vorabend: Reisebereitschaft und Packliste
 
 Zwischen „Plan steht" und „erster Reisetag" liegt ein Moment, in dem sich die

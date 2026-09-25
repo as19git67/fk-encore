@@ -78,6 +78,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 TripAutoStartMonitor.shared.handleNotificationAction(action)
                 completionHandler()
             }
+        case TripDayNotices.visitCategoryId:
+            // "Wart ihr hier?" answered on the banner (§6.4).
+            Task { @MainActor in
+                await TripDayNotices.shared.handleVisitAction(
+                    action, userInfo: response.notification.request.content.userInfo)
+                completionHandler()
+            }
         case TripDayNotices.notificationCategoryId:
             // "Umplanen" on the day's offer (§7.1): the day screen runs
             // it, because that is where the position and the plan are.

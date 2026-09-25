@@ -866,6 +866,40 @@ struct TripDisplacedStop: Codable, Identifiable, Sendable {
     var displayName: String { name ?? "Unbenannter Ort" }
 }
 
+/// One entry of the visit diary (§6.4). What the app asks about is
+/// the entry that is neither confirmed nor dismissed: "wart ihr hier?"
+struct TripVisitSuggestion: Codable, Sendable, Identifiable, Hashable {
+    let id: Int
+    /// The planned stop it would tick, or nil for an unplanned stay.
+    let stopId: Int?
+    let osmRef: String?
+    let name: String?
+    let arrivedAt: String
+    let leftAt: String?
+    let confirmed: Bool
+    let dismissed: Bool
+
+    /// Still a question.
+    var isOpen: Bool { !confirmed && !dismissed }
+    var displayName: String { name ?? "diesem Ort" }
+}
+
+struct TripVisitsResponse: Codable, Sendable {
+    let visits: [TripVisitSuggestion]
+}
+
+/// What the server made of a reported stay: none | suggested | confirmed.
+struct TripVisitReportResponse: Codable, Sendable {
+    let verdict: String
+    let visit: TripVisitSuggestion?
+}
+
+/// A day's open stops back in the pool (§5).
+struct TripCarryOverResponse: Codable, Sendable {
+    let plan: TripPlan
+    let carried: [TripDisplacedStop]
+}
+
 struct RedistributeResponse: Codable, Sendable {
     let plan: TripPlan
     let displaced: [TripDisplacedStop]
