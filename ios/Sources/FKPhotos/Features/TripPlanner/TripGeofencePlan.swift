@@ -20,11 +20,17 @@ import Foundation
 enum TripGeofencePlan {
     /// How many stops to watch at once.
     ///
-    /// §7.1 says one or two. iOS allows twenty regions per app, but the
-    /// point is not the ceiling — it is that a fence you are nowhere
-    /// near is a wake-up that buys nothing. Two covers "the one we are
-    /// heading for" and "the one after it, if we skip ahead".
-    static let maximumRegions = 2
+    /// Every open stop of the day, up to what iOS allows: twenty
+    /// regions per app, one of which is the quarters (§4.2). It used
+    /// to be two — "the one we are heading for and the one after it" —
+    /// on the reasoning that a fence you are nowhere near is a wake-up
+    /// that buys nothing. The first trial showed the day that matters:
+    /// the family strolled through the town without the plan, passed
+    /// stop five, and nothing asked, because only stops one and two
+    /// had a fence. Region monitoring costs the same for nineteen
+    /// fences as for two — the radio wakes on cell changes either way
+    /// — so the cap is the platform's, not the battery's.
+    static let maximumRegions = 19
 
     /// Radius by category, in metres.
     ///
@@ -77,7 +83,8 @@ enum TripGeofencePlan {
     ///
     /// What remains is taken in plan order rather than by distance,
     /// because the plan is the prediction of where you are going. The
-    /// nearest unvisited stop may be one you walked past on purpose.
+    /// nearest unvisited stop may be one you walked past on purpose —
+    /// which only matters on a day with more open stops than fences.
     static func regions(for stops: [TripStop]) -> [TripMonitoredRegion] {
         stops
             .filter { $0.stopStatus == .planned }

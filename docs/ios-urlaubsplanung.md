@@ -1653,6 +1653,17 @@ Ereignis „X war an Spot Y", nie ein laufender Standort; pro Person abschaltbar
 die Sichtbarkeit endet mit dem Trip. Eine Live-Karte mit den Punkten der
 Familie ist ein anderes Produkt.
 
+**Aus der Erprobung: die Wünsche auf der Karte (umgesetzt).** Die Liste
+sagt in Worten, was und wo; die Karte sagt es auf einen Blick — drei „will
+ich" in derselben Gasse sind ein Vormittag, das „lieber nicht" am anderen Ufer
+ein Nachmittag, den niemand will. Der Stimmzettel hat deshalb oben denselben
+Umschalter wie der Vorrat (§5.2): Liste oder Karte. Die Karte ist die
+Vorrats-Karte mit der eigenen Antwort als Farbe (offen, will ich,
+Herzenswunsch, egal, lieber nicht), die Suche gilt für beide, und ein Tipp auf
+einen Pin öffnet dieselbe Zeile wie in der Liste — drei Antworten, das Herz und
+die Details hinter dem Info-Knopf —, frisch aus dem Stimmzettel gelesen, damit
+die eben abgegebene Stimme auch auf der Karte steht (`TripBallotMap`).
+
 ### 6.5 Splits: getrennt unterwegs, gemeinsam geplant
 
 Der Fall ist häufiger als gedacht: Einer ins Technikmuseum, die anderen auf den
@@ -1746,9 +1757,19 @@ Die App kennt den Standort und nutzt ihn für vier Dinge:
 - **Wegschätzung ab dem echten Standort** statt ab dem geplanten Punkt.
 
 **Technisch batterieschonend:** kein Dauer-GPS, sondern Region Monitoring
-(Geofences um die nächsten ein bis zwei Stopps) plus *significant location
+(Geofences um die offenen Stopps des Tages) plus *significant location
 change*. iOS weckt die App bei Bedarf; dazwischen kostet es praktisch nichts.
 Der Trip Mode holt sich ohnehin schon eine `CLLocation` beim Start.
+
+*Nachgereicht aus der Erprobung:* Ursprünglich lagen die Zäune nur um die
+nächsten ein bis zwei Stopps — „ein Zaun, in dessen Nähe man nicht ist, ist ein
+Wecken, das nichts bringt". Der erste Reisetag hat gezeigt, welcher Tag zählt:
+Die Familie schlenderte ohne Plan durch den Ort, kam an Stopp fünf vorbei, und
+nichts fragte, weil nur eins und zwei einen Zaun hatten. Region Monitoring
+kostet für neunzehn Zäune dasselbe wie für zwei — das Funkmodul wacht bei
+Zellwechseln ohnehin auf —, also liegen sie jetzt um **alle offenen Stopps des
+Tages**, bis zur Grenze der Plattform (zwanzig je App, einer davon die
+Unterkunft, §4.2).
 
 **Datenschutz:** Der Standort bleibt für die Planung auf dem Gerät — der Vorrat
 liegt lokal, die Neuverteilung rechnet lokal (§12). Zum eigenen Server geht er
@@ -2101,6 +2122,14 @@ laufen.
   überfüllter Block wird rot.
 - Chat für alles, was sich nicht ziehen lässt.
 
+**Aus der Erprobung: die Vergangenheit ist kein Ziel (umgesetzt).** Am zweiten
+Tag bot „In anderen Block verschieben" noch Tag 1 an. Der Blockwähler lässt
+jetzt weg, was vorbei ist — gestern ganz, und heute die Blöcke, an denen die
+Uhr vorbei ist —, sobald die Reise ein Datum hat (`TripBlockTargets.all(…,
+now:)`). Eine Reise ohne Datum hat kein Heute und deshalb auch kein Gestern;
+dort bleibt jeder Block wählbar. Dasselbe gilt für „Einplanen" aus dem Vorrat,
+weil beide denselben Wähler benutzen (§8.4).
+
 ### 8.5 Modus „Heute"
 Der unterwegs wichtigste Screen: aktueller Block, was noch drin ist, wie viel
 Budget übrig ist. Ein großer Knopf **„umplanen"** (siehe §5) und pro Spot ein
@@ -2217,15 +2246,12 @@ Drei Lücken, alle zwischen Konzept und Code:
    bestätigter Besuch (zwei Signale oder ein Ja) hakt den Stopp jetzt auch im
    Plan ab, statt nur im Tagebuch zu stehen.
 
-Was sich nicht meldet, und warum: **Vorbeigehen ist kein Besuch.** Die Zäune
-liegen um die nächsten ein bis zwei geplanten Stopps (§7.1), und gefragt wird
-erst nach einem Aufenthalt von zehn Minuten oder einem Viertel der geplanten
-Zeit (§6.4). Wer an der Kirche vorbeischlendert, wird nicht gefragt; wer
-zwanzig Minuten darin steht, schon — sofern sie einer der nächsten zwei Stopps
-war. Ob die Zäune am gelebten Tag um *alle* offenen Stopps liegen sollen (iOS
-erlaubt zwanzig), ist eine offene Entscheidung: §7.1 sagt aus Batteriegründen
-ein bis zwei; für einen Tag ohne Plan wären alle das, was „zufällig
-vorbeikommen" braucht.
+Was sich nicht meldet, und warum: **Vorbeigehen ist kein Besuch.** Gefragt
+wird erst nach einem Aufenthalt von zehn Minuten oder einem Viertel der
+geplanten Zeit (§6.4). Wer an der Kirche vorbeischlendert, wird nicht gefragt;
+wer zwanzig Minuten darin steht, schon — an jedem offenen Stopp des Tages,
+seit die Zäune um alle liegen und nicht mehr nur um die nächsten zwei (§7.1,
+entschieden nach dem ersten Reisetag).
 
 ### 8.6 Der Vorabend: Reisebereitschaft und Packliste
 
@@ -5319,3 +5345,44 @@ Bis dahin der Behelf, und er ist brauchbar: den Zwischenstopp als Fund anlegen
 der Plan dann falsch — er misst vom Anker der Etappe statt von der Strecke —,
 aber der Stopp steht im Tag, mit Namen und Dauer, und niemand vergisst ihn
 unterwegs.
+
+## 23. Idee für später: die Hörtour
+
+*Aus der Erprobung, als Wunsch notiert — nicht geplant, nicht begonnen.*
+
+Es gibt Apps wie „Lauschtour": Eine Tour ist vorgegeben, man braucht nur
+Kopfhörer, ein Text sagt, wohin man gehen soll, und sobald man den nächsten
+Spot erreicht, meldet sich die App von selbst und erzählt, was man gerade vor
+sich hat. So etwas gehört auch in den Planer: Der geplante Tag *ist* schon eine
+Tour — eine Folge von Stopps mit Wegen dazwischen —, und die Zäune um die
+Stopps (§7.1) sind genau der Auslöser, den eine Hörtour braucht.
+
+Was schon da wäre:
+
+- **Die Tour**: der Tag mit seiner Reihenfolge, die Wege dazwischen, und
+  „Warum hier?" je Spot (§3.8) als Kern dessen, was zu sagen wäre.
+- **Der Auslöser**: der Zaun um jeden offenen Stopp des Tages (§7.1) — heute
+  fragt er „wart ihr hier?", er könnte ebenso gut „ihr seid da, hört mal" sagen.
+- **Die Sprachausgabe**: iOS liest Text vor (AVSpeechSynthesizer), mit
+  Kopfhörern und im Hintergrund, ohne dass die App vorne sein muss.
+
+Was offen ist, und zwar die Hauptsache: **Woher kommen die Texte?** Die
+Kandidaten, jeder mit einem Haken:
+
+- **Wikipedia** (§10.4 verlinkt den Artikel schon): frei, oft vorhanden, aber
+  ein Lexikonartikel ist kein Erzähltext für einen Spaziergang.
+- **Der lokale Sprachmodelldienst** (llm-service, §9.3 nutzt ihn zum Lesen):
+  könnte aus Wikipedia und den Gründen des Planers einen Hörtext machen — mit
+  dem Risiko, das §15.3 benennt: eine erfundene Jahreszahl klingt vorgelesen
+  so sicher wie eine richtige.
+- **Eigene Texte**: die Familie schreibt oder diktiert vor der Reise etwas zu
+  jedem Spot — ehrlich, aber Arbeit, und für den zufälligen Spot unterwegs
+  nicht da.
+- **Fremde Hörtouren**: Lauschtour und ähnliche sind Inhalte, nicht offene
+  Daten; einbinden ließe sich höchstens ein Link („hier gibt es eine
+  Hörtour").
+
+Bis das entschieden ist, bleibt es eine Idee. Der billige erste Schritt, falls
+er je gewollt wird: Beim Betreten des Zauns den Namen des Spots und sein
+„Warum hier?" vorlesen — das ist keine Hörtour, aber es ist das Gerüst, in das
+eine hineinpasst.

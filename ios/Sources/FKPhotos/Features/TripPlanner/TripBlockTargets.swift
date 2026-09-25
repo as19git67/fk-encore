@@ -31,16 +31,29 @@ enum TripBlockTargets {
     ///   - **The block the stop already sits in.** Offering it is an
     ///     option that does nothing, and an option that does nothing is
     ///     a wrong answer to "where else".
+    ///   - **What is already over**, once a `now` is given and the trip
+    ///     has dates: yesterday, and the blocks of today the clock has
+    ///     passed. Out of the first trial — on day two the picker still
+    ///     offered day one. Moving a spot into the past is not a plan.
+    ///     A trip without dates has no past and keeps every block.
     static func all(
         in leg: TripLeg?,
         excluding current: (dayIndex: Int, blockId: String)? = nil,
+        now: Date? = nil,
     ) -> [TripBlockTarget] {
         guard let leg else { return [] }
+        let today = now.flatMap { todayIndex(in: leg, now: $0) }
+        let minutes = now.map { TripDayTimeline.minutesOfDay($0) }
         return leg.days
             .filter(\.detailed)
+            .filter { day in today.map { day.dayIndex >= $0 } ?? true }
             .flatMap { day in
                 day.blocks.compactMap { block -> TripBlockTarget? in
                     guard block.kind == "spots" else { return nil }
+                    if let today, let minutes, day.dayIndex == today,
+                       let end = block.endMinutes, end <= minutes {
+                        return nil
+                    }
                     if let current, current.dayIndex == day.dayIndex, current.blockId == block.id {
                         return nil
                     }
@@ -59,7 +72,22 @@ enum TripBlockTargets {
         _ dayIndex: Int,
         in leg: TripLeg?,
         excluding current: (dayIndex: Int, blockId: String)? = nil,
+        now: Date? = nil,
     ) -> [TripBlockTarget] {
-        all(in: leg, excluding: current).filter { $0.dayIndex == dayIndex }
+        all(in: leg, excluding: current, now: now).filter { $0.dayIndex == dayIndex }
+    }
+
+    /// Which day of the leg `now` falls on, or nil for a trip without
+    /// dates — which has no today and therefore no yesterday.
+    static func todayIndex(in leg: TripLeg, now: Date, timeZone: TimeZone = .current) -> Int? {
+        guard let start = leg.startDate else { return nil }
+        return TripCalendar.days(from: start, to: TripCalendar.isoDay(now, timeZone: timeZone), timeZone: timeZone)
+    }
+
+    /// Is this day already behind the traveller? False for a trip
+    /// without dates.
+    static func isPast(_ dayIndex: Int, in leg: TripLeg, now: Date, timeZone: TimeZone = .current) -> Bool {
+        guard let today = todayIndex(in: leg, now: now, timeZone: timeZone) else { return false }
+        return dayIndex < today
     }
 }

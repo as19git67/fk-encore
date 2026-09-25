@@ -343,3 +343,36 @@ final class TripVisitSuggestionTests: XCTestCase {
         XCTAssertNil(none.visit)
     }
 }
+
+/// The ballot's colours (§6.1): my answer, as a pin.
+final class TripBallotPinKindTests: XCTestCase {
+
+    private func entry(vote: String?, heart: Bool = false) -> TripBallotEntry {
+        TripBallotEntry(
+            osmRef: "node:1", name: "Kirche Beispiel", label: "Kirche Beispiel", category: "worship",
+            myVote: vote, myHeart: heart, wants: [], ratherNots: [], hearts: [], planned: false,
+        )
+    }
+
+    func testMyAnswerIsTheColour() {
+        XCTAssertEqual(TripBallotPinKind.of(entry(vote: nil)), .open)
+        XCTAssertEqual(TripBallotPinKind.of(entry(vote: "want")), .want)
+        XCTAssertEqual(TripBallotPinKind.of(entry(vote: "meh")), .meh)
+        XCTAssertEqual(TripBallotPinKind.of(entry(vote: "rather-not")), .ratherNot)
+    }
+
+    func testAHeartOutranksTheVoteItSitsOn() {
+        // A heart is a "will ich" with a quota; the map shows the
+        // rarer thing.
+        XCTAssertEqual(TripBallotPinKind.of(entry(vote: "want", heart: true)), .heart)
+    }
+
+    func testAnAnswerTheAppDoesNotKnowIsStillOpen() {
+        XCTAssertEqual(TripBallotPinKind.of(entry(vote: "maybe-later")), .open)
+    }
+
+    func testTheLegendStartsWithWhatIsLeftToDo() {
+        XCTAssertEqual(TripBallotPinKind.legendOrder.first, .open)
+        XCTAssertEqual(Set(TripBallotPinKind.legendOrder), Set(TripBallotPinKind.allCases))
+    }
+}

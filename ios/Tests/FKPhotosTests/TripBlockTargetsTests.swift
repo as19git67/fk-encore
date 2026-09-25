@@ -73,6 +73,68 @@ final class TripBlockTargetsTests: XCTestCase {
         XCTAssertEqual(target?.isOverfull, true)
     }
 
+    // MARK: - What is already over
+
+    private func at(_ day: String, _ hour: Int, _ minute: Int = 0) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let date = TripCalendar.date(fromIsoDay: day, timeZone: .current)!
+        return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: date)!
+    }
+
+    private var timedTwoDays: TripLeg {
+        let timed = { (id: String, start: Int) in
+            TripBlock(id: id, rowId: id.hashValue, label: id.capitalized, kind: "spots",
+                      budgetMinutes: 180, usedMinutes: 0, startMinutes: start, stops: [], branches: nil)
+        }
+        return leg([
+            day(0, blocks: [timed("morning", 9 * 60), timed("afternoon", 14 * 60)]),
+            day(1, blocks: [timed("morning", 9 * 60), timed("afternoon", 14 * 60)]),
+            day(2, blocks: [timed("morning", 9 * 60), timed("afternoon", 14 * 60)]),
+        ])
+    }
+
+    func testYesterdayIsNotAPlaceASpotCanGo() {
+        // The trial's complaint: on day two the picker still offered
+        // day one.
+        let targets = TripBlockTargets.all(in: timedTwoDays, now: at("2026-09-18", 10))
+        XCTAssertFalse(targets.contains { $0.dayIndex == 0 })
+        XCTAssertTrue(targets.contains { $0.dayIndex == 1 })
+        XCTAssertTrue(targets.contains { $0.dayIndex == 2 })
+        XCTAssertTrue(TripBlockTargets.isPast(0, in: timedTwoDays, now: at("2026-09-18", 10)))
+        XCTAssertFalse(TripBlockTargets.isPast(1, in: timedTwoDays, now: at("2026-09-18", 10)))
+    }
+
+    func testABlockTodayTheClockHasPassedIsGoneToo() {
+        // 15:00 on day two: the morning ended at noon, the afternoon is
+        // still on.
+        let today = TripBlockTargets.ofDay(1, in: timedTwoDays, now: at("2026-09-18", 15))
+        XCTAssertEqual(today.map(\.blockId), ["afternoon"])
+        // At 17:00 the afternoon (14:00–17:00) is over as well.
+        XCTAssertEqual(TripBlockTargets.ofDay(1, in: timedTwoDays, now: at("2026-09-18", 17)).count, 0)
+    }
+
+    func testTomorrowKeepsEveryBlock() {
+        let tomorrow = TripBlockTargets.ofDay(2, in: timedTwoDays, now: at("2026-09-18", 17))
+        XCTAssertEqual(tomorrow.map(\.blockId), ["morning", "afternoon"])
+    }
+
+    func testATripWithoutDatesHasNoPast() {
+        // No date, no today, no yesterday: every block stays.
+        let undated = TripLeg(
+            id: 1, position: 0, title: "Stadt",
+            anchor: TripCoordinate(lat: 48.1, lon: 11.5), anchorRadiusM: nil,
+            anchorLabel: nil, arriveMinutes: nil, mode: "foot", regionDb: "nom_test",
+            awaitingRegion: false, startDate: nil, days: timedTwoDays.days, pool: [])
+        XCTAssertEqual(TripBlockTargets.all(in: undated, now: at("2026-09-18", 17)).count, 6)
+        XCTAssertNil(TripBlockTargets.todayIndex(in: undated, now: at("2026-09-18", 17)))
+    }
+
+    func testWithoutANowNothingIsPast() {
+        // The pure list as every other caller had it.
+        XCTAssertEqual(TripBlockTargets.all(in: timedTwoDays).count, 6)
+    }
+
     func testOneDayAtATimeForTheScreensThatGroupByDay() {
         let targets = TripBlockTargets.ofDay(1, in: twoDays)
         XCTAssertEqual(targets.map(\.blockId), ["morning", "afternoon"])
