@@ -58,7 +58,7 @@
     "web-push": "^3.6.7"
   },
   "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.13.0"
+    "@rollup/rollup-linux-x64-gnu": "^4.63.4"
   },
   "allowScripts": {
     "esbuild@0.18.20": true,
