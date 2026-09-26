@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
+import InputText from 'primevue/inputtext'
+import Select from 'primevue/select'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
 import ScrollX from '../../layout/ScrollX.vue'
@@ -11,8 +13,13 @@ import { ApiError } from '../../../api/client'
 import {
   acceptForecastStatement,
   decideForecastStatementLink,
+  linkForecastStatementDocument,
   rejectForecastStatement,
   rereadForecastStatementLink,
+  searchForecastStatementDocuments,
+  setForecastStatementLinkKind,
+  type ForecastDocKind,
+  type ForecastDocumentCandidate,
   type ForecastItem,
   type ForecastItemStatements,
   type ForecastStatementLink,
@@ -103,6 +110,56 @@ async function run(fn: () => Promise<unknown>) {
   }
 }
 
+const KIND_OPTIONS: Array<{ value: ForecastDocKind; label: string }> = [
+  { value: 'statement', label: 'Standmitteilung' },
+  { value: 'dynamic_increase', label: 'Beitragserhöhung (Dynamik)' },
+  { value: 'dynamic_declined', label: 'Erhöhung abgelehnt' },
+  { value: 'other', label: 'Sonstiges (ohne Werte)' },
+]
+
+const setKind = (l: ForecastStatementLink, kind: ForecastDocKind) => run(() => setForecastStatementLinkKind(l.id, kind))
+
+// ---- link a document by hand ----
+
+const searchOpen = ref(false)
+const query = ref('')
+const candidates = ref<ForecastDocumentCandidate[]>([])
+const searching = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+const linkedIds = computed(() => new Set((props.state?.links ?? []).filter((l) => l.status !== 'rejected').map((l) => l.documentId)))
+const shownCandidates = computed(() => candidates.value.filter((c) => !linkedIds.value.has(c.id)))
+
+watch(query, (q) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (q.trim().length < 2) {
+    candidates.value = []
+    return
+  }
+  searchTimer = setTimeout(async () => {
+    searching.value = true
+    try {
+      candidates.value = (await searchForecastStatementDocuments(q)).documents
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : String(err)
+    } finally {
+      searching.value = false
+    }
+  }, 300)
+})
+
+watch(
+  () => props.visible,
+  (v) => {
+    if (!v) {
+      searchOpen.value = false
+      query.value = ''
+    }
+  },
+)
+
+const linkDoc = (c: ForecastDocumentCandidate) => props.item && run(() => linkForecastStatementDocument(props.item!.id, c.id))
+
 const decide = (l: ForecastStatementLink, status: 'confirmed' | 'rejected') => run(() => decideForecastStatementLink(l.id, status))
 const reread = (l: ForecastStatementLink) => run(() => rereadForecastStatementLink(l.id))
 const accept = () => latest.value && run(() => acceptForecastStatement(latest.value!.id, chosen.value))
@@ -128,6 +185,7 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
         Die letzte Standmitteilung ist über ein Jahr alt. Liegt eine neuere vor, erscheint sie hier, sobald sie in den Dokumenten klassifiziert ist.
       </Message>
       <Message v-if="state.reading" severity="info" :closable="false">Dokumente werden gerade gelesen …</Message>
+      <Message v-for="n in state.notes" :key="n" severity="info" :closable="false">{{ n }}</Message>
 
       <section>
         <h3 class="stmt__title">Dokumente</h3>
@@ -150,6 +208,16 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
                 <Button label="Nicht dazu" icon="pi pi-times" size="small" text severity="secondary" :disabled="busy" @click="decide(l, 'rejected')" />
               </template>
               <template v-else>
+                <Select
+                  :model-value="l.kind"
+                  :options="KIND_OPTIONS"
+                  option-label="label"
+                  option-value="value"
+                  size="small"
+                  :disabled="busy"
+                  :aria-label="`Art von ${l.title || 'Dokument'}`"
+                  @update:model-value="setKind(l, $event)"
+                />
                 <Button icon="pi pi-refresh" size="small" text rounded :disabled="busy" aria-label="Neu lesen" v-tooltip.top="'Neu lesen'" @click="reread(l)" />
                 <Button icon="pi pi-times" size="small" text rounded severity="secondary" :disabled="busy" aria-label="Zuordnung lösen" v-tooltip.top="'Zuordnung lösen'" @click="decide(l, 'rejected')" />
               </template>
@@ -157,11 +225,39 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
           </li>
         </ul>
         <p v-if="rejectedCount > 0" class="muted stmt__hint">{{ rejectedCount }} abgelehnte Zuordnung{{ rejectedCount === 1 ? '' : 'en' }} ausgeblendet.</p>
+        <p class="muted stmt__hint">
+          Die Art entscheidet, welcher Beitrag gilt: Nach einer abgelehnten Erhöhung wird der erhöhte Beitrag nicht vorgeschlagen.
+        </p>
+
+        <Button
+          v-if="!searchOpen"
+          label="Dokument von Hand zuordnen"
+          icon="pi pi-link"
+          size="small"
+          text
+          class="stmt__search-toggle"
+          @click="searchOpen = true"
+        />
+        <div v-else class="stmt__search">
+          <label for="stmt-search" class="stmt__search-label">Dokument suchen (Titel, Text oder Nummer)</label>
+          <InputText id="stmt-search" v-model="query" size="small" placeholder="z. B. Dynamik oder Nachtrag" autocomplete="off" />
+          <p v-if="searching" class="muted stmt__hint">Suche …</p>
+          <p v-else-if="query.trim().length >= 2 && shownCandidates.length === 0" class="muted stmt__hint">Nichts gefunden.</p>
+          <ul v-if="shownCandidates.length" class="stmt__links">
+            <li v-for="c in shownCandidates" :key="c.id" class="stmt__link">
+              <div class="stmt__link-main">
+                <span>{{ c.title || `Dokument ${c.id}` }}</span>
+                <span v-if="c.docDate" class="muted">{{ formatMonth(c.docDate) }}</span>
+              </div>
+              <Button label="Zuordnen" icon="pi pi-plus" size="small" text :disabled="busy" @click="linkDoc(c)" />
+            </li>
+          </ul>
+        </div>
       </section>
 
       <section v-if="latest">
         <h3 class="stmt__title">
-          Neueste Standmitteilung
+          Neueste Mitteilung mit Werten
           <span class="muted">· Stand {{ latest.referenceDate ? formatMonth(latest.referenceDate) : 'unbekannt' }}</span>
         </h3>
         <dl v-if="latestValues.length" class="stmt__values">
@@ -201,7 +297,7 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
             </table>
           </ScrollX>
         </template>
-        <p v-else-if="latest.status === 'accepted' || latest.status === 'no_change'" class="muted">Der Eintrag stimmt mit dieser Standmitteilung überein.</p>
+        <p v-else class="muted">Keine Abweichungen zum Eintrag.</p>
       </section>
 
       <section v-if="state.history.length">
@@ -283,6 +379,18 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
   display: flex;
   align-items: center;
   gap: var(--space-1);
+}
+.stmt__search-toggle {
+  margin-top: var(--space-1);
+}
+.stmt__search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.stmt__search-label {
+  font-size: var(--text-sm);
 }
 .stmt__hint {
   font-size: var(--text-sm);

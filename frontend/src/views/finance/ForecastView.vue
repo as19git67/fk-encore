@@ -782,6 +782,49 @@ const ready = computed(() => !loading.value)
           <span v-if="overriddenIds.size" class="muted">{{ overriddenIds.size }} Zeitpunkt(e) im Szenario verschoben.</span>
           <Button v-if="overriddenIds.size" label="Zurücksetzen" link size="small" @click="resetOverrides" />
         </div>
+
+        <!-- Every combination of two leave-work ages at once -->
+        <template v-if="persons.length >= 2">
+          <Button
+            :label="showMatrix ? 'Vergleich ausblenden' : 'Alle Kombinationen vergleichen'"
+            :icon="showMatrix ? 'pi pi-chevron-up' : 'pi pi-th-large'"
+            size="small"
+            outlined
+            class="matrix-toggle"
+            :aria-expanded="showMatrix"
+            aria-controls="fc-matrix"
+            @click="showMatrix = !showMatrix"
+          />
+          <div v-if="showMatrix" id="fc-matrix" class="matrix-panel">
+            <p class="muted matrix-panel__hint">
+              Jedes Feld ist eine eigene Rechnung mit diesen beiden Aufhöralter-Werten. Grün: das Geld reicht, die Zahl ist das Restvermögen am Ende. Rot: das Geld geht aus, die Zahl ist das Jahr, in dem es so weit ist. Ein Klick übernimmt die Kombination in die Regler oben.
+            </p>
+            <div class="matrix-controls">
+              <template v-if="persons.length > 2">
+                <Select v-model="matrixA" :options="persons" option-label="label" option-value="id" size="small" aria-label="Person in den Zeilen" />
+                <span>×</span>
+                <Select v-model="matrixB" :options="persons" option-label="label" option-value="id" size="small" aria-label="Person in den Spalten" />
+              </template>
+              <span>Alter von</span>
+              <InputNumber v-model="matrixFrom" :min="40" :max="80" size="small" aria-label="Alter von" />
+              <span>bis</span>
+              <InputNumber v-model="matrixTo" :min="40" :max="80" size="small" aria-label="Alter bis" />
+            </div>
+            <p v-if="matrixA === matrixB" class="muted">Bitte zwei verschiedene Personen wählen.</p>
+            <ForecastMatrix
+              v-else-if="sim?.matrix && result && matrixPersonA && matrixPersonB"
+              :cells="sim.matrix"
+              :person-a="matrixPersonA"
+              :person-b="matrixPersonB"
+              :real="real"
+              :inflation-rate="inflation"
+              :start-year="result.startYear"
+              :end-year="result.endYear"
+              @pick="pickMatrix"
+            />
+            <p v-else-if="simulating" class="muted">Wird berechnet …</p>
+          </div>
+        </template>
       </section>
 
       <!-- Charts -->
@@ -846,36 +889,6 @@ const ready = computed(() => !loading.value)
             </ul>
           </div>
         </div>
-      </section>
-
-      <!-- Matrix -->
-      <section v-if="persons.length >= 2" class="card">
-        <div class="card__head">
-          <h2 class="card__title">Zwei Personen: Wer hört wann auf?</h2>
-          <Checkbox v-model="showMatrix" binary input-id="fc-matrix-on" />
-          <label for="fc-matrix-on">berechnen</label>
-        </div>
-        <div v-if="showMatrix" class="matrix-controls">
-          <Select v-model="matrixA" :options="persons" option-label="label" option-value="id" size="small" aria-label="Person A" />
-          <span>×</span>
-          <Select v-model="matrixB" :options="persons" option-label="label" option-value="id" size="small" aria-label="Person B" />
-          <span>Alter</span>
-          <InputNumber v-model="matrixFrom" :min="40" :max="80" size="small" aria-label="von Alter" />
-          <span>bis</span>
-          <InputNumber v-model="matrixTo" :min="40" :max="80" size="small" aria-label="bis Alter" />
-        </div>
-        <p v-if="showMatrix && matrixA === matrixB" class="muted">Bitte zwei verschiedene Personen wählen.</p>
-        <ForecastMatrix
-          v-if="showMatrix && sim?.matrix && result && matrixPersonA && matrixPersonB && matrixPersonA !== matrixPersonB"
-          :cells="sim.matrix"
-          :person-a="matrixPersonA"
-          :person-b="matrixPersonB"
-          :real="real"
-          :inflation-rate="inflation"
-          :start-year="result.startYear"
-          :end-year="result.endYear"
-          @pick="pickMatrix"
-        />
       </section>
 
       <!-- Household -->
@@ -1225,6 +1238,16 @@ const ready = computed(() => !loading.value)
   gap: var(--space-2);
   flex-wrap: wrap;
   margin-bottom: var(--space-3);
+}
+.matrix-toggle {
+  margin-top: var(--space-3);
+}
+.matrix-panel {
+  margin-top: var(--space-2);
+}
+.matrix-panel__hint {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
 }
 .matrix-controls :deep(.p-inputnumber-input) {
   width: 5rem;
