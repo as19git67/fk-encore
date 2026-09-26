@@ -112,8 +112,8 @@ const BUNDLE: ForecastBundle = {
     { id: 2, name: 'Vorsichtig', config: { ...DEFAULT_SCENARIO, defaultReturnRate: 0.02, inflationRate: 0.03 }, updatedAt: '2026-09-02T10:00:00Z' },
   ],
   accounts: [
-    { id: 3, label: 'Tagesgeld Beispielbank', balance: 42000 },
-    { id: 4, label: 'Depot Beispielbank', balance: 180000 },
+    { id: 3, label: 'Tagesgeld Beispielbank', balance: 42000, kind: 'tagesgeld' },
+    { id: 4, label: 'Depot Beispielbank', balance: 180000, kind: 'depot' },
   ],
   defaultScenario: DEFAULT_SCENARIO,
 }
@@ -248,6 +248,14 @@ function simulateHandler(req: ForecastSimulateRequest): ForecastSimulateResponse
 const handlers = [
   http.get('/api/finance/forecast', () => HttpResponse.json(BUNDLE)),
   http.get('/api/finance/forecast/statements', () => HttpResponse.json({ items: STATEMENTS })),
+  http.get('/api/finance/forecast/account-suggestions', () =>
+    HttpResponse.json({
+      accounts: [
+        { id: 5, label: 'Festgeld Beispielbank', balance: 15000, kind: 'festgeld' },
+        { id: 6, label: 'Bausparvertrag Beispiel', balance: 8200, kind: 'bausparen' },
+      ],
+    }),
+  ),
   http.post('/api/finance/forecast/simulate', async ({ request }) =>
     HttpResponse.json(simulateHandler((await request.json()) as ForecastSimulateRequest)),
   ),

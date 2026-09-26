@@ -13,6 +13,7 @@ const base: ForecastItemStatements = {
   overdue: false,
   reading: false,
   notes: [],
+  declinedWithoutDocument: [],
 }
 
 describe('forecastStatements', () => {

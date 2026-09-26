@@ -23,6 +23,7 @@ import ForecastCharts from '../../components/finance/forecast/ForecastCharts.vue
 import ForecastMatrix from '../../components/finance/forecast/ForecastMatrix.vue'
 import ForecastImportDialog from '../../components/finance/forecast/ForecastImportDialog.vue'
 import ForecastStatementsDialog from '../../components/finance/forecast/ForecastStatementsDialog.vue'
+import ForecastAccountsDialog from '../../components/finance/forecast/ForecastAccountsDialog.vue'
 import { sourceText, statementBadge } from '../../components/finance/forecast/forecastStatements'
 import {
   ITEM_TYPE_LABELS,
@@ -48,6 +49,7 @@ import {
   deleteForecastPerson,
   deleteForecastScenario,
   getForecast,
+  getForecastAccountSuggestions,
   getForecastStatements,
   scanForecastStatements,
   simulateForecast,
@@ -60,6 +62,7 @@ import {
   type ForecastItemInput,
   type ForecastItemStatements,
   type ForecastItemType,
+  type ForecastLinkableAccount,
   type ForecastMilestone,
   type ForecastMilestoneKind,
   type ForecastPerson,
@@ -99,6 +102,7 @@ async function load() {
   try {
     bundle.value = await getForecast()
     void loadStatements()
+    void loadAccountSuggestions()
     if (!config.value) config.value = cloneConfig(bundle.value.defaultScenario)
     if (earliestFor.value == null) earliestFor.value = persons.value[0]?.id ?? null
     const [first, second] = persons.value
@@ -468,6 +472,27 @@ async function onImported(count: number, found: ForecastScanSummary) {
   await load()
 }
 
+// ---- savings and depot accounts not yet in the forecast ----------------------------------
+
+const accountSuggestions = ref<ForecastLinkableAccount[]>([])
+const accountsDialog = ref(false)
+/** Hidden for this visit once the user said "not now". */
+const accountsDismissed = ref(false)
+
+async function loadAccountSuggestions() {
+  try {
+    accountSuggestions.value = (await getForecastAccountSuggestions()).accounts
+  } catch {
+    // Optional hint: without it the page works as before.
+    accountSuggestions.value = []
+  }
+}
+
+async function onAccountsCreated(count: number) {
+  importNotice.value = count === 1 ? '1 Konto als Vermögen übernommen.' : `${count} Konten als Vermögen übernommen.`
+  await load()
+}
+
 // ---- insurer statements (#1343) ------------------------------------------------------------
 
 const statements = ref<Map<number, ForecastItemStatements>>(new Map())
@@ -701,6 +726,15 @@ const ready = computed(() => !loading.value)
     <template #notice>
       <ErrorBanner v-if="error" :message="error" @retry="load" />
       <ErrorBanner v-else-if="simError" :message="simError" @retry="runSimulation" />
+      <Message
+        v-if="persons.length > 0 && accountSuggestions.length > 0 && !accountsDismissed"
+        severity="info"
+        :closable="true"
+        @close="accountsDismissed = true"
+      >
+        {{ accountSuggestions.length === 1 ? '1 Spar- oder Depotkonto steht' : `${accountSuggestions.length} Spar- und Depotkonten stehen` }} noch nicht in der Prognose.
+        <Button label="Ansehen und übernehmen" link size="small" @click="accountsDialog = true" />
+      </Message>
       <Message v-if="importNotice" severity="info" :closable="true" @close="importNotice = null">{{ importNotice }}</Message>
     </template>
 
@@ -1048,6 +1082,13 @@ const ready = computed(() => !loading.value)
       :persons="persons"
       @imported="onImported"
       @apply-inflation="applyInflation"
+    />
+
+    <ForecastAccountsDialog
+      v-model:visible="accountsDialog"
+      :accounts="accountSuggestions"
+      :persons="persons"
+      @created="onAccountsCreated"
     />
 
     <ForecastStatementsDialog

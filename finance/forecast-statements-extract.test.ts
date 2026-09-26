@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   EMPTY_VALUES,
   applyProposals,
+  checkUserValues,
   classifyDocument,
   computeProposals,
   contractKey,
@@ -14,6 +15,7 @@ import {
   parseLlmKind,
   parseLlmStatement,
   parseStatementText,
+  pickValues,
   validateValues,
   type StatementValues,
 } from "./forecast-statements-extract";
@@ -277,3 +279,17 @@ describe("forecast-statements-extract — kinds of documents", () => {
   });
 });
 
+
+describe("forecast-statements-extract — values typed by the user", () => {
+  it("keeps known keys only and names implausible fields", () => {
+    const v = pickValues({ surrenderValue: 1200.5, maturityDate: "2037-10-01", premiumEndDate: "", bogus: 5, lumpSum: "12" });
+    expect(v).toMatchObject({ surrenderValue: 1200.5, maturityDate: "2037-10-01", premiumEndDate: null, lumpSum: null });
+    expect(v).not.toHaveProperty("bogus");
+    expect(checkUserValues(v)).toEqual([]);
+    expect(checkUserValues({ ...v, surrenderValue: -1, premiumMonthly: 50_000, maturityDate: "2037-13-01" })).toEqual([
+      "surrenderValue",
+      "premiumMonthly",
+      "maturityDate",
+    ]);
+  });
+});
