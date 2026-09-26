@@ -1448,6 +1448,8 @@ export interface ForecastLinkableAccount {
   id: number
   label: string
   balance: number | null
+  /** finance_account_kind: giro, tagesgeld, festgeld, depot, bausparen, … */
+  kind: string
 }
 
 export interface ForecastBundle {
@@ -1741,7 +1743,7 @@ export interface ForecastStatement {
   documentId: number
   referenceDate: string | null
   values: ForecastStatementValues
-  method: 'regex' | 'llm'
+  method: 'regex' | 'llm' | 'user'
   status: 'proposed' | 'accepted' | 'rejected' | 'no_change'
   extractedAt: string
 }
@@ -1772,6 +1774,7 @@ export interface ForecastItemStatements {
   overdue: boolean
   reading: boolean
   notes: string[]
+  declinedWithoutDocument: string[]
 }
 
 export interface ForecastScanSummary {
@@ -1824,4 +1827,31 @@ export async function linkForecastStatementDocument(itemId: number, documentId: 
     method: 'POST',
     body: JSON.stringify({ documentId }),
   })
+}
+
+export async function setForecastDeclinedIncrease(
+  itemId: number,
+  date: string,
+  remove = false,
+): Promise<{ declinedWithoutDocument: string[] }> {
+  return apiFetch(`/finance/forecast/items/${itemId}/declined-increases`, {
+    method: 'POST',
+    body: JSON.stringify({ date, remove }),
+  })
+}
+
+export async function correctForecastStatementValues(id: number, values: ForecastStatementValues): Promise<ForecastStatement> {
+  return apiFetch(`/finance/forecast/statements/${id}/values`, { method: 'POST', body: JSON.stringify({ values }) })
+}
+
+// Retirement forecast — savings and depot accounts as asset items
+
+export async function getForecastAccountSuggestions(): Promise<{ accounts: ForecastLinkableAccount[] }> {
+  return apiFetch('/finance/forecast/account-suggestions')
+}
+
+export async function createForecastAccountItems(
+  accounts: Array<{ accountId: number; personId: number | null }>,
+): Promise<{ created: number }> {
+  return apiFetch('/finance/forecast/account-items', { method: 'POST', body: JSON.stringify({ accounts }) })
 }

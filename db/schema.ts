@@ -3843,7 +3843,8 @@ export const financeForecastStatement = pgTable(
     reference_date: date("reference_date"),
     values: jsonb("values").notNull().$type<ForecastStatementValues>(),
     // "regex" = read by the fixed patterns only, "llm" = the language model agreed or filled gaps.
-    method: text("method").notNull().$type<"regex" | "llm">(),
+    // "user" = corrected by hand after reading
+    method: text("method").notNull().$type<"regex" | "llm" | "user">(),
     status: text("status").notNull().$type<"proposed" | "accepted" | "rejected" | "no_change">(),
     extracted_at: timestamp("extracted_at", { mode: "string", withTimezone: true })
       .notNull()

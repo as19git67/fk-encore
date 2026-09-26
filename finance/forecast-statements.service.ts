@@ -78,7 +78,7 @@ export interface StatementDto {
   documentId: number;
   referenceDate: string | null;
   values: ForecastStatementValues;
-  method: "regex" | "llm";
+  method: "regex" | "llm" | "user";
   status: "proposed" | "accepted" | "rejected" | "no_change";
   extractedAt: string;
 }
@@ -100,6 +100,8 @@ export interface ItemStatementState {
   reading: boolean;
   /** Why a proposal the statement would make is held back (a declined premium increase). */
   notes: string[];
+  /** Premium increases the user declined without a document, as dates (YYYY-MM-DD). */
+  declinedWithoutDocument: string[];
 }
 
 export interface DocumentCandidateDto {
@@ -500,6 +502,20 @@ async function linkFactsOf(itemId: number): Promise<LinkFacts[]> {
     .where(eq(financeForecastDocumentLink.item_id, itemId));
 }
 
+/** Declined increases the user recorded on the item without a document (data.declinedIncreases). */
+export function declinedDates(data: Record<string, unknown>): string[] {
+  const v = data?.declinedIncreases;
+  return Array.isArray(v) ? v.filter((d): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)).sort() : [];
+}
+
+/** A declined increase without a document counts like a confirmed declining letter of that date. */
+function withRecordedDeclines(links: LinkFacts[], data: Record<string, unknown>): LinkFacts[] {
+  return [
+    ...links,
+    ...declinedDates(data).map((d) => ({ documentId: -1, status: "confirmed" as const, kind: "dynamic_declined" as const, docDate: d })),
+  ];
+}
+
 const isoDay = (s: string | null | undefined) => (s && /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null);
 
 /**
@@ -527,7 +543,7 @@ export async function effectiveProposals(
 ): Promise<Proposal[]> {
   const all = computeProposals(item.type, item.data, st.values);
   if (!all.some((p) => PREMIUM_FIELDS.has(p.field))) return all;
-  const declined = declinedAfter(links ?? (await linkFactsOf(item.id)), st);
+  const declined = declinedAfter(withRecordedDeclines(links ?? (await linkFactsOf(item.id)), item.data), st);
   return declined ? all.filter((p) => !PREMIUM_FIELDS.has(p.field)) : all;
 }
 
@@ -597,7 +613,10 @@ export async function statementsForUser(userId: number): Promise<StatementsRespo
       return st.status !== "rejected" && link?.status !== "rejected" && (link?.kind === "statement" || link?.kind === "dynamic_increase");
     };
     const latestRow = itemStatements.find(counts) ?? null;
-    const facts: LinkFacts[] = itemLinks.map((l) => ({ documentId: l.documentId, status: l.status, kind: l.kind, docDate: l.docDate }));
+    const facts: LinkFacts[] = withRecordedDeclines(
+      itemLinks.map((l) => ({ documentId: l.documentId, status: l.status, kind: l.kind, docDate: l.docDate })),
+      row.data,
+    );
     const notes: string[] = [];
     let proposals: Proposal[] = [];
     // "no_change" too: a kind changed since reading can release a held-back premium.
@@ -608,8 +627,11 @@ export async function statementsForUser(userId: number): Promise<StatementsRespo
       const declined = declinedAfter(facts, st);
       if (held > 0 && declined) {
         const when = isoDay(declined.docDate);
+        const day = when ? `${when.slice(8, 10)}.${when.slice(5, 7)}.${when.slice(0, 4)}` : null;
         notes.push(
-          `Beitrag nicht vorgeschlagen: die Beitragserhöhung wurde abgelehnt${when ? ` (Schreiben vom ${when.slice(8, 10)}.${when.slice(5, 7)}.${when.slice(0, 4)})` : ""}.`,
+          declined.documentId === -1
+            ? `Beitrag nicht vorgeschlagen: die Beitragserhöhung wurde abgelehnt (ohne Dokument vermerkt${day ? `, ${day}` : ""}).`
+            : `Beitrag nicht vorgeschlagen: die Beitragserhöhung wurde abgelehnt${day ? ` (Schreiben vom ${day})` : ""}.`,
         );
       }
     }
@@ -636,6 +658,7 @@ export async function statementsForUser(userId: number): Promise<StatementsRespo
       overdue: confirmedLinks && lastKnown != null && monthsBetween(lastKnown, now) > 14,
       reading: reading.has(row.id),
       notes,
+      declinedWithoutDocument: declinedDates(row.data),
     });
   }
   return { items };

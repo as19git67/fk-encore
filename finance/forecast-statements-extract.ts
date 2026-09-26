@@ -564,3 +564,32 @@ export function classifyDocument(text: string, documentType: string | null): Doc
 
 /** Item data keys that hold the premium; a declined increase leaves them alone. */
 export const PREMIUM_FIELDS: ReadonlySet<string> = new Set(["monthlyPremium", "monthlyContribution", "amount"]);
+
+/**
+ * Values the user typed over what was read. Unlike validateValues nothing
+ * is dropped silently: the names of implausible fields come back so the
+ * user can fix them.
+ */
+export function checkUserValues(v: StatementValues): string[] {
+  const bad: string[] = [];
+  for (const f of AMOUNT_FIELDS) {
+    const n = v[f];
+    if (n == null) continue;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > MAX_AMOUNT[f]) bad.push(f);
+  }
+  for (const f of DATE_FIELDS) {
+    const d = v[f];
+    if (d == null) continue;
+    const m = typeof d === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(d) : null;
+    if (!m || iso(Number(m[1]), Number(m[2]), Number(m[3])) == null || Number(m[1]) < 1950 || Number(m[1]) > 2100) bad.push(f);
+  }
+  return bad;
+}
+
+/** Only the known keys, each a number, a string or null. */
+export function pickValues(raw: Record<string, unknown>): StatementValues {
+  const out: StatementValues = { ...EMPTY_VALUES };
+  for (const f of AMOUNT_FIELDS) out[f] = typeof raw[f] === "number" ? (raw[f] as number) : null;
+  for (const f of DATE_FIELDS) out[f] = typeof raw[f] === "string" && raw[f] !== "" ? (raw[f] as string) : null;
+  return out;
+}

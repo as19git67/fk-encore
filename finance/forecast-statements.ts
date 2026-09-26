@@ -8,8 +8,9 @@ import { and, eq } from "drizzle-orm";
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { documents, financeForecastDocumentLink, financeForecastItem, financeForecastStatement } from "../db/schema";
-import { DOC_KINDS, applyProposals, type DocKind } from "./forecast-statements-extract";
+import { DOC_KINDS, applyProposals, checkUserValues, pickValues, type DocKind } from "./forecast-statements-extract";
 import {
+  declinedDates,
   effectiveProposals,
   linkByHand,
   readAll,
@@ -52,6 +53,36 @@ interface LinkKindRequest {
 
 interface DocumentSearchRequest {
   q: Query<string>;
+}
+
+interface DeclinedIncreaseRequest {
+  id: number;
+  /** YYYY-MM-DD: when the increase was declined. */
+  date: string;
+  /** True takes the date out again. */
+  remove?: boolean;
+}
+
+/** What a statement says, as the user corrected it. Every field is sent; null clears it. */
+interface StatementValuesInput {
+  referenceDate: string | null;
+  surrenderValue: number | null;
+  contractValue: number | null;
+  guaranteedPayout: number | null;
+  projectedPayout: number | null;
+  premiumMonthly: number | null;
+  premiumYearly: number | null;
+  premiumEndDate: string | null;
+  maturityDate: string | null;
+  guaranteedMonthlyPension: number | null;
+  projectedMonthlyPension: number | null;
+  lumpSum: number | null;
+  pensionStartDate: string | null;
+}
+
+interface CorrectValuesRequest {
+  id: number;
+  values: StatementValuesInput;
 }
 
 interface ManualLinkRequest {
@@ -221,6 +252,58 @@ export const rejectStatement = api(
       .where(and(eq(financeForecastStatement.id, req.id), eq(financeForecastStatement.user_id, userId)))
       .returning();
     if (!updated) throw APIError.notFound(`statement ${req.id} not found`);
+    return toStatementDto(updated);
+  },
+);
+
+export const setDeclinedIncrease = api(
+  { expose: true, method: "POST", path: "/finance/forecast/items/:id/declined-increases", auth: true },
+  async (req: DeclinedIncreaseRequest): Promise<{ declinedWithoutDocument: string[] }> => {
+    const userId = authed();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date ?? "")) throw APIError.invalidArgument("date must be YYYY-MM-DD");
+    const [item] = await db
+      .select()
+      .from(financeForecastItem)
+      .where(and(eq(financeForecastItem.id, req.id), eq(financeForecastItem.user_id, userId)));
+    if (!item) throw APIError.notFound(`item ${req.id} not found`);
+    const dates = new Set(declinedDates(item.data));
+    if (req.remove) dates.delete(req.date);
+    else dates.add(req.date);
+    const next = [...dates].sort();
+    await db
+      .update(financeForecastItem)
+      .set({ data: { ...item.data, declinedIncreases: next }, updated_at: new Date().toISOString() })
+      .where(eq(financeForecastItem.id, item.id));
+    return { declinedWithoutDocument: next };
+  },
+);
+
+export const correctStatementValues = api(
+  { expose: true, method: "POST", path: "/finance/forecast/statements/:id/values", auth: true },
+  async (req: CorrectValuesRequest): Promise<StatementDto> => {
+    const userId = authed();
+    const values = pickValues((req.values ?? {}) as unknown as Record<string, unknown>);
+    const bad = checkUserValues(values);
+    if (bad.length > 0) throw APIError.invalidArgument(`implausible values: ${bad.join(", ")}`);
+    const [st] = await db
+      .select()
+      .from(financeForecastStatement)
+      .where(and(eq(financeForecastStatement.id, req.id), eq(financeForecastStatement.user_id, userId)));
+    if (!st) throw APIError.notFound(`statement ${req.id} not found`);
+    const [item] = await db.select().from(financeForecastItem).where(eq(financeForecastItem.id, st.item_id));
+    if (!item) throw APIError.notFound(`item ${st.item_id} not found`);
+    const proposals = await effectiveProposals(item, { documentId: st.document_id, referenceDate: values.referenceDate, values });
+    const [updated] = await db
+      .update(financeForecastStatement)
+      .set({
+        values,
+        reference_date: values.referenceDate,
+        method: "user",
+        status: proposals.length > 0 ? "proposed" : "no_change",
+        decided_at: null,
+      })
+      .where(eq(financeForecastStatement.id, st.id))
+      .returning();
     return toStatementDto(updated);
   },
 );

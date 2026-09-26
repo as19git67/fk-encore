@@ -41,6 +41,7 @@ export const STATEMENTS: ForecastItemStatements[] = [
     overdue: false,
     reading: false,
     notes: [],
+    declinedWithoutDocument: [],
   },
   {
     itemId: 112,
@@ -53,5 +54,6 @@ export const STATEMENTS: ForecastItemStatements[] = [
     overdue: false,
     reading: false,
     notes: [],
+    declinedWithoutDocument: [],
   },
 ]
