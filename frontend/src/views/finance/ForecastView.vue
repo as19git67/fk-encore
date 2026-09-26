@@ -591,13 +591,18 @@ function removeItem(id: number) {
     rejectLabel: 'Abbrechen',
     acceptClass: 'p-button-danger',
     accept: async () => {
+      // Gone from the list at once; the reload afterwards brings the simulation along.
+      const before = bundle.value
+      if (bundle.value) bundle.value = { ...bundle.value, items: bundle.value.items.filter((x) => x.id !== id) }
+      itemDialog.value = false
       try {
         await deleteForecastItem(id)
-        itemDialog.value = false
-        await load()
+        importNotice.value = `„${it.label}“ gelöscht.`
       } catch (err) {
-        itemError.value = message(err)
+        bundle.value = before
+        importNotice.value = `„${it.label}“ konnte nicht gelöscht werden: ${message(err)}`
       }
+      await load()
     },
   })
 }
@@ -957,7 +962,7 @@ const ready = computed(() => !loading.value)
               <button type="button" class="item" @click="openItem(it)">
                 <span class="item__type">{{ ITEM_TYPE_LABELS[it.type] }}</span>
                 <span class="item__label">{{ it.label }}</span>
-                <span class="item__summary">{{ summarizeItem(it.type, it.data, it.linkedAccountBalance) }}</span>
+                <span class="item__summary">{{ summarizeItem(it.type, it.data, it.linkedAccountBalance, { milestones, persons }) }}</span>
               </button>
               <div v-if="statements.get(it.id)" class="item-stmt">
                 <button

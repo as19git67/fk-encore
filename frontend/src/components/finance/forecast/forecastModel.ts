@@ -258,23 +258,68 @@ export function defaultItemData(type: ForecastItemType): Record<string, unknown>
 }
 
 /** One line that says what an item is worth, for the list. */
-export function summarizeItem(type: ForecastItemType, data: Record<string, unknown>, linkedBalance: number | null): string {
+/** "MM/YYYY" of a date. An end is exclusive in the engine, so it shows the month before. */
+function monthText(date: string, isEnd: boolean): string {
+  let y = Number(date.slice(0, 4))
+  let m = Number(date.slice(5, 7))
+  if (isEnd) {
+    m -= 1
+    if (m === 0) {
+      m = 12
+      y -= 1
+    }
+  }
+  return `${String(m).padStart(2, '0')}/${y}`
+}
+
+/** A time reference in a list line: a month for a date, the milestone's name otherwise. */
+function refShort(
+  ref: unknown,
+  ctx: { milestones: ForecastMilestone[]; persons: ForecastPerson[] },
+  isEnd: boolean,
+): string | null {
+  if (!ref || typeof ref !== 'object') return null
+  const r = ref as ForecastTimeRef
+  if (r.kind === 'date') return r.date ? monthText(r.date, isEnd) : null
+  return describeTimeRef(r, ctx.milestones, ctx.persons, '')
+}
+
+/**
+ * One line per item for the household list. With `ctx` it names when the
+ * item ends (or, for a pension, begins) where that is set.
+ */
+export function summarizeItem(
+  type: ForecastItemType,
+  data: Record<string, unknown>,
+  linkedBalance: number | null,
+  ctx?: { milestones: ForecastMilestone[]; persons: ForecastPerson[] },
+): string {
   const n = (k: string) => (typeof data[k] === 'number' ? (data[k] as number) : 0)
+  const until = (k: string) => (ctx ? refShort(data[k], ctx, true) : null)
+  const at = (k: string) => (ctx ? refShort(data[k], ctx, false) : null)
+  const withEnd = (text: string, end: string | null, word = 'bis') => (end ? `${text}, ${word} ${end}` : text)
   switch (type) {
     case 'salary':
-      return `${formatEur(n('amount'))} / Monat`
+      return withEnd(`${formatEur(n('amount'))} / Monat`, until('end') ?? (ctx ? 'Ausstieg' : null))
     case 'income':
     case 'expense':
-      return `${formatEur(n('amount'))} ${FREQUENCY_LABELS[(data.frequency as keyof typeof FREQUENCY_LABELS) ?? 'monthly']}`
+      return withEnd(
+        `${formatEur(n('amount'))} ${FREQUENCY_LABELS[(data.frequency as keyof typeof FREQUENCY_LABELS) ?? 'monthly']}`,
+        until('end'),
+      )
     case 'living_expense':
-      return `${formatEur(n('amount'))} / Monat`
+      return withEnd(`${formatEur(n('amount'))} / Monat`, until('end'))
     case 'health_insurance':
       return `${formatEur(n('employedAmount'))} / Monat, danach ${HI_MODE_LABELS[(data.bridgeMode as HiMode) ?? 'statutory_voluntary']}`
-    case 'asset':
-      return `${formatEur(linkedBalance ?? n('currentValue'))}${linkedBalance != null ? ' (aus Konto)' : ''}`
-    case 'life_insurance':
-      return `Rückkauf ${formatEur(n('surrenderValue'))}, Ablauf ${formatEur(n('projectedPayout'))}`
+    case 'asset': {
+      const base = `${formatEur(linkedBalance ?? n('currentValue'))}${linkedBalance != null ? ' (aus Konto)' : ''}`
+      return n('monthlyContribution') > 0 ? withEnd(base, until('contributionEnd'), 'Sparrate bis') : base
+    }
+    case 'life_insurance': {
+      const maturity = at('maturity')
+      return `Rückkauf ${formatEur(n('surrenderValue'))}, Ablauf ${maturity ? `${maturity}: ` : ''}${formatEur(n('projectedPayout'))}`
+    }
     case 'pension':
-      return `${formatEur(n('monthlyAmount'))} / Monat`
+      return withEnd(`${formatEur(n('monthlyAmount'))} / Monat`, at('start'), 'ab')
   }
 }
