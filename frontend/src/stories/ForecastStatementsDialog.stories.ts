@@ -62,6 +62,18 @@ export const ErhoehungAbgelehnt: Story = {
   },
 }
 
+export const AbgelehntOhneDokument: Story = {
+  name: 'Erhöhung ohne Dokument abgelehnt',
+  args: {
+    state: {
+      ...WITH_DIFF,
+      declinedWithoutDocument: ['2026-03-10'],
+      notes: ['Beitrag nicht vorgeschlagen: die Beitragserhöhung wurde abgelehnt (ohne Dokument vermerkt, 10.03.2026).'],
+      latest: { ...WITH_DIFF.latest!, method: 'user' },
+    },
+  },
+}
+
 export const Telefon: Story = {
   name: 'Telefonbreite',
   parameters: { testViewport: { width: 360, height: 740 } },

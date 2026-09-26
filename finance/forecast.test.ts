@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import ExcelJS from "exceljs";
 
 import db from "../db/database";
@@ -8,6 +8,7 @@ import {
   financeAccount,
   financeAccountAccess,
   financeAccountBalance,
+  financeAccountHolding,
   financeAccountType,
   financeCurrency,
   financeForecastItem,
@@ -18,6 +19,7 @@ import {
 } from "../db/schema";
 import {
   commitImport,
+  createAccountItems,
   createItem,
   createMilestone,
   createPerson,
@@ -25,6 +27,7 @@ import {
   deleteItem,
   deletePerson,
   evaluateImport,
+  getAccountSuggestions,
   getForecast,
   previewImport,
   runSimulation,
@@ -183,7 +186,7 @@ describe("finance/forecast — items", () => {
 
     await db.insert(financeAccountAccess).values({ account_id: acc.id, user_id: 1, level: "read" });
     const bundle = await getForecast();
-    expect(bundle.accounts).toEqual([{ id: acc.id, label: "Tagesgeld", balance: 1234.56 }]);
+    expect(bundle.accounts).toEqual([{ id: acc.id, label: "Tagesgeld", balance: 1234.56, kind: expect.any(String) }]);
     const item = await createItem({ type: "asset", label: "TG", data: { pot: "cash", currentValue: 5 }, linkedAccountId: acc.id });
     expect(item.linkedAccountBalance).toBe(1234.56);
 
@@ -191,6 +194,48 @@ describe("finance/forecast — items", () => {
     await personWithMilestones();
     const sim = await runSimulation({ scenario: { endAge: 60, inflationRate: 0, defaultReturnRate: 0 } });
     expect(sim.result.years[0].pots.cash).toBeCloseTo(1234.56, 6);
+  });
+});
+
+describe("finance/forecast — savings accounts as items", () => {
+  async function account(kind: string, label: string, access = true): Promise<number> {
+    await db.insert(financeCurrency).values({ code: "EUR", symbol: "€" }).onConflictDoNothing();
+    const [type] = await db.select({ id: financeAccountType.id }).from(financeAccountType).where(eq(financeAccountType.kind, kind as never));
+    const [acc] = await db
+      .insert(financeAccount)
+      .values({ type_id: type.id, currency_code: "EUR", account_number: `${kind}-${Date.now()}-${Math.random()}`, label })
+      .returning();
+    createdAccounts.push(acc.id);
+    if (access) await db.insert(financeAccountAccess).values({ account_id: acc.id, user_id: 1, level: "read" });
+    return acc.id;
+  }
+
+  it("suggests savings and depot accounts not yet in the forecast, and creates linked items", async () => {
+    const tg = await account("tagesgeld", "Tagesgeld Beispiel");
+    const depot = await account("depot", "Depot Beispiel");
+    await account("giro", "Girokonto Beispiel");
+    await account("festgeld", "Festgeld fremd", false);
+    await db.insert(financeAccountBalance).values({ account_id: tg, as_of: "2026-02-01T00:00:00Z", balance: "5000.00", source: "manual" });
+    // The depot has positions but no balance: its value is the sum of the latest positions.
+    await db.insert(financeAccountHolding).values([
+      { account_id: depot, as_of: "2026-01-01T00:00:00", name: "Fonds A", value: "100.00" },
+      { account_id: depot, as_of: "2026-02-01T00:00:00", name: "Fonds A", value: "1200.00" },
+      { account_id: depot, as_of: "2026-02-01T00:00:00", name: "Fonds B", value: "800.50" },
+    ]);
+
+    const { accounts } = await getAccountSuggestions();
+    expect(accounts.map((a) => a.label).sort()).toEqual(["Depot Beispiel", "Tagesgeld Beispiel"]);
+    expect(accounts.find((a) => a.id === depot)).toMatchObject({ kind: "depot", balance: 2000.5 });
+
+    const person = await createPerson({ label: "A", birthDate: "1970-01-01" });
+    expect(await createAccountItems({ accounts: [{ accountId: tg, personId: null }, { accountId: depot, personId: person.id }] })).toEqual({ created: 2 });
+    const items = (await getForecast()).items;
+    expect(items.find((i) => i.linkedAccountId === tg)).toMatchObject({ type: "asset", data: { pot: "cash" }, linkedAccountBalance: 5000 });
+    expect(items.find((i) => i.linkedAccountId === depot)).toMatchObject({ personId: person.id, data: { pot: "depot" }, linkedAccountBalance: 2000.5 });
+    expect((await getAccountSuggestions()).accounts).toEqual([]);
+
+    const foreign = await account("festgeld", "Noch eins fremd", false);
+    await expect(createAccountItems({ accounts: [{ accountId: foreign, personId: null }] })).rejects.toThrow(/not found/);
   });
 });
 

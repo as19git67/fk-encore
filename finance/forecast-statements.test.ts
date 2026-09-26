@@ -30,6 +30,7 @@ import {
 import { createItem, createPerson, updateItem } from "./forecast";
 import {
   acceptStatement,
+  correctStatementValues,
   decideStatementLink,
   getStatements,
   linkStatementDocument,
@@ -37,6 +38,7 @@ import {
   rereadStatementLink,
   scanStatements,
   searchStatementDocuments,
+  setDeclinedIncrease,
   setStatementLinkKind,
 } from "./forecast-statements";
 import { onDocumentClassified, scanForUser } from "./forecast-statements.service";
@@ -317,6 +319,55 @@ describe("finance/forecast-statements — premium increases and finding more", (
     await expect(linkStatementDocument({ id: item.id, documentId: foreign })).rejects.toThrow(/not found/);
     setAuth("2", ["finance.view"]);
     await expect(linkStatementDocument({ id: item.id, documentId: foreign })).rejects.toThrow(/not found/);
+  });
+});
+
+describe("finance/forecast-statements — decisions without documents and corrections", () => {
+  it("holds a premium back after a decline recorded without a document, and keeps it through item edits", async () => {
+    const { item } = await lifeInsurance();
+    await addDocument({ userId: 1, text: INCREASE_TEXT, documentType: null, tags: ["versicherungsnr:x-000111-01"], docDate: "2025-11-01" });
+    await scanForUser(1, null, { wait: true });
+    const find = async () => (await getStatements()).items.find((s) => s.itemId === item.id)!;
+    expect((await find()).proposals.map((p) => p.field)).toContain("monthlyPremium");
+
+    expect(await setDeclinedIncrease({ id: item.id, date: "2025-11-15" })).toEqual({ declinedWithoutDocument: ["2025-11-15"] });
+    let state = await find();
+    expect(state.declinedWithoutDocument).toEqual(["2025-11-15"]);
+    expect(state.proposals.map((p) => p.field)).not.toContain("monthlyPremium");
+    expect(state.notes[0]).toMatch(/ohne Dokument vermerkt, 15\.11\.2025/);
+
+    // Editing the item in its dialog does not lose the recorded decline.
+    const [row] = await db.select().from(financeForecastItem).where(eq(financeForecastItem.id, item.id));
+    const { declinedIncreases: _dropped, ...withoutIt } = row.data as Record<string, unknown>;
+    await updateItem({ id: item.id, data: { ...withoutIt, surrenderValue: 71000 } });
+    expect((await find()).declinedWithoutDocument).toEqual(["2025-11-15"]);
+
+    // A decline dated before the announcement does not hold it back.
+    await setDeclinedIncrease({ id: item.id, date: "2025-11-15", remove: true });
+    await setDeclinedIncrease({ id: item.id, date: "2025-01-01" });
+    expect((await find()).proposals.map((p) => p.field)).toContain("monthlyPremium");
+    await expect(setDeclinedIncrease({ id: item.id, date: "15.11.2025" })).rejects.toThrow(/YYYY-MM-DD/);
+    setAuth("2", ["finance.view"]);
+    await expect(setDeclinedIncrease({ id: item.id, date: "2025-11-15" })).rejects.toThrow(/not found/);
+  });
+
+  it("takes corrected values, proposes from them and marks them as corrected", async () => {
+    const { item } = await lifeInsurance();
+    await addDocument({ userId: 1, text: LIFE_TEXT, tags: ["versicherungsnr:x-000111-01"] });
+    await scanForUser(1, null, { wait: true });
+    let state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
+    const st = state.latest!;
+    // The surrender value was misread; the right one equals the item.
+    const corrected = await correctStatementValues({ id: st.id, values: { ...st.values, surrenderValue: 70000 } });
+    expect(corrected).toMatchObject({ method: "user", status: "proposed" });
+    state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
+    expect(state.latest?.values.surrenderValue).toBe(70000);
+    expect(state.proposals.map((p) => p.field)).not.toContain("surrenderValue");
+
+    await expect(correctStatementValues({ id: st.id, values: { ...st.values, surrenderValue: -5 } })).rejects.toThrow(/surrenderValue/);
+    await expect(correctStatementValues({ id: st.id, values: { ...st.values, maturityDate: "01.10.2037" } })).rejects.toThrow(/maturityDate/);
+    setAuth("2", ["finance.view"]);
+    await expect(correctStatementValues({ id: st.id, values: st.values })).rejects.toThrow(/not found/);
   });
 });
 

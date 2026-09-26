@@ -5,6 +5,9 @@ import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
+import DatePicker from 'primevue/datepicker'
+import { useConfirm } from 'primevue/useconfirm'
 import Select from 'primevue/select'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
@@ -12,11 +15,13 @@ import ScrollX from '../../layout/ScrollX.vue'
 import { ApiError } from '../../../api/client'
 import {
   acceptForecastStatement,
+  correctForecastStatementValues,
   decideForecastStatementLink,
   linkForecastStatementDocument,
   rejectForecastStatement,
   rereadForecastStatementLink,
   searchForecastStatementDocuments,
+  setForecastDeclinedIncrease,
   setForecastStatementLinkKind,
   type ForecastDocKind,
   type ForecastDocumentCandidate,
@@ -27,6 +32,7 @@ import {
 } from '../../../api/finance'
 import { formatEur } from './forecastModel'
 import { formatMonth, sourceText } from './forecastStatements'
+import { parseLocalDate, toLocalIsoDate } from '../../../utils/dateFormat'
 
 /**
  * Standmitteilungen of one forecast item (#1343): which documents belong
@@ -160,6 +166,76 @@ watch(
 
 const linkDoc = (c: ForecastDocumentCandidate) => props.item && run(() => linkForecastStatementDocument(props.item!.id, c.id))
 
+const confirm = useConfirm()
+
+// ---- a declined increase without a document ----
+
+const declineOpen = ref(false)
+const declineDate = ref<Date>(new Date())
+const formatDay = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`
+const recordDecline = () =>
+  props.item &&
+  run(async () => {
+    await setForecastDeclinedIncrease(props.item!.id, toLocalIsoDate(declineDate.value))
+    declineOpen.value = false
+  })
+const removeDecline = (date: string) => props.item && run(() => setForecastDeclinedIncrease(props.item!.id, date, true))
+
+// ---- correcting what was read ----
+
+const editing = ref(false)
+const draft = ref<ForecastStatementValues | null>(null)
+const EDIT_FIELDS: Array<{ key: keyof ForecastStatementValues; label: string; kind: 'amount' | 'date' }> = [
+  { key: 'referenceDate', label: 'Stand', kind: 'date' },
+  ...VALUE_LABELS,
+]
+
+function startEdit() {
+  if (!latest.value) return
+  draft.value = { ...latest.value.values }
+  editing.value = true
+}
+
+function draftDate(key: keyof ForecastStatementValues): Date | null {
+  const v = draft.value?.[key]
+  return typeof v === 'string' ? parseLocalDate(v) : null
+}
+
+function setDraft(key: keyof ForecastStatementValues, v: number | string | null) {
+  if (draft.value) draft.value = { ...draft.value, [key]: v }
+}
+
+const saveEdit = () =>
+  latest.value &&
+  draft.value &&
+  run(async () => {
+    await correctForecastStatementValues(latest.value!.id, draft.value!)
+    editing.value = false
+  })
+
+/** Reading again replaces a correction: ask first. */
+function rereadAsking(l: ForecastStatementLink) {
+  if (latest.value?.method === 'user' && latest.value.documentId === l.documentId) {
+    confirm.require({
+      header: 'Neu lesen?',
+      message: 'Die Werte dieser Mitteilung wurden von Hand korrigiert. Neu lesen ersetzt die Korrektur durch das, was im Dokument erkannt wird.',
+      acceptLabel: 'Neu lesen',
+      rejectLabel: 'Abbrechen',
+      accept: () => void reread(l),
+    })
+  } else void reread(l)
+}
+
+watch(
+  () => props.visible,
+  (v) => {
+    if (!v) {
+      editing.value = false
+      declineOpen.value = false
+    }
+  },
+)
+
 const decide = (l: ForecastStatementLink, status: 'confirmed' | 'rejected') => run(() => decideForecastStatementLink(l.id, status))
 const reread = (l: ForecastStatementLink) => run(() => rereadForecastStatementLink(l.id))
 const accept = () => latest.value && run(() => acceptForecastStatement(latest.value!.id, chosen.value))
@@ -218,7 +294,7 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
                   :aria-label="`Art von ${l.title || 'Dokument'}`"
                   @update:model-value="setKind(l, $event)"
                 />
-                <Button icon="pi pi-refresh" size="small" text rounded :disabled="busy" aria-label="Neu lesen" v-tooltip.top="'Neu lesen'" @click="reread(l)" />
+                <Button icon="pi pi-refresh" size="small" text rounded :disabled="busy" aria-label="Neu lesen" v-tooltip.top="'Neu lesen'" @click="rereadAsking(l)" />
                 <Button icon="pi pi-times" size="small" text rounded severity="secondary" :disabled="busy" aria-label="Zuordnung lösen" v-tooltip.top="'Zuordnung lösen'" @click="decide(l, 'rejected')" />
               </template>
             </div>
@@ -228,6 +304,32 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
         <p class="muted stmt__hint">
           Die Art entscheidet, welcher Beitrag gilt: Nach einer abgelehnten Erhöhung wird der erhöhte Beitrag nicht vorgeschlagen.
         </p>
+
+        <div class="stmt__declined">
+          <ul v-if="state.declinedWithoutDocument.length" class="stmt__links">
+            <li v-for="d in state.declinedWithoutDocument" :key="d" class="stmt__link">
+              <div class="stmt__link-main">
+                <span>Erhöhung abgelehnt (ohne Dokument)</span>
+                <span class="muted">{{ formatDay(d) }}</span>
+              </div>
+              <Button icon="pi pi-times" size="small" text rounded severity="secondary" :disabled="busy" :aria-label="`Vermerk vom ${formatDay(d)} entfernen`" @click="removeDecline(d)" />
+            </li>
+          </ul>
+          <div v-if="declineOpen" class="stmt__decline-form">
+            <label for="stmt-decline-date" class="stmt__search-label">Abgelehnt am</label>
+            <DatePicker v-model="declineDate" input-id="stmt-decline-date" date-format="dd.mm.yy" show-icon size="small" />
+            <Button label="Vermerken" icon="pi pi-check" size="small" :disabled="busy || !declineDate" @click="recordDecline" />
+            <Button label="Abbrechen" size="small" text severity="secondary" @click="declineOpen = false" />
+          </div>
+          <Button
+            v-else
+            label="Erhöhung ohne Dokument als abgelehnt vermerken"
+            icon="pi pi-ban"
+            size="small"
+            text
+            @click="declineOpen = true"
+          />
+        </div>
 
         <Button
           v-if="!searchOpen"
@@ -259,15 +361,45 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
         <h3 class="stmt__title">
           Neueste Mitteilung mit Werten
           <span class="muted">· Stand {{ latest.referenceDate ? formatMonth(latest.referenceDate) : 'unbekannt' }}</span>
+          <span v-if="latest.method === 'user'" class="muted"> · von Hand korrigiert</span>
         </h3>
-        <dl v-if="latestValues.length" class="stmt__values">
+        <div v-if="editing && draft" class="stmt__edit">
+          <div v-for="f in EDIT_FIELDS" :key="f.key" class="stmt__edit-row">
+            <label :for="`stmt-edit-${f.key}`">{{ f.label }}</label>
+            <InputNumber
+              v-if="f.kind === 'amount'"
+              :input-id="`stmt-edit-${f.key}`"
+              :model-value="(draft[f.key] as number | null)"
+              mode="currency"
+              currency="EUR"
+              locale="de-DE"
+              size="small"
+              @update:model-value="setDraft(f.key, $event)"
+            />
+            <DatePicker
+              v-else
+              :input-id="`stmt-edit-${f.key}`"
+              :model-value="draftDate(f.key)"
+              date-format="dd.mm.yy"
+              size="small"
+              show-button-bar
+              @update:model-value="setDraft(f.key, $event instanceof Date ? toLocalIsoDate($event) : null)"
+            />
+          </div>
+          <div class="stmt__edit-actions">
+            <Button label="Abbrechen" size="small" text severity="secondary" @click="editing = false" />
+            <Button label="Korrektur speichern" icon="pi pi-check" size="small" :loading="busy" @click="saveEdit" />
+          </div>
+        </div>
+        <Button v-else label="Werte korrigieren" icon="pi pi-pencil" size="small" text class="stmt__edit-toggle" @click="startEdit" />
+        <dl v-if="!editing && latestValues.length" class="stmt__values">
           <template v-for="v in latestValues" :key="v.label">
             <dt>{{ v.label }}</dt>
             <dd>{{ v.text }}</dd>
           </template>
         </dl>
 
-        <template v-if="proposals.length">
+        <template v-if="proposals.length && !editing">
           <h4 class="stmt__subtitle">Abweichungen zum Eintrag</h4>
           <ScrollX>
             <table class="stmt__table">
@@ -297,7 +429,7 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
             </table>
           </ScrollX>
         </template>
-        <p v-else class="muted">Keine Abweichungen zum Eintrag.</p>
+        <p v-else-if="!editing" class="muted">Keine Abweichungen zum Eintrag.</p>
       </section>
 
       <section v-if="state.history.length">
@@ -313,7 +445,7 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
 
     <template #footer>
       <Button
-        v-if="latest && proposals.length"
+        v-if="latest && proposals.length && !editing"
         label="Verwerfen"
         severity="secondary"
         text
@@ -323,7 +455,7 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
       />
       <Button label="Schließen" severity="secondary" text @click="emit('update:visible', false)" />
       <Button
-        v-if="latest && proposals.length"
+        v-if="latest && proposals.length && !editing"
         :label="chosen.length === proposals.length ? 'Alle übernehmen' : `${chosen.length} übernehmen`"
         icon="pi pi-check"
         :loading="busy"
@@ -379,6 +511,46 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
   display: flex;
   align-items: center;
   gap: var(--space-1);
+}
+.stmt__declined {
+  margin-top: var(--space-2);
+}
+.stmt__decline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.stmt__edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.stmt__edit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+.stmt__edit-row :deep(.p-inputnumber),
+.stmt__edit-row :deep(.p-datepicker) {
+  width: 100%;
+  min-width: 0;
+}
+.stmt__edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.stmt__edit-toggle {
+  margin-bottom: var(--space-1);
+}
+@media (max-width: 639px) {
+  .stmt__edit-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
 }
 .stmt__search-toggle {
   margin-top: var(--space-1);
