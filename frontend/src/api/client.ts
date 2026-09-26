@@ -226,7 +226,9 @@ export async function apiFetch<T>(
       )
     }
 
-    return response.json()
+    // A void endpoint may answer without a body; that is success, not a JSON error.
+    const text = await response.text()
+    return (text ? JSON.parse(text) : undefined) as T
   } finally {
     cleanup()
   }
