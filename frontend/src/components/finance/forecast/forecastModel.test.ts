@@ -39,6 +39,26 @@ describe('forecastModel', () => {
     expect(describeTimeRef({ kind: 'age', personId: 2, age: 65 }, [], persons, '')).toBe('B mit 65')
   })
 
+  it('names the end of an item where it is set', () => {
+    const ctx = { milestones: [milestone], persons }
+    const clean = (t: string) => t.replace(/ /g, ' ')
+    // An end is exclusive: 2031-07-01 means the last month is 06/2031.
+    expect(clean(summarizeItem('expense', { amount: 900, frequency: 'monthly', end: { kind: 'date', date: '2031-07-01' } }, null, ctx))).toMatch(/, bis 06\/2031$/)
+    expect(clean(summarizeItem('expense', { amount: 900, frequency: 'monthly' }, null, ctx))).not.toMatch(/bis/)
+    expect(clean(summarizeItem('salary', { amount: 3000, end: { kind: 'milestone', milestoneId: 5 } }, null, ctx))).toBe('3.000 € / Monat, bis Ausstieg (A)')
+    // A salary without an end stops when its person leaves work.
+    expect(clean(summarizeItem('salary', { amount: 3000 }, null, ctx))).toBe('3.000 € / Monat, bis Ausstieg')
+    expect(clean(summarizeItem('pension', { monthlyAmount: 500, start: { kind: 'age', personId: 1, age: 67 } }, null, ctx))).toBe('500 € / Monat, ab A mit 67')
+    expect(clean(summarizeItem('life_insurance', { surrenderValue: 1000, projectedPayout: 2000, maturity: { kind: 'date', date: '2032-12-01' } }, null, ctx))).toBe(
+      'Rückkauf 1.000 €, Ablauf 12/2032: 2.000 €',
+    )
+    expect(clean(summarizeItem('asset', { currentValue: 10, monthlyContribution: 50, contributionEnd: { kind: 'date', date: '2030-01-01' } }, null, ctx))).toBe(
+      '10 €, Sparrate bis 12/2029',
+    )
+    // Without the context nothing changes.
+    expect(clean(summarizeItem('salary', { amount: 3000 }, null))).toBe('3.000 € / Monat')
+  })
+
   it('formats money without cents by default', () => {
     expect(formatEur(1234.56).replace(/ /g, ' ')).toBe('1.235 €')
     expect(formatEur(null)).toBe('–')
