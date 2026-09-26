@@ -48,6 +48,20 @@ export const Ueberfaellig: Story = {
   },
 }
 
+export const ErhoehungAbgelehnt: Story = {
+  name: 'Beitragserhöhung abgelehnt',
+  args: {
+    state: {
+      ...WITH_DIFF,
+      links: [
+        ...WITH_DIFF.links,
+        { id: 3, documentId: 503, title: 'Nachtrag Dynamik', docDate: '2026-03-02', documentType: null, matchKind: 'text', status: 'confirmed', kind: 'dynamic_declined', kindByUser: true },
+      ],
+      notes: ['Beitrag nicht vorgeschlagen: die Beitragserhöhung wurde abgelehnt (Schreiben vom 02.03.2026).'],
+    },
+  },
+}
+
 export const Telefon: Story = {
   name: 'Telefonbreite',
   parameters: { testViewport: { width: 360, height: 740 } },

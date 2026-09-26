@@ -3797,6 +3797,9 @@ export const financeForecastDocumentLink = pgTable(
     // How it was found: the reference tag the documents pipeline writes, or the text.
     match_kind: text("match_kind").notNull().$type<"tag" | "text" | "user">(),
     status: text("status").notNull().$type<"suggested" | "confirmed" | "rejected">(),
+    // statement | dynamic_increase | dynamic_declined | other (migration 0210)
+    doc_kind: text("doc_kind").notNull().default("statement").$type<"statement" | "dynamic_increase" | "dynamic_declined" | "other">(),
+    kind_by_user: boolean("kind_by_user").notNull().default(false),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
       .notNull()
       .defaultNow(),

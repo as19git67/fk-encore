@@ -1,16 +1,20 @@
 // Retirement forecast — endpoints for statements (#1343). The logic is in
 // forecast-statements.service.ts.
 
-import { api, APIError } from "encore.dev/api";
+import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { and, eq } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { documents, financeForecastDocumentLink, financeForecastItem, financeForecastStatement } from "../db/schema";
-import { applyProposals, computeProposals } from "./forecast-statements-extract";
+import { DOC_KINDS, applyProposals, type DocKind } from "./forecast-statements-extract";
 import {
+  effectiveProposals,
+  linkByHand,
   readAll,
+  searchDocuments,
+  type DocumentCandidateDto,
   scanForUser,
   statementsForUser,
   toStatementDto,
@@ -39,6 +43,38 @@ interface AcceptRequest {
 
 interface IdRequest {
   id: number;
+}
+
+interface LinkKindRequest {
+  id: number;
+  kind: DocKind;
+}
+
+interface DocumentSearchRequest {
+  q: Query<string>;
+}
+
+interface ManualLinkRequest {
+  id: number;
+  documentId: number;
+}
+
+async function linkDto(row: typeof financeForecastDocumentLink.$inferSelect): Promise<StatementLinkDto> {
+  const [doc] = await db
+    .select({ title: documents.title, docDate: documents.doc_date, documentType: documents.document_type })
+    .from(documents)
+    .where(eq(documents.id, row.document_id));
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    title: doc?.title ?? null,
+    docDate: doc?.docDate ?? null,
+    documentType: doc?.documentType ?? null,
+    matchKind: row.match_kind,
+    status: row.status,
+    kind: row.doc_kind,
+    kindByUser: row.kind_by_user,
+  };
 }
 
 // -----------------------------------------------------------------------
@@ -89,19 +125,47 @@ export const decideStatementLink = api(
           ),
         );
     }
-    const [doc] = await db
-      .select({ title: documents.title, docDate: documents.doc_date, documentType: documents.document_type })
-      .from(documents)
-      .where(eq(documents.id, row.document_id));
-    return {
-      id: row.id,
-      documentId: row.document_id,
-      title: doc?.title ?? null,
-      docDate: doc?.docDate ?? null,
-      documentType: doc?.documentType ?? null,
-      matchKind: row.match_kind,
-      status: row.status,
-    };
+    return linkDto(row);
+  },
+);
+
+export const setStatementLinkKind = api(
+  { expose: true, method: "POST", path: "/finance/forecast/statement-links/:id/kind", auth: true },
+  async (req: LinkKindRequest): Promise<StatementLinkDto> => {
+    const userId = authed();
+    if (!DOC_KINDS.includes(req.kind)) throw APIError.invalidArgument(`kind must be one of ${DOC_KINDS.join(", ")}`);
+    const [row] = await db
+      .update(financeForecastDocumentLink)
+      .set({ doc_kind: req.kind, kind_by_user: true })
+      .where(and(eq(financeForecastDocumentLink.id, req.id), eq(financeForecastDocumentLink.user_id, userId)))
+      .returning();
+    if (!row) throw APIError.notFound(`link ${req.id} not found`);
+    // A document now counted as a statement may never have been read.
+    if (row.status === "confirmed" && (req.kind === "statement" || req.kind === "dynamic_increase")) {
+      void readAll([{ itemId: row.item_id, documentId: row.document_id }]);
+    }
+    return linkDto(row);
+  },
+);
+
+export const searchStatementDocuments = api(
+  { expose: true, method: "GET", path: "/finance/forecast/statement-documents", auth: true },
+  async (req: DocumentSearchRequest): Promise<{ documents: DocumentCandidateDto[] }> => {
+    const userId = authed();
+    return { documents: await searchDocuments(userId, req.q ?? "") };
+  },
+);
+
+export const linkStatementDocument = api(
+  { expose: true, method: "POST", path: "/finance/forecast/items/:id/statement-links", auth: true },
+  async (req: ManualLinkRequest): Promise<void> => {
+    const userId = authed();
+    const [item] = await db
+      .select({ id: financeForecastItem.id })
+      .from(financeForecastItem)
+      .where(and(eq(financeForecastItem.id, req.id), eq(financeForecastItem.user_id, userId)));
+    if (!item) throw APIError.notFound(`item ${req.id} not found`);
+    if (!(await linkByHand(userId, req.id, req.documentId))) throw APIError.notFound(`document ${req.documentId} not found`);
   },
 );
 
@@ -131,13 +195,13 @@ export const acceptStatement = api(
     const [item] = await db.select().from(financeForecastItem).where(eq(financeForecastItem.id, st.item_id));
     if (!item) throw APIError.notFound(`item ${st.item_id} not found`);
 
-    const all = computeProposals(item.type, item.data, st.values);
+    const all = await effectiveProposals(item, { documentId: st.document_id, referenceDate: st.reference_date, values: st.values });
     const wanted = req.fields && req.fields.length > 0 ? all.filter((p) => req.fields!.includes(p.field)) : all;
     const now = new Date().toISOString();
     const data = applyProposals(item.data, wanted, { documentId: st.document_id, referenceDate: st.reference_date, now });
     await db.update(financeForecastItem).set({ data, updated_at: now }).where(eq(financeForecastItem.id, item.id));
     // Fully taken over when nothing is left to propose.
-    const left = computeProposals(item.type, data, st.values).length;
+    const left = (await effectiveProposals({ ...item, data }, { documentId: st.document_id, referenceDate: st.reference_date, values: st.values })).length;
     const [updated] = await db
       .update(financeForecastStatement)
       .set({ status: left === 0 ? "accepted" : "proposed", decided_at: now })

@@ -167,7 +167,13 @@ const PATTERNS: Pattern[] = [
     field: "contractValue",
     label: /((Fonds|Vertrags|Policen)guthaben|Deckungskapital|Vertragswert|Wert\s+Ihre[rs]\s+(Vertrag|Versicherung)\w*|Anteilswert)[^\d\n]{0,40}/i,
   },
-  { field: "premiumMonthly", label: /(monatliche[rn]?\s+Beitrag\w*|Beitrag\w*\s+(monatlich|mtl\.?)|Monatsbeitrag)[^\d\n]{0,30}/i },
+  // A premium increase (Dynamik) states the old and the new premium; the new one counts.
+  { field: "premiumMonthly", label: /neue[rn]?\s+(monatliche[rn]?\s+)?(Gesamt)?beitrag\w*[^\d\n]{0,30}/i },
+  {
+    field: "premiumMonthly",
+    label: /(monatliche[rn]?\s+Beitrag\w*|Beitrag\w*\s+(monatlich|mtl\.?)|Monatsbeitrag)[^\d\n]{0,30}/i,
+    not: /bisherig|alte[rn]?\s/i,
+  },
   { field: "premiumYearly", label: /(j(ä|ae)hrliche[rn]?\s+Beitrag\w*|Jahresbeitrag|Beitrag\w*\s+j(ä|ae)hrlich)[^\d\n]{0,30}/i },
   {
     field: "premiumEndDate",
@@ -204,6 +210,7 @@ export function parseStatementText(text: string): StatementValues {
       const start = m.index;
       const end = start + m[0].length;
       if (overlaps(start, end)) continue;
+      if ((out as unknown as Record<string, unknown>)[p.field] != null) break; // an earlier, more specific pattern had it
       if (p.not && p.not.test(text.slice(Math.max(0, start - 20), end))) continue;
       const window = text.slice(end, end + 90);
       const isDate = (DATE_FIELDS as string[]).includes(p.field);
@@ -228,7 +235,7 @@ export const LLM_FIELDS: Record<keyof StatementValues, string> = {
   contractValue: "Vertragsguthaben/Fondsguthaben/Deckungskapital in Euro",
   guaranteedPayout: "garantierte Ablaufleistung/Kapitalleistung in Euro",
   projectedPayout: "voraussichtliche Ablaufleistung einschließlich Überschüssen in Euro",
-  premiumMonthly: "monatlicher Beitrag in Euro",
+  premiumMonthly: "monatlicher Beitrag in Euro (bei einer angekündigten Beitragserhöhung/Dynamik: der neue Beitrag)",
   premiumYearly: "jährlicher Beitrag in Euro",
   premiumEndDate: "Ende der Beitragszahlung (YYYY-MM-DD)",
   maturityDate: "Ablauf des Vertrags (YYYY-MM-DD)",
@@ -477,3 +484,83 @@ export function contractKey(s: string): string {
 export function isSearchableKey(key: string): boolean {
   return key.length >= 5 && (key.match(/\d/g) ?? []).length >= 4;
 }
+
+/**
+ * A pattern that finds a contract number in running text however it is
+ * written: "L 1.234.567", "L1234567" and "1 234 567" are one number. Up to
+ * two separators (space, dot, slash, dash) may stand between any two
+ * characters. A key with a letter prefix also matches its digits alone,
+ * because letters often speak for the product and are left out. The source
+ * is valid as a JavaScript and as a PostgreSQL regular expression; match it
+ * case-insensitively.
+ */
+export function contractPattern(key: string): string {
+  const variants = [key];
+  const m = /^([a-z]+)(\d.*)$/.exec(key);
+  if (m && (m[2].match(/\d/g) ?? []).length >= 6) variants.push(m[2]);
+  const spread = (k: string) => [...k].join("[\\s./-]{0,2}");
+  return `(^|[^a-z0-9])(${variants.map(spread).join("|")})([^a-z0-9]|$)`;
+}
+
+// -----------------------------------------------------------------------
+// What kind of document it is
+// -----------------------------------------------------------------------
+
+/**
+ * statement: a Standmitteilung or similar with the contract's figures.
+ * dynamic_increase: an announced premium increase (Dynamik, Beitragsanpassung).
+ * dynamic_declined: the increase was declined or will not take place.
+ * other: belongs to the contract but says nothing about its values.
+ */
+export type DocKind = "statement" | "dynamic_increase" | "dynamic_declined" | "other";
+export const DOC_KINDS: readonly DocKind[] = ["statement", "dynamic_increase", "dynamic_declined", "other"];
+
+const DYNAMIC = String.raw`(Dynamik\w*|dynamische[rn]?\s+(Erh(ö|oe)hung|Anpassung)|Beitragserh(ö|oe)hung|Erh(ö|oe)hung\s+(des|Ihres)\s+Beitrag\w*|Beitragsanpassung|planm(ä|ae)(ß|ss)ige\s+Erh(ö|oe)hung)`;
+// Only confirmations: an announcement also says "you may object" and
+// "after two objections the option lapses", which must not read as declined.
+const DECLINED_RE = new RegExp(
+  [
+    String.raw`(Ihren|den)\s+Widerspruch\s+(gegen\s+[^.]{0,60}?)?(haben\s+wir\s+)?(erhalten|bestätig|zur\s+Kenntnis)`,
+    String.raw`wie\s+(von\s+Ihnen\s+)?gewünscht[^.]{0,80}?(nicht|keine)`,
+    String.raw`(Erh(ö|oe)hung|Dynamik\w*|Anpassung)\s+(wird|wurde)\s+(nicht|ausgesetzt)`,
+    String.raw`(Beitrag|Beiträge)\s+(bleibt|bleiben)\s+(daher\s+)?unverändert`,
+  ].join("|"),
+  "i",
+);
+const INCREASE_RE = new RegExp(DYNAMIC, "i");
+
+const LLM_KINDS: Record<string, DocKind> = {
+  standmitteilung: "statement",
+  dynamik_erhoehung: "dynamic_increase",
+  dynamik_abgelehnt: "dynamic_declined",
+  sonstiges: "other",
+};
+
+/** Asked of the model next to the values (key "documentKind"). */
+export const LLM_KIND_FIELD =
+  'Art des Schreibens, genau einer dieser Werte: "standmitteilung" (Stand/Werte des Vertrags), ' +
+  '"dynamik_erhoehung" (angekündigte Beitragserhöhung/Dynamik), "dynamik_abgelehnt" (Bestätigung, dass eine Erhöhung ' +
+  'nicht durchgeführt wird, z. B. nach Widerspruch), "sonstiges"';
+
+/** The model's kind, or null when it gave none of the four. */
+export function parseLlmKind(raw: unknown): DocKind | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v = (raw as Record<string, unknown>).documentKind;
+  if (typeof v !== "string") return null;
+  return LLM_KINDS[v.trim().toLowerCase().replace("ö", "oe")] ?? null;
+}
+
+/**
+ * The kind by the text and the documents module's type. A Standmitteilung
+ * that mentions its Dynamik in passing stays a statement.
+ */
+export function classifyDocument(text: string, documentType: string | null): DocKind {
+  if (documentType === "standmitteilung") return "statement";
+  const head = text.slice(0, 6000);
+  if (DECLINED_RE.test(head)) return "dynamic_declined";
+  if (INCREASE_RE.test(head)) return "dynamic_increase";
+  return "statement";
+}
+
+/** Item data keys that hold the premium; a declined increase leaves them alone. */
+export const PREMIUM_FIELDS: ReadonlySet<string> = new Set(["monthlyPremium", "monthlyContribution", "amount"]);
