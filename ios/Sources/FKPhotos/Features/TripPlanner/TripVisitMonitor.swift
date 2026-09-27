@@ -52,9 +52,51 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
     /// "reached" just because the clock says it should be by now.
     private(set) var openStopOsmRef: String?
 
+    /// The plan the fences are for, when there are any — what a wake
+    /// with no screen behind it falls back on to find the running day.
+    var watchedPlanId: Int? { planId }
+
     private override init() {
         super.init()
+        // Whatever the last run knew about its fences. iOS keeps the
+        // fences across a relaunch and wakes a terminated app for them;
+        // without this the app would wake knowing nothing — no plan, no
+        // stop behind the fence, no arrival time for a stay — and drop
+        // the visit on the floor. Out of the first trial: a whole day
+        // with no stop ticked off.
+        if let state = TripVisitMonitorState.load() {
+            planId = state.planId
+            dayIndex = state.dayIndex
+            regions = Dictionary(state.regions.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
+            stopIds = state.stopIds
+            tracker = TripDwellTracker(openStays: state.openStays)
+            openStopOsmRef = state.openStopOsmRef
+        }
+        // Set last, and in `init`: CoreLocation hands a relaunched app
+        // the event that woke it as soon as a delegate exists, and that
+        // delegate must already know the state above.
         manager.delegate = self
+    }
+
+    /// Called from the app delegate at launch, before anything else
+    /// (§7.1). Creating the monitor is the point: iOS delivers the
+    /// fence crossing that relaunched the app only to a location
+    /// manager that exists by then, and nothing else creates this one
+    /// until the day screen appears — which, in a pocket, it never does.
+    static func resume() {
+        _ = shared
+    }
+
+    /// Write what the monitor knows, so the next launch knows it too.
+    private func persist() {
+        TripVisitMonitorState(
+            planId: planId,
+            dayIndex: dayIndex,
+            regions: Array(regions.values),
+            stopIds: stopIds,
+            openStays: tracker.openStays,
+            openStopOsmRef: openStopOsmRef,
+        ).save()
     }
 
     /// Start watching the stops of the day on screen.
@@ -76,18 +118,20 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
         quarters: TripMonitoredRegion? = nil,
     ) {
         guard CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else { return }
-        self.planId = planId
-        self.dayIndex = dayIndex
-        self.stopIds = stopIdsByRef
-
         let wanted = TripGeofencePlan.regions(for: stops) + (quarters.map { [$0] } ?? [])
         let wantedIds = Set(wanted.map(\.identifier))
 
-        for (identifier, region) in regions where !wantedIds.contains(identifier) {
+        // What the fences meant before this call: a stay at a fence
+        // that is being dropped is reported against it, not against the
+        // new set that no longer knows it.
+        let previousRegions = regions
+        let previousStopIds = stopIds
+        let previousPlanId = self.planId
+        for (identifier, region) in previousRegions where !wantedIds.contains(identifier) {
             stopMonitoring(region)
             if let stay = tracker.exited(identifier, at: Date()) {
                 if openStopOsmRef == identifier { openStopOsmRef = nil }
-                Task { await report(stay) }
+                Task { await report(stay, regions: previousRegions, stopIds: previousStopIds, planId: previousPlanId) }
             }
         }
 
@@ -95,7 +139,11 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             if let previous = regions[region.identifier] { stopMonitoring(previous) }
             startMonitoring(region)
         }
-        regions = Dictionary(uniqueKeysWithValues: wanted.map { ($0.identifier, $0) })
+        regions = Dictionary(wanted.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
+        self.planId = planId
+        self.dayIndex = dayIndex
+        self.stopIds = stopIdsByRef
+        persist()
 
         // "Always" is what lets iOS deliver a crossing to an app that is
         // not running. Without it the fences still exist but only fire
@@ -118,19 +166,56 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
         Task { await flushQueuedReports() }
     }
 
+    /// Watch the day being lived — from a wake, not from a screen.
+    ///
+    /// The fences belong to today, whatever day is on screen: someone
+    /// looking at tomorrow over breakfast has not left today's stops.
+    /// And a new day moves them without anyone opening the plan: the
+    /// first wake of the morning (a significant move, a foreground)
+    /// lands here.
+    ///
+    /// Does nothing when the fences are already this day's. That is not
+    /// only thrift: `watch` asks iOS whether the phone is inside each
+    /// fence, the answer is itself a wake, and a wake comes back here —
+    /// re-watching every time would never stop.
+    func follow(_ running: TripRunningDay) {
+        let stops = running.day.blocks.flatMap(\.stops)
+        let quarters = TripGeofencePlan.anchorRegion(
+            legId: running.leg.id, anchor: running.leg.anchor, radiusM: running.leg.anchorRadiusM)
+        let wantedIds = Set(TripGeofencePlan.regions(for: stops).map(\.identifier) + [quarters.identifier])
+        if planId == running.plan.id, dayIndex == running.day.dayIndex, Set(regions.keys) == wantedIds {
+            return
+        }
+        watch(
+            planId: running.plan.id,
+            dayIndex: running.day.dayIndex,
+            stops: stops,
+            stopIdsByRef: Dictionary(stops.map { ($0.osmRef, $0.rowId) }, uniquingKeysWith: { first, _ in first }),
+            quarters: quarters,
+        )
+    }
+
     /// Stop watching, closing anything still open.
     func stop() {
         for region in regions.values { stopMonitoring(region) }
         let closing = tracker.closeAll(at: Date())
-        regions.removeAll()
-        stopIds.removeAll()
         openStopOsmRef = nil
         manager.stopMonitoringSignificantLocationChanges()
-        for stay in closing {
-            Task { await report(stay) }
-        }
+        // Reported before the plan is forgotten: `report` needs to know
+        // which plan and which fence a stay belongs to.
+        let regionsAtStop = regions
+        let stopIdsAtStop = stopIds
+        let planIdAtStop = planId
+        regions.removeAll()
+        stopIds.removeAll()
         planId = nil
         dayIndex = nil
+        TripVisitMonitorState.clear()
+        for stay in closing {
+            Task {
+                await report(stay, regions: regionsAtStop, stopIds: stopIdsAtStop, planId: planIdAtStop)
+            }
+        }
     }
 
     /// Is this the quarters' fence rather than a stop's?
@@ -177,6 +262,17 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
     /// product decision and one that lives in two places drifts
     /// (`visits.ts`).
     private func report(_ stay: TripStay) async {
+        await report(stay, regions: regions, stopIds: stopIds, planId: planId)
+    }
+
+    /// The same, against the fences as they were when the stay ended —
+    /// `stop()` and `watch` forget or replace them straight after.
+    private func report(
+        _ stay: TripStay,
+        regions: [String: TripMonitoredRegion],
+        stopIds: [String: Int],
+        planId: Int?,
+    ) async {
         guard let planId, let region = regions[stay.regionId], region.kind == .stop else { return }
         guard TripDwellRule.isWorthReporting(stay, plannedMinutes: region.plannedMinutes) else {
             return
@@ -260,6 +356,7 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             } else {
                 tracker.entered(region.identifier, at: now)
                 openStopOsmRef = region.identifier
+                persist()
             }
             pulse(.fenceEntered)
         }
@@ -272,6 +369,7 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             guard !isQuarters(region.identifier) else { return }
             if openStopOsmRef == region.identifier { openStopOsmRef = nil }
             guard let stay = tracker.exited(region.identifier, at: now) else { return }
+            persist()
             await report(stay)
         }
     }
@@ -311,6 +409,7 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             } else {
                 tracker.entered(region.identifier, at: now)
                 openStopOsmRef = region.identifier
+                persist()
             }
             pulse(.fenceEntered)
         }
@@ -323,6 +422,48 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
 /// is a network, and by then the monitor may be watching another day.
 /// The wire body is the same shape `visits.ts` has always taken; the
 /// plan id only says which URL it goes to.
+/// The app delegate's handle on the visit monitor, which is internal
+/// to this module (§7.1). See `TripVisitMonitor.resume()`.
+public enum TripLocationLaunch {
+    @MainActor
+    public static func resume() {
+        TripVisitMonitor.resume()
+    }
+}
+
+/// What the visit monitor knows, kept across launches (§7.1).
+///
+/// iOS keeps a fence after the app is terminated and relaunches the app
+/// in the background when it is crossed — often hours later, after the
+/// system reclaimed the memory. Everything the monitor held then is
+/// gone unless it was written down: which plan, which stop is behind
+/// which fence, and when the group walked into a place they have not
+/// yet left. The last one is what a stay is measured from.
+struct TripVisitMonitorState: Codable {
+    var planId: Int?
+    var dayIndex: Int?
+    var regions: [TripMonitoredRegion]
+    var stopIds: [String: Int]
+    var openStays: [String: Date]
+    var openStopOsmRef: String?
+
+    static let key = "trip.visitMonitor.state"
+
+    static func load(from store: UserDefaults = .standard) -> TripVisitMonitorState? {
+        guard let data = store.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(TripVisitMonitorState.self, from: data)
+    }
+
+    func save(to store: UserDefaults = .standard) {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        store.set(data, forKey: Self.key)
+    }
+
+    static func clear(from store: UserDefaults = .standard) {
+        store.removeObject(forKey: key)
+    }
+}
+
 struct TripVisitReport: Codable, Equatable, Sendable {
     let planId: Int
     let stopId: Int?

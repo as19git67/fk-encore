@@ -58,6 +58,48 @@ export function buildApnsMessage(payload: PushPayload, topic: string): ApnsMessa
   return { body, headers };
 }
 
+/**
+ * An update to a Live Activity (§8.5 of the trip concept).
+ *
+ * Not a notification: no alert, no sound. Apple routes it by the
+ * activity's own push token and a topic with the `.push-type.liveactivity`
+ * suffix, and replaces the activity's content with `content-state` —
+ * which must decode as the app's `ContentState`, key for key.
+ *
+ * `priority` 10 is delivered at once and counts against a budget Apple
+ * keeps per app; 5 is delivered when convenient. A block changing is
+ * worth the 10; a stop changing within a block is not.
+ */
+export interface LiveActivityPush {
+  event: "update" | "end";
+  contentState: Record<string, unknown>;
+  /** When the content stops being true; iOS then shows it as stale. */
+  staleDate?: Date | null;
+  /** For `end`: when the Lock Screen lets go of it. */
+  dismissalDate?: Date | null;
+  timestamp: Date;
+  priority: 5 | 10;
+}
+
+export function buildLiveActivityMessage(push: LiveActivityPush, bundleId: string): ApnsMessage {
+  const seconds = (d: Date) => Math.floor(d.getTime() / 1000);
+  const aps: Record<string, unknown> = {
+    timestamp: seconds(push.timestamp),
+    event: push.event,
+    "content-state": push.contentState,
+  };
+  if (push.staleDate) aps["stale-date"] = seconds(push.staleDate);
+  if (push.dismissalDate) aps["dismissal-date"] = seconds(push.dismissalDate);
+  return {
+    body: { aps },
+    headers: {
+      "apns-topic": `${bundleId}.push-type.liveactivity`,
+      "apns-push-type": "liveactivity",
+      "apns-priority": String(push.priority),
+    },
+  };
+}
+
 /** A device token is 32 bytes as 64 hex characters (longer on newer
  * devices is allowed by Apple, so only the alphabet is checked). */
 export function normaliseDeviceToken(raw: string): string | null {

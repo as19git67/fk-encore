@@ -11,10 +11,13 @@ import Foundation
 /// — blocks, stops, light. `TripVisitMonitor.openStopOsmRef` corrects
 /// the plan's clock-math guess with what a geofence actually confirmed.
 ///
-/// No server push: everything the Activity shows is computed locally,
-/// the same way the day screen's own time slider is (§8.3), and a
-/// finished plan is already downloadable whole for exactly this kind of
-/// offline use (§3.9).
+/// Everything the Activity shows is computed locally, the same way the
+/// day screen's own time slider is (§8.3). Out of the first trial,
+/// that alone left "Mittag bis 14:00" on the Lock Screen at dinner: a
+/// phone lying still gets no wake to recompute it. So the Activity is
+/// also requested with a push token, which goes to the server
+/// (`live-activity.ts`); the server computes the same content and
+/// pushes it at each block boundary while the app sleeps.
 @MainActor
 final class TripDayActivityManager {
     static let shared = TripDayActivityManager()
@@ -24,6 +27,9 @@ final class TripDayActivityManager {
     /// it and starts a fresh one instead of updating the wrong content
     /// under the old attributes.
     private var activePlanId: Int?
+    /// The Activity's current push token, hex, once iOS handed one out.
+    private var pushToken: String?
+    private var tokenTask: Task<Void, Never>?
 
     private init() {}
 
@@ -62,6 +68,18 @@ final class TripDayActivityManager {
         // that is marked as old rather than passed off as current.
         let staleDate = TripDayActivityContent.staleDate(blockEndMinutes: content.blockEndMinutes, now: now)
 
+        // After a relaunch the Activity from the last run is still on
+        // the Lock Screen and this process does not know it. Adopt it:
+        // a new one cannot be started from the background, so without
+        // this a woken app could neither update nor replace it.
+        if activity == nil,
+           let existing = Activity<TripDayActivityAttributes>.activities.first(where: { $0.attributes.planId == planId }) {
+            activity = existing
+            activePlanId = planId
+            pushToken = existing.pushToken.map { $0.map { String(format: "%02x", $0) }.joined() }
+            watchPushToken(of: existing, planId: planId)
+        }
+
         if let activity, activePlanId == planId {
             await activity.update(.init(state: content, staleDate: staleDate))
             return
@@ -70,11 +88,44 @@ final class TripDayActivityManager {
         await end()
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         let attributes = TripDayActivityAttributes(planId: planId, dayTitle: running.leg.anchorTitle)
-        activity = try? Activity.request(
-            attributes: attributes,
-            content: .init(state: content, staleDate: staleDate)
-        )
+        let initial = ActivityContent(state: content, staleDate: staleDate)
+        // With a push token, so the server can keep it current while the
+        // phone sleeps. Without one if iOS refuses that (push not set up
+        // on this build): a local Activity is still better than none.
+        activity = (try? Activity.request(attributes: attributes, content: initial, pushType: .token))
+            ?? (try? Activity.request(attributes: attributes, content: initial))
         activePlanId = activity != nil ? planId : nil
+        if let activity { watchPushToken(of: activity, planId: planId) }
+    }
+
+    /// iOS hands the token out asynchronously and may rotate it; each
+    /// one goes to the server, which answers the same token with an
+    /// upsert.
+    private func watchPushToken(of activity: Activity<TripDayActivityAttributes>, planId: Int) {
+        tokenTask?.cancel()
+        tokenTask = Task { [weak self] in
+            for await data in activity.pushTokenUpdates {
+                let token = data.map { String(format: "%02x", $0) }.joined()
+                self?.pushToken = token
+                await Self.register(token: token, planId: planId)
+            }
+        }
+    }
+
+    private static func register(token: String, planId: Int) async {
+        struct Body: Encodable {
+            let token: String
+            let environment: String
+            let timeZone: String
+        }
+        struct Registered: Decodable { let registered: Bool }
+        // A failure is not worth surfacing: the Activity still works
+        // locally, and the next token or the next start tries again.
+        _ = try? await APIClient.shared.post(
+            "/trip-planner/plans/\(planId)/live-activity",
+            body: Body(token: token, environment: RemotePushManager.environment,
+                       timeZone: TimeZone.current.identifier)
+        ) as Registered
     }
 
     /// Ends whatever Activity is running, if any. Called when the trip
@@ -82,7 +133,26 @@ final class TripDayActivityManager {
     /// that end a trip outright (`TripStore.endTrip()`, the auto-end
     /// suggestion being accepted).
     func end() async {
-        guard let activity else { return }
+        // An Activity from an earlier run of the app is ended too: this
+        // process may never have held it, and it would otherwise stay
+        // on the Lock Screen until iOS gives up on it.
+        guard let activity else {
+            for leftover in Activity<TripDayActivityAttributes>.activities {
+                await leftover.end(nil, dismissalPolicy: .immediate)
+            }
+            return
+        }
+        tokenTask?.cancel()
+        tokenTask = nil
+        if let token = pushToken, let planId = activePlanId {
+            // The server stops pushing to an Activity that is gone.
+            struct Body: Encodable { let token: String }
+            struct Removed: Decodable { let removed: Bool }
+            _ = try? await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/live-activity/end", body: Body(token: token)
+            ) as Removed
+        }
+        pushToken = nil
         await activity.end(nil, dismissalPolicy: .immediate)
         self.activity = nil
         activePlanId = nil

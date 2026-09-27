@@ -382,6 +382,17 @@ struct TripPlanDayView: View {
     /// and re-deriving them when the day or leg changes is cheaper than
     /// keeping a second copy of "which day are we looking at".
     private func watchStops() {
+        // While a trip runs the fences belong to today, not to the day
+        // on screen: leafing through tomorrow must not take them off
+        // the stops the group is walking to (§7.1). The day being lived
+        // sets them itself (`TripVisitMonitor.follow`).
+        if isTravelling {
+            if viewModel.isToday, let plan = viewModel.plan,
+               let running = TripRunningDay.of(plan: plan, light: viewModel.light, now: Date()) {
+                TripVisitMonitor.shared.follow(running)
+            }
+            return
+        }
         let stops = viewModel.stopsOfDay
         guard let leg = viewModel.leg, !stops.isEmpty || viewModel.isToday else {
             TripVisitMonitor.shared.stop()
