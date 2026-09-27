@@ -2129,6 +2129,18 @@ jetzt dasselbe wie das Menü der Zeile — Erledigt, Übersprungen, und bei eine
 abgehakten Stopp „Doch wieder offen" —, dieselbe Schreibung, kein Neuplanen.
 Das Blatt schließt sich, der Pin wechselt die Farbe: das ist die Bestätigung.
 
+**Aus der Erprobung: jeder Weg zum Spot kann dasselbe (umgesetzt).** Die
+Karte konnte abhaken und ausblenden, aber nicht verschieben; die Liste konnte
+verschieben, anheften und zurücklegen, aber nicht ausblenden; die
+Detailansicht hinter der Karte konnte gar nichts. Was möglich war, hing am
+Weg, auf dem man gekommen war. Jetzt entstehen die Aktionen eines Spots an
+einer Stelle — eine Liste für eingeplante Stopps, eine für Kandidaten — und
+Menü, Detailansicht, Pin-Sheet und die Detailansicht dahinter zeigen dieselbe.
+Unterschiede kommen nur aus dem Zustand (Erledigtes wird nicht verschoben,
+nur Kandidaten werden eingeplant). „Für später merken" gibt es damit auch für
+eingeplante Stopps: eine Kopie in den Ideenvorrat, der Stopp bleibt, wo er
+ist. Die Regel steht für künftige Änderungen in den Projektanweisungen.
+
 **Aus der Erprobung: die Vergangenheit ist kein Ziel (umgesetzt).** Am zweiten
 Tag bot „In anderen Block verschieben" noch Tag 1 an. Der Blockwähler lässt
 jetzt weg, was vorbei ist — gestern ganz, und heute die Blöcke, an denen die
@@ -2215,12 +2227,53 @@ neu gelöst.)
 
 Zwei Dinge bleiben absichtlich offen. **Die Live Activity in einem Museum**: Wer
 zwei Stunden drin steht, bewegt sich nicht und wird nicht geweckt; der Inhalt
-ist dann als veraltet markiert, aber nicht neu. Die saubere Lösung ist ein
-Push an die Activity zu jedem Blockwechsel — die Push-Infrastruktur gibt es
-(#765), der `liveactivity`-Pushtyp und die Activity-Tokens noch nicht. Und
+ist dann als veraltet markiert, aber nicht neu. *(Nachgereicht, umgesetzt:
+siehe „Der Sperrbildschirm, während das Telefon schläft" unten.)* Und
 **die Zäune gehören jetzt der Reise, nicht dem Bildschirm**: Sie fielen bisher,
 sobald man den Tagesplan verließ, und blieben nur, solange man ihn ansah — ein
 Zaun, der im Hintergrund nichts meldet, weil er dort nie stand.
+
+**Nachgereicht: der Sperrbildschirm, während das Telefon schläft (Etappe 12b,
+umgesetzt).** Die offene Stelle aus Etappe 12. Die App fordert die Live Activity
+jetzt mit Push-Token an (`pushType: .token`) und gibt den Token samt Zeitzone an
+den Server (`POST …/plans/:planId/live-activity`). Der Server rechnet denselben
+Inhalt wie die App (`live-activity-content.ts`, Zeile für Zeile
+`TripDayActivityContent` und `TripDayTimeline.position`) und schickt ihn alle
+fünf Minuten, **wenn er sich geändert hat** — an jeder Blockgrenze mit hoher
+Priorität, bei einem Stoppwechsel im Block mit niedriger. Nach dem letzten
+Block des Tages beendet er die Activity und vergisst den Token; ein Token, den
+Apple nicht mehr kennt, fällt ebenso heraus, und keiner lebt länger als 30
+Stunden.
+
+Die App bleibt die genauere Quelle: Ein Zaun weiß, an welchem Stopp man steht,
+die Uhr rät es nur. Deshalb spricht der Server nur, wenn sich *seine* Antwort
+ändert, und redet dem Telefon nicht alle fünf Minuten dazwischen. Die beiden
+Rechnungen müssen gleich bleiben — wer eine ändert, ändert die andere; die
+Tests beider Seiten spielen dieselben Fälle durch.
+
+**Nachgereicht aus der Durchsicht nach der Erprobung: die Zäune überleben die
+App.** Drei Fehler, die zusammen erklären können, warum am ersten Tag kein
+einziger Stopp erkannt wurde:
+
+1. **Nach einem Beenden wusste die App nichts mehr von ihren Zäunen.** iOS
+   behält die Zäune, wenn es die App im Hintergrund beendet, und startet sie
+   neu, sobald einer überschritten wird. Aber niemand legte beim Start den
+   Standortdienst an — das tat erst der Tagesbildschirm —, und selbst dann
+   fehlten Plan, Stopp hinter dem Zaun und die Ankunftszeit eines offenen
+   Aufenthalts; alles lag nur im Speicher. Jetzt legt der App-Start den Dienst
+   sofort an (`TripLocationLaunch.resume()`), und der Monitor schreibt seinen
+   Zustand bei jeder Änderung weg (`TripVisitMonitorState`) und liest ihn beim
+   Start wieder. Ebenso fragt ein Wecken ohne Bildschirm selbst nach der
+   laufenden Reise, statt auf die Tab-Leiste zu warten, und die Live Activity
+   übernimmt die des letzten Laufs, statt sie zu übersehen.
+2. **Die Zäune folgten dem Bildschirm, nicht dem Tag.** Wer beim Frühstück
+   den morgigen Tag ansah, nahm die Zäune von den heutigen Stopps. Und am
+   nächsten Morgen standen sie noch um gestern, bis jemand den Plan öffnete.
+   Jetzt gehören sie dem gelebten Tag: jedes Wecken setzt sie dorthin
+   (`TripVisitMonitor.follow`), der Bildschirm fasst sie unterwegs nicht an.
+3. **Beim Abbau wurde vergessen, bevor gemeldet wurde.** Ein Aufenthalt, der
+   beim Abbau eines Zauns noch offen war, sollte gemeldet werden — die
+   Zuordnung war da aber schon gelöscht, und die Meldung verpuffte.
 
 **Aus der Erprobung, zweiter Tag: nichts geht verloren, und die App fragt
 (Etappe 13, umgesetzt).** Am ersten Tag wurde kein einziger Stopp abgehakt —

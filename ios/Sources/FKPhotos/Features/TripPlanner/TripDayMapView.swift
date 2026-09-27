@@ -20,26 +20,32 @@ struct TripDayMapView: View {
     /// user-location puck. Passed in rather than computed here so the
     /// view stays a pure function of its inputs.
     let isRunning: Bool
-    /// Take this spot out of the running for the whole trip (§5).
+    /// What can be done with a stop — the same list the day's rows
+    /// and the detail screen offer (§8.4).
     ///
-    /// A closure rather than the plan's view model: the map stays a
-    /// pure function of what it is given, and the one thing it cannot
-    /// compute — what happens to the trip — arrives from the screen
-    /// that owns it. Nil leaves the sheet read-only.
-    var onHide: (@MainActor (TripStop) async -> Void)?
-    /// Tick a stop off, skip it, or reopen it — from the pin (§8.5).
+    /// Out of the trial: the map could tick off and hide, the list
+    /// could move, pin and return to the pool, and which of them was
+    /// reachable depended on the way somebody had come. A closure
+    /// rather than the plan's view model keeps the map a function of
+    /// what it is given; nil leaves the sheet read-only.
     ///
-    /// Out of the first trial: the map is where you stand when you
-    /// have just seen the place, and the sheet could show everything
-    /// about the stop except let you say so. Nil leaves the sheet
-    /// read-only, as for `onHide`.
-    var onMark: (@MainActor (TripStop, TripStopStatus) async -> Void)?
+    /// The second argument queues work for after the sheet has gone —
+    /// what opens a screen of its own (the block picker) cannot open
+    /// while this sheet is still up.
+    var stopActions: (@MainActor (TripStop, _ afterSheet: @escaping @MainActor (@escaping @MainActor () -> Void) -> Void)
+        -> [TripPinSheetAction])?
+    /// For the detail screen behind the sheet: where a note goes, and
+    /// whether the spot keeps the rain off.
+    var onSave: ((TripSpotEdit) async -> Void)?
+    var shelter: (@MainActor (String) -> TripSpotShelter?)?
     /// How the group moves, for the detail screen's route button.
     var mode: TripTransportMode = .foot
 
     @State private var sliderMinutes: Double = 0
     @State private var sliderActive = false
     @State private var selected: Selection?
+    /// Work an action queued for when the sheet is gone.
+    @State private var afterSheet: (@MainActor () -> Void)?
     @State private var showLegend = false
     /// Whether the legend has ever been shown. The first map somebody
     /// opens explains its colours by itself; from then on the button
@@ -98,12 +104,19 @@ struct TripDayMapView: View {
                 }
             }
         }
-        .sheet(item: $selected) { pick in
+        .sheet(item: $selected, onDismiss: {
+            let work = afterSheet
+            afterSheet = nil
+            work?()
+        }) { pick in
             TripPinDetailSheet(
                 detail: TripPinDetail.of(pick.stop, number: pick.number, in: day),
-                actions: actions(for: pick),
+                actions: stopActions?(pick.stop, { work in afterSheet = work }) ?? [],
                 spot: TripSpotDetail(pick.stop),
                 mode: mode,
+                onSave: onSave,
+                light: light?.hint(for: pick.stop.osmRef),
+                shelter: shelter?(pick.stop.osmRef),
             )
         }
         .onAppear {
@@ -115,63 +128,6 @@ struct TripDayMapView: View {
         }
     }
 
-    /// Hiding the tapped spot, or nothing at all when the screen above
-    /// gave no way to (§5).
-    ///
-    /// Written out rather than inlined into the sheet so the closure
-    /// carries its actor: it touches `selected`, which belongs to this
-    /// view.
-    private func actions(for pick: Selection) -> [TripPinSheetAction] {
-        var actions: [TripPinSheetAction] = []
-        // The status first: it is what somebody standing at the place
-        // reaches for. Both answers are offered while the stop is
-        // open; a settled one offers the way back instead. The sheet
-        // closes on either — the pin changes colour behind it, which
-        // is the confirmation.
-        if let onMark {
-            let status = pick.stop.stopStatus
-            if status != .done {
-                actions.append(TripPinSheetAction(
-                    id: "done", title: "Erledigt", systemImage: "checkmark",
-                    run: { await onMark(pick.stop, .done); selected = nil },
-                ))
-            }
-            if status != .skipped {
-                actions.append(TripPinSheetAction(
-                    id: "skipped", title: "Übersprungen", systemImage: "xmark",
-                    run: { await onMark(pick.stop, .skipped); selected = nil },
-                ))
-            }
-            if status != .planned {
-                actions.append(TripPinSheetAction(
-                    id: "reopen", title: "Doch wieder offen", systemImage: "arrow.uturn.backward",
-                    run: { await onMark(pick.stop, .planned); selected = nil },
-                ))
-            }
-        }
-        guard let onHide else { return actions }
-        return actions + [
-            TripPinSheetAction(
-                id: "hide",
-                title: "Für diese Reise ausblenden",
-                systemImage: "eye.slash",
-                role: .destructive,
-                // The same sentence as in the pool, because it is the
-                // same "no": it holds for the whole trip and it can be
-                // taken back.
-                footer: "Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch beim "
-                    + "nächsten Neuplanen nicht. Rückgängig bei den Kandidaten unter "
-                    + "„Ausgeblendet“.",
-                run: {
-                    await onHide(pick.stop)
-                    // The pin is gone from the day, so the selection
-                    // must go too: it would otherwise re-open a sheet
-                    // about a stop this trip no longer has.
-                    selected = nil
-                },
-            ),
-        ]
-    }
 
     private var map: some View {
         TripSpotMapView(

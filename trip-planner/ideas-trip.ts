@@ -258,6 +258,23 @@ export interface KeepForNextTimeRequest {
   ownerId?: number;
 }
 
+/** What a kept place brings into the collection, from the pool or a day. */
+interface KeptPlace {
+  osmRef: string;
+  name: string | null;
+  localName?: string | null;
+  lat: number;
+  lon: number;
+  category: string;
+  kind?: string | null;
+  dwellMinutes: number;
+  note?: string | null;
+  sourceUrl?: string | null;
+  wikipediaUrl?: string | null;
+  facadeAzimuth?: number | null;
+  unmatched?: boolean;
+}
+
 /**
  * What the trip did not use goes back into the collection (§20.3).
  *
@@ -273,9 +290,25 @@ export const keepForNextTime = api(
     if (!plan) throw APIError.notFound("plan not found");
 
     const wanted = new Set(req.osmRefs);
-    const candidates = plan.legs.flatMap((leg) => leg.pool).filter((c) => wanted.has(c.osmRef));
+    // From the pool, and from the days: a planned stop can be kept for
+    // next time just as well (§8.4 — what the pool offers on a spot,
+    // the day offers too). The stop stays where it is; this is a copy.
+    const byRef = new Map<string, KeptPlace>();
+    for (const leg of plan.legs) {
+      for (const c of leg.pool) {
+        if (wanted.has(c.osmRef) && !byRef.has(c.osmRef)) byRef.set(c.osmRef, { ...c, unmatched: c.unmatched });
+      }
+      for (const day of leg.days) {
+        for (const block of day.blocks) {
+          for (const stop of block.stops) {
+            if (wanted.has(stop.osmRef) && !byRef.has(stop.osmRef)) byRef.set(stop.osmRef, { ...stop, unmatched: false });
+          }
+        }
+      }
+    }
+    const candidates = [...byRef.values()];
     if (candidates.length === 0) {
-      throw APIError.notFound("keiner dieser Spots liegt im Vorrat dieser Reise");
+      throw APIError.notFound("keiner dieser Spots gehört zu dieser Reise");
     }
 
     let kept = 0;
@@ -298,7 +331,7 @@ export const keepForNextTime = api(
           source_url: candidate.sourceUrl ?? null,
           wikipedia_url: candidate.wikipediaUrl ?? null,
           facade_azimuth: candidate.facadeAzimuth ?? null,
-          unmatched: candidate.unmatched,
+          unmatched: candidate.unmatched ?? false,
         })
         // Already collected is not an error: the trip found it worth
         // keeping and so did somebody earlier.

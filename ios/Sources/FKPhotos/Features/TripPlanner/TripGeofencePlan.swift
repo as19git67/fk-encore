@@ -107,7 +107,7 @@ struct TripMonitoredRegion: Equatable, Sendable {
     /// A stop of the day, or the quarters. A stay at the quarters is
     /// not a visit and is never reported; being there at all is what
     /// the arrival day wants to know.
-    enum Kind: Sendable { case stop, quarters }
+    enum Kind: String, Codable, Sendable { case stop, quarters }
 
     let osmRef: String
     let name: String?
@@ -128,5 +128,41 @@ struct TripMonitoredRegion: Equatable, Sendable {
             && lhs.radius == rhs.radius
             && lhs.center.latitude == rhs.center.latitude
             && lhs.center.longitude == rhs.center.longitude
+    }
+}
+
+/// Kept on disk with the monitor's state (`TripVisitMonitorState`):
+/// iOS keeps a fence across a relaunch, and the app has to know again
+/// what is behind it. `CLLocationCoordinate2D` is not `Codable`, so the
+/// centre goes as two numbers.
+extension TripMonitoredRegion: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case osmRef, name, lat, lon, radius, plannedMinutes, kind
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            osmRef: try c.decode(String.self, forKey: .osmRef),
+            name: try c.decodeIfPresent(String.self, forKey: .name),
+            center: CLLocationCoordinate2D(
+                latitude: try c.decode(Double.self, forKey: .lat),
+                longitude: try c.decode(Double.self, forKey: .lon),
+            ),
+            radius: try c.decode(Double.self, forKey: .radius),
+            plannedMinutes: try c.decode(Int.self, forKey: .plannedMinutes),
+            kind: try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .stop,
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(osmRef, forKey: .osmRef)
+        try c.encodeIfPresent(name, forKey: .name)
+        try c.encode(center.latitude, forKey: .lat)
+        try c.encode(center.longitude, forKey: .lon)
+        try c.encode(radius, forKey: .radius)
+        try c.encode(plannedMinutes, forKey: .plannedMinutes)
+        try c.encode(kind, forKey: .kind)
     }
 }

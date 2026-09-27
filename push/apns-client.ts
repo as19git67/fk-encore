@@ -14,7 +14,14 @@
 import http2, { type ClientHttp2Session } from "node:http2";
 import { secret } from "encore.dev/config";
 import { ProviderTokenCache, type ApnsCredentials } from "./apns-jwt";
-import { APNS_HOSTS, buildApnsMessage, type ApnsEnvironment } from "./apns-payload";
+import {
+  APNS_HOSTS,
+  buildApnsMessage,
+  buildLiveActivityMessage,
+  type ApnsEnvironment,
+  type ApnsMessage,
+  type LiveActivityPush,
+} from "./apns-payload";
 import type { PushPayload } from "./push.service";
 
 const apnsKeyId = secret("ApnsKeyId");
@@ -79,8 +86,7 @@ class ApnsGateway {
     return this.tokens.get();
   }
 
-  async send(deviceToken: string, env: ApnsEnvironment, payload: PushPayload): Promise<ApnsSendResult> {
-    const message = buildApnsMessage(payload, apnsTopic());
+  async send(deviceToken: string, env: ApnsEnvironment, message: ApnsMessage): Promise<ApnsSendResult> {
     const body = JSON.stringify(message.body);
     const attempt = (): Promise<ApnsSendResult> =>
       new Promise((resolve, reject) => {
@@ -135,5 +141,20 @@ let gateway: ApnsGateway | null = null;
  * Apple's own refusals come back as a result. */
 export async function sendApns(deviceToken: string, env: ApnsEnvironment, payload: PushPayload): Promise<ApnsSendResult> {
   if (!gateway) gateway = new ApnsGateway();
-  return gateway.send(deviceToken, env, payload);
+  return gateway.send(deviceToken, env, buildApnsMessage(payload, apnsTopic()));
+}
+
+/**
+ * Update or end one Live Activity, addressed by the activity's own push
+ * token (not the device's). Throws on transport failure; Apple's own
+ * refusals come back as a result, and `isDeadToken` reads them the same
+ * way as for a device.
+ */
+export async function sendLiveActivity(
+  activityToken: string,
+  env: ApnsEnvironment,
+  push: LiveActivityPush,
+): Promise<ApnsSendResult> {
+  if (!gateway) gateway = new ApnsGateway();
+  return gateway.send(activityToken, env, buildLiveActivityMessage(push, apnsTopic()));
 }
