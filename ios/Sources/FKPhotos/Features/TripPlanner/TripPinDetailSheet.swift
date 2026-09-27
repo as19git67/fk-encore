@@ -20,6 +20,11 @@ struct TripPinSheetAction: Identifiable {
     /// the traveller onwards. Both close — but an action that only
     /// marks something would not.
     var closes: Bool = true
+    /// Which kind of action it is, so a menu can draw a line between
+    /// kinds. The same list is drawn as a menu on the day's rows, as
+    /// sections in the detail screen and in the map's sheet — one list,
+    /// so no way of looking at a spot can do less than another (§8.4).
+    var group: TripSpotActionGroup = .plan
     let run: @MainActor () async -> Void
 
     init(
@@ -29,6 +34,7 @@ struct TripPinSheetAction: Identifiable {
         role: ButtonRole? = nil,
         footer: String? = nil,
         closes: Bool = true,
+        group: TripSpotActionGroup = .plan,
         run: @escaping @MainActor () async -> Void,
     ) {
         self.id = id
@@ -37,7 +43,80 @@ struct TripPinSheetAction: Identifiable {
         self.role = role
         self.footer = footer
         self.closes = closes
+        self.group = group
         self.run = run
+    }
+}
+
+/// What an action is about, in the order a menu shows them.
+enum TripSpotActionGroup: Int, CaseIterable, Comparable {
+    /// Done, skipped, open again — what you reach for standing there.
+    case status
+    /// Getting there, seeing it on a map.
+    case navigate
+    /// Where it sits in the trip: another block, pinned, the pool.
+    case plan
+    /// Taking it out of the trip altogether.
+    case remove
+
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
+/// A spot's actions as the items of a menu, a section per group.
+struct TripSpotActionMenuItems: View {
+    let actions: [TripPinSheetAction]
+
+    var body: some View {
+        ForEach(TripSpotActionGroup.allCases, id: \.self) { group in
+            let members = actions.filter { $0.group == group }
+            if !members.isEmpty {
+                Section {
+                    ForEach(members) { action in
+                        Button(role: action.role) {
+                            Task { await action.run() }
+                        } label: {
+                            Label(action.title, systemImage: action.systemImage)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A spot's actions as sections of a list — the map's sheet and the
+/// detail screen draw them the same way. `close` is called after an
+/// action that says it closes, with the screen that shows them.
+struct TripSpotActionSections: View {
+    let actions: [TripPinSheetAction]
+    var close: @MainActor () -> Void = {}
+
+    @State private var running: String?
+
+    var body: some View {
+        ForEach(actions) { action in
+            Section {
+                Button(role: action.role) {
+                    running = action.id
+                    Task {
+                        await action.run()
+                        running = nil
+                        if action.closes { close() }
+                    }
+                } label: {
+                    if running == action.id {
+                        ProgressView()
+                    } else {
+                        Label(action.title, systemImage: action.systemImage)
+                    }
+                }
+                .disabled(running != nil)
+            } footer: {
+                if let footer = action.footer {
+                    Text(footer)
+                }
+            }
+        }
     }
 }
 
@@ -62,8 +141,13 @@ struct TripPinDetailSheet: View {
     /// the short answer with the long one a tap away.
     var spot: TripSpotDetail? = nil
     var mode: TripTransportMode = .foot
+    /// What the detail screen behind "Alle Details" needs to be the
+    /// same screen the list opens: somewhere to save a note, the light
+    /// and the shelter. Nil where the caller has none.
+    var onSave: ((TripSpotEdit) async -> Void)? = nil
+    var light: TripSpotLight? = nil
+    var shelter: TripSpotShelter? = nil
 
-    @State private var running: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
@@ -119,29 +203,27 @@ struct TripPinDetailSheet: View {
                     }
                 }
 
-                ForEach(actions) { action in
-                    Section {
-                        Button(role: action.role) {
-                            perform(action)
-                        } label: {
-                            if running == action.id {
-                                ProgressView()
-                            } else {
-                                Label(action.title, systemImage: action.systemImage)
-                            }
-                        }
-                        .disabled(running != nil)
-                    } footer: {
-                        if let footer = action.footer {
-                            Text(footer)
-                        }
-                    }
-                }
+                // Getting there is this sheet's own "In Karten öffnen"
+                // below, and the detail screen's route; the caller's
+                // navigation entries would say it twice.
+                TripSpotActionSections(actions: actions.filter { $0.group != .navigate },
+                                       close: { dismiss() })
 
                 if let spot {
                     Section {
                         NavigationLink {
-                            TripSpotDetailView(spot: spot, mode: mode)
+                            // The same detail screen the list opens, with
+                            // the same actions under it: a spot does not
+                            // lose what can be done with it by being
+                            // reached through the map.
+                            TripSpotDetailView(spot: spot, mode: mode, onSave: onSave,
+                                               light: light, shelter: shelter) { closeDetail in
+                                TripSpotActionSections(
+                                    // The detail screen has its own way there.
+                                    actions: actions.filter { $0.group != .navigate },
+                                    close: { closeDetail(); dismiss() },
+                                )
+                            }
                         } label: {
                             Label("Alle Details", systemImage: "info.circle")
                         }
@@ -202,15 +284,6 @@ struct TripPinDetailSheet: View {
     private var title: String {
         guard let number = detail.planned?.number else { return detail.title }
         return "\(number). \(detail.title)"
-    }
-
-    private func perform(_ action: TripPinSheetAction) {
-        running = action.id
-        Task {
-            await action.run()
-            running = nil
-            if action.closes { dismiss() }
-        }
     }
 
     private var mapsURL: URL {

@@ -187,7 +187,14 @@ struct TripRunningDay {
 
     @MainActor
     static func load(now: Date = Date()) async -> TripRunningDay? {
-        guard let planId = TripRunningPlan.shared.plan?.id else { return nil }
+        // A wake in the background has no screen, and only a screen
+        // asked which plan is running. Ask here, once per launch; and
+        // without a network, the plan the fences were set for is the
+        // running one.
+        if !TripRunningPlan.shared.didLoad { await TripRunningPlan.shared.refresh() }
+        guard let planId = TripRunningPlan.shared.plan?.id ?? TripVisitMonitor.shared.watchedPlanId else {
+            return nil
+        }
         let bundle: TripOfflineBundle
         if let fetched = try? await fetch(planId: planId) {
             bundle = fetched
@@ -234,6 +241,8 @@ enum TripDayPulse {
         let running = await TripRunningDay.load(now: TripDayNotices.shared.now())
         await TripDayActivityManager.shared.refresh(running)
         if let running {
+            // The fences follow the day being lived (§7.1).
+            TripVisitMonitor.shared.follow(running)
             TripDayNotices.shared.evaluate(running)
             await TripDayNotices.shared.loadVisits(planId: running.plan.id)
         } else {

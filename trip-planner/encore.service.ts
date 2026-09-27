@@ -57,9 +57,11 @@ import "./plan-ops";
 import "./splits";
 import "./light-evening";
 import "./climate-check";
+import "./live-activity";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";
+import { tickLiveActivities } from "./live-activity";
 
 // A trip planned for a place with no imported region is saved framed
 // and empty, and the import that follows takes hours (§4.3). This is
@@ -74,6 +76,21 @@ schedule({
   scheduleLabel: "every 15m",
   nextFire: everyMs(15 * 60_000),
   run: tickFillPending,
+});
+
+// The Lock Screen while the phone sleeps (§8.5): recompute each running
+// day's Live Activity and push it when it changed. Five minutes is the
+// most a block boundary can be late by; a tick with nothing new sends
+// nothing.
+schedule({
+  name: "trip-planner-live-activities",
+  description: "Push running days' Live Activities when their block or stop changes.",
+  service: "trip-planner",
+  scheduleLabel: "every 5m",
+  nextFire: everyMs(5 * 60_000),
+  run: async () => {
+    await tickLiveActivities();
+  },
 });
 
 startLocalCron();

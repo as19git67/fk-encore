@@ -1293,6 +1293,32 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
   `#before-rows`, `#subtitle` und `#footer`. Durch den Basket blättert
   `composables/useBasketNavigation.ts`.
 
+## Aktionen an Spots in der iOS-App
+
+Was man mit einem Spot tun kann, ist überall dasselbe, wo der Spot in
+vergleichbarer Weise gezeigt wird: Zeile in der Liste (Menü, langes
+Drücken, Wischgesten), Detailansicht, Pin-Sheet auf der Karte und die
+Detailansicht hinter „Alle Details“. Niemand soll sich wundern, dass eine
+Aktion nur über einen bestimmten Weg erreichbar ist. Was die Karte kann,
+kann die Liste auch, und umgekehrt.
+
+- Die Aktionen entstehen an **einer** Stelle je Art von Spot:
+  `stopActions(_:later:)` in `TripPlanDayView` für eingeplante Stopps,
+  `candidateActions(_:later:)` in `TripPoolView` für Kandidaten. Beide
+  liefern `[TripPinSheetAction]`; gezeichnet wird mit
+  `TripSpotActionMenuItems` (Menü) oder `TripSpotActionSections`
+  (Pin-Sheet, Detailansicht). Keine Oberfläche baut eigene Knöpfe daneben.
+- Unterschiede kommen nur aus dem **Zustand** des Spots, nie aus dem Weg
+  dorthin: „Erledigt“ nur solange offen, „In einen anderen Block“ nicht für
+  Erledigtes, „Zurück zu den Kandidaten“ nur für eingeplante, „Einplanen“ nur
+  für Kandidaten.
+- Ausgenommen ist, was die Oberfläche selbst schon zeigt: Detailansicht und
+  Pin-Sheet haben eigene Knöpfe für Karte und Route und blenden die Gruppe
+  `.navigate` aus; nur die Liste klappt „Warum hier?“ an Ort und Stelle auf, weil
+  Detailansicht und Pin-Sheet die Gründe ohnehin zeigen.
+- Beim Code-Review wird das geprüft: Eine neue Aktion an einer Stelle ist
+  eine neue Aktion an allen.
+
 ## Date-only values in the frontend
 
 For date-only values (no time component), always use the helpers from `frontend/src/utils/dateFormat.ts`:

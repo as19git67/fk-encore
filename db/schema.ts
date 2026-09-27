@@ -3160,6 +3160,33 @@ export const tripPlanStops = pgTable(
 );
 
 /**
+ * Live Activities the server keeps current (§8.5, migration 0213). One
+ * row per Activity, addressed by the push token the Activity hands out.
+ */
+export const tripLiveActivities = pgTable(
+  "trip_live_activities",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    environment: text("environment").notNull().default("production"),
+    // The phone's IANA time zone: which block the day is in is a
+    // question for the local clock.
+    time_zone: text("time_zone").notNull(),
+    // What was last sent, so a tick that would say the same says nothing.
+    last_state: jsonb("last_state"),
+    last_sent_at: timestamp("last_sent_at", { mode: "string", withTimezone: true }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("trip_live_activities_plan_idx").on(table.plan_id)],
+);
+
+/**
  * Where the travellers actually were (§6.4). Only the event ever leaves
  * the phone — the position itself stays on the device (§7.1).
  *

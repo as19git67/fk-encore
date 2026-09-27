@@ -18,6 +18,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // ("Trip beenden" / "Weiter unterwegs") even when they arrive while the
         // app isn't running — the system launches it headless to deliver them.
         UNUserNotificationCenter.current().delegate = self
+        // A fence crossing may be why the app was launched at all, with
+        // no screen coming (§7.1). The location manager has to exist
+        // before this returns for iOS to hand that crossing over.
+        TripLocationLaunch.resume()
         return true
     }
 

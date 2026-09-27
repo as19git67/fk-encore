@@ -278,12 +278,28 @@ describe("what the trip did not use", () => {
     expect(again).toEqual({ kept: 0, alreadyThere: 1 });
   });
 
-  it("refuses a spot that is not in this trip's pool", async () => {
+  it("keeps a planned stop too, and leaves it on its day", async () => {
+    // What the pool offers on a spot, the day offers too (§8.4).
+    const { plan } = await createTripPlan({
+      legs: [{ title: "Zuhause", anchor: HOME, startDate: "2026-07-04" }],
+    });
+    const planned = plan.legs[0].days[0].blocks.flatMap((b) => b.stops)[0];
+    expect(planned).toBeDefined();
+
+    const result = await keepForNextTime({ planId: plan.id, osmRefs: [planned.osmRef] });
+
+    expect(result.kept).toBe(1);
+    const rows = await db.select().from(ideaPool).where(eq(ideaPool.osm_ref, planned.osmRef));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe(planned.name);
+  });
+
+  it("refuses a spot that is not in this trip", async () => {
     const { plan } = await createTripPlan({
       legs: [{ title: "Zuhause", anchor: HOME, startDate: "2026-07-04" }],
     });
 
     await expect(keepForNextTime({ planId: plan.id, osmRefs: ["node:999999"] }))
-      .rejects.toThrow(/liegt im Vorrat/);
+      .rejects.toThrow(/gehört zu dieser Reise/);
   });
 });
