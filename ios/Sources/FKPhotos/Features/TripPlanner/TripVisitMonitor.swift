@@ -193,6 +193,7 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
             dwellMinutes: stay.minutes,
             hasMatchingPhoto: TripPhotoSignal.confirms(
                 stay, region: region, photos: recentPhotos()),
+            utcOffsetMinutes: TripInstant.utcOffsetMinutes(at: stay.arrivedAt),
         )
         // Whatever is still waiting goes first, so the diary keeps its
         // order; then this one. A failed report is not worth surfacing —
@@ -331,6 +332,10 @@ struct TripVisitReport: Codable, Equatable, Sendable {
     let leftAt: String
     let dwellMinutes: Int
     let hasMatchingPhoto: Bool
+    /// Which block the visit happened in depends on the clock at the
+    /// place (§8.5). Optional so a report queued by an older build
+    /// still decodes — it is then ticked, not moved.
+    var utcOffsetMinutes: Int? = nil
 
     /// What goes over the wire — everything but the plan id, which is
     /// in the path.
@@ -342,12 +347,14 @@ struct TripVisitReport: Codable, Equatable, Sendable {
         let leftAt: String
         let dwellMinutes: Int
         let hasMatchingPhoto: Bool
+        let utcOffsetMinutes: Int?
     }
 
     var body: Body {
         Body(
             stopId: stopId, osmRef: osmRef, name: name, arrivedAt: arrivedAt,
             leftAt: leftAt, dwellMinutes: dwellMinutes, hasMatchingPhoto: hasMatchingPhoto,
+            utcOffsetMinutes: utcOffsetMinutes,
         )
     }
 }

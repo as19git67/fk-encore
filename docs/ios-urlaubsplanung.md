@@ -2260,6 +2260,42 @@ wer zwanzig Minuten darin steht, schon — an jedem offenen Stopp des Tages,
 seit die Zäune um alle liegen und nicht mehr nur um die nächsten zwei (§7.1,
 entschieden nach dem ersten Reisetag).
 
+**Aus der Erprobung: abgehakt heißt festgehalten (Etappe 14, umgesetzt).**
+Ein Stopp, der schon abgehakt war, ließ sich beim Umplanen noch in einen
+anderen Block schieben — der Tag erzählte dann etwas, das nicht passiert war.
+Und ein Stopp, den der Zaun am Vormittag abgehakt hatte, stand weiter im
+Nachmittag, weil der Plan ihn dort hatte. Zwei Regeln:
+
+1. **Erledigt bewegt sich nicht.** Die Neuverteilung, der Wettertausch und
+   der Übertrag ließen Erledigtes schon stehen; das Verschieben von Hand
+   (`POST …/stops/move`) lehnt es jetzt ab: „ist schon abgehakt und bleibt,
+   wo ihr ihn gesehen habt. Erst wieder öffnen, dann verschieben." Das Menü
+   bietet „In einen anderen Block" bei einem erledigten Stopp gar nicht erst
+   an.
+2. **Der Zeitpunkt wird gemerkt, und der Zaun setzt den Stopp dorthin.** Jeder
+   Stopp trägt jetzt `doneAt` (Migration 0212). Ein Tipp stempelt den Moment
+   des Tipps, ein zweiter Tipp lässt den ersten stehen, „Doch wieder offen"
+   löscht ihn. Ein Besuch, den das Gerät bestätigt hat — zwei Signale oder
+   ein Ja auf „Wart ihr hier?" —, stempelt die **Ankunft**, nicht den
+   Zeitpunkt der Meldung, und rückt den Stopp in den Block, in dessen Zeit
+   die Ankunft fällt (`visit-place.ts`): hinter das, was davor abgehakt
+   wurde, vor das, was noch offen ist. Fällt die Ankunft in die Mittagspause
+   oder hinter den letzten Block, gilt der nächstgelegene Spot-Block; fällt
+   sie auf einen anderen Tag der Etappe, wandert der Stopp an diesen Tag. Die
+   App schickt dafür ihren Abstand zu UTC mit; eine ältere App bekommt nur den
+   Haken. Eine Zeile zeigt die Uhrzeit neben dem Haken („10:42 ✓").
+
+Nur die Beobachtung des Geräts verschiebt. Ein Haken von Hand sagt „gesehen",
+nicht „jetzt gesehen": Wer beim Abendessen den Vormittag nachträgt, soll den
+Vormittag nicht in den Abend ziehen. Ausgenommen sind der Stopp, um den ein
+Termin den Block gelegt hat (§7.3), und geteilte Blöcke (§6.5).
+
+Nebenbei behoben: Jedes Speichern eines Tages schreibt die Stopp-Zeilen neu,
+und der Verweis eines Tagebucheintrags auf seinen Stopp ging dabei verloren.
+Ein offenes „Wart ihr hier?" verschwand nach einem Verschieben im selben
+Block, und ein Ja darauf hakte nichts mehr ab. Die Verweise werden jetzt über
+den Ort neu gesetzt.
+
 ### 8.6 Der Vorabend: Reisebereitschaft und Packliste
 
 Zwischen „Plan steht" und „erster Reisetag" liegt ein Moment, in dem sich die

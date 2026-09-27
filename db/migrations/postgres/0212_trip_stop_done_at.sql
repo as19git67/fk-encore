@@ -1,0 +1,12 @@
+-- When a stop was ticked off (§6.4, §8.5).
+--
+-- Out of the trial: a stop ticked off in the morning must not be moved
+-- by a later replan, and a stop the geofence ticked off belongs to the
+-- block the group was actually there in — not to the one the plan had
+-- it in. Both need the moment itself, which the status alone never
+-- kept.
+--
+-- Null for every stop that is not done, and for stops ticked off
+-- before this column existed: "done, time unknown" is the honest
+-- reading of those.
+ALTER TABLE trip_plan_stops ADD COLUMN done_at timestamptz;
