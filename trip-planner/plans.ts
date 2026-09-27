@@ -1120,9 +1120,22 @@ export const moveTripStop = api(
       );
     }
 
-    const osmRef = sourceDay.blocks
+    const moving = sourceDay.blocks
       .flatMap((b) => b.stops)
-      .find((s) => s.rowId === req.stopId)!.osmRef;
+      .find((s) => s.rowId === req.stopId)!;
+    const osmRef = moving.osmRef;
+
+    // A stop that is done is the diary, not the plan (§5): it stays in
+    // the block the group saw it in. Out of the trial — a stop ticked
+    // off in the morning turned up in the afternoon after a move, which
+    // made the day say something that did not happen. The way to move
+    // it is to open it again first, which says what is meant.
+    if (moving.status === "done") {
+      throw APIError.failedPrecondition(
+        `„${moving.title ?? moving.name ?? "Dieser Spot"}" ist schon abgehakt und bleibt, wo ihr ihn `
+          + "gesehen habt. Erst wieder öffnen, dann verschieben.",
+      );
+    }
 
     // A stop the frame placed is the reason its block is at that hour
     // (§7.3). Dragging it elsewhere would leave an evening framed for

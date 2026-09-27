@@ -26,6 +26,7 @@ import {
   tripPlanLegs,
   tripPlanPool,
   tripPlanStops,
+  tripPlanVisits,
   tripPlans,
   tripSpotNotes,
   tripHiddenSpots,
@@ -728,11 +729,24 @@ export async function setStopStatus(
   stopId: number,
   status: StopStatus,
   db: Db = dbDefault,
+  /**
+   * When it happened, for a tick the device observed (§6.4): the
+   * arrival at the place. Omitted for a tap, which is stamped now —
+   * unless the stop was already done, in which case the earlier moment
+   * stands: ticking twice does not make a visit later.
+   */
+  doneAt?: Date,
 ): Promise<boolean> {
   const owned = await stopBelongsToPlan(planId, ownerId, stopId, db);
   if (!owned) return false;
 
-  await db.update(tripPlanStops).set({ status }).where(eq(tripPlanStops.id, stopId));
+  const done_at =
+    status !== "done"
+      ? null
+      : doneAt
+        ? doneAt.toISOString()
+        : sql`coalesce(${tripPlanStops.done_at}, now())`;
+  await db.update(tripPlanStops).set({ status, done_at }).where(eq(tripPlanStops.id, stopId));
   await db
     .update(tripPlans)
     .set({ updated_at: new Date().toISOString() })
@@ -790,6 +804,40 @@ async function stopBelongsToPlan(
 }
 
 /**
+ * Which visits point at these stop rows, by place (§6.4).
+ *
+ * Every save of a day rewrites its stop rows, and a visit's link to
+ * its stop is a row id the rewrite deletes — the foreign key sets it to
+ * null. A "wart ihr hier?" that lost its stop is no longer asked, and a
+ * yes to it ticks nothing. Read before the rewrite, `relinkVisits`
+ * points each visit at the row that holds its place afterwards.
+ */
+async function visitLinksOf(
+  stopIds: readonly number[],
+  db: Db,
+): Promise<{ visitId: number; osmRef: string }[]> {
+  if (stopIds.length === 0) return [];
+  const rows = await db
+    .select({ visitId: tripPlanVisits.id, osmRef: tripPlanStops.osm_ref })
+    .from(tripPlanVisits)
+    .innerJoin(tripPlanStops, eq(tripPlanStops.id, tripPlanVisits.stop_id))
+    .where(inArray(tripPlanVisits.stop_id, [...stopIds]));
+  return rows;
+}
+
+async function relinkVisits(
+  links: readonly { visitId: number; osmRef: string }[],
+  idByRef: ReadonlyMap<string, number>,
+  db: Db,
+): Promise<void> {
+  for (const link of links) {
+    const stopId = idByRef.get(link.osmRef);
+    if (stopId === undefined) continue;
+    await db.update(tripPlanVisits).set({ stop_id: stopId }).where(eq(tripPlanVisits.id, link.visitId));
+  }
+}
+
+/**
  * Write back the days a move touched (§8.4).
  *
  * Both days are rewritten wholesale for the same reason a
@@ -803,6 +851,11 @@ export async function saveMovedDays(
   days: ReadonlyArray<{ day: StoredDay; blocks: readonly CurrentBlock[] }>,
   db: Db = dbDefault,
 ): Promise<void> {
+  const links = await visitLinksOf(
+    days.flatMap(({ day }) => day.blocks.flatMap((b) => b.stops.map((s) => s.rowId))),
+    db,
+  );
+  const idByRef = new Map<string, number>();
   for (const { day, blocks } of days) {
     const byTemplateId = new Map(day.blocks.map((b) => [b.id, b]));
     for (const block of blocks) {
@@ -810,7 +863,7 @@ export async function saveMovedDays(
       if (!stored) continue;
       await db.delete(tripPlanStops).where(eq(tripPlanStops.block_id, stored.rowId));
       for (const [position, stop] of block.stops.entries()) {
-        await db.insert(tripPlanStops).values({
+        const [row] = await db.insert(tripPlanStops).values({
           block_id: stored.rowId,
           position,
           osm_ref: stop.osmRef,
@@ -823,6 +876,7 @@ export async function saveMovedDays(
           travel_distance_m: stop.travelFromPrevious.distanceM,
           status: stop.status,
           pinned: stop.pinned,
+          done_at: stop.doneAt ?? null,
           note: stop.note ?? null,
           source_url: stop.sourceUrl ?? null,
           local_name: stop.localName ?? null,
@@ -834,10 +888,12 @@ export async function saveMovedDays(
           // knew it is deleted the moment it lands on a day.
           origin: stop.origin ?? "search",
           reasons: stop.reasons ?? [],
-        });
+        }).returning({ id: tripPlanStops.id });
+        idByRef.set(stop.osmRef, row.id);
       }
     }
   }
+  await relinkVisits(links, idByRef, db);
 
   await db
     .update(tripPlans)
@@ -980,6 +1036,7 @@ export async function loadPlan(
       },
       status: row.status as StopStatus,
       pinned: row.pinned,
+      doneAt: row.done_at === null ? null : new Date(row.done_at).toISOString(),
       reasons: (row.reasons ?? []) as string[],
       // What a person wrote wins over what the find brought with it:
       // the note on the row is provenance from whoever saved the place,
@@ -1167,13 +1224,15 @@ async function rewriteDay(
   db: Db,
 ): Promise<void> {
   const byTemplateId = new Map(day.blocks.map((b) => [b.id, b]));
+  const links = await visitLinksOf(day.blocks.flatMap((b) => b.stops.map((s) => s.rowId)), db);
+  const idByRef = new Map<string, number>();
 
   for (const block of blocks) {
     const stored = byTemplateId.get(block.id);
     if (!stored) continue;
     await db.delete(tripPlanStops).where(eq(tripPlanStops.block_id, stored.rowId));
     for (const [position, stop] of block.stops.entries()) {
-      await db.insert(tripPlanStops).values({
+      const [row] = await db.insert(tripPlanStops).values({
         block_id: stored.rowId,
         position,
         osm_ref: stop.osmRef,
@@ -1186,6 +1245,7 @@ async function rewriteDay(
         travel_distance_m: stop.travelFromPrevious.distanceM,
         status: stop.status,
         pinned: stop.pinned,
+        done_at: stop.doneAt ?? null,
         local_name: stop.localName ?? null,
         wikipedia_url: stop.wikipediaUrl ?? null,
         facade_azimuth: stop.facadeAzimuth ?? null,
@@ -1193,9 +1253,11 @@ async function rewriteDay(
         extent: stop.extent,
         origin: stop.origin ?? "search",
         reasons: stop.reasons ?? [],
-      });
+      }).returning({ id: tripPlanStops.id });
+      idByRef.set(stop.osmRef, row.id);
     }
   }
+  await relinkVisits(links, idByRef, db);
 
   // What the pool already knew about these places, before the rewrite
   // takes it away.

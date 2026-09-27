@@ -1485,6 +1485,13 @@
       "when": 1788652800031,
       "tag": "0211_finance_forecast_statement_user_values",
       "breakpoints": true
+    },
+    {
+      "idx": 212,
+      "version": "7",
+      "when": 1788652800032,
+      "tag": "0212_trip_stop_done_at",
+      "breakpoints": true
     }
   ]
 }

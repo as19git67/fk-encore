@@ -3111,6 +3111,10 @@ export const tripPlanStops = pgTable(
     status: text("status").notNull().default("planned"),
     // Pinned stops are fixed points: never moved automatically (§5).
     pinned: boolean("pinned").notNull().default(false),
+    // When the stop was ticked off (migration 0212). A geofence tick
+    // carries the arrival; a tick by hand the moment of the tap. Null
+    // while the stop is not done.
+    done_at: timestamp("done_at", { mode: "string", withTimezone: true }),
     // Which branch of a split this stop belongs to (§6.5, migration
     // 0184). NULL is the ordinary case: the group is together.
     branch_id: integer("branch_id"),

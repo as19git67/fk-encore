@@ -365,9 +365,20 @@ struct TripStop: Codable, Identifiable, Sendable {
     /// route and are therefore seen without being planned. Nil or empty
     /// for every ordinary stop.
     var passes: [TripPassedSpot]? = nil
+    /// When it was ticked off, as an ISO timestamp (§8.5): the arrival
+    /// for a tick the geofence gave, the tap for one by hand. Nil while
+    /// it is open, and from an older server.
+    var doneAt: String? = nil
 
     var id: Int { rowId }
     var isPhotoStop: Bool { photoStop == true }
+    /// "10:42" on this phone's clock, for a stop that is done and knows
+    /// when. The row says it next to the tick: a day that moved a stop
+    /// into the morning should say why it is there.
+    var doneTime: String? {
+        guard stopStatus == .done, let doneAt, let date = TripInstant.parse(doneAt) else { return nil }
+        return TripClock.format(TripDayTimeline.minutesOfDay(date))
+    }
     var stopStatus: TripStopStatus { TripStopStatus(raw: status) }
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
     /// What to show when OpenStreetMap has no name for the place. Never
@@ -820,6 +831,23 @@ enum TripTransportMode: String, CaseIterable, Sendable {
 /// Kept here rather than as a `Date` on purpose: a fixpoint is "the
 /// 18:40 train", not an instant on a global clock, and formatting it
 /// through a timezone would move it.
+/// An instant as the server writes it. JavaScript's `toISOString`
+/// carries milliseconds, which a plain `ISO8601DateFormatter` refuses —
+/// so both spellings are read.
+enum TripInstant {
+    static func parse(_ text: String) -> Date? {
+        let precise = ISO8601DateFormatter()
+        precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return precise.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+    }
+
+    /// This phone's offset from UTC at `date`, in minutes — what the
+    /// server needs to know which block a visit happened in (§8.5).
+    static func utcOffsetMinutes(at date: Date = Date(), timeZone: TimeZone = .current) -> Int {
+        timeZone.secondsFromGMT(for: date) / 60
+    }
+}
+
 public enum TripClock {
     /// `public`: the trip-day Live Activity widget (`ios/App/Widgets/`,
     /// a separate module) formats block times the same way the day
