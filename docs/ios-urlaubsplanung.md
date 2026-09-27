@@ -2273,7 +2273,7 @@ Nachmittag, weil der Plan ihn dort hatte. Zwei Regeln:
    bietet „In einen anderen Block" bei einem erledigten Stopp gar nicht erst
    an.
 2. **Der Zeitpunkt wird gemerkt, und der Zaun setzt den Stopp dorthin.** Jeder
-   Stopp trägt jetzt `doneAt` (Migration 0209). Ein Tipp stempelt den Moment
+   Stopp trägt jetzt `doneAt` (Migration 0212). Ein Tipp stempelt den Moment
    des Tipps, ein zweiter Tipp lässt den ersten stehen, „Doch wieder offen"
    löscht ihn. Ein Besuch, den das Gerät bestätigt hat — zwei Signale oder
    ein Ja auf „Wart ihr hier?" —, stempelt die **Ankunft**, nicht den

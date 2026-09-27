@@ -40,6 +40,7 @@ import {
 } from "./receipt-capture";
 import { deleteJobsForDocument, hasAnyJob, hasUnfinishedJob } from "./scan-queue";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
+import { onDocumentClassified as linkForecastStatements } from "../finance/forecast-statements.service";
 import {
   assertPathUnderDocumentsRoot,
 } from "./documents.service";
@@ -978,6 +979,8 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // Advisory only: a document becoming OCR-ready must not delay the pipeline.
   void createSuggestionsForDocument(documentId).catch(err => console.error(`[documents] finance matching failed for document=${documentId}:`, err));
   void checkReceiptEnrichment(documentId).catch(err => console.error(`[documents] receipt enrichment check failed for document=${documentId}:`, err));
+  // A statement for a contract in the retirement forecast (#1343): link and read it.
+  void linkForecastStatements(documentId).catch(err => console.error(`[documents] forecast statement linking failed for document=${documentId}:`, err));
 
   // Report the category the document actually carries now: the fresh guess
   // when applied, or the pinned existing one when the category is protected.

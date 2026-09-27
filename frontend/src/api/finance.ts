@@ -1448,6 +1448,8 @@ export interface ForecastLinkableAccount {
   id: number
   label: string
   balance: number | null
+  /** finance_account_kind: giro, tagesgeld, festgeld, depot, bausparen, … */
+  kind: string
 }
 
 export interface ForecastBundle {
@@ -1620,4 +1622,236 @@ export async function updateForecastScenario(
 
 export async function deleteForecastScenario(id: number): Promise<void> {
   return apiFetch(`/finance/forecast/scenarios/${id}`, { method: 'DELETE' })
+}
+
+// Retirement forecast — one-time spreadsheet import (finance/forecast-import.ts)
+
+export interface ForecastImportDetail {
+  contractNo: string | null
+  insuredPerson: string | null
+  insurer: string | null
+  maturity: string | null
+  premiumEnd: string | null
+  currentValue: number | null
+}
+
+export interface ForecastImportRaw {
+  amount: number | null
+  incomeYearly: number | null
+  expenseYearly: number | null
+  once: number | null
+  contributionUntilYear: number | null
+  payoutYear: number | null
+  note: string | null
+  detail: ForecastImportDetail | null
+}
+
+export interface ForecastImportRow {
+  row: number
+  label: string
+  raw: ForecastImportRaw
+  suggestion: {
+    type: ForecastItemType | null
+    personId: number | null
+    include: boolean
+    reason: string | null
+  }
+  summary: string | null
+}
+
+export interface ForecastImportPreview {
+  sheet: string
+  rows: ForecastImportRow[]
+  inflationRate: number | null
+  pensionGrowthRate: number | null
+  warnings: string[]
+}
+
+export interface ForecastImportChoice {
+  label: string
+  type: ForecastItemType
+  personId: number | null
+  raw: ForecastImportRaw
+}
+
+export async function previewForecastImport(fileBase64: string): Promise<ForecastImportPreview> {
+  return apiFetch('/finance/forecast/import/preview', { method: 'POST', body: JSON.stringify({ fileBase64 }) })
+}
+
+export async function evaluateForecastImport(
+  rows: ForecastImportChoice[],
+  pensionGrowthRate: number | null,
+): Promise<{ rows: Array<{ summary: string | null; error: string | null }> }> {
+  return apiFetch('/finance/forecast/import/evaluate', {
+    method: 'POST',
+    body: JSON.stringify({ rows, pensionGrowthRate }),
+  })
+}
+
+export async function commitForecastImport(
+  rows: ForecastImportChoice[],
+  pensionGrowthRate: number | null,
+): Promise<{ created: number; statements: ForecastScanSummary }> {
+  return apiFetch('/finance/forecast/import/commit', {
+    method: 'POST',
+    body: JSON.stringify({ rows, pensionGrowthRate }),
+  })
+}
+
+// Retirement forecast — insurer statements as the source of values (#1343,
+// finance/forecast-statements.ts)
+
+export interface ForecastStatementValues {
+  referenceDate: string | null
+  surrenderValue: number | null
+  contractValue: number | null
+  guaranteedPayout: number | null
+  projectedPayout: number | null
+  premiumMonthly: number | null
+  premiumYearly: number | null
+  premiumEndDate: string | null
+  maturityDate: string | null
+  guaranteedMonthlyPension: number | null
+  projectedMonthlyPension: number | null
+  lumpSum: number | null
+  pensionStartDate: string | null
+}
+
+export interface ForecastStatementLink {
+  id: number
+  documentId: number
+  title: string | null
+  docDate: string | null
+  documentType: string | null
+  matchKind: 'tag' | 'text' | 'user'
+  status: 'suggested' | 'confirmed' | 'rejected'
+  kind: ForecastDocKind
+  kindByUser: boolean
+}
+
+export type ForecastDocKind = 'statement' | 'dynamic_increase' | 'dynamic_declined' | 'other'
+
+export interface ForecastDocumentCandidate {
+  id: number
+  title: string | null
+  docDate: string | null
+  documentType: string | null
+}
+
+export interface ForecastStatement {
+  id: number
+  documentId: number
+  referenceDate: string | null
+  values: ForecastStatementValues
+  method: 'regex' | 'llm' | 'user'
+  status: 'proposed' | 'accepted' | 'rejected' | 'no_change'
+  extractedAt: string
+}
+
+export interface ForecastStatementProposal {
+  field: string
+  label: string
+  kind: 'amount' | 'date'
+  current: number | string | null
+  proposed: number | string
+}
+
+export interface ForecastValuesSource {
+  kind: 'import' | 'manual' | 'statement'
+  referenceDate?: string | null
+  documentId?: number | null
+  updatedAt: string
+}
+
+export interface ForecastItemStatements {
+  itemId: number
+  contractNo: string | null
+  links: ForecastStatementLink[]
+  latest: ForecastStatement | null
+  proposals: ForecastStatementProposal[]
+  history: ForecastStatement[]
+  valuesSource: ForecastValuesSource | null
+  overdue: boolean
+  reading: boolean
+  notes: string[]
+  declinedWithoutDocument: string[]
+}
+
+export interface ForecastScanSummary {
+  itemsWithContract: number
+  linkedByTag: number
+  suggestedByText: number
+  queued: number
+}
+
+export async function getForecastStatements(): Promise<{ items: ForecastItemStatements[] }> {
+  return apiFetch('/finance/forecast/statements')
+}
+
+export async function scanForecastStatements(itemIds?: number[]): Promise<ForecastScanSummary> {
+  return apiFetch('/finance/forecast/statements/scan', { method: 'POST', body: JSON.stringify({ itemIds }) })
+}
+
+export async function decideForecastStatementLink(
+  id: number,
+  status: 'confirmed' | 'rejected',
+): Promise<ForecastStatementLink> {
+  return apiFetch(`/finance/forecast/statement-links/${id}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  })
+}
+
+export async function rereadForecastStatementLink(id: number): Promise<void> {
+  return apiFetch(`/finance/forecast/statement-links/${id}/reread`, { method: 'POST' })
+}
+
+export async function acceptForecastStatement(id: number, fields?: string[]): Promise<ForecastStatement> {
+  return apiFetch(`/finance/forecast/statements/${id}/accept`, { method: 'POST', body: JSON.stringify({ fields }) })
+}
+
+export async function rejectForecastStatement(id: number): Promise<ForecastStatement> {
+  return apiFetch(`/finance/forecast/statements/${id}/reject`, { method: 'POST' })
+}
+
+export async function setForecastStatementLinkKind(id: number, kind: ForecastDocKind): Promise<ForecastStatementLink> {
+  return apiFetch(`/finance/forecast/statement-links/${id}/kind`, { method: 'POST', body: JSON.stringify({ kind }) })
+}
+
+export async function searchForecastStatementDocuments(q: string): Promise<{ documents: ForecastDocumentCandidate[] }> {
+  return apiFetch(`/finance/forecast/statement-documents?q=${encodeURIComponent(q)}`)
+}
+
+export async function linkForecastStatementDocument(itemId: number, documentId: number): Promise<void> {
+  return apiFetch(`/finance/forecast/items/${itemId}/statement-links`, {
+    method: 'POST',
+    body: JSON.stringify({ documentId }),
+  })
+}
+
+export async function setForecastDeclinedIncrease(
+  itemId: number,
+  date: string,
+  remove = false,
+): Promise<{ declinedWithoutDocument: string[] }> {
+  return apiFetch(`/finance/forecast/items/${itemId}/declined-increases`, {
+    method: 'POST',
+    body: JSON.stringify({ date, remove }),
+  })
+}
+
+export async function correctForecastStatementValues(id: number, values: ForecastStatementValues): Promise<ForecastStatement> {
+  return apiFetch(`/finance/forecast/statements/${id}/values`, { method: 'POST', body: JSON.stringify({ values }) })
+}
+
+// Retirement forecast — savings and depot accounts as asset items
+
+export async function getForecastAccountSuggestions(): Promise<{ accounts: ForecastLinkableAccount[] }> {
+  return apiFetch('/finance/forecast/account-suggestions')
+}
+
+export async function createForecastAccountItems(
+  accounts: Array<{ accountId: number; personId: number | null }>,
+): Promise<{ created: number }> {
+  return apiFetch('/finance/forecast/account-items', { method: 'POST', body: JSON.stringify({ accounts }) })
 }

@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
-import { sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
+import ExcelJS from "exceljs";
 
 import db from "../db/database";
 import {
   financeAccount,
   financeAccountAccess,
   financeAccountBalance,
+  financeAccountHolding,
   financeAccountType,
   financeCurrency,
   financeForecastItem,
@@ -16,13 +18,18 @@ import {
   users,
 } from "../db/schema";
 import {
+  commitImport,
+  createAccountItems,
   createItem,
   createMilestone,
   createPerson,
   createScenario,
   deleteItem,
   deletePerson,
+  evaluateImport,
+  getAccountSuggestions,
   getForecast,
+  previewImport,
   runSimulation,
   toEngineScenario,
   updateItem,
@@ -43,14 +50,20 @@ async function ensureUser(id: number): Promise<void> {
   );
 }
 
+// Accounts this file creates. Only these are removed again: other test files
+// leave bookings on their own accounts, and deleting every account would trip
+// over those (finance_transaction references finance_account).
+const createdAccounts: number[] = [];
+
 beforeEach(async () => {
   await db.delete(financeForecastScenario);
   await db.delete(financeForecastItem);
   await db.delete(financeForecastMilestone);
   await db.delete(financeForecastPerson);
-  await db.delete(financeAccountBalance);
-  await db.delete(financeAccountAccess);
-  await db.delete(financeAccount);
+  if (createdAccounts.length > 0) {
+    // Balances and access rows go with the account (ON DELETE CASCADE).
+    await db.delete(financeAccount).where(inArray(financeAccount.id, createdAccounts.splice(0)));
+  }
   await db.delete(users);
   await ensureUser(1);
   await ensureUser(2);
@@ -160,6 +173,7 @@ describe("finance/forecast — items", () => {
       .insert(financeAccount)
       .values({ type_id: type.id, currency_code: "EUR", account_number: "1", label: "Tagesgeld" })
       .returning();
+    createdAccounts.push(acc.id);
     await db.insert(financeAccountBalance).values([
       { account_id: acc.id, as_of: "2026-01-01T00:00:00Z", balance: "1000.00", source: "manual" },
       { account_id: acc.id, as_of: "2026-02-01T00:00:00Z", balance: "1234.56", source: "manual" },
@@ -172,7 +186,7 @@ describe("finance/forecast — items", () => {
 
     await db.insert(financeAccountAccess).values({ account_id: acc.id, user_id: 1, level: "read" });
     const bundle = await getForecast();
-    expect(bundle.accounts).toEqual([{ id: acc.id, label: "Tagesgeld", balance: 1234.56 }]);
+    expect(bundle.accounts).toEqual([{ id: acc.id, label: "Tagesgeld", balance: 1234.56, kind: expect.any(String) }]);
     const item = await createItem({ type: "asset", label: "TG", data: { pot: "cash", currentValue: 5 }, linkedAccountId: acc.id });
     expect(item.linkedAccountBalance).toBe(1234.56);
 
@@ -180,6 +194,48 @@ describe("finance/forecast — items", () => {
     await personWithMilestones();
     const sim = await runSimulation({ scenario: { endAge: 60, inflationRate: 0, defaultReturnRate: 0 } });
     expect(sim.result.years[0].pots.cash).toBeCloseTo(1234.56, 6);
+  });
+});
+
+describe("finance/forecast — savings accounts as items", () => {
+  async function account(kind: string, label: string, access = true): Promise<number> {
+    await db.insert(financeCurrency).values({ code: "EUR", symbol: "€" }).onConflictDoNothing();
+    const [type] = await db.select({ id: financeAccountType.id }).from(financeAccountType).where(eq(financeAccountType.kind, kind as never));
+    const [acc] = await db
+      .insert(financeAccount)
+      .values({ type_id: type.id, currency_code: "EUR", account_number: `${kind}-${Date.now()}-${Math.random()}`, label })
+      .returning();
+    createdAccounts.push(acc.id);
+    if (access) await db.insert(financeAccountAccess).values({ account_id: acc.id, user_id: 1, level: "read" });
+    return acc.id;
+  }
+
+  it("suggests savings and depot accounts not yet in the forecast, and creates linked items", async () => {
+    const tg = await account("tagesgeld", "Tagesgeld Beispiel");
+    const depot = await account("depot", "Depot Beispiel");
+    await account("giro", "Girokonto Beispiel");
+    await account("festgeld", "Festgeld fremd", false);
+    await db.insert(financeAccountBalance).values({ account_id: tg, as_of: "2026-02-01T00:00:00Z", balance: "5000.00", source: "manual" });
+    // The depot has positions but no balance: its value is the sum of the latest positions.
+    await db.insert(financeAccountHolding).values([
+      { account_id: depot, as_of: "2026-01-01T00:00:00", name: "Fonds A", value: "100.00" },
+      { account_id: depot, as_of: "2026-02-01T00:00:00", name: "Fonds A", value: "1200.00" },
+      { account_id: depot, as_of: "2026-02-01T00:00:00", name: "Fonds B", value: "800.50" },
+    ]);
+
+    const { accounts } = await getAccountSuggestions();
+    expect(accounts.map((a) => a.label).sort()).toEqual(["Depot Beispiel", "Tagesgeld Beispiel"]);
+    expect(accounts.find((a) => a.id === depot)).toMatchObject({ kind: "depot", balance: 2000.5 });
+
+    const person = await createPerson({ label: "A", birthDate: "1970-01-01" });
+    expect(await createAccountItems({ accounts: [{ accountId: tg, personId: null }, { accountId: depot, personId: person.id }] })).toEqual({ created: 2 });
+    const items = (await getForecast()).items;
+    expect(items.find((i) => i.linkedAccountId === tg)).toMatchObject({ type: "asset", data: { pot: "cash" }, linkedAccountBalance: 5000 });
+    expect(items.find((i) => i.linkedAccountId === depot)).toMatchObject({ personId: person.id, data: { pot: "depot" }, linkedAccountBalance: 2000.5 });
+    expect((await getAccountSuggestions()).accounts).toEqual([]);
+
+    const foreign = await account("festgeld", "Noch eins fremd", false);
+    await expect(createAccountItems({ accounts: [{ accountId: foreign, personId: null }] })).rejects.toThrow(/not found/);
   });
 });
 
@@ -257,5 +313,72 @@ describe("toEngineScenario", () => {
     expect(s.spendingCurve.phases).toEqual([{ fromAge: 70, factor: 0.8 }]);
     expect(s.offsetDeductions).toEqual([1]);
     expect(s.allowSurrender).toBe(false);
+  });
+});
+
+describe("finance/forecast — spreadsheet import", () => {
+  // An invented overview in the shape the importer reads.
+  async function workbookBase64(): Promise<string> {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Liste");
+    ws.addRow([null, "Betrag", "jährliche Einnahmen (€)", "jährliche Ausgaben (€)", "einmalige Einnahmen/Ausgaben (€)", "Beitragszahlung bis", "Auszahlung im Jahr"]);
+    ws.addRow(["Bar A", 5000]);
+    ws.addRow(["Einkommen A (netto)", null, 36000]);
+    ws.addRow(["Leben", null, null, -18000]);
+    ws.addRow(["Q-000999", null, null, -1200, 20000]); // no year: needs one before it can be taken
+    wb.addWorksheet("Plan").addRow(["angenommene Rentenanpassung", 0.01]);
+    const buf = (await wb.xlsx.writeBuffer()) as unknown as Buffer;
+    return Buffer.from(buf).toString("base64");
+  }
+
+  it("previews, evaluates an edit and commits the chosen rows", async () => {
+    const { person } = await personWithMilestones("A");
+    const preview = await previewImport({ fileBase64: await workbookBase64() });
+    expect(preview.sheet).toBe("Liste");
+    expect(preview.pensionGrowthRate).toBe(0.01);
+    const by = Object.fromEntries(preview.rows.map((r) => [r.label, r]));
+    expect(by["Bar A"].suggestion).toMatchObject({ type: "asset", include: true });
+    expect(by["Einkommen A (netto)"].suggestion).toMatchObject({ type: "salary", personId: person.id });
+    expect(by["Q-000999"].suggestion.include).toBe(false);
+
+    // The user adds the missing payout year; the evaluation now describes the item.
+    const lv = { label: "Q-000999", type: "life_insurance" as const, personId: person.id, raw: { ...by["Q-000999"].raw, payoutYear: 2040 } };
+    const evaluated = await evaluateImport({ rows: [lv] });
+    expect(evaluated.rows[0].error).toBeNull();
+    expect(evaluated.rows[0].summary).toContain("2040");
+
+    const chosen = ["Bar A", "Einkommen A (netto)", "Leben"].map((l) => ({
+      label: l,
+      type: by[l].suggestion.type!,
+      personId: by[l].suggestion.personId,
+      raw: by[l].raw,
+    }));
+    const res = await commitImport({ rows: [...chosen, lv], pensionGrowthRate: preview.pensionGrowthRate });
+    expect(res.created).toBe(4);
+    const items = (await getForecast()).items;
+    expect(items.map((i) => i.type).sort()).toEqual(["asset", "life_insurance", "living_expense", "salary"]);
+    expect(items.find((i) => i.type === "salary")!.data.amount).toBe(3000);
+
+    // A second preview recognises what is already there.
+    const again = await previewImport({ fileBase64: await workbookBase64() });
+    expect(again.rows.find((r) => r.label === "Bar A")!.suggestion.include).toBe(false);
+  });
+
+  it("commits nothing when one row is broken", async () => {
+    const { person } = await personWithMilestones("A");
+    const preview = await previewImport({ fileBase64: await workbookBase64() });
+    const rows = preview.rows.map((r) => ({ label: r.label, type: r.suggestion.type ?? "expense", personId: r.suggestion.personId ?? person.id, raw: r.raw }));
+    await expect(commitImport({ rows })).rejects.toThrow(/nichts übernommen.*Q-000999: Ablaufjahr fehlt/);
+    expect((await getForecast()).items).toHaveLength(0);
+  });
+
+  it("rejects foreign persons, bad files and missing permission", async () => {
+    await personWithMilestones("A");
+    const raw = { amount: null, incomeYearly: 12000, expenseYearly: null, once: null, contributionUntilYear: null, payoutYear: null, note: null, detail: null };
+    await expect(commitImport({ rows: [{ label: "X", type: "salary", personId: 999999, raw }] })).rejects.toThrow(/Person nicht gefunden/);
+    await expect(previewImport({ fileBase64: Buffer.from("kein excel").toString("base64") })).rejects.toThrow(/keine lesbare/);
+    await expect(previewImport({ fileBase64: "" })).rejects.toThrow(/required/);
+    setAuth("1", []);
+    await expect(previewImport({ fileBase64: await workbookBase64() })).rejects.toThrow(/permission/);
   });
 });

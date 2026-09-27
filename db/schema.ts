@@ -3111,7 +3111,7 @@ export const tripPlanStops = pgTable(
     status: text("status").notNull().default("planned"),
     // Pinned stops are fixed points: never moved automatically (§5).
     pinned: boolean("pinned").notNull().default(false),
-    // When the stop was ticked off (migration 0209). A geofence tick
+    // When the stop was ticked off (migration 0212). A geofence tick
     // carries the arrival; a tick by hand the moment of the tap. Null
     // while the stop is not done.
     done_at: timestamp("done_at", { mode: "string", withTimezone: true }),
@@ -3775,4 +3775,88 @@ export const financeForecastScenario = pgTable(
       .defaultNow(),
   },
   (table) => [index("idx_finance_forecast_scenario_user").on(table.user_id)]
+);
+
+// ---------- Finance: forecast items ↔ statements (issue #1343) ----------
+//
+// A contract item (life insurance, pension, …) is linked to the documents
+// that are its statements, found by contract number. Each statement that
+// was read produces one row in finance_forecast_statement: the values it
+// states, and whether the user took them over. Accepted rows are the
+// item's history.
+
+export const financeForecastDocumentLink = pgTable(
+  "finance_forecast_document_link",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    item_id: integer("item_id")
+      .notNull()
+      .references(() => financeForecastItem.id, { onDelete: "cascade" }),
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    // How it was found: the reference tag the documents pipeline writes, or the text.
+    match_kind: text("match_kind").notNull().$type<"tag" | "text" | "user">(),
+    status: text("status").notNull().$type<"suggested" | "confirmed" | "rejected">(),
+    // statement | dynamic_increase | dynamic_declined | other (migration 0210)
+    doc_kind: text("doc_kind").notNull().default("statement").$type<"statement" | "dynamic_increase" | "dynamic_declined" | "other">(),
+    kind_by_user: boolean("kind_by_user").notNull().default(false),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    decided_at: timestamp("decided_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("finance_forecast_document_link_unique").on(table.item_id, table.document_id),
+    index("idx_finance_forecast_document_link_document").on(table.document_id),
+  ]
+);
+
+export interface ForecastStatementValues {
+  referenceDate: string | null;
+  surrenderValue: number | null;
+  contractValue: number | null;
+  guaranteedPayout: number | null;
+  projectedPayout: number | null;
+  premiumMonthly: number | null;
+  premiumYearly: number | null;
+  premiumEndDate: string | null;
+  maturityDate: string | null;
+  guaranteedMonthlyPension: number | null;
+  projectedMonthlyPension: number | null;
+  lumpSum: number | null;
+  pensionStartDate: string | null;
+}
+
+export const financeForecastStatement = pgTable(
+  "finance_forecast_statement",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    item_id: integer("item_id")
+      .notNull()
+      .references(() => financeForecastItem.id, { onDelete: "cascade" }),
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    reference_date: date("reference_date"),
+    values: jsonb("values").notNull().$type<ForecastStatementValues>(),
+    // "regex" = read by the fixed patterns only, "llm" = the language model agreed or filled gaps.
+    // "user" = corrected by hand after reading
+    method: text("method").notNull().$type<"regex" | "llm" | "user">(),
+    status: text("status").notNull().$type<"proposed" | "accepted" | "rejected" | "no_change">(),
+    extracted_at: timestamp("extracted_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    decided_at: timestamp("decided_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("finance_forecast_statement_unique").on(table.item_id, table.document_id),
+    index("idx_finance_forecast_statement_item").on(table.item_id, table.reference_date),
+  ]
 );

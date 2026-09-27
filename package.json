@@ -23,7 +23,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/dockerode": "^4.0.1",
-    "@types/node": "^24.13.6",
+    "@types/node": "^26.6.2",
     "@types/nodemailer": "^7.0.11",
     "@types/pdf-parse": "^1.1.5",
     "@types/pg": "^8.18.0",
@@ -58,7 +58,7 @@
     "web-push": "^3.6.7"
   },
   "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.13.0"
+    "@rollup/rollup-linux-x64-gnu": "^4.63.4"
   },
   "allowScripts": {
     "esbuild@0.18.20": true,

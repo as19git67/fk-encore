@@ -21,6 +21,10 @@ import ForecastItemDialog from '../../components/finance/forecast/ForecastItemDi
 import ForecastTimeline from '../../components/finance/forecast/ForecastTimeline.vue'
 import ForecastCharts from '../../components/finance/forecast/ForecastCharts.vue'
 import ForecastMatrix from '../../components/finance/forecast/ForecastMatrix.vue'
+import ForecastImportDialog from '../../components/finance/forecast/ForecastImportDialog.vue'
+import ForecastStatementsDialog from '../../components/finance/forecast/ForecastStatementsDialog.vue'
+import ForecastAccountsDialog from '../../components/finance/forecast/ForecastAccountsDialog.vue'
+import { sourceText, statementBadge } from '../../components/finance/forecast/forecastStatements'
 import {
   ITEM_TYPE_LABELS,
   MILESTONE_KIND_LABELS,
@@ -45,6 +49,9 @@ import {
   deleteForecastPerson,
   deleteForecastScenario,
   getForecast,
+  getForecastAccountSuggestions,
+  getForecastStatements,
+  scanForecastStatements,
   simulateForecast,
   updateForecastItem,
   updateForecastMilestone,
@@ -53,10 +60,13 @@ import {
   type ForecastBundle,
   type ForecastItem,
   type ForecastItemInput,
+  type ForecastItemStatements,
   type ForecastItemType,
+  type ForecastLinkableAccount,
   type ForecastMilestone,
   type ForecastMilestoneKind,
   type ForecastPerson,
+  type ForecastScanSummary,
   type ForecastScenarioConfig,
   type ForecastSimulateResponse,
 } from '../../api/finance'
@@ -91,6 +101,8 @@ async function load() {
   error.value = null
   try {
     bundle.value = await getForecast()
+    void loadStatements()
+    void loadAccountSuggestions()
     if (!config.value) config.value = cloneConfig(bundle.value.defaultScenario)
     if (earliestFor.value == null) earliestFor.value = persons.value[0]?.id ?? null
     const [first, second] = persons.value
@@ -243,6 +255,7 @@ watch(bundle, scheduleSimulation)
 onMounted(load)
 onBeforeUnmount(() => {
   if (timer) clearTimeout(timer)
+  if (statementsTimer) clearTimeout(statementsTimer)
 })
 
 const result = computed(() => sim.value?.result ?? null)
@@ -449,6 +462,97 @@ function removeMilestone() {
 
 // ---- items ---------------------------------------------------------------------------------
 
+// ---- spreadsheet import -------------------------------------------------------------------
+
+const importDialog = ref(false)
+const importNotice = ref<string | null>(null)
+
+async function onImported(count: number, found: ForecastScanSummary) {
+  importNotice.value = `${count} Einträge aus der Excel-Datei übernommen. ${describeScan(found)}`
+  await load()
+}
+
+// ---- savings and depot accounts not yet in the forecast ----------------------------------
+
+const accountSuggestions = ref<ForecastLinkableAccount[]>([])
+const accountsDialog = ref(false)
+/** Hidden for this visit once the user said "not now". */
+const accountsDismissed = ref(false)
+
+async function loadAccountSuggestions() {
+  try {
+    accountSuggestions.value = (await getForecastAccountSuggestions()).accounts
+  } catch {
+    // Optional hint: without it the page works as before.
+    accountSuggestions.value = []
+  }
+}
+
+async function onAccountsCreated(count: number) {
+  importNotice.value = count === 1 ? '1 Konto als Vermögen übernommen.' : `${count} Konten als Vermögen übernommen.`
+  await load()
+}
+
+// ---- insurer statements (#1343) ------------------------------------------------------------
+
+const statements = ref<Map<number, ForecastItemStatements>>(new Map())
+const scanning = ref(false)
+let statementsTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Loads the statement state; polls while documents are read in the background. */
+async function loadStatements() {
+  if (statementsTimer) clearTimeout(statementsTimer)
+  statementsTimer = null
+  try {
+    const res = await getForecastStatements()
+    statements.value = new Map(res.items.map((s) => [s.itemId, s]))
+    if (res.items.some((s) => s.reading)) statementsTimer = setTimeout(() => void loadStatements(), 3000)
+  } catch (err) {
+    // The forecast works without statements; say so, but keep the page.
+    importNotice.value = `Standmitteilungen konnten nicht geladen werden: ${message(err)}`
+  }
+}
+
+function describeScan(s: ForecastScanSummary): string {
+  if (s.itemsWithContract === 0) return 'Kein Eintrag hat eine Vertragsnummer, nach der gesucht werden könnte.'
+  const parts = [`${s.linkedByTag} Standmitteilung${s.linkedByTag === 1 ? '' : 'en'} zugeordnet`]
+  if (s.suggestedByText > 0) parts.push(`${s.suggestedByText} zum Prüfen vorgeschlagen`)
+  if (s.queued > 0) parts.push(`${s.queued} werden gelesen`)
+  return `${parts.join(', ')}.`
+}
+
+async function scanStatements() {
+  scanning.value = true
+  try {
+    const res = await scanForecastStatements()
+    importNotice.value = `Suche nach Standmitteilungen: ${describeScan(res)}`
+  } catch (err) {
+    importNotice.value = `Suche nach Standmitteilungen fehlgeschlagen: ${message(err)}`
+  } finally {
+    scanning.value = false
+  }
+  await loadStatements()
+}
+
+const hasContracts = computed(() => statements.value.size > 0)
+const statementsDialog = ref(false)
+const statementsItemId = ref<number | null>(null)
+const statementsItem = computed(() => items.value.find((i) => i.id === statementsItemId.value) ?? null)
+const statementsState = computed(() => (statementsItemId.value == null ? null : statements.value.get(statementsItemId.value) ?? null))
+
+function openStatements(it: ForecastItem) {
+  statementsItemId.value = it.id
+  statementsDialog.value = true
+}
+
+async function onStatementsChanged() {
+  await load()
+}
+
+function applyInflation(rate: number) {
+  if (config.value) config.value.inflationRate = rate
+}
+
 const itemDialog = ref(false)
 const itemEdit = ref<ForecastItem | null>(null)
 const itemPreset = ref<ForecastItemType | null>(null)
@@ -487,13 +591,18 @@ function removeItem(id: number) {
     rejectLabel: 'Abbrechen',
     acceptClass: 'p-button-danger',
     accept: async () => {
+      // Gone from the list at once; the reload afterwards brings the simulation along.
+      const before = bundle.value
+      if (bundle.value) bundle.value = { ...bundle.value, items: bundle.value.items.filter((x) => x.id !== id) }
+      itemDialog.value = false
       try {
         await deleteForecastItem(id)
-        itemDialog.value = false
-        await load()
+        importNotice.value = `„${it.label}“ gelöscht.`
       } catch (err) {
-        itemError.value = message(err)
+        bundle.value = before
+        importNotice.value = `„${it.label}“ konnte nicht gelöscht werden: ${message(err)}`
       }
+      await load()
     },
   })
 }
@@ -606,12 +715,32 @@ const ready = computed(() => !loading.value)
   >
     <template #actions>
       <Button label="Person" icon="pi pi-user-plus" size="small" outlined @click="openPerson(null)" />
+      <Button
+        v-if="hasContracts"
+        label="Standmitteilungen suchen"
+        icon="pi pi-search"
+        size="small"
+        outlined
+        :loading="scanning"
+        @click="scanStatements"
+      />
+      <Button label="Import" icon="pi pi-file-import" size="small" outlined :disabled="persons.length === 0" @click="importDialog = true" />
       <Button label="Eintrag" icon="pi pi-plus" size="small" :disabled="persons.length === 0" @click="openItem(null)" />
     </template>
 
     <template #notice>
       <ErrorBanner v-if="error" :message="error" @retry="load" />
       <ErrorBanner v-else-if="simError" :message="simError" @retry="runSimulation" />
+      <Message
+        v-if="persons.length > 0 && accountSuggestions.length > 0 && !accountsDismissed"
+        severity="info"
+        :closable="true"
+        @close="accountsDismissed = true"
+      >
+        {{ accountSuggestions.length === 1 ? '1 Spar- oder Depotkonto steht' : `${accountSuggestions.length} Spar- und Depotkonten stehen` }} noch nicht in der Prognose.
+        <Button label="Ansehen und übernehmen" link size="small" @click="accountsDialog = true" />
+      </Message>
+      <Message v-if="importNotice" severity="info" :closable="true" @close="importNotice = null">{{ importNotice }}</Message>
     </template>
 
     <PageSkeleton v-if="loading && !bundle" variant="list" :count="4" />
@@ -692,6 +821,49 @@ const ready = computed(() => !loading.value)
           <span v-if="overriddenIds.size" class="muted">{{ overriddenIds.size }} Zeitpunkt(e) im Szenario verschoben.</span>
           <Button v-if="overriddenIds.size" label="Zurücksetzen" link size="small" @click="resetOverrides" />
         </div>
+
+        <!-- Every combination of two leave-work ages at once -->
+        <template v-if="persons.length >= 2">
+          <Button
+            :label="showMatrix ? 'Vergleich ausblenden' : 'Alle Kombinationen vergleichen'"
+            :icon="showMatrix ? 'pi pi-chevron-up' : 'pi pi-th-large'"
+            size="small"
+            outlined
+            class="matrix-toggle"
+            :aria-expanded="showMatrix"
+            aria-controls="fc-matrix"
+            @click="showMatrix = !showMatrix"
+          />
+          <div v-if="showMatrix" id="fc-matrix" class="matrix-panel">
+            <p class="muted matrix-panel__hint">
+              Jedes Feld ist eine eigene Rechnung mit diesen beiden Aufhöralter-Werten. Grün: das Geld reicht, die Zahl ist das Restvermögen am Ende. Rot: das Geld geht aus, die Zahl ist das Jahr, in dem es so weit ist. Ein Klick übernimmt die Kombination in die Regler oben.
+            </p>
+            <div class="matrix-controls">
+              <template v-if="persons.length > 2">
+                <Select v-model="matrixA" :options="persons" option-label="label" option-value="id" size="small" aria-label="Person in den Zeilen" />
+                <span>×</span>
+                <Select v-model="matrixB" :options="persons" option-label="label" option-value="id" size="small" aria-label="Person in den Spalten" />
+              </template>
+              <span>Alter von</span>
+              <InputNumber v-model="matrixFrom" :min="40" :max="80" size="small" aria-label="Alter von" />
+              <span>bis</span>
+              <InputNumber v-model="matrixTo" :min="40" :max="80" size="small" aria-label="Alter bis" />
+            </div>
+            <p v-if="matrixA === matrixB" class="muted">Bitte zwei verschiedene Personen wählen.</p>
+            <ForecastMatrix
+              v-else-if="sim?.matrix && result && matrixPersonA && matrixPersonB"
+              :cells="sim.matrix"
+              :person-a="matrixPersonA"
+              :person-b="matrixPersonB"
+              :real="real"
+              :inflation-rate="inflation"
+              :start-year="result.startYear"
+              :end-year="result.endYear"
+              @pick="pickMatrix"
+            />
+            <p v-else-if="simulating" class="muted">Wird berechnet …</p>
+          </div>
+        </template>
       </section>
 
       <!-- Charts -->
@@ -758,36 +930,6 @@ const ready = computed(() => !loading.value)
         </div>
       </section>
 
-      <!-- Matrix -->
-      <section v-if="persons.length >= 2" class="card">
-        <div class="card__head">
-          <h2 class="card__title">Zwei Personen: Wer hört wann auf?</h2>
-          <Checkbox v-model="showMatrix" binary input-id="fc-matrix-on" />
-          <label for="fc-matrix-on">berechnen</label>
-        </div>
-        <div v-if="showMatrix" class="matrix-controls">
-          <Select v-model="matrixA" :options="persons" option-label="label" option-value="id" size="small" aria-label="Person A" />
-          <span>×</span>
-          <Select v-model="matrixB" :options="persons" option-label="label" option-value="id" size="small" aria-label="Person B" />
-          <span>Alter</span>
-          <InputNumber v-model="matrixFrom" :min="40" :max="80" size="small" aria-label="von Alter" />
-          <span>bis</span>
-          <InputNumber v-model="matrixTo" :min="40" :max="80" size="small" aria-label="bis Alter" />
-        </div>
-        <p v-if="showMatrix && matrixA === matrixB" class="muted">Bitte zwei verschiedene Personen wählen.</p>
-        <ForecastMatrix
-          v-if="showMatrix && sim?.matrix && result && matrixPersonA && matrixPersonB && matrixPersonA !== matrixPersonB"
-          :cells="sim.matrix"
-          :person-a="matrixPersonA"
-          :person-b="matrixPersonB"
-          :real="real"
-          :inflation-rate="inflation"
-          :start-year="result.startYear"
-          :end-year="result.endYear"
-          @pick="pickMatrix"
-        />
-      </section>
-
       <!-- Household -->
       <section class="card">
         <h2 class="card__title">Haushalt</h2>
@@ -816,12 +958,24 @@ const ready = computed(() => !loading.value)
             </li>
           </ul>
           <ul class="item-list">
-            <li v-for="it in g.items" :key="it.id">
+            <li v-for="it in g.items" :key="it.id" class="item-row">
               <button type="button" class="item" @click="openItem(it)">
                 <span class="item__type">{{ ITEM_TYPE_LABELS[it.type] }}</span>
                 <span class="item__label">{{ it.label }}</span>
-                <span class="item__summary">{{ summarizeItem(it.type, it.data, it.linkedAccountBalance) }}</span>
+                <span class="item__summary">{{ summarizeItem(it.type, it.data, it.linkedAccountBalance, { milestones, persons }) }}</span>
               </button>
+              <div v-if="statements.get(it.id)" class="item-stmt">
+                <button
+                  type="button"
+                  class="item-stmt__badge"
+                  :class="`item-stmt__badge--${statementBadge(statements.get(it.id)!).tone}`"
+                  @click="openStatements(it)"
+                >
+                  <i class="pi pi-file" aria-hidden="true" />
+                  {{ statementBadge(statements.get(it.id)!).text }}
+                </button>
+                <span class="muted item-stmt__source">{{ sourceText(statements.get(it.id)!.valuesSource) }}</span>
+              </div>
             </li>
             <li v-if="g.items.length === 0" class="muted item-list__empty">Noch keine Einträge.</li>
           </ul>
@@ -927,6 +1081,27 @@ const ready = computed(() => !loading.value)
         <Button label="Speichern" icon="pi pi-check" :loading="msSaving" :disabled="msPerson == null || (msMode === 'age' ? msAge == null : !msDate)" @click="saveMilestone" />
       </template>
     </Dialog>
+
+    <ForecastImportDialog
+      v-model:visible="importDialog"
+      :persons="persons"
+      @imported="onImported"
+      @apply-inflation="applyInflation"
+    />
+
+    <ForecastAccountsDialog
+      v-model:visible="accountsDialog"
+      :accounts="accountSuggestions"
+      :persons="persons"
+      @created="onAccountsCreated"
+    />
+
+    <ForecastStatementsDialog
+      v-model:visible="statementsDialog"
+      :item="statementsItem"
+      :state="statementsState"
+      @changed="onStatementsChanged"
+    />
 
     <ForecastItemDialog
       v-model:visible="itemDialog"
@@ -1110,6 +1285,16 @@ const ready = computed(() => !loading.value)
   flex-wrap: wrap;
   margin-bottom: var(--space-3);
 }
+.matrix-toggle {
+  margin-top: var(--space-3);
+}
+.matrix-panel {
+  margin-top: var(--space-2);
+}
+.matrix-panel__hint {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+}
 .matrix-controls :deep(.p-inputnumber-input) {
   width: 5rem;
 }
@@ -1212,6 +1397,48 @@ const ready = computed(() => !loading.value)
   white-space: nowrap;
   font-size: var(--text-base);
 }
+.item-stmt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: 0 0 var(--space-1) calc(min(160px, 30%) + var(--space-2));
+}
+.item-stmt__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 1px solid var(--p-content-border-color);
+  background: transparent;
+  color: var(--p-text-color);
+  border-radius: 999px;
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.item-stmt__badge:hover {
+  background: var(--p-content-hover-background);
+}
+.item-stmt__badge:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.item-stmt__badge--warn {
+  border-color: var(--p-tag-warn-color);
+  color: var(--p-tag-warn-color);
+}
+.item-stmt__badge--info {
+  border-color: var(--p-tag-info-color);
+  color: var(--p-tag-info-color);
+}
+.item-stmt__badge--success {
+  border-color: var(--p-tag-success-color);
+  color: var(--p-tag-success-color);
+}
+.item-stmt__source {
+  font-size: var(--text-xs);
+}
 .item-list__empty {
   padding: var(--space-1) 0;
 }
@@ -1222,6 +1449,9 @@ const ready = computed(() => !loading.value)
   }
   .item__summary {
     white-space: normal;
+  }
+  .item-stmt {
+    padding-left: 0;
   }
 }
 
