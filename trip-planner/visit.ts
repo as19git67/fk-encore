@@ -16,8 +16,11 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { loadPlan, setStopStatus } from "./plan-store";
+import { dayWalkOfStored } from "./day-walk";
+import { MoveError, moveStop } from "./move";
+import { loadPlan, saveMovedDays, setStopStatus } from "./plan-store";
 import { answerVisit, listVisits, recordVisit, type StoredVisit } from "./visit-store";
+import { placeVisitedStop } from "./visit-place";
 import { assessVisit, isOnTheWay, type VisitVerdict } from "./visits";
 
 export interface ReportVisitRequest {
@@ -40,6 +43,12 @@ export interface ReportVisitRequest {
   hasPayment?: boolean;
   /** The traveller said so outright. */
   manual?: boolean;
+  /**
+   * The device's offset from UTC at the arrival, in minutes. With it, a
+   * confirmed visit moves the stop into the block it happened in
+   * (§8.5); without it — an older app — the stop is only ticked.
+   */
+  utcOffsetMinutes?: number;
 }
 
 export interface ReportVisitResponse {
@@ -66,6 +75,7 @@ export const reportVisit = api(
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
 
+    const offset = validOffset(req.utcOffsetMinutes);
     const arrivedAt = validateTimestamp(req.arrivedAt, "arrivedAt");
     const leftAt = req.leftAt === undefined ? null : validateTimestamp(req.leftAt, "leftAt");
     if (leftAt !== null && leftAt < arrivedAt) {
@@ -128,13 +138,13 @@ export const reportVisit = api(
     // of that sentence. The diary row alone left the stop "planned",
     // so a visit two signals agreed on still had to be ticked by hand.
     if (assessment.verdict === "confirmed" && stop) {
-      await setStopStatus(req.planId, userId, stop.stop.rowId, "done");
+      await tickVisited(req.planId, userId, stop.stop.rowId, arrivedAt, offset);
     }
 
     return {
       verdict: assessment.verdict,
       thresholdMinutes: assessment.thresholdMinutes,
-      visit,
+      visit: await reread(req.planId, userId, visit),
     };
   },
 );
@@ -159,6 +169,8 @@ export interface AnswerVisitRequest {
   visitId: number;
   /** True for "yes, we were there", false for "no". */
   confirmed: boolean;
+  /** The device's offset from UTC, as on the report. */
+  utcOffsetMinutes?: number;
 }
 
 /**
@@ -172,15 +184,102 @@ export const answerTripVisit = api(
   { expose: true, method: "POST", path: "/trip-planner/plans/:planId/visits/answer", auth: true },
   async (req: AnswerVisitRequest): Promise<{ visit: StoredVisit }> => {
     const userId = requireUser();
+    const offset = validOffset(req.utcOffsetMinutes);
     const visit = await answerVisit(req.planId, userId, req.visitId, req.confirmed === true);
     if (!visit) throw APIError.notFound("visit not found");
     // A yes is the tick: the answer was asked for exactly this.
     if (visit.confirmed && visit.stopId !== null) {
-      await setStopStatus(req.planId, userId, visit.stopId, "done");
+      await tickVisited(req.planId, userId, visit.stopId, new Date(visit.arrivedAt), offset);
     }
-    return { visit };
+    return { visit: await reread(req.planId, userId, visit) };
   },
 );
+
+/**
+ * Tick a stop the device saw visited, at the moment it was visited,
+ * and put it in the block that moment falls in (§8.5).
+ *
+ * The tick carries the arrival rather than "now": the report comes when
+ * the group leaves, the answer to "wart ihr hier?" whenever somebody
+ * looks at the phone, and neither is when they were there.
+ *
+ * The move is the drag the travellers could have made themselves, done
+ * by `moveStop` so the walks are recomputed the same way. It is left
+ * out for the stop a frame placed (§7.3), whose block is at that hour
+ * because of it, and for a split block (§6.5), whose stops belong to a
+ * branch.
+ */
+async function tickVisited(
+  planId: number,
+  userId: number,
+  stopId: number,
+  arrivedAt: Date,
+  utcOffsetMinutes: number | undefined,
+): Promise<void> {
+  await setStopStatus(planId, userId, stopId, "done", undefined, arrivedAt);
+  if (utcOffsetMinutes === undefined) return;
+
+  const plan = await loadPlan(planId, userId);
+  if (!plan) return;
+  for (const leg of plan.legs) {
+    const sourceDay = leg.days.find((d) => d.blocks.some((b) => b.stops.some((s) => s.rowId === stopId)));
+    if (!sourceDay) continue;
+    const sourceBlock = sourceDay.blocks.find((b) => b.stops.some((s) => s.rowId === stopId))!;
+    const osmRef = sourceBlock.stops.find((s) => s.rowId === stopId)!.osmRef;
+    if (sourceBlock.branches.length > 0) return;
+    if (sourceDay.fixpoints.some((f) => f.spotRef === osmRef && f.blockId)) return;
+
+    const placement = placeVisitedStop({
+      days: leg.days,
+      startDate: leg.startDate,
+      osmRef,
+      arrivedAt: arrivedAt.toISOString(),
+      utcOffsetMinutes,
+    });
+    if (!placement) return;
+    const targetDay = leg.days.find((d) => d.dayIndex === placement.dayIndex)!;
+
+    let moved;
+    try {
+      moved = moveStop({
+        fromBlocks: sourceDay.blocks,
+        toBlocks: sourceDay.id === targetDay.id ? sourceDay.blocks : targetDay.blocks,
+        osmRef,
+        toBlockId: placement.blockId,
+        toPosition: placement.position,
+        walk: dayWalkOfStored(leg.anchor, sourceDay),
+        toWalk: dayWalkOfStored(leg.anchor, targetDay),
+        mode: leg.mode,
+      });
+    } catch (err) {
+      // The tick stands; only the move did not work out.
+      if (err instanceof MoveError) return;
+      throw err;
+    }
+
+    const days = sourceDay.id === targetDay.id
+      ? [{ day: sourceDay, blocks: moved.fromBlocks }]
+      : [{ day: sourceDay, blocks: moved.fromBlocks }, { day: targetDay, blocks: moved.toBlocks }];
+    // The rewrite gives the stops new rows; the save keeps the
+    // diary's links to them.
+    await saveMovedDays(plan.id, days);
+    return;
+  }
+}
+
+/** The visit as it now reads, after a move may have relinked it. */
+async function reread(planId: number, userId: number, visit: StoredVisit): Promise<StoredVisit> {
+  const visits = await listVisits(planId, userId);
+  return visits?.find((v) => v.id === visit.id) ?? visit;
+}
+
+function validOffset(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < -720 || value > 840) {
+    throw APIError.invalidArgument("utcOffsetMinutes must be between -720 and 840");
+  }
+  return value;
+}
 
 /**
  * Prefer what the device measured; fall back to the two timestamps.

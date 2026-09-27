@@ -527,11 +527,14 @@ public final class TripDayNotices {
         struct Body: Encodable {
             let visitId: Int
             let confirmed: Bool
+            /// So a yes moves the stop into the block it was seen in (§8.5).
+            let utcOffsetMinutes: Int
         }
         struct Ignored: Decodable {}
         _ = try? await APIClient.shared.post(
             "/trip-planner/plans/\(planId)/visits/answer",
-            body: Body(visitId: visit.id, confirmed: yes)) as Ignored
+            body: Body(visitId: visit.id, confirmed: yes,
+                       utcOffsetMinutes: TripInstant.utcOffsetMinutes())) as Ignored
         pendingVisits.removeAll { $0.id == visit.id }
     }
 
@@ -659,11 +662,14 @@ public final class TripDayNotices {
         struct Body: Encodable {
             let visitId: Int
             let confirmed: Bool
+            /// So a yes moves the stop into the block it was seen in (§8.5).
+            let utcOffsetMinutes: Int
         }
         struct Ignored: Decodable {}
         _ = try? await APIClient.shared.post(
             "/trip-planner/plans/\(planId)/visits/answer",
-            body: Body(visitId: visitId, confirmed: yes)) as Ignored
+            body: Body(visitId: visitId, confirmed: yes,
+                       utcOffsetMinutes: TripInstant.utcOffsetMinutes())) as Ignored
         pendingVisits.removeAll { $0.id == visitId }
         // A yes ticked a stop: the day and the Lock Screen changed.
         if yes { await TripDayPulse.tick(.foreground) }

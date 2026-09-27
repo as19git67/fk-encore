@@ -1450,10 +1450,14 @@ struct TripPlanDayView: View {
             }
         }
         Section {
-            Button {
-                moving = TripStopMove(stop: stop, blockId: block.id)
-            } label: {
-                Label("In einen anderen Block", systemImage: "calendar")
+            // A stop that is done stays where it was seen (§5): the
+            // server refuses the move, so the menu does not offer it.
+            if stop.stopStatus != .done {
+                Button {
+                    moving = TripStopMove(stop: stop, blockId: block.id)
+                } label: {
+                    Label("In einen anderen Block", systemImage: "calendar")
+                }
             }
             Button {
                 Task { await viewModel.setPinned(stop, !stop.pinned) }
@@ -1508,10 +1512,12 @@ struct TripPlanDayView: View {
                         // The same section the pool shows: one
                         // decision, one way of making it.
                         Section {
-                            Button {
-                                moving = TripStopMove(stop: stop, blockId: block.id)
-                            } label: {
-                                Label("In einen anderen Block", systemImage: "calendar")
+                            if stop.stopStatus != .done {
+                                Button {
+                                    moving = TripStopMove(stop: stop, blockId: block.id)
+                                } label: {
+                                    Label("In einen anderen Block", systemImage: "calendar")
+                                }
                             }
                             Button {
                                 Task { await viewModel.setPinned(stop, !stop.pinned) }
@@ -1580,7 +1586,17 @@ struct TripPlanDayView: View {
                 .buttonStyle(.plain)
                 Spacer()
                 if stop.stopStatus == .done {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    HStack(spacing: 4) {
+                        if let time = stop.doneTime {
+                            Text(time)
+                                .font(.caption)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(stop.doneTime.map { "Erledigt um \($0)" } ?? "Erledigt")
                 }
                 // One menu for the stop, 44 points wide. Ticking a spot
                 // off is the gesture of the day itself (§8.5) — a menu

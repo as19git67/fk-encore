@@ -44,6 +44,13 @@ export interface CurrentStop extends PlannedStop {
   status: StopStatus;
   pinned: boolean;
   /**
+   * When it was ticked off, as an ISO timestamp; null or absent while
+   * it is not done, and for a tick older than the column. Carried
+   * through every rewrite of a day so the moment is not lost when the
+   * block around it is saved again.
+   */
+  doneAt?: string | null;
+  /**
    * Why it was saved and where from, carried over from the pool entry
    * when a find is planned (§9.2). Absent for the ordinary case: a spot
    * the region search proposed has no note, and its reasons are the
