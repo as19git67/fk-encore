@@ -81,14 +81,11 @@ struct TripPlanDayView: View {
                                        anchor: TripMapAnchor.of(day: day, legAnchor: leg.anchor),
                                        light: viewModel.light,
                                        isRunning: leg.schedule(on: Date()).isRunning,
-                                       onHide: { stop in
-                                           await viewModel.hide(osmRef: stop.osmRef)
-                                       },
-                                       // The same write the row's menu makes
-                                       // (§8.5): one status, no replan.
-                                       onMark: { stop, status in
-                                           await viewModel.mark(stop, as: status)
-                                       },
+                                       // The same list the rows and the
+                                       // detail screen offer (§8.4).
+                                       stopActions: { stop, later in stopActions(stop, later: later) },
+                                       onSave: { await viewModel.saveNote($0) },
+                                       shelter: { viewModel.forecast?.shelter(for: $0) },
                                        mode: leg.transportMode)
                     } label: {
                         Label("Karte", systemImage: "map")
@@ -1419,74 +1416,115 @@ struct TripPlanDayView: View {
         }
     }
 
-    /// Everything one can do with a stop, in one menu. It was six
-    /// separate targets in a row, none of them 44 points wide.
+    /// Everything one can do with a planned stop — one list for every
+    /// place a stop is shown: the row's menu, its long press, the detail
+    /// screen and the map's sheet (§8.4). Out of the trial: the map could
+    /// tick a stop off but not move it, the list could move it but not
+    /// hide it, and what was possible depended on the way somebody had
+    /// come. What differs is only what the stop's state allows.
+    ///
+    /// `later` runs what opens a screen of its own (the block picker)
+    /// once the screen the action was pressed on has gone; the row's
+    /// menu has nothing to wait for and runs it at once.
+    private func stopActions(
+        _ stop: TripStop,
+        later: @escaping @MainActor (@escaping @MainActor () -> Void) -> Void = { $0() },
+    ) -> [TripPinSheetAction] {
+        let status = stop.stopStatus
+        var actions: [TripPinSheetAction] = []
+
+        // Status first: it is what somebody standing at the place
+        // reaches for. Both answers while it is open, the way back once
+        // it is settled.
+        if status != .done {
+            actions.append(TripPinSheetAction(id: "done", title: "Erledigt", systemImage: "checkmark",
+                                              group: .status) {
+                await viewModel.mark(stop, as: .done)
+            })
+        }
+        if status != .skipped {
+            actions.append(TripPinSheetAction(id: "skipped", title: "Übersprungen", systemImage: "xmark",
+                                              group: .status) {
+                await viewModel.mark(stop, as: .skipped)
+            })
+        }
+        if status != .planned {
+            actions.append(TripPinSheetAction(id: "reopen", title: "Doch wieder offen",
+                                              systemImage: "arrow.uturn.backward", group: .status) {
+                await viewModel.mark(stop, as: .planned)
+            })
+        }
+
+        // Routing somewhere is only useful once you are travelling.
+        // Planning at the kitchen table, "where is that?" is the
+        // question — a route from home to a café you will walk to next
+        // month is a number nobody wants.
+        if isTravelling {
+            let mode = viewModel.leg?.transportMode ?? .foot
+            actions.append(TripPinSheetAction(id: "route", title: "Route hierher",
+                                              systemImage: "arrow.triangle.turn.up.right.circle",
+                                              group: .navigate) {
+                later { offerMaps(.single(stop.coordinate, mode: mode)) }
+            })
+        }
+        actions.append(TripPinSheetAction(id: "showOnMap", title: "Auf der Karte zeigen",
+                                          systemImage: "mappin.circle", closes: false, group: .navigate) {
+            TripMapsOpen.pin(stop.coordinate, name: stop.name, using: TripMapsPreference.load())
+        })
+
+        // A stop that is done stays where it was seen (§5): the server
+        // refuses the move, so it is not offered.
+        if status != .done, let blockId = viewModel.day?.blocks.first(where: {
+            $0.stops.contains { $0.rowId == stop.rowId }
+        })?.id {
+            actions.append(TripPinSheetAction(id: "move", title: "In einen anderen Block",
+                                              systemImage: "calendar") {
+                later { moving = TripStopMove(stop: stop, blockId: blockId) }
+            })
+        }
+        actions.append(TripPinSheetAction(id: "pin",
+                                          title: stop.pinned ? "Nicht mehr anheften" : "Anheften",
+                                          systemImage: stop.pinned ? "pin.slash" : "pin") {
+            await viewModel.setPinned(stop, !stop.pinned)
+        })
+        // Not for the stop a frame placed (§7.3): "not today" is said by
+        // taking the outing off the block, and the server refuses the
+        // shortcut with the same sentence.
+        if status == .planned && !isFramed(stop) {
+            actions.append(TripPinSheetAction(
+                id: "toPool", title: "Zurück zu den Kandidaten", systemImage: "tray.and.arrow.down",
+                footer: "„Nicht heute“ — er bleibt im Rennen und kommt beim nächsten Planen wieder in Frage.",
+            ) {
+                await viewModel.returnToPool(stop)
+            })
+        }
+        // "Beim nächsten Mal" (§20.3): the same as in the pool — a copy
+        // into the collection, the stop stays where it is.
+        actions.append(TripPinSheetAction(id: "keep", title: "Für später merken", systemImage: "lightbulb",
+                                          closes: false) {
+            await viewModel.keepForNextTime(osmRefs: [stop.osmRef])
+        })
+
+        actions.append(TripPinSheetAction(
+            id: "hide", title: "Für diese Reise ausblenden", systemImage: "eye.slash",
+            role: .destructive,
+            footer: "Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch beim nächsten "
+                + "Neuplanen nicht. Rückgängig bei den Kandidaten unter „Ausgeblendet“.",
+            group: .remove,
+        ) {
+            await viewModel.hide(osmRef: stop.osmRef)
+        })
+        return actions
+    }
+
+    /// The row's menu: the stop's actions, and — the one thing only a
+    /// row can do — unfolding its reasons in place. The detail screen
+    /// and the map's sheet show the reasons anyway.
     @ViewBuilder
     private func stopMenuItems(_ stop: TripStop, in block: TripBlock, reasons: [String]) -> some View {
-        Section {
-            Button {
-                Task { await viewModel.mark(stop, as: .done) }
-            } label: {
-                Label("Erledigt", systemImage: "checkmark")
-            }
-            Button {
-                Task { await viewModel.mark(stop, as: .skipped) }
-            } label: {
-                Label("Übersprungen", systemImage: "xmark")
-            }
-            if stop.stopStatus != .planned {
-                Button {
-                    Task { await viewModel.mark(stop, as: .planned) }
-                } label: {
-                    Label("Doch wieder offen", systemImage: "arrow.uturn.backward")
-                }
-            }
-        }
-        Section {
-            // Routing somewhere is only useful once you are travelling.
-            // Planning at the kitchen table, "where is that?" is the
-            // question — a route from home to a café you will walk to
-            // next month is a number nobody wants.
-            if isTravelling {
-                Button {
-                    offerMaps(.single(stop.coordinate, mode: viewModel.leg?.transportMode ?? .foot))
-                } label: {
-                    Label("Route hierher", systemImage: "arrow.triangle.turn.up.right.circle")
-                }
-            }
-            Button {
-                TripMapsOpen.pin(stop.coordinate, name: stop.name, using: TripMapsPreference.load())
-            } label: {
-                Label("Auf der Karte zeigen", systemImage: "mappin.circle")
-            }
-        }
-        Section {
-            // A stop that is done stays where it was seen (§5): the
-            // server refuses the move, so the menu does not offer it.
-            if stop.stopStatus != .done {
-                Button {
-                    moving = TripStopMove(stop: stop, blockId: block.id)
-                } label: {
-                    Label("In einen anderen Block", systemImage: "calendar")
-                }
-            }
-            Button {
-                Task { await viewModel.setPinned(stop, !stop.pinned) }
-            } label: {
-                Label(stop.pinned ? "Nicht mehr anheften" : "Anheften",
-                      systemImage: stop.pinned ? "pin.slash" : "pin")
-            }
-            // Not for the stop a frame placed (§7.3): "not today" is
-            // said by taking the outing off the block, and the server
-            // refuses the shortcut with the same sentence.
-            if stop.stopStatus == .planned && !isFramed(stop) {
-                Button {
-                    Task { await viewModel.returnToPool(stop) }
-                } label: {
-                    Label("Zurück zu den Kandidaten", systemImage: "tray.and.arrow.down")
-                }
-            }
-            if !reasons.isEmpty {
+        TripSpotActionMenuItems(actions: stopActions(stop))
+        if !reasons.isEmpty {
+            Section {
                 Button {
                     viewModel.toggleReasons(for: stop.osmRef)
                 } label: {
@@ -1520,57 +1558,15 @@ struct TripPlanDayView: View {
                         light: viewModel.light?.hint(for: stop.osmRef),
                         shelter: viewModel.forecast?.shelter(for: stop.osmRef),
                     ) { closeDetail in
-                        // The same section the pool shows: one
-                        // decision, one way of making it.
-                        Section {
-                            if stop.stopStatus != .done {
-                                Button {
-                                    moving = TripStopMove(stop: stop, blockId: block.id)
-                                } label: {
-                                    Label("In einen anderen Block", systemImage: "calendar")
-                                }
-                            }
-                            Button {
-                                Task { await viewModel.setPinned(stop, !stop.pinned) }
-                            } label: {
-                                Label(stop.pinned ? "Nicht mehr anheften" : "Anheften",
-                                      systemImage: stop.pinned ? "pin.slash" : "pin")
-                            }
-                            // "Nicht heute Nachmittag" (§8.4): out of
-                            // the day, back into the running.
-                            if stop.stopStatus == .planned && !isFramed(stop) {
-                                Button {
-                                    // Back to the day afterwards: this
-                                    // screen would otherwise go on
-                                    // describing a stop that has just
-                                    // left it.
-                                    Task {
-                                        await viewModel.returnToPool(stop)
-                                        closeDetail()
-                                    }
-                                } label: {
-                                    Label("Zurück zu den Kandidaten", systemImage: "tray.and.arrow.down")
-                                }
-                            }
-                            // "Not this one, and not next time either"
-                            // (§5): the way to stop the search from
-                            // proposing a place that is simply not
-                            // wanted. Reversible under "Ausgeblendet"
-                            // in the pool.
-                            Button(role: .destructive) {
-                                Task {
-                                    await viewModel.hide(osmRef: stop.osmRef)
-                                    closeDetail()
-                                }
-                            } label: {
-                                Label("Für diese Reise ausblenden", systemImage: "eye.slash")
-                            }
-                        } footer: {
-                            // The two ways out, side by side, because
-                            // the difference is the whole point.
-                            Text("Zurück zu den Kandidaten heißt „nicht heute“ — er bleibt im "
-                                 + "Rennen. Ausblenden heißt „nicht auf dieser Reise“.")
-                        }
+                        // The same actions as the row's menu and the
+                        // map's sheet (§8.4). Anything that settles or
+                        // removes the stop closes this screen, which
+                        // would otherwise go on describing the stop as
+                        // it was. The screen has its own way there.
+                        TripSpotActionSections(
+                            actions: stopActions(stop).filter { $0.group != .navigate },
+                            close: closeDetail,
+                        )
                     }
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {

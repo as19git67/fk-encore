@@ -2129,6 +2129,18 @@ jetzt dasselbe wie das Menü der Zeile — Erledigt, Übersprungen, und bei eine
 abgehakten Stopp „Doch wieder offen" —, dieselbe Schreibung, kein Neuplanen.
 Das Blatt schließt sich, der Pin wechselt die Farbe: das ist die Bestätigung.
 
+**Aus der Erprobung: jeder Weg zum Spot kann dasselbe (umgesetzt).** Die
+Karte konnte abhaken und ausblenden, aber nicht verschieben; die Liste konnte
+verschieben, anheften und zurücklegen, aber nicht ausblenden; die
+Detailansicht hinter der Karte konnte gar nichts. Was möglich war, hing am
+Weg, auf dem man gekommen war. Jetzt entstehen die Aktionen eines Spots an
+einer Stelle — eine Liste für eingeplante Stopps, eine für Kandidaten — und
+Menü, Detailansicht, Pin-Sheet und die Detailansicht dahinter zeigen dieselbe.
+Unterschiede kommen nur aus dem Zustand (Erledigtes wird nicht verschoben,
+nur Kandidaten werden eingeplant). „Für später merken" gibt es damit auch für
+eingeplante Stopps: eine Kopie in den Ideenvorrat, der Stopp bleibt, wo er
+ist. Die Regel steht für künftige Änderungen in den Projektanweisungen.
+
 **Aus der Erprobung: die Vergangenheit ist kein Ziel (umgesetzt).** Am zweiten
 Tag bot „In anderen Block verschieben" noch Tag 1 an. Der Blockwähler lässt
 jetzt weg, was vorbei ist — gestern ganz, und heute die Blöcke, an denen die

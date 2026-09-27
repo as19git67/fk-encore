@@ -30,7 +30,9 @@ struct TripPoolView: View {
     /// Set while the pin sheet is still on screen and the traveller has
     /// asked for the block picker. Two sheets cannot take the stage at
     /// once, so the picker waits for the first one to leave.
-    @State private var queuedPlacement: TripCandidate?
+    /// Work an action queued for when the map's sheet is gone — the
+    /// block picker cannot open while that sheet is still up.
+    @State private var afterSheet: (@MainActor () -> Void)?
     /// List or map, remembered. Somebody who thinks in places thinks in
     /// places tomorrow too, and re-tapping the switch on every leg is a
     /// preference the app could simply have kept.
@@ -88,13 +90,14 @@ struct TripPoolView: View {
         // never find (§5.2).
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
                     prompt: "Kandidaten durchsuchen")
-        .sheet(item: $inspecting, onDismiss: startQueuedPlacement) { candidate in
+        .sheet(item: $inspecting, onDismiss: runAfterSheet) { candidate in
             if let leg {
                 TripPinDetailSheet(
                     detail: TripPinDetail.of(candidate),
-                    actions: pinActions(candidate),
+                    actions: candidateActions(candidate, later: { afterSheet = $0 }),
                     spot: TripSpotDetail(candidate),
                     mode: leg.transportMode,
+                    onSave: { await viewModel.saveNote($0) },
                 )
             }
         }
@@ -248,32 +251,39 @@ struct TripPoolView: View {
         .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
     }
 
-    /// What a tapped pin can do — the pool's own two gestures (§5.2),
-    /// handed to the sheet, which knows the spot and nothing about the
-    /// trip.
-    private func pinActions(_ candidate: TripCandidate) -> [TripPinSheetAction] {
+    /// Everything that can be done with a candidate — one list for the
+    /// map's sheet and the detail screen, and the same actions the
+    /// row's swipes carry (§5.2, §8.4). Out of the trial: the map could
+    /// not keep a spot for next time, and the detail screen reached
+    /// through the map could do nothing at all.
+    ///
+    /// `later` runs what opens a screen of its own (the block picker)
+    /// once the screen the action was pressed on has gone.
+    private func candidateActions(
+        _ candidate: TripCandidate,
+        later: @escaping @MainActor (@escaping @MainActor () -> Void) -> Void = { $0() },
+    ) -> [TripPinSheetAction] {
         var actions: [TripPinSheetAction] = [
             TripPinSheetAction(
                 id: "place",
                 title: placeInto == nil ? "In einen Block setzen" : "Hier einplanen",
                 systemImage: "calendar.badge.plus",
-                footer: placeInto.map {
-                    "Für \($0.label), Tag \($0.dayIndex + 1)."
-                },
-                run: {
-                    guard let placeInto else {
-                        // The picker cannot open while this sheet
-                        // is still on screen; it goes up as this one
-                        // comes down.
-                        queuedPlacement = candidate
-                        return
-                    }
-                    if await viewModel.place(candidate, inBlock: placeInto.blockId,
-                                             onDay: placeInto.dayIndex) {
-                        dismiss()
-                    }
-                },
-            ),
+                footer: placeInto.map { "Für \($0.label), Tag \($0.dayIndex + 1)." },
+            ) {
+                guard let placeInto else {
+                    later { placing = candidate }
+                    return
+                }
+                if await viewModel.place(candidate, inBlock: placeInto.blockId, onDay: placeInto.dayIndex) {
+                    dismiss()
+                }
+            },
+            // "Beim nächsten Mal" (§20.3): a copy into the collection;
+            // the spot stays a candidate here.
+            TripPinSheetAction(id: "keep", title: "Für später merken", systemImage: "lightbulb",
+                               closes: false) {
+                await viewModel.keepForNextTime(osmRefs: [candidate.osmRef])
+            },
         ]
         if candidate.isManual {
             // A find somebody brought in themselves is theirs to
@@ -285,8 +295,10 @@ struct TripPoolView: View {
                 systemImage: "trash",
                 role: .destructive,
                 footer: "Selbst hinzugefügt — entfernen heißt hier wirklich weg.",
-                run: { await viewModel.drop(candidate) },
-            ))
+                group: .remove,
+            ) {
+                await viewModel.drop(candidate)
+            })
         } else {
             actions.append(TripPinSheetAction(
                 id: "hide",
@@ -295,17 +307,19 @@ struct TripPoolView: View {
                 role: .destructive,
                 footer: "Der Planer schlägt ihn auf dieser Reise nicht mehr vor, auch beim "
                     + "nächsten Neuplanen nicht. Rückgängig oben unter „Ausgeblendet“.",
-                run: { await viewModel.hide(osmRef: candidate.osmRef) },
-            ))
+                group: .remove,
+            ) {
+                await viewModel.hide(osmRef: candidate.osmRef)
+            })
         }
         return actions
     }
 
-    /// The block picker the pin sheet asked for, once it has left.
-    private func startQueuedPlacement() {
-        guard let queued = queuedPlacement else { return }
-        queuedPlacement = nil
-        placing = queued
+    /// Run what an action queued for when the map's sheet is gone.
+    private func runAfterSheet() {
+        let work = afterSheet
+        afterSheet = nil
+        work?()
     }
 
     /// Into the block this screen was opened for, or ask which one.
@@ -344,49 +358,9 @@ struct TripPoolView: View {
                 mode: leg.transportMode,
                 onSave: { await viewModel.saveNote($0) },
             ) { closeDetail in
-                Section {
-                    Button {
-                        Task { await placeOrPick(candidate, then: closeDetail) }
-                    } label: {
-                        Label(placeInto == nil ? "In einen Block setzen" : "Hier einplanen",
-                              systemImage: "calendar.badge.plus")
-                    }
-                    // The same thing the leading swipe does, where it
-                    // can be seen (§20.3).
-                    Button {
-                        Task { await viewModel.keepForNextTime(osmRefs: [candidate.osmRef]) }
-                    } label: {
-                        Label("Für später merken", systemImage: "lightbulb")
-                    }
-                    if candidate.isManual {
-                        // A find somebody brought in themselves is
-                        // theirs to delete: it exists because a person
-                        // added it, and nothing will propose it again.
-                        Button(role: .destructive) {
-                            Task {
-                                await viewModel.drop(candidate)
-                                closeDetail()
-                            }
-                        } label: {
-                            Label("Aus den Kandidaten entfernen", systemImage: "trash")
-                        }
-                    } else {
-                        Button(role: .destructive) {
-                            Task {
-                                await viewModel.hide(osmRef: candidate.osmRef)
-                                closeDetail()
-                            }
-                        } label: {
-                            Label("Für diese Reise ausblenden", systemImage: "eye.slash")
-                        }
-                    }
-                } footer: {
-                    Text(candidate.isManual
-                         ? "Selbst hinzugefügt — entfernen heißt hier wirklich weg."
-                         : "Ausblenden heißt „diesen nicht“: Der Planer schlägt ihn auf dieser "
-                           + "Reise nicht mehr vor, auch beim nächsten Neuplanen nicht. "
-                           + "Rückgängig oben unter „Ausgeblendet“.")
-                }
+                // The same actions as the map's sheet and the row's
+                // swipes (§8.4).
+                TripSpotActionSections(actions: candidateActions(candidate), close: closeDetail)
             }
         } label: {
             HStack {
