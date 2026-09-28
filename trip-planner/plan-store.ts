@@ -587,6 +587,51 @@ export async function updateLegPlace(
     .where(eq(tripPlans.id, planId));
 }
 
+/** What changing a journey writes on its own row (§22.7). */
+export interface TransitLegUpdate {
+  title: string;
+  mode: TransportMode;
+  origin: LegOrigin;
+  anchor: { lat: number; lon: number };
+  anchorLabel: string | null;
+  startDate: string;
+  departMinutes: number;
+  endMinutes: number;
+}
+
+/**
+ * The frame of a journey that is being changed in place: its two ends,
+ * its two moments, how it travels. Its days are written by the re-plan
+ * like any other leg's.
+ */
+export async function updateTransitLeg(
+  planId: number,
+  legId: number,
+  update: TransitLegUpdate,
+  db: Db = dbDefault,
+): Promise<void> {
+  await db
+    .update(tripPlanLegs)
+    .set({
+      title: update.title,
+      mode: update.mode,
+      origin_lat: update.origin.lat,
+      origin_lon: update.origin.lon,
+      origin_label: update.origin.label,
+      anchor_lat: update.anchor.lat,
+      anchor_lon: update.anchor.lon,
+      anchor_label: update.anchorLabel,
+      start_date: update.startDate,
+      depart_minutes: update.departMinutes,
+      end_minutes: update.endMinutes,
+    })
+    .where(and(eq(tripPlanLegs.id, legId), eq(tripPlanLegs.plan_id, planId), eq(tripPlanLegs.kind, "transit")));
+  await db
+    .update(tripPlans)
+    .set({ updated_at: new Date().toISOString() })
+    .where(eq(tripPlans.id, planId));
+}
+
 /**
  * Write a leg's days, with their fixpoints, blocks and stops.
  *

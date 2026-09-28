@@ -13,9 +13,9 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { createTripPlan } from "./plans";
+import { createTripPlan, getTripPlan } from "./plans";
 import { removeTripLeg } from "./legs";
-import { addTripTransit } from "./transits";
+import { addTripTransit, updateTripTransit } from "./transits";
 
 const ANCHOR = { lat: 48.37, lon: 10.9 };
 const NEXT = { lat: 48.37, lon: 11.4 };
@@ -196,5 +196,69 @@ describe("renumbering legs", () => {
     const { plan: without } = await removeTripLeg({ planId: plan.id, legIndex: 1 });
     expect(without.legs.map((l) => [l.position, l.title]))
       .toEqual([[0, "Erster Ort"], [1, "Zweiter Ort"], [2, "Dritter Ort"]]);
+  });
+});
+
+describe("PATCH /trip-planner/plans/:planId/transits/:legIndex", () => {
+  async function withJourney() {
+    const plan = await threeLegs();
+    const { plan: after } = await addTripTransit({
+      planId: plan.id, afterLegIndex: 0,
+      departDate: "2026-09-06", departAt: "10:00", arriveDate: "2026-09-06", arriveAt: "16:00",
+    });
+    return after;
+  }
+
+  it("changes the journey in place and moves the neighbours with it", async () => {
+    const before = await withJourney();
+    const journey = before.legs[1];
+
+    // Leaving an hour later and arriving the next morning.
+    const { plan: after } = await updateTripTransit({
+      planId: before.id, legIndex: 1,
+      departDate: "2026-09-06", departAt: "11:00", arriveDate: "2026-09-07", arriveAt: "09:00",
+    });
+
+    // The same journey — its row, its place, its name — with new moments.
+    const changed = after.legs[1];
+    expect(changed).toMatchObject({
+      id: journey.id, kind: "transit", title: journey.title,
+      startDate: "2026-09-06", departMinutes: 660, endMinutes: 540,
+    });
+    expect(changed.days).toHaveLength(2);
+    // Over night: a frame without stops.
+    expect(changed.days.every((d) => !d.detailed)).toBe(true);
+
+    // The leg left now departs at eleven.
+    expect(after.legs[0].days.at(-1)!.fixpoints.find((f) => f.kind === "departure")?.startMinutes)
+      .toBe(660);
+    // The leg reached begins the next day at nine; the one after moves too.
+    expect(after.legs[2]).toMatchObject({ startDate: "2026-09-07", arriveMinutes: 540 });
+    expect(after.legs[3].startDate).toBe("2026-09-10");
+  });
+
+  it("changes how the journey travels", async () => {
+    const before = await withJourney();
+    const { plan: after } = await updateTripTransit({
+      planId: before.id, legIndex: 1, mode: "transit",
+      departDate: "2026-09-06", departAt: "10:00", arriveDate: "2026-09-06", arriveAt: "16:00",
+    });
+    expect(after.legs[1].mode).toBe("transit");
+    expect(after.legs[1].days[0].bufferReason).toBe("Unterwegs mit Bahn oder Bus");
+  });
+
+  it("refuses what is not a journey, and leaves the journey as it was when refusing", async () => {
+    const before = await withJourney();
+    await expect(updateTripTransit({
+      planId: before.id, legIndex: 0,
+      departDate: "2026-09-06", departAt: "10:00", arriveDate: "2026-09-06", arriveAt: "16:00",
+    })).rejects.toMatchObject({ code: "failed_precondition" });
+    await expect(updateTripTransit({
+      planId: before.id, legIndex: 1,
+      departDate: "2026-09-06", departAt: "16:00", arriveDate: "2026-09-06", arriveAt: "10:00",
+    })).rejects.toMatchObject({ code: "invalid_argument" });
+
+    const { plan: still } = await getTripPlan({ planId: before.id });
+    expect(still.legs[1]).toMatchObject({ kind: "transit", departMinutes: 600, endMinutes: 960 });
   });
 });
