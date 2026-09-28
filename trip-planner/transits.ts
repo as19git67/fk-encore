@@ -33,6 +33,7 @@ import {
   shiftLegsFrom,
   updateLegFrames,
   updateLegPlace,
+  updateTransitLeg,
   type CreateDayInput,
   type StoredPlan,
 } from "./plan-store";
@@ -81,114 +82,207 @@ export const addTripTransit = api(
     if (previous.kind === "transit" || next.kind === "transit") {
       throw APIError.failedPrecondition("zwischen diesen beiden Etappen gibt es schon eine Weiterreise");
     }
-    if (!previous.startDate || !next.startDate) {
-      throw APIError.failedPrecondition(
-        "eine Weiterreise hat ein Datum — erst der Reise Daten geben, dann die Weiterreise anlegen",
-      );
-    }
-
-    const departMinutes = requireTime(req.departAt, "departAt");
-    const arriveMinutes = requireTime(req.arriveAt, "arriveAt");
-    requireDate(req.departDate, "departDate");
-    requireDate(req.arriveDate, "arriveDate");
-    const span = daysBetween(req.departDate, req.arriveDate);
-    if (span < 0 || (span === 0 && arriveMinutes <= departMinutes)) {
-      throw APIError.invalidArgument("die Ankunft muss nach der Abfahrt liegen");
-    }
-    if (span + 1 > MAX_TRANSIT_DAYS) {
-      throw APIError.invalidArgument(
-        `eine Weiterreise dauert höchstens ${MAX_TRANSIT_DAYS} Tage — länger ist es eine eigene Etappe`,
-      );
-    }
-    const previousDays = daysBetween(previous.startDate, req.departDate) + 1;
-    if (previousDays < 1) {
-      throw APIError.invalidArgument(
-        `die Abfahrt liegt vor dem ersten Tag von „${legName(previous)}" (${previous.startDate})`,
-      );
-    }
-
-    // What the two neighbours become. Both are re-planned, so neither
-    // may hold a day somebody has begun.
-    for (const leg of [previous, next]) {
-      const settled = firstSettledStop(leg);
-      if (settled) {
-        throw APIError.failedPrecondition(
-          `„${settled}" auf „${legName(leg)}" ist schon abgehakt — die Weiterreise würde `
-            + "einen begonnenen Tag neu planen",
-        );
-      }
-    }
-
-    const nextTitle = next.title ?? next.anchorLabel ?? `Etappe ${next.position + 1}`;
-    const previousRequest = previousLegRequest(previous, previousDays, req.departAt, nextTitle);
-    const nextRequest: LegRequest = {
-      ...legRequestFromStored(next),
-      startDate: req.arriveDate,
-      transfer: { arriveAt: req.arriveAt },
-    };
-    const mode = validateMode(req.mode ?? next.mode);
-    const transitRequest: LegRequest = {
-      kind: "transit",
-      title: req.title?.trim() || `Weiterreise nach ${nextTitle}`,
-      anchor: next.anchor,
-      anchorLabel: next.anchorLabel ?? next.title ?? undefined,
-      origin: {
-        lat: previous.anchor.lat,
-        lon: previous.anchor.lon,
-        label: previous.anchorLabel ?? previous.title ?? null,
-      },
-      mode,
-      days: span + 1,
-      startDate: req.departDate,
-      transit: { departAt: req.departAt, arriveAt: req.arriveAt },
-    };
-
-    // Everything planned before anything is written: a refusal half-way
-    // would leave a trip with one neighbour changed and no journey.
-    const detailedOf = (leg: StoredPlan["legs"][number]) => leg.days.filter((d) => d.detailed).length;
-    const plannedPrevious = await planLegForTrip(plan, previousRequest, {
-      detailDays: detailedOf(previous),
-      firstDayStartMinutes: previous.arriveMinutes,
-    });
-    const plannedNext = await planLegForTrip(plan, nextRequest, {
-      detailDays: detailedOf(next),
-      firstDayStartMinutes: arriveMinutes,
-    });
-    const plannedTransit = await planLegForTrip(plan, transitRequest, { detailDays: span + 1 });
-
-    await replanPlan(req.planId, plan.constraints, [
-      { legId: previous.id, days: [...plannedPrevious.leg.days] as CreateDayInput[], pool: [...plannedPrevious.leg.pool] },
-      { legId: next.id, days: [...plannedNext.leg.days] as CreateDayInput[], pool: [...plannedNext.leg.pool] },
-    ]);
-    await setLegsAwaitingRegion([
-      { legId: previous.id, awaiting: plannedPrevious.pending !== null },
-      { legId: next.id, awaiting: plannedNext.pending !== null },
-    ]);
-    await updateLegPlace(req.planId, next.id, { arriveMinutes });
-
-    // The next leg and every one after it move by the same number of
-    // days: the gaps the travellers left between cities survive.
-    const shift = daysBetween(next.startDate, req.arriveDate);
-    if (shift !== 0) {
-      await updateLegFrames(req.planId, plan.legs
-        .filter((l) => l.position > previous.position && l.startDate)
-        .map((l) => ({ legId: l.id, startDate: addDaysTo(l.startDate as string, shift) })));
-    }
-
-    const position = previous.position + 1;
-    await shiftLegsFrom(req.planId, position);
-    await insertLeg(req.planId, position, plannedTransit.leg);
-
-    const updated = await loadPlan(req.planId, userId);
-    if (!updated) throw APIError.internal("plan vanished while it was being written");
-    return {
-      plan: updated,
-      pendingRegions: plannedTransit.pending
-        ? [{ ...plannedTransit.pending, legIndex: position, legTitle: transitRequest.title ?? null }]
-        : [],
-    };
+    return await frameJourney(plan, userId, previous, next, req, null);
   },
 );
+
+export interface UpdateTransitRequest {
+  planId: number;
+  /** The journey itself, by position. */
+  legIndex: number;
+  departDate: string;
+  departAt: string;
+  arriveDate: string;
+  arriveAt: string;
+  /** How it travels. Unchanged when absent. */
+  mode?: TransportMode;
+  /** What to call it. Unchanged when absent. */
+  title?: string;
+}
+
+/**
+ * Change a journey in place (§22.7): new moments, a new mode.
+ *
+ * The same framing as adding one — the leg before ends with the new
+ * departure, the leg after begins with the new arrival, later legs move
+ * along — and the journey keeps its row, its position and its title.
+ * Nothing is removed first, so a refusal leaves the journey as it was.
+ */
+export const updateTripTransit = api(
+  { expose: true, method: "PATCH", path: "/trip-planner/plans/:planId/transits/:legIndex", auth: true },
+  async (req: UpdateTransitRequest): Promise<PlanResponse> => {
+    const userId = requireUser();
+    const plan = await loadPlan(req.planId, userId);
+    if (!plan) throw APIError.notFound("plan not found");
+    await requireOrganiser(req.planId, userId, "Etappen ändern");
+
+    const journey = legAt(plan, req.legIndex);
+    if (journey.kind !== "transit") {
+      throw APIError.failedPrecondition(`„${legName(journey)}" ist keine Weiterreise`);
+    }
+    const previous = plan.legs.find((l) => l.position === req.legIndex - 1);
+    const next = plan.legs.find((l) => l.position === req.legIndex + 1);
+    if (!previous || !next) {
+      throw APIError.failedPrecondition(
+        "diese Weiterreise hat keine Etappe mehr davor oder danach — entfernen und neu anlegen",
+      );
+    }
+    return await frameJourney(plan, userId, previous, next, {
+      ...req,
+      mode: req.mode ?? journey.mode,
+      title: req.title ?? journey.title ?? undefined,
+    }, journey);
+  },
+);
+
+/**
+ * The part adding and changing share: validate the two moments, frame
+ * both neighbours by them, plan the journey — everything before
+ * anything is written — then write it all.
+ */
+async function frameJourney(
+  plan: StoredPlan,
+  userId: number,
+  previous: StoredPlan["legs"][number],
+  next: StoredPlan["legs"][number],
+  req: {
+    planId: number;
+    departDate: string;
+    departAt: string;
+    arriveDate: string;
+    arriveAt: string;
+    mode?: TransportMode;
+    title?: string;
+  },
+  existing: StoredPlan["legs"][number] | null,
+): Promise<PlanResponse> {
+  if (!previous.startDate || !next.startDate) {
+    throw APIError.failedPrecondition(
+      "eine Weiterreise hat ein Datum — erst der Reise Daten geben, dann die Weiterreise anlegen",
+    );
+  }
+
+  const departMinutes = requireTime(req.departAt, "departAt");
+  const arriveMinutes = requireTime(req.arriveAt, "arriveAt");
+  requireDate(req.departDate, "departDate");
+  requireDate(req.arriveDate, "arriveDate");
+  const span = daysBetween(req.departDate, req.arriveDate);
+  if (span < 0 || (span === 0 && arriveMinutes <= departMinutes)) {
+    throw APIError.invalidArgument("die Ankunft muss nach der Abfahrt liegen");
+  }
+  if (span + 1 > MAX_TRANSIT_DAYS) {
+    throw APIError.invalidArgument(
+      `eine Weiterreise dauert höchstens ${MAX_TRANSIT_DAYS} Tage — länger ist es eine eigene Etappe`,
+    );
+  }
+  const previousDays = daysBetween(previous.startDate, req.departDate) + 1;
+  if (previousDays < 1) {
+    throw APIError.invalidArgument(
+      `die Abfahrt liegt vor dem ersten Tag von „${legName(previous)}" (${previous.startDate})`,
+    );
+  }
+
+  // Everything re-planned here must not hold a day somebody has begun.
+  for (const leg of existing ? [previous, existing, next] : [previous, next]) {
+    const settled = firstSettledStop(leg);
+    if (settled) {
+      throw APIError.failedPrecondition(
+        `„${settled}" auf „${legName(leg)}" ist schon abgehakt — die Weiterreise würde `
+          + "einen begonnenen Tag neu planen",
+      );
+    }
+  }
+
+  const nextTitle = next.title ?? next.anchorLabel ?? `Etappe ${next.position + 1}`;
+  const previousRequest = previousLegRequest(previous, previousDays, req.departAt, nextTitle);
+  const nextRequest: LegRequest = {
+    ...legRequestFromStored(next),
+    startDate: req.arriveDate,
+    transfer: { arriveAt: req.arriveAt },
+  };
+  const mode = validateMode(req.mode ?? next.mode);
+  const title = req.title?.trim() || `Weiterreise nach ${nextTitle}`;
+  const origin = {
+    lat: previous.anchor.lat,
+    lon: previous.anchor.lon,
+    label: previous.anchorLabel ?? previous.title ?? null,
+  };
+  const transitRequest: LegRequest = {
+    kind: "transit",
+    title,
+    anchor: next.anchor,
+    anchorLabel: next.anchorLabel ?? next.title ?? undefined,
+    origin,
+    mode,
+    days: span + 1,
+    startDate: req.departDate,
+    transit: { departAt: req.departAt, arriveAt: req.arriveAt },
+  };
+
+  // Everything planned before anything is written: a refusal half-way
+  // would leave a trip with one neighbour changed and no journey.
+  const detailedOf = (leg: StoredPlan["legs"][number]) => leg.days.filter((d) => d.detailed).length;
+  const plannedPrevious = await planLegForTrip(plan, previousRequest, {
+    detailDays: detailedOf(previous),
+    firstDayStartMinutes: previous.arriveMinutes,
+  });
+  const plannedNext = await planLegForTrip(plan, nextRequest, {
+    detailDays: detailedOf(next),
+    firstDayStartMinutes: arriveMinutes,
+  });
+  const plannedTransit = await planLegForTrip(plan, transitRequest, { detailDays: span + 1 });
+
+  await replanPlan(req.planId, plan.constraints, [
+    { legId: previous.id, days: [...plannedPrevious.leg.days] as CreateDayInput[], pool: [...plannedPrevious.leg.pool] },
+    { legId: next.id, days: [...plannedNext.leg.days] as CreateDayInput[], pool: [...plannedNext.leg.pool] },
+    ...(existing
+      ? [{ legId: existing.id, days: [...plannedTransit.leg.days] as CreateDayInput[], pool: [...plannedTransit.leg.pool] }]
+      : []),
+  ]);
+  await setLegsAwaitingRegion([
+    { legId: previous.id, awaiting: plannedPrevious.pending !== null },
+    { legId: next.id, awaiting: plannedNext.pending !== null },
+    ...(existing ? [{ legId: existing.id, awaiting: plannedTransit.pending !== null }] : []),
+  ]);
+  await updateLegPlace(req.planId, next.id, { arriveMinutes });
+
+  // The next leg and every one after it move by the same number of
+  // days: the gaps the travellers left between cities survive.
+  const shift = daysBetween(next.startDate, req.arriveDate);
+  if (shift !== 0) {
+    await updateLegFrames(req.planId, plan.legs
+      .filter((l) => l.position >= next.position && l.startDate)
+      .map((l) => ({ legId: l.id, startDate: addDaysTo(l.startDate as string, shift) })));
+  }
+
+  let position: number;
+  if (existing) {
+    position = existing.position;
+    await updateTransitLeg(req.planId, existing.id, {
+      title,
+      mode,
+      origin,
+      anchor: next.anchor,
+      anchorLabel: next.anchorLabel ?? next.title ?? null,
+      startDate: req.departDate,
+      departMinutes,
+      endMinutes: arriveMinutes,
+    });
+  } else {
+    position = previous.position + 1;
+    await shiftLegsFrom(req.planId, position);
+    await insertLeg(req.planId, position, plannedTransit.leg);
+  }
+
+  const updated = await loadPlan(req.planId, userId);
+  if (!updated) throw APIError.internal("plan vanished while it was being written");
+  return {
+    plan: updated,
+    pendingRegions: plannedTransit.pending
+      ? [{ ...plannedTransit.pending, legIndex: position, legTitle: title }]
+      : [],
+  };
+}
 
 /**
  * The leg being left, as it will be: ending on the day of departure,

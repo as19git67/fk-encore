@@ -75,6 +75,9 @@ final class TripTransitTests: XCTestCase {
                                             arrive: at("2026-09-07", 90), mode: .car, timeZone: berlin)
         XCTAssertEqual(body, .init(afterLegIndex: 0, departDate: "2026-09-06", departAt: "10:00",
                                    arriveDate: "2026-09-07", arriveAt: "01:30", mode: "car"))
+        // Changing sends the moments without the neighbour's position.
+        XCTAssertEqual(body.change, .init(departDate: "2026-09-06", departAt: "10:00",
+                                          arriveDate: "2026-09-07", arriveAt: "01:30", mode: "car"))
     }
 
     func testTheWindowOfAJourneyReadsAsFromTo() {
