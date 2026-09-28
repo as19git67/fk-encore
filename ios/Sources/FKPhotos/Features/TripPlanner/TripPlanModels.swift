@@ -20,10 +20,22 @@ struct TripPlan: Codable, Identifiable, Sendable {
     /// may carry fields this build has not learned about.
     let constraints: TripConstraints?
     let legs: [TripLeg]
+    /// Where the trip sets off from and returns to (§22.7), or nil
+    /// while nobody said. Optional so an older server still decodes.
+    var home: TripHome? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, ownerId, title, constraints, legs
+        case id, ownerId, title, constraints, legs, home
     }
+}
+
+/// The far end of the way there and the way home (§22.7).
+struct TripHome: Codable, Sendable, Equatable {
+    let lat: Double
+    let lon: Double
+    let label: String?
+
+    var displayLabel: String { label ?? "Zuhause" }
 }
 
 /// The settings a trip was planned with.

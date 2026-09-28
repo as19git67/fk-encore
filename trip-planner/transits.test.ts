@@ -16,10 +16,14 @@ import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
 import { removeTripLeg } from "./legs";
 import { addTripTransit, updateTripTransit } from "./transits";
+import { setTripHome } from "./home";
+import { applyVotesToPlan, castVote } from "./plan-votes";
 
 const ANCHOR = { lat: 48.37, lon: 10.9 };
 const NEXT = { lat: 48.37, lon: 11.4 };
 const LATER = { lat: 48.37, lon: 11.45 };
+// Inside the seeded region too, a good way west of the first place.
+const HOME = { lat: 48.5, lon: 10.55 };
 const DB = "nom_west";
 
 function spot(n: number, lat: number, lon: number): GeoPoiSearchSpot {
@@ -260,5 +264,102 @@ describe("PATCH /trip-planner/plans/:planId/transits/:legIndex", () => {
 
     const { plan: still } = await getTripPlan({ planId: before.id });
     expect(still.legs[1]).toMatchObject({ kind: "transit", departMinutes: 600, endMinutes: 960 });
+  });
+});
+
+describe("the way there and the way home", () => {
+  it("needs a home, and forgets it again", async () => {
+    const plan = await threeLegs();
+    await expect(addTripTransit({
+      planId: plan.id, afterLegIndex: -1,
+      departDate: "2026-09-05", departAt: "08:00", arriveDate: "2026-09-05", arriveAt: "12:00",
+    })).rejects.toMatchObject({ code: "failed_precondition" });
+
+    const { plan: withHome } = await setTripHome({ planId: plan.id, ...HOME, label: "Zuhause" });
+    expect(withHome.home).toEqual({ ...HOME, label: "Zuhause" });
+    const { plan: without } = await setTripHome({ planId: plan.id, clear: true });
+    expect(without.home).toBeNull();
+    await expect(setTripHome({ planId: plan.id, lat: 95, lon: 0 }))
+      .rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
+  it("puts the journey from home in front, framed by the first place's arrival", async () => {
+    const plan = await threeLegs();
+    await setTripHome({ planId: plan.id, ...HOME, label: "Zuhause" });
+
+    const { plan: after } = await addTripTransit({
+      planId: plan.id, afterLegIndex: -1,
+      departDate: "2026-09-05", departAt: "08:00", arriveDate: "2026-09-05", arriveAt: "12:00",
+    });
+
+    expect(after.legs.map((l) => [l.position, l.kind, l.title])).toEqual([
+      [0, "transit", "Anreise nach Erster Ort"],
+      [1, "stay", "Erster Ort"],
+      [2, "stay", "Zweiter Ort"],
+      [3, "stay", "Dritter Ort"],
+    ]);
+    const [journey, first] = after.legs;
+    expect(journey).toMatchObject({
+      origin: { ...HOME, label: "Zuhause" }, anchor: ANCHOR, departMinutes: 480, endMinutes: 720,
+      startDate: "2026-09-05",
+    });
+    expect(journey.days[0].fixpoints.map((f) => f.label)).toEqual(["Abfahrt Zuhause", "Ankunft Hotel am Fluss"]);
+    // The first place begins at the arrival; the other places stay put.
+    expect(first).toMatchObject({ startDate: "2026-09-05", arriveMinutes: 720 });
+    expect(after.legs[2].startDate).toBe("2026-09-07");
+
+    // Only once.
+    await expect(addTripTransit({
+      planId: plan.id, afterLegIndex: -1,
+      departDate: "2026-09-05", departAt: "08:00", arriveDate: "2026-09-05", arriveAt: "12:00",
+    })).rejects.toMatchObject({ code: "failed_precondition" });
+  });
+
+  it("appends the journey home, ending the last place with the departure", async () => {
+    const plan = await threeLegs();
+    await setTripHome({ planId: plan.id, ...HOME, label: "Zuhause" });
+
+    const { plan: after } = await addTripTransit({
+      planId: plan.id, afterLegIndex: 2,
+      departDate: "2026-09-10", departAt: "10:00", arriveDate: "2026-09-10", arriveAt: "15:00",
+    });
+
+    const journey = after.legs[3];
+    expect(journey).toMatchObject({
+      kind: "transit", title: "Heimreise von Dritter Ort", anchor: HOME, anchorLabel: "Zuhause",
+      origin: { lat: LATER.lat, lon: LATER.lon }, startDate: "2026-09-10",
+    });
+    const last = after.legs[2];
+    expect(last.days.at(-1)!.fixpoints.find((f) => f.kind === "departure"))
+      .toMatchObject({ startMinutes: 600, label: "Weiterreise nach Zuhause" });
+
+    // And it can be changed in place like any journey.
+    const { plan: changed } = await updateTripTransit({
+      planId: plan.id, legIndex: 3,
+      departDate: "2026-09-10", departAt: "14:00", arriveDate: "2026-09-10", arriveAt: "19:00",
+    });
+    expect(changed.legs[3]).toMatchObject({ id: journey.id, departMinutes: 840, endMinutes: 1140 });
+  });
+});
+
+describe("voting on the way", () => {
+  it("lets the group turn a stop on the journey down, and the next plan leaves it out", async () => {
+    const plan = await threeLegs();
+    const { plan: after } = await addTripTransit({
+      planId: plan.id, afterLegIndex: 0,
+      departDate: "2026-09-06", departAt: "10:00", arriveDate: "2026-09-06", arriveAt: "16:00",
+    });
+    const journey = after.legs[1];
+    const stop = journey.days[0].blocks[0].stops[0];
+    expect(stop).toBeDefined();
+
+    // "lieber nicht" on a stop of the journey (§6.1) — the ballot works
+    // per leg, and a journey is a leg.
+    await castVote({ planId: plan.id, legIndex: 1, osmRef: stop.osmRef, value: "rather-not" });
+    const { plan: voted } = await applyVotesToPlan({ planId: plan.id });
+
+    const stops = voted.legs[1].days[0].blocks.flatMap((b) => b.stops.map((s) => s.osmRef));
+    expect(stops).not.toContain(stop.osmRef);
+    expect(voted.legs[1].kind).toBe("transit");
   });
 });

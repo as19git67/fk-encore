@@ -99,4 +99,38 @@ final class TripTransitTests: XCTestCase {
         XCTAssertNotEqual(TripTransitSuggestion.dismissKey(planId: 1, afterLegIndex: 0),
                           TripTransitSuggestion.dismissKey(planId: 1, afterLegIndex: 1))
     }
+
+    func testTheWayThereAndHomeAreOfferedOnlyWithAHome() {
+        let stays = [
+            leg(0, start: "2026-09-05", days: [day(0)]),
+            leg(1, start: "2026-09-06", days: [day(0)]),
+        ]
+        XCTAssertFalse(TripTransitSlots.wantsArrival(stays, hasHome: false))
+        XCTAssertNil(TripTransitSlots.wantsReturn(stays, hasHome: false))
+        XCTAssertTrue(TripTransitSlots.wantsArrival(stays, hasHome: true))
+        XCTAssertEqual(TripTransitSlots.wantsReturn(stays, hasHome: true), 1)
+        // Already beginning with a journey: not again.
+        var journeyFirst = stays
+        journeyFirst.insert(leg(-1, start: "2026-09-05", days: [day(0)], transit: (480, 720)), at: 0)
+        XCTAssertFalse(TripTransitSlots.wantsArrival(journeyFirst, hasHome: true))
+    }
+
+    func testTheFrameSentenceNamesWhatMoves() {
+        XCTAssertEqual(TripTransitPlanning.frameSentence(from: nil, to: "Ort 0"),
+                       "„Ort 0“ beginnt mit der Ankunft. Alle Etappen danach verschieben sich mit.")
+        XCTAssertEqual(TripTransitPlanning.frameSentence(from: "Ort 2", to: nil),
+                       "„Ort 2“ endet mit der Abfahrt.")
+    }
+
+    func testAHomeDecodesAndAnOlderServerWithoutOneStillDoes() throws {
+        let with = """
+        {"id":1,"ownerId":1,"title":null,"constraints":null,"legs":[],
+         "home":{"lat":48.5,"lon":10.55,"label":"Zuhause"}}
+        """
+        let without = """
+        {"id":1,"ownerId":1,"title":null,"constraints":null,"legs":[]}
+        """
+        XCTAssertEqual(try JSONDecoder().decode(TripPlan.self, from: Data(with.utf8)).home?.displayLabel, "Zuhause")
+        XCTAssertNil(try JSONDecoder().decode(TripPlan.self, from: Data(without.utf8)).home)
+    }
 }

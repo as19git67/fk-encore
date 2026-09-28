@@ -5619,6 +5619,20 @@ wie das Anlegen. Die Weiterreise behält ihre Zeile, ihren Platz und ihren
 Namen. Vorher wurde sie gelöscht und neu angelegt; schlug das Neuanlegen fehl,
 war sie weg. Jetzt lässt eine Ablehnung alles, wie es war.
 
+**Hinweg und Rückweg (umgesetzt).** Der Wunsch dahinter war nie die
+Weiterreise als solche, sondern der Weg: auf der Fahrt hin, zwischen zwei
+Orten und zurück Interessantes finden und einplanen — auch über die
+Abstimmung. Dafür kennt die Reise jetzt ein **Zuhause**
+(`PATCH …/plans/:planId/home`, Migration 0217). Mit ihm sind Anreise und
+Heimreise Weiterreisen wie die zwischen zwei Orten: `afterLegIndex: -1` ist
+der Weg von zu Hause zum ersten Ort, die Position des letzten Ortes der Weg
+zurück. Beide haben dieselbe Korridorsuche als Vorrat, und weil die Abstimmung
+je Etappe arbeitet (§6.1), lässt sich über die Orte am Weg abstimmen wie über
+jeden anderen — „lieber nicht" nimmt einen Stopp beim nächsten Planen wieder
+heraus. Der Vorschlag kennt die beiden Enden ebenfalls (Anreise zuerst,
+Heimreise zuletzt). In der App steht das Zuhause oben in der Städteliste;
+davor „Anreise einfügen", danach „Heimreise einfügen".
+
 Nebenbei gefunden: Eine Etappe *vor* zwei oder mehr anderen einzufügen oder zu
 löschen scheiterte an der Eindeutigkeit von `(plan, position)` — die
 Umnummerierung in einem Schritt kollidierte zeilenweise. Sie läuft jetzt über
