@@ -14,7 +14,10 @@ import Tag from 'primevue/tag'
 import ScrollX from '../../layout/ScrollX.vue'
 import { ApiError } from '../../../api/client'
 import {
+  acceptForecastBookingPremium,
   acceptForecastStatement,
+  decideForecastBookingLink,
+  setForecastItemContractNo,
   correctForecastStatementValues,
   decideForecastStatementLink,
   linkForecastStatementDocument,
@@ -31,7 +34,7 @@ import {
   type ForecastStatementValues,
 } from '../../../api/finance'
 import { formatEur } from './forecastModel'
-import { formatMonth, sourceText } from './forecastStatements'
+import { RHYTHM_TEXT, formatMonth, sourceText } from './forecastStatements'
 import { parseLocalDate, toLocalIsoDate } from '../../../utils/dateFormat'
 
 /**
@@ -168,6 +171,21 @@ const linkDoc = (c: ForecastDocumentCandidate) => props.item && run(() => linkFo
 
 const confirm = useConfirm()
 
+// ---- bookings ----
+
+const bookings = computed(() => props.state?.bookings ?? { bookings: [], summary: null, proposal: null, contractNoSuggestion: null })
+const formatDayShort = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`
+const BOOKING_KIND: Record<string, string> = {
+  contract: 'Vertragsnummer in der Buchung',
+  document: 'über ein zugeordnetes Dokument',
+  counterparty: 'Versicherer und Betrag passen',
+  user: 'von Hand zugeordnet',
+}
+const decideBooking = (id: number, status: 'confirmed' | 'rejected') => run(() => decideForecastBookingLink(id, status))
+const acceptBookingPremium = () => props.item && run(() => acceptForecastBookingPremium(props.item!.id))
+const takeContractNo = () =>
+  props.item && bookings.value.contractNoSuggestion && run(() => setForecastItemContractNo(props.item!.id, bookings.value.contractNoSuggestion!))
+
 // ---- a declined increase without a document ----
 
 const declineOpen = ref(false)
@@ -247,7 +265,7 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
     :visible="visible"
     modal
     class="dialog-lg"
-    :header="item ? `Standmitteilungen · ${item.label}` : 'Standmitteilungen'"
+    :header="item ? `Dokumente und Buchungen · ${item.label}` : 'Dokumente und Buchungen'"
     @update:visible="emit('update:visible', $event)"
   >
     <div v-if="state" class="stmt">
@@ -266,8 +284,10 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
       <section>
         <h3 class="stmt__title">Dokumente</h3>
         <p v-if="links.length === 0" class="muted">
-          Noch keine Standmitteilung zu diesem Vertrag gefunden.
-          <template v-if="!state.contractNo">Ohne Vertragsnummer kann nicht gesucht werden.</template>
+          Noch kein Dokument zu diesem Vertrag gefunden.
+          <template v-if="!state.contractNo">
+            Ohne Vertragsnummer wird nach Versicherer und Versicherungsart gesucht; genauer wird es mit einer Nummer.
+          </template>
         </p>
         <ul v-else class="stmt__links">
           <li v-for="l in links" :key="l.id" class="stmt__link">
@@ -358,6 +378,60 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
             </li>
           </ul>
         </div>
+      </section>
+
+      <section>
+        <h3 class="stmt__title">Buchungen</h3>
+        <p v-if="bookings.bookings.length === 0" class="muted">
+          Keine Buchung zugeordnet. Gesucht wird nach der Vertragsnummer in Verwendungszweck oder Mandatsreferenz und – ohne Nummer – nach
+          Versicherer und passendem Betrag.
+        </p>
+        <template v-else>
+          <p v-if="bookings.summary" class="stmt__booking-summary">
+            {{ RHYTHM_TEXT[bookings.summary.rhythm] }}, zuletzt {{ formatEur(bookings.summary.lastAmount, true) }} am
+            {{ formatDayShort(bookings.summary.lastDate) }}
+            <span v-if="bookings.summary.rhythm !== 'irregular'" class="muted">· {{ formatEur(bookings.summary.perYear, true) }} pro Jahr</span>
+          </p>
+          <Message v-if="bookings.proposal" severity="warn" :closable="false">
+            {{ bookings.proposal.label }} laut Buchungen: {{ show(bookings.proposal.proposed, 'amount') }} (im Eintrag
+            {{ show(bookings.proposal.current, 'amount') }}).
+            <Button label="Übernehmen" link size="small" :disabled="busy" @click="acceptBookingPremium" />
+          </Message>
+          <Message v-if="bookings.contractNoSuggestion" severity="info" :closable="false">
+            Die Mandatsreferenz der Lastschrift nennt „{{ bookings.contractNoSuggestion }}“ – als Vertragsnummer übernehmen? Danach werden
+            auch Dokumente mit dieser Nummer gesucht.
+            <Button label="Übernehmen" link size="small" :disabled="busy" @click="takeContractNo" />
+          </Message>
+          <ScrollX>
+            <table class="stmt__table">
+              <thead>
+                <tr>
+                  <th scope="col">Datum</th>
+                  <th scope="col" class="num">Betrag</th>
+                  <th scope="col">Empfänger</th>
+                  <th scope="col"><span class="sr-only">Zuordnung</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="b in bookings.bookings" :key="b.id">
+                  <td>{{ formatDayShort(b.date) }}</td>
+                  <td class="num">{{ formatEur(b.amount, true) }}</td>
+                  <td>
+                    <span>{{ b.counterparty || '–' }}</span>
+                    <span class="muted stmt__booking-kind">{{ BOOKING_KIND[b.matchKind] }}</span>
+                  </td>
+                  <td>
+                    <template v-if="b.status === 'suggested'">
+                      <Button icon="pi pi-check" text rounded size="small" :disabled="busy" aria-label="Buchung gehört dazu" v-tooltip.top="'Gehört dazu'" @click="decideBooking(b.id, 'confirmed')" />
+                      <Button icon="pi pi-times" text rounded size="small" severity="secondary" :disabled="busy" aria-label="Buchung gehört nicht dazu" v-tooltip.top="'Nicht dazu'" @click="decideBooking(b.id, 'rejected')" />
+                    </template>
+                    <Button v-else icon="pi pi-times" text rounded size="small" severity="secondary" :disabled="busy" aria-label="Zuordnung der Buchung lösen" v-tooltip.top="'Zuordnung lösen'" @click="decideBooking(b.id, 'rejected')" />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </ScrollX>
+        </template>
       </section>
 
       <section v-if="latest">
@@ -514,6 +588,13 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
   display: flex;
   align-items: center;
   gap: var(--space-1);
+}
+.stmt__booking-summary {
+  margin: 0 0 var(--space-2);
+}
+.stmt__booking-kind {
+  display: block;
+  font-size: var(--text-xs);
 }
 .stmt__declined {
   margin-top: var(--space-2);

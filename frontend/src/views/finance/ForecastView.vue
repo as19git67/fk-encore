@@ -554,10 +554,11 @@ async function loadStatements() {
 }
 
 function describeScan(s: ForecastScanSummary): string {
-  if (s.itemsWithContract === 0) return 'Kein Eintrag hat eine Vertragsnummer, nach der gesucht werden könnte.'
-  const parts = [`${s.linkedByTag} Standmitteilung${s.linkedByTag === 1 ? '' : 'en'} zugeordnet`]
-  if (s.suggestedByText > 0) parts.push(`${s.suggestedByText} zum Prüfen vorgeschlagen`)
+  const parts = [`${s.linkedByTag} Dokument${s.linkedByTag === 1 ? '' : 'e'} zugeordnet`]
+  if (s.suggestedByText > 0) parts.push(`${s.suggestedByText} Dokument${s.suggestedByText === 1 ? '' : 'e'} zum Prüfen vorgeschlagen`)
   if (s.queued > 0) parts.push(`${s.queued} werden gelesen`)
+  if (s.bookingsLinked > 0) parts.push(`${s.bookingsLinked} Buchung${s.bookingsLinked === 1 ? '' : 'en'} zugeordnet`)
+  if (s.bookingsSuggested > 0) parts.push(`${s.bookingsSuggested} Buchung${s.bookingsSuggested === 1 ? '' : 'en'} zum Prüfen`)
   return `${parts.join(', ')}.`
 }
 
@@ -758,7 +759,7 @@ const ready = computed(() => !loading.value)
       <Button label="Person" icon="pi pi-user-plus" size="small" outlined :disabled="!canEdit" @click="openPerson(null)" />
       <Button
         v-if="hasContracts && canEdit"
-        label="Standmitteilungen suchen"
+        label="Dokumente und Buchungen suchen"
         icon="pi pi-search"
         size="small"
         outlined

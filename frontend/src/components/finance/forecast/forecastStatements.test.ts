@@ -14,6 +14,7 @@ const base: ForecastItemStatements = {
   reading: false,
   notes: [],
   declinedWithoutDocument: [],
+  bookings: { bookings: [], summary: null, proposal: null, contractNoSuggestion: null },
 }
 
 describe('forecastStatements', () => {

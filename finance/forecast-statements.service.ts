@@ -54,6 +54,8 @@ import {
 } from "./forecast-statements-extract";
 import { extractStatementValues, LlmServiceUnavailableError } from "./llm-client";
 import { groupIdsOf, householdMemberIds } from "./forecast-household.service";
+import { bookingStates, scanBookings, type ItemBookingState } from "./forecast-bookings.service";
+import { isInsuranceItem, kindWords, nameTokens } from "./forecast-bookings-extract";
 
 console.log("[boot] finance/forecast-statements.service.ts: all imports resolved");
 
@@ -104,6 +106,8 @@ export interface ItemStatementState {
   notes: string[];
   /** Premium increases the user declined without a document, as dates (YYYY-MM-DD). */
   declinedWithoutDocument: string[];
+  /** Bookings that pay the premium, and what they say. */
+  bookings: ItemBookingState;
 }
 
 export interface DocumentCandidateDto {
@@ -123,6 +127,10 @@ export interface ScanSummary {
   suggestedByText: number;
   /** Documents queued for reading. */
   queued: number;
+  /** Bookings linked by contract number or through a document. */
+  bookingsLinked: number;
+  /** Bookings suggested by insurer and amount. */
+  bookingsSuggested: number;
 }
 
 // -----------------------------------------------------------------------
@@ -368,10 +376,50 @@ export async function scanForUser(userId: number, itemIds: number[] | null, opts
         : eq(financeForecastItem.user_id, userId),
     );
   const items = rows.map(contractItemOf).filter((x): x is ContractItem => x !== null);
-  const summary: ScanSummary = { itemsWithContract: items.length, linkedByTag: 0, suggestedByText: 0, queued: 0 };
+  const summary: ScanSummary = {
+    itemsWithContract: items.length,
+    linkedByTag: 0,
+    suggestedByText: 0,
+    queued: 0,
+    bookingsLinked: 0,
+    bookingsSuggested: 0,
+  };
+  const visible = await householdVisible(userId);
+
+  // Insurance items without a contract number: the insurer and the kind of
+  // insurance together in a document's text make it a suggestion.
+  for (const row of rows) {
+    if (contractItemOf(row) || !isInsuranceItem(row.type, row.label, row.data)) continue;
+    const tokens = nameTokens(row.data.insurer, row.label);
+    const kinds = kindWords(row.label);
+    if (tokens.length === 0 || kinds.length === 0) continue;
+    const linked = await db
+      .select({ documentId: financeForecastDocumentLink.document_id })
+      .from(financeForecastDocumentLink)
+      .where(eq(financeForecastDocumentLink.item_id, row.id));
+    const skip = linked.map((l) => l.documentId);
+    const docs = await db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.status, "ready"),
+          visible,
+          or(...tokens.map((t) => ilike(documents.extracted_text, `%${t}%`))),
+          or(...kinds.map((k) => ilike(documents.extracted_text, `%${k}%`))),
+          ...(skip.length ? [notInArray(documents.id, skip)] : []),
+        ),
+      )
+      .orderBy(sql`${documents.doc_date} DESC NULLS LAST`)
+      .limit(10);
+    for (const d of docs) if ((await upsertLink(userId, row.id, d.id, "text")) === "new-suggested") summary.suggestedByText++;
+  }
+
+  const bookings = await scanBookings(userId, itemIds);
+  summary.bookingsLinked = bookings.bookingsLinked;
+  summary.bookingsSuggested = bookings.bookingsSuggested;
   if (items.length === 0) return summary;
 
-  const visible = await householdVisible(userId);
   const tagged = await taggedDocuments(visible);
   for (const item of items) {
     const byTag = [...new Set(tagged.filter((t) => keysMatch(item.key, t.key)).map((t) => t.documentId))];
@@ -629,12 +677,13 @@ export async function statementsForUser(userId: number, callerId: number = userI
     for (const r of rows) openable.add(r.id);
   }
 
+  const bookingByItem = await bookingStates(itemRows);
   const items: ItemStatementState[] = [];
   for (const row of itemRows) {
     const contractNo = typeof row.data?.contractNo === "string" ? (row.data.contractNo as string) : null;
     const itemLinks = links.filter((l) => l.itemId === row.id);
     const itemStatements = statements.filter((s) => s.item_id === row.id);
-    if (!contractNo && itemLinks.length === 0) continue;
+    if (!contractNo && itemLinks.length === 0 && !isInsuranceItem(row.type, row.label, row.data)) continue;
     // Figures count from statements and announced increases the user has not rejected.
     const counts = (st: (typeof itemStatements)[number]) => {
       const link = itemLinks.find((l) => l.documentId === st.document_id);
@@ -688,6 +737,7 @@ export async function statementsForUser(userId: number, callerId: number = userI
       reading: reading.has(row.id),
       notes,
       declinedWithoutDocument: declinedDates(row.data),
+      bookings: bookingByItem.get(row.id) ?? { bookings: [], summary: null, proposal: null, contractNoSuggestion: null },
     });
   }
   return { items };
