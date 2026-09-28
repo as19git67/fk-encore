@@ -5442,6 +5442,119 @@ der Plan dann falsch — er misst vom Anker der Etappe statt von der Strecke —
 aber der Stopp steht im Tag, mit Namen und Dauer, und niemand vergisst ihn
 unterwegs.
 
+### 22.6 Die Varianten, gegeneinander gestellt (2026-09-28)
+
+*Zur Entscheidung vorgelegt, noch nicht entschieden.*
+
+**Ein Befund vorweg: Der Transfertag hat heute zwei Heimaten.** §16.3 schreibt
+„Tokio 3.–11.9., Osaka 11.–18.9." — der 11. gehört beiden Etappen, vormittags
+Tokio, nachmittags Osaka. Der Code sieht das anders:
+
+- `redateLegs` datiert Etappen lückenlos *hintereinander*. Die Abfahrt liegt
+  auf Tokios letztem Tag, die Ankunft auf Osakas erstem — einen Kalendertag
+  später. Eine Fahrt von vier Stunden verteilt sich über zwei Daten.
+- Trägt man die Daten von Hand überlappend ein, erklärt die App den geteilten
+  Tag für einen Fehler und nimmt die frühere Etappe (`TripPlan.position(on:)`).
+  Osakas Ankunftstag wird dann nie „heute": keine Ankunftsfrage, kein Zaun um
+  das neue Hotel, keine Live Activity für den Nachmittag.
+
+Das ist dieselbe Wurzel wie §21 und §22: Der Weg zwischen zwei Orten hat im
+Modell keinen Platz, also wird er auf zwei Etappen verteilt, die beide nur
+halb zuständig sind. Jede der drei Varianten muss deshalb auch diese Frage
+beantworten, nicht nur die nach dem Zwischenstopp.
+
+**Variante A — der Transfer wird ein eigenes Objekt.** Eine Tabelle
+`trip_plan_transfers` zwischen zwei Etappen: Datum, Abfahrt (Ort, Uhrzeit),
+Ankunft (Ort, Uhrzeit), Verkehrsmittel, „wird geplant / wird nicht geplant"
+und eigene Stopps. Der Transfertag zeigt dann drei Teile: den Vormittag der
+alten Etappe, die Fahrt mit ihren Stopps, den Nachmittag der neuen.
+
+- *Trägt:* Zwischenstopps (§22), den ungeplanten Transfer der Kreuzfahrt
+  (§21.3 Punkt 3), die mitfahrende Unterkunft als Eigenschaft des Transfers
+  („über Nacht an Bord").
+- *Trägt nicht:* den Seetag (§21.3 Punkt 1) — ein Transfer, der einen ganzen
+  Tag dauert, ist wieder ein Tag ohne Ort, nur an anderer Stelle.
+- *Kostet am meisten:* ein neuer Behälter für Stopps neben dem Block. Alles,
+  was heute „Stopp gehört zu Block gehört zu Tag" annimmt, braucht einen
+  zweiten Weg — Speichern, Verschieben, Umverteilen, Abhaken, Zäune, das
+  Offline-Bündel, die Live Activity, der Rückblick, die Abstimmung. Und die
+  Regel „gleiche Aktionen überall" verlangt eine weitere Oberfläche für
+  Stopps.
+- Den Zwei-Heimaten-Befund löst sie nur halb: Vormittag und Nachmittag
+  gehören weiter zwei Etappen, und der Tag braucht eine Sicht, die drei
+  Dinge zusammensetzt.
+
+**Variante B — ein Block bekommt einen eigenen Ort.** Der Anreisetag erhält
+einen „Unterwegs-Block" mit Start und Ziel statt des Etappenankers; sein
+Vorrat kommt aus der Korridorsuche. Stopps bleiben in Blöcken.
+
+- *Trägt:* Zwischenstopps, mit dem wenigsten Umbau — `solveDay` kennt Start
+  und Ziel schon je Tag (`dayWalkOf`), das hieße: je Block.
+- *Trägt nicht:* den Seetag, den ungeplanten Transfer, die mitfahrende
+  Unterkunft. Und den Zwei-Heimaten-Befund gar nicht.
+- *Kostet:* die Regel, dass ein Tag um einen Ort herum geplant wird. Die trägt
+  Blockbudgets, Umverteilung und Licht; ein Block mit eigenem Ort wird in
+  jeder dieser Rechnungen ein Sonderfall.
+
+**Variante C — die Fahrt wird eine Etappe eigener Art.** Eine Etappe bekommt
+eine Art: `stay` (wie heute), `transit` (unterwegs von der vorigen zur
+nächsten) oder `aboard` (ein Tag ohne Landkarte). Eine Transit-Etappe hat
+einen Tag. Ihr Start ist der Anker der vorigen Etappe, ihr Ziel der der
+nächsten, ihr Vorrat die Korridorsuche. Geplant wird mit dem Löser, den es
+gibt: `solveDay` mit verschiedenem `start` und `end` ist der Tagesausflug aus
+§4.5, nur mit zwei Enden statt einem.
+
+- *Trägt:* Zwischenstopps — die Korridorspots sind der Vorrat der
+  Transit-Etappe, und Umverteilen, Abhaken, Zäune, Abstimmen, Offline laufen
+  ohne neuen Weg, weil alles schon je Etappe läuft. Den Seetag als
+  `aboard`-Etappe: kein Anker, kein Vorrat, keine Region, das Bordprogramm
+  als Fixpunkte. Den ungeplanten Transfer: Eine Nachtfahrt zwischen zwei
+  Häfen ist gar keine Etappe, der Hafen danach beginnt am nächsten Morgen.
+  Und den Zwei-Heimaten-Befund: Der Transfertag ist **ein** Tag in **einer**
+  Etappe, mit dem Morgen am alten Ort — die Ellipse schließt die Umgebung
+  beider Enden ein — und dem Abend am neuen.
+- *Trägt nicht von selbst:* die mitfahrende Unterkunft. Sie ist eine
+  Eigenschaft der Etappe („Unterkunft wie vorher"), die der Vorabend (§8.6)
+  und der Zaun ums Quartier lesen müssen — in jeder Variante zusätzliche
+  Arbeit.
+- *Kostet:* eine Spalte `kind` an der Etappe, einen optionalen Anker für
+  `aboard`, einen Regionen-Router, der „keine Region" als Antwort kennt statt
+  als Fehler, und in der App eine eigene Kopfzeile für Transit- und
+  Bordtage. Was heute „Etappenwechsel heißt Hotelwechsel" annimmt, muss die
+  Art fragen.
+- *Ändert eine Gewohnheit:* Die Fahrt ist nicht mehr ein Fixpunkt am Rand
+  zweier Tage, sondern ein Tag für sich. Wer „vormittags noch ins Museum,
+  dann weiter" plant, plant das im Transit-Tag. Die bisherige Form (Abfahrt
+  als Fixpunkt, spätere Ankunft) bleibt für Reisen ohne Transit-Tag, und
+  bestehende Pläne ändern sich nicht.
+
+**Was in jeder Variante dazukommt.** Die Korridorsuche verlangt heute, dass
+beide Enden in *derselben* importierten Region liegen. Augsburg–Prag liegt in
+zwei Geofabrik-Extrakten; die Suche muss je Region suchen und die Treffer
+vereinen. Und die Fahrzeit braucht einen Platz im Tagesbudget: Eine Fahrt von
+vier Stunden ist kein Weg zwischen zwei Stopps, sondern ein Block, der Zeit
+hält wie das Essen in §10.3.
+
+**Empfehlung: C.** Sie ist die einzige, die alle drei Modellfragen aus §21.3,
+den Zwischenstopp und den Zwei-Heimaten-Befund mit einem Begriff beantwortet,
+und sie baut auf dem auf, was das Modell am besten kann: Alles bisher Gebaute
+arbeitet je Etappe. A wäre sauberer, wenn man von vorn anfinge, verdoppelt
+aber jede Stopp-Mechanik. B ist schnell und beantwortet nur die Frage, von der
+man ausging.
+
+Offen für die Entscheidung, wenn C gewählt wird:
+
+1. **Nur ganze Tage?** Eine Transit-Etappe hat genau einen Tag. Eine
+   Weiterfahrt von einer Stunde, die keinen eigenen Tag verdient, bliebe
+   dann beim bisherigen Fixpunkt. Die Alternative — eine Transit-Etappe von
+   einem halben Tag — teilt sich das Datum wieder mit ihren Nachbarn.
+2. **Wer legt den Transit-Tag an?** Vorschlag im Sinne von §4.6: messen
+   (Fahrt länger als zwei Stunden, der Tag hat Luft), dann *einen* Vorschlag,
+   der nichts schreibt. Von Hand geht es immer.
+3. **Reihenfolge.** Erst `transit` (der Fall aus §22, mit echtem Bedarf), dann
+   `aboard` und die mitfahrende Unterkunft, wenn die Kreuzfahrt (§21)
+   wirklich ansteht.
+
 ## 23. Idee für später: die Hörtour
 
 *Aus der Erprobung, als Wunsch notiert — nicht geplant, nicht begonnen.*
