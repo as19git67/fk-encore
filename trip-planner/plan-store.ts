@@ -49,7 +49,18 @@ export interface StoredPlan {
   ownerId: number;
   title: string | null;
   constraints: Record<string, unknown>;
+  /**
+   * Where the trip sets off from and returns to (§22.7), or null while
+   * nobody said. The far end of the journey there and the journey home.
+   */
+  home: PlanHome | null;
   legs: StoredLeg[];
+}
+
+export interface PlanHome {
+  lat: number;
+  lon: number;
+  label: string | null;
 }
 
 /** stay: a place the group is based at. transit: the journey between two (§22.7). */
@@ -1240,6 +1251,9 @@ export async function loadPlan(
     ownerId: plan.owner_id,
     title: plan.title,
     constraints: (plan.constraints ?? {}) as Record<string, unknown>,
+    home: plan.home_lat === null || plan.home_lon === null
+      ? null
+      : { lat: plan.home_lat, lon: plan.home_lon, label: plan.home_label },
     legs: legRows.map((l) => ({
       id: l.id,
       position: l.position,
@@ -1481,6 +1495,23 @@ export async function replanPlan(
  * door, because a store function that trusts its caller is one refactor
  * away from being called by somebody who did not check.
  */
+/** Say where the trip sets off from and returns to, or forget it (§22.7). */
+export async function setPlanHome(
+  planId: number,
+  home: PlanHome | null,
+  db: Db = dbDefault,
+): Promise<void> {
+  await db
+    .update(tripPlans)
+    .set({
+      home_lat: home?.lat ?? null,
+      home_lon: home?.lon ?? null,
+      home_label: home?.label ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .where(eq(tripPlans.id, planId));
+}
+
 export async function renamePlan(
   planId: number,
   ownerId: number,

@@ -33,6 +33,9 @@ struct TripLegsView: View {
 
     /// The one journey the planner would suggest (§22.7), or nil.
     @State private var suggestion: TripTransitSuggestion?
+    /// Looking for where home is (§22.7).
+    @State private var homeFinder = TripPlaceFinderModel()
+    @State private var savingHome = false
 
     private struct TransitTarget: Identifiable {
         let afterLegIndex: Int
@@ -62,6 +65,38 @@ struct TripLegsView: View {
                 }
             }
             Section {
+                // Where the trip sets off from and returns to: with it,
+                // the way there and the way home are journeys too.
+                if let home = viewModel.plan?.home {
+                    HStack {
+                        Label(home.displayLabel, systemImage: "house")
+                        Spacer()
+                        Button("Entfernen") { Task { await clearHome() } }
+                            .buttonStyle(.borderless)
+                            .disabled(savingHome)
+                    }
+                } else {
+                    TripPlaceFinderRows(model: homeFinder, picked: nil) { place in
+                        homeFinder.clearResults()
+                        Task { await setHome(place) }
+                    }
+                }
+            } header: {
+                Text("Zuhause")
+            } footer: {
+                Text("Von hier geht es los, und hierher zurück. Mit einem Zuhause lassen sich "
+                     + "Anreise und Heimreise wie eine Weiterreise planen — mit Orten am Weg.")
+            }
+
+            Section {
+                if let legs = viewModel.plan?.legs, TripTransitSlots.wantsArrival(legs, hasHome: viewModel.plan?.home != nil) {
+                    Button {
+                        transit = TransitTarget(afterLegIndex: -1, existing: nil)
+                    } label: {
+                        Label("Anreise einfügen", systemImage: "house.and.flag")
+                            .font(.subheadline)
+                    }
+                }
                 ForEach(viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []) { leg in
                     Button {
                         if leg.isTransit {
@@ -102,6 +137,15 @@ struct TripLegsView: View {
                             Label("Weiterreise einfügen", systemImage: "arrow.triangle.turn.up.right.diamond")
                                 .font(.subheadline)
                         }
+                    }
+                }
+                if let legs = viewModel.plan?.legs,
+                   let last = TripTransitSlots.wantsReturn(legs, hasHome: viewModel.plan?.home != nil) {
+                    Button {
+                        transit = TransitTarget(afterLegIndex: last, existing: nil)
+                    } label: {
+                        Label("Heimreise einfügen", systemImage: "house")
+                            .font(.subheadline)
                     }
                 }
             } footer: {
@@ -161,6 +205,39 @@ struct TripLegsView: View {
         // A journey added or a city changed may answer the suggestion.
         .onChange(of: viewModel.plan?.legs.count) { _, _ in
             Task { await loadSuggestion() }
+        }
+    }
+
+    private func setHome(_ place: TripPlace) async {
+        savingHome = true
+        defer { savingHome = false }
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let label: String
+        }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.patch(
+                "/trip-planner/plans/\(viewModel.planId)/home",
+                body: Body(lat: place.latitude, lon: place.longitude, label: place.name))
+            viewModel.replace(with: response)
+            await loadSuggestion()
+        } catch {
+            errorMessage = TripErrorText.describe(error)
+        }
+    }
+
+    private func clearHome() async {
+        savingHome = true
+        defer { savingHome = false }
+        struct Body: Encodable { let clear: Bool }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.patch(
+                "/trip-planner/plans/\(viewModel.planId)/home", body: Body(clear: true))
+            viewModel.replace(with: response)
+            await loadSuggestion()
+        } catch {
+            errorMessage = TripErrorText.describe(error)
         }
     }
 
@@ -521,6 +598,21 @@ struct TripLegEditView: View {
 /// Where a journey can go (§22.7): after a place with dates, when the
 /// next leg is a dated place too and nothing lies between them.
 enum TripTransitSlots {
+    /// The way there can be added when home is known and the trip does
+    /// not already begin with a journey.
+    static func wantsArrival(_ legs: [TripLeg], hasHome: Bool) -> Bool {
+        guard hasHome, let first = legs.min(by: { $0.position < $1.position }) else { return false }
+        return !first.isTransit && first.startDate != nil
+    }
+
+    /// The way home: the last place's position, when home is known and
+    /// the trip does not already end with a journey.
+    static func wantsReturn(_ legs: [TripLeg], hasHome: Bool) -> Int? {
+        guard hasHome, let last = legs.max(by: { $0.position < $1.position }),
+              !last.isTransit, last.startDate != nil else { return nil }
+        return last.position
+    }
+
     static func slotAfter(_ leg: TripLeg, in legs: [TripLeg]) -> Int? {
         guard !leg.isTransit, leg.startDate != nil,
               let next = legs.first(where: { $0.position == leg.position + 1 }),

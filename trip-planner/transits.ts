@@ -35,6 +35,7 @@ import {
   updateLegPlace,
   updateTransitLeg,
   type CreateDayInput,
+  type PlanHome,
   type StoredPlan,
 } from "./plan-store";
 import {
@@ -52,7 +53,12 @@ const MAX_TRANSIT_DAYS = 7;
 
 export interface AddTransitRequest {
   planId: number;
-  /** The leg the journey leaves from, by position; it goes to the next one. */
+  /**
+   * The leg the journey leaves from, by position; it goes to the next
+   * one. Two ends may be home instead (§22.7): -1 is the journey from
+   * home to the first leg, and the last leg's position with nothing
+   * after it is the journey home. Both need the trip's home to be set.
+   */
   afterLegIndex: number;
   /** The day and time the group sets off, as YYYY-MM-DD and HH:MM. */
   departDate: string;
@@ -74,13 +80,20 @@ export const addTripTransit = api(
     if (!plan) throw APIError.notFound("plan not found");
     await requireOrganiser(req.planId, userId, "Etappen ändern");
 
-    const previous = legAt(plan, req.afterLegIndex);
-    const next = plan.legs.find((l) => l.position === req.afterLegIndex + 1);
-    if (!next) {
-      throw APIError.failedPrecondition("nach dieser Etappe kommt keine mehr — wohin soll die Weiterreise gehen?");
+    const previous = req.afterLegIndex === -1 ? null : legAt(plan, req.afterLegIndex);
+    const next = plan.legs.find((l) => l.position === req.afterLegIndex + 1) ?? null;
+    if (!previous && !next) throw APIError.notFound("this trip has no legs");
+    if ((!previous || !next) && !plan.home) {
+      throw APIError.failedPrecondition(
+        "für die Anreise und die Heimreise muss die Reise wissen, wo Zuhause ist",
+      );
     }
-    if (previous.kind === "transit" || next.kind === "transit") {
-      throw APIError.failedPrecondition("zwischen diesen beiden Etappen gibt es schon eine Weiterreise");
+    if (previous?.kind === "transit" || next?.kind === "transit") {
+      throw APIError.failedPrecondition(
+        previous && next
+          ? "zwischen diesen beiden Etappen gibt es schon eine Weiterreise"
+          : previous ? "die Heimreise gibt es schon" : "die Anreise gibt es schon",
+      );
     }
     return await frameJourney(plan, userId, previous, next, req, null);
   },
@@ -120,11 +133,12 @@ export const updateTripTransit = api(
     if (journey.kind !== "transit") {
       throw APIError.failedPrecondition(`„${legName(journey)}" ist keine Weiterreise`);
     }
-    const previous = plan.legs.find((l) => l.position === req.legIndex - 1);
-    const next = plan.legs.find((l) => l.position === req.legIndex + 1);
-    if (!previous || !next) {
+    const previous = plan.legs.find((l) => l.position === req.legIndex - 1) ?? null;
+    const next = plan.legs.find((l) => l.position === req.legIndex + 1) ?? null;
+    if (!previous && !next) throw APIError.notFound("this trip has no legs");
+    if ((!previous || !next) && !plan.home) {
       throw APIError.failedPrecondition(
-        "diese Weiterreise hat keine Etappe mehr davor oder danach — entfernen und neu anlegen",
+        "für die Anreise und die Heimreise muss die Reise wissen, wo Zuhause ist",
       );
     }
     return await frameJourney(plan, userId, previous, next, {
@@ -143,8 +157,10 @@ export const updateTripTransit = api(
 async function frameJourney(
   plan: StoredPlan,
   userId: number,
-  previous: StoredPlan["legs"][number],
-  next: StoredPlan["legs"][number],
+  /** The leg being left, or null for the journey from home. */
+  previous: StoredPlan["legs"][number] | null,
+  /** The leg being reached, or null for the journey home. */
+  next: StoredPlan["legs"][number] | null,
   req: {
     planId: number;
     departDate: string;
@@ -156,11 +172,13 @@ async function frameJourney(
   },
   existing: StoredPlan["legs"][number] | null,
 ): Promise<PlanResponse> {
-  if (!previous.startDate || !next.startDate) {
+  if ((previous && !previous.startDate) || (next && !next.startDate)) {
     throw APIError.failedPrecondition(
       "eine Weiterreise hat ein Datum — erst der Reise Daten geben, dann die Weiterreise anlegen",
     );
   }
+  const home = plan.home;
+  if ((!previous || !next) && !home) throw APIError.internal("a journey to or from home needs a home");
 
   const departMinutes = requireTime(req.departAt, "departAt");
   const arriveMinutes = requireTime(req.arriveAt, "arriveAt");
@@ -175,15 +193,16 @@ async function frameJourney(
       `eine Weiterreise dauert höchstens ${MAX_TRANSIT_DAYS} Tage — länger ist es eine eigene Etappe`,
     );
   }
-  const previousDays = daysBetween(previous.startDate, req.departDate) + 1;
-  if (previousDays < 1) {
+  const previousDays = previous ? daysBetween(previous.startDate as string, req.departDate) + 1 : 0;
+  if (previous && previousDays < 1) {
     throw APIError.invalidArgument(
       `die Abfahrt liegt vor dem ersten Tag von „${legName(previous)}" (${previous.startDate})`,
     );
   }
 
   // Everything re-planned here must not hold a day somebody has begun.
-  for (const leg of existing ? [previous, existing, next] : [previous, next]) {
+  const touched = [previous, existing, next].filter((l): l is StoredPlan["legs"][number] => l !== null);
+  for (const leg of touched) {
     const settled = firstSettledStop(leg);
     if (settled) {
       throw APIError.failedPrecondition(
@@ -193,25 +212,31 @@ async function frameJourney(
     }
   }
 
-  const nextTitle = next.title ?? next.anchorLabel ?? `Etappe ${next.position + 1}`;
-  const previousRequest = previousLegRequest(previous, previousDays, req.departAt, nextTitle);
-  const nextRequest: LegRequest = {
-    ...legRequestFromStored(next),
-    startDate: req.arriveDate,
-    transfer: { arriveAt: req.arriveAt },
-  };
-  const mode = validateMode(req.mode ?? next.mode);
-  const title = req.title?.trim() || `Weiterreise nach ${nextTitle}`;
-  const origin = {
-    lat: previous.anchor.lat,
-    lon: previous.anchor.lon,
-    label: previous.anchorLabel ?? previous.title ?? null,
-  };
+  const homeLabel = home?.label ?? "Zuhause";
+  const nextTitle = next ? next.title ?? next.anchorLabel ?? `Etappe ${next.position + 1}` : homeLabel;
+  const previousTitle = previous
+    ? previous.title ?? previous.anchorLabel ?? `Etappe ${previous.position + 1}`
+    : homeLabel;
+  const previousRequest = previous
+    ? previousLegRequest(previous, previousDays, req.departAt, nextTitle)
+    : null;
+  const nextRequest: LegRequest | null = next
+    ? { ...legRequestFromStored(next), startDate: req.arriveDate, transfer: { arriveAt: req.arriveAt } }
+    : null;
+  const mode = validateMode(req.mode ?? next?.mode ?? previous?.mode);
+  const title = req.title?.trim()
+    || (!previous ? `Anreise nach ${nextTitle}` : !next ? `Heimreise von ${previousTitle}` : `Weiterreise nach ${nextTitle}`);
+  const origin = previous
+    ? { lat: previous.anchor.lat, lon: previous.anchor.lon, label: previous.anchorLabel ?? previous.title ?? null }
+    : { lat: (home as PlanHome).lat, lon: (home as PlanHome).lon, label: homeLabel };
+  const destination = next
+    ? { anchor: next.anchor, label: next.anchorLabel ?? next.title ?? null }
+    : { anchor: { lat: (home as PlanHome).lat, lon: (home as PlanHome).lon }, label: homeLabel };
   const transitRequest: LegRequest = {
     kind: "transit",
     title,
-    anchor: next.anchor,
-    anchorLabel: next.anchorLabel ?? next.title ?? undefined,
+    anchor: destination.anchor,
+    anchorLabel: destination.label ?? undefined,
     origin,
     mode,
     days: span + 1,
@@ -222,37 +247,47 @@ async function frameJourney(
   // Everything planned before anything is written: a refusal half-way
   // would leave a trip with one neighbour changed and no journey.
   const detailedOf = (leg: StoredPlan["legs"][number]) => leg.days.filter((d) => d.detailed).length;
-  const plannedPrevious = await planLegForTrip(plan, previousRequest, {
-    detailDays: detailedOf(previous),
-    firstDayStartMinutes: previous.arriveMinutes,
-  });
-  const plannedNext = await planLegForTrip(plan, nextRequest, {
-    detailDays: detailedOf(next),
-    firstDayStartMinutes: arriveMinutes,
-  });
+  const plannedPrevious = previous && previousRequest
+    ? await planLegForTrip(plan, previousRequest, {
+      detailDays: detailedOf(previous),
+      firstDayStartMinutes: previous.arriveMinutes,
+    })
+    : null;
+  const plannedNext = next && nextRequest
+    ? await planLegForTrip(plan, nextRequest, {
+      detailDays: detailedOf(next),
+      firstDayStartMinutes: arriveMinutes,
+    })
+    : null;
   const plannedTransit = await planLegForTrip(plan, transitRequest, { detailDays: span + 1 });
 
-  await replanPlan(req.planId, plan.constraints, [
-    { legId: previous.id, days: [...plannedPrevious.leg.days] as CreateDayInput[], pool: [...plannedPrevious.leg.pool] },
-    { legId: next.id, days: [...plannedNext.leg.days] as CreateDayInput[], pool: [...plannedNext.leg.pool] },
-    ...(existing
-      ? [{ legId: existing.id, days: [...plannedTransit.leg.days] as CreateDayInput[], pool: [...plannedTransit.leg.pool] }]
-      : []),
-  ]);
-  await setLegsAwaitingRegion([
-    { legId: previous.id, awaiting: plannedPrevious.pending !== null },
-    { legId: next.id, awaiting: plannedNext.pending !== null },
-    ...(existing ? [{ legId: existing.id, awaiting: plannedTransit.pending !== null }] : []),
-  ]);
-  await updateLegPlace(req.planId, next.id, { arriveMinutes });
+  const rewrites: Array<{ legId: number; days: CreateDayInput[]; pool: typeof plannedTransit.leg.pool }> = [];
+  const awaiting: Array<{ legId: number; awaiting: boolean }> = [];
+  if (previous && plannedPrevious) {
+    rewrites.push({ legId: previous.id, days: [...plannedPrevious.leg.days] as CreateDayInput[], pool: [...plannedPrevious.leg.pool] });
+    awaiting.push({ legId: previous.id, awaiting: plannedPrevious.pending !== null });
+  }
+  if (next && plannedNext) {
+    rewrites.push({ legId: next.id, days: [...plannedNext.leg.days] as CreateDayInput[], pool: [...plannedNext.leg.pool] });
+    awaiting.push({ legId: next.id, awaiting: plannedNext.pending !== null });
+  }
+  if (existing) {
+    rewrites.push({ legId: existing.id, days: [...plannedTransit.leg.days] as CreateDayInput[], pool: [...plannedTransit.leg.pool] });
+    awaiting.push({ legId: existing.id, awaiting: plannedTransit.pending !== null });
+  }
+  await replanPlan(req.planId, plan.constraints, rewrites);
+  await setLegsAwaitingRegion(awaiting);
 
-  // The next leg and every one after it move by the same number of
-  // days: the gaps the travellers left between cities survive.
-  const shift = daysBetween(next.startDate, req.arriveDate);
-  if (shift !== 0) {
-    await updateLegFrames(req.planId, plan.legs
-      .filter((l) => l.position >= next.position && l.startDate)
-      .map((l) => ({ legId: l.id, startDate: addDaysTo(l.startDate as string, shift) })));
+  if (next) {
+    await updateLegPlace(req.planId, next.id, { arriveMinutes });
+    // The next leg and every one after it move by the same number of
+    // days: the gaps the travellers left between cities survive.
+    const shift = daysBetween(next.startDate as string, req.arriveDate);
+    if (shift !== 0) {
+      await updateLegFrames(req.planId, plan.legs
+        .filter((l) => l.position >= next.position && l.startDate)
+        .map((l) => ({ legId: l.id, startDate: addDaysTo(l.startDate as string, shift) })));
+    }
   }
 
   let position: number;
@@ -262,14 +297,14 @@ async function frameJourney(
       title,
       mode,
       origin,
-      anchor: next.anchor,
-      anchorLabel: next.anchorLabel ?? next.title ?? null,
+      anchor: destination.anchor,
+      anchorLabel: destination.label,
       startDate: req.departDate,
       departMinutes,
       endMinutes: arriveMinutes,
     });
   } else {
-    position = previous.position + 1;
+    position = previous ? previous.position + 1 : 0;
     await shiftLegsFrom(req.planId, position);
     await insertLeg(req.planId, position, plannedTransit.leg);
   }

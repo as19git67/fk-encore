@@ -35,20 +35,27 @@ struct TripTransitView: View {
     private var to: TripLeg? {
         legs.first { $0.position > afterLegIndex && !$0.isTransit }
     }
+    private var home: TripHome? { viewModel.plan?.home }
+    /// The two ends in words: a place, or home at either end (§22.7).
+    private var fromTitle: String { from?.anchorTitle ?? home?.displayLabel ?? "–" }
+    private var toTitle: String { to?.anchorTitle ?? home?.displayLabel ?? "–" }
+    private var kindWord: String {
+        from == nil ? "Anreise" : to == nil ? "Heimreise" : "Weiterreise"
+    }
+    /// Home at an end that has no place; a journey needs both ends.
+    private var hasBothEnds: Bool { (from != nil || home != nil) && (to != nil || home != nil) }
 
     var body: some View {
         Form {
             Section {
-                LabeledContent("Von", value: from?.anchorTitle ?? "–")
-                LabeledContent("Nach", value: to?.anchorTitle ?? "–")
+                LabeledContent("Von", value: fromTitle)
+                LabeledContent("Nach", value: toTitle)
             }
             Section {
                 DatePicker("Abfahrt", selection: $depart, displayedComponents: [.date, .hourAndMinute])
                 DatePicker("Ankunft", selection: $arrive, in: depart..., displayedComponents: [.date, .hourAndMinute])
             } footer: {
-                Text("„\(from?.displayTitle ?? "Die Etappe davor")“ endet mit der Abfahrt, "
-                     + "„\(to?.displayTitle ?? "die nächste")“ beginnt mit der Ankunft. "
-                     + "Alle Etappen danach verschieben sich mit.")
+                Text(TripTransitPlanning.frameSentence(from: from?.displayTitle, to: to?.displayTitle))
             }
             Section {
                 Picker("Unterwegs", selection: $mode) {
@@ -60,7 +67,7 @@ struct TripTransitView: View {
                 Text(TripTransitPlanning.sentence(mode: mode, depart: depart, arrive: arrive))
             }
         }
-        .navigationTitle(existing == nil ? "Weiterreise" : "Weiterreise ändern")
+        .navigationTitle(existing == nil ? kindWord : "\(kindWord) ändern")
         .navigationBarTitleDisplayMode(.inline)
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .toolbar {
@@ -73,7 +80,7 @@ struct TripTransitView: View {
                 } label: {
                     if isSaving { ProgressView() } else { Text("Sichern") }
                 }
-                .disabled(isSaving || arrive <= depart || to == nil)
+                .disabled(isSaving || arrive <= depart || !hasBothEnds)
             }
         }
         .onAppear(perform: prefill)
@@ -102,8 +109,13 @@ struct TripTransitView: View {
            let lastDay = TripCalendar.day(start, plus: max(0, from.days.count - 1)) {
             depart = TripTransitPlanning.moment(lastDay, minutes: 10 * 60) ?? depart
             arrive = TripTransitPlanning.moment(lastDay, minutes: 16 * 60) ?? arrive
+        } else if let to, let start = to.startDate {
+            // From home: the day the first place begins, arriving when
+            // it expects the group.
+            depart = TripTransitPlanning.moment(start, minutes: 8 * 60) ?? depart
+            arrive = TripTransitPlanning.moment(start, minutes: to.arriveMinutes ?? 14 * 60) ?? arrive
         }
-        mode = to?.transportMode == .car || from?.transportMode == .car ? .car : (to?.transportMode ?? .car)
+        mode = to?.transportMode == .car || from?.transportMode == .car ? .car : (to?.transportMode ?? from?.transportMode ?? .car)
     }
 
     private func save() async {
@@ -189,6 +201,22 @@ enum TripTransitPlanning {
         calendar.timeZone = timeZone
         let parts = calendar.dateComponents([.hour, .minute], from: date)
         return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+    }
+
+    /// What the two moments do to the neighbours: a place at each end,
+    /// or home at one of them (§22.7).
+    static func frameSentence(from: String?, to: String?) -> String {
+        switch (from, to) {
+        case let (from?, to?):
+            return "„\(from)“ endet mit der Abfahrt, „\(to)“ beginnt mit der Ankunft. "
+                + "Alle Etappen danach verschieben sich mit."
+        case let (nil, to?):
+            return "„\(to)“ beginnt mit der Ankunft. Alle Etappen danach verschieben sich mit."
+        case let (from?, nil):
+            return "„\(from)“ endet mit der Abfahrt."
+        default:
+            return "Abfahrt und Ankunft der Reise."
+        }
     }
 
     /// What will happen to the journey, said before it is saved.
