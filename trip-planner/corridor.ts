@@ -58,8 +58,14 @@ export interface CorridorSpot extends ScoredCandidate {
 }
 
 export interface CorridorResponse {
-  /** The region database the candidates came from. */
+  /** The region database the candidates came from — the start's. */
   region: string;
+  /**
+   * Every region searched, start's first. Two when the journey crosses
+   * from one imported region into another (§22.7): Augsburg–Prag lies
+   * in two Geofabrik extracts, and each holds its own half.
+   */
+  regions: string[];
   from: { lat: number; lon: number };
   to: { lat: number; lon: number };
   detourBudgetM: number;
@@ -84,25 +90,17 @@ export const planCorridor = api(
       );
     }
 
-    const region = await resolveRegion(from, to);
-
-    const page = await getGeoClient().searchPois(region, {
-      corridor: { from, to, detourBudgetM },
+    const regions = await resolveRegions(from, to);
+    const spots = await corridorCandidates(regions, from, to, {
+      detourBudgetM,
       categories: req.categories,
-      limit: CANDIDATE_LIMIT,
-    });
-
-    // The detour is what makes a corridor result different from a
-    // radius result, so it has to survive scoring — `toCandidates`
-    // keys on osmRef, which is stable, so a lookup restores it.
-    const detourByRef = new Map(page.spots.map((s) => [s.osmRef, s.detourM ?? 0]));
-    const spots = toCandidates(page.spots, {
       interests: req.interests,
       dwellMinutes: req.dwellMinutes,
-    }).map((c) => ({ ...c, detourM: Math.round(detourByRef.get(c.osmRef) ?? 0) }));
+    });
 
     return {
-      region,
+      region: regions[0],
+      regions,
       from,
       to,
       detourBudgetM,
@@ -113,17 +111,18 @@ export const planCorridor = api(
 );
 
 /**
- * Both ends must sit in the same imported region, because a search runs
- * against one database. Stitching two regions together would mean
- * merging and re-sorting two pages, and would still leave a hole
- * wherever only one of them is imported — better to say plainly which
- * end is not covered than to return half a corridor that looks whole
- * (§15.3).
+ * The regions the corridor is searched in: the start's and, when it is
+ * another one, the destination's (§22.7).
+ *
+ * A search runs against one database, so a journey from one imported
+ * region into another is two searches whose results are merged. What
+ * neither covers stays a hole — but both *ends* must be covered, or
+ * the answer would be half a corridor that looks whole (§15.3).
  */
-async function resolveRegion(
+async function resolveRegions(
   from: { lat: number; lon: number },
   to: { lat: number; lon: number },
-): Promise<string> {
+): Promise<string[]> {
   const [fromRegion, toRegion] = await Promise.all([
     pickRegion(from.lat, from.lon),
     pickRegion(to.lat, to.lon),
@@ -134,12 +133,71 @@ async function resolveRegion(
       `no imported OSM region covers the ${missing} of this journey — import it in the region admin first`,
     );
   }
-  if (fromRegion.postgresDb !== toRegion.postgresDb) {
-    throw APIError.failedPrecondition(
-      `the journey crosses region boundaries (${fromRegion.postgresDb} → ${toRegion.postgresDb}) — import a region that covers both ends`,
-    );
+  return [...new Set([fromRegion.postgresDb, toRegion.postgresDb])];
+}
+
+export interface CorridorSearchOptions {
+  detourBudgetM: number;
+  categories?: string[];
+  interests?: string[];
+  dwellMinutes?: Record<string, number>;
+  /** Only what is worth a block — for a pool a day is built from. */
+  requireProminence?: boolean;
+}
+
+/**
+ * The scored spots within the detour budget, searched in each region
+ * and merged: least detour first, each place once.
+ *
+ * Shared by the endpoint and by the transit leg (§22.7), whose pool is
+ * exactly this — the places worth stopping at on the way.
+ */
+export async function corridorCandidates(
+  regions: readonly string[],
+  from: { lat: number; lon: number },
+  to: { lat: number; lon: number },
+  opts: CorridorSearchOptions,
+): Promise<CorridorSpot[]> {
+  const pages = await Promise.all(regions.map((region) =>
+    getGeoClient().searchPois(region, {
+      corridor: { from, to, detourBudgetM: opts.detourBudgetM },
+      categories: opts.categories,
+      limit: CANDIDATE_LIMIT,
+    })));
+  // A place near a border can sit in both extracts; it is one place.
+  const byRef = new Map<string, (typeof pages)[number]["spots"][number]>();
+  for (const page of pages) {
+    for (const spot of page.spots) if (!byRef.has(spot.osmRef)) byRef.set(spot.osmRef, spot);
   }
-  return fromRegion.postgresDb;
+  const raw = [...byRef.values()];
+
+  // The detour is what makes a corridor result different from a
+  // radius result, so it has to survive scoring — `toCandidates` keys
+  // on osmRef, which is stable, so a lookup restores it.
+  const detourByRef = new Map(raw.map((s) => [s.osmRef, s.detourM ?? 0]));
+  return toCandidates(raw, {
+    interests: opts.interests,
+    dwellMinutes: opts.dwellMinutes,
+    requireProminence: opts.requireProminence,
+  })
+    .map((c) => ({ ...c, detourM: Math.round(detourByRef.get(c.osmRef) ?? 0) }))
+    .sort((a, b) => a.detourM - b.detourM || (a.osmRef < b.osmRef ? -1 : 1));
+}
+
+/**
+ * The regions that cover either end, for a caller that would rather
+ * plan with half a corridor than refuse: a transit leg still happens
+ * when only its destination is imported, it just has fewer stops.
+ */
+export async function regionsCovering(
+  from: { lat: number; lon: number },
+  to: { lat: number; lon: number },
+): Promise<string[]> {
+  const [fromRegion, toRegion] = await Promise.all([
+    pickRegion(from.lat, from.lon),
+    pickRegion(to.lat, to.lon),
+  ]);
+  return [...new Set([fromRegion?.postgresDb, toRegion?.postgresDb].filter((r): r is string => !!r))];
 }
 
 function requireUser(): number {

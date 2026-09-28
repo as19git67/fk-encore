@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, daysBetween, isCalendarDate, redateLegs } from "./leg-dates";
+import { addDays, calendarDayCount, daysBetween, isCalendarDate, redateLegs } from "./leg-dates";
 
 describe("isCalendarDate", () => {
   it("accepts a real day", () => {
@@ -93,5 +93,27 @@ describe("redateLegs", () => {
 
   it("has nothing to say about a trip with no legs", () => {
     expect(redateLegs([], "2026-09-10")).toEqual([]);
+  });
+});
+
+describe("calendarDayCount", () => {
+  it("counts the day of a journey once, although three legs share it", () => {
+    // Staying 5.–6., the journey on the 6th, staying 6.–7. (§22.7).
+    expect(calendarDayCount([
+      { startDate: "2026-09-05", days: 2 },
+      { startDate: "2026-09-06", days: 1 },
+      { startDate: "2026-09-06", days: 2 },
+    ])).toBe(3);
+  });
+
+  it("counts a gap between legs as days of the trip", () => {
+    expect(calendarDayCount([
+      { startDate: "2026-09-05", days: 2 },
+      { startDate: "2026-09-10", days: 1 },
+    ])).toBe(6);
+  });
+
+  it("adds legs without dates", () => {
+    expect(calendarDayCount([{ startDate: null, days: 3 }, { startDate: null, days: 2 }])).toBe(5);
   });
 });

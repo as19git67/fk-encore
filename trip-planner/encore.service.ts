@@ -57,6 +57,8 @@ import "./plan-ops";
 import "./splits";
 import "./light-evening";
 import "./climate-check";
+import "./transits";
+import "./transit-suggestion";
 import "./live-activity";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";

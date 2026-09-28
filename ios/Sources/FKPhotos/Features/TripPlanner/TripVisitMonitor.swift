@@ -180,9 +180,12 @@ final class TripVisitMonitor: NSObject, CLLocationManagerDelegate {
     /// re-watching every time would never stop.
     func follow(_ running: TripRunningDay) {
         let stops = running.day.blocks.flatMap(\.stops)
-        let quarters = TripGeofencePlan.anchorRegion(
+        // A journey has no quarters to arrive at (§22.7): the next leg's
+        // arrival is that leg's question.
+        let quarters = running.leg.isTransit ? nil : TripGeofencePlan.anchorRegion(
             legId: running.leg.id, anchor: running.leg.anchor, radiusM: running.leg.anchorRadiusM)
-        let wantedIds = Set(TripGeofencePlan.regions(for: stops).map(\.identifier) + [quarters.identifier])
+        let wantedIds = Set(TripGeofencePlan.regions(for: stops).map(\.identifier)
+            + (quarters.map { [$0.identifier] } ?? []))
         if planId == running.plan.id, dayIndex == running.day.dayIndex, Set(regions.keys) == wantedIds {
             return
         }

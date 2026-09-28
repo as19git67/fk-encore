@@ -5555,6 +5555,69 @@ Offen für die Entscheidung, wenn C gewählt wird:
    `aboard` und die mitfahrende Unterkunft, wenn die Kreuzfahrt (§21)
    wirklich ansteht.
 
+### 22.7 Entschieden: C, mit Zeitpunkten statt ganzer Tage (2026-09-28)
+
+**Variante C.** Und zu den drei offenen Punkten:
+
+1. **Eine Weiterreise hat einen Beginn und ein Ende, jeweils Datum *und*
+   Uhrzeit.** Keine ganzen Tage: Damit sind Fahrten von zwei Stunden ebenso
+   möglich wie solche über mehrere Tage (Nachtzug, Fähre). Die vorige Etappe
+   endet mit der Abfahrt, die nächste beginnt mit der Ankunft — ein
+   Kalendertag kann also Vormittag in Tokio, Fahrt und Abend in Osaka
+   enthalten. Welche Etappe gerade gilt, entscheidet damit nicht mehr das
+   Datum allein, sondern Datum und Uhrzeit.
+2. **Die App darf vorschlagen** (im Sinne von §4.6: messen, einen Vorschlag,
+   nichts schreiben). Anlegen von Hand geht immer.
+3. **Erst `transit`**, `aboard` und die mitfahrende Unterkunft später.
+
+Wie das ins bestehende Modell passt:
+
+- Eine Weiterreise ist eine Etappe mit `kind = transit`, dem Anker der
+  **nächsten** Etappe als Ziel und dem Anker der vorigen als Ausgangspunkt
+  (`origin_*`). Ihre Tage reichen vom Abfahrts- bis zum Ankunftsdatum.
+- Beginn und Ende sind Fixpunkte, die es schon gibt: ein Termin „Abfahrt" mit
+  dem Ausgangsort am ersten Tag (von dort startet der Tag, `day-ends.ts`) und
+  eine `departure` „Ankunft" mit dem Zielort am letzten (dort endet er).
+- Die vorige Etappe bekommt die Abfahrt als `departure` an ihrem letzten Tag
+  und endet am Abfahrtsdatum; die nächste beginnt am Ankunftsdatum mit der
+  Ankunft als spätem Tagesbeginn. Folgende Etappen verschieben sich mit.
+- **Geplant wird nur, was sich planen lässt:** eine Weiterreise innerhalb
+  eines Tages mit Auto, Rad oder zu Fuß. Sie bekommt einen einzigen Block
+  „Unterwegs" über das ganze Zeitfenster, ihr Vorrat ist die Korridorsuche,
+  und der Löser rechnet die Fahrt vom Start zum Ziel als Grundlast — ein
+  Stopp kommt nur hinein, wenn sein Umweg noch ins Fenster passt. Mit Bahn
+  oder Flugzeug, oder über mehrere Tage, bleibt die Weiterreise ein Rahmen
+  ohne Stopps: Sie sagt, wo man ist, und plant nichts hinein.
+- Die Korridorsuche sucht künftig in **jeder** importierten Region, die Start
+  oder Ziel abdeckt, und vereint die Treffer.
+
+Etappen: (1) Server — Modell, Anlegen, Planen, welche Etappe gerade gilt;
+(2) App — Anzeige, Anlegen und Bearbeiten, „heute" nach Uhrzeit; (3) der
+Vorschlag.
+
+**Etappen 1 und 2 umgesetzt.** `POST …/plans/:planId/transits` legt eine
+Weiterreise zwischen zwei datierten Etappen an und rahmt beide Nachbarn
+(`transits.ts`), `transit-leg.ts` plant sie, `running-day.ts` und in der App
+`TripPlan.position(on:)` entscheiden nach Datum und Uhrzeit, welche Etappe
+gerade gilt. Die Reisedauer zählt Kalendertage statt Etappentage
+(`calendarDayCount`), sonst würde ein Tag mit Weiterreise dreimal gezählt. In
+der App steht die Weiterreise in der Städteliste zwischen zwei Städten, mit
+„Weiterreise einfügen", und ihr Tag zeigt „Start → Ziel" statt der Unterkunft.
+
+**Etappe 3 umgesetzt: der Vorschlag.** `GET …/plans/:planId/transit-suggestion`
+misst die Fahrt zwischen zwei aufeinanderfolgenden, datierten Orten ohne
+Weiterreise dazwischen (Auto oder Rad). Ab zwei Stunden schlägt es *eine*
+Weiterreise vor: Abfahrt um zehn am letzten Tag des einen Ortes, Ankunft zur
+Zeit, die der nächste Ort erwartet, sonst nach Fahrt plus zwei Stunden für
+Stopps. Geschrieben wird nichts. Die App zeigt den Vorschlag als Karte über
+der Städteliste; „Ansehen" öffnet den Weiterreise-Bildschirm damit
+vorausgefüllt, „Nein" merkt sich das Telefon.
+
+Nebenbei gefunden: Eine Etappe *vor* zwei oder mehr anderen einzufügen oder zu
+löschen scheiterte an der Eindeutigkeit von `(plan, position)` — die
+Umnummerierung in einem Schritt kollidierte zeilenweise. Sie läuft jetzt über
+negative Zwischenwerte.
+
 ## 23. Idee für später: die Hörtour
 
 *Aus der Erprobung, als Wunsch notiert — nicht geplant, nicht begonnen.*

@@ -16,7 +16,7 @@
  * database never has an opinion about what belongs in a block.
  */
 
-import { and, asc, desc, eq, gt, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
 import { visibleToUser } from "./plan-access";
 import dbDefault from "../db/database";
 import {
@@ -32,6 +32,7 @@ import {
   tripHiddenSpots,
 } from "../db/schema";
 import { storedExtent } from "./extent";
+import { calendarDayCount } from "./leg-dates";
 import { spillOver } from "./spill";
 import { passedBy } from "./on-the-way";
 import type { Candidate, PlannedBlock } from "./solver";
@@ -51,10 +52,28 @@ export interface StoredPlan {
   legs: StoredLeg[];
 }
 
+/** stay: a place the group is based at. transit: the journey between two (§22.7). */
+export type LegKind = "stay" | "transit";
+
+/** Where a transit leg sets off from — the previous leg's base (§22.7). */
+export interface LegOrigin {
+  lat: number;
+  lon: number;
+  label: string | null;
+}
+
 export interface StoredLeg {
   id: number;
   position: number;
   title: string | null;
+  /** "stay" for every ordinary leg; "transit" for a journey (§22.7). */
+  kind: LegKind;
+  /** For a transit leg, where it starts; its `anchor` is where it ends. */
+  origin: LegOrigin | null;
+  /** For a transit leg: when it sets off, on its first day. */
+  departMinutes: number | null;
+  /** For a transit leg: when it arrives, on its last day. */
+  endMinutes: number | null;
   anchor: { lat: number; lon: number };
   /**
    * Set when the anchor is a zone rather than an address (§4.2): the
@@ -292,6 +311,10 @@ export interface DayAnchor {
 
 export interface CreateLegInput {
   title?: string;
+  kind?: LegKind;
+  origin?: LegOrigin | null;
+  departMinutes?: number | null;
+  endMinutes?: number | null;
   anchor: { lat: number; lon: number };
   anchorRadiusM?: number | null;
   anchorLabel?: string | null;
@@ -354,6 +377,12 @@ export async function insertLeg(
       plan_id: planId,
       position,
       title: legInput.title ?? null,
+      kind: legInput.kind ?? "stay",
+      origin_lat: legInput.origin?.lat ?? null,
+      origin_lon: legInput.origin?.lon ?? null,
+      origin_label: legInput.origin?.label ?? null,
+      depart_minutes: legInput.departMinutes ?? null,
+      end_minutes: legInput.endMinutes ?? null,
       anchor_lat: legInput.anchor.lat,
       anchor_lon: legInput.anchor.lon,
       anchor_radius_m: legInput.anchorRadiusM ?? null,
@@ -396,20 +425,27 @@ export async function insertLeg(
 /**
  * Make room at `position` by pushing every leg from there on one along.
  *
- * Two statements rather than one per leg: `position` is unique per plan
- * only by convention, but doing it in descending order would still be
- * a window in which two legs share a number. A single `UPDATE … SET
- * position = position + 1` has no such window.
+ * Not one statement per leg: in any order there is a moment in which
+ * two legs share a number, and `(plan_id, position)` is unique.
  */
 export async function shiftLegsFrom(
   planId: number,
   position: number,
   db: Db = dbDefault,
 ): Promise<void> {
+  // Two steps, because the unique index on (plan, position) is checked
+  // row by row: moving 1→2 while 2 is still there fails before 2 has
+  // moved to 3. Parking the rows on negative numbers first — which no
+  // leg ever has — leaves no moment in which two legs share a place.
+  // Found by the first insert in front of two legs (§22.7).
   await db
     .update(tripPlanLegs)
-    .set({ position: sql`${tripPlanLegs.position} + 1` })
+    .set({ position: sql`-(${tripPlanLegs.position} + 1)` })
     .where(and(eq(tripPlanLegs.plan_id, planId), gte(tripPlanLegs.position, position)));
+  await db
+    .update(tripPlanLegs)
+    .set({ position: sql`-${tripPlanLegs.position}` })
+    .where(and(eq(tripPlanLegs.plan_id, planId), lt(tripPlanLegs.position, 0)));
 }
 
 /**
@@ -430,10 +466,16 @@ export async function removeLeg(
     .where(and(eq(tripPlanLegs.id, legId), eq(tripPlanLegs.plan_id, planId)))
     .returning({ position: tripPlanLegs.position });
   if (!gone) return false;
+  // Two steps, for the reason `shiftLegsFrom` gives: moving 3→2 while
+  // 2 has not yet become 1 is a moment in which two legs share a place.
   await db
     .update(tripPlanLegs)
-    .set({ position: sql`${tripPlanLegs.position} - 1` })
+    .set({ position: sql`-${tripPlanLegs.position}` })
     .where(and(eq(tripPlanLegs.plan_id, planId), gt(tripPlanLegs.position, gone.position)));
+  await db
+    .update(tripPlanLegs)
+    .set({ position: sql`-${tripPlanLegs.position} - 1` })
+    .where(and(eq(tripPlanLegs.plan_id, planId), lt(tripPlanLegs.position, 0)));
   await db
     .update(tripPlans)
     .set({ updated_at: new Date().toISOString() })
@@ -703,8 +745,12 @@ export async function listPlans(
     return {
       id: plan.id,
       title: plan.title,
-      legTitles: legs.map((l) => l.title),
-      dayCount: legs.reduce((sum, l) => sum + (daysByLeg.get(l.id) ?? 0), 0),
+      // The places, not the journeys between them (§22.7).
+      legTitles: legs.filter((l) => l.kind !== "transit").map((l) => l.title),
+      dayCount: calendarDayCount(legs.map((l) => ({
+        startDate: l.start_date,
+        days: daysByLeg.get(l.id) ?? 0,
+      }))),
       startDate: legs[0]?.start_date ?? null,
       updatedAt: plan.updated_at,
       youOrganise: plan.owner_id === ownerId,
@@ -1153,6 +1199,12 @@ export async function loadPlan(
       id: l.id,
       position: l.position,
       title: l.title,
+      kind: (l.kind === "transit" ? "transit" : "stay") as LegKind,
+      origin: l.origin_lat === null || l.origin_lon === null
+        ? null
+        : { lat: l.origin_lat, lon: l.origin_lon, label: l.origin_label },
+      departMinutes: l.depart_minutes,
+      endMinutes: l.end_minutes,
       anchor: { lat: l.anchor_lat, lon: l.anchor_lon },
       anchorRadiusM: l.anchor_radius_m,
       mode: l.mode as TransportMode,

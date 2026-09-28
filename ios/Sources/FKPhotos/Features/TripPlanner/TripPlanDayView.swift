@@ -714,12 +714,47 @@ struct TripPlanDayView: View {
         .accessibilityHint("Unterkunft und Verkehrsmittel ändern")
         .sheet(isPresented: $editingLeg) {
             NavigationStack {
-                TripLegEditView(viewModel: viewModel, legIndex: leg.position)
+                // A journey is changed where it was made (§22.7): its two
+                // moments, not an anchor and a length.
+                if leg.isTransit {
+                    TripTransitView(viewModel: viewModel, afterLegIndex: leg.position - 1, existing: leg)
+                } else {
+                    TripLegEditView(viewModel: viewModel, legIndex: leg.position)
+                }
             }
         }
     }
 
+    @ViewBuilder
     private func legHeaderText(_ leg: TripLeg) -> some View {
+        if leg.isTransit {
+            transitHeaderText(leg)
+        } else {
+            placeHeaderText(leg)
+        }
+    }
+
+    /// A journey's day: from where, to where, when (§22.7).
+    private func transitHeaderText(_ leg: TripLeg) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.turn.up.right.diamond")
+                Text("\(leg.origin?.label ?? "Start") → \(leg.anchorTitle)")
+                    .lineLimit(2)
+                Spacer()
+            }
+            HStack(spacing: 6) {
+                Image(systemName: leg.transportMode.systemImage)
+                Text(leg.transportMode.label)
+                if let window = leg.transitWindowText { Text("· \(window)") }
+                Spacer()
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+    }
+
+    private func placeHeaderText(_ leg: TripLeg) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             // Where the day begins and ends, said out loud. It is the
             // value the whole plan is measured from (§4.2), and the

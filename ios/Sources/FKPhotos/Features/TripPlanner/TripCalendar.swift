@@ -103,11 +103,18 @@ extension TripPlan {
     /// Which day of this trip `today` is, or nil when the trip has no
     /// dates or today is not in it.
     ///
-    /// Legs are searched in order and the first match wins. Overlapping
-    /// legs are not a case worth arbitrating: they are a mistake in the
-    /// dates, and picking the earlier one is at least predictable.
+    /// Date *and* time (§22.7): a day with a journey holds three legs —
+    /// the morning of the one being left, the journey, the evening of
+    /// the one arrived at — and the clock says which of them is being
+    /// lived. The same rule as the server's `running-day.ts`.
     func position(on today: Date, timeZone: TimeZone = .current) -> TripDayPosition? {
         let day = TripCalendar.isoDay(today, timeZone: timeZone)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = calendar.dateComponents([.hour, .minute], from: today)
+        let minutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+
+        var candidates: [(leg: TripLeg, day: TripDay)] = []
         for leg in legs.sorted(by: { $0.position < $1.position }) {
             guard let start = leg.startDate,
                   let offset = TripCalendar.days(from: start, to: day, timeZone: timeZone),
@@ -118,9 +125,26 @@ extension TripPlan {
             guard let matched = leg.days.first(where: { $0.dayIndex == offset })
                 ?? leg.days.sorted(by: { $0.dayIndex < $1.dayIndex }).dropFirst(offset).first
             else { continue }
-            return TripDayPosition(legIndex: leg.position, dayIndex: matched.dayIndex)
+            candidates.append((leg: leg, day: matched))
         }
-        return nil
+        guard let chosen = TripRunningDayRule.pick(candidates, at: minutes) else { return nil }
+        return TripDayPosition(legIndex: chosen.leg.position, dayIndex: chosen.day.dayIndex)
+    }
+
+    /// How many calendar days the trip spans. Not the sum of its legs'
+    /// days: a journey shares its first day with the leg it leaves and
+    /// its last with the leg it reaches (§22.7).
+    var calendarDayCount: Int {
+        let dated = legs.filter { $0.startDate != nil && !$0.days.isEmpty }
+        let undated = legs.filter { $0.startDate == nil }.reduce(0) { $0 + $1.days.count }
+        guard let first = dated.compactMap(\.startDate).min() else { return undated }
+        let lasts = dated.compactMap { leg in
+            leg.startDate.flatMap { TripCalendar.day($0, plus: leg.days.count - 1, timeZone: .current) }
+        }
+        guard let last = lasts.max(),
+              let span = TripCalendar.days(from: first, to: last, timeZone: .current)
+        else { return undated }
+        return span + 1 + undated
     }
 
     /// The trip's own start date: the earliest leg that has one.
@@ -130,9 +154,39 @@ extension TripPlan {
 
     /// How the whole trip relates to today.
     func schedule(on today: Date, timeZone: TimeZone = .current) -> TripSchedule {
-        let dayCount = legs.reduce(0) { $0 + $1.days.count }
-        return TripScheduling.schedule(
-            startDate: startDate, dayCount: dayCount, today: today, timeZone: timeZone)
+        TripScheduling.schedule(
+            startDate: startDate, dayCount: calendarDayCount, today: today, timeZone: timeZone)
+    }
+}
+
+/// Which of several legs sharing a date is being lived at a minute
+/// (§22.7) — pure, so the rule can be tested without a plan.
+///
+/// Each leg's day has a window: it opens at midnight, or later on the
+/// first day of a leg (the arrival, or a journey's departure), and
+/// closes at midnight, or earlier on a day with a departure. The day
+/// whose window holds the minute wins; between windows, the one that
+/// opened last; before any has opened, the first.
+enum TripRunningDayRule {
+    static func window(of leg: TripLeg, day: TripDay) -> ClosedRange<Int> {
+        let first = day.dayIndex == (leg.days.map(\.dayIndex).min() ?? 0)
+        let opens = !first ? 0 : leg.isTransit ? (leg.departMinutes ?? 0) : (leg.arriveMinutes ?? 0)
+        let departures = day.fixpoints.filter { $0.kind == "departure" }.map(\.startMinutes)
+        let closes = departures.min() ?? 24 * 60
+        return opens...max(opens, closes)
+    }
+
+    static func pick(_ candidates: [(leg: TripLeg, day: TripDay)], at minutes: Int)
+        -> (leg: TripLeg, day: TripDay)? {
+        guard candidates.count > 1 else { return candidates.first }
+        if let inside = candidates.first(where: {
+            let w = window(of: $0.leg, day: $0.day)
+            return minutes >= w.lowerBound && minutes < w.upperBound
+        }) {
+            return inside
+        }
+        let opened = candidates.filter { window(of: $0.leg, day: $0.day).lowerBound <= minutes }
+        return opened.last ?? candidates.first
     }
 }
 
