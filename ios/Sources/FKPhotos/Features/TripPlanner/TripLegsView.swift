@@ -31,9 +31,13 @@ struct TripLegsView: View {
     /// the journey itself when it exists.
     @State private var transit: TransitTarget?
 
+    /// The one journey the planner would suggest (§22.7), or nil.
+    @State private var suggestion: TripTransitSuggestion?
+
     private struct TransitTarget: Identifiable {
         let afterLegIndex: Int
         let existing: TripLeg?
+        var suggested: TripTransitSuggestion? = nil
         var id: String { "\(afterLegIndex)-\(existing?.id ?? 0)" }
     }
     @State private var isWorking = false
@@ -41,6 +45,22 @@ struct TripLegsView: View {
 
     var body: some View {
         List {
+            if let suggestion {
+                Section {
+                    Label(suggestion.sentence, systemImage: "arrow.triangle.turn.up.right.diamond")
+                        .font(.subheadline)
+                    HStack {
+                        Button("Ansehen") {
+                            transit = TransitTarget(afterLegIndex: suggestion.afterLegIndex,
+                                                    existing: nil, suggested: suggestion)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Nein") { dismissSuggestion(suggestion) }
+                            .buttonStyle(.bordered)
+                    }
+                    .controlSize(.small)
+                }
+            }
             Section {
                 ForEach(viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []) { leg in
                     Button {
@@ -111,7 +131,7 @@ struct TripLegsView: View {
         .sheet(item: $transit) { target in
             NavigationStack {
                 TripTransitView(viewModel: viewModel, afterLegIndex: target.afterLegIndex,
-                                existing: target.existing)
+                                existing: target.existing, suggested: target.suggested)
             }
         }
         .sheet(isPresented: $adding) {
@@ -134,7 +154,33 @@ struct TripLegsView: View {
                      + "auch mit dem, was jemand von Hand hinzugefügt hat.")
             }
         }
-        .task { await viewModel.load() }
+        .task {
+            await viewModel.load()
+            await loadSuggestion()
+        }
+        // A journey added or a city changed may answer the suggestion.
+        .onChange(of: viewModel.plan?.legs.count) { _, _ in
+            Task { await loadSuggestion() }
+        }
+    }
+
+    private func loadSuggestion() async {
+        let response: TripTransitSuggestionResponse? = try? await APIClient.shared.get(
+            "/trip-planner/plans/\(viewModel.planId)/transit-suggestion")
+        guard let found = response?.suggestion,
+              !UserDefaults.standard.bool(forKey: TripTransitSuggestion.dismissKey(
+                planId: viewModel.planId, afterLegIndex: found.afterLegIndex))
+        else {
+            suggestion = nil
+            return
+        }
+        suggestion = found
+    }
+
+    private func dismissSuggestion(_ found: TripTransitSuggestion) {
+        UserDefaults.standard.set(true, forKey: TripTransitSuggestion.dismissKey(
+            planId: viewModel.planId, afterLegIndex: found.afterLegIndex))
+        suggestion = nil
     }
 
     @ViewBuilder

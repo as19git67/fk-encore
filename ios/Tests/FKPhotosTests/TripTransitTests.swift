@@ -81,4 +81,19 @@ final class TripTransitTests: XCTestCase {
         XCTAssertEqual(plan.legs[1].transitWindowText, "10:00 → 16:00")
         XCTAssertNil(plan.legs[0].transitWindowText)
     }
+
+    func testTheSuggestionDecodesAndItsClockReads() throws {
+        let json = """
+        {"suggestion":{"afterLegIndex":0,"fromTitle":"Ort 0","toTitle":"Ort 1",
+         "departDate":"2026-09-06","departAt":"10:00","arriveDate":"2026-09-06","arriveAt":"16:30",
+         "mode":"car","driveMinutes":200,"sentence":"Von Ort 0 nach Ort 1 sind es rund 3 h 20."}}
+        """
+        let response = try JSONDecoder().decode(TripTransitSuggestionResponse.self, from: Data(json.utf8))
+        let suggestion = try XCTUnwrap(response.suggestion)
+        XCTAssertEqual(suggestion.afterLegIndex, 0)
+        XCTAssertEqual(TripTransitPlanning.minutes(fromClock: suggestion.arriveAt), 990)
+        XCTAssertNil(TripTransitPlanning.minutes(fromClock: "25:00"))
+        XCTAssertNotEqual(TripTransitSuggestion.dismissKey(planId: 1, afterLegIndex: 0),
+                          TripTransitSuggestion.dismissKey(planId: 1, afterLegIndex: 1))
+    }
 }

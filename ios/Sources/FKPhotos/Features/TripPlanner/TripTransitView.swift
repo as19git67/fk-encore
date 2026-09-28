@@ -18,6 +18,8 @@ struct TripTransitView: View {
     let afterLegIndex: Int
     /// The journey being changed, or nil for a new one.
     let existing: TripLeg?
+    /// What the planner suggested, to open with (§22.7).
+    var suggested: TripTransitSuggestion? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var depart = Date()
@@ -88,6 +90,14 @@ struct TripTransitView: View {
             mode = existing.transportMode
             return
         }
+        if let suggested,
+           let departMinutes = TripTransitPlanning.minutes(fromClock: suggested.departAt),
+           let arriveMinutes = TripTransitPlanning.minutes(fromClock: suggested.arriveAt) {
+            depart = TripTransitPlanning.moment(suggested.departDate, minutes: departMinutes) ?? depart
+            arrive = TripTransitPlanning.moment(suggested.arriveDate, minutes: arriveMinutes) ?? arrive
+            mode = TripTransportMode(raw: suggested.mode)
+            return
+        }
         if let from, let start = from.startDate,
            let lastDay = TripCalendar.day(start, plus: max(0, from.days.count - 1)) {
             depart = TripTransitPlanning.moment(lastDay, minutes: 10 * 60) ?? depart
@@ -150,6 +160,13 @@ enum TripTransitPlanning {
             year: parts[0], month: parts[1], day: parts[2], hour: minutes / 60, minute: minutes % 60))
     }
 
+    /// "10:00" to 600.
+    static func minutes(fromClock text: String) -> Int? {
+        let parts = text.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2, (0..<24).contains(parts[0]), (0..<60).contains(parts[1]) else { return nil }
+        return parts[0] * 60 + parts[1]
+    }
+
     static func minutes(of date: Date, timeZone: TimeZone = .current) -> Int {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
@@ -173,4 +190,29 @@ enum TripTransitPlanning {
                 + "und plant sie in einen Block „Unterwegs“."
         }
     }
+}
+
+/// The planner's one suggestion for a journey (§22.7), as the server
+/// sends it. Writes nothing until it is accepted.
+struct TripTransitSuggestion: Codable, Sendable, Equatable {
+    let afterLegIndex: Int
+    let fromTitle: String
+    let toTitle: String
+    let departDate: String
+    let departAt: String
+    let arriveDate: String
+    let arriveAt: String
+    let mode: String
+    let driveMinutes: Int
+    let sentence: String
+
+    /// A "no" is remembered on this phone: nothing was written that
+    /// could be taken back, so there is nothing to tell the server.
+    static func dismissKey(planId: Int, afterLegIndex: Int) -> String {
+        "trip.transitSuggestion.dismissed.\(planId).\(afterLegIndex)"
+    }
+}
+
+struct TripTransitSuggestionResponse: Codable, Sendable {
+    let suggestion: TripTransitSuggestion?
 }

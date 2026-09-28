@@ -5604,6 +5604,15 @@ gerade gilt. Die Reisedauer zählt Kalendertage statt Etappentage
 der App steht die Weiterreise in der Städteliste zwischen zwei Städten, mit
 „Weiterreise einfügen", und ihr Tag zeigt „Start → Ziel" statt der Unterkunft.
 
+**Etappe 3 umgesetzt: der Vorschlag.** `GET …/plans/:planId/transit-suggestion`
+misst die Fahrt zwischen zwei aufeinanderfolgenden, datierten Orten ohne
+Weiterreise dazwischen (Auto oder Rad). Ab zwei Stunden schlägt es *eine*
+Weiterreise vor: Abfahrt um zehn am letzten Tag des einen Ortes, Ankunft zur
+Zeit, die der nächste Ort erwartet, sonst nach Fahrt plus zwei Stunden für
+Stopps. Geschrieben wird nichts. Die App zeigt den Vorschlag als Karte über
+der Städteliste; „Ansehen" öffnet den Weiterreise-Bildschirm damit
+vorausgefüllt, „Nein" merkt sich das Telefon.
+
 Nebenbei gefunden: Eine Etappe *vor* zwei oder mehr anderen einzufügen oder zu
 löschen scheiterte an der Eindeutigkeit von `(plan, position)` — die
 Umnummerierung in einem Schritt kollidierte zeilenweise. Sie läuft jetzt über
