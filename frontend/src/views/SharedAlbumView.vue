@@ -943,7 +943,6 @@ onUnmounted(() => {
   background: var(--p-primary-color);
   color: var(--p-primary-contrast-color);
   border-color: var(--p-primary-color);
-  outline: none;
 }
 
 .shared-header-account-btn--warn {

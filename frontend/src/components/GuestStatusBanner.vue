@@ -227,6 +227,5 @@ const pushTooltip = computed<string | null>(() => {
 .guest-banner__dismiss:focus-visible {
   opacity: 1;
   background: color-mix(in srgb, currentColor 12%, transparent);
-  outline: none;
 }
 </style>

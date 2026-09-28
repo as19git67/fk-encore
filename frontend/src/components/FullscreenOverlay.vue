@@ -1683,7 +1683,6 @@ onUnmounted(() => {
 .fs-stack-badge:hover,
 .fs-stack-badge:focus-visible {
   background: rgba(0,0,0,0.85);
-  outline: none;
 }
 .fs-stack-badge--ai-high {
   background: var(--p-red-500);

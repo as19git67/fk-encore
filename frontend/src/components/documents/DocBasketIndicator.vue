@@ -512,7 +512,7 @@ function handleReprocessDone(payload: { affected: number }) {
       @create="handleTagCreate"
     />
 
-    <Dialog v-model:visible="categoryDialogVisible" modal header="Kategorie setzen" class="basket-dialog">
+    <Dialog v-model:visible="categoryDialogVisible" modal header="Kategorie setzen" class="basket-dialog dialog-sm">
       <p class="dialog-hint">
         Setzt die Kategorie auf {{ count }} Dokument{{ count === 1 ? '' : 'e' }} und
         fixiert sie gegen die automatische Neuklassifizierung.
@@ -537,7 +537,7 @@ function handleReprocessDone(payload: { affected: number }) {
       </template>
     </Dialog>
 
-    <Dialog v-model:visible="dateDialogVisible" modal header="Dokumentdatum setzen" class="basket-dialog">
+    <Dialog v-model:visible="dateDialogVisible" modal header="Dokumentdatum setzen" class="basket-dialog dialog-sm">
       <p class="dialog-hint">
         Setzt das Dokumentdatum auf {{ count }} Dokument{{ count === 1 ? '' : 'e' }}.
         Ohne Auswahl wird das Datum entfernt.
@@ -556,7 +556,7 @@ function handleReprocessDone(payload: { affected: number }) {
       </template>
     </Dialog>
 
-    <Dialog v-model:visible="taxDialogVisible" modal header="Steuer-Metadaten setzen" class="basket-dialog">
+    <Dialog v-model:visible="taxDialogVisible" modal header="Steuer-Metadaten setzen" class="basket-dialog dialog-md">
       <p class="dialog-hint">
         Überschreibt Steuer-Relevanz, Jahr und Steuer-Kategorien auf
         {{ count }} Dokument{{ count === 1 ? '' : 'e' }} (ersetzt vorhandene Zuordnungen).
@@ -591,7 +591,7 @@ function handleReprocessDone(payload: { affected: number }) {
       </template>
     </Dialog>
 
-    <Dialog v-model:visible="personsDialogVisible" modal header="Bezugspersonen" class="basket-dialog">
+    <Dialog v-model:visible="personsDialogVisible" modal header="Bezugspersonen" class="basket-dialog dialog-md">
       <p class="dialog-hint">
         Verknüpft Bezugspersonen mit {{ count }} Dokument{{ count === 1 ? '' : 'en' }}
         oder entfernt sie davon.
