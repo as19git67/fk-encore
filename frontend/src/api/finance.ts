@@ -1452,7 +1452,11 @@ export interface ForecastLinkableAccount {
   kind: string
 }
 
+export type ForecastHouseholdRole = 'owner' | 'edit' | 'view'
+
 export interface ForecastBundle {
+  /** Whose forecast this is: the caller's own, or one shared with them. */
+  household: { role: ForecastHouseholdRole; ownerName: string | null }
   persons: ForecastPerson[]
   milestones: ForecastMilestone[]
   items: ForecastItem[]
@@ -1727,6 +1731,8 @@ export interface ForecastStatementLink {
   status: 'suggested' | 'confirmed' | 'rejected'
   kind: ForecastDocKind
   kindByUser: boolean
+  /** False for a partner's private document in a shared forecast: title and date only. */
+  canOpen: boolean
 }
 
 export type ForecastDocKind = 'statement' | 'dynamic_increase' | 'dynamic_declined' | 'other'
@@ -1854,4 +1860,64 @@ export async function createForecastAccountItems(
   accounts: Array<{ accountId: number; personId: number | null }>,
 ): Promise<{ created: number }> {
   return apiFetch('/finance/forecast/account-items', { method: 'POST', body: JSON.stringify({ accounts }) })
+}
+
+// Retirement forecast — sharing within the household (finance/forecast-sharing.ts)
+
+export interface ForecastShare {
+  id: number
+  userId: number | null
+  userName: string | null
+  groupId: number | null
+  groupName: string | null
+  level: 'edit' | 'view'
+}
+
+export interface ForecastShareOffer {
+  shareId: number
+  ownerId: number
+  ownerName: string
+  level: 'edit' | 'view'
+  groupName: string | null
+}
+
+export interface ForecastSharingState {
+  role: ForecastHouseholdRole
+  ownerName: string | null
+  shares: ForecastShare[]
+  offers: ForecastShareOffer[]
+  hasOwnForecast: boolean
+}
+
+export interface ForecastShareCandidates {
+  users: Array<{ id: number; name: string }>
+  groups: Array<{ id: number; name: string }>
+}
+
+export async function getForecastSharing(): Promise<ForecastSharingState> {
+  return apiFetch('/finance/forecast/sharing')
+}
+
+export async function getForecastShareCandidates(): Promise<ForecastShareCandidates> {
+  return apiFetch('/finance/forecast/share-candidates')
+}
+
+export async function createForecastShare(body: {
+  userId?: number
+  groupId?: number
+  level: 'edit' | 'view'
+}): Promise<ForecastShare> {
+  return apiFetch('/finance/forecast/shares', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function updateForecastShare(id: number, level: 'edit' | 'view'): Promise<ForecastShare> {
+  return apiFetch(`/finance/forecast/shares/${id}`, { method: 'PUT', body: JSON.stringify({ level }) })
+}
+
+export async function deleteForecastShare(id: number): Promise<void> {
+  return apiFetch(`/finance/forecast/shares/${id}`, { method: 'DELETE' })
+}
+
+export async function joinForecastShare(ownerId: number): Promise<ForecastSharingState> {
+  return apiFetch('/finance/forecast/sharing/join', { method: 'POST', body: JSON.stringify({ ownerId }) })
 }

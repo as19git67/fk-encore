@@ -272,7 +272,10 @@ const reject = () => latest.value && run(() => rejectForecastStatement(latest.va
         <ul v-else class="stmt__links">
           <li v-for="l in links" :key="l.id" class="stmt__link">
             <div class="stmt__link-main">
-              <RouterLink :to="{ name: 'dokumente-detail', params: { id: l.documentId } }">{{ l.title || `Dokument ${l.documentId}` }}</RouterLink>
+              <RouterLink v-if="l.canOpen" :to="{ name: 'dokumente-detail', params: { id: l.documentId } }">{{ l.title || `Dokument ${l.documentId}` }}</RouterLink>
+              <span v-else v-tooltip.top="'Privates Dokument eines anderen Haushaltsmitglieds'">
+                {{ l.title || `Dokument ${l.documentId}` }} <i class="pi pi-lock muted" aria-label="privat" />
+              </span>
               <span class="muted">
                 <template v-if="l.docDate">{{ formatMonth(l.docDate) }} · </template>{{ LINK_KIND[l.matchKind] }}
               </span>

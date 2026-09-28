@@ -55,7 +55,7 @@ export const ErhoehungAbgelehnt: Story = {
       ...WITH_DIFF,
       links: [
         ...WITH_DIFF.links,
-        { id: 3, documentId: 503, title: 'Nachtrag Dynamik', docDate: '2026-03-02', documentType: null, matchKind: 'text', status: 'confirmed', kind: 'dynamic_declined', kindByUser: true },
+        { id: 3, documentId: 503, title: 'Nachtrag Dynamik', docDate: '2026-03-02', documentType: null, matchKind: 'text', status: 'confirmed', kind: 'dynamic_declined', kindByUser: true, canOpen: false },
       ],
       notes: ['Beitrag nicht vorgeschlagen: die Beitragserhöhung wurde abgelehnt (Schreiben vom 02.03.2026).'],
     },

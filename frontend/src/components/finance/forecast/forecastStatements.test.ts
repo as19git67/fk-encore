@@ -39,7 +39,7 @@ describe('forecastStatements', () => {
       overdue: true,
     })
     expect(diff).toEqual({ text: 'Standmitteilung 01/2026 · 1 Abweichung', tone: 'warn' })
-    const link = { id: 1, documentId: 2, title: null, docDate: null, documentType: null, matchKind: 'text' as const, status: 'suggested' as const, kind: 'statement' as const, kindByUser: false }
+    const link = { id: 1, documentId: 2, title: null, docDate: null, documentType: null, matchKind: 'text' as const, status: 'suggested' as const, kind: 'statement' as const, kindByUser: false, canOpen: true }
     expect(statementBadge({ ...base, links: [link, { ...link, id: 2 }] }).text).toBe('2 Dokumente prüfen')
     expect(statementBadge({ ...base, overdue: true, latest: { ...latest, status: 'accepted' } }).text).toBe('Standmitteilung überfällig')
     expect(statementBadge({ ...base, latest: { ...latest, status: 'accepted' } }).tone).toBe('success')

@@ -24,6 +24,7 @@ import ForecastMatrix from '../../components/finance/forecast/ForecastMatrix.vue
 import ForecastImportDialog from '../../components/finance/forecast/ForecastImportDialog.vue'
 import ForecastStatementsDialog from '../../components/finance/forecast/ForecastStatementsDialog.vue'
 import ForecastAccountsDialog from '../../components/finance/forecast/ForecastAccountsDialog.vue'
+import ForecastShareDialog from '../../components/finance/forecast/ForecastShareDialog.vue'
 import { sourceText, statementBadge } from '../../components/finance/forecast/forecastStatements'
 import {
   ITEM_TYPE_LABELS,
@@ -50,6 +51,8 @@ import {
   deleteForecastScenario,
   getForecast,
   getForecastAccountSuggestions,
+  getForecastSharing,
+  joinForecastShare,
   getForecastStatements,
   scanForecastStatements,
   simulateForecast,
@@ -67,6 +70,7 @@ import {
   type ForecastMilestoneKind,
   type ForecastPerson,
   type ForecastScanSummary,
+  type ForecastShareOffer,
   type ForecastScenarioConfig,
   type ForecastSimulateResponse,
 } from '../../api/finance'
@@ -103,6 +107,7 @@ async function load() {
     bundle.value = await getForecast()
     void loadStatements()
     void loadAccountSuggestions()
+    void loadShareOffers()
     if (!config.value) config.value = cloneConfig(bundle.value.defaultScenario)
     if (earliestFor.value == null) earliestFor.value = persons.value[0]?.id ?? null
     const [first, second] = persons.value
@@ -472,6 +477,41 @@ async function onImported(count: number, found: ForecastScanSummary) {
   await load()
 }
 
+// ---- sharing within the household ---------------------------------------------------------
+
+const role = computed(() => bundle.value?.household.role ?? 'owner')
+const canEdit = computed(() => role.value !== 'view')
+const shareDialog = ref(false)
+const shareOffers = ref<ForecastShareOffer[]>([])
+
+async function loadShareOffers() {
+  try {
+    shareOffers.value = (await getForecastSharing()).offers
+  } catch {
+    shareOffers.value = []
+  }
+}
+
+function joinShared(offer: ForecastShareOffer) {
+  confirm.require({
+    header: 'Zur geteilten Prognose wechseln',
+    message: `Du arbeitest danach an der Prognose von ${offer.ownerName}. Deine eigene Prognose (Personen, Einträge, Szenarien) wird dabei gelöscht.`,
+    acceptLabel: 'Wechseln und eigene löschen',
+    rejectLabel: 'Abbrechen',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await joinForecastShare(offer.ownerId)
+        config.value = null
+        importNotice.value = `Du arbeitest jetzt an der Prognose von ${offer.ownerName}.`
+      } catch (err) {
+        importNotice.value = `Wechsel fehlgeschlagen: ${message(err)}`
+      }
+      await load()
+    },
+  })
+}
+
 // ---- savings and depot accounts not yet in the forecast ----------------------------------
 
 const accountSuggestions = ref<ForecastLinkableAccount[]>([])
@@ -714,9 +754,10 @@ const ready = computed(() => !loading.value)
     :ready="ready"
   >
     <template #actions>
-      <Button label="Person" icon="pi pi-user-plus" size="small" outlined @click="openPerson(null)" />
+      <Button v-if="role === 'owner'" label="Teilen" icon="pi pi-share-alt" size="small" outlined @click="shareDialog = true" />
+      <Button label="Person" icon="pi pi-user-plus" size="small" outlined :disabled="!canEdit" @click="openPerson(null)" />
       <Button
-        v-if="hasContracts"
+        v-if="hasContracts && canEdit"
         label="Standmitteilungen suchen"
         icon="pi pi-search"
         size="small"
@@ -724,15 +765,23 @@ const ready = computed(() => !loading.value)
         :loading="scanning"
         @click="scanStatements"
       />
-      <Button label="Import" icon="pi pi-file-import" size="small" outlined :disabled="persons.length === 0" @click="importDialog = true" />
-      <Button label="Eintrag" icon="pi pi-plus" size="small" :disabled="persons.length === 0" @click="openItem(null)" />
+      <Button label="Import" icon="pi pi-file-import" size="small" outlined :disabled="persons.length === 0 || !canEdit" @click="importDialog = true" />
+      <Button label="Eintrag" icon="pi pi-plus" size="small" :disabled="persons.length === 0 || !canEdit" @click="openItem(null)" />
     </template>
 
     <template #notice>
       <ErrorBanner v-if="error" :message="error" @retry="load" />
       <ErrorBanner v-else-if="simError" :message="simError" @retry="runSimulation" />
+      <Message v-if="role !== 'owner'" severity="info" :closable="false">
+        Geteilte Prognose von {{ bundle?.household.ownerName ?? 'einem Haushaltsmitglied' }} –
+        {{ canEdit ? 'du kannst sie mitbearbeiten.' : 'du kannst sie nur ansehen; Szenarien lassen sich ausprobieren, aber nicht speichern.' }}
+      </Message>
+      <Message v-for="o in shareOffers" :key="o.shareId" severity="info" :closable="false">
+        {{ o.ownerName }} hat eine Prognose mit dir geteilt{{ o.groupName ? ` (über „${o.groupName}“)` : '' }}.
+        <Button label="Zur geteilten Prognose wechseln" link size="small" @click="joinShared(o)" />
+      </Message>
       <Message
-        v-if="persons.length > 0 && accountSuggestions.length > 0 && !accountsDismissed"
+        v-if="canEdit && persons.length > 0 && accountSuggestions.length > 0 && !accountsDismissed"
         severity="info"
         :closable="true"
         @close="accountsDismissed = true"
@@ -1039,8 +1088,8 @@ const ready = computed(() => !loading.value)
           />
           <span class="spacer" />
           <Button v-if="selectedScenarioId != null" label="Löschen" icon="pi pi-trash" severity="danger" text size="small" @click="removeScenario" />
-          <Button label="Als neues Szenario" icon="pi pi-copy" outlined size="small" @click="scenarioName = ''; scenarioDialog = true" />
-          <Button v-if="selectedScenarioId != null" label="Speichern" icon="pi pi-save" size="small" :disabled="!dirty" @click="saveScenario(false)" />
+          <Button label="Als neues Szenario" icon="pi pi-copy" outlined size="small" :disabled="!canEdit" @click="scenarioName = ''; scenarioDialog = true" />
+          <Button v-if="selectedScenarioId != null" label="Speichern" icon="pi pi-save" size="small" :disabled="!dirty || !canEdit" @click="saveScenario(false)" />
         </div>
         <p class="card__hint">
           Aktuell: Inflation {{ formatPct(config.inflationRate) }}, Rendite {{ formatPct(config.defaultReturnRate) }}, bis {{ config.endAge }}.
@@ -1088,6 +1137,8 @@ const ready = computed(() => !loading.value)
       @imported="onImported"
       @apply-inflation="applyInflation"
     />
+
+    <ForecastShareDialog v-model:visible="shareDialog" @changed="load" />
 
     <ForecastAccountsDialog
       v-model:visible="accountsDialog"

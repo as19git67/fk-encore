@@ -3897,3 +3897,26 @@ export const financeForecastStatement = pgTable(
     index("idx_finance_forecast_statement_item").on(table.item_id, table.reference_date),
   ]
 );
+
+// ---------- Finance: sharing a forecast within a household (migration 0215) ----------
+
+export const financeForecastShare = pgTable(
+  "finance_forecast_share",
+  {
+    id: serial("id").primaryKey(),
+    owner_user_id: integer("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Exactly one of the two targets is set.
+    target_user_id: integer("target_user_id").references(() => users.id, { onDelete: "cascade" }),
+    target_group_id: integer("target_group_id").references(() => groups.id, { onDelete: "cascade" }),
+    level: text("level").notNull().default("edit").$type<"edit" | "view">(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_finance_forecast_share_target_user").on(table.target_user_id),
+    index("idx_finance_forecast_share_target_group").on(table.target_group_id),
+  ]
+);
