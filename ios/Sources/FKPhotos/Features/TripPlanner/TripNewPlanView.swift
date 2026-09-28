@@ -285,11 +285,7 @@ struct TripNewPlanView: View {
                     Text(pace.label).tag(pace)
                 }
             }
-            Picker("Unterwegs", selection: $model.draft.mode) {
-                ForEach(TripTransportMode.allCases, id: \.self) { mode in
-                    Label(mode.label, systemImage: mode.systemImage).tag(mode)
-                }
-            }
+            TripTransportModePicker(mode: $model.draft.mode)
             Text(model.draft.mode.hint)
                 .font(.caption)
                 .foregroundStyle(.secondary)

@@ -74,11 +74,7 @@ struct TripPlanSettingsView: View {
             }
 
             Section {
-                Picker("Unterwegs", selection: $model.mode) {
-                    ForEach(TripTransportMode.allCases, id: \.self) { mode in
-                        Label(mode.label, systemImage: mode.systemImage).tag(mode)
-                    }
-                }
+                TripTransportModePicker(mode: $model.mode)
                 Text(model.mode.hint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
