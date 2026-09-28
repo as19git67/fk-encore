@@ -1763,7 +1763,7 @@ export interface ForecastStatementProposal {
 }
 
 export interface ForecastValuesSource {
-  kind: 'import' | 'manual' | 'statement'
+  kind: 'import' | 'manual' | 'statement' | 'booking'
   referenceDate?: string | null
   documentId?: number | null
   updatedAt: string
@@ -1781,6 +1781,34 @@ export interface ForecastItemStatements {
   reading: boolean
   notes: string[]
   declinedWithoutDocument: string[]
+  bookings: ForecastItemBookings
+}
+
+export interface ForecastBookingLink {
+  id: number
+  transactionId: number
+  date: string
+  amount: number
+  counterparty: string | null
+  purpose: string | null
+  matchKind: 'contract' | 'document' | 'counterparty' | 'user'
+  status: 'suggested' | 'confirmed' | 'rejected'
+}
+
+export interface ForecastBookingSummary {
+  rhythm: 'monthly' | 'quarterly' | 'halfyearly' | 'yearly' | 'irregular'
+  perYearCount: number
+  lastAmount: number
+  lastDate: string
+  perYear: number
+  count: number
+}
+
+export interface ForecastItemBookings {
+  bookings: ForecastBookingLink[]
+  summary: ForecastBookingSummary | null
+  proposal: ForecastStatementProposal | null
+  contractNoSuggestion: string | null
 }
 
 export interface ForecastScanSummary {
@@ -1788,6 +1816,8 @@ export interface ForecastScanSummary {
   linkedByTag: number
   suggestedByText: number
   queued: number
+  bookingsLinked: number
+  bookingsSuggested: number
 }
 
 export async function getForecastStatements(): Promise<{ items: ForecastItemStatements[] }> {
@@ -1920,4 +1950,18 @@ export async function deleteForecastShare(id: number): Promise<void> {
 
 export async function joinForecastShare(ownerId: number): Promise<ForecastSharingState> {
   return apiFetch('/finance/forecast/sharing/join', { method: 'POST', body: JSON.stringify({ ownerId }) })
+}
+
+// Retirement forecast — bookings that pay a premium (finance/forecast-statements.ts)
+
+export async function decideForecastBookingLink(id: number, status: 'confirmed' | 'rejected'): Promise<void> {
+  return apiFetch(`/finance/forecast/booking-links/${id}/decision`, { method: 'POST', body: JSON.stringify({ status }) })
+}
+
+export async function acceptForecastBookingPremium(itemId: number): Promise<void> {
+  return apiFetch(`/finance/forecast/items/${itemId}/booking-premium`, { method: 'POST' })
+}
+
+export async function setForecastItemContractNo(itemId: number, contractNo: string): Promise<ForecastScanSummary> {
+  return apiFetch(`/finance/forecast/items/${itemId}/contract-no`, { method: 'POST', body: JSON.stringify({ contractNo }) })
 }
