@@ -381,7 +381,6 @@ function formatRelative(iso: string): string {
 .reactions__bubble--actionable:hover,
 .reactions__bubble--actionable:focus-visible {
   filter: brightness(0.95);
-  outline: none;
 }
 .is-other .reactions__bubble {
   background: color-mix(in srgb, var(--p-text-color) 12%, transparent);
@@ -449,7 +448,6 @@ function formatRelative(iso: string): string {
      yields a light-gray wash in light mode and a dark-gray wash in
      dark mode, matching the same pattern the composer toggle uses. */
   background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
-  outline: none;
 }
 .reactions__menu-item--danger {
   color: var(--p-red-500);
@@ -496,7 +494,6 @@ function formatRelative(iso: string): string {
 .reactions__toggle:hover,
 .reactions__toggle:focus-visible {
   background: color-mix(in srgb, var(--p-text-color) 16%, transparent);
-  outline: none;
 }
 
 .reactions__edit-textarea {

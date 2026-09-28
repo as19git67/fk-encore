@@ -197,7 +197,6 @@ const allPhotosDest = () => destinations.value.find((d): d is Extract<Destinatio
 .plm-item:hover,
 .plm-item:focus-visible {
   background: var(--p-content-hover-background);
-  outline: none;
 }
 
 .plm-item .pi {

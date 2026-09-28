@@ -216,7 +216,6 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
 .dropzone.active {
   border-color: var(--p-primary-color);
   background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
-  outline: none;
 }
 .dropzone-icon { font-size: var(--text-6xl); color: var(--p-primary-color); }
 .dropzone-text {

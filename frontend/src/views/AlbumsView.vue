@@ -558,7 +558,7 @@ onMounted(async () => {
       @open="openAlbum"
     />
 
-    <Dialog v-model:visible="showCreateDialog" header="Neues Album erstellen" :modal="true">
+    <Dialog v-model:visible="showCreateDialog" class="dialog-md" header="Neues Album erstellen" :modal="true">
       <div class="dialog-content">
         <label for="albumName">Name des Albums</label>
         <InputText id="albumName" v-model="newAlbumName" autofocus @keydown.enter="handleCreateAlbum"/>
