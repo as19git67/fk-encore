@@ -45,6 +45,7 @@ const DEFAULT_SCENARIO: ForecastBundle['defaultScenario'] = {
 }
 
 const BUNDLE: ForecastBundle = {
+  household: { role: 'owner', ownerName: null },
   persons: [
     { id: 1, label: 'Alex', birthDate: '1970-04-01', sortOrder: 0 },
     { id: 2, label: 'Kim', birthDate: '1973-09-01', sortOrder: 1 },
@@ -248,6 +249,9 @@ function simulateHandler(req: ForecastSimulateRequest): ForecastSimulateResponse
 const handlers = [
   http.get('/api/finance/forecast', () => HttpResponse.json(BUNDLE)),
   http.get('/api/finance/forecast/statements', () => HttpResponse.json({ items: STATEMENTS })),
+  http.get('/api/finance/forecast/sharing', () =>
+    HttpResponse.json({ role: 'owner', ownerName: null, shares: [], offers: [], hasOwnForecast: true }),
+  ),
   http.get('/api/finance/forecast/account-suggestions', () =>
     HttpResponse.json({
       accounts: [

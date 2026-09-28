@@ -6,8 +6,8 @@ export const STATEMENTS: ForecastItemStatements[] = [
     itemId: 106,
     contractNo: 'X-000111',
     links: [
-      { id: 1, documentId: 501, title: 'Standmitteilung 2026', docDate: '2026-02-10', documentType: 'standmitteilung', matchKind: 'tag', status: 'confirmed', kind: 'statement', kindByUser: false },
-      { id: 2, documentId: 502, title: 'Jahresinformation', docDate: '2025-02-12', documentType: 'standmitteilung', matchKind: 'text', status: 'suggested', kind: 'statement', kindByUser: false },
+      { id: 1, documentId: 501, title: 'Standmitteilung 2026', docDate: '2026-02-10', documentType: 'standmitteilung', matchKind: 'tag', status: 'confirmed', kind: 'statement', kindByUser: false, canOpen: true },
+      { id: 2, documentId: 502, title: 'Jahresinformation', docDate: '2025-02-12', documentType: 'standmitteilung', matchKind: 'text', status: 'suggested', kind: 'statement', kindByUser: false, canOpen: true },
     ],
     latest: {
       id: 31,
