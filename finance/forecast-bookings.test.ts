@@ -36,6 +36,7 @@ import {
   decideBookingLink,
   decideStatementLink,
   getStatements,
+  rereadStatementLink,
   scanStatements,
   setItemContractNo,
 } from "./forecast-statements";
@@ -211,6 +212,36 @@ describe("finance/forecast — bookings that pay a premium", () => {
     await scanStatements({});
     s = await stateOf(item.id);
     expect(s.bookings.bookings.map((b) => [b.transactionId, b.matchKind])).toEqual([[tx, "document"]]);
+  });
+
+  it("reads a premium invoice as a document with values", async () => {
+    const item = await createItem({ type: "expense", label: "Hausrat", data: { amount: 90, frequency: "yearly", contractNo: "HR-000333-7" } });
+    const [d] = await db
+      .insert(documents)
+      .values({
+        user_id: 1,
+        sha256: `fc-book-inv-${Date.now()}`,
+        original_filename: "rechnung.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1,
+        disk_path: "/tmp/inv.pdf",
+        status: "ready",
+        title: "Beitragsrechnung 2026",
+        doc_date: "2026-01-05",
+        document_type: "rechnung",
+        extracted_text: "Beitragsrechnung\nVersicherungsnummer HR-000333-7\nJahresprämie 96,50 EUR",
+        visibility: "private",
+      })
+      .returning({ id: documents.id });
+    createdDocs.push(d.id);
+    await scanStatements({});
+    let s = await stateOf(item.id);
+    await decideStatementLink({ id: s.links[0].id, status: "confirmed" });
+    await rereadStatementLink({ id: s.links[0].id });
+    s = await stateOf(item.id);
+    expect(s.links[0].kind).toBe("premium_invoice");
+    expect(s.latest?.values.premiumYearly).toBe(96.5);
+    expect(s.proposals).toEqual([expect.objectContaining({ field: "amount", current: 90, proposed: 96.5 })]);
   });
 
   it("finds documents of an insurance without a contract number by insurer and kind", async () => {

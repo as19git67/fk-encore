@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Chart from 'primevue/chart'
-import type { ChartData, ChartOptions, Plugin } from 'chart.js'
+import { Tooltip, type ChartData, type ChartOptions, type Plugin, type TooltipPositionerFunction } from 'chart.js'
 import type { ForecastPerson, ForecastSimulation } from '../../../api/finance'
 import { POT_LABELS, cssVar, deflate, formatEur, potColors, seriesColor, withAlpha } from './forecastModel'
 
@@ -212,6 +212,26 @@ function markerPlugin(showMinimum: boolean): Plugin {
   }
 }
 
+// ---- tooltip -----------------------------------------------------------------
+
+declare module 'chart.js' {
+  interface TooltipPositionerMap {
+    aside: TooltipPositionerFunction<'line' | 'bar'>
+  }
+}
+
+/**
+ * Beside the pointer, never on top of it: on the left half of the chart the
+ * box opens to the right, on the right half to the left, and it hangs from
+ * the top of the plot so the pointed-at column stays visible.
+ */
+Tooltip.positioners.aside = function (_elements, eventPosition) {
+  const area = this.chart.chartArea
+  const x = eventPosition.x ?? (area.left + area.right) / 2
+  const rightHalf = x > (area.left + area.right) / 2
+  return { x: x + (rightHalf ? -12 : 12), y: area.top, xAlign: rightHalf ? 'right' : 'left', yAlign: 'top' }
+}
+
 // ---- options -----------------------------------------------------------------
 
 function baseOptions(kind: 'wealth' | 'cashflow' | 'compare'): ChartOptions<'line'> | ChartOptions<'bar'> {
@@ -230,6 +250,10 @@ function baseOptions(kind: 'wealth' | 'cashflow' | 'compare'): ChartOptions<'lin
     plugins: {
       legend: { position: 'bottom', labels: { color: textColor.value, boxWidth: 12, padding: 12 } },
       tooltip: {
+        position: 'aside',
+        caretSize: 0,
+        // A source that is zero in this year says nothing.
+        filter: (item: { parsed: { y: number | null } }) => Math.abs(item.parsed.y ?? 0) >= 0.5,
         callbacks: {
           title: (items: Array<{ dataIndex: number }>) => {
             const i = items[0]?.dataIndex ?? 0

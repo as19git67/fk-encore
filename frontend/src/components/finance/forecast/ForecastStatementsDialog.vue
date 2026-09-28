@@ -123,6 +123,8 @@ const KIND_OPTIONS: Array<{ value: ForecastDocKind; label: string }> = [
   { value: 'statement', label: 'Standmitteilung' },
   { value: 'dynamic_increase', label: 'Beitragserhöhung (Dynamik)' },
   { value: 'dynamic_declined', label: 'Erhöhung abgelehnt' },
+  { value: 'premium_invoice', label: 'Beitrags-/Prämienrechnung' },
+  { value: 'policy', label: 'Versicherungsschein / Nachtrag' },
   { value: 'other', label: 'Sonstiges (ohne Werte)' },
 ]
 

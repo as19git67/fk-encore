@@ -38,6 +38,7 @@ import {
   LLM_FIELDS,
   LLM_KIND_FIELD,
   PREMIUM_FIELDS,
+  VALUE_KINDS,
   classifyDocument,
   computeProposals,
   contractKey,
@@ -687,7 +688,7 @@ export async function statementsForUser(userId: number, callerId: number = userI
     // Figures count from statements and announced increases the user has not rejected.
     const counts = (st: (typeof itemStatements)[number]) => {
       const link = itemLinks.find((l) => l.documentId === st.document_id);
-      return st.status !== "rejected" && link?.status !== "rejected" && (link?.kind === "statement" || link?.kind === "dynamic_increase");
+      return st.status !== "rejected" && link?.status !== "rejected" && link != null && VALUE_KINDS.has(link.kind);
     };
     const latestRow = itemStatements.find(counts) ?? null;
     const facts: LinkFacts[] = withRecordedDeclines(

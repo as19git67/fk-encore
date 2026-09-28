@@ -1735,7 +1735,7 @@ export interface ForecastStatementLink {
   canOpen: boolean
 }
 
-export type ForecastDocKind = 'statement' | 'dynamic_increase' | 'dynamic_declined' | 'other'
+export type ForecastDocKind = 'statement' | 'dynamic_increase' | 'dynamic_declined' | 'premium_invoice' | 'policy' | 'other'
 
 export interface ForecastDocumentCandidate {
   id: number

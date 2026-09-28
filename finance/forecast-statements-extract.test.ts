@@ -293,3 +293,25 @@ describe("forecast-statements-extract — values typed by the user", () => {
     ]);
   });
 });
+
+describe("forecast-statements-extract — invoices and policies", () => {
+  it("recognises a premium invoice and a policy", () => {
+    expect(classifyDocument("Beitragsrechnung 2026\nJahresprämie 312,40 EUR", null)).toBe("premium_invoice");
+    expect(classifyDocument("Ihre Rechnung", "rechnung")).toBe("premium_invoice");
+    expect(classifyDocument("Versicherungsschein Nr. X-1", null)).toBe("policy");
+    expect(classifyDocument("Nachtrag zum Versicherungsschein", null)).toBe("policy");
+    expect(classifyDocument("Vertragsunterlagen", "vertrag")).toBe("policy");
+    // A statement stays one, and a declined increase wins over the rest.
+    expect(classifyDocument("Beitragsrechnung", "standmitteilung")).toBe("statement");
+    expect(classifyDocument("Ihren Widerspruch gegen die Erhöhung haben wir erhalten. Beitragsrechnung folgt.", null)).toBe("dynamic_declined");
+    expect(parseLlmKind({ documentKind: "beitragsrechnung" })).toBe("premium_invoice");
+    expect(parseLlmKind({ documentKind: "versicherungsschein" })).toBe("policy");
+  });
+
+  it("reads a yearly or monthly premium written as Prämie", () => {
+    expect(parseStatementText("Jahresprämie 312,40 EUR").premiumYearly).toBe(312.4);
+    expect(parseStatementText("Prämie jährlich: 98,00 €").premiumYearly).toBe(98);
+    expect(parseStatementText("Monatsprämie 26,03 €").premiumMonthly).toBe(26.03);
+  });
+});
+
