@@ -15,7 +15,7 @@ import {
   financeForecastStatement,
 } from "../db/schema";
 import { bookingStates } from "./forecast-bookings.service";
-import { DOC_KINDS, applyProposals, checkUserValues, pickValues, type DocKind } from "./forecast-statements-extract";
+import { DOC_KINDS, VALUE_KINDS, applyProposals, checkUserValues, pickValues, type DocKind } from "./forecast-statements-extract";
 import { resolveHousehold } from "./forecast-household.service";
 import {
   callerCanOpen,
@@ -198,7 +198,7 @@ export const setStatementLinkKind = api(
       .returning();
     if (!row) throw APIError.notFound(`link ${req.id} not found`);
     // A document now counted as a statement may never have been read.
-    if (row.status === "confirmed" && (req.kind === "statement" || req.kind === "dynamic_increase")) {
+    if (row.status === "confirmed" && VALUE_KINDS.has(req.kind)) {
       void readAll([{ itemId: row.item_id, documentId: row.document_id }]);
     }
     return linkDto(row, callerId);

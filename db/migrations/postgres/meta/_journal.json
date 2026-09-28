@@ -1527,6 +1527,13 @@
       "when": 1788652800037,
       "tag": "0217_trip_plan_home",
       "breakpoints": true
+    },
+    {
+      "idx": 218,
+      "version": "7",
+      "when": 1788652800038,
+      "tag": "0218_finance_forecast_doc_kind_invoice",
+      "breakpoints": true
     }
   ]
 }
