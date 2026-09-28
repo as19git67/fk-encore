@@ -5613,6 +5613,12 @@ Stopps. Geschrieben wird nichts. Die App zeigt den Vorschlag als Karte über
 der Städteliste; „Ansehen" öffnet den Weiterreise-Bildschirm damit
 vorausgefüllt, „Nein" merkt sich das Telefon.
 
+**Ändern an Ort und Stelle.** `PATCH …/plans/:planId/transits/:legIndex` nimmt
+neue Zeitpunkte und ein neues Verkehrsmittel und rahmt die Nachbarn genauso
+wie das Anlegen. Die Weiterreise behält ihre Zeile, ihren Platz und ihren
+Namen. Vorher wurde sie gelöscht und neu angelegt; schlug das Neuanlegen fehl,
+war sie weg. Jetzt lässt eine Ablehnung alles, wie es war.
+
 Nebenbei gefunden: Eine Etappe *vor* zwei oder mehr anderen einzufügen oder zu
 löschen scheiterte an der Eindeutigkeit von `(plan, position)` — die
 Umnummerierung in einem Schritt kollidierte zeilenweise. Sie läuft jetzt über

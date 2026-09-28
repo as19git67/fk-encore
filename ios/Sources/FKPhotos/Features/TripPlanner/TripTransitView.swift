@@ -9,9 +9,9 @@ import SwiftUI
 /// "Unterwegs" with the places worth a stop on the way. By train, or
 /// over several days, it stays a frame that says where the group is.
 ///
-/// Changing a journey is taking it out and putting it in again — the
-/// same two calls the list makes, so there is one way a journey comes
-/// to be.
+/// Changing a journey changes it in place: the server frames both
+/// neighbours by the new moments and re-plans the journey, and a
+/// refusal leaves everything as it was.
 struct TripTransitView: View {
     @State var viewModel: TripPlannerViewModel
     /// The leg the journey leaves from, by position.
@@ -110,15 +110,17 @@ struct TripTransitView: View {
         isSaving = true
         defer { isSaving = false }
         do {
+            let body = TripTransitPlanning.body(afterLegIndex: afterLegIndex, depart: depart,
+                                                arrive: arrive, mode: mode)
+            let response: TripPlanResponse
             if let existing {
-                let removed: TripPlanResponse = try await APIClient.shared.delete(
-                    "/trip-planner/plans/\(viewModel.planId)/legs/\(existing.position)")
-                viewModel.replace(with: removed)
+                response = try await APIClient.shared.patch(
+                    "/trip-planner/plans/\(viewModel.planId)/transits/\(existing.position)",
+                    body: body.change)
+            } else {
+                response = try await APIClient.shared.post(
+                    "/trip-planner/plans/\(viewModel.planId)/transits", body: body)
             }
-            let response: TripPlanResponse = try await APIClient.shared.post(
-                "/trip-planner/plans/\(viewModel.planId)/transits",
-                body: TripTransitPlanning.body(afterLegIndex: afterLegIndex, depart: depart,
-                                               arrive: arrive, mode: mode))
             viewModel.replace(with: response)
             dismiss()
         } catch {
@@ -131,6 +133,21 @@ struct TripTransitView: View {
 enum TripTransitPlanning {
     struct Body: Encodable, Equatable {
         let afterLegIndex: Int
+        let departDate: String
+        let departAt: String
+        let arriveDate: String
+        let arriveAt: String
+        let mode: String
+
+        /// The same moments for changing a journey, which is addressed
+        /// by its own position in the path rather than its neighbour's.
+        var change: Change {
+            Change(departDate: departDate, departAt: departAt, arriveDate: arriveDate,
+                   arriveAt: arriveAt, mode: mode)
+        }
+    }
+
+    struct Change: Encodable, Equatable {
         let departDate: String
         let departAt: String
         let arriveDate: String
