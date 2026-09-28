@@ -9,7 +9,9 @@ import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { documents, financeForecastDocumentLink, financeForecastItem, financeForecastStatement } from "../db/schema";
 import { DOC_KINDS, applyProposals, checkUserValues, pickValues, type DocKind } from "./forecast-statements-extract";
+import { resolveHousehold } from "./forecast-household.service";
 import {
+  callerCanOpen,
   declinedDates,
   effectiveProposals,
   linkByHand,
@@ -90,7 +92,7 @@ interface ManualLinkRequest {
   documentId: number;
 }
 
-async function linkDto(row: typeof financeForecastDocumentLink.$inferSelect): Promise<StatementLinkDto> {
+async function linkDto(row: typeof financeForecastDocumentLink.$inferSelect, callerId: number): Promise<StatementLinkDto> {
   const [doc] = await db
     .select({ title: documents.title, docDate: documents.doc_date, documentType: documents.document_type })
     .from(documents)
@@ -105,6 +107,7 @@ async function linkDto(row: typeof financeForecastDocumentLink.$inferSelect): Pr
     status: row.status,
     kind: row.doc_kind,
     kindByUser: row.kind_by_user,
+    canOpen: doc != null && (await callerCanOpen(callerId, row.document_id)),
   };
 }
 
@@ -112,21 +115,27 @@ async function linkDto(row: typeof financeForecastDocumentLink.$inferSelect): Pr
 // API
 // -----------------------------------------------------------------------
 
-function authed(): number {
+/** The caller's household: `userId` owns the rows, `callerId` asks. "edit" refuses a read-only share. */
+async function authed(mode: "view" | "edit"): Promise<{ userId: number; callerId: number }> {
   const auth = getAuthData()!;
   requirePermission(auth, "finance.view");
-  return Number(auth.userID);
+  const access = await resolveHousehold(Number(auth.userID), auth.permissions.includes("finance.admin"));
+  if (mode === "edit" && access.role === "view") throw APIError.permissionDenied("this forecast is shared with you read-only");
+  return { userId: access.ownerId, callerId: access.callerId };
 }
 
 export const getStatements = api(
   { expose: true, method: "GET", path: "/finance/forecast/statements", auth: true },
-  async (): Promise<StatementsResponse> => statementsForUser(authed()),
+  async (): Promise<StatementsResponse> => {
+    const { userId, callerId } = await authed("view");
+    return statementsForUser(userId, callerId);
+  },
 );
 
 export const scanStatements = api(
   { expose: true, method: "POST", path: "/finance/forecast/statements/scan", auth: true },
   async (req: ScanRequest): Promise<ScanSummary> => {
-    const userId = authed();
+    const { userId, callerId } = await authed("edit");
     return scanForUser(userId, Array.isArray(req.itemIds) ? req.itemIds.filter((n) => Number.isInteger(n)) : null);
   },
 );
@@ -134,7 +143,7 @@ export const scanStatements = api(
 export const decideStatementLink = api(
   { expose: true, method: "POST", path: "/finance/forecast/statement-links/:id/decision", auth: true },
   async (req: LinkDecisionRequest): Promise<StatementLinkDto> => {
-    const userId = authed();
+    const { userId, callerId } = await authed("edit");
     if (req.status !== "confirmed" && req.status !== "rejected") throw APIError.invalidArgument("status must be confirmed or rejected");
     const [row] = await db
       .update(financeForecastDocumentLink)
@@ -156,14 +165,14 @@ export const decideStatementLink = api(
           ),
         );
     }
-    return linkDto(row);
+    return linkDto(row, callerId);
   },
 );
 
 export const setStatementLinkKind = api(
   { expose: true, method: "POST", path: "/finance/forecast/statement-links/:id/kind", auth: true },
   async (req: LinkKindRequest): Promise<StatementLinkDto> => {
-    const userId = authed();
+    const { userId, callerId } = await authed("edit");
     if (!DOC_KINDS.includes(req.kind)) throw APIError.invalidArgument(`kind must be one of ${DOC_KINDS.join(", ")}`);
     const [row] = await db
       .update(financeForecastDocumentLink)
@@ -175,35 +184,37 @@ export const setStatementLinkKind = api(
     if (row.status === "confirmed" && (req.kind === "statement" || req.kind === "dynamic_increase")) {
       void readAll([{ itemId: row.item_id, documentId: row.document_id }]);
     }
-    return linkDto(row);
+    return linkDto(row, callerId);
   },
 );
 
 export const searchStatementDocuments = api(
   { expose: true, method: "GET", path: "/finance/forecast/statement-documents", auth: true },
   async (req: DocumentSearchRequest): Promise<{ documents: DocumentCandidateDto[] }> => {
-    const userId = authed();
-    return { documents: await searchDocuments(userId, req.q ?? "") };
+    const { userId, callerId } = await authed("view");
+    void userId;
+    // Only what the caller may see: a partner's private documents are not searchable.
+    return { documents: await searchDocuments(callerId, req.q ?? "") };
   },
 );
 
 export const linkStatementDocument = api(
   { expose: true, method: "POST", path: "/finance/forecast/items/:id/statement-links", auth: true },
   async (req: ManualLinkRequest): Promise<void> => {
-    const userId = authed();
+    const { userId, callerId } = await authed("edit");
     const [item] = await db
       .select({ id: financeForecastItem.id })
       .from(financeForecastItem)
       .where(and(eq(financeForecastItem.id, req.id), eq(financeForecastItem.user_id, userId)));
     if (!item) throw APIError.notFound(`item ${req.id} not found`);
-    if (!(await linkByHand(userId, req.id, req.documentId))) throw APIError.notFound(`document ${req.documentId} not found`);
+    if (!(await linkByHand(userId, callerId, req.id, req.documentId))) throw APIError.notFound(`document ${req.documentId} not found`);
   },
 );
 
 export const rereadStatementLink = api(
   { expose: true, method: "POST", path: "/finance/forecast/statement-links/:id/reread", auth: true },
   async (req: IdRequest): Promise<void> => {
-    const userId = authed();
+    const { userId, callerId } = await authed("edit");
     const [row] = await db
       .select()
       .from(financeForecastDocumentLink)
@@ -217,7 +228,7 @@ export const rereadStatementLink = api(
 export const acceptStatement = api(
   { expose: true, method: "POST", path: "/finance/forecast/statements/:id/accept", auth: true },
   async (req: AcceptRequest): Promise<StatementDto> => {
-    const userId = authed();
+    const { userId, callerId } = await authed("edit");
     const [st] = await db
       .select()
       .from(financeForecastStatement)
@@ -245,7 +256,7 @@ export const acceptStatement = api(
 export const rejectStatement = api(
   { expose: true, method: "POST", path: "/finance/forecast/statements/:id/reject", auth: true },
   async (req: IdRequest): Promise<StatementDto> => {
-    const userId = authed();
+    const { userId, callerId } = await authed("edit");
     const [updated] = await db
       .update(financeForecastStatement)
       .set({ status: "rejected", decided_at: new Date().toISOString() })
@@ -259,7 +270,7 @@ export const rejectStatement = api(
 export const setDeclinedIncrease = api(
   { expose: true, method: "POST", path: "/finance/forecast/items/:id/declined-increases", auth: true },
   async (req: DeclinedIncreaseRequest): Promise<{ declinedWithoutDocument: string[] }> => {
-    const userId = authed();
+    const { userId, callerId } = await authed("edit");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date ?? "")) throw APIError.invalidArgument("date must be YYYY-MM-DD");
     const [item] = await db
       .select()
@@ -281,7 +292,7 @@ export const setDeclinedIncrease = api(
 export const correctStatementValues = api(
   { expose: true, method: "POST", path: "/finance/forecast/statements/:id/values", auth: true },
   async (req: CorrectValuesRequest): Promise<StatementDto> => {
-    const userId = authed();
+    const { userId, callerId } = await authed("edit");
     const values = pickValues((req.values ?? {}) as unknown as Record<string, unknown>);
     const bad = checkUserValues(values);
     if (bad.length > 0) throw APIError.invalidArgument(`implausible values: ${bad.join(", ")}`);

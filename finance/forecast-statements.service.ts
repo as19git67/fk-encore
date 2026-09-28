@@ -31,7 +31,6 @@ import {
   financeForecastDocumentLink,
   financeForecastItem,
   financeForecastStatement,
-  groupMembers,
   type ForecastStatementValues,
 } from "../db/schema";
 import type { ItemType } from "./forecast-engine";
@@ -54,6 +53,7 @@ import {
   type ValuesSource,
 } from "./forecast-statements-extract";
 import { extractStatementValues, LlmServiceUnavailableError } from "./llm-client";
+import { groupIdsOf, householdMemberIds } from "./forecast-household.service";
 
 console.log("[boot] finance/forecast-statements.service.ts: all imports resolved");
 
@@ -71,6 +71,8 @@ export interface StatementLinkDto {
   status: "suggested" | "confirmed" | "rejected";
   kind: DocKind;
   kindByUser: boolean;
+  /** The caller may open the document; in a shared forecast a partner's private one shows title and date only. */
+  canOpen: boolean;
 }
 
 export interface StatementDto {
@@ -127,15 +129,29 @@ export interface ScanSummary {
 // Visibility — the rule of documents/visibility.ts
 // -----------------------------------------------------------------------
 
-async function groupIdsOf(userId: number): Promise<number[]> {
-  const rows = await db.select({ id: groupMembers.group_id }).from(groupMembers).where(eq(groupMembers.user_id, userId));
-  return rows.map((r) => r.id);
-}
-
 function visibleTo(userId: number, groupIds: number[]): SQL {
   const own = and(eq(documents.visibility, "private"), eq(documents.user_id, userId))!;
   if (groupIds.length === 0) return own;
   return or(own, and(eq(documents.visibility, "group"), inArray(documents.group_id, groupIds))!)!;
+}
+
+/**
+ * Documents anyone in the owner's household may see. A shared forecast
+ * finds the statements of both partners; the documents themselves stay
+ * where they are, only title, date and the values read show in the forecast.
+ */
+async function householdVisible(ownerId: number): Promise<SQL> {
+  const members = await householdMemberIds(ownerId);
+  const parts = await Promise.all(members.map(async (id) => visibleTo(id, await groupIdsOf(id))));
+  return parts.length === 1 ? parts[0] : or(...parts)!;
+}
+
+async function canSeeDocument(userIds: number[], doc: { userId: number; visibility: string; groupId: number | null }): Promise<boolean> {
+  for (const id of userIds) {
+    if (doc.visibility === "private" && doc.userId === id) return true;
+    if (doc.visibility === "group" && doc.groupId != null && (await groupIdsOf(id)).includes(doc.groupId)) return true;
+  }
+  return false;
 }
 
 // -----------------------------------------------------------------------
@@ -170,13 +186,13 @@ function contractItemOf(row: typeof financeForecastItem.$inferSelect): ContractI
 }
 
 /** Visible documents that carry a contract reference tag, with the tag's key. */
-async function taggedDocuments(userId: number, groupIds: number[]): Promise<Array<{ documentId: number; key: string }>> {
+async function taggedDocuments(visible: SQL): Promise<Array<{ documentId: number; key: string }>> {
   const rows = await db
     .select({ documentId: documentTagLinks.document_id, name: documentTags.name })
     .from(documentTagLinks)
     .innerJoin(documentTags, eq(documentTags.id, documentTagLinks.tag_id))
     .innerJoin(documents, eq(documents.id, documentTagLinks.document_id))
-    .where(and(or(...TAG_PREFIXES.map((p) => like(documentTags.name, `${p}%`))), visibleTo(userId, groupIds)));
+    .where(and(or(...TAG_PREFIXES.map((p) => like(documentTags.name, `${p}%`))), visible));
   return rows.map((r) => ({ documentId: r.documentId, key: contractKey(r.name.slice(r.name.indexOf(":") + 1)) }));
 }
 
@@ -185,12 +201,8 @@ async function taggedDocuments(userId: number, groupIds: number[]): Promise<Arra
  * any spelling (contractPattern), newest first. `skip` are documents the
  * item is already linked to.
  */
-async function documentsByText(userId: number, groupIds: number[], key: string, skip: number[]): Promise<number[]> {
-  const conds = [
-    eq(documents.status, "ready"),
-    sql`${documents.extracted_text} ~* ${contractPattern(key)}`,
-    visibleTo(userId, groupIds),
-  ];
+async function documentsByText(visible: SQL, key: string, skip: number[]): Promise<number[]> {
+  const conds = [eq(documents.status, "ready"), sql`${documents.extracted_text} ~* ${contractPattern(key)}`, visible];
   if (skip.length > 0) conds.push(notInArray(documents.id, skip));
   const rows = await db
     .select({ id: documents.id })
@@ -359,8 +371,8 @@ export async function scanForUser(userId: number, itemIds: number[] | null, opts
   const summary: ScanSummary = { itemsWithContract: items.length, linkedByTag: 0, suggestedByText: 0, queued: 0 };
   if (items.length === 0) return summary;
 
-  const groupIds = await groupIdsOf(userId);
-  const tagged = await taggedDocuments(userId, groupIds);
+  const visible = await householdVisible(userId);
+  const tagged = await taggedDocuments(visible);
   for (const item of items) {
     const byTag = [...new Set(tagged.filter((t) => keysMatch(item.key, t.key)).map((t) => t.documentId))];
     for (const docId of byTag) if ((await upsertLink(userId, item.id, docId, "tag")) === "new-confirmed") summary.linkedByTag++;
@@ -370,7 +382,7 @@ export async function scanForUser(userId: number, itemIds: number[] | null, opts
       .select({ documentId: financeForecastDocumentLink.document_id })
       .from(financeForecastDocumentLink)
       .where(eq(financeForecastDocumentLink.item_id, item.id));
-    for (const docId of await documentsByText(userId, groupIds, item.key, linked.map((l) => l.documentId))) {
+    for (const docId of await documentsByText(visible, item.key, linked.map((l) => l.documentId))) {
       if ((await upsertLink(userId, item.id, docId, "text")) === "new-suggested") summary.suggestedByText++;
     }
   }
@@ -432,14 +444,20 @@ export async function onDocumentClassified(documentId: number): Promise<void> {
     const byTag = keys.some((k) => keysMatch(item.key, k));
     const byText = !byTag && !!doc.text && new RegExp(contractPattern(item.key), "i").test(doc.text);
     if (!byTag && !byText) continue;
-    const canSee =
-      (doc.visibility === "private" && doc.userId === item.userId) ||
-      (doc.visibility === "group" && doc.groupId != null && (await groupIdsOf(item.userId)).includes(doc.groupId));
-    if (!canSee) continue;
+    if (!(await canSeeDocument(await householdMemberIds(item.userId), doc))) continue;
     await upsertLink(item.userId, item.id, documentId, byTag ? "tag" : "text");
     if (byTag) pairs.push({ itemId: item.id, documentId });
   }
   if (pairs.length > 0) await readAll(pairs);
+}
+
+/** The user may open this document in the documents module. */
+export async function callerCanOpen(userId: number, documentId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ id: documents.id })
+    .from(documents)
+    .where(and(eq(documents.id, documentId), visibleTo(userId, await groupIdsOf(userId))));
+  return !!row;
 }
 
 /** Visible documents for linking by hand: title or text contains the query, newest first. */
@@ -465,15 +483,15 @@ export async function searchDocuments(userId: number, query: string): Promise<Do
   return rows;
 }
 
-/** Links a document to an item by hand (confirmed) and reads it. False when the user may not see it. */
-export async function linkByHand(userId: number, itemId: number, documentId: number): Promise<boolean> {
-  const groupIds = await groupIdsOf(userId);
+/** Links a document to an item by hand (confirmed) and reads it. False when the caller may not see it. */
+export async function linkByHand(ownerId: number, callerId: number, itemId: number, documentId: number): Promise<boolean> {
+  const groupIds = await groupIdsOf(callerId);
   const [doc] = await db
     .select({ id: documents.id })
     .from(documents)
-    .where(and(eq(documents.id, documentId), visibleTo(userId, groupIds)));
+    .where(and(eq(documents.id, documentId), visibleTo(callerId, groupIds)));
   if (!doc) return false;
-  await upsertLink(userId, itemId, documentId, "user");
+  await upsertLink(ownerId, itemId, documentId, "user");
   await readAll([{ itemId, documentId }], true);
   return true;
 }
@@ -569,7 +587,7 @@ function monthsBetween(fromIso: string, toIso: string): number {
   return (ty - fy) * 12 + (tm - fm);
 }
 
-export async function statementsForUser(userId: number): Promise<StatementsResponse> {
+export async function statementsForUser(userId: number, callerId: number = userId): Promise<StatementsResponse> {
   const itemRows = await db
     .select()
     .from(financeForecastItem)
@@ -600,6 +618,16 @@ export async function statementsForUser(userId: number): Promise<StatementsRespo
       .orderBy(sql`${financeForecastStatement.reference_date} DESC NULLS LAST`, desc(financeForecastStatement.id)),
   ]);
   const now = today();
+  // Which linked documents the caller may open themselves; the others show title and date only.
+  const linkedIds = [...new Set(links.map((l) => l.documentId))];
+  const openable = new Set<number>();
+  if (linkedIds.length > 0) {
+    const rows = await db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(and(inArray(documents.id, linkedIds), visibleTo(callerId, await groupIdsOf(callerId))));
+    for (const r of rows) openable.add(r.id);
+  }
 
   const items: ItemStatementState[] = [];
   for (const row of itemRows) {
@@ -650,6 +678,7 @@ export async function statementsForUser(userId: number): Promise<StatementsRespo
         status: l.status,
         kind: l.kind,
         kindByUser: l.kindByUser,
+        canOpen: openable.has(l.documentId),
       })),
       latest: latestRow ? toStatementDto(latestRow) : null,
       proposals,

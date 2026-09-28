@@ -22,6 +22,7 @@ import {
   financeForecastMilestone,
   financeForecastPerson,
   financeForecastScenario,
+  users,
 } from "../db/schema";
 import {
   defaultScenario,
@@ -49,6 +50,7 @@ import {
   type ImportRaw,
 } from "./forecast-import";
 import { scanForUser, type ScanSummary } from "./forecast-statements.service";
+import { resolveHousehold, type HouseholdAccess, type HouseholdRole } from "./forecast-household.service";
 
 console.log("[boot] finance/forecast.ts: all imports resolved");
 
@@ -107,6 +109,8 @@ export interface ForecastBundle {
   items: ItemDto[];
   scenarios: ScenarioDto[];
   accounts: LinkableAccount[];
+  /** Whose forecast this is: the caller's own, or one shared with them. */
+  household: { role: HouseholdRole; ownerName: string | null };
   /** The scenario the UI starts with when the user has none saved. */
   defaultScenario: Record<string, unknown>;
 }
@@ -461,10 +465,10 @@ function toScenarioDto(row: typeof financeForecastScenario.$inferSelect): Scenar
   return { id: row.id, name: row.name, config: row.config, updatedAt: row.updated_at };
 }
 
-/** Accounts the user may see, with their latest balance. */
-async function linkableAccounts(userId: number, isAdmin: boolean): Promise<LinkableAccount[]> {
+/** Open accounts one user may see. */
+async function accountRowsOf(userId: number, isAdmin: boolean) {
   const fields = { id: financeAccount.id, label: financeAccount.label, kind: financeAccountType.kind };
-  const rows = isAdmin
+  return isAdmin
     ? await db
         .select(fields)
         .from(financeAccount)
@@ -479,6 +483,17 @@ async function linkableAccounts(userId: number, isAdmin: boolean): Promise<Linka
           and(eq(financeAccountAccess.account_id, financeAccount.id), eq(financeAccountAccess.user_id, userId)),
         )
         .where(isNull(financeAccount.closed_at));
+}
+
+/**
+ * Accounts anyone in the household may see, with their latest balance. A
+ * shared forecast shows the same balances to everyone in it: whoever links
+ * an account shares its balance (never its bookings) with the household.
+ */
+async function linkableAccounts(access: HouseholdAccess): Promise<LinkableAccount[]> {
+  const byId = new Map<number, { id: number; label: string; kind: string }>();
+  for (const m of access.members) for (const r of await accountRowsOf(m.id, m.isAdmin)) byId.set(r.id, r);
+  const rows = [...byId.values()];
   if (rows.length === 0) return [];
   const balances = new Map<number, number>();
   const balanceRows = await db
@@ -529,7 +544,7 @@ interface Household {
   accounts: LinkableAccount[];
 }
 
-async function loadHousehold(userId: number, isAdmin: boolean): Promise<Household> {
+async function loadHousehold(userId: number, access: HouseholdAccess): Promise<Household> {
   const [personRows, milestoneRows, itemRows, accounts] = await Promise.all([
     db
       .select()
@@ -542,7 +557,7 @@ async function loadHousehold(userId: number, isAdmin: boolean): Promise<Househol
       .from(financeForecastItem)
       .where(eq(financeForecastItem.user_id, userId))
       .orderBy(asc(financeForecastItem.sort_order), asc(financeForecastItem.id)),
-    linkableAccounts(userId, isAdmin),
+    linkableAccounts(access),
   ]);
   const balanceOf = new Map(accounts.map((a) => [a.id, a.balance]));
   const itemDtos: ItemDto[] = itemRows.map((r) => ({
@@ -569,10 +584,21 @@ async function loadHousehold(userId: number, isAdmin: boolean): Promise<Househol
   };
 }
 
-function authed(): { userId: number; isAdmin: boolean } {
+/**
+ * The caller's household. `userId` is the forecast's owner, whose rows are
+ * read and written; "edit" refuses a forecast shared read-only.
+ */
+async function authed(mode: "view" | "edit"): Promise<{ userId: number; access: HouseholdAccess }> {
   const auth = getAuthData()!;
   requirePermission(auth, "finance.view");
-  return { userId: Number(auth.userID), isAdmin: auth.permissions.includes("finance.admin") };
+  const access = await resolveHousehold(Number(auth.userID), auth.permissions.includes("finance.admin"));
+  if (mode === "edit" && access.role === "view") throw APIError.permissionDenied("this forecast is shared with you read-only");
+  return { userId: access.ownerId, access };
+}
+
+async function userName(id: number): Promise<string | null> {
+  const [u] = await db.select({ name: users.name }).from(users).where(eq(users.id, id));
+  return u?.name ?? null;
 }
 
 async function ownPerson(userId: number, personId: number): Promise<void> {
@@ -583,8 +609,8 @@ async function ownPerson(userId: number, personId: number): Promise<void> {
   if (!row) throw APIError.notFound(`person ${personId} not found`);
 }
 
-async function ownAccount(userId: number, isAdmin: boolean, accountId: number): Promise<void> {
-  const accounts = await linkableAccounts(userId, isAdmin);
+async function ownAccount(access: HouseholdAccess, accountId: number): Promise<void> {
+  const accounts = await linkableAccounts(access);
   if (!accounts.some((a) => a.id === accountId)) throw APIError.notFound(`account ${accountId} not found`);
 }
 
@@ -595,9 +621,9 @@ async function ownAccount(userId: number, isAdmin: boolean, accountId: number): 
 export const getForecast = api(
   { expose: true, method: "GET", path: "/finance/forecast", auth: true },
   async (): Promise<ForecastBundle> => {
-    const { userId, isAdmin } = authed();
+    const { userId, access } = await authed("view");
     const [hh, scenarioRows] = await Promise.all([
-      loadHousehold(userId, isAdmin),
+      loadHousehold(userId, access),
       db
         .select()
         .from(financeForecastScenario)
@@ -611,6 +637,7 @@ export const getForecast = api(
       items: hh.itemDtos,
       scenarios: scenarioRows.map(toScenarioDto),
       accounts: hh.accounts,
+      household: { role: access.role, ownerName: access.role === "owner" ? null : await userName(access.ownerId) },
       defaultScenario: defaults as unknown as Record<string, unknown>,
     };
   },
@@ -623,7 +650,7 @@ export const getForecast = api(
 export const createPerson = api(
   { expose: true, method: "POST", path: "/finance/forecast/persons", auth: true },
   async (req: PersonInput): Promise<PersonDto> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     if (!req.label || req.label.trim().length === 0) throw APIError.invalidArgument("label must be a non-empty string");
     if (!isIsoDate(req.birthDate)) throw APIError.invalidArgument("birthDate must be YYYY-MM-DD");
     const [row] = await db
@@ -642,7 +669,7 @@ export const createPerson = api(
 export const updatePerson = api(
   { expose: true, method: "PUT", path: "/finance/forecast/persons/:id", auth: true },
   async (req: PersonUpdate): Promise<PersonDto> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     const updates: Partial<typeof financeForecastPerson.$inferInsert> = { updated_at: new Date().toISOString() };
     if (req.label !== undefined) {
       if (req.label.trim().length === 0) throw APIError.invalidArgument("label must be non-empty");
@@ -666,7 +693,7 @@ export const updatePerson = api(
 export const deletePerson = api(
   { expose: true, method: "DELETE", path: "/finance/forecast/persons/:id", auth: true },
   async (req: IdRequest): Promise<void> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     const rows = await db
       .delete(financeForecastPerson)
       .where(and(eq(financeForecastPerson.id, req.id), eq(financeForecastPerson.user_id, userId)))
@@ -689,7 +716,7 @@ function validateWhen(date: string | null | undefined, age: number | null | unde
 export const createMilestone = api(
   { expose: true, method: "POST", path: "/finance/forecast/milestones", auth: true },
   async (req: MilestoneInput): Promise<MilestoneDto> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     if (!MILESTONE_KINDS.includes(req.kind)) throw APIError.invalidArgument(`unknown milestone kind ${String(req.kind)}`);
     await ownPerson(userId, req.personId);
     const when = validateWhen(req.date, req.age);
@@ -705,7 +732,7 @@ export const createMilestone = api(
 export const updateMilestone = api(
   { expose: true, method: "PUT", path: "/finance/forecast/milestones/:id", auth: true },
   async (req: MilestoneUpdate): Promise<MilestoneDto> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     const [existing] = await db
       .select()
       .from(financeForecastMilestone)
@@ -734,7 +761,7 @@ export const updateMilestone = api(
 export const deleteMilestone = api(
   { expose: true, method: "DELETE", path: "/finance/forecast/milestones/:id", auth: true },
   async (req: IdRequest): Promise<void> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     const rows = await db
       .delete(financeForecastMilestone)
       .where(and(eq(financeForecastMilestone.id, req.id), eq(financeForecastMilestone.user_id, userId)))
@@ -801,7 +828,7 @@ function assertSimulatable(row: { id: number; person_id: number | null; type: It
 export const createItem = api(
   { expose: true, method: "POST", path: "/finance/forecast/items", auth: true },
   async (req: ItemInput): Promise<ItemDto> => {
-    const { userId, isAdmin } = authed();
+    const { userId, access } = await authed("edit");
     if (!ITEM_TYPES.includes(req.type)) throw APIError.invalidArgument(`unknown item type ${String(req.type)}`);
     if (!req.label || req.label.trim().length === 0) throw APIError.invalidArgument("label must be a non-empty string");
     if (!req.data || typeof req.data !== "object") throw APIError.invalidArgument("data must be an object");
@@ -809,7 +836,7 @@ export const createItem = api(
     if (PERSONAL_TYPES.has(req.type) && personId == null) throw APIError.invalidArgument(`item of type ${req.type} needs a person`);
     if (personId != null) await ownPerson(userId, personId);
     const linked = req.type === "asset" ? (req.linkedAccountId ?? null) : null;
-    if (linked != null) await ownAccount(userId, isAdmin, linked);
+    if (linked != null) await ownAccount(access, linked);
     const data = req.data.valuesSource ? req.data : { ...req.data, valuesSource: manualSource() };
     const candidate = { id: 0, person_id: personId, type: req.type, label: req.label.trim(), data, linked_account_id: linked };
     assertSimulatable(candidate);
@@ -832,7 +859,7 @@ export const createItem = api(
 export const updateItem = api(
   { expose: true, method: "PUT", path: "/finance/forecast/items/:id", auth: true },
   async (req: ItemUpdate): Promise<ItemDto> => {
-    const { userId, isAdmin } = authed();
+    const { userId, access } = await authed("edit");
     const [existing] = await db
       .select()
       .from(financeForecastItem)
@@ -857,7 +884,7 @@ export const updateItem = api(
       next.person_id = req.personId;
     }
     if (req.linkedAccountId !== undefined) {
-      if (req.linkedAccountId != null) await ownAccount(userId, isAdmin, req.linkedAccountId);
+      if (req.linkedAccountId != null) await ownAccount(access, req.linkedAccountId);
       next.linked_account_id = existing.type === "asset" ? req.linkedAccountId : null;
     }
     if (req.sortOrder !== undefined) next.sort_order = req.sortOrder;
@@ -884,7 +911,7 @@ export const updateItem = api(
 export const deleteItem = api(
   { expose: true, method: "DELETE", path: "/finance/forecast/items/:id", auth: true },
   async (req: IdRequest): Promise<void> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     const rows = await db
       .delete(financeForecastItem)
       .where(and(eq(financeForecastItem.id, req.id), eq(financeForecastItem.user_id, userId)))
@@ -900,7 +927,7 @@ export const deleteItem = api(
 export const createScenario = api(
   { expose: true, method: "POST", path: "/finance/forecast/scenarios", auth: true },
   async (req: ScenarioInput): Promise<ScenarioDto> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     if (!req.name || req.name.trim().length === 0) throw APIError.invalidArgument("name must be a non-empty string");
     if (!req.config || typeof req.config !== "object") throw APIError.invalidArgument("config must be an object");
     const [row] = await db
@@ -914,7 +941,7 @@ export const createScenario = api(
 export const updateScenario = api(
   { expose: true, method: "PUT", path: "/finance/forecast/scenarios/:id", auth: true },
   async (req: ScenarioUpdate): Promise<ScenarioDto> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     const updates: Partial<typeof financeForecastScenario.$inferInsert> = { updated_at: new Date().toISOString() };
     if (req.name !== undefined) {
       if (req.name.trim().length === 0) throw APIError.invalidArgument("name must be non-empty");
@@ -937,7 +964,7 @@ export const updateScenario = api(
 export const deleteScenario = api(
   { expose: true, method: "DELETE", path: "/finance/forecast/scenarios/:id", auth: true },
   async (req: IdRequest): Promise<void> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     const rows = await db
       .delete(financeForecastScenario)
       .where(and(eq(financeForecastScenario.id, req.id), eq(financeForecastScenario.user_id, userId)))
@@ -953,8 +980,8 @@ export const deleteScenario = api(
 export const runSimulation = api(
   { expose: true, method: "POST", path: "/finance/forecast/simulate", auth: true },
   async (req: SimulateRequest): Promise<SimulateResponse> => {
-    const { userId, isAdmin } = authed();
-    const hh = await loadHousehold(userId, isAdmin);
+    const { userId, access } = await authed("view");
+    const hh = await loadHousehold(userId, access);
     if (hh.persons.length === 0) throw APIError.failedPrecondition("add a person first");
 
     const scenarioRows = await db
@@ -1056,7 +1083,7 @@ const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
 export const previewImport = api(
   { expose: true, method: "POST", path: "/finance/forecast/import/preview", auth: true },
   async (req: ImportPreviewRequest): Promise<ImportPreview> => {
-    const { userId } = authed();
+    const { userId } = await authed("view");
     if (!req.fileBase64 || typeof req.fileBase64 !== "string") throw APIError.invalidArgument("fileBase64 is required");
     const buffer = Buffer.from(req.fileBase64, "base64");
     if (buffer.length === 0) throw APIError.invalidArgument("the file is empty");
@@ -1086,7 +1113,7 @@ export const previewImport = api(
 export const commitImport = api(
   { expose: true, method: "POST", path: "/finance/forecast/import/commit", auth: true },
   async (req: ImportCommitRequest): Promise<ImportCommitResponse> => {
-    const { userId } = authed();
+    const { userId } = await authed("edit");
     if (!Array.isArray(req.rows) || req.rows.length === 0) throw APIError.invalidArgument("rows must be a non-empty list");
     if (req.rows.length > 500) throw APIError.invalidArgument("at most 500 rows per import");
 
@@ -1160,7 +1187,7 @@ export const commitImport = api(
 export const evaluateImport = api(
   { expose: true, method: "POST", path: "/finance/forecast/import/evaluate", auth: true },
   async (req: ImportCommitRequest): Promise<ImportEvaluateResponse> => {
-    authed();
+    await authed("view");
     if (!Array.isArray(req.rows)) throw APIError.invalidArgument("rows must be a list");
     if (req.rows.length > 500) throw APIError.invalidArgument("at most 500 rows per import");
     const opts = importOptions(req.pensionGrowthRate);
@@ -1194,9 +1221,9 @@ interface AccountItemsRequest {
 export const getAccountSuggestions = api(
   { expose: true, method: "GET", path: "/finance/forecast/account-suggestions", auth: true },
   async (): Promise<{ accounts: LinkableAccount[] }> => {
-    const { userId, isAdmin } = authed();
+    const { userId, access } = await authed("view");
     const [accounts, linked] = await Promise.all([
-      linkableAccounts(userId, isAdmin),
+      linkableAccounts(access),
       db
         .select({ id: financeForecastItem.linked_account_id })
         .from(financeForecastItem)
@@ -1211,10 +1238,10 @@ export const getAccountSuggestions = api(
 export const createAccountItems = api(
   { expose: true, method: "POST", path: "/finance/forecast/account-items", auth: true },
   async (req: AccountItemsRequest): Promise<{ created: number }> => {
-    const { userId, isAdmin } = authed();
+    const { userId, access } = await authed("edit");
     const chosen = Array.isArray(req.accounts) ? req.accounts : [];
     if (chosen.length === 0) return { created: 0 };
-    const accounts = new Map((await linkableAccounts(userId, isAdmin)).map((a) => [a.id, a]));
+    const accounts = new Map((await linkableAccounts(access)).map((a) => [a.id, a]));
     for (const c of chosen) {
       if (!accounts.has(c.accountId)) throw APIError.notFound(`account ${c.accountId} not found`);
       if (c.personId != null) await ownPerson(userId, c.personId);
