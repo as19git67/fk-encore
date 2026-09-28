@@ -2973,6 +2973,16 @@ export const tripPlanLegs = pgTable(
     // When the group reaches this city, in minutes past midnight — the
     // start of its *first* day only, unlike `day_starts_at`.
     arrive_minutes: integer("arrive_minutes"),
+    // stay | transit (migration 0214, §22.7). A transit leg is the
+    // journey between two others: it starts at origin_* at
+    // depart_minutes on its first day and ends at its own anchor at
+    // end_minutes on its last.
+    kind: text("kind").notNull().default("stay"),
+    origin_lat: doublePrecision("origin_lat"),
+    origin_lon: doublePrecision("origin_lon"),
+    origin_label: text("origin_label"),
+    depart_minutes: integer("depart_minutes"),
+    end_minutes: integer("end_minutes"),
     // foot | bike | transit | car — per leg, not per trip.
     mode: text("mode").notNull().default("foot"),
     region_db: text("region_db").notNull(),

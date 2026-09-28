@@ -85,6 +85,23 @@ export function redateLegs(legs: readonly DatableLeg[], startDate: string): LegD
   });
 }
 
+/**
+ * How many calendar days a trip spans (§22.7).
+ *
+ * Not the sum of its legs' days: a journey shares its first day with
+ * the leg it leaves and its last with the leg it reaches, so the day of
+ * a transfer belongs to up to three legs and is still one day. Legs
+ * without dates cannot be placed on a calendar and are simply counted.
+ */
+export function calendarDayCount(legs: readonly { startDate: string | null; days: number }[]): number {
+  const dated = legs.filter((l) => l.startDate !== null && l.days > 0);
+  const undated = legs.filter((l) => l.startDate === null).reduce((sum, l) => sum + l.days, 0);
+  if (dated.length === 0) return undated;
+  const first = dated.map((l) => l.startDate as string).sort()[0];
+  const last = dated.map((l) => addDays(l.startDate as string, l.days - 1)).sort().at(-1) as string;
+  return daysBetween(first, last) + 1 + undated;
+}
+
 function parseIsoDate(value: string): Date {
   const [year, month, day] = value.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day));
