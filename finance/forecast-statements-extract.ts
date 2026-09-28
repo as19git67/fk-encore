@@ -174,7 +174,11 @@ const PATTERNS: Pattern[] = [
     label: /(monatliche[rn]?\s+Beitrag\w*|Beitrag\w*\s+(monatlich|mtl\.?)|Monatsbeitrag)[^\d\n]{0,30}/i,
     not: /bisherig|alte[rn]?\s/i,
   },
-  { field: "premiumYearly", label: /(j(ä|ae)hrliche[rn]?\s+Beitrag\w*|Jahresbeitrag|Beitrag\w*\s+j(ä|ae)hrlich)[^\d\n]{0,30}/i },
+  {
+    field: "premiumYearly",
+    label: /(j(ä|ae)hrliche[rn]?\s+(Beitrag|Pr(ä|ae)mie)\w*|Jahres(beitrag|pr(ä|ae)mie)|(Beitrag|Pr(ä|ae)mie)\w*\s+j(ä|ae)hrlich)[^\d\n]{0,30}/i,
+  },
+  { field: "premiumMonthly", label: /(monatliche[rn]?\s+Pr(ä|ae)mie|Monatspr(ä|ae)mie|Pr(ä|ae)mie\s+monatlich)[^\d\n]{0,30}/i },
   {
     field: "premiumEndDate",
     label: /(Ablauf\s+der\s+Beitragszahlung|Beitragszahlung\w*\s+(bis|endet|Ende)|Beitragszahlungsende|Beitragsende)[^\d\n]{0,25}/i,
@@ -510,10 +514,14 @@ export function contractPattern(key: string): string {
  * statement: a Standmitteilung or similar with the contract's figures.
  * dynamic_increase: an announced premium increase (Dynamik, Beitragsanpassung).
  * dynamic_declined: the increase was declined or will not take place.
+ * premium_invoice: a Beitrags-/Prämienrechnung — the premium due for a period.
+ * policy: the Versicherungsschein or a Nachtrag — premium and dates as agreed.
  * other: belongs to the contract but says nothing about its values.
  */
-export type DocKind = "statement" | "dynamic_increase" | "dynamic_declined" | "other";
-export const DOC_KINDS: readonly DocKind[] = ["statement", "dynamic_increase", "dynamic_declined", "other"];
+export type DocKind = "statement" | "dynamic_increase" | "dynamic_declined" | "premium_invoice" | "policy" | "other";
+export const DOC_KINDS: readonly DocKind[] = ["statement", "dynamic_increase", "dynamic_declined", "premium_invoice", "policy", "other"];
+/** Kinds whose figures count as the item's current values. */
+export const VALUE_KINDS: ReadonlySet<DocKind> = new Set(["statement", "dynamic_increase", "premium_invoice", "policy"]);
 
 const DYNAMIC = String.raw`(Dynamik\w*|dynamische[rn]?\s+(Erh(ö|oe)hung|Anpassung)|Beitragserh(ö|oe)hung|Erh(ö|oe)hung\s+(des|Ihres)\s+Beitrag\w*|Beitragsanpassung|planm(ä|ae)(ß|ss)ige\s+Erh(ö|oe)hung)`;
 // Only confirmations: an announcement also says "you may object" and
@@ -533,6 +541,8 @@ const LLM_KINDS: Record<string, DocKind> = {
   standmitteilung: "statement",
   dynamik_erhoehung: "dynamic_increase",
   dynamik_abgelehnt: "dynamic_declined",
+  beitragsrechnung: "premium_invoice",
+  versicherungsschein: "policy",
   sonstiges: "other",
 };
 
@@ -540,7 +550,8 @@ const LLM_KINDS: Record<string, DocKind> = {
 export const LLM_KIND_FIELD =
   'Art des Schreibens, genau einer dieser Werte: "standmitteilung" (Stand/Werte des Vertrags), ' +
   '"dynamik_erhoehung" (angekündigte Beitragserhöhung/Dynamik), "dynamik_abgelehnt" (Bestätigung, dass eine Erhöhung ' +
-  'nicht durchgeführt wird, z. B. nach Widerspruch), "sonstiges"';
+  'nicht durchgeführt wird, z. B. nach Widerspruch), "beitragsrechnung" (Beitrags-/Prämienrechnung für einen Zeitraum), ' +
+  '"versicherungsschein" (Versicherungsschein, Police oder Nachtrag), "sonstiges"';
 
 /** The model's kind, or null when it gave none of the four. */
 export function parseLlmKind(raw: unknown): DocKind | null {
@@ -554,11 +565,16 @@ export function parseLlmKind(raw: unknown): DocKind | null {
  * The kind by the text and the documents module's type. A Standmitteilung
  * that mentions its Dynamik in passing stays a statement.
  */
+const INVOICE_RE = /(Beitrags|Pr(ä|ae)mien|Jahres)rechnung|Beitragsmitteilung|Zahlungsaufforderung|Beitragsberechnung/i;
+const POLICY_RE = /Versicherungsschein|Nachtrag\s+zu[mr]?\s+(Versicherungsschein|Vertrag|Police)|\bPolice\b|Policennachtrag/i;
+
 export function classifyDocument(text: string, documentType: string | null): DocKind {
   if (documentType === "standmitteilung") return "statement";
   const head = text.slice(0, 6000);
   if (DECLINED_RE.test(head)) return "dynamic_declined";
-  if (INCREASE_RE.test(head)) return "dynamic_increase";
+  if (INCREASE_RE.test(head) && documentType !== "rechnung") return "dynamic_increase";
+  if (documentType === "rechnung" || INVOICE_RE.test(head)) return "premium_invoice";
+  if (documentType === "vertrag" || POLICY_RE.test(head)) return "policy";
   return "statement";
 }
 
