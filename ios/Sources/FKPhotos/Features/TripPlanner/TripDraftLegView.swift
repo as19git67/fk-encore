@@ -49,11 +49,7 @@ struct TripDraftLegView: View {
                         in: TripNewPlanDraft.minDays...TripNewPlanDraft.maxDays) {
                     Text(leg.days == 1 ? "1 Tag" : "\(leg.days) Tage")
                 }
-                Picker("Unterwegs", selection: $leg.mode) {
-                    ForEach(TripTransportMode.allCases, id: \.self) { mode in
-                        Label(mode.label, systemImage: mode.systemImage).tag(mode)
-                    }
-                }
+                TripTransportModePicker(mode: $leg.mode)
                 Text(leg.mode.hint)
                     .font(.caption)
                     .foregroundStyle(.secondary)

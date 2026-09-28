@@ -58,11 +58,7 @@ struct TripTransitView: View {
                 Text(TripTransitPlanning.frameSentence(from: from?.displayTitle, to: to?.displayTitle))
             }
             Section {
-                Picker("Unterwegs", selection: $mode) {
-                    ForEach(TripTransportMode.allCases, id: \.self) { mode in
-                        Label(mode.label, systemImage: mode.systemImage).tag(mode)
-                    }
-                }
+                TripTransportModePicker(mode: $mode)
             } footer: {
                 Text(TripTransitPlanning.sentence(mode: mode, depart: depart, arrive: arrive))
             }

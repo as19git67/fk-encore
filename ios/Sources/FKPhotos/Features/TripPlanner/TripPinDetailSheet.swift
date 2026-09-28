@@ -84,36 +84,55 @@ struct TripSpotActionMenuItems: View {
     }
 }
 
-/// A spot's actions as sections of a list — the map's sheet and the
+/// A spot's actions as one block of a list — the map's sheet and the
 /// detail screen draw them the same way. `close` is called after an
 /// action that says it closes, with the screen that shows them.
+///
+/// One section, not one per action: five actions in five boxes read
+/// as five unrelated settings, and the screen was mostly gaps. The
+/// sentence an action used to carry as a section footer now sits under
+/// its own title inside the row, so the consequence is still said
+/// where the finger lands. Rows come in the groups the menu uses, in
+/// the same order (§8.4).
 struct TripSpotActionSections: View {
     let actions: [TripPinSheetAction]
     var close: @MainActor () -> Void = {}
 
     @State private var running: String?
 
+    private var ordered: [TripPinSheetAction] {
+        // Stable: within a group the caller's order stands.
+        actions.enumerated()
+            .sorted { ($0.element.group, $0.offset) < ($1.element.group, $1.offset) }
+            .map(\.element)
+    }
+
     var body: some View {
-        ForEach(actions) { action in
+        if !actions.isEmpty {
             Section {
-                Button(role: action.role) {
-                    running = action.id
-                    Task {
-                        await action.run()
-                        running = nil
-                        if action.closes { close() }
+                ForEach(ordered) { action in
+                    Button(role: action.role) {
+                        running = action.id
+                        Task {
+                            await action.run()
+                            running = nil
+                            if action.closes { close() }
+                        }
+                    } label: {
+                        if running == action.id {
+                            ProgressView()
+                        } else {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label(action.title, systemImage: action.systemImage)
+                                if let footer = action.footer {
+                                    Text(footer)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
-                } label: {
-                    if running == action.id {
-                        ProgressView()
-                    } else {
-                        Label(action.title, systemImage: action.systemImage)
-                    }
-                }
-                .disabled(running != nil)
-            } footer: {
-                if let footer = action.footer {
-                    Text(footer)
+                    .disabled(running != nil)
                 }
             }
         }
