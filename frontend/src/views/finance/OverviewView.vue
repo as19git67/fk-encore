@@ -468,7 +468,6 @@ async function saveConfig() {
 .anomaly-tile:hover,
 .anomaly-tile:focus-visible {
   background: var(--p-content-hover-background);
-  outline: none;
 }
 .anomaly-tile .tile-icon {
   font-size: var(--text-3xl);
