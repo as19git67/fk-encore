@@ -25,6 +25,15 @@ import {
   users,
 } from "../db/schema";
 import {
+  leverAnalysis,
+  reverseCalculation,
+  sensitivityTable,
+  type LeverAnalysis,
+  type ReverseResult,
+  type SensitivityTable,
+} from "./forecast-analysis";
+import {
+  ageAtStart,
   defaultScenario,
   earliestLeaveAge,
   leaveAgeMatrix,
@@ -192,6 +201,10 @@ export interface SimulateRequest {
   matrix?: { personA: number; personB: number; fromAge: number; toAge: number };
   /** Also run these saved scenarios for the comparison chart. */
   compareScenarioIds?: number[];
+  /** Also compute the sensitivity table and the levers for `earliestFor` (#1339). */
+  robustness?: boolean;
+  /** Also answer "what does it take to leave at this age?" for `earliestFor` (#1340). */
+  targetAge?: number;
 }
 
 export interface EarliestResult {
@@ -210,6 +223,9 @@ export interface SimulateResponse {
   earliest: EarliestResult | null;
   matrix: MatrixCell[] | null;
   comparisons: ComparisonRun[];
+  sensitivity: SensitivityTable | null;
+  levers: LeverAnalysis | null;
+  reverse: ReverseResult | null;
 }
 
 // -----------------------------------------------------------------------
@@ -423,6 +439,7 @@ export function toEngineScenario(config: Record<string, unknown>, name = "Szenar
   const orderIn = Array.isArray(c.withdrawalOrder) ? c.withdrawalOrder : base.withdrawalOrder;
   const withdrawalOrder = orderIn.filter((p): p is (typeof POTS)[number] => (POTS as readonly string[]).includes(String(p)));
   const offsets = Array.isArray(c.offsetDeductions) ? c.offsetDeductions.filter((x): x is number => typeof x === "number") : [];
+  const st = (c.stress && typeof c.stress === "object" ? c.stress : {}) as Record<string, unknown>;
   return {
     id,
     name,
@@ -446,6 +463,10 @@ export function toEngineScenario(config: Record<string, unknown>, name = "Szenar
       minMonthly: num(hi.minMonthly, base.healthInsurance.minMonthly),
     },
     offsetDeductions: offsets,
+    stress: {
+      crashYear: st.crashYear == null ? null : Math.round(num(st.crashYear, 0)),
+      crashSize: Math.min(0.99, Math.max(0, num(st.crashSize, base.stress.crashSize))),
+    },
   };
 }
 
@@ -1007,7 +1028,7 @@ export const runSimulation = api(
     let earliest: SimulateResponse["earliest"] = null;
     if (req.earliestFor != null) {
       if (!hh.persons.some((p) => p.id === req.earliestFor)) throw APIError.notFound(`person ${req.earliestFor} not found`);
-      earliest = { personId: req.earliestFor, age: earliestLeaveAge(input, req.earliestFor).age };
+      earliest = { personId: req.earliestFor, age: earliestLeaveAge(input, req.earliestFor, 75).age };
     }
 
     let matrix: MatrixCell[] | null = null;
@@ -1033,7 +1054,26 @@ export const runSimulation = api(
       });
     }
 
-    return { result, earliest, matrix, comparisons };
+    let sensitivity: SensitivityTable | null = null;
+    let levers: LeverAnalysis | null = null;
+    let reverse: ReverseResult | null = null;
+    if (req.earliestFor != null && (req.robustness || req.targetAge != null)) {
+      const pid = req.earliestFor;
+      if (req.robustness) {
+        sensitivity = sensitivityTable(input, pid);
+        levers = leverAnalysis(input, pid);
+      }
+      if (req.targetAge != null) {
+        const age = Math.floor(req.targetAge);
+        const current = ageAtStart(input, pid) ?? 0;
+        if (age < Math.max(40, current) || age > 80) {
+          throw APIError.invalidArgument(`target age must be between ${Math.max(40, current)} and 80`);
+        }
+        reverse = reverseCalculation(input, pid, age);
+      }
+    }
+
+    return { result, earliest, matrix, comparisons, sensitivity, levers, reverse };
   },
 );
 

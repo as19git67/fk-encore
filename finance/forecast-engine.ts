@@ -245,6 +245,14 @@ export interface ForecastScenario {
   };
   /** Person ids for which the deduction buy-back is applied. */
   offsetDeductions: number[];
+  /** Stress test (#1339): the depot loses `crashSize` at the start of `crashYear`; null = no crash. */
+  stress: StressTest;
+}
+
+export interface StressTest {
+  crashYear: number | null;
+  /** Share of the depot lost, e.g. 0.3. */
+  crashSize: number;
 }
 
 export interface ForecastInput {
@@ -873,6 +881,16 @@ export function simulate(input: ForecastInput): SimulationResult {
       }
     }
 
+    // ---- stress test: the depot crashes at the start of the chosen year ---
+    if (scenario.stress.crashYear != null && year === scenario.stress.crashYear && (mi % 12 === 0 || mi === start)) {
+      const depot = pots.get("depot")!;
+      if (depot.value > 0) {
+        const loss = depot.value * Math.min(0.99, Math.max(0, scenario.stress.crashSize));
+        depot.value -= loss;
+        r.returns -= loss;
+      }
+    }
+
     // ---- returns on pots -------------------------------------------------
     for (const [pot, s] of pots) {
       if (pot === "insurance" || s.value <= 0) continue;
@@ -1036,7 +1054,15 @@ function liquidWealthAtStart(_input: ForecastInput, items: ForecastItem[]): numb
 // Searches on top of the simulation
 // -----------------------------------------------------------------------
 
-function withLeaveAge(input: ForecastInput, personId: number, age: number): ForecastInput {
+/** The person's age in full years at the start of the simulation; null for an unknown person. */
+export function ageAtStart(input: ForecastInput, personId: number): number | null {
+  const p = input.persons.find((x) => x.id === personId);
+  if (!p) return null;
+  return ageAt(p.birthDate, monthIndex(input.startDate ?? isoToday()));
+}
+
+/** The input with the person's leave-work milestone moved to `age` (unchanged without such a milestone). */
+export function withLeaveAge(input: ForecastInput, personId: number, age: number): ForecastInput {
   const ms = input.milestones.find((m) => m.personId === personId && m.kind === "leave_work");
   if (!ms) return input;
   return {
@@ -1121,6 +1147,7 @@ export function defaultScenario(overrides: Partial<ForecastScenario> = {}): Fore
     },
     healthInsurance: { rate: 0.2, minMonthly: 250 },
     offsetDeductions: [],
+    stress: { crashYear: null, crashSize: 0.3 },
     ...overrides,
   };
 }

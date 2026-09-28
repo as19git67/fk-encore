@@ -1435,6 +1435,8 @@ export interface ForecastScenarioConfig {
   }
   healthInsurance: { rate: number; minMonthly: number }
   offsetDeductions: number[]
+  /** Stress test (#1339): the depot loses `crashSize` at the start of `crashYear`; null = no crash. */
+  stress: { crashYear: number | null; crashSize: number }
 }
 
 export interface ForecastScenario {
@@ -1530,12 +1532,70 @@ export interface ForecastMatrixCell {
   failYear: number | null
 }
 
+export interface ForecastSensitivityCell {
+  returnRate: number
+  inflationRate: number
+  /** Earliest leave-work age under these rates; null when no age works. */
+  age: number | null
+}
+
+export interface ForecastSensitivity {
+  personId: number
+  baseReturnRate: number
+  baseInflationRate: number
+  returnRates: number[]
+  inflationRates: number[]
+  cells: ForecastSensitivityCell[]
+}
+
+export type ForecastLeverKey = 'return' | 'inflation' | 'spending' | 'crash'
+
+export interface ForecastLever {
+  key: ForecastLeverKey
+  label: string
+  age: number | null
+  /** Years the earliest age moves (positive = later); null when either side has no age. */
+  deltaYears: number | null
+}
+
+export interface ForecastLevers {
+  personId: number
+  baseAge: number | null
+  levers: ForecastLever[]
+  biggest: ForecastLeverKey | null
+}
+
+export type ForecastReverseLeverKey = 'savings' | 'spending' | 'return' | 'one_off'
+
+export interface ForecastReverseLever {
+  key: ForecastReverseLeverKey
+  /** The value that just makes the target age work; null when nothing within `bound` does. */
+  value: number | null
+  /** For "spending": the monthly amount the share means in today's money. */
+  monthlyAmount: number | null
+  bound: number
+}
+
+export interface ForecastReverse {
+  personId: number
+  targetAge: number
+  reachable: boolean
+  /** When reachable: how much more could be spent per month (today's money). */
+  bufferMonthly: number | null
+  /** When not reachable: each lever on its own. */
+  levers: ForecastReverseLever[]
+}
+
 export interface ForecastSimulateRequest {
   scenarioId?: number
   scenario?: ForecastScenarioConfig
   earliestFor?: number
   matrix?: { personA: number; personB: number; fromAge: number; toAge: number }
   compareScenarioIds?: number[]
+  /** Sensitivity table and levers for `earliestFor` (#1339). */
+  robustness?: boolean
+  /** "What does it take to leave at this age?" for `earliestFor` (#1340). */
+  targetAge?: number
 }
 
 export interface ForecastSimulateResponse {
@@ -1543,6 +1603,9 @@ export interface ForecastSimulateResponse {
   earliest: { personId: number; age: number | null } | null
   matrix: ForecastMatrixCell[] | null
   comparisons: Array<{ scenarioId: number; name: string; result: ForecastSimulation }>
+  sensitivity: ForecastSensitivity | null
+  levers: ForecastLevers | null
+  reverse: ForecastReverse | null
 }
 
 export async function getForecast(): Promise<ForecastBundle> {
