@@ -74,6 +74,28 @@ export const AbgelehntOhneDokument: Story = {
   },
 }
 
+export const Buchungen: Story = {
+  name: 'Sachversicherung mit Buchungen',
+  args: {
+    item: { ...ITEM, id: 120, type: 'expense', label: 'Rechtsschutz', data: { amount: 22, frequency: 'monthly', insurer: 'Musterschutz AG' } },
+    state: {
+      ...NO_DOCUMENT,
+      itemId: 120,
+      contractNo: null,
+      bookings: {
+        bookings: [
+          { id: 11, transactionId: 901, date: '2026-09-01', amount: -26, counterparty: 'MUSTERSCHUTZ AG', purpose: 'Beitrag', matchKind: 'counterparty', status: 'confirmed' },
+          { id: 12, transactionId: 902, date: '2026-08-01', amount: -26, counterparty: 'MUSTERSCHUTZ AG', purpose: 'Beitrag', matchKind: 'counterparty', status: 'confirmed' },
+          { id: 13, transactionId: 903, date: '2026-07-01', amount: -26, counterparty: 'MUSTERSCHUTZ AG', purpose: 'Beitrag', matchKind: 'counterparty', status: 'suggested' },
+        ],
+        summary: { rhythm: 'monthly', perYearCount: 12, lastAmount: 26, lastDate: '2026-09-01', perYear: 312, count: 2 },
+        proposal: { field: 'amount', label: 'Beitrag pro Monat', kind: 'amount', current: 22, proposed: 26 },
+        contractNoSuggestion: 'RS-0000-0001',
+      },
+    },
+  },
+}
+
 export const Telefon: Story = {
   name: 'Telefonbreite',
   parameters: { testViewport: { width: 360, height: 740 } },

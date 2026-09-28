@@ -439,7 +439,7 @@ export function computeProposals(type: ItemType, data: Data, v: StatementValues)
 }
 
 export interface ValuesSource {
-  kind: "import" | "manual" | "statement";
+  kind: "import" | "manual" | "statement" | "booking";
   referenceDate?: string | null;
   documentId?: number | null;
   updatedAt: string;

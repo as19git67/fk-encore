@@ -42,6 +42,7 @@ export const STATEMENTS: ForecastItemStatements[] = [
     reading: false,
     notes: [],
     declinedWithoutDocument: [],
+    bookings: { bookings: [], summary: null, proposal: null, contractNoSuggestion: null },
   },
   {
     itemId: 112,
@@ -55,5 +56,6 @@ export const STATEMENTS: ForecastItemStatements[] = [
     reading: false,
     notes: [],
     declinedWithoutDocument: [],
+    bookings: { bookings: [], summary: null, proposal: null, contractNoSuggestion: null },
   },
 ]

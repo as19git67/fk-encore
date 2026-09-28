@@ -3920,3 +3920,31 @@ export const financeForecastShare = pgTable(
     index("idx_finance_forecast_share_target_group").on(table.target_group_id),
   ]
 );
+
+// ---------- Finance: bookings that pay a forecast item's premium (migration 0216) ----------
+
+export const financeForecastBookingLink = pgTable(
+  "finance_forecast_booking_link",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    item_id: integer("item_id")
+      .notNull()
+      .references(() => financeForecastItem.id, { onDelete: "cascade" }),
+    transaction_id: bigint("transaction_id", { mode: "number" })
+      .notNull()
+      .references(() => financeTransaction.id, { onDelete: "cascade" }),
+    match_kind: text("match_kind").notNull().$type<"contract" | "document" | "counterparty" | "user">(),
+    status: text("status").notNull().$type<"suggested" | "confirmed" | "rejected">(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    decided_at: timestamp("decided_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("finance_forecast_booking_link_unique").on(table.item_id, table.transaction_id),
+    index("idx_finance_forecast_booking_link_transaction").on(table.transaction_id),
+  ]
+);

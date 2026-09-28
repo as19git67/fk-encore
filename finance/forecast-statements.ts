@@ -7,7 +7,14 @@ import { and, eq } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
-import { documents, financeForecastDocumentLink, financeForecastItem, financeForecastStatement } from "../db/schema";
+import {
+  documents,
+  financeForecastBookingLink,
+  financeForecastDocumentLink,
+  financeForecastItem,
+  financeForecastStatement,
+} from "../db/schema";
+import { bookingStates } from "./forecast-bookings.service";
 import { DOC_KINDS, applyProposals, checkUserValues, pickValues, type DocKind } from "./forecast-statements-extract";
 import { resolveHousehold } from "./forecast-household.service";
 import {
@@ -55,6 +62,16 @@ interface LinkKindRequest {
 
 interface DocumentSearchRequest {
   q: Query<string>;
+}
+
+interface BookingDecisionRequest {
+  id: number;
+  status: "confirmed" | "rejected";
+}
+
+interface ContractNoRequest {
+  id: number;
+  contractNo: string;
 }
 
 interface DeclinedIncreaseRequest {
@@ -316,5 +333,62 @@ export const correctStatementValues = api(
       .where(eq(financeForecastStatement.id, st.id))
       .returning();
     return toStatementDto(updated);
+  },
+);
+
+// -----------------------------------------------------------------------
+// Bookings (migration 0216)
+// -----------------------------------------------------------------------
+
+export const decideBookingLink = api(
+  { expose: true, method: "POST", path: "/finance/forecast/booking-links/:id/decision", auth: true },
+  async (req: BookingDecisionRequest): Promise<void> => {
+    const { userId } = await authed("edit");
+    if (req.status !== "confirmed" && req.status !== "rejected") throw APIError.invalidArgument("status must be confirmed or rejected");
+    const [row] = await db
+      .update(financeForecastBookingLink)
+      .set({ status: req.status, decided_at: new Date().toISOString() })
+      .where(and(eq(financeForecastBookingLink.id, req.id), eq(financeForecastBookingLink.user_id, userId)))
+      .returning({ id: financeForecastBookingLink.id });
+    if (!row) throw APIError.notFound(`booking link ${req.id} not found`);
+  },
+);
+
+/** Takes over the premium the confirmed bookings say. */
+export const acceptBookingPremium = api(
+  { expose: true, method: "POST", path: "/finance/forecast/items/:id/booking-premium", auth: true },
+  async (req: IdRequest): Promise<void> => {
+    const { userId } = await authed("edit");
+    const [item] = await db
+      .select()
+      .from(financeForecastItem)
+      .where(and(eq(financeForecastItem.id, req.id), eq(financeForecastItem.user_id, userId)));
+    if (!item) throw APIError.notFound(`item ${req.id} not found`);
+    const state = (await bookingStates([item])).get(item.id);
+    const p = state?.proposal;
+    if (!p) throw APIError.failedPrecondition("the bookings propose no premium for this item");
+    const now = new Date().toISOString();
+    const data = { ...item.data, [p.field]: p.proposed, valuesSource: { kind: "booking", updatedAt: now } };
+    await db.update(financeForecastItem).set({ data, updated_at: now }).where(eq(financeForecastItem.id, item.id));
+  },
+);
+
+/** Sets the item's contract number (e.g. the one a booking's mandate reference names) and searches again. */
+export const setItemContractNo = api(
+  { expose: true, method: "POST", path: "/finance/forecast/items/:id/contract-no", auth: true },
+  async (req: ContractNoRequest): Promise<ScanSummary> => {
+    const { userId } = await authed("edit");
+    const no = (req.contractNo ?? "").trim();
+    if (no.length < 4 || no.length > 60) throw APIError.invalidArgument("contract number must be 4 to 60 characters");
+    const [item] = await db
+      .select()
+      .from(financeForecastItem)
+      .where(and(eq(financeForecastItem.id, req.id), eq(financeForecastItem.user_id, userId)));
+    if (!item) throw APIError.notFound(`item ${req.id} not found`);
+    await db
+      .update(financeForecastItem)
+      .set({ data: { ...item.data, contractNo: no }, updated_at: new Date().toISOString() })
+      .where(eq(financeForecastItem.id, item.id));
+    return scanForUser(userId, [item.id]);
   },
 );
