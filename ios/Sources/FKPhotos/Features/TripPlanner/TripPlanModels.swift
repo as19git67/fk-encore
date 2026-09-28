@@ -69,8 +69,32 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// whole replanning mechanic turns on (§5), and at trip resolution
     /// the actual planning result (§4.3).
     let pool: [TripCandidate]
+    /// "stay" for a place the group is based at, "transit" for the
+    /// journey between two of them (§22.7). Nil from an older server,
+    /// which only ever had stays.
+    var kind: String? = nil
+    /// Where a journey sets off from — the previous leg's base. Its
+    /// `anchor` is where it arrives.
+    var origin: TripLegOrigin? = nil
+    /// When a journey sets off on its first day, and arrives on its
+    /// last, in minutes past midnight.
+    var departMinutes: Int? = nil
+    var endMinutes: Int? = nil
 
     var transportMode: TripTransportMode { TripTransportMode(raw: mode) }
+
+    /// Is this the journey between two legs rather than a place (§22.7)?
+    var isTransit: Bool { kind == "transit" }
+
+    /// "10:00 → 16:00", or with dates when it takes more than a day.
+    var transitWindowText: String? {
+        guard isTransit, let departMinutes, let endMinutes else { return nil }
+        let from = TripClock.format(departMinutes)
+        let to = TripClock.format(endMinutes)
+        guard days.count > 1, let first = date(ofDayIndex: 0),
+              let last = date(ofDayIndex: days.count - 1) else { return "\(from) → \(to)" }
+        return "\(first) \(from) → \(last) \(to)"
+    }
 
     /// Where every day of this leg starts and ends (§4.2): the hotel,
     /// the campsite, the friends' address. Falls back to the leg's own
@@ -91,6 +115,13 @@ struct TripLeg: Codable, Identifiable, Sendable {
         if let title, !title.isEmpty { return title }
         return "Stadt \(position + 1)"
     }
+}
+
+/// Where a journey sets off from (§22.7).
+struct TripLegOrigin: Codable, Sendable, Equatable {
+    let lat: Double
+    let lon: Double
+    let label: String?
 }
 
 struct TripDay: Codable, Identifiable, Sendable {

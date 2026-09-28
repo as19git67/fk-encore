@@ -58,9 +58,11 @@ export const climateCheck = api(
     if (!plan) throw APIError.notFound("plan not found");
 
     const wanted = req.legIndex;
-    const legs = wanted === undefined
+    // A journey has no climate of its own to prepare for (§22.7).
+    const legs = (wanted === undefined
       ? plan.legs
-      : plan.legs.filter((leg) => leg.position === wanted);
+      : plan.legs.filter((leg) => leg.position === wanted))
+      .filter((leg) => leg.kind !== "transit");
 
     const reports: LegClimateReport[] = [];
     for (const leg of legs) {

@@ -159,6 +159,13 @@ export const dayTripSuggestion = api(
   async (req: DayTripSuggestionRequest): Promise<DayTripSuggestionResponse> => {
     const userId = requireUser();
     const { leg, legIndex } = await legOf(req.planId, userId, req.legIndex);
+    // A journey is not a base to make day trips from (§22.7).
+    if (leg.kind === "transit") {
+      return {
+        legIndex, undersupplied: false, emptyMinutes: 0, poolMinutes: 0,
+        uncoveredMinutes: 0, dayMinutes: 0, suggestion: null, note: null,
+      };
+    }
     const found = await suggestFor(leg);
 
     return {

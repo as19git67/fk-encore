@@ -35,7 +35,7 @@ import {
 } from "../push/apns-payload";
 import { lightOfDay } from "./daylight";
 import { storedHorizon } from "./horizon-store";
-import { addDays } from "./leg-dates";
+import { runningDayAt } from "./running-day";
 import { loadPlan, type StoredPlan } from "./plan-store";
 import {
   buildActivityContent,
@@ -146,11 +146,10 @@ export async function contentFor(
   now: Date,
 ): Promise<{ state: ActivityContentState | null; afterDay: boolean } | null> {
   const local = zonedClock(now, timeZone);
-  for (const leg of plan.legs) {
-    if (!leg.startDate) continue;
-    const day = leg.days.find((d) => addDays(leg.startDate as string, d.dayIndex) === local.date);
-    if (!day || !day.detailed) continue;
-
+  // Date *and* time: a day with a journey holds three legs (§22.7).
+  const running = runningDayAt(plan.legs, local.date, local.minutes);
+  if (running && running.day.detailed) {
+    const { leg, day } = running;
     const horizon = await storedHorizon(day.anchor ?? leg.anchor);
     const light = lightOfDay(leg, day, local.offsetMinutes, horizon);
     const state = buildActivityContent(day.blocks, local.minutes, light.spots);

@@ -27,15 +27,48 @@ struct TripLegsView: View {
     /// The city whose editor is open — a sheet with Abbrechen/Sichern,
     /// like every other editor, instead of a push where Back discarded.
     @State private var editing: TripLeg?
+    /// The journey being added or changed (§22.7): after which leg, and
+    /// the journey itself when it exists.
+    @State private var transit: TransitTarget?
+
+    /// The one journey the planner would suggest (§22.7), or nil.
+    @State private var suggestion: TripTransitSuggestion?
+
+    private struct TransitTarget: Identifiable {
+        let afterLegIndex: Int
+        let existing: TripLeg?
+        var suggested: TripTransitSuggestion? = nil
+        var id: String { "\(afterLegIndex)-\(existing?.id ?? 0)" }
+    }
     @State private var isWorking = false
     @State private var errorMessage: String?
 
     var body: some View {
         List {
+            if let suggestion {
+                Section {
+                    Label(suggestion.sentence, systemImage: "arrow.triangle.turn.up.right.diamond")
+                        .font(.subheadline)
+                    HStack {
+                        Button("Ansehen") {
+                            transit = TransitTarget(afterLegIndex: suggestion.afterLegIndex,
+                                                    existing: nil, suggested: suggestion)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Nein") { dismissSuggestion(suggestion) }
+                            .buttonStyle(.bordered)
+                    }
+                    .controlSize(.small)
+                }
+            }
             Section {
                 ForEach(viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []) { leg in
                     Button {
-                        editing = leg
+                        if leg.isTransit {
+                            transit = TransitTarget(afterLegIndex: leg.position - 1, existing: leg)
+                        } else {
+                            editing = leg
+                        }
                     } label: {
                         HStack {
                             row(leg)
@@ -56,7 +89,18 @@ struct TripLegsView: View {
                     // finds. A long press is the second way in.
                     .contextMenu {
                         Button(role: .destructive) { removing = leg } label: {
-                            Label("Stadt entfernen", systemImage: "trash")
+                            Label(leg.isTransit ? "Weiterreise entfernen" : "Stadt entfernen",
+                                  systemImage: "trash")
+                        }
+                    }
+                    // Between two places without a journey yet: the way
+                    // to say when the group leaves and when it arrives.
+                    if let after = TripTransitSlots.slotAfter(leg, in: viewModel.plan?.legs ?? []) {
+                        Button {
+                            transit = TransitTarget(afterLegIndex: after, existing: nil)
+                        } label: {
+                            Label("Weiterreise einfügen", systemImage: "arrow.triangle.turn.up.right.diamond")
+                                .font(.subheadline)
                         }
                     }
                 }
@@ -84,12 +128,18 @@ struct TripLegsView: View {
                 TripLegEditView(viewModel: viewModel, legIndex: leg.position)
             }
         }
+        .sheet(item: $transit) { target in
+            NavigationStack {
+                TripTransitView(viewModel: viewModel, afterLegIndex: target.afterLegIndex,
+                                existing: target.existing, suggested: target.suggested)
+            }
+        }
         .sheet(isPresented: $adding) {
             NavigationStack {
                 TripAddLegView(viewModel: viewModel)
             }
         }
-        .alert("Stadt entfernen?", isPresented: Binding(
+        .alert(removing?.isTransit == true ? "Weiterreise entfernen?" : "Stadt entfernen?", isPresented: Binding(
             get: { removing != nil }, set: { if !$0 { removing = nil } }),
                presenting: removing) { leg in
             Button("Entfernen", role: .destructive) {
@@ -97,13 +147,73 @@ struct TripLegsView: View {
             }
             Button("Abbrechen", role: .cancel) { removing = nil }
         } message: { leg in
-            Text("„\(leg.displayTitle)“ wird mit allen Tagen und allen Kandidaten gelöscht — "
-                 + "auch mit dem, was jemand von Hand hinzugefügt hat.")
+            if leg.isTransit {
+                Text("Die Städte davor und danach behalten ihre Zeiten.")
+            } else {
+                Text("„\(leg.displayTitle)“ wird mit allen Tagen und allen Kandidaten gelöscht — "
+                     + "auch mit dem, was jemand von Hand hinzugefügt hat.")
+            }
         }
-        .task { await viewModel.load() }
+        .task {
+            await viewModel.load()
+            await loadSuggestion()
+        }
+        // A journey added or a city changed may answer the suggestion.
+        .onChange(of: viewModel.plan?.legs.count) { _, _ in
+            Task { await loadSuggestion() }
+        }
     }
 
+    private func loadSuggestion() async {
+        let response: TripTransitSuggestionResponse? = try? await APIClient.shared.get(
+            "/trip-planner/plans/\(viewModel.planId)/transit-suggestion")
+        guard let found = response?.suggestion,
+              !UserDefaults.standard.bool(forKey: TripTransitSuggestion.dismissKey(
+                planId: viewModel.planId, afterLegIndex: found.afterLegIndex))
+        else {
+            suggestion = nil
+            return
+        }
+        suggestion = found
+    }
+
+    private func dismissSuggestion(_ found: TripTransitSuggestion) {
+        UserDefaults.standard.set(true, forKey: TripTransitSuggestion.dismissKey(
+            planId: viewModel.planId, afterLegIndex: found.afterLegIndex))
+        suggestion = nil
+    }
+
+    @ViewBuilder
     private func row(_ leg: TripLeg) -> some View {
+        if leg.isTransit {
+            transitRow(leg)
+        } else {
+            placeRow(leg)
+        }
+    }
+
+    /// A journey: where from, where to, when, and how.
+    private func transitRow(_ leg: TripLeg) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label(leg.displayTitle, systemImage: leg.transportMode.systemImage)
+                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 6) {
+                if let window = leg.transitWindowText { Text(window) }
+                Text("·")
+                Text(leg.transportMode.label)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if let origin = leg.origin?.label {
+                Text("von \(origin) nach \(leg.anchorTitle)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.leading, 12)
+    }
+
+    private func placeRow(_ leg: TripLeg) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(leg.displayTitle).font(.headline)
             HStack(spacing: 6) {
@@ -405,5 +515,17 @@ struct TripLegEditView: View {
         } catch {
             errorMessage = TripErrorText.describe(error)
         }
+    }
+}
+
+/// Where a journey can go (§22.7): after a place with dates, when the
+/// next leg is a dated place too and nothing lies between them.
+enum TripTransitSlots {
+    static func slotAfter(_ leg: TripLeg, in legs: [TripLeg]) -> Int? {
+        guard !leg.isTransit, leg.startDate != nil,
+              let next = legs.first(where: { $0.position == leg.position + 1 }),
+              !next.isTransit, next.startDate != nil
+        else { return nil }
+        return leg.position
     }
 }

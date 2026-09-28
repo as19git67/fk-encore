@@ -119,13 +119,23 @@ describe("POST /trip-planner/corridor", () => {
     expect(res.detourBudgetM).toBe(5_000);
   });
 
-  it("refuses a journey whose ends fall in different imported regions", async () => {
+  it("searches both regions when the journey crosses from one into another", async () => {
     await seedRegion("europe/germany/bayern", [47.5, 9, 50.5, 11.0]);
     await seedRegion("europe/austria", [47.5, 11.0, 50.5, 13.5]);
+    geo.setSearchSpots("nom_europe_germany_bayern", [spot({ osmRef: "node:1", detourM: 300 })]);
+    geo.setSearchSpots("nom_europe_austria", [
+      spot({ osmRef: "node:2", id: 2, lon: 11.1, detourM: 100, name: "Burg Beispielstein" }),
+      // On the border, in both extracts: one place.
+      spot({ osmRef: "node:1", detourM: 300 }),
+    ]);
 
-    await expect(planCorridor({ from: FROM, to: TO })).rejects.toThrow(
-      /crosses region boundaries/,
-    );
+    const res = await planCorridor({ from: FROM, to: TO });
+
+    expect(res.regions).toEqual(["nom_europe_germany_bayern", "nom_europe_austria"]);
+    expect(geo.getSearchCalls().map((c) => c.postgresDb).sort())
+      .toEqual(["nom_europe_austria", "nom_europe_germany_bayern"]);
+    // Merged, each place once, least detour first.
+    expect(res.spots.map((s) => s.osmRef)).toEqual(["node:2", "node:1"]);
   });
 
   it("says which end is not covered rather than returning half a corridor", async () => {

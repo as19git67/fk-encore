@@ -65,6 +65,7 @@ import { redistribute, type CurrentBlock, type StopStatus } from "./redistribute
 import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
 import { legLimitFor, type TransportMode } from "./travel";
+import { planTransitLeg } from "./transit-leg";
 import {
   DEFAULT_DAY_START_MINUTES,
   parseMinutes,
@@ -162,6 +163,18 @@ export interface LegRequest {
    * plane has promised something nobody has.
    */
   transfer?: TransferRequest;
+  /**
+   * "stay" (the default) for a place the group is based at; "transit"
+   * for the journey between two of them (§22.7). A transit leg's
+   * `anchor` is where it ends, `origin` where it starts, and
+   * `startDate` plus `days` run from the day it sets off to the day it
+   * arrives.
+   */
+  kind?: "stay" | "transit";
+  /** Where a transit leg sets off from — the previous leg's base. */
+  origin?: { lat: number; lon: number; label?: string | null };
+  /** When a transit leg sets off on its first day and arrives on its last, as "HH:MM". */
+  transit?: { departAt: string; arriveAt: string };
 }
 
 /**
@@ -745,6 +758,24 @@ export async function planLegForTrip(
  * is one list rather than one per caller.
  */
 export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegRequest {
+  if (leg.kind === "transit" && leg.origin && leg.departMinutes !== null && leg.endMinutes !== null) {
+    // The frame is the journey's two ends; its fixpoints are derived
+    // from them and are written again by the planner.
+    return {
+      title: leg.title ?? undefined,
+      kind: "transit",
+      anchor: leg.anchor,
+      anchorLabel: leg.anchorLabel ?? undefined,
+      origin: leg.origin,
+      mode: leg.mode,
+      days: leg.days.length,
+      startDate: leg.startDate ?? undefined,
+      transit: {
+        departAt: formatMinutesOfDay(leg.departMinutes),
+        arriveAt: formatMinutesOfDay(leg.endMinutes),
+      },
+    };
+  }
   return {
     title: leg.title ?? undefined,
     anchor: leg.anchor,
@@ -1391,6 +1422,46 @@ export const planPendingTrip = api(
   },
 );
 
+/** A transit leg request, validated and handed to its planner (§22.7). */
+async function planTransitFromRequest(
+  legReq: LegRequest,
+  trip: {
+    categories?: string[];
+    interests?: string[];
+    dwellMinutes?: Record<string, number>;
+    hidden?: ReadonlySet<string>;
+    votes?: Tally;
+  },
+): Promise<{
+  leg: CreateLegInput;
+  dropped: Array<DroppedBlock & { dayIndex: number }>;
+  pending: PendingRegion | null;
+}> {
+  const destination = validateAnchor(legReq.anchor);
+  if (!legReq.origin) throw APIError.invalidArgument("a journey needs an origin");
+  const origin = validateAnchor(legReq.origin);
+  const departMinutes = validateTimeOfDay(legReq.transit?.departAt, "transit.departAt");
+  const endMinutes = validateTimeOfDay(legReq.transit?.arriveAt, "transit.arriveAt");
+  if (departMinutes === null || endMinutes === null) {
+    throw APIError.invalidArgument("a journey needs transit.departAt and transit.arriveAt");
+  }
+  const dayCount = validateDays(legReq.days);
+  if (dayCount === 1 && endMinutes <= departMinutes) {
+    throw APIError.invalidArgument("die Ankunft muss nach der Abfahrt liegen");
+  }
+  const planned = await planTransitLeg({
+    title: legReq.title,
+    origin: { ...origin, label: legReq.origin.label ?? null },
+    destination: { ...destination, label: legReq.anchorLabel ?? legReq.title ?? null },
+    startDate: validateStartDate(legReq.startDate),
+    dayCount,
+    departMinutes,
+    endMinutes,
+    mode: validateMode(legReq.mode),
+  }, trip);
+  return { leg: planned.leg, dropped: [], pending: planned.pending };
+}
+
 /** What the import queue's status means, for a sentence to the traveller. */
 function describeRegionStatus(status: string): string {
   switch (status) {
@@ -1447,6 +1518,12 @@ async function planLeg(
   /** Set when this leg is waiting for its region to be imported. */
   pending: PendingRegion | null;
 }> {
+  // The journey between two legs is planned by its own rules (§22.7):
+  // one block along the corridor, or a frame without stops.
+  if (legReq.kind === "transit") {
+    return await planTransitFromRequest(legReq, trip);
+  }
+
   const anchor = validateAnchor(legReq.anchor);
   const dayCount = validateDays(legReq.days);
   const mode = validateMode(legReq.mode);
