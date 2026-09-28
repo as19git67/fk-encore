@@ -454,11 +454,7 @@ struct TripLegEditView: View {
                 Stepper(value: $days, in: TripNewPlanDraft.minDays...TripNewPlanDraft.maxDays) {
                     Text(days == 1 ? "1 Tag" : "\(days) Tage")
                 }
-                Picker("Unterwegs", selection: $mode) {
-                    ForEach(TripTransportMode.allCases, id: \.self) { m in
-                        Label(m.label, systemImage: m.systemImage).tag(m)
-                    }
-                }
+                TripTransportModePicker(mode: $mode)
                 Toggle("Termin steht fest", isOn: $isDated)
                 if isDated {
                     DatePicker("Erster Tag", selection: $startDate, displayedComponents: .date)
