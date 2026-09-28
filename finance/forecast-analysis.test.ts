@@ -60,6 +60,7 @@ const pension = (amount: number): ForecastItem => ({
   personId: 1,
   kind: "statutory",
   monthlyAmount: amount,
+  currentEntitlement: null,
   start: { kind: "milestone", milestoneId: 2 },
   regularAge: null,
   deductionPerMonth: 0,
@@ -132,6 +133,24 @@ describe("sensitivity table", () => {
     expect(age(0.01, 0.02)).toBeGreaterThanOrEqual(age(0.05, 0.02));
     expect(age(0.03, 0.04)).toBeGreaterThanOrEqual(age(0.03, 0.02));
     expect(t.baseReturnRate).toBe(0.03);
+  });
+});
+
+describe("sensitivity table — explicit returns", () => {
+  it("moves an investment's own return by the same step, and leaves cash alone", () => {
+    const items: ForecastItem[] = [
+      salary(3_000),
+      living(2_500),
+      { ...depot(100_000, 0.06), id: 30 },
+      { id: 31, type: "asset", label: "Tagesgeld", personId: null, pot: "cash", currentValue: 20_000, returnRate: 0.02, monthlyContribution: 0 },
+      pension(2_000),
+    ];
+    const base = input(items, { defaultReturnRate: 0.04, capitalGainsTaxRate: 0 });
+    const t = sensitivityTable(base, 1, [-0.04, 0], [0]);
+    const low = t.cells.find((c) => c.returnRate === 0)!.age ?? 999;
+    const mid = t.cells.find((c) => c.returnRate === 0.04)!.age ?? 999;
+    // With the depot at 6 % the default alone would change nothing; the step must reach the depot.
+    expect(low).toBeGreaterThan(mid);
   });
 });
 

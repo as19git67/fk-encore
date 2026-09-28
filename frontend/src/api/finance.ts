@@ -1512,6 +1512,8 @@ export interface ForecastResolvedMilestone {
 
 export interface ForecastSimulation {
   startYear: number
+  /** First simulated month, 1–12: the first year is a partial year unless this is 1. */
+  startMonth: number
   endYear: number
   years: ForecastYearRow[]
   sources: ForecastFlowSource[]

@@ -94,6 +94,7 @@ const pension = (
   personId,
   kind: "statutory",
   monthlyAmount: amount,
+  currentEntitlement: null,
   start: { kind: "milestone", milestoneId },
   regularAge: null,
   deductionPerMonth: 0,
@@ -223,6 +224,29 @@ describe("simulate — withdrawal order and pots", () => {
     expect(res.years[0].liquidEnd).toBeLessThan(0);
   });
 
+  it("lets cash earn nothing by default and taxes interest when a rate is given", () => {
+    const flat = (id: number, pot: "cash" | "depot", returnRate: number | null): ForecastItem => ({
+      id,
+      type: "asset",
+      label: pot,
+      personId: null,
+      pot,
+      currentValue: 10_000,
+      returnRate,
+      monthlyContribution: 0,
+    });
+    // A current account without a rate of its own must not inherit the investment return.
+    const idle = simulate(input([flat(1, "cash", null)], [], { defaultReturnRate: 0.04, capitalGainsTaxRate: 0.25 }));
+    expect(idle.years[0].pots.cash).toBeCloseTo(10_000, 6);
+    // A depot without a rate does inherit it, and its returns are taxed.
+    const depot = simulate(input([flat(1, "depot", null)], [], { defaultReturnRate: 0.04, capitalGainsTaxRate: 0.25 }));
+    const netYear = Math.pow(1 + (Math.pow(1.04, 1 / 12) - 1) * 0.75, 12); // monthly compounding, tax on each month's gain
+    expect(depot.years[0].pots.depot).toBeCloseTo(10_000 * netYear, 6);
+    // Interest on cash is taxed like any other capital income.
+    const savings = simulate(input([flat(1, "cash", 0.04)], [], { defaultReturnRate: 0, capitalGainsTaxRate: 0.25 }));
+    expect(savings.years[0].pots.cash).toBeCloseTo(10_000 * netYear, 6);
+  });
+
   it("compounds returns monthly and taxes them", () => {
     const depot: ForecastItem = {
       id: 31,
@@ -322,6 +346,58 @@ describe("simulate — pensions", () => {
     const boughtBack = simulate(input([cash(100_000), item], milestones, { endAge: 64, offsetDeductions: [1] }));
     expect(boughtBack.years.find((y) => y.year === 2033)!.income["item:41"]).toBeCloseTo(24_000, 3);
     expect(boughtBack.years[0].expenses["buyback:41"]).toBe(60_000);
+  });
+
+  it("starts a statutory pension the month after the birthday, unless born on the first", () => {
+    const born15: ForecastPerson = { id: 3, label: "C", birthDate: "1970-06-15" };
+    const milestones = [ms(7, 3, "statutory_pension", 63), ms(8, 3, "company_pension", 63)];
+    const items = [
+      { ...pension(3, 1_200, 7), id: 71 },
+      { ...pension(3, 300, 8, { kind: "company" }), id: 72 },
+    ];
+    const res = simulate(input(items, milestones, { endAge: 64 }, [born15]));
+    const y = res.years.find((r) => r.year === 2033)!;
+    expect(y.income["item:71"]).toBeCloseTo(1_200 * 6, 6); // July to December
+    expect(y.income["item:72"]).toBeCloseTo(300 * 7, 6); // June to December
+    expect(res.milestones.find((m) => m.id === 7)!.date).toBe("2033-07-01");
+    // Born on the first: the age is reached the day before, the pension starts in the birthday month.
+    const first = simulate(input([{ ...pension(1, 1_200, 2), id: 71 }], [ms(2, 1, "statutory_pension", 63)], { endAge: 64 }));
+    expect(first.years.find((r) => r.year === 2033)!.income["item:71"]).toBeCloseTo(1_200 * 12, 6);
+  });
+
+  it("adjusts a statutory pension from today on, a company pension from its start", () => {
+    const milestones = [ms(2, 1, "statutory_pension", 60), ms(4, 1, "company_pension", 60)];
+    const items = [
+      { ...pension(1, 1_000, 2, { growthRate: 0.02 }), id: 71 },
+      { ...pension(1, 1_000, 4, { kind: "company", growthRate: 0.02 }), id: 72 },
+    ];
+    const res = simulate(input([cash(1), ...items], milestones, { endAge: 61 }));
+    const y = res.years.find((r) => r.year === 2030)!;
+    // Four adjustments since 2026 for the statutory one; the company projection is nominal at start.
+    expect(y.income["item:71"]).toBeCloseTo(1_000 * Math.pow(1.02, 4) * 12, 3);
+    expect(y.income["item:72"]).toBeCloseTo(12_000, 3);
+  });
+
+  it("lands between the earned entitlement and the projection when work ends early", () => {
+    // Regular age 67 in 2037; projected 2 000, earned so far 1 400. Leaving at 61 (2031)
+    // works 5 of the 11 remaining years: 1 400 + 600 · 5/11. Pension from 63 with 48 months of deduction.
+    const milestones = [ms(1, 1, "leave_work", 61), ms(2, 1, "statutory_pension", 63)];
+    const item = pension(1, 2_000, 2, { regularAge: 67, deductionPerMonth: 0.003, currentEntitlement: 1_400 });
+    const res = simulate(input([cash(1_000_000), item], milestones, { endAge: 64 }));
+    const expected = (1_400 + 600 * (5 / 11)) * (1 - 48 * 0.003);
+    expect(res.years.find((y) => y.year === 2033)!.income["item:41"]).toBeCloseTo(expected * 12, 3);
+    // Working until the regular age earns the full projection; no entitlement given means the projection too.
+    const full = simulate(input([cash(1_000_000), item], [ms(1, 1, "leave_work", 67), ms(2, 1, "statutory_pension", 67)], { endAge: 68 }));
+    expect(full.years.find((y) => y.year === 2037)!.income["item:41"]).toBeCloseTo(24_000, 3);
+    const none = simulate(input([cash(1_000_000), { ...item, currentEntitlement: null }], milestones, { endAge: 64 }));
+    expect(none.years.find((y) => y.year === 2033)!.income["item:41"]).toBeCloseTo(2_000 * (1 - 48 * 0.003) * 12, 3);
+  });
+
+  it("pays the annuity when a lump sum was chosen but no amount is left", () => {
+    const milestones = [ms(4, 1, "company_pension", 58)];
+    const item = pension(1, 500, 4, { kind: "company", lumpSumOption: 0, payoutMode: "lump_sum" });
+    const res = simulate(input([item], milestones, { endAge: 59 }));
+    expect(res.years.find((y) => y.year === 2028)!.income["item:41"]).toBe(6_000);
   });
 
   it("pays the lump sum once when chosen", () => {

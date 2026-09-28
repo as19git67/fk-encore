@@ -46,8 +46,21 @@ const MAX_AGE = 75;
 
 const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
 
+/**
+ * The scenario's return moved to `returnRate`, and every investment with a
+ * return of its own moved by the same distance (never below zero), so the
+ * step reaches a depot that names its 5 % as much as one that inherits the
+ * default. Cash keeps its rate. Inflation is simply set.
+ */
 function withRates(input: ForecastInput, returnRate: number, inflationRate: number): ForecastInput {
-  return { ...input, scenario: { ...input.scenario, defaultReturnRate: returnRate, inflationRate } };
+  const delta = returnRate - input.scenario.defaultReturnRate;
+  return {
+    ...input,
+    scenario: { ...input.scenario, defaultReturnRate: returnRate, inflationRate },
+    items: input.items.map((it) =>
+      it.type === "asset" && it.returnRate != null && it.pot !== "cash" ? { ...it, returnRate: Math.max(0, it.returnRate + delta) } : it,
+    ),
+  };
 }
 
 /** Rates in `steps` (as fractions, e.g. 0.01) around `base`, never below zero, deduplicated and sorted. */

@@ -289,6 +289,11 @@ const verdict = computed(() => {
   return { severity: 'warn' as const, text: `Das verfügbare Vermögen fällt ${r.failYear} unter die Grenze von ${formatEur(config.value?.minLiquidWealth ?? 0)}.` }
 })
 
+/** Deflation year of a bridge: never before the simulation starts (a leave date in the past). */
+function bridgeYear(b: { fromYear: number }): number {
+  return Math.max(b.fromYear, result.value?.startYear ?? b.fromYear)
+}
+
 const bridgeRows = computed(() =>
   (result.value?.bridges ?? []).map((b) => ({
     ...b,
@@ -307,6 +312,9 @@ function leaveAge(p: ForecastPerson): number | null {
   if (!m || !config.value) return null
   const eff = effectiveMilestone(m, config.value)
   if (eff.age != null) return eff.age
+  // A date: the engine's age at that month (a birthday later in the year makes it one less than the year difference).
+  const resolved = result.value?.milestones.find((x) => x.id === m.id)
+  if (resolved) return resolved.age
   if (eff.date) return Number(eff.date.slice(0, 4)) - Number(p.birthDate.slice(0, 4))
   return null
 }
@@ -714,7 +722,7 @@ const yearDetail = computed(() => {
 
 const pctModel = (get: () => number, set: (v: number) => void) =>
   computed({
-    get: () => Math.round(get() * 10000) / 100,
+    get: () => Math.round(get() * 1_000_000) / 10_000,
     set: (v: number | null) => set((v ?? 0) / 100),
   })
 
@@ -852,7 +860,7 @@ const ready = computed(() => !loading.value)
             <p class="result__value" data-testid="earliest">
               <template v-if="sim?.earliest && earliestPerson">
                 <template v-if="sim.earliest.age != null">{{ earliestPerson.label }} mit {{ sim.earliest.age }}</template>
-                <template v-else>Für {{ earliestPerson.label }} reicht es bei diesen Annahmen mit keinem Alter bis {{ config?.endAge }}.</template>
+                <template v-else>Für {{ earliestPerson.label }} reicht es bei diesen Annahmen mit keinem Alter bis 75.</template>
               </template>
               <template v-else-if="simulating">…</template>
               <template v-else>–</template>
@@ -873,8 +881,8 @@ const ready = computed(() => !loading.value)
           <li v-for="b in bridgeRows" :key="`${b.personId}-${b.fromYear}`" class="bridge" :class="{ 'bridge--uncovered': !b.covered }">
             <Tag :severity="b.covered ? 'warn' : 'danger'" :value="b.covered ? 'gedeckt' : 'nicht gedeckt'" />
             <span>
-              <strong>{{ b.who }}</strong> — Überbrückung {{ b.fromYear }}–{{ b.toYear }}: benötigt {{ formatEur(shown(b.need, b.fromYear)) }},
-              verfügbar {{ formatEur(shown(b.liquidAtStart, b.fromYear)) }}
+              <strong>{{ b.who }}</strong> — Überbrückung {{ b.fromYear }}–{{ b.toYear }}: benötigt {{ formatEur(shown(b.need, bridgeYear(b))) }},
+              verfügbar {{ formatEur(shown(b.liquidAtStart, bridgeYear(b))) }}
             </span>
           </li>
         </ul>

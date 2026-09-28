@@ -191,6 +191,7 @@ function toySimulation(req: ForecastSimulateRequest): ForecastSimulation {
   const bridgeStart = Math.min(leaveA, leaveB)
   return {
     startYear,
+    startMonth: 1,
     endYear,
     years,
     sources: [

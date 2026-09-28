@@ -224,7 +224,8 @@ describe("finance/forecast — savings accounts as items", () => {
     ]);
 
     const { accounts } = await getAccountSuggestions();
-    expect(accounts.map((a) => a.label).sort()).toEqual(["Depot Beispiel", "Tagesgeld Beispiel"]);
+    // A current account counts too: it is where every month's surplus lands.
+    expect(accounts.map((a) => a.label).sort()).toEqual(["Depot Beispiel", "Girokonto Beispiel", "Tagesgeld Beispiel"]);
     expect(accounts.find((a) => a.id === depot)).toMatchObject({ kind: "depot", balance: 2000.5 });
 
     const person = await createPerson({ label: "A", birthDate: "1970-01-01" });
@@ -232,7 +233,7 @@ describe("finance/forecast — savings accounts as items", () => {
     const items = (await getForecast()).items;
     expect(items.find((i) => i.linkedAccountId === tg)).toMatchObject({ type: "asset", data: { pot: "cash" }, linkedAccountBalance: 5000 });
     expect(items.find((i) => i.linkedAccountId === depot)).toMatchObject({ personId: person.id, data: { pot: "depot" }, linkedAccountBalance: 2000.5 });
-    expect((await getAccountSuggestions()).accounts).toEqual([]);
+    expect((await getAccountSuggestions()).accounts.map((a) => a.label)).toEqual(["Girokonto Beispiel"]);
 
     const foreign = await account("festgeld", "Noch eins fremd", false);
     await expect(createAccountItems({ accounts: [{ accountId: foreign, personId: null }] })).rejects.toThrow(/not found/);
