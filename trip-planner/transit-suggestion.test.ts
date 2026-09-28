@@ -47,3 +47,32 @@ describe("suggesting a journey", () => {
     expect(suggestTransit([leg(0, 48.37, 10.9, { startDate: null }), far])).toBeNull();
   });
 });
+
+describe("suggesting the way there and home", () => {
+  const home = { lat: 50.1, lon: 8.7, label: "Zuhause in Musterstadt" };
+
+  it("suggests the journey from home first, arriving when the first place expects the group", () => {
+    const s = suggestTransit([leg(0, 48.37, 10.9, { arriveMinutes: 18 * 60 }), far], home);
+    expect(s).toMatchObject({
+      afterLegIndex: -1, fromTitle: "Zuhause in Musterstadt", toTitle: "Ort 0",
+      departDate: "2026-09-05", arriveDate: "2026-09-05", arriveAt: "18:00", mode: "car",
+    });
+    expect(s!.sentence).toMatch(/Als Anreise geplant/);
+  });
+
+  it("suggests the journey home once the way there and the ways between exist", () => {
+    const s = suggestTransit([
+      leg(0, 48.37, 10.9, { kind: "transit", startDate: "2026-09-05" }),
+      leg(1, 48.37, 10.9),
+      leg(2, 48.37, 10.9, { kind: "transit", startDate: "2026-09-06" }),
+      { ...far, position: 3, startDate: "2026-09-06", days: [{}, {}, {}] },
+    ], home);
+    expect(s).toMatchObject({ afterLegIndex: 3, fromTitle: "Ort 1", toTitle: "Zuhause in Musterstadt",
+                              departDate: "2026-09-08" });
+    expect(s!.sentence).toMatch(/Als Heimreise geplant/);
+  });
+
+  it("says nothing about home when the trip has none", () => {
+    expect(suggestTransit([leg(0, 48.37, 10.9)], null)).toBeNull();
+  });
+});

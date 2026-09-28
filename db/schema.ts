@@ -2915,6 +2915,11 @@ export const tripPlans = pgTable(
     // The request that produced this plan, kept so a replan can reuse it.
     // Anchor, region and mode live on the leg (§4.2), not here.
     constraints: jsonb("constraints").notNull().default({}),
+    // Where the trip sets off from and returns to (migration 0217,
+    // §22.7): the far end of the journey there and of the journey home.
+    home_lat: doublePrecision("home_lat"),
+    home_lon: doublePrecision("home_lon"),
+    home_label: text("home_label"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
@@ -3898,7 +3903,7 @@ export const financeForecastStatement = pgTable(
   ]
 );
 
-// ---------- Finance: sharing a forecast within a household (migration 0215) ----------
+// ---------- Finance: sharing a forecast within a household (migration 0217) ----------
 
 export const financeForecastShare = pgTable(
   "finance_forecast_share",

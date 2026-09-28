@@ -42,6 +42,7 @@ export interface SuggestableLeg {
 }
 
 export interface TransitSuggestion {
+  /** -1 for the journey from home; the last leg's position for the journey home. */
   afterLegIndex: number;
   fromTitle: string;
   toTitle: string;
@@ -55,45 +56,110 @@ export interface TransitSuggestion {
   sentence: string;
 }
 
-/** The first pair of places that would be worth a journey, or null. */
-export function suggestTransit(legs: readonly SuggestableLeg[]): TransitSuggestion | null {
+/** Where the trip sets off from and returns to, when it is known. */
+export interface SuggestableHome {
+  lat: number;
+  lon: number;
+  label: string | null;
+}
+
+/**
+ * The first journey worth suggesting, in the order of the trip: from
+ * home to the first place, between two places, from the last place
+ * home. Null when there is none.
+ */
+export function suggestTransit(
+  legs: readonly SuggestableLeg[],
+  home: SuggestableHome | null = null,
+): TransitSuggestion | null {
   const ordered = [...legs].sort((a, b) => a.position - b.position);
+  if (ordered.length === 0) return null;
+  const homeLabel = home?.label ?? "Zuhause";
+
+  // The way there: the day the first place begins, arriving when it
+  // expects the group.
+  const first = ordered[0];
+  if (home && first.kind !== "transit" && first.startDate) {
+    const found = journey(
+      { title: homeLabel, anchor: home, mode: first.mode }, first,
+      -1, first.startDate, first.arriveMinutes, "Anreise",
+    );
+    if (found) return found;
+  }
+
   for (let i = 0; i + 1 < ordered.length; i++) {
     const from = ordered[i];
     const to = ordered[i + 1];
     if (from.kind === "transit" || to.kind === "transit") continue;
     if (!from.startDate || !to.startDate || from.days.length === 0) continue;
-    // Travelling on foot or by public transport, there is nothing the
-    // planner could stop at on the way.
-    const mode: TransportMode = to.mode === "bike" ? "bike" : "car";
-    if (to.mode !== "car" && to.mode !== "bike" && from.mode !== "car") continue;
+    const found = journey(
+      { title: legTitle(from), anchor: from.anchor, mode: from.mode }, to,
+      from.position, addDays(from.startDate, from.days.length - 1), to.arriveMinutes, "Weiterreise",
+    );
+    if (found) return found;
+  }
 
-    const drive = travelLeg(from.anchor, to.anchor, mode).minutes;
-    if (drive < MIN_DRIVE_MINUTES) continue;
-
-    const departDate = addDays(from.startDate, from.days.length - 1);
-    const arrive = to.arriveMinutes
-      ?? Math.min(LATEST_ARRIVAL, DEPART_MINUTES + drive + STOP_MARGIN_MINUTES);
-    if (arrive <= DEPART_MINUTES + drive) continue;
-
-    const fromTitle = from.title ?? from.anchorLabel ?? `Etappe ${from.position + 1}`;
-    const toTitle = to.title ?? to.anchorLabel ?? `Etappe ${to.position + 1}`;
-    return {
-      afterLegIndex: from.position,
-      fromTitle,
-      toTitle,
-      departDate,
-      departAt: clock(DEPART_MINUTES),
-      arriveDate: departDate,
-      arriveAt: clock(arrive),
-      mode,
-      driveMinutes: drive,
-      sentence: `Von ${fromTitle} nach ${toTitle} sind es rund ${duration(drive)} `
-        + `${mode === "bike" ? "mit dem Rad" : "mit dem Auto"}. Als Weiterreise geplant, `
-        + "schlägt der Planer Orte am Weg vor, deren Umweg in den Tag passt.",
-    };
+  // The way home: the last day of the last place.
+  const last = ordered[ordered.length - 1];
+  if (home && last.kind !== "transit" && last.startDate && last.days.length > 0) {
+    return journey(
+      { title: legTitle(last), anchor: last.anchor, mode: last.mode },
+      { title: homeLabel, anchor: home, mode: last.mode, arriveMinutes: null, position: last.position + 1 },
+      last.position, addDays(last.startDate, last.days.length - 1), null, "Heimreise",
+    );
   }
   return null;
+}
+
+interface JourneyEnd {
+  title?: string | null;
+  anchorLabel?: string | null;
+  anchor: Coordinate;
+  mode: TransportMode;
+  arriveMinutes?: number | null;
+  position?: number;
+}
+
+function journey(
+  from: JourneyEnd,
+  to: JourneyEnd,
+  afterLegIndex: number,
+  date: string,
+  expectedArrival: number | null,
+  word: "Anreise" | "Weiterreise" | "Heimreise",
+): TransitSuggestion | null {
+  // Travelling on foot or by public transport, there is nothing the
+  // planner could stop at on the way.
+  const mode: TransportMode = to.mode === "bike" ? "bike" : "car";
+  if (to.mode !== "car" && to.mode !== "bike" && from.mode !== "car") return null;
+
+  const drive = travelLeg(from.anchor, to.anchor, mode).minutes;
+  if (drive < MIN_DRIVE_MINUTES) return null;
+
+  const arrive = expectedArrival
+    ?? Math.min(LATEST_ARRIVAL, DEPART_MINUTES + drive + STOP_MARGIN_MINUTES);
+  if (arrive <= DEPART_MINUTES + drive) return null;
+
+  const fromTitle = legTitle(from);
+  const toTitle = legTitle(to);
+  return {
+    afterLegIndex,
+    fromTitle,
+    toTitle,
+    departDate: date,
+    departAt: clock(DEPART_MINUTES),
+    arriveDate: date,
+    arriveAt: clock(arrive),
+    mode,
+    driveMinutes: drive,
+    sentence: `Von ${fromTitle} nach ${toTitle} sind es rund ${duration(drive)} `
+      + `${mode === "bike" ? "mit dem Rad" : "mit dem Auto"}. Als ${word} geplant, `
+      + "schlägt der Planer Orte am Weg vor, deren Umweg in den Tag passt.",
+  };
+}
+
+function legTitle(end: JourneyEnd): string {
+  return end.title ?? end.anchorLabel ?? `Etappe ${(end.position ?? 0) + 1}`;
 }
 
 export const transitSuggestion = api(
@@ -104,7 +170,7 @@ export const transitSuggestion = api(
     requirePermission(auth, "photos.view");
     const plan = await loadPlan(planId, parseInt(auth.userID, 10));
     if (!plan) throw APIError.notFound("plan not found");
-    return { suggestion: suggestTransit(plan.legs) };
+    return { suggestion: suggestTransit(plan.legs, plan.home) };
   },
 );
 
