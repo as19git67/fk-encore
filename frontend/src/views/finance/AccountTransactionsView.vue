@@ -2003,14 +2003,14 @@ function goBack() {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 .tx-card {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.85rem 1rem;
+  padding: 0.65rem 0.75rem;
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;

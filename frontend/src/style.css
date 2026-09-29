@@ -95,7 +95,10 @@
   --p-focus-ring-width: var(--focus-ring-width);
   --p-focus-ring-offset: var(--focus-ring-offset);
 
-  --page-gutter: 16px;
+  /* 12px on a phone: enough for a focus ring (4px reach) and a thumb's
+     margin, and every page keeps the same edge — search field, cards and
+     headings all sit on it. 16px read as a frame around the cards. */
+  --page-gutter: 12px;
   --page-max-normal: 1200px;
   --page-max-wide: 1600px;
 }
