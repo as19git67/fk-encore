@@ -225,7 +225,8 @@ export function defaultItemData(type: ForecastItemType): Record<string, unknown>
       return { amount: 2500 }
     case 'health_insurance':
       return {
-        employedAmount: 450,
+        // The salary is net: the employee's share is already gone. Only after leaving work is there something to pay.
+        employedAmount: 0,
         bridgeMode: 'statutory_voluntary',
         bridgeAmount: 0,
         retiredMode: 'kvdr',
@@ -316,8 +317,12 @@ export function summarizeItem(
       )
     case 'living_expense':
       return withEnd(`${formatEur(n('amount'))} / Monat`, until('end'))
-    case 'health_insurance':
-      return `${formatEur(n('employedAmount'))} / Monat, danach ${HI_MODE_LABELS[(data.bridgeMode as HiMode) ?? 'statutory_voluntary']}`
+    case 'health_insurance': {
+      const bridge = HI_MODE_LABELS[(data.bridgeMode as HiMode) ?? 'statutory_voluntary']
+      const retired = HI_MODE_LABELS[(data.retiredMode as HiMode) ?? 'kvdr']
+      const now = n('employedAmount') > 0 ? `${formatEur(n('employedAmount'))} / Monat, ` : 'im Netto enthalten, '
+      return `${now}nach dem Ausstieg ${bridge}, ab Rente ${retired}`
+    }
     case 'asset': {
       const base = `${formatEur(linkedBalance ?? n('currentValue'))}${linkedBalance != null ? ' (aus Konto)' : ''}`
       return n('monthlyContribution') > 0 ? withEnd(base, until('contributionEnd'), 'Sparrate bis') : base

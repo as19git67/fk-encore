@@ -353,6 +353,14 @@ describe("toEngineScenario", () => {
     expect(s.offsetDeductions).toEqual([1]);
     expect(s.allowSurrender).toBe(false);
     expect(s.stress).toEqual({ crashYear: null, crashSize: 0.3 });
+    // Older configs know neither the care share nor the ceiling; the care share never exceeds the rate.
+    expect(toEngineScenario({ healthInsurance: { rate: 0.19, minMonthly: 240 } }).healthInsurance).toEqual({
+      rate: 0.19,
+      careRate: 0.036,
+      minMonthly: 240,
+      maxMonthlyIncome: 5512.5,
+    });
+    expect(toEngineScenario({ healthInsurance: { rate: 0.02, careRate: 0.05 } }).healthInsurance.careRate).toBe(0.02);
     expect(toEngineScenario({ stress: { crashYear: 2031.4, crashSize: 7 } }).stress).toEqual({ crashYear: 2031, crashSize: 0.99 });
   });
 });

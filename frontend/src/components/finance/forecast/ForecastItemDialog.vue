@@ -246,8 +246,9 @@ function save() {
     <!-- Health insurance -->
     <template v-if="type === 'health_insurance'">
       <div class="field">
-        <label for="fc-hi-employed">Arbeitnehmeranteil pro Monat (bis zum Ausstieg)</label>
+        <label for="fc-hi-employed">Zusätzlicher Beitrag pro Monat bis zum Ausstieg</label>
         <InputNumber input-id="fc-hi-employed" :model-value="n('employedAmount')" mode="currency" currency="EUR" locale="de-DE" @update:model-value="set('employedAmount', $event)" />
+        <p class="hint">Meist 0: Das Gehalt ist netto, der Arbeitnehmeranteil ist schon abgezogen. Nur ein Beitrag, der zusätzlich vom Netto abgeht (privat versichert, Zusatztarif), gehört hierher.</p>
       </div>
       <div class="grid2">
         <div class="field">
@@ -271,7 +272,10 @@ function save() {
           <InputNumber input-id="fc-hi-growth" :model-value="pct('privateGrowthRate')" suffix=" %" :min-fraction-digits="1" :max-fraction-digits="2" @update:model-value="setPct('privateGrowthRate', $event)" />
         </div>
       </div>
-      <p class="hint">Freiwillig gesetzlich: Beitragssatz auf die eigenen Einnahmen, mindestens der Mindestbeitrag. KVdR: Beitragssatz nur auf die Renten. Beide Sätze stehen im Szenario.</p>
+      <p class="hint">
+        Freiwillig gesetzlich: Beitragssatz auf alle Einnahmen der Person — Renten, Mieten, Kapitalerträge des Vormonats (eigene Anlagen ganz, Haushaltsanlagen anteilig) —, mindestens der Mindestbeitrag, höchstens bis zur Beitragsbemessungsgrenze.
+        KVdR (nur wer die Vorversicherungszeit erfüllt): halber Satz plus voller Pflegesatz auf die gesetzliche Rente, voller Satz auf Betriebsrenten; private Renten und Kapitalerträge bleiben frei. Sätze und Grenzen stehen im Szenario.
+      </p>
     </template>
 
     <!-- Asset -->
