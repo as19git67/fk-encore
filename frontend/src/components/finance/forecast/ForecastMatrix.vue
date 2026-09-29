@@ -44,7 +44,7 @@ function style(c: ForecastMatrixCell | undefined): Record<string, string> {
 
 function title(c: ForecastMatrixCell | undefined): string {
   if (!c) return ''
-  return c.ok ? `Restvermögen am Ende: ${formatEur(shown(c.finalWealth))}` : `Geld reicht bis ${c.failYear ?? '?'}`
+  return c.ok ? `Restvermögen am Ende: ${formatEur(shown(c.finalWealth))}` : `Geld geht ${c.failYear ?? '?'} aus`
 }
 </script>
 

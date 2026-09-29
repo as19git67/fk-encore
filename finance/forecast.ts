@@ -25,6 +25,15 @@ import {
   users,
 } from "../db/schema";
 import {
+  leverAnalysis,
+  reverseCalculation,
+  sensitivityTable,
+  type LeverAnalysis,
+  type ReverseResult,
+  type SensitivityTable,
+} from "./forecast-analysis";
+import {
+  ageAtStart,
   defaultScenario,
   earliestLeaveAge,
   leaveAgeMatrix,
@@ -192,6 +201,10 @@ export interface SimulateRequest {
   matrix?: { personA: number; personB: number; fromAge: number; toAge: number };
   /** Also run these saved scenarios for the comparison chart. */
   compareScenarioIds?: number[];
+  /** Also compute the sensitivity table and the levers for `earliestFor` (#1339). */
+  robustness?: boolean;
+  /** Also answer "what does it take to leave at this age?" for `earliestFor` (#1340). */
+  targetAge?: number;
 }
 
 export interface EarliestResult {
@@ -210,6 +223,9 @@ export interface SimulateResponse {
   earliest: EarliestResult | null;
   matrix: MatrixCell[] | null;
   comparisons: ComparisonRun[];
+  sensitivity: SensitivityTable | null;
+  levers: LeverAnalysis | null;
+  reverse: ReverseResult | null;
 }
 
 // -----------------------------------------------------------------------
@@ -345,7 +361,8 @@ export function toEngineItem(
         ...base,
         type: "asset",
         pot: str(d.pot, POTS, "cash"),
-        currentValue: linkedBalance ?? num(d.currentValue, 0),
+        // A negative balance (an overdrawn account) is a debt, not an asset to draw on.
+        currentValue: Math.max(0, linkedBalance ?? num(d.currentValue, 0)),
         returnRate: numOrNull(d.returnRate),
         monthlyContribution: num(d.monthlyContribution, 0),
         contributionEnd: timeRef(d.contributionEnd),
@@ -380,6 +397,7 @@ export function toEngineItem(
         personId: pid,
         kind: str(d.kind, ["statutory", "company", "private"] as const, "statutory"),
         monthlyAmount: num(d.monthlyAmount, 0),
+        currentEntitlement: numOrNull(d.currentEntitlement),
         start,
         regularAge: numOrNull(d.regularAge),
         deductionPerMonth: num(d.deductionPerMonth, 0),
@@ -423,6 +441,7 @@ export function toEngineScenario(config: Record<string, unknown>, name = "Szenar
   const orderIn = Array.isArray(c.withdrawalOrder) ? c.withdrawalOrder : base.withdrawalOrder;
   const withdrawalOrder = orderIn.filter((p): p is (typeof POTS)[number] => (POTS as readonly string[]).includes(String(p)));
   const offsets = Array.isArray(c.offsetDeductions) ? c.offsetDeductions.filter((x): x is number => typeof x === "number") : [];
+  const st = (c.stress && typeof c.stress === "object" ? c.stress : {}) as Record<string, unknown>;
   return {
     id,
     name,
@@ -446,6 +465,10 @@ export function toEngineScenario(config: Record<string, unknown>, name = "Szenar
       minMonthly: num(hi.minMonthly, base.healthInsurance.minMonthly),
     },
     offsetDeductions: offsets,
+    stress: {
+      crashYear: st.crashYear == null ? null : Math.round(num(st.crashYear, 0)),
+      crashSize: Math.min(0.99, Math.max(0, num(st.crashSize, base.stress.crashSize))),
+    },
   };
 }
 
@@ -658,9 +681,10 @@ export const createPerson = api(
       .values({ user_id: userId, label: req.label.trim(), birth_date: req.birthDate, sort_order: req.sortOrder ?? 0 })
       .returning();
     // Every person starts with the two milestones the forecast turns on.
+    const regular = regularRetirementAge(Number(req.birthDate.slice(0, 4)));
     await db.insert(financeForecastMilestone).values([
-      { user_id: userId, person_id: row.id, kind: "leave_work", label: MILESTONE_LABELS.leave_work, age: 63 },
-      { user_id: userId, person_id: row.id, kind: "statutory_pension", label: MILESTONE_LABELS.statutory_pension, age: 67 },
+      { user_id: userId, person_id: row.id, kind: "leave_work", label: MILESTONE_LABELS.leave_work, age: Math.min(63, regular) },
+      { user_id: userId, person_id: row.id, kind: "statutory_pension", label: MILESTONE_LABELS.statutory_pension, age: regular },
     ]);
     return toPersonDto(row);
   },
@@ -1007,7 +1031,7 @@ export const runSimulation = api(
     let earliest: SimulateResponse["earliest"] = null;
     if (req.earliestFor != null) {
       if (!hh.persons.some((p) => p.id === req.earliestFor)) throw APIError.notFound(`person ${req.earliestFor} not found`);
-      earliest = { personId: req.earliestFor, age: earliestLeaveAge(input, req.earliestFor).age };
+      earliest = { personId: req.earliestFor, age: earliestLeaveAge(input, req.earliestFor, 75).age };
     }
 
     let matrix: MatrixCell[] | null = null;
@@ -1033,7 +1057,26 @@ export const runSimulation = api(
       });
     }
 
-    return { result, earliest, matrix, comparisons };
+    let sensitivity: SensitivityTable | null = null;
+    let levers: LeverAnalysis | null = null;
+    let reverse: ReverseResult | null = null;
+    if (req.earliestFor != null && (req.robustness || req.targetAge != null)) {
+      const pid = req.earliestFor;
+      if (req.robustness) {
+        sensitivity = sensitivityTable(input, pid);
+        levers = leverAnalysis(input, pid);
+      }
+      if (req.targetAge != null) {
+        const age = Math.floor(req.targetAge);
+        const current = ageAtStart(input, pid) ?? 0;
+        if (age < Math.max(40, current) || age > 80) {
+          throw APIError.invalidArgument(`target age must be between ${Math.max(40, current)} and 80`);
+        }
+        reverse = reverseCalculation(input, pid, age);
+      }
+    }
+
+    return { result, earliest, matrix, comparisons, sensitivity, levers, reverse };
   },
 );
 
@@ -1110,6 +1153,28 @@ export const previewImport = api(
   },
 );
 
+/**
+ * An imported statutory pension names a payout year, nothing more. Tied to
+ * the person's "Gesetzliche Rente" milestone instead, it follows the
+ * scenario's sliders, and with the regular age and the usual deduction the
+ * engine can price an earlier start.
+ */
+export function bindStatutoryPension(
+  b: BuiltItem,
+  statutoryMilestone: Map<number, number>,
+  birthYear: Map<number, number>,
+): void {
+  if (b.type !== "pension" || b.data.kind !== "statutory" || b.personId == null) return;
+  const ms = statutoryMilestone.get(b.personId);
+  const born = birthYear.get(b.personId);
+  const start = b.data.start as { kind?: string; date?: string } | null;
+  if (ms == null || born == null || !start || start.kind !== "date" || typeof start.date !== "string") return;
+  const payoutAge = Number(start.date.slice(0, 4)) - born;
+  b.data.start = { kind: "milestone", milestoneId: ms };
+  b.data.regularAge = payoutAge >= 60 && payoutAge <= 70 ? payoutAge : regularRetirementAge(born);
+  b.data.deductionPerMonth = 0.003;
+}
+
 export const commitImport = api(
   { expose: true, method: "POST", path: "/finance/forecast/import/commit", auth: true },
   async (req: ImportCommitRequest): Promise<ImportCommitResponse> => {
@@ -1117,13 +1182,19 @@ export const commitImport = api(
     if (!Array.isArray(req.rows) || req.rows.length === 0) throw APIError.invalidArgument("rows must be a non-empty list");
     if (req.rows.length > 500) throw APIError.invalidArgument("at most 500 rows per import");
 
-    const ownPersons = new Set(
+    const personRows = await db
+      .select({ id: financeForecastPerson.id, birthDate: financeForecastPerson.birth_date })
+      .from(financeForecastPerson)
+      .where(eq(financeForecastPerson.user_id, userId));
+    const ownPersons = new Set(personRows.map((p) => p.id));
+    const birthYear = new Map(personRows.map((p) => [p.id, Number(p.birthDate.slice(0, 4))]));
+    const statutoryMilestone = new Map(
       (
         await db
-          .select({ id: financeForecastPerson.id })
-          .from(financeForecastPerson)
-          .where(eq(financeForecastPerson.user_id, userId))
-      ).map((p) => p.id),
+          .select({ id: financeForecastMilestone.id, personId: financeForecastMilestone.person_id })
+          .from(financeForecastMilestone)
+          .where(and(eq(financeForecastMilestone.user_id, userId), eq(financeForecastMilestone.kind, "statutory_pension")))
+      ).map((m) => [m.personId, m.id]),
     );
     const opts = importOptions(req.pensionGrowthRate);
 
@@ -1154,6 +1225,7 @@ export const commitImport = api(
         problems.push(`${label}: ${b.error}`);
         continue;
       }
+      bindStatutoryPension(b, statutoryMilestone, birthYear);
       if (toEngineItem({ id: 0, person_id: b.personId, type: b.type, label: b.label, data: b.data, linked_account_id: null }, null) === null) {
         problems.push(`${label}: unvollständig`);
         continue;
@@ -1207,11 +1279,25 @@ export const evaluateImport = api(
 
 /** Account kinds that hold wealth rather than running money, and the pot each goes to. */
 const SAVINGS_POT: Record<string, "cash" | "depot" | "other"> = {
+  giro: "cash",
+  bargeld: "cash",
   tagesgeld: "cash",
   festgeld: "cash",
   bausparen: "other",
   depot: "depot",
 };
+
+/**
+ * Regular retirement age of the statutory pension by birth year (§ 35, § 235
+ * SGB VI), in whole years: 65 up to 1946, rising to 67 from 1964 on. The
+ * months in between are rounded to the nearer year.
+ */
+export function regularRetirementAge(birthYear: number): number {
+  if (birthYear <= 1946) return 65;
+  if (birthYear >= 1964) return 67;
+  const months = birthYear <= 1958 ? birthYear - 1946 : 12 + (birthYear - 1958) * 2;
+  return 65 + Math.round(months / 12);
+}
 
 interface AccountItemsRequest {
   accounts: Array<{ accountId: number; personId: number | null }>;

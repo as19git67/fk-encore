@@ -167,6 +167,15 @@ describe("buildImportItem", () => {
     });
   });
 
+  it("books a one-off amount of the current year in the current month, not in January", () => {
+    const now = new Date();
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    const thisYear = { ...opts, currentYear: now.getFullYear() };
+    expect(buildImportItem("Bonus", raw({ once: 5000, payoutYear: now.getFullYear() }), "income", null, thisYear)).toMatchObject({
+      data: { frequency: "once", start: { kind: "date", date: thisMonth } },
+    });
+  });
+
   it("keeps loans at a fixed amount and lets other expenses follow inflation", () => {
     expect(buildImportItem("Zinsen Kredit", raw({ expenseYearly: -1200 }), "expense", null, opts)).toMatchObject({
       data: { amount: 1200, frequency: "yearly", growthRate: 0 },

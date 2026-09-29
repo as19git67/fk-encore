@@ -267,7 +267,7 @@ function findRate(wb: ExcelJS.Workbook, re: RegExp): number | null {
         for (let k = c + 1; k <= c + 3; k++) {
           const n = num(scalar(row.getCell(k).value));
           if (n != null) {
-            found = n > 1 ? n / 100 : n;
+            found = n >= 1 ? n / 100 : n; // "1" means 1 %, a rate of 100 % is never meant
             return;
           }
         }
@@ -328,9 +328,12 @@ export function suggestType(label: string, raw: ImportRaw, currentYear: number):
 
   if ((exp ?? 0) < 0 && (once ?? 0) > 0) {
     const hasMaturity = payoutYear != null || raw.detail?.maturity != null;
-    return hasMaturity
-      ? { type: "life_insurance", include: true, reason: null }
-      : { type: "life_insurance", include: false, reason: "Ablaufjahr fehlt – bitte ergänzen" };
+    if (!hasMaturity) return { type: "life_insurance", include: false, reason: "Ablaufjahr fehlt – bitte ergänzen" };
+    // A contract that has already paid out would be paid out again at the start of the forecast.
+    if (payoutYear != null && payoutYear < currentYear) {
+      return { type: "life_insurance", include: false, reason: "Ablauf liegt in der Vergangenheit" };
+    }
+    return { type: "life_insurance", include: true, reason: payoutYear === currentYear ? "Ablauf in diesem Jahr – bitte prüfen, ob schon ausgezahlt" : null };
   }
   if ((inc ?? 0) > 0 && payoutYear != null && payoutYear > currentYear) {
     return { type: "pension", include: true, reason: null };
@@ -360,6 +363,17 @@ export function suggestType(label: string, raw: ImportRaw, currentYear: number):
  * takes what it can from the row. Returns an error text when the row
  * lacks something the type needs.
  */
+/**
+ * When a one-off amount is booked: January of its year — or, for the current
+ * year, the current month, because the simulation starts this month and
+ * would never visit January again.
+ */
+function onceStart(year: number, currentYear: number): string {
+  if (year !== currentYear) return yearStart(year);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
 export function buildImportItem(
   label: string,
   raw: ImportRaw,
@@ -404,7 +418,7 @@ export function buildImportItem(
       }
       if (once > 0) {
         const y = raw.payoutYear ?? opts.currentYear;
-        return item({ amount: round2(once), frequency: "once", growthRate: 0, taxRate: 0, start: at(yearStart(y)) });
+        return item({ amount: round2(once), frequency: "once", growthRate: 0, taxRate: 0, start: at(onceStart(y, opts.currentYear)) });
       }
       return { error: "Keine Einnahme" };
     }
@@ -412,7 +426,7 @@ export function buildImportItem(
     case "expense": {
       if (once < 0 && isZero(exp)) {
         const y = raw.contributionUntilYear ?? raw.payoutYear ?? opts.currentYear;
-        return item({ amount: round2(-once), frequency: "once", growthRate: 0, start: at(yearStart(y)) });
+        return item({ amount: round2(-once), frequency: "once", growthRate: 0, start: at(onceStart(y, opts.currentYear)) });
       }
       if (yearlyAbs <= 0) return { error: "Keine Ausgabe" };
       const loan = /zins|tilgung|kredit|darlehen/i.test(label);

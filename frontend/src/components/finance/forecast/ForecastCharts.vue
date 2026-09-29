@@ -31,7 +31,13 @@ const onScheme = (e: MediaQueryListEvent) => (isDark.value = e.matches)
 onMounted(() => darkMQ?.addEventListener('change', onScheme))
 onBeforeUnmount(() => darkMQ?.removeEventListener('change', onScheme))
 
-const labels = computed(() => props.result.years.map((y) => String(y.year)))
+/** Year labels; the first year is a partial year when the simulation started later than January. */
+const labels = computed(() =>
+  props.result.years.map((y, i) =>
+    i === 0 && props.result.startMonth > 1 ? `${y.year} (ab ${MONTH_SHORT[props.result.startMonth - 1]})` : String(y.year),
+  ),
+)
+const MONTH_SHORT = ['Jan.', 'Feb.', 'März', 'Apr.', 'Mai', 'Juni', 'Juli', 'Aug.', 'Sep.', 'Okt.', 'Nov.', 'Dez.']
 
 /** Second label row: the ages of all persons. */
 const ageRow = computed(() =>
@@ -47,7 +53,11 @@ const gridColor = computed(() => (isDark.value ? 'rgba(255,255,255,0.08)' : 'rgb
 
 const wealthData = computed<ChartData<'line'>>(() => {
   const colors = potColors()
-  const pots = props.result.pots.filter((p) => props.result.years.some((y) => (y.pots[p] ?? 0) > 1))
+  // Liquid pots first, so the boundary above "Sonstiges" is what the minimum line is compared with.
+  const order: string[] = ['cash', 'depot', 'other', 'real_estate', 'insurance']
+  const pots = [...props.result.pots]
+    .filter((p) => props.result.years.some((y) => (y.pots[p] ?? 0) > 1))
+    .sort((a, b) => order.indexOf(a) - order.indexOf(b))
   return {
     labels: labels.value,
     datasets: pots.map((pot) => ({
@@ -88,6 +98,8 @@ const cashflowData = computed<ChartData<'bar'>>(() => {
     pointRadius: 2,
     tension: 0.2,
     order: -1,
+    // The axis stacks; each line needs a stack of its own or it is drawn on top of the other.
+    stack: 'expenses-total',
   }
   const hiLine = {
     type: 'line' as const,
@@ -100,6 +112,7 @@ const cashflowData = computed<ChartData<'bar'>>(() => {
     pointRadius: 0,
     tension: 0.2,
     order: -1,
+    stack: 'expenses-hi',
   }
   // Mixed charts: the line datasets are typed as bar datasets by Chart.js' generics.
   datasets.push(expenseLine as unknown as ChartData<'bar'>['datasets'][number])
@@ -174,18 +187,19 @@ function markerPlugin(showMinimum: boolean): Plugin {
       const y = scales.y
       if (!x || !chartArea) return
       ctx.save()
-      // Minimum liquid wealth.
+      // Minimum liquid wealth: a nominal constant, so in today's money it falls year by year.
       if (y && minLiquid > 0 && showMinimum) {
-        const py = y.getPixelForValue(minLiquid)
-        if (py >= chartArea.top && py <= chartArea.bottom) {
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'
-          ctx.setLineDash([6, 4])
-          ctx.beginPath()
-          ctx.moveTo(chartArea.left, py)
-          ctx.lineTo(chartArea.right, py)
-          ctx.stroke()
-          ctx.setLineDash([])
-        }
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'
+        ctx.setLineDash([6, 4])
+        ctx.beginPath()
+        result.years.forEach((row, i) => {
+          const py = Math.min(chartArea.bottom, Math.max(chartArea.top, y.getPixelForValue(value(minLiquid, row.year))))
+          const px = x.getPixelForValue(i)
+          if (i === 0) ctx.moveTo(px, py)
+          else ctx.lineTo(px, py)
+        })
+        ctx.stroke()
+        ctx.setLineDash([])
       }
       // Milestones.
       ctx.font = '10px sans-serif'

@@ -115,8 +115,15 @@ export function ageInYear(person: ForecastPerson, year: number): number {
   return year - Number(person.birthDate.slice(0, 4))
 }
 
+/** Completed years today, from the full birth date (the birthday may still be ahead this year). */
 export function currentAge(person: ForecastPerson): number {
-  return ageInYear(person, new Date().getFullYear())
+  const now = new Date()
+  const y = Number(person.birthDate.slice(0, 4))
+  const m = Number(person.birthDate.slice(5, 7))
+  const d = Number(person.birthDate.slice(8, 10))
+  let age = now.getFullYear() - y
+  if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age -= 1
+  return age
 }
 
 /** Milestone as the current scenario sees it (override wins). */

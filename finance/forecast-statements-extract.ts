@@ -30,6 +30,7 @@ export const EMPTY_VALUES: StatementValues = {
   maturityDate: null,
   guaranteedMonthlyPension: null,
   projectedMonthlyPension: null,
+  currentMonthlyPension: null,
   lumpSum: null,
   pensionStartDate: null,
 };
@@ -43,6 +44,7 @@ type AmountField =
   | "premiumYearly"
   | "guaranteedMonthlyPension"
   | "projectedMonthlyPension"
+  | "currentMonthlyPension"
   | "lumpSum";
 type DateField = "referenceDate" | "premiumEndDate" | "maturityDate" | "pensionStartDate";
 
@@ -55,6 +57,7 @@ const AMOUNT_FIELDS: AmountField[] = [
   "premiumYearly",
   "guaranteedMonthlyPension",
   "projectedMonthlyPension",
+  "currentMonthlyPension",
   "lumpSum",
 ];
 const DATE_FIELDS: DateField[] = ["referenceDate", "premiumEndDate", "maturityDate", "pensionStartDate"];
@@ -69,6 +72,7 @@ const MAX_AMOUNT: Record<AmountField, number> = {
   premiumYearly: 240_000,
   guaranteedMonthlyPension: 50_000,
   projectedMonthlyPension: 50_000,
+  currentMonthlyPension: 50_000,
   lumpSum: 10_000_000,
 };
 
@@ -168,7 +172,11 @@ const PATTERNS: Pattern[] = [
     label: /((Fonds|Vertrags|Policen)guthaben|Deckungskapital|Vertragswert|Wert\s+Ihre[rs]\s+(Vertrag|Versicherung)\w*|Anteilswert)[^\d\n]{0,40}/i,
   },
   // A premium increase (Dynamik) states the old and the new premium; the new one counts.
-  { field: "premiumMonthly", label: /neue[rn]?\s+(monatliche[rn]?\s+)?(Gesamt)?beitrag\w*[^\d\n]{0,30}/i },
+  {
+    field: "premiumMonthly",
+    label: /neue[rn]?\s+(monatliche[rn]?\s+)?(Gesamt)?beitrag\w*[^\d\n]{0,30}/i,
+    not: /j(ä|ae)hrlich|Jahres|viertelj|halbj|pro\s+Jahr/i,
+  },
   {
     field: "premiumMonthly",
     label: /(monatliche[rn]?\s+Beitrag\w*|Beitrag\w*\s+(monatlich|mtl\.?)|Monatsbeitrag)[^\d\n]{0,30}/i,
@@ -196,6 +204,10 @@ const PATTERNS: Pattern[] = [
     field: "projectedMonthlyPension",
     label:
       /((voraussichtliche|prognostizierte|m(ö|oe)gliche)\s+(monatliche\s+)?(Regel)?(Alters)?rente|Regelaltersrente|k(ü|ue)nftige[nr]?\s+Regelaltersrente)[^\d\n]{0,60}/i,
+  },
+  {
+    field: "currentMonthlyPension",
+    label: /(bisher\s+erreichte[nrs]?\s+(Renten)?anwartschaft\w*|H(ö|oe)he\s+Ihrer\s+bisher\w*\s+erreichten\s+Rentenanwartschaft|Rente\s+wegen\s+voller\s+Erwerbsminderung)[^\d\n]{0,60}/i,
   },
   { field: "lumpSum", label: /(Kapitalabfindung|einmalige\s+Kapitalzahlung|Kapitalwahl\w*)[^\d\n]{0,40}/i },
   { field: "pensionStartDate", label: /(Rentenbeginn|Leistungsbeginn|Beginn\s+der\s+(Alters)?rente)[^\d\n]{0,25}/i },
@@ -245,6 +257,7 @@ export const LLM_FIELDS: Record<keyof StatementValues, string> = {
   maturityDate: "Ablauf des Vertrags (YYYY-MM-DD)",
   guaranteedMonthlyPension: "garantierte monatliche Rente in Euro",
   projectedMonthlyPension: "voraussichtliche monatliche Rente in Euro (bei der gesetzlichen Rente: Regelaltersrente)",
+  currentMonthlyPension: "bisher erreichte Rentenanwartschaft in Euro pro Monat (gesetzliche Rente: Rente, wenn keine Beiträge mehr gezahlt würden)",
   lumpSum: "Kapitalabfindung/Kapitalwahlrecht als Einmalbetrag in Euro",
   pensionStartDate: "Rentenbeginn (YYYY-MM-DD)",
 };
@@ -288,7 +301,9 @@ export function validateValues(v: StatementValues, today: string): StatementValu
   for (const f of AMOUNT_FIELDS) {
     const n = out[f];
     if (n == null) continue;
-    if (!(n > 0) || n > MAX_AMOUNT[f]) out[f] = null;
+    // A premium of zero is a statement in itself (a contract made premium-free); nothing else is.
+    const min = f === "premiumMonthly" || f === "premiumYearly" ? 0 : Number.MIN_VALUE;
+    if (!(n >= min) || n > MAX_AMOUNT[f]) out[f] = null;
   }
   const limit = addDays(today, 45);
   for (const f of DATE_FIELDS) {
@@ -422,6 +437,7 @@ export function computeProposals(type: ItemType, data: Data, v: StatementValues)
       break;
     case "pension":
       amount("monthlyAmount", "Rente pro Monat", v.projectedMonthlyPension ?? v.guaranteedMonthlyPension);
+      if (data.kind === "statutory") amount("currentEntitlement", "Bisher erreichte Anwartschaft", v.currentMonthlyPension);
       amount("lumpSumOption", "Kapitalwahlrecht", v.lumpSum);
       amount("monthlyContribution", "Eigener Beitrag pro Monat", monthly);
       date("start", "Rentenbeginn", v.pensionStartDate);
@@ -429,11 +445,15 @@ export function computeProposals(type: ItemType, data: Data, v: StatementValues)
     case "asset":
       amount("currentValue", "Aktueller Wert", v.contractValue ?? v.surrenderValue);
       break;
+    case "health_insurance":
+      // The premium while employed; a private contract in the bridge or in retirement follows its own mode.
+      amount("employedAmount", "Beitrag pro Monat", monthly);
+      break;
     case "expense": {
-      // A premium booked as an expense: compare in the item's own rhythm.
+      // A premium booked as an expense: compare in the item's own rhythm (none given = monthly, as the engine reads it).
       const freq = data.frequency;
       if (freq === "yearly") amount("amount", "Beitrag pro Jahr", v.premiumYearly ?? (v.premiumMonthly != null ? v.premiumMonthly * 12 : null));
-      else if (freq === "monthly") amount("amount", "Beitrag pro Monat", monthly);
+      else if (freq === "monthly" || freq == null) amount("amount", "Beitrag pro Monat", monthly);
       break;
     }
     default:

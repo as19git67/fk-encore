@@ -11,6 +11,7 @@ import type {
   ForecastSimulation,
   ForecastYearRow,
 } from '../api/finance'
+import { LEVERS, REVERSE_GAP, REVERSE_OK, SENSITIVITY } from './forecastRobustnessFixture'
 
 /**
  * Finanzen › Prognose (issue #1337). The household below is invented:
@@ -42,6 +43,7 @@ const DEFAULT_SCENARIO: ForecastBundle['defaultScenario'] = {
   },
   healthInsurance: { rate: 0.2, minMonthly: 250 },
   offsetDeductions: [],
+  stress: { crashYear: null, crashSize: 0.3 },
 }
 
 const BUNDLE: ForecastBundle = {
@@ -189,6 +191,7 @@ function toySimulation(req: ForecastSimulateRequest): ForecastSimulation {
   const bridgeStart = Math.min(leaveA, leaveB)
   return {
     startYear,
+    startMonth: 1,
     endYear,
     years,
     sources: [
@@ -243,6 +246,12 @@ function simulateHandler(req: ForecastSimulateRequest): ForecastSimulateResponse
       const s = BUNDLE.scenarios.find((x) => x.id === id)!
       return { scenarioId: id, name: s.name, result: toySimulation({ scenario: s.config }) }
     }),
+    sensitivity: req.robustness && req.earliestFor != null ? { ...SENSITIVITY, personId: req.earliestFor } : null,
+    levers: req.robustness && req.earliestFor != null ? { ...LEVERS, personId: req.earliestFor } : null,
+    reverse:
+      req.targetAge != null && req.earliestFor != null
+        ? { ...(req.targetAge >= 62 ? REVERSE_OK : REVERSE_GAP), personId: req.earliestFor, targetAge: req.targetAge }
+        : null,
   }
 }
 
@@ -289,6 +298,29 @@ export const NochLeer: Story = {
         ...handlers,
       ],
     },
+  },
+}
+
+/** Robustness table, levers and the reverse calculation open (#1339, #1340). */
+export const Robustheit: Story = {
+  name: 'Robustheit und Zielalter',
+  play: async ({ canvasElement }) => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    // The page loads its household first; wait for the button to appear.
+    let button: HTMLButtonElement | undefined
+    for (let i = 0; i < 50 && !button; i++) {
+      button = Array.from(canvasElement.querySelectorAll('button')).find((b) => b.textContent?.includes('Wie robust ist das?'))
+      if (!button) await sleep(100)
+    }
+    button?.click()
+    const input = canvasElement.querySelector<HTMLInputElement>('#fc-target-age')
+    if (input) {
+      input.focus()
+      input.value = '58'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.blur()
+    }
+    await sleep(900)
   },
 }
 

@@ -21,6 +21,8 @@ import ForecastItemDialog from '../../components/finance/forecast/ForecastItemDi
 import ForecastTimeline from '../../components/finance/forecast/ForecastTimeline.vue'
 import ForecastCharts from '../../components/finance/forecast/ForecastCharts.vue'
 import ForecastMatrix from '../../components/finance/forecast/ForecastMatrix.vue'
+import ForecastRobustness from '../../components/finance/forecast/ForecastRobustness.vue'
+import ForecastTargetAge from '../../components/finance/forecast/ForecastTargetAge.vue'
 import ForecastImportDialog from '../../components/finance/forecast/ForecastImportDialog.vue'
 import ForecastStatementsDialog from '../../components/finance/forecast/ForecastStatementsDialog.vue'
 import ForecastAccountsDialog from '../../components/finance/forecast/ForecastAccountsDialog.vue'
@@ -215,6 +217,9 @@ const matrixB = ref<number | null>(null)
 const matrixFrom = ref(58)
 const matrixTo = ref(67)
 const showMatrix = ref(false)
+// #1339 / #1340: robustness table and levers, and the target age for the reverse calculation.
+const showRobustness = ref(false)
+const targetAge = ref<number | null>(null)
 const real = ref(true)
 const selectedYear = ref<number | null>(null)
 
@@ -239,6 +244,8 @@ async function runSimulation() {
       scenario: config.value,
       earliestFor: earliestFor.value ?? undefined,
       compareScenarioIds: compareIds.value,
+      robustness: showRobustness.value && earliestFor.value != null ? true : undefined,
+      targetAge: targetAge.value != null && earliestFor.value != null ? targetAge.value : undefined,
       matrix:
         showMatrix.value && matrixA.value != null && matrixB.value != null && matrixA.value !== matrixB.value
           ? { personA: matrixA.value, personB: matrixB.value, fromAge: matrixFrom.value, toAge: matrixTo.value }
@@ -254,7 +261,9 @@ async function runSimulation() {
   }
 }
 
-watch([config, earliestFor, compareIds, matrixA, matrixB, matrixFrom, matrixTo, showMatrix], scheduleSimulation, { deep: true })
+watch([config, earliestFor, compareIds, matrixA, matrixB, matrixFrom, matrixTo, showMatrix, showRobustness, targetAge], scheduleSimulation, {
+  deep: true,
+})
 watch(bundle, scheduleSimulation)
 
 onMounted(load)
@@ -280,6 +289,11 @@ const verdict = computed(() => {
   return { severity: 'warn' as const, text: `Das verfügbare Vermögen fällt ${r.failYear} unter die Grenze von ${formatEur(config.value?.minLiquidWealth ?? 0)}.` }
 })
 
+/** Deflation year of a bridge: never before the simulation starts (a leave date in the past). */
+function bridgeYear(b: { fromYear: number }): number {
+  return Math.max(b.fromYear, result.value?.startYear ?? b.fromYear)
+}
+
 const bridgeRows = computed(() =>
   (result.value?.bridges ?? []).map((b) => ({
     ...b,
@@ -298,6 +312,9 @@ function leaveAge(p: ForecastPerson): number | null {
   if (!m || !config.value) return null
   const eff = effectiveMilestone(m, config.value)
   if (eff.age != null) return eff.age
+  // A date: the engine's age at that month (a birthday later in the year makes it one less than the year difference).
+  const resolved = result.value?.milestones.find((x) => x.id === m.id)
+  if (resolved) return resolved.age
   if (eff.date) return Number(eff.date.slice(0, 4)) - Number(p.birthDate.slice(0, 4))
   return null
 }
@@ -327,6 +344,15 @@ const overriddenIds = computed(() => {
 function resetOverrides() {
   if (!config.value) return
   config.value.milestoneOverrides = {}
+}
+
+/** Lowest target age the API accepts for the chosen person: at least 40 and not in the past. */
+const targetAgeMin = computed(() => (earliestPerson.value ? Math.max(40, currentAge(earliestPerson.value)) : 40))
+
+function pickRates(payload: { returnRate: number; inflationRate: number }) {
+  if (!config.value) return
+  config.value.defaultReturnRate = payload.returnRate
+  config.value.inflationRate = payload.inflationRate
 }
 
 const matrixPersonA = computed(() => persons.value.find((p) => p.id === matrixA.value) ?? null)
@@ -696,7 +722,7 @@ const yearDetail = computed(() => {
 
 const pctModel = (get: () => number, set: (v: number) => void) =>
   computed({
-    get: () => Math.round(get() * 10000) / 100,
+    get: () => Math.round(get() * 1_000_000) / 10_000,
     set: (v: number | null) => set((v ?? 0) / 100),
   })
 
@@ -705,6 +731,25 @@ const returnPct = pctModel(() => config.value?.defaultReturnRate ?? 0, (v) => co
 const taxPct = pctModel(() => config.value?.capitalGainsTaxRate ?? 0, (v) => config.value && (config.value.capitalGainsTaxRate = v))
 const gainSharePct = pctModel(() => config.value?.depotGainShare ?? 0, (v) => config.value && (config.value.depotGainShare = v))
 const hiRatePct = pctModel(() => config.value?.healthInsurance.rate ?? 0, (v) => config.value && (config.value.healthInsurance.rate = v))
+
+// ---- stress test (#1339) ------------------------------------------------------------
+
+const crashOn = computed({
+  get: () => config.value?.stress.crashYear != null,
+  set: (on: boolean) => {
+    if (!config.value) return
+    if (!on) {
+      config.value.stress = { ...config.value.stress, crashYear: null }
+      return
+    }
+    // Default to the year the chosen person leaves work: the crash that hurts most.
+    const p = earliestPerson.value ?? persons.value[0]
+    const age = p ? leaveAge(p) : null
+    const year = p && age != null ? Number(p.birthDate.slice(0, 4)) + age : new Date().getFullYear() + 1
+    config.value.stress = { ...config.value.stress, crashYear: year }
+  },
+})
+const crashPct = pctModel(() => config.value?.stress.crashSize ?? 0, (v) => config.value && (config.value.stress.crashSize = v))
 
 const orderOptions = [
   { value: 'cash,depot,other', label: 'Tagesgeld → Depot → Sonstiges' },
@@ -815,7 +860,7 @@ const ready = computed(() => !loading.value)
             <p class="result__value" data-testid="earliest">
               <template v-if="sim?.earliest && earliestPerson">
                 <template v-if="sim.earliest.age != null">{{ earliestPerson.label }} mit {{ sim.earliest.age }}</template>
-                <template v-else>Für {{ earliestPerson.label }} reicht es bei diesen Annahmen mit keinem Alter bis {{ config?.endAge }}.</template>
+                <template v-else>Für {{ earliestPerson.label }} reicht es bei diesen Annahmen mit keinem Alter bis 75.</template>
               </template>
               <template v-else-if="simulating">…</template>
               <template v-else>–</template>
@@ -836,8 +881,8 @@ const ready = computed(() => !loading.value)
           <li v-for="b in bridgeRows" :key="`${b.personId}-${b.fromYear}`" class="bridge" :class="{ 'bridge--uncovered': !b.covered }">
             <Tag :severity="b.covered ? 'warn' : 'danger'" :value="b.covered ? 'gedeckt' : 'nicht gedeckt'" />
             <span>
-              <strong>{{ b.who }}</strong> — Überbrückung {{ b.fromYear }}–{{ b.toYear }}: benötigt {{ formatEur(shown(b.need, b.fromYear)) }},
-              verfügbar {{ formatEur(shown(b.liquidAtStart, b.fromYear)) }}
+              <strong>{{ b.who }}</strong> — Überbrückung {{ b.fromYear }}–{{ b.toYear }}: benötigt {{ formatEur(shown(b.need, bridgeYear(b))) }},
+              verfügbar {{ formatEur(shown(b.liquidAtStart, bridgeYear(b))) }}
             </span>
           </li>
         </ul>
@@ -914,6 +959,49 @@ const ready = computed(() => !loading.value)
             <p v-else-if="simulating" class="muted">Wird berechnet …</p>
           </div>
         </template>
+
+        <!-- How fragile is the earliest age? (#1339) -->
+        <template v-if="earliestPerson">
+          <Button
+            :label="showRobustness ? 'Robustheit ausblenden' : 'Wie robust ist das?'"
+            :icon="showRobustness ? 'pi pi-chevron-up' : 'pi pi-shield'"
+            size="small"
+            outlined
+            class="matrix-toggle"
+            :aria-expanded="showRobustness"
+            aria-controls="fc-robustness"
+            @click="showRobustness = !showRobustness"
+          />
+          <div v-if="showRobustness" id="fc-robustness" class="matrix-panel">
+            <p class="muted matrix-panel__hint">
+              Jedes Feld ist der früheste Ausstieg von {{ earliestPerson.label }} mit einer anderen Rendite und Inflation. Darunter steht, welche Annahme das Alter am stärksten bewegt — auch ein Börsencrash im Jahr des Ausstiegs.
+            </p>
+            <ForecastRobustness
+              v-if="sim?.sensitivity || sim?.levers"
+              :sensitivity="sim.sensitivity"
+              :levers="sim.levers"
+              :person="earliestPerson"
+              @pick="pickRates"
+            />
+            <p v-else-if="simulating" class="muted">Wird berechnet …</p>
+          </div>
+        </template>
+
+        <!-- What does it take to leave at X? (#1340) -->
+        <div v-if="earliestPerson" class="target-age">
+          <div class="matrix-controls">
+            <label for="fc-target-age">{{ earliestPerson.label }} möchte aufhören mit</label>
+            <InputNumber input-id="fc-target-age" v-model="targetAge" :min="targetAgeMin" :max="80" size="small" placeholder="Alter" show-buttons class="target-age__input" />
+            <Button v-if="targetAge != null" label="Zurücksetzen" link size="small" @click="targetAge = null" />
+          </div>
+          <ForecastTargetAge
+            v-if="targetAge != null && sim?.reverse && sim.reverse.targetAge === targetAge && config"
+            :reverse="sim.reverse"
+            :person="earliestPerson"
+            :current-return-rate="config.defaultReturnRate"
+          />
+          <p v-else-if="targetAge != null && simulating" class="muted">Wird berechnet …</p>
+        </div>
       </section>
 
       <!-- Charts -->
@@ -1052,6 +1140,16 @@ const ready = computed(() => !loading.value)
           <div class="field"><label for="fc-hi-min">Mindestbeitrag freiwillig Versicherte</label><InputNumber input-id="fc-hi-min" v-model="config.healthInsurance.minMonthly" mode="currency" currency="EUR" locale="de-DE" /></div>
         </div>
 
+        <h3 class="sub">Stresstest</h3>
+        <p class="card__hint">Ein Kurseinbruch im Depot zu Beginn des gewählten Jahres. Direkt nach dem Ausstieg trifft er am härtesten, weil dann aus dem Depot gelebt wird.</p>
+        <div class="assumptions">
+          <div class="field field--inline"><label for="fc-crash">Börsencrash einrechnen</label><Checkbox input-id="fc-crash" v-model="crashOn" binary /></div>
+          <template v-if="crashOn">
+            <div class="field"><label for="fc-crash-year">Jahr des Einbruchs</label><InputNumber input-id="fc-crash-year" v-model="config.stress.crashYear" :min="new Date().getFullYear()" :max="2120" :use-grouping="false" /></div>
+            <div class="field"><label for="fc-crash-size">Verlust im Depot</label><InputNumber input-id="fc-crash-size" v-model="crashPct" suffix=" %" :min="0" :max="99" :min-fraction-digits="0" :max-fraction-digits="0" /></div>
+          </template>
+        </div>
+
         <h3 class="sub">Ausgaben im Alter</h3>
         <p class="card__hint">Faktor auf die Lebenshaltung ab dem Alter der Bezugsperson; Pflegekosten kommen pro Person dazu.</p>
         <div class="assumptions">
@@ -1093,7 +1191,7 @@ const ready = computed(() => !loading.value)
           <Button v-if="selectedScenarioId != null" label="Speichern" icon="pi pi-save" size="small" :disabled="!dirty || !canEdit" @click="saveScenario(false)" />
         </div>
         <p class="card__hint">
-          Aktuell: Inflation {{ formatPct(config.inflationRate) }}, Rendite {{ formatPct(config.defaultReturnRate) }}, bis {{ config.endAge }}.
+          Aktuell: Inflation {{ formatPct(config.inflationRate) }}, Rendite {{ formatPct(config.defaultReturnRate) }}, bis {{ config.endAge }}<template v-if="config.stress.crashYear != null">, Crash {{ config.stress.crashYear }} mit −{{ Math.round(config.stress.crashSize * 100) }} %</template>.
           Steuern sind pauschal; Einkommensteuer und Rentenbesteuerung im Detail kommen später.
         </p>
       </section>
@@ -1349,6 +1447,14 @@ const ready = computed(() => !loading.value)
 }
 .matrix-controls :deep(.p-inputnumber-input) {
   width: 5rem;
+}
+.target-age {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--p-content-border-color);
+}
+.target-age .matrix-controls :deep(.target-age__input .p-inputnumber-input) {
+  width: 4.5rem;
 }
 
 /* household */
