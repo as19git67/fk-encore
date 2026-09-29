@@ -420,6 +420,12 @@ export class InMemoryGeoClient implements GeoClient {
     if (query.corridor) {
       const { from, to, detourBudgetM } = query.corridor;
       const direct = metresBetween(from, to);
+      // What the service refuses, this refuses too — a caller that
+      // hands geo a day's drive in one piece has to be caught here.
+      if (direct > 400_000) {
+        throw new Error(
+          `geo: POST /pois/search → HTTP 400: corridor may span at most 400000 m, got ${Math.round(direct)} m`);
+      }
       spots = spots.filter(
         (s) => metresBetween(from, s) + metresBetween(s, to) <= direct + detourBudgetM);
     }
