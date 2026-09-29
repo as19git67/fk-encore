@@ -458,15 +458,47 @@ describe("simulate — health insurance", () => {
     const res = simulate(
       input([cash(200_000), rent, pension(1, 2_000, 2), hi()], milestones, {
         endAge: 58,
-        healthInsurance: { rate: 0.2, minMonthly: 250 },
+        healthInsurance: { rate: 0.2, careRate: 0.04, minMonthly: 250, maxMonthlyIncome: 5_000 },
       }),
     );
     const [working, bridge, retired] = res.years;
     expect(working.expenses["item:60"]).toBe(4_800);
-    // Bridge: 20 % of 1 000 rent = 200 < minimum 250.
+    // Bridge: 20 % of 1 000 rent = 200 < minimum 250 (the cash earns nothing here).
     expect(bridge.expenses["item:60"]).toBe(3_000);
-    // Retired: KVdR is charged on the pension only, not on the rent.
-    expect(retired.expenses["item:60"]).toBeCloseTo(0.2 * 2_000 * 12, 6);
+    // Retired: KVdR is charged on the statutory pension only — half the health rate (8 %)
+    // plus the full care rate (4 %) — and not on the rent.
+    expect(retired.expenses["item:60"]).toBeCloseTo(0.12 * 2_000 * 12, 6);
+  });
+
+  it("counts capital income and the household's income for the voluntarily insured, up to the ceiling", () => {
+    const depot: ForecastItem = { id: 31, type: "asset", label: "Depot", personId: null, pot: "depot", currentValue: 1_200_000, returnRate: 0.06, monthlyContribution: 0 };
+    const sharedRent: ForecastItem = { id: 12, type: "income", label: "Miete", personId: null, amount: 800, frequency: "monthly", growthRate: 0, taxRate: 0 };
+    const scenario = { endAge: 57, capitalGainsTaxRate: 0, healthInsurance: { rate: 0.2, careRate: 0.04, minMonthly: 250, maxMonthlyIncome: 5_000 } };
+    // Two persons share the depot and the rent; only A is voluntarily insured after leaving at 57.
+    const two = simulate(input([depot, sharedRent, hi()], milestones, scenario, [anna, ben]));
+    const bridge = two.years[1];
+    // A's base: half the rent (400) + half of last month's depot returns. The depot has
+    // grown for a year before the bridge (× 1.06) and keeps growing through it (× 1.06 more).
+    const monthlyReturn = (v: number) => v * (Math.pow(1.06, 1 / 12) - 1);
+    const low = (400 + monthlyReturn(1_200_000 * 1.06) / 2) * 0.2 * 12;
+    const high = (400 + monthlyReturn(1_200_000 * 1.06 * 1.06) / 2) * 0.2 * 12;
+    expect(bridge.expenses["item:60"]).toBeGreaterThan(low);
+    expect(bridge.expenses["item:60"]).toBeLessThan(high);
+    // Alone, A owns the whole depot: the base would be above 6 000, capped at 5 000 → 1 000 a month.
+    const one = simulate(input([depot, sharedRent, hi()], milestones, scenario));
+    expect(one.years[1].expenses["item:60"]).toBeCloseTo(1_000 * 12, 6);
+  });
+
+  it("charges the pensioners' insurance on company pensions in full and leaves private pensions free", () => {
+    const company = { ...pension(1, 500, 2, { kind: "company" }), id: 42 };
+    const priv = { ...pension(1, 300, 2, { kind: "private" }), id: 43 };
+    const res = simulate(
+      input([cash(100_000), pension(1, 2_000, 2), company, priv, hi()], milestones, {
+        endAge: 58,
+        healthInsurance: { rate: 0.2, careRate: 0.04, minMonthly: 250, maxMonthlyIncome: 5_000 },
+      }),
+    );
+    expect(res.years[2].expenses["item:60"]).toBeCloseTo((2_000 * 0.12 + 500 * 0.2) * 12, 6);
   });
 
   it("family insurance costs nothing, a private premium keeps its own increase", () => {

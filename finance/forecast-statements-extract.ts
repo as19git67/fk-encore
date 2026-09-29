@@ -446,8 +446,12 @@ export function computeProposals(type: ItemType, data: Data, v: StatementValues)
       amount("currentValue", "Aktueller Wert", v.contractValue ?? v.surrenderValue);
       break;
     case "health_insurance":
-      // The premium while employed; a private contract in the bridge or in retirement follows its own mode.
-      amount("employedAmount", "Beitrag pro Monat", monthly);
+      // A statement names a premium only where one is paid as such: the extra
+      // premium while employed, and a private contract's premium in the
+      // bridge or in retirement. The statutory modes are computed.
+      if (num(data, "employedAmount") != null && num(data, "employedAmount")! > 0) amount("employedAmount", "Beitrag pro Monat", monthly);
+      if (data.bridgeMode === "private") amount("bridgeAmount", "Privater Beitrag pro Monat", monthly);
+      if (data.retiredMode === "private") amount("retiredAmount", "Privater Beitrag pro Monat (Rente)", monthly);
       break;
     case "expense": {
       // A premium booked as an expense: compare in the item's own rhythm (none given = monthly, as the engine reads it).

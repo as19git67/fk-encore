@@ -731,6 +731,7 @@ const returnPct = pctModel(() => config.value?.defaultReturnRate ?? 0, (v) => co
 const taxPct = pctModel(() => config.value?.capitalGainsTaxRate ?? 0, (v) => config.value && (config.value.capitalGainsTaxRate = v))
 const gainSharePct = pctModel(() => config.value?.depotGainShare ?? 0, (v) => config.value && (config.value.depotGainShare = v))
 const hiRatePct = pctModel(() => config.value?.healthInsurance.rate ?? 0, (v) => config.value && (config.value.healthInsurance.rate = v))
+const hiCarePct = pctModel(() => config.value?.healthInsurance.careRate ?? 0, (v) => config.value && (config.value.healthInsurance.careRate = v))
 
 // ---- stress test (#1339) ------------------------------------------------------------
 
@@ -1137,7 +1138,9 @@ const ready = computed(() => !loading.value)
           <div class="field"><label for="fc-order">Reihenfolge der Entnahme</label><Select input-id="fc-order" v-model="orderModel" :options="orderOptions" option-label="label" option-value="value" /></div>
           <div class="field field--inline"><label for="fc-surrender">Versicherungen notfalls vorzeitig kündigen</label><Checkbox input-id="fc-surrender" v-model="config.allowSurrender" binary /></div>
           <div class="field"><label for="fc-hi-rate">Beitragssatz gesetzliche KV (inkl. Pflege)</label><InputNumber input-id="fc-hi-rate" v-model="hiRatePct" suffix=" %" :min-fraction-digits="1" :max-fraction-digits="2" /></div>
+          <div class="field"><label for="fc-hi-care">davon Pflegeversicherung</label><InputNumber input-id="fc-hi-care" v-model="hiCarePct" suffix=" %" :min-fraction-digits="1" :max-fraction-digits="2" /></div>
           <div class="field"><label for="fc-hi-min">Mindestbeitrag freiwillig Versicherte</label><InputNumber input-id="fc-hi-min" v-model="config.healthInsurance.minMonthly" mode="currency" currency="EUR" locale="de-DE" /></div>
+          <div class="field"><label for="fc-hi-max">Beitragsbemessungsgrenze pro Monat</label><InputNumber input-id="fc-hi-max" v-model="config.healthInsurance.maxMonthlyIncome" mode="currency" currency="EUR" locale="de-DE" /></div>
         </div>
 
         <h3 class="sub">Stresstest</h3>

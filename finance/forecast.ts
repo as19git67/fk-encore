@@ -462,7 +462,9 @@ export function toEngineScenario(config: Record<string, unknown>, name = "Szenar
     },
     healthInsurance: {
       rate: num(hi.rate, base.healthInsurance.rate),
+      careRate: Math.min(num(hi.careRate, base.healthInsurance.careRate), num(hi.rate, base.healthInsurance.rate)),
       minMonthly: num(hi.minMonthly, base.healthInsurance.minMonthly),
+      maxMonthlyIncome: num(hi.maxMonthlyIncome, base.healthInsurance.maxMonthlyIncome),
     },
     offsetDeductions: offsets,
     stress: {

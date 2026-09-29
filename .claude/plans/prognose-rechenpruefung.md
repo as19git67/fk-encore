@@ -97,6 +97,39 @@ Alle Beispiele hier sind erfunden.
     als Teiljahr gekennzeichnet („2026 (ab Sep.)“). Beschriftung, ab wann
     Steigerung/Anpassung greift.
 
+## Nachtrag: Krankenversicherung nach dem Erwerbsleben
+
+Hinweis aus der Nutzung: Das Gehalt ist netto, der Arbeitnehmeranteil steckt
+schon drin; interessant wird die KV erst nach dem Ausstieg, und dort hängt
+sie davon ab, ob die Vorversicherungszeit für die KVdR erreicht wird.
+
+20. **Erwerbsleben**: „Beitrag bis zum Ausstieg“ ist jetzt standardmäßig 0
+    und als Zusatzbeitrag beschrieben; ein Posten „Krankenversicherung“
+    kostet im Erwerbsleben nichts, solange nichts eingetragen ist.
+21. **Freiwillig gesetzlich** (ohne KVdR): Bemessung aus allen Einnahmen der
+    Person — Gehalt, Renten jeder Art, Mieten, Leibrenten — plus dem
+    gleichen Anteil an Einnahmen ohne Person (Haushalt) plus den
+    Kapitalerträgen des Vormonats (Zinsen, Dividenden, Kursgewinne der
+    Töpfe Bargeld/Depot/Sonstiges; eigene Anlagen ganz, Haushaltsanlagen zu
+    gleichen Teilen; Immobilien-Wertsteigerung nicht). Gedeckelt an der
+    Beitragsbemessungsgrenze (Szenario, wächst mit der Inflation), mindestens
+    der Mindestbeitrag. Vorher: nur eigene Einnahmen, keine Kapitalerträge,
+    kein Deckel.
+22. **KVdR**: gesetzliche Rente mit halbem KV-Satz plus vollem Pflegesatz
+    (neues Szenario-Feld „davon Pflegeversicherung“), Betriebsrente voller
+    Satz, private Renten und Kapitalerträge beitragsfrei, Deckel an der
+    Grenze. Vorher: voller Satz auf alle Renten.
+23. Einmalzahlungen (Kapitalwahl, Ablaufleistung) zählen in keiner Variante
+    zur Bemessung; in Wirklichkeit würde eine Direktversicherung als
+    Versorgungsbezug auf 120 Monate verteilt — nicht modelliert.
+24. Der Dokumentleser schlägt für die KV nur noch Beträge vor, die wirklich
+    als Prämie gezahlt werden (Zusatzbeitrag, private Tarife); die
+    gesetzlichen Modi werden gerechnet.
+
+Vereinfachungen: Bemessung monatlich statt nach Einkommensteuerbescheid des
+Vorjahres; kein Sparerpauschbetrag; für die KVdR wird nicht geprüft, ob die
+9/10-Regel erfüllt ist — das entscheidet die Wahl des Modus je Person.
+
 ## Geprüft und in Ordnung
 
 - Kaufkraft: alle Reihen und Detailwerte werden mit ihrem Jahr und demselben
