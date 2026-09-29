@@ -156,6 +156,8 @@ export interface LifeInsuranceItem extends ItemBase {
   annuityAmount: number;
   /** Flat tax on the payout / annuity. */
   taxRate: number;
+  /** Paid to the household when the insured person dies before maturity (#1341). null = the guaranteed payout. */
+  deathBenefit: number | null;
 }
 
 export interface PensionItem extends ItemBase {
@@ -197,6 +199,12 @@ export interface PensionItem extends ItemBase {
   lumpSumOption: number | null;
   payoutMode: "annuity" | "lump_sum";
   taxRate: number;
+  /**
+   * Share of this pension the surviving partner receives after the person's
+   * death (#1341): 0.55 for the statutory "große Witwenrente", whatever the
+   * contract says for a company pension. null = 0.55 statutory, 0.6 company, 0 private.
+   */
+  survivorShare: number | null;
 }
 
 export type ForecastItem =
@@ -267,6 +275,21 @@ export interface ForecastScenario {
   offsetDeductions: number[];
   /** Stress test (#1339): the depot loses `crashSize` at the start of `crashYear`; null = no crash. */
   stress: StressTest;
+  /** Survivor scenario (#1341): what happens when one person dies. */
+  survivor: SurvivorScenario;
+}
+
+export interface SurvivorScenario {
+  /** Who dies; null = nobody. */
+  personId: number | null;
+  /** At which age (start of the birthday month); null = nobody. */
+  age: number | null;
+  /** Living expenses of the household afterwards, as a share of before, e.g. 0.7. */
+  expenseFactor: number;
+  /** Share of the survivor's own income above the allowance that is deducted from a statutory survivor's pension, e.g. 0.4. */
+  incomeOffsetRate: number;
+  /** Monthly allowance of own income before the offset applies (today's money), e.g. 1 038. */
+  incomeAllowance: number;
 }
 
 export interface StressTest {
@@ -330,7 +353,8 @@ export interface BridgePhase {
 export interface ResolvedMilestone {
   id: number;
   personId: number;
-  kind: MilestoneKind;
+  /** "death" only in a survivor scenario's result (#1341); it is no stored milestone. */
+  kind: MilestoneKind | "death";
   label: string;
   date: string;
   year: number;
@@ -355,6 +379,8 @@ export interface SimulationResult {
   potDryYear: Record<string, number | null>;
   /** Wealth at the end of the horizon (nominal). */
   finalWealth: number;
+  /** The death the scenario simulated, if any. */
+  death: { personId: number; year: number; age: number } | null;
 }
 
 export interface MatrixCell {
@@ -635,6 +661,26 @@ export function simulate(input: ForecastInput): SimulationResult {
     return { item: it, from, to };
   });
 
+  // --- survivor scenario: one person dies, the household goes on -----------
+  const sv = scenario.survivor;
+  const deceased = sv.personId != null && sv.age != null ? (ctx.persons.get(sv.personId) ?? null) : null;
+  let deathMonth: number | null = deceased ? monthIndex(deceased.birthDate) + sv.age! * 12 : null;
+  // A death in the past or beyond the horizon is no scenario.
+  if (deathMonth != null && (deathMonth < start || deathMonth >= endMonth)) deathMonth = null;
+  const deceasedId = deathMonth != null && deceased ? deceased.id : null;
+  /** The partner who carries on — the first other person. */
+  const survivorId = deceasedId != null ? (persons.find((p) => p.id !== deceasedId)?.id ?? null) : null;
+  const deadAt = (pid: number | null, mi: number) => pid != null && pid === deceasedId && deathMonth != null && mi >= deathMonth;
+  // Everything personal of the deceased ends with the death: salary, income,
+  // expenses, health insurance, and their own pensions (the survivor's share
+  // is paid separately below).
+  if (deathMonth != null) {
+    for (const w of windows) {
+      const it = w.item;
+      if (it.personId === deceasedId && it.type !== "asset" && it.type !== "life_insurance") w.to = Math.min(w.to, deathMonth);
+    }
+  }
+
   // Statutory pension after deductions, and the buy-back cost.
   const pensionAmount = new Map<number, number>();
   const buyBack = new Map<number, number>(); // month → cost
@@ -683,7 +729,10 @@ export function simulate(input: ForecastInput): SimulationResult {
   const monthlyLiquid: number[] = [];
 
   const refPersonId = scenario.spendingCurve.referencePersonId ?? persons[0]?.id ?? null;
-  const refPerson = refPersonId != null ? ctx.persons.get(refPersonId) : undefined;
+  const refPersonBase = refPersonId != null ? ctx.persons.get(refPersonId) : undefined;
+  const survivorPerson = survivorId != null ? ctx.persons.get(survivorId) : undefined;
+  /** Own income of each person in the previous month (the survivor's pension is offset against it). */
+  let prevIncome = new Map<number, number>();
   const phases = [...scenario.spendingCurve.phases].sort((a, b) => a.fromAge - b.fromAge);
 
   const inflationIndex = (mi: number) =>
@@ -773,7 +822,9 @@ export function simulate(input: ForecastInput): SimulationResult {
     type IncomeKind = "earned" | "statutory" | "company" | "other" | "lump";
     const personIncome = new Map<number, Record<IncomeKind, number>>();
     let householdIncome = 0; // items without a person (rent of a shared flat)
-    const addPersonal = (pid: number | null, v: number, kind: IncomeKind) => {
+    /** Income of one's own this month — a survivor's pension is not, it is what gets offset. */
+    const ownIncome = new Map<number, number>();
+    const addPersonal = (pid: number | null, v: number, kind: IncomeKind, own = true) => {
       if (kind === "lump") return;
       if (pid == null) {
         householdIncome += v;
@@ -782,6 +833,7 @@ export function simulate(input: ForecastInput): SimulationResult {
       const rec = personIncome.get(pid) ?? { earned: 0, statutory: 0, company: 0, other: 0, lump: 0 };
       rec[kind] += v;
       personIncome.set(pid, rec);
+      if (own) ownIncome.set(pid, (ownIncome.get(pid) ?? 0) + v);
     };
 
     // Buy-back of deductions in the first month.
@@ -830,10 +882,13 @@ export function simulate(input: ForecastInput): SimulationResult {
         case "living_expense": {
           if (!active) break;
           let factor = 1;
+          // The spending curve follows the reference person — or the survivor once the reference person has died.
+          const refPerson = refPersonBase && deadAt(refPersonBase.id, mi) ? survivorPerson : refPersonBase;
           if (refPerson) {
             const age = ageAt(refPerson.birthDate, mi);
             for (const ph of phases) if (age >= ph.fromAge) factor = ph.factor;
           }
+          if (deathMonth != null && mi >= deathMonth) factor *= sv.expenseFactor;
           const v = it.amount * factor * infl;
           add(r.expenses, source(`item:${it.id}`, it.label, null, it.type), v);
           expenses += v;
@@ -841,9 +896,28 @@ export function simulate(input: ForecastInput): SimulationResult {
         }
         case "pension": {
           const base = pensionAmount.get(it.id) ?? it.monthlyAmount;
+          // After the person's death the surviving partner receives a share of this pension.
+          if (survivorId != null && deadAt(it.personId, mi) && it.payoutMode === "annuity") {
+            const share = it.survivorShare ?? (it.kind === "statutory" ? 0.55 : it.kind === "company" ? 0.6 : 0);
+            if (share <= 0) break;
+            const growFrom = it.kind === "statutory" ? start : Math.min(w.from, deathMonth!);
+            let gross = base * share * growthIndex(it.growthRate, mi, growFrom);
+            if (it.kind === "statutory") {
+              // Income offset: part of the survivor's own income above the allowance is deducted.
+              const own = prevIncome.get(survivorId) ?? 0;
+              gross = Math.max(0, gross - Math.max(0, own - sv.incomeAllowance * infl) * sv.incomeOffsetRate);
+            }
+            if (gross <= 0) break;
+            const v = gross * (1 - it.taxRate);
+            taxesYear += gross - v;
+            add(r.income, source(`survivor:${it.id}`, `${it.label} (Hinterbliebenenrente)`, survivorId, it.type), v);
+            income += v;
+            addPersonal(survivorId, v, it.kind === "statutory" ? "statutory" : it.kind === "company" ? "company" : "other", false);
+            break;
+          }
           // Contributions before the start.
           const contribEnd = ctx.resolve(it.contributionEnd, w.from);
-          if (it.monthlyContribution > 0 && mi >= start && mi < Math.min(contribEnd, w.from)) {
+          if (it.monthlyContribution > 0 && mi >= start && mi < Math.min(contribEnd, w.from) && !deadAt(it.personId, mi)) {
             add(r.expenses, source(`contrib:${it.id}`, `${it.label} (Beitrag)`, it.personId, it.type), it.monthlyContribution);
             expenses += it.monthlyContribution;
             r.contributions += it.monthlyContribution;
@@ -880,6 +954,7 @@ export function simulate(input: ForecastInput): SimulationResult {
     const care = scenario.spendingCurve;
     if (care.careFromAge != null && care.careMonthly > 0) {
       for (const p of persons) {
+        if (deadAt(p.id, mi)) continue;
         if (ageAt(p.birthDate, mi) >= care.careFromAge) {
           const v = care.careMonthly * infl;
           add(r.expenses, source(`care:${p.id}`, `Pflege ${p.label}`, p.id, "care"), v);
@@ -892,6 +967,18 @@ export function simulate(input: ForecastInput): SimulationResult {
     for (const ins of insurances) {
       const it = ins.item;
       if (ins.surrendered) continue;
+      // The insured person dies before maturity: the death benefit is paid, the contract ends.
+      if (!ins.paidOut && mi < ins.maturity && deadAt(it.personId, mi)) {
+        ins.paidOut = true;
+        ins.value = 0;
+        const v = it.deathBenefit ?? it.guaranteedPayout;
+        if (v > 0) {
+          add(r.income, source(`death:${it.id}`, `${it.label} (Todesfallleistung)`, it.personId, it.type), v);
+          income += v;
+        }
+        continue;
+      }
+      if (ins.paidOut && it.payoutMode === "annuity" && deadAt(it.personId, mi)) continue; // an annuity dies with the person
       if (!ins.paidOut && mi < ins.maturity) {
         if (it.monthlyPremium > 0 && mi < ins.premiumEnd) {
           add(r.expenses, source(`contrib:${it.id}`, `${it.label} (Beitrag)`, it.personId, it.type), it.monthlyPremium);
@@ -1041,6 +1128,7 @@ export function simulate(input: ForecastInput): SimulationResult {
     }
 
     // ---- bookkeeping -----------------------------------------------------
+    prevIncome = ownIncome;
     const liquid = liquidWealth();
     monthlyLiquid.push(liquid);
     if (liquid < scenario.minLiquidWealth && failYear === null) failYear = year;
@@ -1138,6 +1226,18 @@ export function simulate(input: ForecastInput): SimulationResult {
       };
     });
 
+  if (deathMonth != null && deceased) {
+    resolvedMilestones.push({
+      id: -deceased.id,
+      personId: deceased.id,
+      kind: "death",
+      label: `Tod ${deceased.label}`,
+      date: ymString(deathMonth),
+      year: yearOf(deathMonth),
+      age: ageAt(deceased.birthDate, deathMonth),
+    });
+  }
+
   const last = years[years.length - 1];
   return {
     startYear,
@@ -1152,6 +1252,7 @@ export function simulate(input: ForecastInput): SimulationResult {
     failYear,
     potDryYear,
     finalWealth: last ? last.wealthEnd : 0,
+    death: deathMonth != null && deceased ? { personId: deceased.id, year: yearOf(deathMonth), age: ageAt(deceased.birthDate, deathMonth) } : null,
   };
 }
 
@@ -1259,6 +1360,7 @@ export function defaultScenario(overrides: Partial<ForecastScenario> = {}): Fore
     healthInsurance: { rate: 0.2, careRate: 0.036, minMonthly: 250, maxMonthlyIncome: 5_512.5 },
     offsetDeductions: [],
     stress: { crashYear: null, crashSize: 0.3 },
+    survivor: { personId: null, age: null, expenseFactor: 0.7, incomeOffsetRate: 0.4, incomeAllowance: 1_038 },
     ...overrides,
   };
 }

@@ -23,6 +23,7 @@ import ForecastCharts from '../../components/finance/forecast/ForecastCharts.vue
 import ForecastMatrix from '../../components/finance/forecast/ForecastMatrix.vue'
 import ForecastRobustness from '../../components/finance/forecast/ForecastRobustness.vue'
 import ForecastTargetAge from '../../components/finance/forecast/ForecastTargetAge.vue'
+import ForecastSurvivor from '../../components/finance/forecast/ForecastSurvivor.vue'
 import ForecastImportDialog from '../../components/finance/forecast/ForecastImportDialog.vue'
 import ForecastStatementsDialog from '../../components/finance/forecast/ForecastStatementsDialog.vue'
 import ForecastAccountsDialog from '../../components/finance/forecast/ForecastAccountsDialog.vue'
@@ -220,6 +221,8 @@ const showMatrix = ref(false)
 // #1339 / #1340: robustness table and levers, and the target age for the reverse calculation.
 const showRobustness = ref(false)
 const targetAge = ref<number | null>(null)
+// #1341: the survivor check for one person, every age from now on.
+const survivorFor = ref<number | null>(null)
 const real = ref(true)
 const selectedYear = ref<number | null>(null)
 
@@ -246,6 +249,7 @@ async function runSimulation() {
       compareScenarioIds: compareIds.value,
       robustness: showRobustness.value && earliestFor.value != null ? true : undefined,
       targetAge: targetAge.value != null && earliestFor.value != null ? targetAge.value : undefined,
+      survivorFor: survivorFor.value ?? undefined,
       matrix:
         showMatrix.value && matrixA.value != null && matrixB.value != null && matrixA.value !== matrixB.value
           ? { personA: matrixA.value, personB: matrixB.value, fromAge: matrixFrom.value, toAge: matrixTo.value }
@@ -261,7 +265,7 @@ async function runSimulation() {
   }
 }
 
-watch([config, earliestFor, compareIds, matrixA, matrixB, matrixFrom, matrixTo, showMatrix, showRobustness, targetAge], scheduleSimulation, {
+watch([config, earliestFor, compareIds, matrixA, matrixB, matrixFrom, matrixTo, showMatrix, showRobustness, targetAge, survivorFor], scheduleSimulation, {
   deep: true,
 })
 watch(bundle, scheduleSimulation)
@@ -752,6 +756,28 @@ const crashOn = computed({
 })
 const crashPct = pctModel(() => config.value?.stress.crashSize ?? 0, (v) => config.value && (config.value.stress.crashSize = v))
 
+// ---- survivor scenario (#1341) -----------------------------------------------------------
+
+const deathPerson = computed(() => persons.value.find((p) => p.id === config.value?.survivor.personId) ?? null)
+const survivorPerson = computed(() => persons.value.find((p) => p.id === survivorFor.value) ?? null)
+const survivorOptions = computed(() => [{ value: null as number | null, label: 'niemand' }, ...persons.value.map((p) => ({ value: p.id as number | null, label: p.label }))])
+function setDeathPerson(id: number | null) {
+  if (!config.value) return
+  if (id == null) {
+    config.value.survivor = { ...config.value.survivor, personId: null, age: null }
+    return
+  }
+  const p = persons.value.find((x) => x.id === id)
+  const age = config.value.survivor.age ?? (p ? Math.max(currentAge(p) + 1, 60) : 60)
+  config.value.survivor = { ...config.value.survivor, personId: id, age }
+}
+function pickDeathAge(age: number) {
+  if (!config.value || survivorFor.value == null) return
+  config.value.survivor = { ...config.value.survivor, personId: survivorFor.value, age }
+}
+const survivorExpensePct = pctModel(() => config.value?.survivor.expenseFactor ?? 0, (v) => config.value && (config.value.survivor.expenseFactor = v))
+const survivorOffsetPct = pctModel(() => config.value?.survivor.incomeOffsetRate ?? 0, (v) => config.value && (config.value.survivor.incomeOffsetRate = v))
+
 const orderOptions = [
   { value: 'cash,depot,other', label: 'Tagesgeld → Depot → Sonstiges' },
   { value: 'depot,cash,other', label: 'Depot → Tagesgeld → Sonstiges' },
@@ -1153,6 +1179,38 @@ const ready = computed(() => !loading.value)
           </template>
         </div>
 
+        <h3 class="sub">Hinterbliebene</h3>
+        <p class="card__hint">
+          Stirbt eine Person, enden ihr Gehalt, ihre Renten, ihre Krankenversicherung und ihre Pflegekosten. Die andere bekommt den Hinterbliebenen-Anteil der Renten (am Rentenposten einstellbar), Lebensversicherungen zahlen die Todesfallleistung, die Lebenshaltung sinkt auf den Faktor. Bei der gesetzlichen Witwen-/Witwerrente wird eigenes Einkommen über dem Freibetrag angerechnet.
+        </p>
+        <div class="assumptions">
+          <div class="field"><label for="fc-death-person">Es stirbt</label><Select input-id="fc-death-person" :model-value="config.survivor.personId" :options="survivorOptions" option-label="label" option-value="value" @update:model-value="setDeathPerson" /></div>
+          <template v-if="config.survivor.personId != null">
+            <div class="field"><label for="fc-death-age">im Alter von</label><InputNumber input-id="fc-death-age" v-model="config.survivor.age" :min="deathPerson ? currentAge(deathPerson) + 1 : 40" :max="110" suffix=" Jahren" /></div>
+          </template>
+          <div class="field"><label for="fc-survivor-expense">Lebenshaltung danach</label><InputNumber input-id="fc-survivor-expense" v-model="survivorExpensePct" suffix=" %" :min="0" :max="150" :min-fraction-digits="0" :max-fraction-digits="0" /></div>
+          <div class="field"><label for="fc-survivor-offset">Anrechnung eigenen Einkommens</label><InputNumber input-id="fc-survivor-offset" v-model="survivorOffsetPct" suffix=" %" :min="0" :max="100" :min-fraction-digits="0" :max-fraction-digits="0" /></div>
+          <div class="field"><label for="fc-survivor-allowance">Freibetrag pro Monat</label><InputNumber input-id="fc-survivor-allowance" v-model="config.survivor.incomeAllowance" mode="currency" currency="EUR" locale="de-DE" /></div>
+        </div>
+        <div v-if="persons.length >= 2" class="survivor-check">
+          <div class="matrix-controls">
+            <label for="fc-survivor-for">Schnellcheck: Was, wenn</label>
+            <Select input-id="fc-survivor-for" v-model="survivorFor" :options="survivorOptions.slice(1)" option-label="label" option-value="value" size="small" placeholder="Person wählen" show-clear />
+            <span v-if="survivorFor != null">in irgendeinem Jahr stirbt?</span>
+          </div>
+          <ForecastSurvivor
+            v-if="survivorFor != null && sim?.survivor && survivorPerson && result"
+            :check="sim.survivor"
+            :person="survivorPerson"
+            :real="real"
+            :inflation-rate="inflation"
+            :start-year="result.startYear"
+            :end-year="result.endYear"
+            @pick="pickDeathAge"
+          />
+          <p v-else-if="survivorFor != null && simulating" class="muted">Wird berechnet …</p>
+        </div>
+
         <h3 class="sub">Ausgaben im Alter</h3>
         <p class="card__hint">Faktor auf die Lebenshaltung ab dem Alter der Bezugsperson; Pflegekosten kommen pro Person dazu.</p>
         <div class="assumptions">
@@ -1194,7 +1252,7 @@ const ready = computed(() => !loading.value)
           <Button v-if="selectedScenarioId != null" label="Speichern" icon="pi pi-save" size="small" :disabled="!dirty || !canEdit" @click="saveScenario(false)" />
         </div>
         <p class="card__hint">
-          Aktuell: Inflation {{ formatPct(config.inflationRate) }}, Rendite {{ formatPct(config.defaultReturnRate) }}, bis {{ config.endAge }}<template v-if="config.stress.crashYear != null">, Crash {{ config.stress.crashYear }} mit −{{ Math.round(config.stress.crashSize * 100) }} %</template>.
+          Aktuell: Inflation {{ formatPct(config.inflationRate) }}, Rendite {{ formatPct(config.defaultReturnRate) }}, bis {{ config.endAge }}<template v-if="config.stress.crashYear != null">, Crash {{ config.stress.crashYear }} mit −{{ Math.round(config.stress.crashSize * 100) }} %</template><template v-if="deathPerson && config.survivor.age != null">, Tod {{ deathPerson.label }} mit {{ config.survivor.age }}</template>.
           Steuern sind pauschal; Einkommensteuer und Rentenbesteuerung im Detail kommen später.
         </p>
       </section>
@@ -1458,6 +1516,9 @@ const ready = computed(() => !loading.value)
 }
 .target-age .matrix-controls :deep(.target-age__input .p-inputnumber-input) {
   width: 4.5rem;
+}
+.survivor-check {
+  margin-top: var(--space-3);
 }
 
 /* household */

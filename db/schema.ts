@@ -3872,6 +3872,7 @@ export interface ForecastStatementValues {
   maturityDate: string | null;
   guaranteedMonthlyPension: number | null;
   projectedMonthlyPension: number | null;
+  currentMonthlyPension: number | null;
   lumpSum: number | null;
   pensionStartDate: string | null;
 }
