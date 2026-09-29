@@ -628,8 +628,8 @@ enum TripTransitSlots {
         let undated = first.startDate == nil || last.startDate == nil
         guard undated else { return nil }
         let city = first.startDate == nil ? first.displayTitle : last.displayTitle
-        return "Anreise und Heimreise brauchen ein Datum: „\(city)" hat noch keines. "
-            + "In der Stadt „Termin steht fest" einschalten, dann erscheinen sie hier."
+        return "Anreise und Heimreise brauchen ein Datum: „\(city)“ hat noch keines. "
+            + "In der Stadt „Termin steht fest“ einschalten, dann erscheinen sie hier."
     }
 
     static func slotAfter(_ leg: TripLeg, in legs: [TripLeg]) -> Int? {
