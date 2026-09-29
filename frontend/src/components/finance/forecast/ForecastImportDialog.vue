@@ -371,7 +371,13 @@ const fmt = (n: number | null) =>
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
-  margin-bottom: var(--space-3);
+  /* The dialog's content scrolls, so it clips — and the button here is its
+     first child, with a focus ring that reaches above it. Room for the ring
+     on every side, taken back again on the sides and at the bottom; at the
+     top it stays, because the content box has no padding of its own there
+     and a negative margin would only push the ring past its edge. */
+  padding: var(--focus-ring-reach);
+  margin: 0 calc(-1 * var(--focus-ring-reach)) calc(var(--space-3) - var(--focus-ring-reach));
 }
 .pick__input {
   display: none;
