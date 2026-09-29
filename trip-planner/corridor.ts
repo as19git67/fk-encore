@@ -24,7 +24,7 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { getGeoClient } from "../osm-admin/geo-client";
-import { pickRegion } from "../osm-admin/region-router";
+import { pickRegion, regionsIntersecting, type LatLonBox } from "../osm-admin/region-router";
 import { toCandidates, type ScoredCandidate } from "./candidates";
 
 /** Enough of a detour to be worth it, small enough not to be a second trip. */
@@ -90,7 +90,7 @@ export const planCorridor = api(
       );
     }
 
-    const regions = await resolveRegions(from, to);
+    const regions = await resolveRegions(from, to, detourBudgetM);
     const spots = await corridorCandidates(regions, from, to, {
       detourBudgetM,
       categories: req.categories,
@@ -111,17 +111,19 @@ export const planCorridor = api(
 );
 
 /**
- * The regions the corridor is searched in: the start's and, when it is
- * another one, the destination's (§22.7).
+ * The regions the corridor is searched in: the start's, the
+ * destination's, and every one the corridor passes through (§22.7).
  *
- * A search runs against one database, so a journey from one imported
- * region into another is two searches whose results are merged. What
- * neither covers stays a hole — but both *ends* must be covered, or
- * the answer would be half a corridor that looks whole (§15.3).
+ * A search runs against one database, so a journey across imported
+ * regions is one search per region, merged. Both *ends* must be
+ * covered, or the answer would be half a corridor that looks whole
+ * (§15.3); what lies between is searched where it is imported and
+ * stays a hole where it is not.
  */
 async function resolveRegions(
   from: { lat: number; lon: number },
   to: { lat: number; lon: number },
+  detourBudgetM: number,
 ): Promise<string[]> {
   const [fromRegion, toRegion] = await Promise.all([
     pickRegion(from.lat, from.lon),
@@ -133,8 +135,58 @@ async function resolveRegions(
       `no imported OSM region covers the ${missing} of this journey — import it in the region admin first`,
     );
   }
-  return [...new Set([fromRegion.postgresDb, toRegion.postgresDb])];
+  return await withRegionsAlong([fromRegion.postgresDb, toRegion.postgresDb], from, to, detourBudgetM);
 }
+
+/**
+ * The end regions plus whatever the corridor crosses, each once, ends
+ * first.
+ *
+ * The ends come from the exact lookup (polygon and data probe); the
+ * middle from the rectangles alone. Nothing between the ends is
+ * *asked* to contain a point — the ellipse is the question, and a
+ * region whose rectangle it touches is worth one search.
+ */
+async function withRegionsAlong(
+  ends: readonly string[],
+  from: { lat: number; lon: number },
+  to: { lat: number; lon: number },
+  detourBudgetM: number,
+): Promise<string[]> {
+  const along = await regionsIntersecting(corridorBox(from, to, detourBudgetM));
+  return [...new Set([...ends, ...along.map((r) => r.postgresDb)])];
+}
+
+/**
+ * The rectangle around the corridor ellipse, in degrees.
+ *
+ * The ellipse has the two ends as foci and a string of length
+ * `direct + budget`; it reaches `budget / 2` past either end along the
+ * line and half its minor axis, `√(budget · (2·direct + budget)) / 2`,
+ * to either side — which is the larger of the two, so the box of the
+ * ends grows by that much all round. Generous by a little at the ends;
+ * a rectangle around an ellipse always is.
+ */
+export function corridorBox(
+  from: { lat: number; lon: number },
+  to: { lat: number; lon: number },
+  detourBudgetM: number,
+): LatLonBox {
+  const directM = greatCircleMetres(from, to);
+  const padM = Math.sqrt(detourBudgetM * (2 * directM + detourBudgetM)) / 2;
+  const midLat = (from.lat + to.lat) / 2;
+  const padLat = padM / METRES_PER_DEGREE;
+  const padLon = padM / (METRES_PER_DEGREE * Math.max(0.1, Math.cos((midLat * Math.PI) / 180)));
+  return {
+    minLat: Math.min(from.lat, to.lat) - padLat,
+    maxLat: Math.max(from.lat, to.lat) + padLat,
+    minLon: Math.min(from.lon, to.lon) - padLon,
+    maxLon: Math.max(from.lon, to.lon) + padLon,
+  };
+}
+
+/** One degree of latitude on the sphere PostGIS measures with. */
+const METRES_PER_DEGREE = (2 * Math.PI * 6_371_008) / 360;
 
 export interface CorridorSearchOptions {
   detourBudgetM: number;
@@ -185,19 +237,22 @@ export async function corridorCandidates(
 }
 
 /**
- * The regions that cover either end, for a caller that would rather
- * plan with half a corridor than refuse: a transit leg still happens
- * when only its destination is imported, it just has fewer stops.
+ * The regions that cover either end and whatever lies between, for a
+ * caller that would rather plan with part of a corridor than refuse:
+ * a transit leg still happens when only its destination is imported,
+ * it just has fewer stops.
  */
 export async function regionsCovering(
   from: { lat: number; lon: number },
   to: { lat: number; lon: number },
+  detourBudgetM: number,
 ): Promise<string[]> {
   const [fromRegion, toRegion] = await Promise.all([
     pickRegion(from.lat, from.lon),
     pickRegion(to.lat, to.lon),
   ]);
-  return [...new Set([fromRegion?.postgresDb, toRegion?.postgresDb].filter((r): r is string => !!r))];
+  const ends = [fromRegion?.postgresDb, toRegion?.postgresDb].filter((r): r is string => !!r);
+  return await withRegionsAlong(ends, from, to, detourBudgetM);
 }
 
 function requireUser(): number {

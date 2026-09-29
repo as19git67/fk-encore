@@ -179,7 +179,7 @@ export async function planTransitLeg(
   const needsPool = frames.some((f) => f.plannable);
   let pool: ScoredCandidate[] = [];
   if (needsPool) {
-    const regions = await regionsCovering(req.origin, req.destination);
+    const regions = await regionsCovering(req.origin, req.destination, DETOUR_BUDGET_M[req.mode]);
     if (regions.length > 0) {
       const found = await corridorCandidates(regions, req.origin, req.destination, {
         detourBudgetM: DETOUR_BUDGET_M[req.mode],

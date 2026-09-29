@@ -256,6 +256,49 @@ export async function pickRegion(
   return match;
 }
 
+/** A rectangle in degrees, the shape `osm_region_imports` stores. */
+export interface LatLonBox {
+  minLat: number;
+  minLon: number;
+  maxLat: number;
+  maxLon: number;
+}
+
+/**
+ * Every ready region whose rectangle touches `box`, smallest first.
+ *
+ * The coarse half of routing only: a rectangle that overlaps says
+ * "might hold something here", and for a corridor that is the right
+ * question — a journey from home to the coast crosses extracts that
+ * contain neither end, and the search in each of them is what finds
+ * the abbey halfway. A region that does not actually reach the
+ * corridor answers with nothing, which costs a query and nothing else;
+ * a point lookup could not afford that generosity (Lake Garda, above),
+ * a search along a line can.
+ */
+export async function regionsIntersecting(
+  box: LatLonBox,
+  deps: Pick<RouterDeps, "db"> = {},
+): Promise<RegionMatch[]> {
+  const db = deps.db ?? dbDefault;
+  const rows = await db
+    .select()
+    .from(osmRegionImports)
+    .where(
+      and(
+        inArray(osmRegionImports.status, ["ready_running", "ready_stopped"]),
+        sql`${osmRegionImports.bbox_min_lat} <= ${box.maxLat}`,
+        sql`${osmRegionImports.bbox_max_lat} >= ${box.minLat}`,
+        sql`${osmRegionImports.bbox_min_lon} <= ${box.maxLon}`,
+        sql`${osmRegionImports.bbox_max_lon} >= ${box.minLon}`,
+      ),
+    );
+  return rows
+    .sort((a, b) => bboxArea(a) - bboxArea(b))
+    .map(toMatch)
+    .filter((m): m is RegionMatch => m !== null);
+}
+
 /**
  * The extracts containing the point, or null when nobody can say.
  *

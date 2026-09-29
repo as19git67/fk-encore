@@ -17,7 +17,7 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { planCorridor } from "./corridor";
+import { corridorBox, planCorridor } from "./corridor";
 
 /** Invented places on an invented road near Augsburg. */
 const FROM = { lat: 48.3, lon: 10.9 };
@@ -138,6 +138,28 @@ describe("POST /trip-planner/corridor", () => {
     expect(res.spots.map((s) => s.osmRef)).toEqual(["node:2", "node:1"]);
   });
 
+  it("searches a region the corridor crosses without touching either end", async () => {
+    // Home in the west, the coast in the east, and a third extract
+    // between them that contains neither end but the road through it.
+    const home = { lat: 48.3, lon: 9.0 };
+    const coast = { lat: 48.3, lon: 12.0 };
+    await seedRegion("europe/west", [47.5, 8.0, 50.5, 9.5]);
+    await seedRegion("europe/middle", [47.5, 9.5, 50.5, 11.5]);
+    await seedRegion("europe/east", [47.5, 11.5, 50.5, 13.0]);
+    // Far off to the side: its rectangle never meets the corridor.
+    await seedRegion("europe/north", [52.0, 8.0, 55.0, 13.0]);
+    geo.setSearchSpots("nom_europe_middle", [
+      spot({ osmRef: "node:7", id: 7, lon: 10.5, detourM: 400, name: "Kloster am Weg" }),
+    ]);
+
+    const res = await planCorridor({ from: home, to: coast });
+
+    expect(res.regions).toEqual(["nom_europe_west", "nom_europe_east", "nom_europe_middle"]);
+    expect(geo.getSearchCalls().map((c) => c.postgresDb).sort())
+      .toEqual(["nom_europe_east", "nom_europe_middle", "nom_europe_west"]);
+    expect(res.spots.map((s) => s.osmRef)).toEqual(["node:7"]);
+  });
+
   it("says which end is not covered rather than returning half a corridor", async () => {
     await seedRegion("europe/germany/bayern", [47.5, 9, 50.5, 11.0]);
 
@@ -166,5 +188,26 @@ describe("POST /trip-planner/corridor", () => {
     await expect(
       planCorridor({ from: FROM, to: { lat: 48.3, lon: 200 } }),
     ).rejects.toThrow(/to.lon/);
+  });
+});
+
+describe("corridorBox", () => {
+  it("wraps the ellipse: half the minor axis all round the ends", () => {
+    // 100 km east-west at 48°, budget 10 km: the ellipse reaches
+    // √(10·210)/2 ≈ 22.9 km to either side and 5 km past either end.
+    const box = corridorBox({ lat: 48, lon: 10 }, { lat: 48, lon: 11.345 }, 10_000);
+    const padLat = (box.maxLat - 48) * 111_195;
+    expect(padLat).toBeGreaterThan(22_000);
+    expect(padLat).toBeLessThan(24_000);
+    expect(box.minLat).toBeCloseTo(48 - (box.maxLat - 48), 9);
+    // Longitude is padded in metres too, so it is wider in degrees.
+    expect(box.maxLon - 11.345).toBeGreaterThan(box.maxLat - 48);
+    expect(box.minLon).toBeLessThan(10);
+  });
+
+  it("is at least the ends themselves for a journey with no length", () => {
+    const box = corridorBox({ lat: 48, lon: 10 }, { lat: 48, lon: 10 }, 2_000);
+    expect(box.maxLat).toBeGreaterThan(48);
+    expect(box.minLon).toBeLessThan(10);
   });
 });

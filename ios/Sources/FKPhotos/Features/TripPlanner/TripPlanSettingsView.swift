@@ -75,9 +75,6 @@ struct TripPlanSettingsView: View {
 
             Section {
                 TripTransportModePicker(mode: $model.mode)
-                Text(model.mode.hint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Picker("Tempo", selection: $model.pace) {
                     ForEach(TripPace.allCases, id: \.self) { pace in
                         Text(pace.label).tag(pace)
