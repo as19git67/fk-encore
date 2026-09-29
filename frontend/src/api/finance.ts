@@ -1433,7 +1433,7 @@ export interface ForecastScenarioConfig {
     careFromAge: number | null
     careMonthly: number
   }
-  healthInsurance: { rate: number; minMonthly: number }
+  healthInsurance: { rate: number; careRate: number; minMonthly: number; maxMonthlyIncome: number }
   offsetDeductions: number[]
   /** Stress test (#1339): the depot loses `crashSize` at the start of `crashYear`; null = no crash. */
   stress: { crashYear: number | null; crashSize: number }

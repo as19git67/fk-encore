@@ -256,8 +256,12 @@ export interface ForecastScenario {
   healthInsurance: {
     /** Contribution rate incl. additional contribution and care, e.g. 0.20. */
     rate: number;
-    /** Minimum monthly contribution for the voluntarily insured. */
+    /** The care insurance's share of `rate`, e.g. 0.036: pensioners pay it in full, half of the rest. */
+    careRate: number;
+    /** Minimum monthly contribution for the voluntarily insured (today's money). */
     minMonthly: number;
+    /** Contribution ceiling per month (Beitragsbemessungsgrenze, today's money). */
+    maxMonthlyIncome: number;
   };
   /** Person ids for which the deduction buy-back is applied. */
   offsetDeductions: number[];
@@ -576,6 +580,34 @@ export function simulate(input: ForecastInput): SimulationResult {
     }));
   pots.get("insurance")!.value = insurances.reduce((s, i) => s + i.value, 0);
 
+  // --- who owns which pot, for the voluntarily insured ----------------------
+  // Capital income counts towards their contribution. Returns accrue per
+  // pot, so each person's share of a pot is taken from the assets that went
+  // in: personal assets to their owner, household assets to everyone alike.
+  const personIds = persons.map((p) => p.id);
+  const ownership = new Map<Pot, Map<number, number>>(); // pot → person → share
+  {
+    const sums = new Map<Pot, Map<number, number>>();
+    for (const it of items) {
+      if (it.type !== "asset" || it.currentValue <= 0) continue;
+      const m = sums.get(it.pot) ?? new Map<number, number>();
+      const owners = it.personId != null && personIds.includes(it.personId) ? [it.personId] : personIds;
+      for (const pid of owners) m.set(pid, (m.get(pid) ?? 0) + it.currentValue / owners.length);
+      sums.set(it.pot, m);
+    }
+    for (const pot of POTS) {
+      const m = sums.get(pot);
+      const total = m ? [...m.values()].reduce((a, b) => a + b, 0) : 0;
+      const shares = new Map<number, number>();
+      for (const pid of personIds) shares.set(pid, total > 0 ? (m!.get(pid) ?? 0) / total : 1 / Math.max(1, personIds.length));
+      ownership.set(pot, shares);
+    }
+  }
+  /** Gross returns of the previous month per pot — the income the contribution is assessed on. */
+  const lastReturns = new Map<Pot, number>();
+  /** Pots whose returns are income (interest, dividends); a home's appreciation is not. */
+  const INCOME_POTS: ReadonlySet<Pot> = new Set<Pot>(["cash", "depot", "other"]);
+
   // --- sources for the cash-flow chart -----------------------------------
   const sources: FlowSource[] = [];
   const sourceKeys = new Set<string>();
@@ -734,13 +766,22 @@ export function simulate(input: ForecastInput): SimulationResult {
     let income = 0; // regular income this month (net)
     let expenses = 0; // everything that leaves the household
 
-    // Per-person income this month for rate-based health insurance.
-    const personIncome = new Map<number, number>();
-    const personPension = new Map<number, number>();
-    const addPersonal = (pid: number | null, v: number, pension: boolean) => {
-      if (pid == null) return;
-      personIncome.set(pid, (personIncome.get(pid) ?? 0) + v);
-      if (pension) personPension.set(pid, (personPension.get(pid) ?? 0) + v);
+    // Income of this month by person and kind, for rate-based health insurance.
+    // "earned" and "other" (rent, private pensions, annuities) count for the
+    // voluntarily insured only; "statutory" and "company" pensions for the
+    // pensioners' insurance as well; a one-off ("lump") for neither.
+    type IncomeKind = "earned" | "statutory" | "company" | "other" | "lump";
+    const personIncome = new Map<number, Record<IncomeKind, number>>();
+    let householdIncome = 0; // items without a person (rent of a shared flat)
+    const addPersonal = (pid: number | null, v: number, kind: IncomeKind) => {
+      if (kind === "lump") return;
+      if (pid == null) {
+        householdIncome += v;
+        return;
+      }
+      const rec = personIncome.get(pid) ?? { earned: 0, statutory: 0, company: 0, other: 0, lump: 0 };
+      rec[kind] += v;
+      personIncome.set(pid, rec);
     };
 
     // Buy-back of deductions in the first month.
@@ -763,7 +804,7 @@ export function simulate(input: ForecastInput): SimulationResult {
           const v = it.amount * growthIndex(it.growthRate, mi, w.from);
           add(r.income, source(`item:${it.id}`, it.label, it.personId, it.type), v);
           income += v;
-          addPersonal(it.personId, v, false);
+          addPersonal(it.personId, v, "earned");
           break;
         }
         case "income": {
@@ -774,7 +815,7 @@ export function simulate(input: ForecastInput): SimulationResult {
           taxesYear += gross - v;
           add(r.income, source(`item:${it.id}`, it.label, it.personId, it.type), v);
           income += v;
-          addPersonal(it.personId, v, false);
+          addPersonal(it.personId, v, it.frequency === "once" ? "lump" : "other");
           break;
         }
         case "expense": {
@@ -813,7 +854,7 @@ export function simulate(input: ForecastInput): SimulationResult {
               taxesYear += it.lumpSumOption - v;
               add(r.income, source(`item:${it.id}`, it.label, it.personId, it.type), v);
               income += v;
-              addPersonal(it.personId, v, true);
+              addPersonal(it.personId, v, "lump");
             }
             break;
           }
@@ -825,7 +866,7 @@ export function simulate(input: ForecastInput): SimulationResult {
           taxesYear += gross - v;
           add(r.income, source(`item:${it.id}`, it.label, it.personId, it.type), v);
           income += v;
-          addPersonal(it.personId, v, true);
+          addPersonal(it.personId, v, it.kind === "statutory" ? "statutory" : it.kind === "company" ? "company" : "other");
           break;
         }
         case "asset":
@@ -870,7 +911,7 @@ export function simulate(input: ForecastInput): SimulationResult {
           taxesYear += it.projectedPayout - v;
           add(r.income, source(`item:${it.id}`, it.label, it.personId, it.type), v);
           income += v;
-          addPersonal(it.personId, v, true);
+          addPersonal(it.personId, v, "lump");
         }
       }
       if (ins.paidOut && it.payoutMode === "annuity" && mi >= ins.maturity) {
@@ -878,7 +919,7 @@ export function simulate(input: ForecastInput): SimulationResult {
         taxesYear += it.annuityAmount - v;
         add(r.income, source(`item:${it.id}`, it.label, it.personId, it.type), v);
         income += v;
-        addPersonal(it.personId, v, true);
+        addPersonal(it.personId, v, "other");
       }
     }
     pots.get("insurance")!.value = insurances.reduce((s, i) => s + i.value, 0);
@@ -913,12 +954,32 @@ export function simulate(input: ForecastInput): SimulationResult {
         case "private":
           v = fixed * growthIndex(it.privateGrowthRate, mi, start);
           break;
-        case "statutory_voluntary":
-          v = Math.max(scenario.healthInsurance.minMonthly * infl, (personIncome.get(it.personId) ?? 0) * scenario.healthInsurance.rate);
+        case "statutory_voluntary": {
+          // Everything counts: earned income, every pension, rent, annuities,
+          // a share of the household's income and last month's capital income.
+          const hi = scenario.healthInsurance;
+          const inc = personIncome.get(it.personId);
+          let base = inc ? inc.earned + inc.statutory + inc.company + inc.other : 0;
+          base += householdIncome / Math.max(1, personIds.length);
+          for (const pot of INCOME_POTS) base += (lastReturns.get(pot) ?? 0) * (ownership.get(pot)?.get(it.personId) ?? 0);
+          // The ceiling caps the income; the minimum is a contribution, not an income.
+          v = Math.max(hi.minMonthly * infl, Math.min(hi.maxMonthlyIncome * infl, base) * hi.rate);
           break;
-        case "kvdr":
-          v = (personPension.get(it.personId) ?? 0) * scenario.healthInsurance.rate;
+        }
+        case "kvdr": {
+          // Pensioners' insurance: the statutory pension carries half the
+          // health rate (the pension fund pays the other half) and the full
+          // care rate; a company pension carries the full rate; private
+          // pensions and capital income are free of contributions.
+          const hi = scenario.healthInsurance;
+          const inc = personIncome.get(it.personId);
+          if (inc) {
+            const halfRate = hi.careRate + (hi.rate - hi.careRate) / 2;
+            const cap = hi.maxMonthlyIncome * infl;
+            v = Math.min(cap, inc.statutory) * halfRate + Math.min(Math.max(0, cap - inc.statutory), inc.company) * hi.rate;
+          }
           break;
+        }
       }
       if (v > 0) {
         add(r.expenses, source(`item:${it.id}`, it.label, it.personId, it.type), v);
@@ -938,8 +999,10 @@ export function simulate(input: ForecastInput): SimulationResult {
 
     // ---- returns on pots -------------------------------------------------
     for (const [pot, s] of pots) {
+      lastReturns.set(pot, 0);
       if (pot === "insurance" || s.value <= 0) continue;
       const gross = s.value * monthlyRate(s.returnRate);
+      lastReturns.set(pot, gross);
       // Interest and investment returns are taxed as they accrue; real estate
       // only appreciates, which is not taxed until sold (and not modelled).
       const tax = pot === "real_estate" ? 0 : gross * scenario.capitalGainsTaxRate;
@@ -1193,7 +1256,7 @@ export function defaultScenario(overrides: Partial<ForecastScenario> = {}): Fore
       careFromAge: 85,
       careMonthly: 0,
     },
-    healthInsurance: { rate: 0.2, minMonthly: 250 },
+    healthInsurance: { rate: 0.2, careRate: 0.036, minMonthly: 250, maxMonthlyIncome: 5_512.5 },
     offsetDeductions: [],
     stress: { crashYear: null, crashSize: 0.3 },
     ...overrides,

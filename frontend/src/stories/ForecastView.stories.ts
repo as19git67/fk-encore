@@ -41,7 +41,7 @@ const DEFAULT_SCENARIO: ForecastBundle['defaultScenario'] = {
     careFromAge: 85,
     careMonthly: 0,
   },
-  healthInsurance: { rate: 0.2, minMonthly: 250 },
+  healthInsurance: { rate: 0.2, careRate: 0.036, minMonthly: 250, maxMonthlyIncome: 5512.5 },
   offsetDeductions: [],
   stress: { crashYear: null, crashSize: 0.3 },
 }
