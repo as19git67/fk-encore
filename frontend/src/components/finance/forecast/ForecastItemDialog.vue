@@ -126,7 +126,12 @@ function set(k: string, v: unknown) {
 /** Percent field: the UI shows 2,5 and the data holds 0.025. */
 const pct = (k: string) => {
   const v = n(k)
-  return v == null ? null : Math.round(v * 10000) / 100
+  return v == null ? null : Math.round(v * 1_000_000) / 10_000
+}
+/** Without a lump sum there is nothing to choose: back to the annuity. */
+function setLumpSum(v: number | null) {
+  set('lumpSumOption', v)
+  if (!(v != null && v > 0)) set('payoutMode', 'annuity')
 }
 function setPct(k: string, v: number | null) {
   set(k, v == null ? null : v / 100)
@@ -219,7 +224,7 @@ function save() {
           <Select input-id="fc-freq" :model-value="s('frequency') ?? 'monthly'" :options="freqOptions" option-label="label" option-value="value" @update:model-value="set('frequency', $event)" />
         </div>
         <div class="field">
-          <label for="fc-growth">{{ type === 'expense' ? 'Jährliche Steigerung (leer = Inflation)' : 'Jährliche Steigerung' }}</label>
+          <label for="fc-growth">{{ type === 'expense' ? 'Jährliche Steigerung (leer = Inflation ab heute)' : 'Jährliche Steigerung (ab Beginn)' }}</label>
           <InputNumber input-id="fc-growth" :model-value="pct('growthRate')" suffix=" %" :min-fraction-digits="1" :max-fraction-digits="2" @update:model-value="setPct('growthRate', $event)" />
         </div>
         <div v-if="type === 'income'" class="field">
@@ -359,10 +364,14 @@ function save() {
           <InputNumber input-id="fc-monthly" :model-value="n('monthlyAmount')" mode="currency" currency="EUR" locale="de-DE" @update:model-value="set('monthlyAmount', $event)" />
         </div>
         <div class="field">
-          <label for="fc-growth">Rentenanpassung pro Jahr</label>
+          <label for="fc-growth">{{ s('kind') === 'statutory' ? 'Rentenanpassung pro Jahr (ab heute)' : 'Rentenanpassung pro Jahr (ab Beginn)' }}</label>
           <InputNumber input-id="fc-growth" :model-value="pct('growthRate')" suffix=" %" :min-fraction-digits="1" :max-fraction-digits="2" @update:model-value="setPct('growthRate', $event)" />
         </div>
         <template v-if="s('kind') === 'statutory'">
+          <div class="field">
+            <label for="fc-entitlement">Bisher erreichte Anwartschaft pro Monat</label>
+            <InputNumber input-id="fc-entitlement" :model-value="n('currentEntitlement')" mode="currency" currency="EUR" locale="de-DE" @update:model-value="set('currentEntitlement', $event)" />
+          </div>
           <div class="field">
             <label for="fc-regular">Regelaltersgrenze</label>
             <InputNumber input-id="fc-regular" :model-value="n('regularAge')" suffix=" Jahre" :min="60" :max="70" @update:model-value="set('regularAge', $event)" />
@@ -387,7 +396,7 @@ function save() {
           </div>
           <div class="field">
             <label for="fc-lump">Kapitalwahlrecht (Einmalzahlung)</label>
-            <InputNumber input-id="fc-lump" :model-value="n('lumpSumOption')" mode="currency" currency="EUR" locale="de-DE" @update:model-value="set('lumpSumOption', $event)" />
+            <InputNumber input-id="fc-lump" :model-value="n('lumpSumOption')" mode="currency" currency="EUR" locale="de-DE" @update:model-value="setLumpSum($event)" />
           </div>
           <div v-if="(n('lumpSumOption') ?? 0) > 0" class="field field--inline">
             <label for="fc-lump-mode">Einmalzahlung statt Rente</label>
@@ -399,6 +408,10 @@ function save() {
           <InputNumber input-id="fc-tax" :model-value="pct('taxRate')" suffix=" %" :min-fraction-digits="0" :max-fraction-digits="2" @update:model-value="setPct('taxRate', $event)" />
         </div>
       </div>
+      <p v-if="s('kind') === 'statutory'" class="hint">
+        Werte wie in der Renteninformation: Die prognostizierte Rente gilt in heutigen Werten für Beiträge bis zur Regelaltersgrenze und wird ab heute mit der Rentenanpassung fortgeschrieben. Wer früher aufhört, bekommt anteilig weniger — zwischen der bisher erreichten Anwartschaft und der Prognose — und für jeden Monat vor der Regelaltersgrenze den Abschlag. Der Beginn liegt im Monat nach dem Geburtsmonat.
+      </p>
+      <p v-else class="hint">Rente nominal zum Beginn, wie die Standmitteilung sie prognostiziert; die Anpassung greift ab dem Beginn.</p>
     </template>
 
     <!-- Contract reference: links the item to its statements in the documents module (#1343) -->

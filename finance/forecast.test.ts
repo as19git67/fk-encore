@@ -224,7 +224,8 @@ describe("finance/forecast — savings accounts as items", () => {
     ]);
 
     const { accounts } = await getAccountSuggestions();
-    expect(accounts.map((a) => a.label).sort()).toEqual(["Depot Beispiel", "Tagesgeld Beispiel"]);
+    // A current account counts too: it is where every month's surplus lands.
+    expect(accounts.map((a) => a.label).sort()).toEqual(["Depot Beispiel", "Girokonto Beispiel", "Tagesgeld Beispiel"]);
     expect(accounts.find((a) => a.id === depot)).toMatchObject({ kind: "depot", balance: 2000.5 });
 
     const person = await createPerson({ label: "A", birthDate: "1970-01-01" });
@@ -232,7 +233,7 @@ describe("finance/forecast — savings accounts as items", () => {
     const items = (await getForecast()).items;
     expect(items.find((i) => i.linkedAccountId === tg)).toMatchObject({ type: "asset", data: { pot: "cash" }, linkedAccountBalance: 5000 });
     expect(items.find((i) => i.linkedAccountId === depot)).toMatchObject({ personId: person.id, data: { pot: "depot" }, linkedAccountBalance: 2000.5 });
-    expect((await getAccountSuggestions()).accounts).toEqual([]);
+    expect((await getAccountSuggestions()).accounts.map((a) => a.label)).toEqual(["Girokonto Beispiel"]);
 
     const foreign = await account("festgeld", "Noch eins fremd", false);
     await expect(createAccountItems({ accounts: [{ accountId: foreign, personId: null }] })).rejects.toThrow(/not found/);
@@ -278,6 +279,44 @@ describe("finance/forecast — scenarios and simulation", () => {
     await expect(runSimulation({ scenarioId: 99999 })).rejects.toThrow(/not found/);
   });
 
+  it("answers the robustness and target-age questions for the chosen person", async () => {
+    const { person, pension } = await personWithMilestones("A", "1970-01-01");
+    await createItem({ personId: person.id, type: "salary", label: "Gehalt", data: { amount: 3000 } });
+    await createItem({ type: "living_expense", label: "Leben", data: { amount: 2500 } });
+    await createItem({ type: "asset", label: "Depot", data: { pot: "depot", currentValue: 50000, returnRate: 0.03 } });
+    await createItem({
+      personId: person.id,
+      type: "pension",
+      label: "Rente",
+      data: { kind: "statutory", monthlyAmount: 2000, start: { kind: "milestone", milestoneId: pension.id } },
+    });
+    const plain = await runSimulation({ scenario: { endAge: 85 }, earliestFor: person.id });
+    expect(plain.sensitivity).toBeNull();
+    expect(plain.reverse).toBeNull();
+
+    const res = await runSimulation({ scenario: { endAge: 85 }, earliestFor: person.id, robustness: true, targetAge: 58 });
+    expect(res.sensitivity?.cells).toHaveLength(15);
+    expect(res.sensitivity?.cells.find((c) => c.returnRate === 0.04 && c.inflationRate === 0.02)?.age).toBe(res.earliest?.age);
+    expect(res.levers?.levers.map((l) => l.key)).toEqual(["return", "inflation", "spending", "crash"]);
+    expect(res.reverse?.targetAge).toBe(58);
+    expect(typeof res.reverse?.reachable).toBe("boolean");
+
+    // Without a person the questions are not asked; an impossible age is refused.
+    const none = await runSimulation({ robustness: true, targetAge: 60 });
+    expect(none.levers).toBeNull();
+    await expect(runSimulation({ earliestFor: person.id, targetAge: 30 })).rejects.toThrow(/target age/);
+  });
+
+  it("applies a depot crash from the scenario", async () => {
+    const { person } = await personWithMilestones("A", "1970-01-01");
+    await createItem({ personId: person.id, type: "salary", label: "Gehalt", data: { amount: 3000 } });
+    await createItem({ type: "asset", label: "Depot", data: { pot: "depot", currentValue: 100000, returnRate: 0 } });
+    const year = new Date().getUTCFullYear() + 1;
+    const res = await runSimulation({ scenario: { endAge: 70, stress: { crashYear: year, crashSize: 0.4 } } });
+    const row = res.result.years.find((y) => y.year === year)!;
+    expect(row.pots.depot).toBeCloseTo(60000, 6);
+  });
+
   it("computes the two-person matrix", async () => {
     const a = await personWithMilestones("A", "1970-01-01");
     const b = await personWithMilestones("B", "1973-01-01");
@@ -313,6 +352,8 @@ describe("toEngineScenario", () => {
     expect(s.spendingCurve.phases).toEqual([{ fromAge: 70, factor: 0.8 }]);
     expect(s.offsetDeductions).toEqual([1]);
     expect(s.allowSurrender).toBe(false);
+    expect(s.stress).toEqual({ crashYear: null, crashSize: 0.3 });
+    expect(toEngineScenario({ stress: { crashYear: 2031.4, crashSize: 7 } }).stress).toEqual({ crashYear: 2031, crashSize: 0.99 });
   });
 });
 

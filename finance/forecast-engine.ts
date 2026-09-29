@@ -162,8 +162,20 @@ export interface PensionItem extends ItemBase {
   type: "pension";
   personId: number;
   kind: PensionKind;
-  /** Projected monthly pension at `regularAge` (statutory) or at `start`. */
+  /**
+   * Projected monthly pension at `regularAge` (statutory) or at `start`.
+   * A statutory statement quotes it in today's pension value and assumes
+   * contributions until the regular age; see `currentEntitlement`.
+   */
   monthlyAmount: number;
+  /**
+   * Statutory: the pension earned so far ("bisher erreichte Anwartschaft"),
+   * what would be paid if no more contributions came in. Between it and
+   * `monthlyAmount` the entitlement grows with each month worked until the
+   * regular age, so leaving work early lands in between. null = assume the
+   * projection regardless of when work ends.
+   */
+  currentEntitlement: number | null;
   /** Usually a *_pension milestone. */
   start: TimeRef;
   /** Statutory: regular age the projection refers to. */
@@ -172,7 +184,11 @@ export interface PensionItem extends ItemBase {
   deductionPerMonth: number;
   /** One-off cost to buy back the deduction (§ 187a SGB VI), from the pension statement. */
   deductionOffsetCost: number | null;
-  /** Yearly pension adjustment, e.g. 0.02. */
+  /**
+   * Yearly pension adjustment, e.g. 0.02. A statutory pension is adjusted
+   * from today on (the statement's amount is in today's pension value); a
+   * company or private pension from its start (the projection is nominal).
+   */
   growthRate: number;
   /** Own contribution per month until `contributionEnd` (company / private). */
   monthlyContribution: number;
@@ -245,6 +261,14 @@ export interface ForecastScenario {
   };
   /** Person ids for which the deduction buy-back is applied. */
   offsetDeductions: number[];
+  /** Stress test (#1339): the depot loses `crashSize` at the start of `crashYear`; null = no crash. */
+  stress: StressTest;
+}
+
+export interface StressTest {
+  crashYear: number | null;
+  /** Share of the depot lost, e.g. 0.3. */
+  crashSize: number;
 }
 
 export interface ForecastInput {
@@ -311,6 +335,8 @@ export interface ResolvedMilestone {
 
 export interface SimulationResult {
   startYear: number;
+  /** First simulated month, 1–12: the first year is a partial year unless this is 1. */
+  startMonth: number;
   endYear: number;
   years: YearRow[];
   sources: FlowSource[];
@@ -418,6 +444,20 @@ class Context {
   }
 }
 
+/**
+ * A statutory pension starts with the month after the birthday (§ 99 SGB
+ * VI); whoever is born on the first of a month reaches the age on the last
+ * day of the month before and starts in the birthday month itself.
+ */
+function statutoryOffset(p: ForecastPerson): number {
+  return p.birthDate.slice(8, 10) === "01" ? 0 : 1;
+}
+
+/** Month a milestone given as an age falls in. */
+function ageToMonth(p: ForecastPerson, kind: MilestoneKind, age: number): number {
+  return monthIndex(p.birthDate) + age * 12 + (kind === "statutory_pension" ? statutoryOffset(p) : 0);
+}
+
 function resolveMilestones(input: ForecastInput): Resolved {
   const persons = new Map(input.persons.map((p) => [p.id, p]));
   const out: Resolved = new Map();
@@ -427,13 +467,13 @@ function resolveMilestones(input: ForecastInput): Resolved {
     const age = override?.age !== undefined ? override.age : m.age;
     const p = persons.get(m.personId);
     if (override?.age != null && p) {
-      out.set(m.id, monthIndex(p.birthDate) + override.age * 12);
+      out.set(m.id, ageToMonth(p, m.kind, override.age));
     } else if (override?.date) {
       out.set(m.id, monthIndex(override.date));
     } else if (date) {
       out.set(m.id, monthIndex(date));
     } else if (age != null && p) {
-      out.set(m.id, monthIndex(p.birthDate) + age * 12);
+      out.set(m.id, ageToMonth(p, m.kind, age));
     }
   }
   return out;
@@ -496,13 +536,16 @@ export function simulate(input: ForecastInput): SimulationResult {
   const endYear = yearOf(endMonth) - 1;
 
   // --- pots -----------------------------------------------------------
+  // Cash earns nothing unless an asset says otherwise: the scenario's return
+  // is the return on investments, not on a current account.
+  const defaultRate = (pot: Pot) => (pot === "cash" ? 0 : scenario.defaultReturnRate);
   const pots = new Map<Pot, PotState>();
-  for (const p of POTS) pots.set(p, { value: 0, returnRate: p === "cash" ? 0 : scenario.defaultReturnRate });
+  for (const p of POTS) pots.set(p, { value: 0, returnRate: defaultRate(p) });
   {
     const weights = new Map<Pot, { sum: number; weighted: number }>();
     for (const it of items) {
       if (it.type !== "asset") continue;
-      const r = it.returnRate ?? scenario.defaultReturnRate;
+      const r = it.returnRate ?? defaultRate(it.pot);
       const w = weights.get(it.pot) ?? { sum: 0, weighted: 0 };
       w.sum += it.currentValue;
       w.weighted += it.currentValue * r;
@@ -511,7 +554,7 @@ export function simulate(input: ForecastInput): SimulationResult {
     for (const [pot, w] of weights) {
       const s = pots.get(pot)!;
       s.value = w.sum;
-      s.returnRate = w.sum > 0 ? w.weighted / w.sum : scenario.defaultReturnRate;
+      s.returnRate = w.sum > 0 ? w.weighted / w.sum : defaultRate(pot);
     }
     // Return rates of assets without value still matter once contributions arrive.
     for (const it of items) {
@@ -570,7 +613,17 @@ export function simulate(input: ForecastInput): SimulationResult {
     if (it.kind === "statutory" && it.regularAge != null) {
       const p = ctx.persons.get(it.personId);
       if (p) {
-        const regular = monthIndex(p.birthDate) + it.regularAge * 12;
+        const regular = monthIndex(p.birthDate) + it.regularAge * 12 + statutoryOffset(p);
+        // The projection assumes contributions until the regular age. Work
+        // that ends earlier earns only part of the way from what is already
+        // earned to the projection — in proportion to the months worked.
+        if (it.currentEntitlement != null && it.currentEntitlement < amount) {
+          const leave = ctx.personMilestone(it.personId, "leave_work") ?? regular;
+          const monthsToRegular = Math.max(0, regular - start);
+          const monthsWorked = Math.min(monthsToRegular, Math.max(0, leave - start));
+          const share = monthsToRegular > 0 ? monthsWorked / monthsToRegular : 1;
+          amount = it.currentEntitlement + (amount - it.currentEntitlement) * share;
+        }
         const early = Math.max(0, regular - w.from);
         const offset = scenario.offsetDeductions.includes(it.personId) && it.deductionOffsetCost != null;
         if (early > 0 && !offset) amount = amount * (1 - early * it.deductionPerMonth);
@@ -680,7 +733,6 @@ export function simulate(input: ForecastInput): SimulationResult {
 
     let income = 0; // regular income this month (net)
     let expenses = 0; // everything that leaves the household
-    let toPots = 0; // premiums and contributions (leave cash, land in a pot)
 
     // Per-person income this month for rate-based health insurance.
     const personIncome = new Map<number, number>();
@@ -755,7 +807,7 @@ export function simulate(input: ForecastInput): SimulationResult {
             expenses += it.monthlyContribution;
             r.contributions += it.monthlyContribution;
           }
-          if (it.payoutMode === "lump_sum" && it.lumpSumOption != null) {
+          if (it.payoutMode === "lump_sum" && it.lumpSumOption != null && it.lumpSumOption > 0) {
             if (mi === w.from) {
               const v = it.lumpSumOption * (1 - it.taxRate);
               taxesYear += it.lumpSumOption - v;
@@ -766,7 +818,9 @@ export function simulate(input: ForecastInput): SimulationResult {
             break;
           }
           if (!active) break;
-          const gross = base * growthIndex(it.growthRate, mi, w.from);
+          // Statutory: adjusted every year from today on; the statement's
+          // amount is in today's pension value. Company / private: nominal at start.
+          const gross = base * growthIndex(it.growthRate, mi, it.kind === "statutory" ? start : w.from);
           const v = gross * (1 - it.taxRate);
           taxesYear += gross - v;
           add(r.income, source(`item:${it.id}`, it.label, it.personId, it.type), v);
@@ -801,7 +855,6 @@ export function simulate(input: ForecastInput): SimulationResult {
         if (it.monthlyPremium > 0 && mi < ins.premiumEnd) {
           add(r.expenses, source(`contrib:${it.id}`, `${it.label} (Beitrag)`, it.personId, it.type), it.monthlyPremium);
           expenses += it.monthlyPremium;
-          toPots += it.monthlyPremium;
           r.contributions += it.monthlyPremium;
         }
         // Value grows linearly from today's surrender value to the projected payout.
@@ -873,11 +926,23 @@ export function simulate(input: ForecastInput): SimulationResult {
       }
     }
 
+    // ---- stress test: the depot crashes at the start of the chosen year ---
+    if (scenario.stress.crashYear != null && year === scenario.stress.crashYear && (mi % 12 === 0 || mi === start)) {
+      const depot = pots.get("depot")!;
+      if (depot.value > 0) {
+        const loss = depot.value * Math.min(0.99, Math.max(0, scenario.stress.crashSize));
+        depot.value -= loss;
+        r.returns -= loss;
+      }
+    }
+
     // ---- returns on pots -------------------------------------------------
     for (const [pot, s] of pots) {
       if (pot === "insurance" || s.value <= 0) continue;
       const gross = s.value * monthlyRate(s.returnRate);
-      const tax = pot === "cash" || pot === "real_estate" ? 0 : gross * scenario.capitalGainsTaxRate;
+      // Interest and investment returns are taxed as they accrue; real estate
+      // only appreciates, which is not taxed until sold (and not modelled).
+      const tax = pot === "real_estate" ? 0 : gross * scenario.capitalGainsTaxRate;
       s.value += gross - tax;
       r.returns += gross - tax;
       taxesYear += tax;
@@ -1013,6 +1078,7 @@ export function simulate(input: ForecastInput): SimulationResult {
   const last = years[years.length - 1];
   return {
     startYear,
+    startMonth: start - startYear * 12 + 1,
     endYear,
     years,
     sources,
@@ -1036,7 +1102,15 @@ function liquidWealthAtStart(_input: ForecastInput, items: ForecastItem[]): numb
 // Searches on top of the simulation
 // -----------------------------------------------------------------------
 
-function withLeaveAge(input: ForecastInput, personId: number, age: number): ForecastInput {
+/** The person's age in full years at the start of the simulation; null for an unknown person. */
+export function ageAtStart(input: ForecastInput, personId: number): number | null {
+  const p = input.persons.find((x) => x.id === personId);
+  if (!p) return null;
+  return ageAt(p.birthDate, monthIndex(input.startDate ?? isoToday()));
+}
+
+/** The input with the person's leave-work milestone moved to `age` (unchanged without such a milestone). */
+export function withLeaveAge(input: ForecastInput, personId: number, age: number): ForecastInput {
   const ms = input.milestones.find((m) => m.personId === personId && m.kind === "leave_work");
   if (!ms) return input;
   return {
@@ -1121,6 +1195,7 @@ export function defaultScenario(overrides: Partial<ForecastScenario> = {}): Fore
     },
     healthInsurance: { rate: 0.2, minMonthly: 250 },
     offsetDeductions: [],
+    stress: { crashYear: null, crashSize: 0.3 },
     ...overrides,
   };
 }
