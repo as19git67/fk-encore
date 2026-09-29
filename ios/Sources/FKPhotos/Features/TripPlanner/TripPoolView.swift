@@ -54,21 +54,11 @@ struct TripPoolView: View {
         .plannerErrorBanner(viewModel.errorMessage, dismiss: { viewModel.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                // Two shapes of one pool (§5.2): the list answers "what
-                // did the planner find", the map "where is all this" —
-                // and the second question is the one you ask before
-                // deciding what fits into an afternoon (§3.1).
-                Picker("Darstellung", selection: $presentation) {
-                    ForEach(TripPoolPresentation.allCases, id: \.self) { option in
-                        Label(option.label, systemImage: option.symbolName)
-                            .labelStyle(.iconOnly)
-                            .tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
+            // Two shapes of one pool (§5.2): the list answers "what
+            // did the planner find", the map "where is all this" —
+            // and the second question is the one you ask before
+            // deciding what fits into an afternoon (§3.1).
+            TripPresentationToolbarItem(presentation: $presentation)
             ToolbarItem(placement: .topBarTrailing) {
                 // The anti-pool: what this trip has turned down. It
                 // belongs next to the pool rather than in the settings,
