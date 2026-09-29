@@ -182,6 +182,55 @@ export function leverAnalysis(input: ForecastInput, personId: number): LeverAnal
 }
 
 // -----------------------------------------------------------------------
+// Survivor check (#1341): the death of a person at every age from now on
+// -----------------------------------------------------------------------
+
+export interface SurvivorRow {
+  age: number;
+  year: number;
+  ok: boolean;
+  failYear: number | null;
+  finalWealth: number;
+}
+
+export interface SurvivorCheck {
+  personId: number;
+  rows: SurvivorRow[];
+  /** The age at which the death hurts most: the earliest failure, else the smallest final wealth. null without rows. */
+  worstAge: number | null;
+}
+
+/** The input with `personId` dying at `age`. */
+export function withDeath(input: ForecastInput, personId: number, age: number): ForecastInput {
+  return { ...input, scenario: { ...input.scenario, survivor: { ...input.scenario.survivor, personId, age } } };
+}
+
+/** The input without any death. */
+export function withoutDeath(input: ForecastInput): ForecastInput {
+  return { ...input, scenario: { ...input.scenario, survivor: { ...input.scenario.survivor, personId: null, age: null } } };
+}
+
+export function survivorCheck(input: ForecastInput, personId: number, maxAge = 85): SurvivorCheck {
+  const p = input.persons.find((x) => x.id === personId);
+  const current = ageAtStart(input, personId);
+  const rows: SurvivorRow[] = [];
+  if (!p || current == null) return { personId, rows, worstAge: null };
+  const birthYear = Number(p.birthDate.slice(0, 4));
+  for (let age = current + 1; age <= maxAge; age++) {
+    const res = simulate(withDeath(input, personId, age));
+    if (!res.death) continue; // beyond the horizon
+    rows.push({ age, year: birthYear + age, ok: res.ok, failYear: res.failYear, finalWealth: res.finalWealth });
+  }
+  let worst: SurvivorRow | null = null;
+  for (const r of rows) {
+    if (!worst) worst = r;
+    else if (r.failYear != null && (worst.failYear == null || r.failYear < worst.failYear)) worst = r;
+    else if (r.failYear == null && worst.failYear == null && r.finalWealth < worst.finalWealth) worst = r;
+  }
+  return { personId, rows, worstAge: worst?.age ?? null };
+}
+
+// -----------------------------------------------------------------------
 // Reverse calculation (#1340)
 // -----------------------------------------------------------------------
 

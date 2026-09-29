@@ -11,7 +11,7 @@ import type {
   ForecastSimulation,
   ForecastYearRow,
 } from '../api/finance'
-import { LEVERS, REVERSE_GAP, REVERSE_OK, SENSITIVITY } from './forecastRobustnessFixture'
+import { LEVERS, REVERSE_GAP, REVERSE_OK, SENSITIVITY, SURVIVOR } from './forecastRobustnessFixture'
 
 /**
  * Finanzen › Prognose (issue #1337). The household below is invented:
@@ -44,6 +44,7 @@ const DEFAULT_SCENARIO: ForecastBundle['defaultScenario'] = {
   healthInsurance: { rate: 0.2, careRate: 0.036, minMonthly: 250, maxMonthlyIncome: 5512.5 },
   offsetDeductions: [],
   stress: { crashYear: null, crashSize: 0.3 },
+  survivor: { personId: null, age: null, expenseFactor: 0.7, incomeOffsetRate: 0.4, incomeAllowance: 1038 },
 }
 
 const BUNDLE: ForecastBundle = {
@@ -193,6 +194,7 @@ function toySimulation(req: ForecastSimulateRequest): ForecastSimulation {
     startYear,
     startMonth: 1,
     endYear,
+    death: null,
     years,
     sources: [
       { key: 'item:101', label: 'Gehalt Alex', personId: 1, kind: 'salary' },
@@ -230,6 +232,15 @@ function toySimulation(req: ForecastSimulateRequest): ForecastSimulation {
 
 function simulateHandler(req: ForecastSimulateRequest): ForecastSimulateResponse {
   const result = toySimulation(req)
+  const sv = req.scenario?.survivor
+  const deathComparison: ForecastSimulateResponse['comparisons'] = []
+  if (sv?.personId != null && sv.age != null) {
+    const birthYear = sv.personId === 1 ? 1970 : 1973
+    result.death = { personId: sv.personId, year: birthYear + sv.age, age: sv.age }
+    result.milestones.push({ id: -sv.personId, personId: sv.personId, kind: 'death', label: 'Todesfall', date: `${birthYear + sv.age}-04-01`, year: birthYear + sv.age, age: sv.age })
+    const base = toySimulation({ ...req, scenario: req.scenario ? { ...req.scenario, survivor: { ...sv, personId: null, age: null } } : undefined })
+    deathComparison.push({ scenarioId: 0, name: 'Ohne Todesfall', result: base })
+  }
   const matrix = req.matrix
     ? Array.from({ length: req.matrix.toAge - req.matrix.fromAge + 1 }, (_, i) => req.matrix!.fromAge + i).flatMap((ageA) =>
         Array.from({ length: req.matrix!.toAge - req.matrix!.fromAge + 1 }, (_, j) => req.matrix!.fromAge + j).map((ageB) => {
@@ -242,16 +253,20 @@ function simulateHandler(req: ForecastSimulateRequest): ForecastSimulateResponse
     result,
     earliest: req.earliestFor != null ? { personId: req.earliestFor, age: req.earliestFor === 1 ? 60 : 62 } : null,
     matrix,
-    comparisons: (req.compareScenarioIds ?? []).map((id) => {
-      const s = BUNDLE.scenarios.find((x) => x.id === id)!
-      return { scenarioId: id, name: s.name, result: toySimulation({ scenario: s.config }) }
-    }),
+    comparisons: [
+      ...deathComparison,
+      ...(req.compareScenarioIds ?? []).map((id) => {
+        const s = BUNDLE.scenarios.find((x) => x.id === id)!
+        return { scenarioId: id, name: s.name, result: toySimulation({ scenario: s.config }) }
+      }),
+    ],
     sensitivity: req.robustness && req.earliestFor != null ? { ...SENSITIVITY, personId: req.earliestFor } : null,
     levers: req.robustness && req.earliestFor != null ? { ...LEVERS, personId: req.earliestFor } : null,
     reverse:
       req.targetAge != null && req.earliestFor != null
         ? { ...(req.targetAge >= 62 ? REVERSE_OK : REVERSE_GAP), personId: req.earliestFor, targetAge: req.targetAge }
         : null,
+    survivor: req.survivorFor != null ? { ...SURVIVOR, personId: req.survivorFor } : null,
   }
 }
 
@@ -320,6 +335,35 @@ export const Robustheit: Story = {
       input.dispatchEvent(new Event('input', { bubbles: true }))
       input.blur()
     }
+    await sleep(900)
+  },
+}
+
+/** A death in the scenario and the survivor check open (#1341). */
+export const Hinterbliebene: Story = {
+  name: 'Hinterbliebenen-Szenario',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/finance/forecast', () =>
+          HttpResponse.json({ ...BUNDLE, defaultScenario: { ...DEFAULT_SCENARIO, survivor: { ...DEFAULT_SCENARIO.survivor, personId: 1, age: 64 } } }),
+        ),
+        ...handlers,
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    let select: HTMLElement | null = null
+    for (let i = 0; i < 50 && !select; i++) {
+      select = canvasElement.querySelector<HTMLElement>('#fc-survivor-for')
+      if (!select) await sleep(100)
+    }
+    if (!select) return
+    select.click()
+    await sleep(300)
+    const option = Array.from(document.querySelectorAll<HTMLElement>('li[role="option"]')).find((li) => li.textContent?.trim() === 'Alex')
+    option?.click()
     await sleep(900)
   },
 }

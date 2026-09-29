@@ -1,4 +1,4 @@
-import type { ForecastLevers, ForecastReverse, ForecastSensitivity } from '../api/finance'
+import type { ForecastLevers, ForecastReverse, ForecastSensitivity, ForecastSurvivorCheck } from '../api/finance'
 
 /** Invented answers of the robustness and reverse questions (#1339, #1340). */
 
@@ -50,4 +50,15 @@ export const REVERSE_OK: ForecastReverse = {
   reachable: true,
   bufferMonthly: 230,
   levers: [],
+}
+
+/** Death of person 1 at every age from 57 on: the early years fail, later ones leave less and less. */
+export const SURVIVOR: ForecastSurvivorCheck = {
+  personId: 1,
+  rows: Array.from({ length: 29 }, (_, i) => {
+    const age = 57 + i
+    const ok = age >= 63
+    return { age, year: 1970 + age, ok, failYear: ok ? null : 2052 + i, finalWealth: ok ? 20000 * (age - 62) : 0 }
+  }),
+  worstAge: 57,
 }

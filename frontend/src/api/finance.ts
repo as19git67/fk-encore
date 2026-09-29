@@ -1437,6 +1437,8 @@ export interface ForecastScenarioConfig {
   offsetDeductions: number[]
   /** Stress test (#1339): the depot loses `crashSize` at the start of `crashYear`; null = no crash. */
   stress: { crashYear: number | null; crashSize: number }
+  /** Survivor scenario (#1341): who dies at which age, and what changes for the household. */
+  survivor: { personId: number | null; age: number | null; expenseFactor: number; incomeOffsetRate: number; incomeAllowance: number }
 }
 
 export interface ForecastScenario {
@@ -1503,7 +1505,8 @@ export interface ForecastBridge {
 export interface ForecastResolvedMilestone {
   id: number
   personId: number
-  kind: ForecastMilestoneKind
+  /** 'death' only in a survivor scenario's result (#1341). */
+  kind: ForecastMilestoneKind | 'death'
   label: string
   date: string
   year: number
@@ -1514,6 +1517,8 @@ export interface ForecastSimulation {
   startYear: number
   /** First simulated month, 1–12: the first year is a partial year unless this is 1. */
   startMonth: number
+  /** The death a survivor scenario simulated (#1341), if any. */
+  death: { personId: number; year: number; age: number } | null
   endYear: number
   years: ForecastYearRow[]
   sources: ForecastFlowSource[]
@@ -1598,6 +1603,8 @@ export interface ForecastSimulateRequest {
   robustness?: boolean
   /** "What does it take to leave at this age?" for `earliestFor` (#1340). */
   targetAge?: number
+  /** Simulate the death of this person at every age from now on (#1341). */
+  survivorFor?: number
 }
 
 export interface ForecastSimulateResponse {
@@ -1608,6 +1615,22 @@ export interface ForecastSimulateResponse {
   sensitivity: ForecastSensitivity | null
   levers: ForecastLevers | null
   reverse: ForecastReverse | null
+  survivor: ForecastSurvivorCheck | null
+}
+
+export interface ForecastSurvivorRow {
+  age: number
+  year: number
+  ok: boolean
+  failYear: number | null
+  finalWealth: number
+}
+
+export interface ForecastSurvivorCheck {
+  personId: number
+  rows: ForecastSurvivorRow[]
+  /** The age at which the death hurts most; null without rows. */
+  worstAge: number | null
 }
 
 export async function getForecast(): Promise<ForecastBundle> {
@@ -1782,6 +1805,7 @@ export interface ForecastStatementValues {
   maturityDate: string | null
   guaranteedMonthlyPension: number | null
   projectedMonthlyPension: number | null
+  currentMonthlyPension: number | null
   lumpSum: number | null
   pensionStartDate: string | null
 }

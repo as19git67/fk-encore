@@ -25,6 +25,7 @@ export const STATEMENTS: ForecastItemStatements[] = [
         maturityDate: '2032-12-01',
         guaranteedMonthlyPension: null,
         projectedMonthlyPension: null,
+        currentMonthlyPension: null,
         lumpSum: null,
         pensionStartDate: null,
       },
