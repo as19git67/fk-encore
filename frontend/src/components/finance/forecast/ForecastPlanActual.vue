@@ -65,7 +65,8 @@ const canAdopt = computed(() => !!actuals.value && actuals.value.livingItemId !=
     <p v-if="data.snapshots.length === 0" class="muted">
       Noch kein Stand festgehalten. Jeder Stand merkt sich, was ein Szenario an dem Tag erwartet hat; von da an zeigt die Zeile, wie weit die Wirklichkeit davon abweicht. Einmal im Monat hält die Prognose den Stand jedes Szenarios von selbst fest.
     </p>
-    <ScrollX v-else>
+    <div v-else class="plan-actual__table">
+      <ScrollX>
       <table class="snapshots">
         <thead>
           <tr>
@@ -96,7 +97,8 @@ const canAdopt = computed(() => !!actuals.value && actuals.value.livingItemId !=
           </tr>
         </tbody>
       </table>
-    </ScrollX>
+      </ScrollX>
+    </div>
 
     <template v-if="actuals">
       <h3 class="sub">Buchungen der letzten {{ actuals.flows.months }} Monate</h3>
@@ -154,6 +156,11 @@ const canAdopt = computed(() => !!actuals.value && actuals.value.livingItemId !=
   gap: var(--space-2) var(--space-4);
   align-items: center;
   justify-content: space-between;
+}
+/* A flex child keeps its intrinsic width unless told otherwise: the table must scroll, not push. */
+.plan-actual__table {
+  min-width: 0;
+  max-width: 100%;
 }
 .snapshots {
   border-collapse: collapse;
