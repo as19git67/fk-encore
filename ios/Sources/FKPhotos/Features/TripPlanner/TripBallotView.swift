@@ -77,21 +77,11 @@ struct TripBallotView: View {
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
                     prompt: "Vorschläge, Orte und Namen durchsuchen")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                // The same two shapes the pool has (§5.2): the list
-                // answers "what is up for a vote", the map "where is
-                // all this" — and three wishes in one lane are a
-                // morning, which no list can show.
-                Picker("Darstellung", selection: $presentation) {
-                    ForEach(TripPoolPresentation.allCases, id: \.self) { option in
-                        Label(option.label, systemImage: option.symbolName)
-                            .labelStyle(.iconOnly)
-                            .tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
+            // The same two shapes the pool has (§5.2): the list
+            // answers "what is up for a vote", the map "where is
+            // all this" — and three wishes in one lane are a
+            // morning, which no list can show.
+            TripPresentationToolbarItem(presentation: $presentation)
         }
         .plannerErrorBanner(errorMessage, retry: { await load() }, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)

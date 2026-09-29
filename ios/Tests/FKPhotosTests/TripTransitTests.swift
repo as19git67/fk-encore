@@ -17,7 +17,7 @@ final class TripTransitTests: XCTestCase {
                        fixpoints: (departure.map { [$0] } ?? []) + extra)
     }
 
-    private func leg(_ position: Int, start: String, days: [TripDay], arrive: Int? = nil,
+    private func leg(_ position: Int, start: String?, days: [TripDay], arrive: Int? = nil,
                      transit: (depart: Int, end: Int)? = nil) -> TripLeg {
         var leg = TripLeg(
             id: position + 1, position: position, title: "Ort \(position)",
@@ -113,6 +113,21 @@ final class TripTransitTests: XCTestCase {
         var journeyFirst = stays
         journeyFirst.insert(leg(-1, start: "2026-09-05", days: [day(0)], transit: (480, 720)), at: 0)
         XCTAssertFalse(TripTransitSlots.wantsArrival(journeyFirst, hasHome: true))
+    }
+
+    func testAnUndatedCityIsNamedInsteadOfHidingTheJourneys() {
+        let dated = [
+            leg(0, start: "2026-09-05", days: [day(0)]),
+            leg(1, start: "2026-09-06", days: [day(0)]),
+        ]
+        XCTAssertNil(TripTransitSlots.undatedHint(dated, hasHome: true))
+        let stays = [leg(0, start: nil, days: [day(0)]), dated[1]]
+        // Without a home there is nothing to offer and nothing to explain.
+        XCTAssertNil(TripTransitSlots.undatedHint(stays, hasHome: false))
+        XCTAssertFalse(TripTransitSlots.wantsArrival(stays, hasHome: true))
+        let hint = TripTransitSlots.undatedHint(stays, hasHome: true)
+        XCTAssertEqual(hint?.contains("„Ort 0"), true)
+        XCTAssertEqual(hint?.contains("Termin steht fest"), true)
     }
 
     func testTheFrameSentenceNamesWhatMoves() {
