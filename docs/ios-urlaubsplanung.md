@@ -5589,7 +5589,13 @@ Wie das ins bestehende Modell passt:
   oder Flugzeug, oder über mehrere Tage, bleibt die Weiterreise ein Rahmen
   ohne Stopps: Sie sagt, wo man ist, und plant nichts hinein.
 - Die Korridorsuche sucht künftig in **jeder** importierten Region, die Start
-  oder Ziel abdeckt, und vereint die Treffer.
+  oder Ziel abdeckt, und vereint die Treffer. Seit 2026-09-29 auch in jeder
+  Region, deren Rechteck die Korridor-Ellipse berührt: Eine Anreise von
+  Zuhause an die Küste führt durch Extrakte, die keines der beiden Enden
+  enthalten, und das Kloster auf halbem Weg liegt in einem davon. Die Enden
+  prüft der Router genau (Polygon und Datenprobe), die Mitte nur am
+  Rechteck — eine Region, die den Korridor doch nicht erreicht, antwortet
+  mit nichts, und das kostet eine Abfrage und sonst nichts.
 
 Etappen: (1) Server — Modell, Anlegen, Planen, welche Etappe gerade gilt;
 (2) App — Anzeige, Anlegen und Bearbeiten, „heute" nach Uhrzeit; (3) der
