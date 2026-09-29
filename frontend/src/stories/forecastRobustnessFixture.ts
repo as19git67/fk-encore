@@ -1,4 +1,4 @@
-import type { ForecastLevers, ForecastReverse, ForecastSensitivity, ForecastSurvivorCheck } from '../api/finance'
+import type { ForecastLevers, ForecastPlanActual, ForecastReverse, ForecastSensitivity, ForecastSurvivorCheck } from '../api/finance'
 
 /** Invented answers of the robustness and reverse questions (#1339, #1340). */
 
@@ -61,4 +61,47 @@ export const SURVIVOR: ForecastSurvivorCheck = {
     return { age, year: 1970 + age, ok, failYear: ok ? null : 2052 + i, finalWealth: ok ? 20000 * (age - 62) : 0 }
   }),
   worstAge: 57,
+}
+
+/** Two snapshots against today, and a year of invented bookings (#1342). */
+export const PLAN_ACTUAL: ForecastPlanActual = {
+  snapshots: [
+    {
+      id: 2,
+      takenAt: '2026-06-01T09:45:00Z',
+      scenarioId: null,
+      scenarioName: 'Standardannahmen',
+      source: 'cron',
+      startLiquid: 214000,
+      startWealth: 252000,
+      series: [
+        { year: 2026, liquid: 226000, wealth: 266000 },
+        { year: 2027, liquid: 248000, wealth: 292000 },
+      ],
+      plannedNow: { liquid: 220000, wealth: 259000 },
+    },
+    {
+      id: 1,
+      takenAt: '2025-09-15T10:00:00Z',
+      scenarioId: 2,
+      scenarioName: 'Vorsichtig',
+      source: 'manual',
+      startLiquid: 198000,
+      startWealth: 236000,
+      series: [
+        { year: 2025, liquid: 201000, wealth: 240000 },
+        { year: 2026, liquid: 213000, wealth: 254000 },
+        { year: 2027, liquid: 226000, wealth: 269000 },
+      ],
+      plannedNow: { liquid: 210000, wealth: 250500 },
+    },
+  ],
+  now: { date: '2026-09-28', liquid: 222000, wealth: 261000 },
+  actuals: {
+    flows: { months: 12, inflowMonthly: 6150, outflowMonthly: 3620, savingsMonthly: 2530, transfersExcluded: 36 },
+    plannedSpending: 3400,
+    plannedSavings: 2200,
+    livingItemId: 111,
+    since: '2025-09-01',
+  },
 }

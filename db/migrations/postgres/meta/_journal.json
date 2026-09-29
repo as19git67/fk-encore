@@ -1534,6 +1534,13 @@
       "when": 1788652800038,
       "tag": "0218_finance_forecast_doc_kind_invoice",
       "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "7",
+      "when": 1788652800039,
+      "tag": "0219_finance_forecast_snapshot",
+      "breakpoints": true
     }
   ]
 }

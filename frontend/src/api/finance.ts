@@ -1909,6 +1909,65 @@ export interface ForecastScanSummary {
   bookingsSuggested: number
 }
 
+// ---- plan vs. actual (#1342) ------------------------------------------------------
+
+export interface ForecastSeriesPoint {
+  year: number
+  wealth: number
+  liquid: number
+}
+
+export interface ForecastSnapshot {
+  id: number
+  takenAt: string
+  scenarioId: number | null
+  scenarioName: string
+  source: 'manual' | 'cron'
+  startLiquid: number
+  startWealth: number
+  series: ForecastSeriesPoint[]
+  /** What this snapshot expected for today; null when today lies outside it. */
+  plannedNow: { liquid: number; wealth: number } | null
+}
+
+export interface ForecastActualFlows {
+  months: number
+  inflowMonthly: number
+  outflowMonthly: number
+  savingsMonthly: number
+  transfersExcluded: number
+}
+
+export interface ForecastActuals {
+  flows: ForecastActualFlows
+  plannedSpending: number
+  plannedSavings: number | null
+  livingItemId: number | null
+  since: string
+}
+
+export interface ForecastPlanActual {
+  snapshots: ForecastSnapshot[]
+  now: { date: string; liquid: number; wealth: number }
+  actuals: ForecastActuals | null
+}
+
+export async function getForecastPlanActual(): Promise<ForecastPlanActual> {
+  return apiFetch('/finance/forecast/plan-actual')
+}
+
+export async function createForecastSnapshot(scenarioId: number | null): Promise<ForecastSnapshot> {
+  return apiFetch('/finance/forecast/snapshots', { method: 'POST', body: JSON.stringify(scenarioId == null ? {} : { scenarioId }) })
+}
+
+export async function deleteForecastSnapshot(id: number): Promise<void> {
+  return apiFetch(`/finance/forecast/snapshots/${id}`, { method: 'DELETE' })
+}
+
+export async function adoptForecastActuals(itemId: number, monthly: number): Promise<void> {
+  return apiFetch('/finance/forecast/actuals/adopt', { method: 'POST', body: JSON.stringify({ itemId, monthly }) })
+}
+
 export async function getForecastStatements(): Promise<{ items: ForecastItemStatements[] }> {
   return apiFetch('/finance/forecast/statements')
 }
