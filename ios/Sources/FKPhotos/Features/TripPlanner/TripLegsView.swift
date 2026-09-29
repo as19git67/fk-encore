@@ -149,9 +149,19 @@ struct TripLegsView: View {
                     }
                 }
             } footer: {
-                Text("Jede Stadt hat ihren eigenen Ausgangspunkt, ihr eigenes Verkehrsmittel "
-                     + "und ihre eigenen Kandidaten. Umverteilt wird immer nur innerhalb einer "
-                     + "Stadt — was in Tokio nicht mehr passt, rutscht nicht nach Osaka.")
+                VStack(alignment: .leading, spacing: 6) {
+                    // Home is set and the journeys still do not show:
+                    // say why, instead of leaving a button to be
+                    // looked for. A journey hangs on the day it meets
+                    // its city, so the city has to have one.
+                    if let missing = TripTransitSlots.undatedHint(viewModel.plan?.legs ?? [],
+                                                                    hasHome: viewModel.plan?.home != nil) {
+                        Text(missing)
+                    }
+                    Text("Jede Stadt hat ihren eigenen Ausgangspunkt, ihr eigenes Verkehrsmittel "
+                         + "und ihre eigenen Kandidaten. Umverteilt wird immer nur innerhalb einer "
+                         + "Stadt — was in Tokio nicht mehr passt, rutscht nicht nach Osaka.")
+                }
             }
 
             Section {
@@ -607,6 +617,19 @@ enum TripTransitSlots {
         guard hasHome, let last = legs.max(by: { $0.position < $1.position }),
               !last.isTransit, last.startDate != nil else { return nil }
         return last.position
+    }
+
+    /// Why neither journey is offered although home is set: the city
+    /// at that end has no date. Nil when there is nothing to explain.
+    static func undatedHint(_ legs: [TripLeg], hasHome: Bool) -> String? {
+        guard hasHome else { return nil }
+        let places = legs.sorted { $0.position < $1.position }.filter { !$0.isTransit }
+        guard let first = places.first, let last = places.last else { return nil }
+        let undated = first.startDate == nil || last.startDate == nil
+        guard undated else { return nil }
+        let city = first.startDate == nil ? first.displayTitle : last.displayTitle
+        return "Anreise und Heimreise brauchen ein Datum: „\(city)“ hat noch keines. "
+            + "In der Stadt „Termin steht fest“ einschalten, dann erscheinen sie hier."
     }
 
     static func slotAfter(_ leg: TripLeg, in legs: [TripLeg]) -> Int? {

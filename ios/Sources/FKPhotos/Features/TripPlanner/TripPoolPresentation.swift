@@ -136,3 +136,39 @@ enum TripPoolPinKind: String, CaseIterable, Equatable {
         }
     }
 }
+
+/// The list/map switch in the toolbar of the pool and the ballot —
+/// one toolbar item, so both screens look the same and are fixed in
+/// the same place.
+///
+/// On iOS 26 the toolbar puts a glass capsule around every item, and
+/// a segmented picker brings a capsule of its own; the two nested
+/// gave the control a rim that sat a few points inside its background
+/// on either side. The system's answer for controls that carry their
+/// own background is to hide the shared one, which is what this does
+/// where the modifier exists. Earlier systems draw no capsule around
+/// toolbar items and need nothing.
+struct TripPresentationToolbarItem: ToolbarContent {
+    @Binding var presentation: TripPoolPresentation
+
+    var body: some ToolbarContent {
+        if #available(iOS 26, *) {
+            ToolbarItem(placement: .topBarTrailing) { picker }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .topBarTrailing) { picker }
+        }
+    }
+
+    private var picker: some View {
+        Picker("Darstellung", selection: $presentation) {
+            ForEach(TripPoolPresentation.allCases, id: \.self) { option in
+                Label(option.label, systemImage: option.symbolName)
+                    .labelStyle(.iconOnly)
+                    .tag(option)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+}
