@@ -307,6 +307,30 @@ describe("finance/forecast — scenarios and simulation", () => {
     await expect(runSimulation({ earliestFor: person.id, targetAge: 30 })).rejects.toThrow(/target age/);
   });
 
+  it("simulates a death from the scenario, compares against the base case and checks every age", async () => {
+    const a = await personWithMilestones("A", "1970-01-01");
+    const b = await personWithMilestones("B", "1973-01-01");
+    await createItem({ personId: a.person.id, type: "salary", label: "Gehalt A", data: { amount: 4000 } });
+    await createItem({ type: "living_expense", label: "Leben", data: { amount: 2500 } });
+    await createItem({ type: "asset", label: "Depot", data: { pot: "depot", currentValue: 200000, returnRate: 0.03 } });
+    await createItem({
+      personId: a.person.id,
+      type: "pension",
+      label: "Rente A",
+      data: { kind: "statutory", monthlyAmount: 2000, start: { kind: "milestone", milestoneId: a.pension.id }, survivorShare: 0.55 },
+    });
+    const year = new Date().getUTCFullYear() + 2;
+    const res = await runSimulation({ scenario: { endAge: 80, survivor: { personId: a.person.id, age: year - 1970 } }, survivorFor: a.person.id });
+    expect(res.result.death).toMatchObject({ personId: a.person.id, year });
+    expect(res.comparisons.map((c) => c.name)).toEqual(["Ohne Todesfall"]);
+    expect(res.comparisons[0].result.death).toBeNull();
+    expect(res.result.years.find((y) => y.year === year + 1)!.income[`survivor:${res.result.sources.find((s) => s.key.startsWith("survivor:"))!.key.slice(9)}`]).toBeGreaterThan(0);
+    expect(res.survivor?.rows.length).toBeGreaterThan(5);
+    expect(res.survivor?.worstAge).not.toBeNull();
+    await expect(runSimulation({ survivorFor: 99999 })).rejects.toThrow(/not found/);
+    expect(b.person.id).toBeGreaterThan(0);
+  });
+
   it("applies a depot crash from the scenario", async () => {
     const { person } = await personWithMilestones("A", "1970-01-01");
     await createItem({ personId: person.id, type: "salary", label: "Gehalt", data: { amount: 3000 } });
@@ -361,6 +385,8 @@ describe("toEngineScenario", () => {
       maxMonthlyIncome: 5512.5,
     });
     expect(toEngineScenario({ healthInsurance: { rate: 0.02, careRate: 0.05 } }).healthInsurance.careRate).toBe(0.02);
+    expect(s.survivor).toEqual({ personId: null, age: null, expenseFactor: 0.7, incomeOffsetRate: 0.4, incomeAllowance: 1038 });
+    expect(toEngineScenario({ survivor: { personId: 3, age: 61.6, expenseFactor: 9 } }).survivor).toMatchObject({ personId: 3, age: 62, expenseFactor: 1.5 });
     expect(toEngineScenario({ stress: { crashYear: 2031.4, crashSize: 7 } }).stress).toEqual({ crashYear: 2031, crashSize: 0.99 });
   });
 });

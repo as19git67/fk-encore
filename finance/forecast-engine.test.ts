@@ -95,6 +95,7 @@ const pension = (
   kind: "statutory",
   monthlyAmount: amount,
   currentEntitlement: null,
+  survivorShare: null,
   start: { kind: "milestone", milestoneId },
   regularAge: null,
   deductionPerMonth: 0,
@@ -297,6 +298,7 @@ describe("simulate — life insurance", () => {
     payoutMode: "lump_sum",
     annuityAmount: 0,
     taxRate: 0,
+    deathBenefit: null,
     ...over,
   });
   const milestones = [ms(3, 1, "life_insurance_maturity", 58)];
@@ -389,7 +391,7 @@ describe("simulate — pensions", () => {
     // Working until the regular age earns the full projection; no entitlement given means the projection too.
     const full = simulate(input([cash(1_000_000), item], [ms(1, 1, "leave_work", 67), ms(2, 1, "statutory_pension", 67)], { endAge: 68 }));
     expect(full.years.find((y) => y.year === 2037)!.income["item:41"]).toBeCloseTo(24_000, 3);
-    const none = simulate(input([cash(1_000_000), { ...item, currentEntitlement: null }], milestones, { endAge: 64 }));
+    const none = simulate(input([cash(1_000_000), { ...item, currentEntitlement: null } as ForecastItem], milestones, { endAge: 64 }));
     expect(none.years.find((y) => y.year === 2033)!.income["item:41"]).toBeCloseTo(2_000 * (1 - 48 * 0.003) * 12, 3);
   });
 
@@ -425,6 +427,96 @@ describe("simulate — pensions", () => {
     const res = simulate(input([item], milestones, { endAge: 57 }));
     expect(res.years[0].income["item:41"]).toBe(12_000);
     expect(res.years[1].income["item:41"]).toBeCloseTo(13_200, 6);
+  });
+});
+
+describe("simulate — survivor scenario (#1341)", () => {
+  // A (56) and B (53). A earns, both have a statutory pension; A's is the larger one.
+  const milestones = [
+    ms(1, 1, "leave_work", 60),
+    ms(2, 1, "statutory_pension", 65),
+    ms(3, 2, "leave_work", 62),
+    ms(4, 2, "statutory_pension", 65),
+  ];
+  const household = () => [salary(1, 4_000, 10), living(3_000), cash(300_000), pension(1, 2_000, 2), { ...pension(2, 1_000, 4), id: 42 }];
+  const dying = (age: number, over: Partial<ForecastScenario> = {}) =>
+    scenario({ endAge: 70, survivor: { personId: 1, age, expenseFactor: 0.7, incomeOffsetRate: 0.4, incomeAllowance: 1_000 }, ...over });
+
+  it("ends the salary and the person's expenses at death and cuts the household's living expenses", () => {
+    const res = simulate({ persons: [anna, ben], milestones, items: household(), scenario: dying(58), startDate: START });
+    const by = Object.fromEntries(res.years.map((y) => [y.year, y]));
+    expect(res.death).toEqual({ personId: 1, year: 2028, age: 58 });
+    expect(by[2027].income["item:10"]).toBe(48_000);
+    expect(by[2028].income["item:10"]).toBeUndefined(); // dies in January 2028
+    expect(by[2028].expenses["item:20"]).toBeCloseTo(3_000 * 0.7 * 12, 6);
+    expect(res.milestones.find((m) => m.kind === "death")).toMatchObject({ personId: 1, year: 2028, age: 58 });
+  });
+
+  it("pays the survivor's pension from death on, before and after the pension start, offset against own income", () => {
+    // Death at 58, before A's pension would have started: B gets 55 % of 2 000 at once.
+    const early = simulate({ persons: [anna, ben], milestones, items: household(), scenario: dying(58), startDate: START });
+    const e = Object.fromEntries(early.years.map((y) => [y.year, y]));
+    expect(e[2028].income["survivor:41"]).toBeCloseTo(0.55 * 2_000 * 12, 6);
+    expect(e[2028].income["item:41"]).toBeUndefined();
+    // B's own pension starts at 65 (2038): 1 000 a month, the allowance is 1 000 → nothing to offset yet.
+    expect(e[2038].income["survivor:41"]).toBeCloseTo(0.55 * 2_000 * 12, 6);
+    // With a smaller allowance, 40 % of the income above it is deducted.
+    const offset = simulate({
+      persons: [anna, ben],
+      milestones,
+      items: household(),
+      scenario: dying(58, { survivor: { personId: 1, age: 58, expenseFactor: 0.7, incomeOffsetRate: 0.4, incomeAllowance: 600 } }),
+      startDate: START,
+    });
+    const o = Object.fromEntries(offset.years.map((y) => [y.year, y]));
+    // 2039: B's own income the month before is 1 000 → (1 000 − 600) × 0.4 = 160 less.
+    expect(o[2039].income["survivor:41"]).toBeCloseTo((1_100 - 160) * 12, 6);
+    // Death at 67, after A's pension started: A's pension stops, B's share begins.
+    const late = simulate({ persons: [anna, ben], milestones, items: household(), scenario: dying(67), startDate: START });
+    const l = Object.fromEntries(late.years.map((y) => [y.year, y]));
+    expect(l[2036].income["item:41"]).toBe(24_000);
+    expect(l[2037].income["item:41"]).toBeUndefined();
+    expect(l[2037].income["survivor:41"]).toBeCloseTo((1_100 - 160 * 0) * 12, 6); // B's income 1 000 = allowance 1 000
+  });
+
+  it("pays a life insurance's death benefit and ends the contract, and a private pension leaves nothing", () => {
+    const lv: ForecastItem = {
+      id: 50,
+      type: "life_insurance",
+      label: "LV",
+      personId: 1,
+      surrenderValue: 20_000,
+      monthlyPremium: 100,
+      guaranteedPayout: 40_000,
+      projectedPayout: 50_000,
+      maturity: { kind: "milestone", milestoneId: 2 },
+      payoutMode: "lump_sum",
+      annuityAmount: 0,
+      taxRate: 0,
+      deathBenefit: 45_000,
+    };
+    const priv = { ...pension(1, 300, 2, { kind: "private" }), id: 43 };
+    const items = [...household(), lv, priv];
+    const res = simulate({ persons: [anna, ben], milestones, items, scenario: dying(58), startDate: START });
+    const by = Object.fromEntries(res.years.map((y) => [y.year, y]));
+    expect(by[2028].income["death:50"]).toBe(45_000);
+    expect(by[2028].expenses["contrib:50"]).toBeUndefined();
+    expect(by[2035].income["item:50"]).toBeUndefined(); // no maturity payout any more
+    expect(by[2035].income["survivor:43"]).toBeUndefined();
+    expect(by[2035].income["item:43"]).toBeUndefined();
+    // Without a stated benefit the guaranteed payout is paid.
+    const guaranteed = simulate({ persons: [anna, ben], milestones, items: [...household(), { ...lv, deathBenefit: null } as ForecastItem], scenario: dying(58), startDate: START });
+    expect(guaranteed.years.find((y) => y.year === 2028)!.income["death:50"]).toBe(40_000);
+  });
+
+  it("ignores a death outside the horizon or in the past and keeps the base case otherwise unchanged", () => {
+    const base = simulate({ persons: [anna, ben], milestones, items: household(), scenario: scenario({ endAge: 70 }), startDate: START });
+    const past = simulate({ persons: [anna, ben], milestones, items: household(), scenario: dying(50), startDate: START });
+    const beyond = simulate({ persons: [anna, ben], milestones, items: household(), scenario: dying(90), startDate: START });
+    expect(past.death).toBeNull();
+    expect(beyond.death).toBeNull();
+    expect(past.finalWealth).toBe(base.finalWealth);
+    expect(beyond.finalWealth).toBe(base.finalWealth);
   });
 });
 

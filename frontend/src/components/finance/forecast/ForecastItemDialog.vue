@@ -337,6 +337,10 @@ function save() {
           <InputNumber input-id="fc-projected" :model-value="n('projectedPayout')" mode="currency" currency="EUR" locale="de-DE" @update:model-value="set('projectedPayout', $event)" />
         </div>
         <div class="field">
+          <label for="fc-death-benefit">Todesfallleistung (leer = garantierte Ablaufleistung)</label>
+          <InputNumber input-id="fc-death-benefit" :model-value="n('deathBenefit')" mode="currency" currency="EUR" locale="de-DE" @update:model-value="set('deathBenefit', $event)" />
+        </div>
+        <div class="field">
           <label for="fc-payout">Auszahlung</label>
           <Select input-id="fc-payout" :model-value="s('payoutMode')" :options="[{ value: 'lump_sum', label: 'Einmalzahlung' }, { value: 'annuity', label: 'Monatliche Rente' }]" option-label="label" option-value="value" @update:model-value="set('payoutMode', $event)" />
         </div>
@@ -370,6 +374,10 @@ function save() {
         <div class="field">
           <label for="fc-growth">{{ s('kind') === 'statutory' ? 'Rentenanpassung pro Jahr (ab heute)' : 'Rentenanpassung pro Jahr (ab Beginn)' }}</label>
           <InputNumber input-id="fc-growth" :model-value="pct('growthRate')" suffix=" %" :min-fraction-digits="1" :max-fraction-digits="2" @update:model-value="setPct('growthRate', $event)" />
+        </div>
+        <div class="field">
+          <label for="fc-survivor">Hinterbliebenenrente, Anteil (leer = {{ s('kind') === 'statutory' ? '55' : s('kind') === 'company' ? '60' : '0' }} %)</label>
+          <InputNumber input-id="fc-survivor" :model-value="pct('survivorShare')" suffix=" %" :min="0" :max="100" :min-fraction-digits="0" :max-fraction-digits="1" @update:model-value="setPct('survivorShare', $event)" />
         </div>
         <template v-if="s('kind') === 'statutory'">
           <div class="field">

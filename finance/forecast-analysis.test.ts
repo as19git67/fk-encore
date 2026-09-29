@@ -7,6 +7,9 @@ import {
   rateSteps,
   reverseCalculation,
   sensitivityTable,
+  survivorCheck,
+  withDeath,
+  withoutDeath,
   withExtraSavings,
   withSpendingCutAfterLeave,
 } from "./forecast-analysis";
@@ -61,6 +64,7 @@ const pension = (amount: number): ForecastItem => ({
   kind: "statutory",
   monthlyAmount: amount,
   currentEntitlement: null,
+  survivorShare: null,
   start: { kind: "milestone", milestoneId: 2 },
   regularAge: null,
   deductionPerMonth: 0,
@@ -177,6 +181,31 @@ describe("levers", () => {
     expect(a.baseAge).not.toBeNull();
     expect(a.levers.find((l) => l.key === "spending")!.age).toBeNull();
     expect(a.levers.find((l) => l.key === a.biggest)!.age).toBeNull();
+  });
+});
+
+describe("survivor check", () => {
+  it("simulates the death at every age ahead and names the worst one", () => {
+    const ben: ForecastPerson = { id: 2, label: "B", birthDate: "1973-01-01" };
+    const items: ForecastItem[] = [
+      salary(3_000),
+      living(2_500),
+      depot(120_000),
+      pension(2_000),
+      { id: 42, type: "pension", label: "Rente B", personId: 2, kind: "statutory", monthlyAmount: 800, currentEntitlement: null, survivorShare: null, start: { kind: "age", personId: 2, age: 67 }, regularAge: null, deductionPerMonth: 0, deductionOffsetCost: null, growthRate: 0, monthlyContribution: 0, lumpSumOption: null, payoutMode: "annuity", taxRate: 0 },
+    ];
+    const base: ForecastInput = { persons: [anna, ben], milestones, items, scenario: scenario({ endAge: 80 }), startDate: START };
+    const check = survivorCheck(base, 1, 70);
+    expect(check.rows.map((r) => r.age)).toEqual(Array.from({ length: 70 - 56 }, (_, i) => 57 + i));
+    expect(check.rows.every((r) => r.year === 1970 + r.age)).toBe(true);
+    // The worst age is the earliest failure, or the smallest remainder when nothing fails.
+    const worst = check.rows.find((r) => r.age === check.worstAge)!;
+    for (const r of check.rows) {
+      if (worst.failYear != null) expect(r.failYear == null || r.failYear >= worst.failYear).toBe(true);
+      else expect(r.failYear == null && r.finalWealth >= worst.finalWealth).toBe(true);
+    }
+    expect(simulate(withDeath(base, 1, 57)).ok).toBe(check.rows[0].ok);
+    expect(withoutDeath(withDeath(base, 1, 57)).scenario.survivor.personId).toBeNull();
   });
 });
 

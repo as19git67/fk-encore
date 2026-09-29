@@ -28,9 +28,12 @@ import {
   leverAnalysis,
   reverseCalculation,
   sensitivityTable,
+  survivorCheck,
+  withoutDeath,
   type LeverAnalysis,
   type ReverseResult,
   type SensitivityTable,
+  type SurvivorCheck,
 } from "./forecast-analysis";
 import {
   ageAtStart,
@@ -205,6 +208,8 @@ export interface SimulateRequest {
   robustness?: boolean;
   /** Also answer "what does it take to leave at this age?" for `earliestFor` (#1340). */
   targetAge?: number;
+  /** Also simulate the death of this person at every age from now on (#1341). */
+  survivorFor?: number;
 }
 
 export interface EarliestResult {
@@ -226,6 +231,7 @@ export interface SimulateResponse {
   sensitivity: SensitivityTable | null;
   levers: LeverAnalysis | null;
   reverse: ReverseResult | null;
+  survivor: SurvivorCheck | null;
 }
 
 // -----------------------------------------------------------------------
@@ -381,6 +387,7 @@ export function toEngineItem(
         premiumEnd: timeRef(d.premiumEnd),
         guaranteedPayout: num(d.guaranteedPayout, 0),
         projectedPayout: num(d.projectedPayout, num(d.guaranteedPayout, 0)),
+        deathBenefit: numOrNull(d.deathBenefit),
         maturity,
         payoutMode: str(d.payoutMode, ["lump_sum", "annuity"] as const, "lump_sum"),
         annuityAmount: num(d.annuityAmount, 0),
@@ -398,6 +405,7 @@ export function toEngineItem(
         kind: str(d.kind, ["statutory", "company", "private"] as const, "statutory"),
         monthlyAmount: num(d.monthlyAmount, 0),
         currentEntitlement: numOrNull(d.currentEntitlement),
+        survivorShare: numOrNull(d.survivorShare),
         start,
         regularAge: numOrNull(d.regularAge),
         deductionPerMonth: num(d.deductionPerMonth, 0),
@@ -442,6 +450,7 @@ export function toEngineScenario(config: Record<string, unknown>, name = "Szenar
   const withdrawalOrder = orderIn.filter((p): p is (typeof POTS)[number] => (POTS as readonly string[]).includes(String(p)));
   const offsets = Array.isArray(c.offsetDeductions) ? c.offsetDeductions.filter((x): x is number => typeof x === "number") : [];
   const st = (c.stress && typeof c.stress === "object" ? c.stress : {}) as Record<string, unknown>;
+  const sv = (c.survivor && typeof c.survivor === "object" ? c.survivor : {}) as Record<string, unknown>;
   return {
     id,
     name,
@@ -470,6 +479,13 @@ export function toEngineScenario(config: Record<string, unknown>, name = "Szenar
     stress: {
       crashYear: st.crashYear == null ? null : Math.round(num(st.crashYear, 0)),
       crashSize: Math.min(0.99, Math.max(0, num(st.crashSize, base.stress.crashSize))),
+    },
+    survivor: {
+      personId: numOrNull(sv.personId),
+      age: sv.age == null ? null : Math.round(num(sv.age, 0)),
+      expenseFactor: Math.min(1.5, Math.max(0, num(sv.expenseFactor, base.survivor.expenseFactor))),
+      incomeOffsetRate: Math.min(1, Math.max(0, num(sv.incomeOffsetRate, base.survivor.incomeOffsetRate))),
+      incomeAllowance: Math.max(0, num(sv.incomeAllowance, base.survivor.incomeAllowance)),
     },
   };
 }
@@ -1049,6 +1065,8 @@ export const runSimulation = api(
     }
 
     const comparisons: SimulateResponse["comparisons"] = [];
+    // A survivor scenario is read against the same household without the death.
+    if (result.death) comparisons.push({ scenarioId: 0, name: "Ohne Todesfall", result: simulate(withoutDeath(input)) });
     for (const id of req.compareScenarioIds ?? []) {
       const row = byId.get(id);
       if (!row) continue;
@@ -1078,7 +1096,13 @@ export const runSimulation = api(
       }
     }
 
-    return { result, earliest, matrix, comparisons, sensitivity, levers, reverse };
+    let survivor: SurvivorCheck | null = null;
+    if (req.survivorFor != null) {
+      if (!hh.persons.some((p) => p.id === req.survivorFor)) throw APIError.notFound(`person ${req.survivorFor} not found`);
+      survivor = survivorCheck(input, req.survivorFor);
+    }
+
+    return { result, earliest, matrix, comparisons, sensitivity, levers, reverse, survivor };
   },
 );
 

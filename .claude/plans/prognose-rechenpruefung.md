@@ -130,6 +130,30 @@ Vereinfachungen: Bemessung monatlich statt nach Einkommensteuerbescheid des
 Vorjahres; kein Sparerpauschbetrag; für die KVdR wird nicht geprüft, ob die
 9/10-Regel erfüllt ist — das entscheidet die Wahl des Modus je Person.
 
+## Nachtrag: Hinterbliebenen-Szenario (#1341)
+
+Todesfall als Szenario-Einstellung (Person, Alter), nicht als gespeicherter
+Zeitpunkt. Ab dem Geburtsmonat des gewählten Alters: Gehalt, Einnahmen,
+Ausgaben, Krankenversicherung, Pflegekosten und eigene Renten der Person
+enden; laufende Beiträge in Renten und Lebensversicherungen der Person
+enden. Die andere Person erhält den Hinterbliebenen-Anteil der Renten
+(Feld am Rentenposten; Standard 55 % gesetzlich, 60 % Betriebsrente, 0 %
+privat); bei der gesetzlichen Rente wird eigenes Einkommen des Vormonats
+über dem Freibetrag mit dem Anrechnungssatz abgezogen (Standard 40 %,
+1 038 €). Lebensversicherungen auf das Leben der Person zahlen die
+Todesfallleistung (Feld; leer = garantierte Ablaufleistung) steuerfrei und
+enden; eine laufende Leibrente endet. Lebenshaltung × Faktor (Standard
+70 %); die Ausgabenkurve folgt der überlebenden Person, wenn die
+Bezugsperson stirbt. Ergebnis: Urteil und Kurven wie sonst, dazu der
+Vergleich „Ohne Todesfall“ und der Schnellcheck über jedes Sterbealter.
+
+Vereinfachungen: keine Rentenabschläge auf die Witwenrente bei Tod vor 65,
+kein Sterbevierteljahr, keine Verteilung einer Direktversicherung; der
+Freibetrag gilt pauschal (keine Kinderzuschläge); Erbschaftsteuer nicht
+modelliert; die KV-Einstufung der überlebenden Person bleibt, wie am Posten
+gewählt (Familienversicherung über die verstorbene Person müsste von Hand
+geändert werden).
+
 ## Geprüft und in Ordnung
 
 - Kaufkraft: alle Reihen und Detailwerte werden mit ihrem Jahr und demselben
