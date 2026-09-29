@@ -286,9 +286,6 @@ struct TripNewPlanView: View {
                 }
             }
             TripTransportModePicker(mode: $model.draft.mode)
-            Text(model.draft.mode.hint)
-                .font(.caption)
-                .foregroundStyle(.secondary)
             Toggle("Mit Kind", isOn: $model.draft.withChildren)
             Toggle("Schlecht zu Fuß", isOn: $model.draft.limitedMobility)
         } header: {

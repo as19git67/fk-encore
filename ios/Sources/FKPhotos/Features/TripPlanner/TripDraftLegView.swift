@@ -50,9 +50,6 @@ struct TripDraftLegView: View {
                     Text(leg.days == 1 ? "1 Tag" : "\(leg.days) Tage")
                 }
                 TripTransportModePicker(mode: $leg.mode)
-                Text(leg.mode.hint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             } header: {
                 Text("Hier")
             }
