@@ -203,6 +203,15 @@ export interface CorridorSearchOptions {
  *
  * Shared by the endpoint and by the transit leg (§22.7), whose pool is
  * exactly this — the places worth stopping at on the way.
+ *
+ * Geo searches one ellipse of at most 400 km; a day's drive can be
+ * longer (Köln–München is 450 km as the crow flies). So the journey is
+ * cut into stretches the service takes, each searched in every region,
+ * and a place found from two stretches keeps the smaller detour. Along
+ * a straight line the stretch ellipses lie inside the whole one, so
+ * nothing is found that the long ellipse would not have; near the cut
+ * a place is measured against the stretch's ends, which overstates
+ * its detour by a little — the ordering, not the membership.
  */
 export async function corridorCandidates(
   regions: readonly string[],
@@ -210,16 +219,21 @@ export async function corridorCandidates(
   to: { lat: number; lon: number },
   opts: CorridorSearchOptions,
 ): Promise<CorridorSpot[]> {
-  const pages = await Promise.all(regions.map((region) =>
+  const stretches = corridorStretches(from, to);
+  const pages = await Promise.all(stretches.flatMap((stretch) => regions.map((region) =>
     getGeoClient().searchPois(region, {
-      corridor: { from, to, detourBudgetM: opts.detourBudgetM },
+      corridor: { from: stretch.from, to: stretch.to, detourBudgetM: opts.detourBudgetM },
       categories: opts.categories,
       limit: CANDIDATE_LIMIT,
-    })));
-  // A place near a border can sit in both extracts; it is one place.
+    }))));
+  // A place near a border can sit in both extracts, and one near a cut
+  // in both stretches; it is one place, at its smaller detour.
   const byRef = new Map<string, (typeof pages)[number]["spots"][number]>();
   for (const page of pages) {
-    for (const spot of page.spots) if (!byRef.has(spot.osmRef)) byRef.set(spot.osmRef, spot);
+    for (const spot of page.spots) {
+      const seen = byRef.get(spot.osmRef);
+      if (!seen || (spot.detourM ?? 0) < (seen.detourM ?? 0)) byRef.set(spot.osmRef, spot);
+    }
   }
   const raw = [...byRef.values()];
 
@@ -234,6 +248,29 @@ export async function corridorCandidates(
   })
     .map((c) => ({ ...c, detourM: Math.round(detourByRef.get(c.osmRef) ?? 0) }))
     .sort((a, b) => a.detourM - b.detourM || (a.osmRef < b.osmRef ? -1 : 1));
+}
+
+/**
+ * Below what geo accepts for one ellipse (400 km), with room for the
+ * straight-line cut measuring a touch differently from the sphere.
+ */
+const STRETCH_M = 350_000;
+
+/**
+ * The journey as stretches geo will search, in order, end to end.
+ * One stretch for anything up to the limit — which is every transfer
+ * between two cities and most days on the road.
+ */
+export function corridorStretches(
+  from: { lat: number; lon: number },
+  to: { lat: number; lon: number },
+): Array<{ from: { lat: number; lon: number }; to: { lat: number; lon: number } }> {
+  const count = Math.max(1, Math.ceil(greatCircleMetres(from, to) / STRETCH_M));
+  const points = Array.from({ length: count + 1 }, (_, i) => {
+    const t = i / count;
+    return { lat: from.lat + (to.lat - from.lat) * t, lon: from.lon + (to.lon - from.lon) * t };
+  });
+  return points.slice(1).map((point, i) => ({ from: points[i], to: point }));
 }
 
 /**
