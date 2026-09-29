@@ -17,7 +17,7 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { corridorBox, planCorridor } from "./corridor";
+import { corridorBox, corridorCandidates, corridorStretches, planCorridor } from "./corridor";
 
 /** Invented places on an invented road near Augsburg. */
 const FROM = { lat: 48.3, lon: 10.9 };
@@ -209,5 +209,40 @@ describe("corridorBox", () => {
     const box = corridorBox({ lat: 48, lon: 10 }, { lat: 48, lon: 10 }, 2_000);
     expect(box.maxLat).toBeGreaterThan(48);
     expect(box.minLon).toBeLessThan(10);
+  });
+});
+
+describe("corridorStretches", () => {
+  it("is one stretch for a transfer between two cities", () => {
+    expect(corridorStretches(FROM, TO)).toEqual([{ from: FROM, to: TO }]);
+  });
+
+  it("cuts a day's drive into stretches geo will take, end to end", () => {
+    // 424 km east along the 48th parallel: two stretches, meeting in
+    // the middle, the second ending where the journey ends.
+    const far = { lat: 48.3, lon: 16.62 };
+    const stretches = corridorStretches(FROM, far);
+    expect(stretches).toHaveLength(2);
+    expect(stretches[0].from).toEqual(FROM);
+    expect(stretches[0].to).toEqual(stretches[1].from);
+    expect(stretches[1].to).toEqual(far);
+    expect(stretches[0].to.lon).toBeCloseTo((FROM.lon + far.lon) / 2, 6);
+  });
+});
+
+describe("corridorCandidates on a long journey", () => {
+  it("searches stretch by stretch and finds the abbey halfway", async () => {
+    // Geo refuses one ellipse of 424 km (the in-memory client refuses
+    // the same); the journey has to reach it in pieces.
+    const far = { lat: 48.3, lon: 16.62 };
+    geo.setSearchSpots("nom_x", [
+      spot({ osmRef: "node:5", id: 5, lon: 13.76, detourM: 800, name: "Kloster Beispielau" }),
+      spot({ osmRef: "node:6", id: 6, lon: 16.3, detourM: 200, name: "Burg am Ziel" }),
+    ]);
+
+    const found = await corridorCandidates(["nom_x"], FROM, far, { detourBudgetM: 30_000 });
+
+    expect(geo.getSearchCalls()).toHaveLength(2);
+    expect(found.map((s) => s.osmRef)).toEqual(["node:6", "node:5"]);
   });
 });
