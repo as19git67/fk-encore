@@ -374,7 +374,7 @@ export const defaultHandlers = [
   // ── System ─────────────────────────────────────────────────────────────────
   http.get('/api/build-info', () => HttpResponse.json({ build: 'storybook-dev' })),
   http.get('/api/trip-planner/routing/status', () => HttpResponse.json({
-    reachable: true, version: '3.5.1', hasTiles: true,
+    reachable: true, reason: null, version: '3.5.1', hasTiles: true,
     tilesBuiltAt: '2026-09-20T04:00:00.000Z', newestRegionAt: '2026-09-18T12:00:00.000Z',
     tilesBehindRegion: false,
   })),

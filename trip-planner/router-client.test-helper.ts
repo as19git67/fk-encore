@@ -19,6 +19,7 @@ export class InMemoryRouterClient implements RouterClient {
   async status(): Promise<RouterStatus> {
     return {
       reachable: this.reachable,
+      reason: this.reachable ? null : "ECONNREFUSED",
       version: this.reachable ? "test" : null,
       hasTiles: this.reachable && this.hasTiles,
       tilesBuiltAt: this.reachable && this.hasTiles ? this.tilesBuiltAt : null,
