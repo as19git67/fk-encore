@@ -20,6 +20,14 @@ struct OnThisDayWidget: Widget {
 struct OnThisDayEntry: TimelineEntry {
     let date: Date
     let snapshot: OnThisDaySnapshot?
+    /// The recap's cover, if the app has stored one for this widget.
+    let image: UIImage?
+
+    init(date: Date, snapshot: OnThisDaySnapshot?) {
+        self.date = date
+        self.snapshot = snapshot
+        image = WidgetImageStore.shared.image(named: snapshot?.imageFile)
+    }
 }
 
 struct OnThisDayProvider: TimelineProvider {
@@ -45,22 +53,19 @@ struct OnThisDayWidgetView: View {
     let entry: OnThisDayEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("An diesem Tag", systemImage: "calendar")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        let hasImage = entry.image != nil
+        WidgetPhotoCard(caption: "An diesem Tag", systemImage: "calendar", image: entry.image) {
             if let snapshot = entry.snapshot {
-                Text(snapshot.title).font(.headline)
+                Text(snapshot.title).font(.headline).lineLimit(2).widgetTextShadow(hasImage)
                 if let subtitle = snapshot.subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    Text(subtitle).font(.caption).lineLimit(1)
+                        .foregroundStyle(hasImage ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
+                        .widgetTextShadow(hasImage)
                 }
             } else {
                 Text("Heute noch keine Erinnerung").font(.subheadline).foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
         }
-        .padding()
         .widgetURL(entry.snapshot.map { AppDeepLink.url(for: .recap(id: $0.recapId)) } ?? AppDeepLink.url(for: .recaps))
-        .containerBackground(for: .widget) { Color.clear }
     }
 }

@@ -30,8 +30,13 @@ final class FeedViewModel {
             items = response.items
             nextCursor = response.nextCursor
             hasMore = response.nextCursor != nil
-            // Feeds the "recent feed activity" home-screen widget (#764).
+            // Feeds the "recent feed activity" home-screen widget (#764);
+            // the photo itself follows in the background.
             WidgetSnapshotStore.updateFromFeed(response.items)
+            let newestFilename = response.items.first?.filename
+            Task.detached(priority: .utility) {
+                await WidgetSnapshotStore.updateFeedImage(filename: newestFilename)
+            }
 
             await markDisplayedFeedSeen()
         } catch {
