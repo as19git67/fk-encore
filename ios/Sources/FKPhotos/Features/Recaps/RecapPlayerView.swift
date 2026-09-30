@@ -5,6 +5,13 @@ import SwiftUI
 /// segmented progress bar, tap-left/right to seek, long-press to pause and
 /// swipe-down (or the X button) to dismiss. Read-only.
 ///
+/// The chrome — title, music and close buttons, the favourite and exclude
+/// buttons at the bottom — hides itself after `chromeTimeout` seconds so
+/// the photo has the screen to itself; only the progress strip stays. A
+/// tap anywhere brings it back (and only that: while the chrome is
+/// hidden a tap does not seek), and every seek or button press restarts
+/// the countdown.
+///
 /// Slides are prefetched a few positions ahead and rendered with a subtle
 /// Ken-Burns motion plus a crossfade between slides, mirroring the web
 /// player. While the current slide's image is still downloading, playback
@@ -51,6 +58,13 @@ struct RecapPlayerView: View {
     @State private var favoriteBusy = false
     @State private var excludeBusy = false
 
+    /// Whether title, buttons and their gradients are on screen. The
+    /// progress strip never hides.
+    @State private var chromeVisible = true
+    @State private var chromeHideTask: Task<Void, Never>?
+    /// Seconds of no interaction before the chrome fades out.
+    private let chromeTimeout: Double = 3.0
+
     /// Seconds each slide stays on screen before auto-advancing.
     private let perItem: Double = 4.0
     private let tickStep: Double = 0.05
@@ -69,6 +83,7 @@ struct RecapPlayerView: View {
         .task { await load() }
         .onDisappear {
             ticker?.cancel()
+            chromeHideTask?.cancel()
             music.stop()
         }
         .onChange(of: isPaused) { _, paused in
@@ -124,14 +139,17 @@ struct RecapPlayerView: View {
                     .clipped()
 
                 // Tap zones: left third = back, right two-thirds = forward.
+                // With the chrome hidden a tap only brings it back, so the
+                // photo is never skipped by the tap that was meant to reveal
+                // the close button.
                 HStack(spacing: 0) {
                     Color.clear
                         .frame(width: geo.size.width / 3)
                         .contentShape(Rectangle())
-                        .onTapGesture { goPrevious() }
+                        .onTapGesture { tapped { goPrevious() } }
                     Color.clear
                         .contentShape(Rectangle())
-                        .onTapGesture { goNext() }
+                        .onTapGesture { tapped { goNext() } }
                 }
 
                 // Intros cover the first slide until they finish (or are
@@ -145,23 +163,8 @@ struct RecapPlayerView: View {
                 topOverlay(chrome)
 
                 if mapIntro == nil && compareIntro == nil {
-                    favoriteButton
-                        .frame(
-                            maxWidth: .infinity,
-                            maxHeight: .infinity,
-                            alignment: .bottomTrailing
-                        )
-                        .padding(.trailing, 16 + chrome.trailing)
-                        .padding(.bottom, 28 + chrome.bottom)
-
-                    excludeButton
-                        .frame(
-                            maxWidth: .infinity,
-                            maxHeight: .infinity,
-                            alignment: .bottomLeading
-                        )
-                        .padding(.leading, 16 + chrome.leading)
-                        .padding(.bottom, 28 + chrome.bottom)
+                    bottomBar(chrome)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 }
             }
             // Pin the player to the screen. A `ZStack` grows to its widest
@@ -182,6 +185,7 @@ struct RecapPlayerView: View {
             .onAppear {
                 screen = orientation
                 extendPlan()
+                showChrome()
             }
             .onChange(of: orientation) { _, new in
                 screen = new
@@ -283,7 +287,7 @@ struct RecapPlayerView: View {
                 }
                 Spacer()
                 if music.isPlaying {
-                    Button { music.toggleMuted() } label: {
+                    Button { music.toggleMuted(); showChrome() } label: {
                         Image(systemName: music.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                             .font(.headline)
                             .foregroundStyle(.white)
@@ -292,7 +296,7 @@ struct RecapPlayerView: View {
                     .accessibilityLabel(music.isMuted ? "Musik einschalten" : "Musik stummschalten")
                 }
                 if music.canChangeTrack {
-                    Button { music.next() } label: {
+                    Button { music.next(); showChrome() } label: {
                         Image(systemName: "forward.fill")
                             .font(.headline)
                             .foregroundStyle(.white)
@@ -307,6 +311,8 @@ struct RecapPlayerView: View {
                         .padding(8)
                 }
             }
+            .opacity(chromeVisible ? 1 : 0)
+            .allowsHitTesting(chromeVisible)
         }
         .padding(.leading, chrome.leading)
         .padding(.trailing, chrome.trailing)
@@ -318,7 +324,61 @@ struct RecapPlayerView: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea(edges: .top)
+            .opacity(chromeVisible ? 1 : 0)
         )
+        .animation(.easeInOut(duration: 0.25), value: chromeVisible)
+    }
+
+    /// Exclude on the left, favourite on the right — one row on its own
+    /// gradient, aligned with the chrome's side margins, above the home
+    /// indicator. Hides with the rest of the chrome.
+    private func bottomBar(_ chrome: SlideshowChromeInsets) -> some View {
+        HStack {
+            excludeButton
+            Spacer()
+            favoriteButton
+        }
+        .padding(.leading, chrome.leading)
+        .padding(.trailing, chrome.trailing)
+        .padding(.top, 24)
+        .padding(.bottom, max(chrome.bottom, SlideshowChromeInsets.margin) + 8)
+        .background(
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.45)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .bottom)
+        )
+        .opacity(chromeVisible ? 1 : 0)
+        .allowsHitTesting(chromeVisible)
+        .animation(.easeInOut(duration: 0.25), value: chromeVisible)
+    }
+
+    // MARK: - Chrome visibility
+
+    /// A tap on the stage: reveals the chrome if it is hidden, otherwise
+    /// does what the tap zone is for and restarts the countdown.
+    private func tapped(_ action: () -> Void) {
+        if chromeVisible {
+            action()
+        }
+        showChrome()
+    }
+
+    /// Shows the chrome and (re)starts the countdown to hiding it.
+    private func showChrome() {
+        chromeVisible = true
+        chromeHideTask?.cancel()
+        chromeHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(chromeTimeout))
+            guard !Task.isCancelled else { return }
+            // An intro keeps its close button: it has no photo to give the
+            // screen to, and a tap on it skips the intro rather than
+            // revealing anything.
+            guard mapIntro == nil, compareIntro == nil else { return }
+            chromeVisible = false
+        }
     }
 
     // MARK: - Loading
@@ -400,6 +460,8 @@ struct RecapPlayerView: View {
         mapIntro = nil
         compareIntro = nil
         startTicker()
+        // The countdown starts with the first photo, not during the intro.
+        showChrome()
     }
 
     // MARK: - Favorites
@@ -413,7 +475,7 @@ struct RecapPlayerView: View {
     private var favoriteButton: some View {
         let slidePhotos = (currentSlide?.photoIndices ?? []).map { photos[$0] }
         let fav = !slidePhotos.isEmpty && slidePhotos.allSatisfy { isFavorite($0) }
-        return Button { toggleFavorite(allFavorite: fav) } label: {
+        return Button { toggleFavorite(allFavorite: fav); showChrome() } label: {
             Image(systemName: fav ? "heart.fill" : "heart")
                 .font(.title2)
                 .foregroundStyle(fav ? .red : .white)
@@ -451,7 +513,7 @@ struct RecapPlayerView: View {
     // MARK: - Exclude
 
     private var excludeButton: some View {
-        Button { excludeCurrentPhoto() } label: {
+        Button { excludeCurrentPhoto(); showChrome() } label: {
             Image(systemName: "nosign")
                 .font(.title2)
                 .foregroundStyle(.white)
