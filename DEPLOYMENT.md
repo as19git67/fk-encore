@@ -799,6 +799,7 @@ the photo UI responsive under sustained scan load.
 | `GEO_SERVICE_URL`                | `http://geo:8080` | Base URL the app uses to reach the geo service. Override only when running the app outside the compose stack. |
 | `GEO_SHARED_SECRET`              | _(empty)_ | Optional bearer token; if set, every geo HTTP call must present `Authorization: Bearer <secret>`. |
 | `GEO_DB_PASSWORD`                | `postgres` | Postgres superuser password inside the `geo-db` container. |
+| `ROUTING_SERVICE_URL`            | `http://routing:8002` | Base URL of the Valhalla routing container. The trip planner uses it for real travel times and falls back to its estimate when it is absent. |
 | `GEO_OSM2PGSQL_CACHE_MB`         | `2000`  | osm2pgsql `--cache` value, in MB. Raise on hosts with spare RAM to speed up imports of large regions. |
 | `GEO_OSM2PGSQL_PROCS`            | `2`    | osm2pgsql `--number-processes`. |
 | `GEO_REPLICATION_INTERVAL_MS`    | `3600000` | Background `osm2pgsql-replication update` loop interval, ms. Set to `off` (via `GEO_REPLICATION=off`) to disable entirely. |

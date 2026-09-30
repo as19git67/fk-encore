@@ -96,6 +96,12 @@ volumes:
       type: none
       o: bind
       device: ${DEPLOY_DATA_ROOT:-./data}/geo
+  routing_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/routing
   recap-music:
     driver: local
     driver_opts:

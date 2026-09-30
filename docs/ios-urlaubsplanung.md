@@ -5655,6 +5655,44 @@ löschen scheiterte an der Eindeutigkeit von `(plan, position)` — die
 Umnummerierung in einem Schritt kollidierte zeilenweise. Sie läuft jetzt über
 negative Zwischenwerte.
 
+## 24. Router: echte Reisezeiten in Stufen (2026-09-30)
+
+Bis hierher rechnet der Planer jede Reisezeit als Luftlinie mal Umwegfaktor
+(§4.5, `travel.ts`). Das reicht für Blöcke, die nur Summen brauchen, und es
+hält den Planer rein und offline-fähig. Es stimmt aber messbar nicht, wo eine
+Straße nicht gerade läuft — ein Fluss ohne Brücke, eine Bucht, ein Pass — und
+es weiß nichts von Fahrplänen. Der Router kommt in drei Stufen, jede für sich
+brauchbar; was er nicht weiß, sagt der Planer weiter (§15.3, §9.5).
+
+**Stufe 1 — der Dienst steht (umgesetzt).** Ein Container `routing`
+(Valhalla) baut seine Kacheln aus denselben Geofabrik-Extrakten, die die
+Regionsverwaltung schon lädt: `geo_data/pbf` ist schreibgeschützt eingehängt,
+die Kacheln liegen in `routing_data`. Ein Kachelsatz für alle Regionen; eine
+neue Region ist erst nach einem Neustart des Containers routbar (der Einstieg
+baut neu, wenn ein Extrakt jünger ist als die Kacheln). Im Backend:
+`router-client.ts` (Status, Matrix, Route), `travel-table.ts` (eine Matrix je
+Tag, der Solver liest aus der Tabelle, alles andere bleibt Schätzung),
+`GET /trip-planner/routing/status` (erreichbar, Kacheln, Baudatum, und ob eine
+Region jünger ist als die Kacheln) und `POST /trip-planner/routing/compare`
+(Schätzung neben Router für ein Paar — die Messung, die §14 verlangt, bevor
+der Router den Plan bestimmt). ÖPNV fragt der Router noch nicht: ohne
+Fahrplan wäre die Fußgänger-Antwort schlechter als die Schätzung.
+
+**Stufe 2 — der Plan rechnet damit.** `planLeg` baut vor dem Solver eine
+Tabelle über Anker und Kandidaten (höchstens 120 Punkte, sonst Schätzung),
+die Weiterreise misst ihre Fahrzeit am Router, die Korridorsuche ordnet die
+Überlebenden nach echtem Umweg. Der Tag trägt `travelSource` (Router oder
+Schätzung), die App zeigt es an der Reisezeit. Erst nach der Messung aus
+Stufe 1: Wo die Schätzung um mehr als ein Viertel danebenliegt, lohnt es sich.
+
+**Stufe 3 — GTFS.** Fahrpläne je Region (Regionsverwaltung: Feed-URL, Import
+in Valhalla), `transit` wird multimodal mit Abfahrtszeit gefragt, das
+Offline-Bündel behält die Zeiten. Optional, wo ein Feed existiert.
+
+Offen bleibt: Speicher (Kacheln ≈ ein Drittel der PBF-Größe) und Arbeitsspeicher
+beim Bau (einige GB für Deutschland); beides misst Stufe 1 im Betrieb, und
+„Region löschen" muss die Kacheln mitnehmen (§14).
+
 ## 23. Idee für später: die Hörtour
 
 *Aus der Erprobung, als Wunsch notiert — nicht geplant, nicht begonnen.*
