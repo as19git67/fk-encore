@@ -347,8 +347,9 @@ struct TripPlansListView: View {
             let _: Response = try await APIClient.shared.delete(
                 "/trip-planner/plans/\(plan.id)")
             plans.removeAll { $0.id == plan.id }
-            TripPlannerViewModel.forget(planId: plan.id)
-            TripIdeasOfferMemory().forget(planId: plan.id)
+            // Including the day on the Lock Screen: a deleted trip must
+            // not go on running in the Dynamic Island.
+            await TripPlanGone.forget(planId: plan.id)
         } catch {
             actionError = TripErrorText.describe(error)
         }
@@ -368,8 +369,7 @@ struct TripPlansListView: View {
             let _: Response = try await APIClient.shared.post(
                 "/trip-planner/plans/\(plan.id)/participants/remove", body: Body(userId: me))
             plans.removeAll { $0.id == plan.id }
-            TripPlannerViewModel.forget(planId: plan.id)
-            TripIdeasOfferMemory().forget(planId: plan.id)
+            await TripPlanGone.forget(planId: plan.id)
         } catch {
             actionError = TripErrorText.describe(error)
         }

@@ -79,6 +79,8 @@ import {
   hiddenRefs,
   listPlans,
   loadPlan,
+  loadUserHome,
+  setPlanHome,
   saveMovedDays,
   setStopPinned,
   setStopStatus,
@@ -390,6 +392,11 @@ export const createTripPlan = api(
       },
       legs,
     });
+
+    // Where they live is where the trip sets off from, unless they say
+    // otherwise on this trip (§22.7).
+    const userHome = await loadUserHome(userId);
+    if (userHome) await setPlanHome(planId, userHome);
 
     const plan = await loadPlan(planId, userId);
     if (!plan) throw APIError.internal("plan vanished right after being written");

@@ -28,6 +28,7 @@ import {
   tripPlanStops,
   tripPlanVisits,
   tripPlans,
+  tripUserHomes,
   tripSpotNotes,
   tripHiddenSpots,
 } from "../db/schema";
@@ -1496,6 +1497,27 @@ export async function replanPlan(
  * away from being called by somebody who did not check.
  */
 /** Say where the trip sets off from and returns to, or forget it (§22.7). */
+/** Where this person lives, or null while nobody said (§22.7). */
+export async function loadUserHome(userId: number, db: Db = dbDefault): Promise<PlanHome | null> {
+  const row = await db.query.tripUserHomes.findFirst({ where: eq(tripUserHomes.user_id, userId) });
+  return row ? { lat: row.lat, lon: row.lon, label: row.label } : null;
+}
+
+/** Remember, or forget, where this person lives. */
+export async function setUserHome(userId: number, home: PlanHome | null, db: Db = dbDefault): Promise<void> {
+  if (!home) {
+    await db.delete(tripUserHomes).where(eq(tripUserHomes.user_id, userId));
+    return;
+  }
+  await db
+    .insert(tripUserHomes)
+    .values({ user_id: userId, lat: home.lat, lon: home.lon, label: home.label })
+    .onConflictDoUpdate({
+      target: tripUserHomes.user_id,
+      set: { lat: home.lat, lon: home.lon, label: home.label, updated_at: new Date().toISOString() },
+    });
+}
+
 export async function setPlanHome(
   planId: number,
   home: PlanHome | null,
