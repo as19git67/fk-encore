@@ -20,6 +20,14 @@ struct LatestRecapWidget: Widget {
 struct LatestRecapEntry: TimelineEntry {
     let date: Date
     let snapshot: LatestRecapSnapshot?
+    /// The recap's cover, if the app has stored one for this widget.
+    let image: UIImage?
+
+    init(date: Date, snapshot: LatestRecapSnapshot?) {
+        self.date = date
+        self.snapshot = snapshot
+        image = WidgetImageStore.shared.image(named: snapshot?.imageFile)
+    }
 }
 
 struct LatestRecapProvider: TimelineProvider {
@@ -41,22 +49,19 @@ struct LatestRecapWidgetView: View {
     let entry: LatestRecapEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Rückblick", systemImage: "sparkles")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        let hasImage = entry.image != nil
+        WidgetPhotoCard(caption: "Rückblick", systemImage: "sparkles", image: entry.image) {
             if let snapshot = entry.snapshot {
-                Text(snapshot.title).font(.headline)
+                Text(snapshot.title).font(.headline).lineLimit(2).widgetTextShadow(hasImage)
                 if let subtitle = snapshot.subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    Text(subtitle).font(.caption).lineLimit(1)
+                        .foregroundStyle(hasImage ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
+                        .widgetTextShadow(hasImage)
                 }
             } else {
                 Text("Noch kein Rückblick").font(.subheadline).foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
         }
-        .padding()
         .widgetURL(entry.snapshot.map { AppDeepLink.url(for: .recap(id: $0.recapId)) } ?? AppDeepLink.url(for: .recaps))
-        .containerBackground(for: .widget) { Color.clear }
     }
 }

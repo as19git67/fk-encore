@@ -1045,16 +1045,22 @@ eine echte Bereicherung:
 2. ✅ **Home-Screen-Widgets** (#764) – „An diesem Tag", letzter Rückblick,
    neueste Feed-Aktivität. Eigenes WidgetKit-Extension-Target
    `FKPhotosWidgets` (`App/Widgets/`), das sich das Extension-Target mit der
-   Live Activity (Punkt 3) teilt statt ein zweites zu eröffnen. v1 bewusst
-   textbasiert (Titel/Untertitel/SF-Symbol, kein Foto-Thumbnail) — der
-   Disk-Cache aus #1293 liegt im privaten, nicht in der App Group
-   sichtbaren Caches-Verzeichnis der App; ein gemeinsamer Bild-Cache für
-   Widgets ist als Fast-Follow offen, kein Blocker. Die Daten kommen ohne
-   neuen Server-Code: `WidgetSnapshotStore` (im Package) schreibt bei jedem
-   ohnehin stattfindenden Laden von Rückblicken/Feed einen kleinen
-   JSON-Snapshot in dieselbe App-Group-`UserDefaults`-Suite, die die Share
-   Extension schon nutzt (`SharedStorage`, `group.de.f4mil.photos`); die
-   Extension liest nur. „An diesem Tag" und „letzter Rückblick" übernehmen
+   Live Activity (Punkt 3) teilt statt ein zweites zu eröffnen. Die Daten
+   kommen ohne neuen Server-Code: `WidgetSnapshotStore` (im Package)
+   schreibt bei jedem ohnehin stattfindenden Laden von Rückblicken/Feed
+   einen kleinen JSON-Snapshot in dieselbe App-Group-`UserDefaults`-Suite,
+   die die Share Extension schon nutzt (`SharedStorage`,
+   `group.de.f4mil.photos`); die Extension liest nur. Das Foto dazu (Cover
+   des Rückblicks, das Feed-Foto selbst) kommt im zweiten Schritt: der
+   Disk-Cache aus #1293 liegt im privaten Caches-Verzeichnis der App, das
+   die Extension nicht sieht, deshalb lädt die App das Bild einmal in
+   Widget-Größe (`/photos/file/…?w=800&convert=true`) und legt es als JPEG
+   in `widget-images/` im App-Group-Container ab (`WidgetImageStore`, eine
+   Datei je Widget). Der Snapshot nennt den Dateinamen, das Widget zeigt
+   das Foto als Hintergrund unter dem Text; ohne Datei bleibt es die
+   Textkarte. Ein Rückblick, der schon sein Cover hat, lädt es beim
+   nächsten Listenaufruf nicht erneut; ein neuer Rückblick im selben Slot
+   erbt das alte Bild nicht. „An diesem Tag" und „letzter Rückblick" übernehmen
    dieselbe Auswahlregel wie der App Intent „Rückblick zeigen" (2.14):
    ungesehen zuerst, sonst der neueste.
 3. ✅ **Live Activity / Dynamic Island** (#768 §1) — für den laufenden Tag

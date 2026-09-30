@@ -20,6 +20,14 @@ struct RecentFeedWidget: Widget {
 struct RecentFeedEntry: TimelineEntry {
     let date: Date
     let snapshot: RecentFeedSnapshot?
+    /// The photo itself, if the app has stored one for this widget.
+    let image: UIImage?
+
+    init(date: Date, snapshot: RecentFeedSnapshot?) {
+        self.date = date
+        self.snapshot = snapshot
+        image = WidgetImageStore.shared.image(named: snapshot?.imageFile)
+    }
 }
 
 struct RecentFeedProvider: TimelineProvider {
@@ -41,21 +49,18 @@ struct RecentFeedWidgetView: View {
     let entry: RecentFeedEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Feed", systemImage: "house")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        let hasImage = entry.image != nil
+        WidgetPhotoCard(caption: "Feed", systemImage: "house", image: entry.image) {
             if let snapshot = entry.snapshot {
-                Text(sentence(for: snapshot)).font(.headline)
-                Text(relativeDate(snapshot.lastActivityAt)).font(.caption).foregroundStyle(.secondary)
+                Text(sentence(for: snapshot)).font(.headline).lineLimit(2).widgetTextShadow(hasImage)
+                Text(relativeDate(snapshot.lastActivityAt)).font(.caption).lineLimit(1)
+                    .foregroundStyle(hasImage ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
+                    .widgetTextShadow(hasImage)
             } else {
                 Text("Noch keine Aktivität").font(.subheadline).foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
         }
-        .padding()
         .widgetURL(AppDeepLink.url(for: .feed))
-        .containerBackground(for: .widget) { Color.clear }
     }
 
     private func sentence(for snapshot: RecentFeedSnapshot) -> String {
