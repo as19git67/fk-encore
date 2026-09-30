@@ -174,7 +174,7 @@ function jumpToFirstPending() {
 function statusSeverity(status: string | null): 'success' | 'warn' | 'danger' | 'secondary' {
   if (!status) return 'secondary'
   if (status === 'ok') return 'success'
-  if (status === 'tan-required') return 'warn'
+  if (status === 'tan-required' || status === 'tan-expired') return 'warn'
   if (status === 'partial') return 'warn'
   if (status.startsWith('error')) return 'danger'
   return 'secondary'
@@ -184,6 +184,7 @@ function statusLabel(status: string | null): string {
   if (!status) return '—'
   if (status === 'ok') return 'OK'
   if (status === 'tan-required') return 'TAN offen'
+  if (status === 'tan-expired') return 'TAN abgelaufen'
   if (status === 'partial') return 'Teilweise'
   if (status.startsWith('error:')) return `Fehler ${status.slice(6)}`
   return status
@@ -194,6 +195,8 @@ function statusTitle(status: string | null): string | undefined {
     return 'Sync war teilweise erfolgreich. Mindestens ein Konto konnte nicht abgerufen werden (z. B. weil eine TAN benötigt wurde oder die Bank einen Fehler meldete). Aktualisierte Konten und neue Buchungen sind aber gespeichert.'
   if (status === 'tan-required')
     return 'Die Bank fordert eine TAN — bitte den Sync erneut starten und den TAN-Dialog abschließen.'
+  if (status === 'tan-expired')
+    return 'Die TAN-Anfrage der Bank ist abgelaufen, ohne beantwortet zu werden. Bitte den Sync erneut starten.'
   return undefined
 }
 

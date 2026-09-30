@@ -332,6 +332,29 @@ export async function fetchAndPersist(
     };
   }
 
+  if (fetched.pendingTan) {
+    // No user to own a session (cron on a bankcontact without ACL).
+    // The bank still wants a TAN, so say so instead of reporting the
+    // accounts it never fetched as done; a manual sync opens a fresh
+    // dialog and shows the challenge.
+    console.warn(
+      `[finance.statements] bankcontact=${bankcontactId} paused at ` +
+        `account=${fetched.pendingTan.accountNumber} for a TAN but no ` +
+        `user is available to own the session`,
+    );
+    await db
+      .update(financeBankcontact)
+      .set({
+        last_sync_at: new Date().toISOString(),
+        last_sync_status: "tan-required",
+      })
+      .where(eq(financeBankcontact.id, bankcontactId));
+    return {
+      state: "tan-required",
+      challenge: fetched.pendingTan.tanChallenge ?? "",
+    };
+  }
+
   console.log(
     `[finance.statements] bankcontact=${bankcontactId} synced: ` +
       `accounts=${stats.accounts_seen} (matched=${stats.accounts_matched} ` +

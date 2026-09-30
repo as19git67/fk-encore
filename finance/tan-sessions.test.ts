@@ -577,4 +577,57 @@ describe("finance/tan-sessions — cleanupExpiredTanSessions", () => {
     expect(rows.map((r) => r.tan_reference)).toEqual([future]);
     void past; // kept for readability of the test intent
   });
+
+  it("marks a bankcontact tan-expired once its last pending session is gone", async () => {
+    const expiredBc = await insertBankcontact();
+    const stillPendingBc = await insertBankcontact();
+    const untouchedBc = await insertBankcontact();
+    await db
+      .update(financeBankcontact)
+      .set({ last_sync_status: "tan-required" })
+      .where(eq(financeBankcontact.id, expiredBc));
+    await db
+      .update(financeBankcontact)
+      .set({ last_sync_status: "tan-required" })
+      .where(eq(financeBankcontact.id, stillPendingBc));
+    await db
+      .update(financeBankcontact)
+      .set({ last_sync_status: "ok" })
+      .where(eq(financeBankcontact.id, untouchedBc));
+    await insertSession({
+      userId: 1,
+      bankcontactId: expiredBc,
+      expiresAt: new Date(Date.now() - 5_000),
+    });
+    await insertSession({
+      userId: 1,
+      bankcontactId: stillPendingBc,
+      expiresAt: new Date(Date.now() - 5_000),
+    });
+    await insertSession({
+      userId: 1,
+      bankcontactId: stillPendingBc,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    // An expired session on a bankcontact that already synced again
+    // must not flip its status back.
+    await insertSession({
+      userId: 1,
+      bankcontactId: untouchedBc,
+      expiresAt: new Date(Date.now() - 5_000),
+    });
+
+    await cleanupExpiredTanSessions();
+
+    const status = async (id: number) =>
+      (
+        await db
+          .select({ s: financeBankcontact.last_sync_status })
+          .from(financeBankcontact)
+          .where(eq(financeBankcontact.id, id))
+      )[0].s;
+    expect(await status(expiredBc)).toBe("tan-expired");
+    expect(await status(stillPendingBc)).toBe("tan-required");
+    expect(await status(untouchedBc)).toBe("ok");
+  });
 });

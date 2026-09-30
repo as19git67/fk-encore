@@ -22,7 +22,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { eq, lt } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit, resetRateLimit } from "../user/rateLimiter";
@@ -372,7 +372,32 @@ export const cleanupExpiredTanSessions = api(
     const deleted = await db
       .delete(financeTanSession)
       .where(lt(financeTanSession.expires_at, nowIso))
-      .returning({ ref: financeTanSession.tan_reference });
+      .returning({
+        ref: financeTanSession.tan_reference,
+        bankcontact_id: financeTanSession.bankcontact_id,
+      });
+    // A bankcontact whose only pending session just expired would keep
+    // saying "tan-required" until the next sync overwrites it — the
+    // overview counted it as a TAN the user could still answer. Mark
+    // it expired instead; the UI tells the user to start the sync again.
+    const affected = [...new Set(deleted.map((d) => d.bankcontact_id))];
+    for (const bankcontactId of affected) {
+      const [pending] = await db
+        .select({ ref: financeTanSession.tan_reference })
+        .from(financeTanSession)
+        .where(eq(financeTanSession.bankcontact_id, bankcontactId))
+        .limit(1);
+      if (pending) continue;
+      await db
+        .update(financeBankcontact)
+        .set({ last_sync_status: "tan-expired" })
+        .where(
+          and(
+            eq(financeBankcontact.id, bankcontactId),
+            eq(financeBankcontact.last_sync_status, "tan-required"),
+          ),
+        );
+    }
     return { deleted: deleted.length };
   },
 );

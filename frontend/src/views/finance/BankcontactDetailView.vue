@@ -380,7 +380,7 @@ function ignoreUnknown(entry: UnknownBankAccount) {
 
 function syncStatusSeverity(status: string): 'success' | 'warn' | 'danger' | 'secondary' {
   if (status === 'ok') return 'success'
-  if (status === 'tan-required') return 'warn'
+  if (status === 'tan-required' || status === 'tan-expired') return 'warn'
   if (status === 'partial') return 'warn'
   if (status.startsWith('error')) return 'danger'
   return 'secondary'
@@ -389,6 +389,7 @@ function syncStatusSeverity(status: string): 'success' | 'warn' | 'danger' | 'se
 function syncStatusLabel(status: string): string {
   if (status === 'ok') return 'OK'
   if (status === 'tan-required') return 'TAN offen'
+  if (status === 'tan-expired') return 'TAN abgelaufen'
   if (status === 'partial') return 'Teilweise'
   if (status.startsWith('error:')) return `Fehler ${status.slice(6)}`
   return status
