@@ -151,7 +151,7 @@ import type {
 import { resizeImageInPool, type ImagePoolPriority } from "./image-pool";
 import { writeCacheFileAtomically } from "./cache-file";
 import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
-import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS } from "./rpc-timeout";
+import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS, MlRpcTimeoutError } from "./rpc-timeout";
 import {
   buildPhotoFilterConditions,
   type PhotoFilterParams,
@@ -8283,6 +8283,45 @@ export interface NaturalSearchResult extends PhotoSearchResult {
   location_country?: string;
 }
 
+/**
+ * CLIP text search against the embedding service, with failures mapped to
+ * API errors the UI can tell apart: `deadline_exceeded` (service slow or
+ * still starting), `unavailable` (unreachable / 5xx gateway), `internal`
+ * (anything else, incl. a rejected internal secret).
+ */
+async function fetchClipTextSearch(
+  semanticQuery: string,
+  k: number,
+  threshold: number,
+): Promise<Array<{ photo_id: string; score: number }>> {
+  let resp: Response;
+  try {
+    resp = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/search/text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: semanticQuery.slice(0, EMBEDDING_TEXT_SEARCH_MAX_QUERY_LEN),
+        k,
+        threshold,
+      }),
+      timeoutMs: ML_RPC_QUICK_TIMEOUT_MS,
+    });
+  } catch (err) {
+    if (err instanceof MlRpcTimeoutError) {
+      throw APIError.deadlineExceeded("embedding service did not answer in time");
+    }
+    throw APIError.unavailable("embedding service is unreachable");
+  }
+  if (!resp.ok) {
+    if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
+      throw APIError.unavailable(`embedding service not ready (${resp.status})`);
+    }
+    throw APIError.internal(`embedding service error (${resp.status})`);
+  }
+  const data = await resp.json() as { results: Array<{ photo_id: string; score: number }> };
+  return data.results;
+}
+
 export async function searchPhotosNaturalLogic(
   userId: number,
   query: string,
@@ -8428,23 +8467,12 @@ export async function searchPhotosNaturalLogic(
 
   // Case B: semantic only, no structural filters → CLIP ∪ description matches
   if (!hasStructuredFilter) {
-    const [clipResp, descIds] = await Promise.all([
-      fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/search/text`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: parsed.semanticQuery.slice(0, EMBEDDING_TEXT_SEARCH_MAX_QUERY_LEN),
-          k: Math.min(limit, EMBEDDING_TEXT_SEARCH_MAX_K),
-          threshold,
-        }),
-        timeoutMs: ML_RPC_QUICK_TIMEOUT_MS,
-      }),
+    const [clipResults, descIds] = await Promise.all([
+      fetchClipTextSearch(parsed.semanticQuery, Math.min(limit, EMBEDDING_TEXT_SEARCH_MAX_K), threshold),
       fetchTextMatchIds(),
     ]);
-    if (!clipResp.ok) throw new Error(`Embedding service error: ${clipResp.status}`);
-    const clipData = await clipResp.json() as { results: Array<{ photo_id: string; score: number }> };
     const clipScores = new Map<number, number>();
-    for (const r of clipData.results) {
+    for (const r of clipResults) {
       const id = parseInt(r.photo_id, 10);
       if (!isNaN(id)) clipScores.set(id, r.score);
     }
@@ -8482,27 +8510,16 @@ export async function searchPhotosNaturalLogic(
   // Must stay within the embedding service's TextSearchRequest.k upper bound
   // (1000) — exceeding it would produce a 422 Unprocessable Entity.
   const clipK = Math.min(candidateSet.size, limit * 5, EMBEDDING_TEXT_SEARCH_MAX_K);
-  const [clipResp, descIds] = await Promise.all([
-    fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/search/text`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: parsed.semanticQuery.slice(0, EMBEDDING_TEXT_SEARCH_MAX_QUERY_LEN),
-        k: clipK,
-        threshold,
-      }),
-      timeoutMs: ML_RPC_QUICK_TIMEOUT_MS,
-    }),
+  const [clipResults, descIds] = await Promise.all([
+    fetchClipTextSearch(parsed.semanticQuery, clipK, threshold),
     // fetchTextMatchIds already applies the same structural filter,
     // so we don't need to intersect manually.
     fetchTextMatchIds(),
   ]);
-  if (!clipResp.ok) throw new Error(`Embedding service error: ${clipResp.status}`);
-  const clipData = await clipResp.json() as { results: Array<{ photo_id: string; score: number }> };
 
   // Score map: CLIP hits inside the structural candidate set + description matches.
   const merged = new Map<number, number>();
-  for (const r of clipData.results) {
+  for (const r of clipResults) {
     const id = parseInt(r.photo_id, 10);
     if (!isNaN(id) && candidateSet.has(id)) merged.set(id, r.score);
   }
