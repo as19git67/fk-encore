@@ -154,6 +154,30 @@ modelliert; die KV-Einstufung der überlebenden Person bleibt, wie am Posten
 gewählt (Familienversicherung über die verstorbene Person müsste von Hand
 geändert werden).
 
+## Nachtrag: Plan und Wirklichkeit (#1342)
+
+Ein Stand (`finance_forecast_snapshot`) hält die Jahresreihe eines
+Szenarios (Vermögen und verfügbares Vermögen je Jahresende) und das
+verfügbare Vermögen am Tag der Aufnahme fest — von Hand oder einmal im
+Monat per Cron je Szenario. „Erwartet für heute“ ist linear zwischen dem
+Startwert und den Jahresenden interpoliert; verglichen wird das
+**verfügbare** Vermögen (Bargeld, Depot, Sonstiges: verknüpfte Konten mit
+aktuellem Saldo, sonst der eingetragene Wert), weil darauf das Urteil der
+Prognose ruht.
+
+Ist-Werte aus den Buchungen der letzten zwölf vollen Monate über alle
+Konten des Haushalts: Einnahmen, Ausgaben und Sparrate pro Monat, ohne
+Umbuchungen zwischen eigenen Konten (Gegen-IBAN gehört dem Haushalt oder
+Spiegelbuchung gleichen Betrags auf einem anderen Konto binnen drei
+Tagen). Plan-Ausgaben = Lebenshaltung plus laufende Ausgaben der Posten,
+Plan-Sparrate = Einnahmen minus Ausgaben des ersten vollen Simulationsjahres.
+„Lebenshaltung übernehmen“ schreibt die Ist-Ausgaben in den einen
+Lebenshaltungsposten.
+
+Vereinfachungen: Ausgaben enthalten alles, was abfließt (auch Versicherungs-
+beiträge und Sparpläne an fremde Depots ohne Spiegelbuchung); Bargeld-
+Abhebungen zählen als Ausgabe; keine Benachrichtigung bei Abweichung.
+
 ## Geprüft und in Ordnung
 
 - Kaufkraft: alle Reihen und Detailwerte werden mit ihrem Jahr und demselben

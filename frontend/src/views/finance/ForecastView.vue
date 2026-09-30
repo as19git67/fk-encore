@@ -24,6 +24,7 @@ import ForecastMatrix from '../../components/finance/forecast/ForecastMatrix.vue
 import ForecastRobustness from '../../components/finance/forecast/ForecastRobustness.vue'
 import ForecastTargetAge from '../../components/finance/forecast/ForecastTargetAge.vue'
 import ForecastSurvivor from '../../components/finance/forecast/ForecastSurvivor.vue'
+import ForecastPlanActual from '../../components/finance/forecast/ForecastPlanActual.vue'
 import ForecastImportDialog from '../../components/finance/forecast/ForecastImportDialog.vue'
 import ForecastStatementsDialog from '../../components/finance/forecast/ForecastStatementsDialog.vue'
 import ForecastAccountsDialog from '../../components/finance/forecast/ForecastAccountsDialog.vue'
@@ -76,6 +77,12 @@ import {
   type ForecastShareOffer,
   type ForecastScenarioConfig,
   type ForecastSimulateResponse,
+  adoptForecastActuals,
+  createForecastSnapshot,
+  deleteForecastSnapshot,
+  getForecastPlanActual,
+  type ForecastPlanActual as ForecastPlanActualData,
+  type ForecastSnapshot,
 } from '../../api/finance'
 
 /**
@@ -109,6 +116,7 @@ async function load() {
   try {
     bundle.value = await getForecast()
     void loadStatements()
+    void loadPlanActual()
     void loadAccountSuggestions()
     void loadShareOffers()
     if (!config.value) config.value = cloneConfig(bundle.value.defaultScenario)
@@ -775,6 +783,67 @@ function pickDeathAge(age: number) {
   if (!config.value || survivorFor.value == null) return
   config.value.survivor = { ...config.value.survivor, personId: survivorFor.value, age }
 }
+// ---- plan vs. actual (#1342) ------------------------------------------------------------
+
+const planActual = ref<ForecastPlanActualData | null>(null)
+const planActualBusy = ref(false)
+const planActualError = ref<string | null>(null)
+const planActualNote = ref<string | null>(null)
+async function loadPlanActual() {
+  try {
+    planActual.value = await getForecastPlanActual()
+  } catch {
+    planActual.value = null
+  }
+}
+const snapshotScenarioName = computed(() => scenarios.value.find((x) => x.id === selectedScenarioId.value)?.name ?? 'Standardannahmen')
+async function takeSnapshot() {
+  planActualBusy.value = true
+  planActualError.value = null
+  planActualNote.value = null
+  try {
+    await createForecastSnapshot(selectedScenarioId.value)
+    await loadPlanActual()
+  } catch (err) {
+    planActualError.value = `Stand nicht festgehalten: ${message(err)}`
+  } finally {
+    planActualBusy.value = false
+  }
+}
+function removeSnapshot(s: ForecastSnapshot) {
+  confirm.require({
+    message: `Den Stand vom ${new Date(s.takenAt).toLocaleDateString('de-DE')} (${s.scenarioName}) löschen?`,
+    header: 'Stand löschen',
+    icon: 'pi pi-trash',
+    acceptLabel: 'Löschen',
+    rejectLabel: 'Abbrechen',
+    acceptProps: { severity: 'danger' },
+    accept: async () => {
+      planActualBusy.value = true
+      try {
+        await deleteForecastSnapshot(s.id)
+        await loadPlanActual()
+      } catch (err) {
+        planActualError.value = `Stand nicht gelöscht: ${message(err)}`
+      } finally {
+        planActualBusy.value = false
+      }
+    },
+  })
+}
+async function adoptActuals(payload: { itemId: number; monthly: number }) {
+  planActualBusy.value = true
+  try {
+    await adoptForecastActuals(payload.itemId, payload.monthly)
+    await load()
+    planActualNote.value = 'Lebenshaltung aus den Buchungen übernommen.'
+  } catch (err) {
+    planActualError.value = `Nicht übernommen: ${message(err)}`
+  } finally {
+    planActualBusy.value = false
+  }
+}
+
 const survivorExpensePct = pctModel(() => config.value?.survivor.expenseFactor ?? 0, (v) => config.value && (config.value.survivor.expenseFactor = v))
 const survivorOffsetPct = pctModel(() => config.value?.survivor.incomeOffsetRate ?? 0, (v) => config.value && (config.value.survivor.incomeOffsetRate = v))
 
@@ -1093,6 +1162,15 @@ const ready = computed(() => !loading.value)
             </ul>
           </div>
         </div>
+      </section>
+
+      <!-- Plan vs. actual (#1342) -->
+      <section v-if="planActual" class="card">
+        <h2 class="card__title">Plan und Wirklichkeit</h2>
+        <p class="card__hint">Was die Prognose erwartet hat, gegen das, was auf den Konten ist und was die Buchungen sagen.</p>
+        <Message v-if="planActualError" severity="error" :closable="false">{{ planActualError }}</Message>
+        <Message v-else-if="planActualNote" severity="success" :closable="false">{{ planActualNote }}</Message>
+        <ForecastPlanActual :data="planActual" :scenario-name="snapshotScenarioName" :can-edit="canEdit" :busy="planActualBusy" @snapshot="takeSnapshot" @remove="removeSnapshot" @adopt="adoptActuals" />
       </section>
 
       <!-- Household -->

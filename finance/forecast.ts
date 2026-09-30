@@ -575,7 +575,7 @@ async function linkableAccounts(access: HouseholdAccess): Promise<LinkableAccoun
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-interface Household {
+export interface Household {
   persons: ForecastPerson[];
   milestones: ForecastMilestone[];
   items: ForecastItem[];
@@ -585,7 +585,7 @@ interface Household {
   accounts: LinkableAccount[];
 }
 
-async function loadHousehold(userId: number, access: HouseholdAccess): Promise<Household> {
+export async function loadHousehold(userId: number, access: HouseholdAccess): Promise<Household> {
   const [personRows, milestoneRows, itemRows, accounts] = await Promise.all([
     db
       .select()
