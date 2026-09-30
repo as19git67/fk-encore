@@ -119,6 +119,12 @@ struct TripOfflineStore: Sendable {
         return TripOfflineSnapshot(bundle: bundle, storedAt: storedAt(planId: planId) ?? Date())
     }
 
+    /// The trip is gone, or no longer ours: its snapshot must not keep
+    /// a day running that the server no longer has.
+    func forget(planId: Int) {
+        try? FileManager.default.removeItem(at: file(planId))
+    }
+
     func has(planId: Int) -> Bool {
         FileManager.default.fileExists(atPath: file(planId).path)
     }

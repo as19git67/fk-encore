@@ -128,6 +128,26 @@ final class TripDayActivityManager {
         ) as Registered
     }
 
+    /// Ends the Activity for one trip, if that is the one running —
+    /// the trip was deleted or left, and its day on the Lock Screen
+    /// would otherwise outlive it. The server's registration goes with
+    /// the trip, so nothing is unregistered here; an Activity from an
+    /// earlier run of the app for the same trip is ended too.
+    func end(forPlan planId: Int) async {
+        if activePlanId == planId {
+            tokenTask?.cancel()
+            tokenTask = nil
+            pushToken = nil
+            await activity?.end(nil, dismissalPolicy: .immediate)
+            activity = nil
+            activePlanId = nil
+        }
+        for leftover in Activity<TripDayActivityAttributes>.activities
+        where leftover.attributes.planId == planId {
+            await leftover.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
     /// Ends whatever Activity is running, if any. Called when the trip
     /// this Activity was for stops running today, and from the places
     /// that end a trip outright (`TripStore.endTrip()`, the auto-end
