@@ -3930,6 +3930,33 @@ export const financeForecastShare = pgTable(
   ]
 );
 
+// ---------- Finance: forecast snapshots, plan vs. actual (migration 0219) ----------
+
+export interface ForecastSeriesPoint {
+  year: number;
+  wealth: number;
+  liquid: number;
+}
+
+export const financeForecastSnapshot = pgTable(
+  "finance_forecast_snapshot",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scenario_id: integer("scenario_id").references(() => financeForecastScenario.id, { onDelete: "set null" }),
+    scenario_name: text("scenario_name").notNull(),
+    source: text("source").notNull().$type<"manual" | "cron">(),
+    taken_at: timestamp("taken_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    start_liquid: numeric("start_liquid", { precision: 14, scale: 2 }).notNull(),
+    start_wealth: numeric("start_wealth", { precision: 14, scale: 2 }).notNull(),
+    series: jsonb("series").notNull().$type<ForecastSeriesPoint[]>(),
+    config: jsonb("config").notNull().$type<Record<string, unknown>>(),
+  },
+  (table) => [index("idx_finance_forecast_snapshot_user").on(table.user_id, table.taken_at)]
+);
+
 // ---------- Finance: bookings that pay a forecast item's premium (migration 0216) ----------
 
 export const financeForecastBookingLink = pgTable(

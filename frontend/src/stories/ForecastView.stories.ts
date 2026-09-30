@@ -11,7 +11,7 @@ import type {
   ForecastSimulation,
   ForecastYearRow,
 } from '../api/finance'
-import { LEVERS, REVERSE_GAP, REVERSE_OK, SENSITIVITY, SURVIVOR } from './forecastRobustnessFixture'
+import { LEVERS, PLAN_ACTUAL, REVERSE_GAP, REVERSE_OK, SENSITIVITY, SURVIVOR } from './forecastRobustnessFixture'
 
 /**
  * Finanzen › Prognose (issue #1337). The household below is invented:
@@ -273,6 +273,10 @@ function simulateHandler(req: ForecastSimulateRequest): ForecastSimulateResponse
 const handlers = [
   http.get('/api/finance/forecast', () => HttpResponse.json(BUNDLE)),
   http.get('/api/finance/forecast/statements', () => HttpResponse.json({ items: STATEMENTS })),
+  http.get('/api/finance/forecast/plan-actual', () => HttpResponse.json(PLAN_ACTUAL)),
+  http.post('/api/finance/forecast/snapshots', () => HttpResponse.json(PLAN_ACTUAL.snapshots[0])),
+  http.delete('/api/finance/forecast/snapshots/:id', () => new HttpResponse(null, { status: 204 })),
+  http.post('/api/finance/forecast/actuals/adopt', () => new HttpResponse(null, { status: 204 })),
   http.get('/api/finance/forecast/sharing', () =>
     HttpResponse.json({ role: 'owner', ownerName: null, shares: [], offers: [], hasOwnForecast: true }),
   ),
