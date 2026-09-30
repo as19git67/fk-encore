@@ -108,6 +108,7 @@ async function insertStatementsSession(opts: {
   userId: number;
   bankcontactId: number;
   withFetchContext?: boolean;
+  from?: string;
 }): Promise<string> {
   await ensureUser(opts.userId);
   const ref = randomUUID();
@@ -124,6 +125,7 @@ async function insertStatementsSession(opts: {
           currentAccountNumber: "A",
           remainingAccountNumbers: ["B"],
           linkedAccountNumbers: ["A", "B"],
+          ...(opts.from !== undefined ? { from: opts.from } : {}),
         },
     expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
   });
@@ -405,6 +407,41 @@ describe("finance/tan-sessions — statement TAN status", () => {
     const daysBack =
       (Date.now() - (arg!.defaultFrom as Date).getTime()) / 86_400_000;
     expect(daysBack).toBeLessThan(90);
+  });
+
+  it("resumes with the start date of a manual 'fetch from date' sync", async () => {
+    setAuth("42", ["finance.accounts.manage"]);
+    const bcId = await insertBankcontact();
+    const [type] = await db
+      .select({ id: financeAccountType.id })
+      .from(financeAccountType)
+      .where(eq(financeAccountType.kind, "giro"))
+      .limit(1);
+    await db.insert(financeAccount).values({
+      bankcontact_id: bcId,
+      fints_account_number: "A",
+      type_id: type.id,
+      currency_code: "EUR",
+      account_number: "A",
+      label: "Girokonto",
+    });
+    const ref = await insertStatementsSession({
+      userId: 42,
+      bankcontactId: bcId,
+      from: "2026-06-15",
+    });
+    vi.mocked(fintsClient.takeCachedClient).mockReturnValue({} as never);
+    vi.mocked(fintsClient.resumeFetchAfterTan).mockResolvedValue({
+      accounts: [],
+      partial: false,
+    });
+    vi.mocked(statementPersist.persistFetchResult).mockResolvedValue(emptyStats);
+
+    await completeTanSession({ tanReference: ref, tan: "123456" });
+
+    const arg = vi.mocked(fintsClient.resumeFetchAfterTan).mock.calls[0]?.[1];
+    expect(arg?.fromByAccountNumber?.get("A")).toEqual(new Date(2026, 5, 15));
+    expect(arg?.defaultFrom).toEqual(new Date(2026, 5, 15));
   });
 
   it("keeps tan-required when the bank returns a follow-up challenge", async () => {

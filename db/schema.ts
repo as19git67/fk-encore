@@ -2283,12 +2283,14 @@ export const financeTanSession = pgTable(
      * Mid-fetch resume state for kind="statements": which bank
      * accountNumber the dialog was waiting on, and which others are
      * still queued behind it. After the user submits the TAN we
-     * continue the loop from there.
+     * continue the loop from there. `from` is the start date of a
+     * manual "fetch from date" sync, so the resume keeps using it.
      */
     fetch_context: jsonb("fetch_context").$type<{
       currentAccountNumber: string;
       remainingAccountNumbers: string[];
       linkedAccountNumbers: string[];
+      from?: string;
     } | null>(),
     expires_at: timestamp("expires_at", { mode: "string", withTimezone: true }).notNull(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })

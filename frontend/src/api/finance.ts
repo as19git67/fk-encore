@@ -181,10 +181,18 @@ export type SyncResponse =
     }
   | { state: 'error'; errorCode: string; errorMessage: string }
 
-export async function triggerSync(bankcontactId: number): Promise<SyncResponse> {
+/**
+ * `from` (YYYY-MM-DD) asks the bank for all bookings since that date
+ * instead of only the newest ones — refills a gap further back.
+ * Bookings already stored are skipped server-side.
+ */
+export async function triggerSync(
+  bankcontactId: number,
+  from?: string,
+): Promise<SyncResponse> {
   return apiFetch('/finance/statements', {
     method: 'POST',
-    body: JSON.stringify({ bankcontactId }),
+    body: JSON.stringify(from ? { bankcontactId, from } : { bankcontactId }),
   })
 }
 

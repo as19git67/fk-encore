@@ -109,6 +109,7 @@ export const completeTanSession = api(
     const info = session.banking_information as {
       bi: Record<string, unknown>;
       fintsTanRef: string;
+      from?: string;
     };
 
     const result = await runSynchronize(session.bankcontact_id, {
@@ -128,6 +129,7 @@ export const completeTanSession = api(
           banking_information: {
             bi: result.bankingInformation ?? info.bi,
             fintsTanRef: result.tanReference ?? info.fintsTanRef,
+            ...(info.from !== undefined ? { from: info.from } : {}),
           },
           challenge: result.tanChallenge ?? session.challenge,
           tan_media_name: result.tanMediaName ?? session.tan_media_name,
@@ -183,6 +185,7 @@ export const completeTanSession = api(
     resetRateLimit(rateKey);
     return await fetchAndPersist(session.bankcontact_id, result.client, {
       userId,
+      from: info.from,
     });
   },
 );
@@ -240,7 +243,7 @@ async function resumeStatementsTan(
   // used — linked accounts only, and each with its own `from` date.
   // Fetching the queue unfiltered/unbounded is what made every queued
   // account raise its own TAN challenge.
-  const plan = await buildFetchPlan(session.bankcontact_id);
+  const plan = await buildFetchPlan(session.bankcontact_id, { from: ctx.from });
   const fetched = await resumeFetchAfterTan(cached, {
     tanReference: info.fintsTanRef,
     tan: p.tan,
@@ -269,6 +272,7 @@ async function resumeStatementsTan(
           currentAccountNumber: fetched.pendingTan.accountNumber,
           remainingAccountNumbers: fetched.pendingTan.remainingAccountNumbers,
           linkedAccountNumbers: ctx.linkedAccountNumbers,
+          ...(ctx.from !== undefined ? { from: ctx.from } : {}),
         },
       })
       .where(eq(financeTanSession.tan_reference, p.tanReference));
