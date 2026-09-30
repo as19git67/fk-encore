@@ -98,6 +98,16 @@ final class TripTransitTests: XCTestCase {
         XCTAssertNil(TripTransitPlanning.minutes(fromClock: "25:00"))
         XCTAssertNotEqual(TripTransitSuggestion.dismissKey(planId: 1, afterLegIndex: 0),
                           TripTransitSuggestion.dismissKey(planId: 1, afterLegIndex: 1))
+
+        // Without dates the days come as null and the times still read.
+        let undated = """
+        {"suggestion":{"afterLegIndex":-1,"fromTitle":"Zuhause","toTitle":"Ort 0",
+         "departDate":null,"departAt":"10:00","arriveDate":null,"arriveAt":"14:00",
+         "mode":"car","driveMinutes":150,"sentence":"…"}}
+        """
+        let open = try JSONDecoder().decode(TripTransitSuggestionResponse.self, from: Data(undated.utf8))
+        XCTAssertNil(open.suggestion?.departDate)
+        XCTAssertEqual(open.suggestion.flatMap { TripTransitPlanning.minutes(fromClock: $0.arriveAt) }, 840)
     }
 
     func testTheWayThereAndHomeAreOfferedOnlyWithAHome() {

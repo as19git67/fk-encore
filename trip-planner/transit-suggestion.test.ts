@@ -43,8 +43,10 @@ describe("suggesting a journey", () => {
     ])).toBeNull();
   });
 
-  it("needs dates", () => {
-    expect(suggestTransit([leg(0, 48.37, 10.9, { startDate: null }), far])).toBeNull();
+  it("suggests the clock times without a day on a trip that has no dates", () => {
+    const s = suggestTransit([leg(0, 48.37, 10.9, { startDate: null }), { ...far, startDate: null }]);
+    expect(s).toMatchObject({ afterLegIndex: 0, departDate: null, arriveDate: null, departAt: "10:00" });
+    expect(s?.arriveAt).toBeDefined();
   });
 });
 

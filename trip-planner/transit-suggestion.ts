@@ -1,10 +1,14 @@
 /**
  * Suggesting a journey between two legs (§22.7, in the manner of §4.6).
  *
- * Measure, then say one thing, and write nothing: two dated places
- * after each other with no journey between them, far enough apart that
- * the drive is a morning or more — that is a day on which the planner
+ * Measure, then say one thing, and write nothing: two places after
+ * each other with no journey between them, far enough apart that the
+ * drive is a morning or more — that is a day on which the planner
  * could find places on the way, and nobody has asked it to.
+ *
+ * Dates are not asked for. A dated trip gets the journey on the day it
+ * belongs to; an undated one gets the two clock times and no day, and
+ * saving the journey is what dates the trip (see `transits.ts`).
  *
  * The suggestion is the frame the journey screen opens with: leaving at
  * ten on the last day of the one place, arriving when the next one says
@@ -46,9 +50,10 @@ export interface TransitSuggestion {
   afterLegIndex: number;
   fromTitle: string;
   toTitle: string;
-  departDate: string;
+  /** The day, or null on a trip that has no dates yet. */
+  departDate: string | null;
   departAt: string;
-  arriveDate: string;
+  arriveDate: string | null;
   arriveAt: string;
   mode: TransportMode;
   /** The drive alone, as the planner estimates it without a router. */
@@ -79,7 +84,7 @@ export function suggestTransit(
   // The way there: the day the first place begins, arriving when it
   // expects the group.
   const first = ordered[0];
-  if (home && first.kind !== "transit" && first.startDate) {
+  if (home && first.kind !== "transit") {
     const found = journey(
       { title: homeLabel, anchor: home, mode: first.mode }, first,
       -1, first.startDate, first.arriveMinutes, "Anreise",
@@ -91,21 +96,21 @@ export function suggestTransit(
     const from = ordered[i];
     const to = ordered[i + 1];
     if (from.kind === "transit" || to.kind === "transit") continue;
-    if (!from.startDate || !to.startDate || from.days.length === 0) continue;
+    if (from.days.length === 0) continue;
     const found = journey(
       { title: legTitle(from), anchor: from.anchor, mode: from.mode }, to,
-      from.position, addDays(from.startDate, from.days.length - 1), to.arriveMinutes, "Weiterreise",
+      from.position, lastDay(from), to.arriveMinutes, "Weiterreise",
     );
     if (found) return found;
   }
 
   // The way home: the last day of the last place.
   const last = ordered[ordered.length - 1];
-  if (home && last.kind !== "transit" && last.startDate && last.days.length > 0) {
+  if (home && last.kind !== "transit" && last.days.length > 0) {
     return journey(
       { title: legTitle(last), anchor: last.anchor, mode: last.mode },
       { title: homeLabel, anchor: home, mode: last.mode, arriveMinutes: null, position: last.position + 1 },
-      last.position, addDays(last.startDate, last.days.length - 1), null, "Heimreise",
+      last.position, lastDay(last), null, "Heimreise",
     );
   }
   return null;
@@ -120,11 +125,16 @@ interface JourneyEnd {
   position?: number;
 }
 
+/** The last day of a place, or null while the trip has no dates. */
+function lastDay(leg: SuggestableLeg): string | null {
+  return leg.startDate ? addDays(leg.startDate, Math.max(1, leg.days.length) - 1) : null;
+}
+
 function journey(
   from: JourneyEnd,
   to: JourneyEnd,
   afterLegIndex: number,
-  date: string,
+  date: string | null,
   expectedArrival: number | null,
   word: "Anreise" | "Weiterreise" | "Heimreise",
 ): TransitSuggestion | null {
