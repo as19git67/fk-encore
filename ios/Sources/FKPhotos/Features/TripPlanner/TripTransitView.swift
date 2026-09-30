@@ -97,8 +97,9 @@ struct TripTransitView: View {
         if let suggested,
            let departMinutes = TripTransitPlanning.minutes(fromClock: suggested.departAt),
            let arriveMinutes = TripTransitPlanning.minutes(fromClock: suggested.arriveAt) {
-            depart = TripTransitPlanning.moment(suggested.departDate, minutes: departMinutes) ?? depart
-            arrive = TripTransitPlanning.moment(suggested.arriveDate, minutes: arriveMinutes) ?? arrive
+            let today = TripCalendar.isoDay(Date())
+            depart = TripTransitPlanning.moment(suggested.departDate ?? today, minutes: departMinutes) ?? depart
+            arrive = TripTransitPlanning.moment(suggested.arriveDate ?? today, minutes: arriveMinutes) ?? arrive
             mode = TripTransportMode(raw: suggested.mode)
             return
         }
@@ -245,9 +246,12 @@ struct TripTransitSuggestion: Codable, Sendable, Equatable {
     let afterLegIndex: Int
     let fromTitle: String
     let toTitle: String
-    let departDate: String
+    /// The day, or nil on a trip that has no dates yet: then the form
+    /// opens on today with the suggested clock times, and saving the
+    /// journey dates the trip.
+    let departDate: String?
     let departAt: String
-    let arriveDate: String
+    let arriveDate: String?
     let arriveAt: String
     let mode: String
     let driveMinutes: Int
