@@ -64,7 +64,7 @@ services:
     # runs as 568:568, but a host that wants its own group to reach the
     # data as well sets DEPLOY_DATA_GID to that group — the files stay
     # writable for uid 568 either way, because it owns them.
-    command: ["sh", "-c", "chown -R ${DEPLOY_DATA_UID:-568}:${DEPLOY_DATA_GID:-568} /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/taxonomy-out /mnt/recap-music"]
+    command: ["sh", "-c", "chown -R ${DEPLOY_DATA_UID:-568}:${DEPLOY_DATA_GID:-568} /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/routing /mnt/taxonomy-out /mnt/recap-music"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
@@ -75,6 +75,7 @@ services:
       - finance_export:/mnt/finance-export
       - backup:/mnt/backup
       - geo_data:/mnt/geo
+      - routing_data:/mnt/routing
       - taxonomy_out:/mnt/taxonomy-out
       - recap-music:/mnt/recap-music
 
@@ -245,6 +246,10 @@ services:
       # bridge network would otherwise reach the whole OSM database.
       GEO_SERVICE_URL: ${GEO_SERVICE_URL:-http://geo:8080}
       GEO_SHARED_SECRET: "${GEO_SHARED_SECRET:?must be a non-empty secret — the geo service has no other authentication and refuses to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
+      # Routing service (Valhalla) for real travel times in the trip
+      # planner. Optional: without it, or while its tiles are building,
+      # the planner estimates as before and says so.
+      ROUTING_SERVICE_URL: ${ROUTING_SERVICE_URL:-http://routing:8002}
       # Label module — base URL of the CUPS server that exposes the label
       # printer (e.g. a Raspberry Pi with a DYMO LabelWriter 450). Set this
       # in your .env; if unset the backend falls back to localhost:631.
@@ -590,6 +595,44 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+
+  # ── Routing (Valhalla) ──────────────────────────────────────────────────
+  # Real travel times for the trip planner (§12), built from the same
+  # Geofabrik extracts the geo service downloads: geo_data/pbf is mounted
+  # read-only, the tiles live in routing_data. One tile set for every
+  # imported region; a new region needs a restart of this container to be
+  # routable (the entrypoint rebuilds when a PBF is newer than the tiles),
+  # and the app reports tiles older than the newest region rather than
+  # pretend. Publishes no host port; the app reaches it on the bridge
+  # network. Memory: a few GB while building Germany-sized tiles.
+  routing:
+    image: ${DEPLOY_IMAGE_BASE:-ghcr.io/as19git67/fk-encore}/routing:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-routing${DEPLOY_NAME_SUFFIX:-}
+    restart: unless-stopped
+    user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
+    depends_on:
+      chown-init:
+        condition: service_completed_successfully
+    environment:
+      ROUTING_PORT: "8002"
+    volumes:
+      - routing_data:/data
+      - type: volume
+        source: geo_data
+        target: /pbf
+        read_only: true
+        volume:
+          subpath: pbf
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8002/status >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      # Tile building for a large region takes long; do not flag the
+      # container unhealthy while it is still doing that.
+      start_period: 6h
 
   # ── Taxonomy Tools (offline diagnosis + cloud audit/teacher) ────────────
   # Python + Node sidecar that runs the offline taxonomy scripts on demand

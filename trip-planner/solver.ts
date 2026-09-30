@@ -188,6 +188,12 @@ export interface SolveOptions {
    * preference rather than a ban.
    */
   diversityDecay?: number;
+  /**
+   * Where a leg's time comes from. The estimate (`travelLeg`) unless a
+   * table from the router is handed in (`travel-table.ts`, §24) — the
+   * solver itself stays pure either way: it reads, it never asks.
+   */
+  travel?: (from: Coordinate, to: Coordinate, mode: TransportMode) => TravelLeg;
 }
 
 export interface SolvedDay {
@@ -201,6 +207,7 @@ const DEFAULT_DIVERSITY_DECAY = 0.6;
 export function solveDay(opts: SolveOptions): SolvedDay {
   const decay = opts.diversityDecay ?? DEFAULT_DIVERSITY_DECAY;
   const mode = opts.mode ?? "foot";
+  const travel = opts.travel ?? travelLeg;
   const remaining = new Map(opts.candidates.map((c) => [c.osmRef, c]));
   // Spots this day walks past (§4.7). Kept apart from `remaining`
   // rather than removed from it: they are passed, not turned down, and
@@ -232,6 +239,7 @@ export function solveDay(opts: SolveOptions): SolvedDay {
       mode,
       diversityDecay: decay,
       returnTo: returnToAnchor ? opts.end ?? opts.anchor : null,
+      travel,
     });
 
     for (const stop of filled.stops) remaining.delete(stop.osmRef);
@@ -275,7 +283,10 @@ interface FillArgs {
   diversityDecay: number;
   /** When set, the walk back here is charged to this block's budget. */
   returnTo: Coordinate | null;
+  travel: TravelFn;
 }
+
+type TravelFn = (from: Coordinate, to: Coordinate, mode: TransportMode) => TravelLeg;
 
 function fillBlock(args: FillArgs): PlannedBlock {
   const chosen: Candidate[] = [];
@@ -294,14 +305,14 @@ function fillBlock(args: FillArgs): PlannedBlock {
       // (§4.7).
       if (isPassedByAny(chosen, candidate)) continue;
       const trial = [...chosen, candidate];
-      const route = bestRoute(args.start, trial, args.returnTo, args.mode);
+      const route = bestRoute(args.start, trial, args.returnTo, args.mode, args.travel);
       if (route === null) continue;
       if (route.longestLegMinutes > args.maxWalkMinutes) continue;
       if (route.totalMinutes > args.shape.budgetMinutes) continue;
 
       const currentCost = chosen.length === 0
         ? 0
-        : (bestRoute(args.start, chosen, args.returnTo, args.mode)?.totalMinutes ?? 0);
+        : (bestRoute(args.start, chosen, args.returnTo, args.mode, args.travel)?.totalMinutes ?? 0);
       const cost = route.totalMinutes - currentCost;
       const value = candidate.score * args.diversityDecay ** countCategory(chosen, candidate.category);
       // Room in the day is not a reason to go somewhere nobody wants to
@@ -323,12 +334,12 @@ function fillBlock(args: FillArgs): PlannedBlock {
     chosen.push(best.candidate);
   }
 
-  const route = bestRoute(args.start, chosen, args.returnTo, args.mode);
+  const route = bestRoute(args.start, chosen, args.returnTo, args.mode, args.travel);
   const stops: PlannedStop[] = [];
   if (route) {
     let from = args.start;
     for (const candidate of route.order) {
-      const leg = travelLeg(from, candidate, args.mode);
+      const leg = args.travel(from, candidate, args.mode);
       stops.push({
         osmRef: candidate.osmRef,
         name: candidate.name,
@@ -377,13 +388,14 @@ function bestRoute(
   stops: readonly Candidate[],
   returnTo: Coordinate | null,
   mode: TransportMode,
+  travel: TravelFn = travelLeg,
 ): Route | null {
   if (stops.length === 0) return { order: [], totalMinutes: 0, longestLegMinutes: 0 };
-  if (stops.length > EXACT_ORDER_LIMIT) return measureRoute(start, stops, returnTo, mode);
+  if (stops.length > EXACT_ORDER_LIMIT) return measureRoute(start, stops, returnTo, mode, travel);
 
   let best: Route | null = null;
   for (const order of permutations([...stops])) {
-    const route = measureRoute(start, order, returnTo, mode);
+    const route = measureRoute(start, order, returnTo, mode, travel);
     if (
       best === null ||
       route.totalMinutes < best.totalMinutes ||
@@ -402,12 +414,13 @@ function measureRoute(
   order: readonly Candidate[],
   returnTo: Coordinate | null,
   mode: TransportMode,
+  travel: TravelFn = travelLeg,
 ): Route {
   let total = 0;
   let longest = 0;
   let from: Coordinate = start;
   for (const stop of order) {
-    const leg = travelLeg(from, stop, mode);
+    const leg = travel(from, stop, mode);
     total += leg.minutes + stop.dwellMinutes;
     longest = Math.max(longest, leg.minutes);
     // A route is left at its far end, and the way on is measured from
@@ -415,7 +428,7 @@ function measureRoute(
     from = leaveFrom(stop);
   }
   if (returnTo) {
-    const back = travelLeg(from, returnTo, mode);
+    const back = travel(from, returnTo, mode);
     total += back.minutes;
     longest = Math.max(longest, back.minutes);
   }
