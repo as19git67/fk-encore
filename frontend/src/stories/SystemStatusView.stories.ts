@@ -30,7 +30,7 @@ export const RoutingKachelnVeraltet: Story = {
     msw: {
       handlers: [
         http.get('/api/trip-planner/routing/status', () => HttpResponse.json({
-          reachable: true, version: '3.5.1', hasTiles: true,
+          reachable: true, reason: null, version: '3.5.1', hasTiles: true,
           tilesBuiltAt: '2026-09-10T04:00:00.000Z', newestRegionAt: '2026-09-18T12:00:00.000Z',
           tilesBehindRegion: true,
         })),
@@ -46,7 +46,7 @@ export const RoutingNichtErreichbar: Story = {
     msw: {
       handlers: [
         http.get('/api/trip-planner/routing/status', () => HttpResponse.json({
-          reachable: false, version: null, hasTiles: false,
+          reachable: false, reason: 'fetch failed: getaddrinfo ENOTFOUND routing', version: null, hasTiles: false,
           tilesBuiltAt: null, newestRegionAt: '2026-09-18T12:00:00.000Z',
           tilesBehindRegion: false,
         })),

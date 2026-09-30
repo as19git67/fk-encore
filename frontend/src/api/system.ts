@@ -17,6 +17,8 @@ export async function getBuildInfo(): Promise<{ build: string }> {
 /** The router (Valhalla) as the trip planner sees it (§24). */
 export interface RoutingStatus {
   reachable: boolean
+  /** Why not, when not reachable: the error as the app saw it. */
+  reason: string | null
   version: string | null
   hasTiles: boolean
   /** ISO, when Valhalla says when its tiles were built. */

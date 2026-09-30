@@ -22,6 +22,13 @@ const TIMEOUT_MS = parseInt(process.env.ROUTING_TIMEOUT_MS ?? "8000", 10);
 
 export interface RouterStatus {
   reachable: boolean;
+  /**
+   * Why not, when not: the error as the app saw it. "ENOTFOUND routing"
+   * is a container that was never started, "ECONNREFUSED" one that is
+   * up but not serving yet (building tiles) — the admin can tell the
+   * two apart only if we say which (§15.3).
+   */
+  reason: string | null;
   /** Valhalla's version, when it answered. */
   version: string | null;
   /** Whether a tile set is loaded at all. */
@@ -84,7 +91,7 @@ export class HttpRouterClient implements RouterClient {
       const res = await this.fetcher(`${this.baseUrl}/status?verbose=true`, {
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
-      if (!res.ok) return unreachable();
+      if (!res.ok) return unreachable(`HTTP ${res.status}`);
       const body = (await res.json()) as {
         version?: string;
         has_tiles?: boolean;
@@ -92,6 +99,7 @@ export class HttpRouterClient implements RouterClient {
       };
       return {
         reachable: true,
+        reason: null,
         version: body.version ?? null,
         hasTiles: body.has_tiles ?? false,
         tilesBuiltAt: typeof body.tileset_last_modified === "number" && body.tileset_last_modified > 0
@@ -99,8 +107,9 @@ export class HttpRouterClient implements RouterClient {
           : null,
       };
     } catch (err) {
-      log.warn("routing status unavailable", { reason: err instanceof Error ? err.message : String(err) });
-      return unreachable();
+      const reason = describe(err);
+      log.warn("routing status unavailable", { reason });
+      return unreachable(reason);
     }
   }
 
@@ -170,8 +179,16 @@ function point(c: Coordinate): { lat: number; lon: number } {
   return { lat: c.lat, lon: c.lon };
 }
 
-function unreachable(): RouterStatus {
-  return { reachable: false, version: null, hasTiles: false, tilesBuiltAt: null };
+function unreachable(reason: string): RouterStatus {
+  return { reachable: false, reason, version: null, hasTiles: false, tilesBuiltAt: null };
+}
+
+/** The error with its cause, which is where fetch keeps the useful part. */
+function describe(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = (err as Error & { cause?: unknown }).cause;
+  const inner = cause instanceof Error ? cause.message : cause ? String(cause) : null;
+  return inner && inner !== err.message ? `${err.message}: ${inner}` : err.message;
 }
 
 let client: RouterClient | null = null;
