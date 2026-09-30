@@ -26,6 +26,12 @@ final class RecapsViewModel {
             // The same list feeds the "latest recap" and "On this day"
             // home-screen widgets (#764) — one fetch, two more answers.
             WidgetSnapshotStore.updateFromRecaps(response.recaps)
+            // Their cover photos follow once the text is out; the list
+            // itself does not wait for that download.
+            let covers = coverFilenames
+            Task.detached(priority: .utility) {
+                await WidgetSnapshotStore.updateRecapImages(coverFilenames: covers)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
