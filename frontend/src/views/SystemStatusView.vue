@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import AdminPage from '../components/admin/AdminPage.vue'
@@ -10,6 +10,8 @@ import { useRealtimeEvent } from '../composables/useRealtime'
 import { getScanQueueStatus } from '../api/photos'
 import { getDocumentQueueStatus } from '../api/documents'
 import { getFinanceTagQueueStatus } from '../api/finance'
+import { getRoutingStatus, type RoutingStatus } from '../api/system'
+import { formatDateShort } from '../utils/dateFormat'
 
 interface QueueCounts {
   pending: number
@@ -70,7 +72,33 @@ async function refresh() {
   )
 }
 
-onMounted(refresh)
+/**
+ * The router (§24 of the trip-planner concept): reachable, tiles, and
+ * whether a region came after the tiles were built. Read-only like the
+ * queues — the only action, restarting the routing container, is not
+ * the app's to take.
+ */
+const routing = ref<RoutingStatus | null>(null)
+const routingFailed = ref(false)
+
+async function refreshRouting() {
+  try {
+    routing.value = await getRoutingStatus()
+    routingFailed.value = false
+  } catch {
+    routingFailed.value = true
+  }
+}
+
+const routingLine = computed(() => {
+  const r = routing.value
+  if (!r) return routingFailed.value ? 'Status nicht abrufbar.' : 'Wird geladen …'
+  if (!r.reachable) return 'Nicht erreichbar — der Planer schätzt Reisezeiten.'
+  if (!r.hasTiles) return 'Erreichbar, aber ohne Kacheln — der Planer schätzt Reisezeiten.'
+  return `Bereit${r.version ? ` (Valhalla ${r.version})` : ''}.`
+})
+
+onMounted(() => { void refresh(); void refreshRouting() })
 useRealtimeEvent('scan-queue', 'state.changed', () => { void refresh() })
 
 function open(entry: QueueOverviewEntry) {
@@ -115,6 +143,36 @@ function open(entry: QueueOverviewEntry) {
         />
       </div>
     </div>
+
+    <section class="status-services">
+      <h2 class="status-services__title">Dienste</h2>
+      <div class="status-tiles">
+        <div class="status-tile" :class="{ 'status-tile--warn': routing?.tilesBehindRegion || routing?.reachable === false }">
+          <div class="status-tile__head">
+            <i class="pi pi-directions" />
+            <span class="status-tile__label">Routing</span>
+          </div>
+          <p class="status-tile__desc">
+            Echte Reisezeiten für den Reiseplaner, gebaut aus den importierten OSM-Regionen.
+          </p>
+          <p class="status-tile__line">{{ routingLine }}</p>
+          <dl v-if="routing?.reachable" class="status-tile__facts">
+            <div>
+              <dt>Kacheln gebaut</dt>
+              <dd>{{ routing.tilesBuiltAt ? formatDateShort(routing.tilesBuiltAt) : '–' }}</dd>
+            </div>
+            <div>
+              <dt>Neueste Region</dt>
+              <dd>{{ routing.newestRegionAt ? formatDateShort(routing.newestRegionAt) : '–' }}</dd>
+            </div>
+          </dl>
+          <p v-if="routing?.tilesBehindRegion" class="status-tile__warn">
+            Eine Region ist jünger als die Kacheln: Sie ist für Spots durchsuchbar, aber noch nicht
+            routbar. Den Routing-Container neu starten, dann baut er die Kacheln neu.
+          </p>
+        </div>
+      </div>
+    </section>
 
     <BuildInfo />
   </AdminPage>
@@ -184,5 +242,57 @@ function open(entry: QueueOverviewEntry) {
 
 .status-tile__count--bad dd {
   color: var(--p-tag-danger-color);
+}
+
+.status-services {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-self: stretch;
+}
+
+.status-services__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.status-tile--warn {
+  border-color: var(--p-tag-warn-color);
+}
+
+.status-tile__line {
+  margin: 0;
+  font-size: var(--text-base);
+}
+
+.status-tile__facts {
+  display: flex;
+  gap: 1.25rem;
+  margin: 0;
+}
+
+.status-tile__facts div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.status-tile__facts dt {
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  color: var(--p-text-muted-color);
+}
+
+.status-tile__facts dd {
+  margin: 0;
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-tile__warn {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--p-tag-warn-color);
 }
 </style>

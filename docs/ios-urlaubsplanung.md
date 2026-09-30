@@ -5685,9 +5685,14 @@ die Weiterreise misst ihre Fahrzeit am Router, die Korridorsuche ordnet die
 Schätzung), die App zeigt es an der Reisezeit. Erst nach der Messung aus
 Stufe 1: Wo die Schätzung um mehr als ein Viertel danebenliegt, lohnt es sich.
 
-**Stufe 3 — GTFS.** Fahrpläne je Region (Regionsverwaltung: Feed-URL, Import
-in Valhalla), `transit` wird multimodal mit Abfahrtszeit gefragt, das
-Offline-Bündel behält die Zeiten. Optional, wo ein Feed existiert.
+**Stufe 3 — GTFS (zurückgestellt, 2026-09-30).** Fahrpläne je Region
+(Regionsverwaltung: Feed-URL, Import in Valhalla), `transit` wird multimodal
+mit Abfahrtszeit gefragt, das Offline-Bündel behält die Zeiten. Vorerst nicht
+gebaut: ÖPNV bleibt bei der Schätzung, der Router wird dafür nicht gefragt.
+
+**Sichtbar ist der Router** auf der Systemstatus-Seite im Web-Admin
+(Kachel „Routing": erreichbar, Kacheln gebaut am, neueste Region, und der
+Hinweis, wenn eine Region jünger ist als die Kacheln).
 
 Offen bleibt: Speicher (Kacheln ≈ ein Drittel der PBF-Größe) und Arbeitsspeicher
 beim Bau (einige GB für Deutschland); beides misst Stufe 1 im Betrieb, und

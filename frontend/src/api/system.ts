@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './client'
+import { API_BASE_URL, apiFetch } from './client'
 
 export async function getBuildInfo(): Promise<{ build: string }> {
   const separator = API_BASE_URL.includes('?') ? '&' : '?'
@@ -12,4 +12,21 @@ export async function getBuildInfo(): Promise<{ build: string }> {
   )
   if (!res.ok) return { build: 'unbekannt' }
   return res.json()
+}
+
+/** The router (Valhalla) as the trip planner sees it (§24). */
+export interface RoutingStatus {
+  reachable: boolean
+  version: string | null
+  hasTiles: boolean
+  /** ISO, when Valhalla says when its tiles were built. */
+  tilesBuiltAt: string | null
+  /** ISO, the newest ready region's import time. */
+  newestRegionAt: string | null
+  /** A region came after the tiles: routable only after a restart of the routing container. */
+  tilesBehindRegion: boolean
+}
+
+export function getRoutingStatus() {
+  return apiFetch<RoutingStatus>('/trip-planner/routing/status')
 }
