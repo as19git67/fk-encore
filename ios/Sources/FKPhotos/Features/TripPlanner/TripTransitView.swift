@@ -55,7 +55,8 @@ struct TripTransitView: View {
                 DatePicker("Abfahrt", selection: $depart, displayedComponents: [.date, .hourAndMinute])
                 DatePicker("Ankunft", selection: $arrive, in: depart..., displayedComponents: [.date, .hourAndMinute])
             } footer: {
-                Text(TripTransitPlanning.frameSentence(from: from?.displayTitle, to: to?.displayTitle))
+                Text(TripTransitPlanning.frameSentence(from: from?.displayTitle, to: to?.displayTitle,
+                                                       undated: legs.allSatisfy { $0.startDate == nil }))
             }
             Section {
                 TripTransportModePicker(mode: $mode)
@@ -201,18 +202,23 @@ enum TripTransitPlanning {
 
     /// What the two moments do to the neighbours: a place at each end,
     /// or home at one of them (§22.7).
-    static func frameSentence(from: String?, to: String?) -> String {
+    static func frameSentence(from: String?, to: String?, undated: Bool = false) -> String {
+        let frame: String
         switch (from, to) {
         case let (from?, to?):
-            return "„\(from)“ endet mit der Abfahrt, „\(to)“ beginnt mit der Ankunft. "
+            frame = "„\(from)“ endet mit der Abfahrt, „\(to)“ beginnt mit der Ankunft. "
                 + "Alle Etappen danach verschieben sich mit."
         case let (nil, to?):
-            return "„\(to)“ beginnt mit der Ankunft. Alle Etappen danach verschieben sich mit."
+            frame = "„\(to)“ beginnt mit der Ankunft. Alle Etappen danach verschieben sich mit."
         case let (from?, nil):
-            return "„\(from)“ endet mit der Abfahrt."
+            frame = "„\(from)“ endet mit der Abfahrt."
         default:
-            return "Abfahrt und Ankunft der Reise."
+            frame = "Abfahrt und Ankunft der Reise."
         }
+        // A trip without dates gets them from here (§22.7) — worth
+        // saying, because the date pickers are about to date a city
+        // nobody dated.
+        return undated ? frame + " Die Reise bekommt damit ihr Datum." : frame
     }
 
     /// What will happen to the journey, said before it is saved.

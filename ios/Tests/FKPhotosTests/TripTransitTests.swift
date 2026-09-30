@@ -59,7 +59,7 @@ final class TripTransitTests: XCTestCase {
         XCTAssertEqual(plan.calendarDayCount, 3)
     }
 
-    func testAJourneyIsOfferedOnlyBetweenTwoDatedPlaces() {
+    func testAJourneyIsOfferedBetweenTwoPlaces() {
         let stays = [
             leg(0, start: "2026-09-05", days: [day(0)]),
             leg(1, start: "2026-09-06", days: [day(0)]),
@@ -115,19 +115,17 @@ final class TripTransitTests: XCTestCase {
         XCTAssertFalse(TripTransitSlots.wantsArrival(journeyFirst, hasHome: true))
     }
 
-    func testAnUndatedCityIsNamedInsteadOfHidingTheJourneys() {
-        let dated = [
-            leg(0, start: "2026-09-05", days: [day(0)]),
-            leg(1, start: "2026-09-06", days: [day(0)]),
+    func testJourneysAreOfferedOnAnUndatedTrip() {
+        let stays = [
+            leg(0, start: nil, days: [day(0)]),
+            leg(1, start: nil, days: [day(0)]),
         ]
-        XCTAssertNil(TripTransitSlots.undatedHint(dated, hasHome: true))
-        let stays = [leg(0, start: nil, days: [day(0)]), dated[1]]
-        // Without a home there is nothing to offer and nothing to explain.
-        XCTAssertNil(TripTransitSlots.undatedHint(stays, hasHome: false))
-        XCTAssertFalse(TripTransitSlots.wantsArrival(stays, hasHome: true))
-        let hint = TripTransitSlots.undatedHint(stays, hasHome: true)
-        XCTAssertEqual(hint?.contains("„Ort 0"), true)
-        XCTAssertEqual(hint?.contains("Termin steht fest"), true)
+        XCTAssertTrue(TripTransitSlots.wantsArrival(stays, hasHome: true))
+        XCTAssertEqual(TripTransitSlots.wantsReturn(stays, hasHome: true), 1)
+        XCTAssertEqual(TripTransitSlots.slotAfter(stays[0], in: stays), 0)
+        XCTAssertEqual(TripTransitPlanning.frameSentence(from: nil, to: "Ort 0", undated: true),
+                       "„Ort 0“ beginnt mit der Ankunft. Alle Etappen danach verschieben sich mit. "
+                       + "Die Reise bekommt damit ihr Datum.")
     }
 
     func testTheFrameSentenceNamesWhatMoves() {

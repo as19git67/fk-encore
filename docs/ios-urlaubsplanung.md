@@ -5596,6 +5596,17 @@ Wie das ins bestehende Modell passt:
   prüft der Router genau (Polygon und Datenprobe), die Mitte nur am
   Rechteck — eine Region, die den Korridor doch nicht erreicht, antwortet
   mit nichts, und das kostet eine Abfrage und sonst nichts.
+- **Eine Weiterreise datiert die Reise** (2026-09-30). Wer einer Reise ohne
+  Datum die Anreise gibt, hat sie damit datiert: Der Ankunftstag ist der
+  erste Tag der ersten Stadt. Von einer Stadt aus ist der Abfahrtstag ihr
+  letzter, und der erste Reisetag wird über die Städte davor zurückgezählt.
+  Niemand muss erst „Termin steht fest“ einschalten.
+- **Zuhause einmal, nicht je Reise** (2026-09-30). Der Wohnort steht in den
+  Einstellungen (`trip_user_homes`, `GET/PATCH /trip-planner/home`) und wird
+  in jede neue Reise übernommen; eine Reise kann ein eigenes Zuhause haben,
+  und das erste, das jemand einer Reise gibt, wird sein Wohnort, solange
+  keiner gesetzt ist. Eine ältere Reise ohne Zuhause bietet den Wohnort zum
+  Übernehmen an.
 
 Etappen: (1) Server — Modell, Anlegen, Planen, welche Etappe gerade gilt;
 (2) App — Anzeige, Anlegen und Bearbeiten, „heute" nach Uhrzeit; (3) der

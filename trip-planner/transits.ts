@@ -23,7 +23,7 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { daysBetween, isCalendarDate } from "./leg-dates";
+import { addDays, daysBetween, isCalendarDate, redateLegs } from "./leg-dates";
 import { requireOrganiser } from "./plan-access";
 import {
   insertLeg,
@@ -155,12 +155,12 @@ export const updateTripTransit = api(
  * anything is written — then write it all.
  */
 async function frameJourney(
-  plan: StoredPlan,
+  planAsLoaded: StoredPlan,
   userId: number,
   /** The leg being left, or null for the journey from home. */
-  previous: StoredPlan["legs"][number] | null,
+  previousAsLoaded: StoredPlan["legs"][number] | null,
   /** The leg being reached, or null for the journey home. */
-  next: StoredPlan["legs"][number] | null,
+  nextAsLoaded: StoredPlan["legs"][number] | null,
   req: {
     planId: number;
     departDate: string;
@@ -172,6 +172,21 @@ async function frameJourney(
   },
   existing: StoredPlan["legs"][number] | null,
 ): Promise<PlanResponse> {
+  let plan = planAsLoaded;
+  let previous = previousAsLoaded;
+  let next = nextAsLoaded;
+  // A trip without dates gets them from the journey: the day it
+  // arrives is the first place's first day, the day it sets off the
+  // last place's last day (§22.7). Nobody should have to date a city
+  // by hand before saying when they leave home.
+  if (plan.legs.every((l) => !l.startDate)) {
+    requireDate(req.departDate, "departDate");
+    requireDate(req.arriveDate, "arriveDate");
+    const dated = await dateTripFromJourney(plan, userId, previous, next, req);
+    plan = dated.plan;
+    previous = dated.previous;
+    next = dated.next;
+  }
   if ((previous && !previous.startDate) || (next && !next.startDate)) {
     throw APIError.failedPrecondition(
       "eine Weiterreise hat ein Datum — erst der Reise Daten geben, dann die Weiterreise anlegen",
@@ -316,6 +331,47 @@ async function frameJourney(
     pendingRegions: plannedTransit.pending
       ? [{ ...plannedTransit.pending, legIndex: position, legTitle: title }]
       : [],
+  };
+}
+
+/**
+ * Give an undated trip its dates from the journey, and read it back.
+ *
+ * From home, the arrival day is the first place's first day. From a
+ * place, the departure day is that place's last day, and the trip's
+ * first day is counted back from there over the places before it —
+ * an undated trip has no journeys yet, so every leg is a place.
+ */
+async function dateTripFromJourney(
+  plan: StoredPlan,
+  userId: number,
+  previous: StoredPlan["legs"][number] | null,
+  next: StoredPlan["legs"][number] | null,
+  req: { departDate: string; arriveDate: string },
+): Promise<{
+  plan: StoredPlan;
+  previous: StoredPlan["legs"][number] | null;
+  next: StoredPlan["legs"][number] | null;
+}> {
+  const legs = [...plan.legs].sort((a, b) => a.position - b.position);
+  let firstDay: string;
+  if (!previous) {
+    firstDay = req.arriveDate;
+  } else {
+    const before = legs.filter((l) => l.position < previous.position);
+    const daysBefore = before.reduce((sum, l) => sum + Math.max(1, l.days.length), 0);
+    firstDay = addDays(req.departDate, -(daysBefore + Math.max(1, previous.days.length) - 1));
+  }
+  await updateLegFrames(plan.id, redateLegs(
+    legs.map((l) => ({ legId: l.id, startDate: null, days: l.days.length })),
+    firstDay,
+  ));
+  const dated = await loadPlan(plan.id, userId);
+  if (!dated) throw APIError.internal("plan vanished while it was being dated");
+  return {
+    plan: dated,
+    previous: previous ? dated.legs.find((l) => l.id === previous.id) ?? null : null,
+    next: next ? dated.legs.find((l) => l.id === next.id) ?? null : null,
   };
 }
 

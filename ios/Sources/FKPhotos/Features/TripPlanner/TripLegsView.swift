@@ -35,6 +35,8 @@ struct TripLegsView: View {
     @State private var suggestion: TripTransitSuggestion?
     /// Looking for where home is (§22.7).
     @State private var homeFinder = TripPlaceFinderModel()
+    /// Where they live, for a trip made before it was known.
+    @State private var userHome: TripHome?
     @State private var savingHome = false
 
     private struct TransitTarget: Identifiable {
@@ -76,6 +78,18 @@ struct TripLegsView: View {
                             .disabled(savingHome)
                     }
                 } else {
+                    // Where they live, said once in the settings: one
+                    // tap, not a search, for the trip that was made
+                    // before it was known.
+                    if let mine = userHome {
+                        Button {
+                            Task { await setHome(TripPlace(name: mine.displayLabel, subtitle: nil,
+                                                           latitude: mine.lat, longitude: mine.lon)) }
+                        } label: {
+                            Label("„\(mine.displayLabel)“ übernehmen", systemImage: "house")
+                        }
+                        .disabled(savingHome)
+                    }
                     TripPlaceFinderRows(model: homeFinder, picked: nil) { place in
                         homeFinder.clearResults()
                         Task { await setHome(place) }
@@ -85,7 +99,9 @@ struct TripLegsView: View {
                 Text("Zuhause")
             } footer: {
                 Text("Von hier geht es los, und hierher zurück. Mit einem Zuhause lassen sich "
-                     + "Anreise und Heimreise wie eine Weiterreise planen — mit Orten am Weg.")
+                     + "Anreise und Heimreise wie eine Weiterreise planen — mit Orten am Weg. "
+                     + "Wo du wohnst, sagst du einmal in den Einstellungen; jede neue Reise "
+                     + "beginnt damit.")
             }
 
             Section {
@@ -149,19 +165,9 @@ struct TripLegsView: View {
                     }
                 }
             } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    // Home is set and the journeys still do not show:
-                    // say why, instead of leaving a button to be
-                    // looked for. A journey hangs on the day it meets
-                    // its city, so the city has to have one.
-                    if let missing = TripTransitSlots.undatedHint(viewModel.plan?.legs ?? [],
-                                                                    hasHome: viewModel.plan?.home != nil) {
-                        Text(missing)
-                    }
-                    Text("Jede Stadt hat ihren eigenen Ausgangspunkt, ihr eigenes Verkehrsmittel "
-                         + "und ihre eigenen Kandidaten. Umverteilt wird immer nur innerhalb einer "
-                         + "Stadt — was in Tokio nicht mehr passt, rutscht nicht nach Osaka.")
-                }
+                Text("Jede Stadt hat ihren eigenen Ausgangspunkt, ihr eigenes Verkehrsmittel "
+                     + "und ihre eigenen Kandidaten. Umverteilt wird immer nur innerhalb einer "
+                     + "Stadt — was in Tokio nicht mehr passt, rutscht nicht nach Osaka.")
             }
 
             Section {
@@ -211,6 +217,7 @@ struct TripLegsView: View {
         .task {
             await viewModel.load()
             await loadSuggestion()
+            userHome = await TripUserHome.load()
         }
         // A journey added or a city changed may answer the suggestion.
         .onChange(of: viewModel.plan?.legs.count) { _, _ in
@@ -601,41 +608,29 @@ struct TripLegEditView: View {
     }
 }
 
-/// Where a journey can go (§22.7): after a place with dates, when the
-/// next leg is a dated place too and nothing lies between them.
+/// Where a journey can go (§22.7): after a place, when the next leg is
+/// a place too and nothing lies between them. Dates are not asked for:
+/// a journey brings its own, and an undated trip takes them from it.
 enum TripTransitSlots {
     /// The way there can be added when home is known and the trip does
     /// not already begin with a journey.
     static func wantsArrival(_ legs: [TripLeg], hasHome: Bool) -> Bool {
         guard hasHome, let first = legs.min(by: { $0.position < $1.position }) else { return false }
-        return !first.isTransit && first.startDate != nil
+        return !first.isTransit
     }
 
     /// The way home: the last place's position, when home is known and
     /// the trip does not already end with a journey.
     static func wantsReturn(_ legs: [TripLeg], hasHome: Bool) -> Int? {
         guard hasHome, let last = legs.max(by: { $0.position < $1.position }),
-              !last.isTransit, last.startDate != nil else { return nil }
+              !last.isTransit else { return nil }
         return last.position
     }
 
-    /// Why neither journey is offered although home is set: the city
-    /// at that end has no date. Nil when there is nothing to explain.
-    static func undatedHint(_ legs: [TripLeg], hasHome: Bool) -> String? {
-        guard hasHome else { return nil }
-        let places = legs.sorted { $0.position < $1.position }.filter { !$0.isTransit }
-        guard let first = places.first, let last = places.last else { return nil }
-        let undated = first.startDate == nil || last.startDate == nil
-        guard undated else { return nil }
-        let city = first.startDate == nil ? first.displayTitle : last.displayTitle
-        return "Anreise und Heimreise brauchen ein Datum: „\(city)“ hat noch keines. "
-            + "In der Stadt „Termin steht fest“ einschalten, dann erscheinen sie hier."
-    }
-
     static func slotAfter(_ leg: TripLeg, in legs: [TripLeg]) -> Int? {
-        guard !leg.isTransit, leg.startDate != nil,
+        guard !leg.isTransit,
               let next = legs.first(where: { $0.position == leg.position + 1 }),
-              !next.isTransit, next.startDate != nil
+              !next.isTransit
         else { return nil }
         return leg.position
     }

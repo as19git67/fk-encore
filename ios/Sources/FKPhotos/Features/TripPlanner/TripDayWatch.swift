@@ -196,12 +196,22 @@ struct TripRunningDay {
             return nil
         }
         let bundle: TripOfflineBundle
-        if let fetched = try? await fetch(planId: planId) {
-            bundle = fetched
-        } else if let snapshot = TripOfflineStore.shared.load(planId: planId) {
+        do {
+            bundle = try await fetch(planId: planId)
+        } catch {
+            // Offline, the snapshot stands in (§3.9). A real "no" from
+            // the server — deleted, no longer shared with us — is an
+            // answer: the day is over, and the snapshot goes, or it
+            // would keep the Lock Screen on a trip that no longer is.
+            guard TripOfflineReach.meansUnreachable(error),
+                  let snapshot = TripOfflineStore.shared.load(planId: planId)
+            else {
+                if !TripOfflineReach.meansUnreachable(error) {
+                    await TripPlanGone.forget(planId: planId)
+                }
+                return nil
+            }
             bundle = snapshot.bundle
-        } else {
-            return nil
         }
         guard let position = bundle.plan.position(on: now) else { return nil }
         return of(plan: bundle.plan,
@@ -691,5 +701,21 @@ public final class TripDayNotices {
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .notDetermined else { return }
         _ = try? await center.requestAuthorization(options: [.alert, .sound])
+    }
+}
+
+/// What a trip leaves on this phone when it is deleted or left: the
+/// Live Activity, the fences, the offline snapshot, the day screen's
+/// state. All of it goes at once, from the one place, so no screen has
+/// to remember the list.
+enum TripPlanGone {
+    @MainActor
+    static func forget(planId: Int) async {
+        await TripDayActivityManager.shared.end(forPlan: planId)
+        if TripVisitMonitor.shared.watchedPlanId == planId { TripVisitMonitor.shared.stop() }
+        TripOfflineStore.shared.forget(planId: planId)
+        TripPlannerViewModel.forget(planId: planId)
+        TripIdeasOfferMemory().forget(planId: planId)
+        if TripRunningPlan.shared.plan?.id == planId { await TripRunningPlan.shared.refresh() }
     }
 }
