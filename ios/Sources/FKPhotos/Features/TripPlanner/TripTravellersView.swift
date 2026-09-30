@@ -343,15 +343,7 @@ struct TripManualTravellerSheet: View {
                      + "die Person als erwachsen geplant.")
             }
             Section {
-                Picker("Unterwegs", selection: $getsAbout) {
-                    ForEach(TripGetsAbout.allCases) { mode in
-                        Label(mode.label, systemImage: mode.symbolName).tag(mode)
-                    }
-                }
-            } footer: {
-                Text("Mit Rollstuhl, Rollator oder Kinderwagen schlägt der Planer keine "
-                     + "Strecken mit Anstieg vor. Die beiden unterscheidet er nicht — "
-                     + "für einen Weg, der bergauf geht, ist es dieselbe Antwort.")
+                TripGetsAboutPicker(getsAbout: $getsAbout)
             }
             Section {
                 Toggle("Mehr Zeit einplanen", isOn: $shortWalks)
@@ -475,5 +467,58 @@ struct TripTraveller: Codable, Identifiable, Sendable {
             parts.append(startsOn == nil ? "\(ageAtStart)" : "\(ageAtStart) bei Reisebeginn")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// How a traveller gets about, as the same kind of row the trip's
+/// "Fortbewegung" is: what is chosen at rest, a page of choices behind
+/// it. Its own word, because it is a different question — not what the
+/// group travels by, but what this person walks with.
+struct TripGetsAboutPicker: View {
+    @Binding var getsAbout: TripGetsAbout
+
+    var body: some View {
+        NavigationLink {
+            TripGetsAboutChoiceView(getsAbout: $getsAbout)
+        } label: {
+            LabeledContent("Mobilität") {
+                Label(getsAbout.label, systemImage: getsAbout.symbolName)
+            }
+        }
+    }
+}
+
+struct TripGetsAboutChoiceView: View {
+    @Binding var getsAbout: TripGetsAbout
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(TripGetsAbout.allCases) { candidate in
+                    Button {
+                        getsAbout = candidate
+                    } label: {
+                        HStack {
+                            Label(candidate.label, systemImage: candidate.symbolName)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if candidate == getsAbout {
+                                Image(systemName: "checkmark")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.tint)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                    }
+                    .accessibilityAddTraits(candidate == getsAbout ? .isSelected : [])
+                }
+            } footer: {
+                Text("Mit Rollstuhl, Rollator oder Kinderwagen schlägt der Planer keine "
+                     + "Strecken mit Anstieg vor. Die beiden unterscheidet er nicht — "
+                     + "für einen Weg, der bergauf geht, ist es dieselbe Antwort.")
+            }
+        }
+        .navigationTitle("Mobilität")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
