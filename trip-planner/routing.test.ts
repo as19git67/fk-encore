@@ -39,7 +39,7 @@ describe("GET /trip-planner/routing/status", () => {
   it("is honest about a router that is away", async () => {
     router.reachable = false;
     expect(await routingStatus()).toMatchObject({
-      reachable: false, hasTiles: false, tilesBuiltAt: null, tilesBehindRegion: false,
+      reachable: false, reason: "ECONNREFUSED", hasTiles: false, tilesBuiltAt: null, tilesBehindRegion: false,
     });
   });
 

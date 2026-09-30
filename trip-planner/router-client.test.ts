@@ -65,14 +65,16 @@ describe("HttpRouterClient", () => {
       baseUrl: "http://r", fetcher: fetcher(() => { throw new TypeError("fetch failed"); }).fn,
     });
     expect(await away.matrix([A], [B], "car")).toBeNull();
-    expect(await away.status()).toEqual({ reachable: false, version: null, hasTiles: false, tilesBuiltAt: null });
+    expect(await away.status()).toEqual({
+      reachable: false, reason: "fetch failed", version: null, hasTiles: false, tilesBuiltAt: null,
+    });
   });
 
   it("reads the status with the tile set's age", async () => {
     const { fn, calls } = fetcher(() => ({ version: "3.5.1", has_tiles: true, tileset_last_modified: 1758067200 }));
     const client = new HttpRouterClient({ baseUrl: "http://r", fetcher: fn });
     expect(await client.status()).toEqual({
-      reachable: true, version: "3.5.1", hasTiles: true, tilesBuiltAt: "2025-09-17T00:00:00.000Z",
+      reachable: true, reason: null, version: "3.5.1", hasTiles: true, tilesBuiltAt: "2025-09-17T00:00:00.000Z",
     });
     expect(calls[0].url).toBe("http://r/status?verbose=true");
   });

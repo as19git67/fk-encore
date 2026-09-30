@@ -90,10 +90,28 @@ async function refreshRouting() {
   }
 }
 
+/**
+ * What the error usually means, for an admin who sees the tile and not
+ * the container: no such host is a container that was never started
+ * (a new service needs `docker compose up -d` once — Watchtower only
+ * updates what runs), a refused connection is one that is up but not
+ * serving yet, which on first start is the tile build.
+ */
+function explainUnreachable(reason: string | null): string {
+  if (!reason) return ''
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(reason)) {
+    return ` Der Routing-Container läuft nicht — ein neuer Dienst wird einmal mit „docker compose up -d“ gestartet (${reason}).`
+  }
+  if (/ECONNREFUSED|ECONNRESET/i.test(reason)) {
+    return ` Der Container läuft, antwortet aber noch nicht — beim ersten Start baut er die Kacheln, das dauert (${reason}).`
+  }
+  return ` (${reason})`
+}
+
 const routingLine = computed(() => {
   const r = routing.value
   if (!r) return routingFailed.value ? 'Status nicht abrufbar.' : 'Wird geladen …'
-  if (!r.reachable) return 'Nicht erreichbar — der Planer schätzt Reisezeiten.'
+  if (!r.reachable) return `Nicht erreichbar — der Planer schätzt Reisezeiten.${explainUnreachable(r.reason)}`
   if (!r.hasTiles) return 'Erreichbar, aber ohne Kacheln — der Planer schätzt Reisezeiten.'
   return `Bereit${r.version ? ` (Valhalla ${r.version})` : ''}.`
 })
