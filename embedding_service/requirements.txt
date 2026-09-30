@@ -20,8 +20,12 @@ torchvision==0.27.1+cpu
 # OpenCLIP
 open-clip-torch==2.26.1
 
-# DINOv2 via HuggingFace Transformers
-transformers==5.10.1
+# DINOv2 via HuggingFace Transformers.
+# Stay on 4.x: transformers 5 removed PreTrainedTokenizer.batch_encode_plus,
+# which open-clip-torch 2.26.1's HFTokenizer still calls. With 5.x every
+# /search/text request fails with "XLMRobertaTokenizer has no attribute
+# batch_encode_plus" (HTTP 500). Lift the pin together with open-clip-torch.
+transformers==4.57.6
 accelerate==1.15.0
 
 # Image processing
