@@ -14,6 +14,10 @@ struct TripSettingsView: View {
     @State private var homeName: String?
     @State private var homeResolved = false
     @State private var locationProvider = TripLocationProvider()
+    @State private var userHome: TripHome?
+    @State private var homeFinder = TripPlaceFinderModel()
+    @State private var savingUserHome = false
+    @State private var userHomeError: String?
 
     private var suppressedRegionCount: Int {
         _ = refreshTick
@@ -53,13 +57,43 @@ struct TripSettingsView: View {
             }
 
             Section {
+                // Said once, copied into every new trip (§22.7): the far
+                // end of the way there and the way home.
+                if let userHome {
+                    HStack {
+                        Label(userHome.displayLabel, systemImage: "house")
+                        Spacer()
+                        Button("Entfernen") { Task { await clearUserHome() } }
+                            .buttonStyle(.borderless)
+                            .disabled(savingUserHome)
+                    }
+                } else {
+                    TripPlaceFinderRows(model: homeFinder, picked: nil) { place in
+                        homeFinder.clearResults()
+                        Task { await saveUserHome(place) }
+                    }
+                }
+                if let userHomeError {
+                    Text(userHomeError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Wohnort")
+            } footer: {
+                Text("Von hier geht jede neue Reise los, und hierher zurück: Anreise und "
+                     + "Heimreise lassen sich damit wie eine Weiterreise planen. Eine Reise kann "
+                     + "ein eigenes Zuhause bekommen; das hier ändert keine, die es schon gibt.")
+            }
+
+            Section {
                 if !homeResolved {
                     HStack(spacing: 8) {
                         ProgressView()
                         Text("Wird ermittelt …").foregroundStyle(.secondary)
                     }
                 } else if let homeName {
-                    LabeledContent("Zuhause", value: homeName)
+                    LabeledContent("Erkannt", value: homeName)
                     LabeledContent("Umkreis",
                                    value: "\(Int(TripAutoEndPreferences.homeArrivalRadiusMeters / 1000)) km")
                 } else {
@@ -67,7 +101,7 @@ struct TripSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             } header: {
-                Text("Zuhause")
+                Text("Zuhause aus den Fotos")
             } footer: {
                 Text("Aus den Aufnahmeorten deiner Fotos abgeleitet, nicht eingegeben. Fotos aus "
                      + "diesem Umkreis kommen nicht in ein Trip-Album, und hier fragt die App, ob "
@@ -78,6 +112,30 @@ struct TripSettingsView: View {
         .navigationTitle("Trip & Reise")
         .navigationBarTitleDisplayMode(.inline)
         .task { await resolveHome() }
+        .task { userHome = await TripUserHome.load() }
+    }
+
+    private func saveUserHome(_ place: TripPlace) async {
+        savingUserHome = true
+        defer { savingUserHome = false }
+        do {
+            userHome = try await TripUserHome.save(place)
+            userHomeError = nil
+        } catch {
+            userHomeError = TripErrorText.describe(error)
+        }
+    }
+
+    private func clearUserHome() async {
+        savingUserHome = true
+        defer { savingUserHome = false }
+        do {
+            try await TripUserHome.clear()
+            userHome = nil
+            userHomeError = nil
+        } catch {
+            userHomeError = TripErrorText.describe(error)
+        }
     }
 
     private func resolveHome() async {

@@ -38,6 +38,35 @@ struct TripHome: Codable, Sendable, Equatable {
     var displayLabel: String { label ?? "Zuhause" }
 }
 
+/// Where the person lives, said once and copied into every new trip
+/// (§22.7). The trip's own home is `TripPlan.home`; this is what it
+/// starts as.
+enum TripUserHome {
+    private struct Response: Codable { let home: TripHome? }
+    private struct Body: Encodable {
+        var lat: Double? = nil
+        var lon: Double? = nil
+        var label: String? = nil
+        var clear: Bool? = nil
+    }
+
+    static func load() async -> TripHome? {
+        let response: Response? = try? await APIClient.shared.get("/trip-planner/home")
+        return response?.home
+    }
+
+    static func save(_ place: TripPlace) async throws -> TripHome? {
+        let response: Response = try await APIClient.shared.patch(
+            "/trip-planner/home",
+            body: Body(lat: place.latitude, lon: place.longitude, label: place.name))
+        return response.home
+    }
+
+    static func clear() async throws {
+        let _: Response = try await APIClient.shared.patch("/trip-planner/home", body: Body(clear: true))
+    }
+}
+
 /// The settings a trip was planned with.
 struct TripConstraints: Codable, Sendable {
     var pace: String?

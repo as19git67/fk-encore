@@ -16,7 +16,7 @@ import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
 import { removeTripLeg } from "./legs";
 import { addTripTransit, updateTripTransit } from "./transits";
-import { setTripHome } from "./home";
+import { getUserHome, setTripHome, setUserHomeEndpoint } from "./home";
 import { applyVotesToPlan, castVote } from "./plan-votes";
 
 const ANCHOR = { lat: 48.37, lon: 10.9 };
@@ -177,14 +177,48 @@ describe("POST /trip-planner/plans/:planId/transits", () => {
       .rejects.toMatchObject({ code: "failed_precondition" });
   });
 
-  it("needs a trip with dates", async () => {
+  it("dates an undated trip from the journey", async () => {
     const { plan } = await createTripPlan({
-      legs: [{ anchor: ANCHOR, days: 1 }, { anchor: NEXT, days: 1 }],
+      legs: [
+        { title: "Erster Ort", anchor: ANCHOR, days: 2, mode: "car" },
+        { title: "Zweiter Ort", anchor: NEXT, days: 3, mode: "car" },
+      ],
     });
-    await expect(addTripTransit({
+    expect(plan.legs.map((l) => l.startDate)).toEqual([null, null]);
+
+    // Between the two places: the first ends on the day of departure,
+    // so the trip's first day is counted back from it.
+    const { plan: after } = await addTripTransit({
       planId: plan.id, afterLegIndex: 0,
       departDate: "2026-09-06", departAt: "10:00", arriveDate: "2026-09-06", arriveAt: "16:00",
-    })).rejects.toMatchObject({ code: "failed_precondition" });
+    });
+    expect(after.legs.map((l) => [l.kind, l.startDate])).toEqual([
+      ["stay", "2026-09-05"],
+      ["transit", "2026-09-06"],
+      ["stay", "2026-09-06"],
+    ]);
+  });
+
+  it("dates an undated trip from the journey home", async () => {
+    const { plan } = await createTripPlan({
+      legs: [
+        { title: "Erster Ort", anchor: ANCHOR, days: 2, mode: "car" },
+        { title: "Zweiter Ort", anchor: NEXT, days: 3, mode: "car" },
+      ],
+    });
+    await setTripHome({ planId: plan.id, ...HOME, label: "Zuhause" });
+
+    // Leaving the last place on the 10th after three days there and
+    // two before: the trip began on the 6th.
+    const { plan: after } = await addTripTransit({
+      planId: plan.id, afterLegIndex: 1,
+      departDate: "2026-09-10", departAt: "10:00", arriveDate: "2026-09-10", arriveAt: "15:00",
+    });
+    expect(after.legs.map((l) => [l.kind, l.startDate])).toEqual([
+      ["stay", "2026-09-06"],
+      ["stay", "2026-09-08"],
+      ["transit", "2026-09-10"],
+    ]);
   });
 });
 
@@ -281,6 +315,32 @@ describe("the way there and the way home", () => {
     expect(without.home).toBeNull();
     await expect(setTripHome({ planId: plan.id, lat: 95, lon: 0 }))
       .rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
+  it("starts a new trip with the home its owner set once", async () => {
+    expect((await getUserHome()).home).toBeNull();
+    const { home } = await setUserHomeEndpoint({ ...HOME, label: "Daheim" });
+    expect(home).toEqual({ ...HOME, label: "Daheim" });
+
+    const { plan } = await createTripPlan({ legs: [{ anchor: ANCHOR, days: 1 }] });
+    expect(plan.home).toEqual({ ...HOME, label: "Daheim" });
+
+    // A trip may still have a home of its own, and forgetting the
+    // person's home moves no trip.
+    const { plan: own } = await setTripHome({ planId: plan.id, lat: 48.45, lon: 10.6, label: "Ferienhaus" });
+    expect(own.home).toEqual({ lat: 48.45, lon: 10.6, label: "Ferienhaus" });
+    expect((await setUserHomeEndpoint({ clear: true })).home).toBeNull();
+    const { plan: still } = await createTripPlan({ legs: [{ anchor: ANCHOR, days: 1 }] });
+    expect(still.home).toBeNull();
+  });
+
+  it("takes the first home given to a trip as the person's, until they say otherwise", async () => {
+    const { plan } = await createTripPlan({ legs: [{ anchor: ANCHOR, days: 1 }] });
+    await setTripHome({ planId: plan.id, ...HOME, label: "Zuhause" });
+    expect((await getUserHome()).home).toEqual({ ...HOME, label: "Zuhause" });
+    // Another trip's home does not replace it.
+    await setTripHome({ planId: plan.id, lat: 48.45, lon: 10.6, label: "Ferienhaus" });
+    expect((await getUserHome()).home).toEqual({ ...HOME, label: "Zuhause" });
   });
 
   it("puts the journey from home in front, framed by the first place's arrival", async () => {

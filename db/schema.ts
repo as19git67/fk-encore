@@ -2926,6 +2926,19 @@ export const tripPlans = pgTable(
   (table) => [index("trip_plans_owner_idx").on(table.owner_id)]
 );
 
+// Where a person lives, once (migration 0220, §22.7): the home a new
+// trip starts with, so nobody types their own town into every plan.
+// A trip may still be given another home of its own.
+export const tripUserHomes = pgTable("trip_user_homes", {
+  user_id: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  lat: doublePrecision("lat").notNull(),
+  lon: doublePrecision("lon").notNull(),
+  label: text("label"),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
 /**
  * The level between the trip and the day (§4.2): its own period, anchor,
  * way of getting around, region database — and therefore its own pool.
