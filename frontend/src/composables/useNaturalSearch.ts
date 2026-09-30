@@ -1,6 +1,22 @@
 import { computed, ref } from 'vue'
 import type { Ref } from 'vue'
 import { searchPhotosNatural, type ParsedQuery } from '../api/photos'
+import { ApiError } from '../api/client'
+
+/** Tell a slow/starting embedding service apart from a real server error. */
+export function searchErrorMessage(e: unknown): string {
+  const code = e instanceof ApiError ? e.code : undefined
+  if (code === 'deadline_exceeded') {
+    return 'Die Suche hat zu lange gedauert. Der Embedding-Service startet eventuell noch – bitte in ein bis zwei Minuten erneut versuchen.'
+  }
+  if (code === 'unavailable') {
+    return 'Der Embedding-Service ist nicht erreichbar oder noch nicht bereit. Bitte gleich erneut versuchen.'
+  }
+  if (code === 'internal') {
+    return 'Die Suche ist auf dem Server fehlgeschlagen. Details stehen im Log des Embedding-Service.'
+  }
+  return 'Suche fehlgeschlagen. Ist der Embedding-Service erreichbar?'
+}
 
 /**
  * Shared search state & logic for natural-language photo search.
@@ -34,8 +50,8 @@ export function useNaturalSearch(externalQuery?: Ref<string>) {
       const resp = await searchPhotosNatural(q)
       searchResultIds.value = resp.results.map(r => r.photoId)
       parsed.value = resp.parsed
-    } catch {
-      error.value = 'Suche fehlgeschlagen. Ist der Embedding-Service erreichbar?'
+    } catch (e) {
+      error.value = searchErrorMessage(e)
       searchResultIds.value = null
       parsed.value = null
     } finally {
