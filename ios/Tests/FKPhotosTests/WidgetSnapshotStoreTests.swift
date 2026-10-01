@@ -234,6 +234,35 @@ final class WidgetSnapshotStoreTests: XCTestCase {
         XCTAssertNil(WidgetSnapshotStore.loadRecentFeed(defaults: defaults)?.imageFile)
     }
 
+    func testSigningOutLeavesNothingForTheNextAccount() async throws {
+        let bytes = try jpeg()
+        WidgetSnapshotStore.updateFromRecaps(
+            [recap(id: 5, kind: "on_this_day", title: "Vor 5 Jahren", coverPhotoId: 50)], defaults: defaults
+        )
+        await WidgetSnapshotStore.updateRecapImages(
+            coverFilenames: [50: "cover.heic"], defaults: defaults, images: images
+        ) { _ in bytes }
+        WidgetSnapshotStore.updateFromFeed([feedItem(id: 10, ownerName: "Anna", albumName: "Urlaub")], defaults: defaults)
+        await WidgetSnapshotStore.updateFeedImage(
+            filename: "img10.heic", defaults: defaults, images: images
+        ) { _ in bytes }
+        let files = [
+            WidgetSnapshotStore.loadOnThisDay(defaults: defaults)?.imageFile,
+            WidgetSnapshotStore.loadLatestRecap(defaults: defaults)?.imageFile,
+            WidgetSnapshotStore.loadRecentFeed(defaults: defaults)?.imageFile,
+        ].compactMap { $0 }
+        XCTAssertEqual(files.count, 3)
+
+        WidgetSnapshotStore.clearAll(defaults: defaults, images: images)
+
+        XCTAssertNil(WidgetSnapshotStore.loadOnThisDay(defaults: defaults))
+        XCTAssertNil(WidgetSnapshotStore.loadLatestRecap(defaults: defaults))
+        XCTAssertNil(WidgetSnapshotStore.loadRecentFeed(defaults: defaults))
+        for file in files {
+            XCTAssertFalse(images.contains(file), "\(file) survived sign-out")
+        }
+    }
+
     func testASnapshotWrittenBeforeImagesExistedStillDecodes() throws {
         // What #764 stored: no `coverPhotoId`, no `imageFile`.
         let legacy = Data("""

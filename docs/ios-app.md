@@ -1067,7 +1067,10 @@ eine echte Bereicherung:
    nächsten Listenaufruf nicht erneut; ein neuer Rückblick im selben Slot
    erbt das alte Bild nicht. „An diesem Tag" und „letzter Rückblick" übernehmen
    dieselbe Auswahlregel wie der App Intent „Rückblick zeigen" (2.14):
-   ungesehen zuerst, sonst der neueste.
+   ungesehen zuerst, sonst der neueste. Abmelden löscht Snapshots und
+   Bilder (`WidgetSnapshotStore.clearAll`) aus demselben Grund wie den
+   Spotlight-Index: die Extension prüft keine Sitzung, sonst zeigte der
+   Home-Screen dem nächsten Konto Foto und Namen des vorigen.
 3. ✅ **Live Activity / Dynamic Island** (#768 §1) — für den laufenden Tag
    eines Reiseplans, nicht für den Backup-Fortschritt (dafür gibt es kein
    Bedürfnis: das Backup läuft unauffällig im Hintergrund, ein Reisetag

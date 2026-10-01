@@ -172,6 +172,23 @@ public enum WidgetSnapshotStore {
         return images.store(data, widget: widget, photoId: photoId)
     }
 
+    /// Forgets everything the widgets show — snapshots and photos — and
+    /// tells them to redraw. On sign-out: the extension never checks a
+    /// session, so without this the home screen keeps showing the last
+    /// account's photo and names, to whoever signs in next.
+    static func clearAll(
+        defaults: UserDefaults = SharedStorage.defaults,
+        images: WidgetImageStore = .shared
+    ) {
+        for key in [onThisDayKey, latestRecapKey, recentFeedKey] {
+            defaults.removeObject(forKey: key)
+        }
+        for widget in [WidgetKinds.onThisDay, WidgetKinds.latestRecap, WidgetKinds.recentFeed] {
+            images.remove(widget: widget)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
     // MARK: - Readers (widget extension and app alike)
 
     public static func loadOnThisDay(defaults: UserDefaults = SharedStorage.defaults) -> OnThisDaySnapshot? {
