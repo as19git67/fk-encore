@@ -649,6 +649,52 @@ Belastung gesamt 2.966,40 EUR`;
     expect(r.outcome).toBe("created");
   });
 
+  it("takes the model's word that weak-worded paper is something else, but not against a settlement heading", async () => {
+    const { depot } = await setup();
+    // A fund savings plan's annual letter: "Ausschüttung" and the ISIN, no heading a settlement prints.
+    const weak = `Beispiel Kapitalanlage GmbH
+Jahresinformation zu Ihrem Sparplan
+Beispiel World Fonds ISIN ${ISIN_A}
+Ausschüttung im Jahr 2025 insgesamt 12,00 EUR
+Datum 15.01.2026`;
+    vi.mocked(extractSettlementValues).mockResolvedValue({ is_settlement: false, kind: null });
+    const weakDoc = await insertDocument(weak);
+    const r = await enrichDocument(weakDoc);
+    expect(r.outcome).toBe("not_settlement");
+    expect(r.detail).toBe("llm_other");
+    expect((await inspectSettlementDocument({ documentId: weakDoc })).rejection).toBe("llm_other");
+
+    // "Dividendengutschrift" outweighs a model that says no.
+    vi.mocked(extractSettlementValues).mockResolvedValue({ is_settlement: false, kind: null });
+    const strong = await insertDocument(DIVIDEND_TEXT);
+    expect((await enrichDocument(strong)).outcome).toBe("created");
+    expect(await depotRows(depot)).toHaveLength(1);
+  });
+
+  it("leaves insurance paperwork out and pages through the rest, newest first", async () => {
+    const { depot } = await setup();
+    const policy = await insertDocument(`Beispiel Lebensversicherung AG
+Fondsgebundene Kapitallebensversicherung, Versicherungsnummer 12-345-678
+Überschussbeteiligung: Ausschüttung 123,45 EUR
+Fonds ISIN ${ISIN_A} Anteile 12,345
+Datum 15.01.2026`);
+    // Never asked about, never examined, and the inspection says why.
+    expect((await enrichDocument(policy)).detail).toBe("insurance");
+    expect((await inspectSettlementDocument({ documentId: policy })).rejection).toBe("insurance");
+    expect(vi.mocked(extractSettlementValues)).not.toHaveBeenCalled();
+
+    const older = await insertDocument(BUY_TEXT);
+    const newer = await insertDocument(DIVIDEND_TEXT);
+    const first = await enrichPendingDocuments([depot], 1);
+    expect(first.documents_examined).toBe(1);
+    expect(first.results[0]!.document_id).toBe(newer);
+    expect(first.next_before).toBe(newer);
+    const second = await enrichPendingDocuments([depot], 1, {}, { before: first.next_before });
+    expect(second.results[0]!.document_id).toBe(older);
+    expect(second.next_before).toBeNull();
+    expect(await depotRows(depot)).toHaveLength(2);
+  });
+
   it("books nothing when rules and model disagree and the figures do not settle it", async () => {
     const { depot } = await setup();
     // The rules read 2.966,40, the model 3.100 — and the net equation fails for both

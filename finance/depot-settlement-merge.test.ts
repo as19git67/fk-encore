@@ -3,6 +3,7 @@ import {
   EMPTY_SETTLEMENT,
   isinChecksumValid,
   mergeSettlement,
+  parseLlmPaperVerdict,
   parseLlmSettlement,
   settlementChecks,
   type SettlementValues,
@@ -69,6 +70,16 @@ describe("parseLlmSettlement", () => {
       currency: "EUR",
     });
     expect(parseLlmSettlement({ kind: "transfer", net: "x" }).kind).toBeNull();
+  });
+});
+
+describe("parseLlmPaperVerdict", () => {
+  it("reads the model's yes/no and says nothing for an answer without it", () => {
+    expect(parseLlmPaperVerdict({ is_settlement: true })).toBe(true);
+    expect(parseLlmPaperVerdict({ is_settlement: "false" })).toBe(false);
+    expect(parseLlmPaperVerdict({ is_settlement: "nein" })).toBe(false);
+    expect(parseLlmPaperVerdict({ kind: "buy" })).toBeNull();
+    expect(parseLlmPaperVerdict({ is_settlement: "maybe" })).toBeNull();
   });
 });
 

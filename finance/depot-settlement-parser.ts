@@ -42,6 +42,10 @@ export type SettlementField = (typeof SETTLEMENT_FIELDS)[number];
 
 export interface SettlementInspection extends Omit<SettlementExtraction, "kind"> {
   kind: SettlementKind | null;
+  /** The text is insurance paperwork (policy, surplus statement): never a settlement. */
+  insurance: boolean;
+  /** The text prints wording only a settlement or dividend statement prints. */
+  strong: boolean;
   /** The label each amount/date field was read after ("Kurswert", "Schlusstag", …). */
   labels: Partial<Record<SettlementField, string>>;
 }
@@ -87,7 +91,79 @@ const DIVIDEND_MARKERS = [
   "dividende",
 ];
 
-const SETTLEMENT_MARKERS = ["wertpapierabrechnung", "wertpapier-abrechnung", "abrechnung"];
+/**
+ * Wording only a broker's settlement or dividend statement prints. One of
+ * these makes the text a settlement whatever else it says; without one,
+ * the weaker words below ("Ausschüttung", "Abrechnung", "Dividende") count
+ * only when the text is not insurance paperwork.
+ */
+export const STRONG_SETTLEMENT_WORDS = [
+  "wertpapierabrechnung",
+  "wertpapier-abrechnung",
+  "wertpapierkauf",
+  "wertpapierverkauf",
+  "kaufabrechnung",
+  "verkaufsabrechnung",
+  "orderabrechnung",
+  "fondsabrechnung",
+  "ausführungsanzeige",
+  "dividendengutschrift",
+  "dividendenabrechnung",
+  "ertragsgutschrift",
+  "erträgnisgutschrift",
+  "ertragsabrechnung",
+] as const;
+
+const SETTLEMENT_MARKERS = [
+  "wertpapierabrechnung",
+  "wertpapier-abrechnung",
+  "wertpapierkauf",
+  "wertpapierverkauf",
+  "ausführungsanzeige",
+  "abrechnung",
+];
+
+/**
+ * Insurance paperwork — a life or pension policy's statement, its
+ * surplus participation, a policy letter. A unit-linked policy prints its
+ * funds' ISINs and words like "Ausschüttung", so without this gate it
+ * reads as a dividend statement. The depot never sees any of it.
+ */
+export const INSURANCE_WORDS = [
+  "lebensversicherung",
+  "rentenversicherung",
+  "versicherungsschein",
+  "versicherungsnehmer",
+  "versicherungsnummer",
+  "versicherungsvertrag",
+  "überschussbeteiligung",
+  "überschussanteil",
+  "policennummer",
+  "police-nr",
+  "beitragsfrei",
+  "ablaufleistung",
+  "rückkaufswert",
+] as const;
+
+/** Regex sources for SQL pre-filters (Postgres `~*`), same words as above. */
+export const STRONG_SETTLEMENT_PATTERN = STRONG_SETTLEMENT_WORDS.join("|");
+export const INSURANCE_PATTERN = INSURANCE_WORDS.join("|");
+/** Any text worth reading: a strong word, or one of the weaker settlement/dividend words. */
+export const SETTLEMENT_CANDIDATE_PATTERN =
+  `${STRONG_SETTLEMENT_PATTERN}|ausschüttung|dividende|abrechnung[^\n]{0,40}(kauf|verkauf)|(kauf|verkauf)[^\n]{0,40}abrechnung`;
+
+const STRONG_RE = new RegExp(STRONG_SETTLEMENT_PATTERN, "i");
+const INSURANCE_RE = new RegExp(INSURANCE_PATTERN, "i");
+
+/** True when the text prints wording only a settlement or dividend statement prints. */
+export function hasStrongSettlementWording(text: string): boolean {
+  return STRONG_RE.test(text);
+}
+
+/** True when the text is insurance paperwork and nothing in it says settlement. */
+export function looksLikeInsurancePaper(text: string): boolean {
+  return INSURANCE_RE.test(text) && !STRONG_RE.test(text);
+}
 
 /** "1.234,56" → 1234.56 ; "1234.56" → 1234.56 ; "12,5" → 12.5 */
 export function parseGermanNumber(raw: string): number | null {
@@ -169,10 +245,13 @@ function dateAfter(text: string, labels: string[], markers: string[]): string | 
 }
 
 function detectKind(lower: string): SettlementKind | null {
+  if (looksLikeInsurancePaper(lower)) return null;
   if (DIVIDEND_MARKERS.some((m) => lower.includes(m))) return "dividend";
   if (!SETTLEMENT_MARKERS.some((m) => lower.includes(m))) return null;
-  const sell = /\b(verkauf|veräußerung|verkaufsabrechnung)\b/.test(lower);
-  const buy = /\b(kauf|kaufabrechnung|zeichnung|sparplan)\b/.test(lower);
+  // Compound spellings count ("Wertpapierverkauf", "Fondskauf", "Ankauf"),
+  // but not "kaufen" in the boilerplate.
+  const sell = /\b(?:wertpapier|fonds)?(?:verkauf|veräußerung)(?:s?abrechnung)?\b/.test(lower);
+  const buy = /\b(?:wertpapier|fonds|an)?kauf(?:abrechnung)?\b|\b(?:zeichnung|sparplan)\b/.test(lower);
   if (sell && !buy) return "sell";
   if (buy && !sell) return "buy";
   if (sell && buy) {
@@ -365,6 +444,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
 
   return {
     kind,
+    insurance: looksLikeInsurancePaper(lower),
+    strong: hasStrongSettlementWording(lower),
     isin,
     wkn,
     name: detectName(text, isin, wkn),

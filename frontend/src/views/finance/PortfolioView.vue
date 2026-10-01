@@ -403,12 +403,27 @@ function onReviewChanged() {
   void loadTransactions()
 }
 const enrichNotice = ref<{ severity: 'success' | 'info' | 'warn'; text: string } | null>(null)
+/** Documents examined so far in the running read, shown on the button. */
+const enrichProgress = ref(0)
+
+const COUNTED = ['documents_examined', 'created', 'enriched', 'linked', 'conflicts', 'unverified', 'skipped_no_holding'] as const
+type EnrichTotals = Record<(typeof COUNTED)[number], number>
 
 async function enrichFromDocuments() {
   enriching.value = true
   enrichNotice.value = null
+  enrichProgress.value = 0
   try {
-    const r = await enrichDepotTransactionsFromDocuments({ accounts: accountIds.value })
+    // The server reads one page per call, newest first; keep going until it
+    // says there is nothing left, so years of statements are all read.
+    const r: EnrichTotals = Object.fromEntries(COUNTED.map((k) => [k, 0])) as EnrichTotals
+    let before: number | null = null
+    do {
+      const page = await enrichDepotTransactionsFromDocuments({ accounts: accountIds.value, before })
+      for (const k of COUNTED) r[k] += page[k] ?? 0
+      enrichProgress.value = r.documents_examined
+      before = page.next_before ?? null
+    } while (before !== null)
     const changed = r.created + r.enriched + r.linked
     const parts: string[] = []
     if (r.created > 0) parts.push(`${r.created} neu angelegt`)
@@ -431,6 +446,7 @@ async function enrichFromDocuments() {
     enrichNotice.value = { severity: 'warn', text: e?.message ?? 'Belege konnten nicht eingelesen werden' }
   } finally {
     enriching.value = false
+    enrichProgress.value = 0
   }
 }
 </script>
@@ -449,7 +465,7 @@ async function enrichFromDocuments() {
       <Button
         v-tooltip.bottom="'Wertpapier- und Dividendenabrechnungen aus den Dokumenten lesen und den Transaktionen zuordnen'"
         icon="pi pi-file-import"
-        label="Belege einlesen"
+        :label="enriching && enrichProgress > 0 ? `Belege einlesen … ${enrichProgress} geprüft` : 'Belege einlesen'"
         severity="secondary"
         text
         :loading="enriching"
