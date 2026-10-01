@@ -8,7 +8,8 @@ FROM ghcr.io/valhalla/valhalla:latest
 
 # The runtime image ships the binaries and nothing else. The build
 # helpers (valhalla_build_config, valhalla_build_extract) are Python
-# scripts, the timezone build needs spatialite, the healthcheck curl.
+# scripts, the timezone build needs spatialite, the healthcheck curl,
+# merging overlapping extracts osmium.
 # Without python3 the config step produced an empty file and every
 # build tool failed on "could not parse json".
 USER root
@@ -19,6 +20,7 @@ RUN apt-get update \
       curl \
       jq \
       spatialite-bin \
+      osmium-tool \
  && rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.sh /usr/local/bin/fk-routing
