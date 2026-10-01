@@ -49,6 +49,7 @@ import { routeAlong } from "./route-along.ts";
 import { DayTargetError, searchDayTargets, type DayTargetOptions } from "./day-targets.ts";
 import {
   dropRegion,
+  pruneOrphanedPbfs,
   getImportStatus,
   reconcileImportStatus,
   regionTables,
@@ -425,6 +426,17 @@ const server = app.listen(PORT, () => {
 // is set to "off" — useful in tests and during initial import work.
 if (process.env.GEO_REPLICATION !== "off") {
   startReplicationLoop();
+}
+
+// Clear extracts whose region is gone (pbf-cache.ts): at start, and every
+// six hours after. A failure is logged and tried again next time.
+const PBF_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+function prunePbfs(): void {
+  pruneOrphanedPbfs().catch((err) => console.error("[geo] pruning cached extracts failed", err));
+}
+if (process.env.GEO_PBF_PRUNE !== "off") {
+  setTimeout(prunePbfs, 60_000).unref();
+  setInterval(prunePbfs, PBF_PRUNE_INTERVAL_MS).unref();
 }
 
 function shutdown(signal: NodeJS.Signals): void {

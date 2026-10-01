@@ -24,7 +24,7 @@
  */
 
 import { mkdir } from "node:fs/promises";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, renameSync, rmSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { dirname } from "node:path";
@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { adminPool, connectionInfo, dropPool, poolFor } from "./db.ts";
 import { initReplication } from "./replication.ts";
 import { refreshFacadeAzimuth } from "./facade-azimuth.ts";
+import { listPbfs, orphanedPbfs, pbfsForDatabase, removePbfs } from "./pbf-cache.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -277,9 +278,42 @@ export async function dropRegion(postgresDb: string): Promise<boolean> {
     `SELECT 1 FROM pg_database WHERE datname = $1`,
     [postgresDb],
   );
+  // The cached extract goes with the region, database or not: a region
+  // deleted after a failed import still left its download behind, and
+  // the routing container builds tiles from every file in the cache.
+  const removed = removePbfs(PBF_DIR, pbfsForDatabase(listPbfs(PBF_DIR), postgresDb));
+  if (removed.length > 0) console.log(`[geo] removed cached extract(s) of ${postgresDb}: ${removed.join(", ")}`);
   if (res.rowCount === 0) return false;
   await admin.query(`DROP DATABASE ${quoteIdent(postgresDb)}`);
   return true;
+}
+
+/** Files younger than this may be a download whose import has not started. */
+const ORPHAN_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Delete cached extracts whose region database does not exist (see
+ * pbf-cache.ts). Run at start and every few hours: it clears what was
+ * left behind before deleting a region took its extract along, and
+ * whatever a crash leaves in between.
+ */
+export async function pruneOrphanedPbfs(now: number = Date.now()): Promise<string[]> {
+  const res = await adminPool().query<{ datname: string }>(
+    `SELECT datname FROM pg_database WHERE datname LIKE 'nom\\_%'`,
+  );
+  const importing = new Set(
+    [...tracker.values()].filter((s) => s.state === "running").map((s) => s.postgresDb),
+  );
+  const orphans = orphanedPbfs({
+    files: listPbfs(PBF_DIR),
+    liveDatabases: new Set(res.rows.map((r) => r.datname)),
+    importing,
+    now,
+    minAgeMs: ORPHAN_MIN_AGE_MS,
+  });
+  const removed = removePbfs(PBF_DIR, orphans);
+  if (removed.length > 0) console.log(`[geo] removed orphaned extract(s): ${removed.join(", ")}`);
+  return removed;
 }
 
 function validateRequest(req: ImportRequest): void {
@@ -305,15 +339,21 @@ async function downloadPbf(url: string, target: string): Promise<void> {
     return;
   }
   console.log(`[geo] downloading ${url} → ${target}`);
+  // Into a .part file first: an aborted download must not be left where
+  // a finished extract would be. The cache check above would take it for
+  // one, and the routing container builds tiles from every *.pbf here.
+  const partial = `${target}.part`;
+  rmSync(partial, { force: true });
   await execCommand("curl", [
     "--fail",
     "--location",
     "--silent",
     "--show-error",
     "--output",
-    target,
+    partial,
     url,
   ]);
+  renameSync(partial, target);
 }
 
 async function ensureDatabase(name: string): Promise<void> {
