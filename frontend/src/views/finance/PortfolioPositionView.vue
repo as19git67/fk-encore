@@ -60,7 +60,10 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    data.value = await getPortfolioPosition(positionKey.value, { accounts: accountIds.value })
+    data.value = await getPortfolioPosition(positionKey.value, {
+      accounts: accountIds.value,
+      closed: route.query.closedDepots === '1',
+    })
   } catch (e: any) {
     data.value = null
     error.value = e?.message ?? 'Position konnte nicht geladen werden'
@@ -70,7 +73,7 @@ async function load() {
 }
 
 onMounted(load)
-watch([positionKey, () => accountIds.value.join(',')], () => void load())
+watch([positionKey, () => accountIds.value.join(','), () => route.query.closedDepots], () => void load())
 
 const position = computed(() => data.value?.position ?? null)
 const currency = computed(() => position.value?.currency ?? data.value?.currency ?? 'EUR')

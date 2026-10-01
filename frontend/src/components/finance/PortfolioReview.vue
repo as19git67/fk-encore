@@ -30,6 +30,8 @@ import {
  */
 const props = defineProps<{
   accounts: number[]
+  /** Include closed depots when no `accounts` are selected. */
+  includeClosed: boolean
   currency: string
   /** Bump to reload, e.g. after documents were read in. */
   reloadKey: number
@@ -45,14 +47,14 @@ const applying = ref<Set<number>>(new Set())
 async function load() {
   error.value = null
   try {
-    review.value = await getPortfolioReview({ accounts: props.accounts })
+    review.value = await getPortfolioReview({ accounts: props.accounts, closed: props.includeClosed })
   } catch (e: any) {
     error.value = e?.message ?? 'Prüfliste konnte nicht geladen werden'
   }
 }
 
 watch(
-  () => [props.accounts.join(','), props.reloadKey],
+  () => [props.accounts.join(','), props.includeClosed, props.reloadKey],
   () => void load(),
   { immediate: true },
 )

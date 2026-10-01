@@ -572,6 +572,8 @@ export interface PortfolioAccount {
   id: number
   label: string
   currency_code: string
+  /** Closed depots are left out unless asked for. */
+  closed: boolean
 }
 
 export interface PortfolioPosition {
@@ -647,8 +649,10 @@ export interface PortfolioSummary {
 }
 
 export interface PortfolioResponse {
-  /** Every depot the caller may read, for the scope selector. */
+  /** Every depot with data the caller may read, closed ones flagged — for the scope selector. */
   accounts: PortfolioAccount[]
+  /** Closed depots left out of this view (no `closed` flag, no explicit selection). */
+  closed_hidden: number
   currency: string
   mixed_currency: boolean
   summary: PortfolioSummary
@@ -657,10 +661,11 @@ export interface PortfolioResponse {
 }
 
 export async function getPortfolio(
-  opts: { accounts?: number[] } = {},
+  opts: { accounts?: number[]; closed?: boolean } = {},
 ): Promise<PortfolioResponse> {
   const params = new URLSearchParams()
   if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
   const qs = params.toString()
   return apiFetch(`/finance/portfolio${qs ? '?' + qs : ''}`)
 }
@@ -750,10 +755,11 @@ export interface PortfolioReviewResponse {
 }
 
 export async function getPortfolioReview(
-  opts: { accounts?: number[] } = {},
+  opts: { accounts?: number[]; closed?: boolean } = {},
 ): Promise<PortfolioReviewResponse> {
   const params = new URLSearchParams()
   if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
   const qs = params.toString()
   return apiFetch(`/finance/portfolio/review${qs ? '?' + qs : ''}`)
 }
@@ -796,6 +802,8 @@ export type PortfolioTxSortField = 'executed_at' | 'net_amount' | 'name'
 
 export interface ListPortfolioTransactionsOptions {
   accounts?: number[]
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean
   position?: string
   kind?: string
   q?: string
@@ -819,6 +827,7 @@ export async function listPortfolioTransactions(
 ): Promise<PortfolioTransactionsResponse> {
   const params = new URLSearchParams()
   if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
   if (opts.position) params.set('position', opts.position)
   if (opts.kind) params.set('kind', opts.kind)
   if (opts.q) params.set('q', opts.q)
@@ -891,10 +900,11 @@ export interface PortfolioPositionResponse {
 
 export async function getPortfolioPosition(
   key: string,
-  opts: { accounts?: number[] } = {},
+  opts: { accounts?: number[]; closed?: boolean } = {},
 ): Promise<PortfolioPositionResponse> {
   const params = new URLSearchParams()
   if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
   const qs = params.toString()
   return apiFetch(`/finance/portfolio/positions/${encodeURIComponent(key)}${qs ? '?' + qs : ''}`)
 }

@@ -268,9 +268,11 @@ const PF_ISIN_B = 'DE0000000BBB2'
 
 export const MOCK_PORTFOLIO: PortfolioResponse = {
   accounts: [
-    { id: 11, label: 'Depot Beispielbank', currency_code: 'EUR' },
-    { id: 12, label: 'Depot Musterbroker', currency_code: 'EUR' },
+    { id: 11, label: 'Depot Beispielbank', currency_code: 'EUR', closed: false },
+    { id: 12, label: 'Depot Musterbroker', currency_code: 'EUR', closed: false },
+    { id: 13, label: 'Depot Altbank', currency_code: 'EUR', closed: true },
   ],
+  closed_hidden: 1,
   currency: 'EUR',
   mixed_currency: false,
   summary: {
@@ -400,6 +402,7 @@ export const MOCK_PORTFOLIO: PortfolioResponse = {
 
 export const MOCK_PORTFOLIO_EMPTY: PortfolioResponse = {
   accounts: [],
+  closed_hidden: 0,
   currency: 'EUR',
   mixed_currency: false,
   summary: {

@@ -66,6 +66,8 @@ interface DepotAccount {
   id: number;
   label: string;
   currency_code: string;
+  /** The account is closed (sold out / moved away); left out of the default scope. */
+  closed: boolean;
 }
 
 function hasAdmin(auth: { permissions: string[] }): boolean {
@@ -90,6 +92,7 @@ async function visibleDepots(
       id: financeAccount.id,
       label: financeAccount.label,
       currency_code: financeAccount.currency_code,
+      closed: sql<boolean>`${financeAccount.closed_at} IS NOT NULL`,
     })
     .from(financeAccount)
     .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id));
@@ -132,6 +135,20 @@ async function writableDepots(
     );
   const writable = new Set(rows.map((r) => r.account_id));
   return visible.filter((d) => writable.has(d.id));
+}
+
+/**
+ * The depots a portfolio view covers: the requested ones, or else every
+ * open depot — closed ones only with `includeClosed`. A closed depot asked
+ * for by id is covered; the user picked it on purpose.
+ */
+function scopeDepots(
+  all: DepotAccount[],
+  requested: number[] | null,
+  includeClosed: boolean,
+): DepotAccount[] {
+  if (requested && requested.length > 0) return all.filter((d) => requested.includes(d.id));
+  return includeClosed ? all : all.filter((d) => !d.closed);
 }
 
 /** The depots among `depots` with at least one holding snapshot or one transaction. */
@@ -291,12 +308,17 @@ export interface PortfolioSummary {
 }
 
 interface PortfolioParams {
-  /** Comma-separated depot account ids; omitted = every readable depot. */
+  /** Comma-separated depot account ids; omitted = every open readable depot. */
   accounts?: string;
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean;
 }
 
 interface PortfolioResponse {
+  /** Every readable depot with data, closed ones flagged — for the selector. */
   accounts: DepotAccount[];
+  /** Closed depots left out of this view because `closed` was not set. */
+  closed_hidden: number;
   currency: string;
   /** True when the depots in scope use more than one currency; sums are then nominal. */
   mixed_currency: boolean;
@@ -868,7 +890,7 @@ export const getPortfolio = api(
     path: "/finance/portfolio",
     auth: true,
   },
-  async ({ accounts }: PortfolioParams): Promise<PortfolioResponse> => {
+  async ({ accounts, closed }: PortfolioParams): Promise<PortfolioResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
@@ -878,10 +900,12 @@ export const getPortfolio = api(
     // a bank's empty sub-depots and accounts typed "depot" by mistake
     // would otherwise inflate "n Depots" and the selector.
     const allDepots = await withData(await visibleDepots(auth, null));
-    const depots = requested
-      ? allDepots.filter((d) => requested.includes(d.id))
-      : allDepots;
+    const depots = scopeDepots(allDepots, requested, closed === true);
     const ids = depots.map((d) => d.id);
+    const closedHidden =
+      requested && requested.length > 0
+        ? 0
+        : allDepots.filter((d) => d.closed && !depots.includes(d)).length;
 
     const [holdings, txs] = await Promise.all([
       latestHoldings(ids),
@@ -891,6 +915,7 @@ export const getPortfolio = api(
 
     return {
       accounts: allDepots,
+      closed_hidden: closedHidden,
       currency,
       mixed_currency: mixed,
       ...buildPortfolio(holdings, txs),
@@ -930,8 +955,10 @@ export interface PortfolioTransaction {
 type TxSortField = "executed_at" | "net_amount" | "name";
 
 interface PortfolioTransactionsParams {
-  /** Comma-separated depot account ids; omitted = every readable depot. */
+  /** Comma-separated depot account ids; omitted = every open readable depot. */
   accounts?: string;
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean;
   /** Position key (isin, wkn or name) to narrow to one security. */
   position?: string;
   /** buy | sell | in | out | dividend | split | corp_action */
@@ -972,7 +999,7 @@ export const listPortfolioTransactions = api(
     requirePermission(auth, "finance.view");
 
     const requested = parseAccountIds(p.accounts);
-    const depots = await visibleDepots(auth, requested);
+    const depots = scopeDepots(await visibleDepots(auth, null), requested, p.closed === true);
     const ids = depots.map((d) => d.id);
     const empty = { items: [], total: 0, sums: { net_amount: "0.00", fees: "0.00", taxes: "0.00" } };
     if (ids.length === 0) return empty;
@@ -1127,8 +1154,10 @@ export interface PositionYear {
 
 interface PositionParams {
   key: string;
-  /** Comma-separated depot account ids; omitted = every readable depot. */
+  /** Comma-separated depot account ids; omitted = every open readable depot. */
   accounts?: string;
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean;
 }
 
 interface PositionResponse {
@@ -1159,14 +1188,14 @@ export const getPortfolioPosition = api(
     path: "/finance/portfolio/positions/:key",
     auth: true,
   },
-  async ({ key, accounts }: PositionParams): Promise<PositionResponse> => {
+  async ({ key, accounts, closed }: PositionParams): Promise<PositionResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
     if (!key || key.trim() === "") {
       throw APIError.invalidArgument("key is required");
     }
 
-    const depots = await visibleDepots(auth, parseAccountIds(accounts));
+    const depots = scopeDepots(await visibleDepots(auth, null), parseAccountIds(accounts), closed === true);
     const ids = depots.map((d) => d.id);
     if (ids.length === 0) throw APIError.notFound(`position ${key} not found`);
 
@@ -1475,6 +1504,8 @@ export interface ReviewHoldingGap extends HoldingGap {
 
 interface ReviewParams {
   accounts?: string;
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean;
 }
 
 interface ReviewResponse {
@@ -1491,10 +1522,10 @@ export const getPortfolioReview = api(
     path: "/finance/portfolio/review",
     auth: true,
   },
-  async ({ accounts }: ReviewParams): Promise<ReviewResponse> => {
+  async ({ accounts, closed }: ReviewParams): Promise<ReviewResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
-    const depots = await visibleDepots(auth, parseAccountIds(accounts));
+    const depots = scopeDepots(await visibleDepots(auth, null), parseAccountIds(accounts), closed === true);
     const ids = depots.map((d) => d.id);
     if (ids.length === 0) {
       return { conflicts: [], unmatched_documents: [], holding_gaps: [], unverifiable_changes: 0 };
