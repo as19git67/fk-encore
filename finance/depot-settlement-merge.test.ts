@@ -1,0 +1,141 @@
+import { describe, it, expect } from "vitest";
+import {
+  EMPTY_SETTLEMENT,
+  isinChecksumValid,
+  mergeSettlement,
+  parseLlmSettlement,
+  settlementChecks,
+  type SettlementValues,
+} from "./depot-settlement-merge";
+
+// A checksum-valid ISIN for the checks (the synthetic DE000000AAA1 used
+// elsewhere is shape-only). DE0007164600 is a well-known public ISIN of a
+// listed company, not personal data.
+const VALID_ISIN = "DE0007164600";
+
+const buy = (over: Partial<SettlementValues> = {}): SettlementValues => ({
+  ...EMPTY_SETTLEMENT,
+  kind: "buy",
+  isin: VALID_ISIN,
+  executedAt: "2026-03-14",
+  quantity: 25,
+  price: 118.4,
+  gross: 2960,
+  fees: 6.4,
+  tax: null,
+  net: -2966.4,
+  currency: "EUR",
+  ...over,
+});
+
+describe("isinChecksumValid", () => {
+  it("accepts a valid ISIN and rejects a changed digit", () => {
+    expect(isinChecksumValid(VALID_ISIN)).toBe(true);
+    expect(isinChecksumValid("DE0007164601")).toBe(false);
+    expect(isinChecksumValid("XX")).toBe(false);
+  });
+});
+
+describe("parseLlmSettlement", () => {
+  it("normalises the model's answer and drops what is malformed", () => {
+    const v = parseLlmSettlement({
+      kind: "buy",
+      isin: " de0007164600 ",
+      wkn: "ABC",
+      name: "Alpha AG",
+      depot_number: "12-345-678",
+      executed_at: "14.03.2026",
+      quantity: "25",
+      price: 118.4,
+      gross: "2.960,00",
+      fees: "6.40",
+      tax: null,
+      net: 2966.4,
+      currency: "eur",
+    });
+    expect(v).toEqual({
+      kind: "buy",
+      isin: VALID_ISIN,
+      wkn: null,
+      name: "Alpha AG",
+      depotNumber: "12345678",
+      executedAt: "2026-03-14",
+      quantity: 25,
+      price: 118.4,
+      gross: 2960,
+      fees: 6.4,
+      tax: null,
+      net: -2966.4,
+      currency: "EUR",
+    });
+    expect(parseLlmSettlement({ kind: "transfer", net: "x" }).kind).toBeNull();
+  });
+});
+
+describe("settlementChecks", () => {
+  it("checks the net equation, quantity × price, the ISIN and the date", () => {
+    const ok = settlementChecks(buy(), new Date("2026-10-01"));
+    expect(ok.map((c) => [c.name, c.result])).toEqual([
+      ["net_equation", "ok"],
+      ["quantity_price", "ok"],
+      ["isin_checksum", "ok"],
+      ["date_plausible", "ok"],
+    ]);
+    const bad = settlementChecks(buy({ net: -3000, executedAt: "2031-01-01" }), new Date("2026-10-01"));
+    expect(bad.find((c) => c.name === "net_equation")!.result).toBe("failed");
+    expect(bad.find((c) => c.name === "date_plausible")!.result).toBe("failed");
+    // A sale subtracts fees and taxes.
+    const sell = settlementChecks(
+      { ...buy(), kind: "sell", gross: 1450, fees: 10, tax: 21.05, net: 1418.95, quantity: 10, price: 145 },
+      new Date("2026-10-01"),
+    );
+    expect(sell.find((c) => c.name === "net_equation")!.result).toBe("ok");
+  });
+});
+
+describe("mergeSettlement", () => {
+  const today = new Date("2026-10-01");
+
+  it("marks fields both read alike as 'both' and keeps the rules when there is no model", () => {
+    const both = mergeSettlement(buy(), buy(), today);
+    expect(both.verdict).toBe("ok");
+    expect(both.fields.find((f) => f.field === "net")!.source).toBe("both");
+
+    const rulesOnly = mergeSettlement(buy(), null, today);
+    expect(rulesOnly.values).toEqual(buy());
+    expect(rulesOnly.fields.find((f) => f.field === "net")!.source).toBe("rules");
+  });
+
+  it("fills what the rules missed from the model", () => {
+    const r = mergeSettlement(buy({ fees: null, net: null }), buy(), today);
+    expect(r.values.fees).toBe(6.4);
+    expect(r.values.net).toBe(-2966.4);
+    expect(r.fields.find((f) => f.field === "fees")!.source).toBe("llm");
+    expect(r.verdict).toBe("ok");
+  });
+
+  it("takes the reading whose figures add up when they disagree", () => {
+    // The rules read the commission line as the net (a renamed label).
+    const r = mergeSettlement(buy({ net: -4.9 }), buy(), today);
+    expect(r.values.net).toBe(-2966.4);
+    expect(r.fields.find((f) => f.field === "net")).toMatchObject({ source: "llm", disagree: true });
+    expect(r.verdict).toBe("ok");
+
+    // And the other way round: the model misplaced a digit.
+    const l = mergeSettlement(buy(), buy({ gross: 29600 }), today);
+    expect(l.values.gross).toBe(2960);
+    expect(l.fields.find((f) => f.field === "gross")!.source).toBe("rules");
+  });
+
+  it("is unverified when they disagree and neither adds up", () => {
+    const r = mergeSettlement(buy({ net: -3100 }), buy({ net: -3200 }), today);
+    expect(r.verdict).toBe("unverified");
+  });
+
+  it("reads a settlement the rules do not recognise at all", () => {
+    const r = mergeSettlement({ ...EMPTY_SETTLEMENT }, buy(), today);
+    expect(r.values.kind).toBe("buy");
+    expect(r.fields.every((f) => f.source === null || f.source === "llm")).toBe(true);
+    expect(r.verdict).toBe("ok");
+  });
+});

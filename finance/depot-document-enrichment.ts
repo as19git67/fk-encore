@@ -36,9 +36,9 @@ import {
 } from "../db/schema";
 import {
   isUsableSettlement,
-  parseSettlement,
   type SettlementExtraction,
 } from "./depot-settlement-parser";
+import { readSettlement, type LlmMode, type LlmStatus } from "./depot-settlement-reader";
 
 console.log("[boot] finance/depot-document-enrichment.ts: all imports resolved");
 
@@ -54,7 +54,9 @@ export type EnrichOutcome =
   | "already_linked"
   | "not_settlement"
   | "no_holding"
-  | "conflict";
+  | "conflict"
+  /** Rules and model disagree and the figures do not settle it: nothing is booked. */
+  | "unverified";
 
 export interface EnrichResult {
   document_id: number;
@@ -75,6 +77,8 @@ export interface EnrichResult {
   matched_by: DepotMatchedBy | null;
   /** Where the execution date came from: the statement itself or the document's date. */
   date_source: "statement" | "document_date" | null;
+  /** What happened with the language model for this read. */
+  llm_status: LlmStatus | null;
 }
 
 export interface EnrichOptions {
@@ -87,6 +91,11 @@ export interface EnrichOptions {
    * `conflict`; the user asked for it after looking at both numbers.
    */
   overwrite?: boolean;
+  /**
+   * Whether the language model may be asked (see depot-settlement-reader).
+   * Defaults to "cache-only" for a dry run and "allow" otherwise.
+   */
+  llm?: LlmMode;
 }
 
 export interface EnrichStats {
@@ -98,6 +107,8 @@ export interface EnrichStats {
   skipped_not_settlement: number;
   skipped_no_holding: number;
   conflicts: number;
+  /** Rules and model disagreed and the figures did not settle it. */
+  unverified: number;
   errors: string[];
   results: EnrichResult[];
 }
@@ -112,6 +123,7 @@ function emptyStats(): EnrichStats {
     skipped_not_settlement: 0,
     skipped_no_holding: 0,
     conflicts: 0,
+    unverified: 0,
     errors: [],
     results: [],
   };
@@ -368,6 +380,7 @@ export async function enrichDocument(
     depot_number: null,
     matched_by: null,
     date_source: null,
+    llm_status: null,
   };
 
   const [doc] = await db
@@ -383,7 +396,15 @@ export async function enrichDocument(
     .limit(1);
   if (!doc || doc.status !== "ready") return result;
 
-  const parsed = parseSettlement(doc.extracted_text);
+  const reading = await readSettlement(
+    documentId,
+    doc.extracted_text,
+    options.llm ?? (dryRun ? "cache-only" : "allow"),
+  );
+  result.llm_status = reading.llmStatus;
+  const v = reading.merge.values;
+  const parsed: SettlementExtraction | null =
+    v.kind && (v.isin || v.wkn) ? { ...v, kind: v.kind, markers: [] } : null;
   if (parsed) result.date_source = parsed.executedAt ? "statement" : null;
   if (parsed && !parsed.executedAt && doc.doc_date) {
     parsed.executedAt = doc.doc_date.slice(0, 10);
@@ -425,6 +446,17 @@ export async function enrichDocument(
   if (existingLink) {
     result.outcome = "already_linked";
     result.depot_transaction_id = existingLink.id;
+    return result;
+  }
+
+  // Rules and model read different figures and neither set adds up: book
+  // nothing, let the user look (review page, inspection view).
+  if (reading.merge.verdict === "unverified" && !options.overwrite) {
+    result.outcome = "unverified";
+    result.detail = reading.merge.fields
+      .filter((f) => f.disagree)
+      .map((f) => `${f.field}: rules ${f.rules ?? "–"} / llm ${f.llm ?? "–"}`)
+      .join("; ");
     return result;
   }
 
@@ -592,6 +624,7 @@ export async function enrichPendingDocuments(
         case "not_settlement": stats.skipped_not_settlement++; break;
         case "no_holding": stats.skipped_no_holding++; break;
         case "conflict": stats.conflicts++; break;
+        case "unverified": stats.unverified++; break;
       }
     } catch (err) {
       stats.errors.push(`document ${c.id}: ${(err as Error).message ?? String(err)}`);

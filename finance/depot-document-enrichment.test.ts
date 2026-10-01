@@ -2,7 +2,20 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
 import { eq, sql } from "drizzle-orm";
 
+// The language model is not reachable in tests; the cases that need it
+// hand it an answer.
+vi.mock("./llm-client", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("./llm-client")>();
+  return {
+    ...orig,
+    extractSettlementValues: vi.fn(async () => {
+      throw new orig.LlmServiceUnavailableError("not in tests");
+    }),
+  };
+});
+
 import db from "../db/database";
+import { extractSettlementValues, LlmServiceUnavailableError } from "./llm-client";
 import {
   documents,
   financeAccount,
@@ -82,6 +95,10 @@ beforeEach(async () => {
   await db.delete(documents);
   await db.delete(users);
   await ensureUser(1);
+  vi.mocked(extractSettlementValues).mockReset();
+  vi.mocked(extractSettlementValues).mockImplementation(async () => {
+    throw new LlmServiceUnavailableError("not in tests");
+  });
   setAuth("1", ["finance.view", "finance.admin"]);
 });
 
@@ -565,5 +582,87 @@ describe("finance/portfolio — document inspection", () => {
     await ensureUser(8);
     setAuth("8", ["finance.view"]);
     await expect(inspectSettlementDocument({ documentId: invoice })).rejects.toThrow(/not found/);
+  });
+});
+
+describe("finance/depot-document-enrichment — rules and the language model", () => {
+  // A layout the rules cannot read: no label they know, "Endbetrag" renamed.
+  const NEW_LAYOUT = `Beispielbank AG
+Ihre Order wurde ausgeführt
+Alpha Industries AG  ISIN ${ISIN_A}
+Ausgeführt am 14.03.2026 zu je 118,40 EUR, 25 Anteile
+Gegenwert 2.960,00 EUR, Entgelt 6,40 EUR
+Belastung gesamt 2.966,40 EUR`;
+
+  const llmAnswer = {
+    kind: "buy",
+    isin: ISIN_A,
+    wkn: null,
+    name: "Alpha Industries AG",
+    depot_number: null,
+    executed_at: "2026-03-14",
+    quantity: 25,
+    price: 118.4,
+    gross: 2960,
+    fees: 6.4,
+    tax: null,
+    net: 2966.4,
+    currency: "EUR",
+  };
+
+  it("books a settlement only the model could read, and asks it once", async () => {
+    const { depot } = await setup();
+    vi.mocked(extractSettlementValues).mockResolvedValue(llmAnswer);
+    const docId = await insertDocument(NEW_LAYOUT);
+
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("created");
+    expect(r.llm_status).toBe("used");
+    const [row] = await depotRows(depot);
+    expect(row!.net_amount).toBe("-2966.40");
+    expect(Number(row!.amount)).toBe(25);
+    expect(row!.fees).toBe("6.40");
+
+    // The answer is stored: inspection and review do not ask again.
+    const inspection = await inspectSettlementDocument({ documentId: docId });
+    expect(inspection.llm_status).toBe("cached");
+    expect(inspection.method).toBe("rules+llm");
+    expect(inspection.llm_fallback_used).toBe(true);
+    expect(inspection.sources.net).toMatchObject({ rules: null, llm: "-2966.40", source: "llm" });
+    expect(inspection.checks.find((c) => c.name === "net_equation")!.result).toBe("ok");
+    expect(vi.mocked(extractSettlementValues)).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks agreement as both and keeps working when the model is down", async () => {
+    await setup();
+    vi.mocked(extractSettlementValues).mockResolvedValue({ ...llmAnswer, name: "Alpha Industries AG" });
+    const agreed = await insertDocument(BUY_TEXT);
+    const i = await inspectSettlementDocument({ documentId: agreed });
+    expect(i.sources.net.source).toBe("both");
+    expect(i.sources.quantity.source).toBe("both");
+    expect(i.verdict).toBe("ok");
+
+    vi.mocked(extractSettlementValues).mockRejectedValue(new LlmServiceUnavailableError("down"));
+    const other = await insertDocument(BUY_TEXT.replace("2.966,40", "2.966,40 "));
+    const r = await enrichDocument(other);
+    expect(r.llm_status).toBe("unavailable");
+    expect(r.outcome).toBe("created");
+  });
+
+  it("books nothing when rules and model disagree and the figures do not settle it", async () => {
+    const { depot } = await setup();
+    // The rules read 2.966,40, the model 3.100 — and the net equation fails for both
+    // because the statement text lists a fee the model left out.
+    const text = BUY_TEXT.replace("Ausmachender Betrag 2.966,40 EUR", "Ausmachender Betrag 2.999,99 EUR");
+    vi.mocked(extractSettlementValues).mockResolvedValue({ ...llmAnswer, net: 3100 });
+    const docId = await insertDocument(text);
+
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("unverified");
+    expect(r.detail).toContain("net");
+    expect(await depotRows(depot)).toHaveLength(0);
+
+    const review = await getPortfolioReview({});
+    expect(review.unverified_documents.map((d) => d.document_id)).toEqual([docId]);
   });
 });

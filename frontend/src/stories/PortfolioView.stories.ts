@@ -38,12 +38,12 @@ const portfolioHandlers = [
   }),
   http.get('/api/finance/portfolio/review', () => HttpResponse.json(MOCK_PORTFOLIO_REVIEW)),
   http.post('/api/finance/portfolio/documents/:id/apply', () =>
-    HttpResponse.json({ document_id: 305, outcome: 'enriched', depot_transaction_id: 904, account_id: 12, detail: null, statement_net: '-2459.50', transaction_net: '-2457.00', isin: 'DE000000BBB2', wkn: null, depot_number: null }),
+    HttpResponse.json({ document_id: 305, outcome: 'enriched', depot_transaction_id: 904, account_id: 12, detail: null, statement_net: '-2459.50', transaction_net: '-2457.00', isin: 'DE000000BBB2', wkn: null, depot_number: null, matched_by: 'holding', date_source: 'statement', llm_status: 'cached' }),
   ),
   http.post('/api/finance/portfolio/documents/enrich', () =>
     HttpResponse.json({
       documents_examined: 3, created: 1, enriched: 1, linked: 0, already_linked: 0,
-      skipped_not_settlement: 0, skipped_no_holding: 0, conflicts: 1, errors: [], results: [],
+      skipped_not_settlement: 0, skipped_no_holding: 0, conflicts: 1, unverified: 1, errors: [], results: [],
     }),
   ),
   ...defaultHandlers,

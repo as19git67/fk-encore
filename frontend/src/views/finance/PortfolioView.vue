@@ -415,9 +415,10 @@ async function enrichFromDocuments() {
     if (r.enriched > 0) parts.push(`${r.enriched} ergänzt`)
     if (r.linked > 0) parts.push(`${r.linked} verknüpft`)
     if (r.conflicts > 0) parts.push(`${r.conflicts} mit abweichendem Betrag — bitte prüfen`)
+    if (r.unverified > 0) parts.push(`${r.unverified} unsicher erkannt — bitte prüfen`)
     if (r.skipped_no_holding > 0) parts.push(`${r.skipped_no_holding} ohne passendes Depot`)
     enrichNotice.value = {
-      severity: r.conflicts > 0 ? 'warn' : changed > 0 ? 'success' : 'info',
+      severity: r.conflicts > 0 || r.unverified > 0 ? 'warn' : changed > 0 ? 'success' : 'info',
       text: parts.length > 0
         ? `Belege eingelesen: ${parts.join(', ')}.`
         : 'Keine neuen Wertpapier- oder Dividendenabrechnungen gefunden.',
