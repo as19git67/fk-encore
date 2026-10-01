@@ -697,3 +697,48 @@ export async function extractStatementValues(
   }
   return resp;
 }
+
+// -----------------------------------------------------------------------
+// /json-prompt (portfolio — values from a securities settlement, #1336)
+// -----------------------------------------------------------------------
+
+/** Settlements are short; the figures sit on the first page. */
+const SETTLEMENT_TEXT_LIMIT = 8_000;
+
+/**
+ * Asks the model for the values a Wertpapierabrechnung or a dividend
+ * statement states. Returns the raw JSON object; depot-settlement-merge.ts
+ * validates it and checks it against the rule-based reading.
+ */
+export async function extractSettlementValues(text: string): Promise<Record<string, unknown>> {
+  const system =
+    "Du liest Wertpapierabrechnungen (Kauf, Verkauf) und Dividenden-/Ertragsgutschriften deutscher Banken und Broker. " +
+    "Antworte ausschließlich mit einem JSON-Objekt. Übernimm nur Werte, die wörtlich im Text stehen; erfinde nichts und rechne nichts aus. " +
+    "Fehlt ein Wert, setze null. Beträge als positive Zahl ohne Tausenderpunkte (z. B. 2966.40), Datumsangaben als YYYY-MM-DD.";
+  const prompt =
+    "Gib ein JSON-Objekt mit genau diesen Schlüsseln zurück:\n" +
+    '- "kind": "buy" für Kauf/Zeichnung/Sparplan, "sell" für Verkauf, "dividend" für Dividende/Ausschüttung/Ertrag, sonst null\n' +
+    '- "isin": die ISIN des Wertpapiers (12 Zeichen)\n' +
+    '- "wkn": die WKN (6 Zeichen)\n' +
+    '- "name": die Bezeichnung des Wertpapiers\n' +
+    '- "depot_number": die Depotnummer, nur Ziffern\n' +
+    '- "executed_at": Schlusstag/Handelstag; bei Dividenden der Zahltag/Valuta\n' +
+    '- "quantity": Stückzahl bzw. Nominale\n' +
+    '- "price": Ausführungskurs je Stück; bei Dividenden der Betrag je Stück\n' +
+    '- "gross": Kurswert bzw. Bruttobetrag\n' +
+    '- "fees": Summe aller Gebühren, Provisionen und Spesen\n' +
+    '- "tax": Summe aller einbehaltenen Steuern (Kapitalertragsteuer, Solidaritätszuschlag, Kirchensteuer, Quellensteuer)\n' +
+    '- "net": der ausmachende Betrag bzw. Endbetrag, der dem Konto belastet oder gutgeschrieben wird\n' +
+    '- "currency": Währung des ausmachenden Betrags (z. B. "EUR")\n\n' +
+    `Text des Belegs:\n"""\n${text.slice(0, SETTLEMENT_TEXT_LIMIT)}\n"""`;
+  const resp = await postJson<JsonPromptRequest, Record<string, unknown>>("/json-prompt", {
+    prompt,
+    system,
+    temperature: 0,
+    max_tokens: 500,
+  });
+  if (!resp || typeof resp !== "object") {
+    throw new LlmServiceUnavailableError("/json-prompt returned no object for the settlement");
+  }
+  return resp;
+}

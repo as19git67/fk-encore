@@ -685,6 +685,8 @@ export type DepotEnrichOutcome =
   | 'not_settlement'
   | 'no_holding'
   | 'conflict'
+  /** Rules and model disagree and the figures do not settle it: nothing was booked. */
+  | 'unverified'
 
 export interface DepotEnrichResult {
   document_id: number
@@ -704,6 +706,26 @@ export interface DepotEnrichResult {
   matched_by: 'holding' | 'depot_number' | 'transactions' | null
   /** Where the execution date came from. */
   date_source: 'statement' | 'document_date' | null
+  /** What happened with the language model for this read. */
+  llm_status: SettlementLlmStatus | null
+}
+
+/** used = asked now · cached = earlier answer · unavailable = service down · skipped / off = not asked */
+export type SettlementLlmStatus = 'used' | 'cached' | 'unavailable' | 'skipped' | 'off'
+
+export type SettlementFieldSource = 'both' | 'rules' | 'llm' | null
+
+export interface SettlementFieldSourceInfo {
+  rules: string | null
+  llm: string | null
+  source: SettlementFieldSource
+  disagree: boolean
+}
+
+export interface SettlementCheck {
+  name: 'net_equation' | 'quantity_price' | 'isin_checksum' | 'date_plausible'
+  result: 'ok' | 'failed' | 'skipped'
+  detail: string | null
 }
 
 // What the parser read from one document
@@ -740,10 +762,17 @@ export interface SettlementInspection {
   document_id: number
   title: string | null
   doc_date: string | null
-  /** 'rules' — the deterministic parser; nothing else exists yet. */
-  method: 'rules'
-  /** Always false: an LLM fallback is not implemented. */
+  /** 'rules' without a model answer, 'rules+llm' with one. */
+  method: 'rules' | 'rules+llm'
+  /** True when the model's answer took part in this reading. */
   llm_fallback_used: boolean
+  llm_status: SettlementLlmStatus
+  /** Per field: what each source read and which one was used. */
+  sources: Record<keyof SettlementInspectionFields, SettlementFieldSourceInfo>
+  /** Arithmetic and format checks the used reading was put through. */
+  checks: SettlementCheck[]
+  /** 'unverified': rules and model disagree and the figures do not settle it. */
+  verdict: 'ok' | 'unverified'
   is_settlement: boolean
   rejection: SettlementRejection | null
   fields: SettlementInspectionFields
@@ -806,6 +835,8 @@ export interface PortfolioReviewHoldingGap extends HoldingGap {
 export interface PortfolioReviewResponse {
   conflicts: PortfolioReviewConflict[]
   unmatched_documents: PortfolioReviewDocument[]
+  /** Rules and model read different figures that do not add up: nothing was booked. */
+  unverified_documents: PortfolioReviewDocument[]
   holding_gaps: PortfolioReviewHoldingGap[]
   unverifiable_changes: number
 }
@@ -837,6 +868,7 @@ export interface EnrichDepotDocumentsResponse {
   skipped_not_settlement: number
   skipped_no_holding: number
   conflicts: number
+  unverified: number
   errors: string[]
   results: DepotEnrichResult[]
 }
