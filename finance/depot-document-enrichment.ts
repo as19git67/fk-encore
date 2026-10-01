@@ -35,10 +35,13 @@ import {
   financeDepotTransactionDocument,
 } from "../db/schema";
 import {
+  INSURANCE_PATTERN,
   isUsableSettlement,
+  SETTLEMENT_CANDIDATE_PATTERN,
+  STRONG_SETTLEMENT_PATTERN,
   type SettlementExtraction,
 } from "./depot-settlement-parser";
-import { readSettlement, type LlmMode, type LlmStatus } from "./depot-settlement-reader";
+import { readSettlement, rejectedAsOtherPaper, type LlmMode, type LlmStatus } from "./depot-settlement-reader";
 
 console.log("[boot] finance/depot-document-enrichment.ts: all imports resolved");
 
@@ -111,10 +114,13 @@ export interface EnrichStats {
   unverified: number;
   errors: string[];
   results: EnrichResult[];
+  /** Where the next page starts (`before` of the next call); null when this was the last. */
+  next_before: number | null;
 }
 
 function emptyStats(): EnrichStats {
   return {
+    next_before: null,
     documents_examined: 0,
     created: 0,
     enriched: 0,
@@ -402,6 +408,11 @@ export async function enrichDocument(
     options.llm ?? (dryRun ? "cache-only" : "allow"),
   );
   result.llm_status = reading.llmStatus;
+  const otherPaper = rejectedAsOtherPaper(reading);
+  if (otherPaper) {
+    result.detail = otherPaper;
+    return result;
+  }
   const v = reading.merge.values;
   const parsed: SettlementExtraction | null =
     v.kind && (v.isin || v.wkn) ? { ...v, kind: v.kind, markers: [] } : null;
@@ -575,20 +586,37 @@ export async function enrichDocument(
   return result;
 }
 
-/** Cheap SQL pre-filter: words only a settlement or a dividend statement prints. */
-const SETTLEMENT_TEXT_PATTERN =
-  "(wertpapier-?abrechnung|dividendengutschrift|dividendenabrechnung|ertragsgutschrift|erträgnisgutschrift|ertragsabrechnung|ausschüttung)";
+/**
+ * Cheap SQL pre-filter, the same words the parser uses: text that prints
+ * settlement or dividend wording, unless it is insurance paperwork without
+ * a word only a settlement prints (a unit-linked policy's "Ausschüttung"
+ * next to its funds' ISINs). Keeping those out here matters beyond the
+ * cost of reading them: they would fill the page and starve the
+ * settlements behind them.
+ */
+const CANDIDATE_PATTERN = `(${SETTLEMENT_CANDIDATE_PATTERN})`;
+const INSURANCE_ONLY_PATTERN = `(${INSURANCE_PATTERN})`;
+const STRONG_PATTERN = `(${STRONG_SETTLEMENT_PATTERN})`;
+
+export interface PendingPage {
+  /** Only documents with an id below this one (the previous page's `next_before`). */
+  before?: number | null;
+}
 
 /**
  * Every ready document that looks like a settlement and is not yet linked
  * to a depot transaction, run through `enrichDocument` for the given
  * depots. Bounded by `limit` so a backfill over years of statements stays
- * a sequence of short requests.
+ * a sequence of short requests: newest first, and `next_before` in the
+ * result is where the next call continues (null once the end is reached).
+ * A document that stays unlinked — no depot for it, or not a settlement —
+ * is examined again on the next full run, never skipped.
  */
 export async function enrichPendingDocuments(
   accountIds: number[] | null,
   limit = 200,
   options: EnrichOptions = {},
+  page: PendingPage = {},
 ): Promise<EnrichStats> {
   const stats = emptyStats();
   if (accountIds && accountIds.length === 0) return stats;
@@ -597,19 +625,25 @@ export async function enrichPendingDocuments(
     .select({ id: financeDepotTransactionDocument.document_id })
     .from(financeDepotTransactionDocument);
 
-  const candidates = await db
+  const pageSize = Math.max(1, Math.min(limit, 1000));
+  const conditions = [
+    eq(documents.status, "ready"),
+    isNotNull(documents.extracted_text),
+    sql`${documents.extracted_text} ~* ${CANDIDATE_PATTERN}`,
+    sql`NOT (${documents.extracted_text} ~* ${INSURANCE_ONLY_PATTERN} AND ${documents.extracted_text} !~* ${STRONG_PATTERN})`,
+    notInArray(documents.id, linked),
+  ];
+  if (page.before != null) conditions.push(sql`${documents.id} < ${page.before}`);
+
+  // One more than the page: tells whether there is a next page without a count.
+  const found = await db
     .select({ id: documents.id })
     .from(documents)
-    .where(
-      and(
-        eq(documents.status, "ready"),
-        isNotNull(documents.extracted_text),
-        sql`${documents.extracted_text} ~* ${SETTLEMENT_TEXT_PATTERN}`,
-        notInArray(documents.id, linked),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(desc(documents.id))
-    .limit(Math.max(1, Math.min(limit, 1000)));
+    .limit(pageSize + 1);
+  const candidates = found.slice(0, pageSize);
+  stats.next_before = found.length > pageSize ? candidates[candidates.length - 1]!.id : null;
 
   for (const c of candidates) {
     stats.documents_examined++;

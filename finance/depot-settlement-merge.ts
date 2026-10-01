@@ -98,6 +98,21 @@ function isoDate(v: unknown): string | null {
   return null;
 }
 
+/**
+ * Whether the model took the text for a settlement at all. null when it
+ * did not say (an answer stored before the question was asked).
+ */
+export function parseLlmPaperVerdict(raw: Record<string, unknown>): boolean | null {
+  const v = raw.is_settlement;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "string") {
+    const t = v.trim().toLowerCase();
+    if (t === "true" || t === "ja" || t === "yes") return true;
+    if (t === "false" || t === "nein" || t === "no") return false;
+  }
+  return null;
+}
+
 /** The model's JSON → a reading in the parser's shape; anything malformed becomes null. */
 export function parseLlmSettlement(raw: Record<string, unknown>): SettlementValues {
   const kindRaw = str(raw.kind)?.toLowerCase();

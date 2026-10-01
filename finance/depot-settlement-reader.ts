@@ -26,6 +26,7 @@ import {
 } from "./depot-settlement-parser";
 import {
   mergeSettlement,
+  parseLlmPaperVerdict,
   parseLlmSettlement,
   type MergeResult,
   type SettlementValues,
@@ -48,8 +49,23 @@ export type LlmStatus = "used" | "cached" | "unavailable" | "skipped" | "off";
 export interface SettlementReading {
   rules: SettlementInspection | null;
   llm: SettlementValues | null;
+  /** Whether the model took the text for a settlement; null when not asked or it did not say. */
+  llmSaysSettlement: boolean | null;
   merge: MergeResult;
   llmStatus: LlmStatus;
+}
+
+/**
+ * Not a settlement by the reading as a whole: the rules recognised
+ * insurance paperwork, or the model says it is something else and the
+ * rules have nothing stronger than a weak word ("Ausschüttung") against
+ * that. A strong word ("Wertpapierabrechnung", "Dividendengutschrift")
+ * outweighs the model.
+ */
+export function rejectedAsOtherPaper(r: SettlementReading): "insurance" | "llm_other" | null {
+  if (r.rules?.insurance) return "insurance";
+  if (r.llmSaysSettlement === false && !r.rules?.strong) return "llm_other";
+  return null;
 }
 
 /**
@@ -85,13 +101,13 @@ function rulesValues(r: SettlementInspection | null): SettlementValues | null {
   };
 }
 
-async function storedAnswer(documentId: number): Promise<SettlementValues | null> {
+async function storedAnswer(documentId: number): Promise<Record<string, unknown> | null> {
   const [row] = await db
     .select({ values: financeDocumentSettlementLlm.values })
     .from(financeDocumentSettlementLlm)
     .where(eq(financeDocumentSettlementLlm.document_id, documentId))
     .limit(1);
-  return row ? parseLlmSettlement(row.values) : null;
+  return row?.values ?? null;
 }
 
 export async function readSettlement(
@@ -103,17 +119,20 @@ export async function readSettlement(
   const fromRules = rulesValues(rules);
 
   let llm: SettlementValues | null = null;
+  let llmSaysSettlement: boolean | null = null;
   let llmStatus: LlmStatus = mode === "off" ? "off" : "skipped";
 
-  if (mode !== "off" && text && text.trim().length > 0) {
-    llm = await storedAnswer(documentId);
-    if (llm) {
+  // Insurance paperwork is settled by the rules alone: no LLM call for it.
+  if (mode !== "off" && text && text.trim().length > 0 && !rules?.insurance) {
+    const stored = await storedAnswer(documentId);
+    if (stored) {
+      llm = parseLlmSettlement(stored);
+      llmSaysSettlement = parseLlmPaperVerdict(stored);
       llmStatus = "cached";
     } else if (mode === "allow" && looksLikeSecuritiesPaper(text)) {
       try {
         const raw = await extractSettlementValues(text);
-        // Store what the model said (as validated), so it is asked once.
-        const parsed = parseLlmSettlement(raw);
+        // Store what the model said, so it is asked once.
         await db
           .insert(financeDocumentSettlementLlm)
           .values({ document_id: documentId, values: raw })
@@ -121,7 +140,8 @@ export async function readSettlement(
             target: financeDocumentSettlementLlm.document_id,
             set: { values: raw, created_at: new Date().toISOString() },
           });
-        llm = parsed;
+        llm = parseLlmSettlement(raw);
+        llmSaysSettlement = parseLlmPaperVerdict(raw);
         llmStatus = "used";
       } catch (err) {
         if (!(err instanceof LlmServiceUnavailableError)) {
@@ -132,5 +152,5 @@ export async function readSettlement(
     }
   }
 
-  return { rules, llm, merge: mergeSettlement(fromRules, llm), llmStatus };
+  return { rules, llm, llmSaysSettlement, merge: mergeSettlement(fromRules, llm), llmStatus };
 }
