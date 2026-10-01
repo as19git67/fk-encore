@@ -7,6 +7,7 @@ import {
   applySettlementDocument,
   getPortfolioReview,
   type PortfolioReviewConflict,
+  type PortfolioReviewDocument,
   type PortfolioReviewResponse,
 } from '../../api/finance'
 import {
@@ -92,6 +93,14 @@ async function apply(c: PortfolioReviewConflict) {
   } finally {
     applying.value.delete(c.document_id)
   }
+}
+
+/** Why a statement found no depot, from what it identified itself by. */
+function unmatchedReason(d: PortfolioReviewDocument): string {
+  const ids = [d.isin ? `ISIN ${d.isin}` : null, d.wkn ? `WKN ${d.wkn}` : null].filter(Boolean).join(', ')
+  const parts = [ids ? `${ids} in keinem Depot` : 'kein Wertpapier erkannt']
+  parts.push(d.depot_number ? `Depotnummer ${d.depot_number} unbekannt oder mehrdeutig` : 'keine Depotnummer gefunden')
+  return parts.join(' · ')
 }
 
 function signClass(val: string | null): string {
@@ -199,7 +208,7 @@ function signClass(val: string | null): string {
       <div v-if="review.unmatched_documents.length > 0" class="pr-group">
         <h3>Abrechnungen ohne Depot</h3>
         <p class="pr-hint">
-          Kein Depot hält das Wertpapier dieser Belege — vielleicht gehört es zu einem Depot, das noch nicht angebunden ist.
+          Kein Depot hält das Wertpapier dieser Belege, keine Depotnummer passt eindeutig, und es gibt keine Transaktionen dazu — vielleicht gehört der Beleg zu einem Depot, das noch nicht angebunden ist.
         </p>
         <ul class="pr-docs">
           <li v-for="d in review.unmatched_documents" :key="d.document_id">
@@ -208,6 +217,7 @@ function signClass(val: string | null): string {
               {{ d.document_title ?? `Dokument ${d.document_id}` }}
             </RouterLink>
             <span v-if="d.doc_date" class="pr-date">{{ formatIsoDate(d.doc_date) }}</span>
+            <span class="pr-reason">{{ unmatchedReason(d) }}</span>
           </li>
         </ul>
       </div>
@@ -319,9 +329,15 @@ function signClass(val: string | null): string {
 }
 .pr-docs li {
   display: flex;
-  gap: var(--space-2);
+  gap: 0.15rem var(--space-2);
   align-items: baseline;
   flex-wrap: wrap;
+}
+.pr-reason {
+  flex-basis: 100%;
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+  overflow-wrap: anywhere;
 }
 .gain-pos {
   color: var(--p-green-600);

@@ -691,6 +691,10 @@ export interface DepotEnrichResult {
   statement_net: string | null
   /** Net amount of the matched transaction. */
   transaction_net: string | null
+  /** What the statement identified itself by — the reason when no depot matched. */
+  isin: string | null
+  wkn: string | null
+  depot_number: string | null
 }
 
 // What needs a look (#1336, stage 4)
@@ -713,6 +717,10 @@ export interface PortfolioReviewDocument {
   document_id: number
   document_title: string | null
   doc_date: string | null
+  /** What the statement identified itself by — why no depot matched. */
+  isin: string | null
+  wkn: string | null
+  depot_number: string | null
 }
 
 export interface HoldingGap {

@@ -134,6 +134,24 @@ async function writableDepots(
   return visible.filter((d) => writable.has(d.id));
 }
 
+/** The depots among `depots` with at least one holding snapshot or one transaction. */
+async function withData(depots: DepotAccount[]): Promise<DepotAccount[]> {
+  if (depots.length === 0) return depots;
+  const ids = depots.map((d) => d.id);
+  const [held, traded] = await Promise.all([
+    db
+      .selectDistinct({ id: financeAccountHolding.account_id })
+      .from(financeAccountHolding)
+      .where(inArray(financeAccountHolding.account_id, ids)),
+    db
+      .selectDistinct({ id: financeDepotTransaction.account_id })
+      .from(financeDepotTransaction)
+      .where(inArray(financeDepotTransaction.account_id, ids)),
+  ]);
+  const used = new Set([...held, ...traded].map((r) => r.id));
+  return depots.filter((d) => used.has(d.id));
+}
+
 /** "1,2,3" → [1, 2, 3]; anything that is not a positive integer is an error. */
 function parseAccountIds(raw: string | undefined): number[] | null {
   if (!raw || raw.trim() === "") return null;
@@ -855,10 +873,15 @@ export const getPortfolio = api(
     requirePermission(auth, "finance.view");
 
     const requested = parseAccountIds(accounts);
-    const depots = await visibleDepots(auth, requested);
+    // The selector offers every readable depot even when the scope is
+    // narrowed — but only depots that have ever held or traded anything:
+    // a bank's empty sub-depots and accounts typed "depot" by mistake
+    // would otherwise inflate "n Depots" and the selector.
+    const allDepots = await withData(await visibleDepots(auth, null));
+    const depots = requested
+      ? allDepots.filter((d) => requested.includes(d.id))
+      : allDepots;
     const ids = depots.map((d) => d.id);
-    // The selector offers every readable depot even when the scope is narrowed.
-    const allDepots = requested ? await visibleDepots(auth, null) : depots;
 
     const [holdings, txs] = await Promise.all([
       latestHoldings(ids),
@@ -1439,6 +1462,10 @@ export interface ReviewDocument {
   document_id: number;
   document_title: string | null;
   doc_date: string | null;
+  /** What the statement identified itself by — why no depot matched. */
+  isin: string | null;
+  wkn: string | null;
+  depot_number: string | null;
 }
 
 export interface ReviewHoldingGap extends HoldingGap {
@@ -1515,7 +1542,14 @@ export const getPortfolioReview = api(
       const doc = docById.get(r.document_id);
       if (!doc) continue;
       if (r.outcome === "no_holding") {
-        unmatched.push({ document_id: doc.id, document_title: doc.title, doc_date: doc.doc_date });
+        unmatched.push({
+          document_id: doc.id,
+          document_title: doc.title,
+          doc_date: doc.doc_date,
+          isin: r.isin,
+          wkn: r.wkn,
+          depot_number: r.depot_number,
+        });
         continue;
       }
       const tx = r.depot_transaction_id === null ? undefined : txById.get(r.depot_transaction_id);

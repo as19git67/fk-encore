@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  extractDepotNumber,
   isUsableSettlement,
   parseGermanNumber,
   parseSettlement,
@@ -131,5 +132,32 @@ describe("parseSettlement", () => {
     expect(isUsableSettlement(noDate)).toBe(false);
     const noAmount = parseSettlement("Wertpapierabrechnung Kauf ISIN DE000000AAA1 Schlusstag 01.02.2026");
     expect(isUsableSettlement(noAmount)).toBe(false);
+  });
+});
+
+describe("parseSettlement — depot number and WKN beside the ISIN", () => {
+  it("reads the depot number in its usual spellings, digits only", () => {
+    expect(extractDepotNumber("Depotnummer 123 4567")).toBe("1234567");
+    expect(extractDepotNumber("Depot-Nr.: 12-345-678")).toBe("12345678");
+    expect(extractDepotNumber("Depotkonto 0098765432")).toBe("0098765432");
+    expect(extractDepotNumber("Depot 7654321")).toBe("7654321");
+    // Does not run on into the next line, and ignores short numbers.
+    expect(extractDepotNumber("Depotnummer 1234567\n25 Stück")).toBe("1234567");
+    expect(extractDepotNumber("Depot 12")).toBeNull();
+    expect(extractDepotNumber("Depotbank Beispiel AG")).toBeNull();
+  });
+
+  it("reads a WKN printed next to the ISIN without its own prefix", () => {
+    const after = parseSettlement(
+      "Wertpapierabrechnung Kauf\nISIN/WKN DE000000AAA1/AAA111\nDepotnummer 1234567\nSchlusstag 01.02.2026\nKurswert 100,00 EUR",
+    );
+    expect(after!.isin).toBe("DE000000AAA1");
+    expect(after!.wkn).toBe("AAA111");
+    expect(after!.depotNumber).toBe("1234567");
+
+    const before = parseSettlement(
+      "Wertpapierabrechnung Verkauf\nWKN/ISIN AAA111/DE000000AAA1\nSchlusstag 01.02.2026\nKurswert 100,00 EUR",
+    );
+    expect(before!.wkn).toBe("AAA111");
   });
 });

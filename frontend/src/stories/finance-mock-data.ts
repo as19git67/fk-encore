@@ -515,7 +515,7 @@ export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
     },
   ],
   unmatched_documents: [
-    { document_id: 306, document_title: 'Dividendengutschrift Gamma Beteiligungen', doc_date: '2026-06-15' },
+    { document_id: 306, document_title: 'Dividendengutschrift Gamma Beteiligungen', doc_date: '2026-06-15', isin: 'DE000000GGG7', wkn: null, depot_number: '9900000001' },
   ],
   holding_gaps: [
     {
