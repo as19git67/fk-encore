@@ -555,6 +555,152 @@ export async function deriveDepotTransactionsFromGiro(
 }
 
 // ----------------------------------------------------------------------
+// Portfolio — securities across every readable depot (issue #1336)
+// ----------------------------------------------------------------------
+
+export interface PortfolioAccount {
+  id: number
+  label: string
+  currency_code: string
+}
+
+export interface PortfolioPosition {
+  /** COALESCE(isin, wkn, name) — stable identity across depots. */
+  key: string
+  isin: string | null
+  wkn: string | null
+  name: string | null
+  currency: string | null
+  account_ids: number[]
+  /** False when no depot currently holds it (sold out / transferred). */
+  open: boolean
+  amount: string | null
+  price: string | null
+  price_as_of: string | null
+  value: string | null
+  cost_basis: string | null
+  cost_basis_per_unit: string | null
+  cost_basis_source: CostBasisSource
+  unrealized_gain: string | null
+  unrealized_gain_pct: string | null
+  /** Share of the portfolio's market value, in percent. */
+  weight_pct: string | null
+  realized_gain: string | null
+  realized_gain_complete: boolean
+  /** Net dividends / distributions received. */
+  income: string | null
+  yield_on_cost_pct: string | null
+  fees: string | null
+  taxes: string | null
+  /** unrealized + realized + income. */
+  total_return: string | null
+  total_return_pct: string | null
+  buy_count: number
+  sell_count: number
+  dividend_count: number
+  first_transaction_at: string | null
+  last_transaction_at: string | null
+}
+
+export interface PortfolioYear {
+  year: number
+  realized: string
+  sell_count: number
+  realized_complete: boolean
+  income: string
+  dividend_count: number
+  fees: string
+  taxes: string
+  /** Buys − sells by net amount. */
+  net_invested: string
+}
+
+export interface PortfolioSummary {
+  as_of: string | null
+  market_value: string
+  cost_basis: string
+  cost_basis_complete: boolean
+  unrealized_gain: string
+  unrealized_gain_pct: string | null
+  realized_gain: string
+  realized_gain_ytd: string
+  realized_gain_complete: boolean
+  income: string
+  income_ytd: string
+  fees: string
+  taxes: string
+  total_return: string
+  total_return_pct: string | null
+  open_positions: number
+  closed_positions: number
+  transaction_count: number
+}
+
+export interface PortfolioResponse {
+  /** Every depot the caller may read, for the scope selector. */
+  accounts: PortfolioAccount[]
+  currency: string
+  mixed_currency: boolean
+  summary: PortfolioSummary
+  positions: PortfolioPosition[]
+  years: PortfolioYear[]
+}
+
+export async function getPortfolio(
+  opts: { accounts?: number[] } = {},
+): Promise<PortfolioResponse> {
+  const params = new URLSearchParams()
+  if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  const qs = params.toString()
+  return apiFetch(`/finance/portfolio${qs ? '?' + qs : ''}`)
+}
+
+export interface PortfolioTransaction extends Omit<DepotTransaction, 'created_at'> {
+  account_label: string
+  position_key: string
+}
+
+export type PortfolioTxSortField = 'executed_at' | 'net_amount' | 'name'
+
+export interface ListPortfolioTransactionsOptions {
+  accounts?: number[]
+  position?: string
+  kind?: string
+  q?: string
+  from?: string
+  to?: string
+  sortBy?: PortfolioTxSortField
+  sortDir?: 'asc' | 'desc'
+  limit?: number
+  offset?: number
+}
+
+export interface PortfolioTransactionsResponse {
+  items: PortfolioTransaction[]
+  total: number
+  /** Sums over the whole filtered set, not just this page. */
+  sums: { net_amount: string; fees: string; taxes: string }
+}
+
+export async function listPortfolioTransactions(
+  opts: ListPortfolioTransactionsOptions = {},
+): Promise<PortfolioTransactionsResponse> {
+  const params = new URLSearchParams()
+  if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.position) params.set('position', opts.position)
+  if (opts.kind) params.set('kind', opts.kind)
+  if (opts.q) params.set('q', opts.q)
+  if (opts.from) params.set('from', opts.from)
+  if (opts.to) params.set('to', opts.to)
+  if (opts.sortBy) params.set('sortBy', opts.sortBy)
+  if (opts.sortDir) params.set('sortDir', opts.sortDir)
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit))
+  if (opts.offset !== undefined) params.set('offset', String(opts.offset))
+  const qs = params.toString()
+  return apiFetch(`/finance/portfolio/transactions${qs ? '?' + qs : ''}`)
+}
+
+// ----------------------------------------------------------------------
 // Overview (configurable landing page)
 // ----------------------------------------------------------------------
 
