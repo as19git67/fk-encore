@@ -13,6 +13,7 @@ import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 import Message from 'primevue/message'
 import DepotTxSources from '../../components/finance/DepotTxSources.vue'
+import PortfolioReview from '../../components/finance/PortfolioReview.vue'
 import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
 import { useSort } from '../../composables/useSort'
 import type { FilterChip } from '../../components/layout/listToolbar'
@@ -367,6 +368,13 @@ function transactionCash(tx: PortfolioTransaction): string {
 // same over every settlement not linked yet — old statements, or ones
 // that arrived before the depot's holdings told them where they belong.
 const enriching = ref(false)
+/** Bumped to make the review section reload (after reading documents). */
+const reviewReloadKey = ref(0)
+
+function onReviewChanged() {
+  void loadPortfolio()
+  void loadTransactions()
+}
 const enrichNotice = ref<{ severity: 'success' | 'info' | 'warn'; text: string } | null>(null)
 
 async function enrichFromDocuments() {
@@ -390,6 +398,7 @@ async function enrichFromDocuments() {
     if (changed > 0) {
       await Promise.all([loadPortfolio(), loadTransactions()])
     }
+    reviewReloadKey.value++
   } catch (e: any) {
     enrichNotice.value = { severity: 'warn', text: e?.message ?? 'Belege konnten nicht eingelesen werden' }
   } finally {
@@ -552,6 +561,13 @@ async function enrichFromDocuments() {
           Realisierte Gewinne nach Durchschnittsmethode, Erlöse und Erträge netto nach Gebühren und Steuern.
         </p>
       </section>
+
+      <PortfolioReview
+        :accounts="accountIds"
+        :currency="currency"
+        :reload-key="reviewReloadKey"
+        @changed="onReviewChanged"
+      />
 
       <!-- ── Positions ────────────────────────────────────────────── -->
       <section class="pf-section" aria-labelledby="pf-positions-heading">

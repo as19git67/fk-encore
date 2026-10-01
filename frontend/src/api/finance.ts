@@ -687,6 +687,75 @@ export interface DepotEnrichResult {
   depot_transaction_id: number | null
   account_id: number | null
   detail: string | null
+  /** Net amount read from the statement. */
+  statement_net: string | null
+  /** Net amount of the matched transaction. */
+  transaction_net: string | null
+}
+
+// What needs a look (#1336, stage 4)
+
+export interface PortfolioReviewConflict {
+  document_id: number
+  document_title: string | null
+  account_id: number
+  account_label: string
+  depot_transaction_id: number
+  position_key: string
+  name: string | null
+  kind: string
+  executed_at: string
+  statement_net: string | null
+  transaction_net: string | null
+}
+
+export interface PortfolioReviewDocument {
+  document_id: number
+  document_title: string | null
+  doc_date: string | null
+}
+
+export interface HoldingGap {
+  account_id: number
+  position_key: string
+  from: string
+  to: string
+  amount_before: string
+  amount_after: string
+  delta: string
+  explained: string
+  /** Shares no transaction accounts for (signed). */
+  unexplained: string
+  transaction_count: number
+}
+
+export interface PortfolioReviewHoldingGap extends HoldingGap {
+  account_label: string
+  name: string | null
+}
+
+export interface PortfolioReviewResponse {
+  conflicts: PortfolioReviewConflict[]
+  unmatched_documents: PortfolioReviewDocument[]
+  holding_gaps: PortfolioReviewHoldingGap[]
+  unverifiable_changes: number
+}
+
+export async function getPortfolioReview(
+  opts: { accounts?: number[] } = {},
+): Promise<PortfolioReviewResponse> {
+  const params = new URLSearchParams()
+  if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  const qs = params.toString()
+  return apiFetch(`/finance/portfolio/review${qs ? '?' + qs : ''}`)
+}
+
+/** Resolve a conflict in the statement's favour. */
+export async function applySettlementDocument(documentId: number): Promise<DepotEnrichResult> {
+  return apiFetch(`/finance/portfolio/documents/${documentId}/apply`, {
+    method: 'POST',
+    body: JSON.stringify({ documentId }),
+  })
 }
 
 export interface EnrichDepotDocumentsResponse {
@@ -806,6 +875,10 @@ export interface PortfolioPositionResponse {
   /** Each evaluated sale with the cost it was matched against, newest first. */
   sales: PositionSale[]
   years: PositionYear[]
+  /** Share changes between snapshots no transaction accounts for. */
+  holding_gaps: HoldingGap[]
+  /** Share changes that could not be checked (a transaction lacks its quantity). */
+  unverifiable_changes: number
 }
 
 export async function getPortfolioPosition(

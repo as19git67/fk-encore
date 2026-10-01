@@ -20,7 +20,13 @@ import {
 } from "../db/schema";
 import { enrichDocument, enrichPendingDocuments } from "./depot-document-enrichment";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
-import { enrichDepotTransactionsFromDocuments, listPortfolioTransactions } from "./portfolio";
+import {
+  applySettlementDocument,
+  enrichDepotTransactionsFromDocuments,
+  getPortfolioPosition,
+  getPortfolioReview,
+  listPortfolioTransactions,
+} from "./portfolio";
 
 // Synthetic identifiers and texts only — see CLAUDE.md "Keine PII".
 const ISIN_A = "DE000000AAA1";
@@ -316,5 +322,98 @@ describe("finance/depot-document-enrichment", () => {
     const resp = await enrichDepotTransactionsFromDocuments({});
     expect(resp.created).toBe(1);
     expect(resp.results.map((r) => r.outcome)).toEqual(["created"]);
+  });
+});
+
+describe("finance/portfolio — review and apply", () => {
+  it("lists conflicts and unmatched documents without writing, and resolves a conflict on apply", async () => {
+    const { bc, giro, depot } = await setup();
+    await insertGiroBooking(giro, "2026-03-16", "-2900.00");
+    await deriveDepotTransactionsForBankcontact(bc);
+    const conflictDoc = await insertDocument(BUY_TEXT);
+    const foreignDoc = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ9"));
+
+    const review = await getPortfolioReview({});
+    expect(review.conflicts).toHaveLength(1);
+    expect(review.conflicts[0]).toMatchObject({
+      document_id: conflictDoc,
+      account_id: depot,
+      kind: "buy",
+      statement_net: "-2966.40",
+      transaction_net: "-2900.00",
+    });
+    expect(review.unmatched_documents.map((d) => d.document_id)).toEqual([foreignDoc]);
+    // The dry run changed nothing.
+    const [row] = await depotRows(depot);
+    expect(row!.net_amount).toBe("-2900.00");
+    expect(row!.amount).toBeNull();
+
+    const applied = await applySettlementDocument({ documentId: conflictDoc });
+    expect(applied.outcome).toBe("enriched");
+    const [after] = await depotRows(depot);
+    expect(after!.net_amount).toBe("-2966.40");
+    expect(Number(after!.amount)).toBe(25);
+    expect(after!.source).toBe("giro-derived+document");
+    // The booking's date stays.
+    expect(after!.executed_at.slice(0, 10)).toBe("2026-03-16");
+
+    const again = await getPortfolioReview({});
+    expect(again.conflicts).toEqual([]);
+  });
+
+  it("hides another user's documents from the review", async () => {
+    const { bc, giro, depot } = await setup();
+    await insertGiroBooking(giro, "2026-03-16", "-2900.00");
+    await deriveDepotTransactionsForBankcontact(bc);
+    await insertDocument(BUY_TEXT); // owned by user 1
+    await ensureUser(6);
+    await db.insert(financeAccountAccess).values({ account_id: depot, user_id: 6, level: "write" });
+    setAuth("6", ["finance.view"]);
+    const review = await getPortfolioReview({});
+    expect(review.conflicts).toEqual([]);
+    expect(review.unmatched_documents).toEqual([]);
+  });
+
+  it("reports holding gaps on the review and the position", async () => {
+    const { depot } = await setup(); // snapshot 2026-03-01: 25 shares
+    await db.insert(financeAccountHolding).values({
+      account_id: depot,
+      as_of: "2026-04-01",
+      isin: ISIN_A,
+      name: "Alpha Industries AG",
+      amount: "40",
+      price: "120.00",
+      value: "4800.00",
+      currency: "EUR",
+    });
+    // 25 → 40 with only 10 bought: 5 unexplained.
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: ISIN_A,
+      name: "Alpha Industries AG",
+      kind: "buy",
+      executed_at: "2026-03-10",
+      amount: "10",
+      price: "118.00",
+      net_amount: "-1180.00",
+      currency: "EUR",
+      source: "manual",
+    });
+
+    const review = await getPortfolioReview({});
+    expect(review.holding_gaps).toHaveLength(1);
+    expect(review.holding_gaps[0]).toMatchObject({
+      account_id: depot,
+      account_label: "Depot",
+      position_key: ISIN_A,
+      name: "Alpha Industries AG",
+      from: "2026-03-01",
+      to: "2026-04-01",
+      unexplained: "5.00000000",
+    });
+
+    const pos = await getPortfolioPosition({ key: ISIN_A });
+    expect(pos.holding_gaps.map((g) => g.unexplained)).toEqual(["5.00000000"]);
+    expect(pos.unverifiable_changes).toBe(0);
   });
 });
