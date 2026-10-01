@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import {
   financeAccount,
+  financeTransaction,
   financeAccountAccess,
   financeAccountType,
   financeBankcontact,
@@ -40,6 +41,9 @@ async function ensureUser(id: number): Promise<void> {
 beforeEach(async () => {
   await db.delete(financeTanSession);
   await db.delete(financeAccountAccess);
+  // Transactions restrict the delete of their account; another test file may
+  // have left some behind in the shared test database.
+  await db.delete(financeTransaction);
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
