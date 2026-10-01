@@ -103,10 +103,10 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
   /**
    * Trigger a sync for a bankcontact. On tan-required the TAN dialog
    * state is populated — components watch `pendingTan` to know when
-   * to open the dialog.
+   * to open the dialog. `from` (YYYY-MM-DD) fetches from that date on.
    */
-  async function syncNow(id: number): Promise<api.SyncResponse> {
-    const resp = await api.triggerSync(id)
+  async function syncNow(id: number, from?: string): Promise<api.SyncResponse> {
+    const resp = await api.triggerSync(id, from)
     if (resp.state === 'tan-required') {
       tanError.value = null
       pendingTan.value = {

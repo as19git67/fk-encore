@@ -46,6 +46,37 @@ console.log("[boot] finance/statements.ts: all imports resolved");
 
 interface TriggerParams {
   bankcontactId: number;
+  /**
+   * Optional "fetch bookings from" date (YYYY-MM-DD). Replaces the
+   * per-account start date buildFetchPlan would derive from the newest
+   * stored booking, so a gap further back than the 14-day overlap can
+   * be refilled. Already-stored bookings are skipped via dedupe_hash.
+   */
+  from?: string;
+}
+
+/**
+ * Parse a manual-sync `from` date. Local midnight, because lib-fints
+ * formats the Date it gets in local time for HKKAZ.
+ */
+export function parseSyncFromDate(raw: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!m) {
+    throw APIError.invalidArgument("from must be a date in YYYY-MM-DD format");
+  }
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(y, mo - 1, d);
+  if (
+    date.getFullYear() !== y ||
+    date.getMonth() !== mo - 1 ||
+    date.getDate() !== d
+  ) {
+    throw APIError.invalidArgument(`from is not a valid date: ${raw}`);
+  }
+  if (date.getTime() > Date.now()) {
+    throw APIError.invalidArgument("from must not be in the future");
+  }
+  return date;
 }
 
 /**
@@ -141,6 +172,7 @@ export const triggerSync = api(
       message: "Too many manual syncs for this bank contact.",
     });
 
+    if (p.from !== undefined) parseSyncFromDate(p.from);
     await assertBankcontactExists(p.bankcontactId);
 
     const result = await runSynchronize(p.bankcontactId);
@@ -154,6 +186,9 @@ export const triggerSync = api(
         banking_information: {
           bi: result.bankingInformation ?? {},
           fintsTanRef: result.tanReference ?? "",
+          // Carried to tan-sessions.complete so the fetch after the
+          // init-TAN still starts at the requested date.
+          ...(p.from !== undefined ? { from: p.from } : {}),
         },
         challenge: result.tanChallenge ?? "",
         tan_media_name: result.tanMediaName ?? null,
@@ -198,6 +233,7 @@ export const triggerSync = api(
     // data that was unreachable before.
     return await fetchAndPersist(p.bankcontactId, result.client, {
       userId: Number(auth.userID),
+      from: p.from,
     });
   },
 );
@@ -214,11 +250,14 @@ export const triggerSync = api(
  * omitted we still process what we can but a coupled-TAN turns into
  * a soft error rather than a session — the cron flavour, where
  * there's no UI to surface the photoTAN to anyway.
+ *
+ * `from` (YYYY-MM-DD) overrides the per-account start date, see
+ * buildFetchPlan.
  */
 export async function fetchAndPersist(
   bankcontactId: number,
   client: unknown,
-  opts: { userId?: number } = {},
+  opts: { userId?: number; from?: string } = {},
 ): Promise<SyncApiResponse> {
   if (!client) {
     // No client handed over (e.g. a legacy mock) — treat as idle
@@ -236,7 +275,7 @@ export async function fetchAndPersist(
     };
   }
   const { linkedAccountNumbers, fromByAccountNumber, defaultFrom } =
-    await buildFetchPlan(bankcontactId);
+    await buildFetchPlan(bankcontactId, { from: opts.from });
 
   const fetched = await runFetchAccounts(client as FintsClientSurface, {
     linkedAccountNumbers,
@@ -267,6 +306,7 @@ export async function fetchAndPersist(
         currentAccountNumber: fetched.pendingTan.accountNumber,
         remainingAccountNumbers: fetched.pendingTan.remainingAccountNumbers,
         linkedAccountNumbers: [...linkedAccountNumbers],
+        ...(opts.from !== undefined ? { from: opts.from } : {}),
       },
       expires_at: new Date(Date.now() + TAN_SESSION_TTL_MS).toISOString(),
     });
@@ -289,6 +329,29 @@ export async function fetchAndPersist(
       tanMediaName: fetched.pendingTan.tanMediaName,
       tanPhotoMime: fetched.pendingTan.tanPhotoMime,
       tanPhotoBase64: fetched.pendingTan.tanPhotoBase64,
+    };
+  }
+
+  if (fetched.pendingTan) {
+    // No user to own a session (cron on a bankcontact without ACL).
+    // The bank still wants a TAN, so say so instead of reporting the
+    // accounts it never fetched as done; a manual sync opens a fresh
+    // dialog and shows the challenge.
+    console.warn(
+      `[finance.statements] bankcontact=${bankcontactId} paused at ` +
+        `account=${fetched.pendingTan.accountNumber} for a TAN but no ` +
+        `user is available to own the session`,
+    );
+    await db
+      .update(financeBankcontact)
+      .set({
+        last_sync_at: new Date().toISOString(),
+        last_sync_status: "tan-required",
+      })
+      .where(eq(financeBankcontact.id, bankcontactId));
+    return {
+      state: "tan-required",
+      challenge: fetched.pendingTan.tanChallenge ?? "",
     };
   }
 
@@ -357,6 +420,12 @@ export async function fetchAndPersist(
  * has to continue the paused fetch loop with exactly the same plan;
  * without it the resumed accounts would be fetched unfiltered and
  * without a `from`, re-triggering a TAN for every queued account.
+ *
+ * `opts.from` (YYYY-MM-DD, from a manual "fetch from date" sync)
+ * replaces the derived start date for every linked account. That is
+ * how a gap older than the overlap window gets refilled: the bank
+ * returns everything since `from`, and bookings already stored are
+ * skipped via dedupe_hash.
  */
 export interface FetchPlan {
   linkedAccountNumbers: Set<string>;
@@ -366,6 +435,7 @@ export interface FetchPlan {
 
 export async function buildFetchPlan(
   bankcontactId: number,
+  opts: { from?: string } = {},
 ): Promise<FetchPlan> {
   const linkedRows = await db
     .select({
@@ -385,6 +455,17 @@ export async function buildFetchPlan(
       .map((r) => r.fints_account_number)
       .filter((n): n is string => n !== null && n.length > 0),
   );
+
+  if (opts.from !== undefined) {
+    const from = parseSyncFromDate(opts.from);
+    return {
+      linkedAccountNumbers,
+      fromByAccountNumber: new Map(
+        [...linkedAccountNumbers].map((n) => [n, from]),
+      ),
+      defaultFrom: from,
+    };
+  }
 
   // MAX(booking_date) per linked account → fromByAccountNumber.
   const fromByAccountNumber = new Map<string, Date>();

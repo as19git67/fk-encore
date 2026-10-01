@@ -21,7 +21,7 @@ import type { FinanceSyncSlot } from "../db/schema";
 
 vi.mock("./fints-client", async (orig) => {
   const actual = await orig<typeof import("./fints-client")>();
-  return { ...actual, runSynchronize: vi.fn() };
+  return { ...actual, runSynchronize: vi.fn(), runFetchAccounts: vi.fn() };
 });
 vi.mock("../push/push.service", async (orig) => {
   const actual = await orig<typeof import("../push/push.service")>();
@@ -44,6 +44,7 @@ beforeEach(async () => {
   await db.delete(financeBankcontact);
   await db.delete(users);
   vi.mocked(fintsClient.runSynchronize).mockReset();
+  vi.mocked(fintsClient.runFetchAccounts).mockReset();
   vi.mocked(pushService.sendToUser).mockReset();
   vi.mocked(pushService.sendToUser).mockResolvedValue({ sent: 1, pruned: 0 });
 });
@@ -266,6 +267,110 @@ describe("statements-cron — syncStatements (integration-ish)", () => {
       .from(financeBankcontact)
       .where(eq(financeBankcontact.id, bc));
     expect(row.last_sync_status).toBe("tan-required");
+  });
+
+  it("stores a statements session, sends a push and records tan-required when the bank asks for a TAN mid-fetch", async () => {
+    // comdirect & friends: the init dialog passes, then the statement
+    // query for one account demands its own TAN. Previously the cron
+    // ignored that, dropped the paused account and every account queued
+    // behind it, and recorded "ok".
+    const now = new Date();
+    const hh = String(now.getUTCHours()).padStart(2, "0");
+    const mm = String(now.getUTCMinutes()).padStart(2, "0");
+    const bc = await insertBankcontact({
+      sync_times: [
+        { weekdays: [now.getUTCDay()], time: `${hh}:${mm}`, tz: "UTC" },
+      ] as any,
+    });
+    await insertAccountAndAcl(bc, 42, "write");
+
+    vi.mocked(fintsClient.runSynchronize).mockResolvedValue({
+      state: "idle",
+      client: { stub: true },
+    });
+    vi.mocked(fintsClient.runFetchAccounts).mockResolvedValue({
+      accounts: [],
+      partial: true,
+      pendingTan: {
+        accountNumber: "A",
+        remainingAccountNumbers: ["B:CheckingAccount"],
+        tanReference: "fints-stmt-ref",
+        tanChallenge: "photoTAN scannen",
+      },
+    } as Awaited<ReturnType<typeof fintsClient.runFetchAccounts>>);
+
+    const result = await syncStatements();
+    expect(result.tan_required).toBe(1);
+    expect(result.ok).toBe(0);
+
+    const sessions = await db
+      .select()
+      .from(financeTanSession)
+      .where(eq(financeTanSession.bankcontact_id, bc));
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].kind).toBe("statements");
+    expect(sessions[0].user_id).toBe(42);
+    expect(sessions[0].fetch_context).toMatchObject({
+      currentAccountNumber: "A",
+      remainingAccountNumbers: ["B:CheckingAccount"],
+    });
+
+    expect(pushService.sendToUser).toHaveBeenCalledOnce();
+    expect(vi.mocked(pushService.sendToUser).mock.calls[0][0]).toBe(42);
+    const payload = vi.mocked(pushService.sendToUser).mock.calls[0][1];
+    expect(payload.body).toContain("photoTAN scannen");
+    expect(payload.data).toMatchObject({
+      kind: "finance.tan_required",
+      tanReference: sessions[0].tan_reference,
+    });
+
+    const [row] = await db
+      .select({ last_sync_status: financeBankcontact.last_sync_status })
+      .from(financeBankcontact)
+      .where(eq(financeBankcontact.id, bc));
+    expect(row.last_sync_status).toBe("tan-required");
+  });
+
+  it("records partial instead of ok when a per-account fetch failed", async () => {
+    const now = new Date();
+    const hh = String(now.getUTCHours()).padStart(2, "0");
+    const mm = String(now.getUTCMinutes()).padStart(2, "0");
+    const bc = await insertBankcontact({
+      sync_times: [
+        { weekdays: [now.getUTCDay()], time: `${hh}:${mm}`, tz: "UTC" },
+      ] as any,
+    });
+    await insertAccountAndAcl(bc, 7, "write");
+
+    vi.mocked(fintsClient.runSynchronize).mockResolvedValue({
+      state: "idle",
+      client: { stub: true },
+    });
+    vi.mocked(fintsClient.runFetchAccounts).mockResolvedValue({
+      accounts: [
+        {
+          accountNumber: "X",
+          iban: null,
+          accountKind: "giro",
+          currency: "EUR",
+          label: "Giro X",
+          balance: null,
+          transactions: [],
+          holdings: [],
+          errors: ["statements-error:3010 Keine Buchungen vorhanden"],
+        },
+      ],
+      partial: true,
+    });
+
+    const result = await syncStatements();
+    expect(result.ok).toBe(1);
+
+    const [row] = await db
+      .select({ last_sync_status: financeBankcontact.last_sync_status })
+      .from(financeBankcontact)
+      .where(eq(financeBankcontact.id, bc));
+    expect(row.last_sync_status).toBe("partial");
   });
 
   it("records error status when runSynchronize returns error", async () => {

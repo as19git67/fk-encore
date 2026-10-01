@@ -20,9 +20,13 @@ import { hasOpenOverlay, overlayAbove } from '../../utils/overlayLayer'
  *   [ search ] [ filter (n) ] [ sort ] [ view ] [ select ]
  *   [chip] [chip] [alle entfernen]                 „123 von 4.567"
  *
- * The first row carries what the user operates, the second what the list
- * currently *is*. Both rows exist at every width, so nothing jumps between
- * layouts; below `sm` the buttons drop their labels and become icons.
+ * The first group carries what the user operates, the second what the list
+ * currently *is*. Where the width allows, the second group sits at the end
+ * of the first row instead of on a row of its own:
+ *
+ *   [ search ] [ filter (n) ] [ sort ]   [chip] [alle entfernen] „123 von 4.567"
+ *
+ * Below `sm` the buttons drop their labels and become icons.
  *
  * A view with a search bar of its own (the gallery's natural-language
  * search) fills the `search` slot instead of handing over `model.search`.
@@ -277,9 +281,15 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
 </template>
 
 <style scoped>
+/* The controls and the result line share one wrapping row. The controls
+   claim a fixed basis — never their content, for the same reason as below —
+   and nearly all the space that is left; the result line joins them when its
+   own width still fits beside that basis, and otherwise wraps onto a line of
+   its own, where it is alone and keeps the count at the right edge. */
 .list-toolbar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
   min-width: 0;
 }
@@ -289,6 +299,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
+  flex: 1000 1 32rem;
   min-width: 0;
 }
 
@@ -343,6 +354,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-1) var(--space-2);
+  flex: 1 1 auto;
   min-width: 0;
 }
 
