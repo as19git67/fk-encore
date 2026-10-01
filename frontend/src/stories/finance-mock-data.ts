@@ -1,4 +1,4 @@
-import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioResponse, PortfolioTransaction, Tag, Transaction } from '../api/finance'
+import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioTransaction, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -455,3 +455,34 @@ export const MOCK_PORTFOLIO_TRANSACTIONS: PortfolioTransaction[] = [
   portfolioTx({ id: 908, kind: 'buy', executed_at: '2024-06-01', position_key: 'Gamma Beteiligungen', isin: null, wkn: null, name: 'Gamma Beteiligungen', amount: '20', net_amount: '-500.00' }),
   portfolioTx({ id: 909, kind: 'buy', executed_at: '2024-02-15', amount: '70', price: '120.00', gross_amount: '8400.00', fees: '20.00', net_amount: '-8420.00', source: 'fints-mt536' }),
 ]
+
+export const MOCK_PORTFOLIO_POSITION: PortfolioPositionResponse = {
+  currency: 'EUR',
+  position: MOCK_PORTFOLIO.positions[0]!,
+  accounts: [
+    { account_id: 11, account_label: 'Depot Beispielbank', amount: '40.00000000', value: '6000.00', cost_basis: '4800.00', cost_basis_source: 'bank', as_of: '2026-09-30' },
+    { account_id: 12, account_label: 'Depot Musterbroker', amount: '20.00000000', value: '3000.00', cost_basis: '2400.00', cost_basis_source: 'tx-wac', as_of: '2026-09-30' },
+  ],
+  history: ([
+    ['2024-03-01', '70', '118.000000', '8260.00'],
+    ['2024-06-01', '70', '124.500000', '8715.00'],
+    ['2024-09-01', '70', '121.000000', '8470.00'],
+    ['2024-12-01', '70', '131.000000', '9170.00'],
+    ['2025-03-01', '70', '128.000000', '8960.00'],
+    ['2025-06-01', '70', '136.000000', '9520.00'],
+    ['2025-09-01', '70', '141.500000', '9905.00'],
+    ['2025-12-01', '70', '139.000000', '9730.00'],
+    ['2026-03-01', '60', '146.000000', '8760.00'],
+    ['2026-06-01', '60', '143.000000', '8580.00'],
+    ['2026-09-30', '60', '150.000000', '9000.00'],
+  ] as Array<[string, string, string, string]>).map(([as_of, amount, price, value]) => ({ as_of, amount, price, value })),
+  transactions: MOCK_PORTFOLIO_TRANSACTIONS.filter((t) => t.position_key === PF_ISIN_A),
+  sales: [
+    { transaction_id: 903, account_id: 11, executed_at: '2026-02-03', quantity: '10.00000000', proceeds: '1418.95', cost: '1200.00', cost_per_unit: '120.000000', gain: '218.95' },
+  ],
+  years: [
+    { year: 2026, realized: '218.95', sell_count: 1, income: '88.35', dividend_count: 1, fees: '10.00', taxes: '52.70', },
+    { year: 2025, realized: '0.00', sell_count: 0, income: '120.00', dividend_count: 1, fees: '0.00', taxes: '30.00' },
+    { year: 2024, realized: '0.00', sell_count: 0, income: '0.00', dividend_count: 0, fees: '20.00', taxes: '0.00' },
+  ],
+}

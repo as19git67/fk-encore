@@ -171,8 +171,12 @@ const showRealizedColumn = computed(() =>
 )
 const showIncomeColumn = computed(() => visiblePositions.value.some((p) => p.income !== null))
 
-function togglePosition(p: PortfolioPosition) {
-  setQuery({ position: positionFilter.value === p.key ? '' : p.key })
+function openPosition(key: string) {
+  void router.push({
+    name: 'finance-portfolio-position',
+    params: { key },
+    query: accountIds.value.length > 0 ? { accounts: accountIds.value.join(',') } : {},
+  })
 }
 
 // ── Transactions ─────────────────────────────────────────────────────
@@ -542,12 +546,11 @@ function transactionLink(tx: PortfolioTransaction) {
                 class="pf-row"
                 :class="{ 'pf-row-active': positionFilter === p.key, 'pf-row-closed': !p.open }"
                 tabindex="0"
-                role="button"
-                :aria-pressed="positionFilter === p.key"
-                :aria-label="`Transaktionen von ${p.name ?? p.key} ${positionFilter === p.key ? 'wieder alle zeigen' : 'anzeigen'}`"
-                @click="togglePosition(p)"
-                @keydown.enter.prevent="togglePosition(p)"
-                @keydown.space.prevent="togglePosition(p)"
+                role="link"
+                :aria-label="`${p.name ?? p.key} öffnen`"
+                @click="openPosition(p.key)"
+                @keydown.enter.prevent="openPosition(p.key)"
+                @keydown.space.prevent="openPosition(p.key)"
               >
                 <td class="pf-col-name">
                   <span class="pf-name">{{ p.name ?? p.key }}</span>
@@ -702,7 +705,10 @@ function transactionLink(tx: PortfolioTransaction) {
                 <td class="pf-date">{{ formatIsoDate(tx.executed_at) }}</td>
                 <td><span class="pf-kind" :class="`pf-kind-${tx.kind}`">{{ depotKindLabel(tx.kind) }}</span></td>
                 <td class="pf-col-name">
-                  <span class="pf-name">{{ tx.name ?? tx.position_key }}</span>
+                  <RouterLink
+                    class="pf-name pf-name-link"
+                    :to="{ name: 'finance-portfolio-position', params: { key: tx.position_key } }"
+                  >{{ tx.name ?? tx.position_key }}</RouterLink>
                   <span class="pf-ident">{{ tx.isin ?? tx.wkn ?? '' }}</span>
                 </td>
                 <td class="pf-col-num">{{ formatQuantity(tx.amount) }}</td>
@@ -862,6 +868,13 @@ function transactionLink(tx: PortfolioTransaction) {
 .pf-name {
   display: block;
   font-weight: 500;
+}
+.pf-name-link {
+  color: inherit;
+  text-decoration: none;
+}
+.pf-name-link:hover {
+  text-decoration: underline;
 }
 .pf-ident {
   display: block;

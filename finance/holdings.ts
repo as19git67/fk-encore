@@ -445,7 +445,24 @@ export async function buildRealizedGainIndex(
   return { byIsin, byWkn, byName };
 }
 
-export function computeRealizedForPosition(txs: DepotTx[]): RealizedAggregate {
+/** One evaluated sell, as reported to `computeRealizedForPosition`'s observer. */
+export interface RealizedSale {
+  transactionId: number;
+  executedAt: string;
+  /** Quantity actually matched against inventory (capped at what was held). */
+  quantity: number;
+  proceeds: number;
+  /** quantity × WAC at the time of the sale. */
+  cost: number;
+  gain: number;
+  /** WAC per unit applied to this sale. */
+  costPerUnit: number;
+}
+
+export function computeRealizedForPosition(
+  txs: DepotTx[],
+  onSale?: (sale: RealizedSale) => void,
+): RealizedAggregate {
   const sorted = [...txs].sort((a, b) => {
     if (a.executed_at !== b.executed_at) {
       return a.executed_at < b.executed_at ? -1 : 1;
@@ -495,6 +512,15 @@ export function computeRealizedForPosition(txs: DepotTx[]): RealizedAggregate {
         const sellGain = proceeds - costPortion;
         realized += sellGain;
         hasData = true;
+        onSale?.({
+          transactionId: tx.id,
+          executedAt: tx.executed_at,
+          quantity: soldQty,
+          proceeds,
+          cost: costPortion,
+          gain: sellGain,
+          costPerUnit: wac,
+        });
         const year = yearOf(tx.executed_at);
         if (year !== null) {
           const bucket = byYear.get(year) ?? { realized: 0, sellCount: 0 };

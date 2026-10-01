@@ -16,7 +16,7 @@ import {
   financeTransaction,
   users,
 } from "../db/schema";
-import { getPortfolio, listPortfolioTransactions } from "./portfolio";
+import { getPortfolio, getPortfolioPosition, listPortfolioTransactions } from "./portfolio";
 
 function setAuth(userID: string, perms: string[]) {
   vi.mocked(getAuthData).mockReturnValue({ userID, permissions: perms });
@@ -499,5 +499,71 @@ describe("finance/portfolio — listPortfolioTransactions", () => {
     const resp = await listPortfolioTransactions({});
     expect(resp.total).toBe(2);
     expect(resp.items.every((i) => i.account_id === d1)).toBe(true);
+  });
+});
+
+describe("finance/portfolio — getPortfolioPosition", () => {
+  it("returns the position with depot shares, history, sales and years", async () => {
+    const bc = await insertBankcontact();
+    const d1 = await insertAccount(bc, "depot", "Depot 1");
+    const d2 = await insertAccount(bc, "depot", "Depot 2");
+
+    await insertTx({ accountId: d1, kind: "buy", executedAt: "2024-03-01", isin: ISIN_A, name: "Alpha AG", amount: "10", price: "100.00", net: "-1005.00", fees: "5.00" });
+    await insertTx({ accountId: d1, kind: "sell", executedAt: "2025-06-01", isin: ISIN_A, name: "Alpha AG", amount: "4", price: "150.00", net: "590.00", fees: "5.00", tax: "5.00" });
+    await insertTx({ accountId: d1, kind: "dividend", executedAt: "2026-04-01", isin: ISIN_A, name: "Alpha AG", net: "12.50", tax: "4.50" });
+    await insertTx({ accountId: d2, kind: "buy", executedAt: "2025-09-01", isin: ISIN_A, name: "Alpha AG", amount: "2", price: "130.00", net: "-260.00" });
+    // Unrelated position must not leak into the detail.
+    await insertTx({ accountId: d2, kind: "buy", executedAt: "2025-09-02", isin: ISIN_B, name: "Beta ETF", amount: "1", price: "10.00", net: "-10.00" });
+
+    await insertHolding({ accountId: d1, asOf: "2026-08-01", isin: ISIN_A, name: "Alpha AG", amount: "6", price: "110.00", value: "660.00" });
+    await insertHolding({ accountId: d1, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "6", price: "120.00", value: "720.00" });
+    await insertHolding({ accountId: d2, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "2", price: "121.00", value: "242.00", acquisitionPrice: "130.00" });
+    await insertHolding({ accountId: d2, asOf: "2026-09-01", isin: ISIN_B, name: "Beta ETF", amount: "1", price: "11.00", value: "11.00" });
+
+    const resp = await getPortfolioPosition({ key: ISIN_A });
+    expect(resp.position.key).toBe(ISIN_A);
+    expect(Number(resp.position.amount)).toBe(8);
+    expect(resp.position.value).toBe("962.00");
+    // 6 × 100 (WAC) + 2 × 130 (bank)
+    expect(resp.position.cost_basis).toBe("860.00");
+    expect(resp.position.cost_basis_source).toBe("tx-wac");
+
+    expect(resp.accounts.map((a) => [a.account_label, a.cost_basis, a.cost_basis_source])).toEqual([
+      ["Depot 1", "600.00", "tx-wac"],
+      ["Depot 2", "260.00", "bank"],
+    ]);
+
+    expect(resp.history.map((h) => [h.as_of, h.amount && Number(h.amount), h.value])).toEqual([
+      ["2026-08-01", 6, "660.00"],
+      ["2026-09-01", 8, "962.00"],
+    ]);
+
+    expect(resp.sales).toHaveLength(1);
+    expect(resp.sales[0].quantity).toBe("4.00000000");
+    expect(resp.sales[0].cost).toBe("400.00");
+    expect(resp.sales[0].proceeds).toBe("590.00");
+    expect(resp.sales[0].gain).toBe("190.00");
+    expect(resp.sales[0].cost_per_unit).toBe("100.000000");
+
+    expect(resp.transactions.map((t) => t.kind)).toEqual(["dividend", "buy", "sell", "buy"]);
+    expect(resp.transactions.every((t) => t.position_key === ISIN_A)).toBe(true);
+
+    expect(resp.years.map((y) => [y.year, y.realized, y.income, y.fees, y.taxes, y.sell_count, y.dividend_count])).toEqual([
+      [2026, "0.00", "12.50", "0.00", "4.50", 0, 1],
+      [2025, "190.00", "0.00", "5.00", "5.00", 1, 0],
+      [2024, "0.00", "0.00", "5.00", "0.00", 0, 0],
+    ]);
+  });
+
+  it("404s for an unknown key and for a depot outside the ACL", async () => {
+    const bc = await insertBankcontact();
+    const depot = await insertAccount(bc, "depot", "Depot");
+    await insertHolding({ accountId: depot, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "1", price: "10.00", value: "10.00" });
+
+    await expect(getPortfolioPosition({ key: "NOPE" })).rejects.toThrow(/not found/);
+
+    await ensureUser(5);
+    setAuth("5", ["finance.view"]);
+    await expect(getPortfolioPosition({ key: ISIN_A })).rejects.toThrow(/not found/);
   });
 });
