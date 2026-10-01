@@ -270,6 +270,9 @@ interface DepotTxRow {
   tax: string | null;
   net_amount: string | null;
   currency: string | null;
+  source: string;
+  linked_transaction_id: number | null;
+  note: string | null;
 }
 
 interface HoldingRow {
@@ -794,6 +797,9 @@ async function loadTransactions(accountIds: number[]): Promise<DepotTxRow[]> {
       tax: financeDepotTransaction.tax,
       net_amount: financeDepotTransaction.net_amount,
       currency: financeDepotTransaction.currency,
+      source: financeDepotTransaction.source,
+      linked_transaction_id: financeDepotTransaction.linked_transaction_id,
+      note: financeDepotTransaction.note,
     })
     .from(financeDepotTransaction)
     .where(inArray(financeDepotTransaction.account_id, accountIds));
@@ -1006,6 +1012,292 @@ export const listPortfolioTransactions = api(
         fees: Number(agg.fees).toFixed(2),
         taxes: Number(agg.taxes).toFixed(2),
       },
+    };
+  },
+);
+
+// ----------------------------------------------------------------------
+// One position in detail (#1336, stage 3)
+//
+// Everything the detail page shows for a single security: the aggregated
+// position, how it is split across depots, its value/price history as a
+// day series summed over the depots, every transaction, each evaluated
+// sale with the cost it was matched against, and income per year.
+// ----------------------------------------------------------------------
+
+export interface PositionAccountShare {
+  account_id: number;
+  account_label: string;
+  amount: string | null;
+  value: string | null;
+  cost_basis: string | null;
+  cost_basis_source: CostBasisSource;
+  as_of: string | null;
+}
+
+export interface PositionHistoryPoint {
+  as_of: string;
+  /** Sum of the amounts held that day across depots (scale 8). */
+  amount: string | null;
+  /** Last non-null price reported that day (scale 6). */
+  price: string | null;
+  /** Sum of the values that day (scale 2). */
+  value: string | null;
+}
+
+export interface PositionSale {
+  transaction_id: number;
+  account_id: number;
+  executed_at: string;
+  quantity: string;
+  proceeds: string;
+  cost: string;
+  cost_per_unit: string;
+  gain: string;
+}
+
+export interface PositionYear {
+  year: number;
+  realized: string;
+  sell_count: number;
+  income: string;
+  dividend_count: number;
+  fees: string;
+  taxes: string;
+}
+
+interface PositionParams {
+  key: string;
+  /** Comma-separated depot account ids; omitted = every readable depot. */
+  accounts?: string;
+}
+
+interface PositionResponse {
+  currency: string;
+  position: PortfolioPosition;
+  accounts: PositionAccountShare[];
+  history: PositionHistoryPoint[];
+  transactions: PortfolioTransaction[];
+  sales: PositionSale[];
+  years: PositionYear[];
+}
+
+function matchesKey(
+  r: { isin: string | null; wkn: string | null; name: string | null },
+  key: string,
+): boolean {
+  return positionKey(r) === key;
+}
+
+export const getPortfolioPosition = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/portfolio/positions/:key",
+    auth: true,
+  },
+  async ({ key, accounts }: PositionParams): Promise<PositionResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    if (!key || key.trim() === "") {
+      throw APIError.invalidArgument("key is required");
+    }
+
+    const depots = await visibleDepots(auth, parseAccountIds(accounts));
+    const ids = depots.map((d) => d.id);
+    if (ids.length === 0) throw APIError.notFound(`position ${key} not found`);
+
+    // The position's figures come from the same fold as the overview, so
+    // both pages agree to the cent.
+    const [holdings, txs] = await Promise.all([
+      latestHoldings(ids),
+      loadTransactions(ids),
+    ]);
+    const built = buildPortfolio(holdings, txs);
+    const position = built.positions.find((p) => p.key === key);
+    if (!position) throw APIError.notFound(`position ${key} not found`);
+
+    const labelById = new Map(depots.map((d) => [d.id, d.label]));
+    const txsByAccount = new Map<number, DepotTxRow[]>();
+    for (const tx of txs) {
+      if (!matchesKey(tx, key)) continue;
+      const list = txsByAccount.get(tx.account_id) ?? [];
+      list.push(tx);
+      txsByAccount.set(tx.account_id, list);
+    }
+
+    // Per-depot share from the latest snapshot of each depot.
+    const shares: PositionAccountShare[] = [];
+    for (const h of holdings) {
+      if (!matchesKey(h, key)) continue;
+      const wac = wacIndexFromRows(txsByAccount.get(h.account_id) ?? []);
+      const valuation = computeCostBasis(h, wac);
+      shares.push({
+        account_id: h.account_id,
+        account_label: labelById.get(h.account_id) ?? "",
+        amount: h.amount,
+        value: h.value,
+        cost_basis: valuation.costBasisTotal,
+        cost_basis_source: valuation.source,
+        as_of: dateOnly(h.as_of),
+      });
+    }
+    shares.sort((a, b) => a.account_label.localeCompare(b.account_label));
+
+    // Day series across depots: every snapshot row of this position.
+    const historyRows = await db
+      .select({
+        account_id: financeAccountHolding.account_id,
+        as_of: financeAccountHolding.as_of,
+        isin: financeAccountHolding.isin,
+        wkn: financeAccountHolding.wkn,
+        name: financeAccountHolding.name,
+        amount: financeAccountHolding.amount,
+        price: financeAccountHolding.price,
+        value: financeAccountHolding.value,
+      })
+      .from(financeAccountHolding)
+      .where(inArray(financeAccountHolding.account_id, ids))
+      .orderBy(asc(financeAccountHolding.as_of), asc(financeAccountHolding.id));
+    const byDay = new Map<
+      string,
+      { amount: number; hasAmount: boolean; value: number; hasValue: boolean; price: number | null }
+    >();
+    for (const r of historyRows) {
+      if (!matchesKey(r, key)) continue;
+      const day = dateOnly(r.as_of);
+      const d = byDay.get(day) ?? { amount: 0, hasAmount: false, value: 0, hasValue: false, price: null };
+      const a = num(r.amount);
+      if (a !== null) {
+        d.amount += a;
+        d.hasAmount = true;
+      }
+      const v = num(r.value);
+      if (v !== null) {
+        d.value += v;
+        d.hasValue = true;
+      }
+      const p = num(r.price);
+      if (p !== null) d.price = p;
+      byDay.set(day, d);
+    }
+    const history: PositionHistoryPoint[] = [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([as_of, d]) => ({
+        as_of,
+        amount: d.hasAmount ? d.amount.toFixed(8) : null,
+        price: d.price === null ? null : d.price.toFixed(6),
+        value: d.hasValue ? d.value.toFixed(2) : null,
+      }));
+
+    // Sales, replayed per depot exactly as the realized figure is.
+    const sales: PositionSale[] = [];
+    for (const [accountId, list] of txsByAccount) {
+      computeRealizedForPosition(list, (sale) => {
+        sales.push({
+          transaction_id: sale.transactionId,
+          account_id: accountId,
+          executed_at: dateOnly(sale.executedAt),
+          quantity: sale.quantity.toFixed(8),
+          proceeds: sale.proceeds.toFixed(2),
+          cost: sale.cost.toFixed(2),
+          cost_per_unit: sale.costPerUnit.toFixed(6),
+          gain: sale.gain.toFixed(2),
+        });
+      });
+    }
+    sales.sort((a, b) => b.executed_at.localeCompare(a.executed_at) || b.transaction_id - a.transaction_id);
+
+    // Per-year figures of this position alone.
+    const years = new Map<number, PositionYear>();
+    const yearOfPos = (day: string) => {
+      const y = yearOf(day);
+      if (y === null) return null;
+      let b = years.get(y);
+      if (!b) {
+        b = { year: y, realized: "0", sell_count: 0, income: "0", dividend_count: 0, fees: "0", taxes: "0" };
+        years.set(y, b);
+      }
+      return b;
+    };
+    const acc = new Map<number, { realized: number; income: number; fees: number; taxes: number }>();
+    const accOf = (y: number) => {
+      let a = acc.get(y);
+      if (!a) {
+        a = { realized: 0, income: 0, fees: 0, taxes: 0 };
+        acc.set(y, a);
+      }
+      return a;
+    };
+    for (const sale of sales) {
+      const b = yearOfPos(sale.executed_at);
+      if (!b) continue;
+      b.sell_count += 1;
+      accOf(b.year).realized += Number(sale.gain);
+    }
+    const positionTxs: PortfolioTransaction[] = [];
+    for (const [, list] of txsByAccount) {
+      for (const tx of list) {
+        const day = dateOnly(tx.executed_at);
+        const b = yearOfPos(day);
+        if (b) {
+          const a = accOf(b.year);
+          a.fees += Math.abs(num(tx.fees) ?? 0);
+          a.taxes += Math.abs(num(tx.tax) ?? 0);
+          if (tx.kind === "dividend") {
+            const net = dividendNet(tx);
+            if (net !== null) {
+              a.income += net;
+              b.dividend_count += 1;
+            }
+          }
+        }
+        positionTxs.push({
+          id: tx.id,
+          account_id: tx.account_id,
+          account_label: labelById.get(tx.account_id) ?? "",
+          position_key: key,
+          isin: tx.isin,
+          wkn: tx.wkn,
+          name: tx.name,
+          kind: tx.kind,
+          executed_at: day,
+          amount: tx.amount,
+          price: tx.price,
+          gross_amount: tx.gross_amount,
+          fees: tx.fees,
+          tax: tx.tax,
+          net_amount: tx.net_amount,
+          currency: tx.currency,
+          source: tx.source,
+          linked_transaction_id: tx.linked_transaction_id,
+          note: tx.note,
+        });
+      }
+    }
+    positionTxs.sort((a, b) => b.executed_at.localeCompare(a.executed_at) || b.id - a.id);
+
+    const yearsOut = [...years.values()]
+      .sort((a, b) => b.year - a.year)
+      .map((b) => {
+        const a = accOf(b.year);
+        return {
+          ...b,
+          realized: a.realized.toFixed(2),
+          income: a.income.toFixed(2),
+          fees: a.fees.toFixed(2),
+          taxes: a.taxes.toFixed(2),
+        };
+      });
+
+    return {
+      currency: scopeCurrency(depots).currency,
+      position,
+      accounts: shares,
+      history,
+      transactions: positionTxs,
+      sales,
+      years: yearsOut,
     };
   },
 );

@@ -700,6 +700,69 @@ export async function listPortfolioTransactions(
   return apiFetch(`/finance/portfolio/transactions${qs ? '?' + qs : ''}`)
 }
 
+// One position in detail (#1336, stage 3)
+
+export interface PositionAccountShare {
+  account_id: number
+  account_label: string
+  amount: string | null
+  value: string | null
+  cost_basis: string | null
+  cost_basis_source: CostBasisSource
+  as_of: string | null
+}
+
+export interface PositionHistoryPoint {
+  as_of: string
+  amount: string | null
+  price: string | null
+  value: string | null
+}
+
+export interface PositionSale {
+  transaction_id: number
+  account_id: number
+  executed_at: string
+  quantity: string
+  proceeds: string
+  cost: string
+  cost_per_unit: string
+  gain: string
+}
+
+export interface PositionYear {
+  year: number
+  realized: string
+  sell_count: number
+  income: string
+  dividend_count: number
+  fees: string
+  taxes: string
+}
+
+export interface PortfolioPositionResponse {
+  currency: string
+  position: PortfolioPosition
+  accounts: PositionAccountShare[]
+  /** Day series summed over the depots in scope, oldest first. */
+  history: PositionHistoryPoint[]
+  /** Every transaction of the position, newest first. */
+  transactions: PortfolioTransaction[]
+  /** Each evaluated sale with the cost it was matched against, newest first. */
+  sales: PositionSale[]
+  years: PositionYear[]
+}
+
+export async function getPortfolioPosition(
+  key: string,
+  opts: { accounts?: number[] } = {},
+): Promise<PortfolioPositionResponse> {
+  const params = new URLSearchParams()
+  if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  const qs = params.toString()
+  return apiFetch(`/finance/portfolio/positions/${encodeURIComponent(key)}${qs ? '?' + qs : ''}`)
+}
+
 // ----------------------------------------------------------------------
 // Overview (configurable landing page)
 // ----------------------------------------------------------------------
