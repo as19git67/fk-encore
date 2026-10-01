@@ -36,3 +36,37 @@ export interface RoutingStatus {
 export function getRoutingStatus() {
   return apiFetch<RoutingStatus>('/trip-planner/routing/status')
 }
+
+/** One mode of the measurement: how often the estimate is off by more than a quarter. */
+export interface RoutingMeasureMode {
+  mode: 'foot' | 'bike' | 'car' | 'transit'
+  pairs: number
+  answered: number
+  offByQuarter: number
+  /** Median of |router − estimate| / router, in percent. */
+  medianDeviationPct: number | null
+  /** Median of router − estimate, in minutes; positive when the estimate is optimistic. */
+  medianDifferenceMinutes: number | null
+}
+
+export interface RoutingMeasureWorst {
+  mode: RoutingMeasureMode['mode']
+  from: string
+  to: string
+  planTitle: string | null
+  estimateMinutes: number
+  routerMinutes: number
+}
+
+/** The estimate next to the router over the caller's planned days (§24). */
+export interface RoutingMeasure {
+  pairs: number
+  modes: RoutingMeasureMode[]
+  worst: RoutingMeasureWorst[]
+  /** The estimate is off by more than a quarter on at least a quarter of the answered hops. */
+  worthwhile: boolean
+}
+
+export function measureRouting() {
+  return apiFetch<RoutingMeasure>('/trip-planner/routing/measure', { method: 'POST' })
+}
