@@ -6,6 +6,21 @@
 # rebuilds when a PBF is newer than the tiles and serves what it has.
 FROM ghcr.io/valhalla/valhalla:latest
 
+# The runtime image ships the binaries and nothing else. The build
+# helpers (valhalla_build_config, valhalla_build_extract) are Python
+# scripts, the timezone build needs spatialite, the healthcheck curl.
+# Without python3 the config step produced an empty file and every
+# build tool failed on "could not parse json".
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      python3 \
+      python-is-python3 \
+      curl \
+      jq \
+      spatialite-bin \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY entrypoint.sh /usr/local/bin/fk-routing
 RUN chmod +x /usr/local/bin/fk-routing \
  && mkdir -p /data /pbf \
