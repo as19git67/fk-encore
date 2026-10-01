@@ -22,7 +22,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { eq, lt } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import { checkRateLimit, resetRateLimit } from "../user/rateLimiter";
@@ -109,6 +109,7 @@ export const completeTanSession = api(
     const info = session.banking_information as {
       bi: Record<string, unknown>;
       fintsTanRef: string;
+      from?: string;
     };
 
     const result = await runSynchronize(session.bankcontact_id, {
@@ -128,6 +129,7 @@ export const completeTanSession = api(
           banking_information: {
             bi: result.bankingInformation ?? info.bi,
             fintsTanRef: result.tanReference ?? info.fintsTanRef,
+            ...(info.from !== undefined ? { from: info.from } : {}),
           },
           challenge: result.tanChallenge ?? session.challenge,
           tan_media_name: result.tanMediaName ?? session.tan_media_name,
@@ -183,6 +185,7 @@ export const completeTanSession = api(
     resetRateLimit(rateKey);
     return await fetchAndPersist(session.bankcontact_id, result.client, {
       userId,
+      from: info.from,
     });
   },
 );
@@ -240,7 +243,7 @@ async function resumeStatementsTan(
   // used — linked accounts only, and each with its own `from` date.
   // Fetching the queue unfiltered/unbounded is what made every queued
   // account raise its own TAN challenge.
-  const plan = await buildFetchPlan(session.bankcontact_id);
+  const plan = await buildFetchPlan(session.bankcontact_id, { from: ctx.from });
   const fetched = await resumeFetchAfterTan(cached, {
     tanReference: info.fintsTanRef,
     tan: p.tan,
@@ -269,6 +272,7 @@ async function resumeStatementsTan(
           currentAccountNumber: fetched.pendingTan.accountNumber,
           remainingAccountNumbers: fetched.pendingTan.remainingAccountNumbers,
           linkedAccountNumbers: ctx.linkedAccountNumbers,
+          ...(ctx.from !== undefined ? { from: ctx.from } : {}),
         },
       })
       .where(eq(financeTanSession.tan_reference, p.tanReference));
@@ -368,7 +372,32 @@ export const cleanupExpiredTanSessions = api(
     const deleted = await db
       .delete(financeTanSession)
       .where(lt(financeTanSession.expires_at, nowIso))
-      .returning({ ref: financeTanSession.tan_reference });
+      .returning({
+        ref: financeTanSession.tan_reference,
+        bankcontact_id: financeTanSession.bankcontact_id,
+      });
+    // A bankcontact whose only pending session just expired would keep
+    // saying "tan-required" until the next sync overwrites it — the
+    // overview counted it as a TAN the user could still answer. Mark
+    // it expired instead; the UI tells the user to start the sync again.
+    const affected = [...new Set(deleted.map((d) => d.bankcontact_id))];
+    for (const bankcontactId of affected) {
+      const [pending] = await db
+        .select({ ref: financeTanSession.tan_reference })
+        .from(financeTanSession)
+        .where(eq(financeTanSession.bankcontact_id, bankcontactId))
+        .limit(1);
+      if (pending) continue;
+      await db
+        .update(financeBankcontact)
+        .set({ last_sync_status: "tan-expired" })
+        .where(
+          and(
+            eq(financeBankcontact.id, bankcontactId),
+            eq(financeBankcontact.last_sync_status, "tan-required"),
+          ),
+        );
+    }
     return { deleted: deleted.length };
   },
 );

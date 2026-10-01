@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import db from "../db/database";
 import {
@@ -173,6 +173,54 @@ describe("finance/overview — defaults", () => {
     const acc = resp.sections.flatMap((s) => s.accounts).find((a) => a.id === giro);
     expect(acc?.balance).toBe("1234.56");
     expect(acc?.balance_as_of?.startsWith("2026-04-15")).toBe(true);
+  });
+
+  it("flags every account of a bankcontact whose sync stopped on a TAN", async () => {
+    const [bc] = await db
+      .insert(financeBankcontact)
+      .values({
+        name: "comdirect",
+        blz: "12345678",
+        login: "u",
+        server_url: "https://x",
+        last_sync_status: "tan-required",
+      })
+      .returning({ id: financeBankcontact.id });
+    const giro = await insertAccount("Giro", "giro");
+    const visa = await insertAccount("Visa", "kreditkarte");
+    const manual = await insertAccount("Bargeld", "bargeld");
+    await db
+      .update(financeAccount)
+      .set({ bankcontact_id: bc.id })
+      .where(inArray(financeAccount.id, [giro, visa]));
+    await ensureUser(7);
+    await grantAcl(giro, 7);
+    await grantAcl(visa, 7);
+    await grantAcl(manual, 7);
+
+    setAuth("7", ["finance.view"]);
+    const resp = await getOverview();
+    const byId = new Map(
+      resp.sections.flatMap((s) => s.accounts).map((a) => [a.id, a]),
+    );
+    expect(byId.get(giro)).toMatchObject({
+      sync_attention: "tan-required",
+      bankcontact_id: bc.id,
+      bankcontact_name: "comdirect",
+    });
+    expect(byId.get(visa)?.sync_attention).toBe("tan-required");
+    expect(byId.get(manual)).toMatchObject({
+      sync_attention: null,
+      bankcontact_id: null,
+    });
+
+    await db
+      .update(financeBankcontact)
+      .set({ last_sync_status: "ok" })
+      .where(eq(financeBankcontact.id, bc.id));
+    const after = await getOverview();
+    const giroAfter = after.sections.flatMap((s) => s.accounts).find((a) => a.id === giro);
+    expect(giroAfter?.sync_attention).toBeNull();
   });
 
   it("counts only recent transactions without user tags as pending", async () => {

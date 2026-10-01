@@ -37,6 +37,7 @@ import {
   financeAccountAccess,
   financeAccountBalance,
   financeAccountType,
+  financeBankcontact,
   financeCurrency,
   financeUserPref,
   users,
@@ -86,6 +87,19 @@ interface OverviewAccount {
   balance_as_of: string | null;
   /** Count of transactions in the last 30 days without user tags. */
   pending_count: number;
+  /**
+   * Set when the linked bankcontact's sync is stuck on a TAN
+   * ("tan-required": one is pending, "tan-expired": it ran out
+   * unanswered). Every account of that bankcontact carries it — the TAN
+   * blocks the whole fetch, including accounts queued behind the one
+   * the bank asked for. The overview shows an icon linking to the
+   * bankcontact, where the sync can be restarted. Null for manual
+   * accounts and whenever the last sync did not stop on a TAN.
+   */
+  sync_attention: "tan-required" | "tan-expired" | null;
+  /** The bankcontact `sync_attention` points at; null for manual accounts. */
+  bankcontact_id: number | null;
+  bankcontact_name: string | null;
 }
 
 interface OverviewSection {
@@ -360,6 +374,9 @@ async function loadAccessibleAccounts(
     type_label: financeAccountType.label,
     currency_code: financeCurrency.code,
     currency_symbol: financeCurrency.symbol,
+    bankcontact_id: financeAccount.bankcontact_id,
+    bankcontact_name: financeBankcontact.name,
+    bankcontact_sync_status: financeBankcontact.last_sync_status,
   };
 
   // Closed accounts are filtered out of the overview — the dashboard
@@ -378,6 +395,10 @@ async function loadAccessibleAccounts(
           financeCurrency,
           eq(financeCurrency.code, financeAccount.currency_code),
         )
+        .leftJoin(
+          financeBankcontact,
+          eq(financeBankcontact.id, financeAccount.bankcontact_id),
+        )
         .where(isNull(financeAccount.closed_at))
     : await db
         .select(fields)
@@ -389,6 +410,10 @@ async function loadAccessibleAccounts(
         .innerJoin(
           financeCurrency,
           eq(financeCurrency.code, financeAccount.currency_code),
+        )
+        .leftJoin(
+          financeBankcontact,
+          eq(financeBankcontact.id, financeAccount.bankcontact_id),
         )
         .innerJoin(
           financeAccountAccess,
@@ -461,8 +486,17 @@ async function loadAccessibleAccounts(
       balance: bal?.balance ?? null,
       balance_as_of: bal?.as_of ?? null,
       pending_count: pendingByAccount.get(r.id) ?? 0,
+      sync_attention: syncAttention(r.bankcontact_sync_status),
+      bankcontact_id: r.bankcontact_id,
+      bankcontact_name: r.bankcontact_name,
     };
   });
+}
+
+function syncAttention(
+  status: string | null,
+): OverviewAccount["sync_attention"] {
+  return status === "tan-required" || status === "tan-expired" ? status : null;
 }
 
 function buildDefaultSections(accounts: OverviewAccount[]): {

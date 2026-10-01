@@ -7,6 +7,8 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
+import Dialog from 'primevue/dialog'
+import DatePicker from 'primevue/datepicker'
 import PageLayout from '../../components/layout/PageLayout.vue'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
 import { useAccountsStore } from '../../stores/finance/accounts'
@@ -18,6 +20,7 @@ import {
   type UnknownBankAccount,
 } from '../../api/finance'
 import TanDialog from '../../components/finance/TanDialog.vue'
+import { toLocalIsoDate } from '../../utils/dateFormat'
 
 const route = useRoute()
 const router = useRouter()
@@ -55,6 +58,16 @@ const form = ref<{
 const pin = ref('')
 const saving = ref(false)
 const syncing = ref(false)
+/** "Ab Datum abrufen" dialog — refills a gap older than the normal
+ *  sync window (newest booking minus 14 days). */
+const syncFromVisible = ref(false)
+const syncFromDate = ref<Date | null>(null)
+const today = new Date()
+/** PSD2 lets banks serve 90 days without a fresh TAN. */
+const syncFromNeedsTan = computed(() => {
+  if (!syncFromDate.value) return false
+  return (today.getTime() - syncFromDate.value.getTime()) / 86_400_000 > 89
+})
 const probingMethods = ref(false)
 const tanMethodOptions = ref<TanMethodOption[]>([])
 const tanProbeInfo = ref<string | null>(null)
@@ -290,7 +303,21 @@ watch(
   },
 )
 
-async function triggerSync() {
+function openSyncFrom() {
+  const d = new Date()
+  d.setDate(d.getDate() - 89)
+  syncFromDate.value = d
+  syncFromVisible.value = true
+}
+
+async function confirmSyncFrom() {
+  if (!syncFromDate.value) return
+  const from = toLocalIsoDate(syncFromDate.value)
+  syncFromVisible.value = false
+  await triggerSync(from)
+}
+
+async function triggerSync(from?: string) {
   if (!bc.value) return
   syncing.value = true
   errorMsg.value = null
@@ -298,7 +325,7 @@ async function triggerSync() {
   lastSyncErrors.value = []
   try {
     // The response is rendered by the `lastSyncResult` watcher above.
-    await store.syncNow(bc.value.id)
+    await store.syncNow(bc.value.id, from)
   } catch (err) {
     errorMsg.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -353,7 +380,7 @@ function ignoreUnknown(entry: UnknownBankAccount) {
 
 function syncStatusSeverity(status: string): 'success' | 'warn' | 'danger' | 'secondary' {
   if (status === 'ok') return 'success'
-  if (status === 'tan-required') return 'warn'
+  if (status === 'tan-required' || status === 'tan-expired') return 'warn'
   if (status === 'partial') return 'warn'
   if (status.startsWith('error')) return 'danger'
   return 'secondary'
@@ -362,6 +389,7 @@ function syncStatusSeverity(status: string): 'success' | 'warn' | 'danger' | 'se
 function syncStatusLabel(status: string): string {
   if (status === 'ok') return 'OK'
   if (status === 'tan-required') return 'TAN offen'
+  if (status === 'tan-expired') return 'TAN abgelaufen'
   if (status === 'partial') return 'Teilweise'
   if (status.startsWith('error:')) return `Fehler ${status.slice(6)}`
   return status
@@ -545,7 +573,15 @@ async function del() {
           label="Sync jetzt"
           icon="pi pi-refresh"
           :loading="syncing"
-          @click="triggerSync"
+          @click="triggerSync()"
+        />
+        <Button
+          label="Ab Datum abrufen…"
+          icon="pi pi-calendar"
+          severity="secondary"
+          outlined
+          :disabled="syncing"
+          @click="openSyncFrom"
         />
         <Button
           label="Sync-Zeiten bearbeiten"
@@ -645,6 +681,42 @@ async function del() {
     </section>
 
     <TanDialog />
+
+    <Dialog
+      v-model:visible="syncFromVisible"
+      modal
+      header="Buchungen ab Datum abrufen"
+      class="dialog-sm"
+    >
+      <p class="hint sync-from-hint">
+        Holt alle Buchungen ab diesem Datum erneut von der Bank, um eine
+        Lücke zu füllen. Bereits gespeicherte Buchungen werden erkannt und
+        nicht doppelt angelegt.
+      </p>
+      <label class="field">
+        <span>Ab Datum</span>
+        <DatePicker
+          v-model="syncFromDate"
+          date-format="dd.mm.yy"
+          :max-date="today"
+          show-icon
+          fluid
+        />
+      </label>
+      <Message v-if="syncFromNeedsTan" severity="warn" :closable="false" class="status-hint">
+        Mehr als 90 Tage zurück: Die Bank verlangt dafür meist eine TAN,
+        manche liefern so alte Buchungen gar nicht mehr.
+      </Message>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" @click="syncFromVisible = false" />
+        <Button
+          label="Abrufen"
+          icon="pi pi-refresh"
+          :disabled="!syncFromDate"
+          @click="confirmSyncFrom"
+        />
+      </template>
+    </Dialog>
   </PageLayout>
 </template>
 
@@ -700,6 +772,9 @@ async function del() {
 }
 .hint {
   margin: 0;
+}
+.sync-from-hint {
+  margin-bottom: var(--space-3);
 }
 .status-tag {
   margin-left: 0.5rem;

@@ -45,6 +45,18 @@ function formatUpdatedAt(iso: string | null): string {
   return `aktualisiert: ${d.toLocaleDateString('de-DE')}`
 }
 
+/**
+ * The sync of this account's bankcontact stopped on a TAN. The TAN can
+ * only be answered from the bankcontact page (restart the sync there),
+ * so the icon is a link to it rather than a plain marker.
+ */
+function syncAttentionTitle(acc: OverviewAccount): string {
+  const bank = acc.bankcontact_name ?? 'Bankkontakt'
+  return acc.sync_attention === 'tan-expired'
+    ? `TAN-Anfrage abgelaufen — Sync bei ${bank} neu starten`
+    : `TAN erforderlich — Sync bei ${bank} neu starten`
+}
+
 function balanceClass(acc: OverviewAccount): string {
   if (acc.balance === null) return 'balance balance-neutral'
   const n = Number(acc.balance)
@@ -267,6 +279,16 @@ async function saveConfig() {
                   class="row-label row-link"
                 >
                   {{ acc.label }}
+                </RouterLink>
+                <RouterLink
+                  v-if="acc.sync_attention && acc.bankcontact_id !== null"
+                  :to="{ name: 'finance-bankcontact-detail', params: { id: acc.bankcontact_id } }"
+                  class="row-attention"
+                  :aria-label="syncAttentionTitle(acc)"
+                  v-tooltip.top="syncAttentionTitle(acc)"
+                  @click.stop
+                >
+                  <i class="pi pi-shield" aria-hidden="true" />
                 </RouterLink>
                 <span
                   v-if="acc.pending_count > 0"
@@ -572,6 +594,22 @@ async function saveConfig() {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
   border-radius: 0.125rem;
+}
+/* Same glyph and colour as the "TAN offen" card on the bankcontacts
+   page, and it is a link: the TAN is answered on the bankcontact page,
+   not here. (A component token such as --p-tag-warn-color only exists
+   once that component has rendered somewhere; the palette is always
+   loaded.) */
+.row-attention {
+  display: inline-flex;
+  align-items: center;
+  color: var(--p-yellow-700);
+  text-decoration: none;
+  border-radius: 0.125rem;
+}
+.row-attention:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .row-badge {
   display: inline-flex;

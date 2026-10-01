@@ -26,7 +26,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import db from "../db/database";
 import {
@@ -34,10 +34,9 @@ import {
   financeAccountAccess,
   financeBankcontact,
   financeTanSession,
-  financeTransaction,
 } from "../db/schema";
-import { runFetchAccounts, runSynchronize, type FintsClientSurface } from "./fints-client";
-import { persistFetchResult } from "./statement-persist";
+import { runSynchronize } from "./fints-client";
+import { fetchAndPersist, type SyncApiResponse } from "./statements";
 import { cleanupExpiredTanSessions } from "./tan-sessions";
 import { sendToUser, type PushPayload } from "../push/push.service";
 import type { FinanceSyncSlot } from "../db/schema";
@@ -127,78 +126,72 @@ export const syncStatements = api(
         } else if (result.state === "idle") {
           // Pull statements + balances from the same live client —
           // avoids a second init-dialog-TAN round trip per cron tick.
-          // Only *linked* finance_account rows receive data; unknown
-          // bank-side accounts are logged for the admin to pick up in
-          // the UI.
+          // Same plan and persistence as the manual triggerSync path
+          // (linked accounts only, closed ones excluded, per-account
+          // `from`). fetchAndPersist also handles a TAN the bank
+          // demands mid-fetch for one account: it stores a
+          // kind="statements" session and reports tan-required, so the
+          // cron only has to notify the user. Without that the paused
+          // account and every account queued behind it silently got
+          // no data while the status still said "ok".
+          const userId = await firstResponsibleUser(bc.id).catch(() => undefined);
+          let resp: SyncApiResponse;
           try {
-            // Same linked-only + per-account-from filter as the manual
-            // triggerSync path — see statements.ts fetchAndPersist comment.
-            const linkedRows = await db
-              .select({
-                id: financeAccount.id,
-                fints_account_number: financeAccount.fints_account_number,
-              })
-              .from(financeAccount)
-              .where(
-                and(
-                  eq(financeAccount.bankcontact_id, bc.id),
-                  isNotNull(financeAccount.fints_account_number),
-                ),
-              );
-            const linkedAccountNumbers = new Set(
-              linkedRows
-                .map((r) => r.fints_account_number)
-                .filter((n): n is string => n !== null && n.length > 0),
-            );
-            const fromByAccountNumber = new Map<string, Date>();
-            if (linkedRows.length > 0) {
-              const ids = linkedRows.map((r) => r.id);
-              const maxes = await db
-                .select({
-                  account_id: financeTransaction.account_id,
-                  latest: sql<string | null>`MAX(${financeTransaction.booking_date})`,
-                })
-                .from(financeTransaction)
-                .where(inArray(financeTransaction.account_id, ids))
-                .groupBy(financeTransaction.account_id);
-              const overlapMs = 14 * 24 * 60 * 60_000;
-              for (const m of maxes) {
-                if (!m.latest) continue;
-                const row = linkedRows.find((r) => r.id === m.account_id);
-                if (!row?.fints_account_number) continue;
-                fromByAccountNumber.set(
-                  row.fints_account_number,
-                  new Date(new Date(m.latest).getTime() - overlapMs),
-                );
-              }
-            }
-            const defaultFrom = new Date(Date.now() - 90 * 24 * 60 * 60_000);
-            const fetched = await runFetchAccounts(
-              result.client as FintsClientSurface,
-              { linkedAccountNumbers, fromByAccountNumber, defaultFrom },
-            );
-            const stats = await persistFetchResult(bc.id, fetched);
-            console.log(
-              `[finance.cron] bankcontact=${bc.id} (${bc.name}) → ok: ` +
-                `accounts=${stats.accounts_seen} ` +
-                `(matched=${stats.accounts_matched} unknown=${stats.accounts_unknown}) ` +
-                `tx=${stats.transactions_inserted} ` +
-                `balances=${stats.balances_written} partial=${fetched.partial}`,
-            );
+            resp = await fetchAndPersist(bc.id, result.client, { userId });
           } catch (fetchErr) {
             console.error(
               `[finance.cron] bankcontact=${bc.id} (${bc.name}) fetch/persist failed:`,
               fetchErr,
             );
+            await db
+              .update(financeBankcontact)
+              .set({
+                last_sync_at: now.toISOString(),
+                last_sync_status: "error:fetch-failed",
+              })
+              .where(eq(financeBankcontact.id, bc.id));
+            errored++;
+            continue;
           }
+          if (resp.state === "tan-required") {
+            if (userId !== undefined) {
+              await notifyTanRequired(bc, resp.tanReference ?? "", resp.challenge ?? "");
+            }
+            tanRequired++;
+            console.log(
+              `[finance.cron] bankcontact=${bc.id} (${bc.name}) → tan-required ` +
+                `during statements fetch, push ${userId !== undefined ? "sent" : "skipped (no ACL)"}`,
+            );
+            continue;
+          }
+          if (resp.state === "error") {
+            await db
+              .update(financeBankcontact)
+              .set({
+                last_sync_at: now.toISOString(),
+                last_sync_status: `error:${resp.errorCode}`,
+              })
+              .where(eq(financeBankcontact.id, bc.id));
+            errored++;
+            continue;
+          }
+          // fetchAndPersist wrote the status itself when it had a
+          // client; without one (legacy mock) it returns zero counters
+          // and leaves the row alone, so write it here as well.
           await db
             .update(financeBankcontact)
             .set({
               last_sync_at: now.toISOString(),
-              last_sync_status: "ok",
+              last_sync_status: resp.partial ? "partial" : "ok",
             })
             .where(eq(financeBankcontact.id, bc.id));
           ok++;
+          console.log(
+            `[finance.cron] bankcontact=${bc.id} (${bc.name}) → ` +
+              `${resp.partial ? "partial" : "ok"}: accounts=${resp.accounts_seen} ` +
+              `(matched=${resp.accounts_matched} unknown=${resp.accounts_unknown}) ` +
+              `tx=${resp.transactions_inserted} balances=${resp.balances_written}`,
+          );
         } else {
           // state === "error"
           const code = result.errorCode ?? "unknown";

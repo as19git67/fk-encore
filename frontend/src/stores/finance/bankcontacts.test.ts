@@ -159,6 +159,15 @@ describe('finance/bankcontacts store — TAN flow', () => {
     expect(store.lastSyncResult?.seq).toBe(2)
   })
 
+  it('passes a start date through to the API', async () => {
+    const store = useBankcontactsStore()
+    vi.mocked(api.triggerSync).mockResolvedValue({ state: 'idle' } as never)
+
+    await store.syncNow(7, '2026-06-15')
+
+    expect(api.triggerSync).toHaveBeenCalledWith(7, '2026-06-15')
+  })
+
   it('clears both dialog state and error on cancel', async () => {
     const store = await openTanDialog()
     vi.mocked(api.completeTan).mockResolvedValue({

@@ -8,6 +8,7 @@ import {
   financeAccount,
   financeAccountAccess,
   financeAccountBalance,
+  financeAccountType,
   financeBankcontact,
   financeTagTransaction,
   financeTanSession,
@@ -227,5 +228,122 @@ describe("finance/statements — triggerSync", () => {
     expect(accounts).toHaveLength(0);
     const acl = await db.select().from(financeAccountAccess);
     expect(acl).toHaveLength(0);
+  });
+});
+
+describe("finance/statements — triggerSync with a start date", () => {
+  async function insertLinkedAccount(bcId: number): Promise<number> {
+    const [type] = await db
+      .select({ id: financeAccountType.id })
+      .from(financeAccountType)
+      .where(eq(financeAccountType.kind, "giro"))
+      .limit(1);
+    const [row] = await db
+      .insert(financeAccount)
+      .values({
+        bankcontact_id: bcId,
+        fints_account_number: "A",
+        type_id: type.id,
+        currency_code: "EUR",
+        account_number: "A",
+        label: "Girokonto",
+      })
+      .returning({ id: financeAccount.id });
+    return row.id;
+  }
+
+  async function syncWithLinkedAccount(from?: string) {
+    setAuth("1", ["finance.accounts.manage"]);
+    await ensureUser(1);
+    const bcId = await insertBankcontact();
+    const accountId = await insertLinkedAccount(bcId);
+    await db.insert(financeTransaction).values({
+      account_id: accountId,
+      booking_date: "2026-09-20",
+      amount: "-10.00",
+      currency_code: "EUR",
+      dedupe_hash: "existing",
+    });
+    mockResult({ state: "idle", client: { stub: true } });
+    vi.mocked(fintsClient.runFetchAccounts).mockResolvedValue({
+      accounts: [],
+      partial: false,
+    });
+    await triggerSync({ bankcontactId: bcId, from });
+    return vi.mocked(fintsClient.runFetchAccounts).mock.calls[0]?.[1] as
+      fintsClient.RunFetchOptions;
+  }
+
+  it("without from, starts 14 days before the newest stored booking", async () => {
+    const opts = await syncWithLinkedAccount();
+    const start = opts.fromByAccountNumber?.get("A");
+    expect(start?.toISOString().slice(0, 10)).toBe("2026-09-06");
+  });
+
+  it("with from, asks the bank for every linked account from that date", async () => {
+    const opts = await syncWithLinkedAccount("2026-06-15");
+    const start = opts.fromByAccountNumber?.get("A");
+    expect(start).toEqual(new Date(2026, 5, 15));
+    expect(opts.defaultFrom).toEqual(new Date(2026, 5, 15));
+  });
+
+  it("rejects a malformed or future from before contacting the bank", async () => {
+    setAuth("1", ["finance.accounts.manage"]);
+    const id = await insertBankcontact();
+    await expect(
+      triggerSync({ bankcontactId: id, from: "15.06.2026" }),
+    ).rejects.toThrow(/YYYY-MM-DD/);
+    await expect(
+      triggerSync({ bankcontactId: id, from: "2026-02-30" }),
+    ).rejects.toThrow(/not a valid date/);
+    await expect(
+      triggerSync({ bankcontactId: id, from: "2999-01-01" }),
+    ).rejects.toThrow(/future/);
+    expect(fintsClient.runSynchronize).not.toHaveBeenCalled();
+  });
+
+  it("keeps from in the init-TAN session so the fetch after the TAN uses it", async () => {
+    setAuth("7", ["finance.accounts.manage"]);
+    await ensureUser(7);
+    const id = await insertBankcontact();
+    mockResult({
+      state: "tan-required",
+      bankingInformation: { systemId: "sys-1" },
+      tanChallenge: "Bitte bestätigen",
+      tanReference: "fints-ref",
+    });
+    const response = await triggerSync({ bankcontactId: id, from: "2026-06-15" });
+    if (response.state !== "tan-required") throw new Error("type narrow");
+    const [session] = await db
+      .select()
+      .from(financeTanSession)
+      .where(eq(financeTanSession.tan_reference, response.tanReference));
+    expect(session.banking_information).toMatchObject({ from: "2026-06-15" });
+  });
+
+  it("keeps from in a mid-fetch statements TAN session", async () => {
+    setAuth("7", ["finance.accounts.manage"]);
+    await ensureUser(7);
+    const bcId = await insertBankcontact();
+    await insertLinkedAccount(bcId);
+    mockResult({ state: "idle", client: { stub: true } });
+    vi.mocked(fintsClient.runFetchAccounts).mockResolvedValue({
+      accounts: [],
+      partial: true,
+      pendingTan: {
+        accountNumber: "A",
+        remainingAccountNumbers: [],
+        tanReference: "fints-ref",
+        tanChallenge: "Bitte bestätigen",
+      },
+    } as Awaited<ReturnType<typeof fintsClient.runFetchAccounts>>);
+    const response = await triggerSync({ bankcontactId: bcId, from: "2026-06-15" });
+    if (response.state !== "tan-required") throw new Error("type narrow");
+    const [session] = await db
+      .select()
+      .from(financeTanSession)
+      .where(eq(financeTanSession.tan_reference, response.tanReference));
+    expect(session.kind).toBe("statements");
+    expect(session.fetch_context).toMatchObject({ from: "2026-06-15" });
   });
 });
