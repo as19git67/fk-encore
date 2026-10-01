@@ -43,6 +43,12 @@ export interface SettlementExtraction {
   /** Execution date (Schlusstag / Zahlbarkeitstag), YYYY-MM-DD. */
   executedAt: string | null;
   currency: string | null;
+  /**
+   * Depot number printed on the statement ("Depotnummer 1234567"), digits
+   * only. Ties a statement to its depot when no snapshot holds the
+   * security any more (sold before the first sync).
+   */
+  depotNumber: string | null;
   /** Which labels matched — for debugging a layout that reads wrong. */
   markers: string[];
 }
@@ -168,13 +174,59 @@ function detectName(text: string, isin: string | null, wkn: string | null): stri
   }
   const id = isin ?? wkn;
   if (id) {
-    const after = new RegExp(String.raw`${id}\s*[\/|,:-]?\s*([A-Za-zÄÖÜäöüß][^\n]{2,80})`).exec(text);
+    // On the identifier's own line, after it ("DE000… Alpha AG").
+    const after = new RegExp(String.raw`${id}[ \t]*[\/|,:-]?[ \t]*([A-Za-zÄÖÜäöüß][^\n]{2,80})`).exec(text);
     if (after) {
       const candidate = after[1]!.trim().replace(/\s{2,}/g, " ");
       if (!/^(WKN|ISIN)\b/i.test(candidate)) return candidate;
     }
+    // The line above the identifier's line, the usual broker layout:
+    //   Alpha Industries AG
+    //   ISIN DE000…  WKN …
+    const lines = text.split("\n").map((l) => l.trim());
+    const at = lines.findIndex((l) => l.includes(id));
+    for (let i = at - 1; i >= 0 && i >= at - 2; i--) {
+      const line = lines[i]!;
+      if (line.length === 0) continue;
+      if (looksLikeName(line)) return line.replace(/\s{2,}/g, " ");
+      break;
+    }
   }
   return null;
+}
+
+/** Labels and headings a statement prints around the security, never its name. */
+const NOT_A_NAME =
+  /^(stück|stk|nominale|kurs|kurswert|preis|wertpapier|kauf|verkauf|dividend|ertrag|erträgnis|ausschüttung|depot|schlusstag|handelstag|ausführung|valuta|datum|abrechnung|zahlbar|isin|wkn|betrag|brutto|netto|provision|steuer|kapitalertrag)/i;
+
+function looksLikeName(line: string): boolean {
+  if (line.length < 3 || line.length > 80) return false;
+  if (line.includes(":")) return false;
+  if (NOT_A_NAME.test(line)) return false;
+  const letters = (line.match(/[A-Za-zÄÖÜäöüß]/g) ?? []).length;
+  return letters >= 3 && letters >= line.replace(/\s/g, "").length / 2;
+}
+
+/**
+ * A WKN printed next to the ISIN without its own "WKN" prefix, as in
+ * "ISIN/WKN DE000…/123456" or "WKN/ISIN 123456/DE000…" — the prefixed
+ * form is what extractWkn already reads.
+ */
+function wknNextToIsin(text: string, isin: string | null): string | null {
+  if (!isin) return null;
+  const after = new RegExp(String.raw`${isin}\s*[/|]\s*([A-Z0-9]{6})\b`).exec(text);
+  if (after) return after[1]!;
+  const before = new RegExp(String.raw`\b([A-Z0-9]{6})\s*[/|]\s*${isin}`).exec(text);
+  if (before && /\d/.test(before[1]!)) return before[1]!;
+  return null;
+}
+
+/** "Depotnummer 123 456 7", "Depot-Nr.: 1234567", "Depotkonto 12-345" → digits only. */
+export function extractDepotNumber(text: string): string | null {
+  const m = /(?:Depot[-\s]?(?:nummer|nr\.?|konto(?:nummer)?)|Depot)\s*[:.]?\s*(\d[\d \t-]{3,20}\d)/i.exec(text);
+  if (!m) return null;
+  const digits = m[1]!.replace(/\D/g, "");
+  return digits.length >= 5 ? digits : null;
 }
 
 /**
@@ -190,7 +242,7 @@ export function parseSettlement(raw: string | null | undefined): SettlementExtra
   if (!kind) return null;
 
   const isin = extractIsin(text);
-  const wkn = extractWkn(text);
+  const wkn = extractWkn(text) ?? wknNextToIsin(text, isin);
   if (!isin && !wkn) return null;
 
   const markers: string[] = [];
@@ -292,6 +344,7 @@ export function parseSettlement(raw: string | null | undefined): SettlementExtra
     net,
     executedAt,
     currency: detectCurrency(text),
+    depotNumber: extractDepotNumber(text),
     markers,
   };
 }

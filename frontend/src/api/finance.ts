@@ -572,6 +572,8 @@ export interface PortfolioAccount {
   id: number
   label: string
   currency_code: string
+  /** Closed depots are left out unless asked for. */
+  closed: boolean
 }
 
 export interface PortfolioPosition {
@@ -647,8 +649,10 @@ export interface PortfolioSummary {
 }
 
 export interface PortfolioResponse {
-  /** Every depot the caller may read, for the scope selector. */
+  /** Every depot with data the caller may read, closed ones flagged — for the scope selector. */
   accounts: PortfolioAccount[]
+  /** Closed depots left out of this view (no `closed` flag, no explicit selection). */
+  closed_hidden: number
   currency: string
   mixed_currency: boolean
   summary: PortfolioSummary
@@ -657,10 +661,11 @@ export interface PortfolioResponse {
 }
 
 export async function getPortfolio(
-  opts: { accounts?: number[] } = {},
+  opts: { accounts?: number[]; closed?: boolean } = {},
 ): Promise<PortfolioResponse> {
   const params = new URLSearchParams()
   if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
   const qs = params.toString()
   return apiFetch(`/finance/portfolio${qs ? '?' + qs : ''}`)
 }
@@ -687,6 +692,84 @@ export interface DepotEnrichResult {
   depot_transaction_id: number | null
   account_id: number | null
   detail: string | null
+  /** Net amount read from the statement. */
+  statement_net: string | null
+  /** Net amount of the matched transaction. */
+  transaction_net: string | null
+  /** What the statement identified itself by — the reason when no depot matched. */
+  isin: string | null
+  wkn: string | null
+  depot_number: string | null
+}
+
+// What needs a look (#1336, stage 4)
+
+export interface PortfolioReviewConflict {
+  document_id: number
+  document_title: string | null
+  account_id: number
+  account_label: string
+  depot_transaction_id: number
+  position_key: string
+  name: string | null
+  kind: string
+  executed_at: string
+  statement_net: string | null
+  transaction_net: string | null
+}
+
+export interface PortfolioReviewDocument {
+  document_id: number
+  document_title: string | null
+  doc_date: string | null
+  /** What the statement identified itself by — why no depot matched. */
+  isin: string | null
+  wkn: string | null
+  depot_number: string | null
+}
+
+export interface HoldingGap {
+  account_id: number
+  position_key: string
+  from: string
+  to: string
+  amount_before: string
+  amount_after: string
+  delta: string
+  explained: string
+  /** Shares no transaction accounts for (signed). */
+  unexplained: string
+  transaction_count: number
+}
+
+export interface PortfolioReviewHoldingGap extends HoldingGap {
+  account_label: string
+  name: string | null
+}
+
+export interface PortfolioReviewResponse {
+  conflicts: PortfolioReviewConflict[]
+  unmatched_documents: PortfolioReviewDocument[]
+  holding_gaps: PortfolioReviewHoldingGap[]
+  unverifiable_changes: number
+}
+
+export async function getPortfolioReview(
+  opts: { accounts?: number[]; closed?: boolean } = {},
+): Promise<PortfolioReviewResponse> {
+  const params = new URLSearchParams()
+  if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
+  const qs = params.toString()
+  return apiFetch(`/finance/portfolio/review${qs ? '?' + qs : ''}`)
+}
+
+/** Resolve a conflict in the statement's favour. */
+export async function applySettlementDocument(documentId: number): Promise<DepotEnrichResult> {
+  return apiFetch(`/finance/portfolio/documents/${documentId}/apply`, {
+    method: 'POST',
+    body: JSON.stringify({ documentId }),
+  })
 }
 
 export interface EnrichDepotDocumentsResponse {
@@ -719,6 +802,8 @@ export type PortfolioTxSortField = 'executed_at' | 'net_amount' | 'name'
 
 export interface ListPortfolioTransactionsOptions {
   accounts?: number[]
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean
   position?: string
   kind?: string
   q?: string
@@ -742,6 +827,7 @@ export async function listPortfolioTransactions(
 ): Promise<PortfolioTransactionsResponse> {
   const params = new URLSearchParams()
   if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
   if (opts.position) params.set('position', opts.position)
   if (opts.kind) params.set('kind', opts.kind)
   if (opts.q) params.set('q', opts.q)
@@ -806,14 +892,19 @@ export interface PortfolioPositionResponse {
   /** Each evaluated sale with the cost it was matched against, newest first. */
   sales: PositionSale[]
   years: PositionYear[]
+  /** Share changes between snapshots no transaction accounts for. */
+  holding_gaps: HoldingGap[]
+  /** Share changes that could not be checked (a transaction lacks its quantity). */
+  unverifiable_changes: number
 }
 
 export async function getPortfolioPosition(
   key: string,
-  opts: { accounts?: number[] } = {},
+  opts: { accounts?: number[]; closed?: boolean } = {},
 ): Promise<PortfolioPositionResponse> {
   const params = new URLSearchParams()
   if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  if (opts.closed) params.set('closed', 'true')
   const qs = params.toString()
   return apiFetch(`/finance/portfolio/positions/${encodeURIComponent(key)}${qs ? '?' + qs : ''}`)
 }

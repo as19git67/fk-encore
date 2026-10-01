@@ -1,4 +1,4 @@
-import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioTransaction, Tag, Transaction } from '../api/finance'
+import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -268,9 +268,11 @@ const PF_ISIN_B = 'DE0000000BBB2'
 
 export const MOCK_PORTFOLIO: PortfolioResponse = {
   accounts: [
-    { id: 11, label: 'Depot Beispielbank', currency_code: 'EUR' },
-    { id: 12, label: 'Depot Musterbroker', currency_code: 'EUR' },
+    { id: 11, label: 'Depot Beispielbank', currency_code: 'EUR', closed: false },
+    { id: 12, label: 'Depot Musterbroker', currency_code: 'EUR', closed: false },
+    { id: 13, label: 'Depot Altbank', currency_code: 'EUR', closed: true },
   ],
+  closed_hidden: 1,
   currency: 'EUR',
   mixed_currency: false,
   summary: {
@@ -400,6 +402,7 @@ export const MOCK_PORTFOLIO: PortfolioResponse = {
 
 export const MOCK_PORTFOLIO_EMPTY: PortfolioResponse = {
   accounts: [],
+  closed_hidden: 0,
   currency: 'EUR',
   mixed_currency: false,
   summary: {
@@ -487,9 +490,49 @@ export const MOCK_PORTFOLIO_POSITION: PortfolioPositionResponse = {
   sales: [
     { transaction_id: 903, account_id: 11, executed_at: '2026-02-03', quantity: '10.00000000', proceeds: '1418.95', cost: '1200.00', cost_per_unit: '120.000000', gain: '218.95' },
   ],
+  holding_gaps: [
+    { account_id: 12, position_key: PF_ISIN_A, from: '2025-06-01', to: '2025-09-01', amount_before: '10.00000000', amount_after: '20.00000000', delta: '10.00000000', explained: '0.00000000', unexplained: '10.00000000', transaction_count: 0 },
+  ],
+  unverifiable_changes: 1,
   years: [
     { year: 2026, realized: '218.95', sell_count: 1, income: '88.35', dividend_count: 1, fees: '10.00', taxes: '52.70', },
     { year: 2025, realized: '0.00', sell_count: 0, income: '120.00', dividend_count: 1, fees: '0.00', taxes: '30.00' },
     { year: 2024, realized: '0.00', sell_count: 0, income: '0.00', dividend_count: 0, fees: '20.00', taxes: '0.00' },
   ],
+}
+
+export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
+  conflicts: [
+    {
+      document_id: 305,
+      document_title: 'Wertpapierabrechnung Kauf Beispiel World ETF',
+      account_id: 12,
+      account_label: 'Depot Musterbroker',
+      depot_transaction_id: 904,
+      position_key: PF_ISIN_B,
+      name: 'Beispiel World ETF',
+      kind: 'buy',
+      executed_at: '2025-11-05',
+      statement_net: '-2459.50',
+      transaction_net: '-2457.00',
+    },
+  ],
+  unmatched_documents: [
+    { document_id: 306, document_title: 'Dividendengutschrift Gamma Beteiligungen', doc_date: '2026-06-15', isin: 'DE000000GGG7', wkn: null, depot_number: '9900000001' },
+  ],
+  holding_gaps: [
+    {
+      account_id: 12, account_label: 'Depot Musterbroker', position_key: PF_ISIN_A, name: 'Alpha Industries AG',
+      from: '2025-06-01', to: '2025-09-01', amount_before: '10.00000000', amount_after: '20.00000000',
+      delta: '10.00000000', explained: '0.00000000', unexplained: '10.00000000', transaction_count: 0,
+    },
+  ],
+  unverifiable_changes: 2,
+}
+
+export const MOCK_PORTFOLIO_REVIEW_EMPTY: PortfolioReviewResponse = {
+  conflicts: [],
+  unmatched_documents: [],
+  holding_gaps: [],
+  unverifiable_changes: 0,
 }
