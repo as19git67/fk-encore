@@ -9,6 +9,7 @@ import ScrollX from '../../components/layout/ScrollX.vue'
 import EmptyState from '../../components/layout/EmptyState.vue'
 import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
+import DepotTxSources from '../../components/finance/DepotTxSources.vue'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { useMediaQuery } from '../../composables/useBreakpoint'
 import { compactDateLabels, fullDateLabel } from '../../utils/financeChartDates'
@@ -248,12 +249,6 @@ function transactionCash(tx: PortfolioTransaction): string {
   if (tx.net_amount !== null) return formatSignedCurrency(tx.net_amount, tx.currency)
   if (tx.gross_amount !== null) return formatCurrency(tx.gross_amount, tx.currency)
   return '–'
-}
-
-function transactionLink(tx: PortfolioTransaction) {
-  return tx.linked_transaction_id === null
-    ? null
-    : { name: 'finance-transaction-detail', params: { id: tx.linked_transaction_id } }
 }
 </script>
 
@@ -518,8 +513,11 @@ function transactionLink(tx: PortfolioTransaction) {
                 <td class="pp-col-num pp-strong" :class="signClass(tx.net_amount)">{{ transactionCash(tx) }}</td>
                 <td>{{ tx.account_label }}</td>
                 <td class="pp-source">
-                  <RouterLink v-if="transactionLink(tx)" :to="transactionLink(tx)!" class="pp-link">Girobuchung</RouterLink>
-                  <template v-else>{{ tx.source === 'manual' ? 'manuell' : tx.source }}</template>
+                  <DepotTxSources
+                    :source="tx.source"
+                    :linked-transaction-id="tx.linked_transaction_id"
+                    :document-ids="tx.document_ids"
+                  />
                 </td>
                 <td class="pp-note">{{ tx.note ?? '' }}</td>
               </tr>

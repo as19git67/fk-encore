@@ -11,11 +11,14 @@ import ScrollX from '../../components/layout/ScrollX.vue'
 import EmptyState from '../../components/layout/EmptyState.vue'
 import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
+import Message from 'primevue/message'
+import DepotTxSources from '../../components/finance/DepotTxSources.vue'
 import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
 import { useSort } from '../../composables/useSort'
 import type { FilterChip } from '../../components/layout/listToolbar'
 import { replaceQuerySlice, updateRouteQuery } from '../../utils/routeQueryUpdate'
 import {
+  enrichDepotTransactionsFromDocuments,
   getPortfolio,
   listPortfolioTransactions,
   type PortfolioPosition,
@@ -359,10 +362,39 @@ function transactionCash(tx: PortfolioTransaction): string {
   return '–'
 }
 
-function transactionLink(tx: PortfolioTransaction) {
-  return tx.linked_transaction_id === null
-    ? null
-    : { name: 'finance-transaction-detail', params: { id: tx.linked_transaction_id } }
+// ── Settlement documents (#1336, stage 4) ────────────────────────────
+// Documents are read after classification on their own; this runs the
+// same over every settlement not linked yet — old statements, or ones
+// that arrived before the depot's holdings told them where they belong.
+const enriching = ref(false)
+const enrichNotice = ref<{ severity: 'success' | 'info' | 'warn'; text: string } | null>(null)
+
+async function enrichFromDocuments() {
+  enriching.value = true
+  enrichNotice.value = null
+  try {
+    const r = await enrichDepotTransactionsFromDocuments({ accounts: accountIds.value })
+    const changed = r.created + r.enriched + r.linked
+    const parts: string[] = []
+    if (r.created > 0) parts.push(`${r.created} neu angelegt`)
+    if (r.enriched > 0) parts.push(`${r.enriched} ergänzt`)
+    if (r.linked > 0) parts.push(`${r.linked} verknüpft`)
+    if (r.conflicts > 0) parts.push(`${r.conflicts} mit abweichendem Betrag — bitte prüfen`)
+    if (r.skipped_no_holding > 0) parts.push(`${r.skipped_no_holding} ohne passendes Depot`)
+    enrichNotice.value = {
+      severity: r.conflicts > 0 ? 'warn' : changed > 0 ? 'success' : 'info',
+      text: parts.length > 0
+        ? `Belege eingelesen: ${parts.join(', ')}.`
+        : 'Keine neuen Wertpapier- oder Dividendenabrechnungen gefunden.',
+    }
+    if (changed > 0) {
+      await Promise.all([loadPortfolio(), loadTransactions()])
+    }
+  } catch (e: any) {
+    enrichNotice.value = { severity: 'warn', text: e?.message ?? 'Belege konnten nicht eingelesen werden' }
+  } finally {
+    enriching.value = false
+  }
 }
 </script>
 
@@ -376,6 +408,16 @@ function transactionLink(tx: PortfolioTransaction) {
         text
         :disabled="loading || txLoading"
         @click="loadPortfolio(); loadTransactions()"
+      />
+      <Button
+        v-tooltip.bottom="'Wertpapier- und Dividendenabrechnungen aus den Dokumenten lesen und den Transaktionen zuordnen'"
+        icon="pi pi-file-import"
+        label="Belege einlesen"
+        severity="secondary"
+        text
+        :loading="enriching"
+        :disabled="noDepots"
+        @click="enrichFromDocuments"
       />
     </template>
 
@@ -429,6 +471,12 @@ function transactionLink(tx: PortfolioTransaction) {
 
     <template #notice>
       <ErrorBanner v-if="error" :message="error" closable @retry="loadPortfolio" @close="error = null" />
+      <Message
+        v-if="enrichNotice"
+        :severity="enrichNotice.severity"
+        closable
+        @close="enrichNotice = null"
+      >{{ enrichNotice.text }}</Message>
     </template>
 
     <PageSkeleton v-if="loading && !portfolio" variant="list" :count="6" />
@@ -718,10 +766,11 @@ function transactionLink(tx: PortfolioTransaction) {
                 <td class="pf-col-num pf-value" :class="isSignedCell(tx.net_amount)">{{ transactionCash(tx) }}</td>
                 <td>{{ tx.account_label }}</td>
                 <td class="pf-source">
-                  <RouterLink v-if="transactionLink(tx)" :to="transactionLink(tx)!" class="pf-link">
-                    Girobuchung
-                  </RouterLink>
-                  <template v-else>{{ tx.source === 'manual' ? 'manuell' : tx.source }}</template>
+                  <DepotTxSources
+                    :source="tx.source"
+                    :linked-transaction-id="tx.linked_transaction_id"
+                    :document-ids="tx.document_ids"
+                  />
                 </td>
               </tr>
             </tbody>
@@ -972,9 +1021,6 @@ function transactionLink(tx: PortfolioTransaction) {
 .pf-source {
   font-size: var(--text-sm);
   color: var(--p-text-muted-color);
-}
-.pf-link {
-  color: var(--p-primary-color);
 }
 .pf-more {
   display: flex;

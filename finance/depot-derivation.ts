@@ -43,7 +43,7 @@
  * NOT NULL` makes re-runs no-ops.
  */
 
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import db from "../db/database";
 import {
@@ -247,6 +247,8 @@ export interface DerivationStats {
   skipped: number;
   /** Bookings already covered by a prior derivation (dedupe hit). */
   duplicates: number;
+  /** Bookings attached to a row a settlement document created first. */
+  merged: number;
   /** Soft errors (per-tx insert failures). */
   errors: string[];
   /**
@@ -269,6 +271,54 @@ export interface DerivationStats {
  * bankcontact and write `source='giro-derived'` rows into
  * finance_depot_transaction for the ones that match a known holding.
  */
+/**
+ * A row read from a settlement document that this booking confirms: same
+ * depot, position and kind, executed within ±7 days, not yet linked to a
+ * booking, with a net amount that agrees (or none). Returns its id.
+ */
+async function findDocumentRowForBooking(b: {
+  accountId: number;
+  isin: string | null;
+  wkn: string | null;
+  kind: DerivedKind;
+  executedAt: string;
+  net: number;
+}): Promise<number | null> {
+  const ids = [];
+  if (b.isin) ids.push(eq(financeDepotTransaction.isin, b.isin));
+  if (b.wkn) ids.push(eq(financeDepotTransaction.wkn, b.wkn));
+  if (ids.length === 0) return null;
+  const rows = await db
+    .select({
+      id: financeDepotTransaction.id,
+      executed_at: financeDepotTransaction.executed_at,
+      net_amount: financeDepotTransaction.net_amount,
+    })
+    .from(financeDepotTransaction)
+    .where(
+      and(
+        eq(financeDepotTransaction.account_id, b.accountId),
+        eq(financeDepotTransaction.kind, b.kind),
+        eq(financeDepotTransaction.source, "document"),
+        isNull(financeDepotTransaction.linked_transaction_id),
+        or(...ids),
+        sql`${financeDepotTransaction.executed_at} BETWEEN ${b.executedAt}::date - 7 AND ${b.executedAt}::date + 7`,
+      ),
+    );
+  const target = Date.parse(`${b.executedAt}T00:00:00Z`);
+  const fits = rows
+    .filter((r) => {
+      if (r.net_amount === null) return true;
+      return Math.abs(Math.abs(Number(r.net_amount)) - Math.abs(b.net)) <= 0.011;
+    })
+    .sort(
+      (x, y) =>
+        Math.abs(Date.parse(`${x.executed_at.slice(0, 10)}T00:00:00Z`) - target) -
+        Math.abs(Date.parse(`${y.executed_at.slice(0, 10)}T00:00:00Z`) - target),
+    );
+  return fits[0]?.id ?? null;
+}
+
 export async function deriveDepotTransactionsForBankcontact(
   bankcontactId: number,
 ): Promise<DerivationStats> {
@@ -276,6 +326,7 @@ export async function deriveDepotTransactionsForBankcontact(
     derived: 0,
     skipped: 0,
     duplicates: 0,
+    merged: 0,
     errors: [],
     candidates: 0,
     skipped_not_classified: 0,
@@ -406,8 +457,41 @@ export async function deriveDepotTransactionsForBankcontact(
     // OR wkn, whichever is non-null on the holding).
     const rowIsin = isin ?? holding.isin;
     const rowWkn = wkn ?? holding.wkn;
+    const executedAt = (tx.value_date ?? tx.booking_date).slice(0, 10);
 
     try {
+      // Already merged into a row read from a settlement document on an
+      // earlier run: that row carries the booking, not the giro hash.
+      const [alreadyLinked] = await db
+        .select({ id: financeDepotTransaction.id })
+        .from(financeDepotTransaction)
+        .where(eq(financeDepotTransaction.linked_transaction_id, tx.id))
+        .limit(1);
+      if (alreadyLinked) {
+        stats.duplicates++;
+        continue;
+      }
+
+      // A settlement document may have created the row before the booking
+      // arrived (#1336, stage 4). Attach the booking to it instead of
+      // deriving a second, poorer copy of the same trade.
+      const docRow = await findDocumentRowForBooking({
+        accountId: holding.account_id,
+        isin: rowIsin,
+        wkn: rowWkn,
+        kind,
+        executedAt,
+        net: netSigned,
+      });
+      if (docRow !== null) {
+        await db
+          .update(financeDepotTransaction)
+          .set({ linked_transaction_id: tx.id })
+          .where(eq(financeDepotTransaction.id, docRow));
+        stats.merged++;
+        continue;
+      }
+
       const inserted = await db
         .insert(financeDepotTransaction)
         .values({
@@ -416,7 +500,7 @@ export async function deriveDepotTransactionsForBankcontact(
           wkn: rowWkn,
           name: holding.name,
           kind,
-          executed_at: (tx.value_date ?? tx.booking_date).slice(0, 10),
+          executed_at: executedAt,
           amount: null, // shares not known from a giro booking
           price: null,
           gross_amount: gross,

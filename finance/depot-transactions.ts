@@ -383,6 +383,8 @@ interface DeriveDepotTransactionsResponse {
   derived: number;
   skipped: number;
   duplicates: number;
+  /** Bookings attached to a row a settlement document created first. */
+  merged: number;
   errors: string[];
   /** Bookings that looked like Wertpapierabrechnungen and were examined. */
   candidates: number;

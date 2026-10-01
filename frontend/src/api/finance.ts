@@ -542,6 +542,8 @@ export interface DeriveDepotTransactionsResponse {
   derived: number
   skipped: number
   duplicates: number
+  /** Bookings attached to a row a settlement document created first. */
+  merged: number
   errors: string[]
   /** Bookings that looked like Wertpapierabrechnungen and were examined. */
   candidates: number
@@ -666,6 +668,51 @@ export async function getPortfolio(
 export interface PortfolioTransaction extends Omit<DepotTransaction, 'created_at'> {
   account_label: string
   position_key: string
+  /** Settlement documents this row was read from or confirmed by. */
+  document_ids: number[]
+}
+
+export type DepotEnrichOutcome =
+  | 'created'
+  | 'enriched'
+  | 'linked'
+  | 'already_linked'
+  | 'not_settlement'
+  | 'no_holding'
+  | 'conflict'
+
+export interface DepotEnrichResult {
+  document_id: number
+  outcome: DepotEnrichOutcome
+  depot_transaction_id: number | null
+  account_id: number | null
+  detail: string | null
+}
+
+export interface EnrichDepotDocumentsResponse {
+  documents_examined: number
+  created: number
+  enriched: number
+  linked: number
+  already_linked: number
+  skipped_not_settlement: number
+  skipped_no_holding: number
+  conflicts: number
+  errors: string[]
+  results: DepotEnrichResult[]
+}
+
+/** Read every unlinked settlement document into the depots the caller may write to. */
+export async function enrichDepotTransactionsFromDocuments(
+  opts: { accounts?: number[]; limit?: number } = {},
+): Promise<EnrichDepotDocumentsResponse> {
+  const body: Record<string, unknown> = {}
+  if (opts.accounts && opts.accounts.length > 0) body.accounts = opts.accounts.join(',')
+  if (opts.limit !== undefined) body.limit = opts.limit
+  return apiFetch('/finance/portfolio/documents/enrich', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }
 
 export type PortfolioTxSortField = 'executed_at' | 'net_amount' | 'name'
