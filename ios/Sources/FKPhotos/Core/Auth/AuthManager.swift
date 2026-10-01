@@ -253,6 +253,7 @@ public final class AuthManager: @unchecked Sendable {
         SharedStorage.defaults.removeObject(forKey: SharedStorage.tokenKey)
         SharedStorage.defaults.removeObject(forKey: SharedStorage.refreshTokenKey)
         SharedStorage.defaults.removeObject(forKey: SharedStorage.tokenExpiryKey)
+        WidgetSnapshotStore.clearAll()
         Task { @MainActor in
             currentUser = nil
             isAuthenticated = false
