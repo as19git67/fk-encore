@@ -717,6 +717,8 @@ export async function extractSettlementValues(text: string): Promise<Record<stri
     "Fehlt ein Wert, setze null. Beträge als positive Zahl ohne Tausenderpunkte (z. B. 2966.40), Datumsangaben als YYYY-MM-DD.";
   const prompt =
     "Gib ein JSON-Objekt mit genau diesen Schlüsseln zurück:\n" +
+    '- "is_settlement": true, wenn der Beleg eine Wertpapierabrechnung (Kauf/Verkauf) oder eine Dividenden-/Ertragsgutschrift einer Bank oder eines Brokers zu einem Depot ist; ' +
+    'false bei allem anderen, insbesondere bei Versicherungen (Lebens-/Rentenversicherung, Standmitteilung, Überschussbeteiligung, Police), Kontoauszügen, Depotauszügen, Steuerbescheinigungen\n' +
     '- "kind": "buy" für Kauf/Zeichnung/Sparplan, "sell" für Verkauf, "dividend" für Dividende/Ausschüttung/Ertrag, sonst null\n' +
     '- "isin": die ISIN des Wertpapiers (12 Zeichen)\n' +
     '- "wkn": die WKN (6 Zeichen)\n' +

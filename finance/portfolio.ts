@@ -56,7 +56,7 @@ import {
   type EnrichResult,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
-import { readSettlement, type LlmStatus } from "./depot-settlement-reader";
+import { readSettlement, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
 import type { CheckName, FieldSource, MergeField } from "./depot-settlement-merge";
 
 console.log("[boot] finance/portfolio.ts: all imports resolved");
@@ -1419,9 +1419,13 @@ interface EnrichDocumentsParams {
   accounts?: string;
   /** Maximum number of documents examined in this call (default 200). */
   limit?: number;
+  /** Continue a run: only documents with an id below this (the previous call's `next_before`). */
+  before?: number;
 }
 
 interface EnrichDocumentsResponse {
+  /** Pass as `before` to examine the next page; null when every pending document was examined. */
+  next_before: number | null;
   documents_examined: number;
   created: number;
   enriched: number;
@@ -1442,7 +1446,7 @@ export const enrichDepotTransactionsFromDocuments = api(
     path: "/finance/portfolio/documents/enrich",
     auth: true,
   },
-  async ({ accounts, limit }: EnrichDocumentsParams): Promise<EnrichDocumentsResponse> => {
+  async ({ accounts, limit, before }: EnrichDocumentsParams): Promise<EnrichDocumentsResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
     const depots = await writableDepots(auth, parseAccountIds(accounts));
@@ -1452,6 +1456,8 @@ export const enrichDepotTransactionsFromDocuments = api(
     const stats = await enrichPendingDocuments(
       depots.map((d) => d.id),
       limit ?? 200,
+      {},
+      { before: before ?? null },
     );
     return {
       ...stats,
@@ -1685,7 +1691,16 @@ export const applySettlementDocument = api(
 // fallback, and the response says so rather than leaving it to guess.
 // ----------------------------------------------------------------------
 
-type InspectionRejection = "no_text" | "no_kind" | "no_identifier" | "no_date" | "no_amount";
+type InspectionRejection =
+  | "no_text"
+  /** The rules recognised insurance paperwork (policy, surplus statement). */
+  | "insurance"
+  /** The model says it is something else and the rules found no word only a settlement prints. */
+  | "llm_other"
+  | "no_kind"
+  | "no_identifier"
+  | "no_date"
+  | "no_amount";
 
 interface InspectionFields {
   kind: string | null;
@@ -1803,7 +1818,9 @@ export const inspectSettlementDocument = api(
     const reading = await readSettlement(documentId, doc.extracted_text, "allow");
     const v = reading.merge.values;
     let rejection: InspectionRejection | null = null;
+    const otherPaper = rejectedAsOtherPaper(reading);
     if (!doc.extracted_text || doc.extracted_text.trim().length === 0) rejection = "no_text";
+    else if (otherPaper) rejection = otherPaper;
     else if (!v.kind) rejection = "no_kind";
     else if (!v.isin && !v.wkn) rejection = "no_identifier";
     else if (!v.executedAt && !doc.doc_date) rejection = "no_date";

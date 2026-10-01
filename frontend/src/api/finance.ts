@@ -730,7 +730,14 @@ export interface SettlementCheck {
 
 // What the parser read from one document
 
-export type SettlementRejection = 'no_text' | 'no_kind' | 'no_identifier' | 'no_date' | 'no_amount'
+export type SettlementRejection =
+  | 'no_text'
+  | 'insurance'
+  | 'llm_other'
+  | 'no_kind'
+  | 'no_identifier'
+  | 'no_date'
+  | 'no_amount'
 
 export interface SettlementInspectionFields {
   kind: string | null
@@ -871,15 +878,18 @@ export interface EnrichDepotDocumentsResponse {
   unverified: number
   errors: string[]
   results: DepotEnrichResult[]
+  /** Pass as `before` to examine the next page; null once every pending document was examined. */
+  next_before: number | null
 }
 
 /** Read every unlinked settlement document into the depots the caller may write to. */
 export async function enrichDepotTransactionsFromDocuments(
-  opts: { accounts?: number[]; limit?: number } = {},
+  opts: { accounts?: number[]; limit?: number; before?: number | null } = {},
 ): Promise<EnrichDepotDocumentsResponse> {
   const body: Record<string, unknown> = {}
   if (opts.accounts && opts.accounts.length > 0) body.accounts = opts.accounts.join(',')
   if (opts.limit !== undefined) body.limit = opts.limit
+  if (opts.before != null) body.before = opts.before
   return apiFetch('/finance/portfolio/documents/enrich', {
     method: 'POST',
     body: JSON.stringify(body),

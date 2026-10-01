@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   extractDepotNumber,
+  inspectSettlement,
   isUsableSettlement,
   parseGermanNumber,
   parseSettlement,
@@ -159,5 +160,56 @@ describe("parseSettlement — depot number and WKN beside the ISIN", () => {
       "Wertpapierabrechnung Verkauf\nWKN/ISIN AAA111/DE000000AAA1\nSchlusstag 01.02.2026\nKurswert 100,00 EUR",
     );
     expect(before!.wkn).toBe("AAA111");
+  });
+});
+
+describe("parseSettlement — what is not a settlement, and layouts without the usual heading", () => {
+  it("rejects insurance paperwork even when it prints a fund's ISIN and 'Ausschüttung'", () => {
+    // A unit-linked life policy's annual statement: funds with ISINs, a
+    // surplus "Ausschüttung" — and nothing a depot would book.
+    const policy = `Beispiel Lebensversicherung AG
+Fondsgebundene Kapitallebensversicherung
+Versicherungsnehmer: Max Muster
+Versicherungsnummer 12-345-678
+Jahresmitteilung zum 31.12.2025
+Überschussbeteiligung: Ausschüttung der Überschüsse 123,45 EUR
+Fonds: Beispiel World Fonds ISIN DE000000AAA1 Anteile 12,345
+Datum 15.01.2026`;
+    expect(parseSettlement(policy)).toBeNull();
+    const i = inspectSettlement(policy)!;
+    expect(i.insurance).toBe(true);
+    expect(i.kind).toBeNull();
+  });
+
+  it("keeps a settlement that merely names an insurer", () => {
+    const text = `Beispielbank AG
+Wertpapierabrechnung Kauf
+Stück 10
+Muster Rückversicherungs-Gesellschaft AG
+ISIN DE000000AAA1
+Schlusstag 14.03.2026
+Kurswert 1.000,00 EUR
+Ausmachender Betrag 1.004,90 EUR`;
+    const s = parseSettlement(text)!;
+    expect(s.kind).toBe("buy");
+    expect(inspectSettlement(text)!.strong).toBe(true);
+  });
+
+  it("reads buy and sell in compound spellings and without an 'Abrechnung' heading", () => {
+    const buy = parseSettlement(`Beispielbank AG
+Wertpapierkauf
+ISIN DE000000AAA1
+Ausführungstag 14.03.2026
+Kurswert 1.000,00 EUR
+Ausmachender Betrag 1.004,90 EUR`);
+    expect(buy?.kind).toBe("buy");
+    const sell = parseSettlement(`Ausführungsanzeige Fondsverkauf
+ISIN DE000000AAA1
+Handelstag 14.03.2026
+Kurswert 1.000,00 EUR
+Endbetrag 995,10 EUR`);
+    expect(sell?.kind).toBe("sell");
+    // "kaufen" in the boilerplate is not a buy.
+    expect(parseSettlement("Abrechnung Sie können jederzeit Anteile kaufen ISIN DE000000AAA1 Datum 01.02.2026 Endbetrag 1,00 EUR")).toBeNull();
   });
 });
