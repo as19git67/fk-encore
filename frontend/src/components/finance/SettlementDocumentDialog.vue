@@ -209,6 +209,7 @@ function openInDocuments() {
     v-model:visible="visible"
     class="dialog-lg"
     modal
+    block-scroll
     :header="header"
     :draggable="false"
   >
@@ -346,6 +347,11 @@ function openInDocuments() {
   min-height: 60vh;
 }
 .sd-pdf {
+  /* A flex container with a definite height: that is what lets PdfViewer
+     fill it and scroll its page stack itself (the same contract as the
+     document detail's .pdf-panel). Without it the viewer grows with the
+     pages, the overflow is clipped and nothing scrolls. */
+  display: flex;
   min-width: 0;
   height: 70vh;
   border: 1px solid var(--p-content-border-color);
