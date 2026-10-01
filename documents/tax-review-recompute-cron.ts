@@ -70,12 +70,13 @@ export const runTaxReviewRecomputeEndpoint = api(
   },
 );
 
-// 04:15 Berlin (CEST) / 02:15 UTC — off-peak, before the morning batch window.
+// 13:00 Berlin (CEST) / 12:00 (CET) / 11:00 UTC — inside the 10–15 Uhr window,
+// after the batch jobs that end at 10:30 UTC.
 schedule({
   name: "documents-tax-review-recompute",
   description: "Re-derive Bezugspersonen tax-review flags (age limits, own returns)",
   service: "documents",
-  scheduleLabel: "daily 02:15 UTC",
-  nextFire: dailyAtUtc(2, 15),
+  scheduleLabel: "daily 11:00 UTC",
+  nextFire: dailyAtUtc(11, 0),
   run: () => runTaxReviewRecomputeEndpoint(),
 });
