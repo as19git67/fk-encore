@@ -26,6 +26,7 @@ import {
   getPortfolio,
   getPortfolioPosition,
   getPortfolioReview,
+  inspectSettlementDocument,
   listPortfolioTransactions,
 } from "./portfolio";
 
@@ -507,5 +508,62 @@ describe("finance/portfolio — depots without any data", () => {
     });
     const resp = await getPortfolio({});
     expect(resp.accounts.map((a) => a.id)).toEqual([depot]);
+  });
+});
+
+describe("finance/portfolio — document inspection", () => {
+  it("reports every field, the labels read, the depot a dry run picks and how", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(BUY_TEXT);
+
+    const before = await inspectSettlementDocument({ documentId: docId });
+    expect(before.method).toBe("rules");
+    expect(before.llm_fallback_used).toBe(false);
+    expect(before.is_settlement).toBe(true);
+    expect(before.rejection).toBeNull();
+    expect(before.fields).toMatchObject({
+      kind: "buy",
+      isin: ISIN_A,
+      executed_at: "2026-03-14",
+      quantity: "25.00000000",
+      price: "118.400000",
+      gross: "2960.00",
+      fees: "6.40",
+      tax: null,
+      net: "-2966.40",
+      currency: "EUR",
+    });
+    expect(before.labels.fees).toContain("Provision");
+    expect(before.labels.fees).toContain("Handelsplatzgebühr");
+    expect(before.labels.executed_at).toContain("Schlusstag");
+    expect(before.depot).toMatchObject({
+      outcome: "created",
+      account_id: depot,
+      account_label: "Depot",
+      matched_by: "holding",
+      date_source: "statement",
+    });
+    expect(before.links).toEqual([]);
+
+    await enrichDocument(docId);
+    const after = await inspectSettlementDocument({ documentId: docId });
+    expect(after.depot!.outcome).toBe("already_linked");
+    expect(after.links.map((l) => [l.account_id, l.kind, l.net_amount])).toEqual([[depot, "buy", "-2966.40"]]);
+  });
+
+  it("says why a text is not a settlement, and hides other users' documents", async () => {
+    await setup();
+    const invoice = await insertDocument("Rechnung Nr. 1 über 120,00 EUR");
+    const r = await inspectSettlementDocument({ documentId: invoice });
+    expect(r.is_settlement).toBe(false);
+    expect(r.rejection).toBe("no_kind");
+    expect(r.depot).toBeNull();
+
+    const noId = await insertDocument("Wertpapierabrechnung Kauf Stück 3 Schlusstag 01.02.2026 Kurswert 30,00 EUR");
+    expect((await inspectSettlementDocument({ documentId: noId })).rejection).toBe("no_identifier");
+
+    await ensureUser(8);
+    setAuth("8", ["finance.view"]);
+    await expect(inspectSettlementDocument({ documentId: invoice })).rejects.toThrow(/not found/);
   });
 });

@@ -1,4 +1,4 @@
-import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, Tag, Transaction } from '../api/finance'
+import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, SettlementInspection, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -535,4 +535,67 @@ export const MOCK_PORTFOLIO_REVIEW_EMPTY: PortfolioReviewResponse = {
   unmatched_documents: [],
   holding_gaps: [],
   unverifiable_changes: 0,
+}
+
+export const MOCK_SETTLEMENT_INSPECTION: SettlementInspection = {
+  document_id: 305,
+  title: 'Wertpapierabrechnung Kauf Beispiel World ETF',
+  doc_date: '2025-11-05',
+  method: 'rules',
+  llm_fallback_used: false,
+  is_settlement: true,
+  rejection: null,
+  fields: {
+    kind: 'buy',
+    isin: PF_ISIN_B,
+    wkn: null,
+    name: 'Beispiel World ETF',
+    depot_number: '9900000002',
+    executed_at: '2025-11-05',
+    quantity: '50.00000000',
+    price: '49.000000',
+    gross: '2450.00',
+    fees: '9.50',
+    tax: null,
+    net: '-2459.50',
+    currency: 'EUR',
+  },
+  labels: {
+    quantity: 'Stück',
+    price: 'Ausführungskurs',
+    gross: 'Kurswert',
+    fees: 'Provision + Handelsplatzgebühr',
+    net: 'Ausmachender Betrag',
+    executed_at: 'Schlusstag',
+  },
+  depot: {
+    document_id: 305,
+    outcome: 'conflict',
+    depot_transaction_id: 904,
+    account_id: 12,
+    account_label: 'Depot Musterbroker',
+    detail: null,
+    statement_net: '-2459.50',
+    transaction_net: '-2457.00',
+    isin: PF_ISIN_B,
+    wkn: null,
+    depot_number: '9900000002',
+    matched_by: 'holding',
+    date_source: 'statement',
+  },
+  links: [],
+}
+
+export const MOCK_SETTLEMENT_INSPECTION_REJECTED: SettlementInspection = {
+  ...MOCK_SETTLEMENT_INSPECTION,
+  document_id: 306,
+  title: 'Depotauszug 2025',
+  is_settlement: false,
+  rejection: 'no_kind',
+  fields: {
+    kind: null, isin: PF_ISIN_A, wkn: null, name: null, depot_number: '9900000001',
+    executed_at: null, quantity: null, price: null, gross: null, fees: null, tax: null, net: null, currency: 'EUR',
+  },
+  labels: {},
+  depot: null,
 }
