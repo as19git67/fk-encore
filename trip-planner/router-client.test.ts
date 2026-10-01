@@ -76,6 +76,17 @@ describe("HttpRouterClient", () => {
     expect(await client.status()).toEqual({
       reachable: true, reason: null, version: "3.5.1", hasTiles: true, tilesBuiltAt: "2025-09-17T00:00:00.000Z",
     });
-    expect(calls[0].url).toBe("http://r/status?verbose=true");
+    expect(calls[0].url).toBe("http://r/status");
+  });
+
+  it("takes the tile set's age as proof of tiles when has_tiles is not said", async () => {
+    const built = new HttpRouterClient({
+      baseUrl: "http://r", fetcher: fetcher(() => ({ version: "3.5.1", tileset_last_modified: 1758067200 })).fn,
+    });
+    expect(await built.status()).toMatchObject({ hasTiles: true, tilesBuiltAt: "2025-09-17T00:00:00.000Z" });
+    const empty = new HttpRouterClient({
+      baseUrl: "http://r", fetcher: fetcher(() => ({ version: "3.5.1", tileset_last_modified: 0 })).fn,
+    });
+    expect(await empty.status()).toMatchObject({ hasTiles: false, tilesBuiltAt: null });
   });
 });

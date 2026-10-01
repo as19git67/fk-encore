@@ -88,7 +88,12 @@ export class HttpRouterClient implements RouterClient {
 
   async status(): Promise<RouterStatus> {
     try {
-      const res = await this.fetcher(`${this.baseUrl}/status?verbose=true`, {
+      // Plain status: `?verbose=true` is not how Valhalla reads options
+      // on a GET (it wants `?json={...}`), so `has_tiles` never came and
+      // a router with tiles read as one without. The verbose answer also
+      // walks every tile for its bbox. The tile set's age is in the plain
+      // answer, and Valhalla only has one when there are tiles.
+      const res = await this.fetcher(`${this.baseUrl}/status`, {
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       if (!res.ok) return unreachable(`HTTP ${res.status}`);
@@ -97,14 +102,15 @@ export class HttpRouterClient implements RouterClient {
         has_tiles?: boolean;
         tileset_last_modified?: number;
       };
+      const tilesBuiltAt = typeof body.tileset_last_modified === "number" && body.tileset_last_modified > 0
+        ? new Date(body.tileset_last_modified * 1000).toISOString()
+        : null;
       return {
         reachable: true,
         reason: null,
         version: body.version ?? null,
-        hasTiles: body.has_tiles ?? false,
-        tilesBuiltAt: typeof body.tileset_last_modified === "number" && body.tileset_last_modified > 0
-          ? new Date(body.tileset_last_modified * 1000).toISOString()
-          : null,
+        hasTiles: body.has_tiles ?? tilesBuiltAt !== null,
+        tilesBuiltAt,
       };
     } catch (err) {
       const reason = describe(err);
