@@ -20,7 +20,14 @@ import {
 } from "../db/schema";
 import { enrichDocument, enrichPendingDocuments } from "./depot-document-enrichment";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
-import { enrichDepotTransactionsFromDocuments, listPortfolioTransactions } from "./portfolio";
+import {
+  applySettlementDocument,
+  enrichDepotTransactionsFromDocuments,
+  getPortfolio,
+  getPortfolioPosition,
+  getPortfolioReview,
+  listPortfolioTransactions,
+} from "./portfolio";
 
 // Synthetic identifiers and texts only — see CLAUDE.md "Keine PII".
 const ISIN_A = "DE000000AAA1";
@@ -316,5 +323,189 @@ describe("finance/depot-document-enrichment", () => {
     const resp = await enrichDepotTransactionsFromDocuments({});
     expect(resp.created).toBe(1);
     expect(resp.results.map((r) => r.outcome)).toEqual(["created"]);
+  });
+});
+
+describe("finance/portfolio — review and apply", () => {
+  it("lists conflicts and unmatched documents without writing, and resolves a conflict on apply", async () => {
+    const { bc, giro, depot } = await setup();
+    await insertGiroBooking(giro, "2026-03-16", "-2900.00");
+    await deriveDepotTransactionsForBankcontact(bc);
+    const conflictDoc = await insertDocument(BUY_TEXT);
+    const foreignDoc = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ9"));
+
+    const review = await getPortfolioReview({});
+    expect(review.conflicts).toHaveLength(1);
+    expect(review.conflicts[0]).toMatchObject({
+      document_id: conflictDoc,
+      account_id: depot,
+      kind: "buy",
+      statement_net: "-2966.40",
+      transaction_net: "-2900.00",
+    });
+    expect(review.unmatched_documents.map((d) => d.document_id)).toEqual([foreignDoc]);
+    // The dry run changed nothing.
+    const [row] = await depotRows(depot);
+    expect(row!.net_amount).toBe("-2900.00");
+    expect(row!.amount).toBeNull();
+
+    const applied = await applySettlementDocument({ documentId: conflictDoc });
+    expect(applied.outcome).toBe("enriched");
+    const [after] = await depotRows(depot);
+    expect(after!.net_amount).toBe("-2966.40");
+    expect(Number(after!.amount)).toBe(25);
+    expect(after!.source).toBe("giro-derived+document");
+    // The booking's date stays.
+    expect(after!.executed_at.slice(0, 10)).toBe("2026-03-16");
+
+    const again = await getPortfolioReview({});
+    expect(again.conflicts).toEqual([]);
+  });
+
+  it("hides another user's documents from the review", async () => {
+    const { bc, giro, depot } = await setup();
+    await insertGiroBooking(giro, "2026-03-16", "-2900.00");
+    await deriveDepotTransactionsForBankcontact(bc);
+    await insertDocument(BUY_TEXT); // owned by user 1
+    await ensureUser(6);
+    await db.insert(financeAccountAccess).values({ account_id: depot, user_id: 6, level: "write" });
+    setAuth("6", ["finance.view"]);
+    const review = await getPortfolioReview({});
+    expect(review.conflicts).toEqual([]);
+    expect(review.unmatched_documents).toEqual([]);
+  });
+
+  it("reports holding gaps on the review and the position", async () => {
+    const { depot } = await setup(); // snapshot 2026-03-01: 25 shares
+    await db.insert(financeAccountHolding).values({
+      account_id: depot,
+      as_of: "2026-04-01",
+      isin: ISIN_A,
+      name: "Alpha Industries AG",
+      amount: "40",
+      price: "120.00",
+      value: "4800.00",
+      currency: "EUR",
+    });
+    // 25 → 40 with only 10 bought: 5 unexplained.
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: ISIN_A,
+      name: "Alpha Industries AG",
+      kind: "buy",
+      executed_at: "2026-03-10",
+      amount: "10",
+      price: "118.00",
+      net_amount: "-1180.00",
+      currency: "EUR",
+      source: "manual",
+    });
+
+    const review = await getPortfolioReview({});
+    expect(review.holding_gaps).toHaveLength(1);
+    expect(review.holding_gaps[0]).toMatchObject({
+      account_id: depot,
+      account_label: "Depot",
+      position_key: ISIN_A,
+      name: "Alpha Industries AG",
+      from: "2026-03-01",
+      to: "2026-04-01",
+      unexplained: "5.00000000",
+    });
+
+    const pos = await getPortfolioPosition({ key: ISIN_A });
+    expect(pos.holding_gaps.map((g) => g.unexplained)).toEqual(["5.00000000"]);
+    expect(pos.unverifiable_changes).toBe(0);
+  });
+});
+
+describe("finance/depot-document-enrichment — finding the depot without a holding", () => {
+  // A position sold before the first sync: no snapshot holds DE000000SLD3.
+  const SOLD_ISIN = "DE000000SLD3";
+  const soldText = (depotLine: string) => `Beispielbank AG
+Wertpapierabrechnung Verkauf
+${depotLine}
+Stück 5
+Beta Altbestand AG
+ISIN ${SOLD_ISIN}
+Schlusstag 10.02.2021
+Kurs 20,00 EUR
+Kurswert 100,00 EUR
+Ausmachender Betrag 100,00 EUR`;
+
+  async function setDepotNumber(depot: number, number: string) {
+    await db.update(financeAccount).set({ account_number: number }).where(eq(financeAccount.id, depot));
+  }
+
+  it("uses the depot number printed on the statement", async () => {
+    const { depot } = await setup();
+    await setDepotNumber(depot, "0012345678");
+    const docId = await insertDocument(soldText("Depotnummer 12345678"));
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("created");
+    expect(r.account_id).toBe(depot);
+    const rows = await depotRows(depot);
+    expect(rows.map((x) => [x.isin, x.kind, x.name])).toEqual([[SOLD_ISIN, "sell", "Beta Altbestand AG"]]);
+  });
+
+  it("uses the one depot that already has transactions of the security", async () => {
+    const { depot } = await setup();
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: SOLD_ISIN,
+      kind: "buy",
+      executed_at: "2020-01-15",
+      amount: "5",
+      price: "15.00",
+      net_amount: "-75.00",
+      currency: "EUR",
+      source: "manual",
+    });
+    const docId = await insertDocument(soldText(""));
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("created");
+    expect(r.account_id).toBe(depot);
+  });
+
+  it("does not guess between two depots with a matching number, and says why in the review", async () => {
+    const { bc, depot } = await setup();
+    const [other] = await db
+      .insert(financeAccount)
+      .values({
+        bankcontact_id: bc,
+        type_id: (await db.select({ id: financeAccountType.id }).from(financeAccountType).where(eq(financeAccountType.kind, "depot")).limit(1))[0]!.id,
+        currency_code: "EUR",
+        account_number: "depot-2",
+        label: "Depot 2",
+      })
+      .returning({ id: financeAccount.id });
+    await setDepotNumber(depot, "1234567801");
+    await setDepotNumber(other!.id, "1234567802");
+    const docId = await insertDocument(soldText("Depotnummer 12345678"));
+
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("no_holding");
+    expect(r.isin).toBe(SOLD_ISIN);
+    expect(r.depot_number).toBe("12345678");
+
+    const review = await getPortfolioReview({});
+    expect(review.unmatched_documents).toEqual([
+      expect.objectContaining({ document_id: docId, isin: SOLD_ISIN, wkn: null, depot_number: "12345678" }),
+    ]);
+  });
+});
+
+describe("finance/portfolio — depots without any data", () => {
+  it("are left out of the depot list and the scope", async () => {
+    const { bc, depot } = await setup();
+    await db.insert(financeAccount).values({
+      bankcontact_id: bc,
+      type_id: (await db.select({ id: financeAccountType.id }).from(financeAccountType).where(eq(financeAccountType.kind, "depot")).limit(1))[0]!.id,
+      currency_code: "EUR",
+      account_number: "empty-sub-depot",
+      label: "Leeres Unterdepot",
+    });
+    const resp = await getPortfolio({});
+    expect(resp.accounts.map((a) => a.id)).toEqual([depot]);
   });
 });

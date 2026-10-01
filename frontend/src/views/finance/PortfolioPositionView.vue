@@ -60,7 +60,10 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    data.value = await getPortfolioPosition(positionKey.value, { accounts: accountIds.value })
+    data.value = await getPortfolioPosition(positionKey.value, {
+      accounts: accountIds.value,
+      closed: route.query.closedDepots === '1',
+    })
   } catch (e: any) {
     data.value = null
     error.value = e?.message ?? 'Position konnte nicht geladen werden'
@@ -70,7 +73,7 @@ async function load() {
 }
 
 onMounted(load)
-watch([positionKey, () => accountIds.value.join(',')], () => void load())
+watch([positionKey, () => accountIds.value.join(','), () => route.query.closedDepots], () => void load())
 
 const position = computed(() => data.value?.position ?? null)
 const currency = computed(() => position.value?.currency ?? data.value?.currency ?? 'EUR')
@@ -408,6 +411,46 @@ function transactionCash(tx: PortfolioTransaction): string {
             </tbody>
           </table>
         </ScrollX>
+      </section>
+
+      <!-- ── Holding gaps ─────────────────────────────────────────── -->
+      <section
+        v-if="data.holding_gaps.length > 0 || data.unverifiable_changes > 0"
+        class="pp-section"
+        aria-labelledby="pp-gaps-heading"
+      >
+        <h2 id="pp-gaps-heading">Bestandsabgleich</h2>
+        <template v-if="data.holding_gaps.length > 0">
+          <p class="pp-muted">
+            Zwischen diesen Depotständen hat sich die Stückzahl geändert, ohne dass eine Transaktion das erklärt — etwa ein Depotübertrag, ein Split oder eine fehlende Abrechnung.
+          </p>
+          <ScrollX>
+            <table class="pp-table">
+              <thead>
+                <tr>
+                  <th>Zeitraum</th>
+                  <th>Depot</th>
+                  <th class="pp-col-num">Bestand</th>
+                  <th class="pp-col-num">Erklärt</th>
+                  <th class="pp-col-num">Offen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="g in data.holding_gaps" :key="`${g.account_id}|${g.to}`">
+                  <td class="pp-date">{{ formatIsoDate(g.from) }} – {{ formatIsoDate(g.to) }}</td>
+                  <td>{{ accountLabelById.get(g.account_id) ?? `#${g.account_id}` }}</td>
+                  <td class="pp-col-num">{{ formatQuantity(g.amount_before) }} → {{ formatQuantity(g.amount_after) }}</td>
+                  <td class="pp-col-num">{{ formatQuantity(g.explained) }}</td>
+                  <td class="pp-col-num pp-strong">{{ Number(g.unexplained) > 0 ? '+' : '' }}{{ formatQuantity(g.unexplained) }} Stk</td>
+                </tr>
+              </tbody>
+            </table>
+          </ScrollX>
+        </template>
+        <p v-if="data.unverifiable_changes > 0" class="pp-muted">
+          {{ data.unverifiable_changes }} Bestandsänderung{{ data.unverifiable_changes === 1 ? '' : 'en' }}
+          lass{{ data.unverifiable_changes === 1 ? 't' : 'en' }} sich nicht prüfen, weil einer Transaktion die Stückzahl fehlt.
+        </p>
       </section>
 
       <!-- ── Sales ────────────────────────────────────────────────── -->

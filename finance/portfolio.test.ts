@@ -567,3 +567,32 @@ describe("finance/portfolio — getPortfolioPosition", () => {
     await expect(getPortfolioPosition({ key: ISIN_A })).rejects.toThrow(/not found/);
   });
 });
+
+describe("finance/portfolio — closed depots", () => {
+  it("leaves closed depots out unless asked for, and counts what it hid", async () => {
+    const bc = await insertBankcontact();
+    const open = await insertAccount(bc, "depot", "Offen");
+    const closed = await insertAccount(bc, "depot", "Geschlossen");
+    await db.update(financeAccount).set({ closed_at: "2024-01-01T00:00:00Z" }).where(eq(financeAccount.id, closed));
+    await insertHolding({ accountId: open, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "1", price: "10.00", value: "10.00" });
+    await insertTx({ accountId: closed, kind: "sell", executedAt: "2023-05-01", isin: ISIN_B, name: "Beta ETF", amount: "2", price: "50.00", net: "100.00" });
+
+    const def = await getPortfolio({});
+    expect(def.accounts.map((a) => [a.label, a.closed])).toEqual([["Geschlossen", true], ["Offen", false]]);
+    expect(def.closed_hidden).toBe(1);
+    expect(def.positions.map((p) => p.key)).toEqual([ISIN_A]);
+    expect((await listPortfolioTransactions({})).total).toBe(0);
+
+    const all = await getPortfolio({ closed: true });
+    expect(all.closed_hidden).toBe(0);
+    expect(all.positions.map((p) => p.key).sort()).toEqual([ISIN_A, ISIN_B].sort());
+    expect((await listPortfolioTransactions({ closed: true })).total).toBe(1);
+
+    // Picked by id, a closed depot is in scope.
+    const picked = await getPortfolio({ accounts: String(closed) });
+    expect(picked.positions.map((p) => p.key)).toEqual([ISIN_B]);
+    expect(picked.closed_hidden).toBe(0);
+    await expect(getPortfolioPosition({ key: ISIN_B })).rejects.toThrow(/not found/);
+    expect((await getPortfolioPosition({ key: ISIN_B, closed: true })).position.key).toBe(ISIN_B);
+  });
+});

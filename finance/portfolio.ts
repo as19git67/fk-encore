@@ -35,6 +35,7 @@ import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import {
+  documents,
   financeAccount,
   financeAccountAccess,
   financeAccountHolding,
@@ -49,9 +50,11 @@ import {
 } from "./holdings";
 import {
   documentIdsByDepotTransaction,
+  enrichDocument,
   enrichPendingDocuments,
   type EnrichResult,
 } from "./depot-document-enrichment";
+import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
 
 console.log("[boot] finance/portfolio.ts: all imports resolved");
 
@@ -63,6 +66,8 @@ interface DepotAccount {
   id: number;
   label: string;
   currency_code: string;
+  /** The account is closed (sold out / moved away); left out of the default scope. */
+  closed: boolean;
 }
 
 function hasAdmin(auth: { permissions: string[] }): boolean {
@@ -87,6 +92,7 @@ async function visibleDepots(
       id: financeAccount.id,
       label: financeAccount.label,
       currency_code: financeAccount.currency_code,
+      closed: sql<boolean>`${financeAccount.closed_at} IS NOT NULL`,
     })
     .from(financeAccount)
     .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id));
@@ -129,6 +135,38 @@ async function writableDepots(
     );
   const writable = new Set(rows.map((r) => r.account_id));
   return visible.filter((d) => writable.has(d.id));
+}
+
+/**
+ * The depots a portfolio view covers: the requested ones, or else every
+ * open depot — closed ones only with `includeClosed`. A closed depot asked
+ * for by id is covered; the user picked it on purpose.
+ */
+function scopeDepots(
+  all: DepotAccount[],
+  requested: number[] | null,
+  includeClosed: boolean,
+): DepotAccount[] {
+  if (requested && requested.length > 0) return all.filter((d) => requested.includes(d.id));
+  return includeClosed ? all : all.filter((d) => !d.closed);
+}
+
+/** The depots among `depots` with at least one holding snapshot or one transaction. */
+async function withData(depots: DepotAccount[]): Promise<DepotAccount[]> {
+  if (depots.length === 0) return depots;
+  const ids = depots.map((d) => d.id);
+  const [held, traded] = await Promise.all([
+    db
+      .selectDistinct({ id: financeAccountHolding.account_id })
+      .from(financeAccountHolding)
+      .where(inArray(financeAccountHolding.account_id, ids)),
+    db
+      .selectDistinct({ id: financeDepotTransaction.account_id })
+      .from(financeDepotTransaction)
+      .where(inArray(financeDepotTransaction.account_id, ids)),
+  ]);
+  const used = new Set([...held, ...traded].map((r) => r.id));
+  return depots.filter((d) => used.has(d.id));
 }
 
 /** "1,2,3" → [1, 2, 3]; anything that is not a positive integer is an error. */
@@ -270,12 +308,17 @@ export interface PortfolioSummary {
 }
 
 interface PortfolioParams {
-  /** Comma-separated depot account ids; omitted = every readable depot. */
+  /** Comma-separated depot account ids; omitted = every open readable depot. */
   accounts?: string;
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean;
 }
 
 interface PortfolioResponse {
+  /** Every readable depot with data, closed ones flagged — for the selector. */
   accounts: DepotAccount[];
+  /** Closed depots left out of this view because `closed` was not set. */
+  closed_hidden: number;
   currency: string;
   /** True when the depots in scope use more than one currency; sums are then nominal. */
   mixed_currency: boolean;
@@ -847,15 +890,22 @@ export const getPortfolio = api(
     path: "/finance/portfolio",
     auth: true,
   },
-  async ({ accounts }: PortfolioParams): Promise<PortfolioResponse> => {
+  async ({ accounts, closed }: PortfolioParams): Promise<PortfolioResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
     const requested = parseAccountIds(accounts);
-    const depots = await visibleDepots(auth, requested);
+    // The selector offers every readable depot even when the scope is
+    // narrowed — but only depots that have ever held or traded anything:
+    // a bank's empty sub-depots and accounts typed "depot" by mistake
+    // would otherwise inflate "n Depots" and the selector.
+    const allDepots = await withData(await visibleDepots(auth, null));
+    const depots = scopeDepots(allDepots, requested, closed === true);
     const ids = depots.map((d) => d.id);
-    // The selector offers every readable depot even when the scope is narrowed.
-    const allDepots = requested ? await visibleDepots(auth, null) : depots;
+    const closedHidden =
+      requested && requested.length > 0
+        ? 0
+        : allDepots.filter((d) => d.closed && !depots.includes(d)).length;
 
     const [holdings, txs] = await Promise.all([
       latestHoldings(ids),
@@ -865,6 +915,7 @@ export const getPortfolio = api(
 
     return {
       accounts: allDepots,
+      closed_hidden: closedHidden,
       currency,
       mixed_currency: mixed,
       ...buildPortfolio(holdings, txs),
@@ -904,8 +955,10 @@ export interface PortfolioTransaction {
 type TxSortField = "executed_at" | "net_amount" | "name";
 
 interface PortfolioTransactionsParams {
-  /** Comma-separated depot account ids; omitted = every readable depot. */
+  /** Comma-separated depot account ids; omitted = every open readable depot. */
   accounts?: string;
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean;
   /** Position key (isin, wkn or name) to narrow to one security. */
   position?: string;
   /** buy | sell | in | out | dividend | split | corp_action */
@@ -946,7 +999,7 @@ export const listPortfolioTransactions = api(
     requirePermission(auth, "finance.view");
 
     const requested = parseAccountIds(p.accounts);
-    const depots = await visibleDepots(auth, requested);
+    const depots = scopeDepots(await visibleDepots(auth, null), requested, p.closed === true);
     const ids = depots.map((d) => d.id);
     const empty = { items: [], total: 0, sums: { net_amount: "0.00", fees: "0.00", taxes: "0.00" } };
     if (ids.length === 0) return empty;
@@ -1101,8 +1154,10 @@ export interface PositionYear {
 
 interface PositionParams {
   key: string;
-  /** Comma-separated depot account ids; omitted = every readable depot. */
+  /** Comma-separated depot account ids; omitted = every open readable depot. */
   accounts?: string;
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean;
 }
 
 interface PositionResponse {
@@ -1113,6 +1168,10 @@ interface PositionResponse {
   transactions: PortfolioTransaction[];
   sales: PositionSale[];
   years: PositionYear[];
+  /** Share changes between snapshots no transaction accounts for. */
+  holding_gaps: HoldingGap[];
+  /** Share changes that could not be checked (a transaction lacks its quantity). */
+  unverifiable_changes: number;
 }
 
 function matchesKey(
@@ -1129,14 +1188,14 @@ export const getPortfolioPosition = api(
     path: "/finance/portfolio/positions/:key",
     auth: true,
   },
-  async ({ key, accounts }: PositionParams): Promise<PositionResponse> => {
+  async ({ key, accounts, closed }: PositionParams): Promise<PositionResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
     if (!key || key.trim() === "") {
       throw APIError.invalidArgument("key is required");
     }
 
-    const depots = await visibleDepots(auth, parseAccountIds(accounts));
+    const depots = scopeDepots(await visibleDepots(auth, null), parseAccountIds(accounts), closed === true);
     const ids = depots.map((d) => d.id);
     if (ids.length === 0) throw APIError.notFound(`position ${key} not found`);
 
@@ -1326,6 +1385,8 @@ export const getPortfolioPosition = api(
         };
       });
 
+    const recon = await reconcileHoldings(ids, key);
+
     return {
       currency: scopeCurrency(depots).currency,
       position,
@@ -1334,6 +1395,8 @@ export const getPortfolioPosition = api(
       transactions: positionTxs,
       sales,
       years: yearsOut,
+      holding_gaps: recon.gaps,
+      unverifiable_changes: recon.unverifiable,
     };
   },
 );
@@ -1393,5 +1456,211 @@ export const enrichDepotTransactionsFromDocuments = api(
         (r) => r.outcome !== "not_settlement" && r.outcome !== "no_holding",
       ),
     };
+  },
+);
+
+// ----------------------------------------------------------------------
+// What needs a look (#1336, stage 4)
+//
+// Three kinds of loose ends, across the depots in scope:
+//   - conflicts: a settlement whose net disagrees with the transaction it
+//     describes (found by a dry run, so the list is always current and
+//     disappears once resolved),
+//   - unmatched: a settlement no depot in scope holds the security of,
+//   - holding gaps: share changes between snapshots no transaction
+//     explains.
+// Documents are listed only when the caller owns them or is a finance
+// admin — a depot being shared does not share its owner's mail.
+// ----------------------------------------------------------------------
+
+export interface ReviewConflict {
+  document_id: number;
+  document_title: string | null;
+  account_id: number;
+  account_label: string;
+  depot_transaction_id: number;
+  position_key: string;
+  name: string | null;
+  kind: string;
+  executed_at: string;
+  statement_net: string | null;
+  transaction_net: string | null;
+}
+
+export interface ReviewDocument {
+  document_id: number;
+  document_title: string | null;
+  doc_date: string | null;
+  /** What the statement identified itself by — why no depot matched. */
+  isin: string | null;
+  wkn: string | null;
+  depot_number: string | null;
+}
+
+export interface ReviewHoldingGap extends HoldingGap {
+  account_label: string;
+  name: string | null;
+}
+
+interface ReviewParams {
+  accounts?: string;
+  /** Include closed depots when no `accounts` are given. */
+  closed?: boolean;
+}
+
+interface ReviewResponse {
+  conflicts: ReviewConflict[];
+  unmatched_documents: ReviewDocument[];
+  holding_gaps: ReviewHoldingGap[];
+  unverifiable_changes: number;
+}
+
+export const getPortfolioReview = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/portfolio/review",
+    auth: true,
+  },
+  async ({ accounts, closed }: ReviewParams): Promise<ReviewResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const depots = scopeDepots(await visibleDepots(auth, null), parseAccountIds(accounts), closed === true);
+    const ids = depots.map((d) => d.id);
+    if (ids.length === 0) {
+      return { conflicts: [], unmatched_documents: [], holding_gaps: [], unverifiable_changes: 0 };
+    }
+    const labelById = new Map(depots.map((d) => [d.id, d.label]));
+
+    const [dry, recon] = await Promise.all([
+      enrichPendingDocuments(ids, 200, { dryRun: true }),
+      reconcileHoldings(ids),
+    ]);
+
+    const relevant = dry.results.filter((r) => r.outcome === "conflict" || r.outcome === "no_holding");
+    const docIds = [...new Set(relevant.map((r) => r.document_id))];
+    const docRows = docIds.length
+      ? await db
+          .select({ id: documents.id, title: documents.title, user_id: documents.user_id, doc_date: documents.doc_date })
+          .from(documents)
+          .where(inArray(documents.id, docIds))
+      : [];
+    const mayShow = (userId: number) => hasAdmin(auth) || userId === Number(auth.userID);
+    const docById = new Map(docRows.filter((d) => mayShow(d.user_id)).map((d) => [d.id, d]));
+
+    const conflictTxIds = relevant
+      .filter((r) => r.outcome === "conflict" && r.depot_transaction_id !== null)
+      .map((r) => r.depot_transaction_id!);
+    const txRows = conflictTxIds.length
+      ? await db
+          .select({
+            id: financeDepotTransaction.id,
+            account_id: financeDepotTransaction.account_id,
+            isin: financeDepotTransaction.isin,
+            wkn: financeDepotTransaction.wkn,
+            name: financeDepotTransaction.name,
+            kind: financeDepotTransaction.kind,
+            executed_at: financeDepotTransaction.executed_at,
+          })
+          .from(financeDepotTransaction)
+          .where(inArray(financeDepotTransaction.id, conflictTxIds))
+      : [];
+    const txById = new Map(txRows.map((t) => [t.id, t]));
+
+    const conflicts: ReviewConflict[] = [];
+    const unmatched: ReviewDocument[] = [];
+    for (const r of relevant) {
+      const doc = docById.get(r.document_id);
+      if (!doc) continue;
+      if (r.outcome === "no_holding") {
+        unmatched.push({
+          document_id: doc.id,
+          document_title: doc.title,
+          doc_date: doc.doc_date,
+          isin: r.isin,
+          wkn: r.wkn,
+          depot_number: r.depot_number,
+        });
+        continue;
+      }
+      const tx = r.depot_transaction_id === null ? undefined : txById.get(r.depot_transaction_id);
+      if (!tx) continue;
+      conflicts.push({
+        document_id: doc.id,
+        document_title: doc.title,
+        account_id: tx.account_id,
+        account_label: labelById.get(tx.account_id) ?? "",
+        depot_transaction_id: tx.id,
+        position_key: positionKey(tx),
+        name: tx.name,
+        kind: tx.kind,
+        executed_at: dateOnly(tx.executed_at),
+        statement_net: r.statement_net,
+        transaction_net: r.transaction_net,
+      });
+    }
+
+    // Names for the gap rows from the latest snapshot that carries one.
+    const names = new Map<string, string | null>();
+    if (recon.gaps.length > 0) {
+      const rows = await db
+        .select({
+          isin: financeAccountHolding.isin,
+          wkn: financeAccountHolding.wkn,
+          name: financeAccountHolding.name,
+        })
+        .from(financeAccountHolding)
+        .where(inArray(financeAccountHolding.account_id, ids))
+        .orderBy(desc(financeAccountHolding.as_of));
+      for (const row of rows) {
+        const k = positionKey(row);
+        if (k && !names.has(k) && row.name) names.set(k, row.name);
+      }
+    }
+
+    return {
+      conflicts,
+      unmatched_documents: unmatched,
+      holding_gaps: recon.gaps.map((g) => ({
+        ...g,
+        account_label: labelById.get(g.account_id) ?? "",
+        name: names.get(g.position_key) ?? null,
+      })),
+      unverifiable_changes: recon.unverifiable,
+    };
+  },
+);
+
+interface ApplyDocumentParams {
+  documentId: number;
+}
+
+export const applySettlementDocument = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/portfolio/documents/:documentId/apply",
+    auth: true,
+  },
+  async ({ documentId }: ApplyDocumentParams): Promise<EnrichResult> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const depots = await writableDepots(auth, null);
+    if (depots.length === 0) {
+      throw APIError.permissionDenied("write access to at least one depot is required");
+    }
+    const [doc] = await db
+      .select({ user_id: documents.user_id })
+      .from(documents)
+      .where(eq(documents.id, documentId))
+      .limit(1);
+    if (!doc || (!hasAdmin(auth) && doc.user_id !== Number(auth.userID))) {
+      throw APIError.notFound(`document ${documentId} not found`);
+    }
+    const r = await enrichDocument(documentId, depots.map((d) => d.id), { overwrite: true });
+    if (r.outcome === "not_settlement" || r.outcome === "no_holding") {
+      throw APIError.failedPrecondition(`document ${documentId} cannot be applied (${r.outcome})`);
+    }
+    return r;
   },
 );

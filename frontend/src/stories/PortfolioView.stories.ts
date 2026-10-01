@@ -5,6 +5,8 @@ import { http, HttpResponse, delay } from 'msw'
 import {
   MOCK_PORTFOLIO,
   MOCK_PORTFOLIO_EMPTY,
+  MOCK_PORTFOLIO_REVIEW,
+  MOCK_PORTFOLIO_REVIEW_EMPTY,
   MOCK_PORTFOLIO_TRANSACTIONS,
 } from './finance-mock-data'
 import { routeFromParameters } from './storyRoute'
@@ -34,6 +36,10 @@ const portfolioHandlers = [
       sums: { net_amount: net.toFixed(2), fees: fees.toFixed(2), taxes: taxes.toFixed(2) },
     })
   }),
+  http.get('/api/finance/portfolio/review', () => HttpResponse.json(MOCK_PORTFOLIO_REVIEW)),
+  http.post('/api/finance/portfolio/documents/:id/apply', () =>
+    HttpResponse.json({ document_id: 305, outcome: 'enriched', depot_transaction_id: 904, account_id: 12, detail: null, statement_net: '-2459.50', transaction_net: '-2457.00', isin: 'DE000000BBB2', wkn: null, depot_number: null }),
+  ),
   http.post('/api/finance/portfolio/documents/enrich', () =>
     HttpResponse.json({
       documents_examined: 3, created: 1, enriched: 1, linked: 0, already_linked: 0,
@@ -66,6 +72,7 @@ export const KeinDepot: Story = {
     msw: {
       handlers: [
         http.get('/api/finance/portfolio', () => HttpResponse.json(MOCK_PORTFOLIO_EMPTY)),
+        http.get('/api/finance/portfolio/review', () => HttpResponse.json(MOCK_PORTFOLIO_REVIEW_EMPTY)),
         http.get('/api/finance/portfolio/transactions', () =>
           HttpResponse.json({ items: [], total: 0, sums: { net_amount: '0.00', fees: '0.00', taxes: '0.00' } }),
         ),

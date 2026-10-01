@@ -63,6 +63,26 @@ export interface EnrichResult {
   account_id: number | null;
   /** For `conflict`: what the statement says vs. what the row carries. */
   detail: string | null;
+  /** Net amount read from the statement (scale 2, signed), when one was read. */
+  statement_net: string | null;
+  /** Net amount of the matched row, for `conflict` and `enriched`/`linked`. */
+  transaction_net: string | null;
+  /** What the statement identified itself by — the reason when no depot matched. */
+  isin: string | null;
+  wkn: string | null;
+  depot_number: string | null;
+}
+
+export interface EnrichOptions {
+  /** Report what would happen without writing anything. */
+  dryRun?: boolean;
+  /**
+   * Resolve a conflict in the statement's favour: write every value the
+   * statement carries onto the matched row (the booking's date stays) and
+   * link the document. Only takes effect when the outcome would be
+   * `conflict`; the user asked for it after looking at both numbers.
+   */
+  overwrite?: boolean;
 }
 
 export interface EnrichStats {
@@ -135,6 +155,96 @@ async function findHoldingDepot(
     .orderBy(desc(financeAccountHolding.as_of))
     .limit(1);
   return row ?? null;
+}
+
+function digitsOnly(raw: string | null): string {
+  return (raw ?? "").replace(/\D/g, "");
+}
+
+/**
+ * The depot whose number the statement prints. Banks pad or shorten the
+ * number on paper ("0012345678" vs. "12345678", or a sub-depot suffix), so
+ * one number ending with the other counts, as long as the shorter one has
+ * at least five digits.
+ */
+async function findDepotByNumber(
+  depotNumber: string,
+  accountIds: number[] | null,
+): Promise<number | null> {
+  const conditions = [eq(financeAccountType.kind, "depot")];
+  if (accountIds) {
+    if (accountIds.length === 0) return null;
+    conditions.push(inArray(financeAccount.id, accountIds));
+  }
+  const rows = await db
+    .select({
+      id: financeAccount.id,
+      account_number: financeAccount.account_number,
+      fints_account_number: financeAccount.fints_account_number,
+    })
+    .from(financeAccount)
+    .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
+    .where(and(...conditions));
+  const matches = rows.filter((r) =>
+    [digitsOnly(r.account_number), digitsOnly(r.fints_account_number)].some((n) => {
+      if (n.length < 5) return false;
+      const [short, long] = n.length <= depotNumber.length ? [n, depotNumber] : [depotNumber, n];
+      return long.endsWith(short) || long.startsWith(short);
+    }),
+  );
+  // Ambiguous → no guess.
+  return matches.length === 1 ? matches[0]!.id : null;
+}
+
+/**
+ * The depot that already has transactions of this security — a position
+ * sold before the first sync still has its giro-derived or earlier
+ * document rows. Only when exactly one depot qualifies.
+ */
+async function findDepotByTransactions(
+  s: SettlementExtraction,
+  accountIds: number[] | null,
+): Promise<number | null> {
+  const idMatches = [];
+  if (s.isin) idMatches.push(eq(financeDepotTransaction.isin, s.isin));
+  if (s.wkn) idMatches.push(eq(financeDepotTransaction.wkn, s.wkn));
+  if (idMatches.length === 0) return null;
+  const conditions = [or(...idMatches)!];
+  if (accountIds) {
+    if (accountIds.length === 0) return null;
+    conditions.push(inArray(financeDepotTransaction.account_id, accountIds));
+  }
+  const rows = await db
+    .selectDistinct({ account_id: financeDepotTransaction.account_id })
+    .from(financeDepotTransaction)
+    .where(and(...conditions));
+  return rows.length === 1 ? rows[0]!.account_id : null;
+}
+
+/**
+ * Where a statement belongs: the depot holding the security, else the
+ * depot whose number it prints, else the one depot that already has
+ * transactions of the security.
+ */
+async function resolveDepot(
+  s: SettlementExtraction,
+  accountIds: number[] | null,
+): Promise<HoldingMatch | null> {
+  const byHolding = await findHoldingDepot(s, accountIds);
+  if (byHolding) return byHolding;
+  const fallback = (account_id: number): HoldingMatch => ({
+    account_id,
+    isin: s.isin,
+    wkn: s.wkn,
+    name: s.name,
+    currency: s.currency,
+  });
+  if (s.depotNumber) {
+    const id = await findDepotByNumber(s.depotNumber, accountIds);
+    if (id !== null) return fallback(id);
+  }
+  const byTx = await findDepotByTransactions(s, accountIds);
+  return byTx === null ? null : fallback(byTx);
 }
 
 async function accessibleAccountIds(userId: number): Promise<number[] | null> {
@@ -233,13 +343,20 @@ function withDocumentSource(source: string): string {
 export async function enrichDocument(
   documentId: number,
   accountIds: number[] | null = null,
+  options: EnrichOptions = {},
 ): Promise<EnrichResult> {
+  const dryRun = options.dryRun === true;
   const result: EnrichResult = {
     document_id: documentId,
     outcome: "not_settlement",
     depot_transaction_id: null,
     account_id: null,
     detail: null,
+    statement_net: null,
+    transaction_net: null,
+    isin: null,
+    wkn: null,
+    depot_number: null,
   };
 
   const [doc] = await db
@@ -258,12 +375,16 @@ export async function enrichDocument(
   const parsed = parseSettlement(doc.extracted_text);
   if (parsed && !parsed.executedAt && doc.doc_date) parsed.executedAt = doc.doc_date.slice(0, 10);
   if (!isUsableSettlement(parsed)) return result;
+  result.statement_net = fixed(parsed.net, 2);
+  result.isin = parsed.isin;
+  result.wkn = parsed.wkn;
+  result.depot_number = parsed.depotNumber;
 
   // Without an explicit scope, a document only reaches the depots its
   // owner has been given access to; an owner without any ACL row (an
   // admin who sees everything) reaches every depot.
   const scope = accountIds ?? (await accessibleAccountIds(doc.user_id));
-  const holding = await findHoldingDepot(parsed, scope);
+  const holding = await resolveDepot(parsed, scope);
   if (!holding) {
     result.outcome = "no_holding";
     return result;
@@ -293,12 +414,33 @@ export async function enrichDocument(
 
   const match = await findMatchingDepotTransaction(holding.account_id, parsed);
 
-  if (match && !match.netAgrees) {
+  if (match) result.transaction_net = match.row.net_amount;
+
+  if (match && !match.netAgrees && !(options.overwrite && !dryRun)) {
     result.outcome = "conflict";
     result.depot_transaction_id = match.row.id;
     result.detail =
       `statement net ${parsed.net?.toFixed(2) ?? "?"} vs. transaction net ${match.row.net_amount ?? "?"} ` +
       `(${match.row.kind} ${match.row.executed_at.slice(0, 10)})`;
+    return result;
+  }
+
+  if (match && !match.netAgrees) {
+    // overwrite: the user chose the statement over the booking.
+    const row = match.row;
+    const patch: Partial<typeof financeDepotTransaction.$inferInsert> = {
+      source: withDocumentSource(row.source),
+    };
+    if (parsed.quantity !== null) patch.amount = fixed(parsed.quantity, 8);
+    if (parsed.price !== null) patch.price = fixed(parsed.price, 6);
+    if (parsed.gross !== null) patch.gross_amount = fixed(parsed.gross, 2);
+    if (parsed.fees !== null) patch.fees = fixed(parsed.fees, 2);
+    if (parsed.tax !== null) patch.tax = fixed(parsed.tax, 2);
+    if (parsed.net !== null) patch.net_amount = fixed(parsed.net, 2);
+    await db.update(financeDepotTransaction).set(patch).where(eq(financeDepotTransaction.id, row.id));
+    await linkDocument(row.id, documentId);
+    result.outcome = "enriched";
+    result.depot_transaction_id = row.id;
     return result;
   }
 
@@ -315,6 +457,11 @@ export async function enrichDocument(
     if (row.wkn === null && parsed.wkn) patch.wkn = parsed.wkn;
     if (row.name === null && parsed.name) patch.name = parsed.name;
     const changed = Object.keys(patch).length > 0;
+    if (dryRun) {
+      result.outcome = changed ? "enriched" : "linked";
+      result.depot_transaction_id = row.id;
+      return result;
+    }
     if (changed) patch.source = withDocumentSource(row.source);
     if (changed) {
       await db.update(financeDepotTransaction).set(patch).where(eq(financeDepotTransaction.id, row.id));
@@ -322,6 +469,11 @@ export async function enrichDocument(
     await linkDocument(row.id, documentId);
     result.outcome = changed ? "enriched" : "linked";
     result.depot_transaction_id = row.id;
+    return result;
+  }
+
+  if (dryRun) {
+    result.outcome = "created";
     return result;
   }
 
@@ -388,6 +540,7 @@ const SETTLEMENT_TEXT_PATTERN =
 export async function enrichPendingDocuments(
   accountIds: number[] | null,
   limit = 200,
+  options: EnrichOptions = {},
 ): Promise<EnrichStats> {
   const stats = emptyStats();
   if (accountIds && accountIds.length === 0) return stats;
@@ -413,7 +566,7 @@ export async function enrichPendingDocuments(
   for (const c of candidates) {
     stats.documents_examined++;
     try {
-      const r = await enrichDocument(c.id, accountIds);
+      const r = await enrichDocument(c.id, accountIds, options);
       stats.results.push(r);
       switch (r.outcome) {
         case "created": stats.created++; break;

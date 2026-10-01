@@ -13,6 +13,7 @@ import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 import Message from 'primevue/message'
 import DepotTxSources from '../../components/finance/DepotTxSources.vue'
+import PortfolioReview from '../../components/finance/PortfolioReview.vue'
 import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
 import { useSort } from '../../composables/useSort'
 import type { FilterChip } from '../../components/layout/listToolbar'
@@ -54,7 +55,7 @@ const route = useRoute()
 const router = useRouter()
 
 // ── URL-backed filters ───────────────────────────────────────────────
-const FILTER_KEYS = ['accounts', 'position', 'kind', 'year', 'closed'] as const
+const FILTER_KEYS = ['accounts', 'position', 'kind', 'year', 'closed', 'closedDepots'] as const
 
 function queryString(key: string): string {
   const v = route.query[key]
@@ -74,6 +75,8 @@ const yearFilter = computed(() => {
   return Number.isInteger(n) && n > 0 ? n : null
 })
 const showClosed = computed(() => queryString('closed') === '1')
+/** Closed depots (sold out, moved away) are left out unless switched on. */
+const includeClosedDepots = computed(() => queryString('closedDepots') === '1')
 
 function setQuery(patch: Partial<Record<(typeof FILTER_KEYS)[number], string>>) {
   void updateRouteQuery(router, (current) => {
@@ -109,7 +112,7 @@ async function loadPortfolio() {
   loading.value = true
   error.value = null
   try {
-    portfolio.value = await getPortfolio({ accounts: accountIds.value })
+    portfolio.value = await getPortfolio({ accounts: accountIds.value, closed: includeClosedDepots.value })
   } catch (e: any) {
     error.value = e?.message ?? 'Portfolio konnte nicht geladen werden'
   } finally {
@@ -121,7 +124,10 @@ const currency = computed(() => portfolio.value?.currency ?? 'EUR')
 const summary = computed(() => portfolio.value?.summary ?? null)
 
 const accountOptions = computed(() =>
-  (portfolio.value?.accounts ?? []).map((a) => ({ label: a.label, value: a.id })),
+  (portfolio.value?.accounts ?? []).map((a) => ({
+    label: a.closed ? `${a.label} (geschlossen)` : a.label,
+    value: a.id,
+  })),
 )
 const accountLabelById = computed(() => {
   const m = new Map<number, string>()
@@ -178,7 +184,10 @@ function openPosition(key: string) {
   void router.push({
     name: 'finance-portfolio-position',
     params: { key },
-    query: accountIds.value.length > 0 ? { accounts: accountIds.value.join(',') } : {},
+    query: {
+      ...(accountIds.value.length > 0 ? { accounts: accountIds.value.join(',') } : {}),
+      ...(includeClosedDepots.value ? { closedDepots: '1' } : {}),
+    },
   })
 }
 
@@ -195,6 +204,7 @@ function txParams(offset: number) {
   const year = yearFilter.value
   return {
     accounts: accountIds.value,
+    closed: includeClosedDepots.value,
     position: positionFilter.value || undefined,
     kind: kindFilter.value || undefined,
     q: search.term.value.trim() || undefined,
@@ -233,14 +243,15 @@ onMounted(() => {
   void loadTransactions()
 })
 
-watch(accountIds, (next, prev) => {
-  if (next.join(',') === prev.join(',')) return
-  void loadPortfolio()
-})
+watch(
+  () => `${accountIds.value.join(',')}|${includeClosedDepots.value}`,
+  () => void loadPortfolio(),
+)
 
 watch(
   () => [
     accountIds.value.join(','),
+    includeClosedDepots.value,
     positionFilter.value,
     kindFilter.value,
     yearFilter.value,
@@ -255,7 +266,7 @@ watch(
 const filterPanelOpen = ref(false)
 
 function clearFilters() {
-  setQuery({ accounts: '', position: '', kind: '', year: '' })
+  setQuery({ accounts: '', position: '', kind: '', year: '', closedDepots: '' })
 }
 
 const filterChips = computed<FilterChip[]>(() => {
@@ -287,6 +298,13 @@ const filterChips = computed<FilterChip[]>(() => {
       key: 'year',
       label: `Jahr: ${yearFilter.value}`,
       remove: () => setQuery({ year: '' }),
+    })
+  }
+  if (includeClosedDepots.value) {
+    chips.push({
+      key: 'closedDepots',
+      label: 'Mit geschlossenen Depots',
+      remove: () => setQuery({ closedDepots: '' }),
     })
   }
   return chips
@@ -330,13 +348,23 @@ const closedModel = computed({
   get: () => showClosed.value,
   set: (v: boolean) => setQuery({ closed: v ? '1' : '' }),
 })
+const closedDepotsModel = computed({
+  get: () => includeClosedDepots.value,
+  set: (v: boolean) => setQuery({ closedDepots: v ? '1' : '' }),
+})
 
 // ── Presentation ─────────────────────────────────────────────────────
 const hint = computed(() => {
   if (!portfolio.value) return undefined
-  const depots = portfolio.value.accounts.length
-  const scope = accountIds.value.length > 0 ? accountIds.value.length : depots
-  const parts = [`${scope} von ${depots} Depot${depots === 1 ? '' : 's'}`]
+  const all = portfolio.value.accounts
+  const open = all.filter((a) => !a.closed).length
+  const scope =
+    accountIds.value.length > 0 ? accountIds.value.length : includeClosedDepots.value ? all.length : open
+  const total = includeClosedDepots.value || accountIds.value.length > 0 ? all.length : open
+  const parts = [`${scope} von ${total} Depot${total === 1 ? '' : 's'}`]
+  if (portfolio.value.closed_hidden > 0) {
+    parts.push(`${portfolio.value.closed_hidden} geschlossene ausgeblendet`)
+  }
   if (summary.value?.as_of) parts.push(`Stand ${formatIsoDate(summary.value.as_of)}`)
   if (portfolio.value.mixed_currency) parts.push('gemischte Währungen — Summen nominal')
   return parts.join(' · ')
@@ -367,6 +395,13 @@ function transactionCash(tx: PortfolioTransaction): string {
 // same over every settlement not linked yet — old statements, or ones
 // that arrived before the depot's holdings told them where they belong.
 const enriching = ref(false)
+/** Bumped to make the review section reload (after reading documents). */
+const reviewReloadKey = ref(0)
+
+function onReviewChanged() {
+  void loadPortfolio()
+  void loadTransactions()
+}
 const enrichNotice = ref<{ severity: 'success' | 'info' | 'warn'; text: string } | null>(null)
 
 async function enrichFromDocuments() {
@@ -390,6 +425,7 @@ async function enrichFromDocuments() {
     if (changed > 0) {
       await Promise.all([loadPortfolio(), loadTransactions()])
     }
+    reviewReloadKey.value++
   } catch (e: any) {
     enrichNotice.value = { severity: 'warn', text: e?.message ?? 'Belege konnten nicht eingelesen werden' }
   } finally {
@@ -424,6 +460,10 @@ async function enrichFromDocuments() {
     <template #toolbar>
       <ListToolbar :model="toolbar" />
       <section v-if="filterPanelOpen" class="pf-filter-panel" aria-label="Filter">
+        <label v-if="accountOptions.some((o) => o.label.endsWith('(geschlossen)'))" class="pf-filter-check">
+          <Checkbox v-model="closedDepotsModel" binary input-id="pf-closed-depots" />
+          <span>Geschlossene Depots einbeziehen</span>
+        </label>
         <MultiSelect
           v-model="accountsModel"
           :options="accountOptions"
@@ -552,6 +592,14 @@ async function enrichFromDocuments() {
           Realisierte Gewinne nach Durchschnittsmethode, Erlöse und Erträge netto nach Gebühren und Steuern.
         </p>
       </section>
+
+      <PortfolioReview
+        :accounts="accountIds"
+        :include-closed="includeClosedDepots"
+        :currency="currency"
+        :reload-key="reviewReloadKey"
+        @changed="onReviewChanged"
+      />
 
       <!-- ── Positions ────────────────────────────────────────────── -->
       <section class="pf-section" aria-labelledby="pf-positions-heading">
@@ -755,7 +803,11 @@ async function enrichFromDocuments() {
                 <td class="pf-col-name">
                   <RouterLink
                     class="pf-name pf-name-link"
-                    :to="{ name: 'finance-portfolio-position', params: { key: tx.position_key } }"
+                    :to="{
+                      name: 'finance-portfolio-position',
+                      params: { key: tx.position_key },
+                      query: includeClosedDepots ? { closedDepots: '1' } : {},
+                    }"
                   >{{ tx.name ?? tx.position_key }}</RouterLink>
                   <span class="pf-ident">{{ tx.isin ?? tx.wkn ?? '' }}</span>
                 </td>
@@ -802,6 +854,14 @@ async function enrichFromDocuments() {
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
+}
+.pf-filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+  cursor: pointer;
 }
 .pf-filter-input {
   width: 100%;
