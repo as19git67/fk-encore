@@ -622,6 +622,11 @@ dokumentiert**:
   Vollbild-Player mit Auto-Advance, Segment-Fortschrittsbalken, Tippen zum
   Blättern, Halten zum Pausieren und Runterwischen zum Schließen. Dazu
   Trip-Karten-Intro, „Damals & heute"-Vergleich und optionale Hintergrundmusik.
+  Favorit (Herz) und „Aus Rückblick entfernen" sitzen in einer Leiste am
+  unteren Rand. Alles außer dem Fortschrittsbalken blendet sich drei Sekunden
+  nach der letzten Interaktion aus; ein Tipp holt es zurück (und blättert
+  dabei nicht), jedes Blättern und jeder Knopfdruck startet die Frist neu.
+  Während eines Intros bleibt die Leiste stehen.
   Einstieg über den Streifen im Feed und die Feed-Toolbar. Read-only – Recaps
   entstehen serverseitig.
 - **Gruppen-Review** (`ReviewQueueView`, Issue #761): Wisch-basierte Prüfung
