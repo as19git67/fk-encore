@@ -57,6 +57,8 @@ const router = createRouter({
     { path: '/finanzen/ki-tagging', name: 'finance-tag-queue', component: { template: '<div />' } },
     { path: '/finanzen/anomalien', name: 'finance-anomalies', component: { template: '<div />' } },
     { path: '/finanzen/analyse', name: 'finance-analysis', component: { template: '<div />' } },
+    { path: '/finanzen/portfolio', name: 'finance-portfolio', component: { template: '<div />' } },
+    { path: '/finanzen/portfolio/:key', name: 'finance-portfolio-position', component: { template: '<div />' } },
     { path: '/finanzen/belegabgleich', name: 'finance-receipt-enrichment', component: { template: '<div />' } },
     { path: '/finanzen/umsaetze/neu', name: 'finance-transaction-new', component: { template: '<div />' } },
     { path: '/finanzen/bankkontakte/:id/zeiten', name: 'finance-bankcontact-schedule', component: { template: '<div />' } },

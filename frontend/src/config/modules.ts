@@ -361,6 +361,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
+        path: 'portfolio/:key',
+        name: 'finance-portfolio-position',
+        component: () => import('../views/finance/PortfolioPositionView.vue'),
+        meta: { permission: 'finance.view' },
+      },
+      {
         path: 'analyse',
         name: 'finance-analysis',
         component: () => import('../views/finance/AnalysisView.vue'),
