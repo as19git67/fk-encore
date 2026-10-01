@@ -14,10 +14,10 @@
  */
 
 import { api } from "encore.dev/api";
-import { sql } from "drizzle-orm";
+import { asc } from "drizzle-orm";
 
 import db from "../db/database";
-import { dbAll } from "../db/adapter";
+import { userSubjectPersons } from "../db/schema";
 import { schedule, dailyAtUtc } from "../lib/local-cron";
 import { recomputeDerivedTaxReviewForUser } from "./subject-persons";
 import { syncTaxReviewFlagForAllSubjectPersons } from "./documents";
@@ -28,9 +28,12 @@ export interface TaxReviewRecomputeResult {
 }
 
 export async function runTaxReviewRecompute(): Promise<TaxReviewRecomputeResult> {
-  const rows = await dbAll<{ user_id: number }>(
-    db.execute(sql`SELECT DISTINCT user_id FROM user_subject_persons ORDER BY user_id`),
-  );
+  // A typed query, not db.execute: with node-postgres the latter resolves to a
+  // QueryResult object, and iterating that failed every nightly run.
+  const rows = await db
+    .selectDistinct({ user_id: userSubjectPersons.user_id })
+    .from(userSubjectPersons)
+    .orderBy(asc(userSubjectPersons.user_id));
 
   let personsFlipped = 0;
   for (const { user_id } of rows) {
