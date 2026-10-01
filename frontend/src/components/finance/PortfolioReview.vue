@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import { useConfirm } from 'primevue/useconfirm'
 import ScrollX from '../layout/ScrollX.vue'
+import SettlementDocumentDialog from './SettlementDocumentDialog.vue'
 import {
   applySettlementDocument,
   getPortfolioReview,
@@ -69,6 +70,15 @@ const count = computed(() => {
   const r = review.value
   return r ? r.conflicts.length + r.unmatched_documents.length + r.holding_gaps.length : 0
 })
+
+/** The document shown in the preview dialog; closing it leaves the page where it was. */
+const openDocument = ref<number | null>(null)
+
+function onApplyFromDialog(documentId: number) {
+  const c = review.value?.conflicts.find((x) => x.document_id === documentId)
+  openDocument.value = null
+  if (c) askApply(c)
+}
 
 function askApply(c: PortfolioReviewConflict) {
   confirm.require({
@@ -153,9 +163,9 @@ function signClass(val: string | null): string {
                 <td class="pr-num" :class="signClass(c.statement_net)">{{ formatSignedCurrency(c.statement_net, currency) }}</td>
                 <td class="pr-num" :class="signClass(c.transaction_net)">{{ formatSignedCurrency(c.transaction_net, currency) }}</td>
                 <td class="pr-actions">
-                  <RouterLink :to="{ name: 'dokumente-detail', params: { id: c.document_id } }" class="pr-link">
-                    <i class="pi pi-file" aria-hidden="true" /> Beleg
-                  </RouterLink>
+                  <button type="button" class="pr-doc" @click="openDocument = c.document_id">
+                    <i class="pi pi-file" aria-hidden="true" /> Beleg ansehen
+                  </button>
                   <Button
                     label="Übernehmen"
                     size="small"
@@ -214,10 +224,10 @@ function signClass(val: string | null): string {
         </p>
         <ul class="pr-docs">
           <li v-for="d in review.unmatched_documents" :key="d.document_id">
-            <RouterLink :to="{ name: 'dokumente-detail', params: { id: d.document_id } }" class="pr-link">
+            <button type="button" class="pr-doc" @click="openDocument = d.document_id">
               <i class="pi pi-file" aria-hidden="true" />
               {{ d.document_title ?? `Dokument ${d.document_id}` }}
-            </RouterLink>
+            </button>
             <span v-if="d.doc_date" class="pr-date">{{ formatIsoDate(d.doc_date) }}</span>
             <span class="pr-reason">{{ unmatchedReason(d) }}</span>
           </li>
@@ -230,6 +240,13 @@ function signClass(val: string | null): string {
         „Belege einlesen" ergänzt sie, sobald die Abrechnung vorliegt.
       </p>
     </template>
+
+    <SettlementDocumentDialog
+      :document-id="openDocument"
+      can-apply
+      @close="openDocument = null"
+      @apply="onApplyFromDialog"
+    />
   </section>
 </template>
 
@@ -320,6 +337,25 @@ function signClass(val: string | null): string {
 }
 .pr-link {
   color: var(--p-primary-color);
+}
+.pr-doc {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--p-primary-color);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: left;
+}
+.pr-doc:hover {
+  text-decoration: underline;
+}
+.pr-doc:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .pr-docs {
   list-style: none;

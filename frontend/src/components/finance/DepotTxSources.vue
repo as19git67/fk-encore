@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import SettlementDocumentDialog from './SettlementDocumentDialog.vue'
 
 /**
  * Where a depot transaction came from (issue #1336, stage 4): the giro
@@ -25,6 +26,9 @@ const fallbackLabel = computed(() => {
   }
 })
 
+/** The document shown in the dialog; a dialog instead of a page keeps the list where it was. */
+const openDocument = ref<number | null>(null)
+
 const hasLinks = computed(() => props.linkedTransactionId !== null || props.documentIds.length > 0)
 </script>
 
@@ -35,16 +39,23 @@ const hasLinks = computed(() => props.linkedTransactionId !== null || props.docu
       :to="{ name: 'finance-transaction-detail', params: { id: linkedTransactionId } }"
       class="depot-tx-link"
     >Girobuchung</RouterLink>
-    <RouterLink
+    <button
       v-for="(id, i) in documentIds"
       :key="id"
-      :to="{ name: 'dokumente-detail', params: { id } }"
-      class="depot-tx-link"
+      type="button"
+      class="depot-tx-link depot-tx-doc"
+      :aria-label="documentIds.length > 1 ? `Beleg ${i + 1} ansehen` : 'Beleg ansehen'"
+      @click.stop="openDocument = id"
     >
       <i class="pi pi-file" aria-hidden="true" />
       Beleg<template v-if="documentIds.length > 1"> {{ i + 1 }}</template>
-    </RouterLink>
+    </button>
     <template v-if="!hasLinks">{{ fallbackLabel }}</template>
+    <SettlementDocumentDialog
+      v-if="openDocument !== null"
+      :document-id="openDocument"
+      @close="openDocument = null"
+    />
   </span>
 </template>
 
@@ -57,6 +68,23 @@ const hasLinks = computed(() => props.linkedTransactionId !== null || props.docu
 .depot-tx-link {
   color: var(--p-primary-color);
   white-space: nowrap;
+}
+.depot-tx-doc {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.depot-tx-doc:hover {
+  text-decoration: underline;
+}
+.depot-tx-doc:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .depot-tx-link .pi {
   font-size: 0.85em;

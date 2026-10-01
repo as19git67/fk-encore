@@ -22,6 +22,30 @@ import { extractIsin, extractWkn } from "./depot-derivation";
 
 export type SettlementKind = "buy" | "sell" | "dividend";
 
+/** The fields the parser looks for, in the order a statement is usually read. */
+export const SETTLEMENT_FIELDS = [
+  "kind",
+  "isin",
+  "wkn",
+  "name",
+  "depotNumber",
+  "executedAt",
+  "quantity",
+  "price",
+  "gross",
+  "fees",
+  "tax",
+  "net",
+  "currency",
+] as const;
+export type SettlementField = (typeof SETTLEMENT_FIELDS)[number];
+
+export interface SettlementInspection extends Omit<SettlementExtraction, "kind"> {
+  kind: SettlementKind | null;
+  /** The label each amount/date field was read after ("Kurswert", "Schlusstag", …). */
+  labels: Partial<Record<SettlementField, string>>;
+}
+
 export interface SettlementExtraction {
   kind: SettlementKind;
   isin: string | null;
@@ -230,24 +254,32 @@ export function extractDepotNumber(text: string): string | null {
 }
 
 /**
- * Parse one document's text. Returns null when the text is not a
- * settlement: no kind, or neither ISIN nor WKN.
+ * Read every field the parser knows from one document's text, whether or
+ * not it adds up to a settlement — the "what was recognised" view shows
+ * partial results too. `kind` is null when no settlement wording was found.
  */
-export function parseSettlement(raw: string | null | undefined): SettlementExtraction | null {
+export function inspectSettlement(raw: string | null | undefined): SettlementInspection | null {
   if (!raw || raw.trim().length === 0) return null;
   const text = normalize(raw);
   const lower = text.toLowerCase();
 
   const kind = detectKind(lower);
-  if (!kind) return null;
-
   const isin = extractIsin(text);
   const wkn = extractWkn(text) ?? wknNextToIsin(text, isin);
-  if (!isin && !wkn) return null;
 
   const markers: string[] = [];
+  /** Which label each field was read after, for the "what was recognised" view. */
+  const labels: Partial<Record<SettlementField, string>> = {};
+  const track = <T,>(field: SettlementField, read: () => T): T => {
+    const before = markers.length;
+    const value = read();
+    if (value !== null && value !== undefined && markers.length > before) {
+      labels[field] = [...new Set(markers.slice(before))].join(" + ");
+    }
+    return value;
+  };
 
-  const quantity =
+  const quantity = track("quantity", () =>
     amountAfter(text, [String.raw`Stück\s*/\s*Nominale`, String.raw`Stück`, String.raw`Stk\.?`, String.raw`Nominale`, String.raw`Anzahl`], markers) ??
     (() => {
       const m = new RegExp(String.raw`${AMOUNT}\s*(?:Stück|Stk\.?|St\.)`, "i").exec(text);
@@ -255,21 +287,21 @@ export function parseSettlement(raw: string | null | undefined): SettlementExtra
       markers.push("n Stück");
       const n = parseGermanNumber(m[1]!);
       return n === null ? null : Math.abs(n);
-    })();
+    })());
 
-  const price = amountAfter(
+  const price = track("price", () => amountAfter(
     text,
     [String.raw`Ausführungskurs`, String.raw`Kurs\s*/\s*Preis`, String.raw`Kurswert\s*je`, String.raw`Preis\s*je`, String.raw`Kurs(?!wert)`, String.raw`Dividende\s*(?:je|pro)\s*(?:Stück|Aktie|Anteil)`, String.raw`Ausschüttung\s*(?:je|pro)\s*(?:Stück|Anteil)`],
     markers,
-  );
+  ));
 
-  const gross = amountAfter(
+  const gross = track("gross", () => amountAfter(
     text,
     [String.raw`Kurswert`, String.raw`Bruttobetrag`, String.raw`Brutto`, String.raw`Dividendengutschrift`, String.raw`Ausschüttung\s*(?:brutto|gesamt)`],
     markers,
-  );
+  ));
 
-  const fees = sumAfter(
+  const fees = track("fees", () => sumAfter(
     text,
     [
       String.raw`Provision`,
@@ -288,9 +320,9 @@ export function parseSettlement(raw: string | null | undefined): SettlementExtra
       String.raw`Entgelt`,
     ],
     markers,
-  );
+  ));
 
-  const tax = sumAfter(
+  const tax = track("tax", () => sumAfter(
     text,
     [
       String.raw`Kapitalertrag(?:s)?steuer`,
@@ -306,9 +338,9 @@ export function parseSettlement(raw: string | null | undefined): SettlementExtra
       String.raw`Stempelsteuer`,
     ],
     markers,
-  );
+  ));
 
-  const netAbs = amountAfter(
+  const netAbs = track("net", () => amountAfter(
     text,
     [
       String.raw`Ausmachender\s*Betrag`,
@@ -323,13 +355,13 @@ export function parseSettlement(raw: string | null | undefined): SettlementExtra
       String.raw`Belastung\s*(?:in\s*)?Höhe\s*von`,
     ],
     markers,
-  );
+  ));
   const net = netAbs === null ? null : kind === "buy" ? -netAbs : netAbs;
 
-  const executedAt =
+  const executedAt = track("executedAt", () =>
     kind === "dividend"
       ? dateAfter(text, [String.raw`Zahlbarkeitstag`, String.raw`Zahltag`, String.raw`Valuta`, String.raw`Ex-?Tag`, String.raw`Datum`], markers)
-      : dateAfter(text, [String.raw`Schlusstag(?:\s*/\s*-?Zeit)?`, String.raw`Ausführungstag`, String.raw`Handelstag`, String.raw`Ausführung\s*am`, String.raw`Valuta`, String.raw`Datum`], markers);
+      : dateAfter(text, [String.raw`Schlusstag(?:\s*/\s*-?Zeit)?`, String.raw`Ausführungstag`, String.raw`Handelstag`, String.raw`Ausführung\s*am`, String.raw`Valuta`, String.raw`Datum`], markers));
 
   return {
     kind,
@@ -346,7 +378,18 @@ export function parseSettlement(raw: string | null | undefined): SettlementExtra
     currency: detectCurrency(text),
     depotNumber: extractDepotNumber(text),
     markers,
+    labels,
   };
+}
+
+/**
+ * Parse one document's text. Returns null when the text is not a
+ * settlement: no kind, or neither ISIN nor WKN.
+ */
+export function parseSettlement(raw: string | null | undefined): SettlementExtraction | null {
+  const s = inspectSettlement(raw);
+  if (!s || !s.kind || (!s.isin && !s.wkn)) return null;
+  return { ...s, kind: s.kind };
 }
 
 /** True when the extraction carries enough to create or enrich a transaction. */

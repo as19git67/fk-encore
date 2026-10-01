@@ -36,6 +36,7 @@ import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import {
   documents,
+  financeDepotTransactionDocument,
   financeAccount,
   financeAccountAccess,
   financeAccountHolding,
@@ -55,6 +56,7 @@ import {
   type EnrichResult,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
+import { inspectSettlement } from "./depot-settlement-parser";
 
 console.log("[boot] finance/portfolio.ts: all imports resolved");
 
@@ -1662,5 +1664,179 @@ export const applySettlementDocument = api(
       throw APIError.failedPrecondition(`document ${documentId} cannot be applied (${r.outcome})`);
     }
     return r;
+  },
+);
+
+// ----------------------------------------------------------------------
+// What the parser read from one document (#1336)
+//
+// For the "what was recognised" view: every field the settlement parser
+// looks for with the value it found (or null) and the label it read it
+// after, why the text does or does not count as a settlement, which depot
+// a dry run would pick and how, and the transactions the document is
+// already linked to. Reading is rule-based only: there is no LLM
+// fallback, and the response says so rather than leaving it to guess.
+// ----------------------------------------------------------------------
+
+type InspectionRejection = "no_text" | "no_kind" | "no_identifier" | "no_date" | "no_amount";
+
+interface InspectionFields {
+  kind: string | null;
+  isin: string | null;
+  wkn: string | null;
+  name: string | null;
+  depot_number: string | null;
+  executed_at: string | null;
+  quantity: string | null;
+  price: string | null;
+  gross: string | null;
+  fees: string | null;
+  tax: string | null;
+  net: string | null;
+  currency: string | null;
+}
+
+interface InspectionLink {
+  depot_transaction_id: number;
+  account_id: number;
+  account_label: string;
+  position_key: string;
+  kind: string;
+  executed_at: string;
+  net_amount: string | null;
+}
+
+interface DocumentInspectionResponse {
+  document_id: number;
+  title: string | null;
+  doc_date: string | null;
+  /** "rules": the deterministic parser. No other method exists yet. */
+  method: "rules";
+  /** Always false: an LLM fallback is not implemented. */
+  llm_fallback_used: boolean;
+  /** True when the text reads as a settlement with enough to book. */
+  is_settlement: boolean;
+  /** Why it does not, when it does not. */
+  rejection: InspectionRejection | null;
+  fields: InspectionFields;
+  /** The printed label each field was read after ("Kurswert", "Schlusstag", …). */
+  labels: Record<string, string>;
+  /** What enrichment would do now (dry run), with the depot's label. */
+  depot: (EnrichResult & { account_label: string | null }) | null;
+  links: InspectionLink[];
+}
+
+interface InspectDocumentParams {
+  documentId: number;
+}
+
+function numOut(n: number | null, scale: number): string | null {
+  return n === null ? null : n.toFixed(scale);
+}
+
+export const inspectSettlementDocument = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/portfolio/documents/:documentId/inspection",
+    auth: true,
+  },
+  async ({ documentId }: InspectDocumentParams): Promise<DocumentInspectionResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    const [doc] = await db
+      .select({
+        id: documents.id,
+        user_id: documents.user_id,
+        title: documents.title,
+        doc_date: documents.doc_date,
+        extracted_text: documents.extracted_text,
+      })
+      .from(documents)
+      .where(eq(documents.id, documentId))
+      .limit(1);
+    if (!doc || (!hasAdmin(auth) && doc.user_id !== Number(auth.userID))) {
+      throw APIError.notFound(`document ${documentId} not found`);
+    }
+
+    const depots = await visibleDepots(auth, null);
+    const labelById = new Map(depots.map((d) => [d.id, d.label]));
+    const ids = depots.map((d) => d.id);
+
+    const s = inspectSettlement(doc.extracted_text);
+    let rejection: InspectionRejection | null = null;
+    if (!s) rejection = "no_text";
+    else if (!s.kind) rejection = "no_kind";
+    else if (!s.isin && !s.wkn) rejection = "no_identifier";
+    else if (!s.executedAt && !doc.doc_date) rejection = "no_date";
+    else if (s.net === null && s.gross === null && (s.quantity === null || s.price === null)) rejection = "no_amount";
+
+    const dry = rejection === null && ids.length > 0
+      ? await enrichDocument(documentId, ids, { dryRun: true })
+      : null;
+
+    const linkRows = await db
+      .select({
+        id: financeDepotTransaction.id,
+        account_id: financeDepotTransaction.account_id,
+        isin: financeDepotTransaction.isin,
+        wkn: financeDepotTransaction.wkn,
+        name: financeDepotTransaction.name,
+        kind: financeDepotTransaction.kind,
+        executed_at: financeDepotTransaction.executed_at,
+        net_amount: financeDepotTransaction.net_amount,
+      })
+      .from(financeDepotTransactionDocument)
+      .innerJoin(
+        financeDepotTransaction,
+        eq(financeDepotTransaction.id, financeDepotTransactionDocument.depot_transaction_id),
+      )
+      .where(eq(financeDepotTransactionDocument.document_id, documentId));
+
+    return {
+      document_id: doc.id,
+      title: doc.title,
+      doc_date: doc.doc_date,
+      method: "rules",
+      llm_fallback_used: false,
+      is_settlement: rejection === null,
+      rejection,
+      fields: {
+        kind: s?.kind ?? null,
+        isin: s?.isin ?? null,
+        wkn: s?.wkn ?? null,
+        name: s?.name ?? null,
+        depot_number: s?.depotNumber ?? null,
+        executed_at: s?.executedAt ?? null,
+        quantity: numOut(s?.quantity ?? null, 8),
+        price: numOut(s?.price ?? null, 6),
+        gross: numOut(s?.gross ?? null, 2),
+        fees: numOut(s?.fees ?? null, 2),
+        tax: numOut(s?.tax ?? null, 2),
+        net: numOut(s?.net ?? null, 2),
+        currency: s?.currency ?? null,
+      },
+      labels: Object.fromEntries(
+        Object.entries(s?.labels ?? {}).map(([k, v]) => [
+          k === "depotNumber" ? "depot_number" : k === "executedAt" ? "executed_at" : k,
+          v as string,
+        ]),
+      ),
+      depot: dry
+        ? { ...dry, account_label: dry.account_id === null ? null : labelById.get(dry.account_id) ?? null }
+        : null,
+      links: linkRows
+        .filter((r) => labelById.has(r.account_id))
+        .map((r) => ({
+          depot_transaction_id: r.id,
+          account_id: r.account_id,
+          account_label: labelById.get(r.account_id) ?? "",
+          position_key: positionKey(r),
+          kind: r.kind,
+          executed_at: dateOnly(r.executed_at),
+          net_amount: r.net_amount,
+        })),
+    };
   },
 );
