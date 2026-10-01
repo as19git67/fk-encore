@@ -5695,8 +5695,18 @@ gebaut: ÖPNV bleibt bei der Schätzung, der Router wird dafür nicht gefragt.
 Hinweis, wenn eine Region jünger ist als die Kacheln).
 
 Offen bleibt: Speicher (Kacheln ≈ ein Drittel der PBF-Größe) und Arbeitsspeicher
-beim Bau (einige GB für Deutschland); beides misst Stufe 1 im Betrieb, und
-„Region löschen" muss die Kacheln mitnehmen (§14).
+beim Bau (einige GB für Deutschland); beides misst Stufe 1 im Betrieb.
+
+**Region löschen nimmt die Kacheln mit (2026-10-01).** Der Geo-Dienst löscht
+mit der Region ihren heruntergeladenen Extrakt und räumt alle sechs Stunden
+Extrakte ab, deren Region-Datenbank es nicht gibt (älter als ein Tag, kein
+Import läuft). Der Routing-Container vergleicht im Betrieb alle zehn Minuten
+die Menge der Extrakte; bleibt eine Änderung eine weitere Prüfung lang
+stehen, beendet er sich, Compose startet ihn neu, und er baut von vorn —
+Kacheln und Verwaltungsgrenzen, nichts vom gelöschten Extrakt bleibt.
+Überlappende Extrakte führt `osmium merge` vorher zu einer Datei zusammen.
+Downloads landen erst als `.part` und werden nach dem Abschluss umbenannt,
+damit ein abgebrochener Download nicht als fertiger Extrakt gilt.
 
 ## 23. Idee für später: die Hörtour
 
