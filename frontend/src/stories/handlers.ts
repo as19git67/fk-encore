@@ -380,4 +380,16 @@ export const defaultHandlers = [
     tilesBuiltAt: '2026-09-20T04:00:00.000Z', newestRegionAt: '2026-09-18T12:00:00.000Z',
     tilesBehindRegion: false,
   })),
+  http.post('/api/trip-planner/routing/measure', () => HttpResponse.json({
+    pairs: 24,
+    modes: [
+      { mode: 'foot', pairs: 18, answered: 18, offByQuarter: 7, medianDeviationPct: 22, medianDifferenceMinutes: 3 },
+      { mode: 'car', pairs: 6, answered: 6, offByQuarter: 1, medianDeviationPct: 9, medianDifferenceMinutes: -1 },
+    ],
+    worst: [
+      { mode: 'foot', from: 'Hotel', to: 'Aussichtspunkt', planTitle: 'Testreise', estimateMinutes: 14, routerMinutes: 31 },
+      { mode: 'foot', from: 'Museum', to: 'Altstadt', planTitle: 'Testreise', estimateMinutes: 9, routerMinutes: 17 },
+    ],
+    worthwhile: true,
+  })),
 ]

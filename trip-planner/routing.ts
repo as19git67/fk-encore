@@ -16,6 +16,7 @@ import db from "../db/database";
 import { osmRegionImports } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { getRouterClient, type RouterStatus } from "./router-client";
+import { collectPairs, measurePairs, summarize, type MeasureResult } from "./routing-measure";
 import { travelLeg, type TransportMode, type TravelLeg } from "./travel";
 
 export interface RoutingStatusResponse extends RouterStatus {
@@ -93,6 +94,26 @@ export const compareTravel = api(
       router: routed ? { minutes: routed.minutes, distanceM: routed.distanceM } : null,
       differenceMinutes: routed ? routed.minutes - estimate.minutes : null,
     };
+  },
+);
+
+export interface MeasureResponse extends MeasureResult {
+  /** Hops found on the caller's trips; zero means there is nothing to measure yet. */
+  pairs: number;
+}
+
+/**
+ * The comparison over the caller's own planned days (§24, before stage
+ * 2): one button on the system status page instead of pairs typed into
+ * `compare`. Read-only — nothing about a plan changes.
+ */
+export const measureRouting = api(
+  { expose: true, method: "POST", path: "/trip-planner/routing/measure", auth: true },
+  async (): Promise<MeasureResponse> => {
+    const ownerId = requireUser();
+    const pairs = await collectPairs(ownerId);
+    const samples = await measurePairs(pairs, getRouterClient());
+    return { pairs: pairs.length, ...summarize(samples) };
   },
 );
 
