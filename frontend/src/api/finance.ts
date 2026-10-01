@@ -579,6 +579,12 @@ export interface OverviewAccount {
   balance_as_of: string | null
   /** Count of recent transactions still without a user-source tag. */
   pending_count: number
+  /** The linked bankcontact's sync is stuck on a TAN (pending or
+   *  expired). Set on every account of that bankcontact; null for
+   *  manual accounts and after a sync that did not stop on a TAN. */
+  sync_attention: 'tan-required' | 'tan-expired' | null
+  bankcontact_id: number | null
+  bankcontact_name: string | null
 }
 
 export interface OverviewSection {
