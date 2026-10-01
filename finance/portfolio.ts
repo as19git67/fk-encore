@@ -47,6 +47,11 @@ import {
   type CostBasisSource,
   type WacIndex,
 } from "./holdings";
+import {
+  documentIdsByDepotTransaction,
+  enrichPendingDocuments,
+  type EnrichResult,
+} from "./depot-document-enrichment";
 
 console.log("[boot] finance/portfolio.ts: all imports resolved");
 
@@ -100,6 +105,30 @@ async function visibleDepots(
         .orderBy(asc(financeAccount.label));
 
   return rows;
+}
+
+/**
+ * The depots among `visibleDepots` the caller may write to: every one for
+ * an admin, otherwise those with `level='write'` on the ACL.
+ */
+async function writableDepots(
+  auth: { userID: string; permissions: string[] },
+  requested: number[] | null,
+): Promise<DepotAccount[]> {
+  const visible = await visibleDepots(auth, requested);
+  if (hasAdmin(auth) || visible.length === 0) return visible;
+  const rows = await db
+    .select({ account_id: financeAccountAccess.account_id })
+    .from(financeAccountAccess)
+    .where(
+      and(
+        eq(financeAccountAccess.user_id, Number(auth.userID)),
+        eq(financeAccountAccess.level, "write"),
+        inArray(financeAccountAccess.account_id, visible.map((d) => d.id)),
+      ),
+    );
+  const writable = new Set(rows.map((r) => r.account_id));
+  return visible.filter((d) => writable.has(d.id));
 }
 
 /** "1,2,3" → [1, 2, 3]; anything that is not a positive integer is an error. */
@@ -868,6 +897,8 @@ export interface PortfolioTransaction {
   source: string;
   linked_transaction_id: number | null;
   note: string | null;
+  /** Settlement documents this row was read from or confirmed by. */
+  document_ids: number[];
 }
 
 type TxSortField = "executed_at" | "net_amount" | "name";
@@ -984,6 +1015,7 @@ export const listPortfolioTransactions = api(
     ]);
 
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
+    const docsById = await documentIdsByDepotTransaction(rows.map((r) => r.id));
     return {
       items: rows.map((r) => ({
         id: r.id,
@@ -1005,6 +1037,7 @@ export const listPortfolioTransactions = api(
         source: r.source,
         linked_transaction_id: r.linked_transaction_id,
         note: r.note,
+        document_ids: docsById.get(r.id) ?? [],
       })),
       total: agg.total,
       sums: {
@@ -1272,10 +1305,13 @@ export const getPortfolioPosition = api(
           source: tx.source,
           linked_transaction_id: tx.linked_transaction_id,
           note: tx.note,
+          document_ids: [],
         });
       }
     }
     positionTxs.sort((a, b) => b.executed_at.localeCompare(a.executed_at) || b.id - a.id);
+    const positionDocs = await documentIdsByDepotTransaction(positionTxs.map((t) => t.id));
+    for (const t of positionTxs) t.document_ids = positionDocs.get(t.id) ?? [];
 
     const yearsOut = [...years.values()]
       .sort((a, b) => b.year - a.year)
@@ -1298,6 +1334,64 @@ export const getPortfolioPosition = api(
       transactions: positionTxs,
       sales,
       years: yearsOut,
+    };
+  },
+);
+
+// ----------------------------------------------------------------------
+// Read settlement documents into depot transactions (#1336, stage 4)
+//
+// The same enrichment that runs after a document is classified, on demand
+// over every ready settlement that is not linked yet — for a backfill of
+// old statements, or after a depot was synced for the first time and the
+// holdings that tell a document where it belongs now exist. Only depots
+// the caller may write to are touched.
+// ----------------------------------------------------------------------
+
+interface EnrichDocumentsParams {
+  /** Comma-separated depot account ids; omitted = every writable depot. */
+  accounts?: string;
+  /** Maximum number of documents examined in this call (default 200). */
+  limit?: number;
+}
+
+interface EnrichDocumentsResponse {
+  documents_examined: number;
+  created: number;
+  enriched: number;
+  linked: number;
+  already_linked: number;
+  skipped_not_settlement: number;
+  skipped_no_holding: number;
+  conflicts: number;
+  errors: string[];
+  /** Per document: only the ones that changed something or need a look. */
+  results: EnrichResult[];
+}
+
+export const enrichDepotTransactionsFromDocuments = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/portfolio/documents/enrich",
+    auth: true,
+  },
+  async ({ accounts, limit }: EnrichDocumentsParams): Promise<EnrichDocumentsResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const depots = await writableDepots(auth, parseAccountIds(accounts));
+    if (depots.length === 0) {
+      throw APIError.permissionDenied("write access to at least one depot is required");
+    }
+    const stats = await enrichPendingDocuments(
+      depots.map((d) => d.id),
+      limit ?? 200,
+    );
+    return {
+      ...stats,
+      results: stats.results.filter(
+        (r) => r.outcome !== "not_settlement" && r.outcome !== "no_holding",
+      ),
     };
   },
 );
