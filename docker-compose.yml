@@ -698,6 +698,11 @@ services:
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_SCOPE: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
       WATCHTOWER_NO_STARTUP_MESSAGE: "true"
+      # A container stuck in a restart loop is exactly the one whose fixed
+      # image matters most; by default Watchtower skips it.
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+    # Only the containers named here are updated. A new service has to be
+    # added to this list as well, or its image is never pulled again.
     command: >
       --http-api-periodic-polls
       fk-encore-app${DEPLOY_NAME_SUFFIX:-}
@@ -706,6 +711,7 @@ services:
       fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
       fk-encore-receipt-ocr${DEPLOY_NAME_SUFFIX:-}
       fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-routing${DEPLOY_NAME_SUFFIX:-}
       fk-encore-taxonomy-tools${DEPLOY_NAME_SUFFIX:-}
     ports:
       - "${DEPLOY_BIND_WATCHTOWER:-0.0.0.0}:${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"

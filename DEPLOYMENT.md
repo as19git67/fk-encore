@@ -195,6 +195,12 @@ file. They report liveness only.
 
 #### Watchtower update API
 
+Watchtower updates only the containers named in its `command` list in
+`docker-compose.yml`, and also those stuck in a restart loop
+(`WATCHTOWER_INCLUDE_RESTARTING`). A service added to the compose file
+must be added to that list too; otherwise its image is pulled once by
+`docker compose up -d` and never again.
+
 The `watchtower` container mounts the Docker socket, so anyone who can
 call its HTTP update API can start containers on the host — that is host
 root. Two settings guard it:
@@ -799,7 +805,7 @@ the photo UI responsive under sustained scan load.
 | `GEO_SERVICE_URL`                | `http://geo:8080` | Base URL the app uses to reach the geo service. Override only when running the app outside the compose stack. |
 | `GEO_SHARED_SECRET`              | _(empty)_ | Optional bearer token; if set, every geo HTTP call must present `Authorization: Bearer <secret>`. |
 | `GEO_DB_PASSWORD`                | `postgres` | Postgres superuser password inside the `geo-db` container. |
-| `ROUTING_SERVICE_URL`            | `http://routing:8002` | Base URL of the Valhalla routing container. The trip planner uses it for real travel times and falls back to its estimate when it is absent. The `routing` service is new since September 2026: Watchtower only updates containers that already run, so start it once with `docker compose up -d` (it creates `${DEPLOY_DATA_ROOT}/routing`); on first start it builds tiles from the imported regions, which takes a while. The system status page in the web admin shows why it is unreachable. |
+| `ROUTING_SERVICE_URL`            | `http://routing:8002` | Base URL of the Valhalla routing container. The trip planner uses it for real travel times and falls back to its estimate when it is absent. The `routing` service is new since September 2026: start it once with `docker compose up -d` (Watchtower updates it afterwards, but does not create containers) (it creates `${DEPLOY_DATA_ROOT}/routing`); on first start it builds tiles from the imported regions, which takes a while. The system status page in the web admin shows why it is unreachable. |
 | `GEO_OSM2PGSQL_CACHE_MB`         | `2000`  | osm2pgsql `--cache` value, in MB. Raise on hosts with spare RAM to speed up imports of large regions. |
 | `GEO_OSM2PGSQL_PROCS`            | `2`    | osm2pgsql `--number-processes`. |
 | `GEO_REPLICATION_INTERVAL_MS`    | `3600000` | Background `osm2pgsql-replication update` loop interval, ms. Set to `off` (via `GEO_REPLICATION=off`) to disable entirely. |
