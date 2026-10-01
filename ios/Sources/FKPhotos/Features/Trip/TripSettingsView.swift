@@ -87,6 +87,19 @@ struct TripSettingsView: View {
             }
 
             Section {
+                NavigationLink {
+                    TripRoutingMeasureView()
+                } label: {
+                    Label("Reisezeiten prüfen", systemImage: "arrow.triangle.swap")
+                }
+            } header: {
+                Text("Routing")
+            } footer: {
+                Text("Vergleicht die geschätzten Reisezeiten deiner geplanten Tage mit dem "
+                     + "Routing-Dienst und sagt, ob sich echte Reisezeiten im Plan lohnen.")
+            }
+
+            Section {
                 if !homeResolved {
                     HStack(spacing: 8) {
                         ProgressView()

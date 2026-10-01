@@ -5690,6 +5690,19 @@ Stufe 1: Wo die Schätzung um mehr als ein Viertel danebenliegt, lohnt es sich.
 mit Abfahrtszeit gefragt, das Offline-Bündel behält die Zeiten. Vorerst nicht
 gebaut: ÖPNV bleibt bei der Schätzung, der Router wird dafür nicht gefragt.
 
+**Die Messung per Knopf (2026-10-01).** `POST /trip-planner/routing/measure`
+geht die geplanten Tage des Aufrufers so ab, wie der Planer sie geht —
+Tagesanker oder Unterkunft, die Stopps in Blockreihenfolge, zurück — und fragt
+jeden Weg einmal beim Router (höchstens 80, ohne Transit-Etappen und ohne
+ÖPNV). Zurück kommt je Fortbewegung, wie oft die Schätzung um mehr als ein
+Viertel (und mindestens 3 Minuten) danebenliegt, die typische Abweichung und
+die fünf Wege, bei denen sie am weitesten danebenliegt. „Lohnt sich" heißt:
+auf mindestens einem Viertel der beantworteten Wege. In der App unter
+Einstellungen › Trip & Reise › Reisezeiten prüfen, im Web auf der
+Systemstatus-Seite in der Routing-Kachel. An den Plänen ändert sich nichts.
+Bis Stufe 2 gebaut ist, plant der Planer weiter mit der Schätzung —
+`travel-table.ts` steht bereit, ist aber noch nicht angeschlossen.
+
 **Sichtbar ist der Router** auf der Systemstatus-Seite im Web-Admin
 (Kachel „Routing": erreichbar, Kacheln gebaut am, neueste Region, und der
 Hinweis, wenn eine Region jünger ist als die Kacheln).

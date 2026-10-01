@@ -10,7 +10,7 @@ import { useRealtimeEvent } from '../composables/useRealtime'
 import { getScanQueueStatus } from '../api/photos'
 import { getDocumentQueueStatus } from '../api/documents'
 import { getFinanceTagQueueStatus } from '../api/finance'
-import { getRoutingStatus, type RoutingStatus } from '../api/system'
+import { getRoutingStatus, measureRouting, type RoutingMeasure, type RoutingStatus } from '../api/system'
 import { formatDateShort } from '../utils/dateFormat'
 
 interface QueueCounts {
@@ -74,9 +74,9 @@ async function refresh() {
 
 /**
  * The router (§24 of the trip-planner concept): reachable, tiles, and
- * whether a region came after the tiles were built. Read-only like the
- * queues — the only action, restarting the routing container, is not
- * the app's to take.
+ * whether a region came after the tiles were built. The container
+ * rebuilds by itself when its extracts change; the one action here is
+ * the measurement, which reads and changes nothing.
  */
 const routing = ref<RoutingStatus | null>(null)
 const routingFailed = ref(false)
@@ -115,6 +115,48 @@ const routingLine = computed(() => {
   if (!r.hasTiles) return 'Erreichbar, aber ohne Kacheln — der Planer schätzt Reisezeiten.'
   return `Bereit${r.version ? ` (Valhalla ${r.version})` : ''}.`
 })
+
+/**
+ * The estimate next to the router over the admin's own planned days
+ * (§24): whether stage 2 — the router deciding the plan's travel times
+ * — is worth building. Read-only.
+ */
+const measure = ref<RoutingMeasure | null>(null)
+const measuring = ref(false)
+const measureError = ref<string | null>(null)
+
+async function runMeasure() {
+  measuring.value = true
+  try {
+    measure.value = await measureRouting()
+    measureError.value = null
+  } catch (e) {
+    measureError.value = e instanceof Error ? e.message : 'Vergleich fehlgeschlagen.'
+  } finally {
+    measuring.value = false
+  }
+}
+
+const MODE_LABELS: Record<string, string> = { foot: 'Zu Fuß', bike: 'Fahrrad', car: 'Auto', transit: 'ÖPNV' }
+
+const measureVerdict = computed(() => {
+  const m = measure.value
+  if (!m) return null
+  const answered = m.modes.reduce((n, mode) => n + mode.answered, 0)
+  if (m.pairs === 0) return 'Keine geplanten Tage mit Stopps – erst eine Reise planen, dann vergleichen.'
+  if (answered === 0) return `Der Routing-Dienst hat keinen der ${m.pairs} Wege beantwortet – nicht erreichbar oder ohne Kacheln für diese Gegend.`
+  return m.worthwhile
+    ? 'Die Schätzung liegt oft mehr als ein Viertel daneben – echte Reisezeiten würden die Pläne spürbar verbessern.'
+    : 'Die Schätzung trifft meist – echte Reisezeiten würden wenig ändern.'
+})
+
+function modeLine(mode: RoutingMeasure['modes'][number]): string {
+  const base = `${MODE_LABELS[mode.mode] ?? mode.mode}: ${mode.answered} von ${mode.pairs} Wegen beantwortet, ${mode.offByQuarter} mehr als ein Viertel daneben`
+  if (mode.medianDeviationPct === null || mode.medianDifferenceMinutes === null) return base
+  const diff = mode.medianDifferenceMinutes
+  const direction = diff === 0 ? 'im Mittel gleich lang' : diff > 0 ? `Router im Mittel ${diff} min länger` : `Router im Mittel ${-diff} min kürzer`
+  return `${base} · typisch ${mode.medianDeviationPct} % · ${direction}`
+}
 
 onMounted(() => { void refresh(); void refreshRouting() })
 useRealtimeEvent('scan-queue', 'state.changed', () => { void refresh() })
@@ -186,8 +228,33 @@ function open(entry: QueueOverviewEntry) {
           </dl>
           <p v-if="routing?.tilesBehindRegion" class="status-tile__warn">
             Eine Region ist jünger als die Kacheln: Sie ist für Spots durchsuchbar, aber noch nicht
-            routbar. Den Routing-Container neu starten, dann baut er die Kacheln neu.
+            routbar. Der Routing-Container bemerkt das selbst und baut die Kacheln innerhalb von etwa
+            20 Minuten neu.
           </p>
+          <Button
+            :label="measure ? 'Erneut vergleichen' : 'Reisezeiten vergleichen'"
+            icon="pi pi-arrow-right-arrow-left"
+            size="small"
+            outlined
+            :loading="measuring"
+            @click="runMeasure"
+          />
+          <p v-if="measureError" class="status-tile__warn">{{ measureError }}</p>
+          <div v-if="measure" class="status-measure" aria-live="polite">
+            <p class="status-tile__line">{{ measureVerdict }}</p>
+            <ul v-if="measure.modes.length" class="status-measure__list">
+              <li v-for="mode in measure.modes" :key="mode.mode">{{ modeLine(mode) }}</li>
+            </ul>
+            <template v-if="measure.worst.length">
+              <p class="status-measure__head">Am weitesten daneben</p>
+              <ul class="status-measure__list">
+                <li v-for="pair in measure.worst" :key="`${pair.mode}|${pair.from}|${pair.to}`">
+                  {{ pair.from }} → {{ pair.to }}: geschätzt {{ pair.estimateMinutes }} min, Router
+                  {{ pair.routerMinutes }} min ({{ MODE_LABELS[pair.mode] ?? pair.mode }}{{ pair.planTitle ? `, ${pair.planTitle}` : '' }})
+                </li>
+              </ul>
+            </template>
+          </div>
         </div>
       </div>
     </section>
@@ -306,6 +373,29 @@ function open(entry: QueueOverviewEntry) {
   margin: 0;
   font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
+}
+
+.status-measure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-self: stretch;
+}
+
+.status-measure__head {
+  margin: 0;
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  color: var(--p-text-muted-color);
+}
+
+.status-measure__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--text-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .status-tile__warn {
