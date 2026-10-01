@@ -37,8 +37,13 @@ while [ -z "$(pbfs)" ]; do
 done
 
 mkdir -p "$TILE_DIR"
-if [ ! -f "$CONFIG" ]; then
-  valhalla_build_config \
+# Written fresh on every start, into a temporary file first: a redirect
+# creates its target before the command runs, and a failing
+# valhalla_build_config once left an empty config that every later
+# start took for a finished one. Generating it is cheap; a config that
+# is not JSON stops the container here, with the tool's own error, and
+# never reaches the tile build.
+if ! valhalla_build_config \
     --mjolnir-tile-dir "$TILE_DIR" \
     --mjolnir-tile-extract "$DATA_DIR/tiles.tar" \
     --mjolnir-timezone "$DATA_DIR/timezones.sqlite" \
@@ -48,8 +53,15 @@ if [ ! -f "$CONFIG" ]; then
     --service-limits-bicycle-max-matrix-locations 200 \
     --service-limits-pedestrian-max-matrix-locations 200 \
     --httpd-service-listen "tcp://*:${PORT}" \
-    > "$CONFIG"
+    > "$CONFIG.new"; then
+  echo "fk-routing: valhalla_build_config failed" >&2
+  exit 1
 fi
+if ! jq -e . "$CONFIG.new" >/dev/null; then
+  echo "fk-routing: valhalla_build_config wrote no JSON" >&2
+  exit 1
+fi
+mv "$CONFIG.new" "$CONFIG"
 
 if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$(stamp)" ]; then
   echo "fk-routing: building tiles from $(pbfs | wc -l) extract(s)"
