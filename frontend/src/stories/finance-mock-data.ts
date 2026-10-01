@@ -440,14 +440,15 @@ function portfolioTx(
     source: 'manual',
     linked_transaction_id: null,
     note: null,
+    document_ids: [],
     ...overrides,
   }
 }
 
 export const MOCK_PORTFOLIO_TRANSACTIONS: PortfolioTransaction[] = [
-  portfolioTx({ id: 901, kind: 'dividend', executed_at: '2026-05-12', gross_amount: '120.00', tax: '31.65', net_amount: '88.35', source: 'giro-derived', linked_transaction_id: 4711 }),
+  portfolioTx({ id: 901, kind: 'dividend', executed_at: '2026-05-12', gross_amount: '120.00', tax: '31.65', net_amount: '88.35', source: 'giro-derived+document', linked_transaction_id: 4711, document_ids: [301] }),
   portfolioTx({ id: 902, kind: 'dividend', executed_at: '2026-04-20', account_id: 12, account_label: 'Depot Musterbroker', position_key: PF_ISIN_B, isin: PF_ISIN_B, wkn: null, name: 'Beispiel World ETF', gross_amount: '78.00', tax: '15.50', net_amount: '62.50' }),
-  portfolioTx({ id: 903, kind: 'sell', executed_at: '2026-02-03', amount: '10', price: '145.00', gross_amount: '1450.00', fees: '10.00', tax: '21.05', net_amount: '1418.95' }),
+  portfolioTx({ id: 903, kind: 'sell', executed_at: '2026-02-03', amount: '10', price: '145.00', gross_amount: '1450.00', fees: '10.00', tax: '21.05', net_amount: '1418.95', source: 'document', document_ids: [302] }),
   portfolioTx({ id: 904, kind: 'buy', executed_at: '2025-11-05', account_id: 12, account_label: 'Depot Musterbroker', position_key: PF_ISIN_B, isin: PF_ISIN_B, wkn: null, name: 'Beispiel World ETF', amount: '50', price: '49.00', gross_amount: '2450.00', fees: '7.00', net_amount: '-2457.00' }),
   portfolioTx({ id: 905, kind: 'dividend', executed_at: '2025-05-14', gross_amount: '150.00', tax: '30.00', net_amount: '120.00' }),
   portfolioTx({ id: 906, kind: 'sell', executed_at: '2025-03-01', position_key: 'Gamma Beteiligungen', isin: null, wkn: null, name: 'Gamma Beteiligungen', amount: '20', net_amount: '620.00', fees: '5.00' }),

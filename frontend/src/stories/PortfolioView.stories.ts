@@ -34,6 +34,12 @@ const portfolioHandlers = [
       sums: { net_amount: net.toFixed(2), fees: fees.toFixed(2), taxes: taxes.toFixed(2) },
     })
   }),
+  http.post('/api/finance/portfolio/documents/enrich', () =>
+    HttpResponse.json({
+      documents_examined: 3, created: 1, enriched: 1, linked: 0, already_linked: 0,
+      skipped_not_settlement: 0, skipped_no_holding: 0, conflicts: 1, errors: [], results: [],
+    }),
+  ),
   ...defaultHandlers,
 ]
 

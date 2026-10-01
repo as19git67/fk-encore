@@ -2205,6 +2205,27 @@ export const financeDepotTransaction = pgTable(
   ]
 );
 
+// Which document(s) a depot transaction was read from or confirmed by
+// (#1336, stage 4). Same pattern as finance_transaction_document.
+export const financeDepotTransactionDocument = pgTable(
+  "finance_depot_transaction_document",
+  {
+    depot_transaction_id: bigint("depot_transaction_id", { mode: "number" })
+      .notNull()
+      .references(() => financeDepotTransaction.id, { onDelete: "cascade" }),
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.depot_transaction_id, table.document_id] }),
+    index("finance_depot_transaction_document_document_idx").on(table.document_id),
+  ]
+);
+
 // ---------- Tags ----------
 //
 // Same tag name can exist once as source='user' and once as source='ai'
