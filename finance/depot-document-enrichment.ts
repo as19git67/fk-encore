@@ -71,6 +71,10 @@ export interface EnrichResult {
   isin: string | null;
   wkn: string | null;
   depot_number: string | null;
+  /** How the depot was found; null when none was. */
+  matched_by: DepotMatchedBy | null;
+  /** Where the execution date came from: the statement itself or the document's date. */
+  date_source: "statement" | "document_date" | null;
 }
 
 export interface EnrichOptions {
@@ -113,12 +117,16 @@ function emptyStats(): EnrichStats {
   };
 }
 
+/** How a statement found its depot. */
+export type DepotMatchedBy = "holding" | "depot_number" | "transactions";
+
 interface HoldingMatch {
   account_id: number;
   isin: string | null;
   wkn: string | null;
   name: string | null;
   currency: string | null;
+  via: DepotMatchedBy;
 }
 
 /**
@@ -128,7 +136,7 @@ interface HoldingMatch {
 async function findHoldingDepot(
   s: SettlementExtraction,
   accountIds: number[] | null,
-): Promise<HoldingMatch | null> {
+): Promise<Omit<HoldingMatch, "via"> | null> {
   const idMatches = [];
   if (s.isin) idMatches.push(eq(financeAccountHolding.isin, s.isin));
   if (s.wkn) idMatches.push(eq(financeAccountHolding.wkn, s.wkn));
@@ -231,20 +239,21 @@ async function resolveDepot(
   accountIds: number[] | null,
 ): Promise<HoldingMatch | null> {
   const byHolding = await findHoldingDepot(s, accountIds);
-  if (byHolding) return byHolding;
-  const fallback = (account_id: number): HoldingMatch => ({
+  if (byHolding) return { ...byHolding, via: "holding" };
+  const fallback = (account_id: number, via: DepotMatchedBy): HoldingMatch => ({
     account_id,
     isin: s.isin,
     wkn: s.wkn,
     name: s.name,
     currency: s.currency,
+    via,
   });
   if (s.depotNumber) {
     const id = await findDepotByNumber(s.depotNumber, accountIds);
-    if (id !== null) return fallback(id);
+    if (id !== null) return fallback(id, "depot_number");
   }
   const byTx = await findDepotByTransactions(s, accountIds);
-  return byTx === null ? null : fallback(byTx);
+  return byTx === null ? null : fallback(byTx, "transactions");
 }
 
 async function accessibleAccountIds(userId: number): Promise<number[] | null> {
@@ -357,6 +366,8 @@ export async function enrichDocument(
     isin: null,
     wkn: null,
     depot_number: null,
+    matched_by: null,
+    date_source: null,
   };
 
   const [doc] = await db
@@ -373,7 +384,11 @@ export async function enrichDocument(
   if (!doc || doc.status !== "ready") return result;
 
   const parsed = parseSettlement(doc.extracted_text);
-  if (parsed && !parsed.executedAt && doc.doc_date) parsed.executedAt = doc.doc_date.slice(0, 10);
+  if (parsed) result.date_source = parsed.executedAt ? "statement" : null;
+  if (parsed && !parsed.executedAt && doc.doc_date) {
+    parsed.executedAt = doc.doc_date.slice(0, 10);
+    result.date_source = "document_date";
+  }
   if (!isUsableSettlement(parsed)) return result;
   result.statement_net = fixed(parsed.net, 2);
   result.isin = parsed.isin;
@@ -390,6 +405,7 @@ export async function enrichDocument(
     return result;
   }
   result.account_id = holding.account_id;
+  result.matched_by = holding.via;
 
   // Already attached to a transaction of this depot: nothing to do.
   const [existingLink] = await db

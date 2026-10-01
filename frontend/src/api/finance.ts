@@ -700,6 +700,62 @@ export interface DepotEnrichResult {
   isin: string | null
   wkn: string | null
   depot_number: string | null
+  /** How the depot was found; null when none was. */
+  matched_by: 'holding' | 'depot_number' | 'transactions' | null
+  /** Where the execution date came from. */
+  date_source: 'statement' | 'document_date' | null
+}
+
+// What the parser read from one document
+
+export type SettlementRejection = 'no_text' | 'no_kind' | 'no_identifier' | 'no_date' | 'no_amount'
+
+export interface SettlementInspectionFields {
+  kind: string | null
+  isin: string | null
+  wkn: string | null
+  name: string | null
+  depot_number: string | null
+  executed_at: string | null
+  quantity: string | null
+  price: string | null
+  gross: string | null
+  fees: string | null
+  tax: string | null
+  net: string | null
+  currency: string | null
+}
+
+export interface SettlementInspectionLink {
+  depot_transaction_id: number
+  account_id: number
+  account_label: string
+  position_key: string
+  kind: string
+  executed_at: string
+  net_amount: string | null
+}
+
+export interface SettlementInspection {
+  document_id: number
+  title: string | null
+  doc_date: string | null
+  /** 'rules' — the deterministic parser; nothing else exists yet. */
+  method: 'rules'
+  /** Always false: an LLM fallback is not implemented. */
+  llm_fallback_used: boolean
+  is_settlement: boolean
+  rejection: SettlementRejection | null
+  fields: SettlementInspectionFields
+  /** Printed label each field was read after. */
+  labels: Partial<Record<keyof SettlementInspectionFields, string>>
+  /** What enrichment would do now (dry run). */
+  depot: (DepotEnrichResult & { account_label: string | null }) | null
+  links: SettlementInspectionLink[]
+}
+
+export async function inspectSettlementDocument(documentId: number): Promise<SettlementInspection> {
+  return apiFetch(`/finance/portfolio/documents/${documentId}/inspection`)
 }
 
 // What needs a look (#1336, stage 4)
