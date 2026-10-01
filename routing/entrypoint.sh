@@ -49,19 +49,32 @@ if ! valhalla_build_config \
     --mjolnir-timezone "$DATA_DIR/timezones.sqlite" \
     --mjolnir-admin "$DATA_DIR/admins.sqlite" \
     --service-limits-status-allow-verbose true \
-    --service-limits-auto-max-matrix-locations 200 \
-    --service-limits-bicycle-max-matrix-locations 200 \
-    --service-limits-pedestrian-max-matrix-locations 200 \
     --httpd-service-listen "tcp://*:${PORT}" \
     > "$CONFIG.new"; then
   echo "fk-routing: valhalla_build_config failed" >&2
   exit 1
 fi
-if ! jq -e . "$CONFIG.new" >/dev/null; then
-  echo "fk-routing: valhalla_build_config wrote no JSON" >&2
+# The matrix limits are set in the finished JSON rather than by flag:
+# the flag names follow the config keys, and those changed between
+# Valhalla versions (max_matrix_locations became
+# max_matrix_location_pairs). Whichever of the two this version has is
+# raised; a key it does not have is left alone. The planner asks one
+# matrix of up to 120 points per day (trip-planner/travel-table.ts),
+# which is 14 400 pairs.
+if ! jq '
+    .service_limits |= with_entries(
+      if (.value | type) == "object" then
+        .value |= (
+          (if has("max_matrix_location_pairs") then .max_matrix_location_pairs = 15000 else . end)
+          | (if has("max_matrix_locations") then .max_matrix_locations = 200 else . end)
+        )
+      else . end)
+  ' "$CONFIG.new" > "$CONFIG.tmp"; then
+  echo "fk-routing: valhalla_build_config wrote no usable JSON" >&2
   exit 1
 fi
-mv "$CONFIG.new" "$CONFIG"
+mv "$CONFIG.tmp" "$CONFIG"
+rm -f "$CONFIG.new"
 
 if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$(stamp)" ]; then
   echo "fk-routing: building tiles from $(pbfs | wc -l) extract(s)"
