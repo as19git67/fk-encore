@@ -517,6 +517,9 @@ export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
       transaction_net: '-2457.00',
     },
   ],
+  unverified_documents: [
+    { document_id: 307, document_title: 'Wertpapierabrechnung Verkauf Alpha Industries AG', doc_date: '2026-02-03', isin: 'DE000000AAA1', wkn: null, depot_number: null },
+  ],
   unmatched_documents: [
     { document_id: 306, document_title: 'Dividendengutschrift Gamma Beteiligungen', doc_date: '2026-06-15', isin: 'DE000000GGG7', wkn: null, depot_number: '9900000001' },
   ],
@@ -533,6 +536,7 @@ export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
 export const MOCK_PORTFOLIO_REVIEW_EMPTY: PortfolioReviewResponse = {
   conflicts: [],
   unmatched_documents: [],
+  unverified_documents: [],
   holding_gaps: [],
   unverifiable_changes: 0,
 }
@@ -541,8 +545,10 @@ export const MOCK_SETTLEMENT_INSPECTION: SettlementInspection = {
   document_id: 305,
   title: 'Wertpapierabrechnung Kauf Beispiel World ETF',
   doc_date: '2025-11-05',
-  method: 'rules',
-  llm_fallback_used: false,
+  method: 'rules+llm',
+  llm_fallback_used: true,
+  llm_status: 'cached',
+  verdict: 'ok',
   is_settlement: true,
   rejection: null,
   fields: {
@@ -560,6 +566,27 @@ export const MOCK_SETTLEMENT_INSPECTION: SettlementInspection = {
     net: '-2459.50',
     currency: 'EUR',
   },
+  sources: {
+    kind: { rules: 'buy', llm: 'buy', source: 'both', disagree: false },
+    isin: { rules: PF_ISIN_B, llm: PF_ISIN_B, source: 'both', disagree: false },
+    wkn: { rules: null, llm: null, source: null, disagree: false },
+    name: { rules: 'Beispiel World ETF', llm: 'Beispiel World ETF', source: 'both', disagree: false },
+    depot_number: { rules: null, llm: '9900000002', source: 'llm', disagree: false },
+    executed_at: { rules: '2025-11-05', llm: '2025-11-05', source: 'both', disagree: false },
+    quantity: { rules: '50.00000000', llm: '50.00000000', source: 'both', disagree: false },
+    price: { rules: '49.000000', llm: '49.000000', source: 'both', disagree: false },
+    gross: { rules: '2450.00', llm: '2450.00', source: 'both', disagree: false },
+    fees: { rules: '7.00', llm: '9.50', source: 'llm', disagree: true },
+    tax: { rules: null, llm: null, source: null, disagree: false },
+    net: { rules: '-2459.50', llm: '-2459.50', source: 'both', disagree: false },
+    currency: { rules: 'EUR', llm: 'EUR', source: 'both', disagree: false },
+  },
+  checks: [
+    { name: 'net_equation', result: 'ok', detail: '2450.00 + 9.50 + 0.00 = 2459.50 ↔ 2459.50' },
+    { name: 'quantity_price', result: 'ok', detail: '50 × 49 = 2450.00 ↔ 2450.00' },
+    { name: 'isin_checksum', result: 'failed', detail: PF_ISIN_B },
+    { name: 'date_plausible', result: 'ok', detail: '2025-11-05' },
+  ],
   labels: {
     quantity: 'Stück',
     price: 'Ausführungskurs',
@@ -582,6 +609,7 @@ export const MOCK_SETTLEMENT_INSPECTION: SettlementInspection = {
     depot_number: '9900000002',
     matched_by: 'holding',
     date_source: 'statement',
+    llm_status: 'cached',
   },
   links: [],
 }
@@ -590,6 +618,11 @@ export const MOCK_SETTLEMENT_INSPECTION_REJECTED: SettlementInspection = {
   ...MOCK_SETTLEMENT_INSPECTION,
   document_id: 306,
   title: 'Depotauszug 2025',
+  method: 'rules',
+  llm_fallback_used: false,
+  llm_status: 'skipped',
+  verdict: 'ok',
+  checks: [],
   is_settlement: false,
   rejection: 'no_kind',
   fields: {

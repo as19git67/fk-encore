@@ -56,7 +56,8 @@ import {
   type EnrichResult,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
-import { inspectSettlement } from "./depot-settlement-parser";
+import { readSettlement, type LlmStatus } from "./depot-settlement-reader";
+import type { CheckName, FieldSource, MergeField } from "./depot-settlement-merge";
 
 console.log("[boot] finance/portfolio.ts: all imports resolved");
 
@@ -1513,6 +1514,8 @@ interface ReviewParams {
 interface ReviewResponse {
   conflicts: ReviewConflict[];
   unmatched_documents: ReviewDocument[];
+  /** Rules and model read different figures that do not add up: nothing was booked. */
+  unverified_documents: ReviewDocument[];
   holding_gaps: ReviewHoldingGap[];
   unverifiable_changes: number;
 }
@@ -1530,7 +1533,7 @@ export const getPortfolioReview = api(
     const depots = scopeDepots(await visibleDepots(auth, null), parseAccountIds(accounts), closed === true);
     const ids = depots.map((d) => d.id);
     if (ids.length === 0) {
-      return { conflicts: [], unmatched_documents: [], holding_gaps: [], unverifiable_changes: 0 };
+      return { conflicts: [], unmatched_documents: [], unverified_documents: [], holding_gaps: [], unverifiable_changes: 0 };
     }
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
 
@@ -1539,7 +1542,9 @@ export const getPortfolioReview = api(
       reconcileHoldings(ids),
     ]);
 
-    const relevant = dry.results.filter((r) => r.outcome === "conflict" || r.outcome === "no_holding");
+    const relevant = dry.results.filter(
+      (r) => r.outcome === "conflict" || r.outcome === "no_holding" || r.outcome === "unverified",
+    );
     const docIds = [...new Set(relevant.map((r) => r.document_id))];
     const docRows = docIds.length
       ? await db
@@ -1571,11 +1576,12 @@ export const getPortfolioReview = api(
 
     const conflicts: ReviewConflict[] = [];
     const unmatched: ReviewDocument[] = [];
+    const unverified: ReviewDocument[] = [];
     for (const r of relevant) {
       const doc = docById.get(r.document_id);
       if (!doc) continue;
-      if (r.outcome === "no_holding") {
-        unmatched.push({
+      if (r.outcome === "no_holding" || r.outcome === "unverified") {
+        (r.outcome === "no_holding" ? unmatched : unverified).push({
           document_id: doc.id,
           document_title: doc.title,
           doc_date: doc.doc_date,
@@ -1623,6 +1629,7 @@ export const getPortfolioReview = api(
     return {
       conflicts,
       unmatched_documents: unmatched,
+      unverified_documents: unverified,
       holding_gaps: recon.gaps.map((g) => ({
         ...g,
         account_label: labelById.get(g.account_id) ?? "",
@@ -1696,6 +1703,24 @@ interface InspectionFields {
   currency: string | null;
 }
 
+type InspectionFieldKey = keyof InspectionFields;
+
+interface InspectionFieldSource {
+  /** What the rules read (formatted like `fields`), or null. */
+  rules: string | null;
+  /** What the model read, or null (also when it was not asked). */
+  llm: string | null;
+  /** Where the value in `fields` came from; "both" when they agree. */
+  source: FieldSource;
+  disagree: boolean;
+}
+
+interface InspectionCheck {
+  name: CheckName;
+  result: "ok" | "failed" | "skipped";
+  detail: string | null;
+}
+
 interface InspectionLink {
   depot_transaction_id: number;
   account_id: number;
@@ -1710,16 +1735,25 @@ interface DocumentInspectionResponse {
   document_id: number;
   title: string | null;
   doc_date: string | null;
-  /** "rules": the deterministic parser. No other method exists yet. */
-  method: "rules";
-  /** Always false: an LLM fallback is not implemented. */
+  /** "rules" without a model answer, "rules+llm" with one. */
+  method: "rules" | "rules+llm";
+  /** True when the model's answer took part in this reading. */
   llm_fallback_used: boolean;
-  /** True when the text reads as a settlement with enough to book. */
+  /** What happened with the model: used now, cached, unavailable, skipped. */
+  llm_status: LlmStatus;
+  /** True when the reading counts as a settlement with enough to book. */
   is_settlement: boolean;
   /** Why it does not, when it does not. */
   rejection: InspectionRejection | null;
+  /** The reading that is used — rules and model merged. */
   fields: InspectionFields;
-  /** The printed label each field was read after ("Kurswert", "Schlusstag", …). */
+  /** Per field: what each source read and which one was used. */
+  sources: Record<InspectionFieldKey, InspectionFieldSource>;
+  /** The arithmetic and format checks the used reading was put through. */
+  checks: InspectionCheck[];
+  /** "unverified": rules and model disagree and the figures do not settle it. */
+  verdict: "ok" | "unverified";
+  /** The printed label the rules read each field after ("Kurswert", "Schlusstag", …). */
   labels: Record<string, string>;
   /** What enrichment would do now (dry run), with the depot's label. */
   depot: (EnrichResult & { account_label: string | null }) | null;
@@ -1764,16 +1798,19 @@ export const inspectSettlementDocument = api(
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
     const ids = depots.map((d) => d.id);
 
-    const s = inspectSettlement(doc.extracted_text);
+    // The user is looking at this one document: ask the model if it has
+    // not been asked yet, so the view shows both readings.
+    const reading = await readSettlement(documentId, doc.extracted_text, "allow");
+    const v = reading.merge.values;
     let rejection: InspectionRejection | null = null;
-    if (!s) rejection = "no_text";
-    else if (!s.kind) rejection = "no_kind";
-    else if (!s.isin && !s.wkn) rejection = "no_identifier";
-    else if (!s.executedAt && !doc.doc_date) rejection = "no_date";
-    else if (s.net === null && s.gross === null && (s.quantity === null || s.price === null)) rejection = "no_amount";
+    if (!doc.extracted_text || doc.extracted_text.trim().length === 0) rejection = "no_text";
+    else if (!v.kind) rejection = "no_kind";
+    else if (!v.isin && !v.wkn) rejection = "no_identifier";
+    else if (!v.executedAt && !doc.doc_date) rejection = "no_date";
+    else if (v.net === null && v.gross === null && (v.quantity === null || v.price === null)) rejection = "no_amount";
 
     const dry = rejection === null && ids.length > 0
-      ? await enrichDocument(documentId, ids, { dryRun: true })
+      ? await enrichDocument(documentId, ids, { dryRun: true, llm: "cache-only" })
       : null;
 
     const linkRows = await db
@@ -1794,33 +1831,45 @@ export const inspectSettlementDocument = api(
       )
       .where(eq(financeDepotTransactionDocument.document_id, documentId));
 
+    const show = (field: MergeField, raw: string | number | null): string | null => {
+      if (raw === null) return null;
+      switch (field) {
+        case "quantity": return numOut(Number(raw), 8);
+        case "price": return numOut(Number(raw), 6);
+        case "gross":
+        case "fees":
+        case "tax":
+        case "net": return numOut(Number(raw), 2);
+        default: return String(raw);
+      }
+    };
+    const keyOf = (field: MergeField): InspectionFieldKey =>
+      field === "depotNumber" ? "depot_number" : field === "executedAt" ? "executed_at" : field;
+    const fields = {} as InspectionFields;
+    const sources = {} as Record<InspectionFieldKey, InspectionFieldSource>;
+    for (const f of reading.merge.fields) {
+      const key = keyOf(f.field);
+      fields[key] = show(f.field, v[f.field]);
+      sources[key] = { rules: show(f.field, f.rules), llm: show(f.field, f.llm), source: f.source, disagree: f.disagree };
+    }
+
     return {
       document_id: doc.id,
       title: doc.title,
       doc_date: doc.doc_date,
-      method: "rules",
-      llm_fallback_used: false,
+      method: reading.llm ? "rules+llm" : "rules",
+      llm_fallback_used: reading.llm !== null,
+      llm_status: reading.llmStatus,
       is_settlement: rejection === null,
       rejection,
-      fields: {
-        kind: s?.kind ?? null,
-        isin: s?.isin ?? null,
-        wkn: s?.wkn ?? null,
-        name: s?.name ?? null,
-        depot_number: s?.depotNumber ?? null,
-        executed_at: s?.executedAt ?? null,
-        quantity: numOut(s?.quantity ?? null, 8),
-        price: numOut(s?.price ?? null, 6),
-        gross: numOut(s?.gross ?? null, 2),
-        fees: numOut(s?.fees ?? null, 2),
-        tax: numOut(s?.tax ?? null, 2),
-        net: numOut(s?.net ?? null, 2),
-        currency: s?.currency ?? null,
-      },
+      fields,
+      sources,
+      checks: reading.merge.checks,
+      verdict: reading.merge.verdict,
       labels: Object.fromEntries(
-        Object.entries(s?.labels ?? {}).map(([k, v]) => [
+        Object.entries(reading.rules?.labels ?? {}).map(([k, val]) => [
           k === "depotNumber" ? "depot_number" : k === "executedAt" ? "executed_at" : k,
-          v as string,
+          val as string,
         ]),
       ),
       depot: dry

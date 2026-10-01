@@ -1555,6 +1555,13 @@
       "when": 1788652800041,
       "tag": "0221_finance_depot_transaction_document",
       "breakpoints": true
+    },
+    {
+      "idx": 222,
+      "version": "7",
+      "when": 1788652800042,
+      "tag": "0222_finance_document_settlement_llm",
+      "breakpoints": true
     }
   ]
 }

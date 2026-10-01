@@ -63,12 +63,17 @@ watch(
 const hasContent = computed(() => {
   const r = review.value
   if (!r) return false
-  return r.conflicts.length + r.unmatched_documents.length + r.holding_gaps.length > 0 || r.unverifiable_changes > 0
+  return (
+    r.conflicts.length + r.unmatched_documents.length + (r.unverified_documents?.length ?? 0) + r.holding_gaps.length > 0 ||
+    r.unverifiable_changes > 0
+  )
 })
 
 const count = computed(() => {
   const r = review.value
-  return r ? r.conflicts.length + r.unmatched_documents.length + r.holding_gaps.length : 0
+  return r
+    ? r.conflicts.length + r.unmatched_documents.length + (r.unverified_documents?.length ?? 0) + r.holding_gaps.length
+    : 0
 })
 
 /** The document shown in the preview dialog; closing it leaves the page where it was. */
@@ -214,6 +219,23 @@ function signClass(val: string | null): string {
             </tbody>
           </table>
         </ScrollX>
+      </div>
+
+      <!-- Unverified readings -->
+      <div v-if="review.unverified_documents?.length" class="pr-group">
+        <h3>Erkennung unsicher</h3>
+        <p class="pr-hint">
+          Regel und KI lesen auf diesen Belegen unterschiedliche Werte, und keine Variante geht rechnerisch auf — deshalb wurde nichts gebucht. Im Beleg siehst du, welche Felder abweichen.
+        </p>
+        <ul class="pr-docs">
+          <li v-for="d in review.unverified_documents" :key="d.document_id">
+            <button type="button" class="pr-doc" @click="openDocument = d.document_id">
+              <i class="pi pi-file" aria-hidden="true" />
+              {{ d.document_title ?? `Dokument ${d.document_id}` }}
+            </button>
+            <span v-if="d.doc_date" class="pr-date">{{ formatIsoDate(d.doc_date) }}</span>
+          </li>
+        </ul>
       </div>
 
       <!-- Unmatched documents -->

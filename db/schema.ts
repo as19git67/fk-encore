@@ -2205,6 +2205,18 @@ export const financeDepotTransaction = pgTable(
   ]
 );
 
+// What the language model read from a settlement document (#1336), kept
+// once per document — see migration 0222.
+export const financeDocumentSettlementLlm = pgTable("finance_document_settlement_llm", {
+  document_id: integer("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  values: jsonb("values").$type<Record<string, unknown>>().notNull(),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 // Which document(s) a depot transaction was read from or confirmed by
 // (#1336, stage 4). Same pattern as finance_transaction_document.
 export const financeDepotTransactionDocument = pgTable(

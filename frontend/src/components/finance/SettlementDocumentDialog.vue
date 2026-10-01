@@ -106,12 +106,9 @@ const FIELD_ROWS: Array<{ key: FieldKey; label: string }> = [
   { key: 'currency', label: 'Währung' },
 ]
 
-function fieldValue(key: FieldKey): string | null {
-  const f = inspection.value?.fields
-  if (!f) return null
-  const v = f[key]
+function format(key: FieldKey, v: string | null): string | null {
   if (v === null) return null
-  const cur = f.currency
+  const cur = inspection.value?.fields.currency ?? null
   switch (key) {
     case 'kind': return depotKindLabel(v)
     case 'executed_at': return formatIsoDate(v)
@@ -124,6 +121,37 @@ function fieldValue(key: FieldKey): string | null {
     default: return v
   }
 }
+
+function fieldValue(key: FieldKey): string | null {
+  return format(key, inspection.value?.fields[key] ?? null)
+}
+
+function sourceOf(key: FieldKey) {
+  return inspection.value?.sources?.[key] ?? null
+}
+
+const SOURCE_TEXT: Record<string, string> = {
+  both: 'Regel = KI',
+  rules: 'Regel',
+  llm: 'KI',
+}
+
+const LLM_STATUS_TEXT: Record<string, string> = {
+  used: 'Gelesen mit festen Regeln und dem KI-Modell (gerade gefragt).',
+  cached: 'Gelesen mit festen Regeln und dem KI-Modell (gespeicherte Antwort).',
+  unavailable: 'Gelesen nur mit festen Regeln — das KI-Modell war nicht erreichbar.',
+  skipped: 'Gelesen nur mit festen Regeln — der Text sieht nicht nach Wertpapierbeleg aus, das KI-Modell wurde nicht gefragt.',
+  off: 'Gelesen nur mit festen Regeln.',
+}
+
+const CHECK_TEXT: Record<string, string> = {
+  net_equation: 'Kurswert ± Gebühren ± Steuern = Betrag',
+  quantity_price: 'Stück × Kurs ≈ Kurswert',
+  isin_checksum: 'ISIN-Prüfziffer',
+  date_plausible: 'Datum plausibel',
+}
+
+const hasLlm = computed(() => inspection.value?.llm_fallback_used === true)
 
 const recognisedCount = computed(() => FIELD_ROWS.filter((r) => fieldValue(r.key) !== null).length)
 
@@ -161,6 +189,7 @@ const outcomeLine = computed(() => {
     case 'enriched': return 'Einlesen würde die vorhandene Transaktion um fehlende Werte ergänzen.'
     case 'linked': return 'Einlesen würde den Beleg mit der passenden Transaktion verknüpfen.'
     case 'already_linked': return 'Der Beleg ist bereits mit einer Transaktion verknüpft.'
+    case 'unverified': return 'Einlesen bucht nichts, solange Regel und KI sich widersprechen und keine Rechnung aufgeht.'
     case 'conflict':
       return `Der Betrag weicht ab: Beleg ${formatSignedCurrency(d.statement_net, cur)}, Transaktion ${formatSignedCurrency(d.transaction_net, cur)}. Nichts wurde überschrieben.`
     default: return null
@@ -197,7 +226,7 @@ function openInDocuments() {
         <template v-else-if="inspection">
           <p class="sd-method">
             <i class="pi pi-info-circle" aria-hidden="true" />
-            Gelesen mit festen Regeln — ein KI-Fallback ist nicht eingebaut.
+            {{ LLM_STATUS_TEXT[inspection.llm_status] ?? 'Gelesen mit festen Regeln.' }}
           </p>
 
           <p v-if="inspection.is_settlement" class="sd-status sd-ok">
@@ -207,22 +236,57 @@ function openInDocuments() {
             {{ REJECTION_TEXT[inspection.rejection ?? ''] ?? 'Nicht als Abrechnung erkannt.' }}
           </p>
 
+          <p v-if="inspection.verdict === 'unverified'" class="sd-status sd-warn">
+            Regel und KI lesen unterschiedliche Werte, und keine Variante geht rechnerisch auf — es wurde nichts gebucht.
+          </p>
+
           <table class="sd-fields">
             <thead>
               <tr>
                 <th>Feld</th>
-                <th>Erkannt</th>
-                <th>gelesen nach</th>
+                <th>Verwendet</th>
+                <th>Quelle</th>
+                <th v-if="hasLlm">Regel / KI</th>
+                <th v-else>gelesen nach</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in FIELD_ROWS" :key="row.key" :class="{ 'sd-missing': fieldValue(row.key) === null }">
+              <tr
+                v-for="row in FIELD_ROWS"
+                :key="row.key"
+                :class="{ 'sd-missing': fieldValue(row.key) === null, 'sd-disagree': sourceOf(row.key)?.disagree }"
+              >
                 <td>{{ row.label }}</td>
                 <td class="sd-value">{{ fieldValue(row.key) ?? 'nicht gefunden' }}</td>
-                <td class="sd-label">{{ inspection.labels[row.key] ?? '' }}</td>
+                <td>
+                  <span
+                    v-if="sourceOf(row.key)?.source"
+                    class="sd-source"
+                    :class="`sd-source-${sourceOf(row.key)!.source}`"
+                  >{{ SOURCE_TEXT[sourceOf(row.key)!.source!] }}</span>
+                </td>
+                <td v-if="hasLlm" class="sd-label">
+                  <template v-if="sourceOf(row.key)?.disagree">
+                    {{ format(row.key, sourceOf(row.key)!.rules) }} / {{ format(row.key, sourceOf(row.key)!.llm) }}
+                  </template>
+                  <template v-else>{{ inspection.labels[row.key] ?? '' }}</template>
+                </td>
+                <td v-else class="sd-label">{{ inspection.labels[row.key] ?? '' }}</td>
               </tr>
             </tbody>
           </table>
+
+          <ul v-if="inspection.checks?.length" class="sd-checks" aria-label="Rechenprüfungen">
+            <li v-for="c in inspection.checks" :key="c.name" :class="`sd-check-${c.result}`">
+              <i
+                :class="c.result === 'ok' ? 'pi pi-check-circle' : c.result === 'failed' ? 'pi pi-times-circle' : 'pi pi-minus-circle'"
+                aria-hidden="true"
+              />
+              {{ CHECK_TEXT[c.name] ?? c.name }}:
+              {{ c.result === 'ok' ? 'stimmt' : c.result === 'failed' ? 'stimmt nicht' : 'nicht prüfbar' }}
+              <span v-if="c.detail && c.result !== 'skipped'" class="sd-check-detail">({{ c.detail }})</span>
+            </li>
+          </ul>
           <p v-if="inspection.depot?.date_source === 'document_date'" class="sd-note">
             Kein Ausführungstag auf dem Beleg — verwendet wird das Dokumentdatum {{ formatIsoDate(inspection.doc_date) }}.
           </p>
@@ -342,6 +406,52 @@ function openInDocuments() {
 .sd-label {
   color: var(--p-text-muted-color);
   font-style: italic;
+}
+.sd-disagree td {
+  background: rgba(234, 179, 8, 0.12);
+}
+.sd-source {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  background: var(--p-tag-secondary-background);
+  color: var(--p-tag-secondary-color);
+}
+.sd-source-both {
+  background: var(--p-tag-success-background);
+  color: var(--p-tag-success-color);
+}
+.sd-source-llm {
+  background: var(--p-tag-info-background);
+  color: var(--p-tag-info-color);
+}
+.sd-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--text-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.sd-checks .pi {
+  margin-right: 0.25rem;
+}
+.sd-check-ok .pi {
+  color: var(--p-green-600);
+}
+.sd-check-failed {
+  color: var(--p-red-600);
+}
+.sd-check-skipped {
+  color: var(--p-text-muted-color);
+}
+.sd-check-detail {
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .sd-missing td {
   color: var(--p-text-muted-color);
