@@ -458,7 +458,7 @@ wird das Dokument in die **eigene Steuerakte** der Person verschoben:
 
 ### 9.6 Täglicher Cron (`tax-review-recompute-cron.ts`)
 
-Täglich um 02:15 UTC läuft ein Cron-Job, der für alle User die
+Täglich um 11:00 UTC (13:00 Uhr Sommerzeit, 12:00 Uhr Winterzeit) läuft ein Cron-Job, der für alle User die
 Steuer-Prüf-Flags neu berechnet. Zweck: Wenn ein Kind am 1.1. eines
 neuen Jahres die Altersgrenze überschreitet, ändert sich der
 Prüf-Status für künftige Steuerjahre — ohne dass der User etwas
