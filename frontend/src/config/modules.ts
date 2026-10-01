@@ -355,6 +355,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.accounts.manage' },
       },
       {
+        path: 'portfolio',
+        name: 'finance-portfolio',
+        component: () => import('../views/finance/PortfolioView.vue'),
+        meta: { permission: 'finance.view' },
+      },
+      {
         path: 'analyse',
         name: 'finance-analysis',
         component: () => import('../views/finance/AnalysisView.vue'),
@@ -400,6 +406,7 @@ export const modules: ModuleConfig[] = [
     menuItems: [
       { label: 'Übersicht', icon: 'pi pi-th-large', routeName: 'finance-overview', permission: 'finance.view' },
       { label: 'Konten', icon: 'pi pi-wallet', routeName: 'finance-accounts', permission: 'finance.view' },
+      { label: 'Portfolio', icon: 'pi pi-briefcase', routeName: 'finance-portfolio', permission: 'finance.view' },
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
       { label: 'Prognose', icon: 'pi pi-chart-line', routeName: 'finance-forecast', permission: 'finance.view' },
