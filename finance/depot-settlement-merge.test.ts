@@ -169,6 +169,21 @@ describe("mergeSettlement", () => {
     expect(r.values.net).toBe(25.5);
   });
 
+  it("lets the booking's net decide between charges the two read differently", () => {
+    // No final amount on paper; the rules summed overlapping fee lines (16,50),
+    // the model took the order costs (7,50). The account was charged 407,50.
+    const base = buy({ quantity: 10, price: 40, gross: 400, tax: null, net: null, isin: null, wkn: "AAA111" });
+    const rules = { ...base, fees: 16.5 };
+    const llm = { ...base, fees: 7.5 };
+    const blind = mergeSettlement(rules, llm, today);
+    expect(blind.values.fees).toBe(16.5);
+    const decided = mergeSettlement(rules, llm, today, -407.5);
+    expect(decided.values.fees).toBe(7.5);
+    expect(decided.values.net).toBe(-407.5);
+    expect(decided.fields.find((f) => f.field === "fees")).toMatchObject({ source: "llm", disagree: true });
+    expect(decided.checks.find((c) => c.name === "booking_net")!.result).toBe("ok");
+  });
+
   it("is unverified when they disagree and neither adds up", () => {
     const r = mergeSettlement(buy({ net: -3100 }), buy({ net: -3200 }), today);
     expect(r.verdict).toBe("unverified");

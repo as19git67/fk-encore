@@ -44,6 +44,8 @@ export interface SettlementInspection extends Omit<SettlementExtraction, "kind">
   kind: SettlementKind | null;
   /** The text is insurance paperwork (policy, surplus statement): never a settlement. */
   insurance: boolean;
+  /** The text is a cost disclosure (MiFID "Kosteninformation"): never a settlement. */
+  costInfo: boolean;
   /** The text prints wording only a settlement or dividend statement prints. */
   strong: boolean;
   /** The label each amount/date field was read after ("Kurswert", "Schlusstag", …). */
@@ -144,6 +146,22 @@ export const INSURANCE_WORDS = [
   "ablaufleistung",
   "rückkaufswert",
 ] as const;
+
+/**
+ * A cost disclosure before or after an order (MiFID II "Kosteninformation",
+ * "Kostenausweis", ex-ante/ex-post). It names the security, the quantity,
+ * the price and the fees — and says the settlement comes separately. It
+ * is not a booking, whatever settlement words its prose contains.
+ */
+const COST_INFO_RE = /kosten(?:vorab)?information|kostenausweis|ex-?ante-?kosten|ex-?post-?kosten/i;
+
+/** True when the text is a cost disclosure and no line is a settlement's heading. */
+export function looksLikeCostInformation(text: string): boolean {
+  if (!COST_INFO_RE.test(text)) return false;
+  // A settlement that appends a cost section still has its heading: a
+  // short line with a strong word and no figures ("Wertpapierabrechnung Kauf").
+  return !text.split("\n").some((l) => STRONG_RE.test(l) && l.trim().length <= 60 && !/\d/.test(l));
+}
 
 /** Regex sources for SQL pre-filters (Postgres `~*`), same words as above. */
 export const STRONG_SETTLEMENT_PATTERN = STRONG_SETTLEMENT_WORDS.join("|");
@@ -390,7 +408,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   const text = settlementBlock(whole) ?? whole;
   const lower = text.toLowerCase();
 
-  const kind = looksLikeInsurancePaper(wholeLower) ? null : detectKind(lower);
+  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole) ? null : detectKind(lower);
   const isin = extractIsin(text) ?? extractIsin(whole);
   const wkn = extractWkn(text) ?? wknNextToIsin(text, isin) ?? extractWkn(whole);
 
@@ -496,6 +514,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   return {
     kind,
     insurance: looksLikeInsurancePaper(wholeLower),
+    costInfo: looksLikeCostInformation(whole),
     strong: hasStrongSettlementWording(wholeLower),
     isin,
     wkn,

@@ -276,3 +276,39 @@ Zu Ihren Gunsten 91,63 EUR`;
     expect(d.net).toBe(91.63);
   });
 });
+
+describe("parseSettlement — a cost disclosure is not a settlement", () => {
+  // A broker's MiFID II cost information before an order: security,
+  // quantity, price, fees — and a sentence promising the settlement.
+  const COST_INFO = `Beispielbank AG
+Kosteninformation zum Wertpapiergeschäft 14.03.2026 - 10:00 Uhr
+Nach der EU-Richtlinie sind wir verpflichtet, Ihnen die nachfolgende Kosteninformation zur Verfügung zu stellen. Hierfür erhalten Sie eine gesonderte Wertpapierabrechnung.
+Alpha Industries AG Stammaktien
+WKN: AAA111
+Kauf: 10 Stück zu 40,00 EUR
+Kurswert: 400,00 EUR
+Von den unten aufgelisteten Kosten werden Ihnen über die Wertpapierabrechnung voraussichtlich folgende Orderkosten abgerechnet 7,50 EUR
+Kosten des Wertpapierkaufes 9,00 EUR
+Börsenplatzabhängiges Entgelt 1,50 EUR
+Orderprovision 6,00 EUR`;
+
+  it("is rejected although its prose names a Wertpapierabrechnung", () => {
+    const i = inspectSettlement(COST_INFO)!;
+    expect(i.costInfo).toBe(true);
+    expect(i.kind).toBeNull();
+    expect(parseSettlement(COST_INFO)).toBeNull();
+  });
+
+  it("does not reject a settlement that appends a cost section", () => {
+    const text = `Beispielbank AG
+Wertpapierabrechnung Kauf
+ISIN DE000000AAA1
+Schlusstag 14.03.2026
+Kurswert 1.000,00 EUR
+Provision 4,90 EUR
+Ausmachender Betrag 1.004,90 EUR
+Kosteninformation: Ihre Kosten für diese Order betrugen 4,90 EUR.`;
+    expect(inspectSettlement(text)!.costInfo).toBe(false);
+    expect(parseSettlement(text)!.kind).toBe("buy");
+  });
+});

@@ -41,7 +41,14 @@ import {
   STRONG_SETTLEMENT_PATTERN,
   type SettlementExtraction,
 } from "./depot-settlement-parser";
-import { readSettlement, rejectedAsOtherPaper, type LlmMode, type LlmStatus } from "./depot-settlement-reader";
+import {
+  readSettlement,
+  rereadAgainstBooking,
+  rejectedAsOtherPaper,
+  type LlmMode,
+  type LlmStatus,
+  type SettlementReading,
+} from "./depot-settlement-reader";
 
 console.log("[boot] finance/depot-document-enrichment.ts: all imports resolved");
 
@@ -82,6 +89,8 @@ export interface EnrichResult {
   date_source: "statement" | "document_date" | null;
   /** What happened with the language model for this read. */
   llm_status: LlmStatus | null;
+  /** Rules and model disagreed and the booking's net decided between them. */
+  checked_against_booking: boolean;
 }
 
 export interface EnrichOptions {
@@ -389,6 +398,7 @@ export async function enrichDocument(
     matched_by: null,
     date_source: null,
     llm_status: null,
+    checked_against_booking: false,
   };
 
   const [doc] = await db
@@ -415,13 +425,16 @@ export async function enrichDocument(
     result.detail = otherPaper;
     return result;
   }
-  const v = reading.merge.values;
-  const parsed: SettlementExtraction | null =
-    v.kind && (v.isin || v.wkn) ? { ...v, kind: v.kind, markers: [] } : null;
-  if (parsed) result.date_source = parsed.executedAt ? "statement" : null;
-  if (parsed && !parsed.executedAt && doc.doc_date) {
-    parsed.executedAt = doc.doc_date.slice(0, 10);
-    result.date_source = "document_date";
+  const toParsed = (rd: SettlementReading): SettlementExtraction | null => {
+    const v = rd.merge.values;
+    const p: SettlementExtraction | null =
+      v.kind && (v.isin || v.wkn) ? { ...v, kind: v.kind, markers: [] } : null;
+    if (p && !p.executedAt && doc.doc_date) p.executedAt = doc.doc_date.slice(0, 10);
+    return p;
+  };
+  let parsed = toParsed(reading);
+  if (parsed) {
+    result.date_source = reading.merge.values.executedAt ? "statement" : parsed.executedAt ? "document_date" : null;
   }
   if (!isUsableSettlement(parsed)) return result;
   result.statement_net = fixed(parsed.net, 2);
@@ -473,9 +486,23 @@ export async function enrichDocument(
     return result;
   }
 
-  const match = await findMatchingDepotTransaction(holding.account_id, parsed);
+  let match = await findMatchingDepotTransaction(holding.account_id, parsed);
+
+  // Rules and model read different charges and the statement's net does
+  // not match the booking: decide again with the booking's net as a check.
+  // The reading that adds up to what the bank booked is taken.
+  if (match && !match.netAgrees && reading.llm && match.row.net_amount !== null) {
+    const again = rereadAgainstBooking(reading, Number(match.row.net_amount));
+    const p = again.merge.verdict === "ok" ? toParsed(again) : null;
+    if (p && isUsableSettlement(p) && again.merge.checks.some((c) => c.name === "booking_net" && c.result === "ok")) {
+      parsed = p;
+      result.checked_against_booking = true;
+      match = await findMatchingDepotTransaction(holding.account_id, parsed);
+    }
+  }
 
   if (match) result.transaction_net = match.row.net_amount;
+  result.statement_net = fixed(parsed.net, 2);
 
   if (match && !match.netAgrees && !(options.overwrite && !dryRun)) {
     result.outcome = "conflict";
@@ -603,6 +630,13 @@ const STRONG_PATTERN = `(${STRONG_SETTLEMENT_PATTERN})`;
 export interface PendingPage {
   /** Only documents with an id below this one (the previous page's `next_before`). */
   before?: number | null;
+  /**
+   * Stop starting new documents after this many milliseconds and hand back
+   * `next_before` at the last one examined. A document the model reads for
+   * the first time takes seconds; without a budget a page of them outlasts
+   * the reverse proxy in front of the app (502), and the run is lost.
+   */
+  budgetMs?: number;
 }
 
 /**
@@ -647,7 +681,13 @@ export async function enrichPendingDocuments(
   const candidates = found.slice(0, pageSize);
   stats.next_before = found.length > pageSize ? candidates[candidates.length - 1]!.id : null;
 
-  for (const c of candidates) {
+  const started = Date.now();
+  for (const [i, c] of candidates.entries()) {
+    if (i > 0 && page.budgetMs !== undefined && Date.now() - started >= page.budgetMs) {
+      // Out of time: the next call starts below the last one examined.
+      stats.next_before = candidates[i - 1]!.id;
+      break;
+    }
     stats.documents_examined++;
     try {
       const r = await enrichDocument(c.id, accountIds, options);

@@ -56,7 +56,7 @@ import {
   type EnrichResult,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
-import { readSettlement, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
+import { readSettlement, rereadAgainstBooking, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
 import type { CheckName, FieldSource, MergeField } from "./depot-settlement-merge";
 
 console.log("[boot] finance/portfolio.ts: all imports resolved");
@@ -1439,6 +1439,13 @@ interface EnrichDocumentsResponse {
   results: EnrichResult[];
 }
 
+/**
+ * How long one enrich request may keep starting documents. Reverse proxies
+ * commonly cut a request at 60 s; one more document read by the model
+ * (seconds, rarely more) has to fit after the budget runs out.
+ */
+const ENRICH_REQUEST_BUDGET_MS = 20_000;
+
 export const enrichDepotTransactionsFromDocuments = api(
   {
     expose: true,
@@ -1457,7 +1464,7 @@ export const enrichDepotTransactionsFromDocuments = api(
       depots.map((d) => d.id),
       limit ?? 200,
       {},
-      { before: before ?? null },
+      { before: before ?? null, budgetMs: ENRICH_REQUEST_BUDGET_MS },
     );
     return {
       ...stats,
@@ -1695,6 +1702,8 @@ type InspectionRejection =
   | "no_text"
   /** The rules recognised insurance paperwork (policy, surplus statement). */
   | "insurance"
+  /** A cost disclosure (MiFID "Kosteninformation"): the settlement comes separately. */
+  | "cost_info"
   /** The model says it is something else and the rules found no word only a settlement prints. */
   | "llm_other"
   | "no_kind"
@@ -1848,6 +1857,17 @@ export const inspectSettlementDocument = api(
       )
       .where(eq(financeDepotTransactionDocument.document_id, documentId));
 
+    // The booking decides between rules and model: the one a dry run
+    // matched, or the one the document is already linked to.
+    const bookingNet =
+      dry?.checked_against_booking && dry.transaction_net !== null
+        ? dry.transaction_net
+        : reading.llm && linkRows.length === 1
+          ? linkRows[0]!.net_amount
+          : null;
+    const shown = bookingNet !== null ? rereadAgainstBooking(reading, Number(bookingNet)) : reading;
+    const sv = shown.merge.values;
+
     const show = (field: MergeField, raw: string | number | null): string | null => {
       if (raw === null) return null;
       switch (field) {
@@ -1864,9 +1884,9 @@ export const inspectSettlementDocument = api(
       field === "depotNumber" ? "depot_number" : field === "executedAt" ? "executed_at" : field;
     const fields = {} as InspectionFields;
     const sources = {} as Record<InspectionFieldKey, InspectionFieldSource>;
-    for (const f of reading.merge.fields) {
+    for (const f of shown.merge.fields) {
       const key = keyOf(f.field);
-      fields[key] = show(f.field, v[f.field]);
+      fields[key] = show(f.field, sv[f.field]);
       sources[key] = { rules: show(f.field, f.rules), llm: show(f.field, f.llm), source: f.source, disagree: f.disagree };
     }
 
@@ -1881,8 +1901,8 @@ export const inspectSettlementDocument = api(
       rejection,
       fields,
       sources,
-      checks: reading.merge.checks,
-      verdict: reading.merge.verdict,
+      checks: shown.merge.checks,
+      verdict: shown.merge.verdict,
       labels: Object.fromEntries(
         Object.entries(reading.rules?.labels ?? {}).map(([k, val]) => [
           k === "depotNumber" ? "depot_number" : k === "executedAt" ? "executed_at" : k,
