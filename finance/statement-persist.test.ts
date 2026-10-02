@@ -220,6 +220,68 @@ describe("persistFetchResult — matching linked accounts", () => {
   });
 });
 
+describe("persistFetchResult — resume batch after a TAN pause", () => {
+  // comdirect: giro and Visa share one bank-side number. The user linked
+  // the giro (bank reports it as "sonstige") as kind giro, the Visa as
+  // kreditkarte. A resume after a TAN only carries the giro snapshot.
+  async function setup() {
+    const bcId = await insertBankcontact();
+    const giroId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "N-1",
+      label: "Giro",
+      kind: "giro",
+    });
+    const visaId = await insertLinkedAccount({
+      bankcontactId: bcId,
+      fintsAccountNumber: "N-1",
+      label: "Visa",
+      kind: "kreditkarte",
+    });
+    const giroSnapshot: FetchResult["accounts"][number] = {
+      accountNumber: "N-1",
+      iban: null,
+      accountKind: "sonstige",
+      currency: "EUR",
+      label: "Konto N-1",
+      balance: null,
+      transactions: [tx()],
+      holdings: [],
+      errors: [],
+    };
+    return { bcId, giroId, visaId, giroSnapshot };
+  }
+
+  it("matches a lone snapshot when the sibling kinds say which candidate is taken", async () => {
+    const { bcId, giroId, giroSnapshot } = await setup();
+
+    const stats = await persistFetchResult(bcId, {
+      accounts: [giroSnapshot],
+      partial: false,
+      bankAccountKinds: [
+        { accountNumber: "N-1", accountKind: "sonstige" },
+        { accountNumber: "N-1", accountKind: "kreditkarte" },
+      ],
+    });
+
+    expect(stats.accounts_unknown).toBe(0);
+    expect(stats.accounts_matched).toBe(1);
+    const rows = await db
+      .select({ account_id: financeTransaction.account_id })
+      .from(financeTransaction);
+    expect(rows).toEqual([{ account_id: giroId }]);
+  });
+
+  it("stays unknown rather than guess when nothing tells the candidates apart", async () => {
+    const { bcId, giroSnapshot } = await setup();
+
+    const stats = await persistFetchResult(bcId, result([giroSnapshot]));
+
+    expect(stats.accounts_unknown).toBe(1);
+    expect(stats.transactions_inserted).toBe(0);
+  });
+});
+
 describe("persistFetchResult — unknown / pending accounts", () => {
   it("collects unmatched bank-side accounts in stats.unknown without creating rows", async () => {
     const bcId = await insertBankcontact();

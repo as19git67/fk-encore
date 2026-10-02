@@ -16,6 +16,7 @@ import {
   evictCachedClient,
   probeTanMethods,
   resumeFetchAfterTan,
+  bankAccountKey,
   runSynchronize,
   type FintsClientSurface,
 } from "./fints-client";
@@ -1557,6 +1558,81 @@ describe("runFetchAccounts — linked-only filter", () => {
 
     expect(c.getAccountStatements).toHaveBeenCalledTimes(2);
     expect(c.getAccountBalance).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("TAN pause with accounts sharing a number (comdirect giro + Visa)", () => {
+  // comdirect reports both as "Miscellaneous" under one number; only the
+  // subAccountId tells them apart. The resume used to look them up by
+  // number + type and always got the first one back.
+  const upd = {
+    bankAccounts: [
+      { accountNumber: "N-1", accountType: "Miscellaneous", subAccountId: "1", product: "Girokonto", currency: "EUR" },
+      { accountNumber: "N-1", accountType: "Miscellaneous", subAccountId: "2", product: "Visa-Karte", currency: "EUR" },
+    ],
+  };
+
+  it("stores the paused account and the queue so they resolve to the same records", async () => {
+    // Giro + depot under one number, both "Miscellaneous": two accounts
+    // the fetch keeps apart (the depot by its subAccountId).
+    const giroAndDepot = {
+      bankAccounts: [
+        upd.bankAccounts[0],
+        { accountNumber: "N-1", accountType: "Miscellaneous", subAccountId: "Wertpapierdepot", product: "Depot", currency: "EUR" },
+      ],
+    };
+    const c = mockClient({ success: true, requiresTan: false }, { systemId: "s", upd: giroAndDepot } as any);
+    (c.getAccountStatements as any) = vi.fn(async () => ({
+      success: true,
+      requiresTan: true,
+      tanReference: "ref-1",
+      tanChallenge: "photoTAN",
+      bankAnswers: [],
+    }));
+
+    const result = await runFetchAccounts(c, { sleep: async () => {} });
+
+    expect(result.pendingTan?.accountKey).toBe(bankAccountKey(giroAndDepot.bankAccounts[0]));
+    expect(result.pendingTan?.remainingAccountNumbers).toEqual([
+      bankAccountKey(giroAndDepot.bankAccounts[1]),
+    ]);
+    expect(result.bankAccountKinds).toHaveLength(2);
+  });
+
+  it("resumes the account it paused on, not the first one with that number", async () => {
+    const c = mockClient({ success: true, requiresTan: false }, { systemId: "s", upd } as any);
+    (c.getAccountStatementsWithTan as any) = vi.fn(async () => stmtResp([]));
+    (c.getAccountBalance as any) = vi.fn(async () =>
+      balResp({ date: new Date(), currency: "EUR", balance: 1 }),
+    );
+
+    const result = await resumeFetchAfterTan(c, {
+      tanReference: "ref-2",
+      tan: "123456",
+      currentAccountNumber: bankAccountKey(upd.bankAccounts[1]),
+      remainingAccountNumbers: [],
+    });
+
+    expect(result.accounts).toHaveLength(1);
+    expect(result.accounts[0].label).toContain("Visa-Karte");
+  });
+
+  it("still resolves a queue entry stored by an older session", async () => {
+    const c = mockClient({ success: true, requiresTan: false }, { systemId: "s", upd } as any);
+    (c.getAccountStatementsWithTan as any) = vi.fn(async () => stmtResp([]));
+    (c.getAccountStatements as any) = vi.fn(async () => stmtResp([]));
+    (c.getAccountBalance as any) = vi.fn(async () =>
+      balResp({ date: new Date(), currency: "EUR", balance: 1 }),
+    );
+
+    const result = await resumeFetchAfterTan(c, {
+      tanReference: "ref-3",
+      currentAccountNumber: "N-1",
+      tan: "1",
+      remainingAccountNumbers: ["N-1:Miscellaneous"],
+    });
+
+    expect(result.accounts).toHaveLength(2);
   });
 });
 

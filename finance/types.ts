@@ -166,6 +166,13 @@ export interface FetchResult {
   /** True when any account was skipped due to a mid-flight TAN requirement. */
   partial: boolean;
   /**
+   * Every account the bank reported, with its effective kind — not just
+   * the ones in `accounts`. A resume after a TAN only carries the
+   * accounts behind the pause, so persist needs this to know which
+   * finance_accounts sharing a number belong to a sibling account.
+   */
+  bankAccountKinds?: Array<{ accountNumber: string; accountKind: string }>;
+  /**
    * Set when the per-account fetch hit a coupled-TAN (photoTAN,
    * chipTAN, …) that needs UI input. The caller's job: persist a
    * tan_session row with this info + the loop state, return
@@ -181,7 +188,12 @@ export interface FetchResult {
     tanPhotoBase64?: string;
     /** The bank-side accountNumber that triggered the TAN. */
     accountNumber: string;
-    /** Account numbers still queued behind the current one. */
+    /**
+     * fints-client bankAccountKey() of that account — what the resume
+     * looks it up by. Optional only for callers built before it existed.
+     */
+    accountKey?: string;
+    /** bankAccountKey()s of the accounts still queued behind it. */
     remainingAccountNumbers: string[];
   };
 }
