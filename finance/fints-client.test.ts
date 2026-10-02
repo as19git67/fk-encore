@@ -1518,10 +1518,10 @@ describe("runFetchAccounts — linked-only filter", () => {
     // trigger two SCA pushes for the same data.
     const c = clientWith(
       [
-        { accountNumber: "401873500", accountType: "CheckingAccount", currency: "EUR" },
-        { accountNumber: "401873505", accountType: "CheckingAccount", currency: "EUR" },
+        { accountNumber: "1234567800", accountType: "CheckingAccount", currency: "EUR" },
+        { accountNumber: "1234567805", accountType: "CheckingAccount", currency: "EUR" },
         // Duplicate of the first — different subAccountId in real life.
-        { accountNumber: "401873500", accountType: "CheckingAccount", currency: "EUR" },
+        { accountNumber: "1234567800", accountType: "CheckingAccount", currency: "EUR" },
       ],
       {
         getAccountStatements: vi.fn(async () => stmtResp([])),
@@ -1532,14 +1532,14 @@ describe("runFetchAccounts — linked-only filter", () => {
     );
 
     const r = await runFetchAccounts(c, {
-      linkedAccountNumbers: new Set(["401873500", "401873505"]),
+      linkedAccountNumbers: new Set(["1234567800", "1234567805"]),
     });
 
     // Two unique accountNumbers → two snapshots, two stmt calls.
     expect(r.accounts).toHaveLength(2);
     expect(c.getAccountStatements).toHaveBeenCalledTimes(2);
-    expect(c.getAccountStatements).toHaveBeenCalledWith("401873500");
-    expect(c.getAccountStatements).toHaveBeenCalledWith("401873505");
+    expect(c.getAccountStatements).toHaveBeenCalledWith("1234567800");
+    expect(c.getAccountStatements).toHaveBeenCalledWith("1234567805");
     expect(c.getAccountBalance).toHaveBeenCalledTimes(2);
   });
 

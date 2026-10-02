@@ -25,7 +25,7 @@ describe("matchSenderRule", () => {
   });
 
   it("does not match owner/recipient names (the owner-as-sender bug yields no override)", () => {
-    expect(matchSenderRule({ sender: "Anton Beispiel", title: "Irgendein Schreiben" })).toBeNull();
+    expect(matchSenderRule({ sender: "Paul Beispiel", title: "Irgendein Schreiben" })).toBeNull();
   });
 
   it("routes Familienkasse documents to Familienleistungen", () => {

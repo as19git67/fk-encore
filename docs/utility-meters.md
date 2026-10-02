@@ -183,7 +183,6 @@ meter/
 | `POST /meters/anomalies/run` | `meters.manage` | Anomalie-Prüfung sofort ausführen (`reset` löscht offene Funde der eigenen Zähler) |
 | `GET/POST/PUT/DELETE /meters/tariffs/electricity` | `meters.view` / `meters.manage` | Strompreise und Einspeisevergütung verwalten (§5.2) |
 | `POST /meters/tariffs/import` | `meters.manage` | Preis-/Annahmereihen aus einer Datei importieren (§5.2.2) |
-| `POST /meters/import/electricity-prices` | `meters.manage` | Historische Strompreise aus der Excel-Grundlage importieren |
 | `GET /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Verknüpfte Zahlungen einer Ablesung (Finance-ACL-gefiltert, §6) |
 | `POST /meters/readings/:id/transactions` / `DELETE …/:transactionId` | `meters.read_entry` + `finance.view` | Zahlung verknüpfen / lösen (§6) |
 
@@ -423,10 +422,11 @@ Zusätzlich können importierte Annahmen wie PV-Invest, Opportunitätskosten und
 Amortisationsjahre gespeichert werden. Sie werden aktuell noch nicht in die
 Bucket-Kosten eingerechnet, bleiben aber als Stammdaten verfügbar.
 
-Der Import `POST /meters/import/electricity-prices` lädt die normalisierte
-Preisgrundlage aus der historischen Excel-Auswertung. Für die Einspeisevergütung
-enthält die Quelle mehrere Leistungsstufen, aber noch keine Anlagenleistung im
-Encore-Modell. Bis eine Anlagenleistungs-Einstellung existiert, verwendet die
+Historische Preisreihen kommen über den Datei-Import `POST /meters/tariffs/import`
+(§5.2.2). Die frühere fest eingebaute Preisgrundlage und die einmaligen
+Historien-Importe für Wasser und Strom sind entfernt: sie enthielten private
+Zählerdaten. Für die Einspeisevergütung können mehrere Leistungsstufen
+hinterlegt werden, aber es gibt noch keine Anlagenleistung im Encore-Modell. Bis eine Anlagenleistungs-Einstellung existiert, verwendet die
 Kostenrechnung die niedrigste passende Stufe.
 
 Nicht Teil der ersten Ausbaustufe: E-Auto, Gasvergleich/JAZ.

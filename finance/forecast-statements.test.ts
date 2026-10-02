@@ -52,16 +52,16 @@ Versicherungsnummer: X-000111-01
 Stand: 01.12.2025
 Ablauf der Beitragszahlung     01.10.2032
 Ablauf der Versicherung        01.10.2037
-Monatlicher Beitrag            241,02 EUR
-Rückkaufswert                  77.508,29 EUR
+Monatlicher Beitrag            150,00 EUR
+Rückkaufswert                  61.234,50 EUR
 Garantierte Ablaufleistung     55.000,00 EUR
-Voraussichtliche Ablaufleistung inkl. Überschussbeteiligung   132.442,77 EUR`;
+Voraussichtliche Ablaufleistung inkl. Überschussbeteiligung   98.765,40 EUR`;
 
 // An announced premium increase and the confirmation that it will not take place.
 const INCREASE_TEXT = `Beispiel Lebensversicherung AG
 Vers.-Nr. X 000111 01
 Planmäßige Erhöhung Ihrer Versicherung (Dynamik)
-Ihr bisheriger monatlicher Beitrag   241,02 EUR
+Ihr bisheriger monatlicher Beitrag   150,00 EUR
 Ihr neuer monatlicher Beitrag ab 01.12.2025   253,07 EUR
 Wenn Sie die Erhöhung nicht wünschen, können Sie innerhalb eines Monats widersprechen.`;
 
@@ -150,7 +150,7 @@ async function lifeInsurance(contractNo = "X-000111-01") {
     label: "LV Beispiel",
     data: {
       surrenderValue: 70000,
-      monthlyPremium: 241.02,
+      monthlyPremium: 150,
       guaranteedPayout: 55000,
       projectedPayout: 130000,
       maturity: { kind: "date", date: "2038-01-01" },
@@ -246,7 +246,7 @@ describe("finance/forecast-statements — linking", () => {
     const state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
     expect(state.latest).toMatchObject({ method: "llm" });
     expect(state.latest?.values.surrenderValue).toBe(78000);
-    expect(state.latest?.values.projectedPayout).toBe(132442.77); // filled in from the patterns
+    expect(state.latest?.values.projectedPayout).toBe(98765.4); // filled in from the patterns
   });
 });
 
@@ -282,7 +282,7 @@ describe("finance/forecast-statements — premium increases and finding more", (
     // Accepting takes nothing held back.
     await acceptStatement({ id: state.latest!.id });
     const [row] = await db.select().from(financeForecastItem).where(eq(financeForecastItem.id, item.id));
-    expect(row.data.monthlyPremium).toBe(241.02);
+    expect(row.data.monthlyPremium).toBe(150);
   });
 
   it("lets the user set the kind, which reading again keeps", async () => {
@@ -388,7 +388,7 @@ describe("finance/forecast-statements — decisions", () => {
     const full = await acceptStatement({ id: stId });
     expect(full.status).toBe("accepted");
     const [row] = await db.select().from(financeForecastItem).where(eq(financeForecastItem.id, item.id));
-    expect(row.data).toMatchObject({ surrenderValue: 77508.29, projectedPayout: 132442.77, maturity: { kind: "date", date: "2037-10-01" } });
+    expect(row.data).toMatchObject({ surrenderValue: 61234.5, projectedPayout: 98765.4, maturity: { kind: "date", date: "2037-10-01" } });
     state = (await getStatements()).items.find((s) => s.itemId === item.id)!;
     expect(state.proposals).toEqual([]);
     expect(state.history).toHaveLength(1);

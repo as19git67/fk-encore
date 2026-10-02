@@ -266,7 +266,7 @@ function accountKey(bc: string, accountNumber: string): string {
 /** Natural key for manual accounts (no bankcontact). Includes label so
  * two cash wallets with the same synthetic account_number don't collide
  * — e.g. the Finanzkraft converter assigns "fk-1", "fk-2" to its two
- * cash accounts but they have different labels ("Bargeld Anton" vs.
+ * cash accounts but they have different labels ("Bargeld Paul" vs.
  * "Bargeld Martina"). */
 function manualAccountKey(accountNumber: string, label: string): string {
   return `manual::${accountNumber}::${label}`;

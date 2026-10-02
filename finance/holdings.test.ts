@@ -527,8 +527,8 @@ describe("finance/holdings — cost basis & unrealized gain", () => {
       accountId,
       asOf: "2026-05-10",
       isin: null,
-      wkn: "930921",
-      name: "SAUREN GLOB.OPPS A",
+      wkn: "987654",
+      name: "BEISPIEL GLOBAL FONDS A",
       amount: "100",
       price: "60.00",
       value: "6000.00",
@@ -537,8 +537,8 @@ describe("finance/holdings — cost basis & unrealized gain", () => {
     await insertDepotBuy({
       accountId,
       executedAt: "2026-01-10",
-      isin: "LU0106280919",
-      wkn: "930921",
+      isin: "LU0000098763",
+      wkn: "987654",
       amount: "100",
       price: "50",
     });

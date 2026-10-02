@@ -153,7 +153,7 @@ final class TripIdeasTests: XCTestCase {
     // MARK: - Collections
 
     func testACollectionSaysWhoseItIs() {
-        let own = TripIdeaCollection(ownerId: 1, ownerName: "Anton", own: true)
+        let own = TripIdeaCollection(ownerId: 1, ownerName: "Paul", own: true)
         let shared = TripIdeaCollection(ownerId: 2, ownerName: "Anna", own: false)
         let anonymous = TripIdeaCollection(ownerId: 3, ownerName: nil, own: false)
 

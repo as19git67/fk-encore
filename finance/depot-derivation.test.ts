@@ -164,8 +164,8 @@ describe("extractIsin", () => {
 
 describe("extractWkn", () => {
   it("pulls a WKN after the 'WKN' prefix", () => {
-    expect(extractWkn("WERTPAPIERABRECHNUNG KAUF WKN 930921 ANTEILE 5"))
-      .toBe("930921");
+    expect(extractWkn("WERTPAPIERABRECHNUNG KAUF WKN 987654 ANTEILE 5"))
+      .toBe("987654");
   });
 
   it("handles colon separator", () => {
@@ -173,9 +173,9 @@ describe("extractWkn", () => {
   });
 
   it("handles the WKN/ISIN combined form", () => {
-    // Real MLP booking format: "WKN 930921 / LU0106280919"
-    expect(extractWkn("WERTPAPIER WKN 930921 / LU0106280919 SAUREN GLOB"))
-      .toBe("930921");
+    // A broker's booking format: "WKN 987654 / LU0000098763"
+    expect(extractWkn("WERTPAPIER WKN 987654 / LU0000098763 BEISPIEL GLOBAL"))
+      .toBe("987654");
   });
 
   it("uppercases mixed-case WKN payloads", () => {
@@ -185,7 +185,7 @@ describe("extractWkn", () => {
   it("returns null when no 'WKN' prefix is present (avoid false positives)", () => {
     // 6-digit number in the purpose without the WKN anchor must not be
     // mistaken for a WKN — could be a reference, date, or amount.
-    expect(extractWkn("AUFTRAGSNR 930921 KURS 56,19")).toBeNull();
+    expect(extractWkn("AUFTRAGSNR 987654 KURS 42,00")).toBeNull();
   });
 
   it("handles the 'WPKNR:' prefix used on Wertpapierabrechnungen", () => {
@@ -235,7 +235,7 @@ describe("isSecuritiesCandidate", () => {
     expect(
       isSecuritiesCandidate({
         funds_code: null,
-        purpose: "WERTPAPIERABRECHNUNG WKN 930921",
+        purpose: "WERTPAPIERABRECHNUNG WKN 987654",
       }),
     ).toBe(true);
   });
@@ -675,21 +675,21 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     const bcId = await insertBankcontact();
     const giro = await insertAccount(bcId, "giro", "GIRO-1");
     const depot = await insertAccount(bcId, "depot", "DEPOT-1");
-    // Real-world MLP holdings: ISIN column blank, only WKN populated.
+    // Some brokers' holdings: ISIN column blank, only WKN populated.
     await insertHolding({
       accountId: depot,
       asOf: "2026-04-21",
       isin: null,
-      wkn: "930921",
-      name: "SAUREN GLOB.OPPS A",
+      wkn: "987654",
+      name: "BEISPIEL GLOBAL FONDS A",
     });
-    // Real MLP booking text: WKN before "/", ISIN after.
+    // The broker's booking text: WKN before "/", ISIN after.
     const giroTxId = await insertTx({
       accountId: giro,
       bookingDate: "2026-04-21",
-      amount: "234.32",
+      amount: "250.00",
       purpose:
-        "WERTPAPIERABRECHNUNG VERKAUF WKN 930921 / LU0106280919 SAUREN GLOB.OPPS A",
+        "WERTPAPIERABRECHNUNG VERKAUF WKN 987654 / LU0000098763 BEISPIEL GLOBAL FONDS A",
       funds_code: "SECU",
       transaction_code: "TRAD",
     });
@@ -705,8 +705,8 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     expect(row.kind).toBe("sell");
     // ISIN was present in the booking text — keep it on the row even
     // though the holding had none, so future syncs can backfill it.
-    expect(row.isin).toBe("LU0106280919");
-    expect(row.wkn).toBe("930921");
+    expect(row.isin).toBe("LU0000098763");
+    expect(row.wkn).toBe("987654");
     expect(row.linked_transaction_id).toBe(giroTxId);
   });
 
@@ -750,17 +750,17 @@ describe("deriveDepotTransactionsForBankcontact", () => {
       accountId: depot,
       asOf: "2026-05-15",
       isin: null,
-      wkn: "930921",
-      name: "SAUREN GLOB.OPPS A",
+      wkn: "987654",
+      name: "BEISPIEL GLOBAL FONDS A",
     });
-    // 930921 appears as an "AUFTRAGSNR" — not as a WKN. Without a WKN
+    // 987654 appears as an "AUFTRAGSNR" — not as a WKN. Without a WKN
     // prefix the extraction must skip it, and since the booking has no
     // ISIN either there's nothing to match.
     await insertTx({
       accountId: giro,
       bookingDate: "2026-05-10",
       amount: "-50.00",
-      purpose: "GEBÜHR AUFTRAGSNR 930921",
+      purpose: "GEBÜHR AUFTRAGSNR 987654",
       funds_code: "SECU",
       transaction_code: "TRAD",
     });

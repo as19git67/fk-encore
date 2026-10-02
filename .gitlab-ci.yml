@@ -3,21 +3,21 @@
 #
 # Registry: images now live on this GitLab's integrated Container Registry
 # instead of ghcr.io. The main app keeps the project's own image path; sidecar
-# services use sub-paths under it (<registry>/schegg/fk-encore/<service>)
+# services use sub-paths under it (<registry>/group/fk-encore/<service>)
 # instead of GHCR's sibling-repo-with-suffix naming
 # (ghcr.io/as19git67/fk-encore-<service>) — that's the GitLab-native way to
 # group several images under one project.
 #
 # Registry address: CI pushes to the registry's LOCAL origin address
-# (nas.schegg.net:45050, host port 45050 -> container port 5050), NOT the
-# public registry.scheggs.net. The public name is a Cloudflare Tunnel CNAME,
+# (registry-origin.example.internal:45050, host port 45050 -> container port 5050), NOT the
+# public registry.example.com. The public name is a Cloudflare Tunnel CNAME,
 # and tunnel traffic goes through Cloudflare's edge, which caps request bodies
 # at 100 MB — image layers here are bigger than that, so pushes died with
 # "413 Payload Too Large". Going straight to the origin skips Cloudflare
 # entirely. This changes nothing for consumers: a registry stores images by
 # repository PATH, so an image pushed as
-# nas.schegg.net:45050/schegg/fk-encore/embedding is the exact same image as
-# registry.scheggs.net/schegg/fk-encore/embedding — deployments and Watchtower
+# registry-origin.example.internal:45050/group/fk-encore/embedding is the exact same image as
+# registry.example.com/group/fk-encore/embedding — deployments and Watchtower
 # keep pulling the public name unchanged.
 #
 # Login: uses the predefined $CI_REGISTRY_USER / $CI_REGISTRY_PASSWORD
@@ -45,8 +45,8 @@ stages:
 
 variables:
   # Local origin address of the GitLab Container Registry — see the header
-  # comment for why this is not registry.scheggs.net.
-  REGISTRY: nas.schegg.net:45050
+  # comment for why this is not registry.example.com.
+  REGISTRY: registry-origin.example.internal:45050
   DOCKER_TLS_CERTDIR: ""
   DOCKER_HOST: tcp://docker:2375
   DOCKER_DRIVER: overlay2
@@ -75,8 +75,8 @@ workflow:
     #
     # Written to /etc/docker/daemon.json rather than passed as an
     # --insecure-registry=... CLI flag: with the flag, `docker login`
-    # (registry.scheggs.net's own /v2/ check) went through fine but the
-    # later `docker push` to nas.schegg.net:45050 still failed with
+    # (registry.example.com's own /v2/ check) went through fine but the
+    # later `docker push` to registry-origin.example.internal:45050 still failed with
     # "server gave HTTP response to HTTPS client" — the flag was accepted
     # (dockerd started, login worked) but evidently wasn't honoured for
     # every registry client code path. daemon.json is the config dockerd
@@ -94,14 +94,14 @@ workflow:
         - -c
         - |
           mkdir -p /etc/docker
-          printf '{"insecure-registries":["nas.schegg.net:45050"]}' > /etc/docker/daemon.json
+          printf '{"insecure-registries":["registry-origin.example.internal:45050"]}' > /etc/docker/daemon.json
           exec dockerd-entrypoint.sh
 
 # NOTE: the anchors below must stay single multi-line strings (YAML block
 # scalars), not one-element lists — `- *anchor` inside another job's
 # before_script list only flattens correctly when the anchor itself resolves
 # to a scalar. Anchoring a list here would nest as `- - echo ...` and break
-# at runtime (verified against gitlab.scheggs.net's CI lint API).
+# at runtime (verified against gitlab.example.com's CI lint API).
 
 # GitLab waits 30s for a service to report healthy and then starts the job
 # regardless. Docker 27 deliberately slows its own startup when it binds TCP
@@ -123,8 +123,8 @@ workflow:
   done
   # Confirm the insecure-registry entry actually landed. Without this check a
   # missing entry only surfaces minutes later, mid-push, as an opaque TLS error.
-  docker info 2>/dev/null | grep -qF "nas.schegg.net:45050" || {
-    echo "dockerd is up but nas.schegg.net:45050 is not among its insecure registries:"
+  docker info 2>/dev/null | grep -qF "registry-origin.example.internal:45050" || {
+    echo "dockerd is up but registry-origin.example.internal:45050 is not among its insecure registries:"
     docker info 2>/dev/null | sed -n '/Insecure Registries/,$p'
     exit 1
   }

@@ -34,9 +34,9 @@ Wasser.
 
 1. **Wallbox fehlt im Energie-Report.** `ev_charger_total` / `ev_charger_pv`
    sind in `MeterRole`, in `meters_role_check` (Migration 0126) und in
-   `reports.service.ts` implementiert, aber `IMPORT_METER_ROLES`
-   (`meter/import-electricity-history.ts`) mappt `e_auto_wallbox` /
-   `e_auto_pv` nicht, und keine Migration backfilled sie. Die Rolle muss
+   `reports.service.ts` implementiert, aber der damalige Historien-Import
+   (inzwischen entfernt) mappte `e_auto_wallbox` / `e_auto_pv` nicht, und
+   keine Migration backfilled sie. Die Rolle muss
    heute manuell in der UI gesetzt werden, sonst bleiben alle
    Wallbox-Kennzahlen `null`.
 2. **Bucket-Zuordnung ohne Interpolation.** Ein Ableseintervall wird

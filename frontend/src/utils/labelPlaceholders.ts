@@ -10,7 +10,7 @@ export const LABEL_PLACEHOLDERS: LabelPlaceholder[] = [
   { token: '{{datum_zeit}}', label: 'Datum und Uhrzeit', example: '14.07.2026 09:30' },
   { token: '{{jahr}}', label: 'Aktuelles Jahr', example: '2026' },
   { token: '{{monat}}', label: 'Aktueller Monat', example: 'Juli' },
-  { token: '{{benutzer}}', label: 'Benutzername', example: 'Anton' },
+  { token: '{{benutzer}}', label: 'Benutzername', example: 'Paul' },
 ]
 
 export function resolveLabelPlaceholders(

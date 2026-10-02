@@ -6,10 +6,6 @@ import {
   meterElectricityTariffs,
   type MeterElectricityTariffKind,
 } from "../db/schema";
-import {
-  electricityPriceData,
-  type ElectricityPriceImportEntry,
-} from "./import/electricity-price-data";
 
 export type ElectricityTariffKind = MeterElectricityTariffKind;
 export type ElectricityTariffUnit =
@@ -48,13 +44,6 @@ export interface UpsertElectricityTariffInput {
   name?: string | null;
   capacityLimitKw?: number | null;
   source?: Record<string, unknown> | null;
-}
-
-export interface ElectricityPriceImportResult {
-  created: number;
-  updated: number;
-  total: number;
-  alreadyImported: boolean;
 }
 
 /**
@@ -366,37 +355,6 @@ async function findExistingImportEntry(userId: number, entry: TariffNaturalKey) 
   );
   const name = entry.name ?? null;
   return rows.find((row) => (row.name ?? null) === name);
-}
-
-export async function importElectricityPrices(userId: number): Promise<ElectricityPriceImportResult> {
-  let created = 0;
-  let updated = 0;
-  for (const entry of electricityPriceData) {
-    const existing = await findExistingImportEntry(userId, entry);
-    const input: UpsertElectricityTariffInput = {
-      kind: entry.kind,
-      validFrom: entry.validFrom,
-      amount: entry.amount,
-      unit: entry.unit,
-      taxStatus: entry.taxStatus ?? null,
-      name: entry.name ?? null,
-      capacityLimitKw: entry.capacityLimitKw ?? null,
-      source: entry.source ?? null,
-    };
-    if (existing) {
-      await updateElectricityTariff(userId, existing.id, input);
-      updated += 1;
-    } else {
-      await createElectricityTariff(userId, input);
-      created += 1;
-    }
-  }
-  return {
-    created,
-    updated,
-    total: electricityPriceData.length,
-    alreadyImported: created === 0,
-  };
 }
 
 /**

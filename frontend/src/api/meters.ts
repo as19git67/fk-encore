@@ -924,13 +924,6 @@ export function deleteElectricityTariff(id: number) {
   })
 }
 
-export function importElectricityPrices() {
-  return apiFetch<{ created: number; updated: number; total: number; alreadyImported: boolean }>(
-    '/meters/import/electricity-prices',
-    { method: 'POST' },
-  )
-}
-
 /** One row of a tariff/assumption import file. */
 export interface TariffImportEntry {
   kind: string
@@ -954,34 +947,6 @@ export function importTariffFile(entries: TariffImportEntry[]) {
   return apiFetch<TariffImportResult>('/meters/tariffs/import', {
     method: 'POST',
     body: JSON.stringify({ entries }),
-  })
-}
-
-// ── Import (Issue #792) ─────────────────────────────────────────────────────
-
-export interface WaterImportResult {
-  meterId: number
-  devices: number
-  readings: number
-  alreadyImported: boolean
-}
-
-export function importWaterHistory() {
-  return apiFetch<WaterImportResult>('/meters/import/water-history', {
-    method: 'POST',
-  })
-}
-
-export interface ElecImportResult {
-  metersCreated: number
-  devicesCreated: number
-  readingsCreated: number
-  alreadyImported: boolean
-}
-
-export function importElectricityHistory() {
-  return apiFetch<ElecImportResult>('/meters/import/electricity-history', {
-    method: 'POST',
   })
 }
 

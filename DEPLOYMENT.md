@@ -87,7 +87,7 @@ The full list of `DEPLOY_*` overrides:
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `fk-encore` | Isolates compose state. |
 | `DEPLOY_NAME_SUFFIX` | _(empty)_ | Suffix on every `container_name`. |
-| `DEPLOY_IMAGE_BASE` | `ghcr.io/as19git67/fk-encore` | Registry + owner/repo every service image is pulled from (`<base>/<service>`). The one line to change to switch registries — e.g. `registry.scheggs.net/schegg/fk-encore` for a self-hosted GitLab instance. |
+| `DEPLOY_IMAGE_BASE` | `ghcr.io/as19git67/fk-encore` | Registry + owner/repo every service image is pulled from (`<base>/<service>`). The one line to change to switch registries — e.g. `registry.example.com/group/fk-encore` for a self-hosted GitLab instance. |
 | `DEPLOY_IMAGE_TAG` | `latest` | Pulled from `${DEPLOY_IMAGE_BASE}*`. |
 | `DEPLOY_WATCHTOWER_SCOPE` | `fkprod` | Watchtower auto-updates only matching scope. |
 | `DEPLOY_HOST_PORT_APP` | `8080` | Must be unique per deployment. |

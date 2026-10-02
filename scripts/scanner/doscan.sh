@@ -25,7 +25,7 @@ CFG_FILE="${FK_SCAN_CONFIG:-/etc/fk-scan/config}"
 [[ -r "$CFG_FILE" ]] && source "$CFG_FILE"
 
 SPOOL_DIR="${FK_SCAN_SPOOL:-/var/spool/fk-scan/pending}"
-SCAN_BIN="${FK_SCAN_BIN:-/home/anton/sane-scan-pdf/scan}"
+SCAN_BIN="${FK_SCAN_BIN:-$HOME/sane-scan-pdf/scan}"
 SCAN_ARGS="${FK_SCAN_ARGS:--d -x fujitsu -s A4 -r 300 -v -m Lineart --autorotate --skip-empty-pages}"
 UPLOAD_CMD="${FK_UPLOAD_CMD:-/usr/local/bin/fk-upload.sh}"
 LOG_TAG="fk-scan/doscan"

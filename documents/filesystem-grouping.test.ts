@@ -65,7 +65,7 @@ describe("filesystem category grouping", () => {
   it("inserts the resolved dimension directly below its configured root", () => {
     const ctx: DocumentLocationContext = {
       visibility: "private",
-      userLoginSlug: "anton",
+      userLoginSlug: "paul",
       groupSlug: null,
       categorySlugs: ["betreuung", "betreuung-rechenschaftsbericht"],
       filesystemGrouping: {
@@ -86,7 +86,7 @@ describe("filesystem category grouping", () => {
 
     const result = resolveDocumentDiskPath(ctx);
     expect(result.relPath).toBe(path.join(
-      "anton",
+      "paul",
       "betreuung",
       "erika-mustermann",
       "betreuung-rechenschaftsbericht",

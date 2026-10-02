@@ -162,7 +162,7 @@ describe("documents.syncTaxReviewFlagForSubjectPerson", () => {
 
   it("keeps the flag on opt-out when another opted-in person still matches", async () => {
     const mutter = await addPerson("Maria Beispiel", "mutter");
-    const vater = await addPerson("Anton Beispiel", "vater");
+    const vater = await addPerson("Paul Beispiel", "vater");
     await insertDoc(DOC_ID);
     await linkPerson(DOC_ID, mutter);
     await linkPerson(DOC_ID, vater);
@@ -176,7 +176,7 @@ describe("documents.syncTaxReviewFlagForSubjectPerson", () => {
     await setRequiresTaxReview(mutter, false);
     await syncTaxReviewFlagForSubjectPerson(USER_ID, mutter);
 
-    // Anton is still opted in and still linked — the flag must survive.
+    // Paul is still opted in and still linked — the flag must survive.
     expect(await taxReviewNeeded(DOC_ID)).toBe(true);
   });
 

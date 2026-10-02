@@ -151,11 +151,11 @@ describe("layoutTextFromTsv", () => {
       TSV_HEADER,
       tsvWord(100, 100, 80, 20, "HERRN"),
       tsvWord(700, 100, 90, 20, "Rechnung"),
-      tsvWord(100, 140, 120, 20, "ANTON"),
+      tsvWord(100, 140, 120, 20, "PAUL"),
       tsvWord(230, 140, 110, 20, "BEISPIEL"),
     ].join("\n");
 
-    expect(layoutTextFromTsv(tsv)).toBe(["HERRN   Rechnung", "ANTON BEISPIEL"].join("\n"));
+    expect(layoutTextFromTsv(tsv)).toBe(["HERRN   Rechnung", "PAUL BEISPIEL"].join("\n"));
   });
 
   it("yields an empty string for unusable output", () => {

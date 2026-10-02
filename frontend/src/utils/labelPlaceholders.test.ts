@@ -8,9 +8,9 @@ describe('resolveLabelPlaceholders', () => {
       resolveLabelPlaceholders(
         '{{datum}} | {{uhrzeit}} | {{datum_zeit}} | {{jahr}} | {{monat}} | {{benutzer}}',
         now,
-        'Anton',
+        'Paul',
       ),
-    ).toBe('14.07.2026 | 09:05 | 14.07.2026 09:05 | 2026 | Juli | Anton')
+    ).toBe('14.07.2026 | 09:05 | 14.07.2026 09:05 | 2026 | Juli | Paul')
   })
 
   it('replaces repeated placeholders', () => {

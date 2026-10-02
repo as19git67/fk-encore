@@ -69,8 +69,8 @@ export function extractIsin(text: string | null | undefined): string | null {
  * German Wertpapierkennnummer: always 6 alphanumeric characters. The
  * shape alone is too generic (matches dates, amounts, fragments of
  * IBANs), so we require an explicit prefix to avoid false positives.
- * Banks spell that prefix several ways — "WKN 930921", "WKN: 930921",
- * "WKN/ISIN 930921/LU…", and (e.g. comdirect/Sparkasse Wertpapier-
+ * Banks spell that prefix several ways — "WKN 987654", "WKN: 987654",
+ * "WKN/ISIN 987654/LU…", and (e.g. comdirect/Sparkasse Wertpapier-
  * abrechnungen) "WPKNR: 865985" or "WP-KENNNR 865985".
  */
 const WKN_RE = /\b(?:WKN|WPKNR|WPK|WP-?KENN(?:NR|NUMMER)?)[.:\s/]+([A-Z0-9]{6})\b/i;

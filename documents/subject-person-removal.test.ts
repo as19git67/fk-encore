@@ -97,17 +97,17 @@ beforeEach(async () => {
 describe("subject-person removal sticks (migration 0138)", () => {
   it("deselecting an AI-linked person deletes the link and records the removal", async () => {
     const erika = await addPerson("Erika Mustermann", "mutter");
-    const anton = await addPerson("Anton Beispiel", "vater");
-    await insertDoc("Befund für Erika Mustermann und Anton Beispiel");
+    const paul = await addPerson("Paul Beispiel", "vater");
+    await insertDoc("Befund für Erika Mustermann und Paul Beispiel");
     await db.insert(documentSubjectPersons).values([
       { document_id: DOC_ID, subject_person_id: erika, source: "ai" },
-      { document_id: DOC_ID, subject_person_id: anton, source: "ai" },
+      { document_id: DOC_ID, subject_person_id: paul, source: "ai" },
     ]);
 
-    // The edit dialog submits the remaining selection: Anton stays, Erika out.
-    await updateDocument({ id: DOC_ID, subject_person_ids: [anton] });
+    // The edit dialog submits the remaining selection: Paul stays, Erika out.
+    await updateDocument({ id: DOC_ID, subject_person_ids: [paul] });
 
-    expect(await linkedPersonIds()).toEqual([anton]);
+    expect(await linkedPersonIds()).toEqual([paul]);
     expect(await removalIds()).toEqual([erika]);
   });
 

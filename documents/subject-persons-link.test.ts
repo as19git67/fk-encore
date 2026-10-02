@@ -54,9 +54,9 @@ beforeEach(async () => {
 describe("runClassify — Bezugsperson linking", () => {
   it("links subject persons found in the text and preserves manual links", async () => {
     const erika = await addPerson("Erika Mustermann", "mutter");
-    const anton = await addPerson("Anton Beispiel", "vater");
+    const paul = await addPerson("Paul Beispiel", "vater");
 
-    // The text mentions Erika but not Anton.
+    // The text mentions Erika but not Paul.
     await db.execute(
       sql`INSERT INTO documents
             (id, user_id, sha256, original_filename, mime_type, size_bytes, disk_path,
@@ -66,10 +66,10 @@ describe("runClassify — Bezugsperson linking", () => {
              ${`/tmp/d-${DOC_ID}.pdf`}, 'classifying',
              'Befund für Patientin Erika Mustermann vom 1.1.')`,
     );
-    // A manual link to Anton must survive the re-classify.
+    // A manual link to Paul must survive the re-classify.
     await db
       .insert(documentSubjectPersons)
-      .values({ document_id: DOC_ID, subject_person_id: anton, source: "user" });
+      .values({ document_id: DOC_ID, subject_person_id: paul, source: "user" });
 
     await runClassify(DOC_ID);
 
@@ -83,7 +83,7 @@ describe("runClassify — Bezugsperson linking", () => {
     const bySource = Object.fromEntries(rows.map((r) => [r.subject_person_id, r.source]));
 
     expect(bySource[erika]).toBe("ai"); // detected in text
-    expect(bySource[anton]).toBe("user"); // manual link preserved
+    expect(bySource[paul]).toBe("user"); // manual link preserved
     expect(rows.length).toBe(2);
   });
 });

@@ -74,8 +74,8 @@ ios/.swiftpm/
 ios/**/*.xcuserstate
 ios/**/xcuserdata/
 ios/DerivedData/
-/ios-fk-photos.xcworkspace/xcuserdata/anton.xcuserdatad/UserInterfaceState.xcuserstate
-/ios-fk-photos.xcworkspace/xcuserdata/anton.xcuserdatad/xcdebugger/Breakpoints_v2.xcbkptlist
+/ios-fk-photos.xcworkspace/xcuserdata/*.xcuserdatad/UserInterfaceState.xcuserstate
+/ios-fk-photos.xcworkspace/xcuserdata/*.xcuserdatad/xcdebugger/Breakpoints_v2.xcbkptlist
 
 # Taxonomy diagnostic reports (generated, see docs/taxonomy-tax-quality-improvement.md)
 scripts/taxonomy/out/

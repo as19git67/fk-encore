@@ -12,7 +12,7 @@ function item(photoId: number, overrides: Partial<FeedPhotoItem> = {}): FeedPhot
     takenAt: null,
     lastActivityAt: `2026-07-0${photoId}T10:00:00Z`,
     album: null,
-    owner: { id: 1, name: 'Anton' },
+    owner: { id: 1, name: 'Paul' },
     likeCount: 0,
     likedByMe: false,
     commentCount: 0,

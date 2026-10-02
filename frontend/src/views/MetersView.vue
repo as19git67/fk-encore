@@ -17,8 +17,6 @@ import {
   createMeter,
   updateMeter,
   deleteMeter,
-  importWaterHistory,
-  importElectricityHistory,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   METER_ROLE_LABELS,
@@ -255,57 +253,6 @@ async function performDelete(m: MeterListItem) {
   }
 }
 
-// ── History imports ─────────────────────────────────────────────────────────
-
-const importingWater = ref(false)
-const importingElec = ref(false)
-const importMsg = ref('')
-
-const showWaterImport = computed(
-  () => canManage.value && !meters.value.some((m) => m.type === 'water' && m.name === 'Wasser'),
-)
-const showElecImport = computed(
-  () => canManage.value && !meters.value.some((m) => m.type === 'electricity' && m.name === 'Netzstrom Bezug (1.8.0)'),
-)
-
-async function handleImportWater() {
-  importingWater.value = true
-  error.value = ''
-  importMsg.value = ''
-  try {
-    const res = await importWaterHistory()
-    if (res.alreadyImported) {
-      importMsg.value = 'Wasser-Historie war bereits importiert.'
-    } else {
-      importMsg.value = `Wasser-Import: ${res.devices} Geräte, ${res.readings} Ablesungen.`
-    }
-    await load()
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Import'
-  } finally {
-    importingWater.value = false
-  }
-}
-
-async function handleImportElec() {
-  importingElec.value = true
-  error.value = ''
-  importMsg.value = ''
-  try {
-    const res = await importElectricityHistory()
-    if (res.alreadyImported) {
-      importMsg.value = 'Strom-Historie war bereits importiert.'
-    } else {
-      importMsg.value = `Strom-Import: ${res.metersCreated} Zähler, ${res.devicesCreated} Geräte, ${res.readingsCreated} Ablesungen.`
-    }
-    await load()
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Import'
-  } finally {
-    importingElec.value = false
-  }
-}
-
 // ── Electricity prices / tariffs ───────────────────────────────────────────
 
 onMounted(load)
@@ -314,22 +261,6 @@ onMounted(load)
 <template>
   <PageLayout title="Zähler" width="normal" :ready="!loading" :anchor-key="ANCHOR_KEY">
     <template #actions>
-      <Button
-        v-if="showElecImport"
-        label="Strom-Historie importieren"
-        icon="pi pi-upload"
-        severity="secondary"
-        :loading="importingElec"
-        @click="handleImportElec"
-      />
-      <Button
-        v-if="showWaterImport"
-        label="Wasser-Historie importieren"
-        icon="pi pi-upload"
-        severity="secondary"
-        :loading="importingWater"
-        @click="handleImportWater"
-      />
       <Button
         label="Auswertungen"
         icon="pi pi-chart-line"
@@ -345,7 +276,6 @@ onMounted(load)
     </template>
 
     <template #notice>
-      <Message v-if="importMsg" severity="success" @close="importMsg = ''" closable>{{ importMsg }}</Message>
       <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
     </template>
 

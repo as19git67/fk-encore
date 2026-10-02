@@ -681,7 +681,7 @@ export async function extractStatementValues(
   const system =
     "Du liest Standmitteilungen, Renteninformationen und Leistungsmitteilungen deutscher Versicherer und Versorgungseinrichtungen. " +
     "Antworte ausschließlich mit einem JSON-Objekt. Übernimm nur Werte, die wörtlich im Text stehen; erfinde nichts. " +
-    "Fehlt ein Wert, setze null. Beträge als Zahl in Euro ohne Tausenderpunkte (z. B. 77508.29), Datumsangaben als YYYY-MM-DD.";
+    "Fehlt ein Wert, setze null. Beträge als Zahl in Euro ohne Tausenderpunkte (z. B. 61234.5), Datumsangaben als YYYY-MM-DD.";
   const prompt =
     `Vertrag: ${hint.itemLabel}${hint.contractNo ? ` (Nummer ${hint.contractNo})` : ""}\n` +
     `Gib ein JSON-Objekt mit genau diesen Schlüsseln zurück:\n${keys}\n\n` +

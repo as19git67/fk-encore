@@ -33,12 +33,12 @@ Ihr Vertrag im Überblick
 Versicherungsbeginn            01.10.1999
 Ablauf der Beitragszahlung     01.10.2032
 Ablauf der Versicherung        01.10.2037
-Monatlicher Beitrag            241,02 EUR
+Monatlicher Beitrag            150,00 EUR
 
 Werte zum Stichtag
-Rückkaufswert                  77.508,29 EUR
+Rückkaufswert                  61.234,50 EUR
 Garantierte Ablaufleistung     55.000,00 EUR
-Voraussichtliche Ablaufleistung inkl. Überschussbeteiligung   132.442,77 EUR
+Voraussichtliche Ablaufleistung inkl. Überschussbeteiligung   98.765,40 EUR
 Die Verzinsung beträgt 2,25 % p. a.
 `;
 
@@ -46,16 +46,16 @@ const PENSION = `
 Deutsche Beispielrente · Renteninformation 2025
 Stichtag 15.03.2025
 Versicherungsnummer 12 345678 A 901
-Höhe Ihrer künftigen Regelaltersrente: 1.848,00 €
+Höhe Ihrer künftigen Regelaltersrente: 1.500,00 €
 Rentenbeginn: 01.07.2034
-Ihre Rente wegen voller Erwerbsminderung würde 1.203,55 € betragen.
+Ihre Rente wegen voller Erwerbsminderung würde 1.000,00 € betragen.
 `;
 
 const FUND = `
 Musterfonds-Police · Wertmitteilung
 Wertstand zum 31.12.2025
-Fondsguthaben 100.238,86 EUR
-Beitrag monatlich 353,06 €
+Fondsguthaben 54.321,10 EUR
+Beitrag monatlich 120,00 €
 Kapitalwahlrecht: einmalig 95.000,00 €
 Garantierte monatliche Rente 310,50 EUR
 Mögliche monatliche Rente 480,00 EUR
@@ -64,9 +64,9 @@ Beginn der Rente 01.09.2042
 
 describe("parseGermanAmount", () => {
   it("reads German number formats", () => {
-    expect(parseGermanAmount("77.508,29")).toBe(77508.29);
-    expect(parseGermanAmount("1.848")).toBe(1848);
-    expect(parseGermanAmount("241,02")).toBe(241.02);
+    expect(parseGermanAmount("61.234,50")).toBe(61234.5);
+    expect(parseGermanAmount("1.500")).toBe(1500);
+    expect(parseGermanAmount("150,00")).toBe(150);
     expect(parseGermanAmount("12345")).toBe(12345);
     expect(parseGermanAmount("1,2,3")).toBeNull();
   });
@@ -76,10 +76,10 @@ describe("parseStatementText", () => {
   it("reads a life insurance statement", () => {
     const v = parseStatementText(LIFE);
     expect(v.referenceDate).toBe("2025-12-01");
-    expect(v.surrenderValue).toBe(77508.29);
+    expect(v.surrenderValue).toBe(61234.5);
     expect(v.guaranteedPayout).toBe(55000);
-    expect(v.projectedPayout).toBe(132442.77);
-    expect(v.premiumMonthly).toBe(241.02);
+    expect(v.projectedPayout).toBe(98765.4);
+    expect(v.premiumMonthly).toBe(150);
     expect(v.premiumEndDate).toBe("2032-10-01");
     expect(v.maturityDate).toBe("2037-10-01");
   });
@@ -87,7 +87,7 @@ describe("parseStatementText", () => {
   it("reads a statutory pension statement and ignores the contract number", () => {
     const v = parseStatementText(PENSION);
     expect(v.referenceDate).toBe("2025-03-15");
-    expect(v.projectedMonthlyPension).toBe(1848);
+    expect(v.projectedMonthlyPension).toBe(1500);
     expect(v.pensionStartDate).toBe("2034-07-01");
     expect(v.surrenderValue).toBeNull();
   });
@@ -95,8 +95,8 @@ describe("parseStatementText", () => {
   it("reads a fund policy statement", () => {
     const v = parseStatementText(FUND);
     expect(v.referenceDate).toBe("2025-12-31");
-    expect(v.contractValue).toBe(100238.86);
-    expect(v.premiumMonthly).toBe(353.06);
+    expect(v.contractValue).toBe(54321.1);
+    expect(v.premiumMonthly).toBe(120);
     expect(v.lumpSum).toBe(95000);
     expect(v.guaranteedMonthlyPension).toBe(310.5);
     expect(v.projectedMonthlyPension).toBe(480);
@@ -118,19 +118,19 @@ describe("parseLlmStatement", () => {
   it("takes numbers and dates in the forms models return", () => {
     const v = parseLlmStatement({
       referenceDate: "2025-12-01",
-      surrenderValue: "77.508,29 €",
-      projectedPayout: 132442.77,
+      surrenderValue: "61.234,50 €",
+      projectedPayout: 98765.4,
       maturityDate: "01.10.2037",
-      premiumMonthly: "241.02",
+      premiumMonthly: "150",
       unknownKey: 5,
       lumpSum: "keine Angabe",
     });
     expect(v).toMatchObject({
       referenceDate: "2025-12-01",
-      surrenderValue: 77508.29,
-      projectedPayout: 132442.77,
+      surrenderValue: 61234.5,
+      projectedPayout: 98765.4,
       maturityDate: "2037-10-01",
-      premiumMonthly: 241.02,
+      premiumMonthly: 150,
       lumpSum: null,
     });
     expect(parseLlmStatement("nonsense")).toEqual(EMPTY_VALUES);
@@ -179,7 +179,7 @@ describe("computeProposals and applyProposals", () => {
   const values = parseStatementText(LIFE);
   const item = {
     surrenderValue: 70000,
-    monthlyPremium: 241.02,
+    monthlyPremium: 150,
     guaranteedPayout: 55000,
     projectedPayout: 130000,
     maturity: { kind: "date", date: "2038-01-01" },
@@ -190,14 +190,14 @@ describe("computeProposals and applyProposals", () => {
   it("lists the fields where the statement differs", () => {
     const p = computeProposals("life_insurance", item, values);
     expect(p.map((x) => x.field).sort()).toEqual(["maturity", "projectedPayout", "surrenderValue"]);
-    expect(p.find((x) => x.field === "surrenderValue")).toMatchObject({ current: 70000, proposed: 77508.29, kind: "amount" });
+    expect(p.find((x) => x.field === "surrenderValue")).toMatchObject({ current: 70000, proposed: 61234.5, kind: "amount" });
     expect(p.find((x) => x.field === "maturity")).toMatchObject({ current: "2038-01-01", proposed: "2037-10-01", kind: "date" });
   });
 
   it("ignores rounding noise and leaves milestone dates alone", () => {
     const p = computeProposals(
       "life_insurance",
-      { ...item, surrenderValue: 77508.0, projectedPayout: 132442.77, maturity: { kind: "milestone", milestoneId: 3 } },
+      { ...item, surrenderValue: 61234.0, projectedPayout: 98765.4, maturity: { kind: "milestone", milestoneId: 3 } },
       values,
     );
     expect(p.map((x) => x.field)).toEqual([]);
@@ -210,7 +210,7 @@ describe("computeProposals and applyProposals", () => {
       "start",
     ]);
     const fv = parseStatementText(FUND);
-    expect(computeProposals("expense", { amount: 4000, frequency: "yearly" }, fv)[0]).toMatchObject({ field: "amount", proposed: 4236.72 });
+    expect(computeProposals("expense", { amount: 4000, frequency: "yearly" }, fv)[0]).toMatchObject({ field: "amount", proposed: 1440 });
     expect(computeProposals("salary", { amount: 1 }, fv)).toEqual([]);
   });
 
@@ -218,8 +218,8 @@ describe("computeProposals and applyProposals", () => {
     const p = computeProposals("life_insurance", item, values);
     const next = applyProposals(item, p, { documentId: 42, referenceDate: "2025-12-01", now: "2026-09-25T10:00:00Z" });
     expect(next).toMatchObject({
-      surrenderValue: 77508.29,
-      projectedPayout: 132442.77,
+      surrenderValue: 61234.5,
+      projectedPayout: 98765.4,
       maturity: { kind: "date", date: "2037-10-01" },
       contractNo: "X-000111-01",
       valuesSource: { kind: "statement", documentId: 42, referenceDate: "2025-12-01" },
@@ -274,7 +274,7 @@ describe("forecast-statements-extract — kinds of documents", () => {
   });
 
   it("reads the new premium of an increase, not the old one", () => {
-    const v = parseStatementText("Ihr bisheriger monatlicher Beitrag 241,02 EUR\nIhr neuer monatlicher Beitrag ab 01.12.2025 253,07 EUR");
+    const v = parseStatementText("Ihr bisheriger monatlicher Beitrag 150,00 EUR\nIhr neuer monatlicher Beitrag ab 01.12.2025 253,07 EUR");
     expect(v.premiumMonthly).toBe(253.07);
   });
 });

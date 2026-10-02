@@ -131,12 +131,12 @@ async function tagTransaction(
 
 describe("finance/overview — defaults", () => {
   it("synthesises Täglich/Sparen sections from account types when no config is saved", async () => {
-    const giro = await insertAccount("Anton Giro", "giro");
-    const visa = await insertAccount("Anton Visa", "kreditkarte");
-    const tagesgeld = await insertAccount("Anton Tagesgeld", "tagesgeld");
-    const depot = await insertAccount("Anton Depot", "depot");
+    const giro = await insertAccount("Paul Giro", "giro");
+    const visa = await insertAccount("Paul Visa", "kreditkarte");
+    const tagesgeld = await insertAccount("Paul Tagesgeld", "tagesgeld");
+    const depot = await insertAccount("Paul Depot", "depot");
 
-    await ensureUser(7, "anton@beispiel.test");
+    await ensureUser(7, "paul@beispiel.test");
     await grantAcl(giro, 7);
     await grantAcl(visa, 7);
     await grantAcl(tagesgeld, 7);
@@ -146,21 +146,21 @@ describe("finance/overview — defaults", () => {
     const resp = await getOverview();
 
     expect(resp.is_default).toBe(true);
-    expect(resp.user_email).toBe("anton@beispiel.test");
+    expect(resp.user_email).toBe("paul@beispiel.test");
 
     const taeglich = resp.sections.find((s) => s.name === "Täglich");
     const sparen = resp.sections.find((s) => s.name === "Sparen");
     expect(taeglich?.accounts.map((a) => a.label).sort()).toEqual(
-      ["Anton Giro", "Anton Visa"],
+      ["Paul Giro", "Paul Visa"],
     );
     expect(sparen?.accounts.map((a) => a.label).sort()).toEqual(
-      ["Anton Depot", "Anton Tagesgeld"],
+      ["Paul Depot", "Paul Tagesgeld"],
     );
     expect(resp.unassigned).toEqual([]);
   });
 
   it("returns balance + as_of for the latest finance_account_balance row", async () => {
-    const giro = await insertAccount("Anton Giro", "giro");
+    const giro = await insertAccount("Paul Giro", "giro");
     await ensureUser(7);
     await grantAcl(giro, 7);
 
@@ -180,7 +180,7 @@ describe("finance/overview — defaults", () => {
       .insert(financeBankcontact)
       .values({
         name: "comdirect",
-        blz: "20041111",
+        blz: "12345678",
         login: "u",
         server_url: "https://x",
         last_sync_status: "tan-required",
@@ -224,7 +224,7 @@ describe("finance/overview — defaults", () => {
   });
 
   it("counts only recent transactions without user tags as pending", async () => {
-    const giro = await insertAccount("Anton Giro", "giro");
+    const giro = await insertAccount("Paul Giro", "giro");
     await ensureUser(7);
     await grantAcl(giro, 7);
 
