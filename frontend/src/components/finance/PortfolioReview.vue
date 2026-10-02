@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import { useConfirm } from 'primevue/useconfirm'
 import ScrollX from '../layout/ScrollX.vue'
 import SettlementDocumentDialog from './SettlementDocumentDialog.vue'
 import {
   applySettlementDocument,
   getPortfolioReview,
+  setSettlementDocumentIgnored,
   type PortfolioReviewConflict,
   type PortfolioReviewDocument,
   type PortfolioReviewResponse,
@@ -44,37 +46,62 @@ const confirm = useConfirm()
 const review = ref<PortfolioReviewResponse | null>(null)
 const error = ref<string | null>(null)
 const applying = ref<Set<number>>(new Set())
+/** Show documents marked "ignore for depots" in their groups, to take them back. */
+const showIgnored = ref(false)
+/** Documents being marked or unmarked right now. */
+const marking = ref<Set<number>>(new Set())
 
 async function load() {
   error.value = null
   try {
-    review.value = await getPortfolioReview({ accounts: props.accounts, closed: props.includeClosed })
+    review.value = await getPortfolioReview({
+      accounts: props.accounts,
+      closed: props.includeClosed,
+      ignored: showIgnored.value,
+    })
   } catch (e: any) {
     error.value = e?.message ?? 'Prüfliste konnte nicht geladen werden'
   }
 }
 
 watch(
-  () => [props.accounts.join(','), props.includeClosed, props.reloadKey],
+  () => [props.accounts.join(','), props.includeClosed, props.reloadKey, showIgnored.value],
   () => void load(),
   { immediate: true },
 )
+
+const ignoredCount = computed(() => review.value?.ignored_count ?? 0)
 
 const hasContent = computed(() => {
   const r = review.value
   if (!r) return false
   return (
     r.conflicts.length + r.unmatched_documents.length + (r.unverified_documents?.length ?? 0) + r.holding_gaps.length > 0 ||
-    r.unverifiable_changes > 0
+    r.unverifiable_changes > 0 ||
+    // Keeps the toggle reachable when everything left is ignored.
+    ignoredCount.value > 0
   )
 })
 
+/** What still needs a look: ignored documents do not count. */
 const count = computed(() => {
   const r = review.value
-  return r
-    ? r.conflicts.length + r.unmatched_documents.length + (r.unverified_documents?.length ?? 0) + r.holding_gaps.length
-    : 0
+  if (!r) return 0
+  const open = <T extends { ignored?: boolean }>(list: T[] | undefined) => (list ?? []).filter((x) => !x.ignored).length
+  return open(r.conflicts) + open(r.unmatched_documents) + open(r.unverified_documents) + r.holding_gaps.length
 })
+
+async function setIgnored(documentId: number, ignored: boolean) {
+  marking.value.add(documentId)
+  try {
+    await setSettlementDocumentIgnored(documentId, ignored)
+    await load()
+  } catch (e: any) {
+    error.value = e?.message ?? (ignored ? 'Beleg konnte nicht ignoriert werden' : 'Beleg konnte nicht zurückgeholt werden')
+  } finally {
+    marking.value.delete(documentId)
+  }
+}
 
 /** The document shown in the preview dialog; closing it leaves the page where it was. */
 const openDocument = ref<number | null>(null)
@@ -134,6 +161,10 @@ function signClass(val: string | null): string {
       <span v-if="count > 0" class="pr-count">{{ count }}</span>
     </h2>
     <p v-if="error" class="pr-error">{{ error }}</p>
+    <div v-if="ignoredCount > 0" class="pr-toggle">
+      <Checkbox v-model="showIgnored" binary input-id="pr-show-ignored" />
+      <label for="pr-show-ignored">Für Depots ignorierte Belege zeigen ({{ ignoredCount }})</label>
+    </div>
 
     <template v-if="review">
       <!-- Conflicts -->
@@ -156,7 +187,7 @@ function signClass(val: string | null): string {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="c in review.conflicts" :key="c.document_id">
+              <tr v-for="c in review.conflicts" :key="c.document_id" :class="{ 'pr-ignored': c.ignored }">
                 <td class="pr-date">{{ formatIsoDate(c.executed_at) }}</td>
                 <td>{{ depotKindLabel(c.kind) }}</td>
                 <td>
@@ -172,12 +203,34 @@ function signClass(val: string | null): string {
                     <i class="pi pi-file" aria-hidden="true" /> Beleg ansehen
                   </button>
                   <Button
+                    v-if="!c.ignored"
                     label="Übernehmen"
                     size="small"
                     severity="secondary"
                     :loading="applying.has(c.document_id)"
                     @click="askApply(c)"
                   />
+                  <Button
+                    v-if="!c.ignored"
+                    label="Für Depots ignorieren"
+                    icon="pi pi-eye-slash"
+                    size="small"
+                    text
+                    severity="secondary"
+                    :loading="marking.has(c.document_id)"
+                    @click="setIgnored(c.document_id, true)"
+                  />
+                  <template v-else>
+                    <span class="pr-ignored-tag">ignoriert</span>
+                    <Button
+                      label="Wieder berücksichtigen"
+                      icon="pi pi-eye"
+                      size="small"
+                      text
+                      :loading="marking.has(c.document_id)"
+                      @click="setIgnored(c.document_id, false)"
+                    />
+                  </template>
                 </td>
               </tr>
             </tbody>
@@ -228,12 +281,35 @@ function signClass(val: string | null): string {
           Regel und KI lesen auf diesen Belegen unterschiedliche Werte, und keine Variante geht rechnerisch auf — deshalb wurde nichts gebucht. Im Beleg siehst du, welche Felder abweichen.
         </p>
         <ul class="pr-docs">
-          <li v-for="d in review.unverified_documents" :key="d.document_id">
+          <li v-for="d in review.unverified_documents" :key="d.document_id" :class="{ 'pr-ignored': d.ignored }">
             <button type="button" class="pr-doc" @click="openDocument = d.document_id">
               <i class="pi pi-file" aria-hidden="true" />
               {{ d.document_title ?? `Dokument ${d.document_id}` }}
             </button>
             <span v-if="d.doc_date" class="pr-date">{{ formatIsoDate(d.doc_date) }}</span>
+            <span class="pr-mark">
+              <Button
+                    v-if="!d.ignored"
+                    label="Für Depots ignorieren"
+                    icon="pi pi-eye-slash"
+                    size="small"
+                    text
+                    severity="secondary"
+                    :loading="marking.has(d.document_id)"
+                    @click="setIgnored(d.document_id, true)"
+                  />
+                  <template v-else>
+                    <span class="pr-ignored-tag">ignoriert</span>
+                    <Button
+                      label="Wieder berücksichtigen"
+                      icon="pi pi-eye"
+                      size="small"
+                      text
+                      :loading="marking.has(d.document_id)"
+                      @click="setIgnored(d.document_id, false)"
+                    />
+                  </template>
+            </span>
           </li>
         </ul>
       </div>
@@ -245,13 +321,76 @@ function signClass(val: string | null): string {
           Kein Depot hält das Wertpapier dieser Belege, keine Depotnummer passt eindeutig, und es gibt keine Transaktionen dazu — vielleicht gehört der Beleg zu einem Depot, das noch nicht angebunden ist.
         </p>
         <ul class="pr-docs">
-          <li v-for="d in review.unmatched_documents" :key="d.document_id">
+          <li v-for="d in review.unmatched_documents" :key="d.document_id" :class="{ 'pr-ignored': d.ignored }">
             <button type="button" class="pr-doc" @click="openDocument = d.document_id">
               <i class="pi pi-file" aria-hidden="true" />
               {{ d.document_title ?? `Dokument ${d.document_id}` }}
             </button>
             <span v-if="d.doc_date" class="pr-date">{{ formatIsoDate(d.doc_date) }}</span>
+            <span class="pr-mark">
+              <Button
+                    v-if="!d.ignored"
+                    label="Für Depots ignorieren"
+                    icon="pi pi-eye-slash"
+                    size="small"
+                    text
+                    severity="secondary"
+                    :loading="marking.has(d.document_id)"
+                    @click="setIgnored(d.document_id, true)"
+                  />
+                  <template v-else>
+                    <span class="pr-ignored-tag">ignoriert</span>
+                    <Button
+                      label="Wieder berücksichtigen"
+                      icon="pi pi-eye"
+                      size="small"
+                      text
+                      :loading="marking.has(d.document_id)"
+                      @click="setIgnored(d.document_id, false)"
+                    />
+                  </template>
+            </span>
             <span class="pr-reason">{{ unmatchedReason(d) }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Ignored documents that would fall into no group -->
+      <div v-if="showIgnored && review.ignored_other?.length" class="pr-group">
+        <h3>Weitere ignorierte Belege</h3>
+        <p class="pr-hint">
+          Diese Belege sind für die Depots ignoriert und würden sonst in keiner der Gruppen oben stehen — etwa weil sie gar keine Abrechnung sind oder sich ohne Rückfrage einlesen ließen.
+        </p>
+        <ul class="pr-docs">
+          <li v-for="d in review.ignored_other" :key="d.document_id" class="pr-ignored">
+            <button type="button" class="pr-doc" @click="openDocument = d.document_id">
+              <i class="pi pi-file" aria-hidden="true" />
+              {{ d.document_title ?? `Dokument ${d.document_id}` }}
+            </button>
+            <span v-if="d.doc_date" class="pr-date">{{ formatIsoDate(d.doc_date) }}</span>
+            <span class="pr-mark">
+              <Button
+                    v-if="!d.ignored"
+                    label="Für Depots ignorieren"
+                    icon="pi pi-eye-slash"
+                    size="small"
+                    text
+                    severity="secondary"
+                    :loading="marking.has(d.document_id)"
+                    @click="setIgnored(d.document_id, true)"
+                  />
+                  <template v-else>
+                    <span class="pr-ignored-tag">ignoriert</span>
+                    <Button
+                      label="Wieder berücksichtigen"
+                      icon="pi pi-eye"
+                      size="small"
+                      text
+                      :loading="marking.has(d.document_id)"
+                      @click="setIgnored(d.document_id, false)"
+                    />
+                  </template>
+            </span>
           </li>
         </ul>
       </div>
@@ -392,6 +531,30 @@ function signClass(val: string | null): string {
   gap: 0.15rem var(--space-2);
   align-items: baseline;
   flex-wrap: wrap;
+}
+.pr-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+}
+.pr-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.pr-ignored-tag {
+  font-size: var(--text-xs);
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--p-tag-secondary-background);
+  color: var(--p-tag-secondary-color);
+}
+/* Ignored rows stay readable but step back; their buttons keep full contrast. */
+.pr-ignored .pr-doc,
+.pr-ignored td:not(.pr-actions) {
+  opacity: 0.6;
 }
 .pr-reason {
   flex-basis: 100%;

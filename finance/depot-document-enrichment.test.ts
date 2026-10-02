@@ -24,6 +24,7 @@ import {
   financeAccountHolding,
   financeAccountType,
   financeBankcontact,
+  financeDepotDocumentIgnore,
   financeDepotTransaction,
   financeDepotTransactionDocument,
   financeTagTransaction,
@@ -39,8 +40,10 @@ import {
   getPortfolio,
   getPortfolioPosition,
   getPortfolioReview,
+  ignoreSettlementDocument,
   inspectSettlementDocument,
   listPortfolioTransactions,
+  unignoreSettlementDocument,
 } from "./portfolio";
 
 // Synthetic identifiers and texts only — see CLAUDE.md "Keine PII".
@@ -82,6 +85,7 @@ async function ensureUser(id: number): Promise<void> {
 
 beforeEach(async () => {
   await db.execute(sql`DELETE FROM finance_transaction_embedding`);
+  await db.delete(financeDepotDocumentIgnore);
   await db.delete(financeDepotTransactionDocument);
   await db.delete(financeDepotTransaction);
   await db.delete(financeTagTransaction);
@@ -775,5 +779,53 @@ Datum 15.01.2026`);
 
     const review = await getPortfolioReview({});
     expect(review.unverified_documents.map((d) => d.document_id)).toEqual([docId]);
+  });
+});
+
+describe("finance/portfolio — documents ignored for the depots", () => {
+  it("are neither read in nor listed, show up on request, and come back when taken back", async () => {
+    const { depot } = await setup();
+    const foreign = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ9"));
+    const buy = await insertDocument(BUY_TEXT);
+
+    let review = await getPortfolioReview({});
+    expect(review.unmatched_documents.map((d) => d.document_id)).toEqual([foreign]);
+    expect(review.ignored_count).toBe(0);
+
+    await ignoreSettlementDocument({ documentId: foreign });
+    await ignoreSettlementDocument({ documentId: buy });
+    // Idempotent.
+    await ignoreSettlementDocument({ documentId: buy });
+
+    review = await getPortfolioReview({});
+    expect(review.unmatched_documents).toEqual([]);
+    expect(review.ignored_count).toBe(2);
+    expect(review.ignored_other).toEqual([]);
+
+    // With "show ignored": each in the group it would fall into, marked.
+    review = await getPortfolioReview({ ignored: true });
+    expect(review.unmatched_documents).toMatchObject([{ document_id: foreign, ignored: true }]);
+    // The buy would simply be booked: no group, so it is listed on its own.
+    expect(review.ignored_other).toMatchObject([{ document_id: buy, ignored: true }]);
+
+    // Reading in skips both, and so does the classification hook.
+    const stats = await enrichPendingDocuments([depot]);
+    expect(stats.documents_examined).toBe(0);
+    expect(await enrichDocument(buy)).toMatchObject({ outcome: "not_settlement", detail: "ignored", ignored: true });
+    expect(await depotRows(depot)).toHaveLength(0);
+
+    await unignoreSettlementDocument({ documentId: buy });
+    expect((await enrichDocument(buy)).outcome).toBe("created");
+    expect((await getPortfolioReview({})).ignored_count).toBe(1);
+  });
+
+  it("only the document's owner (or an admin) with a writable depot may mark it", async () => {
+    await setup();
+    await ensureUser(2);
+    const docId = await insertDocument(BUY_TEXT, { userId: 2 });
+    setAuth("1", ["finance.view"]);
+    await expect(ignoreSettlementDocument({ documentId: docId })).rejects.toThrow();
+    setAuth("1", ["finance.view", "finance.admin"]);
+    await expect(ignoreSettlementDocument({ documentId: docId })).resolves.toMatchObject({ ignored: true });
   });
 });

@@ -730,7 +730,8 @@ export async function extractSettlementValues(text: string): Promise<Record<stri
     '- "gross": Kurswert bzw. Bruttobetrag\n' +
     '- "fees": Summe aller Gebühren, Provisionen und Spesen\n' +
     '- "tax": Summe aller einbehaltenen Steuern (Kapitalertragsteuer, Solidaritätszuschlag, Kirchensteuer, Quellensteuer)\n' +
-    '- "net": der ausmachende Betrag bzw. Endbetrag, der dem Konto belastet oder gutgeschrieben wird\n' +
+    '- "net": der ausmachende Betrag bzw. Endbetrag, der dem Konto belastet oder gutgeschrieben wird; ' +
+    'steht ein Betrag vor und einer nach Steuern, dann der nach Steuern\n' +
     '- "currency": Währung des ausmachenden Betrags (z. B. "EUR")\n\n' +
     `Text des Belegs:\n"""\n${text.slice(0, SETTLEMENT_TEXT_LIMIT)}\n"""`;
   const resp = await postJson<JsonPromptRequest, Record<string, unknown>>("/json-prompt", {

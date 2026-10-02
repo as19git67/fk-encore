@@ -531,6 +531,21 @@ export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
     },
   ],
   unverifiable_changes: 2,
+  ignored_other: [],
+  ignored_count: 2,
+}
+
+/** The same review with "show ignored" on: ignored documents in their groups, and one in none. */
+export const MOCK_PORTFOLIO_REVIEW_WITH_IGNORED: PortfolioReviewResponse = {
+  ...MOCK_PORTFOLIO_REVIEW,
+  unmatched_documents: [
+    ...MOCK_PORTFOLIO_REVIEW.unmatched_documents,
+    { document_id: 308, document_title: 'Fondsgebundene Versicherung Jahresmitteilung', doc_date: '2026-01-15', isin: 'DE000000HHH5', wkn: null, depot_number: null, ignored: true },
+  ],
+  ignored_other: [
+    { document_id: 309, document_title: 'Kosteninformation zum Wertpapiergeschäft Alpha Industries AG', doc_date: '2026-03-14', isin: null, wkn: null, depot_number: null, ignored: true },
+  ],
+  ignored_count: 2,
 }
 
 export const MOCK_PORTFOLIO_REVIEW_EMPTY: PortfolioReviewResponse = {

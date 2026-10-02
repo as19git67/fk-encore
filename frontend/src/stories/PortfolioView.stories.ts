@@ -7,6 +7,7 @@ import {
   MOCK_PORTFOLIO_EMPTY,
   MOCK_PORTFOLIO_REVIEW,
   MOCK_PORTFOLIO_REVIEW_EMPTY,
+  MOCK_PORTFOLIO_REVIEW_WITH_IGNORED,
   MOCK_PORTFOLIO_TRANSACTIONS,
 } from './finance-mock-data'
 import { routeFromParameters } from './storyRoute'
@@ -36,7 +37,17 @@ const portfolioHandlers = [
       sums: { net_amount: net.toFixed(2), fees: fees.toFixed(2), taxes: taxes.toFixed(2) },
     })
   }),
-  http.get('/api/finance/portfolio/review', () => HttpResponse.json(MOCK_PORTFOLIO_REVIEW)),
+  http.get('/api/finance/portfolio/review', ({ request }) =>
+    HttpResponse.json(
+      new URL(request.url).searchParams.get('ignored') === 'true' ? MOCK_PORTFOLIO_REVIEW_WITH_IGNORED : MOCK_PORTFOLIO_REVIEW,
+    ),
+  ),
+  http.post('/api/finance/portfolio/documents/:id/ignore', ({ params }) =>
+    HttpResponse.json({ document_id: Number(params.id), ignored: true }),
+  ),
+  http.delete('/api/finance/portfolio/documents/:id/ignore', ({ params }) =>
+    HttpResponse.json({ document_id: Number(params.id), ignored: false }),
+  ),
   http.post('/api/finance/portfolio/documents/:id/apply', () =>
     HttpResponse.json({ document_id: 305, outcome: 'enriched', depot_transaction_id: 904, account_id: 12, detail: null, statement_net: '-2459.50', transaction_net: '-2457.00', isin: 'DE000000BBB2', wkn: null, depot_number: null, matched_by: 'holding', date_source: 'statement', llm_status: 'cached' }),
   ),
@@ -112,6 +123,20 @@ export const Ladefehler: Story = {
         ...portfolioHandlers,
       ],
     },
+  },
+}
+
+export const IgnorierteBelege: Story = {
+  name: 'Prüfliste mit ignorierten Belegen',
+  play: async ({ canvasElement }) => {
+    // Turn on "show ignored" once the review has loaded.
+    const deadline = Date.now() + 5000
+    let box: HTMLInputElement | null = null
+    while (!box && Date.now() < deadline) {
+      box = canvasElement.querySelector<HTMLInputElement>('#pr-show-ignored')
+      if (!box) await new Promise((r) => setTimeout(r, 50))
+    }
+    box?.click()
   },
 }
 

@@ -312,3 +312,57 @@ Kosteninformation: Ihre Kosten für diese Order betrugen 4,90 EUR.`;
     expect(parseSettlement(text)!.kind).toBe("buy");
   });
 });
+
+describe("parseSettlement — a settlement with its tax statement appended", () => {
+  // A broker's sale settlement whose second part is the tax statement:
+  // the first "Zu Ihren Gunsten" is before taxes, the amount booked is after.
+  const TEXT = `Depotnr.: 7654321 00
+GESCHÄFTSABRECHNUNG VOM 14.07.2026
+Wertpapierverkauf
+Geschäftstag : 14.07.2026 Ausführungsplatz : BEISPIELBÖRSE
+Wertpapier-Bezeichnung WPKNR/ISIN
+Alpha Industries AG AAA111
+Registered Shares o.N. DE000000AAA1
+Nennwert Zum Kurs von
+St. 30 EUR 100,00
+Kurswert : EUR 3.000,00
+--------------------------------------------------------------------------------
+Eigene Entgelte
+Provision : EUR 4,00-
+Börsenplatzabhäng. Entgelt : EUR 1,00-
+Summe Entgelte : EUR 5,00-
+--------------------------------------------------------------------------------
+IBAN Valuta Zu Ihren Gunsten vor Steuern
+DE00 0000 0000 0000 0000 00 EUR 16.07.2026 EUR 2.995,00
+Informationen zur steuerlichen Behandlung dieses Geschäftsvorgangs und den auf
+Ihrem Konto gebuchten Endbetrag finden Sie auf der separaten Steuermitteilung.
+Steuerliche Behandlung: Wertpapierverkauf Nr. 1234567 vom 14.07.2026
+Stk. 30 ALPHA INDUSTRIES AG , WKN / ISIN: AAA111 / DE000000AAA1
+Zu Ihren Gunsten vor Steuern: EUR 2.995,00
+Steuerbemessungsgrundlage (1) EUR 500,00
+Kapitalertragsteuer EUR -125,00
+Solidaritätszuschlag EUR -6,87
+Kirchensteuer EUR 0,00 _____________________
+abgeführte Steuern EUR -131,87 _____________________
+Zu Ihren Gunsten nach Steuern: EUR 2.863,13
+Die Gutschrift erfolgt mit Valuta 16.07.2026 auf Konto EUR
+einbehaltene
+KapitalertragsteuerSolidaritätszuschlag
+2026
+11,11
+22,22`;
+
+  it("reads the net after taxes, the printed totals and the trade date", () => {
+    const s = parseSettlement(TEXT)!;
+    expect(s.kind).toBe("sell");
+    expect(s.name).toBe("Alpha Industries AG");
+    expect(s.quantity).toBe(30);
+    expect(s.gross).toBe(3000);
+    // "Summe Entgelte" is the total, not a third fee line.
+    expect(s.fees).toBe(5);
+    // "abgeführte Steuern", not every tax word in the tables below it.
+    expect(s.tax).toBe(131.87);
+    expect(s.net).toBe(2863.13);
+    expect(s.executedAt).toBe("2026-07-14");
+  });
+});

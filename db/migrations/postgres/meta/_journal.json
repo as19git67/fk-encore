@@ -1569,6 +1569,13 @@
       "when": 1788652800043,
       "tag": "0223_trip_leg_quarters_aboard",
       "breakpoints": true
+    },
+    {
+      "idx": 224,
+      "version": "7",
+      "when": 1788652800044,
+      "tag": "0224_finance_depot_document_ignore",
+      "breakpoints": true
     }
   ]
 }
