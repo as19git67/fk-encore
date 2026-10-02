@@ -5,6 +5,7 @@ import {
   isUsableSettlement,
   parseGermanNumber,
   parseSettlement,
+  settlementBlock,
 } from "./depot-settlement-parser";
 
 // Synthetic settlement texts in the layouts German brokers print. Every
@@ -211,5 +212,67 @@ Endbetrag 995,10 EUR`);
     expect(sell?.kind).toBe("sell");
     // "kaufen" in the boilerplate is not a buy.
     expect(parseSettlement("Abrechnung Sie können jederzeit Anteile kaufen ISIN DE000000AAA1 Datum 01.02.2026 Endbetrag 1,00 EUR")).toBeNull();
+  });
+});
+
+describe("parseSettlement — a settlement booked inside an account statement", () => {
+  // The layout of a bank's "Vermögensdepot" account statement: fee
+  // bookings, then the sale as one booking, then the back page's prose
+  // that mentions "Dividendenabrechnung". All figures invented.
+  const STATEMENT = `Kontoauszug
+EUR-Konto Beispielbank AG
+Depotnummer 7654321
+alter Kontostand vom 30.06.2026 33,85 S
+03.07. 03.07. ENTGELT gem. PLV PN:2089 30,19 S
+  Beispielbank AG
+  0008 DEPOTPREIS Q2/2026 NETTO 25,37EUR 19% UST. 4,82EUR
+03.07. 03.07. ENTGELT gem. PLV PN:2089 193,18 S
+  0010 VERWALTUNGSENTGELT Q2/2026 NETTO 162,34EUR 19% UST. 30,84EUR
+07.08. 07.08. EFFEKTENGUTSCHRIFT PN:925 224,56 H
+  Beispielbank AG
+  Konto: 1234567 BLZ: 12345678
+  WERTPAPIERABRECHNUNG
+  VERKAUF WKN AAA111 / DE000000AAA1
+  ALPHA GLOBAL FUND A DEPOTNR.: 7654321
+  HANDELSTAG 05.08.2026 MENGE 4,5190
+  KURS 56,9200 KAPST 28,82-
+  SOLZ 1,58- KIST 2,31-
+  AUFTRAGSNR. 99887766
+neuer Kontostand vom 30.09.2026 32,66 S
+Sehr geehrte Kundin, sehr geehrter Kunde,
+Sie haben eine Bankmitteilung erhalten, z. B. einen Kontoauszug, eine Mitteilung oder Dividendenabrechnung. Bitte prüfen
+Sie diese genau.`;
+
+  it("reads the sale, not the depot fees around it or the prose behind it", () => {
+    const s = parseSettlement(STATEMENT)!;
+    expect(s.kind).toBe("sell");
+    expect(s.isin).toBe("DE000000AAA1");
+    expect(s.wkn).toBe("AAA111");
+    expect(s.name).toBe("ALPHA GLOBAL FUND A");
+    expect(s.depotNumber).toBe("7654321");
+    expect(s.executedAt).toBe("2026-08-05");
+    expect(s.quantity).toBe(4.519);
+    expect(s.price).toBe(56.92);
+    expect(s.tax).toBeCloseTo(32.71, 2);
+    expect(s.fees).toBeNull();
+    expect(s.net).toBe(224.56);
+    expect(isUsableSettlement(s)).toBe(true);
+  });
+
+  it("cuts the block at the booking, and a repeated label with an amount does not end it", () => {
+    const block = settlementBlock(STATEMENT)!;
+    expect(block).toContain("EFFEKTENGUTSCHRIFT");
+    expect(block).not.toContain("VERWALTUNGSENTGELT");
+    const dividend = `Beispielbank AG
+Dividendengutschrift
+Alpha Industries AG ISIN DE000000AAA1
+Stück 60
+Dividendengutschrift 120,00 EUR
+Zahlbarkeitstag 12.05.2026
+Zu Ihren Gunsten 91,63 EUR`;
+    const d = parseSettlement(dividend)!;
+    expect(d.kind).toBe("dividend");
+    expect(d.gross).toBe(120);
+    expect(d.net).toBe(91.63);
   });
 });

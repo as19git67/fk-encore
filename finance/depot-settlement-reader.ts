@@ -22,6 +22,7 @@ import { financeDocumentSettlementLlm } from "../db/schema";
 import { extractIsin, extractWkn } from "./depot-derivation";
 import {
   inspectSettlement,
+  settlementBlock,
   type SettlementInspection,
 } from "./depot-settlement-parser";
 import {
@@ -131,7 +132,9 @@ export async function readSettlement(
       llmStatus = "cached";
     } else if (mode === "allow" && looksLikeSecuritiesPaper(text)) {
       try {
-        const raw = await extractSettlementValues(text);
+        // An account statement carries the settlement as one booking among
+        // others: the model reads that block, not the fee lines around it.
+        const raw = await extractSettlementValues(settlementBlock(text) ?? text);
         // Store what the model said, so it is asked once.
         await db
           .insert(financeDocumentSettlementLlm)
