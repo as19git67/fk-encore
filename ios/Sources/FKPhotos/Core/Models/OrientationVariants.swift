@@ -9,22 +9,19 @@ import Foundation
 // and keeps the other one a tap — or a turn of the device — away. Nothing is
 // hidden: the rules here only decide what is on screen right now.
 
-/// Portrait, landscape or square, as the server derives it from the stored
-/// pixel dimensions. Absent on a photo while the dimensions are unknown.
-enum PhotoOrientation: String, Codable, Sendable, Equatable {
-    case portrait
-    case landscape
-    case square
-
+extension PhotoOrientation {
     /// Whether a photo of this shape fits the screen as it is held. A square
-    /// fits either way.
+    /// fits either way; a photo of unknown shape is not told otherwise.
     func fits(_ screen: ScreenOrientation) -> Bool {
         switch (self, screen) {
-        case (.square, _): return true
+        case (.square, _), (.unknown, _): return true
         case (.portrait, .portrait), (.landscape, .landscape): return true
         default: return false
         }
     }
+
+    /// Portrait or landscape: the shapes that can have another side.
+    var isSided: Bool { self == .portrait || self == .landscape }
 }
 
 /// The two sides of a format group: how many visible members each has and
@@ -104,8 +101,7 @@ enum OrientationVariantRules {
         pinned: Bool
     ) -> Bool {
         if pinned { return false }
-        guard let shown, let counterpart else { return false }
-        if shown == .square || counterpart == .square { return false }
+        guard let shown, let counterpart, shown.isSided, counterpart.isSided else { return false }
         return !shown.fits(screen) && counterpart.fits(screen)
     }
 
