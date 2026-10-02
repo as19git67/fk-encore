@@ -28,6 +28,7 @@ import db from "../db/database";
 import {
   documents,
   financeAccount,
+  financeDepotDocumentIgnore,
   financeAccountAccess,
   financeAccountHolding,
   financeAccountType,
@@ -91,6 +92,8 @@ export interface EnrichResult {
   llm_status: LlmStatus | null;
   /** Rules and model disagreed and the booking's net decided between them. */
   checked_against_booking: boolean;
+  /** The user marked the document "ignore for depots". */
+  ignored: boolean;
 }
 
 export interface EnrichOptions {
@@ -108,6 +111,12 @@ export interface EnrichOptions {
    * Defaults to "cache-only" for a dry run and "allow" otherwise.
    */
   llm?: LlmMode;
+  /**
+   * Read documents the user marked "ignore for depots" as well (the review
+   * page with "show ignored" on). Never combined with writing: an ignored
+   * document is only ever looked at.
+   */
+  includeIgnored?: boolean;
 }
 
 export interface EnrichStats {
@@ -399,6 +408,7 @@ export async function enrichDocument(
     date_source: null,
     llm_status: null,
     checked_against_booking: false,
+    ignored: false,
   };
 
   const [doc] = await db
@@ -413,6 +423,12 @@ export async function enrichDocument(
     .where(eq(documents.id, documentId))
     .limit(1);
   if (!doc || doc.status !== "ready") return result;
+
+  result.ignored = await isIgnoredForDepots(documentId);
+  if (result.ignored && !(options.includeIgnored && dryRun)) {
+    result.detail = "ignored";
+    return result;
+  }
 
   const reading = await readSettlement(
     documentId,
@@ -660,6 +676,9 @@ export async function enrichPendingDocuments(
   const linked = db
     .select({ id: financeDepotTransactionDocument.document_id })
     .from(financeDepotTransactionDocument);
+  const ignored = db
+    .select({ id: financeDepotDocumentIgnore.document_id })
+    .from(financeDepotDocumentIgnore);
 
   const pageSize = Math.max(1, Math.min(limit, 1000));
   const conditions = [
@@ -669,6 +688,7 @@ export async function enrichPendingDocuments(
     sql`NOT (${documents.extracted_text} ~* ${INSURANCE_ONLY_PATTERN} AND ${documents.extracted_text} !~* ${STRONG_PATTERN})`,
     notInArray(documents.id, linked),
   ];
+  if (!(options.includeIgnored && options.dryRun)) conditions.push(notInArray(documents.id, ignored));
   if (page.before != null) conditions.push(sql`${documents.id} < ${page.before}`);
 
   // One more than the page: tells whether there is a next page without a count.
@@ -731,4 +751,26 @@ export async function documentIdsByDepotTransaction(
     out.set(r.depot_transaction_id, list);
   }
   return out;
+}
+
+/** True when the user marked the document "ignore for depots". */
+export async function isIgnoredForDepots(documentId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ id: financeDepotDocumentIgnore.document_id })
+    .from(financeDepotDocumentIgnore)
+    .where(eq(financeDepotDocumentIgnore.document_id, documentId))
+    .limit(1);
+  return row !== undefined;
+}
+
+/** Mark or unmark a document as irrelevant to the depots. Idempotent. */
+export async function setIgnoredForDepots(documentId: number, ignored: boolean, userId: number): Promise<void> {
+  if (ignored) {
+    await db
+      .insert(financeDepotDocumentIgnore)
+      .values({ document_id: documentId, ignored_by: userId })
+      .onConflictDoNothing();
+  } else {
+    await db.delete(financeDepotDocumentIgnore).where(eq(financeDepotDocumentIgnore.document_id, documentId));
+  }
 }

@@ -36,6 +36,7 @@ import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import {
   documents,
+  financeDepotDocumentIgnore,
   financeDepotTransactionDocument,
   financeAccount,
   financeAccountAccess,
@@ -53,6 +54,7 @@ import {
   documentIdsByDepotTransaction,
   enrichDocument,
   enrichPendingDocuments,
+  setIgnoredForDepots,
   type EnrichResult,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
@@ -1501,6 +1503,8 @@ export interface ReviewConflict {
   executed_at: string;
   statement_net: string | null;
   transaction_net: string | null;
+  /** Marked "ignore for depots" (listed only with `ignored=true`). */
+  ignored: boolean;
 }
 
 export interface ReviewDocument {
@@ -1511,6 +1515,8 @@ export interface ReviewDocument {
   isin: string | null;
   wkn: string | null;
   depot_number: string | null;
+  /** Marked "ignore for depots" (listed only with `ignored=true`). */
+  ignored: boolean;
 }
 
 export interface ReviewHoldingGap extends HoldingGap {
@@ -1522,6 +1528,8 @@ interface ReviewParams {
   accounts?: string;
   /** Include closed depots when no `accounts` are given. */
   closed?: boolean;
+  /** List documents marked "ignore for depots" too, each in the group it would fall into. */
+  ignored?: boolean;
 }
 
 interface ReviewResponse {
@@ -1531,6 +1539,10 @@ interface ReviewResponse {
   unverified_documents: ReviewDocument[];
   holding_gaps: ReviewHoldingGap[];
   unverifiable_changes: number;
+  /** Ignored documents that fall into none of the groups (only with `ignored=true`). */
+  ignored_other: ReviewDocument[];
+  /** How many documents the caller may see are marked "ignore for depots". */
+  ignored_count: number;
 }
 
 export const getPortfolioReview = api(
@@ -1540,18 +1552,37 @@ export const getPortfolioReview = api(
     path: "/finance/portfolio/review",
     auth: true,
   },
-  async ({ accounts, closed }: ReviewParams): Promise<ReviewResponse> => {
+  async ({ accounts, closed, ignored }: ReviewParams): Promise<ReviewResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
     const depots = scopeDepots(await visibleDepots(auth, null), parseAccountIds(accounts), closed === true);
     const ids = depots.map((d) => d.id);
+    const mayShow = (userId: number) => hasAdmin(auth) || userId === Number(auth.userID);
+
+    // Ignored documents the caller may see: counted always, listed on request.
+    const ignoredRows = (
+      await db
+        .select({ id: documents.id, title: documents.title, user_id: documents.user_id, doc_date: documents.doc_date })
+        .from(financeDepotDocumentIgnore)
+        .innerJoin(documents, eq(documents.id, financeDepotDocumentIgnore.document_id))
+        .orderBy(desc(documents.id))
+    ).filter((d) => mayShow(d.user_id));
+
     if (ids.length === 0) {
-      return { conflicts: [], unmatched_documents: [], unverified_documents: [], holding_gaps: [], unverifiable_changes: 0 };
+      return {
+        conflicts: [],
+        unmatched_documents: [],
+        unverified_documents: [],
+        holding_gaps: [],
+        unverifiable_changes: 0,
+        ignored_other: [],
+        ignored_count: ignoredRows.length,
+      };
     }
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
 
     const [dry, recon] = await Promise.all([
-      enrichPendingDocuments(ids, 200, { dryRun: true }),
+      enrichPendingDocuments(ids, 200, { dryRun: true, includeIgnored: ignored === true }),
       reconcileHoldings(ids),
     ]);
 
@@ -1565,7 +1596,6 @@ export const getPortfolioReview = api(
           .from(documents)
           .where(inArray(documents.id, docIds))
       : [];
-    const mayShow = (userId: number) => hasAdmin(auth) || userId === Number(auth.userID);
     const docById = new Map(docRows.filter((d) => mayShow(d.user_id)).map((d) => [d.id, d]));
 
     const conflictTxIds = relevant
@@ -1601,6 +1631,7 @@ export const getPortfolioReview = api(
           isin: r.isin,
           wkn: r.wkn,
           depot_number: r.depot_number,
+          ignored: r.ignored,
         });
         continue;
       }
@@ -1618,8 +1649,25 @@ export const getPortfolioReview = api(
         executed_at: dateOnly(tx.executed_at),
         statement_net: r.statement_net,
         transaction_net: r.transaction_net,
+        ignored: r.ignored,
       });
     }
+
+    const listed = new Set(relevant.map((r) => r.document_id));
+    const ignoredOther: ReviewDocument[] =
+      ignored === true
+        ? ignoredRows
+            .filter((d) => !listed.has(d.id))
+            .map((d) => ({
+              document_id: d.id,
+              document_title: d.title,
+              doc_date: d.doc_date,
+              isin: null,
+              wkn: null,
+              depot_number: null,
+              ignored: true,
+            }))
+        : [];
 
     // Names for the gap rows from the latest snapshot that carries one.
     const names = new Map<string, string | null>();
@@ -1649,7 +1697,67 @@ export const getPortfolioReview = api(
         name: names.get(g.position_key) ?? null,
       })),
       unverifiable_changes: recon.unverifiable,
+      ignored_other: ignoredOther,
+      ignored_count: ignoredRows.length,
     };
+  },
+);
+
+interface IgnoreDocumentParams {
+  documentId: number;
+}
+
+interface IgnoreDocumentResponse {
+  document_id: number;
+  ignored: boolean;
+}
+
+/** The caller may change a document's depot relevance: their own (or any, as admin), with a writable depot. */
+async function assertMayMarkDocument(documentId: number): Promise<number> {
+  const auth = getAuthData()!;
+  requirePermission(auth, "finance.view");
+  const depots = await writableDepots(auth, null);
+  if (depots.length === 0) {
+    throw APIError.permissionDenied("write access to at least one depot is required");
+  }
+  const [doc] = await db
+    .select({ user_id: documents.user_id })
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .limit(1);
+  if (!doc || (!hasAdmin(auth) && doc.user_id !== Number(auth.userID))) {
+    throw APIError.notFound(`document ${documentId} not found`);
+  }
+  return Number(auth.userID);
+}
+
+/** Mark a document "ignore for depots": never read in, never listed for review. */
+export const ignoreSettlementDocument = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/portfolio/documents/:documentId/ignore",
+    auth: true,
+  },
+  async ({ documentId }: IgnoreDocumentParams): Promise<IgnoreDocumentResponse> => {
+    const userId = await assertMayMarkDocument(documentId);
+    await setIgnoredForDepots(documentId, true, userId);
+    return { document_id: documentId, ignored: true };
+  },
+);
+
+/** Take a document back: read in and reviewed like any other again. */
+export const unignoreSettlementDocument = api(
+  {
+    expose: true,
+    method: "DELETE",
+    path: "/finance/portfolio/documents/:documentId/ignore",
+    auth: true,
+  },
+  async ({ documentId }: IgnoreDocumentParams): Promise<IgnoreDocumentResponse> => {
+    const userId = await assertMayMarkDocument(documentId);
+    await setIgnoredForDepots(documentId, false, userId);
+    return { document_id: documentId, ignored: false };
   },
 );
 

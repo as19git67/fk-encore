@@ -222,23 +222,23 @@ describe("parseSettlement — a settlement booked inside an account statement", 
   const STATEMENT = `Kontoauszug
 EUR-Konto Beispielbank AG
 Depotnummer 7654321
-alter Kontostand vom 30.06.2026 33,85 S
-03.07. 03.07. ENTGELT gem. PLV PN:2089 30,19 S
+alter Kontostand vom 30.06.2026 12,00 S
+03.07. 03.07. ENTGELT PN:1000 11,90 S
   Beispielbank AG
-  0008 DEPOTPREIS Q2/2026 NETTO 25,37EUR 19% UST. 4,82EUR
-03.07. 03.07. ENTGELT gem. PLV PN:2089 193,18 S
-  0010 VERWALTUNGSENTGELT Q2/2026 NETTO 162,34EUR 19% UST. 30,84EUR
-07.08. 07.08. EFFEKTENGUTSCHRIFT PN:925 224,56 H
+  DEPOTPREIS Q2/2026 NETTO 10,00EUR 19% UST. 1,90EUR
+03.07. 03.07. ENTGELT PN:1000 59,50 S
+  VERWALTUNGSENTGELT Q2/2026 NETTO 50,00EUR 19% UST. 9,50EUR
+07.08. 07.08. EFFEKTENGUTSCHRIFT PN:100 450,00 H
   Beispielbank AG
   Konto: 1234567 BLZ: 12345678
   WERTPAPIERABRECHNUNG
   VERKAUF WKN AAA111 / DE000000AAA1
   ALPHA GLOBAL FUND A DEPOTNR.: 7654321
-  HANDELSTAG 05.08.2026 MENGE 4,5190
-  KURS 56,9200 KAPST 28,82-
-  SOLZ 1,58- KIST 2,31-
+  HANDELSTAG 05.08.2026 MENGE 10,0000
+  KURS 50,0000 KAPST 40,00-
+  SOLZ 2,20- KIST 7,80-
   AUFTRAGSNR. 99887766
-neuer Kontostand vom 30.09.2026 32,66 S
+neuer Kontostand vom 30.09.2026 366,60 H
 Sehr geehrte Kundin, sehr geehrter Kunde,
 Sie haben eine Bankmitteilung erhalten, z. B. einen Kontoauszug, eine Mitteilung oder Dividendenabrechnung. Bitte prüfen
 Sie diese genau.`;
@@ -251,11 +251,11 @@ Sie diese genau.`;
     expect(s.name).toBe("ALPHA GLOBAL FUND A");
     expect(s.depotNumber).toBe("7654321");
     expect(s.executedAt).toBe("2026-08-05");
-    expect(s.quantity).toBe(4.519);
-    expect(s.price).toBe(56.92);
-    expect(s.tax).toBeCloseTo(32.71, 2);
+    expect(s.quantity).toBe(10);
+    expect(s.price).toBe(50);
+    expect(s.tax).toBeCloseTo(50, 2);
     expect(s.fees).toBeNull();
-    expect(s.net).toBe(224.56);
+    expect(s.net).toBe(450);
     expect(isUsableSettlement(s)).toBe(true);
   });
 
@@ -281,16 +281,16 @@ describe("parseSettlement — a cost disclosure is not a settlement", () => {
   // A broker's MiFID II cost information before an order: security,
   // quantity, price, fees — and a sentence promising the settlement.
   const COST_INFO = `Beispielbank AG
-Kosteninformation zum Wertpapiergeschäft 06.08.2026 - 16:06 Uhr
+Kosteninformation zum Wertpapiergeschäft 14.03.2026 - 10:00 Uhr
 Nach der EU-Richtlinie sind wir verpflichtet, Ihnen die nachfolgende Kosteninformation zur Verfügung zu stellen. Hierfür erhalten Sie eine gesonderte Wertpapierabrechnung.
 Alpha Industries AG Stammaktien
 WKN: AAA111
-Kauf: 10 Stück zu 79,58 EUR
-Kurswert: 795,80 EUR
-Von den unten aufgelisteten Kosten werden Ihnen über die Wertpapierabrechnung voraussichtlich folgende Orderkosten abgerechnet 12,40 EUR
-Kosten des Wertpapierkaufes 14,00 EUR
-Börsenplatzabhängiges Entgelt 2,50 EUR
-Orderprovision 9,90 EUR`;
+Kauf: 10 Stück zu 40,00 EUR
+Kurswert: 400,00 EUR
+Von den unten aufgelisteten Kosten werden Ihnen über die Wertpapierabrechnung voraussichtlich folgende Orderkosten abgerechnet 7,50 EUR
+Kosten des Wertpapierkaufes 9,00 EUR
+Börsenplatzabhängiges Entgelt 1,50 EUR
+Orderprovision 6,00 EUR`;
 
   it("is rejected although its prose names a Wertpapierabrechnung", () => {
     const i = inspectSettlement(COST_INFO)!;
@@ -310,5 +310,59 @@ Ausmachender Betrag 1.004,90 EUR
 Kosteninformation: Ihre Kosten für diese Order betrugen 4,90 EUR.`;
     expect(inspectSettlement(text)!.costInfo).toBe(false);
     expect(parseSettlement(text)!.kind).toBe("buy");
+  });
+});
+
+describe("parseSettlement — a settlement with its tax statement appended", () => {
+  // A broker's sale settlement whose second part is the tax statement:
+  // the first "Zu Ihren Gunsten" is before taxes, the amount booked is after.
+  const TEXT = `Depotnr.: 7654321 00
+GESCHÄFTSABRECHNUNG VOM 14.07.2026
+Wertpapierverkauf
+Geschäftstag : 14.07.2026 Ausführungsplatz : BEISPIELBÖRSE
+Wertpapier-Bezeichnung WPKNR/ISIN
+Alpha Industries AG AAA111
+Registered Shares o.N. DE000000AAA1
+Nennwert Zum Kurs von
+St. 30 EUR 100,00
+Kurswert : EUR 3.000,00
+--------------------------------------------------------------------------------
+Eigene Entgelte
+Provision : EUR 4,00-
+Börsenplatzabhäng. Entgelt : EUR 1,00-
+Summe Entgelte : EUR 5,00-
+--------------------------------------------------------------------------------
+IBAN Valuta Zu Ihren Gunsten vor Steuern
+DE00 0000 0000 0000 0000 00 EUR 16.07.2026 EUR 2.995,00
+Informationen zur steuerlichen Behandlung dieses Geschäftsvorgangs und den auf
+Ihrem Konto gebuchten Endbetrag finden Sie auf der separaten Steuermitteilung.
+Steuerliche Behandlung: Wertpapierverkauf Nr. 1234567 vom 14.07.2026
+Stk. 30 ALPHA INDUSTRIES AG , WKN / ISIN: AAA111 / DE000000AAA1
+Zu Ihren Gunsten vor Steuern: EUR 2.995,00
+Steuerbemessungsgrundlage (1) EUR 500,00
+Kapitalertragsteuer EUR -125,00
+Solidaritätszuschlag EUR -6,87
+Kirchensteuer EUR 0,00 _____________________
+abgeführte Steuern EUR -131,87 _____________________
+Zu Ihren Gunsten nach Steuern: EUR 2.863,13
+Die Gutschrift erfolgt mit Valuta 16.07.2026 auf Konto EUR
+einbehaltene
+KapitalertragsteuerSolidaritätszuschlag
+2026
+11,11
+22,22`;
+
+  it("reads the net after taxes, the printed totals and the trade date", () => {
+    const s = parseSettlement(TEXT)!;
+    expect(s.kind).toBe("sell");
+    expect(s.name).toBe("Alpha Industries AG");
+    expect(s.quantity).toBe(30);
+    expect(s.gross).toBe(3000);
+    // "Summe Entgelte" is the total, not a third fee line.
+    expect(s.fees).toBe(5);
+    // "abgeführte Steuern", not every tax word in the tables below it.
+    expect(s.tax).toBe(131.87);
+    expect(s.net).toBe(2863.13);
+    expect(s.executedAt).toBe("2026-07-14");
   });
 });
