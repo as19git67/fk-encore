@@ -4,8 +4,10 @@ import UIKit
 /// Arranging a handful of selected photos into a collage.
 ///
 /// The web's `CollageDialog` (#1020): pick one of the three variants for this
-/// many photos, see the result, and reorder by tapping two cells. The layout rules are in `CollageLayouts`, shared with
-/// the web so a collage of the same photos comes out the same shape.
+/// many photos, see the result, and rearrange by dragging one photo onto
+/// another — as on the web — or by tapping two cells in turn. The layout
+/// rules are in `CollageLayouts`, shared with the web so a collage of the
+/// same photos comes out the same shape.
 ///
 /// A caption can be laid over the whole canvas (#1020, stage C): dragged into
 /// place, in one of three sizes, in white, black or a colour taken from the
@@ -60,6 +62,9 @@ struct CollageView: View {
                 }
             }
             .task { await loadPalette() }
+            // Dragging a photo downward must move the photo, not pull the
+            // sheet away with the arrangement in it; "Fertig" closes.
+            .interactiveDismissDisabled()
             .navigationTitle("Collage")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -89,6 +94,7 @@ struct CollageView: View {
                 overlays: overlays,
                 editingOverlay: editing,
                 onTapCell: handleTap,
+                onSwapCells: swapCells,
                 onSelectOverlay: { editing = $0 },
                 onMoveOverlay: move
             )
@@ -103,8 +109,10 @@ struct CollageView: View {
             .padding(.horizontal)
 
             Text(swapAnchor == nil
-                 ? "Tippe zwei Felder an, um die Fotos zu tauschen."
+                 ? "Zum Tauschen ein Foto auf ein anderes ziehen – oder zwei nacheinander antippen."
                  : "Tippe das Feld an, mit dem getauscht werden soll.")
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -333,6 +341,13 @@ struct CollageView: View {
         }
         swapAnchor = nil
     }
+
+    /// A photo dragged onto another cell trades places with it. A half-made
+    /// tap swap is dropped, since the drag has already said where things go.
+    private func swapCells(_ from: Int, _ to: Int) {
+        order = CollageLayouts.swap(order, from, to)
+        swapAnchor = nil
+    }
 }
 
 /// The collage itself: the canvas at its layout's aspect, each cell filled
@@ -344,12 +359,21 @@ private struct CollageCanvas: View {
     let overlays: [CollageText.Overlay]
     let editingOverlay: CollageText.Overlay.ID?
     let onTapCell: (Int) -> Void
+    let onSwapCells: (Int, Int) -> Void
     let onSelectOverlay: (CollageText.Overlay.ID?) -> Void
     let onMoveOverlay: (CollageText.Overlay.ID, Double, Double) -> Void
 
     /// Where a caption was when its drag began, so the gesture applies to a
     /// fixed base rather than compounding its own output.
     @State private var dragStart: (id: CollageText.Overlay.ID, x: Double, y: Double)?
+
+    /// A photo being dragged to another cell: where it came from, which cell
+    /// is under the finger, and where the finger is.
+    @State private var photoDragFrom: Int?
+    @State private var photoDragOver: Int?
+    @State private var photoDragLocation: CGPoint?
+
+    private static let space = "collageCanvas"
 
     var body: some View {
         GeometryReader { geo in
@@ -363,10 +387,56 @@ private struct CollageCanvas: View {
                 ForEach(overlays) { overlay in
                     caption(overlay, canvas: geo.size)
                 }
+                dragGhost
             }
+            .coordinateSpace(name: Self.space)
         }
         .aspectRatio(layout.aspect, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// The dragged photo, small, under the finger — the web's drag ghost.
+    @ViewBuilder
+    private var dragGhost: some View {
+        if let from = photoDragFrom, let location = photoDragLocation,
+           let photo = photos[safe: from] {
+            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+                .opacity(0.9)
+                .position(location)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Drag a photo onto another cell to swap the two, as on the web. The
+    /// short minimum distance leaves a plain tap to `onTapCell`.
+    private func photoDrag(from index: Int, canvas: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+                if photoDragFrom == nil { photoDragFrom = index }
+                photoDragLocation = value.location
+                photoDragOver = cellIndex(at: value.location, canvas: canvas)
+            }
+            .onEnded { value in
+                if let from = photoDragFrom,
+                   let to = cellIndex(at: value.location, canvas: canvas),
+                   to != from {
+                    onSwapCells(from, to)
+                }
+                photoDragFrom = nil
+                photoDragOver = nil
+                photoDragLocation = nil
+            }
+    }
+
+    private func cellIndex(at point: CGPoint, canvas: CGSize) -> Int? {
+        guard canvas.width > 0, canvas.height > 0 else { return nil }
+        return CollageLayouts.cellIndex(
+            at: CGPoint(x: point.x / canvas.width, y: point.y / canvas.height),
+            in: layout
+        )
     }
 
     private func caption(_ overlay: CollageText.Overlay, canvas: CGSize) -> some View {
@@ -406,17 +476,20 @@ private struct CollageCanvas: View {
     ) -> some View {
         let width = cell.width * canvas.width
         let height = cell.height * canvas.height
+        let isDropTarget = photoDragOver == index && photoDragFrom != index
         return PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
             .frame(width: width, height: height)
             .clipped()
+            .opacity(photoDragFrom == index ? 0.4 : 1)
             .overlay {
-                if highlighted == index {
+                if highlighted == index || isDropTarget {
                     Rectangle()
                         .strokeBorder(Color.accentColor, lineWidth: 3)
                 }
             }
             .contentShape(Rectangle())
             .onTapGesture { onTapCell(index) }
+            .gesture(photoDrag(from: index, canvas: canvas))
             .offset(x: cell.x * canvas.width, y: cell.y * canvas.height)
     }
 }

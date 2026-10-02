@@ -308,7 +308,9 @@ struct LibraryAlbumDetailView: View {
                 .padding(.horizontal, 2)
                 .coordinateSpace(name: "libraryGrid")
                 .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-                .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
+                .dragToSelect(isActive: isSelecting, in: "libraryGrid") { point in
+                    paintSelection(at: point)
+                }
             }
         }
     }
@@ -318,20 +320,11 @@ struct LibraryAlbumDetailView: View {
     /// Swipe across the grid to select a run of photos, matching the album
     /// detail view's gesture. Additive only: dragging never *deselects*, so a
     /// wobbly finger can't silently undo part of the selection.
-    /// Gated behind a hold so the grid still scrolls while selecting — see
-    /// `PhotoGridView.dragSelectGesture` for why.
-    private var dragSelectGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(
-                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("libraryGrid"))
-            )
-            .onChanged { value in
-                guard case .second(_, let drag?) = value else { return }
-                for (index, frame) in itemFrames where frame.contains(drag.location) {
-                    guard assets.indices.contains(index) else { continue }
-                    selectedAssetIds.insert(assets[index].localIdentifier)
-                }
-            }
+    private func paintSelection(at point: CGPoint) {
+        for (index, frame) in itemFrames where frame.contains(point) {
+            guard assets.indices.contains(index) else { continue }
+            selectedAssetIds.insert(assets[index].localIdentifier)
+        }
     }
 
     private func toggleSelection(_ localIdentifier: String) {

@@ -305,4 +305,34 @@ final class CollageLayoutsTests: XCTestCase {
         _ = CollageLayouts.swap(order, 0, 2)
         XCTAssertEqual(order, [0, 1, 2])
     }
+
+    // MARK: - Where a dragged photo lands
+
+    func testTheCellUnderAPointIsFoundInAnUnevenLayout() throws {
+        // "Held oben": one wide cell on top (60 %), two below.
+        let layout = try XCTUnwrap(CollageLayouts.layouts(for: 3).first { $0.id == "hero-top" })
+        XCTAssertEqual(CollageLayouts.cellIndex(at: CGPoint(x: 0.9, y: 0.1), in: layout), 0)
+        XCTAssertEqual(CollageLayouts.cellIndex(at: CGPoint(x: 0.2, y: 0.8), in: layout), 1)
+        XCTAssertEqual(CollageLayouts.cellIndex(at: CGPoint(x: 0.7, y: 0.8), in: layout), 2)
+    }
+
+    func testAPointOffTheCanvasIsInNoCell() throws {
+        let layout = try XCTUnwrap(CollageLayouts.layouts(for: 4).first)
+        XCTAssertNil(CollageLayouts.cellIndex(at: CGPoint(x: -0.1, y: 0.5), in: layout))
+        XCTAssertNil(CollageLayouts.cellIndex(at: CGPoint(x: 0.5, y: 1.2), in: layout))
+    }
+
+    func testEveryCellOwnsItsOwnCentre() {
+        for count in 2...9 {
+            for layout in CollageLayouts.layouts(for: count) {
+                for (index, cell) in layout.cells.enumerated() {
+                    let centre = CGPoint(x: cell.x + cell.width / 2, y: cell.y + cell.height / 2)
+                    XCTAssertEqual(
+                        CollageLayouts.cellIndex(at: centre, in: layout), index,
+                        "\(count) photos, \(layout.id), cell \(index)"
+                    )
+                }
+            }
+        }
+    }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Drag-to-select support
 
@@ -15,6 +16,50 @@ extension View {
             Color.clear.preference(key: PhotoFramePreference.self,
                                    value: [id: geo.frame(in: .named(space))])
         })
+    }
+
+    /// Paint a selection by holding a tile for a moment, then dragging
+    /// across others. `onPoint` gets each finger position in `space`.
+    func dragToSelect(
+        isActive: Bool, in space: String, onPoint: @escaping (CGPoint) -> Void
+    ) -> some View {
+        gesture(DragToSelectRecognizer(isActive: isActive, space: space, onPoint: onPoint))
+    }
+}
+
+/// The hold-then-drag behind `dragToSelect`, as a UIKit recognizer.
+///
+/// The grids live in a `ScrollView`. A SwiftUI gesture with a drag in it
+/// kept that scroll view from panning on device — even sequenced behind a
+/// `LongPressGesture` (#1209) — so selection mode froze the grid.
+/// `UILongPressGestureRecognizer` takes part in UIKit's own gesture
+/// resolution instead: a swipe moves past `allowableMovement` before the
+/// hold completes, the recognizer fails and the scroll view pans; holding
+/// still first lets it begin, after which the scroll view stays put and
+/// the finger paints. Photos behaves the same way.
+struct DragToSelectRecognizer: UIGestureRecognizerRepresentable {
+    let isActive: Bool
+    let space: String
+    let onPoint: (CGPoint) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = 0.25
+        recognizer.isEnabled = isActive
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        recognizer.isEnabled = isActive
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        switch recognizer.state {
+        case .began, .changed:
+            onPoint(context.converter.location(in: .named(space)))
+        default:
+            break
+        }
     }
 }
 

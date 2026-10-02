@@ -248,6 +248,16 @@ enum CollageLayouts {
 
     // MARK: - Rearranging
 
+    /// The cell under a point given as fractions of the canvas, or nil when
+    /// the point is outside every cell — where a dragged photo was let go.
+    static func cellIndex(at point: CGPoint, in layout: Layout) -> Int? {
+        let x = Double(point.x)
+        let y = Double(point.y)
+        return layout.cells.firstIndex { cell in
+            x >= cell.x && x < cell.x + cell.width && y >= cell.y && y < cell.y + cell.height
+        }
+    }
+
     /// Swap two positions in the fill order.
     ///
     /// Out-of-range or identical indices leave the order untouched rather than

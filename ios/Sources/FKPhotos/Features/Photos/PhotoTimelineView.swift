@@ -159,19 +159,6 @@ struct PhotoTimelineView: View {
         }
     }
 
-    /// Drag-to-select, gated behind a hold so the timeline still scrolls
-    /// while selecting — see `PhotoGridView.dragSelectGesture` for why.
-    private var dragSelectGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(
-                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("timelineGrid"))
-            )
-            .onChanged { value in
-                guard case .second(_, let drag?) = value else { return }
-                selection.selectItems(at: drag.location, frames: itemFrames)
-            }
-    }
-
     @ViewBuilder
     private var timelineContent: some View {
         if isLoading && years.isEmpty {
@@ -259,7 +246,9 @@ struct PhotoTimelineView: View {
             .padding(.horizontal, 2)
             .coordinateSpace(name: "timelineGrid")
             .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-            .simultaneousGesture(selection.isSelecting ? dragSelectGesture : nil)
+            .dragToSelect(isActive: selection.isSelecting, in: "timelineGrid") { point in
+                selection.selectItems(at: point, frames: itemFrames)
+            }
         }
     }
 

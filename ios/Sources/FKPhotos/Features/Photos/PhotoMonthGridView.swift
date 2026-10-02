@@ -108,7 +108,11 @@ struct PhotoMonthGridView: View {
                     .padding(.horizontal, 2)
                     .coordinateSpace(name: "monthGrid")
                     .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-                    .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
+                    .dragToSelect(isActive: isSelecting, in: "monthGrid") { point in
+                        for (id, frame) in itemFrames where frame.contains(point) {
+                            selectedIds.insert(id)
+                        }
+                    }
                 }
             }
             .scrollsBack(to: $scrollTarget, in: proxy)
@@ -206,21 +210,6 @@ struct PhotoMonthGridView: View {
             selectedIds = []
             addToAlbum.resultMessage = nil
         }
-    }
-
-    /// Drag-to-select, gated behind a hold so the grid still scrolls while
-    /// selecting — see `PhotoGridView.dragSelectGesture` for why.
-    private var dragSelectGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(
-                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("monthGrid"))
-            )
-            .onChanged { value in
-                guard case .second(_, let drag?) = value else { return }
-                for (id, frame) in itemFrames where frame.contains(drag.location) {
-                    selectedIds.insert(id)
-                }
-            }
     }
 
     private func toggleSelection(_ id: Int) {

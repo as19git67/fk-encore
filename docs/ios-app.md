@@ -532,8 +532,11 @@ dokumentiert**:
 
 - **Collage-Ansicht** (`CollageView`), erreichbar über das Raster-Symbol in
   der Auswahl-Leiste der Album-Detailansicht, sobald zwischen 2 und 9 Fotos
-  ausgewählt sind. Drei kuratierte Varianten je Fotoanzahl, Tausch zweier
-  Felder per zwei Tipps.
+  ausgewählt sind. Drei kuratierte Varianten je Fotoanzahl. Zwei Fotos
+  tauschen die Plätze, wenn man eines auf das andere zieht (wie im Web, mit
+  mitlaufendem Vorschaubild und markiertem Zielfeld) oder beide nacheinander
+  antippt. Das Sheet lässt sich dabei nicht per Wischen schließen, damit ein
+  Ziehen nach unten das Foto bewegt statt die Anordnung zu verwerfen.
 - Die Layout-Regeln liegen in `CollageLayouts.swift` — eine Portierung von
   `frontend/src/utils/collageLayouts.ts` mit derselben Tabelle (gleiche IDs,
   Namen, Seitenverhältnisse, Zellen), damit dieselben Fotos auf beiden

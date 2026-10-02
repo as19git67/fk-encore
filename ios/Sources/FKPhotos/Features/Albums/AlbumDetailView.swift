@@ -211,7 +211,11 @@ struct AlbumDetailView: View {
                     .padding(.horizontal, 2)
                     .coordinateSpace(name: "albumGrid")
                     .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-                    .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
+                    .dragToSelect(isActive: isSelecting, in: "albumGrid") { point in
+                        for (id, frame) in itemFrames where frame.contains(point) {
+                            selectedIds.insert(id)
+                        }
+                    }
                 }
             }
             .scrollsBack(to: $scrollTarget, in: proxy)
@@ -571,21 +575,6 @@ struct AlbumDetailView: View {
         } else {
             selectedIds.insert(id)
         }
-    }
-
-    /// Drag-to-select, gated behind a hold so the album grid still scrolls
-    /// while selecting — see `PhotoGridView.dragSelectGesture` for why.
-    private var dragSelectGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(
-                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("albumGrid"))
-            )
-            .onChanged { value in
-                guard case .second(_, let drag?) = value else { return }
-                for (id, frame) in itemFrames where frame.contains(drag.location) {
-                    selectedIds.insert(id)
-                }
-            }
     }
 
     /// Reflects saved album properties locally (title, description, map view)
