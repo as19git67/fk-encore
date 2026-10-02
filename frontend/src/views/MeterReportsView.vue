@@ -24,7 +24,6 @@ import {
   createElectricityTariff,
   updateElectricityTariff,
   deleteElectricityTariff,
-  importElectricityPrices,
   importTariffFile,
   fetchPetrolPrices,
   type TariffImportEntry,
@@ -395,7 +394,6 @@ function fmtPercentTrend(value: number | null) {
 
 const showEnergyHelp = ref(false)
 
-const importingPrices = ref(false)
 const importingTariffFile = ref(false)
 const tariffFileInput = ref<HTMLInputElement | null>(null)
 
@@ -489,20 +487,6 @@ const groupedTariffs = computed(() =>
     ...category,
     items: sortedTariffs.value.filter((tariff) => category.kinds.includes(tariff.kind)),
   })).filter((category) => category.items.length > 0),
-)
-
-const tariffImportKinds: ElectricityTariffKind[] = [
-  'grid_import',
-  'base_price',
-  'feed_in',
-  'self_consumption_value',
-  'pv_investment_net',
-  'pv_investment_vat',
-  'expected_return_rate',
-]
-
-const pricesAlreadyImported = computed(() =>
-  tariffImportKinds.every((kind) => tariffs.value.some((tariff) => tariff.kind === kind)),
 )
 
 function emptyTariffForm(): TariffForm {
@@ -690,25 +674,6 @@ async function handleDeleteTariff(tariff: ElectricityTariff) {
       }
     },
   })
-}
-
-async function handleImportPrices() {
-  if (pricesAlreadyImported.value) return
-  importingPrices.value = true
-  tariffError.value = ''
-  tariffInfo.value = ''
-  try {
-    const res = await importElectricityPrices()
-    tariffInfo.value = res.alreadyImported
-      ? `Strompreise waren bereits importiert; ${res.updated} Einträge aktualisiert.`
-      : `Strompreise importiert: ${res.created} neu, ${res.updated} aktualisiert.`
-    await loadTariffs()
-    await reloadCostReports()
-  } catch (err: any) {
-    tariffError.value = err.message || 'Strompreise konnten nicht importiert werden'
-  } finally {
-    importingPrices.value = false
-  }
 }
 
 /**
@@ -1161,14 +1126,6 @@ onMounted(load)
             PV-Anlagenleistung, Wasserpreis, CO₂-Faktoren.
           </p>
           <div class="tariff-toolbar-actions">
-            <Button
-              :label="pricesAlreadyImported ? 'Importiert' : 'JSON-Grundlage importieren'"
-              icon="pi pi-upload"
-              severity="secondary"
-              :loading="importingPrices"
-              :disabled="pricesAlreadyImported"
-              @click="handleImportPrices"
-            />
             <Button
               label="Benzinpreise abrufen"
               icon="pi pi-cloud-download"

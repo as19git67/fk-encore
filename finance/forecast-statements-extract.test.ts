@@ -197,7 +197,7 @@ describe("computeProposals and applyProposals", () => {
   it("ignores rounding noise and leaves milestone dates alone", () => {
     const p = computeProposals(
       "life_insurance",
-      { ...item, surrenderValue: 77508.0, projectedPayout: 98765.4, maturity: { kind: "milestone", milestoneId: 3 } },
+      { ...item, surrenderValue: 61234.0, projectedPayout: 98765.4, maturity: { kind: "milestone", milestoneId: 3 } },
       values,
     );
     expect(p.map((x) => x.field)).toEqual([]);

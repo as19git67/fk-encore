@@ -1356,13 +1356,13 @@ Betroffen sind auch Inhalte aus Beispieldokumenten, die zur Analyse (z. B. für 
 
 Vor jedem Commit, der neue Test-Fixtures, Seed-Daten oder Beispieltexte einführt: kurz prüfen, ob eine der obigen Kategorien betroffen ist, und ggf. durch synthetische Werte ersetzen.
 
-## GitLab-Zugriff (gitlab.example.com)
+## GitLab-Zugriff (selbstgehostete Instanz)
 
-Das Repo liegt zusätzlich auf einer selbstgehosteten GitLab-Instanz (`group/fk-encore` auf `gitlab.example.com`). Für `git clone`/`push` dorthin per Personal-Access-Token: der Token liegt als Environment-Secret unter dem Namen **`GITLAB_TOKEN`**. Beispiel:
+Das Repo liegt zusätzlich auf einer selbstgehosteten GitLab-Instanz; ihr Hostname steht im Environment-Secret **`GITLAB_HOST`**, der Projektpfad in **`GITLAB_PROJECT`**. Für `git clone`/`push` dorthin per Personal-Access-Token: der Token liegt als Environment-Secret unter dem Namen **`GITLAB_TOKEN`**. Beispiel:
 
 ```bash
-git clone https://oauth2:${GITLAB_TOKEN}@gitlab.example.com/group/fk-encore.git
+git clone https://oauth2:${GITLAB_TOKEN}@${GITLAB_HOST}/${GITLAB_PROJECT}.git
 ```
 
-`gitlab.example.com` muss außerdem in der Netzwerk-Policy der Umgebung freigeschaltet sein, sonst schlägt der Verbindungsaufbau mit 403 fehl.
+Der Host muss außerdem in der Netzwerk-Policy der Umgebung freigeschaltet sein, sonst schlägt der Verbindungsaufbau mit 403 fehl.
 

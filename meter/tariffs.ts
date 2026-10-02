@@ -8,11 +8,9 @@ import { requirePermission } from "../user/auth-handler";
 import {
   createElectricityTariff,
   deleteElectricityTariff,
-  importElectricityPrices,
   importTariffEntries,
   listElectricityTariffs,
   updateElectricityTariff,
-  type ElectricityPriceImportResult,
   type ElectricityTariff,
   type TariffImportEntry,
   type TariffImportResult,
@@ -80,13 +78,5 @@ export const importTariffs = api(
   async (req: ImportTariffsRequest): Promise<TariffImportResult> => {
     const userId = requireUser("meters.manage");
     return await importTariffEntries(userId, req.entries);
-  },
-);
-
-export const importElecPrices = api(
-  { expose: true, method: "POST", path: "/meters/import/electricity-prices", auth: true },
-  async (): Promise<ElectricityPriceImportResult> => {
-    const userId = requireUser("meters.manage");
-    return await importElectricityPrices(userId);
   },
 );

@@ -131,13 +131,13 @@ services:
 volumes:
   fk_pgdata:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/paul/fk-encore_data/pgdata }
+    driver_opts: { type: none, o: bind, device: "${HOME}/fk-encore_data/pgdata" }
   embedding_models:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/paul/fk-encore_data/embedding_models }
+    driver_opts: { type: none, o: bind, device: "${HOME}/fk-encore_data/embedding_models" }
   # Model artifacts for the llm_service (Llama GGUF + sentence-transformers
   # cache). Populate via
   # `docker compose run --rm llm_service /usr/local/bin/download_model.sh`.
   llm_models:
     driver: local
-    driver_opts: { type: none, o: bind, device: /Users/paul/fk-encore_data/llm_models }
+    driver_opts: { type: none, o: bind, device: "${HOME}/fk-encore_data/llm_models" }

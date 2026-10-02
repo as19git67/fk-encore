@@ -14,7 +14,7 @@ FK_ENCORE_URL="http://fk-encore.lan:4000"
 # FK_SCAN_TOKEN_FILE="/etc/fk-scan/refresh_token"
 
 # Where sane-scan-pdf's `scan` wrapper lives.
-# FK_SCAN_BIN="/home/paul/sane-scan-pdf/scan"
+# FK_SCAN_BIN="${HOME}/sane-scan-pdf/scan"
 
 # Arguments passed to the scan wrapper. No OCR — fk-encore does that.
 # FK_SCAN_ARGS="-d -x fujitsu -s A4 -r 300 -v -m Lineart --autorotate --skip-empty-pages"

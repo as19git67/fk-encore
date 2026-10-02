@@ -173,7 +173,7 @@ describe("extractWkn", () => {
   });
 
   it("handles the WKN/ISIN combined form", () => {
-    // Real MLP booking format: "WKN 987654 / LU0000098763"
+    // A broker's booking format: "WKN 987654 / LU0000098763"
     expect(extractWkn("WERTPAPIER WKN 987654 / LU0000098763 BEISPIEL GLOBAL"))
       .toBe("987654");
   });
@@ -675,7 +675,7 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     const bcId = await insertBankcontact();
     const giro = await insertAccount(bcId, "giro", "GIRO-1");
     const depot = await insertAccount(bcId, "depot", "DEPOT-1");
-    // Real-world MLP holdings: ISIN column blank, only WKN populated.
+    // Some brokers' holdings: ISIN column blank, only WKN populated.
     await insertHolding({
       accountId: depot,
       asOf: "2026-04-21",
@@ -683,7 +683,7 @@ describe("deriveDepotTransactionsForBankcontact", () => {
       wkn: "987654",
       name: "BEISPIEL GLOBAL FONDS A",
     });
-    // Real MLP booking text: WKN before "/", ISIN after.
+    // The broker's booking text: WKN before "/", ISIN after.
     const giroTxId = await insertTx({
       accountId: giro,
       bookingDate: "2026-04-21",

@@ -31,7 +31,7 @@ Button wieder aktiv.
 
 - Raspberry Pi OS **Bookworm** (Buster ist seit Juni 2024 EOL).
 - Pakete: `sane-utils scanbd curl jq coreutils util-linux bash`.
-- `sane-scan-pdf` (das bestehende `/home/paul/sane-scan-pdf/scan`-Wrapper-Setup
+- `sane-scan-pdf` (das bestehende `${HOME}/sane-scan-pdf/scan`-Wrapper-Setup
   kann unverändert weiterverwendet werden).
 - Netzwerk-Erreichbarkeit zum fk-encore-Server (lokales LAN reicht).
 

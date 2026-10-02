@@ -33,15 +33,15 @@ rsyncs it to the server.
    - Drop files via SSH as a dedicated `scanner` user and set the
      directory's group + setgid bit so new files inherit group 568:
      ```
-     sudo chown -R scanner:apps /Users/paul/f4mil_data/documents-inbox
-     sudo chmod g+s /Users/paul/f4mil_data/documents-inbox
+     sudo chown -R scanner:apps ${HOME}/f4mil_data/documents-inbox
+     sudo chmod g+s ${HOME}/f4mil_data/documents-inbox
      ```
 
 2. Add the Pi's SSH public key to the server user's
    `~/.ssh/authorized_keys`, restricted to rsync:
 
    ```
-   command="rrsync -wo /Users/paul/f4mil_data/documents-inbox",no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding ssh-ed25519 AAAA…  pi-scanner
+   command="rrsync -wo ${HOME}/f4mil_data/documents-inbox",no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding ssh-ed25519 AAAA…  pi-scanner
    ```
 
    `rrsync` ships with rsync (`/usr/share/doc/rsync/scripts/rrsync`).
@@ -92,7 +92,7 @@ rsync -av --remove-source-files --partial \
    manually. The Pi log should show a successful `rsync` run and the
    file should disappear from `${SCAN_DIR}`.
 2. On the server, the file should briefly appear in
-   `/Users/paul/f4mil_data/documents-inbox/`, then be moved into
+   `${HOME}/f4mil_data/documents-inbox/`, then be moved into
    `…/documents/YYYY/YYYY-MM/<sha256>.pdf` by the watcher.
 3. The container log shows
    `[documents.inbox-watcher] imported foo.pdf → document <id>`.
