@@ -13,7 +13,7 @@
  *
  * Selection is greedy by value per minute, which is the standard
  * approximation for this shape of problem; ordering is then solved
- * exactly by permutation while the stop count stays small, and falls
+ * exactly (see `bestRoute`) while the stop count stays small, and falls
  * back to keeping the greedy order beyond that. Ties break on `osmRef`
  * so two runs never disagree.
  */
@@ -286,7 +286,7 @@ interface FillArgs {
   travel: TravelFn;
 }
 
-type TravelFn = (from: Coordinate, to: Coordinate, mode: TransportMode) => TravelLeg;
+export type TravelFn = (from: Coordinate, to: Coordinate, mode: TransportMode) => TravelLeg;
 
 function fillBlock(args: FillArgs): PlannedBlock {
   const chosen: Candidate[] = [];
@@ -297,6 +297,12 @@ function fillBlock(args: FillArgs): PlannedBlock {
   // what accounts for the detour a new stop causes.
   for (;;) {
     let best: { candidate: Candidate; ratio: number; cost: number } | null = null;
+    // What the stops chosen so far cost on their own. It only changes
+    // when a stop is added, so it is measured once per round, not once
+    // per candidate.
+    const currentCost = chosen.length === 0
+      ? 0
+      : (bestRoute(args.start, chosen, args.returnTo, args.mode, args.travel)?.totalMinutes ?? 0);
 
     for (const candidate of pool) {
       if (chosen.includes(candidate)) continue;
@@ -310,9 +316,6 @@ function fillBlock(args: FillArgs): PlannedBlock {
       if (route.longestLegMinutes > args.maxWalkMinutes) continue;
       if (route.totalMinutes > args.shape.budgetMinutes) continue;
 
-      const currentCost = chosen.length === 0
-        ? 0
-        : (bestRoute(args.start, chosen, args.returnTo, args.mode, args.travel)?.totalMinutes ?? 0);
       const cost = route.totalMinutes - currentCost;
       const value = candidate.score * args.diversityDecay ** countCategory(chosen, candidate.category);
       // Room in the day is not a reason to go somewhere nobody wants to
@@ -371,7 +374,7 @@ function countCategory(chosen: readonly Candidate[], category: string): number {
   return chosen.filter((c) => c.category === category).length;
 }
 
-interface Route {
+export interface Route {
   order: Candidate[];
   totalMinutes: number;
   longestLegMinutes: number;
@@ -379,11 +382,22 @@ interface Route {
 
 /**
  * Shortest tour through `stops`, starting at `start` and optionally
- * returning to `returnTo`. Exhaustive while the count is small — with
- * two to four stops that is at most 24 permutations — and the greedy
- * order beyond `EXACT_ORDER_LIMIT`.
+ * returning to `returnTo`. Exact while the count is small and the
+ * greedy order beyond `EXACT_ORDER_LIMIT`.
+ *
+ * Exact means: the tour with the fewest total minutes, and among tours
+ * of equal length the one whose sequence of refs sorts first, so two
+ * runs never disagree. It is found by a depth-first search over the
+ * orders that abandons a partial tour as soon as it is already longer
+ * than the best complete one — every leg and every dwell is at least
+ * zero minutes, so a tour never gets shorter by going on, and the
+ * answer is the same one trying every permutation gives. Trying every
+ * permutation was the bottleneck: the greedy selection asks this for
+ * every candidate in every round, and seven stops are 5 040 orders.
+ *
+ * Exported for the test that holds it to the exhaustive answer.
  */
-function bestRoute(
+export function bestRoute(
   start: Coordinate,
   stops: readonly Candidate[],
   returnTo: Coordinate | null,
@@ -394,18 +408,52 @@ function bestRoute(
   if (stops.length > EXACT_ORDER_LIMIT) return measureRoute(start, stops, returnTo, mode, travel);
 
   let best: Route | null = null;
-  for (const order of permutations([...stops])) {
-    const route = measureRoute(start, order, returnTo, mode, travel);
-    if (
-      best === null ||
-      route.totalMinutes < best.totalMinutes ||
-      // Deterministic tie-break: prefer the lexicographically smaller
-      // sequence of refs so equal-length tours do not flip between runs.
-      (route.totalMinutes === best.totalMinutes && refKey(route.order) < refKey(best.order))
-    ) {
-      best = route;
+  const used = new Array<boolean>(stops.length).fill(false);
+  const order: Candidate[] = [];
+  // Every stop still to come costs at least its dwell, whatever the
+  // walk to it. Compared with a small allowance so a rounding difference
+  // between this shortcut and the real leg-by-leg sum can never cut off
+  // a tour that is in fact as short as the best.
+  let dwellAhead = stops.reduce((sum, s) => sum + s.dwellMinutes, 0);
+  const SLACK = 1e-6;
+
+  // Sums are built leg by leg exactly as measureRoute builds them, so a
+  // tour found here carries the same minutes to the last bit.
+  const visit = (from: Coordinate, total: number, longest: number): void => {
+    if (best !== null && total + dwellAhead > best.totalMinutes + SLACK) return;
+    if (order.length === stops.length) {
+      let finalTotal = total;
+      let finalLongest = longest;
+      if (returnTo) {
+        const back = travel(from, returnTo, mode);
+        finalTotal += back.minutes;
+        finalLongest = Math.max(finalLongest, back.minutes);
+      }
+      if (
+        best === null ||
+        finalTotal < best.totalMinutes ||
+        (finalTotal === best.totalMinutes && refKey(order) < refKey(best.order))
+      ) {
+        best = { order: [...order], totalMinutes: finalTotal, longestLegMinutes: finalLongest };
+      }
+      return;
     }
-  }
+    for (let i = 0; i < stops.length; i += 1) {
+      if (used[i]) continue;
+      const stop = stops[i];
+      const leg = travel(from, stop, mode);
+      used[i] = true;
+      order.push(stop);
+      dwellAhead -= stop.dwellMinutes;
+      // A route is left at its far end, and the way on is measured from
+      // there (§4.7).
+      visit(leaveFrom(stop), total + (leg.minutes + stop.dwellMinutes), Math.max(longest, leg.minutes));
+      dwellAhead += stop.dwellMinutes;
+      order.pop();
+      used[i] = false;
+    }
+  };
+  visit(start, 0, 0);
   return best;
 }
 
@@ -437,17 +485,6 @@ function measureRoute(
 
 function refKey(order: readonly Candidate[]): string {
   return order.map((c) => c.osmRef).join("|");
-}
-
-function* permutations(items: Candidate[]): Generator<Candidate[]> {
-  if (items.length <= 1) {
-    yield [...items];
-    return;
-  }
-  for (let i = 0; i < items.length; i += 1) {
-    const rest = [...items.slice(0, i), ...items.slice(i + 1)];
-    for (const tail of permutations(rest)) yield [items[i], ...tail];
-  }
 }
 
 function byScoreThenRef(a: Candidate, b: Candidate): number {
