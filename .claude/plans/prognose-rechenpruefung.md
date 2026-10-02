@@ -197,9 +197,12 @@ Abhebungen zählen als Ausgabe; keine Benachrichtigung bei Abweichung.
 - Steuern pauschal: Kapitalerträge werden bei Entstehung besteuert
   (konservativ; kein Freibetrag, keine Vorabpauschale); Renten und
   Auszahlungen mit einem festen Satz je Posten; keine Einkommensteuer.
-- Freiwillige GKV: Beitrag auf Einnahmen des Monats, Kapitalerträge nicht
-  eingerechnet; KVdR: ein Satz auf alle Renten (Betriebsrenten trügen den
-  vollen, gesetzliche den halben Satz).
+- Krankenversicherung (Details im Nachtrag oben, Punkte 21–23): Bemessung
+  monatlich statt nach dem Steuerbescheid des Vorjahres; Kapitalerträge der
+  freiwillig Versicherten aus dem Vormonat, ohne Sparerpauschbetrag;
+  Einmalzahlungen zählen nicht (die 120-Monats-Verteilung von
+  Versorgungsbezügen fehlt); ob die 9/10-Regel für die KVdR erfüllt ist,
+  entscheidet die Wahl des Modus je Person.
 - Kein Zuschlag bei späterem Rentenbeginn (0,5 %/Monat).
 - Die Zeile „Überbrückung gedeckt / nicht gedeckt“ vergleicht Bedarf und
   verfügbares Vermögen am Anfang ohne Erträge in der Phase; das Urteil
