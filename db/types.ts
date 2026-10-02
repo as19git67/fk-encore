@@ -397,6 +397,20 @@ export interface OrientationVariants {
   landscape_ids: number[];
 }
 
+/**
+ * The best-ranked photo on the other side of a format group, as the recap
+ * and the stream ship it next to a photo so a viewer can show the side that
+ * fits the screen without a second lookup
+ * (.claude/plans/orientierungs-varianten.md, stage 6).
+ */
+export interface OrientationCounterpart {
+  id: number;
+  filename: string;
+  width: number | null;
+  height: number | null;
+  orientation: PhotoOrientation | null;
+}
+
 /** Per-photo public-link visibility. See `photos.link_visibility`. */
 export type PhotoLinkVisibility = "auto" | "visible" | "hidden";
 

@@ -51,6 +51,18 @@ struct OrientationVariants: Codable, Sendable, Equatable {
     }
 }
 
+/// The best-ranked photo on the other side of a format group, as the recap
+/// (`GET /recaps/:id`, `counterparts`) and the stream (`counterpart` on an
+/// item) ship it next to a photo. The viewer shows whichever side fits the
+/// screen; nothing else about the item changes.
+struct OrientationCounterpart: Codable, Sendable, Equatable {
+    let id: Int
+    let filename: String
+    let width: Int?
+    let height: Int?
+    let orientation: PhotoOrientation?
+}
+
 /// Which side of a format group a list asks the server for.
 enum VariantMode: String, Sendable, Equatable {
     case all
@@ -153,6 +165,25 @@ enum SlideshowVariants {
             }
         }
         return out
+    }
+
+    /// The one rule the recap player and the stream card share: show the
+    /// counterpart when the photo does not fit the screen and the counterpart
+    /// does, else the photo itself. Squares and unknown shapes stay as they
+    /// are.
+    static func pickSide<P>(
+        _ photo: P,
+        counterpart: P?,
+        screen: ScreenOrientation,
+        orientation: (P) -> PhotoOrientation?
+    ) -> P {
+        guard let counterpart else { return photo }
+        return OrientationVariantRules.shouldSwitchSide(
+            shown: orientation(photo),
+            counterpart: orientation(counterpart),
+            screen: screen,
+            pinned: false
+        ) ? counterpart : photo
     }
 
     /// Replace every photo that does not fit the screen by the best-ranked

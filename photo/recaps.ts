@@ -14,6 +14,8 @@ import {
   pickTrackForRecap,
   type MusicTrack,
 } from "./recaps-music.service";
+import { counterpartsByPhotoId } from "./orientation-variants";
+import type { OrientationCounterpart } from "../db/types";
 
 function getUserId(): number {
   const authData = getAuthData();
@@ -39,6 +41,18 @@ interface GetRecapResponse {
    * folder holds no usable audio files.
    */
   music?: MusicTrack;
+  /**
+   * For every recap photo that is one side of a portrait/landscape format
+   * group (.claude/plans/orientierungs-varianten.md): the best-ranked photo
+   * on the other side, so the player can show the side that fits the screen.
+   * Photos without another side are not listed.
+   */
+  counterparts: RecapCounterpart[];
+}
+
+interface RecapCounterpart {
+  photo_id: number;
+  counterpart: OrientationCounterpart;
 }
 
 interface DismissResponse {
@@ -96,7 +110,10 @@ export const getRecap = api(
     if (!recap) throw APIError.notFound("recap not found");
     const tracks = await listMusicTracks();
     const music = pickTrackForRecap(tracks, recap.kind, recap.id);
-    return { recap, ...(music ? { music } : {}) };
+    const counterpartMap = await counterpartsByPhotoId(userId, recap.photo_ids);
+    const counterparts: RecapCounterpart[] = [];
+    for (const [photo_id, counterpart] of counterpartMap) counterparts.push({ photo_id, counterpart });
+    return { recap, counterparts, ...(music ? { music } : {}) };
   }
 );
 

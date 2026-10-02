@@ -8,6 +8,7 @@ import RecapPlayer from '../components/RecapPlayer.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import {
+  type GetRecapResponse,
   listRecaps,
   getRecap,
   getRecapMusicUrl,
@@ -65,6 +66,23 @@ const detailError = ref('')
 const playerOpen = ref(false)
 const playerRecapId = ref<number | null>(null)
 const playerPhotos = ref<Photo[]>([])
+// Per photo id: the other side of its format group, for the player's
+// "passende Seite zur Orientierung" (.claude/plans/orientierungs-varianten.md).
+const playerCounterparts = ref<Record<number, Photo>>({})
+const detailCounterparts = ref<Record<number, Photo>>({})
+
+/** Resolve the server's counterpart list to full photos from the details batch. */
+function counterpartPhotos(
+  res: GetRecapResponse,
+  byId: Map<number, Photo>,
+): Record<number, Photo> {
+  const out: Record<number, Photo> = {}
+  for (const entry of res.counterparts ?? []) {
+    const photo = byId.get(entry.counterpart.id)
+    if (photo) out[entry.photo_id] = photo
+  }
+  return out
+}
 const playerTitle = ref<string>('')
 const playerSubtitle = ref<string | null>(null)
 const playerMusicUrl = ref<string | null>(null)
@@ -84,12 +102,14 @@ const cardPlayLoadingId = ref<number | null>(null)
  * Photo ids the player needs beyond the recap membership: the "Damals &
  * heute" pair can reference photos outside the curated top-30.
  */
-function collectPlayerPhotoIds(recap: RecapDetails): number[] {
+function collectPlayerPhotoIds(recap: RecapDetails, counterparts: GetRecapResponse['counterparts'] = []): number[] {
   const compare = personCompareFromSeed(recap.kind, recap.seed)
   return Array.from(
     new Set([
       ...recap.photo_ids,
       ...(compare ? [compare.thenId, compare.nowId] : []),
+      // The other sides of the format groups ride along in the same batch.
+      ...(counterparts ?? []).map((c) => c.counterpart.id),
     ])
   )
 }
@@ -154,7 +174,8 @@ async function loadDetail(id: number) {
     detail.value = res.recap
     detailMusic.value = res.music ?? null
     detailCompare.value = null
-    const idsToLoad = collectPlayerPhotoIds(res.recap)
+    detailCounterparts.value = {}
+    const idsToLoad = collectPlayerPhotoIds(res.recap, res.counterparts)
     if (idsToLoad.length > 0) {
       const photosRes = await getPhotoDetailsBatch(idsToLoad)
       const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
@@ -162,6 +183,7 @@ async function loadDetail(id: number) {
         .map((pid) => byId.get(pid))
         .filter((p): p is Photo => !!p)
       detailCompare.value = buildCompareData(res.recap, byId)
+      detailCounterparts.value = counterpartPhotos(res, byId)
     }
     // Deep link from the feed strip: ?play=1 opens the player straight away.
     // The flag is consumed (removed from the URL) so closing the player and
@@ -486,6 +508,7 @@ function openPlayer() {
   if (detailPhotos.value.length === 0) return
   playerRecapId.value = detail.value?.id ?? null
   playerPhotos.value = detailPhotos.value
+  playerCounterparts.value = detailCounterparts.value
   playerTitle.value = detail.value?.title ?? ''
   playerSubtitle.value = detail.value?.subtitle ?? null
   playerMusicUrl.value = detailMusic.value ? getRecapMusicUrl(detailMusic.value) : null
@@ -504,12 +527,13 @@ async function playFromCard(r: RecapSummary, e: Event) {
   try {
     const res = await getRecap(r.id)
     if (res.recap.photo_ids.length === 0) return
-    const photosRes = await getPhotoDetailsBatch(collectPlayerPhotoIds(res.recap))
+    const photosRes = await getPhotoDetailsBatch(collectPlayerPhotoIds(res.recap, res.counterparts))
     const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
     playerRecapId.value = res.recap.id
     playerPhotos.value = res.recap.photo_ids
       .map((pid) => byId.get(pid))
       .filter((p): p is Photo => !!p)
+    playerCounterparts.value = counterpartPhotos(res, byId)
     playerTitle.value = res.recap.title
     playerSubtitle.value = res.recap.subtitle ?? null
     playerMusicUrl.value = res.music ? getRecapMusicUrl(res.music) : null
@@ -688,6 +712,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
 
     <RecapPlayer
       :photos="playerPhotos"
+      :counterparts="playerCounterparts"
       :title="playerTitle"
       :subtitle="playerSubtitle"
       :music-url="playerMusicUrl"

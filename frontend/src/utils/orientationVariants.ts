@@ -174,3 +174,29 @@ export function bestPerSide(
   }
   return [...best.values()].map((b) => b.id)
 }
+
+/**
+ * The side to show large on this screen: the counterpart when the photo
+ * does not fit the screen and the counterpart does, else the photo itself.
+ * This is the one rule the recap player and the stream card share
+ * (.claude/plans/orientierungs-varianten.md, stage 6). Squares and photos of
+ * unknown shape are left alone.
+ */
+export function pickSideForScreen<P extends { orientation?: PhotoOrientation | null }, C extends { orientation?: PhotoOrientation | null }>(
+  photo: P,
+  counterpart: C | null | undefined,
+  screen: ScreenOrientation,
+): P | C {
+  if (!counterpart) return photo
+  if (shouldSwitchSide({ shown: photo.orientation, counterpart: counterpart.orientation, screen, pinned: false })) {
+    return counterpart
+  }
+  return photo
+}
+
+/** Orientation of a feed item or counterpart from its stored dimensions. */
+export function orientationOfDimensions(
+  item: { width: number | null; height: number | null },
+): PhotoOrientation | null {
+  return orientationFromDimensions(item.width, item.height)
+}

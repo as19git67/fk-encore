@@ -1,6 +1,6 @@
 # Orientierungs-Varianten: Hoch- und Querformat desselben Motivs
 
-Status: **In Umsetzung** — Etappen 1–3 (PR #1421), 4 (iOS Raster, Vollbild, Diashow, PR #1425) und 5 (iOS Review) umgesetzt, Etappe 6 offen.
+Status: **Umgesetzt** — Etappen 1–3 (PR #1421), 4 (PR #1425), 5 (PR #1426) und 6 (Rückblicke und Stream).
 
 ## Umsetzungsstand
 
@@ -100,7 +100,24 @@ Status: **In Umsetzung** — Etappen 1–3 (PR #1421), 4 (iOS Raster, Vollbild, 
   Formatpaar behandeln" (`auto`), `ReviewQueueState.setOrientationPair` hält
   die Karte aktuell. Tag „Hoch + Quer" im Kartenkopf. Tests in
   `CompareTournamentTests` und `ReviewQueueTests`.
-- Etappe 6 offen; die album-gebundene Liste läuft über `/gallery/grid`
+- **Etappe 6 (Rückblicke und Stream) — umgesetzt.** Backend:
+  `counterpartsByPhotoId(userId, photoIds)` in `orientation-variants.ts`
+  liefert je Foto die bestplatzierte Gegenseite (`OrientationCounterpart`
+  mit `id`, `filename`, `width`, `height`, `orientation`); `GET /recaps/:id`
+  trägt `counterparts[]`, `FeedPhotoItem` trägt `counterpart`. Nur die
+  Gruppen des Betrachters zählen, fremde Fotos im Stream haben keine
+  Gegenseite. Web: `pickSideForScreen` in `utils/orientationVariants.ts` ist
+  die eine Regel; `RecapPlayer` nimmt `counterparts` und baut die Slides über
+  die passende Seite (Länge bleibt, Indizes bleiben), `RecapsView` lädt die
+  Gegenseiten im selben Details-Batch; `PhotoFeedCard` zeigt die passende
+  Seite mit deren Seitenverhältnis, Likes und Vollbild gehören weiter dem
+  Eintrag. iOS: `SlideshowVariants.pickSide`, `RecapPlayerView` ersetzt je
+  Orientierung vor dem Paaren (wie die Diashow), `FeedCardView` lädt die
+  Datei der passenden Seite (`FeedPhotoItem.shownFilename(for:)`). Stories:
+  `RecapPlayer` Formatpaar in beiden Orientierungen. Tests: Backend
+  (`counterpartsByPhotoId`), Web (`pickSideForScreen`), iOS (Dekodierung,
+  Seitenwahl).
+- Die album-gebundene Liste läuft über `/gallery/grid`
   mit `albumScopeId` und ist damit abgedeckt, die anonyme Link-Ansicht hat
   keinen Nutzer (und damit keine Gruppen) und bleibt außen vor. Die Diashow
   im Web läuft über dasselbe `cursorPhoto`, der Drehungswechsel greift also

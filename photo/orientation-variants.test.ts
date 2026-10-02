@@ -13,6 +13,7 @@ import {
   VARIANT_TIME_WINDOW_SECONDS,
   bestPerOrientation,
   computeOrientationVariants,
+  counterpartsByPhotoId,
   getCollapseOrientationVariantsLogic,
   photoOrientation,
   setCollapseOrientationVariantsLogic,
@@ -421,5 +422,29 @@ describe("orientation variants in the gallery grid", () => {
     // "Nicht dasselbe Motiv" takes the group out of the filter.
     await setGroupOrientationVariantsLogic(u, pairGroup, "off");
     expect((await listReviewQueueLogic(u, { orientationPair: true })).total).toBe(0);
+  });
+
+  it("names the best-ranked other side per photo for the recap and the stream", async () => {
+    const landscape = await makePhoto(u, "landscape", 0);
+    const pA = await makePhoto(u, "portrait", 5);
+    const pB = await makePhoto(u, "portrait", 10);
+    const loner = await makePhoto(u, "landscape", 9000);
+    const groupId = await makeGroup(u, landscape, [landscape, pA, pB]);
+
+    const map = await counterpartsByPhotoId(u, [landscape, pA, pB, loner, 999999]);
+    expect(map.get(landscape)).toMatchObject({ id: pA, orientation: "portrait", width: 3000, height: 4000 });
+    expect(map.get(pA)).toMatchObject({ id: landscape, orientation: "landscape" });
+    expect(map.get(pB)?.id).toBe(landscape);
+    expect(map.has(loner)).toBe(false);
+    expect(map.get(landscape)?.filename).toMatch(/\.jpg$/);
+
+    // Another user's view of my photos: no groups, no counterparts.
+    const other = await makeUser("other@test.com");
+    expect((await counterpartsByPhotoId(other, [landscape])).size).toBe(0);
+
+    // "Nicht dasselbe Motiv" switches the pair off here as well.
+    await setGroupOrientationVariantsLogic(u, groupId, "off");
+    expect((await counterpartsByPhotoId(u, [landscape])).size).toBe(0);
+    expect((await counterpartsByPhotoId(u, [])).size).toBe(0);
   });
 });

@@ -163,4 +163,59 @@ final class OrientationVariantsTests: XCTestCase {
         )
         XCTAssertEqual(out.map(\.id), [21])
     }
+
+    // MARK: - Recap and stream
+
+    func testPickSideShowsTheFittingSideOrThePhotoItself() {
+        let landscape = photo(1, .landscape)
+        let portrait = photo(2, .portrait)
+        let shape: (PhotoWithCuration) -> PhotoOrientation? = { $0.orientation }
+        XCTAssertEqual(SlideshowVariants.pickSide(landscape, counterpart: portrait, screen: .portrait, orientation: shape).id, 2)
+        XCTAssertEqual(SlideshowVariants.pickSide(landscape, counterpart: portrait, screen: .landscape, orientation: shape).id, 1)
+        XCTAssertEqual(SlideshowVariants.pickSide(landscape, counterpart: nil, screen: .portrait, orientation: shape).id, 1)
+        XCTAssertEqual(SlideshowVariants.pickSide(photo(3, nil), counterpart: portrait, screen: .portrait, orientation: shape).id, 3)
+    }
+
+    func testFeedItemShowsTheCounterpartFileOnlyWhereItFits() throws {
+        let json = """
+        {"photoId":1,"filename":"wide.jpg","width":4000,"height":3000,"description":null,"takenAt":null,
+         "lastActivityAt":"2026-01-01T00:00:00.000Z","album":null,"owner":{"id":1,"name":"A"},
+         "likeCount":0,"likedByMe":false,"commentCount":0,"latestComment":null,
+         "counterpart":{"id":2,"filename":"tall.jpg","width":3000,"height":4000,"orientation":"portrait"}}
+        """
+        let item = try JSONDecoder().decode(FeedPhotoItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item.orientation, .landscape)
+        XCTAssertEqual(item.shownFilename(for: .portrait), "tall.jpg")
+        XCTAssertEqual(item.shownFilename(for: .landscape), "wide.jpg")
+
+        let plain = """
+        {"photoId":1,"filename":"wide.jpg","width":4000,"height":3000,"description":null,"takenAt":null,
+         "lastActivityAt":"2026-01-01T00:00:00.000Z","album":null,"owner":{"id":1,"name":"A"},
+         "likeCount":0,"likedByMe":false,"commentCount":0,"latestComment":null}
+        """
+        let without = try JSONDecoder().decode(FeedPhotoItem.self, from: Data(plain.utf8))
+        XCTAssertNil(without.counterpart)
+        XCTAssertEqual(without.shownFilename(for: .portrait), "wide.jpg")
+    }
+
+    func testRecapResponseDecodesCounterpartsAndTheirAbsence() throws {
+        let json = """
+        {"recap":{"id":1,"kind":"trip","title":"T","subtitle":null,"cover_photo_id":null,"period_start":null,
+                  "period_end":null,"photo_count":1,"created_at":"2026-01-01T00:00:00.000Z","dismissed_at":null,
+                  "seen_at":null,"photo_ids":[1],"seed":null},
+         "counterparts":[{"photo_id":1,"counterpart":{"id":2,"filename":"tall.jpg","width":3000,"height":4000,"orientation":"portrait"}}]}
+        """
+        let response = try JSONDecoder().decode(GetRecapResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(response.counterparts?.first?.photo_id, 1)
+        let slidePhoto = RecapPhoto(counterpart: response.counterparts!.first!.counterpart)
+        XCTAssertEqual(slidePhoto.id, 2)
+        XCTAssertEqual(slidePhoto.orientation, .portrait)
+
+        let older = """
+        {"recap":{"id":1,"kind":"trip","title":"T","subtitle":null,"cover_photo_id":null,"period_start":null,
+                  "period_end":null,"photo_count":0,"created_at":"2026-01-01T00:00:00.000Z","dismissed_at":null,
+                  "seen_at":null,"photo_ids":[],"seed":null}}
+        """
+        XCTAssertNil(try JSONDecoder().decode(GetRecapResponse.self, from: Data(older.utf8)).counterparts)
+    }
 }

@@ -50,3 +50,32 @@ export const Portrait: Story = {
     testViewport: { width: 390, height: 844 },
   },
 }
+
+// Format pair (.claude/plans/orientierungs-varianten.md): the first recap
+// photo is a landscape frame whose motif also exists portrait. On a portrait
+// phone the player shows the portrait side, on a landscape screen the
+// landscape one; the slide count stays the same either way.
+const LANDSCAPE_SIDE: Photo = { ...makePhoto(100, 0), orientation: 'landscape' }
+const PORTRAIT_SIDE: Photo = { ...makePhoto(900, 0), filename: 'photo-900.jpg', orientation: 'portrait' }
+
+export const FormatpaarPortrait: Story = {
+  name: 'Formatpaar (Portrait zeigt die Hochkant-Seite)',
+  parameters: {
+    testViewport: { width: 390, height: 844 },
+  },
+  args: {
+    photos: [LANDSCAPE_SIDE, ...RECAP_PHOTOS.slice(1)],
+    counterparts: { 100: PORTRAIT_SIDE },
+  },
+}
+
+export const FormatpaarLandscape: Story = {
+  name: 'Formatpaar (Landscape zeigt die Quer-Seite)',
+  parameters: {
+    testViewport: { width: 844, height: 390 },
+  },
+  args: {
+    photos: [LANDSCAPE_SIDE, ...RECAP_PHOTOS.slice(1)],
+    counterparts: { 100: PORTRAIT_SIDE },
+  },
+}

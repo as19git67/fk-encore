@@ -12,6 +12,9 @@ struct FeedCardView: View {
     /// carries only the handful of fields the card needs.
     @State private var fullscreenPhoto: PhotoWithCuration?
     @State private var isOpeningFullscreen = false
+    /// Which way the screen is held: a photo that is one side of a format
+    /// pair shows the side that fits (.claude/plans/orientierungs-varianten.md).
+    @Environment(\.screenOrientation) private var screenOrientation
 
     init(item: FeedPhotoItem, isHiddenByMe: Bool, onLike: @escaping () -> Void, onToggleHide: @escaping () -> Void) {
         self.item = item
@@ -177,7 +180,13 @@ struct FeedCardView: View {
             }
         }
         .background(Color(.systemBackground))
-        .task {
+        // The card was built for the item's own file; a format pair may ask
+        // for the other side on this screen, and again after a turn.
+        .task(id: item.shownFilename(for: screenOrientation)) {
+            let wanted = item.shownFilename(for: screenOrientation)
+            if imageLoader.filename != wanted {
+                imageLoader = FeedImageLoader(filename: wanted)
+            }
             await imageLoader.load()
         }
     }
@@ -219,7 +228,7 @@ final class FeedImageLoader: @unchecked Sendable {
     private(set) var image: UIImage?
     private(set) var isLoading = false
 
-    private let filename: String
+    let filename: String
 
     init(filename: String) {
         self.filename = filename

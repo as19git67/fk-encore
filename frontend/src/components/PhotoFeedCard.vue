@@ -7,6 +7,8 @@ import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import { getPhotoUrl, updatePhotoDescription } from '../api/photos'
 import { listCommentsPage, createComment, type PhotoComment } from '../api/reactions'
 import type { FeedPhotoItem } from '../api/photoFeed'
+import { useScreenOrientation } from '../composables/useScreenOrientation'
+import { orientationOfDimensions, pickSideForScreen } from '../utils/orientationVariants'
 
 const props = defineProps<{
   item: FeedPhotoItem
@@ -125,9 +127,25 @@ async function saveDescription() {
 const MIN_WIDTH_OVER_HEIGHT = 0.5 // card height at most 2× its width
 const naturalRatio = ref<number | null>(null)
 
+// Orientation variants (.claude/plans/orientierungs-varianten.md): when the
+// photo is one side of the viewer's format group, the card shows whichever
+// side fits the screen. Everything else on the card — likes, comments, the
+// fullscreen it opens — still belongs to the item itself.
+const screenOrientation = useScreenOrientation()
+const shown = computed(() => {
+  const own = { filename: props.item.filename, width: props.item.width, height: props.item.height }
+  const counterpart = props.item.counterpart
+  if (!counterpart) return own
+  return pickSideForScreen(
+    { ...own, orientation: orientationOfDimensions(own) },
+    { filename: counterpart.filename, width: counterpart.width, height: counterpart.height, orientation: counterpart.orientation },
+    screenOrientation.value,
+  )
+})
+
 const aspectRatio = computed(() => {
-  const w = props.item.width
-  const h = props.item.height
+  const w = shown.value.width
+  const h = shown.value.height
   const ratio = w && h && w > 0 && h > 0 ? w / h : naturalRatio.value
   if (ratio == null) return '4 / 3'
   return String(Math.max(ratio, MIN_WIDTH_OVER_HEIGHT))
@@ -210,7 +228,7 @@ async function submitComment() {
       @keydown.enter.prevent="emit('open', item)"
       @keydown.space.prevent="emit('open', item)"
     >
-      <img :src="getPhotoUrl(item.filename, 1280)" :alt="item.description ?? item.filename" loading="lazy" @load="onImageLoad" />
+      <img :src="getPhotoUrl(shown.filename, 1280)" :alt="item.description ?? shown.filename" loading="lazy" @load="onImageLoad" />
       <i v-if="item.hiddenByMe" class="pi pi-thumbs-down-fill hidden-badge" aria-hidden="true" />
     </div>
 
