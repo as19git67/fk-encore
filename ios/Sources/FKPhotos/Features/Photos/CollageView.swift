@@ -3,34 +3,39 @@ import UIKit
 
 /// Arranging a handful of selected photos into a collage.
 ///
-/// The web's `CollageDialog` (#1020): pick one of the three variants for this
-/// many photos, see the result, and rearrange by dragging one photo onto
-/// another — as on the web — or by tapping two cells in turn. The layout
-/// rules are in `CollageLayouts`, shared with the web so a collage of the
-/// same photos comes out the same shape.
+/// The web's `CollageDialog` (#1020), in the same two steps: first the three
+/// variants for this many photos, each drawn with the photos themselves; then
+/// the chosen one large, to rearrange by dragging one photo onto another — or
+/// by tapping two cells in turn — and to caption. The layout rules are in
+/// `CollageLayouts`, shared with the web so a collage of the same photos comes
+/// out the same shape.
 ///
 /// A caption can be laid over the whole canvas (#1020, stage C): dragged into
-/// place, in one of three sizes, in white, black or a colour taken from the
-/// photos themselves. The rules are in `CollageText`, shared with the web.
+/// place, in one of three sizes, in white, black, a colour taken from the
+/// photos or any colour from the picker. The rules are in `CollageText`,
+/// shared with the web.
 ///
-/// Saving renders the canvas on the device and uploads the result as an
-/// ordinary photo — there is no collage endpoint, so this is the same move the
-/// web makes. The collage takes the capture date of its **newest** source plus
-/// one second, so it sorts right after the photos it was made from rather than
-/// at "now". Opened from an album, it is added to that album and the album is
-/// told to reload, as the web's dialog does.
+/// **Teilen** renders the collage on the device and hands the JPEG to the
+/// share sheet. Opened from an album, **Sichern** uploads it as an ordinary
+/// photo — there is no collage endpoint, so this is the same move the web
+/// makes — adds it to that album and tells the album to reload. The collage
+/// takes the capture date of its **newest** source plus one second, so it
+/// sorts right after the photos it was made from rather than at "now".
 ///
 /// The preview cells crop with the same `CollageLayouts.coverCrop` the render
-/// uses, so a portrait cell shows the part of the photo that will be saved.
+/// uses and leave the same white seams, so what is on screen is what is saved.
 struct CollageView: View {
+    /// The photos in the order they were picked; the first fills the first cell.
     let photos: [PhotoWithCuration]
-    /// The album the collage was made from; the saved collage joins it.
+    /// The album the collage was made from; the saved collage joins it. Without
+    /// one there is nothing to save into — the web offers sharing only, too.
     let albumId: Int?
     /// Called after the collage is saved, so the album can show it.
     let onSaved: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var layoutIndex = 0
+    /// The variant being edited; nil while the variants are being chosen.
+    @State private var editingLayout: Int?
     /// Which photo sits in which cell — indices into `photos`.
     @State private var order: [Int]
     /// The first tapped cell of a swap, if a swap is half-made.
@@ -41,7 +46,10 @@ struct CollageView: View {
     /// White and black, plus whatever colours the photos turned out to have.
     @State private var palette: [String] = CollageText.fixedColors
     @State private var isSaving = false
+    @State private var isSharing = false
+    @State private var sharedFile: SharedFile?
     @State private var statusMessage: String?
+    @State private var statusIsError = false
     @State private var didSave = false
 
     init(photos: [PhotoWithCuration], albumId: Int? = nil, onSaved: (() -> Void)? = nil) {
@@ -55,48 +63,98 @@ struct CollageView: View {
         CollageLayouts.layouts(for: photos.count)
     }
 
-    private var layout: CollageLayouts.Layout? {
-        layouts.indices.contains(layoutIndex) ? layouts[layoutIndex] : nil
-    }
-
     var body: some View {
         NavigationStack {
             Group {
-                if let layout {
-                    content(layout: layout)
-                } else {
+                if layouts.isEmpty {
                     ContentUnavailableView {
                         Label("Keine Collage möglich", systemImage: "square.grid.2x2")
                     } description: {
                         Text("Eine Collage braucht \(CollageLayouts.minPhotos) bis \(CollageLayouts.maxPhotos) Fotos — ausgewählt sind \(photos.count).")
                     }
+                } else {
+                    layoutPicker
                 }
             }
-            .task { await loadPalette() }
-            // Dragging a photo downward must move the photo, not pull the
-            // sheet away with the arrangement in it; "Fertig" closes.
-            .interactiveDismissDisabled()
-            .navigationTitle("Collage")
+            .navigationTitle("Layout wählen")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fertig") { dismiss() }
+                    Button("Abbrechen") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    if isSaving {
-                        ProgressView()
-                    } else {
-                        Button("Sichern") { Task { await save() } }
-                            .disabled(layout == nil || didSave)
-                    }
+            }
+            .navigationDestination(item: $editingLayout) { index in
+                if layouts.indices.contains(index) {
+                    editor(layout: layouts[index])
                 }
             }
         }
+        .task { await loadPalette() }
+        // Dragging a photo downward must move the photo, not pull the sheet
+        // away with the arrangement in it.
+        .interactiveDismissDisabled()
+        .sheet(item: $sharedFile) { file in
+            FileActivityView(url: file.url)
+        }
     }
 
-    private func content(layout: CollageLayouts.Layout) -> some View {
+    // MARK: - Step 1: choosing a variant
+
+    /// The three variants, each drawn with the photos — the web's first step.
+    private var layoutPicker: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Wähle ein Layout für deine \(photos.count) Fotos.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 150), spacing: 12, alignment: .top)],
+                    spacing: 16
+                ) {
+                    ForEach(layouts.indices, id: \.self) { index in
+                        variantButton(index)
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+
+    private func variantButton(_ index: Int) -> some View {
+        let layout = layouts[index]
+        return Button {
+            // As on the web, a variant starts from the picked order — cells
+            // of another variant are not the same cells.
+            order = Array(photos.indices)
+            swapAnchor = nil
+            editingLayout = index
+        } label: {
+            VStack(spacing: 6) {
+                CollageCanvas(layout: layout, photos: photos)
+                    .allowsHitTesting(false)
+                    .frame(maxWidth: .infinity, maxHeight: 220)
+                Text(layout.name)
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+            }
+            .padding(6)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.secondary.opacity(0.3))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Layout \(layout.name)")
+    }
+
+    // MARK: - Step 2: editing the chosen variant
+
+    private func editor(layout: CollageLayouts.Layout) -> some View {
+        // A plain stack, not a scroll view: a photo dragged inside the canvas
+        // must move the photo, not the page.
         VStack(spacing: 16) {
             CollageCanvas(
                 layout: layout,
@@ -109,38 +167,62 @@ struct CollageView: View {
                 onSelectOverlay: { editing = $0 },
                 onMoveOverlay: move
             )
-            .padding(.horizontal)
 
-            Picker("Aufteilung", selection: $layoutIndex) {
-                ForEach(layouts.indices, id: \.self) { index in
-                    Text(layouts[index].name).tag(index)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-
-            Text(swapAnchor == nil
-                 ? "Zum Tauschen ein Foto auf ein anderes ziehen – oder zwei nacheinander antippen."
-                 : "Tippe das Feld an, mit dem getauscht werden soll.")
+            Text(hint)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             textControls
-                .padding(.horizontal)
 
             if let statusMessage {
                 Text(statusMessage)
                     .font(.caption)
-                    .foregroundStyle(didSave ? Color.secondary : Color.red)
+                    .foregroundStyle(statusIsError ? Color.red : Color.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
             }
 
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(.top)
+        .padding()
+        .navigationTitle("Collage bearbeiten")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if isSharing {
+                    ProgressView()
+                } else {
+                    Button {
+                        Task { await share(layout: layout) }
+                    } label: {
+                        Label("Teilen", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(isSaving)
+                }
+                if albumId != nil && !didSave {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Button("Sichern") { Task { await save(layout: layout) } }
+                            .disabled(isSharing)
+                    }
+                } else {
+                    Button("Fertig") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var hint: String {
+        if swapAnchor != nil {
+            return "Tippe das Feld an, mit dem getauscht werden soll."
+        }
+        let swap = "Zum Tauschen ein Foto auf ein anderes ziehen – oder zwei nacheinander antippen."
+        return overlays.isEmpty
+            ? swap
+            : swap + " Text ziehen zum Verschieben, antippen zum Bearbeiten."
     }
 
     // MARK: - Text
@@ -154,7 +236,7 @@ struct CollageView: View {
     private var textControls: some View {
         if let index = editingIndex {
             VStack(spacing: 8) {
-                TextField("Text", text: Binding(
+                TextField("Text über die Collage …", text: Binding(
                     get: { overlays[index].text },
                     set: { overlays[index].text = $0 }
                 ), axis: .vertical)
@@ -184,22 +266,32 @@ struct CollageView: View {
                     .frame(width: 140)
                 }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(palette, id: \.self) { hex in
-                            swatch(hex, index: index)
+                HStack(spacing: 8) {
+                    // Any colour at all, as the web's colour picker offers;
+                    // the swatches beside it are the quick choices.
+                    ColorPicker("Farbe", selection: Binding(
+                        get: { Color(uiColor: CollageText.color(fromHex: overlays[index].colorHex) ?? .white) },
+                        set: { overlays[index].colorHex = CollageText.hex(from: UIColor($0)) }
+                    ), supportsOpacity: false)
+                    .labelsHidden()
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(palette, id: \.self) { hex in
+                                swatch(hex, index: index)
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
-                    .padding(.vertical, 2)
                 }
 
                 HStack {
-                    Button("Fertig") { editing = nil }
-                    Spacer()
                     Button("Text entfernen", role: .destructive) {
                         overlays.remove(at: index)
                         editing = nil
                     }
+                    Spacer()
+                    Button("Fertig") { editing = nil }
                 }
                 .font(.callout)
             }
@@ -231,6 +323,7 @@ struct CollageView: View {
                 }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Farbe \(hex)")
     }
 
     private func move(_ id: CollageText.Overlay.ID, dx: Double, dy: Double) {
@@ -239,25 +332,16 @@ struct CollageView: View {
     }
 
     /// Read the colours out of the photos so the caption can be tinted with
-    /// one of them.
+    /// one of them — all of them, as the web samples every photo it loaded.
     ///
-    /// Only the first few photos are sampled: a nine-photo collage would
-    /// otherwise decode nine full images to fill a row of six swatches. The
-    /// images come from the same cache the preview thumbnails use, so this is
-    /// usually free.
+    /// The images come from the same cache the preview tiles fill, so this is
+    /// usually free; `dominantColors` shrinks each to 64 × 64 before looking.
     @MainActor
     private func loadPalette() async {
         var images: [UIImage] = []
         await TransformedPhotosIndex.shared.load()
-        for photo in photos.prefix(3) {
-            let source = TransformedPhotosIndex.shared.request(
-                photoId: photo.id, filename: photo.filename
-            )
-            if let cached = await ImageCache.shared.image(forKey: source.cacheKey) {
-                images.append(cached)
-            } else if let data = try? await APIClient.shared.downloadData(
-                source.path, query: source.query.isEmpty ? nil : source.query
-            ), let image = UIImage(data: data) {
+        for photo in photos {
+            if let image = await fullImage(of: photo) {
                 images.append(image)
             }
         }
@@ -265,33 +349,34 @@ struct CollageView: View {
         palette = CollageText.palette(from: images)
     }
 
-    // MARK: - Saving
-
-    /// Render the collage at full size and upload it as a new photo.
-    ///
-    /// The preview is built from thumbnails; the render needs the originals,
-    /// so they are fetched here rather than reused. A photo that cannot be
-    /// fetched costs its cell, not the collage.
+    /// The photo at full size, rendered through its recipe when it has one —
+    /// the image the preview tile shows and the render draws.
     @MainActor
-    private func save() async {
-        guard let layout else { return }
-        isSaving = true
-        statusMessage = nil
-        defer { isSaving = false }
+    private func fullImage(of photo: PhotoWithCuration) async -> UIImage? {
+        let source = TransformedPhotosIndex.shared.request(
+            photoId: photo.id, filename: photo.filename
+        )
+        if let cached = await ImageCache.shared.image(forKey: source.cacheKey) {
+            return cached
+        }
+        guard let data = try? await APIClient.shared.downloadData(
+            source.path, query: source.query.isEmpty ? nil : source.query
+        ) else { return nil }
+        return UIImage(data: data)
+    }
 
+    // MARK: - Rendering, sharing, saving
+
+    /// Render the collage at full size as a JPEG.
+    ///
+    /// A photo that cannot be fetched costs its cell, not the collage.
+    @MainActor
+    private func renderJPEG(layout: CollageLayouts.Layout) async -> Data? {
         var tiles: [CollageRenderer.Tile] = []
         await TransformedPhotosIndex.shared.load()
         for index in order {
             let photo = photos[index]
-            // Full resolution: no `w`, so an edited photo comes back rendered
-            // through its recipe at full size, exactly as the preview tile
-            // showed it.
-            let source = TransformedPhotosIndex.shared.request(
-                photoId: photo.id, filename: photo.filename
-            )
-            guard let data = try? await APIClient.shared.downloadData(
-                source.path, query: source.query.isEmpty ? nil : source.query
-            ), let image = UIImage(data: data) else { continue }
+            guard let image = await fullImage(of: photo) else { continue }
             // A recipe-rendered photo is already framed by its owner; the AI's
             // focal point belongs to the original frame and would re-shift it.
             let focal = TransformedPhotosIndex.shared.hasRecipe(photo.id)
@@ -299,14 +384,46 @@ struct CollageView: View {
                 : photo.auto_crop.map { CGPoint(x: $0.x, y: $0.y) }
             tiles.append(CollageRenderer.Tile(image: image, focal: focal))
         }
+        guard !tiles.isEmpty else { return nil }
+        let rendered = CollageRenderer.render(layout: layout, tiles: tiles, overlays: overlays)
+        return rendered?.jpegData(compressionQuality: CollageRenderer.jpegQuality)
+    }
 
-        guard !tiles.isEmpty,
-              let rendered = CollageRenderer.render(
-                  layout: layout, tiles: tiles, overlays: overlays
-              ),
-              let jpeg = rendered.jpegData(compressionQuality: 0.9)
-        else {
-            statusMessage = "Die Collage konnte nicht erzeugt werden."
+    private func report(_ message: String, isError: Bool) {
+        statusMessage = message
+        statusIsError = isError
+    }
+
+    /// Hand the rendered JPEG to the share sheet — the web's "Teilen".
+    @MainActor
+    private func share(layout: CollageLayouts.Layout) async {
+        isSharing = true
+        statusMessage = nil
+        defer { isSharing = false }
+        guard let jpeg = await renderJPEG(layout: layout) else {
+            report("Die Collage konnte nicht erzeugt werden.", isError: true)
+            return
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(CollageRenderer.filename())
+        do {
+            try jpeg.write(to: url, options: .atomic)
+            sharedFile = SharedFile(url: url)
+        } catch {
+            report(error.localizedDescription, isError: true)
+        }
+    }
+
+    /// Upload the collage as a new photo and add it to the album.
+    @MainActor
+    private func save(layout: CollageLayouts.Layout) async {
+        guard let albumId else { return }
+        isSaving = true
+        statusMessage = nil
+        defer { isSaving = false }
+
+        guard let jpeg = await renderJPEG(layout: layout) else {
+            report("Die Collage konnte nicht erzeugt werden.", isError: true)
             return
         }
 
@@ -336,27 +453,26 @@ struct CollageView: View {
                 dateTaken: CollageRenderer.inheritedDate(from: order.map { photos[$0] })
             )
         } catch {
-            statusMessage = error.localizedDescription
+            report(error.localizedDescription, isError: true)
             return
         }
 
         // Saved either way from here on; a failed album add must not offer
         // "Sichern" again, which would upload the same collage twice.
         didSave = true
-        if let albumId {
-            struct Body: Encodable { let albumId: Int; let photoId: Int }
-            struct Resp: Decodable { let success: Bool }
-            do {
-                let _: Resp = try await APIClient.shared.post(
-                    "/albums/photos",
-                    body: Body(albumId: albumId, photoId: uploaded.photoId)
-                )
-                statusMessage = "Collage wurde im Album gespeichert."
-            } catch {
-                statusMessage = "Collage gesichert, aber nicht zum Album hinzugefügt: \(error.localizedDescription)"
-            }
-        } else {
-            statusMessage = "Collage gesichert."
+        struct Body: Encodable { let albumId: Int; let photoId: Int }
+        struct Resp: Decodable { let success: Bool }
+        do {
+            let _: Resp = try await APIClient.shared.post(
+                "/albums/photos",
+                body: Body(albumId: albumId, photoId: uploaded.photoId)
+            )
+            report("Collage wurde im Album gespeichert.", isError: false)
+        } catch {
+            report(
+                "Collage gesichert, aber nicht zum Album hinzugefügt: \(error.localizedDescription)",
+                isError: true
+            )
         }
         onSaved?()
     }
@@ -381,18 +497,26 @@ struct CollageView: View {
     }
 }
 
+/// A rendered collage on disk, waiting for the share sheet.
+private struct SharedFile: Identifiable {
+    let url: URL
+    var id: URL { url }
+}
+
 /// The collage itself: the canvas at its layout's aspect, each cell filled
 /// with its photo.
+///
+/// Without callbacks it is a picture and nothing more — the variant previews.
 private struct CollageCanvas: View {
     let layout: CollageLayouts.Layout
     let photos: [PhotoWithCuration]
-    let highlighted: Int?
-    let overlays: [CollageText.Overlay]
-    let editingOverlay: CollageText.Overlay.ID?
-    let onTapCell: (Int) -> Void
-    let onSwapCells: (Int, Int) -> Void
-    let onSelectOverlay: (CollageText.Overlay.ID?) -> Void
-    let onMoveOverlay: (CollageText.Overlay.ID, Double, Double) -> Void
+    var highlighted: Int? = nil
+    var overlays: [CollageText.Overlay] = []
+    var editingOverlay: CollageText.Overlay.ID? = nil
+    var onTapCell: (Int) -> Void = { _ in }
+    var onSwapCells: (Int, Int) -> Void = { _, _ in }
+    var onSelectOverlay: (CollageText.Overlay.ID?) -> Void = { _ in }
+    var onMoveOverlay: (CollageText.Overlay.ID, Double, Double) -> Void = { _, _, _ in }
 
     /// Where a caption was when its drag began, so the gesture applies to a
     /// fixed base rather than compounding its own output.
@@ -409,7 +533,9 @@ private struct CollageCanvas: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
-                Color(.secondarySystemBackground)
+                // The seams between the photos are white in the saved
+                // collage, so they are white here too, in either theme.
+                Color.white
                 ForEach(layout.cells.indices, id: \.self) { index in
                     if let photo = photos[safe: index] {
                         cell(layout.cells[index], photo: photo, index: index, canvas: geo.size)
@@ -505,8 +631,11 @@ private struct CollageCanvas: View {
         index: Int,
         canvas: CGSize
     ) -> some View {
-        let width = cell.width * canvas.width
-        let height = cell.height * canvas.height
+        // The render's white seam, scaled to the preview: the same fraction of
+        // the long edge, half of it on every side of the cell.
+        let gap = CGFloat(CollageRenderer.gapFraction) * max(canvas.width, canvas.height)
+        let width: CGFloat = max(0, CGFloat(cell.width) * canvas.width - gap)
+        let height: CGFloat = max(0, CGFloat(cell.height) * canvas.height - gap)
         let isDropTarget = photoDragOver == index && photoDragFrom != index
         return CollageTile(photo: photo)
             .frame(width: width, height: height)
@@ -520,7 +649,7 @@ private struct CollageCanvas: View {
             .contentShape(Rectangle())
             .onTapGesture { onTapCell(index) }
             .gesture(photoDrag(from: index, canvas: canvas))
-            .offset(x: cell.x * canvas.width, y: cell.y * canvas.height)
+            .offset(x: CGFloat(cell.x) * canvas.width + gap / 2, y: CGFloat(cell.y) * canvas.height + gap / 2)
     }
 }
 
@@ -586,7 +715,7 @@ private struct CollageTile: View {
 /// One caption on the preview.
 ///
 /// The font size is a fraction of the *preview's* height, the same fraction
-/// the render applies to the 2400 px canvas, so the caption covers the same
+/// the render applies to the 4000 px canvas, so the caption covers the same
 /// share of the picture in both.
 ///
 /// Where the two can still differ: SwiftUI breaks the lines here, while the

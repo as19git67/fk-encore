@@ -110,6 +110,25 @@ final class CollageRendererTests: XCTestCase {
         }
     }
 
+    func testAGapLeavesTheSameSeamAsTheWeb() {
+        // 0.6 % of a 4000 px long edge: 24 px between two photos, 12 at the
+        // border, the same white frame the web draws.
+        let canvas = CollageRenderer.canvasSize(aspect: 3.0 / 2, maxEdge: 4000)
+        let gap = CollageRenderer.gap(for: canvas)
+        XCTAssertEqual(gap, 24, accuracy: 0.001)
+        let cells = CollageLayouts.layouts(for: 2).first { $0.id == "side" }!.cells
+        let rects = cells.map { CollageRenderer.destinationRect(for: $0, canvas: canvas, gap: gap) }
+        XCTAssertEqual(Double(rects[0].minX), 12, accuracy: 0.001)
+        XCTAssertEqual(Double(rects[0].minY), 12, accuracy: 0.001)
+        XCTAssertEqual(Double(rects[1].minX - rects[0].maxX), 24, accuracy: 0.001)
+        XCTAssertEqual(Double(canvas.width - rects[1].maxX), 12, accuracy: 0.001)
+    }
+
+    func testTheExportMatchesTheWebsSize() {
+        XCTAssertEqual(CollageRenderer.maxEdge, 4000)
+        XCTAssertEqual(Double(CollageRenderer.jpegQuality), 0.92, accuracy: 0.0001)
+    }
+
     // MARK: - Inherited date
 
     private func photo(id: Int, takenAt: String?) -> PhotoWithCuration {

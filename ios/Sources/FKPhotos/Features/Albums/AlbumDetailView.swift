@@ -35,6 +35,9 @@ struct AlbumDetailView: View {
     @State private var filterSort = FilterSortViewModel()
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
+    /// `selectedIds` in the order they were picked — a collage fills its
+    /// cells in that order, as on the web.
+    @State private var selectionOrder: [Int] = []
     @State private var shareManager = PhotoShareManager()
     @State private var addToAlbum = AddToAlbumManager()
     @State private var itemFrames: [Int: CGRect] = [:]
@@ -239,11 +242,16 @@ struct AlbumDetailView: View {
         }
         .sheet(isPresented: $showCollage) {
             CollageView(
-                photos: displayedPhotos.filter { selectedIds.contains($0.id) },
+                photos: SelectionOrder.photos(displayedPhotos, in: selectionOrder),
                 albumId: albumId
             ) {
                 Task { await loadAlbum() }
             }
+        }
+        .onChange(of: selectedIds) { _, ids in
+            selectionOrder = SelectionOrder.reconciled(
+                selectionOrder, with: ids, gridOrder: displayedPhotos.map(\.id)
+            )
         }
         .sheet(isPresented: $showMap) {
             NavigationStack {

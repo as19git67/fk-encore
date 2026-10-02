@@ -142,3 +142,37 @@ final class PhotoSelectionTests: XCTestCase {
         XCTAssertEqual(selection.title, "2 ausgewählt")
     }
 }
+
+/// The order a collage fills its cells in — the order the photos were picked.
+final class SelectionOrderTests: XCTestCase {
+
+    func testPhotosKeepTheOrderTheyWereTappedIn() {
+        // Tapped 30, then 10, then 20 — not grid order 10, 20, 30.
+        var order: [Int] = []
+        let grid = [10, 20, 30]
+        order = SelectionOrder.reconciled(order, with: [30], gridOrder: grid)
+        order = SelectionOrder.reconciled(order, with: [30, 10], gridOrder: grid)
+        order = SelectionOrder.reconciled(order, with: [30, 10, 20], gridOrder: grid)
+        XCTAssertEqual(order, [30, 10, 20])
+    }
+
+    func testDeselectingDropsAPhotoAndTheRestKeepTheirPlace() {
+        let order = SelectionOrder.reconciled([30, 10, 20], with: [30, 20], gridOrder: [10, 20, 30])
+        XCTAssertEqual(order, [30, 20])
+    }
+
+    func testSeveralArrivingAtOnceFollowTheGrid() {
+        // A drag or "select all" adds a batch; within it, grid order decides.
+        let order = SelectionOrder.reconciled([30], with: [10, 20, 30, 40], gridOrder: [40, 10, 20, 30])
+        XCTAssertEqual(order, [30, 40, 10, 20])
+    }
+
+    func testAnIdOffTheGridStillCountsAndComesLast() {
+        let order = SelectionOrder.reconciled([], with: [7, 3, 5], gridOrder: [5])
+        XCTAssertEqual(order, [5, 3, 7])
+    }
+
+    func testClearingTheSelectionEmptiesTheOrder() {
+        XCTAssertEqual(SelectionOrder.reconciled([1, 2], with: [], gridOrder: [1, 2]), [])
+    }
+}

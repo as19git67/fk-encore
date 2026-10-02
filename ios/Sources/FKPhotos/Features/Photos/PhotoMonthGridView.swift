@@ -16,6 +16,10 @@ struct PhotoMonthGridView: View {
     @State private var showSlideshow = false
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
+    /// `selectedIds` in the order they were picked — a collage fills its
+    /// cells in that order, as on the web.
+    @State private var selectionOrder: [Int] = []
+    @State private var showCollage = false
     @State private var shareManager = PhotoShareManager()
     @State private var addToAlbum = AddToAlbumManager()
     @State private var itemFrames: [Int: CGRect] = [:]
@@ -149,6 +153,14 @@ struct PhotoMonthGridView: View {
                         Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
+                    // A collage needs between two and nine photos; outside
+                    // that range there is no layout to offer.
+                    Button {
+                        showCollage = true
+                    } label: {
+                        Label("Collage", systemImage: "square.grid.2x2")
+                    }
+                    .disabled(!CollageLayouts.canCollage(selectedIds.count))
                 }
             } else {
                 ToolbarItem(placement: .primaryAction) {
@@ -189,6 +201,14 @@ struct PhotoMonthGridView: View {
         .task { await loadPhotos() }
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
+        }
+        .sheet(isPresented: $showCollage) {
+            CollageView(photos: SelectionOrder.photos(photos, in: selectionOrder))
+        }
+        .onChange(of: selectedIds) { _, ids in
+            selectionOrder = SelectionOrder.reconciled(
+                selectionOrder, with: ids, gridOrder: photos.map(\.id)
+            )
         }
         .sheet(isPresented: $addToAlbum.isPresented) {
             AddToAlbumPickerView(manager: addToAlbum)
