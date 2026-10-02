@@ -105,6 +105,23 @@ final class ReviewQueueViewModel {
         decide(.peerConsensus)
     }
 
+    /// „Nicht dasselbe Motiv" (`off`) / „Als Formatpaar behandeln" (`auto`)
+    /// on the current card. Written at once — it is a setting on the group,
+    /// not a review decision, so it is not buffered for undo — and mirrored
+    /// into the loaded card so the tag and the ↓ swipe follow.
+    func setOrientationVariants(mode: String) async {
+        guard let group = state.current else { return }
+        do {
+            _ = try await APIClient.shared.patch(
+                "/photos/groups/\(group.id)/variants",
+                body: VariantsBody(mode: mode)
+            ) as SuccessOnly
+            state.setOrientationPair(mode == "auto", groupId: group.id)
+        } catch {
+            toastMessage = .error("Einstellung konnte nicht gespeichert werden.")
+        }
+    }
+
     /// Advances the cursor immediately and hands the now-uncancellable
     /// decision to the commit chain. Deliberately synchronous: the card must
     /// move the instant the finger lifts, never at the speed of the network.
@@ -139,6 +156,7 @@ final class ReviewQueueViewModel {
     private struct SuccessOnly: Decodable { let success: Bool }
     private struct PhotoIdsBody: Encodable { let photoIds: [Int] }
     private struct CurationBody: Encodable { let status: CurationStatus }
+    private struct VariantsBody: Encodable { let mode: String }
 
     /// Serializes commits behind one another. Decisions are independent
     /// server-side, but keeping them ordered means a failure toast always
@@ -206,6 +224,12 @@ final class ReviewQueueViewModel {
         case .peerConsensus:
             _ = try await APIClient.shared.post(
                 "/photos/groups/\(groupId)/accept-peer-consensus",
+                body: EmptyBody()
+            ) as SuccessOnly
+
+        case .keepBestPerOrientation:
+            _ = try await APIClient.shared.post(
+                "/photos/groups/\(groupId)/keep-best-per-orientation",
                 body: EmptyBody()
             ) as SuccessOnly
         }

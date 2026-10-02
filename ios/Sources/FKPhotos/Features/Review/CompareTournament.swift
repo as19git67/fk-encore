@@ -65,19 +65,32 @@ struct CompareTournament: Equatable, Sendable {
     /// `suggestedKeepIds`). Photos the caller said nothing about are
     /// `.unknown`, which is its own class rather than a guess.
     private let orientations: [Int: PhotoOrientation]
+    /// Portrait against landscape, in a format pair: never asked. The same
+    /// motif shot both ways is not a duel to be won — both sides survive
+    /// (.claude/plans/orientierungs-varianten.md), so these pairs are kept out
+    /// of the tournament from the start. Empty unless the caller said the
+    /// group is a format pair and both shapes are actually present.
+    private let crossPairs: Set<Pair>
 
     // MARK: - Starting
 
+    /// - Parameter formatPair: the group holds the same motif portrait and
+    ///   landscape and the user has not said otherwise. Then photos only duel
+    ///   inside their orientation.
     init(
         photoIds: [Int],
         seedScores: [Int: Int] = [:],
-        orientations: [Int: PhotoOrientation] = [:]
+        orientations: [Int: PhotoOrientation] = [:],
+        formatPair: Bool = false
     ) {
         self.photoIds = photoIds
         self.scores = Dictionary(
             uniqueKeysWithValues: photoIds.map { ($0, seedScores[$0] ?? 0) }
         )
         self.orientations = orientations
+        self.crossPairs = formatPair
+            ? Self.crossOrientationPairs(photoIds: photoIds, orientations: orientations)
+            : []
         self.settled = []
         self.skipped = []
         self.comparisons = 0
@@ -86,12 +99,28 @@ struct CompareTournament: Equatable, Sendable {
         // A group of one has nothing to compare, and goes straight to the
         // confirmation — which is the honest answer, not an error.
         if let first = Self.nextPair(
-            photoIds: photoIds, scores: scores, excluding: []
+            photoIds: photoIds, scores: scores, excluding: crossPairs
         ) {
             self.current = first
         } else {
             self.phase = .confirming
         }
+    }
+
+    /// Every portrait-against-landscape pair of the group, or nothing when one
+    /// of the two shapes is missing — then there is no pair to protect.
+    static func crossOrientationPairs(
+        photoIds: [Int],
+        orientations: [Int: PhotoOrientation]
+    ) -> Set<Pair> {
+        let portrait = photoIds.filter { orientations[$0] == .portrait }
+        let landscape = photoIds.filter { orientations[$0] == .landscape }
+        guard !portrait.isEmpty, !landscape.isEmpty else { return [] }
+        var out: Set<Pair> = []
+        for p in portrait {
+            for l in landscape { out.insert(Pair(p, l)) }
+        }
+        return out
     }
 
     // MARK: - Verdicts
@@ -127,7 +156,7 @@ struct CompareTournament: Equatable, Sendable {
 
     private mutating func advance() {
         if let next = Self.nextPair(
-            photoIds: photoIds, scores: scores, excluding: settled.union(skipped)
+            photoIds: photoIds, scores: scores, excluding: settled.union(skipped).union(crossPairs)
         ) {
             current = next
             return
@@ -135,7 +164,7 @@ struct CompareTournament: Equatable, Sendable {
         // Nothing fresh left: a skipped pair is better than ending early, so
         // those come back before the tournament closes.
         if let revisited = Self.nextPair(
-            photoIds: photoIds, scores: scores, excluding: settled
+            photoIds: photoIds, scores: scores, excluding: settled.union(crossPairs)
         ) {
             current = revisited
             return
@@ -164,7 +193,7 @@ struct CompareTournament: Equatable, Sendable {
     /// comparison screen.
     mutating func resumeComparing() {
         guard let next = Self.nextPair(
-            photoIds: photoIds, scores: scores, excluding: settled
+            photoIds: photoIds, scores: scores, excluding: settled.union(crossPairs)
         ) else { return }
         skipped = []
         current = next
@@ -175,14 +204,18 @@ struct CompareTournament: Equatable, Sendable {
 
     /// Whether any pair at all is still unjudged.
     var hasUnsettledPairs: Bool {
-        Self.nextPair(photoIds: photoIds, scores: scores, excluding: settled) != nil
+        Self.nextPair(photoIds: photoIds, scores: scores, excluding: settled.union(crossPairs)) != nil
     }
 
-    /// Total unique pairs in the group: n · (n − 1) / 2.
+    /// Total pairs the tournament will ask about: n · (n − 1) / 2, minus the
+    /// portrait-against-landscape pairs a format pair never asks.
     var totalPairs: Int {
         let n = photoIds.count
-        return n < 2 ? 0 : n * (n - 1) / 2
+        return n < 2 ? 0 : n * (n - 1) / 2 - crossPairs.count
     }
+
+    /// Whether this tournament keeps portrait and landscape apart.
+    var isFormatPair: Bool { !crossPairs.isEmpty }
 
     func score(of photoId: Int) -> Int { scores[photoId] ?? 0 }
 

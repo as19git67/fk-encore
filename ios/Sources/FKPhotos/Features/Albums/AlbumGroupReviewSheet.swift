@@ -68,7 +68,9 @@ struct AlbumGroupReviewSheet: View {
             .task { await load() }
             .fullScreenCover(item: $comparing) { group in
                 PhotoCompareView(
-                    photos: AlbumGroupReview.comparablePhotos(for: group, from: photos)
+                    photos: AlbumGroupReview.comparablePhotos(for: group, from: photos),
+                    // `variants` is only set while the group forms a format pair.
+                    formatPair: group.variants != nil
                 ) { keep in
                     Task { await commit(group: group, keep: keep) }
                 }

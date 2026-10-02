@@ -37,7 +37,8 @@ final class ReviewQueueTests: XCTestCase {
         photoIds: [Int] = [1, 2, 3],
         pickedIds: [Int]? = nil,
         confidence: String? = "high",
-        peerHiddenOn: Int? = nil
+        peerHiddenOn: Int? = nil,
+        orientationPair: Bool? = nil
     ) -> ReviewQueueGroup {
         let photos = photoIds.map {
             photo($0, picked: pickedIds?.contains($0) ?? false, peerHidden: $0 == peerHiddenOn ? 2 : 0)
@@ -52,7 +53,8 @@ final class ReviewQueueTests: XCTestCase {
             duplicate_candidate: false,
             duplicate_recommended_photo_id: nil,
             duplicate_deletable_count: 0,
-            photos: photos
+            photos: photos,
+            orientation_pair: orientationPair
         )
     }
 
@@ -75,6 +77,70 @@ final class ReviewQueueTests: XCTestCase {
     func testDownwardSwipeIsNotADecision() {
         // Pulling down must stay free for scrolling / dismissing, never decide.
         XCTAssertNil(ReviewSwipe.resolve(translationWidth: 0, translationHeight: 300))
+    }
+
+    /// Down is „Bestes je Format" only where the card is a format pair
+    /// (.claude/plans/orientierungs-varianten.md); everywhere else it stays
+    /// what it was: nothing.
+    func testDownwardSwipeIsBestPerFormatOnlyOnAFormatPair() {
+        XCTAssertEqual(
+            ReviewSwipe.resolve(translationWidth: 0, translationHeight: 300, allowsDown: true),
+            .bestPerFormat
+        )
+        XCTAssertNil(ReviewSwipe.resolve(translationWidth: 0, translationHeight: 300, allowsDown: false))
+        XCTAssertNil(ReviewSwipe.resolve(translationWidth: 0, translationHeight: 40, allowsDown: true))
+        // Up is still favorite, with or without the flag.
+        XCTAssertEqual(
+            ReviewSwipe.resolve(translationWidth: 0, translationHeight: -300, allowsDown: true),
+            .favorite
+        )
+    }
+
+    func testBestPerFormatDecisionNeedsAFormatPair() {
+        let pair = group(id: 1, pickedIds: [2], orientationPair: true)
+        XCTAssertTrue(pair.isOrientationPair)
+        XCTAssertEqual(ReviewSwipe.bestPerFormat.decision(for: pair), .keepBestPerOrientation)
+        XCTAssertEqual(ReviewDecision(group: pair, kind: .keepBestPerOrientation).keptPhotoIds, [])
+
+        let plain = group(id: 2, pickedIds: [2])
+        XCTAssertFalse(plain.isOrientationPair)
+        XCTAssertEqual(ReviewSwipe.bestPerFormat.decision(for: plain), .keepAll)
+    }
+
+    func testOrientationPairCanBeSwitchedOnALoadedGroup() {
+        var state = ReviewQueueState()
+        state.append([group(id: 1, orientationPair: true), group(id: 2)], total: 2)
+        state.setOrientationPair(false, groupId: 1)
+        XCTAssertEqual(state.current?.isOrientationPair, false)
+        state.setOrientationPair(true, groupId: 2)
+        XCTAssertEqual(state.groups[1].isOrientationPair, true)
+        // An unknown id changes nothing.
+        state.setOrientationPair(true, groupId: 99)
+        XCTAssertEqual(state.groups.map(\.isOrientationPair), [false, true])
+    }
+
+    func testGroupDecodesOrientationPairAndTolerateItsAbsence() throws {
+        let with = """
+        {"id":1,"cover_photo_id":1,"member_count":2,"ai_picked_photo_ids":[1],
+         "ai_picked_confidence":"high","runner_up_delta":0.2,"orientation_pair":true,
+         "photos":[{"id":1,"filename":"a.jpg","taken_at":null,"curation":"visible","ai_picked":true,
+                    "ai_quality_score":0.8,"peer_curation":{"hidden":0,"favorite":0},"width":3000,"height":4000},
+                   {"id":2,"filename":"b.jpg","taken_at":null,"curation":"visible","ai_picked":false,
+                    "ai_quality_score":0.7,"peer_curation":{"hidden":0,"favorite":0},"width":4000,"height":3000}]}
+        """
+        let decoded = try JSONDecoder().decode(ReviewQueueGroup.self, from: Data(with.utf8))
+        XCTAssertTrue(decoded.isOrientationPair)
+        XCTAssertTrue(decoded.hasBothOrientations)
+
+        let without = """
+        {"id":1,"cover_photo_id":1,"member_count":1,"ai_picked_photo_ids":[1],
+         "ai_picked_confidence":"high","runner_up_delta":null,
+         "photos":[{"id":1,"filename":"a.jpg","taken_at":null,"curation":"visible","ai_picked":true,
+                    "ai_quality_score":null,"peer_curation":null,"width":null,"height":null}]}
+        """
+        let plain = try JSONDecoder().decode(ReviewQueueGroup.self, from: Data(without.utf8))
+        XCTAssertFalse(plain.isOrientationPair)
+        XCTAssertFalse(plain.hasBothOrientations)
     }
 
     func testDiagonalDragPrefersTheHorizontalDecision() {
