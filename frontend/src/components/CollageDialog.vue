@@ -14,6 +14,10 @@
  *      other (pointer-based, works on touch + mouse). The share button
  *      renders the collage to a JPEG and hands it to the Web Share API
  *      (falling back to a download where unsupported).
+ *
+ * The preview draws 1600 px images; the export draws the originals, fetched
+ * once on the first share/save. A 4000 px collage built from 1600 px sources
+ * would upscale every cell — the iOS app renders from the originals too.
  */
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import Dialog from 'primevue/dialog'
@@ -97,16 +101,23 @@ function isHeic(filename: string): boolean {
   return lower.endsWith('.heic') || lower.endsWith('.heif')
 }
 
+/** Long edge of the preview images; the export uses the originals. */
+const PREVIEW_WIDTH = 1600
+
 // Mirrors HeicImage.vue: Safari decodes HEIC natively, everyone else needs
 // the server-side `?convert=true` JPEG. We retry once with convert on error
 // to cover the UA-detection blind spots noted there.
-function resolveSrc(filename: string, convert: boolean): string {
-  const base = getPhotoUrl(filename, 1600)
+function resolveSrc(filename: string, convert: boolean, width?: number): string {
+  const base = getPhotoUrl(filename, width)
   if (!convert) return base
   return `${base}${base.includes('?') ? '&' : '?'}convert=true`
 }
 
-function loadImage(filename: string): Promise<{ img: HTMLImageElement; url: string }> {
+/** Load a photo; `width` omitted loads the original. */
+function loadImage(
+  filename: string,
+  width?: number,
+): Promise<{ img: HTMLImageElement; url: string }> {
   return new Promise((resolve, reject) => {
     const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
     const wantConvert = isHeic(filename) && !isSafari
@@ -117,13 +128,34 @@ function loadImage(filename: string): Promise<{ img: HTMLImageElement; url: stri
     img.onerror = () => {
       if (isHeic(filename) && !triedConvert) {
         triedConvert = true
-        img.src = resolveSrc(filename, true)
+        img.src = resolveSrc(filename, true, width)
         return
       }
       reject(new Error(`Bild konnte nicht geladen werden: ${filename}`))
     }
-    img.src = resolveSrc(filename, wantConvert)
+    img.src = resolveSrc(filename, wantConvert, width)
   })
+}
+
+// Originals for the export, by photo id — fetched on the first share/save and
+// kept for the next one while the dialog stays open.
+const originals = new Map<number, HTMLImageElement>()
+
+/**
+ * The image to draw into the export: the original, or — if it cannot be
+ * loaded — the preview image, so a failed fetch costs sharpness, not the
+ * collage.
+ */
+async function exportImage(photo: CollagePhoto): Promise<HTMLImageElement> {
+  const cached = originals.get(photo.id)
+  if (cached) return cached
+  try {
+    const { img } = await loadImage(photo.filename)
+    originals.set(photo.id, img)
+    return img
+  } catch {
+    return photo.img
+  }
 }
 
 async function loadPhotos() {
@@ -138,6 +170,7 @@ async function loadPhotos() {
   activeTextIndex.value = null
   textElRefs.value = []
   photoPresetColors.value = []
+  originals.clear()
   const ids = props.photoIds.slice()
   try {
     const { photos: details } = await getPhotoDetailsBatch(ids)
@@ -146,7 +179,7 @@ async function loadPhotos() {
     const ordered = ids.map((id) => byId.get(id)).filter((p): p is Photo => !!p)
     const loaded = await Promise.all(
       ordered.map(async (p) => {
-        const { img, url } = await loadImage(p.filename)
+        const { img, url } = await loadImage(p.filename, PREVIEW_WIDTH)
         return {
           id: p.id,
           filename: p.filename,
@@ -451,17 +484,22 @@ async function buildCollageBlob(): Promise<Blob> {
   ctx.fillRect(0, 0, width, height)
 
   const gap = Math.round(EXPORT_LONG_EDGE * GAP_FRACTION)
+  const cellPhotos = layout.cells.map((_, i) => photoForCell(i))
+  const images = await Promise.all(
+    cellPhotos.map((photo) => (photo ? exportImage(photo) : Promise.resolve(null))),
+  )
   layout.cells.forEach((cell, i) => {
-    const photo = photoForCell(i)
-    if (!photo) return
+    const photo = cellPhotos[i]
+    const img = images[i]
+    if (!photo || !img) return
     const dx = cell.x * width + gap / 2
     const dy = cell.y * height + gap / 2
     const dw = cell.w * width - gap
     const dh = cell.h * height - gap
     if (dw <= 0 || dh <= 0) return
-    const { naturalWidth, naturalHeight } = photo.img
+    const { naturalWidth, naturalHeight } = img
     const src = coverCropRect(naturalWidth, naturalHeight, dw / dh, photo.autoCrop)
-    ctx.drawImage(photo.img, src.sx, src.sy, src.sw, src.sh, dx, dy, dw, dh)
+    ctx.drawImage(img, src.sx, src.sy, src.sw, src.sh, dx, dy, dw, dh)
   })
 
   if (textOverlays.value.some((o) => o.text.trim())) {
