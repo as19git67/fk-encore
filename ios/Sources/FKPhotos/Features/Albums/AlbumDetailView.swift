@@ -35,6 +35,9 @@ struct AlbumDetailView: View {
     @State private var filterSort = FilterSortViewModel()
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
+    /// `selectedIds` in the order they were picked — a collage fills its
+    /// cells in that order, as on the web.
+    @State private var selectionOrder: [Int] = []
     @State private var shareManager = PhotoShareManager()
     @State private var addToAlbum = AddToAlbumManager()
     @State private var itemFrames: [Int: CGRect] = [:]
@@ -211,7 +214,11 @@ struct AlbumDetailView: View {
                     .padding(.horizontal, 2)
                     .coordinateSpace(name: "albumGrid")
                     .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-                    .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
+                    .dragToSelect(isActive: isSelecting, in: "albumGrid") { point in
+                        for (id, frame) in itemFrames where frame.contains(point) {
+                            selectedIds.insert(id)
+                        }
+                    }
                 }
             }
             .scrollsBack(to: $scrollTarget, in: proxy)
@@ -233,8 +240,14 @@ struct AlbumDetailView: View {
         .fullScreenCover(isPresented: $showSlideshow) {
             PhotoSlideshowView(photos: slideshowPhotos, title: album?.name ?? "")
         }
-        .sheet(isPresented: $showCollage) {
-            CollageView(photos: displayedPhotos.filter { selectedIds.contains($0.id) })
+        .collageSheet(
+            isPresented: $showCollage,
+            selectedIds: selectedIds,
+            order: $selectionOrder,
+            photos: displayedPhotos,
+            albumId: albumId
+        ) {
+            Task { await loadAlbum() }
         }
         .sheet(isPresented: $showMap) {
             NavigationStack {
@@ -302,14 +315,7 @@ struct AlbumDetailView: View {
                         Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
-                    // A collage needs between two and nine photos; outside
-                    // that range there is no layout to offer.
-                    Button {
-                        showCollage = true
-                    } label: {
-                        Label("Collage", systemImage: "square.grid.2x2")
-                    }
-                    .disabled(!CollageLayouts.canCollage(selectedIds.count))
+                    CollageToolbarButton(selectedCount: selectedIds.count) { showCollage = true }
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
@@ -571,21 +577,6 @@ struct AlbumDetailView: View {
         } else {
             selectedIds.insert(id)
         }
-    }
-
-    /// Drag-to-select, gated behind a hold so the album grid still scrolls
-    /// while selecting — see `PhotoGridView.dragSelectGesture` for why.
-    private var dragSelectGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(
-                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("albumGrid"))
-            )
-            .onChanged { value in
-                guard case .second(_, let drag?) = value else { return }
-                for (id, frame) in itemFrames where frame.contains(drag.location) {
-                    selectedIds.insert(id)
-                }
-            }
     }
 
     /// Reflects saved album properties locally (title, description, map view)

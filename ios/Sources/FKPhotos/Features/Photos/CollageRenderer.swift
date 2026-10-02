@@ -14,12 +14,25 @@ import UIKit
 /// graphics context.
 enum CollageRenderer {
 
-    /// The longest edge of a rendered collage, in pixels.
+    /// The longest edge of a rendered collage, in pixels — the web's
+    /// `EXPORT_LONG_EDGE`, so a collage is the same size wherever it was made.
     ///
-    /// Big enough to hold up on a large screen and to print small, short of
-    /// the memory a full-resolution montage of nine photos would take on a
-    /// phone.
-    static let maxEdge: Double = 2400
+    /// A 4000 × 4000 canvas is 64 MB of pixels while it is drawn, well within
+    /// a phone's budget for a moment's work.
+    static let maxEdge: Double = 4000
+
+    /// The white gap between cells, as a fraction of the long edge — the
+    /// web's `GAP_FRACTION`. Every cell gives up half of it on each side, so
+    /// the outer border is half as wide as the seam between two photos.
+    static let gapFraction: Double = 0.006
+
+    /// JPEG quality of the saved and shared collage, as on the web.
+    static let jpegQuality: CGFloat = 0.92
+
+    /// The gap in pixels for a canvas of this size.
+    static func gap(for canvas: CGSize) -> Double {
+        (Double(max(canvas.width, canvas.height)) * gapFraction).rounded()
+    }
 
     /// The pixel size of a canvas with this aspect.
     ///
@@ -41,12 +54,21 @@ enum CollageRenderer {
     /// Rounded outward — a cell's edges are grown to whole pixels rather than
     /// truncated, so neighbouring cells overlap by a fraction of a pixel
     /// instead of leaving a hairline of background between them.
-    static func destinationRect(for cell: CollageLayouts.Cell, canvas: CGSize) -> CGRect {
+    ///
+    /// With a `gap`, the cell is then inset by half of it on every side, as
+    /// the web draws it (`dx = x + gap/2`, `dw = w − gap`).
+    static func destinationRect(
+        for cell: CollageLayouts.Cell,
+        canvas: CGSize,
+        gap: Double = 0
+    ) -> CGRect {
         let left = (cell.x * Double(canvas.width)).rounded(.down)
         let top = (cell.y * Double(canvas.height)).rounded(.down)
         let right = ((cell.x + cell.width) * Double(canvas.width)).rounded(.up)
         let bottom = ((cell.y + cell.height) * Double(canvas.height)).rounded(.up)
-        return CGRect(x: left, y: top, width: right - left, height: bottom - top)
+        let rect = CGRect(x: left, y: top, width: right - left, height: bottom - top)
+        guard gap > 0 else { return rect }
+        return rect.insetBy(dx: CGFloat(gap / 2), dy: CGFloat(gap / 2))
     }
 
     /// One photo, ready to be drawn.
@@ -87,10 +109,12 @@ enum CollageRenderer {
             background.setFill()
             context.fill(CGRect(origin: .zero, size: canvas))
 
+            let seam = Self.gap(for: canvas)
             for (index, cell) in layout.cells.enumerated() {
                 guard index < tiles.count else { break }
                 let tile = tiles[index]
-                let destination = destinationRect(for: cell, canvas: canvas)
+                let destination = destinationRect(for: cell, canvas: canvas, gap: seam)
+                guard destination.width > 0, destination.height > 0 else { continue }
                 draw(tile, into: destination, context: context.cgContext)
             }
 
@@ -185,20 +209,56 @@ enum CollageRenderer {
 
     // MARK: - Upload metadata
 
-    /// A collage takes the capture date of its **oldest** source, so it sorts
-    /// beside the photos it was made from rather than at "now" — the same rule
-    /// the web applies through `X-Date-Taken`.
+    /// A collage takes the capture date of its **newest** source plus one
+    /// second, so it sorts directly after the photos it was made from rather
+    /// than at "now" — the web's `getCollageDate` in `CollageDialog.vue`,
+    /// sent the same way through `X-Date-Taken`.
+    ///
+    /// The wall-clock components are carried over literally and the second is
+    /// added in UTC: the server discards any offset, as it does for EXIF, so
+    /// converting through the device's time zone could only skew it.
     ///
     /// Nil when no source has a date to inherit, in which case the server
     /// falls back to the file's own EXIF.
     static func inheritedDate(from photos: [PhotoWithCuration]) -> String? {
-        photos
+        let newest = photos
             .compactMap { $0.taken_at }
-            .compactMap { raw -> (String, Date)? in
-                PhotoFilter.parseDate(raw).map { (raw, $0) }
-            }
-            .min { $0.1 < $1.1 }?
-            .0
+            .compactMap(wallClock(_:))
+            .max()
+        guard let newest else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter.string(from: newest.addingTimeInterval(1))
+    }
+
+    /// `YYYY-MM-DD[T ]HH:MM[:SS]` read as wall-clock time on a UTC calendar;
+    /// fractions and any offset after it are ignored, as on the web.
+    static func wallClock(_ raw: String) -> Date? {
+        let chars = Array(raw)
+        func number(_ start: Int, _ length: Int) -> Int? {
+            guard start + length <= chars.count else { return nil }
+            let digits = chars[start..<start + length]
+            guard digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber) else { return nil }
+            return Int(String(digits))
+        }
+        func char(_ index: Int, in set: String) -> Bool {
+            index < chars.count && set.contains(chars[index])
+        }
+        guard let year = number(0, 4), char(4, in: "-"),
+              let month = number(5, 2), char(7, in: "-"),
+              let day = number(8, 2), char(10, in: "T "),
+              let hour = number(11, 2), char(13, in: ":"),
+              let minute = number(14, 2)
+        else { return nil }
+        let second = char(16, in: ":") ? number(17, 2) ?? 0 : 0
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.date(from: DateComponents(
+            year: year, month: month, day: day,
+            hour: hour, minute: minute, second: second
+        ))
     }
 
     /// The filename a collage is uploaded under.

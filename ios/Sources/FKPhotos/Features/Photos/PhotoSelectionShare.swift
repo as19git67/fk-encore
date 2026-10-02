@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Drag-to-select support
 
@@ -15,6 +16,50 @@ extension View {
             Color.clear.preference(key: PhotoFramePreference.self,
                                    value: [id: geo.frame(in: .named(space))])
         })
+    }
+
+    /// Paint a selection by holding a tile for a moment, then dragging
+    /// across others. `onPoint` gets each finger position in `space`.
+    func dragToSelect(
+        isActive: Bool, in space: String, onPoint: @escaping (CGPoint) -> Void
+    ) -> some View {
+        gesture(DragToSelectRecognizer(isActive: isActive, space: space, onPoint: onPoint))
+    }
+}
+
+/// The hold-then-drag behind `dragToSelect`, as a UIKit recognizer.
+///
+/// The grids live in a `ScrollView`. A SwiftUI gesture with a drag in it
+/// kept that scroll view from panning on device — even sequenced behind a
+/// `LongPressGesture` (#1209) — so selection mode froze the grid.
+/// `UILongPressGestureRecognizer` takes part in UIKit's own gesture
+/// resolution instead: a swipe moves past `allowableMovement` before the
+/// hold completes, the recognizer fails and the scroll view pans; holding
+/// still first lets it begin, after which the scroll view stays put and
+/// the finger paints. Photos behaves the same way.
+struct DragToSelectRecognizer: UIGestureRecognizerRepresentable {
+    let isActive: Bool
+    let space: String
+    let onPoint: (CGPoint) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = 0.25
+        recognizer.isEnabled = isActive
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        recognizer.isEnabled = isActive
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        switch recognizer.state {
+        case .began, .changed:
+            onPoint(context.converter.location(in: .named(space)))
+        default:
+            break
+        }
     }
 }
 
@@ -79,6 +124,35 @@ struct PhotoSelection: Equatable, Sendable {
     var title: String { "\(count) ausgewählt" }
 }
 
+// MARK: - Selection order
+
+/// The order photos were picked in, which a `Set` of ids forgets.
+///
+/// A collage fills its cells in this order, as on the web (whose selection is
+/// an insertion-ordered `Set`): the first photo tapped goes into the first —
+/// often the biggest — cell. Grids keep their `Set` for membership and fold
+/// every change into an ordered list with `reconciled`.
+enum SelectionOrder {
+    /// `order` brought up to date with `ids`: photos no longer selected drop
+    /// out, the ones that stay keep their place, and newly selected ones go
+    /// on the end. Several arriving at once — a drag across the grid — are
+    /// appended in grid order; an id the grid does not show comes last, by
+    /// id, so the result never depends on hashing.
+    static func reconciled(_ order: [Int], with ids: Set<Int>, gridOrder: [Int]) -> [Int] {
+        var seen = Set<Int>()
+        var result = order.filter { ids.contains($0) && seen.insert($0).inserted }
+        result += gridOrder.filter { ids.contains($0) && seen.insert($0).inserted }
+        result += ids.subtracting(seen).sorted()
+        return result
+    }
+
+    /// The selected photos, in the order they were picked.
+    static func photos(_ photos: [PhotoWithCuration], in order: [Int]) -> [PhotoWithCuration] {
+        let byId = Dictionary(photos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return order.compactMap { byId[$0] }
+    }
+}
+
 // MARK: - Selection checkmark overlay
 
 struct SelectionCheckmark: View {
@@ -135,6 +209,18 @@ struct ActivityView: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: images, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+/// The share sheet for one file on disk — a rendered collage, shared as the
+/// JPEG it was encoded to rather than re-encoded from a `UIImage`.
+struct FileActivityView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}

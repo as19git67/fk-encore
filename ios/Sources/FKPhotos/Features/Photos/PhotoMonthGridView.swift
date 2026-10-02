@@ -16,6 +16,10 @@ struct PhotoMonthGridView: View {
     @State private var showSlideshow = false
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
+    /// `selectedIds` in the order they were picked — a collage fills its
+    /// cells in that order, as on the web.
+    @State private var selectionOrder: [Int] = []
+    @State private var showCollage = false
     @State private var shareManager = PhotoShareManager()
     @State private var addToAlbum = AddToAlbumManager()
     @State private var itemFrames: [Int: CGRect] = [:]
@@ -108,7 +112,11 @@ struct PhotoMonthGridView: View {
                     .padding(.horizontal, 2)
                     .coordinateSpace(name: "monthGrid")
                     .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-                    .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
+                    .dragToSelect(isActive: isSelecting, in: "monthGrid") { point in
+                        for (id, frame) in itemFrames where frame.contains(point) {
+                            selectedIds.insert(id)
+                        }
+                    }
                 }
             }
             .scrollsBack(to: $scrollTarget, in: proxy)
@@ -145,6 +153,7 @@ struct PhotoMonthGridView: View {
                         Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
+                    CollageToolbarButton(selectedCount: selectedIds.count) { showCollage = true }
                 }
             } else {
                 ToolbarItem(placement: .primaryAction) {
@@ -186,6 +195,12 @@ struct PhotoMonthGridView: View {
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
         }
+        .collageSheet(
+            isPresented: $showCollage,
+            selectedIds: selectedIds,
+            order: $selectionOrder,
+            photos: photos
+        )
         .sheet(isPresented: $addToAlbum.isPresented) {
             AddToAlbumPickerView(manager: addToAlbum)
                 .presentationDetents([.medium, .large])
@@ -206,21 +221,6 @@ struct PhotoMonthGridView: View {
             selectedIds = []
             addToAlbum.resultMessage = nil
         }
-    }
-
-    /// Drag-to-select, gated behind a hold so the grid still scrolls while
-    /// selecting — see `PhotoGridView.dragSelectGesture` for why.
-    private var dragSelectGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(
-                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("monthGrid"))
-            )
-            .onChanged { value in
-                guard case .second(_, let drag?) = value else { return }
-                for (id, frame) in itemFrames where frame.contains(drag.location) {
-                    selectedIds.insert(id)
-                }
-            }
     }
 
     private func toggleSelection(_ id: Int) {

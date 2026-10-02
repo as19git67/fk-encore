@@ -110,6 +110,25 @@ final class CollageRendererTests: XCTestCase {
         }
     }
 
+    func testAGapLeavesTheSameSeamAsTheWeb() {
+        // 0.6 % of a 4000 px long edge: 24 px between two photos, 12 at the
+        // border, the same white frame the web draws.
+        let canvas = CollageRenderer.canvasSize(aspect: 3.0 / 2, maxEdge: 4000)
+        let gap = CollageRenderer.gap(for: canvas)
+        XCTAssertEqual(gap, 24, accuracy: 0.001)
+        let cells = CollageLayouts.layouts(for: 2).first { $0.id == "side" }!.cells
+        let rects = cells.map { CollageRenderer.destinationRect(for: $0, canvas: canvas, gap: gap) }
+        XCTAssertEqual(Double(rects[0].minX), 12, accuracy: 0.001)
+        XCTAssertEqual(Double(rects[0].minY), 12, accuracy: 0.001)
+        XCTAssertEqual(Double(rects[1].minX - rects[0].maxX), 24, accuracy: 0.001)
+        XCTAssertEqual(Double(canvas.width - rects[1].maxX), 12, accuracy: 0.001)
+    }
+
+    func testTheExportMatchesTheWebsSize() {
+        XCTAssertEqual(CollageRenderer.maxEdge, 4000)
+        XCTAssertEqual(Double(CollageRenderer.jpegQuality), 0.92, accuracy: 0.0001)
+    }
+
     // MARK: - Inherited date
 
     private func photo(id: Int, takenAt: String?) -> PhotoWithCuration {
@@ -137,8 +156,9 @@ final class CollageRendererTests: XCTestCase {
         )
     }
 
-    func testACollageTakesTheDateOfItsOldestSource() {
-        // Otherwise it sorts at "now", away from the photos it is made of.
+    func testACollageSortsRightAfterItsNewestSource() {
+        // Otherwise it sorts at "now", away from the photos it is made of —
+        // the web's rule: newest source plus one second.
         let photos = [
             photo(id: 1, takenAt: "2024-06-15T10:00:00.000Z"),
             photo(id: 2, takenAt: "2024-06-01T10:00:00.000Z"),
@@ -146,7 +166,7 @@ final class CollageRendererTests: XCTestCase {
         ]
         XCTAssertEqual(
             CollageRenderer.inheritedDate(from: photos),
-            "2024-06-01T10:00:00.000Z"
+            "2024-06-30T10:00:01.000Z"
         )
     }
 
@@ -157,7 +177,7 @@ final class CollageRendererTests: XCTestCase {
         ]
         XCTAssertEqual(
             CollageRenderer.inheritedDate(from: photos),
-            "2024-06-05T10:00:00.000Z"
+            "2024-06-05T10:00:01.000Z"
         )
     }
 
@@ -174,16 +194,26 @@ final class CollageRendererTests: XCTestCase {
         ]
         XCTAssertEqual(
             CollageRenderer.inheritedDate(from: photos),
-            "2024-06-05T10:00:00.000Z"
+            "2024-06-05T10:00:01.000Z"
         )
     }
 
-    func testTheDateIsPassedOnExactlyAsItArrived() {
-        // The server parses it; re-formatting here could only lose fidelity.
-        let raw = "2024-06-05 10:00:00.123456"
+    func testTheWallClockIsKeptAndTheSecondCarriesOver() {
+        // Postgres' own format, with microseconds the web drops as well; the
+        // added second rolls the minute, hour, day and year.
         XCTAssertEqual(
-            CollageRenderer.inheritedDate(from: [photo(id: 1, takenAt: raw)]),
-            raw
+            CollageRenderer.inheritedDate(from: [photo(id: 1, takenAt: "2024-12-31 23:59:59.123456")]),
+            "2025-01-01T00:00:00.000Z"
+        )
+        // An offset is ignored rather than converted — the server drops it too.
+        XCTAssertEqual(
+            CollageRenderer.inheritedDate(from: [photo(id: 1, takenAt: "2024-06-05T10:00:00+02:00")]),
+            "2024-06-05T10:00:01.000Z"
+        )
+        // Minutes only: seconds count as zero.
+        XCTAssertEqual(
+            CollageRenderer.inheritedDate(from: [photo(id: 1, takenAt: "2024-06-05T10:00")]),
+            "2024-06-05T10:00:01.000Z"
         )
     }
 

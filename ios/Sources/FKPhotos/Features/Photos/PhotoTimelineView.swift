@@ -24,6 +24,10 @@ struct PhotoTimelineView: View {
     @State private var shareManager = PhotoShareManager()
     @State private var addToAlbum = AddToAlbumManager()
     @State private var itemFrames: [Int: CGRect] = [:]
+    /// `selection.ids` in the order they were picked — a collage fills its
+    /// cells in that order, as on the web.
+    @State private var selectionOrder: [Int] = []
+    @State private var showCollage = false
 
     private let tileColumns = [
         GridItem(.flexible(), spacing: 2),
@@ -82,6 +86,7 @@ struct PhotoTimelineView: View {
                         Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
+                    CollageToolbarButton(selectedCount: selection.count) { showCollage = true }
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
@@ -138,6 +143,12 @@ struct PhotoTimelineView: View {
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
         }
+        .collageSheet(
+            isPresented: $showCollage,
+            selectedIds: selection.ids,
+            order: $selectionOrder,
+            photos: photosVM.photos
+        )
         .sheet(isPresented: $addToAlbum.isPresented) {
             AddToAlbumPickerView(manager: addToAlbum)
                 .presentationDetents([.medium, .large])
@@ -157,19 +168,6 @@ struct PhotoTimelineView: View {
             selection.cancel()
             addToAlbum.resultMessage = nil
         }
-    }
-
-    /// Drag-to-select, gated behind a hold so the timeline still scrolls
-    /// while selecting — see `PhotoGridView.dragSelectGesture` for why.
-    private var dragSelectGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(
-                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("timelineGrid"))
-            )
-            .onChanged { value in
-                guard case .second(_, let drag?) = value else { return }
-                selection.selectItems(at: drag.location, frames: itemFrames)
-            }
     }
 
     @ViewBuilder
@@ -259,7 +257,9 @@ struct PhotoTimelineView: View {
             .padding(.horizontal, 2)
             .coordinateSpace(name: "timelineGrid")
             .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-            .simultaneousGesture(selection.isSelecting ? dragSelectGesture : nil)
+            .dragToSelect(isActive: selection.isSelecting, in: "timelineGrid") { point in
+                selection.selectItems(at: point, frames: itemFrames)
+            }
         }
     }
 

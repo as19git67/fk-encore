@@ -530,19 +530,39 @@ dokumentiert**:
 
 ### 2.6d Collage
 
-- **Collage-Ansicht** (`CollageView`), erreichbar über das Raster-Symbol in
-  der Auswahl-Leiste der Album-Detailansicht, sobald zwischen 2 und 9 Fotos
-  ausgewählt sind. Drei kuratierte Varianten je Fotoanzahl, Tausch zweier
-  Felder per zwei Tipps.
+- **Collage-Ansicht** (`CollageView`), erreichbar über „Collage" in der
+  Auswahl-Leiste der Album-Detailansicht und der Galerie (gefilterte
+  Zeitleiste, Monatsansicht), sobald zwischen 2 und 9 Fotos ausgewählt sind.
+  Zwei Schritte wie im Web: erst die drei kuratierten Varianten je
+  Fotoanzahl, jede mit den Fotos selbst gezeichnet; dann die gewählte groß
+  zum Bearbeiten, mit „Zurück" zur Auswahl. Die Fotos füllen die Zellen in
+  der Reihenfolge, in der sie ausgewählt wurden (`SelectionOrder`) — das
+  zuerst angetippte Foto kommt in die erste, oft größte Zelle. Zwei Fotos
+  tauschen die Plätze, wenn man eines auf das andere zieht (wie im Web, mit
+  mitlaufendem Vorschaubild und markiertem Zielfeld) oder beide nacheinander
+  antippt. Das Sheet lässt sich dabei nicht per Wischen schließen, damit ein
+  Ziehen nach unten das Foto bewegt statt die Anordnung zu verwerfen.
 - Die Layout-Regeln liegen in `CollageLayouts.swift` — eine Portierung von
   `frontend/src/utils/collageLayouts.ts` mit derselben Tabelle (gleiche IDs,
   Namen, Seitenverhältnisse, Zellen), damit dieselben Fotos auf beiden
   Clients dieselbe Collage ergeben.
-- **Sichern** rendert die Leinwand auf dem Gerät (`CollageRenderer`,
-  `UIGraphicsImageRenderer`) und lädt das Ergebnis als gewöhnliches Foto hoch —
-  einen Collage-Endpunkt gibt es nicht, das Web macht es genauso.
-- Die Collage erbt das Aufnahmedatum ihres **ältesten** Quellfotos, per
-  `X-Date-Taken`. Dieser Header **überschreibt** das EXIF der Datei, anders
+- **Teilen** rendert die Leinwand auf dem Gerät (`CollageRenderer`,
+  `UIGraphicsImageRenderer`) und übergibt das JPEG dem Teilen-Sheet.
+  **Sichern** gibt es nur, wenn die Collage aus einem Album kommt (wie im
+  Web): es lädt das Ergebnis als gewöhnliches Foto hoch — einen
+  Collage-Endpunkt gibt es nicht —, fügt es dem Album hinzu und lässt das
+  Album neu laden.
+- Export wie im Web: 4000 px lange Kante, JPEG-Qualität 0,92, weiße Fugen
+  von 0,6 % der langen Kante zwischen den Fotos (am Rand die Hälfte). Die
+  Vorschau zeichnet dieselben Fugen, maßstäblich.
+- Die Vorschau schneidet jede Zelle mit demselben `CollageLayouts.coverCrop`
+  zu wie der Export, gegen das echte Seitenverhältnis der Zelle — ein
+  quadratisches Vorschaubild zeigte in Hochformat-Zellen einen anderen
+  Ausschnitt als die gespeicherte Collage.
+- Die Collage bekommt das Aufnahmedatum ihres **neuesten** Quellfotos plus
+  eine Sekunde (wie `getCollageDate` im Web), per `X-Date-Taken`, und sortiert
+  so direkt hinter ihre Quellfotos. Die Uhrzeit wird wörtlich übernommen, die
+  Sekunde in UTC addiert. Dieser Header **überschreibt** das EXIF der Datei, anders
   als `X-Captured-At`, das nur einspringt, wenn EXIF nichts hergibt: eine
   frisch gerenderte Collage trägt „jetzt" in den Pixeln und würde sonst weit
   weg von ihren Quellfotos einsortiert.
@@ -550,11 +570,12 @@ dokumentiert**:
   Feldern kein Haarstrich Hintergrund stehen bleibt.
 - **Textüberlagerung** (#1020 Etappe C, `CollageText.swift`): beliebig viele
   Beschriftungen über der ganzen Leinwand, per Finger verschiebbar, in drei
-  Größen, links/mittig/rechts, in Weiß, Schwarz oder einer Farbe aus den
-  Fotos selbst.
+  Größen, links/mittig/rechts, in Weiß, Schwarz, einer Farbe aus den Fotos
+  selbst oder einer beliebigen aus dem Farbwähler. Neue Beschriftungen
+  stapeln sich wie im Web senkrecht in der Mitte, je ein Zehntel tiefer.
 - **Die Schriftgröße ist ein Anteil der Leinwandhöhe**, keine Punktgröße —
   0,05 / 0,08 / 0,13 wie im Web. Nur so zeigt die Vorschau (ein paar hundert
-  Punkte hoch) dasselbe Bild wie der Export (2400 px): die Beschriftung
+  Punkte hoch) dasselbe Bild wie der Export (4000 px): die Beschriftung
   bedeckt in beiden denselben Anteil.
 - **Positioniert wird über den Mittelpunkt**, normiert (0…1). Ein Wechsel der
   Aufteilung ändert das Seitenverhältnis der Leinwand, nicht aber, wo der Text
@@ -570,6 +591,7 @@ dokumentiert**:
   16er-Stufen gebündelt und nach Häufigkeit × Sättigung² bewertet, graue und
   sehr dunkle Pixel übersprungen (sie taugen nicht als Schriftfarbe), zu
   ähnliche Ergebnisse verworfen. Weiß und Schwarz stehen immer davor.
+  Ausgewertet werden alle Fotos der Collage, wie im Web.
   Eine Abweichung vom Web: dort kann das Runden auf 256 laufen und erzeugt
   eine siebenstellige, unlesbare Hex-Farbe; hier wird bei 255 geklemmt.
 

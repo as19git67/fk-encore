@@ -49,11 +49,23 @@ final class CollageTextTests: XCTestCase {
         XCTAssertEqual(CollageText.clampUnit(nil), 0.5, accuracy: 0.0001)
     }
 
-    func testASecondCaptionDoesNotLandOnTheFirst() {
+    func testASecondCaptionLandsBelowTheFirst() {
+        // Stacked straight down the middle, as on the web.
         let first = CollageText.newOverlay(existingCount: 0)
         let second = CollageText.newOverlay(existingCount: 1)
-        XCTAssertNotEqual(first.x, second.x)
-        XCTAssertNotEqual(first.y, second.y)
+        XCTAssertEqual(first.x, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(second.x, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(first.y, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(second.y, 0.6, accuracy: 0.0001)
+    }
+
+    func testAPickedColourBecomesTheHexACaptionStores() {
+        XCTAssertEqual(CollageText.hex(from: UIColor(red: 1, green: 0.5, blue: 0, alpha: 1)), "#ff8000")
+        XCTAssertEqual(CollageText.hex(from: .white), "#ffffff")
+        XCTAssertEqual(CollageText.hex(from: .black), "#000000")
+        // Round trip with the parser the swatches use.
+        let parsed = CollageText.color(fromHex: "#3a7bd5")!
+        XCTAssertEqual(CollageText.hex(from: parsed), "#3a7bd5")
     }
 
     func testCaptionsStayOnTheCanvasHoweverManyThereAre() {

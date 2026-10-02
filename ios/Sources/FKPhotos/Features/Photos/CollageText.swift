@@ -12,7 +12,7 @@ import UIKit
 ///
 /// Font sizes are a fraction of the canvas **height** rather than a point
 /// size, which is what makes the preview and the exported JPEG agree — the
-/// preview multiplies the fraction by the size on screen, the render by 2400
+/// preview multiplies the fraction by the size on screen, the render by 4000
 /// pixels, and the caption covers the same share of the picture either way.
 ///
 /// Everything here is pure except `dominantColors`, which reads pixels.
@@ -77,10 +77,13 @@ enum CollageText {
 
     /// Where a fresh caption starts, and each subsequent one, so two captions
     /// added in a row do not land exactly on top of each other.
+    ///
+    /// Stacked straight down the middle, a tenth of the canvas apart — the
+    /// web's `addText` — rather than stepping diagonally.
     static func newOverlay(existingCount: Int) -> Overlay {
         var overlay = Overlay()
         let offset = Double(existingCount) * 0.1
-        overlay.x = clampUnit(0.5 + offset)
+        overlay.x = 0.5
         overlay.y = clampUnit(0.5 + offset)
         return overlay
     }
@@ -315,6 +318,25 @@ enum CollageText {
 
     static func hex(red: Int, green: Int, blue: Int) -> String {
         String(format: "#%02x%02x%02x", min(max(red, 0), 255), min(max(green, 0), 255), min(max(blue, 0), 255))
+    }
+
+    /// A colour as the hex string a caption stores — for the free colour
+    /// picker, which hands back a colour rather than one of the swatches.
+    /// Alpha is dropped: a caption is always drawn opaque.
+    static func hex(from color: UIColor) -> String {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        // Extended sRGB can run past 0…1 (a P3 pick); `hex(red:…)` clamps it.
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return fixedColors[0]
+        }
+        return hex(
+            red: Int((red * 255).rounded()),
+            green: Int((green * 255).rounded()),
+            blue: Int((blue * 255).rounded())
+        )
     }
 
     /// A hex string as a colour, or nil when it is not one.

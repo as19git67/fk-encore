@@ -73,7 +73,11 @@ struct PhotoGridView: View {
                     .padding(.horizontal, 2)
                     .coordinateSpace(name: "photoGrid")
                     .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-                    .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
+                    .dragToSelect(isActive: isSelecting, in: "photoGrid") { point in
+                        for (id, frame) in itemFrames where frame.contains(point) {
+                            selectedIds.insert(id)
+                        }
+                    }
                 }
             }
             .scrollsBack(to: $scrollTarget, in: proxy)
@@ -216,29 +220,6 @@ struct PhotoGridView: View {
 
     private struct FullscreenNav: Hashable {
         let startIndex: Int
-    }
-
-    /// Paint a selection by dragging across tiles — *after* holding still for
-    /// a moment.
-    ///
-    /// The hold is what makes the grid scrollable while selecting. A bare
-    /// `DragGesture` on content inside a `ScrollView` competes with the
-    /// scroll view's own pan and wins as soon as it recognises, so selection
-    /// mode used to freeze the grid completely: no vertical scrolling at all
-    /// while anything was selected. Sequencing the drag behind a long press
-    /// means an ordinary swipe is never claimed — it scrolls — and only a
-    /// deliberate press-then-drag paints, which is also how Photos does it.
-    private var dragSelectGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(
-                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("photoGrid"))
-            )
-            .onChanged { value in
-                guard case .second(_, let drag?) = value else { return }
-                for (id, frame) in itemFrames where frame.contains(drag.location) {
-                    selectedIds.insert(id)
-                }
-            }
     }
 }
 
