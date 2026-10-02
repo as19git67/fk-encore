@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { shapeDay, type BlockTemplate } from "./blocks";
-import { solveDay, type Candidate } from "./solver";
-import { walkingLeg } from "./travel";
+import { bestRoute, solveDay, type Candidate, type Route } from "./solver";
+import { leaveFrom } from "./extent";
+import { travelLeg, walkingLeg, type TransportMode } from "./travel";
 
 /** A compact synthetic city; places are invented. */
 const ANCHOR = { lat: 48.37, lon: 10.9 };
@@ -491,5 +492,88 @@ describe("what a route walks past (§4.7)", () => {
       maxWalkMinutes: 400,
     });
     expect(blocks.flatMap((b) => b.stops).map((s) => s.osmRef)).toEqual(["manual:route"]);
+  });
+});
+
+describe("bestRoute — the same tour as trying every order", () => {
+  // The reference the search replaced: every permutation, shortest
+  // total, ties to the smaller sequence of refs.
+  function exhaustive(
+    start: { lat: number; lon: number },
+    stops: Candidate[],
+    returnTo: { lat: number; lon: number } | null,
+    mode: TransportMode,
+  ): Route {
+    const orders: Candidate[][] = [];
+    const permute = (rest: Candidate[], prefix: Candidate[]) => {
+      if (rest.length === 0) orders.push(prefix);
+      rest.forEach((c, i) => permute([...rest.slice(0, i), ...rest.slice(i + 1)], [...prefix, c]));
+    };
+    permute(stops, []);
+    let best: Route | null = null;
+    for (const order of orders) {
+      let total = 0;
+      let longest = 0;
+      let from = start;
+      for (const stop of order) {
+        const leg = travelLeg(from, stop, mode);
+        total += leg.minutes + stop.dwellMinutes;
+        longest = Math.max(longest, leg.minutes);
+        from = leaveFrom(stop);
+      }
+      if (returnTo) {
+        const back = travelLeg(from, returnTo, mode);
+        total += back.minutes;
+        longest = Math.max(longest, back.minutes);
+      }
+      const key = order.map((c) => c.osmRef).join("|");
+      const bestKey = best?.order.map((c) => c.osmRef).join("|") ?? "";
+      if (best === null || total < best.totalMinutes || (total === best.totalMinutes && key < bestKey)) {
+        best = { order, totalMinutes: total, longestLegMinutes: longest };
+      }
+    }
+    return best!;
+  }
+
+  // Deterministic pseudo-random numbers, so a failure reproduces.
+  function rng(seed: number): () => number {
+    let x = seed;
+    return () => {
+      x = (x * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return x / 2_147_483_648;
+    };
+  }
+
+  it("agrees on random cities, with ties, extents and both endings", () => {
+    const random = rng(42);
+    for (let round = 0; round < 300; round += 1) {
+      const count = 1 + (round % 7);
+      const mode: TransportMode = round % 3 === 0 ? "car" : "foot";
+      const stops: Candidate[] = Array.from({ length: count }, (_, i) => {
+        // Every fourth round puts two stops on one spot: equal tours that
+        // only the tie-break separates.
+        const twin = round % 4 === 0 && count >= 2 && i < 2;
+        const at = twin
+          ? { lat: ANCHOR.lat + 0.004, lon: ANCHOR.lon + 0.004 }
+          : { lat: ANCHOR.lat + (random() - 0.5) * 0.04, lon: ANCHOR.lon + (random() - 0.5) * 0.04 };
+        const withExtent = round % 5 === 0 && i === count - 1;
+        return candidate({
+          osmRef: `node:${round}-${(i * 7919) % 101}`,
+          ...at,
+          dwellMinutes: twin ? 30 : 10 + Math.floor(random() * 80),
+          extent: withExtent
+            ? { end: { lat: at.lat + 0.01, lon: at.lon - 0.01 } }
+            : undefined,
+        });
+      });
+      const returnTo = round % 2 === 0 ? ANCHOR : null;
+
+      const expected = exhaustive(ANCHOR, stops, returnTo, mode);
+      const actual = bestRoute(ANCHOR, stops, returnTo, mode)!;
+
+      expect(actual.order.map((c) => c.osmRef)).toEqual(expected.order.map((c) => c.osmRef));
+      expect(actual.totalMinutes).toBe(expected.totalMinutes);
+      expect(actual.longestLegMinutes).toBe(expected.longestLegMinutes);
+    }
   });
 });
