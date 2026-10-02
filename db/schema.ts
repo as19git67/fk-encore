@@ -2217,6 +2217,18 @@ export const financeDocumentSettlementLlm = pgTable("finance_document_settlement
     .defaultNow(),
 });
 
+// Documents the user marked as irrelevant to the depots (#1336): left out
+// of "read documents" and the review page; the document itself stays.
+export const financeDepotDocumentIgnore = pgTable("finance_depot_document_ignore", {
+  document_id: integer("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  ignored_by: integer("ignored_by").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 // Which document(s) a depot transaction was read from or confirmed by
 // (#1336, stage 4). Same pattern as finance_transaction_document.
 export const financeDepotTransactionDocument = pgTable(

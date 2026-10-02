@@ -811,6 +811,8 @@ export interface PortfolioReviewConflict {
   executed_at: string
   statement_net: string | null
   transaction_net: string | null
+  /** Marked "ignore for depots" (listed only with `ignored: true`). */
+  ignored?: boolean
 }
 
 export interface PortfolioReviewDocument {
@@ -821,6 +823,8 @@ export interface PortfolioReviewDocument {
   isin: string | null
   wkn: string | null
   depot_number: string | null
+  /** Marked "ignore for depots" (listed only with `ignored: true`). */
+  ignored?: boolean
 }
 
 export interface HoldingGap {
@@ -849,16 +853,29 @@ export interface PortfolioReviewResponse {
   unverified_documents: PortfolioReviewDocument[]
   holding_gaps: PortfolioReviewHoldingGap[]
   unverifiable_changes: number
+  /** Ignored documents that fall into none of the groups (only with `ignored: true`). */
+  ignored_other?: PortfolioReviewDocument[]
+  /** How many documents are marked "ignore for depots". */
+  ignored_count?: number
 }
 
 export async function getPortfolioReview(
-  opts: { accounts?: number[]; closed?: boolean } = {},
+  opts: { accounts?: number[]; closed?: boolean; ignored?: boolean } = {},
 ): Promise<PortfolioReviewResponse> {
   const params = new URLSearchParams()
   if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
   if (opts.closed) params.set('closed', 'true')
+  if (opts.ignored) params.set('ignored', 'true')
   const qs = params.toString()
   return apiFetch(`/finance/portfolio/review${qs ? '?' + qs : ''}`)
+}
+
+/** Mark a document as irrelevant to the depots, or take that back. */
+export async function setSettlementDocumentIgnored(documentId: number, ignored: boolean): Promise<void> {
+  await apiFetch(
+    `/finance/portfolio/documents/${documentId}/ignore`,
+    ignored ? { method: 'POST', body: JSON.stringify({ documentId }) } : { method: 'DELETE' },
+  )
 }
 
 /** Resolve a conflict in the statement's favour. */

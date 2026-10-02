@@ -323,6 +323,17 @@ function detectCurrency(text: string): string | null {
 
 /** The security name: the text on the line after "Wertpapierbezeichnung" or next to the ISIN. */
 function detectName(text: string, isin: string | null, wkn: string | null): string | null {
+  const name = detectNameRaw(text, isin, wkn);
+  if (!name) return null;
+  // A table layout prints the identifier in the next column: "Alpha AG  123456".
+  const cleaned = [isin, wkn]
+    .filter((id): id is string => id !== null)
+    .reduce((n, id) => n.replace(new RegExp(String.raw`\s+${id}\s*$`), ""), name)
+    .trim();
+  return cleaned.length >= 3 ? cleaned : name;
+}
+
+function detectNameRaw(text: string, isin: string | null, wkn: string | null): string | null {
   const labelled = /(?:Wertpapierbezeichnung|Bezeichnung|Wertpapier|Gattung)\s*[:\n]\s*([^\n]{3,80})/i.exec(text);
   if (labelled) {
     const candidate = labelled[1]!.trim();
@@ -446,7 +457,13 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     markers,
   ));
 
-  const fees = track("fees", () => sumAfter(
+  // A printed total ("Summe Entgelte 6,40") is the fees; adding it to the
+  // lines it sums would count them twice.
+  const fees = track("fees", () => amountAfter(
+    text,
+    [String.raw`Summe\s*(?:der\s*)?(?:Entgelte|Gebühren|Kosten|Spesen)`, String.raw`(?:Entgelte|Gebühren|Kosten)\s*gesamt`],
+    markers,
+  ) ?? sumAfter(
     text,
     [
       String.raw`Provision`,
@@ -467,7 +484,11 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     markers,
   ));
 
-  const tax = track("tax", () => sumAfter(
+  const tax = track("tax", () => amountAfter(
+    text,
+    [String.raw`abgeführte\s*Steuern`, String.raw`einbehaltene\s*Steuern(?=\s*[:\s]*(?:EUR|-?\d))`, String.raw`Summe\s*Steuern`, String.raw`Steuern\s*gesamt`],
+    markers,
+  ) ?? sumAfter(
     text,
     [
       String.raw`Kapitalertrag(?:s)?steuer`,
@@ -493,8 +514,11 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       String.raw`Endbetrag`,
       String.raw`Gesamtbetrag`,
       String.raw`Nettobetrag`,
-      String.raw`Betrag\s*zu\s*Ihren\s*(?:Gunsten|Lasten)`,
-      String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)`,
+      // A settlement with its tax statement appended prints both; the
+      // amount booked is the one after taxes.
+      String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*nach\s*Steuern`,
+      String.raw`Betrag\s*zu\s*Ihren\s*(?:Gunsten|Lasten)(?!\s*vor\s*Steuern)`,
+      String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)(?!\s*vor\s*Steuern)`,
       String.raw`Zu\s*Lasten`,
       String.raw`Zu\s*Gunsten`,
       String.raw`Gutschrift\s*(?:in\s*)?Höhe\s*von`,
@@ -509,7 +533,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   const executedAt = track("executedAt", () =>
     kind === "dividend"
       ? dateAfter(text, [String.raw`Zahlbarkeitstag`, String.raw`Zahltag`, String.raw`Valuta`, String.raw`Ex-?Tag`, String.raw`Datum`], markers)
-      : dateAfter(text, [String.raw`Schlusstag(?:\s*/\s*-?Zeit)?`, String.raw`Ausführungstag`, String.raw`Handelstag`, String.raw`Ausführung\s*am`, String.raw`Valuta`, String.raw`Datum`], markers));
+      : dateAfter(text, [String.raw`Schlusstag(?:\s*/\s*-?Zeit)?`, String.raw`Ausführungstag`, String.raw`Handelstag`, String.raw`Geschäftstag`, String.raw`Ausführung\s*am`, String.raw`Valuta`, String.raw`Datum`], markers));
 
   return {
     kind,
