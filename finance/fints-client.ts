@@ -934,26 +934,82 @@ export async function runFetchAccounts(
     if (r.pendingTan) {
       // Coupled TAN (photoTAN/chipTAN) demanded mid-fetch. Stop the
       // loop, hand the queue + the TAN info back to the caller; the
-      // resume path picks up from `account.accountNumber` after the
-      // user submits.  Queue entries use "number:type" compound keys
-      // so the resume path can distinguish a giro and a depot that
-      // share the same bank-side account number.
-      const remaining = dedupedAccounts
-        .slice(i + 1)
-        .map((a) => `${a.accountNumber}:${a.accountType ?? ""}`);
+      // resume path picks up from this account after the user submits.
+      // Current account and queue are stored as bankAccountKey()s so
+      // the resume resolves the same records, even where several share
+      // one account number.
+      const remaining = dedupedAccounts.slice(i + 1).map(bankAccountKey);
       return {
         accounts: snapshots,
         partial: true,
+        bankAccountKinds: bankAccountKinds(client, accounts),
         pendingTan: {
           ...r.pendingTan,
           accountNumber: account.accountNumber,
+          accountKey: bankAccountKey(account),
           remainingAccountNumbers: remaining,
         },
       };
     }
   }
 
-  return { accounts: snapshots, partial };
+  return {
+    accounts: snapshots,
+    partial,
+    bankAccountKinds: bankAccountKinds(client, accounts),
+  };
+}
+
+/**
+ * Identifies one entry of `upd.bankAccounts` across a TAN pause.
+ *
+ * The paused account and the queue behind it are stored as strings in
+ * the TAN session and looked up again on resume. Number alone is not
+ * enough (comdirect reports giro and Visa under one number), and
+ * number + accountType is not either: comdirect reports both as
+ * "Miscellaneous", so both resolved to the first record — the resumed
+ * Visa snapshot came back as the giro, and persist could no longer
+ * match it to its finance_account ("noch nicht zugeordnet" right after
+ * the TAN). The subAccountId is what tells them apart.
+ *
+ * Format "number:type:sub". Older sessions hold "number" or
+ * "number:type"; findBankAccount still accepts those.
+ */
+export function bankAccountKey(a: {
+  accountNumber: string;
+  accountType?: string;
+  subAccountId?: string;
+}): string {
+  return `${a.accountNumber}:${a.accountType ?? ""}:${a.subAccountId ?? ""}`;
+}
+
+function findBankAccount(
+  all: RawBankAccount[],
+  key: string,
+): RawBankAccount | undefined {
+  const [number, type, sub] = key.split(":");
+  return all.find(
+    (a) =>
+      a.accountNumber === number &&
+      (type === undefined || (a.accountType ?? "") === type) &&
+      (sub === undefined || (a.subAccountId ?? "") === sub),
+  );
+}
+
+/**
+ * Every bank-side account with its effective kind, for persist's
+ * fallback matching. A resume only carries part of the accounts, so
+ * persist cannot see the siblings that share an account number in the
+ * snapshots alone.
+ */
+function bankAccountKinds(
+  client: FintsClientSurface,
+  all: RawBankAccount[],
+): Array<{ accountNumber: string; accountKind: string }> {
+  return all.map((a) => ({
+    accountNumber: a.accountNumber,
+    accountKind: effectiveAccountKind(client, a),
+  }));
 }
 
 interface RawBankAccount {
@@ -1417,11 +1473,12 @@ export async function resumeFetchAfterTan(
   };
   const allAccounts = bi.upd?.bankAccounts ?? [];
 
-  // Find the bank account record for the paused accountNumber so we
-  // can build a snapshot with the right metadata (label/kind/iban).
-  const currentAccount = allAccounts.find(
-    (a) => a.accountNumber === ctx.currentAccountNumber,
-  );
+  const kinds = bankAccountKinds(client, allAccounts);
+
+  // Find the bank account record we paused on so the snapshot carries
+  // the right metadata (label/kind/iban). `currentAccountNumber` holds
+  // a bankAccountKey(); see there for why the number alone is wrong.
+  const currentAccount = findBankAccount(allAccounts, ctx.currentAccountNumber);
   if (!currentAccount) {
     return {
       accounts: [],
@@ -1457,7 +1514,7 @@ export async function resumeFetchAfterTan(
     snapshot.errors.push(
       `statements-exception:${(err as Error).message ?? String(err)}`,
     );
-    return { accounts: [snapshot], partial: true };
+    return { accounts: [snapshot], partial: true, bankAccountKinds: kinds };
   }
 
   // Decoupled fall-through (e.g. user took too long but the bank now
@@ -1479,11 +1536,12 @@ export async function resumeFetchAfterTan(
     const ref = stmtResp.tanReference;
     if (!ref) {
       snapshot.errors.push("statements-tan-required-no-ref");
-      return { accounts: [snapshot], partial: true };
+      return { accounts: [snapshot], partial: true, bankAccountKinds: kinds };
     }
     return {
       accounts: [snapshot],
       partial: true,
+      bankAccountKinds: kinds,
       pendingTan: {
         tanReference: ref,
         tanChallenge: stmtResp.tanChallenge,
@@ -1492,7 +1550,8 @@ export async function resumeFetchAfterTan(
         tanPhotoBase64: stmtResp.tanPhoto
           ? Buffer.from(stmtResp.tanPhoto.image).toString("base64")
           : undefined,
-        accountNumber: ctx.currentAccountNumber,
+        accountNumber: currentAccount.accountNumber,
+        accountKey: bankAccountKey(currentAccount),
         remainingAccountNumbers: ctx.remainingAccountNumbers,
       },
     };
@@ -1566,13 +1625,7 @@ export async function resumeFetchAfterTan(
   const snapshots: FintsAccountSnapshot[] = [snapshot];
   let partial = snapshot.errors.length > 0;
   for (let i = 0; i < ctx.remainingAccountNumbers.length; i++) {
-    const entry = ctx.remainingAccountNumbers[i];
-    const colonIdx = entry.indexOf(":");
-    const acn = colonIdx >= 0 ? entry.slice(0, colonIdx) : entry;
-    const acType = colonIdx >= 0 ? entry.slice(colonIdx + 1) || undefined : undefined;
-    const acc = allAccounts.find(
-      (a) => a.accountNumber === acn && (acType === undefined || a.accountType === acType),
-    );
+    const acc = findBankAccount(allAccounts, ctx.remainingAccountNumbers[i]);
     if (!acc) continue;
     const fetch = ctx.linkedAccountNumbers
       ? ctx.linkedAccountNumbers.has(acc.accountNumber)
@@ -1590,14 +1643,15 @@ export async function resumeFetchAfterTan(
         partial: true,
         pendingTan: {
           ...r.pendingTan,
-          accountNumber: acn,
+          accountNumber: acc.accountNumber,
+          accountKey: bankAccountKey(acc),
           remainingAccountNumbers: remaining,
         },
       };
     }
   }
 
-  return { accounts: snapshots, partial };
+  return { accounts: snapshots, partial, bankAccountKinds: kinds };
 }
 
 /** Map lib-fints AccountType (enum string) → finance_account_kind value. */
