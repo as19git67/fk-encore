@@ -523,7 +523,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       String.raw`Zu\s*Gunsten`,
       String.raw`Gutschrift\s*(?:in\s*)?Höhe\s*von`,
       String.raw`Belastung\s*(?:in\s*)?Höhe\s*von`,
-      // A statement's booking line: "EFFEKTENGUTSCHRIFT PN:925  224,56 H".
+      // A statement's booking line: "EFFEKTENGUTSCHRIFT PN:100  450,00 H".
       String.raw`Effekten(?:gutschrift|belastung)(?:\s*PN:?\s*\d+)?`,
     ],
     markers,

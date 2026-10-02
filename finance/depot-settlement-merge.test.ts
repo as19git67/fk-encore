@@ -139,47 +139,47 @@ describe("mergeSettlement", () => {
   });
 
   it("keeps the rules' value for a field no check vouches for, even when the model wins on the figures", () => {
-    // A dividend tax statement: the rules read "Stk. 20" and the credited
+    // A dividend tax statement: the rules read "Stk. 15" and the credited
     // foreign tax as the tax; the model adds up (gross − tax = net) but took
-    // "200" from a code on the letterhead as the quantity. No price per
+    // "150" from a code on the letterhead as the quantity. No price per
     // share, so no check reaches the quantity.
     const rules: SettlementValues = {
       ...EMPTY_SETTLEMENT,
       kind: "dividend",
       isin: VALID_ISIN,
-      quantity: 20,
-      tax: 0.73,
+      quantity: 15,
+      tax: 0.5,
       executedAt: "2026-02-18",
       currency: "EUR",
     };
     const llm: SettlementValues = {
       ...rules,
-      quantity: 200,
-      gross: 12.92,
-      tax: 1.94,
-      net: 10.98,
+      quantity: 150,
+      gross: 30,
+      tax: 4.5,
+      net: 25.5,
     };
     const r = mergeSettlement(rules, llm, today);
     expect(r.verdict).toBe("ok");
-    expect(r.values.quantity).toBe(20);
+    expect(r.values.quantity).toBe(15);
     expect(r.fields.find((f) => f.field === "quantity")).toMatchObject({ source: "rules", disagree: true });
     // The tax is in the equation that made the model's reading add up: the model's.
-    expect(r.values.tax).toBe(1.94);
+    expect(r.values.tax).toBe(4.5);
     expect(r.fields.find((f) => f.field === "tax")!.source).toBe("llm");
-    expect(r.values.net).toBe(10.98);
+    expect(r.values.net).toBe(25.5);
   });
 
   it("lets the booking's net decide between charges the two read differently", () => {
-    // No final amount on paper; the rules summed overlapping fee lines (24,80),
-    // the model took the order costs (12,40). The account was charged 808,20.
-    const base = buy({ quantity: 10, price: 79.58, gross: 795.8, tax: null, net: null, isin: null, wkn: "AAA111" });
-    const rules = { ...base, fees: 24.8 };
-    const llm = { ...base, fees: 12.4 };
+    // No final amount on paper; the rules summed overlapping fee lines (16,50),
+    // the model took the order costs (7,50). The account was charged 407,50.
+    const base = buy({ quantity: 10, price: 40, gross: 400, tax: null, net: null, isin: null, wkn: "AAA111" });
+    const rules = { ...base, fees: 16.5 };
+    const llm = { ...base, fees: 7.5 };
     const blind = mergeSettlement(rules, llm, today);
-    expect(blind.values.fees).toBe(24.8);
-    const decided = mergeSettlement(rules, llm, today, -808.2);
-    expect(decided.values.fees).toBe(12.4);
-    expect(decided.values.net).toBe(-808.2);
+    expect(blind.values.fees).toBe(16.5);
+    const decided = mergeSettlement(rules, llm, today, -407.5);
+    expect(decided.values.fees).toBe(7.5);
+    expect(decided.values.net).toBe(-407.5);
     expect(decided.fields.find((f) => f.field === "fees")).toMatchObject({ source: "llm", disagree: true });
     expect(decided.checks.find((c) => c.name === "booking_net")!.result).toBe("ok");
   });
