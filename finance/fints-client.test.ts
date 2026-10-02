@@ -1617,6 +1617,41 @@ describe("TAN pause with accounts sharing a number (comdirect giro + Visa)", () 
     expect(result.accounts[0].label).toContain("Visa-Karte");
   });
 
+  it("fetches the queued depot after the TAN, not the giro that shares its number", async () => {
+    // The order a bank like comdirect reports: giro, savings (where the
+    // TAN comes), then a depot under the giro's number. The queue entry
+    // for the depot used to resolve to the giro, so the giro was fetched
+    // twice, the depot not at all, and the giro could no longer be
+    // matched to its finance_account.
+    const accounts = {
+      bankAccounts: [
+        { accountNumber: "G-1", accountType: "Miscellaneous", subAccountId: "Girokonto", currency: "EUR" },
+        { accountNumber: "S-1", accountType: "Miscellaneous", subAccountId: "Tagesgeld", currency: "EUR" },
+        { accountNumber: "G-1", accountType: "Miscellaneous", subAccountId: "Depot", currency: "EUR" },
+      ],
+    };
+    const c = mockClient({ success: true, requiresTan: false }, { systemId: "s", upd: accounts } as any);
+    (c.getAccountStatementsWithTan as any) = vi.fn(async () => stmtResp([]));
+    (c.getAccountStatements as any) = vi.fn(async () => stmtResp([]));
+    (c.getAccountBalance as any) = vi.fn(async () =>
+      balResp({ date: new Date(), currency: "EUR", balance: 1 }),
+    );
+
+    const result = await resumeFetchAfterTan(c, {
+      tanReference: "ref-4",
+      tan: "1",
+      currentAccountNumber: bankAccountKey(accounts.bankAccounts[1]),
+      remainingAccountNumbers: [bankAccountKey(accounts.bankAccounts[2])],
+    });
+
+    expect(result.accounts.map((a) => [a.accountNumber, a.accountKind])).toEqual([
+      ["S-1", "sonstige"],
+      ["G-1", "depot"],
+    ]);
+    // The giro was not fetched a second time.
+    expect(c.getAccountStatements).not.toHaveBeenCalled();
+  });
+
   it("still resolves a queue entry stored by an older session", async () => {
     const c = mockClient({ success: true, requiresTan: false }, { systemId: "s", upd } as any);
     (c.getAccountStatementsWithTan as any) = vi.fn(async () => stmtResp([]));
