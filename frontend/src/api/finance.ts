@@ -713,7 +713,7 @@ export interface DepotEnrichResult {
 /** used = asked now · cached = earlier answer · unavailable = service down · skipped / off = not asked */
 export type SettlementLlmStatus = 'used' | 'cached' | 'unavailable' | 'skipped' | 'off'
 
-export type SettlementFieldSource = 'both' | 'rules' | 'llm' | null
+export type SettlementFieldSource = 'both' | 'rules' | 'llm' | 'derived' | null
 
 export interface SettlementFieldSourceInfo {
   rules: string | null

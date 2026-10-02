@@ -245,7 +245,8 @@ function score(checks: SettlementCheck[]): { ok: number; failed: number } {
 // Merging
 // ----------------------------------------------------------------------
 
-export type FieldSource = "both" | "rules" | "llm" | null;
+/** "derived": computed from the other fields (a net no source printed). */
+export type FieldSource = "both" | "rules" | "llm" | "derived" | null;
 
 export interface MergedField {
   field: MergeField;
@@ -324,6 +325,17 @@ export function mergeSettlement(
   const materialDisagreement = fields.some((f) => f.disagree && MATERIAL_FIELDS.includes(f.field));
   const settled = checks.some((c) => c.result === "ok") && !checks.some((c) => c.result === "failed");
   const verdict: MergeResult["verdict"] = materialDisagreement && !settled ? "unverified" : "ok";
+
+  // A statement that prints the Kurswert and the charges but no final
+  // amount (or one under a label nobody knows): the net is what they add
+  // up to. Derived after the checks, which would otherwise pass trivially.
+  if (values.net === null && values.gross !== null && values.kind) {
+    const charges = (values.fees ?? 0) + (values.tax ?? 0);
+    const net = values.kind === "buy" ? -(values.gross + charges) : values.gross - charges;
+    values.net = Math.round(net * 100) / 100;
+    const f = fields.find((x) => x.field === "net")!;
+    f.source = "derived";
+  }
 
   return { values, fields, checks, verdict };
 }

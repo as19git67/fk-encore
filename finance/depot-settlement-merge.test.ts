@@ -143,6 +143,16 @@ describe("mergeSettlement", () => {
     expect(r.verdict).toBe("unverified");
   });
 
+  it("derives the net from Kurswert and charges when no source printed one", () => {
+    const r = mergeSettlement(buy({ net: null }), null, today);
+    expect(r.values.net).toBe(-2966.4);
+    expect(r.fields.find((f) => f.field === "net")).toMatchObject({ source: "derived", rules: null, llm: null });
+    // The equation check did not get to see the derived value.
+    expect(r.checks.find((c) => c.name === "net_equation")!.result).toBe("skipped");
+    const sell = mergeSettlement({ ...buy(), kind: "sell", net: null, tax: 10 }, null, today);
+    expect(sell.values.net).toBe(2943.6);
+  });
+
   it("reads a settlement the rules do not recognise at all", () => {
     const r = mergeSettlement({ ...EMPTY_SETTLEMENT }, buy(), today);
     expect(r.values.kind).toBe("buy");
