@@ -3044,6 +3044,11 @@ export const tripPlanLegs = pgTable(
     // are filled — see migration 0168 for why the flag has to exist
     // rather than being inferred from "has no stops".
     awaiting_region: boolean("awaiting_region").notNull().default(false),
+    // The quarters travel along (§21.3, migration 0223): a port day on
+    // a cruise, whose anchor is the pier and whose departure is "Alle
+    // an Bord" with an hour in hand. A tender port adds the boat back.
+    quarters_aboard: boolean("quarters_aboard").notNull().default(false),
+    tender_port: boolean("tender_port").notNull().default(false),
     // Optional real dates; absent means "day 1, day 2, …".
     start_date: date("start_date"),
     // What this leg was searched with, so it can be searched again when

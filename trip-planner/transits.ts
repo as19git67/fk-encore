@@ -45,6 +45,7 @@ import {
   type LegRequest,
   type PlanResponse,
 } from "./plans";
+import { journeyDeparture } from "./aboard";
 import { minutesOf } from "./transit-leg";
 import type { TransportMode } from "./travel";
 
@@ -240,7 +241,11 @@ async function frameJourney(
     : null;
   const mode = validateMode(req.mode ?? next?.mode ?? previous?.mode);
   const title = req.title?.trim()
-    || (!previous ? `Anreise nach ${nextTitle}` : !next ? `Heimreise von ${previousTitle}` : `Weiterreise nach ${nextTitle}`);
+    || (!previous ? `Anreise nach ${nextTitle}`
+      : !next ? `Heimreise von ${previousTitle}`
+        // The sea between two ports (§21.3): the day happens aboard.
+        : mode === "ship" ? `An Bord nach ${nextTitle}`
+          : `Weiterreise nach ${nextTitle}`);
   const origin = previous
     ? { lat: previous.anchor.lat, lon: previous.anchor.lon, label: previous.anchorLabel ?? previous.title ?? null }
     : { lat: (home as PlanHome).lat, lon: (home as PlanHome).lon, label: homeLabel };
@@ -394,17 +399,9 @@ function previousLegRequest(
     days,
     fixpoints: [
       ...(stored.fixpoints ?? []).filter((f) => f.dayIndex < days && f.kind !== "departure"),
-      {
-        dayIndex: lastDay,
-        label: `Weiterreise nach ${nextTitle}`,
-        at: departAt,
-        kind: "departure",
-        // The journey sets off from the base: the day ends there, and
-        // the way to it is the day's own last walk.
-        lat: leg.anchor.lat,
-        lon: leg.anchor.lon,
-        travelMinutes: 0,
-      },
+      // From a hotel the journey on; from a port day with the quarters
+      // aboard "Alle an Bord", with the ship's margin (§21.3).
+      journeyDeparture(leg, nextTitle, departAt, lastDay),
     ],
     dayAnchors: (stored.dayAnchors ?? []).filter((a) => a.dayIndex < days),
   };

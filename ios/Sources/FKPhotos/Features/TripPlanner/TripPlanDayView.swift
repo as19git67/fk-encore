@@ -738,8 +738,10 @@ struct TripPlanDayView: View {
     private func transitHeaderText(_ leg: TripLeg) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.turn.up.right.diamond")
-                Text("\(leg.origin?.label ?? "Start") → \(leg.anchorTitle)")
+                // A day aboard is where the day happens, not a way to
+                // somewhere (§21.3); it says so before the two ports.
+                Image(systemName: leg.isAboard ? "ferry" : "arrow.triangle.turn.up.right.diamond")
+                Text((leg.isAboard ? "An Bord · " : "") + "\(leg.origin?.label ?? "Start") → \(leg.anchorTitle)")
                     .lineLimit(2)
                 Spacer()
             }

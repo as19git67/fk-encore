@@ -39,7 +39,7 @@ export function getRoutingStatus() {
 
 /** One mode of the measurement: how often the estimate is off by more than a quarter. */
 export interface RoutingMeasureMode {
-  mode: 'foot' | 'bike' | 'car' | 'transit'
+  mode: 'foot' | 'bike' | 'car' | 'transit' | 'ship'
   pairs: number
   answered: number
   offByQuarter: number

@@ -14,7 +14,7 @@ import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan, getTripPlan } from "./plans";
-import { removeTripLeg } from "./legs";
+import { removeTripLeg, updateTripLeg } from "./legs";
 import { addTripTransit, updateTripTransit } from "./transits";
 import { getUserHome, setTripHome, setUserHomeEndpoint } from "./home";
 import { applyVotesToPlan, castVote } from "./plan-votes";
@@ -421,5 +421,87 @@ describe("voting on the way", () => {
     const stops = voted.legs[1].days[0].blocks.flatMap((b) => b.stops.map((s) => s.osmRef));
     expect(stops).not.toContain(stop.osmRef);
     expect(voted.legs[1].kind).toBe("transit");
+  });
+});
+
+describe("the quarters travel along (§21.3)", () => {
+  async function twoPorts() {
+    const { plan } = await createTripPlan({
+      legs: [
+        { title: "Erster Hafen", anchor: ANCHOR, anchorLabel: "Liegeplatz 3", days: 1, startDate: "2026-09-05",
+          mode: "foot", quartersAboard: true },
+        { title: "Zweiter Hafen", anchor: NEXT, anchorLabel: "Pier 1", days: 1, startDate: "2026-09-07",
+          mode: "foot", quartersAboard: true, tenderPort: true },
+      ],
+    });
+    return plan;
+  }
+
+  it("keeps the property on the leg", async () => {
+    const plan = await twoPorts();
+    expect(plan.legs.map((l) => [l.quartersAboard, l.tenderPort])).toEqual([[true, false], [true, true]]);
+  });
+
+  it("ends a port day with 'Alle an Bord' and an hour in hand, and calls the sea a day aboard", async () => {
+    const plan = await twoPorts();
+    const { plan: after } = await addTripTransit({
+      planId: plan.id, afterLegIndex: 0, mode: "ship",
+      departDate: "2026-09-05", departAt: "17:00", arriveDate: "2026-09-07", arriveAt: "08:00",
+    });
+    const [port, sea, nextPort] = after.legs;
+    expect(sea.title).toBe("An Bord nach Zweiter Hafen");
+    expect(sea.mode).toBe("ship");
+    expect(sea.days).toHaveLength(3);
+    expect(sea.days.map((d) => d.bufferReason)).toEqual(["An Bord", "An Bord", "An Bord"]);
+    expect(sea.days.flatMap((d) => d.blocks.flatMap((b) => b.stops))).toEqual([]);
+
+    const departure = port.days[0].fixpoints.find((f) => f.kind === "departure");
+    expect(departure).toMatchObject({ label: "Alle an Bord", startMinutes: 1020, bufferMinutes: 60 });
+    expect(nextPort.startDate).toBe("2026-09-07");
+    expect(nextPort.arriveMinutes).toBe(480);
+  });
+
+  it("gives a tender port the boat ride back on top", async () => {
+    const plan = await twoPorts();
+    await setTripHome({ planId: plan.id, lat: HOME.lat, lon: HOME.lon, label: "Zuhause" });
+    const { plan: after } = await addTripTransit({
+      planId: plan.id, afterLegIndex: 1, mode: "ship",
+      departDate: "2026-09-07", departAt: "18:00", arriveDate: "2026-09-08", arriveAt: "09:00",
+    });
+    const tenderPort = after.legs[1];
+    const departure = tenderPort.days[0].fixpoints.find((f) => f.kind === "departure");
+    expect(departure).toMatchObject({ label: "Alle an Bord", bufferMinutes: 90 });
+  });
+
+  it("rewrites the departure when the property changes after the journey was made", async () => {
+    const plan = await threeLegs();
+    await addTripTransit({
+      planId: plan.id, afterLegIndex: 0, mode: "ship",
+      departDate: "2026-09-06", departAt: "17:00", arriveDate: "2026-09-07", arriveAt: "08:00",
+    });
+    // A hotel until somebody says otherwise: the train's margin.
+    let { plan: current } = await getTripPlan({ planId: plan.id });
+    expect(current.legs[0].days[1].fixpoints.find((f) => f.kind === "departure"))
+      .toMatchObject({ label: "Weiterreise nach Zweiter Ort", bufferMinutes: 20 });
+
+    ({ plan: current } = await updateTripLeg({ planId: plan.id, legIndex: 0, quartersAboard: true }));
+    expect(current.legs[0].quartersAboard).toBe(true);
+    expect(current.legs[0].days[1].fixpoints.find((f) => f.kind === "departure"))
+      .toMatchObject({ label: "Alle an Bord", bufferMinutes: 60, startMinutes: 1020 });
+
+    ({ plan: current } = await updateTripLeg({ planId: plan.id, legIndex: 0, tenderPort: true }));
+    expect(current.legs[0].days[1].fixpoints.find((f) => f.kind === "departure"))
+      .toMatchObject({ label: "Alle an Bord", bufferMinutes: 90 });
+
+    ({ plan: current } = await updateTripLeg({ planId: plan.id, legIndex: 0, quartersAboard: false }));
+    expect(current.legs[0].days[1].fixpoints.find((f) => f.kind === "departure"))
+      .toMatchObject({ label: "Weiterreise nach Zweiter Ort", bufferMinutes: 20 });
+  });
+
+  it("only keeps the property while no journey leaves the leg", async () => {
+    const plan = await threeLegs();
+    const { plan: after } = await updateTripLeg({ planId: plan.id, legIndex: 2, quartersAboard: true, tenderPort: true });
+    expect(after.legs[2]).toMatchObject({ quartersAboard: true, tenderPort: true });
+    expect(after.legs[2].days[0].fixpoints.filter((f) => f.kind === "departure")).toEqual([]);
   });
 });

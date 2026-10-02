@@ -5350,6 +5350,11 @@ Transfer) sind zusammen eine Etappe für sich — nicht drei kleine Ergänzungen
 Bis dahin gilt der Behelf aus §21.1: die Landgänge einzeln planen und wissen,
 was einem dabei fehlt.
 
+**Nachtrag (2026-10-02):** Die drei Modellfragen sind beantwortet, ohne dass
+eine neue Etappenart nötig wurde — siehe §22.7, „Mitfahrende Unterkunft und
+Seetage". Offen bleiben Punkt 5 (Zeitzonen) und Punkt 6 (zehn Regionen
+vorbereiten); beides ist kein Modell-, sondern ein Betriebsthema.
+
 ---
 
 ## 22. Offen: Spots auf dem Weg — der gebaute Mechanismus ohne seinen Fall
@@ -5649,6 +5654,37 @@ jeden anderen — „lieber nicht" nimmt einen Stopp beim nächsten Planen wiede
 heraus. Der Vorschlag kennt die beiden Enden ebenfalls (Anreise zuerst,
 Heimreise zuletzt). In der App steht das Zuhause oben in der Städteliste;
 davor „Anreise einfügen", danach „Heimreise einfügen".
+
+**Mitfahrende Unterkunft und Seetage (umgesetzt, 2026-10-02).** Die
+Kreuzfahrt aus §21 kommt mit dem aus, was es gibt — entschieden gegen die
+eigene Etappenart `aboard` aus §22.6, weil die alles nachgebaut hätte, was
+die Weiterreise schon kann (Zeitpunkte, Start, Ziel, „nichts planen", die
+Entscheidung nach Datum und Uhrzeit), und dafür Anker und Region überall
+optional gemacht hätte.
+
+- **Die Fahrt zwischen zwei Häfen ist eine Weiterreise mit dem Verkehrsmittel
+  `ship`** — über Nacht oder über Seetage, bis zu sieben Tage. In sie wird
+  nichts hineingeplant; ihre Tage heißen „An Bord" (statt „Unterwegs"), und
+  das Bordprogramm sind Termine wie an jedem anderen Tag. Ein Ort kann nicht
+  per Schiff unterwegs sein: Die Auswahl „Fortbewegung" bietet das Schiff nur
+  auf dem Weiterreise-Bildschirm an.
+- **Ein Hafentag ist eine gewöhnliche Etappe, deren Anker der Liegeplatz
+  ist**, mit der Eigenschaft `quartersAboard` („Unterkunft fährt mit",
+  Migration 0223). Die Eigenschaft wirkt an genau einer Stelle: Die Abfahrt,
+  die eine Weiterreise auf den letzten Tag der verlassenen Etappe schreibt,
+  heißt dann **„Alle an Bord"** und hält **60 Minuten** Puffer statt 20
+  (`aboard.ts`); ein **Tenderhafen** (`tenderPort`) legt **30 Minuten** für
+  die Bootsfahrt drauf. Wer die Eigenschaft nachträglich ändert, bekommt die
+  Abfahrt neu geschrieben, sofern eine Weiterreise die Etappe verlässt — das
+  plant den letzten Tag neu und ist deshalb auf einem begonnenen Tag
+  ausgeschlossen wie jede andere Neuplanung.
+- In der App: beim Anlegen einer Stadt und beim Ändern unter „Unterkunft"
+  bzw. „Auf dem Schiff"; die Städteliste zeigt „Unterkunft an Bord" am
+  Hafentag und das Schiff an der Weiterreise; der Tageskopf eines Seetags
+  sagt „An Bord · Hafen → Hafen".
+
+Was damit *nicht* gelöst ist: Die Zeitzone wandert mit dem Schiff, und ein
+Tag mit 25 Stunden kommt im Modell weiterhin nicht vor (§21.3 Punkt 5).
 
 Nebenbei gefunden: Eine Etappe *vor* zwei oder mehr anderen einzufügen oder zu
 löschen scheiterte an der Eindeutigkeit von `(plan, position)` — die

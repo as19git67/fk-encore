@@ -60,6 +60,8 @@ enum TripRouteMode: Sendable {
         case .bike:    self = .cycling
         case .transit: self = .transit
         case .car:     self = .driving
+        // No maps app routes a cruise; transit is where ferries live.
+        case .ship:    self = .transit
         }
     }
 

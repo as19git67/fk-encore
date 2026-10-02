@@ -36,12 +36,19 @@ struct TripDraftLegView: View {
                     if leg.anchorIsApproximate {
                         TripRadiusPicker(metres: $leg.anchorRadiusM)
                     }
+                    Toggle("Unterkunft fährt mit", isOn: $leg.quartersAboard)
+                    if leg.quartersAboard {
+                        Toggle("Tenderhafen", isOn: $leg.tenderPort)
+                    }
                 }
             } header: {
                 Text("Unterkunft")
             } footer: {
-                Text("Hotel, Campingplatz oder Adresse — hier fängt jeder Tag dieser Stadt "
-                     + "an und hier endet er.")
+                Text(leg.quartersAboard
+                     ? "Ein Hafentag: Die Unterkunft ist der Liegeplatz, und die Abfahrt heißt "
+                       + "„Alle an Bord“ mit einer Stunde Puffer — in einem Tenderhafen anderthalb."
+                     : "Hotel, Campingplatz oder Adresse — hier fängt jeder Tag dieser Stadt "
+                       + "an und hier endet er.")
             }
 
             Section {
