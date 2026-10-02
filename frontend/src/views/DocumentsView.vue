@@ -1069,15 +1069,6 @@ onMounted(async () => {
   min-height: 0;
   margin-block: 0.75rem;
 }
-.document-card--active {
-  border-color: var(--p-primary-color);
-  box-shadow: inset 3px 0 0 0 var(--p-primary-color);
-  background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-content-background));
-}
-.grid-card--active {
-  border-color: var(--p-primary-color);
-  box-shadow: 0 0 0 2px var(--p-primary-color);
-}
 .collection-strip {
   display: flex;
   flex-direction: column;
@@ -1232,6 +1223,17 @@ onMounted(async () => {
 .document-card:hover {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
+/* The document open in the preview. The stripe is a shadow, so it has to
+   come after :hover and carry the hover shadow along — otherwise pointing at
+   the open row wipes out the very mark that says it is open. */
+.document-card--active {
+  border-color: var(--p-primary-color);
+  box-shadow: inset 3px 0 0 0 var(--p-primary-color);
+  background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-content-background));
+}
+.document-card--active:hover {
+  box-shadow: inset 3px 0 0 0 var(--p-primary-color), 0 2px 6px rgba(0, 0, 0, 0.08);
+}
 .document-card--selected {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
@@ -1349,6 +1351,13 @@ onMounted(async () => {
 .grid-card:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   transform: translateY(-1px);
+}
+.grid-card--active {
+  border-color: var(--p-primary-color);
+  box-shadow: 0 0 0 2px var(--p-primary-color);
+}
+.grid-card--active:hover {
+  box-shadow: 0 0 0 2px var(--p-primary-color), 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 .grid-card:focus-visible {
   outline: var(--focus-ring);
