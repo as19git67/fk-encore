@@ -320,6 +320,21 @@ export const NochLeer: Story = {
   },
 }
 
+/** One person without a health insurance item: the page warns and offers to add one. */
+export const OhneKrankenversicherung: Story = {
+  name: 'Ohne Krankenversicherung',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/finance/forecast', () =>
+          HttpResponse.json({ ...BUNDLE, items: BUNDLE.items.filter((it) => it.id !== 108) } satisfies ForecastBundle),
+        ),
+        ...handlers,
+      ],
+    },
+  },
+}
+
 /** Robustness table, levers and the reverse calculation open (#1339, #1340). */
 export const Robustheit: Story = {
   name: 'Robustheit und Zielalter',

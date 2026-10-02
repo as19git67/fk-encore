@@ -40,6 +40,7 @@ import {
   formatEur,
   formatPct,
   deflate,
+  personsWithoutHealthInsurance,
   summarizeItem,
 } from '../../components/finance/forecast/forecastModel'
 import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
@@ -557,6 +558,8 @@ const accountsDialog = ref(false)
 /** Hidden for this visit once the user said "not now". */
 const accountsDismissed = ref(false)
 
+const uninsured = computed(() => personsWithoutHealthInsurance(persons.value, items.value))
+
 async function loadAccountSuggestions() {
   try {
     accountSuggestions.value = (await getForecastAccountSuggestions()).accounts
@@ -635,12 +638,14 @@ function applyInflation(rate: number) {
 const itemDialog = ref(false)
 const itemEdit = ref<ForecastItem | null>(null)
 const itemPreset = ref<ForecastItemType | null>(null)
+const itemPresetPerson = ref<number | null>(null)
 const itemSaving = ref(false)
 const itemError = ref<string | null>(null)
 
-function openItem(it: ForecastItem | null, preset: ForecastItemType | null = null) {
+function openItem(it: ForecastItem | null, preset: ForecastItemType | null = null, personId: number | null = null) {
   itemEdit.value = it
   itemPreset.value = preset
+  itemPresetPerson.value = personId
   itemError.value = null
   itemDialog.value = true
 }
@@ -930,6 +935,10 @@ const ready = computed(() => !loading.value)
       >
         {{ accountSuggestions.length === 1 ? '1 Spar- oder Depotkonto steht' : `${accountSuggestions.length} Spar- und Depotkonten stehen` }} noch nicht in der Prognose.
         <Button label="Ansehen und übernehmen" link size="small" @click="accountsDialog = true" />
+      </Message>
+      <Message v-for="p in uninsured" :key="'hi' + p.id" severity="warn" :closable="false" data-testid="missing-health-insurance">
+        Für {{ p.label }} ist keine Krankenversicherung eingetragen. Nach dem Ausstieg aus dem Arbeitsleben fehlen damit die Beiträge in den Ausgaben.
+        <Button v-if="canEdit" label="Krankenversicherung anlegen" link size="small" @click="openItem(null, 'health_insurance', p.id)" />
       </Message>
       <Message v-if="importNotice" severity="info" :closable="true" @close="importNotice = null">{{ importNotice }}</Message>
     </template>
@@ -1396,6 +1405,7 @@ const ready = computed(() => !loading.value)
       v-model:visible="itemDialog"
       :item="itemEdit"
       :preset-type="itemPreset"
+      :preset-person-id="itemPresetPerson"
       :persons="persons"
       :milestones="milestones"
       :accounts="bundle?.accounts ?? []"

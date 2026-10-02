@@ -7,6 +7,7 @@
  */
 
 import type {
+  ForecastItem,
   ForecastItemType,
   ForecastMilestone,
   ForecastMilestoneKind,
@@ -113,6 +114,16 @@ export function displayValue(
 
 export function ageInYear(person: ForecastPerson, year: number): number {
   return year - Number(person.birthDate.slice(0, 4))
+}
+
+/**
+ * Persons without a health insurance item. The engine adds no contribution
+ * on its own, so without one the largest expense after leaving work is
+ * missing from the forecast and nothing looks wrong.
+ */
+export function personsWithoutHealthInsurance(persons: ForecastPerson[], items: ForecastItem[]): ForecastPerson[] {
+  const covered = new Set(items.filter((it) => it.type === 'health_insurance').map((it) => it.personId))
+  return persons.filter((p) => !covered.has(p.id))
 }
 
 /** Completed years today, from the full birth date (the birthday may still be ahead this year). */

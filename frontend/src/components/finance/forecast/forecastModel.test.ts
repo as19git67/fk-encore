@@ -5,10 +5,11 @@ import {
   describeWhen,
   effectiveMilestone,
   formatEur,
+  personsWithoutHealthInsurance,
   summarizeItem,
   withAlpha,
 } from './forecastModel'
-import type { ForecastMilestone, ForecastPerson, ForecastScenarioConfig } from '../../../api/finance'
+import type { ForecastItem, ForecastMilestone, ForecastPerson, ForecastScenarioConfig } from '../../../api/finance'
 
 const persons: ForecastPerson[] = [
   { id: 1, label: 'A', birthDate: '1970-01-01', sortOrder: 0 },
@@ -18,6 +19,16 @@ const milestone: ForecastMilestone = { id: 5, personId: 1, kind: 'leave_work', l
 const config = { milestoneOverrides: {} } as unknown as ForecastScenarioConfig
 
 describe('forecastModel', () => {
+  it('names the persons without a health insurance item', () => {
+    const item = (id: number, personId: number | null, type: ForecastItem['type']): ForecastItem => ({
+      id, personId, type, label: '', data: {}, linkedAccountId: null, linkedAccountBalance: null, sortOrder: id,
+    })
+    expect(personsWithoutHealthInsurance(persons, []).map((p) => p.id)).toEqual([1, 2])
+    expect(personsWithoutHealthInsurance(persons, [item(1, 1, 'health_insurance'), item(2, 2, 'salary')]).map((p) => p.id)).toEqual([2])
+    expect(personsWithoutHealthInsurance(persons, [item(1, null, 'health_insurance')]).map((p) => p.id)).toEqual([1, 2])
+    expect(personsWithoutHealthInsurance(persons, [item(1, 1, 'health_insurance'), item(2, 2, 'health_insurance')])).toEqual([])
+  })
+
   it('deflates nominal amounts to today', () => {
     expect(deflate(121, 2028, 2026, 0.1)).toBeCloseTo(100, 9)
   })
