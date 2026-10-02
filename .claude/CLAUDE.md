@@ -1338,6 +1338,8 @@ The conversation with the user stays in whatever language the user is using — 
 
 ## Aktive Feature-Pläne
 
+- **Foto-Freigabe** (optionale Freigabepflicht pro Album, globale Rolle „Foto-Prüfer“, Freigabeklassen keine/intern/öffentlich, Metadaten-Bereinigung bei öffentlicher Auslieferung): `.claude/plans/foto-freigabe.md`. Noch nicht umgesetzt; Etappen und offene Fragen stehen im Plan.
+
 - **Dokumentenverwaltung** (neues Modul neben Fotos, lokale KI-Klassifikation via llm-service): `/root/.claude/plans/ein-weiteres-modul-in-peaceful-robin.md`. Wird iterativ in Etappen umgesetzt (DB/Seed → llm-service → documents-Service → Watcher → Suche → Frontend → Infra).
 - **Web-UI vereinheitlichen** (Seitenskelett `PageLayout`, Untermenü-Zeile im Sticky-Stack, Toolbar-Vertrag, Scroll-/Fokus-Restore, Selection-Bar und Basket) — **umgesetzt** in sechs Etappen (#1276–#1281). Die Regeln stehen in den Abschnitten oben (Seitenskelett, Breakpoints, Knöpfe, Dialoge, Detailseiten, Zurück-Navigation, Listen, Auswahl); Konzept und Etappenhistorie in `.claude/plans/web-ui-vereinheitlichung.md`.
 - **Admin-Aktionen in die Module verschieben** — **umgesetzt**. Datenverwaltung, Bibliotheken, Taxonomie-Cockpit/-Tools und KI-Modell liegen jetzt unter Fotos/Dokumente/Finanzen › Einstellungen; Admin behält Benutzer, Rollen, Jobs und die neue Systemstatus-Seite. Die Panels der früheren `DataManagementView` liegen unter `frontend/src/components/admin/`. Plan und Umsetzungsstand: `.claude/plans/admin-datenverwaltung-aufteilung.md`.
