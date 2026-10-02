@@ -719,6 +719,20 @@ Datum 15.01.2026`);
     expect(await depotRows(depot)).toHaveLength(2);
   });
 
+  it("stops starting documents when the time budget is spent and says where to go on", async () => {
+    const { depot } = await setup();
+    const older = await insertDocument(BUY_TEXT);
+    const newer = await insertDocument(DIVIDEND_TEXT);
+    // The first document always runs; with no time left the second waits for the next call.
+    const first = await enrichPendingDocuments([depot], 200, {}, { budgetMs: 0 });
+    expect(first.documents_examined).toBe(1);
+    expect(first.results[0]!.document_id).toBe(newer);
+    expect(first.next_before).toBe(newer);
+    const second = await enrichPendingDocuments([depot], 200, {}, { before: first.next_before, budgetMs: 0 });
+    expect(second.results[0]!.document_id).toBe(older);
+    expect(second.next_before).toBeNull();
+  });
+
   it("books nothing when rules and model disagree and the figures do not settle it", async () => {
     const { depot } = await setup();
     // The rules read 2.966,40, the model 3.100 — and the net equation fails for both

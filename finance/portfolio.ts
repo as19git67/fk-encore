@@ -1439,6 +1439,13 @@ interface EnrichDocumentsResponse {
   results: EnrichResult[];
 }
 
+/**
+ * How long one enrich request may keep starting documents. Reverse proxies
+ * commonly cut a request at 60 s; one more document read by the model
+ * (seconds, rarely more) has to fit after the budget runs out.
+ */
+const ENRICH_REQUEST_BUDGET_MS = 20_000;
+
 export const enrichDepotTransactionsFromDocuments = api(
   {
     expose: true,
@@ -1457,7 +1464,7 @@ export const enrichDepotTransactionsFromDocuments = api(
       depots.map((d) => d.id),
       limit ?? 200,
       {},
-      { before: before ?? null },
+      { before: before ?? null, budgetMs: ENRICH_REQUEST_BUDGET_MS },
     );
     return {
       ...stats,

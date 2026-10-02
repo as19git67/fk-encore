@@ -603,6 +603,13 @@ const STRONG_PATTERN = `(${STRONG_SETTLEMENT_PATTERN})`;
 export interface PendingPage {
   /** Only documents with an id below this one (the previous page's `next_before`). */
   before?: number | null;
+  /**
+   * Stop starting new documents after this many milliseconds and hand back
+   * `next_before` at the last one examined. A document the model reads for
+   * the first time takes seconds; without a budget a page of them outlasts
+   * the reverse proxy in front of the app (502), and the run is lost.
+   */
+  budgetMs?: number;
 }
 
 /**
@@ -647,7 +654,13 @@ export async function enrichPendingDocuments(
   const candidates = found.slice(0, pageSize);
   stats.next_before = found.length > pageSize ? candidates[candidates.length - 1]!.id : null;
 
-  for (const c of candidates) {
+  const started = Date.now();
+  for (const [i, c] of candidates.entries()) {
+    if (i > 0 && page.budgetMs !== undefined && Date.now() - started >= page.budgetMs) {
+      // Out of time: the next call starts below the last one examined.
+      stats.next_before = candidates[i - 1]!.id;
+      break;
+    }
     stats.documents_examined++;
     try {
       const r = await enrichDocument(c.id, accountIds, options);
