@@ -151,6 +151,41 @@ export const SplitLandscapeWide: Story = {
   },
 }
 
+// Format pair (.claude/plans/orientierungs-varianten.md): the same motif in
+// portrait and landscape. The overlay shows the side that fits the screen and
+// offers the other one on the ↻ button (R). Both viewports, so the button
+// and the preloaded counterpart can be checked on each side.
+const LANDSCAPE_SIDE = { ...MOCK_PHOTOS[0]!, orientation: 'landscape' as const }
+const PORTRAIT_SIDE = { ...MOCK_PHOTOS[2]!, orientation: 'portrait' as const }
+
+export const FormatpaarHochkant: Story = {
+  name: 'Formatpaar (Hochkant, Querformat hinter R)',
+  parameters: {
+    viewport: { viewports: phoneViewports, defaultViewport: 'phonePortrait' },
+    testViewport: { width: 390, height: 844 },
+  },
+  args: {
+    photo: PORTRAIT_SIDE,
+    variantPhoto: LANDSCAPE_SIDE,
+    prevPhoto: null,
+    nextPhoto: MOCK_PHOTOS[1]!,
+  },
+}
+
+export const FormatpaarQuer: Story = {
+  name: 'Formatpaar (Quer, Hochformat hinter R)',
+  parameters: {
+    viewport: { viewports: phoneViewports, defaultViewport: 'phoneLandscape' },
+    testViewport: { width: 844, height: 390 },
+  },
+  args: {
+    photo: LANDSCAPE_SIDE,
+    variantPhoto: PORTRAIT_SIDE,
+    prevPhoto: null,
+    nextPhoto: MOCK_PHOTOS[1]!,
+  },
+}
+
 export const OhneLoeschrechte: Story = {
   name: 'Ohne Löschrechte',
   args: {

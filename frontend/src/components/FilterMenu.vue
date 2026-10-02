@@ -41,7 +41,7 @@ const props = withDefaults(defineProps<{
   available?: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange' | 'nearLocation'>
 }>(), {
   available: () => [
-    'hiddenMode', 'showAiHidden', 'favorite', 'albumHighlight', 'groupHighlight', 'inGroup',
+    'hiddenMode', 'showAiHidden', 'showVariants', 'favorite', 'albumHighlight', 'groupHighlight', 'inGroup',
     'othersFavorited', 'othersHidden', 'notInAnyAlbum',
     'qualityRange', 'albumIds', 'personIds', 'mediaTypes',
     'hasGps', 'hasFaces', 'hasAssignedPerson',
@@ -471,6 +471,15 @@ function close() {
       <div v-if="has('showAiHidden')" class="filter-switch">
         <ToggleSwitch v-model="local.showAiHidden" />
         <span>KI-ausgeblendete anzeigen</span>
+      </div>
+
+      <!-- Formatvarianten (.claude/plans/orientierungs-varianten.md): Hoch-
+           und Querformat desselben Motivs zeigt das Raster sonst nur mit
+           der Seite, die zur Bildschirm-Orientierung passt. Dieser Schalter
+           zeigt beide Seiten nebeneinander. -->
+      <div v-if="has('showVariants')" class="filter-switch">
+        <ToggleSwitch v-model="local.showVariants" />
+        <span>Formatvarianten anzeigen</span>
       </div>
 
       <!-- Boolean switches -->

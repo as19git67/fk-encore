@@ -66,6 +66,14 @@ type GalleryGridQueryParams = {
    */
   albumScopeId?: Query<number>;
 
+  /**
+   * Portrait/landscape format groups: `all` (default) shows both sides,
+   * `portrait` / `landscape` leave out the other side of every format
+   * group. The client sends the current screen orientation here and `all`
+   * while in selection mode.
+   */
+  variantMode?: Query<string>;
+
   // — pagination —
   /** Required. Number of rows to return. Server caps at MAX_LIMIT. */
   limit?: Query<number>;
@@ -126,6 +134,7 @@ function toFilterQuery(p: GalleryGridQueryParams): PhotoFilterQuery {
     aiHiddenMode: p.aiHiddenMode,
     ownerIds: p.ownerIds,
     albumScopeId: p.albumScopeId,
+    variantMode: p.variantMode,
   };
 }
 
@@ -233,6 +242,7 @@ type GalleryIdsQueryParams = {
   aiHiddenMode?: Query<string>;
   ownerIds?: Query<string>;
   albumScopeId?: Query<number>;
+  variantMode?: Query<string>;
   sortBy?: Query<string>;
   sortDir?: Query<string>;
   photoIds?: Query<string>;

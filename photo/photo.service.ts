@@ -152,6 +152,7 @@ import { resizeImageInPool, type ImagePoolPriority } from "./image-pool";
 import { writeCacheFileAtomically } from "./cache-file";
 import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
 import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS, MlRpcTimeoutError } from "./rpc-timeout";
+import { computeOrientationVariants, photoOrientation } from "./orientation-variants";
 import {
   buildPhotoFilterConditions,
   type PhotoFilterParams,
@@ -2963,6 +2964,8 @@ export async function listPhotosLogic(
     keywords: string[] | null;
     link_visibility: string | null;
     has_known_face: boolean | null;
+    width: number | null;
+    height: number | null;
   }>(
     db
       .select({
@@ -2989,6 +2992,8 @@ export async function listPhotosLogic(
         keywords: photos.keywords,
         link_visibility: photos.link_visibility,
         has_known_face: sql<boolean>`${knownFaceExistsSql(sql`${photos.id}`, [userId])}`,
+        width: photos.width,
+        height: photos.height,
       })
       .from(photos)
       .leftJoin(
@@ -3024,6 +3029,7 @@ export async function listPhotosLogic(
       keywords: r.keywords ?? [],
       link_visibility: (r.link_visibility as PhotoLinkVisibility) ?? "auto",
       has_known_face: !!r.has_known_face,
+      orientation: photoOrientation(r.width, r.height),
     })),
   };
 }
@@ -3228,6 +3234,8 @@ export async function getPhotoDetailsBatchLogic(
     keywords: string[] | null;
     link_visibility: string | null;
     has_known_face: boolean | null;
+    width: number | null;
+    height: number | null;
   }>(
     db
       .select({
@@ -3254,6 +3262,8 @@ export async function getPhotoDetailsBatchLogic(
         keywords: photos.keywords,
         link_visibility: photos.link_visibility,
         has_known_face: sql<boolean>`${knownFaceExistsSql(sql`${photos.id}`, [userId])}`,
+        width: photos.width,
+        height: photos.height,
       })
       .from(photos)
       .leftJoin(
@@ -3307,6 +3317,7 @@ export async function getPhotoDetailsBatchLogic(
       keywords: r.keywords ?? [],
       link_visibility: (r.link_visibility as PhotoLinkVisibility) ?? "auto",
       has_known_face: !!r.has_known_face,
+      orientation: photoOrientation(r.width, r.height),
     })),
   };
 }
@@ -7234,6 +7245,7 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
     ai_picked_photo_ids: number[] | null;
     ai_picked_confidence: string | null;
     ai_picked_at: string | null;
+    orientation_variants: string | null;
   }>(
     db
       .select({
@@ -7246,6 +7258,7 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
         ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
         ai_picked_confidence: photoGroups.ai_picked_confidence,
         ai_picked_at: photoGroups.ai_picked_at,
+        orientation_variants: photoGroups.orientation_variants,
       })
       .from(photoGroups)
       .where(eq(photoGroups.user_id, userId))
@@ -7254,11 +7267,41 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
 
   const result: PhotoGroup[] = [];
   for (const g of groups) {
-    const members = await dbAll<{ photo_id: number }>(
-      db.select({ photo_id: photoGroupMembers.photo_id })
+    // Dimensions, taken_at and the viewer's curation ride along so the
+    // format-group summary (orientation-variants.ts) can be computed from
+    // the same rows instead of a second query per group.
+    const members = await dbAll<{
+      photo_id: number;
+      width: number | null;
+      height: number | null;
+      taken_at: string | null;
+      curation_status: string | null;
+    }>(
+      db.select({
+        photo_id: photoGroupMembers.photo_id,
+        width: photos.width,
+        height: photos.height,
+        taken_at: photos.taken_at,
+        curation_status: photoCuration.status,
+      })
         .from(photoGroupMembers)
+        .innerJoin(photos, eq(photos.id, photoGroupMembers.photo_id))
+        .leftJoin(
+          photoCuration,
+          and(eq(photoCuration.photo_id, photoGroupMembers.photo_id), eq(photoCuration.user_id, userId)),
+        )
         .where(eq(photoGroupMembers.group_id, g.id))
         .orderBy(photoGroupMembers.similarity_rank)
+    );
+    const variants = computeOrientationVariants(
+      members.map((m) => ({
+        photo_id: m.photo_id,
+        width: m.width,
+        height: m.height,
+        taken_at: m.taken_at,
+        hidden: m.curation_status === "hidden",
+      })),
+      g.orientation_variants,
     );
 
     result.push({
@@ -7273,6 +7316,11 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
       ai_picked_photo_ids: g.ai_picked_photo_ids ?? undefined,
       ai_picked_confidence: g.ai_picked_confidence as PhotoGroup["ai_picked_confidence"] ?? undefined,
       ai_picked_at: g.ai_picked_at ?? undefined,
+      orientation_variants:
+        g.orientation_variants === "auto" || g.orientation_variants === "off"
+          ? g.orientation_variants
+          : undefined,
+      variants: variants ?? undefined,
     });
   }
 

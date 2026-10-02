@@ -1,4 +1,5 @@
 import { API_BASE_URL, apiFetch, withPhotoAccessParams } from './client'
+import type { OrientationVariants } from './gallery'
 
 export type CurationStatus = 'visible' | 'hidden' | 'favorite'
 
@@ -33,7 +34,21 @@ export interface Photo {
   link_visibility?: PhotoLinkVisibility
   /** An album participant assigned one of this photo's faces to a named person. */
   has_known_face?: boolean
+  /**
+   * Portrait, landscape or square from the stored dimensions; null while
+   * the dimensions are unknown (.claude/plans/orientierungs-varianten.md).
+   */
+  orientation?: PhotoOrientation | null
 }
+
+/** Orientation of a photo as derived from its pixel dimensions. */
+export type PhotoOrientation = 'portrait' | 'landscape' | 'square'
+
+/**
+ * Which side of a portrait/landscape format group a list shows: `all` both,
+ * `portrait` / `landscape` only the frames that fit that screen.
+ */
+export type VariantMode = 'all' | 'portrait' | 'landscape'
 
 /** Per-photo public-link visibility. */
 export type PhotoLinkVisibility = 'auto' | 'visible' | 'hidden'
@@ -132,6 +147,17 @@ export interface PhotoFilter {
   // album's photos (with an access check) instead of the caller's own
   // library — so a shared album also renders for non-owner viewers.
   albumScopeId?: number
+  /**
+   * "Formatvarianten anzeigen": show both sides of every portrait/landscape
+   * format group instead of only the side that fits the screen. Lives in the
+   * URL like the other criteria; the grid turns it into `variantMode=all`.
+   */
+  showVariants?: boolean
+  /**
+   * The side the list asks for. Set by the grid from the screen orientation
+   * (and forced to `all` in selection mode); never part of the URL.
+   */
+  variantMode?: VariantMode
 }
 
 function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): string {
@@ -174,6 +200,8 @@ function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): strin
   }
   if (f.ownerIds && f.ownerIds.length) add('ownerIds', f.ownerIds.join(','))
   if (f.showAiHidden) add('showAiHidden', true)
+  if (f.variantMode) add('variantMode', f.variantMode)
+  else if (f.showVariants) add('variantMode', 'all')
 
   const s = params.toString()
   return s ? `?${s}` : ''
@@ -958,6 +986,13 @@ export interface PhotoGroup {
   ai_picked_photo_ids?: number[]
   ai_picked_confidence?: 'high' | 'medium' | 'low'
   ai_picked_at?: string
+  /**
+   * Portrait/landscape format group setting
+   * (.claude/plans/orientierungs-varianten.md). Absent = 'auto'.
+   */
+  orientation_variants?: 'auto' | 'off'
+  /** Visible members per side while the group forms a format group. */
+  variants?: OrientationVariants
 }
 
 export function findPhotoGroups() {
@@ -1009,6 +1044,31 @@ export function setGroupReviewAdoption(enabled: boolean) {
   })
 }
 
+// ---------- Orientation variants (portrait + landscape of one motif) ----------
+
+/** The user's global switch: show only the side that fits the screen. */
+export function getCollapseOrientationVariants() {
+  return apiFetch<{ enabled: boolean }>('/photos/groups/orientation-variants')
+}
+
+export function setCollapseOrientationVariants(enabled: boolean) {
+  return apiFetch<{ enabled: boolean }>('/photos/groups/orientation-variants', {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+/**
+ * "Nicht dasselbe Motiv" (`off`) / "Als Formatpaar behandeln" (`auto`) on
+ * one group. Immediately reversible.
+ */
+export function setGroupOrientationVariants(groupId: number, mode: 'auto' | 'off') {
+  return apiFetch<{ success: boolean; mode: 'auto' | 'off' }>(`/photos/groups/${groupId}/variants`, {
+    method: 'PATCH',
+    body: JSON.stringify({ mode }),
+  })
+}
+
 // ---------- AI Auto-Pick (Track I) ----------
 
 export function recomputeAiPicks() {
@@ -1050,6 +1110,17 @@ export function acceptPeerConsensus(id: number) {
  * hides the rest, marks the group reviewed. Used by the One-Click-Pick
  * UI in the review queue for 2- and 3-photo groups.
  */
+/**
+ * "Bestes je Format behalten": keep the best-rated photo of every
+ * orientation in the group, hide the rest, mark the group reviewed.
+ */
+export function keepBestPerOrientation(groupId: number) {
+  return apiFetch<{ success: boolean; hidden_count: number; kept_photo_ids: number[] }>(
+    `/photos/groups/${groupId}/keep-best-per-orientation`,
+    { method: 'POST' },
+  )
+}
+
 export function pickPhotosInGroup(groupId: number, photoIds: number[]) {
   return apiFetch<{ success: boolean; hidden_count: number }>(
     `/photos/groups/${groupId}/pick-photos`,
@@ -1095,6 +1166,9 @@ export interface ReviewQueuePhoto {
   taken_at: string | null
   curation: 'visible' | 'hidden' | 'favorite'
   ai_picked: boolean
+  /** Pixel dimensions as written by the face scan; null until scanned. */
+  width: number | null
+  height: number | null
   /** AI quality score (0..1), or null when the photo hasn't been scored yet. */
   ai_quality_score: number | null
   /**
@@ -1121,6 +1195,12 @@ export interface ReviewQueueGroup {
   duplicate_recommended_photo_id: number | null
   duplicate_deletable_count: number
   duplicate_deletable_bytes: number
+  /**
+   * The group holds both orientations of one motif
+   * (.claude/plans/orientierungs-varianten.md): tag "Hoch + Quer", action
+   * "Bestes je Format behalten", chip "Formatpaare".
+   */
+  orientation_pair: boolean
   photos: ReviewQueuePhoto[]
 }
 
@@ -1144,11 +1224,14 @@ export function getReviewQueue(opts: {
   offset?: number
   limit?: number
   confidence?: 'high' | 'medium' | 'low'
+  /** Only groups that hold both orientations of one motif. */
+  orientationPair?: boolean
 } = {}) {
   const sp = new URLSearchParams()
   if (opts.offset !== undefined) sp.set('offset', String(opts.offset))
   if (opts.limit !== undefined) sp.set('limit', String(opts.limit))
   if (opts.confidence) sp.set('confidence', opts.confidence)
+  if (opts.orientationPair) sp.set('orientationPair', 'true')
   const qs = sp.toString()
   return apiFetch<ReviewQueueResponse>(
     `/photos/groups/review-queue${qs ? `?${qs}` : ''}`,

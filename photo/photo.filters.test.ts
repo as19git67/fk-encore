@@ -24,3 +24,16 @@ describe("location proximity photo filter", () => {
     });
   });
 });
+
+describe("orientation variant mode", () => {
+  it("accepts the three documented values", () => {
+    expect(parsePhotoFilterQuery({ variantMode: "portrait" })).toMatchObject({ variantMode: "portrait" });
+    expect(parsePhotoFilterQuery({ variantMode: "landscape" })).toMatchObject({ variantMode: "landscape" });
+    expect(parsePhotoFilterQuery({ variantMode: "all" })).toMatchObject({ variantMode: "all" });
+  });
+
+  it("ignores anything else so an unknown value falls back to showing everything", () => {
+    expect(parsePhotoFilterQuery({ variantMode: "square" })).not.toHaveProperty("variantMode");
+    expect(parsePhotoFilterQuery({})).not.toHaveProperty("variantMode");
+  });
+});

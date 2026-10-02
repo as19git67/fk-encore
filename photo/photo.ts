@@ -7,6 +7,7 @@ import { requirePermission } from "../user/auth-handler";
 import { writeMaintenanceResponseIfActive } from "../backup/maintenance";
 import * as service from "./photo.service";
 import * as adoption from "./group-review-adoption.service";
+import * as orientationVariants from "./orientation-variants";
 import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
@@ -58,6 +59,7 @@ import type {
   UpdatePhotoLinkVisibilityResponse,
   SetKnownFaceLinkVisibilityRequest,
   SetKnownFaceLinkVisibilityResponse,
+  OrientationVariantsMode,
 } from "../db/types";
 import { Query } from "encore.dev/api";
 import { parsePhotoFilterQuery, type PhotoFilterQuery } from "./photo.filters";
@@ -92,6 +94,8 @@ type PhotoFilterQueryParams = {
   nearRadiusKm?: Query<number>;
   showAiHidden?: Query<boolean>;
   aiHiddenMode?: Query<string>;
+  /** Orientation variants: all | portrait | landscape (photo.filters.ts). */
+  variantMode?: Query<string>;
   /** Maximum number of rows to return. Omit for "all". */
   limit?: Query<number>;
   /** Number of rows to skip before returning `limit` rows. */
@@ -129,6 +133,7 @@ function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
     nearRadiusKm: p.nearRadiusKm,
     showAiHidden: p.showAiHidden,
     aiHiddenMode: p.aiHiddenMode,
+    variantMode: p.variantMode,
   };
 }
 
@@ -420,6 +425,7 @@ function parsePhotoIndexQuery(url: URL): PhotoFilterQueryParams {
     nearRadiusKm: readNum("nearRadiusKm"),
     showAiHidden: readBool("showAiHidden"),
     aiHiddenMode: readStr("aiHiddenMode"),
+    variantMode: readStr("variantMode"),
     limit: readNum("limit"),
     offset: readNum("offset"),
   };
@@ -1934,6 +1940,7 @@ import type {
 } from "../db/types";
 import {
   acceptAiPickLogic,
+  keepBestPerOrientationLogic,
   acceptPeerConsensusLogic,
   bulkAcceptHighConfidencePicksLogic,
   exportCalibrationDatasetLogic,
@@ -2010,6 +2017,54 @@ export const setGroupReviewAdoption = api(
     // photos get hidden on the user's behalf.
     requirePermission(authData, "photos.delete");
     return await adoption.setAdoptionDefaultLogic(userId, enabled);
+  }
+);
+
+/**
+ * The user's global switch for portrait/landscape format groups
+ * (.claude/plans/orientierungs-varianten.md): on, lists show only the side
+ * that matches the screen orientation.
+ */
+export const getCollapseOrientationVariants = api(
+  { expose: true, method: "GET", path: "/photos/groups/orientation-variants", auth: true },
+  async (): Promise<orientationVariants.CollapseOrientationVariantsSettings> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await orientationVariants.getCollapseOrientationVariantsLogic(userId);
+  }
+);
+
+/**
+ * Turn the format-group view on or off globally. Nothing is materialised, so
+ * the change simply applies to the next list request.
+ */
+export const setCollapseOrientationVariants = api(
+  { expose: true, method: "PATCH", path: "/photos/groups/orientation-variants", auth: true },
+  async ({ enabled }: { enabled: boolean }): Promise<orientationVariants.CollapseOrientationVariantsSettings> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    // A pure view preference of the caller's own library — nothing gets
+    // hidden on their behalf, so viewing rights are enough.
+    requirePermission(authData, "photos.view");
+    return await orientationVariants.setCollapseOrientationVariantsLogic(userId, enabled);
+  }
+);
+
+/**
+ * "Nicht dasselbe Motiv" (`off`) / "Als Formatpaar behandeln" (`auto`) on one
+ * of the caller's groups. Immediately reversible, no dialog.
+ */
+export const setGroupOrientationVariants = api(
+  { expose: true, method: "PATCH", path: "/photos/groups/:id/variants", auth: true },
+  async ({ id, mode }: { id: number; mode: OrientationVariantsMode }): Promise<orientationVariants.GroupOrientationVariantsResult> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return await orientationVariants.setGroupOrientationVariantsLogic(userId, id, mode);
   }
 );
 
@@ -2160,6 +2215,22 @@ export const pickPhotosInGroup = api(
 );
 
 /**
+ * "Bestes je Format behalten" (.claude/plans/orientierungs-varianten.md):
+ * keep the best-rated photo of every orientation in the group, hide the rest
+ * and mark the group reviewed. Same gate as the other review actions.
+ */
+export const keepBestPerOrientation = api(
+  { expose: true, method: "POST", path: "/photos/groups/:id/keep-best-per-orientation", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean; hidden_count: number; kept_photo_ids: number[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.delete");
+    return await keepBestPerOrientationLogic(userId, id);
+  }
+);
+
+/**
  * "Konsens übernehmen" — let the requester adopt the majority of their
  * album-peers' curation decisions for one similar-photo group. See
  * acceptPeerConsensusLogic for the consensus rule + privacy boundary.
@@ -2260,10 +2331,13 @@ export const listReviewQueue = api(
     offset,
     limit,
     confidence,
+    orientationPair,
   }: {
     offset?: Query<number>;
     limit?: Query<number>;
     confidence?: Query<string>;
+    /** true → only format pairs (portrait + landscape of one motif). */
+    orientationPair?: Query<boolean>;
   }): Promise<ReviewQueueResponse> => {
     checkModule();
     const userId = getUserId();
@@ -2277,6 +2351,7 @@ export const listReviewQueue = api(
       offset: typeof offset === "number" ? offset : undefined,
       limit: typeof limit === "number" ? limit : undefined,
       confidence: conf,
+      orientationPair: orientationPair === true,
     });
   },
 );

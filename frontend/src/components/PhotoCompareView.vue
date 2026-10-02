@@ -10,6 +10,7 @@ import {
   reviewPhotoGroup,
   pickPhotosInGroup,
   getPhotoDetailsBatch,
+  setGroupOrientationVariants,
   type Photo,
   type PhotoGroup,
   type CurationStatus,
@@ -32,6 +33,7 @@ import {
 import { useAuthStore } from '../stores/auth'
 import { discardFlingDirection, flingOffscreenTranslate } from '../utils/compareSwipe'
 import { mergeFreshScore, type FreshScore } from '../utils/comparePhotoScore'
+import { allowedDuel, bestPerSide, hasBothOrientations } from '../utils/orientationVariants'
 import { qualityComparisonRows } from '../utils/compareQualityDetails'
 import {
   computeBboxZoom,
@@ -344,6 +346,36 @@ const estimatedTotal = computed(() => {
   return Math.ceil(n * 1.3)
 })
 
+// ── Format pair (.claude/plans/orientierungs-varianten.md) ──
+// A group that holds the same motif portrait and landscape is a format pair
+// unless the user said "Nicht dasselbe Motiv" (`orientation_variants = 'off'`).
+// In a format pair the frames only duel inside their orientation — portrait
+// against landscape is the wrong question — and the best of each side is
+// never suggested for hiding: both survive as the pair.
+const pairMode = ref(props.group.orientation_variants !== 'off')
+const isFormatPair = computed(() => pairMode.value && hasBothOrientations(groupPhotos.value))
+// Set once the user flipped the mode here, so the way back stays on screen.
+const pairModeTouched = ref(false)
+const pairModeBusy = ref(false)
+
+async function setPairMode(on: boolean) {
+  if (pairModeBusy.value) return
+  pairModeBusy.value = true
+  try {
+    await setGroupOrientationVariants(props.group.id, on ? 'auto' : 'off')
+    pairMode.value = on
+    pairModeTouched.value = true
+  } catch (err) {
+    console.warn('[PhotoCompareView] failed to change format pair mode', err)
+  } finally {
+    pairModeBusy.value = false
+  }
+}
+
+function duelAllowed(a: Photo, b: Photo): boolean {
+  return allowedDuel(a.orientation, b.orientation, isFormatPair.value)
+}
+
 // Swiss-system: pick the best next pair (closest scores, not yet compared)
 function pickNextPair(): [number, number] | null {
   const photos = groupPhotos.value
@@ -356,6 +388,7 @@ function pickNextPair(): [number, number] | null {
       const a = photos[i]!.id
       const b = photos[j]!.id
       if (comparedPairs.value.has(pairKey(a, b))) continue
+      if (!duelAllowed(photos[i]!, photos[j]!)) continue
       const sa = scores.value.get(a) ?? 0
       const sb = scores.value.get(b) ?? 0
       candidates.push({ pair: [a, b], scoreDiff: Math.abs(sa - sb) })
@@ -466,6 +499,7 @@ function skipPair() {
       const a = photos[i]!.id
       const b = photos[j]!.id
       if (tempCompared.has(pairKey(a, b))) continue
+      if (!duelAllowed(photos[i]!, photos[j]!)) continue
       const sa = scores.value.get(a) ?? 0
       const sb = scores.value.get(b) ?? 0
       const diff = Math.abs(sa - sb)
@@ -499,8 +533,19 @@ const sortedPhotos = computed(() => {
 // and are rendered dimmed) — but NOTHING is hidden server-side until the
 // user confirms.
 const suggestedHideIds = computed(() => {
+  // In a format pair the best frame of each side stays whatever the duel
+  // scores say — the pair is the point. AI quality breaks ties.
+  const protectedIds = new Set(
+    isFormatPair.value
+      ? bestPerSide(groupPhotos.value.map((p) => ({
+          id: p.id,
+          orientation: p.orientation,
+          score: (scores.value.get(p.id) ?? 0) * 1000 + (p.ai_quality_score ?? 0),
+        })))
+      : [],
+  )
   return sortedPhotos.value
-    .filter(p => (scores.value.get(p.id) ?? 0) < 0)
+    .filter(p => (scores.value.get(p.id) ?? 0) < 0 && !protectedIds.has(p.id))
     .map(p => p.id)
 })
 
@@ -1601,6 +1646,31 @@ function compareTileSrc(photo: Photo, width?: number): string {
           </div>
         </div>
 
+        <!-- Format pair: the winners of both sides survive together. The way
+             out is one click and comes straight back. -->
+        <div v-if="isFormatPair" class="review-pair-note" role="note">
+          <i class="pi pi-sync" aria-hidden="true" />
+          <span>Hoch- und Querformat bleiben als Formatpaar erhalten – je Seite mindestens das beste Foto.</span>
+          <Button
+            label="Nicht dasselbe Motiv"
+            text
+            size="small"
+            :disabled="pairModeBusy || committing"
+            @click="setPairMode(false)"
+          />
+        </div>
+        <div v-else-if="pairModeTouched && hasBothOrientations(groupPhotos)" class="review-pair-note" role="note">
+          <i class="pi pi-sync" aria-hidden="true" />
+          <span>Hoch- und Querformat treten gegeneinander an.</span>
+          <Button
+            label="Als Formatpaar behandeln"
+            text
+            size="small"
+            :disabled="pairModeBusy || committing"
+            @click="setPairMode(true)"
+          />
+        </div>
+
         <!-- Confirmation: the final selection rendered as feed cards.
              Each card's thumb-down is pre-filled from the compare result
              (suggested-hide → dimmed); toggling is local and only takes
@@ -1875,6 +1945,21 @@ function compareTileSrc(photo: Photo, width?: number): string {
   /* The dark compare backdrop continues behind the cards so the
      confirmation reads as part of the same overlay, not a new screen. */
 }
+.review-pair-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  max-width: 600px;
+  margin: 0.75rem auto 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff; /* audit-ok: note on the near-black compare stage, same in both themes */
+  font-size: var(--text-sm);
+}
+
 .review-feed {
   /* Single column, centred — mirrors the feed's reading layout so the
      photos appear exactly as in the stream. */

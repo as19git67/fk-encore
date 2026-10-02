@@ -20,7 +20,12 @@ import {
   type PasskeyInfo,
 } from '../api/passkeys'
 import { changePassword } from '../api/users'
-import { getGroupReviewAdoption, setGroupReviewAdoption } from '../api/photos'
+import {
+  getGroupReviewAdoption,
+  setGroupReviewAdoption,
+  getCollapseOrientationVariants,
+  setCollapseOrientationVariants,
+} from '../api/photos'
 import { formatDateShort } from '../utils/dateFormat'
 import {
   startRegistration,
@@ -39,6 +44,27 @@ import {
 } from '../api/push'
 
 const auth = useAuthStore()
+
+// ── Orientation variants (portrait + landscape of one motif) ───────────────
+// Global switch, .claude/plans/orientierungs-varianten.md. On: every list
+// shows only the side of a format group that fits the screen.
+const variantsEnabled = ref(true)
+const variantsBusy = ref(false)
+const variantsError = ref('')
+
+async function handleVariantsToggle(value: boolean) {
+  variantsBusy.value = true
+  variantsError.value = ''
+  try {
+    const res = await setCollapseOrientationVariants(value)
+    variantsEnabled.value = res.enabled
+  } catch (err) {
+    variantsEnabled.value = !value
+    variantsError.value = (err as Error).message || 'Einstellung konnte nicht gespeichert werden.'
+  } finally {
+    variantsBusy.value = false
+  }
+}
 
 // ── Adopting other people's group reviews ─────────────────────────────────
 // Global default; docs/group-review-adoption.md. Albums can override it.
@@ -322,6 +348,11 @@ onMounted(async () => {
     // A failed read leaves the switch at the server default (on); the
     // toggle itself still reports its own errors.
   }
+  try {
+    variantsEnabled.value = (await getCollapseOrientationVariants()).enabled
+  } catch {
+    // Same as above: the switch stays at the server default (on).
+  }
 })
 </script>
 
@@ -405,6 +436,33 @@ onMounted(async () => {
             v-model="adoptionEnabled"
             :disabled="adoptionBusy"
             @update:modelValue="handleAdoptionToggle"
+          />
+        </div>
+      </template>
+    </Card>
+
+    <Card class="mb">
+      <template #title>Hoch- und Querformat</template>
+      <template #content>
+        <p class="description">
+          Zeigt ein Stapel dasselbe Motiv hochkant und quer, siehst du in Raster,
+          Vollbild und Diashow nur die Seite, die zur Drehung deines Bildschirms
+          passt. Die andere Seite ist einen Tipp entfernt. Ausgeschaltet stehen
+          beide wie bisher nebeneinander.
+        </p>
+        <Message v-if="variantsError" severity="error" :closable="false" class="mb">
+          {{ variantsError }}
+        </Message>
+        <div class="push-row">
+          <span class="push-label">
+            {{ variantsEnabled
+              ? 'Nur die passende Seite wird gezeigt.'
+              : 'Beide Formate werden nebeneinander gezeigt.' }}
+          </span>
+          <ToggleSwitch
+            v-model="variantsEnabled"
+            :disabled="variantsBusy"
+            @update:modelValue="handleVariantsToggle"
           />
         </div>
       </template>

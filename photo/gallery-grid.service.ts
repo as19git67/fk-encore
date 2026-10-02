@@ -40,7 +40,12 @@ import type {
   GalleryGridGroup,
   GalleryGridResponse,
   CurationStatus,
+  VariantMode,
 } from "../db/types";
+import {
+  computeOrientationVariants,
+  photoOrientation,
+} from "./orientation-variants";
 
 export type GallerySortField =
   | "taken_at"
@@ -328,6 +333,8 @@ export async function listGalleryGridLogic(
     filename: string;
     auto_crop: { x: number; y: number } | null;
     curation_status: string | null;
+    width: number | null;
+    height: number | null;
   }>(
     db
       .select({
@@ -335,6 +342,8 @@ export async function listGalleryGridLogic(
         filename: photos.filename,
         auto_crop: photos.auto_crop,
         curation_status: photoCuration.status,
+        width: photos.width,
+        height: photos.height,
       })
       .from(photos)
       .leftJoin(
@@ -354,7 +363,11 @@ export async function listGalleryGridLogic(
   // Preferring unreviewed-then-highest-id mirrors the legacy server-side
   // ordering and is enforced by the DISTINCT ON sort key.
   const photoIds = rows.map((r) => r.id);
-  const groupByPhotoId = await loadGroupInfoForPhotos(userId, photoIds);
+  const groupByPhotoId = await loadGroupInfoForPhotos(
+    userId,
+    photoIds,
+    effectiveFilter.variantMode ?? "all",
+  );
   // Comments are album-bound, so the "has comments" badge only exists when
   // the grid is scoped to an album. Skip the lookup entirely in the global
   // gallery to keep that hot path free of the extra query.
@@ -375,6 +388,7 @@ export async function listGalleryGridLogic(
       id: r.id,
       filename: r.filename,
       curation: (r.curation_status as CurationStatus) ?? "visible",
+      orientation: photoOrientation(r.width, r.height),
     };
     if (r.auto_crop) entry.auto_crop = r.auto_crop;
     const g = groupByPhotoId.get(r.id);
@@ -516,6 +530,7 @@ async function loadCommentCountsForPhotos(
 async function loadGroupInfoForPhotos(
   userId: number,
   photoIds: number[],
+  variantMode: VariantMode = "all",
 ): Promise<Map<number, GalleryGridGroup>> {
   const out = new Map<number, GalleryGridGroup>();
   if (photoIds.length === 0) return out;
@@ -533,6 +548,8 @@ async function loadGroupInfoForPhotos(
     review_source: string | null;
     ai_picked_photo_ids: number[] | null;
     ai_picked_confidence: string | null;
+    cover_photo_id: number | null;
+    orientation_variants: string | null;
   }>(
     db
       .selectDistinctOn([photoGroupMembers.photo_id], {
@@ -543,6 +560,8 @@ async function loadGroupInfoForPhotos(
         review_source: photoGroups.review_source,
         ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
         ai_picked_confidence: photoGroups.ai_picked_confidence,
+        cover_photo_id: photoGroups.cover_photo_id,
+        orientation_variants: photoGroups.orientation_variants,
       })
       .from(photoGroupMembers)
       .innerJoin(photoGroups, eq(photoGroups.id, photoGroupMembers.group_id))
@@ -591,17 +610,37 @@ async function loadGroupInfoForPhotos(
   const memberCountByGroupId = new Map<number, number>();
   for (const c of counts) memberCountByGroupId.set(c.group_id, c.member_count);
 
+  const variantsByGroupId = await loadOrientationVariantsForGroups(
+    userId,
+    groupIds,
+    new Map(chosen.map((c) => [c.group_id, c.orientation_variants])),
+  );
+
   for (const c of chosen) {
     const visibleMembers = memberCountByGroupId.get(c.group_id) ?? 0;
     // Once all but one member is hidden there is nothing left to compare, so
     // suppress the group badge entirely.
     if (visibleMembers < 2) continue;
+    const variants = variantsByGroupId.get(c.group_id);
+    // Cover choice by orientation: while the grid shows only one side, a
+    // cover on the other side is not on screen. The stack then presents the
+    // first (best-ranked) member of the shown side as its cover, so the
+    // badge still sits on exactly one tile. The database cover stays as is.
+    let isCover = c.is_cover;
+    if (variants && (variantMode === "portrait" || variantMode === "landscape")) {
+      const shownIds = variantMode === "portrait" ? variants.portrait_ids : variants.landscape_ids;
+      const hiddenIds = variantMode === "portrait" ? variants.landscape_ids : variants.portrait_ids;
+      if (c.cover_photo_id !== null && hiddenIds.includes(c.cover_photo_id) && shownIds.length > 0) {
+        isCover = c.photo_id === shownIds[0];
+      }
+    }
     const entry: GalleryGridGroup = {
       id: c.group_id,
-      is_cover: c.is_cover,
+      is_cover: isCover,
       member_count: visibleMembers,
       reviewed: c.reviewed,
     };
+    if (variants) entry.variants = variants;
     if (c.review_source === "adopted") entry.adopted = true;
     if (c.ai_picked_photo_ids && c.ai_picked_photo_ids.length > 0) {
       entry.ai_picked = c.ai_picked_photo_ids.includes(c.photo_id);
@@ -610,6 +649,72 @@ async function loadGroupInfoForPhotos(
       }
     }
     out.set(c.photo_id, entry);
+  }
+  return out;
+}
+
+/**
+ * For the groups on the current page, decide which of them form a
+ * portrait/landscape format group for this user and which members belong to
+ * which side (orientation-variants.ts). One query over all members of those
+ * groups; the rule itself lives in `computeOrientationVariants`. Member ids
+ * come back in similarity-rank order so `[0]` is the best-ranked frame of a
+ * side.
+ */
+async function loadOrientationVariantsForGroups(
+  userId: number,
+  groupIds: number[],
+  modeByGroupId: Map<number, string | null>,
+): Promise<Map<number, NonNullable<ReturnType<typeof computeOrientationVariants>>>> {
+  const out = new Map<number, NonNullable<ReturnType<typeof computeOrientationVariants>>>();
+  if (groupIds.length === 0) return out;
+  const rows = await dbAll<{
+    group_id: number;
+    photo_id: number;
+    width: number | null;
+    height: number | null;
+    taken_at: string | null;
+    curation_status: string | null;
+  }>(
+    db
+      .select({
+        group_id: photoGroupMembers.group_id,
+        photo_id: photoGroupMembers.photo_id,
+        width: photos.width,
+        height: photos.height,
+        taken_at: photos.taken_at,
+        curation_status: photoCuration.status,
+      })
+      .from(photoGroupMembers)
+      .innerJoin(photos, eq(photos.id, photoGroupMembers.photo_id))
+      .leftJoin(
+        photoCuration,
+        and(
+          eq(photoCuration.photo_id, photoGroupMembers.photo_id),
+          eq(photoCuration.user_id, userId),
+        ),
+      )
+      .where(inArray(photoGroupMembers.group_id, groupIds))
+      .orderBy(photoGroupMembers.group_id, photoGroupMembers.similarity_rank, photoGroupMembers.photo_id),
+  );
+  const byGroup = new Map<number, typeof rows>();
+  for (const r of rows) {
+    const list = byGroup.get(r.group_id);
+    if (list) list.push(r);
+    else byGroup.set(r.group_id, [r]);
+  }
+  for (const [groupId, members] of byGroup) {
+    const result = computeOrientationVariants(
+      members.map((m) => ({
+        photo_id: m.photo_id,
+        width: m.width,
+        height: m.height,
+        taken_at: m.taken_at,
+        hidden: m.curation_status === "hidden",
+      })),
+      modeByGroupId.get(groupId),
+    );
+    if (result) out.set(groupId, result);
   }
   return out;
 }

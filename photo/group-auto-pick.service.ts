@@ -53,6 +53,7 @@ import {
   type RedundantPair,
   type ScoringWeights,
 } from "./group-auto-pick";
+import { bestPerOrientation, computeOrientationVariants, groupIsOrientationPairSql } from "./orientation-variants";
 import { fetchWithTimeout } from "./rpc-timeout";
 import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletableDuplicateMembers } from "./duplicate-candidates";
 
@@ -551,6 +552,54 @@ export async function acceptAiPickLogic(
   return { success: true, hidden_count: toHide.length };
 }
 
+/**
+ * "Bestes je Format behalten" (.claude/plans/orientierungs-varianten.md):
+ * keep the best-rated visible photo of every orientation in the group, hide
+ * the rest and mark the group reviewed. Runs through `acceptAiPickLogic`
+ * with the computed set as the override, so favorites stay protected and
+ * the adoption pass fires like for any other review.
+ */
+export async function keepBestPerOrientationLogic(
+  userId: number,
+  groupId: number,
+): Promise<{ success: boolean; hidden_count: number; kept_photo_ids: number[] }> {
+  const owned = await dbFirst<{ id: number }>(
+    db.select({ id: photoGroups.id })
+      .from(photoGroups)
+      .where(and(eq(photoGroups.id, groupId), eq(photoGroups.user_id, userId))),
+  );
+  if (!owned) return { success: false, hidden_count: 0, kept_photo_ids: [] };
+  const members = await dbAll<{
+    photo_id: number;
+    width: number | null;
+    height: number | null;
+    ai_quality_score: number | null;
+    curation: string | null;
+  }>(
+    db.select({
+      photo_id: photoGroupMembers.photo_id,
+      width: photos.width,
+      height: photos.height,
+      ai_quality_score: photos.ai_quality_score,
+      curation: photoCuration.status,
+    })
+      .from(photoGroupMembers)
+      .innerJoin(photos, eq(photos.id, photoGroupMembers.photo_id))
+      .leftJoin(
+        photoCuration,
+        and(eq(photoCuration.photo_id, photoGroupMembers.photo_id), eq(photoCuration.user_id, userId)),
+      )
+      .where(eq(photoGroupMembers.group_id, groupId))
+      .orderBy(photoGroupMembers.similarity_rank, photoGroupMembers.photo_id),
+  );
+  const kept = bestPerOrientation(
+    members.map((m) => ({ ...m, hidden: m.curation === "hidden" })),
+  );
+  if (kept.length === 0) return { success: false, hidden_count: 0, kept_photo_ids: [] };
+  const result = await acceptAiPickLogic(userId, groupId, kept);
+  return { ...result, kept_photo_ids: kept };
+}
+
 export interface BulkAcceptResult {
   groups_accepted: number;
   hidden_count: number;
@@ -990,6 +1039,11 @@ export interface ReviewQueueGroup {
   duplicate_recommended_photo_id: number | null;
   duplicate_deletable_count: number;
   duplicate_deletable_bytes: number;
+  // True when the group currently forms a portrait/landscape format group
+  // for this user (orientation-variants.ts): both orientations present,
+  // visible, within the variant time window and not switched off. The
+  // queue shows it as the "Hoch + Quer" tag and the "Formatpaare" chip.
+  orientation_pair: boolean;
   photos: ReviewQueuePhoto[];
 }
 
@@ -1038,6 +1092,8 @@ export async function listReviewQueueLogic(
     offset?: number;
     limit?: number;
     confidence?: AiConfidence;
+    /** "Formatpaare": only groups that hold both orientations of one motif. */
+    orientationPair?: boolean;
   } = {},
 ): Promise<ReviewQueueResponse> {
   const limit = Math.max(1, Math.min(opts.limit ?? 30, 100));
@@ -1049,6 +1105,9 @@ export async function listReviewQueueLogic(
   ];
   if (opts.confidence) {
     baseConds.push(eq(photoGroups.ai_picked_confidence, opts.confidence));
+  }
+  if (opts.orientationPair) {
+    baseConds.push(groupIsOrientationPairSql(userId));
   }
   // A group is only worth reviewing while at least two of its members are still
   // visible (not hidden via curation). Once hiding or a hard-delete drops it
@@ -1143,12 +1202,14 @@ export async function listReviewQueueLogic(
     member_count: number;
     created_at: string | null;
     runner_up_delta: number | null;
+    orientation_variants: string | null;
   }>(
     db.select({
       id: photoGroups.id,
       cover_photo_id: photoGroups.cover_photo_id,
       ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
       ai_picked_confidence: photoGroups.ai_picked_confidence,
+      orientation_variants: photoGroups.orientation_variants,
       member_count: sql<number>`(
         SELECT COUNT(*)::int FROM ${photoGroupMembers} m
         WHERE m.group_id = ${photoGroups.id}
@@ -1337,6 +1398,16 @@ export async function listReviewQueueLogic(
       duplicate_recommended_photo_id: duplicateRecommendedPhotoId,
       duplicate_deletable_count: deletableDuplicates.length,
       duplicate_deletable_bytes: deletableDuplicates.reduce((sum, member) => sum + member.size, 0),
+      orientation_pair: computeOrientationVariants(
+        members.map((m) => ({
+          photo_id: m.photo_id,
+          width: m.width,
+          height: m.height,
+          taken_at: m.taken_at,
+          hidden: m.curation === "hidden",
+        })),
+        g.orientation_variants,
+      ) !== null,
       photos: members.map((m) => ({
         id: m.photo_id,
         filename: m.filename,
