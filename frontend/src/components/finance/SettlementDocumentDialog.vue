@@ -150,6 +150,7 @@ const CHECK_TEXT: Record<string, string> = {
   quantity_price: 'Stück × Kurs ≈ Kurswert',
   isin_checksum: 'ISIN-Prüfziffer',
   date_plausible: 'Datum plausibel',
+  booking_net: 'Betrag = Buchung auf dem Konto',
 }
 
 const hasLlm = computed(() => inspection.value?.llm_fallback_used === true)
@@ -159,6 +160,7 @@ const recognisedCount = computed(() => FIELD_ROWS.filter((r) => fieldValue(r.key
 const REJECTION_TEXT: Record<string, string> = {
   no_text: 'Das Dokument hat keinen gelesenen Text (OCR fehlt oder ist leer).',
   insurance: 'Das ist ein Versicherungsschreiben (Police, Standmitteilung, Überschussbeteiligung) — es betrifft kein Depot, auch wenn es Fonds mit ISIN nennt.',
+  cost_info: 'Das ist eine Kosteninformation zur Order (MiFID II), keine Abrechnung — die Wertpapierabrechnung kommt als eigener Beleg.',
   llm_other: 'Das KI-Modell hält den Beleg nicht für eine Wertpapierabrechnung, und die Regeln finden keine eindeutige Überschrift dagegen.',
   no_kind: 'Kein Hinweis auf Kauf, Verkauf oder Dividende gefunden — der Beleg gilt nicht als Abrechnung.',
   no_identifier: 'Weder ISIN noch WKN gefunden — ohne Wertpapierkennung kann nichts zugeordnet werden.',
@@ -186,6 +188,14 @@ const depotLine = computed(() => {
 const outcomeLine = computed(() => {
   const d = inspection.value?.depot
   if (!d) return null
+  const line = outcomeText(d)
+  if (line && d.checked_against_booking) {
+    return `Regel und KI lasen verschieden — der gebuchte Betrag auf dem Konto hat entschieden. ${line}`
+  }
+  return line
+})
+
+function outcomeText(d: NonNullable<SettlementInspection['depot']>): string | null {
   const cur = inspection.value?.fields.currency
   switch (d.outcome) {
     case 'created': return 'Einlesen würde eine neue Transaktion anlegen.'
@@ -197,7 +207,7 @@ const outcomeLine = computed(() => {
       return `Der Betrag weicht ab: Beleg ${formatSignedCurrency(d.statement_net, cur)}, Transaktion ${formatSignedCurrency(d.transaction_net, cur)}. Nichts wurde überschrieben.`
     default: return null
   }
-})
+}
 
 function openInDocuments() {
   if (props.documentId === null) return
