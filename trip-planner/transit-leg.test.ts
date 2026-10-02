@@ -33,6 +33,14 @@ describe("the frame of a journey", () => {
     expect(day.reason).toBe("Unterwegs mit Bahn oder Bus");
   });
 
+  it("calls the sea between two ports a day aboard", () => {
+    const days = transitFrame({
+      origin, destination, dayCount: 2, departMinutes: 1080, endMinutes: 480, mode: "ship",
+    });
+    expect(days.every((d) => !d.plannable)).toBe(true);
+    expect(days.map((d) => d.reason)).toEqual(["An Bord", "An Bord"]);
+  });
+
   it("spans several days with the departure on the first and the arrival on the last", () => {
     const days = transitFrame({
       origin, destination, dayCount: 3, departMinutes: 1200, endMinutes: 480, mode: "car",

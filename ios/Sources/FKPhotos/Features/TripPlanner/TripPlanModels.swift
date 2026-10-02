@@ -121,11 +121,20 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// last, in minutes past midnight.
     var departMinutes: Int? = nil
     var endMinutes: Int? = nil
+    /// The quarters travel along (§21.3): a port day on a cruise, whose
+    /// anchor is the pier and whose departure is "Alle an Bord". Nil
+    /// from an older server.
+    var quartersAboard: Bool? = nil
+    var tenderPort: Bool? = nil
 
     var transportMode: TripTransportMode { TripTransportMode(raw: mode) }
 
     /// Is this the journey between two legs rather than a place (§22.7)?
     var isTransit: Bool { kind == "transit" }
+
+    /// The sea between two ports (§21.3): a journey by ship, shown as
+    /// days aboard rather than as "unterwegs".
+    var isAboard: Bool { isTransit && transportMode == .ship }
 
     /// "10:00 → 16:00", or with dates when it takes more than a day.
     var transitWindowText: String? {
@@ -860,6 +869,13 @@ enum TripStopStatus: String, Sendable {
 /// is still a leg worth showing.
 enum TripTransportMode: String, CaseIterable, Sendable {
     case foot, bike, transit, car
+    /// A journey's mode only (§21.3): the sea between two ports. A
+    /// stay never gets about by ship, so the places' pickers leave it
+    /// out — see `forPlaces`.
+    case ship
+
+    /// What a place may get about by. The journey screen offers all.
+    static let forPlaces: [TripTransportMode] = [.foot, .bike, .transit, .car]
 
     init(raw: String) {
         self = TripTransportMode(rawValue: raw) ?? .foot
@@ -871,6 +887,7 @@ enum TripTransportMode: String, CaseIterable, Sendable {
         case .bike:    return "bicycle"
         case .transit: return "tram"
         case .car:     return "car"
+        case .ship:    return "ferry"
         }
     }
 
@@ -884,6 +901,7 @@ enum TripTransportMode: String, CaseIterable, Sendable {
         // like a promise never to walk again.
         case .transit: return "ÖPNV & zu Fuß"
         case .car:     return "mit dem Auto"
+        case .ship:    return "mit dem Schiff"
         }
     }
 
@@ -895,6 +913,7 @@ enum TripTransportMode: String, CaseIterable, Sendable {
         case .bike:    return "Räder sind immer dabei"
         case .transit: return "Kurze Wege laufen, lange fahren"
         case .car:     return "Mit Parken gerechnet"
+        case .ship:    return "An Bord – nichts wird hineingeplant"
         }
     }
 }

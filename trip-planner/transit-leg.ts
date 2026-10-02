@@ -49,6 +49,7 @@ const DETOUR_BUDGET_M: Readonly<Record<TransportMode, number>> = {
   bike: 4_000,
   foot: 1_500,
   transit: 0,
+  ship: 0,
 };
 
 /** What is worth planning: a journey you can stop on the way of. */
@@ -127,7 +128,10 @@ export function transitFrame(input: TransitFrameInput): TransitDayFrame[] {
       reason: plannable
         ? null
         : !plannableMode
-          ? input.mode === "transit" ? "Unterwegs mit Bahn oder Bus" : "Unterwegs"
+          ? input.mode === "transit" ? "Unterwegs mit Bahn oder Bus"
+            // A sea day (§21.3): the ship is where the day happens, and
+            // the deck programme goes in as fixpoints.
+            : input.mode === "ship" ? "An Bord" : "Unterwegs"
           : "Unterwegs über mehrere Tage — für eine Übernachtung unterwegs eine eigene Etappe anlegen",
     };
   });
