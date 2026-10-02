@@ -140,9 +140,27 @@ export async function persistFetchResult(
   // fall back to the sole unclaimed candidate for that account number.
   // "Unclaimed" means no other snapshot already matched it by exact kind,
   // so a depot snapshot can never steal the giro's row.
+  //
+  // A candidate whose kind is exactly that of *another* bank-side account
+  // with the same number belongs to that sibling, even when the sibling
+  // is not among these snapshots. That matters after a TAN pause: the
+  // resume only carries the accounts behind the pause, so "unclaimed"
+  // used to leave two candidates and the account the user had long
+  // linked showed up as "noch nicht zugeordnet".
+  const siblingKinds = new Map<string, Set<string>>();
+  for (const b of result.bankAccountKinds ?? []) {
+    let set = siblingKinds.get(b.accountNumber);
+    if (!set) siblingKinds.set(b.accountNumber, (set = new Set()));
+    set.add(b.accountKind);
+  }
   for (const entry of entries) {
     if (entry.matched) continue;
-    const unclaimed = entry.candidates.filter((c) => !claimedIds.has(c.id));
+    const ownedBySibling = siblingKinds.get(entry.snapshot.accountNumber);
+    // (A candidate of the snapshot's own kind would have matched in
+    // phase 1, so the sibling set can include the snapshot itself.)
+    const unclaimed = entry.candidates.filter(
+      (c) => !claimedIds.has(c.id) && !ownedBySibling?.has(c.kind),
+    );
     if (unclaimed.length === 1) {
       entry.matched = unclaimed[0];
       claimedIds.add(unclaimed[0].id);

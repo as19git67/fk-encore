@@ -269,7 +269,8 @@ async function resumeStatementsTan(
         tan_photo_mime: fetched.pendingTan.tanPhotoMime ?? null,
         tan_photo_base64: fetched.pendingTan.tanPhotoBase64 ?? null,
         fetch_context: {
-          currentAccountNumber: fetched.pendingTan.accountNumber,
+          currentAccountNumber:
+          fetched.pendingTan.accountKey ?? fetched.pendingTan.accountNumber,
           remainingAccountNumbers: fetched.pendingTan.remainingAccountNumbers,
           linkedAccountNumbers: ctx.linkedAccountNumbers,
           ...(ctx.from !== undefined ? { from: ctx.from } : {}),
