@@ -53,6 +53,7 @@ import {
   type RedundantPair,
   type ScoringWeights,
 } from "./group-auto-pick";
+import { computeOrientationVariants } from "./orientation-variants";
 import { fetchWithTimeout } from "./rpc-timeout";
 import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletableDuplicateMembers } from "./duplicate-candidates";
 
@@ -990,6 +991,11 @@ export interface ReviewQueueGroup {
   duplicate_recommended_photo_id: number | null;
   duplicate_deletable_count: number;
   duplicate_deletable_bytes: number;
+  // True when the group currently forms a portrait/landscape format group
+  // for this user (orientation-variants.ts): both orientations present,
+  // visible, within the variant time window and not switched off. The
+  // queue shows it as the "Hoch + Quer" tag and the "Formatpaare" chip.
+  orientation_pair: boolean;
   photos: ReviewQueuePhoto[];
 }
 
@@ -1143,12 +1149,14 @@ export async function listReviewQueueLogic(
     member_count: number;
     created_at: string | null;
     runner_up_delta: number | null;
+    orientation_variants: string | null;
   }>(
     db.select({
       id: photoGroups.id,
       cover_photo_id: photoGroups.cover_photo_id,
       ai_picked_photo_ids: photoGroups.ai_picked_photo_ids,
       ai_picked_confidence: photoGroups.ai_picked_confidence,
+      orientation_variants: photoGroups.orientation_variants,
       member_count: sql<number>`(
         SELECT COUNT(*)::int FROM ${photoGroupMembers} m
         WHERE m.group_id = ${photoGroups.id}
@@ -1337,6 +1345,16 @@ export async function listReviewQueueLogic(
       duplicate_recommended_photo_id: duplicateRecommendedPhotoId,
       duplicate_deletable_count: deletableDuplicates.length,
       duplicate_deletable_bytes: deletableDuplicates.reduce((sum, member) => sum + member.size, 0),
+      orientation_pair: computeOrientationVariants(
+        members.map((m) => ({
+          photo_id: m.photo_id,
+          width: m.width,
+          height: m.height,
+          taken_at: m.taken_at,
+          hidden: m.curation === "hidden",
+        })),
+        g.orientation_variants,
+      ) !== null,
       photos: members.map((m) => ({
         id: m.photo_id,
         filename: m.filename,

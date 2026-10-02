@@ -361,6 +361,34 @@ export interface Photo {
    * visitor sees, without a second round-trip.
    */
   has_known_face?: boolean;
+  /**
+   * Portrait, landscape or square, from the stored pixel dimensions. Null
+   * while the dimensions are unknown (the "Bildmaße nachtragen" backfill has
+   * not run for this photo yet).
+   */
+  orientation?: PhotoOrientation | null;
+}
+
+/** Orientation of a photo as derived from its pixel dimensions. */
+export type PhotoOrientation = "portrait" | "landscape" | "square";
+
+/**
+ * Per-group setting for the portrait/landscape format group
+ * (.claude/plans/orientierungs-varianten.md): `auto` computes membership at
+ * read time, `off` says "these are not the same motif" and never collapses.
+ */
+export type OrientationVariantsMode = "auto" | "off";
+
+/**
+ * Which side of a format group a list shows: `all` shows both sides,
+ * `portrait` / `landscape` leave out the other side of every format group.
+ */
+export type VariantMode = "all" | "portrait" | "landscape";
+
+/** Visible members per side of a format group. */
+export interface OrientationVariantCounts {
+  portrait: number;
+  landscape: number;
 }
 
 /** Per-photo public-link visibility. See `photos.link_visibility`. */
@@ -768,6 +796,14 @@ export interface GalleryGridGroup {
   // behaviour. ai_picked is true on photos in ai_picked_photo_ids.
   ai_picked?: boolean;
   ai_confidence?: "high" | "medium" | "low";
+  /**
+   * Set when the group is a portrait/landscape format group for this user
+   * (both orientations present, visible, within the variant time window and
+   * not switched off): how many visible members each side has. Absent
+   * otherwise. With `variantMode=portrait|landscape` the grid only contains
+   * the matching side; the counts tell the badge what sits behind it.
+   */
+  variants?: OrientationVariantCounts;
 }
 
 /** One cell in the virtualized gallery grid. */
@@ -775,6 +811,8 @@ export interface GalleryGridEntry {
   id: number;
   filename: string;
   curation: CurationStatus;
+  /** Portrait/landscape/square from the stored dimensions; null if unknown. */
+  orientation: PhotoOrientation | null;
   /** Auto-crop hint for the thumbnail container (object-position). */
   auto_crop?: { x: number; y: number };
   /** Group info if the photo participates in a similar-photo group. */
@@ -830,6 +868,16 @@ export interface PhotoGroup {
   ai_picked_photo_ids?: number[];
   ai_picked_confidence?: "high" | "medium" | "low";
   ai_picked_at?: string;
+  /**
+   * Portrait/landscape format group setting. Absent while never touched
+   * (behaves like "auto").
+   */
+  orientation_variants?: OrientationVariantsMode;
+  /**
+   * Visible members per side when the group currently forms a format group
+   * for this user; absent otherwise.
+   */
+  variants?: OrientationVariantCounts;
 }
 
 export interface ListGroupsResponse {

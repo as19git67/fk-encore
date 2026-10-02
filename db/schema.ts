@@ -30,6 +30,10 @@ export const users = pgTable("users", {
   // (docs/group-review-adoption.md). Per-album overrides live on
   // album_user_settings.group_review_adoption.
   adopt_group_reviews: boolean("adopt_group_reviews").notNull().default(true),
+  // Show only the side of a portrait/landscape format group that matches the
+  // screen orientation (.claude/plans/orientierungs-varianten.md). Off gives
+  // back both sides next to each other everywhere.
+  collapse_orientation_variants: boolean("collapse_orientation_variants").notNull().default(true),
 });
 
 // ========== Roles ==========
@@ -356,6 +360,10 @@ export const photoGroups = pgTable("photo_groups", {
   ai_picked_at: timestamp("ai_picked_at", { mode: "string" }),
   ai_picked_confidence: text("ai_picked_confidence"),
   ai_pick_details: jsonb("ai_pick_details").$type<AiPickDetails>(),
+  // Portrait/landscape format group (migration 0225): 'auto' (computed at
+  // read time) | 'off' (user: "not the same motif", never a format group) |
+  // NULL = never looked at, behaves like 'auto'.
+  orientation_variants: text("orientation_variants"),
 });
 
 // Per-photo scoring breakdown stored in photo_groups.ai_pick_details.

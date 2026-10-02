@@ -11,7 +11,10 @@ import {
   photoGroupMembers,
   albums,
 } from "../db/schema";
+import type { VariantMode } from "../db/types";
+import { orientationVariantSuppressedSql } from "./orientation-variants";
 
+export type { VariantMode };
 export type HiddenMode = "exclude" | "include" | "only";
 export type MembershipMode = "include" | "exclude";
 export type MediaType = "photo" | "video" | "raw";
@@ -62,6 +65,16 @@ export interface PhotoFilterParams {
    * non-owner viewers.
    */
   albumScopeId?: number;
+  /**
+   * Portrait/landscape format groups (orientation-variants.ts):
+   *   "all" (default) — every photo, both sides of a format group.
+   *   "portrait" / "landscape" — leave out the *other* side of every format
+   *   group, so a rotated screen only sees the frames that fit it. The
+   *   user's global switch and a group's `off` are honoured inside the SQL.
+   * Server-side on purpose: the grid is server-paginated and a client filter
+   * would tear holes into offsets and counts.
+   */
+  variantMode?: VariantMode;
 }
 
 export interface PhotoFilterQuery {
@@ -96,6 +109,7 @@ export interface PhotoFilterQuery {
   aiHiddenMode?: string;
   ownerIds?: string;
   albumScopeId?: number;
+  variantMode?: string;
 }
 
 function parseIntArray(s: string): number[] {
@@ -159,6 +173,9 @@ export function parsePhotoFilterQuery(q: PhotoFilterQuery): PhotoFilterParams {
   }
   if (q.albumScopeId !== undefined && Number(q.albumScopeId) > 0) {
     f.albumScopeId = Number(q.albumScopeId);
+  }
+  if (q.variantMode === "all" || q.variantMode === "portrait" || q.variantMode === "landscape") {
+    f.variantMode = q.variantMode;
   }
   return f;
 }
@@ -409,6 +426,15 @@ export function buildPhotoFilterConditions(
     conds.push(sql`NOT (${aiHiddenExists})`);
   } else if (aiMode === "only") {
     conds.push(aiHiddenExists);
+  }
+
+  // Orientation variants: with a side given, drop the other side of every
+  // format group. "all" (the default) leaves everything in place — that is
+  // also what the selection mode asks for, so no action ever hits a photo
+  // the user cannot see.
+  const variantMode = filter.variantMode ?? "all";
+  if (variantMode === "portrait" || variantMode === "landscape") {
+    conds.push(sql`NOT ${orientationVariantSuppressedSql(userId, variantMode)}`);
   }
 
   return conds;

@@ -1,6 +1,31 @@
 # Orientierungs-Varianten: Hoch- und Querformat desselben Motivs
 
-Status: **Abgestimmt** (Vorschlag angenommen, Umsetzung offen)
+Status: **In Umsetzung** — Etappe 1 (Backend) umgesetzt, Etappen 2–6 offen.
+
+## Umsetzungsstand
+
+- **Etappe 1 (Backend) — umgesetzt.** Migration `0225_orientation_variants`
+  (`photo_groups.orientation_variants`, `users.collapse_orientation_variants`).
+  Regel und Konstante in `photo/orientation-variants.ts`
+  (`VARIANT_TIME_WINDOW_SECONDS = 120`, benannt wie `TIME_WINDOW_SECONDS` in
+  `photo.service.ts`; der Plan sprach von `_MS`). Dort liegen die reine
+  Funktion `computeOrientationVariants` und das SQL-Prädikat
+  `orientationVariantSuppressedSql`, das `buildPhotoFilterConditions` für
+  `variantMode=portrait|landscape` anwendet — damit gilt der Filter für
+  `/gallery/grid`, `/gallery/ids`, `/photos` und `/photos/index`. Der
+  Nutzer-Schalter und ein `off` an der Gruppe stecken im SQL, kein Aufrufer
+  muss sie nachschlagen. `GalleryGridEntry.orientation`, `Photo.orientation`,
+  `GalleryGridGroup.variants`, `PhotoGroup.orientation_variants`/`variants`,
+  `ReviewQueueGroup.orientation_pair`. Cover-Wahl: zeigt das Raster nur eine
+  Seite und liegt das Cover auf der anderen, trägt das bestplatzierte Mitglied
+  der gezeigten Seite `is_cover` (die Datenbank bleibt unberührt). Endpunkte:
+  `PATCH /photos/groups/:id/variants` (`{ mode: 'auto' | 'off' }`),
+  `GET`/`PATCH /photos/groups/orientation-variants` (`{ enabled }`). Tests in
+  `photo/orientation-variants.test.ts` (Zeitfenster, Sichtbarkeit, `off`,
+  Schalter, Fremdgruppe, Cover, Review-Queue) und `photo.filters.test.ts`.
+- Etappen 2–6 offen; die album-gebundene Liste läuft über `/gallery/grid`
+  mit `albumScopeId` und ist damit abgedeckt, die anonyme Link-Ansicht hat
+  keinen Nutzer (und damit keine Gruppen) und bleibt außen vor.
 
 ## Problem
 
