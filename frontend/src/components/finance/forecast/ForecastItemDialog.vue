@@ -40,6 +40,8 @@ const props = defineProps<{
   item: ForecastItem | null
   /** Preselected type for a new item. */
   presetType?: ForecastItemType | null
+  /** Preselected person for a new item. */
+  presetPersonId?: number | null
   persons: ForecastPerson[]
   milestones: ForecastMilestone[]
   accounts: ForecastLinkableAccount[]
@@ -60,7 +62,7 @@ const linkedAccountId = ref<number | null>(null)
 const data = ref<Record<string, unknown>>({})
 
 watch(
-  () => [props.visible, props.item, props.presetType] as const,
+  () => [props.visible, props.item, props.presetType, props.presetPersonId] as const,
   ([visible]) => {
     if (!visible) return
     if (props.item) {
@@ -72,7 +74,7 @@ watch(
     } else {
       type.value = props.presetType ?? 'salary'
       label.value = ''
-      personId.value = props.persons[0]?.id ?? null
+      personId.value = props.presetPersonId ?? props.persons[0]?.id ?? null
       linkedAccountId.value = null
       data.value = defaultItemData(type.value)
     }
