@@ -138,9 +138,50 @@ describe("mergeSettlement", () => {
     expect(l.fields.find((f) => f.field === "gross")!.source).toBe("rules");
   });
 
+  it("keeps the rules' value for a field no check vouches for, even when the model wins on the figures", () => {
+    // A dividend tax statement: the rules read "Stk. 20" and the credited
+    // foreign tax as the tax; the model adds up (gross − tax = net) but took
+    // "200" from a code on the letterhead as the quantity. No price per
+    // share, so no check reaches the quantity.
+    const rules: SettlementValues = {
+      ...EMPTY_SETTLEMENT,
+      kind: "dividend",
+      isin: VALID_ISIN,
+      quantity: 20,
+      tax: 0.73,
+      executedAt: "2026-02-18",
+      currency: "EUR",
+    };
+    const llm: SettlementValues = {
+      ...rules,
+      quantity: 200,
+      gross: 12.92,
+      tax: 1.94,
+      net: 10.98,
+    };
+    const r = mergeSettlement(rules, llm, today);
+    expect(r.verdict).toBe("ok");
+    expect(r.values.quantity).toBe(20);
+    expect(r.fields.find((f) => f.field === "quantity")).toMatchObject({ source: "rules", disagree: true });
+    // The tax is in the equation that made the model's reading add up: the model's.
+    expect(r.values.tax).toBe(1.94);
+    expect(r.fields.find((f) => f.field === "tax")!.source).toBe("llm");
+    expect(r.values.net).toBe(10.98);
+  });
+
   it("is unverified when they disagree and neither adds up", () => {
     const r = mergeSettlement(buy({ net: -3100 }), buy({ net: -3200 }), today);
     expect(r.verdict).toBe("unverified");
+  });
+
+  it("derives the net from Kurswert and charges when no source printed one", () => {
+    const r = mergeSettlement(buy({ net: null }), null, today);
+    expect(r.values.net).toBe(-2966.4);
+    expect(r.fields.find((f) => f.field === "net")).toMatchObject({ source: "derived", rules: null, llm: null });
+    // The equation check did not get to see the derived value.
+    expect(r.checks.find((c) => c.name === "net_equation")!.result).toBe("skipped");
+    const sell = mergeSettlement({ ...buy(), kind: "sell", net: null, tax: 10 }, null, today);
+    expect(sell.values.net).toBe(2943.6);
   });
 
   it("reads a settlement the rules do not recognise at all", () => {

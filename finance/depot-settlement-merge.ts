@@ -234,6 +234,14 @@ export function settlementChecks(v: SettlementValues, today = new Date()): Settl
   return checks;
 }
 
+/** The fields each check reads — what a passed check vouches for. */
+const CHECK_FIELDS: Record<CheckName, MergeField[]> = {
+  net_equation: ["kind", "gross", "fees", "tax", "net"],
+  quantity_price: ["quantity", "price", "gross"],
+  isin_checksum: ["isin"],
+  date_plausible: ["executedAt"],
+};
+
 function score(checks: SettlementCheck[]): { ok: number; failed: number } {
   return {
     ok: checks.filter((c) => c.result === "ok").length,
@@ -245,7 +253,8 @@ function score(checks: SettlementCheck[]): { ok: number; failed: number } {
 // Merging
 // ----------------------------------------------------------------------
 
-export type FieldSource = "both" | "rules" | "llm" | null;
+/** "derived": computed from the other fields (a net no source printed). */
+export type FieldSource = "both" | "rules" | "llm" | "derived" | null;
 
 export interface MergedField {
   field: MergeField;
@@ -306,8 +315,29 @@ export function mergeSettlement(
   // Fewer failures wins, then more passes; a tie goes to the rules, which
   // never invent a number.
   const llmWins = llm !== null && (ls.failed < rs.failed || (ls.failed === rs.failed && ls.ok > rs.ok));
-  const values = llmWins ? fromLlm : fromRules;
+  const values: SettlementValues = { ...(llmWins ? fromLlm : fromRules) };
   const checks = llmWins ? llmChecks : rulesChecks;
+
+  // The checks vouch only for the fields they used. Where the model's
+  // reading won on the figures but disagrees with the rules on a field no
+  // check reached — the quantity of a dividend statement without a price
+  // per share, say — the rules' value stands: it was read after a printed
+  // label, while the model may have taken a number from anywhere on the page.
+  const vouched = new Set<MergeField>(
+    checks.filter((c) => c.result !== "skipped").flatMap((c) => CHECK_FIELDS[c.name]),
+  );
+  const fromRulesInstead = new Set<MergeField>();
+  if (llmWins) {
+    for (const field of MERGE_FIELDS) {
+      const rv = r[field];
+      const lv = l[field];
+      if (rv !== null && lv !== null && !same(field, rv, lv) && !vouched.has(field)) {
+        (values as Record<MergeField, unknown>)[field] = rv;
+        fromRulesInstead.add(field);
+      }
+    }
+    if (values.net !== null && values.kind) values.net = values.kind === "buy" ? -Math.abs(values.net) : Math.abs(values.net);
+  }
 
   const fields: MergedField[] = MERGE_FIELDS.map((field) => {
     const rv = r[field];
@@ -316,7 +346,7 @@ export function mergeSettlement(
     let source: FieldSource = null;
     if (values[field] === null) source = null;
     else if (rv !== null && lv !== null && !disagree) source = "both";
-    else if (disagree) source = llmWins ? "llm" : "rules";
+    else if (disagree) source = llmWins && !fromRulesInstead.has(field) ? "llm" : "rules";
     else source = rv !== null ? "rules" : "llm";
     return { field, rules: rv, llm: lv, source, disagree };
   });
@@ -324,6 +354,17 @@ export function mergeSettlement(
   const materialDisagreement = fields.some((f) => f.disagree && MATERIAL_FIELDS.includes(f.field));
   const settled = checks.some((c) => c.result === "ok") && !checks.some((c) => c.result === "failed");
   const verdict: MergeResult["verdict"] = materialDisagreement && !settled ? "unverified" : "ok";
+
+  // A statement that prints the Kurswert and the charges but no final
+  // amount (or one under a label nobody knows): the net is what they add
+  // up to. Derived after the checks, which would otherwise pass trivially.
+  if (values.net === null && values.gross !== null && values.kind) {
+    const charges = (values.fees ?? 0) + (values.tax ?? 0);
+    const net = values.kind === "buy" ? -(values.gross + charges) : values.gross - charges;
+    values.net = Math.round(net * 100) / 100;
+    const f = fields.find((x) => x.field === "net")!;
+    f.source = "derived";
+  }
 
   return { values, fields, checks, verdict };
 }
