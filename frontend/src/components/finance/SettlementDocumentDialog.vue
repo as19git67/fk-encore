@@ -134,6 +134,7 @@ const SOURCE_TEXT: Record<string, string> = {
   both: 'Regel = KI',
   rules: 'Regel',
   llm: 'KI',
+  derived: 'berechnet',
 }
 
 const LLM_STATUS_TEXT: Record<string, string> = {
@@ -434,6 +435,10 @@ function openInDocuments() {
 .sd-source-llm {
   background: var(--p-tag-info-background);
   color: var(--p-tag-info-color);
+}
+.sd-source-derived {
+  background: var(--p-tag-warn-background);
+  color: var(--p-tag-warn-color);
 }
 .sd-checks {
   list-style: none;

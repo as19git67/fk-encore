@@ -226,6 +226,30 @@ describe("finance/depot-document-enrichment", () => {
     expect(row.executed_at.slice(0, 10)).toBe("2026-03-16");
   });
 
+  it("enriches the booking when the statement prints Kurswert and charges but no final amount", async () => {
+    const { depot } = await setup();
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: ISIN_A,
+      kind: "buy",
+      executed_at: "2026-03-16",
+      net_amount: "-2966.40",
+      currency: "EUR",
+      source: "giro-derived",
+      dedupe_hash: "giro:1",
+    });
+    const noNet = BUY_TEXT.replace("Ausmachender Betrag 2.966,40 EUR", "");
+    const docId = await insertDocument(noNet);
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("enriched");
+    expect(r.statement_net).toBe("-2966.40");
+    const [row] = await depotRows(depot);
+    expect(row!.gross_amount).toBe("2960.00");
+    expect(row!.fees).toBe("6.40");
+    const i = await inspectSettlementDocument({ documentId: docId });
+    expect(i.sources.net.source).toBe("derived");
+  });
+
   it("merges a later giro booking into the row the document created", async () => {
     const { bc, giro, depot } = await setup();
     const docId = await insertDocument(BUY_TEXT);

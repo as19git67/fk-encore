@@ -244,10 +244,45 @@ function dateAfter(text: string, labels: string[], markers: string[]): string | 
   return null;
 }
 
+/**
+ * The part of a bank statement that is the settlement. An account
+ * statement ("Kontoauszug") can carry a whole Wertpapierabrechnung as one
+ * booking, between fee bookings and the boilerplate on the back — which
+ * mentions "Dividendenabrechnung" and would otherwise decide the kind.
+ * The block runs from a few lines above the first strong word (the
+ * booking line with the amount sits there) to the next strong word or
+ * the end. Null when the text has no strong word: it is read whole.
+ */
+export function settlementBlock(text: string): string | null {
+  const lines = text.split("\n");
+  const hits = lines.map((l, i) => (STRONG_RE.test(l) ? i : -1)).filter((i) => i >= 0);
+  if (hits.length === 0) return null;
+  const start = Math.max(0, hits[0]! - 3);
+  // Only a heading ends the block — a short line without figures — not a
+  // label with an amount ("Dividendengutschrift 120,00 EUR") and not the
+  // back page's prose that happens to mention a settlement.
+  const heading = (i: number) => lines[i]!.trim().length <= 60 && !/\d/.test(lines[i]!);
+  const end = hits.find((i) => i > hits[0]! + 1 && heading(i)) ?? lines.length;
+  return lines.slice(start, end).join("\n");
+}
+
+function firstIndex(lower: string, words: readonly string[]): number {
+  let best = -1;
+  for (const w of words) {
+    const i = lower.indexOf(w);
+    if (i >= 0 && (best < 0 || i < best)) best = i;
+  }
+  return best;
+}
+
 function detectKind(lower: string): SettlementKind | null {
   if (looksLikeInsurancePaper(lower)) return null;
-  if (DIVIDEND_MARKERS.some((m) => lower.includes(m))) return "dividend";
-  if (!SETTLEMENT_MARKERS.some((m) => lower.includes(m))) return null;
+  // Whichever wording comes first decides: a settlement's heading before
+  // the back page's "Kontoauszug, Mitteilung oder Dividendenabrechnung".
+  const dividendAt = firstIndex(lower, DIVIDEND_MARKERS);
+  const settlementAt = firstIndex(lower, SETTLEMENT_MARKERS);
+  if (dividendAt >= 0 && (settlementAt < 0 || dividendAt < settlementAt)) return "dividend";
+  if (settlementAt < 0) return null;
   // Compound spellings count ("Wertpapierverkauf", "Fondskauf", "Ankauf"),
   // but not "kaufen" in the boilerplate.
   const sell = /\b(?:wertpapier|fonds)?(?:verkauf|veräußerung)(?:s?abrechnung)?\b/.test(lower);
@@ -294,6 +329,14 @@ function detectName(text: string, isin: string | null, wkn: string | null): stri
       if (looksLikeName(line)) return line.replace(/\s{2,}/g, " ");
       break;
     }
+    // Or the line below it, as a statement's booking text prints it:
+    //   VERKAUF  WKN 123456 / LU000…
+    //   ALPHA GLOBAL FUND A   DEPOTNR.: 1234567
+    const below = lines[at + 1];
+    if (below) {
+      const cut = below.replace(/\s+(?:depot|stück|stk|menge|nominale|kurs|isin|wkn|handelstag|schlusstag|valuta)\S*.*$/i, "").trim();
+      if (looksLikeName(cut)) return cut.replace(/\s{2,}/g, " ");
+    }
   }
   return null;
 }
@@ -339,12 +382,17 @@ export function extractDepotNumber(text: string): string | null {
  */
 export function inspectSettlement(raw: string | null | undefined): SettlementInspection | null {
   if (!raw || raw.trim().length === 0) return null;
-  const text = normalize(raw);
+  const whole = normalize(raw);
+  const wholeLower = whole.toLowerCase();
+  // Amounts and labels are read from the settlement's own block, so the
+  // fee bookings around it on an account statement do not count as its
+  // fees; what the block lacks (depot number, currency) the whole text supplies.
+  const text = settlementBlock(whole) ?? whole;
   const lower = text.toLowerCase();
 
-  const kind = detectKind(lower);
-  const isin = extractIsin(text);
-  const wkn = extractWkn(text) ?? wknNextToIsin(text, isin);
+  const kind = looksLikeInsurancePaper(wholeLower) ? null : detectKind(lower);
+  const isin = extractIsin(text) ?? extractIsin(whole);
+  const wkn = extractWkn(text) ?? wknNextToIsin(text, isin) ?? extractWkn(whole);
 
   const markers: string[] = [];
   /** Which label each field was read after, for the "what was recognised" view. */
@@ -359,7 +407,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   };
 
   const quantity = track("quantity", () =>
-    amountAfter(text, [String.raw`Stück\s*/\s*Nominale`, String.raw`Stück`, String.raw`Stk\.?`, String.raw`Nominale`, String.raw`Anzahl`], markers) ??
+    amountAfter(text, [String.raw`Stück\s*/\s*Nominale`, String.raw`Stück`, String.raw`Stk\.?`, String.raw`Nominale`, String.raw`Anzahl`, String.raw`Menge`], markers) ??
     (() => {
       const m = new RegExp(String.raw`${AMOUNT}\s*(?:Stück|Stk\.?|St\.)`, "i").exec(text);
       if (!m) return null;
@@ -409,6 +457,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       String.raw`KapSt`,
       String.raw`Solidaritätszuschlag`,
       String.raw`Soli(?:daritätszuschlag)?\b`,
+      String.raw`SolZ\b`,
       String.raw`Kirchensteuer`,
       String.raw`KiSt`,
       String.raw`Quellensteuer`,
@@ -432,6 +481,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       String.raw`Zu\s*Gunsten`,
       String.raw`Gutschrift\s*(?:in\s*)?Höhe\s*von`,
       String.raw`Belastung\s*(?:in\s*)?Höhe\s*von`,
+      // A statement's booking line: "EFFEKTENGUTSCHRIFT PN:100  450,00 H".
+      String.raw`Effekten(?:gutschrift|belastung)(?:\s*PN:?\s*\d+)?`,
     ],
     markers,
   ));
@@ -444,11 +495,11 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
 
   return {
     kind,
-    insurance: looksLikeInsurancePaper(lower),
-    strong: hasStrongSettlementWording(lower),
+    insurance: looksLikeInsurancePaper(wholeLower),
+    strong: hasStrongSettlementWording(wholeLower),
     isin,
     wkn,
-    name: detectName(text, isin, wkn),
+    name: detectName(text, isin, wkn) ?? (text === whole ? null : detectName(whole, isin, wkn)),
     quantity,
     price,
     gross,
@@ -456,8 +507,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     tax,
     net,
     executedAt,
-    currency: detectCurrency(text),
-    depotNumber: extractDepotNumber(text),
+    currency: detectCurrency(text) ?? detectCurrency(whole),
+    depotNumber: extractDepotNumber(text) ?? extractDepotNumber(whole),
     markers,
     labels,
   };

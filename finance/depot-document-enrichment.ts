@@ -340,7 +340,9 @@ export async function findMatchingDepotTransaction(
   }
   const pick = (list: DepotRow[]) => list.sort((a, b) => distance(a) - distance(b))[0];
   if (agreeing.length > 0) return { row: pick(agreeing)!, netAgrees: true };
-  if (blank.length > 0) return { row: pick(blank)!, netAgrees: s.net === null };
+  // A row without a net, or a statement without one: nothing to disagree on.
+  if (blank.length > 0) return { row: pick(blank)!, netAgrees: true };
+  if (s.net === null) return { row: pick(rows)!, netAgrees: true };
   // Rows exist in the window but with a different net: a conflict to report.
   return { row: pick(rows)!, netAgrees: false };
 }
