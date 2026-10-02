@@ -719,6 +719,33 @@ Datum 15.01.2026`);
     expect(await depotRows(depot)).toHaveLength(2);
   });
 
+  it("enriches the booking with the reading that adds up to it when rules and model read different fees", async () => {
+    const { depot } = await setup();
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: ISIN_A,
+      kind: "buy",
+      executed_at: "2026-03-16",
+      net_amount: "-2966.40",
+      currency: "EUR",
+      source: "giro-derived",
+      dedupe_hash: "giro:1",
+    });
+    // No final amount printed; the rules also count a "Gebühr" line from the boilerplate.
+    const text = BUY_TEXT.replace("Ausmachender Betrag 2.966,40 EUR", "Gebühren laut Preisverzeichnis 5,00 EUR");
+    vi.mocked(extractSettlementValues).mockResolvedValue({ ...llmAnswer, net: null });
+    const docId = await insertDocument(text);
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("enriched");
+    expect(r.checked_against_booking).toBe(true);
+    expect(r.statement_net).toBe("-2966.40");
+    const [row] = await depotRows(depot);
+    expect(row!.fees).toBe("6.40");
+    const i = await inspectSettlementDocument({ documentId: docId });
+    expect(i.fields.fees).toBe("6.40");
+    expect(i.checks.find((c) => c.name === "booking_net")!.result).toBe("ok");
+  });
+
   it("stops starting documents when the time budget is spent and says where to go on", async () => {
     const { depot } = await setup();
     const older = await insertDocument(BUY_TEXT);

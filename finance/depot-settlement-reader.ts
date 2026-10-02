@@ -63,8 +63,9 @@ export interface SettlementReading {
  * that. A strong word ("Wertpapierabrechnung", "Dividendengutschrift")
  * outweighs the model.
  */
-export function rejectedAsOtherPaper(r: SettlementReading): "insurance" | "llm_other" | null {
+export function rejectedAsOtherPaper(r: SettlementReading): "insurance" | "cost_info" | "llm_other" | null {
   if (r.rules?.insurance) return "insurance";
+  if (r.rules?.costInfo) return "cost_info";
   if (r.llmSaysSettlement === false && !r.rules?.strong) return "llm_other";
   return null;
 }
@@ -83,7 +84,7 @@ export function looksLikeSecuritiesPaper(text: string): boolean {
   return identifier && SECURITIES_WORDS.test(text);
 }
 
-function rulesValues(r: SettlementInspection | null): SettlementValues | null {
+export function rulesValues(r: SettlementInspection | null): SettlementValues | null {
   if (!r) return null;
   return {
     kind: r.kind,
@@ -123,8 +124,8 @@ export async function readSettlement(
   let llmSaysSettlement: boolean | null = null;
   let llmStatus: LlmStatus = mode === "off" ? "off" : "skipped";
 
-  // Insurance paperwork is settled by the rules alone: no LLM call for it.
-  if (mode !== "off" && text && text.trim().length > 0 && !rules?.insurance) {
+  // Insurance paperwork and cost disclosures are settled by the rules alone: no LLM call for them.
+  if (mode !== "off" && text && text.trim().length > 0 && !rules?.insurance && !rules?.costInfo) {
     const stored = await storedAnswer(documentId);
     if (stored) {
       llm = parseLlmSettlement(stored);
@@ -156,4 +157,13 @@ export async function readSettlement(
   }
 
   return { rules, llm, llmSaysSettlement, merge: mergeSettlement(fromRules, llm), llmStatus };
+}
+
+/**
+ * The same reading, decided again with the booking's net as one more
+ * check (see mergeSettlement). The model's answer is the one already read;
+ * nothing is asked.
+ */
+export function rereadAgainstBooking(r: SettlementReading, bookingNet: number): SettlementReading {
+  return { ...r, merge: mergeSettlement(rulesValues(r.rules), r.llm, new Date(), bookingNet) };
 }

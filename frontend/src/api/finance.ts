@@ -708,6 +708,8 @@ export interface DepotEnrichResult {
   date_source: 'statement' | 'document_date' | null
   /** What happened with the language model for this read. */
   llm_status: SettlementLlmStatus | null
+  /** Rules and model disagreed and the booking's net decided between them. */
+  checked_against_booking?: boolean
 }
 
 /** used = asked now · cached = earlier answer · unavailable = service down · skipped / off = not asked */
@@ -733,6 +735,7 @@ export interface SettlementCheck {
 export type SettlementRejection =
   | 'no_text'
   | 'insurance'
+  | 'cost_info'
   | 'llm_other'
   | 'no_kind'
   | 'no_identifier'

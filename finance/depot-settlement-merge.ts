@@ -145,7 +145,7 @@ export function parseLlmSettlement(raw: Record<string, unknown>): SettlementValu
 // Checks
 // ----------------------------------------------------------------------
 
-export type CheckName = "net_equation" | "quantity_price" | "isin_checksum" | "date_plausible";
+export type CheckName = "net_equation" | "quantity_price" | "isin_checksum" | "date_plausible" | "booking_net";
 export type CheckResult = "ok" | "failed" | "skipped";
 
 export interface SettlementCheck {
@@ -182,7 +182,20 @@ function close(a: number, b: number, tolerance: number): boolean {
 
 const f2 = (n: number) => n.toFixed(2);
 
-export function settlementChecks(v: SettlementValues, today = new Date()): SettlementCheck[] {
+/** The net a reading stands for: the one printed, else Kurswert ± charges. */
+function impliedNet(v: SettlementValues): number | null {
+  if (v.net !== null) return Math.abs(v.net);
+  if (v.gross === null || !v.kind) return null;
+  const charges = (v.fees ?? 0) + (v.tax ?? 0);
+  return v.kind === "buy" ? v.gross + charges : v.gross - charges;
+}
+
+export function settlementChecks(
+  v: SettlementValues,
+  today = new Date(),
+  /** The net of the account booking this statement belongs to, when there is one. */
+  bookingNet: number | null = null,
+): SettlementCheck[] {
   const checks: SettlementCheck[] = [];
 
   // gross ± fees ± taxes = net
@@ -231,6 +244,20 @@ export function settlementChecks(v: SettlementValues, today = new Date()): Settl
     checks.push({ name: "date_plausible", result: "skipped", detail: null });
   }
 
+  // The bank's own booking is the one figure nobody had to read off paper.
+  if (bookingNet !== null) {
+    const implied = impliedNet(v);
+    checks.push(
+      implied === null
+        ? { name: "booking_net", result: "skipped", detail: null }
+        : {
+            name: "booking_net",
+            result: close(implied, Math.abs(bookingNet), 0.011) ? "ok" : "failed",
+            detail: `${f2(implied)} ↔ ${f2(Math.abs(bookingNet))}`,
+          },
+    );
+  }
+
   return checks;
 }
 
@@ -240,6 +267,7 @@ const CHECK_FIELDS: Record<CheckName, MergeField[]> = {
   quantity_price: ["quantity", "price", "gross"],
   isin_checksum: ["isin"],
   date_plausible: ["executedAt"],
+  booking_net: ["kind", "gross", "fees", "tax", "net"],
 };
 
 function score(checks: SettlementCheck[]): { ok: number; failed: number } {
@@ -300,6 +328,12 @@ export function mergeSettlement(
   rules: SettlementValues | null,
   llm: SettlementValues | null,
   today = new Date(),
+  /**
+   * The net of the account booking the statement belongs to. When rules
+   * and model read different charges, the reading that adds up to what
+   * the bank actually booked wins.
+   */
+  bookingNet: number | null = null,
 ): MergeResult {
   const r = rules ?? EMPTY_SETTLEMENT;
   const l = llm ?? EMPTY_SETTLEMENT;
@@ -307,8 +341,8 @@ export function mergeSettlement(
   // Candidate readings: each source, its gaps filled from the other.
   const fromRules = fill(r, l);
   const fromLlm = fill(l, r);
-  const rulesChecks = settlementChecks(fromRules, today);
-  const llmChecks = settlementChecks(fromLlm, today);
+  const rulesChecks = settlementChecks(fromRules, today, bookingNet);
+  const llmChecks = settlementChecks(fromLlm, today, bookingNet);
   const rs = score(rulesChecks);
   const ls = score(llmChecks);
 
