@@ -329,6 +329,13 @@ struct TripLegsView: View {
                     .font(.caption2)
                     .foregroundStyle(Color.accentColor)
             }
+            if leg.quartersAboard == true {
+                // The pier, not a hotel (§21.3): leaving means "Alle an Bord".
+                Label(leg.tenderPort == true ? "Unterkunft an Bord · Tenderhafen" : "Unterkunft an Bord",
+                      systemImage: "ferry")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             if leg.anchorRadiusM != nil {
                 // An anchor zone is not an address (§4.2).
                 Text("Unterkunft noch offen")
@@ -444,6 +451,8 @@ struct TripLegEditView: View {
     @State private var isDated = false
     @State private var startDate = Date()
     @State private var arriveAt: Date?
+    @State private var quartersAboard = false
+    @State private var tenderPort = false
     @State private var isSaving = false
     @State private var loaded = false
     @State private var errorMessage: String?
@@ -522,6 +531,20 @@ struct TripLegEditView: View {
                      + "geplant wird ab der ersten.")
             }
 
+            Section {
+                Toggle("Unterkunft fährt mit", isOn: $quartersAboard)
+                if quartersAboard {
+                    Toggle("Tenderhafen", isOn: $tenderPort)
+                }
+            } header: {
+                Text("Auf dem Schiff")
+            } footer: {
+                Text("Für einen Hafentag auf einer Kreuzfahrt: Die Unterkunft ist der Liegeplatz. "
+                     + "Die Abfahrt der Weiterreise heißt dann „Alle an Bord“ und hält eine Stunde "
+                     + "Puffer statt zwanzig Minuten; in einem Tenderhafen kommt die Bootsfahrt "
+                     + "zurück mit einer halben Stunde dazu.")
+            }
+
         }
         .navigationTitle(leg?.displayTitle ?? "Stadt")
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
@@ -547,6 +570,8 @@ struct TripLegEditView: View {
             isDated = leg.startDate != nil
             startDate = leg.startDate.flatMap { TripCalendar.date(fromIsoDay: $0) } ?? Date()
             arriveAt = leg.arriveMinutes.flatMap(Self.time(fromMinutes:))
+            quartersAboard = leg.quartersAboard ?? false
+            tenderPort = leg.tenderPort ?? false
             loaded = true
         }
     }
@@ -563,9 +588,12 @@ struct TripLegEditView: View {
             let days: Int?
             let startDate: String??
             let arriveAt: String??
+            let quartersAboard: Bool?
+            let tenderPort: Bool?
 
             enum CodingKeys: String, CodingKey {
                 case title, anchor, anchorLabel, mode, days, startDate, arriveAt
+                case quartersAboard, tenderPort
             }
 
             func encode(to encoder: Encoder) throws {
@@ -579,6 +607,8 @@ struct TripLegEditView: View {
                 // explicit null takes it off.
                 if let startDate { try c.encode(startDate, forKey: .startDate) }
                 if let arriveAt { try c.encode(arriveAt, forKey: .arriveAt) }
+                try c.encodeIfPresent(quartersAboard, forKey: .quartersAboard)
+                try c.encodeIfPresent(tenderPort, forKey: .tenderPort)
             }
         }
         let wantedDate: String? = isDated ? TripCalendar.isoDay(startDate) : nil
@@ -599,6 +629,11 @@ struct TripLegEditView: View {
                     days: days == leg.days.count ? nil : days,
                     startDate: wantedDate == leg.startDate ? nil : .some(wantedDate),
                     arriveAt: wantedArrival == storedArrival ? nil : .some(wantedArrival),
+                    // Only what changed: the property re-plans the last
+                    // day when a journey leaves it, and a re-plan is
+                    // refused once that day has begun.
+                    quartersAboard: quartersAboard == (leg.quartersAboard ?? false) ? nil : quartersAboard,
+                    tenderPort: (quartersAboard && tenderPort) == (leg.tenderPort ?? false) ? nil : (quartersAboard && tenderPort),
                 ))
             viewModel.replace(with: response)
             dismiss()

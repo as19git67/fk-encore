@@ -108,6 +108,13 @@ export interface StoredLeg {
    * once the import lands reads exactly this — see migration 0168.
    */
   awaitingRegion: boolean;
+  /**
+   * The quarters travel along (§21.3, migration 0223): a port day on a
+   * cruise. Its departure is "Alle an Bord" with an hour in hand; a
+   * tender port adds the boat ride back on top.
+   */
+  quartersAboard: boolean;
+  tenderPort: boolean;
   /** ISO date of this leg's first day, or null when the trip has no dates. */
   startDate: string | null;
   /**
@@ -335,6 +342,8 @@ export interface CreateLegInput {
   regionDb: string;
   /** Defaults to false — a leg planned against a ready region. */
   awaitingRegion?: boolean;
+  quartersAboard?: boolean;
+  tenderPort?: boolean;
   startDate?: string | null;
   /**
    * What this leg was searched with, kept so a re-plan can reproduce it
@@ -403,6 +412,8 @@ export async function insertLeg(
       mode: legInput.mode ?? "foot",
       region_db: legInput.regionDb,
       awaiting_region: legInput.awaitingRegion ?? false,
+      quarters_aboard: legInput.quartersAboard ?? false,
+      tender_port: legInput.tenderPort ?? false,
       start_date: legInput.startDate ?? null,
       radius_m: legInput.radiusM ?? null,
       day_starts_at: legInput.dayStartMinutes ?? null,
@@ -559,6 +570,8 @@ export interface LegPlaceUpdate {
   radiusM?: number | null;
   regionDb?: string;
   dayStartMinutes?: number | null;
+  quartersAboard?: boolean;
+  tenderPort?: boolean;
 }
 
 /**
@@ -588,6 +601,8 @@ export async function updateLegPlace(
   if (update.radiusM !== undefined) values.radius_m = update.radiusM;
   if (update.regionDb !== undefined) values.region_db = update.regionDb;
   if (update.dayStartMinutes !== undefined) values.day_starts_at = update.dayStartMinutes;
+  if (update.quartersAboard !== undefined) values.quarters_aboard = update.quartersAboard;
+  if (update.tenderPort !== undefined) values.tender_port = update.tenderPort;
   if (Object.keys(values).length === 0) return;
   await db
     .update(tripPlanLegs)
@@ -1272,6 +1287,8 @@ export async function loadPlan(
       arriveMinutes: l.arrive_minutes,
       regionDb: l.region_db,
       awaitingRegion: l.awaiting_region,
+      quartersAboard: l.quarters_aboard,
+      tenderPort: l.tender_port,
       startDate: l.start_date,
       radiusM: l.radius_m,
       dayStartMinutes: l.day_starts_at,

@@ -1562,6 +1562,13 @@
       "when": 1788652800042,
       "tag": "0222_finance_document_settlement_llm",
       "breakpoints": true
+    },
+    {
+      "idx": 223,
+      "version": "7",
+      "when": 1788652800043,
+      "tag": "0223_trip_leg_quarters_aboard",
+      "breakpoints": true
     }
   ]
 }

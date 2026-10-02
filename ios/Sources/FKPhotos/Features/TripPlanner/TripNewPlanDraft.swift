@@ -158,6 +158,8 @@ struct TripNewPlanDraft: Equatable {
                 // On the first city only the arrival is sent: there is
                 // no earlier leg for a departure to shorten (§4.2).
                 transfer: index == 0 ? leg.arrivalOnly : leg.transfer,
+                quartersAboard: leg.quartersAboard ? true : nil,
+                tenderPort: leg.quartersAboard && leg.tenderPort ? true : nil,
             )
         }
         guard wire.count == legs.count else { return nil }
@@ -243,6 +245,9 @@ struct TripCreatePlanRequest: Encodable, Sendable {
         let radiusM: Int
         let startDate: String?
         let transfer: TripDraftTransfer?
+        /// The quarters travel along (§21.3); nil when they do not.
+        let quartersAboard: Bool?
+        let tenderPort: Bool?
     }
 
     struct Group: Encodable, Sendable {
@@ -278,6 +283,10 @@ struct TripDraftLeg: Identifiable, Equatable {
     /// says so rather than claiming an address it does not have.
     var anchorIsApproximate = false
     var anchorRadiusM: Int = 1_500
+    /// A port day on a cruise (§21.3): the anchor is the pier, and
+    /// leaving it is "Alle an Bord" with the ship's margin.
+    var quartersAboard = false
+    var tenderPort = false
     /// Nil until a coordinate was actually chosen. A name is not a
     /// place: the planner has no forward geocoder and inventing one is
     /// the confident guess §15.3 exists to forbid.

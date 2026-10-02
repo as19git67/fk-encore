@@ -37,7 +37,12 @@ export const WALKING_SPEED_M_PER_MIN = 75;
  * city where you take the tram across town and walk the last three
  * corners, which is what most city days actually look like.
  */
-export type TransportMode = "foot" | "bike" | "transit" | "car";
+/**
+ * `ship` is a journey's mode only (§21.3): the sea days between two
+ * ports. Nothing is planned into it — the planner knows no ports of
+ * call and no deck plan — and a stay never gets about by ship.
+ */
+export type TransportMode = "foot" | "bike" | "transit" | "car" | "ship";
 
 /**
  * Speeds in metres per minute while actually moving, deliberately
@@ -59,6 +64,9 @@ export const SPEED_M_PER_MIN: Readonly<Record<TransportMode, number>> = {
   transit: 400,
   // ~20 km/h through a city with lights and one-way streets.
   car: 330,
+  // ~30 km/h: a ship under way. Only ever asked for a journey's own
+  // length, never for a hop between two stops.
+  ship: 500,
 };
 
 /**
@@ -103,6 +111,8 @@ export const DETOUR_FACTOR_BY_MODE: Readonly<Record<TransportMode, number>> = {
   bike: DETOUR_FACTOR,
   transit: 1.5,
   car: 1.4,
+  // Great-circle more or less: a ship goes where it is pointed.
+  ship: 1.15,
 };
 
 /**
@@ -121,6 +131,8 @@ const OVERHEAD_MINUTES: Readonly<Record<TransportMode, number>> = {
   transit: 10,
   // Getting the car out, then finding a space and walking from it.
   car: 6,
+  // Embarkation: nobody steps aboard and casts off.
+  ship: 30,
 };
 
 /**

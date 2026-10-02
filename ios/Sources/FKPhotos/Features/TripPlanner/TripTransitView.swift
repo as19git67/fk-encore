@@ -59,7 +59,7 @@ struct TripTransitView: View {
                                                        undated: legs.allSatisfy { $0.startDate == nil }))
             }
             Section {
-                TripTransportModePicker(mode: $mode)
+                TripTransportModePicker(mode: $mode, choices: TripTransportMode.allCases)
             } footer: {
                 Text(TripTransitPlanning.sentence(mode: mode, depart: depart, arrive: arrive))
             }
@@ -230,6 +230,9 @@ enum TripTransitPlanning {
         switch (mode, sameDay) {
         case (.transit, _):
             return "Mit Bahn oder Bus wird nichts hineingeplant — die Weiterreise sagt nur, wo ihr seid."
+        case (.ship, _):
+            return "An Bord wird nichts hineingeplant — die Tage sagen, dass ihr auf See seid. "
+                + "Das Bordprogramm lässt sich als Termine eintragen."
         case (_, false):
             return "Über mehrere Tage wird nichts hineingeplant. Für eine Übernachtung unterwegs "
                 + "lieber eine eigene Etappe anlegen."

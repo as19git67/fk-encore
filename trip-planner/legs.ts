@@ -55,6 +55,7 @@ import {
   type PlanResponse,
   type TransferRequest,
 } from "./plans";
+import { isJourneyDeparture, journeyDeparture } from "./aboard";
 import type { TransportMode } from "./travel";
 
 /** Mirrors `plans.ts`; a trip may not grow past it by adding legs either. */
@@ -81,6 +82,13 @@ export interface AddLegRequest {
   radiusM?: number;
   startDate?: string;
   dayStartsAt?: string;
+  /**
+   * The quarters travel along (§21.3): a port day on a cruise, whose
+   * anchor is the pier. Leaving it is "Alle an Bord", with an hour in
+   * hand; a tender port adds the boat ride back.
+   */
+  quartersAboard?: boolean;
+  tenderPort?: boolean;
   /**
    * Where in the trip it goes, counted from zero. Appended at the end
    * when absent, which is what "noch eine Stadt" almost always means.
@@ -119,6 +127,8 @@ export const addTripLeg = api(
       radiusM: req.radiusM,
       startDate: req.startDate,
       dayStartsAt: req.dayStartsAt,
+      quartersAboard: req.quartersAboard,
+      tenderPort: req.tenderPort,
       transfer: req.transfer,
     };
     const prepared = previous
@@ -202,6 +212,9 @@ export interface UpdateLegRequest {
   /** `null` takes the date off this leg. */
   startDate?: string | null;
   dayStartsAt?: string;
+  /** The quarters travel along (§21.3); see `AddLegRequest`. */
+  quartersAboard?: boolean;
+  tenderPort?: boolean;
 }
 
 export const updateTripLeg = api(
@@ -219,6 +232,13 @@ export const updateTripLeg = api(
 
     const leg = legAt(plan, req.legIndex);
 
+    // The ship's margin only matters once a journey leaves this leg:
+    // then its departure is rewritten and the last day planned again.
+    // Until then the property is only kept.
+    const aboardChanged = (req.quartersAboard !== undefined && req.quartersAboard !== leg.quartersAboard)
+      || (req.tenderPort !== undefined && req.tenderPort !== leg.tenderPort);
+    const journeyAfter = plan.legs.find((l) => l.position === req.legIndex + 1 && l.kind === "transit") ?? null;
+
     // Which of the two kinds of change is this? Moving the anchor,
     // changing the mode, the length or the radius changes what the days
     // can hold; a name and a date do not. Only the first kind throws
@@ -230,7 +250,8 @@ export const updateTripLeg = api(
       || req.anchorRadiusM !== undefined
       || req.dayStartsAt !== undefined
       // The arrival decides how much of day one there is.
-      || req.arriveAt !== undefined;
+      || req.arriveAt !== undefined
+      || (aboardChanged && journeyAfter !== null);
 
     if (replans) {
       const settled = firstSettledStop(leg);
@@ -262,6 +283,12 @@ export const updateTripLeg = api(
         anchorLabel: req.anchorLabel?.trim() || null,
       });
     }
+    if (req.quartersAboard !== undefined || req.tenderPort !== undefined) {
+      await updateLegPlace(req.planId, leg.id, {
+        quartersAboard: req.quartersAboard,
+        tenderPort: req.tenderPort,
+      });
+    }
 
     if (!replans) return { plan: await reload(req.planId, userId) };
 
@@ -280,7 +307,12 @@ export const updateTripLeg = api(
       // Fixpoints belong to days; a leg that just got shorter must not
       // carry a fixpoint on a day it no longer has.
       fixpoints: (legRequestFromStored(stored).fixpoints ?? [])
-        .filter((f) => f.dayIndex < (req.days ?? stored.days.length)),
+        .filter((f) => f.dayIndex < (req.days ?? stored.days.length))
+        // The journey's departure follows the property: "Alle an Bord"
+        // with the ship's margin, or the journey on with a train's.
+        .map((f) => journeyAfter && isJourneyDeparture(f, stored.anchor)
+          ? journeyDeparture(stored, journeyTitle(reloaded, journeyAfter), f.at, f.dayIndex)
+          : f),
     };
 
     const arriveMinutes = req.arriveAt === undefined
@@ -323,6 +355,13 @@ export const updateTripLeg = api(
     };
   },
 );
+
+/** What the leg after the journey is called — where "Weiterreise nach" goes. */
+function journeyTitle(plan: StoredPlan, journey: StoredPlan["legs"][number]): string {
+  const next = plan.legs.find((l) => l.position === journey.position + 1);
+  if (next) return next.title ?? next.anchorLabel ?? `Etappe ${next.position + 1}`;
+  return plan.home?.label ?? "Zuhause";
+}
 
 export interface RemoveLegRequest {
   planId: number;

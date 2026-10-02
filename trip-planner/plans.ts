@@ -105,7 +105,7 @@ const CANDIDATE_LIMIT = 150;
 const MAX_DAYS = 14;
 /** More than this is a life, not a trip — and every leg costs a search. */
 const MAX_LEGS = 10;
-const TRANSPORT_MODES: readonly TransportMode[] = ["foot", "bike", "transit", "car"];
+const TRANSPORT_MODES: readonly TransportMode[] = ["foot", "bike", "transit", "car", "ship"];
 const FIXPOINT_KINDS: readonly FixpointKind[] = ["appointment", "departure"];
 /**
  * How many days of the trip are planned down to spots straight away
@@ -137,8 +137,15 @@ export interface LegRequest {
    * from claiming an address it does not have (§4.2).
    */
   anchorRadiusM?: number;
-  /** foot | bike | transit | car. On foot by default. */
+  /** foot | bike | transit | car; ship for a journey only. On foot by default. */
   mode?: TransportMode;
+  /**
+   * The quarters travel along (§21.3): a port day on a cruise, whose
+   * anchor is the pier. Leaving it is "Alle an Bord", with an hour in
+   * hand rather than twenty minutes; a tender port adds the boat back.
+   */
+  quartersAboard?: boolean;
+  tenderPort?: boolean;
   /** How many days this leg lasts. One by default. */
   days?: number;
   /** Search radius around this leg's anchor. */
@@ -789,6 +796,8 @@ export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegReques
     anchorRadiusM: leg.anchorRadiusM ?? undefined,
     anchorLabel: leg.anchorLabel ?? undefined,
     mode: leg.mode,
+    quartersAboard: leg.quartersAboard,
+    tenderPort: leg.tenderPort,
     transfer: leg.arriveMinutes === null
       ? undefined
       : { arriveAt: formatMinutesOfDay(leg.arriveMinutes) },
@@ -1769,6 +1778,8 @@ async function planLeg(
       // Kept on the leg so a re-plan cannot hand the morning back: the
       // arrival used to live in the request and nowhere else.
       arriveMinutes: trip.firstDayStartMinutes ?? null,
+      quartersAboard: legReq.quartersAboard ?? false,
+      tenderPort: legReq.tenderPort ?? false,
       regionDb: region?.postgresDb ?? pending!.postgresDb,
       // The leg says it is waiting, rather than the waiting being
       // guessed from "has no stops" — which a leg whose search

@@ -17,10 +17,13 @@ import SwiftUI
 /// around it, which every one of those screens has.
 struct TripTransportModePicker: View {
     @Binding var mode: TripTransportMode
+    /// What may be chosen: a place's four, or every mode for a journey,
+    /// which is the only thing that goes by ship (§21.3).
+    var choices: [TripTransportMode] = TripTransportMode.forPlaces
 
     var body: some View {
         NavigationLink {
-            TripTransportModeChoiceView(mode: $mode)
+            TripTransportModeChoiceView(mode: $mode, choices: choices)
         } label: {
             LabeledContent("Fortbewegung") {
                 Label(mode.label, systemImage: mode.systemImage)
@@ -34,11 +37,12 @@ struct TripTransportModePicker: View {
 /// the tick moves, and the back button is where it always is.
 struct TripTransportModeChoiceView: View {
     @Binding var mode: TripTransportMode
+    var choices: [TripTransportMode] = TripTransportMode.forPlaces
 
     var body: some View {
         List {
             Section {
-                ForEach(TripTransportMode.allCases, id: \.self) { candidate in
+                ForEach(choices, id: \.self) { candidate in
                     Button {
                         mode = candidate
                     } label: {
