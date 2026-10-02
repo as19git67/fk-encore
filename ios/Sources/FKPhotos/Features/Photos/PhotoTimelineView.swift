@@ -86,14 +86,7 @@ struct PhotoTimelineView: View {
                         Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
-                    // A collage needs between two and nine photos; outside
-                    // that range there is no layout to offer.
-                    Button {
-                        showCollage = true
-                    } label: {
-                        Label("Collage", systemImage: "square.grid.2x2")
-                    }
-                    .disabled(!CollageLayouts.canCollage(selection.count))
+                    CollageToolbarButton(selectedCount: selection.count) { showCollage = true }
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
@@ -150,14 +143,12 @@ struct PhotoTimelineView: View {
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
         }
-        .sheet(isPresented: $showCollage) {
-            CollageView(photos: SelectionOrder.photos(photosVM.photos, in: selectionOrder))
-        }
-        .onChange(of: selection.ids) { _, ids in
-            selectionOrder = SelectionOrder.reconciled(
-                selectionOrder, with: ids, gridOrder: photosVM.photos.map(\.id)
-            )
-        }
+        .collageSheet(
+            isPresented: $showCollage,
+            selectedIds: selection.ids,
+            order: $selectionOrder,
+            photos: photosVM.photos
+        )
         .sheet(isPresented: $addToAlbum.isPresented) {
             AddToAlbumPickerView(manager: addToAlbum)
                 .presentationDetents([.medium, .large])

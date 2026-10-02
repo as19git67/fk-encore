@@ -240,18 +240,14 @@ struct AlbumDetailView: View {
         .fullScreenCover(isPresented: $showSlideshow) {
             PhotoSlideshowView(photos: slideshowPhotos, title: album?.name ?? "")
         }
-        .sheet(isPresented: $showCollage) {
-            CollageView(
-                photos: SelectionOrder.photos(displayedPhotos, in: selectionOrder),
-                albumId: albumId
-            ) {
-                Task { await loadAlbum() }
-            }
-        }
-        .onChange(of: selectedIds) { _, ids in
-            selectionOrder = SelectionOrder.reconciled(
-                selectionOrder, with: ids, gridOrder: displayedPhotos.map(\.id)
-            )
+        .collageSheet(
+            isPresented: $showCollage,
+            selectedIds: selectedIds,
+            order: $selectionOrder,
+            photos: displayedPhotos,
+            albumId: albumId
+        ) {
+            Task { await loadAlbum() }
         }
         .sheet(isPresented: $showMap) {
             NavigationStack {
@@ -319,14 +315,7 @@ struct AlbumDetailView: View {
                         Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
-                    // A collage needs between two and nine photos; outside
-                    // that range there is no layout to offer.
-                    Button {
-                        showCollage = true
-                    } label: {
-                        Label("Collage", systemImage: "square.grid.2x2")
-                    }
-                    .disabled(!CollageLayouts.canCollage(selectedIds.count))
+                    CollageToolbarButton(selectedCount: selectedIds.count) { showCollage = true }
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {

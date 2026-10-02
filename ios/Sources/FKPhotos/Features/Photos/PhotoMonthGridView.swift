@@ -153,14 +153,7 @@ struct PhotoMonthGridView: View {
                         Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
-                    // A collage needs between two and nine photos; outside
-                    // that range there is no layout to offer.
-                    Button {
-                        showCollage = true
-                    } label: {
-                        Label("Collage", systemImage: "square.grid.2x2")
-                    }
-                    .disabled(!CollageLayouts.canCollage(selectedIds.count))
+                    CollageToolbarButton(selectedCount: selectedIds.count) { showCollage = true }
                 }
             } else {
                 ToolbarItem(placement: .primaryAction) {
@@ -202,14 +195,12 @@ struct PhotoMonthGridView: View {
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
         }
-        .sheet(isPresented: $showCollage) {
-            CollageView(photos: SelectionOrder.photos(photos, in: selectionOrder))
-        }
-        .onChange(of: selectedIds) { _, ids in
-            selectionOrder = SelectionOrder.reconciled(
-                selectionOrder, with: ids, gridOrder: photos.map(\.id)
-            )
-        }
+        .collageSheet(
+            isPresented: $showCollage,
+            selectedIds: selectedIds,
+            order: $selectionOrder,
+            photos: photos
+        )
         .sheet(isPresented: $addToAlbum.isPresented) {
             AddToAlbumPickerView(manager: addToAlbum)
                 .presentationDetents([.medium, .large])

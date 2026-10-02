@@ -497,6 +497,71 @@ struct CollageView: View {
     }
 }
 
+// MARK: - Opening a collage from a grid
+
+extension View {
+    /// The collage sheet for a grid's selection, plus the bookkeeping that
+    /// remembers in which order the photos were picked.
+    ///
+    /// One modifier rather than two in every grid: the grids' bodies are
+    /// already long chains, and two more links pushed one of them past what
+    /// the type checker solves in reasonable time.
+    func collageSheet(
+        isPresented: Binding<Bool>,
+        selectedIds: Set<Int>,
+        order: Binding<[Int]>,
+        photos: [PhotoWithCuration],
+        albumId: Int? = nil,
+        onSaved: (() -> Void)? = nil
+    ) -> some View {
+        modifier(CollageSheetModifier(
+            isPresented: isPresented,
+            selectedIds: selectedIds,
+            order: order,
+            photos: photos,
+            albumId: albumId,
+            onSaved: onSaved
+        ))
+    }
+}
+
+/// "Collage" in a grid's selection toolbar — enabled for two to nine photos,
+/// the range there are layouts for.
+struct CollageToolbarButton: View {
+    let selectedCount: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label("Collage", systemImage: "square.grid.2x2")
+        }
+        .disabled(!CollageLayouts.canCollage(selectedCount))
+    }
+}
+
+private struct CollageSheetModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    let selectedIds: Set<Int>
+    @Binding var order: [Int]
+    let photos: [PhotoWithCuration]
+    let albumId: Int?
+    let onSaved: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $isPresented) {
+                CollageView(
+                    photos: SelectionOrder.photos(photos, in: order),
+                    albumId: albumId,
+                    onSaved: onSaved
+                )
+            }
+            .onChange(of: selectedIds) { _, ids in
+                order = SelectionOrder.reconciled(order, with: ids, gridOrder: photos.map(\.id))
+            }
+    }
+}
+
 /// A rendered collage on disk, waiting for the share sheet.
 private struct SharedFile: Identifiable {
     let url: URL
