@@ -14,6 +14,39 @@ struct PhotoGridView: View {
     @State private var shareManager   = PhotoShareManager()
     @State private var addToAlbum     = AddToAlbumManager()
     @State private var itemFrames: [Int: CGRect] = [:]
+    /// Tiles currently on screen, so a reload after turning the device can
+    /// come back to the topmost of them.
+    @State private var visibleIds: Set<Int> = []
+    @Environment(\.screenOrientation) private var screenOrientation
+
+    /// Which side of every format group to ask for
+    /// (.claude/plans/orientierungs-varianten.md): the side that fits the
+    /// screen, or everything while selecting or when the filter says so.
+    private var variantMode: VariantMode {
+        VariantMode.forScreen(
+            screenOrientation,
+            showVariants: filterSort.appliedFilter.showVariants == true,
+            selecting: isSelecting
+        )
+    }
+
+    private func reload() async {
+        await viewModel.loadPhotos(
+            filter: filterSort.appliedFilter,
+            sort: filterSort.appliedSort,
+            variantMode: variantMode
+        )
+    }
+
+    /// Reload for a new side and stay where the user was: the topmost tile on
+    /// screen is the anchor, if it is still in the list afterwards.
+    private func reloadKeepingPlace() async {
+        let anchor = viewModel.photos.first { visibleIds.contains($0.id) }?.id
+        await reload()
+        if let anchor, viewModel.photos.contains(where: { $0.id == anchor }) {
+            scrollTarget = anchor
+        }
+    }
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -32,7 +65,7 @@ struct PhotoGridView: View {
                         Text(error)
                     } actions: {
                         Button("Erneut versuchen") {
-                            Task { await viewModel.loadPhotos() }
+                            Task { await reload() }
                         }
                     }
                 } else if viewModel.photos.isEmpty {
@@ -51,6 +84,18 @@ struct PhotoGridView: View {
                                             .padding(4)
                                     }
                                 }
+                                // Format badge: this photo also exists in the
+                                // other orientation. Tap → viewer on that side.
+                                .overlay(alignment: .topTrailing) {
+                                    if !isSelecting, !viewModel.counterpartIds(of: photo.id).isEmpty {
+                                        VariantBadge(label: variantBadgeLabel(for: photo)) {
+                                            openOtherSide(of: photo)
+                                        }
+                                        .padding(4)
+                                    }
+                                }
+                                .onAppear { visibleIds.insert(photo.id) }
+                                .onDisappear { visibleIds.remove(photo.id) }
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     if isSelecting {
@@ -144,32 +189,43 @@ struct PhotoGridView: View {
             }
         }
         .fullScreenCover(isPresented: $showSlideshow) {
-            PhotoSlideshowView(photos: slideshowPhotos, title: "Fotos")
+            PhotoSlideshowView(
+                photos: slideshowPhotos,
+                variants: viewModel.variantsByPhotoId,
+                title: "Fotos"
+            )
         }
         .sheet(isPresented: $showUpload) {
             PhotoUploadView {
-                Task { await viewModel.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort) }
+                Task { await reload() }
             }
         }
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort)
                 .presentationDetents([.medium, .large])
         }
-        .navigationDestination(item: $fullscreenNav) { _ in
+        .navigationDestination(item: $fullscreenNav) { nav in
             PhotoFullscreenView(
                 photos: viewModel.photos,
                 currentIndex: $selectedIndex,
-                onPhotoRemoved: { id in viewModel.photos.removeAll { $0.id == id } }
+                onPhotoRemoved: { id in viewModel.photos.removeAll { $0.id == id } },
+                variants: viewModel.variantsByPhotoId,
+                startOnOtherSide: nav.otherSide
             )
         }
         .remembersGridPosition(whenClosing: fullscreenNav, target: $scrollTarget) {
             GridScroll.target(index: selectedIndex, in: viewModel.photos)
         }
         .refreshable {
-            await viewModel.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort)
+            await reload()
         }
         .task(id: filterSort.applyToken) {
-            await viewModel.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort)
+            await reload()
+        }
+        // Turning the device, or entering/leaving selection, asks for the other
+        // side (or for everything); the list reloads around the tile on top.
+        .onChange(of: variantMode) { _, _ in
+            Task { await reloadKeepingPlace() }
         }
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
@@ -196,6 +252,18 @@ struct PhotoGridView: View {
         }
     }
 
+    /// Open the viewer on `photo` and switch straight to its other side.
+    private func openOtherSide(of photo: PhotoWithCuration) {
+        selectedIndex = viewModel.photos.firstIndex(where: { $0.id == photo.id }) ?? 0
+        fullscreenNav = FullscreenNav(startIndex: selectedIndex, otherSide: true)
+    }
+
+    private func variantBadgeLabel(for photo: PhotoWithCuration) -> String {
+        let side = viewModel.variantsByPhotoId[photo.id]?.side(of: photo.id)
+        let other: PhotoOrientation? = side == .portrait ? .landscape : (side == .landscape ? .portrait : nil)
+        return "Auch im \(OrientationVariantRules.label(for: other)) vorhanden"
+    }
+
     private func toggleSelection(_ id: Int) {
         if selectedIds.contains(id) {
             selectedIds.remove(id)
@@ -220,6 +288,8 @@ struct PhotoGridView: View {
 
     private struct FullscreenNav: Hashable {
         let startIndex: Int
+        /// Open on the other side of the photo's format group (badge tap).
+        var otherSide: Bool = false
     }
 }
 
