@@ -12,7 +12,16 @@ import SwiftUI
 /// Unlike a recap this show has no fixed pace: it uses the interval the user
 /// picked, persisted per device under `Slideshow.intervalDefaultsKey`.
 struct PhotoSlideshowView: View {
-    private let photos: [PhotoWithCuration]
+    /// The photos as shown — after the format groups have been resolved for
+    /// the screen (.claude/plans/orientierungs-varianten.md): a photo whose
+    /// other side fits the screen is replaced by that side, in place, so the
+    /// slide indices never move.
+    @State private var photos: [PhotoWithCuration]
+    /// The sequence as handed over, with the other side of every format group
+    /// dropped once; `photos` is derived from it per screen orientation.
+    private let basePhotos: [PhotoWithCuration]
+    private let variants: [Int: OrientationVariants]
+    @State private var counterparts: [Int: PhotoWithCuration] = [:]
     private let title: String
     private let subtitle: String?
 
@@ -61,12 +70,17 @@ struct PhotoSlideshowView: View {
     ///   means "play on from here", not "play the whole album".
     init(
         photos: [PhotoWithCuration],
+        variants: [Int: OrientationVariants] = [:],
         startIndex: Int = 0,
         title: String = "",
         subtitle: String? = nil
     ) {
         let start = min(max(startIndex, 0), max(0, photos.count - 1))
-        self.photos = photos.isEmpty ? [] : Array(photos[start...])
+        let sequence = photos.isEmpty ? [] : Array(photos[start...])
+        let base = SlideshowVariants.dropCounterparts(photos: sequence, variants: variants)
+        self.basePhotos = base
+        _photos = State(initialValue: base)
+        self.variants = variants
         self.title = title
         self.subtitle = subtitle
         // @AppStorage is not readable this early, so seed from UserDefaults.
@@ -132,6 +146,14 @@ struct PhotoSlideshowView: View {
         }
         .statusBarHidden(true)
         .task {
+            // The fitting side first, then pair what is left: fetch the other
+            // sides once, substitute for the screen as it is held, and only
+            // then point the store at the sequence.
+            let ids = SlideshowVariants.counterpartIds(photos: basePhotos, variants: variants)
+            if !ids.isEmpty, let fetched = try? await PhotoFetch.byIds(ids) {
+                counterparts = Dictionary(fetched.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                photos = resolvedPhotos(for: screen)
+            }
             store.reset(photos: photos.map(SlideshowImageStore.Item.init))
             store.prefetch(around: 0, ahead: prefetchAhead)
             startTicker()
@@ -232,6 +254,7 @@ struct PhotoSlideshowView: View {
             }
             .onChange(of: orientation) { _, new in
                 screen = new
+                applyVariants(for: new)
                 replanForOrientationChange()
             }
             .ignoresSafeArea()
@@ -417,6 +440,28 @@ struct PhotoSlideshowView: View {
 
     /// Turning the phone changes which photos are worth pairing. Slides already
     /// shown keep their numbering — only the unplayed tail is rebuilt.
+    /// `basePhotos` with every photo that does not fit `screen` replaced by
+    /// its fetched counterpart that does.
+    private func resolvedPhotos(for screen: ScreenOrientation) -> [PhotoWithCuration] {
+        SlideshowVariants.substitute(
+            photos: basePhotos,
+            counterparts: counterparts,
+            variants: variants,
+            screen: screen
+        )
+    }
+
+    /// The device turned: swap sides where that helps. Indices stay, so the
+    /// plan is cut back and regrown like after any other orientation change;
+    /// the store is pointed at the new sequence only when something changed.
+    private func applyVariants(for screen: ScreenOrientation) {
+        let next = resolvedPhotos(for: screen)
+        guard next.map(\.id) != photos.map(\.id) else { return }
+        photos = next
+        store.reset(photos: photos.map(SlideshowImageStore.Item.init))
+        store.prefetch(around: currentSlide?.first ?? 0, ahead: prefetchAhead)
+    }
+
     private func replanForOrientationChange() {
         let keep = min(playback.slideIndex + 1, plan.count)
         plan = Array(plan.prefix(keep))

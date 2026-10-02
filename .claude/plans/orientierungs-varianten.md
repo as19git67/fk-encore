@@ -1,6 +1,6 @@
 # Orientierungs-Varianten: Hoch- und Querformat desselben Motivs
 
-Status: **In Umsetzung** — Etappen 1 (Backend), 2 (Web Raster + Vollbild) und 3 (Web Review) umgesetzt, Etappen 4–6 offen.
+Status: **In Umsetzung** — Etappen 1–3 (Backend, Web Raster + Vollbild, Web Review, PR #1421) und 4 (iOS Raster, Vollbild, Diashow) umgesetzt, Etappen 5–6 offen.
 
 ## Umsetzungsstand
 
@@ -62,7 +62,31 @@ Status: **In Umsetzung** — Etappen 1 (Backend), 2 (Web Raster + Vollbild) und 
   Motiv". `ReviewQueuePhoto.width/height` sind im Frontend-Typ deklariert.
   Stories: Review-Queue mit Formatpaar und mit aktivem Chip, Vergleich als
   Formatpaar.
-- Etappen 4–6 offen; die album-gebundene Liste läuft über `/gallery/grid`
+- **Etappe 4 (iOS Raster, Vollbild, Diashow) — umgesetzt.**
+  `Core/Models/OrientationVariants.swift` (`PhotoOrientation`,
+  `OrientationVariants` mit Seite/Gegenseite je Foto, `VariantMode.forScreen`,
+  `OrientationVariantRules.shouldSwitchSide`, `SlideshowVariants`) und
+  `Core/UI/ScreenOrientationEnvironment.swift` (`@Environment(\.screenOrientation)`,
+  einmal in `MainTabView` über `.providesScreenOrientation()` gesetzt, plus
+  `VariantBadge`). `PhotoWithCuration`/`Photo` tragen `orientation`,
+  `AlbumGroupReview.Group` trägt `orientation_variants` und `variants`.
+  `PhotosViewModel` lädt `/photos` mit `variantMode` und parallel
+  `/photos/groups`, woraus `variantsByPhotoId` entsteht. `PhotoGridView`:
+  Seite nach Bildschirm, `all` im Auswahlmodus oder mit dem Filter
+  „Formatvarianten anzeigen" (`PhotoFilter.showVariants`, Schalter im
+  `FilterSortMenuView`), Neuladen bei Drehung um die oberste sichtbare Kachel,
+  Badge oben rechts öffnet den Viewer auf der Gegenseite.
+  `PhotoFullscreenView`: Gegenseite wird je Seite nachgeladen
+  (`PhotoFetch.byId`) und **an Ort und Stelle** gezeigt (Seitenindex bleibt),
+  Knopf in der unteren Leiste, Drehen wechselt automatisch, ein manueller
+  Wechsel pinnt die Seite. `PhotoSlideshowView`: Gegenseiten einmal per
+  `PhotoFetch.byIds` holen, die Gegenseite eines früheren Fotos aus der Folge
+  streichen, je Bildschirm-Orientierung die passende Seite einsetzen (Indizes
+  bleiben stabil), erst dann paart `SlideshowPlanner` den Rest. Tests in
+  `OrientationVariantsTests.swift`. Nicht gemacht: zweiter Dateiname in der
+  iOS-Detailansicht; der Nutzer-Schalter liegt nur im Web-Profil. Ohne Xcode
+  in dieser Umgebung ist der Swift-Code nicht kompiliert worden.
+- Etappen 5–6 offen; die album-gebundene Liste läuft über `/gallery/grid`
   mit `albumScopeId` und ist damit abgedeckt, die anonyme Link-Ansicht hat
   keinen Nutzer (und damit keine Gruppen) und bleibt außen vor. Die Diashow
   im Web läuft über dasselbe `cursorPhoto`, der Drehungswechsel greift also

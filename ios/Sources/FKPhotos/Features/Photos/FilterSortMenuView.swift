@@ -9,7 +9,7 @@ struct FilterSortMenuView: View {
     var available: Set<FilterCriterion> = Set(FilterCriterion.allCases)
 
     enum FilterCriterion: String, CaseIterable {
-        case favorite, hiddenMode, hasGps, dateRange
+        case favorite, hiddenMode, hasGps, dateRange, showVariants
     }
 
     @State private var selectedYear: Int?  = nil
@@ -89,7 +89,7 @@ struct FilterSortMenuView: View {
                 }
 
                 // ── Other filters ──────────────────────────────────────
-                if available.contains(.favorite) || available.contains(.hiddenMode) {
+                if available.contains(.favorite) || available.contains(.hiddenMode) || available.contains(.showVariants) {
                     Section("Filter") {
                         if available.contains(.favorite) {
                             Toggle("Nur Favoriten", isOn: Binding(
@@ -104,6 +104,14 @@ struct FilterSortMenuView: View {
                                 Text("Nur").tag(PhotoFilter.HiddenMode.only)
                             }
                             .pickerStyle(.segmented)
+                        }
+                        // Hoch- und Querformat desselben Motivs zeigt das Raster
+                        // sonst nur mit der Seite, die zur Drehung passt.
+                        if available.contains(.showVariants) {
+                            Toggle("Formatvarianten anzeigen", isOn: Binding(
+                                get: { viewModel.draftFilter.showVariants == true },
+                                set: { viewModel.draftFilter.showVariants = $0 ? true : nil }
+                            ))
                         }
                     }
                 }

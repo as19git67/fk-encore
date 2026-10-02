@@ -46,7 +46,11 @@ struct ReviewPeerCuration: Codable, Sendable, Equatable {
 /// redundant with each other however similar the group thinks they are — so
 /// thinning a group down happens *per orientation* rather than across the
 /// whole thing (`CompareTournament.suggestedKeepIds`).
-enum PhotoOrientation: String, Sendable, Hashable {
+///
+/// Also what the server sends as `orientation` on a photo
+/// (.claude/plans/orientierungs-varianten.md), hence `Codable`; the server
+/// never sends `unknown`, it leaves the field null instead.
+enum PhotoOrientation: String, Codable, Sendable, Hashable {
     case portrait
     case landscape
     case square

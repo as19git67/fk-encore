@@ -86,6 +86,9 @@ struct Photo: Codable, Identifiable, Sendable {
     let ai_quality_score: Double?
     let ai_quality_details: [String: Double]?
     let auto_crop: AutoCrop?
+    /// Portrait, landscape or square from the stored dimensions; nil while
+    /// unknown (.claude/plans/orientierungs-varianten.md).
+    var orientation: PhotoOrientation? = nil
 }
 
 struct AutoCrop: Codable, Sendable {
@@ -127,6 +130,10 @@ struct PhotoWithCuration: Codable, Identifiable, Sendable {
     let curation_status: CurationStatus
     let description: String?
     let keywords: [String]?
+    /// Portrait, landscape or square from the stored dimensions; nil while
+    /// unknown (.claude/plans/orientierungs-varianten.md). A `var` with a
+    /// default so the memberwise init stays as the call sites know it.
+    var orientation: PhotoOrientation? = nil
 }
 
 // MARK: - Album

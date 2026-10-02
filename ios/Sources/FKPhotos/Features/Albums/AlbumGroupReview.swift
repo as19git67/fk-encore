@@ -21,6 +21,11 @@ enum AlbumGroupReview {
         let reviewed_at: String?
         let ai_picked_photo_ids: [Int]?
         let ai_picked_confidence: String?
+        /// Portrait/landscape format group (.claude/plans/orientierungs-varianten.md):
+        /// `'auto'` | `'off'`, absent = auto; `variants` only while the group
+        /// currently forms a format group.
+        var orientation_variants: String? = nil
+        var variants: OrientationVariants? = nil
     }
 
     struct ListResponse: Codable, Sendable {
@@ -56,7 +61,9 @@ enum AlbumGroupReview {
                     ai_picked_photo_ids: group.ai_picked_photo_ids?.filter {
                         visible.contains($0)
                     },
-                    ai_picked_confidence: group.ai_picked_confidence
+                    ai_picked_confidence: group.ai_picked_confidence,
+                    orientation_variants: group.orientation_variants,
+                    variants: group.variants
                 )
             }
             .sorted {

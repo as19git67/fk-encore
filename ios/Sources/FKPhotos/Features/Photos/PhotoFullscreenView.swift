@@ -24,9 +24,28 @@ struct PhotoFullscreenView: View {
     private let bboxes: [FaceBBox?]
     @Binding private var currentIndex: Int
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.screenOrientation) private var screenOrientation
     @Environment(AuthManager.self) private var authManager
     @State private var showDetails = false
     @State private var curationOverrides: [Int: CurationStatus] = [:]
+
+    // Orientation variants (.claude/plans/orientierungs-varianten.md): the
+    // other side of a photo's format group is shown *in place* of it — the
+    // page index stays. A tap on the button (or the badge that opened the
+    // viewer) pins the choice; turning the device switches to the fitting
+    // side unless pinned.
+    /// Format groups by photo id, from the presenting grid. Empty where the
+    /// context has none, and then nothing here does anything.
+    private let variants: [Int: OrientationVariants]
+    /// Open the first page on the other side (the grid's badge was tapped).
+    private let startOnOtherSide: Bool
+    /// Fetched counterparts, keyed by the id of the *list* photo they replace.
+    @State private var counterparts: [Int: PhotoWithCuration] = [:]
+    /// List photo ids whose page currently shows the counterpart.
+    @State private var otherSideShown: Set<Int> = []
+    /// List photo ids whose side the user chose; rotation leaves them alone.
+    @State private var sidePinned: Set<Int> = []
+    @State private var startConsumed = false
 
     // Per-photo actions (issue #762): hide already exists below; these add
     // delete, save-original-to-library and remove-from-album.
@@ -114,6 +133,8 @@ struct PhotoFullscreenView: View {
         self.curationStats = [:]
         self.contextFooter = nil
         self.hideDecision = nil
+        self.variants = [:]
+        self.startOnOtherSide = false
     }
 
     /// Multi-photo init for paged navigation (e.g. PhotoGridView).
@@ -124,7 +145,9 @@ struct PhotoFullscreenView: View {
         curationStats: [Int: PhotoCurationStats] = [:],
         onPhotoRemoved: ((Int) -> Void)? = nil,
         contextFooter: ((PhotoWithCuration) -> AnyView)? = nil,
-        hideDecision: HideDecision? = nil
+        hideDecision: HideDecision? = nil,
+        variants: [Int: OrientationVariants] = [:],
+        startOnOtherSide: Bool = false
     ) {
         self.photos = photos
         self.bboxes = Array(repeating: nil, count: photos.count)
@@ -137,6 +160,8 @@ struct PhotoFullscreenView: View {
         self.curationStats = curationStats
         self.contextFooter = contextFooter
         self.hideDecision = hideDecision
+        self.variants = variants
+        self.startOnOtherSide = startOnOtherSide
     }
 
     /// Multi-photo init for person context: paged navigation with per-photo face boxes.
@@ -153,10 +178,78 @@ struct PhotoFullscreenView: View {
         self.curationStats = [:]
         self.contextFooter = nil
         self.hideDecision = nil
+        self.variants = [:]
+        self.startOnOtherSide = false
+    }
+
+    /// The photo page `index` shows: the list photo, or its counterpart while
+    /// the other side is on.
+    private func displayedPhoto(at index: Int) -> PhotoWithCuration {
+        let base = photos[index]
+        if otherSideShown.contains(base.id), let other = counterparts[base.id] { return other }
+        return base
     }
 
     private var currentPhoto: PhotoWithCuration? {
-        photos.indices.contains(currentIndex) ? photos[currentIndex] : nil
+        photos.indices.contains(currentIndex) ? displayedPhoto(at: currentIndex) : nil
+    }
+
+    /// The side the button would switch the current page to, if there is one.
+    private var currentCounterpart: PhotoWithCuration? {
+        guard photos.indices.contains(currentIndex) else { return nil }
+        let base = photos[currentIndex]
+        guard let other = counterparts[base.id] else { return nil }
+        return otherSideShown.contains(base.id) ? base : other
+    }
+
+    /// Button or badge: show the other side and keep it through rotations.
+    private func toggleSide(pin: Bool = true) {
+        guard photos.indices.contains(currentIndex) else { return }
+        let base = photos[currentIndex]
+        guard counterparts[base.id] != nil else { return }
+        if otherSideShown.contains(base.id) {
+            otherSideShown.remove(base.id)
+        } else {
+            otherSideShown.insert(base.id)
+        }
+        if pin { sidePinned.insert(base.id) }
+    }
+
+    /// Fetch the counterpart of the page on screen, once; then honour a badge
+    /// tap and the screen it is held on.
+    private func loadCounterpart(for index: Int) async {
+        guard photos.indices.contains(index) else { return }
+        let base = photos[index]
+        if counterparts[base.id] == nil,
+           let firstId = variants[base.id]?.counterpartIds(of: base.id).first,
+           let other = try? await PhotoFetch.byId(firstId) {
+            counterparts[base.id] = other
+        }
+        guard index == currentIndex, counterparts[base.id] != nil else { return }
+        if startOnOtherSide, !startConsumed {
+            startConsumed = true
+            otherSideShown.insert(base.id)
+            sidePinned.insert(base.id)
+            return
+        }
+        followScreen()
+    }
+
+    /// Turning the device switches to the side that fits, unless pinned.
+    private func followScreen() {
+        guard photos.indices.contains(currentIndex) else { return }
+        let base = photos[currentIndex]
+        guard let other = counterparts[base.id] else { return }
+        let shown = displayedPhoto(at: currentIndex)
+        let hidden = shown.id == base.id ? other : base
+        if OrientationVariantRules.shouldSwitchSide(
+            shown: shown.orientation,
+            counterpart: hidden.orientation,
+            screen: screenOrientation,
+            pinned: sidePinned.contains(base.id)
+        ) {
+            toggleSide(pin: false)
+        }
     }
 
     /// The recognised text of the photo on screen, or nil when there is none
@@ -205,20 +298,26 @@ struct PhotoFullscreenView: View {
     var body: some View {
         TabView(selection: $currentIndex) {
             ForEach(photos.indices, id: \.self) { index in
+                let shown = displayedPhoto(at: index)
                 PhotoPageView(
-                    photo: photos[index],
+                    photo: shown,
                     faceBBox: index < bboxes.count ? bboxes[index] : nil,
                     showDetails: $showDetails,
-                    curationStatus: curationBinding(for: photos[index]),
-                    curationStats: curationStats[photos[index].id],
+                    curationStatus: curationBinding(for: shown),
+                    curationStats: curationStats[shown.id],
                     textMode: $textMode,
                     onOcrLoaded: { id, result in
                         if let result { ocrByPhoto[id] = result } else { ocrByPhoto.removeValue(forKey: id) }
                     }
                 )
+                // The page keeps its own loader and metadata per photo, so
+                // switching sides has to be a new page, not a mutated one.
+                .id(shown.id)
                 .tag(index)
             }
         }
+        .task(id: currentIndex) { await loadCounterpart(for: currentIndex) }
+        .onChange(of: screenOrientation) { _, _ in followScreen() }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .background(Color(.systemBackground))
         .background(InteractivePopDisabler())
@@ -378,6 +477,18 @@ struct PhotoFullscreenView: View {
                                 .foregroundStyle(showDetails ? Color.accentColor : .primary)
                         }
 
+                        // Other side of the format group (portrait ↔
+                        // landscape of the same motif), swapped in place.
+                        if let other = currentCounterpart {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { toggleSide() }
+                            } label: {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.title2)
+                            }
+                            .accessibilityLabel(OrientationVariantRules.label(for: other.orientation))
+                        }
+
                         // Text in the photo (#1029): only offered when the
                         // photo has recognised text, so the button never
                         // promises a layer that is empty.
@@ -425,6 +536,7 @@ struct PhotoFullscreenView: View {
         .fullScreenCover(isPresented: $showSlideshow) {
             PhotoSlideshowView(
                 photos: photos,
+                variants: variants,
                 startIndex: currentIndex,
                 title: albumContext?.name ?? ""
             )
