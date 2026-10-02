@@ -22,6 +22,7 @@ import { useAuthStore } from '../stores/auth'
 import type { GalleryGridGroup } from '../api/gallery'
 import { formatPhotoDateCompact, formatLocationLabel, toLocalIsoDate } from '../utils/dateFormat'
 import { hasActiveTextSelection, isFullscreenInteractiveTarget, isFullscreenToolbarTarget } from '../utils/fullscreenInteractive'
+import { sideLabel } from '../utils/orientationVariants'
 import { shouldArmSlideshow, slideshowReachedEnd, isDayChange, shouldShowCaption, type SlideshowState } from '../utils/slideshow'
 import {
   SLIDESHOW_INTERVAL_OPTIONS_MS,
@@ -78,6 +79,13 @@ const props = withDefaults(defineProps<{
   group?: GalleryGridGroup | null
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
   /**
+   * The other side of the current photo's portrait/landscape format group
+   * (.claude/plans/orientierungs-varianten.md), when there is one. Shows the
+   * "Querformat" / "Hochformat" button (`R`) and preloads that image so the
+   * switch is instant. The host swaps the two on `toggle-variant`.
+   */
+  variantPhoto?: Photo | null
+  /**
    * When > 0, the slideshow is available (play/pause button + `S` shortcut).
    * The value is the *default* interval; the actual gap between photos is the
    * user's per-browser setting, adjustable via the toolbar interval button
@@ -96,6 +104,13 @@ const props = withDefaults(defineProps<{
   currentIndex: 0,
   totalCount: 0,
   markDayChanges: false,
+  variantPhoto: null,
+})
+
+/** Label of the side the `R` button switches to. */
+const variantLabel = computed(() => {
+  const o = props.variantPhoto?.orientation
+  return o === 'portrait' || o === 'landscape' ? sideLabel(o) : 'Andere Seite'
 })
 
 const showCounter = computed(() => props.totalCount > 0 && props.currentIndex > 0)
@@ -106,6 +121,7 @@ const hasActionBar = computed(() => {
   if (props.showDetailsButton !== false) return true
   if (props.canDelete) return true
   if (props.canShare) return true
+  if (props.variantPhoto) return true
   if (props.textLayer) return true
   if (canEditTransform.value) return true
   if (canSlideshow.value) return true
@@ -198,6 +214,8 @@ const emit = defineEmits<{
   'share': [id: number]
   /** Fired when the user clicks the +N marker → parent opens review. */
   'open-group-review': []
+  /** Switch to the other side of the format group (button or `R`). */
+  'toggle-variant': []
   /** Fired once the current photo's image is actually decoded on screen, so
    *  the host can warm neighbour metadata without competing with the image. */
   'current-loaded': [id: number]
@@ -685,6 +703,14 @@ function handleKeydown(e: KeyboardEvent) {
     e.stopImmediatePropagation()
     e.preventDefault()
     togglePlay()
+  } else if (e.key === 'r' || e.key === 'R') {
+    // Other side of the format group (portrait ↔ landscape).
+    if (!props.variantPhoto) return
+    const tag = (document.activeElement as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    emit('toggle-variant')
   }
 }
 onMounted(() => window.addEventListener('keydown', handleKeydown, true))
@@ -1100,6 +1126,7 @@ onUnmounted(() => {
     <div v-if="currentLoaded" style="display: none">
       <HeicImage v-if="prevPhoto" :src="neighbourPreloadSrc(prevPhoto)" />
       <HeicImage v-if="nextPhoto" :src="neighbourPreloadSrc(nextPhoto)" />
+      <HeicImage v-if="variantPhoto" :src="neighbourPreloadSrc(variantPhoto)" />
     </div>
 
     <!-- Top-centre overlay stack, above the image: the (transient) day-change
@@ -1307,6 +1334,19 @@ onUnmounted(() => {
               :severity="shownViaLink ? 'secondary' : 'danger'"
               @click="emitLinkVisibility"
               v-tooltip.top="linkVisibilityTooltip + ' (L)'"
+            />
+            <!-- Other side of the format group (.claude/plans/orientierungs-
+                 varianten.md): swaps portrait and landscape of the same motif
+                 in place, the list index stays. Turning the device does the
+                 same automatically unless the user chose a side here. -->
+            <Button
+              v-if="variantPhoto"
+              icon="pi pi-sync"
+              rounded text
+              severity="secondary"
+              :aria-label="variantLabel + ' (R)'"
+              @click="emit('toggle-variant')"
+              v-tooltip.top="variantLabel + ' (R)'"
             />
             <Button
               v-if="canShare"

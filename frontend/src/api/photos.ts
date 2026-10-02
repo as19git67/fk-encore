@@ -33,7 +33,21 @@ export interface Photo {
   link_visibility?: PhotoLinkVisibility
   /** An album participant assigned one of this photo's faces to a named person. */
   has_known_face?: boolean
+  /**
+   * Portrait, landscape or square from the stored dimensions; null while
+   * the dimensions are unknown (.claude/plans/orientierungs-varianten.md).
+   */
+  orientation?: PhotoOrientation | null
 }
+
+/** Orientation of a photo as derived from its pixel dimensions. */
+export type PhotoOrientation = 'portrait' | 'landscape' | 'square'
+
+/**
+ * Which side of a portrait/landscape format group a list shows: `all` both,
+ * `portrait` / `landscape` only the frames that fit that screen.
+ */
+export type VariantMode = 'all' | 'portrait' | 'landscape'
 
 /** Per-photo public-link visibility. */
 export type PhotoLinkVisibility = 'auto' | 'visible' | 'hidden'
@@ -132,6 +146,17 @@ export interface PhotoFilter {
   // album's photos (with an access check) instead of the caller's own
   // library — so a shared album also renders for non-owner viewers.
   albumScopeId?: number
+  /**
+   * "Formatvarianten anzeigen": show both sides of every portrait/landscape
+   * format group instead of only the side that fits the screen. Lives in the
+   * URL like the other criteria; the grid turns it into `variantMode=all`.
+   */
+  showVariants?: boolean
+  /**
+   * The side the list asks for. Set by the grid from the screen orientation
+   * (and forced to `all` in selection mode); never part of the URL.
+   */
+  variantMode?: VariantMode
 }
 
 function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): string {
@@ -174,6 +199,8 @@ function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): strin
   }
   if (f.ownerIds && f.ownerIds.length) add('ownerIds', f.ownerIds.join(','))
   if (f.showAiHidden) add('showAiHidden', true)
+  if (f.variantMode) add('variantMode', f.variantMode)
+  else if (f.showVariants) add('variantMode', 'all')
 
   const s = params.toString()
   return s ? `?${s}` : ''
@@ -1006,6 +1033,31 @@ export function setGroupReviewAdoption(enabled: boolean) {
   return apiFetch<{ enabled: boolean }>('/photos/groups/adoption', {
     method: 'PATCH',
     body: JSON.stringify({ enabled }),
+  })
+}
+
+// ---------- Orientation variants (portrait + landscape of one motif) ----------
+
+/** The user's global switch: show only the side that fits the screen. */
+export function getCollapseOrientationVariants() {
+  return apiFetch<{ enabled: boolean }>('/photos/groups/orientation-variants')
+}
+
+export function setCollapseOrientationVariants(enabled: boolean) {
+  return apiFetch<{ enabled: boolean }>('/photos/groups/orientation-variants', {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+/**
+ * "Nicht dasselbe Motiv" (`off`) / "Als Formatpaar behandeln" (`auto`) on
+ * one group. Immediately reversible.
+ */
+export function setGroupOrientationVariants(groupId: number, mode: 'auto' | 'off') {
+  return apiFetch<{ success: boolean; mode: 'auto' | 'off' }>(`/photos/groups/${groupId}/variants`, {
+    method: 'PATCH',
+    body: JSON.stringify({ mode }),
   })
 }
 

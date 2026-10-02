@@ -59,6 +59,8 @@ import { useGallerySource, GALLERY_PAGE_SIZE } from '../composables/useGallerySo
 import type { PhotoFilter } from '../api/photos'
 import { autoCropThumbnailStyle } from '../utils/faceBbox'
 import { isPastHalf } from '../utils/galleryJump'
+import { useScreenOrientation } from '../composables/useScreenOrientation'
+import { counterpartIds, otherSide, sideLabel, variantModeFor, variantSideOf } from '../utils/orientationVariants'
 
 const props = defineProps<{
   /** Photo to land on initially. Null = land on the last (newest in ASC) page. */
@@ -89,6 +91,12 @@ const emit = defineEmits<{
   'photo-click': [entry: GalleryGridEntry]
   'stack-click': [entry: GalleryGridEntry]
   /**
+   * Tap on the format badge of a photo that also exists in the other
+   * orientation (.claude/plans/orientierungs-varianten.md). The parent opens
+   * the fullscreen on this entry and switches straight to the other side.
+   */
+  'variant-click': [entry: GalleryGridEntry]
+  /**
    * Select-mode tap. `context.index` is the photo's absolute position in the
    * current grid order and `context.range` says the user held shift, i.e.
    * asked for everything between the last plain click and this one (#830).
@@ -108,6 +116,20 @@ const emit = defineEmits<{
 // ── Data source ─────────────────────────────────────────────────────────────
 const source = useGallerySource()
 const { entries, total, initialLoading, error } = source
+
+// Orientation variants (.claude/plans/orientierungs-varianten.md): the grid
+// asks the server for the side of every format group that fits the screen
+// it is on. Turning the device changes the filter and reloads around the
+// photo at the top of the viewport, like any other filter change. Selection
+// mode and the "Formatvarianten anzeigen" switch ask for both sides.
+const screenOrientation = useScreenOrientation()
+const effectiveFilter = computed<PhotoFilter>(() => ({
+  ...props.filter,
+  variantMode: variantModeFor(screenOrientation.value, {
+    showVariants: props.filter.showVariants,
+    selectMode: props.selectMode,
+  }),
+}))
 
 // User-recipe-aware thumbnail URL. When the caller has saved a
 // transform on a photo, the helper routes through /photos/:id/render
@@ -315,7 +337,7 @@ async function loadAndScroll(anchor: number | null | undefined) {
   const generation = ++loadGeneration
   ready.value = false
   const { initialOffset, total: totalRows } = await source.init({
-    filter: props.filter,
+    filter: effectiveFilter.value,
     sortBy: props.sortBy,
     sortDir: props.sortDir,
     photoIds: props.searchPhotoIds ?? null,
@@ -396,7 +418,7 @@ function currentViewportAnchorId(): number | null {
 }
 
 watch(
-  () => [props.filter, props.sortBy, props.sortDir, props.searchPhotoIds] as const,
+  () => [effectiveFilter.value, props.sortBy, props.sortDir, props.searchPhotoIds] as const,
   () => {
     void loadAndScroll(currentViewportAnchorId())
   },
@@ -420,11 +442,27 @@ function onTap(entry: GalleryGridEntry | null, event?: MouseEvent, index?: numbe
   // the rest of the group.
   const target = event?.target as HTMLElement | null
   const onMarker = !!entry.group && !!target?.closest('.vg-stack-badge')
+  const onVariantBadge = !!target?.closest('.vg-variant-badge')
   if (onMarker) {
     emit('stack-click', entry)
+  } else if (onVariantBadge && counterpartIds(entry).length > 0) {
+    emit('variant-click', entry)
   } else {
     emit('photo-click', entry)
   }
+}
+
+/**
+ * Tooltip of the format badge: which other side exists for this photo. Empty
+ * when the photo is not part of a format group, which also hides the badge.
+ */
+function variantTitle(entry: GalleryGridEntry): string {
+  const side = variantSideOf(entry)
+  if (!side) return ''
+  const others = counterpartIds(entry).length
+  if (others === 0) return ''
+  const label = sideLabel(otherSide(side))
+  return others === 1 ? `Auch im ${label} vorhanden` : `Auch im ${label} vorhanden (${others} Fotos)`
 }
 
 function badgeTitle(group: GalleryGridEntry['group'] | null | undefined): string {
@@ -543,6 +581,7 @@ defineExpose({
                  No confidence level hides siblings anymore (see
                  docs/auto-pick-face-relevance.md §6) — the badge is
                  always just a prominent +N marker. -->
+            <span class="vg-badges">
             <span
               v-if="slot.group && !slot.group.reviewed"
               class="vg-stack-badge"
@@ -569,6 +608,20 @@ defineExpose({
             >
               <i class="pi pi-users" />
               <i class="pi pi-check" />
+            </span>
+            <!-- Format badge (.claude/plans/orientierungs-varianten.md): this
+                 photo also exists in the other orientation. Same corner and
+                 size as the stack badge, next to it when both are there.
+                 Tap → fullscreen straight on the other side. -->
+            <span
+              v-if="variantTitle(slot)"
+              class="vg-variant-badge"
+              role="img"
+              :aria-label="variantTitle(slot)"
+              :title="variantTitle(slot)"
+            >
+              <i class="pi pi-sync" aria-hidden="true" />
+            </span>
             </span>
             <i
               v-if="slot.curation === 'favorite'"
@@ -723,10 +776,35 @@ defineExpose({
 
 /* Stack badge sits on the cover tile; no frame on the cell itself. */
 
-.vg-stack-badge {
+/* The top-left corner holds the stack badge and the format badge, side by
+   side when both are there; each stays its own click target. */
+.vg-badges {
   position: absolute;
   top: 6px;
   left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 1;
+}
+.vg-badges:empty {
+  display: none;
+}
+.vg-variant-badge {
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff; /* audit-ok: badge on its own dark pill over the thumbnail */
+  font-size: var(--text-sm);
+  padding: 3px 7px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+.vg-variant-badge:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+.vg-stack-badge {
   background: rgba(0, 0, 0, 0.7);
   color: #fff; /* audit-ok: badge on its own dark pill over the thumbnail */
   font-size: var(--text-sm);

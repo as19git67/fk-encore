@@ -385,10 +385,16 @@ export type OrientationVariantsMode = "auto" | "off";
  */
 export type VariantMode = "all" | "portrait" | "landscape";
 
-/** Visible members per side of a format group. */
-export interface OrientationVariantCounts {
+/**
+ * The two sides of a format group: how many visible members each side has
+ * and which photos they are, best-ranked first. The ids let a viewer open
+ * the other side without a second lookup.
+ */
+export interface OrientationVariants {
   portrait: number;
   landscape: number;
+  portrait_ids: number[];
+  landscape_ids: number[];
 }
 
 /** Per-photo public-link visibility. See `photos.link_visibility`. */
@@ -803,7 +809,7 @@ export interface GalleryGridGroup {
    * otherwise. With `variantMode=portrait|landscape` the grid only contains
    * the matching side; the counts tell the badge what sits behind it.
    */
-  variants?: OrientationVariantCounts;
+  variants?: OrientationVariants;
 }
 
 /** One cell in the virtualized gallery grid. */
@@ -877,7 +883,7 @@ export interface PhotoGroup {
    * Visible members per side when the group currently forms a format group
    * for this user; absent otherwise.
    */
-  variants?: OrientationVariantCounts;
+  variants?: OrientationVariants;
 }
 
 export interface ListGroupsResponse {

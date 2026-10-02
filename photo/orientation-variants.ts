@@ -32,7 +32,7 @@ import db from "../db/database";
 import { dbExec, dbFirst } from "../db/adapter";
 import { photoCuration, photoGroupMembers, photoGroups, photos, users } from "../db/schema";
 import type {
-  OrientationVariantCounts,
+  OrientationVariants,
   OrientationVariantsMode,
   PhotoOrientation,
 } from "../db/types";
@@ -82,13 +82,8 @@ export interface VariantMember {
   hidden: boolean;
 }
 
-export interface OrientationVariantsResult {
-  /** Visible members per side that belong to the format group. */
-  counts: OrientationVariantCounts;
-  /** Ids of the members that belong to the format group, per side. */
-  portraitIds: number[];
-  landscapeIds: number[];
-}
+/** Alias kept for readers of the pure function: the same shape the API ships. */
+export type OrientationVariantsResult = OrientationVariants;
 
 function takenAtMs(iso: string | null): number | null {
   if (!iso) return null;
@@ -98,7 +93,8 @@ function takenAtMs(iso: string | null): number | null {
 
 /**
  * Decide whether a group currently forms a format group and which members
- * belong to it. Returns null when it does not (one side missing, everything
+ * belong to it. Members keep the order they came in, so a caller that passes
+ * them by similarity rank gets each side's best frame first. Returns null when it does not (one side missing, everything
  * too far apart, dimensions unknown, or `mode === "off"`).
  *
  * The rule is per member, not per group: a landscape frame belongs when some
@@ -131,9 +127,10 @@ export function computeOrientationVariants(
   const landscapeIds = landscape.filter((l) => near(l, portrait)).map((l) => l.id);
   if (portraitIds.length === 0 || landscapeIds.length === 0) return null;
   return {
-    counts: { portrait: portraitIds.length, landscape: landscapeIds.length },
-    portraitIds,
-    landscapeIds,
+    portrait: portraitIds.length,
+    landscape: landscapeIds.length,
+    portrait_ids: portraitIds,
+    landscape_ids: landscapeIds,
   };
 }
 

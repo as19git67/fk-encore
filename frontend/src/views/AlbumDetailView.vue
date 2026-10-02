@@ -90,6 +90,9 @@ import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
 import { useListSelection } from '../composables/useListSelection'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
+import { useScreenOrientation } from '../composables/useScreenOrientation'
+import { useVariantCursor } from '../composables/useVariantCursor'
+import { counterpartIds, nextIndexSkippingCounterparts } from '../utils/orientationVariants'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
 import { onMounted, onUnmounted } from 'vue'
@@ -221,8 +224,20 @@ const cursorNext = ref<Photo | null>(null)
 // FullscreenOverlay so the `+N` Track-I badge shows up in the album's
 // fullscreen view too (it was previously only wired up in GalleryView).
 const cursorGroup = ref<GalleryGridGroup | null>(null)
+// The grid entry behind `cursorPhoto`; paging needs its format group to
+// step over the other side (.claude/plans/orientierungs-varianten.md).
+const cursorEntry = ref<GalleryGridEntry | null>(null)
 let hydrateToken = 0
 let curationVersion = 0
+
+// ── Orientation variants in the grid fullscreen ─────────────────────────────
+// Same contract as GalleryView: the other side rides along with the cursor,
+// `R` / the button swap and pin, turning the device swaps unless pinned.
+const screenOrientation = useScreenOrientation()
+const variantCursor = useVariantCursor({ screen: screenOrientation, cursorPhoto })
+const { variantPhoto } = variantCursor
+let lastHydratedIndex: number | null = null
+let openOtherSideOnHydrate = false
 
 // ── Filter state ──────────────────────────────────────────────────────────────
 // Client-side filter over the album photos returned by the server. The backend
@@ -881,6 +896,11 @@ async function hydrateCursor(index: number): Promise<void> {
   ])
   if (myToken !== hydrateToken) return
   if (!curEntry) return
+  if (index !== lastHydratedIndex) {
+    variantCursor.reset()
+    lastHydratedIndex = index
+  }
+  cursorEntry.value = curEntry
 
   cursorPhoto.value = entryToMinimalPhoto(curEntry)
   cursorPrev.value = prevEntry ? entryToMinimalPhoto(prevEntry) : null
@@ -896,6 +916,8 @@ async function hydrateCursor(index: number): Promise<void> {
   const ids = [curEntry.id]
   if (prevEntry) ids.push(prevEntry.id)
   if (nextEntry) ids.push(nextEntry.id)
+  const variantId = counterpartIds(curEntry)[0]
+  if (variantId !== undefined) ids.push(variantId)
   const myCurationVersion = curationVersion
   try {
     const { photos } = await getPhotoDetailsBatch(ids)
@@ -910,8 +932,15 @@ async function hydrateCursor(index: number): Promise<void> {
     cursorPhoto.value = merge(byId.get(curEntry.id), cursorPhoto.value)
     cursorPrev.value = prevEntry ? merge(byId.get(prevEntry.id), cursorPrev.value) : null
     cursorNext.value = nextEntry ? merge(byId.get(nextEntry.id), cursorNext.value) : null
+    if (!variantCursor.pinned.value) {
+      variantCursor.setCounterpart(variantId !== undefined ? byId.get(variantId) ?? null : null)
+    }
   } catch {
     // keep minimal photos
+  }
+  if (openOtherSideOnHydrate) {
+    openOtherSideOnHydrate = false
+    variantCursor.toggle()
   }
 }
 
@@ -928,8 +957,14 @@ function closeGridFullscreen() {
 }
 
 async function gridGoPrev(): Promise<void> {
-  if (cursorIndex.value === null || cursorIndex.value === 0) return
-  const next = cursorIndex.value - 1
+  if (cursorIndex.value === null || cursorIndex.value === 0 || !galleryRef.value) return
+  const gallery = galleryRef.value
+  // The other side of the current format group is part of this photo, not
+  // its own step (only relevant while the list holds both sides).
+  const next = await nextIndexSkippingCounterparts(
+    cursorEntry.value, cursorIndex.value - 1, -1, gallery.getTotal(), (i) => gallery.loadEntryAt(i),
+  )
+  if (next === null) return
   cursorIndex.value = next
   await hydrateCursor(next)
   galleryRef.value?.scrollToIndex(next)
@@ -937,9 +972,13 @@ async function gridGoPrev(): Promise<void> {
 
 async function gridGoNext(): Promise<void> {
   if (cursorIndex.value === null || !galleryRef.value) return
-  const total = galleryRef.value.getTotal()
+  const gallery = galleryRef.value
+  const total = gallery.getTotal()
   if (cursorIndex.value + 1 >= total) return
-  const next = cursorIndex.value + 1
+  const next = await nextIndexSkippingCounterparts(
+    cursorEntry.value, cursorIndex.value + 1, 1, total, (i) => gallery.loadEntryAt(i),
+  )
+  if (next === null) return
   cursorIndex.value = next
   await hydrateCursor(next)
   galleryRef.value?.scrollToIndex(next)
@@ -1985,6 +2024,15 @@ function handleGridPhotoClick(entry: GalleryGridEntry) {
   void openGridFullscreenAt(idx)
 }
 
+/** Format badge on a grid tile: open the fullscreen on the other side. */
+function handleGridVariantClick(entry: GalleryGridEntry) {
+  if (!galleryRef.value) return
+  const idx = galleryRef.value.findLoadedIndexById(entry.id)
+  if (idx === null) return
+  openOtherSideOnHydrate = true
+  void openGridFullscreenAt(idx)
+}
+
 async function handleGridStackClick(entry: GalleryGridEntry) {
   if (!entry.group) return
   if (entry.group.adopted) {
@@ -2724,6 +2772,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             :selected-ids="selectedIds"
             :cursor-index="cursorIndex"
             @photo-click="handleGridPhotoClick"
+            @variant-click="handleGridVariantClick"
             @stack-click="handleGridStackClick"
             @toggle-select="onToggleSelect"
             @loaded="onGalleryLoaded"
@@ -2749,6 +2798,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           <PhotoDetailSidebar
             v-if="cursorPhoto"
             :photo="cursorPhoto"
+            :variant-photo="variantPhoto"
             :curation-stats="cursorCurationStats"
             :can-delete="canDeletePhotos || canWrite"
             :can-upload="canUploadPhotos"
@@ -2808,6 +2858,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       :currentIndex="(cursorIndex ?? 0) + 1"
       :totalCount="albumPhotos.length"
       :group="cursorGroup"
+      :variant-photo="variantPhoto"
+      @toggle-variant="variantCursor.toggle()"
       :can-share="true"
       :text-layer="true"
       :sharing="sharingPhotos"
@@ -2841,6 +2893,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :flyout-open="detailsOpen"
           :image-ready="imageReady"
           :photo="cursorPhoto"
+          :variant-photo="variantPhoto"
           :curation-stats="cursorCurationStats"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"

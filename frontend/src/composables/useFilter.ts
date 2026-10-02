@@ -99,6 +99,8 @@ export function parseFilterFromQuery(q: Record<string, unknown>): PhotoFilter {
   // calls in VirtualGallery and leaving empty skeleton cells.
   const showAiHidden = parseBool(q.showAiHidden)
   if (showAiHidden !== undefined) f.showAiHidden = showAiHidden
+  const showVariants = parseBool(q.showVariants)
+  if (showVariants !== undefined) f.showVariants = showVariants
   return f
 }
 
@@ -140,6 +142,7 @@ export function filterToQuery(f: PhotoFilter): Record<string, string> {
     out.nearRadiusKm = String(f.nearRadiusKm ?? 10)
   }
   if (f.showAiHidden) out.showAiHidden = 'true'
+  if (f.showVariants) out.showVariants = 'true'
   return out
 }
 
@@ -169,6 +172,7 @@ export function countActiveFilters(f: PhotoFilter): number {
   if (f.importedDaysAgo !== undefined) n++
   if (f.nearLat !== undefined && f.nearLon !== undefined) n++
   if (f.showAiHidden) n++
+  if (f.showVariants) n++
   return n
 }
 
@@ -345,6 +349,7 @@ export function usePhotoFilterChips(filter: UseFilterReturn): ComputedRef<Filter
       add(`In der Nähe (${f.nearRadiusKm ?? 10} km)`, ['nearLat', 'nearLon', 'nearRadiusKm'])
     }
     if (f.showAiHidden) add('Inkl. KI-ausgeblendete', ['showAiHidden'])
+    if (f.showVariants) add('Inkl. Formatvarianten', ['showVariants'])
     return out
   })
 }

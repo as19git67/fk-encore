@@ -8,7 +8,7 @@
  * fills the slots that the user has scrolled near.
  */
 import { apiFetch, withPhotoAccessParams } from './client'
-import type { PhotoFilter } from './photos'
+import type { PhotoFilter, PhotoOrientation } from './photos'
 
 export type GallerySortField =
   | 'taken_at'
@@ -39,6 +39,21 @@ export interface GalleryGridGroup {
   // pick list. Reviewed groups still set these to surface the marker.
   ai_picked?: boolean
   ai_confidence?: 'high' | 'medium' | 'low'
+  /**
+   * Set when the group is a portrait/landscape format group for this user
+   * (.claude/plans/orientierungs-varianten.md): visible members per side and
+   * their ids, best-ranked first. With `variantMode=portrait|landscape` the
+   * grid only holds the matching side; the ids say what sits behind the badge.
+   */
+  variants?: OrientationVariants
+}
+
+/** The two sides of a format group. */
+export interface OrientationVariants {
+  portrait: number
+  landscape: number
+  portrait_ids: number[]
+  landscape_ids: number[]
 }
 
 /** One cell in the grid. Pre-enriched server-side; no client computation. */
@@ -46,6 +61,8 @@ export interface GalleryGridEntry {
   id: number
   filename: string
   curation: GalleryCuration
+  /** Portrait/landscape/square from the stored dimensions; null if unknown. */
+  orientation: PhotoOrientation | null
   auto_crop?: { x: number; y: number }
   group?: GalleryGridGroup
   /**
@@ -120,6 +137,10 @@ function buildFilterParams(filter: PhotoFilter | undefined, sp: URLSearchParams)
   if (filter.showAiHidden) add('showAiHidden', true)
   if (filter.ownerIds && filter.ownerIds.length) add('ownerIds', filter.ownerIds.join(','))
   if (filter.albumScopeId !== undefined) add('albumScopeId', filter.albumScopeId)
+  // The grid sets `variantMode` from the screen; a bare `showVariants` (from
+  // the URL, e.g. the select-all ids request) means "both sides".
+  if (filter.variantMode) add('variantMode', filter.variantMode)
+  else if (filter.showVariants) add('variantMode', 'all')
 }
 
 export function getGalleryGrid(

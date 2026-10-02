@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
+import { sideLabel } from '../utils/orientationVariants'
 import DatePicker from 'primevue/datepicker'
 import HeicImage from './HeicImage.vue'
 import PhotoMiniMap from './PhotoMiniMap.vue'
@@ -85,6 +86,11 @@ const props = defineProps<{
    *  album, face actions). Driven by a running fullscreen slideshow — paused
    *  slideshow makes the panel editable again. */
   readOnly?: boolean
+  /**
+   * The other side of the photo's portrait/landscape format group, when
+   * there is one: the sidebar names both files so the pair is visible.
+   */
+  variantPhoto?: Photo | null
   /** True while the host is fetching this photo for the share sheet (#1048). */
   sharing?: boolean
   /** Text recognised inside the photo (#1029); null = not scanned (yet). */
@@ -323,6 +329,12 @@ async function copyOcrText() {
 watch(() => props.photo.id, () => { ocrCopied.value = false })
 
 onMounted(loadAlbums)
+
+/** "Querformat" / "Hochformat" of the other side, "Formatpaar" if unknown. */
+const variantSideLabel = computed(() => {
+  const o = props.variantPhoto?.orientation
+  return o === 'portrait' || o === 'landscape' ? sideLabel(o) : 'Formatpaar'
+})
 
 const emit = defineEmits<{
   'update:coverPhotoId': [id: number | null]
@@ -797,6 +809,12 @@ watch(() => props.readOnly, (ro) => {
         <div v-if="photo.filename" class="meta-row">
           <i class="pi pi-hashtag meta-icon" />
           <span class="meta-value meta-value--mono" :title="photo.filename">{{ photo.filename }}</span>
+        </div>
+        <div v-if="variantPhoto" class="meta-row">
+          <i class="pi pi-sync meta-icon" />
+          <span class="meta-value meta-value--mono" :title="variantPhoto.filename">
+            {{ variantSideLabel }}: {{ variantPhoto.filename }}
+          </span>
         </div>
       </div>
     </div>

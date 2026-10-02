@@ -7320,7 +7320,7 @@ export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsRe
         g.orientation_variants === "auto" || g.orientation_variants === "off"
           ? g.orientation_variants
           : undefined,
-      variants: variants?.counts,
+      variants: variants ?? undefined,
     });
   }
 

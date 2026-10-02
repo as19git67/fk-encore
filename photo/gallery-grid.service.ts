@@ -628,8 +628,8 @@ async function loadGroupInfoForPhotos(
     // badge still sits on exactly one tile. The database cover stays as is.
     let isCover = c.is_cover;
     if (variants && (variantMode === "portrait" || variantMode === "landscape")) {
-      const shownIds = variantMode === "portrait" ? variants.portraitIds : variants.landscapeIds;
-      const hiddenIds = variantMode === "portrait" ? variants.landscapeIds : variants.portraitIds;
+      const shownIds = variantMode === "portrait" ? variants.portrait_ids : variants.landscape_ids;
+      const hiddenIds = variantMode === "portrait" ? variants.landscape_ids : variants.portrait_ids;
       if (c.cover_photo_id !== null && hiddenIds.includes(c.cover_photo_id) && shownIds.length > 0) {
         isCover = c.photo_id === shownIds[0];
       }
@@ -640,7 +640,7 @@ async function loadGroupInfoForPhotos(
       member_count: visibleMembers,
       reviewed: c.reviewed,
     };
-    if (variants) entry.variants = variants.counts;
+    if (variants) entry.variants = variants;
     if (c.review_source === "adopted") entry.adopted = true;
     if (c.ai_picked_photo_ids && c.ai_picked_photo_ids.length > 0) {
       entry.ai_picked = c.ai_picked_photo_ids.includes(c.photo_id);

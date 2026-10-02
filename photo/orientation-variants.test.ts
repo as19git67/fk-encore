@@ -61,10 +61,7 @@ describe("computeOrientationVariants", () => {
       [member(1, "portrait", 0), member(2, "landscape", 30)],
       null,
     );
-    expect(r).not.toBeNull();
-    expect(r!.counts).toEqual({ portrait: 1, landscape: 1 });
-    expect(r!.portraitIds).toEqual([1]);
-    expect(r!.landscapeIds).toEqual([2]);
+    expect(r).toEqual({ portrait: 1, landscape: 1, portrait_ids: [1], landscape_ids: [2] });
   });
 
   it("uses the tight variant window, not the ten-minute grouping window", () => {
@@ -91,7 +88,7 @@ describe("computeOrientationVariants", () => {
       ],
       "auto",
     );
-    expect(r!.counts).toEqual({ portrait: 3, landscape: 2 });
+    expect(r).toMatchObject({ portrait: 3, landscape: 2, portrait_ids: [1, 2, 3], landscape_ids: [4, 5] });
   });
 
   it("leaves out a frame that is too far from every frame of the other side", () => {
@@ -103,8 +100,7 @@ describe("computeOrientationVariants", () => {
       ],
       null,
     );
-    expect(r!.counts).toEqual({ portrait: 1, landscape: 1 });
-    expect(r!.landscapeIds).toEqual([2]);
+    expect(r).toMatchObject({ portrait: 1, landscape: 1, landscape_ids: [2] });
   });
 
   it("never counts squares, unknown dimensions, hidden members or members without a date", () => {
@@ -220,7 +216,9 @@ describe("orientation variants in the gallery grid", () => {
     const res = await listGalleryGridLogic(u, { variantMode: "landscape" }, grid);
     const byId = new Map(res.photos.map((p) => [p.id, p]));
     expect(byId.get(l1)!.orientation).toBe("landscape");
-    expect(byId.get(l1)!.group?.variants).toEqual({ portrait: 2, landscape: 1 });
+    expect(byId.get(l1)!.group?.variants).toEqual({
+      portrait: 2, landscape: 1, portrait_ids: [p1, p2], landscape_ids: [l1],
+    });
     // The unknown frame is neither side: it stays visible in both modes
     // and reports its orientation as unknown.
     expect(byId.get(unknown)!.orientation).toBeNull();
@@ -228,7 +226,7 @@ describe("orientation variants in the gallery grid", () => {
     expect(byId.has(p2)).toBe(false);
 
     const all = await listGalleryGridLogic(u, { variantMode: "all" }, grid);
-    for (const p of all.photos) expect(p.group?.variants).toEqual({ portrait: 2, landscape: 1 });
+    for (const p of all.photos) expect(p.group?.variants).toMatchObject({ portrait: 2, landscape: 1 });
   });
 
   it("does not form a format group outside the variant time window", async () => {
@@ -283,7 +281,9 @@ describe("orientation variants in the gallery grid", () => {
     expect(await gridIds(u, "portrait")).toEqual([portrait]);
     const again = await listPhotoGroupsLogic(u);
     expect(again.groups[0].orientation_variants).toBe("auto");
-    expect(again.groups[0].variants).toEqual({ portrait: 1, landscape: 1 });
+    expect(again.groups[0].variants).toEqual({
+      portrait: 1, landscape: 1, portrait_ids: [portrait], landscape_ids: [landscape],
+    });
 
     expect(await getCollapseOrientationVariantsLogic(u)).toEqual({ enabled: true });
     await setCollapseOrientationVariantsLogic(u, false);

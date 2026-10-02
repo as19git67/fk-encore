@@ -74,6 +74,9 @@ import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useListSelection } from '../composables/useListSelection'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
+import { useScreenOrientation } from '../composables/useScreenOrientation'
+import { useVariantCursor } from '../composables/useVariantCursor'
+import { counterpartIds, nextIndexSkippingCounterparts } from '../utils/orientationVariants'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import {
   refreshPhotoFaces,
@@ -1030,8 +1033,22 @@ const cursorNext = ref<Photo | null>(null)
 // "this photo is part of a group, X siblings hidden" + opens the
 // review dialog on click.
 const cursorGroup = ref<GalleryGridGroup | null>(null)
+// The grid entry behind `cursorPhoto`; paging needs its format group to
+// step over the other side (.claude/plans/orientierungs-varianten.md).
+const cursorEntry = ref<GalleryGridEntry | null>(null)
 let hydrateToken = 0
 let curationVersion = 0
+
+// ── Orientation variants in the fullscreen ──────────────────────────────────
+// The other side of the current photo's format group rides along with the
+// cursor. `R` / the button swap the two and pin the choice; turning the
+// device swaps to the fitting side unless pinned. A tap on the grid's format
+// badge opens the fullscreen and goes straight to the other side.
+const screenOrientation = useScreenOrientation()
+const variantCursor = useVariantCursor({ screen: screenOrientation, cursorPhoto })
+const { variantPhoto } = variantCursor
+let lastHydratedIndex: number | null = null
+let openOtherSideOnHydrate = false
 
 // ── Detail flyout state ─────────────────────────────────────────────────────
 // Per-photo metadata loaded on top of the batch-hydrated `Photo`. Faces and
@@ -1158,6 +1175,13 @@ async function hydrateCursor(index: number, options?: { skipNeighbors?: boolean 
     closeFullscreen()
     return
   }
+  // A new index forgets the pinned side; a re-hydration of the same photo
+  // (after a curation write) keeps it.
+  if (index !== lastHydratedIndex) {
+    variantCursor.reset()
+    lastHydratedIndex = index
+  }
+  cursorEntry.value = curEntry
   // Update the shared "last focused photo" (photoNav persists it itself).
   photoNav.selectPhoto(curEntry.id)
 
@@ -1190,6 +1214,10 @@ async function hydrateCursor(index: number, options?: { skipNeighbors?: boolean 
   const ids = [curEntry.id]
   if (prevEntry) ids.push(prevEntry.id)
   if (nextEntry) ids.push(nextEntry.id)
+  // The best-ranked frame of the other side, fetched in the same batch so
+  // the `R` button has its photo the moment the overlay is hydrated.
+  const variantId = counterpartIds(curEntry)[0]
+  if (variantId !== undefined) ids.push(variantId)
   const myCurationVersion = curationVersion
   try {
     const { photos } = await getPhotoDetailsBatch(ids)
@@ -1211,9 +1239,25 @@ async function hydrateCursor(index: number, options?: { skipNeighbors?: boolean 
     cursorNext.value = nextEntry
       ? merge(byId.get(nextEntry.id), cursorNext.value)
       : null
+    if (!variantCursor.pinned.value) {
+      variantCursor.setCounterpart(variantId !== undefined ? byId.get(variantId) ?? null : null)
+    }
   } catch {
     // Fall back to the minimal photo objects we already set above.
   }
+  if (openOtherSideOnHydrate) {
+    openOtherSideOnHydrate = false
+    variantCursor.toggle()
+  }
+}
+
+/** Format badge on a grid tile: open the fullscreen on the other side. */
+async function onVariantClick(entry: GalleryGridEntry): Promise<void> {
+  if (!galleryRef.value) return
+  const idx = galleryRef.value.findLoadedIndexById(entry.id)
+  if (idx === null) return
+  openOtherSideOnHydrate = true
+  await openFullscreenAt(idx)
 }
 
 async function openFullscreenAt(index: number): Promise<void> {
@@ -1234,8 +1278,14 @@ function closeFullscreen() {
 }
 
 async function goPrev(): Promise<void> {
-  if (cursorIndex.value === null || cursorIndex.value === 0) return
-  const next = cursorIndex.value - 1
+  if (cursorIndex.value === null || cursorIndex.value === 0 || !galleryRef.value) return
+  const gallery = galleryRef.value
+  // The other side of the current format group is part of this photo, not
+  // its own step (only relevant while the list holds both sides).
+  const next = await nextIndexSkippingCounterparts(
+    cursorEntry.value, cursorIndex.value - 1, -1, gallery.getTotal(), (i) => gallery.loadEntryAt(i),
+  )
+  if (next === null) return
   cursorIndex.value = next
   await hydrateCursor(next)
   galleryRef.value?.scrollToIndex(next)
@@ -1243,12 +1293,16 @@ async function goPrev(): Promise<void> {
 
 async function goNext(): Promise<void> {
   if (cursorIndex.value === null || !galleryRef.value) return
-  const total = galleryRef.value.getTotal()
+  const gallery = galleryRef.value
+  const total = gallery.getTotal()
   if (cursorIndex.value + 1 >= total) return
-  const next = cursorIndex.value + 1
+  const next = await nextIndexSkippingCounterparts(
+    cursorEntry.value, cursorIndex.value + 1, 1, total, (i) => gallery.loadEntryAt(i),
+  )
+  if (next === null) return
   cursorIndex.value = next
   await hydrateCursor(next)
-  galleryRef.value.scrollToIndex(next)
+  gallery.scrollToIndex(next)
 }
 
 async function applyCurationToPhoto(id: number, target: CurationStatus): Promise<void> {
@@ -1733,6 +1787,7 @@ void refreshReviewSequence()
             :selected-ids="selectedIds"
             :cursor-index="cursorIndex"
             @photo-click="onPhotoClick"
+            @variant-click="onVariantClick"
             @stack-click="onStackClick"
             @toggle-select="onToggleSelect"
             @loaded="onGalleryLoaded"
@@ -1747,6 +1802,7 @@ void refreshReviewSequence()
         <aside v-if="cursorPhoto" class="desktop-sidebar">
           <PhotoDetailSidebar
             :photo="cursorPhoto"
+            :variant-photo="variantPhoto"
             :selected-photo-ids="selectMode && selectedCount > 1 ? Array.from(selectedIds) : undefined"
             :faces="detectedFaces"
             :loading-faces="loadingFaces"
@@ -1810,6 +1866,8 @@ void refreshReviewSequence()
       :current-index="(cursorIndex ?? 0) + 1"
       :total-count="galleryTotal"
       :group="cursorGroup"
+      :variant-photo="variantPhoto"
+      @toggle-variant="variantCursor.toggle()"
       @close="closeFullscreen"
       @prev="goPrev"
       @next="goNext"
@@ -1828,6 +1886,7 @@ void refreshReviewSequence()
           :flyout-open="detailsOpen"
           :image-ready="imageReady"
           :photo="cursorPhoto"
+          :variant-photo="variantPhoto"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
           :poi-matches="detectedPoiMatches"

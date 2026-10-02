@@ -1,6 +1,6 @@
 # Orientierungs-Varianten: Hoch- und Querformat desselben Motivs
 
-Status: **In Umsetzung** — Etappe 1 (Backend) umgesetzt, Etappen 2–6 offen.
+Status: **In Umsetzung** — Etappen 1 (Backend) und 2 (Web Raster + Vollbild) umgesetzt, Etappen 3–6 offen.
 
 ## Umsetzungsstand
 
@@ -23,9 +23,35 @@ Status: **In Umsetzung** — Etappe 1 (Backend) umgesetzt, Etappen 2–6 offen.
   `GET`/`PATCH /photos/groups/orientation-variants` (`{ enabled }`). Tests in
   `photo/orientation-variants.test.ts` (Zeitfenster, Sichtbarkeit, `off`,
   Schalter, Fremdgruppe, Cover, Review-Queue) und `photo.filters.test.ts`.
-- Etappen 2–6 offen; die album-gebundene Liste läuft über `/gallery/grid`
+- **Etappe 2 (Web Raster + Vollbild) — umgesetzt.** `GalleryGridGroup.variants`
+  trägt zusätzlich zu den Zählern die Foto-IDs je Seite (`portrait_ids`,
+  `landscape_ids`, bestplatziert zuerst), damit der Viewer die Gegenseite
+  ohne zweite Abfrage kennt. Im Web: `composables/useScreenOrientation.ts`
+  (eine Quelle für die Bildschirm-Orientierung), `utils/orientationVariants.ts`
+  (Seite eines Eintrags, Gegenseite, `variantModeFor`, `shouldSwitchSide`,
+  `nextIndexSkippingCounterparts`), `composables/useVariantCursor.ts`
+  (Gegenseite neben `cursorPhoto`, `toggle` mit `pinned`, Wechsel bei
+  Drehung). `VirtualGallery` lädt mit `variantMode=<Orientierung>` und bei
+  Drehung neu um den sichtbaren Anker, im Auswahlmodus und mit dem
+  Filter-Schalter „Formatvarianten anzeigen" (`showVariants` in der URL,
+  Chip „Inkl. Formatvarianten") mit `all`. Format-Badge (`.vg-variant-badge`,
+  Icon `pi pi-sync`) in derselben Ecke wie das Stapel-Badge, Tipp öffnet das
+  Vollbild auf der Gegenseite (`variant-click`). `FullscreenOverlay`: Prop
+  `variantPhoto`, Knopf „Querformat"/„Hochformat" mit `R`, Event
+  `toggle-variant`, Gegenseite wird vorgeladen; die Überblendung ist der
+  bestehende Fade-in beim Laden. `PhotoDetailSidebar` zeigt den Dateinamen der
+  Gegenseite. Blättern überspringt die Gegenseite, wenn die Liste beide Seiten
+  hält. Der Nutzer-Schalter sitzt im Profil neben „Ähnliche Fotos" (Karte
+  „Hoch- und Querformat"). Stories: `VirtualGallery.stories.ts` (Quer, Hochkant,
+  beide Seiten, Auswahlmodus) und zwei Formatpaar-Stories im
+  `FullscreenOverlay` mit `testViewport`. Tests: `useScreenOrientation`,
+  `useVariantCursor`, `orientationVariants`.
+- Etappen 3–6 offen; die album-gebundene Liste läuft über `/gallery/grid`
   mit `albumScopeId` und ist damit abgedeckt, die anonyme Link-Ansicht hat
-  keinen Nutzer (und damit keine Gruppen) und bleibt außen vor.
+  keinen Nutzer (und damit keine Gruppen) und bleibt außen vor. Die Diashow
+  im Web läuft über dasselbe `cursorPhoto`, der Drehungswechsel greift also
+  auch dort; eine eigene Seitenwahl pro Schritt in `utils/slideshow.ts` ist
+  erst nötig, wenn die Liste beide Seiten hält.
 
 ## Problem
 

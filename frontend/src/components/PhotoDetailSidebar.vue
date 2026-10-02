@@ -44,6 +44,8 @@ const props = defineProps<{
   imageReady?: boolean
   curationStats?: { fav_count: number; hide_count: number; member_count: number }
   readOnly?: boolean
+  /** The other side of the photo's format group, if any (see base). */
+  variantPhoto?: Photo | null
 }>()
 
 const editDate = defineModel<Date | null>('editDate', { default: null })
@@ -202,6 +204,7 @@ const effectiveLoadingPoiMatches = computed(() => props.loadingPoiMatches ?? int
     :image-ready="imageReady"
     :curation-stats="curationStats"
     :read-only="readOnly"
+    :variant-photo="variantPhoto"
     @update:coverPhotoId="emit('update:coverPhotoId', $event)"
     @fullscreen="emit('fullscreen')"
     @ignore-face="emit('ignore-face', $event)"
