@@ -15,10 +15,19 @@ import UIKit
 ///
 /// Saving renders the canvas on the device and uploads the result as an
 /// ordinary photo — there is no collage endpoint, so this is the same move the
-/// web makes. The collage inherits the capture date of its **oldest** source,
-/// so it sorts beside the photos it was made from rather than at "now".
+/// web makes. The collage takes the capture date of its **newest** source plus
+/// one second, so it sorts right after the photos it was made from rather than
+/// at "now". Opened from an album, it is added to that album and the album is
+/// told to reload, as the web's dialog does.
+///
+/// The preview cells crop with the same `CollageLayouts.coverCrop` the render
+/// uses, so a portrait cell shows the part of the photo that will be saved.
 struct CollageView: View {
     let photos: [PhotoWithCuration]
+    /// The album the collage was made from; the saved collage joins it.
+    let albumId: Int?
+    /// Called after the collage is saved, so the album can show it.
+    let onSaved: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var layoutIndex = 0
@@ -35,8 +44,10 @@ struct CollageView: View {
     @State private var statusMessage: String?
     @State private var didSave = false
 
-    init(photos: [PhotoWithCuration]) {
+    init(photos: [PhotoWithCuration], albumId: Int? = nil, onSaved: (() -> Void)? = nil) {
         self.photos = photos
+        self.albumId = albumId
+        self.onSaved = onSaved
         _order = State(initialValue: Array(photos.indices))
     }
 
@@ -307,8 +318,9 @@ struct CollageView: View {
             isFavorite: false,
             capturedAtString: ""
         )
+        let uploaded: APIClient.UploadResult
         do {
-            _ = try await APIClient.shared.uploadPhoto(
+            uploaded = try await APIClient.shared.uploadPhoto(
                 data: jpeg,
                 filename: filename,
                 mimeType: "image/jpeg",
@@ -323,11 +335,30 @@ struct CollageView: View {
                 assetLocalId: filename,
                 dateTaken: CollageRenderer.inheritedDate(from: order.map { photos[$0] })
             )
-            didSave = true
-            statusMessage = "Collage gesichert."
         } catch {
             statusMessage = error.localizedDescription
+            return
         }
+
+        // Saved either way from here on; a failed album add must not offer
+        // "Sichern" again, which would upload the same collage twice.
+        didSave = true
+        if let albumId {
+            struct Body: Encodable { let albumId: Int; let photoId: Int }
+            struct Resp: Decodable { let success: Bool }
+            do {
+                let _: Resp = try await APIClient.shared.post(
+                    "/albums/photos",
+                    body: Body(albumId: albumId, photoId: uploaded.photoId)
+                )
+                statusMessage = "Collage wurde im Album gespeichert."
+            } catch {
+                statusMessage = "Collage gesichert, aber nicht zum Album hinzugefügt: \(error.localizedDescription)"
+            }
+        } else {
+            statusMessage = "Collage gesichert."
+        }
+        onSaved?()
     }
 
     /// Two taps make a swap: the first marks a cell, the second exchanges them.
@@ -477,9 +508,8 @@ private struct CollageCanvas: View {
         let width = cell.width * canvas.width
         let height = cell.height * canvas.height
         let isDropTarget = photoDragOver == index && photoDragFrom != index
-        return PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
+        return CollageTile(photo: photo)
             .frame(width: width, height: height)
-            .clipped()
             .opacity(photoDragFrom == index ? 0.4 : 1)
             .overlay {
                 if highlighted == index || isDropTarget {
@@ -491,6 +521,65 @@ private struct CollageCanvas: View {
             .onTapGesture { onTapCell(index) }
             .gesture(photoDrag(from: index, canvas: canvas))
             .offset(x: cell.x * canvas.width, y: cell.y * canvas.height)
+    }
+}
+
+/// One photo in its preview cell, cropped exactly as the render will crop it.
+///
+/// `PhotoThumbnailView` centres its focal point inside a *square*; a cell of
+/// another shape then showed a different part of the photo than the saved
+/// collage. This tile runs the render's own `CollageLayouts.coverCrop` against
+/// the cell's real aspect instead. It loads the same full image the render
+/// fetches, so the cache usually makes saving cheaper, not the preview dearer.
+private struct CollageTile: View {
+    @State private var loader: ThumbnailLoader
+    private let autoCrop: AutoCrop?
+
+    init(photo: PhotoWithCuration) {
+        _loader = State(initialValue: ThumbnailLoader(filename: photo.filename, photoId: photo.id))
+        autoCrop = photo.auto_crop
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            if let image = loader.image, geo.size.width > 0, geo.size.height > 0 {
+                cropped(image, in: geo.size)
+            } else {
+                Rectangle()
+                    .fill(.quaternary)
+                    .overlay {
+                        if loader.isLoading {
+                            ProgressView()
+                        } else if loader.hasError {
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundStyle(.red.opacity(0.6))
+                        }
+                    }
+            }
+        }
+        .clipped()
+        .task { await loader.load() }
+    }
+
+    private func cropped(_ image: UIImage, in size: CGSize) -> some View {
+        // The render drops the AI focal point on a photo the user framed
+        // themselves; so does the preview.
+        let focal = loader.isRecipeRendered ? nil : autoCrop.map { CGPoint(x: $0.x, y: $0.y) }
+        let source = CollageLayouts.coverCrop(
+            photoWidth: Double(image.size.width),
+            photoHeight: Double(image.size.height),
+            destinationAspect: Double(size.width / size.height),
+            focal: focal
+        )
+        let scale = source.width > 0 ? Double(size.width) / source.width : 1
+        return Image(uiImage: image)
+            .resizable()
+            .frame(
+                width: CGFloat(Double(image.size.width) * scale),
+                height: CGFloat(Double(image.size.height) * scale)
+            )
+            .offset(x: CGFloat(-source.x * scale), y: CGFloat(-source.y * scale))
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
     }
 }
 

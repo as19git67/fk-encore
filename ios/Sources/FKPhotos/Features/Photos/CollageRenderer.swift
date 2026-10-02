@@ -185,20 +185,56 @@ enum CollageRenderer {
 
     // MARK: - Upload metadata
 
-    /// A collage takes the capture date of its **oldest** source, so it sorts
-    /// beside the photos it was made from rather than at "now" — the same rule
-    /// the web applies through `X-Date-Taken`.
+    /// A collage takes the capture date of its **newest** source plus one
+    /// second, so it sorts directly after the photos it was made from rather
+    /// than at "now" — the web's `getCollageDate` in `CollageDialog.vue`,
+    /// sent the same way through `X-Date-Taken`.
+    ///
+    /// The wall-clock components are carried over literally and the second is
+    /// added in UTC: the server discards any offset, as it does for EXIF, so
+    /// converting through the device's time zone could only skew it.
     ///
     /// Nil when no source has a date to inherit, in which case the server
     /// falls back to the file's own EXIF.
     static func inheritedDate(from photos: [PhotoWithCuration]) -> String? {
-        photos
+        let newest = photos
             .compactMap { $0.taken_at }
-            .compactMap { raw -> (String, Date)? in
-                PhotoFilter.parseDate(raw).map { (raw, $0) }
-            }
-            .min { $0.1 < $1.1 }?
-            .0
+            .compactMap(wallClock(_:))
+            .max()
+        guard let newest else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter.string(from: newest.addingTimeInterval(1))
+    }
+
+    /// `YYYY-MM-DD[T ]HH:MM[:SS]` read as wall-clock time on a UTC calendar;
+    /// fractions and any offset after it are ignored, as on the web.
+    static func wallClock(_ raw: String) -> Date? {
+        let chars = Array(raw)
+        func number(_ start: Int, _ length: Int) -> Int? {
+            guard start + length <= chars.count else { return nil }
+            let digits = chars[start..<start + length]
+            guard digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber) else { return nil }
+            return Int(String(digits))
+        }
+        func char(_ index: Int, in set: String) -> Bool {
+            index < chars.count && set.contains(chars[index])
+        }
+        guard let year = number(0, 4), char(4, in: "-"),
+              let month = number(5, 2), char(7, in: "-"),
+              let day = number(8, 2), char(10, in: "T "),
+              let hour = number(11, 2), char(13, in: ":"),
+              let minute = number(14, 2)
+        else { return nil }
+        let second = char(16, in: ":") ? number(17, 2) ?? 0 : 0
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.date(from: DateComponents(
+            year: year, month: month, day: day,
+            hour: hour, minute: minute, second: second
+        ))
     }
 
     /// The filename a collage is uploaded under.

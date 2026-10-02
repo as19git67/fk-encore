@@ -238,7 +238,12 @@ struct AlbumDetailView: View {
             PhotoSlideshowView(photos: slideshowPhotos, title: album?.name ?? "")
         }
         .sheet(isPresented: $showCollage) {
-            CollageView(photos: displayedPhotos.filter { selectedIds.contains($0.id) })
+            CollageView(
+                photos: displayedPhotos.filter { selectedIds.contains($0.id) },
+                albumId: albumId
+            ) {
+                Task { await loadAlbum() }
+            }
         }
         .sheet(isPresented: $showMap) {
             NavigationStack {

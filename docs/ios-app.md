@@ -543,9 +543,16 @@ dokumentiert**:
   Clients dieselbe Collage ergeben.
 - **Sichern** rendert die Leinwand auf dem Gerät (`CollageRenderer`,
   `UIGraphicsImageRenderer`) und lädt das Ergebnis als gewöhnliches Foto hoch —
-  einen Collage-Endpunkt gibt es nicht, das Web macht es genauso.
-- Die Collage erbt das Aufnahmedatum ihres **ältesten** Quellfotos, per
-  `X-Date-Taken`. Dieser Header **überschreibt** das EXIF der Datei, anders
+  einen Collage-Endpunkt gibt es nicht, das Web macht es genauso. Danach wird
+  sie dem Album hinzugefügt, aus dem sie entstand, und das Album lädt neu.
+- Die Vorschau schneidet jede Zelle mit demselben `CollageLayouts.coverCrop`
+  zu wie der Export, gegen das echte Seitenverhältnis der Zelle — ein
+  quadratisches Vorschaubild zeigte in Hochformat-Zellen einen anderen
+  Ausschnitt als die gespeicherte Collage.
+- Die Collage bekommt das Aufnahmedatum ihres **neuesten** Quellfotos plus
+  eine Sekunde (wie `getCollageDate` im Web), per `X-Date-Taken`, und sortiert
+  so direkt hinter ihre Quellfotos. Die Uhrzeit wird wörtlich übernommen, die
+  Sekunde in UTC addiert. Dieser Header **überschreibt** das EXIF der Datei, anders
   als `X-Captured-At`, das nur einspringt, wenn EXIF nichts hergibt: eine
   frisch gerenderte Collage trägt „jetzt" in den Pixeln und würde sonst weit
   weg von ihren Quellfotos einsortiert.
