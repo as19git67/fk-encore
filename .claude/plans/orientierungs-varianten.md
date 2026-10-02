@@ -1,6 +1,6 @@
 # Orientierungs-Varianten: Hoch- und Querformat desselben Motivs
 
-Status: **Vorschlag** (noch nicht abgestimmt)
+Status: **Abgestimmt** (Vorschlag angenommen, Umsetzung offen)
 
 ## Problem
 
@@ -193,14 +193,16 @@ Entscheidung an der eigenen Gruppe.
    Motiv", Duell-Reihenfolge in `CompareTournament`.
 6. **Rückblicke und Stream** mit derselben Hilfsfunktion.
 
-## Offene Fragen
+## Entscheidungen
 
-- Zeitfenster 120 s: reicht das für „Motiv in zwei Formaten", oder soll es
-  das ganze Gruppenfenster (10 min) sein? Vorschlag: 120 s, konfigurierbar als
-  Konstante neben `TIME_WINDOW_MS`.
-- Mehrere Fotos je Format (3 hoch, 2 quer, alle behalten): alle drei
-  Hochformate zeigen und beide Querformate dahinter, oder streng 1:1 paaren?
-  Vorschlag: Seite zeigen, nicht paaren. Einfacher, und der Nutzer hat ja
-  bewusst drei behalten.
-- Soll das Drehen im Vollbild per Standard automatisch wechseln, oder nur per
-  Knopf? Vorschlag: automatisch, mit `pinned` als Bremse.
+Die drei anfangs offenen Fragen sind mit dem Nutzer entschieden:
+
+- **Zeitfenster 120 s** zwischen den beiden Formaten, als Konstante
+  `VARIANT_TIME_WINDOW_MS` neben `TIME_WINDOW_MS`. Das volle Gruppenfenster
+  von zehn Minuten gilt nicht.
+- **Seite zeigen, nicht paaren.** Hat der Nutzer mehrere Fotos je Format
+  behalten (3 hoch, 2 quer), zeigt die Ansicht alle Fotos der passenden
+  Seite; die andere Seite liegt gesammelt dahinter. Keine 1:1-Zuordnung.
+- **Drehen wechselt automatisch** im Vollbild und in der Diashow, mit
+  Überblendung. Ein manueller Wechsel setzt `pinned` bis zum nächsten Foto
+  und wird vom Drehen nicht überstimmt.
