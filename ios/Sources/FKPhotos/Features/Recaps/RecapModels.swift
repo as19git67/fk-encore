@@ -95,6 +95,15 @@ struct ListRecapsResponse: Codable, Sendable { let recaps: [RecapSummary] }
 struct GetRecapResponse: Codable, Sendable {
     let recap: RecapDetails
     let music: RecapMusicTrack?
+    /// Per recap photo that is one side of a format group: the photo on the
+    /// other side (.claude/plans/orientierungs-varianten.md). Optional so an
+    /// older server still decodes.
+    var counterparts: [RecapCounterpart]? = nil
+}
+
+struct RecapCounterpart: Codable, Sendable {
+    let photo_id: Int
+    let counterpart: OrientationCounterpart
 }
 
 /// Server-computed focal point (face centre, normalized 0..1) used to pick
@@ -116,6 +125,28 @@ struct RecapPhoto: Codable, Identifiable, Sendable {
     /// "visible" | "hidden" | "favorite" — drives the player's heart button.
     let curation_status: String?
     let auto_crop: RecapAutoCrop?
+    /// Portrait, landscape or square; nil while unknown. Decides which side
+    /// of a format pair a slide shows (.claude/plans/orientierungs-varianten.md).
+    var orientation: PhotoOrientation? = nil
+}
+
+extension RecapPhoto {
+    /// The other side of a format pair as a slide photo: the player only
+    /// needs id, file and shape of it. Lives in an extension so the struct
+    /// keeps its memberwise init.
+    init(counterpart: OrientationCounterpart) {
+        self.init(
+            id: counterpart.id,
+            filename: counterpart.filename,
+            taken_at: nil,
+            location_name: nil,
+            location_city: nil,
+            description: nil,
+            curation_status: nil,
+            auto_crop: nil,
+            orientation: counterpart.orientation
+        )
+    }
 }
 
 struct RecapPhotoDetailsResponse: Codable, Sendable { let photos: [RecapPhoto] }

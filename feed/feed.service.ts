@@ -16,6 +16,8 @@ import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
 import { feedItems, users, albums, photos } from "../db/schema";
 import { realtime, push } from "~encore/clients";
+import { counterpartsByPhotoId } from "../photo/orientation-variants";
+import type { OrientationCounterpart } from "../db/types";
 
 export type FeedItemKind =
   | "photo_added"
@@ -185,6 +187,13 @@ export interface FeedPhotoItem {
   /** Comments visible to the viewer (in albums they participate in). */
   commentCount: number;
   latestComment: { author: string | null; excerpt: string } | null;
+  /**
+   * The best-ranked photo on the other side of the viewer's format group
+   * (.claude/plans/orientierungs-varianten.md), when the photo is one side of
+   * one. The card shows whichever side fits the screen. Only the viewer's
+   * own groups can say so, so other people's photos never carry one.
+   */
+  counterpart: OrientationCounterpart | null;
 }
 
 export interface ListPhotoFeedRequest {
@@ -290,6 +299,7 @@ export async function listPhotoFeedForUser(
   const rows = res.rows;
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
+  const counterparts = await counterpartsByPhotoId(userId, page.map((r) => r.photo_id));
 
   const items: FeedPhotoItem[] = page.map((r) => ({
     photoId: r.photo_id,
@@ -308,6 +318,7 @@ export async function listPhotoFeedForUser(
       r.latest_comment_body != null
         ? { author: r.latest_comment_author, excerpt: r.latest_comment_body.slice(0, 140) }
         : null,
+    counterpart: counterparts.get(r.photo_id) ?? null,
   }));
 
   const last = page[page.length - 1];

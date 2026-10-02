@@ -1,4 +1,5 @@
 import { API_BASE_URL, apiFetch } from './client'
+import type { OrientationCounterpart } from './photos'
 
 export type RecapKind =
   | 'on_this_day'
@@ -47,6 +48,12 @@ export interface GetRecapResponse {
   recap: RecapDetails
   /** Suggested background track; absent when the music folder is empty. */
   music?: MusicTrack
+  /**
+   * Per recap photo that is one side of a format group: the best-ranked
+   * photo on the other side (.claude/plans/orientierungs-varianten.md). The
+   * player shows whichever side fits the screen.
+   */
+  counterparts?: Array<{ photo_id: number; counterpart: OrientationCounterpart }>
 }
 
 export function getRecapMusicUrl(track: MusicTrack): string {

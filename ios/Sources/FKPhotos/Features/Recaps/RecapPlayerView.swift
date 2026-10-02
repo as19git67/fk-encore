@@ -25,6 +25,12 @@ struct RecapPlayerView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var photos: [RecapPhoto] = []
+    /// The recap's photos as fetched, before the format groups were resolved
+    /// for the screen; `photos` is derived from it per orientation
+    /// (.claude/plans/orientierungs-varianten.md).
+    @State private var basePhotos: [RecapPhoto] = []
+    /// Per recap photo id: the other side of its format pair.
+    @State private var counterparts: [Int: RecapPhoto] = [:]
     @State private var title: String = ""
     @State private var subtitle: String?
     @State private var isLoading = true
@@ -184,11 +190,15 @@ struct RecapPlayerView: View {
             }, perform: {})
             .onAppear {
                 screen = orientation
+                // The photos may have arrived before the reader measured the
+                // screen; pick their sides for the screen as it really is.
+                applyVariants(for: orientation)
                 extendPlan()
                 showChrome()
             }
             .onChange(of: orientation) { _, new in
                 screen = new
+                applyVariants(for: new)
                 replanForOrientationChange()
             }
             .ignoresSafeArea()
@@ -251,6 +261,31 @@ struct RecapPlayerView: View {
             force: force
         )
         if extended != plan { plan = extended }
+    }
+
+    /// `basePhotos` with every frame that does not fit `screen` replaced by
+    /// the other side of its format pair, where that one fits. Same rule as
+    /// the stream card and the photo slideshow.
+    private func resolvedPhotos(for screen: ScreenOrientation) -> [RecapPhoto] {
+        basePhotos.map { photo in
+            SlideshowVariants.pickSide(
+                photo,
+                counterpart: counterparts[photo.id],
+                screen: screen,
+                orientation: { $0.orientation }
+            )
+        }
+    }
+
+    /// The device turned: swap sides where that helps. Indices stay, so the
+    /// plan is cut back and regrown like after any other orientation change;
+    /// the store is pointed at the new sequence only when something changed.
+    private func applyVariants(for screen: ScreenOrientation) {
+        let next = resolvedPhotos(for: screen)
+        guard next.map(\.id) != photos.map(\.id) else { return }
+        photos = next
+        store.reset(photos: photos.map { SlideshowImageStore.Item(id: $0.id, filename: $0.filename) })
+        store.prefetch(around: currentSlide?.first ?? 0, ahead: prefetchAhead)
     }
 
     /// Turning the phone changes which photos are worth pairing. Slides already
@@ -413,7 +448,12 @@ struct RecapPlayerView: View {
                     try await APIClient.shared.get("/photos/details", query: query)
                 // The batch endpoint may reorder; restore the recap's order.
                 let byId = Dictionary(response.photos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-                photos = ids.compactMap { byId[$0] }
+                basePhotos = ids.compactMap { byId[$0] }
+                counterparts = Dictionary(
+                    (detail.counterparts ?? []).map { ($0.photo_id, RecapPhoto(counterpart: $0.counterpart)) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                photos = resolvedPhotos(for: screen)
                 if let c = compareIds, let then = byId[c.then], let now = byId[c.now] {
                     compareIntro = RecapCompareIntroData(
                         then: then, thenYear: c.thenYear,

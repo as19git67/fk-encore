@@ -26,12 +26,13 @@
  * per-group summary in TypeScript (`computeOrientationVariants`). Keep the two
  * rules in sync — the unit tests in orientation-variants.test.ts pin both.
  */
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
-import { dbExec, dbFirst } from "../db/adapter";
+import { dbAll, dbExec, dbFirst } from "../db/adapter";
 import { photoCuration, photoGroupMembers, photoGroups, photos, users } from "../db/schema";
 import type {
+  OrientationCounterpart,
   OrientationVariants,
   OrientationVariantsMode,
   PhotoOrientation,
@@ -254,6 +255,119 @@ export function bestPerOrientation(
     if (!cur || score > cur.score) best.set(key, { photo_id: m.photo_id, score });
   }
   return [...best.values()].map((b) => b.photo_id);
+}
+
+// ── The other side, per photo ──────────────────────────────────────────────
+
+/**
+ * For each of `photoIds` that currently sits in a format group of `userId`,
+ * the best-ranked photo on the other side. One place for every list that
+ * shows a photo large without being the grid — the recap player and the
+ * stream card take it from here (stage 6) and pick the side that fits the
+ * screen themselves. Photos without another side are simply absent.
+ */
+export async function counterpartsByPhotoId(
+  userId: number,
+  photoIds: number[],
+): Promise<Map<number, OrientationCounterpart>> {
+  const out = new Map<number, OrientationCounterpart>();
+  const wanted = Array.from(new Set(photoIds.filter((id) => Number.isFinite(id) && id > 0)));
+  if (wanted.length === 0) return out;
+
+  const groupRows = await dbAll<{ group_id: number; orientation_variants: string | null }>(
+    db
+      .selectDistinct({
+        group_id: photoGroupMembers.group_id,
+        orientation_variants: photoGroups.orientation_variants,
+      })
+      .from(photoGroupMembers)
+      .innerJoin(photoGroups, eq(photoGroups.id, photoGroupMembers.group_id))
+      .where(and(inArray(photoGroupMembers.photo_id, wanted), eq(photoGroups.user_id, userId))),
+  );
+  if (groupRows.length === 0) return out;
+  const modeByGroup = new Map(groupRows.map((g) => [g.group_id, g.orientation_variants]));
+  const groupIds = [...modeByGroup.keys()];
+
+  const members = await dbAll<{
+    group_id: number;
+    photo_id: number;
+    width: number | null;
+    height: number | null;
+    taken_at: string | null;
+    curation_status: string | null;
+  }>(
+    db
+      .select({
+        group_id: photoGroupMembers.group_id,
+        photo_id: photoGroupMembers.photo_id,
+        width: photos.width,
+        height: photos.height,
+        taken_at: photos.taken_at,
+        curation_status: photoCuration.status,
+      })
+      .from(photoGroupMembers)
+      .innerJoin(photos, eq(photos.id, photoGroupMembers.photo_id))
+      .leftJoin(
+        photoCuration,
+        and(eq(photoCuration.photo_id, photoGroupMembers.photo_id), eq(photoCuration.user_id, userId)),
+      )
+      .where(inArray(photoGroupMembers.group_id, groupIds))
+      .orderBy(photoGroupMembers.group_id, photoGroupMembers.similarity_rank, photoGroupMembers.photo_id),
+  );
+  const byGroup = new Map<number, typeof members>();
+  for (const m of members) {
+    const list = byGroup.get(m.group_id);
+    if (list) list.push(m);
+    else byGroup.set(m.group_id, [m]);
+  }
+
+  // photo id → id of its best-ranked counterpart
+  const counterpartIdByPhoto = new Map<number, number>();
+  for (const [groupId, list] of byGroup) {
+    const result = computeOrientationVariants(
+      list.map((m) => ({
+        photo_id: m.photo_id,
+        width: m.width,
+        height: m.height,
+        taken_at: m.taken_at,
+        hidden: m.curation_status === "hidden",
+      })),
+      modeByGroup.get(groupId),
+    );
+    if (!result) continue;
+    for (const id of result.portrait_ids) {
+      if (wanted.includes(id) && result.landscape_ids[0] !== undefined) {
+        counterpartIdByPhoto.set(id, result.landscape_ids[0]);
+      }
+    }
+    for (const id of result.landscape_ids) {
+      if (wanted.includes(id) && result.portrait_ids[0] !== undefined) {
+        counterpartIdByPhoto.set(id, result.portrait_ids[0]);
+      }
+    }
+  }
+  if (counterpartIdByPhoto.size === 0) return out;
+
+  const counterpartIds = Array.from(new Set(counterpartIdByPhoto.values()));
+  const rows = await dbAll<{ id: number; filename: string; width: number | null; height: number | null }>(
+    db
+      .select({ id: photos.id, filename: photos.filename, width: photos.width, height: photos.height })
+      .from(photos)
+      .where(inArray(photos.id, counterpartIds)),
+  );
+  const rowById = new Map(rows.map((r) => [r.id, r]));
+  for (const [photoId, counterpartId] of counterpartIdByPhoto) {
+    const row = rowById.get(counterpartId);
+    if (!row) continue;
+    out.set(photoId, {
+      id: row.id,
+      filename: row.filename,
+      width: row.width,
+      height: row.height,
+      orientation: photoOrientation(row.width, row.height),
+    });
+  }
+  return out;
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────

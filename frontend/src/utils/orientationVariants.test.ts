@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   allowedDuel,
+  pickSideForScreen,
   bestPerSide,
   counterpartIds,
   hasBothOrientations,
@@ -96,5 +97,15 @@ describe('orientationVariants helpers', () => {
       { id: 3, orientation: 'landscape', score: -1 },
       { id: 4, orientation: 'square', score: 9 },
     ]).sort()).toEqual([2, 3])
+  })
+
+  it('shows the side that fits the screen, and the photo itself otherwise', () => {
+    const landscape = { id: 1, orientation: 'landscape' as const }
+    const portrait = { id: 2, orientation: 'portrait' as const }
+    expect(pickSideForScreen(landscape, portrait, 'portrait')).toBe(portrait)
+    expect(pickSideForScreen(landscape, portrait, 'landscape')).toBe(landscape)
+    expect(pickSideForScreen(portrait, landscape, 'landscape')).toBe(landscape)
+    expect(pickSideForScreen(landscape, null, 'portrait')).toBe(landscape)
+    expect(pickSideForScreen({ id: 3, orientation: null }, portrait, 'portrait')).toEqual({ id: 3, orientation: null })
   })
 })

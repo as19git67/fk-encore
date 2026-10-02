@@ -50,6 +50,19 @@ export type PhotoOrientation = 'portrait' | 'landscape' | 'square'
  */
 export type VariantMode = 'all' | 'portrait' | 'landscape'
 
+/**
+ * The best-ranked photo on the other side of a format group, shipped next to
+ * a photo by the recap and the stream so the viewer can show the side that
+ * fits the screen (.claude/plans/orientierungs-varianten.md).
+ */
+export interface OrientationCounterpart {
+  id: number
+  filename: string
+  width: number | null
+  height: number | null
+  orientation: PhotoOrientation | null
+}
+
 /** Per-photo public-link visibility. */
 export type PhotoLinkVisibility = 'auto' | 'visible' | 'hidden'
 

@@ -13,6 +13,8 @@ import {
 } from '../api/photos'
 import { getRenderedPhotoUrl } from '../api/photoTransforms'
 import { useTransformedPhotosIndex } from '../composables/useTransformedPhotosIndex'
+import { useScreenOrientation } from '../composables/useScreenOrientation'
+import { pickSideForScreen } from '../utils/orientationVariants'
 import { useAuthStore } from '../stores/auth'
 
 const props = defineProps<{
@@ -31,6 +33,13 @@ const props = defineProps<{
   mapIntro?: RecapMapIntroData | null
   /** "Damals & heute" split-screen rendered as the first slide of person recaps. */
   compareIntro?: RecapCompareData | null
+  /**
+   * Per photo id: the photo on the other side of its format group
+   * (.claude/plans/orientierungs-varianten.md). A single slide shows
+   * whichever side fits the screen; the plan keeps its length, so slide
+   * indices never move.
+   */
+  counterparts?: Record<number, Photo>
 }>()
 
 const emit = defineEmits<{
@@ -121,8 +130,19 @@ function buildSlides(photos: Photo[]): Slide[] {
 
 const MAP_INTRO_DURATION_MS = 5500
 
+// Orientation variants: the sequence as shown — every photo replaced by its
+// counterpart where that one fits the screen and the photo does not. Same
+// rule as the stream card (`pickSideForScreen`); the collage grouping below
+// runs on the result, so a collage never pairs a photo with its own other side.
+const screenOrientation = useScreenOrientation()
+const shownPhotos = computed<Photo[]>(() => {
+  const counterparts = props.counterparts
+  if (!counterparts) return props.photos
+  return props.photos.map((p) => pickSideForScreen(p, counterparts[p.id] ?? null, screenOrientation.value))
+})
+
 const slides = computed<Slide[]>(() => {
-  const plan = buildSlides(props.photos)
+  const plan = buildSlides(shownPhotos.value)
   if (props.compareIntro) {
     plan.unshift({
       key: 'compare-intro',

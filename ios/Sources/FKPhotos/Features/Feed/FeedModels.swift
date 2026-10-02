@@ -16,6 +16,32 @@ struct FeedPhotoItem: Codable, Identifiable, Sendable {
     let likedByMe: Bool
     let commentCount: Int
     let latestComment: FeedCommentPreview?
+    /// The other side of the viewer's format group, when this photo is one
+    /// side of one (.claude/plans/orientierungs-varianten.md). The card shows
+    /// whichever side fits the screen.
+    var counterpart: OrientationCounterpart? = nil
+
+    /// Portrait, landscape or square from the stored dimensions.
+    var orientation: PhotoOrientation? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        let ratio = Double(width) / Double(height)
+        if ratio > 1.1 { return .landscape }
+        if ratio < 0.9 { return .portrait }
+        return .square
+    }
+
+    /// The file the card shows on this screen: the counterpart where it fits
+    /// and the photo does not, else the photo's own.
+    func shownFilename(for screen: ScreenOrientation) -> String {
+        guard let counterpart else { return filename }
+        let shown = SlideshowVariants.pickSide(
+            (filename, orientation),
+            counterpart: (counterpart.filename, counterpart.orientation),
+            screen: screen,
+            orientation: { $0.1 }
+        )
+        return shown.0
+    }
 }
 
 struct FeedAlbumRef: Codable, Sendable {
