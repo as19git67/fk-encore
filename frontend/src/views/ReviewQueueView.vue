@@ -22,6 +22,7 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
+import ToggleButton from 'primevue/togglebutton'
 import Dialog from 'primevue/dialog'
 import { useConfirm } from 'primevue/useconfirm'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
@@ -40,6 +41,8 @@ import {
   acceptPeerConsensus,
   bulkAcceptHighConfidenceAiPicks,
   deleteDuplicatePhotoGroup,
+  keepBestPerOrientation,
+  setGroupOrientationVariants,
   type ReviewQueueGroup,
   type ReviewQueuePhoto,
   type ReviewQueueUserCalibration,
@@ -85,6 +88,26 @@ const confidenceView = useListView({
 const confidenceFilter = confidenceView.value
 const confidence = computed(() => confidenceFilter.value as ConfidenceFilter)
 const confidenceFiltered = computed(() => confidence.value !== 'all')
+
+// "Formatpaare" (.claude/plans/orientierungs-varianten.md): only groups that
+// hold both orientations of one motif. In the URL like the confidence.
+const pairsView = useListView({
+  options: [
+    { label: 'Alle Gruppen', value: 'all' },
+    { label: 'Formatpaare', value: 'pairs' },
+  ],
+  defaultValue: 'all',
+  key: 'pairs',
+})
+const pairsFilter = pairsView.value
+const pairsOnly = computed({
+  get: () => pairsFilter.value === 'pairs',
+  set: (on: boolean) => { pairsFilter.value = on ? 'pairs' : 'all' },
+})
+const anyFiltered = computed(() => confidenceFiltered.value || pairsOnly.value)
+// Groups the user switched off with "Nicht dasselbe Motiv" in this session,
+// so the card can offer the way back without a reload.
+const pairOffIds = ref<Set<number>>(new Set())
 
 const bulkBusy = ref(false)
 const bulkConfirmOpen = ref(false)
@@ -139,6 +162,7 @@ async function loadInitial() {
       offset: 0,
       limit: PAGE_SIZE,
       confidence: confidence.value === 'all' ? undefined : confidence.value,
+      orientationPair: pairsOnly.value || undefined,
     })
     groups.value = res.groups
     total.value = res.total
@@ -161,6 +185,7 @@ async function loadMore() {
       offset: offset.value,
       limit: PAGE_SIZE,
       confidence: confidence.value === 'all' ? undefined : confidence.value,
+      orientationPair: pairsOnly.value || undefined,
     })
     groups.value = [...groups.value, ...res.groups]
     total.value = res.total
@@ -175,11 +200,12 @@ async function loadMore() {
 
 // Covers both the picker and browser back/forward, which rewrite the ref
 // from the URL without emitting a change event.
-watch(confidenceFilter, () => { void loadInitial() })
+watch([confidenceFilter, pairsFilter], () => { void loadInitial() })
 
 function clearConfidenceFilter() {
-  if (!confidenceFiltered.value) return
+  if (!anyFiltered.value) return
   confidenceFilter.value = 'all'
+  pairsFilter.value = 'all'
 }
 
 // The queue has nothing to search or sort; the shared toolbar carries the
@@ -241,6 +267,44 @@ async function performDeleteDuplicates(group: ReviewQueueGroup) {
     next.delete(group.id)
     pendingAcceptIds.value = next
   }
+}
+
+/**
+ * "Bestes je Format behalten": the server keeps the best-rated frame of
+ * every orientation, hides the rest and marks the group reviewed. For a
+ * group with one frame per side this is "Alle behalten" with the statement
+ * "format pair".
+ */
+async function onKeepBestPerOrientation(group: ReviewQueueGroup) {
+  await runAcceptAction(group, () => keepBestPerOrientation(group.id))
+}
+
+/**
+ * "Nicht dasselbe Motiv" (`off`) / "Als Formatpaar behandeln" (`auto`).
+ * No dialog, immediately reversible from the same card. With the
+ * "Formatpaare" chip active an `off` group leaves the list, like it
+ * leaves the server-side filter.
+ */
+async function onSetOrientationVariants(group: ReviewQueueGroup, mode: 'auto' | 'off') {
+  loadError.value = ''
+  try {
+    await setGroupOrientationVariants(group.id, mode)
+  } catch (err: any) {
+    loadError.value = err?.message ?? 'Einstellung konnte nicht gespeichert werden.'
+    return
+  }
+  const next = new Set(pairOffIds.value)
+  if (mode === 'off') next.add(group.id)
+  else next.delete(group.id)
+  pairOffIds.value = next
+  if (mode === 'off' && pairsOnly.value) {
+    groups.value = groups.value.filter((g) => g.id !== group.id)
+    total.value = Math.max(0, total.value - 1)
+    return
+  }
+  groups.value = groups.value.map((g) =>
+    g.id === group.id ? { ...g, orientation_pair: mode === 'auto' } : g,
+  )
 }
 
 /**
@@ -575,6 +639,15 @@ onMounted(() => {
             size="small"
             v-tooltip.bottom="'Sicherheit der KI-Auswahl'"
           />
+          <ToggleButton
+            v-model="pairsOnly"
+            on-label="Formatpaare"
+            off-label="Formatpaare"
+            on-icon="pi pi-sync"
+            off-icon="pi pi-sync"
+            size="small"
+            v-tooltip.bottom="'Nur Gruppen mit Hoch- und Querformat desselben Motivs'"
+          />
         </template>
       </ListToolbar>
     </template>
@@ -616,10 +689,12 @@ onMounted(() => {
       v-else-if="groups.length === 0 && !loadError"
       icon="pi pi-check-circle"
       title="Keine offenen Gruppen"
-      :message="confidenceFiltered
-        ? 'Für diese Sicherheitsstufe ist nichts mehr zu prüfen.'
-        : 'Alle ähnlichen Gruppen sind geprüft.'"
-      :filtered="confidenceFiltered"
+      :message="pairsOnly
+        ? 'Kein Formatpaar wartet auf eine Entscheidung.'
+        : confidenceFiltered
+          ? 'Für diese Sicherheitsstufe ist nichts mehr zu prüfen.'
+          : 'Alle ähnlichen Gruppen sind geprüft.'"
+      :filtered="anyFiltered"
       @clear-filters="clearConfidenceFilter"
     >
       <template #action>
@@ -637,6 +712,12 @@ onMounted(() => {
         <div class="rq-card-meta">
           <span v-if="group.duplicate_candidate" class="rq-duplicate-badge">
             <i class="pi pi-copy" /> Sehr wahrscheinliches Duplikat
+          </span>
+          <!-- Format pair (.claude/plans/orientierungs-varianten.md): the
+               group holds the same motif portrait and landscape. The AI
+               keeps both on purpose; this tag says why. -->
+          <span v-if="group.orientation_pair" class="rq-pair-badge">
+            <i class="pi pi-sync" /> Hoch + Quer
           </span>
           <span :class="confidenceClass(group.ai_picked_confidence)">
             {{ confidenceLabel(group.ai_picked_confidence) }}
@@ -812,6 +893,16 @@ onMounted(() => {
             @click="askDeleteDuplicates(group)"
           />
           <Button
+            v-if="group.orientation_pair"
+            icon="pi pi-sync"
+            outlined
+            severity="success"
+            label="Bestes je Format behalten"
+            v-tooltip.top="'Je Hoch- und Querformat das bestbewertete Foto behalten, den Rest ausblenden'"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="onKeepBestPerOrientation(group)"
+          />
+          <Button
             icon="pi pi-images"
             outlined
             severity="success"
@@ -819,6 +910,25 @@ onMounted(() => {
             v-tooltip.top="'Gruppe ohne Ausblenden als reviewed markieren'"
             :disabled="pendingAcceptIds.has(group.id)"
             @click="onKeepAll(group)"
+          />
+          <Button
+            v-if="group.orientation_pair"
+            icon="pi pi-times-circle"
+            text
+            severity="secondary"
+            label="Nicht dasselbe Motiv"
+            v-tooltip.top="'Hoch- und Querformat nicht mehr als Formatpaar zusammenfassen'"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="onSetOrientationVariants(group, 'off')"
+          />
+          <Button
+            v-else-if="pairOffIds.has(group.id)"
+            icon="pi pi-sync"
+            text
+            severity="secondary"
+            label="Als Formatpaar behandeln"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="onSetOrientationVariants(group, 'auto')"
           />
           <Button
             v-if="hasAnyPeerSignal(group)"
@@ -1051,6 +1161,13 @@ onMounted(() => {
   align-items: center;
   gap: 0.35rem;
   color: var(--p-orange-700);
+  font-weight: 700;
+}
+.rq-pair-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--p-primary-color);
   font-weight: 700;
 }
 .rq-conf {

@@ -1,4 +1,5 @@
 import { API_BASE_URL, apiFetch, withPhotoAccessParams } from './client'
+import type { OrientationVariants } from './gallery'
 
 export type CurationStatus = 'visible' | 'hidden' | 'favorite'
 
@@ -985,6 +986,13 @@ export interface PhotoGroup {
   ai_picked_photo_ids?: number[]
   ai_picked_confidence?: 'high' | 'medium' | 'low'
   ai_picked_at?: string
+  /**
+   * Portrait/landscape format group setting
+   * (.claude/plans/orientierungs-varianten.md). Absent = 'auto'.
+   */
+  orientation_variants?: 'auto' | 'off'
+  /** Visible members per side while the group forms a format group. */
+  variants?: OrientationVariants
 }
 
 export function findPhotoGroups() {
@@ -1102,6 +1110,17 @@ export function acceptPeerConsensus(id: number) {
  * hides the rest, marks the group reviewed. Used by the One-Click-Pick
  * UI in the review queue for 2- and 3-photo groups.
  */
+/**
+ * "Bestes je Format behalten": keep the best-rated photo of every
+ * orientation in the group, hide the rest, mark the group reviewed.
+ */
+export function keepBestPerOrientation(groupId: number) {
+  return apiFetch<{ success: boolean; hidden_count: number; kept_photo_ids: number[] }>(
+    `/photos/groups/${groupId}/keep-best-per-orientation`,
+    { method: 'POST' },
+  )
+}
+
 export function pickPhotosInGroup(groupId: number, photoIds: number[]) {
   return apiFetch<{ success: boolean; hidden_count: number }>(
     `/photos/groups/${groupId}/pick-photos`,
@@ -1147,6 +1166,9 @@ export interface ReviewQueuePhoto {
   taken_at: string | null
   curation: 'visible' | 'hidden' | 'favorite'
   ai_picked: boolean
+  /** Pixel dimensions as written by the face scan; null until scanned. */
+  width: number | null
+  height: number | null
   /** AI quality score (0..1), or null when the photo hasn't been scored yet. */
   ai_quality_score: number | null
   /**
@@ -1173,6 +1195,12 @@ export interface ReviewQueueGroup {
   duplicate_recommended_photo_id: number | null
   duplicate_deletable_count: number
   duplicate_deletable_bytes: number
+  /**
+   * The group holds both orientations of one motif
+   * (.claude/plans/orientierungs-varianten.md): tag "Hoch + Quer", action
+   * "Bestes je Format behalten", chip "Formatpaare".
+   */
+  orientation_pair: boolean
   photos: ReviewQueuePhoto[]
 }
 
@@ -1196,11 +1224,14 @@ export function getReviewQueue(opts: {
   offset?: number
   limit?: number
   confidence?: 'high' | 'medium' | 'low'
+  /** Only groups that hold both orientations of one motif. */
+  orientationPair?: boolean
 } = {}) {
   const sp = new URLSearchParams()
   if (opts.offset !== undefined) sp.set('offset', String(opts.offset))
   if (opts.limit !== undefined) sp.set('limit', String(opts.limit))
   if (opts.confidence) sp.set('confidence', opts.confidence)
+  if (opts.orientationPair) sp.set('orientationPair', 'true')
   const qs = sp.toString()
   return apiFetch<ReviewQueueResponse>(
     `/photos/groups/review-queue${qs ? `?${qs}` : ''}`,

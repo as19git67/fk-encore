@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
+  allowedDuel,
+  bestPerSide,
   counterpartIds,
+  hasBothOrientations,
+  orientationFromDimensions,
   nextIndexSkippingCounterparts,
   isCounterpartOf,
   otherSide,
@@ -65,5 +69,32 @@ describe('orientationVariants helpers', () => {
     expect(await nextIndexSkippingCounterparts(list[1]!, 0, -1, list.length, load)).toBeNull()
     // Without a format group nothing is skipped and nothing is loaded.
     expect(await nextIndexSkippingCounterparts(null, 1, 1, list.length, load)).toBe(1)
+  })
+
+  it('classifies dimensions like the server does', () => {
+    expect(orientationFromDimensions(4000, 3000)).toBe('landscape')
+    expect(orientationFromDimensions(3000, 4000)).toBe('portrait')
+    expect(orientationFromDimensions(3000, 3000)).toBe('square')
+    expect(orientationFromDimensions(null, 3000)).toBeNull()
+  })
+
+  it('knows when a group holds both sides and which duels a format pair allows', () => {
+    expect(hasBothOrientations([{ orientation: 'portrait' }, { orientation: 'landscape' }])).toBe(true)
+    expect(hasBothOrientations([{ orientation: 'portrait' }, { orientation: 'square' }])).toBe(false)
+
+    expect(allowedDuel('portrait', 'landscape', true)).toBe(false)
+    expect(allowedDuel('portrait', 'landscape', false)).toBe(true)
+    expect(allowedDuel('portrait', 'portrait', true)).toBe(true)
+    expect(allowedDuel('portrait', 'square', true)).toBe(true)
+    expect(allowedDuel('portrait', null, true)).toBe(true)
+  })
+
+  it('keeps the best of each side', () => {
+    expect(bestPerSide([
+      { id: 1, orientation: 'portrait', score: 1 },
+      { id: 2, orientation: 'portrait', score: 3 },
+      { id: 3, orientation: 'landscape', score: -1 },
+      { id: 4, orientation: 'square', score: 9 },
+    ]).sort()).toEqual([2, 3])
   })
 })

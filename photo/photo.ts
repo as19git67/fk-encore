@@ -1940,6 +1940,7 @@ import type {
 } from "../db/types";
 import {
   acceptAiPickLogic,
+  keepBestPerOrientationLogic,
   acceptPeerConsensusLogic,
   bulkAcceptHighConfidencePicksLogic,
   exportCalibrationDatasetLogic,
@@ -2214,6 +2215,22 @@ export const pickPhotosInGroup = api(
 );
 
 /**
+ * "Bestes je Format behalten" (.claude/plans/orientierungs-varianten.md):
+ * keep the best-rated photo of every orientation in the group, hide the rest
+ * and mark the group reviewed. Same gate as the other review actions.
+ */
+export const keepBestPerOrientation = api(
+  { expose: true, method: "POST", path: "/photos/groups/:id/keep-best-per-orientation", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean; hidden_count: number; kept_photo_ids: number[] }> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.delete");
+    return await keepBestPerOrientationLogic(userId, id);
+  }
+);
+
+/**
  * "Konsens übernehmen" — let the requester adopt the majority of their
  * album-peers' curation decisions for one similar-photo group. See
  * acceptPeerConsensusLogic for the consensus rule + privacy boundary.
@@ -2314,10 +2331,13 @@ export const listReviewQueue = api(
     offset,
     limit,
     confidence,
+    orientationPair,
   }: {
     offset?: Query<number>;
     limit?: Query<number>;
     confidence?: Query<string>;
+    /** true → only format pairs (portrait + landscape of one motif). */
+    orientationPair?: Query<boolean>;
   }): Promise<ReviewQueueResponse> => {
     checkModule();
     const userId = getUserId();
@@ -2331,6 +2351,7 @@ export const listReviewQueue = api(
       offset: typeof offset === "number" ? offset : undefined,
       limit: typeof limit === "number" ? limit : undefined,
       confidence: conf,
+      orientationPair: orientationPair === true,
     });
   },
 );

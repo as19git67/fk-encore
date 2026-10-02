@@ -11,6 +11,7 @@ import {
 } from "../db/schema";
 import {
   VARIANT_TIME_WINDOW_SECONDS,
+  bestPerOrientation,
   computeOrientationVariants,
   getCollapseOrientationVariantsLogic,
   photoOrientation,
@@ -19,7 +20,7 @@ import {
 } from "./orientation-variants";
 import { listGalleryGridLogic, listGalleryIdsLogic } from "./gallery-grid.service";
 import { listPhotoGroupsLogic, listPhotosLogic } from "./photo.service";
-import { listReviewQueueLogic } from "./group-auto-pick.service";
+import { keepBestPerOrientationLogic, listReviewQueueLogic } from "./group-auto-pick.service";
 
 // ── Pure rule ──────────────────────────────────────────────────────────────
 
@@ -112,6 +113,34 @@ describe("computeOrientationVariants", () => {
 
   it("is switched off per group", () => {
     expect(computeOrientationVariants([member(1, "portrait", 0), member(2, "landscape", 1)], "off")).toBeNull();
+  });
+});
+
+describe("bestPerOrientation", () => {
+  const m = (id: number, o: "portrait" | "landscape" | "square" | "unknown", score: number | null, hidden = false) => ({
+    photo_id: id,
+    ...(o === "portrait" ? { width: 3000, height: 4000 }
+      : o === "landscape" ? { width: 4000, height: 3000 }
+      : o === "square" ? { width: 3000, height: 3000 }
+      : { width: null, height: null }),
+    ai_quality_score: score,
+    hidden,
+  });
+
+  it("keeps the best-rated frame of every orientation present", () => {
+    expect(bestPerOrientation([
+      m(1, "portrait", 0.5), m(2, "portrait", 0.8), m(3, "landscape", 0.3), m(4, "landscape", 0.9),
+    ]).sort()).toEqual([2, 4]);
+  });
+
+  it("keeps one frame per orientation as it is, and never drops what it cannot see", () => {
+    expect(bestPerOrientation([m(1, "portrait", 0.2), m(2, "landscape", 0.1)]).sort()).toEqual([1, 2]);
+    expect(bestPerOrientation([m(1, "portrait", 0.9), m(2, "square", null), m(3, "unknown", null)]).sort()).toEqual([1, 2, 3]);
+  });
+
+  it("falls back to member order among unscored frames and skips hidden ones", () => {
+    expect(bestPerOrientation([m(1, "portrait", null), m(2, "portrait", null)])).toEqual([1]);
+    expect(bestPerOrientation([m(1, "portrait", 0.9, true), m(2, "portrait", 0.1)])).toEqual([2]);
   });
 });
 
@@ -347,5 +376,50 @@ describe("orientation variants in the gallery grid", () => {
     expect([...pairFlags.values()].sort()).toEqual([false, true]);
     const pairGroup = queue.groups.find((g) => g.orientation_pair)!;
     expect(pairGroup.photos.map((p) => p.id).sort((a, b) => a - b)).toEqual([portrait, landscape].sort((a, b) => a - b));
+  });
+
+  it("keeps the best frame per orientation, hides the rest and marks the group reviewed", async () => {
+    const pA = await makePhoto(u, "portrait", 0);
+    const pB = await makePhoto(u, "portrait", 5);
+    const lA = await makePhoto(u, "landscape", 10);
+    await db.update(photos).set({ ai_quality_score: 0.4 }).where(eq(photos.id, pA));
+    await db.update(photos).set({ ai_quality_score: 0.9 }).where(eq(photos.id, pB));
+    const groupId = await makeGroup(u, pA, [pA, pB, lA]);
+
+    const res = await keepBestPerOrientationLogic(u, groupId);
+    expect(res.success).toBe(true);
+    expect(res.kept_photo_ids.sort((a, b) => a - b)).toEqual([pB, lA].sort((a, b) => a - b));
+    expect(res.hidden_count).toBe(1);
+    const hidden = await db.select({ status: photoCuration.status })
+      .from(photoCuration).where(eq(photoCuration.photo_id, pA));
+    expect(hidden[0]?.status).toBe("hidden");
+    const g = await db.select({ reviewed_at: photoGroups.reviewed_at }).from(photoGroups).where(eq(photoGroups.id, groupId));
+    expect(g[0]?.reviewed_at).not.toBeNull();
+
+    // Somebody else's group is not ours to decide.
+    const other = await makeUser("other@test.com");
+    expect((await keepBestPerOrientationLogic(other, groupId)).success).toBe(false);
+  });
+
+  it("filters the review queue down to format pairs", async () => {
+    const portrait = await makePhoto(u, "portrait", 0);
+    const landscape = await makePhoto(u, "landscape", 10);
+    const pairGroup = await makeGroup(u, portrait, [portrait, landscape]);
+    const lonerA = await makePhoto(u, "landscape", 6000);
+    const lonerB = await makePhoto(u, "landscape", 6010);
+    await makeGroup(u, lonerA, [lonerA, lonerB]);
+    const farP = await makePhoto(u, "portrait", 9000);
+    const farL = await makePhoto(u, "landscape", 9000 + VARIANT_TIME_WINDOW_SECONDS + 1);
+    await makeGroup(u, farP, [farP, farL]);
+
+    expect((await listReviewQueueLogic(u)).total).toBe(3);
+    const pairs = await listReviewQueueLogic(u, { orientationPair: true });
+    expect(pairs.total).toBe(1);
+    expect(pairs.groups.map((g) => g.id)).toEqual([pairGroup]);
+    expect(pairs.groups[0]!.orientation_pair).toBe(true);
+
+    // "Nicht dasselbe Motiv" takes the group out of the filter.
+    await setGroupOrientationVariantsLogic(u, pairGroup, "off");
+    expect((await listReviewQueueLogic(u, { orientationPair: true })).total).toBe(0);
   });
 });

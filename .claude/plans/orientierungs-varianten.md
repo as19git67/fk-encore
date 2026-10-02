@@ -1,6 +1,6 @@
 # Orientierungs-Varianten: Hoch- und Querformat desselben Motivs
 
-Status: **In Umsetzung** — Etappen 1 (Backend) und 2 (Web Raster + Vollbild) umgesetzt, Etappen 3–6 offen.
+Status: **In Umsetzung** — Etappen 1 (Backend), 2 (Web Raster + Vollbild) und 3 (Web Review) umgesetzt, Etappen 4–6 offen.
 
 ## Umsetzungsstand
 
@@ -46,7 +46,23 @@ Status: **In Umsetzung** — Etappen 1 (Backend) und 2 (Web Raster + Vollbild) u
   beide Seiten, Auswahlmodus) und zwei Formatpaar-Stories im
   `FullscreenOverlay` mit `testViewport`. Tests: `useScreenOrientation`,
   `useVariantCursor`, `orientationVariants`.
-- Etappen 3–6 offen; die album-gebundene Liste läuft über `/gallery/grid`
+- **Etappe 3 (Web Review) — umgesetzt.** Backend:
+  `POST /photos/groups/:id/keep-best-per-orientation` (`bestPerOrientation`
+  in `orientation-variants.ts`, läuft über `acceptAiPickLogic`, Favoriten
+  bleiben geschützt), Review-Queue-Filter `orientationPair=true` über das
+  SQL-Prädikat `groupIsOrientationPairSql` (ohne den Nutzer-Schalter: ob zwei
+  Bilder ein Paar sind, ist eine Eigenschaft der Gruppe). Web:
+  `ReviewQueueView` mit Chip „Formatpaare" (`pairs` in der URL), Tag
+  „Hoch + Quer", Knopf „Bestes je Format behalten" und „Nicht dasselbe
+  Motiv" / „Als Formatpaar behandeln" direkt an der Karte.
+  `PhotoCompareView`: in einem Formatpaar duellieren sich nur Fotos derselben
+  Orientierung (`allowedDuel`), das beste Foto je Seite wird nie zum
+  Ausblenden vorgeschlagen (`bestPerSide`), und das Abschlussraster trägt den
+  Hinweis „bleiben als Formatpaar erhalten" mit dem Schalter „Nicht dasselbe
+  Motiv". `ReviewQueuePhoto.width/height` sind im Frontend-Typ deklariert.
+  Stories: Review-Queue mit Formatpaar und mit aktivem Chip, Vergleich als
+  Formatpaar.
+- Etappen 4–6 offen; die album-gebundene Liste läuft über `/gallery/grid`
   mit `albumScopeId` und ist damit abgedeckt, die anonyme Link-Ansicht hat
   keinen Nutzer (und damit keine Gruppen) und bleibt außen vor. Die Diashow
   im Web läuft über dasselbe `cursorPhoto`, der Drehungswechsel greift also

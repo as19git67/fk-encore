@@ -193,6 +193,69 @@ export function orientationVariantSuppressedSql(
   )`;
 }
 
+/**
+ * SQL predicate on `photo_groups` (alias-free, for the review queue's WHERE):
+ * the group currently forms a format group for `userId` — a visible portrait
+ * and a visible landscape member taken within the window, and not switched
+ * off. Mirrors `computeOrientationVariants` so the "Formatpaare" filter and
+ * the `orientation_pair` flag on the cards agree. The user's global switch is
+ * left out on purpose: whether two frames are a pair is a fact about the
+ * group, not about how the gallery shows it.
+ */
+export function groupIsOrientationPairSql(userId: number): SQL {
+  return sql`(
+    ${photoGroups.orientation_variants} IS DISTINCT FROM 'off'
+    AND EXISTS (
+      SELECT 1
+      FROM ${photoGroupMembers} pgm_p
+      JOIN ${photos} p_p ON p_p.id = pgm_p.photo_id
+      LEFT JOIN ${photoCuration} pc_p
+        ON pc_p.photo_id = p_p.id AND pc_p.user_id = ${userId}
+      JOIN ${photoGroupMembers} pgm_l ON pgm_l.group_id = pgm_p.group_id
+      JOIN ${photos} p_l ON p_l.id = pgm_l.photo_id
+      LEFT JOIN ${photoCuration} pc_l
+        ON pc_l.photo_id = p_l.id AND pc_l.user_id = ${userId}
+      WHERE pgm_p.group_id = ${photoGroups.id}
+        AND COALESCE(pc_p.status, 'visible') <> 'hidden'
+        AND COALESCE(pc_l.status, 'visible') <> 'hidden'
+        AND ${orientationSql(sql`p_p.width`, sql`p_p.height`, "portrait")}
+        AND ${orientationSql(sql`p_l.width`, sql`p_l.height`, "landscape")}
+        AND p_p.taken_at IS NOT NULL AND p_l.taken_at IS NOT NULL
+        AND ABS(EXTRACT(EPOCH FROM (p_l.taken_at - p_p.taken_at))) <= ${VARIANT_TIME_WINDOW_SECONDS}
+    )
+  )`;
+}
+
+/**
+ * "Bestes je Format behalten": of the visible members, the best-rated photo
+ * of every orientation that is present (portrait, landscape, square; frames
+ * without dimensions count as their own bucket so they are never thrown
+ * away by a rule that cannot see them). Ties and unscored photos fall back
+ * to the order the members came in, so pass them by similarity rank.
+ *
+ * For a group with exactly one frame per orientation this keeps everything —
+ * the same result as "Alle behalten", only with the statement "format pair".
+ */
+export function bestPerOrientation(
+  members: Array<{
+    photo_id: number;
+    width: number | null;
+    height: number | null;
+    ai_quality_score: number | null;
+    hidden?: boolean;
+  }>,
+): number[] {
+  const best = new Map<string, { photo_id: number; score: number }>();
+  for (const m of members) {
+    if (m.hidden) continue;
+    const key = photoOrientation(m.width, m.height) ?? "unknown";
+    const score = m.ai_quality_score ?? -1;
+    const cur = best.get(key);
+    if (!cur || score > cur.score) best.set(key, { photo_id: m.photo_id, score });
+  }
+  return [...best.values()].map((b) => b.photo_id);
+}
+
 // ── Settings ───────────────────────────────────────────────────────────────
 
 export interface GroupOrientationVariantsResult {

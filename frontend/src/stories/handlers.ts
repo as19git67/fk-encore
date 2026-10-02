@@ -172,6 +172,18 @@ export const defaultHandlers = [
   http.post('/api/photos/groups/:id/review', () =>
     HttpResponse.json({ success: true }),
   ),
+  http.post('/api/photos/groups/:id/keep-best-per-orientation', () =>
+    HttpResponse.json({ success: true, hidden_count: 1, kept_photo_ids: [6, 8] }),
+  ),
+  http.patch('/api/photos/groups/:id/variants', async ({ request }) => {
+    const body = (await request.json()) as { mode: 'auto' | 'off' }
+    return HttpResponse.json({ success: true, mode: body.mode })
+  }),
+  http.get('/api/photos/groups/orientation-variants', () => HttpResponse.json({ enabled: true })),
+  http.patch('/api/photos/groups/orientation-variants', async ({ request }) => {
+    const body = (await request.json()) as { enabled: boolean }
+    return HttpResponse.json({ enabled: body.enabled })
+  }),
   http.post('/api/photos/search', () =>
     HttpResponse.json({ photos: [] }),
   ),

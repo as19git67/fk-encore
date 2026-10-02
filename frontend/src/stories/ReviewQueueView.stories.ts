@@ -27,20 +27,24 @@ const QUEUE: ReviewQueueResponse = {
       duplicate_recommended_photo_id: null,
       duplicate_deletable_count: 0,
       duplicate_deletable_bytes: 0,
+      orientation_pair: false,
       photos: [
         {
           id: 1, filename: 'castle.jpg', taken_at: '2025-04-01T10:00:00.000Z',
           curation: 'visible', ai_picked: true, ai_quality_score: 0.88,
+          width: 4000, height: 3000,
           peer_curation: { hidden: 0, favorite: 1 },
         },
         {
           id: 2, filename: 'fish.jpg', taken_at: '2025-04-01T10:00:02.000Z',
           curation: 'visible', ai_picked: false, ai_quality_score: 0.67,
+          width: 4000, height: 3000,
           peer_curation: { hidden: 0, favorite: 0 },
         },
         {
           id: 3, filename: 'museum.jpg', taken_at: '2025-04-01T10:00:04.000Z',
           curation: 'visible', ai_picked: false, ai_quality_score: 0.61,
+          width: 4000, height: 3000,
           peer_curation: { hidden: 1, favorite: 0 },
         },
       ],
@@ -56,21 +60,67 @@ const QUEUE: ReviewQueueResponse = {
       duplicate_recommended_photo_id: 4,
       duplicate_deletable_count: 1,
       duplicate_deletable_bytes: 2_400_000,
+      orientation_pair: false,
       photos: [
         {
           id: 4, filename: 'seagull.jpg', taken_at: '2025-04-02T09:00:00.000Z',
           curation: 'visible', ai_picked: true, ai_quality_score: 0.55,
+          width: 4000, height: 3000,
           peer_curation: { hidden: 0, favorite: 0 },
         },
         {
           id: 5, filename: 'steak.jpg', taken_at: '2025-04-02T09:00:01.000Z',
           curation: 'visible', ai_picked: false, ai_quality_score: 0.53,
+          width: 4000, height: 3000,
           peer_curation: { hidden: 0, favorite: 0 },
         },
       ],
     },
   ],
   user_calibration: null,
+}
+
+// A format pair (.claude/plans/orientierungs-varianten.md): the same motif
+// portrait and landscape. The card tags it "Hoch + Quer" and offers
+// "Bestes je Format behalten" and "Nicht dasselbe Motiv".
+const PAIR_GROUP: ReviewQueueResponse['groups'][number] = {
+  id: 3,
+  cover_photo_id: 6,
+  member_count: 3,
+  ai_picked_photo_ids: [6, 8],
+  ai_picked_confidence: 'medium',
+  runner_up_delta: 0.06,
+  duplicate_candidate: false,
+  duplicate_recommended_photo_id: null,
+  duplicate_deletable_count: 0,
+  duplicate_deletable_bytes: 0,
+  orientation_pair: true,
+  photos: [
+    {
+      id: 6, filename: 'castle.jpg', taken_at: '2025-04-03T11:00:00.000Z',
+      curation: 'visible', ai_picked: true, ai_quality_score: 0.81,
+      width: 4000, height: 3000,
+      peer_curation: { hidden: 0, favorite: 0 },
+    },
+    {
+      id: 7, filename: 'museum.jpg', taken_at: '2025-04-03T11:00:12.000Z',
+      curation: 'visible', ai_picked: false, ai_quality_score: 0.64,
+      width: 3000, height: 4000,
+      peer_curation: { hidden: 0, favorite: 0 },
+    },
+    {
+      id: 8, filename: 'fish.jpg', taken_at: '2025-04-03T11:00:20.000Z',
+      curation: 'visible', ai_picked: true, ai_quality_score: 0.77,
+      width: 3000, height: 4000,
+      peer_curation: { hidden: 0, favorite: 0 },
+    },
+  ],
+}
+
+const QUEUE_WITH_PAIR: ReviewQueueResponse = {
+  ...QUEUE,
+  total: 3,
+  groups: [PAIR_GROUP, ...QUEUE.groups],
 }
 
 const queueHandlers = [
@@ -89,6 +139,38 @@ export default meta
 type Story = StoryObj<typeof ReviewQueueView>
 
 export const MitGruppen: Story = { name: 'Mit Gruppen' }
+
+export const MitFormatpaar: Story = {
+  name: 'Mit Formatpaar',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/photos/groups/review-queue', ({ request }) => {
+          const pairsOnly = new URL(request.url).searchParams.get('orientationPair') === 'true'
+          return HttpResponse.json(
+            pairsOnly ? { ...QUEUE_WITH_PAIR, total: 1, groups: [PAIR_GROUP] } : QUEUE_WITH_PAIR,
+          )
+        }),
+        ...queueHandlers,
+      ],
+    },
+  },
+}
+
+export const NurFormatpaare: Story = {
+  name: 'Chip „Formatpaare"',
+  parameters: {
+    route: '/fotos/review-queue?pairs=pairs',
+    msw: {
+      handlers: [
+        http.get('/api/photos/groups/review-queue', () =>
+          HttpResponse.json({ ...QUEUE_WITH_PAIR, total: 1, groups: [PAIR_GROUP] }),
+        ),
+        ...queueHandlers,
+      ],
+    },
+  },
+}
 
 export const NichtsZuEntscheiden: Story = {
   name: 'Nichts zu entscheiden',

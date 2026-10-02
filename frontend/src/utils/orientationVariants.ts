@@ -113,3 +113,64 @@ export async function nextIndexSkippingCounterparts(
   }
   return null
 }
+
+/**
+ * Orientation from pixel dimensions, the same bands the server uses
+ * (`photoOrientation` in photo/orientation-variants.ts). Null while the
+ * dimensions are unknown.
+ */
+export function orientationFromDimensions(
+  width: number | null | undefined,
+  height: number | null | undefined,
+): PhotoOrientation | null {
+  if (!width || !height || width <= 0 || height <= 0) return null
+  const ratio = width / height
+  if (ratio > 1.1) return 'landscape'
+  if (ratio < 0.9) return 'portrait'
+  return 'square'
+}
+
+/** True when the photos hold at least one portrait and one landscape frame. */
+export function hasBothOrientations(
+  photos: Array<{ orientation?: PhotoOrientation | null }>,
+): boolean {
+  let portrait = false
+  let landscape = false
+  for (const p of photos) {
+    if (p.orientation === 'portrait') portrait = true
+    else if (p.orientation === 'landscape') landscape = true
+  }
+  return portrait && landscape
+}
+
+/**
+ * Whether two photos may face each other in a compare duel. In a format
+ * pair, portrait against landscape is the wrong question — those duels are
+ * skipped and the winners of both sides survive together. Squares and
+ * unmeasured frames duel anyone.
+ */
+export function allowedDuel(
+  a: PhotoOrientation | null | undefined,
+  b: PhotoOrientation | null | undefined,
+  formatPair: boolean,
+): boolean {
+  if (!formatPair) return true
+  if (!a || !b || a === 'square' || b === 'square') return true
+  return a === b
+}
+
+/**
+ * The best-scored photo of each side (portrait, landscape) — the two that a
+ * format pair keeps whatever the duel scores say. Ties go to the first.
+ */
+export function bestPerSide(
+  photos: Array<{ id: number; orientation?: PhotoOrientation | null; score: number }>,
+): number[] {
+  const best = new Map<'portrait' | 'landscape', { id: number; score: number }>()
+  for (const p of photos) {
+    if (p.orientation !== 'portrait' && p.orientation !== 'landscape') continue
+    const cur = best.get(p.orientation)
+    if (!cur || p.score > cur.score) best.set(p.orientation, { id: p.id, score: p.score })
+  }
+  return [...best.values()].map((b) => b.id)
+}
