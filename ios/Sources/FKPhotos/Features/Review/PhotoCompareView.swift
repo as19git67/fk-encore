@@ -70,7 +70,10 @@ struct PhotoCompareView: View {
     /// the same button in different orientations.
     @State private var orientationIsPortrait = true
 
-    init(photos: [ReviewQueuePhoto], onCommit: @escaping ([Int]) -> Void) {
+    /// - Parameter formatPair: the group is the same motif portrait and
+    ///   landscape (.claude/plans/orientierungs-varianten.md). Then the two
+    ///   shapes never face each other; each is thinned on its own.
+    init(photos: [ReviewQueuePhoto], formatPair: Bool = false, onCommit: @escaping ([Int]) -> Void) {
         self.photos = photos
         self.onCommit = onCommit
         // The AI's ratings are a starting position, not a verdict: they only
@@ -89,7 +92,8 @@ struct PhotoCompareView: View {
                 // on its own rather than the group as a whole.
                 orientations: Dictionary(
                     uniqueKeysWithValues: photos.map { ($0.id, $0.orientation) }
-                )
+                ),
+                formatPair: formatPair
             )
         )
     }

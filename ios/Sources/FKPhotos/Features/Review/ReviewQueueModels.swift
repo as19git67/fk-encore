@@ -111,8 +111,22 @@ struct ReviewQueueGroup: Codable, Identifiable, Sendable, Equatable {
     let duplicate_recommended_photo_id: Int?
     let duplicate_deletable_count: Int?
     let photos: [ReviewQueuePhoto]
+    /// The group holds the same motif portrait and landscape
+    /// (.claude/plans/orientierungs-varianten.md). Optional for decode
+    /// resilience like the fields above; read it through `isOrientationPair`.
+    var orientation_pair: Bool? = nil
 
     var pickedPhotoIds: [Int] { ai_picked_photo_ids ?? [] }
+
+    /// Tag „Hoch + Quer", swipe ↓ „Bestes je Format", „Nicht dasselbe Motiv".
+    var isOrientationPair: Bool { orientation_pair ?? false }
+
+    /// Portrait and landscape are both in the group — the precondition for
+    /// offering „Als Formatpaar behandeln" after a „Nicht dasselbe Motiv".
+    var hasBothOrientations: Bool {
+        let shapes = Set(photos.map(\.orientation))
+        return shapes.contains(.portrait) && shapes.contains(.landscape)
+    }
 
     var confidence: ReviewConfidence? {
         ai_picked_confidence.flatMap(ReviewConfidence.init(rawValue:))
@@ -166,14 +180,19 @@ struct ReviewDecision: Equatable, Sendable {
         case favoriteAndAccept
         /// Adopt the majority of the album peers' decisions.
         case peerConsensus
+        /// Keep the best-rated photo of every orientation, hide the rest
+        /// (.claude/plans/orientierungs-varianten.md). The server decides
+        /// which those are.
+        case keepBestPerOrientation
 
         var label: String {
             switch self {
-            case .acceptAiPick:      return "Vorschlag übernommen"
-            case .keepAll:           return "Alle behalten"
-            case .pick:              return "Foto ausgewählt"
-            case .favoriteAndAccept: return "Favorisiert & übernommen"
-            case .peerConsensus:     return "Konsens übernommen"
+            case .acceptAiPick:           return "Vorschlag übernommen"
+            case .keepAll:                return "Alle behalten"
+            case .pick:                   return "Foto ausgewählt"
+            case .favoriteAndAccept:      return "Favorisiert & übernommen"
+            case .peerConsensus:          return "Konsens übernommen"
+            case .keepBestPerOrientation: return "Bestes je Format behalten"
             }
         }
     }
@@ -203,7 +222,7 @@ struct ReviewDecision: Equatable, Sendable {
         switch kind {
         case .acceptAiPick, .favoriteAndAccept: return group.pickedPhotoIds
         case .pick(let ids):                    return ids
-        case .keepAll, .peerConsensus:          return []
+        case .keepAll, .peerConsensus, .keepBestPerOrientation: return []
         }
     }
 }
@@ -265,6 +284,13 @@ struct ReviewQueueState: Equatable, Sendable {
         self.total = total
     }
 
+    /// „Nicht dasselbe Motiv" / „Als Formatpaar behandeln" on a loaded group:
+    /// the card follows the server's answer without a reload.
+    mutating func setOrientationPair(_ isPair: Bool, groupId: Int) {
+        guard let i = groups.firstIndex(where: { $0.id == groupId }) else { return }
+        groups[i].orientation_pair = isPair
+    }
+
     /// Records a decision for the current card and advances.
     ///
     /// Returns the *previous* pending decision, which the caller must now send
@@ -311,6 +337,10 @@ enum ReviewSwipe: Equatable, Sendable {
     /// — it resolves the group like `keepPick` does, which is why the label
     /// spells both halves out.
     case favorite
+    /// ↓ down: keep the best photo of every orientation, hide the rest. Only
+    /// offered on a format pair (.claude/plans/orientierungs-varianten.md) —
+    /// right, left and up were taken, and down is the one direction left.
+    case bestPerFormat
 
     /// Minimum travel before a drag counts as a decision.
     static let threshold: CGFloat = 96
@@ -318,13 +348,21 @@ enum ReviewSwipe: Equatable, Sendable {
     /// Resolves a finished drag into a decision, or nil when the finger did not
     /// travel far enough. Horizontal movement wins ties so a slightly diagonal
     /// left/right flick doesn't register as "favorite".
-    static func resolve(translationWidth dx: CGFloat, translationHeight dy: CGFloat) -> ReviewSwipe? {
+    ///
+    /// - Parameter allowsDown: the group is a format pair, so a downward flick
+    ///   is „Bestes je Format". Otherwise down stays what it was: nothing.
+    static func resolve(
+        translationWidth dx: CGFloat,
+        translationHeight dy: CGFloat,
+        allowsDown: Bool = false
+    ) -> ReviewSwipe? {
         if abs(dx) >= abs(dy) {
             guard abs(dx) >= threshold else { return nil }
             return dx > 0 ? .keepPick : .keepAll
         }
-        guard -dy >= threshold else { return nil }
-        return .favorite
+        if -dy >= threshold { return .favorite }
+        if dy >= threshold, allowsDown { return .bestPerFormat }
+        return nil
     }
 
     /// The decision a swipe produces for a concrete group.
@@ -341,14 +379,19 @@ enum ReviewSwipe: Equatable, Sendable {
             return group.hasAiPick ? .acceptAiPick : .keepAll
         case .favorite:
             return group.hasAiPick ? .favoriteAndAccept : .keepAll
+        case .bestPerFormat:
+            // Without a second shape there is no „per format" to keep; the
+            // honest reading is „keep everything", never a hidden photo.
+            return group.isOrientationPair ? .keepBestPerOrientation : .keepAll
         }
     }
 
     var label: String {
         switch self {
-        case .keepPick:  return "Übernehmen"
-        case .keepAll:   return "Alle behalten"
-        case .favorite:  return "Favorit & übernehmen"
+        case .keepPick:      return "Übernehmen"
+        case .keepAll:       return "Alle behalten"
+        case .favorite:      return "Favorit & übernehmen"
+        case .bestPerFormat: return "Bestes je Format"
         }
     }
 
@@ -359,14 +402,16 @@ enum ReviewSwipe: Equatable, Sendable {
         case .keepPick: return "KI-Vorschlag behalten, Rest ausblenden"
         case .keepAll:  return "Nichts ausblenden, nur als geprüft markieren"
         case .favorite: return "Vorschlag favorisieren und übernehmen"
+        case .bestPerFormat: return "Je Hoch- und Querformat das beste Foto behalten, den Rest ausblenden"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .keepPick:  return "checkmark.circle.fill"
-        case .keepAll:   return "tray.full.fill"
-        case .favorite:  return "heart.fill"
+        case .keepPick:      return "checkmark.circle.fill"
+        case .keepAll:       return "tray.full.fill"
+        case .favorite:      return "heart.fill"
+        case .bestPerFormat: return "arrow.triangle.2.circlepath"
         }
     }
 }

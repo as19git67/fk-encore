@@ -1,6 +1,6 @@
 # Orientierungs-Varianten: Hoch- und Querformat desselben Motivs
 
-Status: **In Umsetzung** — Etappen 1–3 (Backend, Web Raster + Vollbild, Web Review, PR #1421) und 4 (iOS Raster, Vollbild, Diashow) umgesetzt, Etappen 5–6 offen.
+Status: **In Umsetzung** — Etappen 1–3 (PR #1421), 4 (iOS Raster, Vollbild, Diashow, PR #1425) und 5 (iOS Review) umgesetzt, Etappe 6 offen.
 
 ## Umsetzungsstand
 
@@ -86,7 +86,21 @@ Status: **In Umsetzung** — Etappen 1–3 (Backend, Web Raster + Vollbild, Web 
   `OrientationVariantsTests.swift`. Nicht gemacht: zweiter Dateiname in der
   iOS-Detailansicht; der Nutzer-Schalter liegt nur im Web-Profil. Ohne Xcode
   in dieser Umgebung ist der Swift-Code nicht kompiliert worden.
-- Etappen 5–6 offen; die album-gebundene Liste läuft über `/gallery/grid`
+- **Etappe 5 (iOS Review) — umgesetzt.** `CompareTournament` nimmt
+  `formatPair:` und schließt dann alle Hoch-gegen-Quer-Paare vom Turnier aus
+  (`crossOrientationPairs`, `totalPairs` zählt sie nicht, `isFormatPair`);
+  `PhotoCompareView(photos:formatPair:)` reicht es durch, die Review-Queue
+  mit `group.isOrientationPair`, das Album-Review mit `group.variants != nil`.
+  `ReviewQueueGroup.orientation_pair` (optional dekodiert, `isOrientationPair`,
+  `hasBothOrientations`). Wischgeste **↓ „Bestes je Format"**
+  (`ReviewSwipe.bestPerFormat`, nur mit `allowsDown` auf einem Formatpaar,
+  Knopf in der Aktionsleiste), Entscheidung `.keepBestPerOrientation` →
+  `POST /photos/groups/:id/keep-best-per-orientation`. Kontextmenü auf der
+  Karte: „Nicht dasselbe Motiv" (`PATCH …/variants` `off`) und zurück „Als
+  Formatpaar behandeln" (`auto`), `ReviewQueueState.setOrientationPair` hält
+  die Karte aktuell. Tag „Hoch + Quer" im Kartenkopf. Tests in
+  `CompareTournamentTests` und `ReviewQueueTests`.
+- Etappe 6 offen; die album-gebundene Liste läuft über `/gallery/grid`
   mit `albumScopeId` und ist damit abgedeckt, die anonyme Link-Ansicht hat
   keinen Nutzer (und damit keine Gruppen) und bleibt außen vor. Die Diashow
   im Web läuft über dasselbe `cursorPhoto`, der Drehungswechsel greift also

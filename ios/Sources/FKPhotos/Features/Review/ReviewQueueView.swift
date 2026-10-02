@@ -9,6 +9,9 @@ import SwiftUI
 /// - **→ rechts** accept the suggestion (keep the pick, hide the rest)
 /// - **← links** keep everything, just mark the group reviewed
 /// - **↑ hoch** favorite the pick *and* accept it in one go
+/// - **↓ runter** on a format pair (portrait + landscape of one motif): keep
+///   the best photo of each orientation, hide the rest
+///   (.claude/plans/orientierungs-varianten.md)
 /// - **Tippen** auf ein Foto: open it full-size to judge the detail
 ///
 /// Every swipe has an equivalent button underneath — a gesture-only interface
@@ -92,7 +95,7 @@ struct ReviewQueueView: View {
             // rather than on the first verdict.
             if let group = viewModel.state.current,
                group.orderedPhotos.count >= 2 {
-                PhotoCompareView(photos: group.orderedPhotos) { keep in
+                PhotoCompareView(photos: group.orderedPhotos, formatPair: group.isOrientationPair) { keep in
                     // `pick-photos` needs at least one keeper. The tournament
                     // guarantees one, but the guard is cheap and the failure
                     // would be silent.
@@ -185,6 +188,23 @@ struct ReviewQueueView: View {
         .rotationEffect(.degrees(Double(dragOffset.width) / 26))
         .overlay(alignment: .top) { swipeHint }
         .gesture(canDecide ? dragGesture : nil)
+        // „Nicht dasselbe Motiv": the two shapes stop being a format pair and
+        // meet in the comparison again. One tap back if it was a slip.
+        .contextMenu {
+            if canDecide, group.isOrientationPair {
+                Button {
+                    Task { await viewModel.setOrientationVariants(mode: "off") }
+                } label: {
+                    Label("Nicht dasselbe Motiv", systemImage: "xmark.circle")
+                }
+            } else if canDecide, group.hasBothOrientations {
+                Button {
+                    Task { await viewModel.setOrientationVariants(mode: "auto") }
+                } label: {
+                    Label("Als Formatpaar behandeln", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+        }
         .animation(.interactiveSpring, value: dragOffset)
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -196,7 +216,8 @@ struct ReviewQueueView: View {
     private var activeSwipe: ReviewSwipe? {
         ReviewSwipe.resolve(
             translationWidth: dragOffset.width,
-            translationHeight: dragOffset.height
+            translationHeight: dragOffset.height,
+            allowsDown: viewModel.state.current?.isOrientationPair ?? false
         )
     }
 
@@ -220,7 +241,8 @@ struct ReviewQueueView: View {
             .onEnded { value in
                 guard let swipe = ReviewSwipe.resolve(
                     translationWidth: value.translation.width,
-                    translationHeight: value.translation.height
+                    translationHeight: value.translation.height,
+                    allowsDown: viewModel.state.current?.isOrientationPair ?? false
                 ) else {
                     dragOffset = .zero
                     return
@@ -237,6 +259,7 @@ struct ReviewQueueView: View {
             case .keepPick: dragOffset = CGSize(width: 700, height: 0)
             case .keepAll:  dragOffset = CGSize(width: -700, height: 0)
             case .favorite: dragOffset = CGSize(width: 0, height: -900)
+            case .bestPerFormat: dragOffset = CGSize(width: 0, height: 900)
             }
         }
         Task {
@@ -256,6 +279,11 @@ struct ReviewQueueView: View {
                     .disabled(!group.hasAiPick)
                 actionButton(.keepPick, tint: .accentColor)
                     .disabled(!group.hasAiPick)
+            }
+            // Format pair: both shapes survive, each with its best frame. The
+            // same decision the ↓ swipe makes, as a button for everyone else.
+            if group.isOrientationPair {
+                actionButton(.bestPerFormat, tint: .teal)
             }
             // Overriding the AI needs its own, always-present entry point:
             // the swipes can only accept or keep-all, and the per-photo
@@ -402,6 +430,11 @@ private struct ReviewGroupCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
+                if group.isOrientationPair {
+                    Label("Hoch + Quer", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.teal)
+                }
                 if group.isDuplicateCandidate {
                     Label("Duplikat", systemImage: "doc.on.doc")
                         .font(.caption)

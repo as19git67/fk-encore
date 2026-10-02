@@ -174,6 +174,56 @@ final class CompareTournamentTests: XCTestCase {
         XCTAssertEqual(tournament.suggestedKeepIds, [2, 3])
     }
 
+    // MARK: - Format pair (.claude/plans/orientierungs-varianten.md)
+
+    /// In a format pair portrait never faces landscape: the only duel is
+    /// between the two landscape frames, and both shapes survive.
+    func testAFormatPairOnlyDuelsInsideOneOrientation() {
+        var tournament = CompareTournament(
+            photoIds: [1, 2, 3],
+            orientations: [1: .landscape, 2: .landscape, 3: .portrait],
+            formatPair: true
+        )
+        XCTAssertTrue(tournament.isFormatPair)
+        XCTAssertEqual(tournament.totalPairs, 1)
+        XCTAssertEqual(tournament.current, CompareTournament.Pair(1, 2))
+        tournament.discard(1)
+        XCTAssertEqual(tournament.phase, .confirming)
+        XCTAssertFalse(tournament.hasUnsettledPairs)
+        XCTAssertEqual(tournament.suggestedKeepIds, [2, 3])
+    }
+
+    /// One frame per shape: nothing to compare, the pair is the answer.
+    func testAOneAndOneFormatPairGoesStraightToConfirmation() {
+        let tournament = CompareTournament(
+            photoIds: [1, 2],
+            orientations: [1: .landscape, 2: .portrait],
+            formatPair: true
+        )
+        XCTAssertEqual(tournament.phase, .confirming)
+        XCTAssertEqual(tournament.totalPairs, 0)
+        XCTAssertEqual(tournament.suggestedKeepIds, [1, 2])
+    }
+
+    /// The flag changes nothing unless both shapes are actually there, and
+    /// without it the cross pairs are asked like before.
+    func testFormatPairNeedsBothShapesAndIsOptIn() {
+        let oneShape = CompareTournament(
+            photoIds: [1, 2, 3],
+            orientations: [1: .landscape, 2: .landscape, 3: .landscape],
+            formatPair: true
+        )
+        XCTAssertFalse(oneShape.isFormatPair)
+        XCTAssertEqual(oneShape.totalPairs, 3)
+
+        let optOut = CompareTournament(
+            photoIds: [1, 2, 3],
+            orientations: [1: .landscape, 2: .landscape, 3: .portrait]
+        )
+        XCTAssertFalse(optOut.isFormatPair)
+        XCTAssertEqual(optOut.totalPairs, 3)
+    }
+
     /// A photo the face scan has not measured has no orientation to be
     /// grouped by, and guessing one could hide the only frame of a shape —
     /// so „unknown" is a class of its own.
