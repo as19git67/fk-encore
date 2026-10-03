@@ -34,12 +34,13 @@ function anonymous() {
   vi.mocked(getAuthData).mockReturnValue(undefined as never);
 }
 
-function signedInWith(permissions: string[]) {
-  vi.mocked(getAuthData).mockReturnValue({ userID: "1", permissions });
+function signedInWith(permissions: string[], userId: number) {
+  vi.mocked(getAuthData).mockReturnValue({ userID: String(userId), permissions });
 }
 
 describe("photo file access", () => {
   let owner: any;
+  let other: any;
   let album: any;
   let shared: any;
   let outside: any;
@@ -56,6 +57,7 @@ describe("photo file access", () => {
     await db.delete(users);
 
     owner = await createUserLogic({ email: "owner@test.local", name: "O", password: "pw" });
+    other = await createUserLogic({ email: "other@test.local", name: "X", password: "pw" });
     album = await service.createAlbumLogic(owner.id, { name: "Shared" });
 
     shared = await service.uploadPhotoLogic(owner.id, {
@@ -77,13 +79,65 @@ describe("photo file access", () => {
   });
 
   describe("signed-in callers", () => {
-    it("lets a photo viewer read any file, with no share token", async () => {
-      signedInWith(VIEWER_PERMISSIONS);
+    it("lets the owner read their own photo, with no share token", async () => {
+      signedInWith(VIEWER_PERMISSIONS, owner.id);
       expect(await denyPhotoFileRequest(outside.filename, null)).toBeNull();
     });
 
+    it("refuses another photo viewer a photo that is not shared with them", async () => {
+      // Holding the photos module is not a key to everybody's library: the
+      // file is answered like a missing one, so the filename cannot be probed.
+      signedInWith(VIEWER_PERMISSIONS, other.id);
+      expect(await denyPhotoFileRequest(outside.filename, null)).toEqual({
+        status: 403,
+        body: "Forbidden",
+      });
+      expect(await denyPhotoFileRequest(shared.filename, null)).toEqual({
+        status: 403,
+        body: "Forbidden",
+      });
+    });
+
+    it("lets a photo viewer read a photo in an album shared with them", async () => {
+      await service.shareAlbumLogic(owner.id, { albumId: album.id, userId: other.id, accessLevel: "read" });
+      signedInWith(VIEWER_PERMISSIONS, other.id);
+      expect(await denyPhotoFileRequest(shared.filename, null)).toBeNull();
+      // …but still nothing outside that album.
+      expect(await denyPhotoFileRequest(outside.filename, null)).toEqual({
+        status: 403,
+        body: "Forbidden",
+      });
+    });
+
+    it("lets a photo viewer read the cover of an album shared with them", async () => {
+      await service.shareAlbumLogic(owner.id, { albumId: album.id, userId: other.id, accessLevel: "read" });
+      await db.update(albums).set({ cover_photo_id: outside.id }).where(eq(albums.id, album.id));
+      signedInWith(VIEWER_PERMISSIONS, other.id);
+      expect(await denyPhotoFileRequest(outside.filename, null)).toBeNull();
+    });
+
+    it("lets the album owner read a photo another user added to their album", async () => {
+      const contributed = await service.uploadPhotoLogic(other.id, {
+        data: Buffer.from([3]),
+        name: "contributed.jpg",
+        mimeType: "image/jpeg",
+      });
+      await db.insert(albumPhotos).values({ album_id: album.id, photo_id: contributed.id });
+      signedInWith(VIEWER_PERMISSIONS, owner.id);
+      expect(await denyPhotoFileRequest(contributed.filename, null)).toBeNull();
+    });
+
+    it("lets a photo viewer without access to the album fall back to a share link", async () => {
+      signedInWith(VIEWER_PERMISSIONS, other.id);
+      expect(await denyPhotoFileRequest(shared.filename, token)).toBeNull();
+      expect(await denyPhotoFileRequest(outside.filename, token)).toEqual({
+        status: 403,
+        body: "Forbidden",
+      });
+    });
+
     it("refuses a caller without photos.view", async () => {
-      signedInWith(["module.photos"]);
+      signedInWith(["module.photos"], owner.id);
       expect(await denyPhotoFileRequest(shared.filename, null)).toEqual({
         status: 403,
         body: "Forbidden",
@@ -91,7 +145,7 @@ describe("photo file access", () => {
     });
 
     it("refuses a caller without the photos module", async () => {
-      signedInWith(["photos.view"]);
+      signedInWith(["photos.view"], owner.id);
       expect(await denyPhotoFileRequest(shared.filename, null)).toEqual({
         status: 403,
         body: "Forbidden",
@@ -102,12 +156,12 @@ describe("photo file access", () => {
       // Having an account says nothing about this album. A finance-only user
       // who is sent a link must not be worse off than a stranger with the
       // same link.
-      signedInWith(["module.finance"]);
+      signedInWith(["module.finance"], other.id);
       expect(await denyPhotoFileRequest(shared.filename, token)).toBeNull();
     });
 
     it("still refuses that account the rest of the library", async () => {
-      signedInWith(["module.finance"]);
+      signedInWith(["module.finance"], other.id);
       expect(await denyPhotoFileRequest(outside.filename, token)).toEqual({
         status: 403,
         body: "Forbidden",
@@ -272,7 +326,7 @@ describe("photo file access", () => {
       // proxy hand one visitor's copy to the next caller. Asserted on the
       // conditional-GET branch, which is the one success path that answers
       // with headers alone rather than streaming the file.
-      signedInWith(VIEWER_PERMISSIONS);
+      signedInWith(VIEWER_PERMISSIONS, owner.id);
       const etag = `"${crypto
         .createHash("md5")
         .update(`${shared.filename}|w=|c=0`)
