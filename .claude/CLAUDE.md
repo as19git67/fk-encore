@@ -1338,7 +1338,7 @@ The conversation with the user stays in whatever language the user is using — 
 
 ## Aktive Feature-Pläne
 
-- **Foto-Freigabe** (Genehmigungsprozess neu → abgelehnt/intern/öffentlich, globale Rolle „Foto-Genehmiger“, Freigabe-Alben, öffentliche Einstiegsseite ohne Anmeldung, Metadaten-Bereinigung bei anonymer Auslieferung): `.claude/plans/foto-freigabe.md`. Noch nicht umgesetzt; Etappen und offene Fragen stehen im Plan.
+- **Foto-Freigabe** (Genehmigungsprozess neu → abgelehnt/intern/öffentlich per Foto, Eingang über Import-Volume, Upload-Links oder Einreichen, globale Rolle „Foto-Genehmiger“, Freigabe-Alben der Organisation, öffentliche Einstiegsseite, Metadaten-Bereinigung bei anonymer Auslieferung; Etappe 0 = serverseitige Zugriffsprüfung pro Foto): `.claude/plans/foto-freigabe.md` (Plan auf Englisch). Noch nicht umgesetzt.
 
 - **Dokumentenverwaltung** (neues Modul neben Fotos, lokale KI-Klassifikation via llm-service): `/root/.claude/plans/ein-weiteres-modul-in-peaceful-robin.md`. Wird iterativ in Etappen umgesetzt (DB/Seed → llm-service → documents-Service → Watcher → Suche → Frontend → Infra).
 - **Web-UI vereinheitlichen** (Seitenskelett `PageLayout`, Untermenü-Zeile im Sticky-Stack, Toolbar-Vertrag, Scroll-/Fokus-Restore, Selection-Bar und Basket) — **umgesetzt** in sechs Etappen (#1276–#1281). Die Regeln stehen in den Abschnitten oben (Seitenskelett, Breakpoints, Knöpfe, Dialoge, Detailseiten, Zurück-Navigation, Listen, Auswahl); Konzept und Etappenhistorie in `.claude/plans/web-ui-vereinheitlichung.md`.
