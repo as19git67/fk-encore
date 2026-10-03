@@ -1,101 +1,247 @@
-# Foto-Freigabe (Genehmigungsprozess für Fotos)
+# Photo release (approval workflow)
 
-Status: **Plan, noch nicht umgesetzt.** Zweite Fassung nach Rückmeldung des
-Nutzers. Die erste Fassung hatte den Status pro Album-Mitgliedschaft
-vorgesehen, die Freigabe hängt jetzt am Foto.
+Status: **plan, not implemented yet.** Third revision. Earlier revisions had an
+instance-wide switch, and the first one stored the state per album
+membership.
 
-Hintergrund: Einsatz des Foto-Moduls bei der Feuerwehr. Fotos aus Einsätzen
-dürfen erst sichtbar bzw. veröffentlicht werden, wenn eine berechtigte Person
-(z. B. der Kommandant) zugestimmt hat.
+## Background and scenario
 
-## Ablauf
+A fire brigade runs the application in **its own instance**. Photos taken
+during operations may only be shown, inside the brigade or publicly, once an
+authorised person (e.g. the commander) has approved them.
+
+In the same instance, some signed-in users (probably board members) use the
+photo module **the way a family does today**: their own gallery, private
+albums, shares, public links. In parallel they work with release albums.
+Both modes have to coexist without interfering with each other.
+
+## Workflow
 
 ```
-Upload / Import ──► neu ──┬──► abgelehnt
-                          ├──► genehmigt-intern  ──► (später) genehmigt-public
-                          └──► genehmigt-public  ──► (später) genehmigt-intern
+Import volume (release inbox) ─┐
+Upload link (anonymous)        ├──► new ──┬──► rejected
+"Submit…" on an own photo      ─┘         ├──► approved-internal ◄──► approved-public
+                                          └──► approved-public
 ```
 
-1. Ein hochgeladenes oder importiertes Foto landet im Zustand **neu**.
-2. Genehmiger (globale Berechtigung `photos.review`) sehen alle neuen Fotos im
-   speziellen Album **„Neu – zur Freigabe“**.
-3. Der Genehmiger wählt ein oder mehrere Fotos aus und entscheidet:
-   - **Ablehnen**, optional mit Grund, oder
-   - **in ein Album einsortieren**, also genehmigen. Das ist immer mindestens
-     *intern*. Zusätzlich kann er **„auch öffentlich“** setzen.
-4. Neue Fotos lösen eine Benachrichtigung aus: in der App, als Push und
-   gebündelt als E-Mail.
+1. A photo enters the workflow **explicitly**, through one of these:
+   - a photo library flagged as **release inbox** (the existing import volume);
+   - an **upload link** (anonymous upload, see below);
+   - **"Submit for release…"** on an own photo, for users with
+     `photos.release.submit`.
 
-## Sichtbarkeit
+   Every other upload stays an ordinary photo (`release_state IS NULL`) and
+   behaves exactly as today. There is no instance-wide mode switch.
+2. Reviewers (global permission `photos.review`) see all new photos in the
+   special album **"New – awaiting release"**.
+3. A reviewer selects one or more photos and either
+   - **rejects** them, with an optional reason, or
+   - **sorts them into one or more release albums**, which approves them. That
+     is always at least *internal*; the reviewer can also tick **"also
+     public"**.
+4. New photos notify reviewers in the app, by push and by a batched email.
 
-Das ist die eine Regel, die überall gelten muss.
+## Visibility
 
-| Zustand | Hochladende Person | Genehmiger | Angemeldet mit `photos.view` | Nicht angemeldet |
+This one rule has to hold everywhere: listings, counters, covers, file
+access, public links, guests and feeds.
+
+| State | Owner / submitter | Reviewer | Signed in with `photos.view` | Anonymous |
 |---|---|---|---|---|
-| neu | ja (Badge „wartet“) | ja | nein | nein |
-| abgelehnt | ja (Badge + Grund) | ja | nein | nein |
-| genehmigt-intern | ja | ja | **ja** | nein |
-| genehmigt-public | ja | ja | ja | **ja**, ohne Metadaten |
+| `NULL` (not in the workflow) | as today | as today | as today: own photos and albums owned or shared | via the album's public link, as today |
+| new | yes ("awaiting" badge) | yes | no | no |
+| rejected | yes (badge + reason) | yes | no | no |
+| approved-internal | yes | yes | **yes**, in release albums | no |
+| approved-public | yes | yes | yes | **yes**, metadata stripped |
 
-- **„Intern“** heißt: jeder angemeldete Nutzer mit `photos.view`, unabhängig
-  von Albumfreigaben (`album_shares`).
-- **Nicht angemeldete Nutzer** sehen ausschließlich `genehmigt-public`. Das
-  gilt auf der neuen Einstiegsseite, bei öffentlichen Album-Links, für Gäste
-  und beim Dateiabruf.
-- Fotos außerhalb des Freigabeprozesses (`release_state IS NULL`, also alle
-  bestehenden Fotos und alles, solange der Modus aus ist) verhalten sich wie
-  heute.
+- **Internal** means any signed-in user holding `photos.view`. It is granted
+  through a role, not to every user automatically. Note that the existing
+  seeded role "Photo User" includes `photos.view`.
+- **Anonymous** visitors only ever see approved-public photos: on the new
+  public entry page, through public album links, as guests and when fetching
+  files.
+- **Private albums** keep working as today. They are no back door, though:
+  a photo that is new or rejected never appears through an album's public link
+  or to guests, even when it sits in a private album.
 
-## Designentscheidungen
+## Design decisions
 
-### Status am Foto
+### State on the photo, no copies
 
-Der Zustand gehört dem Foto (`photos.release_state`), weil die Genehmigung
-eine Aussage über den Inhalt ist („darf gezeigt werden“). Die Albumzuordnung
-ist das Einsortieren und passiert im selben Schritt.
+The state lives on the photo (`photos.release_state`), because approval is a
+statement about the content. Sorting into an album happens in the same step.
 
-### Freigabe-Alben
+**No file is copied and no second record is created.** Photos from the
+release inbox and from upload links are owned directly by the system user
+**"Organisation"**. When a board member submits an own photo, that photo
+itself gets the state *new*; the member stays the owner and it stays in their
+gallery and albums. The submitter is recorded separately
+(`release_submitted_by_user_id`) so that the badge and notifications reach the
+right person even when the owner is "Organisation".
 
-Die Alben, in die Genehmiger einsortieren, sind ein neuer Albumtyp
-(`albums.release_album = true`). Er gehört der Organisation und nicht einem
-einzelnen Nutzer:
+### Release albums
 
-- **Sichtbar** für alle mit `photos.view`. Der Inhalt ist auf genehmigte
-  Fotos gefiltert. Ohne Anmeldung erscheint ein solches Album auf der
-  Einstiegsseite, sobald es mindestens ein `public`-Foto enthält, und zeigt
-  dort nur diese Fotos.
-- **Anlegen, umbenennen, einsortieren, entfernen und Cover setzen** dürfen nur
-  Genehmiger.
-- Die vorhandenen persönlichen Alben (mit Besitzer, Shares und Links) bleiben
-  unverändert. Auch dort gilt die Sichtbarkeitsregel oben: Ein neues Foto
-  erscheint dort nur für die hochladende Person und für Genehmiger, und ein
-  öffentlicher Link zeigt nur `public`-Fotos. Damit lässt sich die Freigabe
-  nicht über ein privates Album umgehen.
+The albums reviewers sort into are a new kind of album
+(`albums.release_album = true`), owned by the system user "Organisation":
 
-### Globale Genehmigerrolle
+- **Visible** to everyone with `photos.view`. Their content is filtered to
+  approved photos.
+- **Anonymous** visitors see a release album on the public entry page once it
+  holds at least one public photo, and only those photos.
+- **Creating, renaming, sorting in, removing photos and setting the cover**
+  are reserved for reviewers.
+- The album list shows two sections: "My albums" and the organisation's
+  albums. The organisation name is configurable, nothing says "Feuerwehr" in
+  code.
 
-- Neue Berechtigung `photos.review` mit der Beschreibung „Neue Fotos prüfen,
-  in Alben einsortieren und freigeben“.
-- Neue Seed-Rolle **„Foto-Genehmiger“** in `db/seed.ts` (`defaultRoles` und
-  `rolePermissionsMap`) mit `module.photos`, `photos.view` und
-  `photos.review`. Sie muss in den Seed, weil eine von Hand vergebene
-  Berechtigung an einer verwalteten Rolle beim nächsten Start wieder entfernt
-  wird. Admin bekommt `photos.review` automatisch.
+### Roles and permissions
 
-### Modus pro Instanz einschalten
+| Permission | Meaning |
+|---|---|
+| `photos.view` (existing) | internal viewer: may see approved photos in release albums |
+| `photos.release.submit` (new) | may submit own photos for release |
+| `photos.review` (new) | may review, sort, reject, change the release level, manage release albums and upload links |
 
-„Optional“ wird über eine **Instanzeinstellung** umgesetzt: „Freigabeprozess
-aktiv“, umschaltbar unter Fotos › Einstellungen › Freigabe durch Personen mit
-`photos.review` oder Admins. Ist sie aus, bekommen neue Fotos
-`release_state = NULL` und alles bleibt wie heute. Eine allgemeine Tabelle für
-Instanzeinstellungen gibt es noch nicht, sie entsteht hier (`app_settings`,
-Schlüssel/Wert).
+New seeded roles in `db/seed.ts` (`defaultRoles` + `rolePermissionsMap`).
+Hand-granted permissions on seeded roles are stripped on every boot, so they
+have to be in the seed.
 
-**Ausschalten bei laufendem Betrieb:** Fotos im Zustand *neu* bleiben *neu*,
-bis jemand entscheidet. Sie werden nicht automatisch freigegeben. Ein Hinweis
-in der Einstellung nennt die Anzahl.
+| Role | Permissions |
+|---|---|
+| "Foto intern" | `module.photos`, `photos.view` |
+| "Foto-Genehmiger" | `module.photos`, `photos.view`, `photos.review`, `photos.release.submit` |
 
-## Datenmodell (Migration 0225)
+Admin gets the new permissions automatically. Board members combine "Photo
+User" with "Foto-Genehmiger" or with `photos.release.submit`.
+
+A user holding only "Foto intern" sees just the release albums in the photo
+module. Gallery, people and recaps would be empty for them and are hidden.
+
+### Self-approval
+
+Photos from reviewers also land in *new*. A reviewer may approve their own
+photos; there is no four-eyes rule. This can become a setting later.
+
+### Rejected photos
+
+Rejected photos are not deleted automatically. The reviewer, or the owner for
+own photos, can delete them. Optional later: purge rejected photos older than
+N days.
+
+## Entry points
+
+### A. Import volume as release inbox
+
+Existing mechanism: `photo_libraries` with an owner, `auto_import` (chokidar
+watcher in `photo/library-watcher.ts`) and optional `auto_albums`. New flag
+`photo_libraries.release_inbox`:
+
+- Imported photos get `release_state = 'new'`. They are owned by the library
+  owner, normally "Organisation".
+- `auto_albums` is ignored for release-inbox libraries, because sorting
+  happens on approval. `attachToAutoAlbum` (`libraries.service.ts` ~496) has
+  to respect this.
+- Full scans (`scanLibrary`) and the reconcile cron (`library-cron.ts`) apply
+  the same rule.
+
+### B. Upload links (anonymous upload)
+
+Works like the public album links, but in the other direction.
+
+- **Creation:** a reviewer creates an upload link, e.g. "Einsatz 2026-10-03".
+  - Fields: title, optional description, expiry (required, default 7 days),
+    optional limits (max. files, max. total size), optional "ask for
+    uploader name", optional target hint (the release album the reviewer will
+    probably sort into, used as a pre-selection in the sort dialog).
+  - It is shown as a URL and a **QR code**, to put on a vehicle or send by
+    messenger.
+  - It can be disabled at any time (soft delete, like `album_public_links`).
+- **Usage:** whoever has the link opens `/upload/:token` without an account
+  and gets a simple mobile-first page: pick or take photos, optional name,
+  upload with a progress bar. The public entry page shows an upload button
+  only while the visitor holds a valid link token (no open upload).
+- **Server side:**
+  - New `api.raw` endpoint `POST /upload-links/:token/photos`.
+  - Streaming upload reusing `uploadPhotoStream`.
+  - Owner "Organisation", `release_state = 'new'`, `upload_link_id` and the
+    optional uploader name stored on the photo.
+- **Safeguards:**
+  - Only image formats, checked by magic bytes and not by extension, then
+    decoded with sharp: if it cannot be decoded, it is rejected.
+  - Per-file size limit.
+  - Per-link and per-IP rate limit.
+  - Duplicate detection by hash within the organisation; a duplicate is
+    silently accepted and not stored twice.
+  - Expired or disabled links answer 410.
+  - No listing: the upload page never shows what others uploaded.
+- **Notifications:** uploads through a link count like any other new photo
+  (see Notifications). The reviewer sees the link title as the source.
+
+### C. Submitting own photos
+
+Board members with `photos.release.submit` get a "Submit for release…" action
+in the gallery and in albums. It works on a selection, with an optional note
+to the reviewer. It sets `release_state = 'new'` and
+`release_submitted_by_user_id`. A submission can be withdrawn while the photo
+is still *new*.
+
+## Prerequisite: server-side access control (stage 0)
+
+The analysis found that today **any user holding `module.photos` +
+`photos.view` can fetch any photo of any user**, although the UI only lists
+own photos and albums owned or shared:
+
+- `/photos/file/*`: `denyPhotoFileRequest` (`photo/photo-file-access.ts:147`)
+  lets every photo viewer through. Filenames are derived from the capture time
+  (`YYYY/YYYY-MM/YYYY-MM-DD_at_HH.MM.SS_00.jpg`, `reserveStoragePath`) and can
+  be enumerated.
+- `GET /photos/:id/render` (`photo/photo.ts:1034`) only checks the
+  permission. Photo IDs are sequential, and `?v=original` redirects to the
+  original file.
+- An audit of all endpoints that take an object id found further gaps. Album
+  endpoints, listings, search, groups, recaps and realtime are scoped
+  correctly; the problems are endpoints keyed by photo id and two
+  person/face endpoints.
+  - **Reads without an access check:**
+    - `/photos/:id/export`: full resolution, enumerable by id.
+    - `/photos/:id/ocr`: recognised text.
+    - `/photos/:id/poi-matches`: place names.
+    - `GET /photos/:id/transforms`: other users' names and edit recipes.
+  - **Writes without an access check:** `PUT /photos/:id/transforms`,
+    `/transforms/from-suggestion`, `/transforms/adopt`, and
+    `/transforms/auto-levels`, which is an existence oracle and costs CPU.
+  - **Person-name leak:** `POST /faces/:faceId/assign` does not check that
+    `personId` belongs to the caller. `GET /photos/:id/faces` joins `persons`
+    without a user filter. `PATCH /persons/:id` re-reads the record without a
+    user filter, so it returns another user's person name and cover filename.
+  - **Minor:**
+    - `GET /photos/uploaders` lists every user who owns photos.
+    - The `curation.changed` realtime event reaches members of every album
+      holding the photo.
+    - Guest comments ignore the public-link exclusions.
+    - The photo owner can read comments in another user's private album that
+      reused the photo.
+  - The building blocks for the fix already exist: `getUsersWithPhotoAccess`
+    (`photo.service.ts` ~782) and the checks in the curation and locations
+    endpoints (~3640, ~5157).
+
+This has to be fixed **before** the release workflow, as its own change.
+Otherwise every internal viewer could fetch new and rejected photos, and every
+user the board members' private photos.
+
+- Add one central rule, `canSeePhoto(viewer, photoId)`. It is true for:
+  - an own photo;
+  - a photo in an own or shared album, or the cover of one;
+  - later: a release album plus an approved state;
+  - later: a reviewer looking at a photo in the workflow.
+- Apply it to every endpoint that returns or changes a single photo, album,
+  face or person.
+- `/photos/file` is hit for every thumbnail. Use an indexed lookup plus a
+  short per-user cache; signed image URLs are an option for later.
+- Tests cover the legitimate cross-user paths: shared albums, faces and people
+  from shared albums, group review, recaps, the AI user.
+
+## Data model (one migration, next free number)
 
 ```sql
 CREATE TABLE app_settings (
@@ -104,22 +250,43 @@ CREATE TABLE app_settings (
   updated_at timestamptz NOT NULL DEFAULT now(),
   updated_by_user_id integer REFERENCES users(id) ON DELETE SET NULL
 );
+-- keys: 'photo_release.org_name', 'photo_release.org_user_id',
+--       'photo_release.public_entry_enabled'
+
+CREATE TABLE upload_links (
+  id serial PRIMARY KEY,
+  token text NOT NULL UNIQUE,
+  title text NOT NULL,
+  description text,
+  created_by_user_id integer REFERENCES users(id) ON DELETE SET NULL,
+  target_album_id integer REFERENCES albums(id) ON DELETE SET NULL,
+  ask_uploader_name boolean NOT NULL DEFAULT false,
+  max_files integer,
+  max_total_bytes bigint,
+  expires_at timestamptz NOT NULL,
+  disabled_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
 ALTER TABLE photos
   ADD COLUMN release_state text
     CHECK (release_state IN ('new','rejected','internal','public')),
+  ADD COLUMN release_submitted_by_user_id integer REFERENCES users(id) ON DELETE SET NULL,
   ADD COLUMN release_reviewed_by_user_id integer REFERENCES users(id) ON DELETE SET NULL,
   ADD COLUMN release_reviewed_at timestamptz,
-  ADD COLUMN release_note text;
+  ADD COLUMN release_note text,
+  ADD COLUMN upload_link_id integer REFERENCES upload_links(id) ON DELETE SET NULL,
+  ADD COLUMN uploader_name text;
 
-CREATE INDEX photos_release_new_idx ON photos (created_at)
-  WHERE release_state = 'new';
-CREATE INDEX photos_release_public_idx ON photos (id)
-  WHERE release_state = 'public';
+CREATE INDEX photos_release_new_idx ON photos (created_at) WHERE release_state = 'new';
+CREATE INDEX photos_release_public_idx ON photos (id) WHERE release_state = 'public';
 
 ALTER TABLE albums
   ADD COLUMN release_album boolean NOT NULL DEFAULT false,
   ADD COLUMN public_show_location boolean NOT NULL DEFAULT false;
+
+ALTER TABLE photo_libraries
+  ADD COLUMN release_inbox boolean NOT NULL DEFAULT false;
 
 CREATE TABLE photo_review_mail_state (
   user_id integer PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -130,225 +297,226 @@ ALTER TYPE feed_item_kind ADD VALUE 'photo_review_pending';
 ALTER TYPE feed_item_kind ADD VALUE 'photo_review_decided';
 ```
 
-- `NULL` bedeutet „nicht im Freigabeprozess“. Damit bleibt das Verhalten
-  aller bestehenden Fotos unverändert.
-- `db/schema.ts` wird nachgezogen und `meta/_journal.json` bekommt den Eintrag
-  `idx 225`.
+- `release_state IS NULL` means "not in the workflow", so all existing
+  photos behave as before.
+- The system user "Organisation" is created by the seed, like `AI-Rating`. It
+  cannot log in.
+- Update `db/schema.ts` and add the entry to `meta/_journal.json`.
 
 ## Backend
 
-### 1. Zentrale Sichtbarkeitsregel (`photo/photo-release.service.ts`)
+### 1. Central visibility helper (`photo/photo-release.service.ts`)
 
-- `releaseVisibleSql(alias, viewer)` setzt die Tabelle oben in SQL um. Dabei
-  ist `viewer` eines von `{ userId, isReviewer }` oder `anonymous`.
-  - **angemeldet:** `release_state IS NULL OR release_state IN
-    ('internal','public') OR user_id = viewer OR isReviewer`
-  - **anonym:** `release_state = 'public'`. Für Fotos mit `NULL` gelten die
-    bisherigen Regeln für öffentliche Links (`linkVisiblePhotoSql`).
-- `initialReleaseState()` liefert `'new'`, wenn der Modus aktiv ist, sonst
-  `NULL`. Der Wert wird kurz gecacht.
+- `releaseVisibleSql(alias, viewer)` implements the table above. `viewer` is
+  `{ userId, permissions }` or `anonymous`. It is combined with the access rule
+  from stage 0.
+- `isPubliclyVisibleSql(alias)` combines `release_state = 'public'` with the
+  existing public-link rules for `NULL` photos (`linkVisiblePhotoSql`). It also
+  excludes `new` and `rejected` from every public link.
 
-Alle Stellen, die Fotos lesen oder anlegen, verwenden diese Helfer. Die
-Analyse hat folgende Stellen gefunden. Die Liste vor der Umsetzung noch
-einmal mit `grep` abgleichen.
+Places to adapt (re-check with `grep` before implementing):
 
-Anlegen:
-- `uploadPhotoLogic` / `uploadPhotoStream` (`photo.service.ts` ~2750/2886).
-- `importFile` in `libraries.service.ts` (~653) und `attachToAutoAlbum`
-  (~496). Diese Funktion schreibt direkt in `album_photos`. Ist der Modus
-  aktiv, werden Auto-Alben für neue Fotos gar nicht erst befüllt, denn das
-  Einsortieren macht der Genehmiger.
+- **Create:** `uploadPhotoLogic` / `uploadPhotoStream` (submit flag),
+  `importFile` / `attachToAutoAlbum` / `scanLibrary` (release inbox), upload
+  links.
+- **Read:**
+  - album list, detail and photos (`listAlbumsLogic`, `getAlbumLogic`,
+    `getAlbumPhotosLogic`), including counters, cover, views and map;
+  - `getPublicAlbumLogic`, `link-visibility.service.ts`,
+    `photo-file-access.ts`, `web/static.ts` (Open Graph);
+  - gallery filters, people and faces, stream and content feed, recaps,
+    export.
 
-Lesen:
-- Albenliste, Albumdetail und Albumfotos (`listAlbumsLogic`,
-  `getAlbumLogic`, `getAlbumPhotosLogic`), jeweils mit Zählern, Cover,
-  Ansichten und Karte.
-- `getPublicAlbumLogic` und `link-visibility.service.ts`.
-- `photo/photo-file-access.ts`: **neu** ist hier, dass auch angemeldete
-  Nutzer mit `photos.view` neue oder abgelehnte Dateien fremder Fotos nicht
-  mehr abrufen können. Anonym ist nur `public` erlaubt, und das immer in der
-  bereinigten Fassung.
-- Galerie und Suche (`photo.filters.ts`, `gallery-grid.ts`), Personen und
-  Gesichter, Karte, Stream und Content-Feed, Rückblicke, Export/ZIP,
-  Open-Graph (`web/static.ts`).
+### 2. Side effects only on approval
 
-### 2. Nebenwirkungen erst bei Genehmigung
+A new photo only triggers:
+- the `photo_review_pending` feed item to everyone with `photos.review`
+  (`user.listUserIdsWithPermission`), batched via `scheduleEmitFeedItems`;
+- a realtime event for the badge counter.
 
-Ein neues Foto löst nur Folgendes aus:
-- den Feed-Eintrag `photo_review_pending` an alle mit `photos.review`
-  (`user.listUserIdsWithPermission`), gebündelt über
-  `scheduleEmitFeedItems`, und
-- ein Realtime-Event für den Badge-Zähler.
+Face assignment for other users, the `photo_added` feed, the content feed and
+guest notifications only run when the photo is sorted in, through
+`addPhotoToAlbumLogic` / `batchUpdateAlbumPhotosLogic`. Guests are notified
+for public photos only.
 
-Gesichtszuordnung für andere, `photo_added`-Feed, Content-Feed und
-Gast-Benachrichtigung laufen erst beim Einsortieren über
-`addPhotoToAlbumLogic` bzw. `batchUpdateAlbumPhotosLogic`. Gäste werden nur
-bei `public` benachrichtigt.
+### 3. Release API (`photo/photo-release.ts`)
 
-### 3. Freigabe-API (`photo/photo-release.ts`)
+All endpoints: `auth: true` and `module.photos`, plus the permission shown.
 
-Alle Endpunkte: `auth: true`, `module.photos`, `photos.review`.
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/photo-release/queue` | review | photos by state (default `new`; also `rejected`, `internal`, `public`), source (library, upload link, submitted), paged, with total |
+| GET | `/photo-release/count` | review | number of new photos, for the badge |
+| POST | `/photo-release/approve` | review | `{ photoIds, albumIds (min. 1), public }`: sort in and set the state |
+| POST | `/photo-release/reject` | review | `{ photoIds, note? }` |
+| POST | `/photo-release/level` | review | `{ photoIds, level: 'internal' \| 'public' }` |
+| POST | `/photo-release/submit` | submit | `{ photoIds, note? }`, own photos only |
+| POST | `/photo-release/withdraw` | submit | own photos, only while `new` |
+| GET/POST/PATCH/DELETE | `/upload-links[...]` | review | manage upload links |
+| GET/PUT | `/photo-release/settings` | review | organisation name, public entry page on/off |
 
-| Methode | Pfad | Zweck |
+- Release albums use the existing album endpoints (`release_album: true`),
+  with permission checks against `photos.review`.
+- `approve` and `reject` set `release_reviewed_by/at/note` and send the
+  submitter a `photo_review_decided` feed item.
+- Downgrading from public to internal takes effect immediately, because file
+  access is checked on every request.
+
+### 4. Public entry page (no login)
+
+`auth: false` endpoints in `photo/public-gallery.ts`:
+
+| Method | Path | Content |
 |---|---|---|
-| GET | `/photo-release/queue` | Fotos nach Zustand (`new` als Voreinstellung, `rejected`, `internal`, `public`), seitenweise, mit Gesamtzahl |
-| GET | `/photo-release/count` | Zahl der neuen Fotos für den Badge |
-| POST | `/photo-release/approve` | `{ photoIds, albumIds: number[] (min. 1), public: boolean }`: einsortieren und Zustand setzen |
-| POST | `/photo-release/reject` | `{ photoIds, note? }` |
-| POST | `/photo-release/level` | `{ photoIds, level: 'internal'\|'public' }`: Freigabeklasse nachträglich ändern |
-| GET/PUT | `/photo-release/settings` | Modus an/aus |
+| GET | `/public/albums` | release albums with at least one public photo: name, description, count, cover (a public photo) |
+| GET | `/public/albums/:id` | the album's public photos only, without coordinates |
+| GET | `/upload-links/:token` | title, description, limits, whether a name is requested (no photos) |
+| POST | `/upload-links/:token/photos` | anonymous upload (see entry point B) |
 
-- Freigabe-Alben werden über die vorhandenen Album-Endpunkte angelegt
-  (`release_album: true`). Die Rechte prüft `photos.review`.
-- `approve` und `reject` setzen `release_reviewed_by/at/note` und schreiben an
-  die hochladende Person einen `photo_review_decided`-Feed-Eintrag.
-- Ein abgelehntes Foto kann der Genehmiger später doch noch genehmigen. Die
-  hochladende Person kann es löschen.
-- Herabstufen von public auf intern wirkt sofort, weil der Dateizugriff bei
-  jedem Request geprüft wird.
+- Anonymous file access through `/photos/file/*` is allowed for public photos
+  and always served stripped.
+- Rate limit per IP on all of these.
+- **Frontend:**
+  - Routes `/public` (album list and album view, layout taken over from
+    `SharedAlbumView`) and `/upload/:token`, both added to
+    `PUBLIC_ROUTE_NAMES`.
+  - The login page links to "View public photos".
+  - Optionally `/` redirects anonymous visitors there instead of to the
+    login; controlled by a setting.
 
-### 4. Öffentliche Einstiegsseite (ohne Anmeldung)
+### 5. Notifications
 
-Neue Endpunkte mit `auth: false` in `photo/public-gallery.ts`:
-
-| Methode | Pfad | Inhalt |
-|---|---|---|
-| GET | `/public/albums` | Freigabe-Alben mit mindestens einem `public`-Foto: Name, Beschreibung, Anzahl, Cover (ein `public`-Foto) |
-| GET | `/public/albums/:id` | Nur `public`-Fotos des Albums, ohne Koordinaten |
-
-- Fotodateien werden über `/photos/file/*` angefordert. Anonym ist das für
-  `release_state = 'public'` erlaubt und wird immer bereinigt ausgeliefert.
-- Für diese Endpunkte gilt eine einfache Ratenbegrenzung pro IP.
-- Frontend: neue Route `/galerie-oeffentlich` (Name `public-gallery`,
-  eingetragen in `PUBLIC_ROUTE_NAMES`). Die Albumansicht übernimmt das Layout
-  von `SharedAlbumView` (wird ggf. in eine gemeinsame Komponente ausgelagert).
-  Auf der Login-Seite gibt es einen Link „Öffentliche Fotos ansehen“.
-  Optional wird `/` ohne Anmeldung dorthin statt auf den Login umgeleitet;
-  das ist per Einstellung steuerbar.
-
-### 5. Benachrichtigungen
-
-- **In der App:** Feed-Einträge (siehe oben) und der Badge am Album „Neu –
-  zur Freigabe“ bzw. am Menüpunkt.
-- **Push:** über `push.fanoutFeed`. Neue `NotificationKind` `photo_review`,
-  im Profil abschaltbar.
-- **E-Mail:** Cron `photo/release-digest-cron.ts` über `lib/local-cron.ts`
-  mit `everyMs(15 min)`, nach dem Muster von `sharedalbum/digest-cron.ts`:
-  - Je Genehmiger mit neuen Fotos, die nach `last_sent_at` hinzugekommen
-    sind, und 30 Minuten Ruhe seit dem letzten Upload geht **eine** E-Mail
-    raus: „37 neue Fotos warten auf Freigabe“, mit Uploadern, Zeitraum und
-    Link.
-  - Die E-Mail baut `sendPhotoReviewDigestEmail` in `user/mail.ts`. Ohne SMTP
-    wird sie nur ins Log geschrieben.
-  - Abschaltbar über `notification_prefs` (`photo_review_email`).
-  - Erscheint in `scheduled_job_state` und damit in der Jobübersicht.
+- **In app:** feed items (above) and a badge on "New – awaiting release" and
+  on the menu entry.
+- **Push:** via `push.fanoutFeed`. New `NotificationKind` `photo_review`,
+  which can be switched off in the profile.
+- **Email digest:** `photo/release-digest-cron.ts` on `lib/local-cron.ts`
+  `everyMs(15 min)`, modelled on `sharedalbum/digest-cron.ts`:
+  - One email per reviewer with new photos since `last_sent_at`, once 30
+    minutes have passed without new arrivals, e.g. "37 new photos awaiting
+    release, 12 of them via upload link 'Einsatz 2026-10-03'". It lists
+    sources and time range and links to the release view.
+  - `sendPhotoReviewDigestEmail` in `user/mail.ts`. Without SMTP it only logs.
+  - Opt-out via `notification_prefs` (`photo_review_email`).
+  - Registered in `scheduled_job_state`, so it shows in the jobs view.
 
 ## Frontend
 
-- **Album „Neu – zur Freigabe“:** Für Genehmiger steht es als erstes,
-  virtuelles Album in der Albenliste, mit Zähler-Badge. Es öffnet
-  `PhotoReleaseView.vue` (Route `fotos/freigabe`, `meta.permission:
-  'photos.review'`).
-  - Aufbau mit `PageLayout` und `ListToolbar`. Filter: Zustand (neu,
-    abgelehnt, intern, öffentlich), hochladende Person, Zeitraum.
-    Sortierung nach Aufnahmezeit oder Uploadzeit.
-  - Mehrfachauswahl über `useListSelection` + `SelectionBar`. Hauptaktion
-    **„Einsortieren…“**: ein Dialog `dialog-md` mit der Auswahl eines oder
-    mehrerer Freigabe-Alben, „Neues Album…“ inline und dem Schalter **„Auch
-    öffentlich freigeben“**. Daneben **„Ablehnen…“** (`dialog-sm`, optionaler
-    Grund).
-  - Vollbildansicht mit denselben Aktionen und angezeigten Metadaten (Ort und
-    Karte, Aufnahmezeit, erkannte Personen). Ein Hinweis erscheint, wenn
-    benannte Personen erkannt wurden.
-  - Nach einer Entscheidung springt die Ansicht zum nächsten neuen Foto, damit
-    ein Genehmiger zügig durcharbeiten kann.
-  - Tastenkürzel: `E` einsortieren (mit dem zuletzt gewählten Album), `Ö`
-    öffentlich umschalten, `A` ablehnen.
-  - Name bewusst „Freigabe“ und nicht „Review“, um eine Verwechslung mit dem
-    vorhandenen `ReviewQueueView` („Gruppen-Review“) zu vermeiden.
-- **Freigabe-Alben:**
-  - Markierung in der Albenliste.
-  - Im Album zeigt jedes Foto für Genehmiger ein Symbol „öffentlich“.
-  - Auswahlaktionen für Genehmiger: „Öffentlich freigeben“, „Nur intern“, „Aus
-    Album entfernen“.
-- **Eigene Uploads:** In Galerie und Alben tragen eigene Fotos im Zustand neu
-  oder abgelehnt einen Badge. Der Grund erscheint per Tooltip bzw. in den
-  Fotodetails.
-- **Einstellungen:** Fotos › Einstellungen › Freigabe mit dem Schalter für den
-  Modus und der Zahl der offenen Fotos.
-- **Profil:** zwei neue Schalter in `NOTIFICATION_TYPES` (Push und E-Mail).
-- **Storybook-Stories** für die Freigabeansicht, den Einsortieren-Dialog und
-  die öffentliche Einstiegsseite (Prüfungen auf Überlauf und Fokusring).
+- **Release view** (`PhotoReleaseView.vue`, route `fotos/freigabe`,
+  `meta.permission: 'photos.review'`). It opens from the virtual album "New –
+  awaiting release", which is first in the album list for reviewers and
+  carries a counter badge.
+  - `PageLayout` + `ListToolbar`.
+    - Filters: state, source (import volume, upload link, submitted by),
+      period.
+    - Sorting: capture time or upload time.
+  - Multi-select via `useListSelection` + `SelectionBar`.
+    - Primary action **"Sort in…"**: a `dialog-md` dialog to pick one or more
+      release albums, with inline "New album…" and an **"Also public"**
+      toggle. The upload link's target hint is pre-selected.
+    - Secondary action **"Reject…"** (`dialog-sm`, optional reason).
+  - Fullscreen view with the same actions and metadata (location and map,
+    capture time, recognised people, source and uploader name).
+  - After a decision the view advances to the next new photo.
+  - Shortcuts: `E` sort in (last album), `P` toggle public, `R` reject.
+  - It is called "Freigabe" in the UI and not "Review", to avoid confusion
+    with the existing `ReviewQueueView` ("Gruppen-Review").
+- **Upload links** (Fotos › Einstellungen › Upload-Links, for reviewers):
+  - A list with title, expiry, number of uploads and status.
+  - Create and edit in a `dialog-md` dialog.
+  - Shown as a QR code with a "copy link" action.
+  - Disabling asks for confirmation.
+- **Upload page** (`/upload/:token`):
+  - Mobile first: a large "Take or choose photos" button, optional name
+    field, progress per file, and a short "Thank you, the photos will be
+    reviewed" at the end.
+  - No navigation into the rest of the app.
+- **Public entry page** (`/public`): album tiles, and an album view with a
+  fullscreen viewer.
+- **Release albums:**
+  - Shown as their own section in the album list.
+  - A "public" icon on photos, visible to reviewers.
+  - Selection actions "Make public", "Internal only", "Remove from album".
+- **Own photos in the workflow:** a badge for new and rejected; the reason is
+  in the tooltip and in the photo details. For `photos.release.submit` there
+  are "Submit for release…" and "Withdraw submission".
+- **Settings** (Fotos › Einstellungen › Freigabe): organisation name, public
+  entry page on/off, number of open photos, and the release-inbox flag on the
+  library settings page.
+- **Profile:** two new toggles in `NOTIFICATION_TYPES` (push and email).
+- **Storybook stories** for the release view, the sort-in dialog, the upload
+  page and the public entry page, so the overflow and focus-ring checks apply.
 
-## Datenschutz: Metadaten entfernen
+## Privacy: stripping metadata
 
-**Wird gebraucht.** Die Analyse hat zwei Lücken gefunden, die heute schon bei
-öffentlichen Album-Links bestehen:
+**Needed.** Two leaks already exist today on public album links:
 
-1. `getPublicAlbumLogic` liefert an anonyme Aufrufer `latitude`, `longitude`
-   und `location_*` aus, also den exakten Einsatzort.
-2. `GET /photos/file/*` streamt ohne `?w=` das unveränderte Original mit
-   EXIF, IPTC und XMP (GPS, Kameraseriennummer, Aufnahmezeit, ggf. Name des
-   Fotografen).
+1. `getPublicAlbumLogic` returns `latitude`, `longitude` and `location_*` to
+   anonymous callers, so the exact location of an operation is exposed.
+2. `GET /photos/file/*` without `?w=` streams the unmodified original with
+   EXIF/IPTC/XMP: GPS, camera serial number, capture time, possibly the
+   photographer's name.
 
-Vorkleinerte Bilder (`?w=`) sind bereits sauber, weil sharp ohne
-`withMetadata()` keine Metadaten schreibt.
+Resized images (`?w=`) are already clean: sharp writes no metadata without
+`withMetadata()`.
 
-Maßnahmen für jeden **anonymen** Zugriff (Einstiegsseite, Links, Gäste,
-Open-Graph):
+For every **anonymous** access (public entry page, public links, guests,
+Open Graph):
 
-- **Nie** das Original ausliefern. Ohne `?w=` gibt es eine bereinigte
-  Vollauflösung: sharp `.rotate()`, JPEG mit ICC-Profil, ohne
-  EXIF/XMP/IPTC. Cache-Schlüssel mit dem Suffix `_clean`.
-- Die JSON-Antworten enthalten keine Koordinaten. Der Ort (`location_city`)
-  erscheint nur, wenn am Album `public_show_location` gesetzt ist
-  (Voreinstellung: aus). Die Aufnahmezeit wird nur als Datum ausgegeben.
-- Ein Download für Gäste nutzt dieselbe bereinigte Fassung.
-- Gesichter: Die vorhandene Regel `link_visibility = auto` gilt für
-  `public`-Fotos **nicht** automatisch, denn die ausdrückliche Freigabe durch
-  den Genehmiger ist die Entscheidung. Der Einsortieren-Dialog weist aber
-  darauf hin, wenn benannte Personen erkannt wurden.
+- **Never** serve the original. Without `?w=`, serve a cleaned full-size
+  version: sharp `.rotate()`, JPEG with the ICC profile, no EXIF/XMP/IPTC.
+  Cache key suffix `_clean`.
+- JSON responses carry no coordinates. The location (`location_city`) is shown
+  only when `public_show_location` is set on the album (default off). Capture
+  time is given as a date only.
+- Guest downloads use the same cleaned version.
+- **Faces:** the existing `link_visibility = auto` rule does **not**
+  automatically apply to approved-public photos, because the reviewer's
+  explicit approval is the decision. The sort-in dialog shows a warning when
+  named people were recognised.
 
-Angemeldete Nutzer sehen weiterhin alle Metadaten.
+Signed-in users keep seeing all metadata.
 
-## Etappen
+Uploads through upload links keep their metadata in the original, so the
+reviewer can see place and time. It is only stripped on anonymous delivery.
 
-1. **Datenmodell, Rolle, Sichtbarkeit:**
-   - Migration, Schema, Seed, `app_settings`.
-   - `photo-release.service.ts` und Anpassung aller Lese- und Anlegestellen
-     einschließlich Dateizugriff.
+## Stages
+
+0. **Server-side access control** (separate issue and PR, before
+   everything else):
+   - The `canSeePhoto` rule applied to file access, render, export, OCR,
+     POI matches and transforms.
+   - `personId` ownership on face assign, a user filter on person and face
+     reads, and the minor findings listed above.
+   - Tests for forbidden access to other users' photos and for every
+     legitimate cross-user path.
+1. **Data model, roles, visibility:**
+   - Migration, schema, seed (permissions, roles, system user
+     "Organisation"), `app_settings`.
+   - `photo-release.service.ts`, adapting every read and create path.
+   - Public links exclude new and rejected photos.
    - Tests:
-     - Mit Modus aus ist alles unverändert.
-     - Ein neues Foto ist unsichtbar für andere Nutzer mit `photos.view`, für
-       Links und anonym, aber sichtbar für die hochladende Person und für
-       Genehmiger.
-     - Ein internes Foto ist sichtbar für alle mit `photos.view`, aber nicht
-       anonym.
-2. **Freigabe-API:**
-   - Einsortieren, Ablehnen, Klasse ändern, Freigabe-Alben und deren Rechte,
-     Nebenwirkungen erst bei Genehmigung.
-   - Tests: Rechte, Batch-Verarbeitung, Herabstufung.
-3. **Öffentliche Einstiegsseite und Metadaten:**
-   - Endpunkte `/public/*`, bereinigte Auslieferung, JSON ohne Koordinaten.
-   - Test: Die anonym gelieferte Datei enthält kein GPS (mit `exifr`
-     prüfen).
-4. **Benachrichtigungen:** Feed-Kinds, Push-Kind, E-Mail-Digest und
-   Einstellungen. Tests für den Cron (Ruhephase, eine E-Mail je Genehmiger,
-   Opt-out).
-5. **Frontend:** Freigabeansicht, Einsortieren-Dialog, Badges,
-   Freigabe-Alben, öffentliche Einstiegsseite, Einstellungen, Profil,
-   Stories.
-6. **(Optional)** iOS-App: Badges, Freigabeansicht, Nutzung der öffentlichen
-   Einstiegsseite. Dokumentation in `docs/`.
-
-## Getroffene Annahmen
-
-Sie lassen sich bei Bedarf ändern.
-
-- **Selbstfreigabe:** Auch Fotos von Genehmigern landen in *neu*. Ein
-  Genehmiger darf eigene Fotos selbst freigeben, es gibt also kein
-  Vier-Augen-Prinzip.
-- **Abgelehnte Fotos** werden nicht automatisch gelöscht. Das Löschen bleibt
-  der hochladenden Person oder dem Genehmiger überlassen.
-- Die Genehmigung verlangt **mindestens ein Album**. Ein freigegebenes Foto
-  ohne Album gibt es nicht.
+     - `NULL` photos are unchanged.
+     - A new photo is invisible to other viewers, links and anonymous
+       visitors, and visible to the submitter and reviewers.
+     - An internal photo is visible to `photos.view` but not anonymously.
+2. **Entry points:** release-inbox flag on libraries (watcher, scan, cron)
+   and submit / withdraw. Tests for each.
+3. **Release API:**
+   - Sort in, reject, change level, release albums and their permissions,
+     side effects only on approval.
+   - Tests: permissions, batches, downgrade.
+4. **Upload links:**
+   - Table, management API, anonymous upload endpoint with the safeguards.
+   - Tests: expiry, limits, non-image rejection, rate limit, duplicates.
+5. **Public entry page and metadata:**
+   - `/public/*`, cleaned delivery, JSON without coordinates.
+   - Test: the anonymously delivered file contains no GPS (checked with
+     `exifr`).
+6. **Notifications:** feed kinds, push kind, email digest and settings. Tests
+   for the cron: quiet period, one email per reviewer, opt-out.
+7. **Frontend:** release view, sort-in dialog, upload-link management with
+   QR code, upload page, public entry page, release albums, badges,
+   settings, profile, stories.
+8. **(Optional)** iOS app (badges, release view, submit), purging rejected
+   photos, a four-eyes setting, docs in `docs/`.
