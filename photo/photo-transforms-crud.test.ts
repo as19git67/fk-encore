@@ -11,6 +11,9 @@ import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbInsertReturning } from "../db/adapter";
 import {
+  albumPhotos,
+  albumShares,
+  albums,
   photos,
   photoTransforms,
   photoTransformSuggestions,
@@ -30,6 +33,13 @@ import {
 let userA: number;
 let userB: number;
 let photoId: number;
+/** Alice's album that `photoId` sits in and that is shared with Bob. */
+let sharedAlbumId: number;
+
+/** Put `id` in Alice's album shared with Bob, so Bob may see it. */
+async function shareWithBob(id: number) {
+  await db.insert(albumPhotos).values({ album_id: sharedAlbumId, photo_id: id });
+}
 
 async function insertSuggestion(payload: PhotoTransformSuggestionsPayload) {
   await db
@@ -44,6 +54,9 @@ async function insertSuggestion(payload: PhotoTransformSuggestionsPayload) {
 beforeEach(async () => {
   await db.delete(photoTransforms);
   await db.delete(photoTransformSuggestions);
+  await db.delete(albumPhotos);
+  await db.delete(albumShares);
+  await db.delete(albums);
   await db.delete(photos);
   await db.delete(users);
 
@@ -77,6 +90,15 @@ beforeEach(async () => {
       .returning({ id: photos.id }),
   );
   photoId = photo!.id;
+
+  // Every transform endpoint is gated on seeing the photo (#1435). Bob edits
+  // Alice's photo throughout these tests, so it has to be shared with him.
+  const album = await dbInsertReturning<{ id: number }>(
+    db.insert(albums).values({ user_id: userA, name: "Shared" }).returning({ id: albums.id }),
+  );
+  sharedAlbumId = album!.id;
+  await db.insert(albumShares).values({ album_id: sharedAlbumId, user_id: userB, access_level: "read" });
+  await shareWithBob(photoId);
 });
 
 describe("validateUpsertRequest — pure", () => {
@@ -392,6 +414,7 @@ describe("listMyTransformedPhotoIdsLogic", () => {
       )
     )!.id;
 
+    await shareWithBob(p3);
     await upsertOwnTransformLogic(userA, p1, { exposure: 0.5 });
     await upsertOwnTransformLogic(userA, p2, { contrast: 0.1 });
     await upsertOwnTransformLogic(userB, p3, { exposure: -0.5 });
@@ -409,5 +432,89 @@ describe("listMyTransformedPhotoIdsLogic", () => {
     );
     const res = await listMyTransformedPhotoIdsLogic(userA);
     expect(res.photo_ids).toEqual([]);
+  });
+});
+
+describe("per-photo scope (#1435)", () => {
+  let strangerId: number;
+  let privatePhotoId: number;
+
+  beforeEach(async () => {
+    strangerId = (
+      await createUserLogic({
+        email: `c-${Date.now()}@example.com`,
+        name: "Carol",
+        password: "pw",
+      })
+    ).id;
+    // Alice's photo that is in no album at all.
+    privatePhotoId = (
+      await dbInsertReturning<{ id: number }>(
+        db
+          .insert(photos)
+          .values({
+            user_id: userA,
+            filename: `private-${Date.now()}.jpg`,
+            original_name: "private.jpg",
+            mime_type: "image/jpeg",
+            size: 1,
+            width: 100,
+            height: 100,
+          })
+          .returning({ id: photos.id }),
+      )
+    )!.id;
+    await insertSuggestionFor(privatePhotoId);
+  });
+
+  async function insertSuggestionFor(id: number) {
+    await db.insert(photoTransformSuggestions).values({
+      photo_id: id,
+      payload: {
+        crops: { "1:1": { x: 0, y: 0, w: 1, h: 1 } },
+        exposure: 0,
+        contrast: 0,
+        gamma: 1,
+      } as unknown as PhotoTransformSuggestionsPayload,
+      model_version: "v1",
+    });
+  }
+
+  async function expectNotFound(p: Promise<unknown>) {
+    await expect(p).rejects.toSatisfy(
+      (e: unknown) => e instanceof APIError && e.code === "not_found",
+    );
+  }
+
+  it("answers a stranger like the photo did not exist, on every operation", async () => {
+    // Reads must not reveal that the photo exists, who edited it or how.
+    await expectNotFound(getPhotoTransformsLogic(strangerId, privatePhotoId));
+    // Writes must not attach a row that would show up in the owner's
+    // "others" list, nor copy the owner's recipe.
+    await expectNotFound(upsertOwnTransformLogic(strangerId, privatePhotoId, { exposure: 0.2 }));
+    await expectNotFound(materializeSuggestionLogic(strangerId, privatePhotoId, "1:1"));
+    const own = await upsertOwnTransformLogic(userA, privatePhotoId, { exposure: 0.4 });
+    await expectNotFound(adoptTransformLogic(strangerId, privatePhotoId, own.id));
+
+    const rows = await db
+      .select()
+      .from(photoTransforms)
+      .where(eq(photoTransforms.photo_id, privatePhotoId));
+    expect(rows.map((r) => r.user_id)).toEqual([userA]);
+  });
+
+  it("the owner and a shared-album member are unaffected", async () => {
+    const bundle = await getPhotoTransformsLogic(userA, privatePhotoId);
+    expect(bundle.suggestion).not.toBeNull();
+    // Bob sees `photoId` through the shared album.
+    const bobRow = await upsertOwnTransformLogic(userB, photoId, { exposure: 0.1 });
+    expect(bobRow.user_id).toBe(userB);
+  });
+
+  it("a stranger cannot read other users' recipes even by adopting", async () => {
+    // Bob's recipe on the shared photo is visible to Alice (album owner),
+    // but Carol is in no album with it.
+    const bobRow = await upsertOwnTransformLogic(userB, photoId, { exposure: 0.9 });
+    await expectNotFound(adoptTransformLogic(strangerId, photoId, bobRow.id));
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import db from "../db/database";
-import { users, photos, faces, persons, userFaceAssignments } from "../db/schema";
+import { users, photos, faces, persons, userFaceAssignments, albums, albumPhotos, albumShares } from "../db/schema";
+import { APIError } from "encore.dev/api";
 import { dbInsertReturning } from "../db/adapter";
 import { createUserLogic } from "../user/user.service";
 import { getPhotoFacesLogic } from "./photo.service";
@@ -18,6 +19,9 @@ describe("getPhotoFacesLogic", () => {
     await db.delete(userFaceAssignments);
     await db.delete(faces);
     await db.delete(persons);
+    await db.delete(albumPhotos);
+    await db.delete(albumShares);
+    await db.delete(albums);
     await db.delete(photos);
     await db.delete(users);
     owner = await createUserLogic({ email: "faces@test.com", name: "Owner", password: "pw" });
@@ -70,8 +74,58 @@ describe("getPhotoFacesLogic", () => {
     const photoId = await makePhoto(owner.id);
     await makeFace(photoId);
     const viewer = await createUserLogic({ email: "viewer@test.com", name: "Viewer", password: "pw" });
+    const album = await dbInsertReturning<{ id: number }>(
+      db.insert(albums).values({ user_id: owner.id, name: "A" }).returning({ id: albums.id }),
+    );
+    await db.insert(albumPhotos).values({ album_id: album!.id, photo_id: photoId });
+    await db.insert(albumShares).values({ album_id: album!.id, user_id: viewer.id, access_level: "read" });
 
     const { faces: out } = await getPhotoFacesLogic(viewer.id, photoId);
     expect(out).toHaveLength(0);
+  });
+
+  it("answers a viewer outside the photo's scope like a missing photo (#1435)", async () => {
+    const photoId = await makePhoto(owner.id);
+    await makeFace(photoId);
+    const stranger = await createUserLogic({ email: "stranger@test.com", name: "S", password: "pw" });
+
+    await expect(getPhotoFacesLogic(stranger.id, photoId)).rejects.toSatisfy(
+      (e: unknown) => e instanceof APIError && e.code === "not_found",
+    );
+  });
+
+  it("lets a member of an album the photo is in see its faces", async () => {
+    const photoId = await makePhoto(owner.id);
+    const faceId = await makeFace(photoId);
+    const member = await createUserLogic({ email: "member@test.com", name: "M", password: "pw" });
+    const album = await dbInsertReturning<{ id: number }>(
+      db.insert(albums).values({ user_id: owner.id, name: "A" }).returning({ id: albums.id }),
+    );
+    await db.insert(albumPhotos).values({ album_id: album!.id, photo_id: photoId });
+    await db.insert(albumShares).values({ album_id: album!.id, user_id: member.id, access_level: "read" });
+    await db.insert(userFaceAssignments).values({
+      user_id: member.id, face_id: faceId, person_id: null, ignored: false,
+    });
+
+    const { faces: out } = await getPhotoFacesLogic(member.id, photoId);
+    expect(out).toHaveLength(1);
+  });
+
+  it("never resolves another user's person name (#1435)", async () => {
+    // An assignment row pointing at somebody else's person — however it
+    // got there — must not label the face with that person's name.
+    const photoId = await makePhoto(owner.id);
+    const faceId = await makeFace(photoId);
+    const other = await createUserLogic({ email: "other@test.com", name: "O2", password: "pw" });
+    const theirPerson = await dbInsertReturning<{ id: number }>(
+      db.insert(persons).values({ user_id: other.id, name: "Secret Name" }).returning({ id: persons.id }),
+    );
+    await db.insert(userFaceAssignments).values({
+      user_id: owner.id, face_id: faceId, person_id: theirPerson!.id, ignored: false,
+    });
+
+    const { faces: out } = await getPhotoFacesLogic(owner.id, photoId);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.person_name).toBeUndefined();
   });
 });

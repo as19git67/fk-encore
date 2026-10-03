@@ -32,6 +32,7 @@ import {
 } from "../db/schema";
 import { feed, realtime, sharedalbum } from "~encore/clients";
 import { emitFeedItem } from "./photo.service";
+import { publicLinkCoversPhoto } from "./photo-file-access";
 import * as contentFeed from "../feed/content-feed.service";
 
 const MAX_COMMENT_LENGTH = 2000;
@@ -269,11 +270,16 @@ export async function listCommentsPage(
 }
 
 /**
- * Assert that the photo is reachable via the given public link (i.e.
- * it belongs to the album that link points to). Used by guest-facing
- * endpoints to authorize comment read/write without leaking info about
- * photos in other albums. Returns the album id the link points to so
- * callers can scope comments to it.
+ * Assert that the photo is reachable via the given public link: it belongs
+ * to the album that link points to, the link is live, and the public
+ * listing actually shows the photo. The last part matters — a photo a
+ * participant hid, opted out of the link, or that carries a known face is
+ * absent from `/albums/public/:token`, so a guest must not be able to read
+ * or write comments on it by id either (same rule as `/photos/file/*`, see
+ * photo-file-access.ts). Used by guest-facing endpoints to authorize
+ * comment read/write without leaking info about photos in other albums.
+ * Returns the album id the link points to so callers can scope comments
+ * to it.
  */
 export async function assertPhotoInPublicLink(
   photoId: number,
@@ -288,6 +294,9 @@ export async function assertPhotoInPublicLink(
       .limit(1),
   );
   if (!hit) throw APIError.notFound("photo not found");
+  if (!(await publicLinkCoversPhoto(publicLinkId, photoId))) {
+    throw APIError.notFound("photo not found");
+  }
   return hit.album_id;
 }
 
