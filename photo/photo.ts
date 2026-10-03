@@ -11,7 +11,7 @@ import * as orientationVariants from "./orientation-variants";
 import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
-import { denyPhotoFileRequest } from "./photo-file-access";
+import { denyPhotoFileRequest, viewerMayReadPhotoId } from "./photo-file-access";
 import { getPhotoOcrLogic, type PhotoOcrResult } from "./photo-ocr.service";
 import * as spotlight from "./photo-spotlight.service";
 import type { SpotlightIdsResponse, SpotlightIndexResponse } from "./photo-spotlight.service";
@@ -162,12 +162,12 @@ function checkModule() {
 function writeAuthorizedPhotoViewerOrRespond(res: {
   statusCode: number;
   end: (chunk?: string) => void;
-}): boolean {
+}): number | null {
   const authData = getAuthData();
   if (!authData) {
     res.statusCode = 401;
     res.end("Unauthorized");
-    return false;
+    return null;
   }
   try {
     requirePermission(authData, "module.photos");
@@ -175,9 +175,33 @@ function writeAuthorizedPhotoViewerOrRespond(res: {
   } catch {
     res.statusCode = 403;
     res.end("Forbidden");
-    return false;
+    return null;
   }
-  return true;
+  const userId = parseInt(authData.userID, 10);
+  if (!Number.isFinite(userId)) {
+    res.statusCode = 401;
+    res.end("Unauthorized");
+    return null;
+  }
+  return userId;
+}
+
+/**
+ * Raw-endpoint counterpart of the per-photo scope every metadata endpoint
+ * applies: the caller may only have a photo rendered that is their own or
+ * sits in an album they own or that is shared with them. A photo outside
+ * that scope is answered exactly like one that does not exist, so the
+ * sequential ids give nothing away. Returns true when the handler may go on.
+ */
+async function writeAccessiblePhotoOrRespond(
+  res: { statusCode: number; end: (chunk?: string) => void },
+  userId: number,
+  photoId: number,
+): Promise<boolean> {
+  if (await viewerMayReadPhotoId(userId, photoId)) return true;
+  res.statusCode = 404;
+  res.end("Photo not found");
+  return false;
 }
 
 /**
@@ -1028,7 +1052,9 @@ const VALID_RATIOS: ReadonlySet<PhotoTransformAspectRatio> = new Set([
  *   user=<id>              — required for v=user; numeric user id
  *   w=…                    — target width in pixels; omit for full resolution
  *
- * Requires authentication. This endpoint is addressed by the photo's
+ * Requires authentication, and the photo has to be within the caller's
+ * scope (own, or in an album they own or that is shared with them; see
+ * photo-file-access.ts). This endpoint is addressed by the photo's
  * sequential id, so leaving it open let anyone walk `id=1,2,3,…` and pull
  * the whole library; `v=original` additionally answered with the photo's
  * filename, handing out the one piece of information /photos/file/* relies
@@ -1041,7 +1067,8 @@ export const renderPhotoTransformed = api.raw(
   { expose: true, method: "GET", path: "/photos/:id/render", auth: true },
   async (req, res) => {
     if (writeMaintenanceResponseIfActive(res)) return;
-    if (!writeAuthorizedPhotoViewerOrRespond(res)) return;
+    const viewerId = writeAuthorizedPhotoViewerOrRespond(res);
+    if (viewerId === null) return;
     try {
       const url = new URL(req.url || "", `http://${req.headers.host}`);
       // api.raw doesn't surface path params; parse `:id` from the URL.
@@ -1057,6 +1084,7 @@ export const renderPhotoTransformed = api.raw(
         res.end("Invalid photo id");
         return;
       }
+      if (!(await writeAccessiblePhotoOrRespond(res, viewerId, photoId))) return;
 
       const variant = (url.searchParams.get("v") ?? "suggested").toLowerCase();
       if (variant !== "suggested" && variant !== "user" && variant !== "original") {
@@ -1307,7 +1335,8 @@ export const exportPhotoTransformed = api.raw(
   { expose: true, method: "GET", path: "/photos/:id/export", auth: true },
   async (req, res) => {
     if (writeMaintenanceResponseIfActive(res)) return;
-    if (!writeAuthorizedPhotoViewerOrRespond(res)) return;
+    const viewerId = writeAuthorizedPhotoViewerOrRespond(res);
+    if (viewerId === null) return;
     try {
       const url = new URL(req.url || "", `http://${req.headers.host}`);
       const match = url.pathname.match(/\/photos\/(\d+)\/export$/);
@@ -1322,6 +1351,7 @@ export const exportPhotoTransformed = api.raw(
         res.end("Invalid photo id");
         return;
       }
+      if (!(await writeAccessiblePhotoOrRespond(res, viewerId, photoId))) return;
 
       const variant = (url.searchParams.get("v") ?? "user").toLowerCase();
       if (variant !== "suggested" && variant !== "user") {
