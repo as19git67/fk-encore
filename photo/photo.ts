@@ -11,7 +11,7 @@ import * as orientationVariants from "./orientation-variants";
 import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
-import { denyPhotoFileRequest, viewerMayReadPhotoId } from "./photo-file-access";
+import { assertPhotoAccess, denyPhotoFileRequest, viewerMayReadPhotoId } from "./photo-file-access";
 import { getPhotoOcrLogic, type PhotoOcrResult } from "./photo-ocr.service";
 import * as spotlight from "./photo-spotlight.service";
 import type { SpotlightIdsResponse, SpotlightIndexResponse } from "./photo-spotlight.service";
@@ -1312,8 +1312,10 @@ export const computeAutoLevels = api(
     req: { id: number; crop?: PhotoTransformCrop | null },
   ): Promise<{ exposure: number; contrast: number; gamma: number }> => {
     checkModule();
+    const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
+    await assertPhotoAccess(userId, req.id);
     const result = await computeAutoLevelsForPhoto(req.id, req.crop ?? null);
     if (!result) {
       throw APIError.notFound(`photo ${req.id} not found`);
@@ -2524,8 +2526,10 @@ export const getPhotoPoiMatches = api(
   { expose: true, method: "GET", path: "/photos/:id/poi-matches", auth: true },
   async ({ id }: { id: number }): Promise<{ matches: PoiMatchItem[] }> => {
     checkModule();
+    const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
+    await assertPhotoAccess(userId, id);
     return await service.getPoiMatchesForPhotoLogic(id);
   }
 );
@@ -2541,8 +2545,10 @@ export const getPhotoOcr = api(
   { expose: true, method: "GET", path: "/photos/:id/ocr", auth: true },
   async ({ id }: { id: number }): Promise<{ ocr: PhotoOcrResult | null }> => {
     checkModule();
+    const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
+    await assertPhotoAccess(userId, id);
     return { ocr: await getPhotoOcrLogic(id) };
   }
 );
@@ -2634,6 +2640,6 @@ export const listPhotoUploaders = api(
   async (): Promise<{ uploaders: { id: number; name: string }[] }> => {
     checkModule();
     requirePermission(getAuthData()!, "photos.view");
-    return await service.listPhotoUploadersLogic();
+    return await service.listPhotoUploadersLogic(getUserId());
   }
 );

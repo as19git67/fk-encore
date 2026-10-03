@@ -28,6 +28,7 @@
  */
 
 import { getAuthData } from "~encore/auth";
+import { APIError } from "encore.dev/api";
 import { sql, type SQL } from "drizzle-orm";
 import db from "../db/database";
 import { requirePermission } from "../user/auth-handler";
@@ -52,22 +53,26 @@ export interface PhotoFileDenial {
 }
 
 /**
- * True when the share link is live and actually covers this file.
+ * True when a public link is live and actually covers a photo.
+ *
+ * `linkCond` picks the link (by token for an image request, by id for a
+ * guest session) and `photoCond` the photo (by filename or id); both are
+ * predicates over the aliases `l` and `p`.
  *
  * The exclusions mirror `getPublicAlbumLogic` exactly: a photo any album
  * participant has hidden, one set to `link_visibility = 'hidden'`, and — by
  * default — one carrying a face a participant assigned to a named person are
  * all absent from the public listing, so none of them may be reachable by
- * filename either; otherwise hiding a photo after sharing the link would not
- * take effect for anyone who noted the URL.
+ * filename, nor commented on, either; otherwise hiding a photo after sharing
+ * the link would not take effect for anyone who noted the URL.
  */
-async function shareLinkCoversFile(token: string, filename: string): Promise<boolean> {
+async function publicLinkCovers(linkCond: SQL, photoCond: SQL): Promise<boolean> {
   const result = await db.execute(sql`
     SELECT 1
     FROM ${albumPublicLinks} l
     JOIN ${albums} a ON a.id = l.album_id
-    JOIN ${photos} p ON p.filename = ${filename}
-    WHERE l.token = ${token}
+    JOIN ${photos} p ON ${photoCond}
+    WHERE ${linkCond}
       AND l.disabled_at IS NULL
       AND (l.expires_at IS NULL OR l.expires_at > NOW())
       -- Photos the link may not show — the per-photo opt-out, and by default
@@ -118,6 +123,20 @@ async function shareLinkCoversFile(token: string, filename: string): Promise<boo
     LIMIT 1
   `);
   return result.rows.length > 0;
+}
+
+/** True when the share link behind `token` is live and covers this file. */
+function shareLinkCoversFile(token: string, filename: string): Promise<boolean> {
+  return publicLinkCovers(sql`l.token = ${token}`, sql`p.filename = ${filename}`);
+}
+
+/**
+ * True when the public link with this id is live and shows this photo. The
+ * guest comment endpoints use it so a photo the public listing withholds
+ * (hidden, opted out, or carrying a known face) cannot be reached by id.
+ */
+export function publicLinkCoversPhoto(publicLinkId: number, photoId: number): Promise<boolean> {
+  return publicLinkCovers(sql`l.id = ${publicLinkId}`, sql`p.id = ${photoId}`);
 }
 
 /**
@@ -174,6 +193,17 @@ export function viewerMayReadFile(userId: number, filename: string): Promise<boo
  */
 export function viewerMayReadPhotoId(userId: number, photoId: number): Promise<boolean> {
   return viewerMayRead(userId, sql`${photos.id} = ${photoId}`);
+}
+
+/**
+ * The per-photo gate for typed endpoints addressed by photo id: throws
+ * `not_found` unless `userId` may see the photo. A photo outside the
+ * caller's scope is indistinguishable from one that does not exist.
+ */
+export async function assertPhotoAccess(userId: number, photoId: number): Promise<void> {
+  if (!(await viewerMayReadPhotoId(userId, photoId))) {
+    throw APIError.notFound("photo not found");
+  }
 }
 
 /** True when this caller holds the photo module and the viewer right. */

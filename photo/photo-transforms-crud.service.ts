@@ -17,6 +17,7 @@ import {
   type PhotoTransformCrop,
   type PhotoTransformSuggestionsPayload,
 } from "../db/schema";
+import { assertPhotoAccess } from "./photo-file-access";
 import { APIError } from "encore.dev/api";
 
 // ----------------- DTO types -----------------
@@ -116,15 +117,6 @@ function inRange(n: number, lo: number, hi: number): boolean {
 
 // ----------------- Internal helpers -----------------
 
-async function assertPhotoExists(photoId: number): Promise<void> {
-  const row = await dbFirst<{ id: number }>(
-    db.select({ id: photos.id }).from(photos).where(eq(photos.id, photoId)),
-  );
-  if (!row) {
-    throw APIError.notFound(`photo ${photoId} not found`);
-  }
-}
-
 function rowFromDb(r: typeof photoTransforms.$inferSelect): PhotoTransformRow {
   return {
     id: r.id,
@@ -158,7 +150,7 @@ export async function getPhotoTransformsLogic(
   userId: number,
   photoId: number,
 ): Promise<PhotoTransformsBundle> {
-  await assertPhotoExists(photoId);
+  await assertPhotoAccess(userId, photoId);
 
   const mineRow = await dbFirst<typeof photoTransforms.$inferSelect>(
     db
@@ -238,7 +230,7 @@ export async function upsertOwnTransformLogic(
   body: UpsertTransformRequest,
 ): Promise<PhotoTransformRow> {
   validateUpsertRequest(body);
-  await assertPhotoExists(photoId);
+  await assertPhotoAccess(userId, photoId);
 
   const existing = await dbFirst<typeof photoTransforms.$inferSelect>(
     db
@@ -329,7 +321,7 @@ export async function materializeSuggestionLogic(
   photoId: number,
   ratio: PhotoTransformAspectRatio,
 ): Promise<PhotoTransformRow> {
-  await assertPhotoExists(photoId);
+  await assertPhotoAccess(userId, photoId);
   const suggestion = await dbFirst<{ payload: PhotoTransformSuggestionsPayload }>(
     db
       .select({ payload: photoTransformSuggestions.payload })
@@ -385,7 +377,7 @@ export async function adoptTransformLogic(
   photoId: number,
   fromTransformId: number,
 ): Promise<PhotoTransformRow> {
-  await assertPhotoExists(photoId);
+  await assertPhotoAccess(userId, photoId);
   const source = await dbFirst<typeof photoTransforms.$inferSelect>(
     db
       .select()
