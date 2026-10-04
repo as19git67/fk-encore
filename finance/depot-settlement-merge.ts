@@ -9,8 +9,10 @@
  *                        gross ± fees ± taxes = net, quantity × price ≈
  *                        gross, the ISIN check digit, a plausible date.
  *   mergeSettlement    — one reading from both: fields both agree on are
- *                        taken as they are; where they disagree, the
- *                        reading whose figures add up wins. When neither
+ *                        taken as they are; where they disagree, each
+ *                        field goes to whichever source makes the figures
+ *                        add up — the quantity may come from one and the
+ *                        charges from the other. When no combination
  *                        adds up and they disagree on something that
  *                        matters, the result is "unverified" — the caller
  *                        books nothing and asks the user.
@@ -261,15 +263,6 @@ export function settlementChecks(
   return checks;
 }
 
-/** The fields each check reads — what a passed check vouches for. */
-const CHECK_FIELDS: Record<CheckName, MergeField[]> = {
-  net_equation: ["kind", "gross", "fees", "tax", "net"],
-  quantity_price: ["quantity", "price", "gross"],
-  isin_checksum: ["isin"],
-  date_plausible: ["executedAt"],
-  booking_net: ["kind", "gross", "fees", "tax", "net"],
-};
-
 function score(checks: SettlementCheck[]): { ok: number; failed: number } {
   return {
     ok: checks.filter((c) => c.result === "ok").length,
@@ -309,10 +302,17 @@ function same(field: MergeField, a: unknown, b: unknown): boolean {
   return a === b;
 }
 
-function fill(primary: SettlementValues, secondary: SettlementValues): SettlementValues {
-  const out = { ...primary } as Record<MergeField, unknown>;
+/** Above this many disagreeing fields, only the two whole readings are tried (2^n combinations). */
+const MAX_COMBINED_FIELDS = 10;
+
+/**
+ * One reading from both: the model's value for the fields in `fromLlm`,
+ * the rules' for every other field — each source filling the other's gaps.
+ */
+function combine(rules: SettlementValues, llm: SettlementValues, fromLlm: Set<MergeField>): SettlementValues {
+  const out = {} as Record<MergeField, unknown>;
   for (const f of MERGE_FIELDS) {
-    if (out[f] === null) out[f] = secondary[f];
+    out[f] = fromLlm.has(f) ? llm[f] : (rules[f] ?? llm[f]);
   }
   const v = out as SettlementValues;
   // The sign of net follows the kind that was settled on.
@@ -338,40 +338,36 @@ export function mergeSettlement(
   const r = rules ?? EMPTY_SETTLEMENT;
   const l = llm ?? EMPTY_SETTLEMENT;
 
-  // Candidate readings: each source, its gaps filled from the other.
-  const fromRules = fill(r, l);
-  const fromLlm = fill(l, r);
-  const rulesChecks = settlementChecks(fromRules, today, bookingNet);
-  const llmChecks = settlementChecks(fromLlm, today, bookingNet);
-  const rs = score(rulesChecks);
-  const ls = score(llmChecks);
-
-  // Fewer failures wins, then more passes; a tie goes to the rules, which
-  // never invent a number.
-  const llmWins = llm !== null && (ls.failed < rs.failed || (ls.failed === rs.failed && ls.ok > rs.ok));
-  const values: SettlementValues = { ...(llmWins ? fromLlm : fromRules) };
-  const checks = llmWins ? llmChecks : rulesChecks;
-
-  // The checks vouch only for the fields they used. Where the model's
-  // reading won on the figures but disagrees with the rules on a field no
-  // check reached — the quantity of a dividend statement without a price
-  // per share, say — the rules' value stands: it was read after a printed
-  // label, while the model may have taken a number from anywhere on the page.
-  const vouched = new Set<MergeField>(
-    checks.filter((c) => c.result !== "skipped").flatMap((c) => CHECK_FIELDS[c.name]),
-  );
-  const fromRulesInstead = new Set<MergeField>();
-  if (llmWins) {
-    for (const field of MERGE_FIELDS) {
-      const rv = r[field];
-      const lv = l[field];
-      if (rv !== null && lv !== null && !same(field, rv, lv) && !vouched.has(field)) {
-        (values as Record<MergeField, unknown>)[field] = rv;
-        fromRulesInstead.add(field);
-      }
+  // Where both read a value and they differ, either may be the right one —
+  // and not necessarily the same source for every field: the rules can
+  // read the charges right and the quantity wrong while the model does the
+  // opposite. So every combination is tried, field by field, and the one
+  // whose figures add up wins.
+  const disagreeing = MERGE_FIELDS.filter((f) => r[f] !== null && l[f] !== null && !same(f, r[f], l[f]));
+  const choices = disagreeing.length <= MAX_COMBINED_FIELDS ? 1 << disagreeing.length : 2;
+  let best: { values: SettlementValues; checks: SettlementCheck[]; fromLlm: Set<MergeField> } | null = null;
+  let bestKey: [number, number, number] | null = null;
+  for (let mask = 0; mask < choices; mask++) {
+    // Too many disagreements to try them all: one source or the other, whole.
+    const fromLlm = new Set<MergeField>(
+      disagreeing.length <= MAX_COMBINED_FIELDS ? disagreeing.filter((_, i) => mask & (1 << i)) : mask ? disagreeing : [],
+    );
+    const values = combine(r, l, fromLlm);
+    const checks = settlementChecks(values, today, bookingNet);
+    const s = score(checks);
+    // Fewer failures wins, then more passes, then fewer values taken from
+    // the model: a tie goes to the rules, which never invent a number. That
+    // last rule also keeps a field no check reaches — the quantity of a
+    // dividend statement without a price per share, say — with the rules:
+    // it was read after a printed label, while the model may have taken a
+    // number from anywhere on the page.
+    const key: [number, number, number] = [s.failed, -s.ok, fromLlm.size];
+    if (!bestKey || key[0] < bestKey[0] || (key[0] === bestKey[0] && (key[1] < bestKey[1] || (key[1] === bestKey[1] && key[2] < bestKey[2])))) {
+      best = { values, checks, fromLlm };
+      bestKey = key;
     }
-    if (values.net !== null && values.kind) values.net = values.kind === "buy" ? -Math.abs(values.net) : Math.abs(values.net);
   }
+  const { values, checks, fromLlm } = best!;
 
   const fields: MergedField[] = MERGE_FIELDS.map((field) => {
     const rv = r[field];
@@ -380,7 +376,7 @@ export function mergeSettlement(
     let source: FieldSource = null;
     if (values[field] === null) source = null;
     else if (rv !== null && lv !== null && !disagree) source = "both";
-    else if (disagree) source = llmWins && !fromRulesInstead.has(field) ? "llm" : "rules";
+    else if (disagree) source = fromLlm.has(field) ? "llm" : "rules";
     else source = rv !== null ? "rules" : "llm";
     return { field, rules: rv, llm: lv, source, disagree };
   });

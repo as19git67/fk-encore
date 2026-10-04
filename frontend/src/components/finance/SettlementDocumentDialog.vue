@@ -282,6 +282,7 @@ function openInDocuments() {
                 <td v-if="hasLlm" class="sd-label">
                   <template v-if="sourceOf(row.key)?.disagree">
                     {{ format(row.key, sourceOf(row.key)!.rules) }} / {{ format(row.key, sourceOf(row.key)!.llm) }}
+                    <span v-if="inspection.labels[row.key]" class="sd-label-after">Regel las nach „{{ inspection.labels[row.key] }}“</span>
                   </template>
                   <template v-else>{{ inspection.labels[row.key] ?? '' }}</template>
                 </td>
@@ -425,6 +426,10 @@ function openInDocuments() {
 .sd-label {
   color: var(--p-text-muted-color);
   font-style: italic;
+}
+.sd-label-after {
+  display: block;
+  font-size: var(--text-xs);
 }
 .sd-disagree td {
   background: rgba(234, 179, 8, 0.12);
