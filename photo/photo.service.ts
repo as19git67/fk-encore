@@ -153,6 +153,7 @@ import { writeCacheFileAtomically } from "./cache-file";
 import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
 import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS, MlRpcTimeoutError } from "./rpc-timeout";
 import { computeOrientationVariants, photoOrientation } from "./orientation-variants";
+import { accessiblePhotoCondition, assertPhotoAccess } from "./photo-file-access";
 import {
   buildPhotoFilterConditions,
   type PhotoFilterParams,
@@ -6262,8 +6263,12 @@ export async function updatePersonLogic(userId: number, personId: number, name: 
         cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
       })
       .from(persons)
-      .where(eq(persons.id, personId))
-  ))!;
+      .where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
+  ));
+  // The UPDATE above was scoped to the caller, so a miss here means the
+  // person is not theirs (or does not exist) — never echo another user's
+  // record back.
+  if (!updated) throw APIError.notFound("person not found");
 
   return {
     id: updated.id,
@@ -6334,6 +6339,16 @@ export async function assignFaceToPersonLogic(
   faceId: number,
   personId: number
 ): Promise<{ success: boolean }> {
+  // Only the caller's own persons may receive a face: pointing one at
+  // another user's person would leak that person's name through
+  // getPhotoFacesLogic and inflate their faceCount.
+  const person = await dbFirst<{ id: number }>(
+    db.select({ id: persons.id })
+      .from(persons)
+      .where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
+  );
+  if (!person) throw APIError.notFound("person not found");
+
   await dbExec(
     db.update(userFaceAssignments)
       .set({ person_id: personId, ignored: false })
@@ -6374,6 +6389,7 @@ export async function getPhotoFacesLogic(
   userId: number,
   photoId: number
 ): Promise<{ faces: Face[] }> {
+  await assertPhotoAccess(userId, photoId);
   const rows = await dbAll<{
     id: number; user_id: number; photo_id: number; bbox: string; embedding: string;
     person_id: number | null; person_name: string | null; quality: number | null; ignored: boolean;
@@ -6398,7 +6414,10 @@ export async function getPhotoFacesLogic(
       eq(userFaceAssignments.face_id, faces.id),
       eq(userFaceAssignments.user_id, userId)
     ))
-    .leftJoin(persons, eq(persons.id, userFaceAssignments.person_id))
+    .leftJoin(persons, and(
+      eq(persons.id, userFaceAssignments.person_id),
+      eq(persons.user_id, userId)
+    ))
     .where(eq(faces.photo_id, photoId))
   );
 
@@ -8734,11 +8753,18 @@ export async function purgeAllPhotosLogic(deleteFiles: boolean): Promise<PurgeRe
   return { success: true, dbCounts, files, embeddingService };
 }
 
-export async function listPhotoUploadersLogic(): Promise<{ uploaders: { id: number; name: string }[] }> {
+/**
+ * Users who uploaded at least one photo the caller can see — the options
+ * of the gallery's uploader filter. Listing every account that owns a
+ * photo would tell a viewer who else uses the module, which is nothing a
+ * list of their own and shared photos says.
+ */
+export async function listPhotoUploadersLogic(userId: number): Promise<{ uploaders: { id: number; name: string }[] }> {
   const rows = await dbAll<{ id: number; name: string }>(
     db.selectDistinctOn([users.id], { id: users.id, name: users.name })
       .from(photos)
       .innerJoin(users, eq(photos.user_id, users.id))
+      .where(accessiblePhotoCondition(userId))
       .orderBy(users.id)
   );
   return { uploaders: rows };
