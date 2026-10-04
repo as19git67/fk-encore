@@ -1,39 +1,33 @@
-import MapKit
 import SwiftUI
 
-/// Starting a trip — the screen that was missing.
+/// A new trip (§4.2, §25): only what it needs to exist.
 ///
-/// The planner list said "Sag, wohin und wie lange" and then offered
-/// nowhere to say it, so nothing else in the planner could be reached
-/// at all. This is that place.
-///
-/// It is a **form first**, with the sentence as an accelerator below
-/// it. That order is on purpose: the language model runs on the user's
-/// own box and is regularly cold or unavailable, and a screen that can
-/// only be used when a model answers is a screen that sometimes cannot
-/// be used. What the sentence does is fill the same fields in, visibly,
-/// so a misread sentence is a correction rather than a wrong trip
-/// (§8.3).
+/// A name, the first place, how long and from when, how it gets about.
+/// Everything else — further legs and journeys, who comes along, the
+/// pace, what counts — is done afterwards exactly as it is changed
+/// later: in the leg strip and the trip's settings. The form once asked
+/// for all of it at once, plus a sentence a model would read; a trip
+/// that could be created in four fields took a screenful, and the
+/// screenful was not where anybody changed those things afterwards.
 struct TripNewPlanView: View {
     @State private var model = TripNewPlanViewModel()
     @Environment(\.dismiss) private var dismiss
     @State private var confirmCancel = false
-    /// The draft city about to be deleted (display offsets, see
-    /// `removeLegs`). A filled-in city is not deleted by one swipe.
-    @State private var removingOffsets: IndexSet?
 
     /// Handed the new plan's id, so the caller can open it.
     let onCreated: (Int) -> Void
 
     var body: some View {
         Form {
+            // Only what a trip needs to exist (§25): a name, the first
+            // place, how long, how it gets about. Further legs,
+            // journeys, who comes, what counts — all of that is done
+            // afterwards exactly as it is changed later, in the leg
+            // strip and the trip's settings.
             nameSection
             placeSection
-            routeSection
             lengthSection
-            styleSection
-            interestsSection
-            sentenceSection
+            modeSection
             if !model.draft.isPlannable {
                 Section {
                     EmptyView()
@@ -47,23 +41,12 @@ struct TripNewPlanView: View {
         .navigationTitle("Neue Reise")
         .plannerErrorBanner(model.errorMessage, dismiss: { model.errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
-        .task { await model.loadInterests() }
         // A filled form is not thrown away by a swipe or a mis-tap.
         .interactiveDismissDisabled(model.isDirty)
         .confirmationDialog("Eingaben verwerfen?", isPresented: $confirmCancel,
                             titleVisibility: .visible) {
             Button("Verwerfen", role: .destructive) { dismiss() }
             Button("Weiter bearbeiten", role: .cancel) {}
-        }
-        .alert("Stadt entfernen?", isPresented: Binding(
-            get: { removingOffsets != nil }, set: { if !$0 { removingOffsets = nil } })) {
-            Button("Entfernen", role: .destructive) {
-                if let offsets = removingOffsets { model.removeLegs(displayedAt: offsets) }
-                removingOffsets = nil
-            }
-            Button("Abbrechen", role: .cancel) { removingOffsets = nil }
-        } message: {
-            Text("Ort, Länge und Zeiten dieser Stadt gehen verloren.")
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -152,73 +135,6 @@ struct TripNewPlanView: View {
         }
     }
 
-    // MARK: - Further cities
-
-    /// The rest of the route (§4.2).
-    ///
-    /// Kept below the first city rather than turning the screen into a
-    /// list of equals: most trips have one city, and a screen that asks
-    /// "how many cities?" first makes the common case pay for the rare
-    /// one. Adding the second one is one tap away, and from then on the
-    /// two read alike.
-    private var routeSection: some View {
-        Section {
-            // Addressed by identity, never by index. A row bound to
-            // `legs[2]` keeps that index after the list shrinks, and
-            // SwiftUI evaluates a pushed destination once more on the
-            // way out — which is a crash rather than a stale screen.
-            ForEach(model.draft.legs.dropFirst()) { leg in
-                NavigationLink {
-                    TripDraftLegView(
-                        leg: model.binding(for: leg.id),
-                        position: model.position(of: leg.id) ?? 1,
-                        previousName: model.legBefore(leg.id)?.place?.name,
-                    )
-                } label: {
-                    legRow(leg, position: model.position(of: leg.id) ?? 1)
-                }
-            }
-            .onDelete { offsets in
-                // These index the *displayed* rows, which start at the
-                // second city — so offset 0 is `legs[1]`. Asked first
-                // when the row already holds a place.
-                let displayed = Array(model.draft.legs.dropFirst())
-                let holdsSomething = offsets.contains {
-                    displayed.indices.contains($0) && displayed[$0].place != nil
-                }
-                if holdsSomething { removingOffsets = offsets } else { model.removeLegs(displayedAt: offsets) }
-            }
-
-            Button {
-                model.addLeg()
-            } label: {
-                Label("Noch eine Stadt", systemImage: "plus.circle")
-            }
-            .disabled(model.draft.legs.count >= TripNewPlanDraft.maxLegs)
-        } header: {
-            Text("Weiter nach")
-        } footer: {
-            Text("Jede Stadt hat ihren eigenen Ausgangspunkt, ihre eigene Länge und ihr "
-                 + "eigenes Verkehrsmittel. Die Fahrt dazwischen kürzt beide Tage: der "
-                 + "Abreisetag hat keinen Abend, der Ankunftstag keinen Vormittag.")
-        }
-    }
-
-    private func legRow(_ leg: TripDraftLeg, position: Int) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(leg.place?.name ?? "Stadt \(position + 1) — noch offen")
-                .foregroundStyle(leg.place == nil ? .secondary : .primary)
-            HStack(spacing: 6) {
-                Text(leg.days == 1 ? "1 Tag" : "\(leg.days) Tage")
-                Text("·")
-                Label(leg.mode.label, systemImage: leg.mode.systemImage)
-                    .labelStyle(.titleAndIcon)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-    }
-
     // MARK: - How long
 
     private var lengthSection: some View {
@@ -278,93 +194,15 @@ struct TripNewPlanView: View {
 
     // MARK: - How
 
-    private var styleSection: some View {
+    private var modeSection: some View {
         Section {
-            Picker("Tempo", selection: $model.draft.pace) {
-                ForEach(TripPace.allCases, id: \.self) { pace in
-                    Text(pace.label).tag(pace)
-                }
-            }
             TripTransportModePicker(mode: $model.draft.mode)
-            Toggle("Mit Kind", isOn: $model.draft.withChildren)
-            Toggle("Schlecht zu Fuß", isOn: $model.draft.limitedMobility)
         } header: {
-            Text("Wie?")
+            Text("Wie unterwegs?")
         } footer: {
-            Text("Gilt für die ganze Reise; jede weitere Stadt kann ihr eigenes Verkehrsmittel "
-                 + "haben. Verkehrsmittel, Tempo und Begleitung bestimmen, wie viel an einem Tag "
-                 + "Platz hat. Alles davon lässt sich später in den Einstellungen ändern.")
-        }
-    }
-
-    // MARK: - What counts
-
-    /// The interests, as toggles — the same list the settings show.
-    /// They used to be reachable at creation only through the sentence,
-    /// which needs a model that is often asleep.
-    @ViewBuilder
-    private var interestsSection: some View {
-        if !model.interestOptions.isEmpty {
-            Section {
-                ForEach(model.interestOptions) { option in
-                    Toggle(option.label, isOn: Binding(
-                        get: { model.draft.interests.contains(option.id) },
-                        set: { on in
-                            if on {
-                                if !model.draft.interests.contains(option.id) {
-                                    model.draft.interests.append(option.id)
-                                }
-                            } else {
-                                model.draft.interests.removeAll { $0 == option.id }
-                            }
-                        },
-                    ))
-                }
-            } header: {
-                Text("Wonach gesucht wird")
-            } footer: {
-                Text("Gesucht wird nur, was angekreuzt ist. „Alles andere“ steht für Orte, "
-                     + "die zu keinem der Themen gehören — alles an heißt alles, was die Karte kennt.")
-            }
-        }
-    }
-
-    // MARK: - The sentence
-
-    private var sentenceSection: some View {
-        Section {
-            TextField("„Vier Tage Lissabon, mit Kind, eher gemütlich“",
-                      text: $model.sentence, axis: .vertical)
-                .lineLimit(2...4)
-            Button {
-                Task { await model.interpretSentence() }
-            } label: {
-                if model.isInterpreting {
-                    HStack { ProgressView(); Text("Wird gelesen…") }
-                } else {
-                    Label("Satz übernehmen", systemImage: "text.magnifyingglass")
-                }
-            }
-            .disabled(model.sentence.trimmingCharacters(in: .whitespaces).isEmpty
-                      || model.isInterpreting)
-
-            if let unavailable = model.interpretUnavailable {
-                Text("Der Satz konnte nicht gelesen werden: \(unavailable)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            // Everything the model proposed and the server would not
-            // take. Shown, never swallowed — a silently reduced plan is
-            // worse than a visible misunderstanding.
-            ForEach(model.rejected, id: \.self) { note in
-                Label(note, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text("Oder in einem Satz")
-        } footer: {
-            Text("Der Satz füllt die Felder oben aus — den Ort bestätigst du auf der Karte.")
+            Text("Gilt für diese Stadt; jede weitere kann ihr eigenes Verkehrsmittel haben. "
+                 + "Tempo, Begleitung und wonach gesucht wird stehen danach in den Einstellungen "
+                 + "der Reise.")
         }
     }
 }

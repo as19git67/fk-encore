@@ -5835,3 +5835,81 @@ Bis das entschieden ist, bleibt es eine Idee. Der billige erste Schritt, falls
 er je gewollt wird: Beim Betreten des Zauns den Namen des Spots und sein
 „Warum hier?" vorlesen — das ist keine Hörtour, aber es ist das Gerüst, in das
 eine hineinpasst.
+
+---
+
+## 25. Vereinfachung: drei Ebenen, drei Orte (2026-10-04)
+
+Aus der Praxis: Mit jeder Anforderung war ein Menüpunkt dazugekommen, und
+am Ende hatte das Dreipunktemenü des Tagesbildschirms neunzehn Einträge in
+vier Gruppen. Die Gruppen folgten nicht dem, woran jemand gerade arbeitet:
+„Diese Reise" enthielt die Kandidaten und die Wünsche (die zur Etappe
+gehören) neben Städten und Einstellungen (die zur Reise gehören), und die
+Struktur der Reise — Etappen, Weiterreisen — war ein Eintrag unter vielen,
+obwohl der obere Bereich des Bildschirms sie längst zeigt.
+
+Der Befund dahinter: Es gibt nicht zwei Ebenen, sondern drei — **Reise**,
+**Etappe**, **Tag** —, und die mittlere hatte keinen Ort. Alles von ihr lag
+deshalb im Menü.
+
+### 25.1 Die Regel
+
+Jede Ebene hat genau einen Ort auf dem Tagesbildschirm, und jede Aktion
+liegt an dem Ort ihrer Ebene:
+
+- **Reise — die Etappenleiste oben und das Menü „Reise".** Die Leiste zeigt
+  die Etappen (immer, auch bei einer einzigen) und endet mit „Etappen": der
+  Struktur-Editor, in dem Etappen hinzugefügt, verschoben, entfernt und
+  Weiterreisen, Anreise und Heimreise eingefügt werden (`TripLegsView`).
+  Das Menü enthält nur noch, was der ganzen Reise gehört: Einstellungen,
+  Planen mit, Reisegruppe, Dokumente, Änderungen, Reisebereit?, Danach,
+  Unterwegs ohne Netz.
+- **Etappe — die Etappenkopfzeile.** Ein Tipp öffnet das Etappen-Blatt
+  (`TripLegSheet`): oben die Etappe selbst (Unterkunft, Länge, Datum,
+  Fortbewegung; bei einer Weiterreise Abfahrt, Ankunft, Fortbewegung), dann
+  **Hinzufügen** (Ort suchen, Strecke anlegen, Strecken in der Nähe, aus den
+  Ideen übernehmen — fünf Wege zu einem Ziel, dem Vorrat der Etappe) und
+  **Vorrat** (Kandidaten, Wünsche, Tagesausflug). Eine Weiterreise hat
+  denselben Vorrat und dieselben Wünsche — die Orte am Weg — und öffnet
+  dasselbe Blatt.
+- **Tag — der untere Bereich.** Feste Zeiten, Ausflugsziel, Abendlicht
+  stehen im Rahmen des Tages; Stopps, Ort suchen, Umplanen, Karte an den
+  Blöcken. Nichts davon liegt in einem Menü.
+
+Die Verteilung der früheren Menüpunkte:
+
+| Früher im Menü | Ebene | Jetzt |
+|---|---|---|
+| Städte | Reise | „Etappen" am Ende der Etappenleiste |
+| Einstellungen, Planen mit, Reisegruppe | Reise | Menü „Reise" |
+| Dokumente, Änderungen, Reisebereit?, Danach, Unterwegs ohne Netz | Reise | Menü „Reise" (und wie bisher die Reiseliste) |
+| Kandidaten, Wünsche, Tagesausflug | Etappe | Etappen-Blatt, „Vorrat" |
+| Ort suchen, Strecke anlegen, Strecken in der Nähe, Aus den Ideen übernehmen | Etappe | Etappen-Blatt, „Hinzufügen" |
+| Abendlicht | Tag | Rahmen des Tages |
+
+### 25.2 Eine neue Reise
+
+Der Anlegedialog fragt nur, was eine Reise zum Entstehen braucht: Name,
+erste Stadt, Länge und Datum, Fortbewegung. Weitere Städte, Weiterreisen,
+Anreise und Heimreise, wer mitfährt, Tempo und wonach gesucht wird — all das
+passiert danach an denselben Orten wie beim späteren Ändern. Der
+Satz-Interpreter und die Interessen sind aus dem Dialog herausgenommen; der
+eine, weil er Dinge setzte, die der Dialog nicht mehr zeigt, die anderen,
+weil sie in den Einstellungen stehen und dort zu Beginn ohnehin alle an sind
+(§8.1).
+
+### 25.3 Was noch aussteht
+
+- **Ein Wort je Ebene.** Dasselbe Ding heißt noch „Stadt", „Etappe" und
+  „Ort". „Etappe" für die Struktur, „Ort" nur für Spots — eine Durchsicht
+  der Texte steht aus.
+- **Wünsche auf der Karte** (Etappe B): Pins mit dem Symbol der Kategorie
+  und dem Abstimmungszustand als Farbring; die Details im ersten Blatt unter
+  der Abstimmung statt hinter einem zweiten Tipp; der Kartenausschnitt zoomt
+  an Ort und Stelle und öffnet die Karten-App über ein Overlay, nicht beim
+  Antippen.
+- **Wikipedia am Spot** (Etappe C): Zusammenfassung und Text über die
+  Wikipedia-API, Fotos wie bei den Strecken, zuerst der deutsche Artikel,
+  sonst Übersetzung durch den llm-service; gespeichert, gekennzeichnet, mit
+  Quelle und Lizenz.
+
