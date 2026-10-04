@@ -5858,13 +5858,18 @@ Jede Ebene hat genau einen Ort auf dem Tagesbildschirm, und jede Aktion
 liegt an dem Ort ihrer Ebene:
 
 - **Reise — die Etappenleiste oben und das Menü „Reise".** Die Leiste zeigt
-  die Etappen (immer, auch bei einer einzigen) und endet mit „Etappen": der
-  Struktur-Editor, in dem Etappen hinzugefügt, verschoben, entfernt und
-  Weiterreisen, Anreise und Heimreise eingefügt werden (`TripLegsView`).
+  die Etappen (immer, auch bei einer einzigen); rechts davon, fest am Rand
+  und nicht mitgescrollt, der Stift: der Struktur-Editor, in dem Etappen
+  hinzugefügt, verschoben, entfernt und Weiterreisen, Anreise und Heimreise
+  eingefügt werden (`TripLegsView`, als Blatt mit „Fertig"). Die Chips der
+  Leiste und der Stift sind 44 pt hoch — das Maß, das Apple für ein
+  Bedienelement verlangt.
   Das Menü enthält nur noch, was der ganzen Reise gehört: Einstellungen,
   Planen mit, Reisegruppe, Dokumente, Änderungen, Reisebereit?, Danach,
   Unterwegs ohne Netz.
-- **Etappe — die Etappenkopfzeile.** Ein Tipp öffnet das Etappen-Blatt
+- **Etappe — die Etappenkopfzeile.** Eine Karte mit Pfeil wie eine
+  Listenzeile, die erste Zeile in Textfarbe: der wichtigste Einstieg des
+  Bildschirms darf nicht wie eine Fußnote aussehen. Ein Tipp öffnet das Etappen-Blatt
   (`TripLegSheet`): oben die Etappe selbst (Unterkunft, Länge, Datum,
   Fortbewegung; bei einer Weiterreise Abfahrt, Ankunft, Fortbewegung), dann
   **Hinzufügen** (Ort suchen, Strecke anlegen, Strecken in der Nähe, aus den
@@ -5886,6 +5891,16 @@ Die Verteilung der früheren Menüpunkte:
 | Kandidaten, Wünsche, Tagesausflug | Etappe | Etappen-Blatt, „Vorrat" |
 | Ort suchen, Strecke anlegen, Strecken in der Nähe, Aus den Ideen übernehmen | Etappe | Etappen-Blatt, „Hinzufügen" |
 | Abendlicht | Tag | Rahmen des Tages |
+
+Ein Tag der Weiterreise, in den nichts geplant wird — auf See, im Zug,
+über mehrere Nächte auf der Straße —, zeigt eine Karte „An Bord" bzw.
+„Unterwegs" mit dem Fenster dieses Tages („Bis 08:00, Ankunft Reykjavik —
+danach beginnt die nächste Etappe") statt eines Puffertags mit „Diesen Tag
+jetzt planen"; der Server lehnt das Planen eines solchen Tages ab. Abfahrt
+und Ankunft der Weiterreise stehen ohne X im Rahmen des Tages: sie sind der
+Rahmen der Weiterreise und werden in ihrem Editor geändert, der Server weist
+das Entfernen zurück (`isJourneyEnd`), statt sie beim nächsten Umplanen
+stillschweigend wieder zu schreiben.
 
 ### 25.2 Eine neue Reise
 

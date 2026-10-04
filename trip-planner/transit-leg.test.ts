@@ -3,7 +3,7 @@
  * begins and ends, and which of them can hold a stop.
  */
 import { describe, expect, it } from "vitest";
-import { transitFrame } from "./transit-leg";
+import { isJourneyEnd, transitFrame } from "./transit-leg";
 
 const origin = { lat: 48.37, lon: 10.9, label: "Hotel am Fluss" };
 const destination = { lat: 48.37, lon: 11.4, label: "Pension am See" };
@@ -56,5 +56,23 @@ describe("the frame of a journey", () => {
     expect(() => transitFrame({
       origin, destination, dayCount: 1, departMinutes: 960, endMinutes: 600, mode: "car",
     })).toThrow(/arrive after/);
+  });
+});
+
+describe("the ends of a journey", () => {
+  const leg = { kind: "transit", departMinutes: 18 * 60, endMinutes: 8 * 60, dayCount: 4 };
+
+  it("recognises the departure on the first day and the arrival on the last", () => {
+    expect(isJourneyEnd(leg, 0, { kind: "appointment", startMinutes: 18 * 60 })).toBe(true);
+    expect(isJourneyEnd(leg, 3, { kind: "departure", startMinutes: 8 * 60 })).toBe(true);
+  });
+
+  it("leaves every other fixed time alone", () => {
+    // The deck programme at the departure's minute on a sea day.
+    expect(isJourneyEnd(leg, 1, { kind: "appointment", startMinutes: 18 * 60 })).toBe(false);
+    // A dinner booked at eight on the arrival day is not the arrival.
+    expect(isJourneyEnd(leg, 3, { kind: "appointment", startMinutes: 8 * 60 })).toBe(false);
+    // Nothing on a stay is a journey's end.
+    expect(isJourneyEnd({ ...leg, kind: "stay" }, 0, { kind: "appointment", startMinutes: 18 * 60 })).toBe(false);
   });
 });

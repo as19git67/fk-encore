@@ -923,6 +923,14 @@ export const detailTripDay = api(
         "this day is already planned — use redistribute to change it",
       );
     }
+    // A journey's day that is not planned is one nothing goes into
+    // (§22.7): aboard, on a train, or on the road over several nights.
+    // Its frame is all it has, and that is already written.
+    if (leg.kind === "transit") {
+      throw APIError.failedPrecondition(
+        "Ein Tag der Weiterreise wird nicht geplant — er sagt nur, wo ihr seid",
+      );
+    }
 
     const maxWalkMinutes =
       typeof plan.constraints.maxWalkMinutes === "number"

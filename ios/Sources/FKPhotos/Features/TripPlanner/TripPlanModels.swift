@@ -136,6 +136,35 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// days aboard rather than as "unterwegs".
     var isAboard: Bool { isTransit && transportMode == .ship }
 
+    /// Is this fixed time one of the two the journey writes for
+    /// itself — the departure on its first day, the arrival on its
+    /// last (§22.7)? They are the journey's frame and are changed in
+    /// its editor; taking one off the day would only have the next
+    /// re-plan write it back. The same rule the server applies.
+    func isJourneyEnd(_ fix: TripFixpoint, dayIndex: Int) -> Bool {
+        guard isTransit else { return false }
+        if dayIndex == 0, fix.kind == "appointment", fix.startMinutes == departMinutes { return true }
+        return dayIndex == days.count - 1 && fix.isDeparture && fix.startMinutes == endMinutes
+    }
+
+    /// What a day of the journey holds, in one line (§22.7, §21.3):
+    /// from the departure on the first day, up to the arrival on the
+    /// last, the whole day in between — or both on a day's journey.
+    func journeyDayLine(dayIndex: Int) -> String? {
+        guard isTransit, let departMinutes, let endMinutes else { return nil }
+        let origin = self.origin?.label ?? "Start"
+        let from = TripClock.format(departMinutes)
+        let to = TripClock.format(endMinutes)
+        let first = dayIndex == 0
+        let last = dayIndex == days.count - 1
+        switch (first, last) {
+        case (true, true): return "\(from) Abfahrt \(origin) · \(to) Ankunft \(anchorTitle)"
+        case (true, false): return "Ab \(from), Abfahrt \(origin)"
+        case (false, true): return "Bis \(to), Ankunft \(anchorTitle) — danach beginnt die nächste Etappe"
+        case (false, false): return "Den ganzen Tag"
+        }
+    }
+
     /// "10:00 → 16:00", or with dates when it takes more than a day.
     var transitWindowText: String? {
         guard isTransit, let departMinutes, let endMinutes else { return nil }
