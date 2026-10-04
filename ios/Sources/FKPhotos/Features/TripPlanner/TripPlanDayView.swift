@@ -37,8 +37,10 @@ struct TripPlanDayView: View {
     /// The block being split (§6.5), while its sheet is open.
     @State private var splitting: TripSplitTarget?
     @State private var confirmRemoveOuting = false
-    /// The city's editor, opened from the header.
+    /// The leg's own sheet (§25): add, pool, ballot, settings.
     @State private var editingLeg = false
+    /// The trip's structure — legs and journeys — from the leg strip.
+    @State private var editingStructure = false
     /// The minute the screen is drawn for. Ticks while the day on
     /// screen is today, so "jetzt" moves along the blocks instead of
     /// staying on the one the screen was opened on — the first trial's
@@ -92,100 +94,14 @@ struct TripPlanDayView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    // Only what belongs to the whole trip (§25). What
+                    // belongs to the leg is behind its header, what
+                    // belongs to the day is on the day.
                     Menu {
-                        // Grouped by what the entry is about. Fourteen
-                        // entries in one column made "Abendlicht" and
-                        // "Dokumente" neighbours, and put the evening
-                        // before the trip behind the same dots as the
-                        // afternoon of it.
-                        Section("Dieser Tag") {
-                            // The way into the candidates that needs
-                            // nothing else — no share sheet, no map
-                            // app, no model (§9.2, case 4).
-                            NavigationLink {
-                                TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position)
-                            } label: {
-                                Label("Ort suchen", systemImage: "magnifyingglass")
-                            }
-                            // A spot whose way is the point (§4.7): the
-                            // import knows only points, so it comes by hand.
-                            NavigationLink {
-                                TripRouteEntryView(planId: viewModel.planId, legIndex: leg.position)
-                            } label: {
-                                Label("Strecke anlegen", systemImage: "figure.hiking")
-                            }
-                            // What the map already knows (§4.7) — with
-                            // its length, its climb and its course.
-                            NavigationLink {
-                                TripNearbyRoutesView(planId: viewModel.planId, legIndex: leg.position)
-                            } label: {
-                                Label("Strecken in der Nähe", systemImage: "map")
-                            }
-                            // When the light is good, after the planned
-                            // day is over (§7.3).
-                            NavigationLink {
-                                TripEveningLightView(
-                                    planId: viewModel.planId,
-                                    legIndex: viewModel.legIndex,
-                                    dayIndex: viewModel.dayIndex,
-                                ) { Task { await viewModel.load() } }
-                            } label: {
-                                Label("Abendlicht", systemImage: "sun.horizon")
-                            }
-                        }
-                        Section("Diese Reise") {
-                            // Everything this leg could do, and why (§5).
-                            NavigationLink {
-                                TripPoolView(viewModel: viewModel, legIndex: leg.position)
-                            } label: {
-                                Label("Kandidaten (\(leg.pool.count))", systemImage: "tray.full")
-                            }
-                            // „Vier Tage in San Gimignano" — and the
-                            // city an hour away (§4.6). About the leg
-                            // rather than this day, because it is the
-                            // leg whose pool does not carry its days.
-                            NavigationLink {
-                                TripDayTripView(
-                                    planId: viewModel.planId,
-                                    legIndex: leg.position,
-                                ) { Task { await viewModel.load() } }
-                            } label: {
-                                Label("Tagesausflug", systemImage: "car")
-                            }
-                            // „Ihr habt vier Ideen für Lissabon gesammelt"
-                            // (§20.3) — offered, never pushed.
-                            NavigationLink {
-                                TripPlanIdeasView(viewModel: viewModel)
-                            } label: {
-                                Label(viewModel.didLoadPlanIdeas
-                                      ? "Aus den Ideen übernehmen (\(viewModel.pendingIdeas.count))"
-                                      : "Aus den Ideen übernehmen",
-                                      systemImage: "lightbulb")
-                            }
-                            // The cities of the trip (§4.2).
-                            NavigationLink {
-                                TripLegsView(viewModel: viewModel)
-                            } label: {
-                                Label("Städte (\(viewModel.plan?.legs.count ?? 1))",
-                                      systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                            }
-                            // Everybody rates, nobody is averaged away (§6.1).
-                            NavigationLink {
-                                TripBallotView(
-                                    planId: viewModel.planId,
-                                    legIndex: viewModel.legIndex,
-                                    leg: viewModel.leg,
-                                ) {
-                                    Task { await viewModel.load() }
-                                }
-                            } label: {
-                                Label("Wünsche", systemImage: "heart")
-                            }
-                            Button {
-                                showSettings = true
-                            } label: {
-                                Label("Einstellungen", systemImage: "slider.horizontal.3")
-                            }
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Label("Einstellungen", systemImage: "slider.horizontal.3")
                         }
                         Section("Gruppe") {
                             // Who may plan (§6.2) and who is coming
@@ -204,10 +120,7 @@ struct TripPlanDayView: View {
                                 Label("Reisegruppe", systemImage: "figure.2.and.child.holdinghands")
                             }
                         }
-                        // What belongs to the trip rather than to the
-                        // day. Also on the plan list, where the evening
-                        // before and the week after are actually spent.
-                        Menu {
+                        Section("Rund um die Reise") {
                             NavigationLink {
                                 TripDocumentsView(planId: viewModel.planId)
                             } label: {
@@ -235,11 +148,9 @@ struct TripPlanDayView: View {
                             } label: {
                                 Label("Unterwegs ohne Netz", systemImage: "wifi.slash")
                             }
-                        } label: {
-                            Label("Rund um die Reise", systemImage: "suitcase")
                         }
                     } label: {
-                        Label("Mehr", systemImage: "ellipsis.circle")
+                        Label("Reise", systemImage: "suitcase")
                     }
                 }
             }
@@ -445,10 +356,10 @@ struct TripPlanDayView: View {
         )
         .safeAreaInset(edge: .top) {
             VStack(spacing: 0) {
-                // Only for a trip that has more than one: a chooser
-                // with a single entry is noise on the screen people
-                // look at most.
-                if (viewModel.plan?.legs.count ?? 1) > 1 { legPicker }
+                // Always, even with one leg: the strip is where the
+                // trip's structure lives now (§25) — the legs, and the
+                // way to add, move or remove them.
+                legPicker
                 dayPicker(leg)
             }
         }
@@ -704,23 +615,17 @@ struct TripPlanDayView: View {
             HStack(alignment: .top, spacing: 6) {
                 legHeaderText(leg)
                 Spacer(minLength: 0)
-                Image(systemName: "square.and.pencil")
+                Image(systemName: "chevron.right")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Unterkunft und Verkehrsmittel ändern")
+        .accessibilityHint("Hinzufügen, Kandidaten, Wünsche und Einstellungen dieser Etappe")
         .sheet(isPresented: $editingLeg) {
             NavigationStack {
-                // A journey is changed where it was made (§22.7): its two
-                // moments, not an anchor and a length.
-                if leg.isTransit {
-                    TripTransitView(viewModel: viewModel, afterLegIndex: leg.position - 1, existing: leg)
-                } else {
-                    TripLegEditView(viewModel: viewModel, legIndex: leg.position)
-                }
+                TripLegSheet(viewModel: viewModel, leg: leg)
             }
             .interactiveDismissDisabled()
         }
@@ -855,11 +760,31 @@ struct TripPlanDayView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                // The structure itself: add a leg, insert a journey,
+                // reorder, remove (§25). One place for it, where the
+                // legs are.
+                Button {
+                    editingStructure = true
+                } label: {
+                    Label("Etappen", systemImage: "pencil")
+                        .font(.subheadline)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 12)
+                        .background(.quaternary.opacity(0.5), in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Etappen und Weiterreisen hinzufügen, ändern, entfernen")
             }
             .padding(.horizontal)
             .padding(.top, 6)
         }
         .background(.bar)
+        .sheet(isPresented: $editingStructure) {
+            NavigationStack {
+                TripLegsView(viewModel: viewModel)
+            }
+            .interactiveDismissDisabled()
+        }
     }
 
     private func dayPicker(_ leg: TripLeg) -> some View {
@@ -989,6 +914,23 @@ struct TripPlanDayView: View {
             }
             Divider()
             outingRow(day)
+            Divider()
+            // When the light is good, after the planned day is over
+            // (§7.3) — a thing of this day, so it sits with the day's
+            // frame rather than in a menu (§25).
+            NavigationLink {
+                TripEveningLightView(
+                    planId: viewModel.planId,
+                    legIndex: viewModel.legIndex,
+                    dayIndex: viewModel.dayIndex,
+                ) { Task { await viewModel.load() } }
+            } label: {
+                Label("Abendlicht", systemImage: "sun.horizon")
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
