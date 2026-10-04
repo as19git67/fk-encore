@@ -5741,6 +5741,24 @@ die Weiterreise misst ihre Fahrzeit am Router, die Korridorsuche ordnet die
 Schätzung), die App zeigt es an der Reisezeit. Erst nach der Messung aus
 Stufe 1: Wo die Schätzung um mehr als ein Viertel danebenliegt, lohnt es sich.
 
+**Davon umgesetzt: der Korridor entlang der Straße (2026-10-04).** Aus der
+Praxis: Die Kandidaten einer Anreise saßen fast alle auf der Luftlinie, weil
+die Ellipse um die beiden Enden bei einigen hundert Kilometern nur wenige
+Kilometer breit ist und die Autobahn woanders verläuft. Jetzt fragt die
+Korridorsuche den Router nach der Route und bis zu zwei Alternativen
+(`routes` mit `alternates`, `route-corridor.ts`), legt um jede einen Schlauch
+von halbem Umweg-Budget (ein Ort `d` Meter neben der Straße kostet etwa `2d`)
+und sucht in geo entlang dieser Linien (`path` statt `corridor` in
+`POST /pois/search`: `ST_DWithin` zur Linie, Umweg als doppelter Abstand).
+Die Regionen kommen aus dem Rechteck um alle Routen, nicht um die Luftlinie.
+Was zurückkommt, wird am Router nachgemessen — Start→Ort und Ort→Ziel als
+zwei Matrizen über höchstens 120 Kandidaten, abzüglich der Route —, nach
+diesem gefahrenen Umweg sortiert und über dem Budget verworfen. Ohne Router,
+ohne Kacheln oder ohne Form bleibt es bei der Ellipse; `POST
+/trip-planner/corridor` sagt mit `source: router | estimate`, welches von
+beiden. Noch nicht angeschlossen: die Fahrzeiten *innerhalb* des Tages (der
+Löser schätzt weiter) und die Tabelle für die Stadt-Tage.
+
 **Stufe 3 — GTFS (zurückgestellt, 2026-09-30).** Fahrpläne je Region
 (Regionsverwaltung: Feed-URL, Import in Valhalla), `transit` wird multimodal
 mit Abfahrtszeit gefragt, das Offline-Bündel behält die Zeiten. Vorerst nicht

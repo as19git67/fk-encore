@@ -70,6 +70,25 @@ describe("HttpRouterClient", () => {
     });
   });
 
+  it("asks for alternatives and reads every road that has a shape", async () => {
+    const { fn, calls } = fetcher(() => ({
+      trip: { summary: { time: 3600, length: 60 }, legs: [{ shape: "abc" }] },
+      alternates: [
+        { trip: { summary: { time: 3900, length: 66 }, legs: [{ shape: "def" }] } },
+        { trip: { summary: { time: 4000 } } },
+      ],
+    }));
+    const client = new HttpRouterClient({ baseUrl: "http://r", fetcher: fn });
+    expect(await client.routes(A, B, "car", 2)).toEqual([
+      { minutes: 60, distanceM: 60000, shape: "abc" },
+      { minutes: 65, distanceM: 66000, shape: "def" },
+    ]);
+    expect(calls[0].body).toMatchObject({ costing: "auto", alternates: 2 });
+    // A single route asks for none, and the body says nothing about alternates.
+    await client.route(A, B, "car");
+    expect((calls[1].body as Record<string, unknown>).alternates).toBeUndefined();
+  });
+
   it("reads the status with the tile set's age", async () => {
     const { fn, calls } = fetcher(() => ({ version: "3.5.1", has_tiles: true, tileset_last_modified: 1758067200 }));
     const client = new HttpRouterClient({ baseUrl: "http://r", fetcher: fn });

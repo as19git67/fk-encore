@@ -46,7 +46,7 @@ export interface RouterCell {
 export interface RouterRoute {
   minutes: number;
   distanceM: number;
-  /** Encoded polyline (precision 6), for a map. */
+  /** Encoded polyline (precision 6), for a map — and for the corridor. */
   shape: string | null;
 }
 
@@ -63,6 +63,13 @@ export interface RouterClient {
     mode: TransportMode,
   ): Promise<(RouterCell | null)[][] | null>;
   route(from: Coordinate, to: Coordinate, mode: TransportMode): Promise<RouterRoute | null>;
+  /**
+   * The way from here to there and, where the road network offers
+   * them, up to `alternates` other ways worth considering — the roads
+   * a corridor is laid along (§24, stage 2). The first is the best.
+   * Null when the router cannot answer; never fewer than one otherwise.
+   */
+  routes(from: Coordinate, to: Coordinate, mode: TransportMode, alternates: number): Promise<RouterRoute[] | null>;
 }
 
 /** Valhalla's word for each of ours; transit has none yet. */
@@ -144,17 +151,27 @@ export class HttpRouterClient implements RouterClient {
   }
 
   async route(from: Coordinate, to: Coordinate, mode: TransportMode): Promise<RouterRoute | null> {
+    const routes = await this.routes(from, to, mode, 0);
+    return routes?.[0] ?? null;
+  }
+
+  async routes(from: Coordinate, to: Coordinate, mode: TransportMode, alternates: number): Promise<RouterRoute[] | null> {
     const costing = costingFor(mode);
     if (!costing) return null;
-    const body = await this.post("/route", { locations: [point(from), point(to)], costing, units: "kilometers" });
+    const body = await this.post("/route", {
+      locations: [point(from), point(to)],
+      costing,
+      units: "kilometers",
+      ...(alternates > 0 ? { alternates } : {}),
+    });
     if (!body) return null;
-    const trip = (body as { trip?: { summary?: { time?: number; length?: number }; legs?: Array<{ shape?: string }> } }).trip;
-    if (!trip?.summary || typeof trip.summary.time !== "number" || typeof trip.summary.length !== "number") return null;
-    return {
-      minutes: Math.round(trip.summary.time / 60),
-      distanceM: Math.round(trip.summary.length * 1000),
-      shape: trip.legs?.[0]?.shape ?? null,
-    };
+    const answer = body as { trip?: ValhallaTrip; alternates?: Array<{ trip?: ValhallaTrip }> };
+    const first = readTrip(answer.trip);
+    if (!first) return null;
+    const others = (answer.alternates ?? [])
+      .map((a) => readTrip(a.trip))
+      .filter((r): r is RouterRoute => r !== null);
+    return [first, ...others];
   }
 
   /**
@@ -184,6 +201,21 @@ export class HttpRouterClient implements RouterClient {
 
 function point(c: Coordinate): { lat: number; lon: number } {
   return { lat: c.lat, lon: c.lon };
+}
+
+type ValhallaTrip = { summary?: { time?: number; length?: number }; legs?: Array<{ shape?: string }> };
+
+/** One trip as Valhalla writes it, or null when it lacks the numbers. */
+function readTrip(trip: ValhallaTrip | undefined): RouterRoute | null {
+  if (!trip?.summary || typeof trip.summary.time !== "number" || typeof trip.summary.length !== "number") return null;
+  const shapes = (trip.legs ?? []).map((l) => l.shape).filter((s): s is string => typeof s === "string");
+  return {
+    minutes: Math.round(trip.summary.time / 60),
+    distanceM: Math.round(trip.summary.length * 1000),
+    // One leg for two locations; several would each start where the
+    // last ended, and a corridor wants the whole line.
+    shape: shapes.length === 0 ? null : shapes.length === 1 ? shapes[0] : null,
+  };
 }
 
 function unreachable(reason: string): RouterStatus {

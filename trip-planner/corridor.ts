@@ -26,6 +26,9 @@ import { requirePermission } from "../user/auth-handler";
 import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion, regionsIntersecting, type LatLonBox } from "../osm-admin/region-router";
 import { toCandidates, type ScoredCandidate } from "./candidates";
+import { measureDetours, pathsBox, roadsBetween, type RoadCorridor } from "./route-corridor";
+import { getRouterClient } from "./router-client";
+import type { TransportMode } from "./travel";
 
 /** Enough of a detour to be worth it, small enough not to be a second trip. */
 const DEFAULT_DETOUR_BUDGET_M = 5_000;
@@ -50,6 +53,12 @@ export interface CorridorRequest {
   interests?: string[];
   /** Per-category dwell overrides, in minutes. */
   dwellMinutes?: Record<string, number>;
+  /**
+   * How the journey travels. With a reachable router and a mode it can
+   * route, the corridor follows the roads (§24, stage 2); otherwise,
+   * or when absent, the ellipse around the straight line.
+   */
+  mode?: TransportMode;
 }
 
 export interface CorridorSpot extends ScoredCandidate {
@@ -73,6 +82,12 @@ export interface CorridorResponse {
   directDistanceM: number;
   /** Scored candidates, least detour first. */
   spots: CorridorSpot[];
+  /**
+   * Where the corridor came from: `router` when it follows the roads
+   * and the detours are driven ones, `estimate` when it is the ellipse
+   * around the straight line (§15.3: say which).
+   */
+  source: "router" | "estimate";
 }
 
 export const planCorridor = api(
@@ -90,12 +105,15 @@ export const planCorridor = api(
       );
     }
 
-    const regions = await resolveRegions(from, to, detourBudgetM);
+    const roads = req.mode ? await roadsBetween(getRouterClient(), from, to, req.mode, detourBudgetM) : null;
+    const regions = await resolveRegions(from, to, detourBudgetM, roads);
     const spots = await corridorCandidates(regions, from, to, {
       detourBudgetM,
       categories: req.categories,
       interests: req.interests,
       dwellMinutes: req.dwellMinutes,
+      roads,
+      mode: req.mode,
     });
 
     return {
@@ -106,6 +124,7 @@ export const planCorridor = api(
       detourBudgetM,
       directDistanceM: Math.round(directDistanceM),
       spots,
+      source: roads ? "router" : "estimate",
     };
   },
 );
@@ -124,6 +143,7 @@ async function resolveRegions(
   from: { lat: number; lon: number },
   to: { lat: number; lon: number },
   detourBudgetM: number,
+  roads: RoadCorridor | null = null,
 ): Promise<string[]> {
   const [fromRegion, toRegion] = await Promise.all([
     pickRegion(from.lat, from.lon),
@@ -135,7 +155,7 @@ async function resolveRegions(
       `no imported OSM region covers the ${missing} of this journey — import it in the region admin first`,
     );
   }
-  return await withRegionsAlong([fromRegion.postgresDb, toRegion.postgresDb], from, to, detourBudgetM);
+  return await withRegionsAlong([fromRegion.postgresDb, toRegion.postgresDb], from, to, detourBudgetM, roads);
 }
 
 /**
@@ -152,8 +172,12 @@ async function withRegionsAlong(
   from: { lat: number; lon: number },
   to: { lat: number; lon: number },
   detourBudgetM: number,
+  roads: RoadCorridor | null = null,
 ): Promise<string[]> {
-  const along = await regionsIntersecting(corridorBox(from, to, detourBudgetM));
+  // Along the roads when they are known: a motorway that swings round
+  // a mountain crosses extracts the straight line never touches.
+  const box = roads ? pathsBox(roads.paths, roads.widthM) : corridorBox(from, to, detourBudgetM);
+  const along = await regionsIntersecting(box);
   return [...new Set([...ends, ...along.map((r) => r.postgresDb)])];
 }
 
@@ -195,6 +219,14 @@ export interface CorridorSearchOptions {
   dwellMinutes?: Record<string, number>;
   /** Only what is worth a block — for a pool a day is built from. */
   requireProminence?: boolean;
+  /**
+   * The roads from the router (§24, stage 2). Given, the search runs
+   * along each of them instead of the ellipse, and the detours are
+   * measured at the router; absent, the ellipse as before.
+   */
+  roads?: RoadCorridor | null;
+  /** Needed with `roads`, to measure the detours in the same mode. */
+  mode?: TransportMode;
 }
 
 /**
@@ -219,13 +251,22 @@ export async function corridorCandidates(
   to: { lat: number; lon: number },
   opts: CorridorSearchOptions,
 ): Promise<CorridorSpot[]> {
-  const stretches = corridorStretches(from, to);
-  const pages = await Promise.all(stretches.flatMap((stretch) => regions.map((region) =>
-    getGeoClient().searchPois(region, {
-      corridor: { from: stretch.from, to: stretch.to, detourBudgetM: opts.detourBudgetM },
-      categories: opts.categories,
-      limit: CANDIDATE_LIMIT,
-    }))));
+  const roads = opts.roads ?? null;
+  const pages = roads
+    // One search per road and region: the way there, and the one or
+    // two other ways the network offers, each half a budget wide.
+    ? await Promise.all(roads.paths.flatMap((points) => regions.map((region) =>
+      getGeoClient().searchPois(region, {
+        path: { points, widthM: roads.widthM },
+        categories: opts.categories,
+        limit: CANDIDATE_LIMIT,
+      }))))
+    : await Promise.all(corridorStretches(from, to).flatMap((stretch) => regions.map((region) =>
+      getGeoClient().searchPois(region, {
+        corridor: { from: stretch.from, to: stretch.to, detourBudgetM: opts.detourBudgetM },
+        categories: opts.categories,
+        limit: CANDIDATE_LIMIT,
+      }))));
   // A place near a border can sit in both extracts, and one near a cut
   // in both stretches; it is one place, at its smaller detour.
   const byRef = new Map<string, (typeof pages)[number]["spots"][number]>();
@@ -241,12 +282,24 @@ export async function corridorCandidates(
   // radius result, so it has to survive scoring — `toCandidates` keys
   // on osmRef, which is stable, so a lookup restores it.
   const detourByRef = new Map(raw.map((s) => [s.osmRef, s.detourM ?? 0]));
-  return toCandidates(raw, {
+  const scored = toCandidates(raw, {
     interests: opts.interests,
     dwellMinutes: opts.dwellMinutes,
     requireProminence: opts.requireProminence,
   })
     .map((c) => ({ ...c, detourM: Math.round(detourByRef.get(c.osmRef) ?? 0) }))
+    .sort((a, b) => a.detourM - b.detourM || (a.osmRef < b.osmRef ? -1 : 1));
+  if (!roads || !opts.mode) return scored;
+
+  // The detour that orders the pool is the one the car drives: origin
+  // to stop and stop to destination at the router, less the road. What
+  // the router cannot measure keeps the distance off the road; what
+  // costs more than the budget on the road is not a stop on the way.
+  const driven = await measureDetours(getRouterClient(), from, to, opts.mode, scored, roads.directM);
+  if (!driven) return scored;
+  return scored
+    .map((c) => ({ ...c, detourM: driven.get(c.osmRef) ?? c.detourM }))
+    .filter((c) => c.detourM <= opts.detourBudgetM)
     .sort((a, b) => a.detourM - b.detourM || (a.osmRef < b.osmRef ? -1 : 1));
 }
 
@@ -283,13 +336,14 @@ export async function regionsCovering(
   from: { lat: number; lon: number },
   to: { lat: number; lon: number },
   detourBudgetM: number,
+  roads: RoadCorridor | null = null,
 ): Promise<string[]> {
   const [fromRegion, toRegion] = await Promise.all([
     pickRegion(from.lat, from.lon),
     pickRegion(to.lat, to.lon),
   ]);
   const ends = [fromRegion?.postgresDb, toRegion?.postgresDb].filter((r): r is string => !!r);
-  return await withRegionsAlong(ends, from, to, detourBudgetM);
+  return await withRegionsAlong(ends, from, to, detourBudgetM, roads);
 }
 
 function requireUser(): number {

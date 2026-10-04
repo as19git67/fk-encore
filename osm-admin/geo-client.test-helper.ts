@@ -393,12 +393,12 @@ export class InMemoryGeoClient implements GeoClient {
         && (this.failingRank === null || this.failingRank === (query.rank ?? "distance"))) {
       throw new Error(`geo: POST /pois/search → connect ECONNREFUSED (${postgresDb})`);
     }
-    const areas = [query.bbox, query.center, query.corridor].filter((a) => a !== undefined);
+    const areas = [query.bbox, query.center, query.corridor, query.path].filter((a) => a !== undefined);
     if (areas.length !== 1) {
       // The service refuses this outright, and a fake that shrugs at it
       // is how a caller sending no area at all reaches production.
       throw new Error(
-        `geo: POST /pois/search → 400 (pass exactly one of bbox, center or corridor, got ${areas.length})`,
+        `geo: POST /pois/search → 400 (pass exactly one of bbox, center, corridor or path, got ${areas.length})`,
       );
     }
 
@@ -428,6 +428,17 @@ export class InMemoryGeoClient implements GeoClient {
       }
       spots = spots.filter(
         (s) => metresBetween(from, s) + metresBetween(s, to) <= direct + detourBudgetM);
+    }
+    if (query.path) {
+      const { points, widthM } = query.path;
+      if (points.length < 2) throw new Error("geo: POST /pois/search → 400 (path needs two points)");
+      // Within the width of the road, nearest the road first; the
+      // detour is the way off the road and back, as the service says.
+      spots = spots
+        .map((s) => ({ s, off: metresFromLine(s, points) }))
+        .filter(({ off }) => off <= widthM)
+        .sort((a, b) => a.off - b.off)
+        .map(({ s, off }) => ({ ...s, detourM: Math.round(2 * off) }));
     }
     if (query.categories?.length) {
       const wanted = new Set(query.categories);
@@ -576,4 +587,24 @@ function metresBetween(
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
   return 2 * earthRadiusM * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** Distance from a point to a polyline, in metres — flat-earth over short legs. */
+function metresFromLine(p: { lat: number; lon: number }, line: readonly { lat: number; lon: number }[]): number {
+  const cosLat = Math.cos((p.lat * Math.PI) / 180);
+  const mPerDeg = 111_195;
+  const toXY = (q: { lat: number; lon: number }) => ({ x: q.lon * mPerDeg * cosLat, y: q.lat * mPerDeg });
+  const pt = toXY(p);
+  let best = Infinity;
+  for (let i = 1; i < line.length; i++) {
+    const a = toXY(line[i - 1]);
+    const b = toXY(line[i]);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / len2));
+    const d = Math.hypot(pt.x - (a.x + t * dx), pt.y - (a.y + t * dy));
+    if (d < best) best = d;
+  }
+  return best;
 }

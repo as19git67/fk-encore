@@ -640,6 +640,20 @@ function parseSearchBody(body: unknown): { database: string; options: PoiSearchO
       detourBudgetM: requireFiniteNumber(corridor.detourBudgetM, "corridor.detourBudgetM"),
     };
   }
+  if (b.path !== undefined && b.path !== null) {
+    const path = b.path as Record<string, unknown>;
+    if (!Array.isArray(path.points)) throw new HttpError(400, "path.points must be an array");
+    options.path = {
+      points: path.points.map((p, i) => {
+        const point = (p ?? {}) as Record<string, unknown>;
+        return {
+          lat: requireFiniteNumber(point.lat, `path.points[${i}].lat`),
+          lon: requireFiniteNumber(point.lon, `path.points[${i}].lon`),
+        };
+      }),
+      widthM: requireFiniteNumber(path.widthM, "path.widthM"),
+    };
+  }
   if (b.categories !== undefined && b.categories !== null) {
     if (!Array.isArray(b.categories) || b.categories.some((c) => typeof c !== "string")) {
       throw new HttpError(400, "categories must be an array of strings");

@@ -15,6 +15,12 @@ export class InMemoryRouterClient implements RouterClient {
   speeds: Partial<Record<TransportMode, number>> = { car: 800, bike: 250, foot: 80 };
   readonly matrixCalls: Array<{ sources: number; targets: number; mode: TransportMode }> = [];
   readonly routeCalls: TransportMode[] = [];
+  /**
+   * The roads, for `routes`: encoded shapes a test lays down so the
+   * corridor can follow a road that bends away from the straight line.
+   * Empty means the straight line between the two ends, as one route.
+   */
+  shapes: string[] = [];
 
   async status(): Promise<RouterStatus> {
     return {
@@ -37,10 +43,17 @@ export class InMemoryRouterClient implements RouterClient {
   }
 
   async route(from: Coordinate, to: Coordinate, mode: TransportMode): Promise<RouterRoute | null> {
+    const routes = await this.routes(from, to, mode, 0);
+    return routes?.[0] ?? null;
+  }
+
+  async routes(from: Coordinate, to: Coordinate, mode: TransportMode, alternates: number): Promise<RouterRoute[] | null> {
     this.routeCalls.push(mode);
     if (!this.reachable || !costingFor(mode)) return null;
     const cell = this.cell(from, to, mode);
-    return cell ? { ...cell, shape: null } : null;
+    if (!cell) return null;
+    const shapes = this.shapes.length > 0 ? this.shapes.slice(0, 1 + alternates) : [encodeLine([from, to])];
+    return shapes.map((shape) => ({ ...cell, shape }));
   }
 
   private cell(from: Coordinate, to: Coordinate, mode: TransportMode): RouterCell | null {
@@ -48,5 +61,31 @@ export class InMemoryRouterClient implements RouterClient {
     if (!speed) return null;
     const distanceM = Math.round(haversineMeters(from, to) * 1.2);
     return { minutes: Math.round(distanceM / speed), distanceM };
+  }
+}
+
+/** Encode a line the way Valhalla does (polyline, six places). */
+export function encodeLine(points: readonly Coordinate[], precision = 6): string {
+  const factor = 10 ** precision;
+  let out = "";
+  let lastLat = 0;
+  let lastLon = 0;
+  for (const p of points) {
+    const lat = Math.round(p.lat * factor);
+    const lon = Math.round(p.lon * factor);
+    out += encodeValue(lat - lastLat) + encodeValue(lon - lastLon);
+    lastLat = lat;
+    lastLon = lon;
+  }
+  return out;
+
+  function encodeValue(value: number): string {
+    let v = value < 0 ? ~(value << 1) : value << 1;
+    let s = "";
+    while (v >= 0x20) {
+      s += String.fromCharCode((0x20 | (v & 0x1f)) + 63);
+      v >>= 5;
+    }
+    return s + String.fromCharCode(v + 63);
   }
 }

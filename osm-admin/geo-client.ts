@@ -88,6 +88,16 @@ export interface GeoPoiSearchQuery {
     to: { lat: number; lon: number };
     detourBudgetM: number;
   };
+  /**
+   * Search along a road (§24, stage 2): the spots within `widthM` of
+   * the line through `points`, their detour reported as twice that
+   * distance. Exactly one of bbox, center, corridor and path may be
+   * given.
+   */
+  path?: {
+    points: Array<{ lat: number; lon: number }>;
+    widthM: number;
+  };
   /** Category ids from GET /pois/categories. Omitted = all of them. */
   categories?: string[];
   /**
@@ -551,6 +561,7 @@ export class HttpGeoClient implements GeoClient {
       bbox: query.bbox,
       center: query.center,
       corridor: query.corridor,
+      path: query.path,
       categories: query.categories,
       name: query.name,
       rank: query.rank,
