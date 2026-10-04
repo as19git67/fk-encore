@@ -87,11 +87,18 @@ struct TripBallotView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $inspecting) { tapped in
             // The row itself, over the map — read fresh from the ballot
-            // rather than from the pin, so the vote just cast shows.
+            // rather than from the pin, so the vote just cast shows —
+            // and the place under it (§25, stage B): the map, what is
+            // on the sign, why it is on the list, the article. Voting
+            // on a name is voting on a word (§3.8), and the details
+            // used to be a second tap behind an info button.
             NavigationStack {
                 List {
                     if let ballot, let entry = ballot.entries.first(where: { $0.osmRef == tapped.osmRef }) {
                         row(for: entry, heartsLeft: ballot.heartsLeft)
+                        if let leg, let spot = details(for: entry)?.spot {
+                            placeSections(spot, in: leg)
+                        }
                     }
                 }
                 .navigationTitle(tapped.label)
@@ -137,7 +144,58 @@ struct TripBallotView: View {
         }
     }
 
-    /// What the colours mean, and how much of the ballot is on screen.
+    /// The place behind a pin, under its row in the map's sheet.
+    ///
+    /// The short answer, not the whole detail screen: the map that
+    /// zooms, the name on the sign, the planner's reasons, the article.
+    /// Route, Google Maps, light and shelter stay behind "Alle Details"
+    /// — the sheet is half a screen over a map, and the vote is what
+    /// it is for.
+    @ViewBuilder
+    private func placeSections(_ spot: TripSpotDetail, in leg: TripLeg) -> some View {
+        Section {
+            TripSpotMapSnippet(coordinate: spot.coordinate, title: spot.displayName, name: spot.name,
+                               symbolName: TripCategory.symbol(spot.category), height: 160)
+                .listRowInsets(EdgeInsets())
+        }
+        if spot.localName != nil || spot.officialName != nil || spot.extent != nil {
+            Section {
+                if let localName = spot.localName {
+                    LabeledContent("Vor Ort", value: localName)
+                }
+                if let official = spot.officialName {
+                    LabeledContent("In OpenStreetMap", value: official)
+                }
+                if let extent = spot.extent {
+                    LabeledContent("Strecke", value: extent.summary)
+                }
+            }
+        }
+        if !spot.reasons.isEmpty {
+            Section("Warum hier?") {
+                ForEach(spot.reasons, id: \.self) { reason in
+                    Text(reason).font(.callout)
+                }
+            }
+        }
+        Section {
+            if let article = spot.wikipediaUrl, let url = URL(string: article) {
+                // In the app, German or translated (§25, stage C).
+                NavigationLink {
+                    TripArticleView(url: url, placeName: spot.displayName)
+                } label: {
+                    Label("Artikel lesen", systemImage: "book")
+                }
+            }
+            NavigationLink {
+                TripSpotDetailView(spot: spot, mode: leg.transportMode)
+            } label: {
+                Label("Alle Details", systemImage: "info.circle")
+            }
+        }
+    }
+
+    /// What the rings mean, and how much of the ballot is on screen.
     private func legend(shown: [TripBallotEntry], of ballot: TripBallot) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(TripBallotSearch.countLabel(shown: shown.count, of: ballot.entries.count)
@@ -149,16 +207,18 @@ struct TripBallotView: View {
                       alignment: .leading, spacing: 4) {
                 ForEach(TripBallotPinKind.legendOrder, id: \.self) { kind in
                     HStack(spacing: 5) {
+                        // A ring, as on the map: the fill belongs to
+                        // the category's symbol there.
                         Circle()
-                            .fill(kind.colour)
-                            .frame(width: 10, height: 10)
-                            .overlay(Circle().stroke(.white, lineWidth: 1))
+                            .stroke(kind.colour, lineWidth: 2.5)
+                            .frame(width: 11, height: 11)
                         Text(kind.label)
                     }
                 }
             }
             .font(.caption)
-            Text("Antippen: abstimmen, Herzenswunsch setzen, Details lesen.")
+            Text("Das Symbol sagt, was es ist; der Ring, was du gesagt hast. "
+                 + "Antippen: abstimmen, Herzenswunsch setzen, Details lesen.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

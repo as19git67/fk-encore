@@ -1197,6 +1197,41 @@ struct TripRoutePhoto: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// A Wikipedia article as the server hands it over (§25, stage C):
+/// German where German exists, otherwise the original with its
+/// translation under way, done, or failed.
+struct TripSpotArticle: Codable, Sendable {
+    struct Section: Codable, Sendable, Identifiable, Hashable {
+        /// Nil for the lead.
+        let heading: String?
+        /// 2 for a chapter, 3 for a part of one; 1 for the lead.
+        let level: Int
+        let text: String
+        var id: String { "\(level)-\(heading ?? "")-\(text.prefix(40))" }
+    }
+
+    let title: String
+    /// The language of the text shown — "de" after a translation too.
+    let language: String
+    /// Which edition the text came from.
+    let sourceLanguage: String
+    let sourceUrl: String
+    let description: String?
+    let sections: [Section]
+    let truncated: Bool
+    /// "none", "pending", "done" or "failed".
+    let translation: String
+    let photos: [TripRoutePhoto]
+    let attribution: String
+    let license: String
+
+    var isPending: Bool { translation == "pending" }
+    var isTranslated: Bool { translation == "done" }
+    var translationFailed: Bool { translation == "failed" }
+    /// Shown in a language other than German — before or without a translation.
+    var isForeign: Bool { language != "de" }
+}
+
 struct TripRoutePhotosResponse: Codable, Sendable {
     let photos: [TripRoutePhoto]
 }

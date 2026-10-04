@@ -54,6 +54,7 @@ export async function interpretTripRequest(
 export async function askForJson(
   prompt: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  options: { maxTokens?: number } = {},
 ): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -62,7 +63,13 @@ export async function askForJson(
     resp = await fetch(`${LLM_SERVICE_URL}/json-prompt`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt, temperature: 0 }),
+      // The service's default of 768 tokens fits an answer about a
+      // sentence; a translated section needs room for its own length.
+      body: JSON.stringify({
+        prompt,
+        temperature: 0,
+        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+      }),
       signal: controller.signal,
     });
   } catch (err) {

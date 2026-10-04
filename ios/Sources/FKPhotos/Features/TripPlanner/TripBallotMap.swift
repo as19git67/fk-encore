@@ -5,9 +5,10 @@ import SwiftUI
 /// Out of the first trial: the list says what and where in words, and
 /// the map says the same thing at a glance — three of the "will ich"
 /// are in the same lane, the one "lieber nicht" is the only thing on
-/// the far shore. The map is the pool's map with the vote as its
-/// colour, and a tap opens the same row the list shows: the three
-/// answers, the heart, and the details behind an info button.
+/// the far shore. The map is the pool's map with the vote as a ring
+/// around the category's symbol — what it is, and what I said — and a
+/// tap opens the same row the list shows, with the place itself under
+/// it: the three answers, the heart, the map, the facts.
 ///
 /// Pure where it decides anything, so the colours can be tested
 /// without a map.
@@ -68,6 +69,10 @@ enum TripBallotMap {
     /// A pin per entry the leg still knows a place for. An entry the leg
     /// has lost between two loads has no coordinate and no pin — the
     /// list shows it with an empty line for the same reason.
+    ///
+    /// The symbol is the category's, the ring my answer: a blue disc
+    /// with a question mark in it told the reader only that they had
+    /// not voted yet, and nothing about what they were looking at.
     static func pins(for entries: [TripBallotEntry], in leg: TripLeg) -> [TripSpotMapPin] {
         entries.compactMap { entry in
             guard let spot = TripBallotDetails.of(entry.osmRef, in: leg).spot else { return nil }
@@ -76,8 +81,9 @@ enum TripBallotMap {
                 id: entry.osmRef,
                 coordinate: spot.coordinate,
                 title: entry.label,
-                symbolName: kind.symbolName,
+                symbolName: TripCategory.symbol(entry.category),
                 tint: kind.colour,
+                ringTint: kind.colour,
             )
         }
     }
