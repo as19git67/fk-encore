@@ -25,6 +25,9 @@ struct TripTransitView: View {
     @State private var depart = Date()
     @State private var arrive = Date()
     @State private var mode: TripTransportMode = .car
+    /// Prefilled once. `onAppear` fires again on the way back from the
+    /// mode page, and prefilling then threw the chosen mode away.
+    @State private var prefilled = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -80,7 +83,14 @@ struct TripTransitView: View {
                 .disabled(isSaving || arrive <= depart || !hasBothEnds)
             }
         }
-        .onAppear(perform: prefill)
+        .onAppear {
+            guard !prefilled else { return }
+            prefilled = true
+            prefill()
+        }
+        // The two moments and the mode are typed, not picked from a
+        // list: a swipe must not throw them away without asking.
+        .interactiveDismissDisabled()
     }
 
     /// The journey as it is, or — for a new one — setting off at ten on
