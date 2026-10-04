@@ -33,6 +33,8 @@ import { pickRegion } from "../osm-admin/region-router";
 import type { PlannedBlockShape } from "./blocks";
 import type { ScoredCandidate } from "./candidates";
 import { corridorCandidates, regionsCovering } from "./corridor";
+import { roadsBetween } from "./route-corridor";
+import { getRouterClient } from "./router-client";
 import { parseMinutes } from "./fixpoints";
 import type { CreateDayInput, CreateFixpointInput, CreateLegInput, LegOrigin } from "./plan-store";
 import { requestRegionFor, type RequestedRegion } from "./region-request";
@@ -183,7 +185,10 @@ export async function planTransitLeg(
   const needsPool = frames.some((f) => f.plannable);
   let pool: ScoredCandidate[] = [];
   if (needsPool) {
-    const regions = await regionsCovering(req.origin, req.destination, DETOUR_BUDGET_M[req.mode]);
+    // Along the roads when the router knows them (§24, stage 2), the
+    // ellipse around the straight line when it does not.
+    const roads = await roadsBetween(getRouterClient(), req.origin, req.destination, req.mode, DETOUR_BUDGET_M[req.mode]);
+    const regions = await regionsCovering(req.origin, req.destination, DETOUR_BUDGET_M[req.mode], roads);
     if (regions.length > 0) {
       const found = await corridorCandidates(regions, req.origin, req.destination, {
         detourBudgetM: DETOUR_BUDGET_M[req.mode],
@@ -191,6 +196,8 @@ export async function planTransitLeg(
         interests: opts.interests,
         dwellMinutes: opts.dwellMinutes,
         requireProminence: true,
+        roads,
+        mode: req.mode,
       });
       pool = found
         .filter((c) => !opts.hidden?.has(c.osmRef))

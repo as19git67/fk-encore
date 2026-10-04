@@ -62,13 +62,18 @@ struct TripDraftLegView: View {
             }
 
             Section {
-                optionalTime("Abfahrt \(fromWhere)", binding: $leg.departAt, defaultHour: 9)
+                // Only the arrival: the way here — when the group leaves
+                // the city before, what it sees on the road — is a
+                // journey of its own (§22.7), made in the city list once
+                // the trip exists. Two places to say the same thing was
+                // what nobody could tell apart.
                 optionalTime("Ankunft", binding: $leg.arriveAt, defaultHour: 14)
             } header: {
-                Text("Die Fahrt dorthin")
+                Text("Ankunft in dieser Stadt")
             } footer: {
-                Text("Beides ist freiwillig. Was angegeben ist, wird zu einer festen Zeit: nach der "
-                     + "Abfahrt ist der Tag vorbei, vor der Ankunft fängt der nächste nicht an.")
+                Text("Freiwillig. Vor der Ankunft fängt der erste Tag nicht an. Die Fahrt "
+                     + "selbst — Abfahrt, Dauer, Orte am Weg — ist eine Weiterreise: die fügst du "
+                     + "nach dem Anlegen in der Städteliste zwischen zwei Städten ein.")
             }
         }
         .navigationTitle(leg.effectiveTitle ?? "Stadt \(position + 1)")
@@ -76,10 +81,6 @@ struct TripDraftLegView: View {
         .onAppear {
             if let name = leg.place?.name, finder.query.isEmpty { finder.query = name }
         }
-    }
-
-    private var fromWhere: String {
-        previousName.map { "aus \($0)" } ?? "aus der Stadt davor"
     }
 
     /// A time that may simply not be known yet.

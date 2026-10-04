@@ -41,7 +41,18 @@ export interface Corridor {
   detourBudgetM: number;
 }
 
-/** Exactly one of these three picks the area to search. */
+/**
+ * Search along a road (§24, stage 2): the line a router drew, widened.
+ * A spot `d` metres off the road costs about `2d` of detour, so the
+ * caller passes half its budget as the width and reads the detour back
+ * as twice the distance to the line.
+ */
+export interface Path {
+  points: Array<{ lat: number; lon: number }>;
+  widthM: number;
+}
+
+/** Exactly one of these four picks the area to search. */
 export interface PoiSearchArea {
   /** Search a rectangle. */
   bbox?: BoundingBox;
@@ -49,6 +60,8 @@ export interface PoiSearchArea {
   center?: { lat: number; lon: number; radiusM: number };
   /** Search what lies along a journey — see `buildCorridorClause`. */
   corridor?: Corridor;
+  /** Search along a road — see `buildPathClause`. */
+  path?: Path;
 }
 
 export interface PoiSearchOptions extends PoiSearchArea {
@@ -163,6 +176,10 @@ export const MAX_BBOX_SPAN_DEG = 2;
 export const MAX_CORRIDOR_LENGTH_M = 400_000;
 /** A detour larger than this is a second destination, not a stop on the way. */
 export const MAX_DETOUR_BUDGET_M = 50_000;
+/** A road is a day's drive at most; its line is thinned by the caller. */
+export const MAX_PATH_POINTS = 500;
+export const MAX_PATH_LENGTH_M = 1_000_000;
+export const MAX_PATH_WIDTH_M = 25_000;
 /**
  * Mean earth radius in metres, matching what `ST_DistanceSphere` uses.
  * Only the pre-filter radius is computed with it; the ellipse itself is
@@ -220,7 +237,9 @@ export async function searchPois(
   const distanceSelect = opts.center
     ? `ST_DistanceSphere(geom, ${centrePoint(opts.center)})`
     : "NULL::double precision";
-  const detourSelect = opts.corridor ? detourExpression(opts.corridor) : "NULL::double precision";
+  const detourSelect = opts.corridor
+    ? detourExpression(opts.corridor)
+    : opts.path ? pathDetourExpression(opts.path) : "NULL::double precision";
 
   // Nearest-first only makes sense with a centre, least-detour-first
   // only with a corridor. With neither, order by a prominence proxy so
@@ -243,7 +262,9 @@ export async function searchPois(
       // the ellipse clause has already cut the candidate set down to a
       // narrow band, so the sort runs over few rows.
       ? `${detourExpression(opts.corridor)}, osm_id`
-      : prominenceOrder;
+      : opts.path
+        ? `${pathDetourExpression(opts.path)}, osm_id`
+        : prominenceOrder;
 
   const sql = `
     SELECT
@@ -339,11 +360,13 @@ function buildAreaClause(area: PoiSearchArea, params: unknown[]): string {
     area.bbox ? "bbox" : null,
     area.center ? "center" : null,
     area.corridor ? "corridor" : null,
+    area.path ? "path" : null,
   ].filter((v): v is string => v !== null);
   if (given.length > 1) {
-    throw new PoiSearchError(`pass exactly one of bbox, center or corridor — got ${given.join(", ")}`);
+    throw new PoiSearchError(`pass exactly one of bbox, center, corridor or path — got ${given.join(", ")}`);
   }
   if (area.corridor) return buildCorridorClause(area.corridor, params);
+  if (area.path) return buildPathClause(area.path, params);
   if (area.bbox) {
     const { minLat, minLon, maxLat, maxLon } = area.bbox;
     for (const [name, v] of Object.entries(area.bbox)) {
@@ -440,6 +463,52 @@ function buildCorridorClause(corridor: Corridor, params: unknown[]): string {
   return `ST_DWithin(geom::geography, ST_MakeLine(${fromPoint}, ${toPoint})::geography, ${semiMinorParam})
       AND ST_DistanceSphere(geom, ${fromPoint}) + ST_DistanceSphere(geom, ${toPoint})
           <= ST_DistanceSphere(${fromPoint}, ${toPoint}) + ${budgetParam}`;
+}
+
+/**
+ * Within the width of the road. The envelope test comes first so the
+ * GiST index on `geom` cuts the table down before the geography
+ * distance runs over what is left.
+ */
+function buildPathClause(path: Path, params: unknown[]): string {
+  const line = pathLine(path);
+  if (!Number.isFinite(path.widthM) || path.widthM <= 0) {
+    throw new PoiSearchError("path.widthM must be a positive number");
+  }
+  if (path.widthM > MAX_PATH_WIDTH_M) {
+    throw new PoiSearchError(`path.widthM may be at most ${MAX_PATH_WIDTH_M} m`);
+  }
+  params.push(path.widthM);
+  const widthParam = `$${params.length}`;
+  // Degrees per metre, generous: the envelope only has to not lose rows.
+  const padDeg = (path.widthM / 111_000) * 1.1 + 0.001;
+  return `geom && ST_Expand(ST_Envelope(${line}), ${numeric(padDeg)})
+      AND ST_DWithin(geom::geography, ${line}::geography, ${widthParam})`;
+}
+
+/** Off the road and back again: twice the distance to the line. */
+function pathDetourExpression(path: Path): string {
+  return `(2 * ST_Distance(geom::geography, ${pathLine(path)}::geography))`;
+}
+
+/** The road as a PostGIS line, validated and interpolated like a point. */
+function pathLine(path: Path): string {
+  if (!Array.isArray(path.points) || path.points.length < 2) {
+    throw new PoiSearchError("path.points needs at least two points");
+  }
+  if (path.points.length > MAX_PATH_POINTS) {
+    throw new PoiSearchError(`path.points may hold at most ${MAX_PATH_POINTS} points`);
+  }
+  let length = 0;
+  path.points.forEach((p, i) => {
+    validatePoint(p, `path.points[${i}]`);
+    if (i > 0) length += greatCircleMetres(path.points[i - 1], p);
+  });
+  if (length > MAX_PATH_LENGTH_M) {
+    throw new PoiSearchError(`path may be at most ${MAX_PATH_LENGTH_M} m long, got ${Math.round(length)} m`);
+  }
+  const coords = path.points.map((p) => `${numeric(p.lon)} ${numeric(p.lat)}`).join(", ");
+  return `ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)`;
 }
 
 /** The extra metres a stop at this spot adds to the journey. */

@@ -229,3 +229,32 @@ test("bad corridors are rejected before touching the database", async () => {
     PoiSearchError,
   );
 });
+
+test("a path follows the road the router drew, not the straight line", async (t) => {
+  if (!(await postgisAvailable())) return t.skip("PostGIS not available");
+  // The road bends north through the museum in the valley; the museum
+  // on the straight line is two kilometres from it and not on the way.
+  // The museum 300 m past the destination is within the width of the
+  // road's end and stays a stop, as it did in the ellipse.
+  const road = [FROM, offset(2_000, 2_000), TO];
+  const page = await searchPois(DB, { path: { points: road, widthM: 600 } });
+  assert.deepEqual(page.spots.map((s) => s.id), [12, 13]);
+  assert.ok((page.spots[0].detourM ?? 1) < 50, `detour on the road should be ~0, got ${page.spots[0].detourM}`);
+  assert.ok(Math.abs((page.spots[1].detourM ?? 0) - 600) < 40);
+
+  // Wide enough, the café 500 m off the bend's first leg joins, nearest the road first.
+  const wider = await searchPois(DB, { path: { points: road, widthM: 1_100 } });
+  assert.deepEqual(wider.spots.map((s) => s.id), [12, 13, 11]);
+  // Off the road and back: twice the distance to the line.
+  assert.ok(Math.abs((wider.spots[2].detourM ?? 0) - 2 * 1_061) < 60);
+});
+
+test("a path refuses what the service cannot search", async (t) => {
+  if (!(await postgisAvailable())) return t.skip("PostGIS not available");
+  await assert.rejects(searchPois(DB, { path: { points: [FROM], widthM: 500 } }), PoiSearchError);
+  await assert.rejects(searchPois(DB, { path: { points: [FROM, TO], widthM: 0 } }), PoiSearchError);
+  await assert.rejects(
+    searchPois(DB, { path: { points: [FROM, TO], widthM: 500 }, center: { ...FROM, radiusM: 10 } }),
+    PoiSearchError,
+  );
+});

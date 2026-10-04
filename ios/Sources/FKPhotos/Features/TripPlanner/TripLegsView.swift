@@ -538,7 +538,8 @@ struct TripLegEditView: View {
             } footer: {
                 Text("Der erste Tag fängt dann erst dann an. Unabhängig davon, ab wann das "
                      + "Zimmer frei ist — ankommen und einchecken sind zwei Zeiten, und "
-                     + "geplant wird ab der ersten.")
+                     + "geplant wird ab der ersten. Die Fahrt hierher — Abfahrt, Dauer, Orte am "
+                     + "Weg — ist eine Weiterreise aus der Städteliste.")
             }
 
             Section {

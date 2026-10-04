@@ -18,6 +18,9 @@ import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { corridorBox, corridorCandidates, corridorStretches, planCorridor } from "./corridor";
+import { encodeLine, InMemoryRouterClient } from "./router-client.test-helper";
+import { setRouterClient } from "./router-client";
+import { pathsBox } from "./route-corridor";
 
 /** Invented places on an invented road near Augsburg. */
 const FROM = { lat: 48.3, lon: 10.9 };
@@ -244,5 +247,65 @@ describe("corridorCandidates on a long journey", () => {
 
     expect(geo.getSearchCalls()).toHaveLength(2);
     expect(found.map((s) => s.osmRef)).toEqual(["node:6", "node:5"]);
+  });
+});
+
+describe("the corridor along the road (§24, stage 2)", () => {
+  // The road from FROM to TO swings 8 km north through the valley; the
+  // straight line is where nobody drives.
+  const BEND = { lat: FROM.lat + 0.072, lon: 11.05 };
+  let router: InMemoryRouterClient;
+
+  beforeEach(async () => {
+    await seedRegion("europe/x", [48.0, 10.5, 48.7, 11.6]);
+    router = new InMemoryRouterClient();
+    router.shapes = [encodeLine([FROM, BEND, TO])];
+    setRouterClient(router);
+    geo.setSearchSpots("nom_europe_x", [
+      // On the road, at the bend.
+      spot({ osmRef: "node:1", id: 1, lat: BEND.lat, lon: BEND.lon, name: "Kloster im Tal" }),
+      // On the straight line, 8 km from the road: the ellipse's favourite.
+      spot({ osmRef: "node:2", id: 2, lat: FROM.lat, lon: 11.05, name: "Museum an der Luftlinie" }),
+      // A kilometre off the road.
+      spot({ osmRef: "node:3", id: 3, lat: BEND.lat + 0.009, lon: BEND.lon, name: "Burg überm Tal" }),
+    ]);
+    return () => setRouterClient(null);
+  });
+
+  it("searches along the road and measures the detour the car drives", async () => {
+    const res = await planCorridor({ from: FROM, to: TO, detourBudgetM: 10_000, mode: "car" });
+    expect(res.source).toBe("router");
+    expect(res.spots.map((s) => s.osmRef)).toEqual(["node:1", "node:3"]);
+    // Geo was asked along the road, not for an ellipse.
+    const calls = geo.getSearchCalls();
+    expect(calls.every((c) => c.query.path !== undefined && c.query.corridor === undefined)).toBe(true);
+    expect(calls[0].query.path?.widthM).toBe(5_000);
+    // Two matrices: origin → stops, stops → destination.
+    expect(router.matrixCalls.map((c) => [c.sources, c.targets])).toEqual([[1, 2], [2, 1]]);
+    expect(res.spots[0].detourM).toBeLessThan(res.spots[1].detourM);
+  });
+
+  it("falls back to the ellipse when the router is away, and says so", async () => {
+    router.reachable = false;
+    const res = await planCorridor({ from: FROM, to: TO, detourBudgetM: 10_000, mode: "car" });
+    expect(res.source).toBe("estimate");
+    expect(res.spots.map((s) => s.osmRef)).toContain("node:2");
+    expect(geo.getSearchCalls().every((c) => c.query.corridor !== undefined)).toBe(true);
+  });
+
+  it("asks for the roads only with a mode, and never for one the router cannot route", async () => {
+    const without = await planCorridor({ from: FROM, to: TO, detourBudgetM: 10_000 });
+    expect(without.source).toBe("estimate");
+    const byTrain = await planCorridor({ from: FROM, to: TO, detourBudgetM: 10_000, mode: "transit" });
+    expect(byTrain.source).toBe("estimate");
+    expect(router.routeCalls).toEqual(["transit"]);
+  });
+
+  it("boxes the regions around the roads, widened by the corridor", () => {
+    const box = pathsBox([[FROM, BEND, TO]], 5_000);
+    expect(box.maxLat).toBeGreaterThan(BEND.lat + 0.04);
+    expect(box.minLat).toBeLessThan(FROM.lat - 0.04);
+    expect(box.minLon).toBeLessThan(FROM.lon);
+    expect(box.maxLon).toBeGreaterThan(TO.lon);
   });
 });
