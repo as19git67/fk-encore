@@ -25,8 +25,15 @@ struct TripTransportModePicker: View {
         NavigationLink {
             TripTransportModeChoiceView(mode: $mode, choices: choices)
         } label: {
-            LabeledContent("Fortbewegung") {
+            // One line, always: a `LabeledContent` wraps its value under
+            // the title when the two do not fit side by side, and the
+            // row grew to two lines on the journey screen.
+            HStack {
+                Text("Fortbewegung")
+                Spacer()
                 Label(mode.label, systemImage: mode.systemImage)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
     }
@@ -47,11 +54,18 @@ struct TripTransportModeChoiceView: View {
                         mode = candidate
                     } label: {
                         HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label(candidate.label, systemImage: candidate.systemImage)
-                                Text(candidate.hint)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                            // The hint sits in the label's title column,
+                            // flush with the name rather than under the
+                            // icon.
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(candidate.label)
+                                    Text(candidate.hint)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: candidate.systemImage)
                             }
                             .foregroundStyle(.primary)
                             Spacer()
@@ -64,6 +78,8 @@ struct TripTransportModeChoiceView: View {
                         }
                     }
                     .accessibilityAddTraits(candidate == mode ? .isSelected : [])
+                    // The hairline runs from the icon, not from the text.
+                    .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
                 }
             } footer: {
                 Text("Der Planer rechnet damit, wie weit ein Spot vom nächsten liegen "

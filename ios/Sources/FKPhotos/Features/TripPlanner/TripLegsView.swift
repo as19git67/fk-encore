@@ -288,7 +288,7 @@ struct TripLegsView: View {
 
     /// A journey: where from, where to, when, and how.
     private func transitRow(_ leg: TripLeg) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 5) {
             Label(leg.displayTitle, systemImage: leg.transportMode.systemImage)
                 .font(.subheadline.weight(.semibold))
             HStack(spacing: 6) {
@@ -308,7 +308,7 @@ struct TripLegsView: View {
     }
 
     private func placeRow(_ leg: TripLeg) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(leg.displayTitle).font(.headline)
             HStack(spacing: 6) {
                 Text(leg.days.count == 1 ? "1 Tag" : "\(leg.days.count) Tage")
@@ -547,6 +547,8 @@ struct TripLegEditView: View {
 
         }
         .navigationTitle(leg?.displayTitle ?? "Stadt")
+        // Typed changes must not vanish on a swipe; "Abbrechen" is a tap away.
+        .interactiveDismissDisabled()
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
