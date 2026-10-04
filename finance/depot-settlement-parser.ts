@@ -48,6 +48,12 @@ export interface SettlementInspection extends Omit<SettlementExtraction, "kind">
   costInfo: boolean;
   /** The text prints wording only a settlement or dividend statement prints. */
   strong: boolean;
+  /**
+   * A tax statement on its own (see looksLikeTaxStatement): `gross` is the
+   * amount before taxes, `net` the one after, and nothing but the tax is
+   * ever written to a transaction.
+   */
+  taxStatement: boolean;
   /** The label each amount/date field was read after ("Kurswert", "Schlusstag", …). */
   labels: Partial<Record<SettlementField, string>>;
 }
@@ -199,11 +205,37 @@ export function parseGermanNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-const AMOUNT = String.raw`(-?\s?\d{1,3}(?:[.\s]\d{3})*(?:,\d{1,8})?|-?\s?\d+(?:[.,]\d{1,8})?)`;
+// A rate ("12,34 %") is never an amount.
+const AMOUNT = String.raw`(-?\s?\d{1,3}(?:[.\s]\d{3})*(?:,\d{1,8})?|-?\s?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)`;
 const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
+
+/** "Steuern", also as OCR reads it off a scan ("Steuem"). */
+const STEUERN = String.raw`Steue(?:rn|m)`;
+
+/**
+ * A tax statement on its own ("Steuerliche Behandlung: <Geschäftsart>
+ * vom <Datum>"): the taxes on a booking that has its own settlement or
+ * credit note. It prints the quantity and the amounts before and after
+ * taxes, but no price, no Kurswert and no charges — it only adds the tax
+ * to a transaction that exists anyway. A settlement with its tax statement
+ * appended still has its own heading and is read as a settlement.
+ */
+export function looksLikeTaxStatement(text: string): boolean {
+  if (!TAX_STATEMENT_RE.test(text)) return false;
+  const rest = text
+    .split("\n")
+    .filter((l) => !TAX_STATEMENT_RE.test(l))
+    .join("\n");
+  return !STRONG_RE.test(rest) && !/Kurswert/i.test(rest);
+}
+
+const TAX_STATEMENT_RE = /steuerliche\s+behandlung/i;
 
 function normalize(text: string): string {
   return text
+    // A total's underline ("abgeführte Steuern EUR ______ -12,34") would
+    // push the amount out of reach of its label.
+    .replace(/_{2,}/g, " ")
     .replace(/ /g, " ")
     .replace(/[ \t]+/g, " ")
     .replace(/\r/g, "")
@@ -427,7 +459,13 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   const text = settlementBlock(whole) ?? whole;
   const lower = text.toLowerCase();
 
-  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole) ? null : detectKind(lower);
+  const taxStatement = looksLikeTaxStatement(whole);
+  // A tax statement names the booking it belongs to on its heading line
+  // ("Steuerliche Behandlung: <Geschäftsart> vom <Datum>").
+  const taxLine = taxStatement ? (whole.split("\n").find((l) => TAX_STATEMENT_RE.test(l)) ?? null) : null;
+  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole)
+    ? null
+    : (taxLine ? detectKind(taxLine.toLowerCase()) : null) ?? detectKind(lower);
   const isin = extractIsin(text) ?? extractIsin(whole);
   const wkn = extractWkn(text) ?? wknNextToIsin(text, isin) ?? extractWkn(whole);
 
@@ -454,13 +492,17 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       return n === null ? null : Math.abs(n);
     })());
 
-  const price = track("price", () => amountAfter(
+  // A tax statement prints no price, Kurswert or charges: whatever those
+  // labels reach there belongs to a table of tax bases.
+  const price = taxStatement ? null : track("price", () => amountAfter(
     text,
     [String.raw`Ausführungskurs`, String.raw`Kurs\s*/\s*Preis`, String.raw`Kurswert\s*je`, String.raw`Preis\s*je`, String.raw`Kurs(?!wert)`, String.raw`Dividende\s*(?:je|pro)\s*(?:Stück|Aktie|Anteil)`, String.raw`Ausschüttung\s*(?:je|pro)\s*(?:Stück|Anteil)`],
     markers,
   ));
 
-  const gross = track("gross", () => amountAfter(
+  const gross = taxStatement
+    ? track("gross", () => amountAfter(text, [String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*vor\s*${STEUERN}`], markers))
+    : track("gross", () => amountAfter(
     text,
     [String.raw`Kurswert`, String.raw`Bruttobetrag`, String.raw`Brutto`, String.raw`Dividendengutschrift`, String.raw`Ausschüttung\s*(?:brutto|gesamt)`],
     markers,
@@ -468,7 +510,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
 
   // A printed total ("Summe Entgelte 6,40") is the fees; adding it to the
   // lines it sums would count them twice.
-  const fees = track("fees", () => amountAfter(
+  const fees = taxStatement ? null : track("fees", () => amountAfter(
     text,
     [String.raw`Summe\s*(?:der\s*)?(?:Entgelte|Gebühren|Kosten|Spesen)`, String.raw`(?:Entgelte|Gebühren|Kosten)\s*gesamt`],
     markers,
@@ -493,30 +535,9 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     markers,
   ));
 
-  const tax = track("tax", () => amountAfter(
-    text,
-    [String.raw`abgeführte\s*Steuern`, String.raw`einbehaltene\s*Steuern(?=\s*[:\s]*(?:EUR|-?\d))`, String.raw`Summe\s*Steuern`, String.raw`Steuern\s*gesamt`],
-    markers,
-  ) ?? sumAfter(
-    text,
-    [
-      String.raw`Kapitalertrag(?:s)?steuer`,
-      String.raw`KESt`,
-      String.raw`KapSt`,
-      String.raw`Solidaritätszuschlag`,
-      String.raw`Soli(?:daritätszuschlag)?\b`,
-      String.raw`SolZ\b`,
-      String.raw`Kirchensteuer`,
-      String.raw`KiSt`,
-      String.raw`Quellensteuer`,
-      String.raw`QuSt`,
-      String.raw`Finanztransaktionssteuer`,
-      String.raw`Stempelsteuer`,
-    ],
-    markers,
-  ));
-
-  const netAbs = track("net", () => amountAfter(
+  const netAbs = taxStatement
+    ? track("net", () => amountAfter(text, [String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*nach\s*${STEUERN}`], markers))
+    : track("net", () => amountAfter(
     text,
     [
       String.raw`Ausmachender\s*Betrag`,
@@ -525,9 +546,9 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       String.raw`Nettobetrag`,
       // A settlement with its tax statement appended prints both; the
       // amount booked is the one after taxes.
-      String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*nach\s*Steuern`,
-      String.raw`Betrag\s*zu\s*Ihren\s*(?:Gunsten|Lasten)(?!\s*vor\s*Steuern)`,
-      String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)(?!\s*vor\s*Steuern)`,
+      String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*nach\s*${STEUERN}`,
+      String.raw`Betrag\s*zu\s*Ihren\s*(?:Gunsten|Lasten)(?!\s*vor\s*${STEUERN})`,
+      String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)(?!\s*vor\s*${STEUERN})`,
       String.raw`Zu\s*Lasten`,
       String.raw`Zu\s*Gunsten`,
       String.raw`Gutschrift\s*(?:in\s*)?Höhe\s*von`,
@@ -539,16 +560,50 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   ));
   const net = netAbs === null ? null : kind === "buy" ? -netAbs : netAbs;
 
+  const tax = track("tax", () => amountAfter(
+    text,
+    [String.raw`abgeführte\s*${STEUERN}`, String.raw`einbehaltene\s*${STEUERN}(?=\s*[:\s]*(?:EUR|-?\d))`, String.raw`Summe\s*${STEUERN}`, String.raw`${STEUERN}\s*gesamt`],
+    markers,
+  ) ?? (() => {
+    // No printed total: on a tax statement, what lies between the amounts
+    // before and after taxes is the tax — safer than adding up every tax
+    // word in the tables and footnotes.
+    if (!taxStatement || gross === null || netAbs === null) return null;
+    markers.push("vor − nach Steuern");
+    return Math.round(Math.abs(gross - netAbs) * 100) / 100;
+  })() ?? sumAfter(
+    text,
+    [
+      String.raw`Kapitalertrag(?:s)?steuer(?!satz)`,
+      String.raw`KESt`,
+      String.raw`KapSt`,
+      String.raw`Solidaritätszuschlag`,
+      String.raw`Soli(?:daritätszuschlag)?\b`,
+      String.raw`SolZ\b`,
+      String.raw`Kirchensteuer(?!satz)`,
+      String.raw`KiSt`,
+      // Credited foreign tax is not withheld from this booking.
+      String.raw`(?<!angerechnete\s(?:\S+\s)?)Quellensteuer`,
+      String.raw`QuSt`,
+      String.raw`Finanztransaktionssteuer`,
+      String.raw`Stempelsteuer`,
+    ],
+    markers,
+  ));
+
+
   const executedAt = track("executedAt", () =>
-    kind === "dividend"
+    (taxLine ? dateAfter(taxLine, [String.raw`Steuerliche\s*Behandlung[^\n]*?\bvom`], markers) : null) ??
+    (kind === "dividend"
       ? dateAfter(text, [String.raw`Zahlbarkeitstag`, String.raw`Zahltag`, String.raw`Valuta`, String.raw`Ex-?Tag`, String.raw`Datum`], markers)
-      : dateAfter(text, [String.raw`Schlusstag(?:\s*/\s*-?Zeit)?`, String.raw`Ausführungstag`, String.raw`Handelstag`, String.raw`Geschäftstag`, String.raw`Ausführung\s*am`, String.raw`Valuta`, String.raw`Datum`], markers));
+      : dateAfter(text, [String.raw`Schlusstag(?:\s*/\s*-?Zeit)?`, String.raw`Ausführungstag`, String.raw`Handelstag`, String.raw`Geschäftstag`, String.raw`Ausführung\s*am`, String.raw`Valuta`, String.raw`Datum`], markers)));
 
   return {
     kind,
     insurance: looksLikeInsurancePaper(wholeLower),
     costInfo: looksLikeCostInformation(whole),
     strong: hasStrongSettlementWording(wholeLower),
+    taxStatement,
     isin,
     wkn,
     name: detectName(text, isin, wkn) ?? (text === whole ? null : detectName(whole, isin, wkn)),

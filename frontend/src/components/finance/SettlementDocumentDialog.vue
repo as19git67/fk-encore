@@ -106,6 +106,16 @@ const FIELD_ROWS: Array<{ key: FieldKey; label: string }> = [
   { key: 'currency', label: 'Währung' },
 ]
 
+/** A tax statement prints the amounts before and after taxes, not a Kurswert and a settled net. */
+const TAX_STATEMENT_LABELS: Partial<Record<FieldKey, string>> = {
+  gross: 'Betrag vor Steuern',
+  net: 'Betrag nach Steuern',
+}
+
+function rowLabel(row: { key: FieldKey; label: string }): string {
+  return (inspection.value?.tax_statement ? TAX_STATEMENT_LABELS[row.key] : undefined) ?? row.label
+}
+
 function format(key: FieldKey, v: string | null): string | null {
   if (v === null) return null
   const cur = inspection.value?.fields.currency ?? null
@@ -197,6 +207,14 @@ const outcomeLine = computed(() => {
 
 function outcomeText(d: NonNullable<SettlementInspection['depot']>): string | null {
   const cur = inspection.value?.fields.currency
+  if (inspection.value?.tax_statement) {
+    switch (d.outcome) {
+      case 'enriched': return 'Einlesen würde die Steuer an der passenden Transaktion ergänzen und den Beleg dort verknüpfen.'
+      case 'linked': return 'Einlesen würde den Beleg mit der passenden Transaktion verknüpfen; ihre Steuer ist schon eingetragen.'
+      case 'no_transaction':
+        return 'Keine passende Transaktion gefunden (gleiches Wertpapier, gleiche Art und Stückzahl, ±7 Tage). Eine Steuermitteilung legt keine eigene Transaktion an.'
+    }
+  }
   switch (d.outcome) {
     case 'created': return 'Einlesen würde eine neue Transaktion anlegen.'
     case 'enriched': return 'Einlesen würde die vorhandene Transaktion um fehlende Werte ergänzen.'
@@ -243,7 +261,10 @@ function openInDocuments() {
             {{ LLM_STATUS_TEXT[inspection.llm_status] ?? 'Gelesen mit festen Regeln.' }}
           </p>
 
-          <p v-if="inspection.is_settlement" class="sd-status sd-ok">
+          <p v-if="inspection.is_settlement && inspection.tax_statement" class="sd-status sd-ok">
+            Als Steuermitteilung ({{ depotKindLabel(inspection.fields.kind ?? '') }}) erkannt · ergänzt nur die Steuer einer vorhandenen Transaktion
+          </p>
+          <p v-else-if="inspection.is_settlement" class="sd-status sd-ok">
             Als {{ depotKindLabel(inspection.fields.kind ?? '') }}-Abrechnung erkannt · {{ recognisedCount }} von {{ FIELD_ROWS.length }} Feldern gefunden
           </p>
           <p v-else class="sd-status sd-warn">
@@ -270,7 +291,7 @@ function openInDocuments() {
                 :key="row.key"
                 :class="{ 'sd-missing': fieldValue(row.key) === null, 'sd-disagree': sourceOf(row.key)?.disagree }"
               >
-                <td>{{ row.label }}</td>
+                <td>{{ rowLabel(row) }}</td>
                 <td class="sd-value">{{ fieldValue(row.key) ?? 'nicht gefunden' }}</td>
                 <td>
                   <span

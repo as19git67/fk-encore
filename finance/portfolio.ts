@@ -1436,6 +1436,9 @@ interface EnrichDocumentsResponse {
   skipped_not_settlement: number;
   skipped_no_holding: number;
   conflicts: number;
+  unverified: number;
+  /** Tax statements without a transaction to add their tax to. */
+  skipped_no_transaction: number;
   errors: string[];
   /** Per document: only the ones that changed something or need a look. */
   results: EnrichResult[];
@@ -1788,7 +1791,7 @@ export const applySettlementDocument = api(
       throw APIError.notFound(`document ${documentId} not found`);
     }
     const r = await enrichDocument(documentId, depots.map((d) => d.id), { overwrite: true });
-    if (r.outcome === "not_settlement" || r.outcome === "no_holding") {
+    if (r.outcome === "not_settlement" || r.outcome === "no_holding" || r.outcome === "no_transaction") {
       throw APIError.failedPrecondition(`document ${documentId} cannot be applied (${r.outcome})`);
     }
     return r;
@@ -1875,6 +1878,8 @@ interface DocumentInspectionResponse {
   llm_status: LlmStatus;
   /** True when the reading counts as a settlement with enough to book. */
   is_settlement: boolean;
+  /** A tax statement on its own: it only adds the tax to an existing transaction. */
+  tax_statement: boolean;
   /** Why it does not, when it does not. */
   rejection: InspectionRejection | null;
   /** The reading that is used — rules and model merged. */
@@ -2006,6 +2011,7 @@ export const inspectSettlementDocument = api(
       llm_fallback_used: reading.llm !== null,
       llm_status: reading.llmStatus,
       is_settlement: rejection === null,
+      tax_statement: reading.rules?.taxStatement ?? false,
       rejection,
       fields,
       sources,

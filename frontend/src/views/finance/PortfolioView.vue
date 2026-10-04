@@ -406,7 +406,7 @@ const enrichNotice = ref<{ severity: 'success' | 'info' | 'warn'; text: string }
 /** Documents examined so far in the running read, shown on the button. */
 const enrichProgress = ref(0)
 
-const COUNTED = ['documents_examined', 'created', 'enriched', 'linked', 'conflicts', 'unverified', 'skipped_no_holding'] as const
+const COUNTED = ['documents_examined', 'created', 'enriched', 'linked', 'conflicts', 'unverified', 'skipped_no_holding', 'skipped_no_transaction'] as const
 type EnrichTotals = Record<(typeof COUNTED)[number], number>
 
 async function enrichFromDocuments() {
@@ -432,6 +432,7 @@ async function enrichFromDocuments() {
     if (r.conflicts > 0) parts.push(`${r.conflicts} mit abweichendem Betrag — bitte prüfen`)
     if (r.unverified > 0) parts.push(`${r.unverified} unsicher erkannt — bitte prüfen`)
     if (r.skipped_no_holding > 0) parts.push(`${r.skipped_no_holding} ohne passendes Depot`)
+    if (r.skipped_no_transaction > 0) parts.push(`${r.skipped_no_transaction} Steuermitteilungen ohne passende Transaktion`)
     enrichNotice.value = {
       severity: r.conflicts > 0 || r.unverified > 0 ? 'warn' : changed > 0 ? 'success' : 'info',
       text: parts.length > 0

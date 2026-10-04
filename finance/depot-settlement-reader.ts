@@ -66,7 +66,9 @@ export interface SettlementReading {
 export function rejectedAsOtherPaper(r: SettlementReading): "insurance" | "cost_info" | "llm_other" | null {
   if (r.rules?.insurance) return "insurance";
   if (r.rules?.costInfo) return "cost_info";
-  if (r.llmSaysSettlement === false && !r.rules?.strong) return "llm_other";
+  // A tax statement is not a settlement, and the model may well say so —
+  // the rules recognise it by its heading and read it as what it is.
+  if (r.llmSaysSettlement === false && !r.rules?.strong && !r.rules?.taxStatement) return "llm_other";
   return null;
 }
 

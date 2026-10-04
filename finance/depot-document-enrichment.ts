@@ -67,7 +67,9 @@ export type EnrichOutcome =
   | "no_holding"
   | "conflict"
   /** Rules and model disagree and the figures do not settle it: nothing is booked. */
-  | "unverified";
+  | "unverified"
+  /** A tax statement with no transaction of the same security, kind and quantity to add its tax to. */
+  | "no_transaction";
 
 export interface EnrichResult {
   document_id: number;
@@ -94,6 +96,8 @@ export interface EnrichResult {
   checked_against_booking: boolean;
   /** The user marked the document "ignore for depots". */
   ignored: boolean;
+  /** The document is a tax statement on its own: it only adds the tax to an existing transaction. */
+  tax_statement: boolean;
 }
 
 export interface EnrichOptions {
@@ -130,6 +134,8 @@ export interface EnrichStats {
   conflicts: number;
   /** Rules and model disagreed and the figures did not settle it. */
   unverified: number;
+  /** Tax statements without a transaction to add their tax to. */
+  skipped_no_transaction: number;
   errors: string[];
   results: EnrichResult[];
   /** Where the next page starts (`before` of the next call); null when this was the last. */
@@ -148,6 +154,7 @@ function emptyStats(): EnrichStats {
     skipped_no_holding: 0,
     conflicts: 0,
     unverified: 0,
+    skipped_no_transaction: 0,
     errors: [],
     results: [],
   };
@@ -365,6 +372,78 @@ export async function findMatchingDepotTransaction(
   return { row: pick(rows)!, netAgrees: false };
 }
 
+/**
+ * The transaction a tax statement belongs to: same depot, same position
+ * (ISIN or WKN), same kind, within the window — and the same quantity
+ * when both carry one. The amounts on a tax statement say nothing about
+ * the row (before/after taxes, not the booked net), so they are not
+ * compared. The closest date wins.
+ */
+export async function findTaxStatementTransaction(
+  accountId: number,
+  s: SettlementExtraction,
+): Promise<DepotRow | null> {
+  if (!s.executedAt) return null;
+  const idMatches = [];
+  if (s.isin) idMatches.push(eq(financeDepotTransaction.isin, s.isin));
+  if (s.wkn) idMatches.push(eq(financeDepotTransaction.wkn, s.wkn));
+  const rows = await db
+    .select()
+    .from(financeDepotTransaction)
+    .where(
+      and(
+        eq(financeDepotTransaction.account_id, accountId),
+        eq(financeDepotTransaction.kind, s.kind),
+        or(...idMatches)!,
+        sql`${financeDepotTransaction.executed_at} >= ${shiftDate(s.executedAt, -SETTLEMENT_MATCH_WINDOW_DAYS)}::date`,
+        sql`${financeDepotTransaction.executed_at} <= ${shiftDate(s.executedAt, SETTLEMENT_MATCH_WINDOW_DAYS)}::date`,
+      ),
+    );
+  const target = Date.parse(`${s.executedAt}T00:00:00Z`);
+  const distance = (r: DepotRow) => Math.abs(Date.parse(`${r.executed_at.slice(0, 10)}T00:00:00Z`) - target);
+  const sameQuantity = (r: DepotRow) => {
+    const amount = num(r.amount);
+    return s.quantity === null || amount === null || Math.abs(Math.abs(amount) - s.quantity) < 1e-6;
+  };
+  return rows.filter(sameQuantity).sort((a, b) => distance(a) - distance(b))[0] ?? null;
+}
+
+/**
+ * A tax statement adds its tax to the transaction it belongs to and links
+ * itself there. It never creates a transaction and never touches another
+ * value: the settlement or the credit note is the source for those. A tax
+ * the row already carries stays, unless the user chose the statement over
+ * it (`overwrite`).
+ */
+async function addTaxFromStatement(
+  result: EnrichResult,
+  parsed: SettlementExtraction,
+  accountId: number,
+  documentId: number,
+  options: EnrichOptions,
+): Promise<EnrichResult> {
+  const dryRun = options.dryRun === true;
+  const row = await findTaxStatementTransaction(accountId, parsed);
+  if (!row) {
+    result.outcome = "no_transaction";
+    return result;
+  }
+  result.depot_transaction_id = row.id;
+  result.transaction_net = row.net_amount;
+  const writeTax = parsed.tax !== null && (row.tax === null || (options.overwrite === true && !dryRun));
+  const changed = writeTax && (row.tax === null || Math.abs(Number(row.tax) - parsed.tax!) > NET_TOLERANCE);
+  result.outcome = changed ? "enriched" : "linked";
+  if (dryRun) return result;
+  if (changed) {
+    await db
+      .update(financeDepotTransaction)
+      .set({ tax: fixed(parsed.tax, 2), source: withDocumentSource(row.source) })
+      .where(eq(financeDepotTransaction.id, row.id));
+  }
+  await linkDocument(row.id, documentId);
+  return result;
+}
+
 /** Fixed-scale string for a numeric column, or null. */
 function fixed(n: number | null, scale: number): string | null {
   return n === null ? null : n.toFixed(scale);
@@ -409,6 +488,7 @@ export async function enrichDocument(
     llm_status: null,
     checked_against_booking: false,
     ignored: false,
+    tax_statement: false,
   };
 
   const [doc] = await db
@@ -500,6 +580,11 @@ export async function enrichDocument(
       .map((f) => `${f.field}: rules ${f.rules ?? "–"} / llm ${f.llm ?? "–"}`)
       .join("; ");
     return result;
+  }
+
+  if (reading.rules?.taxStatement) {
+    result.tax_statement = true;
+    return addTaxFromStatement(result, parsed, holding.account_id, documentId, options);
   }
 
   let match = await findMatchingDepotTransaction(holding.account_id, parsed);
@@ -719,6 +804,7 @@ export async function enrichPendingDocuments(
         case "already_linked": stats.already_linked++; break;
         case "not_settlement": stats.skipped_not_settlement++; break;
         case "no_holding": stats.skipped_no_holding++; break;
+        case "no_transaction": stats.skipped_no_transaction++; break;
         case "conflict": stats.conflicts++; break;
         case "unverified": stats.unverified++; break;
       }
