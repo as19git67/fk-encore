@@ -184,6 +184,31 @@ describe("mergeSettlement", () => {
     expect(decided.checks.find((c) => c.name === "booking_net")!.result).toBe("ok");
   });
 
+  it("takes each field from whichever source makes the figures add up", () => {
+    // A sale with its tax statement appended. The rules read the net after
+    // taxes but took an amount of money as the quantity; the model read the
+    // quantity but the net before taxes. Neither reading adds up whole.
+    const base: SettlementValues = {
+      ...EMPTY_SETTLEMENT,
+      kind: "sell",
+      isin: VALID_ISIN,
+      executedAt: "2026-05-06",
+      gross: 1563,
+      fees: 4.9,
+      tax: 120.45,
+      currency: "EUR",
+    };
+    const rules = { ...base, quantity: 3125.5, net: 1437.65 };
+    const llm = { ...base, quantity: 30, price: 52.1, net: 1558.1 };
+    const r = mergeSettlement(rules, llm, today);
+    expect(r.values.quantity).toBe(30);
+    expect(r.values.net).toBe(1437.65);
+    expect(r.fields.find((f) => f.field === "quantity")).toMatchObject({ source: "llm", disagree: true });
+    expect(r.fields.find((f) => f.field === "net")).toMatchObject({ source: "rules", disagree: true });
+    expect(r.checks.every((c) => c.result !== "failed")).toBe(true);
+    expect(r.verdict).toBe("ok");
+  });
+
   it("is unverified when they disagree and neither adds up", () => {
     const r = mergeSettlement(buy({ net: -3100 }), buy({ net: -3200 }), today);
     expect(r.verdict).toBe("unverified");

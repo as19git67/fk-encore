@@ -334,8 +334,16 @@ function detectName(text: string, isin: string | null, wkn: string | null): stri
 }
 
 function detectNameRaw(text: string, isin: string | null, wkn: string | null): string | null {
-  const labelled = /(?:Wertpapierbezeichnung|Bezeichnung|Wertpapier|Gattung)\s*[:\n]\s*([^\n]{3,80})/i.exec(text);
-  if (labelled) {
+  // The specific labels first: a bare "Wertpapier:" also heads lines of an
+  // appended tax statement that are not the security's name. A label may
+  // share its line with the identifier column's heading
+  // ("Wertpapier-Bezeichnung   WKN/ISIN"); the name is then on the next line.
+  for (const label of [String.raw`Wertpapier-?\s?bezeichnung`, String.raw`Bezeichnung`, String.raw`Gattung`, String.raw`Wertpapier`]) {
+    const labelled = new RegExp(
+      String.raw`${label}[ \t]*(?::\s*|(?:[ \t]+(?:WPKNR|WKN|ISIN)\b[^\n]*)?\n\s*)([^\n]{3,80})`,
+      "i",
+    ).exec(text);
+    if (!labelled) continue;
     const candidate = labelled[1]!.trim();
     if (!/^(ISIN|WKN)\b/i.test(candidate)) return candidate.replace(/\s{2,}/g, " ");
   }
@@ -436,7 +444,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   };
 
   const quantity = track("quantity", () =>
-    amountAfter(text, [String.raw`Stück\s*/\s*Nominale`, String.raw`Stück`, String.raw`Stk\.?`, String.raw`Nominale`, String.raw`Anzahl`, String.raw`Menge`], markers) ??
+    // Not "Stückzinsen" (accrued interest, an amount of money).
+    amountAfter(text, [String.raw`Stück\s*/\s*Nominale`, String.raw`Stück(?!zins)`, String.raw`Stk\.?`, String.raw`\bSt\.`, String.raw`Nominale`, String.raw`Anzahl`, String.raw`Menge`], markers) ??
     (() => {
       const m = new RegExp(String.raw`${AMOUNT}\s*(?:Stück|Stk\.?|St\.)`, "i").exec(text);
       if (!m) return null;

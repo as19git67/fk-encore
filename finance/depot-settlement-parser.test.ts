@@ -365,4 +365,23 @@ KapitalertragsteuerSolidaritätszuschlag
     expect(s.net).toBe(2863.13);
     expect(s.executedAt).toBe("2026-07-14");
   });
+
+  it("takes the name under the settlement's own label and no amount of money as the quantity", () => {
+    // The tax statement's table heads a line with a bare "Wertpapier" and
+    // prints accrued interest — neither is the security or its quantity.
+    const s = parseSettlement(
+      TEXT.replace(
+        "Zu Ihren Gunsten vor Steuern: EUR",
+        "Stückzinsen EUR 12,34\nWertpapier\nBeispielhinweis zur Steuer\nZu Ihren Gunsten vor Steuern: EUR",
+      ),
+    )!;
+    expect(s.name).toBe("Alpha Industries AG");
+    expect(s.quantity).toBe(30);
+  });
+
+  it("reads the quantity after 'St.' when no other quantity label is printed", () => {
+    const s = parseSettlement(TEXT.replace("Stk. 30", "30 Anteile"))!;
+    expect(s.quantity).toBe(30);
+    expect(s.markers).toContain("bSt.");
+  });
 });
