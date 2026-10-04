@@ -12,12 +12,17 @@ import SwiftUI
 /// Both times are optional and independent, because that is how they
 /// are actually known: the flight is booked long before anybody works
 /// out when they will leave the flat.
-struct TripDraftLegView: View {
+///
+/// `extra` is what a caller adds below the shared fields — the add-city
+/// form puts the date there, which a city drafted with the trip takes
+/// from the trip instead.
+struct TripDraftLegView<Extra: View>: View {
     @Binding var leg: TripDraftLeg
     let position: Int
     /// What the city before this one is called, for the transfer's
     /// wording. Nil while it is still unpicked.
     let previousName: String?
+    @ViewBuilder var extra: () -> Extra
 
     @State private var finder = TripPlaceFinderModel()
 
@@ -75,6 +80,8 @@ struct TripDraftLegView: View {
                      + "selbst — Abfahrt, Dauer, Orte am Weg — ist eine Weiterreise: die fügst du "
                      + "nach dem Anlegen in der Städteliste zwischen zwei Städten ein.")
             }
+
+            extra()
         }
         .navigationTitle(leg.effectiveTitle ?? "Stadt \(position + 1)")
         .navigationBarTitleDisplayMode(.inline)
@@ -114,5 +121,12 @@ struct TripDraftLegView: View {
 
     private static func today(at hour: Int) -> Date {
         Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+}
+
+extension TripDraftLegView where Extra == EmptyView {
+    /// The shared fields alone, for the trip draft.
+    init(leg: Binding<TripDraftLeg>, position: Int, previousName: String?) {
+        self.init(leg: leg, position: position, previousName: previousName) { EmptyView() }
     }
 }

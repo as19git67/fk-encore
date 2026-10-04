@@ -367,16 +367,25 @@ export async function travellersOf(plan: StoredPlan): Promise<TravellersResponse
  * a no-op.
  */
 async function syncPlanners(plan: StoredPlan): Promise<void> {
-  const planners = await db
+  // The owner first, then whoever was invited, in the order they were:
+  // the rows are written in one statement and share a `created_at`, so
+  // the list's order falls back to their ids — which is the order they
+  // are inserted in here. A `WHERE id IN (…)` alone returns whatever
+  // order the scan happens to have, and the invitee came back before
+  // the owner on some runs.
+  const sharedWith = (await db
+    .select({ id: tripPlanShares.user_id })
+    .from(tripPlanShares)
+    .where(eq(tripPlanShares.plan_id, plan.id))
+    .orderBy(asc(tripPlanShares.id))).map((row) => row.id);
+  const wanted = [plan.ownerId, ...sharedWith.filter((id) => id !== plan.ownerId)];
+  const found = await db
     .select({ id: users.id, name: users.name, email: users.email })
     .from(users)
-    .where(inArray(users.id, [
-      plan.ownerId,
-      ...(await db
-        .select({ id: tripPlanShares.user_id })
-        .from(tripPlanShares)
-        .where(eq(tripPlanShares.plan_id, plan.id))).map((row) => row.id),
-    ]));
+    .where(inArray(users.id, wanted));
+  const planners = wanted
+    .map((id) => found.find((planner) => planner.id === id))
+    .filter((planner): planner is (typeof found)[number] => planner !== undefined);
   const plannerIds = planners.map((planner) => planner.id);
 
   if (planners.length > 0) {
