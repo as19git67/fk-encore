@@ -126,6 +126,9 @@ struct TripLegsView: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
+                    // The hairline runs from the row's edge, not from
+                    // where the first text happens to start.
+                    .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { removing = leg } label: {
                             Label("Entfernen", systemImage: "trash")
@@ -173,17 +176,22 @@ struct TripLegsView: View {
             NavigationStack {
                 TripLegEditView(viewModel: viewModel, legIndex: leg.position)
             }
+            // Typed input must not vanish on a swipe — on any page of the
+            // sheet, the mode choice included; "Abbrechen" is a tap away.
+            .interactiveDismissDisabled()
         }
         .sheet(item: $transit) { target in
             NavigationStack {
                 TripTransitView(viewModel: viewModel, afterLegIndex: target.afterLegIndex,
                                 existing: target.existing, suggested: target.suggested)
             }
+            .interactiveDismissDisabled()
         }
         .sheet(isPresented: $adding) {
             NavigationStack {
                 TripAddLegView(viewModel: viewModel)
             }
+            .interactiveDismissDisabled()
         }
         .alert(removing?.isTransit == true ? "Weiterreise entfernen?" : "Stadt entfernen?", isPresented: Binding(
             get: { removing != nil }, set: { if !$0 { removing = nil } }),
@@ -285,6 +293,7 @@ struct TripLegsView: View {
             }
         }
         .disabled(blocker != nil)
+        .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
     }
 
     @ViewBuilder
@@ -314,7 +323,6 @@ struct TripLegsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.leading, 12)
     }
 
     private func placeRow(_ leg: TripLeg) -> some View {
@@ -380,15 +388,49 @@ struct TripAddLegView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var leg = TripDraftLeg()
+    @State private var isDated = false
+    @State private var startDate = Date()
+    @State private var prefilled = false
     @State private var isSaving = false
     @State private var errorMessage: String?
+
+    /// The day after the trip so far: the day after the last place's
+    /// last day, or the day a closing journey arrives. Nil on a trip
+    /// without dates.
+    private var nextDay: String? {
+        TripTransitSlots.nextDay(after: viewModel.plan?.legs ?? [])
+    }
 
     var body: some View {
         TripDraftLegView(
             leg: $leg,
             position: viewModel.plan?.legs.count ?? 1,
             previousName: viewModel.plan?.legs.last?.title,
-        )
+        ) {
+            Section {
+                Toggle("Termin steht fest", isOn: $isDated)
+                if isDated {
+                    DatePicker("Erster Tag", selection: $startDate, displayedComponents: .date)
+                }
+            } header: {
+                Text("Wann")
+            } footer: {
+                Text(nextDay == nil
+                     ? "Die Reise hat noch kein Datum; die Stadt bekommt eines mit ihr."
+                     : "Vorbelegt mit dem Tag nach der bisherigen Reise.")
+            }
+        }
+        .onAppear {
+            // Once: the next logical day, which is what "noch eine Stadt"
+            // almost always means. Typing it was the step everybody got
+            // wrong by one.
+            guard !prefilled else { return }
+            prefilled = true
+            if let next = nextDay, let date = TripCalendar.date(fromIsoDay: next) {
+                isDated = true
+                startDate = date
+            }
+        }
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -417,6 +459,7 @@ struct TripAddLegView: View {
             let mode: String
             let days: Int
             let radiusM: Int
+            let startDate: String?
             let transfer: TripDraftTransfer?
         }
         do {
@@ -430,6 +473,7 @@ struct TripAddLegView: View {
                     mode: leg.mode.rawValue,
                     days: leg.days,
                     radiusM: leg.radiusM,
+                    startDate: isDated ? TripCalendar.isoDay(startDate) : nil,
                     transfer: leg.transfer,
                 ))
             viewModel.replace(with: response)
@@ -690,6 +734,14 @@ enum TripTransitSlots {
         guard let first = undated.first else { return nil }
         return "„\(first.displayTitle)“ hat noch kein Datum — erst der Stadt ein Datum geben, "
             + "dann die \(afterLegIndex < 0 ? "Anreise" : to == nil ? "Heimreise" : "Weiterreise") anlegen."
+    }
+
+    /// The day a city added at the end would begin: the day after the
+    /// last place's last day, or the day a closing journey arrives. Nil
+    /// without dates.
+    static func nextDay(after legs: [TripLeg]) -> String? {
+        guard let last = legs.max(by: { $0.position < $1.position }), let start = last.startDate else { return nil }
+        return TripCalendar.day(start, plus: last.isTransit ? max(0, last.days.count - 1) : last.days.count)
     }
 
     static func slotAfter(_ leg: TripLeg, in legs: [TripLeg]) -> Int? {

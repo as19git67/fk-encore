@@ -88,5 +88,9 @@ struct TripTransportModeChoiceView: View {
         }
         .navigationTitle("Fortbewegung")
         .navigationBarTitleDisplayMode(.inline)
+        // Pushed inside a form's sheet: a swipe here closed the whole
+        // form, choices and typed input with it. The lock on the sheet's
+        // root does not reach a pushed page, so the page says it too.
+        .interactiveDismissDisabled()
     }
 }

@@ -722,6 +722,7 @@ struct TripPlanDayView: View {
                     TripLegEditView(viewModel: viewModel, legIndex: leg.position)
                 }
             }
+            .interactiveDismissDisabled()
         }
     }
 
