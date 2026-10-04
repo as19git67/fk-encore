@@ -5858,13 +5858,18 @@ Jede Ebene hat genau einen Ort auf dem Tagesbildschirm, und jede Aktion
 liegt an dem Ort ihrer Ebene:
 
 - **Reise — die Etappenleiste oben und das Menü „Reise".** Die Leiste zeigt
-  die Etappen (immer, auch bei einer einzigen) und endet mit „Etappen": der
-  Struktur-Editor, in dem Etappen hinzugefügt, verschoben, entfernt und
-  Weiterreisen, Anreise und Heimreise eingefügt werden (`TripLegsView`).
+  die Etappen (immer, auch bei einer einzigen); rechts davon, fest am Rand
+  und nicht mitgescrollt, der Stift: der Struktur-Editor, in dem Etappen
+  hinzugefügt, verschoben, entfernt und Weiterreisen, Anreise und Heimreise
+  eingefügt werden (`TripLegsView`, als Blatt mit „Fertig"). Die Chips der
+  Leiste und der Stift sind 44 pt hoch — das Maß, das Apple für ein
+  Bedienelement verlangt.
   Das Menü enthält nur noch, was der ganzen Reise gehört: Einstellungen,
   Planen mit, Reisegruppe, Dokumente, Änderungen, Reisebereit?, Danach,
   Unterwegs ohne Netz.
-- **Etappe — die Etappenkopfzeile.** Ein Tipp öffnet das Etappen-Blatt
+- **Etappe — die Etappenkopfzeile.** Eine Karte mit Pfeil wie eine
+  Listenzeile, die erste Zeile in Textfarbe: der wichtigste Einstieg des
+  Bildschirms darf nicht wie eine Fußnote aussehen. Ein Tipp öffnet das Etappen-Blatt
   (`TripLegSheet`): oben die Etappe selbst (Unterkunft, Länge, Datum,
   Fortbewegung; bei einer Weiterreise Abfahrt, Ankunft, Fortbewegung), dann
   **Hinzufügen** (Ort suchen, Strecke anlegen, Strecken in der Nähe, aus den
@@ -5887,6 +5892,16 @@ Die Verteilung der früheren Menüpunkte:
 | Ort suchen, Strecke anlegen, Strecken in der Nähe, Aus den Ideen übernehmen | Etappe | Etappen-Blatt, „Hinzufügen" |
 | Abendlicht | Tag | Rahmen des Tages |
 
+Ein Tag der Weiterreise, in den nichts geplant wird — auf See, im Zug,
+über mehrere Nächte auf der Straße —, zeigt eine Karte „An Bord" bzw.
+„Unterwegs" mit dem Fenster dieses Tages („Bis 08:00, Ankunft Reykjavik —
+danach beginnt die nächste Etappe") statt eines Puffertags mit „Diesen Tag
+jetzt planen"; der Server lehnt das Planen eines solchen Tages ab. Abfahrt
+und Ankunft der Weiterreise stehen ohne X im Rahmen des Tages: sie sind der
+Rahmen der Weiterreise und werden in ihrem Editor geändert, der Server weist
+das Entfernen zurück (`isJourneyEnd`), statt sie beim nächsten Umplanen
+stillschweigend wieder zu schreiben.
+
 ### 25.2 Eine neue Reise
 
 Der Anlegedialog fragt nur, was eine Reise zum Entstehen braucht: Name,
@@ -5898,18 +5913,59 @@ eine, weil er Dinge setzte, die der Dialog nicht mehr zeigt, die anderen,
 weil sie in den Einstellungen stehen und dort zu Beginn ohnehin alle an sind
 (§8.1).
 
-### 25.3 Was noch aussteht
+### 25.3 Etappe B: Wünsche auf der Karte
+
+Die Karte der Wünsche zeigte blaue Scheiben mit einem Fragezeichen: sie
+sagten, dass man noch nicht abgestimmt hat, und nichts darüber, was man vor
+sich hat. Jetzt trägt jeder Pin das **Symbol seiner Kategorie** auf hellem
+Grund und die **eigene Antwort als Ring** darum (blau offen, grün „will
+ich", rosa Herzenswunsch, grau „egal", rot „lieber nicht"); die Legende
+zeichnet dieselben Ringe. `TripSpotMapPin.ringTint` ist der Schalter dafür,
+die anderen Karten behalten ihre gefüllten Punkte.
+
+Das Blatt hinter einem Pin zeigt die Abstimmungszeile und **darunter den
+Ort selbst** — Kartenausschnitt, Name vor Ort und in OpenStreetMap, Strecke,
+„Warum hier?", der Wikipedia-Link und „Alle Details" — statt die Details
+hinter einem zweiten Tipp auf das i zu verstecken (§3.8: wer über ein Wort
+abstimmt, stimmt über ein Wort ab).
+
+Der **Kartenausschnitt** eines Spots (`TripSpotMapSnippet`, im Blatt und in
+der Detailansicht) ist kein Bild mehr: er zoomt an Ort und Stelle (nur
+Zoom, kein Verschieben — er steht in einer Liste, und eine Karte, die das
+Ziehen nimmt, ist eine Liste, die nicht mehr scrollt) und trägt in der Ecke
+einen Knopf, der die in den Einstellungen gewählte Karten-App öffnet.
+
+### 25.4 Etappe C: Der Artikel im Blatt
+
+„Artikel lesen" öffnete Safari; war der Artikel italienisch, sagte die
+Fußzeile das und überließ das Lesen iOS. Jetzt kommt der Artikel in die App
+(`TripArticleView`, erreichbar aus der Detailansicht, dem Pin-Blatt und
+dem Blatt der Wünsche), über `GET /trip-planner/wikipedia/article?url=…`
+(`wiki-article.ts`, `wikipedia-client.ts`):
+
+1. **Deutsch, wo es Deutsch gibt.** Der Link aus OpenStreetMap nennt den
+   Artikel in der Landessprache; Wikipedias Sprachlinks sagen, ob derselbe
+   Ort einen deutschen hat, und der wird gezeigt.
+2. **Sonst übersetzt.** Der Text geht abschnittsweise an den llm-service
+   (`/json-prompt`, bis `MAX_TRANSLATED_CHARS`). Das dauert auf einem lokalen
+   Modell Minuten, deshalb antwortet der Server zuerst mit dem Original und
+   `translation: "pending"`, arbeitet weiter, und die App fragt alle paar
+   Sekunden nach, bis `"done"` (oder `"failed"`: dann bleibt das Original,
+   gekennzeichnet). Zwei Leser lösen keine zwei Übersetzungen aus.
+3. **Gespeichert.** Je Artikel einen Monat (`trip_wiki_articles`, Migration
+   0227): das Kolosseum liest sich für alle gleich, und niemand zahlt die
+   Übersetzung zweimal.
+4. **Bilder wie bei den Strecken** (§4.7): die Dateien des Artikels, das
+   Hauptbild zuerst, ohne Flaggen, Karten, Wappen und Vektorgrafiken;
+   Vorschau und Lizenz von Commons, der Fotograf am Bild.
+5. **Gesagt, jedes Mal:** Wikipedia, CC BY-SA 4.0, und dass eine Übersetzung
+   die einer Maschine ist. Einzelnachweise, Literatur, Weblinks und ihre
+   Entsprechungen in anderen Sprachen werden nicht gezeigt; ein gekürzter
+   Artikel endet mit „Weiterlesen auf Wikipedia".
+
+### 25.5 Was noch aussteht
 
 - **Ein Wort je Ebene.** Dasselbe Ding heißt noch „Stadt", „Etappe" und
   „Ort". „Etappe" für die Struktur, „Ort" nur für Spots — eine Durchsicht
   der Texte steht aus.
-- **Wünsche auf der Karte** (Etappe B): Pins mit dem Symbol der Kategorie
-  und dem Abstimmungszustand als Farbring; die Details im ersten Blatt unter
-  der Abstimmung statt hinter einem zweiten Tipp; der Kartenausschnitt zoomt
-  an Ort und Stelle und öffnet die Karten-App über ein Overlay, nicht beim
-  Antippen.
-- **Wikipedia am Spot** (Etappe C): Zusammenfassung und Text über die
-  Wikipedia-API, Fotos wie bei den Strecken, zuerst der deutsche Artikel,
-  sonst Übersetzung durch den llm-service; gespeichert, gekennzeichnet, mit
-  Quelle und Lizenz.
 

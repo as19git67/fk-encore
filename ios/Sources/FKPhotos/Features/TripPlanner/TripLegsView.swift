@@ -21,6 +21,9 @@ import SwiftUI
 /// rather than a screen that half works.
 struct TripLegsView: View {
     @State var viewModel: TripPlannerViewModel
+    /// Opened as a sheet from the leg strip (§25); a sheet needs its
+    /// own way out, and a list is not a form a swipe could lose.
+    @Environment(\.dismiss) private var dismiss
 
     @State private var adding = false
     @State private var removing: TripLeg?
@@ -172,6 +175,11 @@ struct TripLegsView: View {
         .navigationTitle("Städte")
         .plannerErrorBanner(errorMessage, dismiss: { errorMessage = nil })
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Fertig") { dismiss() }
+            }
+        }
         .sheet(item: $editing) { leg in
             NavigationStack {
                 TripLegEditView(viewModel: viewModel, legIndex: leg.position)

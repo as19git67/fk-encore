@@ -18,6 +18,11 @@ struct TripSpotMapPin: Identifiable, Equatable {
     /// What to draw when there is no number. Nil leaves a plain dot.
     var symbolName: String? = nil
     let tint: Color
+    /// Drawn as a ring around a light dot instead of as the dot's fill
+    /// (§6.1): the ballot's pins say what a place is with the symbol
+    /// and what I answered with the ring, and a blue disc with a
+    /// question mark said neither. Nil keeps the filled dot.
+    var ringTint: Color? = nil
     /// Drawn larger: the day's slider marks where the plan says you
     /// would be at that hour.
     var emphasised: Bool = false
@@ -115,7 +120,8 @@ struct TripSpotMapView: View {
 
     @ViewBuilder
     private func badge(_ pin: TripSpotMapPin) -> some View {
-        let size: CGFloat = pin.emphasised ? 32 : 26
+        let ringed = pin.ringTint != nil
+        let size: CGFloat = pin.emphasised ? 32 : (ringed ? 30 : 26)
         Group {
             if let number = pin.number {
                 Text("\(number)")
@@ -127,10 +133,10 @@ struct TripSpotMapView: View {
                 Color.clear
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(ringed ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
         .frame(width: size, height: size)
-        .background(pin.tint, in: .circle)
-        .overlay(Circle().stroke(.white, lineWidth: pin.emphasised ? 3 : 2))
+        .background(ringed ? AnyShapeStyle(.background) : AnyShapeStyle(pin.tint), in: .circle)
+        .overlay(Circle().stroke(pin.ringTint ?? .white, lineWidth: ringed || pin.emphasised ? 3 : 2))
         .animation(.easeInOut(duration: 0.15), value: pin.emphasised)
     }
 

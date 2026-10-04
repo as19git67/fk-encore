@@ -1,0 +1,211 @@
+/**
+ * The article behind a spot (§25, stage C): German where German
+ * exists, otherwise the original first and the translation when it is
+ * done; kept once it is; pictures when Commons answers and an article
+ * when it does not. Every title, file and sentence is invented.
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getAuthData } from "~encore/auth";
+import db from "../db/database";
+import { tripWikiArticles, users } from "../db/schema";
+import type { CommonsClient, CommonsPhoto } from "./commons-client";
+import {
+  buildTranslationPrompt,
+  clearArticleWork,
+  clip,
+  MAX_ARTICLE_PHOTOS,
+  spotArticle,
+  splitForTranslation,
+  TRANSLATION_CHUNK_CHARS,
+} from "./wiki-article";
+import type { ArticleRef, WikipediaArticle, WikipediaClient } from "./wikipedia-client";
+
+vi.mock("~encore/auth", () => ({ getAuthData: vi.fn() }));
+
+class FakeWikipedia implements WikipediaClient {
+  german = new Map<string, string>();
+  articles = new Map<string, WikipediaArticle>();
+  calls: string[] = [];
+
+  async germanTitle(ref: ArticleRef): Promise<string | null> {
+    this.calls.push(`de?${ref.lang}:${ref.title}`);
+    return this.german.get(`${ref.lang}:${ref.title}`) ?? null;
+  }
+
+  async article(ref: ArticleRef): Promise<WikipediaArticle | null> {
+    this.calls.push(`${ref.lang}:${ref.title}`);
+    return this.articles.get(`${ref.lang}:${ref.title}`) ?? null;
+  }
+}
+
+class FakeCommons implements CommonsClient {
+  fail = false;
+  async imagesOf(): Promise<Map<string, string>> { return new Map(); }
+  async files(titles: readonly string[]): Promise<CommonsPhoto[]> {
+    if (this.fail) throw new Error("commons down");
+    // Commons answers in its own order; the strip must not.
+    return [...titles].reverse().map((title) => ({
+      title,
+      thumbUrl: `https://upload.example.test/${encodeURIComponent(title)}`,
+      thumbWidth: 640, thumbHeight: 480,
+      pageUrl: `https://commons.example.test/wiki/${encodeURIComponent(title)}`,
+      author: "Beispiel Fotograf", license: "CC BY-SA 4.0",
+    }));
+  }
+  async nearby(): Promise<CommonsPhoto[]> { return []; }
+}
+
+function article(lang: string, title: string, lead: string): WikipediaArticle {
+  return {
+    lang, title,
+    pageUrl: `https://${lang}.wikipedia.org/wiki/${title.replace(/ /g, "_")}`,
+    description: lang === "de" ? "Kirche in Musterstadt" : "chiesa di Esempio",
+    sections: [
+      { heading: null, level: 1, text: lead },
+      { heading: lang === "de" ? "Geschichte" : "Storia", level: 2, text: lang === "de" ? "Der Bau begann 1180." : "La costruzione iniziò nel 1180." },
+    ],
+    mainImage: "File:Beispielkirche Westfassade.jpg",
+    images: ["File:Beispielkirche Westfassade.jpg", "File:Innenraum.jpg"],
+  };
+}
+
+let wiki: FakeWikipedia;
+let commons: FakeCommons;
+const translated: string[] = [];
+const translate = async (text: string): Promise<string> => {
+  translated.push(text);
+  return `[de] ${text}`;
+};
+
+beforeEach(async () => {
+  await db.delete(tripWikiArticles);
+  clearArticleWork();
+  translated.length = 0;
+  const [user] = await db
+    .insert(users)
+    .values({ email: `wiki-${Date.now()}@test.invalid`, name: "Reader", password_hash: "x" })
+    .returning({ id: users.id });
+  vi.mocked(getAuthData).mockReturnValue({ userID: String(user.id), permissions: ["photos.view"] });
+  wiki = new FakeWikipedia();
+  commons = new FakeCommons();
+  wiki.articles.set("de:Beispielkirche", article("de", "Beispielkirche", "Die Beispielkirche ist eine Kirche."));
+  wiki.articles.set("it:Chiesa di Esempio", article("it", "Chiesa di Esempio", "La Chiesa di Esempio è una chiesa."));
+});
+
+describe("the article behind a spot", () => {
+  it("shows a German article as it is, with its pictures in the article's order", async () => {
+    const res = await spotArticle({ url: "https://de.wikipedia.org/wiki/Beispielkirche" }, { wiki, commons, translate });
+    expect(res).toMatchObject({
+      title: "Beispielkirche", language: "de", sourceLanguage: "de", translation: "none",
+      attribution: "Wikipedia · CC BY-SA 4.0",
+    });
+    expect(res.sections.map((s) => s.heading)).toEqual([null, "Geschichte"]);
+    expect(res.photos.map((p) => p.pageUrl)).toEqual([
+      "https://commons.example.test/wiki/File%3ABeispielkirche%20Westfassade.jpg",
+      "https://commons.example.test/wiki/File%3AInnenraum.jpg",
+    ]);
+    expect(translated).toEqual([]);
+    // No language-link lookup for an article that is German already.
+    expect(wiki.calls).toEqual(["de:Beispielkirche"]);
+  });
+
+  it("prefers the German article Wikipedia links from a foreign one", async () => {
+    wiki.german.set("it:Chiesa di Esempio", "Beispielkirche");
+    const res = await spotArticle({ url: "https://it.wikipedia.org/wiki/Chiesa_di_Esempio" }, { wiki, commons, translate });
+    expect(res).toMatchObject({ title: "Beispielkirche", language: "de", translation: "none" });
+    expect(res.sourceUrl).toBe("https://de.wikipedia.org/wiki/Beispielkirche");
+    expect(translated).toEqual([]);
+  });
+
+  it("answers with the original first and the translation once it is done", async () => {
+    const url = "https://it.wikipedia.org/wiki/Chiesa_di_Esempio";
+    const first = await spotArticle({ url }, { wiki, commons, translate });
+    expect(first).toMatchObject({ language: "it", sourceLanguage: "it", translation: "pending" });
+    expect(first.sections[0].text).toBe("La Chiesa di Esempio è una chiesa.");
+
+    // Asked again while the work runs: the same answer, no second job.
+    const again = await spotArticle({ url }, { wiki, commons, translate });
+    expect(again.translation).toBe("pending");
+
+    const done = await spotArticle({ url }, { wiki, commons, translate, awaitTranslation: true });
+    // The first call's job finished in between; whichever answered,
+    // the result is German and kept.
+    expect(done).toMatchObject({ language: "de", sourceLanguage: "it", translation: "done" });
+    expect(done.sections.map((s) => s.heading)).toEqual([null, "[de] Storia"]);
+    expect(done.sections[0].text).toBe("[de] La Chiesa di Esempio è una chiesa.");
+    expect(done.description).toBe("[de] chiesa di Esempio");
+
+    const cached = await spotArticle({ url }, { wiki, commons, translate });
+    expect(cached.translation).toBe("done");
+    // Wikipedia was asked once for the article, not once per reader.
+    expect(wiki.calls.filter((c) => c === "it:Chiesa di Esempio")).toHaveLength(1);
+  });
+
+  it("keeps the original and says so when the model fails", async () => {
+    const failing = async (): Promise<string> => { throw new Error("llm down"); };
+    const res = await spotArticle({ url: "https://it.wikipedia.org/wiki/Chiesa_di_Esempio" },
+                                  { wiki, commons, translate: failing, awaitTranslation: true });
+    expect(res).toMatchObject({ language: "it", translation: "failed" });
+    expect(res.sections[0].text).toBe("La Chiesa di Esempio è una chiesa.");
+  });
+
+  it("is an article without pictures when Commons is down", async () => {
+    commons.fail = true;
+    const res = await spotArticle({ url: "https://de.wikipedia.org/wiki/Beispielkirche" }, { wiki, commons, translate });
+    expect(res.photos).toEqual([]);
+    expect(res.sections).toHaveLength(2);
+  });
+
+  it("refuses what is not an article and says when there is none", async () => {
+    await expect(spotArticle({ url: "https://example.test/x" }, { wiki, commons, translate }))
+      .rejects.toMatchObject({ code: "invalid_argument" });
+    await expect(spotArticle({ url: "https://de.wikipedia.org/wiki/Gibt_es_nicht" }, { wiki, commons, translate }))
+      .rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("forgets an article after a month", async () => {
+    const url = "https://de.wikipedia.org/wiki/Beispielkirche";
+    let now = Date.UTC(2026, 9, 4);
+    await spotArticle({ url }, { wiki, commons, translate, now: () => now });
+    now += 31 * 24 * 60 * 60 * 1000;
+    await spotArticle({ url }, { wiki, commons, translate, now: () => now });
+    expect(wiki.calls.filter((c) => c === "de:Beispielkirche")).toHaveLength(2);
+  });
+});
+
+describe("the pieces", () => {
+  it("clips at a section boundary and always keeps the lead", () => {
+    const sections = [
+      { heading: null, level: 1, text: "x".repeat(100) },
+      { heading: "A", level: 2, text: "y".repeat(100) },
+      { heading: "B", level: 2, text: "z".repeat(100) },
+    ];
+    expect(clip(sections, 250)).toEqual({ sections: sections.slice(0, 2), truncated: true });
+    expect(clip(sections, 1000)).toEqual({ sections, truncated: false });
+    expect(clip(sections.slice(0, 1), 10)).toEqual({ sections: sections.slice(0, 1), truncated: false });
+  });
+
+  it("splits a text into paragraph groups the model can answer in one go", () => {
+    const paragraph = "Satz eins. ".repeat(50).trim(); // ~550 chars: two fit, three do not
+    const text = [paragraph, paragraph, paragraph].join("\n\n");
+    const chunks = splitForTranslation(text, TRANSLATION_CHUNK_CHARS);
+    expect(chunks.length).toBe(2);
+    expect(chunks.every((c) => c.length <= TRANSLATION_CHUNK_CHARS)).toBe(true);
+    // A single long paragraph is cut at a sentence end.
+    const long = "Ein Satz. ".repeat(300).trim();
+    const cut = splitForTranslation(long, 500);
+    expect(cut.every((c) => c.length <= 500 && c.endsWith("."))).toBe(true);
+    expect(cut.join(" ")).toBe(long);
+  });
+
+  it("tells the model what to do and what not to", () => {
+    const prompt = buildTranslationPrompt("Testo.", "it");
+    expect(prompt).toContain("ins Deutsche");
+    expect(prompt).toContain('{"text"');
+    expect(prompt).toContain("Testo.");
+  });
+
+  it("caps the strip", () => {
+    expect(MAX_ARTICLE_PHOTOS).toBeLessThanOrEqual(12);
+  });
+});

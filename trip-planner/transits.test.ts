@@ -13,7 +13,8 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { createTripPlan, getTripPlan } from "./plans";
+import { createTripPlan, detailTripDay, getTripPlan } from "./plans";
+import { removeTripFixpoint } from "./fixpoint-edit";
 import { removeTripLeg, updateTripLeg } from "./legs";
 import { addTripTransit, updateTripTransit } from "./transits";
 import { getUserHome, setTripHome, setUserHomeEndpoint } from "./home";
@@ -298,6 +299,33 @@ describe("PATCH /trip-planner/plans/:planId/transits/:legIndex", () => {
 
     const { plan: still } = await getTripPlan({ planId: before.id });
     expect(still.legs[1]).toMatchObject({ kind: "transit", departMinutes: 600, endMinutes: 960 });
+  });
+
+  it("keeps the journey's own departure and arrival where they are", async () => {
+    const plan = await withJourney();
+    const journey = plan.legs[1];
+    const arrival = journey.days.at(-1)!.fixpoints.find((f) => f.kind === "departure")!;
+    const departure = journey.days[0].fixpoints.find((f) => f.kind === "appointment")!;
+    // The re-plan would write them straight back, so the call says so
+    // instead of pretending.
+    await expect(removeTripFixpoint({ planId: plan.id, fixpointId: arrival.rowId }))
+      .rejects.toMatchObject({ code: "failed_precondition" });
+    await expect(removeTripFixpoint({ planId: plan.id, fixpointId: departure.rowId }))
+      .rejects.toMatchObject({ code: "failed_precondition" });
+    const { plan: still } = await getTripPlan({ planId: plan.id });
+    expect(still.legs[1].days.at(-1)!.fixpoints.map((f) => f.label)).toContain(arrival.label);
+  });
+
+  it("plans nothing into a journey's day that is only a frame", async () => {
+    const before = await withJourney();
+    // Over night: two days, neither of them plannable.
+    const { plan } = await updateTripTransit({
+      planId: before.id, legIndex: 1,
+      departDate: "2026-09-06", departAt: "18:00", arriveDate: "2026-09-07", arriveAt: "08:00",
+    });
+    expect(plan.legs[1].days.every((d) => !d.detailed)).toBe(true);
+    await expect(detailTripDay({ planId: plan.id, legIndex: 1, dayIndex: 1 }))
+      .rejects.toMatchObject({ code: "failed_precondition" });
   });
 });
 

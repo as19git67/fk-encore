@@ -272,6 +272,26 @@ export async function planTransitLeg(
   };
 }
 
+/**
+ * Whether a fixpoint is one of the two a journey writes for itself:
+ * the departure on its first day, the arrival on its last. They are
+ * derived from the leg's own window and written again on every
+ * re-plan, so taking one off does nothing — the way to move it is the
+ * journey's editor. The store keeps no key for them, so they are
+ * recognised by what they are: the right kind, at the leg's own
+ * minute, on the day it belongs to.
+ */
+export function isJourneyEnd(
+  leg: { kind?: string | null; departMinutes: number | null; endMinutes: number | null; dayCount: number },
+  dayIndex: number,
+  fix: { kind?: string | null; startMinutes: number },
+): boolean {
+  if (leg.kind !== "transit") return false;
+  const kind = fix.kind ?? "appointment";
+  if (dayIndex === 0 && kind === "appointment" && fix.startMinutes === leg.departMinutes) return true;
+  return dayIndex === leg.dayCount - 1 && kind === "departure" && fix.startMinutes === leg.endMinutes;
+}
+
 /** "HH:MM" to minutes past midnight, or null. */
 export function minutesOf(text: string | undefined): number | null {
   if (typeof text !== "string") return null;

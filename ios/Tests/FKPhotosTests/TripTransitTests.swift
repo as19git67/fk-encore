@@ -70,6 +70,29 @@ final class TripTransitTests: XCTestCase {
         XCTAssertNil(TripTransitSlots.slotAfter(plan.legs[0], in: plan.legs))
     }
 
+    /// The departure on the first day and the arrival on the last are
+    /// the journey's own (§22.7): no x next to them, and the day card
+    /// says the window rather than offering to plan the morning.
+    func testTheJourneysOwnEndsAreRecognised() {
+        let journey = leg(1, start: "2026-09-03", days: [day(0), day(1), day(2), day(3)], transit: (1080, 480))
+        let depart = TripFixpoint(rowId: 5, kind: "appointment", label: "Abfahrt", startMinutes: 1080,
+                                  durationMinutes: 0, travelMinutes: 0, bufferMinutes: 20, lat: nil, lon: nil)
+        let arrive = TripFixpoint(rowId: 6, kind: "departure", label: "Ankunft", startMinutes: 480,
+                                  durationMinutes: 0, travelMinutes: 0, bufferMinutes: 5, lat: nil, lon: nil)
+        XCTAssertTrue(journey.isJourneyEnd(depart, dayIndex: 0))
+        XCTAssertTrue(journey.isJourneyEnd(arrive, dayIndex: 3))
+        // The same minute on a sea day is the deck programme.
+        XCTAssertFalse(journey.isJourneyEnd(depart, dayIndex: 1))
+        XCTAssertFalse(plan.legs[0].isJourneyEnd(depart, dayIndex: 0))
+
+        XCTAssertEqual(journey.journeyDayLine(dayIndex: 0), "Ab 18:00, Abfahrt Start")
+        XCTAssertEqual(journey.journeyDayLine(dayIndex: 1), "Den ganzen Tag")
+        XCTAssertEqual(journey.journeyDayLine(dayIndex: 3),
+                       "Bis 08:00, Ankunft Ort 1 — danach beginnt die nächste Etappe")
+        XCTAssertEqual(plan.legs[1].journeyDayLine(dayIndex: 0), "10:00 Abfahrt Start · 16:00 Ankunft Ort 1")
+        XCTAssertNil(plan.legs[0].journeyDayLine(dayIndex: 0))
+    }
+
     func testTheScreenSendsTheTwoMomentsOnThePhonesClock() {
         let body = TripTransitPlanning.body(afterLegIndex: 0, depart: at("2026-09-06", 600),
                                             arrive: at("2026-09-07", 90), mode: .car, timeZone: berlin)

@@ -256,14 +256,11 @@ struct TripPinDetailSheet: View {
                         Label("In Karten öffnen", systemImage: "map")
                     }
                     if let wikipediaUrl = detail.wikipediaUrl {
-                        Link(destination: wikipediaUrl) {
-                            // With the language where it is not German:
-                            // the sheet has one line per link, so it
-                            // goes on the label rather than under it
-                            // (§10.4).
-                            Label(TripArticleLanguage.name(of: wikipediaUrl)
-                                    .map { "Wikipedia (\($0))" } ?? "Wikipedia",
-                                  systemImage: "book")
+                        // In the app, German or translated (§25, stage C).
+                        NavigationLink {
+                            TripArticleView(url: wikipediaUrl, placeName: detail.title)
+                        } label: {
+                            Label("Artikel lesen", systemImage: "book")
                         }
                     }
                     if let sourceUrl = detail.sourceUrl {

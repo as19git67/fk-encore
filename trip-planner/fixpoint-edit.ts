@@ -29,6 +29,7 @@ import { addFixpoint, loadPlan, removeFixpoint } from "./plan-store";
 import type { FixpointKind } from "./fixpoints";
 import { MIN_BUFFER_MINUTES } from "./fixpoints";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
+import { isJourneyEnd } from "./transit-leg";
 
 export interface AddFixpointRequest {
   planId: number;
@@ -130,6 +131,19 @@ export const removeTripFixpoint = api(
 
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
+
+    // A journey's departure and arrival are its frame, not a time put
+    // on the day: the re-plan below would write them straight back.
+    for (const leg of plan.legs) {
+      for (const day of leg.days) {
+        const fix = day.fixpoints.find((f) => f.rowId === req.fixpointId);
+        if (fix && isJourneyEnd({ ...leg, dayCount: leg.days.length }, day.dayIndex, fix)) {
+          throw APIError.failedPrecondition(
+            "Abfahrt und Ankunft gehören zur Weiterreise — sie werden dort geändert",
+          );
+        }
+      }
+    }
 
     const removed = await removeFixpoint(req.planId, userId, req.fixpointId);
     if (!removed) throw APIError.notFound("diese feste Zeit gehört nicht zu dieser Reise");

@@ -3481,6 +3481,30 @@ export const horizonProfiles = pgTable(
 );
 
 /**
+ * A Wikipedia article as the app shows it (trip-planner/wiki-article.ts,
+ * §25 stage C): the German text where German exists, otherwise the
+ * local text and its translation by the llm-service. Kept per article
+ * — not per trip or per person — because the Colosseum reads the same
+ * for everybody, and a translation is the one answer here that costs
+ * minutes.
+ */
+export const tripWikiArticles = pgTable(
+  "trip_wiki_articles",
+  {
+    id: serial("id").primaryKey(),
+    /** The edition the link named: "it" for it.wikipedia.org. */
+    lang: text("lang").notNull(),
+    title: text("title").notNull(),
+    /** The `SpotArticle` the endpoint answers with, complete. */
+    article: jsonb("article").notNull(),
+    fetched_at: timestamp("fetched_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [uniqueIndex("trip_wiki_articles_key").on(table.lang, table.title)]
+);
+
+/**
  * The pool without a trip (§20).
  *
  * Everything else in the planner needs a trip. This is the list people

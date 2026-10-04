@@ -1,5 +1,4 @@
 import MapKit
-import SafariServices
 import SwiftUI
 
 /// One spot, in full — whether it is planned or still in the pool.
@@ -40,7 +39,6 @@ struct TripSpotDetailView<Actions: View>: View {
     @Environment(\.dismiss) private var dismiss
     @State private var routeChoice: TripMapsChoice?
     @State private var editing: TripSpotEdit?
-    @State private var showingWikipedia = false
     @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
 
     init(
@@ -70,16 +68,11 @@ struct TripSpotDetailView<Actions: View>: View {
             }
 
             Section {
-                Map(initialPosition: .region(MKCoordinateRegion(
-                    center: CLLocationCoordinate2D(spot.coordinate),
-                    latitudinalMeters: 600, longitudinalMeters: 600,
-                ))) {
-                    Marker(spot.displayName, systemImage: TripCategory.symbol(spot.category),
-                           coordinate: CLLocationCoordinate2D(spot.coordinate))
-                }
-                .frame(height: 180)
-                .listRowInsets(EdgeInsets())
-                .allowsHitTesting(false)
+                // Zooms in place, and opens the maps app from its
+                // corner (§25, stage B).
+                TripSpotMapSnippet(coordinate: spot.coordinate, title: spot.displayName, name: spot.name,
+                                   symbolName: TripCategory.symbol(spot.category))
+                    .listRowInsets(EdgeInsets())
             }
 
             Section {
@@ -132,23 +125,24 @@ struct TripSpotDetailView<Actions: View>: View {
 
             if let article = spot.wikipediaUrl, let articleURL = URL(string: article) {
                 Section {
-                    Button {
-                        showingWikipedia = true
+                    // In the app, with pictures (§25, stage C): the
+                    // German article where one exists, otherwise the
+                    // local one and its translation.
+                    NavigationLink {
+                        TripArticleView(url: articleURL, placeName: spot.displayName)
                     } label: {
                         Label("Artikel lesen", systemImage: "book")
                     }
                 } header: {
                     Text("Wikipedia")
                 } footer: {
-                    // Said before the tap, not after it. The server
-                    // links the German article wherever OpenStreetMap
-                    // knows of one; where it does not, the article is
-                    // still worth reading and iOS can translate it —
-                    // but „Artikel lesen“ alone would promise a page
-                    // nobody in the car can read (§10.4).
+                    // Said before the tap, not after it (§10.4): the
+                    // link is to the local article; whether German
+                    // exists the server finds out, and translates
+                    // where it does not.
                     if let language = TripArticleLanguage.name(of: articleURL) {
-                        Text("Auf Deutsch gibt es dazu nichts — der Artikel ist auf "
-                             + "\(language). Im Lesen bietet iOS „Übersetzen“ an.")
+                        Text("Der Artikel ist auf \(language); gibt es ihn auf Deutsch, "
+                             + "wird der gezeigt, sonst übersetzt.")
                     }
                 }
             }
@@ -251,12 +245,6 @@ struct TripSpotDetailView<Actions: View>: View {
                 } onCancel: {
                     editing = nil
                 }
-            }
-        }
-        .sheet(isPresented: $showingWikipedia) {
-            if let article = spot.wikipediaUrl, let url = URL(string: article) {
-                SpotWikipediaSheet(url: url, isPresented: $showingWikipedia)
-                    .ignoresSafeArea()
             }
         }
         .confirmationDialog(
@@ -457,31 +445,6 @@ struct TripSpotDetail: Identifiable, Sendable {
         photoStop = stop.isPhotoStop
         supportsPhotoStop = true
         extent = stop.extent
-    }
-}
-
-/// SFSafariViewController wrapped for SwiftUI, with delegate wiring so
-/// the built-in Done button correctly dismisses the sheet.
-private struct SpotWikipediaSheet: UIViewControllerRepresentable {
-    let url: URL
-    @Binding var isPresented: Bool
-
-    func makeCoordinator() -> Coordinator { Coordinator(isPresented: $isPresented) }
-
-    func makeUIViewController(context: Context) -> SFSafariViewController {
-        let vc = SFSafariViewController(url: url)
-        vc.delegate = context.coordinator
-        return vc
-    }
-
-    func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
-
-    final class Coordinator: NSObject, SFSafariViewControllerDelegate {
-        @Binding var isPresented: Bool
-        init(isPresented: Binding<Bool>) { _isPresented = isPresented }
-        func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
-            isPresented = false
-        }
     }
 }
 

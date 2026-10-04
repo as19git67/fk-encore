@@ -337,6 +337,8 @@ struct TripPlanDayView: View {
                     ForEach(day.blocks) { block in
                         blockCard(block)
                     }
+                } else if leg.isTransit {
+                    journeyDayCard(day, leg)
                 } else {
                     tripResolutionCard(day)
                 }
@@ -609,19 +611,30 @@ struct TripPlanDayView: View {
     private func legHeader(_ leg: TripLeg) -> some View {
         // Tappable: the accommodation and the transport are printed
         // here, and changing either used to be five screens away.
+        //
+        // It is the way into everything of the leg (§25), so it reads
+        // like a row and not like a footnote: body-sized first line in
+        // the primary colour, the chevron a list row would have, and a
+        // card behind it. Two footnote lines in secondary grey with a
+        // caption-sized chevron were the most important control on
+        // the screen drawn as the least.
         Button {
             editingLeg = true
         } label: {
-            HStack(alignment: .top, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
                 legHeaderText(leg)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 12))
         .accessibilityHint("Hinzufügen, Kandidaten, Wünsche und Einstellungen dieser Etappe")
         .sheet(isPresented: $editingLeg) {
             NavigationStack {
@@ -651,15 +664,16 @@ struct TripPlanDayView: View {
                     .lineLimit(2)
                 Spacer()
             }
+            .font(.subheadline.weight(.medium))
             HStack(spacing: 6) {
                 Image(systemName: leg.transportMode.systemImage)
                 Text(leg.transportMode.label)
                 if let window = leg.transitWindowText { Text("· \(window)") }
                 Spacer()
             }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
     }
 
     private func placeHeaderText(_ leg: TripLeg) -> some View {
@@ -679,6 +693,7 @@ struct TripPlanDayView: View {
                     .lineLimit(2)
                 Spacer()
             }
+            .font(.subheadline.weight(.medium))
             HStack(spacing: 6) {
                 Image(systemName: leg.transportMode.systemImage)
                 Text(leg.transportMode.label)
@@ -689,9 +704,9 @@ struct TripPlanDayView: View {
                 }
                 Spacer()
             }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
     }
 
     private func headerSymbol(_ leg: TripLeg) -> String {
@@ -735,55 +750,66 @@ struct TripPlanDayView: View {
     /// map, moving a spot — is scoped to the leg on screen, so the
     /// other two were unreachable rather than merely unshown.
     private var legPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []) { leg in
-                    Button {
-                        viewModel.select(leg: leg.position)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(leg.displayTitle)
-                                .font(.subheadline.weight(
-                                    leg.position == viewModel.legIndex ? .semibold : .regular))
-                            if leg.isAwaitingRegion {
-                                Image(systemName: "map.circle").font(.caption2)
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []) { leg in
+                        Button {
+                            viewModel.select(leg: leg.position)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(leg.displayTitle)
+                                    .font(.subheadline.weight(
+                                        leg.position == viewModel.legIndex ? .semibold : .regular))
+                                if leg.isAwaitingRegion {
+                                    Image(systemName: "map.circle").font(.caption2)
+                                }
                             }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 14)
+                            .background(
+                                leg.position == viewModel.legIndex
+                                    ? AnyShapeStyle(.tint.opacity(0.15))
+                                    : AnyShapeStyle(.quaternary.opacity(0.35)),
+                                in: .capsule,
+                            )
+                            // The capsule is what is seen; the 44 pt
+                            // Apple asks of a control are what is hit.
+                            .frame(minHeight: 44)
+                            .contentShape(.rect)
                         }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(
-                            leg.position == viewModel.legIndex
-                                ? AnyShapeStyle(.tint.opacity(0.15))
-                                : AnyShapeStyle(.clear),
-                            in: .capsule,
-                        )
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
-                // The structure itself: add a leg, insert a journey,
-                // reorder, remove (§25). One place for it, where the
-                // legs are.
-                Button {
-                    editingStructure = true
-                } label: {
-                    Label("Etappen", systemImage: "pencil")
-                        .font(.subheadline)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(.quaternary.opacity(0.5), in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Etappen und Weiterreisen hinzufügen, ändern, entfernen")
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
-            .padding(.top, 6)
+            // The structure itself: add a leg, insert a journey,
+            // reorder, remove (§25). Always in view at the end of the
+            // strip rather than scrolled along with it: on a trip with
+            // six legs the way in was off the right edge of the
+            // screen, and a pencil needs no word next to it.
+            Divider().frame(height: 24)
+            Button {
+                editingStructure = true
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.body.weight(.medium))
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 4)
+            .accessibilityLabel("Etappen")
+            .accessibilityHint("Etappen und Weiterreisen hinzufügen, ändern, entfernen")
         }
+        .padding(.top, 2)
         .background(.bar)
         .sheet(isPresented: $editingStructure) {
             NavigationStack {
                 TripLegsView(viewModel: viewModel)
             }
-            .interactiveDismissDisabled()
+            // A list, not a form: nothing typed is lost on a swipe, and
+            // the forms it opens guard themselves.
         }
     }
 
@@ -819,7 +845,7 @@ struct TripPlanDayView: View {
                             // A day still at trip resolution is marked, so
                             // an empty-looking day never reads as a day
                             // with nothing to do (§4.3).
-                            if !day.detailed {
+                            if !day.detailed, !leg.isTransit {
                                 Image(systemName: "circle.dashed")
                                     .font(.caption2)
                             }
@@ -900,8 +926,17 @@ struct TripPlanDayView: View {
                         }
                     }
                     Spacer()
-                    removeButton("\(fix.label) entfernen") {
-                        Task { await viewModel.removeFixpoint(fix) }
+                    // A journey's departure and arrival are its frame
+                    // (§22.7): taken off here, the next re-plan would
+                    // write them back, so the x did nothing. They are
+                    // changed in the journey's editor, behind the
+                    // header above.
+                    if let leg = viewModel.leg, leg.isJourneyEnd(fix, dayIndex: viewModel.dayIndex) {
+                        EmptyView()
+                    } else {
+                        removeButton("\(fix.label) entfernen") {
+                            Task { await viewModel.removeFixpoint(fix) }
+                        }
                     }
                 }
                 .frame(minHeight: 44)
@@ -1090,6 +1125,35 @@ struct TripPlanDayView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(viewModel.isDetailing)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 14))
+    }
+
+    /// A day of the journey that nothing is planned into (§22.7): at
+    /// sea, on a train, or on the road over several nights. It says
+    /// where the group is and what the day's window is — and no more.
+    /// Drawn as a buffer day it offered "Diesen Tag jetzt planen" and
+    /// counted the hours up to the arrival as a block to fill, which
+    /// on the morning a ship docks at eight is nonsense twice over.
+    private func journeyDayCard(_ day: TripDay, _ leg: TripLeg) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(leg.isAboard ? "An Bord" : (day.bufferReason ?? "Unterwegs"),
+                  systemImage: leg.isAboard ? "ferry" : leg.transportMode.systemImage)
+                .font(.headline)
+            if let line = leg.journeyDayLine(dayIndex: day.dayIndex) {
+                Text(line)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if leg.isAboard {
+                // The deck programme goes in as fixed times (§21.3) —
+                // said here, because the band above only offers it.
+                Text("Was an Bord fest ist — Essen, Show, Ausflugstreffpunkt — kommt als feste Zeit dazu.")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
