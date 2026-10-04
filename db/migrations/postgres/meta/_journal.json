@@ -1583,6 +1583,13 @@
       "when": 1788652800045,
       "tag": "0225_orientation_variants",
       "breakpoints": true
+    },
+    {
+      "idx": 226,
+      "version": "7",
+      "when": 1788652800046,
+      "tag": "0226_trip_interests_filter",
+      "breakpoints": true
     }
   ]
 }

@@ -88,15 +88,16 @@ describe("toCandidates", () => {
     expect(known.reasons).toContain("hat einen Wikipedia-Artikel");
   });
 
-  it("raises the score for a stated interest, and names it", () => {
-    // "passt zu euren Interessen" was true of nothing in particular;
-    // which interest it answers is the part that makes the suggestion
-    // arguable (§8.3).
+  it("keeps what the selection names, says which line, and drops the rest", () => {
+    // Ticked is searched, unticked is not (2026-10-04) — and the
+    // reason names the line a kept spot answers, which is the part
+    // that makes the suggestion arguable (§8.3).
     const [without] = toCandidates([spot()]);
     const [with_] = toCandidates([spot()], { interests: ["museum"] });
-    expect(with_.score).toBeGreaterThan(without.score);
+    expect(with_.score).toBe(without.score);
     expect(with_.reasons.some((r) => r.startsWith("ihr wolltet:"))).toBe(true);
     expect(with_.reasons.some((r) => r.includes("Museen"))).toBe(true);
+    expect(toCandidates([spot()], { interests: ["castles"] })).toEqual([]);
   });
 
   it("uses the category's dwell default", () => {

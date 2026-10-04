@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { INTERESTS, interestLabel, matchedInterests, matchesInterest } from "./interests";
+import { INTERESTS, interestLabel, matchedInterests, matchesInterest, OTHER_INTEREST_ID, selectionOf, interestsForCategories } from "./interests";
 import { toCandidates } from "./candidates";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 
@@ -122,22 +122,46 @@ describe("the interest vocabulary", () => {
   });
 });
 
-describe("scoring with interests", () => {
-  it("rewards a spot that answers one, and says which", () => {
-    const [plain] = toCandidates([spot({ osmRef: "way:2", kind: "historic=castle",
-                                         categories: ["sight"] })]);
-    const [wanted] = toCandidates(
-      [spot({ osmRef: "way:2", kind: "historic=castle", categories: ["sight"] })],
-      { interests: ["castles"] });
+describe("the selection as a filter (2026-10-04)", () => {
+  const castle = spot({ osmRef: "way:2", kind: "historic=castle", categories: ["sight"] });
+  const park = spot({ osmRef: "way:3", kind: "leisure=park", categories: ["outdoors"] });
+  const square = spot({ osmRef: "way:4", kind: "place=square", categories: ["sight"] });
 
-    expect(wanted.score).toBeGreaterThan(plain.score);
+  it("keeps a spot that answers a ticked line and names the line", () => {
+    const [plain] = toCandidates([castle]);
+    const [wanted] = toCandidates([castle], { interests: ["castles"] });
+    expect(wanted.score).toBe(plain.score);
     expect(wanted.reasons.some((r) => r.includes("Burgen und Schlösser"))).toBe(true);
   });
 
-  it("leaves a spot nobody asked for exactly where it was", () => {
-    const [plain] = toCandidates([spot({ kind: "leisure=park", categories: ["outdoors"] })]);
-    const [scored] = toCandidates([spot({ kind: "leisure=park", categories: ["outdoors"] })],
-                                  { interests: ["castles"] });
-    expect(scored.score).toBe(plain.score);
+  it("drops what nobody ticked", () => {
+    expect(toCandidates([castle, park], { interests: ["castles"] }).map((c) => c.osmRef)).toEqual(["way:2"]);
+  });
+
+  it("searches everything with nothing ticked, and with every line ticked", () => {
+    const all = [...INTERESTS.map((i) => i.id), OTHER_INTEREST_ID];
+    expect(toCandidates([castle, park, square])).toHaveLength(3);
+    expect(toCandidates([castle, park, square], { interests: all })).toHaveLength(3);
+    expect(toCandidates([castle], { interests: all })[0].reasons.some((r) => r.startsWith("ihr wolltet")))
+      .toBe(false);
+    expect(selectionOf(all)).toBeNull();
+    expect(selectionOf([])).toBeNull();
+  });
+
+  it("'Alles andere' stands for what no line names", () => {
+    const kept = toCandidates([castle, park, square], { interests: [OTHER_INTEREST_ID] });
+    expect(kept.map((c) => c.osmRef)).toEqual(["way:4"]);
+    expect(kept[0].reasons).toContain("ihr wolltet: Alles andere");
+    expect(toCandidates([castle, square], { interests: ["castles", OTHER_INTEREST_ID] })).toHaveLength(2);
+  });
+
+  it("ignores words the vocabulary does not know instead of matching nothing", () => {
+    expect(toCandidates([castle, park], { interests: ["barock"] })).toHaveLength(2);
+    expect(selectionOf(["barock", "castles"])).toEqual(new Set(["castles"]));
+  });
+
+  it("turns the interpreter's categories into lines on the screen", () => {
+    expect(interestsForCategories(["worship", "museum"])).toEqual(["museum", "churches"]);
+    expect(interestsForCategories(["food"])).toEqual([]);
   });
 });

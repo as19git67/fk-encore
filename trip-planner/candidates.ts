@@ -14,7 +14,7 @@ import { readableName } from "./readable-name";
 import { articleUrl } from "./spot-links";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import type { Candidate } from "./solver";
-import { matchedInterests } from "./interests";
+import { keepsSelection, matchedInterests, selectionOf } from "./interests";
 import { lightWindows } from "./sun";
 import type { Coordinate } from "./travel";
 import { spotLight } from "./light";
@@ -62,7 +62,11 @@ export interface ScoringOptions {
    * lookup — "what is near me" legitimately answers with the ordinary.
    */
   requireProminence?: boolean;
-  /** Category ids the travellers said they care about. */
+  /**
+   * What is searched for (interest ids, `other` for the rest). Empty or
+   * every line ticked is everything; anything narrower is a filter, not
+   * a bonus (2026-10-04).
+   */
   interests?: readonly string[];
   /** Per-category overrides for the dwell defaults. */
   dwellMinutes?: Readonly<Record<string, number>>;
@@ -152,7 +156,7 @@ export function toCandidates(
   spots: readonly GeoPoiSearchSpot[],
   opts: ScoringOptions = {},
 ): ScoredCandidate[] {
-  const interests = new Set(opts.interests ?? []);
+  const selection = selectionOf(opts.interests);
   const candidates: ScoredCandidate[] = [];
 
   for (const spot of spots) {
@@ -191,15 +195,16 @@ export function toCandidates(
     if (!spot.name) {
       reasons.push("unbenannt in OpenStreetMap");
     }
-    // Against the interest vocabulary rather than the category id: a
-    // category is one of nine, an interest is a theme, and comparing
-    // the two awarded this to nobody (see interests.ts).
-    const hits = matchedInterests({ kind: spot.kind, category }, interests);
-    if (hits.length > 0) {
-      score += 2;
-      // Named, not "passt zu euren Interessen": which of them it
-      // answers is the part that makes the suggestion arguable (§8.3).
-      reasons.push(`ihr wolltet: ${hits.join(", ")}`);
+    // The selection is a filter, not a bonus (2026-10-04): what was
+    // not ticked is not searched. Two meanings for one row of ticks —
+    // "more of this" and "only this" — was the thing nobody could read
+    // off the screen. With everything ticked nothing is narrowed and
+    // nothing is said; narrowed, the reason names the line it answers,
+    // which is what makes the suggestion arguable (§8.3).
+    if (selection !== null) {
+      if (!keepsSelection({ kind: spot.kind, category }, selection)) continue;
+      const hits = matchedInterests({ kind: spot.kind, category }, selection);
+      if (hits.length > 0) reasons.push(`ihr wolltet: ${hits.join(", ")}`);
     }
 
     // Nothing says this is worth a block. Keep it out of the pool a day

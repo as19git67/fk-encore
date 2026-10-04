@@ -321,9 +321,10 @@ struct TripNewPlanView: View {
                     ))
                 }
             } header: {
-                Text("Was zählt auf dieser Reise?")
+                Text("Wonach gesucht wird")
             } footer: {
-                Text("Angekreuztes bewertet der Planer höher — es schließt nichts aus.")
+                Text("Gesucht wird nur, was angekreuzt ist. „Alles andere“ steht für Orte, "
+                     + "die zu keinem der Themen gehören — alles an heißt alles, was die Karte kennt.")
             }
         }
     }

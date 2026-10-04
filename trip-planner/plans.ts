@@ -1567,7 +1567,12 @@ async function planLeg(
   //
   // Zero candidates is exactly a frame: the solver fills the budget it
   // is given, and given nothing it produces blocks with no stops.
-  const spots = region ? await spotsAround(region.postgresDb, anchor, radiusM, trip.categories) : [];
+  // Not `trip.categories`: the interpreter's category list used to
+  // narrow the search invisibly, next to ticks that only raised scores.
+  // Since 2026-10-04 the ticks are the one filter, and the categories
+  // a sentence names become ticks (interpret.ts) rather than a second,
+  // hidden one.
+  const spots = region ? await spotsAround(region.postgresDb, anchor, radiusM, undefined) : [];
 
   const scored = toCandidates(spots, {
     interests: trip.interests,
@@ -2228,7 +2233,7 @@ async function dayTripPool(
     return [];
   }
 
-  const spots = await spotsAround(region.postgresDb, dayTrip.at, radiusM, trip.categories);
+  const spots = await spotsAround(region.postgresDb, dayTrip.at, radiusM, undefined);
   const pool = toCandidates(spots, {
     interests: trip.interests,
     dwellMinutes: trip.dwellMinutes,

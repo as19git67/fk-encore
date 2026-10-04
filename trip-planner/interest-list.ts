@@ -10,7 +10,7 @@
  */
 
 import { api } from "encore.dev/api";
-import { INTERESTS } from "./interests";
+import { INTERESTS, OTHER_INTEREST_ID, OTHER_INTEREST_LABEL } from "./interests";
 
 export interface InterestOption {
   id: string;
@@ -24,6 +24,10 @@ export interface InterestsResponse {
 export const listTripInterests = api(
   { expose: true, method: "GET", path: "/trip-planner/interests", auth: true },
   async (): Promise<InterestsResponse> => ({
-    interests: INTERESTS.map((interest) => ({ id: interest.id, label: interest.label })),
+    interests: [
+      ...INTERESTS.map((interest) => ({ id: interest.id, label: interest.label })),
+      // Last, so "everything else" reads as the remainder it is.
+      { id: OTHER_INTEREST_ID, label: OTHER_INTEREST_LABEL },
+    ],
   }),
 );
