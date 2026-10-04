@@ -42,9 +42,19 @@ final class TripNewPlanViewModel {
         do {
             let response: Response = try await APIClient.shared.get("/trip-planner/interests")
             interestOptions = response.interests
+            // Every line on to begin with: the list is a filter, and a
+            // new trip searches everything until somebody narrows it.
+            if draft.interests.isEmpty {
+                draft.interests = interestOptions.map(\.id)
+            }
         } catch {
             interestOptions = []
         }
+    }
+
+    /// Has the selection been narrowed from "everything"?
+    private var interestsNarrowed: Bool {
+        !draft.interests.isEmpty && Set(draft.interests) != Set(interestOptions.map(\.id))
     }
 
     /// Has anything been typed or picked? Decides whether "Abbrechen"
@@ -54,7 +64,7 @@ final class TripNewPlanViewModel {
             || !draft.title.trimmingCharacters(in: .whitespaces).isEmpty
             || !sentence.trimmingCharacters(in: .whitespaces).isEmpty
             || draft.legs.count > 1
-            || !draft.interests.isEmpty
+            || interestsNarrowed
     }
 
     // MARK: - Place search

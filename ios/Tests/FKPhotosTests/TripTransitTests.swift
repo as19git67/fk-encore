@@ -110,6 +110,22 @@ final class TripTransitTests: XCTestCase {
         XCTAssertEqual(open.suggestion.flatMap { TripTransitPlanning.minutes(fromClock: $0.arriveAt) }, 840)
     }
 
+    func testAJourneyIsBlockedWhileAPlaceItTouchesHasNoDate() {
+        // Nothing dated: the journey dates the trip, nothing blocks.
+        let undated = [leg(0, start: nil, days: [day(0)]), leg(1, start: nil, days: [day(0)])]
+        XCTAssertNil(TripTransitSlots.blocker(afterLegIndex: 0, in: undated))
+        // One place dated, the other not: the server would refuse on
+        // save, so the button says why beforehand — naming the place.
+        let half = [leg(0, start: "2026-09-05", days: [day(0)]), leg(1, start: nil, days: [day(0)])]
+        XCTAssertEqual(TripTransitSlots.blocker(afterLegIndex: 0, in: half),
+                       "„Ort 1“ hat noch kein Datum — erst der Stadt ein Datum geben, dann die Weiterreise anlegen.")
+        XCTAssertNil(TripTransitSlots.blocker(afterLegIndex: -1, in: half))
+        XCTAssertTrue(TripTransitSlots.blocker(afterLegIndex: 1, in: half)?.contains("Heimreise") == true)
+        // Both dated: free.
+        let dated = [leg(0, start: "2026-09-05", days: [day(0)]), leg(1, start: "2026-09-06", days: [day(0)])]
+        XCTAssertNil(TripTransitSlots.blocker(afterLegIndex: 0, in: dated))
+    }
+
     func testTheWayThereAndHomeAreOfferedOnlyWithAHome() {
         let stays = [
             leg(0, start: "2026-09-05", days: [day(0)]),

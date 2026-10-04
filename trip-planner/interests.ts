@@ -173,6 +173,75 @@ export function interestById(id: string): Interest | undefined {
 }
 
 /**
+ * The sixteenth line: what fits none of the fifteen (2026-10-04).
+ *
+ * The list became a filter — ticked is searched, unticked is not — and
+ * a filter over a short vocabulary would silently drop the bridge, the
+ * square, the odd building that no theme names. So "everything else" is
+ * a choice of its own, on by default like the rest, and whoever wants
+ * museums and churches only switches it off knowing what goes.
+ */
+export const OTHER_INTEREST_ID = "other";
+export const OTHER_INTEREST_LABEL = "Alles andere";
+
+/** Does any of the fifteen name this spot? */
+function matchesAnyInterest(spot: { kind?: string | null; category: string }): boolean {
+  for (const interest of INTERESTS) {
+    if (interest.categories.includes(spot.category)) return true;
+    if (spot.kind && interest.kinds.includes(spot.kind)) return true;
+  }
+  return false;
+}
+
+/**
+ * What a stored selection means for the search: `null` is everything,
+ * a set is "only these" (with `other` standing for what no theme names).
+ *
+ * Nothing chosen is everything — the default, and what every trip from
+ * before the filter stores. So is a selection that ticks every line:
+ * narrowing nothing is not a filter, and the "why here?" line should
+ * not then say "ihr wolltet: Museen" of every museum. Free text the
+ * interpreter once stored ("barock") and ids of renamed interests are
+ * ignored rather than matched against nothing, which would empty the
+ * pool over a word nobody can see.
+ */
+export function selectionOf(chosen: Iterable<string> | null | undefined): ReadonlySet<string> | null {
+  if (!chosen) return null;
+  const known = new Set<string>();
+  for (const id of chosen) {
+    if (BY_ID.has(id) || id === OTHER_INTEREST_ID) known.add(id);
+  }
+  if (known.size === 0) return null;
+  if (known.size === INTERESTS.length + 1) return null;
+  return known;
+}
+
+/** Is this spot searched for under the selection? */
+export function keepsSelection(
+  spot: { kind?: string | null; category: string },
+  selection: ReadonlySet<string> | null,
+): boolean {
+  if (selection === null) return true;
+  return matchesInterest(spot, selection);
+}
+
+/**
+ * The interests that stand for geo categories (`sight`, `worship`, …):
+ * how the interpreter's category list becomes ticks somebody can see.
+ * A category no interest claims becomes nothing — the filter must not
+ * narrow to a line that is not on the screen.
+ */
+export function interestsForCategories(categoryIds: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const interest of INTERESTS) {
+    if (interest.categories.some((c) => categoryIds.includes(c)) && !out.includes(interest.id)) {
+      out.push(interest.id);
+    }
+  }
+  return out;
+}
+
+/**
  * Does this spot answer one of the chosen interests?
  *
  * Unknown ids answer no rather than throwing: a trip planned before an
@@ -184,6 +253,11 @@ export function matchesInterest(
   chosen: Iterable<string>,
 ): boolean {
   for (const id of chosen) {
+    // "Everything else": what none of the fifteen names.
+    if (id === OTHER_INTEREST_ID) {
+      if (!matchesAnyInterest(spot)) return true;
+      continue;
+    }
     const interest = BY_ID.get(id);
     if (!interest) {
       // Stored free text from the interpreter ("barock"), or a category
@@ -200,6 +274,7 @@ export function matchesInterest(
 
 /** The label for a reason line, or the raw id when it is not one of ours. */
 export function interestLabel(id: string): string {
+  if (id === OTHER_INTEREST_ID) return OTHER_INTEREST_LABEL;
   return BY_ID.get(id)?.label ?? id;
 }
 

@@ -3946,6 +3946,26 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Bildschirm, der ihn irgendwohin fallen ließe, würde diese Rechnung entweder
    verdoppeln oder ignorieren.
 
+   **Die Häkchen sind ein Filter (2026-10-04).** Aus der Praxis: „Was zählt
+   auf dieser Reise?" las sich verkehrt herum, weil nichts angekreuzt der
+   neutrale Zustand war und ein Häkchen nur +2 Punkte gab. Dazu kam ein
+   zweiter, unsichtbarer Mechanismus: Die Kategorien, die der Satz-Interpreter
+   aus „vier Tage Lissabon, Museen und Kirchen" zog, schränkten die Suche hart
+   ein, ohne dass ein Bildschirm es zeigte. Jetzt gilt: **Gesucht wird nur,
+   was angekreuzt ist**, alle Zeilen sind zu Beginn an, und es gibt eine
+   sechzehnte Zeile **„Alles andere"** für Orte, die zu keinem Thema gehören
+   (`OTHER_INTEREST_ID`) — ohne sie würde ein Filter über ein kurzes Vokabular
+   die Brücke und den Platz lautlos verlieren. Der Bonus entfällt; „ihr
+   wolltet: …" steht nur noch, wenn die Auswahl wirklich eingegrenzt ist.
+   Alles an und nichts an bedeuten dasselbe (`selectionOf` → `null`), Wörter
+   außerhalb des Vokabulars werden ignoriert statt gegen nichts geprüft. Die
+   Kategorien des Interpreters werden in Häkchen übersetzt
+   (`interestsForCategories`) und nicht mehr angewendet; Migration 0226 nimmt
+   alten Reisen Häkchen und Kategorien weg, damit sie weiter alles suchen,
+   was ihr Bildschirm nun auch sagt. Die Überschrift heißt „Wonach gesucht
+   wird".
+
+
    **Nachgereicht: eine Reise ohne importierte Region.** Der Planer lehnte ab
    („no imported OSM region covers this location") und warf damit alles weg,
    was der Reisende getippt hatte — wegen eines Downloads, den er selbst gar

@@ -106,12 +106,7 @@ struct TripLegsView: View {
 
             Section {
                 if let legs = viewModel.plan?.legs, TripTransitSlots.wantsArrival(legs, hasHome: viewModel.plan?.home != nil) {
-                    Button {
-                        transit = TransitTarget(afterLegIndex: -1, existing: nil)
-                    } label: {
-                        Label("Anreise einfügen", systemImage: "house.and.flag")
-                            .font(.subheadline)
-                    }
+                    journeyButton("Anreise einfügen", systemImage: "house.and.flag", afterLegIndex: -1)
                 }
                 ForEach(viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []) { leg in
                     Button {
@@ -147,22 +142,13 @@ struct TripLegsView: View {
                     // Between two places without a journey yet: the way
                     // to say when the group leaves and when it arrives.
                     if let after = TripTransitSlots.slotAfter(leg, in: viewModel.plan?.legs ?? []) {
-                        Button {
-                            transit = TransitTarget(afterLegIndex: after, existing: nil)
-                        } label: {
-                            Label("Weiterreise einfügen", systemImage: "arrow.triangle.turn.up.right.diamond")
-                                .font(.subheadline)
-                        }
+                        journeyButton("Weiterreise einfügen", systemImage: "arrow.triangle.turn.up.right.diamond",
+                                      afterLegIndex: after)
                     }
                 }
                 if let legs = viewModel.plan?.legs,
                    let last = TripTransitSlots.wantsReturn(legs, hasHome: viewModel.plan?.home != nil) {
-                    Button {
-                        transit = TransitTarget(afterLegIndex: last, existing: nil)
-                    } label: {
-                        Label("Heimreise einfügen", systemImage: "house")
-                            .font(.subheadline)
-                    }
+                    journeyButton("Heimreise einfügen", systemImage: "house", afterLegIndex: last)
                 }
             } footer: {
                 Text("Jede Stadt hat ihren eigenen Ausgangspunkt, ihr eigenes Verkehrsmittel "
@@ -275,6 +261,30 @@ struct TripLegsView: View {
         UserDefaults.standard.set(true, forKey: TripTransitSuggestion.dismissKey(
             planId: viewModel.planId, afterLegIndex: found.afterLegIndex))
         suggestion = nil
+    }
+
+    /// The way into the journey screen — or, when a neighbour still has
+    /// no date, the reason instead of a screen that refuses on save.
+    /// The server's rule (§22.7): an undated trip takes its dates from
+    /// the journey, but once some places are dated, the ones the journey
+    /// touches have to be.
+    @ViewBuilder
+    private func journeyButton(_ title: String, systemImage: String, afterLegIndex: Int) -> some View {
+        let blocker = TripTransitSlots.blocker(afterLegIndex: afterLegIndex, in: viewModel.plan?.legs ?? [])
+        Button {
+            transit = TransitTarget(afterLegIndex: afterLegIndex, existing: nil)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(title, systemImage: systemImage)
+                    .font(.subheadline)
+                if let blocker {
+                    Text(blocker)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(blocker != nil)
     }
 
     @ViewBuilder
@@ -662,6 +672,23 @@ enum TripTransitSlots {
         guard hasHome, let last = legs.max(by: { $0.position < $1.position }),
               !last.isTransit else { return nil }
         return last.position
+    }
+
+    /// Why a journey cannot be made here yet, in one sentence — or nil.
+    ///
+    /// Mirrors `transits.ts`: with no date anywhere the journey dates
+    /// the trip, so nothing blocks. Once any place is dated, the place
+    /// being left and the place being reached both need a date, or the
+    /// server refuses on save — better said before the screen opens
+    /// than after the moments were typed.
+    static func blocker(afterLegIndex: Int, in legs: [TripLeg]) -> String? {
+        guard legs.contains(where: { $0.startDate != nil }) else { return nil }
+        let from = legs.first { $0.position == afterLegIndex }
+        let to = legs.first { $0.position > afterLegIndex && !$0.isTransit }
+        let undated = [from, to].compactMap { $0 }.filter { $0.startDate == nil }
+        guard let first = undated.first else { return nil }
+        return "„\(first.displayTitle)“ hat noch kein Datum — erst der Stadt ein Datum geben, "
+            + "dann die \(afterLegIndex < 0 ? "Anreise" : to == nil ? "Heimreise" : "Weiterreise") anlegen."
     }
 
     static func slotAfter(_ leg: TripLeg, in legs: [TripLeg]) -> Int? {

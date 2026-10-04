@@ -27,6 +27,7 @@ import {
   type NlConstraints,
 } from "./constraints";
 import { interpretTripRequest, LlmServiceUnavailableError } from "./llm-client";
+import { interestsForCategories } from "./interests";
 
 /** Long enough for a paragraph, short enough not to be a document. */
 const MAX_TEXT_LENGTH = 2_000;
@@ -76,6 +77,17 @@ export const interpretRequest = api(
       raw,
       categories.map((c) => c.id),
     );
+    // Categories the sentence named become ticks the screen shows
+    // (2026-10-04): the search is narrowed by the interest list alone,
+    // and never by a list nobody can see. A category no interest stands
+    // for is dropped rather than kept as a hidden filter.
+    if (constraints.categories && constraints.categories.length > 0) {
+      const fromCategories = interestsForCategories(constraints.categories);
+      const merged = [...(constraints.interests ?? [])];
+      for (const id of fromCategories) if (!merged.includes(id)) merged.push(id);
+      if (merged.length > 0) constraints.interests = merged;
+      delete constraints.categories;
+    }
     return { constraints, rejected };
   },
 );

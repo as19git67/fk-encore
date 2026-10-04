@@ -119,12 +119,14 @@ struct TripPlanSettingsView: View {
                         ))
                     }
                 } header: {
-                    Text("Was zählt auf dieser Reise?")
+                    Text("Wonach gesucht wird")
                 } footer: {
-                    // Honest about both halves: what it does, and why
-                    // the list is short (§4, interests.ts).
-                    Text("Angekreuztes bewertet der Planer höher — es schließt "
-                         + "nichts aus. Die Liste ist kurz, weil sie nur enthält, was "
+                    // A filter, not a bonus (2026-10-04): what it does,
+                    // what the last line is for, and why the list is
+                    // short (§4, interests.ts).
+                    Text("Gesucht wird nur, was angekreuzt ist. „Alles andere“ steht für "
+                         + "Orte, die zu keinem der Themen gehören — alles an heißt alles, "
+                         + "was die Karte kennt. Die Liste ist kurz, weil sie nur enthält, was "
                          + "OpenStreetMap wirklich unterscheidet: „Burgen“ kann die Karte "
                          + "beantworten, „Barock“ nicht.\n\nSpeichern plant die Tage neu.")
                 }
@@ -291,6 +293,12 @@ final class TripPlanSettingsViewModel {
         do {
             let response: Response = try await APIClient.shared.get("/trip-planner/interests")
             options = response.interests
+            // Nothing stored means everything is searched (the server
+            // reads it so too): show that as every line ticked rather
+            // than none, which read as "nothing counts".
+            if !options.contains(where: { interests.contains($0.id) }) {
+                interests.formUnion(options.map(\.id))
+            }
         } catch {
             options = []
         }
