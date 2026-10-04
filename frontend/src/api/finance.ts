@@ -687,6 +687,8 @@ export type DepotEnrichOutcome =
   | 'conflict'
   /** Rules and model disagree and the figures do not settle it: nothing was booked. */
   | 'unverified'
+  /** A tax statement with no transaction of the same security, kind and quantity to add its tax to. */
+  | 'no_transaction'
 
 export interface DepotEnrichResult {
   document_id: number
@@ -784,6 +786,8 @@ export interface SettlementInspection {
   /** 'unverified': rules and model disagree and the figures do not settle it. */
   verdict: 'ok' | 'unverified'
   is_settlement: boolean
+  /** A tax statement on its own: it only adds the tax to an existing transaction. */
+  tax_statement?: boolean
   rejection: SettlementRejection | null
   fields: SettlementInspectionFields
   /** Printed label each field was read after. */
@@ -896,6 +900,8 @@ export interface EnrichDepotDocumentsResponse {
   skipped_no_holding: number
   conflicts: number
   unverified: number
+  /** Tax statements without a transaction to add their tax to. */
+  skipped_no_transaction?: number
   errors: string[]
   results: DepotEnrichResult[]
   /** Pass as `before` to examine the next page; null once every pending document was examined. */

@@ -385,3 +385,60 @@ KapitalertragsteuerSolidaritätszuschlag
     expect(s.markers).toContain("bSt.");
   });
 });
+
+describe("parseSettlement — a tax statement on its own", () => {
+  // Synthetic: the tax statement a broker sends next to a dividend credit.
+  // It prints the amounts before and after taxes, a table of tax bases and
+  // footnotes with rates — no price, no Kurswert, no charges.
+  const TAX = `Beispielbank AG
+Steuerliche Behandlung: Dividende vom 03.06.2026
+Stk. 40 ALPHA INDUSTRIES AG , WKN / ISIN: AAA111 / DE000000AAA1
+Zu Ihren Gunsten vor Steuern: EUR 52,40
+Steuerbemessungsgrundlage EUR 58,90
+Kapitalertragsteuer (2) EUR -6,10
+(angerechnete Quellensteuer EUR 7,89)
+Solidaritätszuschlag EUR -0,33
+Kirchensteuer EUR -0,48
+abgeführte Steuern EUR -6,91
+Zu Ihren Gunsten nach Steuern: EUR 45,49
+Die Gutschrift erfolgt mit Valuta 05.06.2026 auf Konto EUR mit der IBAN DE00 0000 0000 0000 0000 00
+(2) Beispielhinweis: Kapitalertragsteuersatz 12,34 %, Kirchensteuersatz 5 %.`;
+
+  it("is read as a tax statement: tax, the amounts before and after, quantity and the date it names", () => {
+    const s = inspectSettlement(TAX)!;
+    expect(s.taxStatement).toBe(true);
+    expect(s.kind).toBe("dividend");
+    expect(s.quantity).toBe(40);
+    expect(s.tax).toBe(6.91);
+    expect(s.gross).toBe(52.4);
+    expect(s.net).toBe(45.49);
+    expect(s.price).toBeNull();
+    expect(s.fees).toBeNull();
+    expect(s.executedAt).toBe("2026-06-03");
+  });
+
+  it("reads a scan whose OCR made 'Steuem' of 'Steuern' and kept the total's underline", () => {
+    const scanned = TAX.replace(/Steuern/g, "Steuem").replace("abgeführte Steuem EUR -6,91", "abgeführte Steuem EUR ________________ -6,91");
+    const s = inspectSettlement(scanned)!;
+    expect(s.taxStatement).toBe(true);
+    expect(s.tax).toBe(6.91);
+    expect(s.gross).toBe(52.4);
+    expect(s.net).toBe(45.49);
+  });
+
+  it("takes the difference before − after taxes when no total is printed, not every tax word and rate", () => {
+    const s = inspectSettlement(TAX.replace("abgeführte Steuern EUR -6,91\n", ""))!;
+    expect(s.tax).toBe(6.91);
+    expect(s.labels.tax).toBe("vor − nach Steuern");
+  });
+
+  it("does not take a settlement with its tax statement appended for a tax statement", () => {
+    const combined = `Wertpapierabrechnung Verkauf
+Stück 40 Alpha Industries AG ISIN DE000000AAA1
+Schlusstag 03.06.2026
+Kurswert 4.000,00 EUR
+Ausmachender Betrag 3.990,00 EUR
+Steuerliche Behandlung: Wertpapierverkauf vom 03.06.2026`;
+    expect(inspectSettlement(combined)!.taxStatement).toBe(false);
+  });
+});

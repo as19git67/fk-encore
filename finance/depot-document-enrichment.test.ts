@@ -829,3 +829,82 @@ describe("finance/portfolio — documents ignored for the depots", () => {
     await expect(ignoreSettlementDocument({ documentId: docId })).resolves.toMatchObject({ ignored: true });
   });
 });
+
+describe("finance/depot-document-enrichment — a tax statement on its own", () => {
+  // Synthetic tax statement for a dividend of ISIN_A (see the parser tests).
+  const TAX_STATEMENT = `Beispielbank AG
+Steuerliche Behandlung: Dividende vom 03.06.2026
+Stk. 40 ALPHA INDUSTRIES AG , ISIN: ${ISIN_A}
+Zu Ihren Gunsten vor Steuern: EUR 52,40
+Kapitalertragsteuer EUR -6,10
+Solidaritätszuschlag EUR -0,33
+Kirchensteuer EUR -0,48
+abgeführte Steuern EUR -6,91
+Zu Ihren Gunsten nach Steuern: EUR 45,49`;
+
+  async function dividendRow(depot: number, amount: string | null, tax: string | null = null): Promise<number> {
+    const [row] = await db
+      .insert(financeDepotTransaction)
+      .values({
+        account_id: depot,
+        isin: ISIN_A,
+        kind: "dividend",
+        executed_at: "2026-06-05",
+        amount,
+        tax,
+        net_amount: "45.49",
+        currency: "EUR",
+        source: "giro-derived",
+        dedupe_hash: `giro:${Math.random()}`,
+      })
+      .returning({ id: financeDepotTransaction.id });
+    return row!.id;
+  }
+
+  it("adds its tax to the transaction of the same security and quantity, and nothing else", async () => {
+    const { depot } = await setup();
+    const rowId = await dividendRow(depot, "40");
+    const docId = await insertDocument(TAX_STATEMENT);
+
+    const dry = await enrichDocument(docId, null, { dryRun: true });
+    expect(dry).toMatchObject({ outcome: "enriched", tax_statement: true, depot_transaction_id: rowId });
+
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("enriched");
+    const rows = await depotRows(depot);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.tax).toBe("6.91");
+    // The amounts on a tax statement are not the booking's.
+    expect(rows[0]!.net_amount).toBe("45.49");
+    expect(rows[0]!.gross_amount).toBeNull();
+    expect(rows[0]!.price).toBeNull();
+    expect(rows[0]!.source).toBe("giro-derived+document");
+    expect((await enrichDocument(docId)).outcome).toBe("already_linked");
+
+    const i = await inspectSettlementDocument({ documentId: docId });
+    expect(i.tax_statement).toBe(true);
+  });
+
+  it("creates nothing when no transaction of that quantity exists, and keeps a tax already there", async () => {
+    const { depot } = await setup();
+    await dividendRow(depot, "25");
+    const docId = await insertDocument(TAX_STATEMENT);
+    expect((await enrichDocument(docId)).outcome).toBe("no_transaction");
+    expect(await depotRows(depot)).toHaveLength(1);
+
+    await db.delete(financeDepotTransaction);
+    await dividendRow(depot, null, "7.00");
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("linked");
+    expect((await depotRows(depot))[0]!.tax).toBe("7.00");
+  });
+
+  it("is not thrown out because the model says it is no settlement", async () => {
+    const { depot } = await setup();
+    await dividendRow(depot, "40");
+    vi.mocked(extractSettlementValues).mockResolvedValue({ is_settlement: false, kind: "dividend", tax: "6.91" });
+    const docId = await insertDocument(TAX_STATEMENT);
+    expect((await enrichDocument(docId)).outcome).toBe("enriched");
+    expect((await depotRows(depot))[0]!.tax).toBe("6.91");
+  });
+});
