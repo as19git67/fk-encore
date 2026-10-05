@@ -214,7 +214,8 @@ export function parseGermanNumber(raw: string): number | null {
 }
 
 // A rate ("12,34 %") is never an amount, nor is a footnote marker ("(1)").
-const AMOUNT = String.raw`(-?\s?\d{1,3}(?:[.\s]\d{3})*(?:,\d{1,8})?|-?\s?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))`;
+// The amount stands on its label's line: a line break never belongs to it.
+const AMOUNT = String.raw`(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))`;
 /** What may stand between a label and its amount: text, or a footnote marker ("Kapitalertragsteuer (1) EUR …"). */
 const GAP = String.raw`(?:[^\d\n-]|\(\d{1,2}\)){0,40}?`;
 const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
@@ -250,6 +251,46 @@ function normalize(text: string): string {
     .replace(/[ \t]+/g, " ")
     .replace(/\r/g, "")
     .replace(/\n{2,}/g, "\n");
+}
+
+const CURRENCY_ONLY_RE = /(?:EUR|USD|CHF|GBP|€)\s*$/;
+const AMOUNT_ONLY_RE = /^-?\d{1,3}(?:\.\d{3})*,\d{2}$|^-?\d+,\d{2}$/;
+
+/**
+ * Text read off a two-column table can come out column by column: the
+ * labels with their currency ("abgeführte Steuern EUR"), and further down
+ * the amounts alone, one per line, in the same order. Each run of such
+ * amounts is put back after the labels it belongs to, so that every label
+ * is followed by its amount again. A run that does not match the number of
+ * labels waiting for one is left as it is.
+ */
+export function rejoinColumnAmounts(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let waiting: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (AMOUNT_ONLY_RE.test(line)) {
+      let j = i;
+      while (j < lines.length && AMOUNT_ONLY_RE.test(lines[j]!.trim())) j++;
+      const run = lines.slice(i, j).map((l) => l.trim());
+      if (run.length === waiting.length) {
+        run.forEach((amount, k) => {
+          out[waiting[k]!] = `${out[waiting[k]!]} ${amount}`;
+        });
+        waiting = [];
+        i = j - 1;
+        continue;
+      }
+      out.push(...lines.slice(i, j));
+      waiting = [];
+      i = j - 1;
+      continue;
+    }
+    if (CURRENCY_ONLY_RE.test(line) && !/\d/.test(line)) waiting.push(out.length);
+    out.push(lines[i]!);
+  }
+  return out.join("\n");
 }
 
 /** First amount after any of the labels, as a positive number. */
@@ -522,7 +563,7 @@ export function extractDepotNumber(text: string): string | null {
  */
 export function inspectSettlement(raw: string | null | undefined): SettlementInspection | null {
   if (!raw || raw.trim().length === 0) return null;
-  const whole = normalize(raw);
+  const whole = rejoinColumnAmounts(normalize(raw));
   const wholeLower = whole.toLowerCase();
   // Amounts and labels are read from the settlement's own block, so the
   // fee bookings around it on an account statement do not count as its

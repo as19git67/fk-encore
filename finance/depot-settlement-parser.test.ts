@@ -7,6 +7,7 @@ import {
   isUsableSettlement,
   parseGermanNumber,
   parseSettlement,
+  rejoinColumnAmounts,
   settlementBlock,
 } from "./depot-settlement-parser";
 
@@ -506,5 +507,47 @@ STK 25,000 Registered Shares o.N. DE000000AAA1
 Bruttobetrag: EUR 50,00
 Ausmachender Betrag EUR 50,00`)!;
     expect(s.name).toBe("Alpha Industries AG");
+  });
+});
+
+describe("parseSettlement — a tax statement read column by column", () => {
+  // Synthetic: the text of a scanned two-column table, where the labels
+  // come with their currency and the amounts follow later, one per line.
+  // A second page carries year-to-date tables whose figures are no part
+  // of this booking.
+  const TAX = `Beispielbank AG
+Steuerliche Behandlung: Dividende vom 03.06.2026
+Stk.   Stk. 40 ALPHA INDUSTRIES AG , WKN / ISIN: AAA111 / DE000000AAA1
+Zu Ihren Gunsten vor Steuern:   EUR
+Steuerbemessungsgrundlage   EUR   58,90
+Kapitalertragsteuer (1)   EUR   -6,10
+(angerechnete Quellensteuer:   EUR   7,89 )
+Solidaritätszuschlag   EUR   -0,33
+Kirchensteuer   EUR   -0,48
+abgeführte Steuern   EUR
+Zu Ihren Gunsten nach Steuern:   EUR
+52,40
+-6,91
+45,49
+Die Gutschrift erfolgt mit Valuta 05.06.2026 auf Konto EUR
+Steuern im laufenden Jahr in EUR
+Kapitalertragsteuer   Solidaritätszuschlag
+Stand   1.234,56   78,90
+Kirchensteuer einbehaltene   ausländische Quellensteuer
+98,76   54,32`;
+
+  it("pairs each amount with its label again and leaves the year-to-date tables alone", () => {
+    const s = inspectSettlement(TAX)!;
+    expect(s.taxStatement).toBe(true);
+    expect(s.gross).toBe(52.4);
+    expect(s.tax).toBe(6.91);
+    expect(s.net).toBe(45.49);
+    expect(s.quantity).toBe(40);
+    expect(s.executedAt).toBe("2026-06-03");
+  });
+
+  it("leaves a run of amounts alone when it does not match the labels waiting for one", () => {
+    expect(rejoinColumnAmounts("Betrag EUR\n1,00\n2,00")).toBe("Betrag EUR\n1,00\n2,00");
+    expect(rejoinColumnAmounts("A EUR\nB EUR\n1,00\n2,00")).toBe("A EUR 1,00\nB EUR 2,00");
   });
 });
