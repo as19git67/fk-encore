@@ -2078,6 +2078,8 @@ export const inspectSettlementDocument = api(
         kind: financeDepotTransaction.kind,
         executed_at: financeDepotTransaction.executed_at,
         net_amount: financeDepotTransaction.net_amount,
+        linked_transaction_id: financeDepotTransaction.linked_transaction_id,
+        source: financeDepotTransaction.source,
       })
       .from(financeDepotTransactionDocument)
       .innerJoin(
@@ -2087,11 +2089,15 @@ export const inspectSettlementDocument = api(
       .where(eq(financeDepotTransactionDocument.document_id, documentId));
 
     // The booking decides between rules and model: the one a dry run
-    // matched, or the one the document is already linked to.
+    // matched, or the one the document is already linked to — if an account
+    // booking confirmed it. A row this document created only repeats what
+    // was read off it and proves nothing.
     const bookingNet =
       dry?.checked_against_booking && dry.transaction_net !== null
         ? dry.transaction_net
-        : reading.llm && linkRows.length === 1
+        : reading.llm &&
+            linkRows.length === 1 &&
+            (linkRows[0]!.source !== "document" || linkRows[0]!.linked_transaction_id !== null)
           ? linkRows[0]!.net_amount
           : null;
     const shown = bookingNet !== null ? rereadAgainstBooking(reading, Number(bookingNet)) : reading;

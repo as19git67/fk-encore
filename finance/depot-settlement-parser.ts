@@ -32,6 +32,7 @@ export function isMoneyOut(kind: SettlementKind | null): boolean {
   return kind === "buy" || kind === "tax";
 }
 
+const NO_TAX_RE = /kein(?:en)?\s+steuerabzug|keine\s+steuern?\s+(?:einbehalten|abgeführt)|ohne\s+steuerabzug/i;
 const ACCUMULATION_RE = /thesaurierung|thesaurierte\s+erträge|vorabpauschale|ausschüttungsgleiche\s+erträge/i;
 const TRADE_RE = /wertpapierabrechnung|wertpapier-abrechnung|wertpapierkauf|wertpapierverkauf|kaufabrechnung|verkaufsabrechnung|orderabrechnung|fondsabrechnung|ausführungsanzeige/i;
 const PAYOUT_RE = /dividendengutschrift|ertragsgutschrift|erträgnisgutschrift|ausschüttung(?!sgleich)/i;
@@ -244,8 +245,9 @@ export function parseGermanNumber(raw: string): number | null {
 
 // A rate ("12,34 %") is never an amount, nor is a footnote marker ("(1)").
 // The amount stands on its label's line: a line break never belongs to it.
-// Nor is a number that a date continues ("01.01.26") an amount.
-const AMOUNT = String.raw`(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))(?![.,]?\d)`;
+// Nor is a number that a date continues ("01.01.26") an amount, nor one a
+// legal reference names ("nach § 12a EStG", "Abs. 3", "Nr. 5").
+const AMOUNT = String.raw`(?<!(?:§|Abs\.|Nr\.|Art\.)\s?)(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))(?![.,]?\d)`;
 /** What may stand between a label and its amount: text, or a footnote marker ("Kapitalertragsteuer (1) EUR …"). */
 const GAP = String.raw`(?:[^\d\n-]|\(\d{1,2}\)){0,40}?`;
 const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
@@ -544,7 +546,7 @@ function nameOnIdentifierLine(text: string, isin: string | null, wkn: string | n
 
 /** Labels and headings a statement prints around the security, never its name. */
 const NOT_A_NAME =
-  /^(stück|stk|nominale|kurs|kurswert|preis|wertpapier|kauf|verkauf|dividend|ertrag|erträgnis|ausschüttung|depot|schlusstag|handelstag|ausführung|valuta|datum|abrechnung|zahlbar|isin|wkn|betrag|brutto|netto|provision|steuer|kapitalertrag|anlageklasse|anlagestrategie|emittent|fondsgesellschaft|herrn?\b|frau\b|inhaber|kunde)/i;
+  /^(stück|stk|nominale|kurs|kurswert|preis|wertpapier|kauf|verkauf|dividend|ertrag|erträgnis|ausschüttung|depot|schlusstag|handelstag|ausführung|valuta|datum|abrechnung|zahlbar|isin|wkn|betrag|brutto|netto|provision|steuer|kapitalertrag|anlageklasse|anlagestrategie|vermögensdepot|emittent|fondsgesellschaft|herrn?\b|frau\b|inhaber|kunde)/i;
 
 /**
  * A security name as a table row prints it, without the columns around it:
@@ -554,7 +556,8 @@ const NOT_A_NAME =
 export function cleanSecurityName(raw: string): string | null {
   const name = raw
     .replace(/^(?:per\s+)?\d{1,2}\.\d{1,2}\.\d{2,4}\s+/i, "")
-    .replace(/^(?:STK|Stück|St\.)\s*[\d.,]+\s+/i, "")
+    // "Stück" as OCR also reads it ("Stiick", "Stuck").
+    .replace(/^(?:STK|St(?:ü|ii|u)ck|St\.)\s*[\d.,]+\s+/i, "")
     // The identifier column at the end: an ISIN, or a WKN (six characters, at least one digit).
     .replace(/\s+[A-Z]{2}[A-Z0-9]{9}\d$/, "")
     .replace(/\s+(?=[A-Z0-9]*\d)[A-Z0-9]{6}$/, "")
@@ -815,7 +818,9 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   const accumulation =
     !looksLikeInsurancePaper(wholeLower) && !looksLikeCostInformation(whole) && looksLikeAccumulation(whole);
   if (accumulation) {
-    const charged = tax ?? netAbs;
+    // "kein Steuerabzug": a fund abroad, whose income is taxed in the
+    // owner's return — nothing was charged, whatever tax words follow.
+    const charged = NO_TAX_RE.test(whole) ? 0 : (tax ?? netAbs);
     return {
       kind: "tax",
       insurance: false,
@@ -833,7 +838,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       gross: null,
       fees: null,
       tax: charged,
-      net: charged === null ? null : -charged,
+      net: charged === null ? null : charged === 0 ? 0 : -charged,
       executedAt,
       currency: printedCurrency,
       depotNumber: extractDepotNumber(text) ?? extractDepotNumber(whole),

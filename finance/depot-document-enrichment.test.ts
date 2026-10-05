@@ -1171,3 +1171,16 @@ Zu Ihren Gunsten nach Steuern: EUR 45,49`;
     expect((await depotRows(depot))[0]!.tax).toBe("6.91");
   });
 });
+
+describe("finance/portfolio — inspection of a document linked to a row it created", () => {
+  it("does not take that row's net for an account booking", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(BUY_TEXT);
+    await enrichDocument(docId);
+    vi.mocked(extractSettlementValues).mockResolvedValue({ is_settlement: true, kind: "buy", isin: ISIN_A, net: 2966.4 });
+    const i = await inspectSettlementDocument({ documentId: docId });
+    expect(i.links).toHaveLength(1);
+    expect(i.checks.find((c) => c.name === "booking_net")).toBeUndefined();
+    expect((await depotRows(depot))[0]!.linked_transaction_id).toBeNull();
+  });
+});
