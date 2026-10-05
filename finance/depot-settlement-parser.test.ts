@@ -753,3 +753,25 @@ Hinweis: Kirchensteuer nach § 51a EStG und Kapitalertragsteuer werden mit der S
     expect(cleanSecurityName("Stiick 0,005 BEISPIEL FONDS ANTEILE")).toBe("BEISPIEL FONDS ANTEILE");
   });
 });
+
+describe("an account statement of a depot's settlement account", () => {
+  // Synthetic: fees and a transfer, and the back page's boilerplate.
+  const STATEMENT = `Beispielbank AG
+Kontoauszug Nr. 3
+alter Kontostand EUR 1.000,00
+Verwaltungsvergütung WKN AAA111 -4,50
+Übertrag vom Girokonto 200,00
+neuer Kontostand EUR 1.195,50
+Bitte prüfen Sie diesen Kontoauszug, jede Mitteilung oder Dividendenabrechnung und erheben Sie Einwendungen unverzüglich.`;
+
+  it("is no settlement when settlement words appear only in the boilerplate", () => {
+    const s = inspectSettlement(STATEMENT)!;
+    expect(s.accountStatement).toBe(true);
+    expect(s.kind).toBeNull();
+  });
+
+  it("is one when it carries a trade's booking", () => {
+    const s = inspectSettlement(STATEMENT.replace("Übertrag vom Girokonto 200,00", "Wertpapierabrechnung Verkauf ISIN DE000000AAA1 990,00"))!;
+    expect(s.accountStatement).toBe(false);
+  });
+});

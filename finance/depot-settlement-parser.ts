@@ -71,6 +71,12 @@ export interface SettlementInspection extends Omit<SettlementExtraction, "kind">
   insurance: boolean;
   /** The text is a cost disclosure (MiFID "Kosteninformation"): never a settlement. */
   costInfo: boolean;
+  /**
+   * An account statement (a depot's settlement account) with no settlement
+   * of its own in it: fees, interest, transfers and the back page's
+   * boilerplate. Never a settlement; one that carries a trade's booking is.
+   */
+  accountStatement: boolean;
   /** The text prints wording only a settlement or dividend statement prints. */
   strong: boolean;
   /**
@@ -198,6 +204,19 @@ export const INSURANCE_WORDS = [
  * is not a booking, whatever settlement words its prose contains.
  */
 const COST_INFO_RE = /kosten(?:vorab)?information|kostenausweis|ex-?ante-?kosten|ex-?post-?kosten/i;
+
+const ACCOUNT_STATEMENT_RE = /kontoauszug|(?:alter|neuer)\s+(?:konto)?(?:stand|saldo)|kontostand\s+(?:am|per|vom)/i;
+
+/**
+ * An account statement in which settlement wording appears only in prose —
+ * the back page's "Kontoauszug, Mitteilung oder Dividendenabrechnung" —
+ * and not on a line of its own or a booking line.
+ */
+export function looksLikeAccountStatementOnly(text: string): boolean {
+  if (!ACCOUNT_STATEMENT_RE.test(text)) return false;
+  const prose = (line: string) => line.trim().length > 80 || /\s(?:oder|und)\s|mitteilung|hinweis|bitte/i.test(line);
+  return !text.split("\n").some((l) => STRONG_RE.test(l) && !prose(l));
+}
 
 /** True when the text is a cost disclosure and no line is a settlement's heading. */
 export function looksLikeCostInformation(text: string): boolean {
@@ -630,7 +649,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   // A tax statement names the booking it belongs to on its heading line
   // ("Steuerliche Behandlung: <Geschäftsart> vom <Datum>").
   const taxLine = taxStatement ? (whole.split("\n").find((l) => TAX_STATEMENT_RE.test(l)) ?? null) : null;
-  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole)
+  const accountStatement = looksLikeAccountStatementOnly(whole);
+  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole) || accountStatement
     ? null
     : (taxLine ? detectKind(taxLine.toLowerCase()) : null) ?? detectKind(lower);
   const isin = extractIsin(text) ?? extractIsin(whole);
@@ -825,6 +845,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       kind: "tax",
       insurance: false,
       costInfo: false,
+      accountStatement: false,
       strong: hasStrongSettlementWording(wholeLower),
       taxStatement: false,
       taxPending: false,
@@ -851,6 +872,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     kind,
     insurance: looksLikeInsurancePaper(wholeLower),
     costInfo: looksLikeCostInformation(whole),
+    accountStatement,
     strong: hasStrongSettlementWording(wholeLower),
     taxStatement,
     taxPending,

@@ -172,6 +172,7 @@ const REJECTION_TEXT: Record<string, string> = {
   no_text: 'Das Dokument hat keinen gelesenen Text (OCR fehlt oder ist leer).',
   insurance: 'Das ist ein Versicherungsschreiben (Police, Standmitteilung, Überschussbeteiligung) — es betrifft kein Depot, auch wenn es Fonds mit ISIN nennt.',
   cost_info: 'Das ist eine Kosteninformation zur Order (MiFID II), keine Abrechnung — die Wertpapierabrechnung kommt als eigener Beleg.',
+  account_statement: 'Das ist ein Kontoauszug des Verrechnungskontos ohne eigene Wertpapierabrechnung (Gebühren, Zinsen, Überträge) — er betrifft die Depots nicht.',
   llm_other: 'Das KI-Modell hält den Beleg nicht für eine Wertpapierabrechnung, und die Regeln finden keine eindeutige Überschrift dagegen.',
   no_kind: 'Kein Hinweis auf Kauf, Verkauf oder Dividende gefunden — der Beleg gilt nicht als Abrechnung.',
   no_identifier: 'Weder ISIN noch WKN gefunden — ohne Wertpapierkennung kann nichts zugeordnet werden.',

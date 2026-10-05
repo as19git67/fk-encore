@@ -1927,6 +1927,8 @@ type InspectionRejection =
   | "insurance"
   /** A cost disclosure (MiFID "Kosteninformation"): the settlement comes separately. */
   | "cost_info"
+  /** An account statement with no settlement of its own (fees, interest, transfers). */
+  | "account_statement"
   /** The model says it is something else and the rules found no word only a settlement prints. */
   | "llm_other"
   | "no_kind"

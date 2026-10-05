@@ -66,9 +66,12 @@ export interface SettlementReading {
  * that. A strong word ("Wertpapierabrechnung", "Dividendengutschrift")
  * outweighs the model.
  */
-export function rejectedAsOtherPaper(r: SettlementReading): "insurance" | "cost_info" | "llm_other" | null {
+export function rejectedAsOtherPaper(
+  r: SettlementReading,
+): "insurance" | "cost_info" | "account_statement" | "llm_other" | null {
   if (r.rules?.insurance) return "insurance";
   if (r.rules?.costInfo) return "cost_info";
+  if (r.rules?.accountStatement) return "account_statement";
   // A tax statement is not a settlement, and the model may well say so —
   // the rules recognise it by its heading and read it as what it is.
   if (r.llmSaysSettlement === false && !r.rules?.strong && !r.rules?.taxStatement && !r.rules?.accumulation) return "llm_other";
@@ -194,7 +197,7 @@ export async function readSettlement(
   let llmStatus: LlmStatus = mode === "off" ? "off" : "skipped";
 
   // Insurance paperwork and cost disclosures are settled by the rules alone: no LLM call for them.
-  if (mode !== "off" && text && text.trim().length > 0 && !rules?.insurance && !rules?.costInfo) {
+  if (mode !== "off" && text && text.trim().length > 0 && !rules?.insurance && !rules?.costInfo && !rules?.accountStatement) {
     const stored = await storedAnswer(documentId);
     if (stored) {
       llm = parseLlmSettlement(stored);

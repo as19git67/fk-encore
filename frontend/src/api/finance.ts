@@ -740,6 +740,7 @@ export type SettlementRejection =
   | 'no_text'
   | 'insurance'
   | 'cost_info'
+  | 'account_statement'
   | 'llm_other'
   | 'no_kind'
   | 'no_identifier'

@@ -282,6 +282,19 @@ describe("classifySecuTransaction", () => {
     ).toBe("buy");
   });
 
+  it("reads a settlement account's text when the bank gave no code", () => {
+    const c = (amount: string, purpose: string) =>
+      classifySecuTransaction({ amount, transaction_code: null, purpose });
+    // Synthetic booking texts of a depot's settlement account.
+    expect(c("-4.50", "VERWALTUNGSVERGUETUNG WKN AAA111")).toBeNull();
+    expect(c("-2.10", "STEUER VORABPAUSCHALE ISIN DE000000AAA1")).toBeNull();
+    expect(c("12.40", "ERTRAEGNISGUTSCHRIFT WKN AAA111")).toBe("dividend");
+    expect(c("-12.40", "AUSSCHUETTUNG STORNO WKN AAA111")).toBeNull();
+    // A trade's wording decides even next to a fee word.
+    expect(c("-1000.00", "WERTPAPIERABRECHNUNG KAUF INKL. ENTGELT WKN AAA111")).toBe("buy");
+    expect(c("990.00", "WERTPAPIERABRECHNUNG VERKAUF WKN AAA111")).toBe("sell");
+  });
+
   it("skips zero/non-numeric amounts", () => {
     expect(
       classifySecuTransaction({ amount: "0.00", transaction_code: null }),
