@@ -160,9 +160,6 @@ final class TripNearbyRoutesModel {
 
     private let planId: Int
     private let legIndex: Int
-    /// Told after every route that went in, so the screen behind shows
-    /// it without a reload of the trip.
-    private let onChanged: (() -> Void)?
 
     init(planId: Int, legIndex: Int) {
         self.planId = planId
@@ -222,6 +219,9 @@ final class TripNearbyRoutesModel {
 
 struct TripNearbyRoutesView: View {
     @State private var model: TripNearbyRoutesModel
+    /// Told after every route that went in, so the screen behind shows
+    /// it without a reload of the trip.
+    private let onChanged: (() -> Void)?
     /// Carried alongside the model so the course screen can ask for
     /// the file: the export goes through the plan, never through a
     /// region and a relation id somebody names.
