@@ -749,6 +749,11 @@ struct TripPlanDayView: View {
     /// and nothing else: every screen behind the day — the pool, the
     /// map, moving a spot — is scoped to the leg on screen, so the
     /// other two were unreachable rather than merely unshown.
+    /// One height for a chip in either strip: the legs are one line,
+    /// the days two, and two strips of different heights over one
+    /// screen read as two different controls.
+    private static let pickerChipHeight: CGFloat = 48
+
     private var legPicker: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -765,17 +770,17 @@ struct TripPlanDayView: View {
                                     Image(systemName: "map.circle").font(.caption2)
                                 }
                             }
-                            .padding(.vertical, 8)
                             .padding(.horizontal, 14)
+                            // As tall as a day's chip, so the two
+                            // strips line up; well past the 44 pt
+                            // Apple asks of a control.
+                            .frame(minHeight: Self.pickerChipHeight)
                             .background(
                                 leg.position == viewModel.legIndex
                                     ? AnyShapeStyle(.tint.opacity(0.15))
                                     : AnyShapeStyle(.quaternary.opacity(0.35)),
                                 in: .capsule,
                             )
-                            // The capsule is what is seen; the 44 pt
-                            // Apple asks of a control are what is hit.
-                            .frame(minHeight: 44)
                             .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
@@ -788,21 +793,25 @@ struct TripPlanDayView: View {
             // strip rather than scrolled along with it: on a trip with
             // six legs the way in was off the right edge of the
             // screen, and a pencil needs no word next to it.
-            Divider().frame(height: 24)
+            Divider().frame(height: 28)
             Button {
                 editingStructure = true
             } label: {
+                // A control, not a glyph: as tall as the chips, bold
+                // enough to read at a glance, on its own disc.
                 Image(systemName: "pencil")
-                    .font(.body.weight(.medium))
-                    .frame(width: 44, height: 44)
+                    .font(.title3.weight(.semibold))
+                    .frame(width: Self.pickerChipHeight, height: Self.pickerChipHeight)
+                    .background(.quaternary.opacity(0.35), in: .circle)
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .padding(.trailing, 4)
+            .padding(.leading, 8)
+            .padding(.trailing, 12)
             .accessibilityLabel("Etappen")
             .accessibilityHint("Etappen und Weiterreisen hinzufügen, ändern, entfernen")
         }
-        .padding(.top, 2)
+        .padding(.vertical, 6)
         .background(.bar)
         .sheet(isPresented: $editingStructure) {
             NavigationStack {
@@ -835,24 +844,27 @@ struct TripPlanDayView: View {
                             // The date, once the trip has one. Without
                             // it "Tag 3" is a number the traveller has
                             // to work out from the calendar.
-                            if let date = leg.date(ofDayIndex: day.dayIndex) {
-                                Text(date)
-                                    .font(.caption2)
-                                    .foregroundStyle(
-                                        leg.isToday(dayIndex: day.dayIndex)
-                                            ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            // Two lines, always: the date and, beside
+                            // it, the mark of a day still at trip
+                            // resolution (§4.3) — so an empty-looking
+                            // day never reads as a day with nothing to
+                            // do, and no chip is taller than the next.
+                            HStack(spacing: 3) {
+                                if let date = leg.date(ofDayIndex: day.dayIndex) {
+                                    Text(date)
+                                        .foregroundStyle(
+                                            leg.isToday(dayIndex: day.dayIndex)
+                                                ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                                }
+                                if !day.detailed, !leg.isTransit {
+                                    Image(systemName: "circle.dashed")
+                                        .foregroundStyle(.secondary)
+                                }
                             }
-                            // A day still at trip resolution is marked, so
-                            // an empty-looking day never reads as a day
-                            // with nothing to do (§4.3).
-                            if !day.detailed, !leg.isTransit {
-                                Image(systemName: "circle.dashed")
-                                    .font(.caption2)
-                            }
+                            .font(.caption2)
                         }
-                        .frame(minWidth: 56)
-                        .padding(.vertical, 6)
                         .padding(.horizontal, 10)
+                        .frame(minWidth: 56, minHeight: Self.pickerChipHeight)
                         .background(
                             day.dayIndex == viewModel.dayIndex
                                 ? AnyShapeStyle(.tint.opacity(0.15))
