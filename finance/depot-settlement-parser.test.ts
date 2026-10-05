@@ -11,6 +11,7 @@ import {
   settlementBlock,
   SETTLEMENT_CANDIDATE_PATTERN,
 } from "./depot-settlement-parser";
+import { nameNearerIdentifier } from "./depot-settlement-reader";
 
 // Synthetic settlement texts in the layouts German brokers print. Every
 // identifier, name and number here is invented.
@@ -660,5 +661,64 @@ Zahltag 15.03.2026
 Betrag zu Ihren Gunsten EUR 20,00`)!;
     expect(payout.accumulation).toBe(false);
     expect(payout.kind).toBe("dividend");
+  });
+});
+
+describe("security name on a tax statement", () => {
+  // Synthetic: the name sits on the identifier line; a table further down
+  // heads a line with a bare "Wertpapier".
+  const TAX = `Beispielbank AG
+Steuerliche Behandlung: Dividende vom 03.06.2026
+Stk.   Stk. 40 ALPHA INDUSTRIES AG , WKN / ISIN: AAA111 / DE000000AAA1
+Zu Ihren Gunsten vor Steuern: EUR 52,40
+abgeführte Steuern EUR -6,91
+Zu Ihren Gunsten nach Steuern: EUR 45,49
+Wertpapier
+Beispielhinweis zur Verrechnung`;
+
+  it("reads the name between the quantity and the identifiers", () => {
+    expect(inspectSettlement(TAX)!.name).toBe("ALPHA INDUSTRIES AG");
+  });
+});
+
+describe("nameNearerIdentifier", () => {
+  const TEXT = `Kopf
+Stk. 40 ALPHA INDUSTRIES AG , ISIN: DE000000AAA1
+Steuer
+Wertpapier
+Beispielhinweis zur Verrechnung`;
+
+  it("takes the name printed nearer the identifier", () => {
+    expect(nameNearerIdentifier(TEXT, "DE000000AAA1", "Beispielhinweis zur Verrechnung", "ALPHA INDUSTRIES AG")).toBe("llm");
+    expect(nameNearerIdentifier(TEXT, "DE000000AAA1", "ALPHA INDUSTRIES AG", "Beispielhinweis zur Verrechnung")).toBe("rules");
+  });
+
+  it("does not take a name the text does not print", () => {
+    expect(nameNearerIdentifier(TEXT, "DE000000AAA1", "ALPHA INDUSTRIES AG", "Erfundene Holding AG")).toBe("rules");
+  });
+});
+
+describe("parseSettlement — exchange fees listed after the fees' total", () => {
+  // Synthetic: the bank's own fees with their total, then the exchange's
+  // variable fees on their own line.
+  const SALE = `Wertpapierverkauf
+Stück 30 Alpha Industries AG ISIN DE000000AAA1
+Geschäftstag : 14.07.2026
+Kurswert : EUR 3.000,00
+Provision : EUR 4,00-
+Börsenplatzabhäng. Entgelt : EUR 1,00-
+Summe Entgelte : EUR 5,00-
+Variable Börsenspesen : EUR 0,75-
+Ausmachender Betrag EUR 2.994,25`;
+
+  it("adds them to the total, so the figures add up", () => {
+    const s = parseSettlement(SALE)!;
+    expect(s.fees).toBe(5.75);
+    expect(s.net).toBe(2994.25);
+  });
+
+  it("counts them without a printed total too", () => {
+    const s = parseSettlement(SALE.replace("Summe Entgelte : EUR 5,00-\n", ""))!;
+    expect(s.fees).toBe(5.75);
   });
 });

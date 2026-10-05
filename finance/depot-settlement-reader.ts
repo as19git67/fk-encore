@@ -55,6 +55,8 @@ export interface SettlementReading {
   llmSaysSettlement: boolean | null;
   merge: MergeResult;
   llmStatus: LlmStatus;
+  /** Which source's name the text puts nearer the identifier, when they differ. */
+  nameFrom: "rules" | "llm" | null;
 }
 
 /**
@@ -106,6 +108,48 @@ export function llmInEuro(llm: SettlementValues, fx: ExchangeRate | null): Settl
     tax: conv(llm.tax, 2),
     net: netIsEuro ? llm.net : conv(llm.net, 2),
     currency: "EUR",
+  };
+}
+
+/**
+ * Rules and model name the security differently. No check reaches the
+ * name, so the text decides: the one printed nearer the security's
+ * identifier (ISIN or WKN) is its name — the other came from a table or an
+ * address block further away. A name not in the text at all loses; a tie
+ * stays with the rules.
+ */
+export function nameNearerIdentifier(
+  text: string | null,
+  identifier: string | null,
+  rulesName: string | null,
+  llmName: string | null,
+): "rules" | "llm" | null {
+  if (!text || !identifier || !rulesName || !llmName) return null;
+  const lines = text.toLowerCase().split("\n").map((l) => l.replace(/\s+/g, " "));
+  const idLine = lines.findIndex((l) => l.includes(identifier.toLowerCase()));
+  if (idLine < 0) return null;
+  const distance = (name: string): number => {
+    const n = name.toLowerCase().replace(/\s+/g, " ").trim();
+    let best = Infinity;
+    lines.forEach((l, i) => {
+      if (l.includes(n)) best = Math.min(best, Math.abs(i - idLine));
+    });
+    return best;
+  };
+  const r = distance(rulesName);
+  const l = distance(llmName);
+  if (l < r) return "llm";
+  return r < Infinity ? "rules" : null;
+}
+
+function withNameFrom(merge: MergeResult, from: "rules" | "llm" | null): MergeResult {
+  if (from !== "llm") return merge;
+  const field = merge.fields.find((f) => f.field === "name");
+  if (!field || !field.disagree || field.llm === null) return merge;
+  return {
+    ...merge,
+    values: { ...merge.values, name: String(field.llm) },
+    fields: merge.fields.map((f) => (f.field === "name" ? { ...f, source: "llm" } : f)),
   };
 }
 
@@ -182,7 +226,19 @@ export async function readSettlement(
   }
 
   if (llm) llm = llmInEuro(llm, rules?.fx ?? null);
-  return { rules, llm, llmSaysSettlement, merge: mergeSettlement(fromRules, llm), llmStatus };
+  // A tax statement and a notice of accumulated income print no Kurswert,
+  // price or charges; what the model reads there (a tax base, a per-share
+  // amount) means something else and would only stand in for a gap.
+  if (llm && (rules?.taxStatement || rules?.accumulation)) llm = { ...llm, gross: rules.gross, price: null, fees: null };
+  const nameFrom = nameNearerIdentifier(text, rules?.isin ?? rules?.wkn ?? null, rules?.name ?? null, llm?.name ?? null);
+  return {
+    rules,
+    llm,
+    llmSaysSettlement,
+    merge: withNameFrom(mergeSettlement(fromRules, llm), nameFrom),
+    llmStatus,
+    nameFrom,
+  };
 }
 
 /**
@@ -191,5 +247,5 @@ export async function readSettlement(
  * nothing is asked.
  */
 export function rereadAgainstBooking(r: SettlementReading, bookingNet: number): SettlementReading {
-  return { ...r, merge: mergeSettlement(rulesValues(r.rules), r.llm, new Date(), bookingNet) };
+  return { ...r, merge: withNameFrom(mergeSettlement(rulesValues(r.rules), r.llm, new Date(), bookingNet), r.nameFrom) };
 }
