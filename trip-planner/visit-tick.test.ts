@@ -60,7 +60,7 @@ beforeEach(async () => {
   clearRouterCache();
   const [user] = await db
     .insert(users)
-    .values({ email: `tick-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `tick-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   ownerId = user.id;
   vi.mocked(getAuthData).mockReturnValue({

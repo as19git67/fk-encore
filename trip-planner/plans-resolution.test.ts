@@ -72,7 +72,7 @@ beforeEach(async () => {
   clearRouterCache();
   const [user] = await db
     .insert(users)
-    .values({ email: `res-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `res-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   vi.mocked(getAuthData).mockReturnValue({
     userID: String(user.id),
@@ -251,7 +251,7 @@ describe("detailing a day on the eve", () => {
     const { plan } = await createTripPlan({ anchor: ANCHOR, days: 4 });
     const [other] = await db
       .insert(users)
-      .values({ email: `other-${Date.now()}@test.invalid`, name: "Other", password_hash: "x" })
+      .values({ email: `other-${crypto.randomUUID()}@test.invalid`, name: "Other", password_hash: "x" })
       .returning({ id: users.id });
     vi.mocked(getAuthData).mockReturnValue({
       userID: String(other.id),
@@ -378,7 +378,7 @@ describe("ticking a spot off", () => {
 
     const [other] = await db
       .insert(users)
-      .values({ email: `other-${Date.now()}@test.invalid`, name: "Other", password_hash: "x" })
+      .values({ email: `other-${crypto.randomUUID()}@test.invalid`, name: "Other", password_hash: "x" })
       .returning({ id: users.id });
     vi.mocked(getAuthData).mockReturnValue({
       userID: String(other.id),

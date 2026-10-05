@@ -303,7 +303,7 @@ describe("the evening before", () => {
     const [stranger] = await db
       .insert(users)
       .values({
-        email: `fremd-${Date.now()}@test.invalid`,
+        email: `fremd-${crypto.randomUUID()}@test.invalid`,
         name: "Fremde",
         password_hash: "x",
       })

@@ -84,7 +84,7 @@ beforeEach(async () => {
   clearRouterCache();
   const [user] = await db
     .insert(users)
-    .values({ email: `daytrip-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `daytrip-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   ownerId = user.id;
   vi.mocked(getAuthData).mockReturnValue({
@@ -274,7 +274,7 @@ describe("the frame around it", () => {
     const p = await thinPlan();
     const [other] = await db
       .insert(users)
-      .values({ email: `other-${Date.now()}@test.invalid`, name: "Other", password_hash: "x" })
+      .values({ email: `other-${crypto.randomUUID()}@test.invalid`, name: "Other", password_hash: "x" })
       .returning({ id: users.id });
     vi.mocked(getAuthData).mockReturnValue({
       userID: String(other.id),

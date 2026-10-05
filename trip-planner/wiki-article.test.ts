@@ -93,7 +93,7 @@ beforeEach(async () => {
   translated.length = 0;
   const [user] = await db
     .insert(users)
-    .values({ email: `wiki-${Date.now()}@test.invalid`, name: "Reader", password_hash: "x" })
+    .values({ email: `wiki-${crypto.randomUUID()}@test.invalid`, name: "Reader", password_hash: "x" })
     .returning({ id: users.id });
   vi.mocked(getAuthData).mockReturnValue({ userID: String(user.id), permissions: ["photos.view"] });
   wiki = new FakeWikipedia();

@@ -391,7 +391,7 @@ describe("deleting a trip", () => {
 
   it("tells somebody who was never on it that there is nothing there", async () => {
     const plan = await plannedTrip();
-    const strangerId = await makeUser(`fremd-${Date.now()}@test.invalid`, "Fremde");
+    const strangerId = await makeUser(`fremd-${crypto.randomUUID()}@test.invalid`, "Fremde");
     actAs(strangerId);
     await expect(deleteTripPlan({ planId: plan.id })).rejects.toThrow(/plan not found/);
   });

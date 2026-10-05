@@ -33,7 +33,7 @@ beforeEach(async () => {
   await db.delete(ideaPoolShares);
   const [user] = await db
     .insert(users)
-    .values({ email: `edit-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `edit-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   userId = user.id;
   vi.mocked(getAuthData).mockReturnValue({
@@ -141,7 +141,7 @@ describe("PATCH /trip-planner/ideas/:id", () => {
     const entry = await collectSomething();
     const [stranger] = await db
       .insert(users)
-      .values({ email: `stranger-${Date.now()}@test.invalid`, name: "X", password_hash: "x" })
+      .values({ email: `stranger-${crypto.randomUUID()}@test.invalid`, name: "X", password_hash: "x" })
       .returning({ id: users.id });
     vi.mocked(getAuthData).mockReturnValue({
       userID: String(stranger.id),
@@ -158,7 +158,7 @@ describe("PATCH /trip-planner/ideas/:id", () => {
     const entry = await collectSomething();
     const [friend] = await db
       .insert(users)
-      .values({ email: `friend-${Date.now()}@test.invalid`, name: "Anna", password_hash: "x" })
+      .values({ email: `friend-${crypto.randomUUID()}@test.invalid`, name: "Anna", password_hash: "x" })
       .returning({ id: users.id });
     await db.insert(ideaPoolShares).values({ owner_id: userId, user_id: friend.id });
     vi.mocked(getAuthData).mockReturnValue({

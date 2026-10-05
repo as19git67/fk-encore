@@ -65,7 +65,7 @@ beforeEach(async () => {
   clearRouterCache();
   const [user] = await db
     .insert(users)
-    .values({ email: `wire-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `wire-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   userId = user.id;
   vi.mocked(getAuthData).mockReturnValue({
@@ -117,7 +117,7 @@ describe("what the share extension decodes", () => {
   it("names a shared collection's owner, because the label is built from it", async () => {
     const [other] = await db
       .insert(users)
-      .values({ email: `other-${Date.now()}@test.invalid`, name: "Anna", password_hash: "x" })
+      .values({ email: `other-${crypto.randomUUID()}@test.invalid`, name: "Anna", password_hash: "x" })
       .returning({ id: users.id });
     await db.insert(ideaPoolShares).values({ owner_id: other.id, user_id: userId });
 

@@ -60,7 +60,7 @@ beforeEach(async () => {
   clearRouterCache();
   const [user] = await db
     .insert(users)
-    .values({ email: `visit-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `visit-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   ownerId = user.id;
   vi.mocked(getAuthData).mockReturnValue({
@@ -265,7 +265,7 @@ describe("POST /trip-planner/plans/:planId/visits", () => {
     const { plan, stops } = await planWithStops();
     const [other] = await db
       .insert(users)
-      .values({ email: `other-${Date.now()}@test.invalid`, name: "Other", password_hash: "x" })
+      .values({ email: `other-${crypto.randomUUID()}@test.invalid`, name: "Other", password_hash: "x" })
       .returning({ id: users.id });
     vi.mocked(getAuthData).mockReturnValue({
       userID: String(other.id),
@@ -330,7 +330,7 @@ describe('answering „wart ihr hier?“', () => {
 
     const [other] = await db
       .insert(users)
-      .values({ email: `other-${Date.now()}@test.invalid`, name: "Other", password_hash: "x" })
+      .values({ email: `other-${crypto.randomUUID()}@test.invalid`, name: "Other", password_hash: "x" })
       .returning({ id: users.id });
     vi.mocked(getAuthData).mockReturnValue({
       userID: String(other.id),

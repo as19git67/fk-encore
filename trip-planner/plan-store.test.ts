@@ -64,7 +64,7 @@ beforeEach(async () => {
   await db.delete(tripPlans);
   const [user] = await db
     .insert(users)
-    .values({ email: `planner-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `planner-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   ownerId = user.id;
 });
@@ -142,7 +142,7 @@ describe("plan persistence", () => {
     });
     const [other] = await db
       .insert(users)
-      .values({ email: `other-${Date.now()}@test.invalid`, name: "Other", password_hash: "x" })
+      .values({ email: `other-${crypto.randomUUID()}@test.invalid`, name: "Other", password_hash: "x" })
       .returning({ id: users.id });
 
     expect(await loadPlan(planId, other.id)).toBeNull();

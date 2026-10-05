@@ -100,7 +100,7 @@ beforeEach(async () => {
   requested.slugs.length = 0;
   const [user] = await db
     .insert(users)
-    .values({ email: `shore-${Date.now()}@test.invalid`, name: "P", password_hash: "x" })
+    .values({ email: `shore-${crypto.randomUUID()}@test.invalid`, name: "P", password_hash: "x" })
     .returning({ id: users.id });
   vi.mocked(getAuthData).mockReturnValue({
     userID: String(user.id),

@@ -60,6 +60,28 @@ describe("reconcilePosition", () => {
     expect(r).toEqual({ gaps: [], unverifiable: 0 });
   });
 
+  it("takes a trade dated a few days after the snapshot that shows it (value date)", () => {
+    const r = reconcilePosition(1, "K", [p("2026-03-02", 10), p("2026-03-04", 15), p("2026-03-06", 15)], [
+      // Booked on the 1st, valued on the 5th: the snapshot of the 4th already shows it.
+      { executed_at: "2026-03-05", kind: "buy", amount: 5 },
+    ]);
+    expect(r.gaps).toEqual([]);
+  });
+
+  it("does not take a later trade that does not make the change add up", () => {
+    const r = reconcilePosition(1, "K", [p("2026-03-02", 10), p("2026-03-04", 15)], [
+      { executed_at: "2026-03-05", kind: "buy", amount: 3 },
+    ]);
+    expect(r.gaps.map((g) => g.unexplained)).toEqual(["5.00000000"]);
+  });
+
+  it("does not reach further than the lookahead", () => {
+    const r = reconcilePosition(1, "K", [p("2026-03-02", 10), p("2026-03-04", 15)], [
+      { executed_at: "2026-03-20", kind: "buy", amount: 5 },
+    ]);
+    expect(r.gaps).toHaveLength(1);
+  });
+
   it("hands each trade to the first change after it only once", () => {
     const r = reconcilePosition(
       1,

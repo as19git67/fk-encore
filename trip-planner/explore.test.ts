@@ -70,7 +70,7 @@ beforeEach(async () => {
   clearRouterCache();
   const [user] = await db
     .insert(users)
-    .values({ email: `explore-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `explore-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   userId = user.id;
   vi.mocked(getAuthData).mockReturnValue({
@@ -170,7 +170,7 @@ describe("POST /trip-planner/explore", () => {
   it("marks against a shared collection when one is named", async () => {
     const [other] = await db
       .insert(users)
-      .values({ email: `other-${Date.now()}@test.invalid`, name: "Anna", password_hash: "x" })
+      .values({ email: `other-${crypto.randomUUID()}@test.invalid`, name: "Anna", password_hash: "x" })
       .returning({ id: users.id });
     await db.insert(ideaPoolShares).values({ owner_id: other.id, user_id: userId });
     await db.insert(ideaPool).values({
@@ -192,7 +192,7 @@ describe("POST /trip-planner/explore", () => {
   it("does not admit a collection nobody let you into", async () => {
     const [stranger] = await db
       .insert(users)
-      .values({ email: `stranger-${Date.now()}@test.invalid`, name: "X", password_hash: "x" })
+      .values({ email: `stranger-${crypto.randomUUID()}@test.invalid`, name: "X", password_hash: "x" })
       .returning({ id: users.id });
     geo.setSearchSpots("nom_toscana", [spot(1, nearby(300), "Museo Civico")]);
 
