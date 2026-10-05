@@ -1439,7 +1439,9 @@ struct TripPlanDayView: View {
         if let leg = viewModel.leg {
             if leg.pool.isEmpty {
                 NavigationLink {
-                    TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position)
+                    TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position) {
+                        Task { await viewModel.load() }
+                    }
                 } label: {
                     Label("Ort suchen", systemImage: "magnifyingglass")
                         .font(.footnote)

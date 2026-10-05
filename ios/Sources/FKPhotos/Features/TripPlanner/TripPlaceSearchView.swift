@@ -13,10 +13,15 @@ import SwiftUI
 /// and "eine Region war nicht erreichbar" are different answers.
 struct TripPlaceSearchView: View {
     @State private var model: TripPlaceSearchViewModel
+    /// Told after every spot that went in, so the screen behind — the
+    /// leg's candidate count, the pool, the ballot — shows it at once
+    /// rather than after the next reload of the trip.
+    private let onChanged: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
-    init(planId: Int, legIndex: Int? = nil) {
+    init(planId: Int, legIndex: Int? = nil, onChanged: (() -> Void)? = nil) {
         _model = State(initialValue: TripPlaceSearchViewModel(planId: planId, legIndex: legIndex))
+        self.onChanged = onChanged
     }
 
     var body: some View {
@@ -103,7 +108,10 @@ struct TripPlaceSearchView: View {
                     .foregroundStyle(.green)
             } else {
                 Button {
-                    Task { await model.add(place) }
+                    Task {
+                        await model.add(place)
+                        if model.added[place.osmRef] != nil { onChanged?() }
+                    }
                 } label: {
                     if model.addingRef == place.osmRef {
                         HStack { ProgressView(); Text("Wird übernommen…") }

@@ -103,10 +103,14 @@ final class TripRouteEntryModel {
 
 struct TripRouteEntryView: View {
     @State private var model: TripRouteEntryModel
+    /// Told once the route is in the pool, so the screen behind shows
+    /// it without a reload of the trip.
+    private let onChanged: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
-    init(planId: Int, legIndex: Int? = nil) {
+    init(planId: Int, legIndex: Int? = nil, onChanged: (() -> Void)? = nil) {
         _model = State(initialValue: TripRouteEntryModel(planId: planId, legIndex: legIndex))
+        self.onChanged = onChanged
     }
 
     var body: some View {
@@ -170,7 +174,10 @@ struct TripRouteEntryView: View {
                 Button("Sichern") {
                     Task {
                         await model.save()
-                        if model.savedTo != nil { dismiss() }
+                        if model.savedTo != nil {
+                            onChanged?()
+                            dismiss()
+                        }
                     }
                 }
                 .disabled(!model.canSave)

@@ -160,6 +160,9 @@ final class TripNearbyRoutesModel {
 
     private let planId: Int
     private let legIndex: Int
+    /// Told after every route that went in, so the screen behind shows
+    /// it without a reload of the trip.
+    private let onChanged: (() -> Void)?
 
     init(planId: Int, legIndex: Int) {
         self.planId = planId
@@ -242,10 +245,17 @@ struct TripNearbyRoutesView: View {
     /// list is choosing, and the nearest is only the easiest.
     @AppStorage("trip.routes.order") private var orderRaw = TripRouteOrder.worth.rawValue
 
-    init(planId: Int, legIndex: Int) {
+    init(planId: Int, legIndex: Int, onChanged: (() -> Void)? = nil) {
         self.planId = planId
         self.legIndex = legIndex
+        self.onChanged = onChanged
         _model = State(initialValue: TripNearbyRoutesModel(planId: planId, legIndex: legIndex))
+    }
+
+    /// Taking a route, and saying so to the screen behind when it worked.
+    private func take(_ route: TripNearbyRoute) async {
+        await model.take(route)
+        if model.isInPool(route) { onChanged?() }
     }
 
     /// The picker's selection, which also reloads.
@@ -439,7 +449,7 @@ struct TripNearbyRoutesView: View {
     /// spell twice.
     private func takeAction(for route: TripNearbyRoute) -> (() async -> Void)? {
         if model.isInPool(route) { return nil }
-        return { await model.take(route) }
+        return { await take(route) }
     }
 
     @ViewBuilder
@@ -502,7 +512,7 @@ struct TripNearbyRoutesView: View {
                     .foregroundStyle(.green)
             } else {
                 Button {
-                    Task { await model.take(route) }
+                    Task { await take(route) }
                 } label: {
                     if model.takingRef == route.osmRef {
                         HStack { ProgressView(); Text("Wird übernommen…") }
