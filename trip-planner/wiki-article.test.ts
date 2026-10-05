@@ -13,6 +13,7 @@ import {
   buildTranslationPrompt,
   clearArticleWork,
   clip,
+  keepLanguagesOf,
   MAX_ARTICLE_PHOTOS,
   spotArticle,
   splitForTranslation,
@@ -35,6 +36,14 @@ class FakeWikipedia implements WikipediaClient {
   async article(ref: ArticleRef): Promise<WikipediaArticle | null> {
     this.calls.push(`${ref.lang}:${ref.title}`);
     return this.articles.get(`${ref.lang}:${ref.title}`) ?? null;
+  }
+
+  revisionFails = false;
+
+  async revision(ref: ArticleRef): Promise<number | null> {
+    this.calls.push(`rev?${ref.lang}:${ref.title}`);
+    if (this.revisionFails) throw new Error("wikipedia down");
+    return this.articles.get(`${ref.lang}:${ref.title}`)?.revision ?? null;
   }
 }
 
@@ -59,6 +68,7 @@ function article(lang: string, title: string, lead: string): WikipediaArticle {
   return {
     lang, title,
     pageUrl: `https://${lang}.wikipedia.org/wiki/${title.replace(/ /g, "_")}`,
+    revision: 100,
     description: lang === "de" ? "Kirche in Musterstadt" : "chiesa di Esempio",
     sections: [
       { heading: null, level: 1, text: lead },
@@ -134,6 +144,9 @@ describe("the article behind a spot", () => {
     expect(done.sections.map((s) => s.heading)).toEqual([null, "[de] Storia"]);
     expect(done.sections[0].text).toBe("[de] La Chiesa di Esempio è una chiesa.");
     expect(done.description).toBe("[de] chiesa di Esempio");
+    // The text as written stays with it, for the reader who wants it.
+    expect(done.original).toMatchObject({ language: "it", description: "chiesa di Esempio" });
+    expect(done.original?.sections[0].text).toBe("La Chiesa di Esempio è una chiesa.");
 
     const cached = await spotArticle({ url }, { wiki, commons, translate });
     expect(cached.translation).toBe("done");
@@ -149,6 +162,25 @@ describe("the article behind a spot", () => {
     expect(res.sections[0].text).toBe("La Chiesa di Esempio è una chiesa.");
   });
 
+  it("leaves a language the reader understands as it is, and translates it for the next reader", async () => {
+    const url = "https://it.wikipedia.org/wiki/Chiesa_di_Esempio";
+    const kept = await spotArticle({ url, keepLanguages: "en, it" }, { wiki, commons, translate });
+    expect(kept).toMatchObject({ language: "it", translation: "skipped" });
+    expect(kept.original).toBeUndefined();
+    expect(translated).toEqual([]);
+    // Again with the same setting: the cached answer, no work.
+    const again = await spotArticle({ url, keepLanguages: "it" }, { wiki, commons, translate });
+    expect(again.translation).toBe("skipped");
+    expect(wiki.calls.filter((c) => c === "it:Chiesa di Esempio")).toHaveLength(1);
+    // A reader without Italian gets the translation, from the cached text.
+    const done = await spotArticle({ url }, { wiki, commons, translate, awaitTranslation: true });
+    expect(done).toMatchObject({ language: "de", translation: "done" });
+    expect(wiki.calls.filter((c) => c === "it:Chiesa di Esempio")).toHaveLength(1);
+    // German is never "kept": there is nothing to translate.
+    const german = await spotArticle({ url: "https://de.wikipedia.org/wiki/Beispielkirche", keepLanguages: "de" }, { wiki, commons, translate });
+    expect(german.translation).toBe("none");
+  });
+
   it("is an article without pictures when Commons is down", async () => {
     commons.fail = true;
     const res = await spotArticle({ url: "https://de.wikipedia.org/wiki/Beispielkirche" }, { wiki, commons, translate });
@@ -161,6 +193,73 @@ describe("the article behind a spot", () => {
       .rejects.toMatchObject({ code: "invalid_argument" });
     await expect(spotArticle({ url: "https://de.wikipedia.org/wiki/Gibt_es_nicht" }, { wiki, commons, translate }))
       .rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("asks once a day whether the page changed, and fetches it again only then", async () => {
+    const url = "https://de.wikipedia.org/wiki/Beispielkirche";
+    let now = Date.UTC(2026, 9, 4, 8);
+    const clock = () => now;
+    const first = await spotArticle({ url }, { wiki, commons, translate, now: clock });
+    expect(first.revision).toBe(100);
+    expect(first.fetchedAt).toBe(new Date(now).toISOString());
+
+    // The same morning: no question to Wikipedia at all.
+    now += 2 * 60 * 60 * 1000;
+    await spotArticle({ url }, { wiki, commons, translate, now: clock });
+    expect(wiki.calls.filter((c) => c.startsWith("rev?"))).toHaveLength(0);
+
+    // Next day, unchanged: one cheap question, no fetch, and not asked
+    // again until tomorrow.
+    now += 24 * 60 * 60 * 1000;
+    const checked = await spotArticle({ url }, { wiki, commons, translate, now: clock });
+    expect(checked.checkedAt).toBe(new Date(now).toISOString());
+    expect(checked.fetchedAt).toBe(first.fetchedAt);
+    now += 60 * 60 * 1000;
+    await spotArticle({ url }, { wiki, commons, translate, now: clock });
+    expect(wiki.calls.filter((c) => c.startsWith("rev?"))).toHaveLength(1);
+    expect(wiki.calls.filter((c) => c === "de:Beispielkirche")).toHaveLength(1);
+
+    // Edited on Wikipedia: the reader still gets the kept text now,
+    // and the new one is there for the next opening.
+    now += 24 * 60 * 60 * 1000;
+    wiki.articles.set("de:Beispielkirche", { ...article("de", "Beispielkirche", "Die Beispielkirche ist eine Basilika."), revision: 101 });
+    const stale = await spotArticle({ url }, { wiki, commons, translate, now: clock, awaitTranslation: true });
+    expect(stale.sections[0].text).toBe("Die Beispielkirche ist eine Basilika.");
+    expect(stale.revision).toBe(101);
+    expect(stale.fetchedAt).toBe(new Date(now).toISOString());
+    const next = await spotArticle({ url }, { wiki, commons, translate, now: clock });
+    expect(next.sections[0].text).toBe("Die Beispielkirche ist eine Basilika.");
+  });
+
+  it("translates a changed foreign article anew, and keeps the old one meanwhile", async () => {
+    const url = "https://it.wikipedia.org/wiki/Chiesa_di_Esempio";
+    let now = Date.UTC(2026, 9, 4, 8);
+    const clock = () => now;
+    const done = await spotArticle({ url }, { wiki, commons, translate, now: clock, awaitTranslation: true });
+    expect(done.translation).toBe("done");
+
+    now += 2 * 24 * 60 * 60 * 1000;
+    wiki.articles.set("it:Chiesa di Esempio", { ...article("it", "Chiesa di Esempio", "La Chiesa di Esempio è una basilica."), revision: 7 });
+    const meanwhile = await spotArticle({ url }, { wiki, commons, translate, now: clock });
+    // The reader who opened it gets the finished translation, not a wait.
+    expect(meanwhile.translation).toBe("done");
+    expect(meanwhile.sections[0].text).toBe("[de] La Chiesa di Esempio è una chiesa.");
+    const fresh = await spotArticle({ url }, { wiki, commons, translate, now: clock, awaitTranslation: true });
+    expect(fresh.translation).toBe("done");
+    expect(fresh.sections[0].text).toBe("[de] La Chiesa di Esempio è una basilica.");
+    expect(fresh.original?.sections[0].text).toBe("La Chiesa di Esempio è una basilica.");
+  });
+
+  it("keeps the article when the revision check fails", async () => {
+    const url = "https://de.wikipedia.org/wiki/Beispielkirche";
+    let now = Date.UTC(2026, 9, 4, 8);
+    const clock = () => now;
+    await spotArticle({ url }, { wiki, commons, translate, now: clock });
+    now += 2 * 24 * 60 * 60 * 1000;
+    wiki.revisionFails = true;
+    const kept = await spotArticle({ url }, { wiki, commons, translate, now: clock });
+    expect(kept.sections[0].text).toBe("Die Beispielkirche ist eine Kirche.");
+    expect(kept.checkedAt).toBeUndefined();
   });
 
   it("forgets an article after a month", async () => {
@@ -203,6 +302,12 @@ describe("the pieces", () => {
     expect(prompt).toContain("ins Deutsche");
     expect(prompt).toContain('{"text"');
     expect(prompt).toContain("Testo.");
+  });
+
+  it("reads the languages the reader understands", () => {
+    expect([...keepLanguagesOf("en, IT,,pt-br, nonsense!")]).toEqual(["en", "it", "pt-br"]);
+    expect(keepLanguagesOf(undefined).size).toBe(0);
+    expect(keepLanguagesOf("de").size).toBe(0);
   });
 
   it("caps the strip", () => {

@@ -1210,6 +1210,14 @@ struct TripSpotArticle: Codable, Sendable {
         var id: String { "\(level)-\(heading ?? "")-\(text.prefix(40))" }
     }
 
+    /// The text as written, kept beside a translation so the reader
+    /// can switch back.
+    struct Original: Codable, Sendable {
+        let language: String
+        let description: String?
+        let sections: [Section]
+    }
+
     let title: String
     /// The language of the text shown — "de" after a translation too.
     let language: String
@@ -1219,15 +1227,27 @@ struct TripSpotArticle: Codable, Sendable {
     let description: String?
     let sections: [Section]
     let truncated: Bool
-    /// "none", "pending", "done" or "failed".
+    /// "none", "pending", "done", "failed" or "skipped" (a language the
+    /// reader said they can read).
     let translation: String
+    var original: Original? = nil
     let photos: [TripRoutePhoto]
     let attribution: String
     let license: String
+    /// When the text was read from Wikipedia, ISO 8601. Optional so an
+    /// answer from an older server still decodes.
+    var fetchedAt: String? = nil
+
+    /// "Stand: 5. Okt. 2026", or nil without a date.
+    var fetchedLine: String? {
+        guard let fetchedAt, let date = Self.parseTimestamp(fetchedAt) else { return nil }
+        return "Stand: " + date.formatted(date: .abbreviated, time: .omitted)
+    }
 
     var isPending: Bool { translation == "pending" }
     var isTranslated: Bool { translation == "done" }
     var translationFailed: Bool { translation == "failed" }
+    var isSkipped: Bool { translation == "skipped" }
     /// Shown in a language other than German — before or without a translation.
     var isForeign: Bool { language != "de" }
 }
@@ -1459,4 +1479,17 @@ struct TripDismissDayTripResponse: Codable, Sendable {
     let legIndex: Int
     let key: String
     let dismissed: Bool
+}
+
+extension TripSpotArticle {
+    /// Reads the server's timestamps, with or without fractions of a
+    /// second — Node writes them, Postgres does not.
+    static func parseTimestamp(_ text: String) -> Date? {
+        let withFractions = ISO8601DateFormatter()
+        withFractions.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFractions.date(from: text) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: text)
+    }
 }

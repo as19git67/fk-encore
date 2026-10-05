@@ -22,6 +22,11 @@ struct TripArticleView: View {
     @State private var errorMessage: String?
     @State private var isLoading = true
     @State private var shownPhoto: TripRoutePhoto?
+    /// The text as written instead of the translation — the reader's
+    /// choice on this article; first set from the languages they said
+    /// they can read.
+    @State private var showOriginal = false
+    @AppStorage(TripArticlePreferences.keepLanguagesKey) private var keptLanguages: String = ""
 
     /// How often to ask while the translation runs, and for how long.
     private static let pollSeconds: UInt64 = 6
@@ -57,19 +62,32 @@ struct TripArticleView: View {
     }
 
     private func content(_ article: TripSpotArticle) -> some View {
-        ScrollView {
+        // What is on screen: the translation, or the text as written
+        // when the reader switched to it.
+        let original = showOriginal ? article.original : nil
+        let description = original.map(\.description) ?? article.description
+        let sections = original?.sections ?? article.sections
+        return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if !article.photos.isEmpty {
                     photoStrip(article.photos)
                 }
                 VStack(alignment: .leading, spacing: 12) {
-                    if let description = article.description {
+                    if let description {
                         Text(description)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
+                    if article.original != nil {
+                        // Both are there; which one is the reader's call.
+                        Picker("Sprache", selection: $showOriginal) {
+                            Text("Deutsch").tag(false)
+                            Text("Original (\(languageName(article.sourceLanguage)))").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                    }
                     translationBanner(article)
-                    ForEach(article.sections) { section in
+                    ForEach(sections) { section in
                         VStack(alignment: .leading, spacing: 6) {
                             if let heading = section.heading {
                                 Text(heading)
@@ -111,6 +129,10 @@ struct TripArticleView: View {
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 10))
+        } else if article.isSkipped {
+            Text("Nicht übersetzt — \(languageName(article.sourceLanguage)) steht in deinen Sprachen.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         } else if article.translationFailed {
             Label("Die Übersetzung ist gerade nicht möglich — der Artikel auf "
                   + "\(languageName(article.sourceLanguage)). Auf Wikipedia bietet iOS „Übersetzen“ an.",
@@ -126,7 +148,7 @@ struct TripArticleView: View {
     private func attribution(_ article: TripSpotArticle) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Divider().padding(.vertical, 6)
-            Text(article.isTranslated
+            Text(article.isTranslated && !showOriginal
                  ? "\(article.attribution) · maschinell übersetzt aus dem "
                    + "\(languageName(article.sourceLanguage, dative: true)) durch den eigenen KI-Dienst"
                  : article.attribution)
@@ -135,6 +157,14 @@ struct TripArticleView: View {
             Text("Text und Bilder unter \(article.license); Fotos mit ihren Urhebern am Bild.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+            // From when the text is: the server asks Wikipedia once a
+            // day whether the page changed, and fetches it again when
+            // it did.
+            if let line = article.fetchedLine {
+                Text(line)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 
@@ -189,6 +219,11 @@ struct TripArticleView: View {
         do {
             var current: TripSpotArticle = try await fetch()
             article = current
+            // A language they said they can read opens as written,
+            // even where a translation is already there from another
+            // reader; the switch above is one tap away either way.
+            showOriginal = current.original != nil
+                && TripArticlePreferences.codes(from: keptLanguages).contains(current.sourceLanguage)
             // A translation under way: ask again, quietly, until it is
             // there or it is clear it will not be.
             var rounds = 0
@@ -206,6 +241,9 @@ struct TripArticleView: View {
     }
 
     private func fetch() async throws -> TripSpotArticle {
-        try await APIClient.shared.get("/trip-planner/wikipedia/article", query: ["url": url.absoluteString])
+        var query = ["url": url.absoluteString]
+        let kept = TripArticlePreferences.stored(from: TripArticlePreferences.codes(from: keptLanguages))
+        if !kept.isEmpty { query["keepLanguages"] = kept }
+        return try await APIClient.shared.get("/trip-planner/wikipedia/article", query: query)
     }
 }

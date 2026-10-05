@@ -5959,7 +5959,25 @@ dem Blatt der Wünsche), über `GET /trip-planner/wikipedia/article?url=…`
    Hauptbild zuerst, ohne Flaggen, Karten, Wappen und Vektorgrafiken;
    Vorschau und Lizenz von Commons, der Fotograf am Bild.
 5. **Gesagt, jedes Mal:** Wikipedia, CC BY-SA 4.0, und dass eine Übersetzung
-   die einer Maschine ist. Einzelnachweise, Literatur, Weblinks und ihre
+   die einer Maschine ist.
+6. **Das Original bleibt.** Eine fertige Übersetzung trägt den Text, wie er
+   geschrieben ist, mit sich (`original`); im Artikel schaltet ein Segment
+   zwischen „Deutsch" und „Original (Italienisch)" um. In den
+   Reise-Einstellungen („Wikipedia-Artikel › Nicht übersetzen") nennt man die
+   Sprachen, die man lesen kann; die App schickt sie als `keepLanguages` mit,
+   der Server zeigt einen Artikel in einer davon als geschrieben
+   (`translation: "skipped"`) und übersetzt ihn erst, wenn ein Leser ohne
+   diese Sprache ihn öffnet — aus dem gespeicherten Text, ohne Wikipedia
+   erneut zu fragen.
+7. **Aktualisierungen kommen an.** Der Artikel trägt die Revisionsnummer
+   der Seite. Ist der gespeicherte Eintrag beim Öffnen älter als einen Tag,
+   fragt der Server Wikipedia nur nach dieser Nummer; nur eine geänderte
+   Nummer holt den Artikel neu und übersetzt ihn, wo nötig, erneut — im
+   Hintergrund, der Leser bekommt sofort den vorhandenen Text und beim
+   nächsten Öffnen den neuen. Eine fehlgeschlagene Prüfung ändert nichts;
+   der Monat bleibt als Obergrenze. Der Reader nennt „Stand: <Datum>".
+   Kein Cron-Lauf: der würde auch Artikel übersetzen, die niemand mehr
+   öffnet. Einzelnachweise, Literatur, Weblinks und ihre
    Entsprechungen in anderen Sprachen werden nicht gezeigt; ein gekürzter
    Artikel endet mit „Weiterlesen auf Wikipedia".
 
