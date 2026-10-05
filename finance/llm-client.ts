@@ -710,7 +710,27 @@ const SETTLEMENT_TEXT_LIMIT = 8_000;
  * statement states. Returns the raw JSON object; depot-settlement-merge.ts
  * validates it and checks it against the rule-based reading.
  */
-export async function extractSettlementValues(text: string): Promise<Record<string, unknown>> {
+/** What each field means on each kind of paper — told to the model once the rules know the kind. */
+const SETTLEMENT_PAPER_HINTS: Record<string, string> = {
+  trade:
+    "Der Beleg ist eine Wertpapierabrechnung (Kauf oder Verkauf): price ist der Ausführungskurs je Stück, " +
+    "gross der Kurswert, fees alle Entgelte einschließlich Börsen- und Fremdspesen, net der ausmachende Betrag.",
+  dividend:
+    "Der Beleg ist eine Dividenden- oder Ertragsgutschrift: price ist der Betrag je Stück, gross der Bruttobetrag, " +
+    "tax die einbehaltenen Steuern einschließlich Quellensteuer, net der gutgeschriebene Betrag; fees meist null.",
+  tax_statement:
+    "Der Beleg ist eine Steuermitteilung zu einer Buchung, die einen eigenen Beleg hat: gross ist der Betrag vor Steuern, " +
+    "net der Betrag nach Steuern, tax die abgeführten Steuern; price und fees sind null.",
+  accumulation:
+    "Der Beleg meldet eine Thesaurierung oder Vorabpauschale: ausgeschüttet wurde nichts. tax ist die tatsächlich " +
+    "abgeführte Steuer (0, wenn kein Steuerabzug erfolgte); price, gross, fees und net sind null.",
+};
+
+export async function extractSettlementValues(
+  text: string,
+  /** The kind of paper the rules recognised (see PaperType), when they did. */
+  paperType: string | null = null,
+): Promise<Record<string, unknown>> {
   const system =
     "Du liest Wertpapierabrechnungen (Kauf, Verkauf) und Dividenden-/Ertragsgutschriften deutscher Banken und Broker. " +
     "Antworte ausschließlich mit einem JSON-Objekt. Übernimm nur Werte, die wörtlich im Text stehen; erfinde nichts und rechne nichts aus. " +
@@ -733,6 +753,7 @@ export async function extractSettlementValues(text: string): Promise<Record<stri
     '- "net": der ausmachende Betrag bzw. Endbetrag, der dem Konto belastet oder gutgeschrieben wird; ' +
     'steht ein Betrag vor und einer nach Steuern, dann der nach Steuern\n' +
     '- "currency": Währung des ausmachenden Betrags (z. B. "EUR")\n\n' +
+    (paperType && SETTLEMENT_PAPER_HINTS[paperType] ? `${SETTLEMENT_PAPER_HINTS[paperType]}\n\n` : "") +
     `Text des Belegs:\n"""\n${text.slice(0, SETTLEMENT_TEXT_LIMIT)}\n"""`;
   const resp = await postJson<JsonPromptRequest, Record<string, unknown>>("/json-prompt", {
     prompt,

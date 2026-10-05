@@ -6,6 +6,7 @@ import {
   isPersonName,
   isUsableSettlement,
   parseGermanNumber,
+  paperTypeOf,
   parseSettlement,
   rejoinColumnAmounts,
   settlementBlock,
@@ -720,5 +721,68 @@ Ausmachender Betrag EUR 2.994,25`;
   it("counts them without a printed total too", () => {
     const s = parseSettlement(SALE.replace("Summe Entgelte : EUR 5,00-\n", ""))!;
     expect(s.fees).toBe(5.75);
+  });
+});
+
+describe("accumulated income — no tax, legal references, names", () => {
+  // Synthetic notice of a fund abroad: income kept, no tax deducted here.
+  const ABROAD = `Beispielbank AG
+Vermögensdepot
+0016
+Thesaurierung von Investmenterträgen
+Nominale Wertpapierbezeichnung ISIN
+Stück 12,5 BEISPIEL WELT FONDS DE000000AAA1
+Tag des Zuflusses 30.06.2026
+Thesaurierungsbetrag brutto 4,20 EUR
+Die Investmentgesellschaft hat ihren Sitz im Ausland. Somit kann kein Steuerabzug im Inland vorgenommen werden.
+Hinweis: Kirchensteuer nach § 51a EStG und Kapitalertragsteuer werden mit der Steuererklärung erhoben.`;
+
+  it("charges nothing when the notice says no tax was deducted", () => {
+    const s = inspectSettlement(ABROAD)!;
+    expect(s.accumulation).toBe(true);
+    expect(s.tax).toBe(0);
+    expect(s.net).toBe(0);
+  });
+
+  it("never reads a paragraph number as an amount", () => {
+    const s = inspectSettlement(ABROAD.replace(/Die Investmentgesellschaft[^\n]*\n/, ""))!;
+    expect(s.tax).toBeNull();
+  });
+
+  it("is not named after the depot label, nor with the quantity OCR misread", () => {
+    expect(cleanSecurityName("Vermögensdepot")).toBeNull();
+    expect(cleanSecurityName("Stiick 0,005 BEISPIEL FONDS ANTEILE")).toBe("BEISPIEL FONDS ANTEILE");
+  });
+});
+
+describe("an account statement of a depot's settlement account", () => {
+  // Synthetic: fees and a transfer, and the back page's boilerplate.
+  const STATEMENT = `Beispielbank AG
+Kontoauszug Nr. 3
+alter Kontostand EUR 1.000,00
+Verwaltungsvergütung WKN AAA111 -4,50
+Übertrag vom Girokonto 200,00
+neuer Kontostand EUR 1.195,50
+Bitte prüfen Sie diesen Kontoauszug, jede Mitteilung oder Dividendenabrechnung und erheben Sie Einwendungen unverzüglich.`;
+
+  it("is no settlement when settlement words appear only in the boilerplate", () => {
+    const s = inspectSettlement(STATEMENT)!;
+    expect(s.accountStatement).toBe(true);
+    expect(s.kind).toBeNull();
+  });
+
+  it("is one when it carries a trade's booking", () => {
+    const s = inspectSettlement(STATEMENT.replace("Übertrag vom Girokonto 200,00", "Wertpapierabrechnung Verkauf ISIN DE000000AAA1 990,00"))!;
+    expect(s.accountStatement).toBe(false);
+  });
+});
+
+describe("paperTypeOf", () => {
+  it("names the kind of paper from what the rules recognised", () => {
+    expect(paperTypeOf({ kind: "buy", taxStatement: false, accumulation: false })).toBe("trade");
+    expect(paperTypeOf({ kind: "dividend", taxStatement: false, accumulation: false })).toBe("dividend");
+    expect(paperTypeOf({ kind: "dividend", taxStatement: true, accumulation: false })).toBe("tax_statement");
+    expect(paperTypeOf({ kind: "tax", taxStatement: false, accumulation: true })).toBe("accumulation");
+    expect(paperTypeOf({ kind: null, taxStatement: false, accumulation: false })).toBeNull();
   });
 });

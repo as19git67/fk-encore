@@ -1171,3 +1171,49 @@ Zu Ihren Gunsten nach Steuern: EUR 45,49`;
     expect((await depotRows(depot))[0]!.tax).toBe("6.91");
   });
 });
+
+describe("finance/portfolio — inspection of a document linked to a row it created", () => {
+  it("does not take that row's net for an account booking", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(BUY_TEXT);
+    await enrichDocument(docId);
+    vi.mocked(extractSettlementValues).mockResolvedValue({ is_settlement: true, kind: "buy", isin: ISIN_A, net: 2966.4 });
+    const i = await inspectSettlementDocument({ documentId: docId });
+    expect(i.links).toHaveLength(1);
+    expect(i.checks.find((c) => c.name === "booking_net")).toBeUndefined();
+    expect((await depotRows(depot))[0]!.linked_transaction_id).toBeNull();
+  });
+});
+
+describe("finance/depot-document-enrichment — kinds of paper", () => {
+  it("tells the model which kind of paper it reads", async () => {
+    await setup();
+    vi.mocked(extractSettlementValues).mockResolvedValue({ is_settlement: true, kind: "dividend", isin: ISIN_A });
+    const docId = await insertDocument(DIVIDEND_TEXT);
+    await enrichDocument(docId);
+    expect(extractSettlementValues).toHaveBeenCalledWith(expect.any(String), "dividend");
+    expect((await inspectSettlementDocument({ documentId: docId })).paper_type).toBe("dividend");
+  });
+
+  it("finds a dividend by its quantity and days when its amount is not the one booked", async () => {
+    const { depot } = await setup();
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: ISIN_A,
+      kind: "dividend",
+      executed_at: "2026-05-13",
+      amount: "25",
+      net_amount: "30.00",
+      currency: "EUR",
+      source: "giro-derived",
+      dedupe_hash: "giro:div",
+    });
+    const r = await enrichDocument(await insertDocument(DIVIDEND_TEXT));
+    expect(r.outcome).toBe("enriched");
+    const rows = await depotRows(depot);
+    expect(rows).toHaveLength(1);
+    // The booking's own amount stays; the credit note adds what it lacked.
+    expect(rows[0]!.net_amount).toBe("30.00");
+    expect(rows[0]!.gross_amount).toBe("50.00");
+  });
+});

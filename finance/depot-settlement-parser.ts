@@ -27,11 +27,38 @@ import { extractIsin, extractWkn } from "./depot-derivation";
  */
 export type SettlementKind = "buy" | "sell" | "dividend" | "tax";
 
+/**
+ * What kind of paper a document is — each has its own fields, its own
+ * arithmetic and its own way to find the transaction it belongs to:
+ *
+ *   trade         buy or sell: quantity × price = Kurswert, Kurswert ±
+ *                 charges = net; found by its net and date
+ *   dividend      credit note: quantity × per-share = gross, gross − taxes
+ *                 = net; found by its net, or its quantity and date
+ *   tax_statement the taxes on a booking that has its own paper: before −
+ *                 taxes = after; joins the booking of the same quantity
+ *   accumulation  income a fund kept (or a Vorabpauschale): only the tax
+ *                 charged, as money out; no arithmetic
+ */
+export type PaperType = "trade" | "dividend" | "tax_statement" | "accumulation";
+
+export function paperTypeOf(
+  r: Pick<SettlementInspection, "kind" | "taxStatement" | "accumulation"> | null,
+): PaperType | null {
+  if (!r) return null;
+  if (r.accumulation) return "accumulation";
+  if (r.taxStatement) return "tax_statement";
+  if (r.kind === "dividend") return "dividend";
+  if (r.kind === "buy" || r.kind === "sell") return "trade";
+  return null;
+}
+
 /** Whether the net of this kind leaves the account (signed negative). */
 export function isMoneyOut(kind: SettlementKind | null): boolean {
   return kind === "buy" || kind === "tax";
 }
 
+const NO_TAX_RE = /kein(?:en)?\s+steuerabzug|keine\s+steuern?\s+(?:einbehalten|abgeführt)|ohne\s+steuerabzug/i;
 const ACCUMULATION_RE = /thesaurierung|thesaurierte\s+erträge|vorabpauschale|ausschüttungsgleiche\s+erträge/i;
 const TRADE_RE = /wertpapierabrechnung|wertpapier-abrechnung|wertpapierkauf|wertpapierverkauf|kaufabrechnung|verkaufsabrechnung|orderabrechnung|fondsabrechnung|ausführungsanzeige/i;
 const PAYOUT_RE = /dividendengutschrift|ertragsgutschrift|erträgnisgutschrift|ausschüttung(?!sgleich)/i;
@@ -70,6 +97,12 @@ export interface SettlementInspection extends Omit<SettlementExtraction, "kind">
   insurance: boolean;
   /** The text is a cost disclosure (MiFID "Kosteninformation"): never a settlement. */
   costInfo: boolean;
+  /**
+   * An account statement (a depot's settlement account) with no settlement
+   * of its own in it: fees, interest, transfers and the back page's
+   * boilerplate. Never a settlement; one that carries a trade's booking is.
+   */
+  accountStatement: boolean;
   /** The text prints wording only a settlement or dividend statement prints. */
   strong: boolean;
   /**
@@ -198,6 +231,19 @@ export const INSURANCE_WORDS = [
  */
 const COST_INFO_RE = /kosten(?:vorab)?information|kostenausweis|ex-?ante-?kosten|ex-?post-?kosten/i;
 
+const ACCOUNT_STATEMENT_RE = /kontoauszug|(?:alter|neuer)\s+(?:konto)?(?:stand|saldo)|kontostand\s+(?:am|per|vom)/i;
+
+/**
+ * An account statement in which settlement wording appears only in prose —
+ * the back page's "Kontoauszug, Mitteilung oder Dividendenabrechnung" —
+ * and not on a line of its own or a booking line.
+ */
+export function looksLikeAccountStatementOnly(text: string): boolean {
+  if (!ACCOUNT_STATEMENT_RE.test(text)) return false;
+  const prose = (line: string) => line.trim().length > 80 || /\s(?:oder|und)\s|mitteilung|hinweis|bitte/i.test(line);
+  return !text.split("\n").some((l) => STRONG_RE.test(l) && !prose(l));
+}
+
 /** True when the text is a cost disclosure and no line is a settlement's heading. */
 export function looksLikeCostInformation(text: string): boolean {
   if (!COST_INFO_RE.test(text)) return false;
@@ -244,8 +290,9 @@ export function parseGermanNumber(raw: string): number | null {
 
 // A rate ("12,34 %") is never an amount, nor is a footnote marker ("(1)").
 // The amount stands on its label's line: a line break never belongs to it.
-// Nor is a number that a date continues ("01.01.26") an amount.
-const AMOUNT = String.raw`(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))(?![.,]?\d)`;
+// Nor is a number that a date continues ("01.01.26") an amount, nor one a
+// legal reference names ("nach § 12a EStG", "Abs. 3", "Nr. 5").
+const AMOUNT = String.raw`(?<!(?:§|Abs\.|Nr\.|Art\.)\s?)(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))(?![.,]?\d)`;
 /** What may stand between a label and its amount: text, or a footnote marker ("Kapitalertragsteuer (1) EUR …"). */
 const GAP = String.raw`(?:[^\d\n-]|\(\d{1,2}\)){0,40}?`;
 const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
@@ -544,7 +591,7 @@ function nameOnIdentifierLine(text: string, isin: string | null, wkn: string | n
 
 /** Labels and headings a statement prints around the security, never its name. */
 const NOT_A_NAME =
-  /^(stück|stk|nominale|kurs|kurswert|preis|wertpapier|kauf|verkauf|dividend|ertrag|erträgnis|ausschüttung|depot|schlusstag|handelstag|ausführung|valuta|datum|abrechnung|zahlbar|isin|wkn|betrag|brutto|netto|provision|steuer|kapitalertrag|anlageklasse|anlagestrategie|emittent|fondsgesellschaft|herrn?\b|frau\b|inhaber|kunde)/i;
+  /^(stück|stk|nominale|kurs|kurswert|preis|wertpapier|kauf|verkauf|dividend|ertrag|erträgnis|ausschüttung|depot|schlusstag|handelstag|ausführung|valuta|datum|abrechnung|zahlbar|isin|wkn|betrag|brutto|netto|provision|steuer|kapitalertrag|anlageklasse|anlagestrategie|vermögensdepot|emittent|fondsgesellschaft|herrn?\b|frau\b|inhaber|kunde)/i;
 
 /**
  * A security name as a table row prints it, without the columns around it:
@@ -554,7 +601,8 @@ const NOT_A_NAME =
 export function cleanSecurityName(raw: string): string | null {
   const name = raw
     .replace(/^(?:per\s+)?\d{1,2}\.\d{1,2}\.\d{2,4}\s+/i, "")
-    .replace(/^(?:STK|Stück|St\.)\s*[\d.,]+\s+/i, "")
+    // "Stück" as OCR also reads it ("Stiick", "Stuck").
+    .replace(/^(?:STK|St(?:ü|ii|u)ck|St\.)\s*[\d.,]+\s+/i, "")
     // The identifier column at the end: an ISIN, or a WKN (six characters, at least one digit).
     .replace(/\s+[A-Z]{2}[A-Z0-9]{9}\d$/, "")
     .replace(/\s+(?=[A-Z0-9]*\d)[A-Z0-9]{6}$/, "")
@@ -627,7 +675,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   // A tax statement names the booking it belongs to on its heading line
   // ("Steuerliche Behandlung: <Geschäftsart> vom <Datum>").
   const taxLine = taxStatement ? (whole.split("\n").find((l) => TAX_STATEMENT_RE.test(l)) ?? null) : null;
-  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole)
+  const accountStatement = looksLikeAccountStatementOnly(whole);
+  const kind = looksLikeInsurancePaper(wholeLower) || looksLikeCostInformation(whole) || accountStatement
     ? null
     : (taxLine ? detectKind(taxLine.toLowerCase()) : null) ?? detectKind(lower);
   const isin = extractIsin(text) ?? extractIsin(whole);
@@ -815,11 +864,14 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   const accumulation =
     !looksLikeInsurancePaper(wholeLower) && !looksLikeCostInformation(whole) && looksLikeAccumulation(whole);
   if (accumulation) {
-    const charged = tax ?? netAbs;
+    // "kein Steuerabzug": a fund abroad, whose income is taxed in the
+    // owner's return — nothing was charged, whatever tax words follow.
+    const charged = NO_TAX_RE.test(whole) ? 0 : (tax ?? netAbs);
     return {
       kind: "tax",
       insurance: false,
       costInfo: false,
+      accountStatement: false,
       strong: hasStrongSettlementWording(wholeLower),
       taxStatement: false,
       taxPending: false,
@@ -833,7 +885,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       gross: null,
       fees: null,
       tax: charged,
-      net: charged === null ? null : -charged,
+      net: charged === null ? null : charged === 0 ? 0 : -charged,
       executedAt,
       currency: printedCurrency,
       depotNumber: extractDepotNumber(text) ?? extractDepotNumber(whole),
@@ -846,6 +898,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     kind,
     insurance: looksLikeInsurancePaper(wholeLower),
     costInfo: looksLikeCostInformation(whole),
+    accountStatement,
     strong: hasStrongSettlementWording(wholeLower),
     taxStatement,
     taxPending,

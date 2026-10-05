@@ -62,7 +62,7 @@ import {
   type EnrichResult,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
-import { cleanSecurityName, isPersonName } from "./depot-settlement-parser";
+import { cleanSecurityName, isPersonName, paperTypeOf, type PaperType } from "./depot-settlement-parser";
 import { readSettlement, rereadAgainstBooking, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
 import type { CheckName, FieldSource, MergeField } from "./depot-settlement-merge";
 
@@ -1927,6 +1927,8 @@ type InspectionRejection =
   | "insurance"
   /** A cost disclosure (MiFID "Kosteninformation"): the settlement comes separately. */
   | "cost_info"
+  /** An account statement with no settlement of its own (fees, interest, transfers). */
+  | "account_statement"
   /** The model says it is something else and the rules found no word only a settlement prints. */
   | "llm_other"
   | "no_kind"
@@ -1996,6 +1998,8 @@ interface DocumentInspectionResponse {
   tax_pending: boolean;
   /** Accumulated income or a Vorabpauschale: only the tax charged is booked. */
   accumulation: boolean;
+  /** Which kind of paper: its fields, checks and matching follow from it. */
+  paper_type: PaperType | null;
   /** Why it does not, when it does not. */
   rejection: InspectionRejection | null;
   /** The reading that is used — rules and model merged. */
@@ -2078,6 +2082,8 @@ export const inspectSettlementDocument = api(
         kind: financeDepotTransaction.kind,
         executed_at: financeDepotTransaction.executed_at,
         net_amount: financeDepotTransaction.net_amount,
+        linked_transaction_id: financeDepotTransaction.linked_transaction_id,
+        source: financeDepotTransaction.source,
       })
       .from(financeDepotTransactionDocument)
       .innerJoin(
@@ -2087,11 +2093,15 @@ export const inspectSettlementDocument = api(
       .where(eq(financeDepotTransactionDocument.document_id, documentId));
 
     // The booking decides between rules and model: the one a dry run
-    // matched, or the one the document is already linked to.
+    // matched, or the one the document is already linked to — if an account
+    // booking confirmed it. A row this document created only repeats what
+    // was read off it and proves nothing.
     const bookingNet =
       dry?.checked_against_booking && dry.transaction_net !== null
         ? dry.transaction_net
-        : reading.llm && linkRows.length === 1
+        : reading.llm &&
+            linkRows.length === 1 &&
+            (linkRows[0]!.source !== "document" || linkRows[0]!.linked_transaction_id !== null)
           ? linkRows[0]!.net_amount
           : null;
     const shown = bookingNet !== null ? rereadAgainstBooking(reading, Number(bookingNet)) : reading;
@@ -2130,6 +2140,7 @@ export const inspectSettlementDocument = api(
       tax_statement: reading.rules?.taxStatement ?? false,
       tax_pending: reading.rules?.taxPending ?? false,
       accumulation: reading.rules?.accumulation ?? false,
+      paper_type: paperTypeOf(reading.rules),
       rejection,
       fields,
       sources,

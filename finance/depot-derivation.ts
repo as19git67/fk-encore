@@ -231,14 +231,33 @@ export type DerivedKind = "buy" | "sell" | "dividend";
 export function classifySecuTransaction(tx: {
   amount: string;
   transaction_code: string | null;
+  purpose?: string | null;
+  entry_text?: string | null;
 }): DerivedKind | null {
   const subFamily = tx.transaction_code?.toUpperCase() ?? "";
   if (subFamily === "CHRG") return null;
   if (subFamily === "DVCA") return "dividend";
   const n = Number(tx.amount);
   if (!Number.isFinite(n) || n === 0) return null;
+  // Without the bank's code (MT940, manual import) the text decides. A
+  // settlement account books more than trades: its fees, taxes on income
+  // a fund kept, transfers — none of them a buy or a sale, even when the
+  // text names the security.
+  const text = `${tx.purpose ?? ""} ${tx.entry_text ?? ""}`;
+  if (!TRADE_TEXT_RE.test(text)) {
+    if (CHARGE_TEXT_RE.test(text)) return null;
+    if (PAYOUT_TEXT_RE.test(text)) return n > 0 ? "dividend" : null;
+  }
   return n < 0 ? "buy" : "sell";
 }
+
+/** Wording of a trade's booking: it decides over everything below. */
+const TRADE_TEXT_RE = /wertpapierabrechnung|wertpapier-?kauf|wertpapier-?verkauf|\b(?:kauf|verkauf)\b|fondsanteile|ausf(?:ü|ue)hrung/i;
+/** Fees, charges and taxes a settlement account books besides trades. */
+const CHARGE_TEXT_RE =
+  /geb(?:ü|ue)hr|entgelt|spesen|verwaltungsverg|verg(?:ü|ue)tung|depotpreis|kontof(?:ü|ue)hrung|abschluss|steuer|vorabpauschale|thesaur/i;
+/** A payout: dividend, distribution, interest on a bond. */
+const PAYOUT_TEXT_RE = /dividende|aussch(?:ü|ue)ttung|ertr(?:ä|ae)g|zinsen|kupon/i;
 
 export interface DerivationStats {
   /** Newly inserted rows. */

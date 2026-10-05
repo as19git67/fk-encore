@@ -740,6 +740,7 @@ export type SettlementRejection =
   | 'no_text'
   | 'insurance'
   | 'cost_info'
+  | 'account_statement'
   | 'llm_other'
   | 'no_kind'
   | 'no_identifier'
@@ -794,6 +795,8 @@ export interface SettlementInspection {
   tax_pending?: boolean
   /** Accumulated income or a Vorabpauschale: only the tax charged is booked. */
   accumulation?: boolean
+  /** Which kind of paper: its fields, checks and matching follow from it. */
+  paper_type?: 'trade' | 'dividend' | 'tax_statement' | 'accumulation' | null
   rejection: SettlementRejection | null
   fields: SettlementInspectionFields
   /** Printed label each field was read after. */

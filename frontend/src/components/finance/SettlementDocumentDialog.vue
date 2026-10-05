@@ -106,15 +106,43 @@ const FIELD_ROWS: Array<{ key: FieldKey; label: string }> = [
   { key: 'currency', label: 'Währung' },
 ]
 
-/** A tax statement prints the amounts before and after taxes, not a Kurswert and a settled net. */
-const TAX_STATEMENT_LABELS: Partial<Record<FieldKey, string>> = {
-  gross: 'Betrag vor Steuern',
-  net: 'Betrag nach Steuern',
+/**
+ * Each kind of paper prints its own fields: what a field means there (its
+ * label) and which fields it never prints (hidden, not "nicht gefunden").
+ */
+const PAPER_FIELDS: Record<string, { labels: Partial<Record<FieldKey, string>>; hidden: FieldKey[] }> = {
+  trade: { labels: {}, hidden: [] },
+  dividend: { labels: { price: 'Betrag je Stück', gross: 'Brutto' }, hidden: [] },
+  tax_statement: { labels: { gross: 'Betrag vor Steuern', net: 'Betrag nach Steuern' }, hidden: ['price', 'fees'] },
+  accumulation: { labels: { tax: 'Abgeführte Steuer', net: 'Abfluss' }, hidden: ['price', 'gross', 'fees'] },
 }
+
+/** The checks a kind of paper can be put through at all. */
+const PAPER_CHECKS: Record<string, string[]> = {
+  tax_statement: ['net_equation', 'isin_checksum', 'date_plausible', 'booking_net'],
+  accumulation: ['isin_checksum', 'date_plausible'],
+}
+
+const paperFields = computed(() => PAPER_FIELDS[inspection.value?.paper_type ?? ''] ?? PAPER_FIELDS.trade!)
+
+const visibleRows = computed(() =>
+  FIELD_ROWS.filter((r) => {
+    if (paperFields.value.hidden.includes(r.key)) return false
+    // A dividend rarely charges fees: the row only when it does.
+    if (inspection.value?.paper_type === 'dividend' && r.key === 'fees') return fieldValue(r.key) !== null
+    return true
+  }),
+)
+
+const visibleChecks = computed(() => {
+  const allowed = PAPER_CHECKS[inspection.value?.paper_type ?? '']
+  const checks = inspection.value?.checks ?? []
+  return allowed ? checks.filter((c) => allowed.includes(c.name)) : checks
+})
 
 function rowLabel(row: { key: FieldKey; label: string }): string {
   if (inspection.value?.tax_pending && row.key === 'net') return 'Betrag vor Steuern'
-  return (inspection.value?.tax_statement ? TAX_STATEMENT_LABELS[row.key] : undefined) ?? row.label
+  return paperFields.value.labels[row.key] ?? row.label
 }
 
 function format(key: FieldKey, v: string | null): string | null {
@@ -166,12 +194,13 @@ const CHECK_TEXT: Record<string, string> = {
 
 const hasLlm = computed(() => inspection.value?.llm_fallback_used === true)
 
-const recognisedCount = computed(() => FIELD_ROWS.filter((r) => fieldValue(r.key) !== null).length)
+const recognisedCount = computed(() => visibleRows.value.filter((r) => fieldValue(r.key) !== null).length)
 
 const REJECTION_TEXT: Record<string, string> = {
   no_text: 'Das Dokument hat keinen gelesenen Text (OCR fehlt oder ist leer).',
   insurance: 'Das ist ein Versicherungsschreiben (Police, Standmitteilung, Überschussbeteiligung) — es betrifft kein Depot, auch wenn es Fonds mit ISIN nennt.',
   cost_info: 'Das ist eine Kosteninformation zur Order (MiFID II), keine Abrechnung — die Wertpapierabrechnung kommt als eigener Beleg.',
+  account_statement: 'Das ist ein Kontoauszug des Verrechnungskontos ohne eigene Wertpapierabrechnung (Gebühren, Zinsen, Überträge) — er betrifft die Depots nicht.',
   llm_other: 'Das KI-Modell hält den Beleg nicht für eine Wertpapierabrechnung, und die Regeln finden keine eindeutige Überschrift dagegen.',
   no_kind: 'Kein Hinweis auf Kauf, Verkauf oder Dividende gefunden — der Beleg gilt nicht als Abrechnung.',
   no_identifier: 'Weder ISIN noch WKN gefunden — ohne Wertpapierkennung kann nichts zugeordnet werden.',
@@ -272,7 +301,7 @@ function openInDocuments() {
             Als {{ depotKindLabel(inspection.fields.kind ?? '') }}-Gutschrift vor Steuern erkannt · die Steuermitteilung ergänzt Steuern und Betrag nach Steuern
           </p>
           <p v-else-if="inspection.is_settlement" class="sd-status sd-ok">
-            Als {{ depotKindLabel(inspection.fields.kind ?? '') }}-Abrechnung erkannt · {{ recognisedCount }} von {{ FIELD_ROWS.length }} Feldern gefunden
+            Als {{ depotKindLabel(inspection.fields.kind ?? '') }}-Abrechnung erkannt · {{ recognisedCount }} von {{ visibleRows.length }} Feldern gefunden
           </p>
           <p v-else class="sd-status sd-warn">
             {{ REJECTION_TEXT[inspection.rejection ?? ''] ?? 'Nicht als Abrechnung erkannt.' }}
@@ -294,7 +323,7 @@ function openInDocuments() {
             </thead>
             <tbody>
               <tr
-                v-for="row in FIELD_ROWS"
+                v-for="row in visibleRows"
                 :key="row.key"
                 :class="{ 'sd-missing': fieldValue(row.key) === null, 'sd-disagree': sourceOf(row.key)?.disagree }"
               >
@@ -319,8 +348,8 @@ function openInDocuments() {
             </tbody>
           </table>
 
-          <ul v-if="inspection.checks?.length" class="sd-checks" aria-label="Rechenprüfungen">
-            <li v-for="c in inspection.checks" :key="c.name" :class="`sd-check-${c.result}`">
+          <ul v-if="visibleChecks.length" class="sd-checks" aria-label="Rechenprüfungen">
+            <li v-for="c in visibleChecks" :key="c.name" :class="`sd-check-${c.result}`">
               <i
                 :class="c.result === 'ok' ? 'pi pi-check-circle' : c.result === 'failed' ? 'pi pi-times-circle' : 'pi pi-minus-circle'"
                 aria-hidden="true"

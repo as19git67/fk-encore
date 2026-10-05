@@ -716,6 +716,14 @@ export async function enrichDocument(
   if (match) result.transaction_net = match.row.net_amount;
   result.statement_net = fixed(parsed.net, 2);
 
+  // A credit note's amount need not be the one booked (before or after
+  // taxes, another currency): a dividend of the same security and the same
+  // quantity on the same days is the one it belongs to all the same.
+  if (parsed.kind === "dividend" && parsed.quantity !== null && (!match || !match.netAgrees)) {
+    const byQuantity = await findTransactionByQuantity(holding.account_id, parsed);
+    if (byQuantity && byQuantity.amount !== null) match = { row: byQuantity, netAgrees: true };
+  }
+
   if (match && !match.netAgrees && !(options.overwrite && !dryRun)) {
     result.outcome = "conflict";
     result.depot_transaction_id = match.row.id;

@@ -22,6 +22,7 @@ import { financeDocumentSettlementLlm } from "../db/schema";
 import { extractIsin, extractWkn } from "./depot-derivation";
 import {
   inspectSettlement,
+  paperTypeOf,
   settlementBlock,
   type ExchangeRate,
   type SettlementInspection,
@@ -66,9 +67,12 @@ export interface SettlementReading {
  * that. A strong word ("Wertpapierabrechnung", "Dividendengutschrift")
  * outweighs the model.
  */
-export function rejectedAsOtherPaper(r: SettlementReading): "insurance" | "cost_info" | "llm_other" | null {
+export function rejectedAsOtherPaper(
+  r: SettlementReading,
+): "insurance" | "cost_info" | "account_statement" | "llm_other" | null {
   if (r.rules?.insurance) return "insurance";
   if (r.rules?.costInfo) return "cost_info";
+  if (r.rules?.accountStatement) return "account_statement";
   // A tax statement is not a settlement, and the model may well say so —
   // the rules recognise it by its heading and read it as what it is.
   if (r.llmSaysSettlement === false && !r.rules?.strong && !r.rules?.taxStatement && !r.rules?.accumulation) return "llm_other";
@@ -194,7 +198,7 @@ export async function readSettlement(
   let llmStatus: LlmStatus = mode === "off" ? "off" : "skipped";
 
   // Insurance paperwork and cost disclosures are settled by the rules alone: no LLM call for them.
-  if (mode !== "off" && text && text.trim().length > 0 && !rules?.insurance && !rules?.costInfo) {
+  if (mode !== "off" && text && text.trim().length > 0 && !rules?.insurance && !rules?.costInfo && !rules?.accountStatement) {
     const stored = await storedAnswer(documentId);
     if (stored) {
       llm = parseLlmSettlement(stored);
@@ -204,7 +208,7 @@ export async function readSettlement(
       try {
         // An account statement carries the settlement as one booking among
         // others: the model reads that block, not the fee lines around it.
-        const raw = await extractSettlementValues(settlementBlock(text) ?? text);
+        const raw = await extractSettlementValues(settlementBlock(text) ?? text, paperTypeOf(rules));
         // Store what the model said, so it is asked once.
         await db
           .insert(financeDocumentSettlementLlm)
@@ -230,6 +234,9 @@ export async function readSettlement(
   // price or charges; what the model reads there (a tax base, a per-share
   // amount) means something else and would only stand in for a gap.
   if (llm && (rules?.taxStatement || rules?.accumulation)) llm = { ...llm, gross: rules.gross, price: null, fees: null };
+  // On a notice of accumulated income the only money that moves is the tax;
+  // the amount the model reads there is the income kept, never a net.
+  if (llm && rules?.accumulation) llm = { ...llm, net: llm.tax === null ? null : -Math.abs(llm.tax) };
   const nameFrom = nameNearerIdentifier(text, rules?.isin ?? rules?.wkn ?? null, rules?.name ?? null, llm?.name ?? null);
   return {
     rules,
