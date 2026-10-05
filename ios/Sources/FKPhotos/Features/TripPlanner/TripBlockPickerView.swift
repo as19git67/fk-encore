@@ -27,6 +27,9 @@ struct TripBlockPickerView: View {
     /// it used to close either way, leaving the spot where it was with
     /// nothing said.
     let choose: (String, Int) async -> Bool
+    /// What is being placed: a restaurant is offered the meal blocks
+    /// and not the sightseeing ones, a café both, a sight only those.
+    let category: String?
 
     @State private var isWorking = false
     @State private var failure: String?
@@ -36,11 +39,13 @@ struct TripBlockPickerView: View {
         title: String,
         leg: TripLeg?,
         current: (dayIndex: Int, blockId: String)? = nil,
+        category: String? = nil,
         choose: @escaping (String, Int) async -> Bool,
     ) {
         self.title = title
         self.leg = leg
         self.current = current
+        self.category = category
         self.choose = choose
     }
 
@@ -76,7 +81,8 @@ struct TripBlockPickerView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
-                        let targets = TripBlockTargets.ofDay(day.dayIndex, in: leg, excluding: current, now: now)
+                        let targets = TripBlockTargets.ofDay(day.dayIndex, in: leg, excluding: current, now: now,
+                                                             category: category)
                         if targets.isEmpty {
                             Text(current?.dayIndex == day.dayIndex
                                  ? "Hier steht der Stopp schon."

@@ -179,12 +179,12 @@ describe("POST /trip-planner/plans/:planId/stops/move", () => {
     expect(evening.usedMinutes).toBeGreaterThan(evening.budgetMinutes);
   });
 
-  it("refuses a meal block", async () => {
+  it("refuses a sight in a meal block", async () => {
     const plan = await twoPlannedDays();
     const target = blocksOf(plan, 0).find((b) => b.id === "morning")!.stops[0];
     await expect(
       moveTripStop({ planId: plan.id, stopId: target.rowId, toDayIndex: 0, toBlockId: "midday" }),
-    ).rejects.toThrow(/holds time, not places/);
+    ).rejects.toThrow(/holds time for a meal/);
   });
 
   it("refuses a day that is not planned yet", async () => {

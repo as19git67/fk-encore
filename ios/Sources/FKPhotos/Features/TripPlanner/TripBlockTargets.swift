@@ -24,8 +24,11 @@ enum TripBlockTargets {
     /// Three things are left out, each for its own reason:
     ///
     ///   - **Meal blocks**, because they hold time and a rough area,
-    ///     never a venue (§10.3) — dropping a museum in would quietly
-    ///     make the block something it is not.
+    ///     never a sight (§10.3) — dropping a museum in would quietly
+    ///     make the block something it is not. Somewhere to eat is
+    ///     what the block is for, so for a restaurant or a café they
+    ///     are offered, and the sightseeing blocks are not for a
+    ///     restaurant: it is a meal, not a sight.
     ///   - **Days at trip resolution**, which have a frame and no stops
     ///     yet (§4.3): the day has to be planned before it can receive.
     ///   - **The block the stop already sits in.** Offering it is an
@@ -36,10 +39,23 @@ enum TripBlockTargets {
     ///     passed. Out of the first trial — on day two the picker still
     ///     offered day one. Moving a spot into the past is not a plan.
     ///     A trip without dates has no past and keeps every block.
+    /// What a meal block may hold — the same two the server names.
+    static let mealCategories: Set<String> = ["food", "cafe"]
+
+    /// Whether a spot of this category may go into this kind of block.
+    static func fits(category: String?, blockKind: String) -> Bool {
+        let eats = category.map { mealCategories.contains($0) } ?? false
+        if blockKind == "meal" { return eats }
+        // A restaurant is a meal, not a sight; a café can be an
+        // afternoon's stop.
+        return category != "food"
+    }
+
     static func all(
         in leg: TripLeg?,
         excluding current: (dayIndex: Int, blockId: String)? = nil,
         now: Date? = nil,
+        category: String? = nil,
     ) -> [TripBlockTarget] {
         guard let leg else { return [] }
         let today = now.flatMap { todayIndex(in: leg, now: $0) }
@@ -49,7 +65,7 @@ enum TripBlockTargets {
             .filter { day in today.map { day.dayIndex >= $0 } ?? true }
             .flatMap { day in
                 day.blocks.compactMap { block -> TripBlockTarget? in
-                    guard block.kind == "spots" else { return nil }
+                    guard fits(category: category, blockKind: block.kind) else { return nil }
                     if let today, let minutes, day.dayIndex == today,
                        let end = block.endMinutes, end <= minutes {
                         return nil
@@ -73,8 +89,9 @@ enum TripBlockTargets {
         in leg: TripLeg?,
         excluding current: (dayIndex: Int, blockId: String)? = nil,
         now: Date? = nil,
+        category: String? = nil,
     ) -> [TripBlockTarget] {
-        all(in: leg, excluding: current, now: now).filter { $0.dayIndex == dayIndex }
+        all(in: leg, excluding: current, now: now, category: category).filter { $0.dayIndex == dayIndex }
     }
 
     /// Which day of the leg `now` falls on, or nil for a trip without

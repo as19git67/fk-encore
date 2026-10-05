@@ -2806,6 +2806,20 @@ verdient zwei Anmerkungen:
    habt; auf Wunsch Belege und Kartenzahlungen (§10.6). Stark bei Wiederholung,
    im Regelfall leer — Leitentscheidung 3 gilt auch hier.
 
+**Nachtrag (2026-10-05): Ein gewünschtes Lokal gehört in den Mahlzeit-Block.**
+Der Planer sucht weiterhin kein Lokal aus. Aber ein Restaurant, das jemand
+über „Ort suchen" hereingeholt und mit Herzenswunsch oder „will ich"
+versehen hat, ist nicht die Wahl des Planers — es landet beim Umplanen im
+Mahlzeit-Block (eines je Mahlzeit, das bestgewertete, dessen Weg in die
+Gehgrenze passt; über Budget wird gezeigt, nicht verhindert). Restaurants
+kommen an einem Tag mit Mahlzeit-Block in keinen Besichtigungsblock mehr,
+Cafés dürfen weiterhin ein Nachmittagsstopp sein. Dieselbe Regel gilt fürs
+Ablegen von Hand: der Blockwähler bietet einem Restaurant die
+Mahlzeit-Blöcke an, einem Café beide Arten, einer Sehenswürdigkeit nur die
+Besichtigungsblöcke; der Server (`move.ts`, `MEAL_CATEGORIES`) weist alles
+andere zurück. Vorher scheiterte „In diesen Block setzen" aus „Essen in der
+Nähe" still an genau dieser Sperre.
+
 ### 10.4 Die harte Regel für das LLM
 
 **Das Modell darf ausschließlich aus dem Kandidatenvorrat formulieren, niemals

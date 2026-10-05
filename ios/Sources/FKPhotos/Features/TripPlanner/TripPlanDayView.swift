@@ -206,6 +206,7 @@ struct TripPlanDayView: View {
                     title: move.stop.displayName,
                     leg: viewModel.leg,
                     current: (dayIndex: viewModel.dayIndex, blockId: move.blockId),
+                    category: move.stop.category,
                 ) { blockId, dayIndex in
                     await viewModel.move(move.stop, toDayIndex: dayIndex, toBlockId: blockId)
                 }

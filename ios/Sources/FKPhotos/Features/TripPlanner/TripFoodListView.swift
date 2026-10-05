@@ -112,78 +112,89 @@ struct TripFoodListView: View {
         "\(vegetarian)\(vegan)\(outdoorSeating)\(wheelchair)\(onlyCafes)"
     }
 
+    /// One place: what it is, a tap into its details, and the things
+    /// to do with it as proper buttons — 44 pt tall, the icon next to
+    /// its word — rather than three caption-sized labels in a row.
     private func row(_ place: FoodPlace) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(place.displayName)
-                Spacer()
-                Text(place.distanceLabel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-
-            if let subtitle = place.attributeLine {
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let hours = place.openingHours {
-                // Verbatim, because OSM's syntax is the only thing that
-                // is actually true — paraphrasing it into "open now"
-                // would be a claim we cannot stand behind. Prefixed with
-                // where it comes from, so "Mo-Fr 11:00-22:00" reads as
-                // somebody's tag and not as this app's promise.
-                Text("Laut OpenStreetMap: \(hours)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 16) {
-                Button {
-                    openInMaps(place)
-                } label: {
-                    Label("In Karten ansehen", systemImage: "map")
-                }
-                if let phone = place.phoneURL {
-                    Link(destination: phone) {
-                        Label("Anrufen", systemImage: "phone")
+        VStack(alignment: .leading, spacing: 8) {
+            // The same detail screen a spot has everywhere else (§8.4):
+            // the map that zooms, the names, the way there.
+            NavigationLink {
+                TripSpotDetailView(spot: TripSpotDetail(place), mode: .foot)
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(place.displayName)
+                        Spacer()
+                        Text(place.distanceLabel)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
-                }
-                if let website = place.websiteURL {
-                    Link(destination: website) {
-                        Label("Website", systemImage: "safari")
+                    if let subtitle = place.attributeLine {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let hours = place.openingHours {
+                        // Verbatim, because OSM's syntax is the only thing
+                        // that is actually true — paraphrasing it into
+                        // "open now" would be a claim we cannot stand
+                        // behind. Prefixed with where it comes from, so
+                        // "Mo-Fr 11:00-22:00" reads as somebody's tag and
+                        // not as this app's promise.
+                        Text("Laut OpenStreetMap: \(hours)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            .font(.caption)
-            .buttonStyle(.plain)
-            .padding(.top, 2)
 
-            if target != nil {
-                if let outcome = placed[place.osmRef] {
-                    Label(outcome, systemImage: "checkmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 2)
-                } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
                     Button {
-                        Task { await put(place) }
+                        openInMaps(place)
                     } label: {
-                        if placingRef == place.osmRef {
-                            HStack { ProgressView(); Text("Wird eingetragen\u{2026}") }
-                        } else {
-                            Label("In diesen Block setzen", systemImage: "plus.circle")
+                        Label("Karte", systemImage: "map")
+                    }
+                    .accessibilityLabel("\(place.displayName) in Karten ansehen")
+                    if let phone = place.phoneURL {
+                        Link(destination: phone) {
+                            Label("Anrufen", systemImage: "phone")
                         }
                     }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
-                    .disabled(placingRef != nil)
-                    .padding(.top, 2)
+                    if let website = place.websiteURL {
+                        Link(destination: website) {
+                            Label("Website", systemImage: "safari")
+                        }
+                    }
+                    if target != nil, placed[place.osmRef] == nil {
+                        Button {
+                            Task { await put(place) }
+                        } label: {
+                            if placingRef == place.osmRef {
+                                HStack(spacing: 6) { ProgressView(); Text("Wird eingetragen\u{2026}") }
+                            } else {
+                                Label("In den Block", systemImage: "plus.circle")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(placingRef != nil)
+                    }
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .font(.subheadline)
+            }
+            .scrollClipDisabled()
+
+            if let outcome = placed[place.osmRef] {
+                Label(outcome, systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     private func openInMaps(_ place: FoodPlace) {
@@ -389,5 +400,27 @@ struct FoodPlace: Codable, Identifiable, Sendable {
         // OSM carries plenty of bare hostnames.
         let candidate = website.hasPrefix("http") ? website : "https://\(website)"
         return URL(string: candidate)
+    }
+}
+
+extension TripSpotDetail {
+    /// A place to eat out of the nearby list (§10.3): what OpenStreetMap
+    /// says about it and nothing anybody added — it belongs to no plan
+    /// until it is put into a block.
+    init(_ place: FoodPlace) {
+        osmRef = place.osmRef
+        name = place.name
+        title = nil
+        localName = nil
+        wikipediaUrl = nil
+        category = place.categories.first { TripBlockTargets.mealCategories.contains($0) } ?? "food"
+        coordinate = TripCoordinate(lat: place.lat, lon: place.lon)
+        dwellMinutes = 60
+        reasons = place.attributeLine.map { [$0] } ?? []
+        note = nil
+        sourceUrl = place.websiteURL?.absoluteString
+        unmatched = false
+        photoStop = false
+        supportsPhotoStop = false
     }
 }

@@ -93,7 +93,8 @@ struct TripPoolView: View {
         }
         .sheet(item: $placing) { candidate in
             NavigationStack {
-                TripBlockPickerView(title: candidate.displayName, leg: leg) { blockId, dayIndex in
+                TripBlockPickerView(title: candidate.displayName, leg: leg,
+                                    category: candidate.category) { blockId, dayIndex in
                     await viewModel.place(candidate, inBlock: blockId, onDay: dayIndex)
                 }
             }

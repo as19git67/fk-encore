@@ -161,6 +161,30 @@ describe("solveDay", () => {
     expect(blocks[1].stops.map((s) => s.osmRef)).toEqual(["node:a"]);
   });
 
+  it("puts the restaurant the family asked for into the meal block, and no other restaurant anywhere", () => {
+    // The solver picks no venue (§10.3); a heart is not its pick.
+    const day: BlockTemplate[] = [
+      { id: "morning", label: "Vormittag", kind: "spots", baseBudgetMinutes: 210 },
+      { id: "midday", label: "Mittag", kind: "meal", baseBudgetMinutes: 90 },
+      { id: "afternoon", label: "Nachmittag", kind: "spots", baseBudgetMinutes: 210 },
+    ];
+    const { blocks, unplaced } = solveDay({
+      anchor: ANCHOR,
+      blocks: blocksOf(day),
+      candidates: [
+        candidate({ osmRef: "node:church", ...north(300) }),
+        candidate({ osmRef: "node:lunch", ...north(500), category: "food", dwellMinutes: 60, score: 9, wanted: true }),
+        candidate({ osmRef: "node:other", ...north(400), category: "food", dwellMinutes: 60, score: 8 }),
+      ],
+      maxWalkMinutes: 40,
+    });
+    expect(blocks[1].stops.map((s) => s.osmRef)).toEqual(["node:lunch"]);
+    expect(blocks[1].usedMinutes).toBeGreaterThanOrEqual(60);
+    expect(blocks[0].stops.map((s) => s.osmRef)).toEqual(["node:church"]);
+    expect(blocks[2].stops.map((s) => s.category)).not.toContain("food");
+    expect(unplaced.map((c) => c.osmRef)).toEqual(["node:other"]);
+  });
+
   it("charges the walk back to the anchor to the last block", () => {
     const spot = north(1_000);
     const single: BlockTemplate[] = [
