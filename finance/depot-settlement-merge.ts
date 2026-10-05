@@ -22,7 +22,7 @@
  * trace. The checks are what lets either one be trusted.
  */
 
-import type { SettlementExtraction, SettlementKind } from "./depot-settlement-parser";
+import { isMoneyOut, type SettlementExtraction, type SettlementKind } from "./depot-settlement-parser";
 
 /** The fields a reading consists of, in the inspection view's order. */
 export const MERGE_FIELDS = [
@@ -138,7 +138,7 @@ export function parseLlmSettlement(raw: Record<string, unknown>): SettlementValu
     fees: amount(raw.fees),
     tax: amount(raw.tax),
     // Signed like the rule-based reading: money out for a buy.
-    net: net === null ? null : kind === "buy" ? -net : net,
+    net: net === null ? null : isMoneyOut(kind) ? -net : net,
     currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : currency === "€" ? "EUR" : null,
   };
 }
@@ -316,7 +316,7 @@ function combine(rules: SettlementValues, llm: SettlementValues, fromLlm: Set<Me
   }
   const v = out as SettlementValues;
   // The sign of net follows the kind that was settled on.
-  if (v.net !== null && v.kind) v.net = v.kind === "buy" ? -Math.abs(v.net) : Math.abs(v.net);
+  if (v.net !== null && v.kind) v.net = isMoneyOut(v.kind) ? -Math.abs(v.net) : Math.abs(v.net);
   return v;
 }
 
@@ -390,7 +390,7 @@ export function mergeSettlement(
   // up to. Derived after the checks, which would otherwise pass trivially.
   if (values.net === null && values.gross !== null && values.kind) {
     const charges = (values.fees ?? 0) + (values.tax ?? 0);
-    const net = values.kind === "buy" ? -(values.gross + charges) : values.gross - charges;
+    const net = isMoneyOut(values.kind) ? -(values.gross + charges) : values.gross - charges;
     values.net = Math.round(net * 100) / 100;
     const f = fields.find((x) => x.field === "net")!;
     f.source = "derived";

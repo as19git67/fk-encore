@@ -9,6 +9,7 @@ import {
   parseSettlement,
   rejoinColumnAmounts,
   settlementBlock,
+  SETTLEMENT_CANDIDATE_PATTERN,
 } from "./depot-settlement-parser";
 
 // Synthetic settlement texts in the layouts German brokers print. Every
@@ -586,5 +587,78 @@ DE00 0000 0000 0000 0000 00   EUR   14.04.2026   EUR   27,20`;
     expect(s.currency).toBe("EUR");
     expect(s.executedAt).toBe("2026-04-10");
     expect(s.taxPending).toBe(true);
+  });
+});
+
+describe("parseSettlement — accumulated income and the Vorabpauschale", () => {
+  // Synthetic notices of a fund that keeps its income.
+  const ACCUMULATION = `Beispielbank AG
+Mitteilung über Ertragsthesaurierung
+Beispiel Welt Fonds ISIN DE000000AAA1
+Stück 50
+Ertragsthesaurierung je Anteil EUR 0,40
+ausschüttungsgleiche Erträge EUR 20,00
+Ex-Tag 15.03.2026
+Kapitalertragsteuer EUR 3,50
+Solidaritätszuschlag EUR 0,19
+Zu Ihren Lasten EUR 3,69`;
+  const PREPAYMENT = `Beispielbank AG
+Steuerliche Behandlung: Vorabpauschale vom 02.01.2026
+Stk. 50 BEISPIEL WELT FONDS , ISIN: DE000000AAA1
+Vorabpauschale EUR 12,00
+Kapitalertragsteuer EUR -2,10
+Solidaritätszuschlag EUR -0,11
+abgeführte Steuern EUR -2,21
+Zu Ihren Lasten nach Steuern: EUR 2,21`;
+
+  it("reads accumulated income as the tax charged, money out, and no payout", () => {
+    const s = inspectSettlement(ACCUMULATION)!;
+    expect(s.accumulation).toBe(true);
+    expect(s.kind).toBe("tax");
+    expect(s.tax).toBe(3.69);
+    expect(s.net).toBe(-3.69);
+    expect(s.gross).toBeNull();
+    expect(s.price).toBeNull();
+    expect(s.quantity).toBe(50);
+    expect(s.executedAt).toBe("2026-03-15");
+  });
+
+  it("reads the Vorabpauschale's tax statement the same way, not as a tax statement to join", () => {
+    const s = inspectSettlement(PREPAYMENT)!;
+    expect(s.accumulation).toBe(true);
+    expect(s.kind).toBe("tax");
+    expect(s.taxStatement).toBe(false);
+    expect(s.tax).toBe(2.21);
+    expect(s.net).toBe(-2.21);
+    expect(s.executedAt).toBe("2026-01-02");
+  });
+
+  it("is a candidate for reading in at all", () => {
+    const re = new RegExp(SETTLEMENT_CANDIDATE_PATTERN, "i");
+    expect(re.test(ACCUMULATION)).toBe(true);
+    expect(re.test(PREPAYMENT)).toBe(true);
+  });
+
+  it("leaves a fund's buy and a distribution alone that only mention the words", () => {
+    const buy = inspectSettlement(`Wertpapierabrechnung Kauf
+Stück 10 Beispiel Welt Fonds ISIN DE000000AAA1
+Ertragsverwendung: thesaurierend, ausschüttungsgleiche Erträge werden reinvestiert
+Schlusstag 03.06.2026
+Kurswert 400,00 EUR
+Ausmachender Betrag 400,00 EUR`)!;
+    expect(buy.accumulation).toBe(false);
+    expect(buy.kind).toBe("buy");
+
+    const payout = inspectSettlement(`Beispielbank AG
+Ausschüttung
+Beispiel Welt Fonds ISIN DE000000AAA1
+Stück 50
+Ausschüttung je Anteil EUR 0,40
+davon ausschüttungsgleiche Erträge EUR 1,00
+Bruttobetrag EUR 20,00
+Zahltag 15.03.2026
+Betrag zu Ihren Gunsten EUR 20,00`)!;
+    expect(payout.accumulation).toBe(false);
+    expect(payout.kind).toBe("dividend");
   });
 });

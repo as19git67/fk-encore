@@ -55,6 +55,9 @@ import {
   documentIdsByDepotTransaction,
   enrichDocument,
   enrichPendingDocuments,
+  correctMisbookedAccumulation,
+  findMisbookedAccumulations,
+  type MisbookedAccumulation,
   setIgnoredForDepots,
   type EnrichResult,
 } from "./depot-document-enrichment";
@@ -552,6 +555,14 @@ function dateOnly(raw: string): string {
   return raw.length > 10 ? raw.slice(0, 10) : raw;
 }
 
+/** Signed cash of a tax row (Thesaurierung, Vorabpauschale): always negative. */
+function accumulationTax(tx: DepotTxRow): number | null {
+  const net = num(tx.net_amount);
+  if (net !== null) return -Math.abs(net);
+  const tax = num(tx.tax);
+  return tax === null ? null : -Math.abs(tax);
+}
+
 /** Signed net of a dividend row: net_amount first, gross − fees − tax as the fallback. */
 function dividendNet(tx: DepotTxRow): number | null {
   const net = num(tx.net_amount);
@@ -712,6 +723,15 @@ export function buildPortfolio(
           yb.income += net;
           yb.dividendCount += 1;
         }
+      }
+    } else if (tx.kind === "tax") {
+      // Tax on income a fund kept: income is counted after taxes, so this
+      // lowers it — there was no payout to count.
+      const net = accumulationTax(tx);
+      if (net !== null) {
+        p.income += net;
+        p.hasIncome = true;
+        if (yb) yb.income += net;
       }
     }
   }
@@ -1030,7 +1050,7 @@ interface PortfolioTransactionsResponse {
   };
 }
 
-const VALID_KINDS = new Set(["buy", "sell", "in", "out", "dividend", "split", "corp_action"]);
+const VALID_KINDS = new Set(["buy", "sell", "in", "out", "dividend", "split", "corp_action", "tax"]);
 
 export const listPortfolioTransactions = api(
   {
@@ -1391,6 +1411,9 @@ export const getPortfolioPosition = api(
               a.income += net;
               b.dividend_count += 1;
             }
+          } else if (tx.kind === "tax") {
+            const net = accumulationTax(tx);
+            if (net !== null) a.income += net;
           }
         }
         positionTxs.push({
@@ -1590,6 +1613,8 @@ interface ReviewResponse {
   ignored_other: ReviewDocument[];
   /** How many documents the caller may see are marked "ignore for depots". */
   ignored_count: number;
+  /** Dividends booked from a notice of accumulated income or a Vorabpauschale. */
+  misbooked_accumulations: (MisbookedAccumulation & { account_label: string })[];
 }
 
 export const getPortfolioReview = api(
@@ -1624,13 +1649,15 @@ export const getPortfolioReview = api(
         unverifiable_changes: 0,
         ignored_other: [],
         ignored_count: ignoredRows.length,
+        misbooked_accumulations: [],
       };
     }
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
 
-    const [dry, recon] = await Promise.all([
+    const [dry, recon, misbooked] = await Promise.all([
       enrichPendingDocuments(ids, 200, { dryRun: true, includeIgnored: ignored === true }),
       reconcileHoldings(ids),
+      findMisbookedAccumulations(ids),
     ]);
 
     const relevant = dry.results.filter(
@@ -1746,7 +1773,48 @@ export const getPortfolioReview = api(
       unverifiable_changes: recon.unverifiable,
       ignored_other: ignoredOther,
       ignored_count: ignoredRows.length,
+      misbooked_accumulations: misbooked.map((m) => ({ ...m, account_label: labelById.get(m.account_id) ?? "" })),
     };
+  },
+);
+
+interface CorrectAccumulationParams {
+  depotTransactionId: number;
+}
+
+interface CorrectAccumulationResponse {
+  depot_transaction_id: number;
+  /** rebooked_as_tax: now a tax row · removed / unlinked: no tax was charged · not_found: nothing to correct. */
+  result: "rebooked_as_tax" | "removed" | "unlinked" | "not_found";
+}
+
+/**
+ * Correct a dividend booked from a notice of accumulated income or a
+ * Vorabpauschale (see findMisbookedAccumulations). Write access to its
+ * depot is required.
+ */
+export const correctAccumulationTransaction = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/portfolio/transactions/:depotTransactionId/correct-accumulation",
+    auth: true,
+  },
+  async ({ depotTransactionId }: CorrectAccumulationParams): Promise<CorrectAccumulationResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const [row] = await db
+      .select({ account_id: financeDepotTransaction.account_id })
+      .from(financeDepotTransaction)
+      .where(eq(financeDepotTransaction.id, depotTransactionId))
+      .limit(1);
+    if (!row) throw APIError.notFound(`depot transaction ${depotTransactionId} not found`);
+    const depots = await writableDepots(auth, [row.account_id]);
+    if (depots.length === 0) {
+      throw APIError.permissionDenied("write access to the depot is required");
+    }
+    const result = await correctMisbookedAccumulation(depotTransactionId);
+    return { depot_transaction_id: depotTransactionId, result };
   },
 );
 
@@ -1926,6 +1994,8 @@ interface DocumentInspectionResponse {
   tax_statement: boolean;
   /** A credit note whose amount is before taxes: a separate tax statement completes it. */
   tax_pending: boolean;
+  /** Accumulated income or a Vorabpauschale: only the tax charged is booked. */
+  accumulation: boolean;
   /** Why it does not, when it does not. */
   rejection: InspectionRejection | null;
   /** The reading that is used — rules and model merged. */
@@ -2059,6 +2129,7 @@ export const inspectSettlementDocument = api(
       is_settlement: rejection === null,
       tax_statement: reading.rules?.taxStatement ?? false,
       tax_pending: reading.rules?.taxPending ?? false,
+      accumulation: reading.rules?.accumulation ?? false,
       rejection,
       fields,
       sources,

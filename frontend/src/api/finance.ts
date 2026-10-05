@@ -471,6 +471,8 @@ export type DepotTransactionKind =
   | 'dividend'
   | 'split'
   | 'corp_action'
+  /** Tax charged on income a fund kept (Thesaurierung, Vorabpauschale): money out, no shares. */
+  | 'tax'
 
 export interface DepotTransaction {
   id: number
@@ -790,6 +792,8 @@ export interface SettlementInspection {
   tax_statement?: boolean
   /** A credit note whose amount is before taxes: a separate tax statement completes it. */
   tax_pending?: boolean
+  /** Accumulated income or a Vorabpauschale: only the tax charged is booked. */
+  accumulation?: boolean
   rejection: SettlementRejection | null
   fields: SettlementInspectionFields
   /** Printed label each field was read after. */
@@ -863,6 +867,32 @@ export interface PortfolioReviewResponse {
   ignored_other?: PortfolioReviewDocument[]
   /** How many documents are marked "ignore for depots". */
   ignored_count?: number
+  /** Dividends booked from a notice of accumulated income or a Vorabpauschale. */
+  misbooked_accumulations?: PortfolioMisbookedAccumulation[]
+}
+
+export interface PortfolioMisbookedAccumulation {
+  depot_transaction_id: number
+  account_id: number
+  account_label: string
+  document_id: number
+  isin: string | null
+  wkn: string | null
+  name: string | null
+  executed_at: string
+  net_amount: string | null
+  /** Tax the notice says was charged, or null when none was. */
+  tax: string | null
+}
+
+/** Turn a dividend booked from an accumulation notice into the tax it charged (or remove it). */
+export async function correctAccumulationTransaction(
+  depotTransactionId: number,
+): Promise<{ depot_transaction_id: number; result: 'rebooked_as_tax' | 'removed' | 'unlinked' | 'not_found' }> {
+  return apiFetch(`/finance/portfolio/transactions/${depotTransactionId}/correct-accumulation`, {
+    method: 'POST',
+    body: JSON.stringify({ depotTransactionId }),
+  })
 }
 
 export async function getPortfolioReview(

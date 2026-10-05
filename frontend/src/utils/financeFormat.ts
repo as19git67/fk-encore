@@ -80,6 +80,7 @@ export const DEPOT_KIND_LABELS: Record<string, string> = {
   dividend: 'Dividende',
   split: 'Split',
   corp_action: 'Kapitalmaßnahme',
+  tax: 'Steuer',
 }
 
 export function depotKindLabel(kind: string): string {

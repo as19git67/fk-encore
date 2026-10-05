@@ -37,7 +37,9 @@ export type DepotTransactionKind =
   | "out"
   | "dividend"
   | "split"
-  | "corp_action";
+  | "corp_action"
+  /** Tax charged on income a fund kept (Thesaurierung, Vorabpauschale): money out, no shares. */
+  | "tax";
 
 const VALID_KINDS: ReadonlySet<string> = new Set<DepotTransactionKind>([
   "buy",
@@ -47,6 +49,7 @@ const VALID_KINDS: ReadonlySet<string> = new Set<DepotTransactionKind>([
   "dividend",
   "split",
   "corp_action",
+  "tax",
 ]);
 
 interface DepotTransactionView {
