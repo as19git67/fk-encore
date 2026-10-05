@@ -1210,6 +1210,14 @@ struct TripSpotArticle: Codable, Sendable {
         var id: String { "\(level)-\(heading ?? "")-\(text.prefix(40))" }
     }
 
+    /// The text as written, kept beside a translation so the reader
+    /// can switch back.
+    struct Original: Codable, Sendable {
+        let language: String
+        let description: String?
+        let sections: [Section]
+    }
+
     let title: String
     /// The language of the text shown — "de" after a translation too.
     let language: String
@@ -1219,8 +1227,10 @@ struct TripSpotArticle: Codable, Sendable {
     let description: String?
     let sections: [Section]
     let truncated: Bool
-    /// "none", "pending", "done" or "failed".
+    /// "none", "pending", "done", "failed" or "skipped" (a language the
+    /// reader said they can read).
     let translation: String
+    var original: Original? = nil
     let photos: [TripRoutePhoto]
     let attribution: String
     let license: String
@@ -1228,6 +1238,7 @@ struct TripSpotArticle: Codable, Sendable {
     var isPending: Bool { translation == "pending" }
     var isTranslated: Bool { translation == "done" }
     var translationFailed: Bool { translation == "failed" }
+    var isSkipped: Bool { translation == "skipped" }
     /// Shown in a language other than German — before or without a translation.
     var isForeign: Bool { language != "de" }
 }

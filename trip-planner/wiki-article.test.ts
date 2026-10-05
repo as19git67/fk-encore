@@ -13,6 +13,7 @@ import {
   buildTranslationPrompt,
   clearArticleWork,
   clip,
+  keepLanguagesOf,
   MAX_ARTICLE_PHOTOS,
   spotArticle,
   splitForTranslation,
@@ -134,6 +135,9 @@ describe("the article behind a spot", () => {
     expect(done.sections.map((s) => s.heading)).toEqual([null, "[de] Storia"]);
     expect(done.sections[0].text).toBe("[de] La Chiesa di Esempio è una chiesa.");
     expect(done.description).toBe("[de] chiesa di Esempio");
+    // The text as written stays with it, for the reader who wants it.
+    expect(done.original).toMatchObject({ language: "it", description: "chiesa di Esempio" });
+    expect(done.original?.sections[0].text).toBe("La Chiesa di Esempio è una chiesa.");
 
     const cached = await spotArticle({ url }, { wiki, commons, translate });
     expect(cached.translation).toBe("done");
@@ -147,6 +151,25 @@ describe("the article behind a spot", () => {
                                   { wiki, commons, translate: failing, awaitTranslation: true });
     expect(res).toMatchObject({ language: "it", translation: "failed" });
     expect(res.sections[0].text).toBe("La Chiesa di Esempio è una chiesa.");
+  });
+
+  it("leaves a language the reader understands as it is, and translates it for the next reader", async () => {
+    const url = "https://it.wikipedia.org/wiki/Chiesa_di_Esempio";
+    const kept = await spotArticle({ url, keepLanguages: "en, it" }, { wiki, commons, translate });
+    expect(kept).toMatchObject({ language: "it", translation: "skipped" });
+    expect(kept.original).toBeUndefined();
+    expect(translated).toEqual([]);
+    // Again with the same setting: the cached answer, no work.
+    const again = await spotArticle({ url, keepLanguages: "it" }, { wiki, commons, translate });
+    expect(again.translation).toBe("skipped");
+    expect(wiki.calls.filter((c) => c === "it:Chiesa di Esempio")).toHaveLength(1);
+    // A reader without Italian gets the translation, from the cached text.
+    const done = await spotArticle({ url }, { wiki, commons, translate, awaitTranslation: true });
+    expect(done).toMatchObject({ language: "de", translation: "done" });
+    expect(wiki.calls.filter((c) => c === "it:Chiesa di Esempio")).toHaveLength(1);
+    // German is never "kept": there is nothing to translate.
+    const german = await spotArticle({ url: "https://de.wikipedia.org/wiki/Beispielkirche", keepLanguages: "de" }, { wiki, commons, translate });
+    expect(german.translation).toBe("none");
   });
 
   it("is an article without pictures when Commons is down", async () => {
@@ -203,6 +226,12 @@ describe("the pieces", () => {
     expect(prompt).toContain("ins Deutsche");
     expect(prompt).toContain('{"text"');
     expect(prompt).toContain("Testo.");
+  });
+
+  it("reads the languages the reader understands", () => {
+    expect([...keepLanguagesOf("en, IT,,pt-br, nonsense!")]).toEqual(["en", "it", "pt-br"]);
+    expect(keepLanguagesOf(undefined).size).toBe(0);
+    expect(keepLanguagesOf("de").size).toBe(0);
   });
 
   it("caps the strip", () => {

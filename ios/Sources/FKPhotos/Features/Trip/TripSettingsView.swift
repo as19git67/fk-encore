@@ -9,6 +9,7 @@ import SwiftUI
 /// the one entry, linked from the Settings tab and from the Trip tab.
 struct TripSettingsView: View {
     @AppStorage(TripSuggestionSettings.enabledKey) private var tripSuggestions = true
+    @AppStorage(TripArticlePreferences.keepLanguagesKey) private var keptLanguages: String = ""
     /// Bumped after a reset so the count row re-reads.
     @State private var refreshTick = 0
     @State private var homeName: String?
@@ -37,6 +38,22 @@ struct TripSettingsView: View {
                 }
             } footer: {
                 Text("Womit Routen, ganze Blöcke und Orte geöffnet werden.")
+            }
+
+            Section {
+                NavigationLink {
+                    TripArticleLanguagesView()
+                } label: {
+                    LabeledContent("Nicht übersetzen") {
+                        Text(keptLanguagesSummary)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Wikipedia-Artikel")
+            } footer: {
+                Text("Artikel in diesen Sprachen bleiben, wie sie geschrieben sind; alle anderen "
+                     + "übersetzt der eigene KI-Dienst ins Deutsche.")
             }
 
             Section {
@@ -126,6 +143,12 @@ struct TripSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await resolveHome() }
         .task { userHome = await TripUserHome.load() }
+    }
+
+    /// "Englisch, Italienisch", or "Keine" when everything is translated.
+    private var keptLanguagesSummary: String {
+        let names = TripArticlePreferences.codes(from: keptLanguages).map(TripArticlePreferences.name(of:))
+        return names.isEmpty ? "Keine" : names.joined(separator: ", ")
     }
 
     private func saveUserHome(_ place: TripPlace) async {

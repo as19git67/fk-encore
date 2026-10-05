@@ -36,4 +36,18 @@ final class TripArticleLanguageTests: XCTestCase {
         XCTAssertNil(TripArticleLanguage.code(of: try url("https://www.wikipedia.org/")))
         XCTAssertNil(TripArticleLanguage.code(of: try url("https://wikipedia.org/wiki/X")))
     }
+
+    // MARK: - The languages not to translate (§25, stage C)
+
+    func testTheKeptLanguagesAreCodesOnlyAndNeverGerman() {
+        XCTAssertEqual(TripArticlePreferences.codes(from: "en, IT,,pt-br, nonsense!, de, en"),
+                       ["en", "it", "pt-br"])
+        XCTAssertEqual(TripArticlePreferences.stored(from: ["en", "it"]), "en,it")
+        XCTAssertEqual(TripArticlePreferences.codes(from: ""), [])
+    }
+
+    func testTheOfferedLanguagesHaveNamesAndNoGerman() {
+        XCTAssertFalse(TripArticlePreferences.offeredCodes.contains("de"))
+        XCTAssertEqual(Set(TripArticlePreferences.offeredCodes).count, TripArticlePreferences.offeredCodes.count)
+    }
 }

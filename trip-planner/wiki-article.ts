@@ -56,11 +56,29 @@ export const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** One section's translation may take this long before it counts as failed. */
 const TRANSLATION_STEP_TIMEOUT_MS = 120_000;
 
-export type TranslationState = "none" | "pending" | "done" | "failed";
+/**
+ * "none" for a German article; "skipped" for one the reader said they
+ * can read as it is; the other three for a translation's life.
+ */
+export type TranslationState = "none" | "pending" | "done" | "failed" | "skipped";
 
 export interface SpotArticleRequest {
   /** The article's address, as the spot carries it. */
   url: string;
+  /**
+   * Languages the reader understands, as codes separated by commas
+   * ("en,it"). An article in one of them is shown as it is and no
+   * translation is started for it — a setting of the app, sent along
+   * because only the server knows which language the article is in.
+   */
+  keepLanguages?: string;
+}
+
+/** The text before translation, kept so the reader can switch back. */
+export interface ArticleOriginal {
+  language: string;
+  description: string | null;
+  sections: ArticleSection[];
 }
 
 export interface SpotArticle {
@@ -76,6 +94,8 @@ export interface SpotArticle {
   /** True when the text stops before the article does. */
   truncated: boolean;
   translation: TranslationState;
+  /** The untranslated text, once `translation` is "done"; absent otherwise. */
+  original?: ArticleOriginal;
   photos: RoutePhoto[];
   /** "Wikipedia · CC BY-SA 4.0", for the footer. */
   attribution: string;
@@ -108,42 +128,52 @@ export async function spotArticle(req: SpotArticleRequest, deps: SpotArticleDeps
   // A translation under way answers with what is there, or with the
   // result for a caller that wants to wait; a cached pending answer
   // with no work behind it (a restart) starts the work again.
+  const keep = keepLanguagesOf(req.keepLanguages);
   const running = inFlight.get(cacheKey(ref));
   const cached = await readCached(db, ref, now());
   if (running) return deps.awaitTranslation || !cached ? await running : cached;
-  if (cached && cached.translation !== "pending") return cached;
-
-  const wiki = deps.wiki ?? getWikipediaClient();
-  const commons = deps.commons ?? getCommonsClient();
-
-  // German where German exists (§10.4): the local link is the way in,
-  // not the text to show.
-  let source: WikipediaArticle | null = null;
-  if (ref.lang !== "de") {
-    const german = await wiki.germanTitle(ref);
-    if (german) source = await wiki.article({ lang: "de", title: german });
+  // A text somebody else chose to read as it is can still be
+  // translated for this reader; everything else cached is the answer.
+  if (cached && cached.translation !== "pending"
+      && !(cached.translation === "skipped" && !keep.has(cached.sourceLanguage))) {
+    return cached;
   }
-  if (!source) source = await wiki.article(ref);
-  if (!source) throw APIError.notFound("Zu diesem Link gibt es keinen Artikel");
 
-  const { sections, truncated } = clip(source.sections, MAX_ARTICLE_CHARS);
-  const photos = await photosOf(source, commons);
-  const needsTranslation = source.lang !== "de";
-  const article: SpotArticle = {
-    title: source.title,
-    language: source.lang,
-    sourceLanguage: source.lang,
-    sourceUrl: source.pageUrl,
-    description: source.description,
-    sections,
-    truncated,
-    translation: needsTranslation ? "pending" : "none",
-    photos,
-    attribution: `Wikipedia · ${LICENSE}`,
-    license: LICENSE,
-  };
+  let article: SpotArticle;
+  if (cached && cached.translation === "skipped") {
+    article = { ...cached, translation: "pending" };
+  } else {
+    const wiki = deps.wiki ?? getWikipediaClient();
+    const commons = deps.commons ?? getCommonsClient();
+
+    // German where German exists (§10.4): the local link is the way in,
+    // not the text to show.
+    let source: WikipediaArticle | null = null;
+    if (ref.lang !== "de") {
+      const german = await wiki.germanTitle(ref);
+      if (german) source = await wiki.article({ lang: "de", title: german });
+    }
+    if (!source) source = await wiki.article(ref);
+    if (!source) throw APIError.notFound("Zu diesem Link gibt es keinen Artikel");
+
+    const { sections, truncated } = clip(source.sections, MAX_ARTICLE_CHARS);
+    const photos = await photosOf(source, commons);
+    article = {
+      title: source.title,
+      language: source.lang,
+      sourceLanguage: source.lang,
+      sourceUrl: source.pageUrl,
+      description: source.description,
+      sections,
+      truncated,
+      translation: source.lang === "de" ? "none" : keep.has(source.lang) ? "skipped" : "pending",
+      photos,
+      attribution: `Wikipedia · ${LICENSE}`,
+      license: LICENSE,
+    };
+  }
   await writeCached(db, ref, article, now());
-  if (!needsTranslation) return article;
+  if (article.translation !== "pending") return article;
 
   const translate = deps.translate ?? translateWithLlm;
   const work = translateArticle(article, translate)
@@ -166,6 +196,16 @@ export async function spotArticle(req: SpotArticleRequest, deps: SpotArticleDeps
 
 /** Translations under way, so a second reader does not start a second one. */
 const inFlight = new Map<string, Promise<SpotArticle>>();
+
+/** "en, it" → {"en", "it"}; anything that is not a language code is dropped. */
+export function keepLanguagesOf(value: string | undefined): Set<string> {
+  return new Set(
+    (value ?? "")
+      .split(",")
+      .map((code) => code.trim().toLowerCase())
+      .filter((code) => /^[a-z]{2,3}(-[a-z0-9-]+)?$/.test(code) && code !== "de"),
+  );
+}
 
 export function clearArticleWork(): void {
   inFlight.clear();
@@ -250,6 +290,13 @@ export async function translateArticle(
     truncated,
     translation: "done",
     description: article.description ? await translate(article.description, article.sourceLanguage) : null,
+    // Kept, so the reader can switch back to the text as it was
+    // written: a machine's German is a way in, not the last word.
+    original: {
+      language: article.sourceLanguage,
+      description: article.description,
+      sections: article.sections,
+    },
   };
 }
 
