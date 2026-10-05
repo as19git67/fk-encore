@@ -681,13 +681,29 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
 
   // A printed total ("Summe Entgelte 6,40") is the fees; adding it to the
   // lines it sums would count them twice.
-  const fees = taxStatement ? null : track("fees", () => amountAfter(
-    text,
-    [String.raw`Summe\s*(?:der\s*)?(?:Entgelte|Gebühren|Kosten|Spesen)`, String.raw`(?:Entgelte|Gebühren|Kosten)\s*gesamt`],
-    markers,
-  ) ?? sumAfter(
+  // Charges a bank lists after the total of its own fees — the exchange's
+  // and third parties' — belong to the fees all the same.
+  const feesAfterTotal = [
+    String.raw`(?:Variable\s*)?Börsenspesen`,
+    String.raw`Fremde\s*Spesen`,
+    String.raw`Fremdspesen`,
+    String.raw`Maklercourtage`,
+  ];
+  const fees = taxStatement ? null : track("fees", () => {
+    const total = new RegExp(
+      String.raw`(Summe\s*(?:der\s*)?(?:Entgelte|Gebühren|Kosten|Spesen)|(?:Entgelte|Gebühren|Kosten)\s*gesamt)${GAP}${AMOUNT}`,
+      "i",
+    ).exec(text);
+    const totalAmount = total ? parseGermanNumber(total[2]!) : null;
+    if (total && totalAmount !== null) {
+      markers.push(total[1]!.replace(/\s+/g, " "));
+      const extra = sumAfter(text.slice(total.index + total[0].length), feesAfterTotal, markers) ?? 0;
+      return Math.round((Math.abs(totalAmount) + extra) * 100) / 100;
+    }
+    return sumAfter(
     text,
     [
+      String.raw`(?:Variable\s*)?Börsenspesen`,
       String.raw`Provision`,
       String.raw`Orderprovision`,
       String.raw`Grundgebühr`,
@@ -704,7 +720,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       String.raw`Entgelt`,
     ],
     markers,
-  ));
+  );
+  });
 
   const netAbs = taxStatement
     ? track("net", () => amountAfter(text, [String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*nach\s*${STEUERN}`], markers))

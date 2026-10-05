@@ -226,6 +226,10 @@ export async function readSettlement(
   }
 
   if (llm) llm = llmInEuro(llm, rules?.fx ?? null);
+  // A tax statement and a notice of accumulated income print no Kurswert,
+  // price or charges; what the model reads there (a tax base, a per-share
+  // amount) means something else and would only stand in for a gap.
+  if (llm && (rules?.taxStatement || rules?.accumulation)) llm = { ...llm, gross: rules.gross, price: null, fees: null };
   const nameFrom = nameNearerIdentifier(text, rules?.isin ?? rules?.wkn ?? null, rules?.name ?? null, llm?.name ?? null);
   return {
     rules,

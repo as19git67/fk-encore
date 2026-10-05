@@ -697,3 +697,28 @@ Beispielhinweis zur Verrechnung`;
     expect(nameNearerIdentifier(TEXT, "DE000000AAA1", "ALPHA INDUSTRIES AG", "Erfundene Holding AG")).toBe("rules");
   });
 });
+
+describe("parseSettlement — exchange fees listed after the fees' total", () => {
+  // Synthetic: the bank's own fees with their total, then the exchange's
+  // variable fees on their own line.
+  const SALE = `Wertpapierverkauf
+Stück 30 Alpha Industries AG ISIN DE000000AAA1
+Geschäftstag : 14.07.2026
+Kurswert : EUR 3.000,00
+Provision : EUR 4,00-
+Börsenplatzabhäng. Entgelt : EUR 1,00-
+Summe Entgelte : EUR 5,00-
+Variable Börsenspesen : EUR 0,75-
+Ausmachender Betrag EUR 2.994,25`;
+
+  it("adds them to the total, so the figures add up", () => {
+    const s = parseSettlement(SALE)!;
+    expect(s.fees).toBe(5.75);
+    expect(s.net).toBe(2994.25);
+  });
+
+  it("counts them without a printed total too", () => {
+    const s = parseSettlement(SALE.replace("Summe Entgelte : EUR 5,00-\n", ""))!;
+    expect(s.fees).toBe(5.75);
+  });
+});

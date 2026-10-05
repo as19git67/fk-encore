@@ -1129,3 +1129,45 @@ Betrag zu Ihren Gunsten 50,00 EUR`;
     expect(i.fields.name).toBe("ALPHA INDUSTRIES AG");
   });
 });
+
+describe("finance/depot-document-enrichment — the model's Kurswert on a tax statement", () => {
+  it("is not used: what it reads there is a tax base", async () => {
+    const { depot } = await setup();
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: ISIN_A,
+      kind: "dividend",
+      executed_at: "2026-06-05",
+      amount: "40",
+      net_amount: "45.49",
+      currency: "EUR",
+      source: "giro-derived",
+      dedupe_hash: "giro:taxbase",
+    });
+    // Synthetic tax statement whose "vor Steuern" amount the rules cannot read.
+    const text = `Beispielbank AG
+Steuerliche Behandlung: Dividende vom 03.06.2026
+Stk. 40 ALPHA INDUSTRIES AG , ISIN: ${ISIN_A}
+Steuerbemessungsgrundlage EUR 58,90
+abgeführte Steuern EUR -6,91
+Zu Ihren Gunsten nach Steuern: EUR 45,49`;
+    vi.mocked(extractSettlementValues).mockResolvedValue({
+      is_settlement: true,
+      kind: "dividend",
+      isin: ISIN_A,
+      quantity: 40,
+      gross: 58.9,
+      tax: 6.91,
+      net: 45.49,
+      currency: "EUR",
+    });
+    const docId = await insertDocument(text);
+    const i = await inspectSettlementDocument({ documentId: docId });
+    // The tax base is no Kurswert: no check fails on it, and none is shown as gross.
+    expect(i.checks.find((c) => c.name === "net_equation")!.result).not.toBe("failed");
+    expect(i.fields.gross).toBeNull();
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("enriched");
+    expect((await depotRows(depot))[0]!.tax).toBe("6.91");
+  });
+});
