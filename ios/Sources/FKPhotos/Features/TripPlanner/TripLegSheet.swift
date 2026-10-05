@@ -50,24 +50,34 @@ struct TripLegSheet: View {
                 }
             }
 
+            // Every way in tells the plan to reload once something went
+            // in: the count below, the pool and the ballot read the plan
+            // in memory, and a spot that is only on the server is a spot
+            // nobody sees until the next pull.
             Section {
                 // The way into the candidates that needs nothing else —
                 // no share sheet, no map app, no model (§9.2, case 4).
                 NavigationLink {
-                    TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position)
+                    TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position) {
+                        Task { await viewModel.load() }
+                    }
                 } label: {
                     Label("Ort suchen", systemImage: "magnifyingglass")
                 }
                 // A spot whose way is the point (§4.7): the import knows
                 // only points, so it comes by hand.
                 NavigationLink {
-                    TripRouteEntryView(planId: viewModel.planId, legIndex: leg.position)
+                    TripRouteEntryView(planId: viewModel.planId, legIndex: leg.position) {
+                        Task { await viewModel.load() }
+                    }
                 } label: {
                     Label("Strecke anlegen", systemImage: "figure.hiking")
                 }
                 // What the map already knows (§4.7).
                 NavigationLink {
-                    TripNearbyRoutesView(planId: viewModel.planId, legIndex: leg.position)
+                    TripNearbyRoutesView(planId: viewModel.planId, legIndex: leg.position) {
+                        Task { await viewModel.load() }
+                    }
                 } label: {
                     Label("Strecken in der Nähe", systemImage: "map")
                 }
