@@ -12,6 +12,7 @@ import EmptyState from '../../components/layout/EmptyState.vue'
 import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 import Message from 'primevue/message'
+import { useConfirm } from 'primevue/useconfirm'
 import DepotTxSources from '../../components/finance/DepotTxSources.vue'
 import PortfolioReview from '../../components/finance/PortfolioReview.vue'
 import { useListSearch, useListToolbar } from '../../composables/useListToolbar'
@@ -21,6 +22,7 @@ import { replaceQuerySlice, updateRouteQuery } from '../../utils/routeQueryUpdat
 import {
   enrichDepotTransactionsFromDocuments,
   getPortfolio,
+  resetDocumentReadings,
   listPortfolioTransactions,
   type PortfolioPosition,
   type PortfolioResponse,
@@ -409,6 +411,38 @@ const enrichProgress = ref(0)
 const COUNTED = ['documents_examined', 'created', 'enriched', 'linked', 'conflicts', 'unverified', 'skipped_no_holding', 'skipped_no_transaction'] as const
 type EnrichTotals = Record<(typeof COUNTED)[number], number>
 
+const confirm = useConfirm()
+
+/** Take back what documents booked into the depots in scope, then read them all in again. */
+function askReadAgain() {
+  confirm.require({
+    header: 'Belege neu einlesen',
+    message:
+      'Alle Transaktionen, die aus Belegen angelegt oder ergänzt wurden, werden gelöscht; aus Kontobuchungen ' +
+      'abgeleitete werden danach neu abgeleitet. Manuell erfasste Transaktionen bleiben, nur ihre Verknüpfung ' +
+      'zu Belegen wird gelöst. Die gespeicherten KI-Antworten werden verworfen, damit die KI jeden Beleg neu liest — ' +
+      'das dauert länger. „Für Depots ignorieren“ bleibt erhalten.',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Löschen und neu einlesen', severity: 'danger' },
+    accept: () => { void readAgain() },
+  })
+}
+
+async function readAgain() {
+  enriching.value = true
+  enrichNotice.value = null
+  try {
+    await resetDocumentReadings(accountIds.value)
+  } catch (e: any) {
+    enrichNotice.value = { severity: 'warn', text: e?.message ?? 'Belege konnten nicht zurückgesetzt werden' }
+    enriching.value = false
+    return
+  }
+  await Promise.all([loadPortfolio(), loadTransactions()])
+  await enrichFromDocuments()
+}
+
 async function enrichFromDocuments() {
   enriching.value = true
   enrichNotice.value = null
@@ -472,6 +506,15 @@ async function enrichFromDocuments() {
         :loading="enriching"
         :disabled="noDepots"
         @click="enrichFromDocuments"
+      />
+      <Button
+        v-tooltip.bottom="'Alles, was Belege gebucht haben, zurücknehmen und alle Belege neu lesen'"
+        icon="pi pi-history"
+        aria-label="Belege neu einlesen"
+        severity="secondary"
+        text
+        :disabled="noDepots || enriching"
+        @click="askReadAgain"
       />
     </template>
 

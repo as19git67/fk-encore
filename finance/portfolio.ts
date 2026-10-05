@@ -43,8 +43,10 @@ import {
   financeAccountHolding,
   financeAccountType,
   financeDepotTransaction,
+  financeDocumentSettlementLlm,
   users,
 } from "../db/schema";
+import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 import {
   computeCostBasis,
   computeRealizedForPosition,
@@ -2167,5 +2169,121 @@ export const inspectSettlementDocument = api(
           net_amount: r.net_amount,
         })),
     };
+  },
+);
+
+// ----------------------------------------------------------------------
+// Read the documents in afresh (#1336)
+//
+// The readings improved over time; what earlier versions booked stays
+// until someone undoes it. This takes back everything documents put into
+// the given depots and lets the next "Belege einlesen" start over:
+//
+//   - transactions a document created, and those derived from an account
+//     booking that a document then completed, are deleted — the latter
+//     come back from their booking right away (derivation below);
+//   - a manual transaction a document completed stays, only its link to
+//     the document goes (which values the document added is not recorded);
+//   - the model's stored answers for the caller's documents (all of them
+//     for an admin) are cleared, so it reads them again with today's hints;
+//   - "ignore for depots" marks stay.
+// ----------------------------------------------------------------------
+
+interface ResetDocumentsParams {
+  accounts?: string;
+}
+
+interface ResetDocumentsResponse {
+  /** Transactions deleted (created or completed from documents). */
+  removed: number;
+  /** Manual transactions that only lost their link to a document. */
+  unlinked: number;
+  /** Stored model answers cleared. */
+  answers_cleared: number;
+  /** Transactions derived again from account bookings. */
+  rederived: number;
+}
+
+export const resetDocumentReadings = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/portfolio/documents/reset",
+    auth: true,
+  },
+  async ({ accounts }: ResetDocumentsParams): Promise<ResetDocumentsResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const depots = await writableDepots(auth, parseAccountIds(accounts));
+    if (depots.length === 0) {
+      throw APIError.permissionDenied("write access to at least one depot is required");
+    }
+    const ids = depots.map((d) => d.id);
+
+    const removed = await db
+      .delete(financeDepotTransaction)
+      .where(
+        and(
+          inArray(financeDepotTransaction.account_id, ids),
+          inArray(financeDepotTransaction.source, ["document", "giro-derived+document"]),
+        ),
+      )
+      .returning({ id: financeDepotTransaction.id });
+
+    const kept = await db
+      .select({ id: financeDepotTransaction.id })
+      .from(financeDepotTransaction)
+      .where(
+        and(
+          inArray(financeDepotTransaction.account_id, ids),
+          sql`${financeDepotTransaction.source} LIKE '%+document'`,
+        ),
+      );
+    if (kept.length > 0) {
+      await db
+        .delete(financeDepotTransactionDocument)
+        .where(inArray(financeDepotTransactionDocument.depot_transaction_id, kept.map((k) => k.id)));
+      await db
+        .update(financeDepotTransaction)
+        .set({ source: sql`replace(${financeDepotTransaction.source}, '+document', '')` })
+        .where(inArray(financeDepotTransaction.id, kept.map((k) => k.id)));
+    }
+    // Links of the remaining rows (a document linked to a booking without
+    // changing it) go too, so every document is read again.
+    await db
+      .delete(financeDepotTransactionDocument)
+      .where(
+        inArray(
+          financeDepotTransactionDocument.depot_transaction_id,
+          db
+            .select({ id: financeDepotTransaction.id })
+            .from(financeDepotTransaction)
+            .where(inArray(financeDepotTransaction.account_id, ids)),
+        ),
+      );
+
+    const cleared = await db
+      .delete(financeDocumentSettlementLlm)
+      .where(
+        hasAdmin(auth)
+          ? sql`true`
+          : inArray(
+              financeDocumentSettlementLlm.document_id,
+              db.select({ id: documents.id }).from(documents).where(eq(documents.user_id, Number(auth.userID))),
+            ),
+      )
+      .returning({ id: financeDocumentSettlementLlm.document_id });
+
+    const bankcontacts = await db
+      .selectDistinct({ id: financeAccount.bankcontact_id })
+      .from(financeAccount)
+      .where(inArray(financeAccount.id, ids));
+    let rederived = 0;
+    for (const bc of bankcontacts) {
+      if (bc.id === null) continue;
+      rederived += (await deriveDepotTransactionsForBankcontact(bc.id)).derived;
+    }
+
+    return { removed: removed.length, unlinked: kept.length, answers_cleared: cleared.length, rederived };
   },
 );
