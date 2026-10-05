@@ -105,6 +105,9 @@ struct TripBallotView: View {
                 .navigationBarTitleDisplayMode(.inline)
             }
             .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            // The map stays bright and usable under the half sheet.
+            .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         }
         .refreshable { await load() }
         .task { await load() }

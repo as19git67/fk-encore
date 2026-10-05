@@ -754,6 +754,12 @@ struct TripPlanDayView: View {
     /// screen read as two different controls.
     private static let pickerChipHeight: CGFloat = 48
 
+    /// The chip's second line: how long a stay is, how a journey goes.
+    private func legChipDetail(_ leg: TripLeg) -> String {
+        if leg.isTransit { return leg.transportMode.label }
+        return leg.days.count == 1 ? "1 Tag" : "\(leg.days.count) Tage"
+    }
+
     private var legPicker: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -762,24 +768,30 @@ struct TripPlanDayView: View {
                         Button {
                             viewModel.select(leg: leg.position)
                         } label: {
-                            HStack(spacing: 4) {
+                            // The same shape as a day's chip below —
+                            // two lines, the same corners, the same
+                            // highlight — so the two strips read as
+                            // one control at two levels.
+                            VStack(spacing: 2) {
                                 Text(leg.displayTitle)
                                     .font(.subheadline.weight(
                                         leg.position == viewModel.legIndex ? .semibold : .regular))
-                                if leg.isAwaitingRegion {
-                                    Image(systemName: "map.circle").font(.caption2)
+                                HStack(spacing: 3) {
+                                    Text(legChipDetail(leg))
+                                    if leg.isAwaitingRegion {
+                                        Image(systemName: "map.circle")
+                                    }
                                 }
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                             }
-                            .padding(.horizontal, 14)
-                            // As tall as a day's chip, so the two
-                            // strips line up; well past the 44 pt
-                            // Apple asks of a control.
-                            .frame(minHeight: Self.pickerChipHeight)
+                            .padding(.horizontal, 12)
+                            .frame(minWidth: 56, minHeight: Self.pickerChipHeight)
                             .background(
                                 leg.position == viewModel.legIndex
                                     ? AnyShapeStyle(.tint.opacity(0.15))
-                                    : AnyShapeStyle(.quaternary.opacity(0.35)),
-                                in: .capsule,
+                                    : AnyShapeStyle(.clear),
+                                in: .rect(cornerRadius: 10),
                             )
                             .contentShape(.rect)
                         }
