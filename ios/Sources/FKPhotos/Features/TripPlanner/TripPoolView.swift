@@ -115,6 +115,13 @@ struct TripPoolView: View {
                           systemImage: "calendar.badge.plus")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    if let leg, let kind = blockKind(of: placeInto, in: leg) {
+                        Text(kind == "meal"
+                             ? "Gezeigt wird, was zu einer Mahlzeit passt: Restaurants und Cafés."
+                             : "Restaurants gehören zur Mahlzeit und stehen hier nicht.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             if let leg {
@@ -330,7 +337,19 @@ struct TripPoolView: View {
     /// The pool as list and map both show it (§5.2) — one filter, so
     /// what leaves the list leaves the map.
     private func matches(in leg: TripLeg) -> [TripCandidate] {
-        TripPoolFilter.matches(in: leg.pool, query: query)
+        // Opened for one block, only what may go into it: somewhere to
+        // eat for a meal block, no restaurant for a sightseeing one —
+        // the same rule the block picker and the server apply (§10.3).
+        let kind = placeInto.flatMap { target in
+            leg.days.first { $0.dayIndex == target.dayIndex }?.blocks.first { $0.id == target.blockId }?.kind
+        }
+        return TripPoolFilter.matches(in: leg.pool, query: query).filter { candidate in
+            kind.map { TripBlockTargets.fits(category: candidate.category, blockKind: $0) } ?? true
+        }
+    }
+
+    private func blockKind(of target: TripPoolTarget, in leg: TripLeg) -> String? {
+        leg.days.first { $0.dayIndex == target.dayIndex }?.blocks.first { $0.id == target.blockId }?.kind
     }
 
     private func countLabel(_ leg: TripLeg) -> String {

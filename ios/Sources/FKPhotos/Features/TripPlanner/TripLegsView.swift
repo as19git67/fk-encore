@@ -168,7 +168,8 @@ struct TripLegsView: View {
                 } label: {
                     Label("Stadt hinzufügen", systemImage: "plus.circle")
                 }
-                .disabled(isWorking || (viewModel.plan?.legs.count ?? 0) >= TripNewPlanDraft.maxLegs)
+                .disabled(isWorking
+                          || (viewModel.plan?.legs.filter { !$0.isTransit }.count ?? 0) >= TripNewPlanDraft.maxStays)
             }
 
         }

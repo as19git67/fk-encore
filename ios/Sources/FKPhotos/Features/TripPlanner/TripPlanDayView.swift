@@ -1326,13 +1326,35 @@ struct TripPlanDayView: View {
             if block.isMeal {
                 // A meal block holds time and a rough area, not a venue:
                 // the planner never picks a restaurant (§10.3). Finding
-                // somewhere is the second stage, and it happens on the
-                // spot rather than at the planning table.
+                // somewhere is the second stage — nearby, on the spot,
+                // or out of the candidates where somebody already named
+                // a place; and once chosen it is a stop like any other.
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Zeit fürs Essen — der Planer sucht kein Lokal aus.",
-                          systemImage: "fork.knife")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    ForEach(Array(block.stops.enumerated()), id: \.element.rowId) { index, stop in
+                        if index > 0 || stop.travelFromPrevious.minutes > 0 {
+                            travelRow(stop.travelFromPrevious)
+                        }
+                        stopRow(stop, in: block)
+                    }
+                    if block.stops.isEmpty {
+                        Label("Zeit fürs Essen — der Planer sucht kein Lokal aus.",
+                              systemImage: "fork.knife")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let leg = viewModel.leg, leg.pool.contains(where: { TripBlockTargets.mealCategories.contains($0.category) }) {
+                        NavigationLink {
+                            TripPoolView(
+                                viewModel: viewModel,
+                                legIndex: leg.position,
+                                placeInto: TripPoolTarget(dayIndex: viewModel.dayIndex,
+                                                          blockId: block.id, label: block.label),
+                            )
+                        } label: {
+                            Label("Aus den Kandidaten", systemImage: "tray.full")
+                                .font(.footnote)
+                        }
+                    }
                     if let leg = viewModel.leg {
                         NavigationLink {
                             TripFoodListView(
