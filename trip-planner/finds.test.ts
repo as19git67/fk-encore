@@ -51,6 +51,24 @@ describe("which leg a find belongs to", () => {
     expect(chooseLeg(dayTrip, legs).position).toBe(0);
   });
 
+  it("gives a find to the stay, not to the journey that arrives at the same point", () => {
+    // A journey is anchored where it arrives (§22.7) — the stay's own
+    // anchor — so by distance alone the two tie.
+    const withJourney = [
+      { position: 0, title: "Weststadt", anchor: WEST },
+      { position: 1, title: "Weiterreise nach Oststadt", anchor: EAST, kind: "transit" },
+      { position: 2, title: "Oststadt", anchor: EAST },
+    ];
+    expect(chooseLeg({ lat: 48.141, lon: 11.581 }, withJourney).position).toBe(2);
+    // A place on the way, near no stay at all, is the journey's.
+    const onTheWay = [
+      { position: 0, title: "Weit weg", anchor: FAR },
+      { position: 1, title: "Weiterreise", anchor: { lat: 48.25, lon: 11.2 }, kind: "transit" },
+      { position: 2, title: "Noch weiter", anchor: { lat: FAR.lat + 1, lon: FAR.lon } },
+    ];
+    expect(chooseLeg({ lat: 48.25, lon: 11.21 }, onTheWay).position).toBe(1);
+  });
+
   it("says so when there are no legs at all", () => {
     expect(chooseLeg(WEST, []).reason).toBe("no-legs");
   });
