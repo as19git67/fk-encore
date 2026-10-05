@@ -22,7 +22,7 @@ let ownerId = 0;
 async function newUser(tag: string): Promise<number> {
   const [user] = await db
     .insert(users)
-    .values({ email: `measure-${tag}-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `measure-${tag}-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   return user.id;
 }

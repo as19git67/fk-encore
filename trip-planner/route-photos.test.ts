@@ -107,7 +107,7 @@ beforeEach(async () => {
   clearRoutePhotoCache();
   const [user] = await db
     .insert(users)
-    .values({ email: `photos-${Date.now()}@test.invalid`, name: "Planner", password_hash: "x" })
+    .values({ email: `photos-${crypto.randomUUID()}@test.invalid`, name: "Planner", password_hash: "x" })
     .returning({ id: users.id });
   ownerId = user.id;
   vi.mocked(getAuthData).mockReturnValue({ userID: String(ownerId), permissions: ["photos.view"] });

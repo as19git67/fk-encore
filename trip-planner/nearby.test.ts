@@ -186,7 +186,7 @@ describe("POST /trip-planner/nearby", () => {
     const { plan } = await createTripPlan({ anchor: HERE, days: 1 });
     const [other] = await db
       .insert(users)
-      .values({ email: `other-${Date.now()}@test.invalid`, name: "Other", password_hash: "x" })
+      .values({ email: `other-${crypto.randomUUID()}@test.invalid`, name: "Other", password_hash: "x" })
       .returning({ id: users.id });
     vi.mocked(getAuthData).mockReturnValue({
       userID: String(other.id),
