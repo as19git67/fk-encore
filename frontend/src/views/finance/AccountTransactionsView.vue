@@ -836,6 +836,7 @@ const KIND_LABELS: Record<string, string> = {
   dividend: 'Ertrag',
   split: 'Split',
   corp_action: 'Kapitalmaßnahme',
+  tax: 'Steuer',
 }
 
 function kindLabel(kind: string): string {
@@ -898,6 +899,7 @@ const KIND_OPTIONS: { label: string; value: DepotTransactionKind }[] = [
   { label: 'Ausbuchung', value: 'out' },
   { label: 'Split', value: 'split' },
   { label: 'Kapitalmaßnahme', value: 'corp_action' },
+  { label: 'Steuer (Thesaurierung)', value: 'tax' },
 ]
 
 function openAddForm(h: Holding) {

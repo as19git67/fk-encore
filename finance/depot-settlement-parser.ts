@@ -20,7 +20,31 @@
 
 import { extractIsin, extractWkn } from "./depot-derivation";
 
-export type SettlementKind = "buy" | "sell" | "dividend";
+/**
+ * "tax": the tax charged on income that was not paid out — a fund's
+ * accumulated income (Thesaurierung) or the Vorabpauschale. Money leaves
+ * the account; no shares move and nothing was earned in cash.
+ */
+export type SettlementKind = "buy" | "sell" | "dividend" | "tax";
+
+/** Whether the net of this kind leaves the account (signed negative). */
+export function isMoneyOut(kind: SettlementKind | null): boolean {
+  return kind === "buy" || kind === "tax";
+}
+
+const ACCUMULATION_RE = /thesaurierung|thesaurierte\s+erträge|vorabpauschale|ausschüttungsgleiche\s+erträge/i;
+const TRADE_RE = /wertpapierabrechnung|wertpapier-abrechnung|wertpapierkauf|wertpapierverkauf|kaufabrechnung|verkaufsabrechnung|orderabrechnung|fondsabrechnung|ausführungsanzeige/i;
+const PAYOUT_RE = /dividendengutschrift|ertragsgutschrift|erträgnisgutschrift|ausschüttung(?!sgleich)/i;
+
+/**
+ * A notice of income a fund kept (Thesaurierung, ausschüttungsgleiche
+ * Erträge) or of the Vorabpauschale: no payout, at most a tax charge. Not
+ * when the text is a trade's settlement or a payout's credit note that
+ * merely mentions the word.
+ */
+export function looksLikeAccumulation(text: string): boolean {
+  return ACCUMULATION_RE.test(text) && !TRADE_RE.test(text) && !PAYOUT_RE.test(text);
+}
 
 /** The fields the parser looks for, in the order a statement is usually read. */
 export const SETTLEMENT_FIELDS = [
@@ -56,6 +80,11 @@ export interface SettlementInspection extends Omit<SettlementExtraction, "kind">
   taxPending: boolean;
   /** The exchange rate a statement in a foreign currency was converted at; its amounts here are in euros. */
   fx: ExchangeRate | null;
+  /**
+   * Accumulated income or a Vorabpauschale (see looksLikeAccumulation):
+   * kind "tax", the net is the tax charged (negative), no gross, no price.
+   */
+  accumulation: boolean;
   /**
    * A tax statement on its own (see looksLikeTaxStatement): `gross` is the
    * amount before taxes, `net` the one after, and nothing but the tax is
@@ -182,7 +211,7 @@ export const STRONG_SETTLEMENT_PATTERN = STRONG_SETTLEMENT_WORDS.join("|");
 export const INSURANCE_PATTERN = INSURANCE_WORDS.join("|");
 /** Any text worth reading: a strong word, or one of the weaker settlement/dividend words. */
 export const SETTLEMENT_CANDIDATE_PATTERN =
-  `${STRONG_SETTLEMENT_PATTERN}|ausschüttung|dividende|abrechnung[^\n]{0,40}(kauf|verkauf)|(kauf|verkauf)[^\n]{0,40}abrechnung`;
+  `${STRONG_SETTLEMENT_PATTERN}|ausschüttung|dividende|thesaurierung|thesaurierte|vorabpauschale|abrechnung[^\n]{0,40}(kauf|verkauf)|(kauf|verkauf)[^\n]{0,40}abrechnung`;
 
 const STRONG_RE = new RegExp(STRONG_SETTLEMENT_PATTERN, "i");
 const INSURANCE_RE = new RegExp(INSURANCE_PATTERN, "i");
@@ -685,7 +714,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     ],
     markers,
   ));
-  const net = netAbs === null ? null : kind === "buy" ? -netAbs : netAbs;
+  const net = netAbs === null ? null : isMoneyOut(kind) ? -netAbs : netAbs;
 
   const tax = track("tax", () => amountAfter(
     text,
@@ -747,8 +776,39 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     ? net
     : (() => {
         const abs = fx!.booked ?? toEuro(netAbs, 2);
-        return abs === null ? null : kind === "buy" ? -abs : abs;
+        return abs === null ? null : isMoneyOut(kind) ? -abs : abs;
       })();
+
+  // Income a fund kept: the only money that moved is the tax charged on it.
+  const accumulation =
+    !looksLikeInsurancePaper(wholeLower) && !looksLikeCostInformation(whole) && looksLikeAccumulation(whole);
+  if (accumulation) {
+    const charged = tax ?? netAbs;
+    return {
+      kind: "tax",
+      insurance: false,
+      costInfo: false,
+      strong: hasStrongSettlementWording(wholeLower),
+      taxStatement: false,
+      taxPending: false,
+      accumulation: true,
+      fx: null,
+      isin,
+      wkn,
+      name: detectName(text, isin, wkn) ?? (text === whole ? null : detectName(whole, isin, wkn)),
+      quantity,
+      price: null,
+      gross: null,
+      fees: null,
+      tax: charged,
+      net: charged === null ? null : -charged,
+      executedAt,
+      currency: printedCurrency,
+      depotNumber: extractDepotNumber(text) ?? extractDepotNumber(whole),
+      markers,
+      labels,
+    };
+  }
 
   return {
     kind,
@@ -757,6 +817,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     strong: hasStrongSettlementWording(wholeLower),
     taxStatement,
     taxPending,
+    accumulation: false,
     fx: converted ? fx : null,
     isin,
     wkn,

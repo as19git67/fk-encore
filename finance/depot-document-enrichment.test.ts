@@ -36,6 +36,7 @@ import { enrichDocument, enrichPendingDocuments } from "./depot-document-enrichm
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 import {
   applySettlementDocument,
+  correctAccumulationTransaction,
   enrichDepotTransactionsFromDocuments,
   getPortfolio,
   getPortfolioPosition,
@@ -1028,5 +1029,72 @@ describe("finance/portfolio — security names", () => {
     expect(name(ISIN_A)).toBe("Alpha Industries AG");
     expect(name("DE000000BBB2")).toBe("Beta Werke AG");
     expect(name("DE000000CCC3")).toBeNull();
+  });
+});
+
+describe("finance/depot-document-enrichment — accumulated income", () => {
+  // Synthetic notice of a fund that keeps its income; ISIN_A is held by setup().
+  const NOTICE = (tax: string) => `Beispielbank AG
+Mitteilung über Ertragsthesaurierung
+Alpha Industries AG ISIN ${ISIN_A}
+Stück 25
+ausschüttungsgleiche Erträge EUR 20,00
+Ex-Tag 15.03.2026
+Kapitalertragsteuer EUR ${tax}`;
+
+  it("books the tax charged as money out and lowers the position's income", async () => {
+    const { depot } = await setup();
+    const r = await enrichDocument(await insertDocument(NOTICE("3,50")));
+    expect(r.outcome).toBe("created");
+    const [row] = await depotRows(depot);
+    expect(row!.kind).toBe("tax");
+    expect(row!.net_amount).toBe("-3.50");
+    expect(row!.tax).toBe("3.50");
+    expect(row!.gross_amount).toBeNull();
+
+    const resp = await getPortfolio({});
+    const p = resp.positions.find((x) => x.isin === ISIN_A)!;
+    expect(Number(p.income)).toBe(-3.5);
+    expect(p.dividend_count).toBe(0);
+  });
+
+  it("books nothing when no tax was charged", async () => {
+    const { depot } = await setup();
+    const r = await enrichDocument(await insertDocument(NOTICE("0,00")));
+    expect(r).toMatchObject({ outcome: "not_settlement", detail: "accumulation_without_tax" });
+    expect(await depotRows(depot)).toHaveLength(0);
+  });
+
+  it("lists a dividend booked from such a notice and corrects it on request", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(NOTICE("3,50"));
+    const [tx] = await db
+      .insert(financeDepotTransaction)
+      .values({
+        account_id: depot,
+        isin: ISIN_A,
+        kind: "dividend",
+        executed_at: "2026-03-15",
+        gross_amount: "20.00",
+        net_amount: "3.50",
+        currency: "EUR",
+        source: "document",
+        dedupe_hash: `doc:${docId}`,
+      })
+      .returning({ id: financeDepotTransaction.id });
+    await db.insert(financeDepotTransactionDocument).values({ depot_transaction_id: tx!.id, document_id: docId });
+
+    const review = await getPortfolioReview({});
+    expect(review.misbooked_accumulations).toEqual([
+      expect.objectContaining({ depot_transaction_id: tx!.id, document_id: docId, tax: "3.50", net_amount: "3.50" }),
+    ]);
+    // Nothing changes until the user asks.
+    expect((await depotRows(depot))[0]!.kind).toBe("dividend");
+
+    const done = await correctAccumulationTransaction({ depotTransactionId: tx!.id });
+    expect(done.result).toBe("rebooked_as_tax");
+    const [row] = await depotRows(depot);
+    expect(row).toMatchObject({ kind: "tax", net_amount: "-3.50", tax: "3.50", gross_amount: null });
+    expect((await getPortfolioReview({})).misbooked_accumulations).toEqual([]);
   });
 });

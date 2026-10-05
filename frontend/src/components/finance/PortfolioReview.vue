@@ -7,8 +7,10 @@ import ScrollX from '../layout/ScrollX.vue'
 import SettlementDocumentDialog from './SettlementDocumentDialog.vue'
 import {
   applySettlementDocument,
+  correctAccumulationTransaction,
   getPortfolioReview,
   setSettlementDocumentIgnored,
+  type PortfolioMisbookedAccumulation,
   type PortfolioReviewConflict,
   type PortfolioReviewDocument,
   type PortfolioReviewResponse,
@@ -76,7 +78,8 @@ const hasContent = computed(() => {
   const r = review.value
   if (!r) return false
   return (
-    r.conflicts.length + r.unmatched_documents.length + (r.unverified_documents?.length ?? 0) + r.holding_gaps.length > 0 ||
+    r.conflicts.length + r.unmatched_documents.length + (r.unverified_documents?.length ?? 0) + r.holding_gaps.length +
+      (r.misbooked_accumulations?.length ?? 0) > 0 ||
     r.unverifiable_changes > 0 ||
     // Keeps the toggle reachable when everything left is ignored.
     ignoredCount.value > 0
@@ -88,8 +91,43 @@ const count = computed(() => {
   const r = review.value
   if (!r) return 0
   const open = <T extends { ignored?: boolean }>(list: T[] | undefined) => (list ?? []).filter((x) => !x.ignored).length
-  return open(r.conflicts) + open(r.unmatched_documents) + open(r.unverified_documents) + r.holding_gaps.length
+  return (
+    open(r.conflicts) + open(r.unmatched_documents) + open(r.unverified_documents) + r.holding_gaps.length +
+    (r.misbooked_accumulations?.length ?? 0)
+  )
 })
+
+/** Dividends booked from an accumulation notice, being corrected right now. */
+const correcting = ref<Set<number>>(new Set())
+
+function askCorrect(m: PortfolioMisbookedAccumulation) {
+  const what = m.tax !== null
+    ? `wird zur Steuer von ${formatSignedCurrency((-Number(m.tax)).toFixed(2), props.currency)}`
+    : 'wird entfernt, weil keine Steuer angefallen ist'
+  confirm.require({
+    header: 'Thesaurierung korrigieren',
+    message:
+      `Die Dividende vom ${formatIsoDate(m.executed_at)} (${m.name ?? m.isin ?? m.wkn ?? ''}) über ` +
+      `${formatSignedCurrency(m.net_amount, props.currency)} ${what}. Ausgeschüttet wurde nichts.`,
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Korrigieren' },
+    accept: () => { void correct(m) },
+  })
+}
+
+async function correct(m: PortfolioMisbookedAccumulation) {
+  correcting.value.add(m.depot_transaction_id)
+  try {
+    await correctAccumulationTransaction(m.depot_transaction_id)
+    await load()
+    emit('changed')
+  } catch (e: any) {
+    error.value = e?.message ?? 'Transaktion konnte nicht korrigiert werden'
+  } finally {
+    correcting.value.delete(m.depot_transaction_id)
+  }
+}
 
 async function setIgnored(documentId: number, ignored: boolean) {
   marking.value.add(documentId)
@@ -231,6 +269,51 @@ function signClass(val: string | null): string {
                       @click="setIgnored(c.document_id, false)"
                     />
                   </template>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </ScrollX>
+      </div>
+
+      <!-- Dividends that were accumulated income -->
+      <div v-if="review.misbooked_accumulations?.length" class="pr-group">
+        <h3>Thesaurierung als Dividende gebucht</h3>
+        <p class="pr-hint">
+          Diese Belege melden eine Thesaurierung oder Vorabpauschale — ausgeschüttet wurde nichts. Gebucht gehört nur die abgeführte Steuer, als Abfluss.
+        </p>
+        <ScrollX>
+          <table class="pr-table">
+            <thead>
+              <tr>
+                <th>Datum</th>
+                <th>Wertpapier</th>
+                <th>Depot</th>
+                <th class="pr-num">Gebucht</th>
+                <th class="pr-num">Richtig</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in review.misbooked_accumulations" :key="m.depot_transaction_id">
+                <td class="pr-date">{{ formatIsoDate(m.executed_at) }}</td>
+                <td>
+                  <button type="button" class="pr-doc" @click="openDocument = m.document_id">
+                    <i class="pi pi-file" aria-hidden="true" />
+                    {{ m.name ?? m.isin ?? m.wkn }}
+                  </button>
+                </td>
+                <td>{{ m.account_label }}</td>
+                <td class="pr-num" :class="signClass(m.net_amount)">{{ formatSignedCurrency(m.net_amount, currency) }}</td>
+                <td class="pr-num">{{ m.tax !== null ? formatSignedCurrency((-Number(m.tax)).toFixed(2), currency) : 'nichts' }}</td>
+                <td>
+                  <Button
+                    label="Korrigieren"
+                    size="small"
+                    text
+                    :loading="correcting.has(m.depot_transaction_id)"
+                    @click="askCorrect(m)"
+                  />
                 </td>
               </tr>
             </tbody>

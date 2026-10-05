@@ -631,6 +631,11 @@ export async function enrichDocument(
     result.date_source = reading.merge.values.executedAt ? "statement" : parsed.executedAt ? "document_date" : null;
   }
   if (!isUsableSettlement(parsed)) return result;
+  // Income a fund kept without any tax charged: no money moved, nothing to book.
+  if (parsed.kind === "tax" && !(parsed.tax !== null && parsed.tax > 0)) {
+    result.detail = "accumulation_without_tax";
+    return result;
+  }
   result.statement_net = fixed(parsed.net, 2);
   result.isin = parsed.isin;
   result.wkn = parsed.wkn;
@@ -968,4 +973,130 @@ export async function setIgnoredForDepots(documentId: number, ignored: boolean, 
   } else {
     await db.delete(financeDepotDocumentIgnore).where(eq(financeDepotDocumentIgnore.document_id, documentId));
   }
+}
+
+/** A dividend that was booked from a document now read as accumulated income. */
+export interface MisbookedAccumulation {
+  depot_transaction_id: number;
+  account_id: number;
+  document_id: number;
+  isin: string | null;
+  wkn: string | null;
+  name: string | null;
+  executed_at: string;
+  /** What the row carries now (a dividend, i.e. money in). */
+  net_amount: string | null;
+  /** The tax the document says was charged (scale 2), or null when none was. */
+  tax: string | null;
+}
+
+/**
+ * Dividends booked from a notice of accumulated income or a Vorabpauschale
+ * before such notices were recognised: they claim a payout that never
+ * happened. Listed for the user to correct, never changed silently.
+ */
+export async function findMisbookedAccumulations(accountIds: number[]): Promise<MisbookedAccumulation[]> {
+  if (accountIds.length === 0) return [];
+  const rows = await db
+    .select({
+      id: financeDepotTransaction.id,
+      account_id: financeDepotTransaction.account_id,
+      isin: financeDepotTransaction.isin,
+      wkn: financeDepotTransaction.wkn,
+      name: financeDepotTransaction.name,
+      executed_at: financeDepotTransaction.executed_at,
+      net_amount: financeDepotTransaction.net_amount,
+      document_id: financeDepotTransactionDocument.document_id,
+      text: documents.extracted_text,
+    })
+    .from(financeDepotTransaction)
+    .innerJoin(
+      financeDepotTransactionDocument,
+      eq(financeDepotTransactionDocument.depot_transaction_id, financeDepotTransaction.id),
+    )
+    .innerJoin(documents, eq(documents.id, financeDepotTransactionDocument.document_id))
+    .where(
+      and(
+        inArray(financeDepotTransaction.account_id, accountIds),
+        eq(financeDepotTransaction.kind, "dividend"),
+        sql`${documents.extracted_text} ~* ${ACCUMULATION_CANDIDATE}`,
+      ),
+    );
+  const out: MisbookedAccumulation[] = [];
+  for (const r of rows) {
+    const reading = await readSettlement(r.document_id, r.text, "cache-only");
+    if (!reading.rules?.accumulation) continue;
+    const tax = reading.rules.tax;
+    out.push({
+      depot_transaction_id: r.id,
+      account_id: r.account_id,
+      document_id: r.document_id,
+      isin: r.isin,
+      wkn: r.wkn,
+      name: r.name,
+      executed_at: r.executed_at.slice(0, 10),
+      net_amount: r.net_amount,
+      tax: tax !== null && tax > 0 ? tax.toFixed(2) : null,
+    });
+  }
+  return out;
+}
+
+const ACCUMULATION_CANDIDATE = "thesaurierung|thesaurierte|vorabpauschale|ausschüttungsgleich";
+
+/**
+ * Turn a dividend booked from an accumulation notice into what the notice
+ * says happened: the tax charged, as money out — or, when no tax was
+ * charged, nothing at all (a row only that document created is removed,
+ * any other row loses the link to it). Returns what was done.
+ */
+export async function correctMisbookedAccumulation(
+  depotTransactionId: number,
+): Promise<"rebooked_as_tax" | "removed" | "unlinked" | "not_found"> {
+  const [found] = (await findMisbookedAccumulationsFor(depotTransactionId));
+  if (!found) return "not_found";
+  if (found.tax !== null) {
+    await db
+      .update(financeDepotTransaction)
+      .set({
+        kind: "tax",
+        tax: found.tax,
+        net_amount: (-Number(found.tax)).toFixed(2),
+        gross_amount: null,
+        price: null,
+        fees: null,
+      })
+      .where(eq(financeDepotTransaction.id, depotTransactionId));
+    return "rebooked_as_tax";
+  }
+  const [row] = await db
+    .select({ source: financeDepotTransaction.source })
+    .from(financeDepotTransaction)
+    .where(eq(financeDepotTransaction.id, depotTransactionId))
+    .limit(1);
+  if (row?.source === "document") {
+    await db.delete(financeDepotTransaction).where(eq(financeDepotTransaction.id, depotTransactionId));
+    return "removed";
+  }
+  await db
+    .delete(financeDepotTransactionDocument)
+    .where(
+      and(
+        eq(financeDepotTransactionDocument.depot_transaction_id, depotTransactionId),
+        eq(financeDepotTransactionDocument.document_id, found.document_id),
+      ),
+    );
+  return "unlinked";
+}
+
+async function findMisbookedAccumulationsFor(depotTransactionId: number): Promise<MisbookedAccumulation[]> {
+  const [row] = await db
+    .select({ account_id: financeDepotTransaction.account_id })
+    .from(financeDepotTransaction)
+    .where(eq(financeDepotTransaction.id, depotTransactionId))
+    .limit(1);
+  if (!row) return [];
+  return (await findMisbookedAccumulations([row.account_id])).filter(
+    (m) => m.depot_transaction_id === depotTransactionId,
+  );
 }
