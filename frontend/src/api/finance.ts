@@ -917,6 +917,23 @@ export async function setSettlementDocumentIgnored(documentId: number, ignored: 
   )
 }
 
+export interface ResetDocumentReadingsResponse {
+  /** Transactions deleted (created or completed from documents). */
+  removed: number
+  /** Manual transactions that only lost their link to a document. */
+  unlinked: number
+  /** Stored model answers cleared. */
+  answers_cleared: number
+  /** Transactions derived again from account bookings. */
+  rederived: number
+}
+
+/** Take back everything documents put into the depots, so they can be read in afresh. */
+export async function resetDocumentReadings(accounts: number[] = []): Promise<ResetDocumentReadingsResponse> {
+  const qs = accounts.length > 0 ? `?accounts=${accounts.join(',')}` : ''
+  return apiFetch(`/finance/portfolio/documents/reset${qs}`, { method: 'POST', body: JSON.stringify({}) })
+}
+
 /** Resolve a conflict in the statement's favour. */
 export async function applySettlementDocument(documentId: number): Promise<DepotEnrichResult> {
   return apiFetch(`/finance/portfolio/documents/${documentId}/apply`, {

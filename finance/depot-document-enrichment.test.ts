@@ -27,6 +27,7 @@ import {
   financeDepotDocumentIgnore,
   financeDepotTransaction,
   financeDepotTransactionDocument,
+  financeDocumentSettlementLlm,
   financeTagTransaction,
   financeTanSession,
   financeTransaction,
@@ -44,6 +45,7 @@ import {
   ignoreSettlementDocument,
   inspectSettlementDocument,
   listPortfolioTransactions,
+  resetDocumentReadings,
   unignoreSettlementDocument,
 } from "./portfolio";
 
@@ -1215,5 +1217,40 @@ describe("finance/depot-document-enrichment — kinds of paper", () => {
     // The booking's own amount stays; the credit note adds what it lacked.
     expect(rows[0]!.net_amount).toBe("30.00");
     expect(rows[0]!.gross_amount).toBe("50.00");
+  });
+});
+
+describe("finance/portfolio — read the documents in afresh", () => {
+  it("takes back what documents booked, keeps manual rows and ignore marks, and derives again", async () => {
+    const { bc, giro, depot } = await setup();
+    // A booking derived from the account, then completed by its settlement.
+    await insertGiroBooking(giro, "2026-03-16", "-2966.40");
+    await deriveDepotTransactionsForBankcontact(bc);
+    const settlement = await insertDocument(BUY_TEXT);
+    expect((await enrichDocument(settlement)).outcome).toBe("enriched");
+    // A row a document created on its own.
+    expect((await enrichDocument(await insertDocument(DIVIDEND_TEXT))).outcome).toBe("created");
+    // A manual row a document completed.
+    const [manual] = await db
+      .insert(financeDepotTransaction)
+      .values({ account_id: depot, isin: ISIN_A, kind: "sell", executed_at: "2026-08-01", net_amount: "100.00", source: "manual+document" })
+      .returning({ id: financeDepotTransaction.id });
+    const manualDoc = await insertDocument("Beispieltext");
+    await db.insert(financeDepotTransactionDocument).values({ depot_transaction_id: manual!.id, document_id: manualDoc });
+    // A stored model answer and an ignore mark.
+    await db.insert(financeDocumentSettlementLlm).values({ document_id: settlement, values: { kind: "buy" } });
+    const ignoredDoc = await insertDocument("Beispieltext");
+    await ignoreSettlementDocument({ documentId: ignoredDoc });
+
+    const r = await resetDocumentReadings({});
+    expect(r).toMatchObject({ removed: 2, unlinked: 1, answers_cleared: 1, rederived: 1 });
+
+    const rows = await depotRows(depot);
+    expect(rows.map((x) => x.source).sort()).toEqual(["giro-derived", "manual"]);
+    // The re-derived row carries only what the booking knows.
+    expect(rows.find((x) => x.source === "giro-derived")!.amount).toBeNull();
+    expect(await db.select().from(financeDepotTransactionDocument)).toHaveLength(0);
+    expect(await db.select().from(financeDocumentSettlementLlm)).toHaveLength(0);
+    expect(await db.select().from(financeDepotDocumentIgnore)).toHaveLength(1);
   });
 });
