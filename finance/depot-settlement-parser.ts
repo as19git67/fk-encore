@@ -49,6 +49,14 @@ export interface SettlementInspection extends Omit<SettlementExtraction, "kind">
   /** The text prints wording only a settlement or dividend statement prints. */
   strong: boolean;
   /**
+   * A credit note or settlement whose amount is before taxes: it prints
+   * "Zu Ihren Gunsten vor Steuern" and leaves the taxes to a separate tax
+   * statement. Its net is not what the account is credited.
+   */
+  taxPending: boolean;
+  /** The exchange rate a statement in a foreign currency was converted at; its amounts here are in euros. */
+  fx: ExchangeRate | null;
+  /**
    * A tax statement on its own (see looksLikeTaxStatement): `gross` is the
    * amount before taxes, `net` the one after, and nothing but the tax is
    * ever written to a transaction.
@@ -205,8 +213,10 @@ export function parseGermanNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// A rate ("12,34 %") is never an amount.
-const AMOUNT = String.raw`(-?\s?\d{1,3}(?:[.\s]\d{3})*(?:,\d{1,8})?|-?\s?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)`;
+// A rate ("12,34 %") is never an amount, nor is a footnote marker ("(1)").
+const AMOUNT = String.raw`(-?\s?\d{1,3}(?:[.\s]\d{3})*(?:,\d{1,8})?|-?\s?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))`;
+/** What may stand between a label and its amount: text, or a footnote marker ("Kapitalertragsteuer (1) EUR …"). */
+const GAP = String.raw`(?:[^\d\n-]|\(\d{1,2}\)){0,40}?`;
 const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
 
 /** "Steuern", also as OCR reads it off a scan ("Steuem"). */
@@ -245,7 +255,7 @@ function normalize(text: string): string {
 /** First amount after any of the labels, as a positive number. */
 function amountAfter(text: string, labels: string[], markers: string[]): number | null {
   for (const label of labels) {
-    const re = new RegExp(String.raw`${label}[^\d\n-]{0,40}?${AMOUNT}${CURRENCY}`, "i");
+    const re = new RegExp(String.raw`${label}${GAP}${AMOUNT}${CURRENCY}`, "i");
     const m = re.exec(text);
     if (!m) continue;
     const n = parseGermanNumber(m[1]!);
@@ -266,7 +276,7 @@ function sumAfter(text: string, labels: string[], markers: string[]): number | n
   const seen = new Set<number>();
   let sum = 0;
   for (const label of labels) {
-    const re = new RegExp(String.raw`${label}[^\d\n-]{0,40}?${AMOUNT}${CURRENCY}`, "gi");
+    const re = new RegExp(String.raw`${label}${GAP}${AMOUNT}${CURRENCY}`, "gi");
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
       const n = parseGermanNumber(m[1]!);
@@ -344,6 +354,34 @@ function detectKind(lower: string): SettlementKind | null {
     return lower.indexOf("verkauf") < lower.indexOf("kauf") ? "sell" : "buy";
   }
   return null;
+}
+
+export interface ExchangeRate {
+  /** The currency the statement's amounts are printed in. */
+  foreign: string;
+  /** Foreign units per euro ("Devisenkurs EUR/USD 1,2500"). */
+  perEuro: number;
+  /** The amount in euros printed next to the rate, when one is. */
+  booked: number | null;
+}
+
+/**
+ * "zum Devisenkurs: EUR/USD 1,250000  EUR 40,00": a statement in a foreign
+ * currency says at what rate it was converted and, mostly, the euro amount
+ * that was booked. Null for a statement in euros.
+ */
+export function exchangeRate(text: string): ExchangeRate | null {
+  const m = new RegExp(
+    String.raw`Devisenkurs\s*:?\s*(?:EUR\s*/\s*([A-Z]{3})|([A-Z]{3})\s*/\s*EUR)\s+(\d+[.,]\d+)(?:\s+EUR\s+${AMOUNT})?`,
+    "i",
+  ).exec(text);
+  if (!m) return null;
+  const quoted = parseGermanNumber(m[3]!);
+  if (quoted === null || quoted <= 0) return null;
+  const foreign = (m[1] ?? m[2])!.toUpperCase();
+  if (foreign === "EUR") return null;
+  const booked = m[4] === undefined ? null : parseGermanNumber(m[4]);
+  return { foreign, perEuro: m[1] ? quoted : 1 / quoted, booked: booked === null ? null : Math.abs(booked) };
 }
 
 function detectCurrency(text: string): string | null {
@@ -496,9 +534,16 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   // labels reach there belongs to a table of tax bases.
   const price = taxStatement ? null : track("price", () => amountAfter(
     text,
-    [String.raw`Ausführungskurs`, String.raw`Kurs\s*/\s*Preis`, String.raw`Kurswert\s*je`, String.raw`Preis\s*je`, String.raw`Kurs(?!wert)`, String.raw`Dividende\s*(?:je|pro)\s*(?:Stück|Aktie|Anteil)`, String.raw`Ausschüttung\s*(?:je|pro)\s*(?:Stück|Anteil)`],
+    [String.raw`Ausführungskurs`, String.raw`Kurs\s*/\s*Preis`, String.raw`Kurswert\s*je`, String.raw`Preis\s*je`, String.raw`(?<!Devisen)Kurs(?!wert)`, String.raw`Dividende\s*(?:je|pro)\s*(?:Stück|Aktie|Anteil)`, String.raw`Ausschüttung\s*(?:je|pro)\s*(?:Stück|Anteil)`],
     markers,
-  ));
+  ) ?? (() => {
+    // "USD 0,80 Dividende pro Stück": the amount in front of the label.
+    const m = new RegExp(String.raw`${AMOUNT}[ \t]*(?:Dividende|Ausschüttung|Ertrag)\s*(?:je|pro)\s*(?:Stück|Aktie|Anteil)`, "i").exec(text);
+    if (!m) return null;
+    markers.push("n … pro Stück");
+    const n = parseGermanNumber(m[1]!);
+    return n === null ? null : Math.abs(n);
+  })());
 
   const gross = taxStatement
     ? track("gross", () => amountAfter(text, [String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*vor\s*${STEUERN}`], markers))
@@ -595,8 +640,33 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   const executedAt = track("executedAt", () =>
     (taxLine ? dateAfter(taxLine, [String.raw`Steuerliche\s*Behandlung[^\n]*?\bvom`], markers) : null) ??
     (kind === "dividend"
-      ? dateAfter(text, [String.raw`Zahlbarkeitstag`, String.raw`Zahltag`, String.raw`Valuta`, String.raw`Ex-?Tag`, String.raw`Datum`], markers)
+      ? dateAfter(text, [String.raw`Zahlbarkeitstag`, String.raw`Zahltag`, String.raw`zahlbar\s*ab`, String.raw`Valuta`, String.raw`Ex-?Tag`, String.raw`Datum`], markers)
       : dateAfter(text, [String.raw`Schlusstag(?:\s*/\s*-?Zeit)?`, String.raw`Ausführungstag`, String.raw`Handelstag`, String.raw`Geschäftstag`, String.raw`Ausführung\s*am`, String.raw`Valuta`, String.raw`Datum`], markers)));
+
+  const taxPending =
+    !taxStatement &&
+    new RegExp(String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*vor\s*${STEUERN}`, "i").test(text) &&
+    !new RegExp(String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*nach\s*${STEUERN}`, "i").test(text);
+
+  // A statement in a foreign currency: every amount is converted at the
+  // rate it prints, and the net is the euro amount it says was booked. A
+  // depot transaction carries one currency — the account's — so that
+  // Kurswert, taxes and the account booking can be checked against each other.
+  const printedCurrency = detectCurrency(text) ?? detectCurrency(whole);
+  const fx = taxStatement ? null : exchangeRate(text);
+  const converted = fx !== null && printedCurrency === fx.foreign;
+  const toEuro = (n: number | null, scale: number): number | null =>
+    n === null || !converted ? n : Math.round((n / fx!.perEuro) * 10 ** scale) / 10 ** scale;
+  if (converted) {
+    markers.push("Devisenkurs");
+    labels.currency = `Devisenkurs EUR/${fx!.foreign}`;
+  }
+  const netEuro = !converted
+    ? net
+    : (() => {
+        const abs = fx!.booked ?? toEuro(netAbs, 2);
+        return abs === null ? null : kind === "buy" ? -abs : abs;
+      })();
 
   return {
     kind,
@@ -604,17 +674,19 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     costInfo: looksLikeCostInformation(whole),
     strong: hasStrongSettlementWording(wholeLower),
     taxStatement,
+    taxPending,
+    fx: converted ? fx : null,
     isin,
     wkn,
     name: detectName(text, isin, wkn) ?? (text === whole ? null : detectName(whole, isin, wkn)),
     quantity,
-    price,
-    gross,
-    fees,
-    tax,
-    net,
+    price: toEuro(price, 6),
+    gross: toEuro(gross, 2),
+    fees: toEuro(fees, 2),
+    tax: toEuro(tax, 2),
+    net: netEuro,
     executedAt,
-    currency: detectCurrency(text) ?? detectCurrency(whole),
+    currency: converted ? "EUR" : printedCurrency,
     depotNumber: extractDepotNumber(text) ?? extractDepotNumber(whole),
     markers,
     labels,

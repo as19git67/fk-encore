@@ -442,3 +442,41 @@ Steuerliche Behandlung: Wertpapierverkauf vom 03.06.2026`;
     expect(inspectSettlement(combined)!.taxStatement).toBe(false);
   });
 });
+
+describe("parseSettlement — a credit note in a foreign currency, taxes to follow", () => {
+  // Synthetic: a dividend paid in USD, converted at the printed rate; the
+  // German taxes come on a separate tax statement.
+  const CREDIT = `Beispielbank AG
+Dividendengutschrift
+STK 50,000 Alpha Industries AG WKN/ISIN AAA111 / DE000000AAA1
+USD 0,80 Dividende pro Stück
+zahlbar ab 10.04.2026
+Bruttobetrag: USD 40,00
+Quellensteuer USD 6,00
+Ausmachender Betrag USD 34,00
+zum Devisenkurs: EUR/USD 1,250000 EUR 27,20
+Valuta 14.04.2026 Zu Ihren Gunsten vor Steuern EUR 27,20`;
+
+  it("converts every amount at the printed rate and takes the euro amount booked as the net", () => {
+    const s = inspectSettlement(CREDIT)!;
+    expect(s.kind).toBe("dividend");
+    expect(s.currency).toBe("EUR");
+    expect(s.quantity).toBe(50);
+    expect(s.price).toBe(0.64);
+    expect(s.gross).toBe(32);
+    expect(s.tax).toBe(4.8);
+    expect(s.net).toBe(27.2);
+    expect(s.executedAt).toBe("2026-04-10");
+    expect(s.labels.currency).toBe("Devisenkurs EUR/USD");
+  });
+
+  it("says its amount is before taxes", () => {
+    expect(inspectSettlement(CREDIT)!.taxPending).toBe(true);
+    expect(inspectSettlement(CREDIT)!.taxStatement).toBe(false);
+  });
+
+  it("reads past a footnote marker between a tax label and its amount", () => {
+    const s = inspectSettlement(CREDIT.replace("Quellensteuer USD 6,00", "Quellensteuer (1) USD 6,00"))!;
+    expect(s.tax).toBe(4.8);
+  });
+});

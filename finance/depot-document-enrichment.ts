@@ -42,6 +42,7 @@ import {
   STRONG_SETTLEMENT_PATTERN,
   type SettlementExtraction,
 } from "./depot-settlement-parser";
+import type { SettlementValues } from "./depot-settlement-merge";
 import {
   readSettlement,
   rereadAgainstBooking,
@@ -373,13 +374,13 @@ export async function findMatchingDepotTransaction(
 }
 
 /**
- * The transaction a tax statement belongs to: same depot, same position
+ * The transaction a tax statement (or a credit note awaiting one) belongs to: same depot, same position
  * (ISIN or WKN), same kind, within the window — and the same quantity
  * when both carry one. The amounts on a tax statement say nothing about
  * the row (before/after taxes, not the booked net), so they are not
  * compared. The closest date wins.
  */
-export async function findTaxStatementTransaction(
+export async function findTransactionByQuantity(
   accountId: number,
   s: SettlementExtraction,
 ): Promise<DepotRow | null> {
@@ -408,36 +409,117 @@ export async function findTaxStatementTransaction(
   return rows.filter(sameQuantity).sort((a, b) => distance(a) - distance(b))[0] ?? null;
 }
 
+/** One document's reading, as far as it counts for a transaction it is linked to. */
+interface PairReading {
+  values: SettlementValues;
+  taxStatement: boolean;
+  taxPending: boolean;
+}
+
+async function readLinkedDocument(documentId: number): Promise<PairReading | null> {
+  const [doc] = await db
+    .select({ extracted_text: documents.extracted_text })
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .limit(1);
+  if (!doc) return null;
+  const r = await readSettlement(documentId, doc.extracted_text, "cache-only");
+  if (r.merge.verdict !== "ok" || rejectedAsOtherPaper(r)) return null;
+  return { values: r.merge.values, taxStatement: r.rules?.taxStatement ?? false, taxPending: r.rules?.taxPending ?? false };
+}
+
 /**
- * A tax statement adds its tax to the transaction it belongs to and links
- * itself there. It never creates a transaction and never touches another
- * value: the settlement or the credit note is the source for those. A tax
- * the row already carries stays, unless the user chose the statement over
- * it (`overwrite`).
+ * The values a transaction takes from the documents linked to it, when one
+ * of them is a tax statement or a credit note that leaves the taxes to one.
+ * A bank sends two papers for one dividend: the credit note (quantity,
+ * gross, withholding tax, the amount before taxes) and the tax statement
+ * (the taxes withheld here, the amount after them, which is what the
+ * account was credited). Together they are one transaction:
+ *
+ *   tax = the credit note's tax + the tax statement's
+ *   net = the tax statement's amount after taxes
+ *
+ * Whichever is read first, the result is the same. A value a booking
+ * confirmed (the net of a row matched to an account booking) and a tax the
+ * row carries without a credit note to explain it are kept.
  */
-async function addTaxFromStatement(
-  result: EnrichResult,
-  parsed: SettlementExtraction,
-  accountId: number,
-  documentId: number,
-  options: EnrichOptions,
-): Promise<EnrichResult> {
-  const dryRun = options.dryRun === true;
-  const row = await findTaxStatementTransaction(accountId, parsed);
-  if (!row) {
-    result.outcome = "no_transaction";
-    return result;
+export function combinePairValues(
+  row: Pick<DepotRow, "amount" | "price" | "gross_amount" | "tax" | "net_amount" | "currency" | "source" | "linked_transaction_id">,
+  readings: PairReading[],
+): Partial<typeof financeDepotTransaction.$inferInsert> {
+  const credit = readings.find((r) => !r.taxStatement)?.values ?? null;
+  const creditPending = readings.find((r) => !r.taxStatement)?.taxPending ?? false;
+  const statement = readings.find((r) => r.taxStatement)?.values ?? null;
+  // A row only documents ever wrote: their values replace its own.
+  const fromDocuments = row.source === "document" && row.linked_transaction_id === null;
+  const patch: Partial<typeof financeDepotTransaction.$inferInsert> = {};
+  const take = (
+    key: "amount" | "price" | "gross_amount" | "currency",
+    current: string | null,
+    value: number | string | null,
+    scale: number,
+  ) => {
+    if (value === null || (current !== null && !fromDocuments)) return;
+    const out = typeof value === "number" ? value.toFixed(scale) : value;
+    if (out !== current) patch[key] = out;
+  };
+  if (credit) {
+    take("amount", row.amount, credit.quantity, 8);
+    take("price", row.price, credit.price, 6);
+    take("gross_amount", row.gross_amount, credit.gross, 2);
+    take("currency", row.currency, credit.currency, 0);
   }
+
+  let tax: number | null = null;
+  if (statement?.tax != null && credit && creditPending) tax = (credit.tax ?? 0) + statement.tax;
+  else if (statement?.tax != null) tax = row.tax === null ? statement.tax : null;
+  else if (credit?.tax != null) tax = row.tax === null || fromDocuments ? credit.tax : null;
+  if (tax !== null) {
+    const out = (Math.round(tax * 100) / 100).toFixed(2);
+    if (out !== row.tax) patch.tax = out;
+  }
+
+  const bookingConfirmed = row.linked_transaction_id !== null && row.net_amount !== null;
+  let net: number | null = null;
+  if (statement?.net != null) net = bookingConfirmed ? null : statement.net;
+  else if (credit?.net != null) net = row.net_amount === null || fromDocuments ? credit.net : null;
+  if (net !== null) {
+    const out = net.toFixed(2);
+    if (out !== row.net_amount) patch.net_amount = out;
+  }
+  return patch;
+}
+
+/**
+ * A tax statement, or a credit note whose amount is before taxes, joins
+ * the transaction of the same security, kind and quantity and links
+ * itself there; the transaction then takes its values from all documents
+ * linked to it (combinePairValues). The amounts are not compared to find
+ * the row — the one printed is before or after taxes, not necessarily the
+ * one booked. A tax statement never creates a transaction.
+ */
+async function joinPairTransaction(
+  result: EnrichResult,
+  row: DepotRow,
+  documentId: number,
+  dryRun: boolean,
+): Promise<EnrichResult> {
   result.depot_transaction_id = row.id;
   result.transaction_net = row.net_amount;
-  const writeTax = parsed.tax !== null && (row.tax === null || (options.overwrite === true && !dryRun));
-  const changed = writeTax && (row.tax === null || Math.abs(Number(row.tax) - parsed.tax!) > NET_TOLERANCE);
+  const linked = await db
+    .select({ id: financeDepotTransactionDocument.document_id })
+    .from(financeDepotTransactionDocument)
+    .where(eq(financeDepotTransactionDocument.depot_transaction_id, row.id));
+  const ids = [...new Set([...linked.map((l) => l.id), documentId])];
+  const readings = (await Promise.all(ids.map(readLinkedDocument))).filter((r): r is PairReading => r !== null);
+  const patch = combinePairValues(row, readings);
+  const changed = Object.keys(patch).length > 0;
   result.outcome = changed ? "enriched" : "linked";
   if (dryRun) return result;
   if (changed) {
     await db
       .update(financeDepotTransaction)
-      .set({ tax: fixed(parsed.tax, 2), source: withDocumentSource(row.source) })
+      .set({ ...patch, source: withDocumentSource(row.source) })
       .where(eq(financeDepotTransaction.id, row.id));
   }
   await linkDocument(row.id, documentId);
@@ -582,9 +664,17 @@ export async function enrichDocument(
     return result;
   }
 
-  if (reading.rules?.taxStatement) {
-    result.tax_statement = true;
-    return addTaxFromStatement(result, parsed, holding.account_id, documentId, options);
+  // The two papers of one dividend (or sale): the credit note before
+  // taxes and the tax statement. Both join the transaction of the same
+  // quantity; only the credit note may create one.
+  if (reading.rules?.taxStatement || reading.rules?.taxPending) {
+    result.tax_statement = reading.rules.taxStatement;
+    const row = await findTransactionByQuantity(holding.account_id, parsed);
+    if (row) return joinPairTransaction(result, row, documentId, dryRun);
+    if (reading.rules.taxStatement) {
+      result.outcome = "no_transaction";
+      return result;
+    }
   }
 
   let match = await findMatchingDepotTransaction(holding.account_id, parsed);

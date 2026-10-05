@@ -1880,6 +1880,8 @@ interface DocumentInspectionResponse {
   is_settlement: boolean;
   /** A tax statement on its own: it only adds the tax to an existing transaction. */
   tax_statement: boolean;
+  /** A credit note whose amount is before taxes: a separate tax statement completes it. */
+  tax_pending: boolean;
   /** Why it does not, when it does not. */
   rejection: InspectionRejection | null;
   /** The reading that is used — rules and model merged. */
@@ -2012,6 +2014,7 @@ export const inspectSettlementDocument = api(
       llm_status: reading.llmStatus,
       is_settlement: rejection === null,
       tax_statement: reading.rules?.taxStatement ?? false,
+      tax_pending: reading.rules?.taxPending ?? false,
       rejection,
       fields,
       sources,

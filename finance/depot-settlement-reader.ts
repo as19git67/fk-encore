@@ -23,6 +23,7 @@ import { extractIsin, extractWkn } from "./depot-derivation";
 import {
   inspectSettlement,
   settlementBlock,
+  type ExchangeRate,
   type SettlementInspection,
 } from "./depot-settlement-parser";
 import {
@@ -84,6 +85,28 @@ const SECURITIES_WORDS =
 export function looksLikeSecuritiesPaper(text: string): boolean {
   const identifier = extractIsin(text) !== null || extractWkn(text) !== null || /\bISIN\b|\bWKN\b/i.test(text);
   return identifier && SECURITIES_WORDS.test(text);
+}
+
+/**
+ * The model reads amounts as printed — in the foreign currency of a
+ * statement the rules converted at its printed rate. Converted the same
+ * way, both readings can be compared and checked together. A net the model
+ * took from the euro amount next to the rate stays as it is.
+ */
+export function llmInEuro(llm: SettlementValues, fx: ExchangeRate | null): SettlementValues {
+  if (!fx || llm.currency !== fx.foreign) return llm;
+  const conv = (n: number | null, scale: number) =>
+    n === null ? null : Math.round((n / fx.perEuro) * 10 ** scale) / 10 ** scale;
+  const netIsEuro = llm.net !== null && fx.booked !== null && Math.abs(Math.abs(llm.net) - fx.booked) < 0.011;
+  return {
+    ...llm,
+    price: conv(llm.price, 6),
+    gross: conv(llm.gross, 2),
+    fees: conv(llm.fees, 2),
+    tax: conv(llm.tax, 2),
+    net: netIsEuro ? llm.net : conv(llm.net, 2),
+    currency: "EUR",
+  };
 }
 
 export function rulesValues(r: SettlementInspection | null): SettlementValues | null {
@@ -158,6 +181,7 @@ export async function readSettlement(
     }
   }
 
+  if (llm) llm = llmInEuro(llm, rules?.fx ?? null);
   return { rules, llm, llmSaysSettlement, merge: mergeSettlement(fromRules, llm), llmStatus };
 }
 
