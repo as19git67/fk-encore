@@ -73,7 +73,9 @@ struct TripNewPlanDraft: Equatable {
     static let minRadiusM = TripReach.minRadiusM
     static let maxRadiusM = TripReach.maxRadiusM
     /// Mirrors the endpoint: more than this is a life, not a trip.
-    static let maxLegs = 10
+    /// Places to stay, not legs — the journeys between them (§22.7)
+    /// are legs too and do not count.
+    static let maxStays = 20
 
     /// Every city needs a coordinate — a half-picked second leg is not
     /// "plan what you have", it is a trip missing a city.

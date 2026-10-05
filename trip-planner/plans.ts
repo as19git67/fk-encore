@@ -103,8 +103,12 @@ import {
 
 const CANDIDATE_LIMIT = 150;
 const MAX_DAYS = 14;
-/** More than this is a life, not a trip — and every leg costs a search. */
-const MAX_LEGS = 10;
+/**
+ * More than this is a life, not a trip — and every leg costs a search.
+ * Counted in places to stay (`legs.ts` says the same): the journeys
+ * between them are legs too and are bounded by the stays.
+ */
+const MAX_STAYS = 20;
 const TRANSPORT_MODES: readonly TransportMode[] = ["foot", "bike", "transit", "car", "ship"];
 const FIXPOINT_KINDS: readonly FixpointKind[] = ["appointment", "departure"];
 /**
@@ -2023,8 +2027,8 @@ function normalizeLegs(req: CreatePlanRequest): LegRequest[] {
     if (!Array.isArray(req.legs) || req.legs.length === 0) {
       throw APIError.invalidArgument("legs must be a non-empty array");
     }
-    if (req.legs.length > MAX_LEGS) {
-      throw APIError.invalidArgument(`a plan may have at most ${MAX_LEGS} legs`);
+    if (req.legs.filter((leg) => leg.kind !== "transit").length > MAX_STAYS) {
+      throw APIError.invalidArgument(`a plan may have at most ${MAX_STAYS} places to stay`);
     }
     return req.legs;
   }

@@ -58,8 +58,13 @@ import {
 import { isJourneyDeparture, journeyDeparture } from "./aboard";
 import type { TransportMode } from "./travel";
 
-/** Mirrors `plans.ts`; a trip may not grow past it by adding legs either. */
-const MAX_LEGS = 10;
+/**
+ * Mirrors `plans.ts`; a trip may not grow past it by adding legs
+ * either. Counted in places to stay, not legs: the journeys between
+ * them (§22.7) are legs too, and a trip of six cities with its way
+ * there, its way home and the journeys between already had twelve.
+ */
+const MAX_STAYS = 20;
 /**
  * How many days of a newly added leg are planned down to spots.
  *
@@ -106,9 +111,9 @@ export const addTripLeg = api(
     if (!plan) throw APIError.notFound("plan not found");
     await requireOrganiser(req.planId, userId, "Etappen ändern");
 
-    if (plan.legs.length >= MAX_LEGS) {
+    if (plan.legs.filter((leg) => leg.kind !== "transit").length >= MAX_STAYS) {
       throw APIError.failedPrecondition(
-        `eine Reise hat höchstens ${MAX_LEGS} Etappen — das ist ein Leben, keine Reise`,
+        `eine Reise hat höchstens ${MAX_STAYS} Städte — das ist ein Leben, keine Reise`,
       );
     }
     const position = validatePosition(req.position, plan.legs.length);

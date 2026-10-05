@@ -4148,7 +4148,9 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    über „Mitreisende" und braucht dafür niemandes Erlaubnis.
 
    **Mehrere Städte, auch nachträglich (§4.2).** Der Server nahm seit
-   dem ersten Tag bis zu zehn Etappen — eigener Anker, eigener Modus,
+   dem ersten Tag bis zu zehn Etappen (seit 2026-10-05: zwanzig Städte,
+   Weiterreisen zählen nicht mit — mit ihnen als Etappen war bei sechs
+   Städten Schluss) — eigener Anker, eigener Modus,
    eigene Region, eigener Vorrat — aber *nur beim Anlegen*, und die App
    baute davon genau eine. Die zwanzig Tage Japan aus §16 waren damit in
    einem Request planbar und danach unveränderlich, was nicht ist, wie
