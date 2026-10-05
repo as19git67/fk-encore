@@ -258,7 +258,7 @@ function chooseLegFor(
 ): number {
   const choice = chooseLeg(
     position,
-    plan.legs.map((l) => ({ position: l.position, title: l.title, anchor: l.anchor })),
+    plan.legs.map((l) => ({ position: l.position, title: l.title, anchor: l.anchor, kind: l.kind })),
   );
   if (choice.position !== null) return choice.position;
 

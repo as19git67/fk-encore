@@ -47,6 +47,8 @@ export interface LegCandidate {
   position: number;
   title: string | null;
   anchor: Coordinate;
+  /** "transit" for the journey between two places (§22.7); anything else is a stay. */
+  kind?: string | null;
 }
 
 export interface LegChoice {
@@ -63,6 +65,13 @@ export interface LegChoice {
  * The nearest anchor wins, and only if it is near enough at all. Two
  * legs in the same city both being "near" is not a problem worth
  * solving here: either answer is right, and the traveller can move it.
+ *
+ * A journey (§22.7) is anchored where it arrives — the same point as
+ * the stay it leads to — so by distance alone the two tie, and a find
+ * shared for Reykjavík landed in "Weiterreise nach Reykjavík", where
+ * nobody looks for it. The stay wins wherever one is near enough; a
+ * journey takes a find only when no stay is, which is a place on the
+ * way (§24).
  */
 export function chooseLeg(
   find: Coordinate,
@@ -70,6 +79,20 @@ export function chooseLeg(
 ): LegChoice {
   if (legs.length === 0) return { position: null, distanceM: null, reason: "no-legs" };
 
+  const stays = legs.filter((leg) => leg.kind !== "transit");
+  const first = nearest(find, stays.length > 0 ? stays : legs);
+  const best = first && first.distanceM <= MAX_LEG_DISTANCE_M ? first : nearest(find, legs);
+
+  if (!best || best.distanceM > MAX_LEG_DISTANCE_M) {
+    return { position: null, distanceM: best?.distanceM ?? null, reason: "too-far" };
+  }
+  return { position: best.position, distanceM: best.distanceM };
+}
+
+function nearest(
+  find: Coordinate,
+  legs: readonly LegCandidate[],
+): { position: number; distanceM: number } | null {
   let best: { position: number; distanceM: number } | null = null;
   for (const leg of legs) {
     const distanceM = haversineMeters(find, leg.anchor);
@@ -77,11 +100,7 @@ export function chooseLeg(
       best = { position: leg.position, distanceM };
     }
   }
-
-  if (!best || best.distanceM > MAX_LEG_DISTANCE_M) {
-    return { position: null, distanceM: best?.distanceM ?? null, reason: "too-far" };
-  }
-  return { position: best.position, distanceM: best.distanceM };
+  return best;
 }
 
 export interface ExistingEntry {

@@ -366,7 +366,7 @@ function toOption(candidate: LocatedCandidate): ShareProposalOption {
 function legFor(position: { lat: number; lon: number }, plan: LoadedPlan): number | null {
   const choice = chooseLeg(
     position,
-    plan.legs.map((leg) => ({ position: leg.position, title: leg.title, anchor: leg.anchor })),
+    plan.legs.map((leg) => ({ position: leg.position, title: leg.title, anchor: leg.anchor, kind: leg.kind })),
   );
   return choice.position;
 }
