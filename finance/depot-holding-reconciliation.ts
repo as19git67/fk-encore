@@ -15,6 +15,12 @@
  * explained by the first change after it, however many unchanged
  * snapshots lie between.
  *
+ * The lag also runs the other way: a row derived from an account booking
+ * carries the value date, which can fall a day or two after the snapshot
+ * that already shows the trade. When the pooled transactions do not
+ * explain a change, the ones dated up to LOOKAHEAD_DAYS after the snapshot
+ * are taken too, but only if they then explain it exactly.
+ *
  * A change the pooled transactions cannot be checked against — one of
  * them carries no quantity (a giro-derived row without its settlement),
  * or a split / corporate action is among them — is counted as
@@ -28,6 +34,12 @@ import { financeAccountHolding, financeDepotTransaction } from "../db/schema";
 
 /** Shares below this are rounding noise, not a gap. */
 const QUANTITY_EPSILON = 1e-6;
+/** How far after a snapshot a transaction's date may lie and still explain it (value date after a weekend). */
+export const LOOKAHEAD_DAYS = 5;
+
+function daysAfter(from: string, to: string): number {
+  return (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
+}
 
 export interface SnapshotPoint {
   as_of: string;
@@ -127,12 +139,27 @@ export function reconcilePosition(
       if (effect === "unknown") unknown = true;
       else if (effect !== null) explained += effect;
     }
-    const count = pending.length;
+    let count = pending.length;
     pending.length = 0;
 
     if (unknown) {
       out.unverifiable++;
       continue;
+    }
+    // Dated after the snapshot (a value date), but what makes it add up.
+    if (Math.abs(delta - explained) >= QUANTITY_EPSILON) {
+      let extra = 0;
+      for (let k = next; k < pool.length && daysAfter(after.as_of, pool[k]!.executed_at) <= LOOKAHEAD_DAYS; k++) {
+        const effect = quantityEffect(pool[k]!);
+        if (effect === "unknown") break;
+        if (effect !== null) extra += effect;
+        if (Math.abs(delta - explained - extra) < QUANTITY_EPSILON) {
+          explained += extra;
+          count += k + 1 - next;
+          next = k + 1;
+          break;
+        }
+      }
     }
     const unexplained = delta - explained;
     if (Math.abs(unexplained) < QUANTITY_EPSILON) continue;
