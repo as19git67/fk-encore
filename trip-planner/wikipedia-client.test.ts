@@ -10,6 +10,7 @@ import {
   parseArticle,
   parseArticleUrl,
   parseGermanTitle,
+  parseRevision,
   parseSections,
 } from "./wikipedia-client";
 
@@ -100,6 +101,7 @@ describe("the article's files", () => {
         pages: [{
           title: "Beispielkirche",
           fullurl: "https://de.wikipedia.org/wiki/Beispielkirche",
+          lastrevid: 4711,
           description: "Kirche in Musterstadt",
           extract: "Lead.\n\n== Geschichte ==\nText.",
           pageimage: "Beispielkirche_Westfassade.jpg",
@@ -117,8 +119,11 @@ describe("the article's files", () => {
       description: "Kirche in Musterstadt",
       mainImage: "File:Beispielkirche Westfassade.jpg",
       images: ["File:Beispielkirche Westfassade.jpg", "File:Innenraum.jpg"],
+      revision: 4711,
     });
     expect(article?.sections).toHaveLength(2);
+    expect(parseRevision({ query: { pages: [{ title: "Beispielkirche", lastrevid: 4712 }] } })).toBe(4712);
+    expect(parseRevision({ query: { pages: [{ title: "Nichts", missing: true }] } })).toBeNull();
     expect(parseArticle({ query: { pages: [{ title: "Nichts", missing: true }] } }, "de")).toBeNull();
   });
 });

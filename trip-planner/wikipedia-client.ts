@@ -39,6 +39,8 @@ export interface ArticleSection {
 
 export interface WikipediaArticle extends ArticleRef {
   pageUrl: string;
+  /** The page's current revision id, so a later look can tell whether it changed. */
+  revision: number | null;
   /** Wikidata's one-line description where the article has one. */
   description: string | null;
   sections: ArticleSection[];
@@ -53,6 +55,8 @@ export interface WikipediaClient {
   germanTitle(ref: ArticleRef): Promise<string | null>;
   /** The article, or null when the title names no page. */
   article(ref: ArticleRef): Promise<WikipediaArticle | null>;
+  /** The page's current revision id alone — the cheap question "did it change?" */
+  revision(ref: ArticleRef): Promise<number | null>;
 }
 
 /** Wikipedia did not answer. The caller shows the link it always had. */
@@ -84,6 +88,13 @@ export class HttpWikipediaClient implements WikipediaClient {
     url.searchParams.set("imlimit", "50");
     url.searchParams.set("titles", ref.title);
     return parseArticle(await getJson(url), ref.lang);
+  }
+
+  async revision(ref: ArticleRef): Promise<number | null> {
+    const url = apiUrl(ref.lang);
+    url.searchParams.set("prop", "info");
+    url.searchParams.set("titles", ref.title);
+    return parseRevision(await getJson(url));
   }
 }
 
@@ -158,6 +169,13 @@ export function parseGermanTitle(body: unknown): string | null {
   return null;
 }
 
+/** The revision id out of an `info` answer, or null for a missing page. */
+export function parseRevision(body: unknown): number | null {
+  const page = firstPage(body);
+  if (!page || page.missing === true) return null;
+  return typeof page.lastrevid === "number" ? page.lastrevid : null;
+}
+
 /** The article out of a `query` answer, or null for a missing page. */
 export function parseArticle(body: unknown, lang: string): WikipediaArticle | null {
   const page = firstPage(body);
@@ -172,6 +190,7 @@ export function parseArticle(body: unknown, lang: string): WikipediaArticle | nu
   return {
     lang,
     title: page.title,
+    revision: typeof page.lastrevid === "number" ? page.lastrevid : null,
     pageUrl: typeof page.fullurl === "string"
       ? page.fullurl
       : `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`,

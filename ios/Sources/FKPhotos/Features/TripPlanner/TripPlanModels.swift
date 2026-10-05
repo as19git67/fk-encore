@@ -1234,6 +1234,15 @@ struct TripSpotArticle: Codable, Sendable {
     let photos: [TripRoutePhoto]
     let attribution: String
     let license: String
+    /// When the text was read from Wikipedia, ISO 8601. Optional so an
+    /// answer from an older server still decodes.
+    var fetchedAt: String? = nil
+
+    /// "Stand: 5. Okt. 2026", or nil without a date.
+    var fetchedLine: String? {
+        guard let fetchedAt, let date = Self.parseTimestamp(fetchedAt) else { return nil }
+        return "Stand: " + date.formatted(date: .abbreviated, time: .omitted)
+    }
 
     var isPending: Bool { translation == "pending" }
     var isTranslated: Bool { translation == "done" }
@@ -1470,4 +1479,17 @@ struct TripDismissDayTripResponse: Codable, Sendable {
     let legIndex: Int
     let key: String
     let dismissed: Bool
+}
+
+extension TripSpotArticle {
+    /// Reads the server's timestamps, with or without fractions of a
+    /// second — Node writes them, Postgres does not.
+    static func parseTimestamp(_ text: String) -> Date? {
+        let withFractions = ISO8601DateFormatter()
+        withFractions.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFractions.date(from: text) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: text)
+    }
 }

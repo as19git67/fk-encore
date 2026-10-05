@@ -50,4 +50,10 @@ final class TripArticleLanguageTests: XCTestCase {
         XCTAssertFalse(TripArticlePreferences.offeredCodes.contains("de"))
         XCTAssertEqual(Set(TripArticlePreferences.offeredCodes).count, TripArticlePreferences.offeredCodes.count)
     }
+
+    func testTheFetchedDateReadsBothTimestampShapes() {
+        XCTAssertNotNil(TripSpotArticle.parseTimestamp("2026-10-05T08:00:00.123Z"))
+        XCTAssertNotNil(TripSpotArticle.parseTimestamp("2026-10-05T08:00:00Z"))
+        XCTAssertNil(TripSpotArticle.parseTimestamp("gestern"))
+    }
 }

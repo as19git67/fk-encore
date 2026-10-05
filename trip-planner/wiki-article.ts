@@ -15,8 +15,13 @@
  *      section by section. That takes minutes on a local model, so the
  *      first answer is the original with `translation: "pending"`, the
  *      work runs on, and the app asks again until it is `"done"`.
- *   3. **Kept.** Per article, for a month: the Colosseum reads the same
- *      for everybody, and nobody should pay the translation twice.
+ *   3. **Kept, and checked.** Per article: the Colosseum reads the same
+ *      for everybody, and nobody should pay the translation twice. Once
+ *      a day, when somebody opens it, the server asks Wikipedia for the
+ *      page's revision id alone; only a changed id fetches the article
+ *      again and translates it anew, in the background, while the
+ *      reader gets the text that is there. A month is the outer limit
+ *      for an article whose check keeps failing.
  *
  * Said on screen, every time: where the text comes from, under which
  * licence (CC BY-SA 4.0), and that a translation is a machine's.
@@ -53,6 +58,8 @@ export const MAX_TRANSLATED_CHARS = 6_000;
 export const TRANSLATION_CHUNK_CHARS = 1_200;
 /** A translated article is kept this long; an untranslated one too. */
 export const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** How old a kept article may be before an opening asks Wikipedia whether it changed. */
+export const REVALIDATE_AFTER_MS = 24 * 60 * 60 * 1000;
 /** One section's translation may take this long before it counts as failed. */
 const TRANSLATION_STEP_TIMEOUT_MS = 120_000;
 
@@ -97,6 +104,12 @@ export interface SpotArticle {
   /** The untranslated text, once `translation` is "done"; absent otherwise. */
   original?: ArticleOriginal;
   photos: RoutePhoto[];
+  /** The shown edition's revision id when it was fetched, for the daily check. */
+  revision: number | null;
+  /** When the text was fetched from Wikipedia, ISO 8601 — "Stand" in the reader. */
+  fetchedAt: string;
+  /** When Wikipedia was last asked whether it changed; absent on a fresh fetch. */
+  checkedAt?: string;
   /** "Wikipedia · CC BY-SA 4.0", for the footer. */
   attribution: string;
   license: string;
@@ -133,48 +146,73 @@ export async function spotArticle(req: SpotArticleRequest, deps: SpotArticleDeps
   const cached = await readCached(db, ref, now());
   if (running) return deps.awaitTranslation || !cached ? await running : cached;
   // A text somebody else chose to read as it is can still be
-  // translated for this reader; everything else cached is the answer.
+  // translated for this reader; everything else cached is the answer
+  // — after the daily look at whether Wikipedia has moved on.
   if (cached && cached.translation !== "pending"
       && !(cached.translation === "skipped" && !keep.has(cached.sourceLanguage))) {
-    return cached;
+    return revalidated(cached, ref, keep, deps, db, now);
   }
 
   let article: SpotArticle;
   if (cached && cached.translation === "skipped") {
     article = { ...cached, translation: "pending" };
   } else {
-    const wiki = deps.wiki ?? getWikipediaClient();
-    const commons = deps.commons ?? getCommonsClient();
-
-    // German where German exists (§10.4): the local link is the way in,
-    // not the text to show.
-    let source: WikipediaArticle | null = null;
-    if (ref.lang !== "de") {
-      const german = await wiki.germanTitle(ref);
-      if (german) source = await wiki.article({ lang: "de", title: german });
-    }
-    if (!source) source = await wiki.article(ref);
-    if (!source) throw APIError.notFound("Zu diesem Link gibt es keinen Artikel");
-
-    const { sections, truncated } = clip(source.sections, MAX_ARTICLE_CHARS);
-    const photos = await photosOf(source, commons);
-    article = {
-      title: source.title,
-      language: source.lang,
-      sourceLanguage: source.lang,
-      sourceUrl: source.pageUrl,
-      description: source.description,
-      sections,
-      truncated,
-      translation: source.lang === "de" ? "none" : keep.has(source.lang) ? "skipped" : "pending",
-      photos,
-      attribution: `Wikipedia · ${LICENSE}`,
-      license: LICENSE,
-    };
+    article = await fetchArticle(ref, keep, deps, now);
   }
   await writeCached(db, ref, article, now());
   if (article.translation !== "pending") return article;
+  const work = startTranslation(ref, article, deps, db, now);
+  return deps.awaitTranslation ? await work : article;
+}
 
+/**
+ * The article as Wikipedia has it now: German where German exists
+ * (§10.4) — the local link is the way in, not the text to show — with
+ * its pictures, untranslated.
+ */
+async function fetchArticle(
+  ref: ArticleRef,
+  keep: Set<string>,
+  deps: SpotArticleDeps,
+  now: () => number,
+): Promise<SpotArticle> {
+  const wiki = deps.wiki ?? getWikipediaClient();
+  const commons = deps.commons ?? getCommonsClient();
+  let source: WikipediaArticle | null = null;
+  if (ref.lang !== "de") {
+    const german = await wiki.germanTitle(ref);
+    if (german) source = await wiki.article({ lang: "de", title: german });
+  }
+  if (!source) source = await wiki.article(ref);
+  if (!source) throw APIError.notFound("Zu diesem Link gibt es keinen Artikel");
+
+  const { sections, truncated } = clip(source.sections, MAX_ARTICLE_CHARS);
+  const photos = await photosOf(source, commons);
+  return {
+    title: source.title,
+    language: source.lang,
+    sourceLanguage: source.lang,
+    sourceUrl: source.pageUrl,
+    description: source.description,
+    sections,
+    truncated,
+    translation: source.lang === "de" ? "none" : keep.has(source.lang) ? "skipped" : "pending",
+    photos,
+    attribution: `Wikipedia · ${LICENSE}`,
+    license: LICENSE,
+    revision: source.revision,
+    fetchedAt: new Date(now()).toISOString(),
+  };
+}
+
+/** The translation, in the background; whoever asks meanwhile gets what is there. */
+function startTranslation(
+  ref: ArticleRef,
+  article: SpotArticle,
+  deps: SpotArticleDeps,
+  db: Db,
+  now: () => number,
+): Promise<SpotArticle> {
   const translate = deps.translate ?? translateWithLlm;
   const work = translateArticle(article, translate)
     .then(async (translated) => {
@@ -191,7 +229,63 @@ export async function spotArticle(req: SpotArticleRequest, deps: SpotArticleDeps
     })
     .finally(() => inFlight.delete(cacheKey(ref)));
   inFlight.set(cacheKey(ref), work);
-  return deps.awaitTranslation ? await work : article;
+  return work;
+}
+
+/**
+ * The kept article, after the daily question to Wikipedia: has the
+ * page a newer revision? Asked at most once a day per article, with
+ * the revision id alone, and answered without waiting: the reader
+ * gets the kept text now; a changed page is fetched again — and
+ * translated anew where it has to be — behind their back, for the
+ * next opening. A check that fails changes nothing; the month-old
+ * limit in `readCached` is the net under it.
+ */
+async function revalidated(
+  cached: SpotArticle,
+  ref: ArticleRef,
+  keep: Set<string>,
+  deps: SpotArticleDeps,
+  db: Db,
+  now: () => number,
+): Promise<SpotArticle> {
+  const since = Date.parse(cached.checkedAt ?? cached.fetchedAt);
+  if (Number.isFinite(since) && now() - since < REVALIDATE_AFTER_MS) return cached;
+  const wiki = deps.wiki ?? getWikipediaClient();
+  let current: number | null;
+  try {
+    current = await wiki.revision({ lang: cached.sourceLanguage, title: cached.title });
+  } catch (err) {
+    log.warn("wikipedia did not answer the revision check; the kept article stays", {
+      title: cached.title, error: err instanceof Error ? err.message : String(err),
+    });
+    return cached;
+  }
+  const checked: SpotArticle = { ...cached, checkedAt: new Date(now()).toISOString() };
+  if (current === null || cached.revision === null || current === cached.revision) {
+    await writeCached(db, ref, checked, now());
+    return checked;
+  }
+  // Changed: the new text, and its translation, for the next opening.
+  const work = fetchArticle(ref, keep, deps, now)
+    .then(async (fresh) => {
+      await writeCached(db, ref, fresh, now());
+      if (fresh.translation !== "pending") {
+        inFlight.delete(cacheKey(ref));
+        return fresh;
+      }
+      return startTranslation(ref, fresh, deps, db, now);
+    })
+    .catch(async (err) => {
+      log.warn("refreshing a changed article failed; the kept one stays", {
+        title: cached.title, error: err instanceof Error ? err.message : String(err),
+      });
+      inFlight.delete(cacheKey(ref));
+      await writeCached(db, ref, checked, now());
+      return checked;
+    });
+  inFlight.set(cacheKey(ref), work);
+  return deps.awaitTranslation ? await work : checked;
 }
 
 /** Translations under way, so a second reader does not start a second one. */
@@ -371,7 +465,9 @@ async function readCached(db: Db, ref: ArticleRef, now: number): Promise<SpotArt
 }
 
 async function writeCached(db: Db, ref: ArticleRef, article: SpotArticle, now: number): Promise<void> {
-  const fetchedAt = new Date(now).toISOString();
+  // The row's age is the fetch, not the last check: the month that
+  // `readCached` allows counts from when Wikipedia was last read.
+  const fetchedAt = article.fetchedAt ?? new Date(now).toISOString();
   await db
     .insert(tripWikiArticles)
     .values({ lang: ref.lang, title: ref.title, article, fetched_at: fetchedAt })

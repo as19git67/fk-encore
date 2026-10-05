@@ -157,6 +157,14 @@ struct TripArticleView: View {
             Text("Text und Bilder unter \(article.license); Fotos mit ihren Urhebern am Bild.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+            // From when the text is: the server asks Wikipedia once a
+            // day whether the page changed, and fetches it again when
+            // it did.
+            if let line = article.fetchedLine {
+                Text(line)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 
