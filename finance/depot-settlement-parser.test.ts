@@ -11,6 +11,7 @@ import {
   settlementBlock,
   SETTLEMENT_CANDIDATE_PATTERN,
 } from "./depot-settlement-parser";
+import { nameNearerIdentifier } from "./depot-settlement-reader";
 
 // Synthetic settlement texts in the layouts German brokers print. Every
 // identifier, name and number here is invented.
@@ -660,5 +661,39 @@ Zahltag 15.03.2026
 Betrag zu Ihren Gunsten EUR 20,00`)!;
     expect(payout.accumulation).toBe(false);
     expect(payout.kind).toBe("dividend");
+  });
+});
+
+describe("security name on a tax statement", () => {
+  // Synthetic: the name sits on the identifier line; a table further down
+  // heads a line with a bare "Wertpapier".
+  const TAX = `Beispielbank AG
+Steuerliche Behandlung: Dividende vom 03.06.2026
+Stk.   Stk. 40 ALPHA INDUSTRIES AG , WKN / ISIN: AAA111 / DE000000AAA1
+Zu Ihren Gunsten vor Steuern: EUR 52,40
+abgeführte Steuern EUR -6,91
+Zu Ihren Gunsten nach Steuern: EUR 45,49
+Wertpapier
+Beispielhinweis zur Verrechnung`;
+
+  it("reads the name between the quantity and the identifiers", () => {
+    expect(inspectSettlement(TAX)!.name).toBe("ALPHA INDUSTRIES AG");
+  });
+});
+
+describe("nameNearerIdentifier", () => {
+  const TEXT = `Kopf
+Stk. 40 ALPHA INDUSTRIES AG , ISIN: DE000000AAA1
+Steuer
+Wertpapier
+Beispielhinweis zur Verrechnung`;
+
+  it("takes the name printed nearer the identifier", () => {
+    expect(nameNearerIdentifier(TEXT, "DE000000AAA1", "Beispielhinweis zur Verrechnung", "ALPHA INDUSTRIES AG")).toBe("llm");
+    expect(nameNearerIdentifier(TEXT, "DE000000AAA1", "ALPHA INDUSTRIES AG", "Beispielhinweis zur Verrechnung")).toBe("rules");
+  });
+
+  it("does not take a name the text does not print", () => {
+    expect(nameNearerIdentifier(TEXT, "DE000000AAA1", "ALPHA INDUSTRIES AG", "Erfundene Holding AG")).toBe("rules");
   });
 });

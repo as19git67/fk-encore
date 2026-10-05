@@ -1098,3 +1098,34 @@ Kapitalertragsteuer EUR ${tax}`;
     expect((await getPortfolioReview({})).misbooked_accumulations).toEqual([]);
   });
 });
+
+describe("finance/portfolio — rules and model name the security differently", () => {
+  it("takes the name printed nearer the identifier", async () => {
+    await setup();
+    // Synthetic: a bare "Wertpapier" heads an unrelated line before the security.
+    const text = `Beispielbank AG
+Wertpapier
+Beispielhinweis zur Verrechnung
+Dividendengutschrift
+ALPHA INDUSTRIES AG
+ISIN ${ISIN_A}
+Stück 25
+Bruttobetrag 50,00 EUR
+Zahlbarkeitstag 12.05.2026
+Betrag zu Ihren Gunsten 50,00 EUR`;
+    vi.mocked(extractSettlementValues).mockResolvedValue({
+      is_settlement: true,
+      kind: "dividend",
+      isin: ISIN_A,
+      name: "ALPHA INDUSTRIES AG",
+      quantity: 25,
+      gross: 50,
+      net: 50,
+      executed_at: "2026-05-12",
+      currency: "EUR",
+    });
+    const i = await inspectSettlementDocument({ documentId: await insertDocument(text) });
+    expect(i.sources.name).toMatchObject({ rules: "Beispielhinweis zur Verrechnung", llm: "ALPHA INDUSTRIES AG", source: "llm" });
+    expect(i.fields.name).toBe("ALPHA INDUSTRIES AG");
+  });
+});

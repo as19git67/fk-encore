@@ -483,6 +483,10 @@ function detectName(text: string, isin: string | null, wkn: string | null): stri
 }
 
 function detectNameRaw(text: string, isin: string | null, wkn: string | null): string | null {
+  // On the identifier's own line, between the quantity and the identifiers,
+  // as a tax statement prints it: "Stk. 25 ALPHA INDUSTRIES AG , WKN / ISIN: …".
+  const onIdLine = nameOnIdentifierLine(text, isin, wkn);
+  if (onIdLine) return onIdLine;
   // The specific labels first: a bare "Wertpapier:" also heads lines of an
   // appended tax statement that are not the security's name. A label may
   // share its line with the identifier column's heading
@@ -525,6 +529,17 @@ function detectNameRaw(text: string, isin: string | null, wkn: string | null): s
     }
   }
   return null;
+}
+
+function nameOnIdentifierLine(text: string, isin: string | null, wkn: string | null): string | null {
+  const ids = [isin, wkn].filter((id): id is string => id !== null);
+  if (ids.length === 0) return null;
+  const line = text.split("\n").find((l) => ids.some((id) => l.includes(id)));
+  if (!line) return null;
+  const m = /^\s*(?:(?:Stk\.?|Stück|STK)\s*)*[\d.,]+\s+(.+?)\s*,?\s*(?:WKN|ISIN)\b/i.exec(line);
+  if (!m) return null;
+  const candidate = m[1]!.trim().replace(/\s{2,}/g, " ");
+  return looksLikeName(candidate) ? candidate : null;
 }
 
 /** Labels and headings a statement prints around the security, never its name. */
