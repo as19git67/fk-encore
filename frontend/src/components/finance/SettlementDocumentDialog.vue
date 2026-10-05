@@ -113,6 +113,7 @@ const TAX_STATEMENT_LABELS: Partial<Record<FieldKey, string>> = {
 }
 
 function rowLabel(row: { key: FieldKey; label: string }): string {
+  if (inspection.value?.tax_pending && row.key === 'net') return 'Betrag vor Steuern'
   return (inspection.value?.tax_statement ? TAX_STATEMENT_LABELS[row.key] : undefined) ?? row.label
 }
 
@@ -263,6 +264,9 @@ function openInDocuments() {
 
           <p v-if="inspection.is_settlement && inspection.tax_statement" class="sd-status sd-ok">
             Als Steuermitteilung ({{ depotKindLabel(inspection.fields.kind ?? '') }}) erkannt · ergänzt nur die Steuer einer vorhandenen Transaktion
+          </p>
+          <p v-else-if="inspection.is_settlement && inspection.tax_pending" class="sd-status sd-ok">
+            Als {{ depotKindLabel(inspection.fields.kind ?? '') }}-Gutschrift vor Steuern erkannt · die Steuermitteilung ergänzt Steuern und Betrag nach Steuern
           </p>
           <p v-else-if="inspection.is_settlement" class="sd-status sd-ok">
             Als {{ depotKindLabel(inspection.fields.kind ?? '') }}-Abrechnung erkannt · {{ recognisedCount }} von {{ FIELD_ROWS.length }} Feldern gefunden

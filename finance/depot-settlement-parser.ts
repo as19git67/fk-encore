@@ -49,6 +49,14 @@ export interface SettlementInspection extends Omit<SettlementExtraction, "kind">
   /** The text prints wording only a settlement or dividend statement prints. */
   strong: boolean;
   /**
+   * A credit note or settlement whose amount is before taxes: it prints
+   * "Zu Ihren Gunsten vor Steuern" and leaves the taxes to a separate tax
+   * statement. Its net is not what the account is credited.
+   */
+  taxPending: boolean;
+  /** The exchange rate a statement in a foreign currency was converted at; its amounts here are in euros. */
+  fx: ExchangeRate | null;
+  /**
    * A tax statement on its own (see looksLikeTaxStatement): `gross` is the
    * amount before taxes, `net` the one after, and nothing but the tax is
    * ever written to a transaction.
@@ -205,8 +213,12 @@ export function parseGermanNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// A rate ("12,34 %") is never an amount.
-const AMOUNT = String.raw`(-?\s?\d{1,3}(?:[.\s]\d{3})*(?:,\d{1,8})?|-?\s?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)`;
+// A rate ("12,34 %") is never an amount, nor is a footnote marker ("(1)").
+// The amount stands on its label's line: a line break never belongs to it.
+// Nor is a number that a date continues ("01.01.26") an amount.
+const AMOUNT = String.raw`(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))(?![.,]?\d)`;
+/** What may stand between a label and its amount: text, or a footnote marker ("Kapitalertragsteuer (1) EUR …"). */
+const GAP = String.raw`(?:[^\d\n-]|\(\d{1,2}\)){0,40}?`;
 const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
 
 /** "Steuern", also as OCR reads it off a scan ("Steuem"). */
@@ -242,10 +254,50 @@ function normalize(text: string): string {
     .replace(/\n{2,}/g, "\n");
 }
 
+const CURRENCY_ONLY_RE = /(?:EUR|USD|CHF|GBP|€)\s*$/;
+const AMOUNT_ONLY_RE = /^-?\d{1,3}(?:\.\d{3})*,\d{2}$|^-?\d+,\d{2}$/;
+
+/**
+ * Text read off a two-column table can come out column by column: the
+ * labels with their currency ("abgeführte Steuern EUR"), and further down
+ * the amounts alone, one per line, in the same order. Each run of such
+ * amounts is put back after the labels it belongs to, so that every label
+ * is followed by its amount again. A run that does not match the number of
+ * labels waiting for one is left as it is.
+ */
+export function rejoinColumnAmounts(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let waiting: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (AMOUNT_ONLY_RE.test(line)) {
+      let j = i;
+      while (j < lines.length && AMOUNT_ONLY_RE.test(lines[j]!.trim())) j++;
+      const run = lines.slice(i, j).map((l) => l.trim());
+      if (run.length === waiting.length) {
+        run.forEach((amount, k) => {
+          out[waiting[k]!] = `${out[waiting[k]!]} ${amount}`;
+        });
+        waiting = [];
+        i = j - 1;
+        continue;
+      }
+      out.push(...lines.slice(i, j));
+      waiting = [];
+      i = j - 1;
+      continue;
+    }
+    if (CURRENCY_ONLY_RE.test(line) && !/\d/.test(line)) waiting.push(out.length);
+    out.push(lines[i]!);
+  }
+  return out.join("\n");
+}
+
 /** First amount after any of the labels, as a positive number. */
 function amountAfter(text: string, labels: string[], markers: string[]): number | null {
   for (const label of labels) {
-    const re = new RegExp(String.raw`${label}[^\d\n-]{0,40}?${AMOUNT}${CURRENCY}`, "i");
+    const re = new RegExp(String.raw`${label}${GAP}${AMOUNT}${CURRENCY}`, "i");
     const m = re.exec(text);
     if (!m) continue;
     const n = parseGermanNumber(m[1]!);
@@ -266,7 +318,7 @@ function sumAfter(text: string, labels: string[], markers: string[]): number | n
   const seen = new Set<number>();
   let sum = 0;
   for (const label of labels) {
-    const re = new RegExp(String.raw`${label}[^\d\n-]{0,40}?${AMOUNT}${CURRENCY}`, "gi");
+    const re = new RegExp(String.raw`${label}${GAP}${AMOUNT}${CURRENCY}`, "gi");
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
       const n = parseGermanNumber(m[1]!);
@@ -303,6 +355,9 @@ function dateAfter(text: string, labels: string[], markers: string[]): string | 
  * booking line with the amount sits there) to the next strong word or
  * the end. Null when the text has no strong word: it is read whole.
  */
+const FINAL_AMOUNT_RE =
+  /ausmachender\s*betrag|endbetrag|gesamtbetrag|nettobetrag|zu\s*ihren\s*(?:gunsten|lasten)|effekten(?:gutschrift|belastung)|gutschrift\s*(?:in\s*)?höhe|belastung\s*(?:in\s*)?höhe/i;
+
 export function settlementBlock(text: string): string | null {
   const lines = text.split("\n");
   const hits = lines.map((l, i) => (STRONG_RE.test(l) ? i : -1)).filter((i) => i >= 0);
@@ -312,7 +367,11 @@ export function settlementBlock(text: string): string | null {
   // label with an amount ("Dividendengutschrift 120,00 EUR") and not the
   // back page's prose that happens to mention a settlement.
   const heading = (i: number) => lines[i]!.trim().length <= 60 && !/\d/.test(lines[i]!);
-  const end = hits.find((i) => i > hits[0]! + 1 && heading(i)) ?? lines.length;
+  // And only once the settlement printed its final amount: a credit note
+  // may repeat its own kind as a sub-heading above its figures
+  // ("Abrechnung Dividendengutschrift").
+  const closed = (i: number) => FINAL_AMOUNT_RE.test(lines.slice(hits[0]!, i).join("\n"));
+  const end = hits.find((i) => i > hits[0]! + 1 && heading(i) && closed(i)) ?? lines.length;
   return lines.slice(start, end).join("\n");
 }
 
@@ -346,6 +405,34 @@ function detectKind(lower: string): SettlementKind | null {
   return null;
 }
 
+export interface ExchangeRate {
+  /** The currency the statement's amounts are printed in. */
+  foreign: string;
+  /** Foreign units per euro ("Devisenkurs EUR/USD 1,2500"). */
+  perEuro: number;
+  /** The amount in euros printed next to the rate, when one is. */
+  booked: number | null;
+}
+
+/**
+ * "zum Devisenkurs: EUR/USD 1,250000  EUR 40,00": a statement in a foreign
+ * currency says at what rate it was converted and, mostly, the euro amount
+ * that was booked. Null for a statement in euros.
+ */
+export function exchangeRate(text: string): ExchangeRate | null {
+  const m = new RegExp(
+    String.raw`Devisenkurs\s*:?\s*(?:EUR\s*/\s*([A-Z]{3})|([A-Z]{3})\s*/\s*EUR)\s+(\d+[.,]\d+)(?:\s+EUR\s+${AMOUNT})?`,
+    "i",
+  ).exec(text);
+  if (!m) return null;
+  const quoted = parseGermanNumber(m[3]!);
+  if (quoted === null || quoted <= 0) return null;
+  const foreign = (m[1] ?? m[2])!.toUpperCase();
+  if (foreign === "EUR") return null;
+  const booked = m[4] === undefined ? null : parseGermanNumber(m[4]);
+  return { foreign, perEuro: m[1] ? quoted : 1 / quoted, booked: booked === null ? null : Math.abs(booked) };
+}
+
 function detectCurrency(text: string): string | null {
   const m = /\b(EUR|USD|CHF|GBP)\b/.exec(text);
   if (m) return m[1]!.toUpperCase();
@@ -355,7 +442,8 @@ function detectCurrency(text: string): string | null {
 
 /** The security name: the text on the line after "Wertpapierbezeichnung" or next to the ISIN. */
 function detectName(text: string, isin: string | null, wkn: string | null): string | null {
-  const name = detectNameRaw(text, isin, wkn);
+  const raw = detectNameRaw(text, isin, wkn);
+  const name = raw === null ? null : cleanSecurityName(raw);
   if (!name) return null;
   // A table layout prints the identifier in the next column: "Alpha AG  123456".
   const cleaned = [isin, wkn]
@@ -412,7 +500,39 @@ function detectNameRaw(text: string, isin: string | null, wkn: string | null): s
 
 /** Labels and headings a statement prints around the security, never its name. */
 const NOT_A_NAME =
-  /^(stück|stk|nominale|kurs|kurswert|preis|wertpapier|kauf|verkauf|dividend|ertrag|erträgnis|ausschüttung|depot|schlusstag|handelstag|ausführung|valuta|datum|abrechnung|zahlbar|isin|wkn|betrag|brutto|netto|provision|steuer|kapitalertrag)/i;
+  /^(stück|stk|nominale|kurs|kurswert|preis|wertpapier|kauf|verkauf|dividend|ertrag|erträgnis|ausschüttung|depot|schlusstag|handelstag|ausführung|valuta|datum|abrechnung|zahlbar|isin|wkn|betrag|brutto|netto|provision|steuer|kapitalertrag|anlageklasse|anlagestrategie|emittent|fondsgesellschaft|herrn?\b|frau\b|inhaber|kunde)/i;
+
+/**
+ * A security name as a table row prints it, without the columns around it:
+ * "per 01.02.2026 Alpha AG" (the holding's date column), "STK 25 Alpha AG"
+ * (the quantity column), "Alpha AG AAA111" (the identifier column). Null when what is left is a label, not a name.
+ */
+export function cleanSecurityName(raw: string): string | null {
+  const name = raw
+    .replace(/^(?:per\s+)?\d{1,2}\.\d{1,2}\.\d{2,4}\s+/i, "")
+    .replace(/^(?:STK|Stück|St\.)\s*[\d.,]+\s+/i, "")
+    // The identifier column at the end: an ISIN, or a WKN (six characters, at least one digit).
+    .replace(/\s+[A-Z]{2}[A-Z0-9]{9}\d$/, "")
+    .replace(/\s+(?=[A-Z0-9]*\d)[A-Z0-9]{6}$/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (name.length < 2 || NOT_A_NAME.test(name)) return null;
+  const letters = (name.match(/[A-Za-zÄÖÜäöüß]/g) ?? []).length;
+  return letters >= 2 ? name : null;
+}
+
+/**
+ * Whether a name read as the security's is a person's — the holder's name
+ * from the address block, taken by a reader that looked in the wrong place.
+ * `people` are the names it must not be (the users of this installation).
+ */
+export function isPersonName(name: string, people: readonly string[]): boolean {
+  const words = new Set(name.toLowerCase().split(/[^a-zäöüß]+/).filter((w) => w.length >= 2));
+  return people.some((person) => {
+    const parts = person.toLowerCase().split(/[^a-zäöüß]+/).filter((w) => w.length >= 2);
+    return parts.length > 0 && parts.every((p) => words.has(p));
+  });
+}
 
 function looksLikeName(line: string): boolean {
   if (line.length < 3 || line.length > 80) return false;
@@ -451,7 +571,7 @@ export function extractDepotNumber(text: string): string | null {
  */
 export function inspectSettlement(raw: string | null | undefined): SettlementInspection | null {
   if (!raw || raw.trim().length === 0) return null;
-  const whole = normalize(raw);
+  const whole = rejoinColumnAmounts(normalize(raw));
   const wholeLower = whole.toLowerCase();
   // Amounts and labels are read from the settlement's own block, so the
   // fee bookings around it on an account statement do not count as its
@@ -496,9 +616,16 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   // labels reach there belongs to a table of tax bases.
   const price = taxStatement ? null : track("price", () => amountAfter(
     text,
-    [String.raw`Ausführungskurs`, String.raw`Kurs\s*/\s*Preis`, String.raw`Kurswert\s*je`, String.raw`Preis\s*je`, String.raw`Kurs(?!wert)`, String.raw`Dividende\s*(?:je|pro)\s*(?:Stück|Aktie|Anteil)`, String.raw`Ausschüttung\s*(?:je|pro)\s*(?:Stück|Anteil)`],
+    [String.raw`Ausführungskurs`, String.raw`Kurs\s*/\s*Preis`, String.raw`Kurswert\s*je`, String.raw`Preis\s*je`, String.raw`(?<!Devisen)Kurs(?!wert)`, String.raw`Dividende\s*(?:je|pro)\s*(?:Stück|Aktie|Anteil)`, String.raw`Ausschüttung\s*(?:je|pro)\s*(?:Stück|Anteil)`],
     markers,
-  ));
+  ) ?? (() => {
+    // "USD 0,80 Dividende pro Stück": the amount in front of the label.
+    const m = new RegExp(String.raw`${AMOUNT}[ \t]*(?:Dividende|Ausschüttung|Ertrag)\s*(?:je|pro)\s*(?:Stück|Aktie|Anteil)`, "i").exec(text);
+    if (!m) return null;
+    markers.push("n … pro Stück");
+    const n = parseGermanNumber(m[1]!);
+    return n === null ? null : Math.abs(n);
+  })());
 
   const gross = taxStatement
     ? track("gross", () => amountAfter(text, [String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*vor\s*${STEUERN}`], markers))
@@ -595,8 +722,33 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   const executedAt = track("executedAt", () =>
     (taxLine ? dateAfter(taxLine, [String.raw`Steuerliche\s*Behandlung[^\n]*?\bvom`], markers) : null) ??
     (kind === "dividend"
-      ? dateAfter(text, [String.raw`Zahlbarkeitstag`, String.raw`Zahltag`, String.raw`Valuta`, String.raw`Ex-?Tag`, String.raw`Datum`], markers)
+      ? dateAfter(text, [String.raw`Zahlbarkeitstag`, String.raw`Zahltag`, String.raw`zahlbar\s*ab`, String.raw`Valuta`, String.raw`Ex-?Tag`, String.raw`Datum`], markers)
       : dateAfter(text, [String.raw`Schlusstag(?:\s*/\s*-?Zeit)?`, String.raw`Ausführungstag`, String.raw`Handelstag`, String.raw`Geschäftstag`, String.raw`Ausführung\s*am`, String.raw`Valuta`, String.raw`Datum`], markers)));
+
+  const taxPending =
+    !taxStatement &&
+    new RegExp(String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*vor\s*${STEUERN}`, "i").test(text) &&
+    !new RegExp(String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*nach\s*${STEUERN}`, "i").test(text);
+
+  // A statement in a foreign currency: every amount is converted at the
+  // rate it prints, and the net is the euro amount it says was booked. A
+  // depot transaction carries one currency — the account's — so that
+  // Kurswert, taxes and the account booking can be checked against each other.
+  const printedCurrency = detectCurrency(text) ?? detectCurrency(whole);
+  const fx = taxStatement ? null : exchangeRate(text);
+  const converted = fx !== null && printedCurrency === fx.foreign;
+  const toEuro = (n: number | null, scale: number): number | null =>
+    n === null || !converted ? n : Math.round((n / fx!.perEuro) * 10 ** scale) / 10 ** scale;
+  if (converted) {
+    markers.push("Devisenkurs");
+    labels.currency = `Devisenkurs EUR/${fx!.foreign}`;
+  }
+  const netEuro = !converted
+    ? net
+    : (() => {
+        const abs = fx!.booked ?? toEuro(netAbs, 2);
+        return abs === null ? null : kind === "buy" ? -abs : abs;
+      })();
 
   return {
     kind,
@@ -604,17 +756,19 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     costInfo: looksLikeCostInformation(whole),
     strong: hasStrongSettlementWording(wholeLower),
     taxStatement,
+    taxPending,
+    fx: converted ? fx : null,
     isin,
     wkn,
     name: detectName(text, isin, wkn) ?? (text === whole ? null : detectName(whole, isin, wkn)),
     quantity,
-    price,
-    gross,
-    fees,
-    tax,
-    net,
+    price: toEuro(price, 6),
+    gross: toEuro(gross, 2),
+    fees: toEuro(fees, 2),
+    tax: toEuro(tax, 2),
+    net: netEuro,
     executedAt,
-    currency: detectCurrency(text) ?? detectCurrency(whole),
+    currency: converted ? "EUR" : printedCurrency,
     depotNumber: extractDepotNumber(text) ?? extractDepotNumber(whole),
     markers,
     labels,

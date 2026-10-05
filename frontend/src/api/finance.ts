@@ -788,6 +788,8 @@ export interface SettlementInspection {
   is_settlement: boolean
   /** A tax statement on its own: it only adds the tax to an existing transaction. */
   tax_statement?: boolean
+  /** A credit note whose amount is before taxes: a separate tax statement completes it. */
+  tax_pending?: boolean
   rejection: SettlementRejection | null
   fields: SettlementInspectionFields
   /** Printed label each field was read after. */

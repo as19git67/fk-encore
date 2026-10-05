@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  cleanSecurityName,
   extractDepotNumber,
   inspectSettlement,
+  isPersonName,
   isUsableSettlement,
   parseGermanNumber,
   parseSettlement,
+  rejoinColumnAmounts,
   settlementBlock,
 } from "./depot-settlement-parser";
 
@@ -440,5 +443,148 @@ Kurswert 4.000,00 EUR
 Ausmachender Betrag 3.990,00 EUR
 Steuerliche Behandlung: Wertpapierverkauf vom 03.06.2026`;
     expect(inspectSettlement(combined)!.taxStatement).toBe(false);
+  });
+});
+
+describe("parseSettlement — a credit note in a foreign currency, taxes to follow", () => {
+  // Synthetic: a dividend paid in USD, converted at the printed rate; the
+  // German taxes come on a separate tax statement.
+  const CREDIT = `Beispielbank AG
+Dividendengutschrift
+STK 50,000 Alpha Industries AG WKN/ISIN AAA111 / DE000000AAA1
+USD 0,80 Dividende pro Stück
+zahlbar ab 10.04.2026
+Bruttobetrag: USD 40,00
+Quellensteuer USD 6,00
+Ausmachender Betrag USD 34,00
+zum Devisenkurs: EUR/USD 1,250000 EUR 27,20
+Valuta 14.04.2026 Zu Ihren Gunsten vor Steuern EUR 27,20`;
+
+  it("converts every amount at the printed rate and takes the euro amount booked as the net", () => {
+    const s = inspectSettlement(CREDIT)!;
+    expect(s.kind).toBe("dividend");
+    expect(s.currency).toBe("EUR");
+    expect(s.quantity).toBe(50);
+    expect(s.price).toBe(0.64);
+    expect(s.gross).toBe(32);
+    expect(s.tax).toBe(4.8);
+    expect(s.net).toBe(27.2);
+    expect(s.executedAt).toBe("2026-04-10");
+    expect(s.labels.currency).toBe("Devisenkurs EUR/USD");
+  });
+
+  it("says its amount is before taxes", () => {
+    expect(inspectSettlement(CREDIT)!.taxPending).toBe(true);
+    expect(inspectSettlement(CREDIT)!.taxStatement).toBe(false);
+  });
+
+  it("reads past a footnote marker between a tax label and its amount", () => {
+    const s = inspectSettlement(CREDIT.replace("Quellensteuer USD 6,00", "Quellensteuer (1) USD 6,00"))!;
+    expect(s.tax).toBe(4.8);
+  });
+});
+
+describe("security names", () => {
+  it("drops the table columns printed next to the name, and labels", () => {
+    expect(cleanSecurityName("per 01.02.2026 Alpha Industries AG")).toBe("Alpha Industries AG");
+    expect(cleanSecurityName("STK 25,000 Alpha Industries AG")).toBe("Alpha Industries AG");
+    expect(cleanSecurityName("Anlageklasse")).toBeNull();
+    expect(cleanSecurityName("Alpha Industries AG")).toBe("Alpha Industries AG");
+  });
+
+  it("recognises a person's name taken from the address block", () => {
+    expect(isPersonName("Paul Beispiel", ["Paul Beispiel"])).toBe(true);
+    expect(isPersonName("Herrn Paul Beispiel", ["Paul Beispiel"])).toBe(true);
+    expect(isPersonName("Alpha Industries AG", ["Paul Beispiel"])).toBe(false);
+  });
+
+  it("reads the name under 'Wertpapier-Bezeichnung' without the holding's date column", () => {
+    const s = inspectSettlement(`Beispielbank AG
+Dividendengutschrift
+Depotbestand Wertpapier-Bezeichnung WKN/ISIN
+per 01.02.2026 Alpha Industries AG AAA111
+STK 25,000 Registered Shares o.N. DE000000AAA1
+Bruttobetrag: EUR 50,00
+Ausmachender Betrag EUR 50,00`)!;
+    expect(s.name).toBe("Alpha Industries AG");
+  });
+});
+
+describe("parseSettlement — a tax statement read column by column", () => {
+  // Synthetic: the text of a scanned two-column table, where the labels
+  // come with their currency and the amounts follow later, one per line.
+  // A second page carries year-to-date tables whose figures are no part
+  // of this booking.
+  const TAX = `Beispielbank AG
+Steuerliche Behandlung: Dividende vom 03.06.2026
+Stk.   Stk. 40 ALPHA INDUSTRIES AG , WKN / ISIN: AAA111 / DE000000AAA1
+Zu Ihren Gunsten vor Steuern:   EUR
+Steuerbemessungsgrundlage   EUR   58,90
+Kapitalertragsteuer (1)   EUR   -6,10
+(angerechnete Quellensteuer:   EUR   7,89 )
+Solidaritätszuschlag   EUR   -0,33
+Kirchensteuer   EUR   -0,48
+abgeführte Steuern   EUR
+Zu Ihren Gunsten nach Steuern:   EUR
+52,40
+-6,91
+45,49
+Die Gutschrift erfolgt mit Valuta 05.06.2026 auf Konto EUR
+Steuern im laufenden Jahr in EUR
+Kapitalertragsteuer   Solidaritätszuschlag
+Stand   1.234,56   78,90
+Kirchensteuer einbehaltene   ausländische Quellensteuer
+98,76   54,32`;
+
+  it("pairs each amount with its label again and leaves the year-to-date tables alone", () => {
+    const s = inspectSettlement(TAX)!;
+    expect(s.taxStatement).toBe(true);
+    expect(s.gross).toBe(52.4);
+    expect(s.tax).toBe(6.91);
+    expect(s.net).toBe(45.49);
+    expect(s.quantity).toBe(40);
+    expect(s.executedAt).toBe("2026-06-03");
+  });
+
+  it("leaves a run of amounts alone when it does not match the labels waiting for one", () => {
+    expect(rejoinColumnAmounts("Betrag EUR\n1,00\n2,00")).toBe("Betrag EUR\n1,00\n2,00");
+    expect(rejoinColumnAmounts("A EUR\nB EUR\n1,00\n2,00")).toBe("A EUR 1,00\nB EUR 2,00");
+  });
+});
+
+describe("parseSettlement — a credit note that repeats its kind above its figures", () => {
+  // Synthetic: the heading, the holding table, then a sub-heading with the
+  // kind again and only then the amounts; a fiscal-year range after the
+  // per-share label.
+  const CREDIT = `Beispielbank AG
+Dividendengutschrift
+Depotbestand   Wertpapier-Bezeichnung
+per 01.04.2026   Alpha Industries AG
+WKN/ISIN
+AAA111
+STK   50,000   Registered Shares o.N.   DE000000AAA1
+USD 0,80   Dividende pro Stück für Zeitraum   01.01.26 bis 31.12.26
+zahlbar ab 10.04.2026
+Abrechnung Dividendengutschrift
+Bruttobetrag:   USD   40,00
+-
+Quellensteuer   USD   6,00
+Ausmachender Betrag   USD   34,00
+zum Devisenkurs: EUR/USD   1,250000   EUR   27,20
+Verrechnung über Konto   Valuta   Zu Ihren Gunsten vor Steuern
+DE00 0000 0000 0000 0000 00   EUR   14.04.2026   EUR   27,20`;
+
+  it("reads the figures below the sub-heading, the per-share amount and the name", () => {
+    const s = inspectSettlement(CREDIT)!;
+    expect(s.kind).toBe("dividend");
+    expect(s.name).toBe("Alpha Industries AG");
+    expect(s.quantity).toBe(50);
+    expect(s.price).toBe(0.64);
+    expect(s.gross).toBe(32);
+    expect(s.tax).toBe(4.8);
+    expect(s.net).toBe(27.2);
+    expect(s.currency).toBe("EUR");
+    expect(s.executedAt).toBe("2026-04-10");
+    expect(s.taxPending).toBe(true);
   });
 });

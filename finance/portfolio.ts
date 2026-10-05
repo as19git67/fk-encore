@@ -43,6 +43,7 @@ import {
   financeAccountHolding,
   financeAccountType,
   financeDepotTransaction,
+  users,
 } from "../db/schema";
 import {
   computeCostBasis,
@@ -58,6 +59,7 @@ import {
   type EnrichResult,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
+import { cleanSecurityName, isPersonName } from "./depot-settlement-parser";
 import { readSettlement, rereadAgainstBooking, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
 import type { CheckName, FieldSource, MergeField } from "./depot-settlement-merge";
 
@@ -371,6 +373,8 @@ interface PositionAcc {
   isin: string | null;
   wkn: string | null;
   name: string | null;
+  /** The name came from a bank holding, which no transaction's name replaces. */
+  nameFromHolding: boolean;
   currency: string | null;
   accountIds: Set<number>;
   open: boolean;
@@ -405,6 +409,7 @@ function newAcc(key: string): PositionAcc {
     isin: null,
     wkn: null,
     name: null,
+    nameFromHolding: false,
     currency: null,
     accountIds: new Set(),
     open: false,
@@ -432,13 +437,45 @@ function newAcc(key: string): PositionAcc {
   };
 }
 
+/**
+ * The names of the people using this installation. A security name read
+ * off a document that is one of them came from the address block.
+ */
+async function householdNames(): Promise<string[]> {
+  const rows = await db.select({ name: users.name }).from(users);
+  return rows.map((r) => r.name).filter((n) => n.trim().length > 0);
+}
+
+/**
+ * A name read off a document, fit to show: without the table columns
+ * around it, and null when it is a label or a person's name.
+ */
+export function securityDisplayName(name: string | null, people: readonly string[]): string | null {
+  if (!name) return null;
+  const cleaned = cleanSecurityName(name);
+  return cleaned && !isPersonName(cleaned, people) ? cleaned : null;
+}
+
+/**
+ * The bank's own holding names the security; a transaction's name (read off
+ * a document, often enough off the wrong line) only stands in when no
+ * holding does, and the first fit one wins.
+ */
 function adoptIdentity(
   acc: PositionAcc,
   r: { isin: string | null; wkn: string | null; name: string | null; currency: string | null },
+  from: "holding" | "transaction",
+  people: readonly string[],
 ) {
   if (r.isin && !acc.isin) acc.isin = r.isin;
   if (r.wkn && !acc.wkn) acc.wkn = r.wkn;
-  if (r.name) acc.name = r.name;
+  if (from === "holding" ? r.name && !acc.nameFromHolding : !acc.name) {
+    const name = from === "holding" ? r.name : securityDisplayName(r.name, people);
+    if (name) {
+      acc.name = name;
+      if (from === "holding") acc.nameFromHolding = true;
+    }
+  }
   if (r.currency && !acc.currency) acc.currency = r.currency;
 }
 
@@ -539,6 +576,8 @@ function cashOf(tx: DepotTxRow): number | null {
 export function buildPortfolio(
   holdings: HoldingRow[],
   txs: DepotTxRow[],
+  /** Names a security can never have (see householdNames). */
+  people: readonly string[] = [],
 ): Pick<PortfolioResponse, "summary" | "positions" | "years"> {
   const positions = new Map<string, PositionAcc>();
   const acc = (key: string) => {
@@ -569,7 +608,7 @@ export function buildPortfolio(
     if (!asOf || day > asOf) asOf = day;
 
     const p = acc(key);
-    adoptIdentity(p, h);
+    adoptIdentity(p, h, "holding", people);
     p.accountIds.add(h.account_id);
     p.holdingCount += 1;
 
@@ -635,7 +674,7 @@ export function buildPortfolio(
     const key = positionKey(tx);
     if (!key) continue;
     const p = acc(key);
-    adoptIdentity(p, tx);
+    adoptIdentity(p, tx, "transaction", people);
     p.accountIds.add(tx.account_id);
 
     const day = dateOnly(tx.executed_at);
@@ -912,9 +951,10 @@ export const getPortfolio = api(
         ? 0
         : allDepots.filter((d) => d.closed && !depots.includes(d)).length;
 
-    const [holdings, txs] = await Promise.all([
+    const [holdings, txs, people] = await Promise.all([
       latestHoldings(ids),
       loadTransactions(ids),
+      householdNames(),
     ]);
     const { currency, mixed } = scopeCurrency(depots);
 
@@ -923,7 +963,7 @@ export const getPortfolio = api(
       closed_hidden: closedHidden,
       currency,
       mixed_currency: mixed,
-      ...buildPortfolio(holdings, txs),
+      ...buildPortfolio(holdings, txs, people),
     };
   },
 );
@@ -1073,7 +1113,10 @@ export const listPortfolioTransactions = api(
     ]);
 
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
-    const docsById = await documentIdsByDepotTransaction(rows.map((r) => r.id));
+    const [docsById, people] = await Promise.all([
+      documentIdsByDepotTransaction(rows.map((r) => r.id)),
+      householdNames(),
+    ]);
     return {
       items: rows.map((r) => ({
         id: r.id,
@@ -1082,7 +1125,7 @@ export const listPortfolioTransactions = api(
         position_key: positionKey(r),
         isin: r.isin,
         wkn: r.wkn,
-        name: r.name,
+        name: securityDisplayName(r.name, people),
         kind: r.kind,
         executed_at: dateOnly(r.executed_at),
         amount: r.amount,
@@ -1206,11 +1249,12 @@ export const getPortfolioPosition = api(
 
     // The position's figures come from the same fold as the overview, so
     // both pages agree to the cent.
-    const [holdings, txs] = await Promise.all([
+    const [holdings, txs, people] = await Promise.all([
       latestHoldings(ids),
       loadTransactions(ids),
+      householdNames(),
     ]);
-    const built = buildPortfolio(holdings, txs);
+    const built = buildPortfolio(holdings, txs, people);
     const position = built.positions.find((p) => p.key === key);
     if (!position) throw APIError.notFound(`position ${key} not found`);
 
@@ -1880,6 +1924,8 @@ interface DocumentInspectionResponse {
   is_settlement: boolean;
   /** A tax statement on its own: it only adds the tax to an existing transaction. */
   tax_statement: boolean;
+  /** A credit note whose amount is before taxes: a separate tax statement completes it. */
+  tax_pending: boolean;
   /** Why it does not, when it does not. */
   rejection: InspectionRejection | null;
   /** The reading that is used — rules and model merged. */
@@ -2012,6 +2058,7 @@ export const inspectSettlementDocument = api(
       llm_status: reading.llmStatus,
       is_settlement: rejection === null,
       tax_statement: reading.rules?.taxStatement ?? false,
+      tax_pending: reading.rules?.taxPending ?? false,
       rejection,
       fields,
       sources,

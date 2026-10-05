@@ -908,3 +908,125 @@ Zu Ihren Gunsten nach Steuern: EUR 45,49`;
     expect((await depotRows(depot))[0]!.tax).toBe("6.91");
   });
 });
+
+describe("finance/depot-document-enrichment — credit note and tax statement of one dividend", () => {
+  // Synthetic pair: a USD dividend converted to 27,20 EUR before taxes, and
+  // the tax statement taking 3,10 EUR of German taxes off it.
+  const CREDIT = `Beispielbank AG
+Dividendengutschrift
+STK 50,000 Alpha Industries AG ISIN ${ISIN_A}
+USD 0,80 Dividende pro Stück
+zahlbar ab 10.04.2026
+Bruttobetrag: USD 40,00
+Quellensteuer USD 6,00
+Ausmachender Betrag USD 34,00
+zum Devisenkurs: EUR/USD 1,250000 EUR 27,20
+Valuta 14.04.2026 Zu Ihren Gunsten vor Steuern EUR 27,20`;
+  const TAX = `Beispielbank AG
+Steuerliche Behandlung: Dividende vom 10.04.2026
+Stk. 50 ALPHA INDUSTRIES AG , ISIN: ${ISIN_A}
+Zu Ihren Gunsten vor Steuern: EUR 27,20
+Kapitalertragsteuer (1) EUR -2,80
+Solidaritätszuschlag EUR -0,15
+Kirchensteuer EUR -0,15
+abgeführte Steuern EUR -3,10
+Zu Ihren Gunsten nach Steuern: EUR 24,10`;
+
+  async function expectCombined(depot: number) {
+    const rows = await depotRows(depot);
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row.kind).toBe("dividend");
+    expect(Number(row.amount)).toBe(50);
+    expect(row.gross_amount).toBe("32.00");
+    // Withholding tax from the credit note + German taxes from the statement.
+    expect(row.tax).toBe("7.90");
+    // What the account was credited: after taxes.
+    expect(row.net_amount).toBe("24.10");
+    expect(row.currency).toBe("EUR");
+  }
+
+  it("credit note first: it creates the transaction, the tax statement completes it", async () => {
+    const { depot } = await setup();
+    const credit = await insertDocument(CREDIT);
+    expect((await enrichDocument(credit)).outcome).toBe("created");
+    expect((await depotRows(depot))[0]!.net_amount).toBe("27.20");
+
+    const tax = await insertDocument(TAX);
+    const r = await enrichDocument(tax);
+    expect(r).toMatchObject({ outcome: "enriched", tax_statement: true });
+    await expectCombined(depot);
+  });
+
+  it("booking and tax statement first: the credit note joins by quantity, not by its amount before taxes", async () => {
+    const { depot } = await setup();
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: ISIN_A,
+      kind: "dividend",
+      executed_at: "2026-04-14",
+      net_amount: "24.10",
+      currency: "EUR",
+      source: "giro-derived",
+      dedupe_hash: "giro:pair",
+    });
+    expect((await enrichDocument(await insertDocument(TAX))).outcome).toBe("enriched");
+    expect((await depotRows(depot))[0]!.tax).toBe("3.10");
+
+    const r = await enrichDocument(await insertDocument(CREDIT));
+    expect(r.outcome).toBe("enriched");
+    await expectCombined(depot);
+  });
+
+  it("compares the model's amounts in the printed currency after converting them at the same rate", async () => {
+    const { depot } = await setup();
+    vi.mocked(extractSettlementValues).mockResolvedValue({
+      is_settlement: true,
+      kind: "dividend",
+      isin: ISIN_A,
+      quantity: 50,
+      price: 0.8,
+      gross: 40,
+      tax: 6,
+      net: 27.2,
+      currency: "USD",
+    });
+    const docId = await insertDocument(CREDIT);
+    expect((await enrichDocument(docId)).outcome).toBe("created");
+    const i = await inspectSettlementDocument({ documentId: docId });
+    expect(i.verdict).toBe("ok");
+    expect(i.sources.gross.source).toBe("both");
+    expect(i.sources.tax.source).toBe("both");
+    expect((await depotRows(depot))[0]!.gross_amount).toBe("32.00");
+  });
+});
+
+describe("finance/portfolio — security names", () => {
+  it("prefers the bank holding's name and shows no label or person's name read off a document", async () => {
+    const { depot } = await setup();
+    const tx = (isin: string, name: string) => ({
+      account_id: depot,
+      isin,
+      name,
+      kind: "dividend" as const,
+      executed_at: "2026-02-01",
+      net_amount: "10.00",
+      currency: "EUR",
+      source: "document",
+      dedupe_hash: `doc:${isin}`,
+    });
+    await db.insert(financeDepotTransaction).values([
+      // The holding names this one.
+      tx(ISIN_A, "per 01.02.2026 Falsch gelesen AG"),
+      // Only documents name these.
+      tx("DE000000BBB2", "per 01.02.2026 Beta Werke AG"),
+      // ensureUser(1) is called "User1": the address block, not a security.
+      tx("DE000000CCC3", "User1"),
+    ]);
+    const resp = await getPortfolio({});
+    const name = (isin: string) => resp.positions.find((p) => p.isin === isin)?.name;
+    expect(name(ISIN_A)).toBe("Alpha Industries AG");
+    expect(name("DE000000BBB2")).toBe("Beta Werke AG");
+    expect(name("DE000000CCC3")).toBeNull();
+  });
+});
