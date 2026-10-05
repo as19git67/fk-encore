@@ -164,6 +164,13 @@ export interface RankableCandidate {
   osmRef: string;
   score: number;
   reasons: string[];
+  /**
+   * Somebody asked for this one — a heart, or more "will ich" than
+   * "lieber nicht". What lets the solver put a restaurant into the
+   * meal block: it never picks a venue by itself (§10.3), but a place
+   * the family asked to eat at is not the solver's pick.
+   */
+  wanted?: boolean;
 }
 
 /**
@@ -184,7 +191,26 @@ export function applyVotes<T extends RankableCandidate>(
       ...candidate,
       score: candidate.score + adjustment.delta,
       reasons: [...candidate.reasons, ...adjustment.reasons],
+      wanted: adjustment.hearted || adjustment.delta > 0 || candidate.wanted === true,
     };
+  });
+}
+
+/**
+ * Only the flag, not the score: for a pool whose scores already carry
+ * the votes from the last re-plan (they are stored with the entries),
+ * a day filled in later or re-planned on the spot still needs to know
+ * which places were asked for — a restaurant goes into the meal block
+ * on that alone.
+ */
+export function markWanted<T extends RankableCandidate>(
+  candidates: readonly T[],
+  tallied: Tally,
+): T[] {
+  return candidates.map((candidate) => {
+    const adjustment = tallied.byRef.get(candidate.osmRef);
+    if (!adjustment) return candidate;
+    return { ...candidate, wanted: adjustment.hearted || adjustment.delta > 0 || candidate.wanted === true };
   });
 }
 

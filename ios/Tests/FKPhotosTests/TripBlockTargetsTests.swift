@@ -35,11 +35,21 @@ final class TripBlockTargetsTests: XCTestCase {
         ])
     }
 
-    func testAMealBlockIsNeverAPlaceForASpot() {
-        // A meal block holds time and a rough area, never a venue
+    func testAMealBlockIsNeverAPlaceForASight() {
+        // A meal block holds time and a rough area, never a sight
         // (§10.3).
         let ids = TripBlockTargets.all(in: twoDays).map(\.blockId)
         XCTAssertFalse(ids.contains("midday"))
+        XCTAssertFalse(TripBlockTargets.all(in: twoDays, category: "museum").map(\.blockId).contains("midday"))
+    }
+
+    func testSomewhereToEatGoesIntoTheMealBlock() {
+        // A restaurant is a meal, not a sight: the meal blocks and not
+        // the sightseeing ones. A café may be either.
+        let restaurant = TripBlockTargets.all(in: twoDays, category: "food").map(\.blockId)
+        XCTAssertEqual(restaurant, ["midday"])
+        let cafe = Set(TripBlockTargets.all(in: twoDays, category: "cafe").map(\.blockId))
+        XCTAssertEqual(cafe, ["morning", "midday", "afternoon"])
     }
 
     func testADayAtTripResolutionCannotReceiveAnything() {

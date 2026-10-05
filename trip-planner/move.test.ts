@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { MoveError, moveStop, recomputeDay } from "./move";
+import { insertStop, MoveError, moveStop, recomputeDay } from "./move";
 import type { CurrentBlock, CurrentStop } from "./redistribute";
 import { travelLeg } from "./travel";
 
@@ -270,13 +270,18 @@ describe("an overfull block", () => {
 });
 
 describe("what cannot be dropped where", () => {
-  it("refuses a meal block", () => {
-    // A meal block is time and a rough area, never a venue (§10.3).
-    // Accepting a museum into it would quietly make it something else.
+  it("refuses a sight in a meal block, and takes somewhere to eat", () => {
+    // A meal block is time and a rough area, never a sight (§10.3).
+    // Accepting a museum into it would quietly make it something else;
+    // a restaurant is what it is for.
     const blocks = day();
     expect(() =>
       moveStop({ fromBlocks: blocks, toBlocks: blocks, osmRef: "node:a", toBlockId: "midday", walk: HOME }),
     ).toThrow(MoveError);
+    const eating = { ...blocks[0].stops[0], osmRef: "node:lunch", category: "food", dwellMinutes: 60 };
+    const { blocks: after } = insertStop({ blocks, stop: eating, toBlockId: "midday", walk: HOME });
+    expect(after[1].stops.map((s) => s.osmRef)).toEqual(["node:lunch"]);
+    expect(after[1].usedMinutes).toBeGreaterThanOrEqual(60);
   });
 
   it("refuses a stop that is not in the source day", () => {

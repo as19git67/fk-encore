@@ -98,14 +98,8 @@ export function moveStop(req: MoveStopRequest): MoveStopResult {
 
   const target = to.find((b) => b.id === req.toBlockId);
   if (!target) throw new MoveError(`no block '${req.toBlockId}' in the target day`);
-  if (target.kind !== "spots") {
-    // A meal block holds time and a rough area, never a venue (§10.3).
-    // Dropping a museum into it would quietly make it something it is
-    // not, and the day would stop adding up.
-    throw new MoveError(`'${req.toBlockId}' holds time, not places — nothing can be dropped in it`);
-  }
-
   const index = source.stops.findIndex((s) => s.osmRef === req.osmRef);
+  assertFits(target, source.stops[index].category);
   const [stop] = source.stops.splice(index, 1);
 
   const at = clampPosition(req.toPosition, target.stops.length);
@@ -169,10 +163,7 @@ export function insertStop(req: InsertStopRequest): InsertStopResult {
 
   const target = blocks.find((b) => b.id === req.toBlockId);
   if (!target) throw new MoveError(`no block '${req.toBlockId}' in this day`);
-  if (target.kind !== "spots") {
-    // A meal block holds time and a rough area, never a venue (§10.3).
-    throw new MoveError(`'${req.toBlockId}' holds time, not places — nothing can be dropped in it`);
-  }
+  assertFits(target, req.stop.category);
 
   const at = clampPosition(req.toPosition, target.stops.length);
   target.stops.splice(at, 0, { ...req.stop });
@@ -201,6 +192,20 @@ export function insertStop(req: InsertStopRequest): InsertStopResult {
  * three-and-a-half-hour Vormittag makes lunch late, and the day now
  * says so instead of pretending the afternoon began on time.
  */
+/** What a meal block may hold: somewhere to eat, and nothing else. */
+export const MEAL_CATEGORIES: ReadonlySet<string> = new Set(["food", "cafe"]);
+
+/**
+ * A meal block holds time and a rough area, never a sight (§10.3):
+ * dropping a museum into it would quietly make it something it is
+ * not, and the day would stop adding up. A restaurant or a café is
+ * what the block is *for* — "wir essen hier" — so those go in.
+ */
+function assertFits(target: { id: string; kind: string }, category: string): void {
+  if (target.kind === "spots" || MEAL_CATEGORIES.has(category)) return;
+  throw new MoveError(`'${target.id}' holds time for a meal — only somewhere to eat can be dropped in it`);
+}
+
 export function recomputeDay(
   blocks: CurrentBlock[],
   walk: DayWalk,

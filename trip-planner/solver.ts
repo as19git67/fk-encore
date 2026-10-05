@@ -83,7 +83,12 @@ export interface Candidate extends Coordinate {
   dwellMinutes: number;
   /** Higher is better. See `scoreCandidate` in candidates.ts. */
   score: number;
+  /** Somebody asked for it (votes.ts) — what earns a restaurant the meal block. */
+  wanted?: boolean;
 }
+
+/** What a meal block may hold (move.ts says the same for a drop). */
+const MEAL_CATEGORIES: ReadonlySet<string> = new Set(["food", "cafe"]);
 
 export interface PlannedStop {
   osmRef: string;
@@ -222,11 +227,20 @@ export function solveDay(opts: SolveOptions): SolvedDay {
   // day the train leaves.
   let position = opts.start ?? opts.anchor;
   const lastSpotsBlockIndex = lastIndexOfSpotsBlock(opts.blocks);
+  const hasMeal = opts.blocks.some((shape) => shape.kind === "meal");
 
   opts.blocks.forEach((shape, index) => {
     if (shape.kind !== "spots") {
-      // A meal block holds time and a rough area, not a venue (§10.3).
-      blocks.push({ ...shapeToBlock(shape), usedMinutes: 0, stops: [] });
+      // A meal block holds time and a rough area, not a venue (§10.3):
+      // the solver picks no restaurant. One the family asked for — a
+      // heart, a "will ich" — is not the solver's pick, so the best
+      // such place goes in, one per meal, when the way there fits.
+      const meal = pickMeal(shape, position, [...remaining.values()], opts.maxWalkMinutes, mode, travel);
+      if (meal) {
+        remaining.delete(meal.stop.osmRef);
+        position = leaveFrom(meal.candidate);
+      }
+      blocks.push({ ...shapeToBlock(shape), usedMinutes: meal?.stop ? meal.used : 0, stops: meal ? [meal.stop] : [] });
       return;
     }
 
@@ -234,7 +248,12 @@ export function solveDay(opts: SolveOptions): SolvedDay {
     const filled = fillBlock({
       shape,
       start: position,
-      candidates: [...remaining.values()].filter((c) => !passed.has(c.osmRef)),
+      // A restaurant is a meal, not a sight: on a day with a meal
+      // block it goes there or nowhere. A café can still be the
+      // afternoon's stop.
+      candidates: [...remaining.values()]
+        .filter((c) => !passed.has(c.osmRef))
+        .filter((c) => !(hasMeal && c.category === "food")),
       maxWalkMinutes: opts.maxWalkMinutes,
       mode,
       diversityDecay: decay,
@@ -287,6 +306,54 @@ interface FillArgs {
 }
 
 export type TravelFn = (from: Coordinate, to: Coordinate, mode: TransportMode) => TravelLeg;
+
+/**
+ * The place the family asked to eat at, for one meal block: the best
+ * wanted restaurant or café that the walk there allows, with what it
+ * costs the block. Null when nobody asked for one — then the block
+ * stays what it always was, time and a rough area.
+ */
+function pickMeal(
+  shape: PlannedBlockShape,
+  start: Coordinate,
+  candidates: readonly Candidate[],
+  maxWalkMinutes: number,
+  mode: TransportMode,
+  travel: TravelFn,
+): { candidate: Candidate; stop: PlannedStop; used: number } | null {
+  const wanted = candidates
+    .filter((c) => c.wanted === true && MEAL_CATEGORIES.has(c.category) && c.score > 0)
+    .sort(byScoreThenRef);
+  for (const candidate of wanted) {
+    const leg = travel(start, candidate, mode);
+    if (leg.minutes > maxWalkMinutes) continue;
+    const used = leg.minutes + candidate.dwellMinutes;
+    // Over budget is still placed: a wish for lunch at a place twenty
+    // minutes away is a longer lunch, not no lunch — and the block
+    // says it is over, as it does for a drop (§8.4).
+    return {
+      candidate,
+      used,
+      stop: {
+        osmRef: candidate.osmRef,
+        name: candidate.name,
+        localName: candidate.localName ?? null,
+        wikipediaUrl: candidate.wikipediaUrl ?? null,
+        facadeAzimuth: candidate.facadeAzimuth ?? null,
+        kind: candidate.kind ?? null,
+        lat: candidate.lat,
+        lon: candidate.lon,
+        extent: candidate.extent,
+        category: candidate.category,
+        dwellMinutes: candidate.dwellMinutes,
+        score: candidate.score,
+        reasons: candidate.reasons ?? [],
+        travelFromPrevious: leg,
+      },
+    };
+  }
+  return null;
+}
 
 function fillBlock(args: FillArgs): PlannedBlock {
   const chosen: Candidate[] = [];

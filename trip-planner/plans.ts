@@ -53,7 +53,7 @@ import {
 import { storedHorizon } from "./horizon-store";
 import { fairnessOfPlan, votesOfLeg } from "./vote-store";
 import { orderBlocksForLight } from "./light-replan";
-import { applyVotes, tally, type Tally } from "./votes";
+import { applyVotes, markWanted, tally, type Tally } from "./votes";
 import { requireOrganiser } from "./plan-access";
 import {
   createPending,
@@ -986,7 +986,9 @@ export const detailTripDay = api(
       start: walk.start,
       end: walk.end,
       blocks: budgetsForSolver(shapes, framedToday),
-      candidates: withoutFramed(pool, framedToday),
+      // Who asked for what (§6.1), so a wished-for restaurant takes
+      // the meal block on a day filled in later too (§10.3).
+      candidates: withoutFramed(markWanted(pool, tally(await votesOfLeg(leg.id))), framedToday),
       maxWalkMinutes,
       mode: leg.mode,
     });
@@ -1352,8 +1354,9 @@ export const redistributeDay = api(
       result = redistribute({
         blocks,
         // The leg's own pool: a spot in Osaka is not a replacement for
-        // one missed in Tokyo (§4.2).
-        pool: leg.pool,
+        // one missed in Tokyo (§4.2) — with who asked for what, so a
+        // wished-for restaurant can take the meal block (§10.3).
+        pool: markWanted(leg.pool, tally(await votesOfLeg(leg.id))),
         position,
         // Where *this day* ends, which is not the quarters on a day
         // trip or on the day the train leaves (§4.4, §4.5).
