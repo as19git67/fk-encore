@@ -551,3 +551,40 @@ Kirchensteuer einbehaltene   ausländische Quellensteuer
     expect(rejoinColumnAmounts("A EUR\nB EUR\n1,00\n2,00")).toBe("A EUR 1,00\nB EUR 2,00");
   });
 });
+
+describe("parseSettlement — a credit note that repeats its kind above its figures", () => {
+  // Synthetic: the heading, the holding table, then a sub-heading with the
+  // kind again and only then the amounts; a fiscal-year range after the
+  // per-share label.
+  const CREDIT = `Beispielbank AG
+Dividendengutschrift
+Depotbestand   Wertpapier-Bezeichnung
+per 01.04.2026   Alpha Industries AG
+WKN/ISIN
+AAA111
+STK   50,000   Registered Shares o.N.   DE000000AAA1
+USD 0,80   Dividende pro Stück für Zeitraum   01.01.26 bis 31.12.26
+zahlbar ab 10.04.2026
+Abrechnung Dividendengutschrift
+Bruttobetrag:   USD   40,00
+-
+Quellensteuer   USD   6,00
+Ausmachender Betrag   USD   34,00
+zum Devisenkurs: EUR/USD   1,250000   EUR   27,20
+Verrechnung über Konto   Valuta   Zu Ihren Gunsten vor Steuern
+DE00 0000 0000 0000 0000 00   EUR   14.04.2026   EUR   27,20`;
+
+  it("reads the figures below the sub-heading, the per-share amount and the name", () => {
+    const s = inspectSettlement(CREDIT)!;
+    expect(s.kind).toBe("dividend");
+    expect(s.name).toBe("Alpha Industries AG");
+    expect(s.quantity).toBe(50);
+    expect(s.price).toBe(0.64);
+    expect(s.gross).toBe(32);
+    expect(s.tax).toBe(4.8);
+    expect(s.net).toBe(27.2);
+    expect(s.currency).toBe("EUR");
+    expect(s.executedAt).toBe("2026-04-10");
+    expect(s.taxPending).toBe(true);
+  });
+});

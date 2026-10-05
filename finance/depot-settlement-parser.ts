@@ -215,7 +215,8 @@ export function parseGermanNumber(raw: string): number | null {
 
 // A rate ("12,34 %") is never an amount, nor is a footnote marker ("(1)").
 // The amount stands on its label's line: a line break never belongs to it.
-const AMOUNT = String.raw`(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))`;
+// Nor is a number that a date continues ("01.01.26") an amount.
+const AMOUNT = String.raw`(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))(?![.,]?\d)`;
 /** What may stand between a label and its amount: text, or a footnote marker ("Kapitalertragsteuer (1) EUR …"). */
 const GAP = String.raw`(?:[^\d\n-]|\(\d{1,2}\)){0,40}?`;
 const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
@@ -354,6 +355,9 @@ function dateAfter(text: string, labels: string[], markers: string[]): string | 
  * booking line with the amount sits there) to the next strong word or
  * the end. Null when the text has no strong word: it is read whole.
  */
+const FINAL_AMOUNT_RE =
+  /ausmachender\s*betrag|endbetrag|gesamtbetrag|nettobetrag|zu\s*ihren\s*(?:gunsten|lasten)|effekten(?:gutschrift|belastung)|gutschrift\s*(?:in\s*)?höhe|belastung\s*(?:in\s*)?höhe/i;
+
 export function settlementBlock(text: string): string | null {
   const lines = text.split("\n");
   const hits = lines.map((l, i) => (STRONG_RE.test(l) ? i : -1)).filter((i) => i >= 0);
@@ -363,7 +367,11 @@ export function settlementBlock(text: string): string | null {
   // label with an amount ("Dividendengutschrift 120,00 EUR") and not the
   // back page's prose that happens to mention a settlement.
   const heading = (i: number) => lines[i]!.trim().length <= 60 && !/\d/.test(lines[i]!);
-  const end = hits.find((i) => i > hits[0]! + 1 && heading(i)) ?? lines.length;
+  // And only once the settlement printed its final amount: a credit note
+  // may repeat its own kind as a sub-heading above its figures
+  // ("Abrechnung Dividendengutschrift").
+  const closed = (i: number) => FINAL_AMOUNT_RE.test(lines.slice(hits[0]!, i).join("\n"));
+  const end = hits.find((i) => i > hits[0]! + 1 && heading(i) && closed(i)) ?? lines.length;
   return lines.slice(start, end).join("\n");
 }
 
