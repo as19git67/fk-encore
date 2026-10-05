@@ -62,7 +62,7 @@ import {
   type EnrichResult,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
-import { cleanSecurityName, isPersonName } from "./depot-settlement-parser";
+import { cleanSecurityName, isPersonName, paperTypeOf, type PaperType } from "./depot-settlement-parser";
 import { readSettlement, rereadAgainstBooking, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
 import type { CheckName, FieldSource, MergeField } from "./depot-settlement-merge";
 
@@ -1998,6 +1998,8 @@ interface DocumentInspectionResponse {
   tax_pending: boolean;
   /** Accumulated income or a Vorabpauschale: only the tax charged is booked. */
   accumulation: boolean;
+  /** Which kind of paper: its fields, checks and matching follow from it. */
+  paper_type: PaperType | null;
   /** Why it does not, when it does not. */
   rejection: InspectionRejection | null;
   /** The reading that is used — rules and model merged. */
@@ -2138,6 +2140,7 @@ export const inspectSettlementDocument = api(
       tax_statement: reading.rules?.taxStatement ?? false,
       tax_pending: reading.rules?.taxPending ?? false,
       accumulation: reading.rules?.accumulation ?? false,
+      paper_type: paperTypeOf(reading.rules),
       rejection,
       fields,
       sources,

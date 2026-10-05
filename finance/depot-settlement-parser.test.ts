@@ -6,6 +6,7 @@ import {
   isPersonName,
   isUsableSettlement,
   parseGermanNumber,
+  paperTypeOf,
   parseSettlement,
   rejoinColumnAmounts,
   settlementBlock,
@@ -773,5 +774,15 @@ Bitte prüfen Sie diesen Kontoauszug, jede Mitteilung oder Dividendenabrechnung 
   it("is one when it carries a trade's booking", () => {
     const s = inspectSettlement(STATEMENT.replace("Übertrag vom Girokonto 200,00", "Wertpapierabrechnung Verkauf ISIN DE000000AAA1 990,00"))!;
     expect(s.accountStatement).toBe(false);
+  });
+});
+
+describe("paperTypeOf", () => {
+  it("names the kind of paper from what the rules recognised", () => {
+    expect(paperTypeOf({ kind: "buy", taxStatement: false, accumulation: false })).toBe("trade");
+    expect(paperTypeOf({ kind: "dividend", taxStatement: false, accumulation: false })).toBe("dividend");
+    expect(paperTypeOf({ kind: "dividend", taxStatement: true, accumulation: false })).toBe("tax_statement");
+    expect(paperTypeOf({ kind: "tax", taxStatement: false, accumulation: true })).toBe("accumulation");
+    expect(paperTypeOf({ kind: null, taxStatement: false, accumulation: false })).toBeNull();
   });
 });

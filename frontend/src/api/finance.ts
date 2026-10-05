@@ -795,6 +795,8 @@ export interface SettlementInspection {
   tax_pending?: boolean
   /** Accumulated income or a Vorabpauschale: only the tax charged is booked. */
   accumulation?: boolean
+  /** Which kind of paper: its fields, checks and matching follow from it. */
+  paper_type?: 'trade' | 'dividend' | 'tax_statement' | 'accumulation' | null
   rejection: SettlementRejection | null
   fields: SettlementInspectionFields
   /** Printed label each field was read after. */

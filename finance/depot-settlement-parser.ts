@@ -27,6 +27,32 @@ import { extractIsin, extractWkn } from "./depot-derivation";
  */
 export type SettlementKind = "buy" | "sell" | "dividend" | "tax";
 
+/**
+ * What kind of paper a document is — each has its own fields, its own
+ * arithmetic and its own way to find the transaction it belongs to:
+ *
+ *   trade         buy or sell: quantity × price = Kurswert, Kurswert ±
+ *                 charges = net; found by its net and date
+ *   dividend      credit note: quantity × per-share = gross, gross − taxes
+ *                 = net; found by its net, or its quantity and date
+ *   tax_statement the taxes on a booking that has its own paper: before −
+ *                 taxes = after; joins the booking of the same quantity
+ *   accumulation  income a fund kept (or a Vorabpauschale): only the tax
+ *                 charged, as money out; no arithmetic
+ */
+export type PaperType = "trade" | "dividend" | "tax_statement" | "accumulation";
+
+export function paperTypeOf(
+  r: Pick<SettlementInspection, "kind" | "taxStatement" | "accumulation"> | null,
+): PaperType | null {
+  if (!r) return null;
+  if (r.accumulation) return "accumulation";
+  if (r.taxStatement) return "tax_statement";
+  if (r.kind === "dividend") return "dividend";
+  if (r.kind === "buy" || r.kind === "sell") return "trade";
+  return null;
+}
+
 /** Whether the net of this kind leaves the account (signed negative). */
 export function isMoneyOut(kind: SettlementKind | null): boolean {
   return kind === "buy" || kind === "tax";

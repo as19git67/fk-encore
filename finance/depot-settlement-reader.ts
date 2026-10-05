@@ -22,6 +22,7 @@ import { financeDocumentSettlementLlm } from "../db/schema";
 import { extractIsin, extractWkn } from "./depot-derivation";
 import {
   inspectSettlement,
+  paperTypeOf,
   settlementBlock,
   type ExchangeRate,
   type SettlementInspection,
@@ -207,7 +208,7 @@ export async function readSettlement(
       try {
         // An account statement carries the settlement as one booking among
         // others: the model reads that block, not the fee lines around it.
-        const raw = await extractSettlementValues(settlementBlock(text) ?? text);
+        const raw = await extractSettlementValues(settlementBlock(text) ?? text, paperTypeOf(rules));
         // Store what the model said, so it is asked once.
         await db
           .insert(financeDocumentSettlementLlm)
