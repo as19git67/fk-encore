@@ -1000,3 +1000,33 @@ Zu Ihren Gunsten nach Steuern: EUR 24,10`;
     expect((await depotRows(depot))[0]!.gross_amount).toBe("32.00");
   });
 });
+
+describe("finance/portfolio — security names", () => {
+  it("prefers the bank holding's name and shows no label or person's name read off a document", async () => {
+    const { depot } = await setup();
+    const tx = (isin: string, name: string) => ({
+      account_id: depot,
+      isin,
+      name,
+      kind: "dividend" as const,
+      executed_at: "2026-02-01",
+      net_amount: "10.00",
+      currency: "EUR",
+      source: "document",
+      dedupe_hash: `doc:${isin}`,
+    });
+    await db.insert(financeDepotTransaction).values([
+      // The holding names this one.
+      tx(ISIN_A, "per 01.02.2026 Falsch gelesen AG"),
+      // Only documents name these.
+      tx("DE000000BBB2", "per 01.02.2026 Beta Werke AG"),
+      // ensureUser(1) is called "User1": the address block, not a security.
+      tx("DE000000CCC3", "User1"),
+    ]);
+    const resp = await getPortfolio({});
+    const name = (isin: string) => resp.positions.find((p) => p.isin === isin)?.name;
+    expect(name(ISIN_A)).toBe("Alpha Industries AG");
+    expect(name("DE000000BBB2")).toBe("Beta Werke AG");
+    expect(name("DE000000CCC3")).toBeNull();
+  });
+});

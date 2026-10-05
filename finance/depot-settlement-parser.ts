@@ -393,7 +393,8 @@ function detectCurrency(text: string): string | null {
 
 /** The security name: the text on the line after "Wertpapierbezeichnung" or next to the ISIN. */
 function detectName(text: string, isin: string | null, wkn: string | null): string | null {
-  const name = detectNameRaw(text, isin, wkn);
+  const raw = detectNameRaw(text, isin, wkn);
+  const name = raw === null ? null : cleanSecurityName(raw);
   if (!name) return null;
   // A table layout prints the identifier in the next column: "Alpha AG  123456".
   const cleaned = [isin, wkn]
@@ -450,7 +451,39 @@ function detectNameRaw(text: string, isin: string | null, wkn: string | null): s
 
 /** Labels and headings a statement prints around the security, never its name. */
 const NOT_A_NAME =
-  /^(stück|stk|nominale|kurs|kurswert|preis|wertpapier|kauf|verkauf|dividend|ertrag|erträgnis|ausschüttung|depot|schlusstag|handelstag|ausführung|valuta|datum|abrechnung|zahlbar|isin|wkn|betrag|brutto|netto|provision|steuer|kapitalertrag)/i;
+  /^(stück|stk|nominale|kurs|kurswert|preis|wertpapier|kauf|verkauf|dividend|ertrag|erträgnis|ausschüttung|depot|schlusstag|handelstag|ausführung|valuta|datum|abrechnung|zahlbar|isin|wkn|betrag|brutto|netto|provision|steuer|kapitalertrag|anlageklasse|anlagestrategie|emittent|fondsgesellschaft|herrn?\b|frau\b|inhaber|kunde)/i;
+
+/**
+ * A security name as a table row prints it, without the columns around it:
+ * "per 01.02.2026 Alpha AG" (the holding's date column), "STK 25 Alpha AG"
+ * (the quantity column), "Alpha AG AAA111" (the identifier column). Null when what is left is a label, not a name.
+ */
+export function cleanSecurityName(raw: string): string | null {
+  const name = raw
+    .replace(/^(?:per\s+)?\d{1,2}\.\d{1,2}\.\d{2,4}\s+/i, "")
+    .replace(/^(?:STK|Stück|St\.)\s*[\d.,]+\s+/i, "")
+    // The identifier column at the end: an ISIN, or a WKN (six characters, at least one digit).
+    .replace(/\s+[A-Z]{2}[A-Z0-9]{9}\d$/, "")
+    .replace(/\s+(?=[A-Z0-9]*\d)[A-Z0-9]{6}$/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (name.length < 2 || NOT_A_NAME.test(name)) return null;
+  const letters = (name.match(/[A-Za-zÄÖÜäöüß]/g) ?? []).length;
+  return letters >= 2 ? name : null;
+}
+
+/**
+ * Whether a name read as the security's is a person's — the holder's name
+ * from the address block, taken by a reader that looked in the wrong place.
+ * `people` are the names it must not be (the users of this installation).
+ */
+export function isPersonName(name: string, people: readonly string[]): boolean {
+  const words = new Set(name.toLowerCase().split(/[^a-zäöüß]+/).filter((w) => w.length >= 2));
+  return people.some((person) => {
+    const parts = person.toLowerCase().split(/[^a-zäöüß]+/).filter((w) => w.length >= 2);
+    return parts.length > 0 && parts.every((p) => words.has(p));
+  });
+}
 
 function looksLikeName(line: string): boolean {
   if (line.length < 3 || line.length > 80) return false;

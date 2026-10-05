@@ -34,9 +34,12 @@ import {
   financeAccountType,
   financeDepotTransaction,
   financeDepotTransactionDocument,
+  users,
 } from "../db/schema";
 import {
+  cleanSecurityName,
   INSURANCE_PATTERN,
+  isPersonName,
   isUsableSettlement,
   SETTLEMENT_CANDIDATE_PATTERN,
   STRONG_SETTLEMENT_PATTERN,
@@ -526,6 +529,19 @@ async function joinPairTransaction(
   return result;
 }
 
+/**
+ * A security name read off a document, fit to store: without the table
+ * columns around it, and null when it is a label or the name of one of
+ * the people using the installation (the address block, read by mistake).
+ */
+async function fitName(name: string | null): Promise<string | null> {
+  if (!name) return null;
+  const cleaned = cleanSecurityName(name);
+  if (!cleaned) return null;
+  const people = (await db.select({ name: users.name }).from(users)).map((u) => u.name);
+  return isPersonName(cleaned, people) ? null : cleaned;
+}
+
 /** Fixed-scale string for a numeric column, or null. */
 function fixed(n: number | null, scale: number): string | null {
   return n === null ? null : n.toFixed(scale);
@@ -734,7 +750,10 @@ export async function enrichDocument(
     if (row.net_amount === null && parsed.net !== null) patch.net_amount = fixed(parsed.net, 2);
     if (row.isin === null && parsed.isin) patch.isin = parsed.isin;
     if (row.wkn === null && parsed.wkn) patch.wkn = parsed.wkn;
-    if (row.name === null && parsed.name) patch.name = parsed.name;
+    if (row.name === null) {
+      const name = await fitName(parsed.name);
+      if (name) patch.name = name;
+    }
     const changed = Object.keys(patch).length > 0;
     if (dryRun) {
       result.outcome = changed ? "enriched" : "linked";
@@ -762,7 +781,7 @@ export async function enrichDocument(
       account_id: holding.account_id,
       isin: parsed.isin ?? holding.isin,
       wkn: parsed.wkn ?? holding.wkn,
-      name: parsed.name ?? holding.name,
+      name: (await fitName(parsed.name)) ?? holding.name,
       kind: parsed.kind,
       executed_at: parsed.executedAt!,
       amount: fixed(parsed.quantity, 8),

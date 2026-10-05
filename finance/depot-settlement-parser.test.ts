@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  cleanSecurityName,
   extractDepotNumber,
   inspectSettlement,
+  isPersonName,
   isUsableSettlement,
   parseGermanNumber,
   parseSettlement,
@@ -478,5 +480,31 @@ Valuta 14.04.2026 Zu Ihren Gunsten vor Steuern EUR 27,20`;
   it("reads past a footnote marker between a tax label and its amount", () => {
     const s = inspectSettlement(CREDIT.replace("Quellensteuer USD 6,00", "Quellensteuer (1) USD 6,00"))!;
     expect(s.tax).toBe(4.8);
+  });
+});
+
+describe("security names", () => {
+  it("drops the table columns printed next to the name, and labels", () => {
+    expect(cleanSecurityName("per 01.02.2026 Alpha Industries AG")).toBe("Alpha Industries AG");
+    expect(cleanSecurityName("STK 25,000 Alpha Industries AG")).toBe("Alpha Industries AG");
+    expect(cleanSecurityName("Anlageklasse")).toBeNull();
+    expect(cleanSecurityName("Alpha Industries AG")).toBe("Alpha Industries AG");
+  });
+
+  it("recognises a person's name taken from the address block", () => {
+    expect(isPersonName("Paul Beispiel", ["Paul Beispiel"])).toBe(true);
+    expect(isPersonName("Herrn Paul Beispiel", ["Paul Beispiel"])).toBe(true);
+    expect(isPersonName("Alpha Industries AG", ["Paul Beispiel"])).toBe(false);
+  });
+
+  it("reads the name under 'Wertpapier-Bezeichnung' without the holding's date column", () => {
+    const s = inspectSettlement(`Beispielbank AG
+Dividendengutschrift
+Depotbestand Wertpapier-Bezeichnung WKN/ISIN
+per 01.02.2026 Alpha Industries AG AAA111
+STK 25,000 Registered Shares o.N. DE000000AAA1
+Bruttobetrag: EUR 50,00
+Ausmachender Betrag EUR 50,00`)!;
+    expect(s.name).toBe("Alpha Industries AG");
   });
 });
