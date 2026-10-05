@@ -291,8 +291,14 @@ struct TripPinDetailSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        // Half the screen first, the whole of it on a pull: the long
+        // ones (a note, five actions, the article) used to be stuck at
+        // half. And the map behind stays bright and usable — the sheet
+        // is an answer about a dot on it, not a modal over it; the
+        // system's dimming made the whole screen look switched off.
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
     }
 
     /// "7. Kaiserbrunnen" on a day, plain "Kaiserbrunnen" in the pool —
