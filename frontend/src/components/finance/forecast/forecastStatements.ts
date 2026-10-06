@@ -17,6 +17,7 @@ export function sourceText(src: ForecastValuesSource | null | undefined): string
   switch (src.kind) {
     case 'statement':
       return src.referenceDate ? `Werte aus Standmitteilung ${formatMonth(src.referenceDate)}` : 'Werte aus einer Standmitteilung'
+    // The one-time spreadsheet import is gone; items it created still carry this source.
     case 'import':
       return `Werte aus dem Excel-Import ${formatMonth(src.updatedAt)}`
     case 'manual':

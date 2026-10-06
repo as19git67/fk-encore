@@ -25,7 +25,6 @@ import ForecastRobustness from '../../components/finance/forecast/ForecastRobust
 import ForecastTargetAge from '../../components/finance/forecast/ForecastTargetAge.vue'
 import ForecastSurvivor from '../../components/finance/forecast/ForecastSurvivor.vue'
 import ForecastPlanActual from '../../components/finance/forecast/ForecastPlanActual.vue'
-import ForecastImportDialog from '../../components/finance/forecast/ForecastImportDialog.vue'
 import ForecastStatementsDialog from '../../components/finance/forecast/ForecastStatementsDialog.vue'
 import ForecastAccountsDialog from '../../components/finance/forecast/ForecastAccountsDialog.vue'
 import ForecastShareDialog from '../../components/finance/forecast/ForecastShareDialog.vue'
@@ -506,15 +505,9 @@ function removeMilestone() {
 
 // ---- items ---------------------------------------------------------------------------------
 
-// ---- spreadsheet import -------------------------------------------------------------------
+// ---- notices ------------------------------------------------------------------------------
 
-const importDialog = ref(false)
-const importNotice = ref<string | null>(null)
-
-async function onImported(count: number, found: ForecastScanSummary) {
-  importNotice.value = `${count} Einträge aus der Excel-Datei übernommen. ${describeScan(found)}`
-  await load()
-}
+const notice = ref<string | null>(null)
 
 // ---- sharing within the household ---------------------------------------------------------
 
@@ -542,9 +535,9 @@ function joinShared(offer: ForecastShareOffer) {
       try {
         await joinForecastShare(offer.ownerId)
         config.value = null
-        importNotice.value = `Du arbeitest jetzt an der Prognose von ${offer.ownerName}.`
+        notice.value = `Du arbeitest jetzt an der Prognose von ${offer.ownerName}.`
       } catch (err) {
-        importNotice.value = `Wechsel fehlgeschlagen: ${message(err)}`
+        notice.value = `Wechsel fehlgeschlagen: ${message(err)}`
       }
       await load()
     },
@@ -570,7 +563,7 @@ async function loadAccountSuggestions() {
 }
 
 async function onAccountsCreated(count: number) {
-  importNotice.value = count === 1 ? '1 Konto als Vermögen übernommen.' : `${count} Konten als Vermögen übernommen.`
+  notice.value = count === 1 ? '1 Konto als Vermögen übernommen.' : `${count} Konten als Vermögen übernommen.`
   await load()
 }
 
@@ -590,7 +583,7 @@ async function loadStatements() {
     if (res.items.some((s) => s.reading)) statementsTimer = setTimeout(() => void loadStatements(), 3000)
   } catch (err) {
     // The forecast works without statements; say so, but keep the page.
-    importNotice.value = `Standmitteilungen konnten nicht geladen werden: ${message(err)}`
+    notice.value = `Standmitteilungen konnten nicht geladen werden: ${message(err)}`
   }
 }
 
@@ -607,9 +600,9 @@ async function scanStatements() {
   scanning.value = true
   try {
     const res = await scanForecastStatements()
-    importNotice.value = `Suche nach Standmitteilungen: ${describeScan(res)}`
+    notice.value = `Suche nach Standmitteilungen: ${describeScan(res)}`
   } catch (err) {
-    importNotice.value = `Suche nach Standmitteilungen fehlgeschlagen: ${message(err)}`
+    notice.value = `Suche nach Standmitteilungen fehlgeschlagen: ${message(err)}`
   } finally {
     scanning.value = false
   }
@@ -629,10 +622,6 @@ function openStatements(it: ForecastItem) {
 
 async function onStatementsChanged() {
   await load()
-}
-
-function applyInflation(rate: number) {
-  if (config.value) config.value.inflationRate = rate
 }
 
 const itemDialog = ref(false)
@@ -681,10 +670,10 @@ function removeItem(id: number) {
       itemDialog.value = false
       try {
         await deleteForecastItem(id)
-        importNotice.value = `„${it.label}“ gelöscht.`
+        notice.value = `„${it.label}“ gelöscht.`
       } catch (err) {
         bundle.value = before
-        importNotice.value = `„${it.label}“ konnte nicht gelöscht werden: ${message(err)}`
+        notice.value = `„${it.label}“ konnte nicht gelöscht werden: ${message(err)}`
       }
       await load()
     },
@@ -912,7 +901,6 @@ const ready = computed(() => !loading.value)
         :loading="scanning"
         @click="scanStatements"
       />
-      <Button label="Import" icon="pi pi-file-import" size="small" outlined :disabled="persons.length === 0 || !canEdit" @click="importDialog = true" />
       <Button label="Eintrag" icon="pi pi-plus" size="small" :disabled="persons.length === 0 || !canEdit" @click="openItem(null)" />
     </template>
 
@@ -940,7 +928,7 @@ const ready = computed(() => !loading.value)
         Für {{ p.label }} ist keine Krankenversicherung eingetragen. Nach dem Ausstieg aus dem Arbeitsleben fehlen damit die Beiträge in den Ausgaben.
         <Button v-if="canEdit" label="Krankenversicherung anlegen" link size="small" @click="openItem(null, 'health_insurance', p.id)" />
       </Message>
-      <Message v-if="importNotice" severity="info" :closable="true" @close="importNotice = null">{{ importNotice }}</Message>
+      <Message v-if="notice" severity="info" :closable="true" @close="notice = null">{{ notice }}</Message>
     </template>
 
     <PageSkeleton v-if="loading && !bundle" variant="list" :count="4" />
@@ -1377,13 +1365,6 @@ const ready = computed(() => !loading.value)
         <Button label="Speichern" icon="pi pi-check" :loading="msSaving" :disabled="msPerson == null || (msMode === 'age' ? msAge == null : !msDate)" @click="saveMilestone" />
       </template>
     </Dialog>
-
-    <ForecastImportDialog
-      v-model:visible="importDialog"
-      :persons="persons"
-      @imported="onImported"
-      @apply-inflation="applyInflation"
-    />
 
     <ForecastShareDialog v-model:visible="shareDialog" @changed="load" />
 

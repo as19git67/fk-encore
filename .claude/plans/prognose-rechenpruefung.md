@@ -10,6 +10,11 @@ und Buchungen (`finance/forecast-statements-extract.ts`,
 
 Alle Beispiele hier sind erfunden.
 
+Nachtrag: Den einmaligen Tabellen-Import gibt es nicht mehr (entfernt, weil
+er nie wieder gebraucht wird). Die Punkte zum Import unten beschreiben, was
+beim Prüfen galt; schon importierte Posten tragen weiter die Herkunft
+„Excel-Import“.
+
 ## Behoben (Commit „Forecast: corrections from the calculation audit“)
 
 ### Engine
@@ -207,8 +212,6 @@ Abhebungen zählen als Ausgabe; keine Benachrichtigung bei Abweichung.
 - Die Zeile „Überbrückung gedeckt / nicht gedeckt“ vergleicht Bedarf und
   verfügbares Vermögen am Anfang ohne Erträge in der Phase; das Urteil
   „Geld reicht“ kommt aus der vollen Simulation.
-- Import ohne Detailblatt: Rückkaufswert 0, garantierte = prognostizierte
-  Ablaufleistung (die Engine liest die Garantie nicht).
 - Sicherheitspuffer ist nominal und wächst nicht mit der Inflation.
 - Kontostand eines Depots: Saldo-Zeile vor Positionssumme; ob der FinTS-Saldo
   eines Depots das Verrechnungskonto ist, wäre zu prüfen.
