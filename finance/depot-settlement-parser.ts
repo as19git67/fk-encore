@@ -60,7 +60,7 @@ export function isMoneyOut(kind: SettlementKind | null): boolean {
 
 const NO_TAX_RE = /kein(?:en)?\s+steuerabzug|keine\s+steuern?\s+(?:einbehalten|abgeführt)|ohne\s+steuerabzug/i;
 const ACCUMULATION_RE = /thesaurierung|thesaurierte\s+erträge|vorabpauschale|ausschüttungsgleiche\s+erträge/i;
-const TRADE_RE = /wertpapierabrechnung|wertpapier-abrechnung|wertpapierkauf|wertpapierverkauf|kaufabrechnung|verkaufsabrechnung|orderabrechnung|fondsabrechnung|ausführungsanzeige/i;
+const TRADE_RE = /wertpapier[\s-]*abrechnung|abrechnung\s+(?:kauf|verkauf)\b|wertpapierkauf|wertpapierverkauf|kaufabrechnung|verkaufsabrechnung|orderabrechnung|fondsabrechnung|ausführungsanzeige/i;
 const PAYOUT_RE = /dividendengutschrift|ertragsgutschrift|erträgnisgutschrift|ausschüttung(?!sgleich)/i;
 
 /**
@@ -292,7 +292,9 @@ export function parseGermanNumber(raw: string): number | null {
 // The amount stands on its label's line: a line break never belongs to it.
 // Nor is a number that a date continues ("01.01.26") an amount, nor one a
 // legal reference names ("nach § 12a EStG", "Abs. 3", "Nr. 5").
-const AMOUNT = String.raw`(?<!(?:§|Abs\.|Nr\.|Art\.)\s?)(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d+(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))(?![.,]?\d)`;
+const AMOUNT = String.raw`(?<!(?:§|Abs\.|Nr\.|Art\.)\s?)(-? ?\d{1,3}(?:[. ]\d{3})*(?:,\d{1,8})?|-? ?\d{1,7}(?:[.,]\d{1,8})?)(?![\d.,]*\s*%)(?![\d.,]*\))(?![.,]?\d)`;
+// A run of more than seven digits without a separator is an account or
+// order number ("zu Gunsten des Kontos 0123456789"), not an amount.
 /** What may stand between a label and its amount: text, or a footnote marker ("Kapitalertragsteuer (1) EUR …"). */
 const GAP = String.raw`(?:[^\d\n-]|\(\d{1,2}\)){0,40}?`;
 const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
@@ -786,8 +788,9 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)\s*nach\s*${STEUERN}`,
       String.raw`Betrag\s*zu\s*Ihren\s*(?:Gunsten|Lasten)(?!\s*vor\s*${STEUERN})`,
       String.raw`Zu\s*Ihren\s*(?:Gunsten|Lasten)(?!\s*vor\s*${STEUERN})`,
-      String.raw`Zu\s*Lasten`,
-      String.raw`Zu\s*Gunsten`,
+      // Not "zu Gunsten des Kontos …": an account number follows.
+      String.raw`Zu\s*Lasten(?!\s*(?:des\s*)?Kontos?\b)`,
+      String.raw`Zu\s*Gunsten(?!\s*(?:des\s*)?Kontos?\b)`,
       String.raw`Gutschrift\s*(?:in\s*)?Höhe\s*von`,
       String.raw`Belastung\s*(?:in\s*)?Höhe\s*von`,
       // A statement's booking line: "EFFEKTENGUTSCHRIFT PN:100  450,00 H".

@@ -663,6 +663,46 @@ Betrag zu Ihren Gunsten EUR 20,00`)!;
     expect(payout.accumulation).toBe(false);
     expect(payout.kind).toBe("dividend");
   });
+
+  it("reads a sale headed with a spaced \"Wertpapier Abrechnung\" as a trade, whatever its tax part mentions", () => {
+    const sale = inspectSettlement(`Wertpapier Abrechnung Verkauf
+Auftrag vom 02.02.2026 10:00:00 Uhr
+Nominale Wertpapierbezeichnung ISIN (WKN)
+Stück 0,500 BEISPIEL WELT FONDS ANTEILE XF00SONNE005 (SNN001)
+Schlusstag 03.02.2026
+Ausführungskurs 200,00 EUR
+Kurswert 100,00 EUR
+Ermittlung steuerrelevante Erträge
+Veräußerungsgewinn (nach Teilfreistellung) 10,00 EUR
+davon angesetzte Vorabpauschale 1,00 EUR
+Verrechneter Sparerpauschbetrag 10,00- EUR
+Ausmachender Betrag 100,00 EUR
+Den Gegenwert buchen wir mit Valuta 05.02.2026 zu Gunsten des Kontos 1234567890`)!;
+    expect(sale.accumulation).toBe(false);
+    expect(sale.kind).toBe("sell");
+    expect(sale.net).toBe(100);
+    expect(sale.tax).toBeNull();
+  });
+});
+
+describe("account numbers are not amounts", () => {
+  it("does not read the account after \"zu Gunsten des Kontos\" as the net", () => {
+    const s = inspectSettlement(`Wertpapier Abrechnung Verkauf
+Stück 1 BEISPIEL AG XF00SONNE005
+Schlusstag 03.02.2026
+Kurswert 50,00 EUR
+Den Gegenwert buchen wir mit Valuta 05.02.2026 zu Gunsten des Kontos 1234567890`)!;
+    expect(s.net).toBeNull();
+  });
+
+  it("does not take a long digit run without separators as an amount", () => {
+    const s = inspectSettlement(`Wertpapierabrechnung Kauf
+Stück 1 BEISPIEL AG XF00SONNE005
+Schlusstag 03.02.2026
+Kurswert 50,00 EUR
+Abgeführte Steuern 1234567890`)!;
+    expect(s.tax).toBeNull();
+  });
 });
 
 describe("security name on a tax statement", () => {
