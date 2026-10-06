@@ -495,9 +495,9 @@ export const MOCK_PORTFOLIO_POSITION: PortfolioPositionResponse = {
   ],
   unverifiable_changes: 1,
   years: [
-    { year: 2026, realized: '218.95', sell_count: 1, income: '88.35', dividend_count: 1, fees: '10.00', taxes: '52.70', },
-    { year: 2025, realized: '0.00', sell_count: 0, income: '120.00', dividend_count: 1, fees: '0.00', taxes: '30.00' },
-    { year: 2024, realized: '0.00', sell_count: 0, income: '0.00', dividend_count: 0, fees: '20.00', taxes: '0.00' },
+    { year: 2026, realized: '218.95', realized_complete: true, sell_count: 1, income: '88.35', dividend_count: 1, fees: '10.00', taxes: '52.70', },
+    { year: 2025, realized: '0.00', realized_complete: true, sell_count: 0, income: '120.00', dividend_count: 1, fees: '0.00', taxes: '30.00' },
+    { year: 2024, realized: '0.00', realized_complete: true, sell_count: 0, income: '0.00', dividend_count: 0, fees: '20.00', taxes: '0.00' },
   ],
 }
 

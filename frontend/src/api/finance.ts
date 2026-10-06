@@ -1042,14 +1042,17 @@ export interface PositionSale {
   executed_at: string
   quantity: string
   proceeds: string
-  cost: string
-  cost_per_unit: string
-  gain: string
+  /** Null when a buy before it has no quantity or price. */
+  cost: string | null
+  cost_per_unit: string | null
+  gain: string | null
 }
 
 export interface PositionYear {
   year: number
   realized: string
+  /** False when a sale that year has unknown costs (left out of `realized`). */
+  realized_complete: boolean
   sell_count: number
   income: string
   dividend_count: number
