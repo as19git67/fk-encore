@@ -294,16 +294,17 @@ describe("finance/portfolio — getPortfolio", () => {
     ]);
 
     const alpha = resp.positions[0];
-    expect(alpha.cost_basis).toBe("600.00");
+    // The buy's fees belong to its cost: 1005 / 10 = 100.50 a share.
+    expect(alpha.cost_basis).toBe("603.00");
     expect(alpha.cost_basis_source).toBe("tx-wac");
-    expect(alpha.unrealized_gain).toBe("120.00");
-    // 590 proceeds − 4 × 100 cost
-    expect(alpha.realized_gain).toBe("190.00");
+    expect(alpha.unrealized_gain).toBe("117.00");
+    // 590 proceeds − 4 × 100.50 cost
+    expect(alpha.realized_gain).toBe("188.00");
     expect(alpha.realized_gain_complete).toBe(true);
     expect(alpha.income).toBe("12.50");
     expect(alpha.fees).toBe("10.00");
     expect(alpha.taxes).toBe("9.50");
-    expect(alpha.total_return).toBe("322.50");
+    expect(alpha.total_return).toBe("317.50");
     expect(alpha.buy_count).toBe(1);
     expect(alpha.sell_count).toBe(1);
     expect(alpha.dividend_count).toBe(1);
@@ -317,11 +318,11 @@ describe("finance/portfolio — getPortfolio", () => {
     expect(beta.realized_gain).toBe("-20.00");
     expect(beta.total_return).toBe("-20.00");
 
-    expect(resp.summary.realized_gain).toBe("170.00");
+    expect(resp.summary.realized_gain).toBe("168.00");
     expect(resp.summary.income).toBe("12.50");
     expect(resp.summary.fees).toBe("10.00");
     expect(resp.summary.taxes).toBe("9.50");
-    expect(resp.summary.total_return).toBe("302.50");
+    expect(resp.summary.total_return).toBe("297.50");
     expect(resp.summary.open_positions).toBe(1);
     expect(resp.summary.closed_positions).toBe(1);
     expect(resp.summary.transaction_count).toBe(5);
@@ -331,7 +332,7 @@ describe("finance/portfolio — getPortfolio", () => {
     expect(y2024.fees).toBe("5.00");
     expect(y2024.net_invested).toBe("1005.00");
     const y2025 = resp.years[1];
-    expect(y2025.realized).toBe("170.00");
+    expect(y2025.realized).toBe("168.00");
     expect(y2025.sell_count).toBe(2);
     expect(y2025.fees).toBe("5.00");
     expect(y2025.taxes).toBe("5.00");
@@ -524,12 +525,12 @@ describe("finance/portfolio — getPortfolioPosition", () => {
     expect(resp.position.key).toBe(ISIN_A);
     expect(Number(resp.position.amount)).toBe(8);
     expect(resp.position.value).toBe("962.00");
-    // 6 × 100 (WAC) + 2 × 130 (bank)
-    expect(resp.position.cost_basis).toBe("860.00");
+    // 6 × 100.50 (WAC with the buy's fees) + 2 × 130 (bank)
+    expect(resp.position.cost_basis).toBe("863.00");
     expect(resp.position.cost_basis_source).toBe("tx-wac");
 
     expect(resp.accounts.map((a) => [a.account_label, a.cost_basis, a.cost_basis_source])).toEqual([
-      ["Depot 1", "600.00", "tx-wac"],
+      ["Depot 1", "603.00", "tx-wac"],
       ["Depot 2", "260.00", "bank"],
     ]);
 
@@ -540,17 +541,17 @@ describe("finance/portfolio — getPortfolioPosition", () => {
 
     expect(resp.sales).toHaveLength(1);
     expect(resp.sales[0].quantity).toBe("4.00000000");
-    expect(resp.sales[0].cost).toBe("400.00");
+    expect(resp.sales[0].cost).toBe("402.00");
     expect(resp.sales[0].proceeds).toBe("590.00");
-    expect(resp.sales[0].gain).toBe("190.00");
-    expect(resp.sales[0].cost_per_unit).toBe("100.000000");
+    expect(resp.sales[0].gain).toBe("188.00");
+    expect(resp.sales[0].cost_per_unit).toBe("100.500000");
 
     expect(resp.transactions.map((t) => t.kind)).toEqual(["dividend", "buy", "sell", "buy"]);
     expect(resp.transactions.every((t) => t.position_key === ISIN_A)).toBe(true);
 
     expect(resp.years.map((y) => [y.year, y.realized, y.income, y.fees, y.taxes, y.sell_count, y.dividend_count])).toEqual([
       [2026, "0.00", "12.50", "0.00", "4.50", 0, 1],
-      [2025, "190.00", "0.00", "5.00", "5.00", 1, 0],
+      [2025, "188.00", "0.00", "5.00", "5.00", 1, 0],
       [2024, "0.00", "0.00", "5.00", "0.00", 0, 0],
     ]);
   });

@@ -457,7 +457,7 @@ function transactionCash(tx: PortfolioTransaction): string {
       <section v-if="data.sales.length > 0" class="pp-section" aria-labelledby="pp-sales-heading">
         <h2 id="pp-sales-heading">Verkäufe</h2>
         <p class="pp-muted">
-          Jeder Verkauf gegen den gewichteten Durchschnittskurs der Käufe im selben Depot zu diesem Zeitpunkt; Erlös netto nach Gebühren und Steuern.
+          Jeder Verkauf gegen den gewichteten Durchschnittskurs der Käufe samt Kaufgebühren im selben Depot zu diesem Zeitpunkt; Erlös netto nach Gebühren und Steuern.
         </p>
         <ScrollX>
           <table class="pp-table">

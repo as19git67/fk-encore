@@ -215,6 +215,25 @@ export interface WacIndex {
   byWkn: Map<string, BuyAggregate>;
 }
 
+/**
+ * What a buy cost: the amount paid with its fees — the tax office counts
+ * Anschaffungsnebenkosten as cost — else quantity × price. Null without a
+ * quantity or either figure.
+ */
+export function buyCost(tx: {
+  amount: string | null;
+  price: string | null;
+  net_amount: string | null;
+}): { qty: number; cost: number } | null {
+  const qty = tx.amount === null ? NaN : Number(tx.amount);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  const paid = tx.net_amount === null ? NaN : Math.abs(Number(tx.net_amount));
+  if (Number.isFinite(paid) && paid > 0) return { qty, cost: paid };
+  const price = tx.price === null ? NaN : Number(tx.price);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  return { qty, cost: qty * price };
+}
+
 export async function buildBuyWacIndex(accountId: number): Promise<WacIndex> {
   const byIsin = new Map<string, BuyAggregate>();
   const byWkn = new Map<string, BuyAggregate>();
@@ -225,6 +244,7 @@ export async function buildBuyWacIndex(accountId: number): Promise<WacIndex> {
       wkn: financeDepotTransaction.wkn,
       amount: financeDepotTransaction.amount,
       price: financeDepotTransaction.price,
+      net_amount: financeDepotTransaction.net_amount,
     })
     .from(financeDepotTransaction)
     .where(
@@ -235,12 +255,9 @@ export async function buildBuyWacIndex(accountId: number): Promise<WacIndex> {
     );
 
   for (const tx of buys) {
-    if (!tx.amount || !tx.price) continue;
-    const qty = Number(tx.amount);
-    const price = Number(tx.price);
-    if (!Number.isFinite(qty) || !Number.isFinite(price)) continue;
-    if (qty <= 0 || price <= 0) continue;
-    const cost = qty * price;
+    const bought = buyCost(tx);
+    if (!bought) continue;
+    const { qty, cost } = bought;
     if (tx.isin) {
       const agg = byIsin.get(tx.isin) ?? { weightedCost: 0, totalQty: 0 };
       agg.weightedCost += cost;
@@ -346,7 +363,8 @@ export function computeCostBasis(
 //              tax treatment; not part of position G/V)
 //
 // "proceeds" prefers `net_amount` (after fees/tax — closer to what the
-// user actually received). Falls back to amount × price.
+// user actually received). Falls back to amount × price. A buy's cost
+// likewise prefers what was paid with fees, then amount × price.
 //
 // `complete` is false when any buy/sell on the position lacked the
 // quantitative data needed (typical for giro-derived rows with only
@@ -467,11 +485,15 @@ export function computeRealizedForPosition(
   txs: DepotTx[],
   onSale?: (sale: RealizedSale) => void,
 ): RealizedAggregate {
+  // Within a day, shares come in before they go out: a sale cannot sell
+  // what was bought later that day, so a buy and a sale of the same day
+  // (often read from different sources, in any id order) are a round trip.
+  const inbound = (kind: string) => (kind === "buy" || kind === "in" ? 0 : 1);
   const sorted = [...txs].sort((a, b) => {
-    if (a.executed_at !== b.executed_at) {
-      return a.executed_at < b.executed_at ? -1 : 1;
-    }
-    return a.id - b.id;
+    const dayA = a.executed_at.slice(0, 10);
+    const dayB = b.executed_at.slice(0, 10);
+    if (dayA !== dayB) return dayA < dayB ? -1 : 1;
+    return inbound(a.kind) - inbound(b.kind) || a.id - b.id;
   });
 
   let qty = 0;
@@ -489,9 +511,10 @@ export function computeRealizedForPosition(
   for (const tx of sorted) {
     if (tx.kind === "buy" || tx.kind === "in") {
       const a = tx.amount === null ? null : Number(tx.amount);
-      const p = tx.price === null ? null : Number(tx.price);
       const known = a !== null && Number.isFinite(a) && a > 0;
-      if (!known || p === null || !Number.isFinite(p) || p <= 0) {
+      // A transfer in carries no payment of its own: its price is the cost.
+      const bought = buyCost(tx.kind === "buy" ? tx : { ...tx, net_amount: null });
+      if (!known || !bought) {
         complete = false;
         if (known) {
           qty += a;
@@ -501,8 +524,8 @@ export function computeRealizedForPosition(
         }
         continue;
       }
-      qty += a;
-      costTotal += a * p;
+      qty += bought.qty;
+      costTotal += bought.cost;
     } else if (tx.kind === "sell") {
       const a = tx.amount === null ? null : Number(tx.amount);
       if (a === null || !Number.isFinite(a) || a <= 0) {
