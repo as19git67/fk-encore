@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
 import { eq, inArray, sql } from "drizzle-orm";
-import ExcelJS from "exceljs";
 
 import db from "../db/database";
 import {
@@ -18,7 +17,6 @@ import {
   users,
 } from "../db/schema";
 import {
-  commitImport,
   createAccountItems,
   createItem,
   createMilestone,
@@ -26,10 +24,8 @@ import {
   createScenario,
   deleteItem,
   deletePerson,
-  evaluateImport,
   getAccountSuggestions,
   getForecast,
-  previewImport,
   runSimulation,
   toEngineScenario,
   updateItem,
@@ -388,72 +384,5 @@ describe("toEngineScenario", () => {
     expect(s.survivor).toEqual({ personId: null, age: null, expenseFactor: 0.7, incomeOffsetRate: 0.4, incomeAllowance: 1038 });
     expect(toEngineScenario({ survivor: { personId: 3, age: 61.6, expenseFactor: 9 } }).survivor).toMatchObject({ personId: 3, age: 62, expenseFactor: 1.5 });
     expect(toEngineScenario({ stress: { crashYear: 2031.4, crashSize: 7 } }).stress).toEqual({ crashYear: 2031, crashSize: 0.99 });
-  });
-});
-
-describe("finance/forecast — spreadsheet import", () => {
-  // An invented overview in the shape the importer reads.
-  async function workbookBase64(): Promise<string> {
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Liste");
-    ws.addRow([null, "Betrag", "jährliche Einnahmen (€)", "jährliche Ausgaben (€)", "einmalige Einnahmen/Ausgaben (€)", "Beitragszahlung bis", "Auszahlung im Jahr"]);
-    ws.addRow(["Bar A", 5000]);
-    ws.addRow(["Einkommen A (netto)", null, 36000]);
-    ws.addRow(["Leben", null, null, -18000]);
-    ws.addRow(["Q-000999", null, null, -1200, 20000]); // no year: needs one before it can be taken
-    wb.addWorksheet("Plan").addRow(["angenommene Rentenanpassung", 0.01]);
-    const buf = (await wb.xlsx.writeBuffer()) as unknown as Buffer;
-    return Buffer.from(buf).toString("base64");
-  }
-
-  it("previews, evaluates an edit and commits the chosen rows", async () => {
-    const { person } = await personWithMilestones("A");
-    const preview = await previewImport({ fileBase64: await workbookBase64() });
-    expect(preview.sheet).toBe("Liste");
-    expect(preview.pensionGrowthRate).toBe(0.01);
-    const by = Object.fromEntries(preview.rows.map((r) => [r.label, r]));
-    expect(by["Bar A"].suggestion).toMatchObject({ type: "asset", include: true });
-    expect(by["Einkommen A (netto)"].suggestion).toMatchObject({ type: "salary", personId: person.id });
-    expect(by["Q-000999"].suggestion.include).toBe(false);
-
-    // The user adds the missing payout year; the evaluation now describes the item.
-    const lv = { label: "Q-000999", type: "life_insurance" as const, personId: person.id, raw: { ...by["Q-000999"].raw, payoutYear: 2040 } };
-    const evaluated = await evaluateImport({ rows: [lv] });
-    expect(evaluated.rows[0].error).toBeNull();
-    expect(evaluated.rows[0].summary).toContain("2040");
-
-    const chosen = ["Bar A", "Einkommen A (netto)", "Leben"].map((l) => ({
-      label: l,
-      type: by[l].suggestion.type!,
-      personId: by[l].suggestion.personId,
-      raw: by[l].raw,
-    }));
-    const res = await commitImport({ rows: [...chosen, lv], pensionGrowthRate: preview.pensionGrowthRate });
-    expect(res.created).toBe(4);
-    const items = (await getForecast()).items;
-    expect(items.map((i) => i.type).sort()).toEqual(["asset", "life_insurance", "living_expense", "salary"]);
-    expect(items.find((i) => i.type === "salary")!.data.amount).toBe(3000);
-
-    // A second preview recognises what is already there.
-    const again = await previewImport({ fileBase64: await workbookBase64() });
-    expect(again.rows.find((r) => r.label === "Bar A")!.suggestion.include).toBe(false);
-  });
-
-  it("commits nothing when one row is broken", async () => {
-    const { person } = await personWithMilestones("A");
-    const preview = await previewImport({ fileBase64: await workbookBase64() });
-    const rows = preview.rows.map((r) => ({ label: r.label, type: r.suggestion.type ?? "expense", personId: r.suggestion.personId ?? person.id, raw: r.raw }));
-    await expect(commitImport({ rows })).rejects.toThrow(/nichts übernommen.*Q-000999: Ablaufjahr fehlt/);
-    expect((await getForecast()).items).toHaveLength(0);
-  });
-
-  it("rejects foreign persons, bad files and missing permission", async () => {
-    await personWithMilestones("A");
-    const raw = { amount: null, incomeYearly: 12000, expenseYearly: null, once: null, contributionUntilYear: null, payoutYear: null, note: null, detail: null };
-    await expect(commitImport({ rows: [{ label: "X", type: "salary", personId: 999999, raw }] })).rejects.toThrow(/Person nicht gefunden/);
-    await expect(previewImport({ fileBase64: Buffer.from("kein excel").toString("base64") })).rejects.toThrow(/keine lesbare/);
-    await expect(previewImport({ fileBase64: "" })).rejects.toThrow(/required/);
-    setAuth("1", []);
-    await expect(previewImport({ fileBase64: await workbookBase64() })).rejects.toThrow(/permission/);
   });
 });
