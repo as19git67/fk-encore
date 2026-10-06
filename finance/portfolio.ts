@@ -1540,6 +1540,17 @@ export const enrichDepotTransactionsFromDocuments = api(
       {},
       { before: before ?? null, budgetMs: ENRICH_REQUEST_BUDGET_MS },
     );
+    if (stats.created > 0) {
+      // A new row may be the first trace of a position closed before the
+      // first holdings snapshot: its bookings can be derived only now.
+      const bankcontacts = await db
+        .selectDistinct({ id: financeAccount.bankcontact_id })
+        .from(financeAccount)
+        .where(inArray(financeAccount.id, depots.map((d) => d.id)));
+      for (const bc of bankcontacts) {
+        if (bc.id !== null) await deriveDepotTransactionsForBankcontact(bc.id);
+      }
+    }
     return {
       ...stats,
       results: stats.results.filter(

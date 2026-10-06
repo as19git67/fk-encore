@@ -155,6 +155,14 @@ describe("extractIsin", () => {
     expect(extractIsin("REFERENZ US0378331005Z xxxx")).toBeNull();
   });
 
+  it("reads an ISIN the booking text prints with a space inside", () => {
+    expect(extractIsin("APPLE INC. WPKNR: 865985 ISIN: US0378 331005")).toBe("US0378331005");
+  });
+
+  it("does not join a spaced ISIN whose check digit fails", () => {
+    expect(extractIsin("ISIN: US0378 331006")).toBeNull();
+  });
+
   it("returns null on null/empty input", () => {
     expect(extractIsin(null)).toBeNull();
     expect(extractIsin("")).toBeNull();
@@ -531,6 +539,74 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     const stats = await deriveDepotTransactionsForBankcontact(bcId);
     expect(stats.candidates).toBe(0);
     expect(stats.derived).toBe(0);
+  });
+
+  it("takes the depot of earlier rows when a closed position has no holding", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    // Read from a settlement document; no holdings snapshot ever showed it.
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: "US0378331005",
+      wkn: "865985",
+      name: "APPLE INC.",
+      kind: "sell",
+      executed_at: "2026-03-10",
+      amount: "5",
+      net_amount: "1100.00",
+      currency: "EUR",
+      source: "document",
+    });
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-02-03",
+      amount: "-1000.00",
+      purpose: "WERTPAPIERKAUF APPLE INC. WPKNR: 865985 ISIN: US0378 331005",
+      funds_code: "R",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(1);
+    const [row] = await db
+      .select()
+      .from(financeDepotTransaction)
+      .where(eq(financeDepotTransaction.source, "giro-derived"));
+    expect(row).toMatchObject({
+      account_id: depot,
+      kind: "buy",
+      isin: "US0378331005",
+      wkn: "865985",
+      name: "APPLE INC.",
+      net_amount: "-1000.00",
+    });
+  });
+
+  it("does not guess between two depots that both have rows of the security", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    for (const label of ["DEPOT-1", "DEPOT-2"]) {
+      const depot = await insertAccount(bcId, "depot", label);
+      await db.insert(financeDepotTransaction).values({
+        account_id: depot,
+        wkn: "865985",
+        kind: "buy",
+        executed_at: "2026-01-10",
+        currency: "EUR",
+        source: "document",
+      });
+    }
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-02-03",
+      amount: "-1000.00",
+      purpose: "WERTPAPIERKAUF WPKNR: 865985",
+      funds_code: "R",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(0);
+    expect(stats.skipped_no_holding).toBe(1);
   });
 
   it("falls back to matching by holding name when purpose has no ISIN/WKN", async () => {

@@ -22,6 +22,7 @@
  * trace. The checks are what lets either one be trusted.
  */
 
+import { isinChecksumValid } from "./depot-derivation";
 import { isMoneyOut, type SettlementExtraction, type SettlementKind } from "./depot-settlement-parser";
 
 /** The fields a reading consists of, in the inspection view's order. */
@@ -157,26 +158,8 @@ export interface SettlementCheck {
   detail: string | null;
 }
 
-/** ISO 6166 check digit: letters to numbers (A=10 … Z=35), then Luhn over the digits. */
-export function isinChecksumValid(isin: string): boolean {
-  if (!/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(isin)) return false;
-  const digits = isin
-    .split("")
-    .map((c) => (/\d/.test(c) ? c : String(c.charCodeAt(0) - 55)))
-    .join("");
-  let sum = 0;
-  let double = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let d = Number(digits[i]);
-    if (double) {
-      d *= 2;
-      if (d > 9) d -= 9;
-    }
-    sum += d;
-    double = !double;
-  }
-  return sum % 10 === 0;
-}
+/** ISO 6166 check digit — lives next to the ISIN extraction. */
+export { isinChecksumValid };
 
 function close(a: number, b: number, tolerance: number): boolean {
   return Math.abs(a - b) <= tolerance;
