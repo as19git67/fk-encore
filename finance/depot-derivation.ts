@@ -29,7 +29,7 @@
  *     WKN. When multiple depots qualify, the one with the most recent
  *     matching holding wins.
  *   - When the purpose text has neither an ISIN nor a WKN-prefixed code
- *     (e.g. "APPLE INC." with no identifier at all), fall back to matching
+ *     (e.g. "SONNENOBST INC." with no identifier at all), fall back to matching
  *     the holding's own display name against the purpose text. Every
  *     significant word of the name (legal-form suffixes like "INC"/"AG"
  *     stripped) must appear in the purpose, and the match must be
@@ -107,7 +107,7 @@ export function extractIsin(text: string | null | undefined): string | null {
  * IBANs), so we require an explicit prefix to avoid false positives.
  * Banks spell that prefix several ways — "WKN 987654", "WKN: 987654",
  * "WKN/ISIN 987654/LU…", and (e.g. comdirect/Sparkasse Wertpapier-
- * abrechnungen) "WPKNR: 865985" or "WP-KENNNR 865985".
+ * abrechnungen) "WPKNR: SNN001" or "WP-KENNNR SNN001".
  */
 const WKN_RE = /\b(?:WKN|WPKNR|WPK|WP-?KENN(?:NR|NUMMER)?)[.:\s/]+([A-Z0-9]{6})\b/i;
 
@@ -152,7 +152,7 @@ interface HoldingMatch {
 
 /**
  * Fallback for bookings whose purpose text carries neither ISIN nor a
- * WKN-prefixed code (e.g. "APPLE INC." with nothing else) — match by the
+ * WKN-prefixed code (e.g. "SONNENOBST INC." with nothing else) — match by the
  * holding's own display name instead. Deliberately conservative: every
  * significant word of the holding's name must appear in the purpose text,
  * and the match must be unambiguous (exactly one qualifying security) or
@@ -523,7 +523,7 @@ export async function deriveDepotTransactionsForBankcontact(
         .orderBy(desc(financeAccountHolding.as_of))
         .limit(1);
     } else {
-      // No ISIN and no WKN-prefixed code in the text (e.g. "APPLE INC."
+      // No ISIN and no WKN-prefixed code in the text (e.g. "SONNENOBST INC."
       // with nothing else) — fall back to matching the holding's own
       // display name against the purpose text.
       holding = await matchHoldingByName(bankcontactId, tx.purpose);

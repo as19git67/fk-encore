@@ -487,7 +487,7 @@ describe("persistFetchResult — holdings persistence", () => {
           transactions: [],
           holdings: [
             holding({ isin: "DE000A1EWWW0", name: "ADIDAS", value: "1000.00" }),
-            holding({ isin: "US0378331005", name: "APPLE", value: "4000.00" }),
+            holding({ isin: "XF00SONNE005", name: "SONNENOBST", value: "4000.00" }),
           ],
           errors: [],
         },
@@ -502,7 +502,7 @@ describe("persistFetchResult — holdings persistence", () => {
       .from(financeAccountHolding)
       .where(eq(financeAccountHolding.account_id, accountId));
     expect(rows).toHaveLength(2);
-    expect(rows.map((r) => r.isin).sort()).toEqual(["DE000A1EWWW0", "US0378331005"]);
+    expect(rows.map((r) => r.isin).sort()).toEqual(["DE000A1EWWW0", "XF00SONNE005"]);
   });
 
   it("upserts idempotently — second sync on same day does not duplicate", async () => {
@@ -519,7 +519,7 @@ describe("persistFetchResult — holdings persistence", () => {
       transactions: [] as FintsTransactionData[],
       holdings: [
         holding({ isin: "DE000A1EWWW0", name: "ADIDAS", value: "1000.00" }),
-        holding({ isin: "US0378331005", name: "APPLE", value: "4000.00" }),
+        holding({ isin: "XF00SONNE005", name: "SONNENOBST", value: "4000.00" }),
       ],
       errors: [] as string[],
     };

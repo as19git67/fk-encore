@@ -204,14 +204,14 @@ describe("finance/holdings — getHoldingsHistory", () => {
     await insertHolding({
       accountId,
       asOf: "2026-05-01",
-      isin: "US0378331005",
-      name: "APPLE",
+      isin: "XF00SONNE005",
+      name: "SONNENOBST",
       amount: "20",
       price: "200.00",
       value: "4000.00",
     });
 
-    // Day 2 — ADIDAS up, APPLE down, total 5050
+    // Day 2 — ADIDAS up, SONNENOBST down, total 5050
     await insertHolding({
       accountId,
       asOf: "2026-05-10",
@@ -224,8 +224,8 @@ describe("finance/holdings — getHoldingsHistory", () => {
     await insertHolding({
       accountId,
       asOf: "2026-05-10",
-      isin: "US0378331005",
-      name: "APPLE",
+      isin: "XF00SONNE005",
+      name: "SONNENOBST",
       amount: "20",
       price: "200.00",
       value: "4000.00",
@@ -240,15 +240,15 @@ describe("finance/holdings — getHoldingsHistory", () => {
 
     expect(resp.positions).toHaveLength(2);
     const adidas = resp.positions.find((p) => p.isin === "DE000A1EWWW0");
-    const apple = resp.positions.find((p) => p.isin === "US0378331005");
+    const sonnenobst = resp.positions.find((p) => p.isin === "XF00SONNE005");
     expect(adidas).toBeDefined();
-    expect(apple).toBeDefined();
+    expect(sonnenobst).toBeDefined();
     expect(adidas!.points.map((p) => p.as_of)).toEqual([
       "2026-05-01",
       "2026-05-10",
     ]);
     expect(adidas!.points.map((p) => p.value)).toEqual(["1000.00", "1050.00"]);
-    expect(apple!.points).toHaveLength(2);
+    expect(sonnenobst!.points).toHaveLength(2);
   });
 
   it("respects the from/to filter (inclusive bounds)", async () => {
@@ -945,13 +945,13 @@ describe("finance/holdings — getRealizedByYear", () => {
     await insertDepotBuy({
       accountId,
       executedAt: "2024-02-10",
-      isin: "US0378331005",
+      isin: "XF00SONNE005",
       amount: "5",
       price: "100",
     });
     await db.insert(financeDepotTransaction).values({
       account_id: accountId,
-      isin: "US0378331005",
+      isin: "XF00SONNE005",
       kind: "sell",
       executed_at: "2025-08-10",
       amount: "1",
