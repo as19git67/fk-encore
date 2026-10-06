@@ -1061,7 +1061,7 @@ describe("computeRealizedForPosition — buys without quantity or price", () => 
     const sales: RealizedSale[] = [];
     computeRealizedForPosition(
       [
-        tx("buy", "2026-01-05", "10", null, "-1000.00"),
+        tx("buy", "2026-01-05", "10", null, null),
         tx("sell", "2026-01-06", "10", "120", "1200.00"),
         tx("buy", "2026-02-01", "5", "100", "-500.00"),
         tx("sell", "2026-02-02", "5", "110", "550.00"),
@@ -1082,5 +1082,49 @@ describe("computeRealizedForPosition — buys without quantity or price", () => 
       (s) => sales.push(s),
     );
     expect(sales[0]!.gain).toBeNull();
+  });
+});
+
+describe("computeRealizedForPosition — order within a day and buy fees", () => {
+  const row = (id: number, kind: string, executed_at: string, amount: string, price: string, net: string) => ({
+    id,
+    isin: "XF00SONNE005",
+    wkn: null,
+    name: null,
+    kind,
+    executed_at,
+    amount,
+    price,
+    net_amount: net,
+  });
+
+  it("sells what was bought the same day, even when the sale has the lower id", () => {
+    const sales: RealizedSale[] = [];
+    const r = computeRealizedForPosition(
+      [
+        // Read from a document first, the buy derived from the booking later.
+        row(1, "sell", "2026-02-03", "10", "100", "990.00"),
+        row(2, "buy", "2026-02-03", "10", "100", "-1010.00"),
+      ],
+      (s) => sales.push(s),
+    );
+    expect(sales).toHaveLength(1);
+    expect(sales[0]).toMatchObject({ quantity: 10, cost: 1010, proceeds: 990 });
+    expect(r.realized).toBeCloseTo(-20, 6);
+    expect(r.complete).toBe(true);
+  });
+
+  it("counts a buy's fees in its cost", () => {
+    const sales: RealizedSale[] = [];
+    computeRealizedForPosition(
+      [
+        row(1, "buy", "2026-01-05", "4", "100", "-405.00"),
+        row(2, "buy", "2026-01-06", "6", "110", "-665.00"),
+        row(3, "sell", "2026-03-01", "10", "105", "1040.00"),
+      ],
+      (s) => sales.push(s),
+    );
+    expect(sales[0]!.cost).toBeCloseTo(1070, 6);
+    expect(sales[0]!.gain).toBeCloseTo(-30, 6);
   });
 });

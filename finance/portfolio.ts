@@ -48,6 +48,7 @@ import {
 } from "../db/schema";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 import {
+  buyCost,
   computeCostBasis,
   computeRealizedForPosition,
   type CostBasisSource,
@@ -533,10 +534,9 @@ function wacIndexFromRows(txs: DepotTxRow[]): WacIndex {
   const byWkn = new Map<string, { weightedCost: number; totalQty: number }>();
   for (const tx of txs) {
     if (tx.kind !== "buy") continue;
-    const qty = num(tx.amount);
-    const price = num(tx.price);
-    if (qty === null || price === null || qty <= 0 || price <= 0) continue;
-    const cost = qty * price;
+    const bought = buyCost(tx);
+    if (!bought) continue;
+    const { qty, cost } = bought;
     if (tx.isin) {
       const agg = byIsin.get(tx.isin) ?? { weightedCost: 0, totalQty: 0 };
       agg.weightedCost += cost;
