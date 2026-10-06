@@ -29,12 +29,16 @@
  *     WKN. When multiple depots qualify, the one with the most recent
  *     matching holding wins.
  *   - When the purpose text has neither an ISIN nor a WKN-prefixed code
- *     (e.g. "APPLE INC." with no identifier at all), fall back to matching
+ *     (e.g. "SONNENOBST INC." with no identifier at all), fall back to matching
  *     the holding's own display name against the purpose text. Every
  *     significant word of the name (legal-form suffixes like "INC"/"AG"
  *     stripped) must appear in the purpose, and the match must be
  *     unambiguous — exactly one qualifying security across the
  *     bankcontact's depots — or we skip.
+ *   - A position closed before the first holdings snapshot has no holding
+ *     to match. Then the one depot on the bankcontact that already has
+ *     transactions of the security (e.g. read from its settlement
+ *     documents) takes the booking.
  *   - Unmatched SECU bookings are skipped silently (counted, not errored —
  *     re-running after the next sync may match).
  *
@@ -58,11 +62,43 @@ console.log("[boot] finance/depot-derivation.ts: all imports resolved");
 /** ISO 6166 ISIN: two letters + nine alphanumerics + one check digit. */
 const ISIN_RE = /\b[A-Z]{2}[A-Z0-9]{9}[0-9]\b/;
 
+/**
+ * An ISIN after its label with spaces inside, as some booking texts print
+ * it ("ISIN: AB1234 5678901"). Only taken when the check digit holds — the
+ * spaces would otherwise let the pattern swallow neighbouring words.
+ */
+const SPACED_ISIN_RE = /\bISIN[.:\s]*((?:[A-Z0-9] ?){11}[0-9])(?![A-Z0-9])/;
+
+/** ISO 6166 check digit: letters to numbers (A=10 … Z=35), then Luhn over the digits. */
+export function isinChecksumValid(isin: string): boolean {
+  if (!/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(isin)) return false;
+  const digits = isin
+    .split("")
+    .map((c) => (/\d/.test(c) ? c : String(c.charCodeAt(0) - 55)))
+    .join("");
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = Number(digits[i]);
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+
 /** Extract the first ISIN appearing in a free-text field, or null. */
 export function extractIsin(text: string | null | undefined): string | null {
   if (!text) return null;
   const m = text.match(ISIN_RE);
-  return m ? m[0] : null;
+  if (m) return m[0];
+  const spaced = text.match(SPACED_ISIN_RE);
+  if (!spaced) return null;
+  const isin = spaced[1]!.replace(/ /g, "");
+  return isinChecksumValid(isin) ? isin : null;
 }
 
 /**
@@ -71,7 +107,7 @@ export function extractIsin(text: string | null | undefined): string | null {
  * IBANs), so we require an explicit prefix to avoid false positives.
  * Banks spell that prefix several ways — "WKN 987654", "WKN: 987654",
  * "WKN/ISIN 987654/LU…", and (e.g. comdirect/Sparkasse Wertpapier-
- * abrechnungen) "WPKNR: 865985" or "WP-KENNNR 865985".
+ * abrechnungen) "WPKNR: SNN001" or "WP-KENNNR SNN001".
  */
 const WKN_RE = /\b(?:WKN|WPKNR|WPK|WP-?KENN(?:NR|NUMMER)?)[.:\s/]+([A-Z0-9]{6})\b/i;
 
@@ -116,7 +152,7 @@ interface HoldingMatch {
 
 /**
  * Fallback for bookings whose purpose text carries neither ISIN nor a
- * WKN-prefixed code (e.g. "APPLE INC." with nothing else) — match by the
+ * WKN-prefixed code (e.g. "SONNENOBST INC." with nothing else) — match by the
  * holding's own display name instead. Deliberately conservative: every
  * significant word of the holding's name must appear in the purpose text,
  * and the match must be unambiguous (exactly one qualifying security) or
@@ -160,6 +196,44 @@ async function matchHoldingByName(
   });
 
   return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * The one depot on this bankcontact that already has transactions of the
+ * security (read from settlement documents, or derived earlier). Covers a
+ * position closed before the first holdings snapshot. Ambiguous → none.
+ */
+async function matchDepotByTransactions(
+  bankcontactId: number,
+  isin: string | null,
+  wkn: string | null,
+): Promise<HoldingMatch | undefined> {
+  const idMatches = [];
+  if (isin) idMatches.push(eq(financeDepotTransaction.isin, isin));
+  if (wkn) idMatches.push(eq(financeDepotTransaction.wkn, wkn));
+  if (idMatches.length === 0) return undefined;
+  const rows = await db
+    .select({
+      account_id: financeDepotTransaction.account_id,
+      isin: financeDepotTransaction.isin,
+      wkn: financeDepotTransaction.wkn,
+      name: financeDepotTransaction.name,
+      currency: financeDepotTransaction.currency,
+    })
+    .from(financeDepotTransaction)
+    .innerJoin(financeAccount, eq(financeAccount.id, financeDepotTransaction.account_id))
+    .where(and(eq(financeAccount.bankcontact_id, bankcontactId), or(...idMatches)))
+    .orderBy(desc(financeDepotTransaction.executed_at));
+  if (rows.length === 0 || new Set(rows.map((r) => r.account_id)).size > 1) return undefined;
+  // The newest row with a name speaks for the security.
+  const named = rows.find((r) => r.name) ?? rows[0]!;
+  return {
+    account_id: named.account_id,
+    isin: rows.find((r) => r.isin)?.isin ?? null,
+    wkn: rows.find((r) => r.wkn)?.wkn ?? null,
+    name: named.name,
+    currency: named.currency,
+  };
 }
 
 /**
@@ -449,10 +523,16 @@ export async function deriveDepotTransactionsForBankcontact(
         .orderBy(desc(financeAccountHolding.as_of))
         .limit(1);
     } else {
-      // No ISIN and no WKN-prefixed code in the text (e.g. "APPLE INC."
+      // No ISIN and no WKN-prefixed code in the text (e.g. "SONNENOBST INC."
       // with nothing else) — fall back to matching the holding's own
       // display name against the purpose text.
       holding = await matchHoldingByName(bankcontactId, tx.purpose);
+    }
+
+    if (!holding && (isin || wkn)) {
+      // A position sold before the first holdings snapshot has none — but
+      // its settlement documents may already have put rows on a depot.
+      holding = await matchDepotByTransactions(bankcontactId, isin, wkn);
     }
 
     if (!holding) {

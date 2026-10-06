@@ -226,8 +226,8 @@ describe("finance/depot-transactions — list", () => {
     });
     await createDepotTransaction({
       id: accountId,
-      isin: "US0378331005",
-      name: "APPLE",
+      isin: "XF00SONNE005",
+      name: "SONNENOBST",
       kind: "dividend",
       executed_at: "2026-05-10",
       net_amount: 12.5,

@@ -1207,14 +1207,17 @@ export interface PositionSale {
   executed_at: string;
   quantity: string;
   proceeds: string;
-  cost: string;
-  cost_per_unit: string;
-  gain: string;
+  /** Null when a buy before it has no quantity or price. */
+  cost: string | null;
+  cost_per_unit: string | null;
+  gain: string | null;
 }
 
 export interface PositionYear {
   year: number;
   realized: string;
+  /** False when a sale that year has unknown costs (left out of `realized`). */
+  realized_complete: boolean;
   sell_count: number;
   income: string;
   dividend_count: number;
@@ -1363,9 +1366,9 @@ export const getPortfolioPosition = api(
           executed_at: dateOnly(sale.executedAt),
           quantity: sale.quantity.toFixed(8),
           proceeds: sale.proceeds.toFixed(2),
-          cost: sale.cost.toFixed(2),
-          cost_per_unit: sale.costPerUnit.toFixed(6),
-          gain: sale.gain.toFixed(2),
+          cost: sale.cost?.toFixed(2) ?? null,
+          cost_per_unit: sale.costPerUnit?.toFixed(6) ?? null,
+          gain: sale.gain?.toFixed(2) ?? null,
         });
       });
     }
@@ -1378,7 +1381,7 @@ export const getPortfolioPosition = api(
       if (y === null) return null;
       let b = years.get(y);
       if (!b) {
-        b = { year: y, realized: "0", sell_count: 0, income: "0", dividend_count: 0, fees: "0", taxes: "0" };
+        b = { year: y, realized: "0", realized_complete: true, sell_count: 0, income: "0", dividend_count: 0, fees: "0", taxes: "0" };
         years.set(y, b);
       }
       return b;
@@ -1396,7 +1399,8 @@ export const getPortfolioPosition = api(
       const b = yearOfPos(sale.executed_at);
       if (!b) continue;
       b.sell_count += 1;
-      accOf(b.year).realized += Number(sale.gain);
+      if (sale.gain === null) b.realized_complete = false;
+      else accOf(b.year).realized += Number(sale.gain);
     }
     const positionTxs: PortfolioTransaction[] = [];
     for (const [, list] of txsByAccount) {
@@ -1540,6 +1544,17 @@ export const enrichDepotTransactionsFromDocuments = api(
       {},
       { before: before ?? null, budgetMs: ENRICH_REQUEST_BUDGET_MS },
     );
+    if (stats.created > 0) {
+      // A new row may be the first trace of a position closed before the
+      // first holdings snapshot: its bookings can be derived only now.
+      const bankcontacts = await db
+        .selectDistinct({ id: financeAccount.bankcontact_id })
+        .from(financeAccount)
+        .where(inArray(financeAccount.id, depots.map((d) => d.id)));
+      for (const bc of bankcontacts) {
+        if (bc.id !== null) await deriveDepotTransactionsForBankcontact(bc.id);
+      }
+    }
     return {
       ...stats,
       results: stats.results.filter(

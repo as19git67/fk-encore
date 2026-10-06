@@ -17,6 +17,8 @@ import {
   users,
 } from "../db/schema";
 import {
+  computeRealizedForPosition,
+  type RealizedSale,
   getHoldingsHistory,
   getRealizedByYear,
   listHoldings,
@@ -202,14 +204,14 @@ describe("finance/holdings — getHoldingsHistory", () => {
     await insertHolding({
       accountId,
       asOf: "2026-05-01",
-      isin: "US0378331005",
-      name: "APPLE",
+      isin: "XF00SONNE005",
+      name: "SONNENOBST",
       amount: "20",
       price: "200.00",
       value: "4000.00",
     });
 
-    // Day 2 — ADIDAS up, APPLE down, total 5050
+    // Day 2 — ADIDAS up, SONNENOBST down, total 5050
     await insertHolding({
       accountId,
       asOf: "2026-05-10",
@@ -222,8 +224,8 @@ describe("finance/holdings — getHoldingsHistory", () => {
     await insertHolding({
       accountId,
       asOf: "2026-05-10",
-      isin: "US0378331005",
-      name: "APPLE",
+      isin: "XF00SONNE005",
+      name: "SONNENOBST",
       amount: "20",
       price: "200.00",
       value: "4000.00",
@@ -238,15 +240,15 @@ describe("finance/holdings — getHoldingsHistory", () => {
 
     expect(resp.positions).toHaveLength(2);
     const adidas = resp.positions.find((p) => p.isin === "DE000A1EWWW0");
-    const apple = resp.positions.find((p) => p.isin === "US0378331005");
+    const sonnenobst = resp.positions.find((p) => p.isin === "XF00SONNE005");
     expect(adidas).toBeDefined();
-    expect(apple).toBeDefined();
+    expect(sonnenobst).toBeDefined();
     expect(adidas!.points.map((p) => p.as_of)).toEqual([
       "2026-05-01",
       "2026-05-10",
     ]);
     expect(adidas!.points.map((p) => p.value)).toEqual(["1000.00", "1050.00"]);
-    expect(apple!.points).toHaveLength(2);
+    expect(sonnenobst!.points).toHaveLength(2);
   });
 
   it("respects the from/to filter (inclusive bounds)", async () => {
@@ -740,7 +742,7 @@ describe("finance/holdings — cost basis & unrealized gain", () => {
       value: "1300.00",
     });
     // Giro-derived buy with no shares/price — the walker can't fold it
-    // into WAC, so realized G/V on later sells will be over-stated.
+    // into WAC, so the cost of every later sell is unknown.
     await insertDepotBuy({
       accountId,
       executedAt: "2026-01-10",
@@ -773,8 +775,8 @@ describe("finance/holdings — cost basis & unrealized gain", () => {
     });
 
     const resp = await listHoldings({ id: accountId });
-    // Only the priced buy contributed: WAC=150, sell 5 net 1240 → 490
-    expect(resp.items[0].realized_gain).toBe("490.00");
+    // Counting the unpriced lot as free would report 490; unknown instead.
+    expect(resp.items[0].realized_gain).toBeNull();
     expect(resp.items[0].realized_gain_complete).toBe(false);
   });
 
@@ -943,13 +945,13 @@ describe("finance/holdings — getRealizedByYear", () => {
     await insertDepotBuy({
       accountId,
       executedAt: "2024-02-10",
-      isin: "US0378331005",
+      isin: "XF00SONNE005",
       amount: "5",
       price: "100",
     });
     await db.insert(financeDepotTransaction).values({
       account_id: accountId,
-      isin: "US0378331005",
+      isin: "XF00SONNE005",
       kind: "sell",
       executed_at: "2025-08-10",
       amount: "1",
@@ -1010,7 +1012,9 @@ describe("finance/holdings — getRealizedByYear", () => {
     const resp = await getRealizedByYear({ id: accountId });
     expect(resp.years).toHaveLength(1);
     expect(resp.years[0].year).toBe(2024);
-    expect(resp.years[0].realized).toBe("100.00");
+    // The sale's cost is unknown: it is counted, its gain left out.
+    expect(resp.years[0].realized).toBe("0.00");
+    expect(resp.years[0].sell_count).toBe(1);
     expect(resp.years[0].complete).toBe(false);
     expect(resp.complete).toBe(false);
   });
@@ -1023,5 +1027,60 @@ describe("finance/holdings — getRealizedByYear", () => {
     // Caller without admin and without an ACL row.
     setAuth("999", ["finance.view"]);
     await expect(getRealizedByYear({ id: accountId })).rejects.toThrow();
+  });
+});
+
+describe("computeRealizedForPosition — buys without quantity or price", () => {
+  let nextId = 1;
+  const tx = (kind: string, executed_at: string, amount: string | null, price: string | null, net: string | null) => ({
+    id: nextId++,
+    isin: "XX0000000001",
+    wkn: null,
+    name: null,
+    kind,
+    executed_at,
+    amount,
+    price,
+    net_amount: net,
+  });
+
+  it("leaves a sale's cost unknown instead of free when a buy had no quantity", () => {
+    const sales: RealizedSale[] = [];
+    const r = computeRealizedForPosition(
+      [tx("buy", "2026-01-05", null, null, "-1000.00"), tx("sell", "2026-01-05", "10", "120", "1200.00")],
+      (s) => sales.push(s),
+    );
+    expect(sales).toHaveLength(1);
+    expect(sales[0]).toMatchObject({ quantity: 10, proceeds: 1200, cost: null, gain: null, costPerUnit: null });
+    expect(r.complete).toBe(false);
+    expect(r.hasData).toBe(false);
+    expect(r.realized).toBe(0);
+  });
+
+  it("knows the costs again once a priceless lot of known quantity is sold out", () => {
+    const sales: RealizedSale[] = [];
+    computeRealizedForPosition(
+      [
+        tx("buy", "2026-01-05", "10", null, "-1000.00"),
+        tx("sell", "2026-01-06", "10", "120", "1200.00"),
+        tx("buy", "2026-02-01", "5", "100", "-500.00"),
+        tx("sell", "2026-02-02", "5", "110", "550.00"),
+      ],
+      (s) => sales.push(s),
+    );
+    expect(sales.map((s) => s.gain)).toEqual([null, 50]);
+  });
+
+  it("keeps the costs unknown after a buy without quantity, even when later lots are priced", () => {
+    const sales: RealizedSale[] = [];
+    computeRealizedForPosition(
+      [
+        tx("buy", "2026-01-05", null, null, "-1000.00"),
+        tx("buy", "2026-02-01", "5", "100", "-500.00"),
+        tx("sell", "2026-03-01", "5", "110", "550.00"),
+      ],
+      (s) => sales.push(s),
+    );
+    expect(sales[0]!.gain).toBeNull();
   });
 });

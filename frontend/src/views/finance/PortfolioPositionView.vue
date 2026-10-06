@@ -480,7 +480,15 @@ function transactionCash(tx: PortfolioTransaction): string {
                 <td class="pp-col-num">{{ formatCurrency(s.cost_per_unit, currency) }}</td>
                 <td class="pp-col-num">{{ formatCurrency(s.cost, currency) }}</td>
                 <td class="pp-col-num">{{ formatCurrency(s.proceeds, currency) }}</td>
-                <td class="pp-col-num pp-strong" :class="signClass(s.gain)">{{ formatSignedCurrency(s.gain, currency) }}</td>
+                <td class="pp-col-num pp-strong" :class="signClass(s.gain)">
+                  {{ formatSignedCurrency(s.gain, currency) }}
+                  <i
+                    v-if="s.gain === null"
+                    class="pi pi-exclamation-triangle pp-warn"
+                    title="Einstand unbekannt — ein Kauf davor trägt keine Stückzahl oder keinen Kurs"
+                    aria-label="Einstand unbekannt"
+                  />
+                </td>
               </tr>
             </tbody>
           </table>
@@ -506,7 +514,15 @@ function transactionCash(tx: PortfolioTransaction): string {
             <tbody>
               <tr v-for="y in data.years" :key="y.year">
                 <td>{{ y.year }}</td>
-                <td class="pp-col-num" :class="signClass(y.realized)">{{ formatSignedCurrency(y.realized, currency) }}</td>
+                <td class="pp-col-num" :class="signClass(y.realized)">
+                  {{ formatSignedCurrency(y.realized, currency) }}
+                  <i
+                    v-if="!y.realized_complete"
+                    class="pi pi-exclamation-triangle pp-warn"
+                    title="Unvollständig — nicht jeder Verkauf hat einen bekannten Einstand"
+                    aria-label="Unvollständig"
+                  />
+                </td>
                 <td class="pp-col-num">{{ y.sell_count }}</td>
                 <td class="pp-col-num" :class="signClass(y.income)">{{ formatSignedCurrency(y.income, currency) }}</td>
                 <td class="pp-col-num">{{ y.dividend_count }}</td>

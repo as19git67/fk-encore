@@ -152,7 +152,15 @@ describe("extractIsin", () => {
 
   it("returns null for an ISIN-shaped string with a non-digit check char", () => {
     // 13th char must be 0-9; "Z" doesn't match the trailing [0-9].
-    expect(extractIsin("REFERENZ US0378331005Z xxxx")).toBeNull();
+    expect(extractIsin("REFERENZ XF00SONNE005Z xxxx")).toBeNull();
+  });
+
+  it("reads an ISIN the booking text prints with a space inside", () => {
+    expect(extractIsin("SONNENOBST INC. WPKNR: SNN001 ISIN: XF00SO NNE005")).toBe("XF00SONNE005");
+  });
+
+  it("does not join a spaced ISIN whose check digit fails", () => {
+    expect(extractIsin("ISIN: XF00SO NNE006")).toBeNull();
   });
 
   it("returns null on null/empty input", () => {
@@ -189,12 +197,12 @@ describe("extractWkn", () => {
   });
 
   it("handles the 'WPKNR:' prefix used on Wertpapierabrechnungen", () => {
-    expect(extractWkn("APPLE INC.\nWPKNR: 865985  ISIN: US0378331005"))
-      .toBe("865985");
+    expect(extractWkn("SONNENOBST INC.\nWPKNR: SNN001  ISIN: XF00SONNE005"))
+      .toBe("SNN001");
   });
 
   it("handles the 'WP-KENNNR' prefix", () => {
-    expect(extractWkn("WP-KENNNR 865985 STK 10")).toBe("865985");
+    expect(extractWkn("WP-KENNNR SNN001 STK 10")).toBe("SNN001");
   });
 
   it("returns null on null/empty input", () => {
@@ -226,7 +234,7 @@ describe("isSecuritiesCandidate", () => {
     expect(
       isSecuritiesCandidate({
         funds_code: "R",
-        purpose: "APPLE INC.\nWPKNR: 865985  ISIN: US0378331005",
+        purpose: "SONNENOBST INC.\nWPKNR: SNN001  ISIN: XF00SONNE005",
       }),
     ).toBe(true);
   });
@@ -242,7 +250,7 @@ describe("isSecuritiesCandidate", () => {
 
   it("rejects an MT940 booking with no identifier in the text", () => {
     expect(
-      isSecuritiesCandidate({ funds_code: "R", purpose: "APPLE.COM/BILL" }),
+      isSecuritiesCandidate({ funds_code: "R", purpose: "SONNENOBST.TEST/BILL" }),
     ).toBe(false);
   });
 
@@ -251,7 +259,7 @@ describe("isSecuritiesCandidate", () => {
       isSecuritiesCandidate({
         funds_code: "R",
         purpose: "Abrechnung",
-        entry_text: "WERTPAPIERKAUF WKN 865985",
+        entry_text: "WERTPAPIERKAUF WKN SNN001",
       }),
     ).toBe(true);
   });
@@ -355,14 +363,14 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     await insertHolding({
       accountId: depot,
       asOf: "2026-05-15",
-      isin: "US0378331005",
-      name: "APPLE",
+      isin: "XF00SONNE005",
+      name: "SONNENOBST",
     });
     await insertTx({
       accountId: giro,
       bookingDate: "2026-06-01",
       amount: "12.34",
-      purpose: "DIVIDENDE APPLE US0378331005",
+      purpose: "DIVIDENDE SONNENOBST XF00SONNE005",
       funds_code: "SECU",
       transaction_code: "DVCA",
     });
@@ -460,15 +468,15 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     await insertHolding({
       accountId: depot,
       asOf: "2026-05-15",
-      isin: "US0378331005",
-      wkn: "865985",
-      name: "APPLE INC.",
+      isin: "XF00SONNE005",
+      wkn: "SNN001",
+      name: "SONNENOBST INC.",
     });
     await insertTx({
       accountId: giro,
       bookingDate: "2026-06-01",
       amount: "-1500.00",
-      purpose: "APPLE INC.\nWPKNR: 865985  ISIN: US0378331005",
+      purpose: "SONNENOBST INC.\nWPKNR: SNN001  ISIN: XF00SONNE005",
       funds_code: "R",
       transaction_code: null,
     });
@@ -483,8 +491,8 @@ describe("deriveDepotTransactionsForBankcontact", () => {
       .from(financeDepotTransaction)
       .where(eq(financeDepotTransaction.account_id, depot));
     expect(row.kind).toBe("buy");
-    expect(row.isin).toBe("US0378331005");
-    expect(row.wkn).toBe("865985");
+    expect(row.isin).toBe("XF00SONNE005");
+    expect(row.wkn).toBe("SNN001");
     expect(row.net_amount).toBe("-1500.00");
   });
 
@@ -497,7 +505,7 @@ describe("deriveDepotTransactionsForBankcontact", () => {
       accountId: giro,
       bookingDate: "2026-06-01",
       amount: "-1500.00",
-      purpose: "APPLE INC.\nWPKNR: 865985  ISIN: US0378331005",
+      purpose: "SONNENOBST INC.\nWPKNR: SNN001  ISIN: XF00SONNE005",
       funds_code: "R",
     });
 
@@ -508,8 +516,8 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     expect(stats.skipped_no_identifier).toBe(0);
   });
 
-  it("does not treat an App Store charge as a securities booking", async () => {
-    // "APPLE.COM/BILL" matches the holding name by words, but carries no
+  it("does not treat a subscription charge naming the security as a securities booking", async () => {
+    // "SONNENOBST.TEST/BILL" matches the holding name by words, but carries no
     // ISIN/WKN and no SECU flag — it must never reach the name fallback.
     const bcId = await insertBankcontact();
     const giro = await insertAccount(bcId, "giro", "GIRO-1");
@@ -517,20 +525,88 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     await insertHolding({
       accountId: depot,
       asOf: "2026-05-15",
-      isin: "US0378331005",
-      name: "APPLE INC.",
+      isin: "XF00SONNE005",
+      name: "SONNENOBST INC.",
     });
     await insertTx({
       accountId: giro,
       bookingDate: "2026-06-02",
       amount: "-9.99",
-      purpose: "APPLE.COM/BILL ITUNES",
+      purpose: "SONNENOBST.TEST/BILL ABO",
       funds_code: "R",
     });
 
     const stats = await deriveDepotTransactionsForBankcontact(bcId);
     expect(stats.candidates).toBe(0);
     expect(stats.derived).toBe(0);
+  });
+
+  it("takes the depot of earlier rows when a closed position has no holding", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    // Read from a settlement document; no holdings snapshot ever showed it.
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: "XF00SONNE005",
+      wkn: "SNN001",
+      name: "SONNENOBST INC.",
+      kind: "sell",
+      executed_at: "2026-03-10",
+      amount: "5",
+      net_amount: "1100.00",
+      currency: "EUR",
+      source: "document",
+    });
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-02-03",
+      amount: "-1000.00",
+      purpose: "WERTPAPIERKAUF SONNENOBST INC. WPKNR: SNN001 ISIN: XF00SO NNE005",
+      funds_code: "R",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(1);
+    const [row] = await db
+      .select()
+      .from(financeDepotTransaction)
+      .where(eq(financeDepotTransaction.source, "giro-derived"));
+    expect(row).toMatchObject({
+      account_id: depot,
+      kind: "buy",
+      isin: "XF00SONNE005",
+      wkn: "SNN001",
+      name: "SONNENOBST INC.",
+      net_amount: "-1000.00",
+    });
+  });
+
+  it("does not guess between two depots that both have rows of the security", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    for (const label of ["DEPOT-1", "DEPOT-2"]) {
+      const depot = await insertAccount(bcId, "depot", label);
+      await db.insert(financeDepotTransaction).values({
+        account_id: depot,
+        wkn: "SNN001",
+        kind: "buy",
+        executed_at: "2026-01-10",
+        currency: "EUR",
+        source: "document",
+      });
+    }
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-02-03",
+      amount: "-1000.00",
+      purpose: "WERTPAPIERKAUF WPKNR: SNN001",
+      funds_code: "R",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(0);
+    expect(stats.skipped_no_holding).toBe(1);
   });
 
   it("falls back to matching by holding name when purpose has no ISIN/WKN", async () => {
@@ -540,15 +616,15 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     await insertHolding({
       accountId: depot,
       asOf: "2026-05-15",
-      isin: "US0378331005",
-      wkn: "865985",
-      name: "APPLE INC.",
+      isin: "XF00SONNE005",
+      wkn: "SNN001",
+      name: "SONNENOBST INC.",
     });
     await insertTx({
       accountId: giro,
       bookingDate: "2026-06-01",
       amount: "-1500.00",
-      purpose: "APPLE INC.",
+      purpose: "SONNENOBST INC.",
       funds_code: "SECU",
       transaction_code: "TRAD",
     });
@@ -562,8 +638,8 @@ describe("deriveDepotTransactionsForBankcontact", () => {
       .from(financeDepotTransaction)
       .where(eq(financeDepotTransaction.account_id, depot));
     expect(row.kind).toBe("buy");
-    expect(row.isin).toBe("US0378331005");
-    expect(row.wkn).toBe("865985");
+    expect(row.isin).toBe("XF00SONNE005");
+    expect(row.wkn).toBe("SNN001");
   });
 
   it("skips the name fallback when it would be ambiguous across holdings", async () => {
@@ -573,20 +649,20 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     await insertHolding({
       accountId: depot,
       asOf: "2026-05-15",
-      isin: "US0378331005",
-      name: "APPLE INC.",
+      isin: "XF00SONNE005",
+      name: "SONNENOBST INC.",
     });
     await insertHolding({
       accountId: depot,
       asOf: "2026-05-16",
       isin: "US0000000001",
-      name: "APPLE HOLDINGS SE",
+      name: "SONNENOBST HOLDINGS SE",
     });
     await insertTx({
       accountId: giro,
       bookingDate: "2026-06-01",
       amount: "-1500.00",
-      purpose: "APPLE",
+      purpose: "SONNENOBST",
       funds_code: "SECU",
       transaction_code: "TRAD",
     });

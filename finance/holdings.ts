@@ -452,11 +452,15 @@ export interface RealizedSale {
   /** Quantity actually matched against inventory (capped at what was held). */
   quantity: number;
   proceeds: number;
-  /** quantity × WAC at the time of the sale. */
-  cost: number;
-  gain: number;
+  /**
+   * quantity × WAC at the time of the sale. Null when a buy still in the
+   * inventory has no quantity or price (e.g. derived from a bank booking
+   * alone): counting it as free would report the whole proceeds as gain.
+   */
+  cost: number | null;
+  gain: number | null;
   /** WAC per unit applied to this sale. */
-  costPerUnit: number;
+  costPerUnit: number | null;
 }
 
 export function computeRealizedForPosition(
@@ -472,6 +476,11 @@ export function computeRealizedForPosition(
 
   let qty = 0;
   let costTotal = 0; // qty × current WAC
+  // A buy without price is in the inventory: costs are unknown until the
+  // known quantity is sold out. Without quantity it never clears — there
+  // is no telling when the inventory is empty.
+  let unknownCost = false;
+  let unknownQty = false;
   let realized = 0;
   let complete = true;
   let hasData = false;
@@ -481,8 +490,15 @@ export function computeRealizedForPosition(
     if (tx.kind === "buy" || tx.kind === "in") {
       const a = tx.amount === null ? null : Number(tx.amount);
       const p = tx.price === null ? null : Number(tx.price);
-      if (a === null || p === null || !Number.isFinite(a) || !Number.isFinite(p) || a <= 0 || p <= 0) {
+      const known = a !== null && Number.isFinite(a) && a > 0;
+      if (!known || p === null || !Number.isFinite(p) || p <= 0) {
         complete = false;
+        if (known) {
+          qty += a;
+          unknownCost = true;
+        } else {
+          unknownQty = true;
+        }
         continue;
       }
       qty += a;
@@ -504,10 +520,28 @@ export function computeRealizedForPosition(
         if (Number.isFinite(p)) proceeds = a * p;
       }
       const wac = qty > 0 ? costTotal / qty : 0;
-      const soldQty = Math.min(a, qty);
-      const costPortion = soldQty * wac;
+      const soldQty = unknownQty ? a : Math.min(a, qty);
+      const costPortion = Math.min(soldQty, qty) * wac;
       if (proceeds === null) {
         complete = false;
+      } else if (unknownCost || unknownQty) {
+        complete = false;
+        onSale?.({
+          transactionId: tx.id,
+          executedAt: tx.executed_at,
+          quantity: soldQty,
+          proceeds,
+          cost: null,
+          gain: null,
+          costPerUnit: null,
+        });
+        // The year had a sale, its figure just is not known in full.
+        const year = yearOf(tx.executed_at);
+        if (year !== null) {
+          const bucket = byYear.get(year) ?? { realized: 0, sellCount: 0 };
+          bucket.sellCount += 1;
+          byYear.set(year, bucket);
+        }
       } else {
         const sellGain = proceeds - costPortion;
         realized += sellGain;
@@ -529,8 +563,9 @@ export function computeRealizedForPosition(
           byYear.set(year, bucket);
         }
       }
-      qty -= soldQty;
-      costTotal -= costPortion;
+      qty = Math.max(0, qty - soldQty);
+      costTotal = qty > 0 ? costTotal - costPortion : 0;
+      if (qty === 0 && !unknownQty) unknownCost = false;
     } else if (tx.kind === "out") {
       const a = tx.amount === null ? null : Number(tx.amount);
       if (a === null || !Number.isFinite(a) || a <= 0) {
@@ -632,7 +667,8 @@ export const getRealizedByYear = api(
     ]) {
       if (seen.has(agg)) continue;
       seen.add(agg);
-      if (!agg.hasData) continue;
+      // No sale at all; a sale of unknown cost still lists its year.
+      if (!agg.hasData && agg.byYear.size === 0) continue;
       if (!agg.complete) overallComplete = false;
       for (const [year, posBucket] of agg.byYear) {
         const b =
