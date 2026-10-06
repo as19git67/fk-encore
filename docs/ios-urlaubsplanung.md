@@ -2820,6 +2820,12 @@ Besichtigungsblöcke; der Server (`move.ts`, `MEAL_CATEGORIES`) weist alles
 andere zurück. Vorher scheiterte „In diesen Block setzen" aus „Essen in der
 Nähe" still an genau dieser Sperre.
 
+Der Mittag-Block zeigt seinen Stopp wie jeder andere Block und hat zwei Wege
+hinein: „Essen in der Nähe" (die Suche vor Ort) und „Aus den Kandidaten",
+sobald im Vorrat ein Restaurant oder Café liegt. Die Kandidatenliste, für
+einen Block geöffnet, zeigt nur, was in ihn darf: Restaurants und Cafés für
+eine Mahlzeit, kein Restaurant für einen Besichtigungsblock.
+
 ### 10.4 Die harte Regel für das LLM
 
 **Das Modell darf ausschließlich aus dem Kandidatenvorrat formulieren, niemals
@@ -5810,6 +5816,16 @@ Kacheln und Verwaltungsgrenzen, nichts vom gelöschten Extrakt bleibt.
 Überlappende Extrakte führt `osmium merge` vorher zu einer Datei zusammen.
 Downloads landen erst als `.part` und werden nach dem Abschluss umbenannt,
 damit ein abgebrochener Download nicht als fertiger Extrakt gilt.
+
+**Nachträge aus der Praxis (2026-10-05).** Eine Weiterreise ist am
+Ankunftsort verankert, also genau am Anker der folgenden Etappe. Für einen
+geteilten Fund (§9.2) oder einen Artikel-Vorschlag (§9.3) wählte
+`chooseLeg` die nächste Etappe nach Entfernung; die Weiterreise lag gleich
+nah und gewann, der Spot landete in „Weiterreise nach Reykjavík". Jetzt
+bekommt die Etappe den Fund, sobald eine in Reichweite liegt; eine
+Weiterreise nur, wenn keine Etappe nah ist — ein Ort am Weg (§24). Und die
+Grenze einer Reise zählt Aufenthalte (zwanzig), nicht Etappen: mit
+Weiterreisen als Etappen war bei sechs Städten Schluss.
 
 ## 23. Idee für später: die Hörtour
 
