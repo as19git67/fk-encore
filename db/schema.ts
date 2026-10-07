@@ -2157,6 +2157,49 @@ export const financeAccountHolding = pgTable(
   ]
 );
 
+// ---------- Quotes ----------
+//
+// Prices of the securities the depots hold, fetched from a quote provider
+// and kept here so the history outlives the provider. A position is keyed
+// the way holdings and depot transactions key it: ISIN, else WKN.
+
+export const financeQuoteSymbol = pgTable("finance_quote_symbol", {
+  position_key: text("position_key").primaryKey(),
+  isin: text("isin"),
+  wkn: text("wkn"),
+  /** The provider's own id for the security ("ABC.DE"); null when unresolved. */
+  symbol: text("symbol"),
+  provider: text("provider").notNull(),
+  name: text("name"),
+  exchange: text("exchange"),
+  currency: text("currency"),
+  resolved_at: timestamp("resolved_at", { mode: "string", withTimezone: true }),
+  /** When the last resolution attempt failed; retried after a while. */
+  failed_at: timestamp("failed_at", { mode: "string", withTimezone: true }),
+  failure: text("failure"),
+  /** The daily history was loaded once; afterwards only the recent days are refreshed. */
+  backfilled_at: timestamp("backfilled_at", { mode: "string", withTimezone: true }),
+});
+
+export const financeQuote = pgTable(
+  "finance_quote",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    position_key: text("position_key")
+      .notNull()
+      .references(() => financeQuoteSymbol.position_key, { onDelete: "cascade" }),
+    at: timestamp("at", { mode: "string", withTimezone: true }).notNull(),
+    price: numeric("price", { precision: 20, scale: 6 }).notNull(),
+    currency: text("currency"),
+    /** "daily": a close; "intraday": a point of the day, pruned after a month. */
+    kind: text("kind").notNull().$type<"daily" | "intraday">(),
+    source: text("source").notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_quote_key_at_kind").on(table.position_key, table.at, table.kind),
+  ],
+);
+
 // ---------- Depot Transactions ----------
 //
 // Per-position buys / sells / dividends / corporate actions. A position
