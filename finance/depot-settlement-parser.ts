@@ -329,7 +329,12 @@ function normalize(text: string): string {
     .replace(/ /g, " ")
     .replace(/[ \t]+/g, " ")
     .replace(/\r/g, "")
-    .replace(/\n{2,}/g, "\n");
+    .replace(/\n{2,}/g, "\n")
+    // OCR splits an amount after its decimal comma ("EUR -1.234, 56"): read
+    // alone, "1.234" is a thousand and change. Joined only where the left
+    // part is plainly an amount — thousands groups, or a currency before it.
+    .replace(/(\d{1,3}(?:\.\d{3})+), (\d{2})(?![\d.,])/g, "$1,$2")
+    .replace(/((?:EUR|USD|CHF|GBP|€) ?-? ?\d+), (\d{2})(?![\d.,])/g, "$1,$2");
 }
 
 const CURRENCY_ONLY_RE = /(?:EUR|USD|CHF|GBP|€)\s*$/;
