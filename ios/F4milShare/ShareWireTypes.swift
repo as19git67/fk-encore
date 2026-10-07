@@ -73,6 +73,10 @@ struct ShareMapLinkRead: Decodable, Sendable {
     let lat: Double?
     let lon: Double?
     let name: String?
+    /// The whole search term where the link names its place in words —
+    /// name and address — and has no coordinate. Optional so an answer
+    /// from an older server still decodes.
+    let query: String?
     let unresolved: Bool
 }
 

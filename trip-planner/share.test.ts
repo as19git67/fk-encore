@@ -17,6 +17,7 @@ import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
 import { createTripPlan } from "./plans";
 import { analyseShare } from "./share";
+import { setRedirectResolver } from "./map-link-read";
 
 const WEST = { lat: 48.37, lon: 10.9 };
 const EAST = { lat: 48.14, lon: 11.58 };
@@ -139,6 +140,24 @@ describe("POST /trip-planner/plans/:planId/shares", () => {
       expect(res.proposals[0].name).toBe("Beispielhof");
       // The eastern city, while the first leg is the western one.
       expect(res.proposals[0].legIndex).toBe(1);
+    });
+
+    it("resolves a Google Maps app link, which names the place but has no coordinate", async () => {
+      const plan = await twoLegPlan();
+      geo.setSearchSpots("nom_east", [spot(7, EAST, "Beispielwirt")]);
+      setRedirectResolver(async (url) => url.includes("goo.gl")
+        ? "https://maps.google.com/?q=Beispielwirt,+Beispielstra%C3%9Fe+1,+Oststadt&ftid=0x1:0x2&g_st=ic"
+        : null);
+      try {
+        const res = await analyseShare({ planId: plan.id, url: "https://maps.app.goo.gl/AbCdEfGhIjK?g_st=ic" });
+        expect(res.kind).toBe("map-link");
+        expect(res.proposals[0]).toMatchObject({
+          name: "Beispielwirt", verdict: "unique", osmRef: "node:7", legIndex: 1,
+          position: { lat: EAST.lat, lon: EAST.lon },
+        });
+      } finally {
+        setRedirectResolver(null);
+      }
     });
 
     it("leaves the leg open when the pin is in none of them", async () => {

@@ -35,11 +35,12 @@ import { requirePermission } from "../user/auth-handler";
 import { loadPlan } from "./plan-store";
 import { chooseLeg } from "./finds";
 import { parseMapLink } from "./map-link";
+import { followShortLink } from "./map-link-read";
 import { articleTextFromHtml, prepareArticleText } from "./article";
 import { buildExtractPrompt, parseExtractedPlaces, type ExtractedPlace } from "./extract-places";
 import { askForJson, LlmServiceUnavailableError } from "./llm-client";
 import { lookupPlace, type LocatedCandidate } from "./place-lookup";
-import { fetchSharedPage, resolveRedirect, PageFetchError } from "./page-fetch";
+import { fetchSharedPage, PageFetchError } from "./page-fetch";
 
 /** A page the device already read is text; anything longer is a book. */
 const MAX_SHARED_TEXT = 200_000;
@@ -191,15 +192,11 @@ async function mapLinkProposal(
   if (!link) return null;
 
   if (link.needsRedirect) {
-    // A shortened link holds nothing until it is followed. Failing to
-    // follow it is not fatal: the traveller still gets a proposal with
-    // no position and confirms the spot on a map.
-    try {
-      const target = await resolveRedirect(url);
-      if (target) link = parseMapLink(target) ?? link;
-    } catch (err) {
-      if (!(err instanceof PageFetchError)) throw err;
-    }
+    // A shortened link holds nothing until it is followed — sometimes
+    // over several hops. Failing to follow it is not fatal: the
+    // traveller still gets a proposal with no position and confirms
+    // the spot on a map.
+    link = await followShortLink(url, link);
   }
 
   // The link itself may carry no name — Apple's `?ll=` form often does
@@ -208,6 +205,17 @@ async function mapLinkProposal(
   const name = link.name ?? firstLine(caption);
 
   if (!link.position && !name) return null;
+
+  if (!link.position && name) {
+    // A link out of the Google Maps app names its place and gives no
+    // coordinate. The name is then resolved the way an article's names
+    // are (§9.3): in the trip's regions, unique, ambiguous or none.
+    const resolved = await resolveExtracted(
+      { name, placeHint: null, kindHint: null, quote: "" },
+      searchAreasOf(plan),
+    );
+    return { ...resolved, quote: null };
+  }
 
   const legIndex = link.position ? legFor(link.position, plan) : null;
   return {

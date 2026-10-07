@@ -2674,6 +2674,21 @@ dauert und ein Tipp keine Wartezeit bestellen sollte, der niemand zugestimmt
 hat. Der Bildschirm sagt, was daraus wurde — schon da, lädt gerade, oder wartet
 auf Freigabe.
 
+
+**Nachtrag (2026-10-07): Kurzlinks aus der Google-Maps-App.** Ein
+`maps.app.goo.gl/…?g_st=ic`-Link führt nicht direkt zu einem Pin, sondern
+zuerst auf `maps.google.com/?q=Name, Adresse&ftid=…` — Name und Adresse in
+Worten, eine Kennung, die nur Google lesen kann, und keine Koordinate. Der
+Server folgte genau einem Sprung, fand keine Koordinate und meldete den
+Link als unaufgelöst; die Share Extension verwarf daraufhin auch den Namen
+und bot „Meine Ideen" nicht an. Jetzt folgt der Server bis zu vier Sprüngen
+(auch durch Googles Consent-Seite, deren `continue` das eigentliche Ziel
+trägt) und gibt Name und vollen Suchbegriff zurück (`query`). Die Extension
+sucht den Ort dann in Apple Karten und zeigt, was sie gefunden hat
+(„Gefunden: Name · Adresse"), bevor gespeichert wird; beim Teilen in eine
+Reise löst der Server den Namen wie bei einem Artikel in den Regionen der
+Reise auf (§9.3).
+
 ### 9.3 Eine Webseite auslesen
 
 Der Weg von einem Reiseblog zu Kandidaten im Vorrat, in vier Stufen. Er ist der

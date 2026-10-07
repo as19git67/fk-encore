@@ -81,6 +81,34 @@ describe("readMapLink", () => {
     expect(read.unresolved).toBe(false);
   });
 
+  it("follows a short link over several hops and keeps the name it passed", async () => {
+    // A link out of the Google Maps app goes to a page that names the
+    // place in words first, and only further on to one with the pin.
+    const hops = new Map([
+      ["https://maps.app.goo.gl/AbCdEfGhIjK?g_st=ic",
+        "https://maps.google.com/?q=Beispielwirt,+Beispielstra%C3%9Fe+1,+Musterstadt&ftid=0x1:0x2&g_st=ic"],
+      ["https://maps.google.com/?q=Beispielwirt,+Beispielstra%C3%9Fe+1,+Musterstadt&ftid=0x1:0x2&g_st=ic",
+        "https://consent.google.com/ml?continue="
+          + encodeURIComponent("https://www.google.com/maps/place/Beispielwirt/@48.3705,10.8978,17z")],
+    ]);
+    setRedirectResolver(async (url) => hops.get(url) ?? null);
+    const read = await readMapLink({ url: "https://maps.app.goo.gl/AbCdEfGhIjK?g_st=ic" });
+    expect(read).toMatchObject({ isMapLink: true, lat: 48.3705, lon: 10.8978, name: "Beispielwirt", unresolved: false });
+  });
+
+  it("hands back the name and the search term when no hop has a coordinate", async () => {
+    // The caller then asks a geocoder; "unresolved" says the place is
+    // not known yet, and the words say what to look for.
+    setRedirectResolver(async (url) => url.includes("goo.gl")
+      ? "https://maps.google.com/?q=Beispielwirt,+Beispielstra%C3%9Fe+1,+Musterstadt&ftid=0x1:0x2"
+      : null);
+    const read = await readMapLink({ url: "https://maps.app.goo.gl/AbCdEfGhIjK" });
+    expect(read).toMatchObject({
+      isMapLink: true, lat: null, name: "Beispielwirt",
+      query: "Beispielwirt, Beispielstraße 1, Musterstadt", unresolved: true,
+    });
+  });
+
   it("tells a short link it could not follow from a link with no place", async () => {
     // Both come back without a coordinate, and the caller says
     // different things about them: one is worth trying again.

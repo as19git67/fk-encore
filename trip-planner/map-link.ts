@@ -29,6 +29,13 @@ export interface MapLink {
   /** The place's name or the search term, when the link carries one. */
   name: string | null;
   /**
+   * The whole search term, where the link names its place in words
+   * rather than by coordinate — "Beispielwirt, Beispielstraße 1, 12345
+   * Musterstadt". `name` is its first part, which is what the place is
+   * called; this is what a geocoder is asked with.
+   */
+  query: string | null;
+  /**
    * True for a shortened link, which holds nothing until its redirect
    * is followed. `position` and `name` are then both null.
    */
@@ -53,7 +60,7 @@ export function parseMapLink(shared: string): MapLink | null {
   if (text.length === 0) return null;
 
   const bare = parseBareCoordinates(text);
-  if (bare) return { position: bare, name: null, needsRedirect: false, source: "coordinates" };
+  if (bare) return { position: bare, name: null, query: null, needsRedirect: false, source: "coordinates" };
 
   let url: URL;
   try {
@@ -66,7 +73,13 @@ export function parseMapLink(shared: string): MapLink | null {
 
   const host = url.hostname.toLowerCase().replace(/^www\./, "");
   if (SHORT_LINK_HOSTS.has(host)) {
-    return { position: null, name: null, needsRedirect: true, source: "google" };
+    return { position: null, name: null, query: null, needsRedirect: true, source: "google" };
+  }
+  // Google's cookie consent, which a server in the EU is sent to on the
+  // way to a maps page: the page it would have shown is in `continue`.
+  if (host === "consent.google.com") {
+    const next = url.searchParams.get("continue");
+    return next && next !== text ? parseMapLink(next) : null;
   }
   if (host === "maps.apple.com" || url.protocol === "maps:") return parseAppleLink(url);
   if (isGoogleMaps(host, url.pathname)) return parseGoogleLink(url);
@@ -100,7 +113,9 @@ function parseAppleLink(url: URL): MapLink {
   const p = url.searchParams;
   const position = firstCoordinatePair(p.get("ll"), p.get("coordinate"), p.get("daddr"));
   const name = cleanName(p.get("name") ?? p.get("q") ?? p.get("address"));
-  return { position, name, needsRedirect: false, source: "apple" };
+  const address = cleanName(p.get("address"));
+  const query = name && address && address !== name ? `${name}, ${address}` : name;
+  return { position, name, query, needsRedirect: false, source: "apple" };
 }
 
 /**
@@ -123,11 +138,17 @@ function parseGoogleLink(url: URL): MapLink {
   const fromQuery = queryParam ? parseBareCoordinates(queryParam.replace(/^loc:/i, "")) : null;
 
   const placeName = /\/maps\/place\/([^/@]+)/.exec(path)?.[1];
-  const name = cleanName(placeName ?? (fromQuery ? null : queryParam));
+  // A link out of the Google Maps app names its place in words — "q=
+  // Beispielwirt, Beispielstraße 1, 12345 Musterstadt" beside an `ftid`
+  // only Google can read — and no coordinate at all. The whole term is
+  // what a geocoder is asked with; its first part is the place's name.
+  const query = cleanName(placeName ?? (fromQuery ? null : queryParam));
+  const name = query ? firstPart(query) : null;
 
   return {
     position: pin ?? fromQuery ?? centre,
     name,
+    query,
     needsRedirect: false,
     source: "google",
   };
@@ -138,7 +159,7 @@ function parseOsmLink(url: URL): MapLink {
   const p = url.searchParams;
   const marker = pair(p.get("mlat"), p.get("mlon"));
   const view = matchPair(url.hash, /#map=[\d.]+\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/);
-  return { position: marker ?? view, name: null, needsRedirect: false, source: "osm" };
+  return { position: marker ?? view, name: null, query: null, needsRedirect: false, source: "osm" };
 }
 
 /** `geo:48.1,11.5?q=48.1,11.5(Name)` — RFC 5870 plus the Android custom. */
@@ -147,7 +168,8 @@ function parseGeoUri(url: URL): MapLink {
   const [coords, query] = url.pathname.split("?");
   const position = parseBareCoordinates(coords ?? "");
   const label = /\(([^)]+)\)/.exec(decodeSafely(query ?? url.search))?.[1];
-  return { position, name: cleanName(label), needsRedirect: false, source: "geo" };
+  const name = cleanName(label);
+  return { position, name, query: name, needsRedirect: false, source: "geo" };
 }
 
 /**
@@ -211,6 +233,12 @@ function cleanName(raw: string | null | undefined): string | null {
   // names — showing one to the traveller would be noise.
   if (/^(0x[0-9a-f]+|[A-Za-z0-9_-]{20,})$/i.test(decoded)) return null;
   return decoded;
+}
+
+/** "Beispielwirt, Beispielstraße 1, Musterstadt" → "Beispielwirt". */
+function firstPart(query: string): string {
+  const head = query.split(",")[0]?.trim();
+  return head && head.length > 0 ? head : query;
 }
 
 function decodeSafely(text: string): string {

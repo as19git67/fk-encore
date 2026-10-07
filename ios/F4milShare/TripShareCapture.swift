@@ -25,6 +25,10 @@ struct TripShareCaptureView: View {
     /// A map link that carried no place, in one sentence — said rather
     /// than left as a missing row in the picker.
     @State private var linkNote: String?
+    /// The place the link's name was found as on the map, when the link
+    /// itself had no coordinate — "Beispielwirt · Beispielstraße 1,
+    /// Musterstadt". Shown, because a search can pick the wrong one.
+    @State private var foundByName: String?
 
     // Picker state
     @State private var plans: [SharePlanSummary] = []
@@ -111,6 +115,19 @@ struct TripShareCaptureView: View {
             } else if let text = payload?.text {
                 Section("Quelle") {
                     Text(text).font(.footnote).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+
+            if let foundByName {
+                Section {
+                    Label(foundByName, systemImage: "mappin.and.ellipse")
+                        .font(.subheadline)
+                } header: {
+                    Text("Gefunden")
+                } footer: {
+                    Text("Der Link nennt den Ort nur beim Namen; gesucht wurde er in Apple Karten. "
+                         + "Bitte prüfen \u{2014} stimmt er nicht, abbrechen und den Ort in der App "
+                         + "über \u{201E}Ort suchen\u{201C} eintragen.")
                 }
             }
 
@@ -283,6 +300,19 @@ struct TripShareCaptureView: View {
         if let lat = read.lat, let lon = read.lon {
             coordinate = (lat, lon, read.name)
             if titleText.isEmpty { titleText = read.name ?? "" }
+        } else if read.isMapLink, let words = read.query ?? read.name {
+            // A link out of the Google Maps app names its place — name
+            // and address — and carries no coordinate. Apple Maps knows
+            // the place by those words; it is asked here, on the phone,
+            // and what it found is shown rather than silently taken.
+            if titleText.isEmpty { titleText = read.name ?? words }
+            if let hit = await Self.searchMap(for: words) {
+                coordinate = (hit.lat, hit.lon, read.name ?? hit.name)
+                foundByName = hit.label
+            } else {
+                linkNote = "\u{201E}\(read.name ?? words)\u{201C} lie\u{00DF} sich auf der Karte nicht "
+                    + "finden \u{2014} ohne Koordinate geht nur eine Reise."
+            }
         } else if read.isMapLink {
             // A map link whose place nobody could work out. Worth
             // saying, because it reads nothing like an article: the
@@ -292,6 +322,29 @@ struct TripShareCaptureView: View {
                 ? "Dem Kurzlink konnte gerade nicht gefolgt werden \u{2014} ohne Koordinate geht nur eine Reise."
                 : "In diesem Kartenlink steckt keine Koordinate."
         }
+    }
+
+    /// The place the words name, as Apple Maps finds it — the first
+    /// hit, with its address for the "Gefunden" line. Nil when nothing
+    /// is found or the search fails; the picker then says so.
+    private static func searchMap(
+        for words: String
+    ) async -> (lat: Double, lon: Double, name: String?, label: String)? {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = words
+        request.resultTypes = [.pointOfInterest, .address]
+        guard let item = try? await MKLocalSearch(request: request).start().mapItems.first else {
+            return nil
+        }
+        let at = item.placemark.coordinate
+        guard CLLocationCoordinate2DIsValid(at), at.latitude != 0 || at.longitude != 0 else { return nil }
+        let address = item.placemark.title ?? ""
+        let name = item.name
+        let label = [name, address.isEmpty ? nil : address]
+            .compactMap { $0 }
+            .reduce(into: [String]()) { parts, part in if !parts.contains(part) { parts.append(part) } }
+            .joined(separator: " \u{00B7} ")
+        return (at.latitude, at.longitude, name, label.isEmpty ? words : label)
     }
 
     /// Pull `ll=lat,lon&q=name` out of a maps.apple.com or similar URL.

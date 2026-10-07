@@ -66,6 +66,28 @@ describe("parseMapLink", () => {
       expect(link?.name).toBe("Beispielmuseum Musterstadt");
     });
 
+    it("splits what the Google Maps app shares into the name and the whole search term", () => {
+      // Where a maps.app.goo.gl link out of the app leads: the place in
+      // words, an id only Google reads, and no coordinate.
+      const link = parseMapLink(
+        "https://maps.google.com/?q=Beispielwirt,+Beispielstra%C3%9Fe+1,+12345+Musterstadt"
+          + "&ftid=0x479e9cd4f7d6b3c1:0x1a2b3c4d5e6f7081&entry=gps&g_st=ic",
+      );
+      expect(link?.position).toBeNull();
+      expect(link?.name).toBe("Beispielwirt");
+      expect(link?.query).toBe("Beispielwirt, Beispielstraße 1, 12345 Musterstadt");
+    });
+
+    it("unwraps Google's cookie consent to the page behind it", () => {
+      const behind = "https://www.google.com/maps/place/Beispielpark/@48.3705,10.8978,15z";
+      const link = parseMapLink(
+        `https://consent.google.com/ml?continue=${encodeURIComponent(behind)}&gl=DE&hl=de`,
+      );
+      expect(link?.position).toEqual({ lat: 48.3705, lon: 10.8978 });
+      expect(link?.name).toBe("Beispielpark");
+      expect(parseMapLink("https://consent.google.com/ml?gl=DE")).toBeNull();
+    });
+
     it("reports a short link as needing its redirect followed", () => {
       const link = parseMapLink("https://maps.app.goo.gl/AbCdEfGhIjK");
       expect(link?.needsRedirect).toBe(true);
