@@ -118,11 +118,12 @@ struct PhotoGridView: View {
                     .padding(.horizontal, 2)
                     .coordinateSpace(name: "photoGrid")
                     .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-                    .dragToSelect(isActive: isSelecting, in: "photoGrid") { point in
-                        for (id, frame) in itemFrames where frame.contains(point) {
-                            selectedIds.insert(id)
-                        }
-                    }
+                    .dragToSelect(
+                        isActive: isSelecting,
+                        in: "photoGrid",
+                        startsSelecting: swipeSelects(startingAt:),
+                        onPoint: paintSelection(at:selecting:)
+                    )
                 }
             }
             .scrollsBack(to: $scrollTarget, in: proxy)
@@ -262,6 +263,15 @@ struct PhotoGridView: View {
         let side = viewModel.variantsByPhotoId[photo.id]?.side(of: photo.id)
         let other: PhotoOrientation? = side == .portrait ? .landscape : (side == .landscape ? .portrait : nil)
         return "Auch im \(OrientationVariantRules.label(for: other)) vorhanden"
+    }
+
+    /// A swipe deselects when it starts on a selected photo, as in Photos.
+    private func swipeSelects(startingAt point: CGPoint) -> Bool {
+        DragToSelect.strokeSelects(startingAt: point, frames: itemFrames, selected: selectedIds)
+    }
+
+    private func paintSelection(at point: CGPoint, selecting: Bool) {
+        DragToSelect.paint(&selectedIds, at: point, frames: itemFrames, selecting: selecting)
     }
 
     private func toggleSelection(_ id: Int) {

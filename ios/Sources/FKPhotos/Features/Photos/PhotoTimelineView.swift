@@ -257,10 +257,22 @@ struct PhotoTimelineView: View {
             .padding(.horizontal, 2)
             .coordinateSpace(name: "timelineGrid")
             .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-            .dragToSelect(isActive: selection.isSelecting, in: "timelineGrid") { point in
-                selection.selectItems(at: point, frames: itemFrames)
-            }
+            .dragToSelect(
+                isActive: selection.isSelecting,
+                in: "timelineGrid",
+                startsSelecting: swipeSelects(startingAt:),
+                onPoint: paintSelection(at:selecting:)
+            )
         }
+    }
+
+    /// A swipe deselects when it starts on a selected photo, as in Photos.
+    private func swipeSelects(startingAt point: CGPoint) -> Bool {
+        selection.strokeSelects(startingAt: point, frames: itemFrames)
+    }
+
+    private func paintSelection(at point: CGPoint, selecting: Bool) {
+        selection.paintItems(at: point, frames: itemFrames, selecting: selecting)
     }
 
 
