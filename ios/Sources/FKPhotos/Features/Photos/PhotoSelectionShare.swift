@@ -352,10 +352,10 @@ struct PhotoSelection: Equatable, Sendable {
         }
     }
 
-    /// Drag-to-select: add every photo whose frame contains `point`.
-    ///
-    /// Additive on purpose — a drag across the grid extends the selection and
-    /// never clears it, so a wobbling finger cannot undo what it just picked.
+    /// Swipe-to-select: select or deselect every photo whose frame contains
+    /// `point`, in the one direction the swipe chose where it started. A
+    /// deselecting swipe that empties the selection stays in selection mode —
+    /// the finger is still down.
     mutating func paintItems(at point: CGPoint, frames: [Int: CGRect], selecting: Bool) {
         DragToSelect.paint(&ids, at: point, frames: frames, selecting: selecting)
     }
@@ -366,6 +366,8 @@ struct PhotoSelection: Equatable, Sendable {
         DragToSelect.strokeSelects(startingAt: point, frames: frames, selected: ids)
     }
 
+    /// Add every photo whose frame contains `point` — `paintItems` with
+    /// `selecting: true`.
     mutating func selectItems(at point: CGPoint, frames: [Int: CGRect]) {
         for (id, frame) in frames where frame.contains(point) {
             ids.insert(id)
