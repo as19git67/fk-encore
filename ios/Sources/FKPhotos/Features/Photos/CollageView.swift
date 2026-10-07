@@ -72,24 +72,20 @@ struct CollageView: View {
                     } description: {
                         Text("Eine Collage braucht \(CollageLayouts.minPhotos) bis \(CollageLayouts.maxPhotos) Fotos — ausgewählt sind \(photos.count).")
                     }
+                } else if let index = editingLayout, layouts.indices.contains(index) {
+                    // The editor replaces the picker in place rather than
+                    // being pushed: every bit of its state (the order, the
+                    // captions, the save status) lives in this view, and a
+                    // pushed destination is not guaranteed to be rebuilt when
+                    // that state changes.
+                    editor(layout: layouts[index])
                 } else {
                     layoutPicker
                 }
             }
-            .navigationTitle("Layout wählen")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
-            }
-            .navigationDestination(item: $editingLayout) { index in
-                if layouts.indices.contains(index) {
-                    editor(layout: layouts[index])
-                }
-            }
         }
         .task { await loadPalette() }
         // Dragging a photo downward must move the photo, not pull the sheet
@@ -119,6 +115,12 @@ struct CollageView: View {
                 }
             }
             .padding()
+        }
+        .navigationTitle("Layout wählen")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Abbrechen") { dismiss() }
+            }
         }
     }
 
@@ -186,10 +188,16 @@ struct CollageView: View {
         }
         .padding()
         .navigationTitle("Collage bearbeiten")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    editingLayout = nil
+                    swapAnchor = nil
+                } label: {
+                    Label("Zurück", systemImage: "chevron.backward")
+                        .labelStyle(.titleAndIcon)
+                }
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if isSharing {
                     ProgressView()
@@ -703,6 +711,11 @@ private struct CollageCanvas: View {
         let height: CGFloat = max(0, CGFloat(cell.height) * canvas.height - gap)
         let isDropTarget = photoDragOver == index && photoDragFrom != index
         return CollageTile(photo: photo)
+            // A cell is identified by its position, but the tile keeps its
+            // image loader in `@State`, which SwiftUI sets only once. Without
+            // this, a swap handed each cell the other photo and the cell went
+            // on showing the old one: the order changed, the picture did not.
+            .id(photo.id)
             .frame(width: width, height: height)
             .opacity(photoDragFrom == index ? 0.4 : 1)
             .overlay {
@@ -804,7 +817,11 @@ private struct CollageCaption: View {
             .shadow(color: .black.opacity(0.7), radius: 0, x: 1, y: 1)
             .shadow(color: .black.opacity(0.7), radius: 0, x: -1, y: -1)
             .opacity(overlay.text.isEmpty ? 0.5 : 1)
-            .frame(maxWidth: canvas.width * CGFloat(CollageText.widthFraction))
+            // The caption's frame is always the full wrap width, and the text
+            // sits inside it by its alignment — as `CollageText.block` draws
+            // it — so left and right reach the frame's edges even for one
+            // short line.
+            .frame(width: canvas.width * CGFloat(CollageText.widthFraction), alignment: frameAlignment)
             .padding(4)
             .overlay {
                 if isEditing {
@@ -812,6 +829,14 @@ private struct CollageCaption: View {
                         .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 1, dash: [4]))
                 }
             }
+    }
+
+    private var frameAlignment: Alignment {
+        switch overlay.align {
+        case .left: return .leading
+        case .center: return .center
+        case .right: return .trailing
+        }
     }
 
     private var alignment: TextAlignment {

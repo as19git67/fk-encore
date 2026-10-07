@@ -18,8 +18,8 @@ extension View {
         })
     }
 
-    /// Paint a selection by holding a tile for a moment, then dragging
-    /// across others. `onPoint` gets each finger position in `space`.
+    /// Paint a selection by swiping across the grid, as in Photos.
+    /// `onPoint` gets each finger position in `space`.
     func dragToSelect(
         isActive: Bool, in space: String, onPoint: @escaping (CGPoint) -> Void
     ) -> some View {
@@ -27,38 +27,228 @@ extension View {
     }
 }
 
-/// The hold-then-drag behind `dragToSelect`, as a UIKit recognizer.
+/// The geometry behind swipe-to-select, kept free of UIKit so it can be tested.
 ///
-/// The grids live in a `ScrollView`. A SwiftUI gesture with a drag in it
-/// kept that scroll view from panning on device — even sequenced behind a
-/// `LongPressGesture` (#1209) — so selection mode froze the grid.
-/// `UILongPressGestureRecognizer` takes part in UIKit's own gesture
-/// resolution instead: a swipe moves past `allowableMovement` before the
-/// hold completes, the recognizer fails and the scroll view pans; holding
-/// still first lets it begin, after which the scroll view stays put and
-/// the finger paints. Photos behaves the same way.
+/// Apple documents no API for the one-finger swipe-to-select Photos uses
+/// (UIKit's own multiple-selection interaction is a *two*-finger pan on a
+/// `UICollectionView`, and these grids are SwiftUI). The behaviour is
+/// rebuilt here from what Photos does:
+///
+/// - a swipe that starts **sideways** selects; one that starts up or down
+///   scrolls, so the grid stays scrollable in selection mode;
+/// - once selecting, the finger may go any way, the grid holds still, and
+///   the back-swipe of the navigation stack waits for the gesture to fail;
+/// - near the top or bottom edge the grid scrolls by itself, faster the
+///   closer the finger gets, and the selection follows.
+enum DragToSelect {
+    /// How far into the visible area, from either edge, autoscroll begins.
+    static let autoscrollEdge: CGFloat = 80
+    /// Points per second at the very edge.
+    static let maxAutoscrollSpeed: CGFloat = 900
+
+    /// Whether a pan with this velocity starts a selection rather than a
+    /// scroll: clearly more sideways than up or down.
+    static func startsSelection(velocity: CGPoint) -> Bool {
+        let dx = abs(velocity.x)
+        let dy = abs(velocity.y)
+        return dx > 0 && dx > dy
+    }
+
+    /// Autoscroll speed for a finger `fingerY` points below the top of a
+    /// visible area `visibleHeight` tall: negative scrolls up, positive down,
+    /// zero away from the edges. Ramps linearly from nothing at the edge band
+    /// to `maxAutoscrollSpeed` at the edge itself (or past it).
+    static func autoscrollSpeed(fingerY: CGFloat, visibleHeight: CGFloat) -> CGFloat {
+        guard visibleHeight > 0 else { return 0 }
+        let edge = min(autoscrollEdge, visibleHeight / 3)
+        guard edge > 0 else { return 0 }
+        if fingerY < edge {
+            let depth = min(1, (edge - fingerY) / edge)
+            return -maxAutoscrollSpeed * depth
+        }
+        let bottom = visibleHeight - edge
+        if fingerY > bottom {
+            let depth = min(1, (fingerY - bottom) / edge)
+            return maxAutoscrollSpeed * depth
+        }
+        return 0
+    }
+
+    /// A content offset moved by `delta`, kept inside the scrollable range.
+    static func clampedOffset(
+        current: CGFloat, delta: CGFloat, minOffset: CGFloat, maxOffset: CGFloat
+    ) -> CGFloat {
+        min(max(current + delta, minOffset), max(minOffset, maxOffset))
+    }
+}
+
+/// Swipe-to-select as a UIKit pan recognizer — see `DragToSelect` for the
+/// rules.
+///
+/// A SwiftUI drag gesture kept the grid's scroll view from panning at all
+/// (#1209), and the hold-then-drag recognizer that replaced it lost to the
+/// scroll view and the back-swipe as soon as the finger moved. A pan
+/// recognizer can be told the two things that matter: begin only on a
+/// sideways start (`gestureRecognizerShouldBegin`), and make the scroll
+/// view's pan and the navigation pop wait for it to fail
+/// (`shouldBeRequiredToFailBy`) — so whichever starts, the other stays out.
 struct DragToSelectRecognizer: UIGestureRecognizerRepresentable {
     let isActive: Bool
     let space: String
     let onPoint: (CGPoint) -> Void
 
-    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
-        let recognizer = UILongPressGestureRecognizer()
-        recognizer.minimumPressDuration = 0.25
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.delegate = context.coordinator
         recognizer.isEnabled = isActive
+        context.coordinator.onPoint = onPoint
         return recognizer
     }
 
-    func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
         recognizer.isEnabled = isActive
+        context.coordinator.onPoint = onPoint
     }
 
-    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
         switch recognizer.state {
         case .began, .changed:
-            onPoint(context.converter.location(in: .named(space)))
+            context.coordinator.track(
+                point: context.converter.location(in: .named(space)),
+                recognizer: recognizer
+            )
         default:
-            break
+            context.coordinator.stop()
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onPoint: ((CGPoint) -> Void)?
+        /// The finger in the grid's coordinate space, moved along with the
+        /// content while autoscrolling so the selection keeps up.
+        private var lastPoint: CGPoint?
+        private weak var scrollView: UIScrollView?
+        private var displayLink: CADisplayLink?
+        private var speed: CGFloat = 0
+
+        // MARK: Deciding who wins
+
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
+            return DragToSelect.startsSelection(velocity: pan.velocity(in: pan.view))
+        }
+
+        /// The scroll view's pan and the navigation back-swipe wait for this
+        /// recognizer to fail. It fails at once on an up-or-down start, so
+        /// scrolling is not held up; on a sideways start it wins, and neither
+        /// the grid nor the page moves under the finger.
+        func gestureRecognizer(
+            _ recognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy other: UIGestureRecognizer
+        ) -> Bool {
+            if other.view is UIScrollView { return true }
+            if other is UIScreenEdgePanGestureRecognizer { return true }
+            guard let navigation = navigationController(of: recognizer.view) else { return false }
+            if other === navigation.interactivePopGestureRecognizer { return true }
+            if #available(iOS 26.0, *), other === navigation.interactiveContentPopGestureRecognizer {
+                return true
+            }
+            return false
+        }
+
+        // MARK: Tracking and autoscroll
+
+        func track(point: CGPoint, recognizer: UIPanGestureRecognizer) {
+            lastPoint = point
+            onPoint?(point)
+            if scrollView == nil {
+                scrollView = enclosingScrollView(for: recognizer)
+            }
+            guard let scrollView else { return }
+            let inset = scrollView.adjustedContentInset
+            let fingerY = recognizer.location(in: scrollView).y - scrollView.contentOffset.y - inset.top
+            let visibleHeight = scrollView.bounds.height - inset.top - inset.bottom
+            speed = DragToSelect.autoscrollSpeed(fingerY: fingerY, visibleHeight: visibleHeight)
+            if speed == 0 {
+                stopAutoscroll()
+            } else if displayLink == nil {
+                let link = CADisplayLink(target: self, selector: #selector(step(_:)))
+                link.add(to: .main, forMode: .common)
+                displayLink = link
+            }
+        }
+
+        func stop() {
+            stopAutoscroll()
+            lastPoint = nil
+            scrollView = nil
+        }
+
+        private func stopAutoscroll() {
+            displayLink?.invalidate()
+            displayLink = nil
+            speed = 0
+        }
+
+        @objc private func step(_ link: CADisplayLink) {
+            guard let scrollView, let point = lastPoint, speed != 0 else { return }
+            let elapsed = CGFloat(link.targetTimestamp - link.timestamp)
+            let inset = scrollView.adjustedContentInset
+            let current = scrollView.contentOffset.y
+            let next = DragToSelect.clampedOffset(
+                current: current,
+                delta: speed * elapsed,
+                minOffset: -inset.top,
+                maxOffset: scrollView.contentSize.height - scrollView.bounds.height + inset.bottom
+            )
+            let delta = next - current
+            guard delta != 0 else { return }
+            scrollView.contentOffset.y = next
+            // The content moved under a still finger: the finger now points
+            // `delta` further along the grid.
+            let moved = CGPoint(x: point.x, y: point.y + delta)
+            lastPoint = moved
+            onPoint?(moved)
+        }
+
+        // MARK: Finding the views
+
+        /// The grid's scroll view: the nearest one around the view under the
+        /// finger — SwiftUI may host the recognizer above the scroll view, so
+        /// its own ancestors are only the fallback.
+        private func enclosingScrollView(for recognizer: UIGestureRecognizer) -> UIScrollView? {
+            if let view = recognizer.view,
+               let found = firstScrollView(from: view.hitTest(recognizer.location(in: view), with: nil)) {
+                return found
+            }
+            return firstScrollView(from: recognizer.view)
+        }
+
+        private func firstScrollView(from view: UIView?) -> UIScrollView? {
+            var current = view
+            while let candidate = current {
+                if let scroll = candidate as? UIScrollView { return scroll }
+                current = candidate.superview
+            }
+            return nil
+        }
+
+        private func navigationController(of view: UIView?) -> UINavigationController? {
+            var responder: UIResponder? = view
+            while let current = responder {
+                if let controller = current as? UIViewController {
+                    return controller.navigationController
+                        ?? (controller as? UINavigationController)
+                }
+                responder = current.next
+            }
+            return nil
         }
     }
 }
