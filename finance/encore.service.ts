@@ -41,8 +41,15 @@ import "./tag-cleanup-cron";
 import "./document-match-cleanup-cron";
 // Side-effect: registers the monthly snapshot of the retirement forecast (#1342).
 import "./forecast-snapshot-cron";
+// Side-effect: registers the refresh of the held securities' quotes.
+import "./quotes-cron";
+import { setQuoteProvider } from "./quote-provider";
+import { yahooQuoteProvider } from "./quote-provider-yahoo";
 
 import { startFinanceImportWatcher } from "./import-pending";
+
+// Prices come from Yahoo until another provider is wired in.
+setQuoteProvider(yahooQuoteProvider);
 
 // Arm all timers registered above. Synchronous, fire-and-forget jobs
 // run on their own timers from here on.
