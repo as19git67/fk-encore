@@ -436,10 +436,10 @@ function drawSingleTextOverlay(
   const cx = clampUnit(overlay.x) * width
   const cy = clampUnit(overlay.y) * height
 
-  // Block is centered at cx, sized to content (capped at maxWidth) — mirrors
-  // CSS: max-width 90% + transform: translate(-50%, -50%).
-  const lineWidths = lines.map((l) => ctx.measureText(l).width)
-  const blockWidth = Math.min(Math.max(...lineWidths, 0), maxWidth)
+  // Block is centered at cx and always the full wrap width — mirrors CSS
+  // `width: 90%` + `transform: translate(-50%, -50%)` — so left/right
+  // alignment reaches the frame's edges even for one short line.
+  const blockWidth = maxWidth
   ctx.textAlign = overlay.align
   const anchorX =
     overlay.align === 'left'
@@ -997,20 +997,13 @@ onBeforeUnmount(() => {
 /* ── Text overlay ─────────────────────────────────────────────────────────── */
 .collage-text-overlay {
   position: absolute;
-  /* Expand to the full natural (unwrapped) text width so short text sits on
-     one line; max-width caps it at 90% of the canvas, where pre-wrap +
-     overflow-wrap break long text at word boundaries. The wrap width is thus
-     independent of the box's horizontal position.
-
-     The -webkit- fallback is essential: this project has no autoprefixer, and
-     WebKit/older iOS Safari drop the unprefixed `max-content`, which silently
-     reverts the box to `width:auto` (shrink-to-fit). Shrink-to-fit's available
-     width is `stageWidth − left`, so the box would narrow — and wrap sooner —
-     the further right it is dragged. */
-  width: -webkit-max-content;
-  width: -moz-max-content;
-  width: max-content;
-  max-width: 90%;
+  /* The caption's frame is always 90% of the canvas, centred on its point;
+     pre-wrap + overflow-wrap break long text at word boundaries inside it,
+     and text-align places even a single short line at the frame's left or
+     right edge. Sized to its content, a one-line caption had nowhere to move
+     and left/right seemed to do nothing. A fixed width also keeps the wrap
+     width independent of where the box is dragged. */
+  width: 90%;
   padding: 0.05em 0.3em;
   transform: translate(-50%, -50%);
   margin: 0;

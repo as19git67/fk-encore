@@ -176,3 +176,60 @@ final class SelectionOrderTests: XCTestCase {
         XCTAssertEqual(SelectionOrder.reconciled([1, 2], with: [], gridOrder: [1, 2]), [])
     }
 }
+
+/// Swipe-to-select as in Photos: which swipes select, and how the grid
+/// scrolls itself while the finger rests near an edge.
+final class DragToSelectTests: XCTestCase {
+
+    func testASidewaysStartSelects() {
+        XCTAssertTrue(DragToSelect.startsSelection(velocity: CGPoint(x: 300, y: 40)))
+        XCTAssertTrue(DragToSelect.startsSelection(velocity: CGPoint(x: -300, y: -40)))
+    }
+
+    func testAnUpOrDownStartScrolls() {
+        // Otherwise the grid could not be scrolled in selection mode at all.
+        XCTAssertFalse(DragToSelect.startsSelection(velocity: CGPoint(x: 40, y: 300)))
+        XCTAssertFalse(DragToSelect.startsSelection(velocity: CGPoint(x: 0, y: -300)))
+        XCTAssertFalse(DragToSelect.startsSelection(velocity: .zero))
+    }
+
+    func testNoAutoscrollAwayFromTheEdges() {
+        XCTAssertEqual(DragToSelect.autoscrollSpeed(fingerY: 400, visibleHeight: 800), 0)
+    }
+
+    func testNearTheTopTheGridScrollsUpFasterTheCloserTheFinger() {
+        let near = DragToSelect.autoscrollSpeed(fingerY: 60, visibleHeight: 800)
+        let nearer = DragToSelect.autoscrollSpeed(fingerY: 10, visibleHeight: 800)
+        XCTAssertLessThan(near, 0)
+        XCTAssertLessThan(nearer, near)
+        XCTAssertEqual(
+            DragToSelect.autoscrollSpeed(fingerY: -30, visibleHeight: 800),
+            -DragToSelect.maxAutoscrollSpeed
+        )
+    }
+
+    func testNearTheBottomTheGridScrollsDown() {
+        let speed = DragToSelect.autoscrollSpeed(fingerY: 780, visibleHeight: 800)
+        XCTAssertGreaterThan(speed, 0)
+        XCTAssertLessThanOrEqual(speed, DragToSelect.maxAutoscrollSpeed)
+    }
+
+    func testAShortViewKeepsAMiddleWhereNothingScrolls() {
+        // The edge bands shrink to a third each, so a short grid still has a
+        // calm middle to select in.
+        XCTAssertEqual(DragToSelect.autoscrollSpeed(fingerY: 75, visibleHeight: 150), 0)
+    }
+
+    func testAutoscrollStopsAtTheEndsOfTheContent() {
+        XCTAssertEqual(
+            DragToSelect.clampedOffset(current: 10, delta: -50, minOffset: -20, maxOffset: 500), -20
+        )
+        XCTAssertEqual(
+            DragToSelect.clampedOffset(current: 490, delta: 50, minOffset: -20, maxOffset: 500), 500
+        )
+        // Content shorter than the view: nowhere to go.
+        XCTAssertEqual(
+            DragToSelect.clampedOffset(current: 0, delta: 50, minOffset: 0, maxOffset: -100), 0
+        )
+    }
+}

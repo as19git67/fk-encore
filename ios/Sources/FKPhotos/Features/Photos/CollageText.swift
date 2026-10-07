@@ -165,11 +165,14 @@ enum CollageText {
     /// Where the block of text sits on the canvas, and where its first
     /// baseline is.
     ///
-    /// The block is centred on the overlay's point and sized to its content,
-    /// capped at 90 % of the width — the same rule as the web's
-    /// `max-width: 90%` plus `translate(-50%, -50%)`. The anchor is the x the
-    /// text is drawn from, which depends on the alignment: a left-aligned
-    /// block starts at its left edge, a right-aligned one at its right.
+    /// The block is the caption's frame: centred on the overlay's point and
+    /// always 90 % of the canvas wide — the web's `width: 90%` plus
+    /// `translate(-50%, -50%)`. Lines are wrapped to that width and aligned
+    /// inside it, so left and right move even a single short line to the
+    /// frame's edge. (Sized to its content, a one-line caption had nowhere to
+    /// move and the alignment buttons seemed to do nothing.) The anchor is
+    /// the x the text is drawn from: the frame's left edge, its centre or its
+    /// right edge.
     struct Block: Equatable, Sendable {
         var lines: [String]
         var fontSize: Double
@@ -211,8 +214,7 @@ enum CollageText {
         let lines = wrapLines(overlay.text, maxWidth: maxWidth) { measure($0, size) }
         let lineHeight = size * lineSpacing
         let blockHeight = lineHeight * Double(lines.count)
-        let widest = lines.map { measure($0, size) }.max() ?? 0
-        let blockWidth = min(max(widest, 0), maxWidth)
+        let blockWidth = maxWidth
 
         let centerX = clampUnit(overlay.x) * canvasWidth
         let centerY = clampUnit(overlay.y) * canvasHeight

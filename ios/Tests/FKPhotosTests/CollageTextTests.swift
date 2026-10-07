@@ -224,6 +224,18 @@ final class CollageTextTests: XCTestCase {
         XCTAssertEqual(right.anchorX, centre.centerX + right.width / 2, accuracy: 0.001)
     }
 
+    func testAShortCaptionStillMovesToTheEdgeOfItsFrame() {
+        // One short word on a 1000-wide canvas: the frame is 900 wide and
+        // centred, so left starts at 50 and right ends at 950. Sized to the
+        // word, all three alignments drew the same thing.
+        guard let left = block(text: "hi", align: .left),
+              let right = block(text: "hi", align: .right)
+        else { return XCTFail("no block") }
+        XCTAssertEqual(left.width, 900, accuracy: 0.001)
+        XCTAssertEqual(left.anchorX, 50, accuracy: 0.001)
+        XCTAssertEqual(right.anchorX, 950, accuracy: 0.001)
+    }
+
     // MARK: - The outline
 
     func testTheOutlineGrowsWithTheText() {

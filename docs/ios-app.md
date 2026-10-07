@@ -110,6 +110,18 @@ dokumentiert**:
   Nur in der gefilterten Ansicht verfügbar: unfiltert zeigt die Timeline
   Jahres-Kacheln, keine Fotos. Ein Filterwechsel verwirft die Auswahl, damit
   keine unsichtbaren Fotos in einer Stapel-Aktion landen.
+- **Auswählen durch Wischen** (alle Foto-Raster, `DragToSelect` in
+  `PhotoSelectionShare.swift`), wie in Apple Fotos: Ein Wisch, der **seitlich**
+  beginnt, wählt aus und darf danach in jede Richtung weiterlaufen; einer, der
+  nach oben oder unten beginnt, scrollt. Während des Auswählens bleibt das
+  Raster stehen, die Zurück-Wischgeste der Navigation wartet, und nahe dem
+  oberen oder unteren Rand scrollt das Raster von selbst weiter (schneller, je
+  näher der Finger am Rand ist). Apple dokumentiert für diese
+  Ein-Finger-Geste keine API — UIKits eingebaute Mehrfachauswahl ist ein
+  Zwei-Finger-Wisch auf einer `UICollectionView`, die Raster hier sind
+  SwiftUI —, deshalb ist sie als `UIPanGestureRecognizer` nachgebaut, der
+  Scroll-View und Zurück-Geste per `shouldBeRequiredToFailBy` auf sich warten
+  lässt.
 - **Metadaten-Ansicht** (`PhotoMetadataView`): Datei-Infos, Aufnahmedatum,
   Beschreibung, Qualitäts-Bewertung („x von 4"), erkannte Personen.
 - **Per-Foto-Karte**: MapKit-Mini-Karte mit Marker bei vorhandenem GPS.
@@ -542,6 +554,9 @@ dokumentiert**:
   mitlaufendem Vorschaubild und markiertem Zielfeld) oder beide nacheinander
   antippt. Das Sheet lässt sich dabei nicht per Wischen schließen, damit ein
   Ziehen nach unten das Foto bewegt statt die Anordnung zu verwerfen.
+  Der Rahmen einer Beschriftung ist immer 90 % der Leinwand breit (wie im
+  Web); links/rechts setzt den Text an dessen Kante, auch eine einzelne kurze
+  Zeile.
   Eine Zelle ist über ihre Position identifiziert, ihre Kachel aber über das
   Foto (`.id(photo.id)`): Die Kachel hält ihren Bildlader in `@State`, und
   ohne die Foto-Id behielt sie nach einem Tausch das alte Bild.
