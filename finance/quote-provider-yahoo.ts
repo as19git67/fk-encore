@@ -4,9 +4,10 @@
  * Yahoo has no public API; what everybody uses are the JSON endpoints
  * behind its website. They cost nothing, know German exchanges and funds,
  * and are delayed by about fifteen minutes. They also change without
- * notice and answer 429 when asked too often. The service calls once per
- * security and tick, which has stayed well under that so far; a 429 ends
- * the tick and the next one waits for the backoff.
+ * notice, want a consent cookie and a crumb (see below), and answer 429
+ * when asked too often. The service calls once per security and tick; a
+ * 429 that a fresh session does not cure ends the tick, and the next one
+ * waits for the backoff.
  *
  * Parsing is kept in pure functions so the shapes can be tested without
  * the network.
@@ -105,14 +106,81 @@ const RANGE_PARAMS: Record<HistoryRange, string> = {
   backfill: "range=5y&interval=1d",
 };
 
-async function getJson(url: string): Promise<unknown> {
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+/**
+ * Yahoo answers the search (and some other endpoints) with 429 unless the
+ * request carries a consent cookie and the "crumb" that goes with it —
+ * whatever the request rate. The cookie comes from any page of
+ * fc.yahoo.com (a 404 that still sets it), the crumb from getcrumb with
+ * that cookie. Both are kept for a while and renewed once when a request
+ * is refused; a refusal after that is a real rate limit.
+ */
+const COOKIE_URL = "https://fc.yahoo.com/";
+const CRUMB_URL = "https://query1.finance.yahoo.com/v1/test/getcrumb";
+const SESSION_TTL_MS = 60 * 60_000;
+
+interface Session {
+  cookie: string;
+  crumb: string;
+  at: number;
+}
+
+let session: Session | null = null;
+
+function headers(cookie?: string): Record<string, string> {
+  const h: Record<string, string> = { "User-Agent": USER_AGENT, Accept: "application/json, text/plain, */*" };
+  if (cookie) h.Cookie = cookie;
+  return h;
+}
+
+/** The cookie names of a set-cookie list, joined for a Cookie header. */
+export function cookieHeader(setCookies: string[]): string {
+  return setCookies
+    .map((c) => c.split(";")[0]!.trim())
+    .filter((c) => c.length > 0)
+    .join("; ");
+}
+
+async function openSession(): Promise<Session> {
+  const page = await fetch(COOKIE_URL, { headers: headers(), redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+  const cookie = cookieHeader(page.headers.getSetCookie());
+  if (!cookie) throw new Error("yahoo: no consent cookie received");
+  const res = await fetch(CRUMB_URL, { headers: headers(cookie), signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (res.status === 429) throw new QuoteRateLimitedError();
-  if (!res.ok) throw new Error(`yahoo ${res.status} for ${url}`);
-  return res.json();
+  if (!res.ok) throw new Error(`yahoo ${res.status} for the crumb`);
+  const crumb = (await res.text()).trim();
+  if (!crumb || crumb.includes("<")) throw new Error("yahoo: no crumb received");
+  return { cookie, crumb, at: Date.now() };
+}
+
+async function currentSession(renew = false): Promise<Session> {
+  if (!renew && session && Date.now() - session.at < SESSION_TTL_MS) return session;
+  session = await openSession();
+  return session;
+}
+
+/** For tests: forget the session, or install one. */
+export function setYahooSession(s: Session | null): void {
+  session = s;
+}
+
+async function getJson(url: string): Promise<unknown> {
+  let s = await currentSession();
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${url}&crumb=${encodeURIComponent(s.crumb)}`, {
+      headers: headers(s.cookie),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 429 || res.status === 401) {
+      // The session may have expired: once more with a fresh one.
+      if (attempt === 0) {
+        s = await currentSession(true);
+        continue;
+      }
+      throw new QuoteRateLimitedError();
+    }
+    if (!res.ok) throw new Error(`yahoo ${res.status} for ${url}`);
+    return res.json();
+  }
 }
 
 export const yahooQuoteProvider: QuoteProvider = {
