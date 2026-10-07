@@ -542,6 +542,9 @@ dokumentiert**:
   mitlaufendem Vorschaubild und markiertem Zielfeld) oder beide nacheinander
   antippt. Das Sheet lässt sich dabei nicht per Wischen schließen, damit ein
   Ziehen nach unten das Foto bewegt statt die Anordnung zu verwerfen.
+  Eine Zelle ist über ihre Position identifiziert, ihre Kachel aber über das
+  Foto (`.id(photo.id)`): Die Kachel hält ihren Bildlader in `@State`, und
+  ohne die Foto-Id behielt sie nach einem Tausch das alte Bild.
 - Die Layout-Regeln liegen in `CollageLayouts.swift` — eine Portierung von
   `frontend/src/utils/collageLayouts.ts` mit derselben Tabelle (gleiche IDs,
   Namen, Seitenverhältnisse, Zellen), damit dieselben Fotos auf beiden

@@ -72,24 +72,20 @@ struct CollageView: View {
                     } description: {
                         Text("Eine Collage braucht \(CollageLayouts.minPhotos) bis \(CollageLayouts.maxPhotos) Fotos — ausgewählt sind \(photos.count).")
                     }
+                } else if let index = editingLayout, layouts.indices.contains(index) {
+                    // The editor replaces the picker in place rather than
+                    // being pushed: every bit of its state (the order, the
+                    // captions, the save status) lives in this view, and a
+                    // pushed destination is not guaranteed to be rebuilt when
+                    // that state changes.
+                    editor(layout: layouts[index])
                 } else {
                     layoutPicker
                 }
             }
-            .navigationTitle("Layout wählen")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
-            }
-            .navigationDestination(item: $editingLayout) { index in
-                if layouts.indices.contains(index) {
-                    editor(layout: layouts[index])
-                }
-            }
         }
         .task { await loadPalette() }
         // Dragging a photo downward must move the photo, not pull the sheet
@@ -119,6 +115,12 @@ struct CollageView: View {
                 }
             }
             .padding()
+        }
+        .navigationTitle("Layout wählen")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Abbrechen") { dismiss() }
+            }
         }
     }
 
@@ -186,10 +188,16 @@ struct CollageView: View {
         }
         .padding()
         .navigationTitle("Collage bearbeiten")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    editingLayout = nil
+                    swapAnchor = nil
+                } label: {
+                    Label("Zurück", systemImage: "chevron.backward")
+                        .labelStyle(.titleAndIcon)
+                }
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if isSharing {
                     ProgressView()
@@ -703,6 +711,11 @@ private struct CollageCanvas: View {
         let height: CGFloat = max(0, CGFloat(cell.height) * canvas.height - gap)
         let isDropTarget = photoDragOver == index && photoDragFrom != index
         return CollageTile(photo: photo)
+            // A cell is identified by its position, but the tile keeps its
+            // image loader in `@State`, which SwiftUI sets only once. Without
+            // this, a swap handed each cell the other photo and the cell went
+            // on showing the old one: the order changed, the picture did not.
+            .id(photo.id)
             .frame(width: width, height: height)
             .opacity(photoDragFrom == index ? 0.4 : 1)
             .overlay {
