@@ -75,7 +75,7 @@ console.log("[boot] finance/portfolio.ts: all imports resolved");
 // Scope: which depots the caller may see
 // ----------------------------------------------------------------------
 
-interface DepotAccount {
+export interface DepotAccount {
   id: number;
   label: string;
   currency_code: string;
@@ -91,7 +91,7 @@ function hasAdmin(auth: { permissions: string[] }): boolean {
  * Every depot account the caller may read, optionally narrowed to the
  * ids in `requested`. Ids outside the readable set are ignored.
  */
-async function visibleDepots(
+export async function visibleDepots(
   auth: { userID: string; permissions: string[] },
   requested: number[] | null,
 ): Promise<DepotAccount[]> {
@@ -360,7 +360,7 @@ interface DepotTxRow {
   note: string | null;
 }
 
-interface HoldingRow {
+export interface HoldingRow {
   account_id: number;
   as_of: string;
   isin: string | null;
@@ -490,7 +490,7 @@ function adoptIdentity(
  * every holding row of that day. One query per account keeps it simple;
  * a household has a handful of depots, not hundreds.
  */
-async function latestHoldings(accountIds: number[]): Promise<HoldingRow[]> {
+export async function latestHoldings(accountIds: number[]): Promise<HoldingRow[]> {
   const out: HoldingRow[] = [];
   for (const id of accountIds) {
     const [latest] = await db
