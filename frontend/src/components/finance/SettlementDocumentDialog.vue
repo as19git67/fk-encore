@@ -44,6 +44,11 @@ const emit = defineEmits<{
   (e: 'close'): void
   /** The user wants the statement's values applied to the conflicting transaction. */
   (e: 'apply', documentId: number): void
+  /**
+   * Opening the statement asked the model for the first time. Its answer
+   * is stored, so a list that judged the statement without it is stale.
+   */
+  (e: 'read', documentId: number): void
 }>()
 
 const router = useRouter()
@@ -73,6 +78,7 @@ async function load(id: number | null) {
   try {
     const r = await inspectSettlementDocument(id)
     if (inFlightFor === id) inspection.value = r
+    if (r.llm_status === 'used') emit('read', id)
   } catch (e: any) {
     if (inFlightFor === id) error.value = e?.message ?? 'Erkennung konnte nicht geladen werden'
   } finally {

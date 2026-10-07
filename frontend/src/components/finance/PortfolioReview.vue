@@ -143,6 +143,23 @@ async function setIgnored(documentId: number, ignored: boolean) {
 
 /** The document shown in the preview dialog; closing it leaves the page where it was. */
 const openDocument = ref<number | null>(null)
+/**
+ * The list judges statements with the stored model answers only. When the
+ * dialog had to ask the model first, the list is reloaded once it closes.
+ */
+let readWhileOpen = false
+
+function markRead() {
+  readWhileOpen = true
+}
+
+function closeDocument() {
+  openDocument.value = null
+  if (readWhileOpen) {
+    readWhileOpen = false
+    void load()
+  }
+}
 
 function onApplyFromDialog(documentId: number) {
   const c = review.value?.conflicts.find((x) => x.document_id === documentId)
@@ -488,8 +505,9 @@ function signClass(val: string | null): string {
     <SettlementDocumentDialog
       :document-id="openDocument"
       can-apply
-      @close="openDocument = null"
+      @close="closeDocument"
       @apply="onApplyFromDialog"
+      @read="markRead"
     />
   </section>
 </template>
