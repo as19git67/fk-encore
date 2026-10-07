@@ -19,11 +19,24 @@ extension View {
     }
 
     /// Paint a selection by swiping across the grid, as in Photos.
-    /// `onPoint` gets each finger position in `space`.
+    ///
+    /// `startsSelecting` is asked once, with the point a swipe starts at:
+    /// true to select along the way, false to deselect — Photos deselects
+    /// when the swipe starts on a photo that is already selected
+    /// (`DragToSelect.strokeSelects`). `onPoint` then gets every finger
+    /// position in `space`, with that decision, until the finger lifts.
     func dragToSelect(
-        isActive: Bool, in space: String, onPoint: @escaping (CGPoint) -> Void
+        isActive: Bool,
+        in space: String,
+        startsSelecting: @escaping (CGPoint) -> Bool,
+        onPoint: @escaping (CGPoint, Bool) -> Void
     ) -> some View {
-        gesture(DragToSelectRecognizer(isActive: isActive, space: space, onPoint: onPoint))
+        gesture(DragToSelectRecognizer(
+            isActive: isActive,
+            space: space,
+            startsSelecting: startsSelecting,
+            onPoint: onPoint
+        ))
     }
 }
 
@@ -39,8 +52,40 @@ extension View {
 /// - once selecting, the finger may go any way, the grid holds still, and
 ///   the back-swipe of the navigation stack waits for the gesture to fail;
 /// - near the top or bottom edge the grid scrolls by itself, faster the
-///   closer the finger gets, and the selection follows.
+///   closer the finger gets, and the selection follows;
+/// - a swipe that starts on a selected photo deselects everything it
+///   crosses instead, so a slip can be undone the way it was made.
 enum DragToSelect {
+    /// The item whose frame contains `point`, if any.
+    static func item<ID: Hashable>(at point: CGPoint, in frames: [ID: CGRect]) -> ID? {
+        frames.first { $0.value.contains(point) }?.key
+    }
+
+    /// Whether a swipe starting at `point` selects (true) or deselects
+    /// (false): it deselects only when it starts on a photo that is already
+    /// selected. Starting between photos selects.
+    static func strokeSelects<ID: Hashable>(
+        startingAt point: CGPoint, frames: [ID: CGRect], selected: Set<ID>
+    ) -> Bool {
+        guard let start = item(at: point, in: frames) else { return true }
+        return !selected.contains(start)
+    }
+
+    /// Select or deselect every item under `point`. One direction per swipe
+    /// on purpose: a finger wobbling back over a photo it already painted
+    /// cannot flip it back.
+    static func paint<ID: Hashable>(
+        _ selected: inout Set<ID>, at point: CGPoint, frames: [ID: CGRect], selecting: Bool
+    ) {
+        for (id, frame) in frames where frame.contains(point) {
+            if selecting {
+                selected.insert(id)
+            } else {
+                selected.remove(id)
+            }
+        }
+    }
+
     /// How far into the visible area, from either edge, autoscroll begins.
     static let autoscrollEdge: CGFloat = 80
     /// Points per second at the very edge.
@@ -95,7 +140,8 @@ enum DragToSelect {
 struct DragToSelectRecognizer: UIGestureRecognizerRepresentable {
     let isActive: Bool
     let space: String
-    let onPoint: (CGPoint) -> Void
+    let startsSelecting: (CGPoint) -> Bool
+    let onPoint: (CGPoint, Bool) -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
         Coordinator()
@@ -117,7 +163,11 @@ struct DragToSelectRecognizer: UIGestureRecognizerRepresentable {
 
     func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
         switch recognizer.state {
-        case .began, .changed:
+        case .began:
+            let point = context.converter.location(in: .named(space))
+            context.coordinator.selecting = startsSelecting(point)
+            context.coordinator.track(point: point, recognizer: recognizer)
+        case .changed:
             context.coordinator.track(
                 point: context.converter.location(in: .named(space)),
                 recognizer: recognizer
@@ -129,7 +179,9 @@ struct DragToSelectRecognizer: UIGestureRecognizerRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var onPoint: ((CGPoint) -> Void)?
+        var onPoint: ((CGPoint, Bool) -> Void)?
+        /// What this swipe does, decided where it started.
+        var selecting = true
         /// The finger in the grid's coordinate space, moved along with the
         /// content while autoscrolling so the selection keeps up.
         private var lastPoint: CGPoint?
@@ -166,7 +218,7 @@ struct DragToSelectRecognizer: UIGestureRecognizerRepresentable {
 
         func track(point: CGPoint, recognizer: UIPanGestureRecognizer) {
             lastPoint = point
-            onPoint?(point)
+            onPoint?(point, selecting)
             if scrollView == nil {
                 scrollView = enclosingScrollView(for: recognizer)
             }
@@ -214,7 +266,7 @@ struct DragToSelectRecognizer: UIGestureRecognizerRepresentable {
             // `delta` further along the grid.
             let moved = CGPoint(x: point.x, y: point.y + delta)
             lastPoint = moved
-            onPoint?(moved)
+            onPoint?(moved, selecting)
         }
 
         // MARK: Finding the views
@@ -300,10 +352,22 @@ struct PhotoSelection: Equatable, Sendable {
         }
     }
 
-    /// Drag-to-select: add every photo whose frame contains `point`.
-    ///
-    /// Additive on purpose — a drag across the grid extends the selection and
-    /// never clears it, so a wobbling finger cannot undo what it just picked.
+    /// Swipe-to-select: select or deselect every photo whose frame contains
+    /// `point`, in the one direction the swipe chose where it started. A
+    /// deselecting swipe that empties the selection stays in selection mode —
+    /// the finger is still down.
+    mutating func paintItems(at point: CGPoint, frames: [Int: CGRect], selecting: Bool) {
+        DragToSelect.paint(&ids, at: point, frames: frames, selecting: selecting)
+    }
+
+    /// Whether a swipe starting at `point` selects or, starting on a
+    /// selected photo, deselects — see `DragToSelect.strokeSelects`.
+    func strokeSelects(startingAt point: CGPoint, frames: [Int: CGRect]) -> Bool {
+        DragToSelect.strokeSelects(startingAt: point, frames: frames, selected: ids)
+    }
+
+    /// Add every photo whose frame contains `point` — `paintItems` with
+    /// `selecting: true`.
     mutating func selectItems(at point: CGPoint, frames: [Int: CGRect]) {
         for (id, frame) in frames where frame.contains(point) {
             ids.insert(id)

@@ -116,7 +116,9 @@ dokumentiert**:
   nach oben oder unten beginnt, scrollt. Während des Auswählens bleibt das
   Raster stehen, die Zurück-Wischgeste der Navigation wartet, und nahe dem
   oberen oder unteren Rand scrollt das Raster von selbst weiter (schneller, je
-  näher der Finger am Rand ist). Apple dokumentiert für diese
+  näher der Finger am Rand ist). Beginnt der Wisch auf einem schon ausgewählten Foto,
+  wählt er ab statt aus — ebenfalls wie in Fotos; die Richtung gilt für den
+  ganzen Wisch, ein Zurückwackeln kippt nichts. Apple dokumentiert für diese
   Ein-Finger-Geste keine API — UIKits eingebaute Mehrfachauswahl ist ein
   Zwei-Finger-Wisch auf einer `UICollectionView`, die Raster hier sind
   SwiftUI —, deshalb ist sie als `UIPanGestureRecognizer` nachgebaut, der

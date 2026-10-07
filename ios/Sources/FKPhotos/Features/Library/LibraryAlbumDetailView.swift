@@ -308,8 +308,12 @@ struct LibraryAlbumDetailView: View {
                 .padding(.horizontal, 2)
                 .coordinateSpace(name: "libraryGrid")
                 .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
-                .dragToSelect(isActive: isSelecting, in: "libraryGrid") { point in
-                    paintSelection(at: point)
+                .dragToSelect(
+                    isActive: isSelecting,
+                    in: "libraryGrid",
+                    startsSelecting: { swipeSelects(startingAt: $0) }
+                ) { point, selecting in
+                    paintSelection(at: point, selecting: selecting)
                 }
             }
         }
@@ -320,10 +324,24 @@ struct LibraryAlbumDetailView: View {
     /// Swipe across the grid to select a run of photos, matching the album
     /// detail view's gesture. Additive only: dragging never *deselects*, so a
     /// wobbly finger can't silently undo part of the selection.
-    private func paintSelection(at point: CGPoint) {
+    /// Frames here are keyed by grid index, the selection by asset id, so
+    /// the shared rule (`DragToSelect.strokeSelects`) runs on asset ids.
+    private func swipeSelects(startingAt point: CGPoint) -> Bool {
+        guard let index = DragToSelect.item(at: point, in: itemFrames),
+              assets.indices.contains(index)
+        else { return true }
+        return !selectedAssetIds.contains(assets[index].localIdentifier)
+    }
+
+    private func paintSelection(at point: CGPoint, selecting: Bool) {
         for (index, frame) in itemFrames where frame.contains(point) {
             guard assets.indices.contains(index) else { continue }
-            selectedAssetIds.insert(assets[index].localIdentifier)
+            let id = assets[index].localIdentifier
+            if selecting {
+                selectedAssetIds.insert(id)
+            } else {
+                selectedAssetIds.remove(id)
+            }
         }
     }
 

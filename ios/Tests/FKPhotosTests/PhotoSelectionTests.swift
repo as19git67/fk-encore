@@ -220,6 +220,58 @@ final class DragToSelectTests: XCTestCase {
         XCTAssertEqual(DragToSelect.autoscrollSpeed(fingerY: 75, visibleHeight: 150), 0)
     }
 
+    // MARK: Select or deselect, decided where the swipe starts
+
+    private let row: [Int: CGRect] = [
+        1: CGRect(x: 0, y: 0, width: 100, height: 100),
+        2: CGRect(x: 100, y: 0, width: 100, height: 100),
+        3: CGRect(x: 200, y: 0, width: 100, height: 100),
+    ]
+
+    func testASwipeStartingOnAnUnselectedPhotoSelects() {
+        XCTAssertTrue(DragToSelect.strokeSelects(startingAt: CGPoint(x: 50, y: 50), frames: row, selected: [2]))
+    }
+
+    func testASwipeStartingOnASelectedPhotoDeselects() {
+        // Photos' rule: start on a ticked photo and the swipe unticks.
+        XCTAssertFalse(DragToSelect.strokeSelects(startingAt: CGPoint(x: 150, y: 50), frames: row, selected: [2]))
+    }
+
+    func testASwipeStartingBetweenPhotosSelects() {
+        XCTAssertTrue(DragToSelect.strokeSelects(startingAt: CGPoint(x: 500, y: 50), frames: row, selected: [1, 2, 3]))
+    }
+
+    func testADeselectingSwipeOnlyRemoves() {
+        var selected: Set<Int> = [1, 2]
+        for x in [150, 250, 50] {
+            DragToSelect.paint(&selected, at: CGPoint(x: Double(x), y: 50), frames: row, selecting: false)
+        }
+        // 3 was never selected and stays unselected; the swipe never adds.
+        XCTAssertEqual(selected, [])
+    }
+
+    func testASelectingSwipeDoesNotUntickWhatItCrossesAgain() {
+        // A finger wobbling back over a photo it just painted leaves it painted.
+        var selected: Set<Int> = []
+        for x in [50, 150, 50, 150] {
+            DragToSelect.paint(&selected, at: CGPoint(x: Double(x), y: 50), frames: row, selecting: true)
+        }
+        XCTAssertEqual(selected, [1, 2])
+    }
+
+    func testTheSharedSelectionPaintsBothWays() {
+        var selection = PhotoSelection()
+        selection.begin(with: 1)
+        selection.paintItems(at: CGPoint(x: 150, y: 50), frames: row, selecting: true)
+        XCTAssertEqual(selection.ids, [1, 2])
+        XCTAssertFalse(selection.strokeSelects(startingAt: CGPoint(x: 50, y: 50), frames: row))
+        selection.paintItems(at: CGPoint(x: 50, y: 50), frames: row, selecting: false)
+        XCTAssertEqual(selection.ids, [2])
+        // Still in selection mode mid-swipe, even if it empties.
+        selection.paintItems(at: CGPoint(x: 150, y: 50), frames: row, selecting: false)
+        XCTAssertTrue(selection.isSelecting)
+    }
+
     func testAutoscrollStopsAtTheEndsOfTheContent() {
         XCTAssertEqual(
             DragToSelect.clampedOffset(current: 10, delta: -50, minOffset: -20, maxOffset: 500), -20
