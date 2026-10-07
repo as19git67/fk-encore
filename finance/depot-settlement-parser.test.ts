@@ -826,3 +826,35 @@ describe("paperTypeOf", () => {
     expect(paperTypeOf({ kind: null, taxStatement: false, accumulation: false })).toBeNull();
   });
 });
+
+describe("amounts OCR split after the decimal comma", () => {
+  it("reads \"EUR -1.214, 25\" as one amount, not as a thousand and change", () => {
+    const s = inspectSettlement(`Wertpapierkauf
+St. 80 EUR 15,00
+Kurswert : EUR 1.200,00
+Provision : EUR 7,90
+Börsenplatzabhäng. Entgelt : EUR 4,00
+Summe Entgelte : EUR 11,90
+Variable Börsenspesen EUR 2,35
+Valuta Zu Ihren Lasten vor Steuern
+DE00 0000 0000 0000 0000 00 EUR 03.02.2026 EUR 1.214,25
+Datum: 03.02.2026
+Steuerliche Behandlung: Wertpapierkauf vom 03.02.2026
+Stk. 80 BEISPIEL AG, WKN / ISIN: SNN001 / XF00SONNE005
+Zu Ihren Lasten vor Steuern: EUR -1.214, 25
+abgeführte Steuern EUR 0,00
+Zu Ihren Lasten nach Steuern: EUR -1.214, 25`)!;
+    expect(s.kind).toBe("buy");
+    expect(s.net).toBe(-1214.25);
+    expect(s.fees).toBe(14.25);
+  });
+
+  it("joins a small amount only after its currency", () => {
+    const s = inspectSettlement(`Wertpapierkauf
+Stk. 4 BEISPIEL AG XF00SONNE005
+Schlusstag 03.02.2026
+Kurswert EUR 500,00
+Ausmachender Betrag EUR -517, 25`)!;
+    expect(s.net).toBe(-517.25);
+  });
+});
