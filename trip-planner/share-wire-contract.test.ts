@@ -43,7 +43,7 @@ const PLAN_KEYS = ["id", "title", "legTitles"];
 /** What `ShareIdeaCollection` reads — `label` is derived on the client. */
 const COLLECTION_KEYS = ["ownerId", "ownerName", "own"];
 /** What `ShareMapLinkRead` reads. */
-const MAP_LINK_KEYS = ["isMapLink", "lat", "lon", "name", "unresolved"];
+const MAP_LINK_KEYS = ["isMapLink", "lat", "lon", "name", "query", "unresolved"];
 /** What `ShareAnalyzeResponse` reads. */
 const ANALYSE_KEYS = ["kind", "sourceUrl", "proposals", "rejected"];
 /** What `ShareProposal` reads. */
