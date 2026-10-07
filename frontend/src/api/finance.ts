@@ -2579,3 +2579,61 @@ export async function acceptForecastBookingPremium(itemId: number): Promise<void
 export async function setForecastItemContractNo(itemId: number, contractNo: string): Promise<ForecastScanSummary> {
   return apiFetch(`/finance/forecast/items/${itemId}/contract-no`, { method: 'POST', body: JSON.stringify({ contractNo }) })
 }
+
+// ── Quotes of the held securities ──────────────────────────────────────
+
+export type QuoteRange = '1d' | '1w' | '1m' | '1y' | 'max'
+
+export interface QuotePoint {
+  at: string
+  price: string
+}
+
+export interface QuoteTile {
+  key: string
+  isin: string | null
+  wkn: string | null
+  name: string | null
+  /** Shares across the depots in scope (scale 8). */
+  amount: string
+  currency: string | null
+  /** The newest price known, whatever the range. */
+  last: QuotePoint | null
+  /** Value of the shares at the last price (scale 2). */
+  value: string | null
+  /** Change over the range: last against the first point in it. */
+  change: { absolute: string; percent: string } | null
+  points: QuotePoint[]
+  /** Why there is nothing: no symbol found, or no prices yet. */
+  status: 'ok' | 'unresolved' | 'pending'
+}
+
+export interface QuotesResponse {
+  range: QuoteRange
+  tiles: QuoteTile[]
+  /** When the newest price in the answer was fetched. */
+  as_of: string | null
+}
+
+export interface QuoteRefreshStats {
+  positions: number
+  resolved: number
+  unresolved: number
+  fetched: number
+  points: number
+  rate_limited: boolean
+  errors: string[]
+}
+
+export async function getQuotes(opts: { range: QuoteRange; accounts?: number[] }): Promise<QuotesResponse> {
+  const params = new URLSearchParams({ range: opts.range })
+  if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
+  return apiFetch(`/finance/quotes?${params.toString()}`)
+}
+
+export async function refreshQuotes(opts: { accounts?: number[] } = {}): Promise<QuoteRefreshStats> {
+  return apiFetch('/finance/quotes/refresh', {
+    method: 'POST',
+    body: JSON.stringify(opts.accounts && opts.accounts.length > 0 ? { accounts: opts.accounts.join(',') } : {}),
+  })
+}

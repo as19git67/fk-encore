@@ -361,6 +361,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
+        path: 'kurse',
+        name: 'finance-quotes',
+        component: () => import('../views/finance/QuotesView.vue'),
+        meta: { permission: 'finance.view' },
+      },
+      {
         path: 'portfolio/:key',
         name: 'finance-portfolio-position',
         component: () => import('../views/finance/PortfolioPositionView.vue'),
@@ -413,6 +419,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Übersicht', icon: 'pi pi-th-large', routeName: 'finance-overview', permission: 'finance.view' },
       { label: 'Konten', icon: 'pi pi-wallet', routeName: 'finance-accounts', permission: 'finance.view' },
       { label: 'Portfolio', icon: 'pi pi-briefcase', routeName: 'finance-portfolio', permission: 'finance.view' },
+      { label: 'Kurse', icon: 'pi pi-chart-line', routeName: 'finance-quotes', permission: 'finance.view' },
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
       { label: 'Prognose', icon: 'pi pi-chart-line', routeName: 'finance-forecast', permission: 'finance.view' },

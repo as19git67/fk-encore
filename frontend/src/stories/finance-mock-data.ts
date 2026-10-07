@@ -1,4 +1,4 @@
-import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, SettlementInspection, Tag, Transaction } from '../api/finance'
+import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, QuotesResponse, SettlementInspection, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -647,3 +647,90 @@ export const MOCK_SETTLEMENT_INSPECTION_REJECTED: SettlementInspection = {
   labels: {},
   depot: null,
 }
+
+// ── Quotes (invented securities and prices) ────────────────────────────
+
+function quoteSeries(start: number, end: number, points: number, from: string, stepMs: number) {
+  const out = []
+  const t0 = new Date(from).getTime()
+  for (let i = 0; i < points; i++) {
+    const t = i / (points - 1)
+    const wobble = Math.sin(i * 1.7) * (end - start) * 0.15
+    out.push({ at: new Date(t0 + i * stepMs).toISOString(), price: (start + (end - start) * t + wobble).toFixed(6) })
+  }
+  return out
+}
+
+export const MOCK_QUOTES: QuotesResponse = {
+  range: '1m',
+  as_of: '2026-09-01T14:35:00.000Z',
+  tiles: [
+    {
+      key: PF_ISIN_A,
+      isin: PF_ISIN_A,
+      wkn: 'ALP001',
+      name: 'Alpha AG',
+      amount: '8.00000000',
+      currency: 'EUR',
+      last: { at: '2026-09-01T14:35:00.000Z', price: '124.300000' },
+      value: '994.40',
+      change: { absolute: '6.10', percent: '5.16' },
+      points: quoteSeries(118.2, 124.3, 22, '2026-08-01T07:00:00Z', 24 * 60 * 60_000),
+      status: 'ok',
+    },
+    {
+      key: PF_ISIN_B,
+      isin: PF_ISIN_B,
+      wkn: null,
+      name: 'Beta ETF',
+      amount: '25.00000000',
+      currency: 'EUR',
+      last: { at: '2026-09-01T14:30:00.000Z', price: '41.120000' },
+      value: '1028.00',
+      change: { absolute: '-1.38', percent: '-3.25' },
+      points: quoteSeries(42.5, 41.12, 22, '2026-08-01T07:00:00Z', 24 * 60 * 60_000),
+      status: 'ok',
+    },
+    {
+      key: 'XF00GAMMA007',
+      isin: 'XF00GAMMA007',
+      wkn: 'GAM007',
+      name: 'Gamma Fonds Anteile',
+      amount: '12.50000000',
+      currency: 'EUR',
+      last: { at: '2026-08-31T16:00:00.000Z', price: '88.000000' },
+      value: '1100.00',
+      change: null,
+      points: [{ at: '2026-08-31T16:00:00.000Z', price: '88.000000' }],
+      status: 'ok',
+    },
+    {
+      key: 'XF00DELTA004',
+      isin: 'XF00DELTA004',
+      wkn: null,
+      name: 'Delta Holding SE',
+      amount: '3.00000000',
+      currency: null,
+      last: null,
+      value: null,
+      change: null,
+      points: [],
+      status: 'unresolved',
+    },
+    {
+      key: 'XF00EPSIL001',
+      isin: 'XF00EPSIL001',
+      wkn: null,
+      name: 'Epsilon Inc.',
+      amount: '40.00000000',
+      currency: null,
+      last: null,
+      value: null,
+      change: null,
+      points: [],
+      status: 'pending',
+    },
+  ],
+}
+
+export const MOCK_QUOTES_EMPTY: QuotesResponse = { range: '1m', as_of: null, tiles: [] }
