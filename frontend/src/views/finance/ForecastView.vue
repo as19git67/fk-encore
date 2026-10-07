@@ -1584,7 +1584,8 @@ const ready = computed(() => !loading.value)
   border-top: 1px solid var(--p-content-border-color);
 }
 .target-age .matrix-controls :deep(.target-age__input .p-inputnumber-input) {
-  width: 4.5rem;
+  /* The stacked arrows sit inside the field: leave room for "Alter" or two digits beside them. */
+  width: 7.5rem;
 }
 .survivor-check {
   margin-top: var(--space-3);
