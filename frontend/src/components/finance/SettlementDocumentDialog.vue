@@ -218,6 +218,7 @@ const MATCHED_BY_TEXT: Record<string, string> = {
   holding: 'über den Bestand (das Depot hält das Wertpapier)',
   depot_number: 'über die Depotnummer auf dem Beleg',
   transactions: 'über bestehende Transaktionen desselben Wertpapiers',
+  booking: 'über die Girobuchung, der der Beleg zugeordnet ist',
 }
 
 const depotLine = computed(() => {

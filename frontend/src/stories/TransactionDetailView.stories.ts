@@ -58,7 +58,8 @@ export const MitBeleg: Story = {
         http.get('/api/finance/transactions/:id/documents', () =>
           HttpResponse.json({
             items: [
-              { document_id: 7, title: 'Rechnung Juni', original_filename: 'rechnung-juni.pdf' },
+              { document_id: 7, title: 'Rechnung Juni', original_filename: 'rechnung-juni.pdf', via: 'manual' },
+              { document_id: 8, title: 'Wertpapierabrechnung Kauf', original_filename: 'abrechnung.pdf', via: 'depot' },
             ],
           }),
         ),

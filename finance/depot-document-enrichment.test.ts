@@ -31,6 +31,7 @@ import {
   financeTagTransaction,
   financeTanSession,
   financeTransaction,
+  financeTransactionDocument,
   users,
 } from "../db/schema";
 import { enrichDocument, enrichPendingDocuments } from "./depot-document-enrichment";
@@ -1252,5 +1253,77 @@ describe("finance/portfolio — read the documents in afresh", () => {
     expect(await db.select().from(financeDepotTransactionDocument)).toHaveLength(0);
     expect(await db.select().from(financeDocumentSettlementLlm)).toHaveLength(0);
     expect(await db.select().from(financeDepotDocumentIgnore)).toHaveLength(1);
+  });
+});
+
+describe("finance/depot-document-enrichment — a paper linked to the booking", () => {
+  async function derivedRow(bc: number, giro: number, depot: number, date: string, amount: string) {
+    const bookingId = await insertGiroBooking(giro, date, amount);
+    await deriveDepotTransactionsForBankcontact(bc);
+    const row = (await depotRows(depot)).find((r) => r.linked_transaction_id === bookingId)!;
+    return { bookingId, row };
+  }
+
+  it("takes the booking's row although the dates lie far apart", async () => {
+    const { bc, giro, depot } = await setup();
+    // Booked three weeks after the trade: outside the window of the search.
+    const { bookingId, row } = await derivedRow(bc, giro, depot, "2026-04-04", "-2966.40");
+
+    const docId = await insertDocument(BUY_TEXT);
+    // Without the link the search finds no row and would create a second one.
+    expect((await enrichDocument(docId, null, { dryRun: true })).outcome).toBe("created");
+
+    await db.insert(financeTransactionDocument).values({ transaction_id: bookingId, document_id: docId });
+    const r = await enrichDocument(docId);
+    expect(r).toMatchObject({ outcome: "enriched", matched_by: "booking", depot_transaction_id: row.id });
+    const [after] = await depotRows(depot);
+    expect(Number(after!.amount)).toBe(25);
+    expect(after!.fees).toBe("6.40");
+    expect(after!.executed_at.slice(0, 10)).toBe("2026-04-04");
+  });
+
+  it("links a paper it cannot read, and takes nothing from it", async () => {
+    const { bc, giro, depot } = await setup();
+    const { bookingId, row } = await derivedRow(bc, giro, depot, "2026-03-16", "-2966.40");
+    const docId = await insertDocument("Beispielbank AG\nIhre Unterlagen zur Order\nSeite 1 von 1");
+    await db.insert(financeTransactionDocument).values({ transaction_id: bookingId, document_id: docId });
+
+    const r = await enrichDocument(docId);
+    expect(r).toMatchObject({ outcome: "linked", matched_by: "booking", depot_transaction_id: row.id });
+    const [after] = await depotRows(depot);
+    expect(after!.amount).toBeNull();
+    expect((await enrichDocument(docId)).outcome).toBe("already_linked");
+  });
+
+  it("reports a paper about another trade instead of booking it", async () => {
+    const { bc, giro, depot } = await setup();
+    const { bookingId, row } = await derivedRow(bc, giro, depot, "2026-03-16", "-2966.40");
+    const docId = await insertDocument(DIVIDEND_TEXT);
+    await db.insert(financeTransactionDocument).values({ transaction_id: bookingId, document_id: docId });
+
+    const r = await enrichDocument(docId);
+    expect(r).toMatchObject({ outcome: "conflict", depot_transaction_id: row.id });
+    const links = await db.select().from(financeDepotTransactionDocument);
+    expect(links).toHaveLength(0);
+  });
+
+  it("reads the papers of a booking when its row is derived, and the pending run finds them", async () => {
+    const { bc, giro, depot } = await setup();
+    const bookingId = await insertGiroBooking(giro, "2026-03-16", "-2966.40");
+    const docId = await insertDocument(BUY_TEXT);
+    await db.insert(financeTransactionDocument).values({ transaction_id: bookingId, document_id: docId });
+
+    await deriveDepotTransactionsForBankcontact(bc);
+    const [row] = await depotRows(depot);
+    expect(Number(row!.amount)).toBe(25);
+    const links = await db.select().from(financeDepotTransactionDocument);
+    expect(links.map((l) => l.document_id)).toEqual([docId]);
+
+    // A paper without settlement wording is examined because of its link.
+    await db.delete(financeDepotTransactionDocument);
+    const plain = await insertDocument("Beispielbank AG\nIhre Unterlagen zur Order");
+    await db.insert(financeTransactionDocument).values({ transaction_id: bookingId, document_id: plain });
+    const stats = await enrichPendingDocuments(null);
+    expect(stats.results.map((r) => r.document_id).sort()).toEqual([docId, plain].sort());
   });
 });

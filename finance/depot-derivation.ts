@@ -435,6 +435,8 @@ export async function deriveDepotTransactionsForBankcontact(
     .where(eq(financeAccount.bankcontact_id, bankcontactId));
   if (accounts.length === 0) return stats;
   const accountIds = accounts.map((a) => a.id);
+  /** Bookings a new row was derived from: their papers are read below. */
+  const derivedBookings: number[] = [];
 
   const txs = await db
     .select({
@@ -624,6 +626,7 @@ export async function deriveDepotTransactionsForBankcontact(
 
       if (inserted.length > 0) {
         stats.derived++;
+        derivedBookings.push(tx.id);
       } else {
         stats.duplicates++;
       }
@@ -632,6 +635,18 @@ export async function deriveDepotTransactionsForBankcontact(
         `tx ${tx.id} (${rowIsin ?? rowWkn}): derivation insert failed: ` +
           ((err as Error).message ?? String(err)),
       );
+    }
+  }
+
+  // Papers already linked to these bookings (by hand, or an accepted
+  // suggestion) settle the new rows. Imported here, not at the top: the
+  // enrichment's reader imports this module.
+  if (derivedBookings.length > 0) {
+    try {
+      const { enrichDocumentsOfBookings } = await import("./depot-document-enrichment");
+      await enrichDocumentsOfBookings(derivedBookings, { llm: "cache-only" });
+    } catch (err) {
+      stats.errors.push(`reading the papers of derived bookings failed: ${(err as Error).message ?? String(err)}`);
     }
   }
 

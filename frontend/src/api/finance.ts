@@ -707,7 +707,7 @@ export interface DepotEnrichResult {
   wkn: string | null
   depot_number: string | null
   /** How the depot was found; null when none was. */
-  matched_by: 'holding' | 'depot_number' | 'transactions' | null
+  matched_by: 'holding' | 'depot_number' | 'transactions' | 'booking' | null
   /** Where the execution date came from. */
   date_source: 'statement' | 'document_date' | null
   /** What happened with the language model for this read. */
@@ -1874,7 +1874,12 @@ export interface DocumentMatchSuggestion {
 }
 export async function suggestDocumentsForTransactions(transaction_ids: number[]) { const response = await apiFetch<{ items: DocumentMatchSuggestion[] }>('/finance/document-matches/suggest', { method: 'POST', body: JSON.stringify({ transaction_ids }) }); return response.items }
 export async function decideDocumentMatch(id: number, outcome: 'accepted' | 'rejected' | 'ignored') { return apiFetch<{ ok: boolean }>(`/finance/document-matches/${id}/decision`, { method: 'POST', body: JSON.stringify({ outcome }) }) }
-export async function getTransactionDocumentLinks(transactionId: number) { const response = await apiFetch<{ items: Array<{ document_id: number; title: string | null; original_filename: string }> }>(`/finance/transactions/${transactionId}/documents`); return response.items }
+/**
+ * A paper on a booking. `via: 'depot'` — linked by the portfolio to the
+ * depot transaction derived from this booking, not to the booking itself.
+ */
+export interface TransactionDocumentLink { document_id: number; title: string | null; original_filename: string; via: 'manual' | 'depot' }
+export async function getTransactionDocumentLinks(transactionId: number) { const response = await apiFetch<{ items: TransactionDocumentLink[] }>(`/finance/transactions/${transactionId}/documents`); return response.items }
 export async function getDocumentTransactionLinks(documentId: number) { const response = await apiFetch<{ items: Array<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }> }>(`/finance/documents/${documentId}/transactions`); return response.items }
 export async function getDocumentMatchMetrics() { return apiFetch<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> }>('/finance/document-matches/metrics') }
 
