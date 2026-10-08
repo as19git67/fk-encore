@@ -59,6 +59,8 @@ export async function activePositions(accountIds: number[]): Promise<ActivePosit
 
 /** A failed resolution is tried again after this long (at once when asked by hand). */
 const RESOLVE_RETRY_MS = 24 * 60 * 60_000;
+/** A symbol resolved without its security type is asked again after this long. */
+const TYPE_RETRY_MS = 24 * 60 * 60_000;
 /** The day's minutes are kept this long; the closes stay. */
 const INTRADAY_KEEP_DAYS = 35;
 /** The closes are refreshed when the newest is older than this. */
@@ -108,6 +110,13 @@ export async function refreshQuotes(
         (opts.retryUnresolved || (row.failed_at && now.getTime() - Date.parse(row.failed_at) >= RESOLVE_RETRY_MS))
       ) {
         row = await resolvePosition(p, now);
+      } else if (
+        row.symbol &&
+        row.security_type === null &&
+        (!row.resolved_at || now.getTime() - Date.parse(row.resolved_at) >= TYPE_RETRY_MS)
+      ) {
+        // Resolved before the type was kept: the news need it.
+        row = await resolvePosition(p, now, row);
       }
       if (!row.symbol) {
         stats.unresolved++;
@@ -122,7 +131,7 @@ export async function refreshQuotes(
       ranges.push("intraday");
 
       for (const range of ranges) {
-        const series = await provider.history(row.symbol, range);
+        const series = await provider.history(row.symbol, range, { isin: p.isin, wkn: p.wkn });
         stats.fetched++;
         stats.points += await storeSeries(p.key, series.points, series.currency ?? row.currency, range === "intraday" ? "intraday" : "daily", provider.name);
         if (range === "backfill") {
@@ -155,9 +164,11 @@ export async function refreshQuotes(
   return stats;
 }
 
-async function resolvePosition(p: ActivePosition, now: Date) {
+async function resolvePosition(p: ActivePosition, now: Date, previous?: typeof financeQuoteSymbol.$inferSelect) {
   const provider = quoteProvider();
   const found = await provider.resolve({ isin: p.isin, wkn: p.wkn, name: p.name });
+  // The same symbol from the same provider keeps its loaded history.
+  const sameSymbol = previous && previous.provider === provider.name && found?.symbol === previous.symbol;
   const values = {
     position_key: p.key,
     isin: p.isin,
@@ -170,8 +181,9 @@ async function resolvePosition(p: ActivePosition, now: Date) {
     resolved_at: found ? now.toISOString() : null,
     failed_at: found ? null : now.toISOString(),
     failure: found ? null : "no symbol found",
-    // Another provider's history does not count as this one's.
-    backfilled_at: null,
+    // Another provider's (or symbol's) history does not count as this one's.
+    backfilled_at: sameSymbol ? previous.backfilled_at : null,
+    security_type: found?.securityType ?? null,
   };
   const [row] = await db
     .insert(financeQuoteSymbol)
@@ -309,18 +321,39 @@ export async function buildQuoteTiles(accountIds: number[], range: QuoteRange, n
     (await db.select().from(financeQuoteSymbol).where(inArray(financeQuoteSymbol.position_key, keys))).map((r) => [r.position_key, r]),
   );
   const { from, kind } = rangeWindow(range, now);
-  const conditions = [inArray(financeQuote.position_key, keys), eq(financeQuote.kind, kind)];
+  const columns = { key: financeQuote.position_key, at: financeQuote.at, price: financeQuote.price, currency: financeQuote.currency, kind: financeQuote.kind };
+  const conditions = [inArray(financeQuote.position_key, keys)];
+  // A day or a week reads the closes too: the minutes are kept only from
+  // the day the quotes started, and on a closed market there are none.
+  if (kind === "daily") conditions.push(eq(financeQuote.kind, "daily"));
   if (from) conditions.push(gte(financeQuote.at, from));
-  const rows = await db
-    .select({ key: financeQuote.position_key, at: financeQuote.at, price: financeQuote.price, currency: financeQuote.currency })
-    .from(financeQuote)
-    .where(and(...conditions))
-    .orderBy(asc(financeQuote.at));
+  const rows = await db.select(columns).from(financeQuote).where(and(...conditions)).orderBy(asc(financeQuote.at));
   const byKey = new Map<string, typeof rows>();
   for (const r of rows) {
     const list = byKey.get(r.key) ?? [];
     list.push(r);
     byKey.set(r.key, list);
+  }
+  if (kind === "intraday") {
+    // The closes fill the window up to the first minute; without a close in
+    // the window the one before it is the start, so the change is measured
+    // against the last close.
+    const before = from
+      ? await db
+          .selectDistinctOn([financeQuote.position_key], columns)
+          .from(financeQuote)
+          .where(and(inArray(financeQuote.position_key, keys), eq(financeQuote.kind, "daily"), lt(financeQuote.at, from)))
+          .orderBy(financeQuote.position_key, sql`${financeQuote.at} DESC`)
+      : [];
+    const beforeByKey = new Map(before.map((r) => [r.key, r]));
+    for (const key of keys) {
+      const list = byKey.get(key) ?? [];
+      const firstMinute = list.find((r) => r.kind === "intraday");
+      const closes = list.filter((r) => r.kind === "daily" && (!firstMinute || Date.parse(r.at) < Date.parse(firstMinute.at)));
+      const start = closes.length === 0 ? beforeByKey.get(key) : undefined;
+      const merged = [...(start ? [start] : []), ...closes, ...list.filter((r) => r.kind === "intraday")];
+      if (merged.length > 0) byKey.set(key, merged);
+    }
   }
   // The newest price of each security, from either kind — a day's range
   // on a closed market would otherwise show nothing.

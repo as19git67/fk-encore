@@ -20,6 +20,7 @@ import {
   type HistoryRange,
   type QuoteProvider,
   type QuoteSeries,
+  type SecurityType,
 } from "./quote-provider";
 
 // Invented securities throughout.
@@ -76,6 +77,7 @@ function memoryProvider(opts: {
   symbols?: Record<string, string>;
   series?: (symbol: string, range: HistoryRange) => QuoteSeries;
   failWith?: Error;
+  securityType?: SecurityType | null;
 } = {}): QuoteProvider & { calls: { resolve: string[]; history: [string, HistoryRange][] } } {
   const calls = { resolve: [] as string[], history: [] as [string, HistoryRange][] };
   return {
@@ -84,7 +86,7 @@ function memoryProvider(opts: {
     async resolve(id) {
       calls.resolve.push(id.isin ?? id.wkn ?? "");
       const symbol = opts.symbols?.[id.isin ?? id.wkn ?? ""];
-      return symbol ? { symbol, name: `Name of ${symbol}`, exchange: "GER", currency: "EUR" } : null;
+      return symbol ? { symbol, name: `Name of ${symbol}`, exchange: "GER", currency: "EUR", securityType: opts.securityType === undefined ? "equity" : opts.securityType } : null;
     },
     async history(symbol, range) {
       calls.history.push([symbol, range]);
@@ -235,6 +237,27 @@ describe("refreshQuotes", () => {
     expect(sym).toMatchObject({ provider: "memory", symbol: "SNN.DE" });
   });
 
+  it("asks again for the type of a symbol resolved without one, keeping its history", async () => {
+    const d = await insertDepot();
+    await insertHolding(d, "2026-02-03", ISIN_A, "5");
+    await db.insert(financeQuoteSymbol).values({
+      position_key: ISIN_A,
+      provider: "memory",
+      symbol: "SNN.DE",
+      resolved_at: new Date(NOW.getTime() - 2 * 24 * 60 * 60_000).toISOString(),
+      backfilled_at: NOW.toISOString(),
+    });
+    const provider = memoryProvider({ symbols: { [ISIN_A]: "SNN.DE" } });
+    setQuoteProvider(provider);
+    await refreshQuotes(await activePositions([d]), NOW);
+    expect(provider.calls.resolve).toEqual([ISIN_A]);
+    // No second backfill: the symbol did not change.
+    expect(provider.calls.history.map(([, r]) => r)).not.toContain("backfill");
+    const [sym] = await db.select().from(financeQuoteSymbol);
+    expect(sym).toMatchObject({ security_type: "equity" });
+    expect(sym!.backfilled_at).not.toBeNull();
+  });
+
   it("prunes the day's minutes after a month, never the closes", async () => {
     const d = await insertDepot();
     await insertHolding(d, "2026-02-03", ISIN_A, "5");
@@ -287,9 +310,10 @@ describe("buildQuoteTiles and getQuotes", () => {
       status: "ok",
       last: { at: minute(0), price: "10.800000" },
       value: "108.00",
-      change: { absolute: "0.30", percent: "2.86" },
+      // Against the close before the day's minutes.
+      change: { absolute: "0.40", percent: "3.85" },
     });
-    expect(a.points.map((p) => p.price)).toEqual(["10.500000", "10.600000", "10.800000"]);
+    expect(a.points.map((p) => p.price)).toEqual(["10.400000", "10.500000", "10.600000", "10.800000"]);
 
     const b = tiles[1]!;
     expect(b).toMatchObject({ status: "unresolved", last: null, value: null, change: null, points: [] });
@@ -300,6 +324,32 @@ describe("buildQuoteTiles and getQuotes", () => {
     expect(year[0]!.points.map((p) => p.price)).toEqual(["9.000000", "10.200000", "10.400000", "10.800000"]);
     expect(year[0]!.change).toEqual({ absolute: "1.80", percent: "20.00" });
     expect(year[0]!.last!.price).toBe("10.800000");
+  });
+
+  it("draws a day or a week from the closes while there are no minutes", async () => {
+    const d = await insertDepot();
+    await insertHolding(d, "2026-02-03", ISIN_A, "1");
+    await db.insert(financeQuoteSymbol).values({ position_key: ISIN_A, provider: "memory", symbol: "SNN.DE", backfilled_at: NOW.toISOString() });
+    await db.insert(financeQuote).values([
+      { position_key: ISIN_A, at: day(10), price: "9", kind: "daily", source: "memory" },
+      { position_key: ISIN_A, at: day(4), price: "9.5", kind: "daily", source: "memory" },
+      { position_key: ISIN_A, at: day(2), price: "10", kind: "daily", source: "memory" },
+      { position_key: ISIN_A, at: minute(30), price: "10.2", kind: "intraday", source: "memory" },
+    ]);
+
+    const week = await buildQuoteTiles([d], "1w", NOW);
+    expect(week[0]!.points.map((p) => p.price)).toEqual(["9.500000", "10.000000", "10.200000"]);
+    expect(week[0]!.change).toEqual({ absolute: "0.70", percent: "7.37" });
+
+    // No close within the day: the one before it is where the line starts.
+    const today = await buildQuoteTiles([d], "1d", NOW);
+    expect(today[0]!.points.map((p) => p.price)).toEqual(["10.000000", "10.200000"]);
+    expect(today[0]!.change).toEqual({ absolute: "0.20", percent: "2.00" });
+
+    // A closed market without any minutes still shows the closes.
+    await db.delete(financeQuote).where(eq(financeQuote.kind, "intraday"));
+    const closed = await buildQuoteTiles([d], "1w", NOW);
+    expect(closed[0]!.points.map((p) => p.price)).toEqual(["9.500000", "10.000000"]);
   });
 
   it("serves the caller's depots and refuses an unknown range", async () => {

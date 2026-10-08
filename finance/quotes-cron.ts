@@ -6,16 +6,20 @@
  * changes once a day, and the provider is not to be asked for nothing.
  * After a rate limit the next tick waits a quarter of an hour. Each run
  * logs what it did, so a quiet log means no run, not a silent failure.
+ *
+ * The news run hourly; `refreshNews` keeps to the news provider's daily
+ * budget itself, so an hourly run only spreads the calls over the day.
  */
 
 import log from "encore.dev/log";
 
-import { schedule } from "../lib/local-cron";
+import { everyMs, schedule } from "../lib/local-cron";
 
 import db from "../db/database";
 import { financeAccount, financeAccountType } from "../db/schema";
 import { eq, isNull, and } from "drizzle-orm";
 import { activePositions, refreshQuotes } from "./quotes";
+import { refreshNews } from "./news";
 
 console.log("[boot] finance/quotes-cron.ts: all imports resolved");
 
@@ -80,4 +84,15 @@ schedule({
   scheduleLabel: `every ${TICK_MINUTES}m while markets trade, hourly otherwise`,
   nextFire: (after) => nextQuoteTick(after, backoffUntil),
   run: () => refreshQuotesTick(),
+});
+
+schedule({
+  name: "finance-news-refresh",
+  description: "Fetch news about the held equities within the news provider's daily budget",
+  service: "finance",
+  scheduleLabel: "every 1h",
+  nextFire: everyMs(60 * 60_000),
+  run: async () => {
+    await refreshNews(await activePositions(await openDepotIds()));
+  },
 });

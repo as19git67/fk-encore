@@ -22,10 +22,8 @@ import {
   type QuoteProvider,
   type QuoteSeries,
   type QuoteSymbol,
+  type SecurityType,
 } from "./quote-provider";
-
-/** What kind of security an instrument is; decides which venue's price counts. */
-export type OnvistaKind = "equity" | "etf" | "fund" | "other";
 
 const BASE_URL = "https://api.onvista.de/api/v1";
 const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -70,7 +68,7 @@ export function pickInstrument(body: SearchBody, id: { isin: string | null; wkn:
 }
 
 /** Onvista's types as a security type; an ETF is a fund whose type or attributes say so. */
-export function onvistaSecurityType(i: OnvistaInstrument): OnvistaKind {
+export function onvistaSecurityType(i: OnvistaInstrument): SecurityType {
   if (i.entityType === "STOCK") return "equity";
   if (i.entityType === "FUND") {
     const marks = [i.instrumentType ?? "", ...(i.entityAttributes ?? [])].join(" ").toUpperCase();
@@ -158,14 +156,100 @@ function isoDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+class OnvistaHttpError extends Error {
+  constructor(readonly status: number, path: string) {
+    super(`onvista ${status} for ${path}`);
+  }
+}
+
 async function getJson(path: string): Promise<unknown> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (res.status === 429) throw new QuoteRateLimitedError("onvista 429");
-  if (!res.ok) throw new Error(`onvista ${res.status} for ${path}`);
+  if (!res.ok) throw new OnvistaHttpError(res.status, path);
   return res.json();
+}
+
+/**
+ * The day's prices. chart_history is undocumented; what is known for sure
+ * is `range` and `resolution` (`range=MAX&resolution=1D`). Which
+ * resolutions it takes below a day is not, so the variants are tried in
+ * order and the first that answers with prices is kept for later calls.
+ * An empty answer (a closed market) proves nothing and is not kept.
+ */
+const INTRADAY_VARIANTS = [
+  "range=D1&resolution=5m&withCurrentDay=true",
+  "range=D1&resolution=1m&withCurrentDay=true",
+  "range=D1&withCurrentDay=true",
+];
+let intradayVariant: number | null = null;
+/**
+ * Until when chart_history is not asked: it answered 403 to every
+ * variant. Onvista keeps some venues' minutes to itself; the snapshot's
+ * current price, stored every tick, then makes the day's line instead.
+ */
+let chartRefusedUntil = 0;
+const CHART_REFUSED_MS = 6 * 60 * 60_000;
+
+/** For tests: forget which variant worked and whether the chart refused. */
+export function resetOnvistaIntradayVariant(): void {
+  intradayVariant = null;
+  chartRefusedUntil = 0;
+}
+
+/**
+ * The price the snapshot shows for this notation (else the preferred one)
+ * as a one-point series. Needs the ISIN: the snapshot is asked by it.
+ */
+async function snapshotPoint(entityType: string, idNotation: string, isin: string, symbol: string, currency: string | null): Promise<QuoteSeries> {
+  const path = SNAPSHOT_PATH[entityType];
+  if (!path) throw new Error(`onvista: no snapshot for ${entityType}`);
+  const body = (await getJson(`/${path}/ISIN:${encodeURIComponent(isin)}/snapshot`)) as SnapshotBody;
+  const all = [...(body.quoteList?.list ?? []), ...(body.quote ? [body.quote] : [])];
+  const q =
+    all.find((x) => String(x.market?.idNotation) === idNotation && typeof x.last === "number") ??
+    pickNotation(body, entityType === "FUND");
+  if (!q || typeof q.last !== "number" || !Number.isFinite(q.last)) return { symbol, currency, points: [] };
+  const at = toIso(q.datetimeLast) ?? new Date().toISOString();
+  return { symbol, currency: q.isoCurrency ?? currency, points: [{ at, price: q.last }] };
+}
+
+async function intraday(
+  base: string,
+  s: { type: string; idNotation: string },
+  symbol: string,
+  currency: string | null,
+  isin: string | null,
+): Promise<QuoteSeries> {
+  if (isin && Date.now() < chartRefusedUntil) return snapshotPoint(s.type, s.idNotation, isin, symbol, currency);
+  const idNotation = s.idNotation;
+  const order = intradayVariant === null
+    ? INTRADAY_VARIANTS.map((_, i) => i)
+    : [intradayVariant, ...INTRADAY_VARIANTS.map((_, i) => i).filter((i) => i !== intradayVariant)];
+  let empty: QuoteSeries | null = null;
+  let firstError: unknown = null;
+  for (const i of order) {
+    try {
+      const body = (await getJson(`${base}/chart_history?idNotation=${idNotation}&${INTRADAY_VARIANTS[i]}`)) as HistoryBody;
+      const series = parseHistory(body, symbol, currency);
+      if (series.points.length > 0) {
+        intradayVariant = i;
+        return series;
+      }
+      empty ??= series;
+    } catch (err) {
+      if (err instanceof QuoteRateLimitedError) throw err;
+      firstError ??= err;
+    }
+  }
+  if (empty) return empty;
+  if (isin && firstError instanceof OnvistaHttpError && firstError.status === 403) {
+    chartRefusedUntil = Date.now() + CHART_REFUSED_MS;
+    return snapshotPoint(s.type, s.idNotation, isin, symbol, currency);
+  }
+  throw firstError instanceof Error ? firstError : new Error(`onvista: no intraday prices for ${symbol}`);
 }
 
 /** The currency per symbol, from the snapshot; history answers may lack it. */
@@ -193,20 +277,18 @@ export const onvistaQuoteProvider: QuoteProvider = {
       name: instrument.name ?? null,
       exchange: notation.market.name ?? notation.market.codeExchange ?? null,
       currency,
+      securityType: type,
     };
   },
 
-  async history(symbol: string, range: HistoryRange): Promise<QuoteSeries> {
+  async history(symbol: string, range: HistoryRange, id?: { isin: string | null; wkn: string | null }): Promise<QuoteSeries> {
     const s = decodeSymbol(symbol);
     if (!s) throw new Error(`onvista: not a symbol of this provider: ${symbol}`);
     const base = `/instruments/${encodeURIComponent(s.type)}/${encodeURIComponent(s.entityValue)}`;
     const now = new Date();
     const day = 24 * 60 * 60_000;
     const currency = currencies.get(symbol) ?? null;
-    if (range === "intraday") {
-      const qs = `idNotation=${s.idNotation}&resolution=5m&startDate=${isoDay(new Date(now.getTime() - day))}&endDate=${isoDay(new Date(now.getTime() + day))}`;
-      return parseHistory((await getJson(`${base}/chart_history?${qs}`)) as HistoryBody, symbol, currency);
-    }
+    if (range === "intraday") return intraday(base, s, symbol, currency, id?.isin ?? null);
     const [r, days] = range === "backfill" ? ["Y5", 5 * 366] : ["M1", 31];
     const qs = `idNotation=${s.idNotation}&range=${r}&startDate=${isoDay(new Date(now.getTime() - days * day))}`;
     return parseHistory((await getJson(`${base}/eod_history?${qs}`)) as HistoryBody, symbol, currency);

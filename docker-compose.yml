@@ -284,6 +284,11 @@ services:
       FINANCE_IMPORT_DIR: /mnt/data/finance-import
       FINANCE_EXPORT_DIR: /mnt/data/finance-export
       FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
+      # Quotes and news of the held securities (.claude/plans/kurse.md).
+      # Quotes come from Onvista; without a token there are no news.
+      EODHD_API_TOKEN: ${EODHD_API_TOKEN:-}
+      FINANCE_EODHD_DAILY_CALLS: ${FINANCE_EODHD_DAILY_CALLS:-20}
+      FINANCE_QUOTE_PROVIDER: ${FINANCE_QUOTE_PROVIDER:-onvista}
     # The app uses compose's `default` network to reach the geo service.
     # The legacy Docker socket mount + OSM bridge network attachment is
     # gone: geo replaces the runtime-spawned per-region Nominatim/Overpass
