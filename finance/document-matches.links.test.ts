@@ -17,6 +17,8 @@ import {
   financeAccount,
   financeAccountAccess,
   financeAccountType,
+  financeDepotTransaction,
+  financeDepotTransactionDocument,
   financeTransaction,
   users,
 } from "../db/schema";
@@ -63,6 +65,8 @@ async function insertDocument(userId: number, name: string): Promise<number> {
 
 beforeEach(async () => {
   await db.execute(sql`DELETE FROM finance_transaction_document`);
+  await db.delete(financeDepotTransactionDocument);
+  await db.delete(financeDepotTransaction);
   await db.delete(financeTransaction);
   await db.delete(financeAccountAccess);
   await db.delete(financeAccount);
@@ -207,5 +211,35 @@ describe("the values reach the database as parameters", () => {
       )
     ).rows;
     expect(Number(count)).toBe(1);
+  });
+});
+
+describe("papers the portfolio linked to the booking's depot row", () => {
+  it("are listed with the booking as via depot, a paper linked both ways once", async () => {
+    const [depotRow] = await db
+      .insert(financeDepotTransaction)
+      .values({
+        account_id: accountId,
+        isin: "XF00SONNE005",
+        kind: "buy",
+        executed_at: "2024-03-01",
+        net_amount: "-19.99",
+        source: "giro-derived+document",
+        linked_transaction_id: transactionId,
+        dedupe_hash: "giro:1",
+      })
+      .returning({ id: financeDepotTransaction.id });
+    const settlement = await insertDocument(owner.id, "abrechnung");
+    await db.insert(financeDepotTransactionDocument).values([
+      { depot_transaction_id: depotRow!.id, document_id: settlement },
+      { depot_transaction_id: depotRow!.id, document_id: documentId },
+    ]);
+    await db.execute(sql`INSERT INTO finance_transaction_document (transaction_id, document_id) VALUES (${transactionId}, ${documentId})`);
+
+    const fromTx = await (transactionDocumentLinks as any)({ transactionId });
+    expect(fromTx.items.map((i: { document_id: number; via: string }) => [i.document_id, i.via])).toEqual([
+      [documentId, "manual"],
+      [settlement, "depot"],
+    ].sort((a, b) => Number(a[0]) - Number(b[0])));
   });
 });

@@ -44,7 +44,7 @@ const rejecting = ref<string | null>(null)
 const saving = ref(false)
 const deleting = ref(false)
 const copyToast = ref<string | null>(null)
-const linkedDocuments = ref<Array<{ document_id: number; title: string | null; original_filename: string }>>([])
+const linkedDocuments = ref<api.TransactionDocumentLink[]>([])
 const linkedDocumentsLoading = ref(true)
 const linkedDocumentsLoaded = ref(false)
 const documentLinkPanelOpen = ref(false)
@@ -816,7 +816,12 @@ const extractedFields = computed(() => {
           <div v-if="linkedDocuments.length" class="linked-documents">
             <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
               <Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id }, query: { fromTransaction: String(tx.id) } })" />
-              <Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
+              <span
+                v-if="document.via === 'depot'"
+                class="linked-document-via"
+                title="Im Portfolio der Depottransaktion dieser Buchung zugeordnet; lösen lässt sich das dort."
+              >über Depot</span>
+              <Button v-else icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
             </span>
           </div>
 
@@ -1397,6 +1402,12 @@ const extractedFields = computed(() => {
   align-items: center;
   border: 1px solid var(--p-content-border-color);
   border-radius: .35rem;
+}
+.linked-document-via {
+  padding: 0 var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--p-text-muted-color);
+  white-space: nowrap;
 }
 .linked-document :deep(.p-button) {
   padding-block: .25rem;

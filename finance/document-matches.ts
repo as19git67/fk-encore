@@ -9,6 +9,7 @@ import { requirePermission } from '../user/auth-handler'
 import { loadVisibleDocument } from '../documents/visibility'
 import { documentTextPreview } from '../documents/text-preview'
 import { fetchTagsForDocuments } from '../documents/tags'
+import { enrichDocumentsOfBookings } from './depot-document-enrichment'
 
 interface SuggestDocumentsParams { transaction_ids: number[] }
 interface DecideSuggestionParams { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }
@@ -35,7 +36,12 @@ interface MatchMetricBucket { accepted: number; rejected: number; ignored: numbe
 interface MatchMetricsResponse { high: MatchMetricBucket; medium: MatchMetricBucket; low: MatchMetricBucket }
 interface LinkResponse { linked: number }
 interface OkResponse { ok: boolean }
-interface TransactionDocumentLinkDTO { document_id: number; title: string | null; original_filename: string }
+/**
+ * `via`: "manual" for a link on the booking itself (by hand, an accepted
+ * suggestion, a receipt capture); "depot" for a paper the portfolio linked
+ * to the depot row derived from this booking — shown, not removable here.
+ */
+interface TransactionDocumentLinkDTO { document_id: number; title: string | null; original_filename: string; via: 'manual' | 'depot' }
 interface DocumentTransactionLinkDTO { transaction_id: number; booking_date: string; amount: string; counterparty: string | null }
 interface DocumentSuggestionsResponse { items: DocumentSuggestionDTO[] }
 interface TransactionDocumentLinksResponse { items: TransactionDocumentLinkDTO[] }
@@ -94,6 +100,9 @@ export const decideDocumentSuggestion = api({ expose: true, method: 'POST', path
   if (!suggestion || !(await readableTransactionIds(Number(auth.userID), [suggestion.transaction_id])).length) throw APIError.notFound('suggestion not found')
   await loadVisibleDocument(Number(auth.userID), suggestion.document_id)
   const updated = await decideSuggestion(id, outcome)
+  if (updated && outcome === 'accepted') {
+    void enrichDocumentsOfBookings([Number(suggestion.transaction_id)]).catch(err => console.error('[finance] depot enrichment after accept failed:', err))
+  }
   return { ok: updated }
 })
 
@@ -110,7 +119,18 @@ export const transactionDocumentLinks = api({ expose: true, method: 'GET', path:
   const ids = await readableTransactionIds(Number(auth.userID), [transactionId])
   if (!ids.length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
   try {
-    const rows = await db.execute<{ document_id: number; title: string | null; original_filename: string }>(sql`SELECT d.id AS document_id, d.title, d.original_filename FROM finance_transaction_document l JOIN documents d ON d.id = l.document_id WHERE l.transaction_id = ${transactionId}`)
+    const rows = await db.execute<{ document_id: number; title: string | null; original_filename: string; via: 'manual' | 'depot' }>(sql`
+      SELECT d.id AS document_id, d.title, d.original_filename, 'manual' AS via
+        FROM finance_transaction_document l JOIN documents d ON d.id = l.document_id
+       WHERE l.transaction_id = ${transactionId}
+      UNION
+      SELECT d.id, d.title, d.original_filename, 'depot'
+        FROM finance_depot_transaction t
+        JOIN finance_depot_transaction_document dl ON dl.depot_transaction_id = t.id
+        JOIN documents d ON d.id = dl.document_id
+       WHERE t.linked_transaction_id = ${transactionId}
+         AND d.id NOT IN (SELECT document_id FROM finance_transaction_document WHERE transaction_id = ${transactionId})
+       ORDER BY document_id`)
     const visible = await Promise.all(rows.rows.map(async row => { try { await loadVisibleDocument(Number(auth.userID), row.document_id); return row } catch { return null } }))
     return { items: visible.filter((row): row is NonNullable<typeof row> => row !== null) }
   } catch (err: any) {
@@ -139,6 +159,9 @@ export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance
   if (allowed.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
   await Promise.all(document_ids.map(id => loadVisibleDocument(Number(auth.userID), id)))
   for (const transaction_id of allowed) for (const document_id of document_ids) await db.execute(sql`INSERT INTO finance_transaction_document (transaction_id, document_id) VALUES (${transaction_id}, ${document_id}) ON CONFLICT DO NOTHING`)
+  // A paper linked to a securities booking settles its depot row: read it
+  // into the portfolio without making the user wait for the model.
+  void enrichDocumentsOfBookings(allowed).catch(err => console.error('[finance] depot enrichment after link failed:', err))
   return { linked: allowed.length * document_ids.length }
 })
 

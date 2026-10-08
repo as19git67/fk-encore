@@ -34,6 +34,7 @@ import {
   financeAccountType,
   financeDepotTransaction,
   financeDepotTransactionDocument,
+  financeTransactionDocument,
   users,
 } from "../db/schema";
 import {
@@ -165,7 +166,12 @@ function emptyStats(): EnrichStats {
 }
 
 /** How a statement found its depot. */
-export type DepotMatchedBy = "holding" | "depot_number" | "transactions";
+/**
+ * How the depot was found. "booking": the document is linked to a giro
+ * booking (by hand or an accepted suggestion) from which a depot row was
+ * derived — that row is the match, no search needed.
+ */
+export type DepotMatchedBy = "holding" | "depot_number" | "transactions" | "booking";
 
 interface HoldingMatch {
   account_id: number;
@@ -412,6 +418,43 @@ export async function findTransactionByQuantity(
   return rows.filter(sameQuantity).sort((a, b) => distance(a) - distance(b))[0] ?? null;
 }
 
+/**
+ * The depot row derived from the giro booking this document is linked to
+ * (finance_transaction_document: by hand in the transaction view, or an
+ * accepted suggestion). Only when exactly one such row lies in scope —
+ * a document linked to several bookings says nothing about which trade
+ * it settles.
+ */
+export async function depotRowForBookingDocument(
+  documentId: number,
+  accountIds: number[] | null,
+): Promise<DepotRow | null> {
+  if (accountIds && accountIds.length === 0) return null;
+  const bookings = db
+    .select({ id: financeTransactionDocument.transaction_id })
+    .from(financeTransactionDocument)
+    .where(eq(financeTransactionDocument.document_id, documentId));
+  const conditions = [inArray(financeDepotTransaction.linked_transaction_id, bookings)];
+  if (accountIds) conditions.push(inArray(financeDepotTransaction.account_id, accountIds));
+  const rows = await db.select().from(financeDepotTransaction).where(and(...conditions)).limit(2);
+  return rows.length === 1 ? rows[0]! : null;
+}
+
+/**
+ * The booking's row as the match of a statement: the nets agree when
+ * either side has none or they are within a cent. A statement about
+ * another security or another kind of trade is no match at all.
+ */
+function bookingMatch(row: DepotRow, s: SettlementExtraction): { row: DepotRow; netAgrees: boolean } | "mismatch" {
+  const otherSecurity =
+    (s.isin !== null && row.isin !== null && s.isin !== row.isin) ||
+    (s.isin === null && s.wkn !== null && row.wkn !== null && s.wkn !== row.wkn);
+  if (otherSecurity || s.kind !== row.kind) return "mismatch";
+  const rowNet = num(row.net_amount);
+  const netAgrees = rowNet === null || s.net === null || Math.abs(Math.abs(rowNet) - Math.abs(s.net)) <= NET_TOLERANCE;
+  return { row, netAgrees };
+}
+
 /** One document's reading, as far as it counts for a transaction it is linked to. */
 interface PairReading {
   values: SettlementValues;
@@ -564,6 +607,38 @@ function withDocumentSource(source: string): string {
  * Read one document and create or enrich the depot transaction it
  * describes. `accountIds` limits the depots considered (null = all).
  */
+/** Link the document to the booking's row and change nothing on it. */
+async function linkToBookingRow(
+  result: EnrichResult,
+  row: DepotRow,
+  documentId: number,
+  dryRun: boolean,
+  why: string,
+): Promise<EnrichResult> {
+  result.account_id = row.account_id;
+  result.matched_by = "booking";
+  result.depot_transaction_id = row.id;
+  result.transaction_net = row.net_amount;
+  const [existing] = await db
+    .select({ id: financeDepotTransactionDocument.depot_transaction_id })
+    .from(financeDepotTransactionDocument)
+    .where(
+      and(
+        eq(financeDepotTransactionDocument.document_id, documentId),
+        eq(financeDepotTransactionDocument.depot_transaction_id, row.id),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    result.outcome = "already_linked";
+    return result;
+  }
+  result.outcome = "linked";
+  result.detail = `linked by the booking's document; ${why}, nothing taken from it`;
+  if (!dryRun) await linkDocument(row.id, documentId);
+  return result;
+}
+
 export async function enrichDocument(
   documentId: number,
   accountIds: number[] | null = null,
@@ -608,7 +683,7 @@ export async function enrichDocument(
     return result;
   }
 
-  const reading = await readSettlement(
+  let reading = await readSettlement(
     documentId,
     doc.extracted_text,
     options.llm ?? (dryRun ? "cache-only" : "allow"),
@@ -630,7 +705,20 @@ export async function enrichDocument(
   if (parsed) {
     result.date_source = reading.merge.values.executedAt ? "statement" : parsed.executedAt ? "document_date" : null;
   }
-  if (!isUsableSettlement(parsed)) return result;
+
+  // Without an explicit scope, a document only reaches the depots its
+  // owner has been given access to; an owner without any ACL row (an
+  // admin who sees everything) reaches every depot.
+  const scope = accountIds ?? (await accessibleAccountIds(doc.user_id));
+  // Linked to the booking a depot row was derived from: that row is the one.
+  const bookingRow = await depotRowForBookingDocument(documentId, scope);
+
+  if (!isUsableSettlement(parsed)) {
+    // The figures cannot be read, but the user said which booking the
+    // paper belongs to: show it with the trade, take nothing from it.
+    if (bookingRow) return linkToBookingRow(result, bookingRow, documentId, dryRun, "figures not readable");
+    return result;
+  }
   // Income a fund kept without any tax charged: no money moved, nothing to book.
   if (parsed.kind === "tax" && !(parsed.tax !== null && parsed.tax > 0)) {
     result.detail = "accumulation_without_tax";
@@ -641,11 +729,16 @@ export async function enrichDocument(
   result.wkn = parsed.wkn;
   result.depot_number = parsed.depotNumber;
 
-  // Without an explicit scope, a document only reaches the depots its
-  // owner has been given access to; an owner without any ACL row (an
-  // admin who sees everything) reaches every depot.
-  const scope = accountIds ?? (await accessibleAccountIds(doc.user_id));
-  const holding = await resolveDepot(parsed, scope);
+  const holding: HoldingMatch | null = bookingRow
+    ? {
+        account_id: bookingRow.account_id,
+        isin: parsed.isin ?? bookingRow.isin,
+        wkn: parsed.wkn ?? bookingRow.wkn,
+        name: parsed.name ?? bookingRow.name,
+        currency: parsed.currency ?? bookingRow.currency,
+        via: "booking",
+      }
+    : await resolveDepot(parsed, scope);
   if (!holding) {
     result.outcome = "no_holding";
     return result;
@@ -674,9 +767,23 @@ export async function enrichDocument(
     return result;
   }
 
+  // Rules and model disagree, but the booking's net can decide between
+  // them: the reading that adds up to what the bank booked is taken.
+  if (bookingRow && reading.merge.verdict === "unverified" && reading.llm && bookingRow.net_amount !== null) {
+    const again = rereadAgainstBooking(reading, Number(bookingRow.net_amount));
+    const p = again.merge.verdict === "ok" ? toParsed(again) : null;
+    if (p && isUsableSettlement(p) && again.merge.checks.some((c) => c.name === "booking_net" && c.result === "ok")) {
+      parsed = p;
+      reading = again;
+      result.checked_against_booking = true;
+    }
+  }
+
   // Rules and model read different figures and neither set adds up: book
-  // nothing, let the user look (review page, inspection view).
+  // nothing, let the user look (review page, inspection view). A paper the
+  // user linked to the booking still shows with the trade.
   if (reading.merge.verdict === "unverified" && !options.overwrite) {
+    if (bookingRow) return linkToBookingRow(result, bookingRow, documentId, dryRun, "rules and model disagree");
     result.outcome = "unverified";
     result.detail = reading.merge.fields
       .filter((f) => f.disagree)
@@ -698,7 +805,20 @@ export async function enrichDocument(
     }
   }
 
-  let match = await findMatchingDepotTransaction(holding.account_id, parsed);
+  const findMatch = async (st: SettlementExtraction) => {
+    if (!bookingRow) return findMatchingDepotTransaction(holding.account_id, st);
+    const m = bookingMatch(bookingRow, st);
+    return m === "mismatch" ? null : m;
+  };
+  if (bookingRow && bookingMatch(bookingRow, parsed) === "mismatch") {
+    result.outcome = "conflict";
+    result.depot_transaction_id = bookingRow.id;
+    result.detail =
+      `the booking's document reads ${parsed.kind} ${parsed.isin ?? parsed.wkn ?? "?"}, ` +
+      `the booking's row is ${bookingRow.kind} ${bookingRow.isin ?? bookingRow.wkn ?? "?"}`;
+    return result;
+  }
+  let match = await findMatch(parsed);
 
   // Rules and model read different charges and the statement's net does
   // not match the booking: decide again with the booking's net as a check.
@@ -709,7 +829,7 @@ export async function enrichDocument(
     if (p && isUsableSettlement(p) && again.merge.checks.some((c) => c.name === "booking_net" && c.result === "ok")) {
       parsed = p;
       result.checked_against_booking = true;
-      match = await findMatchingDepotTransaction(holding.account_id, parsed);
+      match = await findMatch(parsed);
     }
   }
 
@@ -719,7 +839,7 @@ export async function enrichDocument(
   // A credit note's amount need not be the one booked (before or after
   // taxes, another currency): a dividend of the same security and the same
   // quantity on the same days is the one it belongs to all the same.
-  if (parsed.kind === "dividend" && parsed.quantity !== null && (!match || !match.netAgrees)) {
+  if (!bookingRow && parsed.kind === "dividend" && parsed.quantity !== null && (!match || !match.netAgrees)) {
     const byQuantity = await findTransactionByQuantity(holding.account_id, parsed);
     if (byQuantity && byQuantity.amount !== null) match = { row: byQuantity, netAgrees: true };
   }
@@ -887,12 +1007,27 @@ export async function enrichPendingDocuments(
     .select({ id: financeDepotDocumentIgnore.document_id })
     .from(financeDepotDocumentIgnore);
 
+  // Papers linked to a booking a depot row was derived from are examined
+  // whatever their wording: the link says what they belong to.
+  const onBooking = db
+    .select({ id: financeTransactionDocument.document_id })
+    .from(financeTransactionDocument)
+    .innerJoin(
+      financeDepotTransaction,
+      eq(financeDepotTransaction.linked_transaction_id, financeTransactionDocument.transaction_id),
+    );
+
   const pageSize = Math.max(1, Math.min(limit, 1000));
   const conditions = [
     eq(documents.status, "ready"),
     isNotNull(documents.extracted_text),
-    sql`${documents.extracted_text} ~* ${CANDIDATE_PATTERN}`,
-    sql`NOT (${documents.extracted_text} ~* ${INSURANCE_ONLY_PATTERN} AND ${documents.extracted_text} !~* ${STRONG_PATTERN})`,
+    or(
+      and(
+        sql`${documents.extracted_text} ~* ${CANDIDATE_PATTERN}`,
+        sql`NOT (${documents.extracted_text} ~* ${INSURANCE_ONLY_PATTERN} AND ${documents.extracted_text} !~* ${STRONG_PATTERN})`,
+      ),
+      inArray(documents.id, onBooking),
+    )!,
     notInArray(documents.id, linked),
   ];
   if (!(options.includeIgnored && options.dryRun)) conditions.push(notInArray(documents.id, ignored));
@@ -1107,4 +1242,35 @@ async function findMisbookedAccumulationsFor(depotTransactionId: number): Promis
   return (await findMisbookedAccumulations([row.account_id])).filter(
     (m) => m.depot_transaction_id === depotTransactionId,
   );
+}
+
+/**
+ * Run the documents linked to these giro bookings through `enrichDocument`
+ * — after a link is made by hand or a suggestion accepted, and after a
+ * depot row is derived from a booking that already has papers. Only
+ * bookings a depot row was derived from count. Best effort: a failure is
+ * logged, never thrown.
+ */
+export async function enrichDocumentsOfBookings(
+  transactionIds: number[],
+  options: EnrichOptions = {},
+): Promise<EnrichResult[]> {
+  if (transactionIds.length === 0) return [];
+  const rows = await db
+    .selectDistinct({ document_id: financeTransactionDocument.document_id })
+    .from(financeTransactionDocument)
+    .innerJoin(
+      financeDepotTransaction,
+      eq(financeDepotTransaction.linked_transaction_id, financeTransactionDocument.transaction_id),
+    )
+    .where(inArray(financeTransactionDocument.transaction_id, transactionIds));
+  const out: EnrichResult[] = [];
+  for (const r of rows) {
+    try {
+      out.push(await enrichDocument(r.document_id, null, options));
+    } catch (err) {
+      console.error(`[finance] enriching document ${r.document_id} of a booking failed:`, (err as Error).message);
+    }
+  }
+  return out;
 }
