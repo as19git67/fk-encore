@@ -38,6 +38,10 @@ import { enrichDocument, enrichPendingDocuments } from "./depot-document-enrichm
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 import {
   applySettlementDocument,
+  awaitDocumentEnrichRun,
+  documentEnrichRunStatus,
+  resetDocumentEnrichRuns,
+  startDocumentEnrichRun,
   correctAccumulationTransaction,
   enrichDepotTransactionsFromDocuments,
   getPortfolio,
@@ -1325,5 +1329,36 @@ describe("finance/depot-document-enrichment — a paper linked to the booking", 
     await db.insert(financeTransactionDocument).values({ transaction_id: bookingId, document_id: plain });
     const stats = await enrichPendingDocuments(null);
     expect(stats.results.map((r) => r.document_id).sort()).toEqual([docId, plain].sort());
+  });
+});
+
+describe("finance/portfolio — reading the documents in the background", () => {
+  it("runs on the server, reports its totals, and starts no second run while one is going", async () => {
+    resetDocumentEnrichRuns();
+    const { depot } = await setup();
+    await insertDocument(BUY_TEXT);
+    expect((await documentEnrichRunStatus()).run).toBeNull();
+
+    const { run } = await startDocumentEnrichRun({});
+    expect(run).toMatchObject({ status: "running", account_ids: [depot] });
+    // Asked again while it runs: the same run.
+    expect((await startDocumentEnrichRun({})).run.id).toBe(run.id);
+
+    await awaitDocumentEnrichRun(1);
+    const done = (await documentEnrichRunStatus()).run!;
+    expect(done).toMatchObject({ id: run.id, status: "done", error: null });
+    expect(done.totals).toMatchObject({ documents_examined: 1, created: 1 });
+    expect(done.finished_at).not.toBeNull();
+    expect(await depotRows(depot)).toHaveLength(1);
+
+    // Once it is over, a new start is a new run.
+    const next = (await startDocumentEnrichRun({})).run;
+    expect(next.id).not.toBe(run.id);
+    await awaitDocumentEnrichRun(1);
+  });
+
+  it("needs a writable depot", async () => {
+    resetDocumentEnrichRuns();
+    await expect(startDocumentEnrichRun({ accounts: "999999" })).rejects.toThrow(/write access/);
   });
 });

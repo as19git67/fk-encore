@@ -960,6 +960,41 @@ export interface EnrichDepotDocumentsResponse {
   next_before: number | null
 }
 
+export interface EnrichRunTotals {
+  documents_examined: number
+  created: number
+  enriched: number
+  linked: number
+  conflicts: number
+  unverified: number
+  skipped_no_holding: number
+  skipped_no_transaction: number
+}
+
+/** A read of the settlement documents running (or run) on the server. */
+export interface EnrichRun {
+  id: number
+  status: 'running' | 'done' | 'failed'
+  started_at: string
+  finished_at: string | null
+  account_ids: number[]
+  totals: EnrichRunTotals
+  error: string | null
+}
+
+/** Start reading the documents on the server; a run already going is answered instead. */
+export async function startDocumentEnrichRun(accounts: number[] = []): Promise<{ run: EnrichRun }> {
+  return apiFetch('/finance/portfolio/documents/enrich/start', {
+    method: 'POST',
+    body: JSON.stringify(accounts.length > 0 ? { accounts: accounts.join(',') } : {}),
+  })
+}
+
+/** The caller's running or last run, null when none since the app started. */
+export async function getDocumentEnrichRun(): Promise<{ run: EnrichRun | null }> {
+  return apiFetch('/finance/portfolio/documents/enrich/status')
+}
+
 /** Read every unlinked settlement document into the depots the caller may write to. */
 export async function enrichDepotTransactionsFromDocuments(
   opts: { accounts?: number[]; limit?: number; before?: number | null } = {},

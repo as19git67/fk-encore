@@ -14,6 +14,20 @@ import { routeFromParameters } from './storyRoute'
 
 /** The portfolio page (issue #1336), in each state it can be in. */
 
+/** A read of the documents on the server, finished and still running. */
+const ENRICH_TOTALS = {
+  documents_examined: 3, created: 1, enriched: 1, linked: 0,
+  conflicts: 1, unverified: 1, skipped_no_holding: 0, skipped_no_transaction: 0,
+}
+const ENRICH_RUN_DONE = {
+  id: 1, status: 'done', started_at: new Date(Date.now() - 60_000).toISOString(),
+  finished_at: new Date().toISOString(), account_ids: [12], totals: ENRICH_TOTALS, error: null,
+}
+const ENRICH_RUN_RUNNING = {
+  ...ENRICH_RUN_DONE, id: 2, status: 'running', finished_at: null,
+  totals: { ...ENRICH_TOTALS, documents_examined: 42 },
+}
+
 const portfolioHandlers = [
   http.get('/api/finance/portfolio', () => HttpResponse.json(MOCK_PORTFOLIO)),
   http.get('/api/finance/portfolio/transactions', ({ request }) => {
@@ -51,12 +65,8 @@ const portfolioHandlers = [
   http.post('/api/finance/portfolio/documents/:id/apply', () =>
     HttpResponse.json({ document_id: 305, outcome: 'enriched', depot_transaction_id: 904, account_id: 12, detail: null, statement_net: '-2459.50', transaction_net: '-2457.00', isin: 'DE000000BBB2', wkn: null, depot_number: null, matched_by: 'holding', date_source: 'statement', llm_status: 'cached' }),
   ),
-  http.post('/api/finance/portfolio/documents/enrich', () =>
-    HttpResponse.json({
-      documents_examined: 3, created: 1, enriched: 1, linked: 0, already_linked: 0,
-      skipped_not_settlement: 0, skipped_no_holding: 0, conflicts: 1, unverified: 1, errors: [], results: [],
-    }),
-  ),
+  http.post('/api/finance/portfolio/documents/enrich/start', () => HttpResponse.json({ run: ENRICH_RUN_DONE })),
+  http.get('/api/finance/portfolio/documents/enrich/status', () => HttpResponse.json({ run: null })),
   ...defaultHandlers,
 ]
 
@@ -143,4 +153,17 @@ export const IgnorierteBelege: Story = {
 export const Telefon: Story = {
   name: 'Telefonbreite',
   parameters: { testViewport: { width: 360, height: 740 } },
+}
+
+/** Reading the documents on the server: the button shows how far it got. */
+export const BelegeWerdenEingelesen: Story = {
+  name: 'Belege werden eingelesen',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/finance/portfolio/documents/enrich/status', () => HttpResponse.json({ run: ENRICH_RUN_RUNNING })),
+        ...portfolioHandlers,
+      ],
+    },
+  },
 }

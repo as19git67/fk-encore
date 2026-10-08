@@ -1524,6 +1524,23 @@ interface EnrichDocumentsResponse {
  */
 const ENRICH_REQUEST_BUDGET_MS = 20_000;
 
+/** One page of the pending documents of these depots, newest first, below `before`. */
+async function enrichPage(depotIds: number[], limit: number, before: number | null) {
+  const stats = await enrichPendingDocuments(depotIds, limit, {}, { before, budgetMs: ENRICH_REQUEST_BUDGET_MS });
+  if (stats.created > 0) {
+    // A new row may be the first trace of a position closed before the
+    // first holdings snapshot: its bookings can be derived only now.
+    const bankcontacts = await db
+      .selectDistinct({ id: financeAccount.bankcontact_id })
+      .from(financeAccount)
+      .where(inArray(financeAccount.id, depotIds));
+    for (const bc of bankcontacts) {
+      if (bc.id !== null) await deriveDepotTransactionsForBankcontact(bc.id);
+    }
+  }
+  return stats;
+}
+
 export const enrichDepotTransactionsFromDocuments = api(
   {
     expose: true,
@@ -1538,29 +1555,135 @@ export const enrichDepotTransactionsFromDocuments = api(
     if (depots.length === 0) {
       throw APIError.permissionDenied("write access to at least one depot is required");
     }
-    const stats = await enrichPendingDocuments(
-      depots.map((d) => d.id),
-      limit ?? 200,
-      {},
-      { before: before ?? null, budgetMs: ENRICH_REQUEST_BUDGET_MS },
-    );
-    if (stats.created > 0) {
-      // A new row may be the first trace of a position closed before the
-      // first holdings snapshot: its bookings can be derived only now.
-      const bankcontacts = await db
-        .selectDistinct({ id: financeAccount.bankcontact_id })
-        .from(financeAccount)
-        .where(inArray(financeAccount.id, depots.map((d) => d.id)));
-      for (const bc of bankcontacts) {
-        if (bc.id !== null) await deriveDepotTransactionsForBankcontact(bc.id);
-      }
-    }
+    const stats = await enrichPage(depots.map((d) => d.id), limit ?? 200, before ?? null);
     return {
       ...stats,
       results: stats.results.filter(
         (r) => r.outcome !== "not_settlement" && r.outcome !== "no_holding",
       ),
     };
+  },
+);
+
+// ----------------------------------------------------------------------
+// Reading the documents in the background
+//
+// A full read can take minutes when the model reads papers for the first
+// time. Driven page by page from the browser it stopped with the tab, and
+// a page opened again knew nothing of it. The run lives on the server
+// instead: one per user, started by `startDocumentEnrichRun`, followed by
+// `documentEnrichRunStatus`. It works page by page as before, so a slow
+// model holds up nothing else. The state is kept in memory: a restart of
+// the app ends a run, and the next run picks up what is still unlinked.
+// ----------------------------------------------------------------------
+
+export interface EnrichRunTotals {
+  documents_examined: number;
+  created: number;
+  enriched: number;
+  linked: number;
+  conflicts: number;
+  unverified: number;
+  skipped_no_holding: number;
+  skipped_no_transaction: number;
+}
+
+export interface EnrichRun {
+  id: number;
+  status: "running" | "done" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  /** The depots the run reads into. */
+  account_ids: number[];
+  totals: EnrichRunTotals;
+  /** Set when the run failed. */
+  error: string | null;
+}
+
+const enrichRuns = new Map<number, EnrichRun>();
+const enrichRunPromises = new Map<number, Promise<void>>();
+let enrichRunSeq = 0;
+
+function emptyTotals(): EnrichRunTotals {
+  return {
+    documents_examined: 0,
+    created: 0,
+    enriched: 0,
+    linked: 0,
+    conflicts: 0,
+    unverified: 0,
+    skipped_no_holding: 0,
+    skipped_no_transaction: 0,
+  };
+}
+
+async function runEnrichment(run: EnrichRun): Promise<void> {
+  try {
+    let before: number | null = null;
+    do {
+      const page = await enrichPage(run.account_ids, 200, before);
+      for (const k of Object.keys(run.totals) as (keyof EnrichRunTotals)[]) run.totals[k] += page[k];
+      before = page.next_before;
+    } while (before !== null);
+    run.status = "done";
+  } catch (err) {
+    run.status = "failed";
+    run.error = (err as Error).message ?? String(err);
+  } finally {
+    run.finished_at = new Date().toISOString();
+  }
+}
+
+/** For tests: wait for the user's run to end. */
+export async function awaitDocumentEnrichRun(userId: number): Promise<void> {
+  await enrichRunPromises.get(userId);
+}
+
+/** For tests: forget every run. */
+export function resetDocumentEnrichRuns(): void {
+  enrichRuns.clear();
+  enrichRunPromises.clear();
+}
+
+/**
+ * Start reading the documents into the caller's writable depots. While a
+ * run of the caller's is still going, that run is answered and no second
+ * one starts.
+ */
+export const startDocumentEnrichRun = api(
+  { expose: true, method: "POST", path: "/finance/portfolio/documents/enrich/start", auth: true },
+  async ({ accounts }: { accounts?: string }): Promise<{ run: EnrichRun }> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const userId = Number(auth.userID);
+    const current = enrichRuns.get(userId);
+    if (current?.status === "running") return { run: current };
+    const depots = await writableDepots(auth, parseAccountIds(accounts));
+    if (depots.length === 0) {
+      throw APIError.permissionDenied("write access to at least one depot is required");
+    }
+    const run: EnrichRun = {
+      id: ++enrichRunSeq,
+      status: "running",
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      account_ids: depots.map((d) => d.id),
+      totals: emptyTotals(),
+      error: null,
+    };
+    enrichRuns.set(userId, run);
+    enrichRunPromises.set(userId, runEnrichment(run));
+    return { run };
+  },
+);
+
+/** The caller's running or last run; null when there was none since the app started. */
+export const documentEnrichRunStatus = api(
+  { expose: true, method: "GET", path: "/finance/portfolio/documents/enrich/status", auth: true },
+  async (): Promise<{ run: EnrichRun | null }> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    return { run: enrichRuns.get(Number(auth.userID)) ?? null };
   },
 );
 

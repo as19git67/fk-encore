@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
@@ -20,7 +20,9 @@ import { useSort } from '../../composables/useSort'
 import type { FilterChip } from '../../components/layout/listToolbar'
 import { replaceQuerySlice, updateRouteQuery } from '../../utils/routeQueryUpdate'
 import {
-  enrichDepotTransactionsFromDocuments,
+  getDocumentEnrichRun,
+  startDocumentEnrichRun,
+  type EnrichRun,
   getPortfolio,
   resetDocumentReadings,
   listPortfolioTransactions,
@@ -408,9 +410,6 @@ const enrichNotice = ref<{ severity: 'success' | 'info' | 'warn'; text: string }
 /** Documents examined so far in the running read, shown on the button. */
 const enrichProgress = ref(0)
 
-const COUNTED = ['documents_examined', 'created', 'enriched', 'linked', 'conflicts', 'unverified', 'skipped_no_holding', 'skipped_no_transaction'] as const
-type EnrichTotals = Record<(typeof COUNTED)[number], number>
-
 const confirm = useConfirm()
 
 /** Take back what documents booked into the depots in scope, then read them all in again. */
@@ -443,47 +442,105 @@ async function readAgain() {
   await enrichFromDocuments()
 }
 
+// The read runs on the server (one per user): the page starts it and
+// follows it every two seconds. Leaving the page leaves it running; a page
+// opened later picks it up, or reports a run that ended meanwhile — once
+// per browser session, and only if it ended within the hour.
+
+const POLL_MS = 2000
+const SHOWN_KEY = 'finance.portfolio.enrichRunShown'
+const REPORT_WITHIN_MS = 60 * 60_000
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+
+function shownRunId(): number | null {
+  try {
+    const v = sessionStorage.getItem(SHOWN_KEY)
+    return v ? Number(v) : null
+  } catch {
+    return null
+  }
+}
+function markShown(id: number) {
+  try {
+    sessionStorage.setItem(SHOWN_KEY, String(id))
+  } catch {
+    // Without storage a finished run may be reported once more; harmless.
+  }
+}
+
 async function enrichFromDocuments() {
   enriching.value = true
   enrichNotice.value = null
   enrichProgress.value = 0
   try {
-    // The server reads one page per call, newest first; keep going until it
-    // says there is nothing left, so years of statements are all read.
-    const r: EnrichTotals = Object.fromEntries(COUNTED.map((k) => [k, 0])) as EnrichTotals
-    let before: number | null = null
-    do {
-      const page = await enrichDepotTransactionsFromDocuments({ accounts: accountIds.value, before })
-      for (const k of COUNTED) r[k] += page[k] ?? 0
-      enrichProgress.value = r.documents_examined
-      before = page.next_before ?? null
-    } while (before !== null)
-    const changed = r.created + r.enriched + r.linked
-    const parts: string[] = []
-    if (r.created > 0) parts.push(`${r.created} neu angelegt`)
-    if (r.enriched > 0) parts.push(`${r.enriched} ergänzt`)
-    if (r.linked > 0) parts.push(`${r.linked} verknüpft`)
-    if (r.conflicts > 0) parts.push(`${r.conflicts} mit abweichendem Betrag — bitte prüfen`)
-    if (r.unverified > 0) parts.push(`${r.unverified} unsicher erkannt — bitte prüfen`)
-    if (r.skipped_no_holding > 0) parts.push(`${r.skipped_no_holding} ohne passendes Depot`)
-    if (r.skipped_no_transaction > 0) parts.push(`${r.skipped_no_transaction} Steuermitteilungen ohne passende Transaktion`)
-    enrichNotice.value = {
-      severity: r.conflicts > 0 || r.unverified > 0 ? 'warn' : changed > 0 ? 'success' : 'info',
-      text: parts.length > 0
-        ? `Belege eingelesen: ${parts.join(', ')}.`
-        : 'Keine neuen Wertpapier- oder Dividendenabrechnungen gefunden.',
-    }
-    if (changed > 0) {
-      await Promise.all([loadPortfolio(), loadTransactions()])
-    }
-    reviewReloadKey.value++
+    const { run } = await startDocumentEnrichRun(accountIds.value)
+    follow(run)
   } catch (e: any) {
-    enrichNotice.value = { severity: 'warn', text: e?.message ?? 'Belege konnten nicht eingelesen werden' }
-  } finally {
     enriching.value = false
-    enrichProgress.value = 0
+    enrichNotice.value = { severity: 'warn', text: e?.message ?? 'Belege konnten nicht eingelesen werden' }
   }
 }
+
+function follow(run: EnrichRun) {
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = null
+  if (run.status === 'running') {
+    enriching.value = true
+    enrichProgress.value = run.totals.documents_examined
+    pollTimer = setTimeout(() => void pollRun(), POLL_MS)
+    return
+  }
+  enriching.value = false
+  enrichProgress.value = 0
+  const ended = run.finished_at ? Date.parse(run.finished_at) : 0
+  if (shownRunId() === run.id || Date.now() - ended > REPORT_WITHIN_MS) return
+  markShown(run.id)
+  void reportRun(run)
+}
+
+async function pollRun() {
+  pollTimer = null
+  try {
+    const { run } = await getDocumentEnrichRun()
+    if (run) follow(run)
+    else enriching.value = false
+  } catch {
+    // A hiccup of the network: ask again a little later.
+    pollTimer = setTimeout(() => void pollRun(), POLL_MS * 3)
+  }
+}
+
+async function reportRun(run: EnrichRun) {
+  if (run.status === 'failed') {
+    enrichNotice.value = { severity: 'warn', text: `Belege konnten nicht eingelesen werden: ${run.error ?? 'unbekannter Fehler'}` }
+    return
+  }
+  const r = run.totals
+  const changed = r.created + r.enriched + r.linked
+  const parts: string[] = []
+  if (r.created > 0) parts.push(`${r.created} neu angelegt`)
+  if (r.enriched > 0) parts.push(`${r.enriched} ergänzt`)
+  if (r.linked > 0) parts.push(`${r.linked} verknüpft`)
+  if (r.conflicts > 0) parts.push(`${r.conflicts} mit abweichendem Betrag — bitte prüfen`)
+  if (r.unverified > 0) parts.push(`${r.unverified} unsicher erkannt — bitte prüfen`)
+  if (r.skipped_no_holding > 0) parts.push(`${r.skipped_no_holding} ohne passendes Depot`)
+  if (r.skipped_no_transaction > 0) parts.push(`${r.skipped_no_transaction} Steuermitteilungen ohne passende Transaktion`)
+  enrichNotice.value = {
+    severity: r.conflicts > 0 || r.unverified > 0 ? 'warn' : changed > 0 ? 'success' : 'info',
+    text: parts.length > 0
+      ? `Belege eingelesen: ${parts.join(', ')}.`
+      : 'Keine neuen Wertpapier- oder Dividendenabrechnungen gefunden.',
+  }
+  if (changed > 0) {
+    await Promise.all([loadPortfolio(), loadTransactions()])
+  }
+  reviewReloadKey.value++
+}
+
+onMounted(() => void pollRun())
+onBeforeUnmount(() => {
+  if (pollTimer) clearTimeout(pollTimer)
+})
 </script>
 
 <template>
