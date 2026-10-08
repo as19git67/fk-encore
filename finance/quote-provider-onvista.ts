@@ -156,13 +156,19 @@ function isoDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+class OnvistaHttpError extends Error {
+  constructor(readonly status: number, path: string) {
+    super(`onvista ${status} for ${path}`);
+  }
+}
+
 async function getJson(path: string): Promise<unknown> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (res.status === 429) throw new QuoteRateLimitedError("onvista 429");
-  if (!res.ok) throw new Error(`onvista ${res.status} for ${path}`);
+  if (!res.ok) throw new OnvistaHttpError(res.status, path);
   return res.json();
 }
 
@@ -179,13 +185,46 @@ const INTRADAY_VARIANTS = [
   "range=D1&withCurrentDay=true",
 ];
 let intradayVariant: number | null = null;
+/**
+ * Until when chart_history is not asked: it answered 403 to every
+ * variant. Onvista keeps some venues' minutes to itself; the snapshot's
+ * current price, stored every tick, then makes the day's line instead.
+ */
+let chartRefusedUntil = 0;
+const CHART_REFUSED_MS = 6 * 60 * 60_000;
 
-/** For tests: forget which variant worked. */
+/** For tests: forget which variant worked and whether the chart refused. */
 export function resetOnvistaIntradayVariant(): void {
   intradayVariant = null;
+  chartRefusedUntil = 0;
 }
 
-async function intraday(base: string, idNotation: string, symbol: string, currency: string | null): Promise<QuoteSeries> {
+/**
+ * The price the snapshot shows for this notation (else the preferred one)
+ * as a one-point series. Needs the ISIN: the snapshot is asked by it.
+ */
+async function snapshotPoint(entityType: string, idNotation: string, isin: string, symbol: string, currency: string | null): Promise<QuoteSeries> {
+  const path = SNAPSHOT_PATH[entityType];
+  if (!path) throw new Error(`onvista: no snapshot for ${entityType}`);
+  const body = (await getJson(`/${path}/ISIN:${encodeURIComponent(isin)}/snapshot`)) as SnapshotBody;
+  const all = [...(body.quoteList?.list ?? []), ...(body.quote ? [body.quote] : [])];
+  const q =
+    all.find((x) => String(x.market?.idNotation) === idNotation && typeof x.last === "number") ??
+    pickNotation(body, entityType === "FUND");
+  if (!q || typeof q.last !== "number" || !Number.isFinite(q.last)) return { symbol, currency, points: [] };
+  const at = toIso(q.datetimeLast) ?? new Date().toISOString();
+  return { symbol, currency: q.isoCurrency ?? currency, points: [{ at, price: q.last }] };
+}
+
+async function intraday(
+  base: string,
+  s: { type: string; idNotation: string },
+  symbol: string,
+  currency: string | null,
+  isin: string | null,
+): Promise<QuoteSeries> {
+  if (isin && Date.now() < chartRefusedUntil) return snapshotPoint(s.type, s.idNotation, isin, symbol, currency);
+  const idNotation = s.idNotation;
   const order = intradayVariant === null
     ? INTRADAY_VARIANTS.map((_, i) => i)
     : [intradayVariant, ...INTRADAY_VARIANTS.map((_, i) => i).filter((i) => i !== intradayVariant)];
@@ -206,6 +245,10 @@ async function intraday(base: string, idNotation: string, symbol: string, curren
     }
   }
   if (empty) return empty;
+  if (isin && firstError instanceof OnvistaHttpError && firstError.status === 403) {
+    chartRefusedUntil = Date.now() + CHART_REFUSED_MS;
+    return snapshotPoint(s.type, s.idNotation, isin, symbol, currency);
+  }
   throw firstError instanceof Error ? firstError : new Error(`onvista: no intraday prices for ${symbol}`);
 }
 
@@ -238,14 +281,14 @@ export const onvistaQuoteProvider: QuoteProvider = {
     };
   },
 
-  async history(symbol: string, range: HistoryRange): Promise<QuoteSeries> {
+  async history(symbol: string, range: HistoryRange, id?: { isin: string | null; wkn: string | null }): Promise<QuoteSeries> {
     const s = decodeSymbol(symbol);
     if (!s) throw new Error(`onvista: not a symbol of this provider: ${symbol}`);
     const base = `/instruments/${encodeURIComponent(s.type)}/${encodeURIComponent(s.entityValue)}`;
     const now = new Date();
     const day = 24 * 60 * 60_000;
     const currency = currencies.get(symbol) ?? null;
-    if (range === "intraday") return intraday(base, s.idNotation, symbol, currency);
+    if (range === "intraday") return intraday(base, s, symbol, currency, id?.isin ?? null);
     const [r, days] = range === "backfill" ? ["Y5", 5 * 366] : ["M1", 31];
     const qs = `idNotation=${s.idNotation}&range=${r}&startDate=${isoDay(new Date(now.getTime() - days * day))}`;
     return parseHistory((await getJson(`${base}/eod_history?${qs}`)) as HistoryBody, symbol, currency);

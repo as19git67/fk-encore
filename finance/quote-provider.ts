@@ -49,8 +49,10 @@ export interface QuoteProvider {
    * Prices of one symbol: "intraday" is today in minutes, "recent_days"
    * the closes of the last few days, "backfill" the closes of the last
    * years. Throws on a provider error; the caller decides what to retry.
+   * `id` is the security the symbol stands for, for a provider that needs
+   * it to fall back on another endpoint.
    */
-  history(symbol: string, range: HistoryRange): Promise<QuoteSeries>;
+  history(symbol: string, range: HistoryRange, id?: { isin: string | null; wkn: string | null }): Promise<QuoteSeries>;
 }
 
 /** One news item about a security. */

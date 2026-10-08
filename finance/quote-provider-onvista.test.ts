@@ -147,6 +147,30 @@ describe("onvistaQuoteProvider", () => {
     expect(urls[3]).toMatch(/range=D1&withCurrentDay=true$/);
   });
 
+  it("takes the snapshot's price for the day when the chart is refused, and skips the chart for a while", async () => {
+    const urls = stub({
+      chart_history: () => new Response("forbidden", { status: 403 }),
+      "/stocks/ISIN:": () =>
+        Response.json({
+          quoteList: {
+            list: [
+              { market: { idNotation: 9, codeExchange: "FRA" }, last: 10.1, datetimeLast: "2026-02-04T09:58:00Z" },
+              { market: { idNotation: 2, codeExchange: "GER" }, last: 10.3, datetimeLast: "2026-02-04T09:59:00Z", isoCurrency: "EUR" },
+            ],
+          },
+        }),
+    });
+    // Without the ISIN there is nothing to fall back on.
+    await expect(onvistaQuoteProvider.history("STOCK:42:2", "intraday")).rejects.toThrow(/onvista 403/);
+
+    const day = await onvistaQuoteProvider.history("STOCK:42:2", "intraday", { isin: ISIN, wkn: null });
+    expect(day).toMatchObject({ currency: "EUR", points: [{ at: "2026-02-04T09:59:00.000Z", price: 10.3 }] });
+
+    const before = urls.length;
+    await onvistaQuoteProvider.history("STOCK:42:2", "intraday", { isin: ISIN, wkn: null });
+    expect(urls.slice(before)).toEqual([expect.stringContaining(`/stocks/ISIN:${ISIN}/snapshot`)]);
+  });
+
   it("answers an empty day when the market is closed, and the first error when nothing works", async () => {
     stub({ "resolution=5m": () => Response.json({ datetimeLast: [], last: [] }) });
     expect((await onvistaQuoteProvider.history("STOCK:42:2", "intraday")).points).toEqual([]);

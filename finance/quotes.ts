@@ -131,7 +131,7 @@ export async function refreshQuotes(
       ranges.push("intraday");
 
       for (const range of ranges) {
-        const series = await provider.history(row.symbol, range);
+        const series = await provider.history(row.symbol, range, { isin: p.isin, wkn: p.wkn });
         stats.fetched++;
         stats.points += await storeSeries(p.key, series.points, series.currency ?? row.currency, range === "intraday" ? "intraday" : "daily", provider.name);
         if (range === "backfill") {
