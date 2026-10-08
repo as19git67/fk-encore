@@ -256,11 +256,13 @@ function formatStamp(iso: string): string {
 function formatPrice(raw: string, cur: string | null): string {
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: cur || 'EUR', maximumFractionDigits: 2 }).format(Number(raw))
 }
-function openPosition(tile: QuoteTile) {
+/** The position page; with `news`, scrolled to its news. */
+function openPosition(tile: QuoteTile, news = false) {
   void router.push({
     name: 'finance-portfolio-position',
     params: { key: tile.key },
     query: accountIds.value.length > 0 ? { accounts: accountIds.value.join(',') } : {},
+    hash: news ? '#nachrichten' : undefined,
   })
 }
 
@@ -383,10 +385,22 @@ const STATUS_TEXT: Record<QuoteTile['status'], string> = {
       <ul class="qv-grid" aria-label="Wertpapiere">
         <li v-for="tile in tiles" :key="tile.key">
           <article class="qv-tile" :class="{ 'is-empty': tile.status !== 'ok' }">
-            <button type="button" class="qv-tile-head" @click="openPosition(tile)">
-              <span class="qv-tile-name">{{ tile.name ?? tile.key }}</span>
-              <span class="qv-tile-id">{{ tile.isin ?? tile.wkn }}</span>
-            </button>
+            <div class="qv-tile-top">
+              <button type="button" class="qv-tile-head" @click="openPosition(tile)">
+                <span class="qv-tile-name">{{ tile.name ?? tile.key }}</span>
+                <span class="qv-tile-id">{{ tile.isin ?? tile.wkn }}</span>
+              </button>
+              <button
+                v-if="tile.news_unread > 0"
+                type="button"
+                class="qv-tile-news"
+                :aria-label="`${tile.news_unread} neue ${tile.news_unread === 1 ? 'Nachricht' : 'Nachrichten'}`"
+                @click="openPosition(tile, true)"
+              >
+                <i class="pi pi-megaphone" aria-hidden="true" />
+                {{ tile.news_unread > 99 ? '99+' : tile.news_unread }}
+              </button>
+            </div>
 
             <template v-if="tile.last">
               <div class="qv-tile-figures">
@@ -499,6 +513,32 @@ const STATUS_TEXT: Record<QuoteTile['status'], string> = {
   color: var(--p-text-muted-color);
 }
 
+.qv-tile-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.qv-tile-news {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.15rem 0.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.qv-tile-news:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
 .qv-tile-head {
   display: flex;
   flex-direction: column;

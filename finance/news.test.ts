@@ -9,13 +9,15 @@ import {
   financeAccountHolding,
   financeAccountType,
   financeBankcontact,
+  financeNewsSeen,
   financeNewsSource,
   financeProviderUsage,
   financeQuoteNews,
   financeQuoteSymbol,
   users,
 } from "../db/schema";
-import { charge, getPositionNews, refreshNews, usedToday } from "./news";
+import { charge, getPositionNews, markPositionNewsSeen, refreshNews, usedToday } from "./news";
+import { unreadNewsCounts } from "./quotes";
 import { activePositions } from "./quotes";
 import {
   QuoteRateLimitedError,
@@ -38,6 +40,7 @@ function setAuth(userID: string, perms: string[]) {
 
 beforeEach(async () => {
   await db.delete(financeQuoteNews);
+  await db.delete(financeNewsSeen);
   await db.delete(financeNewsSource);
   await db.delete(financeProviderUsage);
   await db.delete(financeQuoteSymbol);
@@ -223,5 +226,40 @@ describe("getPositionNews", () => {
     await db.execute(sql`INSERT INTO users (id, email, name, password_hash) VALUES (9, 'n9@test.local', 'N', 'x')`);
     setAuth("9", ["finance.view"]);
     await expect(getPositionNews({ key: A })).rejects.toThrow(/not found/);
+  });
+});
+
+describe("news seen and unread", () => {
+  it("counts news newer than the last look, or than a week when never looked", async () => {
+    await db.execute(sql`INSERT INTO users (id, email, name, password_hash) VALUES (1, 'n1@test.local', 'N', 'x')`);
+    const d = await insertDepot();
+    await hold(d, A);
+    await db.insert(financeQuoteNews).values([
+      { position_key: A, provider: "memnews", url: "https://beispiel.test/alt", title: "Alt", at: hours(24 * 10) },
+      { position_key: A, provider: "memnews", url: "https://beispiel.test/1", title: "Eins", at: hours(5) },
+      { position_key: A, provider: "memnews", url: "https://beispiel.test/2", title: "Zwei", at: hours(1) },
+    ]);
+
+    // Never looked: the week's two, not the ten-day-old one.
+    expect((await unreadNewsCounts(1, [A, B], NOW)).get(A)).toBe(2);
+    expect((await getPositionNews({ key: A })).seen_at).toBeNull();
+
+    await markPositionNewsSeen({ key: A });
+    const seen = (await getPositionNews({ key: A })).seen_at;
+    expect(seen).not.toBeNull();
+    expect((await unreadNewsCounts(1, [A], new Date())).get(A)).toBeUndefined();
+
+    // A newer item counts again; another user's look does not count for this one.
+    await db.insert(financeQuoteNews).values({
+      position_key: A,
+      provider: "memnews",
+      url: "https://beispiel.test/3",
+      title: "Drei",
+      at: new Date(Date.parse(seen!) + 60_000).toISOString(),
+    });
+    expect((await unreadNewsCounts(1, [A], new Date())).get(A)).toBe(1);
+    expect(await unreadNewsCounts(null, [A], new Date())).toEqual(new Map());
+
+    await expect(markPositionNewsSeen({ key: B })).rejects.toThrow(/not found/);
   });
 });

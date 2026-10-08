@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Button from 'primevue/button'
 import Chart from 'primevue/chart'
@@ -15,8 +15,11 @@ import { useMediaQuery } from '../../composables/useBreakpoint'
 import { compactDateLabels, fullDateLabel } from '../../utils/financeChartDates'
 import {
   getPortfolioPosition,
+  getPositionNews,
+  markPositionNewsSeen,
   type PortfolioPositionResponse,
   type PortfolioTransaction,
+  type PositionNewsResponse,
 } from '../../api/finance'
 import {
   depotKindLabel,
@@ -74,6 +77,55 @@ async function load() {
 
 onMounted(load)
 watch([positionKey, () => accountIds.value.join(','), () => route.query.closedDepots], () => void load())
+
+// ── News ─────────────────────────────────────────────────────────────
+// What the news provider brought about this security (`.claude/plans/
+// kurse.md`). Loading them marks them seen, so the quotes tile stops
+// counting; the items that were new to this visit keep their marker
+// until the page is left. No news provider configured (never fetched,
+// nothing stored): the section stays away.
+
+const news = ref<PositionNewsResponse | null>(null)
+
+async function loadNews() {
+  const key = positionKey.value
+  if (!key) return
+  try {
+    const resp = await getPositionNews(key)
+    if (key !== positionKey.value) return
+    news.value = resp
+    if (resp.items.length > 0) void markPositionNewsSeen(key).catch(() => {})
+    if (route.hash === '#nachrichten') {
+      await nextTick()
+      document.getElementById('nachrichten')?.scrollIntoView({ block: 'start' })
+    }
+  } catch {
+    // News are an extra; the page stands without them.
+    news.value = null
+  }
+}
+
+onMounted(loadNews)
+watch(positionKey, () => void loadNews())
+
+const showNews = computed(() => !!news.value && (news.value.items.length > 0 || news.value.checked_at !== null))
+
+function isNewItem(at: string): boolean {
+  const seen = news.value?.seen_at
+  return !seen || at > seen
+}
+
+function sentimentOf(value: number | null): { label: string; cls: string } | null {
+  if (value === null) return null
+  if (value >= 0.2) return { label: 'positiv', cls: 'gain-pos' }
+  if (value <= -0.2) return { label: 'negativ', cls: 'gain-neg' }
+  return { label: 'neutral', cls: 'pp-sentiment-neutral' }
+}
+
+const newsTimeFormat = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' })
+function formatNewsTime(at: string): string {
+  return newsTimeFormat.format(new Date(at))
+}
 
 const position = computed(() => data.value?.position ?? null)
 const currency = computed(() => position.value?.currency ?? data.value?.currency ?? 'EUR')
@@ -376,6 +428,37 @@ function transactionCash(tx: PortfolioTransaction): string {
         <p v-else class="pp-muted">
           Der Verlauf erscheint, sobald mindestens zwei Tages-Snapshots dieses Wertpapiers vorliegen.
         </p>
+      </section>
+
+      <!-- ── News ─────────────────────────────────────────────────── -->
+      <section
+        v-if="showNews && news"
+        id="nachrichten"
+        class="pp-section scroll-anchor"
+        aria-labelledby="pp-news-heading"
+      >
+        <h2 id="pp-news-heading">Nachrichten</h2>
+        <p v-if="news.items.length === 0" class="pp-muted">
+          Zu diesem Wertpapier gab es zuletzt keine Nachrichten.
+        </p>
+        <ul v-else class="pp-news">
+          <li v-for="item in news.items" :key="item.id" class="pp-news-item">
+            <a class="pp-news-title" :href="item.url" target="_blank" rel="noopener noreferrer">
+              {{ item.title }}
+              <i class="pi pi-external-link" aria-hidden="true" />
+              <span class="visually-hidden">(öffnet in neuem Tab)</span>
+            </a>
+            <span class="pp-news-meta">
+              <span v-if="isNewItem(item.at)" class="pp-news-new">Neu</span>
+              <time :datetime="item.at">{{ formatNewsTime(item.at) }}</time>
+              <template v-if="item.source"> · {{ item.source }}</template>
+              <template v-if="sentimentOf(item.sentiment)">
+                · <span :class="sentimentOf(item.sentiment)!.cls">Stimmung {{ sentimentOf(item.sentiment)!.label }}</span>
+              </template>
+            </span>
+            <p v-if="item.summary" class="pp-news-summary">{{ item.summary }}</p>
+          </li>
+        </ul>
       </section>
 
       <!-- ── Depots ───────────────────────────────────────────────── -->
@@ -713,6 +796,67 @@ function transactionCash(tx: PortfolioTransaction): string {
 }
 .pp-link {
   color: var(--p-primary-color);
+}
+.pp-news {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pp-news-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.pp-news-item:last-child {
+  border-bottom: 0;
+}
+.pp-news-title {
+  font-weight: 600;
+  color: var(--p-text-color);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.pp-news-title:hover {
+  text-decoration: underline;
+}
+.pp-news-title:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.pp-news-title .pi {
+  font-size: 0.75em;
+  color: var(--p-text-muted-color);
+}
+.pp-news-meta {
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+}
+.pp-news-new {
+  display: inline-block;
+  margin-right: 0.4rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.pp-news-summary {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--p-text-color);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pp-sentiment-neutral {
+  color: var(--p-text-muted-color);
 }
 .pp-source {
   font-size: var(--text-sm);

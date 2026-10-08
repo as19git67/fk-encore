@@ -1611,6 +1611,13 @@
       "when": 1788652800049,
       "tag": "0229_finance_news",
       "breakpoints": true
+    },
+    {
+      "idx": 230,
+      "version": "7",
+      "when": 1788652800050,
+      "tag": "0230_finance_news_seen",
+      "breakpoints": true
     }
   ]
 }

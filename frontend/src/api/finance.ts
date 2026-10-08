@@ -2606,6 +2606,8 @@ export interface QuoteTile {
   points: QuotePoint[]
   /** Why there is nothing: no symbol found, or no prices yet. */
   status: 'ok' | 'unresolved' | 'pending'
+  /** News that came in since the user last opened the position's news. */
+  news_unread: number
 }
 
 export interface QuotesResponse {
@@ -2629,6 +2631,35 @@ export async function getQuotes(opts: { range: QuoteRange; accounts?: number[] }
   const params = new URLSearchParams({ range: opts.range })
   if (opts.accounts && opts.accounts.length > 0) params.set('accounts', opts.accounts.join(','))
   return apiFetch(`/finance/quotes?${params.toString()}`)
+}
+
+export interface PositionNewsItem {
+  id: number
+  url: string
+  title: string
+  source: string | null
+  at: string
+  summary: string | null
+  /** -1 (negative) … 1 (positive), where the provider gives one. */
+  sentiment: number | null
+  provider: string
+}
+
+export interface PositionNewsResponse {
+  items: PositionNewsItem[]
+  /** When the news of this security were last fetched; null when never. */
+  checked_at: string | null
+  /** When the user last looked at them; items newer are new to them. */
+  seen_at: string | null
+}
+
+export async function getPositionNews(key: string, limit = 20): Promise<PositionNewsResponse> {
+  const params = new URLSearchParams({ key, limit: String(limit) })
+  return apiFetch(`/finance/quotes/news?${params.toString()}`)
+}
+
+export async function markPositionNewsSeen(key: string): Promise<void> {
+  await apiFetch('/finance/quotes/news/seen', { method: 'POST', body: JSON.stringify({ key }) })
 }
 
 export async function refreshQuotes(opts: { accounts?: number[] } = {}): Promise<QuoteRefreshStats> {
