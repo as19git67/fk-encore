@@ -59,6 +59,8 @@ export async function activePositions(accountIds: number[]): Promise<ActivePosit
 
 /** A failed resolution is tried again after this long (at once when asked by hand). */
 const RESOLVE_RETRY_MS = 24 * 60 * 60_000;
+/** A symbol resolved without its security type is asked again after this long. */
+const TYPE_RETRY_MS = 24 * 60 * 60_000;
 /** The day's minutes are kept this long; the closes stay. */
 const INTRADAY_KEEP_DAYS = 35;
 /** The closes are refreshed when the newest is older than this. */
@@ -108,6 +110,13 @@ export async function refreshQuotes(
         (opts.retryUnresolved || (row.failed_at && now.getTime() - Date.parse(row.failed_at) >= RESOLVE_RETRY_MS))
       ) {
         row = await resolvePosition(p, now);
+      } else if (
+        row.symbol &&
+        row.security_type === null &&
+        (!row.resolved_at || now.getTime() - Date.parse(row.resolved_at) >= TYPE_RETRY_MS)
+      ) {
+        // Resolved before the type was kept: the news need it.
+        row = await resolvePosition(p, now, row);
       }
       if (!row.symbol) {
         stats.unresolved++;
@@ -155,9 +164,11 @@ export async function refreshQuotes(
   return stats;
 }
 
-async function resolvePosition(p: ActivePosition, now: Date) {
+async function resolvePosition(p: ActivePosition, now: Date, previous?: typeof financeQuoteSymbol.$inferSelect) {
   const provider = quoteProvider();
   const found = await provider.resolve({ isin: p.isin, wkn: p.wkn, name: p.name });
+  // The same symbol from the same provider keeps its loaded history.
+  const sameSymbol = previous && previous.provider === provider.name && found?.symbol === previous.symbol;
   const values = {
     position_key: p.key,
     isin: p.isin,
@@ -170,8 +181,9 @@ async function resolvePosition(p: ActivePosition, now: Date) {
     resolved_at: found ? now.toISOString() : null,
     failed_at: found ? null : now.toISOString(),
     failure: found ? null : "no symbol found",
-    // Another provider's history does not count as this one's.
-    backfilled_at: null,
+    // Another provider's (or symbol's) history does not count as this one's.
+    backfilled_at: sameSymbol ? previous.backfilled_at : null,
+    security_type: found?.securityType ?? null,
   };
   const [row] = await db
     .insert(financeQuoteSymbol)

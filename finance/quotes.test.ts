@@ -20,6 +20,7 @@ import {
   type HistoryRange,
   type QuoteProvider,
   type QuoteSeries,
+  type SecurityType,
 } from "./quote-provider";
 
 // Invented securities throughout.
@@ -76,6 +77,7 @@ function memoryProvider(opts: {
   symbols?: Record<string, string>;
   series?: (symbol: string, range: HistoryRange) => QuoteSeries;
   failWith?: Error;
+  securityType?: SecurityType | null;
 } = {}): QuoteProvider & { calls: { resolve: string[]; history: [string, HistoryRange][] } } {
   const calls = { resolve: [] as string[], history: [] as [string, HistoryRange][] };
   return {
@@ -84,7 +86,7 @@ function memoryProvider(opts: {
     async resolve(id) {
       calls.resolve.push(id.isin ?? id.wkn ?? "");
       const symbol = opts.symbols?.[id.isin ?? id.wkn ?? ""];
-      return symbol ? { symbol, name: `Name of ${symbol}`, exchange: "GER", currency: "EUR" } : null;
+      return symbol ? { symbol, name: `Name of ${symbol}`, exchange: "GER", currency: "EUR", securityType: opts.securityType === undefined ? "equity" : opts.securityType } : null;
     },
     async history(symbol, range) {
       calls.history.push([symbol, range]);
@@ -233,6 +235,27 @@ describe("refreshQuotes", () => {
     expect(provider.calls.history[0]).toEqual(["SNN.DE", "backfill"]);
     const [sym] = await db.select().from(financeQuoteSymbol);
     expect(sym).toMatchObject({ provider: "memory", symbol: "SNN.DE" });
+  });
+
+  it("asks again for the type of a symbol resolved without one, keeping its history", async () => {
+    const d = await insertDepot();
+    await insertHolding(d, "2026-02-03", ISIN_A, "5");
+    await db.insert(financeQuoteSymbol).values({
+      position_key: ISIN_A,
+      provider: "memory",
+      symbol: "SNN.DE",
+      resolved_at: new Date(NOW.getTime() - 2 * 24 * 60 * 60_000).toISOString(),
+      backfilled_at: NOW.toISOString(),
+    });
+    const provider = memoryProvider({ symbols: { [ISIN_A]: "SNN.DE" } });
+    setQuoteProvider(provider);
+    await refreshQuotes(await activePositions([d]), NOW);
+    expect(provider.calls.resolve).toEqual([ISIN_A]);
+    // No second backfill: the symbol did not change.
+    expect(provider.calls.history.map(([, r]) => r)).not.toContain("backfill");
+    const [sym] = await db.select().from(financeQuoteSymbol);
+    expect(sym).toMatchObject({ security_type: "equity" });
+    expect(sym!.backfilled_at).not.toBeNull();
   });
 
   it("prunes the day's minutes after a month, never the closes", async () => {

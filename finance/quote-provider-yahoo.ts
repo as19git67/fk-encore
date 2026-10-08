@@ -19,6 +19,7 @@ import {
   type QuoteProvider,
   type QuoteSeries,
   type QuoteSymbol,
+  type SecurityType,
 } from "./quote-provider";
 
 const SEARCH_URL = "https://query2.finance.yahoo.com/v1/finance/search";
@@ -53,7 +54,19 @@ export function pickSymbol(quotes: SearchQuote[]): QuoteSymbol | null {
     name: q.longname ?? q.shortname ?? null,
     exchange: q.exchange ?? null,
     currency: null,
+    securityType: yahooSecurityType(q.quoteType),
   };
+}
+
+/** Yahoo's quoteType as a security type. */
+export function yahooSecurityType(quoteType: string | undefined): SecurityType | null {
+  switch ((quoteType ?? "").toUpperCase()) {
+    case "": return null;
+    case "EQUITY": return "equity";
+    case "ETF": return "etf";
+    case "MUTUALFUND": return "fund";
+    default: return "other";
+  }
 }
 
 function rank(q: SearchQuote): number {

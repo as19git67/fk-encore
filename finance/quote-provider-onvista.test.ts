@@ -113,7 +113,7 @@ describe("onvistaQuoteProvider", () => {
     });
 
     const sym = await onvistaQuoteProvider.resolve({ isin: ISIN, wkn: null, name: null });
-    expect(sym).toEqual({ symbol: "STOCK:42:2", name: "Sonnenobst AG", exchange: "Xetra", currency: "EUR" });
+    expect(sym).toEqual({ symbol: "STOCK:42:2", name: "Sonnenobst AG", exchange: "Xetra", currency: "EUR", securityType: "equity" });
 
     const closes = await onvistaQuoteProvider.history("STOCK:42:2", "backfill");
     expect(closes).toMatchObject({ currency: "EUR", points: [{ price: 10.5 }] });

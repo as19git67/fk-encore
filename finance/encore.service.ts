@@ -43,16 +43,26 @@ import "./document-match-cleanup-cron";
 import "./forecast-snapshot-cron";
 // Side-effect: registers the refresh of the held securities' quotes.
 import "./quotes-cron";
-import { setQuoteProvider } from "./quote-provider";
+import { setNewsProvider, setQuoteProvider } from "./quote-provider";
 import { yahooQuoteProvider } from "./quote-provider-yahoo";
 import { onvistaQuoteProvider } from "./quote-provider-onvista";
+import { eodhdFromEnvironment } from "./quote-provider-eodhd-config";
 
 import { startFinanceImportWatcher } from "./import-pending";
 
 // Prices come from Onvista. Yahoo answers a server's requests with 429
 // whatever the rate (it wants a browser's TLS fingerprint), so it stays
-// only as a choice: FINANCE_QUOTE_PROVIDER=yahoo.
-setQuoteProvider(process.env.FINANCE_QUOTE_PROVIDER === "yahoo" ? yahooQuoteProvider : onvistaQuoteProvider);
+// only as a choice: FINANCE_QUOTE_PROVIDER=yahoo. EODHD serves prices when
+// chosen (FINANCE_QUOTE_PROVIDER=eodhd) and its token is set; news come
+// from EODHD whenever the token is set, and are off otherwise.
+{
+  const eodhd = eodhdFromEnvironment();
+  const choice = process.env.FINANCE_QUOTE_PROVIDER;
+  setQuoteProvider(
+    choice === "eodhd" && eodhd ? eodhd : choice === "yahoo" ? yahooQuoteProvider : onvistaQuoteProvider,
+  );
+  setNewsProvider(eodhd);
+}
 
 // Arm all timers registered above. Synchronous, fire-and-forget jobs
 // run on their own timers from here on.

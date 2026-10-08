@@ -9,6 +9,7 @@
     "ApnsPrivateKey": { "$env": "APNS_PRIVATE_KEY" },
     "FinanceCredentialsKey": { "$env": "FINANCE_CREDENTIALS_KEY" },
     "FinanceFintsProductId": { "$env": "FINANCE_FINTS_PRODUCT_ID" },
-    "FinanceFintsProductVersion": { "$env": "FINANCE_FINTS_PRODUCT_VERSION" }
+    "FinanceFintsProductVersion": { "$env": "FINANCE_FINTS_PRODUCT_VERSION" },
+    "EodhdApiToken": { "$env": "EODHD_API_TOKEN" }
   }
 }

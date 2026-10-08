@@ -10,7 +10,7 @@ describe("pickSymbol", () => {
       { symbol: "SNN.DE", exchange: "GER", longname: "Sonnenobst AG", quoteType: "EQUITY" },
       { symbol: "SNN", exchange: "NMS", longname: "Sonnenobst AG", quoteType: "EQUITY" },
     ]);
-    expect(picked).toEqual({ symbol: "SNN.DE", name: "Sonnenobst AG", exchange: "GER", currency: null });
+    expect(picked).toEqual({ symbol: "SNN.DE", name: "Sonnenobst AG", exchange: "GER", currency: null, securityType: "equity" });
   });
 
   it("takes the first match when no German venue lists it", () => {

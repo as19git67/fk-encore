@@ -37,11 +37,16 @@ history is kept in our own database so it outlives the provider.
    range in `route.query`, tiles with Chart.js sparklines, a refresh
    button calling `/finance/quotes/refresh`, tile click → position page.
    Entry in `config/modules.ts` next to Portfolio.
-3. **EODHD adapter with news.** `finance/quote-provider-eodhd.ts`:
-   quotes by ISIN (EODHD's search knows ISINs), and the Financial News
-   API (title, link, source, date, summary, tags, sentiment). Token from
-   the secret `EodhdApiToken`; the provider in force is a setting
-   (`yahoo` | `eodhd`), Yahoo stays the default without a token.
+3. **EODHD adapter with news** — built. `finance/quote-provider-eodhd.ts`:
+   quotes by ISIN (search, end-of-day, the delayed real-time price) and
+   the Financial News API (title, link, date, summary, sentiment).
+   Quotes and news are **separate providers** (`setQuoteProvider`,
+   `setNewsProvider`): on the free plan EODHD cannot carry quotes every
+   five minutes, so the quotes stay with Onvista and EODHD brings the news.
+   Configuration (`finance/quote-provider-eodhd-config.ts`): secret
+   `EodhdApiToken` (env `EODHD_API_TOKEN`), `FINANCE_EODHD_DAILY_CALLS`
+   (default 20), `FINANCE_QUOTE_PROVIDER=eodhd` for quotes on a paid plan.
+   No token: no news, quotes from Onvista.
    - The free plan allows 20 API calls a day; a news request costs 5 per
      symbol, so about four securities a day. The scheduler therefore
      keeps a **news budget** of its own, separate from the quote ticks:
@@ -50,9 +55,17 @@ history is kept in our own database so it outlives the provider.
      500 welcome calls cover the first round.
    - `QuoteProvider.news?(symbol, since)` is optional: a provider
      without news leaves it out and everything else keeps working.
-   - Table `finance_quote_news` (position_key, id, title, url, source,
-     at, summary, sentiment, provider), deduplicated by `id`, kept 90
-     days. The news history is ours like the prices.
+   - Table `finance_quote_news`, deduplicated by (position, url), kept 90
+     days; `finance_news_source` holds the news provider's symbol per
+     position and when it was last asked; `finance_provider_usage` counts
+     the calls charged per provider and UTC day (one atomic statement, so
+     two runs cannot both spend the last calls). Migration 0229, which
+     also adds `security_type` to `finance_quote_symbol`.
+   - `finance/news.ts`: `refreshNews` (job `finance-news-refresh`, hourly;
+     equities and unknown types only — an unknown type is decided by the
+     news provider's resolve; at most once in 20 hours per security; the
+     first fetch reaches back 30 days), `GET /finance/quotes/news?key=`
+     for a position the caller's depots hold or held.
 4. **News on the pages.** The position page gets a "Nachrichten"
    section (title, source, time, link opens externally, a sentiment
    marker where the provider gives one); the quotes tile shows a count

@@ -22,10 +22,8 @@ import {
   type QuoteProvider,
   type QuoteSeries,
   type QuoteSymbol,
+  type SecurityType,
 } from "./quote-provider";
-
-/** What kind of security an instrument is; decides which venue's price counts. */
-export type OnvistaKind = "equity" | "etf" | "fund" | "other";
 
 const BASE_URL = "https://api.onvista.de/api/v1";
 const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -70,7 +68,7 @@ export function pickInstrument(body: SearchBody, id: { isin: string | null; wkn:
 }
 
 /** Onvista's types as a security type; an ETF is a fund whose type or attributes say so. */
-export function onvistaSecurityType(i: OnvistaInstrument): OnvistaKind {
+export function onvistaSecurityType(i: OnvistaInstrument): SecurityType {
   if (i.entityType === "STOCK") return "equity";
   if (i.entityType === "FUND") {
     const marks = [i.instrumentType ?? "", ...(i.entityAttributes ?? [])].join(" ").toUpperCase();
@@ -193,6 +191,7 @@ export const onvistaQuoteProvider: QuoteProvider = {
       name: instrument.name ?? null,
       exchange: notation.market.name ?? notation.market.codeExchange ?? null,
       currency,
+      securityType: type,
     };
   },
 
