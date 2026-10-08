@@ -321,18 +321,39 @@ export async function buildQuoteTiles(accountIds: number[], range: QuoteRange, n
     (await db.select().from(financeQuoteSymbol).where(inArray(financeQuoteSymbol.position_key, keys))).map((r) => [r.position_key, r]),
   );
   const { from, kind } = rangeWindow(range, now);
-  const conditions = [inArray(financeQuote.position_key, keys), eq(financeQuote.kind, kind)];
+  const columns = { key: financeQuote.position_key, at: financeQuote.at, price: financeQuote.price, currency: financeQuote.currency, kind: financeQuote.kind };
+  const conditions = [inArray(financeQuote.position_key, keys)];
+  // A day or a week reads the closes too: the minutes are kept only from
+  // the day the quotes started, and on a closed market there are none.
+  if (kind === "daily") conditions.push(eq(financeQuote.kind, "daily"));
   if (from) conditions.push(gte(financeQuote.at, from));
-  const rows = await db
-    .select({ key: financeQuote.position_key, at: financeQuote.at, price: financeQuote.price, currency: financeQuote.currency })
-    .from(financeQuote)
-    .where(and(...conditions))
-    .orderBy(asc(financeQuote.at));
+  const rows = await db.select(columns).from(financeQuote).where(and(...conditions)).orderBy(asc(financeQuote.at));
   const byKey = new Map<string, typeof rows>();
   for (const r of rows) {
     const list = byKey.get(r.key) ?? [];
     list.push(r);
     byKey.set(r.key, list);
+  }
+  if (kind === "intraday") {
+    // The closes fill the window up to the first minute; without a close in
+    // the window the one before it is the start, so the change is measured
+    // against the last close.
+    const before = from
+      ? await db
+          .selectDistinctOn([financeQuote.position_key], columns)
+          .from(financeQuote)
+          .where(and(inArray(financeQuote.position_key, keys), eq(financeQuote.kind, "daily"), lt(financeQuote.at, from)))
+          .orderBy(financeQuote.position_key, sql`${financeQuote.at} DESC`)
+      : [];
+    const beforeByKey = new Map(before.map((r) => [r.key, r]));
+    for (const key of keys) {
+      const list = byKey.get(key) ?? [];
+      const firstMinute = list.find((r) => r.kind === "intraday");
+      const closes = list.filter((r) => r.kind === "daily" && (!firstMinute || Date.parse(r.at) < Date.parse(firstMinute.at)));
+      const start = closes.length === 0 ? beforeByKey.get(key) : undefined;
+      const merged = [...(start ? [start] : []), ...closes, ...list.filter((r) => r.kind === "intraday")];
+      if (merged.length > 0) byKey.set(key, merged);
+    }
   }
   // The newest price of each security, from either kind — a day's range
   // on a closed market would otherwise show nothing.

@@ -7,6 +7,7 @@ import {
   parseHistory,
   pickInstrument,
   pickNotation,
+  resetOnvistaIntradayVariant,
 } from "./quote-provider-onvista";
 import { QuoteRateLimitedError } from "./quote-provider";
 
@@ -14,7 +15,10 @@ import { QuoteRateLimitedError } from "./quote-provider";
 const ISIN = "XF00SONNE005";
 const FUND_ISIN = "XF00MONDE003";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  resetOnvistaIntradayVariant();
+});
 
 describe("pickInstrument", () => {
   it("takes the hit with this ISIN or WKN among the types with prices", () => {
@@ -123,7 +127,31 @@ describe("onvistaQuoteProvider", () => {
     expect(urls[0]).toContain(`searchValue=${ISIN}`);
     expect(urls[1]).toContain(`/stocks/ISIN:${ISIN}/snapshot`);
     expect(urls[2]).toMatch(/\/instruments\/STOCK\/42\/eod_history\?idNotation=2&range=Y5&startDate=\d{4}-\d{2}-\d{2}/);
-    expect(urls[3]).toMatch(/\/instruments\/STOCK\/42\/chart_history\?idNotation=2&resolution=5m/);
+    expect(urls[3]).toMatch(/\/instruments\/STOCK\/42\/chart_history\?idNotation=2&range=D1&resolution=5m/);
+  });
+
+  it("tries the day's variants in turn and keeps the one that answered with prices", async () => {
+    const urls = stub({
+      "resolution=5m": () => new Response("bad request", { status: 400 }),
+      "resolution=1m": () => Response.json({ datetimeLast: [], last: [] }),
+      "chart_history": () => Response.json({ datetimeLast: [1_770_000_300], last: [10.55] }),
+    });
+    const first = await onvistaQuoteProvider.history("STOCK:42:2", "intraday");
+    expect(first.points.map((p) => p.price)).toEqual([10.55]);
+    expect(urls).toHaveLength(3);
+
+    // The variant that worked goes first from now on.
+    const second = await onvistaQuoteProvider.history("STOCK:42:2", "intraday");
+    expect(second.points).toHaveLength(1);
+    expect(urls).toHaveLength(4);
+    expect(urls[3]).toMatch(/range=D1&withCurrentDay=true$/);
+  });
+
+  it("answers an empty day when the market is closed, and the first error when nothing works", async () => {
+    stub({ "resolution=5m": () => Response.json({ datetimeLast: [], last: [] }) });
+    expect((await onvistaQuoteProvider.history("STOCK:42:2", "intraday")).points).toEqual([]);
+    stub({});
+    await expect(onvistaQuoteProvider.history("STOCK:42:2", "intraday")).rejects.toThrow(/onvista 404/);
   });
 
   it("answers null for an unknown security and reports a 429 as a rate limit", async () => {

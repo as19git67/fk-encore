@@ -102,3 +102,9 @@ history is kept in our own database so it outlives the provider.
   Host to allow: `api.onvista.de`.
 - The sandbox's network policy allows none of the providers; the adapters
   cannot be smoke-tested here, only in the deployed app.
+- Onvista's day (`chart_history`) is undocumented beyond `range` and
+  `resolution`; the adapter tries `range=D1` with 5-minute, 1-minute and
+  default resolution and keeps the first that answers with prices. A day
+  or a week on the page reads the closes too, so both show a line before
+  any minutes are stored, and a day's change is measured against the
+  last close.

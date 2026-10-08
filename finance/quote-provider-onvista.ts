@@ -166,6 +166,49 @@ async function getJson(path: string): Promise<unknown> {
   return res.json();
 }
 
+/**
+ * The day's prices. chart_history is undocumented; what is known for sure
+ * is `range` and `resolution` (`range=MAX&resolution=1D`). Which
+ * resolutions it takes below a day is not, so the variants are tried in
+ * order and the first that answers with prices is kept for later calls.
+ * An empty answer (a closed market) proves nothing and is not kept.
+ */
+const INTRADAY_VARIANTS = [
+  "range=D1&resolution=5m&withCurrentDay=true",
+  "range=D1&resolution=1m&withCurrentDay=true",
+  "range=D1&withCurrentDay=true",
+];
+let intradayVariant: number | null = null;
+
+/** For tests: forget which variant worked. */
+export function resetOnvistaIntradayVariant(): void {
+  intradayVariant = null;
+}
+
+async function intraday(base: string, idNotation: string, symbol: string, currency: string | null): Promise<QuoteSeries> {
+  const order = intradayVariant === null
+    ? INTRADAY_VARIANTS.map((_, i) => i)
+    : [intradayVariant, ...INTRADAY_VARIANTS.map((_, i) => i).filter((i) => i !== intradayVariant)];
+  let empty: QuoteSeries | null = null;
+  let firstError: unknown = null;
+  for (const i of order) {
+    try {
+      const body = (await getJson(`${base}/chart_history?idNotation=${idNotation}&${INTRADAY_VARIANTS[i]}`)) as HistoryBody;
+      const series = parseHistory(body, symbol, currency);
+      if (series.points.length > 0) {
+        intradayVariant = i;
+        return series;
+      }
+      empty ??= series;
+    } catch (err) {
+      if (err instanceof QuoteRateLimitedError) throw err;
+      firstError ??= err;
+    }
+  }
+  if (empty) return empty;
+  throw firstError instanceof Error ? firstError : new Error(`onvista: no intraday prices for ${symbol}`);
+}
+
 /** The currency per symbol, from the snapshot; history answers may lack it. */
 const currencies = new Map<string, string | null>();
 
@@ -202,10 +245,7 @@ export const onvistaQuoteProvider: QuoteProvider = {
     const now = new Date();
     const day = 24 * 60 * 60_000;
     const currency = currencies.get(symbol) ?? null;
-    if (range === "intraday") {
-      const qs = `idNotation=${s.idNotation}&resolution=5m&startDate=${isoDay(new Date(now.getTime() - day))}&endDate=${isoDay(new Date(now.getTime() + day))}`;
-      return parseHistory((await getJson(`${base}/chart_history?${qs}`)) as HistoryBody, symbol, currency);
-    }
+    if (range === "intraday") return intraday(base, s.idNotation, symbol, currency);
     const [r, days] = range === "backfill" ? ["Y5", 5 * 366] : ["M1", 31];
     const qs = `idNotation=${s.idNotation}&range=${r}&startDate=${isoDay(new Date(now.getTime() - days * day))}`;
     return parseHistory((await getJson(`${base}/eod_history?${qs}`)) as HistoryBody, symbol, currency);
