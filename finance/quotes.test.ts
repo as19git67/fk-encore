@@ -177,7 +177,7 @@ describe("refreshQuotes", () => {
     expect(bar!.price).toBe("10.900000");
   });
 
-  it("records a security the provider does not know and asks again only after a week", async () => {
+  it("records a security the provider does not know and asks again after a day, or at once by hand", async () => {
     const d = await insertDepot();
     await insertHolding(d, "2026-02-03", ISIN_B, "5");
     const provider = memoryProvider({});
@@ -189,10 +189,13 @@ describe("refreshQuotes", () => {
     const [sym] = await db.select().from(financeQuoteSymbol);
     expect(sym).toMatchObject({ symbol: null, failure: "no symbol found" });
 
-    await refreshQuotes(positions, new Date(NOW.getTime() + 24 * 60 * 60_000));
+    await refreshQuotes(positions, new Date(NOW.getTime() + 12 * 60 * 60_000));
     expect(provider.calls.resolve).toHaveLength(1);
-    await refreshQuotes(positions, new Date(NOW.getTime() + 8 * 24 * 60 * 60_000));
+    await refreshQuotes(positions, new Date(NOW.getTime() + 25 * 60 * 60_000));
     expect(provider.calls.resolve).toHaveLength(2);
+    // Asked by hand: at once.
+    await refreshQuotes(positions, new Date(NOW.getTime() + 26 * 60 * 60_000), { retryUnresolved: true });
+    expect(provider.calls.resolve).toHaveLength(3);
   });
 
   it("ends the run on a rate limit and keeps the other errors per position", async () => {

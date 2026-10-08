@@ -240,7 +240,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
         >
           <template #option="{ option }">
             <i v-if="option.icon" :class="option.icon" aria-hidden="true" />
-            <span class="list-toolbar__view-label">{{ option.label }}</span>
+            <span class="list-toolbar__view-label" :class="{ 'list-toolbar__view-label--beside-icon': option.icon }">{{ option.label }}</span>
           </template>
         </SelectButton>
 
@@ -369,7 +369,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   white-space: nowrap;
 }
 
-.list-toolbar__view-label {
+.list-toolbar__view-label--beside-icon {
   margin-left: 0.35rem;
 }
 
@@ -388,7 +388,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
     max-width: none;
   }
   .list-toolbar__button :deep(.p-button-label),
-  .list-toolbar__view-label {
+  /* Only a label with an icon beside it: a view without icons (a range
+     switch: 1T · 1W · 1M) would be left with empty buttons. */
+  .list-toolbar__view-label--beside-icon {
     display: none;
   }
   .list-toolbar__clear-all :deep(.p-button-label) {

@@ -45,11 +45,14 @@ import "./forecast-snapshot-cron";
 import "./quotes-cron";
 import { setQuoteProvider } from "./quote-provider";
 import { yahooQuoteProvider } from "./quote-provider-yahoo";
+import { onvistaQuoteProvider } from "./quote-provider-onvista";
 
 import { startFinanceImportWatcher } from "./import-pending";
 
-// Prices come from Yahoo until another provider is wired in.
-setQuoteProvider(yahooQuoteProvider);
+// Prices come from Onvista. Yahoo answers a server's requests with 429
+// whatever the rate (it wants a browser's TLS fingerprint), so it stays
+// only as a choice: FINANCE_QUOTE_PROVIDER=yahoo.
+setQuoteProvider(process.env.FINANCE_QUOTE_PROVIDER === "yahoo" ? yahooQuoteProvider : onvistaQuoteProvider);
 
 // Arm all timers registered above. Synchronous, fire-and-forget jobs
 // run on their own timers from here on.

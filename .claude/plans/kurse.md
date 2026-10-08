@@ -9,9 +9,13 @@ history is kept in our own database so it outlives the provider.
 
 ## Decisions
 
-- **Provider:** Yahoo Finance's unofficial JSON endpoints to start — free,
-  knows German exchanges and funds, about fifteen minutes delayed, no
-  contract. The provider sits behind `finance/quote-provider.ts` so EODHD
+- **Provider:** Onvista's JSON API (`api.onvista.de/api/v1`), undocumented
+  but free and without a token; it knows German exchanges and funds,
+  including the fund company's own price, and finds a security by ISIN or
+  WKN. Yahoo was the first choice but answers a server's requests with 429
+  whatever the rate — it wants a browser's TLS fingerprint, as yfinance and
+  Portfolio Performance found in 2025 — so it stays only as an option
+  (`FINANCE_QUOTE_PROVIDER=yahoo`). The provider sits behind `finance/quote-provider.ts` so EODHD
   (or another) can replace it without touching the service or the page.
 - **History is stored.** `finance_quote` keeps the day's minutes for a
   month and the closes for good. Switching providers re-resolves the
@@ -72,8 +76,16 @@ history is kept in our own database so it outlives the provider.
   waits a quarter of an hour. Hosts to allow: `fc.yahoo.com`,
   `query1.finance.yahoo.com`, `query2.finance.yahoo.com` (later
   `feeds.finance.yahoo.com` for news, `eodhd.com` for EODHD).
-- A security the provider does not know stays `unresolved` and is asked
-  again after a week. The symbol can be set by hand in
+- A security the provider does not know stays `unresolved`, is logged
+  with its ISIN, and is asked again after a day — at once when the page's
+  refresh button is pressed. The symbol can be set by hand in
   `finance_quote_symbol` until a UI for it exists.
-- The sandbox's network policy does not allow `query1/query2.finance.yahoo.com`;
-  the adapter cannot be smoke-tested here, only in the deployed app.
+- Every run logs a summary ("quote refresh done": positions, resolved,
+  unresolved, fetches, new prices, errors, rate limit). The cadence lives
+  in the schedule, so the admin's "run now" always runs.
+- Onvista: a security resolves in two calls (search, snapshot) to the
+  symbol `TYPE:entityValue:idNotation`; the notation is Xetra, Tradegate,
+  Frankfurt, … for shares and the fund company ("KAG") first for funds.
+  Host to allow: `api.onvista.de`.
+- The sandbox's network policy allows none of the providers; the adapters
+  cannot be smoke-tested here, only in the deployed app.

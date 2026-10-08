@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dueNow, marketsOpen } from "./quotes-cron";
+import { marketsOpen, nextQuoteTick } from "./quotes-cron";
 
 describe("marketsOpen", () => {
   it("is true on a weekday between 8 and 22 Berlin time", () => {
@@ -19,24 +19,18 @@ describe("marketsOpen", () => {
   });
 });
 
-describe("dueNow", () => {
+describe("nextQuoteTick", () => {
   const open = new Date("2026-02-04T10:00:00+01:00");
   const night = new Date("2026-02-04T23:00:00+01:00");
-  const min = (d: Date, n: number) => new Date(d.getTime() - n * 60_000);
+  const plus = (d: Date, min: number) => new Date(d.getTime() + min * 60_000);
 
-  it("fetches at once when it never has", () => {
-    expect(dueNow(open, null, null)).toBe(true);
+  it("fires every five minutes while markets trade, hourly otherwise", () => {
+    expect(nextQuoteTick(open, null)).toEqual(plus(open, 5));
+    expect(nextQuoteTick(night, null)).toEqual(plus(night, 60));
   });
 
-  it("fetches every five minutes while markets trade, hourly otherwise", () => {
-    expect(dueNow(open, min(open, 5), null)).toBe(true);
-    expect(dueNow(open, min(open, 3), null)).toBe(false);
-    expect(dueNow(night, min(night, 30), null)).toBe(false);
-    expect(dueNow(night, min(night, 60), null)).toBe(true);
-  });
-
-  it("waits out a backoff", () => {
-    expect(dueNow(open, min(open, 60), new Date(open.getTime() + 60_000))).toBe(false);
-    expect(dueNow(open, min(open, 60), min(open, 1))).toBe(true);
+  it("waits out a backoff, and ignores one that is over", () => {
+    expect(nextQuoteTick(open, plus(open, 15))).toEqual(plus(open, 15));
+    expect(nextQuoteTick(open, plus(open, -1))).toEqual(plus(open, 5));
   });
 });
