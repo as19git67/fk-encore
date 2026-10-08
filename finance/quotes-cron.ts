@@ -4,10 +4,13 @@
  * Every five minutes while German markets trade (Xetra 9:00–17:30, the
  * regional exchanges until 22:00), hourly otherwise — a fund's price
  * changes once a day, and the provider is not to be asked for nothing.
- * After a rate limit the next tick waits a quarter of an hour.
+ * After a rate limit the next tick waits a quarter of an hour. Each run
+ * logs what it did, so a quiet log means no run, not a silent failure.
  */
 
-import { everyMs, schedule } from "../lib/local-cron";
+import log from "encore.dev/log";
+
+import { schedule } from "../lib/local-cron";
 
 import db from "../db/database";
 import { financeAccount, financeAccountType } from "../db/schema";
@@ -34,15 +37,17 @@ export function marketsOpen(now: Date): boolean {
   return hour >= 8 && hour < 22;
 }
 
-let lastRunAt: Date | null = null;
 let backoffUntil: Date | null = null;
 
-/** Whether this tick should fetch, given when the last one did. */
-export function dueNow(now: Date, last: Date | null, backoff: Date | null): boolean {
-  if (backoff && now < backoff) return false;
-  if (!last) return true;
-  const minutes = (now.getTime() - last.getTime()) / 60_000;
-  return minutes >= (marketsOpen(now) ? TICK_MINUTES : QUIET_MINUTES) - 0.5;
+/**
+ * When the next tick fires: after a rate limit at the end of the backoff,
+ * else in five minutes while markets trade and in an hour otherwise. The
+ * cadence lives here, in the schedule, so that a run started by hand
+ * (the admin's "run now") always runs.
+ */
+export function nextQuoteTick(after: Date, backoff: Date | null): Date {
+  if (backoff && backoff > after) return backoff;
+  return new Date(after.getTime() + (marketsOpen(after) ? TICK_MINUTES : QUIET_MINUTES) * 60_000);
 }
 
 async function openDepotIds(): Promise<number[]> {
@@ -55,10 +60,17 @@ async function openDepotIds(): Promise<number[]> {
 }
 
 export async function refreshQuotesTick(now = new Date()): Promise<void> {
-  if (!dueNow(now, lastRunAt, backoffUntil)) return;
-  lastRunAt = now;
+  if (backoffUntil && now < backoffUntil) {
+    log.info("quote refresh skipped: the provider asked to wait", { until: backoffUntil.toISOString() });
+    return;
+  }
   const stats = await refreshQuotes(await activePositions(await openDepotIds()), now);
   backoffUntil = stats.rate_limited ? new Date(now.getTime() + BACKOFF_MINUTES * 60_000) : null;
+}
+
+/** For tests: forget a backoff. */
+export function resetQuoteBackoff(): void {
+  backoffUntil = null;
 }
 
 schedule({
@@ -66,6 +78,6 @@ schedule({
   description: "Fetch current prices of the securities the depots hold",
   service: "finance",
   scheduleLabel: `every ${TICK_MINUTES}m while markets trade, hourly otherwise`,
-  nextFire: everyMs(TICK_MINUTES * 60_000),
+  nextFire: (after) => nextQuoteTick(after, backoffUntil),
   run: () => refreshQuotesTick(),
 });

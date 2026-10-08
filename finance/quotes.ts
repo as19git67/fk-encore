@@ -57,8 +57,8 @@ export async function activePositions(accountIds: number[]): Promise<ActivePosit
   return [...byKey.values()];
 }
 
-/** A failed resolution is tried again after this long. */
-const RESOLVE_RETRY_MS = 7 * 24 * 60 * 60_000;
+/** A failed resolution is tried again after this long (at once when asked by hand). */
+const RESOLVE_RETRY_MS = 24 * 60 * 60_000;
 /** The day's minutes are kept this long; the closes stay. */
 const INTRADAY_KEEP_DAYS = 35;
 /** The closes are refreshed when the newest is older than this. */
@@ -80,9 +80,16 @@ export interface RefreshStats {
  * the provider has not been asked about, load the history of the ones
  * it has just resolved, and fetch today's prices for all.
  */
-export async function refreshQuotes(positions: ActivePosition[], now = new Date()): Promise<RefreshStats> {
+export async function refreshQuotes(
+  positions: ActivePosition[],
+  now = new Date(),
+  opts: { retryUnresolved?: boolean } = {},
+): Promise<RefreshStats> {
   const stats: RefreshStats = { positions: positions.length, resolved: 0, unresolved: 0, fetched: 0, points: 0, rate_limited: false, errors: [] };
-  if (positions.length === 0) return stats;
+  if (positions.length === 0) {
+    log.info("quote refresh: no held security with an ISIN or WKN");
+    return stats;
+  }
   const provider = quoteProvider();
 
   const known = new Map(
@@ -96,11 +103,15 @@ export async function refreshQuotes(positions: ActivePosition[], now = new Date(
       if (!row || row.provider !== provider.name) {
         // Never asked, or asked another provider: ask this one.
         row = await resolvePosition(p, now);
-      } else if (!row.symbol && row.failed_at && now.getTime() - Date.parse(row.failed_at) >= RESOLVE_RETRY_MS) {
+      } else if (
+        !row.symbol &&
+        (opts.retryUnresolved || (row.failed_at && now.getTime() - Date.parse(row.failed_at) >= RESOLVE_RETRY_MS))
+      ) {
         row = await resolvePosition(p, now);
       }
       if (!row.symbol) {
         stats.unresolved++;
+        log.info("quote provider knows no symbol for a position", { position: p.key, provider: provider.name });
         continue;
       }
       stats.resolved++;
@@ -131,6 +142,16 @@ export async function refreshQuotes(positions: ActivePosition[], now = new Date(
   }
 
   await pruneIntraday(now);
+  log.info("quote refresh done", {
+    provider: provider.name,
+    positions: stats.positions,
+    resolved: stats.resolved,
+    unresolved: stats.unresolved,
+    fetched: stats.fetched,
+    points: stats.points,
+    errors: stats.errors.length,
+    rate_limited: stats.rate_limited,
+  });
   return stats;
 }
 
@@ -378,6 +399,7 @@ export const refreshQuotesNow = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
     const depots = await visibleDepots(auth, parseAccountIds(accounts));
-    return refreshQuotes(await activePositions(depots.map((d) => d.id)));
+    // Asked by hand: a security without a symbol is asked again at once.
+    return refreshQuotes(await activePositions(depots.map((d) => d.id)), new Date(), { retryUnresolved: true });
   },
 );
