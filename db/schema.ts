@@ -2179,7 +2179,56 @@ export const financeQuoteSymbol = pgTable("finance_quote_symbol", {
   failure: text("failure"),
   /** The daily history was loaded once; afterwards only the recent days are refreshed. */
   backfilled_at: timestamp("backfilled_at", { mode: "string", withTimezone: true }),
+  /** "equity" | "etf" | "fund" | "other" as the provider says; null when unknown. */
+  security_type: text("security_type"),
 });
+
+/**
+ * Where a position's news come from: the news provider's own symbol for
+ * it, and when its news were last fetched (the scheduler asks the ones
+ * longest unasked first).
+ */
+export const financeNewsSource = pgTable("finance_news_source", {
+  position_key: text("position_key").primaryKey(),
+  provider: text("provider").notNull(),
+  symbol: text("symbol"),
+  resolved_at: timestamp("resolved_at", { mode: "string", withTimezone: true }),
+  failed_at: timestamp("failed_at", { mode: "string", withTimezone: true }),
+  checked_at: timestamp("checked_at", { mode: "string", withTimezone: true }),
+});
+
+/** News about the held securities, kept 90 days. */
+export const financeQuoteNews = pgTable(
+  "finance_quote_news",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    position_key: text("position_key").notNull(),
+    provider: text("provider").notNull(),
+    url: text("url").notNull(),
+    title: text("title").notNull(),
+    source: text("source"),
+    at: timestamp("at", { mode: "string", withTimezone: true }).notNull(),
+    summary: text("summary"),
+    sentiment: real("sentiment"),
+    fetched_at: timestamp("fetched_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_quote_news_key_url").on(table.position_key, table.url),
+    index("finance_quote_news_key_at").on(table.position_key, table.at),
+  ],
+);
+
+/** Calls charged against a metered provider's daily allowance. */
+export const financeProviderUsage = pgTable(
+  "finance_provider_usage",
+  {
+    provider: text("provider").notNull(),
+    /** The provider's day (UTC — allowances reset at midnight GMT). */
+    day: date("day", { mode: "string" }).notNull(),
+    calls: integer("calls").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.provider, table.day] })],
+);
 
 export const financeQuote = pgTable(
   "finance_quote",
