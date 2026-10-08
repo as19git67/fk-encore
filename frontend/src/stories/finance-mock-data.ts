@@ -1,4 +1,4 @@
-import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, QuotesResponse, SettlementInspection, Tag, Transaction } from '../api/finance'
+import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, PositionNewsResponse, QuotesResponse, SettlementInspection, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -677,6 +677,7 @@ export const MOCK_QUOTES: QuotesResponse = {
       change: { absolute: '6.10', percent: '5.16' },
       points: quoteSeries(118.2, 124.3, 22, '2026-08-01T07:00:00Z', 24 * 60 * 60_000),
       status: 'ok',
+      news_unread: 3,
     },
     {
       key: PF_ISIN_B,
@@ -690,6 +691,7 @@ export const MOCK_QUOTES: QuotesResponse = {
       change: { absolute: '-1.38', percent: '-3.25' },
       points: quoteSeries(42.5, 41.12, 22, '2026-08-01T07:00:00Z', 24 * 60 * 60_000),
       status: 'ok',
+      news_unread: 0,
     },
     {
       key: 'XF00GAMMA007',
@@ -703,6 +705,7 @@ export const MOCK_QUOTES: QuotesResponse = {
       change: null,
       points: [{ at: '2026-08-31T16:00:00.000Z', price: '88.000000' }],
       status: 'ok',
+      news_unread: 1,
     },
     {
       key: 'XF00DELTA004',
@@ -716,6 +719,7 @@ export const MOCK_QUOTES: QuotesResponse = {
       change: null,
       points: [],
       status: 'unresolved',
+      news_unread: 0,
     },
     {
       key: 'XF00EPSIL001',
@@ -729,8 +733,47 @@ export const MOCK_QUOTES: QuotesResponse = {
       change: null,
       points: [],
       status: 'pending',
+      news_unread: 0,
     },
   ],
 }
 
 export const MOCK_QUOTES_EMPTY: QuotesResponse = { range: '1m', as_of: null, tiles: [] }
+
+/** News about a security, invented throughout. */
+export const MOCK_POSITION_NEWS: PositionNewsResponse = {
+  checked_at: '2026-02-04T08:00:00.000Z',
+  seen_at: '2026-02-03T12:00:00.000Z',
+  items: [
+    {
+      id: 3,
+      url: 'https://beispiel.test/nachrichten/3',
+      title: 'Beispiel AG hebt die Prognose für das laufende Jahr an',
+      source: 'beispiel.test',
+      at: '2026-02-04T07:30:00.000Z',
+      summary: 'Der Vorstand rechnet mit einem höheren Umsatz als bisher; als Grund nennt er eine stärkere Nachfrage in allen Regionen.',
+      sentiment: 0.6,
+      provider: 'eodhd',
+    },
+    {
+      id: 2,
+      url: 'https://beispiel.test/nachrichten/2',
+      title: 'Analysten uneins über die Bewertung',
+      source: 'nachrichten.beispiel.test',
+      at: '2026-02-02T15:10:00.000Z',
+      summary: null,
+      sentiment: 0.05,
+      provider: 'eodhd',
+    },
+    {
+      id: 1,
+      url: 'https://beispiel.test/nachrichten/1',
+      title: 'Lieferengpässe belasten das Quartal',
+      source: null,
+      at: '2026-01-29T09:00:00.000Z',
+      summary: 'Ein fehlendes Bauteil verzögert die Auslieferung; der Umsatz des Quartals fällt geringer aus als geplant.',
+      sentiment: -0.45,
+      provider: 'eodhd',
+    },
+  ],
+}

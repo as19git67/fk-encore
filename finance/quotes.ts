@@ -17,7 +17,7 @@ import log from "encore.dev/log";
 import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import db from "../db/database";
-import { financeQuote, financeQuoteSymbol } from "../db/schema";
+import { financeNewsSeen, financeQuote, financeQuoteNews, financeQuoteSymbol } from "../db/schema";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { latestHoldings, visibleDepots } from "./portfolio";
@@ -292,6 +292,8 @@ export interface QuoteTile {
   points: { at: string; price: string }[];
   /** Why there is nothing: no symbol found, or no prices yet. */
   status: "ok" | "unresolved" | "pending";
+  /** News that came in since the caller last opened the position's news. */
+  news_unread: number;
 }
 
 interface QuotesParams {
@@ -313,7 +315,39 @@ function parseAccountIds(raw: string | undefined): number[] | null {
   return ids.length > 0 ? ids : null;
 }
 
-export async function buildQuoteTiles(accountIds: number[], range: QuoteRange, now = new Date()): Promise<QuoteTile[]> {
+/** News not seen before a user has never opened a position count from this far back. */
+const UNREAD_NEWS_DAYS = 7;
+
+/**
+ * Per position, the news newer than the user last looked at them — or,
+ * never looked, than a week ago, so a first visit does not show months.
+ */
+export async function unreadNewsCounts(userId: number | null, keys: string[], now: Date): Promise<Map<string, number>> {
+  if (userId === null || keys.length === 0) return new Map();
+  const floor = new Date(now.getTime() - UNREAD_NEWS_DAYS * 24 * 60 * 60_000).toISOString();
+  const rows = await db
+    .select({ key: financeQuoteNews.position_key, n: sql<number>`COUNT(*)::int` })
+    .from(financeQuoteNews)
+    .leftJoin(
+      financeNewsSeen,
+      and(eq(financeNewsSeen.position_key, financeQuoteNews.position_key), eq(financeNewsSeen.user_id, userId)),
+    )
+    .where(
+      and(
+        inArray(financeQuoteNews.position_key, keys),
+        sql`${financeQuoteNews.at} > COALESCE(${financeNewsSeen.seen_at}, ${floor}::timestamptz)`,
+      ),
+    )
+    .groupBy(financeQuoteNews.position_key);
+  return new Map(rows.map((r) => [r.key, Number(r.n)]));
+}
+
+export async function buildQuoteTiles(
+  accountIds: number[],
+  range: QuoteRange,
+  now = new Date(),
+  userId: number | null = null,
+): Promise<QuoteTile[]> {
   const positions = await activePositions(accountIds);
   if (positions.length === 0) return [];
   const keys = positions.map((p) => p.key);
@@ -369,6 +403,7 @@ export async function buildQuoteTiles(accountIds: number[], range: QuoteRange, n
         .where(sql`(${financeQuote.position_key}, ${financeQuote.at}) IN (${sql.join(latest.map((l) => sql`(${l.key}, ${l.at}::timestamptz)`), sql`, `)})`)
     : [];
   const lastByKey = new Map(latestRows.map((r) => [r.key, r]));
+  const unread = await unreadNewsCounts(userId, keys, now);
 
   return positions
     .map((p): QuoteTile => {
@@ -403,6 +438,7 @@ export async function buildQuoteTiles(accountIds: number[], range: QuoteRange, n
         change,
         points: drawn,
         status,
+        news_unread: unread.get(p.key) ?? 0,
       };
     })
     .sort((a, b) => (Number(b.value ?? 0) - Number(a.value ?? 0)) || (a.name ?? "").localeCompare(b.name ?? ""));
@@ -416,7 +452,7 @@ export const getQuotes = api(
     const r = (range ?? "1m") as QuoteRange;
     if (!RANGES.includes(r)) throw APIError.invalidArgument(`range must be one of ${RANGES.join(", ")}`);
     const depots = (await visibleDepots(auth, parseAccountIds(accounts))).filter((d) => !d.closed || accounts);
-    const tiles = await buildQuoteTiles(depots.map((d) => d.id), r);
+    const tiles = await buildQuoteTiles(depots.map((d) => d.id), r, new Date(), Number(auth.userID));
     const asOf = tiles.reduce<string | null>((max, t) => (t.last && (!max || t.last.at > max) ? t.last.at : max), null);
     return { range: r, tiles, as_of: asOf };
   },

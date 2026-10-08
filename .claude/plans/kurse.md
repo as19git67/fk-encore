@@ -66,10 +66,14 @@ history is kept in our own database so it outlives the provider.
      news provider's resolve; at most once in 20 hours per security; the
      first fetch reaches back 30 days), `GET /finance/quotes/news?key=`
      for a position the caller's depots hold or held.
-4. **News on the pages.** The position page gets a "Nachrichten"
+4. **News on the pages** — built. The position page gets a "Nachrichten"
    section (title, source, time, link opens externally, a sentiment
    marker where the provider gives one); the quotes tile shows a count
    of items newer than the last visit, linking to the position page.
+   The last visit is kept per user and position (`finance_news_seen`,
+   migration 0230); loading the news marks them seen
+   (`POST /finance/quotes/news/seen`). A position never opened counts the
+   last week's news.
 5. **Yahoo news** as the free second way: the RSS feed per symbol
    (`feeds.finance.yahoo.com/rss/2.0/headline?s=SYMBOL`, no cookie
    needed), `id` from the article URL, same table and pages. Coverage

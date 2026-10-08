@@ -17,6 +17,7 @@ import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import db from "../db/database";
 import {
   financeDepotTransaction,
+  financeNewsSeen,
   financeNewsSource,
   financeProviderUsage,
   financeQuoteNews,
@@ -234,6 +235,8 @@ interface NewsResponse {
   items: NewsItemOut[];
   /** When the news of this security were last fetched; null when never. */
   checked_at: string | null;
+  /** When the caller last looked at them; null when never. Items newer are new to them. */
+  seen_at: string | null;
 }
 
 function parseLimit(raw: number | undefined): number {
@@ -276,6 +279,10 @@ export const getPositionNews = api(
       .select({ checked_at: financeNewsSource.checked_at })
       .from(financeNewsSource)
       .where(eq(financeNewsSource.position_key, key));
+    const [seen] = await db
+      .select({ seen_at: financeNewsSeen.seen_at })
+      .from(financeNewsSeen)
+      .where(and(eq(financeNewsSeen.user_id, Number(auth.userID)), eq(financeNewsSeen.position_key, key)));
     const iso = (s: string) => new Date(s).toISOString();
     return {
       items: rows.map((r) => ({
@@ -289,6 +296,23 @@ export const getPositionNews = api(
         provider: r.provider,
       })),
       checked_at: source?.checked_at ? iso(source.checked_at) : null,
+      seen_at: seen?.seen_at ? iso(seen.seen_at) : null,
     };
+  },
+);
+
+/** The caller has seen the news of this security: the quotes tile stops counting them. */
+export const markPositionNewsSeen = api(
+  { expose: true, method: "POST", path: "/finance/quotes/news/seen", auth: true },
+  async ({ key }: { key: string }): Promise<void> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    if (!key) throw APIError.invalidArgument("key is required");
+    if (!(await positionVisible(auth, key))) throw APIError.notFound("position not found");
+    const now = new Date().toISOString();
+    await db
+      .insert(financeNewsSeen)
+      .values({ user_id: Number(auth.userID), position_key: key, seen_at: now })
+      .onConflictDoUpdate({ target: [financeNewsSeen.user_id, financeNewsSeen.position_key], set: { seen_at: now } });
   },
 );

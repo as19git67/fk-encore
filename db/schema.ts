@@ -2218,6 +2218,19 @@ export const financeQuoteNews = pgTable(
   ],
 );
 
+/** When a user last looked at the news of a security. */
+export const financeNewsSeen = pgTable(
+  "finance_news_seen",
+  {
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    position_key: text("position_key").notNull(),
+    seen_at: timestamp("seen_at", { mode: "string", withTimezone: true }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.user_id, table.position_key] })],
+);
+
 /** Calls charged against a metered provider's daily allowance. */
 export const financeProviderUsage = pgTable(
   "finance_provider_usage",
