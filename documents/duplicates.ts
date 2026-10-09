@@ -30,8 +30,8 @@
 
 import fs from "fs";
 import path from "path";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
-import { api, APIError } from "encore.dev/api";
+import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { api, APIError, Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -45,8 +45,18 @@ import { removeOcrPdf } from "./ocr-pdf";
 
 console.log("[boot] documents/duplicates.ts: all imports resolved");
 
-/** Trigram Jaccard a pair has to reach to count as the same document. */
-export const DUPLICATE_MIN_SCORE = parseFloat(process.env.DOCUMENTS_DUPLICATE_MIN_SCORE ?? "0.85");
+/**
+ * Trigram Jaccard a pair has to reach to count as the same document. 0.95
+ * rather than 0.85: at 0.85 a real corpus produced thousands of pairs, most
+ * of them the same form letter with different numbers, and the review page
+ * drowned. A sandwich or upright copy of the same scan still reads well
+ * above 0.95; two OCR slips in a short letter no longer do, by design.
+ */
+export const DUPLICATE_MIN_SCORE = parseFloat(process.env.DOCUMENTS_DUPLICATE_MIN_SCORE ?? "0.95");
+/** Open pairs one list call returns at most; the page cannot render thousands. */
+export const DUPLICATE_LIST_MAX = 200;
+/** `score` is a float4 column: compare with a hair of slack so a pair scored exactly at the bar stays. */
+const SCORE_BAR = DUPLICATE_MIN_SCORE - 1e-6;
 /** Cosine distance between two chunk embeddings that counts as "the same page". */
 export const DUPLICATE_EMBEDDING_MAX_DISTANCE = parseFloat(
   process.env.DOCUMENTS_DUPLICATE_EMBEDDING_MAX_DISTANCE ?? "0.08",
@@ -632,8 +642,20 @@ export interface DuplicatePairDTO {
   created_at: string;
 }
 
+export interface ListDuplicatesRequest {
+  /** At most this many pairs, highest score first; capped at `DUPLICATE_LIST_MAX`. */
+  limit?: Query<number>;
+}
+
 export interface ListDuplicatesResponse {
   items: DuplicatePairDTO[];
+  /** Open pairs at or above the threshold, whether or not they fit in `items`. */
+  total: number;
+  /**
+   * Open pairs recorded under an earlier, lower threshold. They stay in the
+   * table but are not shown: the threshold is what "duplicate" means today.
+   */
+  hidden_below_threshold: number;
 }
 
 const sideColumns = {
@@ -652,17 +674,30 @@ const sideColumns = {
   source_folder: documents.source_folder,
 };
 
-/** Open pairs for review, highest score first. */
+/** Open pairs for review, highest score first, at most `limit` of them. */
 export const listDuplicates = api(
   { expose: true, method: "GET", path: "/documents/duplicates", auth: true },
-  async (): Promise<ListDuplicatesResponse> => {
+  async (req: ListDuplicatesRequest): Promise<ListDuplicatesResponse> => {
     requireAdmin();
+    const limit = Math.max(1, Math.min(DUPLICATE_LIST_MAX, Math.floor(req.limit ?? DUPLICATE_LIST_MAX)));
+    const open = eq(documentDuplicateCandidates.status, "open");
+    const aboveBar = gte(documentDuplicateCandidates.score, SCORE_BAR);
+    const counts = await dbFirst<{ total: number; hidden: number }>(
+      db
+        .select({
+          total: sql<number>`count(*) filter (where ${documentDuplicateCandidates.score} >= ${SCORE_BAR})::int`,
+          hidden: sql<number>`count(*) filter (where ${documentDuplicateCandidates.score} < ${SCORE_BAR})::int`,
+        })
+        .from(documentDuplicateCandidates)
+        .where(open),
+    );
     const pairs = await dbAll<typeof documentDuplicateCandidates.$inferSelect>(
       db
         .select()
         .from(documentDuplicateCandidates)
-        .where(eq(documentDuplicateCandidates.status, "open"))
-        .orderBy(desc(documentDuplicateCandidates.score), desc(documentDuplicateCandidates.id)),
+        .where(and(open, aboveBar))
+        .orderBy(desc(documentDuplicateCandidates.score), desc(documentDuplicateCandidates.id))
+        .limit(limit),
     );
     const ids = [...new Set(pairs.flatMap((p) => [p.document_a_id, p.document_b_id]).filter((x): x is number => x != null))];
     const sides = ids.length
@@ -685,7 +720,11 @@ export const listDuplicates = api(
         created_at: p.created_at,
       });
     }
-    return { items };
+    return {
+      items,
+      total: counts?.total ?? 0,
+      hidden_below_threshold: counts?.hidden ?? 0,
+    };
   },
 );
 
@@ -704,6 +743,7 @@ export const listDuplicatesForDocument = api(
         .where(
           and(
             eq(documentDuplicateCandidates.status, "open"),
+            gte(documentDuplicateCandidates.score, SCORE_BAR),
             or(eq(documentDuplicateCandidates.document_a_id, id), eq(documentDuplicateCandidates.document_b_id, id)),
           ),
         ),

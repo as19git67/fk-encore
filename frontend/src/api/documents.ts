@@ -406,8 +406,18 @@ export function scanDuplicates() {
 }
 
 /** Open pairs awaiting a decision, highest score first. */
-export function listDuplicates() {
-  return apiFetch<{ items: DuplicatePair[] }>('/documents/duplicates')
+export interface ListDuplicatesResponse {
+  items: DuplicatePair[]
+  /** Open pairs at or above the threshold, whether or not they fit in `items`. */
+  total: number
+  /** Open pairs recorded under an earlier, lower threshold; not shown. */
+  hidden_below_threshold: number
+}
+
+/** The highest-scoring open pairs, at most `limit` (the server caps at 200). */
+export function listDuplicates(limit?: number) {
+  const qs = limit ? `?limit=${limit}` : ''
+  return apiFetch<ListDuplicatesResponse>(`/documents/duplicates${qs}`)
 }
 
 /** Open pairs one document is part of (the other sides' ids). */

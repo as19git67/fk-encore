@@ -229,7 +229,11 @@ As built: `documents/duplicates.ts`. The prefilter is equal `pages_total`
 plus equal `doc_date` or `correspondent_slug`, or first-chunk embeddings
 within `DOCUMENTS_DUPLICATE_EMBEDDING_MAX_DISTANCE` (0.08); confirmation is
 trigram Jaccard over normalised text at `DOCUMENTS_DUPLICATE_MIN_SCORE`
-(0.85). The merge re-points rows generically by walking every foreign key
+(0.95; started at 0.85, which produced thousands of pairs on a real corpus,
+mostly the same form letter with different numbers). The list endpoint shows
+only open pairs at or above the current threshold, at most 200 per call,
+with the total and the count of pairs an earlier scan recorded below the
+bar. The merge re-points rows generically by walking every foreign key
 onto `documents.id` in `information_schema`, so a new table cannot be
 forgotten; derived tables (embeddings, scan queue, receipt extraction) are
 dropped, a row the keeper already has is dropped on unique violation, pinned
