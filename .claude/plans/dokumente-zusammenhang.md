@@ -135,7 +135,7 @@ and the search returns exact normalised matches first; the filter is `ref=`;
 the detail page shows chips linking to that filter and edits the list as one
 line per number ("Vertragsnummer: 12345").
 
-### 4. Dossiers: collections with a membership rule (#1480)
+### 4. Dossiers: collections with a membership rule (#1480) — done
 
 - Migration on `document_collections`: `rule JSONB NULL` with
   `{ correspondent_slug?: string, reference_numbers?: string[] }` (normalised
@@ -154,6 +154,17 @@ line per number ("Vertragsnummer: 12345").
 - A document without any reference number (terms and conditions) joins
   through the related panel (stage 2) with one click, or via a rule entry
   `source_folder` prefix added to the rule shape in this stage.
+
+As built: `documents/dossiers.ts`. `document_collections.kind` and `rule`
+(migration 0234), `document_collection_items.joined_by`. A document matches
+when its origin folder lies under the prefix, or when it satisfies every
+other set part (correspondent and numbers). The rule runs after
+classification, after an attribute edit, on save of the rule and on
+"Regel jetzt anwenden"; it withdraws only what it added, and a document a
+person removed is remembered in `rule.excluded_document_ids`. A new dossier
+is seeded from the document's correspondent, numbers and folder in the
+"In Sammelmappe legen" dialog. Membership never widens access: a dossier
+takes only documents in its own owner or group scope.
 
 ### 5. Near-duplicate detection and merge (#1481) — done
 

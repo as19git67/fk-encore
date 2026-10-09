@@ -1,5 +1,6 @@
 import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint, date } from "drizzle-orm/pg-core";
 import type { DocumentReferenceNumber } from "../documents/reference-numbers";
+import type { CollectionKind, CollectionRule } from "../documents/dossiers";
 import { sql } from "drizzle-orm";
 
 /**
@@ -1318,6 +1319,11 @@ export const documentCollections = pgTable("document_collections", {
    */
   visibility: documentVisibilityEnum("visibility").notNull().default("private"),
   group_id: integer("group_id").references(() => groups.id, { onDelete: "restrict" }),
+  // A dossier (#1480, migration 0234) is a collection with a membership rule:
+  // documents matching `rule` join after classification. See
+  // documents/dossiers.ts for the rule's shape and semantics.
+  kind: text("kind").$type<CollectionKind>().notNull().default("manual"),
+  rule: jsonb("rule").$type<CollectionRule>(),
   created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
@@ -1350,6 +1356,9 @@ export const documentCollectionItems = pgTable("document_collection_items", {
     .references(() => documents.id, { onDelete: "cascade" }),
   /** Dense, 0-based sort key — renumbered on every reorder. */
   position: integer("position").notNull(),
+  // Who put the document in (#1480): 'user' by hand, 'rule' by the dossier's
+  // rule. The rule withdraws only what it added.
+  joined_by: text("joined_by").$type<"user" | "rule">().notNull().default("user"),
   /**
    * Switched off means "still in the folder, not in the PDF". Kept as a flag
    * rather than a deleted row so deselecting a document does not throw away

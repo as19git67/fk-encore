@@ -11,10 +11,12 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import Checkbox from 'primevue/checkbox'
 import {
   addCollectionDocuments,
   createCollection,
   listCollections,
+  type CollectionRuleInput,
   type DocumentCollection,
 } from '../../api/collections'
 
@@ -22,6 +24,11 @@ const props = defineProps<{
   visible: boolean
   /** Documents to put in, in the order they should appear. */
   documentIds: number[]
+  /**
+   * When given, a new folder can be created as a dossier whose rule is seeded
+   * from this (the document's correspondent, numbers and folder, #1480).
+   */
+  ruleSeed?: CollectionRuleInput | null
 }>()
 
 const emit = defineEmits<{
@@ -34,6 +41,12 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const newTitle = ref('')
+/** Create the new folder as a dossier with the seeded rule. */
+const asDossier = ref(false)
+const seedUsable = computed(() => {
+  const s = props.ruleSeed
+  return !!s && (!!s.correspondent_slug || (s.reference_numbers?.length ?? 0) > 0 || !!s.source_folder_prefix)
+})
 
 const count = computed(() => props.documentIds.length)
 
@@ -43,6 +56,7 @@ watch(
     if (!visible) return
     error.value = ''
     newTitle.value = ''
+    asDossier.value = false
     void load()
   },
   { immediate: true },
@@ -80,7 +94,11 @@ async function createAndAdd() {
   saving.value = true
   error.value = ''
   try {
-    const created = await createCollection({ title, document_ids: props.documentIds })
+    const created = await createCollection({
+      title,
+      document_ids: props.documentIds,
+      ...(asDossier.value && seedUsable.value ? { kind: 'dossier' as const, rule: props.ruleSeed } : {}),
+    })
     emit('added', { collectionId: created.id, title: created.title, count: count.value })
     emit('update:visible', false)
   } catch (err: any) {
@@ -106,6 +124,13 @@ async function createAndAdd() {
 
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
 
+    <label v-if="seedUsable" class="atc-dossier">
+      <Checkbox v-model="asDossier" binary />
+      <span>
+        Neue Mappe als Akte anlegen: Korrespondent, Referenznummern und Herkunftsordner dieses
+        Dokuments werden zur Regel, passende Dokumente treten von selbst bei.
+      </span>
+    </label>
     <div class="atc-new">
       <InputText
         v-model="newTitle"
@@ -138,6 +163,14 @@ async function createAndAdd() {
 </template>
 
 <style scoped>
+.atc-dossier {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+}
 .atc-lead {
   margin: 0 0 12px;
   color: var(--p-text-muted-color);

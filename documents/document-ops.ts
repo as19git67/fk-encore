@@ -106,6 +106,7 @@ import { realtime, push } from "~encore/clients";
 
 import { checkForDuplicatesOf } from "./duplicates";
 import { extractReferenceNumbers, mergeReferenceNumbers, userEntered } from "./reference-numbers";
+import { applyDossierRulesQuietly } from "./dossiers";
 console.log("[boot] documents/document-ops.ts: all imports resolved");
 
 type DocumentStatus = "pending" | "extracting" | "classifying" | "ready" | "failed" | "encrypted";
@@ -992,6 +993,8 @@ export async function runClassify(documentId: number): Promise<{ classification:
         console.error(`[documents] category suggestion for document=${documentId} failed:`, err),
     );
   }
+  // A dossier whose rule the document now satisfies takes it in (#1480).
+  void applyDossierRulesQuietly(documentId);
   // Advisory only: a document becoming OCR-ready must not delay the pipeline.
   void createSuggestionsForDocument(documentId).catch(err => console.error(`[documents] finance matching failed for document=${documentId}:`, err));
   void checkReceiptEnrichment(documentId).catch(err => console.error(`[documents] receipt enrichment check failed for document=${documentId}:`, err));
