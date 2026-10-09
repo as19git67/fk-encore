@@ -303,6 +303,27 @@ describe("classifySecuTransaction", () => {
     expect(c("990.00", "WERTPAPIERABRECHNUNG VERKAUF WKN AAA111")).toBe("sell");
   });
 
+  it("does not take money moved onto the settlement account for a sale", () => {
+    const c = (amount: string, purpose: string) =>
+      classifySecuTransaction({ amount, transaction_code: null, purpose });
+    // The transfer that pays for a purchase, in the user's own words.
+    expect(c("1000.00", "FUER KAUF WKN AAA111")).toBeNull();
+    expect(c("1000.00", "UEBERWEISUNG DEPOT WKN AAA111")).toBeNull();
+    expect(c("1000.00", "DAUERAUFTRAG SPARPLAN WKN AAA111")).toBeNull();
+    // Money in with nothing but the identifier: a sale only on the bank's say-so.
+    expect(c("1000.00", "WKN AAA111 FONDSNAME")).toBeNull();
+    expect(classifySecuTransaction({ amount: "1000.00", transaction_code: "TRAD", purpose: "WKN AAA111" })).toBe("sell");
+    // MT940's type code is not the bank's say-so.
+    expect(classifySecuTransaction({ amount: "1000.00", transaction_code: "NMSC", purpose: "WKN AAA111" })).toBeNull();
+    // Money out with "Verkauf" is no sale either.
+    expect(c("-1000.00", "VERKAUF WKN AAA111")).toBeNull();
+    // The purchase itself, with and without a word.
+    expect(c("-1000.00", "WERTPAPIERKAUF WKN AAA111")).toBe("buy");
+    expect(c("-1000.00", "WKN AAA111 FONDSNAME")).toBe("buy");
+    // "Wertpapierabrechnung" alone names no direction: the sign decides.
+    expect(c("990.00", "WERTPAPIERABRECHNUNG WKN AAA111")).toBe("sell");
+  });
+
   it("skips zero/non-numeric amounts", () => {
     expect(
       classifySecuTransaction({ amount: "0.00", transaction_code: null }),
