@@ -56,6 +56,7 @@ import PageLayout from '../components/layout/PageLayout.vue'
 import PdfViewer from '../components/PdfViewer.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
 import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
+import RelatedDocumentsCard from '../components/documents/RelatedDocumentsCard.vue'
 import {
   listCollectionsForDocument,
   type DocumentCollectionRef,
@@ -1255,6 +1256,15 @@ onBeforeUnmount(() => {
             Noch in keiner Sammelmappe. Ein Dokument darf in mehreren liegen.
           </p>
         </section>
+
+        <!-- What else belongs next to this document, grouped by why (#1478).
+             Loads after the document itself; a neighbour put into a
+             Sammelmappe may be in one of ours now, so our card reloads. -->
+        <RelatedDocumentsCard
+          v-if="doc"
+          :document-id="doc.id"
+          @collection-changed="reloadCollections"
+        />
 
         <section class="tax-card">
           <div class="tax-card-header">
