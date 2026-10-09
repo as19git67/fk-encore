@@ -93,6 +93,7 @@ import {
   visibleDocumentsWhere,
 } from "./visibility";
 import { enqueueDocumentScan, getQueueStatus, requeueDocument, cancelPendingJobs, retryFailedJobs, type QueueStatus } from "./scan-queue";
+import { normalizeSourceFolder, sourceFolderPrefixPattern } from "./source-folder";
 import { triggerWorkers } from "./scan-worker";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
@@ -191,6 +192,11 @@ export interface DocumentSummary {
   group_id: number | null;
   /** Free-form human notes (shared document metadata, issue #750). */
   notes: string | null;
+  /**
+   * Folder the file came from, relative to the inbox root or the uploaded
+   * folder (#1477), or null when it arrived on its own at the root.
+   */
+  source_folder: string | null;
   /**
    * True when a human pinned the editable attributes (see migration 0101).
    * `false` on a ready document marks it as "new": freshly imported with
@@ -366,6 +372,8 @@ interface ListQuery {
   in_collection?: Query<boolean>;
   /** Keep only the members of this one Sammelmappe. Wins over `in_collection`. */
   collection_id?: Query<number>;
+  /** Origin folder, with everything below it (#1477). */
+  folder?: Query<string>;
   sort_by?: Query<string>;
   sort_dir?: Query<string>;
   limit?: Query<number>;
@@ -392,6 +400,8 @@ interface DocumentFilterArgs {
   document_type?: string;
   in_collection?: boolean;
   collection_id?: number;
+  /** Keep documents from this origin folder and every folder below it (#1477). */
+  folder?: string;
 }
 
 /**
@@ -442,6 +452,15 @@ async function buildDocumentFilterConditions(
   }
   if (f.correspondent && f.correspondent.trim().length > 0) {
     conds.push(eq(documents.correspondent_slug, f.correspondent.trim().toLowerCase()));
+  }
+  const folder = normalizeSourceFolder(f.folder);
+  if (folder) {
+    conds.push(
+      or(
+        eq(documents.source_folder, folder),
+        sql`${documents.source_folder} LIKE ${sourceFolderPrefixPattern(folder)} ESCAPE '\\'`,
+      )!,
+    );
   }
   if (f.date_from) {
     conds.push(gte(documents.doc_date, f.date_from));
@@ -546,6 +565,9 @@ export const uploadDocument = api.raw(
       .toLowerCase()
       .split(";")[0]
       .trim();
+    // A folder upload sends the file's folder (its `webkitRelativePath`
+    // without the file name), percent-encoded like the file name (#1477).
+    const sourceFolder = decodeHeaderValue(req.headers["x-source-folder"]);
 
     if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
       res.statusCode = 415;
@@ -554,7 +576,7 @@ export const uploadDocument = api.raw(
     }
 
     try {
-      const result = await streamAndStoreDocument(req, originalName, mimeType, userId);
+      const result = await streamAndStoreDocument(req, originalName, mimeType, userId, sourceFolder);
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(result));
@@ -873,9 +895,21 @@ async function streamAndStoreDocument(
   originalName: string,
   mimeType: string,
   userId: number,
+  sourceFolder: string | null = null,
 ): Promise<DocumentSummary> {
   const buffer = await readRequestBuffer(req);
-  return storeDocumentBuffer({ buffer, originalName, mimeType, userId });
+  return storeDocumentBuffer({ buffer, originalName, mimeType, userId, sourceFolder });
+}
+
+/** A percent-encoded, optional request header; `null` when absent or undecodable. */
+function decodeHeaderValue(raw: string | string[] | undefined): string | null {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
 }
 
 async function storeDocumentBuffer(params: {
@@ -897,6 +931,8 @@ async function storeDocumentBuffer(params: {
   receiptAccountId?: number | null;
   receiptTransactionId?: number | null;
   receiptOcrState?: "pending" | null;
+  /** Folder the file came from in a folder upload (#1477). */
+  sourceFolder?: string | null;
 }): Promise<DocumentSummary> {
   const {
     buffer,
@@ -910,6 +946,7 @@ async function storeDocumentBuffer(params: {
     receiptAccountId = null,
     receiptTransactionId = null,
     receiptOcrState = null,
+    sourceFolder = null,
   } = params;
   if (buffer.length > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
   const ext = guessExtension(originalName, mimeType);
@@ -970,6 +1007,7 @@ async function storeDocumentBuffer(params: {
         receipt_account_id: receiptAccountId,
         receipt_transaction_id: receiptTransactionId,
         receipt_ocr_state: receiptOcrState,
+        source_folder: normalizeSourceFolder(sourceFolder),
       })
       .returning(),
   );
@@ -1161,7 +1199,7 @@ export function sortDocumentSummaries<T extends DocumentSummary>(
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -1176,7 +1214,7 @@ export const listDocuments = api(
       : [visibleDocumentsWhere(userId, groupIds)];
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -3440,6 +3478,8 @@ interface SearchQuery {
   /** See `ListQuery` — the same Sammelmappen filter applies to search results. */
   in_collection?: Query<boolean>;
   collection_id?: Query<number>;
+  /** Origin folder, with everything below it (#1477). */
+  folder?: Query<string>;
   // Optional override of the relevance ranking, mirrored from `ListQuery`
   // (otherwise a sort chosen in the list view was silently dropped once a
   // search term was active — sorting only ever worked on the plain list).
@@ -3460,7 +3500,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, sort_by, sort_dir }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, sort_by, sort_dir }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -3475,7 +3515,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -4468,6 +4508,7 @@ export function toSummary(
     visibility: row.visibility,
     group_id: row.group_id,
     notes: row.notes ?? null,
+    source_folder: row.source_folder ?? null,
     attributes_reviewed: row.attributes_reviewed ?? false,
     category_source: row.category_source ?? "ai",
     collections,

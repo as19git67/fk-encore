@@ -42,6 +42,11 @@ export interface DocumentSummary {
   /** Free-form human notes (shared document metadata). */
   notes: string | null
   /**
+   * Folder the file came from, relative to the inbox root or the uploaded
+   * folder (#1477); null when it arrived on its own at the root.
+   */
+  source_folder: string | null
+  /**
    * True when a human pinned the editable attributes. `false` on a ready
    * document marks it as "new": AI-only attribution awaiting approval (#635).
    */
@@ -197,6 +202,8 @@ export interface ListDocumentsQuery {
    * unless the user asks for it.
    */
   in_collection?: boolean
+  /** Keep only documents from this origin folder and everything below it (#1477). */
+  folder?: string
   /** Keep only the members of this one Sammelmappe. Wins over `in_collection`. */
   collection_id?: number
   sort_by?: string
@@ -368,6 +375,7 @@ export type DocumentFilterParams = Pick<
   | 'document_type'
   | 'in_collection'
   | 'collection_id'
+  | 'folder'
 >
 
 export function searchDocuments(
@@ -391,15 +399,28 @@ export function searchDocuments(
  * other Unicode characters in filenames working.
  */
 export function uploadDocument(file: File, signal?: AbortSignal) {
+  const headers: Record<string, string> = {
+    'Content-Type': file.type || 'application/pdf',
+    'X-File-Name': encodeURIComponent(file.name),
+  }
+  // A folder pick reports `Versicherungen/Hausrat/police.pdf`; the folder
+  // part is the origin the import would otherwise lose (#1477).
+  const folder = sourceFolderOf(file)
+  if (folder) headers['X-Source-Folder'] = encodeURIComponent(folder)
   return apiFetch<DocumentSummary>('/documents', {
     method: 'POST',
     body: file,
     signal,
-    headers: {
-      'Content-Type': file.type || 'application/pdf',
-      'X-File-Name': encodeURIComponent(file.name),
-    },
+    headers,
   })
+}
+
+/** The folder part of a picked file's `webkitRelativePath`, or null for a loose file. */
+export function sourceFolderOf(file: Pick<File, 'webkitRelativePath'>): string | null {
+  const rel = file.webkitRelativePath || ''
+  const cut = rel.lastIndexOf('/')
+  if (cut <= 0) return null
+  return rel.slice(0, cut)
 }
 
 export function uploadReceiptCapture(
@@ -672,6 +693,39 @@ export interface RelocateAllDocumentsResponse {
   processed: number
   moved: number
   failed: number
+}
+
+export interface SourceFolderBackfillMatch {
+  document_id: number
+  source_folder: string | null
+  previous: string | null
+}
+
+export interface SourceFolderBackfillResponse {
+  dry_run: boolean
+  files_scanned: number
+  matched: number
+  updated: number
+  unmatched_files: string[]
+  unmatched_files_total: number
+  ambiguous_files: string[]
+  ambiguous_files_total: number
+  unmatched_rows_total: number
+  matches: SourceFolderBackfillMatch[]
+  truncated: boolean
+}
+
+/**
+ * Walk the old folder tree at `root` on the server and write each file's
+ * folder onto the document with the same content hash (#1477). Without
+ * `apply` it only reports.
+ */
+export function backfillSourceFolders(root: string, apply: boolean) {
+  return apiFetch<SourceFolderBackfillResponse>('/documents/source-folder/backfill', {
+    method: 'POST',
+    body: JSON.stringify({ root, apply }),
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 export function relocateAllDocuments() {

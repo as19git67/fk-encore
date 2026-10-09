@@ -1069,6 +1069,11 @@ export const documents = pgTable("documents", {
   // Free-form human notes on the document. Shared document metadata —
   // independent of the per-user follow-up feature (issue #750).
   notes: text("notes"),
+  // The folder the file came from, relative to the inbox root or to the
+  // uploaded folder (migration 0231, #1477): `/`-separated, no leading slash,
+  // NULL for a file dropped on its own at the root. Data about the document,
+  // not a filing location — `disk_path` alone says where the file lives.
+  source_folder: text("source_folder"),
   // Cached, lowercase, space-separated list of the document's tag names.
   // Kept in sync by triggers on document_tag_links and document_tags
   // (migration 0090) so the generated text_tsv column can fold tags

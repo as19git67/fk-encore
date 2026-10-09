@@ -19,6 +19,7 @@ const queue = ref<QueuedFile[]>([])
 const dragActive = ref(false)
 const uploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const folderInput = ref<HTMLInputElement | null>(null)
 
 function onFilesPicked(ev: Event) {
   const input = ev.target as HTMLInputElement
@@ -127,6 +128,26 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
         @change="onFilesPicked"
       />
     </div>
+    <!-- A whole folder at once: the browser reports each file's path inside
+         it, which the upload keeps as the document's origin folder (#1477). -->
+    <div class="folder-pick">
+      <Button
+        label="Ordner auswählen"
+        icon="pi pi-folder-open"
+        text
+        size="small"
+        @click="folderInput?.click()"
+      />
+      <input
+        ref="folderInput"
+        type="file"
+        accept="application/pdf,.pdf"
+        multiple
+        webkitdirectory
+        hidden
+        @change="onFilesPicked"
+      />
+    </div>
 
     <div v-if="queue.length > 0" class="queue-block">
       <div class="queue-header">
@@ -196,6 +217,12 @@ const doneCount = () => queue.value.filter((i) => i.status === 'done').length
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.folder-pick {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-2);
 }
 
 .dropzone {

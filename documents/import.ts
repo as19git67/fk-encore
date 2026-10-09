@@ -26,6 +26,7 @@ import {
 import { relocateDocument } from "./relocate";
 import { enqueueDocumentScan } from "./scan-queue";
 import { assertGroupMember } from "./visibility";
+import { hashFile, normalizeSourceFolder } from "./source-folder";
 
 export interface ImportedDocument {
   id: number;
@@ -103,6 +104,8 @@ export async function importDocumentFromPath(params: {
   sourcePath: string;
   originalFilename: string;
   mimeType?: string;
+  /** Folder the file came from, relative to the inbox root (#1477). */
+  sourceFolder?: string | null;
 }): Promise<ImportedDocument> {
   const { userId, sourcePath } = params;
   const stat = await fs.promises.stat(sourcePath);
@@ -166,6 +169,7 @@ export async function importDocumentFromPath(params: {
         disk_path: absPath,
         visibility: defaultGroupId != null ? "group" : "private",
         group_id: defaultGroupId,
+        source_folder: normalizeSourceFolder(params.sourceFolder),
       })
       .returning(),
   );
@@ -191,16 +195,6 @@ export async function importDocumentFromPath(params: {
   };
 }
 
-async function hashFile(absPath: string): Promise<string> {
-  const hash = crypto.createHash("sha256");
-  await new Promise<void>((resolve, reject) => {
-    const stream = fs.createReadStream(absPath);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("end", () => resolve());
-    stream.on("error", reject);
-  });
-  return hash.digest("hex");
-}
 
 /**
  * Move a file across filesystem boundaries. `fs.rename` fails with
