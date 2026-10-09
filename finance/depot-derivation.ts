@@ -15,11 +15,18 @@
  *     single letter like "R" there and manual imports leave it null, so
  *     for those we fall back to requiring a hard identifier (ISIN or
  *     prefixed WKN) in the purpose / booking text instead.
- *   - Kind:
+ *   - Kind (`classifySecuTransaction`):
  *       transaction_code === 'DVCA'   → 'dividend'  (positive net_amount)
  *       transaction_code === 'CHRG'   → skip (custody fee, not a holding tx)
- *       amount < 0                    → 'buy'
- *       amount > 0                    → 'sell'
+ *       the wording decides the direction where it has one: "Kauf" is a
+ *       buy, "Verkauf" a sale, and a sign that contradicts it (money in,
+ *       "Kauf") marks a transfer for a trade, not the trade → skip.
+ *       Transfer wording (Überweisung, Übertrag, Dauerauftrag, …) without
+ *       a trade's wording → skip. Without any wording the sign decides,
+ *       but only money out becomes a buy (a savings plan's execution
+ *       often says nothing); money in is a sale only when the bank or the
+ *       text says so — the settlement account of a depot receives
+ *       transfers far more often than it books unlabelled sales.
  *   - ISIN extracted via the ISO 6166 regex from the purpose field.
  *   - WKN extracted via a prefix-anchored "WKN …" pattern. Many German
  *     banks (e.g. MLP) book only WKNs and leave the ISIN field on the
@@ -318,15 +325,39 @@ export function classifySecuTransaction(tx: {
   // a fund kept, transfers — none of them a buy or a sale, even when the
   // text names the security.
   const text = `${tx.purpose ?? ""} ${tx.entry_text ?? ""}`;
-  if (!TRADE_TEXT_RE.test(text)) {
-    if (CHARGE_TEXT_RE.test(text)) return null;
-    if (PAYOUT_TEXT_RE.test(text)) return n > 0 ? "dividend" : null;
+  const bankSaysTrade = BANK_TRADE_CODES.has(subFamily);
+  if (TRADE_TEXT_RE.test(text)) {
+    // The wording's direction, where it has one. Money that came in with
+    // "Kauf" on it is the transfer that pays for the purchase, not the
+    // purchase; money out with "Verkauf" is no sale either.
+    const sell = SELL_TEXT_RE.test(text);
+    const buy = BUY_TEXT_RE.test(text);
+    if (sell && !buy) return n > 0 ? "sell" : null;
+    if (buy && !sell) return n < 0 ? "buy" : null;
+    return n < 0 ? "buy" : "sell";
   }
-  return n < 0 ? "buy" : "sell";
+  if (CHARGE_TEXT_RE.test(text)) return null;
+  if (PAYOUT_TEXT_RE.test(text)) return n > 0 ? "dividend" : null;
+  if (TRANSFER_TEXT_RE.test(text)) return null;
+  if (n < 0) return "buy";
+  // Money in without a word: a sale only on the bank's say-so.
+  return bankSaysTrade ? "sell" : null;
 }
 
+/**
+ * ISO BTC sub-families of a trade (camt only — MT940 puts the SWIFT type
+ * such as "NMSC" here, which says nothing): a trade, a fund subscription,
+ * a redemption.
+ */
+const BANK_TRADE_CODES: ReadonlySet<string> = new Set(["TRAD", "SUBS", "REDM"]);
 /** Wording of a trade's booking: it decides over everything below. */
 const TRADE_TEXT_RE = /wertpapierabrechnung|wertpapier-?kauf|wertpapier-?verkauf|\b(?:kauf|verkauf)\b|fondsanteile|ausf(?:ü|ue)hrung/i;
+/** The trade's direction, when the text names one. */
+const SELL_TEXT_RE = /verkauf/i;
+const BUY_TEXT_RE = /(?<!ver)kauf/i;
+/** Money moved onto or off the settlement account — a transfer, not a trade. */
+const TRANSFER_TEXT_RE =
+  /(?:ü|ue)berweisung|(?:ü|ue)bertrag|umbuchung|einzahlung|auszahlung|dauerauftrag|geldeingang|zahlungseingang/i;
 /** Fees, charges and taxes a settlement account books besides trades. */
 const CHARGE_TEXT_RE =
   /geb(?:ü|ue)hr|entgelt|spesen|verwaltungsverg|verg(?:ü|ue)tung|depotpreis|kontof(?:ü|ue)hrung|abschluss|steuer|vorabpauschale|thesaur/i;
