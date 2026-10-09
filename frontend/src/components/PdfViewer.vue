@@ -14,6 +14,7 @@ import {
   clampChunkIndex,
   pageNumbersInChunk,
 } from '../utils/pdfPageChunks'
+import { anchorScrollDelta, captureViewAnchor, type ClientPoint, type ViewAnchor } from '../utils/viewAnchor'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -361,13 +362,63 @@ function scheduleScan() {
 }
 
 /**
+ * The spot to keep in place through the next relayout. A pinch sets it to
+ * the point between the fingers before it changes the zoom; otherwise the
+ * relayout anchors the middle of what is on screen.
+ */
+let pendingAnchor: ViewAnchor | null = null
+
+/** Page boxes as currently laid out, for the anchor math. */
+function pageRects(): Array<readonly [number, DOMRect]> {
+  const rects: Array<readonly [number, DOMRect]> = []
+  for (const entry of pages.value) {
+    const el = pageEls.get(entry.pageNumber)
+    if (el) rects.push([entry.pageNumber, el.getBoundingClientRect()])
+  }
+  return rects
+}
+
+/** The middle of the viewer's on-screen band, in client coordinates. */
+function viewCenter(): ClientPoint | null {
+  const wrapper = containerRef.value
+  const band = visibleBand()
+  if (!wrapper || !band) return null
+  const rect = wrapper.getBoundingClientRect()
+  return { clientX: rect.left + wrapper.clientWidth / 2, clientY: (band.top + band.bottom) / 2 }
+}
+
+function captureAnchor(focal: ClientPoint | null): ViewAnchor | null {
+  return focal ? captureViewAnchor(pageRects(), focal) : null
+}
+
+/**
+ * Scroll so the anchored spot on its page is back under the anchor's screen
+ * point. Vertical scrolling may belong to an ancestor (narrow layout: the
+ * page scrolls), horizontal always to the wrapper.
+ */
+function restoreAnchor(anchor: ViewAnchor): boolean {
+  const el = pageEls.get(anchor.pageNumber)
+  const wrapper = containerRef.value
+  if (!el || !wrapper) return false
+  const { dx, dy } = anchorScrollDelta(anchor, el.getBoundingClientRect())
+  const scroller = scrollParentOf(el)
+  if (scroller) scroller.scrollTop += dy
+  wrapper.scrollLeft += dx
+  return true
+}
+
+/**
  * Re-measure every mounted page after a zoom or container-width change.
- * Every page changes height, so the old scroll offset would land on a
- * different page — keep the one the user was looking at anchored.
+ * Every page changes size, so the old scroll offset would land somewhere
+ * else — keep the spot the user was looking at where it is on screen, not
+ * just the page: jumping to the top of the page after each zoom step lost
+ * the very region that had just been enlarged.
  */
 async function relayout() {
   if (pages.value.length === 0) return
-  const anchor = currentPage.value
+  const fallbackPage = currentPage.value
+  const anchor = pendingAnchor ?? captureAnchor(viewCenter())
+  pendingAnchor = null
   cancelRenders()
   for (const entry of pages.value) {
     const page = pageProxies.get(entry.pageNumber)
@@ -381,7 +432,7 @@ async function relayout() {
   }
   effectiveZoom.value = pages.value[0]?.scale ?? 1
   await nextTick()
-  scrollToPageElement(anchor)
+  if (!(anchor && restoreAnchor(anchor))) scrollToPageElement(fallbackPage)
   updateVisiblePages()
 }
 
@@ -540,6 +591,12 @@ let pinchStartDist = 0
 let pinchStartZoom = 1
 const pinchOriginX = ref(0)
 const pinchOriginY = ref(0)
+/** Where the fingers last were, so the zoom can be committed around it. */
+let pinchMidpoint: ClientPoint | null = null
+
+function touchMidpoint(a: Touch, b: Touch): ClientPoint {
+  return { clientX: (a.clientX + b.clientX) / 2, clientY: (a.clientY + b.clientY) / 2 }
+}
 
 function touchDistance(a: Touch, b: Touch): number {
   const dx = a.clientX - b.clientX
@@ -556,14 +613,16 @@ function onTouchStart(e: TouchEvent) {
   pinchStartZoom = effectiveZoom.value
   pinchScale.value = 1
   const rect = wrapper.getBoundingClientRect()
-  pinchOriginX.value = (a.clientX + b.clientX) / 2 - rect.left + wrapper.scrollLeft
-  pinchOriginY.value = (a.clientY + b.clientY) / 2 - rect.top + wrapper.scrollTop
+  pinchMidpoint = touchMidpoint(a, b)
+  pinchOriginX.value = pinchMidpoint.clientX - rect.left + wrapper.scrollLeft
+  pinchOriginY.value = pinchMidpoint.clientY - rect.top + wrapper.scrollTop
 }
 
 function onTouchMove(e: TouchEvent) {
   const [a, b] = e.touches
   if (!pinching.value || e.touches.length !== 2 || !a || !b || pinchStartDist === 0) return
   e.preventDefault()
+  pinchMidpoint = touchMidpoint(a, b)
   pinchScale.value = touchDistance(a, b) / pinchStartDist
 }
 
@@ -572,7 +631,14 @@ function onTouchEnd(e: TouchEvent) {
   pinching.value = false
   const finalZoom = pinchStartZoom * pinchScale.value
   pinchScale.value = 1
-  zoom.value = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, finalZoom))
+  const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, finalZoom))
+  if (next === zoom.value) return
+  // The preview transform is still on screen; the fractions it yields are
+  // the same as without it, since it scales the page uniformly around a
+  // point that does not move. Commit the zoom around the fingers, not the
+  // middle of the viewer — that is what the user was enlarging.
+  pendingAnchor = captureAnchor(pinchMidpoint)
+  zoom.value = next
 }
 
 function onContainerResize() {
