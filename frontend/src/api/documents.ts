@@ -278,6 +278,44 @@ export function listDocuments(params: ListDocumentsQuery = {}) {
   return apiFetch<ListDocumentsResponse>(`/documents${buildQuery(params as Record<string, unknown>)}`)
 }
 
+// ─── Related documents (#1478) ──────────────────────────────────────────────
+
+export type RelatedReason =
+  | 'same_folder'
+  | 'same_correspondent_nearby'
+  | 'same_collection'
+  | 'semantic'
+
+export interface RelatedDocument {
+  id: number
+  title: string | null
+  original_filename: string
+  doc_date: string | null
+  sender: string | null
+  correspondent_display: string | null
+  document_type: string | null
+  category_slug: string | null
+  status: string
+  /** Only on `semantic` items: cosine distance, lower is closer. */
+  semantic_distance?: number
+}
+
+export interface RelatedGroup {
+  reason: RelatedReason
+  /** The folder for `same_folder`, the collection title for `same_collection`. */
+  label: string | null
+  collection_id: number | null
+  items: RelatedDocument[]
+}
+
+/**
+ * What else belongs next to a document, grouped by the reason it is
+ * suggested. Every group is already filtered to what the caller may see.
+ */
+export function getRelatedDocuments(id: number) {
+  return apiFetch<{ groups: RelatedGroup[] }>(`/documents/${id}/related`)
+}
+
 // ─── Correspondents: facet + overrides ──────────────────────────────────────
 
 export interface CorrespondentFacet {
