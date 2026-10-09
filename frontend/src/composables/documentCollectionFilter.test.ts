@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   collectionQueryParams,
   countActiveDocFilters,
+  defaultCollectionScope,
   docFilterToQuery,
   effectiveCollectionScope,
   parseDocFilterFromQuery,
@@ -11,24 +12,50 @@ import {
 /**
  * The Sammelmappen scope on the document list.
  *
- * By default a bundled document is left out of the list, because its folder
- * row stands for it above — so the default is a real filter, and it has to be
- * as visible, as shareable and as undoable as one the user typed.
+ * While browsing, a bundled document is left out of the list, because its
+ * folder row stands for it above — so the default is a real filter, and it
+ * has to be as visible, as shareable and as undoable as one the user typed.
+ * While searching, the default flips: a hit that sits in a folder is still a
+ * hit.
  */
-describe('the default scope', () => {
+describe('the default scope while browsing', () => {
   it('leaves bundled documents out when nothing was chosen', () => {
+    expect(defaultCollectionScope(false)).toBe('without')
     expect(effectiveCollectionScope({})).toBe('without')
     expect(collectionQueryParams({})).toEqual({ in_collection: false })
   })
 
   it('stays out of the URL — a link carries what the sender changed', () => {
     expect(docFilterToQuery({})).toEqual({})
-    expect(docFilterToQuery({ collectionScope: 'without' })).toEqual({})
   })
 
   it('does not count as an active filter', () => {
     expect(countActiveDocFilters({})).toBe(0)
-    expect(countActiveDocFilters({ collectionScope: 'without' })).toBe(0)
+  })
+})
+
+describe('the default scope while searching', () => {
+  it('includes bundled documents as hits when nothing was chosen', () => {
+    expect(defaultCollectionScope(true)).toBe('with')
+    expect(effectiveCollectionScope({}, true)).toBe('with')
+    expect(collectionQueryParams({}, true)).toEqual({})
+  })
+
+  it('still honours an explicit choice', () => {
+    expect(effectiveCollectionScope({ collectionScope: 'without' }, true)).toBe('without')
+    expect(collectionQueryParams({ collectionScope: 'without' }, true)).toEqual({
+      in_collection: false,
+    })
+    expect(collectionQueryParams({ collectionScope: 'only' }, true)).toEqual({ in_collection: true })
+  })
+
+  it('carries an explicit "ohne Sammelmappen" through the URL and counts it', () => {
+    // It is the departure from the search default, so it is as visible and as
+    // shareable as any other filter.
+    const query = docFilterToQuery({ collectionScope: 'without' })
+    expect(query).toEqual({ collectionScope: 'without' })
+    expect(parseDocFilterFromQuery(query)).toEqual({ collectionScope: 'without' })
+    expect(countActiveDocFilters({ collectionScope: 'without' })).toBe(1)
   })
 })
 
@@ -76,7 +103,6 @@ describe('departing from the default', () => {
 
 describe('a scope value the URL should not carry', () => {
   it('falls back to the default rather than to nothing', () => {
-    expect(parseDocFilterFromQuery({ collectionScope: 'without' })).toEqual({})
     expect(parseDocFilterFromQuery({ collectionScope: 'irgendwas' })).toEqual({})
     expect(effectiveCollectionScope(parseDocFilterFromQuery({ collectionScope: '' }))).toBe(
       'without',

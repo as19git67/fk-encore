@@ -9,6 +9,7 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import DateRangePresets from './DateRangePresets.vue'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import {
+  defaultCollectionScope,
   effectiveCollectionScope,
   type DocumentCollectionScope,
   type DocumentFilter,
@@ -28,6 +29,12 @@ const props = defineProps<{
   correspondents: { slug: string; display: string; count: number }[]
   /** Sammelmappen the caller can pick from, for the membership facet. */
   collections: { id: number; title: string }[]
+  /**
+   * Whether a search term is in force. It moves the default of the
+   * membership facet: browsing leaves bundled documents to their folder
+   * rows, a search includes them as hits.
+   */
+  searching?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -148,22 +155,29 @@ const subjectOptions = computed<Array<{ label: string; value: number | null }>>(
 /**
  * The Sammelmappen facet as one control.
  *
- * The default leaves bundled documents out, because the folder row above the
- * list already stands for them; this control is where that is turned off
- * ("Auch in Sammelmappen") or inverted, and where one folder can be singled
- * out. A named folder supersedes the scope, so they share one dropdown rather
- * than fighting each other as two.
+ * While browsing, the default leaves bundled documents out, because the
+ * folder row above the list already stands for them; while searching it
+ * includes them, because a hit in a folder is still a hit. This control is
+ * where either default is overridden or inverted, and where one folder can be
+ * singled out. A named folder supersedes the scope, so they share one
+ * dropdown rather than fighting each other as two.
  */
+const scopeDefault = computed(() => defaultCollectionScope(Boolean(props.searching)))
+
+function scopeLabel(scope: DocumentCollectionScope, label: string): string {
+  return scopeDefault.value === scope ? `${label} (Standard)` : label
+}
+
 const collectionOptions = computed<Array<{ label: string; value: string }>>(() => [
-  { label: 'Ohne Sammelmappen (Standard)', value: 'without' },
-  { label: 'Auch in Sammelmappen', value: 'with' },
-  { label: 'Nur in Sammelmappen', value: 'only' },
+  { label: scopeLabel('without', 'Ohne Sammelmappen'), value: 'without' },
+  { label: scopeLabel('with', 'Auch in Sammelmappen'), value: 'with' },
+  { label: scopeLabel('only', 'Nur in Sammelmappen'), value: 'only' },
   ...props.collections.map((c) => ({ label: `Mappe: ${c.title}`, value: `id:${c.id}` })),
 ])
 
 function collectionSelection(f: DocumentFilter): string {
   if (f.collectionId) return `id:${f.collectionId}`
-  return effectiveCollectionScope(f)
+  return effectiveCollectionScope(f, Boolean(props.searching))
 }
 
 function applyCollectionSelection(value: string): DocumentFilter {
@@ -176,7 +190,7 @@ function applyCollectionSelection(value: string): DocumentFilter {
     collectionId: undefined,
     // The default is stored as "unset" so a filter that was never touched
     // stays indistinguishable from one explicitly reset to it.
-    collectionScope: scope === 'without' ? undefined : scope,
+    collectionScope: scope === scopeDefault.value ? undefined : scope,
   }
 }
 

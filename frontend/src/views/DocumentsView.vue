@@ -106,6 +106,7 @@ const search = useListSearch({
 })
 /** The settled search term; the list and the search endpoint both read this. */
 const q = search.term
+const isSearchActive = computed(() => q.value.trim().length > 0)
 const searchMode = ref<SearchMode>(loadStoredSearchMode())
 watch(searchMode, (v) => localStorage.setItem(SEARCH_MODE_STORAGE_KEY, v))
 
@@ -246,7 +247,7 @@ const visibleCollections = computed(() => {
  */
 const bundledHidden = computed(
   () =>
-    effectiveCollectionScope(filter.applied.value) === 'without' &&
+    effectiveCollectionScope(filter.applied.value, isSearchActive.value) === 'without' &&
     !filter.applied.value.collectionId &&
     collections.value.some((c) => c.item_count > 0),
 )
@@ -380,7 +381,6 @@ const SEARCH_LIMIT = 100
 /** Total matching documents (list mode); drives "X von Y" + "Mehr laden". */
 const total = ref(0)
 const loadingMore = ref(false)
-const isSearchActive = computed(() => q.value.trim().length > 0)
 
 const filterChips = useDocumentFilterChips(filter, {
   documentType: documentTypeLabel,
@@ -447,7 +447,8 @@ function currentFilterParams() {
     document_type: f.documentType,
     folder: f.folder,
     ref: f.ref,
-    ...collectionQueryParams(f),
+    // A search looks into Sammelmappen by default; see `defaultCollectionScope`.
+    ...collectionQueryParams(f, isSearchActive.value),
   }
 }
 
@@ -1026,6 +1027,7 @@ onMounted(async () => {
       :subject-people="subjectPeople"
       :correspondents="correspondents"
       :collections="collections"
+      :searching="isSearchActive"
       @apply="applyFilterMenu"
       @reset="resetFilterMenu"
     />

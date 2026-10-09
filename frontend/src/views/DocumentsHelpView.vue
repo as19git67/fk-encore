@@ -271,14 +271,18 @@ function goBack() {
           <strong>In der Dokumentenliste</strong> – Sammelmappen erscheinen als
           eigene Zeilen über den Dokumenten; die Suche findet sie über Titel,
           Notiz und Zusammenfassung. <strong>Standardmäßig</strong> werden
-          Dokumente, die in einer Mappe liegen, nicht zusätzlich einzeln
-          aufgeführt – die Mappen-Zeile steht für sie. Ein Hinweis über der
-          Liste sagt das und schaltet es mit einem Klick wieder ab.
+          Dokumente, die in einer Mappe liegen, beim Blättern nicht zusätzlich
+          einzeln aufgeführt – die Mappen-Zeile steht für sie. Ein Hinweis über
+          der Liste sagt das und schaltet es mit einem Klick wieder ab. Bei
+          einem <strong>Suchbegriff</strong> gilt das nicht: Die Suche findet
+          Dokumente auch in Mappen und zeigt sie als Treffer, denn wer sucht,
+          sucht ein Dokument.
         </li>
         <li>
           <strong>Filter „Sammelmappe"</strong> – „Auch in Sammelmappen" zeigt
-          wieder alle Dokumente einzeln, „Nur in Sammelmappen" die Umkehrung
-          des Standards, und eine benannte Mappe genau deren Dokumente (dann
+          alle Dokumente einzeln, „Ohne Sammelmappen" blendet Mappen-Inhalte
+          auch bei einer Suche aus, „Nur in Sammelmappen" zeigt ausschließlich
+          diese, und eine benannte Mappe genau deren Dokumente (dann
           steht nur diese eine Mappen-Zeile darüber). Bei aktivem
           Dokumentfilter – Kategorie, Absender, Steuer, Dokumentart … – treten
           die Mappen-Zeilen zurück, weil ein Filter nach Eigenschaften fragt,
