@@ -105,6 +105,7 @@ import {
 import { realtime, push } from "~encore/clients";
 
 import { checkForDuplicatesOf } from "./duplicates";
+import { extractReferenceNumbers, mergeReferenceNumbers, userEntered } from "./reference-numbers";
 console.log("[boot] documents/document-ops.ts: all imports resolved");
 
 type DocumentStatus = "pending" | "extracting" | "classifying" | "ready" | "failed" | "encrypted";
@@ -607,6 +608,14 @@ export async function runClassify(documentId: number): Promise<{ classification:
   if (referenceTags.length > 0) {
     classification.tags = [...classification.tags, ...referenceTags];
   }
+  // 3a. The same numbers as a typed field (#1479): the label-anchored reading
+  //     wins, the model adds what the labels miss, and what the user typed on
+  //     this document survives every run.
+  classification.reference_numbers = mergeReferenceNumbers(
+    extractReferenceNumbers(clipped),
+    classification.reference_numbers,
+    userEntered(row.reference_numbers),
+  );
   // 3b. Content tags the user consistently files for this sender (learned).
   classification.tags = mergeLearnedTags(classification.tags, learned);
 
@@ -954,6 +963,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
     // valid type rather than forcing a fallback.
     patch.document_type = classification.document_type;
     patch.document_type_confidence = classification.document_type_confidence;
+    patch.reference_numbers = classification.reference_numbers;
   }
   // Only overwrite tax fields when neither a human nor the Cloud Teacher has
   // pinned them. `tax_reviewed=true` = human asserted; `category_source` in

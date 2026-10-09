@@ -17,6 +17,7 @@
 import { CLASSIFY_PROMPTS } from "./classify-prompts";
 import { isValidTaxSectionSlug, type TaxSectionGroup } from "./tax-sections";
 import { isValidDocumentTypeSlug } from "./document-types";
+import { parseModelReferenceNumbers, type DocumentReferenceNumber } from "./reference-numbers";
 
 console.log("[boot] documents/llm-client.ts: all imports resolved");
 
@@ -132,6 +133,10 @@ export interface Classification {
   tax_year: number | null;
   tax_year_confidence: number;
   tax_sections: TaxAssignment[];
+  // Contract/policy/customer/case numbers the model read (#1479). Merged
+  // with the label-anchored regex reading in document-ops.ts; the model never
+  // overrides what the regex found.
+  reference_numbers: DocumentReferenceNumber[];
 }
 
 export interface SubjectPersonRequestEntry {
@@ -377,6 +382,7 @@ export function parseClassification(raw: unknown): Classification {
     confidence: conf,
     ...parseDocumentType(r),
     ...parseTaxFields(r),
+    reference_numbers: parseModelReferenceNumbers(r.reference_numbers),
   };
 }
 

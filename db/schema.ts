@@ -1,4 +1,5 @@
 import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint, date } from "drizzle-orm/pg-core";
+import type { DocumentReferenceNumber } from "../documents/reference-numbers";
 import { sql } from "drizzle-orm";
 
 /**
@@ -1074,6 +1075,11 @@ export const documents = pgTable("documents", {
   // NULL for a file dropped on its own at the root. Data about the document,
   // not a filing location — `disk_path` alone says where the file lives.
   source_folder: text("source_folder"),
+  // Contract, policy, customer and case numbers found in the text (#1479,
+  // migration 0233): `[{ kind, value, normalized, source }]`, see
+  // documents/reference-numbers.ts. Separate from `document_number`, which is
+  // the document's own "#1234" sticker only.
+  reference_numbers: jsonb("reference_numbers").$type<DocumentReferenceNumber[]>().notNull().default([]),
   // Cached, lowercase, space-separated list of the document's tag names.
   // Kept in sync by triggers on document_tag_links and document_tags
   // (migration 0090) so the generated text_tsv column can fold tags

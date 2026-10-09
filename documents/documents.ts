@@ -94,6 +94,13 @@ import {
 } from "./visibility";
 import { enqueueDocumentScan, getQueueStatus, requeueDocument, cancelPendingJobs, retryFailedJobs, type QueueStatus } from "./scan-queue";
 import { normalizeSourceFolder, sourceFolderPrefixPattern } from "./source-folder";
+import {
+  isPlausibleReferenceValue,
+  normalizeReference,
+  parseUserReferenceNumbers,
+  referenceNumberContains,
+  type DocumentReferenceNumber,
+} from "./reference-numbers";
 import { triggerWorkers } from "./scan-worker";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
@@ -197,6 +204,8 @@ export interface DocumentSummary {
    * folder (#1477), or null when it arrived on its own at the root.
    */
   source_folder: string | null;
+  /** Contract, policy, customer and case numbers in the text (#1479). */
+  reference_numbers: DocumentReferenceNumber[];
   /**
    * True when a human pinned the editable attributes (see migration 0101).
    * `false` on a ready document marks it as "new": freshly imported with
@@ -374,6 +383,8 @@ interface ListQuery {
   collection_id?: Query<number>;
   /** Origin folder, with everything below it (#1477). */
   folder?: Query<string>;
+  /** Reference number, compared normalised (#1479). */
+  ref?: Query<string>;
   sort_by?: Query<string>;
   sort_dir?: Query<string>;
   limit?: Query<number>;
@@ -402,6 +413,8 @@ interface DocumentFilterArgs {
   collection_id?: number;
   /** Keep documents from this origin folder and every folder below it (#1477). */
   folder?: string;
+  /** Keep documents carrying this reference number (compared normalised, #1479). */
+  ref?: string;
 }
 
 /**
@@ -452,6 +465,10 @@ async function buildDocumentFilterConditions(
   }
   if (f.correspondent && f.correspondent.trim().length > 0) {
     conds.push(eq(documents.correspondent_slug, f.correspondent.trim().toLowerCase()));
+  }
+  if (f.ref && f.ref.trim().length > 0) {
+    const norm = normalizeReference(f.ref);
+    conds.push(norm.length > 0 ? referenceNumberContains(norm) : sql`FALSE`);
   }
   const folder = normalizeSourceFolder(f.folder);
   if (folder) {
@@ -1199,7 +1216,7 @@ export function sortDocumentSummaries<T extends DocumentSummary>(
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -1214,7 +1231,7 @@ export const listDocuments = api(
       : [visibleDocumentsWhere(userId, groupIds)];
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -1224,11 +1241,15 @@ export const listDocuments = api(
 
     if (q && q.trim().length > 0) {
       const pat = `%${q.trim()}%`;
+      // A typed reference number finds the document that carries it, however
+      // the number was printed (#1479).
+      const refNorm = isPlausibleReferenceValue(q.trim()) ? normalizeReference(q.trim()) : "";
       const matchedByTitle = or(
         ilike(documents.title, pat),
         ilike(documents.sender, pat),
         ilike(documents.original_filename, pat),
         ilike(documents.summary, pat),
+        ...(refNorm.length >= 3 ? [referenceNumberContains(refNorm)] : []),
       );
       if (matchedByTitle) conds.push(matchedByTitle);
     }
@@ -1649,6 +1670,11 @@ export interface UpdateDocumentRequest {
   document_type?: string | null;
   tags?: string[];
   /**
+   * Replace the reference numbers (#1479). Every entry becomes `source:
+   * 'user'` and survives re-classification; `kind` defaults to 'other'.
+   */
+  reference_numbers?: Array<{ kind?: string | null; value: string }>;
+  /**
    * Explicitly set the "human-pinned attributes" flag. Editing any attribute
    * above already sets it to true implicitly; send `false` to hand the
    * document back to the classifier ("let the AI decide again").
@@ -1682,6 +1708,9 @@ export const updateDocument = api(
     if (req.sender !== undefined) patch.sender = req.sender?.trim() || null;
     if (req.document_number !== undefined) patch.document_number = req.document_number?.trim() || null;
     if (req.summary !== undefined) patch.summary = req.summary?.trim() || null;
+    if (req.reference_numbers !== undefined) {
+      patch.reference_numbers = parseUserReferenceNumbers(req.reference_numbers);
+    }
 
     if (req.category_slug !== undefined) {
       if (req.category_slug === null || req.category_slug === "") {
@@ -3480,6 +3509,8 @@ interface SearchQuery {
   collection_id?: Query<number>;
   /** Origin folder, with everything below it (#1477). */
   folder?: Query<string>;
+  /** Reference number, compared normalised (#1479). */
+  ref?: Query<string>;
   // Optional override of the relevance ranking, mirrored from `ListQuery`
   // (otherwise a sort chosen in the list view was silently dropped once a
   // search term was active — sorting only ever worked on the plain list).
@@ -3500,7 +3531,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, sort_by, sort_dir }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref, sort_by, sort_dir }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -3515,7 +3546,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -4509,6 +4540,7 @@ export function toSummary(
     group_id: row.group_id,
     notes: row.notes ?? null,
     source_folder: row.source_folder ?? null,
+    reference_numbers: row.reference_numbers ?? [],
     attributes_reviewed: row.attributes_reviewed ?? false,
     category_source: row.category_source ?? "ai",
     collections,

@@ -24,6 +24,7 @@ import db from "../db/database";
 import { sql } from "drizzle-orm";
 import { embedTexts } from "./llm-client";
 import { loadUserGroupIds } from "./visibility";
+import { isPlausibleReferenceValue, normalizeReference } from "./reference-numbers";
 
 export type SearchMode = "fts" | "semantic" | "hybrid";
 
@@ -74,11 +75,24 @@ export async function searchDocuments(params: SearchParams): Promise<SearchHit[]
 
   const groupIds = await loadUserGroupIds(userId);
 
+  // A query that reads like a reference number finds the documents carrying
+  // it first, whatever the ranking below says (#1479): a policy number typed
+  // into the search is a lookup, not a question.
+  const exact = await runReferenceExact(userId, groupIds, q).catch((err) => {
+    console.warn(`[documents.search] reference branch failed: ${err?.message ?? err}`);
+    return [] as SearchHit[];
+  });
+  const withExact = (hits: SearchHit[]): SearchHit[] => {
+    if (exact.length === 0) return hits;
+    const seen = new Set(exact.map((h) => h.document_id));
+    return [...exact, ...hits.filter((h) => !seen.has(h.document_id))].slice(0, limit);
+  };
+
   if (mode === "fts") {
-    return await runFts(userId, groupIds, q, limit);
+    return withExact(await runFts(userId, groupIds, q, limit));
   }
   if (mode === "semantic") {
-    return await runSemantic(userId, groupIds, q, limit);
+    return withExact(await runSemantic(userId, groupIds, q, limit));
   }
 
   const [fts, semantic] = await Promise.all([
@@ -91,7 +105,22 @@ export async function searchDocuments(params: SearchParams): Promise<SearchHit[]
       return [] as SearchHit[];
     }),
   ]);
-  return reciprocalRankFusion([fts, semantic], RRF_K).slice(0, limit);
+  return withExact(reciprocalRankFusion([fts, semantic], RRF_K).slice(0, limit));
+}
+
+/** Documents whose `reference_numbers` contain the query, compared normalised. */
+async function runReferenceExact(userId: number, groupIds: number[], q: string): Promise<SearchHit[]> {
+  if (!isPlausibleReferenceValue(q)) return [];
+  const norm = normalizeReference(q);
+  if (norm.length < 3) return [];
+  const needle = JSON.stringify([{ normalized: norm }]);
+  const rows = await db.execute<{ document_id: number }>(sql`
+    SELECT id AS document_id FROM documents
+    WHERE reference_numbers @> ${needle}::jsonb AND ${visibilityClause(userId, groupIds)}
+    ORDER BY doc_date DESC NULLS LAST, id DESC
+    LIMIT 50
+  `);
+  return rows.rows.map((r) => ({ document_id: Number(r.document_id), score: 1 }));
 }
 
 /**
