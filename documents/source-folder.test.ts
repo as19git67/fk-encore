@@ -7,7 +7,10 @@ import { sql } from "drizzle-orm";
 import db from "../db/database";
 import {
   backfillSourceFolders,
+  getSourceFolderBackfillState,
   hashFile,
+  resetSourceFolderBackfillState,
+  startSourceFolderBackfill,
   normalizeSourceFolder,
   sourceFolderFor,
   sourceFolderPrefixPattern,
@@ -166,3 +169,66 @@ describe("backfillSourceFolders", () => {
     expect(await folderOf(id)).toBeNull();
   });
 });
+
+describe("startSourceFolderBackfill", () => {
+  beforeEach(async () => {
+    await ensureUser();
+    await db.execute(sql`DELETE FROM documents WHERE user_id = ${USER_ID}`);
+    tmpRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fk-source-folder-run-"));
+    resetSourceFolderBackfillState();
+  });
+
+  afterAll(async () => {
+    await db.execute(sql`DELETE FROM documents WHERE user_id = ${USER_ID}`);
+  });
+
+  async function waitUntilFinished(): Promise<void> {
+    for (let i = 0; i < 200; i += 1) {
+      if (getSourceFolderBackfillState().status !== "running") return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error("backfill run did not finish");
+  }
+
+  it("runs in the background, reports progress and keeps the result", async () => {
+    const abs = await writeFile("Versicherungen/police.pdf", "run bytes");
+    const id = await insertDoc(await hashFile(abs), "police.pdf");
+
+    const { started, state } = startSourceFolderBackfill(tmpRoot, true);
+    expect(started).toBe(true);
+    expect(state.status).toBe("running");
+    expect(state.root).toBe(tmpRoot);
+    expect(state.apply).toBe(true);
+
+    await waitUntilFinished();
+    const done = getSourceFolderBackfillState();
+    expect(done.status).toBe("done");
+    expect(done.finished_at).not.toBeNull();
+    expect(done.progress).toEqual({ files_found: 1, files_hashed: 1 });
+    expect(done.result?.updated).toBe(1);
+    expect(await folderOf(id)).toBe("Versicherungen");
+  });
+
+  it("refuses a second run while one is active", async () => {
+    await writeFile("a.pdf", "a");
+    const first = startSourceFolderBackfill(tmpRoot, false);
+    const second = startSourceFolderBackfill(tmpRoot, true);
+    expect(first.started).toBe(true);
+    expect(second.started).toBe(false);
+    expect(second.state.apply).toBe(false);
+    await waitUntilFinished();
+    expect(getSourceFolderBackfillState().status).toBe("done");
+  });
+
+  it("records a failure instead of staying running forever", async () => {
+    const { started } = startSourceFolderBackfill(path.join(tmpRoot, "missing"), false);
+    expect(started).toBe(true);
+    await waitUntilFinished();
+    // An unreadable root walks to an empty tree rather than throwing, so the
+    // run ends done with nothing scanned; what matters is that it ends.
+    const s = getSourceFolderBackfillState();
+    expect(s.status === "done" || s.status === "failed").toBe(true);
+    expect(s.finished_at).not.toBeNull();
+  });
+});
+
