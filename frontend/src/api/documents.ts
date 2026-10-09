@@ -880,6 +880,30 @@ export function backfillSourceFolders(root: string, apply: boolean) {
   })
 }
 
+export interface InboxFolderEntry {
+  user_id: number
+  name: string
+  email: string
+  /** First folder below the inbox root that routes scans to this user. */
+  folder: string
+  default_group_id: number | null
+  default_group_name: string | null
+  /** Files outside any user folder go to this user. */
+  is_fallback: boolean
+  /** Another user with a lower id owns the same folder name. */
+  shadowed: boolean
+}
+
+export interface InboxFoldersResponse {
+  inbox_dir: string
+  entries: InboxFolderEntry[]
+}
+
+/** Which inbox subfolder routes scans to which user, and into which group. */
+export function listInboxFolders() {
+  return apiFetch<InboxFoldersResponse>('/documents/inbox-folders')
+}
+
 export function relocateAllDocuments() {
   return apiFetch<RelocateAllDocumentsResponse>('/documents/relocate-all', {
     method: 'POST',

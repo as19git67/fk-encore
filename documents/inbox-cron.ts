@@ -25,6 +25,37 @@ interface ReconcileResult {
   attempted: number;
 }
 
+/**
+ * Every supported file below `dir`, depth first. Hidden entries are
+ * skipped like the watcher skips them; a directory that vanishes while
+ * we read it is treated as empty.
+ */
+async function collectSupportedFiles(dir: string): Promise<string[]> {
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch (err: any) {
+    console.error(
+      `[documents.inbox-cron] readdir ${dir} failed: ${err?.message ?? err}`,
+    );
+    return [];
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await collectSupportedFiles(abs)));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (!SUPPORTED_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+    files.push(abs);
+  }
+  return files;
+}
+
 export const reconcileInbox = api(
   { expose: false, method: "POST", path: "/internal/documents/inbox-reconcile" },
   async (): Promise<ReconcileResult> => {
@@ -32,40 +63,19 @@ export const reconcileInbox = api(
       return { scanned: 0, attempted: 0 };
     }
 
-    let entries: string[];
-    try {
-      entries = await fs.promises.readdir(DOCUMENTS_INBOX_DIR);
-    } catch (err: any) {
-      console.error(
-        `[documents.inbox-cron] readdir ${DOCUMENTS_INBOX_DIR} failed: ${err?.message ?? err}`,
-      );
-      return { scanned: 0, attempted: 0 };
-    }
+    // Walk the whole tree: user folders (`<login-slug>/…`) and any
+    // subfolders a scanner put files in are inbox content too.
+    const files = await collectSupportedFiles(DOCUMENTS_INBOX_DIR);
 
     let attempted = 0;
-    for (const entry of entries) {
-      if (entry.startsWith(".")) continue;
-      const ext = path.extname(entry).toLowerCase();
-      if (!SUPPORTED_EXTENSIONS.has(ext)) continue;
-
-      const abs = path.join(DOCUMENTS_INBOX_DIR, entry);
-      let stat: fs.Stats;
-      try {
-        stat = await fs.promises.stat(abs);
-      } catch {
-        // File vanished between readdir and stat — likely the live
-        // watcher just moved it. Nothing to do.
-        continue;
-      }
-      if (!stat.isFile()) continue;
-
+    for (const abs of files) {
       attempted++;
       // handleAddedFile already swallows duplicate / empty errors and
       // logs the rest, so we don't need a try/catch wrapper here.
       await handleAddedFile(abs);
     }
 
-    return { scanned: entries.length, attempted };
+    return { scanned: files.length, attempted };
   },
 );
 
