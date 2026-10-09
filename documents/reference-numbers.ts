@@ -184,12 +184,13 @@ export function parseUserReferenceNumbers(
  * reading beats the model's guess, and the model adds only what neither has.
  */
 export function mergeReferenceNumbers(
-  regex: readonly DocumentReferenceNumber[],
-  model: readonly DocumentReferenceNumber[],
-  user: readonly DocumentReferenceNumber[] = [],
+  regex: readonly DocumentReferenceNumber[] | null | undefined,
+  model: readonly DocumentReferenceNumber[] | null | undefined,
+  user: readonly DocumentReferenceNumber[] | null | undefined = [],
 ): DocumentReferenceNumber[] {
   const byNorm = new Map<string, DocumentReferenceNumber>();
-  for (const list of [user, regex, model]) {
+  // A classification from before this field (or a test double) has no list.
+  for (const list of [user ?? [], regex ?? [], model ?? []]) {
     for (const r of list) {
       if (!byNorm.has(r.normalized)) byNorm.set(r.normalized, r);
     }
