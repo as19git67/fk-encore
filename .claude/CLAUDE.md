@@ -1338,6 +1338,7 @@ The conversation with the user stays in whatever language the user is using — 
 
 ## Aktive Feature-Pläne
 
+- **Zusammenhang zwischen Dokumenten** (Herkunftsordner mit Backfill über `sha256`, Panel „Verwandte Dokumente“ auf der Detailseite, Referenznummern als eigenes Feld, Akten als Sammelmappen mit Regel, Erkennung und Zusammenführung von Beinahe-Duplikaten aus Neuimporten): `.claude/plans/dokumente-zusammenhang.md` (Plan auf Englisch), Issues #1477–#1481. Noch nicht umgesetzt.
 - **Foto-Freigabe** (Genehmigungsprozess neu → abgelehnt/intern/öffentlich per Foto, Eingang über Import-Volume, Upload-Links oder Einreichen, globale Rolle „Foto-Genehmiger“, Freigabe-Alben der Organisation, öffentliche Einstiegsseite, Metadaten-Bereinigung bei anonymer Auslieferung; Etappe 0 = serverseitige Zugriffsprüfung pro Foto): `.claude/plans/foto-freigabe.md` (Plan auf Englisch). Noch nicht umgesetzt.
 
 - **Dokumentenverwaltung** (neues Modul neben Fotos, lokale KI-Klassifikation via llm-service): `/root/.claude/plans/ein-weiteres-modul-in-peaceful-robin.md`. Wird iterativ in Etappen umgesetzt (DB/Seed → llm-service → documents-Service → Watcher → Suche → Frontend → Infra).
