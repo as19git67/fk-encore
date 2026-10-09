@@ -17,7 +17,8 @@ import {
   type SourceFolderBackfillResponse,
 } from '../../api/documents'
 
-const root = ref('')
+/** Where docker-compose.yml mounts the old tree; a bare-metal install types its own path. */
+const root = ref('/mnt/data/documents-source')
 const loading = ref(false)
 const error = ref('')
 const result = ref<SourceFolderBackfillResponse | null>(null)
@@ -56,7 +57,7 @@ async function run(apply: boolean) {
       <InputText
         v-model="root"
         class="source-root__input"
-        placeholder="/mnt/alte-dokumente"
+        placeholder="/mnt/data/documents-source"
         :disabled="loading"
       />
     </label>

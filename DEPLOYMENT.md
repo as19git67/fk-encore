@@ -46,6 +46,14 @@ file and takes every future `docker-compose.yml` from the repository
 | Where the data sits, when it is not one `DEPLOY_DATA_ROOT` | `DEPLOY_DATA_ROOT`, ports, image tag, passwords, timeouts |
 | External photo libraries mounted into `app` | anything else `DEPLOY_*` |
 
+The old document folder tree (for the "Herkunftsordner nachtragen"
+backfill under Dokumente › Verarbeitung) is the `documents_source` volume
+in that file, mounted read-only at `/mnt/data/documents-source` in `app`.
+Point its `device` at the tree, or leave the default
+`${DEPLOY_DATA_ROOT}/documents-source` and copy the tree there. The
+directory has to exist before `docker compose up`, like every other bind
+mount; it may stay empty.
+
 Extra photo libraries need two entries, both in that file: a volume bound
 to the host path, and a mount on `app` under `/mnt/libraries/`. The
 multi-file merge **appends** those to the mounts `docker-compose.yml`

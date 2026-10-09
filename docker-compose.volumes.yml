@@ -66,6 +66,17 @@ volumes:
       type: none
       o: bind
       device: ${DEPLOY_DATA_ROOT:-./data}/documents-inbox
+  # The folder tree the documents came from, before fk-encore filed them
+  # (#1477): the "Herkunftsordner nachtragen" backfill reads it to write
+  # each document's origin folder. Point `device` at the old tree, or leave
+  # the default and copy the tree there. Mounted read-only on `app`; an
+  # empty directory is fine when there is nothing to backfill.
+  documents_source:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/documents-source
   finance_import:
     driver: local
     driver_opts:
