@@ -85,6 +85,7 @@ describe('moduleEntryPath', () => {
       'Bezugspersonen',
       'Gruppen',
       'Verarbeitung',
+      'Duplikate',
       'Taxonomie-Cockpit',
       'Taxonomie-Tools',
       'KI-Modell',

@@ -225,6 +225,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'data.manage' },
       },
       {
+        path: 'duplikate',
+        name: 'dokumente-duplikate',
+        component: () => import('../views/DocumentDuplicatesView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+      {
         path: 'korrespondenten',
         name: 'dokumente-korrespondenten',
         component: () => import('../views/CorrespondentOverridesView.vue'),
@@ -274,6 +280,7 @@ export const modules: ModuleConfig[] = [
           { label: 'Bezugspersonen', icon: 'pi pi-id-card', routeName: 'dokumente-bezugspersonen', permission: 'documents.view' },
           { label: 'Gruppen', icon: 'pi pi-users', routeName: 'dokumente-gruppen', permission: 'groups.view' },
           { label: 'Verarbeitung', icon: 'pi pi-file', routeName: 'dokumente-verarbeitung', permission: 'data.manage' },
+          { label: 'Duplikate', icon: 'pi pi-clone', routeName: 'dokumente-duplikate', permission: 'data.manage' },
           { label: 'Taxonomie-Cockpit', icon: 'pi pi-chart-line', routeName: 'dokumente-taxonomie-cockpit', permission: 'data.manage' },
           { label: 'Taxonomie-Tools', icon: 'pi pi-wrench', routeName: 'dokumente-taxonomie-tools', permission: 'data.manage' },
           { label: 'KI-Modell', icon: 'pi pi-microchip-ai', routeName: 'dokumente-ki-modell', permission: 'data.manage' },

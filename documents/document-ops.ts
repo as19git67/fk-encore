@@ -104,6 +104,7 @@ import {
 } from "./metadata-extract";
 import { realtime, push } from "~encore/clients";
 
+import { checkForDuplicatesOf } from "./duplicates";
 console.log("[boot] documents/document-ops.ts: all imports resolved");
 
 type DocumentStatus = "pending" | "extracting" | "classifying" | "ready" | "failed" | "encrypted";
@@ -321,6 +322,10 @@ export async function runTextExtract(documentId: number): Promise<void> {
     .returning({ status: documents.status });
   const actualStatus = (updated[0]?.status as DocumentStatus) ?? nextStatus;
   await publishStatusChanged(documentId, row.user_id, actualStatus);
+
+  // Now that the text is there, ask whether it reads like a document already
+  // in the corpus (#1481). Records an open pair for review; never blocks.
+  await checkForDuplicatesOf(documentId);
 
   console.log(
     `[documents] text_extract(${documentId}) done in ${Date.now() - jobStarted}ms — ` +
