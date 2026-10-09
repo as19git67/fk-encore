@@ -80,6 +80,14 @@ struct AdminView: View {
                 }
             }
 
+            Section("Info") {
+                NavigationLink {
+                    SourcesView()
+                } label: {
+                    Label("Quellen & Lizenzen", systemImage: "doc.text")
+                }
+            }
+
             // Logout
             Section {
                 Button(role: .destructive) {

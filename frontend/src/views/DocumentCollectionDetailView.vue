@@ -20,12 +20,14 @@ import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import PageLayout from '../components/layout/PageLayout.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import CollectionPageSelector from '../components/documents/CollectionPageSelector.vue'
 import {
+  applyCollectionRule,
   collectionPdfFilename,
   fetchCollectionPdf,
   getCollection,
@@ -36,6 +38,7 @@ import {
   type DocumentCollectionDetail,
   type DocumentCollectionItem,
 } from '../api/collections'
+import { listCorrespondents, type CorrespondentFacet } from '../api/documents'
 import { canShareFiles, shareFile, triggerDownload } from '../utils/shareFile'
 import { useModuleBack } from '../composables/useModuleBack'
 
@@ -71,6 +74,72 @@ const exporting = ref(false)
  */
 const { goBack } = useModuleBack('/dokumente', 'dokumente-mappen')
 
+// ─── Dossier rule (#1480) ───────────────────────────────────────────────────
+// Drafted as text and saved as a whole: the server normalises the parts and
+// applies the rule to the corpus right away, so the list below moves on save.
+const ruleCorrespondent = ref<string | null>(null)
+const ruleRefsText = ref('')
+const ruleFolder = ref('')
+const correspondents = ref<CorrespondentFacet[]>([])
+const ruleResult = ref<{ added: number; removed: number } | null>(null)
+const isDossier = computed(() => collection.value?.kind === 'dossier')
+const ruleJoinedCount = computed(() => items.value.filter((i) => i.joined_by === 'rule').length)
+const dirtyRule = computed(() => {
+  const r = collection.value?.rule
+  return (
+    (ruleCorrespondent.value ?? null) !== (r?.correspondent_slug ?? null) ||
+    ruleRefsText.value.trim() !== (r?.reference_numbers ?? []).join(', ') ||
+    ruleFolder.value.trim() !== (r?.source_folder_prefix ?? '')
+  )
+})
+const ruleDraftEmpty = computed(
+  () => !ruleCorrespondent.value && !ruleRefsText.value.trim() && !ruleFolder.value.trim(),
+)
+function applyRuleDraft(detail: DocumentCollectionDetail) {
+  ruleCorrespondent.value = detail.rule?.correspondent_slug ?? null
+  ruleRefsText.value = (detail.rule?.reference_numbers ?? []).join(', ')
+  ruleFolder.value = detail.rule?.source_folder_prefix ?? ''
+}
+function ruleInput() {
+  return {
+    correspondent_slug: ruleCorrespondent.value,
+    reference_numbers: ruleRefsText.value.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean),
+    source_folder_prefix: ruleFolder.value.trim() || null,
+  }
+}
+function saveRule() {
+  if (ruleDraftEmpty.value) return
+  ruleResult.value = null
+  void run(() => updateCollection(collectionId.value, { kind: 'dossier', rule: ruleInput() }))
+}
+function stopRule() {
+  ruleResult.value = null
+  void run(() => updateCollection(collectionId.value, { kind: 'manual' }))
+}
+async function runRuleNow() {
+  busy.value = true
+  loadError.value = ''
+  try {
+    ruleResult.value = await applyCollectionRule(collectionId.value)
+    await load()
+  } catch (err: any) {
+    loadError.value = err?.message ?? 'Regel konnte nicht angewendet werden.'
+  } finally {
+    busy.value = false
+  }
+}
+async function loadCorrespondents() {
+  try {
+    correspondents.value = (await listCorrespondents()).items
+  } catch {
+    correspondents.value = []
+  }
+}
+const correspondentOptions = computed(() => [
+  { label: 'Beliebig', value: null as string | null },
+  ...correspondents.value.map((c) => ({ label: `${c.display} (${c.count})`, value: c.slug as string | null })),
+])
+
 const collectionId = computed(() => Number(route.params.id))
 const items = computed(() => collection.value?.items ?? [])
 const includedCount = computed(() => items.value.filter((i) => i.included).length)
@@ -87,6 +156,7 @@ const dirtySummary = computed(
 watch(collectionId, () => void load())
 
 function apply(detail: DocumentCollectionDetail) {
+  applyRuleDraft(detail)
   collection.value = detail
   titleDraft.value = detail.title
   notesDraft.value = detail.notes ?? ''
@@ -236,7 +306,10 @@ function pageHint(item: DocumentCollectionItem): string {
     : `${item.excluded_pages.length} Seiten abgewählt`
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadCorrespondents()
+})
 </script>
 
 <template>
@@ -285,6 +358,76 @@ onMounted(load)
         placeholder="Erscheint unter dem Titel auf dem Deckblatt."
         @blur="saveNotes"
       />
+    </section>
+
+    <!-- Dossier rule (#1480): what joins this folder by itself. -->
+    <section class="cd-panel">
+      <div class="cd-panel-head">
+        <span class="cd-panel-label">
+          <i class="pi pi-bolt" aria-hidden="true" />
+          Akte: Dokumente nach Regel aufnehmen
+        </span>
+        <div class="cd-panel-actions">
+          <Tag v-if="isDossier" :value="`${ruleJoinedCount} per Regel`" severity="secondary" />
+          <Button
+            v-if="isDossier"
+            icon="pi pi-refresh"
+            label="Regel jetzt anwenden"
+            text
+            size="small"
+            :disabled="busy || dirtyRule"
+            @click="runRuleNow"
+          />
+        </div>
+      </div>
+      <p class="cd-rule-hint">
+        Ein Dokument tritt bei, wenn es aus dem Herkunftsordner stammt oder Korrespondent und
+        Referenznummer passen. Was die Regel aufnimmt, nimmt sie auch wieder heraus, wenn das
+        Dokument nicht mehr passt; von Hand Hinzugefügtes und Entferntes bleibt, wie es ist.
+      </p>
+      <div class="cd-rule-fields">
+        <label>
+          <span>Korrespondent</span>
+          <Select
+            :model-value="ruleCorrespondent"
+            :options="correspondentOptions"
+            option-label="label"
+            option-value="value"
+            filter
+            :disabled="busy"
+            @update:model-value="(v: string | null) => (ruleCorrespondent = v)"
+          />
+        </label>
+        <label>
+          <span>Referenznummern (Komma-getrennt)</span>
+          <InputText v-model="ruleRefsText" placeholder="AB 123456, 998877" :disabled="busy" />
+        </label>
+        <label>
+          <span>Herkunftsordner (Präfix)</span>
+          <InputText v-model="ruleFolder" placeholder="Versicherungen/Hausrat" :disabled="busy" />
+        </label>
+      </div>
+      <div class="cd-rule-actions">
+        <Button
+          v-if="isDossier"
+          label="Regel abschalten"
+          severity="secondary"
+          outlined
+          size="small"
+          :disabled="busy"
+          @click="stopRule"
+        />
+        <Button
+          :label="isDossier ? 'Regel speichern' : 'Als Akte mit dieser Regel führen'"
+          icon="pi pi-check"
+          size="small"
+          :disabled="busy || ruleDraftEmpty || (isDossier && !dirtyRule)"
+          @click="saveRule"
+        />
+      </div>
+      <Message v-if="ruleResult" severity="info" :closable="true" @close="ruleResult = null">
+        Regel angewendet: {{ ruleResult.added }} aufgenommen, {{ ruleResult.removed }} entfernt.
+      </Message>
     </section>
 
     <section class="cd-panel">
@@ -385,7 +528,10 @@ onMounted(load)
             />
           </button>
           <div class="cd-body" @click="openDocument(item)">
-            <span class="cd-name">{{ item.title || item.original_filename }}</span>
+            <span class="cd-name">
+              {{ item.title || item.original_filename }}
+              <Tag v-if="item.joined_by === 'rule'" value="per Regel" severity="secondary" class="cd-rule-tag" />
+            </span>
             <div class="cd-meta">
               <span v-if="item.sender"><i class="pi pi-building" /> {{ item.sender }}</span>
               <span v-if="item.doc_date"><i class="pi pi-calendar" /> {{ item.doc_date }}</span>
@@ -525,6 +671,42 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.cd-rule-hint {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+.cd-rule-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+/* Three fields side by side from `md` up (768px, see useBreakpoint). */
+@media (min-width: 768px) {
+  .cd-rule-fields {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+.cd-rule-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.cd-rule-fields label > span {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+.cd-rule-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.cd-rule-tag {
+  margin-left: 0.4em;
+  vertical-align: middle;
 }
 .cd-options {
   display: flex;

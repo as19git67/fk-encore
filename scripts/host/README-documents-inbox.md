@@ -48,9 +48,36 @@ rsyncs it to the server.
    The `-wo` flag allows write-only access — the Pi can create new
    files but cannot list, read, or delete existing ones.
 
-3. (Optional) Set `DOCUMENTS_INBOX_USER_EMAIL` in the app's env to
-   the e-mail address of the user that should own the imported
-   documents. Without it, the watcher falls back to the first Admin
+3. Decide who owns the imported documents. The first folder below
+   the inbox names the owner:
+
+   ```
+   documents-inbox/
+   ├── scan.pdf                 → fallback owner (see below)
+   ├── anna/scan.pdf            → the user whose login slug is `anna`
+   └── ben/Versicherungen/x.pdf → user `ben`, source folder `Versicherungen`
+   ```
+
+   The login slug is the e-mail's local part, lower-cased and reduced
+   to `a-z0-9-` (`Anna.Muster@example.test` → `anna-muster`). The app
+   lists every user's folder under *Dokumente › Einstellungen ›
+   Verarbeitung › Scanner-Eingang*, together with the group the
+   user's imports join: each owner's "Standard-Gruppe für neue
+   Dokumente" (the gear in the document list) decides whether an
+   import stays private or lands in a group, exactly as for a UI
+   upload. A folder that matches no user is kept as the file's source
+   folder and the file goes to the fallback owner.
+
+   For several people, give each scanner or Pi its own SSH key whose
+   `rrsync` root is that person's folder:
+
+   ```
+   command="rrsync -wo ${HOME}/f4mil_data/documents-inbox/anna",… ssh-ed25519 AAAA…  pi-scanner-anna
+   ```
+
+4. (Optional) Set `DOCUMENTS_INBOX_USER_EMAIL` in the app's env to
+   the e-mail address of the user that should own files outside any
+   user folder. Without it, the watcher falls back to the first Admin
    (ordered by user id).
 
 ## Pi-side script
@@ -92,7 +119,8 @@ rsync -av --remove-source-files --partial \
    manually. The Pi log should show a successful `rsync` run and the
    file should disappear from `${SCAN_DIR}`.
 2. On the server, the file should briefly appear in
-   `${HOME}/f4mil_data/documents-inbox/`, then be moved into
+   `${HOME}/f4mil_data/documents-inbox/` (or the user's folder below
+   it), then be moved into
    `…/documents/YYYY/YYYY-MM/<sha256>.pdf` by the watcher.
 3. The container log shows
    `[documents.inbox-watcher] imported foo.pdf → document <id>`.

@@ -9,13 +9,27 @@
  * opt-in without forcing admins who do not use it to create an empty
  * directory.
  *
- * The owning user is picked once at boot and cached — the inbox is a
- * single-tenant integration point (typically the household scanner).
+ * Who owns an imported file is decided by where it lands:
+ *
+ *   documents-inbox/<login-slug>/...   → the user whose login slug
+ *                                        (see `slugifyUserLogin`) names
+ *                                        the first folder
+ *   documents-inbox/...                → the fallback owner
+ *                                        (`DOCUMENTS_INBOX_USER_EMAIL`,
+ *                                        else the first Admin)
+ *
+ * The owner's "default group for new documents" preference then decides
+ * whether the document is private or shared, exactly as for a UI upload.
+ * A first folder that matches no user is not an owner folder: the file
+ * goes to the fallback owner and the whole relative path stays its
+ * source folder. The owner lookup is cached per folder name and reset
+ * when the watcher stops.
  *
  * Env knobs:
  *   DOCUMENTS_INBOX_DIR            default: uploads/documents-inbox
- *   DOCUMENTS_INBOX_USER_EMAIL     which user owns imported docs
- *                                  (falls back to the first Admin)
+ *   DOCUMENTS_INBOX_USER_EMAIL     fallback owner for files outside a
+ *                                  user folder (falls back to the first
+ *                                  Admin)
  *   DOCUMENTS_INBOX_STABILITY_MS   await-write-finish window, default 10000
  */
 
@@ -24,11 +38,12 @@ import path from "path";
 import chokidar, { type FSWatcher } from "chokidar";
 import { asc, eq } from "drizzle-orm";
 import db from "../db/database";
-import { dbFirst } from "../db/adapter";
+import { dbAll, dbFirst } from "../db/adapter";
 import { roles, userRoles, users } from "../db/schema";
 import {
   DOCUMENTS_INBOX_DIR,
   SUPPORTED_EXTENSIONS,
+  slugifyUserLogin,
 } from "./documents.service";
 import {
   DuplicateDocumentError,
@@ -39,19 +54,21 @@ import { triggerWorkers } from "./scan-worker";
 import { sourceFolderFor } from "./source-folder";
 
 let watcher: FSWatcher | null = null;
-let cachedOwnerId: number | null = null;
+/** Fallback owner for files outside a user folder; `undefined` = not yet resolved. */
+let cachedFallbackOwnerId: number | null | undefined;
+/** First inbox folder → user id, or null when the folder names no user. */
+const cachedFolderOwners = new Map<string, number | null>();
 
 function isSupported(file: string): boolean {
   return SUPPORTED_EXTENSIONS.has(path.extname(file).toLowerCase());
 }
 
 /**
- * Resolve the user that should own documents imported from the
- * inbox. Priority:
+ * Resolve the user that owns inbox files outside any user folder.
+ * Priority:
  *   1. `DOCUMENTS_INBOX_USER_EMAIL` env var → user must exist.
- *   2. The first user holding the `Admin` role (by user id).
- * Returns null if neither is available; the caller then skips
- * starting the watcher and logs a warning.
+ *   2. The first user (by id) holding the `Admin` role.
+ *   3. null → import is skipped with a warning.
  */
 export async function resolveInboxOwnerId(): Promise<number | null> {
   const email = (process.env.DOCUMENTS_INBOX_USER_EMAIL ?? "").trim().toLowerCase();
@@ -77,9 +94,70 @@ export async function resolveInboxOwnerId(): Promise<number | null> {
   return admin?.id ?? null;
 }
 
-/** For tests: reset the cached owner so resolveInboxOwnerId is re-queried. */
+/**
+ * The user whose login slug is `folder`, or null when no user has that
+ * slug. Slugs are derived from the e-mail's local part and may collide
+ * (`anna@a.test` and `anna@b.test` are both `anna`); the first user by
+ * id wins, matching the fallback's tie-break.
+ */
+export async function resolveInboxFolderOwnerId(folder: string): Promise<number | null> {
+  const rows = await dbAll<{ id: number; email: string }>(
+    db.select({ id: users.id, email: users.email }).from(users).orderBy(asc(users.id)),
+  );
+  for (const row of rows) {
+    if (slugifyUserLogin(row.email, row.id) === folder) return row.id;
+  }
+  return null;
+}
+
+/** The first path segment of `file` below the inbox root, or null at the root. */
+export function inboxFolderOf(rootDir: string, file: string): string | null {
+  const rel = path.relative(path.resolve(rootDir), path.resolve(file));
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  const segments = rel.split(path.sep);
+  return segments.length > 1 ? segments[0]! : null;
+}
+
+export interface ResolvedInboxOwner {
+  userId: number;
+  /** The directory whose relative path becomes the document's source folder. */
+  sourceRoot: string;
+}
+
+/**
+ * Decide who owns `file` and which directory its source folder is
+ * measured from. A user folder is stripped from the source folder: the
+ * folder names the owner, it is not where the document came from.
+ */
+export async function resolveInboxOwnerFor(file: string): Promise<ResolvedInboxOwner | null> {
+  const folder = inboxFolderOf(DOCUMENTS_INBOX_DIR, file);
+  if (folder != null) {
+    let ownerId = cachedFolderOwners.get(folder);
+    if (ownerId === undefined) {
+      ownerId = await resolveInboxFolderOwnerId(folder);
+      cachedFolderOwners.set(folder, ownerId);
+      if (ownerId == null) {
+        console.warn(
+          `[documents.inbox-watcher] folder ${folder} names no user — importing for the fallback owner`,
+        );
+      }
+    }
+    if (ownerId != null) {
+      return { userId: ownerId, sourceRoot: path.join(DOCUMENTS_INBOX_DIR, folder) };
+    }
+  }
+
+  if (cachedFallbackOwnerId === undefined) {
+    cachedFallbackOwnerId = await resolveInboxOwnerId();
+  }
+  if (cachedFallbackOwnerId == null) return null;
+  return { userId: cachedFallbackOwnerId, sourceRoot: DOCUMENTS_INBOX_DIR };
+}
+
+/** For tests: reset the cached owners so they are re-queried. */
 export function _resetInboxOwnerCache(): void {
-  cachedOwnerId = null;
+  cachedFallbackOwnerId = undefined;
+  cachedFolderOwners.clear();
 }
 
 /**
@@ -90,26 +168,25 @@ export function _resetInboxOwnerCache(): void {
  */
 export async function handleAddedFile(file: string): Promise<void> {
   if (!isSupported(file)) return;
-  if (cachedOwnerId === null) {
-    cachedOwnerId = await resolveInboxOwnerId();
-    if (cachedOwnerId === null) {
-      console.warn(
-        `[documents.inbox-watcher] no owning user available — skipping ${path.basename(file)}`,
-      );
-      return;
-    }
+  const owner = await resolveInboxOwnerFor(file);
+  if (owner === null) {
+    console.warn(
+      `[documents.inbox-watcher] no owning user available — skipping ${path.basename(file)}`,
+    );
+    return;
   }
 
   try {
     const imported = await importDocumentFromPath({
-      userId: cachedOwnerId,
+      userId: owner.userId,
       sourcePath: file,
       originalFilename: path.basename(file),
       mimeType: "application/pdf",
       // `Versicherungen/Hausrat/police.pdf` → "Versicherungen/Hausrat": the
       // subfolder the scanner or a copy put the file in is the one context
-      // the import would otherwise throw away (#1477).
-      sourceFolder: sourceFolderFor(DOCUMENTS_INBOX_DIR, file),
+      // the import would otherwise throw away (#1477). A user folder is
+      // not part of it.
+      sourceFolder: sourceFolderFor(owner.sourceRoot, file),
     });
     console.log(
       `[documents.inbox-watcher] imported ${path.basename(file)} → document ${imported.id}`,
@@ -182,6 +259,6 @@ export async function stopInboxWatcher(): Promise<void> {
   if (!watcher) return;
   await watcher.close();
   watcher = null;
-  cachedOwnerId = null;
+  _resetInboxOwnerCache();
   console.log("[documents.inbox-watcher] stopped");
 }

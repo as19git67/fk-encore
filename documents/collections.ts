@@ -39,6 +39,7 @@ import {
   groupMembers,
 } from "../db/schema";
 import { assertPathUnderDocumentsRoot } from "./documents.service";
+import { applyRuleToCorpus, normalizeRule, type CollectionKind, type CollectionRule, type RuleInput } from "./dossiers";
 import { assertGroupMember, loadUserGroupIds, visibleDocumentsWhere } from "./visibility";
 import { shouldUseTesseractSidecar } from "./receipt-capture";
 import { ensureSearchablePdf } from "./ocr-pdf";
@@ -115,6 +116,9 @@ export interface CollectionSummaryDTO {
   include_summary: boolean;
   visibility: "private" | "group";
   group_id: number | null;
+  /** 'dossier' when a membership rule fills the folder (#1480). */
+  kind: CollectionKind;
+  rule: CollectionRule | null;
   created_at: string | null;
   updated_at: string | null;
   /** Members in the folder, switched on or off. */
@@ -141,6 +145,8 @@ export interface CollectionItemDTO {
   pages_total: number | null;
   visibility: "private" | "group";
   group_id: number | null;
+  /** 'rule' when the dossier's rule put it in, 'user' when a person did (#1480). */
+  joined_by: "user" | "rule";
 }
 
 export interface CollectionDetailDTO extends CollectionSummaryDTO {
@@ -328,6 +334,8 @@ async function toSummaryDTO(
     include_summary: row.include_summary,
     visibility: row.visibility,
     group_id: row.group_id,
+    kind: row.kind,
+    rule: row.rule ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     item_count: counts?.total ?? 0,
@@ -342,6 +350,7 @@ async function loadItems(collectionId: number): Promise<CollectionItemDTO[]> {
     position: number;
     included: boolean;
     excluded_pages: number[] | null;
+    joined_by: "user" | "rule";
     title: string | null;
     original_filename: string;
     mime_type: string;
@@ -359,6 +368,7 @@ async function loadItems(collectionId: number): Promise<CollectionItemDTO[]> {
         position: documentCollectionItems.position,
         included: documentCollectionItems.included,
         excluded_pages: documentCollectionItems.excluded_pages,
+        joined_by: documentCollectionItems.joined_by,
         title: documents.title,
         original_filename: documents.original_filename,
         mime_type: documents.mime_type,
@@ -451,6 +461,9 @@ export interface CreateCollectionRequest {
   group_id?: number | null;
   /** Documents to seed the collection with, in the order given. */
   document_ids?: number[];
+  /** 'dossier' with a `rule` makes matching documents join by themselves (#1480). */
+  kind?: CollectionKind;
+  rule?: RuleInput | null;
 }
 
 export const createCollection = api(
@@ -474,6 +487,10 @@ export const createCollection = api(
       await assertGroupMember(userId, groupId);
     }
 
+    const rule = req.kind === "dossier" ? normalizeRule(req.rule) : null;
+    if (req.kind === "dossier" && !rule) {
+      throw APIError.invalidArgument("a dossier needs a rule with at least one part");
+    }
     const created = await dbInsertReturning<CollectionRow>(
       db
         .insert(documentCollections)
@@ -483,6 +500,8 @@ export const createCollection = api(
           notes: req.notes?.trim() || null,
           visibility,
           group_id: groupId,
+          kind: rule ? "dossier" : "manual",
+          rule,
         })
         .returning(),
     );
@@ -491,6 +510,9 @@ export const createCollection = api(
     if (req.document_ids?.length) {
       await addDocumentsToCollection(created, req.document_ids, userId, isAdmin);
     }
+    // A fresh dossier gathers what already matches, so it never starts empty
+    // while the corpus holds its letters.
+    if (rule) await applyRuleToCorpus(created);
     return await buildDetail(created.id, userId, isAdmin);
   },
 );
@@ -526,6 +548,13 @@ export interface UpdateCollectionRequest {
   include_summary?: boolean;
   visibility?: "private" | "group";
   group_id?: number | null;
+  /**
+   * Switch the folder between a hand-filled Sammelmappe and a dossier, or
+   * change the dossier's rule (#1480). `kind: 'manual'` keeps the members
+   * but stops the rule; a new rule is applied to the corpus at once.
+   */
+  kind?: CollectionKind;
+  rule?: RuleInput | null;
 }
 
 export const updateCollection = api(
@@ -587,9 +616,33 @@ export const updateCollection = api(
       patch.group_id = groupId;
     }
 
+    let applyRule = false;
+    if (req.kind !== undefined || req.rule !== undefined) {
+      const kind = req.kind ?? row.kind;
+      if (kind === "dossier") {
+        const previous = (row.rule ?? {}) as CollectionRule;
+        const rule = normalizeRule(req.rule === undefined ? previous : req.rule, {
+          excluded_document_ids: previous.excluded_document_ids,
+        });
+        if (!rule) throw APIError.invalidArgument("a dossier needs a rule with at least one part");
+        patch.kind = "dossier";
+        patch.rule = rule;
+        applyRule = true;
+      } else {
+        patch.kind = "manual";
+        patch.rule = null;
+      }
+    }
+
     await dbExec(
       db.update(documentCollections).set(patch).where(eq(documentCollections.id, row.id)),
     );
+    if (applyRule) {
+      const fresh = await dbFirst<CollectionRow>(
+        db.select().from(documentCollections).where(eq(documentCollections.id, row.id)),
+      );
+      if (fresh) await applyRuleToCorpus(fresh);
+    }
     return await buildDetail(row.id, userId, isAdmin);
   },
 );
@@ -706,6 +759,21 @@ export const removeCollectionDocument = api(
     const userId = getUserId();
     const isAdmin = isDataAdmin(authData);
     const row = await loadEditableCollection(userId, id, isAdmin);
+    // Taking a document out of a dossier is a decision the rule must respect:
+    // remember it, or the next run would put the document straight back.
+    if (row.kind === "dossier" && row.rule) {
+      const rule = row.rule as CollectionRule;
+      const excluded = new Set(rule.excluded_document_ids ?? []);
+      if (!excluded.has(documentId)) {
+        excluded.add(documentId);
+        await dbExec(
+          db
+            .update(documentCollections)
+            .set({ rule: { ...rule, excluded_document_ids: [...excluded] } })
+            .where(eq(documentCollections.id, id)),
+        );
+      }
+    }
     await dbExec(
       db
         .delete(documentCollectionItems)

@@ -109,6 +109,13 @@ export interface SourceFolderBackfillMatch {
   previous: string | null;
 }
 
+export interface SourceFolderBackfillProgress {
+  /** Supported files the walk found under `root`. */
+  files_found: number;
+  /** Of those, how many have been hashed so far. */
+  files_hashed: number;
+}
+
 export interface SourceFolderBackfillResponse {
   dry_run: boolean;
   /** Supported files found under `root`. */
@@ -187,15 +194,20 @@ export async function walkSourceTree(
 export async function backfillSourceFolders(
   root: string,
   apply: boolean,
+  onProgress?: (p: SourceFolderBackfillProgress) => void,
 ): Promise<SourceFolderBackfillResponse> {
   const { files, truncated } = await walkSourceTree(root);
+  onProgress?.({ files_found: files.length, files_hashed: 0 });
 
   // sha256 → folder. The same bytes in two folders cannot be assigned, so the
   // second sighting marks the digest ambiguous and both files are reported.
   const byDigest = new Map<string, { folder: string | null; rel: string }>();
   const ambiguous = new Map<string, string[]>();
+  let hashed = 0;
   for (const f of files) {
     const digest = await hashFile(f.abs);
+    hashed += 1;
+    if (hashed % 50 === 0) onProgress?.({ files_found: files.length, files_hashed: hashed });
     const seen = byDigest.get(digest);
     if (seen && seen.folder !== f.folder) {
       const list = ambiguous.get(digest) ?? [seen.rel];
@@ -206,6 +218,7 @@ export async function backfillSourceFolders(
     if (!seen) byDigest.set(digest, { folder: f.folder, rel: f.rel });
   }
   for (const digest of ambiguous.keys()) byDigest.delete(digest);
+  onProgress?.({ files_found: files.length, files_hashed: hashed });
 
   const matches: SourceFolderBackfillMatch[] = [];
   const matchedDigests = new Set<string>();
@@ -260,18 +273,110 @@ export async function backfillSourceFolders(
   };
 }
 
+// ─── Run state ──────────────────────────────────────────────────────────────
+//
+// Hashing a few thousand PDFs takes minutes, longer than any reverse proxy
+// lets a request live (Cloudflare answers 524 after 100 s). So the endpoint
+// only starts the run; it continues in this process and the panel polls its
+// state. One run at a time — the second request while one is running gets
+// the running state back rather than a second walk over the same tree. The
+// state lives in memory only: a restart forgets a finished report, which is
+// fine, the admin runs "Prüfen" again.
+
+export type SourceFolderBackfillStatus = "idle" | "running" | "done" | "failed";
+
+export interface SourceFolderBackfillState {
+  status: SourceFolderBackfillStatus;
+  /** The root of the current or last run; null while idle. */
+  root: string | null;
+  apply: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  progress: SourceFolderBackfillProgress;
+  /** The report, once `status` is `done`. */
+  result: SourceFolderBackfillResponse | null;
+  /** The failure, once `status` is `failed`. */
+  error: string | null;
+}
+
+let runState: SourceFolderBackfillState = {
+  status: "idle",
+  root: null,
+  apply: false,
+  started_at: null,
+  finished_at: null,
+  progress: { files_found: 0, files_hashed: 0 },
+  result: null,
+  error: null,
+};
+
+/** The current state, as a copy so a caller cannot reach into the run. */
+export function getSourceFolderBackfillState(): SourceFolderBackfillState {
+  return { ...runState, progress: { ...runState.progress } };
+}
+
+/** Tests only: forget a finished run so the next start is a fresh one. */
+export function resetSourceFolderBackfillState(): void {
+  if (runState.status === "running") throw new Error("a backfill run is still active");
+  runState = { ...runState, status: "idle", root: null, result: null, error: null };
+}
+
+/**
+ * Start a run unless one is active. Returns the state right after the start
+ * (or the running state, when one was already active) — `started` says which.
+ */
+export function startSourceFolderBackfill(
+  root: string,
+  apply: boolean,
+): { started: boolean; state: SourceFolderBackfillState } {
+  if (runState.status === "running") return { started: false, state: getSourceFolderBackfillState() };
+  runState = {
+    status: "running",
+    root,
+    apply,
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    progress: { files_found: 0, files_hashed: 0 },
+    result: null,
+    error: null,
+  };
+  void backfillSourceFolders(root, apply, (p) => {
+    runState.progress = p;
+  })
+    .then((result) => {
+      runState = { ...runState, status: "done", result, finished_at: new Date().toISOString() };
+    })
+    .catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[source-folder] backfill failed", { root, apply, error: message });
+      runState = { ...runState, status: "failed", error: message, finished_at: new Date().toISOString() };
+    });
+  return { started: true, state: getSourceFolderBackfillState() };
+}
+
+export interface SourceFolderBackfillStartResponse {
+  /** False when a run was already active; `state` then describes that one. */
+  started: boolean;
+  state: SourceFolderBackfillState;
+}
+
+function requireBackfillAdmin(): void {
+  const authData = getAuthData();
+  if (!authData) throw APIError.unauthenticated("Unauthorized");
+  requirePermission(authData, "module.documents");
+  requirePermission(authData, "data.manage");
+}
+
 /**
  * `POST /documents/source-folder/backfill` — admin only (`data.manage`),
  * because it walks an arbitrary server path and writes across every owner's
- * documents; the plain `documents.edit` holder sees only their own.
+ * documents; the plain `documents.edit` holder sees only their own. Starts
+ * the run and returns at once; `GET …/backfill/status` has the rest.
  */
 export const sourceFolderBackfill = api(
   { expose: true, method: "POST", path: "/documents/source-folder/backfill", auth: true },
-  async (req: SourceFolderBackfillRequest): Promise<SourceFolderBackfillResponse> => {
-    const authData = getAuthData();
-    if (!authData) throw APIError.unauthenticated("Unauthorized");
-    requirePermission(authData, "module.documents");
-    requirePermission(authData, "data.manage");
+  async (req: SourceFolderBackfillRequest): Promise<SourceFolderBackfillStartResponse> => {
+    requireBackfillAdmin();
 
     const root = path.resolve((req.root ?? "").trim());
     if (!req.root || root === path.parse(root).root) {
@@ -285,6 +390,15 @@ export const sourceFolderBackfill = api(
     }
     if (!stat.isDirectory()) throw APIError.invalidArgument(`root is not a directory: ${root}`);
 
-    return backfillSourceFolders(root, req.apply === true);
+    return startSourceFolderBackfill(root, req.apply === true);
+  },
+);
+
+/** `GET /documents/source-folder/backfill/status` — the current or last run. */
+export const sourceFolderBackfillStatus = api(
+  { expose: true, method: "GET", path: "/documents/source-folder/backfill/status", auth: true },
+  async (): Promise<SourceFolderBackfillState> => {
+    requireBackfillAdmin();
+    return getSourceFolderBackfillState();
   },
 );

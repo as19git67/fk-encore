@@ -66,7 +66,7 @@ interface UploadDefaultsPref {
   group_id: number | null;
 }
 
-async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
+export async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
   const row = await dbFirst<{ value: unknown }>(
     db
       .select({ value: documentsUserPref.value })

@@ -10,6 +10,7 @@ import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import { buildCategoryOptions, filterOptions, type SlugOption } from '../utils/categoryOptions'
+import { scrollSelectedOptionIntoView } from '../utils/autocompleteScroll'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import AutoComplete from 'primevue/autocomplete'
@@ -252,6 +253,17 @@ function parseReferenceNumbersText(text: string): Array<{ kind: ReferenceKind; v
   return out
 }
 
+/** What a dossier created from this document would take in (#1480). */
+const dossierRuleSeed = computed(() => {
+  const d = doc.value
+  if (!d) return null
+  return {
+    correspondent_slug: d.correspondent_slug,
+    reference_numbers: d.reference_numbers.map((r) => r.normalized),
+    source_folder_prefix: d.source_folder,
+  }
+})
+
 const proposeName = ref('')
 const proposeParentSlug = ref<string | null>(null)
 const proposeMoveToSonstiges = ref(true)
@@ -336,6 +348,9 @@ const documentTypeOptions = computed<SlugOption[]>(() =>
 // ─── Typeahead selects (Kategorie / Dokumentart) ────────────────────────────
 const selectedCategoryOption = ref<SlugOption | null>(null)
 const categorySuggestions = ref<SlugOption[]>([])
+// Component instances, so an opened list can scroll to its current value.
+const categoryPicker = ref()
+const documentTypePicker = ref()
 
 function syncCategorySelection() {
   selectedCategoryOption.value = form.value.category_slug
@@ -1147,6 +1162,7 @@ onBeforeUnmount(() => {
           <div class="meta-form-field">
             <span class="label">Kategorie</span>
             <AutoComplete
+              ref="categoryPicker"
               v-model="selectedCategoryOption"
               :suggestions="categorySuggestions"
               optionLabel="label"
@@ -1156,6 +1172,7 @@ onBeforeUnmount(() => {
               :inputStyle="{ width: '100%' }"
               :disabled="!auth.hasPermission('documents.edit')"
               @complete="searchCategories"
+              @show="scrollSelectedOptionIntoView(categoryPicker)"
             />
             <Button
               v-if="auth.hasPermission('documents.edit')"
@@ -1170,6 +1187,7 @@ onBeforeUnmount(() => {
           <div class="meta-form-field">
             <span class="label">Dokumentart</span>
             <AutoComplete
+              ref="documentTypePicker"
               v-model="selectedDocumentTypeOption"
               :suggestions="documentTypeSuggestions"
               optionLabel="label"
@@ -1179,6 +1197,7 @@ onBeforeUnmount(() => {
               :inputStyle="{ width: '100%' }"
               :disabled="!auth.hasPermission('documents.edit')"
               @complete="searchDocumentTypes"
+              @show="scrollSelectedOptionIntoView(documentTypePicker)"
             />
           </div>
           <div
@@ -1592,6 +1611,7 @@ onBeforeUnmount(() => {
     <AddToCollectionDialog
       v-model:visible="addToCollectionOpen"
       :document-ids="[docId]"
+      :rule-seed="dossierRuleSeed"
       @added="reloadCollections"
     />
 

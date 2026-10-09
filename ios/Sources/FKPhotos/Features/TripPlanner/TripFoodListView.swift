@@ -67,8 +67,11 @@ struct TripFoodListView: View {
             } header: {
                 Text("Filter")
             } footer: {
-                Text("Gefiltert nach dem, was OpenStreetMap verzeichnet, sortiert nach "
-                     + "Entfernung. Keine Bewertung — die kennen wir nicht.")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Gefiltert nach dem, was OpenStreetMap verzeichnet, sortiert nach "
+                         + "Entfernung. Keine Bewertung — die kennen wir nicht.")
+                    OSMAttributionNote()
+                }
             }
 
             Section {

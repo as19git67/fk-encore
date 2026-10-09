@@ -299,6 +299,8 @@ services:
       - recap-music:/mnt/data/recap-music
       - documents:/mnt/data/documents
       - documents_inbox:/mnt/data/documents-inbox
+      # Read-only: the backfill under Dokumente › Verarbeitung only reads it.
+      - documents_source:/mnt/data/documents-source:ro
       - finance_import:/mnt/data/finance-import
       - finance_export:/mnt/data/finance-export
       - backup:/mnt/backup

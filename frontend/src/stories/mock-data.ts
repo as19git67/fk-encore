@@ -24,6 +24,7 @@ import type {
   DocumentDetail,
   DocumentCategory,
   DocQueueStatus as DocumentQueueStatus,
+  InboxFoldersResponse,
 } from '../api/documents'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -751,6 +752,8 @@ export const MOCK_DOCUMENT_COLLECTIONS = [
     include_cover: true,
     include_toc: true,
     include_summary: true,
+    kind: 'manual' as const,
+    rule: null,
     visibility: 'private' as const,
     group_id: null,
     created_at: '2026-01-15T09:00:00.000Z',
@@ -770,6 +773,8 @@ export const MOCK_DOCUMENT_COLLECTIONS = [
     include_cover: false,
     include_toc: true,
     include_summary: false,
+    kind: 'manual' as const,
+    rule: null,
     visibility: 'group' as const,
     group_id: 3,
     created_at: '2026-01-20T09:00:00.000Z',
@@ -797,6 +802,8 @@ export const MOCK_COLLECTIONS: DocumentCollection[] = [
     include_cover: true,
     include_toc: true,
     include_summary: true,
+    kind: 'manual' as const,
+    rule: null,
     visibility: 'private',
     group_id: null,
     created_at: '2025-04-01T08:00:00.000Z',
@@ -816,6 +823,8 @@ export const MOCK_COLLECTIONS: DocumentCollection[] = [
     include_cover: true,
     include_toc: false,
     include_summary: true,
+    kind: 'manual' as const,
+    rule: null,
     visibility: 'private',
     group_id: null,
     created_at: '2025-05-20T08:00:00.000Z',
@@ -835,6 +844,8 @@ export const MOCK_COLLECTIONS: DocumentCollection[] = [
     include_cover: false,
     include_toc: false,
     include_summary: false,
+    kind: 'manual' as const,
+    rule: null,
     visibility: 'private',
     group_id: null,
     created_at: '2025-03-11T08:00:00.000Z',
@@ -884,3 +895,21 @@ export const MOCK_METERS: MeterListItem[] = [
     absoluteTotal: 12345.6,
   },
 ]
+
+export const MOCK_INBOX_FOLDERS: InboxFoldersResponse = {
+  inbox_dir: '/mnt/data/documents-inbox',
+  entries: [
+    {
+      user_id: 1, name: 'Admin', email: 'admin@beispiel.test', folder: 'admin',
+      default_group_id: 1, default_group_name: 'Familie', is_fallback: true, shadowed: false,
+    },
+    {
+      user_id: 2, name: 'Erika Muster', email: 'erika@beispiel.test', folder: 'erika',
+      default_group_id: null, default_group_name: null, is_fallback: false, shadowed: false,
+    },
+    {
+      user_id: 3, name: 'Erika Zweit', email: 'erika@anders.test', folder: 'erika',
+      default_group_id: 1, default_group_name: 'Familie', is_fallback: false, shadowed: true,
+    },
+  ],
+}

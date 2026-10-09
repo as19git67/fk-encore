@@ -10,9 +10,9 @@
 # the diff and identical for both targets (the app and its share
 # extension must carry the same CFBundleVersion).
 #
-# Runs only when the commit touches `ios/`, never lowers the number, and
-# does nothing at all in a shallow checkout, where the count is smaller
-# than the history it was cut from.
+# Runs only when the commit touches `ios/` and never lowers the number. In a
+# shallow checkout it fetches the full history first, since the count there is
+# smaller than the history it was cut from; offline it leaves the number alone.
 set -eu
 
 project="ios/FKPhotos.xcodeproj/project.pbxproj"
@@ -24,8 +24,15 @@ if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '^ios/'; then
 fi
 
 if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
-    echo "ios: shallow checkout — build number left as is"
-    exit 0
+    # Cloud sessions clone shallow, and their iOS commits shipped without
+    # a new number. Fetch the missing history first; only when that fails
+    # (no network, no remote) is the number left alone.
+    echo "ios: shallow checkout — fetching full history for the build number"
+    git fetch --quiet --unshallow 2>/dev/null || true
+    if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+        echo "ios: history still shallow — build number left as is"
+        exit 0
+    fi
 fi
 
 # The number this commit will have once it exists.

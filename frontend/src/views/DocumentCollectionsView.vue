@@ -182,6 +182,7 @@ onMounted(load)
           <div class="cv-line">
             <span class="cv-name">{{ c.title }}</span>
             <Tag v-if="c.visibility === 'group'" value="Gruppe" icon="pi pi-users" severity="info" />
+            <Tag v-if="c.kind === 'dossier'" value="Akte" icon="pi pi-bolt" severity="secondary" />
           </div>
           <p v-if="c.summary" class="cv-summary">{{ c.summary }}</p>
           <p v-else-if="c.summary_stale && c.item_count > 0" class="cv-summary cv-summary--pending">

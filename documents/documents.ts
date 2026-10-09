@@ -101,6 +101,7 @@ import {
   referenceNumberContains,
   type DocumentReferenceNumber,
 } from "./reference-numbers";
+import { applyDossierRulesQuietly } from "./dossiers";
 import { triggerWorkers } from "./scan-worker";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
@@ -1786,6 +1787,9 @@ export const updateDocument = api(
 
     if (Object.keys(patch).length > 0) {
       await db.update(documents).set(patch).where(eq(documents.id, existing.id));
+      // A changed correspondent, folder or reference number may move the
+      // document into or out of a dossier (#1480).
+      void applyDossierRulesQuietly(existing.id);
     }
 
     if (req.tags !== undefined) {

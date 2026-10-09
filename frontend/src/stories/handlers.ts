@@ -7,7 +7,7 @@ import {
   MOCK_SCAN_QUEUE_IDLE, MOCK_SERVICES_OK, MOCK_SERVER_PRESSURE_OK,
   MOCK_FACES,
   MOCK_DOCUMENTS, MOCK_DOCUMENT_CATEGORIES, MOCK_DOCUMENT_DETAIL,
-  MOCK_DOCUMENT_QUEUE_IDLE,
+  MOCK_DOCUMENT_QUEUE_IDLE, MOCK_INBOX_FOLDERS,
 } from './mock-data'
 import { makeMultiPagePdf } from './mock-pdf'
 
@@ -349,6 +349,7 @@ export const defaultHandlers = [
     HttpResponse.json(MOCK_DOCUMENT_QUEUE_IDLE),
   ),
   http.get('/api/documents/subject-persons', () => HttpResponse.json({ items: [] })),
+  http.get('/api/documents/inbox-folders', () => HttpResponse.json(MOCK_INBOX_FOLDERS)),
   http.get('/api/documents/:id', ({ params }) => {
     const id = Number(params.id)
     const summary = MOCK_DOCUMENTS.find((d) => d.id === id) ?? MOCK_DOCUMENTS[0]!
