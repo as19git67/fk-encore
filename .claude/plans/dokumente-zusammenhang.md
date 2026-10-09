@@ -61,7 +61,7 @@ What the code does today (October 2026):
 
 ## Stages
 
-### 1. Origin folder (`source_folder`) and backfill
+### 1. Origin folder (`source_folder`) and backfill (#1477)
 
 - Migration: `documents.source_folder TEXT NULL` plus index. Relative path
   of the file's directory under the inbox root (or under the uploaded
@@ -83,7 +83,7 @@ What the code does today (October 2026):
   the list filtered by `source_folder` prefix (`folder=` in `route.query`,
   through `ListToolbar` like every other filter).
 
-### 2. "Related documents" panel on the detail page
+### 2. "Related documents" panel on the detail page (#1478)
 
 Endpoint `GET /documents/:id/related` returning groups, each with a
 `reason` and up to N items, all filtered by `visibleDocumentsWhere` so
@@ -104,7 +104,7 @@ one. Each item carries the one-click actions "add to collection" (reuses
 `DocumentDetailView.vue` next to the Sammelmappen card and loads lazily
 after the document itself.
 
-### 3. Reference numbers
+### 3. Reference numbers (#1479)
 
 - Migration: `documents.reference_numbers JSONB NOT NULL DEFAULT '[]'`,
   shape `{ kind: 'insurance' | 'contract' | 'customer' | 'case' | 'other',
@@ -124,7 +124,7 @@ after the document itself.
 - Tests follow the pattern of `metadata-extract.test.ts` with synthetic
   numbers only (see "Keine personenbezogenen Daten" in CLAUDE.md).
 
-### 4. Dossiers: collections with a membership rule
+### 4. Dossiers: collections with a membership rule (#1480)
 
 - Migration on `document_collections`: `rule JSONB NULL` with
   `{ correspondent_slug?: string, reference_numbers?: string[] }` (normalised
@@ -144,7 +144,7 @@ after the document itself.
   through the related panel (stage 2) with one click, or via a rule entry
   `source_folder` prefix added to the rule shape in this stage.
 
-### 5. Near-duplicate detection and merge
+### 5. Near-duplicate detection and merge (#1481)
 
 **Detection** (`documents/duplicates.ts`, endpoint
 `POST /documents/duplicates/scan`, admin): candidate pairs within the same
