@@ -15,6 +15,7 @@ import {
 } from '../composables/useDocumentFilter'
 import type { DocumentCategory, SubjectPerson } from '../api/documents'
 import { buildCategoryOptions, filterOptions, type SlugOption } from '../utils/categoryOptions'
+import { scrollSelectedOptionIntoView } from '../utils/autocompleteScroll'
 
 type CatOption = SlugOption
 
@@ -69,6 +70,8 @@ const allCatOptions = computed<CatOption[]>(() => buildCategoryOptions(props.cat
 
 const categorySuggestions = ref<CatOption[]>([])
 const selectedCategory = ref<CatOption | null>(null)
+// Component instance, so an opened list can scroll to its current value.
+const categoryPicker = ref()
 
 function syncCategorySelection() {
   const slug = local.value.category
@@ -217,6 +220,7 @@ function handleReset() {
       <div class="filter-row">
         <label class="filter-label">Kategorie</label>
         <AutoComplete
+          ref="categoryPicker"
           v-model="selectedCategory"
           :suggestions="categorySuggestions"
           option-label="label"
@@ -224,6 +228,7 @@ function handleReset() {
           placeholder="Kategorie suchen…"
           dropdown
           @complete="searchCategories"
+          @show="scrollSelectedOptionIntoView(categoryPicker)"
         />
       </div>
 
