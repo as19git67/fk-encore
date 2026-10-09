@@ -268,6 +268,8 @@ struct TripPinDetailSheet: View {
                             Label("Woher der Fund stammt", systemImage: "link")
                         }
                     }
+                } footer: {
+                    OSMAttributionNote()
                 }
             }
             .navigationTitle(title)

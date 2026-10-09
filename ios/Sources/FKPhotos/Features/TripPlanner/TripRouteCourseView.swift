@@ -64,10 +64,13 @@ struct TripRouteCourseView: View {
                         .listRowInsets(EdgeInsets())
                 }
             } footer: {
-                Text(route.hasCourse
-                     ? "Der Verlauf kommt aus OpenStreetMap und ist für die Karte vereinfacht."
-                     : "Für diese Strecke hat OpenStreetMap keinen zusammenhängenden Verlauf "
-                       + "— gezeigt wird höchstens, wo sie beginnt.")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(route.hasCourse
+                         ? "Der Verlauf kommt aus OpenStreetMap und ist für die Karte vereinfacht."
+                         : "Für diese Strecke hat OpenStreetMap keinen zusammenhängenden Verlauf "
+                           + "— gezeigt wird höchstens, wo sie beginnt.")
+                    OSMAttributionNote()
+                }
             }
 
             // Pictures, where Wikimedia has any. No section at all when
@@ -224,11 +227,20 @@ struct TripRouteCourseView: View {
                             .frame(width: 200, height: 150)
                             .background(.quaternary)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
-                            Text(photo.caption ?? photo.credit)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .frame(width: 200, alignment: .leading)
+                            // The credit always, the caption above it
+                            // where there is one: CC BY-SA asks for the
+                            // author beside the picture, not a tap away.
+                            VStack(alignment: .leading, spacing: 0) {
+                                if let caption = photo.caption {
+                                    Text(caption)
+                                        .lineLimit(1)
+                                }
+                                Text(photo.credit)
+                                    .lineLimit(1)
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 200, alignment: .leading)
                         }
                     }
                     .buttonStyle(.plain)
