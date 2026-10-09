@@ -8,7 +8,7 @@ const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
   'category', 'tags', 'status', 'review', 'neu', 'sender', 'correspondent', 'dateFrom', 'dateTo',
   'taxRelevant', 'subjectPerson', 'categorySource', 'documentType', 'collectionScope', 'collection',
-  'folder',
+  'folder', 'ref',
 ] as const
 
 export interface DocumentFilter {
@@ -40,6 +40,8 @@ export interface DocumentFilter {
   collectionId?: number
   /** Origin folder (`source_folder`), with every folder below it (#1477). */
   folder?: string
+  /** Reference number, compared normalised (#1479). */
+  ref?: string
 }
 
 /**
@@ -123,6 +125,7 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
     if (Number.isFinite(n)) f.collectionId = n
   }
   if (typeof q.folder === 'string' && q.folder) f.folder = q.folder
+  if (typeof q.ref === 'string' && q.ref) f.ref = q.ref
   return f
 }
 
@@ -148,6 +151,7 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   }
   if (f.collectionId) out.collection = String(f.collectionId)
   if (f.folder) out.folder = f.folder
+  if (f.ref) out.ref = f.ref
   return out
 }
 
@@ -170,6 +174,7 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   // decision, and counting the default would show one for an untouched list.
   if (f.collectionId || (f.collectionScope && f.collectionScope !== 'without')) n++
   if (f.folder) n++
+  if (f.ref) n++
   return n
 }
 
@@ -335,6 +340,7 @@ export function useDocumentFilterChips(
       add('subjectPerson', `Person: ${label}`, ['subjectPersonId'])
     }
     if (f.folder) add('folder', `Ordner: ${f.folder}`, ['folder'])
+    if (f.ref) add('ref', `Referenz: ${f.ref}`, ['ref'])
     if (f.categorySource) {
       add('categorySource', `Quelle: ${f.categorySource}`, ['categorySource'])
     }

@@ -104,7 +104,7 @@ one. Each item carries the one-click actions "add to collection" (reuses
 `DocumentDetailView.vue` next to the Sammelmappen card and loads lazily
 after the document itself.
 
-### 3. Reference numbers (#1479)
+### 3. Reference numbers (#1479) — done
 
 - Migration: `documents.reference_numbers JSONB NOT NULL DEFAULT '[]'`,
   shape `{ kind: 'insurance' | 'contract' | 'customer' | 'case' | 'other',
@@ -123,6 +123,17 @@ after the document itself.
   every number is a chip linking to that filter.
 - Tests follow the pattern of `metadata-extract.test.ts` with synthetic
   numbers only (see "Keine personenbezogenen Daten" in CLAUDE.md).
+
+As built: `documents/reference-numbers.ts`. The regex reader covers
+insurance (Versicherungsschein, Police, VS-Nr.), contract (Vertrag,
+Darlehen, Mitglied), customer, order (Auftrag, Bestellung), case
+(Aktenzeichen, Geschäftszeichen, Vorgang, Schaden, Az.) and other (Referenz,
+Ihr Zeichen). The model branch is parsed and merged when present but the
+classify prompt does not request it yet: the prompt budget
+(`classify-prompt-budget.test.ts`) had 31 characters left. `q` in the list
+and the search returns exact normalised matches first; the filter is `ref=`;
+the detail page shows chips linking to that filter and edits the list as one
+line per number ("Vertragsnummer: 12345").
 
 ### 4. Dossiers: collections with a membership rule (#1480)
 

@@ -6,6 +6,7 @@ import Checkbox from 'primevue/checkbox'
 import InputNumber from 'primevue/inputnumber'
 import DatePicker from 'primevue/datepicker'
 import InputText from 'primevue/inputtext'
+import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import { buildCategoryOptions, filterOptions, type SlugOption } from '../utils/categoryOptions'
@@ -57,7 +58,7 @@ import PdfViewer from '../components/PdfViewer.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
 import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
 import RelatedDocumentsCard from '../components/documents/RelatedDocumentsCard.vue'
-import { listDuplicatesForDocument } from '../api/documents'
+import { listDuplicatesForDocument, REFERENCE_KIND_LABELS, type ReferenceKind, type ReferenceNumber } from '../api/documents'
 import {
   listCollectionsForDocument,
   type DocumentCollectionRef,
@@ -142,6 +143,8 @@ const form = ref({
   doc_date: null as Date | null,
   sender: '' as string,
   document_number: '' as string,
+  /** One per line, optionally "Art: Wert" (Art = Versicherungsnummer, Vertragsnummer, …). */
+  referenceNumbersText: '' as string,
   summary: '' as string,
   notes: '' as string,
   category_slug: null as string | null,
@@ -220,6 +223,34 @@ const sourceFolderSegments = computed<Array<{ name: string; path: string }>>(() 
   }
   return out
 })
+
+// Reference numbers go through the form as text: one per line, optionally
+// prefixed with the kind's German label ("Vertragsnummer: 12345"). A bare
+// value keeps the kind it already had on the document, else 'other'.
+function referenceNumbersToText(list: ReferenceNumber[]): string {
+  return list.map((r) => `${REFERENCE_KIND_LABELS[r.kind]}: ${r.value}`).join('\n')
+}
+
+function parseReferenceNumbersText(text: string): Array<{ kind: ReferenceKind; value: string }> {
+  const labelToKind = new Map<string, ReferenceKind>(
+    (Object.entries(REFERENCE_KIND_LABELS) as Array<[ReferenceKind, string]>).map(([k, l]) => [l.toLowerCase(), k]),
+  )
+  const existingKind = new Map<string, ReferenceKind>(
+    (doc.value?.reference_numbers ?? []).map((r) => [r.value.trim().toLowerCase(), r.kind]),
+  )
+  const out: Array<{ kind: ReferenceKind; value: string }> = []
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const cut = line.indexOf(':')
+    const label = cut > 0 ? line.slice(0, cut).trim().toLowerCase() : ''
+    const kindFromLabel = labelToKind.get(label)
+    const value = kindFromLabel ? line.slice(cut + 1).trim() : line
+    if (!value) continue
+    out.push({ kind: kindFromLabel ?? existingKind.get(value.toLowerCase()) ?? 'other', value })
+  }
+  return out
+}
 
 const proposeName = ref('')
 const proposeParentSlug = ref<string | null>(null)
@@ -412,6 +443,7 @@ function resetForm() {
     doc_date: doc.value.doc_date ? parseLocalDate(doc.value.doc_date) : null,
     sender: doc.value.sender ?? '',
     document_number: doc.value.document_number ?? '',
+    referenceNumbersText: referenceNumbersToText(doc.value.reference_numbers),
     summary: doc.value.summary ?? '',
     notes: doc.value.notes ?? '',
     category_slug: doc.value.category_slug,
@@ -491,6 +523,7 @@ async function save() {
         doc_date: form.value.doc_date ? toLocalIsoDate(form.value.doc_date) : null,
         sender: form.value.sender.trim() || null,
         document_number: form.value.document_number.trim() || null,
+        reference_numbers: parseReferenceNumbersText(form.value.referenceNumbersText),
         summary: form.value.summary.trim() || null,
         notes: form.value.notes.trim() || null,
         category_slug: form.value.category_slug,
@@ -1086,6 +1119,30 @@ onBeforeUnmount(() => {
               <span class="label">Dok.-Nr.</span>
               <InputText v-model="form.document_number" :disabled="!auth.hasPermission('documents.edit')" placeholder="#1234" />
             </label>
+          </div>
+          <!-- Contract, policy, customer and case numbers (#1479). Shown as
+               chips that filter the list; edited as one line per number. -->
+          <div class="meta-form-field">
+            <span class="label">Referenznummern</span>
+            <div v-if="doc.reference_numbers.length > 0" class="reference-chips">
+              <RouterLink
+                v-for="r in doc.reference_numbers"
+                :key="r.normalized"
+                class="reference-chip"
+                :to="{ name: 'dokumente-list', query: { ref: r.normalized, collectionScope: 'with' } }"
+                :title="`Alle Dokumente mit ${REFERENCE_KIND_LABELS[r.kind]} ${r.value}`"
+              >
+                <span class="reference-chip__kind">{{ REFERENCE_KIND_LABELS[r.kind] }}</span>
+                <span class="reference-chip__value">{{ r.value }}</span>
+              </RouterLink>
+            </div>
+            <Textarea
+              v-model="form.referenceNumbersText"
+              rows="2"
+              autoResize
+              placeholder="Eine Nummer pro Zeile, z. B. „Versicherungsnummer: AB 123456“"
+              :disabled="!auth.hasPermission('documents.edit')"
+            />
           </div>
           <div class="meta-form-field">
             <span class="label">Kategorie</span>
@@ -1954,6 +2011,38 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.5rem;
+}
+
+.reference-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+.reference-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--p-content-border-color);
+  background: var(--p-content-hover-background);
+  color: var(--p-text-color);
+  text-decoration: none;
+  font-size: var(--text-sm);
+}
+.reference-chip:hover {
+  border-color: var(--p-primary-color);
+}
+.reference-chip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.reference-chip__kind {
+  color: var(--p-text-muted-color);
+}
+.reference-chip__value {
+  font-weight: 600;
 }
 
 .source-folder__crumbs {

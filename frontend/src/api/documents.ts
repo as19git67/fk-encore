@@ -15,6 +15,26 @@ export type TaxAssignmentSource = 'ai' | 'user'
 export type CategorySource = 'ai' | 'cloud' | 'user'
 export type DocumentVisibility = 'private' | 'group'
 
+export type ReferenceKind = 'insurance' | 'contract' | 'customer' | 'order' | 'case' | 'other'
+
+export interface ReferenceNumber {
+  kind: ReferenceKind
+  /** As printed. */
+  value: string
+  /** Letters and digits only, upper-cased: what the search and the filter compare. */
+  normalized: string
+  source: 'regex' | 'model' | 'user'
+}
+
+export const REFERENCE_KIND_LABELS: Record<ReferenceKind, string> = {
+  insurance: 'Versicherungsnummer',
+  contract: 'Vertragsnummer',
+  customer: 'Kundennummer',
+  order: 'Auftragsnummer',
+  case: 'Aktenzeichen',
+  other: 'Referenz',
+}
+
 export interface DocumentSummary {
   id: number
   title: string | null
@@ -46,6 +66,8 @@ export interface DocumentSummary {
    * folder (#1477); null when it arrived on its own at the root.
    */
   source_folder: string | null
+  /** Contract, policy, customer and case numbers found in the text (#1479). */
+  reference_numbers: ReferenceNumber[]
   /**
    * True when a human pinned the editable attributes. `false` on a ready
    * document marks it as "new": AI-only attribution awaiting approval (#635).
@@ -204,6 +226,8 @@ export interface ListDocumentsQuery {
   in_collection?: boolean
   /** Keep only documents from this origin folder and everything below it (#1477). */
   folder?: string
+  /** Keep only documents carrying this reference number, compared normalised (#1479). */
+  ref?: string
   /** Keep only the members of this one Sammelmappe. Wins over `in_collection`. */
   collection_id?: number
   sort_by?: string
@@ -217,6 +241,8 @@ export interface UpdateDocumentPayload {
   doc_date?: string | null
   sender?: string | null
   document_number?: string | null
+  /** Replace the reference numbers; every entry becomes user-sourced (#1479). */
+  reference_numbers?: Array<{ kind?: ReferenceKind | null; value: string }>
   summary?: string | null
   category_slug?: string | null
   /** Override the document-type facet (Dokumentart); null clears it. */
@@ -501,6 +527,7 @@ export type DocumentFilterParams = Pick<
   | 'in_collection'
   | 'collection_id'
   | 'folder'
+  | 'ref'
 >
 
 export function searchDocuments(
