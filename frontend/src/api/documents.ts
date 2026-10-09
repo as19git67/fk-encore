@@ -867,17 +867,47 @@ export interface SourceFolderBackfillResponse {
   truncated: boolean
 }
 
+export interface SourceFolderBackfillProgress {
+  files_found: number
+  files_hashed: number
+}
+
+export type SourceFolderBackfillStatus = 'idle' | 'running' | 'done' | 'failed'
+
+/** The current or last backfill run; it lives in the server process only. */
+export interface SourceFolderBackfillState {
+  status: SourceFolderBackfillStatus
+  root: string | null
+  apply: boolean
+  started_at: string | null
+  finished_at: string | null
+  progress: SourceFolderBackfillProgress
+  result: SourceFolderBackfillResponse | null
+  error: string | null
+}
+
+export interface SourceFolderBackfillStartResponse {
+  /** False when a run was already active; `state` then describes that one. */
+  started: boolean
+  state: SourceFolderBackfillState
+}
+
 /**
- * Walk the old folder tree at `root` on the server and write each file's
- * folder onto the document with the same content hash (#1477). Without
- * `apply` it only reports.
+ * Start walking the old folder tree at `root` on the server; each file's
+ * folder is written onto the document with the same content hash (#1477),
+ * without `apply` it only reports. Returns at once — the run takes minutes
+ * on a real tree, so poll `getSourceFolderBackfillStatus` for the report.
  */
-export function backfillSourceFolders(root: string, apply: boolean) {
-  return apiFetch<SourceFolderBackfillResponse>('/documents/source-folder/backfill', {
+export function startSourceFolderBackfill(root: string, apply: boolean) {
+  return apiFetch<SourceFolderBackfillStartResponse>('/documents/source-folder/backfill', {
     method: 'POST',
     body: JSON.stringify({ root, apply }),
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+export function getSourceFolderBackfillStatus() {
+  return apiFetch<SourceFolderBackfillState>('/documents/source-folder/backfill/status')
 }
 
 export interface InboxFolderEntry {

@@ -7,36 +7,81 @@
  * the document with the same content. "Prüfen" only reports, "Übernehmen"
  * writes — the report in between is what the admin reads before anything
  * changes.
+ *
+ * Hashing a real tree takes minutes, longer than a reverse proxy keeps a
+ * request open, so the backend runs it in the background and this panel
+ * polls its state until the report is there. A reload mid-run picks the
+ * run back up, because the state lives on the server.
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import ProgressBar from 'primevue/progressbar'
 import {
-  backfillSourceFolders,
-  type SourceFolderBackfillResponse,
+  getSourceFolderBackfillStatus,
+  startSourceFolderBackfill,
+  type SourceFolderBackfillState,
 } from '../../api/documents'
+
+const POLL_MS = 2000
 
 /** Where docker-compose.yml mounts the old tree; a bare-metal install types its own path. */
 const root = ref('/mnt/data/documents-source')
-const loading = ref(false)
+const starting = ref(false)
 const error = ref('')
-const result = ref<SourceFolderBackfillResponse | null>(null)
+const state = ref<SourceFolderBackfillState | null>(null)
+let pollTimer: ReturnType<typeof setTimeout> | null = null
 
-const canRun = computed(() => root.value.trim().length > 0 && !loading.value)
+const running = computed(() => state.value?.status === 'running')
+const result = computed(() => (state.value?.status === 'done' ? state.value.result : null))
+const canRun = computed(() => root.value.trim().length > 0 && !starting.value && !running.value)
+const progressPercent = computed(() => {
+  const p = state.value?.progress
+  if (!p || p.files_found === 0) return 0
+  return Math.round((p.files_hashed / p.files_found) * 100)
+})
+
+function stopPolling() {
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = null
+}
+
+async function refresh() {
+  stopPolling()
+  try {
+    state.value = await getSourceFolderBackfillStatus()
+    if (state.value.status === 'failed') {
+      error.value = state.value.error || 'Der Abgleich des Ordnerbaums ist fehlgeschlagen.'
+    }
+  } catch (err: any) {
+    error.value = err?.message || 'Status des Abgleichs konnte nicht geladen werden'
+    return
+  }
+  if (state.value.status === 'running') pollTimer = setTimeout(refresh, POLL_MS)
+}
 
 async function run(apply: boolean) {
   error.value = ''
-  loading.value = true
+  starting.value = true
   try {
-    result.value = await backfillSourceFolders(root.value.trim(), apply)
+    const { started, state: s } = await startSourceFolderBackfill(root.value.trim(), apply)
+    state.value = s
+    if (!started) error.value = 'Es läuft bereits ein Abgleich; das ist sein Stand.'
+    if (s.status === 'running') pollTimer = setTimeout(refresh, POLL_MS)
   } catch (err: any) {
-    result.value = null
     error.value = err?.message || 'Fehler beim Abgleich des Ordnerbaums'
   } finally {
-    loading.value = false
+    starting.value = false
   }
 }
+
+onMounted(() => {
+  void refresh().then(() => {
+    if (state.value?.root) root.value = state.value.root
+  })
+})
+onBeforeUnmount(stopPolling)
 </script>
 
 <template>
@@ -58,7 +103,7 @@ async function run(apply: boolean) {
         v-model="root"
         class="source-root__input"
         placeholder="/mnt/data/documents-source"
-        :disabled="loading"
+        :disabled="starting || running"
       />
     </label>
 
@@ -68,16 +113,27 @@ async function run(apply: boolean) {
         outlined
         label="Prüfen"
         :disabled="!canRun"
-        :loading="loading && result === null"
+        :loading="(starting || running) && !state?.apply"
         @click="run(false)"
       />
       <Button
         icon="pi pi-check"
         label="Übernehmen"
         :disabled="!canRun || result === null || !result.dry_run || result.updated === 0"
-        :loading="loading && result !== null"
+        :loading="(starting || running) && !!state?.apply"
         @click="run(true)"
       />
+    </div>
+
+    <div v-if="running && state" class="data-management-group__item source-progress">
+      <ProgressBar :value="progressPercent" :show-value="false" aria-label="Fortschritt des Abgleichs" />
+      <span class="source-progress__text">
+        {{ state.apply ? 'Übernehmen' : 'Prüfen' }} läuft:
+        <template v-if="state.progress.files_found === 0">Ordnerbaum wird gelesen …</template>
+        <template v-else>
+          {{ state.progress.files_hashed }} von {{ state.progress.files_found }} Datei(en) gelesen.
+        </template>
+      </span>
     </div>
 
     <div v-if="result" class="data-management-group__item">
@@ -143,6 +199,16 @@ async function run(apply: boolean) {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+.source-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 40rem;
+}
+.source-progress__text {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
 }
 .source-report {
   margin-top: var(--space-2);
