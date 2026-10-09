@@ -8,6 +8,7 @@ const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
   'category', 'tags', 'status', 'review', 'neu', 'sender', 'correspondent', 'dateFrom', 'dateTo',
   'taxRelevant', 'subjectPerson', 'categorySource', 'documentType', 'collectionScope', 'collection',
+  'folder',
 ] as const
 
 export interface DocumentFilter {
@@ -37,6 +38,8 @@ export interface DocumentFilter {
   collectionScope?: DocumentCollectionScope
   /** Keep only the members of this one Sammelmappe. Wins over `collectionScope`. */
   collectionId?: number
+  /** Origin folder (`source_folder`), with every folder below it (#1477). */
+  folder?: string
 }
 
 /**
@@ -119,6 +122,7 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
     const n = Number(q.collection)
     if (Number.isFinite(n)) f.collectionId = n
   }
+  if (typeof q.folder === 'string' && q.folder) f.folder = q.folder
   return f
 }
 
@@ -143,6 +147,7 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
     out.collectionScope = f.collectionScope
   }
   if (f.collectionId) out.collection = String(f.collectionId)
+  if (f.folder) out.folder = f.folder
   return out
 }
 
@@ -164,6 +169,7 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   // supersedes the scope, so counting both would show "2 Filter" for a single
   // decision, and counting the default would show one for an untouched list.
   if (f.collectionId || (f.collectionScope && f.collectionScope !== 'without')) n++
+  if (f.folder) n++
   return n
 }
 
@@ -328,6 +334,7 @@ export function useDocumentFilterChips(
       const label = labels.subjectPerson?.(f.subjectPersonId) ?? `#${f.subjectPersonId}`
       add('subjectPerson', `Person: ${label}`, ['subjectPersonId'])
     }
+    if (f.folder) add('folder', `Ordner: ${f.folder}`, ['folder'])
     if (f.categorySource) {
       add('categorySource', `Quelle: ${f.categorySource}`, ['categorySource'])
     }

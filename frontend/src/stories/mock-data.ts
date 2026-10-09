@@ -508,6 +508,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_source: 'ai',
     collections: [{ id: 1, title: 'Unterlagen Steuerberater 2024', visibility: 'private' }],
     document_type: null,
+  source_folder: null,
   },
   {
     id: 2,
@@ -536,6 +537,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_source: 'ai',
     collections: [{ id: 1, title: 'Unterlagen Steuerberater 2024', visibility: 'private' }],
     document_type: null,
+  source_folder: null,
   },
   {
     id: 3,
@@ -564,6 +566,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_source: 'ai',
     collections: [],
     document_type: null,
+  source_folder: null,
   },
   {
     id: 4,
@@ -592,6 +595,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_source: 'ai',
     collections: [],
     document_type: null,
+  source_folder: null,
   },
   {
     id: 5,
@@ -620,6 +624,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     category_source: 'ai',
     collections: [],
     document_type: null,
+  source_folder: null,
   },
 ]
 

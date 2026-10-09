@@ -220,7 +220,7 @@ function hasDocumentFacetFilter(): boolean {
     f.category || (f.tags && f.tags.length > 0) || f.status || f.needs_review ||
     f.unreviewed || f.sender || f.correspondent || f.dateFrom || f.dateTo ||
     f.taxRelevant !== undefined || f.subjectPersonId || f.categorySource ||
-    f.documentType,
+    f.documentType || f.folder,
   )
 }
 
@@ -445,6 +445,7 @@ function currentFilterParams() {
     subject_person_id: f.subjectPersonId,
     category_source: f.categorySource as any,
     document_type: f.documentType,
+    folder: f.folder,
     ...collectionQueryParams(f),
   }
 }

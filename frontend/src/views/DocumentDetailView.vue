@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputNumber from 'primevue/inputnumber'
@@ -192,6 +192,22 @@ async function toggleFullText() {
 
 // "Keine passende Kategorie — neue vorschlagen"
 const proposeOpen = ref(false)
+/**
+ * `Versicherungen/Hausrat` → two crumbs, each carrying the prefix up to
+ * itself so the link lists that folder and everything below it.
+ */
+const sourceFolderSegments = computed<Array<{ name: string; path: string }>>(() => {
+  const folder = doc.value?.source_folder
+  if (!folder) return []
+  const out: Array<{ name: string; path: string }> = []
+  let prefix = ''
+  for (const name of folder.split('/')) {
+    prefix = prefix ? `${prefix}/${name}` : name
+    out.push({ name, path: prefix })
+  }
+  return out
+})
+
 const proposeName = ref('')
 const proposeParentSlug = ref<string | null>(null)
 const proposeMoveToSonstiges = ref(true)
@@ -1397,6 +1413,23 @@ onBeforeUnmount(() => {
 
         <div class="extra-info">
           <div><strong>Datei:</strong> {{ doc.original_filename }}</div>
+          <!-- The folder the file came from, each segment a link to the list of
+               everything from that folder down (#1477). The link asks for the
+               flat list: a folder is about origin, so a member of a Sammelmappe
+               belongs in it as much as a loose document does. -->
+          <div v-if="sourceFolderSegments.length > 0" class="source-folder">
+            <strong>Herkunft:</strong>
+            <nav class="source-folder__crumbs" aria-label="Herkunftsordner">
+              <template v-for="(seg, i) in sourceFolderSegments" :key="seg.path">
+                <span v-if="i > 0" class="source-folder__sep" aria-hidden="true">/</span>
+                <RouterLink
+                  class="source-folder__link"
+                  :to="{ name: 'dokumente-list', query: { folder: seg.path, collectionScope: 'with' } }"
+                  :title="`Alle Dokumente aus „${seg.path}“`"
+                >{{ seg.name }}</RouterLink>
+              </template>
+            </nav>
+          </div>
           <div v-if="doc.classification_confidence != null">
             <strong>Konfidenz:</strong> {{ (doc.classification_confidence * 100).toFixed(0) }}%
           </div>
@@ -1888,6 +1921,24 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.5rem;
+}
+
+.source-folder__crumbs {
+  display: inline;
+}
+.source-folder__sep {
+  margin: 0 0.25em;
+}
+.source-folder__link {
+  color: var(--p-primary-color);
+  text-decoration: none;
+}
+.source-folder__link:hover {
+  text-decoration: underline;
+}
+.source-folder__link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .extra-info {

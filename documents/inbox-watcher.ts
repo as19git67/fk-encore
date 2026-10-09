@@ -36,6 +36,7 @@ import {
   importDocumentFromPath,
 } from "./import";
 import { triggerWorkers } from "./scan-worker";
+import { sourceFolderFor } from "./source-folder";
 
 let watcher: FSWatcher | null = null;
 let cachedOwnerId: number | null = null;
@@ -105,6 +106,10 @@ export async function handleAddedFile(file: string): Promise<void> {
       sourcePath: file,
       originalFilename: path.basename(file),
       mimeType: "application/pdf",
+      // `Versicherungen/Hausrat/police.pdf` → "Versicherungen/Hausrat": the
+      // subfolder the scanner or a copy put the file in is the one context
+      // the import would otherwise throw away (#1477).
+      sourceFolder: sourceFolderFor(DOCUMENTS_INBOX_DIR, file),
     });
     console.log(
       `[documents.inbox-watcher] imported ${path.basename(file)} → document ${imported.id}`,
