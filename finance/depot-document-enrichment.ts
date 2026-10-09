@@ -607,6 +607,27 @@ function withDocumentSource(source: string): string {
  * Read one document and create or enrich the depot transaction it
  * describes. `accountIds` limits the depots considered (null = all).
  */
+/** What the statement says and the row lacks — nothing a row carries is touched. */
+async function missingFieldsPatch(
+  row: DepotRow,
+  parsed: SettlementExtraction,
+): Promise<Partial<typeof financeDepotTransaction.$inferInsert>> {
+  const patch: Partial<typeof financeDepotTransaction.$inferInsert> = {};
+  if (row.amount === null && parsed.quantity !== null) patch.amount = fixed(parsed.quantity, 8);
+  if (row.price === null && parsed.price !== null) patch.price = fixed(parsed.price, 6);
+  if (row.gross_amount === null && parsed.gross !== null) patch.gross_amount = fixed(parsed.gross, 2);
+  if (row.fees === null && parsed.fees !== null) patch.fees = fixed(parsed.fees, 2);
+  if (row.tax === null && parsed.tax !== null) patch.tax = fixed(parsed.tax, 2);
+  if (row.net_amount === null && parsed.net !== null) patch.net_amount = fixed(parsed.net, 2);
+  if (row.isin === null && parsed.isin) patch.isin = parsed.isin;
+  if (row.wkn === null && parsed.wkn) patch.wkn = parsed.wkn;
+  if (row.name === null) {
+    const name = await fitName(parsed.name);
+    if (name) patch.name = name;
+  }
+  return patch;
+}
+
 /** Link the document to the booking's row and change nothing on it. */
 async function linkToBookingRow(
   result: EnrichResult,
@@ -746,9 +767,12 @@ export async function enrichDocument(
   result.account_id = holding.account_id;
   result.matched_by = holding.via;
 
-  // Already attached to a transaction of this depot: nothing to do.
+  // Already attached to a transaction of this depot. Linked while its
+  // figures could not be read (the model was away, or rules and model
+  // disagreed), the row may still lack what the paper says: fill that in
+  // now that it reads — the same paper, the same trade, nothing overwritten.
   const [existingLink] = await db
-    .select({ id: financeDepotTransactionDocument.depot_transaction_id })
+    .select({ row: financeDepotTransaction })
     .from(financeDepotTransactionDocument)
     .innerJoin(
       financeDepotTransaction,
@@ -762,8 +786,22 @@ export async function enrichDocument(
     )
     .limit(1);
   if (existingLink) {
+    const row = existingLink.row;
     result.outcome = "already_linked";
-    result.depot_transaction_id = existingLink.id;
+    result.depot_transaction_id = row.id;
+    result.transaction_net = row.net_amount;
+    const rowNet = num(row.net_amount);
+    const netAgrees = rowNet === null || parsed.net === null || Math.abs(Math.abs(rowNet) - Math.abs(parsed.net)) <= NET_TOLERANCE;
+    // A tax statement's amounts (before and after taxes) are not the trade's.
+    if (reading.rules?.taxStatement || reading.rules?.taxPending) return result;
+    if (reading.merge.verdict === "unverified" || row.kind !== parsed.kind || !netAgrees) return result;
+    const patch = await missingFieldsPatch(row, parsed);
+    if (Object.keys(patch).length === 0) return result;
+    if (!dryRun) {
+      patch.source = withDocumentSource(row.source);
+      await db.update(financeDepotTransaction).set(patch).where(eq(financeDepotTransaction.id, row.id));
+    }
+    result.outcome = "enriched";
     return result;
   }
 
@@ -874,19 +912,7 @@ export async function enrichDocument(
 
   if (match) {
     const row = match.row;
-    const patch: Partial<typeof financeDepotTransaction.$inferInsert> = {};
-    if (row.amount === null && parsed.quantity !== null) patch.amount = fixed(parsed.quantity, 8);
-    if (row.price === null && parsed.price !== null) patch.price = fixed(parsed.price, 6);
-    if (row.gross_amount === null && parsed.gross !== null) patch.gross_amount = fixed(parsed.gross, 2);
-    if (row.fees === null && parsed.fees !== null) patch.fees = fixed(parsed.fees, 2);
-    if (row.tax === null && parsed.tax !== null) patch.tax = fixed(parsed.tax, 2);
-    if (row.net_amount === null && parsed.net !== null) patch.net_amount = fixed(parsed.net, 2);
-    if (row.isin === null && parsed.isin) patch.isin = parsed.isin;
-    if (row.wkn === null && parsed.wkn) patch.wkn = parsed.wkn;
-    if (row.name === null) {
-      const name = await fitName(parsed.name);
-      if (name) patch.name = name;
-    }
+    const patch = await missingFieldsPatch(row, parsed);
     const changed = Object.keys(patch).length > 0;
     if (dryRun) {
       result.outcome = changed ? "enriched" : "linked";
@@ -1000,9 +1026,22 @@ export async function enrichPendingDocuments(
   const stats = emptyStats();
   if (accountIds && accountIds.length === 0) return stats;
 
+  // Linked papers are done — unless their trade still has no quantity: a
+  // paper linked before it could be read is examined again, so what it
+  // says reaches the row once it reads.
   const linked = db
     .select({ id: financeDepotTransactionDocument.document_id })
-    .from(financeDepotTransactionDocument);
+    .from(financeDepotTransactionDocument)
+    .innerJoin(
+      financeDepotTransaction,
+      eq(financeDepotTransaction.id, financeDepotTransactionDocument.depot_transaction_id),
+    )
+    .where(
+      or(
+        isNotNull(financeDepotTransaction.amount),
+        notInArray(financeDepotTransaction.kind, ["buy", "sell", "dividend"]),
+      ),
+    );
   const ignored = db
     .select({ id: financeDepotDocumentIgnore.document_id })
     .from(financeDepotDocumentIgnore);
