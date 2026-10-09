@@ -71,6 +71,12 @@ describe("parseLlmSettlement", () => {
     });
     expect(parseLlmSettlement({ kind: "transfer", net: "x" }).kind).toBeNull();
   });
+
+  it("keeps the sign of a refunded tax and drops it everywhere else", () => {
+    expect(parseLlmSettlement({ kind: "sell", tax: -21.05, net: -1461.05 })).toMatchObject({ tax: -21.05, net: 1461.05 });
+    expect(parseLlmSettlement({ kind: "sell", tax: "-21,05" }).tax).toBe(-21.05);
+    expect(parseLlmSettlement({ kind: "sell", tax: "21.05" }).tax).toBe(21.05);
+  });
 });
 
 describe("parseLlmPaperVerdict", () => {
@@ -101,6 +107,12 @@ describe("settlementChecks", () => {
       new Date("2026-10-01"),
     );
     expect(sell.find((c) => c.name === "net_equation")!.result).toBe("ok");
+    // A refunded tax (negative) raises the net of a sale.
+    const refund = settlementChecks(
+      { ...buy(), kind: "sell", gross: 1450, fees: 10, tax: -21.05, net: 1461.05, quantity: 10, price: 145 },
+      new Date("2026-10-01"),
+    );
+    expect(refund.find((c) => c.name === "net_equation")!.result).toBe("ok");
   });
 });
 

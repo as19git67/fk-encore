@@ -142,7 +142,7 @@ export interface SettlementExtraction {
   gross: number | null;
   /** Sum of fees and charges (positive). */
   fees: number | null;
-  /** Sum of taxes withheld (positive). */
+  /** Sum of taxes withheld (positive) — negative when taxes were refunded (a loss offset). */
   tax: number | null;
   /** Cash moved, signed: negative for a buy, positive for a sell or a dividend. */
   net: number | null;
@@ -301,6 +301,15 @@ const CURRENCY = String.raw`(?:\s*(EUR|USD|CHF|GBP|€|\$))?`;
 
 /** "Steuern", also as OCR reads it off a scan ("Steuem"). */
 const STEUERN = String.raw`Steue(?:rn|m)`;
+/** A tax refund's total, as the banks label it. */
+const TAX_REFUND_LABELS = [
+  String.raw`erstattete\s*${STEUERN}`,
+  String.raw`${STEUERN}\s*erstattung`,
+  String.raw`Steuer(?:r(?:ü|ue)ck)?erstattung`,
+  String.raw`Steuerr(?:ü|ue)ckzahlung`,
+  String.raw`Erstattung\s*(?:der\s*|von\s*)?(?:${STEUERN}|Kapitalertragsteuer)`,
+  String.raw`erstattete\s*Kapitalertragsteuer`,
+];
 
 /**
  * A tax statement on its own ("Steuerliche Behandlung: <Geschäftsart>
@@ -805,17 +814,22 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
   ));
   const net = netAbs === null ? null : isMoneyOut(kind) ? -netAbs : netAbs;
 
-  const tax = track("tax", () => amountAfter(
+  const tax = track("tax", () => (() => {
+    // Taxes given back (a sale at a loss offsets earlier gains): the amount
+    // raises the net instead of lowering it, so it is kept negative.
+    const refund = amountAfter(text, TAX_REFUND_LABELS, markers);
+    return refund === null ? null : -refund;
+  })() ?? amountAfter(
     text,
     [String.raw`abgeführte\s*${STEUERN}`, String.raw`einbehaltene\s*${STEUERN}(?=\s*[:\s]*(?:EUR|-?\d))`, String.raw`Summe\s*${STEUERN}`, String.raw`${STEUERN}\s*gesamt`],
     markers,
   ) ?? (() => {
     // No printed total: on a tax statement, what lies between the amounts
     // before and after taxes is the tax — safer than adding up every tax
-    // word in the tables and footnotes.
+    // word in the tables and footnotes. More after than before: a refund.
     if (!taxStatement || gross === null || netAbs === null) return null;
     markers.push("vor − nach Steuern");
-    return Math.round(Math.abs(gross - netAbs) * 100) / 100;
+    return Math.round((gross - netAbs) * 100) / 100;
   })() ?? sumAfter(
     text,
     [

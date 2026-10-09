@@ -66,6 +66,23 @@ Zahlbarkeitstag 12.05.2026
 Betrag zu Ihren Gunsten 91,63 EUR
 `;
 
+/** A sale at a loss: the bank gives earlier taxes back, and the net is above the Kurswert. */
+const SELL_REFUND_TEXT = `
+Musterbroker
+Wertpapier-Abrechnung Verkauf
+Stück 10
+Beispiel World ETF
+ISIN DE000000BBB2
+Handelstag 03.02.2026
+Kurs 145,00 EUR
+Kurswert 1.450,00 EUR
+Orderprovision 10,00 EUR
+Kapitalertragsteuer 20,00 EUR
+Solidaritätszuschlag 1,05 EUR
+erstattete Steuern 21,05 EUR
+Endbetrag 1.461,05 EUR
+`;
+
 describe("parseGermanNumber", () => {
   it("reads German and plain formats", () => {
     expect(parseGermanNumber("1.234,56")).toBe(1234.56);
@@ -94,6 +111,15 @@ describe("parseSettlement", () => {
     expect(s!.net).toBe(-2966.4);
     expect(s!.executedAt).toBe("2026-03-14");
     expect(s!.currency).toBe("EUR");
+    expect(isUsableSettlement(s)).toBe(true);
+  });
+
+  it("keeps a refunded tax negative, so the net equation still holds", () => {
+    const s = parseSettlement(SELL_REFUND_TEXT)!;
+    expect(s.kind).toBe("sell");
+    expect(s.fees).toBe(10);
+    expect(s.tax).toBe(-21.05);
+    expect(s.net).toBe(1461.05);
     expect(isUsableSettlement(s)).toBe(true);
   });
 
