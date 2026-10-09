@@ -148,6 +148,8 @@ const visibleChecks = computed(() => {
 
 function rowLabel(row: { key: FieldKey; label: string }): string {
   if (inspection.value?.tax_pending && row.key === 'net') return 'Betrag vor Steuern'
+  // A negative tax is one the bank gave back (a loss offset): it raises the net.
+  if (row.key === 'tax' && Number(inspection.value?.fields.tax ?? 0) < 0) return 'Steuern (erstattet)'
   return paperFields.value.labels[row.key] ?? row.label
 }
 

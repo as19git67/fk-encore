@@ -701,10 +701,11 @@ export function buildPortfolio(
       p.fees += Math.abs(fees);
       if (yb) yb.fees += Math.abs(fees);
     }
+    // Taxes are kept signed: withheld positive, refunded negative.
     const tax = num(tx.tax);
     if (tax !== null) {
-      p.taxes += Math.abs(tax);
-      if (yb) yb.taxes += Math.abs(tax);
+      p.taxes += tax;
+      if (yb) yb.taxes += tax;
     }
 
     if (tx.kind === "buy") {
@@ -843,7 +844,7 @@ export function buildPortfolio(
           ? null
           : ((incomeOut / cost) * 100).toFixed(2),
       fees: p.fees > 0 ? p.fees.toFixed(2) : null,
-      taxes: p.taxes > 0 ? p.taxes.toFixed(2) : null,
+      taxes: p.taxes !== 0 ? p.taxes.toFixed(2) : null,
       total_return: totalReturn === null ? null : totalReturn.toFixed(2),
       total_return_pct:
         totalReturn === null || cost === null || cost === 0
@@ -1128,7 +1129,7 @@ export const listPortfolioTransactions = api(
           total: sql<number>`COUNT(*)::int`,
           net: sql<string>`COALESCE(SUM(CAST(${t.net_amount} AS NUMERIC)), 0)::text`,
           fees: sql<string>`COALESCE(SUM(ABS(CAST(${t.fees} AS NUMERIC))), 0)::text`,
-          taxes: sql<string>`COALESCE(SUM(ABS(CAST(${t.tax} AS NUMERIC))), 0)::text`,
+          taxes: sql<string>`COALESCE(SUM(CAST(${t.tax} AS NUMERIC)), 0)::text`,
         })
         .from(t)
         .where(where),

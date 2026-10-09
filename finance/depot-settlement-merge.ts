@@ -6,7 +6,8 @@
  *   parseLlmSettlement — validates what the model returned into the same
  *                        shape the rule-based parser produces.
  *   settlementChecks   — arithmetic and format checks one reading must pass:
- *                        gross ± fees ± taxes = net, quantity × price ≈
+ *                        gross ± fees ± taxes = net (a refunded tax is
+ *                        negative and raises the net), quantity × price ≈
  *                        gross, the ISIN check digit, a plausible date.
  *   mergeSettlement    — one reading from both: fields both agree on are
  *                        taken as they are; where they disagree, each
@@ -91,6 +92,14 @@ function amount(v: unknown): number | null {
   return Number.isFinite(n) ? Math.abs(n) : null;
 }
 
+/** Like `amount`, keeping the sign: a refunded tax is negative. */
+function signedAmount(v: unknown): number | null {
+  const a = amount(v);
+  if (a === null) return null;
+  const negative = typeof v === "number" ? v < 0 : /^\s*-/.test(String(v));
+  return negative ? -a : a;
+}
+
 function isoDate(v: unknown): string | null {
   const s = str(v);
   if (!s) return null;
@@ -137,7 +146,8 @@ export function parseLlmSettlement(raw: Record<string, unknown>): SettlementValu
     price: amount(raw.price),
     gross: amount(raw.gross),
     fees: amount(raw.fees),
-    tax: amount(raw.tax),
+    // Negative when the model read a refund; every other amount is unsigned.
+    tax: signedAmount(raw.tax),
     // Signed like the rule-based reading: money out for a buy.
     net: net === null ? null : isMoneyOut(kind) ? -net : net,
     currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : currency === "€" ? "EUR" : null,
