@@ -121,6 +121,10 @@ struct TripSpotDetailView<Actions: View>: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+            } footer: {
+                if !spot.unmatched {
+                    OSMAttributionNote()
+                }
             }
 
             if let article = spot.wikipediaUrl, let articleURL = URL(string: article) {
