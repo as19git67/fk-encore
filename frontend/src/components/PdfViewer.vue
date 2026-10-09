@@ -45,6 +45,7 @@ interface PageEntry {
 
 const pdfDoc = shallowRef<PDFDocumentProxy | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
+const listRef = ref<HTMLDivElement | null>(null)
 /** Page navigation, zoom and chunk pagination — sticky in the tall layout. */
 const headRef = ref<HTMLDivElement | null>(null)
 
@@ -612,10 +613,14 @@ function onTouchStart(e: TouchEvent) {
   pinchStartDist = touchDistance(a, b)
   pinchStartZoom = effectiveZoom.value
   pinchScale.value = 1
-  const rect = wrapper.getBoundingClientRect()
   pinchMidpoint = touchMidpoint(a, b)
-  pinchOriginX.value = pinchMidpoint.clientX - rect.left + wrapper.scrollLeft
-  pinchOriginY.value = pinchMidpoint.clientY - rect.top + wrapper.scrollTop
+  // `transform-origin` is measured from the page list's own box, which sits
+  // inside the wrapper's padding and auto margins — measured from the
+  // wrapper instead, the preview scaled around a point a few pixels off the
+  // fingers and the content crept away under them.
+  const rect = (listRef.value ?? wrapper).getBoundingClientRect()
+  pinchOriginX.value = pinchMidpoint.clientX - rect.left
+  pinchOriginY.value = pinchMidpoint.clientY - rect.top
 }
 
 function onTouchMove(e: TouchEvent) {
@@ -832,6 +837,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div
+        ref="listRef"
         class="page-list"
         :style="pinching ? {
           transform: `scale(${pinchScale})`,
