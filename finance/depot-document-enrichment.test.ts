@@ -1299,6 +1299,29 @@ describe("finance/depot-document-enrichment — a paper linked to the booking", 
     expect((await enrichDocument(docId)).outcome).toBe("already_linked");
   });
 
+  it("fills the row in later, once a paper linked unread can be read", async () => {
+    const { bc, giro, depot } = await setup();
+    const { bookingId, row } = await derivedRow(bc, giro, depot, "2026-03-16", "-2966.40");
+    // Linked while nothing could be read off it.
+    const docId = await insertDocument("Beispielbank AG\nIhre Unterlagen zur Order");
+    await db.insert(financeTransactionDocument).values({ transaction_id: bookingId, document_id: docId });
+    expect((await enrichDocument(docId)).outcome).toBe("linked");
+    expect((await depotRows(depot))[0]!.amount).toBeNull();
+
+    // The text arrives (a better OCR, the model back): the row gets the figures.
+    await db.update(documents).set({ extracted_text: BUY_TEXT }).where(eq(documents.id, docId));
+    const stats = await enrichPendingDocuments(null);
+    expect(stats.results.map((r) => [r.document_id, r.outcome])).toEqual([[docId, "enriched"]]);
+    const [after] = await depotRows(depot);
+    expect(after!.id).toBe(row.id);
+    expect(Number(after!.amount)).toBe(25);
+    expect(after!.fees).toBe("6.40");
+    expect(after!.net_amount).toBe("-2966.40");
+    expect(after!.source).toBe("giro-derived+document");
+    // Complete now: the next run leaves it alone.
+    expect((await enrichPendingDocuments(null)).results).toEqual([]);
+  });
+
   it("reports a paper about another trade instead of booking it", async () => {
     const { bc, giro, depot } = await setup();
     const { bookingId, row } = await derivedRow(bc, giro, depot, "2026-03-16", "-2966.40");
