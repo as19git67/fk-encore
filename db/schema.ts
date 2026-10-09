@@ -1316,6 +1316,24 @@ export const documentCollections = pgTable("document_collections", {
   updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
 
+// Near-duplicate candidates found by content (#1481, migration 0232). Both
+// document columns are nullable with SET NULL so a merged pair survives the
+// loser's deletion and still names the keeper. `document_a_id` <
+// `document_b_id` while both exist.
+export const documentDuplicateCandidates = pgTable("document_duplicate_candidates", {
+  id: serial("id").primaryKey(),
+  document_a_id: integer("document_a_id").references(() => documents.id, { onDelete: "set null" }),
+  document_b_id: integer("document_b_id").references(() => documents.id, { onDelete: "set null" }),
+  score: real("score").notNull(),
+  evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+  status: text("status").notNull().default("open"),
+  keeper_id: integer("keeper_id").references(() => documents.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  decided_at: timestamp("decided_at", { mode: "string", withTimezone: true }),
+}, (table) => [
+  uniqueIndex("document_duplicate_candidates_pair_idx").on(table.document_a_id, table.document_b_id),
+]);
+
 export const documentCollectionItems = pgTable("document_collection_items", {
   id: serial("id").primaryKey(),
   collection_id: integer("collection_id")

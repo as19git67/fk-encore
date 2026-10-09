@@ -57,6 +57,7 @@ import PdfViewer from '../components/PdfViewer.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
 import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
 import RelatedDocumentsCard from '../components/documents/RelatedDocumentsCard.vue'
+import { listDuplicatesForDocument } from '../api/documents'
 import {
   listCollectionsForDocument,
   type DocumentCollectionRef,
@@ -193,6 +194,17 @@ async function toggleFullText() {
 
 // "Keine passende Kategorie — neue vorschlagen"
 const proposeOpen = ref(false)
+// Open near-duplicate pairs this document is part of (#1481): a notice with
+// a link to the review page, loaded alongside the document and never blocking it.
+const duplicateOtherIds = ref<number[]>([])
+async function loadDuplicateNotice(id: number) {
+  try {
+    duplicateOtherIds.value = (await listDuplicatesForDocument(id)).other_ids
+  } catch {
+    duplicateOtherIds.value = []
+  }
+}
+
 /**
  * `Versicherungen/Hausrat` → two crumbs, each carrying the prefix up to
  * itself so the link lists that folder and everything below it.
@@ -359,6 +371,7 @@ async function load() {
       listCollectionsForDocument(id).catch(() => ({ items: [] })),
     ])
     doc.value = detail
+    void loadDuplicateNotice(id)
     categories.value = cats.items
     documentTypes.value = docTypes.items
     taxCatalog.value = taxCats.items
@@ -1228,6 +1241,16 @@ onBeforeUnmount(() => {
             <Button label="Speichern" icon="pi pi-check" :loading="saving" @click="save" />
           </div>
         </div>
+
+        <Message v-if="duplicateOtherIds.length > 0" severity="warn" :closable="false" class="duplicate-notice">
+          Möglicherweise doppelt vorhanden:
+          <template v-for="(otherId, i) in duplicateOtherIds" :key="otherId">
+            <template v-if="i > 0">, </template>
+            <RouterLink :to="{ name: 'dokumente-detail', params: { id: otherId } }">#{{ otherId }}</RouterLink>
+          </template>
+          liest wie dieses Dokument.
+          <RouterLink v-if="auth.hasPermission('data.manage')" :to="{ name: 'dokumente-duplikate' }">Zur Prüfung</RouterLink>
+        </Message>
 
         <section class="collections-card">
           <div class="collections-header">

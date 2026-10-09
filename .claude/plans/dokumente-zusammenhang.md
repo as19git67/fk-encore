@@ -61,7 +61,7 @@ What the code does today (October 2026):
 
 ## Stages
 
-### 1. Origin folder (`source_folder`) and backfill (#1477)
+### 1. Origin folder (`source_folder`) and backfill (#1477) — done (#1483)
 
 - Migration: `documents.source_folder TEXT NULL` plus index. Relative path
   of the file's directory under the inbox root (or under the uploaded
@@ -83,7 +83,7 @@ What the code does today (October 2026):
   the list filtered by `source_folder` prefix (`folder=` in `route.query`,
   through `ListToolbar` like every other filter).
 
-### 2. "Related documents" panel on the detail page (#1478)
+### 2. "Related documents" panel on the detail page (#1478) — done (#1484)
 
 Endpoint `GET /documents/:id/related` returning groups, each with a
 `reason` and up to N items, all filtered by `visibleDocumentsWhere` so
@@ -144,7 +144,7 @@ after the document itself.
   through the related panel (stage 2) with one click, or via a rule entry
   `source_folder` prefix added to the rule shape in this stage.
 
-### 5. Near-duplicate detection and merge (#1481)
+### 5. Near-duplicate detection and merge (#1481) — done
 
 **Detection** (`documents/duplicates.ts`, endpoint
 `POST /documents/duplicates/scan`, admin): candidate pairs within the same
@@ -198,10 +198,21 @@ transaction under `withDocumentLock` for both ids:
   keeper id.
 
 **Prevention**: the import path runs the same detection against the new
-document once its text is extracted (a scan-worker step after
-`text_extract`). A hit above the threshold does not block the import; it
-records an open pair and flags the document in the list ("possible
-duplicate of #id"), which is where the review list starts.
+document once its text is extracted (at the end of `runTextExtract`). A hit
+above the threshold does not block the import; it records an open pair, and
+the detail page shows a notice ("possibly a duplicate of #id") linking to
+the review page.
+
+As built: `documents/duplicates.ts`. The prefilter is equal `pages_total`
+plus equal `doc_date` or `correspondent_slug`, or first-chunk embeddings
+within `DOCUMENTS_DUPLICATE_EMBEDDING_MAX_DISTANCE` (0.08); confirmation is
+trigram Jaccard over normalised text at `DOCUMENTS_DUPLICATE_MIN_SCORE`
+(0.85). The merge re-points rows generically by walking every foreign key
+onto `documents.id` in `information_schema`, so a new table cannot be
+forgotten; derived tables (embeddings, scan queue, receipt extraction) are
+dropped, a row the keeper already has is dropped on unique violation, pinned
+attributes and tax fields are copied only where the keeper has none, notes
+are appended. Review page: Dokumente › Einstellungen › Duplikate.
 
 ### Order
 

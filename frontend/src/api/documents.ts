@@ -316,6 +316,93 @@ export function getRelatedDocuments(id: number) {
   return apiFetch<{ groups: RelatedGroup[] }>(`/documents/${id}/related`)
 }
 
+// ─── Near-duplicates (#1481) ────────────────────────────────────────────────
+
+export interface DuplicateEvidence {
+  pages_a: number | null
+  pages_b: number | null
+  same_date: boolean
+  same_correspondent: boolean
+  embedding_hit: boolean
+  text_source_a: string | null
+  text_source_b: string | null
+  speaking_name_a: boolean
+  speaking_name_b: boolean
+  size_a: number
+  size_b: number
+}
+
+export interface DuplicateSide {
+  id: number
+  title: string | null
+  original_filename: string
+  doc_date: string | null
+  sender: string | null
+  correspondent_display: string | null
+  uploaded_at: string | null
+  size_bytes: number
+  pages_total: number | null
+  text_source: string | null
+  attributes_reviewed: boolean
+  tax_reviewed: boolean
+  source_folder: string | null
+}
+
+export interface DuplicatePair {
+  id: number
+  score: number
+  evidence: DuplicateEvidence
+  status: string
+  a: DuplicateSide
+  b: DuplicateSide
+  suggested_keeper_id: number
+  created_at: string
+}
+
+export interface DuplicateScanResponse {
+  found: number
+  new_open: number
+  already_known: number
+}
+
+export interface MergeDuplicateResult {
+  keeper_id: number
+  loser_id: number
+  moved: Record<string, number>
+  dropped: Record<string, number>
+  attributes_copied: boolean
+  tax_copied: boolean
+}
+
+/** Scan the whole corpus for near-duplicate pairs; new ones become open. */
+export function scanDuplicates() {
+  return apiFetch<DuplicateScanResponse>('/documents/duplicates/scan', { method: 'POST' })
+}
+
+/** Open pairs awaiting a decision, highest score first. */
+export function listDuplicates() {
+  return apiFetch<{ items: DuplicatePair[] }>('/documents/duplicates')
+}
+
+/** Open pairs one document is part of (the other sides' ids). */
+export function listDuplicatesForDocument(id: number) {
+  return apiFetch<{ other_ids: number[] }>(`/documents/${id}/duplicates`)
+}
+
+/** Merge the pair: `keeperId` stays, the other side's work moves onto it and it is deleted. */
+export function mergeDuplicate(pairId: number, keeperId: number) {
+  return apiFetch<MergeDuplicateResult>(`/documents/duplicates/${pairId}/merge`, {
+    method: 'POST',
+    body: JSON.stringify({ keeper_id: keeperId }),
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+/** Not a duplicate: the pair is remembered so the scan does not propose it again. */
+export function dismissDuplicate(pairId: number) {
+  return apiFetch<{ success: boolean }>(`/documents/duplicates/${pairId}/dismiss`, { method: 'POST' })
+}
+
 // ─── Correspondents: facet + overrides ──────────────────────────────────────
 
 export interface CorrespondentFacet {
