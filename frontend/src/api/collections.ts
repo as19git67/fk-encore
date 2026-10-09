@@ -9,6 +9,25 @@
 import { API_BASE_URL, apiFetch } from './client'
 import type { DocumentStatus, DocumentVisibility } from './documents'
 
+export type CollectionKind = 'manual' | 'dossier'
+
+/** What a dossier takes in (#1480); every part optional, see documents/dossiers.ts. */
+export interface CollectionRule {
+  correspondent_slug?: string | null
+  /** Normalised: letters and digits only, upper-cased. */
+  reference_numbers?: string[]
+  source_folder_prefix?: string | null
+  /** Documents a person took out; the rule leaves them alone. */
+  excluded_document_ids?: number[]
+}
+
+/** The rule as typed; the server normalises it. */
+export interface CollectionRuleInput {
+  correspondent_slug?: string | null
+  reference_numbers?: string[] | null
+  source_folder_prefix?: string | null
+}
+
 export interface DocumentCollection {
   id: number
   title: string
@@ -23,6 +42,9 @@ export interface DocumentCollection {
   include_summary: boolean
   visibility: DocumentVisibility
   group_id: number | null
+  /** 'dossier' when a rule fills the folder by itself (#1480). */
+  kind: CollectionKind
+  rule: CollectionRule | null
   created_at: string | null
   updated_at: string | null
   /** Documents in the folder, switched on or off. */
@@ -49,6 +71,8 @@ export interface DocumentCollectionItem {
   pages_total: number | null
   visibility: DocumentVisibility
   group_id: number | null
+  /** 'rule' when the dossier's rule put it in, 'user' when a person did. */
+  joined_by: 'user' | 'rule'
 }
 
 export interface DocumentCollectionDetail extends DocumentCollection {
@@ -83,6 +107,8 @@ export interface CreateCollectionPayload {
   visibility?: DocumentVisibility
   group_id?: number | null
   document_ids?: number[]
+  kind?: CollectionKind
+  rule?: CollectionRuleInput | null
 }
 
 export function createCollection(
@@ -103,6 +129,15 @@ export interface UpdateCollectionPayload {
   include_summary?: boolean
   visibility?: DocumentVisibility
   group_id?: number | null
+  kind?: CollectionKind
+  rule?: CollectionRuleInput | null
+}
+
+/** Run a dossier's rule over the corpus now. */
+export function applyCollectionRule(id: number): Promise<{ added: number; removed: number }> {
+  return apiFetch<{ added: number; removed: number }>(`/document-collections/${id}/apply-rule`, {
+    method: 'POST',
+  })
 }
 
 export function updateCollection(

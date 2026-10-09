@@ -19,6 +19,7 @@ const DETAIL: DocumentCollectionDetail = {
     position: i + 1,
     included: i !== 2,
     excluded_pages: i === 0 ? [2] : [],
+    joined_by: (i === 2 ? 'rule' : 'user') as 'user' | 'rule',
     title: doc.title,
     original_filename: doc.original_filename,
     mime_type: doc.mime_type,

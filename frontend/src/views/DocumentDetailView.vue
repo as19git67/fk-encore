@@ -252,6 +252,17 @@ function parseReferenceNumbersText(text: string): Array<{ kind: ReferenceKind; v
   return out
 }
 
+/** What a dossier created from this document would take in (#1480). */
+const dossierRuleSeed = computed(() => {
+  const d = doc.value
+  if (!d) return null
+  return {
+    correspondent_slug: d.correspondent_slug,
+    reference_numbers: d.reference_numbers.map((r) => r.normalized),
+    source_folder_prefix: d.source_folder,
+  }
+})
+
 const proposeName = ref('')
 const proposeParentSlug = ref<string | null>(null)
 const proposeMoveToSonstiges = ref(true)
@@ -1592,6 +1603,7 @@ onBeforeUnmount(() => {
     <AddToCollectionDialog
       v-model:visible="addToCollectionOpen"
       :document-ids="[docId]"
+      :rule-seed="dossierRuleSeed"
       @added="reloadCollections"
     />
 
