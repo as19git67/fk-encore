@@ -21,6 +21,13 @@
  *     produced (`buildFrontMatter`), which in practice settles on the first
  *     or second pass.
  *
+ *   - **Every page is at most A4-sized.** Some sources write a page box in
+ *     pixels rather than points — a 300 dpi scan then claims a page more than
+ *     a metre wide. Viewers that lay out a document by its widest page (macOS
+ *     Preview) show every normal page as a thin strip next to it. Oversized
+ *     pages are scaled down uniformly to fit A4 (`fitScaleToA4`); the content
+ *     stream is only wrapped in a transform, so text stays selectable.
+ *
  * `qpdf` and `pdftoppm` come from the runtime image (docker/Dockerfile.runtime).
  * Everything that decides *what* to assemble — page selection, the qpdf
  * argument vector, the contents entries and their page numbers — is a pure
@@ -32,6 +39,7 @@ import os from "os";
 import path from "path";
 import { spawn } from "child_process";
 import PDFDocument from "pdfkit";
+import { PDFDocument as PdfLibDocument } from "pdf-lib";
 import sharp from "sharp";
 import { normalizePdfText } from "../finance/pdf-report";
 import { singleJpegPagePdf } from "./receipt-pdf";
@@ -499,7 +507,7 @@ export async function buildCollectionPdf(
       ? [{ path: frontPath, pages: rangeOf(front.page_count) }, ...parts]
       : parts;
     await run("qpdf", qpdfMergeArgs(mergeParts, outPath));
-    const bytes = await fs.promises.readFile(outPath);
+    const bytes = await shrinkOversizedPages(await fs.promises.readFile(outPath));
 
     return {
       bytes,
@@ -529,4 +537,67 @@ export function frontMatterWanted(options: CollectionPdfOptions, entryCount: num
 
 function rangeOf(count: number): number[] {
   return Array.from({ length: count }, (_, i) => i + 1);
+}
+
+// ─── Page size ──────────────────────────────────────────────────────────────
+
+const A4_SHORT = 595.28;
+const A4_LONG = 841.89;
+/**
+ * Pages up to this much larger than A4 are left alone: Letter, Legal and a
+ * scanner's slightly generous A4 are fine as they are; only boxes that are
+ * clearly not in points are worth touching.
+ */
+const OVERSIZE_TOLERANCE = 1.25;
+
+/**
+ * The uniform factor that brings a page of `width` × `height` points within
+ * A4 in its own orientation, or null when the page is not oversized.
+ */
+export function fitScaleToA4(width: number, height: number): number | null {
+  if (!(width > 0) || !(height > 0)) return null;
+  const [boxW, boxH] = width > height ? [A4_LONG, A4_SHORT] : [A4_SHORT, A4_LONG];
+  if (width <= boxW * OVERSIZE_TOLERANCE && height <= boxH * OVERSIZE_TOLERANCE) return null;
+  return Math.min(boxW / width, boxH / height);
+}
+
+/**
+ * Scale every oversized page of `bytes` down to A4 (see the header). Returns
+ * the input unchanged when nothing is oversized or the PDF cannot be parsed —
+ * an export with one huge page beats no export.
+ */
+export async function shrinkOversizedPages(bytes: Buffer): Promise<Buffer> {
+  try {
+    const doc = await PdfLibDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    let changed = false;
+    for (const page of doc.getPages()) {
+      const crop = page.getCropBox();
+      const factor = fitScaleToA4(crop.width, crop.height);
+      if (factor === null) continue;
+      // Content and annotations scale about the origin, so every box has to
+      // scale about it too — including its offset.
+      const boxes: Array<[() => { x: number; y: number; width: number; height: number } | undefined, (x: number, y: number, w: number, h: number) => void]> = [
+        [() => page.getMediaBox(), (x, y, w, h) => page.setMediaBox(x, y, w, h)],
+        [() => (page.node.CropBox() ? page.getCropBox() : undefined), (x, y, w, h) => page.setCropBox(x, y, w, h)],
+        [() => (page.node.BleedBox() ? page.getBleedBox() : undefined), (x, y, w, h) => page.setBleedBox(x, y, w, h)],
+        [() => (page.node.TrimBox() ? page.getTrimBox() : undefined), (x, y, w, h) => page.setTrimBox(x, y, w, h)],
+        [() => (page.node.ArtBox() ? page.getArtBox() : undefined), (x, y, w, h) => page.setArtBox(x, y, w, h)],
+      ];
+      for (const [get, set] of boxes) {
+        const box = get();
+        if (box) set(box.x * factor, box.y * factor, box.width * factor, box.height * factor);
+      }
+      page.scaleContent(factor, factor);
+      page.scaleAnnotations(factor, factor);
+      changed = true;
+    }
+    if (!changed) return bytes;
+    return Buffer.from(await doc.save({ updateFieldAppearances: false }));
+  } catch (err) {
+    console.warn(
+      "[documents] collection export: page sizes left as they are:",
+      (err as Error)?.message ?? err,
+    );
+    return bytes;
+  }
 }
