@@ -1328,6 +1328,39 @@ export const documentCollections = pgTable("document_collections", {
   updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * The last PDF built from a collection, per reader (migration 0235).
+ *
+ * Per reader because the export is: a group folder leaves out what the
+ * particular reader may not open, so two members of the group can get two
+ * different files. The bytes live on disk (documents/collection-export.ts);
+ * this row says whether a build is running, how the last one ended, and from
+ * which inputs it was built — `fingerprint` — so a folder changed since then
+ * can say its PDF is out of date instead of handing out a stale file silently.
+ */
+export const documentCollectionExports = pgTable(
+  "document_collection_exports",
+  {
+    collection_id: integer("collection_id")
+      .notNull()
+      .references(() => documentCollections.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").$type<"running" | "done" | "failed">().notNull(),
+    fingerprint: text("fingerprint"),
+    started_at: timestamp("started_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
+    error: text("error"),
+    filename: text("filename"),
+    page_count: integer("page_count"),
+    size_bytes: integer("size_bytes"),
+    /** Members that did not make it into the file, with the reason. */
+    skipped: jsonb("skipped").$type<Array<{ document_id: number; reason: string }>>().notNull().default([]),
+  },
+  (table) => [primaryKey({ columns: [table.collection_id, table.user_id] })],
+);
+
 // Near-duplicate candidates found by content (#1481, migration 0232). Both
 // document columns are nullable with SET NULL so a merged pair survives the
 // loser's deletion and still names the keeper. `document_a_id` <

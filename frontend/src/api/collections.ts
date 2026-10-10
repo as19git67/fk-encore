@@ -227,19 +227,43 @@ export interface CollectionPdf {
   skipped: number
 }
 
+/** How the caller's PDF of a collection stands (built in the background, kept). */
+export interface CollectionExport {
+  status: 'none' | 'running' | 'done' | 'failed'
+  started_at: string | null
+  finished_at: string | null
+  error: string | null
+  filename: string | null
+  page_count: number | null
+  size_bytes: number | null
+  /** Members that did not make it into the file. */
+  skipped_count: number
+  /** The folder changed since the kept file was built. */
+  stale: boolean
+}
+
+/** Start building the PDF on the server, or join the build already running. */
+export function startCollectionExport(id: number): Promise<CollectionExport> {
+  return apiFetch<CollectionExport>(`/document-collections/${id}/export`, { method: 'POST' })
+}
+
+export function getCollectionExport(id: number): Promise<CollectionExport> {
+  return apiFetch<CollectionExport>(`/document-collections/${id}/export`)
+}
+
 /**
- * Build and fetch the collection's PDF.
+ * Fetch the kept PDF.
  *
  * Returns a `File` so the caller can hand it straight to `navigator.share`
- * inside a tap handler — awaiting the fetch there would cost the transient
- * activation iOS requires, and the share would be rejected.
+ * inside a later tap handler — awaiting the fetch there would cost the
+ * transient activation iOS requires, and the share would be rejected.
  */
 export async function fetchCollectionPdf(
   id: number,
   title: string,
 ): Promise<CollectionPdf> {
   const token = localStorage.getItem('auth_token')
-  const res = await fetch(`${API_BASE_URL}/document-collections/${id}/pdf`, {
+  const res = await fetch(`${API_BASE_URL}/document-collections/${id}/export/pdf`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
   if (!res.ok) {

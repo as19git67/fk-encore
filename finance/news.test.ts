@@ -46,7 +46,10 @@ beforeEach(async () => {
   await db.delete(financeQuoteSymbol);
   await db.delete(financeAccountHolding);
   await db.delete(financeAccountAccess);
-  await db.delete(financeAccount);
+  // Every account goes, so whatever hangs off one goes with it: a file that
+  // ran before this one may have left transactions behind, and a plain
+  // DELETE would trip over their foreign key.
+  await db.execute(sql`TRUNCATE finance_account CASCADE`);
   await db.delete(financeBankcontact);
   await db.delete(users);
   setAuth("1", ["finance.view", "finance.admin"]);

@@ -4,7 +4,7 @@ import { defaultHandlers } from './handlers'
 import { http, HttpResponse, delay } from 'msw'
 import { MOCK_COLLECTIONS, MOCK_DOCUMENTS } from './mock-data'
 import { routeFromParameters } from './storyRoute'
-import type { DocumentCollectionDetail } from '../api/collections'
+import type { CollectionExport, DocumentCollectionDetail } from '../api/collections'
 
 /**
  * One Sammelmappe with its documents (issue #1281): the order they go into
@@ -44,7 +44,66 @@ const reorderHandler = http.put('/api/document-collections/:id/order', async ({ 
   return HttpResponse.json({ ...DETAIL, items })
 })
 
+const NO_EXPORT: CollectionExport = {
+  status: 'none',
+  started_at: null,
+  finished_at: null,
+  error: null,
+  filename: null,
+  page_count: null,
+  size_bytes: null,
+  skipped_count: 0,
+  stale: false,
+}
+
+const BUILT_EXPORT: CollectionExport = {
+  status: 'done',
+  started_at: '2026-03-14T09:30:00Z',
+  finished_at: '2026-03-14T09:30:12Z',
+  error: null,
+  filename: 'Steuer-2024.pdf',
+  page_count: 9,
+  size_bytes: 1_843_200,
+  skipped_count: 0,
+  stale: false,
+}
+
+/** A tiny but valid PDF, so the page can fetch and offer the kept file. */
+const PDF_BYTES = new TextEncoder().encode(
+  '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n' +
+    '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n' +
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>endobj\n' +
+    'trailer<</Root 1 0 R>>\n%%EOF\n',
+)
+
+/**
+ * The background build: starting reports "running", the next status poll
+ * finds it done — enough to watch the page switch from one to the other.
+ */
+function exportHandlers(initial: CollectionExport) {
+  let state = initial
+  return [
+    http.post('/api/document-collections/:id/export', () => {
+      state = { ...NO_EXPORT, status: 'running', started_at: new Date().toISOString() }
+      return HttpResponse.json(state)
+    }),
+    http.get('/api/document-collections/:id/export', () => {
+      if (state.status === 'running') {
+        state = { ...BUILT_EXPORT, finished_at: new Date().toISOString() }
+        return HttpResponse.json({ ...state, status: 'running' })
+      }
+      return HttpResponse.json(state)
+    }),
+    http.get('/api/document-collections/:id/export/pdf', () =>
+      HttpResponse.arrayBuffer(PDF_BYTES.buffer as ArrayBuffer, {
+        headers: { 'Content-Type': 'application/pdf', 'X-Collection-Skipped': '0' },
+      }),
+    ),
+  ]
+}
+
 const detailHandlers = [
+  ...exportHandlers(NO_EXPORT),
   http.get('/api/document-collections/:id', () => HttpResponse.json(DETAIL)),
   reorderHandler,
   // Before the defaults: their `/api/documents/:id` would answer this path
@@ -121,6 +180,46 @@ export const Ladefehler: Story = {
         http.get('/api/document-collections/:id', () =>
           HttpResponse.json({ message: 'Mappe nicht gefunden' }, { status: 404 }),
         ),
+        ...detailHandlers,
+      ],
+    },
+  },
+}
+
+export const PdfWirdErzeugt: Story = {
+  name: 'PDF wird erzeugt',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/document-collections/:id/export', () =>
+          HttpResponse.json({ ...NO_EXPORT, status: 'running', started_at: '2026-03-14T09:30:00Z' }),
+        ),
+        ...detailHandlers,
+      ],
+    },
+  },
+}
+
+export const PdfVeraltet: Story = {
+  name: 'PDF vorhanden, Mappe seitdem geändert',
+  parameters: {
+    msw: {
+      handlers: [...exportHandlers({ ...BUILT_EXPORT, stale: true }), ...detailHandlers],
+    },
+  },
+}
+
+export const PdfFehlgeschlagen: Story = {
+  name: 'PDF fehlgeschlagen',
+  parameters: {
+    msw: {
+      handlers: [
+        ...exportHandlers({
+          ...NO_EXPORT,
+          status: 'failed',
+          finished_at: '2026-03-14T09:31:00Z',
+          error: 'qpdf exited 2: file is damaged',
+        }),
         ...detailHandlers,
       ],
     },

@@ -7,19 +7,23 @@
  *   - which documents and which of their pages are switched off — kept per
  *     membership, so the same document can be whole in one folder and trimmed
  *     in another;
- *   - the export, which is built on the server on demand and never stored.
+ *   - the export, which the server builds in the background and keeps. The
+ *     page only starts it and follows it: leaving and coming back finds the
+ *     build still running or its file waiting, and the server says when the
+ *     folder has changed since (`stale`).
  *
- * The PDF is fetched into a `File` first and shared from a *later* tap. iOS
- * revokes the transient activation across an `await`, so a share started
- * before the bytes are in hand is rejected — the same two-step the recap
- * video export uses (see utils/shareFile).
+ * The kept PDF is fetched into a `File` as soon as it is there and shared from
+ * a *later* tap. iOS revokes the transient activation across an `await`, so a
+ * share started before the bytes are in hand is rejected — the same two-step
+ * the recap video export uses (see utils/shareFile).
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import ProgressSpinner from 'primevue/progressspinner'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
@@ -31,10 +35,13 @@ import {
   collectionPdfFilename,
   fetchCollectionPdf,
   getCollection,
+  getCollectionExport,
+  startCollectionExport,
   removeCollectionDocument,
   reorderCollection,
   updateCollection,
   updateCollectionItem,
+  type CollectionExport,
   type DocumentCollectionDetail,
   type DocumentCollectionItem,
 } from '../api/collections'
@@ -59,11 +66,15 @@ const summaryDraft = ref('')
 const pageSelectorOpen = ref(false)
 const pageSelectorItem = ref<DocumentCollectionItem | null>(null)
 
-/** Set once the export is built; cleared by any change to the folder. */
+/** The server's word on the caller's PDF; null until first asked. */
+const exportState = ref<CollectionExport | null>(null)
+/** The kept file, fetched once it is there; tied to the build it came from. */
 const exportFile = ref<File | null>(null)
 const exportUrl = ref<string | null>(null)
-const exportSkipped = ref(0)
-const exporting = ref(false)
+const exportFileBuiltAt = ref<string | null>(null)
+const exportStarting = ref(false)
+const exportFetching = ref(false)
+const exportRunning = computed(() => exportState.value?.status === 'running')
 
 /**
  * "Zurück" returns to wherever the folder was opened from — the document list
@@ -162,15 +173,8 @@ function apply(detail: DocumentCollectionDetail) {
   titleDraft.value = detail.title
   notesDraft.value = detail.notes ?? ''
   summaryDraft.value = detail.summary ?? ''
-  discardExport()
-}
-
-/** A built PDF describes the folder as it was; any change invalidates it. */
-function discardExport() {
-  if (exportUrl.value) URL.revokeObjectURL(exportUrl.value)
-  exportUrl.value = null
-  exportFile.value = null
-  exportSkipped.value = 0
+  // The kept file stays; the server decides whether it is still current.
+  if (!exportRunning.value) void refreshExport()
 }
 
 async function load() {
@@ -281,20 +285,99 @@ function openDocument(item: DocumentCollectionItem) {
   })
 }
 
+// ─── Export (built and kept on the server) ──────────────────────────────────
+const EXPORT_POLL_MS = 2000
+let exportTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearExportTimer() {
+  if (exportTimer) clearTimeout(exportTimer)
+  exportTimer = null
+}
+
+function followExport(state: CollectionExport) {
+  exportState.value = state
+  clearExportTimer()
+  if (state.status === 'running') {
+    exportTimer = setTimeout(() => void refreshExport(), EXPORT_POLL_MS)
+  } else if (state.status === 'done' && exportFileBuiltAt.value !== state.finished_at) {
+    void loadExportFile(state)
+  } else if (state.status !== 'done') {
+    dropExportFile()
+  }
+}
+
+async function refreshExport() {
+  if (!Number.isFinite(collectionId.value)) return
+  try {
+    followExport(await getCollectionExport(collectionId.value))
+  } catch {
+    // A hiccup while following a build is not worth a banner; try again.
+    if (exportRunning.value) {
+      clearExportTimer()
+      exportTimer = setTimeout(() => void refreshExport(), EXPORT_POLL_MS * 3)
+    }
+  }
+}
+
 async function buildExport() {
-  if (!collection.value || exporting.value) return
-  exporting.value = true
+  if (!collection.value || exportStarting.value || exportRunning.value) return
+  exportStarting.value = true
   loadError.value = ''
   try {
+    followExport(await startCollectionExport(collectionId.value))
+  } catch (err: any) {
+    loadError.value = err?.message ?? 'PDF konnte nicht gestartet werden.'
+  } finally {
+    exportStarting.value = false
+  }
+}
+
+function dropExportFile() {
+  if (exportUrl.value) URL.revokeObjectURL(exportUrl.value)
+  exportUrl.value = null
+  exportFile.value = null
+  exportFileBuiltAt.value = null
+}
+
+async function loadExportFile(state: CollectionExport) {
+  if (!collection.value || exportFetching.value) return
+  exportFetching.value = true
+  try {
     const result = await fetchCollectionPdf(collectionId.value, collection.value.title)
+    dropExportFile()
     exportFile.value = result.file
     exportUrl.value = result.url
-    exportSkipped.value = result.skipped
+    exportFileBuiltAt.value = state.finished_at
   } catch (err: any) {
-    loadError.value = err?.message ?? 'PDF konnte nicht erzeugt werden.'
+    loadError.value = err?.message ?? 'PDF konnte nicht geladen werden.'
   } finally {
-    exporting.value = false
+    exportFetching.value = false
   }
+}
+
+function formatBuiltAt(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+function exportSummary(state: CollectionExport): string {
+  return [
+    `PDF vom ${formatBuiltAt(state.finished_at)}`,
+    state.page_count ? `${state.page_count} ${state.page_count === 1 ? 'Seite' : 'Seiten'}` : '',
+    formatSize(state.size_bytes),
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+function formatSize(bytes: number | null): string {
+  if (bytes == null) return ''
+  return bytes < 1024 * 1024
+    ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+    : `${(bytes / (1024 * 1024)).toLocaleString('de-DE', { maximumFractionDigits: 1 })} MB`
 }
 
 /**
@@ -323,9 +406,20 @@ function pageHint(item: DocumentCollectionItem): string {
     : `${item.excluded_pages.length} Seiten abgewählt`
 }
 
+watch(collectionId, () => {
+  clearExportTimer()
+  dropExportFile()
+  exportState.value = null
+})
+
 onMounted(() => {
   void load()
   void loadCorrespondents()
+})
+
+onBeforeUnmount(() => {
+  clearExportTimer()
+  dropExportFile()
 })
 </script>
 
@@ -599,36 +693,80 @@ onMounted(() => {
       </ul>
     </section>
 
-    <section class="cd-export">
-      <Button
-        v-if="!exportFile"
-        icon="pi pi-file-pdf"
-        label="PDF erzeugen"
-        :loading="exporting"
-        :disabled="includedCount === 0 && !(collection?.include_cover ?? true)"
-        @click="buildExport"
-      />
-      <template v-else>
+    <section class="cd-export" aria-live="polite">
+      <p v-if="exportRunning" class="cd-export-status">
+        <ProgressSpinner class="cd-export-spinner" stroke-width="6" aria-hidden="true" />
+        PDF wird auf dem Server erzeugt … Du kannst die Seite verlassen, es läuft weiter.
+      </p>
+      <p v-else-if="exportState?.status === 'done'" class="cd-export-status">
+        <i class="pi pi-file-pdf" aria-hidden="true" />
+        {{ exportSummary(exportState) }}
+        <Tag v-if="exportState.stale" value="Mappe seitdem geändert" severity="warn" />
+      </p>
+      <Message v-if="exportState?.status === 'failed'" severity="error" :closable="false">
+        PDF konnte nicht erzeugt werden: {{ exportState.error }}
+      </Message>
+
+      <div class="cd-export-actions">
+        <template v-if="exportState?.status === 'done' || (exportRunning && exportFile)">
+          <Button
+            v-if="exportFile"
+            :icon="canShareFiles() ? 'pi pi-share-alt' : 'pi pi-download'"
+            :label="canShareFiles() ? 'PDF teilen' : 'PDF speichern'"
+            :severity="exportState?.stale ? 'secondary' : undefined"
+            :outlined="exportState?.stale"
+            @click="shareExport"
+          />
+          <Button
+            v-else-if="exportFetching"
+            icon="pi pi-download"
+            label="PDF wird geladen …"
+            loading
+            disabled
+            severity="secondary"
+            outlined
+          />
+          <Button
+            v-else-if="exportState"
+            icon="pi pi-download"
+            label="PDF laden"
+            severity="secondary"
+            outlined
+            @click="loadExportFile(exportState)"
+          />
+          <Button
+            v-if="exportFile && canShareFiles()"
+            icon="pi pi-download"
+            label="Speichern"
+            text
+            severity="secondary"
+            @click="downloadExport"
+          />
+        </template>
         <Button
-          :icon="canShareFiles() ? 'pi pi-share-alt' : 'pi pi-download'"
-          :label="canShareFiles() ? 'PDF teilen' : 'PDF speichern'"
-          @click="shareExport"
+          :icon="exportState?.status === 'none' || !exportState ? 'pi pi-file-pdf' : 'pi pi-refresh'"
+          :label="
+            exportRunning
+              ? 'Wird erzeugt …'
+              : exportState?.status === 'done' || exportState?.status === 'failed'
+                ? 'Neu erzeugen'
+                : 'PDF erzeugen'
+          "
+          :loading="exportStarting || exportRunning"
+          :text="exportState?.status === 'done' && !exportState.stale"
+          :disabled="exportRunning || (includedCount === 0 && !(collection?.include_cover ?? true))"
+          @click="buildExport"
         />
-        <Button
-          v-if="canShareFiles()"
-          icon="pi pi-download"
-          label="Speichern"
-          text
-          severity="secondary"
-          @click="downloadExport"
-        />
-        <Button icon="pi pi-refresh" label="Neu erzeugen" text @click="buildExport" />
-      </template>
+      </div>
     </section>
 
-    <Message v-if="exportSkipped > 0" severity="warn" :closable="false">
-      {{ exportSkipped }}
-      {{ exportSkipped === 1 ? 'Dokument konnte' : 'Dokumente konnten' }} nicht übernommen werden
+    <Message
+      v-if="exportState?.status === 'done' && exportState.skipped_count > 0"
+      severity="warn"
+      :closable="false"
+    >
+      {{ exportState.skipped_count }}
+      {{ exportState.skipped_count === 1 ? 'Dokument konnte' : 'Dokumente konnten' }} nicht übernommen werden
       (Datei fehlt, alle Seiten abgewählt oder nicht sichtbar).
     </Message>
     </div>
@@ -867,8 +1005,27 @@ onMounted(() => {
 }
 .cd-export {
   display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: 4px;
+}
+.cd-export-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+.cd-export-spinner {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+.cd-export-actions {
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding-top: 4px;
 }
 </style>

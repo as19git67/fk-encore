@@ -1,10 +1,11 @@
 /**
  * The single PDF a Sammelmappe turns into.
  *
- * Built on demand, never stored: the folder is the durable thing, the PDF is
- * what falls out of it at the moment somebody asks. That keeps the export
- * honest — a document edited, re-OCR'd or deselected after the last export
- * cannot leave a stale file behind for the next person to send on.
+ * Built when somebody asks, in the background, and kept per reader
+ * (collection-export.ts). The folder stays the durable thing: the kept file
+ * records which inputs it was built from, so a document edited, re-OCR'd or
+ * deselected since is reported as "changed since" instead of the stale file
+ * being handed on silently.
  *
  * Two properties shape the implementation:
  *

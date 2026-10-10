@@ -33,6 +33,7 @@ import db from "../db/database";
 import { dbAll, dbExec, dbFirst, dbInsertReturning } from "../db/adapter";
 import {
   documentCategories,
+  documentCollectionExports,
   documentCollectionItems,
   documentCollections,
   documents,
@@ -43,6 +44,13 @@ import { applyRuleToCorpus, normalizeRule, type CollectionKind, type CollectionR
 import { assertGroupMember, loadUserGroupIds, visibleDocumentsWhere } from "./visibility";
 import { shouldUseTesseractSidecar } from "./receipt-capture";
 import { ensureSearchablePdf } from "./ocr-pdf";
+import {
+  collectionExportFingerprint,
+  collectionExportPath,
+  removeCollectionExports,
+  writeCollectionExport,
+  type CollectionExportInputs,
+} from "./collection-export";
 import {
   buildCollectionPdf,
   normalizeExcludedPages,
@@ -658,6 +666,7 @@ export const deleteCollection = api(
     const row = await loadReadableCollection(userId, id, isAdmin);
     await assertCollectionAdministrable(row, userId, isAdmin);
     await dbExec(db.delete(documentCollections).where(eq(documentCollections.id, id)));
+    await removeCollectionExports(id);
     return { deleted: true };
   },
 );
@@ -1100,23 +1109,243 @@ export function collectionPdfFilename(title: string): string {
 }
 
 /**
- * The collection as one PDF, assembled on demand.
+ * Building a collection's PDF is a background job (it can take minutes: OCR
+ * sidecars, many members), and its result is kept.
  *
- * Members switched off, members the caller may not read, and members whose
- * every page is deselected all drop out; the response header
- * `X-Collection-Skipped` names how many, so the frontend can say so without a
- * second round trip.
+ *   - `POST /document-collections/:id/export` starts a build for the caller
+ *     and returns at once — or returns the build already running.
+ *   - `GET  /document-collections/:id/export` says how the caller's build
+ *     stands, and whether the folder changed since (`stale`). A client that
+ *     left the page picks the build back up from here.
+ *   - `GET  /document-collections/:id/export/pdf` serves the kept file.
+ *
+ * The state is a row per collection and reader (`document_collection_exports`);
+ * the running promise is held in memory. A row still "running" without a
+ * promise behind it belongs to a process that has since restarted, and is
+ * reported as interrupted.
  */
-export const downloadCollectionPdf = api.raw(
-  { expose: true, method: "GET", path: "/document-collections/:id/pdf", auth: true },
-  async (req, res) => {
-    try {
-      checkModule();
-    } catch {
-      res.statusCode = 403;
-      res.end("Forbidden");
-      return;
+interface ExportRun {
+  /** Settles once the row says "running". */
+  claimed: Promise<void>;
+  /** Settles when the build has ended, either way. */
+  done: Promise<void>;
+}
+const exportRuns = new Map<string, ExportRun>();
+
+function exportRunKey(collectionId: number, userId: number): string {
+  return `${collectionId}:${userId}`;
+}
+
+type ExportRow = typeof documentCollectionExports.$inferSelect;
+
+export interface CollectionExportDTO {
+  status: "none" | "running" | "done" | "failed";
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  filename: string | null;
+  page_count: number | null;
+  size_bytes: number | null;
+  /** Members that did not make it into the file. */
+  skipped_count: number;
+  /** True when the folder changed since the kept file was built. */
+  stale: boolean;
+}
+
+const NO_EXPORT: CollectionExportDTO = {
+  status: "none",
+  started_at: null,
+  finished_at: null,
+  error: null,
+  filename: null,
+  page_count: null,
+  size_bytes: null,
+  skipped_count: 0,
+  stale: false,
+};
+
+async function loadExportRow(collectionId: number, userId: number): Promise<ExportRow | undefined> {
+  return await dbFirst<ExportRow>(
+    db
+      .select()
+      .from(documentCollectionExports)
+      .where(
+        and(
+          eq(documentCollectionExports.collection_id, collectionId),
+          eq(documentCollectionExports.user_id, userId),
+        ),
+      ),
+  );
+}
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    await fs.promises.access(p, fs.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function exportStatus(
+  collectionId: number,
+  userId: number,
+  isAdmin: boolean,
+): Promise<CollectionExportDTO> {
+  let row = await loadExportRow(collectionId, userId);
+  if (!row) return NO_EXPORT;
+  if (row.status === "running" && !exportRuns.has(exportRunKey(collectionId, userId))) {
+    await finishExportRow(collectionId, userId, {
+      status: "failed",
+      error: "Unterbrochen — der Server wurde neu gestartet.",
+    });
+    row = (await loadExportRow(collectionId, userId))!;
+  }
+  // A kept file that vanished (cleanup, restore) is no file at all.
+  const hasFile =
+    row.status === "done" && (await fileExists(collectionExportPath(collectionId, userId)));
+  if (row.status === "done" && !hasFile) return NO_EXPORT;
+
+  let stale = false;
+  if (row.status === "done") {
+    const inputs = await loadExportInputs(collectionId, userId, isAdmin);
+    stale = collectionExportFingerprint(inputs.inputs) !== row.fingerprint;
+  }
+  return {
+    status: row.status,
+    started_at: row.started_at,
+    finished_at: row.finished_at,
+    error: row.error,
+    filename: row.filename,
+    page_count: row.page_count,
+    size_bytes: row.size_bytes,
+    skipped_count: row.skipped?.length ?? 0,
+    stale,
+  };
+}
+
+async function finishExportRow(
+  collectionId: number,
+  userId: number,
+  patch: Partial<Omit<ExportRow, "collection_id" | "user_id">>,
+): Promise<void> {
+  await dbExec(
+    db
+      .update(documentCollectionExports)
+      .set({ finished_at: sql`now()` as any, ...patch })
+      .where(
+        and(
+          eq(documentCollectionExports.collection_id, collectionId),
+          eq(documentCollectionExports.user_id, userId),
+        ),
+      ),
+  );
+}
+
+/**
+ * Build and keep the PDF. Never throws: how it ended is written to the row,
+ * which is the only place anyone will look.
+ */
+async function runCollectionExport(
+  collectionId: number,
+  userId: number,
+  isAdmin: boolean,
+): Promise<void> {
+  try {
+    const result = await renderCollectionPdf(collectionId, userId, isAdmin);
+    await writeCollectionExport(collectionId, userId, result.bytes);
+    await finishExportRow(collectionId, userId, {
+      status: "done",
+      error: null,
+      fingerprint: result.fingerprint,
+      filename: result.filename,
+      page_count: result.page_count,
+      size_bytes: result.bytes.length,
+      skipped: result.skipped,
+    });
+  } catch (err: any) {
+    console.error("[documents] collection export failed:", err?.message ?? err);
+    const message =
+      err instanceof APIError && err.code === "failed_precondition"
+        ? "Die Mappe enthält keine Dokumente, die ins PDF können."
+        : err?.message ?? "PDF konnte nicht erzeugt werden.";
+    await finishExportRow(collectionId, userId, { status: "failed", error: String(message) }).catch(
+      () => {},
+    );
+  }
+}
+
+/** Start building the caller's PDF of this collection (or join the running build). */
+export const startCollectionExport = api(
+  { expose: true, method: "POST", path: "/document-collections/:id/export", auth: true },
+  async ({ id }: { id: number }): Promise<CollectionExportDTO> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+    const isAdmin = isDataAdmin(authData);
+    await loadReadableCollection(userId, id, isAdmin);
+
+    const key = exportRunKey(id, userId);
+    let run = exportRuns.get(key);
+    if (!run) {
+      // Claimed before the first await, so two starts arriving together end
+      // up in one build. The previous file stays until the new one replaces
+      // it — a failed rebuild does not take away a PDF that was fine a minute
+      // ago — but the row describes the running build from here on.
+      const claimed: Promise<void> = dbExec(
+        db
+          .insert(documentCollectionExports)
+          .values({ collection_id: id, user_id: userId, status: "running" })
+          .onConflictDoUpdate({
+            target: [documentCollectionExports.collection_id, documentCollectionExports.user_id],
+            set: { status: "running", started_at: sql`now()`, finished_at: null, error: null },
+          }),
+      ).then(() => undefined);
+      const record: ExportRun = {
+        claimed,
+        done: claimed
+          .then(() => runCollectionExport(id, userId, isAdmin))
+          .catch((err) => console.error("[documents] collection export not started:", err))
+          .finally(() => {
+            if (exportRuns.get(key) === record) exportRuns.delete(key);
+          }),
+      };
+      exportRuns.set(key, record);
+      run = record;
     }
+    // Wait for the row, not the build, so the answer already says "running".
+    await run.claimed.catch(() => {});
+    return await exportStatus(id, userId, isAdmin);
+  },
+);
+
+/** How the caller's PDF of this collection stands. */
+export const getCollectionExport = api(
+  { expose: true, method: "GET", path: "/document-collections/:id/export", auth: true },
+  async ({ id }: { id: number }): Promise<CollectionExportDTO> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+    const isAdmin = isDataAdmin(authData);
+    await loadReadableCollection(userId, id, isAdmin);
+    return await exportStatus(id, userId, isAdmin);
+  },
+);
+
+/** Test hook: wait for the caller's running build, if any. */
+export async function awaitCollectionExport(collectionId: number, userId: number): Promise<void> {
+  await exportRuns.get(exportRunKey(collectionId, userId))?.done;
+}
+
+/**
+ * The kept PDF. Still behind the collection's read check: losing access to
+ * the folder loses access to its file.
+ */
+export const downloadCollectionExport = api.raw(
+  { expose: true, method: "GET", path: "/document-collections/:id/export/pdf", auth: true },
+  async (req, res) => {
     const authData = getAuthData();
     if (!authData) {
       res.statusCode = 401;
@@ -1124,6 +1353,7 @@ export const downloadCollectionPdf = api.raw(
       return;
     }
     try {
+      checkModule();
       requirePermission(authData, "documents.view");
     } catch {
       res.statusCode = 403;
@@ -1132,7 +1362,7 @@ export const downloadCollectionPdf = api.raw(
     }
 
     const userId = parseInt(authData.userID, 10);
-    const match = /\/document-collections\/(\d+)\/pdf/.exec(req.url ?? "");
+    const match = /\/document-collections\/(\d+)\/export\/pdf/.exec(req.url ?? "");
     const collectionId = match ? parseInt(match[1], 10) : NaN;
     if (!Number.isFinite(collectionId)) {
       res.statusCode = 400;
@@ -1141,38 +1371,52 @@ export const downloadCollectionPdf = api.raw(
     }
 
     try {
-      const bytes = await renderCollectionPdf(collectionId, userId, isDataAdmin(authData));
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Length", String(bytes.bytes.length));
-      res.setHeader("X-Collection-Skipped", String(bytes.skipped.length));
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename*=UTF-8''${encodeURIComponent(bytes.filename)}`,
-      );
-      res.end(bytes.bytes);
-    } catch (err: any) {
-      const code = err instanceof APIError ? ((err as any).statusCode ?? 500) : 500;
-      console.error("[documents] collection export failed:", err?.message ?? err);
-      res.statusCode = code === 500 ? 500 : code;
-      res.end(err?.message ?? "Export failed");
+      await loadReadableCollection(userId, collectionId, isDataAdmin(authData));
+    } catch {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
     }
+    const row = await loadExportRow(collectionId, userId);
+    const filePath = collectionExportPath(collectionId, userId);
+    // While a rebuild runs, the previous file is still the one there is.
+    if (!row || !(await fileExists(filePath))) {
+      res.statusCode = 404;
+      res.end("No PDF built yet");
+      return;
+    }
+    const stat = await fs.promises.stat(filePath);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", String(stat.size));
+    res.setHeader("X-Collection-Skipped", String(row.skipped?.length ?? 0));
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(row.filename ?? "sammelmappe.pdf")}`,
+    );
+    fs.createReadStream(filePath)
+      .on("error", () => {
+        if (!res.headersSent) res.statusCode = 500;
+        res.end();
+      })
+      .pipe(res);
   },
 );
 
 /**
- * Gather the collection's readable, switched-on members and assemble the PDF.
- * Split out of the endpoint so the assembly is reachable from a test and from
- * any future scheduled export without going through HTTP.
+ * What a build of this collection would read, for this reader: the switched-on
+ * members in order, split into those the reader may open and those they may
+ * not, plus the front matter's text and switches. Cheap — no file is touched —
+ * so the status endpoint can fingerprint it on every call.
  */
-export async function renderCollectionPdf(
+async function loadExportInputs(
   collectionId: number,
   userId: number,
   isAdmin: boolean,
 ): Promise<{
-  bytes: Buffer;
-  filename: string;
-  skipped: Array<{ document_id: number; reason: string }>;
+  collection: CollectionRow;
+  inputs: CollectionExportInputs;
+  docs: Map<number, typeof documents.$inferSelect>;
 }> {
   const collection = await loadReadableCollection(userId, collectionId, isAdmin);
   const items = await dbAll<{
@@ -1194,28 +1438,75 @@ export async function renderCollectionPdf(
       .orderBy(asc(documentCollectionItems.position)),
   );
 
-  const docs = await loadVisibleDocumentsById(
+  const visible = await loadVisibleDocumentsById(
     userId,
     items.map((item) => item.document_id),
     isAdmin,
   );
-  const byId = new Map(docs.map((doc) => [doc.id, doc]));
+  const docs = new Map(visible.map((doc) => [doc.id, doc]));
 
-  const members: CollectionPdfMember[] = [];
-  const skipped: Array<{ document_id: number; reason: string }> = [];
+  const inputs: CollectionExportInputs = {
+    title: collection.title,
+    notes: collection.notes,
+    summary: collection.summary,
+    include_cover: collection.include_cover,
+    include_toc: collection.include_toc,
+    include_summary: collection.include_summary,
+    members: [],
+    not_visible: [],
+  };
   for (const item of items) {
-    const doc = byId.get(item.document_id);
+    const doc = docs.get(item.document_id);
     if (!doc) {
-      skipped.push({ document_id: item.document_id, reason: "not_visible" });
+      inputs.not_visible.push(item.document_id);
       continue;
     }
+    inputs.members.push({
+      document_id: doc.id,
+      sha256: doc.sha256,
+      disk_path: doc.disk_path,
+      receipt_ocr_state: doc.receipt_ocr_state ?? null,
+      title: doc.title,
+      original_filename: doc.original_filename,
+      sender: doc.sender,
+      doc_date: doc.doc_date,
+      excluded_pages: normalizeExcludedPages(item.excluded_pages),
+    });
+  }
+  return { collection, inputs, docs };
+}
+
+/**
+ * Gather the collection's readable, switched-on members and assemble the PDF.
+ * Split out of the job so the assembly is reachable from a test without going
+ * through the background run.
+ */
+export async function renderCollectionPdf(
+  collectionId: number,
+  userId: number,
+  isAdmin: boolean,
+): Promise<{
+  bytes: Buffer;
+  filename: string;
+  page_count: number;
+  fingerprint: string;
+  skipped: Array<{ document_id: number; reason: string }>;
+}> {
+  const { collection, inputs, docs } = await loadExportInputs(collectionId, userId, isAdmin);
+
+  const members: CollectionPdfMember[] = [];
+  const skipped: Array<{ document_id: number; reason: string }> = inputs.not_visible.map(
+    (document_id) => ({ document_id, reason: "not_visible" }),
+  );
+  for (const member of inputs.members) {
+    const doc = docs.get(member.document_id)!;
     const source = await exportSourcePath({
       id: doc.id,
       disk_path: doc.disk_path,
       receipt_ocr_state: doc.receipt_ocr_state,
     });
     if (!source) {
-      skipped.push({ document_id: item.document_id, reason: "file_missing" });
+      skipped.push({ document_id: doc.id, reason: "file_missing" });
       continue;
     }
     members.push({
@@ -1225,7 +1516,7 @@ export async function renderCollectionPdf(
       doc_date: doc.doc_date,
       source_path: source.path,
       mime_type: source.mime || doc.mime_type,
-      excluded_pages: normalizeExcludedPages(item.excluded_pages),
+      excluded_pages: member.excluded_pages,
     });
   }
 
@@ -1247,6 +1538,8 @@ export async function renderCollectionPdf(
   return {
     bytes: result.bytes,
     filename: collectionPdfFilename(collection.title),
+    page_count: result.page_count,
+    fingerprint: collectionExportFingerprint(inputs),
     skipped: [...skipped, ...result.skipped],
   };
 }
