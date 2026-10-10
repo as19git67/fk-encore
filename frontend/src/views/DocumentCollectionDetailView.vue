@@ -238,6 +238,7 @@ function setOption(patch: { include_cover?: boolean; include_toc?: boolean; incl
 const {
   ordered: orderedItems,
   draggingKey,
+  rowStyle,
   onGripPointerDown,
   onGripKeydown,
 } = useDragReorder({
@@ -532,6 +533,7 @@ onMounted(() => {
             'cd-item--dragging': draggingKey === item.document_id,
           }"
           :data-reorder-key="item.document_id"
+          :style="rowStyle(item.document_id)"
         >
           <button
             v-if="items.length > 1"
