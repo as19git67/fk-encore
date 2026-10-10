@@ -33,8 +33,23 @@ const DETAIL: DocumentCollectionDetail = {
   })),
 }
 
+/** Saving a new order answers with the folder in that order, as the API does. */
+const reorderHandler = http.put('/api/document-collections/:id/order', async ({ request }) => {
+  const { document_ids } = (await request.json()) as { document_ids: number[] }
+  const byId = new Map(DETAIL.items.map((item) => [item.document_id, item]))
+  const items = document_ids.flatMap((id, i) => {
+    const item = byId.get(id)
+    return item ? [{ ...item, position: i + 1 }] : []
+  })
+  return HttpResponse.json({ ...DETAIL, items })
+})
+
 const detailHandlers = [
   http.get('/api/document-collections/:id', () => HttpResponse.json(DETAIL)),
+  reorderHandler,
+  // Before the defaults: their `/api/documents/:id` would answer this path
+  // with a document, and the rule's correspondent picker would break.
+  http.get('/api/documents/correspondents', () => HttpResponse.json({ items: [] })),
   ...defaultHandlers,
 ]
 
