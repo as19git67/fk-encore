@@ -24,6 +24,7 @@ import {
   startDuplicateAutoMerge,
   type AutoMergeItem,
   type AutoMergeState,
+  type ContentRejectReason,
   type DuplicatePair,
   type DuplicateScanResponse,
   type DuplicateSide,
@@ -264,8 +265,19 @@ const OUTCOME_LABELS: Record<AutoMergeItem['outcome'], string> = {
   planned: 'geplant',
   merged: 'zusammengeführt',
   failed: 'fehlgeschlagen',
+  rejected: 'nicht übernommen',
 }
-
+const REASON_LABELS: Record<ContentRejectReason, string> = {
+  pages: 'Seitenzahl verschieden oder unbekannt',
+  numbers: 'Zahlen im Text verschieden',
+  text: 'Kein Text',
+  score: 'Text unter 98 %',
+}
+const autoRejectedTotal = computed(() => {
+  const r = autoReport.value?.content_rejected
+  return r ? r.pages + r.numbers + r.text + r.score : 0
+})
+/** The merge candidates first, the rejected pairs after them. */
 const autoItemsShown = computed(() => autoReport.value?.items.slice(0, AUTO_SHOWN_MAX) ?? [])
 
 function csvCell(v: string | number | null): string {
@@ -276,13 +288,14 @@ function csvCell(v: string | number | null): string {
 function downloadAutoReport() {
   const r = autoReport.value
   if (!r) return
-  const head = ['stufe', 'ergebnis', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
+  const head = ['stufe', 'ergebnis', 'grund', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
   const lines = [head.join(';')]
   for (const i of r.items) {
     lines.push(
       [
         STAGE_LABELS[i.stage],
         OUTCOME_LABELS[i.outcome],
+        i.reason ? REASON_LABELS[i.reason] : '',
         i.keeper_id,
         i.keeper_filename,
         i.loser_id,
@@ -360,9 +373,10 @@ const movedSummary = computed(() => {
       <p>
         Zwei Arten von Paaren brauchen keinen Blick: Eine Datei, deren Name den Inhalts-Hash eines
         anderen Dokuments trägt (<code>…__0a1b2c3d.pdf</code>), wurde aus genau diesem Dokument
-        exportiert und wieder importiert. Und zwei Dokumente, die in jeder Zahl, der Seitenzahl, dem
-        Datum und dem Korrespondenten übereinstimmen und deren Text zu mindestens 98&nbsp;% gleich
-        ist, sind derselbe Brief und nicht derselbe Vordruck mit anderen Zahlen. „Prüfen“ zählt und
+        exportiert und wieder importiert. Und zwei Dokumente, die in jeder Zahl und der Seitenzahl
+        übereinstimmen und deren Text zu mindestens 98&nbsp;% gleich ist, sind derselbe Brief und
+        nicht derselbe Vordruck mit anderen Zahlen; ein abweichendes Datum oder ein anderer
+        Korrespondent zählt dabei nicht, beides hat die Klassifikation aus demselben Text gelesen. „Prüfen“ zählt und
         listet, „Zusammenführen“ führt genau diese Paare zusammen; das Original bleibt.
       </p>
 
@@ -421,6 +435,14 @@ const movedSummary = computed(() => {
             {{ autoReport.provenance.merged + autoReport.content.merged }} zusammengeführt,
             {{ autoReport.provenance.failed + autoReport.content.failed }} fehlgeschlagen.
           </template>
+          <template v-if="autoRejectedTotal > 0">
+            {{ autoRejectedTotal }} Paar(e) über 98&nbsp;% nicht übernommen:
+            <template v-if="autoReport.content_rejected.numbers">{{ autoReport.content_rejected.numbers }}× Zahlen im Text verschieden, </template>
+            <template v-if="autoReport.content_rejected.pages">{{ autoReport.content_rejected.pages }}× Seitenzahl verschieden oder unbekannt, </template>
+            <template v-if="autoReport.content_rejected.text">{{ autoReport.content_rejected.text }}× kein Text, </template>
+            <template v-if="autoReport.content_rejected.score">{{ autoReport.content_rejected.score }}× Text unter 98&nbsp;%, </template>
+            Details in der Liste und im CSV.
+          </template>
         </Message>
 
         <details v-if="autoReport.items.length > 0" class="auto-report">
@@ -430,13 +452,22 @@ const movedSummary = computed(() => {
           <ul class="auto-report__list">
             <li v-for="i in autoItemsShown" :key="`${i.keeper_id}-${i.loser_id}`">
               <Tag :value="STAGE_LABELS[i.stage]" severity="secondary" />
-              <Tag v-if="!autoReport.dry_run" :value="OUTCOME_LABELS[i.outcome]" :severity="i.outcome === 'failed' ? 'danger' : 'success'" />
-              <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.keeper_id } }">#{{ i.keeper_id }}</RouterLink>
-              bleibt ({{ i.keeper_filename }}),
-              <template v-if="i.outcome === 'merged'">#{{ i.loser_id }}</template>
-              <RouterLink v-else :to="{ name: 'dokumente-detail', params: { id: i.loser_id } }">#{{ i.loser_id }}</RouterLink>
-              {{ autoReport.dry_run ? 'würde gelöscht' : 'gelöscht' }} ({{ i.loser_filename }})<template v-if="i.score != null">, Text {{ Math.round(i.score * 100) }}&nbsp;%</template>
-              <span v-if="i.error" class="text-secondary"> – {{ i.error }}</span>
+              <Tag v-if="i.outcome === 'rejected'" :value="i.reason ? REASON_LABELS[i.reason] : OUTCOME_LABELS.rejected" severity="warn" />
+              <Tag v-else-if="!autoReport.dry_run" :value="OUTCOME_LABELS[i.outcome]" :severity="i.outcome === 'failed' ? 'danger' : 'success'" />
+              <template v-if="i.outcome === 'rejected'">
+                <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.keeper_id } }">#{{ i.keeper_id }}</RouterLink>
+                ({{ i.keeper_filename }}) und
+                <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.loser_id } }">#{{ i.loser_id }}</RouterLink>
+                ({{ i.loser_filename }}) bleiben zur Prüfung<template v-if="i.score != null">, Text {{ Math.round(i.score * 100) }}&nbsp;%</template>
+              </template>
+              <template v-else>
+                <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.keeper_id } }">#{{ i.keeper_id }}</RouterLink>
+                bleibt ({{ i.keeper_filename }}),
+                <template v-if="i.outcome === 'merged'">#{{ i.loser_id }}</template>
+                <RouterLink v-else :to="{ name: 'dokumente-detail', params: { id: i.loser_id } }">#{{ i.loser_id }}</RouterLink>
+                {{ autoReport.dry_run ? 'würde gelöscht' : 'gelöscht' }} ({{ i.loser_filename }})<template v-if="i.score != null">, Text {{ Math.round(i.score * 100) }}&nbsp;%</template>
+                <span v-if="i.error" class="text-secondary"> – {{ i.error }}</span>
+              </template>
             </li>
           </ul>
         </details>

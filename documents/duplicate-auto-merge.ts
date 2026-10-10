@@ -18,9 +18,13 @@
  * - **Stage B, content.** For open pairs without that link the adversary is
  *   "the same form letter with other numbers". So the bar is not more
  *   percent but a check that rules exactly that out: every number in the two
- *   texts identical, in order; equal page count; no contradicting date or
- *   correspondent; text at or above `DOCUMENTS_DUPLICATE_AUTO_MIN_SCORE`
- *   (0.98) or word-identical after normalisation.
+ *   texts identical, in order; equal page count; text at or above
+ *   `DOCUMENTS_DUPLICATE_AUTO_MIN_SCORE` (0.98) or word-identical after
+ *   normalisation. `doc_date` and `correspondent_slug` are not compared:
+ *   both are read out of the text by the classifier, so when every number in
+ *   the two texts agrees, a differing date is the classifier's doing, not the
+ *   document's — and such pairs were the bulk of what the first version left
+ *   on the review page.
  *
  * Everything else stays on the review page. Dry run by default: the report
  * names every pair with its stage and the side that would stay; `apply` runs
@@ -64,11 +68,16 @@ export interface AutoMergeCandidate {
   score: number | null;
 }
 
-export type AutoMergeOutcome = "planned" | "merged" | "failed";
+export type AutoMergeOutcome = "planned" | "merged" | "failed" | "rejected";
+
+/** Why stage B passed on an open pair above the score. */
+export type ContentRejectReason = "pages" | "numbers" | "text" | "score";
 
 export interface AutoMergeItem extends AutoMergeCandidate {
   outcome: AutoMergeOutcome;
   error: string | null;
+  /** Set on a rejected content pair: the first check it failed. */
+  reason: ContentRejectReason | null;
 }
 
 export interface AutoMergeStageCount {
@@ -81,6 +90,8 @@ export interface AutoMergeReport {
   dry_run: boolean;
   provenance: AutoMergeStageCount;
   content: AutoMergeStageCount;
+  /** Open pairs above the score that stage B passed on, by first failed check. */
+  content_rejected: Record<ContentRejectReason, number>;
   items: AutoMergeItem[];
   items_total: number;
   truncated: boolean;
@@ -142,11 +153,6 @@ function sameSequence(a: string[], b: string[]): boolean {
   return true;
 }
 
-/** Null on either side never contradicts; two values do when they differ. */
-function contradicts<T>(a: T | null, b: T | null): boolean {
-  return a != null && b != null && a !== b;
-}
-
 export interface ContentSide {
   id: number;
   original_filename: string;
@@ -159,19 +165,22 @@ export interface ContentSide {
 
 /**
  * Does this pair read as the same document and not as the same form with
- * other numbers? Pure, so the test can feed it two rows.
+ * other numbers? Returns the first failed check, or null when it qualifies.
+ * Pure, so the test can feed it two rows.
  */
-export function contentPairQualifies(a: ContentSide, b: ContentSide, score: number): boolean {
-  if (a.pages_total == null || b.pages_total == null || a.pages_total !== b.pages_total) return false;
-  if (contradicts(a.doc_date, b.doc_date)) return false;
-  if (contradicts(a.correspondent_slug, b.correspondent_slug)) return false;
+export function contentPairVerdict(a: ContentSide, b: ContentSide, score: number): ContentRejectReason | null {
+  if (a.pages_total == null || b.pages_total == null || a.pages_total !== b.pages_total) return "pages";
   const na = normalizeForSimilarity(a.extracted_text);
   const nb = normalizeForSimilarity(b.extracted_text);
-  if (na.length === 0 || nb.length === 0) return false;
-  if (!sameSequence(numberTokens(na), numberTokens(nb))) return false;
-  if (na === nb) return true;
+  if (na.length === 0 || nb.length === 0) return "text";
+  if (!sameSequence(numberTokens(na), numberTokens(nb))) return "numbers";
+  if (na === nb) return null;
   const s = score >= DUPLICATE_AUTO_MIN_SCORE ? score : trigramJaccard(na, nb);
-  return s >= DUPLICATE_AUTO_MIN_SCORE;
+  return s >= DUPLICATE_AUTO_MIN_SCORE ? null : "score";
+}
+
+export function contentPairQualifies(a: ContentSide, b: ContentSide, score: number): boolean {
+  return contentPairVerdict(a, b, score) === null;
 }
 
 /**
@@ -197,8 +206,12 @@ const contentColumns = {
   extracted_text: documents.extracted_text,
 };
 
-/** Open pairs at or above the auto score whose content qualifies. */
-export async function findContentPairs(): Promise<AutoMergeCandidate[]> {
+export interface RejectedContentPair extends AutoMergeCandidate {
+  reason: ContentRejectReason;
+}
+
+/** Open pairs at or above the auto score: those whose content qualifies, and why the others do not. */
+export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate[]; rejected: RejectedContentPair[] }> {
   const pairs = await dbAll<{ id: number; a: number | null; b: number | null; score: number }>(
     db
       .select({
@@ -215,7 +228,8 @@ export async function findContentPairs(): Promise<AutoMergeCandidate[]> {
         ),
       ),
   );
-  const out: AutoMergeCandidate[] = [];
+  const accepted: AutoMergeCandidate[] = [];
+  const rejected: RejectedContentPair[] = [];
   for (const p of pairs) {
     if (p.a == null || p.b == null) continue;
     const sides = await dbAll<ContentSide>(
@@ -224,19 +238,21 @@ export async function findContentPairs(): Promise<AutoMergeCandidate[]> {
     const a = sides.find((s) => s.id === p.a);
     const b = sides.find((s) => s.id === p.b);
     if (!a || !b) continue;
-    if (!contentPairQualifies(a, b, p.score)) continue;
     const keeperId = contentKeeper(a, b);
     const [keeper, loser] = keeperId === a.id ? [a, b] : [b, a];
-    out.push({
+    const candidate: AutoMergeCandidate = {
       stage: "content",
       keeper_id: keeper.id,
       loser_id: loser.id,
       keeper_filename: keeper.original_filename,
       loser_filename: loser.original_filename,
       score: p.score,
-    });
+    };
+    const reason = contentPairVerdict(a, b, p.score);
+    if (reason) rejected.push({ ...candidate, reason });
+    else accepted.push(candidate);
   }
-  return out;
+  return { accepted, rejected };
 }
 
 // ─── The run ────────────────────────────────────────────────────────────────
@@ -259,7 +275,7 @@ export async function autoMergeDuplicates(
 ): Promise<AutoMergeReport> {
   const provenance = await findProvenancePairs();
   onProgress?.({ found: provenance.length, done: 0 });
-  const content = await findContentPairs();
+  const { accepted: content, rejected } = await findContentPairs();
 
   // Stage A wins when the same pair shows up in both.
   const seen = new Set(provenance.map((c) => `${Math.min(c.keeper_id, c.loser_id)}:${Math.max(c.keeper_id, c.loser_id)}`));
@@ -286,7 +302,7 @@ export async function autoMergeDuplicates(
 
   let done = 0;
   for (const c of candidates) {
-    const item: AutoMergeItem = { ...c, outcome: "planned", error: null };
+    const item: AutoMergeItem = { ...c, outcome: "planned", error: null, reason: null };
     if (apply) {
       const keeper = resolve(c.keeper_id);
       const loser = c.loser_id;
@@ -316,13 +332,22 @@ export async function autoMergeDuplicates(
   }
   onProgress?.({ found: candidates.length, done });
 
+  // The pairs stage B looked at and passed on, so the report says why the
+  // review page is still as long as it is.
+  const contentRejected: Record<ContentRejectReason, number> = { pages: 0, numbers: 0, text: 0, score: 0 };
+  for (const r of rejected) {
+    contentRejected[r.reason] += 1;
+    if (items.length < REPORT_ITEMS_MAX) items.push({ ...r, outcome: "rejected", error: null });
+  }
+
   return {
     dry_run: !apply,
     provenance: counts.provenance,
     content: counts.content,
+    content_rejected: contentRejected,
     items,
-    items_total: candidates.length,
-    truncated: candidates.length > items.length,
+    items_total: candidates.length + rejected.length,
+    truncated: candidates.length + rejected.length > items.length,
   };
 }
 

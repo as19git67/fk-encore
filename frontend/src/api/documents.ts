@@ -421,7 +421,9 @@ export function listDuplicates(limit?: number) {
 }
 
 export type AutoMergeStage = 'provenance' | 'content'
-export type AutoMergeOutcome = 'planned' | 'merged' | 'failed'
+export type AutoMergeOutcome = 'planned' | 'merged' | 'failed' | 'rejected'
+/** Why stage B passed on an open pair above the score. */
+export type ContentRejectReason = 'pages' | 'numbers' | 'text' | 'score'
 
 export interface AutoMergeItem {
   stage: AutoMergeStage
@@ -432,6 +434,8 @@ export interface AutoMergeItem {
   score: number | null
   outcome: AutoMergeOutcome
   error: string | null
+  /** Set on a rejected content pair: the first check it failed. */
+  reason: ContentRejectReason | null
 }
 
 export interface AutoMergeStageCount {
@@ -444,6 +448,8 @@ export interface AutoMergeReport {
   dry_run: boolean
   provenance: AutoMergeStageCount
   content: AutoMergeStageCount
+  /** Open pairs above the score that stage B passed on, by first failed check. */
+  content_rejected: Record<ContentRejectReason, number>
   items: AutoMergeItem[]
   items_total: number
   truncated: boolean

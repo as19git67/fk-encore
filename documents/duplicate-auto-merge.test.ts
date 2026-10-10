@@ -6,6 +6,7 @@ import {
   autoMergeDuplicates,
   contentKeeper,
   contentPairQualifies,
+  contentPairVerdict,
   findContentPairs,
   findProvenancePairs,
   getAutoMergeState,
@@ -106,14 +107,23 @@ describe("numberTokens / contentPairQualifies", () => {
     expect(contentPairQualifies(a, otherAmount, 0.99)).toBe(false);
   });
 
-  it("rejects contradicting pages, date or correspondent but tolerates a missing one", () => {
+  it("rejects contradicting pages and names the first failed check", () => {
     const a = side({ id: 1 });
-    expect(contentPairQualifies(a, side({ id: 2, pages_total: 3 }), 0.99)).toBe(false);
-    expect(contentPairQualifies(a, side({ id: 2, pages_total: null }), 0.99)).toBe(false);
-    expect(contentPairQualifies(a, side({ id: 2, doc_date: "2024-03-01" }), 0.99)).toBe(false);
+    expect(contentPairVerdict(a, side({ id: 2, pages_total: 3 }), 0.99)).toBe("pages");
+    expect(contentPairVerdict(a, side({ id: 2, pages_total: null }), 0.99)).toBe("pages");
+    expect(contentPairVerdict(a, side({ id: 2, extracted_text: LETTER.replace("123,45", "124,45") }), 0.99)).toBe("numbers");
+    expect(contentPairVerdict(a, side({ id: 2, extracted_text: "" }), 0.99)).toBe("text");
+    expect(contentPairVerdict(a, side({ id: 2, extracted_text: LETTER.replace("Ihrer", "lhrer") }), 0.5)).toBe("score");
+    expect(contentPairVerdict(a, side({ id: 2 }), 0.99)).toBeNull();
+  });
+
+  it("ignores a differing date or correspondent when the numbers agree", () => {
+    // Both come out of the text through the classifier; with every number
+    // identical a differing date is the classifier's doing, not the document's.
+    const a = side({ id: 1 });
+    expect(contentPairQualifies(a, side({ id: 2, doc_date: "2024-03-01" }), 0.99)).toBe(true);
     expect(contentPairQualifies(a, side({ id: 2, doc_date: null }), 0.99)).toBe(true);
-    expect(contentPairQualifies(a, side({ id: 2, correspondent_slug: "andere" }), 0.99)).toBe(false);
-    expect(contentPairQualifies(a, side({ id: 2, correspondent_slug: null }), 0.99)).toBe(true);
+    expect(contentPairQualifies(a, side({ id: 2, correspondent_slug: "andere" }), 0.99)).toBe(true);
   });
 
   it("needs the text score unless the normalised texts are identical", () => {
@@ -186,9 +196,12 @@ describe("auto-merge against the database", () => {
     await insertPair(a, otherNumber, 0.99);
     await insertPair(a, belowBar, 0.96);
 
-    const pairs = await findContentPairs();
-    expect(pairs).toHaveLength(1);
-    expect(pairs[0]).toMatchObject({ stage: "content", keeper_id: a, loser_id: sandwich, score: 0.99 });
+    const { accepted, rejected } = await findContentPairs();
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({ stage: "content", keeper_id: a, loser_id: sandwich, score: 0.99 });
+    // The other-number pair is reported with its reason; the one under the
+    // auto score is not looked at.
+    expect(rejected.map((r) => [r.loser_id, r.reason])).toEqual([[otherNumber, "numbers"]]);
   });
 
   it("dry run reports and writes nothing; apply merges both stages and follows a chain", async () => {
@@ -207,6 +220,7 @@ describe("auto-merge against the database", () => {
     expect(dry.dry_run).toBe(true);
     expect(dry.provenance.found).toBe(2);
     expect(dry.content.found).toBe(1);
+    expect(dry.content_rejected).toEqual({ pages: 0, numbers: 0, text: 0, score: 0 });
     expect(dry.items.every((i) => i.outcome === "planned")).toBe(true);
     for (const id of [first, second, third, c1, c2]) expect(await exists(id)).toBe(true);
 
