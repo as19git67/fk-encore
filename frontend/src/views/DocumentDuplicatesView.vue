@@ -30,6 +30,10 @@ const router = useRouter()
 const confirm = useConfirm()
 
 const pairs = ref<DuplicatePair[]>([])
+/** Open pairs above the threshold, including those beyond the page shown. */
+const total = ref(0)
+/** Pairs an earlier scan recorded under a lower threshold; the server hides them. */
+const hiddenBelowThreshold = ref(0)
 const loading = ref(false)
 const error = ref('')
 const scanning = ref(false)
@@ -43,7 +47,10 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    pairs.value = (await listDuplicates()).items
+    const res = await listDuplicates()
+    pairs.value = res.items
+    total.value = res.total
+    hiddenBelowThreshold.value = res.hidden_below_threshold
   } catch (err: any) {
     error.value = err?.message || 'Duplikate konnten nicht geladen werden'
   } finally {
@@ -144,6 +151,7 @@ async function doMerge(p: DuplicatePair) {
   try {
     lastMerge.value = await mergeDuplicate(p.id, keeperOf(p))
     pairs.value = pairs.value.filter((x) => x.id !== p.id)
+    total.value = Math.max(0, total.value - 1)
   } catch (err: any) {
     error.value = err?.message || 'Zusammenführen fehlgeschlagen'
   } finally {
@@ -157,6 +165,7 @@ async function dismiss(p: DuplicatePair) {
   try {
     await dismissDuplicate(p.id)
     pairs.value = pairs.value.filter((x) => x.id !== p.id)
+    total.value = Math.max(0, total.value - 1)
   } catch (err: any) {
     error.value = err?.message || 'Konnte das Paar nicht ablehnen'
   } finally {
@@ -180,7 +189,7 @@ const movedSummary = computed(() => {
       <p>
         Der Scan vergleicht Dokumente mit gleicher Seitenzahl und gleichem Datum, Korrespondenten
         oder nahezu gleichem Embedding anhand ihres Textes. Ein Paar erscheint hier erst, wenn
-        der Text zu mindestens 85&nbsp;% übereinstimmt. Gelöscht wird nichts automatisch: jedes
+        der Text zu mindestens 95&nbsp;% übereinstimmt. Gelöscht wird nichts automatisch: jedes
         Paar entscheidest du hier, und was am gelöschten Dokument hing, wandert vorher zum
         bleibenden.
       </p>
@@ -216,14 +225,23 @@ const movedSummary = computed(() => {
     </div>
 
     <div class="data-management-group">
-      <h3>Zur Prüfung ({{ pairs.length }})</h3>
+      <h3>Zur Prüfung ({{ total }})</h3>
+      <p v-if="hiddenBelowThreshold > 0" class="text-secondary">
+        {{ hiddenBelowThreshold }} Paar(e) aus einem früheren Scan liegen unter der heutigen
+        Schwelle und werden nicht gezeigt.
+      </p>
       <p v-if="loading" class="text-secondary">Wird geladen …</p>
       <p v-else-if="pairs.length === 0" class="text-secondary">
         Keine offenen Paare. Nach einem Scan oder einem Import, der wie ein vorhandenes
         Dokument liest, erscheinen sie hier.
       </p>
 
-      <ul v-else class="pair-list">
+      <p v-else-if="total > pairs.length" class="text-secondary pair-page">
+        Die {{ pairs.length }} Paare mit der höchsten Übereinstimmung werden gezeigt.
+        Entschiedene Paare rücken beim Aktualisieren nach.
+        <Button label="Aktualisieren" icon="pi pi-refresh" text size="small" :disabled="loading" @click="load" />
+      </p>
+      <ul v-if="!loading && pairs.length > 0" class="pair-list">
         <li v-for="p in pairs" :key="p.id" class="pair">
           <div class="pair__evidence">
             <Tag v-for="chip in evidenceChips(p)" :key="chip" :value="chip" severity="secondary" />
@@ -297,6 +315,12 @@ const movedSummary = computed(() => {
 </template>
 
 <style scoped>
+.pair-page {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
 .pair-list {
   list-style: none;
   margin: 0;
