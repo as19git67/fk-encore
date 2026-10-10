@@ -241,7 +241,11 @@ the sha256 prefix in a re-imported file's name (`…__<8 hex>.pdf` from
 scope and without contradicting page counts, regardless of text score; stage
 B takes open pairs at or above `DOCUMENTS_DUPLICATE_AUTO_MIN_SCORE` (0.98) or
 with word-identical normalised text whose digit runs are identical in order
-and whose pages, date and correspondent do not contradict. The keeper is the
+and whose page counts agree; `doc_date` and `correspondent_slug` are not
+compared, because the classifier reads both out of the same text and a
+differing date on identical numbers was the bulk of what the first version
+left on the review page. The dry run reports the pairs above the score it
+passed on, by first failed check (pages, numbers, text, score). The keeper is the
 side the hash names, else the side without the speaking name, else the
 general rule. The merge re-points rows generically by walking every foreign key
 onto `documents.id` in `information_schema`, so a new table cannot be
