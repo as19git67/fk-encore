@@ -53,7 +53,6 @@ const NO_EXPORT: CollectionExport = {
   page_count: null,
   size_bytes: null,
   skipped_count: 0,
-  stale: false,
 }
 
 const BUILT_EXPORT: CollectionExport = {
@@ -65,7 +64,6 @@ const BUILT_EXPORT: CollectionExport = {
   page_count: 9,
   size_bytes: 1_843_200,
   skipped_count: 0,
-  stale: false,
 }
 
 /** A tiny but valid PDF, so the page can fetch and offer the kept file. */
@@ -200,11 +198,11 @@ export const PdfWirdErzeugt: Story = {
   },
 }
 
-export const PdfVeraltet: Story = {
-  name: 'PDF vorhanden, Mappe seitdem geändert',
+export const PdfVorhanden: Story = {
+  name: 'PDF vorhanden',
   parameters: {
     msw: {
-      handlers: [...exportHandlers({ ...BUILT_EXPORT, stale: true }), ...detailHandlers],
+      handlers: [...exportHandlers(BUILT_EXPORT), ...detailHandlers],
     },
   },
 }

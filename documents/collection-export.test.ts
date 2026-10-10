@@ -27,9 +27,9 @@ import {
 } from "./collection-export";
 
 /**
- * The Sammelmappe PDF is built in the background and kept (#1506 follow-up):
- * a client that leaves and comes back finds the build running or its file
- * waiting, and is told when the folder changed since.
+ * The Sammelmappe PDF is built in the background and kept: a client that
+ * leaves and comes back finds the build running or its file waiting — and a
+ * change to the folder throws the file away, so a stale PDF is never offered.
  *
  * The folders here have a cover and no members, so the build is pdfkit only
  * and needs neither qpdf nor real document files.
@@ -90,7 +90,6 @@ describe("collection export job", () => {
     await awaitCollectionExport(id, OWNER_ID);
     const done = await getCollectionExport({ id });
     expect(done.status).toBe("done");
-    expect(done.stale).toBe(false);
     expect(done.page_count).toBe(1);
     expect(done.filename).toBe("Unterlagen-Beispiel.pdf");
     const bytes = fs.readFileSync(collectionExportPath(id, OWNER_ID));
@@ -98,14 +97,29 @@ describe("collection export job", () => {
     expect(done.size_bytes).toBe(bytes.length);
   });
 
-  it("says the file is out of date once the folder changes", async () => {
+  it("throws the file away as soon as the folder changes", async () => {
     const id = await newFolder();
     await startCollectionExport({ id });
     await awaitCollectionExport(id, OWNER_ID);
+    expect(fs.existsSync(collectionExportPath(id, OWNER_ID))).toBe(true);
+
     await updateCollection({ id, title: "Neuer Titel" });
-    const status = await getCollectionExport({ id });
-    expect(status.status).toBe("done");
-    expect(status.stale).toBe(true);
+    expect(fs.existsSync(collectionExportPath(id, OWNER_ID))).toBe(false);
+    expect((await getCollectionExport({ id })).status).toBe("none");
+  });
+
+  it("throws the file away when what it was built from no longer matches", async () => {
+    // A change the folder does not hear about directly — here simulated by a
+    // row whose recorded inputs differ from the folder's.
+    const id = await newFolder();
+    await startCollectionExport({ id });
+    await awaitCollectionExport(id, OWNER_ID);
+    await db.execute(sql`
+      UPDATE document_collection_exports SET fingerprint = 'veraltet'
+       WHERE collection_id = ${id} AND user_id = ${OWNER_ID}
+    `);
+    expect((await getCollectionExport({ id })).status).toBe("none");
+    expect(fs.existsSync(collectionExportPath(id, OWNER_ID))).toBe(false);
   });
 
   it("joins a build already running instead of starting a second", async () => {

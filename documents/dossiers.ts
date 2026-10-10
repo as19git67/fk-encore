@@ -36,6 +36,7 @@ import { documentCollectionItems, documentCollections, documents } from "../db/s
 import { normalizeReference, type DocumentReferenceNumber } from "./reference-numbers";
 import { normalizeSourceFolder } from "./source-folder";
 import { assertGroupMember } from "./visibility";
+import { discardCollectionExports } from "./collection-export";
 
 console.log("[boot] documents/dossiers.ts: all imports resolved");
 
@@ -122,6 +123,8 @@ async function touch(collectionId: number): Promise<void> {
       .set({ summary_stale: true, updated_at: sql`now()` })
       .where(eq(documentCollections.id, collectionId)),
   );
+  // The rule moved members in or out: the built PDFs describe another folder.
+  await discardCollectionExports(collectionId);
 }
 
 async function nextPosition(collectionId: number): Promise<number> {

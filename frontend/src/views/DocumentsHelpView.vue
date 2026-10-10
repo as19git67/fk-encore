@@ -275,10 +275,10 @@ function goBack() {
           gebaut (Deckblatt, Zusammenfassung und Inhaltsverzeichnis sind
           einzeln abschaltbar). Man kann die Seite währenddessen verlassen;
           beim Zurückkommen zeigt die Mappe den Stand bzw. das fertige PDF.
-          Das PDF bleibt gespeichert, bis es neu erzeugt oder die Mappe
-          gelöscht wird; hat sich die Mappe seitdem geändert, steht
-          „Mappe seitdem geändert“ daneben. Auf iOS öffnet „PDF teilen“ das
-          native Share-Sheet.
+          Das PDF bleibt gespeichert, bis sich an der Mappe oder an einem
+          ihrer Dokumente etwas ändert – dann wird es verworfen und muss neu
+          erzeugt werden. Auf iOS öffnet „PDF teilen“ das native
+          Share-Sheet.
         </li>
         <li>
           <strong>In der Dokumentenliste</strong> – Sammelmappen erscheinen als

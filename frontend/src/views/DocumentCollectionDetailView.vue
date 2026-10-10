@@ -9,8 +9,9 @@
  *     in another;
  *   - the export, which the server builds in the background and keeps. The
  *     page only starts it and follows it: leaving and coming back finds the
- *     build still running or its file waiting, and the server says when the
- *     folder has changed since (`stale`).
+ *     build still running or its file waiting. Any change to the folder
+ *     throws the kept file away on the server, so the page re-asks after
+ *     every change and drops its copy with it.
  *
  * The kept PDF is fetched into a `File` as soon as it is there and shared from
  * a *later* tap. iOS revokes the transient activation across an `await`, so a
@@ -173,7 +174,7 @@ function apply(detail: DocumentCollectionDetail) {
   titleDraft.value = detail.title
   notesDraft.value = detail.notes ?? ''
   summaryDraft.value = detail.summary ?? ''
-  // The kept file stays; the server decides whether it is still current.
+  // A change throws the kept PDF away on the server; ask, and drop ours too.
   if (!exportRunning.value) void refreshExport()
 }
 
@@ -701,7 +702,6 @@ onBeforeUnmount(() => {
       <p v-else-if="exportState?.status === 'done'" class="cd-export-status">
         <i class="pi pi-file-pdf" aria-hidden="true" />
         {{ exportSummary(exportState) }}
-        <Tag v-if="exportState.stale" value="Mappe seitdem geändert" severity="warn" />
       </p>
       <Message v-if="exportState?.status === 'failed'" severity="error" :closable="false">
         PDF konnte nicht erzeugt werden: {{ exportState.error }}
@@ -713,8 +713,6 @@ onBeforeUnmount(() => {
             v-if="exportFile"
             :icon="canShareFiles() ? 'pi pi-share-alt' : 'pi pi-download'"
             :label="canShareFiles() ? 'PDF teilen' : 'PDF speichern'"
-            :severity="exportState?.stale ? 'secondary' : undefined"
-            :outlined="exportState?.stale"
             @click="shareExport"
           />
           <Button
@@ -753,7 +751,7 @@ onBeforeUnmount(() => {
                 : 'PDF erzeugen'
           "
           :loading="exportStarting || exportRunning"
-          :text="exportState?.status === 'done' && !exportState.stale"
+          :text="exportState?.status === 'done'"
           :disabled="exportRunning || (includedCount === 0 && !(collection?.include_cover ?? true))"
           @click="buildExport"
         />

@@ -47,6 +47,8 @@ import { ensureSearchablePdf } from "./ocr-pdf";
 import {
   collectionExportFingerprint,
   collectionExportPath,
+  discardCollectionExports,
+  removeCollectionExport,
   removeCollectionExports,
   writeCollectionExport,
   type CollectionExportInputs,
@@ -287,7 +289,10 @@ async function loadVisibleDocumentsById(
   );
 }
 
-/** Mark the summary as needing a rewrite and bump the change timestamp. */
+/**
+ * Mark the summary as needing a rewrite, bump the change timestamp, and throw
+ * away the PDFs built from the folder as it was.
+ */
 async function touchCollection(collectionId: number): Promise<void> {
   await dbExec(
     db
@@ -295,6 +300,7 @@ async function touchCollection(collectionId: number): Promise<void> {
       .set({ summary_stale: true, updated_at: sql`now()` })
       .where(eq(documentCollections.id, collectionId)),
   );
+  await discardCollectionExports(collectionId);
 }
 
 /** Renumber a collection's items to a dense 0-based sequence. */
@@ -645,6 +651,7 @@ export const updateCollection = api(
     await dbExec(
       db.update(documentCollections).set(patch).where(eq(documentCollections.id, row.id)),
     );
+    await discardCollectionExports(row.id);
     if (applyRule) {
       const fresh = await dbFirst<CollectionRow>(
         db.select().from(documentCollections).where(eq(documentCollections.id, row.id)),
@@ -1115,8 +1122,9 @@ export function collectionPdfFilename(title: string): string {
  *   - `POST /document-collections/:id/export` starts a build for the caller
  *     and returns at once — or returns the build already running.
  *   - `GET  /document-collections/:id/export` says how the caller's build
- *     stands, and whether the folder changed since (`stale`). A client that
- *     left the page picks the build back up from here.
+ *     stands. A client that left the page picks the build back up from here.
+ *     A kept file the folder no longer matches is thrown away, not offered
+ *     (see collection-export.ts).
  *   - `GET  /document-collections/:id/export/pdf` serves the kept file.
  *
  * The state is a row per collection and reader (`document_collection_exports`);
@@ -1148,8 +1156,6 @@ export interface CollectionExportDTO {
   size_bytes: number | null;
   /** Members that did not make it into the file. */
   skipped_count: number;
-  /** True when the folder changed since the kept file was built. */
-  stale: boolean;
 }
 
 const NO_EXPORT: CollectionExportDTO = {
@@ -1161,7 +1167,6 @@ const NO_EXPORT: CollectionExportDTO = {
   page_count: null,
   size_bytes: null,
   skipped_count: 0,
-  stale: false,
 };
 
 async function loadExportRow(collectionId: number, userId: number): Promise<ExportRow | undefined> {
@@ -1206,10 +1211,25 @@ async function exportStatus(
     row.status === "done" && (await fileExists(collectionExportPath(collectionId, userId)));
   if (row.status === "done" && !hasFile) return NO_EXPORT;
 
-  let stale = false;
   if (row.status === "done") {
+    // A member changed since the build (new title, re-scanned file, access
+    // lost): the file no longer is the folder, so it goes.
     const inputs = await loadExportInputs(collectionId, userId, isAdmin);
-    stale = collectionExportFingerprint(inputs.inputs) !== row.fingerprint;
+    if (collectionExportFingerprint(inputs.inputs) !== row.fingerprint) {
+      await dbExec(
+        db
+          .delete(documentCollectionExports)
+          .where(
+            and(
+              eq(documentCollectionExports.collection_id, collectionId),
+              eq(documentCollectionExports.user_id, userId),
+              eq(documentCollectionExports.status, "done"),
+            ),
+          ),
+      );
+      await removeCollectionExport(collectionId, userId);
+      return NO_EXPORT;
+    }
   }
   return {
     status: row.status,
@@ -1220,7 +1240,6 @@ async function exportStatus(
     page_count: row.page_count,
     size_bytes: row.size_bytes,
     skipped_count: row.skipped?.length ?? 0,
-    stale,
   };
 }
 

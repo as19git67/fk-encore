@@ -227,7 +227,10 @@ export interface CollectionPdf {
   skipped: number
 }
 
-/** How the caller's PDF of a collection stands (built in the background, kept). */
+/**
+ * How the caller's PDF of a collection stands: built in the background and
+ * kept until the folder changes, which throws it away ('none' again).
+ */
 export interface CollectionExport {
   status: 'none' | 'running' | 'done' | 'failed'
   started_at: string | null
@@ -238,8 +241,6 @@ export interface CollectionExport {
   size_bytes: number | null
   /** Members that did not make it into the file. */
   skipped_count: number
-  /** The folder changed since the kept file was built. */
-  stale: boolean
 }
 
 /** Start building the PDF on the server, or join the build already running. */
