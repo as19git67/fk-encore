@@ -39,6 +39,7 @@ import {
   STEUER_SEGMENT,
 } from "./documents.service";
 import { DOCUMENTS_OCR_DIR } from "./ocr-pdf";
+import { DOCUMENTS_COLLECTIONS_DIR } from "./collection-export";
 import { DOCUMENTS_THUMBS_DIR } from "./thumbnail";
 import { relocateDocument } from "./relocate";
 import { withDocumentLock } from "./document-lock";
@@ -51,12 +52,13 @@ console.log("[boot] documents/fsck.ts: all imports resolved");
  * skipped when hunting for orphans:
  *   - `_steuer`   holds tax-view hardlinks (same inode as a canonical file),
  *   - `_thumbs`   holds `<id>.webp` previews,
- *   - `_ocr`      holds `<id>.pdf` searchable sidecars.
+ *   - `_ocr`      holds `<id>.pdf` searchable sidecars,
+ *   - `_collections` holds built Sammelmappe PDFs.
  * `_inbox` is intentionally NOT skipped — unclassified documents legitimately
  * live there and are referenced by `disk_path`, so an inbox file with no
  * referencing row is a genuine orphan.
  */
-const SKIP_DIR_NAMES = new Set([STEUER_SEGMENT, "_thumbs", "_ocr"]);
+const SKIP_DIR_NAMES = new Set([STEUER_SEGMENT, "_thumbs", "_ocr", "_collections"]);
 
 /** Upper bound on orphan files hashed in a single run — a runaway guard. */
 const MAX_ORPHAN_HASHES = parseInt(
@@ -197,7 +199,7 @@ export const runDocumentsFsck = api(
 /**
  * Walk DOCUMENTS_DIR and hash every file not referenced by an existing
  * `disk_path`, returning a sha256 → absolute-path index. Derived-artifact
- * directories (`_steuer`, `_thumbs`, `_ocr`) are skipped. Bounded by
+ * directories (`_steuer`, `_thumbs`, `_ocr`, `_collections`) are skipped. Bounded by
  * `MAX_ORPHAN_HASHES` to cap the cost of a pathological tree.
  */
 async function indexOrphans(
@@ -208,7 +210,7 @@ async function indexOrphans(
   // Extra guard for the case where the OCR/thumb caches were relocated
   // (via env) to a custom path that still sits inside DOCUMENTS_DIR.
   const skipRoots = new Set(
-    [DOCUMENTS_OCR_DIR, DOCUMENTS_THUMBS_DIR].map((p) => path.resolve(p)),
+    [DOCUMENTS_OCR_DIR, DOCUMENTS_THUMBS_DIR, DOCUMENTS_COLLECTIONS_DIR].map((p) => path.resolve(p)),
   );
 
   const stack: string[] = [DOCUMENTS_DIR];

@@ -20,6 +20,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { api } from "encore.dev/api";
 import db from "../db/database";
+import { discardCollectionExports } from "./collection-export";
 import { dbAll, dbExec } from "../db/adapter";
 import {
   documentCategories,
@@ -115,6 +116,7 @@ export async function refreshStaleCollectionSummaries(
           })
           .where(eq(documentCollections.id, collection.id)),
       );
+      await discardCollectionExports(collection.id);
       result.emptied++;
       continue;
     }
@@ -136,6 +138,8 @@ export async function refreshStaleCollectionSummaries(
           })
           .where(eq(documentCollections.id, collection.id)),
       );
+      // The cover carries the summary: a PDF built before it is outdated.
+      await discardCollectionExports(collection.id);
       result.written++;
     } catch (err) {
       const reason =
