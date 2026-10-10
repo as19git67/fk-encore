@@ -250,12 +250,20 @@ function goBack() {
         </li>
         <li>
           <strong>Reihenfolge</strong> – bestimmt die Reihenfolge im PDF und
-          wird in der Mappe mit den Pfeiltasten gesetzt.
+          wird in der Mappe am Griff links (☰) per Ziehen gesetzt, mit der
+          Tastatur über die Pfeiltasten auf dem Griff.
         </li>
         <li>
           <strong>Abwählen</strong> – einzelne Dokumente per Häkchen, einzelne
-          Seiten über die Seitenvorschau. Beides bleibt erhalten, wenn das
-          Dokument nur vorübergehend aus dem PDF fliegt.
+          Seiten über „Seiten wählen“: Nur der runde Knopf auf einer Seite
+          wählt sie an oder ab; ein Klick auf die Seite selbst zeigt sie groß,
+          die Lupen vergrößern die Vorschaubilder. Beides bleibt erhalten,
+          wenn das Dokument nur vorübergehend aus dem PDF fliegt.
+        </li>
+        <li>
+          <strong>Durchblättern</strong> – aus der Mappe geöffnet, zeigt die
+          Detailansicht eines Dokuments Vor und Zurück durch die Dokumente
+          der Mappe; „Zurück“ führt wieder in die Mappe.
         </li>
         <li>
           <strong>Zusammenfassung</strong> – wird nach jeder Änderung
