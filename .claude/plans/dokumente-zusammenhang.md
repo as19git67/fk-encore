@@ -233,7 +233,17 @@ trigram Jaccard over normalised text at `DOCUMENTS_DUPLICATE_MIN_SCORE`
 mostly the same form letter with different numbers). The list endpoint shows
 only open pairs at or above the current threshold, at most 200 per call,
 with the total and the count of pairs an earlier scan recorded below the
-bar. The merge re-points rows generically by walking every foreign key
+bar. Pairs nobody needs to look at are merged automatically
+(`documents/duplicate-auto-merge.ts`, `POST /documents/duplicates/auto-merge`
+with a dry run by default, status endpoint, background run): stage A follows
+the sha256 prefix in a re-imported file's name (`…__<8 hex>.pdf` from
+`relocate.ts`) back to the document it was exported from, within the owner
+scope and without contradicting page counts, regardless of text score; stage
+B takes open pairs at or above `DOCUMENTS_DUPLICATE_AUTO_MIN_SCORE` (0.98) or
+with word-identical normalised text whose digit runs are identical in order
+and whose pages, date and correspondent do not contradict. The keeper is the
+side the hash names, else the side without the speaking name, else the
+general rule. The merge re-points rows generically by walking every foreign key
 onto `documents.id` in `information_schema`, so a new table cannot be
 forgotten; derived tables (embeddings, scan queue, receipt extraction) are
 dropped, a row the keeper already has is dropped on unique violation, pinned

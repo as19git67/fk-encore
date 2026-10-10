@@ -5,10 +5,11 @@
  * pair — merge (naming which side stays) or "not a duplicate". Nothing is
  * deleted by the scan itself; only a merge confirmed here removes a file.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
+import ProgressBar from 'primevue/progressbar'
 import RadioButton from 'primevue/radiobutton'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
@@ -16,9 +17,13 @@ import AdminPage from '../components/admin/AdminPage.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import {
   dismissDuplicate,
+  getDuplicateAutoMergeStatus,
   listDuplicates,
   mergeDuplicate,
   scanDuplicates,
+  startDuplicateAutoMerge,
+  type AutoMergeItem,
+  type AutoMergeState,
   type DuplicatePair,
   type DuplicateScanResponse,
   type DuplicateSide,
@@ -173,6 +178,132 @@ async function dismiss(p: DuplicatePair) {
   }
 }
 
+// ─── Automatic merge ────────────────────────────────────────────────────────
+
+const AUTO_POLL_MS = 2000
+/** Report rows rendered on the page; the CSV has them all. */
+const AUTO_SHOWN_MAX = 300
+
+const autoState = ref<AutoMergeState | null>(null)
+const autoStarting = ref(false)
+const autoError = ref('')
+let autoTimer: ReturnType<typeof setTimeout> | null = null
+
+const autoRunning = computed(() => autoState.value?.status === 'running')
+const autoReport = computed(() => (autoState.value?.status === 'done' ? autoState.value.report : null))
+const autoFound = computed(() => {
+  const r = autoReport.value
+  return r ? r.provenance.found + r.content.found : 0
+})
+const autoProgressPercent = computed(() => {
+  const s = autoState.value
+  if (!s || !s.apply || s.progress.found === 0) return 0
+  return Math.round((s.progress.done / s.progress.found) * 100)
+})
+
+function stopAutoPolling() {
+  if (autoTimer) clearTimeout(autoTimer)
+  autoTimer = null
+}
+
+async function refreshAuto() {
+  stopAutoPolling()
+  const wasApplying = autoState.value?.status === 'running' && autoState.value.apply
+  try {
+    autoState.value = await getDuplicateAutoMergeStatus()
+    if (autoState.value.status === 'failed') {
+      autoError.value = autoState.value.error || 'Das automatische Zusammenführen ist fehlgeschlagen.'
+    }
+  } catch (err: any) {
+    autoError.value = err?.message || 'Status des automatischen Zusammenführens konnte nicht geladen werden'
+    return
+  }
+  if (autoState.value.status === 'running') {
+    autoTimer = setTimeout(refreshAuto, AUTO_POLL_MS)
+  } else if (wasApplying) {
+    // The merges changed the list below.
+    await load()
+  }
+}
+
+async function runAuto(apply: boolean) {
+  autoError.value = ''
+  autoStarting.value = true
+  try {
+    const { started, state } = await startDuplicateAutoMerge(apply)
+    autoState.value = state
+    if (!started) autoError.value = 'Es läuft bereits ein Durchgang; das ist sein Stand.'
+    if (state.status === 'running') autoTimer = setTimeout(refreshAuto, AUTO_POLL_MS)
+  } catch (err: any) {
+    autoError.value = err?.message || 'Konnte das automatische Zusammenführen nicht starten'
+  } finally {
+    autoStarting.value = false
+  }
+}
+
+function askAutoApply() {
+  const n = autoFound.value
+  confirm.require({
+    header: 'Automatisch zusammenführen',
+    message:
+      `${n} Paar(e) werden zusammengeführt; je Paar wird das exportierte bzw. jüngere Dokument gelöscht, ` +
+      'nachdem Tags, Sammelmappen, Personen, Steuerzuordnung, Finanzverknüpfungen und Wiedervorlagen ' +
+      'zum bleibenden Dokument gewandert sind. Das lässt sich nicht rückgängig machen.',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: `${n} Paar(e) zusammenführen`, severity: 'danger' },
+    accept: () => { void runAuto(true) },
+  })
+}
+
+const STAGE_LABELS: Record<AutoMergeItem['stage'], string> = {
+  provenance: 'Hash im Dateinamen',
+  content: 'Gleicher Inhalt',
+}
+const OUTCOME_LABELS: Record<AutoMergeItem['outcome'], string> = {
+  planned: 'geplant',
+  merged: 'zusammengeführt',
+  failed: 'fehlgeschlagen',
+}
+
+const autoItemsShown = computed(() => autoReport.value?.items.slice(0, AUTO_SHOWN_MAX) ?? [])
+
+function csvCell(v: string | number | null): string {
+  const s = v == null ? '' : String(v)
+  return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+function downloadAutoReport() {
+  const r = autoReport.value
+  if (!r) return
+  const head = ['stufe', 'ergebnis', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
+  const lines = [head.join(';')]
+  for (const i of r.items) {
+    lines.push(
+      [
+        STAGE_LABELS[i.stage],
+        OUTCOME_LABELS[i.outcome],
+        i.keeper_id,
+        i.keeper_filename,
+        i.loser_id,
+        i.loser_filename,
+        i.score == null ? '' : i.score.toFixed(3),
+        i.error,
+      ].map(csvCell).join(';'),
+    )
+  }
+  const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `duplikate-${r.dry_run ? 'probelauf' : 'zusammengefuehrt'}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+onMounted(() => { void refreshAuto() })
+onBeforeUnmount(stopAutoPolling)
+
 const movedSummary = computed(() => {
   const m = lastMerge.value
   if (!m) return ''
@@ -222,6 +353,94 @@ const movedSummary = computed(() => {
         :disabled="scanning"
         @click="scan"
       />
+    </div>
+
+    <div class="data-management-group">
+      <h3>Automatisch zusammenführen</h3>
+      <p>
+        Zwei Arten von Paaren brauchen keinen Blick: Eine Datei, deren Name den Inhalts-Hash eines
+        anderen Dokuments trägt (<code>…__0a1b2c3d.pdf</code>), wurde aus genau diesem Dokument
+        exportiert und wieder importiert. Und zwei Dokumente, die in jeder Zahl, der Seitenzahl, dem
+        Datum und dem Korrespondenten übereinstimmen und deren Text zu mindestens 98&nbsp;% gleich
+        ist, sind derselbe Brief und nicht derselbe Vordruck mit anderen Zahlen. „Prüfen“ zählt und
+        listet, „Zusammenführen“ führt genau diese Paare zusammen; das Original bleibt.
+      </p>
+
+      <Message v-if="autoError" severity="error" class="data-management-group__item" @close="autoError = ''">
+        {{ autoError }}
+      </Message>
+
+      <div class="data-management-group__item auto-actions">
+        <Button
+          icon="pi pi-search"
+          outlined
+          label="Prüfen"
+          :disabled="autoStarting || autoRunning"
+          :loading="(autoStarting || autoRunning) && !autoState?.apply"
+          @click="runAuto(false)"
+        />
+        <Button
+          icon="pi pi-arrow-right-arrow-left"
+          severity="danger"
+          label="Zusammenführen"
+          :disabled="autoStarting || autoRunning || !autoReport || !autoReport.dry_run || autoFound === 0"
+          :loading="(autoStarting || autoRunning) && !!autoState?.apply"
+          @click="askAutoApply"
+        />
+        <Button
+          v-if="autoReport && autoReport.items.length > 0"
+          icon="pi pi-download"
+          text
+          label="Bericht als CSV"
+          @click="downloadAutoReport"
+        />
+      </div>
+
+      <div v-if="autoRunning && autoState" class="data-management-group__item auto-progress">
+        <ProgressBar
+          :value="autoProgressPercent"
+          :mode="autoState.apply ? 'determinate' : 'indeterminate'"
+          :show-value="false"
+          aria-label="Fortschritt des automatischen Zusammenführens"
+        />
+        <span class="text-secondary">
+          <template v-if="autoState.apply">
+            {{ autoState.progress.done }} von {{ autoState.progress.found }} Paar(en) zusammengeführt …
+          </template>
+          <template v-else>Paare werden gesucht … {{ autoState.progress.found }} gefunden.</template>
+        </span>
+      </div>
+
+      <div v-if="autoReport" class="data-management-group__item">
+        <Message :severity="autoReport.provenance.failed + autoReport.content.failed > 0 ? 'warn' : 'info'" :closable="false">
+          <template v-if="autoReport.dry_run">Probelauf: </template>
+          <template v-else>Übernommen: </template>
+          {{ autoReport.provenance.found }} Paar(e) über den Hash im Dateinamen,
+          {{ autoReport.content.found }} Paar(e) über gleichen Inhalt.
+          <template v-if="!autoReport.dry_run">
+            {{ autoReport.provenance.merged + autoReport.content.merged }} zusammengeführt,
+            {{ autoReport.provenance.failed + autoReport.content.failed }} fehlgeschlagen.
+          </template>
+        </Message>
+
+        <details v-if="autoReport.items.length > 0" class="auto-report">
+          <summary>
+            Paare ({{ autoItemsShown.length }}<template v-if="autoReport.items_total > autoItemsShown.length"> von {{ autoReport.items_total }}</template>)
+          </summary>
+          <ul class="auto-report__list">
+            <li v-for="i in autoItemsShown" :key="`${i.keeper_id}-${i.loser_id}`">
+              <Tag :value="STAGE_LABELS[i.stage]" severity="secondary" />
+              <Tag v-if="!autoReport.dry_run" :value="OUTCOME_LABELS[i.outcome]" :severity="i.outcome === 'failed' ? 'danger' : 'success'" />
+              <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.keeper_id } }">#{{ i.keeper_id }}</RouterLink>
+              bleibt ({{ i.keeper_filename }}),
+              <template v-if="i.outcome === 'merged'">#{{ i.loser_id }}</template>
+              <RouterLink v-else :to="{ name: 'dokumente-detail', params: { id: i.loser_id } }">#{{ i.loser_id }}</RouterLink>
+              {{ autoReport.dry_run ? 'würde gelöscht' : 'gelöscht' }} ({{ i.loser_filename }})<template v-if="i.score != null">, Text {{ Math.round(i.score * 100) }}&nbsp;%</template>
+              <span v-if="i.error" class="text-secondary"> – {{ i.error }}</span>
+            </li>
+          </ul>
+        </details>
+      </div>
     </div>
 
     <div class="data-management-group">
@@ -315,6 +534,34 @@ const movedSummary = computed(() => {
 </template>
 
 <style scoped>
+.auto-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.auto-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 40rem;
+}
+.auto-progress span {
+  font-size: var(--text-sm);
+}
+.auto-report {
+  margin-top: var(--space-2);
+}
+.auto-report__list {
+  margin: var(--space-1) 0 0;
+  padding-left: 1.25rem;
+  max-height: 24rem;
+  overflow: auto;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
 .pair-page {
   display: flex;
   flex-wrap: wrap;

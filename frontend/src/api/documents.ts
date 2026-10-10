@@ -420,6 +420,72 @@ export function listDuplicates(limit?: number) {
   return apiFetch<ListDuplicatesResponse>(`/documents/duplicates${qs}`)
 }
 
+export type AutoMergeStage = 'provenance' | 'content'
+export type AutoMergeOutcome = 'planned' | 'merged' | 'failed'
+
+export interface AutoMergeItem {
+  stage: AutoMergeStage
+  keeper_id: number
+  loser_id: number
+  keeper_filename: string
+  loser_filename: string
+  score: number | null
+  outcome: AutoMergeOutcome
+  error: string | null
+}
+
+export interface AutoMergeStageCount {
+  found: number
+  merged: number
+  failed: number
+}
+
+export interface AutoMergeReport {
+  dry_run: boolean
+  provenance: AutoMergeStageCount
+  content: AutoMergeStageCount
+  items: AutoMergeItem[]
+  items_total: number
+  truncated: boolean
+}
+
+export type AutoMergeStatus = 'idle' | 'running' | 'done' | 'failed'
+
+/** The current or last automatic merge run; it lives in the server process only. */
+export interface AutoMergeState {
+  status: AutoMergeStatus
+  apply: boolean
+  started_at: string | null
+  finished_at: string | null
+  progress: { found: number; done: number }
+  report: AutoMergeReport | null
+  error: string | null
+}
+
+export interface AutoMergeStartResponse {
+  started: boolean
+  state: AutoMergeState
+}
+
+/**
+ * Start the automatic merge: stage A follows the sha256 prefix in a
+ * re-imported file's name back to its original, stage B takes open pairs
+ * whose numbers, pages, date and correspondent all agree and whose text is
+ * near-identical. Without `apply` it only reports; poll the status for the
+ * result.
+ */
+export function startDuplicateAutoMerge(apply: boolean) {
+  return apiFetch<AutoMergeStartResponse>('/documents/duplicates/auto-merge', {
+    method: 'POST',
+    body: JSON.stringify({ apply }),
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+export function getDuplicateAutoMergeStatus() {
+  return apiFetch<AutoMergeState>('/documents/duplicates/auto-merge/status')
+}
+
 /** Open pairs one document is part of (the other sides' ids). */
 export function listDuplicatesForDocument(id: number) {
   return apiFetch<{ other_ids: number[] }>(`/documents/${id}/duplicates`)
