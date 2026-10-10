@@ -5,16 +5,21 @@ import { computed, onBeforeUnmount, ref, watch, type ComputedRef, type Ref } fro
  *
  * Built on pointer events rather than the HTML5 drag-and-drop API: that API
  * never fires for a finger on iOS Safari and draws its own ghost image we
- * cannot style. Here the row itself moves — the list re-renders in the
- * would-be order while the pointer travels, so what you see on release is
- * what gets saved.
+ * cannot style. Here the row itself follows the pointer and the rows it
+ * passes slide out of its way, so what you see on release is what gets saved.
+ *
+ * Nothing moves in the DOM while dragging — only `transform`s (`rowStyle`).
+ * Re-sorting the keyed rows mid-drag would detach and re-insert the grip's
+ * row, which drops the pointer capture and, on iOS, cancels the touch: the
+ * release then never arrives and the drag never ends. The list is re-sorted
+ * once, on release.
  *
  * The grip doubles as the keyboard handle: ArrowUp/ArrowDown on the focused
  * grip move the row by one, so dragging is never the only way to reorder.
  *
  * Rows are found through the DOM: the list carries `data-reorder-list`, every
- * row `data-reorder-key="<key>"`. Measuring the rows on each move (instead of
- * once at the start) keeps the target right while the page auto-scrolls.
+ * row `data-reorder-key="<key>"`. They are measured once, at the start, in
+ * page coordinates, so auto-scrolling the page does not throw the target off.
  */
 
 export type ReorderKey = string | number
@@ -32,6 +37,8 @@ export interface UseDragReorderReturn<T> {
   ordered: ComputedRef<T[]>
   /** Key of the row being dragged, or null. */
   draggingKey: Ref<ReorderKey | null>
+  /** Inline style for a row: its offset while a drag is under way. */
+  rowStyle: (key: ReorderKey) => Record<string, string> | undefined
   onGripPointerDown: (key: ReorderKey, event: PointerEvent) => void
   onGripKeydown: (key: ReorderKey, event: KeyboardEvent) => void
 }
@@ -89,10 +96,23 @@ export function useDragReorder<T>(options: UseDragReorderOptions<T>): UseDragReo
     return out
   })
 
-  let listEl: HTMLElement | null = null
-  let grip: HTMLElement | null = null
-  let pointerId: number | null = null
-  let lastY = 0
+  /** Geometry captured at the start of a drag, in page coordinates. */
+  interface DragState {
+    key: ReorderKey
+    pointerId: number
+    keys: ReorderKey[]
+    from: number
+    /** Vertical middle of every row, in `keys` order. */
+    mids: number[]
+    /** How far the other rows move to make room: row height plus gap. */
+    slot: number
+    startPageY: number
+  }
+  let drag: DragState | null = null
+  /** How far the dragged row has travelled, and where it would land. */
+  const offset = ref(0)
+  const target = ref(0)
+  let lastClientY = 0
   let rafId = 0
 
   async function finish(keys: ReorderKey[]) {
@@ -110,92 +130,112 @@ export function useDragReorder<T>(options: UseDragReorderOptions<T>): UseDragReo
     }
   }
 
-  function updateTarget(y: number) {
-    const key = draggingKey.value
-    if (key === null || !listEl || !preview.value) return
-    const rows = Array.from(listEl.querySelectorAll<HTMLElement>('[data-reorder-key]'))
-    const mids = rows
-      .filter((row) => row.dataset.reorderKey !== String(key))
-      .map((row) => {
-        const rect = row.getBoundingClientRect()
-        return rect.top + rect.height / 2
-      })
-    const next = moveKey(preview.value, key, reorderTargetIndex(mids, y))
-    if (!sameOrder(next, preview.value)) preview.value = next
+  function update() {
+    if (!drag) return
+    offset.value = lastClientY + window.scrollY - drag.startPageY
+    const center = drag.mids[drag.from]! + offset.value
+    target.value = reorderTargetIndex(
+      drag.mids.filter((_, i) => i !== drag!.from),
+      center,
+    )
+  }
+
+  function rowStyle(key: ReorderKey): Record<string, string> | undefined {
+    if (!drag || draggingKey.value === null) return undefined
+    if (key === drag.key) {
+      return { transform: `translateY(${offset.value}px)`, transition: 'none' }
+    }
+    const i = drag.keys.indexOf(key)
+    let shift = 0
+    if (i > drag.from && i <= target.value) shift = -drag.slot
+    else if (i < drag.from && i >= target.value) shift = drag.slot
+    return { transform: `translateY(${shift}px)`, transition: 'transform 150ms ease' }
   }
 
   function autoscroll() {
     rafId = 0
-    if (draggingKey.value === null) return
+    if (!drag) return
     const h = window.innerHeight
     let step = 0
-    if (lastY < AUTOSCROLL_EDGE) step = -Math.ceil(((AUTOSCROLL_EDGE - lastY) / AUTOSCROLL_EDGE) * AUTOSCROLL_MAX_STEP)
-    else if (lastY > h - AUTOSCROLL_EDGE)
-      step = Math.ceil(((lastY - (h - AUTOSCROLL_EDGE)) / AUTOSCROLL_EDGE) * AUTOSCROLL_MAX_STEP)
+    if (lastClientY < AUTOSCROLL_EDGE)
+      step = -Math.ceil(((AUTOSCROLL_EDGE - lastClientY) / AUTOSCROLL_EDGE) * AUTOSCROLL_MAX_STEP)
+    else if (lastClientY > h - AUTOSCROLL_EDGE)
+      step = Math.ceil(((lastClientY - (h - AUTOSCROLL_EDGE)) / AUTOSCROLL_EDGE) * AUTOSCROLL_MAX_STEP)
     if (step !== 0) {
       window.scrollBy(0, step)
-      updateTarget(lastY)
+      update()
     }
     rafId = requestAnimationFrame(autoscroll)
   }
 
   function onMove(event: PointerEvent) {
-    if (event.pointerId !== pointerId) return
+    if (!drag || event.pointerId !== drag.pointerId) return
     event.preventDefault()
-    lastY = event.clientY
-    updateTarget(lastY)
+    lastClientY = event.clientY
+    update()
   }
 
   function teardown() {
-    if (grip) {
-      grip.removeEventListener('pointermove', onMove)
-      grip.removeEventListener('pointerup', onUp)
-      grip.removeEventListener('pointercancel', onCancel)
-      if (pointerId !== null && grip.hasPointerCapture?.(pointerId)) grip.releasePointerCapture(pointerId)
-    }
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onCancel)
     if (rafId) cancelAnimationFrame(rafId)
     rafId = 0
-    grip = null
-    listEl = null
-    pointerId = null
+    drag = null
+    offset.value = 0
     draggingKey.value = null
   }
 
   function onUp(event: PointerEvent) {
-    if (event.pointerId !== pointerId) return
-    const keys = preview.value ?? savedKeys.value
+    if (!drag || event.pointerId !== drag.pointerId) return
+    const keys = moveKey(drag.keys, drag.key, target.value)
+    // Re-sort first, then drop the offsets: both land in the same render.
+    preview.value = keys
     teardown()
     void finish(keys)
   }
 
   function onCancel(event: PointerEvent) {
-    if (event.pointerId !== pointerId) return
+    if (!drag || event.pointerId !== drag.pointerId) return
     teardown()
-    preview.value = null
   }
 
   function onGripPointerDown(key: ReorderKey, event: PointerEvent) {
-    if (disabled?.value || draggingKey.value !== null) return
+    if (disabled?.value || drag) return
     if (event.pointerType === 'mouse' && event.button !== 0) return
-    const target = event.currentTarget as HTMLElement | null
-    const list = target?.closest<HTMLElement>('[data-reorder-list]')
-    if (!target || !list) return
+    const grip = event.currentTarget as HTMLElement | null
+    const list = grip?.closest<HTMLElement>('[data-reorder-list]')
+    if (!grip || !list) return
+    const rows = Array.from(list.querySelectorAll<HTMLElement>('[data-reorder-key]'))
+    const keys = preview.value ?? savedKeys.value
+    const from = keys.indexOf(key)
+    if (from < 0 || rows.length !== keys.length) return
     event.preventDefault()
-    grip = target
-    listEl = list
-    pointerId = event.pointerId
-    lastY = event.clientY
-    preview.value = [...savedKeys.value]
+    const rects = rows.map((row) => row.getBoundingClientRect())
+    const gap = rects.length > 1 ? Math.max(0, rects[1]!.top - rects[0]!.bottom) : 0
+    drag = {
+      key,
+      pointerId: event.pointerId,
+      keys: [...keys],
+      from,
+      mids: rects.map((r) => r.top + window.scrollY + r.height / 2),
+      slot: rects[from]!.height + gap,
+      startPageY: event.clientY + window.scrollY,
+    }
+    lastClientY = event.clientY
+    offset.value = 0
+    target.value = from
     draggingKey.value = key
-    target.setPointerCapture?.(event.pointerId)
-    target.addEventListener('pointermove', onMove)
-    target.addEventListener('pointerup', onUp)
-    target.addEventListener('pointercancel', onCancel)
+    // On the window, not the grip: a release outside the grip (or after the
+    // row was re-rendered) still has to end the drag.
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
     rafId = requestAnimationFrame(autoscroll)
   }
 
   function onGripKeydown(key: ReorderKey, event: KeyboardEvent) {
-    if (disabled?.value || draggingKey.value !== null) return
+    if (disabled?.value || drag) return
     const delta = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0
     if (delta === 0) return
     event.preventDefault()
@@ -210,5 +250,5 @@ export function useDragReorder<T>(options: UseDragReorderOptions<T>): UseDragReo
 
   onBeforeUnmount(teardown)
 
-  return { ordered, draggingKey, onGripPointerDown, onGripKeydown }
+  return { ordered, draggingKey, rowStyle, onGripPointerDown, onGripKeydown }
 }
