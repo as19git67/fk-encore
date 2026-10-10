@@ -61,7 +61,9 @@ import AddToCollectionDialog from '../components/documents/AddToCollectionDialog
 import RelatedDocumentsCard from '../components/documents/RelatedDocumentsCard.vue'
 import { listDuplicatesForDocument, REFERENCE_KIND_LABELS, type ReferenceKind, type ReferenceNumber } from '../api/documents'
 import {
+  getCollection,
   listCollectionsForDocument,
+  type DocumentCollectionDetail,
   type DocumentCollectionRef,
 } from '../api/collections'
 import { getDocumentTransactionLinks, unlinkTransactionDocument } from '../api/finance'
@@ -89,6 +91,51 @@ const {
 
 function goBasketDoc(id: number) {
   router.push({ name: 'dokumente-detail', params: { id } })
+}
+
+// ─── Sammelmappe navigation ─────────────────────────────────────────────────
+// Opened from a Sammelmappe (`?mappe=<id>`), prev/next step through that
+// folder in its order, so the folder need not be reopened between documents.
+// Stepping replaces the history entry: "Zurück" still lands on the folder
+// rather than walking back through every document seen on the way.
+const sourceCollectionId = computed(() => {
+  const value = Number(route.query.mappe)
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+})
+const sourceCollection = ref<DocumentCollectionDetail | null>(null)
+const sourceCollectionItems = computed(() =>
+  (sourceCollection.value?.items ?? []).map((item) => ({ id: item.document_id })),
+)
+const {
+  inBasket: inCollection,
+  position: collectionPosition,
+  total: collectionTotal,
+  previous: collectionPrev,
+  next: collectionNext,
+} = useBasketNavigation(sourceCollectionItems, docId)
+
+async function loadSourceCollection(id: number | null) {
+  if (id === null) {
+    sourceCollection.value = null
+    return
+  }
+  if (sourceCollection.value?.id === id) return
+  try {
+    sourceCollection.value = await getCollection(id)
+  } catch {
+    // Without the folder there is nothing to step through; the page itself
+    // does not depend on it.
+    sourceCollection.value = null
+  }
+}
+watch(sourceCollectionId, (id) => void loadSourceCollection(id), { immediate: true })
+
+function goCollectionDoc(id: number) {
+  void router.replace({
+    name: 'dokumente-detail',
+    params: { id },
+    query: { mappe: String(sourceCollectionId.value) },
+  })
 }
 
 function toggleBasket() {
@@ -832,7 +879,34 @@ onBeforeUnmount(() => {
     <template #actions>
       <div class="detail-actions">
         <Button icon="pi pi-arrow-left" label="Zurück" aria-label="Zurück" text @click="goBack" />
-        <div v-if="inBasket" class="basket-nav" aria-label="Navigation durch den Basket">
+        <div
+          v-if="inCollection"
+          class="basket-nav"
+          :aria-label="`Navigation durch die Sammelmappe ${sourceCollection?.title ?? ''}`"
+        >
+          <Button
+            icon="pi pi-chevron-left"
+            text
+            rounded
+            :disabled="!collectionPrev"
+            aria-label="Vorheriges Dokument der Sammelmappe"
+            v-tooltip.bottom="'Vorheriges Dokument der Sammelmappe'"
+            @click="collectionPrev && goCollectionDoc(collectionPrev.id)"
+          />
+          <span class="basket-nav-pos" :title="sourceCollection?.title">
+            <i class="pi pi-folder" /> {{ collectionPosition }}&hairsp;/&hairsp;{{ collectionTotal }}
+          </span>
+          <Button
+            icon="pi pi-chevron-right"
+            text
+            rounded
+            :disabled="!collectionNext"
+            aria-label="Nächstes Dokument der Sammelmappe"
+            v-tooltip.bottom="'Nächstes Dokument der Sammelmappe'"
+            @click="collectionNext && goCollectionDoc(collectionNext.id)"
+          />
+        </div>
+        <div v-else-if="inBasket" class="basket-nav" aria-label="Navigation durch den Basket">
           <Button
             icon="pi pi-chevron-left"
             text

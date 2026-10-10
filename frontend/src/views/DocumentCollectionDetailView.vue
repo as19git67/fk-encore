@@ -41,6 +41,7 @@ import {
 import { listCorrespondents, type CorrespondentFacet } from '../api/documents'
 import { canShareFiles, shareFile, triggerDownload } from '../utils/shareFile'
 import { useModuleBack } from '../composables/useModuleBack'
+import { useDragReorder } from '../composables/useDragReorder'
 
 const route = useRoute()
 const router = useRouter()
@@ -230,14 +231,21 @@ function setOption(patch: { include_cover?: boolean; include_toc?: boolean; incl
   void run(() => updateCollection(collectionId.value, patch))
 }
 
-function move(item: DocumentCollectionItem, delta: number) {
-  const order = items.value.map((i) => i.document_id)
-  const from = order.indexOf(item.document_id)
-  const to = from + delta
-  if (from < 0 || to < 0 || to >= order.length) return
-  order.splice(to, 0, ...order.splice(from, 1))
-  void run(() => reorderCollection(collectionId.value, order))
-}
+/**
+ * The order is set by dragging the grip (or ArrowUp/ArrowDown on it). The
+ * list shows the would-be order while dragging and saves once on release.
+ */
+const {
+  ordered: orderedItems,
+  draggingKey,
+  onGripPointerDown,
+  onGripKeydown,
+} = useDragReorder({
+  items,
+  keyOf: (item) => item.document_id,
+  commit: (keys) => run(() => reorderCollection(collectionId.value, keys as number[])),
+  disabled: busy,
+})
 
 function toggleIncluded(item: DocumentCollectionItem, included: boolean) {
   void run(() => updateCollectionItem(collectionId.value, item.document_id, { included }))
@@ -260,8 +268,16 @@ function savePageSelection(excludedPages: number[]) {
   )
 }
 
+/**
+ * `mappe` tells the detail page which folder it was opened from, so it can
+ * step to the previous and next document of this folder directly.
+ */
 function openDocument(item: DocumentCollectionItem) {
-  router.push({ name: 'dokumente-detail', params: { id: item.document_id } })
+  router.push({
+    name: 'dokumente-detail',
+    params: { id: item.document_id },
+    query: { mappe: String(collectionId.value) },
+  })
 }
 
 async function buildExport() {
@@ -506,13 +522,29 @@ onMounted(() => {
         Arbeitskorb hinzufügen.
       </p>
 
-      <ul class="cd-list">
+      <ul class="cd-list" data-reorder-list>
         <li
-          v-for="(item, index) in items"
+          v-for="(item, index) in orderedItems"
           :key="item.document_id"
           class="cd-item"
-          :class="{ 'cd-item--off': !item.included }"
+          :class="{
+            'cd-item--off': !item.included,
+            'cd-item--dragging': draggingKey === item.document_id,
+          }"
+          :data-reorder-key="item.document_id"
         >
+          <button
+            v-if="items.length > 1"
+            type="button"
+            class="cd-grip"
+            :aria-label="`Dokument ${index + 1} verschieben (Pfeiltasten hoch/runter)`"
+            v-tooltip.bottom="'Ziehen zum Verschieben'"
+            :disabled="busy"
+            @pointerdown="onGripPointerDown(item.document_id, $event)"
+            @keydown="onGripKeydown(item.document_id, $event)"
+          >
+            <i class="pi pi-bars" aria-hidden="true" />
+          </button>
           <span class="cd-index">{{ index + 1 }}</span>
           <Checkbox
             :model-value="item.included"
@@ -541,24 +573,6 @@ onMounted(() => {
             </div>
           </div>
           <div class="cd-actions">
-            <Button
-              icon="pi pi-chevron-up"
-              text
-              rounded
-              size="small"
-              aria-label="Nach oben"
-              :disabled="busy || index === 0"
-              @click="move(item, -1)"
-            />
-            <Button
-              icon="pi pi-chevron-down"
-              text
-              rounded
-              size="small"
-              aria-label="Nach unten"
-              :disabled="busy || index === items.length - 1"
-              @click="move(item, 1)"
-            />
             <Button
               icon="pi pi-clone"
               text
@@ -755,6 +769,44 @@ onMounted(() => {
 }
 .cd-item--off {
   opacity: 0.55;
+}
+.cd-item--dragging {
+  position: relative;
+  z-index: 1;
+  border-color: var(--p-primary-color);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+/* The grip owns its touches: without `touch-action: none` the browser would
+   scroll the page instead of handing the finger to the drag. */
+.cd-grip {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 40px;
+  margin: 0 -4px 0 -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  cursor: grab;
+  touch-action: none;
+}
+.cd-grip:hover:not(:disabled) {
+  background: var(--p-content-hover-background);
+}
+.cd-grip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.cd-grip:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.cd-item--dragging .cd-grip {
+  cursor: grabbing;
+  color: var(--p-primary-color);
 }
 .cd-index {
   flex: 0 0 auto;

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { PDFDocument as PdfLibDocument } from "pdf-lib";
 import {
   assignStartPages,
   buildFrontMatter,
@@ -11,6 +12,8 @@ import {
   qpdfMergeArgs,
   renderFrontMatter,
   selectPages,
+  fitScaleToA4,
+  shrinkOversizedPages,
   type CollectionPdfEntry,
   type CollectionPdfOptions,
 } from "./collection-pdf";
@@ -265,3 +268,57 @@ describe("buildFrontMatter", () => {
     expect(entries.at(-1)!.start_page).toBe(page_count + 1 + 59 * 2);
   });
 });
+
+describe("fitScaleToA4", () => {
+  it("leaves A4, Letter and slightly generous scans alone", () => {
+    expect(fitScaleToA4(595.28, 841.89)).toBeNull();
+    expect(fitScaleToA4(841.89, 595.28)).toBeNull();
+    expect(fitScaleToA4(612, 792)).toBeNull();
+    expect(fitScaleToA4(612, 1008)).toBeNull();
+  });
+
+  it("fits a page written in pixels into A4 in its own orientation", () => {
+    // A 300 dpi A4 scan whose page box was written as 2480 × 3508 "points".
+    const portrait = fitScaleToA4(2480, 3508)!;
+    expect(2480 * portrait).toBeLessThanOrEqual(595.28 + 0.01);
+    expect(3508 * portrait).toBeCloseTo(841.89, 0);
+    const landscape = fitScaleToA4(3508, 2480)!;
+    expect(3508 * landscape).toBeCloseTo(841.89, 0);
+  });
+
+  it("ignores degenerate boxes", () => {
+    expect(fitScaleToA4(0, 800)).toBeNull();
+    expect(fitScaleToA4(Number.NaN, 800)).toBeNull();
+  });
+});
+
+describe("shrinkOversizedPages", () => {
+  async function pdfWithPages(sizes: Array<[number, number]>): Promise<Buffer> {
+    const doc = await PdfLibDocument.create();
+    for (const size of sizes) doc.addPage(size);
+    return Buffer.from(await doc.save());
+  }
+
+  it("scales only the oversized pages down to A4", async () => {
+    const input = await pdfWithPages([
+      [595.28, 841.89],
+      [2480, 3508],
+    ]);
+    const out = await PdfLibDocument.load(await shrinkOversizedPages(input));
+    const [a4, scan] = out.getPages().map((p) => p.getSize());
+    expect(a4!.width).toBeCloseTo(595.28, 1);
+    expect(scan!.height).toBeCloseTo(841.89, 0);
+    expect(scan!.width).toBeLessThanOrEqual(595.3);
+  });
+
+  it("returns the bytes untouched when nothing is oversized", async () => {
+    const input = await pdfWithPages([[595.28, 841.89]]);
+    expect(await shrinkOversizedPages(input)).toBe(input);
+  });
+
+  it("returns the bytes untouched when they are not a PDF", async () => {
+    const input = Buffer.from("not a pdf");
+    expect(await shrinkOversizedPages(input)).toBe(input);
+  });
+});
+
