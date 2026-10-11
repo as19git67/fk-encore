@@ -78,6 +78,8 @@ export interface AutoMergeItem extends AutoMergeCandidate {
   error: string | null;
   /** Set on a rejected content pair: the first check it failed. */
   reason: ContentRejectReason | null;
+  /** For `numbers`: the digit runs only one side has, so the CSV shows what differs. */
+  detail: string | null;
 }
 
 export interface AutoMergeStageCount {
@@ -153,6 +155,42 @@ function sameSequence(a: string[], b: string[]): boolean {
   return true;
 }
 
+/**
+ * Do the two texts carry the same numbers? Token by token first; failing
+ * that, as one digit string, because OCR splits or joins a number ("123 45"
+ * against "12345") without changing a single digit — a different document
+ * would have different digits, not different spacing.
+ */
+export function sameNumbers(na: string, nb: string): boolean {
+  const ta = numberTokens(na);
+  const tb = numberTokens(nb);
+  if (sameSequence(ta, tb)) return true;
+  return ta.join("") === tb.join("");
+}
+
+/** Which digit runs each side has that the other lacks, a few of each, for the report. */
+export function numberDifference(na: string, nb: string, max = 5): string {
+  const count = (tokens: string[]) => {
+    const m = new Map<string, number>();
+    for (const t of tokens) m.set(t, (m.get(t) ?? 0) + 1);
+    return m;
+  };
+  const ca = count(numberTokens(na));
+  const cb = count(numberTokens(nb));
+  const only = (x: Map<string, number>, y: Map<string, number>) => {
+    const out: string[] = [];
+    for (const [t, n] of x) {
+      const extra = n - (y.get(t) ?? 0);
+      for (let i = 0; i < extra && out.length < max; i++) out.push(t);
+    }
+    return out;
+  };
+  const a = only(ca, cb);
+  const b = only(cb, ca);
+  const side = (label: string, list: string[]) => (list.length ? `${label}: ${list.join(", ")}` : null);
+  return [side("A", a), side("B", b)].filter((x): x is string => x !== null).join(" | ") || "same digits, other order";
+}
+
 export interface ContentSide {
   id: number;
   original_filename: string;
@@ -173,7 +211,7 @@ export function contentPairVerdict(a: ContentSide, b: ContentSide, score: number
   const na = normalizeForSimilarity(a.extracted_text);
   const nb = normalizeForSimilarity(b.extracted_text);
   if (na.length === 0 || nb.length === 0) return "text";
-  if (!sameSequence(numberTokens(na), numberTokens(nb))) return "numbers";
+  if (!sameNumbers(na, nb)) return "numbers";
   if (na === nb) return null;
   const s = score >= DUPLICATE_AUTO_MIN_SCORE ? score : trigramJaccard(na, nb);
   return s >= DUPLICATE_AUTO_MIN_SCORE ? null : "score";
@@ -208,6 +246,7 @@ const contentColumns = {
 
 export interface RejectedContentPair extends AutoMergeCandidate {
   reason: ContentRejectReason;
+  detail: string | null;
 }
 
 /** Open pairs at or above the auto score: those whose content qualifies, and why the others do not. */
@@ -249,8 +288,13 @@ export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate
       score: p.score,
     };
     const reason = contentPairVerdict(a, b, p.score);
-    if (reason) rejected.push({ ...candidate, reason });
-    else accepted.push(candidate);
+    if (reason) {
+      const detail =
+        reason === "numbers"
+          ? numberDifference(normalizeForSimilarity(a.extracted_text), normalizeForSimilarity(b.extracted_text))
+          : null;
+      rejected.push({ ...candidate, reason, detail });
+    } else accepted.push(candidate);
   }
   return { accepted, rejected };
 }
@@ -302,7 +346,7 @@ export async function autoMergeDuplicates(
 
   let done = 0;
   for (const c of candidates) {
-    const item: AutoMergeItem = { ...c, outcome: "planned", error: null, reason: null };
+    const item: AutoMergeItem = { ...c, outcome: "planned", error: null, reason: null, detail: null };
     if (apply) {
       const keeper = resolve(c.keeper_id);
       const loser = c.loser_id;

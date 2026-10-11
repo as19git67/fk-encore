@@ -288,7 +288,7 @@ function csvCell(v: string | number | null): string {
 function downloadAutoReport() {
   const r = autoReport.value
   if (!r) return
-  const head = ['stufe', 'ergebnis', 'grund', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
+  const head = ['stufe', 'ergebnis', 'grund', 'unterschied', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
   const lines = [head.join(';')]
   for (const i of r.items) {
     lines.push(
@@ -296,6 +296,7 @@ function downloadAutoReport() {
         STAGE_LABELS[i.stage],
         OUTCOME_LABELS[i.outcome],
         i.reason ? REASON_LABELS[i.reason] : '',
+        i.detail,
         i.keeper_id,
         i.keeper_filename,
         i.loser_id,
@@ -459,6 +460,7 @@ const movedSummary = computed(() => {
                 ({{ i.keeper_filename }}) und
                 <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.loser_id } }">#{{ i.loser_id }}</RouterLink>
                 ({{ i.loser_filename }}) bleiben zur Prüfung<template v-if="i.score != null">, Text {{ Math.round(i.score * 100) }}&nbsp;%</template>
+                <span v-if="i.detail" class="text-secondary"> – {{ i.detail }}</span>
               </template>
               <template v-else>
                 <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.keeper_id } }">#{{ i.keeper_id }}</RouterLink>

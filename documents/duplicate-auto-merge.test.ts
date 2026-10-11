@@ -10,8 +10,10 @@ import {
   findContentPairs,
   findProvenancePairs,
   getAutoMergeState,
+  numberDifference,
   numberTokens,
   resetAutoMergeState,
+  sameNumbers,
   startAutoMerge,
   type ContentSide,
 } from "./duplicate-auto-merge";
@@ -97,6 +99,13 @@ describe("numberTokens / contentPairQualifies", () => {
   it("lists every digit run in order", () => {
     expect(numberTokens("vertrag 4711 0815 betrag 123 45 euro")).toEqual(["4711", "0815", "123", "45"]);
     expect(numberTokens("keine zahlen")).toEqual([]);
+  });
+
+  it("treats a number OCR split or joined as the same, a changed digit as different", () => {
+    expect(sameNumbers("vertrag 4711 0815 betrag 123 45", "vertrag 47110815 betrag 12345")).toBe(true);
+    expect(sameNumbers("vertrag 4711 0815", "vertrag 4711 0816")).toBe(false);
+    expect(numberDifference("betrag 123 45 vertrag 4711", "betrag 124 45 vertrag 4711")).toBe("A: 123 | B: 124");
+    expect(numberDifference("a 1 2", "a 2 1")).toBe("same digits, other order");
   });
 
   it("accepts the same letter with OCR noise and rejects it with one other number", () => {
@@ -201,7 +210,7 @@ describe("auto-merge against the database", () => {
     expect(accepted[0]).toMatchObject({ stage: "content", keeper_id: a, loser_id: sandwich, score: 0.99 });
     // The other-number pair is reported with its reason; the one under the
     // auto score is not looked at.
-    expect(rejected.map((r) => [r.loser_id, r.reason])).toEqual([[otherNumber, "numbers"]]);
+    expect(rejected.map((r) => [r.loser_id, r.reason, r.detail])).toEqual([[otherNumber, "numbers", "A: 0815 | B: 0816"]]);
   });
 
   it("dry run reports and writes nothing; apply merges both stages and follows a chain", async () => {

@@ -436,6 +436,8 @@ export interface AutoMergeItem {
   error: string | null
   /** Set on a rejected content pair: the first check it failed. */
   reason: ContentRejectReason | null
+  /** For `numbers`: the digit runs only one side has. */
+  detail: string | null
 }
 
 export interface AutoMergeStageCount {
