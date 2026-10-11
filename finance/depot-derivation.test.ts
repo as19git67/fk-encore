@@ -303,6 +303,16 @@ describe("classifySecuTransaction", () => {
     expect(c("990.00", "WERTPAPIERABRECHNUNG VERKAUF WKN AAA111")).toBe("sell");
   });
 
+  it("skips a tax correction that quotes the trade it corrects", () => {
+    const c = (amount: string, purpose: string) =>
+      classifySecuTransaction({ amount, transaction_code: null, purpose });
+    // Synthetic text in the shape a settlement account books it.
+    const text = "STEUERAUSGLEICH WERTPAPIERABRECHNUNG DEPOT-NR 0000000000 BEISPIEL FONDS WKN AAA111 / XF00SONNE005 HANDELSTAG 01.12.2011 MENGE 1,1840 KURS 8442,13200000";
+    expect(c("12.34", text)).toBeNull();
+    expect(c("-12.34", text)).toBeNull();
+    expect(c("-12.34", "STEUERNACHBELASTUNG WERTPAPIERABRECHNUNG WKN AAA111")).toBeNull();
+  });
+
   it("does not take money moved onto the settlement account for a sale", () => {
     const c = (amount: string, purpose: string) =>
       classifySecuTransaction({ amount, transaction_code: null, purpose });

@@ -22,7 +22,9 @@
  *       buy, "Verkauf" a sale, and a sign that contradicts it (money in,
  *       "Kauf") marks a transfer for a trade, not the trade → skip.
  *       Transfer wording (Überweisung, Übertrag, Dauerauftrag, …) without
- *       a trade's wording → skip. Without any wording the sign decides,
+ *       a trade's wording → skip. A tax correction on a trade
+ *       ("Steuerausgleich Wertpapierabrechnung …") → skip, whatever else
+ *       the text quotes. Without any wording the sign decides,
  *       but only money out becomes a buy (a savings plan's execution
  *       often says nothing); money in is a sale only when the bank or the
  *       text says so — the settlement account of a depot receives
@@ -326,6 +328,9 @@ export function classifySecuTransaction(tx: {
   // text names the security.
   const text = `${tx.purpose ?? ""} ${tx.entry_text ?? ""}`;
   const bankSaysTrade = BANK_TRADE_CODES.has(subFamily);
+  // A tax correction on an earlier trade quotes that trade's wording,
+  // quantity and price — but moves no shares.
+  if (TAX_ADJUSTMENT_TEXT_RE.test(text)) return null;
   if (TRADE_TEXT_RE.test(text)) {
     // The wording's direction, where it has one. Money that came in with
     // "Kauf" on it is the transfer that pays for the purchase, not the
@@ -350,6 +355,8 @@ export function classifySecuTransaction(tx: {
  * a redemption.
  */
 const BANK_TRADE_CODES: ReadonlySet<string> = new Set(["TRAD", "SUBS", "REDM"]);
+/** A tax booking about a trade (MLP: "STEUERAUSGLEICH WERTPAPIERABRECHNUNG …"): not the trade. */
+const TAX_ADJUSTMENT_TEXT_RE = /steuer(?:ausgleich|korrektur|erstattung|nachbelastung|neuberechnung|r(?:ü|ue)ckerstattung)/i;
 /** Wording of a trade's booking: it decides over everything below. */
 const TRADE_TEXT_RE = /wertpapierabrechnung|wertpapier-?kauf|wertpapier-?verkauf|\b(?:kauf|verkauf)\b|fondsanteile|ausf(?:ü|ue)hrung/i;
 /** The trade's direction, when the text names one. */
