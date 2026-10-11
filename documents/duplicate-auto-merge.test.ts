@@ -12,8 +12,11 @@ import {
   getAutoMergeState,
   numberDifference,
   numberTokens,
+  oneSidedExtras,
   resetAutoMergeState,
+  sameNumberMultiset,
   sameNumbers,
+  scanNumberKey,
   startAutoMerge,
   type ContentSide,
 } from "./duplicate-auto-merge";
@@ -118,12 +121,37 @@ describe("numberTokens / contentPairQualifies", () => {
 
   it("rejects contradicting pages and names the first failed check", () => {
     const a = side({ id: 1 });
-    expect(contentPairVerdict(a, side({ id: 2, pages_total: 3 }), 0.99)).toBe("pages");
-    expect(contentPairVerdict(a, side({ id: 2, pages_total: null }), 0.99)).toBe("pages");
-    expect(contentPairVerdict(a, side({ id: 2, extracted_text: LETTER.replace("123,45", "124,45") }), 0.99)).toBe("numbers");
-    expect(contentPairVerdict(a, side({ id: 2, extracted_text: "" }), 0.99)).toBe("text");
-    expect(contentPairVerdict(a, side({ id: 2, extracted_text: LETTER.replace("Ihrer", "lhrer") }), 0.5)).toBe("score");
-    expect(contentPairVerdict(a, side({ id: 2 }), 0.99)).toBeNull();
+    const reason = (v: ReturnType<typeof contentPairVerdict>) => (v.ok ? null : v.reason);
+    expect(reason(contentPairVerdict(a, side({ id: 2, pages_total: 3 }), 0.99))).toBe("pages");
+    expect(reason(contentPairVerdict(a, side({ id: 2, pages_total: null }), 0.99))).toBe("pages");
+    expect(reason(contentPairVerdict(a, side({ id: 2, extracted_text: LETTER.replace("123,45", "124,45") }), 0.99))).toBe("numbers");
+    expect(reason(contentPairVerdict(a, side({ id: 2, extracted_text: "" }), 0.99))).toBe("text");
+    expect(reason(contentPairVerdict(a, side({ id: 2, extracted_text: LETTER.replace("Ihrer", "lhrer") }), 0.5))).toBe("score");
+    expect(contentPairVerdict(a, side({ id: 2 }), 0.99)).toEqual({ ok: true, via: "numbers" });
+  });
+
+  it("takes the same scan stored twice on its file names, whatever the numbers read", () => {
+    const a = side({ id: 1, original_filename: "Scan5652-Jahr_2025.pdf", extracted_text: LETTER.replace("123,45", "128,45") });
+    const b = side({ id: 2, original_filename: "#5652-Jahr_2025 Versicherung Beispiel AG Police.pdf" });
+    expect(contentPairVerdict(a, b, 0.96)).toEqual({ ok: true, via: "scan_number" });
+    expect(contentPairVerdict(a, side({ id: 3, original_filename: "Scan5652-Jahr_2025 2.pdf" }), 0.96)).toEqual({ ok: true, via: "scan_number" });
+    // Another counter, another year, or no counter: no link.
+    expect(contentPairVerdict(a, side({ id: 4, original_filename: "Scan5653-Jahr_2025.pdf" }), 0.99).ok).toBe(false);
+    expect(contentPairVerdict(a, side({ id: 5, original_filename: "Scan5652-Jahr_2024.pdf" }), 0.99).ok).toBe(false);
+    expect(scanNumberKey("Rechnung 2025.pdf")).toBeNull();
+    expect(scanNumberKey("#05652-Jahr_2025 x.pdf")).toBe("5652-2025");
+  });
+
+  it("takes the same numbers in another order and reports one-sided extras", () => {
+    const a = side({ id: 1, extracted_text: "Posten 10 Euro und 20 Euro, Summe 30" });
+    const b = side({ id: 2, extracted_text: "Posten 20 Euro und 10 Euro, Summe 30" });
+    expect(sameNumberMultiset("posten 10 euro und 20 euro summe 30", "posten 20 euro und 10 euro summe 30")).toBe(true);
+    expect(contentPairVerdict(a, b, 0.99)).toEqual({ ok: true, via: "order" });
+    expect(oneSidedExtras("a 1 2 3", "a 1 2")).toEqual(["3"]);
+    expect(oneSidedExtras("a 1 2", "a 1 2 3 3")).toEqual(["3", "3"]);
+    expect(oneSidedExtras("a 1 4", "a 1 5")).toBeNull();
+    const v = contentPairVerdict(side({ id: 1, extracted_text: `${LETTER} Tel 04106 7082500` }), side({ id: 2 }), 0.99);
+    expect(v).toEqual({ ok: false, reason: "numbers", extras: ["04106", "7082500"] });
   });
 
   it("ignores a differing date or correspondent when the numbers agree", () => {
@@ -207,10 +235,35 @@ describe("auto-merge against the database", () => {
 
     const { accepted, rejected } = await findContentPairs();
     expect(accepted).toHaveLength(1);
-    expect(accepted[0]).toMatchObject({ stage: "content", keeper_id: a, loser_id: sandwich, score: 0.99 });
+    expect(accepted[0]).toMatchObject({ stage: "content", via: "numbers", keeper_id: a, loser_id: sandwich, score: 0.99 });
     // The other-number pair is reported with its reason; the one under the
-    // auto score is not looked at.
+    // auto score is neither taken nor reported.
     expect(rejected.map((r) => [r.loser_id, r.reason, r.detail])).toEqual([[otherNumber, "numbers", "A: 0815 | B: 0816"]]);
+  });
+
+  it("lets a scan-number pair in below the auto score and a repeated one-sided footer in as boilerplate", async () => {
+    const scanA = await insertDoc({ filename: "Scan5700-Jahr_2025.pdf", text: LETTER.replace("123,45", "128,45") });
+    const scanB = await insertDoc({ filename: "#5700-Jahr_2025 Police.pdf" });
+    await insertPair(scanA, scanB, 0.96);
+
+    // Five pairs where one side carries the same footer numbers and nothing else differs.
+    const footerPairs: Array<[number, number]> = [];
+    for (let i = 0; i < 5; i++) {
+      const letter = LETTER.replace("4711-0815", `4711-08${20 + i}`);
+      const plain = await insertDoc({ text: letter });
+      const withFooter = await insertDoc({ text: `${letter} Beispiel AG, Musterstadt, Tel 04106 7082500` });
+      await insertPair(plain, withFooter, 0.99);
+      footerPairs.push([plain, withFooter]);
+    }
+    // One pair with a different one-sided addition: stays rejected.
+    const draft = await insertDoc({ text: LETTER });
+    const signed = await insertDoc({ text: `${LETTER} Unterschrieben am 08.07.2025 um 18:28` });
+    await insertPair(draft, signed, 0.99);
+
+    const { accepted, rejected } = await findContentPairs();
+    expect(accepted.find((c) => c.loser_id === scanB || c.keeper_id === scanB)?.via).toBe("scan_number");
+    expect(accepted.filter((c) => c.via === "boilerplate")).toHaveLength(5);
+    expect(rejected.map((r) => [r.reason, r.detail])).toEqual([["numbers", "B: 08, 07, 2025, 18, 28"]]);
   });
 
   it("dry run reports and writes nothing; apply merges both stages and follows a chain", async () => {

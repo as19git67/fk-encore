@@ -245,7 +245,15 @@ and whose page counts agree; `doc_date` and `correspondent_slug` are not
 compared, because the classifier reads both out of the same text and a
 differing date on identical numbers was the bulk of what the first version
 left on the review page. The dry run reports the pairs above the score it
-passed on, by first failed check (pages, numbers, text, score). The keeper is the
+passed on, by first failed check (pages, numbers, text, score). Three
+refinements from a real corpus: the scanner's counter and year in both file
+names (`Scan5652-Jahr_2025.pdf` beside `#5652-Jahr_2025 ….pdf`) is a
+provenance link and lets a pair in from `DUPLICATE_MIN_SCORE` up whatever
+the numbers read; the same digit runs in another order are the same numbers
+read column-wise; and digit runs only one side has count as boilerplate
+when exactly that set appears in `BOILERPLATE_MIN_PAIRS` (5) pairs. A
+tolerance on single digits was considered and rejected: consecutive invoice
+numbers differ by one digit. The keeper is the
 side the hash names, else the side without the speaking name, else the
 general rule. The merge re-points rows generically by walking every foreign key
 onto `documents.id` in `information_schema`, so a new table cannot be

@@ -421,12 +421,15 @@ export function listDuplicates(limit?: number) {
 }
 
 export type AutoMergeStage = 'provenance' | 'content'
+/** What let a candidate in. */
+export type AutoMergeVia = 'hash' | 'scan_number' | 'numbers' | 'order' | 'boilerplate'
 export type AutoMergeOutcome = 'planned' | 'merged' | 'failed' | 'rejected'
 /** Why stage B passed on an open pair above the score. */
 export type ContentRejectReason = 'pages' | 'numbers' | 'text' | 'score'
 
 export interface AutoMergeItem {
   stage: AutoMergeStage
+  via: AutoMergeVia
   keeper_id: number
   loser_id: number
   keeper_filename: string

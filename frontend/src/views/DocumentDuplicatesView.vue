@@ -261,6 +261,13 @@ const STAGE_LABELS: Record<AutoMergeItem['stage'], string> = {
   provenance: 'Hash im Dateinamen',
   content: 'Gleicher Inhalt',
 }
+const VIA_LABELS: Record<AutoMergeItem['via'], string> = {
+  hash: 'Hash im Dateinamen',
+  scan_number: 'Gleiche Scan-Nummer',
+  numbers: 'Gleiche Zahlen',
+  order: 'Gleiche Zahlen, andere Reihenfolge',
+  boilerplate: 'Nur Vordruck-Zahlen verschieden',
+}
 const OUTCOME_LABELS: Record<AutoMergeItem['outcome'], string> = {
   planned: 'geplant',
   merged: 'zusammengeführt',
@@ -288,12 +295,13 @@ function csvCell(v: string | number | null): string {
 function downloadAutoReport() {
   const r = autoReport.value
   if (!r) return
-  const head = ['stufe', 'ergebnis', 'grund', 'unterschied', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
+  const head = ['stufe', 'merkmal', 'ergebnis', 'grund', 'unterschied', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
   const lines = [head.join(';')]
   for (const i of r.items) {
     lines.push(
       [
         STAGE_LABELS[i.stage],
+        i.outcome === 'rejected' ? '' : VIA_LABELS[i.via],
         OUTCOME_LABELS[i.outcome],
         i.reason ? REASON_LABELS[i.reason] : '',
         i.detail,
@@ -377,7 +385,10 @@ const movedSummary = computed(() => {
         exportiert und wieder importiert. Und zwei Dokumente, die in jeder Zahl und der Seitenzahl
         übereinstimmen und deren Text zu mindestens 98&nbsp;% gleich ist, sind derselbe Brief und
         nicht derselbe Vordruck mit anderen Zahlen; ein abweichendes Datum oder ein anderer
-        Korrespondent zählt dabei nicht, beides hat die Klassifikation aus demselben Text gelesen. „Prüfen“ zählt und
+        Korrespondent zählt dabei nicht, beides hat die Klassifikation aus demselben Text gelesen.
+        Dazu kommen: dieselbe Scan-Nummer samt Jahr in beiden Dateinamen (derselbe Scan, zweimal
+        abgelegt), dieselben Zahlen in anderer Reihenfolge, und Zusatzzahlen auf nur einer Seite,
+        die in fünf oder mehr Paaren identisch auftauchen (eine Fußzeile, kein Inhalt). „Prüfen“ zählt und
         listet, „Zusammenführen“ führt genau diese Paare zusammen; das Original bleibt.
       </p>
 
@@ -452,7 +463,7 @@ const movedSummary = computed(() => {
           </summary>
           <ul class="auto-report__list">
             <li v-for="i in autoItemsShown" :key="`${i.keeper_id}-${i.loser_id}`">
-              <Tag :value="STAGE_LABELS[i.stage]" severity="secondary" />
+              <Tag :value="i.outcome === 'rejected' ? STAGE_LABELS[i.stage] : VIA_LABELS[i.via]" severity="secondary" />
               <Tag v-if="i.outcome === 'rejected'" :value="i.reason ? REASON_LABELS[i.reason] : OUTCOME_LABELS.rejected" severity="warn" />
               <Tag v-else-if="!autoReport.dry_run" :value="OUTCOME_LABELS[i.outcome]" :severity="i.outcome === 'failed' ? 'danger' : 'success'" />
               <template v-if="i.outcome === 'rejected'">
