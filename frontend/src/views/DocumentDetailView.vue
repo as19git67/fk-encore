@@ -878,7 +878,7 @@ onBeforeUnmount(() => {
   >
     <template #actions>
       <div class="detail-actions">
-        <Button icon="pi pi-arrow-left" label="Zurück" aria-label="Zurück" text @click="goBack" />
+        <Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" @click="goBack" />
         <div
           v-if="inCollection"
           class="basket-nav"
@@ -932,9 +932,9 @@ onBeforeUnmount(() => {
           <Button
             v-if="doc"
             :icon="inBasket ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
-            :label="inBasket ? 'Im Basket' : 'In den Basket'"
             :aria-label="inBasket ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
             text
+            rounded
             :severity="inBasket ? 'success' : undefined"
             v-tooltip.bottom="inBasket ? 'Aus dem Basket entfernen' : 'Dokument in den Basket legen'"
             @click="toggleBasket"
@@ -942,16 +942,17 @@ onBeforeUnmount(() => {
           <Button
             v-if="auth.hasPermission('documents.edit') && doc"
             icon="pi pi-refresh"
-            label="Neu klassifizieren"
+            label="Klassifizieren"
             aria-label="Neu klassifizieren"
             text
             :loading="saving"
+            v-tooltip.bottom="'Neu klassifizieren'"
             @click="onReclassify()"
           />
           <Button
             v-if="auth.hasPermission('documents.edit') && doc"
             icon="pi pi-eye"
-            label="OCR erzwingen"
+            label="OCR"
             aria-label="OCR erzwingen"
             text
             :loading="saving"
@@ -961,7 +962,7 @@ onBeforeUnmount(() => {
           <Button
             v-if="auth.hasPermission('documents.edit') && doc"
             :icon="doc.teacher_requested ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
-            :label="doc.teacher_requested ? 'Vorgemerkt' : 'Für Cloud-Lehrer vormerken'"
+            :label="doc.teacher_requested ? 'Vorgemerkt' : 'Vormerken'"
             :aria-label="doc.teacher_requested ? 'Vormerkung aufheben' : 'Für Cloud-Lehrer vormerken'"
             text
             :loading="saving"
@@ -973,9 +974,9 @@ onBeforeUnmount(() => {
           <Button
             v-if="doc"
             icon="pi pi-download"
-            label="Herunterladen"
             aria-label="Herunterladen"
             text
+            rounded
             :loading="downloading"
             title="Dokument herunterladen — mit durchsuchbarer Textebene (wird bei reinen Scans bei Bedarf erzeugt)."
             @click="onDownload"
@@ -994,8 +995,9 @@ onBeforeUnmount(() => {
             icon="pi pi-trash"
             severity="danger"
             text
-            label="Löschen"
+            rounded
             aria-label="Löschen"
+            v-tooltip.bottom="'Dokument löschen'"
             @click="onDelete"
           />
           <Button
@@ -1857,9 +1859,10 @@ onBeforeUnmount(() => {
   line-height: 1.35;
 }
 
-/* On phones the four labelled buttons (Zurück / Neu klassifizieren /
-   OCR erzwingen / Löschen) overflow the viewport. Hide the labels and
-   tighten padding so the row stays icon-only and fits comfortably. */
+/* Back, basket, download and delete are icon-only everywhere; on phones the
+   remaining labelled buttons (Klassifizieren / OCR / Vormerken /
+   Wiedervorlage) would still overflow the viewport. Hide those labels too
+   and tighten padding so the row stays icon-only and fits comfortably. */
 @media (max-width: 639px) {
   .detail-actions :deep(.p-button-label) {
     display: none;

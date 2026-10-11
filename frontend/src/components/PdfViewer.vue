@@ -750,7 +750,30 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div class="toolbar-group">
+        <!-- Chunk pagination: only documents longer than one chunk need it.
+             Centred between page navigation and zoom where the head is wide
+             enough, on a row of its own below them where it is not. -->
+        <div v-if="paginated" class="toolbar-chunk">
+          <Button
+            icon="pi pi-angle-double-left"
+            text
+            size="small"
+            aria-label="Vorherige Seiten"
+            :disabled="!hasPrevChunk"
+            @click="prevChunk"
+          />
+          <span class="chunk-label">{{ rangeLabel }}</span>
+          <Button
+            icon="pi pi-angle-double-right"
+            text
+            size="small"
+            aria-label="Nächste Seiten"
+            :disabled="!hasNextChunk"
+            @click="nextChunk"
+          />
+        </div>
+
+        <div class="toolbar-group toolbar-group--end">
           <Button
             icon="pi pi-search-minus"
             text
@@ -779,26 +802,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Chunk pagination: only documents longer than one chunk need it. -->
-      <div v-if="paginated" class="chunk-bar">
-        <Button
-          icon="pi pi-angle-double-left"
-          text
-          size="small"
-          aria-label="Vorherige Seiten"
-          :disabled="!hasPrevChunk"
-          @click="prevChunk"
-        />
-        <span class="chunk-label">{{ rangeLabel }}</span>
-        <Button
-          icon="pi pi-angle-double-right"
-          text
-          size="small"
-          aria-label="Nächste Seiten"
-          :disabled="!hasNextChunk"
-          @click="nextChunk"
-        />
-      </div>
     </div>
 
     <div
@@ -923,6 +926,9 @@ onBeforeUnmount(() => {
   top: var(--pdf-head-top, 0px);
   z-index: 3;
   flex-shrink: 0;
+  /* The toolbar lays out by the viewer's width, not the screen's: in the
+     split layout a wide screen still gives the viewer half of it. */
+  container: pdf-head / inline-size;
 }
 
 .toolbar {
@@ -940,6 +946,34 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.25rem;
+}
+
+/* Narrow: page range on its own row under navigation and zoom. */
+.toolbar-chunk {
+  order: 3;
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+/* Wide enough for all three on one row: navigation left, zoom right and the
+   page range centred in the row itself, not merely between the two — the
+   equal outer columns keep it there whatever the groups measure. */
+@container pdf-head (min-width: 760px) {
+  .toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+  .toolbar-chunk {
+    order: 0;
+    grid-column: 2;
+  }
+  .toolbar-group--end {
+    grid-column: 3;
+    justify-self: end;
+  }
 }
 
 .page-indicator {
@@ -986,11 +1020,9 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   flex-wrap: wrap;
   padding: 0.3rem 0.5rem;
-  border-bottom: 1px solid var(--p-content-border-color);
   background: var(--p-content-background);
 }
 .chunk-bar--bottom {
-  border-bottom: none;
   border-top: 1px solid var(--p-content-border-color);
 }
 
@@ -1044,6 +1076,10 @@ onBeforeUnmount(() => {
 
   .chunk-bar {
     padding: 0.2rem 0.25rem;
+  }
+
+  .toolbar-chunk {
+    gap: 0.25rem;
   }
 }
 .chunk-label {
