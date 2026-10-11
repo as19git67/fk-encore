@@ -593,6 +593,25 @@ watch(previewOpen, (open) => {
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onPreviewKeydown))
 
+// The explanation of the two footer controls, until somebody closes it.
+const PREVIEW_HELP_STORAGE_KEY = 'collection-page-selector-help-dismissed'
+function readPreviewHelpDismissed(): boolean {
+  try {
+    return localStorage.getItem(PREVIEW_HELP_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+const previewHelpDismissed = ref(readPreviewHelpDismissed())
+function dismissPreviewHelp() {
+  previewHelpDismissed.value = true
+  try {
+    localStorage.setItem(PREVIEW_HELP_STORAGE_KEY, '1')
+  } catch {
+    // Storage blocked: it stays closed for this visit only.
+  }
+}
+
 const previewIncluded = computed({
   get: () => previewPage.value !== null && !excluded.value.has(previewPage.value),
   set: (included: boolean) => {
@@ -869,9 +888,16 @@ function save() {
         </div>
       </div>
 
-      <Message v-if="redactMode" severity="info" size="small" :closable="false">
-        Rechteck aufziehen, um einen Bereich zu schwärzen. Im PDF der Mappe ist der Text darunter
-        dann entfernt; das Dokument selbst bleibt unverändert.
+      <Message
+        v-if="!previewHelpDismissed"
+        severity="info"
+        size="small"
+        closable
+        @close="dismissPreviewHelp"
+      >
+        <strong>Im PDF</strong>: ob diese Seite ins PDF der Mappe kommt.
+        <strong>Schwärzen</strong>: einschalten und ein Rechteck aufziehen — im PDF der Mappe ist
+        der Text darunter dann entfernt. Das Dokument selbst bleibt unverändert.
       </Message>
       <Message v-if="previewError" severity="warn" :closable="false">{{ previewError }}</Message>
 
@@ -927,7 +953,7 @@ function save() {
     <template #footer>
       <div class="cps-preview-include">
         <Checkbox v-model="previewIncluded" binary input-id="cps-preview-include" />
-        <label for="cps-preview-include">Seite übernehmen</label>
+        <label for="cps-preview-include">Im PDF</label>
       </div>
       <span class="cps-preview-spacer" />
       <Button
