@@ -142,6 +142,21 @@ describe("numberTokens / contentPairQualifies", () => {
     expect(scanNumberKey("#05652-Jahr_2025 x.pdf")).toBe("5652-2025");
   });
 
+  it("below the auto score identical numbers carry a pair only when there are enough of them", () => {
+    // LETTER has seven digit runs: not a fingerprint on its own.
+    const a = side({ id: 1 });
+    expect(contentPairVerdict(a, side({ id: 2, extracted_text: LETTER.replace("Ihrer", "lhrer") }), 0.96)).toEqual({
+      ok: false, reason: "score", extras: null,
+    });
+    const rich = `${LETTER} Kundennummer 99887766, IBAN DE00 0000 0000 0000 0000 00, Beleg 2024-0042.`;
+    const richNoisy = rich.replace("Ihrer", "lhrer").replace("bestätigen", "bestatigen");
+    expect(contentPairVerdict(side({ id: 1, extracted_text: rich }), side({ id: 2, extracted_text: richNoisy }), 0.96)).toEqual({
+      ok: true, via: "numbers_low",
+    });
+    // One digit off: no.
+    expect(contentPairVerdict(side({ id: 1, extracted_text: rich }), side({ id: 2, extracted_text: richNoisy.replace("0042", "0043") }), 0.96).ok).toBe(false);
+  });
+
   it("takes the same numbers in another order and reports one-sided extras", () => {
     const a = side({ id: 1, extracted_text: "Posten 10 Euro und 20 Euro, Summe 30" });
     const b = side({ id: 2, extracted_text: "Posten 20 Euro und 10 Euro, Summe 30" });
@@ -237,8 +252,11 @@ describe("auto-merge against the database", () => {
     expect(accepted).toHaveLength(1);
     expect(accepted[0]).toMatchObject({ stage: "content", via: "numbers", keeper_id: a, loser_id: sandwich, score: 0.99 });
     // The other-number pair is reported with its reason; the one under the
-    // auto score is neither taken nor reported.
-    expect(rejected.map((r) => [r.loser_id, r.reason, r.detail])).toEqual([[otherNumber, "numbers", "A: 0815 | B: 0816"]]);
+    // auto score too, in its own band (LETTER has too few numbers to carry it).
+    expect(rejected.map((r) => [r.loser_id, r.reason, r.detail, r.band]).sort((x, y) => Number(x[0]) - Number(y[0]))).toEqual([
+      [otherNumber, "numbers", "A: 0815 | B: 0816", "auto"],
+      [belowBar, "score", null, "low"],
+    ]);
   });
 
   it("lets a scan-number pair in below the auto score and a repeated one-sided footer in as boilerplate", async () => {
@@ -283,6 +301,7 @@ describe("auto-merge against the database", () => {
     expect(dry.provenance.found).toBe(2);
     expect(dry.content.found).toBe(1);
     expect(dry.content_rejected).toEqual({ pages: 0, numbers: 0, text: 0, score: 0 });
+    expect(dry.content_rejected_low).toEqual({ pages: 0, numbers: 0, text: 0, score: 0 });
     expect(dry.items.every((i) => i.outcome === "planned")).toBe(true);
     for (const id of [first, second, third, c1, c2]) expect(await exists(id)).toBe(true);
 

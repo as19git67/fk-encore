@@ -253,7 +253,10 @@ the numbers read; the same digit runs in another order are the same numbers
 read column-wise; and digit runs only one side has count as boilerplate
 when exactly that set appears in `BOILERPLATE_MIN_PAIRS` (5) pairs. A
 tolerance on single digits was considered and rejected: consecutive invoice
-numbers differ by one digit. The keeper is the
+numbers differ by one digit. Between `DUPLICATE_MIN_SCORE` and the auto
+score identical numbers carry a pair on their own when there are at least
+`LOW_BAND_MIN_NUMBERS` (8) of them — a fingerprint of every date, amount and
+reference — and the report counts that band's rejections separately. The keeper is the
 side the hash names, else the side without the speaking name, else the
 general rule. The merge re-points rows generically by walking every foreign key
 onto `documents.id` in `information_schema`, so a new table cannot be
