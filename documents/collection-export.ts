@@ -111,6 +111,7 @@ export interface CollectionExportInputs {
     sender: string | null;
     doc_date: string | null;
     excluded_pages: number[];
+    redactions: Array<{ page: number; x: number; y: number; w: number; h: number }>;
   }>;
   /** Switched-on members the reader may not open. */
   not_visible: number[];

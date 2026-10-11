@@ -188,6 +188,7 @@ describe("collectionExportFingerprint", () => {
         sender: null,
         doc_date: null,
         excluded_pages: [],
+        redactions: [],
       },
     ],
     not_visible: [],
@@ -202,6 +203,12 @@ describe("collectionExportFingerprint", () => {
       collectionExportFingerprint({
         ...base,
         members: [{ ...base.members[0]!, excluded_pages: [2] }],
+      }),
+    ).not.toBe(collectionExportFingerprint(base));
+    expect(
+      collectionExportFingerprint({
+        ...base,
+        members: [{ ...base.members[0]!, redactions: [{ page: 1, x: 0.1, y: 0.1, w: 0.2, h: 0.1 }] }],
       }),
     ).not.toBe(collectionExportFingerprint(base));
   });

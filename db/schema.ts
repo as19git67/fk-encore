@@ -1403,6 +1403,14 @@ export const documentCollectionItems = pgTable("document_collection_items", {
    * `[]` is the whole document.
    */
   excluded_pages: jsonb("excluded_pages").$type<number[]>().notNull().default([]),
+  /**
+   * Rectangles blacked out in the PDF, relative to the visible page (0..1,
+   * origin top left). See `normalizeRedactions` in documents/collection-pdf.ts.
+   */
+  redactions: jsonb("redactions")
+    .$type<Array<{ page: number; x: number; y: number; w: number; h: number }>>()
+    .notNull()
+    .default([]),
   added_at: timestamp("added_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -45,6 +45,7 @@ import {
   type CollectionExport,
   type DocumentCollectionDetail,
   type DocumentCollectionItem,
+  type PageRedaction,
 } from '../api/collections'
 import { listCorrespondents, type CorrespondentFacet } from '../api/documents'
 import { canShareFiles, shareFile, triggerDownload } from '../utils/shareFile'
@@ -266,11 +267,14 @@ function openPageSelector(item: DocumentCollectionItem) {
   pageSelectorOpen.value = true
 }
 
-function savePageSelection(excludedPages: number[]) {
+function savePageSelection(selection: { excludedPages: number[]; redactions: PageRedaction[] }) {
   const item = pageSelectorItem.value
   if (!item) return
   void run(() =>
-    updateCollectionItem(collectionId.value, item.document_id, { excluded_pages: excludedPages }),
+    updateCollectionItem(collectionId.value, item.document_id, {
+      excluded_pages: selection.excludedPages,
+      redactions: selection.redactions,
+    }),
   )
 }
 
@@ -405,6 +409,11 @@ function pageHint(item: DocumentCollectionItem): string {
   return kept != null
     ? `${kept} von ${item.pages_total} Seiten`
     : `${item.excluded_pages.length} Seiten abgewählt`
+}
+
+function redactionHint(item: DocumentCollectionItem): string {
+  const count = item.redactions.length
+  return `${count} ${count === 1 ? 'Schwärzung' : 'Schwärzungen'}`
 }
 
 watch(collectionId, () => {
@@ -667,6 +676,9 @@ onBeforeUnmount(() => {
               <span :class="{ 'cd-pages--trimmed': item.excluded_pages.length > 0 }">
                 <i class="pi pi-file" /> {{ pageHint(item) }}
               </span>
+              <span v-if="item.redactions.length > 0" class="cd-pages--trimmed">
+                <i class="pi pi-eye-slash" /> {{ redactionHint(item) }}
+              </span>
             </div>
           </div>
           <div class="cd-actions">
@@ -675,7 +687,7 @@ onBeforeUnmount(() => {
               text
               rounded
               size="small"
-              aria-label="Seiten wählen"
+              aria-label="Seiten wählen und schwärzen"
               :disabled="busy"
               @click="openPageSelector(item)"
             />
@@ -775,6 +787,7 @@ onBeforeUnmount(() => {
       :document-id="pageSelectorItem.document_id"
       :title="pageSelectorItem.title || pageSelectorItem.original_filename"
       :excluded-pages="pageSelectorItem.excluded_pages"
+      :redactions="pageSelectorItem.redactions"
       @save="savePageSelection"
     />
   </PageLayout>

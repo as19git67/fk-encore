@@ -55,12 +55,26 @@ export interface DocumentCollection {
   can_administer: boolean
 }
 
+/**
+ * A rectangle blacked out in the folder's PDF, relative to the page as shown
+ * (0..1, origin top left). The document itself is never changed.
+ */
+export interface PageRedaction {
+  /** 1-based page number. */
+  page: number
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface DocumentCollectionItem {
   document_id: number
   position: number
   included: boolean
   /** 1-based page numbers left out of the PDF. */
   excluded_pages: number[]
+  redactions: PageRedaction[]
   title: string | null
   original_filename: string
   mime_type: string
@@ -188,6 +202,7 @@ export function reorderCollection(
 export interface UpdateCollectionItemPayload {
   included?: boolean
   excluded_pages?: number[]
+  redactions?: PageRedaction[]
 }
 
 export function updateCollectionItem(
