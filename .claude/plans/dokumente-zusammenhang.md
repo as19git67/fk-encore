@@ -256,7 +256,14 @@ tolerance on single digits was considered and rejected: consecutive invoice
 numbers differ by one digit. Between `DUPLICATE_MIN_SCORE` and the auto
 score identical numbers carry a pair on their own when there are at least
 `LOW_BAND_MIN_NUMBERS` (8) of them — a fingerprint of every date, amount and
-reference — and the report counts that band's rejections separately. The keeper is the
+reference — and the report counts that band's rejections separately. Trigram
+Jaccard over the whole text is blind to the one line that tells two forms
+apart (two contracts with different tariff names and the same twelve pages
+of terms score 0.998), so the first `HEAD_LENGTH` (120) normalised
+characters are compared on their own: below `HEAD_MIN_SIMILARITY` (0.7) the
+review page shows "Anfang verschieden" and the automatic merge rejects the
+pair before any other check, the scan number included. Scores are shown
+with one decimal. The keeper is the
 side the hash names, else the side without the speaking name, else the
 general rule. The merge re-points rows generically by walking every foreign key
 onto `documents.id` in `information_schema`, so a new table cannot be

@@ -86,6 +86,22 @@ function trigrams(s: string): Set<string> {
   return out;
 }
 
+/**
+ * How much of the opening the two texts share. Trigram Jaccard over the
+ * whole text is blind to the one line that tells two forms apart: two o2
+ * contracts with different tariff names and the same twelve pages of terms
+ * score 0.998. The first `HEAD_LENGTH` normalised characters — title, first
+ * line — are compared on their own; below `HEAD_MIN_SIMILARITY` the pair is
+ * flagged on the review page and the automatic merge leaves it alone
+ * whatever else matches.
+ */
+export const HEAD_LENGTH = 120;
+export const HEAD_MIN_SIMILARITY = 0.7;
+
+export function headSimilarity(normalizedA: string, normalizedB: string): number {
+  return trigramJaccard(normalizedA.slice(0, HEAD_LENGTH), normalizedB.slice(0, HEAD_LENGTH));
+}
+
 /** Jaccard similarity of the two texts' trigram sets, 0..1. */
 export function trigramJaccard(a: string, b: string): number {
   const ta = trigrams(a);
@@ -633,6 +649,8 @@ export interface DuplicateSideDTO {
 export interface DuplicatePairDTO {
   id: number;
   score: number;
+  /** Similarity of the two openings (see `headSimilarity`); null when a text is missing. */
+  head_score: number | null;
   evidence: DuplicateEvidence;
   status: string;
   a: DuplicateSideDTO;
@@ -704,14 +722,28 @@ export const listDuplicates = api(
       ? await dbAll<DuplicateSideDTO>(db.select(sideColumns).from(documents).where(inArray(documents.id, ids)))
       : [];
     const byId = new Map(sides.map((s) => [s.id, s]));
+    // The openings, for the "Anfang verschieden" signal: the whole text is
+    // read once per document and only its head kept.
+    const heads = new Map<number, string>();
+    if (ids.length) {
+      const texts = await dbAll<{ id: number; extracted_text: string | null }>(
+        db.select({ id: documents.id, extracted_text: documents.extracted_text }).from(documents).where(inArray(documents.id, ids)),
+      );
+      for (const t of texts) {
+        if (t.extracted_text) heads.set(t.id, normalizeForSimilarity(t.extracted_text).slice(0, HEAD_LENGTH));
+      }
+    }
     const items: DuplicatePairDTO[] = [];
     for (const p of pairs) {
       const a = p.document_a_id != null ? byId.get(p.document_a_id) : undefined;
       const b = p.document_b_id != null ? byId.get(p.document_b_id) : undefined;
       if (!a || !b) continue; // one side gone: nothing left to decide
+      const ha = heads.get(a.id);
+      const hb = heads.get(b.id);
       items.push({
         id: p.id,
         score: p.score,
+        head_score: ha != null && hb != null ? headSimilarity(ha, hb) : null,
         evidence: p.evidence as unknown as DuplicateEvidence,
         status: p.status,
         a,

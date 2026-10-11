@@ -49,7 +49,9 @@ import { dbAll } from "../db/adapter";
 import { documentDuplicateCandidates, documents } from "../db/schema";
 import {
   DUPLICATE_MIN_SCORE,
+  HEAD_MIN_SIMILARITY,
   defaultKeeper,
+  headSimilarity,
   looksLikeSpeakingName,
   mergeDocuments,
   normalizeForSimilarity,
@@ -94,7 +96,7 @@ export interface AutoMergeCandidate {
 export type AutoMergeOutcome = "planned" | "merged" | "failed" | "rejected";
 
 /** Why stage B passed on an open pair above the score. */
-export type ContentRejectReason = "pages" | "numbers" | "text" | "score";
+export type ContentRejectReason = "pages" | "head" | "numbers" | "text" | "score";
 
 export interface AutoMergeItem extends AutoMergeCandidate {
   outcome: AutoMergeOutcome;
@@ -287,6 +289,10 @@ export function contentPairVerdict(a: ContentSide, b: ContentSide, score: number
   const na = normalizeForSimilarity(a.extracted_text);
   const nb = normalizeForSimilarity(b.extracted_text);
   if (na.length === 0 || nb.length === 0) return { ok: false, reason: "text", extras: null };
+  // A different opening — title, tariff name, first line — is a different
+  // document however much of the small print they share; nothing below,
+  // the scan number included, overrides it.
+  if (headSimilarity(na, nb) < HEAD_MIN_SIMILARITY) return { ok: false, reason: "head", extras: null };
 
   // The same scan stored twice: provenance, so the recorded score (at or
   // above DUPLICATE_MIN_SCORE, or the pair would not exist) is enough and
@@ -494,8 +500,8 @@ export async function autoMergeDuplicates(
 
   // The pairs stage B looked at and passed on, so the report says why the
   // review page is still as long as it is.
-  const contentRejected: Record<ContentRejectReason, number> = { pages: 0, numbers: 0, text: 0, score: 0 };
-  const contentRejectedLow: Record<ContentRejectReason, number> = { pages: 0, numbers: 0, text: 0, score: 0 };
+  const contentRejected: Record<ContentRejectReason, number> = { pages: 0, head: 0, numbers: 0, text: 0, score: 0 };
+  const contentRejectedLow: Record<ContentRejectReason, number> = { pages: 0, head: 0, numbers: 0, text: 0, score: 0 };
   for (const r of rejected) {
     (r.band === "low" ? contentRejectedLow : contentRejected)[r.reason] += 1;
     if (items.length < REPORT_ITEMS_MAX) items.push({ ...r, outcome: "rejected", error: null });

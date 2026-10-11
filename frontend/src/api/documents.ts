@@ -377,6 +377,8 @@ export interface DuplicateSide {
 export interface DuplicatePair {
   id: number
   score: number
+  /** Similarity of the two openings (first ~120 characters); null when a text is missing. */
+  head_score: number | null
   evidence: DuplicateEvidence
   status: string
   a: DuplicateSide
@@ -427,7 +429,7 @@ export type AutoMergeVia = 'hash' | 'scan_number' | 'numbers' | 'numbers_low' | 
 export type ScoreBand = 'auto' | 'low'
 export type AutoMergeOutcome = 'planned' | 'merged' | 'failed' | 'rejected'
 /** Why stage B passed on an open pair above the score. */
-export type ContentRejectReason = 'pages' | 'numbers' | 'text' | 'score'
+export type ContentRejectReason = 'pages' | 'head' | 'numbers' | 'text' | 'score'
 
 export interface AutoMergeItem {
   stage: AutoMergeStage

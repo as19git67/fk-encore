@@ -130,6 +130,17 @@ describe("numberTokens / contentPairQualifies", () => {
     expect(contentPairVerdict(a, side({ id: 2 }), 0.99)).toEqual({ ok: true, via: "numbers" });
   });
 
+  it("rejects a different opening before anything else, the scan number included", () => {
+    const terms = " Allgemeine Geschäftsbedingungen. ".repeat(40) + LETTER;
+    const a = side({ id: 1, original_filename: "Scan5660-Jahr_2025.pdf", extracted_text: `Tarif Starter Flex Online Vertragszusammenfassung.${terms}` });
+    const b = side({ id: 2, original_filename: "#5660-Jahr_2025 Vertrag.pdf", extracted_text: `Tarif S Boost Mobil Pflichtinformationen.${terms}` });
+    const v = contentPairVerdict(a, b, 0.998);
+    expect(v).toEqual({ ok: false, reason: "head", extras: null });
+    // The same opening with an OCR slip passes the head check.
+    const c = side({ id: 3, original_filename: "#5660-Jahr_2025 Vertrag.pdf", extracted_text: `Tarif Starter Flex Onlıne Vertragszusammenfassung.${terms}` });
+    expect(contentPairVerdict(a, c, 0.998).ok).toBe(true);
+  });
+
   it("takes the same scan stored twice on its file names, whatever the numbers read", () => {
     const a = side({ id: 1, original_filename: "Scan5652-Jahr_2025.pdf", extracted_text: LETTER.replace("123,45", "128,45") });
     const b = side({ id: 2, original_filename: "#5652-Jahr_2025 Versicherung Beispiel AG Police.pdf" });
@@ -300,8 +311,8 @@ describe("auto-merge against the database", () => {
     expect(dry.dry_run).toBe(true);
     expect(dry.provenance.found).toBe(2);
     expect(dry.content.found).toBe(1);
-    expect(dry.content_rejected).toEqual({ pages: 0, numbers: 0, text: 0, score: 0 });
-    expect(dry.content_rejected_low).toEqual({ pages: 0, numbers: 0, text: 0, score: 0 });
+    expect(dry.content_rejected).toEqual({ pages: 0, head: 0, numbers: 0, text: 0, score: 0 });
+    expect(dry.content_rejected_low).toEqual({ pages: 0, head: 0, numbers: 0, text: 0, score: 0 });
     expect(dry.items.every((i) => i.outcome === "planned")).toBe(true);
     for (const id of [first, second, third, c1, c2]) expect(await exists(id)).toBe(true);
 
