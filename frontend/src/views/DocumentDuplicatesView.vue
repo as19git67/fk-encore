@@ -116,10 +116,19 @@ function textSource(s: DuplicateSide): string {
   return s.text_source ? (TEXT_SOURCE_LABELS[s.text_source] ?? s.text_source) : '–'
 }
 
+/** Below this the two openings (title, first line) count as different; mirrors the backend. */
+const HEAD_MIN_SIMILARITY = 0.7
+
+/** One decimal, so 0.998 reads 99,8 % and only 1.0 reads 100 %. */
+function formatPercent(score: number): string {
+  return `${(score * 100).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}\u00a0%`
+}
+
 function evidenceChips(p: DuplicatePair): string[] {
   const e = p.evidence
   const out: string[] = []
-  out.push(`Text ${Math.round(p.score * 100)}% gleich`)
+  out.push(`Text ${formatPercent(p.score)} gleich`)
+  if (p.head_score != null && p.head_score < HEAD_MIN_SIMILARITY) out.push('Anfang verschieden')
   if (e.pages_a != null && e.pages_a === e.pages_b) out.push(`${e.pages_a} Seiten beide`)
   if (e.same_date) out.push('Gleiches Datum')
   if (e.same_correspondent) out.push('Gleicher Korrespondent')
@@ -277,6 +286,7 @@ const OUTCOME_LABELS: Record<AutoMergeItem['outcome'], string> = {
 }
 const REASON_LABELS: Record<ContentRejectReason, string> = {
   pages: 'Seitenzahl verschieden oder unbekannt',
+  head: 'Anfang verschieden',
   numbers: 'Zahlen im Text verschieden',
   text: 'Kein Text',
   score: 'Gleiche Zahlen, aber zu wenige für Text unter 98 %',
@@ -288,6 +298,7 @@ const autoRejectedTotal = computed(() => sumReasons(autoReport.value?.content_re
 const autoRejectedLowTotal = computed(() => sumReasons(autoReport.value?.content_rejected_low))
 function reasonBreakdown(r: Record<ContentRejectReason, number>): string {
   const parts: string[] = []
+  if (r.head) parts.push(`${r.head}× Anfang verschieden`)
   if (r.numbers) parts.push(`${r.numbers}× Zahlen verschieden`)
   if (r.score) parts.push(`${r.score}× gleiche Zahlen, aber zu wenige`)
   if (r.pages) parts.push(`${r.pages}× Seitenzahl verschieden oder unbekannt`)
@@ -401,7 +412,9 @@ const movedSummary = computed(() => {
         abgelegt), dieselben Zahlen in anderer Reihenfolge, und Zusatzzahlen auf nur einer Seite,
         die in fünf oder mehr Paaren identisch auftauchen (eine Fußzeile, kein Inhalt). Zwischen 95 und
         98&nbsp;% reichen gleiche Zahlen, wenn es mindestens acht sind: dann stimmen alle Daten, Beträge
-        und Nummern überein, und der Rest ist OCR. „Prüfen“ zählt und
+        und Nummern überein, und der Rest ist OCR. Ein abweichender Anfang (Titel, Tarifname, erste
+        Zeile) schließt ein Paar von allem aus: Zwei Verträge mit verschiedenen Tarifen teilen sich
+        dieselben AGB und sehen deshalb im Text fast gleich aus. „Prüfen“ zählt und
         listet, „Zusammenführen“ führt genau diese Paare zusammen; das Original bleibt.
       </p>
 
@@ -482,7 +495,7 @@ const movedSummary = computed(() => {
                 <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.keeper_id } }">#{{ i.keeper_id }}</RouterLink>
                 ({{ i.keeper_filename }}) und
                 <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.loser_id } }">#{{ i.loser_id }}</RouterLink>
-                ({{ i.loser_filename }}) bleiben zur Prüfung<template v-if="i.score != null">, Text {{ Math.round(i.score * 100) }}&nbsp;%</template>
+                ({{ i.loser_filename }}) bleiben zur Prüfung<template v-if="i.score != null">, Text {{ formatPercent(i.score) }}</template>
                 <span v-if="i.detail" class="text-secondary"> – {{ i.detail }}</span>
               </template>
               <template v-else>
@@ -490,7 +503,7 @@ const movedSummary = computed(() => {
                 bleibt ({{ i.keeper_filename }}),
                 <template v-if="i.outcome === 'merged'">#{{ i.loser_id }}</template>
                 <RouterLink v-else :to="{ name: 'dokumente-detail', params: { id: i.loser_id } }">#{{ i.loser_id }}</RouterLink>
-                {{ autoReport.dry_run ? 'würde gelöscht' : 'gelöscht' }} ({{ i.loser_filename }})<template v-if="i.score != null">, Text {{ Math.round(i.score * 100) }}&nbsp;%</template>
+                {{ autoReport.dry_run ? 'würde gelöscht' : 'gelöscht' }} ({{ i.loser_filename }})<template v-if="i.score != null">, Text {{ formatPercent(i.score) }}</template>
                 <span v-if="i.error" class="text-secondary"> – {{ i.error }}</span>
               </template>
             </li>
