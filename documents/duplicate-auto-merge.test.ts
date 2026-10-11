@@ -7,6 +7,8 @@ import {
   contentKeeper,
   contentPairQualifies,
   contentPairVerdict,
+  dismissClearlyDifferent,
+  isClearlyDifferent,
   findContentPairs,
   findProvenancePairs,
   getAutoMergeState,
@@ -168,6 +170,17 @@ describe("numberTokens / contentPairQualifies", () => {
     expect(contentPairVerdict(side({ id: 1, extracted_text: rich }), side({ id: 2, extracted_text: richNoisy.replace("0042", "0043") }), 0.96).ok).toBe(false);
   });
 
+  it("calls a pair clearly different on pages, opening, or numbers replaced on both sides", () => {
+    expect(isClearlyDifferent("pages", 0, 0)).toBe(true);
+    expect(isClearlyDifferent("head", 0, 0)).toBe(true);
+    expect(isClearlyDifferent("numbers", 3, 2)).toBe(true);
+    // One-sided additions and a single differing run stay with a person.
+    expect(isClearlyDifferent("numbers", 4, 0)).toBe(false);
+    expect(isClearlyDifferent("numbers", 1, 1)).toBe(false);
+    expect(isClearlyDifferent("score", 5, 5)).toBe(false);
+    expect(isClearlyDifferent("text", 0, 0)).toBe(false);
+  });
+
   it("takes the same numbers in another order and reports one-sided extras", () => {
     const a = side({ id: 1, extracted_text: "Posten 10 Euro und 20 Euro, Summe 30" });
     const b = side({ id: 2, extracted_text: "Posten 20 Euro und 10 Euro, Summe 30" });
@@ -313,6 +326,7 @@ describe("auto-merge against the database", () => {
     expect(dry.content.found).toBe(1);
     expect(dry.content_rejected).toEqual({ pages: 0, head: 0, numbers: 0, text: 0, score: 0 });
     expect(dry.content_rejected_low).toEqual({ pages: 0, head: 0, numbers: 0, text: 0, score: 0 });
+    expect(dry.clearly_different).toBe(0);
     expect(dry.items.every((i) => i.outcome === "planned")).toBe(true);
     for (const id of [first, second, third, c1, c2]) expect(await exists(id)).toBe(true);
 
@@ -352,5 +366,37 @@ describe("auto-merge against the database", () => {
     expect(done.report?.provenance.found).toBe(1);
     expect(done.report?.items[0]?.keeper_id).toBe(original);
     expect(await exists(original)).toBe(true);
+  });
+
+  it("dismisses the clearly different pairs of the last report in one go", async () => {
+    // Two months' statements on one form: dates and document number replaced.
+    const march = await insertDoc({ text: LETTER.replace("4711-0815", "5760639").replace("1. Februar", "31. März") });
+    const april = await insertDoc({ text: LETTER.replace("4711-0815", "5810417").replace("1. Februar", "30. April") });
+    await insertPair(march, april, 0.99);
+    // A one-sided addition: stays open for a person.
+    const draft = await insertDoc({ text: LETTER });
+    const signed = await insertDoc({ text: `${LETTER} Unterschrieben am 08.07.2025 um 18:28` });
+    await insertPair(draft, signed, 0.99);
+
+    await expect(dismissClearlyDifferent()).rejects.toThrow(/dry run/);
+
+    startAutoMerge(false);
+    for (let i = 0; i < 200 && getAutoMergeState().status === "running"; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const report = getAutoMergeState().report!;
+    expect(report.clearly_different).toBe(1);
+
+    expect(await dismissClearlyDifferent()).toEqual({ dismissed: 1 });
+    const after = getAutoMergeState().report!;
+    expect(after.dismissed).toBe(1);
+    expect(after.clearly_different).toBe(0);
+    expect(after.items.filter((i) => i.outcome === "dismissed")).toHaveLength(1);
+    const open = await db.execute<{ a: number; b: number }>(
+      sql`SELECT document_a_id AS a, document_b_id AS b FROM document_duplicate_candidates WHERE status = 'open'`,
+    );
+    expect(open.rows.map((r) => [Number(r.a), Number(r.b)])).toEqual([[Math.min(draft, signed), Math.max(draft, signed)]]);
+    // Running it again touches nothing.
+    expect(await dismissClearlyDifferent()).toEqual({ dismissed: 0 });
   });
 });

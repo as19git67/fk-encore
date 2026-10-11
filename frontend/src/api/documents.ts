@@ -427,7 +427,7 @@ export type AutoMergeStage = 'provenance' | 'content'
 export type AutoMergeVia = 'hash' | 'scan_number' | 'numbers' | 'numbers_low' | 'order' | 'boilerplate'
 /** At the auto score (98 %) or between the list threshold (95 %) and it. */
 export type ScoreBand = 'auto' | 'low'
-export type AutoMergeOutcome = 'planned' | 'merged' | 'failed' | 'rejected'
+export type AutoMergeOutcome = 'planned' | 'merged' | 'failed' | 'rejected' | 'dismissed'
 /** Why stage B passed on an open pair above the score. */
 export type ContentRejectReason = 'pages' | 'head' | 'numbers' | 'text' | 'score'
 
@@ -436,6 +436,7 @@ export interface AutoMergeItem {
   via: AutoMergeVia
   /** Content pairs only; null for a provenance link. */
   band: ScoreBand | null
+  pair_id: number | null
   keeper_id: number
   loser_id: number
   keeper_filename: string
@@ -447,6 +448,8 @@ export interface AutoMergeItem {
   reason: ContentRejectReason | null
   /** For `numbers`: the digit runs only one side has. */
   detail: string | null
+  /** A rejected pair the bulk "kein Duplikat" takes. */
+  clearly_different: boolean
 }
 
 export interface AutoMergeStageCount {
@@ -463,6 +466,10 @@ export interface AutoMergeReport {
   content_rejected: Record<ContentRejectReason, number>
   /** The same for pairs between 95 and 98 %. */
   content_rejected_low: Record<ContentRejectReason, number>
+  /** Rejected pairs the bulk "kein Duplikat" would take, not yet dismissed. */
+  clearly_different: number
+  /** Pairs the bulk "kein Duplikat" dismissed from this report. */
+  dismissed: number
   items: AutoMergeItem[]
   items_total: number
   truncated: boolean
@@ -499,6 +506,11 @@ export function startDuplicateAutoMerge(apply: boolean) {
     body: JSON.stringify({ apply }),
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+/** Mark the last report's clearly different pairs as "kein Duplikat" in one go. */
+export function dismissAutoMergeRejected() {
+  return apiFetch<{ dismissed: number }>('/documents/duplicates/auto-merge/dismiss-rejected', { method: 'POST' })
 }
 
 export function getDuplicateAutoMergeStatus() {

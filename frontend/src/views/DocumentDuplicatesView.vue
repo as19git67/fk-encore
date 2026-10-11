@@ -16,6 +16,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import AdminPage from '../components/admin/AdminPage.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import {
+  dismissAutoMergeRejected,
   dismissDuplicate,
   getDuplicateAutoMergeStatus,
   listDuplicates,
@@ -251,6 +252,36 @@ async function runAuto(apply: boolean) {
   }
 }
 
+const autoDismissing = ref(false)
+
+function askAutoDismiss() {
+  const n = autoReport.value?.clearly_different ?? 0
+  confirm.require({
+    header: 'Als kein Duplikat markieren',
+    message:
+      `${n} Paar(e) mit verschiedener Seitenzahl, anderem Anfang oder auf beiden Seiten verschiedenen Zahlen ` +
+      'werden als „Kein Duplikat“ abgehakt und nie wieder vorgeschlagen. Kein Dokument wird verändert oder gelöscht.',
+    icon: 'pi pi-times',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: `${n} Paar(e) abhaken` },
+    accept: () => { void doAutoDismiss() },
+  })
+}
+
+async function doAutoDismiss() {
+  autoDismissing.value = true
+  autoError.value = ''
+  try {
+    await dismissAutoMergeRejected()
+    await refreshAuto()
+    await load()
+  } catch (err: any) {
+    autoError.value = err?.message || 'Konnte die Paare nicht abhaken'
+  } finally {
+    autoDismissing.value = false
+  }
+}
+
 function askAutoApply() {
   const n = autoFound.value
   confirm.require({
@@ -283,6 +314,7 @@ const OUTCOME_LABELS: Record<AutoMergeItem['outcome'], string> = {
   merged: 'zusammengeführt',
   failed: 'fehlgeschlagen',
   rejected: 'nicht übernommen',
+  dismissed: 'kein Duplikat',
 }
 const REASON_LABELS: Record<ContentRejectReason, string> = {
   pages: 'Seitenzahl verschieden oder unbekannt',
@@ -316,16 +348,17 @@ function csvCell(v: string | number | null): string {
 function downloadAutoReport() {
   const r = autoReport.value
   if (!r) return
-  const head = ['stufe', 'merkmal', 'band', 'ergebnis', 'grund', 'unterschied', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
+  const head = ['stufe', 'merkmal', 'band', 'ergebnis', 'grund', 'eindeutig_verschieden', 'unterschied', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
   const lines = [head.join(';')]
   for (const i of r.items) {
     lines.push(
       [
         STAGE_LABELS[i.stage],
-        i.outcome === 'rejected' ? '' : VIA_LABELS[i.via],
+        i.outcome === 'rejected' || i.outcome === 'dismissed' ? '' : VIA_LABELS[i.via],
         i.band === 'low' ? '95-98' : i.band === 'auto' ? '98+' : '',
         OUTCOME_LABELS[i.outcome],
         i.reason ? REASON_LABELS[i.reason] : '',
+        i.clearly_different ? 'ja' : '',
         i.detail,
         i.keeper_id,
         i.keeper_filename,
@@ -414,7 +447,9 @@ const movedSummary = computed(() => {
         98&nbsp;% reichen gleiche Zahlen, wenn es mindestens acht sind: dann stimmen alle Daten, Beträge
         und Nummern überein, und der Rest ist OCR. Ein abweichender Anfang (Titel, Tarifname, erste
         Zeile) schließt ein Paar von allem aus: Zwei Verträge mit verschiedenen Tarifen teilen sich
-        dieselben AGB und sehen deshalb im Text fast gleich aus. „Prüfen“ zählt und
+        dieselben AGB und sehen deshalb im Text fast gleich aus. Was der Probelauf als eindeutig verschieden
+        erkennt (Seitenzahl, Anfang oder auf beiden Seiten andere Zahlen, wie zwei Monatsauszüge auf einem
+        Vordruck), lässt sich mit einem Klick als „Kein Duplikat“ abhaken. „Prüfen“ zählt und
         listet, „Zusammenführen“ führt genau diese Paare zusammen; das Original bleibt.
       </p>
 
@@ -438,6 +473,16 @@ const movedSummary = computed(() => {
           :disabled="autoStarting || autoRunning || !autoReport || !autoReport.dry_run || autoFound === 0"
           :loading="(autoStarting || autoRunning) && !!autoState?.apply"
           @click="askAutoApply"
+        />
+        <Button
+          v-if="autoReport && autoReport.dry_run"
+          icon="pi pi-times"
+          severity="secondary"
+          outlined
+          :label="`${autoReport.clearly_different} Paar(e) als kein Duplikat`"
+          :disabled="autoStarting || autoRunning || autoDismissing || autoReport.clearly_different === 0"
+          :loading="autoDismissing"
+          @click="askAutoDismiss"
         />
         <Button
           v-if="autoReport && autoReport.items.length > 0"
@@ -479,6 +524,10 @@ const movedSummary = computed(() => {
           <template v-if="autoRejectedLowTotal > 0">
             {{ autoRejectedLowTotal }} Paar(e) zwischen 95 und 98&nbsp;% nicht übernommen: {{ reasonBreakdown(autoReport.content_rejected_low) }}.
           </template>
+          <template v-if="autoReport.dismissed > 0"> {{ autoReport.dismissed }} Paar(e) als kein Duplikat abgehakt.</template>
+          <template v-if="autoReport.clearly_different > 0">
+            {{ autoReport.clearly_different }} davon sind eindeutig verschieden (Seitenzahl, Anfang oder beidseitig andere Zahlen) und lassen sich mit einem Klick abhaken.
+          </template>
           <template v-if="autoRejectedTotal + autoRejectedLowTotal > 0"> Details in der Liste und im CSV.</template>
         </Message>
 
@@ -488,14 +537,15 @@ const movedSummary = computed(() => {
           </summary>
           <ul class="auto-report__list">
             <li v-for="i in autoItemsShown" :key="`${i.keeper_id}-${i.loser_id}`">
-              <Tag :value="i.outcome === 'rejected' ? STAGE_LABELS[i.stage] : VIA_LABELS[i.via]" severity="secondary" />
-              <Tag v-if="i.outcome === 'rejected'" :value="i.reason ? REASON_LABELS[i.reason] : OUTCOME_LABELS.rejected" severity="warn" />
-              <Tag v-else-if="!autoReport.dry_run" :value="OUTCOME_LABELS[i.outcome]" :severity="i.outcome === 'failed' ? 'danger' : 'success'" />
-              <template v-if="i.outcome === 'rejected'">
+              <Tag :value="i.outcome === 'rejected' || i.outcome === 'dismissed' ? STAGE_LABELS[i.stage] : VIA_LABELS[i.via]" severity="secondary" />
+              <Tag v-if="i.outcome === 'rejected' || i.outcome === 'dismissed'" :value="i.reason ? REASON_LABELS[i.reason] : OUTCOME_LABELS.rejected" severity="warn" />
+              <Tag v-if="i.outcome === 'dismissed'" :value="OUTCOME_LABELS.dismissed" severity="secondary" />
+              <Tag v-else-if="i.outcome !== 'rejected' && !autoReport.dry_run" :value="OUTCOME_LABELS[i.outcome]" :severity="i.outcome === 'failed' ? 'danger' : 'success'" />
+              <template v-if="i.outcome === 'rejected' || i.outcome === 'dismissed'">
                 <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.keeper_id } }">#{{ i.keeper_id }}</RouterLink>
                 ({{ i.keeper_filename }}) und
                 <RouterLink :to="{ name: 'dokumente-detail', params: { id: i.loser_id } }">#{{ i.loser_id }}</RouterLink>
-                ({{ i.loser_filename }}) bleiben zur Prüfung<template v-if="i.score != null">, Text {{ formatPercent(i.score) }}</template>
+                ({{ i.loser_filename }}) {{ i.outcome === 'dismissed' ? 'abgehakt' : 'bleiben zur Prüfung' }}<template v-if="i.score != null">, Text {{ formatPercent(i.score) }}</template>
                 <span v-if="i.detail" class="text-secondary"> – {{ i.detail }}</span>
               </template>
               <template v-else>

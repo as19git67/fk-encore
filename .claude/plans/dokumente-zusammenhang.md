@@ -263,7 +263,13 @@ of terms score 0.998), so the first `HEAD_LENGTH` (120) normalised
 characters are compared on their own: below `HEAD_MIN_SIMILARITY` (0.7) the
 review page shows "Anfang verschieden" and the automatic merge rejects the
 pair before any other check, the scan number included. Scores are shown
-with one decimal. The keeper is the
+with one decimal. What the dry run rejects for a different page count, a
+different opening, or numbers replaced on both sides (at least
+`CLEARLY_DIFFERENT_MIN_EXTRAS` runs each — two months' statements on one
+form) is "clearly different"; `POST
+/documents/duplicates/auto-merge/dismiss-rejected` marks all of them "kein
+Duplikat" in one go, leaving one-sided additions and single differing runs
+(OCR slips, signed beside draft) to a person. The keeper is the
 side the hash names, else the side without the speaking name, else the
 general rule. The merge re-points rows generically by walking every foreign key
 onto `documents.id` in `information_schema`, so a new table cannot be
