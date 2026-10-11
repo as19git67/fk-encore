@@ -22,6 +22,14 @@
  *     produced (`buildFrontMatter`), which in practice settles on the first
  *     or second pass.
  *
+ *   - **A redacted page keeps nothing of what was under its boxes.** Drawing
+ *     a black rectangle over a page only hides the text from the eye; it
+ *     stays in the content stream and copies out of any viewer. A page with
+ *     redactions is therefore rasterized (`pdftoppm`), the boxes are burnt
+ *     into the pixels, and the image replaces the page (`redactPage`). That
+ *     page loses its own text layer; when `tesseract` is around it gets a
+ *     fresh one, read from the already blackened image.
+ *
  *   - **Every page is at most A4-sized.** Some sources write a page box in
  *     pixels rather than points — a 300 dpi scan then claims a page more than
  *     a metre wide. Viewers that lay out a document by its widest page (macOS
@@ -44,6 +52,7 @@ import { PDFDocument as PdfLibDocument } from "pdf-lib";
 import sharp from "sharp";
 import { normalizePdfText } from "../finance/pdf-report";
 import { singleJpegPagePdf } from "./receipt-pdf";
+import { tesseractEnv } from "./tesseract-env";
 
 console.log("[boot] documents/collection-pdf.ts: all imports resolved");
 
@@ -60,6 +69,24 @@ export interface CollectionPdfMember {
   mime_type: string;
   /** 1-based page numbers to leave out. */
   excluded_pages: number[];
+  /** Rectangles to black out (see `normalizeRedactions`). */
+  redactions?: PageRedaction[];
+}
+
+/**
+ * One rectangle to black out, relative to the page as it is shown — after the
+ * page's rotation, inside its crop box: `x`/`y` are the top-left corner and
+ * `w`/`h` the size, all as fractions of the visible page (0..1). Relative
+ * rather than in points so the browser can record it on whatever size it
+ * rendered the page at.
+ */
+export interface PageRedaction {
+  /** 1-based page number. */
+  page: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface CollectionPdfOptions {
@@ -144,6 +171,88 @@ export function normalizeExcludedPages(input: unknown): number[] {
     seen.add(rounded);
   }
   return [...seen].sort((a, b) => a - b);
+}
+
+/** More boxes than any page plausibly needs; keeps a runaway client in check. */
+const MAX_REDACTIONS = 500;
+/** Boxes thinner than this (relative) are a stray click, not a redaction. */
+const MIN_REDACTION_SIZE = 0.002;
+
+/**
+ * Normalize a stored redaction list: finite numbers only, every box clipped
+ * to the page, specks dropped, sorted by page. Applied on write, like
+ * `normalizeExcludedPages`.
+ */
+export function normalizeRedactions(input: unknown): PageRedaction[] {
+  if (!Array.isArray(input)) return [];
+  const out: PageRedaction[] = [];
+  for (const raw of input) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    const page = Math.trunc(Number(r.page));
+    const nums = [r.x, r.y, r.w, r.h].map(Number);
+    if (!Number.isFinite(page) || page < 1 || nums.some((n) => !Number.isFinite(n))) continue;
+    const [x, y, w, h] = nums as [number, number, number, number];
+    const left = clamp01(Math.min(x, x + w));
+    const top = clamp01(Math.min(y, y + h));
+    const right = clamp01(Math.max(x, x + w));
+    const bottom = clamp01(Math.max(y, y + h));
+    if (right - left < MIN_REDACTION_SIZE || bottom - top < MIN_REDACTION_SIZE) continue;
+    out.push({ page, x: round6(left), y: round6(top), w: round6(right - left), h: round6(bottom - top) });
+    if (out.length >= MAX_REDACTIONS) break;
+  }
+  return out.sort((a, b) => a.page - b.page);
+}
+
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(0, n));
+}
+
+function round6(n: number): number {
+  return Math.round(n * 1e6) / 1e6;
+}
+
+/**
+ * A redaction box in pixels of a `width` × `height` raster. Rounded outward,
+ * so a box never shrinks below what was drawn — half a glyph left visible at
+ * the edge is exactly what redaction must not do.
+ */
+export function redactionPixelBox(
+  r: Pick<PageRedaction, "x" | "y" | "w" | "h">,
+  width: number,
+  height: number,
+): { left: number; top: number; width: number; height: number } {
+  const left = Math.max(0, Math.floor(r.x * width));
+  const top = Math.max(0, Math.floor(r.y * height));
+  const right = Math.min(width, Math.ceil((r.x + r.w) * width));
+  const bottom = Math.min(height, Math.ceil((r.y + r.h) * height));
+  return { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+}
+
+/**
+ * Split one member's selected pages into merge parts: runs of untouched pages
+ * come from the source, every redacted page from its own rendered file.
+ * `[1,2,3,4]` with page 3 redacted → `src 1-2`, `r3 1`, `src 4`.
+ */
+export function partsWithRedactedPages(
+  sourcePath: string,
+  selected: number[],
+  redacted: Map<number, string>,
+): Array<{ path: string; pages: number[] }> {
+  const parts: Array<{ path: string; pages: number[] }> = [];
+  let run: number[] = [];
+  for (const page of selected) {
+    const replacement = redacted.get(page);
+    if (!replacement) {
+      run.push(page);
+      continue;
+    }
+    if (run.length > 0) parts.push({ path: sourcePath, pages: run });
+    run = [];
+    parts.push({ path: replacement, pages: [1] });
+  }
+  if (run.length > 0) parts.push({ path: sourcePath, pages: run });
+  return parts;
 }
 
 /**
@@ -434,6 +543,117 @@ async function materializePdf(
   return out;
 }
 
+// ─── Redaction ──────────────────────────────────────────────────────────────
+
+/** Raster resolution of a redacted page: sharp enough to read and to re-OCR. */
+const REDACT_DPI = parseInt(process.env.DOCUMENTS_REDACT_DPI ?? "200", 10);
+
+/**
+ * Render one page of `pdfPath` with `boxes` burnt in and return the path of a
+ * one-page PDF of the same visible size that holds only that image (plus,
+ * when tesseract is available, a text layer read from it). Nothing of the
+ * original page's content stream, fonts, annotations or form fields carries
+ * over, so text under a box cannot be copied, searched or extracted.
+ */
+export async function redactPage(
+  pdfPath: string,
+  page: number,
+  boxes: Array<Pick<PageRedaction, "x" | "y" | "w" | "h">>,
+  outPrefix: string,
+): Promise<string> {
+  // `-cropbox` and pdftoppm's own handling of /Rotate give the page exactly
+  // as pdfjs shows it in the browser, which is what the boxes are relative to.
+  await run("pdftoppm", [
+    "-f", String(page),
+    "-l", String(page),
+    "-r", String(REDACT_DPI),
+    "-cropbox",
+    "-png",
+    "-singlefile",
+    pdfPath,
+    outPrefix,
+  ]);
+  const raster = `${outPrefix}.png`;
+  const meta = await sharp(raster).metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+  if (!width || !height) throw new Error(`redaction: page ${page} rendered empty`);
+  const jpeg = await sharp(raster)
+    .flatten({ background: "#ffffff" })
+    .composite(
+      boxes.map((box) => {
+        const px = redactionPixelBox(box, width, height);
+        return {
+          input: { create: { width: px.width, height: px.height, channels: 3 as const, background: "#000000" } },
+          left: px.left,
+          top: px.top,
+        };
+      }),
+    )
+    .jpeg({ quality: 85 })
+    .toBuffer();
+  await fs.promises.rm(raster, { force: true });
+  const jpegPath = `${outPrefix}.jpg`;
+  await fs.promises.writeFile(jpegPath, jpeg);
+
+  const searchable = await ocrPagePdf(jpegPath, `${outPrefix}-ocr`);
+  if (searchable) return searchable;
+
+  // No tesseract: the image alone, at the page's own size in points.
+  const doc = await PdfLibDocument.create();
+  const image = await doc.embedJpg(jpeg);
+  const pageWidth = (width * 72) / REDACT_DPI;
+  const pageHeight = (height * 72) / REDACT_DPI;
+  doc.addPage([pageWidth, pageHeight]).drawImage(image, { x: 0, y: 0, width: pageWidth, height: pageHeight });
+  const out = `${outPrefix}.pdf`;
+  await fs.promises.writeFile(out, await doc.save());
+  return out;
+}
+
+/**
+ * A one-page searchable PDF of `jpegPath` via tesseract, or null when
+ * tesseract is missing or fails — the caller then embeds the image alone.
+ * Tesseract reads only the blackened image, so it cannot bring back what the
+ * boxes cover.
+ */
+async function ocrPagePdf(jpegPath: string, outBase: string): Promise<string | null> {
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(
+        "tesseract",
+        [
+          jpegPath,
+          outBase,
+          "--dpi",
+          String(REDACT_DPI),
+          "-l",
+          process.env.DOCUMENTS_OCR_LANG ?? "deu+eng",
+          "-c",
+          "preserve_interword_spaces=1",
+          "pdf",
+        ],
+        { stdio: ["ignore", "ignore", "pipe"], env: tesseractEnv() },
+      );
+      let stderr = "";
+      proc.stderr?.on("data", (d) => {
+        stderr += d.toString();
+      });
+      proc.on("error", reject);
+      proc.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`tesseract exited ${code}: ${stderr.trim().slice(0, 300)}`));
+      });
+    });
+    return `${outBase}.pdf`;
+  } catch (err) {
+    console.warn(
+      "[documents] collection export: redacted page without text layer:",
+      (err as Error)?.message ?? err,
+    );
+    return null;
+  }
+}
+
 // ─── Assembly ───────────────────────────────────────────────────────────────
 
 /**
@@ -474,7 +694,23 @@ export async function buildCollectionPdf(
         skipped.push({ document_id: member.document_id, reason: "no_pages_selected" });
         continue;
       }
-      parts.push({ path: pdfPath, pages: selected });
+      const boxes = (member.redactions ?? []).filter((r) => r.page <= pageCount);
+      if (boxes.length > 0) {
+        // A page that cannot be redacted must not go out unredacted: let the
+        // build fail instead of quietly shipping what was meant to be hidden.
+        const redacted = new Map<number, string>();
+        for (const page of selected) {
+          const onPage = boxes.filter((r) => r.page === page);
+          if (onPage.length === 0) continue;
+          redacted.set(
+            page,
+            await redactPage(pdfPath, page, onPage, path.join(tmpDir, `red-${member.document_id}-${page}`)),
+          );
+        }
+        parts.push(...partsWithRedactedPages(pdfPath, selected, redacted));
+      } else {
+        parts.push({ path: pdfPath, pages: selected });
+      }
       counted.push({
         document_id: member.document_id,
         title: member.title,

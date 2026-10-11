@@ -291,6 +291,29 @@ describe("collection membership", () => {
     expect(after.items[0].excluded_pages).toEqual([1, 3]);
   });
 
+  it("keeps redactions per folder and normalizes them on write", async () => {
+    const doc = await insertDoc();
+    const first = await createCollection({ title: "Mappe A", document_ids: [doc] });
+    const second = await createCollection({ title: "Mappe B", document_ids: [doc] });
+    const after = await updateCollectionItem({
+      id: first.id,
+      documentId: doc,
+      redactions: [
+        { page: 2, x: 0.1, y: 0.1, w: 0.2, h: 0.05 },
+        { page: 1, x: 0.9, y: 0.5, w: 0.5, h: 0.1 },
+        { page: 0, x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+      ],
+    });
+    expect(after.items[0].redactions).toEqual([
+      { page: 1, x: 0.9, y: 0.5, w: 0.1, h: 0.1 },
+      { page: 2, x: 0.1, y: 0.1, w: 0.2, h: 0.05 },
+    ]);
+    expect((await getCollection({ id: second.id })).items[0].redactions).toEqual([]);
+
+    const cleared = await updateCollectionItem({ id: first.id, documentId: doc, redactions: [] });
+    expect(cleared.items[0].redactions).toEqual([]);
+  });
+
   it("refuses to change a document that is not in the collection", async () => {
     const doc = await insertDoc();
     const collection = await createCollection({ title: "Mappe" });

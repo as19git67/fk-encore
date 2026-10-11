@@ -17,6 +17,13 @@
  * terms — and looking must not change the selection. The thumbnails can be
  * zoomed for the same reason; the PDF stays open while the dialog is, so the
  * large preview renders a page on demand at the size it is shown.
+ *
+ * The large preview is also where areas get blacked out: with „Schwärzen" on,
+ * dragging a rectangle over the page adds a box. Boxes are kept relative to
+ * the page as shown (0..1), so they mean the same at any render size. They
+ * change only the folder's PDF — the server re-renders such a page as an
+ * image with the boxes burnt in, so the text under them is gone there; the
+ * document in the archive stays as it is.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -26,6 +33,7 @@ import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import { fetchDocumentBytes } from '../../api/documents'
+import type { PageRedaction } from '../../api/collections'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -35,11 +43,13 @@ const props = defineProps<{
   title: string
   /** 1-based page numbers currently left out. */
   excludedPages: number[]
+  /** Rectangles currently blacked out. */
+  redactions: PageRedaction[]
 }>()
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
-  (e: 'save', excludedPages: number[]): void
+  (e: 'save', value: { excludedPages: number[]; redactions: PageRedaction[] }): void
 }>()
 
 /** Thumbnail widths in CSS pixels the zoom steps through. */
@@ -53,6 +63,7 @@ const loading = ref(false)
 const error = ref('')
 const pages = ref<Array<{ page: number; dataUrl: string }>>([])
 const excluded = ref<Set<number>>(new Set())
+const redactions = ref<PageRedaction[]>([])
 
 const selectedCount = computed(() => pages.value.length - excluded.value.size)
 const allSelected = computed(() => excluded.value.size === 0)
@@ -84,19 +95,6 @@ let pdf: pdfjsLib.PDFDocumentProxy | null = null
 /** Bumped per load so a slow render for a previous document is dropped. */
 let loadToken = 0
 
-watch(
-  () => [props.visible, props.documentId] as const,
-  ([visible]) => {
-    if (!visible) {
-      closePreview()
-      void releasePdf()
-      return
-    }
-    excluded.value = new Set(props.excludedPages)
-    void render()
-  },
-  { immediate: true },
-)
 
 onBeforeUnmount(() => void releasePdf())
 
@@ -168,6 +166,85 @@ function selectNone() {
   excluded.value = new Set(pages.value.map((p) => p.page))
 }
 
+// ─── Redaction ───────────────────────────────────────────────────────────────
+/** Smaller than this (relative) is a click, not a box. */
+const MIN_BOX = 0.005
+
+const redactMode = ref(false)
+/** The box being dragged, in the same relative units. */
+const draft = ref<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+const canvasEl = ref<HTMLElement | null>(null)
+
+function boxesOn(page: number): Array<{ box: PageRedaction; index: number }> {
+  const out: Array<{ box: PageRedaction; index: number }> = []
+  redactions.value.forEach((box, index) => {
+    if (box.page === page) out.push({ box, index })
+  })
+  return out
+}
+
+function boxStyle(box: Pick<PageRedaction, 'x' | 'y' | 'w' | 'h'>) {
+  return {
+    left: `${box.x * 100}%`,
+    top: `${box.y * 100}%`,
+    width: `${box.w * 100}%`,
+    height: `${box.h * 100}%`,
+  }
+}
+
+const draftBox = computed(() => {
+  const d = draft.value
+  if (!d) return null
+  return {
+    x: Math.min(d.x0, d.x1),
+    y: Math.min(d.y0, d.y1),
+    w: Math.abs(d.x1 - d.x0),
+    h: Math.abs(d.y1 - d.y0),
+  }
+})
+
+function relativePoint(event: PointerEvent): { x: number; y: number } | null {
+  const rect = canvasEl.value?.getBoundingClientRect()
+  if (!rect || rect.width === 0 || rect.height === 0) return null
+  const clamp = (n: number) => Math.min(1, Math.max(0, n))
+  return {
+    x: clamp((event.clientX - rect.left) / rect.width),
+    y: clamp((event.clientY - rect.top) / rect.height),
+  }
+}
+
+function onDrawStart(event: PointerEvent) {
+  if (!redactMode.value || previewPage.value === null || event.button !== 0) return
+  const point = relativePoint(event)
+  if (!point) return
+  event.preventDefault()
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  draft.value = { x0: point.x, y0: point.y, x1: point.x, y1: point.y }
+}
+
+function onDrawMove(event: PointerEvent) {
+  if (!draft.value) return
+  const point = relativePoint(event)
+  if (!point) return
+  draft.value = { ...draft.value, x1: point.x, y1: point.y }
+}
+
+function onDrawEnd() {
+  const box = draftBox.value
+  draft.value = null
+  if (!box || previewPage.value === null) return
+  if (box.w < MIN_BOX || box.h < MIN_BOX) return
+  redactions.value = [...redactions.value, { page: previewPage.value, ...box }]
+}
+
+function removeRedaction(index: number) {
+  redactions.value = redactions.value.filter((_, i) => i !== index)
+}
+
+const previewBoxCount = computed(() =>
+  previewPage.value === null ? 0 : boxesOn(previewPage.value).length,
+)
+
 // ─── Large preview ───────────────────────────────────────────────────────────
 const previewPage = ref<number | null>(null)
 const previewUrl = ref<string | null>(null)
@@ -214,6 +291,8 @@ async function openPreview(page: number) {
 }
 
 function closePreview() {
+  draft.value = null
+  redactMode.value = false
   previewPage.value = null
   previewUrl.value = null
   previewLoading.value = false
@@ -248,8 +327,28 @@ function close() {
   emit('update:visible', false)
 }
 
+// Last in setup: with `immediate` this runs right away, and everything it
+// reaches (the preview cache, the redaction state) must exist by then.
+watch(
+  () => [props.visible, props.documentId] as const,
+  ([visible]) => {
+    if (!visible) {
+      closePreview()
+      void releasePdf()
+      return
+    }
+    excluded.value = new Set(props.excludedPages)
+    redactions.value = props.redactions.map((r) => ({ ...r }))
+    void render()
+  },
+  { immediate: true },
+)
+
 function save() {
-  emit('save', [...excluded.value].sort((a, b) => a - b))
+  emit('save', {
+    excludedPages: [...excluded.value].sort((a, b) => a - b),
+    redactions: redactions.value,
+  })
   close()
 }
 </script>
@@ -273,7 +372,8 @@ function save() {
       <div class="cps-toolbar">
         <span class="cps-count">
           {{ selectedCount }} von {{ pages.length }}
-          {{ pages.length === 1 ? 'Seite' : 'Seiten' }} ausgewählt
+          {{ pages.length === 1 ? 'Seite' : 'Seiten' }} ausgewählt<template v-if="redactions.length > 0">
+            · {{ redactions.length }} {{ redactions.length === 1 ? 'Schwärzung' : 'Schwärzungen' }}</template>
         </span>
         <div class="cps-toolbar-actions">
           <Button
@@ -317,8 +417,20 @@ function save() {
               :aria-label="`Seite ${p.page} groß anzeigen`"
               @click="openPreview(p.page)"
             >
-              <img :src="p.dataUrl" alt="" />
+              <span class="cps-canvas">
+                <img :src="p.dataUrl" alt="" />
+                <span
+                  v-for="{ box, index } in boxesOn(p.page)"
+                  :key="index"
+                  class="cps-box"
+                  :style="boxStyle(box)"
+                  aria-hidden="true"
+                />
+              </span>
             </button>
+            <span v-if="boxesOn(p.page).length > 0" class="cps-redacted" aria-hidden="true">
+              <i class="pi pi-eye-slash" /> {{ boxesOn(p.page).length }}
+            </span>
             <button
               type="button"
               class="cps-badge"
@@ -350,13 +462,49 @@ function save() {
   >
     <div class="cps-preview">
       <Message v-if="previewError" severity="warn" :closable="false">{{ previewError }}</Message>
+      <Message v-if="redactMode" severity="info" :closable="false">
+        Rechteck über den Bereich ziehen, der geschwärzt werden soll. Die Schwärzung gilt nur
+        im PDF dieser Mappe — die Seite wird dort als Bild ausgegeben, der Text darunter ist
+        nicht mehr enthalten. Das Dokument selbst bleibt unverändert.
+      </Message>
       <div class="cps-preview-frame">
-        <img
+        <div
           v-if="previewUrl"
-          :src="previewUrl"
-          :alt="previewPage !== null ? `Seite ${previewPage}` : ''"
-          class="cps-preview-img"
-        />
+          ref="canvasEl"
+          class="cps-preview-canvas"
+          :class="{ 'cps-preview-canvas--draw': redactMode }"
+          @pointerdown="onDrawStart"
+          @pointermove="onDrawMove"
+          @pointerup="onDrawEnd"
+          @pointercancel="draft = null"
+        >
+          <img
+            :src="previewUrl"
+            :alt="previewPage !== null ? `Seite ${previewPage}` : ''"
+            class="cps-preview-img"
+            draggable="false"
+          />
+          <template v-if="previewPage !== null">
+            <div
+              v-for="{ box, index } in boxesOn(previewPage)"
+              :key="index"
+              class="cps-box"
+              :style="boxStyle(box)"
+            >
+              <button
+                v-if="redactMode"
+                type="button"
+                class="cps-box-remove"
+                aria-label="Schwärzung entfernen"
+                @pointerdown.stop
+                @click="removeRedaction(index)"
+              >
+                <i class="pi pi-times" aria-hidden="true" />
+              </button>
+            </div>
+          </template>
+          <div v-if="draftBox" class="cps-box cps-box--draft" :style="boxStyle(draftBox)" />
+        </div>
         <ProgressSpinner v-if="previewLoading" class="cps-preview-spinner" style="width: 36px; height: 36px" />
       </div>
     </div>
@@ -378,6 +526,15 @@ function save() {
         @click="stepPreview(1)"
       />
       <span class="cps-preview-spacer" />
+      <Button
+        :icon="redactMode ? 'pi pi-check' : 'pi pi-eye-slash'"
+        :label="redactMode ? 'Schwärzen beenden' : previewBoxCount > 0 ? `Schwärzen (${previewBoxCount})` : 'Schwärzen'"
+        :severity="redactMode ? undefined : 'secondary'"
+        outlined
+        :aria-pressed="redactMode"
+        :disabled="!previewUrl"
+        @click="redactMode = !redactMode"
+      />
       <Button
         v-if="previewPage !== null"
         :icon="excluded.has(previewPage) ? 'pi pi-circle' : 'pi pi-check-circle'"
@@ -455,6 +612,30 @@ function save() {
   width: 100%;
   height: auto;
 }
+.cps-canvas {
+  position: relative;
+  display: block;
+}
+/* A redaction box: black in both themes, because that is what the PDF gets. */
+.cps-box {
+  position: absolute;
+  background: #000; /* audit-ok: the redaction is black in the PDF, whatever the theme */
+}
+.cps-box--draft {
+  background: rgba(0, 0, 0, 0.55);
+  outline: 2px dashed var(--p-primary-color);
+}
+.cps-redacted {
+  pointer-events: none;
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: var(--text-sm);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff; /* audit-ok: white on the fixed dark scrim, like .cps-label */
+}
 .cps-page--off {
   border-color: var(--p-content-border-color);
 }
@@ -516,6 +697,40 @@ function save() {
   display: grid;
   place-items: center;
   min-height: 200px;
+}
+.cps-preview-canvas {
+  position: relative;
+  max-width: 100%;
+  user-select: none;
+}
+.cps-preview-canvas--draw {
+  cursor: crosshair;
+  touch-action: none;
+}
+.cps-box-remove {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  font-size: var(--text-xs);
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+  cursor: pointer;
+}
+.cps-box-remove::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.cps-box-remove:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .cps-preview-img {
   display: block;

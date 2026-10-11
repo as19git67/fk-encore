@@ -56,6 +56,8 @@ import {
 import {
   buildCollectionPdf,
   normalizeExcludedPages,
+  normalizeRedactions,
+  type PageRedaction,
   type CollectionPdfMember,
 } from "./collection-pdf";
 
@@ -144,6 +146,8 @@ export interface CollectionItemDTO {
   position: number;
   included: boolean;
   excluded_pages: number[];
+  /** Rectangles blacked out in the PDF (relative to the visible page). */
+  redactions: PageRedaction[];
   title: string | null;
   original_filename: string;
   mime_type: string;
@@ -364,6 +368,7 @@ async function loadItems(collectionId: number): Promise<CollectionItemDTO[]> {
     position: number;
     included: boolean;
     excluded_pages: number[] | null;
+    redactions: unknown;
     joined_by: "user" | "rule";
     title: string | null;
     original_filename: string;
@@ -382,6 +387,7 @@ async function loadItems(collectionId: number): Promise<CollectionItemDTO[]> {
         position: documentCollectionItems.position,
         included: documentCollectionItems.included,
         excluded_pages: documentCollectionItems.excluded_pages,
+        redactions: documentCollectionItems.redactions,
         joined_by: documentCollectionItems.joined_by,
         title: documents.title,
         original_filename: documents.original_filename,
@@ -403,6 +409,7 @@ async function loadItems(collectionId: number): Promise<CollectionItemDTO[]> {
   return rows.map((row) => ({
     ...row,
     excluded_pages: normalizeExcludedPages(row.excluded_pages),
+    redactions: normalizeRedactions(row.redactions),
   }));
 }
 
@@ -889,6 +896,11 @@ export interface UpdateCollectionItemRequest {
   included?: boolean;
   /** 1-based page numbers to leave out of the PDF. */
   excluded_pages?: number[];
+  /**
+   * Rectangles to black out in the PDF; replaces the whole list. The document
+   * itself is never changed — only the folder's PDF is.
+   */
+  redactions?: PageRedaction[];
 }
 
 export const updateCollectionItem = api(
@@ -910,6 +922,9 @@ export const updateCollectionItem = api(
     if (req.included !== undefined) patch.included = req.included;
     if (req.excluded_pages !== undefined) {
       patch.excluded_pages = normalizeExcludedPages(req.excluded_pages);
+    }
+    if (req.redactions !== undefined) {
+      patch.redactions = normalizeRedactions(req.redactions);
     }
     if (Object.keys(patch).length === 0) {
       return await buildDetail(row.id, userId, isAdmin);
@@ -1441,11 +1456,13 @@ async function loadExportInputs(
   const items = await dbAll<{
     document_id: number;
     excluded_pages: number[] | null;
+    redactions: unknown;
   }>(
     db
       .select({
         document_id: documentCollectionItems.document_id,
         excluded_pages: documentCollectionItems.excluded_pages,
+        redactions: documentCollectionItems.redactions,
       })
       .from(documentCollectionItems)
       .where(
@@ -1490,6 +1507,7 @@ async function loadExportInputs(
       sender: doc.sender,
       doc_date: doc.doc_date,
       excluded_pages: normalizeExcludedPages(item.excluded_pages),
+      redactions: normalizeRedactions(item.redactions),
     });
   }
   return { collection, inputs, docs };
@@ -1536,6 +1554,7 @@ export async function renderCollectionPdf(
       source_path: source.path,
       mime_type: source.mime || doc.mime_type,
       excluded_pages: member.excluded_pages,
+      redactions: member.redactions,
     });
   }
 

@@ -1,4 +1,10 @@
 import { describe, it, expect } from "vitest";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { spawnSync } from "child_process";
+import PDFDocument from "pdfkit";
+import sharp from "sharp";
 import { PDFDocument as PdfLibDocument } from "pdf-lib";
 import {
   assignStartPages,
@@ -9,7 +15,11 @@ import {
   formatPageSpec,
   frontMatterWanted,
   normalizeExcludedPages,
+  normalizeRedactions,
+  partsWithRedactedPages,
   qpdfMergeArgs,
+  redactPage,
+  redactionPixelBox,
   renderFrontMatter,
   selectPages,
   fitScaleToA4,
@@ -322,3 +332,121 @@ describe("shrinkOversizedPages", () => {
   });
 });
 
+
+describe("normalizeRedactions", () => {
+  it("clips boxes to the page, flips negative sizes and sorts by page", () => {
+    expect(
+      normalizeRedactions([
+        { page: 2, x: 0.5, y: 0.5, w: 0.8, h: 0.1 },
+        { page: 1, x: 0.4, y: 0.3, w: -0.2, h: -0.1 },
+      ]),
+    ).toEqual([
+      { page: 1, x: 0.2, y: 0.2, w: 0.2, h: 0.1 },
+      { page: 2, x: 0.5, y: 0.5, w: 0.5, h: 0.1 },
+    ]);
+  });
+
+  it("drops junk, specks and pages below 1", () => {
+    expect(
+      normalizeRedactions([
+        null,
+        "box",
+        { page: 0, x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+        { page: 1, x: "a", y: 0.1, w: 0.2, h: 0.2 },
+        { page: 1, x: 0.1, y: 0.1, w: 0.0001, h: 0.2 },
+        { page: 1, x: 2, y: 2, w: 1, h: 1 },
+      ]),
+    ).toEqual([]);
+    expect(normalizeRedactions("nope")).toEqual([]);
+  });
+});
+
+describe("redactionPixelBox", () => {
+  it("rounds outward so the box never shrinks", () => {
+    expect(redactionPixelBox({ x: 0.105, y: 0.205, w: 0.1, h: 0.1 }, 100, 100)).toEqual({
+      left: 10,
+      top: 20,
+      width: 11,
+      height: 11,
+    });
+  });
+
+  it("stays inside the raster", () => {
+    expect(redactionPixelBox({ x: 0.95, y: 0.95, w: 0.05, h: 0.05 }, 100, 100)).toEqual({
+      left: 95,
+      top: 95,
+      width: 5,
+      height: 5,
+    });
+  });
+});
+
+describe("partsWithRedactedPages", () => {
+  it("splits the source around each redacted page", () => {
+    const redacted = new Map([
+      [3, "/tmp/r3.pdf"],
+      [5, "/tmp/r5.pdf"],
+    ]);
+    expect(partsWithRedactedPages("/src.pdf", [1, 2, 3, 4, 5], redacted)).toEqual([
+      { path: "/src.pdf", pages: [1, 2] },
+      { path: "/tmp/r3.pdf", pages: [1] },
+      { path: "/src.pdf", pages: [4] },
+      { path: "/tmp/r5.pdf", pages: [1] },
+    ]);
+  });
+
+  it("ignores redactions on pages that are not selected", () => {
+    expect(partsWithRedactedPages("/src.pdf", [1, 2], new Map([[3, "/tmp/r3.pdf"]]))).toEqual([
+      { path: "/src.pdf", pages: [1, 2] },
+    ]);
+  });
+});
+
+const hasPoppler =
+  spawnSync("pdftoppm", ["-v"]).status === 0 && spawnSync("pdftotext", ["-v"]).status === 0;
+
+describe.skipIf(!hasPoppler)("redactPage", () => {
+  async function letter(): Promise<Buffer> {
+    const pdf = new PDFDocument({ size: "A4", margin: 56 });
+    const chunks: Buffer[] = [];
+    pdf.on("data", (c: Buffer) => chunks.push(c));
+    const done = new Promise<void>((resolve) => pdf.on("end", () => resolve()));
+    pdf.fontSize(18).text("VERTRAULICH 4711", 56, 80);
+    pdf.fontSize(18).text("Sichtbarer Rest", 56, 600);
+    pdf.end();
+    await done;
+    return Buffer.concat(chunks);
+  }
+
+  it("leaves no trace of the covered text and keeps the page size", async () => {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "redact-test-"));
+    try {
+      const src = path.join(dir, "src.pdf");
+      await fs.promises.writeFile(src, await letter());
+      expect(spawnSync("pdftotext", [src, "-"]).stdout.toString()).toContain("VERTRAULICH");
+
+      // Top band of the page: y 60..120pt of 841.89pt.
+      const out = await redactPage(src, 1, [{ x: 0, y: 0.06, w: 1, h: 0.09 }], path.join(dir, "r"));
+
+      expect(spawnSync("pdftotext", [out, "-"]).stdout.toString()).not.toContain("VERTRAULICH");
+      const doc = await PdfLibDocument.load(await fs.promises.readFile(out));
+      expect(doc.getPageCount()).toBe(1);
+      const size = doc.getPages()[0]!.getSize();
+      expect(size.width).toBeCloseTo(595.28, 0);
+      expect(size.height).toBeCloseTo(841.89, 0);
+
+      // The box is black in the output, the rest of the page is not.
+      expect(spawnSync("pdftoppm", ["-r", "36", "-png", "-singlefile", out, path.join(dir, "check")]).status).toBe(0);
+      const { data, info } = await sharp(path.join(dir, "check.png"))
+        .greyscale()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const at = (fx: number, fy: number) =>
+        data[Math.floor(fy * info.height) * info.width + Math.floor(fx * info.width)]!;
+      expect(at(0.5, 0.1)).toBeLessThan(40);
+      expect(at(0.5, 0.4)).toBeGreaterThan(200);
+    } finally {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
