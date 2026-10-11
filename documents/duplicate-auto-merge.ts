@@ -26,6 +26,14 @@
  *   document's — and such pairs were the bulk of what the first version left
  *   on the review page.
  *
+ *   Three refinements, each from a real corpus: a scanner's counter and
+ *   year in both file names (`Scan5652-Jahr_2025.pdf` beside
+ *   `#5652-Jahr_2025 ….pdf`) is a provenance link like the hash and lets a
+ *   pair in from `DUPLICATE_MIN_SCORE` up; the same digit runs in another
+ *   order are the same numbers read column-wise; and digits only one side
+ *   has are boilerplate, not content, when exactly that set turns up in
+ *   `BOILERPLATE_MIN_PAIRS` pairs (a footer one rendering has as text).
+ *
  * Everything else stays on the review page. Dry run by default: the report
  * names every pair with its stage and the side that would stay; `apply` runs
  * the same `mergeDocuments` the manual button uses, one pair after another,
@@ -40,6 +48,7 @@ import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { documentDuplicateCandidates, documents } from "../db/schema";
 import {
+  DUPLICATE_MIN_SCORE,
   defaultKeeper,
   looksLikeSpeakingName,
   mergeDocuments,
@@ -55,11 +64,17 @@ export const DUPLICATE_AUTO_MIN_SCORE = parseFloat(
 );
 /** Report rows kept; the counts are complete either way. */
 const REPORT_ITEMS_MAX = 5000;
+/** One-sided extra digit runs identical across this many pairs count as boilerplate. */
+export const BOILERPLATE_MIN_PAIRS = 5;
+
+/** What let a candidate in, for the report. */
+export type AutoMergeVia = "hash" | "scan_number" | "numbers" | "order" | "boilerplate";
 
 export type AutoMergeStage = "provenance" | "content";
 
 export interface AutoMergeCandidate {
   stage: AutoMergeStage;
+  via: AutoMergeVia;
   keeper_id: number;
   loser_id: number;
   keeper_filename: string;
@@ -134,6 +149,7 @@ export async function findProvenancePairs(): Promise<AutoMergeCandidate[]> {
   `);
   return rows.rows.map((r) => ({
     stage: "provenance",
+    via: "hash",
     keeper_id: Number(r.keeper_id),
     loser_id: Number(r.loser_id),
     keeper_filename: r.keeper_filename,
@@ -191,6 +207,49 @@ export function numberDifference(na: string, nb: string, max = 5): string {
   return [side("A", a), side("B", b)].filter((x): x is string => x !== null).join(" | ") || "same digits, other order";
 }
 
+/**
+ * The scanner's counter and the year a household's file names carry, as one
+ * key: `Scan5652-Jahr_2025.pdf`, `#5652-Jahr_2025 Versicherung ….pdf` and
+ * `Scan5652-Jahr_2025 2.pdf` all say "scan 5652 of 2025". Two documents
+ * with the same key are the same scan stored twice; the year keeps a
+ * counter that wrapped from matching across years.
+ */
+export function scanNumberKey(filename: string): string | null {
+  const m = /(?:^|[\s_-])(?:scan|#)\s?(\d{3,6})-jahr_(\d{4})/i.exec(filename);
+  return m ? `${Number(m[1])}-${m[2]}` : null;
+}
+
+/** The same digit runs, whatever their order: the numbers read column-wise. */
+export function sameNumberMultiset(na: string, nb: string): boolean {
+  const ta = numberTokens(na).sort();
+  const tb = numberTokens(nb).sort();
+  return sameSequence(ta, tb);
+}
+
+/**
+ * The digit runs only one side has, when the other side has none of its
+ * own — the shape of a footer one rendering carries as text. Null when both
+ * sides have extras (that is content differing, not an addition).
+ */
+export function oneSidedExtras(na: string, nb: string): string[] | null {
+  const count = (tokens: string[]) => {
+    const m = new Map<string, number>();
+    for (const t of tokens) m.set(t, (m.get(t) ?? 0) + 1);
+    return m;
+  };
+  const ca = count(numberTokens(na));
+  const cb = count(numberTokens(nb));
+  const extras = (x: Map<string, number>, y: Map<string, number>) => {
+    const out: string[] = [];
+    for (const [t, n] of x) for (let i = (y.get(t) ?? 0); i < n; i++) out.push(t);
+    return out.sort();
+  };
+  const a = extras(ca, cb);
+  const b = extras(cb, ca);
+  if (a.length > 0 && b.length > 0) return null;
+  return a.length > 0 ? a : b;
+}
+
 export interface ContentSide {
   id: number;
   original_filename: string;
@@ -206,19 +265,40 @@ export interface ContentSide {
  * other numbers? Returns the first failed check, or null when it qualifies.
  * Pure, so the test can feed it two rows.
  */
-export function contentPairVerdict(a: ContentSide, b: ContentSide, score: number): ContentRejectReason | null {
-  if (a.pages_total == null || b.pages_total == null || a.pages_total !== b.pages_total) return "pages";
+export type ContentVerdict =
+  | { ok: true; via: AutoMergeVia }
+  | { ok: false; reason: ContentRejectReason; extras: string[] | null };
+
+export function contentPairVerdict(a: ContentSide, b: ContentSide, score: number): ContentVerdict {
+  if (a.pages_total == null || b.pages_total == null || a.pages_total !== b.pages_total) {
+    return { ok: false, reason: "pages", extras: null };
+  }
   const na = normalizeForSimilarity(a.extracted_text);
   const nb = normalizeForSimilarity(b.extracted_text);
-  if (na.length === 0 || nb.length === 0) return "text";
-  if (!sameNumbers(na, nb)) return "numbers";
-  if (na === nb) return null;
+  if (na.length === 0 || nb.length === 0) return { ok: false, reason: "text", extras: null };
+
+  // The same scan stored twice: provenance, so the recorded score (at or
+  // above DUPLICATE_MIN_SCORE, or the pair would not exist) is enough and
+  // the numbers may differ by OCR.
+  const ka = scanNumberKey(a.original_filename);
+  const kb = scanNumberKey(b.original_filename);
+  if (ka && kb && ka === kb) return { ok: true, via: "scan_number" };
+
+  const same = sameNumbers(na, nb);
+  const sameSet = !same && sameNumberMultiset(na, nb);
+  if (!same && !sameSet) {
+    const s = score >= DUPLICATE_AUTO_MIN_SCORE ? score : trigramJaccard(na, nb);
+    if (s < DUPLICATE_AUTO_MIN_SCORE) return { ok: false, reason: "score", extras: null };
+    return { ok: false, reason: "numbers", extras: oneSidedExtras(na, nb) };
+  }
+  if (na === nb) return { ok: true, via: "numbers" };
   const s = score >= DUPLICATE_AUTO_MIN_SCORE ? score : trigramJaccard(na, nb);
-  return s >= DUPLICATE_AUTO_MIN_SCORE ? null : "score";
+  if (s < DUPLICATE_AUTO_MIN_SCORE) return { ok: false, reason: "score", extras: null };
+  return { ok: true, via: same ? "numbers" : "order" };
 }
 
 export function contentPairQualifies(a: ContentSide, b: ContentSide, score: number): boolean {
-  return contentPairVerdict(a, b, score) === null;
+  return contentPairVerdict(a, b, score).ok;
 }
 
 /**
@@ -249,7 +329,12 @@ export interface RejectedContentPair extends AutoMergeCandidate {
   detail: string | null;
 }
 
-/** Open pairs at or above the auto score: those whose content qualifies, and why the others do not. */
+/**
+ * Open pairs: those whose content qualifies, and why the others at or above
+ * the auto score do not. Pairs between `DUPLICATE_MIN_SCORE` and the auto
+ * score are looked at only for the scan-number link and otherwise left
+ * unreported — they were never promised to the automatic run.
+ */
 export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate[]; rejected: RejectedContentPair[] }> {
   const pairs = await dbAll<{ id: number; a: number | null; b: number | null; score: number }>(
     db
@@ -263,12 +348,15 @@ export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate
       .where(
         and(
           eq(documentDuplicateCandidates.status, "open"),
-          gte(documentDuplicateCandidates.score, DUPLICATE_AUTO_MIN_SCORE - 1e-6),
+          gte(documentDuplicateCandidates.score, DUPLICATE_MIN_SCORE - 1e-6),
         ),
       ),
   );
   const accepted: AutoMergeCandidate[] = [];
   const rejected: RejectedContentPair[] = [];
+  // Number-rejected pairs whose extras sit on one side only, by that set:
+  // the same set in BOILERPLATE_MIN_PAIRS pairs is a footer, not content.
+  const byExtras = new Map<string, RejectedContentPair[]>();
   for (const p of pairs) {
     if (p.a == null || p.b == null) continue;
     const sides = await dbAll<ContentSide>(
@@ -279,24 +367,43 @@ export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate
     if (!a || !b) continue;
     const keeperId = contentKeeper(a, b);
     const [keeper, loser] = keeperId === a.id ? [a, b] : [b, a];
+    const verdict = contentPairVerdict(a, b, p.score);
     const candidate: AutoMergeCandidate = {
       stage: "content",
+      via: verdict.ok ? verdict.via : "numbers",
       keeper_id: keeper.id,
       loser_id: loser.id,
       keeper_filename: keeper.original_filename,
       loser_filename: loser.original_filename,
       score: p.score,
     };
-    const reason = contentPairVerdict(a, b, p.score);
-    if (reason) {
-      const detail =
-        reason === "numbers"
-          ? numberDifference(normalizeForSimilarity(a.extracted_text), normalizeForSimilarity(b.extracted_text))
-          : null;
-      rejected.push({ ...candidate, reason, detail });
-    } else accepted.push(candidate);
+    if (verdict.ok) {
+      accepted.push(candidate);
+      continue;
+    }
+    // Below the auto score only the scan-number link counts; the rest was
+    // never a candidate and is not reported.
+    if (p.score < DUPLICATE_AUTO_MIN_SCORE - 1e-6) continue;
+    const detail =
+      verdict.reason === "numbers"
+        ? numberDifference(normalizeForSimilarity(a.extracted_text), normalizeForSimilarity(b.extracted_text))
+        : null;
+    const row: RejectedContentPair = { ...candidate, reason: verdict.reason, detail };
+    rejected.push(row);
+    if (verdict.reason === "numbers" && verdict.extras && verdict.extras.length > 0) {
+      const key = verdict.extras.join(",");
+      byExtras.set(key, [...(byExtras.get(key) ?? []), row]);
+    }
   }
-  return { accepted, rejected };
+  const boilerplate = new Set<RejectedContentPair>();
+  for (const group of byExtras.values()) {
+    if (group.length < BOILERPLATE_MIN_PAIRS) continue;
+    for (const r of group) {
+      boilerplate.add(r);
+      accepted.push({ ...r, via: "boilerplate" });
+    }
+  }
+  return { accepted, rejected: rejected.filter((r) => !boilerplate.has(r)) };
 }
 
 // ─── The run ────────────────────────────────────────────────────────────────
