@@ -67,14 +67,22 @@ const REPORT_ITEMS_MAX = 5000;
 /** One-sided extra digit runs identical across this many pairs count as boilerplate. */
 export const BOILERPLATE_MIN_PAIRS = 5;
 
+/** Digit runs a pair needs before identical numbers alone carry it below the auto score. */
+export const LOW_BAND_MIN_NUMBERS = 8;
+
 /** What let a candidate in, for the report. */
-export type AutoMergeVia = "hash" | "scan_number" | "numbers" | "order" | "boilerplate";
+export type AutoMergeVia = "hash" | "scan_number" | "numbers" | "numbers_low" | "order" | "boilerplate";
+
+/** Which score band a content pair sits in: at the auto score or between DUPLICATE_MIN_SCORE and it. */
+export type ScoreBand = "auto" | "low";
 
 export type AutoMergeStage = "provenance" | "content";
 
 export interface AutoMergeCandidate {
   stage: AutoMergeStage;
   via: AutoMergeVia;
+  /** Content pairs only; null for a provenance link. */
+  band: ScoreBand | null;
   keeper_id: number;
   loser_id: number;
   keeper_filename: string;
@@ -107,8 +115,10 @@ export interface AutoMergeReport {
   dry_run: boolean;
   provenance: AutoMergeStageCount;
   content: AutoMergeStageCount;
-  /** Open pairs above the score that stage B passed on, by first failed check. */
+  /** Open pairs at the auto score that stage B passed on, by first failed check. */
   content_rejected: Record<ContentRejectReason, number>;
+  /** The same for pairs between DUPLICATE_MIN_SCORE and the auto score. */
+  content_rejected_low: Record<ContentRejectReason, number>;
   items: AutoMergeItem[];
   items_total: number;
   truncated: boolean;
@@ -150,6 +160,7 @@ export async function findProvenancePairs(): Promise<AutoMergeCandidate[]> {
   return rows.rows.map((r) => ({
     stage: "provenance",
     via: "hash",
+    band: null,
     keeper_id: Number(r.keeper_id),
     loser_id: Number(r.loser_id),
     keeper_filename: r.keeper_filename,
@@ -286,15 +297,15 @@ export function contentPairVerdict(a: ContentSide, b: ContentSide, score: number
 
   const same = sameNumbers(na, nb);
   const sameSet = !same && sameNumberMultiset(na, nb);
-  if (!same && !sameSet) {
-    const s = score >= DUPLICATE_AUTO_MIN_SCORE ? score : trigramJaccard(na, nb);
-    if (s < DUPLICATE_AUTO_MIN_SCORE) return { ok: false, reason: "score", extras: null };
-    return { ok: false, reason: "numbers", extras: oneSidedExtras(na, nb) };
-  }
+  if (!same && !sameSet) return { ok: false, reason: "numbers", extras: oneSidedExtras(na, nb) };
   if (na === nb) return { ok: true, via: "numbers" };
   const s = score >= DUPLICATE_AUTO_MIN_SCORE ? score : trigramJaccard(na, nb);
-  if (s < DUPLICATE_AUTO_MIN_SCORE) return { ok: false, reason: "score", extras: null };
-  return { ok: true, via: same ? "numbers" : "order" };
+  if (s >= DUPLICATE_AUTO_MIN_SCORE) return { ok: true, via: same ? "numbers" : "order" };
+  // Below the auto score identical numbers still carry the pair when there
+  // are enough of them to be a fingerprint: every date, amount, account and
+  // reference the same, and the text apart by OCR only.
+  if (same && numberTokens(na).length >= LOW_BAND_MIN_NUMBERS) return { ok: true, via: "numbers_low" };
+  return { ok: false, reason: "score", extras: null };
 }
 
 export function contentPairQualifies(a: ContentSide, b: ContentSide, score: number): boolean {
@@ -330,10 +341,9 @@ export interface RejectedContentPair extends AutoMergeCandidate {
 }
 
 /**
- * Open pairs: those whose content qualifies, and why the others at or above
- * the auto score do not. Pairs between `DUPLICATE_MIN_SCORE` and the auto
- * score are looked at only for the scan-number link and otherwise left
- * unreported — they were never promised to the automatic run.
+ * Open pairs from `DUPLICATE_MIN_SCORE` up: those whose content qualifies,
+ * and why the others do not, each tagged with its score band so the report
+ * can tell the auto band from the one below it.
  */
 export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate[]; rejected: RejectedContentPair[] }> {
   const pairs = await dbAll<{ id: number; a: number | null; b: number | null; score: number }>(
@@ -368,9 +378,11 @@ export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate
     const keeperId = contentKeeper(a, b);
     const [keeper, loser] = keeperId === a.id ? [a, b] : [b, a];
     const verdict = contentPairVerdict(a, b, p.score);
+    const band: ScoreBand = p.score >= DUPLICATE_AUTO_MIN_SCORE - 1e-6 ? "auto" : "low";
     const candidate: AutoMergeCandidate = {
       stage: "content",
       via: verdict.ok ? verdict.via : "numbers",
+      band,
       keeper_id: keeper.id,
       loser_id: loser.id,
       keeper_filename: keeper.original_filename,
@@ -381,9 +393,6 @@ export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate
       accepted.push(candidate);
       continue;
     }
-    // Below the auto score only the scan-number link counts; the rest was
-    // never a candidate and is not reported.
-    if (p.score < DUPLICATE_AUTO_MIN_SCORE - 1e-6) continue;
     const detail =
       verdict.reason === "numbers"
         ? numberDifference(normalizeForSimilarity(a.extracted_text), normalizeForSimilarity(b.extracted_text))
@@ -486,8 +495,9 @@ export async function autoMergeDuplicates(
   // The pairs stage B looked at and passed on, so the report says why the
   // review page is still as long as it is.
   const contentRejected: Record<ContentRejectReason, number> = { pages: 0, numbers: 0, text: 0, score: 0 };
+  const contentRejectedLow: Record<ContentRejectReason, number> = { pages: 0, numbers: 0, text: 0, score: 0 };
   for (const r of rejected) {
-    contentRejected[r.reason] += 1;
+    (r.band === "low" ? contentRejectedLow : contentRejected)[r.reason] += 1;
     if (items.length < REPORT_ITEMS_MAX) items.push({ ...r, outcome: "rejected", error: null });
   }
 
@@ -496,6 +506,7 @@ export async function autoMergeDuplicates(
     provenance: counts.provenance,
     content: counts.content,
     content_rejected: contentRejected,
+    content_rejected_low: contentRejectedLow,
     items,
     items_total: candidates.length + rejected.length,
     truncated: candidates.length + rejected.length > items.length,

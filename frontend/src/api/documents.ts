@@ -422,7 +422,9 @@ export function listDuplicates(limit?: number) {
 
 export type AutoMergeStage = 'provenance' | 'content'
 /** What let a candidate in. */
-export type AutoMergeVia = 'hash' | 'scan_number' | 'numbers' | 'order' | 'boilerplate'
+export type AutoMergeVia = 'hash' | 'scan_number' | 'numbers' | 'numbers_low' | 'order' | 'boilerplate'
+/** At the auto score (98 %) or between the list threshold (95 %) and it. */
+export type ScoreBand = 'auto' | 'low'
 export type AutoMergeOutcome = 'planned' | 'merged' | 'failed' | 'rejected'
 /** Why stage B passed on an open pair above the score. */
 export type ContentRejectReason = 'pages' | 'numbers' | 'text' | 'score'
@@ -430,6 +432,8 @@ export type ContentRejectReason = 'pages' | 'numbers' | 'text' | 'score'
 export interface AutoMergeItem {
   stage: AutoMergeStage
   via: AutoMergeVia
+  /** Content pairs only; null for a provenance link. */
+  band: ScoreBand | null
   keeper_id: number
   loser_id: number
   keeper_filename: string
@@ -455,6 +459,8 @@ export interface AutoMergeReport {
   content: AutoMergeStageCount
   /** Open pairs above the score that stage B passed on, by first failed check. */
   content_rejected: Record<ContentRejectReason, number>
+  /** The same for pairs between 95 and 98 %. */
+  content_rejected_low: Record<ContentRejectReason, number>
   items: AutoMergeItem[]
   items_total: number
   truncated: boolean

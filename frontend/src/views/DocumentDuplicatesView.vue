@@ -265,6 +265,7 @@ const VIA_LABELS: Record<AutoMergeItem['via'], string> = {
   hash: 'Hash im Dateinamen',
   scan_number: 'Gleiche Scan-Nummer',
   numbers: 'Gleiche Zahlen',
+  numbers_low: 'Gleiche Zahlen, Text 95–98 %',
   order: 'Gleiche Zahlen, andere Reihenfolge',
   boilerplate: 'Nur Vordruck-Zahlen verschieden',
 }
@@ -278,12 +279,21 @@ const REASON_LABELS: Record<ContentRejectReason, string> = {
   pages: 'Seitenzahl verschieden oder unbekannt',
   numbers: 'Zahlen im Text verschieden',
   text: 'Kein Text',
-  score: 'Text unter 98 %',
+  score: 'Gleiche Zahlen, aber zu wenige für Text unter 98 %',
 }
-const autoRejectedTotal = computed(() => {
-  const r = autoReport.value?.content_rejected
+function sumReasons(r: Record<ContentRejectReason, number> | undefined): number {
   return r ? r.pages + r.numbers + r.text + r.score : 0
-})
+}
+const autoRejectedTotal = computed(() => sumReasons(autoReport.value?.content_rejected))
+const autoRejectedLowTotal = computed(() => sumReasons(autoReport.value?.content_rejected_low))
+function reasonBreakdown(r: Record<ContentRejectReason, number>): string {
+  const parts: string[] = []
+  if (r.numbers) parts.push(`${r.numbers}× Zahlen verschieden`)
+  if (r.score) parts.push(`${r.score}× gleiche Zahlen, aber zu wenige`)
+  if (r.pages) parts.push(`${r.pages}× Seitenzahl verschieden oder unbekannt`)
+  if (r.text) parts.push(`${r.text}× kein Text`)
+  return parts.join(', ')
+}
 /** The merge candidates first, the rejected pairs after them. */
 const autoItemsShown = computed(() => autoReport.value?.items.slice(0, AUTO_SHOWN_MAX) ?? [])
 
@@ -295,13 +305,14 @@ function csvCell(v: string | number | null): string {
 function downloadAutoReport() {
   const r = autoReport.value
   if (!r) return
-  const head = ['stufe', 'merkmal', 'ergebnis', 'grund', 'unterschied', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
+  const head = ['stufe', 'merkmal', 'band', 'ergebnis', 'grund', 'unterschied', 'bleibt_id', 'bleibt_datei', 'geloescht_id', 'geloescht_datei', 'textscore', 'fehler']
   const lines = [head.join(';')]
   for (const i of r.items) {
     lines.push(
       [
         STAGE_LABELS[i.stage],
         i.outcome === 'rejected' ? '' : VIA_LABELS[i.via],
+        i.band === 'low' ? '95-98' : i.band === 'auto' ? '98+' : '',
         OUTCOME_LABELS[i.outcome],
         i.reason ? REASON_LABELS[i.reason] : '',
         i.detail,
@@ -388,7 +399,9 @@ const movedSummary = computed(() => {
         Korrespondent zählt dabei nicht, beides hat die Klassifikation aus demselben Text gelesen.
         Dazu kommen: dieselbe Scan-Nummer samt Jahr in beiden Dateinamen (derselbe Scan, zweimal
         abgelegt), dieselben Zahlen in anderer Reihenfolge, und Zusatzzahlen auf nur einer Seite,
-        die in fünf oder mehr Paaren identisch auftauchen (eine Fußzeile, kein Inhalt). „Prüfen“ zählt und
+        die in fünf oder mehr Paaren identisch auftauchen (eine Fußzeile, kein Inhalt). Zwischen 95 und
+        98&nbsp;% reichen gleiche Zahlen, wenn es mindestens acht sind: dann stimmen alle Daten, Beträge
+        und Nummern überein, und der Rest ist OCR. „Prüfen“ zählt und
         listet, „Zusammenführen“ führt genau diese Paare zusammen; das Original bleibt.
       </p>
 
@@ -448,13 +461,12 @@ const movedSummary = computed(() => {
             {{ autoReport.provenance.failed + autoReport.content.failed }} fehlgeschlagen.
           </template>
           <template v-if="autoRejectedTotal > 0">
-            {{ autoRejectedTotal }} Paar(e) über 98&nbsp;% nicht übernommen:
-            <template v-if="autoReport.content_rejected.numbers">{{ autoReport.content_rejected.numbers }}× Zahlen im Text verschieden, </template>
-            <template v-if="autoReport.content_rejected.pages">{{ autoReport.content_rejected.pages }}× Seitenzahl verschieden oder unbekannt, </template>
-            <template v-if="autoReport.content_rejected.text">{{ autoReport.content_rejected.text }}× kein Text, </template>
-            <template v-if="autoReport.content_rejected.score">{{ autoReport.content_rejected.score }}× Text unter 98&nbsp;%, </template>
-            Details in der Liste und im CSV.
+            {{ autoRejectedTotal }} Paar(e) über 98&nbsp;% nicht übernommen: {{ reasonBreakdown(autoReport.content_rejected) }}.
           </template>
+          <template v-if="autoRejectedLowTotal > 0">
+            {{ autoRejectedLowTotal }} Paar(e) zwischen 95 und 98&nbsp;% nicht übernommen: {{ reasonBreakdown(autoReport.content_rejected_low) }}.
+          </template>
+          <template v-if="autoRejectedTotal + autoRejectedLowTotal > 0"> Details in der Liste und im CSV.</template>
         </Message>
 
         <details v-if="autoReport.items.length > 0" class="auto-report">
