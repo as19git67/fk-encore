@@ -40,7 +40,7 @@
  * in the background (a few hundred merges take longer than a request may).
  */
 
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
@@ -85,6 +85,8 @@ export interface AutoMergeCandidate {
   via: AutoMergeVia;
   /** Content pairs only; null for a provenance link. */
   band: ScoreBand | null;
+  /** The open pair row a content candidate came from; null for a provenance link. */
+  pair_id: number | null;
   keeper_id: number;
   loser_id: number;
   keeper_filename: string;
@@ -93,7 +95,7 @@ export interface AutoMergeCandidate {
   score: number | null;
 }
 
-export type AutoMergeOutcome = "planned" | "merged" | "failed" | "rejected";
+export type AutoMergeOutcome = "planned" | "merged" | "failed" | "rejected" | "dismissed";
 
 /** Why stage B passed on an open pair above the score. */
 export type ContentRejectReason = "pages" | "head" | "numbers" | "text" | "score";
@@ -105,6 +107,8 @@ export interface AutoMergeItem extends AutoMergeCandidate {
   reason: ContentRejectReason | null;
   /** For `numbers`: the digit runs only one side has, so the CSV shows what differs. */
   detail: string | null;
+  /** A rejected pair the bulk "kein Duplikat" takes (see `isClearlyDifferent`). */
+  clearly_different: boolean;
 }
 
 export interface AutoMergeStageCount {
@@ -121,6 +125,10 @@ export interface AutoMergeReport {
   content_rejected: Record<ContentRejectReason, number>;
   /** The same for pairs between DUPLICATE_MIN_SCORE and the auto score. */
   content_rejected_low: Record<ContentRejectReason, number>;
+  /** Rejected pairs the bulk "kein Duplikat" would take, not yet dismissed. */
+  clearly_different: number;
+  /** Pairs the bulk "kein Duplikat" dismissed from this report. */
+  dismissed: number;
   items: AutoMergeItem[];
   items_total: number;
   truncated: boolean;
@@ -163,6 +171,7 @@ export async function findProvenancePairs(): Promise<AutoMergeCandidate[]> {
     stage: "provenance",
     via: "hash",
     band: null,
+    pair_id: null,
     keeper_id: Number(r.keeper_id),
     loser_id: Number(r.loser_id),
     keeper_filename: r.keeper_filename,
@@ -198,7 +207,8 @@ export function sameNumbers(na: string, nb: string): boolean {
 }
 
 /** Which digit runs each side has that the other lacks, a few of each, for the report. */
-export function numberDifference(na: string, nb: string, max = 5): string {
+/** The digit runs each side has that the other lacks, complete and sorted. */
+export function numberExtras(na: string, nb: string): { a: string[]; b: string[] } {
   const count = (tokens: string[]) => {
     const m = new Map<string, number>();
     for (const t of tokens) m.set(t, (m.get(t) ?? 0) + 1);
@@ -208,16 +218,33 @@ export function numberDifference(na: string, nb: string, max = 5): string {
   const cb = count(numberTokens(nb));
   const only = (x: Map<string, number>, y: Map<string, number>) => {
     const out: string[] = [];
-    for (const [t, n] of x) {
-      const extra = n - (y.get(t) ?? 0);
-      for (let i = 0; i < extra && out.length < max; i++) out.push(t);
-    }
+    for (const [t, n] of x) for (let i = y.get(t) ?? 0; i < n; i++) out.push(t);
     return out;
   };
-  const a = only(ca, cb);
-  const b = only(cb, ca);
-  const side = (label: string, list: string[]) => (list.length ? `${label}: ${list.join(", ")}` : null);
+  return { a: only(ca, cb), b: only(cb, ca) };
+}
+
+/** Which digit runs each side has that the other lacks, a few of each, for the report. */
+export function numberDifference(na: string, nb: string, max = 5): string {
+  const { a, b } = numberExtras(na, nb);
+  const side = (label: string, list: string[]) => (list.length ? `${label}: ${list.slice(0, max).join(", ")}` : null);
   return [side("A", a), side("B", b)].filter((x): x is string => x !== null).join(" | ") || "same digits, other order";
+}
+
+/**
+ * A rejected pair the review page need not show either: a different page
+ * count, a different opening, or numbers that differ on both sides with at
+ * least `CLEARLY_DIFFERENT_MIN_EXTRAS` runs each — the shape of two months'
+ * statements on one form (dates and a document number replaced, not read
+ * wrongly). One-sided additions and single differing runs are left to a
+ * person: that is where OCR slips and signed-beside-draft live.
+ */
+export const CLEARLY_DIFFERENT_MIN_EXTRAS = 2;
+
+export function isClearlyDifferent(reason: ContentRejectReason, extrasA: number, extrasB: number): boolean {
+  if (reason === "pages" || reason === "head") return true;
+  if (reason !== "numbers") return false;
+  return extrasA >= CLEARLY_DIFFERENT_MIN_EXTRAS && extrasB >= CLEARLY_DIFFERENT_MIN_EXTRAS;
 }
 
 /**
@@ -344,6 +371,7 @@ const contentColumns = {
 export interface RejectedContentPair extends AutoMergeCandidate {
   reason: ContentRejectReason;
   detail: string | null;
+  clearly_different: boolean;
 }
 
 /**
@@ -389,6 +417,7 @@ export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate
       stage: "content",
       via: verdict.ok ? verdict.via : "numbers",
       band,
+      pair_id: p.id,
       keeper_id: keeper.id,
       loser_id: loser.id,
       keeper_filename: keeper.original_filename,
@@ -399,11 +428,23 @@ export async function findContentPairs(): Promise<{ accepted: AutoMergeCandidate
       accepted.push(candidate);
       continue;
     }
-    const detail =
-      verdict.reason === "numbers"
-        ? numberDifference(normalizeForSimilarity(a.extracted_text), normalizeForSimilarity(b.extracted_text))
-        : null;
-    const row: RejectedContentPair = { ...candidate, reason: verdict.reason, detail };
+    let detail: string | null = null;
+    let extrasA = 0;
+    let extrasB = 0;
+    if (verdict.reason === "numbers") {
+      const na = normalizeForSimilarity(a.extracted_text);
+      const nb = normalizeForSimilarity(b.extracted_text);
+      detail = numberDifference(na, nb);
+      const ex = numberExtras(na, nb);
+      extrasA = ex.a.length;
+      extrasB = ex.b.length;
+    }
+    const row: RejectedContentPair = {
+      ...candidate,
+      reason: verdict.reason,
+      detail,
+      clearly_different: isClearlyDifferent(verdict.reason, extrasA, extrasB),
+    };
     rejected.push(row);
     if (verdict.reason === "numbers" && verdict.extras && verdict.extras.length > 0) {
       const key = verdict.extras.join(",");
@@ -468,7 +509,7 @@ export async function autoMergeDuplicates(
 
   let done = 0;
   for (const c of candidates) {
-    const item: AutoMergeItem = { ...c, outcome: "planned", error: null, reason: null, detail: null };
+    const item: AutoMergeItem = { ...c, outcome: "planned", error: null, reason: null, detail: null, clearly_different: false };
     if (apply) {
       const keeper = resolve(c.keeper_id);
       const loser = c.loser_id;
@@ -513,6 +554,8 @@ export async function autoMergeDuplicates(
     content: counts.content,
     content_rejected: contentRejected,
     content_rejected_low: contentRejectedLow,
+    clearly_different: rejected.filter((r) => r.clearly_different).length,
+    dismissed: 0,
     items,
     items_total: candidates.length + rejected.length,
     truncated: candidates.length + rejected.length > items.length,
@@ -578,6 +621,34 @@ export function startAutoMerge(apply: boolean): { started: boolean; state: AutoM
   return { started: true, state: getAutoMergeState() };
 }
 
+/**
+ * Mark every clearly different pair of the last finished report as "kein
+ * Duplikat" — one click instead of hundreds. Only pairs still open are
+ * touched; the report is updated in place so the page shows what happened.
+ */
+export async function dismissClearlyDifferent(): Promise<{ dismissed: number }> {
+  if (runState.status !== "done" || !runState.report) {
+    throw APIError.failedPrecondition("run a dry run first");
+  }
+  const report = runState.report;
+  const targets = report.items.filter(
+    (i) => i.outcome === "rejected" && i.clearly_different && i.pair_id != null,
+  );
+  if (targets.length === 0) return { dismissed: 0 };
+  const ids = targets.map((i) => i.pair_id as number);
+  const updated = await db
+    .update(documentDuplicateCandidates)
+    .set({ status: "dismissed", decided_at: sql`now()` })
+    .where(and(inArray(documentDuplicateCandidates.id, ids), eq(documentDuplicateCandidates.status, "open")))
+    .returning({ id: documentDuplicateCandidates.id });
+  const done = new Set(updated.map((u) => u.id));
+  for (const i of targets) if (done.has(i.pair_id as number)) i.outcome = "dismissed";
+  report.dismissed += done.size;
+  report.clearly_different = report.items.filter((i) => i.outcome === "rejected" && i.clearly_different).length;
+  console.log(`[documents.auto-merge] dismissed ${done.size} clearly different pair(s)`);
+  return { dismissed: done.size };
+}
+
 // ─── Endpoints ──────────────────────────────────────────────────────────────
 
 function requireAdmin(): void {
@@ -604,6 +675,15 @@ export const startDuplicateAutoMerge = api(
   async (req: AutoMergeStartRequest): Promise<AutoMergeStartResponse> => {
     requireAdmin();
     return startAutoMerge(req.apply === true);
+  },
+);
+
+/** `POST /documents/duplicates/auto-merge/dismiss-rejected` — bulk "kein Duplikat" for the last report's clearly different pairs. */
+export const dismissAutoMergeRejected = api(
+  { expose: true, method: "POST", path: "/documents/duplicates/auto-merge/dismiss-rejected", auth: true },
+  async (): Promise<{ dismissed: number }> => {
+    requireAdmin();
+    return dismissClearlyDifferent();
   },
 );
 
