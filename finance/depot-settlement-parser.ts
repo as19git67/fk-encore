@@ -330,6 +330,11 @@ export function looksLikeTaxStatement(text: string): boolean {
 
 const TAX_STATEMENT_RE = /steuerliche\s+behandlung/i;
 
+/** OCR text as the parsers read it: single spaces, no underlines, split amounts rejoined. */
+export function normalizeText(text: string): string {
+  return normalize(text);
+}
+
 function normalize(text: string): string {
   return text
     // A total's underline ("abgeführte Steuern EUR ______ -12,34") would

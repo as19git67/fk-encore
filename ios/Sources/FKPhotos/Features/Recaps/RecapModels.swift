@@ -96,7 +96,7 @@ struct GetRecapResponse: Codable, Sendable {
     let recap: RecapDetails
     let music: RecapMusicTrack?
     /// Per recap photo that is one side of a format group: the photo on the
-    /// other side (.claude/plans/orientierungs-varianten.md). Optional so an
+    /// other side (docs/plans/orientierungs-varianten.md). Optional so an
     /// older server still decodes.
     var counterparts: [RecapCounterpart]? = nil
 }
@@ -126,7 +126,7 @@ struct RecapPhoto: Codable, Identifiable, Sendable {
     let curation_status: String?
     let auto_crop: RecapAutoCrop?
     /// Portrait, landscape or square; nil while unknown. Decides which side
-    /// of a format pair a slide shows (.claude/plans/orientierungs-varianten.md).
+    /// of a format pair a slide shows (docs/plans/orientierungs-varianten.md).
     var orientation: PhotoOrientation? = nil
 }
 

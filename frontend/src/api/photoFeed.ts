@@ -31,7 +31,7 @@ export interface FeedPhotoItem {
   hiddenByMe?: boolean
   /**
    * The best-ranked photo on the other side of the viewer's format group,
-   * when this photo is one side of one (.claude/plans/orientierungs-varianten.md).
+   * when this photo is one side of one (docs/plans/orientierungs-varianten.md).
    * The card shows whichever side fits the screen. Optional: items built on
    * the client (the compare view's confirmation) carry none.
    */

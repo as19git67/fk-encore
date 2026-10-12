@@ -319,7 +319,10 @@ export async function persistFetchResult(
               value  = EXCLUDED.value,
               currency = EXCLUDED.currency,
               acquisition_date  = EXCLUDED.acquisition_date,
-              acquisition_price = EXCLUDED.acquisition_price
+              acquisition_price = EXCLUDED.acquisition_price,
+              -- The bank's word replaces what a statement said about the same day.
+              source = 'bank',
+              document_id = NULL
           `);
           stats.holdings_written++;
         } catch (err) {

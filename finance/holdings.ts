@@ -38,6 +38,9 @@ interface HoldingView {
   currency: string | null;
   acquisition_date: string | null;
   acquisition_price: string | null;
+  /** "bank": the FinTS sync · "document": read from a depot statement (`document_id`). */
+  source: "bank" | "document";
+  document_id: number | null;
   /** Per-unit cost basis applied to the current holding (scale 6). */
   cost_basis_per_unit: string | null;
   /** Total cost basis = amount × cost_basis_per_unit (scale 2). */
@@ -167,6 +170,8 @@ export const listHoldings = api(
                 : r.acquisition_date)
             : null,
           acquisition_price: r.acquisition_price,
+          source: r.source,
+          document_id: r.document_id,
           cost_basis_per_unit: valuation.costBasisPerUnit,
           cost_basis: valuation.costBasisTotal,
           cost_basis_source: valuation.source,

@@ -20,7 +20,7 @@ struct PhotoGridView: View {
     @Environment(\.screenOrientation) private var screenOrientation
 
     /// Which side of every format group to ask for
-    /// (.claude/plans/orientierungs-varianten.md): the side that fits the
+    /// (docs/plans/orientierungs-varianten.md): the side that fits the
     /// screen, or everything while selecting or when the filter says so.
     private var variantMode: VariantMode {
         VariantMode.forScreen(

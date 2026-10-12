@@ -346,7 +346,7 @@ const estimatedTotal = computed(() => {
   return Math.ceil(n * 1.3)
 })
 
-// ── Format pair (.claude/plans/orientierungs-varianten.md) ──
+// ── Format pair (docs/plans/orientierungs-varianten.md) ──
 // A group that holds the same motif portrait and landscape is a format pair
 // unless the user said "Nicht dasselbe Motiv" (`orientation_variants = 'off'`).
 // In a format pair the frames only duel inside their orientation — portrait

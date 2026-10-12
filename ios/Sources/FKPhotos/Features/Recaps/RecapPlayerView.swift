@@ -27,7 +27,7 @@ struct RecapPlayerView: View {
     @State private var photos: [RecapPhoto] = []
     /// The recap's photos as fetched, before the format groups were resolved
     /// for the screen; `photos` is derived from it per orientation
-    /// (.claude/plans/orientierungs-varianten.md).
+    /// (docs/plans/orientierungs-varianten.md).
     @State private var basePhotos: [RecapPhoto] = []
     /// Per recap photo id: the other side of its format pair.
     @State private var counterparts: [Int: RecapPhoto] = [:]

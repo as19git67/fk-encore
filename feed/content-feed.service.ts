@@ -1,6 +1,6 @@
 /**
  * Content-feed maintenance — Etappe 2 of the Instagram-style chronological
- * feed (see .claude/plans/instagram-style-feed.md).
+ * feed (see docs/plans/instagram-style-feed.md).
  *
  * Keeps the materialized `photo_feed_entries` table in sync. The table holds
  * one row per (viewer, photo) with a monotonic `last_activity_at` sort key.

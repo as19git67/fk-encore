@@ -159,6 +159,8 @@ interface HoldingMatch {
   wkn: string | null;
   name: string | null;
   currency: string | null;
+  /** Where the snapshot row came from: the bank, or a statement read in (stage 2). */
+  source?: "bank" | "document";
 }
 
 /**
@@ -565,6 +567,7 @@ export async function deriveDepotTransactionsForBankcontact(
           wkn: financeAccountHolding.wkn,
           name: financeAccountHolding.name,
           currency: financeAccountHolding.currency,
+          source: financeAccountHolding.source,
         })
         .from(financeAccountHolding)
         .innerJoin(
@@ -579,6 +582,8 @@ export async function deriveDepotTransactionsForBankcontact(
         )
         .orderBy(desc(financeAccountHolding.as_of))
         .limit(1);
+      // A snapshot row read from a statement is a paper's word, not the bank's.
+      if (holding?.source === "document") fromBank = false;
     } else {
       // No ISIN and no WKN-prefixed code in the text (e.g. "SONNENOBST INC."
       // with nothing else) — fall back to matching the holding's own

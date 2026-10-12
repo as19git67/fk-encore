@@ -29,7 +29,7 @@ struct PhotoFullscreenView: View {
     @State private var showDetails = false
     @State private var curationOverrides: [Int: CurationStatus] = [:]
 
-    // Orientation variants (.claude/plans/orientierungs-varianten.md): the
+    // Orientation variants (docs/plans/orientierungs-varianten.md): the
     // other side of a photo's format group is shown *in place* of it — the
     // page index stays. A tap on the button (or the badge that opened the
     // viewer) pins the choice; turning the device switches to the fitting

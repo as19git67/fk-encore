@@ -46,7 +46,7 @@ import {
 const auth = useAuthStore()
 
 // ── Orientation variants (portrait + landscape of one motif) ───────────────
-// Global switch, .claude/plans/orientierungs-varianten.md. On: every list
+// Global switch, docs/plans/orientierungs-varianten.md. On: every list
 // shows only the side of a format group that fits the screen.
 const variantsEnabled = ref(true)
 const variantsBusy = ref(false)

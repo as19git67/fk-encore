@@ -4,7 +4,7 @@ import Foundation
 //
 // Of one motif there is often a portrait and a landscape frame, a few seconds
 // apart. The server derives a *format group* from the similarity groups
-// (.claude/plans/orientierungs-varianten.md) and ships both sides on
+// (docs/plans/orientierungs-varianten.md) and ships both sides on
 // `GET /photos/groups`; every list shows only the side that fits the screen
 // and keeps the other one a tap — or a turn of the device — away. Nothing is
 // hidden: the rules here only decide what is on screen right now.

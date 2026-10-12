@@ -189,7 +189,7 @@ export interface FeedPhotoItem {
   latestComment: { author: string | null; excerpt: string } | null;
   /**
    * The best-ranked photo on the other side of the viewer's format group
-   * (.claude/plans/orientierungs-varianten.md), when the photo is one side of
+   * (docs/plans/orientierungs-varianten.md), when the photo is one side of
    * one. The card shows whichever side fits the screen. Only the viewer's
    * own groups can say so, so other people's photos never carry one.
    */

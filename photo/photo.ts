@@ -2054,7 +2054,7 @@ export const setGroupReviewAdoption = api(
 
 /**
  * The user's global switch for portrait/landscape format groups
- * (.claude/plans/orientierungs-varianten.md): on, lists show only the side
+ * (docs/plans/orientierungs-varianten.md): on, lists show only the side
  * that matches the screen orientation.
  */
 export const getCollapseOrientationVariants = api(
@@ -2247,7 +2247,7 @@ export const pickPhotosInGroup = api(
 );
 
 /**
- * "Bestes je Format behalten" (.claude/plans/orientierungs-varianten.md):
+ * "Bestes je Format behalten" (docs/plans/orientierungs-varianten.md):
  * keep the best-rated photo of every orientation in the group, hide the rest
  * and mark the group reviewed. Same gate as the other review actions.
  */

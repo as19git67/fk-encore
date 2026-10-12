@@ -43,7 +43,7 @@ interface GetRecapResponse {
   music?: MusicTrack;
   /**
    * For every recap photo that is one side of a portrait/landscape format
-   * group (.claude/plans/orientierungs-varianten.md): the best-ranked photo
+   * group (docs/plans/orientierungs-varianten.md): the best-ranked photo
    * on the other side, so the player can show the side that fits the screen.
    * Photos without another side are not listed.
    */

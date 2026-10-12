@@ -33,7 +33,7 @@ export const users = pgTable("users", {
   // album_user_settings.group_review_adoption.
   adopt_group_reviews: boolean("adopt_group_reviews").notNull().default(true),
   // Show only the side of a portrait/landscape format group that matches the
-  // screen orientation (.claude/plans/orientierungs-varianten.md). Off gives
+  // screen orientation (docs/plans/orientierungs-varianten.md). Off gives
   // back both sides next to each other everywhere.
   collapse_orientation_variants: boolean("collapse_orientation_variants").notNull().default(true),
 });
@@ -2224,6 +2224,10 @@ export const financeAccountHolding = pgTable(
     currency: text("currency"),
     acquisition_date: timestamp("acquisition_date", { mode: "string" }),
     acquisition_price: numeric("acquisition_price", { precision: 20, scale: 6 }),
+    /** "bank": the FinTS holdings sync · "document": read from a depot statement or reporting (migration 0238). */
+    source: text("source").$type<"bank" | "document">().notNull().default("bank"),
+    /** The statement the row was read from, for source "document". */
+    document_id: integer("document_id").references(() => documents.id, { onDelete: "cascade" }),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -2409,10 +2413,22 @@ export const financeDocumentSettlementLlm = pgTable("finance_document_settlement
     .defaultNow(),
 });
 
+// What the language model read from a depot statement or reporting (the
+// positions held on a day), kept once per document — see migration 0238.
+export const financeDocumentStatementLlm = pgTable("finance_document_statement_llm", {
+  document_id: integer("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  values: jsonb("values").$type<Record<string, unknown>>().notNull(),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 // Documents the user marked as irrelevant to the depots (#1336): left out
 // of "read documents" and the review page; the document itself stays.
 /**
- * The securities master of a depot (.claude/plans/wertpapier-stamm.md):
+ * The securities master of a depot (docs/plans/wertpapier-stamm.md):
  * a security is booked only once confirmed here. "bank" entries come from
  * the holdings; "booking" and "document" ones are proposals until the
  * user decides ("user").

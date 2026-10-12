@@ -374,7 +374,7 @@ export type PhotoOrientation = "portrait" | "landscape" | "square";
 
 /**
  * Per-group setting for the portrait/landscape format group
- * (.claude/plans/orientierungs-varianten.md): `auto` computes membership at
+ * (docs/plans/orientierungs-varianten.md): `auto` computes membership at
  * read time, `off` says "these are not the same motif" and never collapses.
  */
 export type OrientationVariantsMode = "auto" | "off";
@@ -401,7 +401,7 @@ export interface OrientationVariants {
  * The best-ranked photo on the other side of a format group, as the recap
  * and the stream ship it next to a photo so a viewer can show the side that
  * fits the screen without a second lookup
- * (.claude/plans/orientierungs-varianten.md, stage 6).
+ * (docs/plans/orientierungs-varianten.md, stage 6).
  */
 export interface OrientationCounterpart {
   id: number;
