@@ -2,7 +2,7 @@
 
 ## The problem
 
-Similar-photo groups (`docs/similar-photo-groups.md`) are **per user**: every
+Similar-photo groups (`documentation/similar-photo-groups.md`) are **per user**: every
 participant of a shared album gets their own `photo_groups` rows and their own
 `reviewed_at`. Hiding a photo is per user too (`photo_curation`).
 

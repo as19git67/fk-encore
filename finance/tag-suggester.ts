@@ -23,7 +23,7 @@
  *      transaction (unless a user-variant already covers the same
  *      name on the same transaction).
  *
- * Architecture: docs/finance-tagging-and-ai.md §3.
+ * Architecture: documentation/finance-tagging-and-ai.md §3.
  */
 
 import { api, APIError } from "encore.dev/api";
@@ -426,7 +426,7 @@ function logSkip(txId: number, what: string, err: unknown): void {
 
 // -----------------------------------------------------------------------
 // Batch endpoint for backfills (covers the non-user-specific import
-// from Etappe 7 — see docs/finance-tagging-and-ai.md §3.3 Trigger B).
+// from Etappe 7 — see documentation/finance-tagging-and-ai.md §3.3 Trigger B).
 // -----------------------------------------------------------------------
 
 interface SuggestBatchParams {
@@ -453,7 +453,7 @@ export const suggestTagsBatch = api(
     requirePermission(auth, "finance.view");
 
     // Batch runs can fan out to many llm-service calls. Strict cap.
-    // See docs/finance-rate-limiting.md §2.
+    // See documentation/finance-rate-limiting.md §2.
     checkRateLimit(`tag-suggest-batch:${auth.userID}`, {
       maxAttempts: 5,
       windowMs: 60 * 60_000,

@@ -107,8 +107,8 @@ tax categories, and banking.
 - **Share extension** to upload from other apps; **passkey** sign-in;
   in-app comments & reactions
 - Full inventory, Web↔iOS comparison and parity roadmap:
-  [`docs/ios-app.md`](./docs/ios-app.md); backup/sync architecture in
-  [`docs/ios-backup-sync.md`](./docs/ios-backup-sync.md)
+  [`documentation/ios-app.md`](./documentation/ios-app.md); backup/sync architecture in
+  [`documentation/ios-backup-sync.md`](./documentation/ios-backup-sync.md)
 
 ### Authentication & access control
 - Password login (bcrypt) and **WebAuthn / FIDO2 passkeys** with multi-passkey
@@ -119,7 +119,7 @@ tax categories, and banking.
 - Rate limiting on auth endpoints
 - Dedicated, opt-in `photos.purge` permission for the destructive "delete all
   photo data" action (not granted to Admin by default — see
-  [`docs/purge.md`](./docs/purge.md))
+  [`documentation/purge.md`](./documentation/purge.md))
 
 ## Architecture
 
@@ -127,7 +127,7 @@ tax categories, and banking.
 |----------------------|----------------------------------------------------------------|
 | `app` (Encore.ts)    | Main application – REST API + static frontend SPA              |
 | `frontend`           | Vue 3 + PrimeVue + Pinia SPA (served under `/app/`)            |
-| `ios`                | Native SwiftUI app (see [`docs/ios-app.md`](./docs/ios-app.md)) |
+| `ios`                | Native SwiftUI app (see [`documentation/ios-app.md`](./documentation/ios-app.md)) |
 | `postgres`           | PostgreSQL 18 + `pgvector` – main application DB and the embeddings DB |
 | `insightface`        | Python – face detection & embeddings (InsightFace `buffalo_l`) |
 | `embedding_service`  | Python – CLIP + DINOv2 image embeddings                        |
@@ -141,7 +141,7 @@ bank statement is ever sent to a third-party API.
 See [`FEATURE_COMPARISON.md`](./FEATURE_COMPARISON.md) for a detailed
 feature-by-feature comparison against Immich,
 [`DEPLOYMENT.md`](./DEPLOYMENT.md) for the full deployment guide, and
-[`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md) for the geo /
+[`documentation/osm-admin-deployment.md`](./documentation/osm-admin-deployment.md) for the geo /
 POI subsystem.
 
 ## Prerequisites

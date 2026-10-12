@@ -1,13 +1,13 @@
 # Zähler-Reports — Ausbauplan (Issue #792, Etappe 6)
 
-Ergänzung zu `docs/utility-meters.md` §5. Beschreibt, welche Auswertungen über
+Ergänzung zu `documentation/utility-meters.md` §5. Beschreibt, welche Auswertungen über
 den bestehenden Report-MVP hinaus sinnvoll sind, was dafür an Daten und
 Annahmen fehlt, und in welcher Reihenfolge das umgesetzt werden sollte.
 
 Status: **Etappe 6 vollständig umgesetzt** (6a–6e), ebenso die zunächst
 zurückgestellten Punkte: Saisonprofil A3 (#1022), Witterungsbereinigung C3
 (#1023), Abschlagsvergleich E3 (mit Etappe 8, #1018) und die
-Tages-/Wochen-Granularität (#1024). Details in `docs/utility-meters.md`
+Tages-/Wochen-Granularität (#1024). Details in `documentation/utility-meters.md`
 §5.1, §5.2.5, §5.2.6, §6.1.
 
 ---
@@ -69,7 +69,7 @@ markiert.
 | A1 ⭐ | **PV-Ersparnis kumuliert** | Kumulierte Kurve „Stromkosten mit PV“ vs. „hypothetische Kosten ohne PV“ seit Inbetriebnahme; Differenzfläche = Ersparnis. Je Bucket bereits als `netElectricityCostEur` / `noPvElectricityCostEur` vorhanden — es fehlt nur Kumulierung + Darstellung. | — |
 | A2 ⭐ | **Amortisation** | Invest (netto + MwSt.) minus kumulierter PV-Nutzen → Restbetrag, prognostiziertes Amortisationsdatum aus dem Mittel der letzten 12 Monate. Zweite Linie *inkl.* Opportunitätskosten: entgangene Rendite, zinseszinslich aus `expected_return_rate` gerechnet — nicht als fertiger Betrag gepflegt. | `pv_investment_*`, `expected_return_rate` |
 | A3 ✅ | **Saisonprofil Autarkie/Eigenverbrauch** | Heatmap Jahr × Monat für Autarkie und Eigenverbrauchsquote. Zeigt sofort, in welchen Monaten der Speicher/die Anlage trägt und ob sich das über die Jahre verbessert. `GET /meters/reports/season-profile` (#1022). | — |
-| A4 | **Ertrag je kWp / Performance-Ratio** | Jahresertrag pro kWp gegen Vorjahre — der einzige belastbare Frühindikator für Anlagendegradation oder verschmutzte Module. | Anlagenleistung kWp (neue Stammdatum-Annahme; wird ohnehin für die korrekte Einspeise-Leistungsstufe gebraucht, siehe `docs/utility-meters.md` §5.2) |
+| A4 | **Ertrag je kWp / Performance-Ratio** | Jahresertrag pro kWp gegen Vorjahre — der einzige belastbare Frühindikator für Anlagendegradation oder verschmutzte Module. | Anlagenleistung kWp (neue Stammdatum-Annahme; wird ohnehin für die korrekte Einspeise-Leistungsstufe gebraucht, siehe `documentation/utility-meters.md` §5.2) |
 
 ### B — Technologie-Vergleich (kontrafaktisch)
 
@@ -98,7 +98,7 @@ Wasser.
 | # | Report | Inhalt |
 |---|---|---|
 | C1 | **Trend-Dashboard** | Eine Kachel je Kennzahl: aktueller 12-Monats-Wert, Änderung ggü. den 12 Monaten davor (absolut + %), Richtungspfeil, Sparkline. Zusätzlich Steigung pro Jahr aus linearer Regression über die **rollierende 12-Monats-Summe** — dadurch ist die Saison herausgerechnet und der Trend tatsächlich lesbar. |
-| C2 | **Vorjahresvergleich je Bucket** | `compare=previous_year`: jeder Monat/Jahr bekommt `previousValue`, `deltaAbsolute`, `deltaPercent`. Im Chart als zweite, blassere Linie. Bereits als offener Punkt in `docs/utility-meters.md` §5.1 notiert. |
+| C2 | **Vorjahresvergleich je Bucket** | `compare=previous_year`: jeder Monat/Jahr bekommt `previousValue`, `deltaAbsolute`, `deltaPercent`. Im Chart als zweite, blassere Linie. Bereits als offener Punkt in `documentation/utility-meters.md` §5.1 notiert. |
 | C3 ✅ | **Witterungsbereinigung Heizung** | Heizverbrauch ÷ Gradtagzahl des Monats. Ohne das ist „mehr Heizstrom als letztes Jahr“ meist nur „kälterer Winter“. Umgesetzt mit beiden Quellen: Gradtagzahl-Reihe als Annahme (`heating_degree_days`, Datei-Import) oder — ohne externe Daten — aus den eigenen Daten geschätzter Referenzwinter, jeweils ausgewiesen (`GET /meters/reports/heating-weather`, #1023). |
 | C4 | **Ausreißer-Kontext** | Im Trend-Chart die Buckets markieren, die auf ungewöhnlich langen/kurzen Ableseintervallen beruhen (< 20 oder > 40 Tage bei Monatsbuckets). Verhindert Fehlinterpretationen, bevor Etappe 7 (Anomalien) überhaupt existiert. |
 

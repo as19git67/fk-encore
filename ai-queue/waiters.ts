@@ -17,7 +17,7 @@
  * Should the topology ever be split across multiple processes, this registry
  * degrades gracefully — the fallback poll in the waiter still makes progress,
  * it just loses the instant-wakeup latency. Phase 2 (see
- * docs/ai-queue-push-wakeup.md) would add Postgres LISTEN/NOTIFY as a
+ * documentation/ai-queue-push-wakeup.md) would add Postgres LISTEN/NOTIFY as a
  * cross-process transport without changing this API.
  */
 

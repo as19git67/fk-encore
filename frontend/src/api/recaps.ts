@@ -50,7 +50,7 @@ export interface GetRecapResponse {
   music?: MusicTrack
   /**
    * Per recap photo that is one side of a format group: the best-ranked
-   * photo on the other side (docs/plans/orientierungs-varianten.md). The
+   * photo on the other side (documentation/plans/orientierungs-varianten.md). The
    * player shows whichever side fits the screen.
    */
   counterparts?: Array<{ photo_id: number; counterpart: OrientationCounterpart }>

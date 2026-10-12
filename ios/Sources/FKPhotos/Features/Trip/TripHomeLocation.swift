@@ -47,7 +47,7 @@ enum TripHomeLocation {
 
     /// The exclusion zone to stamp onto a starting trip, or `nil` when no home
     /// location is known — then the trip is a pure time window, which is the
-    /// documented default (`docs/ios-trip-mode.md` §2).
+    /// documented default (`documentation/ios-trip-mode.md` §2).
     @MainActor
     static func exclusionZone() async -> ActiveTrip.Geofence? {
         guard let home = await resolve() else { return nil }

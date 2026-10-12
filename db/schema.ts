@@ -29,11 +29,11 @@ export const users = pgTable("users", {
   // Per-user label-printing preferences (e.g. the selected CUPS printer).
   label_prefs: jsonb("label_prefs").notNull().default({}),
   // Global default for adopting other people's similar-photo group reviews
-  // (docs/group-review-adoption.md). Per-album overrides live on
+  // (documentation/group-review-adoption.md). Per-album overrides live on
   // album_user_settings.group_review_adoption.
   adopt_group_reviews: boolean("adopt_group_reviews").notNull().default(true),
   // Show only the side of a portrait/landscape format group that matches the
-  // screen orientation (docs/plans/orientierungs-varianten.md). Off gives
+  // screen orientation (documentation/plans/orientierungs-varianten.md). Off gives
   // back both sides next to each other everywhere.
   collapse_orientation_variants: boolean("collapse_orientation_variants").notNull().default(true),
 });
@@ -331,7 +331,7 @@ export const photoCuration = pgTable(
     status: text("status").notNull().default("visible"), // 'visible' | 'hidden' | 'favorite'
     // Provenance of this row: 'user' = the user decided it themselves,
     // 'adopted' = derived from a peer's group review (see
-    // docs/group-review-adoption.md). Adopted rows are revertible and are
+    // documentation/group-review-adoption.md). Adopted rows are revertible and are
     // excluded from the anonymised fav/hide consensus counters, so three
     // passive users can't turn one person's opinion into a fake 4/4.
     source: text("source").notNull().default("user"), // 'user' | 'adopted'
@@ -630,7 +630,7 @@ export const albumUserSettings = pgTable(
 
 // ========== Photo Transformations (AI crop/exposure suggestions + per-user recipes) ==========
 //
-// See docs/photos-ai-transforms.md. Originals are never overwritten; user
+// See documentation/photos-ai-transforms.md. Originals are never overwritten; user
 // recipes live here, and the AI suggestion payload is shared per photo.
 
 export type PhotoTransformCrop = { x: number; y: number; w: number; h: number };
@@ -876,7 +876,7 @@ export const documentTaxSourceEnum = pgEnum("document_tax_source", [
 // Provenance of a document's category assignment (migration 0132). Three-tier:
 // 'ai' (raw local Qwen guess) < 'cloud' (Claude-verified via the offline
 // Cloud-Teacher) < 'user' (human-pinned). Replaces `attributes_reviewed` as the
-// category-guard source — see docs/design/cloud-teacher-gold-set.md.
+// category-guard source — see documentation/design/cloud-teacher-gold-set.md.
 // Trust tiers for the category assignment, weakest first: 'ai' (local
 // classifier guess) < 'system' (assigned by the application from how the
 // document arrived — see receipt capture, migration 0151) < 'cloud'
@@ -1030,7 +1030,7 @@ export const documents = pgTable("documents", {
   // 'user'. The offline Cloud-Teacher writes 'cloud'; the edit dialog writes
   // 'user'. Intended as the category-guard source that supersedes the
   // attributes_reviewed boolean once the classify path is wired to it
-  // (docs/design/cloud-teacher-gold-set.md, step 4). Backfilled to 'user' for
+  // (documentation/design/cloud-teacher-gold-set.md, step 4). Backfilled to 'user' for
   // rows that were attributes_reviewed at migration time.
   category_source: documentCategorySourceEnum("category_source").notNull().default("ai"),
   // Classify-time diagnostics (migration 0153). Three layers sit above the
@@ -1926,7 +1926,7 @@ export const guestNotifications = pgTable("guest_notifications", {
 // multi-label tags — no category tree, no rule engine. Credentials are
 // stored AES-GCM-encrypted (see finance/encryption.ts), never in plain
 // text. The TAN flow is stateful in finance_tan_session (no in-memory
-// singleton). See docs/finance-data-model.md.
+// singleton). See documentation/finance-data-model.md.
 
 export const financeAccountLevelEnum = pgEnum("finance_account_level", [
   "read",
@@ -2428,7 +2428,7 @@ export const financeDocumentStatementLlm = pgTable("finance_document_statement_l
 // Documents the user marked as irrelevant to the depots (#1336): left out
 // of "read documents" and the review page; the document itself stays.
 /**
- * The securities master of a depot (docs/plans/wertpapier-stamm.md):
+ * The securities master of a depot (documentation/plans/wertpapier-stamm.md):
  * a security is booked only once confirmed here. "bank" entries come from
  * the holdings; "booking" and "document" ones are proposals until the
  * user decides ("user").
@@ -3202,7 +3202,7 @@ export const meterElectricityTariffs = pgTable(
 //
 // The pool is not a leftovers bin. Redistribution moves stops back into
 // it and pulls replacements out of it, so it is the working set the
-// whole mechanic turns on (docs/ios-urlaubsplanung.md §5).
+// whole mechanic turns on (documentation/ios-urlaubsplanung.md §5).
 
 export const tripPlans = pgTable(
   "trip_plans",

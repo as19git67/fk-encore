@@ -4,7 +4,7 @@ Einmalige, **read-only** Skripte, um aus den bereits eingespannten Dokumenten ei
 bessere Taxonomie und verlässlichere Steuer-Hints abzuleiten. Sie verändern keine
 produktiven Daten; alle Ergebnisse landen unter `out/` (gitignored).
 
-Gesamtkonzept und Etappen: siehe `docs/taxonomy-tax-quality-improvement.md`.
+Gesamtkonzept und Etappen: siehe `documentation/taxonomy-tax-quality-improvement.md`.
 
 ## Voraussetzungen
 

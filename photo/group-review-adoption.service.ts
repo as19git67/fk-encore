@@ -18,7 +18,7 @@
  *   revertAdoptionForUser() — drop adopted rows and reopen the groups they
  *                             closed. Used when the setting is switched off.
  *
- * See docs/group-review-adoption.md.
+ * See documentation/group-review-adoption.md.
  */
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";

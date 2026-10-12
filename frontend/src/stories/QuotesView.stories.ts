@@ -5,7 +5,7 @@ import { http, HttpResponse, delay } from 'msw'
 import { MOCK_PORTFOLIO, MOCK_QUOTES, MOCK_QUOTES_EMPTY } from './finance-mock-data'
 import { routeFromParameters } from './storyRoute'
 
-/** The quotes page (`docs/plans/kurse.md`, stage 2), in each state it can be in. */
+/** The quotes page (`documentation/plans/kurse.md`, stage 2), in each state it can be in. */
 
 const quotesHandlers = [
   http.get('/api/finance/quotes', ({ request }) =>

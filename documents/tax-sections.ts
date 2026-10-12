@@ -9,7 +9,7 @@
  *   3. Frontend — groups the "Steuer" view by `group` and renders `name`.
  *
  * Decision: a document may belong to **multiple** sections (N:M), see
- * docs/tax-document-detection.md § 8.1. The join table
+ * documentation/tax-document-detection.md § 8.1. The join table
  * `document_tax_sections` stores (document_id, slug, confidence, source).
  *
  * `hint` is a short German sentence telling both the LLM and the user

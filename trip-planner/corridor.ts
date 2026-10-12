@@ -1,7 +1,7 @@
 /**
  * Trip planner — what is worth a stop on the way from A to B.
  *
- * Part of step 6 of docs/ios-urlaubsplanung.md §13: the transfer
+ * Part of step 6 of documentation/ios-urlaubsplanung.md §13: the transfer
  * between two legs is a planning object of its own (§4.2), not dead
  * time. The question is not "what is near here?" but "what can we see
  * without a real detour?", and the answer is the set of spots that

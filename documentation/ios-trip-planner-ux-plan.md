@@ -4,7 +4,7 @@ Scope: the "Trip" tab of the iOS app (middle button of the main tab bar) and
 everything reachable from it: trip mode (`Features/Trip`) and the vacation
 planner (`Features/TripPlanner`). The audit was done by reading the code
 (about 19,000 lines of Swift) and cross-checking against
-`docs/ios-trip-mode.md` and `docs/ios-urlaubsplanung.md`.
+`documentation/ios-trip-mode.md` and `documentation/ios-urlaubsplanung.md`.
 
 Chapter 1 lists what a user runs into. Chapter 2 proposes how to fix it, in
 the same order, referenced by finding ID.
@@ -23,7 +23,7 @@ paths, **X** = smaller issues.
 **S1 — The planner is an appendix of the photo mode.**
 The tab is called "Trip" and shows the photo sync. The whole vacation planner
 hangs on a single toolbar icon top right (`Features/Trip/TripView.swift:43`).
-The concept (`docs/ios-urlaubsplanung.md` §8.1) describes two peer areas,
+The concept (`documentation/ios-urlaubsplanung.md` §8.1) describes two peer areas,
 "record" and "plan". The navigation from tab to a day screen is four levels
 deep behind an icon in a tab about something else.
 
@@ -163,7 +163,7 @@ server rejects their delete, while the swipe action and the alert promise
 **D4 — From an idea there is no way into a trip.**
 `TripIdeasView.swift:337-358`: the idea detail offers only "Aus dem Vorrat
 entfernen". The transition idea → trip (the point of the collection per
-`docs/ideenvorrat.md` §4.3) exists only from the trip side. "Ausflug daraus"
+`documentation/ideenvorrat.md` §4.3) exists only from the trip side. "Ausflug daraus"
 (`TripIdeasNearbyView.swift:68`) is disabled without explanation whenever the
 5 km neighbourhood is empty, so planning an outing from home is impossible.
 `TripIdeasOutingView` can open blank with no refresh or empty state
@@ -270,7 +270,7 @@ hard-codes `false` (`TripSpotDetailView.swift:396`).
 `TripParticipantsView.swift:139`: `me` is set only when `youOrganise`, and
 then to the organiser's ID. For anyone else `mayRemove` is always `false`
 and the "Verlassen" swipe never appears, contradicting the plan-list delete
-dialog and `docs/ios-urlaubsplanung.md` §6.2.
+dialog and `documentation/ios-urlaubsplanung.md` §6.2.
 
 **B3 — Plan list disappears after a failed delete.** See D3.
 
@@ -469,7 +469,7 @@ have names, and its rows are not tappable (no map, no note, no source).
   `"trip.suggestions.enabled"` as a string literal instead of using
   `TripSuggestionSettings`.
 - **X15** `TripMapsHandoff.swift:4` and `TripMapsSettingsView.swift:4` cite
-  "§9.1", which in `docs/ios-trip-mode.md` is the auto-end section.
+  "§9.1", which in `documentation/ios-trip-mode.md` is the auto-end section.
 
 ---
 
@@ -539,7 +539,7 @@ fixes that can be done in any order.
 
 ### 2.4 One vocabulary (T1–T7, T9)
 
-Add a glossary section to `docs/ios-urlaubsplanung.md` and apply it across
+Add a glossary section to `documentation/ios-urlaubsplanung.md` and apply it across
 all labels. Proposed terms:
 
 | Concept | Term | Replaces |
@@ -745,8 +745,8 @@ or not at all.
 | ID | Item | Status |
 |---|---|---|
 | D8 | Persist "Warum hier?" reasons on the stop when it leaves the pool (server) | Done in a follow-up PR: `trip_plan_stops.reasons` (migration 0198) is written by every path that creates a stop (initial plan, placement from the pool, redistribution, weather shuffle, split branches) and read back on the stop; returning a spot to the pool brings them back. `TripStop.reasons` is optional for an older server, and the day screen falls back to the pool entry then |
-| D11 (ideas) | "Wer schreibt mit" screen for the idea collection with a list of invitees and removal | Done in a follow-up PR, with a change of model: invitations (trips and ideas) pick from the household like the album share instead of typing an address (`GET /trip-planner/shareable-users`); the ideas list is one list across every collection the person may write into (`GET /ideas` without `ownerId`, folded where two collections hold the same place); `GET /ideas/members` lists who writes into mine. Two people who collected separately and then let each other in see one list; nothing is merged or moved. See `docs/ideenvorrat.md` §4 |
-| D6 | Build the manual-mode selection grid, or hide the toggle | Neither. The toggle stays; the empty state and a caption under the switch (`ActiveTripView.autoAddHint`) say what it decides: only whether new photos go into the iOS album by themselves — the album is synchronised to f4mil in both positions, even while it is empty. `docs/ios-trip-mode.md` §7 says the same |
+| D11 (ideas) | "Wer schreibt mit" screen for the idea collection with a list of invitees and removal | Done in a follow-up PR, with a change of model: invitations (trips and ideas) pick from the household like the album share instead of typing an address (`GET /trip-planner/shareable-users`); the ideas list is one list across every collection the person may write into (`GET /ideas` without `ownerId`, folded where two collections hold the same place); `GET /ideas/members` lists who writes into mine. Two people who collected separately and then let each other in see one list; nothing is merged or moved. See `documentation/ideenvorrat.md` §4 |
+| D6 | Build the manual-mode selection grid, or hide the toggle | Neither. The toggle stays; the empty state and a caption under the switch (`ActiveTripView.autoAddHint`) say what it decides: only whether new photos go into the iOS album by themselves — the album is synchronised to f4mil in both positions, even while it is empty. `documentation/ios-trip-mode.md` §7 says the same |
 | E3 | "Das hier merken" directly on the Trip tab and as an App Shortcut | Done in a follow-up PR: a toolbar button on the "Aufnehmen" half opens the same capture sheet (one tap, then "Merken"); `RememberHereIntent` (App Intent, `openAppWhenRun`) leaves a request in `TripIdeaCaptureRequest`, the tab bar switches to Trip and the tab opens the sheet. `FKPhotosShortcuts` in the app target declares the shortcut. The app target is not built by the iOS CI, so that part is compiled only by Xcode |
 | X11 | Travellers outside the household, a per-traveller `shortWalks` toggle, transferring the organiser role | Done in a follow-up PR: "Jemanden eintragen" (name, optional birth date, "Kürzere Wege") on the Reisegruppe screen; "Kürzere Wege" as a toggle per traveller (`POST /travellers/update`, organiser only, re-plans); "Rolle übergeben" as a swipe action on Planen mit (`POST /participants/hand-over`, a swap: the old organiser stays as participant) |
 | X15 | "§9.1" references in `TripMapsHandoff.swift` / `TripMapsSettingsView.swift` | Dropped: they cite §9.1 of `ios-urlaubsplanung.md` ("Hinaus: was die App abgibt"), which is correct. The finding was wrong |
@@ -760,7 +760,7 @@ or not at all.
 - `TripSettingsView.swift`: the "Trip & Reise" screen.
 - `TripVisitReportQueue` (in `TripVisitMonitor.swift`): failed visit reports are queued in `UserDefaults` (cap 100) and flushed later.
 - `TripIdeaTakeSheet` (in `TripIdeasView.swift`): the plan picker behind "In eine Reise übernehmen".
-- `TripIdeasOffer` / `TripIdeasOfferMemory`: the day screen says „Ihr habt vier Ideen für Lissabon gesammelt" once per count of not-yet-taken ideas, leading to "Aus den Ideen übernehmen"; that menu entry shows the count. Creating a trip still never takes ideas over by itself (`docs/ideenvorrat.md` §4.3).
+- `TripIdeasOffer` / `TripIdeasOfferMemory`: the day screen says „Ihr habt vier Ideen für Lissabon gesammelt" once per count of not-yet-taken ideas, leading to "Aus den Ideen übernehmen"; that menu entry shows the count. Creating a trip still never takes ideas over by itself (`documentation/ideenvorrat.md` §4.3).
 - The share extension's own copy of the collection labels follows the glossary (`F4milShare/ShareWireTypes.swift`, `ShareProposalsView.swift`, `TripShareCapture.swift`).
 - Backend: `youOrganise` on `PlanSummary` (`trip-planner/plan-store.ts`), with a test in `shares.test.ts`.
 - Unit tests: `TripErrorTextTests`, `TripDayNavigationTests`, `TripParticipantsInviteTests`, `TripVisitReportQueueTests`, the organiser-flag decode in `TripPlanModelsTests`, `testTrimmingKeepsThePhotoStop` in `TripSpotDetailTests`, and extensions of `TripIdeasTests` and `TripIdeasOutingTests`.

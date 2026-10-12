@@ -1,6 +1,6 @@
 /**
  * Per-face sharpness measurement — Etappe 2 of
- * docs/auto-pick-face-relevance.md.
+ * documentation/auto-pick-face-relevance.md.
  *
  * Today the only per-face sharpness the system has is `face_sharpness` in
  * `photos.ai_quality_details`: the *minimum* over all detections of a photo,

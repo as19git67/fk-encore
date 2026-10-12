@@ -20,7 +20,7 @@ struct TripStartSheet: View {
     let onStart: (String) -> Void
 
     /// - Parameter suggestedName: Prefill from the auto-start suggestion
-    ///   (`docs/ios-trip-mode.md` §9.2), derived from where the recent photos
+    ///   (`documentation/ios-trip-mode.md` §9.2), derived from where the recent photos
     ///   were taken. `nil` for a manual start, which falls back to the
     ///   date-based default. Either way the live location below may still
     ///   refine it — the suggestion's coordinate comes from a photo cluster,

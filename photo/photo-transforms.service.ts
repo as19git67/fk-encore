@@ -9,7 +9,7 @@
 //
 // Pure math is exported separately for unit testing.
 //
-// See docs/photos-ai-transforms.md.
+// See documentation/photos-ai-transforms.md.
 
 import path from "path";
 import { eq, sql } from "drizzle-orm";

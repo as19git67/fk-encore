@@ -40,7 +40,7 @@ const bulkLoading = ref(false)
 
 // Regions an older osm2pgsql style built. osm2pgsql applies a style on
 // --create only, so such a region cannot gain a table any other way
-// than by being imported again (docs/ios-urlaubsplanung.md §4.7).
+// than by being imported again (documentation/ios-urlaubsplanung.md §4.7).
 const outdated = ref<OutdatedRegionsResult | null>(null)
 const outdatedLoading = ref(false)
 const reimportResult = ref<ReimportOutdatedResult | null>(null)

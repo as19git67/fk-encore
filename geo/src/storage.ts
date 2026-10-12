@@ -3,7 +3,7 @@
  *
  * `/status` already reports the total size per region, which answers
  * "how full is the volume". It does not answer the question the import
- * rework raises (docs/ios-urlaubsplanung.md §13.0): **how much did
+ * rework raises (documentation/ios-urlaubsplanung.md §13.0): **how much did
  * carrying gastronomy and everyday infrastructure add?** For that the
  * total has to be broken down, because most of a region's bytes are the
  * osm2pgsql slim middle tables — kept so replication can append — and

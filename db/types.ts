@@ -374,7 +374,7 @@ export type PhotoOrientation = "portrait" | "landscape" | "square";
 
 /**
  * Per-group setting for the portrait/landscape format group
- * (docs/plans/orientierungs-varianten.md): `auto` computes membership at
+ * (documentation/plans/orientierungs-varianten.md): `auto` computes membership at
  * read time, `off` says "these are not the same motif" and never collapses.
  */
 export type OrientationVariantsMode = "auto" | "off";
@@ -401,7 +401,7 @@ export interface OrientationVariants {
  * The best-ranked photo on the other side of a format group, as the recap
  * and the stream ship it next to a photo so a viewer can show the side that
  * fits the screen without a second lookup
- * (docs/plans/orientierungs-varianten.md, stage 6).
+ * (documentation/plans/orientierungs-varianten.md, stage 6).
  */
 export interface OrientationCounterpart {
   id: number;
@@ -573,7 +573,7 @@ export interface PhotoCurationStats {
 
 /**
  * Per-album override for adopting other people's similar-photo group
- * reviews (docs/group-review-adoption.md). `null` inherits the user's
+ * reviews (documentation/group-review-adoption.md). `null` inherits the user's
  * global default.
  */
 export type GroupReviewAdoption = "on" | "off" | null;
@@ -875,7 +875,7 @@ export interface PhotoGroup {
   reviewed_at?: string;
   /**
    * Who closed the group: "user" (the owner did it) or "adopted" (taken
-   * over from a peer's review, docs/group-review-adoption.md). Absent
+   * over from a peer's review, documentation/group-review-adoption.md). Absent
    * while the group is still open.
    */
   review_source?: "user" | "adopted";

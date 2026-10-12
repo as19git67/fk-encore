@@ -1,6 +1,6 @@
 import Foundation
 
-/// The album "views" from `docs/album-photo-views.md`: a lens over a shared
+/// The album "views" from `documentation/album-photo-views.md`: a lens over a shared
 /// album that combines a hide filter and a favorites filter so every
 /// participant can look at *their* version of the album without the group
 /// having to agree on one cut (issue #760).

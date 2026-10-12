@@ -2,7 +2,7 @@ import CoreLocation
 import XCTest
 @testable import FKPhotosLib
 
-/// Locks the **auto-start suggestion contract** (`docs/ios-trip-mode.md` §9.2):
+/// Locks the **auto-start suggestion contract** (`documentation/ios-trip-mode.md` §9.2):
 /// only ever a suggestion, raised from photo GPS rather than live location, and
 /// only when the photos show a stay that is both far from home and long enough
 /// to be a trip rather than an outing. The PhotoKit enumeration and the

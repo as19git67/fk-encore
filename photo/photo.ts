@@ -2054,7 +2054,7 @@ export const setGroupReviewAdoption = api(
 
 /**
  * The user's global switch for portrait/landscape format groups
- * (docs/plans/orientierungs-varianten.md): on, lists show only the side
+ * (documentation/plans/orientierungs-varianten.md): on, lists show only the side
  * that matches the screen orientation.
  */
 export const getCollapseOrientationVariants = api(
@@ -2162,7 +2162,7 @@ export const backfillPhotoDimensions = api(
 
 /**
  * Backfill `faces.sharpness` (Etappe 2 of
- * docs/auto-pick-face-relevance.md) for faces detected before the column
+ * documentation/auto-pick-face-relevance.md) for faces detected before the column
  * existed. Like the dimensions backfill this is a property of the file, so
  * `data.manage` gates it server-wide.
  *
@@ -2247,7 +2247,7 @@ export const pickPhotosInGroup = api(
 );
 
 /**
- * "Bestes je Format behalten" (docs/plans/orientierungs-varianten.md):
+ * "Bestes je Format behalten" (documentation/plans/orientierungs-varianten.md):
  * keep the best-rated photo of every orientation in the group, hide the rest
  * and mark the group reviewed. Same gate as the other review actions.
  */

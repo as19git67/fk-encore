@@ -67,7 +67,7 @@ struct CompareTournament: Equatable, Sendable {
     private let orientations: [Int: PhotoOrientation]
     /// Portrait against landscape, in a format pair: never asked. The same
     /// motif shot both ways is not a duel to be won — both sides survive
-    /// (docs/plans/orientierungs-varianten.md), so these pairs are kept out
+    /// (documentation/plans/orientierungs-varianten.md), so these pairs are kept out
     /// of the tournament from the start. Empty unless the caller said the
     /// group is a format pair and both shapes are actually present.
     private let crossPairs: Set<Pair>

@@ -277,7 +277,7 @@ Karte das Tag „Hoch + Quer". KI-Auto-Pick bleibt wie er ist: die
 Orientierungs-Diversität tut genau das Richtige, und der neue Zustand macht
 nur sichtbar, warum die KI zwei Fotos behalten hat.
 
-Übernahme fremder Reviews (`docs/group-review-adoption.md`) überträgt
+Übernahme fremder Reviews (`documentation/group-review-adoption.md`) überträgt
 `orientation_variants` **nicht**: ob zwei Bilder dasselbe Motiv sind, ist
 objektiv genug, dass `auto` für alle gilt; ein `off` ist eine persönliche
 Entscheidung an der eigenen Gruppe.

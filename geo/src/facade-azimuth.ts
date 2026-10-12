@@ -3,7 +3,7 @@
  *
  * The planner uses this to say when a spot stands in good light: a
  * facade is front-lit while the sun sits in the half-space it faces
- * (docs/ios-urlaubsplanung.md §7.3). Sun position is pure arithmetic on
+ * (documentation/ios-urlaubsplanung.md §7.3). Sun position is pure arithmetic on
  * the planner's side; the one thing it cannot know is which way the
  * building looks.
  *

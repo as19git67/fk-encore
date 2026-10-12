@@ -304,7 +304,7 @@ export const setBankcontactCredentials = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.accounts.manage");
 
-    // Rate-limit per user×bankcontact. See docs/finance-rate-limiting.md §2.
+    // Rate-limit per user×bankcontact. See documentation/finance-rate-limiting.md §2.
     checkRateLimit(`bank-creds:${auth.userID}:${p.id}`, {
       maxAttempts: 10,
       windowMs: 15 * 60_000,

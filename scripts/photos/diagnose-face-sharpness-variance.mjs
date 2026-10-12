@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Vorhersage V1 aus docs/auto-pick-face-relevance.md, Abschnitt 7.
+ * Vorhersage V1 aus documentation/auto-pick-face-relevance.md, Abschnitt 7.
  *
  * Frage: Hat eine prominenzgewichtete Aggregation der Gesichtsschärfe
  * innerhalb einer Ähnlichkeitsgruppe mehr Streuung als das heutige Minimum?
@@ -137,7 +137,7 @@ async function main() {
   if (ONLY_USER != null) out(`Eingeschränkt auf user_id = ${ONLY_USER}`);
   out();
   out(
-    `Prüfung der Vorhersage **V1** aus \`docs/auto-pick-face-relevance.md\`: ` +
+    `Prüfung der Vorhersage **V1** aus \`documentation/auto-pick-face-relevance.md\`: ` +
       `Eine prominenzgewichtete Aggregation von \`faces.sharpness\` hat ` +
       `innerhalb einer Ähnlichkeitsgruppe eine höhere Streuung als das heutige ` +
       `Minimum. Trifft V1 nicht zu, ist die Kernannahme aus Abschnitt 2 falsch ` +

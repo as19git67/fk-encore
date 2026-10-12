@@ -13,7 +13,7 @@ struct FeedCardView: View {
     @State private var fullscreenPhoto: PhotoWithCuration?
     @State private var isOpeningFullscreen = false
     /// Which way the screen is held: a photo that is one side of a format
-    /// pair shows the side that fits (docs/plans/orientierungs-varianten.md).
+    /// pair shows the side that fits (documentation/plans/orientierungs-varianten.md).
     @Environment(\.screenOrientation) private var screenOrientation
 
     init(item: FeedPhotoItem, isHiddenByMe: Bool, onLike: @escaping () -> Void, onToggleHide: @escaping () -> Void) {

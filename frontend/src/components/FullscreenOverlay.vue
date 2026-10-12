@@ -73,14 +73,14 @@ const props = withDefaults(defineProps<{
    * Similar-photo-group context for the currently shown photo, when
    * the photo is part of a group. Drives the `+N`-marker that tells
    * the user that more siblings exist and offers a one-click jump
-   * to the review dialog (Track I, see docs/ai-auto-pick.md).
+   * to the review dialog (Track I, see documentation/ai-auto-pick.md).
    * Null/undefined → no marker rendered.
    */
   group?: GalleryGridGroup | null
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
   /**
    * The other side of the current photo's portrait/landscape format group
-   * (docs/plans/orientierungs-varianten.md), when there is one. Shows the
+   * (documentation/plans/orientierungs-varianten.md), when there is one. Shows the
    * "Querformat" / "Hochformat" button (`R`) and preloads that image so the
    * switch is instant. The host swaps the two on `toggle-variant`.
    */
@@ -340,7 +340,7 @@ async function copyAllText() {
 
 // Track-I marker semantics — mirrors VirtualGallery's badge logic. No
 // confidence level hides siblings anymore (see
-// docs/auto-pick-face-relevance.md §6), so the badge is always just a
+// documentation/auto-pick-face-relevance.md §6), so the badge is always just a
 // prominent marker, never a claim that something is hidden.
 const groupBadgeTitle = computed(() => {
   const g = props.group
@@ -1335,7 +1335,7 @@ onUnmounted(() => {
               @click="emitLinkVisibility"
               v-tooltip.top="linkVisibilityTooltip + ' (L)'"
             />
-            <!-- Other side of the format group (docs/plans/orientierungs-
+            <!-- Other side of the format group (documentation/plans/orientierungs-
                  varianten.md): swaps portrait and landscape of the same motif
                  in place, the list index stays. Turning the device does the
                  same automatically unless the user chose a side here. -->

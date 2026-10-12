@@ -3,7 +3,7 @@ import XCTest
 
 /// Locks the semantics of the album views (issue #760) against the backend
 /// presets in `photo/photo.service.ts` (`VIEW_PRESETS`) and the feature spec in
-/// `docs/album-photo-views.md`. The SwiftUI grid is verified on-device; these
+/// `documentation/album-photo-views.md`. The SwiftUI grid is verified on-device; these
 /// pin the filter decisions, which is where a regression would silently show
 /// the wrong photos to a whole group.
 final class AlbumViewModeTests: XCTestCase {

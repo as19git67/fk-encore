@@ -1,6 +1,6 @@
 # Lokales Modell gegen Claude API — die Messung aus §11.0
 
-`docs/ios-urlaubsplanung.md` §11 überlegt, was sich änderte, wenn statt des
+`documentation/ios-urlaubsplanung.md` §11 überlegt, was sich änderte, wenn statt des
 lokalen Modells die Claude API zur Verfügung stünde. §11.0 macht daraus eine
 Auflage:
 

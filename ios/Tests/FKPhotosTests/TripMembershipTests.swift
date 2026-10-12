@@ -129,7 +129,7 @@ final class TripMembershipTests: XCTestCase {
         )
     }
 
-    /// The zone's actual job (`docs/ios-trip-mode.md` §5): a photo taken at
+    /// The zone's actual job (`documentation/ios-trip-mode.md` §5): a photo taken at
     /// home while a trip is nominally still running is not a trip photo.
     func testPhotoAtHomeIsExcluded() {
         let trip = makeTrip(startedAt: start, homeExclusion: homeZone(at: munich))
@@ -165,7 +165,7 @@ final class TripMembershipTests: XCTestCase {
         )
     }
 
-    /// Etappe-1-Entscheidung (`docs/ios-trip-mode.md` §14.4): im Zweifel aufnehmen.
+    /// Etappe-1-Entscheidung (`documentation/ios-trip-mode.md` §14.4): im Zweifel aufnehmen.
     func testPhotoWithoutGPSIsIncluded() {
         let trip = makeTrip(startedAt: start, homeExclusion: homeZone(at: munich))
         XCTAssertTrue(

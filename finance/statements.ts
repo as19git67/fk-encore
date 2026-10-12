@@ -165,7 +165,7 @@ export const triggerSync = api(
 
     // Rate-limit manual sync per user×bankcontact so a single user can't
     // spam the bank's FinTS endpoint. The cron fires independently.
-    // See docs/finance-rate-limiting.md §2.
+    // See documentation/finance-rate-limiting.md §2.
     checkRateLimit(`sync-trigger:${auth.userID}:${p.bankcontactId}`, {
       maxAttempts: 20,
       windowMs: 15 * 60_000,

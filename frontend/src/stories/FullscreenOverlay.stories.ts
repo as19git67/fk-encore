@@ -151,7 +151,7 @@ export const SplitLandscapeWide: Story = {
   },
 }
 
-// Format pair (docs/plans/orientierungs-varianten.md): the same motif in
+// Format pair (documentation/plans/orientierungs-varianten.md): the same motif in
 // portrait and landscape. The overlay shows the side that fits the screen and
 // offers the other one on the ↻ button (R). Both viewports, so the button
 // and the preloaded counterpart can be checked on each side.

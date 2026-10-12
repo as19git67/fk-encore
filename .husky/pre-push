@@ -9,4 +9,5 @@
 # in genuine emergencies; the CI will catch you anyway.
 set -e
 
+npm run check:pages
 npm --prefix frontend run build

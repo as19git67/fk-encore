@@ -36,7 +36,7 @@ export interface Photo {
   has_known_face?: boolean
   /**
    * Portrait, landscape or square from the stored dimensions; null while
-   * the dimensions are unknown (docs/plans/orientierungs-varianten.md).
+   * the dimensions are unknown (documentation/plans/orientierungs-varianten.md).
    */
   orientation?: PhotoOrientation | null
 }
@@ -53,7 +53,7 @@ export type VariantMode = 'all' | 'portrait' | 'landscape'
 /**
  * The best-ranked photo on the other side of a format group, shipped next to
  * a photo by the recap and the stream so the viewer can show the side that
- * fits the screen (docs/plans/orientierungs-varianten.md).
+ * fits the screen (documentation/plans/orientierungs-varianten.md).
  */
 export interface OrientationCounterpart {
   id: number
@@ -769,7 +769,7 @@ export interface AlbumUserSettings {
   cover_photo_id?: number | null
   /**
    * Per-album override for adopting other people's group reviews: null
-   * inherits the global default (docs/group-review-adoption.md).
+   * inherits the global default (documentation/group-review-adoption.md).
    */
   group_review_adoption?: 'on' | 'off' | null
 }
@@ -988,7 +988,7 @@ export interface PhotoGroup {
   reviewed_at?: string
   /**
    * Who closed the group: 'user' (you did) or 'adopted' (taken over from
-   * somebody else's review — see docs/group-review-adoption.md). Absent
+   * somebody else's review — see documentation/group-review-adoption.md). Absent
    * while the group is still open.
    */
   review_source?: 'user' | 'adopted'
@@ -1001,7 +1001,7 @@ export interface PhotoGroup {
   ai_picked_at?: string
   /**
    * Portrait/landscape format group setting
-   * (docs/plans/orientierungs-varianten.md). Absent = 'auto'.
+   * (documentation/plans/orientierungs-varianten.md). Absent = 'auto'.
    */
   orientation_variants?: 'auto' | 'off'
   /** Visible members per side while the group forms a format group. */
@@ -1210,7 +1210,7 @@ export interface ReviewQueueGroup {
   duplicate_deletable_bytes: number
   /**
    * The group holds both orientations of one motif
-   * (docs/plans/orientierungs-varianten.md): tag "Hoch + Quer", action
+   * (documentation/plans/orientierungs-varianten.md): tag "Hoch + Quer", action
    * "Bestes je Format behalten", chip "Formatpaare".
    */
   orientation_pair: boolean

@@ -36,7 +36,7 @@
  * lighting. We deliberately keep the same *ideas* (upright + high-contrast
  * B/W) but implement them with the libraries already in the runtime image
  * (`sharp` + `tesseract`) rather than adding `unpaper`/ImageMagick — see
- * `docs/ocr-improvements.md` for the full comparison.
+ * `documentation/ocr-improvements.md` for the full comparison.
  */
 
 import fs from "fs";

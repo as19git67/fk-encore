@@ -2,7 +2,7 @@
  * Travel-time estimation for the planner — deliberately coarse.
  *
  * The plan speaks in blocks, not clock times (see
- * docs/ios-urlaubsplanung.md §4.1), so a leg only has to be good enough
+ * documentation/ios-urlaubsplanung.md §4.1), so a leg only has to be good enough
  * to charge against a block budget. That makes a straight-line estimate
  * with a detour factor sufficient for the first implementation steps,
  * and it keeps the planner free of a routing engine — which the concept

@@ -40,7 +40,7 @@ behind it.
   with Qwen2.5-7B) has no tool protocol; the trip-planner benchmark
   emulated tools by asking for JSON (`trip-planner/llm-bench/run-chat.ts`),
   and this Gemma model scored 10/10 against Claude's 9/10 there and 96 %
-  on request understanding at a 1 s median (`docs/ios-urlaubsplanung.md`
+  on request understanding at a 1 s median (`documentation/ios-urlaubsplanung.md`
   §11).
 - The 16 GB carry the Q4 weights, the KV cache, the vision projector and
   the E5 embedder together. The usable context window is whatever is
@@ -65,7 +65,7 @@ behind it.
   complete description of a list, so the assistant can answer with a
   link that opens the real page with the right filters instead of
   re-rendering the list itself.
-- Everything AI stays in-house (`docs/ios-urlaubsplanung.md` §11.5). The
+- Everything AI stays in-house (`documentation/ios-urlaubsplanung.md` §11.5). The
   Anthropic client exists only for benchmarks.
 
 ## Decisions

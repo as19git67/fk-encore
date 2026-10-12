@@ -33,7 +33,7 @@ import {
 /**
  * Kurse — one tile per security the depots hold: the last price, its
  * change over a switchable range, a sparkline and the value of the
- * shares. Prices come from the quote cache (`docs/plans/kurse.md`);
+ * shares. Prices come from the quote cache (`documentation/plans/kurse.md`);
  * the page polls every minute while it is open and keeps the previous
  * tiles on screen while a reload is in flight.
  *

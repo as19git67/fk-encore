@@ -7,7 +7,7 @@ import SwiftUI
 /// und Auto/Manuell-Optionen und das Foto-Grid des Trip-Albums.
 /// Ortsermittlung beim Start liefert den Namensvorschlag, der
 /// automatische Foto-Zuwachs läuft über den Auto-Add-Pass (siehe
-/// `docs/ios-trip-mode.md`). **Planen** is the vacation planner
+/// `documentation/ios-trip-mode.md`). **Planen** is the vacation planner
 /// (`TripPlansListView`). A segmented control in the navigation bar
 /// switches; the planner used to hang on one toolbar icon here, four
 /// levels from the tab to a day.
@@ -203,7 +203,7 @@ struct TripView: View {
     /// Opens the prefilled start sheet when the user chose "Trip starten" on
     /// the suggestion notification. That action deliberately doesn't start the
     /// trip itself — the name becomes an iOS *and* a server album, so it wants
-    /// confirming (`docs/ios-trip-mode.md` §9.2).
+    /// confirming (`documentation/ios-trip-mode.md` §9.2).
     @MainActor
     private func consumeStartSuggestionHandoff() {
         guard !store.isActive, let name = autoStart.consumeStartSheetRequest() else { return }
@@ -667,7 +667,7 @@ private struct ActiveTripView: View {
     }
 }
 
-/// The caption under the Auto/Manuell switch (`docs/ios-trip-mode.md` §7).
+/// The caption under the Auto/Manuell switch (`documentation/ios-trip-mode.md` §7).
 ///
 /// Both halves say the same second thing on purpose: the switch changes
 /// how photos get *into* the iOS album, never whether the album is

@@ -27,8 +27,8 @@ Vue-3-UI darstellen. Vorlage ist das bestehende Projekt **Finanzkraft**.
   `user/auth-handler`
 - Migrations-Verzeichnis: `db/migrations/postgres/` (zuletzt
   `0041_drop_photo_likes.sql`) → neue Migration startet bei `0042_…`
-- Plan-Doku-Konvention: ausführliche Markdown-Dateien unter `docs/` (siehe
-  `docs/tax-document-detection.md`, `docs/document-folders.md`)
+- Plan-Doku-Konvention: ausführliche Markdown-Dateien unter `documentation/` (siehe
+  `documentation/tax-document-detection.md`, `documentation/document-folders.md`)
 
 ## Quelle: Finanzkraft (nur als Referenz, NICHT 1:1 portieren)
 
@@ -231,7 +231,7 @@ Stack-Match ist 100% (Vue 3.5, PrimeVue 4.5, Pinia 3). Pro Etappe:
 
 | #  | Inhalt                                                                                                                                                               | Liefergegenstand      |
 |----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|
-| 0  | Plan-Dokument schreiben (`docs/finance-module.md` im Stil von `docs/tax-document-detection.md`), commit                                                              | Doku-PR               |
+| 0  | Plan-Dokument schreiben (`documentation/finance-module.md` im Stil von `documentation/tax-document-detection.md`), commit                                                              | Doku-PR               |
 | 1  | DB-Schema (alle `finance_*`-Tabellen), Migration `0042_finance_initial.sql`, Drizzle-Typen, Seeds (Currency/AccountType/Timespan), Modul-Permissions                 | grüne Tests           |
 | 2  | `finance/encryption.ts` + `finance/fints-client.ts` + Unit-Tests (Mock `lib-fints`)                                                                                  | grüne Tests           |
 | 3  | Bankcontact-API + Account-API + ACL-API + Tests                                                                                                                      | grüne Tests           |
@@ -259,8 +259,8 @@ Stack-Match ist 100% (Vue 3.5, PrimeVue 4.5, Pinia 3). Pro Etappe:
 
 ## Aufgabe für die nächste Session
 
-**Starte mit Etappe 0**: Schreibe `docs/finance-module.md` (Stil wie
-`docs/tax-document-detection.md`/`docs/document-folders.md`, deutsch,
+**Starte mit Etappe 0**: Schreibe `documentation/finance-module.md` (Stil wie
+`documentation/tax-document-detection.md`/`documentation/document-folders.md`, deutsch,
 strukturiert). Inhalt: alle Architektur-Entscheidungen oben, vollständiges
 Drizzle-Schema-Skizze, TAN-Session-Sequenzdiagramm (Mermaid),
 Etappen-Roadmap, offene Punkte. Danach commit auf

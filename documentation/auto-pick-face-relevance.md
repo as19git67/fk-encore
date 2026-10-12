@@ -1,7 +1,7 @@
 # Auto-Pick: vom Qualitätsbewerter zum Vergleicher
 
 Konzept, noch nicht umgesetzt. Folgearbeit zu #873 (Focus Peaking) und
-`docs/ai-auto-pick.md`.
+`documentation/ai-auto-pick.md`.
 
 Grundlage sind drei Messrunden an der produktiven Datenbank
 (Stand 2026-08-07, 511 auswertbare reviewte Gruppen):

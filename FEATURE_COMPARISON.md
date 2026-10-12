@@ -118,7 +118,7 @@ Status: August 2026 (updated)
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| iOS app | ✅ Native | ✅ Native SwiftUI app (see `docs/ios-app.md`) |
+| iOS app | ✅ Native | ✅ Native SwiftUI app (see `documentation/ios-app.md`) |
 | Android app | ✅ Native | ❌ |
 | Auto-backup (background) | ✅ | ✅ Background upload (`PHBackgroundResourceUploadExtension` / `BGProcessingTask`) |
 | Selective album backup | ✅ | ✅ Device-album → server-album mapping |
@@ -139,7 +139,7 @@ Status: August 2026 (updated)
 > functional: background auto-backup, two-way sync, selective album mapping,
 > Wi-Fi-only, a share extension, passkeys, comments/reactions, recaps, and the
 > collaborative-curation features (album view modes with anonymized consensus
-> counters, and the swipe-based group review queue). See `docs/ios-app.md` for
+> counters, and the swipe-based group review queue). See `documentation/ios-app.md` for
 > the full inventory and the Web↔iOS parity plan.**
 
 ## 9. Authentication & User Management
@@ -284,7 +284,7 @@ be the most impactful:
 
 For the iOS app specifically, the Web↔iOS feature gap and a prioritized
 parity plan plus iOS-only enrichment ideas are tracked in
-**`docs/ios-app.md`**. Stage 1 of that plan is complete (recaps viewer, album
+**`documentation/ios-app.md`**. Stage 1 of that plan is complete (recaps viewer, album
 view-modes with consensus voting, swipe-based group review, and the full set of
 fullscreen photo actions). What remains on iOS is Stage 2 and beyond: setting
 GPS locations, an interactive map/trips view, public album links, multi-select

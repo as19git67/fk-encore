@@ -4,7 +4,7 @@
  * Pure and DB-free so the rule itself can be unit-tested without a database;
  * `group-review-adoption.service.ts` does the loading and the writing.
  *
- * See docs/group-review-adoption.md for the why.
+ * See documentation/group-review-adoption.md for the why.
  */
 
 export type CurationStatus = "visible" | "hidden" | "favorite";

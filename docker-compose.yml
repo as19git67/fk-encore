@@ -135,7 +135,7 @@ services:
       DOCUMENTS_TEXT_LAYER_SPACING: ${DOCUMENTS_TEXT_LAYER_SPACING:-1}
       DOCUMENTS_OCR_OMP_THREADS: ${DOCUMENTS_OCR_OMP_THREADS:-1}
       # Page preprocessing — rotation and contrast, documented in
-      # docs/ocr-improvements.md. DOCUMENTS_OCR_PREPROCESS=0 restores the
+      # documentation/ocr-improvements.md. DOCUMENTS_OCR_PREPROCESS=0 restores the
       # pre-#892 behaviour wholesale.
       DOCUMENTS_OCR_PREPROCESS: ${DOCUMENTS_OCR_PREPROCESS:-1}
       DOCUMENTS_OCR_AUTOROTATE: ${DOCUMENTS_OCR_AUTOROTATE:-1}
@@ -173,7 +173,7 @@ services:
       DOC_SCAN_EMBED_CONCURRENCY: ${DOC_SCAN_EMBED_CONCURRENCY:-1}
       DOC_SCAN_RECEIPT_OCR_CONCURRENCY: ${DOC_SCAN_RECEIPT_OCR_CONCURRENCY:-1}
       DOC_SCAN_POLL_INTERVAL_MS: ${DOC_SCAN_POLL_INTERVAL_MS:-30000}
-      # OCR resolver (docs/document-text-extraction.md). Both stages default
+      # OCR resolver (documentation/document-text-extraction.md). Both stages default
       # off: with them off the uncertainty scan does not run at all and page
       # text is byte-for-byte what it was before.
       DOCUMENTS_OCR_SECOND_ENGINE: ${DOCUMENTS_OCR_SECOND_ENGINE:-0}
@@ -284,7 +284,7 @@ services:
       FINANCE_IMPORT_DIR: /mnt/data/finance-import
       FINANCE_EXPORT_DIR: /mnt/data/finance-export
       FINANCE_EXPORT_KEEP: ${FINANCE_EXPORT_KEEP:-30}
-      # Quotes and news of the held securities (docs/plans/kurse.md).
+      # Quotes and news of the held securities (documentation/plans/kurse.md).
       # Quotes come from Onvista; without a token there are no news.
       EODHD_API_TOKEN: ${EODHD_API_TOKEN:-}
       FINANCE_EODHD_DAILY_CALLS: ${FINANCE_EODHD_DAILY_CALLS:-20}

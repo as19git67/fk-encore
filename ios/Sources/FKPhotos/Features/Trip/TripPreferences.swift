@@ -38,7 +38,7 @@ struct ActiveTrip: Codable, Equatable, Sendable {
     var homeExclusion: Geofence?
     /// High-water mark on `creationDate`: the auto-add pass has examined every
     /// asset in the window up to this instant, so the next pass only needs to
-    /// enumerate from here (`docs/ios-trip-mode.md` §14.4). `nil` before the
+    /// enumerate from here (`documentation/ios-trip-mode.md` §14.4). `nil` before the
     /// first pass — then the window starts at `startedAt`.
     ///
     /// Missing from trips persisted before the watermark existed; the synthesised
@@ -108,7 +108,7 @@ enum TripMembership {
     ///
     /// An asset without a creation date can't be placed in the window and is
     /// excluded. An asset without GPS **is** included — im Zweifel aufnehmen
-    /// (`docs/ios-trip-mode.md` §14.4).
+    /// (`documentation/ios-trip-mode.md` §14.4).
     static func includes(creationDate: Date?, location: CLLocation?, trip: ActiveTrip) -> Bool {
         guard let creationDate else { return false }
         guard creationDate >= trip.startedAt else { return false }
@@ -179,7 +179,7 @@ enum TripPreferences {
     ///    photos taken away from its start location.
     /// 2. The watermark is reset, because the old rule's damage is otherwise
     ///    permanent: the pass advances the watermark over assets it *examined*,
-    ///    including the ones the geofence rejected (`docs/ios-trip-mode.md`
+    ///    including the ones the geofence rejected (`documentation/ios-trip-mode.md`
     ///    §14.4). Those photos sit below the watermark and would never be
     ///    enumerated again, so fixing the rule alone would not bring back the
     ///    photos the user already took.

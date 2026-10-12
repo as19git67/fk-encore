@@ -6,7 +6,7 @@ Dokumente zu erhöhen, OHNE manuelle Klassifikation.
 Abgrenzung (wichtig): Dies ersetzt NICHT die Produktions-Klassifikation. Das
 lokale Qwen bleibt der Klassifikator für jedes Dokument. Claude läuft nur
 gezielt und offline, um dort mehr korrekte Beispiele zu erzeugen, wo das
-Gold-Set heute dünn ist. Siehe docs/design/cloud-teacher-gold-set.md.
+Gold-Set heute dünn ist. Siehe documentation/design/cloud-teacher-gold-set.md.
 
 Unterschied zum Audit (cloud_audit.py):
   - SCHREIBT in die DB (category_source='cloud', document_tax_sections.source

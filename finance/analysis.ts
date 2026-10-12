@@ -10,7 +10,7 @@
  * callers get their results automatically scoped to accounts they
  * can read via finance_account_access.
  *
- * Architecture: docs/finance-tagging-and-ai.md §4.
+ * Architecture: documentation/finance-tagging-and-ai.md §4.
  */
 
 import { api, APIError } from "encore.dev/api";
@@ -72,7 +72,7 @@ export const query = api(
 
     // Rate-limit per user — each call hits llm-service. The /aggregate
     // endpoint (no LLM) is deliberately exempt.
-    // See docs/finance-rate-limiting.md §2.
+    // See documentation/finance-rate-limiting.md §2.
     checkRateLimit(`analysis-query:${auth.userID}`, {
       maxAttempts: 30,
       windowMs: 10 * 60_000,

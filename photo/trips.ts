@@ -1,6 +1,6 @@
 /**
  * Trip Mode server support beyond the plain album endpoints it otherwise
- * reuses (see `docs/ios-trip-mode.md`). Currently just the home-location
+ * reuses (see `documentation/ios-trip-mode.md`). Currently just the home-location
  * lookup the client needs to suggest ending a trip once the device is back
  * home (Etappe 5).
  */

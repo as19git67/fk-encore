@@ -163,7 +163,7 @@ describe("Gallery grid – album scope", () => {
     await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: dup });
 
     // A high-confidence, unreviewed AI-picked similar-photo group: `dup`
-    // is a non-pick member. Per docs/auto-pick-face-relevance.md §6 this
+    // is a non-pick member. Per documentation/auto-pick-face-relevance.md §6 this
     // no longer auto-hides `dup` by default — the offline replay found
     // too weak a lift (+7.8pp at 75.6% hit rate) to hide unattended.
     const group = await dbInsertReturning<{ id: number }>(

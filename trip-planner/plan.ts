@@ -1,7 +1,7 @@
 /**
  * Trip planner — HTTP endpoint for a single planned day.
  *
- * Step 2 of docs/ios-urlaubsplanung.md §13: constraints in, blocks with
+ * Step 2 of documentation/ios-urlaubsplanung.md §13: constraints in, blocks with
  * spots out. No language model, no persistence, no frontend — those are
  * later steps. Keeping it stateless here means the whole path is
  * deterministic and can be exercised in tests without a database.

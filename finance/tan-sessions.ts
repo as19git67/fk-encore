@@ -67,7 +67,7 @@ export const completeTanSession = api(
     requirePermission(auth, "finance.accounts.manage");
 
     // Rate-limit per tan_reference, not per IP — NATed users must not lock
-    // each other out. See docs/finance-rate-limiting.md §2.
+    // each other out. See documentation/finance-rate-limiting.md §2.
     const rateKey = `tan-complete:${p.tanReference}`;
     checkRateLimit(rateKey, {
       maxAttempts: 5,

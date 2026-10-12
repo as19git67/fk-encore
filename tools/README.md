@@ -87,7 +87,7 @@ shape that fk-encore's `/finance/admin/import` endpoint expects.
 ### What gets dropped on purpose
 
 - `Categories[]` — fk-encore classifies by tag only (see
-  `docs/finance-tagging-and-ai.md`).
+  `documentation/finance-tagging-and-ai.md`).
 - `NewTransactionPresets[]` — preset suggestions are not part of fk-encore.
 - `RuleSets[]` — rules are out of scope; tagging is manual + LLM.
 - `SystemPreferences[]` / `Roles[]` / `Users[]` / `UserRoles[]` /

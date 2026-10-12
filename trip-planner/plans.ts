@@ -1,7 +1,7 @@
 /**
  * Persisted plans and redistribution — HTTP endpoints.
  *
- * Step 3 of docs/ios-urlaubsplanung.md §13. Step 2 computed a day and
+ * Step 3 of documentation/ios-urlaubsplanung.md §13. Step 2 computed a day and
  * threw it away; here a plan is stored so the mechanic the concept
  * calls its core can work on it: "we are here, it is now", the pool,
  * and moving what no longer fits to a following day.

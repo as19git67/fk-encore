@@ -5,7 +5,7 @@ import Foundation
 /// The playback machinery itself lives in `SlideshowPlan.swift` (planning and
 /// position) and `SlideshowStage.swift` (what one slide looks like); this is
 /// only the per-device pace and the caption rule. Documented once in
-/// `docs/photo-slideshow.md`.
+/// `documentation/photo-slideshow.md`.
 enum Slideshow {
 
     // MARK: - Interval

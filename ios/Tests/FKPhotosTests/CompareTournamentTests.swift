@@ -174,7 +174,7 @@ final class CompareTournamentTests: XCTestCase {
         XCTAssertEqual(tournament.suggestedKeepIds, [2, 3])
     }
 
-    // MARK: - Format pair (docs/plans/orientierungs-varianten.md)
+    // MARK: - Format pair (documentation/plans/orientierungs-varianten.md)
 
     /// In a format pair portrait never faces landscape: the only duel is
     /// between the two landscape frames, and both shapes survive.

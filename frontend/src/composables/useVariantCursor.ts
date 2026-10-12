@@ -4,7 +4,7 @@ import type { ScreenOrientation } from '../composables/useScreenOrientation'
 import { shouldSwitchSide } from '../utils/orientationVariants'
 
 /**
- * The other side of the fullscreen photo (docs/plans/orientierungs-varianten.md).
+ * The other side of the fullscreen photo (documentation/plans/orientierungs-varianten.md).
  *
  * A view that drives `FullscreenOverlay` keeps the shown photo in
  * `cursorPhoto`. This composable keeps its counterpart from the format group

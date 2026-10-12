@@ -546,14 +546,14 @@ export async function acceptAiPickLogic(
   );
 
   // Accepting a suggestion is a review like any other, so the people who
-  // share these photos may inherit it (docs/group-review-adoption.md).
+  // share these photos may inherit it (documentation/group-review-adoption.md).
   void scheduleAdoptionForPeers(userId, members.map((m) => m.photo_id));
 
   return { success: true, hidden_count: toHide.length };
 }
 
 /**
- * "Bestes je Format behalten" (docs/plans/orientierungs-varianten.md):
+ * "Bestes je Format behalten" (documentation/plans/orientierungs-varianten.md):
  * keep the best-rated visible photo of every orientation in the group, hide
  * the rest and mark the group reviewed. Runs through `acceptAiPickLogic`
  * with the computed set as the override, so favorites stay protected and
@@ -709,7 +709,7 @@ export async function bulkAcceptHighConfidencePicksLogic(
   }
   if (acceptedGroupIds.length > 0) {
     // The bulk pass closes many groups at once; the peers who share those
-    // photos inherit the lot (docs/group-review-adoption.md).
+    // photos inherit the lot (documentation/group-review-adoption.md).
     const touched = await dbAll<{ photo_id: number }>(
       db.select({ photo_id: photoGroupMembers.photo_id })
         .from(photoGroupMembers)
@@ -738,7 +738,7 @@ export interface PeerConsensusResult {
  * decisions to the requester's own photo_curation rows for one group.
  *
  * Consensus rule (deliberately conservative, see investigation in
- * docs/ai-auto-pick.md): hide a photo only if at least one peer hid it
+ * documentation/ai-auto-pick.md): hide a photo only if at least one peer hid it
  * AND no peer favorited it. A single favorite vote vetoes the hide. No
  * peer signal at all → leave the photo as-is.
  *

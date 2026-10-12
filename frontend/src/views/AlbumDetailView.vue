@@ -225,7 +225,7 @@ const cursorNext = ref<Photo | null>(null)
 // fullscreen view too (it was previously only wired up in GalleryView).
 const cursorGroup = ref<GalleryGridGroup | null>(null)
 // The grid entry behind `cursorPhoto`; paging needs its format group to
-// step over the other side (docs/plans/orientierungs-varianten.md).
+// step over the other side (documentation/plans/orientierungs-varianten.md).
 const cursorEntry = ref<GalleryGridEntry | null>(null)
 let hydrateToken = 0
 let curationVersion = 0
@@ -1580,7 +1580,7 @@ const albumSettingsMapEnabled = ref(false)
 const albumSettingsUpdating = ref(false)
 
 // Per-album override for adopting other people's similar-photo group
-// reviews (docs/group-review-adoption.md). Personal, not an album property,
+// reviews (documentation/group-review-adoption.md). Personal, not an album property,
 // so it saves on change instead of on "Speichern".
 const albumAdoption = ref<'inherit' | 'on' | 'off'>('inherit')
 const albumAdoptionBusy = ref(false)
@@ -2039,7 +2039,7 @@ async function handleGridStackClick(entry: GalleryGridEntry) {
     // "Selbst prüfen" on an adopted stack: give the photos that were
     // hidden on the user's behalf back before opening the compare view,
     // otherwise they would review a group whose members they cannot see
-    // (docs/group-review-adoption.md).
+    // (documentation/group-review-adoption.md).
     await reclaimAdoptedGroup(entry.group.id)
     await refreshGroupsAndPhotos()
   }

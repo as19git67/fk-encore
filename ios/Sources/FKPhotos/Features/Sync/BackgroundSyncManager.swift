@@ -411,7 +411,7 @@ public final class BackgroundSyncManager {
         // running right then and waited for the next cycle.
         await TripStore.shared.runAutoAddPass()
 
-        // Trip suggestions (docs/ios-trip-mode.md §9). Both are cheap, local
+        // Trip suggestions (documentation/ios-trip-mode.md §9). Both are cheap, local
         // and idempotent, and both belong here rather than on a timer of their
         // own: this method already runs on every occasion the app is awake
         // (open, foreground resume, background task), which is exactly when a
