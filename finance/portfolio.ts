@@ -42,6 +42,7 @@ import {
   financeAccountAccess,
   financeAccountHolding,
   financeAccountType,
+  financeDepotSecurity,
   financeDepotTransaction,
   financeDocumentSettlementLlm,
   users,
@@ -65,6 +66,7 @@ import {
   type EnrichResult,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
+import { decideSecurity, evidenceDocumentIds, listSecurities, type ListedSecurity, type SecurityStatus } from "./depot-securities";
 import { cleanSecurityName, isPersonName, paperTypeOf, type PaperType } from "./depot-settlement-parser";
 import { readSettlement, rereadAgainstBooking, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
 import type { CheckName, FieldSource, MergeField } from "./depot-settlement-merge";
@@ -1587,6 +1589,7 @@ export interface EnrichRunTotals {
   unverified: number;
   skipped_no_holding: number;
   skipped_no_transaction: number;
+  skipped_unknown_security: number;
 }
 
 export interface EnrichRun {
@@ -1615,6 +1618,7 @@ function emptyTotals(): EnrichRunTotals {
     unverified: 0,
     skipped_no_holding: 0,
     skipped_no_transaction: 0,
+    skipped_unknown_security: 0,
   };
 }
 
@@ -1735,6 +1739,13 @@ export interface ReviewHoldingGap extends HoldingGap {
   name: string | null;
 }
 
+/** A security met in bookings or papers that the depot's master has not confirmed. */
+export interface ReviewSecurity extends ListedSecurity {
+  account_label: string;
+  /** Ignored by the user (listed only with `ignored=true`). */
+  ignored: boolean;
+}
+
 interface ReviewParams {
   accounts?: string;
   /** Include closed depots when no `accounts` are given. */
@@ -1756,6 +1767,8 @@ interface ReviewResponse {
   ignored_count: number;
   /** Dividends booked from a notice of accumulated income or a Vorabpauschale. */
   misbooked_accumulations: (MisbookedAccumulation & { account_label: string })[];
+  /** Securities proposed by bookings or papers, for the user to take in or ignore. */
+  new_securities: ReviewSecurity[];
 }
 
 export const getPortfolioReview = api(
@@ -1791,14 +1804,16 @@ export const getPortfolioReview = api(
         ignored_other: [],
         ignored_count: ignoredRows.length,
         misbooked_accumulations: [],
+        new_securities: [],
       };
     }
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
 
-    const [dry, recon, misbooked] = await Promise.all([
+    const [dry, recon, misbooked, securities] = await Promise.all([
       enrichPendingDocuments(ids, 200, { dryRun: true, includeIgnored: ignored === true }),
       reconcileHoldings(ids),
       findMisbookedAccumulations(ids),
+      listSecurities(ids, ignored === true ? ["proposed", "ignored"] : ["proposed"]),
     ]);
 
     const relevant = dry.results.filter(
@@ -1915,7 +1930,67 @@ export const getPortfolioReview = api(
       ignored_other: ignoredOther,
       ignored_count: ignoredRows.length,
       misbooked_accumulations: misbooked.map((m) => ({ ...m, account_label: labelById.get(m.account_id) ?? "" })),
+      new_securities: securities.map((sec) => ({
+        ...sec,
+        account_label: labelById.get(sec.account_id) ?? "",
+        ignored: sec.status === "ignored",
+      })),
     };
+  },
+);
+
+// ----------------------------------------------------------------------
+// The securities master (.claude/plans/wertpapier-stamm.md, stage 1)
+// ----------------------------------------------------------------------
+
+interface SecurityDecisionParams {
+  securityId: number;
+  /** "confirm": book it from now on and read its evidence · "ignore": stay silent · "propose": undo a decision. */
+  decision: "confirm" | "ignore" | "propose";
+}
+
+interface SecurityDecisionResponse {
+  security_id: number;
+  status: SecurityStatus;
+  /** Transactions derived from bookings once the security was confirmed. */
+  rederived: number;
+  /** Papers of the evidence that booked something once the security was confirmed. */
+  documents_read: number;
+}
+
+/**
+ * The user's word on a proposed security. Taking one in reads its
+ * evidence at once — the bookings of the depot's bankcontact and the
+ * papers it was met in — so its rows appear without a full run.
+ */
+export const decideDepotSecurity = api(
+  { expose: true, method: "POST", path: "/finance/portfolio/securities/:securityId/decision", auth: true },
+  async ({ securityId, decision }: SecurityDecisionParams): Promise<SecurityDecisionResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    const [sec] = await db.select().from(financeDepotSecurity).where(eq(financeDepotSecurity.id, securityId)).limit(1);
+    if (!sec) throw APIError.notFound("security not found");
+    if ((await writableDepots(auth, [sec.account_id])).length === 0) {
+      throw APIError.permissionDenied("write access to the depot is required");
+    }
+    const row = await decideSecurity(securityId, decision, Number(auth.userID));
+    let rederived = 0;
+    let documentsRead = 0;
+    if (decision === "confirm") {
+      const [acc] = await db
+        .select({ bankcontact_id: financeAccount.bankcontact_id })
+        .from(financeAccount)
+        .where(eq(financeAccount.id, sec.account_id))
+        .limit(1);
+      if (acc?.bankcontact_id != null) {
+        rederived = (await deriveDepotTransactionsForBankcontact(acc.bankcontact_id)).derived;
+      }
+      for (const docId of await evidenceDocumentIds(securityId)) {
+        const r = await enrichDocument(docId, [sec.account_id]);
+        if (r.outcome === "created" || r.outcome === "enriched" || r.outcome === "linked") documentsRead++;
+      }
+    }
+    return { security_id: securityId, status: row!.status as SecurityStatus, rederived, documents_read: documentsRead };
   },
 );
 

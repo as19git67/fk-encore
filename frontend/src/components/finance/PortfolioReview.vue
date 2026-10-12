@@ -8,12 +8,14 @@ import SettlementDocumentDialog from './SettlementDocumentDialog.vue'
 import {
   applySettlementDocument,
   correctAccumulationTransaction,
+  decideDepotSecurity,
   getPortfolioReview,
   setSettlementDocumentIgnored,
   type PortfolioMisbookedAccumulation,
   type PortfolioReviewConflict,
   type PortfolioReviewDocument,
   type PortfolioReviewResponse,
+  type PortfolioReviewSecurity,
 } from '../../api/finance'
 import {
   depotKindLabel,
@@ -79,7 +81,7 @@ const hasContent = computed(() => {
   if (!r) return false
   return (
     r.conflicts.length + r.unmatched_documents.length + (r.unverified_documents?.length ?? 0) + r.holding_gaps.length +
-      (r.misbooked_accumulations?.length ?? 0) > 0 ||
+      (r.misbooked_accumulations?.length ?? 0) + (r.new_securities?.length ?? 0) > 0 ||
     r.unverifiable_changes > 0 ||
     // Keeps the toggle reachable when everything left is ignored.
     ignoredCount.value > 0
@@ -93,9 +95,40 @@ const count = computed(() => {
   const open = <T extends { ignored?: boolean }>(list: T[] | undefined) => (list ?? []).filter((x) => !x.ignored).length
   return (
     open(r.conflicts) + open(r.unmatched_documents) + open(r.unverified_documents) + r.holding_gaps.length +
-    (r.misbooked_accumulations?.length ?? 0)
+    (r.misbooked_accumulations?.length ?? 0) + open(r.new_securities)
   )
 })
+
+// ── Proposed securities ──────────────────────────────────────────────
+// A security met in bookings or papers that the depot's master has not
+// confirmed: nothing is booked for it until the user takes it in. Taking
+// it in reads its evidence at once; ignoring keeps it silent, and "show
+// ignored" lets a decision be undone.
+const deciding = ref<Set<number>>(new Set())
+
+async function decideSecurity(sec: PortfolioReviewSecurity, decision: 'confirm' | 'ignore' | 'propose') {
+  deciding.value.add(sec.id)
+  try {
+    const r = await decideDepotSecurity(sec.id, decision)
+    await load()
+    if (decision === 'confirm' && (r.rederived > 0 || r.documents_read > 0)) emit('changed')
+  } catch (e: any) {
+    error.value = e?.message ?? 'Entscheidung konnte nicht gespeichert werden'
+  } finally {
+    deciding.value.delete(sec.id)
+  }
+}
+
+function securityLabel(sec: PortfolioReviewSecurity): string {
+  return sec.name ?? sec.isin ?? sec.wkn ?? `#${sec.id}`
+}
+
+function securityEvidence(sec: PortfolioReviewSecurity): string {
+  const parts: string[] = []
+  if (sec.bookings > 0) parts.push(`${sec.bookings} Buchung${sec.bookings === 1 ? '' : 'en'}`)
+  if (sec.documents > 0) parts.push(`${sec.documents} Beleg${sec.documents === 1 ? '' : 'e'}`)
+  return parts.length > 0 ? `in ${parts.join(' und ')}` : 'ohne Fundstelle'
+}
 
 /** Dividends booked from an accumulation notice, being corrected right now. */
 const correcting = ref<Set<number>>(new Set())
@@ -414,6 +447,69 @@ function signClass(val: string | null): string {
         </ul>
       </div>
 
+      <!-- Proposed securities -->
+      <div v-if="review.new_securities?.length" class="pr-group">
+        <h3>Neue Wertpapiere</h3>
+        <p class="pr-hint">
+          Diese Wertpapiere tauchen in Buchungen oder Belegen auf, gehören aber bisher zu keinem Depotbestand. Erst wenn du eines aufnimmst, werden seine Käufe, Verkäufe und Erträge gebucht; ignorierte bleiben still.
+        </p>
+        <ul class="pr-docs">
+          <li v-for="sec in review.new_securities" :key="sec.id" :class="{ 'pr-ignored': sec.ignored }">
+            <span class="pr-security">
+              <strong>{{ securityLabel(sec) }}</strong>
+              <span class="pr-security-ids">{{ [sec.isin ? `ISIN ${sec.isin}` : null, sec.wkn ? `WKN ${sec.wkn}` : null].filter(Boolean).join(' · ') }}</span>
+            </span>
+            <span class="pr-date">{{ sec.account_label }}</span>
+            <span class="pr-reason">
+              {{ securityEvidence(sec) }}, zuerst am {{ formatIsoDate(sec.first_seen_at.slice(0, 10)) }}
+              <template v-if="sec.document_ids.length > 0">
+                ·
+                <button
+                  v-for="docId in sec.document_ids"
+                  :key="docId"
+                  type="button"
+                  class="pr-doc pr-doc-inline"
+                  @click="openDocument = docId"
+                >
+                  <i class="pi pi-file" aria-hidden="true" /> Beleg {{ docId }}
+                </button>
+              </template>
+            </span>
+            <span class="pr-mark">
+              <template v-if="!sec.ignored">
+                <Button
+                  label="Aufnehmen"
+                  icon="pi pi-plus"
+                  size="small"
+                  :loading="deciding.has(sec.id)"
+                  @click="decideSecurity(sec, 'confirm')"
+                />
+                <Button
+                  label="Ignorieren"
+                  icon="pi pi-eye-slash"
+                  size="small"
+                  text
+                  severity="secondary"
+                  :loading="deciding.has(sec.id)"
+                  @click="decideSecurity(sec, 'ignore')"
+                />
+              </template>
+              <template v-else>
+                <span class="pr-ignored-tag">ignoriert</span>
+                <Button
+                  label="Wieder vorschlagen"
+                  icon="pi pi-eye"
+                  size="small"
+                  text
+                  :loading="deciding.has(sec.id)"
+                  @click="decideSecurity(sec, 'propose')"
+                />
+              </template>
+            </span>
+          </li>
+        </ul>
+      </div>
+
       <!-- Unmatched documents -->
       <div v-if="review.unmatched_documents.length > 0" class="pr-group">
         <h3>Abrechnungen ohne Depot</h3>
@@ -656,6 +752,20 @@ function signClass(val: string | null): string {
 .pr-ignored .pr-doc,
 .pr-ignored td:not(.pr-actions) {
   opacity: 0.6;
+}
+.pr-security {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.pr-security-ids {
+  font-size: var(--text-xs);
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+.pr-doc-inline {
+  font-size: inherit;
+  margin-right: var(--space-1);
 }
 .pr-reason {
   flex-basis: 100%;

@@ -22,6 +22,7 @@ import {
   extractWkn,
   isSecuritiesCandidate,
 } from "./depot-derivation";
+import { decideSecurity, findSecurity } from "./depot-securities";
 import { deriveDepotTransactionsFromGiro } from "./depot-transactions";
 
 function setAuth(userID: string, perms: string[]) {
@@ -597,6 +598,16 @@ describe("deriveDepotTransactionsForBankcontact", () => {
       funds_code: "R",
     });
 
+    // Known only from earlier rows: proposed to the user, not booked.
+    const first = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(first.derived).toBe(0);
+    expect(first.skipped_unconfirmed).toBe(1);
+    const proposal = await findSecurity(depot, { isin: "XF00SONNE005", wkn: null });
+    expect(proposal).toMatchObject({ status: "proposed", source: "booking", wkn: "SNN001", name: "SONNENOBST INC." });
+
+    // Taken in: the booking is derived.
+    await ensureUser(1);
+    await decideSecurity(proposal!.id, "confirm", 1);
     const stats = await deriveDepotTransactionsForBankcontact(bcId);
     expect(stats.derived).toBe(1);
     const [row] = await db
@@ -611,6 +622,37 @@ describe("deriveDepotTransactionsForBankcontact", () => {
       name: "SONNENOBST INC.",
       net_amount: "-1000.00",
     });
+  });
+
+  it("proposes a security no depot knows to the bankcontact's only depot, and the bank's holdings confirm it", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    const txId = await insertTx({
+      accountId: giro,
+      bookingDate: "2026-02-03",
+      amount: "-1000.00",
+      purpose: "WERTPAPIERKAUF WPKNR: SNN001 ISIN: XF00SONNE005",
+      funds_code: "R",
+    });
+    const first = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(first).toMatchObject({ derived: 0, skipped_no_holding: 1 });
+    expect(await findSecurity(depot, { isin: "XF00SONNE005", wkn: null })).toMatchObject({ status: "proposed", source: "booking" });
+
+    // Ignored: still nothing, silently.
+    await ensureUser(1);
+    const sec = (await findSecurity(depot, { isin: "XF00SONNE005", wkn: null }))!;
+    await decideSecurity(sec.id, "ignore", 1);
+    await insertHolding({ accountId: depot, asOf: "2026-05-15", isin: "XF00SONNE005", wkn: "SNN001", name: "SONNENOBST INC." });
+    expect((await deriveDepotTransactionsForBankcontact(bcId)).skipped_unconfirmed).toBe(1);
+
+    // Proposed again, and the bank's holdings settle it.
+    await decideSecurity(sec.id, "propose", 1);
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(1);
+    expect(await findSecurity(depot, { isin: "XF00SONNE005", wkn: null })).toMatchObject({ status: "confirmed", source: "bank" });
+    const rows = await db.select().from(financeDepotTransaction).where(eq(financeDepotTransaction.linked_transaction_id, txId));
+    expect(rows).toHaveLength(1);
   });
 
   it("does not guess between two depots that both have rows of the security", async () => {

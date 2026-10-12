@@ -533,6 +533,12 @@ export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
   unverifiable_changes: 2,
   ignored_other: [],
   ignored_count: 2,
+  new_securities: [
+    {
+      id: 41, account_id: 12, account_label: 'Depot Musterbroker', isin: 'DE000000DDD4', wkn: 'DDD444', name: 'Delta Holding SE',
+      status: 'proposed', source: 'document', first_seen_at: '2026-04-02T09:00:00.000Z', bookings: 2, documents: 1, document_ids: [309], ignored: false,
+    },
+  ],
 }
 
 /** The same review with "show ignored" on: ignored documents in their groups, and one in none. */

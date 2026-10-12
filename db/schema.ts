@@ -2411,6 +2411,51 @@ export const financeDocumentSettlementLlm = pgTable("finance_document_settlement
 
 // Documents the user marked as irrelevant to the depots (#1336): left out
 // of "read documents" and the review page; the document itself stays.
+/**
+ * The securities master of a depot (.claude/plans/wertpapier-stamm.md):
+ * a security is booked only once confirmed here. "bank" entries come from
+ * the holdings; "booking" and "document" ones are proposals until the
+ * user decides ("user").
+ */
+export const financeDepotSecurity = pgTable(
+  "finance_depot_security",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "cascade" }),
+    isin: text("isin"),
+    wkn: text("wkn"),
+    name: text("name"),
+    status: text("status").notNull().default("proposed").$type<"confirmed" | "proposed" | "ignored">(),
+    source: text("source").notNull().$type<"bank" | "booking" | "document" | "user">(),
+    first_seen_at: timestamp("first_seen_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    decided_at: timestamp("decided_at", { mode: "string", withTimezone: true }),
+    decided_by: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    uniqueIndex("finance_depot_security_isin").on(table.account_id, table.isin).where(sql`${table.isin} IS NOT NULL`),
+    uniqueIndex("finance_depot_security_wkn").on(table.account_id, table.wkn).where(sql`${table.wkn} IS NOT NULL`),
+  ],
+);
+
+/** Where a proposed security was met: a booking or a paper. */
+export const financeDepotSecurityEvidence = pgTable(
+  "finance_depot_security_evidence",
+  {
+    security_id: bigint("security_id", { mode: "number" })
+      .notNull()
+      .references(() => financeDepotSecurity.id, { onDelete: "cascade" }),
+    transaction_id: bigint("transaction_id", { mode: "number" }).references(() => financeTransaction.id, { onDelete: "cascade" }),
+    document_id: integer("document_id").references(() => documents.id, { onDelete: "cascade" }),
+    seen_at: timestamp("seen_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_depot_security_evidence_tx").on(table.security_id, table.transaction_id).where(sql`${table.transaction_id} IS NOT NULL`),
+    uniqueIndex("finance_depot_security_evidence_doc").on(table.security_id, table.document_id).where(sql`${table.document_id} IS NOT NULL`),
+  ],
+);
+
 export const financeDepotDocumentIgnore = pgTable("finance_depot_document_ignore", {
   document_id: integer("document_id")
     .primaryKey()

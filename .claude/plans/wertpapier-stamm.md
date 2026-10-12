@@ -1,0 +1,110 @@
+# Securities master, depot statements, model-first reading
+
+Status: stage 1 in progress. Follows the portfolio work of #1336 (settlement
+documents, derivation from bookings, review page).
+
+## Problem
+
+The portfolio takes securities from wherever they turn up:
+
+- A booking on the settlement account becomes a depot transaction when its
+  ISIN or WKN stands in a holdings snapshot — that part is tight.
+- A document may create a transaction for every security it names, as long
+  as it carries the depot number or the depot already has transactions of
+  the security. A quarterly reporting that lists insurance contracts and
+  other positions next to the three funds, with the depot number on it,
+  creates phantom positions. A model that takes the bank's name for the
+  security's does the same.
+- Depot statements and reportings, which say exactly what the depot held
+  on a day, are not read at all — the only holdings come from FinTS, which
+  reaches back a few months.
+- The rules read a paper first and the model second; on a tie the rules
+  win, and on fields no check reaches (name, WKN, depot number) that is
+  nearly always. The model reads amounts and identifiers off OCR'd and
+  column-split text better than the rules do.
+
+## Decisions
+
+- **A security exists only when confirmed.** Each depot keeps a master of
+  its securities. What the bank's holdings deliver is confirmed by itself;
+  anything else found in bookings or documents is a *proposal* on the
+  review page, booked only after the user takes it in. Ignored proposals
+  stay silent. This is the guard that lets the model read more freely.
+- **Statements are holdings.** A depot statement or reporting is read into
+  holdings snapshots (`finance_account_holding`, source `document`), for
+  the confirmed securities only. The reconciliation then has anchors over
+  the whole history, and the oldest statement is the opening position —
+  no cut-off date setting is needed.
+- **The model reads, the rules check.** The model's reading becomes the
+  primary one; the checks (net equation, quantity × price, ISIN check
+  digit, date, booking net) decide what stands; the rules fill in where
+  the model's value fails or is missing. The rules keep the paper type and
+  the pre-selection of papers worth sending to the model.
+
+## Stages
+
+1. **Securities master** (`finance/depot-securities.ts`).
+   - Table `finance_depot_security`: `id`, `account_id`, `isin`, `wkn`,
+     `name`, `status` (`confirmed` | `proposed` | `ignored`), `source`
+     (`bank` | `booking` | `document` | `user`), `first_seen_at`,
+     `decided_at`, `decided_by`. Unique per depot and identifier (ISIN,
+     else WKN). Table `finance_depot_security_evidence`: where a proposal
+     was seen (`security_id`, `transaction_id` | `document_id`,
+     `seen_at`), so the review page can show "in 3 bookings, 2 papers".
+   - Seeding: every security in `finance_account_holding` is `confirmed`
+     (source `bank`); the holdings sync keeps it so. A migration seeds the
+     existing data.
+   - Derivation (`depot-derivation.ts`): a booking whose security is not
+     confirmed for the depot it would go to creates or extends a proposal
+     and derives nothing. Ignored: derives nothing, silently.
+   - Enrichment (`depot-document-enrichment.ts`): `resolveDepot` also
+     requires the security to be confirmed in the depot it found; a paper
+     about an unconfirmed security becomes a proposal (outcome
+     `unknown_security`) and books nothing. The booking-link path
+     (#1474) is exempt: a paper the user linked to a booking of a
+     confirmed security is the user's say-so.
+   - Review page: group "Neue Wertpapiere" with name, ISIN/WKN, depot,
+     evidence, first date; buttons "Aufnehmen" and "Ignorieren". Taking
+     one in confirms it and reads its evidence again (derivation for the
+     depot's bankcontact, enrichment of the documents), so the rows appear
+     without a full "Belege einlesen".
+   - "Belege neu einlesen" keeps the master and its decisions.
+   - API: `GET /finance/portfolio/review` gains `new_securities`;
+     `POST /finance/portfolio/securities/:id/decision` with
+     `confirm | ignore`; the ignored ones are listed with `ignored=true`
+     like ignored documents, so a decision can be undone.
+
+2. **Depot statements and reportings as holdings.**
+   - Paper type `statement` next to the existing ones (rules: "Depotauszug",
+     "Vermögensübersicht", "Depotbestand", "Reporting" with a table of
+     positions; the model confirms the type and lists the positions).
+   - Reader: per position ISIN/WKN, name, quantity, price, value, currency,
+     and the statement's date. Stored as holdings rows with `source =
+     'document'` and a link to the document (new columns on
+     `finance_account_holding`: `source`, `document_id`).
+   - Only confirmed securities are stored; unknown ones become proposals
+     with evidence `document`, so a position bought before the first paper
+     still gets found.
+   - Reconciliation and the position page treat document holdings like
+     FinTS holdings; the oldest one is the opening position (quantity and,
+     where printed, the bank's cost basis).
+   - The review page lists statements that could not be placed (no depot
+     number, no confirmed security) under "Depotauszüge ohne Depot".
+
+3. **Model-first reading** (`depot-settlement-merge.ts`, `llm-client.ts`).
+   - `mergeSettlement`: on a tie the model wins; "unverified" only when no
+     combination passes the checks. The rules still win a field whose
+     model value fails a check the rules' value passes.
+   - A second question to the model for papers the rules do not take for
+     a settlement: "which kind of paper, which securities" — used by
+     stage 2 and to send more candidates to the settlement reading.
+   - Identifiers the model reads count only against the master (stage 1):
+     an ISIN or WKN not confirmed is a proposal, never a booking.
+
+## Operations
+
+- Stage 1 changes what "Belege einlesen" books: a paper about a security
+  outside the master is reported as a proposal, not booked. After the
+  deploy, the review page may show proposals for securities sold before
+  the first holdings snapshot — one "Aufnehmen" each.
+- The master is per depot: the same ISIN in two depots is two entries.
