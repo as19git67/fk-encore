@@ -1,6 +1,6 @@
 # Assistant: one chat over everything the server knows
 
-Status: concept, nothing implemented yet. Branch `claude/server-data-ai-chat`.
+Status: concept, nothing implemented yet.
 
 ## Problem
 
@@ -264,11 +264,64 @@ behind it.
    - Conversation titles from the first question (`/json-prompt`, as the
      recap titles do).
 
-6. **iOS** (later, own plan). The service API is the contract; the
+6. **Work products: bundles, redactions, reports.** The example that
+   needs all of this:
+
+   > "Zeige mir alles, was beim Kauf der Immobilie in München relevant
+   > war." → documents and bookings. Then: "Schwärze den Kaufpreis in den
+   > Dokumenten und erzeuge ein PDF mit all diesen Dokumenten. Mach ein
+   > zweites PDF, in dem alle Finanztransaktionen gelistet werden, inkl.
+   > Summe, mit Zwischensummen für Kauf, Sonderzahlungen wegen Reparatur,
+   > Mieteinnahmen, und ermittle die bisherige Rendite."
+
+   - `find_text_in_document(document_id, query)` returns the pages and
+     rectangles where a value stands (`{page, x, y, w, h}` in the 0..1
+     page coordinates `document_collection_members.redactions` already
+     uses). For born-digital PDFs this is `pdftotext -bbox`; for scans the
+     word boxes exist only inside `text_extract` today and are not
+     stored, so the tool re-runs tesseract on the page it needs. An amount
+     is matched in all its printed forms ("450.000,00 EUR", "450.000 €",
+     "EUR 450.000,-"), so one `query` covers the purchase price wherever
+     it appears.
+   - `create_collection(name, document_ids, redactions)` creates a manual
+     Sammelmappe through `/document-collections` with the rectangles per
+     member, and `build_collection_pdf(collection_id)` triggers the
+     existing export (`documents/collection-pdf.ts`: rasterized, burnt-in
+     redactions, fresh text layer). Both are write tools, so the turn
+     ends in a proposal card that says "Sammelmappe ‚Kauf München' mit
+     14 Dokumenten, Kaufpreis auf 6 Seiten geschwärzt"; after "Ausführen"
+     the answer carries the download link and the link to the
+     Sammelmappe, where the user checks and corrects the boxes by hand
+     before passing the PDF on. A missed box is not a risk the assistant
+     should take alone.
+   - `transaction_report(title, groups, yield?)` takes the grouping the
+     model made — `groups: [{name, transaction_ids}]`, one booking in at
+     most one group, the rest in "Sonstige" — and computes per group the
+     subtotal and count, the grand total, and, when `yield` is given,
+     the return with its formula printed: `yield: {investment_group,
+     income_groups, cost_groups}` → net income over the period divided by
+     the investment, as a total and annualised over the span from the
+     first investment booking to today. The server does all sums; the
+     PDF comes from `finance/pdf-report.ts` extended by group headings
+     and a formula footer. The report is stored as a saved analysis
+     (`/finance/saved-analysis`) so it can be re-run with new bookings,
+     and the proposal card shows the groups with their counts before
+     anything is built.
+   - Grouping is where the model earns its keep: it sorts bookings by
+     counterparty, purpose and the user's tags ("Miete", "Reparatur") and
+     explains a doubtful one in the answer rather than hiding it. A
+     booking the model cannot place stays in "Sonstige" and is listed,
+     never dropped.
+   - Both PDFs render in the background like the collection export
+     today; the stream reports `tool_start` and the answer links the
+     result when it is ready, or says where to find it (the Sammelmappe,
+     the saved analysis).
+
+7. **iOS** (later, own plan). The service API is the contract; the
    stream endpoint is a WebSocket the iOS client can consume like
    `/realtime/subscribe`.
 
-## How the four questions run
+## How the example questions run
 
 | Question | Router | Tools | Answer |
 |---|---|---|---|
@@ -276,6 +329,14 @@ behind it.
 | Protokolle Eigentümerversammlung München | documents | `list_categories` → `search_documents(q, category=kapitalanlage-immobilie-*)` | Document rows; route `/dokumente?q=…&category=…` |
 | Urlaubsreisen letztes Jahr | photos (+ trip planner) | `list_recaps(kind=trip, year)`, `list_trip_plans(year)`, `list_albums(hasEvent, year)` | One line per trip with dates and place; photo cells |
 | Album mit Favoriten 2025 | photos | `list_photos(favorite, 2025)` → proposal `create_album` + `add_photos_to_album(from_previous_result)` | Proposal card, album link after "Ausführen" |
+| Alles zum Kauf der Immobilie München | documents + finance | `search_documents(q, category=kapitalanlage-immobilie-*)`, `list_transactions(q=…)` or `analyze_spending(tags)` | Document rows and booking rows, both kept as the working set |
+| Kaufpreis schwärzen, zwei PDFs, Rendite | documents + finance (stage 6) | `find_text_in_document(each doc, purchase price)` → proposal `create_collection` + `build_collection_pdf`; grouping by the model → proposal `transaction_report(groups, yield)` | Two proposal cards; after "Ausführen" two PDF links, the Sammelmappe and the saved analysis |
+
+The two-turn example is the one that decides the architecture: the
+second turn works only because the first turn's rows stay addressable
+(stage 5), because the model knows the document and finance tools at
+once (the catalog), and because sums and the yield come from a tool, not
+from the model.
 
 ## Open questions
 
@@ -286,6 +347,18 @@ behind it.
 - "Immobilie" has no entity. The second question works through
   categories and the search text today; a property entity (address,
   documents, meters, bookings) is its own feature and not a prerequisite.
+  The purchase example makes the case for it stronger: "everything
+  relevant to the purchase" is a search today and would be a lookup with
+  an entity. It is also the natural home of the yield, which the saved
+  analysis of stage 6 only approximates.
+- Finding the purchase price on a scan depends on OCR word boxes that are
+  not stored. Re-running tesseract per page is fine for a dozen
+  documents; if it turns out to be the common case, `text_extract`
+  should keep the boxes (a `jsonb` per page next to `extracted_text`).
+- What the yield means has to be printed, not assumed: gross rent over
+  purchase price is one number, net of repairs and annualised another.
+  The tool prints its formula and the period on the report, and the
+  answer repeats it in one sentence.
 - Whether the header chat icon should open a drawer over the current
   page (context: "diese Liste als Album") instead of a page. Stage 3
   starts with the page; the drawer can come once the page is right.
