@@ -47,6 +47,7 @@ import {
   type SettlementExtraction,
 } from "./depot-settlement-parser";
 import type { SettlementValues } from "./depot-settlement-merge";
+import { admitSecurity } from "./depot-securities";
 import {
   readSettlement,
   rereadAgainstBooking,
@@ -74,7 +75,9 @@ export type EnrichOutcome =
   /** Rules and model disagree and the figures do not settle it: nothing is booked. */
   | "unverified"
   /** A tax statement with no transaction of the same security, kind and quantity to add its tax to. */
-  | "no_transaction";
+  | "no_transaction"
+  /** The security is only proposed (or ignored) in the depot's master: nothing booked until the user decides. */
+  | "unknown_security";
 
 export interface EnrichResult {
   document_id: number;
@@ -141,6 +144,8 @@ export interface EnrichStats {
   unverified: number;
   /** Tax statements without a transaction to add their tax to. */
   skipped_no_transaction: number;
+  /** Papers about a security the depot's master has not confirmed. */
+  skipped_unknown_security: number;
   errors: string[];
   results: EnrichResult[];
   /** Where the next page starts (`before` of the next call); null when this was the last. */
@@ -160,6 +165,7 @@ function emptyStats(): EnrichStats {
     conflicts: 0,
     unverified: 0,
     skipped_no_transaction: 0,
+    skipped_unknown_security: 0,
     errors: [],
     results: [],
   };
@@ -767,6 +773,25 @@ export async function enrichDocument(
   result.account_id = holding.account_id;
   result.matched_by = holding.via;
 
+  // The depot's securities master has the last word. A paper that found
+  // its depot by the depot number or by earlier rows may name any security
+  // — a reporting lists more than the funds — so it is booked only once
+  // the user took the security in. The booking's row (linked by the user)
+  // is the user's word already.
+  if (!bookingRow) {
+    const admitted = await admitSecurity(
+      holding.account_id,
+      { isin: parsed.isin ?? holding.isin, wkn: parsed.wkn ?? holding.wkn, name: parsed.name ?? holding.name },
+      holding.via === "holding" ? "bank" : "document",
+      { documentId },
+    );
+    if (admitted !== "confirmed") {
+      result.outcome = "unknown_security";
+      result.detail = admitted === "ignored" ? "security ignored for this depot" : "security proposed, awaiting the user";
+      return result;
+    }
+  }
+
   // Already attached to a transaction of this depot. Linked while its
   // figures could not be read (the model was away, or rules and model
   // disagreed), the row may still lack what the paper says: fill that in
@@ -1101,6 +1126,7 @@ export async function enrichPendingDocuments(
         case "not_settlement": stats.skipped_not_settlement++; break;
         case "no_holding": stats.skipped_no_holding++; break;
         case "no_transaction": stats.skipped_no_transaction++; break;
+        case "unknown_security": stats.skipped_unknown_security++; break;
         case "conflict": stats.conflicts++; break;
         case "unverified": stats.unverified++; break;
       }

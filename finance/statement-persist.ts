@@ -42,6 +42,7 @@ import type { FetchResult, FintsHoldingData, FintsTransactionData } from "./type
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
+import { confirmBankSecurities } from "./depot-securities";
 import { createSuggestionsForTransaction } from "./document-match.service";
 
 console.log("[boot] finance/statement-persist.ts: all imports resolved");
@@ -328,6 +329,18 @@ export async function persistFetchResult(
               ((err as Error).message ?? String(err)),
           );
         }
+      }
+      // The bank's word: what the depot holds is confirmed in its securities master.
+      try {
+        await confirmBankSecurities(
+          accountId,
+          snapshot.holdings.map((h) => ({ isin: h.isin ?? null, wkn: h.wkn ?? null, name: h.name ?? null })),
+        );
+      } catch (err) {
+        stats.errors.push(
+          `account ${snapshot.accountNumber}: securities master update failed: ` +
+            ((err as Error).message ?? String(err)),
+        );
       }
     }
   }

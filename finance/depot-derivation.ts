@@ -62,9 +62,11 @@ import db from "../db/database";
 import {
   financeAccount,
   financeAccountHolding,
+  financeAccountType,
   financeDepotTransaction,
   financeTransaction,
 } from "../db/schema";
+import { admitSecurity } from "./depot-securities";
 
 console.log("[boot] finance/depot-derivation.ts: all imports resolved");
 
@@ -395,6 +397,8 @@ export interface DerivationStats {
   skipped_no_identifier: number;
   /** Identifier found, but no holding on this bankcontact carries it. */
   skipped_no_holding: number;
+  /** The security is only proposed (or ignored) in the depot's master: nothing booked until the user decides. */
+  skipped_unconfirmed: number;
 }
 
 /**
@@ -450,6 +454,16 @@ async function findDocumentRowForBooking(b: {
   return fits[0]?.id ?? null;
 }
 
+/** The one depot of a bankcontact, when there is exactly one. */
+async function soleDepotOf(bankcontactId: number): Promise<number | null> {
+  const rows = await db
+    .select({ id: financeAccount.id })
+    .from(financeAccount)
+    .innerJoin(financeAccountType, eq(financeAccountType.id, financeAccount.type_id))
+    .where(and(eq(financeAccount.bankcontact_id, bankcontactId), eq(financeAccountType.kind, "depot")));
+  return rows.length === 1 ? rows[0]!.id : null;
+}
+
 export async function deriveDepotTransactionsForBankcontact(
   bankcontactId: number,
 ): Promise<DerivationStats> {
@@ -463,6 +477,7 @@ export async function deriveDepotTransactionsForBankcontact(
     skipped_not_classified: 0,
     skipped_no_identifier: 0,
     skipped_no_holding: 0,
+    skipped_unconfirmed: 0,
   };
 
   // All accounts on this bankcontact — we look at giro/clearing txs and
@@ -531,6 +546,8 @@ export async function deriveDepotTransactionsForBankcontact(
       extractWkn(tx.counterparty);
 
     let holding: HoldingMatch | undefined;
+    /** Whether the match came from the bank's holdings (the bank's word) or from earlier rows. */
+    let fromBank = true;
 
     if (isin || wkn) {
       // Find a depot account on the same bankcontact whose holdings
@@ -573,12 +590,34 @@ export async function deriveDepotTransactionsForBankcontact(
       // A position sold before the first holdings snapshot has none — but
       // its settlement documents may already have put rows on a depot.
       holding = await matchDepotByTransactions(bankcontactId, isin, wkn);
+      fromBank = false;
+      if (!holding) {
+        // No depot knows it. With one depot on the bankcontact the booking
+        // can still propose the security there, for the user to decide.
+        const sole = await soleDepotOf(bankcontactId);
+        if (sole !== null) await admitSecurity(sole, { isin, wkn, name: null }, "booking", { transactionId: tx.id });
+      }
     }
 
     if (!holding) {
       stats.skipped++;
       if (isin || wkn) stats.skipped_no_holding++;
       else stats.skipped_no_identifier++;
+      continue;
+    }
+
+    // The depot's securities master has the last word: what the bank holds
+    // is confirmed by itself; a security known only from earlier rows is
+    // booked once the user took it in, and never while ignored.
+    const admitted = await admitSecurity(
+      holding.account_id,
+      { isin: isin ?? holding.isin, wkn: wkn ?? holding.wkn, name: holding.name },
+      fromBank ? "bank" : "booking",
+      { transactionId: tx.id },
+    );
+    if (admitted !== "confirmed") {
+      stats.skipped++;
+      stats.skipped_unconfirmed++;
       continue;
     }
 

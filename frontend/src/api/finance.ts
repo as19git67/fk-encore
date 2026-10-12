@@ -859,6 +859,25 @@ export interface PortfolioReviewHoldingGap extends HoldingGap {
   name: string | null
 }
 
+/** A security met in bookings or papers that the depot's master has not confirmed. */
+export interface PortfolioReviewSecurity {
+  id: number
+  account_id: number
+  account_label: string
+  isin: string | null
+  wkn: string | null
+  name: string | null
+  status: 'confirmed' | 'proposed' | 'ignored'
+  source: 'bank' | 'booking' | 'document' | 'user'
+  first_seen_at: string
+  /** Bookings and papers it was met in. */
+  bookings: number
+  documents: number
+  document_ids: number[]
+  /** Ignored by the user (listed only with `ignored: true`). */
+  ignored: boolean
+}
+
 export interface PortfolioReviewResponse {
   conflicts: PortfolioReviewConflict[]
   unmatched_documents: PortfolioReviewDocument[]
@@ -872,6 +891,8 @@ export interface PortfolioReviewResponse {
   ignored_count?: number
   /** Dividends booked from a notice of accumulated income or a Vorabpauschale. */
   misbooked_accumulations?: PortfolioMisbookedAccumulation[]
+  /** Securities proposed by bookings or papers, for the user to take in or ignore. */
+  new_securities?: PortfolioReviewSecurity[]
 }
 
 export interface PortfolioMisbookedAccumulation {
@@ -910,6 +931,24 @@ export async function getPortfolioReview(
 }
 
 /** Mark a document as irrelevant to the depots, or take that back. */
+export interface SecurityDecisionResult {
+  security_id: number
+  status: 'confirmed' | 'proposed' | 'ignored'
+  rederived: number
+  documents_read: number
+}
+
+/** The user's word on a proposed security: take it in, ignore it, or undo a decision. */
+export async function decideDepotSecurity(
+  securityId: number,
+  decision: 'confirm' | 'ignore' | 'propose',
+): Promise<SecurityDecisionResult> {
+  return apiFetch(`/finance/portfolio/securities/${securityId}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  })
+}
+
 export async function setSettlementDocumentIgnored(documentId: number, ignored: boolean): Promise<void> {
   await apiFetch(
     `/finance/portfolio/documents/${documentId}/ignore`,
@@ -969,6 +1008,8 @@ export interface EnrichRunTotals {
   unverified: number
   skipped_no_holding: number
   skipped_no_transaction: number
+  /** Papers about a security the depot's master has not confirmed. */
+  skipped_unknown_security?: number
 }
 
 /** A read of the settlement documents running (or run) on the server. */

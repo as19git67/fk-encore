@@ -39,6 +39,7 @@ import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 import {
   applySettlementDocument,
   awaitDocumentEnrichRun,
+  decideDepotSecurity,
   documentEnrichRunStatus,
   resetDocumentEnrichRuns,
   startDocumentEnrichRun,
@@ -491,18 +492,46 @@ Ausmachender Betrag 100,00 EUR`;
     await db.update(financeAccount).set({ account_number: number }).where(eq(financeAccount.id, depot));
   }
 
-  it("uses the depot number printed on the statement", async () => {
+  it("uses the depot number printed on the statement — once the user took the security in", async () => {
     const { depot } = await setup();
     await setDepotNumber(depot, "0012345678");
     const docId = await insertDocument(soldText("Depotnummer 12345678"));
+    // The depot is found, but the security is new to it: proposed, nothing booked.
     const r = await enrichDocument(docId);
-    expect(r.outcome).toBe("created");
-    expect(r.account_id).toBe(depot);
+    expect(r).toMatchObject({ outcome: "unknown_security", account_id: depot, matched_by: "depot_number" });
+    expect(await depotRows(depot)).toHaveLength(0);
+
+    const review = await getPortfolioReview({});
+    expect(review.new_securities).toEqual([
+      expect.objectContaining({
+        account_id: depot,
+        isin: SOLD_ISIN,
+        name: "Beta Altbestand AG",
+        status: "proposed",
+        source: "document",
+        bookings: 0,
+        documents: 1,
+        document_ids: [docId],
+        ignored: false,
+      }),
+    ]);
+    const sec = review.new_securities[0]!;
+
+    // Ignored: the paper stays unread, the proposal leaves the list unless asked for.
+    await decideDepotSecurity({ securityId: sec.id, decision: "ignore" });
+    expect((await enrichDocument(docId)).detail).toMatch(/ignored/);
+    expect((await getPortfolioReview({})).new_securities).toEqual([]);
+    expect((await getPortfolioReview({ ignored: true })).new_securities).toEqual([expect.objectContaining({ id: sec.id, ignored: true })]);
+
+    // Taken in: its evidence is read at once.
+    const decided = await decideDepotSecurity({ securityId: sec.id, decision: "confirm" });
+    expect(decided).toMatchObject({ status: "confirmed", documents_read: 1 });
     const rows = await depotRows(depot);
     expect(rows.map((x) => [x.isin, x.kind, x.name])).toEqual([[SOLD_ISIN, "sell", "Beta Altbestand AG"]]);
+    expect((await getPortfolioReview({})).new_securities).toEqual([]);
   });
 
-  it("uses the one depot that already has transactions of the security", async () => {
+  it("uses the one depot that already has transactions of the security — once the user took it in", async () => {
     const { depot } = await setup();
     await db.insert(financeDepotTransaction).values({
       account_id: depot,
@@ -517,8 +546,11 @@ Ausmachender Betrag 100,00 EUR`;
     });
     const docId = await insertDocument(soldText(""));
     const r = await enrichDocument(docId);
-    expect(r.outcome).toBe("created");
-    expect(r.account_id).toBe(depot);
+    expect(r).toMatchObject({ outcome: "unknown_security", account_id: depot, matched_by: "transactions" });
+    const sec = (await getPortfolioReview({})).new_securities[0]!;
+    await decideDepotSecurity({ securityId: sec.id, decision: "confirm" });
+    expect((await enrichDocument(docId)).outcome).toBe("already_linked");
+    expect((await depotRows(depot)).filter((x) => x.source === "document")).toHaveLength(1);
   });
 
   it("does not guess between two depots with a matching number, and says why in the review", async () => {

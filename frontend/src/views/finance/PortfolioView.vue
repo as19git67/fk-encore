@@ -525,6 +525,7 @@ async function reportRun(run: EnrichRun) {
   if (r.unverified > 0) parts.push(`${r.unverified} unsicher erkannt — bitte prüfen`)
   if (r.skipped_no_holding > 0) parts.push(`${r.skipped_no_holding} ohne passendes Depot`)
   if (r.skipped_no_transaction > 0) parts.push(`${r.skipped_no_transaction} Steuermitteilungen ohne passende Transaktion`)
+  if ((r.skipped_unknown_security ?? 0) > 0) parts.push(`${r.skipped_unknown_security} zu Wertpapieren, die unter „Zu prüfen“ auf dich warten`)
   enrichNotice.value = {
     severity: r.conflicts > 0 || r.unverified > 0 ? 'warn' : changed > 0 ? 'success' : 'info',
     text: parts.length > 0
