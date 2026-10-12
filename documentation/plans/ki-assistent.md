@@ -112,6 +112,12 @@ behind it.
   `read` or `write` kind, and for the important ones a sentence written
   for the model ("overdue direct debits and amount changes of standing
   mandates" rather than "GET /finance/anomalies").
+- **Generated text is a draft until the user says otherwise.** Where the
+  model writes prose for the user (stage 7), the text is shown
+  editable before anything is rendered or saved, the facts in it come
+  from the context the server handed over, and the sender, date and
+  layout come from the server. A letter is the user's letter; the model
+  wrote the first version.
 - **The model never does arithmetic.** Sums, subtotals, yields and date
   ranges are computed by tools and printed with their formula. The model
   chooses what goes into which group and names the groups; the server
@@ -333,7 +339,72 @@ behind it.
      result when it is ready, or says where to find it (the Sammelmappe,
      the saved analysis).
 
-7. **iOS** (later, own plan). The service API is the contract; the
+7. **Text generation: a letter from what the app knows.** The example:
+
+   > A letter is needed quickly — to print, or to send by mail — and
+   > selected documents, photos or bookings are its context. The result
+   > is downloaded or shared, or saved as a new document in the system,
+   > possibly together with its context in a Sammelmappe.
+
+   This is the one stage where the model's own words are the product.
+   Everything around the words stays with the server.
+
+   - **Context comes from a selection.** Three ways in: the working set
+     of the conversation (stage 5: "schreib dem Verwalter wegen dieser
+     drei Rechnungen"); a list selection or the basket handed over with
+     a new `SelectionBar` action "An den Assistenten" (opens the chat
+     with the selected ids as context, which is what the basket is
+     for); and a document's detail page with "Antwort entwerfen"
+     (context = this document, recipient = its correspondent). The
+     context is a list of typed references; the server renders each into
+     a compact brief for the prompt — a document as title, date, sender,
+     reference numbers and summary, a booking as date, counterparty,
+     amount and purpose, a photo as date, place and description — never
+     the full text, unless the model asks for one document with
+     `get_document_text`.
+   - **The draft is text in the chat, editable.** The model writes the
+     letter body in the answer (streamed, in the user's language, in the
+     tone asked for). Facts in it — amounts, dates, reference numbers —
+     are copied from the context briefs; the system prompt says to use
+     only what the context carries and to leave a bracketed gap
+     (`[Datum der Zahlung]`) for what it does not. The answer ends with
+     the list of context objects used, so the user sees what the letter
+     rests on.
+   - `render_letter(body, recipient?, subject?, attachments?)` is the
+     write tool. The server supplies what the model must not invent: the
+     sender block from the user's profile, today's date, the recipient
+     from a document's correspondent or the user's input, and the layout
+     — a DIN 5008 letter with address window and fold marks, drawn with
+     pdfkit next to `finance/pdf-report.ts`. The proposal card shows the
+     draft in an editable field, recipient and subject as inputs, and the
+     three destinations as checkboxes; "Ausführen" renders the text as
+     edited, not as drafted.
+   - **Three destinations, all through existing paths.** *Download* is
+     the rendered PDF. *Save as document* posts the PDF to `POST
+     /documents` like an upload, so it runs through extraction and
+     classification and gets `source = assistant`, with a link to the
+     conversation and to the context documents (the existing
+     related-documents panel then shows the letter next to the invoices
+     it answers). *Sammelmappe* creates a manual collection with the
+     letter as its first member and the context documents behind it, so
+     the existing export yields one PDF with the letter as cover and the
+     enclosures in order — which is what "anbei die Rechnungen" needs.
+   - **E-mail** in this stage is a `mailto:` link with subject and body
+     and the PDF already downloaded for attaching, because the user's
+     mail client holds their identity, signature and sent folder. Sending
+     from the server through the SMTP that `user/mail.ts` already uses
+     for invites is possible later, but a letter to an arbitrary
+     recipient leaving the server unseen is a step that needs its own
+     decision (confirmation, a copy saved as document, a sent log).
+   - Photos as context: the brief carries date, place and description;
+     a letter that should carry pictures ("hier die Fotos vom Schaden")
+     gets them as attachments through the same Sammelmappe path, each
+     photo as a page via `receipt-pdf.ts`'s single-image page.
+   - Follow-ups edit the draft in place: "kürzer", "förmlicher", "nenne
+     auch die zweite Rechnung" produce a new draft from the same context;
+     the card keeps the latest.
+
+8. **iOS** (later, own plan). The service API is the contract; the
    stream endpoint is a WebSocket the iOS client can consume like
    `/realtime/subscribe`.
 
@@ -347,6 +418,7 @@ behind it.
 | Album mit Favoriten 2025 | photos | `list_photos(favorite, 2025)` → proposal `create_album` + `add_photos_to_album(from_previous_result)` | Proposal card, album link after "Ausführen" |
 | Alles zum Kauf der Immobilie München | documents + finance | `search_documents(q, category=kapitalanlage-immobilie-*)`, `list_transactions(q=…)` or `analyze_spending(tags)` | Document rows and booking rows, both kept as the working set |
 | Kaufpreis schwärzen, zwei PDFs, Rendite | documents + finance (stage 6) | `find_text_in_document(each doc, purchase price)` → proposal `create_collection` + `build_collection_pdf`; grouping by the model → proposal `transaction_report(groups, yield)` | Two proposal cards; after "Ausführen" two PDF links, the Sammelmappe and the saved analysis |
+| Anschreiben an den Verwalter zu drei Rechnungen | documents (stage 7) | context briefs of the three documents → draft in the answer → proposal `render_letter(body, recipient=correspondent, attachments)` | Editable draft card; after "Ausführen" the PDF, the new document, or the Sammelmappe with the letter as cover |
 
 The two-turn example is the one that decides the architecture: the
 second turn works only because the first turn's rows stay addressable
