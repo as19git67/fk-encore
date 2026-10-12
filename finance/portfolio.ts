@@ -2319,8 +2319,11 @@ export const inspectSettlementDocument = api(
 // the given depots and lets the next "Belege einlesen" start over:
 //
 //   - transactions a document created, and those derived from an account
-//     booking that a document then completed, are deleted — the latter
-//     come back from their booking right away (derivation below);
+//     booking (completed by a document or not), are deleted — the derived
+//     ones come back from their booking right away (derivation below),
+//     read with today's rules: a booking an earlier rule took for a trade
+//     and today's does not stays gone, instead of surviving every reset
+//     behind its dedupe hash;
 //   - a manual transaction a document completed stays, only its link to
 //     the document goes (which values the document added is not recorded);
 //   - the model's stored answers for the caller's documents (all of them
@@ -2333,7 +2336,7 @@ interface ResetDocumentsParams {
 }
 
 interface ResetDocumentsResponse {
-  /** Transactions deleted (created or completed from documents). */
+  /** Transactions deleted (created from documents, or derived from bookings). */
   removed: number;
   /** Manual transactions that only lost their link to a document. */
   unlinked: number;
@@ -2364,7 +2367,7 @@ export const resetDocumentReadings = api(
       .where(
         and(
           inArray(financeDepotTransaction.account_id, ids),
-          inArray(financeDepotTransaction.source, ["document", "giro-derived+document"]),
+          inArray(financeDepotTransaction.source, ["document", "giro-derived", "giro-derived+document"]),
         ),
       )
       .returning({ id: financeDepotTransaction.id });

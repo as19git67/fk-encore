@@ -1385,3 +1385,46 @@ describe("finance/portfolio — reading the documents in the background", () => 
     await expect(startDocumentEnrichRun({ accounts: "999999" })).rejects.toThrow(/write access/);
   });
 });
+
+describe("finance/portfolio — the reset derives the bookings again with today's rules", () => {
+  it("drops a derived row an earlier rule took for a trade, and keeps a real trade's", async () => {
+    const { bc, giro, depot } = await setup();
+    // A transfer onto the settlement account: an earlier rule made it a sale.
+    const [transfer] = await db
+      .insert(financeTransaction)
+      .values({
+        account_id: giro,
+        booking_date: "2026-03-10",
+        value_date: "2026-03-10",
+        amount: "1000.00",
+        currency_code: "EUR",
+        purpose: `UEBERWEISUNG DEPOT ISIN ${ISIN_A}`,
+        funds_code: "SECU",
+        dedupe_hash: "transfer|1000",
+      })
+      .returning({ id: financeTransaction.id });
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: ISIN_A,
+      kind: "sell",
+      executed_at: "2026-03-10",
+      gross_amount: "1000.00",
+      net_amount: "1000.00",
+      currency: "EUR",
+      source: "giro-derived",
+      linked_transaction_id: transfer!.id,
+      dedupe_hash: `giro:${transfer!.id}`,
+    });
+    // A real purchase, derived as usual.
+    const bookingId = await insertGiroBooking(giro, "2026-03-16", "-2966.40");
+    await deriveDepotTransactionsForBankcontact(bc);
+    expect((await depotRows(depot)).map((r) => r.kind).sort()).toEqual(["buy", "sell"]);
+
+    const r = await resetDocumentReadings({});
+    expect(r.removed).toBe(2);
+    expect(r.rederived).toBe(1);
+    const rows = await depotRows(depot);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "buy", source: "giro-derived", linked_transaction_id: bookingId });
+  });
+});
