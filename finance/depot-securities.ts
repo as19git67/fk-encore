@@ -1,5 +1,5 @@
 /**
- * The securities master of a depot (.claude/plans/wertpapier-stamm.md,
+ * The securities master of a depot (docs/plans/wertpapier-stamm.md,
  * stage 1).
  *
  * A security is booked into a depot only once it is *confirmed* there.

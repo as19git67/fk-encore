@@ -80,7 +80,7 @@ final class ReviewQueueTests: XCTestCase {
     }
 
     /// Down is „Bestes je Format" only where the card is a format pair
-    /// (.claude/plans/orientierungs-varianten.md); everywhere else it stays
+    /// (docs/plans/orientierungs-varianten.md); everywhere else it stays
     /// what it was: nothing.
     func testDownwardSwipeIsBestPerFormatOnlyOnAFormatPair() {
         XCTAssertEqual(

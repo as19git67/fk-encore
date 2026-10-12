@@ -79,7 +79,7 @@ onMounted(load)
 watch([positionKey, () => accountIds.value.join(','), () => route.query.closedDepots], () => void load())
 
 // ── News ─────────────────────────────────────────────────────────────
-// What the news provider brought about this security (`.claude/plans/
+// What the news provider brought about this security (`docs/plans/
 // kurse.md`). Loading them marks them seen, so the quotes tile stops
 // counting; the items that were new to this visit keep their marker
 // until the page is left. No news provider configured (never fetched,

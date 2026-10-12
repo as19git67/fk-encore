@@ -80,7 +80,7 @@ const props = withDefaults(defineProps<{
   /** Optional slot content rendered inside the fullscreen image (e.g. face box) */
   /**
    * The other side of the current photo's portrait/landscape format group
-   * (.claude/plans/orientierungs-varianten.md), when there is one. Shows the
+   * (docs/plans/orientierungs-varianten.md), when there is one. Shows the
    * "Querformat" / "Hochformat" button (`R`) and preloads that image so the
    * switch is instant. The host swaps the two on `toggle-variant`.
    */
@@ -1335,7 +1335,7 @@ onUnmounted(() => {
               @click="emitLinkVisibility"
               v-tooltip.top="linkVisibilityTooltip + ' (L)'"
             />
-            <!-- Other side of the format group (.claude/plans/orientierungs-
+            <!-- Other side of the format group (docs/plans/orientierungs-
                  varianten.md): swaps portrait and landscape of the same motif
                  in place, the list index stays. Turning the device does the
                  same automatically unless the user chose a side here. -->

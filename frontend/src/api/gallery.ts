@@ -41,7 +41,7 @@ export interface GalleryGridGroup {
   ai_confidence?: 'high' | 'medium' | 'low'
   /**
    * Set when the group is a portrait/landscape format group for this user
-   * (.claude/plans/orientierungs-varianten.md): visible members per side and
+   * (docs/plans/orientierungs-varianten.md): visible members per side and
    * their ids, best-ranked first. With `variantMode=portrait|landscape` the
    * grid only holds the matching side; the ids say what sits behind the badge.
    */

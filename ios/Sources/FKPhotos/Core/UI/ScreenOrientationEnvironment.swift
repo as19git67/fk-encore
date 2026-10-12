@@ -4,7 +4,7 @@ import SwiftUI
 //
 // The grid, the fullscreen viewer and the slideshow all ask which way the
 // screen is turned and must get the same answer, so none of them reads a
-// `GeometryReader` of its own for it (.claude/plans/orientierungs-varianten.md).
+// `GeometryReader` of its own for it (docs/plans/orientierungs-varianten.md).
 // `MainTabView` provides the value once at the root; everything below reads
 // `@Environment(\.screenOrientation)`.
 

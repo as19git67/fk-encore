@@ -2024,7 +2024,7 @@ export const getPortfolioReview = api(
 );
 
 // ----------------------------------------------------------------------
-// The securities master (.claude/plans/wertpapier-stamm.md, stage 1)
+// The securities master (docs/plans/wertpapier-stamm.md, stage 1)
 // ----------------------------------------------------------------------
 
 interface SecurityDecisionParams {

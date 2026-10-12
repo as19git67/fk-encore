@@ -33,7 +33,7 @@ export const users = pgTable("users", {
   // album_user_settings.group_review_adoption.
   adopt_group_reviews: boolean("adopt_group_reviews").notNull().default(true),
   // Show only the side of a portrait/landscape format group that matches the
-  // screen orientation (.claude/plans/orientierungs-varianten.md). Off gives
+  // screen orientation (docs/plans/orientierungs-varianten.md). Off gives
   // back both sides next to each other everywhere.
   collapse_orientation_variants: boolean("collapse_orientation_variants").notNull().default(true),
 });
@@ -2428,7 +2428,7 @@ export const financeDocumentStatementLlm = pgTable("finance_document_statement_l
 // Documents the user marked as irrelevant to the depots (#1336): left out
 // of "read documents" and the review page; the document itself stays.
 /**
- * The securities master of a depot (.claude/plans/wertpapier-stamm.md):
+ * The securities master of a depot (docs/plans/wertpapier-stamm.md):
  * a security is booked only once confirmed here. "bank" entries come from
  * the holdings; "booking" and "document" ones are proposals until the
  * user decides ("user").

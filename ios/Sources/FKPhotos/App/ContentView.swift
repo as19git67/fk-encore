@@ -175,7 +175,7 @@ struct MainTabView: View {
             }
         }
         // One source for how the screen is held; the photo grid, the viewer
-        // and the slideshow read it (.claude/plans/orientierungs-varianten.md).
+        // and the slideshow read it (docs/plans/orientierungs-varianten.md).
         .providesScreenOrientation()
         .task {
             await feedViewModel.refreshUnreadCount()

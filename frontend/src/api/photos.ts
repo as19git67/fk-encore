@@ -36,7 +36,7 @@ export interface Photo {
   has_known_face?: boolean
   /**
    * Portrait, landscape or square from the stored dimensions; null while
-   * the dimensions are unknown (.claude/plans/orientierungs-varianten.md).
+   * the dimensions are unknown (docs/plans/orientierungs-varianten.md).
    */
   orientation?: PhotoOrientation | null
 }
@@ -53,7 +53,7 @@ export type VariantMode = 'all' | 'portrait' | 'landscape'
 /**
  * The best-ranked photo on the other side of a format group, shipped next to
  * a photo by the recap and the stream so the viewer can show the side that
- * fits the screen (.claude/plans/orientierungs-varianten.md).
+ * fits the screen (docs/plans/orientierungs-varianten.md).
  */
 export interface OrientationCounterpart {
   id: number
@@ -1001,7 +1001,7 @@ export interface PhotoGroup {
   ai_picked_at?: string
   /**
    * Portrait/landscape format group setting
-   * (.claude/plans/orientierungs-varianten.md). Absent = 'auto'.
+   * (docs/plans/orientierungs-varianten.md). Absent = 'auto'.
    */
   orientation_variants?: 'auto' | 'off'
   /** Visible members per side while the group forms a format group. */
@@ -1210,7 +1210,7 @@ export interface ReviewQueueGroup {
   duplicate_deletable_bytes: number
   /**
    * The group holds both orientations of one motif
-   * (.claude/plans/orientierungs-varianten.md): tag "Hoch + Quer", action
+   * (docs/plans/orientierungs-varianten.md): tag "Hoch + Quer", action
    * "Bestes je Format behalten", chip "Formatpaare".
    */
   orientation_pair: boolean

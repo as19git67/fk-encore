@@ -1,4 +1,4 @@
--- Depot statements as holdings (.claude/plans/wertpapier-stamm.md, stage 2).
+-- Depot statements as holdings (docs/plans/wertpapier-stamm.md, stage 2).
 --
 -- A holdings row so far always came from the bank (FinTS). A depot
 -- statement or a reporting says what the depot held on a day as well; its

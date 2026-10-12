@@ -35,7 +35,7 @@ const props = defineProps<{
   compareIntro?: RecapCompareData | null
   /**
    * Per photo id: the photo on the other side of its format group
-   * (.claude/plans/orientierungs-varianten.md). A single slide shows
+   * (docs/plans/orientierungs-varianten.md). A single slide shows
    * whichever side fits the screen; the plan keeps its length, so slide
    * indices never move.
    */

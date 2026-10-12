@@ -1,5 +1,5 @@
 /**
- * Depot statement parser (.claude/plans/wertpapier-stamm.md, stage 2).
+ * Depot statement parser (docs/plans/wertpapier-stamm.md, stage 2).
  *
  * A depot statement ("Depotauszug"), a wealth overview or a quarterly
  * reporting says what a depot held on a day: per security a quantity, a
