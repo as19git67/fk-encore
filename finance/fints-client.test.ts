@@ -1139,12 +1139,12 @@ describe("runFetchAccounts — happy path", () => {
     expect(depot.balance?.currency).toBe("EUR");
     expect(depot.transactions).toEqual([]);
     expect(portfolio).toHaveBeenCalledTimes(1);
-    expect(portfolio.mock.calls[0]?.[0]).toBe("DEPOT-1");
+    expect((portfolio.mock.calls[0] as unknown[])?.[0]).toMatchObject({ accountNumber: "DEPOT-1" });
     // Depot must NOT trigger the standard statements/balance HBCI calls.
     expect(stmt).toHaveBeenCalledTimes(1);
-    expect(stmt.mock.calls[0]?.[0]).toBe("GIRO-1");
+    expect((stmt.mock.calls[0] as unknown[])?.[0]).toMatchObject({ accountNumber: "GIRO-1" });
     expect(bal).toHaveBeenCalledTimes(1);
-    expect(bal).toHaveBeenCalledWith("GIRO-1");
+    expect(bal).toHaveBeenCalledWith(expect.objectContaining({ accountNumber: "GIRO-1" }));
   });
 
   it("skips depot fetch silently when bank/lib does not advertise HKWPD", async () => {
@@ -1163,14 +1163,14 @@ describe("runFetchAccounts — happy path", () => {
     expect(portfolio).not.toHaveBeenCalled();
   });
 
-  it("fetches portfolio when depot shares account number with giro (getBankAccount patch)", async () => {
+  it("fetches portfolio when depot shares account number with giro", async () => {
     // Some banks (e.g. comdirect) report giro + depot with the same
-    // accountNumber, distinguished only by subAccountId. lib-fints'
-    // getBankAccount picks the first match, so without the monkey-patch
-    // canGetPortfolio would check the giro (no HKWPD) instead of the depot.
+    // accountNumber, distinguished only by subAccountId. lib-fints >= 1.5
+    // throws on a bare number that matches several accounts, so every
+    // call must hand over the account record itself.
     const accounts = [
-      { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "00" },
-      { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "depot" },
+      { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "Girokonto" },
+      { accountNumber: "1234", accountType: "Miscellaneous", currency: "EUR", subAccountId: "Depot" },
     ];
     const stmt = vi.fn(async () => stmtResp([]));
     const bal = vi.fn(async () =>
@@ -1190,53 +1190,49 @@ describe("runFetchAccounts — happy path", () => {
         ],
       },
     } as any));
-    // Realistic canGetPortfolio: looks up the account via
-    // config.getBankAccount and checks its allowedTransactions. The
-    // monkey-patch must make this return the depot entry (which has
-    // HKWPD) instead of the giro (which doesn't).
-    const canPortfolio = vi.fn(function (this: any, accountNumber: string) {
-      const cfg = this?.config ?? c.config;
-      if (typeof cfg.getBankAccount === "function") {
-        try {
-          const acct = cfg.getBankAccount(accountNumber);
-          return acct?.allowedTransactions?.some((t: any) => t.transId === "HKWPD") ?? false;
-        } catch { return false; }
-      }
-      return false;
-    });
     const c = clientWith(accounts, {
       getAccountStatements: stmt,
       getAccountBalance: bal,
       getPortfolio: portfolio,
     });
-    // Set up a realistic getBankAccount on the config — first-match
-    // semantics like lib-fints, so without the patch it returns giro.
     const bi = c.config.bankingInformation as any;
     bi.upd.bankAccounts[0].allowedTransactions = [{ transId: "HKKAZ" }];
     bi.upd.bankAccounts[1].allowedTransactions = [{ transId: "HKWPD" }];
-    (c.config as any).getBankAccount = (acn: string) => {
-      const found = bi.upd.bankAccounts.find((a: any) => a.accountNumber === acn);
-      if (!found) throw new Error(`Account ${acn} not found`);
-      return found;
+    // Same resolution rules as lib-fints 1.5's config.getBankAccount.
+    const resolve = (ref: any) => {
+      const all = bi.upd.bankAccounts as any[];
+      if (typeof ref !== "string") {
+        return all.find(
+          (a) => a.accountNumber === ref.accountNumber && a.subAccountId === ref.subAccountId,
+        );
+      }
+      const matches = all.filter((a) => a.accountNumber === ref);
+      if (matches.length > 1) throw new Error(`Account number ${ref} is not unique in UPD`);
+      return matches[0];
     };
-    // Bind canGetPortfolio so it has access to the client's config
-    c.canGetPortfolio = canPortfolio.bind(c) as any;
+    c.canGetPortfolio = vi.fn((ref: any) =>
+      resolve(ref)?.allowedTransactions?.some((t: any) => t.transId === "HKWPD") ?? false,
+    );
+    c.canGetCreditCardStatements = vi.fn((ref: any) => {
+      resolve(ref);
+      return false;
+    });
 
     const r = await runFetchAccounts(c);
     expect(r.accounts).toHaveLength(2);
     expect(r.accounts.map((a) => a.accountKind)).toEqual(["sonstige", "depot"]);
+    expect(r.accounts[0].errors).toEqual([]);
     const depot = r.accounts[1];
     expect(depot.balance?.amount).toBe("50000.00");
     expect(depot.holdings).toHaveLength(1);
     expect(depot.holdings[0].isin).toBe("DE000A1EWWW0");
     expect(portfolio).toHaveBeenCalledTimes(1);
-    // Giro got standard statements + balance
+    expect(portfolio).toHaveBeenCalledWith(bi.upd.bankAccounts[1]);
+    // Giro got standard statements + balance, addressed by its record
     expect(stmt).toHaveBeenCalledTimes(1);
+    expect(stmt).toHaveBeenCalledWith(bi.upd.bankAccounts[0]);
     expect(bal).toHaveBeenCalledTimes(1);
-    // After fetchDepotPortfolio, the patch must be cleaned up — the
-    // original getBankAccount should be restored.
-    const restored = (c.config as any).getBankAccount("1234");
-    expect(restored.subAccountId).toBe("00"); // back to first-match = giro
+    expect(bal).toHaveBeenCalledWith(bi.upd.bankAccounts[0]);
   });
 });
 
@@ -1495,9 +1491,9 @@ describe("runFetchAccounts — linked-only filter", () => {
     expect(r.accounts).toHaveLength(3);
     // LINKED got its statements + balance call.
     expect(c.getAccountStatements).toHaveBeenCalledTimes(1);
-    expect(c.getAccountStatements).toHaveBeenCalledWith("LINKED");
+    expect(c.getAccountStatements).toHaveBeenCalledWith(expect.objectContaining({ accountNumber: "LINKED" }));
     expect(c.getAccountBalance).toHaveBeenCalledTimes(1);
-    expect(c.getAccountBalance).toHaveBeenCalledWith("LINKED");
+    expect(c.getAccountBalance).toHaveBeenCalledWith(expect.objectContaining({ accountNumber: "LINKED" }));
     // OTHER-1 and OTHER-2 still appear in the result (so the UI's
     // pending block can offer them as imports), but with empty data.
     const others = r.accounts.filter((a) => a.accountNumber !== "LINKED");
@@ -1538,8 +1534,8 @@ describe("runFetchAccounts — linked-only filter", () => {
     // Two unique accountNumbers → two snapshots, two stmt calls.
     expect(r.accounts).toHaveLength(2);
     expect(c.getAccountStatements).toHaveBeenCalledTimes(2);
-    expect(c.getAccountStatements).toHaveBeenCalledWith("1234567800");
-    expect(c.getAccountStatements).toHaveBeenCalledWith("1234567805");
+    expect(c.getAccountStatements).toHaveBeenCalledWith(expect.objectContaining({ accountNumber: "1234567800" }));
+    expect(c.getAccountStatements).toHaveBeenCalledWith(expect.objectContaining({ accountNumber: "1234567805" }));
     expect(c.getAccountBalance).toHaveBeenCalledTimes(2);
   });
 

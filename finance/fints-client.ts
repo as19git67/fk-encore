@@ -54,6 +54,15 @@ const productVersion = secret("FinanceFintsProductVersion");
 const MAX_RETRIES = 2;
 const RETRY_BACKOFF_MS = [2_000, 4_000];
 
+/**
+ * How the wrapper names an account towards lib-fints: always the entry
+ * from `upd.bankAccounts` itself, never its bare number. Since lib-fints
+ * 1.5 a number shared by several accounts (comdirect reports giro and
+ * depot under one number, told apart only by subAccountId) throws
+ * instead of resolving to the first match.
+ */
+export type FintsAccountRef = string | RawBankAccount;
+
 /** Subset of lib-fints surface the wrapper uses — lets tests swap the constructor without module-level mocking. */
 export interface FintsClientSurface {
   synchronize(): Promise<import("lib-fints").SynchronizeResponse>;
@@ -68,7 +77,7 @@ export interface FintsClientSurface {
     selectedTanMethod?: import("lib-fints").TanMethod;
   };
   getAccountStatements(
-    accountNumber: string,
+    account: FintsAccountRef,
     from?: Date,
     to?: Date,
   ): Promise<import("lib-fints").StatementResponse>;
@@ -77,15 +86,15 @@ export interface FintsClientSurface {
     tan?: string,
   ): Promise<import("lib-fints").StatementResponse>;
   getAccountBalance(
-    accountNumber: string,
+    account: FintsAccountRef,
   ): Promise<import("lib-fints").AccountBalanceResponse>;
   getAccountBalanceWithTan(
     tanReference: string,
     tan?: string,
   ): Promise<import("lib-fints").AccountBalanceResponse>;
-  canGetCreditCardStatements(accountNumber?: string): boolean;
+  canGetCreditCardStatements(account?: FintsAccountRef): boolean;
   getCreditCardStatements(
-    accountNumber: string,
+    account: FintsAccountRef,
     from?: Date,
   ): Promise<import("lib-fints").StatementResponse & {
     balance?: { balance: number; date: Date; currency: string };
@@ -118,12 +127,12 @@ export interface FintsClientSurface {
   }>;
   /** Whether the cached BPD advertises HKWPD (Wertpapierdepot) for the given
    *  account, i.e. depots/securities accounts that lib-fints can fetch. */
-  canGetPortfolio?(accountNumber?: string): boolean;
+  canGetPortfolio?(account?: FintsAccountRef): boolean;
   /** Fetch the portfolio statement (MT535) for a depot. Total value is
    *  exposed as `portfolioStatement.totalValue`; we treat it as the
    *  account's "balance" for sync purposes. */
   getPortfolio?(
-    accountNumber: string,
+    account: FintsAccountRef,
     currency?: string,
     priceQuality?: "1" | "2",
     maxEntries?: number,
@@ -883,10 +892,10 @@ export async function runFetchAccounts(
   let partial = false;
   // Some banks (e.g. comdirect) report the same accountNumber twice
   // in upd.bankAccounts with different subAccountIds (giro + Visa
-  // sub-account on the same number). lib-fints' getAccountStatements
-  // / getAccountBalance only take the accountNumber, so a second
-  // call for the *same account type* would just retrigger the same
-  // SCA push for the same data. However, a depot (SecuritiesAccount)
+  // sub-account on the same number). Snapshots and persistence are
+  // keyed on the number, so a second account of the *same kind* would
+  // collide with the first and cost another SCA push for nothing.
+  // However, a depot (SecuritiesAccount)
   // sharing a number with a giro (CheckingAccount) uses a completely
   // different FinTS segment (HKWPD vs HKKAZ), so those must not be
   // deduped. Key on accountNumber:accountType.
@@ -1014,9 +1023,9 @@ function bankAccountKinds(
 
 interface RawBankAccount {
   accountNumber: string;
-  /** Lib-fints includes the FinTS sub-account discriminator. We don't
-   *  use it for routing (getAccountStatements doesn't take it), but
-   *  log it so duplicate-accountNumber cases are diagnosable. */
+  /** FinTS sub-account discriminator. Number and subAccountId together
+   *  identify the account; lib-fints matches on both when it is handed
+   *  this record (see FintsAccountRef). */
   subAccountId?: string;
   iban?: string;
   currency?: string;
@@ -1094,7 +1103,7 @@ async function fetchOneAccount(
   const isCreditCard = accountKind === "kreditkarte";
   const canGetCC = isCreditCard &&
     typeof client.canGetCreditCardStatements === "function" &&
-    client.canGetCreditCardStatements(account.accountNumber);
+    client.canGetCreditCardStatements(account);
 
   const useCreditCardPath = isCreditCard && canGetCC;
 
@@ -1109,7 +1118,7 @@ async function fetchOneAccount(
           (opts.from ? `: from=${opts.from.toISOString().slice(0, 10)}` : ""),
       );
       stmtResp = await client.getCreditCardStatements(
-        account.accountNumber,
+        account,
         opts.from,
       );
     } else if (opts.from) {
@@ -1118,11 +1127,11 @@ async function fetchOneAccount(
           opts.from.toISOString().slice(0, 10),
       );
       stmtResp = await client.getAccountStatements(
-        account.accountNumber,
+        account,
         opts.from,
       );
     } else {
-      stmtResp = await client.getAccountStatements(account.accountNumber);
+      stmtResp = await client.getAccountStatements(account);
     }
     // Bank requires SCA for the statement query? Poll the decoupled
     // continuation until the user approves on their device, then
@@ -1207,7 +1216,7 @@ async function fetchOneAccount(
   }
 
   try {
-    let balResp = await client.getAccountBalance(account.accountNumber);
+    let balResp = await client.getAccountBalance(account);
     if (balResp.requiresTan) {
       console.log(
         `[fints] balance ${account.accountNumber} → tan-required, ` +
@@ -1270,61 +1279,7 @@ async function fetchDepotPortfolio(
     return { snapshot };
   }
 
-  // lib-fints resolves accounts by the first accountNumber match in
-  // upd.bankAccounts (via config.getBankAccount). When giro and depot
-  // share the same number, that first-match picks the giro — which
-  // doesn't support HKWPD. We can't reorder the array because Dialog
-  // init rebuilds the UPD from the bank's response, undoing any
-  // reorder. Instead, monkey-patch getBankAccount on the config
-  // instance to prefer the depot entry for the shared number. This
-  // survives UPD rebuilds because the override is on the method, not
-  // the data.
-  const restore = patchGetBankAccountForDepot(client, account);
-  try {
-    return await fetchDepotPortfolioInner(client, account, snapshot, sleep);
-  } finally {
-    restore();
-  }
-}
-
-/**
- * Monkey-patch `config.getBankAccount` so that lookups for the depot's
- * accountNumber return the depot entry (matched by subAccountId) instead
- * of whichever entry `.find()` hits first (usually the giro).
- *
- * This survives Dialog init rebuilding the UPD because it's a method
- * override on the config instance — the rebuilt UPD replaces the *data*
- * (`config.bankingInformation.upd`), but the patched method still
- * searches the (now-fresh) array with the correct predicate.
- *
- * Returns a restore function that removes the instance-level override.
- */
-function patchGetBankAccountForDepot(
-  client: FintsClientSurface,
-  account: RawBankAccount,
-): () => void {
-  const cfg = client.config as Record<string, unknown>;
-  const origGetBankAccount = (cfg as { getBankAccount: (n: string) => RawBankAccount }).getBankAccount;
-  if (typeof origGetBankAccount !== "function") return () => {};
-
-  const bound = origGetBankAccount.bind(cfg);
-  (cfg as { getBankAccount: (n: string) => RawBankAccount }).getBankAccount = (accountNumber: string) => {
-    if (accountNumber === account.accountNumber) {
-      const upd = (client.config.bankingInformation as Record<string, unknown>)
-        .upd as { bankAccounts?: RawBankAccount[] } | undefined;
-      const depotEntry = upd?.bankAccounts?.find(
-        (a) =>
-          a.accountNumber === accountNumber &&
-          a.subAccountId === account.subAccountId,
-      );
-      if (depotEntry) return depotEntry;
-    }
-    return bound(accountNumber);
-  };
-
-  return () => {
-    (cfg as { getBankAccount: (n: string) => RawBankAccount }).getBankAccount = origGetBankAccount;
-  };
+  return await fetchDepotPortfolioInner(client, account, snapshot, sleep);
 }
 
 async function fetchDepotPortfolioInner(
@@ -1333,7 +1288,7 @@ async function fetchDepotPortfolioInner(
   snapshot: FintsAccountSnapshot,
   sleep: (ms: number) => Promise<void>,
 ): Promise<FetchOneResult> {
-  if (!client.canGetPortfolio!(account.accountNumber)) {
+  if (!client.canGetPortfolio!(account)) {
     console.log(
       `[fints] account ${account.accountNumber}: kind=depot, bank ` +
         `does not advertise HKWPD — skipping`,
@@ -1343,7 +1298,7 @@ async function fetchDepotPortfolioInner(
 
   console.log(`[fints] portfolio ${account.accountNumber}`);
   try {
-    let resp = await client.getPortfolio(account.accountNumber);
+    let resp = await client.getPortfolio(account);
     if (resp.requiresTan && client.getPortfolioWithTan) {
       console.log(
         `[fints] portfolio ${account.accountNumber} → tan-required, ` +
@@ -1503,7 +1458,7 @@ export async function resumeFetchAfterTan(
   const isCCResume =
     accountKind === "kreditkarte" &&
     typeof client.canGetCreditCardStatements === "function" &&
-    client.canGetCreditCardStatements(currentAccount.accountNumber);
+    client.canGetCreditCardStatements(currentAccount);
 
   let stmtResp;
   try {
@@ -1588,7 +1543,7 @@ export async function resumeFetchAfterTan(
   // Balance for the resumed account — typically already in the same
   // session, no fresh TAN.
   try {
-    let balResp = await client.getAccountBalance(currentAccount.accountNumber);
+    let balResp = await client.getAccountBalance(currentAccount);
     if (balResp.requiresTan) {
       balResp = await pollDecoupled(
         client,
@@ -1695,7 +1650,7 @@ function effectiveAccountKind(
   }
   if (
     typeof client.canGetCreditCardStatements === "function" &&
-    client.canGetCreditCardStatements(account.accountNumber)
+    client.canGetCreditCardStatements(account)
   ) {
     return "kreditkarte";
   }
