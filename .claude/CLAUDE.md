@@ -1346,6 +1346,7 @@ The conversation with the user stays in whatever language the user is using — 
 - **Orientierungs-Varianten** (Hoch- und Querformat desselben Motivs als Formatgruppe; jede Ansicht zeigt die Seite, die zur Bildschirm-Orientierung passt) — **umgesetzt** in sechs Etappen (#1421, #1425, #1426 und Etappe 6). Regel und Konstante (`VARIANT_TIME_WINDOW_SECONDS`) in `photo/orientation-variants.ts`, Web-Hilfen in `frontend/src/utils/orientationVariants.ts`, iOS in `Core/Models/OrientationVariants.swift`; Konzept und Umsetzungsstand in `docs/plans/orientierungs-varianten.md`.
 - **Kurse der gehaltenen Wertpapiere** (Provider-Schnittstelle mit Onvista als Kursquelle, Yahoo/EODHD wählbar, eigener Kurs-Cache mit Historie, Scheduler zu Handelszeiten, Kurse-Seite mit Kacheln und Zeitspanne, EODHD-Nachrichten im Tagesbudget) — Etappen 1–4 umgesetzt (#1467, #1468, #1471, #1472 und Etappe 4: Nachrichten auf Positionsseite, Zähler ungelesener Nachrichten auf der Kachel); als Nächstes Yahoo-RSS als zweiter Nachrichtenweg. Plan und Stand in `docs/plans/kurse.md`.
 - **Wertpapier-Stamm, Depotauszüge, KI zuerst** (Wertpapiere je Depot nur nach Bestätigung — Bank-Bestand automatisch, Fundstellen aus Buchungen/Belegen als Vorschlag unter „Zu prüfen“; Depotauszüge und Reportings als Bestandsstände; die KI liest, die Regeln prüfen): `docs/plans/wertpapier-stamm.md` (Plan auf Englisch). Etappe 1 (Stamm, #1518) und Etappe 2 (Depotauszüge als Bestand: `finance/depot-statement-parser.ts`, `depot-statement-enrichment.ts`) umgesetzt; als Nächstes Etappe 3 (KI zuerst im Abrechnungs-Merge).
+- **KI-Assistent über alle Daten** (ein Chat, der Fragen über Finanzen, Dokumente, Fotos, Zähler und Reisen beantwortet; das Modell kennt den ganzen Werkzeugkatalog aus der OpenAPI-Spezifikation und ruft nur bestehende Service-Funktionen über `~encore/clients` als der fragende Nutzer auf, nie SQL; Schreibaktionen als bestätigungspflichtige Vorschläge; Tool-Calling über den lokalen llama-server; Streaming per `api.streamOut`): `docs/plans/ki-assistent.md` (Plan auf Englisch). Noch nicht umgesetzt; Etappe 1 (Chat-Endpunkt mit Tools im llm-service plus Benchmark auf dem produktiven Gemma-4-Modell) misst Trefferquote und Antwortzeit.
 - **Admin-Aktionen in die Module verschieben** — **umgesetzt**. Datenverwaltung, Bibliotheken, Taxonomie-Cockpit/-Tools und KI-Modell liegen jetzt unter Fotos/Dokumente/Finanzen › Einstellungen; Admin behält Benutzer, Rollen, Jobs und die neue Systemstatus-Seite. Die Panels der früheren `DataManagementView` liegen unter `frontend/src/components/admin/`. Plan und Umsetzungsstand: `docs/plans/admin-datenverwaltung-aufteilung.md`.
 
 ## Keine personenbezogenen Daten (PII) im Repo
@@ -1361,6 +1362,18 @@ In Code, Tests, Fixtures, Kommentaren, Seed-Daten, Migrationsdateien und Commit-
 Betroffen sind auch Inhalte aus Beispieldokumenten, die zur Analyse (z. B. für die Dokumentenverwaltung/Klassifikation) hochgeladen werden — daraus abgeleitete Test-Fixtures, Prompts oder Beispieltexte müssen mit frei erfundenen, offensichtlich synthetischen Werten arbeiten (z. B. `Beispielstraße 1`, `12345 Musterstadt`, `max@beispiel.test`, `DE00 0000 0000 0000 0000 00`), nicht mit realen Daten aus der Quelle.
 
 Vor jedem Commit, der neue Test-Fixtures, Seed-Daten oder Beispieltexte einführt: kurz prüfen, ob eine der obigen Kategorien betroffen ist, und ggf. durch synthetische Werte ersetzen.
+
+## Produktiv geladenes KI-Modell
+
+Im llm-service läuft produktiv **`gemma-4-26B-A4B-it-qat-UD-Q4_K_XL`**
+(Gemma 4, Mixture-of-Experts mit 26 Mrd. Parametern gesamt und rund 4 Mrd.
+aktiven je Token, quantisierungsbewusst trainiert, dynamische 4-Bit-Quantisierung)
+auf einer GPU mit **16 GB VRAM**, über den `server`-Backend (llama-server mit
+`--jinja`), mit dem passenden `mmproj` für Vision. Das in Doku und Defaults
+noch erwähnte Qwen2.5-7B ist nur der CPU-Fallback. Pläne, Prompts und
+Benchmarks richten sich nach diesem Modell; der VRAM-Rahmen (Gewichte plus
+KV-Cache plus E5-Embedder) begrenzt das nutzbare Kontextfenster, siehe
+`llm-service/README.md`.
 
 ## GitLab-Zugriff (selbstgehostete Instanz)
 
