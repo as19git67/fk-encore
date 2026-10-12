@@ -92,7 +92,7 @@ const emit = defineEmits<{
   'stack-click': [entry: GalleryGridEntry]
   /**
    * Tap on the format badge of a photo that also exists in the other
-   * orientation (.claude/plans/orientierungs-varianten.md). The parent opens
+   * orientation (docs/plans/orientierungs-varianten.md). The parent opens
    * the fullscreen on this entry and switches straight to the other side.
    */
   'variant-click': [entry: GalleryGridEntry]
@@ -117,7 +117,7 @@ const emit = defineEmits<{
 const source = useGallerySource()
 const { entries, total, initialLoading, error } = source
 
-// Orientation variants (.claude/plans/orientierungs-varianten.md): the grid
+// Orientation variants (docs/plans/orientierungs-varianten.md): the grid
 // asks the server for the side of every format group that fits the screen
 // it is on. Turning the device changes the filter and reloads around the
 // photo at the top of the viewport, like any other filter change. Selection
@@ -609,7 +609,7 @@ defineExpose({
               <i class="pi pi-users" />
               <i class="pi pi-check" />
             </span>
-            <!-- Format badge (.claude/plans/orientierungs-varianten.md): this
+            <!-- Format badge (docs/plans/orientierungs-varianten.md): this
                  photo also exists in the other orientation. Same corner and
                  size as the stack badge, next to it when both are there.
                  Tap → fullscreen straight on the other side. -->

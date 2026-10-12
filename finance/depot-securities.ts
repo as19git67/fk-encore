@@ -1,5 +1,5 @@
 /**
- * The securities master of a depot (.claude/plans/wertpapier-stamm.md,
+ * The securities master of a depot (docs/plans/wertpapier-stamm.md,
  * stage 1).
  *
  * A security is booked into a depot only once it is *confirmed* there.
@@ -16,7 +16,7 @@
 import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 
 import db from "../db/database";
-import { financeDepotSecurity, financeDepotSecurityEvidence } from "../db/schema";
+import { financeAccountHolding, financeDepotSecurity, financeDepotSecurityEvidence } from "../db/schema";
 
 console.log("[boot] finance/depot-securities.ts: all imports resolved");
 
@@ -136,7 +136,11 @@ export async function confirmBankSecurities(
 
 export type SecurityDecision = "confirm" | "ignore" | "propose";
 
-/** The user's word on a proposal — or on a decision to undo ("propose"). */
+/**
+ * The user's word on a proposal — or on a decision to undo ("propose").
+ * A security no longer confirmed loses the holdings that statements wrote
+ * for it (stage 2): those rows exist only because it was confirmed.
+ */
 export async function decideSecurity(id: number, decision: SecurityDecision, userId: number): Promise<SecurityRow | null> {
   const status: SecurityStatus = decision === "confirm" ? "confirmed" : decision === "ignore" ? "ignored" : "proposed";
   const [row] = await db
@@ -144,6 +148,20 @@ export async function decideSecurity(id: number, decision: SecurityDecision, use
     .set({ status, source: "user", decided_at: new Date().toISOString(), decided_by: userId })
     .where(eq(financeDepotSecurity.id, id))
     .returning();
+  if (row && status !== "confirmed" && (row.isin || row.wkn)) {
+    const matches = [];
+    if (row.isin) matches.push(eq(financeAccountHolding.isin, row.isin));
+    if (row.wkn) matches.push(eq(financeAccountHolding.wkn, row.wkn));
+    await db
+      .delete(financeAccountHolding)
+      .where(
+        and(
+          eq(financeAccountHolding.account_id, row.account_id),
+          eq(financeAccountHolding.source, "document"),
+          or(...matches)!,
+        ),
+      );
+  }
   return row ?? null;
 }
 

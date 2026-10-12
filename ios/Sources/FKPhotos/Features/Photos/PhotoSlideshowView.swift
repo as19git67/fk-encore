@@ -13,7 +13,7 @@ import SwiftUI
 /// picked, persisted per device under `Slideshow.intervalDefaultsKey`.
 struct PhotoSlideshowView: View {
     /// The photos as shown — after the format groups have been resolved for
-    /// the screen (.claude/plans/orientierungs-varianten.md): a photo whose
+    /// the screen (docs/plans/orientierungs-varianten.md): a photo whose
     /// other side fits the screen is replaced by that side, in place, so the
     /// slide indices never move.
     @State private var photos: [PhotoWithCuration]

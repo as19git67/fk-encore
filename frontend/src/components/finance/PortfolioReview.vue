@@ -16,6 +16,7 @@ import {
   type PortfolioReviewDocument,
   type PortfolioReviewResponse,
   type PortfolioReviewSecurity,
+  type PortfolioReviewStatement,
 } from '../../api/finance'
 import {
   depotKindLabel,
@@ -81,7 +82,7 @@ const hasContent = computed(() => {
   if (!r) return false
   return (
     r.conflicts.length + r.unmatched_documents.length + (r.unverified_documents?.length ?? 0) + r.holding_gaps.length +
-      (r.misbooked_accumulations?.length ?? 0) + (r.new_securities?.length ?? 0) > 0 ||
+      (r.misbooked_accumulations?.length ?? 0) + (r.new_securities?.length ?? 0) + (r.unplaced_statements?.length ?? 0) > 0 ||
     r.unverifiable_changes > 0 ||
     // Keeps the toggle reachable when everything left is ignored.
     ignoredCount.value > 0
@@ -95,9 +96,21 @@ const count = computed(() => {
   const open = <T extends { ignored?: boolean }>(list: T[] | undefined) => (list ?? []).filter((x) => !x.ignored).length
   return (
     open(r.conflicts) + open(r.unmatched_documents) + open(r.unverified_documents) + r.holding_gaps.length +
-    (r.misbooked_accumulations?.length ?? 0) + open(r.new_securities)
+    (r.misbooked_accumulations?.length ?? 0) + open(r.new_securities) + open(r.unplaced_statements)
   )
 })
+
+/** Why a depot statement found no depot: what it printed and listed. */
+function statementReason(s: PortfolioReviewStatement): string {
+  const parts: string[] = []
+  parts.push(s.as_of ? `Bestand per ${formatIsoDate(s.as_of)}` : 'kein Stichtag erkannt')
+  parts.push(s.depot_number ? `Depotnummer ${s.depot_number} unbekannt oder mehrdeutig` : 'keine Depotnummer gefunden')
+  if (s.positions > 0) {
+    const shown = s.identifiers.join(', ')
+    parts.push(`${s.positions} Position${s.positions === 1 ? '' : 'en'}${shown ? ` (${shown}${s.positions > s.identifiers.length ? ', …' : ''})` : ''} in keinem Depot bestätigt`)
+  }
+  return parts.join(' · ')
+}
 
 // ── Proposed securities ──────────────────────────────────────────────
 // A security met in bookings or papers that the depot's master has not
@@ -547,6 +560,47 @@ function signClass(val: string | null): string {
                   </template>
             </span>
             <span class="pr-reason">{{ unmatchedReason(d) }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Depot statements without a depot -->
+      <div v-if="review.unplaced_statements?.length" class="pr-group">
+        <h3>Depotauszüge ohne Depot</h3>
+        <p class="pr-hint">
+          Diese Depotauszüge und Reportings nennen keine bekannte Depotnummer, und keines ihrer Wertpapiere ist in genau einem Depot aufgenommen. Nimm das Wertpapier unter „Neue Wertpapiere“ auf oder trage die Depotnummer am Depot ein, dann wird der Bestand beim nächsten Einlesen übernommen.
+        </p>
+        <ul class="pr-docs">
+          <li v-for="s in review.unplaced_statements" :key="s.document_id" :class="{ 'pr-ignored': s.ignored }">
+            <button type="button" class="pr-doc" @click="openDocument = s.document_id">
+              <i class="pi pi-file" aria-hidden="true" />
+              {{ s.document_title ?? `Dokument ${s.document_id}` }}
+            </button>
+            <span v-if="s.doc_date" class="pr-date">{{ formatIsoDate(s.doc_date) }}</span>
+            <span class="pr-mark">
+              <Button
+                v-if="!s.ignored"
+                label="Für Depots ignorieren"
+                icon="pi pi-eye-slash"
+                size="small"
+                text
+                severity="secondary"
+                :loading="marking.has(s.document_id)"
+                @click="setIgnored(s.document_id, true)"
+              />
+              <template v-else>
+                <span class="pr-ignored-tag">ignoriert</span>
+                <Button
+                  label="Wieder berücksichtigen"
+                  icon="pi pi-eye"
+                  size="small"
+                  text
+                  :loading="marking.has(s.document_id)"
+                  @click="setIgnored(s.document_id, false)"
+                />
+              </template>
+            </span>
+            <span class="pr-reason">{{ statementReason(s) }}</span>
           </li>
         </ul>
       </div>

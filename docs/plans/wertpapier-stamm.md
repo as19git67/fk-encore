@@ -1,7 +1,7 @@
 # Securities master, depot statements, model-first reading
 
-Status: stage 1 in progress. Follows the portfolio work of #1336 (settlement
-documents, derivation from bookings, review page).
+Status: stages 1 (#1518) and 2 done; stage 3 next. Follows the portfolio
+work of #1336 (settlement documents, derivation from bookings, review page).
 
 ## Problem
 
@@ -74,22 +74,43 @@ The portfolio takes securities from wherever they turn up:
      `confirm | ignore`; the ignored ones are listed with `ignored=true`
      like ignored documents, so a decision can be undone.
 
-2. **Depot statements and reportings as holdings.**
-   - Paper type `statement` next to the existing ones (rules: "Depotauszug",
-     "Vermögensübersicht", "Depotbestand", "Reporting" with a table of
-     positions; the model confirms the type and lists the positions).
-   - Reader: per position ISIN/WKN, name, quantity, price, value, currency,
-     and the statement's date. Stored as holdings rows with `source =
-     'document'` and a link to the document (new columns on
-     `finance_account_holding`: `source`, `document_id`).
-   - Only confirmed securities are stored; unknown ones become proposals
-     with evidence `document`, so a position bought before the first paper
-     still gets found.
-   - Reconciliation and the position page treat document holdings like
-     FinTS holdings; the oldest one is the opening position (quantity and,
-     where printed, the bank's cost basis).
-   - The review page lists statements that could not be placed (no depot
-     number, no confirmed security) under "Depotauszüge ohne Depot".
+2. **Depot statements and reportings as holdings** — done.
+   - Own reader next to the settlement one (`depot-statement-parser.ts`,
+     `depot-statement-enrichment.ts`): the rules recognise the paper by its
+     heading words ("Depotauszug", "Depotbestand", "Vermögensübersicht",
+     "Reporting", …) and the absence of settlement wording, read the
+     statement's date ("per 31.12.2025"), the depot number and a position
+     per identifier with the figures labelled on its row. The model is
+     asked once per paper (`extractStatementPositions`, answer kept in
+     `finance_document_statement_llm`) for the date and the positions; the
+     merge takes the model's figures first and the rules' where the model
+     has none — or where the rules' quantity × price gives the value and
+     the model's does not (stage 3 applied here already).
+   - Stored as holdings rows with `source = 'document'` and `document_id`
+     (migration 0238, columns on `finance_account_holding`), keyed like the
+     bank's rows (depot, day, ISIN else WKN); a day the bank's sync covers
+     keeps the bank's figures, and the sync sets `source` back to `bank`.
+   - The depot is the one whose number the paper prints, else the one depot
+     in scope whose master confirms a security the paper lists. Only
+     confirmed securities are stored; unknown ones become proposals with
+     evidence `document` (a dry run proposes nothing), ignored ones stay
+     silent, and a confirmed position without a readable quantity is never
+     stored. "Aufnehmen" re-reads the statements among the evidence;
+     "Ignorieren" and "Wieder vorschlagen" delete the rows statements wrote
+     for that security.
+   - Reconciliation, the holdings history and the position page treat
+     document holdings like FinTS holdings; the oldest one is the opening
+     position (quantity and, where printed, the bank's cost basis as
+     `acquisition_price`). A row read from a statement never counts as the
+     bank's word for the master (enrichment and derivation check `source`).
+   - The review page lists statements that could not be placed under
+     "Depotauszüge ohne Depot" (`unplaced_statements`, with date, depot
+     number and the identifiers listed); "Für Depots ignorieren" applies to
+     them as to any paper. The background run reads the statements after
+     the settlements and reports `statements_stored`, `statements_unplaced`
+     and `statement_positions_proposed`; "Belege neu einlesen" deletes the
+     document holdings and the stored answers, so every statement is read
+     again with today's rules.
 
 3. **Model-first reading** (`depot-settlement-merge.ts`, `llm-client.ts`).
    - `mergeSettlement`: on a tie the model wins; "unverified" only when no
@@ -108,3 +129,11 @@ The portfolio takes securities from wherever they turn up:
   deploy, the review page may show proposals for securities sold before
   the first holdings snapshot — one "Aufnehmen" each.
 - The master is per depot: the same ISIN in two depots is two entries.
+- Stage 2 reads statements on the next "Belege einlesen" (the run reads
+  them after the settlements). A statement that lists only part of a depot
+  (one page of a reporting, a sub-depot) counts as a snapshot day of the
+  whole depot for the reconciliation, so a position it omits shows as a
+  gap on that day — mark the paper "Für Depots ignorieren" if it is not a
+  full statement. A statement whose depot could not be found waits under
+  "Depotauszüge ohne Depot": take its security in, or give the depot its
+  number.

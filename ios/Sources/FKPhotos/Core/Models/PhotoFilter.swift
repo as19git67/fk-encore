@@ -35,7 +35,7 @@ struct PhotoFilter: Equatable, Codable {
     var dateTo: Date?               = nil
     /// "Formatvarianten anzeigen": both sides of every portrait/landscape
     /// format group instead of only the side that fits the screen
-    /// (.claude/plans/orientierungs-varianten.md). Optional so a filter
+    /// (docs/plans/orientierungs-varianten.md). Optional so a filter
     /// persisted before the switch existed still decodes.
     var showVariants: Bool?         = nil
 

@@ -89,7 +89,7 @@ const confidenceFilter = confidenceView.value
 const confidence = computed(() => confidenceFilter.value as ConfidenceFilter)
 const confidenceFiltered = computed(() => confidence.value !== 'all')
 
-// "Formatpaare" (.claude/plans/orientierungs-varianten.md): only groups that
+// "Formatpaare" (docs/plans/orientierungs-varianten.md): only groups that
 // hold both orientations of one motif. In the URL like the confidence.
 const pairsView = useListView({
   options: [
@@ -713,7 +713,7 @@ onMounted(() => {
           <span v-if="group.duplicate_candidate" class="rq-duplicate-badge">
             <i class="pi pi-copy" /> Sehr wahrscheinliches Duplikat
           </span>
-          <!-- Format pair (.claude/plans/orientierungs-varianten.md): the
+          <!-- Format pair (docs/plans/orientierungs-varianten.md): the
                group holds the same motif portrait and landscape. The AI
                keeps both on purpose; this tag says why. -->
           <span v-if="group.orientation_pair" class="rq-pair-badge">

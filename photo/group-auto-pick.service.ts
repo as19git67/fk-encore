@@ -553,7 +553,7 @@ export async function acceptAiPickLogic(
 }
 
 /**
- * "Bestes je Format behalten" (.claude/plans/orientierungs-varianten.md):
+ * "Bestes je Format behalten" (docs/plans/orientierungs-varianten.md):
  * keep the best-rated visible photo of every orientation in the group, hide
  * the rest and mark the group reviewed. Runs through `acceptAiPickLogic`
  * with the computed set as the override, so favorites stay protected and

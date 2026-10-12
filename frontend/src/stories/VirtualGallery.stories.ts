@@ -7,7 +7,7 @@ import { MOCK_PHOTOS } from './mock-data'
 
 /**
  * The virtualized photo grid with format pairs
- * (.claude/plans/orientierungs-varianten.md): the same motif in portrait and
+ * (docs/plans/orientierungs-varianten.md): the same motif in portrait and
  * landscape. The grid asks the server for the side that fits the screen, so
  * the stories pin the viewport and answer the request from a fixture that
  * knows both sides. The shown tile carries the ↻ badge; next to an open

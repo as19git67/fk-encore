@@ -1,4 +1,4 @@
--- The securities master of a depot (.claude/plans/wertpapier-stamm.md).
+-- The securities master of a depot (docs/plans/wertpapier-stamm.md).
 --
 -- A security is booked into a depot only once it is confirmed there. What
 -- the bank's holdings deliver is confirmed by itself; a security met only

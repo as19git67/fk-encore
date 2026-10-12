@@ -45,6 +45,7 @@ import {
   financeDepotSecurity,
   financeDepotTransaction,
   financeDocumentSettlementLlm,
+  financeDocumentStatementLlm,
   users,
 } from "../db/schema";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
@@ -64,8 +65,10 @@ import {
   type MisbookedAccumulation,
   setIgnoredForDepots,
   type EnrichResult,
+  type EnrichStats,
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
+import { enrichPendingStatements, readDepotStatement, type StatementStats } from "./depot-statement-enrichment";
 import { decideSecurity, evidenceDocumentIds, listSecurities, type ListedSecurity, type SecurityStatus } from "./depot-securities";
 import { cleanSecurityName, isPersonName, paperTypeOf, type PaperType } from "./depot-settlement-parser";
 import { readSettlement, rereadAgainstBooking, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
@@ -1590,6 +1593,12 @@ export interface EnrichRunTotals {
   skipped_no_holding: number;
   skipped_no_transaction: number;
   skipped_unknown_security: number;
+  /** Depot statements and reportings read into holdings snapshots (stage 2). */
+  statements_stored: number;
+  /** Statements no depot could be found for — listed on the review page. */
+  statements_unplaced: number;
+  /** Positions on statements about securities the master has not confirmed: proposed. */
+  statement_positions_proposed: number;
 }
 
 export interface EnrichRun {
@@ -1619,7 +1628,29 @@ function emptyTotals(): EnrichRunTotals {
     skipped_no_holding: 0,
     skipped_no_transaction: 0,
     skipped_unknown_security: 0,
+    statements_stored: 0,
+    statements_unplaced: 0,
+    statement_positions_proposed: 0,
   };
+}
+
+const SETTLEMENT_TOTAL_KEYS = [
+  "documents_examined",
+  "created",
+  "enriched",
+  "linked",
+  "conflicts",
+  "unverified",
+  "skipped_no_holding",
+  "skipped_no_transaction",
+  "skipped_unknown_security",
+] as const satisfies readonly (keyof EnrichRunTotals & keyof EnrichStats)[];
+
+function addStatementPage(totals: EnrichRunTotals, page: StatementStats): void {
+  totals.documents_examined += page.documents_examined;
+  totals.statements_stored += page.stored;
+  totals.statements_unplaced += page.no_depot;
+  totals.statement_positions_proposed += page.positions_proposed;
 }
 
 async function runEnrichment(run: EnrichRun): Promise<void> {
@@ -1627,7 +1658,14 @@ async function runEnrichment(run: EnrichRun): Promise<void> {
     let before: number | null = null;
     do {
       const page = await enrichPage(run.account_ids, 200, before);
-      for (const k of Object.keys(run.totals) as (keyof EnrichRunTotals)[]) run.totals[k] += page[k];
+      for (const k of SETTLEMENT_TOTAL_KEYS) run.totals[k] += page[k];
+      before = page.next_before;
+    } while (before !== null);
+    // Then the depot statements: what the depots held, as snapshots.
+    before = null;
+    do {
+      const page = await enrichPendingStatements(run.account_ids, 200, {}, { before, budgetMs: ENRICH_REQUEST_BUDGET_MS });
+      addStatementPage(run.totals, page);
       before = page.next_before;
     } while (before !== null);
     run.status = "done";
@@ -1746,6 +1784,22 @@ export interface ReviewSecurity extends ListedSecurity {
   ignored: boolean;
 }
 
+/** A depot statement no depot could be found for (stage 2). */
+export interface ReviewStatement {
+  document_id: number;
+  document_title: string | null;
+  doc_date: string | null;
+  /** The day the statement states the holdings for. */
+  as_of: string | null;
+  depot_number: string | null;
+  /** Positions with an identifier the statement lists. */
+  positions: number;
+  /** The identifiers listed (ISIN, else WKN), at most five. */
+  identifiers: string[];
+  /** Marked "ignore for depots" (listed only with `ignored=true`). */
+  ignored: boolean;
+}
+
 interface ReviewParams {
   accounts?: string;
   /** Include closed depots when no `accounts` are given. */
@@ -1769,6 +1823,8 @@ interface ReviewResponse {
   misbooked_accumulations: (MisbookedAccumulation & { account_label: string })[];
   /** Securities proposed by bookings or papers, for the user to take in or ignore. */
   new_securities: ReviewSecurity[];
+  /** Depot statements and reportings that could not be placed in a depot. */
+  unplaced_statements: ReviewStatement[];
 }
 
 export const getPortfolioReview = api(
@@ -1805,16 +1861,43 @@ export const getPortfolioReview = api(
         ignored_count: ignoredRows.length,
         misbooked_accumulations: [],
         new_securities: [],
+        unplaced_statements: [],
       };
     }
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
 
-    const [dry, recon, misbooked, securities] = await Promise.all([
+    const [dry, recon, misbooked, securities, statements] = await Promise.all([
       enrichPendingDocuments(ids, 200, { dryRun: true, includeIgnored: ignored === true }),
       reconcileHoldings(ids),
       findMisbookedAccumulations(ids),
       listSecurities(ids, ignored === true ? ["proposed", "ignored"] : ["proposed"]),
+      enrichPendingStatements(ids, 200, { dryRun: true, includeIgnored: ignored === true }),
     ]);
+
+    // Statements without a depot, when the caller may see them.
+    const unplacedResults = statements.results.filter((r) => r.outcome === "no_depot");
+    const statementDocs = unplacedResults.length
+      ? await db
+          .select({ id: documents.id, title: documents.title, user_id: documents.user_id, doc_date: documents.doc_date })
+          .from(documents)
+          .where(inArray(documents.id, unplacedResults.map((r) => r.document_id)))
+      : [];
+    const statementDocById = new Map(statementDocs.filter((d) => mayShow(d.user_id)).map((d) => [d.id, d]));
+    const unplacedStatements: ReviewStatement[] = [];
+    for (const r of unplacedResults) {
+      const doc = statementDocById.get(r.document_id);
+      if (!doc) continue;
+      unplacedStatements.push({
+        document_id: doc.id,
+        document_title: doc.title,
+        doc_date: doc.doc_date,
+        as_of: r.as_of,
+        depot_number: r.depot_number,
+        positions: r.positions_found,
+        identifiers: r.identifiers,
+        ignored: r.ignored,
+      });
+    }
 
     const relevant = dry.results.filter(
       (r) => r.outcome === "conflict" || r.outcome === "no_holding" || r.outcome === "unverified",
@@ -1935,12 +2018,13 @@ export const getPortfolioReview = api(
         account_label: labelById.get(sec.account_id) ?? "",
         ignored: sec.status === "ignored",
       })),
+      unplaced_statements: unplacedStatements,
     };
   },
 );
 
 // ----------------------------------------------------------------------
-// The securities master (.claude/plans/wertpapier-stamm.md, stage 1)
+// The securities master (docs/plans/wertpapier-stamm.md, stage 1)
 // ----------------------------------------------------------------------
 
 interface SecurityDecisionParams {
@@ -1988,6 +2072,9 @@ export const decideDepotSecurity = api(
       for (const docId of await evidenceDocumentIds(securityId)) {
         const r = await enrichDocument(docId, [sec.account_id]);
         if (r.outcome === "created" || r.outcome === "enriched" || r.outcome === "linked") documentsRead++;
+        // A statement that proposed it now stores its position.
+        const s = await readDepotStatement(docId, [sec.account_id]);
+        if (s.outcome === "stored") documentsRead++;
       }
     }
     return { security_id: securityId, status: row!.status as SecurityStatus, rederived, documents_read: documentsRead };
@@ -2415,8 +2502,10 @@ interface ResetDocumentsResponse {
   removed: number;
   /** Manual transactions that only lost their link to a document. */
   unlinked: number;
-  /** Stored model answers cleared. */
+  /** Stored model answers cleared (settlements and statements). */
   answers_cleared: number;
+  /** Holdings rows read from depot statements deleted; the statements are read again on the next run. */
+  holdings_removed: number;
   /** Transactions derived again from account bookings. */
   rederived: number;
 }
@@ -2479,17 +2568,21 @@ export const resetDocumentReadings = api(
         ),
       );
 
+    const ownDocuments = db.select({ id: documents.id }).from(documents).where(eq(documents.user_id, Number(auth.userID)));
     const cleared = await db
       .delete(financeDocumentSettlementLlm)
-      .where(
-        hasAdmin(auth)
-          ? sql`true`
-          : inArray(
-              financeDocumentSettlementLlm.document_id,
-              db.select({ id: documents.id }).from(documents).where(eq(documents.user_id, Number(auth.userID))),
-            ),
-      )
+      .where(hasAdmin(auth) ? sql`true` : inArray(financeDocumentSettlementLlm.document_id, ownDocuments))
       .returning({ id: financeDocumentSettlementLlm.document_id });
+    const clearedStatements = await db
+      .delete(financeDocumentStatementLlm)
+      .where(hasAdmin(auth) ? sql`true` : inArray(financeDocumentStatementLlm.document_id, ownDocuments))
+      .returning({ id: financeDocumentStatementLlm.document_id });
+
+    // What statements wrote into the holdings goes too: they are read again with today's rules.
+    const holdingsRemoved = await db
+      .delete(financeAccountHolding)
+      .where(and(inArray(financeAccountHolding.account_id, ids), eq(financeAccountHolding.source, "document")))
+      .returning({ id: financeAccountHolding.id });
 
     const bankcontacts = await db
       .selectDistinct({ id: financeAccount.bankcontact_id })
@@ -2501,6 +2594,12 @@ export const resetDocumentReadings = api(
       rederived += (await deriveDepotTransactionsForBankcontact(bc.id)).derived;
     }
 
-    return { removed: removed.length, unlinked: kept.length, answers_cleared: cleared.length, rederived };
+    return {
+      removed: removed.length,
+      unlinked: kept.length,
+      answers_cleared: cleared.length + clearedStatements.length,
+      holdings_removed: holdingsRemoved.length,
+      rederived,
+    };
   },
 );

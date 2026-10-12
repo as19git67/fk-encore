@@ -1,5 +1,5 @@
 -- Orientation variants: portrait and landscape of the same motif
--- (.claude/plans/orientierungs-varianten.md).
+-- (docs/plans/orientierungs-varianten.md).
 --
 -- A similarity group that holds both a portrait and a landscape frame taken
 -- within two minutes of each other is a "format group": every view shows only

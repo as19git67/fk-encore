@@ -4,7 +4,7 @@ import { useMediaQuery } from './useBreakpoint'
 export type ScreenOrientation = 'portrait' | 'landscape'
 
 /**
- * Which way the screen is turned right now (.claude/plans/orientierungs-varianten.md).
+ * Which way the screen is turned right now (docs/plans/orientierungs-varianten.md).
  *
  * One composable for the whole app: the gallery grid, the fullscreen viewer
  * and the slideshow all ask the same question and must get the same answer,

@@ -1,5 +1,5 @@
 /**
- * Portrait and landscape of the same motif (.claude/plans/orientierungs-varianten.md).
+ * Portrait and landscape of the same motif (docs/plans/orientierungs-varianten.md).
  *
  * The server decides which photos form a format group and ships the two
  * sides on `GalleryGridGroup.variants`. These helpers answer the questions
@@ -179,7 +179,7 @@ export function bestPerSide(
  * The side to show large on this screen: the counterpart when the photo
  * does not fit the screen and the counterpart does, else the photo itself.
  * This is the one rule the recap player and the stream card share
- * (.claude/plans/orientierungs-varianten.md, stage 6). Squares and photos of
+ * (docs/plans/orientierungs-varianten.md, stage 6). Squares and photos of
  * unknown shape are left alone.
  */
 export function pickSideForScreen<P extends { orientation?: PhotoOrientation | null }, C extends { orientation?: PhotoOrientation | null }>(
