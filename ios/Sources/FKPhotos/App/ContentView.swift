@@ -151,7 +151,7 @@ struct MainTabView: View {
             // appears (the same dynamic mechanism the Feed unread badge uses).
             //
             // The badge doubles as the quietest layer of both suggestions
-            // (docs/ios-trip-mode.md §9): if the notification was denied or
+            // (documentation/ios-trip-mode.md §9): if the notification was denied or
             // dismissed and the user never opened the Trip tab, the dot is
             // what's left to say there is something waiting — a trip to
             // start, or one to end.
@@ -175,7 +175,7 @@ struct MainTabView: View {
             }
         }
         // One source for how the screen is held; the photo grid, the viewer
-        // and the slideshow read it (docs/plans/orientierungs-varianten.md).
+        // and the slideshow read it (documentation/plans/orientierungs-varianten.md).
         .providesScreenOrientation()
         .task {
             await feedViewModel.refreshUnreadCount()

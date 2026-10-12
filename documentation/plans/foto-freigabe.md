@@ -519,4 +519,4 @@ reviewer can see place and time. It is only stripped on anonymous delivery.
    QR code, upload page, public entry page, release albums, badges,
    settings, profile, stories.
 8. **(Optional)** iOS app (badges, release view, submit), purging rejected
-   photos, a four-eyes setting, docs in `docs/`.
+   photos, a four-eyes setting, docs in `documentation/`.

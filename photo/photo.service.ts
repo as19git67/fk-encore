@@ -596,7 +596,7 @@ export async function hasFacesForPhoto(photoId: number): Promise<boolean> {
 
 /**
  * Decode a photo into the grayscale plane the per-face sharpness measurement
- * reads (Etappe 2 of docs/auto-pick-face-relevance.md).
+ * reads (Etappe 2 of documentation/auto-pick-face-relevance.md).
  *
  * Face bboxes are stored normalised against the dimensions the InsightFace
  * service reported. Those are resolution-independent, but *not*
@@ -3680,7 +3680,7 @@ export async function updatePhotoCurationLogic(
   if (status === "visible") {
     if (prev?.source === "adopted") {
       // Un-hiding a photo that was hidden by adopting somebody else's group
-      // review (docs/group-review-adoption.md). Deleting the row would let
+      // review (documentation/group-review-adoption.md). Deleting the row would let
       // the next adoption pass hide it straight back, so the disagreement is
       // recorded as a user-made "visible" tombstone instead. Every consumer
       // already reads "status is not 'hidden'" as visible, so the row is
@@ -5885,7 +5885,7 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
           -- Self-made hides only. An adopted row echoes a peer who may not
           -- even participate in this album, so letting it veto the public
           -- listing would carry that peer's opinion somewhere they never
-          -- expressed it (docs/group-review-adoption.md).
+          -- expressed it (documentation/group-review-adoption.md).
           AND pc.source = 'user'
           AND pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
       )
@@ -6808,7 +6808,7 @@ export function scheduleRegroup(userId: number): Promise<void> {
       } while (groupingPending.has(userId));
       // Re-grouping replaced the user's unreviewed groups, so a peer review
       // that already answers one of them has to be applied again before the
-      // views refresh (docs/group-review-adoption.md).
+      // views refresh (documentation/group-review-adoption.md).
       try {
         await runAdoptionForUser(userId);
       } catch (err) {
@@ -7097,7 +7097,7 @@ export interface FaceSharpnessBackfillResult {
 
 /**
  * Backfill `faces.sharpness` for existing libraries — Etappe 2 of
- * docs/auto-pick-face-relevance.md.
+ * documentation/auto-pick-face-relevance.md.
  *
  * Going forward `detectPhotoFaces` writes the value during the scan; this
  * exists to seed the measurement on faces detected before the column existed.
@@ -7251,7 +7251,7 @@ export async function countUserGroupStats(userId: number): Promise<FindGroupsRes
 export async function listPhotoGroupsLogic(userId: number): Promise<ListGroupsResponse> {
   // Opening the gallery or an album is the one moment we know the user is
   // looking at their stacks, so it is also where adoption has to catch up
-  // (docs/group-review-adoption.md). The event triggers only fire on a peer's
+  // (documentation/group-review-adoption.md). The event triggers only fire on a peer's
   // *next* review; without this, reviews made before the feature existed — or
   // while this user's own groups were being rebuilt — would never reach them.
   // Fire-and-forget and coalesced: the pass publishes a refresh event when it
@@ -7437,7 +7437,7 @@ export async function reviewPhotoGroupLogic(
             .where(eq(photoGroups.id, candidate.id))
         );
         // The people who share these photos may now inherit this review as
-        // their default (docs/group-review-adoption.md).
+        // their default (documentation/group-review-adoption.md).
         void scheduleAdoptionForPeers(userId, photoIds);
         return { success: true };
       }

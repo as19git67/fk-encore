@@ -4,7 +4,7 @@ import Foundation
 /// exactly, so a change on the server surfaces as a decode failure in
 /// the tests rather than as a screen that quietly shows nothing.
 ///
-/// The shape is the concept's (docs/ios-urlaubsplanung.md): a trip is a
+/// The shape is the concept's (documentation/ios-urlaubsplanung.md): a trip is a
 /// list of **legs** (§4.2), each with its own anchor and pool; a leg has
 /// **days**; a day has **blocks**, and a block has **stops**. A day also
 /// carries the hard times that frame it (§4.4) and a flag saying whether

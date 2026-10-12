@@ -17,7 +17,7 @@ struct FeedPhotoItem: Codable, Identifiable, Sendable {
     let commentCount: Int
     let latestComment: FeedCommentPreview?
     /// The other side of the viewer's format group, when this photo is one
-    /// side of one (docs/plans/orientierungs-varianten.md). The card shows
+    /// side of one (documentation/plans/orientierungs-varianten.md). The card shows
     /// whichever side fits the screen.
     var counterpart: OrientationCounterpart? = nil
 

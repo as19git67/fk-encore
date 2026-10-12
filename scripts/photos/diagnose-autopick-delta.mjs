@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Etappe 0 aus docs/auto-pick-face-relevance.md.
+ * Etappe 0 aus documentation/auto-pick-face-relevance.md.
  *
  * Frage: Welches Signal erzeugt eigentlich den Score-Abstand Δ zwischen
  * Top-Pick und bestem Nicht-Pick — jenen Abstand, der über
@@ -144,7 +144,7 @@ async function main() {
   if (ONLY_USER != null) out(`Eingeschränkt auf user_id = ${ONLY_USER}`);
   out();
   out(
-    `Etappe 0 aus \`docs/auto-pick-face-relevance.md\`. Zerlegt den ` +
+    `Etappe 0 aus \`documentation/auto-pick-face-relevance.md\`. Zerlegt den ` +
       `Score-Abstand zwischen Top-Pick und bestem Nicht-Pick in die Beiträge ` +
       `der einzelnen Signale — und prüft, ob sich diese Zerlegung zwischen ` +
       `richtigen und falschen Vorschlägen unterscheidet.`,

@@ -48,7 +48,7 @@ struct ReviewPeerCuration: Codable, Sendable, Equatable {
 /// whole thing (`CompareTournament.suggestedKeepIds`).
 ///
 /// Also what the server sends as `orientation` on a photo
-/// (docs/plans/orientierungs-varianten.md), hence `Codable`; the server
+/// (documentation/plans/orientierungs-varianten.md), hence `Codable`; the server
 /// never sends `unknown`, it leaves the field null instead.
 enum PhotoOrientation: String, Codable, Sendable, Hashable {
     case portrait
@@ -112,7 +112,7 @@ struct ReviewQueueGroup: Codable, Identifiable, Sendable, Equatable {
     let duplicate_deletable_count: Int?
     let photos: [ReviewQueuePhoto]
     /// The group holds the same motif portrait and landscape
-    /// (docs/plans/orientierungs-varianten.md). Optional for decode
+    /// (documentation/plans/orientierungs-varianten.md). Optional for decode
     /// resilience like the fields above; read it through `isOrientationPair`.
     var orientation_pair: Bool? = nil
 
@@ -181,7 +181,7 @@ struct ReviewDecision: Equatable, Sendable {
         /// Adopt the majority of the album peers' decisions.
         case peerConsensus
         /// Keep the best-rated photo of every orientation, hide the rest
-        /// (docs/plans/orientierungs-varianten.md). The server decides
+        /// (documentation/plans/orientierungs-varianten.md). The server decides
         /// which those are.
         case keepBestPerOrientation
 
@@ -338,7 +338,7 @@ enum ReviewSwipe: Equatable, Sendable {
     /// spells both halves out.
     case favorite
     /// ↓ down: keep the best photo of every orientation, hide the rest. Only
-    /// offered on a format pair (docs/plans/orientierungs-varianten.md) —
+    /// offered on a format pair (documentation/plans/orientierungs-varianten.md) —
     /// right, left and up were taken, and down is the one direction left.
     case bestPerFormat
 

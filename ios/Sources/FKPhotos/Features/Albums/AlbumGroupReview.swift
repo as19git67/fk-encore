@@ -21,7 +21,7 @@ enum AlbumGroupReview {
         let reviewed_at: String?
         let ai_picked_photo_ids: [Int]?
         let ai_picked_confidence: String?
-        /// Portrait/landscape format group (docs/plans/orientierungs-varianten.md):
+        /// Portrait/landscape format group (documentation/plans/orientierungs-varianten.md):
         /// `'auto'` | `'off'`, absent = auto; `variants` only while the group
         /// currently forms a format group.
         var orientation_variants: String? = nil

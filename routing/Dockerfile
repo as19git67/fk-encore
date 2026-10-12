@@ -1,5 +1,5 @@
 # Routing service: Valhalla, built from the same Geofabrik PBFs the geo
-# service already downloads (docs/ios-urlaubsplanung.md §12, §24).
+# service already downloads (documentation/ios-urlaubsplanung.md §12, §24).
 #
 # One instance, one tile set: Valhalla serves a single tile directory,
 # so every imported region goes into the same build. The entrypoint

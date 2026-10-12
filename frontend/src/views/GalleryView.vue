@@ -1034,7 +1034,7 @@ const cursorNext = ref<Photo | null>(null)
 // review dialog on click.
 const cursorGroup = ref<GalleryGridGroup | null>(null)
 // The grid entry behind `cursorPhoto`; paging needs its format group to
-// step over the other side (docs/plans/orientierungs-varianten.md).
+// step over the other side (documentation/plans/orientierungs-varianten.md).
 const cursorEntry = ref<GalleryGridEntry | null>(null)
 let hydrateToken = 0
 let curationVersion = 0

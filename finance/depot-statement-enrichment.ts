@@ -1,5 +1,5 @@
 /**
- * Depot statements and reportings as holdings (docs/plans/wertpapier-stamm.md,
+ * Depot statements and reportings as holdings (documentation/plans/wertpapier-stamm.md,
  * stage 2).
  *
  * A depot statement says what the depot held on a day. Read into

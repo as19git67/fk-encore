@@ -11,7 +11,7 @@ import SwiftUI
 /// - **↑ hoch** favorite the pick *and* accept it in one go
 /// - **↓ runter** on a format pair (portrait + landscape of one motif): keep
 ///   the best photo of each orientation, hide the rest
-///   (docs/plans/orientierungs-varianten.md)
+///   (documentation/plans/orientierungs-varianten.md)
 /// - **Tippen** auf ein Foto: open it full-size to judge the detail
 ///
 /// Every swipe has an equivalent button underneath — a gesture-only interface

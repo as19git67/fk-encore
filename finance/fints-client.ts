@@ -18,7 +18,7 @@
  * for those come in Etappe 3 — this module only handles the
  * synchronize dialog for now.
  *
- * Architecture: docs/finance-fints-integration.md §2.
+ * Architecture: documentation/finance-fints-integration.md §2.
  */
 
 import { eq } from "drizzle-orm";
@@ -1836,7 +1836,7 @@ async function loadBankcontact(
 
 /**
  * Maps a lib-fints ClientResponse to our DialogResult. See
- * docs/finance-fints-integration.md §2.3 for the code table —
+ * documentation/finance-fints-integration.md §2.3 for the code table —
  * non-zero first bankAnswer.code becomes errorCode when
  * success=false.
  */

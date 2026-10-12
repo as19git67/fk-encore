@@ -6,7 +6,7 @@ import UIKit
 import UserNotifications
 
 /// Suggests switching Trip Mode on when the recent photos show the user is far
-/// from home and has been for a while (`docs/ios-trip-mode.md` §9.2). Never
+/// from home and has been for a while (`documentation/ios-trip-mode.md` §9.2). Never
 /// starts a trip on its own — starting creates albums and changes what gets
 /// uploaded, so it always ends at a sheet the user confirms.
 ///

@@ -7,7 +7,7 @@
  * docker setup (no Encore Cloud control plane), so we run our own
  * scheduler — see lib/local-cron.ts.
  *
- * Architecture: docs/finance-service-layout.md.
+ * Architecture: documentation/finance-service-layout.md.
  */
 
 import { Service } from "encore.dev/service";

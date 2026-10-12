@@ -1,7 +1,7 @@
 /**
  * Natural language in, planning constraints out.
  *
- * Step 5 of docs/ios-urlaubsplanung.md §13. "Wir sind vier Tage in
+ * Step 5 of documentation/ios-urlaubsplanung.md §13. "Wir sind vier Tage in
  * Augsburg, mit einem Kind, eher gemütlich" becomes the same fields a
  * caller could have filled in by hand — nothing more.
  *

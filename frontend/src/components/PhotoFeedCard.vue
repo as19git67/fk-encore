@@ -127,7 +127,7 @@ async function saveDescription() {
 const MIN_WIDTH_OVER_HEIGHT = 0.5 // card height at most 2× its width
 const naturalRatio = ref<number | null>(null)
 
-// Orientation variants (docs/plans/orientierungs-varianten.md): when the
+// Orientation variants (documentation/plans/orientierungs-varianten.md): when the
 // photo is one side of the viewer's format group, the card shows whichever
 // side fits the screen. Everything else on the card — likes, comments, the
 // fullscreen it opens — still belongs to the item itself.

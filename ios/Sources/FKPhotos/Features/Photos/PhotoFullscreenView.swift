@@ -29,7 +29,7 @@ struct PhotoFullscreenView: View {
     @State private var showDetails = false
     @State private var curationOverrides: [Int: CurationStatus] = [:]
 
-    // Orientation variants (docs/plans/orientierungs-varianten.md): the
+    // Orientation variants (documentation/plans/orientierungs-varianten.md): the
     // other side of a photo's format group is shown *in place* of it — the
     // page index stays. A tap on the button (or the badge that opened the
     // viewer) pins the choice; turning the device switches to the fitting
@@ -94,7 +94,7 @@ struct PhotoFullscreenView: View {
     @State private var isProcessingAction = false
     @State private var toastMessage: ToastMessage?
 
-    /// Slideshow (issue #767, Stage 2; rules in docs/photo-slideshow.md).
+    /// Slideshow (issue #767, Stage 2; rules in documentation/photo-slideshow.md).
     /// The viewer does not play photos itself — the play button hands the
     /// remaining photos to `PhotoSlideshowView`, the same story-style player
     /// the recaps use.

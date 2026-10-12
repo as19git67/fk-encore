@@ -319,8 +319,8 @@ erreichbar (alte Route bis zur Umstellung, danach Weiterleitung).
   Stories je neuer View (Leerlauf, Queue aktiv, GPS-Rescan verfügbar bleiben
   erhalten, nur auf die jeweilige Seite verteilt; Stories der verschobenen
   Views bleiben und werden nur umbenannt).
-- Doku-Verweise prüfen: `docs/purge.md`, `docs/osm-admin-deployment.md`,
-  `docs/external-libraries.md`, `docs/finance-tagging-and-ai.md`.
+- Doku-Verweise prüfen: `documentation/purge.md`, `documentation/osm-admin-deployment.md`,
+  `documentation/external-libraries.md`, `documentation/finance-tagging-and-ai.md`.
 - `.claude/CLAUDE.md`: Plan-Eintrag auf „umgesetzt" setzen.
 
 ## Tests und Absicherung

@@ -2,7 +2,7 @@
  * Per-endpoint rate-limiting integration tests.
  *
  * Covers the six limited finance endpoints listed in
- * docs/finance-rate-limiting.md §2:
+ * documentation/finance-rate-limiting.md §2:
  *
  *   1. POST /finance/tan-sessions/complete   (5 / 10m, per tan_reference)
  *   2. POST /finance/bankcontacts/:id/creds  (10 / 15m, per user×bankcontact)

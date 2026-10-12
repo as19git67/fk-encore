@@ -13,7 +13,7 @@ struct PendingAutoEndSuggestion: Codable, Equatable, Sendable {
 }
 
 /// Tuning + persisted state for "you're back home, end the trip?"
-/// (`docs/ios-trip-mode.md` §9, the ending half). Pure decision helpers plus
+/// (`documentation/ios-trip-mode.md` §9, the ending half). Pure decision helpers plus
 /// UserDefaults persistence — no CoreLocation monitoring here, that lives in
 /// `TripAutoEndMonitor`.
 enum TripAutoEndPreferences {

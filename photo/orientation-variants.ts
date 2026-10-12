@@ -1,6 +1,6 @@
 /**
  * Orientation variants: portrait and landscape of the same motif
- * (docs/plans/orientierungs-varianten.md, Stage 1).
+ * (documentation/plans/orientierungs-varianten.md, Stage 1).
  *
  * Of one motif there is often a portrait and a landscape frame, a few seconds
  * apart. Both are wanted, but on a rotated screen one of them always fits

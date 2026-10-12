@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// Deliberately shows counts, never names — the whole point of the feature is
 /// that you see "2 von 4 haben es ausgeblendet", not "Max hat dein Foto
-/// ausgeblendet" (see `docs/album-photo-views.md`).
+/// ausgeblendet" (see `documentation/album-photo-views.md`).
 struct CurationStatsBadges: View {
     let stats: PhotoCurationStats
 
@@ -59,7 +59,7 @@ struct CurationStatsBadges: View {
 /// The AI quality score is deliberately *not* part of this block — the
 /// fullscreen viewer already renders it under "Bewertung", and the AI's vote
 /// is anonymized into these counters anyway (it is counted as an ordinary
-/// participant, see `docs/album-photo-views.md`).
+/// participant, see `documentation/album-photo-views.md`).
 struct OpinionsSection: View {
     let stats: PhotoCurationStats
 

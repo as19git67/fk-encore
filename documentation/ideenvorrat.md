@@ -3,7 +3,7 @@
 Stand: 2026-09-11 · Status: Backend vollständig, iOS-Oberfläche gebaut
 (zwei Wege hinein und die Veranstaltungen ausgenommen — §6)
 
-Ausführliche Begründung und Entwurf: `docs/ios-urlaubsplanung.md` §20.
+Ausführliche Begründung und Entwurf: `documentation/ios-urlaubsplanung.md` §20.
 Dieses Dokument beschreibt, **was gebaut ist** — Endpunkte, Datenmodell,
 Regeln — damit man es benutzen kann, ohne 3 600 Zeilen Konzept zu lesen.
 

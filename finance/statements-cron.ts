@@ -20,8 +20,8 @@
  * previous one) — the server does not keep a rate-limit table yet;
  * that's tracked as a follow-up in finance-rate-limiting.md §5.
  *
- * Architecture: docs/finance-fints-integration.md §5 and
- * docs/finance-logging-monitoring.md §2.1.
+ * Architecture: documentation/finance-fints-integration.md §5 and
+ * documentation/finance-logging-monitoring.md §2.1.
  */
 
 import { api, APIError } from "encore.dev/api";
@@ -60,7 +60,7 @@ const CRON_INTERVAL_MINUTES = 5;
  */
 const SLOT_MATCH_TOLERANCE_MIN = Math.ceil(CRON_INTERVAL_MINUTES / 2) + 1;
 
-/** TAN session lifetime — see docs/finance-fints-integration.md §4. */
+/** TAN session lifetime — see documentation/finance-fints-integration.md §4. */
 const TAN_SESSION_TTL_MS = 10 * 60_000;
 
 // -----------------------------------------------------------------------
@@ -272,7 +272,7 @@ export function isSlotDue(now: Date, slot: FinanceSyncSlot): boolean {
  * Converts `date` into the given IANA time zone and extracts the
  * fields `isSlotDue` needs. Returns weekday as 0=Sunday … 6=Saturday
  * to match JavaScript's convention (and the slot schema in
- * docs/finance-data-model.md §2.3).
+ * documentation/finance-data-model.md §2.3).
  */
 function formatInTz(
   date: Date,

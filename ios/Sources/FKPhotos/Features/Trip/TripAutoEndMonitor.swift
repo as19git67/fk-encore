@@ -5,7 +5,7 @@ import UserNotifications
 
 /// Watches for "the device is back home" while a trip is active and, once
 /// that has held for long enough, suggests ending the trip — never ends it
-/// automatically (`docs/ios-trip-mode.md` §9). Deliberately reachable while
+/// automatically (`documentation/ios-trip-mode.md` §9). Deliberately reachable while
 /// the app is not in the foreground: it uses the significant-change location
 /// service, which can relaunch a suspended or terminated app to deliver an
 /// update, and raises the suggestion as an actionable local notification so

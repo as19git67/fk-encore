@@ -264,7 +264,7 @@ export async function remove(
  */
 /**
  * Size breakdown for one region, for the before/after measurement the
- * import rework needs (docs/ios-urlaubsplanung.md §13.0).
+ * import rework needs (documentation/ios-urlaubsplanung.md §13.0).
  *
  * Read it once before a re-import and once after; the difference is
  * what carrying gastronomy and everyday infrastructure costs. Compare

@@ -48,7 +48,7 @@ export const HIGH_CONFIDENCE_DELTA = 0.10;
 export const MEDIUM_CONFIDENCE_DELTA = 0.04;
 
 /**
- * Face prominence thresholds — Etappe 1 of docs/auto-pick-face-relevance.md.
+ * Face prominence thresholds — Etappe 1 of documentation/auto-pick-face-relevance.md.
  *
  * Prominence replaces the binary `face_count > 0` switch with a smooth
  * regime blend derived from bbox area and (optionally) person identity.

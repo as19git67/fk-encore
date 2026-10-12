@@ -50,7 +50,7 @@ beforeEach(async () => {
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   // Import is capped at 3/60min per user — reset so each test starts
-  // with a fresh quota. See docs/finance-rate-limiting.md §2.
+  // with a fresh quota. See documentation/finance-rate-limiting.md §2.
   __resetRateLimiterForTests();
   setAuth("1", []);
 });

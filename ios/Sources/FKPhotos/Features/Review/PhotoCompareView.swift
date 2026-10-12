@@ -71,7 +71,7 @@ struct PhotoCompareView: View {
     @State private var orientationIsPortrait = true
 
     /// - Parameter formatPair: the group is the same motif portrait and
-    ///   landscape (docs/plans/orientierungs-varianten.md). Then the two
+    ///   landscape (documentation/plans/orientierungs-varianten.md). Then the two
     ///   shapes never face each other; each is thinned on its own.
     init(photos: [ReviewQueuePhoto], formatPair: Bool = false, onCommit: @escaping ([Int]) -> Void) {
         self.photos = photos

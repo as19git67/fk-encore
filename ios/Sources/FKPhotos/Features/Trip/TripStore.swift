@@ -112,7 +112,7 @@ final class TripStore {
 
         BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
         // Suggest ending the trip once the device is back home (Etappe 5,
-        // docs/ios-trip-mode.md §9) — never automatic, only a prompt.
+        // documentation/ios-trip-mode.md §9) — never automatic, only a prompt.
         TripAutoEndMonitor.shared.start()
         Task { [weak self] in await self?.applyHomeExclusion(toAlbum: iosAlbumId) }
     }
@@ -209,7 +209,7 @@ final class TripStore {
     /// edge list (`handledAssetIds`) cover everything the pass has already seen,
     /// so an aussortiertes Foto stays out and the `sync` mode can propagate the
     /// removal to the server without the auto-add pass fighting it (see
-    /// `docs/ios-trip-mode.md` §4).
+    /// `documentation/ios-trip-mode.md` §4).
     ///
     /// Concurrent triggers are **chained, not dropped**: `@MainActor` methods
     /// interleave at their `await` points, so the sync's catch-up and the
@@ -329,7 +329,7 @@ final class TripStore {
     /// what applies the home exclusion. The lower bound is the watermark (inclusive,
     /// with the edge list skipping what was already seen at that exact instant)
     /// instead of `startedAt`, so the pass costs the same on day 14 of a trip as
-    /// on day 1 (`docs/ios-trip-mode.md` §14.4).
+    /// on day 1 (`documentation/ios-trip-mode.md` §14.4).
     private static func scanTripWindow(
         for trip: ActiveTrip,
         excluding handled: Set<String>

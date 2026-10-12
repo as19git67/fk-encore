@@ -6,7 +6,7 @@
  * client); the arithmetic — budgets, walking estimates, selection and
  * ordering — lives here and is pure.
  *
- * See docs/ios-urlaubsplanung.md for the concept this implements.
+ * See documentation/ios-urlaubsplanung.md for the concept this implements.
  */
 
 import { Service } from "encore.dev/service";

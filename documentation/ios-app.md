@@ -200,7 +200,7 @@ dokumentiert**:
   `active_view`: Das Web setzt diese Einstellung bei jedem Album-Laden auf
   `"all"` zurück und filtert selbst clientseitig, ein von iOS gespeichertes
   Preset würde also stillschweigend verworfen. Details in
-  `docs/album-photo-views.md`.
+  `documentation/album-photo-views.md`.
 - **Album-Einstellungen** (`AlbumSettingsView`) wie im Web: Name,
   Beschreibung und „Karte aktivieren" (`display_mode`) ändern. Erreichbar über
   das Überlauf-Menü der Detailansicht und das Kontextmenü der Albenliste;
@@ -313,7 +313,7 @@ dokumentiert**:
 - **Zuschnitt-Ansicht** (`PhotoTransformsView`), erreichbar über „Zuschnitt…"
   im Überlauf-Menü des Vollbild-Viewers. Der Backend-Stack existierte bereits
   vollständig (`photo/photo-transforms-crud.service.ts`,
-  `docs/photos-ai-transforms.md`) — es fehlte nur der Client.
+  `documentation/photos-ai-transforms.md`) — es fehlte nur der Client.
 - Eine „Rezeptur" (Crop, Rotation, Belichtung, Kontrast, Gamma, Schwarz-/
   Weißpunkt) gilt **pro Nutzer und pro Foto**; die Originaldatei wird nie
   verändert. Drei Quellen: die eigene, die anderer Haushaltsmitglieder (per
@@ -889,7 +889,7 @@ dokumentiert**:
 - **Ein Absender, zwei Kanäle.** `sendToUser` im `push`-Service schickt
   dieselbe Benachrichtigung über Web Push an Browser und über APNs an
   iPhones; Präferenzen, Entprellung, Online-Unterdrückung und Digest davor
-  sind gemeinsam. Details: `docs/push-notifications.md`, „iOS: APNs".
+  sind gemeinsam. Details: `documentation/push-notifications.md`, „iOS: APNs".
 - **`RemotePushManager`** (`Features/Push/`): Opt-in wie im Web. Beim
   Einschalten Berechtigung erfragen, Token holen
   (`registerForRemoteNotifications`), an `POST /push/apns/register` geben —
@@ -1062,7 +1062,7 @@ Referenz stehen, was jeweils gebaut wurde.
 9. ✅ **Diashow** – umgesetzt als eigener Vollbild-Player
    (`PhotoSlideshowView`), derselbe Story-Player wie bei den Rückblicken.
    Startbar aus Album, Auswahl, Mediathek und dem Vollbild-Viewer; reine Logik
-   in `SlideshowPlan.swift`, Regeln in `docs/photo-slideshow.md`.
+   in `SlideshowPlan.swift`, Regeln in `documentation/photo-slideshow.md`.
 
 ### Etappe 3 – Nice-to-have / aufwändiger
 10. ✅ **Nicht-destruktiver Transform-/Crop-Editor** – `PhotoTransformsView`

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Etappe 0b aus docs/auto-pick-face-relevance.md.
+ * Etappe 0b aus documentation/auto-pick-face-relevance.md.
  *
  * Frage: Sagt die GRÖSSE des Score-Abstands Δ überhaupt etwas über die
  * Trefferwahrscheinlichkeit aus?

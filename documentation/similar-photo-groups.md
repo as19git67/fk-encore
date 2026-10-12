@@ -153,7 +153,7 @@ leaving the side-by-side layout:
 ### Eyes-closed hint (Track N / #81)
 
 `ai_quality_details.eyes_open` already drives the global auto-pick
-weighting (see `docs/ai-auto-pick.md`). The compare and review tiles
+weighting (see `documentation/ai-auto-pick.md`). The compare and review tiles
 surface low scores directly:
 
 - Each photo with `eyes_open < 0.5` shows a red "Augen zu" pill in the

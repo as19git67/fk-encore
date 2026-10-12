@@ -1,7 +1,7 @@
 import XCTest
 @testable import FKPhotosLib
 
-/// The caption under the Auto/Manuell switch (`docs/ios-trip-mode.md` §7).
+/// The caption under the Auto/Manuell switch (`documentation/ios-trip-mode.md` §7).
 final class TripAutoAddHintTests: XCTestCase {
 
     func testManualIsNotOff() {

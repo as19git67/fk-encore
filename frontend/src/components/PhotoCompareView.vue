@@ -205,7 +205,7 @@ function qualityBarWidth(value: number | null): string {
 
 // ── Eyes-closed hint (Track N / #81) ─────────────────────────────────────
 // The `eyes_open` AI signal is weak — the score sits in a narrow band
-// (roughly 0.35–0.67 in the user's library, see docs/ai-auto-pick.md). An
+// (roughly 0.35–0.67 in the user's library, see documentation/ai-auto-pick.md). An
 // absolute threshold would flag photos with obviously open eyes whenever
 // their score happens to land at 0.45. We therefore surface the hint only
 // when there's a meaningful RELATIVE gap: in the compare-phase against
@@ -346,7 +346,7 @@ const estimatedTotal = computed(() => {
   return Math.ceil(n * 1.3)
 })
 
-// ── Format pair (docs/plans/orientierungs-varianten.md) ──
+// ── Format pair (documentation/plans/orientierungs-varianten.md) ──
 // A group that holds the same motif portrait and landscape is a format pair
 // unless the user said "Nicht dasselbe Motiv" (`orientation_variants = 'off'`).
 // In a format pair the frames only duel inside their orientation — portrait

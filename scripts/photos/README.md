@@ -79,7 +79,7 @@ Bibliothek. Gruppen, in denen der Nutzer nichts ausgeblendet hat, werden
 
 ## `diagnose-autopick-delta.mjs`
 
-Etappe 0 aus `docs/auto-pick-face-relevance.md`. Zerlegt den Score-Abstand Δ
+Etappe 0 aus `documentation/auto-pick-face-relevance.md`. Zerlegt den Score-Abstand Δ
 zwischen Top-Pick und bestem Nicht-Pick in die Beiträge der einzelnen
 Signale.
 
@@ -150,7 +150,7 @@ auto-akzeptieren, ohne dass die verbleibenden zuverlässiger wären.
 ## `diagnose-face-sharpness-variance.mjs`
 
 Etappe 2. Prüft die Vorhersage **V1** aus
-`docs/auto-pick-face-relevance.md`: Hat eine prominenzgewichtete
+`documentation/auto-pick-face-relevance.md`: Hat eine prominenzgewichtete
 Aggregation von `faces.sharpness` innerhalb einer Ähnlichkeitsgruppe mehr
 Streuung als das heutige Minimum?
 
@@ -209,4 +209,4 @@ ins Konzept.
 die Skala gesättigt oder die auswertbare Menge kleiner als 30 Gruppen ist.
 Der erste Produktivlauf (3,3 % Abdeckung, alle Werte an der Decke) hätte
 sonst „V1 widerlegt" gemeldet, obwohl gar nichts gemessen war — siehe
-Etappe 2 in `docs/auto-pick-face-relevance.md`.
+Etappe 2 in `documentation/auto-pick-face-relevance.md`.

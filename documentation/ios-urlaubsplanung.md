@@ -244,10 +244,10 @@ am wenigsten wichtig war. Google Maps hat Listen, aber keine Gruppenentscheidung
 die anschließend in eine Auswahl fließt.
 
 ### 3.7 Der Kreis schließt sich mit dem Trip Mode
-`docs/ios-trip-mode.md` bringt Fotos des Tages automatisch ins Trip-Album. Ein
+`documentation/ios-trip-mode.md` bringt Fotos des Tages automatisch ins Trip-Album. Ein
 Plan plus dieses Album ergibt ohne Zusatzaufwand ein **Reisetagebuch**: geplante
 Blöcke gegen tatsächlich Besuchtes, pro Stopp die dort entstandenen Fotos, und
-am Ende ein Recap (`docs/recaps.md`), das bereits existiert.
+am Ende ein Recap (`documentation/recaps.md`), das bereits existiert.
 
 ### 3.8 Erklärbar, verhandelbar, werbefrei
 Jeder Vorschlag trägt eine Begründung („20 Min. zu Fuß vom Hotel, passt in den
@@ -2433,7 +2433,7 @@ eigenen Fotos, und nur solche aus dem Reisezeitraum. Ohne das Zeitfenster
 landete jeder frühere Besuch derselben Kirche im Konto dieser Reise.
 
 **Nachgereicht: die Übergabe an den Rückblick.** Rückblicke entstehen aus
-GPS-Clustern über die eigene Mediathek (`docs/recaps.md`) und leiteten ihren
+GPS-Clustern über die eigene Mediathek (`documentation/recaps.md`) und leiteten ihren
 Titel aus den Fotos ab — Stadtname, Zeitraum, im besten Fall ein Satz vom
 Sprachmodell. Das ist die richtige Methode, solange nichts anderes bekannt ist.
 Oft ist aber etwas bekannt: Eine hier geplante Reise hat einen Namen, den jemand
@@ -5043,7 +5043,7 @@ Konzept keinen Ort, obwohl der Baustein dafür längst existiert: der **Vorrat**
 Etappe.
 
 > **Wie man es benutzt**, ohne dieses Kapitel zu lesen:
-> `docs/ideenvorrat.md` — Endpunkte, Datenmodell, Regeln und der Stand.
+> `documentation/ideenvorrat.md` — Endpunkte, Datenmodell, Regeln und der Stand.
 
 ### 20.1 Was es ist
 

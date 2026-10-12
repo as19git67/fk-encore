@@ -100,7 +100,7 @@ All builders live in `photo/recaps.service.ts` and share a common helper,
   invents. The plan contributes nothing else; which photos belong to the recap is
   still decided by the photos. The plan's id is stamped into `seed.trip_plan_id`,
   which is how the trip's "Danach" screen finds its recap (§8.7 of
-  `docs/ios-urlaubsplanung.md`).
+  `documentation/ios-urlaubsplanung.md`).
 
 ### person
 

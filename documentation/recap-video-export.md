@@ -3,7 +3,7 @@
 Rückblicke lassen sich als MP4 exportieren (Button „Video" in der
 Detail-Ansicht der Web-App): 1080p, H.264 + AAC, Ken-Burns-Zoom pro Folie,
 Crossfades und die Hintergrundmusik des Rückblicks (falls Tracks im
-Musik-Ordner liegen, siehe `docs/recap-music.md`).
+Musik-Ordner liegen, siehe `documentation/recap-music.md`).
 
 ## Voraussetzung: ffmpeg
 

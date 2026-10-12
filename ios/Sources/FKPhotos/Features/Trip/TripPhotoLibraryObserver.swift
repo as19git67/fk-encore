@@ -29,7 +29,7 @@ final class TripPhotoLibraryObserver: NSObject, PHPhotoLibraryChangeObserver {
         Task { @MainActor in
             guard TripStore.shared.hasPendingTripWork else {
                 // No trip running — a new photo is instead a data point for
-                // "is the user travelling?" (docs/ios-trip-mode.md §9.2). This
+                // "is the user travelling?" (documentation/ios-trip-mode.md §9.2). This
                 // is the responsive path; the reliable one is the same check
                 // from `runFullSync`, which also sees photos taken while the
                 // app was suspended.

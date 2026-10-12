@@ -470,7 +470,7 @@ Nach dem ersten Live-Test der Rapid-Review wurden mehrere UX-Findings adressiert
 | #404 | Backfill + Recompute server-weit (statt user-scoped) |
 | #405 | Kalibrierungs-Export scort reviewte Gruppen inline |
 | #406 | Fix DB-Key-Mapping (sharpness/contrast/exposure/eyes_open) + Reset stale state (Migration 0077) |
-| #407 | `face_composition`-Signal + Initialdoku `docs/ai-auto-pick.md` (Migration 0078) |
+| #407 | `face_composition`-Signal + Initialdoku `documentation/ai-auto-pick.md` (Migration 0078) |
 | #408 | Click-Semantik in PhotoGrid (versehentlich falsche Komponente fixiert) |
 | #409 | Hidden-Siblings-Marker in Grid + Fullscreen, URL-Sync-Fix, Filter-Persistenz |
 | #410 | Track-I-Marker in **VirtualGallery** (die echte Galerie) + PhotoGrid.vue gelöscht (toter Code) |

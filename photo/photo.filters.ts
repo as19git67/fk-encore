@@ -405,7 +405,7 @@ export function buildPhotoFilterConditions(
   // own hide decisions exclusively.
   //
   // Default is "include" (no auto-hide): the offline replay in
-  // docs/auto-pick-face-relevance.md §1 found only 75.6% hit rate at
+  // documentation/auto-pick-face-relevance.md §1 found only 75.6% hit rate at
   // high confidence for +7.8pp lift, while medium confidence delivers
   // +23.7pp lift with zero hiding. Auto-hiding on a signal this weak
   // silently drops the wrong photo from view too often to run

@@ -67,7 +67,7 @@ async function handleBackfillDimensions() {
   }
 }
 
-// Per-face sharpness backfill (Etappe 2, docs/auto-pick-face-relevance.md).
+// Per-face sharpness backfill (Etappe 2, documentation/auto-pick-face-relevance.md).
 // The endpoint works in photo batches and hands back a cursor, so a single
 // click drives the whole pass here rather than making the admin click once
 // per batch. Totals accumulate across batches; a failing batch stops the loop

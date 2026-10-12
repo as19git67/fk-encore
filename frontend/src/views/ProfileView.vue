@@ -46,7 +46,7 @@ import {
 const auth = useAuthStore()
 
 // ── Orientation variants (portrait + landscape of one motif) ───────────────
-// Global switch, docs/plans/orientierungs-varianten.md. On: every list
+// Global switch, documentation/plans/orientierungs-varianten.md. On: every list
 // shows only the side of a format group that fits the screen.
 const variantsEnabled = ref(true)
 const variantsBusy = ref(false)
@@ -67,7 +67,7 @@ async function handleVariantsToggle(value: boolean) {
 }
 
 // ── Adopting other people's group reviews ─────────────────────────────────
-// Global default; docs/group-review-adoption.md. Albums can override it.
+// Global default; documentation/group-review-adoption.md. Albums can override it.
 const adoptionEnabled = ref(true)
 const adoptionBusy = ref(false)
 const adoptionError = ref('')

@@ -1,7 +1,7 @@
 /**
  * Turning what the model said into constraints the planner may act on.
  *
- * Step 5 of docs/ios-urlaubsplanung.md §13. The division of labour the
+ * Step 5 of documentation/ios-urlaubsplanung.md §13. The division of labour the
  * concept insists on (§11.6) is "the model understands and phrases, the
  * algorithm plans" — so the language model's only job here is to read a
  * sentence and propose values. It never reaches the solver directly.

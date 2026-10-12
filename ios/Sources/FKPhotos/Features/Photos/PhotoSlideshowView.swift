@@ -7,13 +7,13 @@ import SwiftUI
 /// segmented progress bar, tap-left/right to seek, long-press to pause,
 /// swipe-down or the X button to leave, Ken-Burns motion and a crossfade
 /// between slides. Nothing but the photo is on screen; the rules are documented
-/// in `docs/photo-slideshow.md`.
+/// in `documentation/photo-slideshow.md`.
 ///
 /// Unlike a recap this show has no fixed pace: it uses the interval the user
 /// picked, persisted per device under `Slideshow.intervalDefaultsKey`.
 struct PhotoSlideshowView: View {
     /// The photos as shown — after the format groups have been resolved for
-    /// the screen (docs/plans/orientierungs-varianten.md): a photo whose
+    /// the screen (documentation/plans/orientierungs-varianten.md): a photo whose
     /// other side fits the screen is replaced by that side, in place, so the
     /// slide indices never move.
     @State private var photos: [PhotoWithCuration]

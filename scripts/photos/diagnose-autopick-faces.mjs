@@ -6,7 +6,7 @@
  * READ-ONLY. Ausschließlich SELECT-Abfragen, keine Schreibzugriffe.
  * Report nach scripts/photos/out/<datum>-autopick-faces.md.
  *
- * Hintergrund (Follow-up zu #873 / docs/similar-photo-groups.md):
+ * Hintergrund (Follow-up zu #873 / documentation/similar-photo-groups.md):
  * `face_sharpness` und `eyes_open` werden im embedding_service als
  * `min()` über ALLE erkannten Gesichter gebildet — ohne Rücksicht darauf,
  * wie prominent ein Gesicht überhaupt ist (Filter: nur ≥10 px Kantenlänge

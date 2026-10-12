@@ -7,7 +7,7 @@ final class PhotosViewModel {
     var isLoading = false
     var errorMessage: String?
     /// The format groups by member photo id
-    /// (docs/plans/orientierungs-varianten.md): which photos have another
+    /// (documentation/plans/orientierungs-varianten.md): which photos have another
     /// side, and which photos that is. Loaded alongside the photos from
     /// `GET /photos/groups`; empty when that request fails, which only costs
     /// the badges.

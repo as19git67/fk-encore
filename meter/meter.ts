@@ -9,7 +9,7 @@
  *   POST   /meters/:id/replace-device  atomic device swap (meters.manage)
  *
  * Readings, OCR, API ingestion, reports and the finance link follow in
- * later stages — see docs/utility-meters.md.
+ * later stages — see documentation/utility-meters.md.
  */
 
 import { api, APIError } from "encore.dev/api";

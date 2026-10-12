@@ -5,7 +5,7 @@ import Foundation
 /// is never touched.
 ///
 /// The whole stack is server-side (`photo/photo-transforms-crud.service.ts`,
-/// documented in `docs/photos-ai-transforms.md`); this is the client's half.
+/// documented in `documentation/photos-ai-transforms.md`); this is the client's half.
 /// Three things can hold a recipe for one photo:
 ///
 /// - **mine** — what this user saved, if anything

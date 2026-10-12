@@ -18,7 +18,7 @@ needs to build from scratch:
 | Per-user state | `photo_curation`, `photo_description`, `photo_keywords` | migrations 0015, 0021 |
 | Face detection | InsightFace `buffalo_l`, bboxes + embeddings in `faces` | `insightface-service/` |
 | Landmark detection | Grounding DINO bboxes in `photo_landmarks` | `landmark-service/` |
-| Focus-point compute | Weighted centroid faces → landmark fallback | `docs/auto-crop.md` |
+| Focus-point compute | Weighted centroid faces → landmark fallback | `documentation/auto-crop.md` |
 | LLM service | Llama-3.2-3B + e5 multilingual, **text-only** | `llm-service/` |
 | Frontend | Vue 3 + PrimeVue, no cropper library installed | `frontend/src/` |
 

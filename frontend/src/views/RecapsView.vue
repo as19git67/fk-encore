@@ -67,7 +67,7 @@ const playerOpen = ref(false)
 const playerRecapId = ref<number | null>(null)
 const playerPhotos = ref<Photo[]>([])
 // Per photo id: the other side of its format group, for the player's
-// "passende Seite zur Orientierung" (docs/plans/orientierungs-varianten.md).
+// "passende Seite zur Orientierung" (documentation/plans/orientierungs-varianten.md).
 const playerCounterparts = ref<Record<number, Photo>>({})
 const detailCounterparts = ref<Record<number, Photo>>({})
 

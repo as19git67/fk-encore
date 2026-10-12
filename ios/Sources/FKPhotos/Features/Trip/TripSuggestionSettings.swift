@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 
 /// Global on/off switch for both trip suggestions (start and end),
-/// `docs/ios-trip-mode.md` §9.3. The coarse brake: everything else in §9.3
+/// `documentation/ios-trip-mode.md` §9.3. The coarse brake: everything else in §9.3
 /// narrows *where* the app asks, this turns asking off entirely.
 ///
 /// Defaults to on — the suggestion is the feature; a user who never wants it
@@ -45,7 +45,7 @@ enum TripRegionGrid {
     }
 }
 
-/// Per-region "stop asking here" state (`docs/ios-trip-mode.md` §9.3).
+/// Per-region "stop asking here" state (`documentation/ios-trip-mode.md` §9.3).
 ///
 /// Without this the daily commute would ask "Trip Mode einschalten?" every day.
 /// Two ways a region goes quiet, deliberately kept in one set because the

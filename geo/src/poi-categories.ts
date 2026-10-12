@@ -16,7 +16,7 @@
  * places to eat, not so the planner can recommend one. Open data knows
  * existence, not opinion — no quality, no popularity, no price level —
  * so the planner keeps lunch as a slot plus an area and leaves the
- * choice to the people eating (docs/ios-urlaubsplanung.md §10).
+ * choice to the people eating (documentation/ios-urlaubsplanung.md §10).
  */
 
 /** A tag predicate: key must be present, and — unless `values` is

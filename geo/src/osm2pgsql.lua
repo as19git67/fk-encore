@@ -46,7 +46,7 @@ tables.pois = osm2pgsql.define_table({
   },
 })
 
--- Signposted walking and cycling routes (docs/ios-urlaubsplanung.md
+-- Signposted walking and cycling routes (documentation/ios-urlaubsplanung.md
 -- §4.7). A relation rather than a point, because the thing being
 -- planned is the way itself: it starts in one place, ends in another,
 -- and the day carries on from its far end.
@@ -96,7 +96,7 @@ local highway_values = {
 -- The second is what a *planner* needs: gastronomy, and the everyday
 -- infrastructure a trip actually runs on. Open data is weak on taste and
 -- strong on existence, so these are here to be found, not to be ranked
--- (docs/ios-urlaubsplanung.md §10).
+-- (documentation/ios-urlaubsplanung.md §10).
 --
 -- Adding to this table forces a re-import of every region and grows the
 -- databases noticeably — gastronomy and everyday infrastructure are

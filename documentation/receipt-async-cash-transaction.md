@@ -189,7 +189,7 @@ normalen Bearbeiten-Pfad, kein Extra-Review.
 - Tote synchrone OCR-Endpoints (`/documents/receipt-ocr`,
   `/documents/receipt-ocr-items`) deprecaten/entfernen, sobald Etappe 6 sie
   ablöst.
-- Doku (`docs/finance-frontend.md`, `finance-tagging-and-ai.md`) aktualisieren.
+- Doku (`documentation/finance-frontend.md`, `finance-tagging-and-ai.md`) aktualisieren.
 - End-to-end-Test über den ganzen Flow.
 
 ---

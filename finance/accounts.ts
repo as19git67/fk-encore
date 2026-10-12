@@ -10,8 +10,8 @@
  *     account (any level ≥ 'read'). The ACL table is administered
  *     via account-access.ts.
  *
- * Architecture: docs/finance-data-model.md §5 (permissions) and
- * docs/finance-frontend.md §4.7 (ACL semantics).
+ * Architecture: documentation/finance-data-model.md §5 (permissions) and
+ * documentation/finance-frontend.md §4.7 (ACL semantics).
  */
 
 import { api, APIError } from "encore.dev/api";

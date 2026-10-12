@@ -77,6 +77,6 @@ ios/DerivedData/
 /ios-fk-photos.xcworkspace/xcuserdata/*.xcuserdatad/UserInterfaceState.xcuserstate
 /ios-fk-photos.xcworkspace/xcuserdata/*.xcuserdatad/xcdebugger/Breakpoints_v2.xcbkptlist
 
-# Taxonomy diagnostic reports (generated, see docs/taxonomy-tax-quality-improvement.md)
+# Taxonomy diagnostic reports (generated, see documentation/taxonomy-tax-quality-improvement.md)
 scripts/taxonomy/out/
 scripts/photos/out/

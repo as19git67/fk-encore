@@ -80,7 +80,7 @@ const QUEUE: ReviewQueueResponse = {
   user_calibration: null,
 }
 
-// A format pair (docs/plans/orientierungs-varianten.md): the same motif
+// A format pair (documentation/plans/orientierungs-varianten.md): the same motif
 // portrait and landscape. The card tags it "Hoch + Quer" and offers
 // "Bestes je Format behalten" and "Nicht dasselbe Motiv".
 const PAIR_GROUP: ReviewQueueResponse['groups'][number] = {

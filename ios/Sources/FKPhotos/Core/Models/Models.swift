@@ -87,7 +87,7 @@ struct Photo: Codable, Identifiable, Sendable {
     let ai_quality_details: [String: Double]?
     let auto_crop: AutoCrop?
     /// Portrait, landscape or square from the stored dimensions; nil while
-    /// unknown (docs/plans/orientierungs-varianten.md).
+    /// unknown (documentation/plans/orientierungs-varianten.md).
     var orientation: PhotoOrientation? = nil
 }
 
@@ -131,7 +131,7 @@ struct PhotoWithCuration: Codable, Identifiable, Sendable {
     let description: String?
     let keywords: [String]?
     /// Portrait, landscape or square from the stored dimensions; nil while
-    /// unknown (docs/plans/orientierungs-varianten.md). A `var` with a
+    /// unknown (documentation/plans/orientierungs-varianten.md). A `var` with a
     /// default so the memberwise init stays as the call sites know it.
     var orientation: PhotoOrientation? = nil
 }
@@ -229,7 +229,7 @@ struct PersonDetailsResponse: Codable, Identifiable, Sendable {
 
 /// Anonymized curation counters for one photo inside a *shared* album
 /// ("3 von 5 mögen es"). The server only attaches them when the album has more
-/// than one participant — see `docs/album-photo-views.md`.
+/// than one participant — see `documentation/album-photo-views.md`.
 ///
 /// `hide_count` / `member_count` are optional purely for decode resilience: a
 /// server predating them would otherwise fail the whole album payload, which

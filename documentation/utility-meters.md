@@ -801,7 +801,7 @@ Report teilt den monatlichen Heizverbrauch (Rolle `heat_heating_total`,
 Fallback `heat_pump_total`) durch die Gradtagzahl des Monats; der Rest —
 kWh je Gradtag — beschreibt Haus und Heizung statt des Wetters.
 
-Die offene Entscheidung Nr. 4 (`docs/utility-meters-reports.md` §5) ist so
+Die offene Entscheidung Nr. 4 (`documentation/utility-meters-reports.md` §5) ist so
 gelöst, dass **beide** Optionen existieren und der Report die verwendete
 Quelle ausweist (`source`):
 
@@ -988,7 +988,7 @@ Storybook-Stories für Übersicht + Erfassungsdialog.
 | 3 | Manuelle Ablesungen | `readings.ts`, Absolutstand-Berechnung, Übersichts- + Detail-View, Erfassungsdialog | 2 |
 | 4 | Foto-OCR | `receipt-ocr-service`-Endpunkt `/meter-reading`, `readings-ocr.ts`, Foto-Ablage, Bestätigungs-UI | 3 |
 | 5 | API-Ingestion | `meter_api_keys`, `ingest.ts` (Bearer, Idempotenz, Rate-Limit), Key-Verwaltung in Admin-View | 3 |
-| 6 | Reports | Umgesetzt (6a–6e, siehe `docs/utility-meters-reports.md`), inkl. Day/Week-Granularität (#1024), Saisonprofil A3 (#1022) und Witterungsbereinigung C3 (#1023) | 3 |
+| 6 | Reports | Umgesetzt (6a–6e, siehe `documentation/utility-meters-reports.md`), inkl. Day/Week-Granularität (#1024), Saisonprofil A3 (#1022) und Witterungsbereinigung C3 (#1023) | 3 |
 | 7 | Anomalien | Umgesetzt: Job + `meter_anomalies` (Migration 0191), Postfach mit Badge (#1015) | 6 |
 | 8 | Finance-Link | Umgesetzt: Endpunkte, Dialog an der Ablesung, Report E3 Abschlagsvergleich (#1018) | 3 (+ Finance) |
 

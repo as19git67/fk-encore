@@ -33,7 +33,7 @@ vor dem nächsten `git pull` erst zurückgesetzt werden muss.
 - `NSExtensionActivationSupportsWebURLWithMaxCount = 1`: Ein geteilter
   Link ist der klarste Weg, auf dem ein Fund die Urlaubsplanung erreicht —
   ein Karten-Pin oder ein Artikel über eine Stadt
-  (`docs/ios-urlaubsplanung.md` §9.2, Fälle 1 und 2).
+  (`documentation/ios-urlaubsplanung.md` §9.2, Fälle 1 und 2).
 - `NSExtensionActivationSupportsText`: Markierter Text, und alles, was eine
   Chat-App als reinen Text statt als Link teilt.
 - `NSExtensionActivationSupportsWebPageWithMaxCount = 1`: Lässt Safari das

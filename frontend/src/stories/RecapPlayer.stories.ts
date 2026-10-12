@@ -51,7 +51,7 @@ export const Portrait: Story = {
   },
 }
 
-// Format pair (docs/plans/orientierungs-varianten.md): the first recap
+// Format pair (documentation/plans/orientierungs-varianten.md): the first recap
 // photo is a landscape frame whose motif also exists portrait. On a portrait
 // phone the player shows the portrait side, on a landscape screen the
 // landscape one; the slide count stays the same either way.

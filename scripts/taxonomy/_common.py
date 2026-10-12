@@ -219,7 +219,7 @@ def scrub_for_teacher(text: str | None, names: list[str]) -> str | None:
     Kategorie-Signal bei kaum erhöhtem Privacy-Risiko.
 
     Bewusst getrennt von `scrub`/`scrub_names`: die strenge Audit-Stufe bleibt
-    unverändert (siehe docs/design/cloud-teacher-gold-set.md §3).
+    unverändert (siehe documentation/design/cloud-teacher-gold-set.md §3).
     """
     return scrub_names(scrub(text), names)
 

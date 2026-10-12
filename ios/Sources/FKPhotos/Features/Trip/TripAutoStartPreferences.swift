@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 
 /// A raised "looks like you're travelling — start Trip Mode?" suggestion
-/// (`docs/ios-trip-mode.md` §9.2), surfaced as a local notification and as a
+/// (`documentation/ios-trip-mode.md` §9.2), surfaced as a local notification and as a
 /// banner in `TripView`'s no-trip state.
 struct PendingStartSuggestion: Codable, Equatable, Sendable {
     /// Prefill for `TripStartSheet` — a place name where reverse geocoding
@@ -22,7 +22,7 @@ struct PendingStartSuggestion: Codable, Equatable, Sendable {
 ///
 /// Kept apart from `TripAutoEndPreferences` on purpose: a start suggestion the
 /// user declined for a region must not silence a later end suggestion, or vice
-/// versa (`docs/ios-trip-mode.md` §9.2).
+/// versa (`documentation/ios-trip-mode.md` §9.2).
 enum TripAutoStartPreferences {
     /// How far from home a photo has to be taken to count as "travelling".
     /// Two orders of magnitude above the 2 km home radius of the end heuristic,
@@ -110,7 +110,7 @@ struct TripPhotoSample: Equatable, Sendable {
 /// CoreLocation monitoring and its "Always" permission. The photo library is
 /// already being enumerated on every sync pass, and a photo carries both the
 /// coordinate and the time — everything the heuristic needs, for free
-/// (`docs/ios-trip-mode.md` §9.2).
+/// (`documentation/ios-trip-mode.md` §9.2).
 enum TripAutoStartHeuristic {
     struct Outcome: Equatable {
         /// Earliest away-from-home photo of the cluster.

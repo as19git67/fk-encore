@@ -111,7 +111,7 @@ export const importFinanceData = api(
     requirePermission(auth, "finance.admin");
 
     // Import is expensive (minutes, large TXs). Tight per-user cap.
-    // See docs/finance-rate-limiting.md §2.
+    // See documentation/finance-rate-limiting.md §2.
     checkRateLimit(`finance-import:${auth.userID}`, {
       maxAttempts: 3,
       windowMs: 60 * 60_000,

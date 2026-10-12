@@ -7,7 +7,7 @@
  * schreibt einen Markdown-Report nach scripts/taxonomy/out/diagnose.md.
  * Es verändert KEINE produktiven Daten.
  *
- * Zweck (siehe docs/taxonomy-tax-quality-improvement.md, Etappe A):
+ * Zweck (siehe documentation/taxonomy-tax-quality-improvement.md, Etappe A):
  *   - Inventar der manuell bestätigten Daten (tax_reviewed, source='user'),
  *     damit klar ist, wie groß das Steuer-Gold-Set fürs spätere Eval-Gate ist.
  *   - Kategorie-Verteilung inkl. sonstiges-Quote und Niedrig-Confidence-Anteil.

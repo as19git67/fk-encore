@@ -445,7 +445,7 @@ skips the push leg entirely.
 
    Users can then opt in per device under **Profil → Benachrichtigungen**.
 
-See `docs/push-notifications.md` for architecture, subscription
+See `documentation/push-notifications.md` for architecture, subscription
 lifecycle and troubleshooting.
 
 ### iOS push notifications (optional)
@@ -491,7 +491,7 @@ Web Push is unaffected.
 
 Users then opt in per phone under **Einstellungen → Benachrichtigungen**.
 The per-kind preferences on that screen are the same the web profile
-edits. See `docs/push-notifications.md`, "iOS: APNs".
+edits. See `documentation/push-notifications.md`, "iOS: APNs".
 
 ### iOS universal links (optional)
 
@@ -802,7 +802,7 @@ the photo UI responsive under sustained scan load.
 | `ML_RPC_QUICK_TIMEOUT_MS`        | `60000`  | Per-request timeout (ms) for user-facing ML RPCs (`/search/text`, `/similar-groups`). |
 | `ML_CONCURRENCY_EMBEDDING`       | `1`     | Max parallel requests to the embedding container. `embedding` and `quality` workers share this slot, so the default serializes them. Raise only with GPU. |
 | `ML_CONCURRENCY_INSIGHTFACE`     | `1`     | Max parallel requests to the insightface container. |
-| `ENABLE_POI_DETECTION`           | `false` | Turn on the osm-admin POI matcher. Off by default — only useful once at least one OSM region has been imported via the admin UI. See [`docs/osm-admin-deployment.md`](./docs/osm-admin-deployment.md). |
+| `ENABLE_POI_DETECTION`           | `false` | Turn on the osm-admin POI matcher. Off by default — only useful once at least one OSM region has been imported via the admin UI. See [`documentation/osm-admin-deployment.md`](./documentation/osm-admin-deployment.md). |
 | `ENABLE_TEXT_OCR`                | `false` | Recognise text inside photos (signs, whiteboards, menus) via the receipt-ocr container, making it searchable and copyable. Off by default: the detection pass runs over every photo. |
 | `PHOTO_OCR_LONG_SIDE`            | `1600`  | Long edge a photo is scaled to before recognition. Detection cost grows with area; legibility of scene text does not. |
 | `PHOTO_OCR_MIN_CONFIDENCE`       | `0.5`   | Lines below this confidence are discarded — scene-text detection finds "text" in brickwork, and that noise costs search more than it adds. |

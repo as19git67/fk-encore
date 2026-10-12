@@ -92,7 +92,7 @@ const emit = defineEmits<{
   'stack-click': [entry: GalleryGridEntry]
   /**
    * Tap on the format badge of a photo that also exists in the other
-   * orientation (docs/plans/orientierungs-varianten.md). The parent opens
+   * orientation (documentation/plans/orientierungs-varianten.md). The parent opens
    * the fullscreen on this entry and switches straight to the other side.
    */
   'variant-click': [entry: GalleryGridEntry]
@@ -117,7 +117,7 @@ const emit = defineEmits<{
 const source = useGallerySource()
 const { entries, total, initialLoading, error } = source
 
-// Orientation variants (docs/plans/orientierungs-varianten.md): the grid
+// Orientation variants (documentation/plans/orientierungs-varianten.md): the grid
 // asks the server for the side of every format group that fits the screen
 // it is on. Turning the device changes the filter and reloads around the
 // photo at the top of the viewport, like any other filter change. Selection
@@ -435,7 +435,7 @@ function onTap(entry: GalleryGridEntry | null, event?: MouseEvent, index?: numbe
     })
     return
   }
-  // Track-I semantics (see docs/ai-auto-pick.md): only a tap on the
+  // Track-I semantics (see documentation/ai-auto-pick.md): only a tap on the
   // +N marker opens the review dialog — every other tap on the tile
   // opens the photo fullscreen, even for group members. The KI's pick
   // is the default view; the marker is the affordance to drill into
@@ -579,7 +579,7 @@ defineExpose({
             <!-- Track-I marker. Shows on every member of an unreviewed
                  group so the user can launch the review from any tile.
                  No confidence level hides siblings anymore (see
-                 docs/auto-pick-face-relevance.md §6) — the badge is
+                 documentation/auto-pick-face-relevance.md §6) — the badge is
                  always just a prominent +N marker. -->
             <span class="vg-badges">
             <span
@@ -596,7 +596,7 @@ defineExpose({
             </span>
             <!-- Adopted stack: somebody else reviewed this group and the
                  result became this user's default (see
-                 docs/group-review-adoption.md). It is done, but not by
+                 documentation/group-review-adoption.md). It is done, but not by
                  them — so it gets its own quiet marker instead of the open
                  `+N`, and tapping it takes the group back for a real
                  review. Only on the cover tile: the other members are
@@ -609,7 +609,7 @@ defineExpose({
               <i class="pi pi-users" />
               <i class="pi pi-check" />
             </span>
-            <!-- Format badge (docs/plans/orientierungs-varianten.md): this
+            <!-- Format badge (documentation/plans/orientierungs-varianten.md): this
                  photo also exists in the other orientation. Same corner and
                  size as the stack badge, next to it when both are there.
                  Tap → fullscreen straight on the other side. -->

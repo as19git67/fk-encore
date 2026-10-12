@@ -70,7 +70,7 @@ export interface RateLimitOpts {
  * Enforce a sliding-window rate limit keyed by `key`. The original
  * auth path passed an IP here; newer callers (finance) key by
  * composite like `"tan-complete:<uuid>"` — see
- * docs/finance-rate-limiting.md §2 for the contract.
+ * documentation/finance-rate-limiting.md §2 for the contract.
  *
  * Throws APIError.resourceExhausted (HTTP 429) with a message that
  * tells the caller how many seconds to wait.

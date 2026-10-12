@@ -63,7 +63,7 @@ export const FuenfFotos: Story = {
   },
 }
 
-// Format pair (docs/plans/orientierungs-varianten.md): one landscape and
+// Format pair (documentation/plans/orientierungs-varianten.md): one landscape and
 // two portrait frames of the same motif. Only the two portraits duel; the
 // review then keeps the landscape frame and the portrait winner as the pair.
 const PAIR_PHOTOS = [

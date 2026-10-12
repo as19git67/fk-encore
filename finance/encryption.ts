@@ -16,7 +16,7 @@
  * Rotation: set a fresh secret, run a re-encrypt script that uses
  * `encryptWithKey` / `decryptWithKey` against the old + new key, deploy.
  *
- * Architecture: docs/finance-fints-integration.md §3.
+ * Architecture: documentation/finance-fints-integration.md §3.
  */
 
 import { secret } from "encore.dev/config";

@@ -473,7 +473,7 @@ function close() {
         <span>KI-ausgeblendete anzeigen</span>
       </div>
 
-      <!-- Formatvarianten (docs/plans/orientierungs-varianten.md): Hoch-
+      <!-- Formatvarianten (documentation/plans/orientierungs-varianten.md): Hoch-
            und Querformat desselben Motivs zeigt das Raster sonst nur mit
            der Seite, die zur Bildschirm-Orientierung passt. Dieser Schalter
            zeigt beide Seiten nebeneinander. -->
