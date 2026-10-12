@@ -112,6 +112,12 @@ behind it.
   `read` or `write` kind, and for the important ones a sentence written
   for the model ("overdue direct debits and amount changes of standing
   mandates" rather than "GET /finance/anomalies").
+- **Generated text is a draft until the user says otherwise.** Where the
+  model writes prose for the user (stage 7), the text is shown
+  editable before anything is rendered or saved, the facts in it come
+  from the context the server handed over, and the sender, date and
+  layout come from the server. A letter is the user's letter; the model
+  wrote the first version.
 - **The model never does arithmetic.** Sums, subtotals, yields and date
   ranges are computed by tools and printed with their formula. The model
   chooses what goes into which group and names the groups; the server
@@ -274,15 +280,31 @@ behind it.
    > Summe, mit Zwischensummen für Kauf, Sonderzahlungen wegen Reparatur,
    > Mieteinnahmen, und ermittle die bisherige Rendite."
 
-   - `find_text_in_document(document_id, query)` returns the pages and
-     rectangles where a value stands (`{page, x, y, w, h}` in the 0..1
-     page coordinates `document_collection_members.redactions` already
-     uses). For born-digital PDFs this is `pdftotext -bbox`; for scans the
-     word boxes exist only inside `text_extract` today and are not
-     stored, so the tool re-runs tesseract on the page it needs. An amount
-     is matched in all its printed forms ("450.000,00 EUR", "450.000 €",
-     "EUR 450.000,-"), so one `query` covers the purchase price wherever
-     it appears.
+   - **Prerequisite: the text keeps its positions.** A document that has
+     been through OCR already knows where every word stands; today
+     `text_extract` parses Tesseract's TSV into `OcrWord[]` (pixel boxes
+     with confidence, `documents/ocr-layout.ts`), lets the resolver
+     correct the rows, renders the layout text — and drops the boxes.
+     Born-digital PDFs go the same way: `pdf-text-layout.ts` reads each
+     item's transform for the spacing and keeps none of it. Nothing is
+     re-run later: `text_extract` writes the corrected rows per page into
+     `document_page_words` (`document_id`, `page`, `width`, `height`,
+     `words` jsonb of `{text, left, top, right, bottom, confidence?}`,
+     pixels for a scan, points for a born-digital page), at the same
+     moment it writes `extracted_text`. The box of a word, divided by the
+     page size, is the 0..1 rectangle the redactions already use. Existing
+     documents get their rows by the targeted re-extraction that exists
+     for OCR changes (`text-extract.ts` prioritises by quality), run once
+     as a backfill. Stage 6 does not start before this is in place.
+   - `find_text_in_document(document_id, query)` reads
+     `document_page_words` and returns the pages and rectangles where a
+     value stands (`{page, x, y, w, h}` in the 0..1 page coordinates
+     `document_collection_members.redactions` already uses), merging
+     adjacent words into one box. An amount is matched in all its printed
+     forms ("450.000,00 EUR", "450.000 €", "EUR 450.000,-"), so one
+     `query` covers the purchase price wherever it appears. A document
+     without stored rows is reported as such, not re-OCR'd on the spot:
+     the answer names it so the user can trigger its extraction.
    - `create_collection(name, document_ids, redactions)` creates a manual
      Sammelmappe through `/document-collections` with the rectangles per
      member, and `build_collection_pdf(collection_id)` triggers the
@@ -317,7 +339,72 @@ behind it.
      result when it is ready, or says where to find it (the Sammelmappe,
      the saved analysis).
 
-7. **iOS** (later, own plan). The service API is the contract; the
+7. **Text generation: a letter from what the app knows.** The example:
+
+   > A letter is needed quickly — to print, or to send by mail — and
+   > selected documents, photos or bookings are its context. The result
+   > is downloaded or shared, or saved as a new document in the system,
+   > possibly together with its context in a Sammelmappe.
+
+   This is the one stage where the model's own words are the product.
+   Everything around the words stays with the server.
+
+   - **Context comes from a selection.** Three ways in: the working set
+     of the conversation (stage 5: "schreib dem Verwalter wegen dieser
+     drei Rechnungen"); a list selection or the basket handed over with
+     a new `SelectionBar` action "An den Assistenten" (opens the chat
+     with the selected ids as context, which is what the basket is
+     for); and a document's detail page with "Antwort entwerfen"
+     (context = this document, recipient = its correspondent). The
+     context is a list of typed references; the server renders each into
+     a compact brief for the prompt — a document as title, date, sender,
+     reference numbers and summary, a booking as date, counterparty,
+     amount and purpose, a photo as date, place and description — never
+     the full text, unless the model asks for one document with
+     `get_document_text`.
+   - **The draft is text in the chat, editable.** The model writes the
+     letter body in the answer (streamed, in the user's language, in the
+     tone asked for). Facts in it — amounts, dates, reference numbers —
+     are copied from the context briefs; the system prompt says to use
+     only what the context carries and to leave a bracketed gap
+     (`[Datum der Zahlung]`) for what it does not. The answer ends with
+     the list of context objects used, so the user sees what the letter
+     rests on.
+   - `render_letter(body, recipient?, subject?, attachments?)` is the
+     write tool. The server supplies what the model must not invent: the
+     sender block from the user's profile, today's date, the recipient
+     from a document's correspondent or the user's input, and the layout
+     — a DIN 5008 letter with address window and fold marks, drawn with
+     pdfkit next to `finance/pdf-report.ts`. The proposal card shows the
+     draft in an editable field, recipient and subject as inputs, and the
+     three destinations as checkboxes; "Ausführen" renders the text as
+     edited, not as drafted.
+   - **Three destinations, all through existing paths.** *Download* is
+     the rendered PDF. *Save as document* posts the PDF to `POST
+     /documents` like an upload, so it runs through extraction and
+     classification and gets `source = assistant`, with a link to the
+     conversation and to the context documents (the existing
+     related-documents panel then shows the letter next to the invoices
+     it answers). *Sammelmappe* creates a manual collection with the
+     letter as its first member and the context documents behind it, so
+     the existing export yields one PDF with the letter as cover and the
+     enclosures in order — which is what "anbei die Rechnungen" needs.
+   - **E-mail** in this stage is a `mailto:` link with subject and body
+     and the PDF already downloaded for attaching, because the user's
+     mail client holds their identity, signature and sent folder. Sending
+     from the server through the SMTP that `user/mail.ts` already uses
+     for invites is possible later, but a letter to an arbitrary
+     recipient leaving the server unseen is a step that needs its own
+     decision (confirmation, a copy saved as document, a sent log).
+   - Photos as context: the brief carries date, place and description;
+     a letter that should carry pictures ("hier die Fotos vom Schaden")
+     gets them as attachments through the same Sammelmappe path, each
+     photo as a page via `receipt-pdf.ts`'s single-image page.
+   - Follow-ups edit the draft in place: "kürzer", "förmlicher", "nenne
+     auch die zweite Rechnung" produce a new draft from the same context;
+     the card keeps the latest.
+
+8. **iOS** (later, own plan). The service API is the contract; the
    stream endpoint is a WebSocket the iOS client can consume like
    `/realtime/subscribe`.
 
@@ -331,6 +418,7 @@ behind it.
 | Album mit Favoriten 2025 | photos | `list_photos(favorite, 2025)` → proposal `create_album` + `add_photos_to_album(from_previous_result)` | Proposal card, album link after "Ausführen" |
 | Alles zum Kauf der Immobilie München | documents + finance | `search_documents(q, category=kapitalanlage-immobilie-*)`, `list_transactions(q=…)` or `analyze_spending(tags)` | Document rows and booking rows, both kept as the working set |
 | Kaufpreis schwärzen, zwei PDFs, Rendite | documents + finance (stage 6) | `find_text_in_document(each doc, purchase price)` → proposal `create_collection` + `build_collection_pdf`; grouping by the model → proposal `transaction_report(groups, yield)` | Two proposal cards; after "Ausführen" two PDF links, the Sammelmappe and the saved analysis |
+| Anschreiben an den Verwalter zu drei Rechnungen | documents (stage 7) | context briefs of the three documents → draft in the answer → proposal `render_letter(body, recipient=correspondent, attachments)` | Editable draft card; after "Ausführen" the PDF, the new document, or the Sammelmappe with the letter as cover |
 
 The two-turn example is the one that decides the architecture: the
 second turn works only because the first turn's rows stay addressable
@@ -351,10 +439,11 @@ from the model.
   relevant to the purchase" is a search today and would be a lookup with
   an entity. It is also the natural home of the yield, which the saved
   analysis of stage 6 only approximates.
-- Finding the purchase price on a scan depends on OCR word boxes that are
-  not stored. Re-running tesseract per page is fine for a dozen
-  documents; if it turns out to be the common case, `text_extract`
-  should keep the boxes (a `jsonb` per page next to `extracted_text`).
+- Which rows `document_page_words` keeps: the resolver-corrected rows
+  (what the letterhead read and the classifier see) rather than
+  Tesseract's raw words. The corrected ones are what the stored text was
+  rendered from, so a search over the text and a search over the boxes
+  find the same thing. The uncorrected reading is not kept.
 - What the yield means has to be printed, not assumed: gross rent over
   purchase price is one number, net of repairs and annualised another.
   The tool prints its formula and the period on the report, and the
@@ -368,8 +457,12 @@ from the model.
 
 ## Operations
 
-- A new service, two to three new tables, one new finance endpoint. No
-  change to the model deployment; the `--jinja` flag is already set.
+- A new service, two to three new tables, one new finance endpoint, and
+  for stage 6 one more table (`document_page_words`) that `text_extract`
+  fills from then on plus a one-time backfill over the corpus — the same
+  re-extraction an OCR change needs, so it costs one pass of OCR time,
+  scheduled through the scan queue. No change to the model deployment;
+  the `--jinja` flag is already set.
 - The chat competes with classification and the OCR vision calls for the
   single inference worker and the one KV cache. A question asked while a
   classification batch runs waits for its slot; the stream shows
