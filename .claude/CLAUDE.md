@@ -1388,4 +1388,4 @@ Der Host muss außerdem in der Netzwerk-Policy der Umgebung freigeschaltet sein,
 
 ## `docs/` ist die Webseite, `documentation/` ist die Doku
 
-`docs/` wird per GitHub Pages veröffentlicht und enthält ausschließlich `index.html` und `assets/`. Alle Pläne, Konzepte und Beschreibungen (Markdown) liegen unter `documentation/`. `npm run check:pages` (läuft im pre-push-Hook) schlägt fehl, wenn etwas anderes in `documentation/` landet.
+`docs/` wird per GitHub Pages veröffentlicht und enthält ausschließlich `index.html` und `assets/`. Alle Pläne, Konzepte und Beschreibungen (Markdown) liegen unter `documentation/`. `npm run check:pages` (läuft im pre-push-Hook) schlägt fehl, wenn etwas anderes in `docs/` landet.
