@@ -87,16 +87,42 @@ behind it.
   model stays whatever the admin activates under "KI-Modell". A cloud
   model would fit behind the same protocol; it is deliberately out of
   scope, as in the trip planner.
-- **The context is the budget, so the menu stays small.** Thirty tool
-  schemas plus a glossary plus a conversation plus tool results do not fit
-  the window that 16 GB leave next to the weights, and every prompt token
-  is prefill time on each round. The first turn is a router step that
-  picks one or two domains; only their tools (five to eight) go into the
-  request. Tool results are compact tables, capped in rows, with ids and
-  totals, never full records. The glossary (account labels, user tags,
-  categories, person names) is injected per domain, not globally. With
-  about 4B active parameters the model is fast per token; what costs is
-  what it has to read.
+- **The model always knows the whole menu, and reads the recipe on
+  demand.** A question like "which trips last year and what did they
+  cost" spans photos, trip plans and finance; a router that picks one
+  domain up front cannot answer it. So every request carries the complete
+  catalog: one line per tool, name and a sentence, across all modules the
+  user may use (about 1 500 tokens for fifty tools). Full JSON schemas
+  (150 to 400 tokens each) are not sent; the model fetches the ones it
+  needs with a meta-tool `describe_tools(names)`, exactly as a deferred
+  tool list works in an agent harness. The model decides what to combine,
+  the server decides nothing in advance. Tool results are compact tables,
+  capped in rows, with ids and totals, never full records, because fifty
+  known tools do not help when one result of 500 bookings fills the
+  window. The glossary (account labels, user tags, categories, person
+  names) comes with the domain's first tool result, not up front.
+- **The catalog is generated, the allow-list is written.** Encore knows
+  every endpoint and emits the full specification with `encore gen client
+  --lang=openapi` (`openapi/spec.json` in the repo is a hand-kept subset
+  of 85 operations for iOS). The catalog is built from the generated
+  specification at startup, so a new endpoint is known to the assistant
+  without hand work. Two things stay manual, in
+  `assistant/tool-allowlist.ts`: which operations are offered at all
+  (deleting, sharing, FinTS sync and admin endpoints never), each one's
+  `read` or `write` kind, and for the important ones a sentence written
+  for the model ("overdue direct debits and amount changes of standing
+  mandates" rather than "GET /finance/anomalies").
+- **The model never does arithmetic.** Sums, subtotals, yields and date
+  ranges are computed by tools and printed with their formula. The model
+  chooses what goes into which group and names the groups; the server
+  adds up. A number in an answer that no tool produced is a bug.
+- **Work products are app objects, not loose files.** A bundle of
+  documents is a Sammelmappe (`document_collections`, kind `manual`) with
+  the existing redaction rectangles and the existing PDF export; a
+  transaction report is a saved analysis with the existing PDF report.
+  The user finds both again in the module, can edit the redactions by
+  hand and rebuild the PDF, and the assistant does not need its own file
+  storage.
 - **The answer is text plus cards plus a link.** The model writes the
   sentence; the server attaches the rows it saw as typed result blocks
   (`transactions`, `documents`, `photos`, `albums`, `meters`, `proposal`)
@@ -150,17 +176,26 @@ behind it.
      `tool_start`, `tool_result` (the typed block), `route`, `done` and
      `error` events, then closes. Reconnection is not needed: a turn is
      short, and a lost turn is asked again.
-   - Agent loop (`assistant/agent.ts`): router step → system prompt with
-     time grounding and the domain glossary → up to six tool rounds →
-     final answer. Each round is one `/chat` call; the loop stops on an
-     answer without tool calls, on the round cap, or on the context
-     budget (tool results are trimmed first, history second).
-   - Tool registry (`assistant/tools/*.ts`): one file per domain, each
-     tool with a JSON schema, a `permission` (the module permission plus
+   - Agent loop (`assistant/agent.ts`): system prompt with time
+     grounding, the full one-line catalog of the tools this user may use,
+     and two or three worked examples of chained calls → up to eight tool
+     rounds → final answer. Each round is one `/chat` call; the loop stops
+     on an answer without tool calls, on the round cap, or on the context
+     budget (older tool results are replaced by their digest first,
+     history second).
+   - Catalog (`assistant/catalog.ts`): built at startup from the generated
+     OpenAPI specification plus `tool-allowlist.ts`. Each entry has a
+     name, the one-line description, the JSON schema derived from the
+     operation's parameters, a `permission` (the module permission plus
      the domain's view permission), a `kind` (`read` | `write`) and a
-     runner that calls `~encore/clients` and returns `{summary, block?,
-     route?}`. A user without the permission does not get the tool offered
-     at all, so the model cannot even ask for it.
+     runner. `describe_tools(names)` returns the schemas of up to five
+     entries. A user without the permission does not see the entry at
+     all, so the model cannot even ask for it.
+   - Hand-written tools (`assistant/tools/*.ts`) exist only where an
+     endpoint is not the right shape for the model: a composite that
+     saves rounds (`upcoming_direct_debits`), a result that needs
+     trimming or a route (`search_documents` returning rows plus the list
+     URL), or a computation (stage 6). They register in the same catalog.
    - Read tools of this stage:
      - finance: `list_transactions` (the `/finance/transactions` filters),
        `analyze_spending` (the analysis AST path), `list_accounts`,
