@@ -186,6 +186,8 @@ interface HoldingMatch {
   name: string | null;
   currency: string | null;
   via: DepotMatchedBy;
+  /** For "holding": whether the snapshot row came from the bank or from a statement read in. */
+  holding_source?: "bank" | "document";
 }
 
 /**
@@ -214,6 +216,7 @@ async function findHoldingDepot(
       wkn: financeAccountHolding.wkn,
       name: financeAccountHolding.name,
       currency: financeAccountHolding.currency,
+      holding_source: financeAccountHolding.source,
     })
     .from(financeAccountHolding)
     .innerJoin(financeAccount, eq(financeAccount.id, financeAccountHolding.account_id))
@@ -234,7 +237,7 @@ function digitsOnly(raw: string | null): string {
  * one number ending with the other counts, as long as the shorter one has
  * at least five digits.
  */
-async function findDepotByNumber(
+export async function findDepotByNumber(
   depotNumber: string,
   accountIds: number[] | null,
 ): Promise<number | null> {
@@ -315,7 +318,8 @@ async function resolveDepot(
   return byTx === null ? null : fallback(byTx, "transactions");
 }
 
-async function accessibleAccountIds(userId: number): Promise<number[] | null> {
+/** The depots a document's owner reaches; null for an owner without any ACL row (sees everything). */
+export async function accessibleAccountIds(userId: number): Promise<number[] | null> {
   const rows = await db
     .select({ account_id: financeAccountAccess.account_id })
     .from(financeAccountAccess)
@@ -782,7 +786,8 @@ export async function enrichDocument(
     const admitted = await admitSecurity(
       holding.account_id,
       { isin: parsed.isin ?? holding.isin, wkn: parsed.wkn ?? holding.wkn, name: parsed.name ?? holding.name },
-      holding.via === "holding" ? "bank" : "document",
+      // A snapshot row read from a statement is a paper's word, not the bank's.
+      holding.via === "holding" && holding.holding_source !== "document" ? "bank" : "document",
       { documentId },
     );
     if (admitted !== "confirmed") {

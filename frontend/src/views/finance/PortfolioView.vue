@@ -526,13 +526,17 @@ async function reportRun(run: EnrichRun) {
   if (r.skipped_no_holding > 0) parts.push(`${r.skipped_no_holding} ohne passendes Depot`)
   if (r.skipped_no_transaction > 0) parts.push(`${r.skipped_no_transaction} Steuermitteilungen ohne passende Transaktion`)
   if ((r.skipped_unknown_security ?? 0) > 0) parts.push(`${r.skipped_unknown_security} zu Wertpapieren, die unter „Zu prüfen“ auf dich warten`)
+  const statements = r.statements_stored ?? 0
+  if (statements > 0) parts.push(`${statements} Depotauszüge als Bestand übernommen`)
+  if ((r.statements_unplaced ?? 0) > 0) parts.push(`${r.statements_unplaced} Depotauszüge ohne Depot — bitte prüfen`)
+  if ((r.statement_positions_proposed ?? 0) > 0) parts.push(`${r.statement_positions_proposed} Positionen auf Depotauszügen als neue Wertpapiere vorgeschlagen`)
   enrichNotice.value = {
-    severity: r.conflicts > 0 || r.unverified > 0 ? 'warn' : changed > 0 ? 'success' : 'info',
+    severity: r.conflicts > 0 || r.unverified > 0 ? 'warn' : changed + statements > 0 ? 'success' : 'info',
     text: parts.length > 0
       ? `Belege eingelesen: ${parts.join(', ')}.`
       : 'Keine neuen Wertpapier- oder Dividendenabrechnungen gefunden.',
   }
-  if (changed > 0) {
+  if (changed + statements > 0) {
     await Promise.all([loadPortfolio(), loadTransactions()])
   }
   reviewReloadKey.value++

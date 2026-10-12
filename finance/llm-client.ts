@@ -767,3 +767,45 @@ export async function extractSettlementValues(
   }
   return resp;
 }
+
+// -----------------------------------------------------------------------
+// /json-prompt (portfolio — positions from a depot statement or reporting)
+// -----------------------------------------------------------------------
+
+/** A reporting runs long and the positions table may sit behind a summary. */
+const DEPOT_STATEMENT_TEXT_LIMIT = 16_000;
+
+/**
+ * Asks the model which positions a depot statement, a wealth overview or a
+ * reporting lists, and for which day. Returns the raw JSON object;
+ * depot-statement-parser.ts validates it and merges it with the rules.
+ */
+export async function extractStatementPositions(text: string): Promise<Record<string, unknown>> {
+  const system =
+    "Du liest Depotauszüge, Vermögensübersichten und Reportings deutscher Banken, Broker und Vermögensverwalter. " +
+    "Antworte ausschließlich mit einem JSON-Objekt. Übernimm nur Werte, die wörtlich im Text stehen; erfinde nichts und rechne nichts aus. " +
+    "Fehlt ein Wert, setze null. Beträge als Zahl ohne Tausenderpunkte (z. B. 2966.40), Datumsangaben als YYYY-MM-DD.";
+  const prompt =
+    "Gib ein JSON-Objekt mit genau diesen Schlüsseln zurück:\n" +
+    '- "is_statement": true, wenn der Beleg einen Depotbestand zu einem Stichtag auflistet (Depotauszug, Depotbestand, Vermögensübersicht, Reporting mit Positionsliste); ' +
+    "false bei Wertpapierabrechnungen (Kauf/Verkauf), Dividenden-/Ertragsgutschriften, Kontoauszügen, Steuerbescheinigungen und Versicherungsmitteilungen ohne Depotpositionen\n" +
+    '- "as_of": der Stichtag, zu dem der Bestand gilt (z. B. "per 31.12.2025")\n' +
+    '- "depot_number": die Depotnummer, nur Ziffern\n' +
+    '- "positions": eine Liste der Wertpapierpositionen; je Position ein Objekt mit\n' +
+    '    "isin" (12 Zeichen), "wkn" (6 Zeichen), "name" (Bezeichnung des Wertpapiers),\n' +
+    '    "quantity" (Stückzahl bzw. Anteile), "price" (Kurs je Stück am Stichtag), "value" (Kurswert der Position),\n' +
+    '    "currency" (Währung des Kurswerts, z. B. "EUR"), "acquisition_price" (Einstandskurs je Stück, falls gedruckt)\n\n' +
+    "Nur Wertpapiere zählen: Aktien, Fonds, ETFs, Anleihen, Zertifikate. Keine Versicherungsverträge, Konten, Bausparverträge, Summen- oder Zwischensummenzeilen. " +
+    "Eine Position ohne ISIN und ohne WKN lässt du weg.\n\n" +
+    `Text des Belegs:\n"""\n${text.slice(0, DEPOT_STATEMENT_TEXT_LIMIT)}\n"""`;
+  const resp = await postJson<JsonPromptRequest, Record<string, unknown>>("/json-prompt", {
+    prompt,
+    system,
+    temperature: 0,
+    max_tokens: 1500,
+  });
+  if (!resp || typeof resp !== "object") {
+    throw new LlmServiceUnavailableError("/json-prompt returned no object for the depot statement");
+  }
+  return resp;
+}

@@ -369,6 +369,9 @@ export interface Holding {
   currency: string | null
   acquisition_date: string | null
   acquisition_price: string | null
+  /** "bank": the FinTS sync · "document": read from a depot statement (`document_id`). */
+  source?: 'bank' | 'document'
+  document_id?: number | null
   cost_basis_per_unit: string | null
   cost_basis: string | null
   cost_basis_source: CostBasisSource
@@ -893,6 +896,24 @@ export interface PortfolioReviewResponse {
   misbooked_accumulations?: PortfolioMisbookedAccumulation[]
   /** Securities proposed by bookings or papers, for the user to take in or ignore. */
   new_securities?: PortfolioReviewSecurity[]
+  /** Depot statements and reportings that could not be placed in a depot. */
+  unplaced_statements?: PortfolioReviewStatement[]
+}
+
+/** A depot statement no depot could be found for. */
+export interface PortfolioReviewStatement {
+  document_id: number
+  document_title: string | null
+  doc_date: string | null
+  /** The day the statement states the holdings for. */
+  as_of: string | null
+  depot_number: string | null
+  /** Positions with an identifier the statement lists. */
+  positions: number
+  /** The identifiers listed (ISIN, else WKN), at most five. */
+  identifiers: string[]
+  /** Marked "ignore for depots" (listed only with `ignored: true`). */
+  ignored?: boolean
 }
 
 export interface PortfolioMisbookedAccumulation {
@@ -1010,6 +1031,12 @@ export interface EnrichRunTotals {
   skipped_no_transaction: number
   /** Papers about a security the depot's master has not confirmed. */
   skipped_unknown_security?: number
+  /** Depot statements and reportings read into holdings snapshots. */
+  statements_stored?: number
+  /** Statements no depot could be found for — listed on the review page. */
+  statements_unplaced?: number
+  /** Positions on statements about securities the master has not confirmed: proposed. */
+  statement_positions_proposed?: number
 }
 
 /** A read of the settlement documents running (or run) on the server. */

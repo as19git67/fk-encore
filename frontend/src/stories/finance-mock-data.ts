@@ -539,6 +539,12 @@ export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
       status: 'proposed', source: 'document', first_seen_at: '2026-04-02T09:00:00.000Z', bookings: 2, documents: 1, document_ids: [309], ignored: false,
     },
   ],
+  unplaced_statements: [
+    {
+      document_id: 310, document_title: 'Depotauszug per 31.12.2025', doc_date: '2026-01-08', as_of: '2025-12-31',
+      depot_number: '9900000002', positions: 3, identifiers: ['DE000000EEE2', 'LU000000FFF3', 'DE000000GGG7'], ignored: false,
+    },
+  ],
 }
 
 /** The same review with "show ignored" on: ignored documents in their groups, and one in none. */

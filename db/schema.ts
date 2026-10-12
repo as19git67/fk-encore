@@ -2224,6 +2224,10 @@ export const financeAccountHolding = pgTable(
     currency: text("currency"),
     acquisition_date: timestamp("acquisition_date", { mode: "string" }),
     acquisition_price: numeric("acquisition_price", { precision: 20, scale: 6 }),
+    /** "bank": the FinTS holdings sync · "document": read from a depot statement or reporting (migration 0238). */
+    source: text("source").$type<"bank" | "document">().notNull().default("bank"),
+    /** The statement the row was read from, for source "document". */
+    document_id: integer("document_id").references(() => documents.id, { onDelete: "cascade" }),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -2400,6 +2404,18 @@ export const financeDepotTransaction = pgTable(
 // What the language model read from a settlement document (#1336), kept
 // once per document — see migration 0222.
 export const financeDocumentSettlementLlm = pgTable("finance_document_settlement_llm", {
+  document_id: integer("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  values: jsonb("values").$type<Record<string, unknown>>().notNull(),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// What the language model read from a depot statement or reporting (the
+// positions held on a day), kept once per document — see migration 0238.
+export const financeDocumentStatementLlm = pgTable("finance_document_statement_llm", {
   document_id: integer("document_id")
     .primaryKey()
     .references(() => documents.id, { onDelete: "cascade" }),
