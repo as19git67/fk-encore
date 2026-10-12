@@ -274,15 +274,31 @@ behind it.
    > Summe, mit Zwischensummen für Kauf, Sonderzahlungen wegen Reparatur,
    > Mieteinnahmen, und ermittle die bisherige Rendite."
 
-   - `find_text_in_document(document_id, query)` returns the pages and
-     rectangles where a value stands (`{page, x, y, w, h}` in the 0..1
-     page coordinates `document_collection_members.redactions` already
-     uses). For born-digital PDFs this is `pdftotext -bbox`; for scans the
-     word boxes exist only inside `text_extract` today and are not
-     stored, so the tool re-runs tesseract on the page it needs. An amount
-     is matched in all its printed forms ("450.000,00 EUR", "450.000 €",
-     "EUR 450.000,-"), so one `query` covers the purchase price wherever
-     it appears.
+   - **Prerequisite: the text keeps its positions.** A document that has
+     been through OCR already knows where every word stands; today
+     `text_extract` parses Tesseract's TSV into `OcrWord[]` (pixel boxes
+     with confidence, `documents/ocr-layout.ts`), lets the resolver
+     correct the rows, renders the layout text — and drops the boxes.
+     Born-digital PDFs go the same way: `pdf-text-layout.ts` reads each
+     item's transform for the spacing and keeps none of it. Nothing is
+     re-run later: `text_extract` writes the corrected rows per page into
+     `document_page_words` (`document_id`, `page`, `width`, `height`,
+     `words` jsonb of `{text, left, top, right, bottom, confidence?}`,
+     pixels for a scan, points for a born-digital page), at the same
+     moment it writes `extracted_text`. The box of a word, divided by the
+     page size, is the 0..1 rectangle the redactions already use. Existing
+     documents get their rows by the targeted re-extraction that exists
+     for OCR changes (`text-extract.ts` prioritises by quality), run once
+     as a backfill. Stage 6 does not start before this is in place.
+   - `find_text_in_document(document_id, query)` reads
+     `document_page_words` and returns the pages and rectangles where a
+     value stands (`{page, x, y, w, h}` in the 0..1 page coordinates
+     `document_collection_members.redactions` already uses), merging
+     adjacent words into one box. An amount is matched in all its printed
+     forms ("450.000,00 EUR", "450.000 €", "EUR 450.000,-"), so one
+     `query` covers the purchase price wherever it appears. A document
+     without stored rows is reported as such, not re-OCR'd on the spot:
+     the answer names it so the user can trigger its extraction.
    - `create_collection(name, document_ids, redactions)` creates a manual
      Sammelmappe through `/document-collections` with the rectangles per
      member, and `build_collection_pdf(collection_id)` triggers the
@@ -351,10 +367,11 @@ from the model.
   relevant to the purchase" is a search today and would be a lookup with
   an entity. It is also the natural home of the yield, which the saved
   analysis of stage 6 only approximates.
-- Finding the purchase price on a scan depends on OCR word boxes that are
-  not stored. Re-running tesseract per page is fine for a dozen
-  documents; if it turns out to be the common case, `text_extract`
-  should keep the boxes (a `jsonb` per page next to `extracted_text`).
+- Which rows `document_page_words` keeps: the resolver-corrected rows
+  (what the letterhead read and the classifier see) rather than
+  Tesseract's raw words. The corrected ones are what the stored text was
+  rendered from, so a search over the text and a search over the boxes
+  find the same thing. The uncorrected reading is not kept.
 - What the yield means has to be printed, not assumed: gross rent over
   purchase price is one number, net of repairs and annualised another.
   The tool prints its formula and the period on the report, and the
@@ -368,8 +385,12 @@ from the model.
 
 ## Operations
 
-- A new service, two to three new tables, one new finance endpoint. No
-  change to the model deployment; the `--jinja` flag is already set.
+- A new service, two to three new tables, one new finance endpoint, and
+  for stage 6 one more table (`document_page_words`) that `text_extract`
+  fills from then on plus a one-time backfill over the corpus — the same
+  re-extraction an OCR change needs, so it costs one pass of OCR time,
+  scheduled through the scan queue. No change to the model deployment;
+  the `--jinja` flag is already set.
 - The chat competes with classification and the OCR vision calls for the
   single inference worker and the one KV cache. A question asked while a
   classification batch runs waits for its slot; the stream shows
