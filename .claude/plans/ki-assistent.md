@@ -29,17 +29,23 @@ behind it.
 
 ## What exists
 
-- `llm-service` runs a local Qwen (2.5-7B on CPU, 3-14B on the GPU
-  profile) behind `llama-server`, started with `--jinja`
+- `llm-service` runs `gemma-4-26B-A4B-it-qat-UD-Q4_K_XL` in production:
+  a Gemma 4 Mixture-of-Experts model, 26B parameters with about 4B active
+  per token, on a 16 GB GPU behind `llama-server` started with `--jinja`
   (`llama_supervisor.py:65`). That gives an OpenAI-compatible
   `/v1/chat/completions` with native `tools`, `tool_choice` and
   `stream`. The FastAPI layer exposes only `/classify`, `/embed`,
   `/json-prompt` and the vision endpoints — no chat, no tools, no
-  streaming. The in-process backend (`llama-cpp-python`, the CPU image)
-  has no tool protocol; the trip-planner benchmark emulated tools by
-  asking for JSON (`trip-planner/llm-bench/run-chat.ts`), and the local
-  model scored 10/10 against Claude's 9/10 there
-  (`docs/ios-urlaubsplanung.md` §11).
+  streaming. The in-process backend (`llama-cpp-python`, the CPU image
+  with Qwen2.5-7B) has no tool protocol; the trip-planner benchmark
+  emulated tools by asking for JSON (`trip-planner/llm-bench/run-chat.ts`),
+  and this Gemma model scored 10/10 against Claude's 9/10 there and 96 %
+  on request understanding at a 1 s median (`docs/ios-urlaubsplanung.md`
+  §11).
+- The 16 GB carry the Q4 weights, the KV cache, the vision projector and
+  the E5 embedder together. The usable context window is whatever is
+  left after those, and the active `LLM_CTX` is the budget the agent loop
+  has to live in; `llm-service/README.md` has the arithmetic.
 - Natural language already drives one domain: `POST
   /finance/analysis/query` (`finance/analysis.ts`) parses a question into
   an AST via `/json-prompt`, then runs SQL. `POST /photos/search/natural`
@@ -81,13 +87,16 @@ behind it.
   model stays whatever the admin activates under "KI-Modell". A cloud
   model would fit behind the same protocol; it is deliberately out of
   scope, as in the trip planner.
-- **Small models get small menus.** A 7B model with `LLM_CTX=8192` cannot
-  carry thirty tool schemas plus a conversation. The first turn is a
-  router step that picks one or two domains; only their tools (five to
-  eight) go into the request. Tool results are compact tables, capped in
-  rows, with ids and totals, never full records. The glossary (account
-  labels, user tags, categories, person names) is injected per domain,
-  not globally.
+- **The context is the budget, so the menu stays small.** Thirty tool
+  schemas plus a glossary plus a conversation plus tool results do not fit
+  the window that 16 GB leave next to the weights, and every prompt token
+  is prefill time on each round. The first turn is a router step that
+  picks one or two domains; only their tools (five to eight) go into the
+  request. Tool results are compact tables, capped in rows, with ids and
+  totals, never full records. The glossary (account labels, user tags,
+  categories, person names) is injected per domain, not globally. With
+  about 4B active parameters the model is fast per token; what costs is
+  what it has to read.
 - **The answer is text plus cards plus a link.** The model writes the
   sentence; the server attaches the rows it saw as typed result blocks
   (`transactions`, `documents`, `photos`, `albums`, `meters`, `proposal`)
@@ -118,11 +127,14 @@ behind it.
      block spends the context the tool results need.
    - The call goes through the single-worker executor like the others, so
      a chat turn and a classification never run at once on the CPU.
+   - First check that llama.cpp's jinja template for Gemma 4 emits
+     parseable `tool_calls` (the pinned `LLAMA_CPP_REF` decides this), and
+     that a tool turn with the projector loaded fits the active `LLM_CTX`.
    - Benchmark (`llm-service/tests/`, and a small case file in the
      assistant service): the four questions above plus ten variants, run
-     against the CPU and GPU models, scored on "right tool, right
-     arguments". This decides whether the 7B model is good enough for the
-     CPU profile or whether the assistant is a GPU-only feature at first.
+     against the production Gemma model, scored on "right tool, right
+     arguments" and timed per round. The CPU fallback is measured once
+     for the record; the assistant is designed for the GPU deployment.
 
 2. **The `assistant` service** (new, `assistant/`).
    - Tables `assistant_conversation` (`id`, `user_id`, `title`,
@@ -232,8 +244,9 @@ behind it.
 
 ## Open questions
 
-- Whether the CPU model carries this: stage 1's benchmark answers it. If
-  not, the assistant is offered only when the active config runs on the
+- How many tool rounds a question may take before the wait is too long:
+  stage 1's timing answers it. If the CPU fallback cannot carry a tool
+  turn, the assistant is offered only when the active config runs on the
   `server` backend, and the page says so.
 - "Immobilie" has no entity. The second question works through
   categories and the search text today; a property entity (address,
@@ -249,8 +262,10 @@ behind it.
 
 - A new service, two to three new tables, one new finance endpoint. No
   change to the model deployment; the `--jinja` flag is already set.
-- The chat competes with classification for the single inference worker.
-  On a CPU host a 7B turn with two tool rounds is tens of seconds; the
-  stream shows `tool_start` events so the wait is explained.
+- The chat competes with classification and the OCR vision calls for the
+  single inference worker and the one KV cache. A question asked while a
+  classification batch runs waits for its slot; the stream shows
+  `tool_start` events so the wait is explained. Decode is quick with 4B
+  active parameters; the rounds' prefill is what adds up.
 - Conversations are personal data of the user; they are deleted with the
   user and excluded from backups' public exports like the documents.
