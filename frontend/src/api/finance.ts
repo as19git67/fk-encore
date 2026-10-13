@@ -892,6 +892,8 @@ export interface PortfolioReviewResponse {
   ignored_other?: PortfolioReviewDocument[]
   /** How many documents are marked "ignore for depots". */
   ignored_count?: number
+  /** How many securities the depots ignore (taken out, or a proposal turned down). */
+  ignored_securities_count?: number
   /** Dividends booked from a notice of accumulated income or a Vorabpauschale. */
   misbooked_accumulations?: PortfolioMisbookedAccumulation[]
   /** Securities proposed by bookings or papers, for the user to take in or ignore. */
@@ -1180,6 +1182,35 @@ export interface PortfolioPositionResponse {
   holding_gaps: HoldingGap[]
   /** Share changes that could not be checked (a transaction lacks its quantity). */
   unverifiable_changes: number
+  /** Per depot: the security in the master, and what taking it out would delete. */
+  depots?: PositionDepotSecurity[]
+}
+
+/** The security in one depot's master, for "Aus Depot entfernen". */
+export interface PositionDepotSecurity {
+  account_id: number
+  account_label: string
+  /** null: the depot has no entry yet (rows from before the master). */
+  status: 'confirmed' | 'proposed' | 'ignored' | null
+  /** The bank's latest snapshot lists it: it cannot be removed. */
+  bank_held: boolean
+  writable: boolean
+  removable_transactions: number
+  removable_holdings: number
+}
+
+export interface RemovePositionResult {
+  security_id: number
+  transactions_removed: number
+  holdings_removed: number
+}
+
+/** Take a security added by mistake out of one depot: ignored from now on, its read rows deleted. */
+export async function removePositionFromDepot(key: string, accountId: number): Promise<RemovePositionResult> {
+  return apiFetch(`/finance/portfolio/positions/${encodeURIComponent(key)}/remove`, {
+    method: 'POST',
+    body: JSON.stringify({ accountId }),
+  })
 }
 
 export async function getPortfolioPosition(

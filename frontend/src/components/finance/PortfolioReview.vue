@@ -76,6 +76,14 @@ watch(
 )
 
 const ignoredCount = computed(() => review.value?.ignored_count ?? 0)
+/** Securities taken out of a depot or turned down: listed with "show ignored", to propose them again. */
+const ignoredSecuritiesCount = computed(() => review.value?.ignored_securities_count ?? 0)
+const ignoredLabel = computed(() => {
+  const parts: string[] = []
+  if (ignoredCount.value > 0) parts.push(`${ignoredCount.value} Beleg${ignoredCount.value === 1 ? '' : 'e'}`)
+  if (ignoredSecuritiesCount.value > 0) parts.push(`${ignoredSecuritiesCount.value} Wertpapier${ignoredSecuritiesCount.value === 1 ? '' : 'e'}`)
+  return `Für Depots Ignoriertes zeigen (${parts.join(', ')})`
+})
 
 const hasContent = computed(() => {
   const r = review.value
@@ -85,7 +93,7 @@ const hasContent = computed(() => {
       (r.misbooked_accumulations?.length ?? 0) + (r.new_securities?.length ?? 0) + (r.unplaced_statements?.length ?? 0) > 0 ||
     r.unverifiable_changes > 0 ||
     // Keeps the toggle reachable when everything left is ignored.
-    ignoredCount.value > 0
+    ignoredCount.value + ignoredSecuritiesCount.value > 0
   )
 })
 
@@ -262,9 +270,9 @@ function signClass(val: string | null): string {
       <span v-if="count > 0" class="pr-count">{{ count }}</span>
     </h2>
     <p v-if="error" class="pr-error">{{ error }}</p>
-    <div v-if="ignoredCount > 0" class="pr-toggle">
+    <div v-if="ignoredCount + ignoredSecuritiesCount > 0" class="pr-toggle">
       <Checkbox v-model="showIgnored" binary input-id="pr-show-ignored" />
-      <label for="pr-show-ignored">Für Depots ignorierte Belege zeigen ({{ ignoredCount }})</label>
+      <label for="pr-show-ignored">{{ ignoredLabel }}</label>
     </div>
 
     <template v-if="review">

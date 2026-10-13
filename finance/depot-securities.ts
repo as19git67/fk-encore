@@ -16,7 +16,12 @@
 import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 
 import db from "../db/database";
-import { financeAccountHolding, financeDepotSecurity, financeDepotSecurityEvidence } from "../db/schema";
+import {
+  financeAccountHolding,
+  financeDepotSecurity,
+  financeDepotSecurityEvidence,
+  financeDepotTransaction,
+} from "../db/schema";
 
 console.log("[boot] finance/depot-securities.ts: all imports resolved");
 
@@ -162,6 +167,132 @@ export async function findConfirmedByName(accountId: number, name: string | null
     return [...small].every((w) => large.has(w));
   });
   return matches.length === 1 ? matches[0]! : null;
+}
+
+/**
+ * The depot transactions a removal takes along: those read from papers or
+ * derived from bookings. Manual rows and the bank's own (FinTS) stay —
+ * the user or the bank put them there, not a reading.
+ */
+export const REMOVABLE_TX_SOURCES = ["document", "giro-derived", "giro-derived+document"];
+
+function idMatch(
+  cols: typeof financeDepotTransaction | typeof financeAccountHolding,
+  ids: Pick<SecurityIds, "isin" | "wkn">,
+) {
+  const m = [];
+  if (ids.isin) m.push(eq(cols.isin, ids.isin));
+  if (ids.wkn) m.push(eq(cols.wkn, ids.wkn));
+  return m.length > 0 ? or(...m)! : null;
+}
+
+/** Whether the bank's latest holdings snapshot of the depot lists the security. */
+export async function bankHolds(accountId: number, ids: Pick<SecurityIds, "isin" | "wkn">): Promise<boolean> {
+  const match = idMatch(financeAccountHolding, ids);
+  if (!match) return false;
+  const [latest] = await db
+    .select({ as_of: financeAccountHolding.as_of })
+    .from(financeAccountHolding)
+    .where(and(eq(financeAccountHolding.account_id, accountId), eq(financeAccountHolding.source, "bank")))
+    .orderBy(desc(financeAccountHolding.as_of))
+    .limit(1);
+  if (!latest) return false;
+  const [row] = await db
+    .select({ id: financeAccountHolding.id })
+    .from(financeAccountHolding)
+    .where(
+      and(
+        eq(financeAccountHolding.account_id, accountId),
+        eq(financeAccountHolding.source, "bank"),
+        eq(financeAccountHolding.as_of, latest.as_of),
+        match,
+      ),
+    )
+    .limit(1);
+  return !!row;
+}
+
+export interface RemovalCounts {
+  /** Depot transactions read from papers or derived from bookings. */
+  transactions: number;
+  /** Holdings rows read from depot statements. */
+  holdings: number;
+}
+
+/** What a removal of the security from the depot would delete. */
+export async function removalPreview(accountId: number, ids: Pick<SecurityIds, "isin" | "wkn">): Promise<RemovalCounts> {
+  const txMatch = idMatch(financeDepotTransaction, ids);
+  const hMatch = idMatch(financeAccountHolding, ids);
+  if (!txMatch || !hMatch) return { transactions: 0, holdings: 0 };
+  const [tx] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(financeDepotTransaction)
+    .where(
+      and(
+        eq(financeDepotTransaction.account_id, accountId),
+        inArray(financeDepotTransaction.source, REMOVABLE_TX_SOURCES),
+        txMatch,
+      ),
+    );
+  const [h] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(financeAccountHolding)
+    .where(and(eq(financeAccountHolding.account_id, accountId), eq(financeAccountHolding.source, "document"), hMatch));
+  return { transactions: tx?.n ?? 0, holdings: h?.n ?? 0 };
+}
+
+/**
+ * Take a security out of a depot that was added by mistake: it is ignored
+ * from now on — bookings and papers about it stay silent on every later
+ * run — and what readings booked for it goes: the transactions read from
+ * papers or derived from bookings, and the holdings read from statements.
+ * The user's own rows and the bank's stay. "Wieder vorschlagen" on the
+ * review page undoes it; taking it in again reads its evidence anew.
+ */
+export async function removeSecurity(
+  accountId: number,
+  ids: SecurityIds,
+  userId: number,
+): Promise<RemovalCounts & { security_id: number }> {
+  let entry = await findSecurity(accountId, ids);
+  if (entry) {
+    [entry] = await db
+      .update(financeDepotSecurity)
+      .set({ status: "ignored", source: "user", decided_at: new Date().toISOString(), decided_by: userId })
+      .where(eq(financeDepotSecurity.id, entry.id))
+      .returning();
+  } else {
+    [entry] = await db
+      .insert(financeDepotSecurity)
+      .values({
+        account_id: accountId,
+        isin: ids.isin,
+        wkn: ids.wkn,
+        name: ids.name,
+        status: "ignored",
+        source: "user",
+        decided_at: new Date().toISOString(),
+        decided_by: userId,
+      })
+      .returning();
+  }
+  const txMatch = idMatch(financeDepotTransaction, ids)!;
+  const hMatch = idMatch(financeAccountHolding, ids)!;
+  const txs = await db
+    .delete(financeDepotTransaction)
+    .where(
+      and(
+        eq(financeDepotTransaction.account_id, accountId),
+        inArray(financeDepotTransaction.source, REMOVABLE_TX_SOURCES),
+        txMatch,
+      ),
+    )
+    .returning({ id: financeDepotTransaction.id });
+  const holdings = await db
+    .delete(financeAccountHolding)
+    .where(and(eq(financeAccountHolding.account_id, accountId), eq(financeAccountHolding.source, "document"), hMatch))
+    .returning({ id: financeAccountHolding.id });
+  return { security_id: entry!.id, transactions: txs.length, holdings: holdings.length };
 }
 
 /** Every security of a holdings snapshot is the bank's word: confirmed. */

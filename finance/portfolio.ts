@@ -71,7 +71,17 @@ import {
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
 import { enrichPendingStatements, readDepotStatement, type StatementStats } from "./depot-statement-enrichment";
 import { classifyPendingPapers } from "./depot-paper-type";
-import { decideSecurity, evidenceDocumentIds, listSecurities, type ListedSecurity, type SecurityStatus } from "./depot-securities";
+import {
+  bankHolds,
+  decideSecurity,
+  evidenceDocumentIds,
+  findSecurity,
+  listSecurities,
+  removalPreview,
+  removeSecurity,
+  type ListedSecurity,
+  type SecurityStatus,
+} from "./depot-securities";
 import { cleanSecurityName, isPersonName, paperTypeOf, type PaperType } from "./depot-settlement-parser";
 import { readSettlement, rereadAgainstBooking, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
 import type { CheckName, FieldSource, MergeField } from "./depot-settlement-merge";
@@ -1253,6 +1263,24 @@ interface PositionResponse {
   holding_gaps: HoldingGap[];
   /** Share changes that could not be checked (a transaction lacks its quantity). */
   unverifiable_changes: number;
+  /** Per depot: where the security stands in the master, and what taking it out would delete. */
+  depots: PositionDepotSecurity[];
+}
+
+/** The security in one depot's master, for "Aus Depot entfernen" on the position page. */
+export interface PositionDepotSecurity {
+  account_id: number;
+  account_label: string;
+  /** The master's status; null when the depot has no entry (rows from before the master). */
+  status: SecurityStatus | null;
+  /** The bank's latest snapshot lists it: it cannot be removed, the bank would bring it back. */
+  bank_held: boolean;
+  /** The caller may write to the depot. */
+  writable: boolean;
+  /** Transactions read from papers or derived from bookings that removing it deletes. */
+  removable_transactions: number;
+  /** Holdings read from statements that removing it deletes. */
+  removable_holdings: number;
 }
 
 function matchesKey(
@@ -1472,6 +1500,7 @@ export const getPortfolioPosition = api(
       });
 
     const recon = await reconcileHoldings(ids, key);
+    const securityDepots = await positionDepotSecurities(auth, position, labelById);
 
     return {
       currency: scopeCurrency(depots).currency,
@@ -1483,7 +1512,85 @@ export const getPortfolioPosition = api(
       years: yearsOut,
       holding_gaps: recon.gaps,
       unverifiable_changes: recon.unverifiable,
+      depots: securityDepots,
     };
+  },
+);
+
+async function positionDepotSecurities(
+  auth: { userID: string; permissions: string[] },
+  position: PortfolioPosition,
+  labelById: Map<number, string>,
+): Promise<PositionDepotSecurity[]> {
+  // Only a security with an identifier can be kept out of a depot.
+  if (!position.isin && !position.wkn) return [];
+  const ids = { isin: position.isin, wkn: position.wkn };
+  const writable = new Set((await writableDepots(auth, position.account_ids)).map((d) => d.id));
+  const out: PositionDepotSecurity[] = [];
+  for (const accountId of position.account_ids) {
+    if (!labelById.has(accountId)) continue;
+    const [entry, bankHeld, counts] = await Promise.all([
+      findSecurity(accountId, ids),
+      bankHolds(accountId, ids),
+      removalPreview(accountId, ids),
+    ]);
+    out.push({
+      account_id: accountId,
+      account_label: labelById.get(accountId) ?? "",
+      status: (entry?.status as SecurityStatus | undefined) ?? null,
+      bank_held: bankHeld,
+      writable: writable.has(accountId),
+      removable_transactions: counts.transactions,
+      removable_holdings: counts.holdings,
+    });
+  }
+  return out;
+}
+
+interface RemovePositionParams {
+  key: string;
+  /** The depot to take the security out of. */
+  accountId: number;
+}
+
+interface RemovePositionResponse {
+  security_id: number;
+  /** Transactions read from papers or derived from bookings, deleted. */
+  transactions_removed: number;
+  /** Holdings read from statements, deleted. */
+  holdings_removed: number;
+}
+
+/**
+ * Take a security added by mistake out of a depot (see removeSecurity):
+ * ignored from now on, its read and derived rows deleted. Refused while
+ * the bank's latest snapshot still lists it — the next sync would bring
+ * it back. Write access to the depot is required.
+ */
+export const removePositionFromDepot = api(
+  { expose: true, method: "POST", path: "/finance/portfolio/positions/:key/remove", auth: true },
+  async ({ key, accountId }: RemovePositionParams): Promise<RemovePositionResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    if ((await writableDepots(auth, [accountId])).length === 0) {
+      throw APIError.permissionDenied("write access to the depot is required");
+    }
+    const [holdings, txs, people] = await Promise.all([
+      latestHoldings([accountId]),
+      loadTransactions([accountId]),
+      householdNames(),
+    ]);
+    const position = buildPortfolio(holdings, txs, people).positions.find((p) => p.key === key);
+    if (!position) throw APIError.notFound(`position ${key} not found in this depot`);
+    if (!position.isin && !position.wkn) {
+      throw APIError.failedPrecondition("the position has neither ISIN nor WKN");
+    }
+    const ids = { isin: position.isin, wkn: position.wkn, name: position.name };
+    if (await bankHolds(accountId, ids)) {
+      throw APIError.failedPrecondition("the bank still reports this security in the depot");
+    }
+    const r = await removeSecurity(accountId, ids, Number(auth.userID));
+    return { security_id: r.security_id, transactions_removed: r.transactions, holdings_removed: r.holdings };
   },
 );
 
@@ -1831,6 +1938,8 @@ interface ReviewResponse {
   ignored_other: ReviewDocument[];
   /** How many documents the caller may see are marked "ignore for depots". */
   ignored_count: number;
+  /** How many securities the depots in scope ignore (taken out, or a proposal turned down). */
+  ignored_securities_count: number;
   /** Dividends booked from a notice of accumulated income or a Vorabpauschale. */
   misbooked_accumulations: (MisbookedAccumulation & { account_label: string })[];
   /** Securities proposed by bookings or papers, for the user to take in or ignore. */
@@ -1871,6 +1980,7 @@ export const getPortfolioReview = api(
         unverifiable_changes: 0,
         ignored_other: [],
         ignored_count: ignoredRows.length,
+        ignored_securities_count: 0,
         misbooked_accumulations: [],
         new_securities: [],
         unplaced_statements: [],
@@ -1885,6 +1995,11 @@ export const getPortfolioReview = api(
       listSecurities(ids, ignored === true ? ["proposed", "ignored"] : ["proposed"]),
       enrichPendingStatements(ids, 200, { dryRun: true, includeIgnored: ignored === true }),
     ]);
+
+    const [ignoredSecurities] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(financeDepotSecurity)
+      .where(and(inArray(financeDepotSecurity.account_id, ids), eq(financeDepotSecurity.status, "ignored")));
 
     // Statements without a depot, when the caller may see them.
     const unplacedResults = statements.results.filter((r) => r.outcome === "no_depot");
@@ -2024,6 +2139,7 @@ export const getPortfolioReview = api(
       unverifiable_changes: recon.unverifiable,
       ignored_other: ignoredOther,
       ignored_count: ignoredRows.length,
+      ignored_securities_count: ignoredSecurities?.n ?? 0,
       misbooked_accumulations: misbooked.map((m) => ({ ...m, account_label: labelById.get(m.account_id) ?? "" })),
       new_securities: securities.map((sec) => ({
         ...sec,

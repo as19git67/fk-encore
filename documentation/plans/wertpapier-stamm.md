@@ -153,6 +153,20 @@ The portfolio takes securities from wherever they turn up:
      ISIN is matched by name (exactly one confirmed entry, every significant
      word shared), which also places a report without a depot number.
 
+## Taking a security out of a depot
+
+A security added by mistake (a booking or paper read wrong, a proposal
+taken in too quickly) is taken out on the position page, per depot:
+"Aus Depot entfernen" (`removePositionFromDepot`, `removeSecurity`). It
+becomes ignored in that depot's master — later runs leave its bookings and
+papers alone — and what readings booked for it goes: transactions from
+papers or derived from bookings (sources `document`, `giro-derived`,
+`giro-derived+document`) and holdings from statements. Manual rows and the
+bank's own stay. A security the bank's latest snapshot still lists cannot
+be removed: the next sync would confirm it again. The review page's "show
+ignored" toggle counts ignored securities too; "Wieder vorschlagen" and
+"Aufnehmen" undo a removal and read the evidence again.
+
 ## Operations
 
 - Stage 1 changes what "Belege einlesen" books: a paper about a security

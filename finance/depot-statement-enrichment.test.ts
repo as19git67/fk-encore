@@ -326,7 +326,7 @@ Alpha Industries AG ${ISIN_A}
     expect((await readDepotStatement(settlement)).outcome).toBe("not_statement");
 
     const docId = await insertDocument(STATEMENT_WITH_NUMBER);
-    await db.insert(financeDepotDocumentIgnore).values({ document_id: docId, user_id: 1 });
+    await db.insert(financeDepotDocumentIgnore).values({ document_id: docId, ignored_by: 1 });
     expect((await readDepotStatement(docId)).outcome).toBe("ignored");
     expect(await holdingsOf(depot)).toHaveLength(1);
   });
