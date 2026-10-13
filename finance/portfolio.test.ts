@@ -11,6 +11,8 @@ import {
   financeAccountType,
   financeBankcontact,
   financeDepotTransaction,
+  financeQuote,
+  financeQuoteSymbol,
   financeTagTransaction,
   financeTanSession,
   financeTransaction,
@@ -33,6 +35,8 @@ beforeEach(async () => {
   await db.delete(financeTagTransaction);
   await db.delete(financeTransaction);
   await db.delete(financeDepotTransaction);
+  await db.delete(financeQuote);
+  await db.delete(financeQuoteSymbol);
   await db.delete(financeAccountHolding);
   await db.delete(financeAccountBalance);
   await db.delete(financeTanSession);
@@ -150,6 +154,23 @@ async function insertTx(opts: {
 
 const ISIN_A = "DE0000000AAA1";
 const ISIN_B = "DE0000000BBB2";
+
+async function insertQuotes(
+  key: string,
+  points: Array<{ at: string; price: string; kind?: "daily" | "intraday"; currency?: string | null }>,
+): Promise<void> {
+  await db.insert(financeQuoteSymbol).values({ position_key: key, provider: "memory", symbol: `${key}.X` }).onConflictDoNothing();
+  await db.insert(financeQuote).values(
+    points.map((p) => ({
+      position_key: key,
+      at: p.at,
+      price: p.price,
+      currency: p.currency === undefined ? "EUR" : p.currency,
+      kind: p.kind ?? "daily",
+      source: "memory",
+    })),
+  );
+}
 
 describe("finance/portfolio — getPortfolio", () => {
   it("returns an empty portfolio without depots", async () => {
@@ -401,6 +422,84 @@ describe("finance/portfolio — getPortfolio", () => {
 
   it("rejects a malformed accounts parameter", async () => {
     await expect(getPortfolio({ accounts: "1,x" })).rejects.toThrow(/comma-separated/);
+  });
+});
+
+describe("finance/portfolio — today's price", () => {
+  it("values a position at the newest quote when it is not older than the snapshot", async () => {
+    const bc = await insertBankcontact();
+    const depot = await insertAccount(bc, "depot", "Depot");
+    await insertHolding({ accountId: depot, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "10", price: "100.00", value: "1000.00", acquisitionPrice: "80.00" });
+    await insertHolding({ accountId: depot, asOf: "2026-09-01", isin: ISIN_B, name: "Beta ETF", amount: "4", price: "50.00", value: "200.00", acquisitionPrice: "40.00" });
+    // A: a close and a newer minute; the minute wins.
+    await insertQuotes(ISIN_A, [
+      { at: "2026-09-02T15:30:00Z", price: "105.00" },
+      { at: "2026-09-03T08:15:00Z", price: "107.50", kind: "intraday" },
+    ]);
+    // B: only a price older than the bank's snapshot.
+    await insertQuotes(ISIN_B, [{ at: "2026-08-20T15:30:00Z", price: "45.00" }]);
+
+    const resp = await getPortfolio({});
+    const a = resp.positions.find((p) => p.key === ISIN_A)!;
+    expect(a.price).toBe("107.500000");
+    expect(a.price_as_of).toBe("2026-09-03");
+    expect(a.price_source).toBe("quote");
+    expect(a.price_at).toBe("2026-09-03T08:15:00.000Z");
+    expect(a.value).toBe("1075.00");
+    expect(a.unrealized_gain).toBe("275.00");
+
+    const b = resp.positions.find((p) => p.key === ISIN_B)!;
+    expect(b.price).toBe("50.000000");
+    expect(b.price_source).toBe("bank");
+    expect(b.price_at).toBeNull();
+    expect(b.value).toBe("200.00");
+
+    expect(resp.summary.as_of).toBe("2026-09-01");
+    expect(resp.summary.price_as_of).toBe("2026-09-03");
+    expect(resp.summary.quotes_at).toBe("2026-09-03T08:15:00.000Z");
+    expect(resp.summary.market_value).toBe("1275.00");
+    expect(resp.summary.unrealized_gain).toBe("315.00");
+    expect(a.weight_pct).toBe("84.31");
+  });
+
+  it("keeps the bank's price when the quote is in another currency", async () => {
+    const bc = await insertBankcontact();
+    const depot = await insertAccount(bc, "depot", "Depot");
+    await insertHolding({ accountId: depot, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "10", price: "100.00", value: "1000.00" });
+    await insertQuotes(ISIN_A, [{ at: "2026-09-02T15:30:00Z", price: "120.00", currency: "USD" }]);
+
+    const pos = (await getPortfolio({})).positions[0]!;
+    expect(pos.price_source).toBe("bank");
+    expect(pos.value).toBe("1000.00");
+  });
+
+  it("continues the position's history with the closes after the last snapshot", async () => {
+    const bc = await insertBankcontact();
+    const d1 = await insertAccount(bc, "depot", "Depot 1");
+    const d2 = await insertAccount(bc, "depot", "Depot 2");
+    await insertHolding({ accountId: d1, asOf: "2026-08-31", isin: ISIN_A, name: "Alpha AG", amount: "6", price: "100.00", value: "600.00" });
+    await insertHolding({ accountId: d1, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "6", price: "101.00", value: "606.00" });
+    await insertHolding({ accountId: d2, asOf: "2026-09-01", isin: ISIN_A, name: "Alpha AG", amount: "4", price: "101.00", value: "404.00" });
+    await insertQuotes(ISIN_A, [
+      // On and before the snapshot: the bank's figures stay.
+      { at: "2026-08-31T22:00:00Z", price: "99.00" },
+      // Stamped at local midnight: the close of 2 September.
+      { at: "2026-09-01T22:00:00Z", price: "102.00" },
+      { at: "2026-09-03T15:30:00Z", price: "103.00" },
+      { at: "2026-09-04T09:00:00Z", price: "104.25", kind: "intraday" },
+    ]);
+
+    const resp = await getPortfolioPosition({ key: ISIN_A });
+    expect(resp.position.value).toBe("1042.50");
+    expect(resp.history.map((h) => [h.as_of, h.price && Number(h.price), h.value, h.source])).toEqual([
+      ["2026-08-31", 100, "600.00", "bank"],
+      ["2026-09-01", 101, "1010.00", "bank"],
+      ["2026-09-02", 102, "1020.00", "quote"],
+      ["2026-09-03", 103, "1030.00", "quote"],
+      ["2026-09-04", 104.25, "1042.50", "quote"],
+    ]);
+    // The depots add up to the position at the same price.
+    expect(resp.accounts.map((a) => a.value)).toEqual(["625.50", "417.00"]);
   });
 });
 

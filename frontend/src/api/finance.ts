@@ -594,6 +594,10 @@ export interface PortfolioPosition {
   amount: string | null
   price: string | null
   price_as_of: string | null
+  /** 'quote': today's price from the quote provider; 'bank': the bank's last snapshot. */
+  price_source: 'quote' | 'bank' | null
+  /** When the quote was priced (ISO timestamp); null for the bank's price. */
+  price_at: string | null
   value: string | null
   cost_basis: string | null
   cost_basis_per_unit: string | null
@@ -633,7 +637,12 @@ export interface PortfolioYear {
 }
 
 export interface PortfolioSummary {
+  /** Date of the newest bank snapshot. */
   as_of: string | null
+  /** Date of the newest price of an open position (quote or snapshot). */
+  price_as_of: string | null
+  /** When the newest quote used was priced; null when every price is the bank's. */
+  quotes_at: string | null
   market_value: string
   cost_basis: string
   cost_basis_complete: boolean
@@ -1141,6 +1150,8 @@ export interface PositionHistoryPoint {
   amount: string | null
   price: string | null
   value: string | null
+  /** 'bank': a snapshot; 'quote': a close or today's quote after the last snapshot. */
+  source: 'bank' | 'quote'
 }
 
 export interface PositionSale {
