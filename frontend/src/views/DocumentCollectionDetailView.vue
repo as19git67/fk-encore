@@ -47,7 +47,7 @@ import {
   type DocumentCollectionItem,
   type PageRedaction,
 } from '../api/collections'
-import { listCorrespondents, type CorrespondentFacet } from '../api/documents'
+import { listCorrespondents, listGroups, type CorrespondentFacet, type GroupSummary } from '../api/documents'
 import { canShareFiles, shareFile, triggerDownload } from '../utils/shareFile'
 import { useModuleBack } from '../composables/useModuleBack'
 import { useDragReorder } from '../composables/useDragReorder'
@@ -142,6 +142,56 @@ async function runRuleNow() {
     busy.value = false
   }
 }
+// ─── Sharing ────────────────────────────────────────────────────────────────
+// Private (only the owner) or one of the caller's groups. A group folder may
+// only hold documents shared with that group; say which ones before asking.
+const groups = ref<GroupSummary[]>([])
+async function loadGroups() {
+  try {
+    groups.value = (await listGroups()).items
+  } catch {
+    groups.value = []
+  }
+}
+const sharingValue = computed<number | null>(() =>
+  collection.value?.visibility === 'group' ? collection.value.group_id : null,
+)
+const sharingOptions = computed(() => {
+  const opts: Array<{ label: string; value: number | null }> = [
+    { label: 'Privat (nur für mich)', value: null },
+    ...groups.value.map((g) => ({ label: `Gruppe „${g.name}“`, value: g.id })),
+  ]
+  // A group the caller is not in (an admin looking at it) still shows its value.
+  const current = sharingValue.value
+  if (current != null && !opts.some((o) => o.value === current)) {
+    opts.push({ label: 'Gruppe (andere)', value: current })
+  }
+  return opts
+})
+function changeSharing(groupId: number | null) {
+  if (!collection.value || groupId === sharingValue.value) return
+  if (groupId != null) {
+    // What a dossier's rule added, the rule sorts out again after the switch.
+    const notShared = collection.value.items.filter(
+      (i) =>
+        !(collection.value!.kind === 'dossier' && i.joined_by === 'rule') &&
+        (i.visibility !== 'group' || i.group_id !== groupId),
+    ).length
+    if (notShared > 0) {
+      loadError.value =
+        `${notShared} Dokument(e) dieser Mappe sind nicht mit der Gruppe geteilt. ` +
+        'Erst die Dokumente für die Gruppe freigeben oder aus der Mappe nehmen.'
+      return
+    }
+  }
+  void run(() =>
+    updateCollection(
+      collectionId.value,
+      groupId == null ? { visibility: 'private' } : { visibility: 'group', group_id: groupId },
+    ),
+  )
+}
+
 async function loadCorrespondents() {
   try {
     correspondents.value = (await listCorrespondents()).items
@@ -425,6 +475,7 @@ watch(collectionId, () => {
 onMounted(() => {
   void load()
   void loadCorrespondents()
+  void loadGroups()
 })
 
 onBeforeUnmount(() => {
@@ -468,6 +519,23 @@ onBeforeUnmount(() => {
         severity="info"
       />
     </div>
+
+    <section v-if="collection?.can_administer" class="cd-panel">
+      <label for="cd-sharing">Freigabe</label>
+      <Select
+        input-id="cd-sharing"
+        :model-value="sharingValue"
+        :options="sharingOptions"
+        option-label="label"
+        option-value="value"
+        :disabled="busy"
+        @update:model-value="changeSharing"
+      />
+      <p class="cd-rule-hint">
+        Eine Gruppenmappe sehen und bearbeiten alle Mitglieder der Gruppe. Sie enthält nur
+        Dokumente, die mit derselben Gruppe geteilt sind.
+      </p>
+    </section>
 
     <section class="cd-panel">
       <label for="cd-notes">Notiz</label>

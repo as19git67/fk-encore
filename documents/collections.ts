@@ -620,18 +620,23 @@ export const updateCollection = api(
           id: number;
           visibility: "private" | "group";
           group_id: number | null;
+          joined_by: string;
         }>(
           db
             .select({
               id: documents.id,
               visibility: documents.visibility,
               group_id: documents.group_id,
+              joined_by: documentCollectionItems.joined_by,
             })
             .from(documentCollectionItems)
             .innerJoin(documents, eq(documents.id, documentCollectionItems.document_id))
             .where(eq(documentCollectionItems.collection_id, row.id)),
         );
-        assertMembersFitVisibility({ visibility, group_id: groupId }, memberDocs);
+        // What a dossier's rule put in, the rule takes out again when it re-runs
+        // in the new scope below; only hand-placed members must already fit.
+        const handPlaced = row.kind === "dossier" ? memberDocs.filter((d) => d.joined_by !== "rule") : memberDocs;
+        assertMembersFitVisibility({ visibility, group_id: groupId }, handPlaced);
       }
       patch.visibility = visibility;
       patch.group_id = groupId;
@@ -654,6 +659,9 @@ export const updateCollection = api(
         patch.rule = null;
       }
     }
+
+    // A dossier shared or taken back covers other documents now.
+    if (req.visibility !== undefined && (patch.kind ?? row.kind) === "dossier") applyRule = true;
 
     await dbExec(
       db.update(documentCollections).set(patch).where(eq(documentCollections.id, row.id)),
