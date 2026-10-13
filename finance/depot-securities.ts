@@ -123,6 +123,47 @@ export async function admitSecurity(
   return status;
 }
 
+/** Words of a security's name that say nothing about which security it is. */
+const NAME_NOISE = new Set([
+  "AG", "SE", "NA", "ON", "O", "N", "INH", "ST", "VZ", "NV", "SA", "PLC", "INC", "CORP", "CO", "LTD", "GMBH", "KGAA",
+  "REG", "SHS", "DL", "LS", "EO", "UCITS", "ETF", "ACC", "DIS", "HLDGS", "HOLDING", "HOLDINGS", "GROUP", "THE",
+]);
+
+function nameWords(name: string): Set<string> {
+  return new Set(
+    name
+      .toUpperCase()
+      .replace(/[^A-Z0-9ÄÖÜ]+/g, " ")
+      .split(" ")
+      .filter((w) => w.length >= 2 && !NAME_NOISE.has(w) && !/^\d+$/.test(w)),
+  );
+}
+
+/**
+ * The depot's one confirmed security this name stands for, when it is
+ * known there only under its ISIN. A holdings table that prints the WKN
+ * alone (a bank's periodic report) would otherwise propose a security the
+ * depot already holds. Every significant word of the shorter name must be
+ * in the other, and exactly one entry may qualify — no guess.
+ */
+export async function findConfirmedByName(accountId: number, name: string | null): Promise<SecurityRow | null> {
+  if (!name) return null;
+  const words = nameWords(name);
+  if (words.size === 0) return null;
+  const rows = await db
+    .select()
+    .from(financeDepotSecurity)
+    .where(and(eq(financeDepotSecurity.account_id, accountId), eq(financeDepotSecurity.status, "confirmed")));
+  const matches = rows.filter((r) => {
+    if (!r.name || r.wkn !== null) return false;
+    const other = nameWords(r.name);
+    if (other.size === 0) return false;
+    const [small, large] = words.size <= other.size ? [words, other] : [other, words];
+    return [...small].every((w) => large.has(w));
+  });
+  return matches.length === 1 ? matches[0]! : null;
+}
+
 /** Every security of a holdings snapshot is the bank's word: confirmed. */
 export async function confirmBankSecurities(
   accountId: number,

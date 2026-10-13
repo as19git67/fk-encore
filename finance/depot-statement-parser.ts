@@ -56,12 +56,32 @@ export const STATEMENT_CANDIDATE_PATTERN = STATEMENT_WORDS.join("|");
 const STATEMENT_RE = new RegExp(STATEMENT_CANDIDATE_PATTERN, "i");
 
 /**
+ * A holdings table: its heading and, soon after, the header row naming the
+ * value column ("Depotbestand … Kurswert"). A bank's periodic report
+ * (Finanzreport) carries one among account sections and a list of trades
+ * — whose settlement words must not hide the table. Postgres `~*` lets `.`
+ * cross line breaks; the JavaScript twin spells that out.
+ */
+export const HOLDINGS_TABLE_PATTERN = String.raw`(depotbestand|depotübersicht|bestandsübersicht|vermögensaufstellung).{0,250}kurswert`;
+const HOLDINGS_TABLE_RE = /(depotbestand|depotübersicht|bestandsübersicht|vermögensaufstellung)[\s\S]{0,250}kurswert/i;
+
+/**
  * A statement by its wording: one of the heading words, and nothing only a
  * settlement or a credit note prints — those are read by the settlement
- * parser, whatever else they mention.
+ * parser, whatever else they mention. A holdings table counts whatever
+ * else the paper prints.
  */
 export function looksLikeDepotStatement(text: string): boolean {
+  if (HOLDINGS_TABLE_RE.test(text)) return true;
   return STATEMENT_RE.test(text) && !hasStrongSettlementWording(text);
+}
+
+/**
+ * A WKN as OCR reads it, repaired: WKNs never use the letters I and O
+ * (they would be mistaken for 1 and 0), so an I or O in one is a 1 or 0.
+ */
+export function repairWkn(raw: string): string {
+  return raw.toUpperCase().replace(/O/g, "0").replace(/I/g, "1");
 }
 
 export interface StatementPosition {
@@ -177,7 +197,9 @@ function identifierHits(lines: string[]): IdentifierHit[] {
   });
   lines.forEach((line, i) => {
     for (const m of line.matchAll(WKN_GLOBAL_RE)) {
-      const wkn = m[1]!.toUpperCase();
+      // A table header ("WKN / Verwahrart") is no identifier: a WKN carries a digit.
+      if (!/\d/.test(m[1]!)) continue;
+      const wkn = repairWkn(m[1]!);
       if (seen.has(wkn)) continue;
       // The WKN of an ISIN already found on the same or a neighbouring line belongs to it.
       const owner = hits.find((h) => h.isin && Math.abs(h.line - i) <= 1 && h.wkn === null);
@@ -234,19 +256,115 @@ function nameNear(lines: string[], line: number, isin: string | null, wkn: strin
   return null;
 }
 
+// ----------------------------------------------------------------------
+// Holdings table rows (a bank's periodic report)
+// ----------------------------------------------------------------------
+//
+// One position, two or three lines, no labels on the row itself — the
+// header row names the columns once per page:
+//
+//   AAA111 / Girosammelverwahrung 25,000 118,400 EUR 2.960,00 2.500,00 +460,00
+//   ALPHA INDUSTRIES AG NA O.N. +0,00
+//
+// WKN and custody type, quantity, last price, currency, value, purchase
+// value, gain; then the name with the accrued interest. A security held
+// abroad puts a line with the country and the custodian ("über AKV")
+// before its name. OCR reads "/" as "7", a WKN's 0 as O, and splits
+// amounts after their separators ("7. 953, 00").
+
+const NUM = String.raw`[+-]?\d{1,3}(?:\.\d{3})+(?:,\d+)?|[+-]?\d+(?:,\d+)?`;
+const HOLDING_ROW_RE = new RegExp(
+  String.raw`^\s*([A-Z0-9]{6})\s*[/|7]\s*(\S*(?:verwahrung|rechnung))\s+(${NUM})\s+(${NUM})\s+([A-Z]{3})\s+(${NUM})(?:\s+(${NUM}))?`,
+  "i",
+);
+/** A line that heads a table or a page, never a name. */
+const TABLE_CHROME_RE = /depotbestand|^\s*wkn\b|^\s*bezeichnung\b|verwahrart|seite\s+\d|finanzreport|kundennummer/i;
+/** The custodian line of a security held abroad ("Irland über AKV"). */
+const CUSTODIAN_RE = /\b(?:über|uber|ueber)\s+AKV\b|\bAKV\b/i;
+
+/** "7. 953, 00" → "7.953,00": amounts OCR split after a separator. */
+function rejoinSplitAmounts(line: string): string {
+  return line.replace(/(\d)\. (\d{3})(?!\d)/g, "$1.$2").replace(/(\d), (\d{2,3})(?!\d)/g, "$1,$2");
+}
+
+function num(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const n = parseGermanNumber(raw.replace(/^\+/, ""));
+  return n === null ? null : Math.abs(n);
+}
+
+/** The name on the lines after a row: past the custodian line, without the accrued interest. */
+function rowName(lines: string[], row: number): string | null {
+  for (let k = row + 1; k <= Math.min(lines.length - 1, row + 3); k++) {
+    const line = lines[k]!;
+    if (HOLDING_ROW_RE.test(rejoinSplitAmounts(line)) || TABLE_CHROME_RE.test(line)) return null;
+    const stripped = rejoinSplitAmounts(line).replace(/\s*[+-]\s*\d[\d.,]*\s*$/, "").trim();
+    if (stripped.length === 0 || CUSTODIAN_RE.test(stripped)) continue;
+    return cleanSecurityName(stripped);
+  }
+  return null;
+}
+
+/** Every row of a holdings table, with the line it stands on. */
+export function holdingRows(lines: string[]): Array<StatementPosition & { line: number }> {
+  const rows: Array<StatementPosition & { line: number }> = [];
+  lines.forEach((raw, i) => {
+    const m = HOLDING_ROW_RE.exec(rejoinSplitAmounts(raw));
+    if (!m) return;
+    const wkn = repairWkn(m[1]!);
+    // Six characters before a custody type, but a WKN has a digit.
+    if (!/\d/.test(wkn)) return;
+    const quantity = num(m[3]);
+    const price = num(m[4]);
+    const value = num(m[6]);
+    // The column after the value is the purchase value — unless it is the
+    // gain already (signed), because the purchase value was not printed.
+    const purchase = m[7] && !/^[+-]/.test(m[7]) ? num(m[7]) : null;
+    rows.push({
+      line: i,
+      isin: null,
+      wkn,
+      name: rowName(lines, i),
+      quantity,
+      price,
+      value,
+      currency: m[5]!.toUpperCase(),
+      acquisitionPrice:
+        purchase !== null && quantity !== null && quantity > 0 ? Math.round((purchase / quantity) * 1e6) / 1e6 : null,
+    });
+  });
+  return rows;
+}
+
+/**
+ * The part of a long paper the model should read for the positions: the
+ * first lines (date, depot number) and everything from the holdings
+ * heading on. Null when the paper is short or has no such heading.
+ */
+export function holdingsSection(text: string, limit = 16_000): string | null {
+  if (text.length <= limit) return null;
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => /depotbestand|depotübersicht|bestandsübersicht|vermögensaufstellung/i.test(l));
+  if (start <= 20) return null;
+  return [...lines.slice(0, 15), "…", ...lines.slice(Math.max(15, start - 3))].join("\n");
+}
+
 /**
  * The rules' reading of a statement. `positions` has one entry per
  * identifier found; the figures are those labelled near it, null where no
- * label matched.
+ * label matched — or, in a holdings table, those of its row.
  */
 export function inspectDepotStatement(raw: string | null | undefined): StatementInspection | null {
   if (!raw || raw.trim().length === 0) return null;
   const text = rejoinColumnAmounts(normalizeText(raw));
   const statement = looksLikeDepotStatement(text);
   const lines = text.split("\n");
-  const hits = identifierHits(lines);
-  const identifierLines = hits.map((h) => h.line);
-  const positions: StatementPosition[] = hits.map((hit) => {
+  const rows = holdingRows(lines);
+  const inRows = new Set(rows.map((r) => r.wkn));
+  const hits = identifierHits(lines).filter((h) => !(h.wkn && inRows.has(h.wkn)) && !rows.some((r) => r.line === h.line));
+  const identifierLines = [...hits.map((h) => h.line), ...rows.map((r) => r.line)];
+  const tablePositions: StatementPosition[] = rows.map(({ line: _line, ...p }) => p);
+  const labelledPositions: StatementPosition[] = hits.map((hit) => {
     const block = blockAround(lines, hit.line, identifierLines);
     // "10,5 Anteile" before "Stück 25": a number right before its unit is the quantity for sure.
     const quantity = amountBefore(block, QUANTITY_AFTER_LABELS) ?? amountAfter(block, QUANTITY_LABELS);
@@ -268,7 +386,7 @@ export function inspectDepotStatement(raw: string | null | undefined): Statement
     statement,
     asOf: statementDate(text),
     depotNumber: depotNumberOf(text),
-    positions,
+    positions: [...tablePositions, ...labelledPositions],
   };
 }
 
@@ -323,7 +441,7 @@ export function parseLlmStatement(raw: Record<string, unknown>): LlmStatement {
     // An identifier the model misread (a wrong check digit, a seventh character) is no identifier.
     const isinRaw = str(p.isin)?.toUpperCase().replace(/\s/g, "") ?? null;
     const isin = isinRaw && isinChecksumValid(isinRaw) ? isinRaw : null;
-    const wknRaw = str(p.wkn)?.toUpperCase().replace(/\s/g, "") ?? null;
+    const wknRaw = str(p.wkn) ? repairWkn(str(p.wkn)!.replace(/\s/g, "")) : null;
     const wkn = wknRaw && /^[A-Z0-9]{6}$/.test(wknRaw) && /\d/.test(wknRaw) ? wknRaw : null;
     if (!isin && !wkn) continue;
     const currency = str(p.currency)?.toUpperCase() ?? null;

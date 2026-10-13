@@ -6,6 +6,7 @@ import {
   mergeStatement,
   parseLlmStatement,
   positionAddsUp,
+  repairWkn,
   statementDate,
 } from "./depot-statement-parser";
 
@@ -76,6 +77,68 @@ Beta Global Fonds ISIN ${ISIN_B}
     const r = inspectDepotStatement(`Mitteilung\nISIN ${ISIN_A}`)!;
     expect(r.statement).toBe(false);
     expect(r.positions).toHaveLength(1);
+  });
+});
+
+// A bank's periodic report: the holdings table runs over pages, with the
+// usual OCR slips — "7" for "/", an O in a WKN, amounts split after a separator.
+const REPORT_TEXT = `Finanzreport Nr. 9 per 01.04.2026 - Seite 7
+Kundennummer 000 0000000 Beispielbank
+Umsätze: Wertpapierkauf vom 02.03.2026 siehe Abrechnung
+Depot
+Depotbestand EUR EUR EUR
+WKN / Verwahrart Anzahl / Nominal letzter Währung Kurswert Kaufwert Gewinn / Verlust
+Bezeichnung Kurs Stückzinsen
+AAA111 / Girosammelverwahrung 25,000 118,400 EUR 2.960,00 2.500,00 +460,00
+ALPHA INDUSTRIES AG NA O.N. +0,00
+BBB222 / Wertpapierrechnung 100,000 12,500 EUR 1.250,00 1.400,00 -150,00
+Beispielland über AKV +0,00
+BETA GLOBAL PLC LS 0.10
+Beispielbank - Musterstadt
+Seite 7
+Finanzreport Nr. 9 per 01.04.2026 - Seite 8
+Depotbestand EUR EUR EUR
+WKN / Verwahrart Anzahl / Nominal letzter Währung Kurswert Kaufwert Gewinn / Verlust
+Bezeichnung Kurs Stückzinsen
+CCC333 7 Girosammelverwahrung 40,000 198,750 EUR 7. 950, 00 6.000,00 +1.950,00
+GAMMA WERKE AG ST +0, 00
+DOD4E4 / Girosammelverwahrung 10,000 1.234,500 EUR 12.345,00 9.000,00 +3.345,00
+DELTA SE INH O.N. +0,00`;
+
+describe("holdings table of a periodic report", () => {
+  it("reads every row across pages, with name, figures and the cost per unit", () => {
+    const r = inspectDepotStatement(REPORT_TEXT)!;
+    // A holdings table is a statement, whatever trades the report lists besides.
+    expect(r.statement).toBe(true);
+    expect(r.asOf).toBe("2026-04-01");
+    expect(r.depotNumber).toBeNull();
+    expect(r.positions.map((p) => p.wkn)).toEqual(["AAA111", "BBB222", "CCC333", "D0D4E4"]);
+    expect(r.positions[0]).toEqual({
+      isin: null,
+      wkn: "AAA111",
+      name: "ALPHA INDUSTRIES AG NA O.N.",
+      quantity: 25,
+      price: 118.4,
+      value: 2960,
+      currency: "EUR",
+      acquisitionPrice: 100,
+    });
+    // Held abroad: the custodian line is not the name.
+    expect(r.positions[1]).toMatchObject({ name: "BETA GLOBAL PLC LS 0.10", quantity: 100, value: 1250, acquisitionPrice: 14 });
+    // "7" for "/", and an amount split after its separators.
+    expect(r.positions[2]).toMatchObject({ name: "GAMMA WERKE AG ST", quantity: 40, price: 198.75, value: 7950 });
+    expect(r.positions[3]).toMatchObject({ name: "DELTA SE INH O.N.", quantity: 10, price: 1234.5, value: 12345 });
+    for (const p of r.positions) expect(positionAddsUp(p)).toBe(true);
+  });
+
+  it("does not take the column header for a WKN", () => {
+    const r = inspectDepotStatement("Depotbestand\nWKN / Verwahrart Anzahl Kurswert")!;
+    expect(r.positions).toEqual([]);
+  });
+
+  it("repairs a WKN OCR read with I or O", () => {
+    expect(repairWkn("AOB2C3")).toBe("A0B2C3");
+    expect(repairWkn("i23456")).toBe("123456");
   });
 });
 

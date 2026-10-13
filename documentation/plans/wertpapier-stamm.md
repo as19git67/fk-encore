@@ -141,6 +141,17 @@ The portfolio takes securities from wherever they turn up:
      would only duplicate them.
    - Identifiers the model reads count only against the master (stage 1):
      an ISIN or WKN not confirmed is a proposal, never a booking.
+   - Holdings tables of a bank's periodic report ("Finanzreport"): rows of
+     WKN / custody type, quantity, last price, currency, value, purchase
+     value and gain, the name on the next line (after a custodian line for
+     securities held abroad), running over pages. `holdingRows` reads them
+     with the usual OCR slips repaired: "7" for "/", amounts split after a
+     separator, and an I or O in a WKN (WKNs use neither). A holdings table
+     makes a paper a statement whatever trades the report also lists; the
+     model gets the report's head and the table, not the account pages
+     before it. A WKN-only row for a security the master knows only by its
+     ISIN is matched by name (exactly one confirmed entry, every significant
+     word shared), which also places a report without a depot number.
 
 ## Operations
 

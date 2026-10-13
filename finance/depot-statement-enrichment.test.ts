@@ -381,6 +381,35 @@ Alpha Industries AG ${ISIN_A}
     expect(run!.totals.statements_unplaced).toBe(1);
   });
 
+  it("reads a report's holdings table with WKNs only, placing it by the names the master knows", async () => {
+    // The master knows Alpha by its ISIN alone (the bank's sync delivered no WKN).
+    const { depot } = await setup({ depotNumber: null });
+    const docId = await insertDocument(`Finanzreport Nr. 9 per 01.04.2026
+Depotbestand EUR EUR EUR
+WKN / Verwahrart Anzahl / Nominal letzter Währung Kurswert Kaufwert Gewinn / Verlust
+Bezeichnung Kurs Stückzinsen
+AAA111 / Girosammelverwahrung 25,000 118,400 EUR 2.960,00 2.500,00 +460,00
+ALPHA INDUSTRIES AG NA O.N. +0,00
+BBB222 / Girosammelverwahrung 100,000 12,500 EUR 1.250,00 1.400,00 -150,00
+BETA GLOBAL AG +0,00`);
+
+    const r = await readDepotStatement(docId);
+    expect(r.outcome).toBe("stored");
+    expect(r.matched_by).toBe("securities");
+    expect(r.positions_stored).toBe(1);
+    expect(r.positions_proposed).toBe(1);
+    const row = (await holdingsOf(depot)).find((h) => h.document_id === docId)!;
+    // Keyed like the bank's rows: under the ISIN the master knows.
+    expect(row).toMatchObject({ isin: ISIN_A, wkn: "AAA111", source: "document" });
+    expect(Number(row.amount)).toBe(25);
+    expect(row.acquisition_price).toBe("100.000000");
+    // The master learnt the WKN; Beta is a proposal, not a second Alpha.
+    const [alpha] = await db.select().from(financeDepotSecurity).where(eq(financeDepotSecurity.isin, ISIN_A));
+    expect(alpha!.wkn).toBe("AAA111");
+    const proposed = await listSecurities([depot], ["proposed"]);
+    expect(proposed.map((s) => s.wkn)).toEqual(["BBB222"]);
+  });
+
   it("asks the model once about a paper the rules do not recognise and reads it as the kind it names", async () => {
     const { depot } = await setup();
     // No heading the rules know: neither "Depotauszug" nor "Wertpapierabrechnung".

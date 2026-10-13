@@ -187,7 +187,8 @@ export function groundingOf(text: string | null, llm: SettlementValues | null): 
   const g: Grounding = {};
   const compact = text.toUpperCase().replace(/\s+/g, "");
   if (llm.isin) g.isin = compact.includes(llm.isin);
-  if (llm.wkn) g.wkn = compact.includes(llm.wkn);
+  // WKNs never use I or O: what OCR printed as such is a 1 or a 0.
+  if (llm.wkn) g.wkn = compact.replace(/O/g, "0").replace(/I/g, "1").includes(llm.wkn.replace(/O/g, "0").replace(/I/g, "1"));
   if (llm.depotNumber) g.depotNumber = text.replace(/\D/g, "").includes(llm.depotNumber);
   if (llm.quantity !== null) {
     const q = llm.quantity;
