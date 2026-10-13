@@ -14,10 +14,14 @@
  *   - `source_folder_prefix`: an origin folder and everything below it (#1477).
  *
  * A document matches when its origin folder lies under the prefix, OR when it
- * satisfies every one of the *other* parts that are set (correspondent and
- * numbers both, when both are given). The folder is an alternative way in on
- * purpose: terms and conditions carry no number and often no clear sender,
- * but they sat next to the policy in the folder.
+ * carries one of the rule's numbers, OR — for a rule without numbers — when
+ * its correspondent is the rule's. A number is specific enough on its own: the
+ * same file number reaches the case from the court, the lawyer and the
+ * opposing side, and the model names the sender of each differently, so
+ * requiring the correspondent as well kept out exactly the letters the
+ * dossier is for. The folder is an alternative way in on purpose: terms and
+ * conditions carry no number and often no clear sender, but they sat next to
+ * the policy in the folder.
  *
  * What the rule added it can take away again (`joined_by = 'rule'`), and
  * nothing else: a document a person put in stays, and a document a person
@@ -107,15 +111,12 @@ export function ruleMatchesDocument(rule: CollectionRule, doc: RuleSubject): boo
     const p = rule.source_folder_prefix;
     if (doc.source_folder === p || doc.source_folder.startsWith(`${p}/`)) return true;
   }
-  const wantsCorrespondent = !!rule.correspondent_slug;
-  const wantsRefs = (rule.reference_numbers?.length ?? 0) > 0;
-  if (!wantsCorrespondent && !wantsRefs) return false;
-  if (wantsCorrespondent && doc.correspondent_slug !== rule.correspondent_slug) return false;
-  if (wantsRefs) {
+  // A number decides alone; the correspondent only when the rule has none.
+  if ((rule.reference_numbers?.length ?? 0) > 0) {
     const have = new Set((doc.reference_numbers ?? []).flatMap((r) => referenceKeys(r)));
-    if (!rule.reference_numbers!.some((n) => have.has(normalizeReference(stripReferenceLabel(n))))) return false;
+    return rule.reference_numbers!.some((n) => have.has(normalizeReference(stripReferenceLabel(n))));
   }
-  return true;
+  return !!rule.correspondent_slug && doc.correspondent_slug === rule.correspondent_slug;
 }
 
 type CollectionRow = typeof documentCollections.$inferSelect;

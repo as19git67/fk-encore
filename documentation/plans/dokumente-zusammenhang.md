@@ -157,8 +157,11 @@ line per number ("Vertragsnummer: 12345").
 
 As built: `documents/dossiers.ts`. `document_collections.kind` and `rule`
 (migration 0234), `document_collection_items.joined_by`. A document matches
-when its origin folder lies under the prefix, or when it satisfies every
-other set part (correspondent and numbers). The rule runs after
+when its origin folder lies under the prefix, or when it carries one of
+the rule's numbers, or (for a rule without numbers) when its correspondent
+is the rule's. A number used to need the correspondent as well; that kept
+out letters about the same file from other senders, so a number now decides
+alone. The rule runs after
 classification, after an attribute edit, on save of the rule and on
 "Regel jetzt anwenden"; it withdraws only what it added, and a document a
 person removed is remembered in `rule.excluded_document_ids`. A new dossier

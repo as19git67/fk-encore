@@ -39,10 +39,15 @@ describe("ruleMatchesDocument", () => {
     expect(ruleMatchesDocument({ reference_numbers: ["7 K 123/24"] }, legacy)).toBe(true);
   });
 
-  it("needs every set part among correspondent and numbers", () => {
+  it("lets a number decide alone and the correspondent only without numbers", () => {
     expect(ruleMatchesDocument({ correspondent_slug: "beispiel-ag", reference_numbers: ["AB123456"] }, doc())).toBe(true);
-    expect(ruleMatchesDocument({ correspondent_slug: "andere-ag", reference_numbers: ["AB123456"] }, doc())).toBe(false);
+    // Same number from another sender: the number is enough.
+    expect(ruleMatchesDocument({ correspondent_slug: "andere-ag", reference_numbers: ["AB123456"] }, doc())).toBe(true);
+    // The right sender with another number stays out: the numbers decide.
     expect(ruleMatchesDocument({ correspondent_slug: "beispiel-ag", reference_numbers: ["ZZ9999"] }, doc())).toBe(false);
+    expect(ruleMatchesDocument({ correspondent_slug: "beispiel-ag" }, doc())).toBe(true);
+    expect(ruleMatchesDocument({ correspondent_slug: "andere-ag" }, doc())).toBe(false);
+    expect(ruleMatchesDocument({ reference_numbers: ["XI 1234/05"] }, doc({ reference_numbers: refs("XI 1234/05") }))).toBe(true);
     expect(ruleMatchesDocument({ reference_numbers: ["AB123456"] }, doc({ correspondent_slug: null }))).toBe(true);
   });
 
