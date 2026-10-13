@@ -23,6 +23,7 @@ import {
   type DocumentCategory,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import { useConfirmAsync } from '../composables/useConfirmAsync'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -158,8 +159,15 @@ async function confirmAccept() {
   }
 }
 
+const askConfirm = useConfirmAsync()
+
 async function reject(s: CategorySuggestion) {
-  if (!window.confirm(`Vorschlag "${s.suggested_name}" ablehnen?`)) return
+  if (!(await askConfirm({
+    header: 'Vorschlag ablehnen',
+    message: `Kategorie-Vorschlag „${s.suggested_name}“ ablehnen?`,
+    acceptLabel: 'Ablehnen',
+    danger: true,
+  }))) return
   error.value = ''
   info.value = ''
   try {

@@ -16,6 +16,7 @@ import {
   type RegionStorage,
 } from '../../api/osmAdmin'
 import { usePolling } from '../../composables/usePolling'
+import { useConfirmAsync } from '../../composables/useConfirmAsync'
 
 const osmRegions = ref<OsmRegionImport[]>([])
 const osmError = ref('')
@@ -150,8 +151,15 @@ async function handleRefreshOsmRegion(slug: string) {
   }
 }
 
+const askConfirm = useConfirmAsync()
+
 async function handleDeleteOsmRegion(slug: string) {
-  if (!window.confirm(`Region ${slug} entfernen? Droppt die PostGIS-Datenbank im geo-Service (Postgres-Daten gehen verloren, mehrere GB) und entfernt die DB-Zeile. Nicht rückgängig zu machen.`)) return
+  if (!(await askConfirm({
+    header: 'Region entfernen',
+    message: `Region ${slug} entfernen? Droppt die PostGIS-Datenbank im geo-Service (Postgres-Daten gehen verloren, mehrere GB) und entfernt die DB-Zeile. Nicht rückgängig zu machen.`,
+    acceptLabel: 'Entfernen',
+    danger: true,
+  }))) return
   osmLoading.value = true
   try {
     await deleteOsmRegion(slug)
@@ -214,13 +222,17 @@ async function handleReimportOutdated() {
   // "vier Regionen" is not something anybody can check before saying
   // yes to it.
   const names = list.map((r) => `· ${r.slug} (fehlt: ${r.missing.join(', ')})`).join('\n')
-  if (!window.confirm(
-    `${list.length} Region(en) neu importieren?\n\n${names}\n\n`
-    + 'Die PostGIS-Datenbank wird jeweils gelöscht und der Import neu gestartet. '
-    + 'Das dauert pro Region 10–30 Minuten, und solange ist sie nicht verfügbar. '
-    + 'Die PBF-Datei bleibt im Cache — es wird nichts neu heruntergeladen, der '
-    + 'Import hat damit aber auch denselben Datenstand wie zuvor.',
-  )) return
+  if (!(await askConfirm({
+    header: 'Regionen neu importieren',
+    message:
+      `${list.length} Region(en) neu importieren?\n\n${names}\n\n`
+      + 'Die PostGIS-Datenbank wird jeweils gelöscht und der Import neu gestartet. '
+      + 'Das dauert pro Region 10–30 Minuten, und solange ist sie nicht verfügbar. '
+      + 'Die PBF-Datei bleibt im Cache — es wird nichts neu heruntergeladen, der '
+      + 'Import hat damit aber auch denselben Datenstand wie zuvor.',
+    acceptLabel: 'Neu importieren',
+    danger: true,
+  }))) return
 
   reimportLoading.value = true
   try {

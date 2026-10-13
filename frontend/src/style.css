@@ -293,3 +293,9 @@ a:hover {
   transform: translate(-50%, -50%) rotate(-45deg);
   pointer-events: none;
 }
+
+/* Confirmation messages may list items one per line (the OSM re-import
+   names every region it drops); keep the line breaks the caller wrote. */
+.p-confirmdialog-message {
+  white-space: pre-line;
+}

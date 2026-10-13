@@ -20,6 +20,7 @@ import {
   type HintSuggestionKind,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import { useConfirmAsync } from '../composables/useConfirmAsync'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -112,8 +113,14 @@ function formatDate(dateStr: string | null): string {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+const askConfirm = useConfirmAsync()
+
 async function handleAccept(s: HintSuggestion) {
-  if (!window.confirm(`Hint-Vorschlag für „${s.target_slug}" als nützlich markieren?`)) return
+  if (!(await askConfirm({
+    header: 'Vorschlag übernehmen',
+    message: `Hint-Vorschlag für „${s.target_slug}“ als nützlich markieren?`,
+    acceptLabel: 'Als nützlich markieren',
+  }))) return
   acceptingById.value[s.id] = true
   error.value = ''
   info.value = ''
@@ -129,7 +136,12 @@ async function handleAccept(s: HintSuggestion) {
 }
 
 async function handleReject(s: HintSuggestion) {
-  if (!window.confirm(`Hint-Vorschlag für „${s.target_slug}" ablehnen?`)) return
+  if (!(await askConfirm({
+    header: 'Vorschlag ablehnen',
+    message: `Hint-Vorschlag für „${s.target_slug}“ ablehnen?`,
+    acceptLabel: 'Ablehnen',
+    danger: true,
+  }))) return
   rejectingById.value[s.id] = true
   error.value = ''
   info.value = ''
