@@ -189,14 +189,15 @@ async function readStatement(documentId: number, rules: StatementInspection, tex
   // Positions only count with an identifier the text shows: the model reads, the text checks.
   if (llm) {
     const compact = text.toUpperCase().replace(/\s+/g, "");
-    // A WKN as OCR printed it may carry an O for a 0 (see repairWkn).
+    // An identifier as OCR printed it may carry an O for a 0: compared with
+    // O/0 and I/1 alike (repairWkn maps both the same way).
     const compactWkn = repairWkn(compact);
     llm = {
       ...llm,
       positions: llm.positions
         .map((p) => ({
           ...p,
-          isin: p.isin && compact.includes(p.isin) ? p.isin : null,
+          isin: p.isin && compactWkn.includes(repairWkn(p.isin)) ? p.isin : null,
           wkn: p.wkn && compactWkn.includes(p.wkn) ? p.wkn : null,
         }))
         .filter((p) => p.isin || p.wkn),

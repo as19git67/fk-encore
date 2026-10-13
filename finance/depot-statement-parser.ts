@@ -23,7 +23,7 @@
  * identifier is dropped, one without a quantity is reported, never stored.
  */
 
-import { isinChecksumValid } from "./depot-derivation";
+import { isinChecksumValid, repairIsin } from "./depot-derivation";
 import {
   cleanSecurityName,
   hasStrongSettlementWording,
@@ -189,7 +189,7 @@ function identifierHits(lines: string[]): IdentifierHit[] {
   const seen = new Set<string>();
   lines.forEach((line, i) => {
     for (const m of line.matchAll(ISIN_GLOBAL_RE)) {
-      const isin = m[1]!;
+      const isin = repairIsin(m[1]!);
       if (!isinChecksumValid(isin) || seen.has(isin)) continue;
       seen.add(isin);
       hits.push({ isin, wkn: null, line: i });
@@ -440,7 +440,8 @@ export function parseLlmStatement(raw: Record<string, unknown>): LlmStatement {
     const p = item as Record<string, unknown>;
     // An identifier the model misread (a wrong check digit, a seventh character) is no identifier.
     const isinRaw = str(p.isin)?.toUpperCase().replace(/\s/g, "") ?? null;
-    const isin = isinRaw && isinChecksumValid(isinRaw) ? isinRaw : null;
+    const isinFixed = isinRaw ? repairIsin(isinRaw) : null;
+    const isin = isinFixed && isinChecksumValid(isinFixed) ? isinFixed : null;
     const wknRaw = str(p.wkn) ? repairWkn(str(p.wkn)!.replace(/\s/g, "")) : null;
     const wkn = wknRaw && /^[A-Z0-9]{6}$/.test(wknRaw) && /\d/.test(wknRaw) ? wknRaw : null;
     if (!isin && !wkn) continue;

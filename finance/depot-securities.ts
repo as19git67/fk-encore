@@ -16,6 +16,7 @@
 import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 
 import db from "../db/database";
+import { isinChecksumValid } from "./depot-derivation";
 import {
   financeAccountHolding,
   financeDepotSecurity,
@@ -83,6 +84,8 @@ export async function admitSecurity(
   source: Exclude<SecuritySource, "user">,
   evidence?: SecurityEvidence,
 ): Promise<SecurityStatus> {
+  // A misread ISIN (failing check digit) is never written to the master.
+  if (ids.isin && !isinChecksumValid(ids.isin)) ids = { ...ids, isin: null };
   if (!ids.isin && !ids.wkn) return "confirmed";
   const existing = await findSecurity(accountId, ids);
   if (existing) {

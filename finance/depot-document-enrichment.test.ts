@@ -308,7 +308,7 @@ describe("finance/depot-document-enrichment", () => {
     const invoice = await insertDocument("Rechnung Nr. 1 über 120,00 EUR");
     expect((await enrichDocument(invoice)).outcome).toBe("not_settlement");
 
-    const foreign = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ9"));
+    const foreign = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ2"));
     expect((await enrichDocument(foreign)).outcome).toBe("no_holding");
 
     const pending = await insertDocument(BUY_TEXT, { status: "pending" });
@@ -388,7 +388,7 @@ describe("finance/portfolio — review and apply", () => {
     await insertGiroBooking(giro, "2026-03-16", "-2900.00");
     await deriveDepotTransactionsForBankcontact(bc);
     const conflictDoc = await insertDocument(BUY_TEXT);
-    const foreignDoc = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ9"));
+    const foreignDoc = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ2"));
 
     const review = await getPortfolioReview({});
     expect(review.conflicts).toHaveLength(1);
@@ -476,8 +476,8 @@ describe("finance/portfolio — review and apply", () => {
 });
 
 describe("finance/depot-document-enrichment — finding the depot without a holding", () => {
-  // A position sold before the first sync: no snapshot holds DE000000SLD3.
-  const SOLD_ISIN = "DE000000SLD3";
+  // A position sold before the first sync: no snapshot holds DE000000SLD4.
+  const SOLD_ISIN = "DE000000SLD4";
   const soldText = (depotLine: string) => `Beispielbank AG
 Wertpapierabrechnung Verkauf
 ${depotLine}
@@ -913,7 +913,7 @@ Datum 15.01.2026`);
 describe("finance/portfolio — documents ignored for the depots", () => {
   it("are neither read in nor listed, show up on request, and come back when taken back", async () => {
     const { depot } = await setup();
-    const foreign = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ9"));
+    const foreign = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ2"));
     const buy = await insertDocument(BUY_TEXT);
 
     let review = await getPortfolioReview({});
@@ -1147,15 +1147,15 @@ describe("finance/portfolio — security names", () => {
       // The holding names this one.
       tx(ISIN_A, "per 01.02.2026 Falsch gelesen AG"),
       // Only documents name these.
-      tx("DE000000BBB2", "per 01.02.2026 Beta Werke AG"),
+      tx("DE000000BBB5", "per 01.02.2026 Beta Werke AG"),
       // ensureUser(1) is called "User1": the address block, not a security.
-      tx("DE000000CCC3", "User1"),
+      tx("DE000000CCC9", "User1"),
     ]);
     const resp = await getPortfolio({});
     const name = (isin: string) => resp.positions.find((p) => p.isin === isin)?.name;
     expect(name(ISIN_A)).toBe("Alpha Industries AG");
-    expect(name("DE000000BBB2")).toBe("Beta Werke AG");
-    expect(name("DE000000CCC3")).toBeNull();
+    expect(name("DE000000BBB5")).toBe("Beta Werke AG");
+    expect(name("DE000000CCC9")).toBeNull();
   });
 });
 
