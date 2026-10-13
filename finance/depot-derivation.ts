@@ -106,8 +106,8 @@ const DIGIT_FOR: Record<string, string> = { O: "0", I: "1" };
 
 /**
  * An ISIN as OCR read it, repaired. ISINs rarely use the letters O and I
- * after the country code, while OCR often reads a 0 or 1 as one ("GBOOB…"
- * for "GB00B…" — read so by the rules and by a model copying the text
+ * after the country code, while OCR often reads a 0 or 1 as one ("DEOOO…"
+ * for "DE000…" — read so by the rules and by a model copying the text
  * alike). So:
  *
  *   1. every O and I after the country code read as 0 and 1: taken when

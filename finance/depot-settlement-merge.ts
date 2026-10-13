@@ -131,7 +131,7 @@ export function parseLlmSettlement(raw: Record<string, unknown>): SettlementValu
   const kindRaw = str(raw.kind)?.toLowerCase();
   const kind: SettlementKind | null =
     kindRaw === "buy" || kindRaw === "sell" || kindRaw === "dividend" ? kindRaw : null;
-  // A model copying OCR'd text copies its slips too ("GBOOB…" for "GB00B…").
+  // A model copying OCR'd text copies its slips too ("DEOOO…" for "DE000…").
   const isinRaw = str(raw.isin)?.toUpperCase().replace(/\s/g, "") ?? null;
   const isin = isinRaw ? repairIsin(isinRaw) : null;
   const wkn = str(raw.wkn)?.toUpperCase().replace(/\s/g, "") ?? null;
