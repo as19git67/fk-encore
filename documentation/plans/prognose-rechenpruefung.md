@@ -1,218 +1,218 @@
-# Prognose (Finanzen › Prognose): Prüfung der Rechnungen
+# Forecast (Finance › Prognose): audit of the calculations
 
-Stand: 2026-09-28. Geprüft wurden die Simulation (`finance/forecast-engine.ts`),
-die Was-wäre-wenn-Rechnungen (`finance/forecast-analysis.ts`), die Abbildung
-der gespeicherten Daten auf die Engine (`finance/forecast.ts`), der
-Tabellen-Import (`finance/forecast-import.ts`), das Lesen von Standmitteilungen
-und Buchungen (`finance/forecast-statements-extract.ts`,
-`finance/forecast-bookings-extract.ts`) und die Anzeige im Frontend
-(Kaufkraft-Umrechnung, Prozentfelder, Charts, Dialoge).
+As of 2026-09-28. Audited were the simulation (`finance/forecast-engine.ts`),
+the what-if calculations (`finance/forecast-analysis.ts`), the mapping
+of the stored data onto the engine (`finance/forecast.ts`), the
+spreadsheet import (`finance/forecast-import.ts`), the reading of pension statements
+and transactions (`finance/forecast-statements-extract.ts`,
+`finance/forecast-bookings-extract.ts`) and the display in the frontend
+(purchasing-power conversion, percentage fields, charts, dialogs).
 
-Alle Beispiele hier sind erfunden.
+All examples here are invented.
 
-Nachtrag: Den einmaligen Tabellen-Import gibt es nicht mehr (entfernt, weil
-er nie wieder gebraucht wird). Die Punkte zum Import unten beschreiben, was
-beim Prüfen galt; schon importierte Posten tragen weiter die Herkunft
-„Excel-Import“.
+Addendum: The one-off spreadsheet import no longer exists (removed because
+it is never needed again). The points on the import below describe what
+applied during the audit; items that were already imported still carry the origin
+„Excel-Import“ (Excel import).
 
-## Behoben (Commit „Forecast: corrections from the calculation audit“)
+## Fixed (commit „Forecast: corrections from the calculation audit“)
 
 ### Engine
 
-1. **Tagesgeld verzinste sich mit dem Szenario-Zins, steuerfrei.** Ein
-   Vermögens-Posten im Topf „Tagesgeld / Konto“ ohne eigene Rendite bekam
-   den Standard-Zins (4 %), und Zinsen auf Bargeld wurden nicht besteuert.
-   Über 30 Jahre verdreifacht das den Bargeld-Topf. Jetzt: leer = 0 % für
-   Bargeld, Standard-Zins nur für Depot/Sonstiges/Immobilie; Zinsen auf
-   Bargeld werden wie andere Kapitalerträge pauschal besteuert. Immobilien
-   bleiben unbesteuert (Wertsteigerung wird nicht realisiert).
-2. **Gesetzliche Rente: Rentenanpassung erst ab Rentenbeginn.** Die
-   Renteninformation nennt die Rente in heutigen Werten (aktueller
-   Rentenwert, ohne künftige Anpassungen). Die Engine ließ den Betrag bis
-   zum Beginn unverändert und wertete erst danach auf; bei 2 % und 10 Jahren
-   bis zum Beginn fehlten so 22 % der nominalen Rente. Jetzt wird eine
-   gesetzliche Rente ab heute fortgeschrieben; Betriebs- und Privatrenten
-   bleiben nominal zum Beginn (so prognostiziert sie die Standmitteilung).
-3. **Gesetzliche Rente: früherer Ausstieg senkte die Rente nicht.** Die
-   prognostizierte Rente setzt Beiträge bis zur Regelaltersgrenze voraus.
-   Wer mit 61 statt 67 aufhört, erwirbt die restlichen Entgeltpunkte nicht.
-   Neues Feld „Bisher erreichte Anwartschaft“ (steht in jeder
-   Renteninformation): die Rente liegt dann anteilig zu den gearbeiteten
-   Monaten zwischen Anwartschaft und Prognose; darauf kommt der Abschlag für
-   den früheren Beginn. Ohne das Feld gilt weiter die Prognose. Der
-   Standmitteilungs-Leser kennt den Wert jetzt („bisher erreichte
-   Rentenanwartschaft“) und schlägt ihn vor.
-4. **Rentenbeginn im Geburtsmonat.** Eine gesetzliche Rente beginnt mit dem
-   Monat nach dem Geburtsmonat (§ 99 SGB VI); wer am 1. geboren ist, im
-   Geburtsmonat. Gilt für den Zeitpunkt „Gesetzliche Rente“ und für die
-   Abschlagsrechnung (Monate vor der Regelaltersgrenze).
-5. **Regelaltersgrenze pauschal 67.** Neue Personen bekommen sie nach
-   Jahrgang (65 bis 1946, steigend, 67 ab 1964; Zwischenmonate auf ganze
-   Jahre gerundet).
-6. **Kapitalwahl mit 0 € zahlte nichts.** War „Einmalzahlung statt Rente“
-   gewählt und der Betrag danach gelöscht, zahlte die Engine 0 € einmalig
-   und keine Rente. Jetzt: Einmalzahlung nur bei Betrag > 0; der Dialog
-   setzt beim Löschen des Betrags auf Rente zurück.
-7. **Sensitivität/Hebel griffen nicht bei Anlagen mit eigener Rendite.** Die
-   Rendite-Stufen verschoben nur den Standard-Zins; ein Depot mit eigenen
-   5 % blieb unberührt. Jetzt wird jede Anlage außer Bargeld um dieselbe
-   Stufe verschoben.
-8. Tote Variable `toPots` entfernt (keine Doppelzählung, war ungenutzt).
+1. **Savings accounts compounded at the scenario interest rate, tax-free.** An
+   asset item in the „Tagesgeld / Konto“ (savings / account) pot without its own return got
+   the default interest rate (4 %), and interest on cash was not taxed.
+   Over 30 years this triples the cash pot. Now: empty = 0 % for
+   cash, default interest rate only for securities account/other/real estate; interest on
+   cash is taxed at a flat rate like other capital gains. Real estate
+   stays untaxed (appreciation is not realized).
+2. **Statutory pension: pension adjustment only from the pension start.** The
+   pension information states the pension in today's values (current
+   pension value, without future adjustments). The engine left the amount unchanged
+   until the start and only revalued it afterwards; at 2 % and 10 years
+   until the start, 22 % of the nominal pension was missing. Now a
+   statutory pension is carried forward from today; occupational and private pensions
+   stay nominal at the start (this is how the pension statement projects them).
+3. **Statutory pension: leaving earlier did not lower the pension.** The
+   projected pension assumes contributions until the standard retirement age.
+   Someone who stops at 61 instead of 67 does not earn the remaining earnings points.
+   New field „Bisher erreichte Anwartschaft“ (entitlement reached so far; it appears in every
+   pension information): the pension then lies between entitlement and
+   projection in proportion to the months worked; the deduction for
+   the earlier start is applied on top. Without the field the projection still applies.
+   The statement reader now knows the value („bisher erreichte
+   Rentenanwartschaft“) and suggests it.
+4. **Pension start in the birth month.** A statutory pension starts with the
+   month after the birth month (§ 99 SGB VI); for someone born on the 1st, in the
+   birth month. Applies to the point in time „Gesetzliche Rente“ (statutory pension) and to the
+   deduction calculation (months before the standard retirement age).
+5. **Standard retirement age flat 67.** New persons now get it by
+   birth year (65 up to 1946, rising, 67 from 1964; intermediate months
+   rounded to whole years).
+6. **Lump-sum option with €0 paid nothing.** If „Einmalzahlung statt Rente“ (lump sum instead of pension)
+   was selected and the amount was then deleted, the engine paid €0 once
+   and no pension. Now: lump sum only for amount > 0; the dialog
+   resets to pension when the amount is deleted.
+7. **Sensitivity/levers did not apply to assets with their own return.** The
+   return steps only shifted the default interest rate; a securities account with its own
+   5 % stayed untouched. Now every asset except cash is shifted by the same
+   step.
+8. Dead variable `toPots` removed (no double counting, it was unused).
 
-### Abbildung / Import / Standmitteilungen
+### Mapping / import / pension statements
 
-9. **Einmalbeträge im laufenden Jahr fielen still weg** (Start „1. Januar“
-   lag vor dem Simulationsstart). Jetzt: aktueller Monat.
-10. **Abgelaufene Lebensversicherung wurde beim Start noch einmal
-    ausgezahlt.** Ablaufjahr in der Vergangenheit wird nicht mehr
-    importiert; Ablauf im laufenden Jahr wird als „bitte prüfen“ markiert.
-11. **Importierte gesetzliche Renten hingen an festen Daten** und
-    reagierten nicht auf den Regler „Gesetzliche Rente“, ohne Abschlag bei
-    früherem Beginn. Beim Import werden sie jetzt an den Zeitpunkt der
-    Person gebunden, Regelalter = Auszahlungsjahr − Geburtsjahr, Abschlag
-    0,3 %/Monat. **Bereits importierte Renten sind davon nicht betroffen**:
-    dort „Beginn“ im Dialog auf den Zeitpunkt „Gesetzliche Rente“ stellen
-    und Regelaltersgrenze/Abschlag eintragen.
-12. Import: Zelle „1“ bei Zinssätzen bedeutet 1 %, nicht 100 %.
-13. Krankenversicherung bekam aus Beitragsrechnungen keinen
-    Korrekturvorschlag (Buchungen schon). Jetzt: „Beitrag pro Monat“ →
-    Beitrag im Erwerbsleben.
-14. Ein beitragsfrei gestellter Vertrag („Beitrag 0,00 €“) wurde verworfen;
-    0 ist bei Beiträgen jetzt zulässig. Ausgaben ohne Rhythmus zählen als
-    monatlich (wie in der Engine). „neuer Beitrag … jährlich“ landet nicht
-    mehr als Monatsbeitrag.
-15. Girokonten und Bargeld werden als Vermögens-Posten vorgeschlagen (dort
-    landet der Monatsüberschuss); ein negativer Kontosaldo ist kein
-    Vermögen und wird als 0 gelesen.
+9. **One-off amounts in the current year silently dropped out** (start „1. Januar“
+   (1 January) lay before the simulation start). Now: current month.
+10. **An expired life insurance was paid out again at the start.** An expiry year
+    in the past is no longer imported; expiry in the current year is marked
+    „bitte prüfen“ (please check).
+11. **Imported statutory pensions were tied to fixed dates** and
+    did not react to the „Gesetzliche Rente“ slider, with no deduction for an
+    earlier start. On import they are now bound to the person's
+    point in time, standard age = payout year − birth year, deduction
+    0.3 %/month. **Pensions that were already imported are not affected**:
+    there, set „Beginn“ (start) in the dialog to the point in time „Gesetzliche Rente“
+    and enter standard retirement age/deduction.
+12. Import: a cell „1“ for interest rates means 1 %, not 100 %.
+13. Health insurance got no correction suggestion from contribution
+    invoices (transactions did). Now: „Beitrag pro Monat“ (contribution per month) →
+    contribution during working life.
+14. A contribution-free insurance contract („Beitrag 0,00 €“) was discarded;
+    0 is now permitted for contributions. Expenses without a rhythm count as
+    monthly (as in the engine). „neuer Beitrag … jährlich“ (new contribution … annually) no longer ends up
+    as a monthly contribution.
+15. Current accounts and cash are suggested as asset items (that is where
+    the monthly surplus lands); a negative account balance is not
+    an asset and is read as 0.
 
 ### Frontend
 
-16. **KV-Linie im Geldfluss-Chart lag auf den Gesamtausgaben obendrauf**
-    (gestapelte Achse ohne eigenen Stapel). Jetzt eigene Stapel.
-17. **Ausstiegsalter aus einem Datum** war bei Geburtstag später im Jahr um
-    eins zu hoch (Jahresdifferenz statt Alter). Jetzt aus dem Ergebnis der
-    Engine. „Aktuelles Alter“ (Haushalt, Regler-Minimum, Zielalter) aus dem
-    vollen Geburtsdatum.
-18. Puffer-Linie („Sicherheitspuffer“) im Vermögens-Chart bei „heutige
-    Kaufkraft“ jetzt deflationiert; Töpfe so gestapelt, dass die Grenze
-    über „Sonstiges“ dem verfügbaren Vermögen entspricht.
-19. Überbrückung: Deflation nie mit einem Jahr vor dem Start. Prozentfelder
-    zeigen 26,375 % statt 26,38 %. Text „mit keinem Alter bis 75“ statt bis
-    Endalter. Matrix-Tooltip „Geld geht {Jahr} aus“. Erstes Jahr im Chart
-    als Teiljahr gekennzeichnet („2026 (ab Sep.)“). Beschriftung, ab wann
-    Steigerung/Anpassung greift.
+16. **The health-insurance line in the cash-flow chart sat on top of the total expenses**
+    (stacked axis without its own stack). Now a separate stack.
+17. **Exit age from a date** was one too high when the birthday falls later in the year
+    (year difference instead of age). Now taken from the result of the
+    engine. „Aktuelles Alter“ (current age; household, slider minimum, target age) from the
+    full date of birth.
+18. Buffer line („Sicherheitspuffer“, safety buffer) in the wealth chart is now deflated at
+    „heutige Kaufkraft“ (today's purchasing power); pots stacked so that the boundary
+    above „Sonstiges“ (other) equals the available wealth.
+19. Bridging: deflation never with a year before the start. Percentage fields
+    show 26.375 % instead of 26.38 %. Text „mit keinem Alter bis 75“ (with no age up to 75) instead of up to
+    final age. Matrix tooltip „Geld geht {Jahr} aus“ (money runs out in {year}). First year in the chart
+    marked as a partial year („2026 (ab Sep.)“, from Sep.). Label stating from when
+    increase/adjustment applies.
 
-## Nachtrag: Krankenversicherung nach dem Erwerbsleben
+## Addendum: health insurance after working life
 
-Hinweis aus der Nutzung: Das Gehalt ist netto, der Arbeitnehmeranteil steckt
-schon drin; interessant wird die KV erst nach dem Ausstieg, und dort hängt
-sie davon ab, ob die Vorversicherungszeit für die KVdR erreicht wird.
+Note from use: the salary is net, the employee share is already included;
+health insurance only becomes interesting after exit, and there it depends
+on whether the prior insurance period for the KVdR (health insurance for pensioners) is reached.
 
-20. **Erwerbsleben**: „Beitrag bis zum Ausstieg“ ist jetzt standardmäßig 0
-    und als Zusatzbeitrag beschrieben; ein Posten „Krankenversicherung“
-    kostet im Erwerbsleben nichts, solange nichts eingetragen ist.
-21. **Freiwillig gesetzlich** (ohne KVdR): Bemessung aus allen Einnahmen der
-    Person — Gehalt, Renten jeder Art, Mieten, Leibrenten — plus dem
-    gleichen Anteil an Einnahmen ohne Person (Haushalt) plus den
-    Kapitalerträgen des Vormonats (Zinsen, Dividenden, Kursgewinne der
-    Töpfe Bargeld/Depot/Sonstiges; eigene Anlagen ganz, Haushaltsanlagen zu
-    gleichen Teilen; Immobilien-Wertsteigerung nicht). Gedeckelt an der
-    Beitragsbemessungsgrenze (Szenario, wächst mit der Inflation), mindestens
-    der Mindestbeitrag. Vorher: nur eigene Einnahmen, keine Kapitalerträge,
-    kein Deckel.
-22. **KVdR**: gesetzliche Rente mit halbem KV-Satz plus vollem Pflegesatz
-    (neues Szenario-Feld „davon Pflegeversicherung“), Betriebsrente voller
-    Satz, private Renten und Kapitalerträge beitragsfrei, Deckel an der
-    Grenze. Vorher: voller Satz auf alle Renten.
-23. Einmalzahlungen (Kapitalwahl, Ablaufleistung) zählen in keiner Variante
-    zur Bemessung; in Wirklichkeit würde eine Direktversicherung als
-    Versorgungsbezug auf 120 Monate verteilt — nicht modelliert.
-24. Der Dokumentleser schlägt für die KV nur noch Beträge vor, die wirklich
-    als Prämie gezahlt werden (Zusatzbeitrag, private Tarife); die
-    gesetzlichen Modi werden gerechnet.
+20. **Working life**: „Beitrag bis zum Ausstieg“ (contribution until exit) now defaults to 0
+    and is described as a supplementary contribution; a „Krankenversicherung“ (health insurance) item
+    costs nothing during working life as long as nothing is entered.
+21. **Voluntary statutory** (without KVdR): assessment from all income of the
+    person — salary, pensions of every kind, rents, annuities — plus the
+    same share of income without a person (household) plus the
+    capital gains of the previous month (interest, dividends, price gains of the
+    cash/securities account/other pots; own assets in full, household assets in
+    equal parts; real estate appreciation not). Capped at the
+    contribution assessment ceiling (scenario, grows with inflation), at least
+    the minimum contribution. Before: only own income, no capital gains,
+    no cap.
+22. **KVdR**: statutory pension with half the health-insurance rate plus the full long-term-care rate
+    (new scenario field „davon Pflegeversicherung“, of which long-term care insurance), occupational pension at the full
+    rate, private pensions and capital gains contribution-free, cap at the
+    ceiling. Before: full rate on all pensions.
+23. Lump-sum payments (lump-sum option, maturity benefit) do not count toward the assessment
+    in any variant; in reality a direct insurance would be spread over
+    120 months as a pension benefit — not modeled.
+24. The document reader now only suggests amounts for health insurance that are actually
+    paid as a premium (supplementary contribution, private tariffs); the
+    statutory modes are calculated.
 
-Vereinfachungen: Bemessung monatlich statt nach Einkommensteuerbescheid des
-Vorjahres; kein Sparerpauschbetrag; für die KVdR wird nicht geprüft, ob die
-9/10-Regel erfüllt ist — das entscheidet die Wahl des Modus je Person.
+Simplifications: assessment monthly instead of by the previous year's
+income tax assessment; no saver's allowance; for the KVdR it is not checked whether the
+9/10 rule is met — that is decided by the choice of mode per person.
 
-## Nachtrag: Hinterbliebenen-Szenario (#1341)
+## Addendum: survivor scenario (#1341)
 
-Todesfall als Szenario-Einstellung (Person, Alter), nicht als gespeicherter
-Zeitpunkt. Ab dem Geburtsmonat des gewählten Alters: Gehalt, Einnahmen,
-Ausgaben, Krankenversicherung, Pflegekosten und eigene Renten der Person
-enden; laufende Beiträge in Renten und Lebensversicherungen der Person
-enden. Die andere Person erhält den Hinterbliebenen-Anteil der Renten
-(Feld am Rentenposten; Standard 55 % gesetzlich, 60 % Betriebsrente, 0 %
-privat); bei der gesetzlichen Rente wird eigenes Einkommen des Vormonats
-über dem Freibetrag mit dem Anrechnungssatz abgezogen (Standard 40 %,
-1 038 €). Lebensversicherungen auf das Leben der Person zahlen die
-Todesfallleistung (Feld; leer = garantierte Ablaufleistung) steuerfrei und
-enden; eine laufende Leibrente endet. Lebenshaltung × Faktor (Standard
-70 %); die Ausgabenkurve folgt der überlebenden Person, wenn die
-Bezugsperson stirbt. Ergebnis: Urteil und Kurven wie sonst, dazu der
-Vergleich „Ohne Todesfall“ und der Schnellcheck über jedes Sterbealter.
+Death as a scenario setting (person, age), not as a stored
+point in time. From the birth month of the chosen age: salary, income,
+expenses, health insurance, care costs and the person's own pensions
+end; running contributions into pensions and life insurances of the person
+end. The other person receives the survivor share of the pensions
+(field on the pension item; default 55 % statutory, 60 % occupational pension, 0 %
+private); for the statutory pension, own income of the previous month
+above the allowance is deducted at the offset rate (default 40 %,
+€1,038). Life insurances on the life of the person pay out
+the death benefit (field; empty = guaranteed maturity benefit) tax-free and
+end; a running annuity ends. Cost of living × factor (default
+70 %); the expense curve follows the surviving person when the
+reference person dies. Result: verdict and curves as usual, plus the
+comparison „Ohne Todesfall“ (without death) and the quick check across every age of death.
 
-Vereinfachungen: keine Rentenabschläge auf die Witwenrente bei Tod vor 65,
-kein Sterbevierteljahr, keine Verteilung einer Direktversicherung; der
-Freibetrag gilt pauschal (keine Kinderzuschläge); Erbschaftsteuer nicht
-modelliert; die KV-Einstufung der überlebenden Person bleibt, wie am Posten
-gewählt (Familienversicherung über die verstorbene Person müsste von Hand
-geändert werden).
+Simplifications: no pension deductions on the widow's pension for death before 65,
+no death quarter (Sterbevierteljahr), no spreading of a direct insurance; the
+allowance applies flat (no child supplements); inheritance tax not
+modeled; the health-insurance classification of the surviving person stays as chosen on the item
+(family insurance via the deceased person would have to be
+changed by hand).
 
-## Nachtrag: Plan und Wirklichkeit (#1342)
+## Addendum: plan versus reality (#1342)
 
-Ein Stand (`finance_forecast_snapshot`) hält die Jahresreihe eines
-Szenarios (Vermögen und verfügbares Vermögen je Jahresende) und das
-verfügbare Vermögen am Tag der Aufnahme fest — von Hand oder einmal im
-Monat per Cron je Szenario. „Erwartet für heute“ ist linear zwischen dem
-Startwert und den Jahresenden interpoliert; verglichen wird das
-**verfügbare** Vermögen (Bargeld, Depot, Sonstiges: verknüpfte Konten mit
-aktuellem Saldo, sonst der eingetragene Wert), weil darauf das Urteil der
-Prognose ruht.
+A snapshot (`finance_forecast_snapshot`) records the annual series of a
+scenario (wealth and available wealth at each year end) and the
+available wealth on the day of capture — by hand or once a
+month via cron per scenario. „Erwartet für heute“ (expected for today) is interpolated linearly between the
+starting value and the year ends; what is compared is the
+**available** wealth (cash, securities account, other: linked accounts with
+current balance, otherwise the entered value), because the forecast's verdict
+rests on it.
 
-Ist-Werte aus den Buchungen der letzten zwölf vollen Monate über alle
-Konten des Haushalts: Einnahmen, Ausgaben und Sparrate pro Monat, ohne
-Umbuchungen zwischen eigenen Konten (Gegen-IBAN gehört dem Haushalt oder
-Spiegelbuchung gleichen Betrags auf einem anderen Konto binnen drei
-Tagen). Plan-Ausgaben = Lebenshaltung plus laufende Ausgaben der Posten,
-Plan-Sparrate = Einnahmen minus Ausgaben des ersten vollen Simulationsjahres.
-„Lebenshaltung übernehmen“ schreibt die Ist-Ausgaben in den einen
-Lebenshaltungsposten.
+Actual values from the transactions of the last twelve full months across all
+accounts of the household: income, expenses and savings rate per month, excluding
+transfers between own accounts (counter IBAN belongs to the household or
+mirror transaction of the same amount on another account within three
+days). Planned expenses = cost of living plus running expenses of the items,
+planned savings rate = income minus expenses of the first full simulation year.
+„Lebenshaltung übernehmen“ (adopt cost of living) writes the actual expenses into the one
+cost-of-living item.
 
-Vereinfachungen: Ausgaben enthalten alles, was abfließt (auch Versicherungs-
-beiträge und Sparpläne an fremde Depots ohne Spiegelbuchung); Bargeld-
-Abhebungen zählen als Ausgabe; keine Benachrichtigung bei Abweichung.
+Simplifications: expenses contain everything that flows out (also insurance
+contributions and savings plans to third-party securities accounts without a mirror transaction); cash
+withdrawals count as expenses; no notification on deviation.
 
-## Geprüft und in Ordnung
+## Checked and fine
 
-- Kaufkraft: alle Reihen und Detailwerte werden mit ihrem Jahr und demselben
-  Startjahr deflationiert; Endvermögen mit dem Endjahr; Matrix ebenso.
-- Keine Doppelzählung: Beiträge/Prämien stehen einmal in den Ausgaben;
-  Sparpläne sind Umbuchungen Bargeld → Topf und keine Ausgabe.
-- Prozent ↔ Bruch in allen Feldern; Abschlag 0,3 % pro Monat × Monate;
-  monatliche Verzinsung `(1+r)^(1/12)`; Depotverkauf brutto mit Steuer auf
-  den Gewinnanteil; Entnahmereihenfolge; Lebensversicherung linear vom
-  Rückkaufswert zur Ablaufleistung, Auszahlung/Rente/Kündigung; KV-Modi;
-  Ausgabenkurve und Pflege; Horizont und Jahresabschluss.
-- Import: Jahreswerte → Monat, Enden exklusiv, Vorzeichen, Töpfe;
-  Standmitteilungs-Vorschläge in der Einheit des Postens; Buchungsrhythmus.
+- Purchasing power: all series and detail values are deflated with their year and the same
+  start year; final wealth with the final year; matrix likewise.
+- No double counting: contributions/premiums appear once in the expenses;
+  savings plans are transfers cash → pot and not an expense.
+- Percent ↔ fraction in all fields; deduction 0.3 % per month × months;
+  monthly compounding `(1+r)^(1/12)`; securities account sale gross with tax on
+  the gain portion; withdrawal order; life insurance linear from the
+  surrender value to the maturity benefit, payout/pension/cancellation; health-insurance modes;
+  expense curve and care; horizon and year-end closing.
+- Import: annual values → month, ends exclusive, signs, pots;
+  pension-statement suggestions in the unit of the item; transaction rhythm.
 
-## Bekannte Vereinfachungen (bewusst, dokumentiert)
+## Known simplifications (deliberate, documented)
 
-- Steuern pauschal: Kapitalerträge werden bei Entstehung besteuert
-  (konservativ; kein Freibetrag, keine Vorabpauschale); Renten und
-  Auszahlungen mit einem festen Satz je Posten; keine Einkommensteuer.
-- Krankenversicherung (Details im Nachtrag oben, Punkte 21–23): Bemessung
-  monatlich statt nach dem Steuerbescheid des Vorjahres; Kapitalerträge der
-  freiwillig Versicherten aus dem Vormonat, ohne Sparerpauschbetrag;
-  Einmalzahlungen zählen nicht (die 120-Monats-Verteilung von
-  Versorgungsbezügen fehlt); ob die 9/10-Regel für die KVdR erfüllt ist,
-  entscheidet die Wahl des Modus je Person.
-- Kein Zuschlag bei späterem Rentenbeginn (0,5 %/Monat).
-- Die Zeile „Überbrückung gedeckt / nicht gedeckt“ vergleicht Bedarf und
-  verfügbares Vermögen am Anfang ohne Erträge in der Phase; das Urteil
-  „Geld reicht“ kommt aus der vollen Simulation.
-- Sicherheitspuffer ist nominal und wächst nicht mit der Inflation.
-- Kontostand eines Depots: Saldo-Zeile vor Positionssumme; ob der FinTS-Saldo
-  eines Depots das Verrechnungskonto ist, wäre zu prüfen.
-- Zeitleiste: Ziehen eines Datum-Zeitpunkts rechnet in Kalenderjahren.
+- Taxes flat: capital gains are taxed when they arise
+  (conservative; no allowance, no advance lump sum); pensions and
+  payouts at a fixed rate per item; no income tax.
+- Health insurance (details in the addendum above, points 21–23): assessment
+  monthly instead of by the previous year's tax assessment; capital gains of
+  voluntarily insured persons from the previous month, without saver's allowance;
+  lump sums do not count (the 120-month spreading of
+  pension benefits is missing); whether the 9/10 rule is met for the KVdR is
+  decided by the choice of mode per person.
+- No surcharge for a later pension start (0.5 %/month).
+- The row „Überbrückung gedeckt / nicht gedeckt“ (bridging covered / not covered) compares need and
+  available wealth at the start without returns during the phase; the verdict
+  „Geld reicht“ (money suffices) comes from the full simulation.
+- Safety buffer is nominal and does not grow with inflation.
+- Account balance of a securities account: balance row before position total; whether the FinTS balance
+  of a securities account is the settlement account would have to be checked.
+- Timeline: dragging a date point calculates in calendar years.

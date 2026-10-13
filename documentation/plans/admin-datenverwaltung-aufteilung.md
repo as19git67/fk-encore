@@ -1,127 +1,127 @@
-# Admin-Aktionen in die Module verschieben, Admin-Seite „Datenverwaltung" auflösen
+# Move admin actions into the modules, dissolve the admin page „Datenverwaltung" (data management)
 
-Status: **Umgesetzt** · Branch: `claude/admin-page-section-split-06k81e`
+Status: **Implemented** · Branch: `claude/admin-page-section-split-06k81e`
 
-## Umsetzungsstand
+## Implementation status
 
-- ✅ **Etappe 1 — Vorbereitung**: `components/admin/adminPanels.css`, `AdminPage.vue`,
+- ✅ **Stage 1 — Preparation**: `components/admin/adminPanels.css`, `AdminPage.vue`,
   `composables/usePolling.ts`, `composables/useScanQueueStatus.ts`,
-  `config/queueOverview.ts` (+ Test), Mock-Rechte, Zahnrad-Gruppe in `App.vue`
-  für alle Module verallgemeinert.
-- ✅ **Etappe 2 — Panels**: elf Panels unter `components/admin/` plus
-  `OsmRegionStorageDialog.vue`, 1:1 aus der alten View übernommen.
-- ✅ **Etappe 3 — Fotos › Einstellungen**: Scan-Queue, Wartung, Externe
-  Bibliotheken, OSM-Regionen, Gefahrenzone.
-- ✅ **Etappe 4 — Dokumente/Finanzen**: Verarbeitung, Korrespondenten,
-  Taxonomie-Cockpit, Taxonomie-Tools, KI-Modell; Finanzen-Gruppe mit
-  Konto-Zugriff und KI-Tagging.
-- ✅ **Etappe 5 — Admin › Systemstatus**: `SystemStatusView`, Weiterleitungen,
-  `DataManagementView` gelöscht, Stories je Seite neu, Doku nachgezogen.
+  `config/queueOverview.ts` (+ test), mock permissions, gear group in `App.vue`
+  generalized for all modules.
+- ✅ **Stage 2 — Panels**: eleven panels under `components/admin/` plus
+  `OsmRegionStorageDialog.vue`, taken over 1:1 from the old view.
+- ✅ **Stage 3 — Photos › Settings**: scan queue, maintenance, external
+  libraries, OSM regions, danger zone.
+- ✅ **Stage 4 — Documents/Finance**: processing, correspondents,
+  taxonomy cockpit, taxonomy tools, AI model; Finance group with
+  account access and AI tagging.
+- ✅ **Stage 5 — Admin › System status**: `SystemStatusView`, redirects,
+  `DataManagementView` deleted, stories re-created per page, docs updated.
 
-Tests: Backend 312 Dateien / 4282 grün, Frontend 63 / 562 grün.
+Tests: backend 312 files / 4282 green, frontend 63 / 562 green.
 
-Abweichungen vom ursprünglichen Entwurf:
+Deviations from the original draft:
 
-- Statt `AdminSection.vue` (Wrapper mit Slot) gibt es `AdminPage.vue` (Seiten-
-  Rahmen mit `<h1>`) und `adminPanels.css`. Scoped Styles greifen nicht in
-  Slot-Inhalte hinein, ein Wrapper hätte die Panels also nicht stylen können;
-  die Panels importieren das gemeinsame CSS stattdessen selbst per
-  `<style scoped src="./adminPanels.css">`, was den Scope-Hash behält.
-- Zusätzlich entstand `useScanQueueStatus`: die Wartungs-Aktionen sperren sich
-  bei laufender Scan-Queue und lasen das früher aus derselben Seite. Jetzt
-  teilen sich alle Panels einen Status statt fünf Requests zu stellen.
-- Die Wartungs-Buttons prüfen nur noch `isActive` statt zusätzlich der lokalen
-  `rescanLoading`/`retryLoading`-Flags — diese gehören zur Scan-Queue-Seite und
-  sind von der Wartungsseite aus nicht mehr sichtbar. Ein gestarteter Rescan
-  setzt die Queue praktisch sofort auf aktiv, die Sperre greift also weiterhin.
+- Instead of `AdminSection.vue` (wrapper with slot) there is `AdminPage.vue` (page
+  frame with `<h1>`) and `adminPanels.css`. Scoped styles do not reach into
+  slot content, so a wrapper could not have styled the panels;
+  the panels instead import the shared CSS themselves via
+  `<style scoped src="./adminPanels.css">`, which keeps the scope hash.
+- `useScanQueueStatus` was added as well: the maintenance actions lock themselves
+  while the scan queue is running and used to read that from the same page. Now
+  all panels share one status instead of making five requests.
+- The maintenance buttons now only check `isActive` instead of additionally the local
+  `rescanLoading`/`retryLoading` flags — these belong to the scan queue page and
+  are no longer visible from the maintenance page. A started rescan
+  sets the queue to active almost immediately, so the lock still applies.
 
-## Ziel in einem Satz
+## Goal in one sentence
 
-Modulspezifische Admin-Aktionen wandern in die Einstellungen des jeweiligen
-Moduls (Fotos, Dokumente, Finanzen); das Admin-Modul behält nur noch, was
-modulübergreifend ist (Benutzer, Rollen, eingeplante Jobs) und bekommt eine
-schlanke Systemstatus-Seite als Überblick über alle Warteschlangen.
+Module-specific admin actions move into the settings of the respective
+module (Photos, Documents, Finance); the admin module keeps only what is
+cross-module (users, roles, scheduled jobs) and gets a
+slim system status page as an overview of all queues.
 
-Das Repo macht es an zwei Stellen schon so: „Konto-Zugriff" (`finance.admin`)
-liegt im Finanzen-Modul, die `documents.manage_taxonomy`-Seiten liegen unter
-„Dokumente › Einstellungen". Dieser Plan macht das Muster durchgängig.
+The repo already does this in two places: „Konto-Zugriff" (account access, `finance.admin`)
+lives in the Finance module, the `documents.manage_taxonomy` pages live under
+„Dokumente › Einstellungen" (Documents › Settings). This plan makes the pattern consistent.
 
-## Ausgangslage
+## Starting point
 
-### Die lange Seite
+### The long page
 
-`frontend/src/views/DataManagementView.vue` (Route `/admin/daten`, Menüpunkt
-„Datenverwaltung") hat **2 640 Zeilen** und bündelt elf fachlich unabhängige
-Bereiche aus vier Modulen in einer Scroll-Seite:
+`frontend/src/views/DataManagementView.vue` (route `/admin/daten`, menu item
+„Datenverwaltung") has **2,640 lines** and bundles eleven functionally independent
+areas from four modules in one scrolling page:
 
-| # | Abschnitt (Template) | Zeilen | Backend-Endpunkte | Backend-Recht |
+| # | Section (template) | Lines | Backend endpoints | Backend permission |
 |---|---|---|---|---|
-| 1 | Scan-Queue (Status, Rescan, Retry, Abbrechen, POI-Neuerkennung ×2, Fehler-Dialog) | 923–1099 | `/photos/scan-queue/*`, `/photos/rescan`, `/photos/poi-redetect*` | `data.manage` |
-| 2 | Finance KI-Tagging (Queue-Status, Retry, Abbrechen, Neu einreihen) | 1100–1169 | `/finance/tag-queue/*` | `data.manage` |
-| 3 | Dokument-Verarbeitung (Queue-Status, Cancel, Retry, Reclassify-All, Relocate-All) | 1170–1329 | `/document-queue/*`, `/documents/reclassify-all`, `/documents/relocate-all` | Status: `documents.view` · Aktionen: `data.manage` |
-| 4 | Korrespondenten-Overrides (`CorrespondentOverridesPanel`) | 1330–1334 | `/documents/correspondent-overrides` | **`documents.manage_taxonomy`** |
-| 5 | Ähnliche Fotos gruppieren (Find-Groups, AI-Picks, Kalibrierung, Gewichte, Backfill Dimensionen/Gesichtsschärfe) | 1335–1450 | `/photos/find-groups`, `/photos/groups/*`, `/photos/backfill-*` | `data.manage` |
-| 6 | GPS-Koordinaten neu einlesen | 1451–1485 | `/photos/needs-gps-rescan`, `/photos/:id/rescan-gps` | `data.manage` |
-| 7 | Auto-Crop neu berechnen | 1486–1512 | `/photos/recompute-auto-crops` | `data.manage` |
-| 8 | KI-Crop-Vorschläge neu berechnen | 1513–1563 | `/photos/recompute-transform-suggestions` | `data.manage` |
-| 9 | Metadaten aktualisieren | 1564–1587 | `/photos/refresh-metadata`, `/photos/:id/refresh-metadata` | **`photos.refresh_metadata`** |
-| 10 | OSM-Regionen (Liste, Vorschlag, Anlegen, Freigeben, Refresh, Löschen, Speicher-Dialog, Bulk-Vorschlag, Reverse-Geocoding-Test) | 1588–1905 + Dialog 2043–2098 | `/osm/regions/*`, `/osm/reverse` | `osm.admin` (bereits `v-if="canManageOsm"`) |
-| 11 | Danger Zone (Alle Fotodaten löschen) | 1906–1921 + Dialog 1928–2042 | `/photos/purge` | `photos.purge` (bereits `v-if="canPurgePhotos"`) |
-| 12 | Version (Build-Nummer) | 1922–1926 | `/api/build-info` (statisch, ohne Auth) | – |
+| 1 | Scan queue (status, rescan, retry, cancel, POI re-detection ×2, error dialog) | 923–1099 | `/photos/scan-queue/*`, `/photos/rescan`, `/photos/poi-redetect*` | `data.manage` |
+| 2 | Finance AI tagging (queue status, retry, cancel, re-enqueue) | 1100–1169 | `/finance/tag-queue/*` | `data.manage` |
+| 3 | Document processing (queue status, cancel, retry, reclassify-all, relocate-all) | 1170–1329 | `/document-queue/*`, `/documents/reclassify-all`, `/documents/relocate-all` | Status: `documents.view` · Actions: `data.manage` |
+| 4 | Correspondent overrides (`CorrespondentOverridesPanel`) | 1330–1334 | `/documents/correspondent-overrides` | **`documents.manage_taxonomy`** |
+| 5 | Group similar photos (find groups, AI picks, calibration, weights, backfill dimensions/face sharpness) | 1335–1450 | `/photos/find-groups`, `/photos/groups/*`, `/photos/backfill-*` | `data.manage` |
+| 6 | Re-read GPS coordinates | 1451–1485 | `/photos/needs-gps-rescan`, `/photos/:id/rescan-gps` | `data.manage` |
+| 7 | Recompute auto-crop | 1486–1512 | `/photos/recompute-auto-crops` | `data.manage` |
+| 8 | Recompute AI crop suggestions | 1513–1563 | `/photos/recompute-transform-suggestions` | `data.manage` |
+| 9 | Refresh metadata | 1564–1587 | `/photos/refresh-metadata`, `/photos/:id/refresh-metadata` | **`photos.refresh_metadata`** |
+| 10 | OSM regions (list, suggestion, create, approve, refresh, delete, storage dialog, bulk suggestion, reverse-geocoding test) | 1588–1905 + dialog 2043–2098 | `/osm/regions/*`, `/osm/reverse` | `osm.admin` (already `v-if="canManageOsm"`) |
+| 11 | Danger zone (delete all photo data) | 1906–1921 + dialog 1928–2042 | `/photos/purge` | `photos.purge` (already `v-if="canPurgePhotos"`) |
+| 12 | Version (build number) | 1922–1926 | `/api/build-info` (static, no auth) | – |
 
-Der Script-Teil (Zeilen 1–917) hält für alle Bereiche gleichzeitig State,
-Handler, Realtime-Abos (`scan-queue`) und einen 5-Sekunden-Poll-Timer für
-OSM, egal welchen Abschnitt der Benutzer gerade ansieht.
+The script part (lines 1–917) holds state, handlers, realtime subscriptions
+(`scan-queue`) and a 5-second poll timer for OSM for all areas at the same time,
+no matter which section the user is currently looking at.
 
-### Die übrigen Admin-Seiten
+### The remaining admin pages
 
-Vier weitere Seiten im Admin-Modul sind ebenfalls modulspezifisch und werden
-**verbindlich** mitverschoben:
+Four more pages in the admin module are likewise module-specific and are
+**mandatorily** moved along:
 
-| Heute | View | Route-Recht | Backend | Gehört zu |
+| Today | View | Route permission | Backend | Belongs to |
 |---|---|---|---|---|
-| Externe Bibliotheken | `LibrariesView.vue` (1 143 Z.) | `photos.libraries.manage` | `/libraries/*` | Fotos |
-| Taxonomie-Cockpit | `TaxonomyCockpitView.vue` (426 Z.) | `data.manage` | `/admin/taxonomy-cockpit*` (Service `documents`) | Dokumente |
-| Taxonomie-Tools | `AdminToolsView.vue` (796 Z.) | `data.manage` | `/admin/tools/*` (Service `user`, arbeitet auf Dokument-Taxonomie) | Dokumente |
-| KI-Modell | `LlmModelsView.vue` (926 Z.) | `data.manage` | `/admin/llm-configs*`, `/admin/llm-models/*` | Dokumente **und** Finanzen (ein gemeinsamer `llm_service`) |
+| External libraries | `LibrariesView.vue` (1,143 lines) | `photos.libraries.manage` | `/libraries/*` | Photos |
+| Taxonomy cockpit | `TaxonomyCockpitView.vue` (426 lines) | `data.manage` | `/admin/taxonomy-cockpit*` (service `documents`) | Documents |
+| Taxonomy tools | `AdminToolsView.vue` (796 lines) | `data.manage` | `/admin/tools/*` (service `user`, works on the document taxonomy) | Documents |
+| AI model | `LlmModelsView.vue` (926 lines) | `data.manage` | `/admin/llm-configs*`, `/admin/llm-models/*` | Documents **and** Finance (one shared `llm_service`) |
 
-Im Admin-Modul verbleiben: Benutzer (`users.list`), Benutzer-Detail
-(`users.read`), Rollen (`roles.list`), Eingeplante Jobs (`data.manage`,
-modulübergreifend).
+What remains in the admin module: users (`users.list`), user detail
+(`users.read`), roles (`roles.list`), scheduled jobs (`data.manage`,
+cross-module).
 
-### Rechte heute
+### Permissions today
 
-- Der Route-Guard (`meta.permission` in `frontend/src/config/modules.ts`)
-  kennt genau **ein** Recht pro Route; `router.beforeEach` prüft es.
-- Module werden über ihr `permission`-Feld ein- oder ausgeblendet
+- The route guard (`meta.permission` in `frontend/src/config/modules.ts`)
+  knows exactly **one** permission per route; `router.beforeEach` checks it.
+- Modules are shown or hidden via their `permission` field
   (`photos.view`, `documents.view`, `module.finance`, …, Admin: `users.list`).
-  Menüpunkte und Gruppen-Kinder werden in `App.vue` einzeln nach Recht
-  gefiltert; leere Gruppen fallen weg.
-- Das Backend ist die Autorität (`requirePermission` in jedem Endpunkt);
-  Frontend-Guards sind reine UX.
-- Die Seed-Rolle `Admin` erhält alle Rechte **außer** `photos.purge` und
-  `finance.admin` (bewusst, siehe `db/seed.ts` und `user/admin-guard.ts`).
+  Menu items and group children are filtered individually by permission in `App.vue`;
+  empty groups are dropped.
+- The backend is the authority (`requirePermission` in every endpoint);
+  frontend guards are purely UX.
+- The seed role `Admin` receives all permissions **except** `photos.purge` and
+  `finance.admin` (deliberately, see `db/seed.ts` and `user/admin-guard.ts`).
 
-### Gefundene Rechte-Lücken (heute schon vorhanden)
+### Permission gaps found (already present today)
 
-1. **Metadaten aktualisieren** (Abschnitt 9): Seite verlangt `data.manage`,
-   Endpunkt `photos.refresh_metadata`. Mit nur `data.manage` sieht man den
-   Button und bekommt 403.
-2. **Korrespondenten-Overrides** (Abschnitt 4): Endpunkt verlangt
-   `documents.manage_taxonomy`, Seite nur `data.manage`. Panel lädt mit 403.
-3. **OSM-Polling** läuft alle 5 s für die gesamte Lebensdauer der Seite.
+1. **Refresh metadata** (section 9): the page requires `data.manage`, the
+   endpoint `photos.refresh_metadata`. With only `data.manage` you see the
+   button and get a 403.
+2. **Correspondent overrides** (section 4): the endpoint requires
+   `documents.manage_taxonomy`, the page only `data.manage`. The panel loads with a 403.
+3. **OSM polling** runs every 5 s for the entire lifetime of the page.
 
-Beide Rechte-Lücken fallen heute nicht auf, weil die Admin-Rolle alle Rechte
-hat. Sie werden beim Umbau geschlossen.
+Both permission gaps go unnoticed today because the Admin role has all permissions.
+They are closed during the rework.
 
-## Zielbild
+## Target picture
 
-### Menüstruktur nach dem Umbau
+### Menu structure after the rework
 
 ```
 Fotos
   Feed · Galerie · Alben · Aktivität · Rückblicke · Personen · Gruppen-Review
-  ⚙ Einstellungen (neue Gruppe)
+  ⚙ Einstellungen (new group)
       Scan-Queue                 data.manage
       Wartung                    data.manage
       Externe Bibliotheken       photos.libraries.manage
@@ -130,59 +130,59 @@ Fotos
 
 Dokumente
   Alle Dokumente · Arbeitskorb · Später · Sammelmappen · Steuer
-  ⚙ Einstellungen (bestehende Gruppe, erweitert)
-      Kategorie-Vorschläge       documents.manage_taxonomy   (bleibt)
-      Steuer-Hints               documents.manage_taxonomy   (bleibt)
-      Hint-Vorschläge            documents.manage_taxonomy   (bleibt)
-      Korrespondenten            documents.manage_taxonomy   (neu, aus Abschnitt 4)
-      Bezugspersonen             documents.view              (bleibt)
-      Gruppen                    groups.view                 (bleibt)
-      Verarbeitung               data.manage                 (neu, Abschnitt 3)
-      Taxonomie-Cockpit          data.manage                 (aus Admin)
-      Taxonomie-Tools            data.manage                 (aus Admin)
-      KI-Modell                  data.manage                 (aus Admin)
-      Hilfe                      documents.view              (bleibt)
+  ⚙ Einstellungen (existing group, extended)
+      Kategorie-Vorschläge       documents.manage_taxonomy   (stays)
+      Steuer-Hints               documents.manage_taxonomy   (stays)
+      Hint-Vorschläge            documents.manage_taxonomy   (stays)
+      Korrespondenten            documents.manage_taxonomy   (new, from section 4)
+      Bezugspersonen             documents.view              (stays)
+      Gruppen                    groups.view                 (stays)
+      Verarbeitung               data.manage                 (new, section 3)
+      Taxonomie-Cockpit          data.manage                 (from Admin)
+      Taxonomie-Tools            data.manage                 (from Admin)
+      KI-Modell                  data.manage                 (from Admin)
+      Hilfe                      documents.view              (stays)
 
 Finanzen
   Übersicht · Konten · Bankkontakte · Analyse · Anomalien · Belegabgleich
-  ⚙ Einstellungen (neue Gruppe)
-      Konto-Zugriff              finance.admin               (aus dem Strip in die Gruppe)
-      KI-Tagging                 data.manage                 (neu, Abschnitt 2)
+  ⚙ Einstellungen (new group)
+      Konto-Zugriff              finance.admin               (from the strip into the group)
+      KI-Tagging                 data.manage                 (new, section 2)
 
 Admin
   Benutzer                       users.list
   Rollen                         roles.list
   Eingeplante Jobs               data.manage
-  Systemstatus                   data.manage                 (neu: Queue-Überblick + Build-Nummer)
+  Systemstatus                   data.manage                 (new: queue overview + build number)
 ```
 
-### Routen
+### Routes
 
-Alle Backend-Pfade bleiben unverändert (auch `/admin/tools/*`,
-`/admin/llm-*`, `/admin/taxonomy-cockpit`); der Umbau ist rein Frontend.
+All backend paths remain unchanged (including `/admin/tools/*`,
+`/admin/llm-*`, `/admin/taxonomy-cockpit`); the rework is purely frontend.
 
-| Route | Name | View | `meta.permission` | Inhalt |
+| Route | Name | View | `meta.permission` | Content |
 |---|---|---|---|---|
-| `/fotos/einstellungen/scan-queue` | `fotos-settings-scan-queue` | `PhotoScanQueueView` | `data.manage` | Abschnitt 1 |
-| `/fotos/einstellungen/wartung` | `fotos-settings-maintenance` | `PhotoMaintenanceView` | `data.manage` | Abschnitte 5–9; Abschnitt 9 zusätzlich `v-if photos.refresh_metadata` |
-| `/fotos/einstellungen/bibliotheken` | `fotos-settings-libraries` | `LibrariesView` (verschoben) | `photos.libraries.manage` | unverändert |
-| `/fotos/einstellungen/osm` | `fotos-settings-osm` | `OsmRegionsView` | `osm.admin` | Abschnitt 10 |
-| `/fotos/einstellungen/gefahrenzone` | `fotos-settings-purge` | `PhotoPurgeView` | `photos.purge` | Abschnitt 11 |
-| `/dokumente/verarbeitung` | `dokumente-verarbeitung` | `DocumentProcessingView` | `data.manage` | Abschnitt 3 |
-| `/dokumente/korrespondenten` | `dokumente-korrespondenten` | `CorrespondentOverridesView` | `documents.manage_taxonomy` | Abschnitt 4 |
-| `/dokumente/taxonomie-cockpit` | `dokumente-taxonomie-cockpit` | `TaxonomyCockpitView` (verschoben) | `data.manage` | unverändert |
-| `/dokumente/taxonomie-tools` | `dokumente-taxonomie-tools` | `TaxonomyToolsView` (aus `AdminToolsView` umbenannt) | `data.manage` | unverändert |
-| `/dokumente/ki-modell` | `dokumente-ki-modell` | `LlmModelsView` (verschoben) | `data.manage` | unverändert |
-| `/finanzen/ki-tagging` | `finance-tag-queue` | `finance/TagQueueView` | `data.manage` | Abschnitt 2 |
-| `/admin/status` | `admin-status` | `SystemStatusView` | `data.manage` | Queue-Zahlen aller drei Warteschlangen mit Links, Build-Nummer (Abschnitt 12) |
+| `/fotos/einstellungen/scan-queue` | `fotos-settings-scan-queue` | `PhotoScanQueueView` | `data.manage` | Section 1 |
+| `/fotos/einstellungen/wartung` | `fotos-settings-maintenance` | `PhotoMaintenanceView` | `data.manage` | Sections 5–9; section 9 additionally `v-if photos.refresh_metadata` |
+| `/fotos/einstellungen/bibliotheken` | `fotos-settings-libraries` | `LibrariesView` (moved) | `photos.libraries.manage` | unchanged |
+| `/fotos/einstellungen/osm` | `fotos-settings-osm` | `OsmRegionsView` | `osm.admin` | Section 10 |
+| `/fotos/einstellungen/gefahrenzone` | `fotos-settings-purge` | `PhotoPurgeView` | `photos.purge` | Section 11 |
+| `/dokumente/verarbeitung` | `dokumente-verarbeitung` | `DocumentProcessingView` | `data.manage` | Section 3 |
+| `/dokumente/korrespondenten` | `dokumente-korrespondenten` | `CorrespondentOverridesView` | `documents.manage_taxonomy` | Section 4 |
+| `/dokumente/taxonomie-cockpit` | `dokumente-taxonomie-cockpit` | `TaxonomyCockpitView` (moved) | `data.manage` | unchanged |
+| `/dokumente/taxonomie-tools` | `dokumente-taxonomie-tools` | `TaxonomyToolsView` (renamed from `AdminToolsView`) | `data.manage` | unchanged |
+| `/dokumente/ki-modell` | `dokumente-ki-modell` | `LlmModelsView` (moved) | `data.manage` | unchanged |
+| `/finanzen/ki-tagging` | `finance-tag-queue` | `finance/TagQueueView` | `data.manage` | Section 2 |
+| `/admin/status` | `admin-status` | `SystemStatusView` | `data.manage` | Queue numbers of all three queues with links, build number (section 12) |
 
-Reihenfolge in `modules.ts` beachten: Die neuen Dokumente-Routen müssen
-**vor** `:id` stehen, sonst schluckt die Detail-Route sie (gleiches Muster
-wie `hilfe/gradtage` im Zähler-Modul).
+Mind the order in `modules.ts`: the new Documents routes must come
+**before** `:id`, otherwise the detail route swallows them (same pattern
+as `hilfe/gradtage` in the meter module).
 
-**Weiterleitungen** (alte URLs und Bookmarks bleiben gültig):
+**Redirects** (old URLs and bookmarks stay valid):
 
-| Alt | Neu |
+| Old | New |
 |---|---|
 | `/admin/daten`, `/data-management` | `/admin/status` |
 | `/admin/bibliotheken` | `/fotos/einstellungen/bibliotheken` |
@@ -190,51 +190,51 @@ wie `hilfe/gradtage` im Zähler-Modul).
 | `/admin/tools` | `/dokumente/taxonomie-tools` |
 | `/admin/ki-modell` | `/dokumente/ki-modell` |
 
-### Menü-Gruppen in `App.vue`
+### Menu groups in `App.vue`
 
-`App.vue` behandelt heute nur die Dokumente-Gruppe als Zahnrad in der
-Navbar (`docSettingsGroup`, nur für `activeModule.id === 'dokumente'`);
-alle anderen Gruppen würden generisch als Popup-Button im Strip erscheinen.
-Damit Fotos und Finanzen genauso aussehen wie Dokumente, wird die
-Sonderbehandlung verallgemeinert: **Die erste `children`-Gruppe jedes
-Moduls wird zum Zahnrad in der Navbar.** Das ist eine kleine Änderung
-(die `id === 'dokumente'`-Bedingung fällt weg), die Dokumente-Sonderlogik
-mit dem Arbeitskorb bleibt.
+Today `App.vue` only treats the Documents group as a gear in the
+navbar (`docSettingsGroup`, only for `activeModule.id === 'dokumente'`);
+all other groups would appear generically as a popup button in the strip.
+So that Photos and Finance look just like Documents, the
+special handling is generalized: **The first `children` group of each
+module becomes the gear in the navbar.** This is a small change
+(the `id === 'dokumente'` condition is dropped), the Documents special logic
+with the work basket (Arbeitskorb) stays.
 
-### Sichtbarkeit und Rechte
+### Visibility and permissions
 
-1. **Ein Recht pro Route** bleibt die Regel; der Router wird nicht erweitert.
-   Bereiche mit eigenem Recht (`osm.admin`, `photos.purge`,
-   `photos.libraries.manage`, `documents.manage_taxonomy`) bekommen deshalb
-   eigene Routen statt Guards innerhalb einer Seite.
-2. **Feinere Rechte per `v-if`**, nicht per deaktiviertem Button
-   (Konvention der bisherigen Seite). Betroffen: Metadaten-Karte in
+1. **One permission per route** remains the rule; the router is not extended.
+   Areas with their own permission (`osm.admin`, `photos.purge`,
+   `photos.libraries.manage`, `documents.manage_taxonomy`) therefore get
+   their own routes instead of guards inside a page.
+2. **Finer permissions via `v-if`**, not via a disabled button
+   (convention of the previous page). Affected: metadata card in
    `PhotoMaintenanceView` (`photos.refresh_metadata`).
-3. **Modulrecht kommt hinzu.** Wer eine Admin-Aktion sehen will, braucht
-   jetzt zusätzlich das Modulrecht (`photos.view`, `documents.view`,
-   `module.finance`). Für Inhaber der Admin-Rolle ändert sich nichts. Eine
-   spätere „Operator"-Rolle mit nur `data.manage` müsste auch Modulrechte
-   bekommen. Das wird bewusst in Kauf genommen; im Gegenzug entfällt die
-   heutige Hürde, dass das Admin-Modul nur mit `users.list` sichtbar ist.
-4. **Systemstatus-Seite** zeigt Zahlen (pending/processing/failed) der
-   drei Warteschlangen über die bestehenden Status-Endpunkte und verlinkt
-   auf die jeweilige Modulseite; Links erscheinen nur mit dem Modulrecht.
-   Aktionen gibt es dort keine.
-5. **Backend bleibt unangetastet.** Kein Recht und kein Pfad wird geändert.
-6. **Storybook-Mock-Benutzer** (`stories/mock-data.ts`) bekommt zusätzlich
+3. **Module permission is added.** Anyone who wants to see an admin action
+   now additionally needs the module permission (`photos.view`, `documents.view`,
+   `module.finance`). For holders of the Admin role nothing changes. A
+   later "operator" role with only `data.manage` would also have to
+   get module permissions. This is accepted deliberately; in return, the
+   current hurdle that the admin module is only visible with `users.list` goes away.
+4. **System status page** shows numbers (pending/processing/failed) of the
+   three queues via the existing status endpoints and links
+   to the respective module page; links appear only with the module permission.
+   There are no actions there.
+5. **Backend stays untouched.** No permission and no path is changed.
+6. **Storybook mock user** (`stories/mock-data.ts`) additionally gets
    `osm.admin`, `photos.refresh_metadata`, `documents.manage_taxonomy`,
-   `module.finance`, `finance.view`, damit alle Seiten darstellbar sind.
-   Je verschobener Seite eine Story mit reduzierten Rechten.
+   `module.finance`, `finance.view`, so that all pages can be rendered.
+   For each moved page a story with reduced permissions.
 
-### Komponenten-Schnitt
+### Component split
 
-Neuer Ordner `frontend/src/components/admin/`, ein Panel pro Abschnitt nach
-dem Vorbild von `CorrespondentOverridesPanel.vue` (eigener State, eigene
-API-Aufrufe, kein Prop-Drilling):
+New folder `frontend/src/components/admin/`, one panel per section modeled on
+`CorrespondentOverridesPanel.vue` (own state, own
+API calls, no prop drilling):
 
-| Panel | Aus Abschnitt | Script-Zeilen heute |
+| Panel | From section | Script lines today |
 |---|---|---|
-| `ScanQueuePanel.vue` (+ vorhandener `QueueErrorsDialog`) | 1 | 60–199 |
+| `ScanQueuePanel.vue` (+ existing `QueueErrorsDialog`) | 1 | 60–199 |
 | `FinanceTagQueuePanel.vue` | 2 | 518–582 |
 | `DocumentQueuePanel.vue` | 3 | 584–677 |
 | `PhotoGroupingPanel.vue` | 5 | 202–350 |
@@ -246,108 +246,108 @@ API-Aufrufe, kein Prop-Drilling):
 | `PhotoPurgePanel.vue` (+ `PhotoPurgeDialog.vue`) | 11 | 474–516 |
 | `BuildInfo.vue` | 12 | 679–681 |
 
-Gemeinsame Bausteine:
+Shared building blocks:
 
-- `adminPanels.css`: die gemeinsamen Regeln (`.data-management-group`,
-  Queue-Tabellen und -Karten, Badges, `.button-row`) aus dem alten
-  `<style scoped>`-Block. Jedes Panel bindet sie per
-  `<style scoped src="./adminPanels.css">` ein, behält also seinen Scope-Hash.
-  `AdminPage.vue` liefert nur den Seitenrahmen mit `<h1>`. Farben nur über
-  semantische PrimeVue-Variablen (siehe `css_style_guide` in der CLAUDE.md).
-- `usePolling(fn, intervalMs)`: Composable für den OSM-Timer (Start in
-  `onMounted`, Stopp in `onBeforeUnmount`). Der Poll läuft dann nur noch
-  auf der OSM-Seite.
-- `frontend/src/config/queueOverview.ts`: reine Liste der drei
-  Warteschlangen (Label, Status-Loader, Ziel-Route, Modulrecht) für die
-  Systemstatus-Seite, plus `visibleQueues(hasPermission)`; ohne DOM
-  testbar.
+- `adminPanels.css`: the shared rules (`.data-management-group`,
+  queue tables and cards, badges, `.button-row`) from the old
+  `<style scoped>` block. Each panel includes them via
+  `<style scoped src="./adminPanels.css">`, so it keeps its scope hash.
+  `AdminPage.vue` only supplies the page frame with `<h1>`. Colors only via
+  semantic PrimeVue variables (see `css_style_guide` in CLAUDE.md).
+- `usePolling(fn, intervalMs)`: composable for the OSM timer (start in
+  `onMounted`, stop in `onBeforeUnmount`). The poll then only runs
+  on the OSM page.
+- `frontend/src/config/queueOverview.ts`: plain list of the three
+  queues (label, status loader, target route, module permission) for the
+  system status page, plus `visibleQueues(hasPermission)`; testable
+  without a DOM.
 
-Die vier verschobenen Views (`LibrariesView`, `TaxonomyCockpitView`,
-`AdminToolsView`, `LlmModelsView`) werden **nicht** umgebaut, nur
-umgehängt (Route, Menü, ggf. Dateiname). Ihr `localStorage`-Schlüssel
-(`admin-tools-state-v1`) bleibt, damit gespeicherter Zustand erhalten
-bleibt.
+The four moved views (`LibrariesView`, `TaxonomyCockpitView`,
+`AdminToolsView`, `LlmModelsView`) are **not** rebuilt, only
+re-hung (route, menu, file name if needed). Their `localStorage` key
+(`admin-tools-state-v1`) stays so that saved state is
+preserved.
 
-## Etappen
+## Stages
 
-Jede Etappe ist für sich mergefähig; alle Seiten bleiben jederzeit
-erreichbar (alte Route bis zur Umstellung, danach Weiterleitung).
+Each stage is mergeable on its own; all pages remain reachable at all times
+(old route until the switch, redirect afterwards).
 
-### Etappe 1 — Vorbereitung ohne Verhaltensänderung
+### Stage 1 — Preparation without behavior change
 
-- `AdminSection.vue`, `usePolling`, `queueOverview.ts` (+ Vitest-Test).
-- Mock-Berechtigungen in `stories/mock-data.ts` ergänzen.
-- `App.vue`: Zahnrad-Gruppe für alle Module verallgemeinern. Sichtbar
-  ändert sich nichts, weil nur Dokumente eine Gruppe hat.
+- `AdminSection.vue`, `usePolling`, `queueOverview.ts` (+ Vitest test).
+- Add mock permissions in `stories/mock-data.ts`.
+- `App.vue`: generalize the gear group for all modules. Nothing changes
+  visibly, because only Documents has a group.
 
-### Etappe 2 — Panels extrahieren (1:1)
+### Stage 2 — Extract panels (1:1)
 
-- Elf Panels nach `components/admin/`, State und Handler mitnehmen.
-  `DataManagementView.vue` besteht danach nur aus `<AdminSection>`-Blöcken
-  mit je einem Panel. Realtime-Abos wandern in `ScanQueuePanel` bzw.
-  `PhotoGroupingPanel`.
-- Verifikation: Storybook-Screenshots der bestehenden Stories
-  vorher/nachher (`npm run screenshot`), keine sichtbare Änderung.
+- Eleven panels to `components/admin/`, taking state and handlers along.
+  `DataManagementView.vue` then consists only of `<AdminSection>` blocks
+  with one panel each. Realtime subscriptions move into `ScanQueuePanel` and
+  `PhotoGroupingPanel` respectively.
+- Verification: Storybook screenshots of the existing stories
+  before/after (`npm run screenshot`), no visible change.
 
-### Etappe 3 — Fotos › Einstellungen
+### Stage 3 — Photos › Settings
 
-- Gruppe „Einstellungen" im Fotos-Modul anlegen.
-- Fünf Routen/Views: Scan-Queue, Wartung, Bibliotheken (verschoben),
-  OSM-Regionen, Gefahrenzone.
-- Weiterleitung `/admin/bibliotheken`; Menüpunkt „Externe Bibliotheken" aus
-  Admin entfernen.
-- Rechte-Feinschliff: Metadaten-Karte hinter `photos.refresh_metadata`.
-- Verweis in `ReviewQueueView.vue` (Zeile ~836, „im DataManagement") als
-  Router-Link auf `fotos-settings-maintenance`.
+- Create the group „Einstellungen" (Settings) in the Photos module.
+- Five routes/views: scan queue, maintenance, libraries (moved),
+  OSM regions, danger zone.
+- Redirect `/admin/bibliotheken`; remove the menu item „Externe Bibliotheken" from
+  Admin.
+- Permission polish: metadata card behind `photos.refresh_metadata`.
+- Reference in `ReviewQueueView.vue` (line ~836, „im DataManagement" (in data management)) as a
+  router link to `fotos-settings-maintenance`.
 
-### Etappe 4 — Dokumente › Einstellungen und Finanzen › Einstellungen
+### Stage 4 — Documents › Settings and Finance › Settings
 
-- Dokumente: Verarbeitung, Korrespondenten (eigene Route mit
-  `documents.manage_taxonomy`), Taxonomie-Cockpit, Taxonomie-Tools
-  (`AdminToolsView` → `TaxonomyToolsView`), KI-Modell. Routen vor `:id`
-  einsortieren. Weiterleitungen für die drei Admin-URLs; Menüpunkte aus
-  Admin entfernen.
-- Finanzen: Gruppe „Einstellungen" mit Konto-Zugriff (Route unverändert,
-  nur Menüplatz) und KI-Tagging.
+- Documents: processing, correspondents (own route with
+  `documents.manage_taxonomy`), taxonomy cockpit, taxonomy tools
+  (`AdminToolsView` → `TaxonomyToolsView`), AI model. Sort routes in before
+  `:id`. Redirects for the three admin URLs; remove menu items from
+  Admin.
+- Finance: group „Einstellungen" with account access (route unchanged,
+  only the menu location) and AI tagging.
 
-### Etappe 5 — Admin › Systemstatus, Auflösung der alten Seite
+### Stage 5 — Admin › System status, dissolving the old page
 
-- `SystemStatusView` unter `/admin/status` mit Queue-Überblick und
-  Build-Nummer; Menüpunkt „Datenverwaltung" durch „Systemstatus" ersetzen.
-- Weiterleitungen `/admin/daten` und `/data-management` auf `/admin/status`.
-- `DataManagementView.vue` und `DataManagementView.stories.ts` löschen;
-  Stories je neuer View (Leerlauf, Queue aktiv, GPS-Rescan verfügbar bleiben
-  erhalten, nur auf die jeweilige Seite verteilt; Stories der verschobenen
-  Views bleiben und werden nur umbenannt).
-- Doku-Verweise prüfen: `documentation/purge.md`, `documentation/osm-admin-deployment.md`,
+- `SystemStatusView` under `/admin/status` with queue overview and
+  build number; replace the menu item „Datenverwaltung" with „Systemstatus" (system status).
+- Redirects `/admin/daten` and `/data-management` to `/admin/status`.
+- Delete `DataManagementView.vue` and `DataManagementView.stories.ts`;
+  stories per new view (idle, queue active, GPS rescan available are
+  kept, only distributed onto the respective page; stories of the moved
+  views stay and are only renamed).
+- Check doc references: `documentation/purge.md`, `documentation/osm-admin-deployment.md`,
   `documentation/external-libraries.md`, `documentation/finance-tagging-and-ai.md`.
-- `.claude/CLAUDE.md`: Plan-Eintrag auf „umgesetzt" setzen.
+- `.claude/CLAUDE.md`: set the plan entry to "implemented".
 
-## Tests und Absicherung
+## Tests and safeguards
 
-- **Vitest (Frontend):** `queueOverview.test.ts` (Sichtbarkeit nach
-  Rechten); `moduleEntryPath.test.ts` weiter grün; ein Test, dass jede
-  Weiterleitung aus der Tabelle oben auf eine existierende Route zeigt
-  (Router auflösen, `matched.length > 0`).
-- **Backend:** keine Änderung, `npm run test` muss trotzdem vor jedem Push
-  laufen (Test-Pflicht aus der CLAUDE.md).
-- **Storybook:** je Seite mindestens eine Story; Screenshot-Vergleich nach
-  Etappe 2 als Regressionsschutz für das Layout.
-- **Manuell:** mit einem Benutzer, der nur `data.manage` plus Modulrechte
-  hat, prüfen, dass OSM, Gefahrenzone, Bibliotheken, Korrespondenten und
-  Metadaten-Karte nicht erscheinen und keine 403-Meldungen auftauchen; mit
-  der Admin-Rolle prüfen, dass Gefahrenzone fehlt (kein `photos.purge`).
+- **Vitest (frontend):** `queueOverview.test.ts` (visibility by
+  permissions); `moduleEntryPath.test.ts` stays green; a test that every
+  redirect from the table above points to an existing route
+  (resolve router, `matched.length > 0`).
+- **Backend:** no change, `npm run test` must still run before every push
+  (test obligation from CLAUDE.md).
+- **Storybook:** at least one story per page; screenshot comparison after
+  stage 2 as regression protection for the layout.
+- **Manual:** with a user who only has `data.manage` plus module permissions,
+  check that OSM, danger zone, libraries, correspondents and the
+  metadata card do not appear and no 403 messages show up; with
+  the Admin role check that the danger zone is missing (no `photos.purge`).
 
-## Getroffene Annahmen und offene Punkte
+## Assumptions made and open points
 
-1. **KI-Modell liegt unter Dokumente.** Der `llm_service` wird von Dokumente
-   (Klassifikation) und Finanzen (Tag-Vorschläge, Analyse) genutzt. Dokumente
-   ist der Hauptnutzer und hat schon die Einstellungs-Gruppe; die
-   Finanzen-Seite „KI-Tagging" bekommt einen Hinweis mit Link auf die
-   Modellseite. Alternative wäre, KI-Modell unter Admin zu belassen; das
-   widerspricht der Vorgabe, alle vier Seiten zu verschieben.
-2. **Konto-Zugriff wandert in die Finanzen-Gruppe.** Nur der Menüplatz ändert
-   sich, Route und Recht bleiben. Wenn der Punkt im Strip bleiben soll,
-   enthält die Gruppe nur KI-Tagging; das funktioniert ebenfalls.
-3. **Systemstatus** ist bewusst schreibgeschützt. Wer eingreifen will, folgt
-   dem Link ins Modul.
+1. **AI model lives under Documents.** The `llm_service` is used by Documents
+   (classification) and Finance (tag suggestions, analysis). Documents
+   is the main user and already has the settings group; the
+   Finance page „KI-Tagging" gets a note with a link to the
+   model page. The alternative would be to leave AI model under Admin; that
+   contradicts the requirement to move all four pages.
+2. **Account access moves into the Finance group.** Only the menu location
+   changes, route and permission stay. If the item is to stay in the strip,
+   the group contains only AI tagging; that works as well.
+3. **System status** is deliberately read-only. Anyone who wants to intervene follows
+   the link into the module.

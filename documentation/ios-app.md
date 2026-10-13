@@ -1,1161 +1,1160 @@
-# iOS-App (FKPhotos) – Feature-Inventar, Web-Vergleich & Parität-Plan
+# iOS App (FKPhotos) – Feature Inventory, Web Comparison & Parity Plan
 
-Stand: August 2026
+As of: August 2026
 
-Dieses Dokument beschreibt den tatsächlichen Funktionsumfang der nativen
-iOS-App (`ios/`, SwiftUI), vergleicht den **Foto-Bereich** der Web-App mit der
-iOS-App und leitet daraus einen priorisierten Plan ab, um – **dort wo es Sinn
-ergibt** – Featuregleichheit herzustellen. Zusätzlich werden iOS-spezifische
-Erweiterungen vorgeschlagen, die nur auf dem Gerät sinnvoll sind.
+This document describes the actual feature set of the native iOS app
+(`ios/`, SwiftUI), compares the **photo area** of the web app with the iOS
+app, and derives a prioritized plan to reach feature parity – **where it makes
+sense**. It also proposes iOS-specific extensions that only make sense on the
+device.
 
-> **Wichtiger Hinweis zur Dokumentation:** Die `FEATURE_COMPARISON.md`
-> beschrieb die iOS-App lange als „read-only, no auto-backup". Das ist
-> **veraltet**. Die App besitzt inzwischen einen vollständigen Hintergrund-
-> Backup-Stack, Zwei-Wege-Sync, eine Share-Extension, Passkeys sowie
-> Kommentare/Reaktionen. Dieses Dokument holt die fehlende Dokumentation nach.
+> **Important note on documentation:** `FEATURE_COMPARISON.md` described the
+> iOS app for a long time as "read-only, no auto-backup". That is
+> **outdated**. The app now has a complete background backup stack, two-way
+> sync, a share extension, passkeys, and comments/reactions. This document
+> catches up on the missing documentation.
 
 ---
 
-## 1. Architektur-Überblick
+## 1. Architecture Overview
 
-- **Sprache/UI:** Swift / SwiftUI, `@Observable`-ViewModels.
-- **Einstieg:** `App/ContentView.swift` → `MainTabView` mit fünf Tabs:
-  **Feed**, **Alben**, **Trip**, **Suche**, **Einstellungen**. Personen hängen
-  an der Albenliste; **Rückblicke** und **Gruppen-Review** an der
-  Feed-Toolbar.
-- **Netzwerk:** `Core/Networking/APIClient.swift` (+ `AuthInterceptor`),
-  spricht dieselbe Encore.ts-API wie das Web-Frontend.
+- **Language/UI:** Swift / SwiftUI, `@Observable` view models.
+- **Entry point:** `App/ContentView.swift` → `MainTabView` with five tabs:
+  **Feed**, **Alben** (albums), **Trip**, **Suche** (search), **Einstellungen**
+  (settings). People hang off the album list; **Rückblicke** (look-backs) and
+  **Gruppen-Review** (group review) hang off the feed toolbar.
+- **Network:** `Core/Networking/APIClient.swift` (+ `AuthInterceptor`),
+  talks to the same Encore.ts API as the web frontend.
 - **Auth:** `Core/Auth/` – `AuthManager`, `KeychainHelper`, `PasskeyManager`.
-- **Storage/Cache:** `Core/Storage/` – `ImageCache`, `ThumbnailLoader`,
-  `SharedStorage` (geteilt mit der Share-Extension).
-- **App-Targets:** Haupt-App, **Share-Extension** (Code in `F4milShare/`, ihre
-  `Info.plist` in `App/ShareExtension/`) zum Hochladen aus anderen Apps.
-- **Sprache:** Die App ist durchgehend deutsch — und sagt das dem System
-  auch: `CFBundleDevelopmentRegion = de` in beiden Info.plists (App und
-  Share-Extension) sowie `developmentRegion`/`knownRegions` im Xcode-Projekt.
-  Ohne diese Angabe meldet das Bundle Englisch als einzige Sprache, und iOS
-  zeichnet daraufhin seine eigenen Oberflächen — Ausschneiden/Kopieren/
-  Einfügen, Tastatur, Standardknöpfe, Foto-Picker, Share-Sheet — englisch,
-  mitten in deutschen Texten. Eigene Strings sind weiterhin hart im Code;
-  für echte Mehrsprachigkeit bräuchte es zusätzlich einen String-Katalog.
-- **Keine XML-Kommentare in `Info.plist` und `.entitlements`.** Xcode
-  schreibt Property Lists beim Öffnen des Targets in seiner kanonischen Form
-  zurück — Schlüssel alphabetisch sortiert, Kommentare entfernt. Weicht die
-  Datei im Repo davon ab, steht nach jedem Build ein Diff im Arbeitsbaum,
-  der vor dem nächsten `git pull` zurückgesetzt werden muss (so geschehen ab
-  #1252, als der erste Kommentar hineinkam). Was ein Schlüssel bedeutet,
-  steht deshalb hier bzw. in `ios/App/ShareExtension/README.md`:
+- **Storage/cache:** `Core/Storage/` – `ImageCache`, `ThumbnailLoader`,
+  `SharedStorage` (shared with the share extension).
+- **App targets:** main app, **share extension** (code in `F4milShare/`, its
+  `Info.plist` in `App/ShareExtension/`) for uploading from other apps.
+- **Language:** The app is German throughout — and tells the system so:
+  `CFBundleDevelopmentRegion = de` in both Info.plists (app and share
+  extension) as well as `developmentRegion`/`knownRegions` in the Xcode
+  project. Without this setting the bundle reports English as its only
+  language, and iOS then draws its own UI — cut/copy/paste, keyboard,
+  standard buttons, photo picker, share sheet — in English, in the middle of
+  German texts. Custom strings are still hard-coded; real multilingual support
+  would additionally require a string catalog.
+- **No XML comments in `Info.plist` and `.entitlements`.** Xcode writes
+  property lists back in its canonical form when the target is opened — keys
+  sorted alphabetically, comments removed. If the file in the repo deviates
+  from that, a diff shows up in the working tree after every build, which has
+  to be reverted before the next `git pull` (this happened from #1252 on, when
+  the first comment was added). What a key means is therefore documented here
+  or in `ios/App/ShareExtension/README.md`:
   `PHPhotoLibraryPreventAutomaticLimitedAccessAlert` in 2.13,
-  `CFBundleSpokenName`/`INAlternativeAppNames` in 2.14, das
-  `applinks:`-Entitlement in 2.11.
-- **Build-Nummer:** `CURRENT_PROJECT_VERSION` wird nicht mehr von Hand
-  gepflegt (sie blieb dabei sechzehn Pull Requests zurück), sondern vom
-  pre-commit-Hook aus der Commit-Anzahl abgeleitet:
-  `scripts/sync-ios-build-number.sh` setzt sie bei jedem Commit, der `ios/`
-  berührt, auf `git rev-list --count HEAD + 1` — in allen vier
-  Build-Konfigurationen gemeinsam, denn App und Share-Extension müssen
-  dieselbe `CFBundleVersion` tragen. Die Nummer wird nie kleiner, und in
-  einem flachen Checkout (CI, `--depth`) passiert nichts, weil die Zählung
-  dort kleiner wäre als die Historie, aus der sie stammt. `MARKETING_VERSION`
-  bleibt eine bewusste Entscheidung von Hand.
+  `CFBundleSpokenName`/`INAlternativeAppNames` in 2.14, the
+  `applinks:` entitlement in 2.11.
+- **Build number:** `CURRENT_PROJECT_VERSION` is no longer maintained by hand
+  (it fell sixteen pull requests behind that way), but derived from the commit
+  count by the pre-commit hook:
+  `scripts/sync-ios-build-number.sh` sets it on every commit that touches
+  `ios/` to `git rev-list --count HEAD + 1` — in all four build
+  configurations together, because the app and the share extension must carry
+  the same `CFBundleVersion`. The number never decreases, and in a shallow
+  checkout (CI, `--depth`) nothing happens, because the count there would be
+  smaller than the history it comes from. `MARKETING_VERSION` remains a
+  deliberate manual decision.
 
-### 1.1 Die Sitzung der Share-Extension
+### 1.1 The share extension's session
 
-Die Extension kommt nicht an den Keychain der App. Deshalb spiegelt die App
-Zugriffs- und Refresh-Token samt Ablaufzeitpunkt in die App-Group
-(`SharedStorage`), und die Extension liest sie von dort — über `ShareAuth`,
-das beides kann: **vorher erneuern**, wenn der gespeicherte Ablauf naht, und
-**einmal auf 401 erneuern** und die Anfrage wiederholen. Ein Zugriffstoken
-lebt 15 Minuten, ein Refresh-Token 30 Tage; ohne Erneuerung war die Extension
-also eine Viertelstunde nach dem letzten App-Start „nicht eingerichtet".
+The extension cannot reach the app's keychain. The app therefore mirrors
+access and refresh tokens, including their expiry time, into the app group
+(`SharedStorage`), and the extension reads them from there — via `ShareAuth`,
+which can do both: **refresh beforehand** when the stored expiry is
+approaching, and **refresh once on 401** and retry the request. An access
+token lives 15 minutes, a refresh token 30 days; without refreshing, the
+extension was therefore "not set up" a quarter of an hour after the last app
+launch.
 
-Zwei Regeln, die dabei zusammenspielen müssen:
+Two rules that have to work together here:
 
-- **Die Extension schreibt das rotierte Paar zurück in die App-Group**,
-  Ablaufzeitpunkt eingeschlossen. Nur so sieht die App, dass sich die Sitzung
-  bewegt hat.
-- **Die App überschreibt eine vorhandene Sitzung in der Group nicht**
-  (`SharedSession.shouldMirror`). Sie füllt sie, wenn keine da ist. Die
-  Rotation der Extension erreicht den Keychain nie — sie kann ihn nicht
-  schreiben —, und ein Spiegeln beim Start hätte die frisch rotierte Sitzung
-  durch die alte ersetzt. Nach den fünf Minuten Karenz, die der Server einem
-  rotierten Refresh-Token lässt, half dann nur noch neu anmelden.
+- **The extension writes the rotated pair back into the app group**,
+  including the expiry time. Only that way does the app see that the session
+  has moved on.
+- **The app does not overwrite an existing session in the group**
+  (`SharedSession.shouldMirror`). It fills it if there is none. The
+  extension's rotation never reaches the keychain — it cannot write to it —,
+  and mirroring at launch would have replaced the freshly rotated session
+  with the old one. After the five minutes of grace the server allows a
+  rotated refresh token, the only remedy was to sign in again.
 
 ---
 
-## 2. Implementierte iOS-Features (Dokumentations-Nachzug)
+## 2. Implemented iOS Features (Documentation Catch-up)
 
-Folgende Features sind im Code vorhanden, waren aber bisher **nicht
-dokumentiert**:
+The following features exist in the code but were so far **not
+documented**:
 
-### 2.1 Authentifizierung
-- Passwort-Login (`AuthViewModel`, `LoginView`, `RegisterView`).
+### 2.1 Authentication
+- Password login (`AuthViewModel`, `LoginView`, `RegisterView`).
 - **Passkeys / WebAuthn** (`PasskeyManager`, via `ASAuthorization`):
-  Registrierung + Login gegen `/passkeys/register/*` und `/passkeys/auth/*`.
-- Token-Persistenz in der Keychain (`KeychainHelper`).
+  registration + login against `/passkeys/register/*` and `/passkeys/auth/*`.
+- Token persistence in the keychain (`KeychainHelper`).
 
-### 2.2 Fotos & Galerie
-- **„Alle Fotos"-Timeline** (`PhotoTimelineView` → `PhotoYearView` →
-  `PhotoMonthGridView`) über `/photos/timeline`, als virtuelles Album oben in
-  der Alben-Liste.
-- **Vollbild-Viewer** (`PhotoFullscreenView`, ~740 Zeilen): native Pinch-Zoom
-  (`ZoomableImageView`), Swipe-Navigation, Metadaten-Overlay.
-- **Filter & Sortierung** (`FilterSortViewModel`, `FilterSortMenuView`):
-  Favorit, GPS vorhanden, Datumsbereich; Sortierung nach Datum etc.
-- **Mehrfachauswahl in „Alle Fotos"** (Issue #767, Etappe 2): in der
-  gefilterten Flach-Ansicht von `PhotoTimelineView` per Langdruck oder
-  Toolbar-Button, inkl. Drag-Select und den Stapel-Aktionen „zu Album
-  hinzufügen" und „teilen" — dieselben wie im Album und im Monats-Grid. Der
-  Zustand steckt im gemeinsamen `PhotoSelection` (`PhotoSelectionShare.swift`).
-  Nur in der gefilterten Ansicht verfügbar: unfiltert zeigt die Timeline
-  Jahres-Kacheln, keine Fotos. Ein Filterwechsel verwirft die Auswahl, damit
-  keine unsichtbaren Fotos in einer Stapel-Aktion landen.
-- **Auswählen durch Wischen** (alle Foto-Raster, `DragToSelect` in
-  `PhotoSelectionShare.swift`), wie in Apple Fotos: Ein Wisch, der **seitlich**
-  beginnt, wählt aus und darf danach in jede Richtung weiterlaufen; einer, der
-  nach oben oder unten beginnt, scrollt. Während des Auswählens bleibt das
-  Raster stehen, die Zurück-Wischgeste der Navigation wartet, und nahe dem
-  oberen oder unteren Rand scrollt das Raster von selbst weiter (schneller, je
-  näher der Finger am Rand ist). Beginnt der Wisch auf einem schon ausgewählten Foto,
-  wählt er ab statt aus — ebenfalls wie in Fotos; die Richtung gilt für den
-  ganzen Wisch, ein Zurückwackeln kippt nichts. Apple dokumentiert für diese
-  Ein-Finger-Geste keine API — UIKits eingebaute Mehrfachauswahl ist ein
-  Zwei-Finger-Wisch auf einer `UICollectionView`, die Raster hier sind
-  SwiftUI —, deshalb ist sie als `UIPanGestureRecognizer` nachgebaut, der
-  Scroll-View und Zurück-Geste per `shouldBeRequiredToFailBy` auf sich warten
-  lässt.
-- **Metadaten-Ansicht** (`PhotoMetadataView`): Datei-Infos, Aufnahmedatum,
-  Beschreibung, Qualitäts-Bewertung („x von 4"), erkannte Personen.
-- **Per-Foto-Karte**: MapKit-Mini-Karte mit Marker bei vorhandenem GPS.
-- **Auto-Crop-Fokuspunkt** wird beim Thumbnail berücksichtigt
+### 2.2 Photos & Gallery
+- **"Alle Fotos" (all photos) timeline** (`PhotoTimelineView` → `PhotoYearView` →
+  `PhotoMonthGridView`) via `/photos/timeline`, as a virtual album at the top
+  of the album list.
+- **Fullscreen viewer** (`PhotoFullscreenView`, ~740 lines): native pinch zoom
+  (`ZoomableImageView`), swipe navigation, metadata overlay.
+- **Filter & sorting** (`FilterSortViewModel`, `FilterSortMenuView`):
+  favorite, GPS present, date range; sorting by date etc.
+- **Multi-select in "Alle Fotos"** (issue #767, stage 2): in the filtered flat
+  view of `PhotoTimelineView` via long press or toolbar button, including
+  drag-select and the batch actions "add to album" and "share" — the same as
+  in the album and in the month grid. The state lives in the shared
+  `PhotoSelection` (`PhotoSelectionShare.swift`). Only available in the
+  filtered view: unfiltered, the timeline shows year tiles, not photos. A
+  filter change discards the selection so that no invisible photos end up in a
+  batch action.
+- **Selecting by swiping** (all photo grids, `DragToSelect` in
+  `PhotoSelectionShare.swift`), as in Apple Photos: a swipe that begins
+  **sideways** selects and may then continue in any direction; one that begins
+  upward or downward scrolls. While selecting, the grid stays put, the
+  navigation's back swipe gesture waits, and near the top or bottom edge the
+  grid keeps scrolling by itself (faster the closer the finger is to the
+  edge). If the swipe begins on an already selected photo, it deselects
+  instead of selecting — likewise as in Photos; the direction applies to the
+  whole swipe, wiggling back flips nothing. Apple documents no API for this
+  one-finger gesture — UIKit's built-in multi-select is a two-finger swipe on
+  a `UICollectionView`, while the grids here are SwiftUI —, so it is rebuilt
+  as a `UIPanGestureRecognizer` that makes the scroll view and the back
+  gesture wait for it via `shouldBeRequiredToFailBy`.
+- **Metadata view** (`PhotoMetadataView`): file info, capture date,
+  description, quality rating ("x von 4", i.e. x of 4), recognized people.
+- **Per-photo map**: MapKit mini map with a marker when GPS is present.
+- **Auto-crop focus point** is taken into account in the thumbnail
   (`PhotoThumbnailView(autoCrop:)`).
 
-### 2.3 Foto-Aktionen
-- **Favorit** umschalten (Herz) im Vollbild.
-- **Aufnahmedatum ändern**.
-- **Zu Album hinzufügen** (`AddToAlbumManager`, Picker).
-- **Teilen** über das native iOS-Share-Sheet (`PhotoShareManager`,
+### 2.3 Photo Actions
+- Toggle **favorite** (heart) in fullscreen.
+- **Change capture date**.
+- **Add to album** (`AddToAlbumManager`, picker).
+- **Share** via the native iOS share sheet (`PhotoShareManager`,
   `ActivityView`).
-- **Personen benennen / zusammenführen** direkt aus erkannten Gesichtern
-  im Vollbild.
-- **Ausblenden / Einblenden**, **Aus dem Album entfernen** (im Album-Kontext),
-  **Löschen** (nur mit `photos.delete`, mit Rückfrage) und **Original in die
-  Fotos-Mediathek sichern** – alle im Überlauf-Menü des Vollbilds (Issue #762).
+- **Name / merge people** directly from recognized faces
+  in fullscreen.
+- **Hide / unhide**, **Remove from album** (in album context),
+  **Delete** (only with `photos.delete`, with confirmation) and **Save original
+  to the Photos library** – all in the fullscreen overflow menu (issue #762).
 
-### 2.3a Ein Vollbild-Viewer, nicht einer je Kontext
+### 2.3a One Fullscreen Viewer, Not One per Context
 
-- `PhotoFullscreenView` ist **die** Ansicht für ein einzelnes Server-Foto:
-  Blättern, Zoom, Herz/Info/Diashow, Ausblenden, Löschen, Download,
-  „Zuschnitt…", aus dem Album entfernen, Ortskarte, Gesichter. Erreichbar aus
-  Album, Raster, Zeitleiste, Personen-Ansicht, Karte, Feed — und seit #1085
-  auch aus den Suchergebnissen und der Review-Vorschau.
-- Vorher wurde je Kontext eine neue Einzelbild-Ansicht erfunden. Das
-  Suchergebnis hatte eine eigene Scroll-Seite ohne Blättern und ohne Zoom,
-  deren Kurations-Knöpfe eine Route riefen, die es nicht gibt
-  (`PUT /photos/curation` statt `PATCH /photos/:id/curation`), deren Fehler
-  nirgends gerendert wurden und in der „sichtbar" als **grüner Daumen runter**
-  neben einem zweiten Daumen runter stand. Alle drei Mängel gab es nur, weil
-  die Seite separat geschrieben und danach nie mitgezogen wurde; mit der Seite
-  sind sie verschwunden (#1085 §3).
-- Was ein Kontext zusätzlich braucht, wird **hineingereicht** statt nachgebaut:
-  `albumContext` blendet „aus Album entfernen" nur dort ein, wo ein Album
-  betrachtet wird, und `contextFooter` hängt eine Leiste unter das Foto. Die
-  Review-Vorschau ist damit nur noch dieser Fuß („Nur dieses Foto behalten",
-  die Behalten-Schalter, KI-Pick, Bewertung, Peer-Stimmen) — Pager, Zoom und
-  alles andere sind die des Viewers.
-- **Bewusste Ausnahme:** `LibraryPhotoFullscreenView` zeigt **Geräte**-Fotos
-  (`PHAsset`). Der kanonische Viewer ist auf `PhotoWithCuration` und
-  `/photos/file/…` gebaut; ihn über seine Bildquelle zu verallgemeinern wäre
-  eine eigene Entscheidung.
+- `PhotoFullscreenView` is **the** view for a single server photo:
+  paging, zoom, heart/info/slideshow, hide, delete, download,
+  "Zuschnitt…" (crop…), remove from album, location map, faces. Reachable from
+  album, grid, timeline, people view, map, feed — and since #1085
+  also from the search results and the review preview.
+- Previously, a new single-image view was invented for each context. The
+  search result had its own scroll page without paging and without zoom,
+  whose curation buttons called a route that does not exist
+  (`PUT /photos/curation` instead of `PATCH /photos/:id/curation`), whose
+  errors were rendered nowhere, and in which "visible" appeared as a **green
+  thumbs-down** next to a second thumbs-down. All three defects existed only
+  because the page was written separately and never kept in sync afterwards;
+  with the page they are gone (#1085 §3).
+- What a context additionally needs is **passed in** rather than rebuilt:
+  `albumContext` shows "remove from album" only where an album is being
+  viewed, and `contextFooter` attaches a bar below the photo. The review
+  preview is thus reduced to just this footer ("Nur dieses Foto behalten",
+  i.e. keep only this photo, the keep toggles, AI pick, rating, peer votes) —
+  pager, zoom and everything else are the viewer's.
+- **Deliberate exception:** `LibraryPhotoFullscreenView` shows **device**
+  photos (`PHAsset`). The canonical viewer is built on `PhotoWithCuration` and
+  `/photos/file/…`; generalizing it over its image source would be a decision
+  of its own.
 
-### 2.4 Alben
-- Liste mit Suche, **Anpinnen** (`AlbumPinPreferences`), Wisch-Aktionen,
-  Erstellen/Löschen.
-- Detail-Ansicht mit Grid, Filter/Sort, **Mehrfachauswahl inkl.
-  Drag-Select**, Stapel-Aktionen (zu Album hinzufügen, teilen), Upload.
-- **Ansichtsmodi + Konsens** (`AlbumViewMode`, Issue #760): Umschalter für
-  „Alle Fotos", „Meine Favoriten", „Gruppen-Highlights" (Konsens),
-  „Von anderen favorisiert" und eine „Eigene Ansicht" mit einstellbaren
-  Schwellenwerten. Die zählerbasierten Modi erscheinen nur bei geteilten Alben.
-  Der gewählte Modus wird pro Album gemerkt.
-- **Albumcover** (`AlbumCover`): „Als Albumcover festlegen" im Kontextmenü des
-  Grids, für alle mit Schreibrecht. Ohne gesetztes Cover zeigt das Album sein
-  neuestes Foto — das wandert mit jedem Upload weiter, deshalb ist „Cover
-  entfernen" eine eigene Entscheidung und ein eigener Eintrag.
-- **Nur das Cover geht über die Leitung.** `PATCH /albums` behandelt ein
-  fehlendes Feld als „unverändert", also überschreibt eine Cover-Änderung
-  keinen Namen und keine Beschreibung, die jemand anderes inzwischen geändert
-  hat. Umgekehrt heißt das: das Entfernen muss ein ausdrückliches `null`
-  senden — Swift ließe ein `nil` beim Kodieren sonst weg, und das Entfernen
-  täte stillschweigend nichts.
-- Der Server nimmt nur Fotos **aus dem Album** als Cover; dieselbe Regel
-  entscheidet hier, was das Menü überhaupt anbietet.
-- **Anonymisierte Abstimmung**: In geteilten Alben zeigt jedes Thumbnail
-  „3/5"-Badges für Favoriten und Ausblendungen, das Vollbild einen
-  „Meinungen"-Block mit Anteilsbalken. Die eigene Favoriten-Stimme lässt sich
-  direkt aus dem Grid-Kontextmenü setzen; die Zähler aktualisieren sich sofort
-  und werden bei einem Fehler zurückgerollt.
+### 2.4 Albums
+- List with search, **pinning** (`AlbumPinPreferences`), swipe actions,
+  create/delete.
+- Detail view with grid, filter/sort, **multi-select incl.
+  drag-select**, batch actions (add to album, share), upload.
+- **View modes + consensus** (`AlbumViewMode`, issue #760): switcher for
+  "Alle Fotos", "Meine Favoriten" (my favorites), "Gruppen-Highlights"
+  (consensus), "Von anderen favorisiert" (favorited by others) and an "Eigene
+  Ansicht" (custom view) with adjustable thresholds. The count-based modes
+  only appear for shared albums. The chosen mode is remembered per album.
+- **Album cover** (`AlbumCover`): "Als Albumcover festlegen" (set as album
+  cover) in the grid's context menu, for everyone with write permission.
+  Without a cover set, the album shows its newest photo — which moves on with
+  every upload, which is why "Cover entfernen" (remove cover) is a decision of
+  its own and an entry of its own.
+- **Only the cover goes over the wire.** `PATCH /albums` treats a missing
+  field as "unchanged", so a cover change does not overwrite a name or
+  description that someone else has changed in the meantime. Conversely, this
+  means removal has to send an explicit `null` — Swift would otherwise omit a
+  `nil` when encoding, and the removal would silently do nothing.
+- The server accepts only photos **from the album** as the cover; the same
+  rule decides here what the menu offers in the first place.
+- **Anonymized voting**: In shared albums, every thumbnail shows
+  "3/5" badges for favorites and hides, and the fullscreen view an
+  "Meinungen" (opinions) block with share bars. One's own favorite vote can be
+  set directly from the grid context menu; the counters update immediately
+  and are rolled back on error.
 
-  Die Filterung passiert **auf dem Gerät**, nicht über das serverseitige
-  `active_view`: Das Web setzt diese Einstellung bei jedem Album-Laden auf
-  `"all"` zurück und filtert selbst clientseitig, ein von iOS gespeichertes
-  Preset würde also stillschweigend verworfen. Details in
-  `documentation/album-photo-views.md`.
-- **Album-Einstellungen** (`AlbumSettingsView`) wie im Web: Name,
-  Beschreibung und „Karte aktivieren" (`display_mode`) ändern. Erreichbar über
-  das Überlauf-Menü der Detailansicht und das Kontextmenü der Albenliste;
-  Freigeben und Löschen sind aus demselben Sheet heraus möglich. Bearbeiten
-  darf jeder mit Schreibzugriff, Löschen nur der Eigentümer.
-- **Album teilen** wie im Web (`AlbumShareView`, `AlbumShareViewModel`,
-  Issue #918): interne Nutzer mit „Nur lesen“, „Bearbeiten“ oder
-  „Bearbeiten + Teilen“ einladen (letzteres nur als Eigentümer) sowie
-  öffentlicher Link mit Ablaufdatum, Kopieren und Share-Sheet. Der geteilte
-  Link zeigt auf die SPA-Route `/app/albums/shared/<token>`
-  (`AlbumPublicLinkURL`) — dieselbe URL, die `web/static.ts` serverseitig als
-  kanonische `pageUrl` baut und mit Open-Graph-Tags anreichert, damit
-  iMessage-Vorschauen Albumnamen und Cover zeigen. Nicht zu verwechseln mit
-  `/albums/public/<token>`, dem JSON-API-Endpunkt. Die
-  einladbaren Nutzer kommen aus `/albums/:id/shareable-users`, sodass auch
-  Nicht-Admins und `write_share`-Delegierte teilen können; Delegierte können
-  nur ihre eigenen Einladungen wieder entfernen. Erreichbar aus der
-  Album-Detailansicht und direkt aus dem laufenden Trip.
-- **Die iPhone-Mediathek steht abseits** (#1115 §5). Sie lag als vierte Zeile
-  in der ersten Sektion, gleichauf mit „Alle Fotos", „Personen" und
-  „Gruppen-Review" — als wäre sie ein weiterer Ort *innerhalb* von f4mil.
-  Dahinter liegt aber nichts von f4mil, sondern die Mediathek des Geräts.
-  Jetzt: eigene Sektion „Vom iPhone" **direkt hinter den f4mil-Orten**, deren
-  Footer den Unterschied ausspricht, und **modal** statt gepusht — ein Sheet mit eigenem
-  „Fertig" ist die Geste der Plattform für „Abstecher, du kommst zurück",
-  während ein Push „tiefer ins selbe Material" hieße. Der Zielscreen heißt
-  „iPhone-Mediathek" (nicht „iOS") und sagt oben selbst, wessen Alben er
-  zeigt. Die Sektion stand zuerst am *Ende* der Liste — was sie versteckte:
-  unter einer echten Albensammlung ist sie einen langen Scroll weit weg, und
-  in den beiden Leer-Zuständen wurde sie gar nicht gerendert, sodass
-  ausgerechnet wer noch kein Album hat keinen Weg dorthin hatte.
+  Filtering happens **on the device**, not via the server-side
+  `active_view`: The web resets this setting to `"all"` on every album load
+  and filters client-side itself, so a preset stored by iOS would be silently
+  discarded. Details in `documentation/album-photo-views.md`.
+- **Album settings** (`AlbumSettingsView`) as on the web: change name,
+  description and "Karte aktivieren" (enable map) (`display_mode`). Reachable
+  via the detail view's overflow menu and the album list's context menu;
+  sharing and deleting are possible from the same sheet. Anyone with write
+  access may edit, only the owner may delete.
+- **Share album** as on the web (`AlbumShareView`, `AlbumShareViewModel`,
+  issue #918): invite internal users with "Nur lesen" (read only), "Bearbeiten"
+  (edit) or "Bearbeiten + Teilen" (edit + share) (the latter only as owner),
+  as well as a public link with expiry date, copy and share sheet. The shared
+  link points to the SPA route `/app/albums/shared/<token>`
+  (`AlbumPublicLinkURL`) — the same URL that `web/static.ts` builds
+  server-side as the canonical `pageUrl` and enriches with Open Graph tags so
+  that iMessage previews show the album name and cover. Not to be confused
+  with `/albums/public/<token>`, the JSON API endpoint. The
+  invitable users come from `/albums/:id/shareable-users`, so that non-admins
+  and `write_share` delegates can share too; delegates can only remove their
+  own invitations again. Reachable from the album detail view and directly
+  from the running trip.
+- **The iPhone library stands apart** (#1115 §5). It used to be the fourth row
+  in the first section, on a par with "Alle Fotos", "Personen" and
+  "Gruppen-Review" — as if it were another place *within* f4mil. Behind it,
+  however, lies nothing from f4mil, but the device's photo library.
+  Now: its own section "Vom iPhone" (from the iPhone) **directly after the
+  f4mil places**, whose footer spells out the difference, and **modal** instead
+  of pushed — a sheet with its own "Fertig" (done) is the platform's gesture
+  for "a detour, you will come back", whereas a push would mean "deeper into
+  the same material". The destination screen is called "iPhone-Mediathek"
+  (not "iOS") and says at the top itself whose albums it shows. The section
+  was first placed at the *end* of the list — which hid it: below a real album
+  collection it is a long scroll away, and in the two empty states it was not
+  rendered at all, so that precisely those who have no album yet had no way
+  there.
 
-### 2.5 Personen & Gesichter
-- Personen-Grid (`PersonsListView`), Umbenennen, Zusammenführen,
-  Gesichter ignorieren („Alle ignorieren").
-- **Jahres-Kacheln** in der Personen-Detailansicht (neu, Issue #391): Fotos
-  einer Person werden nach Jahr gruppiert; bei vielen Fotos wird initial nur
-  das neueste Jahr gerendert.
+### 2.5 People & Faces
+- People grid (`PersonsListView`), rename, merge,
+  ignore faces ("Alle ignorieren", i.e. ignore all).
+- **Year tiles** in the person detail view (new, issue #391): a person's
+  photos are grouped by year; with many photos, initially only
+  the newest year is rendered.
 
-### 2.6 Suche
-- **Systemsuchfeld** (`.searchable`): Lupe im Feld, Löschkreuz und
-  „Abbrechen" kommen von iOS, statt von Hand nachgebaut zu werden. Das Feld
-  bleibt beim Scrollen stehen (`.navigationBarDrawer(displayMode: .always)`) —
-  in einem Tab, der nur zum Suchen da ist, wäre ein wegscrollendes Suchfeld
-  eine Suche, die man erst wiederfinden muss. Gesucht wird beim Absenden,
-  nicht bei jedem Tastendruck — jede
-  Anfrage ist eine Runde durch den Embedding-Service, und halb getippte Wörter
-  dafür auszugeben wäre verschwendet. Leert man das Feld (per × oder
-  „Abbrechen"), verschwinden die Treffer mit; sonst stünde das Raster voll mit
-  Ergebnissen zu einer Anfrage, die nicht mehr auf dem Bildschirm steht.
-- Unter dem Feld steht vor einer Suche **nichts**. Die früheren Beispiel-
-  Anfragen saßen dort, wo Ergebnisse erscheinen, und lasen sich als solche.
-- Natürliche-Sprache-Suche (`SearchView`, `SearchViewModel`) über denselben
-  Endpunkt wie das Web (`POST /photos/search/natural`): Ort und Zeitraum
-  werden aus der Anfrage herausgeparst und als **Filter** angewendet, statt
-  als Wörter mitgesucht zu werden. „Kirchen in München von 2004 bis 2017"
-  bedeutet damit auf beiden Clients dasselbe.
-- **„Verstanden als:"-Chips** (`NaturalSearch`, `SearchParseChips`) zeigen die
-  Lesart des Servers — semantischer Rest, Ort, Zeitraum. Gleiche Regeln wie
-  `useNaturalSearch` im Web: ganze Jahre kollabieren zu „2004–2017", und der
-  semantische Chip erscheint nur, wenn tatsächlich etwas aus der Anfrage
-  herausgelöst wurde.
-- Der Endpunkt liefert nur bewertete IDs; die Zeilen kommen über den
-  Batch-Endpunkt `GET /photos/details` nach und werden wieder in die
-  Ranking-Reihenfolge gebracht (`PhotoFetch.byIds`).
-- Ein Tipp auf einen Treffer öffnet **denselben Vollbild-Viewer wie überall
-  sonst**, geblättert über die ganze Trefferliste (#1085 §3/§4) — siehe 2.3a.
-- Ort/POI/Radius zusätzlich über `searchByLocation` (`/photos/search/location`).
+### 2.6 Search
+- **System search field** (`.searchable`): magnifier in the field, clear
+  cross and "Abbrechen" (cancel) come from iOS instead of being rebuilt by
+  hand. The field stays put while scrolling
+  (`.navigationBarDrawer(displayMode: .always)`) —
+  in a tab that exists only for searching, a search field that scrolls away
+  would be a search you first have to find again. Searching happens on submit,
+  not on every keystroke — every
+  request is a round trip through the embedding service, and spending that on
+  half-typed words would be wasteful. If the field is cleared (via × or
+  "Abbrechen"), the hits disappear with it; otherwise the grid would be full of
+  results for a query that is no longer on screen.
+- Below the field there is **nothing** before a search. The earlier example
+  queries sat where results appear and read as such.
+- Natural-language search (`SearchView`, `SearchViewModel`) via the same
+  endpoint as the web (`POST /photos/search/natural`): place and time range
+  are parsed out of the query and applied as **filters** instead of being
+  searched as words. "Kirchen in München von 2004 bis 2017" (churches in
+  Munich from 2004 to 2017) thus means the same on both clients.
+- **"Verstanden als:" (understood as) chips** (`NaturalSearch`,
+  `SearchParseChips`) show the server's reading — semantic remainder, place,
+  time range. Same rules as `useNaturalSearch` on the web: whole years
+  collapse to "2004–2017", and the semantic chip appears only if something was
+  actually extracted from the query.
+- The endpoint returns only scored IDs; the rows are fetched afterwards via the
+  batch endpoint `GET /photos/details` and put back into
+  ranking order (`PhotoFetch.byIds`).
+- A tap on a hit opens **the same fullscreen viewer as everywhere
+  else**, paged across the whole hit list (#1085 §3/§4) — see 2.3a.
+- Place/POI/radius additionally via `searchByLocation` (`/photos/search/location`).
 
-### 2.6a Karte über eine Foto-Sammlung
+### 2.6a Map over a Photo Collection
 
-- **Kartenansicht** (`PhotoMapView`, MapKit) über die Fotos eines Albums,
-  erreichbar aus dem Überlauf-Menü der Album-Detailansicht („Karte").
-  Darunter die **Zeitleiste** wie im Web: ein „Übersicht"-Eintrag, danach
-  jeder Stopp über alle Tage hinweg als eine durchgehende chronologische
-  Reihe. Der erste Stopp eines Tages trägt die Tagesfarbe
-  (`PhotoStops.dayColors`, identisch zum Web), damit die Tagesgrenzen in einer
-  langen Reihe lesbar bleiben.
-- Eine Auswahl, zwei Ansichten: „Übersicht" zeigt einen Pin je Region
-  (Übersichts-Cluster über alle Tage) samt gestrichelten Linien für die
-  größten Sprünge. Die Auswahl eines Stopps zeigt **dessen Tag**, damit die
-  Nachbarstopps sichtbar bleiben, zentriert die Karte darauf und hebt Pin wie
-  Karte hervor. Karte und Zeitleiste folgen einander.
-- Auf dem Pin sitzt das Titelbild; Tippen öffnet dessen Fotos im
-  Vollbild-Viewer. Ein Tipp auf eine Zeitleisten-Karte wählt nur aus — so
-  reißt Scrollen nie den Viewer auf.
-- Die Gruppierungsregeln liegen in `PhotoStops.swift` — eine Portierung von
-  `frontend/src/composables/usePhotoStops.ts` mit denselben Konstanten, damit
-  Web und iOS für dasselbe Album dieselben Pins zeichnen: Gruppierung nach
-  **lokalem** Tag, je Tag zwei Clustering-Durchgänge (gierig nach nächstem
-  Zentroid innerhalb des Include-Radius, danach Zusammenlegen aller Paare
-  unterhalb des Separations-Radius), Radien skaliert an der Ausdehnung des
-  Tages, Übersichts-Cluster über alle Tage, sowie die längsten ~10 % der
-  Sprünge zwischen aufeinanderfolgenden Stopps als gestrichelte Linien.
-- **Der Zoom steuert das Clustering** (wie im Web): Was ein Stopp ist, ist das,
-  was bei der aktuellen Zoomstufe unter einen Pin passt. Hineinzoomen teilt
-  Stopps auf, Herauszoomen führt sie zusammen — die Zeitleiste folgt exakt,
-  weil Pins und Karten denselben Clustering-Durchgang lesen. Der Radius wird
-  aus dem sichtbaren Bereich projiziert (`PhotoStops.clusterRadius`) und nur
-  neu berechnet, wenn die Geste zur Ruhe kommt und sich der Radius um mehr als
-  2 % ändert — ein reines Verschieben kostet also keinen Durchgang.
-- **Die Auswahl ist ein Foto, kein Stopp.** Ein Neuclustern vergibt alle
-  Stopp-IDs neu; eine über den Zoom gehaltene ID zeigte danach auf etwas
-  anderes. Die Auswahl hängt deshalb an einer Foto-ID, der Stopp wird daraus
-  neu aufgelöst (`PhotoStops.stop(containing:in:)`) — wie im Web über
+- **Map view** (`PhotoMapView`, MapKit) over the photos of an album,
+  reachable from the overflow menu of the album detail view ("Karte").
+  Below it the **timeline** as on the web: an "Übersicht" (overview) entry,
+  followed by every stop across all days as one continuous chronological
+  series. The first stop of a day carries the day color
+  (`PhotoStops.dayColors`, identical to the web), so that the day boundaries
+  stay readable in a long series.
+- One selection, two views: "Übersicht" shows one pin per region
+  (overview cluster across all days) plus dashed lines for the
+  largest jumps. Selecting a stop shows **its day**, so that the neighboring
+  stops stay visible, centers the map on it and highlights pin and
+  card. Map and timeline follow each other.
+- The pin carries the cover image; tapping opens its photos in the
+  fullscreen viewer. A tap on a timeline card only selects — so
+  scrolling never tears open the viewer.
+- The grouping rules live in `PhotoStops.swift` — a port of
+  `frontend/src/composables/usePhotoStops.ts` with the same constants, so that
+  web and iOS draw the same pins for the same album: grouping by
+  **local** day, two clustering passes per day (greedy by nearest
+  centroid within the include radius, then merging all pairs
+  below the separation radius), radii scaled to the extent of the
+  day, overview clusters across all days, and the longest ~10 % of
+  jumps between consecutive stops as dashed lines.
+- **Zoom drives the clustering** (as on the web): what a stop is is whatever
+  fits under one pin at the current zoom level. Zooming in splits
+  stops, zooming out merges them — the timeline follows exactly,
+  because pins and cards read the same clustering pass. The radius is
+  projected from the visible region (`PhotoStops.clusterRadius`) and
+  recomputed only when the gesture comes to rest and the radius changes by more
+  than 2 % — a pure pan therefore costs no pass.
+- **The selection is a photo, not a stop.** Re-clustering reassigns all
+  stop IDs; an ID held across the zoom would afterwards point to something
+  else. The selection is therefore tied to a photo ID, and the stop is
+  re-resolved from it (`PhotoStops.stop(containing:in:)`) — as on the web via
   `selectedAnchorPhotoId`.
 
-### 2.6b Nicht-destruktive Bearbeitung (Zuschnitt/Tonwerte)
+### 2.6b Non-destructive Editing (Crop/Tone)
 
-- **Zuschnitt-Ansicht** (`PhotoTransformsView`), erreichbar über „Zuschnitt…"
-  im Überlauf-Menü des Vollbild-Viewers. Der Backend-Stack existierte bereits
-  vollständig (`photo/photo-transforms-crud.service.ts`,
-  `documentation/photos-ai-transforms.md`) — es fehlte nur der Client.
-- Eine „Rezeptur" (Crop, Rotation, Belichtung, Kontrast, Gamma, Schwarz-/
-  Weißpunkt) gilt **pro Nutzer und pro Foto**; die Originaldatei wird nie
-  verändert. Drei Quellen: die eigene, die anderer Haushaltsmitglieder (per
-  Klick übernehmbar) und der KI-Vorschlag.
-- Umgesetzt (#1019 Etappe A): Vorschlag je Seitenverhältnis ansehen und
-  anwenden, fremde Fassung übernehmen, auf das Original zurücksetzen. Regeln
-  und Drahtformat in `PhotoTransforms.swift`.
-- **Vorschläge werden nie automatisch angewendet** — und einen KI-Vorschlag
-  gibt es nur für Seitenverhältnisse, für die ein Gesicht als Bildmitte
-  gefunden wurde; ohne erkanntes Gesicht liefert der Server bewusst gar keinen
-  Zuschnitt.
-- **Die Seitenverhältnisse stehen trotzdem alle in der Zuschnitt-Ansicht**
-  (#1085 §1b). Vorher baute sie ihre Auswahl aus den KI-Vorschlägen — ein Foto
-  ohne erkanntes Gesicht zeigte also gar kein Seitenverhältnis und las sich, als
-  fehle die Funktion. Ein Tipp auf ein Verhältnis öffnet den Editor bereits auf
-  diesen Zuschnitt gesetzt; wo die KI komponiert hat (mit ✨ markiert), auf
-  ihren Ausschnitt, sonst mittig. 2:1 gibt es bewusst nicht — weder Web noch
-  Server kennen es, das wäre eine Änderung an allen dreien.
-- **Eine gespeicherte Bearbeitung ist überall zu sehen, nicht nur im Editor**
-  (#1085 §1a). Bis dahin rendert nur `PhotoTransformsView` durch die Rezeptur;
-  jede andere Fläche lud `/photos/file/<filename>`, also das unveränderte
-  Original — der Zuschnitt war im Blatt sichtbar, das ihn gemacht hat, und
-  sonst nirgends. Fotos mit eigener Rezeptur kommen jetzt über
-  `GET /photos/:id/render?v=user`; welche das sind, sagt
-  `GET /photos/transforms/mine` einmal für die ganze App
-  (`TransformedPhotosIndex`, wie `useTransformedPhotosIndex` im Web).
-- **Der Cache-Schlüssel ist die Falle.** `ImageCache` liegt auf der Platte, ein
-  unveränderter Schlüssel überlebt also den Neustart und lieferte weiter die
-  Pixel von vor der Bearbeitung — der Fix hätte ausgesehen wie der Fehler.
-  Gerenderte Fotos tragen Nutzer und eine Revision im Schlüssel, und die
-  Revision reist auch in der Query mit: die Render-Route antwortet
-  `Cache-Control: immutable`, `URLSession` hielte sonst die alten Bytes.
-- **Der Platten-Cache hat eine Grenze (500 MB).** Bis dahin hatte er keine —
-  jedes je geladene Thumbnail blieb, `clearDisk()` rief niemand auf.
-  `ImageCache.enforceDiskCacheLimit()` löscht die am längsten nicht mehr
-  angesehenen Dateien, bis die Grenze wieder unterschritten ist; ein
-  Platten-Treffer in `image(forKey:)` setzt das Änderungsdatum der Datei auf
-  jetzt, das ist das LRU-Signal. `runMaintenanceIfNeeded()` läuft dafür
-  höchstens einmal pro Tag, angestoßen aus `ContentView` beim Start — kein
-  Verzeichnis-Scan bei jedem Öffnen der App.
-- Bewusst beim Original bleiben: eine Vollbildseite, die einen Gesichtsrahmen
-  zeichnet (der Rahmen liegt in den Koordinaten des Originals), und der
-  Download in die Gerätemediathek (das Original ist die Archivkopie). Wo
-  gerendert wird, entfällt der KI-Fokuspunkt — der eigene Zuschnitt *ist* die
-  Antwort darauf, was das Foto zeigt.
-- Bekannte Lücke: eine anderswo (Web, zweites Gerät) gemachte **zweite**
-  Bearbeitung erhöht hier keine Revision und kann bis zum Verfallen des Caches
-  alt ausgeliefert werden. Die *erste* Rezeptur eines Fotos erscheint immer,
-  weil sie das Foto in den Index bringt.
-- **Selbst bearbeiten** (#1019 Etappe B, `PhotoRecipeEditorView` +
-  `PhotoRecipe.swift`), erreichbar über „Selbst bearbeiten…": Zuschnitt-Rahmen
-  ziehen, Ecken anfassen, in 90°-Schritten drehen, Regler für Belichtung,
-  Kontrast und Gamma — alles mit Live-Vorschau, gespeichert per
+- **Crop view** (`PhotoTransformsView`), reachable via "Zuschnitt…"
+  in the overflow menu of the fullscreen viewer. The backend stack already
+  existed in full (`photo/photo-transforms-crud.service.ts`,
+  `documentation/photos-ai-transforms.md`) — only the client was missing.
+- A "recipe" (crop, rotation, exposure, contrast, gamma, black/white
+  point) applies **per user and per photo**; the original file is never
+  modified. Three sources: one's own, that of other household members (can be
+  adopted with a click) and the AI suggestion.
+- Implemented (#1019 stage A): view and apply the suggestion per aspect ratio,
+  adopt someone else's version, reset to the original. Rules
+  and wire format in `PhotoTransforms.swift`.
+- **Suggestions are never applied automatically** — and an AI suggestion
+  exists only for aspect ratios for which a face was found as the image
+  center; without a recognized face the server deliberately returns no
+  crop at all.
+- **All aspect ratios are nevertheless listed in the crop view**
+  (#1085 §1b). Before, it built its selection from the AI suggestions — a photo
+  without a recognized face thus showed no aspect ratio at all and read as if
+  the feature were missing. A tap on a ratio opens the editor already set to
+  that crop; where the AI has composed one (marked with ✨), to
+  its section, otherwise centered. 2:1 is deliberately absent — neither web nor
+  server knows it, so adding it would be a change to all three.
+- **A saved edit is visible everywhere, not only in the editor**
+  (#1085 §1a). Until then only `PhotoTransformsView` rendered through the
+  recipe; every other surface loaded `/photos/file/<filename>`, i.e. the
+  unmodified original — the crop was visible in the sheet that made it, and
+  nowhere else. Photos with their own recipe now come via
+  `GET /photos/:id/render?v=user`; which ones those are is told by
+  `GET /photos/transforms/mine` once for the whole app
+  (`TransformedPhotosIndex`, like `useTransformedPhotosIndex` on the web).
+- **The cache key is the trap.** `ImageCache` lives on disk, so an
+  unchanged key survives a restart and would keep delivering the
+  pixels from before the edit — the fix would have looked like the bug.
+  Rendered photos carry user and a revision in the key, and the
+  revision also travels in the query: the render route answers
+  `Cache-Control: immutable`, and `URLSession` would otherwise hold the old
+  bytes.
+- **The disk cache has a limit (500 MB).** Until then it had none —
+  every thumbnail ever loaded stayed, and nobody called `clearDisk()`.
+  `ImageCache.enforceDiskCacheLimit()` deletes the files unviewed for the
+  longest time until the limit is undershot again; a
+  disk hit in `image(forKey:)` sets the file's modification date to
+  now, which is the LRU signal. `runMaintenanceIfNeeded()` runs for this
+  at most once a day, triggered from `ContentView` at startup — no
+  directory scan every time the app is opened.
+- Deliberately staying with the original: a fullscreen page that draws a
+  face frame (the frame lies in the original's coordinates), and the
+  download into the device library (the original is the archive copy). Where
+  rendering is used, the AI focus point is dropped — the own crop *is* the
+  answer to what the photo shows.
+- Known gap: a **second** edit made elsewhere (web, second device)
+  does not bump a revision here and may be served stale until the cache
+  expires. The *first* recipe of a photo always appears,
+  because it brings the photo into the index.
+- **Edit yourself** (#1019 stage B, `PhotoRecipeEditorView` +
+  `PhotoRecipe.swift`), reachable via "Selbst bearbeiten…": drag the crop
+  frame, grab the corners, rotate in 90° steps, sliders for exposure,
+  contrast and gamma — all with live preview, saved via
   `PUT /photos/:id/transforms`.
-- **Der Zuschnitt gilt im unrotierten Bild.** Der Server schneidet zuerst zu
-  und dreht danach (`photo/photo-transforms-render.service.ts`); ein Rahmen,
-  der beim Drehen mitwandert, ergäbe beim Rendern einen anderen Ausschnitt als
-  der Editor gezeigt hat.
-- **Die Vorschau rechnet auf dem Gerät**, nicht per Anfrage: eine Runde zum
-  Server pro Reglerschritt wäre unbenutzbar. `PhotoRecipe.toneCurve` ist die
-  Kurve des Renderers selbst (Belichtung × Kontrast um 128/255, dann
-  Schwarz-/Weißpunkt, dann Gamma), damit die Vorschau der später gerenderten
-  Datei entspricht. Bearbeitet wird eine auf 1600 px verkleinerte Kopie — der
-  Crop ist normiert, die Kurve gilt pro Pixel, also ändert das am Ergebnis
-  nichts.
-- **Gamma unter 1 wird nicht versprochen.** `sharp` nimmt nur 1…3; die
-  Vorschau klemmt genauso, statt eine Bearbeitung zu zeigen, die die Datei
-  nicht bekommt.
-- **Regler-Bereich ≠ Server-Bereich.** Die Regler enden bei ±2 EV wie im Web,
-  gespeichert wird gegen die Server-Grenzen (±3 EV) geklemmt — ein von
-  außerhalb übernommenes Rezept wird so nicht abgelehnt, nur weil es neben dem
-  Regler liegt. Schwarzpunkt ≥ Weißpunkt lehnt der Server ab; welcher der
-  beiden gemeint war, ist nicht erkennbar, also fallen beide weg.
-- **Auto-Levels speichert nicht.** Es misst die Pixel *innerhalb* des
-  aktuellen Zuschnitts und füllt nur die Regler; gespeichert wird erst mit
-  „Sichern".
+- **The crop applies in the unrotated image.** The server crops first
+  and rotates afterwards (`photo/photo-transforms-render.service.ts`); a frame
+  that moved along when rotating would yield a different section on rendering
+  than the editor showed.
+- **The preview computes on the device**, not per request: a round trip to the
+  server per slider step would be unusable. `PhotoRecipe.toneCurve` is the
+  renderer's own curve (exposure × contrast around 128/255, then
+  black/white point, then gamma), so that the preview matches the file
+  rendered later. A copy scaled down to 1600 px is edited — the
+  crop is normalized, the curve applies per pixel, so this changes nothing in
+  the result.
+- **Gamma below 1 is not promised.** `sharp` accepts only 1…3; the
+  preview clamps the same way instead of showing an edit that the file
+  does not get.
+- **Slider range ≠ server range.** The sliders end at ±2 EV as on the web,
+  saving is clamped against the server limits (±3 EV) — a recipe adopted
+  from outside is thus not rejected just because it lies beyond the
+  slider. The server rejects black point ≥ white point; which of the
+  two was meant cannot be told, so both are dropped.
+- **Auto-levels does not save.** It measures the pixels *inside* the
+  current crop and only fills the sliders; saving happens only with
+  "Sichern" (save).
 
-### 2.6c Foto-Vergleich (Gruppen-Review)
+### 2.6c Photo Comparison (Group Review)
 
-- **Vergleichsansicht** (`PhotoCompareView`), erreichbar über „Vergleichen …"
-  in der Gruppen-Review-Karte, sobald eine Gruppe mindestens zwei Fotos hat.
-  Zwei Aufnahmen nebeneinander (im Hochformat übereinander).
-- Der entscheidende Zug ist derselbe wie im Web: **ein Tipp auf ein Gesicht
-  zoomt beide Fotos darauf, auf dieselbe Bildschirmgröße.** Zwei unabhängig
-  gezoomte Gesichter lassen sich nicht vergleichen, gleich große schon. Die
-  Geometrie liegt in `PhotoCompare.swift` (Port von
+- **Comparison view** (`PhotoCompareView`), reachable via "Vergleichen …"
+  (compare …) in the group review card as soon as a group has at least two
+  photos. Two shots side by side (stacked in portrait).
+- The decisive move is the same as on the web: **a tap on a face
+  zooms both photos onto it, to the same screen size.** Two independent
+  zoomed faces cannot be compared, equally sized ones can. The
+  geometry lives in `PhotoCompare.swift` (port of
   `frontend/src/utils/compareZoom.ts`).
-- Beide Zooms werden **gemeinsam** gelöst: jede Seite braucht die Maße des
-  anderen Fotos, sonst kämen die zwei Hälften auf verschiedene Ergebnisse.
-  Maßgeblich ist das kleinere der beiden Gesichter — andersherum liefe das
-  zweite aus seinem Ausschnitt heraus.
-- Ein Tipp auf ein **benanntes** Gesicht richtet beide Seiten auf dieselbe
-  Person aus; ohne Namen gibt es nichts zum Abgleichen, dann behält die
-  getippte Seite genau das getippte Gesicht und die andere nimmt ihr eigenes
-  Hauptgesicht (`PhotoCompare.anchoredBoxes`). Ein Tipp ins Leere zoomt
-  trotzdem auf das Hauptgesicht, statt nichts zu tun.
-- **Ein Tipp auf ein anderes Gesicht wechselt den Fokus direkt dorthin**
-  (#1115 §4). Vorher zoomte jeder zweite Tipp zurück aufs ganze Bild, ohne zu
-  prüfen, was unter dem Finger lag — von einem Gesicht zum nächsten waren es
-  zwei Tipps und ein Umweg. Nur ein Tipp auf das bereits fokussierte Gesicht
-  (oder ins Leere) zoomt jetzt noch heraus. Damit das im gezoomten Zustand
-  überhaupt getroffen werden kann, rechnet `PhotoCompare.unzoomed` den Tipp
-  erst auf das ungezoomte Bild zurück; unbenannte Gesichter werden über ihre
-  Position identifiziert, sonst wären zwei davon derselbe Fokus.
-- **Ist die Person nur auf einem der beiden Fotos, fällt der Abgleich auf das
-  jeweilige Hauptgesicht zurück** (#1085 §2c). Vorher lieferte die andere Seite
-  nichts, `syncedZooms` braucht aber beide Rahmen — also zoomte *keines* der
-  Fotos, während „Ganzes Bild" trotzdem in der Werkzeugleiste erschien. Von
-  außen: getippt, nichts passiert, ein neuer Knopf ist da. Jetzt zoomt jeder
-  Tipp entweder oder ändert gar nichts (`PhotoCompare.matchedBoxes`).
-- **Schärfe-Overlay** (`FocusPeaking`, Portierung von
-  `frontend/src/utils/focusPeaking.ts`): jedes gemessene Gesicht bekommt einen
-  Rahmen in Ampelfarbe plus Prozentwert. Gemessen wird die Varianz des
-  Laplace-Operators über den Gesichts-Crop, normiert gegen denselben
-  Full-Scale-Wert wie im Embedding-Service — die Farben stimmen also mit den
-  daneben angezeigten KI-Qualitätswerten überein. Über das „…"-Menü
-  abschaltbar. Der Rahmen ist eine **Haarlinie** (`chromeScale`, also 1 pt
-  gegen den Zoom gerechnet): er liegt auf genau dem Detail, um das es beim
-  Vergleich geht, und 2 pt verdeckten davon zu viel (#1115 §3).
-- **Die Werkzeugleiste hat höchstens drei Einträge, und das Überlaufmenü ist
-  unseres** (#1115 §2). Fünf `.primaryAction`s passen nicht in eine
-  iPhone-Navigationsleiste, also faltete iOS den Rest in ein eigenes
-  „…"-Menü — was darin landete, hing von der Breite ab. Jetzt in der Leiste:
-  „Ganzes Bild" (nur solange gezoomt) und „Zur Auswahl"; im eigenen
-  `Menu`: Schärfe-Anzeige, Bewertung, Hilfe. „Zur Auswahl" hieß „Fertig",
-  was in einer Navigationsleiste „Bildschirm schließen" bedeutet — es beendet
-  aber nur die Paarvergleiche und springt zur Auswahl, wo noch nichts
-  gespeichert ist.
-- Die **Gesten-Legende** („?" bzw. „Hilfe") erscheint auf dem iPhone als
-  Sheet. Sie war per `presentationCompactAdaptation(.popover)` zu einem echten
-  Popover gezwungen, das an einem Knopf am oberen Rand hing und keinen Platz
-  hatte — lesbar war darin nichts (#1115 §1).
-- **Der Rand wird übersprungen, nicht umgeschlagen.** Der Embedding-Service
-  nähert den Laplace mit `np.roll` an, das Nachbarn um die Ränder herumwickelt.
-  Auf einem ganzen Foto harmlos; auf einem kleinen Gesichts-Crop macht es aus
-  jedem Helligkeitsunterschied zwischen gegenüberliegenden Rändern eine
-  Scheinkante, und ein weich ausgeleuchtetes, unscharfes Gesicht läse sich als
-  scharf. Das Web weicht aus demselben Grund ab.
-- **„Nicht messbar" ist nicht „unscharf".** Gesichter ohne brauchbaren Crop
-  bekommen gar keinen Rahmen statt eines roten — für die Entscheidung zwischen
-  zwei Aufnahmen sind das verschiedene Aussagen. Ebenso bleiben zu klein
-  gerenderte Gesichter ungerahmt: ein Dutzend überlappender Kästchen auf einem
-  Gruppenbild sagt weniger als keines.
-- Rahmenstärke und Beschriftung skalieren gegen den Zoom, damit eine 2-pt-Linie
-  beim Hineinzoomen nicht zum Balken wird.
-- **Wisch-zum-Verwerfen** (`CompareSwipe`, Portierung von
-  `frontend/src/utils/compareSwipe.ts`): ein Foto vom Bildschirm zu werfen
-  verwirft es — die Gruppe behält alle übrigen. Jede Richtung zählt **außer
-  der, die auf das Partnerfoto zeigt**: die beiden ineinander zu schieben sagt
-  nichts darüber aus, welches weg soll. Welche Richtung das ist, hängt an der
-  Anordnung — im Hochformat übereinander (unten/oben), im Querformat
-  nebeneinander (rechts/links).
-- Ein Wisch braucht 64 pt Weg (derselbe Wert wie im Web), damit ein
-  Streifschuss kein Foto wegwirft; im gezoomten Zustand ist eine Ziehbewegung
-  Verschieben und löst nichts aus.
-- **Qualitäts-Aufschlüsselung** (`PhotoQualityDetails`, Portierung von
-  `compareQualityDetails.ts` + `comparePhotoScore.ts`), über „Bewertung" in
-  der Werkzeugleiste: je Kriterium beide Werte nebeneinander, der höhere
-  hervorgehoben. Dass 71 % gegen 68 % steht, sagt nichts; dass das eine Foto
-  schärfer und das andere besser komponiert ist, entscheidet.
-- **Die Aufschlüsselung kommt nicht aus der Review-Queue.** `ReviewQueuePhoto`
-  trägt nur den Gesamtwert. Statt den Queue-Endpunkt zu verbreitern (die
-  Details würden dann bei jeder Seite mitgeschleppt, für eine selten geöffnete
-  Tabelle), werden beim Öffnen des Vergleichs genau die zwei Fotos über
-  `GET /photos/details` nachgeladen — dasselbe Vorgehen wie im Web. Der
-  Endpunkt liefert `ai_quality_details` seit jeher; nur der Client hat es
-  bisher im Decoder weggeworfen.
-- Der frische Wert überschreibt nur die Qualitätsfelder, nie den
-  Kurations-Status — sonst nähme das Öffnen der Tabelle ein Ausblenden aus
-  derselben Sitzung zurück. Ein frisches `null` fällt auf den bekannten Wert
-  zurück, damit ein noch nicht fertig bewertetes Foto keine Bewertung verliert.
-- **„–" heißt „nicht gemessen", nicht „null Punkte"**, und ein nicht gemessenes
-  Kriterium gewinnt auch nicht gegen ein gemessenes.
-- Sortiert wird nach dem rohen Schlüssel, nicht nach der deutschen
-  Beschriftung: so steht die Tabelle auf beiden Clients in derselben
-  Reihenfolge, und eine umformulierte Beschriftung wirbelt sie nicht durch.
-  Ein unbekanntes Kriterium behält seinen Rohnamen, statt zu verschwinden.
-- **Ein Urteil beendet die Gruppe nicht** (#1085 §2a). Es ist ein
-  Schweizer-System-Turnier wie im Web (`CompareTournament`): der Verlierer geht
-  runter, der Gewinner rauf, *dieses Paar* ist erledigt, und als nächstes kommt
-  das Paar mit dem geringsten Punktabstand, das noch offen ist. Erst wenn keine
-  Paare mehr übrig sind, geht die Auswahl in die Bestätigung — und **einmal**
-  an den Server. Vorher entschied der erste Wisch für die ganze Gruppe, bei
-  vier Fotos wurden also drei nie angesehen.
-- Die KI-Bewertungen setzen nur die Startpunkte; liegen sie alle dicht
-  beieinander (Spanne < 0,12 — der Normalfall bei einer Serie), werden sie
-  innerhalb der Gruppe normiert, sonst sagte die absolute Zuordnung nichts.
-- **Eine ungeprüfte Gruppe schlägt vor, alles zu behalten**, und der Vorschlag
-  ist nie leer: `pick-photos` verlangt mindestens einen Behalter, und Fotos
-  ohne jeden Anhaltspunkt auszublenden ist genau der Fehler, den das ersetzt.
-- Jedes Urteil gibt es auch als beschrifteten Knopf — je Seite verwerfen,
-  „gleich gut", „später" — und der Vergleich lässt sich bei langen Gruppen
-  vorzeitig beenden. Ein Wisch ist unsichtbar und mit VoiceOver nicht
-  erreichbar.
-- **Diese Knöpfe liegen in der System-Werkzeugleiste unten**, nicht in einer
-  selbst gebauten Leiste (#1091 §1). Ein `VStack` aus Panes und Leiste schob
-  die Leiste über die Unterkante hinaus: die Panes werden gegen die *ganze*
-  `GeometryReader` bemessen und `ComparePane` nagelt diese Größe fest, es
-  konnte also nichts schrumpfen, um Platz zu machen. Als Chrome reserviert das
-  System die Höhe, der Reader misst den Rest — und im Gegensatz zu einer
-  schwebenden Leiste verdeckt nichts die Fotos, um die es gerade geht.
-- **Ein „?" erklärt die Gesten.** Wischen und der Gesichts-Tipp sind der
-  schnelle Weg und vollkommen unsichtbar; die Knöpfe erklären sie nicht, also
-  tut es ein Popover (`GestureHelp`).
-- **Aus der Bestätigung führt ein Weg zurück in den Vergleich**
-  (`resumeComparing`, #1091 §2c). Vorher war das Beenden endgültig: die einzigen
-  Ausgänge waren „übernehmen" und „abbrechen", letzteres verwarf das ganze
-  Turnier. Angeboten wird es nur, solange wirklich ein Paar offen ist; die
-  Punkte und die erledigten Paare bleiben, entschieden bleibt entschieden. Die
-  Vorauswahl wird dabei **nicht** neu gesetzt — sonst nähme der zweite Durchgang
-  die von Hand gesetzten Schalter zurück.
-- **In der Bestätigung öffnet ein Tipp auf das Bild es in groß**, nicht die
-  Auswahl (#1091 §2a/§2b): das ist der Bildschirm, auf dem Fotos ausgeblendet
-  werden, und er zeigt sie 110 pt groß — aus einer Miniatur zu entscheiden ist
-  genau das, was der Vergleich vermeiden soll. Behalten/Ausblenden sitzt auf dem
-  Auswahl-Icon (44 pt Trefferfläche) und zusätzlich im Fuß der Vollbildansicht,
-  damit „ansehen, dann entscheiden" nicht ins Raster zurückführt.
-- **Der Gruppen-Review läuft auch innerhalb eines Albums** (#1085 §2b), über
-  „Gruppen-Review" im Überlauf-Menü der Album-Detailansicht — derselbe Name
-  und dasselbe Icon (`checklist`) wie im Feed und im Fotos-Hub, damit es als
-  ein Feature statt als drei verschiedene liest.
-  `GET /photos/groups` ist nicht album-fähig und muss es nicht sein:
-  `AlbumGroupReview.scoped` schneidet jede Gruppe auf die **sichtbaren**
-  Album-Mitglieder zu und verwirft die mit weniger als zwei — dieselbe
-  clientseitige Verschneidung wie in `AlbumDetailView.vue`. Erlaubt ist es mit
-  `photos.delete`, der Berechtigung, die der Server auf `pick-photos` prüft.
-- Die vollständige Auswahl bleibt beim `ReviewSelectionSheet`.
+- Both zooms are solved **together**: each side needs the dimensions of the
+  other photo, otherwise the two halves would arrive at different results.
+  The smaller of the two faces is decisive — the other way around, the
+  second would run out of its section.
+- A tap on a **named** face aligns both sides to the same
+  person; without a name there is nothing to match, so the tapped side keeps
+  exactly the tapped face and the other takes its own
+  main face (`PhotoCompare.anchoredBoxes`). A tap on empty space
+  still zooms onto the main face instead of doing nothing.
+- **A tap on another face switches the focus directly to it**
+  (#1115 §4). Before, every second tap zoomed back out to the whole image without
+  checking what was under the finger — from one face to the next took
+  two taps and a detour. Now only a tap on the already focused face
+  (or on empty space) zooms out. So that this can be hit at all in the zoomed
+  state, `PhotoCompare.unzoomed` first maps the tap back onto the unzoomed
+  image; unnamed faces are identified by their
+  position, otherwise two of them would be the same focus.
+- **If the person is on only one of the two photos, the matching falls back to
+  the respective main face** (#1085 §2c). Before, the other side returned
+  nothing, but `syncedZooms` needs both frames — so *neither* photo
+  zoomed, while "Ganzes Bild" (whole image) nevertheless appeared in the
+  toolbar. From the outside: tapped, nothing happens, a new button appears.
+  Now every tap either zooms or changes nothing at all (`PhotoCompare.matchedBoxes`).
+- **Sharpness overlay** (`FocusPeaking`, port of
+  `frontend/src/utils/focusPeaking.ts`): every measured face gets a
+  frame in traffic-light color plus a percentage value. What is measured is the variance
+  of the Laplacian over the face crop, normalized against the same
+  full-scale value as in the embedding service — the colors thus agree with the
+  AI quality values shown next to them. Can be switched off via the "…" menu.
+  The frame is a **hairline** (`chromeScale`, i.e. 1 pt
+  computed against the zoom): it lies on exactly the detail the comparison is
+  about, and 2 pt covered too much of it (#1115 §3).
+- **The toolbar has at most three entries, and the overflow menu is
+  ours** (#1115 §2). Five `.primaryAction`s do not fit in an
+  iPhone navigation bar, so iOS folded the rest into its own
+  "…" menu — what ended up in it depended on the width. Now in the bar:
+  "Ganzes Bild" (only while zoomed) and "Zur Auswahl" (to the selection); in our own
+  `Menu`: sharpness display, rating, help. "Zur Auswahl" used to be called "Fertig",
+  which in a navigation bar means "close screen" — but it only ends
+  the pairwise comparisons and jumps to the selection, where nothing has been
+  saved yet.
+- The **gesture legend** ("?" or "Hilfe") appears on the iPhone as a
+  sheet. It had been forced into a real popover via
+  `presentationCompactAdaptation(.popover)`, which hung off a button at the top
+  edge and had no room — nothing in it was legible (#1115 §1).
+- **The edge is skipped, not wrapped.** The embedding service
+  approximates the Laplacian with `np.roll`, which wraps neighbors around the edges.
+  On a whole photo this is harmless; on a small face crop it turns
+  every brightness difference between opposite edges into a
+  phantom edge, and a softly lit, blurry face would read as
+  sharp. The web deviates for the same reason.
+- **"Not measurable" is not "blurry".** Faces without a usable crop
+  get no frame at all instead of a red one — for the decision between
+  two shots these are different statements. Likewise, faces rendered too
+  small stay unframed: a dozen overlapping boxes on a
+  group photo say less than none.
+- Frame thickness and labeling scale against the zoom, so that a 2 pt line
+  does not become a bar when zooming in.
+- **Swipe to discard** (`CompareSwipe`, port of
+  `frontend/src/utils/compareSwipe.ts`): throwing a photo off the screen
+  discards it — the group keeps all the others. Every direction counts **except
+  the one pointing at the partner photo**: pushing the two into each other says
+  nothing about which one should go. Which direction that is depends on the
+  arrangement — stacked in portrait (down/up), side by side in landscape
+  (right/left).
+- A swipe needs 64 pt of travel (the same value as on the web), so that a
+  graze does not throw a photo away; in the zoomed state a drag is
+  panning and triggers nothing.
+- **Quality breakdown** (`PhotoQualityDetails`, port of
+  `compareQualityDetails.ts` + `comparePhotoScore.ts`), via "Bewertung" (rating) in
+  the toolbar: per criterion both values side by side, the higher one
+  highlighted. That 71 % stands against 68 % says nothing; that one photo is
+  sharper and the other better composed is what decides.
+- **The breakdown does not come from the review queue.** `ReviewQueuePhoto`
+  carries only the overall score. Instead of widening the queue endpoint (the
+  details would then be dragged along with every page, for a rarely opened
+  table), exactly the two photos are fetched via
+  `GET /photos/details` when the comparison is opened — the same approach as on the web. The
+  endpoint has always returned `ai_quality_details`; only the client had
+  thrown it away in the decoder until now.
+- The fresh value overwrites only the quality fields, never the
+  curation status — otherwise opening the table would undo a hide made in
+  the same session. A fresh `null` falls back to the known value,
+  so that a photo not yet fully rated does not lose its rating.
+- **"–" means "not measured", not "zero points"**, and a criterion that was not
+  measured does not win against a measured one either.
+- Sorting is by the raw key, not by the German
+  label: this way the table has the same order on both clients, and a reworded
+  label does not shuffle it.
+  An unknown criterion keeps its raw name instead of disappearing.
+- **A verdict does not end the group** (#1085 §2a). It is a
+  Swiss-system tournament as on the web (`CompareTournament`): the loser goes
+  down, the winner up, *this pair* is done, and next comes
+  the pair with the smallest point gap that is still open. Only when no
+  pairs are left does the selection go to confirmation — and **once**
+  to the server. Before, the first swipe decided for the whole group, so with
+  four photos three were never looked at.
+- The AI ratings only set the starting points; if they are all close
+  together (spread < 0.12 — the normal case for a burst), they are normalized
+  within the group, otherwise the absolute assignment would say nothing.
+- **An unreviewed group proposes keeping everything**, and the proposal
+  is never empty: `pick-photos` requires at least one keeper, and hiding photos
+  without any basis is exactly the mistake this replaces.
+- Every verdict is also available as a labeled button — discard per side,
+  "gleich gut" (equally good), "später" (later) — and the comparison can be ended
+  early for long groups. A swipe is invisible and not
+  reachable with VoiceOver.
+- **These buttons sit in the system toolbar at the bottom**, not in a
+  hand-built bar (#1091 §1). A `VStack` of panes and bar pushed
+  the bar beyond the bottom edge: the panes are sized against the *whole*
+  `GeometryReader` and `ComparePane` pins that size, so nothing
+  could shrink to make room. As chrome, the system reserves the height, the
+  reader measures the rest — and unlike a floating bar, nothing
+  covers the photos that are the point right now.
+- **A "?" explains the gestures.** Swiping and the face tap are the
+  fast way and completely invisible; the buttons do not explain them,
+  so a popover does (`GestureHelp`).
+- **From the confirmation there is a way back into the comparison**
+  (`resumeComparing`, #1091 §2c). Before, ending was final: the only
+  exits were "apply" and "cancel", the latter discarding the whole
+  tournament. It is offered only while a pair is actually open; the
+  points and the completed pairs stay, what is decided stays decided. The
+  preselection is **not** reset in the process — otherwise the second pass would undo the
+  toggles set by hand.
+- **In the confirmation, a tap on the image opens it large**, not the
+  selection (#1091 §2a/§2b): this is the screen on which photos are
+  hidden, and it shows them 110 pt large — deciding from a thumbnail is
+  exactly what the comparison is meant to avoid. Keep/hide sits on the
+  selection icon (44 pt hit area) and additionally in the footer of the fullscreen view,
+  so that "look, then decide" does not lead back to the grid.
+- **The group review also runs inside an album** (#1085 §2b), via
+  "Gruppen-Review" in the overflow menu of the album detail view — the same name
+  and the same icon (`checklist`) as in the feed and in the photos hub, so that it reads as
+  one feature instead of three different ones.
+  `GET /photos/groups` is not album-capable and does not need to be:
+  `AlbumGroupReview.scoped` trims each group to the **visible**
+  album members and discards those with fewer than two — the same
+  client-side intersection as in `AlbumDetailView.vue`. It is permitted with
+  `photos.delete`, the permission the server checks on `pick-photos`.
+- The full selection stays with the `ReviewSelectionSheet`.
 
 ### 2.6d Collage
 
-- **Collage-Ansicht** (`CollageView`), erreichbar über „Collage" in der
-  Auswahl-Leiste der Album-Detailansicht und der Galerie (gefilterte
-  Zeitleiste, Monatsansicht), sobald zwischen 2 und 9 Fotos ausgewählt sind.
-  Zwei Schritte wie im Web: erst die drei kuratierten Varianten je
-  Fotoanzahl, jede mit den Fotos selbst gezeichnet; dann die gewählte groß
-  zum Bearbeiten, mit „Zurück" zur Auswahl. Die Fotos füllen die Zellen in
-  der Reihenfolge, in der sie ausgewählt wurden (`SelectionOrder`) — das
-  zuerst angetippte Foto kommt in die erste, oft größte Zelle. Zwei Fotos
-  tauschen die Plätze, wenn man eines auf das andere zieht (wie im Web, mit
-  mitlaufendem Vorschaubild und markiertem Zielfeld) oder beide nacheinander
-  antippt. Das Sheet lässt sich dabei nicht per Wischen schließen, damit ein
-  Ziehen nach unten das Foto bewegt statt die Anordnung zu verwerfen.
-  Der Rahmen einer Beschriftung ist immer 90 % der Leinwand breit (wie im
-  Web); links/rechts setzt den Text an dessen Kante, auch eine einzelne kurze
-  Zeile.
-  Eine Zelle ist über ihre Position identifiziert, ihre Kachel aber über das
-  Foto (`.id(photo.id)`): Die Kachel hält ihren Bildlader in `@State`, und
-  ohne die Foto-Id behielt sie nach einem Tausch das alte Bild.
-- Die Layout-Regeln liegen in `CollageLayouts.swift` — eine Portierung von
-  `frontend/src/utils/collageLayouts.ts` mit derselben Tabelle (gleiche IDs,
-  Namen, Seitenverhältnisse, Zellen), damit dieselben Fotos auf beiden
-  Clients dieselbe Collage ergeben.
-- **Teilen** rendert die Leinwand auf dem Gerät (`CollageRenderer`,
-  `UIGraphicsImageRenderer`) und übergibt das JPEG dem Teilen-Sheet.
-  **Sichern** gibt es nur, wenn die Collage aus einem Album kommt (wie im
-  Web): es lädt das Ergebnis als gewöhnliches Foto hoch — einen
-  Collage-Endpunkt gibt es nicht —, fügt es dem Album hinzu und lässt das
-  Album neu laden.
-- Export wie im Web: 4000 px lange Kante, JPEG-Qualität 0,92, weiße Fugen
-  von 0,6 % der langen Kante zwischen den Fotos (am Rand die Hälfte). Die
-  Vorschau zeichnet dieselben Fugen, maßstäblich.
-- Die Vorschau schneidet jede Zelle mit demselben `CollageLayouts.coverCrop`
-  zu wie der Export, gegen das echte Seitenverhältnis der Zelle — ein
-  quadratisches Vorschaubild zeigte in Hochformat-Zellen einen anderen
-  Ausschnitt als die gespeicherte Collage.
-- Die Collage bekommt das Aufnahmedatum ihres **neuesten** Quellfotos plus
-  eine Sekunde (wie `getCollageDate` im Web), per `X-Date-Taken`, und sortiert
-  so direkt hinter ihre Quellfotos. Die Uhrzeit wird wörtlich übernommen, die
-  Sekunde in UTC addiert. Dieser Header **überschreibt** das EXIF der Datei, anders
-  als `X-Captured-At`, das nur einspringt, wenn EXIF nichts hergibt: eine
-  frisch gerenderte Collage trägt „jetzt" in den Pixeln und würde sonst weit
-  weg von ihren Quellfotos einsortiert.
-- Zellkanten werden nach außen auf ganze Pixel gerundet, damit zwischen zwei
-  Feldern kein Haarstrich Hintergrund stehen bleibt.
-- **Textüberlagerung** (#1020 Etappe C, `CollageText.swift`): beliebig viele
-  Beschriftungen über der ganzen Leinwand, per Finger verschiebbar, in drei
-  Größen, links/mittig/rechts, in Weiß, Schwarz, einer Farbe aus den Fotos
-  selbst oder einer beliebigen aus dem Farbwähler. Neue Beschriftungen
-  stapeln sich wie im Web senkrecht in der Mitte, je ein Zehntel tiefer.
-- **Die Schriftgröße ist ein Anteil der Leinwandhöhe**, keine Punktgröße —
-  0,05 / 0,08 / 0,13 wie im Web. Nur so zeigt die Vorschau (ein paar hundert
-  Punkte hoch) dasselbe Bild wie der Export (4000 px): die Beschriftung
-  bedeckt in beiden denselben Anteil.
-- **Positioniert wird über den Mittelpunkt**, normiert (0…1). Ein Wechsel der
-  Aufteilung ändert das Seitenverhältnis der Leinwand, nicht aber, wo der Text
-  darin sitzt.
-- Umbrochen wird zwischen Wörtern, gemessen mit der Schrift, die auch gezeichnet
-  wird; ausdrückliche Zeilenumbrüche bleiben erhalten (auch leere Zeilen), und
-  ein Wort, das breiter als die Zeile ist, wird nicht mitten
-  auseinandergerissen — ein umbrochener Name liest sich schlechter als einer,
-  der übersteht.
-- Gezeichnet wird mit dunkler Kontur unter der Füllfarbe, damit Text auch über
-  einem unruhigen Foto lesbar bleibt; die Kontur wird nie dünner als 2 px.
-- **Die Farbvorschläge kommen aus den Fotos**: 64×64 verkleinert, Pixel in
-  16er-Stufen gebündelt und nach Häufigkeit × Sättigung² bewertet, graue und
-  sehr dunkle Pixel übersprungen (sie taugen nicht als Schriftfarbe), zu
-  ähnliche Ergebnisse verworfen. Weiß und Schwarz stehen immer davor.
-  Ausgewertet werden alle Fotos der Collage, wie im Web.
-  Eine Abweichung vom Web: dort kann das Runden auf 256 laufen und erzeugt
-  eine siebenstellige, unlesbare Hex-Farbe; hier wird bei 255 geklemmt.
+- **Collage view** (`CollageView`), reachable via "Collage" in the
+  selection bar of the album detail view and the gallery (filtered
+  timeline, month view) as soon as between 2 and 9 photos are selected.
+  Two steps as on the web: first the three curated variants per
+  photo count, each drawn with the photos themselves; then the chosen one large
+  for editing, with "Zurück" (back) to the selection. The photos fill the cells in
+  the order in which they were selected (`SelectionOrder`) — the photo
+  tapped first goes into the first, often largest cell. Two photos
+  swap places when one is dragged onto the other (as on the web, with a
+  preview image following along and the target field highlighted) or when both are
+  tapped one after the other. The sheet cannot be dismissed by swiping meanwhile, so that a
+  drag downward moves the photo instead of discarding the arrangement.
+  The frame of a caption is always 90 % of the canvas wide (as on the
+  web); left/right aligns the text to its edge, even a single short
+  line.
+  A cell is identified by its position, but its tile by the
+  photo (`.id(photo.id)`): the tile holds its image loader in `@State`, and
+  without the photo ID it kept the old image after a swap.
+- The layout rules live in `CollageLayouts.swift` — a port of
+  `frontend/src/utils/collageLayouts.ts` with the same table (same IDs,
+  names, aspect ratios, cells), so that the same photos yield the same collage
+  on both clients.
+- **Sharing** renders the canvas on the device (`CollageRenderer`,
+  `UIGraphicsImageRenderer`) and hands the JPEG to the share sheet.
+  **Saving** exists only if the collage comes from an album (as on the
+  web): it uploads the result as an ordinary photo — there is no
+  collage endpoint —, adds it to the album and has the
+  album reload.
+- Export as on the web: 4000 px long edge, JPEG quality 0.92, white gutters
+  of 0.6 % of the long edge between the photos (half of that at the edge). The
+  preview draws the same gutters, to scale.
+- The preview crops each cell with the same `CollageLayouts.coverCrop`
+  as the export, against the cell's real aspect ratio — a
+  square preview image showed a different section in portrait cells than the
+  saved collage.
+- The collage gets the capture date of its **newest** source photo plus
+  one second (like `getCollageDate` on the web), via `X-Date-Taken`, and thus sorts
+  right behind its source photos. The time of day is taken literally, the
+  second added in UTC. This header **overrides** the file's EXIF, unlike
+  `X-Captured-At`, which only steps in when EXIF yields nothing: a
+  freshly rendered collage carries "now" in its pixels and would otherwise be sorted
+  far away from its source photos.
+- Cell edges are rounded outward to whole pixels, so that no hairline of
+  background is left standing between two fields.
+- **Text overlay** (#1020 stage C, `CollageText.swift`): any number of
+  captions over the whole canvas, movable by finger, in three
+  sizes, left/center/right, in white, black, a color from the photos
+  themselves, or any color from the color picker. New captions
+  stack vertically in the middle as on the web, each one tenth lower.
+- **The font size is a fraction of the canvas height**, not a point size —
+  0.05 / 0.08 / 0.13 as on the web. Only that way does the preview (a few hundred
+  points tall) show the same image as the export (4000 px): the caption
+  covers the same share in both.
+- **Positioning is by the center point**, normalized (0…1). Changing the
+  layout changes the canvas's aspect ratio, but not where the text
+  sits within it.
+- Wrapping happens between words, measured with the font that is also
+  drawn; explicit line breaks are preserved (including empty lines), and
+  a word wider than the line is not torn apart in the middle
+  — a wrapped name reads worse than one that overhangs.
+- Drawing is done with a dark outline under the fill color, so that text stays
+  legible even over a busy photo; the outline never gets thinner than 2 px.
+- **The color suggestions come from the photos**: scaled down to 64×64, pixels
+  bucketed in steps of 16 and scored by frequency × saturation²,
+  gray and very dark pixels skipped (they are no good as a font color), results that are
+  too similar discarded. White and black always come first.
+  All photos of the collage are evaluated, as on the web.
+  One deviation from the web: there, rounding can run up to 256 and produces
+  a seven-digit, unreadable hex color; here it is clamped at 255.
 
-### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
-- **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`) — zählt jede
-  Art von Aktivität.
-- **Das Badge am Home-Bildschirm zählt etwas anderes: ungelesene Kommentare
-  anderer Leute** (`CommentBadge`, `GET /feed/unread-comment-count`). Vorher
-  stand dort die Zahl der offenen Ähnlichkeits-Gruppen, gesetzt von der
-  Review-Benachrichtigung. Die ging nie von allein weg — eine Aufräum-Warteschlange
-  ist nie *fertig* —, also trug das Icon dauerhaft eine rote Zahl für Arbeit,
-  die niemand heute erledigen muss; so hört ein Badge auf, etwas zu bedeuten.
-  Jetzt steht es für das Einzige, dem man vom Home-Bildschirm aus nachgehen
-  will: jemand hat dir etwas geschrieben. „Ungelesen" ist dabei das `seen_at`
-  des Feeds, das Badge verschwindet also genau dann, wenn der Feed-Tab seine
-  Einträge als gesehen markiert — kein zweiter Gelesen-Begriff, der auseinanderlaufen
-  könnte.
-- **Welche Fotos überhaupt im Foto-Feed auftauchen**, entscheiden vier
-  Handlungen und sonst nichts: in ein Album aufgenommen, favorisiert,
-  kommentiert, mit einer Beschreibung versehen. Ein korrigiertes
-  Aufnahmedatum bumpt nicht mehr (das ist Buchhaltung), ein Favorit dagegen
-  jetzt schon — er tat es früher nicht. Gelöschte Beschreibungen bumpen
-  ebenfalls nicht: es gibt nichts Neues zu lesen. Serverseitig in
+### 2.7 Feed (Activity, Comments, Reactions)
+- **Feed tab** with unread badge (`FeedViewModel.unreadCount`) — counts every
+  kind of activity.
+- **The badge on the home screen counts something different: unread comments
+  from other people** (`CommentBadge`, `GET /feed/unread-comment-count`). Before,
+  it showed the number of open similarity groups, set by the
+  review notification. That never went away on its own — a cleanup queue
+  is never *done* —, so the icon permanently carried a red number for work
+  that nobody has to do today; that is how a badge stops meaning anything.
+  Now it stands for the only thing one wants to follow up from the home screen:
+  someone wrote you something. "Unread" here is the feed's `seen_at`,
+  so the badge disappears exactly when the feed tab marks its
+  entries as seen — no second notion of read that could drift
+  apart.
+- **Which photos appear in the photo feed at all** is decided by four
+  actions and nothing else: added to an album, favorited,
+  commented on, given a description. A corrected
+  capture date no longer bumps (that is bookkeeping), a favorite on the other hand
+  does now — it did not before. Deleted descriptions
+  do not bump either: there is nothing new to read. Server-side in
   `feed/content-feed.service.ts`.
-- **Reaktionen / Likes** und **Ausblenden** je Foto.
-- **Kommentare ansehen und schreiben** (`FeedCommentSection`).
-- **Doppel-Tap öffnet das Vollbild** (und damit Pinch-to-Zoom über
-  `ZoomableImageView`); das Foto wird dafür per `GET /photos/:id` nachgeladen,
-  da der Feed-Eintrag nur Dateiname und Zähler enthält. Geherzt wird über den
-  Herz-Button, nicht mehr über den Doppel-Tap.
+- **Reactions / likes** and **hiding** per photo.
+- **View and write comments** (`FeedCommentSection`).
+- **Double tap opens the fullscreen view** (and with it pinch-to-zoom via
+  `ZoomableImageView`); the photo is fetched via `GET /photos/:id` for this,
+  since the feed entry contains only the filename and counters. Hearting is done via the
+  heart button, no longer via the double tap.
 
-### 2.8 Backup & Sync (Kern-Stärke der iOS-App)
-- **Automatischer Upload** (`PhotoSyncService`, `AssetUploadEnqueuer`,
-  `UploadQueue`): Modi „Alle Fotos hochladen" / „Nur neue Fotos" /
-  „Nur neue ab jetzt".
-- **Hintergrund-Sync** (`BackgroundSyncManager`): nutzt unter iOS 26.1+ die
-  `PHBackgroundResourceUploadExtension`, darunter `BGProcessingTask` als
-  Fallback.
-- **Nur-WLAN**-Beschränkung (`wifiOnly`, Standard an) für Up- und Download.
-- **Geräte-Album → Server-Album-Zuordnung** (`ServerAlbumPickerView`,
-  „Album-Zuordnungen").
-- **Medientypen-Auswahl** und **Screenshots ausschließen**.
-- **Zwei-Wege-Sync**: automatischer **Download** auf das Gerät
+### 2.8 Backup & Sync (the iOS app's core strength)
+- **Automatic upload** (`PhotoSyncService`, `AssetUploadEnqueuer`,
+  `UploadQueue`): modes "Alle Fotos hochladen" (upload all photos) / "Nur neue Fotos" (only new photos) /
+  "Nur neue ab jetzt" (only new from now on).
+- **Background sync** (`BackgroundSyncManager`): on iOS 26.1+ uses the
+  `PHBackgroundResourceUploadExtension`, below that `BGProcessingTask` as a
+  fallback.
+- **Wi-Fi-only** restriction (`wifiOnly`, on by default) for upload and download.
+- **Device album → server album mapping** (`ServerAlbumPickerView`,
+  "Album-Zuordnungen", i.e. album mappings).
+- **Media type selection** and **exclude screenshots**.
+- **Two-way sync**: automatic **download** to the device
   (`PhotoDownloadService`, `DownloadSyncPreferences`, `DownloadSettingsView`).
-- **Foto-Hashing** (`PhotoHashing`) zur Duplikat-/Wiedererkennung.
-- **Share-Extension**: Fotos aus anderen Apps direkt hochladen.
+- **Photo hashing** (`PhotoHashing`) for duplicate/recognition purposes.
+- **Share extension**: upload photos directly from other apps.
 
-### 2.9 Rückblicke & Gruppen-Review
-- **Rückblicke** (`RecapsListView`, `RecapPlayerView`, Issue #759): story-artiger
-  Vollbild-Player mit Auto-Advance, Segment-Fortschrittsbalken, Tippen zum
-  Blättern, Halten zum Pausieren und Runterwischen zum Schließen. Dazu
-  Trip-Karten-Intro, „Damals & heute"-Vergleich und optionale Hintergrundmusik.
-  Favorit (Herz) und „Aus Rückblick entfernen" sitzen in einer Leiste am
-  unteren Rand. Alles außer dem Fortschrittsbalken blendet sich drei Sekunden
-  nach der letzten Interaktion aus; ein Tipp holt es zurück (und blättert
-  dabei nicht), jedes Blättern und jeder Knopfdruck startet die Frist neu.
-  Während eines Intros bleibt die Leiste stehen.
-  Einstieg über den Streifen im Feed und die Feed-Toolbar. Read-only – Recaps
-  entstehen serverseitig.
-- **Gruppen-Review** (`ReviewQueueView`, Issue #761): Wisch-basierte Prüfung
-  ähnlicher Fotos gegen `/photos/groups/review-queue`. Rechts = KI-Vorschlag
-  übernehmen, links = alle behalten, hoch = favorisieren **und** übernehmen;
-  bei Peer-Signal zusätzlich „Konsens übernehmen". Tippen auf ein Foto öffnet
-  die zoombare Großansicht (`ReviewPhotoPreview`) und entscheidet nichts – „Nur
-  dieses Foto behalten" ist dort ein beschrifteter Button, ebenso im
-  Kontextmenü der Kachel. Wer den KI-Vorschlag überstimmen will, öffnet
-  „Auswahl anpassen …" (`ReviewSelectionSheet`): jedes Foto mit Daumen
-  hoch/runter, vorbelegt aus dem Vorschlag, lokal bis zum Commit – das
-  Gegenstück zur Bestätigungsphase des Web-Vergleichs. Die Großansicht zeigt
-  dieselben Daumen, sodass die Entscheidung direkt am großen Bild geändert
-  werden kann. Jede Geste hat einen gleichwertigen Button
-  (VoiceOver). Fortschrittsbalken, Filter nach Sicherheitsstufe und ein
-  garantiert einstufiges **Rückgängig** – die neueste Entscheidung wird lokal
-  gepuffert und erst mit der nächsten (oder beim Verlassen) gesendet, weil das
-  Backend kein „Un-Review" kennt. Entscheiden erfordert `photos.delete`.
-- **Weitere Einstiegspunkte** (#968): bis dahin gab es genau einen — das stille
-  Checklisten-Icon in der Feed-Toolbar. `ReviewQueueCount` liest `total` aus
-  `/photos/groups/review-queue` (`limit=1`) einmal für die ganze App und hält
-  die Zahl lokal aktuell, wenn eine Entscheidung fällt oder rückgängig gemacht
-  wird — der Server wird dafür nicht erneut gefragt.
-  - **Badge** auf dem Checklisten-Icon (`ReviewCountBadge`).
-  - **Eintrag „Gruppen-Review"** im Fotos-Hub (`AlbumsListView`), auf gleicher
-    Stufe wie „Alle Fotos" und „Personen" — das iOS-Gegenstück zum Web-
-    Menüpunkt in `frontend/src/config/modules.ts`.
-  - **Banner im Feed**, wenn etwas offen ist, mit Sprung direkt ins Review;
-    lässt sich für die aktuelle Sitzung ausblenden.
-  - **Deep Link** `f4milphotos://review-queue` (`AppDeepLink`,
-    `CFBundleURLTypes` in `Info.plist`), geroutet über einen `fullScreenCover`
-    in `MainTabView` statt über einen Tab, weil die Review-Queue zu keinem Tab
-    gehört. Seit #768 §5a ist das ein Fall unter mehreren — siehe 2.11.
-  - **Lokale Benachrichtigung** (`ReviewQueueNotifier`), nach jedem
-    Hintergrund-Sync geprüft: nur wenn die Zahl gegenüber dem letzten
-    mitgeteilten Stand gestiegen ist, nie beim allerersten Stand nach der
-    Installation (sonst würde ein Neuling mit einer bereits vorhandenen Liste
-    begrüßt). **Keine Push-Infrastruktur** — der Server hat keinen APNs-Pfad;
-    das ist eine rein lokale Prüfung nach dem ohnehin laufenden Sync.
-    Sie setzt **kein** Icon-Badge mehr (siehe §2.7): die Mitteilung selbst ist
-    der richtige Ort für „es sind neue Gruppen da", eine bleibende Zahl am
-    Icon war es nicht.
-    Abschaltbar unter Einstellungen → „Hinweis auf neue Gruppen".
+### 2.9 Recaps & Group Review
+- **Recaps** (`RecapsListView`, `RecapPlayerView`, issue #759): story-style
+  fullscreen player with auto-advance, segmented progress bar, tap to
+  page, hold to pause, and swipe down to close. Plus
+  trip-map intro, "Damals & heute" (then & now) comparison and optional background music.
+  Favorite (heart) and "Aus Rückblick entfernen" (remove from recap) sit in a bar at the
+  bottom edge. Everything except the progress bar fades out three seconds
+  after the last interaction; a tap brings it back (and does not page
+  in the process), every paging and every button press restarts the timer.
+  During an intro the bar stays put.
+  Entry via the strip in the feed and the feed toolbar. Read-only – recaps
+  are created server-side.
+- **Group review** (`ReviewQueueView`, issue #761): swipe-based review of
+  similar photos against `/photos/groups/review-queue`. Right = accept
+  AI suggestion, left = keep all, up = favorite **and** accept;
+  with a peer signal additionally "Konsens übernehmen" (accept consensus). Tapping a photo opens
+  the zoomable large view (`ReviewPhotoPreview`) and decides nothing – "Nur
+  dieses Foto behalten" is a labeled button there, as it is in the
+  tile's context menu. Whoever wants to overrule the AI suggestion opens
+  "Auswahl anpassen …" (`ReviewSelectionSheet`): every photo with thumbs
+  up/down, prefilled from the suggestion, local until the commit – the
+  counterpart to the confirmation phase of the web comparison. The large view shows
+  the same thumbs, so that the decision can be changed directly on the large image.
+  Every gesture has an equivalent button
+  (VoiceOver). Progress bar, filter by confidence level and a
+  guaranteed single-step **undo** – the newest decision is buffered locally
+  and only sent with the next one (or on leaving), because the
+  backend knows no "un-review". Deciding requires `photos.delete`.
+- **More entry points** (#968): until then there was exactly one — the quiet
+  checklist icon in the feed toolbar. `ReviewQueueCount` reads `total` from
+  `/photos/groups/review-queue` (`limit=1`) once for the whole app and keeps
+  the number up to date locally when a decision is made or undone
+  — the server is not asked again for this.
+  - **Badge** on the checklist icon (`ReviewCountBadge`).
+  - **Entry "Gruppen-Review"** in the photos hub (`AlbumsListView`), at the same
+    level as "Alle Fotos" and "Personen" — the iOS counterpart to the web
+    menu item in `frontend/src/config/modules.ts`.
+  - **Banner in the feed** when something is open, with a jump straight into the review;
+    can be dismissed for the current session.
+  - **Deep link** `f4milphotos://review-queue` (`AppDeepLink`,
+    `CFBundleURLTypes` in `Info.plist`), routed via a `fullScreenCover`
+    in `MainTabView` instead of via a tab, because the review queue belongs to
+    no tab. Since #768 §5a this is one case among several — see 2.11.
+  - **Local notification** (`ReviewQueueNotifier`), checked after every
+    background sync: only if the number has risen compared to the last
+    reported state, never for the very first state after
+    installation (otherwise a newcomer would be greeted with an already existing list).
+    **No push infrastructure** — the server has no APNs path;
+    this is a purely local check after the sync that runs anyway.
+    It sets **no** icon badge any more (see §2.7): the notification itself is
+    the right place for "there are new groups", a permanent number on the
+    icon was not.
+    Can be switched off under Einstellungen → "Hinweis auf neue Gruppen" (notice about new groups).
 
-### 2.10 Einstellungen / Admin
-- Profil-Anzeige (Name, E-Mail, Rollen).
-- **Benutzerverwaltung** (`UsersListView`) und **Rollen & Berechtigungen**
-  (`RolesView`) – Basis-Admin.
-- Sync-Einstellungen (Upload/Download), Server-Verbindung, Abmelden.
+### 2.10 Settings / Admin
+- Profile display (name, e-mail, roles).
+- **User management** (`UsersListView`) and **roles & permissions**
+  (`RolesView`) – basic admin.
+- Sync settings (upload/download), server connection, sign out.
 
-### 2.11 Deep Links und Universal Links (#768 §5a)
+### 2.11 Deep Links and Universal Links (#768 §5a)
 
-- **Ein Parser, ein Router.** `AppDeepLink` (`App/AppDeepLink.swift`) liest
-  zwei URL-Formen auf dieselben Ziele: das eigene Schema
+- **One parser, one router.** `AppDeepLink` (`App/AppDeepLink.swift`) reads
+  two URL forms onto the same destinations: the app's own scheme
   (`f4milphotos://album/12`, `photo/34`, `person/5`, `recap/7`, `recaps`,
-  `feed`, `review-queue`, `shared-album/<token>`) und die Web-Routen des
-  konfigurierten Servers (`https://<server>/app/fotos/alben/12`,
+  `feed`, `review-queue`, `shared-album/<token>`) and the web routes of the
+  configured server (`https://<server>/app/fotos/alben/12`,
   `/app/albums/shared/<token>`, `/app/fotos/personen?personId=5`,
   `/app/fotos/rueckblicke[?recapId=7]`, `/app/fotos/feed`,
-  `/app/fotos/review-queue`, `/app/fotos/galerie?photoId=34` sowie die
-  Legacy-Redirects `/app/albums/:id` und `/app/photos?photoId=`). Eine
-  Web-URL auf einem **anderen Host** wird verworfen: die App darf nicht auf
-  fremde Seiten reagieren, die zufällig dieselbe Pfadstruktur haben. Parsing
-  ist rein und in `AppDeepLinkTests` abgedeckt, inklusive Round-Trip der
-  erzeugten URLs (`AppDeepLink.url(for:)`, `webURL(for:serverURL:)`).
-- **`AppDeepLinkRouter`** hält den Link in `pending`, bis die Tab-Leiste
-  existiert — ein Link, der auf dem Login-Bildschirm ankommt, landet nach
-  der Anmeldung dort, wo er hinwollte, statt im Feed. `MainTabView` wählt
-  nur den Tab; der Push selbst passiert an dessen Wurzel über
+  `/app/fotos/review-queue`, `/app/fotos/galerie?photoId=34` as well as the
+  legacy redirects `/app/albums/:id` and `/app/photos?photoId=`). A
+  web URL on a **different host** is discarded: the app must not react to
+  foreign sites that happen to have the same path structure. Parsing
+  is pure and covered in `AppDeepLinkTests`, including a round trip of the
+  generated URLs (`AppDeepLink.url(for:)`, `webURL(for:serverURL:)`).
+- **`AppDeepLinkRouter`** holds the link in `pending` until the tab bar
+  exists — a link that arrives on the login screen ends up, after
+  sign-in, where it wanted to go, instead of in the feed. `MainTabView` selects
+  only the tab; the push itself happens at its root via
   `navigationDestination(item:)` (`albumToOpen`, `personToOpen`,
-  `recapsToOpen` im Router, gebunden in `AlbumsListView` bzw. `FeedView`).
-  Foto, Rückblick-Player und Review-Queue kommen als `fullScreenCover`, weil
-  sie zu keinem Tab gehören.
-- **Die Tab-Stacks bleiben bewusst ohne `NavigationPath`-Binding.** Der erste
-  Wurf band die Stacks an einen Pfad, um Deep Links hineinzuschreiben — und
-  damit verlor das Album-Grid nach jedem Vollbild-Besuch seine
-  Scroll-Position: die Grids pushen den Viewer per
-  `navigationDestination(item:)`, und in einem pfadgebundenen Stack baut
-  SwiftUI die Quell-View beim Zurückgehen neu auf. Ungebundene Stacks plus
-  Item-Ziele an der Wurzel sind dasselbe Muster, das die Grids selbst
-  benutzen. Preis: ein Deep Link pusht über den aktuellen Zustand des Tabs
-  statt ihn zu ersetzen, und eine Person kommt direkt (ohne die Liste
-  dazwischen).
-- **Geteilte Alben** (`/app/albums/shared/<token>`): der Token wird über
-  `/albums/public/<token>` aufgelöst; ist die angemeldete Person Mitglied
-  (`GET /albums/:id` antwortet), öffnet die eigene Album-Ansicht, sonst die
-  öffentliche Web-Seite in einem `SFSafariViewController` (`SafariSheet`) —
-  nicht in Safari selbst, denn das ist ein Universal Link, und Safari gäbe
-  ihn sofort zurück.
-- **Universal Links** brauchen zwei Seiten: der Server veröffentlicht
+  `recapsToOpen` in the router, bound in `AlbumsListView` and `FeedView` respectively).
+  Photo, recap player and review queue come as a `fullScreenCover`, because
+  they belong to no tab.
+- **The tab stacks deliberately stay without a `NavigationPath` binding.** The first
+  attempt tied the stacks to a path in order to write deep links into it — and
+  as a result the album grid lost its scroll position after every fullscreen
+  visit: the grids push the viewer via
+  `navigationDestination(item:)`, and in a path-bound stack
+  SwiftUI rebuilds the source view on going back. Unbound stacks plus
+  item destinations at the root are the same pattern the grids themselves
+  use. Price: a deep link pushes on top of the tab's current state
+  instead of replacing it, and a person arrives directly (without the list
+  in between).
+- **Shared albums** (`/app/albums/shared/<token>`): the token is resolved via
+  `/albums/public/<token>`; if the signed-in person is a member
+  (`GET /albums/:id` answers), the app's own album view opens, otherwise the
+  public web page in an `SFSafariViewController` (`SafariSheet`) —
+  not in Safari itself, because this is a universal link, and Safari would hand
+  it straight back.
+- **Universal links** need two sides: the server publishes
   `/.well-known/apple-app-site-association` (`web/app-site-association.ts`,
-  gesteuert über `APPLE_APP_IDS`; ohne die Variable 404 und alles bleibt im
-  Browser), und die App trägt `applinks:$(F4MIL_ASSOCIATED_DOMAIN)` in
-  `FKPhotos.entitlements`. Der Host ist pro Haushalt verschieden und daher ein
-  Build-Setting im Xcode-Projekt, kein Code. Beansprucht werden nur Pfade, die
-  die App wirklich öffnen kann — Dokumente, Finanzen und die nackte Galerie
-  bleiben Safari. Einrichtung: `DEPLOYMENT.md`, „iOS universal links".
-- **Alle „öffne X"-Quellen** — Benachrichtigung (`ReviewQueueNotifier`),
-  Spotlight (`SpotlightItems.deepLink(forIdentifier:)`), künftig Widgets und
-  App Intents — erzeugen nur noch eine URL bzw. einen `AppDeepLink` und geben
-  ihn `AppDeepLinkRouter.shared`.
+  controlled via `APPLE_APP_IDS`; without the variable it is 404 and everything stays in the
+  browser), and the app carries `applinks:$(F4MIL_ASSOCIATED_DOMAIN)` in
+  `FKPhotos.entitlements`. The host differs per household and is therefore a
+  build setting in the Xcode project, not code. Only paths are claimed that
+  the app can actually open — documents, finance and the bare gallery
+  stay with Safari. Setup: `DEPLOYMENT.md`, "iOS universal links".
+- **All "open X" sources** — notification (`ReviewQueueNotifier`),
+  Spotlight (`SpotlightItems.deepLink(forIdentifier:)`), in future widgets and
+  App Intents — only produce a URL or an `AppDeepLink` and hand
+  it to `AppDeepLinkRouter.shared`.
 
-### 2.12 Spotlight: Fotos mit Text, Personen, Alben (#768 §2)
+### 2.12 Spotlight: Photos with Text, People, Albums (#768 §2)
 
-- **Was im Index landet** (`Features/Spotlight/SpotlightIndexer.swift`):
-  Fotos mit erkanntem Text (`photo_ocr`, #1029) oder einer Beschreibung, dazu
-  Personen und Alben. Fotos ohne Text kommen nicht hinein — es gäbe nichts,
-  worauf Spotlight matchen könnte; die semantische Suche bleibt in der App.
-  Bei ~75 000 Fotos ist das ein Bruchteil, und Core Spotlight hat für die
-  Anzahl keine Grenze, wohl aber für Thumbnails: Foto-Einträge tragen
-  **keine**, ein Treffer zeigt App-Icon, Textausschnitt und Datum.
-- **Delta statt Vollabgleich.** `GET /photos/spotlight-index?cursor=&limit=`
-  (`photo/photo-spotlight.service.ts`) liefert Einträge, die sich seit dem
-  Cursor geändert haben — `GREATEST(photos.updated_at, photo_ocr.updated_at)`,
-  mikrosekundengenau, mit Foto-ID als Tie-Break —, seitenweise und in
-  Änderungsreihenfolge. Der Client speichert nach **jedem** Batch Cursor und
-  ID-Menge (`SpotlightIndexState`, die IDs als kompaktes `Data`), sodass ein
-  abgebrochener Erstlauf dort weitermacht. Löschungen und verlorener Zugriff
-  können nicht durch ein Delta reisen (die OCR-Zeile stirbt mit dem Foto),
-  deshalb wird nach jedem Lauf `GET /photos/spotlight-index/ids` gegen die
-  gehaltene ID-Menge gediffed und der Rest entfernt.
-- **Sichtbarkeit wie `/photos/details`:** eigene Fotos und Fotos in Alben,
-  die man besitzt oder in die man eingeladen ist. Personennamen kommen aus den
-  eigenen Gesichtszuordnungen, denn eine Person ist pro Nutzer.
-- **Eintragsform** (`SpotlightItems`, getestet in `SpotlightItemsTests`):
-  Titel = erste Textzeile (oder die Beschreibung), Body = Rest, `textContent`
-  = alles (das ist, worauf Spotlight Volltext matcht), Personennamen als
-  Keywords, Aufnahmedatum als `contentCreationDate`, `expirationDate` =
-  unendlich — der Standard ist ein Monat, danach vergisst Spotlight still
-  alles. Text ist serverseitig auf 2000 Zeichen gekappt.
-- **Wann gelaufen wird:** nach jedem Sync (`BackgroundSyncManager`) und beim
-  App-Start, höchstens alle 15 Minuten; „Jetzt aktualisieren" in den
-  Einstellungen erzwingt es. Personen und Alben werden beim Laden der Listen
-  komplett ersetzt (`replaceDomain`), damit Zusammenführen und Löschen
-  mitziehen. Eigene Domänen `photo`/`person`/`album`, einzeln löschbar.
-- **Datenschutz:** Erkannter Text ist genau die Art Inhalt, die
-  personenbezogene Daten trägt (fotografierte Briefe, Rechnungen,
-  Visitenkarten). Der Index bleibt auf dem Gerät, aber die iPhone-Suche zeigt
-  die Schnipsel jedem, der das Telefon hält. Deshalb ist „Text in Fotos"
-  **Opt-in** (Einstellungen → „Suche auf dem iPhone", `SpotlightSettingsView`),
-  getrennt von „Personen und Alben" (an); Ausschalten löscht die Domäne,
-  Abmelden löscht alles (`wipeAll`), weil der Index pro Gerät ist und die API
-  pro Nutzer.
-- **Ein Treffer öffnet** über `onContinueUserActivity(CSSearchableItemActionType)`
-  in `ContentView`: `photo:<id>` / `person:<id>` / `album:<id>` werden zum
-  `AppDeepLink` und gehen denselben Weg wie jeder andere Link (2.11).
-- **Nicht gebaut:** eine Spotlight-Index-Extension
-  (`CSIndexExtensionRequestHandler`), mit der iOS nach Verlust des
-  Systemindex ohne App-Start neu aufbauen lassen könnte — sie braucht ein
-  eigenes Extension-Target; bis dahin baut der nächste App-Start neu auf.
+- **What ends up in the index** (`Features/Spotlight/SpotlightIndexer.swift`):
+  photos with recognized text (`photo_ocr`, #1029) or a description, plus
+  people and albums. Photos without text do not go in — there would be nothing
+  for Spotlight to match on; semantic search stays in the app.
+  With ~75,000 photos this is a fraction, and Core Spotlight has no limit on
+  the count, but it does for thumbnails: photo entries carry
+  **none**, a hit shows app icon, text excerpt and date.
+- **Delta instead of full reconciliation.** `GET /photos/spotlight-index?cursor=&limit=`
+  (`photo/photo-spotlight.service.ts`) returns entries that have changed since
+  the cursor — `GREATEST(photos.updated_at, photo_ocr.updated_at)`,
+  microsecond-precise, with the photo ID as tie-break —, page by page and in
+  order of change. The client stores cursor and ID set after **every** batch
+  (`SpotlightIndexState`, the IDs as compact `Data`), so that an
+  aborted first run resumes where it stopped. Deletions and lost access
+  cannot travel through a delta (the OCR row dies with the photo),
+  so after every run `GET /photos/spotlight-index/ids` is diffed against the
+  held ID set and the remainder is removed.
+- **Visibility like `/photos/details`:** own photos and photos in albums
+  that one owns or is invited to. Person names come from the
+  own face assignments, because a person is per user.
+- **Entry shape** (`SpotlightItems`, tested in `SpotlightItemsTests`):
+  title = first line of text (or the description), body = rest, `textContent`
+  = everything (this is what Spotlight matches full text on), person names as
+  keywords, capture date as `contentCreationDate`, `expirationDate` =
+  infinite — the default is one month, after which Spotlight silently forgets
+  everything. Text is capped server-side at 2000 characters.
+- **When it runs:** after every sync (`BackgroundSyncManager`) and at
+  app start, at most every 15 minutes; "Jetzt aktualisieren" (update now) in the
+  settings forces it. People and albums are replaced completely when the lists
+  are loaded (`replaceDomain`), so that merging and deleting
+  carry over. Separate domains `photo`/`person`/`album`, each deletable individually.
+- **Privacy:** Recognized text is exactly the kind of content that
+  carries personal data (photographed letters, invoices,
+  business cards). The index stays on the device, but iPhone search shows
+  the snippets to anyone holding the phone. Therefore "Text in Fotos"
+  (text in photos) is **opt-in** (Einstellungen → "Suche auf dem iPhone" (search on the iPhone), `SpotlightSettingsView`),
+  separate from "Personen und Alben" (on); switching it off deletes the domain,
+  signing out deletes everything (`wipeAll`), because the index is per device and the API
+  per user.
+- **A hit opens** via `onContinueUserActivity(CSSearchableItemActionType)`
+  in `ContentView`: `photo:<id>` / `person:<id>` / `album:<id>` become the
+  `AppDeepLink` and take the same path as any other link (2.11).
+- **Not built:** a Spotlight index extension
+  (`CSIndexExtensionRequestHandler`), with which iOS could have the index
+  rebuilt after losing the system index without launching the app — it needs a
+  target of its own; until then the next app start rebuilds.
 
-### 2.13 Eingeschränkter Fotozugriff (#768 §4a)
+### 2.13 Limited Photo Access (#768 §4a)
 
-- Der Sync akzeptierte `.limited` von Anfang an, sagte es aber nirgends:
-  „Alle Fotos hochladen" hieß still „alle *freigegebenen* Fotos", und iOS
-  legte bei jedem Start seinen eigenen „Weiterhin beschränken / Mehr
-  auswählen"-Alert über die App — was wie ein Fehler der App las.
-- `PHPhotoLibraryPreventAutomaticLimitedAccessAlert` in der `Info.plist`
-  schaltet den System-Alert ab; stattdessen zeigt `LimitedLibraryAccessSection`
-  in den Sync-Einstellungen den Zustand mit den zwei Auswegen: „Auswahl
-  ändern…" (`presentLimitedLibraryPicker`, präsentiert vom vordersten
-  View-Controller, weil SwiftUI keinen hergibt) und „Vollen Zugriff erlauben"
-  (Systemeinstellungen). Der Fußtext benennt die Folge für verknüpfte Alben.
-- `LimitedLibraryChangeObserver` hört auf Mediathek-Änderungen: unter
-  eingeschränktem Zugriff ist eine erweiterte Auswahl der einzige Weg, auf dem
-  ein neues Foto erscheinen kann, also läuft danach (3 s entprellt, nur bei
-  aktivem Sync) ein `runFullSync`, statt auf den nächsten Vordergrund-Zyklus
-  zu warten. Getrennt vom `TripPhotoLibraryObserver`, der etwas anderes
-  entscheidet.
+- Sync accepted `.limited` from the start, but said so nowhere:
+  "Alle Fotos hochladen" silently meant "all *shared* photos", and iOS
+  laid its own "Weiterhin beschränken / Mehr auswählen" (keep limiting / select more)
+  alert over the app at every launch — which read like a bug in the app.
+- `PHPhotoLibraryPreventAutomaticLimitedAccessAlert` in the `Info.plist`
+  switches off the system alert; instead `LimitedLibraryAccessSection`
+  in the sync settings shows the state with the two ways out: "Auswahl
+  ändern…" (change selection) (`presentLimitedLibraryPicker`, presented from the frontmost
+  view controller, because SwiftUI provides none) and "Vollen Zugriff erlauben"
+  (allow full access) (system settings). The footer text names the consequence for linked albums.
+- `LimitedLibraryChangeObserver` listens for library changes: under
+  limited access an extended selection is the only way a
+  new photo can appear, so afterwards (debounced 3 s, only when sync
+  is active) a `runFullSync` runs, instead of waiting for the next foreground cycle.
+  Separate from the `TripPhotoLibraryObserver`, which decides something different.
 
-### 2.14 App Intents / Siri-Shortcuts (#766)
+### 2.14 App Intents / Siri Shortcuts (#766)
 
-- **Die Intents liegen im App-Target** (`ios/App/Intents.swift`), nicht im
-  Paket. Sie lagen zuerst im Paket und wurden über ein `AppIntentsPackage`
-  hinübergereicht — das funktionierte aus Xcode, aber nicht aus TestFlight:
-  Die Metadaten-Extraktion des Archivs ließ die Paket-Intents aus, und die
-  installierte App hatte in der Kurzbefehle-App keine einzige Aktion. Im
-  App-Target werden sie bei jedem Build auf dem normalen Weg extrahiert. Jeder
-  Intent ist ein Aufruf in `IntentActions` (`Sources/FKPhotos/App/
-  IntentActions.swift`, öffentliche Fassade); die Arbeit bleibt im Paket. Die
-  App-Shortcuts stehen in derselben Datei.
-  - **Jetzt sichern** (`BackUpNowIntent`, ohne App-Öffnen): prüft Schalter,
-    Netzwerk-Gate und laufende Sicherung und **startet** dann `runFullSync`,
-    ohne darauf zu warten — ein Erstlauf dauert Minuten, ein Intent hat
-    Sekunden; die Sync-Engine hält ihre eigene Background-Task-Assertion.
-    Geantwortet wird, was sofort feststeht: gestartet, oder warum nicht.
-  - **Fotos suchen** (`SearchPhotosIntent`, Parameter `query`): öffnet den
-    Such-Tab mit abgeschickter Anfrage. Neuer `AppDeepLink.search(query:)`
-    (`f4milphotos://search?q=…`, nur App-Schema — das Web hat keine
-    Such-URL); der Router hält die Anfrage in `pendingSearchQuery`, `SearchView`
-    nimmt sie ab, als wäre sie getippt.
-  - **Rückblick zeigen** (`ShowLatestRecapIntent`): holt `/recaps`, öffnet den
-    neuesten nicht verworfenen im Player; ohne Rückblick oder offline die
-    Liste mit gesprochener Erklärung.
-  - **Album öffnen** / **Fotos einer Person zeigen** (`OpenAlbumIntent`,
-    `ShowPersonIntent`) über `AlbumEntity` / `PersonEntity` mit
-    `EntityStringQuery`: Siri und Shortcuts fragen die Listen vom Server ab,
-    Namen werden akzent- und schreibweisenunabhängig gematcht („urlaub" findet
-    „Urlaub 2024"). Unbenannte Personen tauchen nicht auf.
-  - **Gruppen-Review öffnen** (`OpenReviewQueueIntent`).
-- **Alles Sichtbare geht über den Router** (2.11): ein Intent erzeugt einen
-  `AppDeepLink` und sonst nichts, also landet „Zeige Album Urlaub" per Siri
-  auf demselben Bildschirm wie ein Spotlight-Treffer oder ein Link.
-- **Wie Siri die App hört:** Der Anzeigename „F4mil Photos" hat eine Ziffer
-  mitten im Wort, und wie Siri das ausspricht, ist nicht vorhersagbar.
-  `CFBundleSpokenName` („Famil Photos") sagt es ihr, und
-  `INAlternativeAppNames` in der `Info.plist` lässt die Shortcuts zusätzlich
-  auf „Famil Photos", „Famil" und „Familienfotos" reagieren, jeweils mit
-  Aussprache-Hinweis. Ohne diese Schlüssel müsste man den Namen so sprechen,
-  wie Siri ihn sich gerade vorstellt.
-- **Nicht als App-Shortcut deklariert** sind die entity-nehmenden Intents:
-  eine Shortcut-Phrase kann eine Entity nur als aufzählbaren Parameter tragen,
-  Alben sind offen. Über die Kurzbefehle-App und Siris eigene Auflösung
-  bleiben sie erreichbar.
+- **The intents live in the app target** (`ios/App/Intents.swift`), not in
+  the package. They first lived in the package and were passed over via an
+  `AppIntentsPackage` — that worked from Xcode, but not from TestFlight:
+  the archive's metadata extraction left out the package intents, and the
+  installed app had not a single action in the Shortcuts app. In the
+  app target they are extracted on the normal path with every build. Each
+  intent is a call into `IntentActions` (`Sources/FKPhotos/App/
+  IntentActions.swift`, public facade); the work stays in the package. The
+  app shortcuts are in the same file.
+  - **Back up now** (`BackUpNowIntent`, without opening the app): checks the toggle,
+    network gate and a running backup and then **starts** `runFullSync`,
+    without waiting for it — a first run takes minutes, an intent has
+    seconds; the sync engine holds its own background task assertion.
+    The reply is what is known immediately: started, or why not.
+  - **Search photos** (`SearchPhotosIntent`, parameter `query`): opens the
+    search tab with the query submitted. New `AppDeepLink.search(query:)`
+    (`f4milphotos://search?q=…`, app scheme only — the web has no
+    search URL); the router holds the query in `pendingSearchQuery`, `SearchView`
+    picks it up as if it had been typed.
+  - **Show recap** (`ShowLatestRecapIntent`): fetches `/recaps`, opens the
+    newest non-dismissed one in the player; with no recap or offline, the
+    list with a spoken explanation.
+  - **Open album** / **Show a person's photos** (`OpenAlbumIntent`,
+    `ShowPersonIntent`) via `AlbumEntity` / `PersonEntity` with
+    `EntityStringQuery`: Siri and Shortcuts query the lists from the server,
+    names are matched independent of accents and capitalization ("urlaub" finds
+    "Urlaub 2024"). Unnamed people do not appear.
+  - **Open group review** (`OpenReviewQueueIntent`).
+- **Everything visible goes through the router** (2.11): an intent produces an
+  `AppDeepLink` and nothing else, so "Zeige Album Urlaub" via Siri lands
+  on the same screen as a Spotlight hit or a link.
+- **How Siri hears the app:** The display name "F4mil Photos" has a digit
+  in the middle of the word, and how Siri pronounces that is not predictable.
+  `CFBundleSpokenName` ("Famil Photos") tells it, and
+  `INAlternativeAppNames` in the `Info.plist` additionally lets Shortcuts
+  respond to "Famil Photos", "Famil" and "Familienfotos", each with a
+  pronunciation hint. Without these keys one would have to speak the name the
+  way Siri currently imagines it.
+- **Not declared as app shortcuts** are the entity-taking intents:
+  a shortcut phrase can carry an entity only as an enumerable parameter,
+  albums are open-ended. They remain reachable via the Shortcuts app and Siri's own
+  resolution.
 
-### 2.15 Remote-Push über APNs (#765)
+### 2.15 Remote Push via APNs (#765)
 
-- **Ein Absender, zwei Kanäle.** `sendToUser` im `push`-Service schickt
-  dieselbe Benachrichtigung über Web Push an Browser und über APNs an
-  iPhones; Präferenzen, Entprellung, Online-Unterdrückung und Digest davor
-  sind gemeinsam. Details: `documentation/push-notifications.md`, „iOS: APNs".
-- **`RemotePushManager`** (`Features/Push/`): Opt-in wie im Web. Beim
-  Einschalten Berechtigung erfragen, Token holen
-  (`registerForRemoteNotifications`), an `POST /push/apns/register` geben —
-  und das **bei jedem Start** erneut, weil sich der Token ändern kann und
-  der Server nur den letzten kennt. Ausschalten und Abmelden rufen
-  `/push/apns/unregister`, damit ein zweites Konto auf demselben Telefon
-  nicht die Mitteilungen des ersten bekommt. Sandbox oder Produktion
-  entscheidet die Build-Konfiguration (`#if DEBUG`), genau wie Xcode das
-  `aps-environment`-Entitlement vergibt.
-- **Ein Tipp öffnet die Stelle.** Der Payload trägt den web-relativen Pfad
-  (`/app/fotos/alben/12?photoId=34`), den jede Feed-Benachrichtigung ohnehin
-  hat; `AppDeepLinkRouter.handle(urlString:)` löst ihn gegen den
-  konfigurierten Server auf und routet ihn wie einen Universal Link (2.11).
-  Der `default`-Zweig des Notification-Delegates in `Main.swift` gilt damit
-  für Remote-Push und die lokale Review-Mitteilung gleichermaßen.
-- **`PushSettingsView`** (Einstellungen → Benachrichtigungen): der Schalter
-  für dieses iPhone mit Status (aktiv, wird registriert, in iOS verweigert,
-  Fehler), die Arten wie im Web-Profil (`/push/preferences`, ein Satz für alle
-  Geräte, nur die Foto-Arten — Dokumente hat die App nicht) und der Schalter
-  für die lokale Gruppen-Mitteilung, der vorher in der Hauptliste stand.
-  Ist der Server nicht eingerichtet (`GET /push/apns/status`), ist der
-  Schalter aus und sagt warum.
+- **One sender, two channels.** `sendToUser` in the `push` service sends
+  the same notification via Web Push to browsers and via APNs to
+  iPhones; preferences, debouncing, online suppression and digest upstream of
+  it are shared. Details: `documentation/push-notifications.md`, "iOS: APNs".
+- **`RemotePushManager`** (`Features/Push/`): opt-in as on the web. On
+  enabling, ask for permission, fetch the token
+  (`registerForRemoteNotifications`), hand it to `POST /push/apns/register` —
+  and do so **again on every launch**, because the token can change and
+  the server knows only the latest. Switching off and signing out call
+  `/push/apns/unregister`, so that a second account on the same phone
+  does not receive the first one's notifications. Sandbox or production
+  is decided by the build configuration (`#if DEBUG`), exactly as Xcode assigns the
+  `aps-environment` entitlement.
+- **A tap opens the place.** The payload carries the web-relative path
+  (`/app/fotos/alben/12?photoId=34`) that every feed notification has anyway;
+  `AppDeepLinkRouter.handle(urlString:)` resolves it against the
+  configured server and routes it like a universal link (2.11).
+  The `default` branch of the notification delegate in `Main.swift` thus
+  applies to remote push and the local review notification alike.
+- **`PushSettingsView`** (Einstellungen → Benachrichtigungen, i.e. notifications): the toggle
+  for this iPhone with status (active, registering, denied in iOS,
+  error), the kinds as in the web profile (`/push/preferences`, one set for all
+  devices, only the photo kinds — the app has no documents) and the toggle
+  for the local group notification, which previously sat in the main list.
+  If the server is not set up (`GET /push/apns/status`), the
+  toggle is off and says why.
 - **Entitlement** `aps-environment = development` in `FKPhotos.entitlements`
-  (Xcode setzt es beim Archivieren auf `production`). Die Push-Capability
-  am App-ID legt Xcode mit automatischem Signing an.
+  (Xcode sets it to `production` when archiving). Xcode creates the push capability
+  on the App ID with automatic signing.
 
 ---
 
-## 3. Vergleich: Web-Foto-Bereich ↔ iOS
+## 3. Comparison: Web Photo Area ↔ iOS
 
-Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders · ❌ fehlt
+Legend: ✅ present · ⚡ present & superior · 🔶 partial/different · ❌ missing
 
-### 3.1 Ansicht & Navigation
+### 3.1 View & Navigation
 | Feature | Web | iOS |
 |---|---|---|
-| Chronologische Timeline / „Alle Fotos" | ✅ Virtual-Scroll | ✅ Jahr → Monat |
-| Filter (Favorit, GPS, Datum, Medientyp) | ✅ | ✅ (Favorit, GPS, Datum) |
-| Sortierung (Datum/Qualität/Name/Größe) | ✅ | 🔶 (Teilmenge) |
-| Vollbild + Zoom | ✅ | ✅ native Pinch-Zoom |
-| Diashow / Slideshow | ✅ Modus im Vollbild | ✅ eigener Story-Player (`PhotoSlideshowView`), mit Foto-Paaren je nach Geräteausrichtung |
-| Mehrfachauswahl + Stapelaktionen | ✅ (Galerie + Album) | ✅ (Album, Monat und „Alle Fotos") |
-| Fotos vergleichen | ✅ `PhotoCompareView` | ✅ `PhotoCompareView` (Seite an Seite, synchroner Gesichts-Zoom, Schärfe-Overlay, Wisch-zum-Verwerfen, Qualitäts-Aufschlüsselung) |
+| Chronological timeline / "Alle Fotos" | ✅ virtual scroll | ✅ year → month |
+| Filter (favorite, GPS, date, media type) | ✅ | ✅ (favorite, GPS, date) |
+| Sorting (date/quality/name/size) | ✅ | 🔶 (subset) |
+| Fullscreen + zoom | ✅ | ✅ native pinch zoom |
+| Slideshow | ✅ mode in fullscreen | ✅ own story player (`PhotoSlideshowView`), with photo pairs depending on device orientation |
+| Multi-select + batch actions | ✅ (gallery + album) | ✅ (album, month and "Alle Fotos") |
+| Compare photos | ✅ `PhotoCompareView` | ✅ `PhotoCompareView` (side by side, synchronized face zoom, sharpness overlay, swipe to discard, quality breakdown) |
 
-### 3.2 Foto-Aktionen
+### 3.2 Photo Actions
 | Feature | Web | iOS |
 |---|---|---|
-| Favorit | ✅ | ✅ |
-| Ausblenden / Einblenden | ✅ | ✅ (Feed + Vollbild) |
-| Löschen | ✅ | ✅ (mit `photos.delete`) |
-| Original herunterladen | ✅ | ✅ (in die Fotos-Mediathek) |
-| Teilen (nativ) | 🔶 (Link) | ⚡ iOS-Share-Sheet |
-| Zu Album hinzufügen | ✅ | ✅ |
-| Aus Album entfernen | ✅ | ✅ (im Album-Kontext) |
-| Aufnahmedatum ändern | ✅ | ✅ |
-| GPS-Ort setzen/ändern | ❌ (auch Web nicht — nur `POST /photos/:id/rescan-gps` liest EXIF neu) | ❌ |
-| Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | ✅ `PhotoMapView` (Pins, Zeitleiste, Zoom-Clustering) |
-| Reindex / Metadaten aktualisieren | ✅ | ❌ |
-| Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | ✅ `PhotoTransformsView` (Ansehen/Anwenden/Übernehmen/Zurücksetzen) + `PhotoRecipeEditorView` (Cropper, Drehung, Tonwert-Regler, Auto-Levels) |
-| Collage erstellen | ✅ `CollageDialog` | ✅ `CollageView` (Layouts, Vorschau, Rendern + Upload, Textüberlagerung) |
+| Favorite | ✅ | ✅ |
+| Hide / unhide | ✅ | ✅ (feed + fullscreen) |
+| Delete | ✅ | ✅ (with `photos.delete`) |
+| Download original | ✅ | ✅ (into the Photos library) |
+| Share (native) | 🔶 (link) | ⚡ iOS share sheet |
+| Add to album | ✅ | ✅ |
+| Remove from album | ✅ | ✅ (in album context) |
+| Change capture date | ✅ | ✅ |
+| Set/change GPS location | ❌ (not on the web either — only `POST /photos/:id/rescan-gps` re-reads EXIF) | ❌ |
+| Map over a collection (stops/trip) | ✅ `TripMap` | ✅ `PhotoMapView` (pins, timeline, zoom clustering) |
+| Reindex / refresh metadata | ✅ | ❌ |
+| Non-destructive transformations (crop/rotate) | ✅ `PhotoTransformEditor` | ✅ `PhotoTransformsView` (view/apply/adopt/reset) + `PhotoRecipeEditorView` (cropper, rotation, tone sliders, auto-levels) |
+| Create collage | ✅ `CollageDialog` | ✅ `CollageView` (layouts, preview, render + upload, text overlay) |
 
-### 3.3 Metadaten
+### 3.3 Metadata
 | Feature | Web | iOS |
 |---|---|---|
-| EXIF-/Metadaten-Sidebar | ✅ | ✅ |
-| Qualitäts-Score-Anzeige | ✅ | ✅ |
-| Per-Foto-Karte | ✅ | ✅ |
-| Erkannte Gesichter + Benennen | ✅ | ✅ |
+| EXIF/metadata sidebar | ✅ | ✅ |
+| Quality score display | ✅ | ✅ |
+| Per-photo map | ✅ | ✅ |
+| Recognized faces + naming | ✅ | ✅ |
 
-### 3.4 Alben
+### 3.4 Albums
 | Feature | Web | iOS |
 |---|---|---|
-| Liste / Erstellen / Löschen | ✅ | ✅ |
-| Album anpinnen | 🔶 | ⚡ (Pin + Wisch-Aktionen) |
-| Ansichtsmodi (Alle/Favoriten/Konsens/Eigen) | ✅ | ✅ `AlbumViewMode` |
-| Konsens-/anonyme Abstimmung | ⚡ | ✅ (Badges „3/5" + Favoriten-Vote) |
-| Mit Nutzern teilen (Rollen) | ✅ | ✅ |
-| Öffentliche Links (mit Ablauf) | ✅ | ✅ |
-| Album bearbeiten (Name, Beschreibung, Kartenmodus) | ✅ | ✅ `AlbumSettingsView` |
-| Cover setzen | ✅ | ✅ (Grid-Kontextmenü, `AlbumCover`) |
-| In Album hochladen | ✅ | ✅ |
+| List / create / delete | ✅ | ✅ |
+| Pin album | 🔶 | ⚡ (pin + swipe actions) |
+| View modes (all/favorites/consensus/custom) | ✅ | ✅ `AlbumViewMode` |
+| Consensus / anonymous voting | ⚡ | ✅ (badges "3/5" + favorite vote) |
+| Share with users (roles) | ✅ | ✅ |
+| Public links (with expiry) | ✅ | ✅ |
+| Edit album (name, description, map mode) | ✅ | ✅ `AlbumSettingsView` |
+| Set cover | ✅ | ✅ (grid context menu, `AlbumCover`) |
+| Upload to album | ✅ | ✅ |
 
-### 3.5 Personen & Gesichter
+### 3.5 People & Faces
 | Feature | Web | iOS |
 |---|---|---|
-| Personen-Grid, Umbenennen, Merge, Ignorieren | ✅ | ✅ |
-| Jahres-Kacheln pro Person | ❌ | ⚡ (neu) |
-| Geburtstag / Alter zum Aufnahmezeitpunkt | ❌ | ❌ |
+| People grid, rename, merge, ignore | ✅ | ✅ |
+| Year tiles per person | ❌ | ⚡ (new) |
+| Birthday / age at time of capture | ❌ | ❌ |
 
-### 3.6 Suche
+### 3.6 Search
 | Feature | Web | iOS |
 |---|---|---|
-| Semantisch / natürliche Sprache | ✅ | ✅ |
-| Ort / POI / Radius | ✅ | ✅ (gleiches Backend) |
-| Filter-Chips / strukturierte Filter-UI | ✅ `NaturalSearchBar` + Chips | ✅ `SearchParseChips` |
+| Semantic / natural language | ✅ | ✅ |
+| Place / POI / radius | ✅ | ✅ (same backend) |
+| Filter chips / structured filter UI | ✅ `NaturalSearchBar` + chips | ✅ `SearchParseChips` |
 
-### 3.7 Feed / Soziales
+### 3.7 Feed / Social
 | Feature | Web | iOS |
 |---|---|---|
-| Aktivitäts-Feed (Album-Aktivität) | ✅ | ✅ (Badge) |
-| Foto-Stream (chronologisch) | ✅ `PhotoFeedView` | 🔶 (Feed = Aktivität) |
-| Reaktionen / Likes | ✅ | ✅ |
-| Kommentare (lesen + schreiben) | ✅ | ✅ |
-| Push-Benachrichtigungen | ✅ (PWA-Push) | ✅ (APNs, #765 — siehe 2.15) |
+| Activity feed (album activity) | ✅ | ✅ (badge) |
+| Photo stream (chronological) | ✅ `PhotoFeedView` | 🔶 (feed = activity) |
+| Reactions / likes | ✅ | ✅ |
+| Comments (read + write) | ✅ | ✅ |
+| Push notifications | ✅ (PWA push) | ✅ (APNs, #765 — see 2.15) |
 
-### 3.8 Rückblicke & Review
+### 3.8 Recaps & Review
 | Feature | Web | iOS |
 |---|---|---|
-| Rückblicke (Recaps) – Player | ✅ `RecapsView`/`RecapPlayer` | ✅ `RecapPlayerView` |
-| „An diesem Tag" / Memories | 🔶 (über Recaps) | 🔶 (über Recaps) |
-| Gruppen-Review (Review-Queue) | ✅ `ReviewQueueView` | ✅ `ReviewQueueView` (Swipe) |
+| Recaps – player | ✅ `RecapsView`/`RecapPlayer` | ✅ `RecapPlayerView` |
+| "On this day" / memories | 🔶 (via recaps) | 🔶 (via recaps) |
+| Group review (review queue) | ✅ `ReviewQueueView` | ✅ `ReviewQueueView` (swipe) |
 
 ### 3.9 Backup & Sync
 | Feature | Web | iOS |
 |---|---|---|
-| Manueller Upload | ✅ | ✅ |
-| Auto-Backup im Hintergrund | ❌ | ⚡ |
-| Nur-WLAN | ❌ | ✅ |
-| Geräte-Album → Server-Album-Mapping | ❌ | ✅ |
-| Screenshots ausschließen / Medientypen | ❌ | ✅ |
-| Zwei-Wege-Sync (Download aufs Gerät) | ❌ | ✅ |
-| Upload-Queue + Retry | ❌ | ✅ |
-| Share-Extension (Upload aus anderen Apps) | ❌ | ✅ |
+| Manual upload | ✅ | ✅ |
+| Auto-backup in the background | ❌ | ⚡ |
+| Wi-Fi only | ❌ | ✅ |
+| Device album → server album mapping | ❌ | ✅ |
+| Exclude screenshots / media types | ❌ | ✅ |
+| Two-way sync (download to the device) | ❌ | ✅ |
+| Upload queue + retry | ❌ | ✅ |
+| Share extension (upload from other apps) | ❌ | ✅ |
 
 ### 3.10 Auth & Admin
 | Feature | Web | iOS |
 |---|---|---|
-| Passwort + Passkeys | ✅ | ✅ |
-| Benutzer-/Rollenverwaltung | ✅ (vollständig) | 🔶 (Basis) |
-| Datenverwaltung / Jobs / Purge | ✅ | ❌ (bewusst Web) |
+| Password + passkeys | ✅ | ✅ |
+| User/role management | ✅ (complete) | 🔶 (basic) |
+| Data management / jobs / purge | ✅ | ❌ (deliberately web) |
 
 ---
 
-## 4. Plan: Featuregleichheit (nur wo sinnvoll)
+## 4. Plan: Feature Parity (only where sensible)
 
-Priorisiert nach Nutzen ÷ Aufwand und „passt das auf ein Telefon?".
+Prioritized by benefit ÷ effort and "does this fit on a phone?".
 
-### Etappe 1 – Hoher Nutzen, mobil naheliegend *(umgesetzt)*
+### Stage 1 – High benefit, obvious on mobile *(implemented)*
 
-Alle vier Punkte sind in der App vorhanden; die Beschreibungen bleiben als
-Referenz stehen, was jeweils gebaut wurde.
+All four items are present in the app; the descriptions remain as a
+reference for what was built in each case.
 
-1. ✅ **Rückblicke/Recaps-Viewer** – Story-artige Wiedergabe ist auf dem Handy
-   ideal. Read-only-Konsum der bestehenden `/recaps`-Daten + `RecapPlayer`-
-   Pendant in SwiftUI (`TabView`-Paging, Auto-Advance, Musik optional).
-2. ✅ **Album-Ansichtsmodi + Konsens/Abstimmung** – das Alleinstellungsmerkmal
-   der App (kollaborative Kuratierung). Modi „Alle / Favoriten / Konsens",
-   Favoriten-Toggle je Album-Mitglied, „3/5 Favoriten"-Anzeige.
-3. ✅ **Gruppen-Review (Review-Queue)** – Swipe-basiertes Review (links/rechts)
-   passt hervorragend zu Touch.
-4. ✅ **Foto-Aktionen im Vollbild vervollständigen** – Ausblenden/Einblenden,
-   Aus Album entfernen, Löschen (mit Berechtigung), Original herunterladen.
-   Schließt alltägliche Lücken; nutzt vorhandene Endpunkte.
+1. ✅ **Recaps viewer** – Story-style playback is ideal on the phone.
+   Read-only consumption of the existing `/recaps` data + a `RecapPlayer`
+   counterpart in SwiftUI (`TabView` paging, auto-advance, optional music).
+2. ✅ **Album view modes + consensus/voting** – the app's unique selling point
+   (collaborative curation). Modes "All / Favorites / Consensus",
+   favorite toggle per album member, "3/5 favorites" display.
+3. ✅ **Group review (review queue)** – Swipe-based review (left/right)
+   fits touch superbly.
+4. ✅ **Complete the photo actions in fullscreen** – hide/unhide,
+   remove from album, delete (with permission), download original.
+   Closes everyday gaps; uses existing endpoints.
 
-### Etappe 2 – Mittlerer Nutzen
-5. ✅ **Interaktive Karten-/Trip-Ansicht** – Karte mit Foto-Clustern,
-   Stopp-Zeitleiste und zoomabhängigem Neuclustern, umgesetzt als
-   `PhotoMapView` auf Basis der portierten `PhotoStops`-Regeln (#1016).
-   *Ort per Karten-Pin zuweisen* gehört nicht hierher — das kann das Web
-   ebenfalls nicht, es ist also kein Parity-Gap.
-6. ✅ **Öffentliche Album-Links** erstellen und per Share-Sheet teilen
-   (Ablaufdatum) – umgesetzt in `AlbumShareView`; der geteilte Link zeigt auf
-   die SPA-Route `/app/albums/shared/<token>` (`AlbumPublicLinkURL`).
-7. ✅ **Mehrfachauswahl in „Alle Fotos"** inkl. Stapelaktionen – umgesetzt
-   in `PhotoTimelineView` (gefilterte Flach-Ansicht) auf Basis des
-   gemeinsamen `PhotoSelection`-Zustands.
-8. ✅ **Reichere Such-Filter (Chips)** – die Suche geht jetzt auf
-   `/photos/search/natural` (Ort und Zeitraum filtern, statt mitgesucht zu
-   werden) und zeigt die Lesart des Servers als „Verstanden als"-Chips
-   (`NaturalSearch`, `SearchParseChips`), analog `NaturalSearchBar`.
-9. ✅ **Diashow** – umgesetzt als eigener Vollbild-Player
-   (`PhotoSlideshowView`), derselbe Story-Player wie bei den Rückblicken.
-   Startbar aus Album, Auswahl, Mediathek und dem Vollbild-Viewer; reine Logik
-   in `SlideshowPlan.swift`, Regeln in `documentation/photo-slideshow.md`.
+### Stage 2 – Medium benefit
+5. ✅ **Interactive map/trip view** – map with photo clusters,
+   stop timeline and zoom-dependent re-clustering, implemented as
+   `PhotoMapView` on the basis of the ported `PhotoStops` rules (#1016).
+   *Assigning a place via a map pin* does not belong here — the web cannot do that
+   either, so it is not a parity gap.
+6. ✅ Create **public album links** and share them via the share sheet
+   (expiry date) – implemented in `AlbumShareView`; the shared link points to
+   the SPA route `/app/albums/shared/<token>` (`AlbumPublicLinkURL`).
+7. ✅ **Multi-select in "Alle Fotos"** incl. batch actions – implemented
+   in `PhotoTimelineView` (filtered flat view) on the basis of the
+   shared `PhotoSelection` state.
+8. ✅ **Richer search filters (chips)** – search now goes to
+   `/photos/search/natural` (place and time range filter instead of being
+   searched as words) and shows the server's reading as "Verstanden als" (understood as) chips
+   (`NaturalSearch`, `SearchParseChips`), analogous to `NaturalSearchBar`.
+9. ✅ **Slideshow** – implemented as its own fullscreen player
+   (`PhotoSlideshowView`), the same story player as for the recaps.
+   Startable from album, selection, library and the fullscreen viewer; pure logic
+   in `SlideshowPlan.swift`, rules in `documentation/photo-slideshow.md`.
 
-### Etappe 3 – Nice-to-have / aufwändiger
-10. ✅ **Nicht-destruktiver Transform-/Crop-Editor** – `PhotoTransformsView`
-    (Vorschläge ansehen/anwenden, fremde Fassung übernehmen, zurücksetzen,
-    #1019 Etappe A) und `PhotoRecipeEditorView` (Cropper, Drehung, Tonwert-
-    Regler, Auto-Levels, Etappe B).
-11. **Collage-Erstellung**.
-12. ✅ **Fotos vergleichen** – `PhotoCompareView` im Gruppen-Review: zwei
-    Aufnahmen nebeneinander, ein Tipp auf ein Gesicht zoomt beide gleich groß
-    darauf (#1021 Etappe A), dazu Schärfe-Overlay, Wisch-zum-Verwerfen und
-    Qualitäts-Aufschlüsselung (Etappe B).
+### Stage 3 – Nice-to-have / more effort
+10. ✅ **Non-destructive transform/crop editor** – `PhotoTransformsView`
+    (view/apply suggestions, adopt someone else's version, reset,
+    #1019 stage A) and `PhotoRecipeEditorView` (cropper, rotation, tone
+    sliders, auto-levels, stage B).
+11. **Collage creation**.
+12. ✅ **Compare photos** – `PhotoCompareView` in the group review: two
+    shots side by side, a tap on a face zooms both onto it at equal size
+    (#1021 stage A), plus sharpness overlay, swipe to discard and
+    quality breakdown (stage B).
 
-### Bewusst **nicht** portieren (Web sinnvoller)
-- Vollständige Datenverwaltung, geplante Jobs, Purge → bleibt Web-/Admin-Domäne.
-- Gast-/Public-Link-Empfänger-Flows (Gast-Dialoge) → Web-Konzept.
-- CLI-/Bulk-Upload.
-
----
-
-## 5. iOS-spezifische Erweiterungen (nur auf iOS sinnvoll)
-
-Diese Features ergeben primär oder ausschließlich auf dem Gerät Sinn und wären
-eine echte Bereicherung:
-
-1. **„Speicher freigeben"** – bereits gesicherte Original-Fotos vom Gerät
-   entfernen (Immich-Stil), inkl. „nur bestätigt hochgeladene".
-2. ✅ **Home-Screen-Widgets** (#764) – „An diesem Tag", letzter Rückblick,
-   neueste Feed-Aktivität. Eigenes WidgetKit-Extension-Target
-   `FKPhotosWidgets` (`App/Widgets/`), das sich das Extension-Target mit der
-   Live Activity (Punkt 3) teilt statt ein zweites zu eröffnen. Die Daten
-   kommen ohne neuen Server-Code: `WidgetSnapshotStore` (im Package)
-   schreibt bei jedem ohnehin stattfindenden Laden von Rückblicken/Feed
-   einen kleinen JSON-Snapshot in dieselbe App-Group-`UserDefaults`-Suite,
-   die die Share Extension schon nutzt (`SharedStorage`,
-   `group.de.f4mil.photos`); die Extension liest nur. Das Foto dazu (Cover
-   des Rückblicks, das Feed-Foto selbst) kommt im zweiten Schritt: der
-   Disk-Cache aus #1293 liegt im privaten Caches-Verzeichnis der App, das
-   die Extension nicht sieht, deshalb lädt die App das Bild einmal in
-   Widget-Größe (`/photos/file/…?w=800&convert=true`) und legt es als JPEG
-   in `widget-images/` im App-Group-Container ab (`WidgetImageStore`, eine
-   Datei je Widget). Der Snapshot nennt den Dateinamen, das Widget zeigt
-   das Foto als Hintergrund unter dem Text; ohne Datei bleibt es die
-   Textkarte. Ein Rückblick, der schon sein Cover hat, lädt es beim
-   nächsten Listenaufruf nicht erneut; ein neuer Rückblick im selben Slot
-   erbt das alte Bild nicht. „An diesem Tag" und „letzter Rückblick" übernehmen
-   dieselbe Auswahlregel wie der App Intent „Rückblick zeigen" (2.14):
-   ungesehen zuerst, sonst der neueste. Abmelden löscht Snapshots und
-   Bilder (`WidgetSnapshotStore.clearAll`) aus demselben Grund wie den
-   Spotlight-Index: die Extension prüft keine Sitzung, sonst zeigte der
-   Home-Screen dem nächsten Konto Foto und Namen des vorigen.
-3. ✅ **Live Activity / Dynamic Island** (#768 §1) — für den laufenden Tag
-   eines Reiseplans, nicht für den Backup-Fortschritt (dafür gibt es kein
-   Bedürfnis: das Backup läuft unauffällig im Hintergrund, ein Reisetag
-   dagegen ist die Situation, in der ein Blick aufs Sperrbildschirm-Widget
-   tatsächlich hilft). Zeigt den aktuellen Block, den bestätigten oder
-   vermuteten Stopp, eine Verspätungsanzeige und einen Licht-Hinweis, wenn
-   einer noch bevorsteht. `TripDayActivityManager` (im Package) hält die
-   Activity per 60-Sekunden-Polling im Vordergrund aktuell — ActivityKit
-   drosselt Updates ohnehin auf ungefähr eine Minute, häufigeres Aufrufen
-   kostet also nichts zusätzlich — und beendet sie von selbst, sobald der
-   Tag vorbei ist oder kein Plan mehr läuft; kein Server-Push nötig, da
-   alles lokal aus dem ohnehin für den Offline-Gebrauch ladbaren
-   Plan-Bundle berechnet wird (§3.9). `TripVisitMonitor.openStopOsmRef`
-   liefert den geofence-bestätigten Stopp und gewinnt gegenüber der reinen
-   Uhrzeit-Vermutung des Plans.
-4. ✅ **App Intents / Siri-Shortcuts** – „Jetzt sichern", „Suche nach …",
-   „Zeige Rückblick", Album/Person als Entity — siehe 2.14.
-5. **Lokale Benachrichtigungen** – „neue Gruppen warten" ist umgesetzt
-   (`ReviewQueueNotifier`, 2.9); „Backup abgeschlossen" bewusst nicht, da es
-   dafür kein Widget/keine Live Activity gibt (siehe Punkt 3) — ein Push
-   bei Bedarf würde hier ausreichen, ist aber nicht Teil dieser Etappe.
-6. ✅ **Remote-Push (APNs)** – Gegenstück zum bestehenden `push`-Service &
-   PWA-Push — siehe 2.15.
-7. ✅ **Spotlight-Indexierung** — Fotos mit erkanntem Text (Opt-in),
-   Personen und Alben — siehe 2.12.
-8. **Live Photos** – Erfassung/Upload von Bewegungsanteil (sobald das Backend
-   Video/Motion unterstützt; aktuell rein fotobasiert).
-9. ✅ **Limited-Library-Picker-Politur** (PhotoKit) — siehe 2.13. Focus-Filter
-   bewusst offen (#768 §4b).
-10. ✅ **Deep Links & Universal Links** zwischen iOS und Web — siehe 2.11.
-    Handoff offen (#768 §5b).
+### Deliberately **not** ported (web makes more sense)
+- Full data management, scheduled jobs, purge → remains web/admin domain.
+- Guest/public-link recipient flows (guest dialogs) → web concept.
+- CLI/bulk upload.
 
 ---
 
-## 6. Offene Dokumentations-Punkte
+## 5. iOS-Specific Extensions (only sensible on iOS)
 
-- `FEATURE_COMPARISON.md` Abschnitt 8 („Mobile Apps") und die Zusammenfassung
-  wurden mit diesem Stand aktualisiert (iOS ist nicht mehr „read-only").
-- Die Sync-Architektur (Upload-Queue, Hintergrund-Task, Hash-Abgleich,
-  Zwei-Wege-Sync) ist in [`ios-backup-sync.md`](./ios-backup-sync.md)
-  dokumentiert.
-- Die Album-Ansichtsmodi inklusive der Begründung, warum iOS auf dem Gerät
-  filtert statt `active_view` zu speichern, stehen in
+These features make sense primarily or exclusively on the device and would be
+a real enrichment:
+
+1. **"Free up storage"** – remove already backed-up original photos from the device
+   (Immich style), incl. "only confirmed uploaded".
+2. ✅ **Home screen widgets** (#764) – "On this day", latest recap,
+   newest feed activity. Its own WidgetKit extension target
+   `FKPhotosWidgets` (`App/Widgets/`), which shares the extension target with the
+   Live Activity (item 3) instead of opening a second one. The data
+   comes without new server code: `WidgetSnapshotStore` (in the package)
+   writes, on every load of recaps/feed that takes place anyway,
+   a small JSON snapshot into the same app-group `UserDefaults` suite
+   that the share extension already uses (`SharedStorage`,
+   `group.de.f4mil.photos`); the extension only reads. The photo for it (cover
+   of the recap, the feed photo itself) comes in a second step: the
+   disk cache from #1293 lives in the app's private caches directory, which the
+   extension does not see, so the app loads the image once at
+   widget size (`/photos/file/…?w=800&convert=true`) and stores it as JPEG
+   in `widget-images/` in the app-group container (`WidgetImageStore`, one
+   file per widget). The snapshot names the file name, the widget shows
+   the photo as background under the text; without a file it remains the
+   text card. A recap that already has its cover does not reload it on the
+   next list fetch; a new recap in the same slot does not
+   inherit the old image. "On this day" and "latest recap" adopt
+   the same selection rule as the "Show recap" App Intent (2.14):
+   unseen first, otherwise the newest. Signing out deletes snapshots and
+   images (`WidgetSnapshotStore.clearAll`) for the same reason as the
+   Spotlight index: the extension checks no session, otherwise the
+   home screen would show the next account the photo and names of the previous one.
+3. ✅ **Live Activity / Dynamic Island** (#768 §1) — for the current day
+   of a trip plan, not for backup progress (there is no need for that:
+   the backup runs unobtrusively in the background, whereas a travel day
+   is the situation in which a glance at the lock screen widget
+   actually helps). Shows the current block, the confirmed or
+   presumed stop, a delay indicator and a light hint when
+   one is still upcoming. `TripDayActivityManager` (in the package) keeps the
+   activity current in the foreground via 60-second polling — ActivityKit
+   throttles updates to about one minute anyway, so calling more often
+   costs nothing extra — and ends it by itself as soon as the
+   day is over or no plan is running any more; no server push needed, since
+   everything is computed locally from the plan bundle, which can be loaded
+   for offline use anyway (§3.9). `TripVisitMonitor.openStopOsmRef`
+   delivers the geofence-confirmed stop and wins over the plan's pure
+   time-of-day guess.
+4. ✅ **App Intents / Siri Shortcuts** – "Back up now", "Search for …",
+   "Show recap", album/person as entity — see 2.14.
+5. **Local notifications** – "new groups waiting" is implemented
+   (`ReviewQueueNotifier`, 2.9); "backup completed" deliberately not, since there is
+   no widget/Live Activity for it (see item 3) — a push
+   on demand would suffice here, but is not part of this stage.
+6. ✅ **Remote push (APNs)** – counterpart to the existing `push` service &
+   PWA push — see 2.15.
+7. ✅ **Spotlight indexing** — photos with recognized text (opt-in),
+   people and albums — see 2.12.
+8. **Live Photos** – capture/upload of the motion component (once the backend
+   supports video/motion; currently purely photo-based).
+9. ✅ **Limited library picker polish** (PhotoKit) — see 2.13. Focus filter
+   deliberately left open (#768 §4b).
+10. ✅ **Deep links & universal links** between iOS and web — see 2.11.
+    Handoff open (#768 §5b).
+
+---
+
+## 6. Open Documentation Items
+
+- `FEATURE_COMPARISON.md` section 8 ("Mobile Apps") and the summary
+  were updated with this state (iOS is no longer "read-only").
+- The sync architecture (upload queue, background task, hash matching,
+  two-way sync) is documented in [`ios-backup-sync.md`](./ios-backup-sync.md).
+- The album view modes, including the rationale for why iOS filters on the device
+  instead of storing `active_view`, are in
   [`album-photo-views.md`](./album-photo-views.md).
-- Die Wisch-Variante der Review-Queue samt Gesten-Tabelle und dem Verhalten
-  des einstufigen Undo steht in [`ai-auto-pick.md`](./ai-auto-pick.md).
+- The swipe variant of the review queue, including the gesture table and the behavior
+  of the single-step undo, is in [`ai-auto-pick.md`](./ai-auto-pick.md).

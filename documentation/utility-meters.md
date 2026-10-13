@@ -1,73 +1,73 @@
-# Zählerstände (Utility Meters) — Feature-Plan
+# Meter Readings (Utility Meters) — Feature Plan
 
-Neues Modul zur Erfassung und Auswertung von Haushaltszählern (Strom, Wasser,
-Gas) sowie Betriebsstundenzählern (Pumpen, Kompressoren), inkl. Ablesung per
-Foto/OCR, automatischer Erfassung per API und Verknüpfung mit
-Finance-Transaktionen.
+New module for recording and analyzing household meters (electricity, water,
+gas) as well as operating-hours meters (pumps, compressors), including reading
+by photo/OCR, automatic capture via API and linking to
+finance transactions.
 
-Status: Feature-Plan (GitHub Issue #792), Etappen 1–8 umgesetzt (Stand siehe §8).
-
----
-
-## 1. Ziele
-
-- **Zähler verwalten**: Ein Zähler hat Namen, Typ, Standort, Einheit, Notizen
-  und optional ein Foto. Anlegen/Bearbeiten nur mit Sonderrecht
-  (Admin-Seite).
-- **Gerätewechsel abbilden**: Ein Zähler (logische Messstelle) kann über die
-  Zeit durch mehrere physische Geräte realisiert sein. Beim Tausch startet
-  das neue Gerät bei 0 oder einem beliebigen Anfangswert. Der **absolute
-  Gesamtstand** der Messstelle ist die Summe der Verbräuche aller Geräte und
-  ist monoton steigend.
-- **Ablesungen erfassen**: manuell im Formular, per Foto mit OCR-Erkennung
-  des Zählerstands, oder automatisch über eine externe API (Gerät/Software
-  pusht Werte). Datum + Uhrzeit werden immer mitgespeichert.
-- **Auswertungen**: Verbrauch über Zeit, Vergleich mit historischen
-  Zeiträumen, Anomalie-Erkennung (KI).
-- **Finance-Verknüpfung**: Zahlungen (Abschläge, Jahresabrechnungen) können
-  mit Ablesungen bzw. Zählern verknüpft werden.
-
-Nicht-Ziele (vorerst): Tarifverwaltung/Kostenrechnung pro kWh, Import von
-Versorger-Portalen, Smart-Meter-Protokolle (SML/MQTT) — die API-Ingestion ist
-bewusst ein generischer HTTP-Endpunkt, Adapter dafür können extern laufen.
+Status: Feature plan (GitHub Issue #792), stages 1–8 implemented (for the current state see §8).
 
 ---
 
-## 2. Domänenmodell
+## 1. Goals
 
-Zentrale Unterscheidung: **Messstelle** (`meter`) vs. **physisches Gerät**
+- **Manage meters**: A meter has a name, type, location, unit, notes
+  and optionally a photo. Creating/editing only with a special permission
+  (admin page).
+- **Model device replacement**: A meter (logical metering point) can be
+  realized over time by several physical devices. On replacement
+  the new device starts at 0 or at an arbitrary initial value. The **absolute
+  total reading** of the metering point is the sum of the consumption of all devices and
+  is monotonically increasing.
+- **Record readings**: manually in a form, by photo with OCR recognition
+  of the meter reading, or automatically via an external API (device/software
+  pushes values). Date + time are always stored as well.
+- **Analyses**: consumption over time, comparison with historical
+  periods, anomaly detection (AI).
+- **Finance link**: Payments (advance payments, annual statements) can be
+  linked to readings or meters.
+
+Non-goals (for now): tariff management/cost calculation per kWh, import from
+utility portals, smart-meter protocols (SML/MQTT) — the API ingestion is
+deliberately a generic HTTP endpoint; adapters for it can run externally.
+
+---
+
+## 2. Domain model
+
+Central distinction: **metering point** (`meter`) vs. **physical device**
 (`meter_device`).
 
 ```
-meter (Messstelle, logisch, dauerhaft)
- └── meter_device (physisches Gerät, zeitlich begrenzt)
-      └── meter_reading (Ablesung eines Geräts zu einem Zeitpunkt)
+meter (metering point, logical, permanent)
+ └── meter_device (physical device, time-limited)
+      └── meter_reading (reading of a device at a point in time)
 ```
 
-Beispiel aus dem Issue (Wasser):
+Example from the issue (water):
 
-| Gerät | von | bis | Startwert | Endwert |
+| Device | from | to | Start value | End value |
 |---|---|---|---|---|
-| Gerät 1 | 2020-02-10 | 2025-03-21 | 102 | 734 |
-| Gerät 2 | 2025-03-21 | — | 3 | (laufend) |
+| Device 1 | 2020-02-10 | 2025-03-21 | 102 | 734 |
+| Device 2 | 2025-03-21 | — | 3 | (running) |
 
-Absoluter Gesamtstand heute = (734 − 102) + (aktueller Stand − 3).
-Der Endwert eines Geräts ist die letzte Ablesung vor dem Ausbau (beim
-„Ersetzen“ wird sie als Abschluss-Ablesung miterfasst).
+Absolute total reading today = (734 − 102) + (current reading − 3).
+The end value of a device is the last reading before removal (on
+"replace" it is recorded as a closing reading).
 
-### 2.1 Tabellen (Drizzle, `db/schema.ts`)
+### 2.1 Tables (Drizzle, `db/schema.ts`)
 
 ```
 meters
   id            serial PK
   name          text NOT NULL
   type          text NOT NULL  -- 'electricity' | 'water' | 'gas' | 'operating_hours'
-  unit          text NOT NULL  -- 'kWh' | 'm3' | 'h' | frei
+  unit          text NOT NULL  -- 'kWh' | 'm3' | 'h' | free
   location      text
   notes         text
-  photo_path    text           -- Foto der Messstelle (optional)
-  decimals      integer NOT NULL DEFAULT 1  -- Nachkommastellen bei Eingabe/Anzeige
-  group_id      integer REFERENCES groups(id)  -- Sichtbarkeit analog documents (§4)
+  photo_path    text           -- photo of the metering point (optional)
+  decimals      integer NOT NULL DEFAULT 1  -- decimal places for input/display
+  group_id      integer REFERENCES groups(id)  -- visibility analogous to documents (§4)
   owner_user_id integer NOT NULL REFERENCES users(id)
   created_at / updated_at timestamptz
 
@@ -76,12 +76,12 @@ meter_devices
   meter_id      integer NOT NULL REFERENCES meters(id) ON DELETE CASCADE
   serial_number text
   installed_at  timestamptz NOT NULL
-  removed_at    timestamptz            -- NULL = aktives Gerät
-  start_value   numeric(14,3) NOT NULL -- Stand bei Einbau
-  end_value     numeric(14,3)          -- Stand bei Ausbau (NULL solange aktiv)
+  removed_at    timestamptz            -- NULL = active device
+  start_value   numeric(14,3) NOT NULL -- reading at installation
+  end_value     numeric(14,3)          -- reading at removal (NULL while active)
   notes         text
-  -- Invariante: pro meter_id höchstens ein Gerät mit removed_at IS NULL
-  -- (partieller UNIQUE-Index)
+  -- Invariant: per meter_id at most one device with removed_at IS NULL
+  -- (partial UNIQUE index)
 
 meter_readings
   id            bigserial PK
@@ -89,556 +89,555 @@ meter_readings
   value         numeric(14,3) NOT NULL
   taken_at      timestamptz NOT NULL
   source        text NOT NULL DEFAULT 'manual' -- 'manual' | 'ocr' | 'api'
-  photo_path    text          -- Beleg-Foto bei OCR-Erfassung
-  ocr_confidence real         -- 0..1, nur bei source='ocr'
-  entered_by    integer REFERENCES users(id)   -- NULL bei source='api'
-  api_key_id    integer REFERENCES meter_api_keys(id) -- nur bei source='api'
+  photo_path    text          -- receipt photo for OCR capture
+  ocr_confidence real         -- 0..1, only for source='ocr'
+  entered_by    integer REFERENCES users(id)   -- NULL for source='api'
+  api_key_id    integer REFERENCES meter_api_keys(id) -- only for source='api'
   created_at    timestamptz NOT NULL DEFAULT now()
   UNIQUE (device_id, taken_at)
 
 meter_api_keys
   id            serial PK
   meter_id      integer NOT NULL REFERENCES meters(id) ON DELETE CASCADE
-  name          text NOT NULL          -- z. B. "Shelly EM Garage"
-  key_hash      text NOT NULL          -- SHA-256 des Tokens, Klartext nur einmal angezeigt
+  name          text NOT NULL          -- e.g. "Shelly EM Garage"
+  key_hash      text NOT NULL          -- SHA-256 of the token, plaintext shown only once
   created_by    integer NOT NULL REFERENCES users(id)
   created_at    timestamptz
   last_used_at  timestamptz
   disabled_at   timestamptz
 
-meter_reading_transactions          -- Finance-Verknüpfung, Muster wie
+meter_reading_transactions          -- finance link, pattern like
   reading_id     bigint NOT NULL REFERENCES meter_readings(id) ON DELETE CASCADE
   transaction_id bigint NOT NULL REFERENCES finance_transaction(id) ON DELETE CASCADE
   created_at     timestamptz NOT NULL DEFAULT now()
   PRIMARY KEY (reading_id, transaction_id)
 ```
 
-Migration: nächste freie Nummer (`0121_utility_meters.sql`), **inkl. Eintrag
-in `db/migrations/postgres/meta/_journal.json`** (siehe CLAUDE.md).
+Migration: next free number (`0121_utility_meters.sql`), **including an entry
+in `db/migrations/postgres/meta/_journal.json`** (see CLAUDE.md).
 
-### 2.2 Validierungsregeln (Service-Schicht)
+### 2.2 Validation rules (service layer)
 
-- Neue Ablesung: `value >= start_value` des Geräts und `value >=` letzte
-  Ablesung mit `taken_at <=` neuem Zeitpunkt (monoton pro Gerät). Rückwirkend
-  eingefügte Ablesungen müssen auch `<=` der nächst-späteren Ablesung sein.
-  Verstoß → `APIError.invalidArgument` mit Details (erwartetes Minimum).
-- Gerätewechsel („Ersetzen“): atomarer Vorgang — Abschluss-Ablesung +
-  `end_value`/`removed_at` am alten Gerät, neues Gerät mit `installed_at` =
-  `removed_at` und frei wählbarem `start_value` (Default 0).
-- Absolutstand: `SUM(COALESCE(end_value, letzter Messwert) − start_value)`
-  über alle Geräte der Messstelle; als SQL-View oder Query-Helfer, nicht
-  materialisiert.
+- New reading: `value >= start_value` of the device and `value >=` the last
+  reading with `taken_at <=` the new timestamp (monotonic per device). Readings
+  inserted retroactively must also be `<=` the next later reading.
+  Violation → `APIError.invalidArgument` with details (expected minimum).
+- Device replacement ("Replace"): atomic operation — closing reading +
+  `end_value`/`removed_at` on the old device, new device with `installed_at` =
+  `removed_at` and freely selectable `start_value` (default 0).
+- Absolute reading: `SUM(COALESCE(end_value, last measured value) − start_value)`
+  over all devices of the metering point; as an SQL view or query helper, not
+  materialized.
 
 ---
 
-## 3. Backend-Service `meter/`
+## 3. Backend service `meter/`
 
-Neuer Encore-Service nach dem Muster von `documents/`:
+New Encore service following the pattern of `documents/`:
 
 ```
 meter/
 ├── encore.service.ts        // new Service("meter")
-├── meter.service.ts         // DB-Logik (Drizzle)
-├── meter.ts                 // CRUD-Endpunkte Zähler + Geräte
-├── readings.ts              // Ablesungen (manuell), Verlauf, Absolutstand
-├── readings-ocr.ts          // Foto-Upload → OCR → Vorschlagswert
-├── ingest.ts                // api.raw POST /api/meters/ingest (API-Key-Auth)
-├── api-keys.ts              // API-Key-Verwaltung
-├── reports.ts               // Verbrauch/Zeit, Perioden-Vergleich
-├── reports.service.ts       // generische Bucket-Logik + DB-Reportdaten
-├── season-profile.service.ts   // Saisonprofil A3
-├── heating-weather.service.ts  // Witterungsbereinigung C3
-├── open-meteo-client.ts / degree-days.service.ts / home-location.ts  // Gradtagzahlen aus dem Archiv
-├── anomalies.ts / anomalies.service.ts          // Anomalie-Erkennung (Job + Endpunkte)
-├── reading-transactions.ts / .service.ts        // Verknüpfung Ablesung ↔ finance_transaction
-├── advance-payments.service.ts                  // Abschlagsvergleich E3
+├── meter.service.ts         // DB logic (Drizzle)
+├── meter.ts                 // CRUD endpoints for meters + devices
+├── readings.ts              // readings (manual), history, absolute reading
+├── readings-ocr.ts          // photo upload → OCR → suggested value
+├── ingest.ts                // api.raw POST /api/meters/ingest (API-key auth)
+├── api-keys.ts              // API key management
+├── reports.ts               // consumption/time, period comparison
+├── reports.service.ts       // generic bucket logic + DB report data
+├── season-profile.service.ts   // season profile A3
+├── heating-weather.service.ts  // weather adjustment C3
+├── open-meteo-client.ts / degree-days.service.ts / home-location.ts  // degree days from the archive
+├── anomalies.ts / anomalies.service.ts          // anomaly detection (job + endpoints)
+├── reading-transactions.ts / .service.ts        // link reading ↔ finance_transaction
+├── advance-payments.service.ts                  // advance-payment comparison E3
 └── *.test.ts
 ```
 
-### 3.1 Endpunkte (alle `expose: true, auth: true`, außer Ingest)
+### 3.1 Endpoints (all `expose: true, auth: true`, except ingest)
 
-| Methode/Pfad | Recht | Zweck |
+| Method/Path | Permission | Purpose |
 |---|---|---|
-| `GET /meters` | `meters.view` | Liste inkl. aktuellem Gerät, letzter Ablesung, Absolutstand |
-| `POST /meters` / `PUT /meters/:id` / `DELETE /meters/:id` | `meters.manage` | Zähler-CRUD (Admin-Seite) |
-| `POST /meters/:id/replace-device` | `meters.manage` | Gerätewechsel (atomar, §2.2) |
-| `PUT /meters/devices/:id` | `meters.manage` | Gerätedaten korrigieren |
-| `DELETE /meters/devices/:id` | `meters.manage` | Neuestes Gerät löschen, solange es keine Ablesungen hat |
-| `GET /meters/:id/readings` | `meters.view` | Ablesungen (paginiert, über Gerätegrenzen hinweg, mit Absolutwert-Spalte) |
-| `POST /meters/:id/readings` | `meters.read_entry` | Manuelle Ablesung |
-| `PUT/DELETE /meters/readings/:id` | `meters.read_entry` (eigene) / `meters.manage` (fremde) | Korrektur/Löschen |
-| `POST /meters/:id/readings/ocr` | `meters.read_entry` | Foto hochladen → `{ value, confidence, photoPath }` als Vorschlag; Speichern erfolgt erst mit Bestätigung über `POST readings` |
-| `GET/POST/DELETE /meters/:id/api-keys` | `meters.manage` | API-Keys; Klartext-Token nur in der Create-Response |
-| `POST /api/meters/ingest` | API-Key (kein User-Auth) | Externe Ablesung |
-| `GET /meters/:id/report?granularity=day\|week\|month\|year&from=&to=` | `meters.view` | Generische Verbrauchsreihen (§5) |
-| `GET /meters/reports/energy?granularity=day\|week\|month\|year&from=&to=` | `meters.view` | Strom-/PV-Gesamtreport (§5.2) |
-| `GET /meters/reports/season-profile?from=&to=` | `meters.view` | Saisonprofil Autarkie/Eigenverbrauch (§5.2.5) |
-| `GET /meters/reports/heating-weather?from=&to=` | `meters.view` | Heizung witterungsbereinigt (§5.2.6) |
-| `GET/PUT/DELETE /meters/home-location` | `meters.view` / `meters.manage` | Wohnort für den Gradtagzahl-Abruf (§5.2.6) |
-| `GET /meters/places?q=` | `meters.manage` | Ortssuche (Open-Meteo-Geocoding) |
-| `POST /meters/degree-days/fetch` | `meters.manage` | Fehlende Gradtagzahl-Monate aus dem Open-Meteo-Archiv holen |
-| `GET /meters/reports/advance-payments` | `meters.view` + `finance.view` | Abschläge vs. Ist-Kosten (§6.1) |
-| `GET /meters/anomalies?status=pending\|all` | `meters.view` | Auffälligkeiten sichtbarer Zähler (§5.3) |
+| `GET /meters` | `meters.view` | List incl. current device, last reading, absolute reading |
+| `POST /meters` / `PUT /meters/:id` / `DELETE /meters/:id` | `meters.manage` | Meter CRUD (admin page) |
+| `POST /meters/:id/replace-device` | `meters.manage` | Device replacement (atomic, §2.2) |
+| `PUT /meters/devices/:id` | `meters.manage` | Correct device data |
+| `DELETE /meters/devices/:id` | `meters.manage` | Delete the newest device as long as it has no readings |
+| `GET /meters/:id/readings` | `meters.view` | Readings (paginated, across device boundaries, with absolute-value column) |
+| `POST /meters/:id/readings` | `meters.read_entry` | Manual reading |
+| `PUT/DELETE /meters/readings/:id` | `meters.read_entry` (own) / `meters.manage` (others') | Correction/delete |
+| `POST /meters/:id/readings/ocr` | `meters.read_entry` | Upload photo → `{ value, confidence, photoPath }` as a suggestion; saving only happens after confirmation via `POST readings` |
+| `GET/POST/DELETE /meters/:id/api-keys` | `meters.manage` | API keys; plaintext token only in the create response |
+| `POST /api/meters/ingest` | API key (no user auth) | External reading |
+| `GET /meters/:id/report?granularity=day\|week\|month\|year&from=&to=` | `meters.view` | Generic consumption series (§5) |
+| `GET /meters/reports/energy?granularity=day\|week\|month\|year&from=&to=` | `meters.view` | Electricity/PV overall report (§5.2) |
+| `GET /meters/reports/season-profile?from=&to=` | `meters.view` | Season profile self-sufficiency/self-consumption (§5.2.5) |
+| `GET /meters/reports/heating-weather?from=&to=` | `meters.view` | Weather-adjusted heating (§5.2.6) |
+| `GET/PUT/DELETE /meters/home-location` | `meters.view` / `meters.manage` | Home location for the degree-day retrieval (§5.2.6) |
+| `GET /meters/places?q=` | `meters.manage` | Place search (Open-Meteo geocoding) |
+| `POST /meters/degree-days/fetch` | `meters.manage` | Fetch missing degree-day months from the Open-Meteo archive |
+| `GET /meters/reports/advance-payments` | `meters.view` + `finance.view` | Advance payments vs. actual costs (§6.1) |
+| `GET /meters/anomalies?status=pending\|all` | `meters.view` | Anomalies of visible meters (§5.3) |
 | `POST /meters/anomalies/:id/status` | `meters.read_entry` | `confirmed` / `dismissed` / `pending` |
-| `POST /meters/anomalies/run` | `meters.manage` | Anomalie-Prüfung sofort ausführen (`reset` löscht offene Funde der eigenen Zähler) |
-| `GET/POST/PUT/DELETE /meters/tariffs/electricity` | `meters.view` / `meters.manage` | Strompreise und Einspeisevergütung verwalten (§5.2) |
-| `POST /meters/tariffs/import` | `meters.manage` | Preis-/Annahmereihen aus einer Datei importieren (§5.2.2) |
-| `GET /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Verknüpfte Zahlungen einer Ablesung (Finance-ACL-gefiltert, §6) |
-| `POST /meters/readings/:id/transactions` / `DELETE …/:transactionId` | `meters.read_entry` + `finance.view` | Zahlung verknüpfen / lösen (§6) |
+| `POST /meters/anomalies/run` | `meters.manage` | Run the anomaly check immediately (`reset` deletes open findings of the own meters) |
+| `GET/POST/PUT/DELETE /meters/tariffs/electricity` | `meters.view` / `meters.manage` | Manage electricity prices and feed-in tariff (§5.2) |
+| `POST /meters/tariffs/import` | `meters.manage` | Import price/assumption series from a file (§5.2.2) |
+| `GET /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Linked payments of a reading (Finance-ACL-filtered, §6) |
+| `POST /meters/readings/:id/transactions` / `DELETE …/:transactionId` | `meters.read_entry` + `finance.view` | Link / unlink a payment (§6) |
 
-### 3.2 Externe Ingestion
+### 3.2 External ingestion
 
-`api.raw`-Endpunkt (kein Encore-Auth-Handler), Authentifizierung per
-`Authorization: Bearer <token>`; Lookup über `key_hash`. Payload:
+`api.raw` endpoint (no Encore auth handler), authentication via
+`Authorization: Bearer <token>`; lookup via `key_hash`. Payload:
 
 ```json
 { "value": 1234.5, "takenAt": "2026-07-09T06:00:00Z" }
 ```
 
-- `takenAt` optional (Default: Serverzeit); der API-Key ist an genau einen
-  Zähler gebunden, das Ziel-Gerät ist das aktive Gerät der Messstelle.
-- Idempotenz über `UNIQUE (device_id, taken_at)` — Duplikat → 200 mit
-  `duplicate: true` (Geräte senden oft doppelt).
-- Monotonie-Verstöße → 422; Rate-Limit wie `user/rateLimiter.ts`.
-- `last_used_at` am Key aktualisieren.
+- `takenAt` optional (default: server time); the API key is bound to exactly one
+  meter, the target device is the active device of the metering point.
+- Idempotency via `UNIQUE (device_id, taken_at)` — duplicate → 200 with
+  `duplicate: true` (devices often send twice).
+- Monotonicity violations → 422; rate limit like `user/rateLimiter.ts`.
+- Update `last_used_at` on the key.
 
-### 3.3 Foto-OCR
+### 3.3 Photo OCR
 
-Wiederverwendung der bestehenden ML-Infrastruktur:
+Reuse of the existing ML infrastructure:
 
-1. **Stufe 1 (MVP)**: neuer Endpunkt `/meter-reading` im
-   `receipt-ocr-service` (PaddleOCR läuft dort bereits). Zählerstände sind
-   gedruckte/mechanische Ziffern — PaddleOCR-Rohtext + Heuristik (längste
-   plausible Ziffernfolge, rote Nachkommastellen-Rolle optional
-   abschneidbar). Rückgabe `{ value, confidence, rawText }`.
-2. **Stufe 2 (Fallback/Qualität)**: bei niedriger Confidence Vision-Prompt
-   an den `llm-service` (analog `documents/llm-client.ts`), der aus dem Bild
-   den Wert extrahiert.
-3. Frontend zeigt den erkannten Wert **immer zur Bestätigung/Korrektur** an —
-   OCR speichert nie direkt. Foto wird unter `METERS_DIR` (analog
-   `DOCUMENTS_DIR`) abgelegt und an der Ablesung referenziert.
+1. **Stage 1 (MVP)**: new endpoint `/meter-reading` in the
+   `receipt-ocr-service` (PaddleOCR already runs there). Meter readings are
+   printed/mechanical digits — PaddleOCR raw text + heuristic (longest
+   plausible digit sequence, red decimal-place wheel optionally
+   strippable). Returns `{ value, confidence, rawText }`.
+2. **Stage 2 (fallback/quality)**: on low confidence, a vision prompt
+   to the `llm-service` (analogous to `documents/llm-client.ts`) that extracts
+   the value from the image.
+3. The frontend **always** shows the recognized value for confirmation/correction —
+   OCR never saves directly. The photo is stored under `METERS_DIR` (analogous to
+   `DOCUMENTS_DIR`) and referenced on the reading.
 
 ---
 
-## 4. Rechte & Sichtbarkeit
+## 4. Permissions & visibility
 
-Neue Permission-Keys in `db/seed.ts` (Muster wie Documents/Finance):
+New permission keys in `db/seed.ts` (pattern like Documents/Finance):
 
-| Key | Beschreibung |
+| Key | Description |
 |---|---|
 | `module.meters` | Enable utility meters module (Navigation) |
-| `meters.view` | Zähler, Ablesungen und Reports ansehen |
-| `meters.read_entry` | Ablesungen erfassen (manuell/OCR) |
-| `meters.manage` | Zähler anlegen/bearbeiten/ersetzen, API-Keys verwalten (Sonderrecht laut Issue) |
+| `meters.view` | View meters, readings and reports |
+| `meters.read_entry` | Record readings (manual/OCR) |
+| `meters.manage` | Create/edit/replace meters, manage API keys (special permission per the issue) |
 
-Sichtbarkeit: Zähler gehören einem Nutzer (`owner_user_id`) und optional
-einer Gruppe (`group_id`, bestehendes `groups`-Konzept aus dem
-Documents-Modul). Sichtbar ist ein Zähler für Owner + Gruppenmitglieder;
-`meters.manage` wirkt nur auf sichtbare Zähler (kein globaler Admin-Bypass
-nötig, Haushalts-Scope reicht).
+Visibility: Meters belong to a user (`owner_user_id`) and optionally to
+a group (`group_id`, existing `groups` concept from the
+Documents module). A meter is visible to the owner + group members;
+`meters.manage` only applies to visible meters (no global admin bypass
+needed, household scope is enough).
 
 ---
 
-## 5. Reports & Anomalie-Erkennung
+## 5. Reports & anomaly detection
 
-### 5.1 Verbrauchsreihen
+### 5.1 Consumption series
 
 `GET /meters/:id/report?granularity=day|week|month|year&from=&to=`
 
-- Verbrauch pro Bucket = Differenz zwischen zwei aufeinanderfolgenden
-  Absolutständen.
-- **Zuordnung (`allocation`)**: Standard ist `interpolated` — ein
-  Ableseintervall wird zeitanteilig auf die Buckets verteilt, die es
-  überlappt. `interval_start` rechnet das Intervall vollständig dem Bucket
-  seines Start-Zeitpunkts zu; das ist die ursprüngliche Excel-Logik und bleibt
-  für die Reproduktion alter Zahlen erhalten.
-- Die Berechnung ist generisch für alle Zählertypen und läuft über den
-  Absolutstand der Messstelle, also auch über Gerätewechsel hinweg.
-- `from`/`to` filtern in beiden Zuordnungen ganze Buckets nach
-  Perioden-Start — erst nach dem Vorjahresvergleich, damit ein Filter die
-  Referenzperiode nicht entfernt.
-- **Gerätewechsel**: der Absolutstand läuft über alle Geräte der Messstelle.
-  Hat ein abgelöstes Gerät keinen `end_value`, zählt seine letzte Ablesung als
-  Endstand (`buildDeviceOffsets` in `meter.service.ts`, von Reports,
-  Anomalie-Erkennung und Ablesungsliste gemeinsam genutzt).
-- Zwei Ablesungen zum selben Zeitpunkt (z. B. Gerätewechsel) bilden ein
-  Intervall der Länge 0; sein Verbrauch wird vollständig dem Bucket des
-  Zeitpunkts zugerechnet statt verloren zu gehen.
-- `startValue`/`endValue` eines Buckets sind die auf die Periodengrenzen
-  interpolierten Stände, nicht die nächstgelegenen Ablesungen — sonst passte
-  „Ende − Anfang“ nicht zum ausgewiesenen Verbrauch.
-- **`coverage`** je Bucket (0..1) gibt an, welcher Anteil der Periode
-  tatsächlich von Ablesungen abgedeckt ist. Ab `COMPLETE_COVERAGE_THRESHOLD`
-  (0,99) gilt eine Periode als vollständig gemessen; darunter ist sie eine
-  Teilperiode und fließt weder in den Vorjahresvergleich noch in die Trends
-  ein. Das Frontend markiert solche Perioden.
-- **`meanIntervalDays`**: coverage-gewichtete mittlere Länge der
-  Ableseintervalle hinter dem Bucket. Ein Monat aus einer einzigen
-  Jahresablesung hat `coverage` 1, aber ein mittleres Intervall von 365 Tagen
-  — der Wert ist verteilt, nicht gemessen. Die Detail-View markiert Buckets,
-  deren mittleres Intervall mehr als das Doppelte der Periode beträgt
+- Consumption per bucket = difference between two consecutive
+  absolute readings.
+- **Allocation (`allocation`)**: The default is `interpolated` — a
+  reading interval is distributed proportionally in time onto the buckets it
+  overlaps. `interval_start` attributes the interval entirely to the bucket
+  of its start time; this is the original Excel logic and is kept
+  to reproduce old numbers.
+- The calculation is generic for all meter types and runs over the
+  absolute reading of the metering point, i.e. also across device replacements.
+- `from`/`to` filter whole buckets by period start in both allocations —
+  only after the previous-year comparison, so that a filter does not remove the
+  reference period.
+- **Device replacement**: the absolute reading runs across all devices of the metering point.
+  If a replaced device has no `end_value`, its last reading counts as
+  the final reading (`buildDeviceOffsets` in `meter.service.ts`, shared by reports,
+  anomaly detection and the reading list).
+- Two readings at the same point in time (e.g. device replacement) form an
+  interval of length 0; its consumption is attributed entirely to the bucket of the
+  point in time instead of being lost.
+- `startValue`/`endValue` of a bucket are the readings interpolated onto the period boundaries,
+  not the nearest readings — otherwise
+  "end − start" would not match the reported consumption.
+- **`coverage`** per bucket (0..1) states which share of the period is
+  actually covered by readings. From `COMPLETE_COVERAGE_THRESHOLD`
+  (0.99) a period counts as completely measured; below that it is a
+  partial period and enters neither the previous-year comparison nor the trends.
+  The frontend marks such periods.
+- **`meanIntervalDays`**: coverage-weighted mean length of the
+  reading intervals behind the bucket. A month from a single annual
+  reading has `coverage` 1, but a mean interval of 365 days
+  — the value is distributed, not measured. The detail view marks buckets
+  whose mean interval is more than twice the period
   (`isInterpolatedPeriod`).
-- **Vorjahresvergleich**: jeder Bucket trägt `previousConsumption`,
-  `deltaAbsolute` und `deltaPercent` für dieselbe Periode ein Jahr früher —
-  nur wenn beide Perioden vollständig gemessen sind. `deltaPercent`
-  vergleicht die **Tagesraten**, nicht die Summen: ein Schaltjahr-Februar oder
-  ein 53-Wochen-Jahr ist keine Verbrauchsänderung.
-- Bei Betriebsstundenzählern identisch (Einheit h).
-- **`day`/`week`** (#1024): Tages-Buckets tragen den Schlüssel `YYYY-MM-DD`,
-  Wochen-Buckets die ISO-Woche `YYYY-Www` (Montag bis Sonntag, Wochenjahr
-  nach ISO 8601 — die Tage um den Jahreswechsel gehören zur Woche, nicht zum
-  Kalenderjahr). Interpolation, Coverage und Vorjahresvergleich funktionieren
-  unverändert; Vorjahr ist beim Tag dasselbe Datum, bei der Woche dieselbe
-  Wochennummer des Vorjahres (eine KW 53 findet dann keinen Partner). Alle
-  Bucket-Helfer (`bucketKey`, `bucketStartDate`, `nextBucketStart`,
-  `previousYearKey`, `bucketsPerYear`) sind aus `reports.service.ts`
-  exportiert und werden von den übrigen Report-Services wiederverwendet.
-  Nützlich wird das erst mit regelmäßiger API-Ingestion; die Detail-View
-  bietet die vier Stufen als Umschalter an und zeigt beim Tag die letzten 31,
-  bei der Woche die letzten 26 Perioden.
+- **Previous-year comparison**: every bucket carries `previousConsumption`,
+  `deltaAbsolute` and `deltaPercent` for the same period one year earlier —
+  only if both periods are completely measured. `deltaPercent`
+  compares the **daily rates**, not the sums: a leap-year February or
+  a 53-week year is not a change in consumption.
+- Identical for operating-hours meters (unit h).
+- **`day`/`week`** (#1024): Day buckets carry the key `YYYY-MM-DD`,
+  week buckets the ISO week `YYYY-Www` (Monday to Sunday, week-year
+  per ISO 8601 — the days around the turn of the year belong to the week, not to the
+  calendar year). Interpolation, coverage and previous-year comparison work
+  unchanged; the previous year for a day is the same date, for a week the same
+  week number of the previous year (a week 53 then finds no partner). All
+  bucket helpers (`bucketKey`, `bucketStartDate`, `nextBucketStart`,
+  `previousYearKey`, `bucketsPerYear`) are exported from `reports.service.ts`
+  and reused by the other report services.
+  This only becomes useful with regular API ingestion; the detail view
+  offers the four levels as a toggle and shows the last 31 periods for the day,
+  the last 26 for the week.
 
-### 5.1.1 Verbrauchstrends
+### 5.1.1 Consumption trends
 
 `GET /meters/reports/trends`
 
-Beantwortet „verbrauche ich tendenziell mehr oder weniger?“ je Kategorie:
-Haushaltsstrom (ohne Wärmepumpe und Wallbox), Heizung, Warmwasser,
-E-Auto/Wallbox, Netzbezug sowie je ein Eintrag pro sichtbarem Wasser-/Gaszähler.
+Answers "do I tend to consume more or less?" per category:
+household electricity (without heat pump and wallbox), heating, hot water,
+EV/wallbox, grid import, and one entry per visible water/gas meter.
 
-Alle Kennzahlen laufen über die **rollierende 12-Monats-Summe**, nicht über
-rohe Monatswerte — sonst misst eine Regression über zwölf Monate überwiegend
-die Jahreszeit. Je Kennzahl geliefert: `current12` (letzte zwölf vollständig
-gemessenen Monate), `previous12` (die zwölf davor), `changeAbsolute`,
-`changePercent`, `slopePerYear` (Regression über die Rollreihe),
-`trendPoints` (Anzahl der Rollwerte hinter der Regression), `direction`
-(`rising`/`falling`/`stable`/`unknown`) und `directionBasis`
-(`year_over_year` / `regression` / `none`). Änderungen unter 2 % gelten als
-`stable`. Eine Lücke in den Ablesungen macht jedes Rollfenster, das sie
-enthält, `null` — ein fehlender Monat darf nicht wie ein Rückgang aussehen.
+All metrics run over the **rolling 12-month sum**, not over
+raw monthly values — otherwise a regression over twelve months mostly measures
+the season. Delivered per metric: `current12` (last twelve completely
+measured months), `previous12` (the twelve before), `changeAbsolute`,
+`changePercent`, `slopePerYear` (regression over the rolling series),
+`trendPoints` (number of rolling values behind the regression), `direction`
+(`rising`/`falling`/`stable`/`unknown`) and `directionBasis`
+(`year_over_year` / `regression` / `none`). Changes below 2 % count as
+`stable`. A gap in the readings makes every rolling window that contains it
+`null` — a missing month must not look like a decline.
 
-Die Regression braucht mindestens `MIN_SLOPE_POINTS` (6) Rollwerte, also 17
-Monate Daten: aufeinanderfolgende Rollfenster überlappen sich zu elf Zwölfteln,
-drei davon sind fast eine einzige Beobachtung. Mit weniger Punkten bleibt die
-Richtung `unknown`, statt aus drei überlappenden Werten eine Tendenz zu
-behaupten. Liegt ein volles Vorjahr vor, ist es die Basis der Richtung; die
-Regression greift nur dahinter (`directionBasis`), und das Frontend sagt das.
+The regression needs at least `MIN_SLOPE_POINTS` (6) rolling values, i.e. 17
+months of data: consecutive rolling windows overlap by eleven twelfths,
+three of them are almost a single observation. With fewer points the
+direction stays `unknown` instead of asserting a tendency from three overlapping values.
+If a full previous year is available, it is the basis of the direction; the
+regression only applies behind it (`directionBasis`), and the frontend says so.
 
-Die Regressions-Helfer (`linearRegressionSlopeOverTime`, `yearsAt`) sind
-exportiert und rechnen über die **Kalenderzeit**, nicht über Listenpositionen —
-eine Messlücke von einem Jahr darf die Steigung nicht verdoppeln. Anlagenzustand
-(§5.2.3) und Witterungsbereinigung (§5.2.6) nutzen dieselben.
+The regression helpers (`linearRegressionSlopeOverTime`, `yearsAt`) are
+exported and compute over **calendar time**, not over list positions —
+a measurement gap of one year must not double the slope. System condition
+(§5.2.3) and weather adjustment (§5.2.6) use the same ones.
 
-Rollen-Zähler (Wasser Hausanschluss/Garten, Gas) bekommen genau eine Kachel:
-ein Zähler, der schon über seine Rolle im Report steht, taucht in der Schleife
-über die Einzelzähler nicht ein zweites Mal auf.
+Role meters (water main connection/garden, gas) get exactly one tile:
+a meter that already appears in the report via its role does not show up a second time in the loop
+over the individual meters.
 
-### 5.2 Strom-/PV-Gesamtreport
+### 5.2 Electricity/PV overall report
 
 `GET /meters/reports/energy?granularity=month|year&from=&to=`
 
-Der aggregierte Energie-Report kombiniert die vorhandenen Stromzähler, sofern
-sie sichtbar sind. Dafür werden explizite Zählerrollen auf `meters.role`
-verwendet; die Report-Logik leitet Rollen nicht aus Anzeigenamen ab.
-Der historische Stromimport setzt diese Rollen direkt:
+The aggregated energy report combines the existing electricity meters, provided
+they are visible. For this, explicit meter roles on `meters.role` are
+used; the report logic does not derive roles from display names.
+The historical electricity import sets these roles directly:
 
-- `grid_import` → Bezug
-- `grid_export` → Einspeisung
-- `pv_production` → Produktion
-- `heat_pump_total` → Wärmepumpe gesamt
-- `heat_heating_total` / `heat_heating_pv` → Heizung/Fußbodenheizung gesamt bzw. PV-Anteil
-- `hot_water_total` / `hot_water_pv` → Warmwasser gesamt bzw. PV-Anteil
-- `ev_charger_total` / `ev_charger_pv` → E-Auto/Wallbox gesamt bzw. PV-Anteil
+- `grid_import` → grid import
+- `grid_export` → feed-in
+- `pv_production` → production
+- `heat_pump_total` → heat pump overall
+- `heat_heating_total` / `heat_heating_pv` → heating/underfloor heating overall and PV share respectively
+- `hot_water_total` / `hot_water_pv` → hot water overall and PV share respectively
+- `ev_charger_total` / `ev_charger_pv` → EV/wallbox overall and PV share respectively
 
-Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
+From these, the following values are computed per bucket and for the total:
 
-- Eigenverbrauch = Produktion - Einspeisung
-- Gesamtverbrauch = Bezug + Eigenverbrauch
-- Autarkie = 1 - Bezug / Gesamtverbrauch
-- Eigenverbrauchsquote = Eigenverbrauch / Produktion
-- Verbrauch ohne Wärmepumpe/E-Auto = Gesamtverbrauch - Wärmepumpe gesamt - E-Auto/Wallbox gesamt
-- Heizung PV-Anteil = Heizung PV / Heizung gesamt
-- Warmwasser PV-Anteil = Warmwasser PV / Warmwasser gesamt
-- E-Auto/Wallbox PV-Anteil = E-Auto/Wallbox PV / E-Auto/Wallbox gesamt
-- Netzbezugskosten = Bezug × zeitgültiger Arbeitspreis
-- Grundkosten = zeitgültiger Grundpreis anteilig pro Bucket
-- Einspeiseerlös = Einspeisung × zeitgültige Einspeisevergütung
-- Vermiedener Netzbezug = Eigenverbrauch × zeitgültiger Eigenverbrauchswert
-  (Fallback: Arbeitspreis Netzbezug)
-- PV-Nutzen = vermiedener Netzbezug + Einspeiseerlös
-- Netto-Stromkosten = Netzbezugskosten + Grundkosten - Einspeiseerlös
+- Self-consumption = production - feed-in
+- Total consumption = grid import + self-consumption
+- Self-sufficiency = 1 - grid import / total consumption
+- Self-consumption rate = self-consumption / production
+- Consumption without heat pump/EV = total consumption - heat pump overall - EV/wallbox overall
+- Heating PV share = heating PV / heating overall
+- Hot water PV share = hot water PV / hot water overall
+- EV/wallbox PV share = EV/wallbox PV / EV/wallbox overall
+- Grid import costs = grid import × time-valid unit price
+- Base costs = time-valid base price pro rata per bucket
+- Feed-in revenue = feed-in × time-valid feed-in tariff
+- Avoided grid import = self-consumption × time-valid self-consumption value
+  (fallback: unit price for grid import)
+- PV benefit = avoided grid import + feed-in revenue
+- Net electricity costs = grid import costs + base costs - feed-in revenue
 
-Zeiträume ohne vollständiges PV-Set (Bezug, Einspeisung und Produktion) werden
-im aggregierten Energie-Report ausgelassen, damit alte Vor-PV-Daten nicht in
-PV-Kennzahlen und Analysewerte einfließen. Migration `0123_meter_roles`
-backfilled bereits importierte historische Zähler einmalig; beim manuellen
-Anlegen/Bearbeiten kann die Report-Rolle gesetzt werden.
+Periods without a complete PV set (grid import, feed-in and production) are
+omitted from the aggregated energy report, so that old pre-PV data does not flow into
+PV metrics and analysis values. Migration `0123_meter_roles`
+backfills already imported historical meters once; the report role can be set
+when creating/editing manually.
 
-Regeln, die aus der Analyse der Reports folgen (PR #1201):
+Rules that follow from the analysis of the reports (PR #1201):
 
-- **`complete`** je Bucket: PV-Set vollständig **und** jeder beteiligte Zähler
-  über `COMPLETE_COVERAGE_THRESHOLD`. Nur vollständige Buckets gehen in
-  `totals` ein; unvollständige werden trotzdem geliefert und im Frontend
-  markiert. Die Summen für Eigenverbrauch und Gesamtverbrauch sind Summen der
-  Bucket-Werte, die Quoten (Autarkie, EV-Quote, PV-Anteile) werden aus den
-  Summen der jeweils **gemeinsam** vorhandenen Paare gebildet, nicht aus
-  Summen über unterschiedliche Bucket-Mengen.
-- **Fehlende Rolle → `null`**, nicht 0: „Verbrauch ohne Wärmepumpe/E-Auto“
-  ist nur definiert, wenn die abzuziehenden Zähler existieren. Fehlt
-  `heat_pump_total`, wird die Summe der vorhandenen Unterzähler abgezogen.
-- **`warnings`** je Bucket (`export_exceeds_production`,
-  `exclusion_exceeds_total`) machen Datenfehler sichtbar, statt sie zu
-  kappen: mehr Einspeisung als Produktion heißt meist „an verschiedenen Tagen
-  abgelesen“, Wärmepumpe + Wallbox über dem Gesamtverbrauch heißt „ein
-  Unterzähler hängt nicht am Netzbezug“. PV-Anteile werden auf 1 begrenzt.
-- **`duplicateRoles`**: tragen mehrere sichtbare Zähler dieselbe Rolle, wird
-  nur der erste verwendet (`resolveRoleMeters`), und der Report sagt das —
-  vorher fiel stillschweigend der jeweils zufällige Treffer.
-- **Jahreskosten** werden aus den Monatsbuckets summiert (`sumCostResults`),
-  nicht aus dem Jahresbucket gerechnet: ein Preiswechsel mitten im Jahr wird
-  so tagesgenau gewichtet, und der Grundpreis wird an Preisänderungen
-  innerhalb eines Monats geteilt. Ohne Grundpreis-Eintrag gilt 0, nicht
-  „Kosten unbekannt“.
-- **Einspeisevergütung**: der Eintrag ist die zum Zeitpunkt jüngste
-  *Generation* (`valid_from` ≤ Zeitpunkt) und darin die Leistungsstufe ≥
-  `pv_capacity_kwp` (Fallback: kleinste Stufe). Der Tarif der
-  Inbetriebnahme gilt 20 Jahre — eine später hinterlegte Generation für eine
-  Erweiterung überschreibt ihn nicht rückwirkend.
-- **Zeitgültige Annahmen** (`amountAt(kind, at)`): ein Wert mit `valid_from`
-  in der Zukunft gilt nicht rückwärts, der früheste Eintrag gilt aber auch
-  vor seinem `valid_from` (Preise gab es schon). Beim Anlegen prüft
-  `assertTariff` Plausibilitätsgrenzen je Art (`AMOUNT_BOUNDS`: JAZ 1–8,
-  Kesselwirkungsgrad 0,3–1,2, Ladeverluste 0–0,5, Rendite 0–0,3 usw.), damit
-  ein Tippfehler (JAZ 35) nicht als Ergebnis erscheint.
+- **`complete`** per bucket: PV set complete **and** every participating meter
+  above `COMPLETE_COVERAGE_THRESHOLD`. Only complete buckets enter
+  `totals`; incomplete ones are still delivered and marked in the
+  frontend. The sums for self-consumption and total consumption are sums of the
+  bucket values, the rates (self-sufficiency, self-consumption rate, PV shares) are formed from the
+  sums of the pairs available **jointly** in each case, not from
+  sums over different bucket sets.
+- **Missing role → `null`**, not 0: "consumption without heat pump/EV"
+  is only defined if the meters to be subtracted exist. If
+  `heat_pump_total` is missing, the sum of the existing sub-meters is subtracted.
+- **`warnings`** per bucket (`export_exceeds_production`,
+  `exclusion_exceeds_total`) make data errors visible instead of clipping
+  them: more feed-in than production usually means "read on different
+  days", heat pump + wallbox above total consumption means "a
+  sub-meter is not connected to the grid import". PV shares are capped at 1.
+- **`duplicateRoles`**: if several visible meters carry the same role, only
+  the first one is used (`resolveRoleMeters`), and the report says so —
+  previously the respective random match was silently used.
+- **Annual costs** are summed from the monthly buckets (`sumCostResults`),
+  not computed from the annual bucket: a price change in the middle of the year is
+  thus weighted to the day, and the base price is split at price changes
+  within a month. Without a base-price entry 0 applies, not
+  "costs unknown".
+- **Feed-in tariff**: the entry is the most recent *generation* at that point in time
+  (`valid_from` ≤ point in time) and within it the capacity tier ≥
+  `pv_capacity_kwp` (fallback: smallest tier). The tariff at
+  commissioning applies for 20 years — a generation stored later for an
+  extension does not override it retroactively.
+- **Time-valid assumptions** (`amountAt(kind, at)`): a value with `valid_from`
+  in the future does not apply backwards, but the earliest entry also applies
+  before its `valid_from` (prices existed already). On creation,
+  `assertTariff` checks plausibility limits per kind (`AMOUNT_BOUNDS`: JAZ 1–8,
+  boiler efficiency 0.3–1.2, charging losses 0–0.5, return 0–0.3 etc.), so that
+  a typo (JAZ 35) does not appear as a result.
 
-Kosten und PV-Ersparnis verwenden `meter_electricity_tariffs`. Die
-Tarifverwaltung erlaubt Preisänderungen mit `valid_from` für:
+Costs and PV savings use `meter_electricity_tariffs`. The
+tariff management allows price changes with `valid_from` for:
 
-- `grid_import` Arbeitspreis Netzbezug (`eur_per_kwh`)
-- `base_price` Grundpreis (`eur_per_month`)
-- `feed_in` Einspeisevergütung (`eur_per_kwh`)
-- `self_consumption_value` angenommener Wert des Eigenverbrauchs (`eur_per_kwh`)
+- `grid_import` unit price for grid import (`eur_per_kwh`)
+- `base_price` base price (`eur_per_month`)
+- `feed_in` feed-in tariff (`eur_per_kwh`)
+- `self_consumption_value` assumed value of self-consumption (`eur_per_kwh`)
 
-Zusätzlich können importierte Annahmen wie PV-Invest, Opportunitätskosten und
-Amortisationsjahre gespeichert werden. Sie werden aktuell noch nicht in die
-Bucket-Kosten eingerechnet, bleiben aber als Stammdaten verfügbar.
+In addition, imported assumptions such as PV investment, opportunity costs and
+payback years can be stored. They are currently not yet included in the
+bucket costs, but remain available as master data.
 
-Historische Preisreihen kommen über den Datei-Import `POST /meters/tariffs/import`
-(§5.2.2). Die frühere fest eingebaute Preisgrundlage und die einmaligen
-Historien-Importe für Wasser und Strom sind entfernt: sie enthielten private
-Zählerdaten. Für die Einspeisevergütung können mehrere Leistungsstufen
-hinterlegt werden, aber es gibt noch keine Anlagenleistung im Encore-Modell. Bis eine Anlagenleistungs-Einstellung existiert, verwendet die
-Kostenrechnung die niedrigste passende Stufe.
+Historical price series come via the file import `POST /meters/tariffs/import`
+(§5.2.2). The former built-in price basis and the one-off
+history imports for water and electricity are removed: they contained private
+meter data. Several capacity tiers can be stored for the feed-in tariff,
+but there is no system capacity in the Encore model yet. Until a system-capacity setting exists, the
+cost calculation uses the lowest matching tier.
 
-Nicht Teil der ersten Ausbaustufe: E-Auto, Gasvergleich/JAZ.
+Not part of the first expansion stage: EV, gas comparison/JAZ.
 
-**Kennzahlen im Frontend-Block „Energie"** (`frontend/src/utils/energySummary.ts`):
-Der Report liefert `totals` über *alle* vollständigen Zeiträume seit Beginn der
-Aufzeichnung. Der Block zeigt aber nur ein Fenster — in der Monatsansicht die
-letzten 12 Monate, in der Jahresansicht alle Jahre. Die Kacheln rechnen deshalb
-nicht mit `totals`, sondern aggregieren genau die Buckets dieses Fensters, und
-darin nur die mit `complete === true`; der laufende Monat bzw. das laufende Jahr
-fällt zusätzlich heraus. Sonst steht über den Kosten „Summe im angezeigten
-Zeitraum", während die Zahl zehn Jahre umfasst, und der Durchschnitt lässt sich
-aus der Tabelle darunter nicht nachrechnen.
+**Metrics in the frontend block "Energie"** (`frontend/src/utils/energySummary.ts`):
+The report delivers `totals` over *all* complete periods since the start of
+recording. The block, however, only shows a window — in the monthly view the
+last 12 months, in the yearly view all years. The tiles therefore do not
+compute with `totals`, but aggregate exactly the buckets of this window, and
+within it only those with `complete === true`; the current month or the current year
+is additionally excluded. Otherwise "Sum in the displayed period" would stand above the costs,
+while the number spans ten years, and the average cannot be
+recomputed from the table below.
 
-Im selben Modul:
+In the same module:
 
-- **Quoten aus Summen**: Ø Autarkie, Ø Eigenverbrauchsquote und die PV-Anteile
-  kommen aus den Summen des Fensters (`1 − Σ Bezug / Σ Gesamtverbrauch`), nicht
-  aus dem Mittel der Monatsprozente — sonst zählt ein verbrauchsarmer Monat so
-  viel wie ein verbrauchsstarker. Ein PV-Anteil wird nur über Zeiträume gebildet,
-  in denen *beide* Seiten bekannt sind.
-- **Trend über die Kalenderachse** (`slopePerPeriod`): Stützstellen sind
-  `periodOrdinal` (Jahr × 12 + Monat), nicht der Index im Array. Ein fehlender
-  Monat bleibt damit eine Lücke, statt stillschweigend zugezogen zu werden.
-- **Bezugsgröße am Wert**: Ein Durchschnitt wird als `kWh / Monat` bzw.
-  `kWh / Jahr` ausgegeben, eine Summe als `€ / 12 Monate` bzw. `€ / 5 Jahre`
-  (`periodUnit`, `periodSpanLabel`). Die Zahl allein sagt nicht, worauf sie sich
-  bezieht.
+- **Rates from sums**: Ø self-sufficiency, Ø self-consumption rate and the PV shares
+  come from the sums of the window (`1 − Σ grid import / Σ total consumption`), not
+  from the mean of the monthly percentages — otherwise a low-consumption month counts as
+  much as a high-consumption one. A PV share is only formed over periods
+  in which *both* sides are known.
+- **Trend over the calendar axis** (`slopePerPeriod`): The data points are
+  `periodOrdinal` (year × 12 + month), not the index in the array. A missing
+  month thus remains a gap instead of being silently closed.
+- **Reference basis on the value**: An average is output as `kWh / Monat` or
+  `kWh / Jahr`, a sum as `€ / 12 Monate` or `€ / 5 Jahre`
+  (`periodUnit`, `periodSpanLabel`). The number alone does not say what it
+  refers to.
 
-### 5.2.1 Wirtschaftlichkeit
+### 5.2.1 Profitability
 
 `GET /meters/reports/economics?granularity=month|year&from=&to=`
 
-Zwei Blöcke, die die kWh-Reports nicht beantworten können:
+Two blocks that the kWh reports cannot answer:
 
-**PV-Ersparnis und Amortisation.** Je Bucket `netElectricityCostEur` (mit PV,
-tatsächlich) gegen `noPvElectricityCostEur` (dieselbe Verbrauchsmenge komplett
-aus dem Netz gekauft); die Differenz ist `savingsEur`, kumuliert in
-`cumulativeSavingsEur`. Die Summen (`totalSavingsEur` usw.) laufen wie im
-Energie-Report nur über `complete`-Buckets. Die Amortisation stellt der
-Investition (Summe aller `pv_investment_net`- und `pv_investment_vat`-
-Einträge bis heute **abzüglich `pv_vat_refunded`**, eine Erweiterung ist ein
-zweiter Eintrag) den über die
-**gesamte** gemessene Historie kumulierten PV-Nutzen gegenüber — unabhängig
-von `from`/`to`, denn die Frage ist, was die Anlage seit Inbetriebnahme
-eingebracht hat. `measuredMonths` sind die vollständig gemessenen Monate
-dahinter, `yearsElapsed` = `measuredMonths` / 12 ist die gemeinsame Zeitbasis
-von Nutzen und Opportunitätskosten — ein Messloch verlängert also nicht die
-Zinsrechnung. Die Hochrechnung des Amortisationsdatums nutzt
-`benefitLast12MonthsEur`, den Nutzen der letzten zwölf **lückenlos**
-gemessenen Monate; klafft in den letzten zwölf Monaten eine Lücke, bleibt er
-`null` und es gibt bewusst kein Datum.
+**PV savings and payback.** Per bucket `netElectricityCostEur` (with PV,
+actual) against `noPvElectricityCostEur` (the same consumption quantity bought entirely
+from the grid); the difference is `savingsEur`, cumulated in
+`cumulativeSavingsEur`. The sums (`totalSavingsEur` etc.) run, as in the
+energy report, only over `complete` buckets. The payback compares the
+investment (sum of all `pv_investment_net` and `pv_investment_vat`
+entries up to today **minus `pv_vat_refunded`**, an extension is a
+second entry) with the PV benefit cumulated over the
+**entire** measured history — independent of `from`/`to`, because the question is what the system
+has brought in since commissioning. `measuredMonths` are the completely measured months
+behind it, `yearsElapsed` = `measuredMonths` / 12 is the common time basis
+of benefit and opportunity costs — a measurement gap thus does not extend the
+interest calculation. The extrapolation of the payback date uses
+`benefitLast12MonthsEur`, the benefit of the last twelve **gaplessly**
+measured months; if there is a gap in the last twelve months, it stays
+`null` and deliberately no date is given.
 
-Die Opportunitätskosten sind **kein Stammdatum**, sondern werden gerechnet.
-Einzige Annahme ist `expected_return_rate` — die Rendite, die das Geld
-anderswo erwartungsgemäß gebracht hätte (Faktor, 0,05 = 5 %/Jahr). Daraus
-folgt der entgangene Ertrag als **fester Jahresbetrag** (Investition × Rate,
-einfache Verzinsung, nicht Zinseszins) — dieselbe Form wie die Formel der
-Ursprungs-Tabelle (`=B15*0.05`), nur aus der Rate statt als Ergebniszelle
-gespeichert. Zinseszins wurde bewusst verworfen: eine exponentiell wachsende
-"was hätte die Anlage anderswo verdient"-Kurve gegen einen ungefähr
-konstanten jährlichen PV-Nutzen holt diesen bei jeder positiven Rate
-irgendwann uneinholbar ein — das Amortisationsdatum wäre für praktisch jede
-reale Anlage "nie erreichbar" gewesen, was zwar rechnerisch stimmt, aber
-keine brauchbare Aussage über die Anlage ist. Mit dem festen Jahresbetrag ist
-die Bedingung wieder einfach: das Datum ist erreichbar, sobald der
-Jahresnutzen (letzte 12 Monate) über den jährlichen Opportunitätskosten
-liegt; sonst wird bewusst **kein** Datum geliefert statt eines geschönten.
+The opportunity costs are **not master data** but are computed.
+The only assumption is `expected_return_rate` — the return that the money
+would presumably have earned elsewhere (factor, 0.05 = 5 %/year). From it
+follows the forgone yield as a **fixed annual amount** (investment × rate,
+simple interest, not compound interest) — the same form as the formula of the
+original table (`=B15*0.05`), only from the rate instead of stored as a result cell.
+Compound interest was deliberately rejected: an exponentially growing
+"what would the system have earned elsewhere" curve against an approximately
+constant annual PV benefit overtakes the latter at any positive rate
+irrecoverably at some point — the payback date would have been "unreachable"
+for practically every real system, which is mathematically correct, but
+no useful statement about the system. With the fixed annual amount
+the condition is simple again: the date is reachable as soon as the
+annual benefit (last 12 months) is above the annual opportunity costs;
+otherwise deliberately **no** date is delivered instead of a flattering one.
 
-**Umsatzsteuer, die nie bezahlt blieb.** Bei Regelbesteuerung holt sich der
-Haushalt die Vorsteuer auf die Anlage vom Finanzamt zurück — dieses Geld muss
-sich nicht erwirtschaften. `pv_vat_refunded` (€, je Investition eine Zeile)
-hält fest, was erstattet wurde, und die Investition ist
-`netto + MwSt. − erstattet`. Mehr als die gebuchte MwSt. wird nie abgezogen:
-zurück gibt es nur, was vorher gezahlt wurde, alles darüber ist ein Tippfehler.
-Ohne Eintrag bleibt die Investition brutto — wer nicht optiert hat, zahlt die
-MwSt. tatsächlich.
+**VAT that was never left paid.** Under regular taxation, the
+household reclaims the input VAT on the system from the tax office — this money does not have to
+be earned back. `pv_vat_refunded` (€, one row per investment)
+records what was refunded, and the investment is
+`net + VAT − refunded`. More than the booked VAT is never deducted:
+only what was paid beforehand comes back, anything above that is a typo.
+Without an entry the investment stays gross — whoever has not opted in actually pays the
+VAT.
 
-Die Gegenseite ist die **unentgeltliche Wertabgabe**: Solange
-Regelbesteuerung gilt, schuldet der Haushalt Umsatzsteuer auf den selbst
-verbrauchten Strom. `self_consumption_vat_rate` (Faktor, z. B. 0,19) wird je
-Bucket zeitgültig ausgewertet und auf den Wert des Eigenverbrauchs gerechnet
-(`self_consumption_value`, laut Quelle genau die Bemessungsgrundlage); das
-Ergebnis steht als `selfConsumptionVatEur` im Kostenergebnis und geht vom
-PV-Nutzen ab. Der Wechsel zur Kleinunternehmerregelung nach fünf Jahren ist
-eine **zweite Zeile mit 0** zum Wechseldatum — die Jahre davor behalten ihre
-Steuer, die danach sind frei davon. Ohne Eintrag wird nichts abgezogen.
+The counterpart is the **gratuitous withdrawal** (unentgeltliche Wertabgabe): As long as
+regular taxation applies, the household owes VAT on the electricity it
+consumes itself. `self_consumption_vat_rate` (factor, e.g. 0.19) is evaluated per
+bucket in a time-valid way and applied to the value of the self-consumption
+(`self_consumption_value`, according to the source exactly the tax base); the
+result appears as `selfConsumptionVatEur` in the cost result and is deducted from the
+PV benefit. The switch to the small-business scheme after five years is
+a **second row with 0** on the date of the switch — the years before keep their
+tax, those after are free of it. Without an entry nothing is deducted.
 
-Die Einspeisevergütung ist in den importierten Daten bereits **netto**
-hinterlegt (`tax_status` `net`), der Netzbezug **brutto** — beides passt zur
-Regelbesteuerung, in der die Umsatzsteuer auf die Einspeisung ein
-durchlaufender Posten ist. `tax_status` ist dabei Dokumentation der Quelle und
-wird von keiner Rechnung ausgewertet; was steuerlich wirkt, sind die beiden
-Annahmen oben.
+The feed-in tariff is stored in the imported data already **net**
+(`tax_status` `net`), the grid import **gross** — both fit
+regular taxation, in which the VAT on the feed-in is a
+pass-through item. `tax_status` is documentation of the source and
+is not evaluated by any calculation; what has a tax effect are the two
+assumptions above.
 
-**Kosten je Anwendung.** Heizung, Warmwasser, Wärmepumpe (Rest),
-E-Auto/Wallbox und der übrige Haushalt jeweils in €. Eigenverbrauchte kWh
-werden mit `self_consumption_value` bewertet, Netzbezug mit dem zeitgültigen
-Arbeitspreis; `gridKwh` ist immer gesetzt und der PV-Anteil nie größer als
-der Gesamtverbrauch der Anwendung. **`heatPumpRest`** ist der Anteil des
-Zählers „Wärmepumpe gesamt“, den Heizungs- und Warmwasser-Unterzähler nicht
-abdecken (oder die ganze Pumpe, wenn es keine Unterzähler gibt) — vorher
-fehlte er in jeder Anwendung und der Haushalt war zu groß. Sein PV-Anteil ist
-nicht gemessen, er zählt zum Netzpreis. Der PV-Anteil des Haushalts ist der
-Rest der Gesamt-Eigenverbrauchsmenge, den kein Unterzähler beansprucht
-(begrenzt auf den Haushaltsverbrauch). Der Grundpreis wird keiner Anwendung
-zugeordnet; `totalCostEur` ist Anwendungen + Grundpreis. Die Anwendungssummen
-sind ein **Vergleichswert** (Netzbezug zum Arbeitspreis plus Eigenverbrauch
-zum Eigenverbrauchswert), nicht die Stromrechnung — das Frontend sagt das
-unter der Tabelle.
+**Costs per application.** Heating, hot water, heat pump (remainder),
+EV/wallbox and the rest of the household each in €. Self-consumed kWh
+are valued at `self_consumption_value`, grid import at the time-valid
+unit price; `gridKwh` is always set and the PV share never larger than
+the total consumption of the application. **`heatPumpRest`** is the part of the
+"heat pump overall" meter that the heating and hot water sub-meters do not
+cover (or the whole pump if there are no sub-meters) — previously
+it was missing from every application and the household was too large. Its PV share is
+not measured, it counts at the grid price. The PV share of the household is the
+remainder of the total self-consumption quantity that no sub-meter claims
+(capped at the household consumption). The base price is not assigned to any application;
+`totalCostEur` is applications + base price. The application sums
+are a **comparison value** (grid import at the unit price plus self-consumption
+at the self-consumption value), not the electricity bill — the frontend says so
+below the table.
 
-Fehlen Preise (`hasTariffs === false`), bleiben beide Blöcke leer statt mit
-Platzhalterwerten zu rechnen.
+If prices are missing (`hasTariffs === false`), both blocks stay empty instead of
+calculating with placeholder values.
 
-### 5.2.2 Vergleichsrechnungen (Gasheizung / Benziner)
+### 5.2.2 Comparison calculations (gas heating / petrol car)
 
 `GET /meters/reports/comparisons?granularity=month|year&from=&to=`
 
-Kontrafaktische Modellrechnungen — nur die Stromseite ist gemessen, die
-Gegenrechnung beruht auf Annahmen. Jede Response liefert deshalb die
-verwendeten Annahmen mit (`assumptions`), damit das Frontend sie anzeigen kann
-und die Zahl beurteilbar bleibt.
+Counterfactual model calculations — only the electricity side is measured, the
+counter-calculation is based on assumptions. Every response therefore delivers the
+assumptions used (`assumptions`), so that the frontend can display them
+and the number remains assessable.
 
-**Bewertung des Stroms** (für beide Vergleiche gleich): der Netzanteil zum
-zeitgültigen Arbeitspreis, der PV-Anteil zur zeitgültigen
-**Einspeisevergütung** — das ist, was diese kWh stattdessen gebracht hätten
-(Fallback: Eigenverbrauchswert, dann Arbeitspreis). Die frühere Fassung
-bewertete den PV-Anteil beim E-Auto doppelt (Eigenverbrauchswert *plus*
-entgangene Einspeisung) und bei der Wärmepumpe gar nicht; jetzt gilt für
-beide dieselbe Opportunitätslogik.
+**Valuation of the electricity** (same for both comparisons): the grid share at the
+time-valid unit price, the PV share at the time-valid
+**feed-in tariff** — this is what these kWh would have earned instead
+(fallback: self-consumption value, then unit price). The earlier version
+valued the PV share for the EV twice (self-consumption value *plus*
+forgone feed-in) and for the heat pump not at all; now the same
+opportunity logic applies to both.
 
-**Wärmepumpe statt Gasheizung.** Wärmemenge = Wärmepumpenstrom [kWh el.] ×
-JAZ; Gasbedarf = Wärmemenge ÷ Kesselwirkungsgrad; Gaskosten = Gasbedarf ×
-Gaspreis + Gas-Grundpreis. Der Wärmepumpenstrom kommt aus den Unterzählern
-Heizung + Warmwasser (`heatSource: sub_meters`); fehlen sie, aus
-`heat_pump_total` (ohne PV-Aufteilung, alles zum Netzpreis) oder aus dem
-einen vorhandenen Unterzähler (`heating_only` / `hot_water_only`) — der
-Report benennt die Quelle, das Frontend erklärt die Einschränkung.
+**Heat pump instead of gas heating.** Heat quantity = heat pump electricity [kWh el.] ×
+JAZ; gas demand = heat quantity ÷ boiler efficiency; gas costs = gas demand ×
+gas price + gas base price. The heat pump electricity comes from the sub-meters
+heating + hot water (`heatSource: sub_meters`); if they are missing, from
+`heat_pump_total` (without PV split, everything at the grid price) or from the
+one existing sub-meter (`heating_only` / `hot_water_only`) — the
+report names the source, the frontend explains the limitation.
 
-Ohne Wärmemengenzähler ist die JAZ geschätzt. Das Ergebnis wird deshalb als
-**Bandbreite** über JAZ ± `SCOP_BAND` (0,5) ausgewiesen, nicht als eine Zahl.
-Eine niedrigere JAZ bedeutet weniger gelieferte Wärme und damit weniger Gas —
-die Bandbreite ist nach der JAZ geordnet, die Kostenwerte folgen ihr.
+Without a heat meter the JAZ is estimated. The result is therefore shown as a
+**range** over JAZ ± `SCOP_BAND` (0.5), not as a single number.
+A lower JAZ means less delivered heat and thus less gas —
+the range is ordered by JAZ, the cost values follow it.
 
-**E-Auto statt Benziner.** km = Wallbox-kWh × (1 − `ev_charging_loss`) ÷
-Verbrauch [kWh/100 km] × 100; Benzinbedarf = km ÷ 100 × [l/100 km];
-Benzinkosten = Liter × Benzinpreis. Die Wallbox zählt mehr, als in der
-Batterie ankommt; ohne hinterlegte Ladeverluste (Annahme `ev_charging_loss`,
-Faktor 0–0,5) gilt 0 und das Frontend weist darauf hin, dass die Kilometer
-dann eher überschätzt sind. `evCostEur` ist die oben beschriebene Bewertung
-des Ladestroms und die Basis für Differenz und ct/km.
+**EV instead of petrol car.** km = wallbox kWh × (1 − `ev_charging_loss`) ÷
+consumption [kWh/100 km] × 100; petrol demand = km ÷ 100 × [l/100 km];
+petrol costs = liters × petrol price. The wallbox counts more than arrives in the
+battery; without stored charging losses (assumption `ev_charging_loss`,
+factor 0–0.5) 0 applies and the frontend points out that the kilometers
+are then more likely overestimated. `evCostEur` is the valuation of the charging
+electricity described above and the basis for the difference and ct/km.
 
-**Gemeinsame Bucket-Menge.** Nur Buckets, in denen *beide* Seiten bekannt sind
-(`compared`), gehen in die Summen, ct/km, CO₂ und den ausgewiesenen Zeitraum
-(`periodStart`/`periodEnd`, `comparedPeriods`) ein — sonst stünden 24 Monate
-Stromkosten gegen 18 Monate Benzinpreis. Unvollständig gemessene Buckets
-(§5.2 `complete`) werden vorher entfernt.
+**Common bucket set.** Only buckets in which *both* sides are known
+(`compared`) enter the sums, ct/km, CO₂ and the reported period
+(`periodStart`/`periodEnd`, `comparedPeriods`) — otherwise 24 months of
+electricity costs would stand against 18 months of petrol price. Incompletely measured buckets
+(§5.2 `complete`) are removed beforehand.
 
-**Zeitgültige Annahmen.** Jeder Bucket rechnet mit dem Wert, der zu seinem
-Beginn galt (`amountAt`): JAZ, Verbräuche, Emissionsfaktoren, Preise. Die
-`assumptions` enthalten deshalb je Art alle im Zeitraum wirksamen Einträge
-mit `validFrom` (`entriesForPeriod`), einschließlich Arbeitspreis,
-Einspeisevergütung und Eigenverbrauchswert; das Frontend zeigt eine Reihe als
-„x ab MM.JJJJ, y ab MM.JJJJ“.
+**Time-valid assumptions.** Each bucket calculates with the value that applied at its
+start (`amountAt`): JAZ, consumption, emission factors, prices. The
+`assumptions` therefore contain, per kind, all entries effective in the period
+with `validFrom` (`entriesForPeriod`), including unit price,
+feed-in tariff and self-consumption value; the frontend shows a series as
+"x ab MM.JJJJ, y ab MM.JJJJ" (x from MM.YYYY, y from MM.YYYY).
 
-**CO₂** wird nur berechnet, wenn die Emissionsfaktoren hinterlegt sind, und
-zwar mit dem **Netzanteil** des Stroms — PV-Strom hat keinen Strommix-Faktor.
-Fehlt der Netzfaktor, bleibt CO₂ `null`. Bei der Wärmepumpe hängt die
-vermiedene Menge an der JAZ und wird deshalb wie die Kosten als Bandbreite
-geliefert (`avoidedCo2Range`; `avoidedCo2Kg` ist der Mittelwert).
+**CO₂** is only calculated if the emission factors are stored,
+and with the **grid share** of the electricity — PV electricity has no grid-mix factor.
+If the grid factor is missing, CO₂ stays `null`. For the heat pump the
+avoided quantity depends on the JAZ and is therefore delivered like the costs as a range
+(`avoidedCo2Range`; `avoidedCo2Kg` is the mean).
 
-Fehlen die Kern-Annahmen einer Vergleichsrechnung (JAZ + Kesselwirkungsgrad
-bzw. Verbrauch E-Auto + Verbrauch Benziner), liefert sie `null` statt mit
-Standardwerten zu rechnen.
+If the core assumptions of a comparison calculation are missing (JAZ + boiler efficiency
+or EV consumption + petrol consumption), it returns `null` instead of calculating with
+default values.
 
-#### Annahmen als Stammdaten
+#### Assumptions as master data
 
-Die Annahmen liegen in `meter_electricity_tariffs` (Migration 0148). Sie sind
-keine gemessenen Tarife, haben aber dieselbe Form
-(`kind`, `valid_from`, `amount`, `unit`) und dieselbe „welcher Wert galt
-wann“-Logik — eine zweite Tabelle mit dupliziertem CRUD wäre reiner Overhead.
+The assumptions live in `meter_electricity_tariffs` (migration 0148). They are
+not measured tariffs, but have the same form
+(`kind`, `valid_from`, `amount`, `unit`) and the same "which value applied
+when" logic — a second table with duplicated CRUD would be pure overhead.
 
-| kind | Einheit | Bedeutung |
+| kind | Unit | Meaning |
 |---|---|---|
-| `gas_price` | `eur_per_kwh` | Gas-Arbeitspreis |
-| `gas_base_price` | `eur_per_month` | Gas-Grundpreis |
-| `boiler_efficiency` | `ratio` | Kesselwirkungsgrad |
-| `heat_pump_scop` | `ratio` | Jahresarbeitszahl |
-| `ev_consumption` | `kwh_per_100km` | Verbrauch E-Auto (ab Batterie) |
-| `ev_charging_loss` | `ratio` | Ladeverluste zwischen Wallbox und Batterie (Migration 0194) |
-| `petrol_consumption` | `l_per_100km` | Verbrauch Benziner |
-| `petrol_price` | `eur_per_l` | Benzinpreis |
-| `grid_co2` / `gas_co2` | `kg_per_kwh` | Emissionsfaktoren |
-| `petrol_co2` | `kg_per_l` | Emissionsfaktor Benzin |
+| `gas_price` | `eur_per_kwh` | Gas unit price |
+| `gas_base_price` | `eur_per_month` | Gas base price |
+| `boiler_efficiency` | `ratio` | Boiler efficiency |
+| `heat_pump_scop` | `ratio` | Seasonal performance factor (JAZ) |
+| `ev_consumption` | `kwh_per_100km` | EV consumption (from the battery) |
+| `ev_charging_loss` | `ratio` | Charging losses between wallbox and battery (migration 0194) |
+| `petrol_consumption` | `l_per_100km` | Petrol car consumption |
+| `petrol_price` | `eur_per_l` | Petrol price |
+| `grid_co2` / `gas_co2` | `kg_per_kwh` | Emission factors |
+| `petrol_co2` | `kg_per_l` | Emission factor petrol |
 
-Preise mit Zeitverlauf (Gas, Benzin) werden wie der Stromarbeitspreis
-zeitanteilig über Preisänderungen gewichtet.
+Prices with a time profile (gas, petrol) are weighted pro rata in time over price changes,
+like the electricity unit price.
 
-Zu jeder Art gibt es eine laienverständliche Erklärung
-(`ELECTRICITY_TARIFF_KIND_EXPLANATIONS` in `frontend/src/api/meters.ts`), die
-im Dialog unter der Art-Auswahl erscheint, sobald die jeweilige Art gewählt
-ist — reaktiv auf `tariffForm.kind`, keine eigene Legende nötig.
+For every kind there is an explanation understandable to laypeople
+(`ELECTRICITY_TARIFF_KIND_EXPLANATIONS` in `frontend/src/api/meters.ts`), which
+appears in the dialog below the kind selection as soon as the respective kind is selected
+— reactive to `tariffForm.kind`, no separate legend needed.
 
-#### Datei-Import von Reihen
+#### File import of series
 
-`POST /meters/tariffs/import` (`meters.manage`) nimmt eine ganze Reihe auf
-einmal entgegen — gedacht für historische Preisverläufe wie Benzin- oder
-Gaspreise, die monatsweise über Jahre laufen und im Dialog Zeile für Zeile
-einzugeben unzumutbar wäre. Im Dialog „Tarife & Annahmen“ hängt der Button
-**Datei importieren** daran.
+`POST /meters/tariffs/import` (`meters.manage`) accepts a whole series at
+once — intended for historical price curves such as petrol or
+gas prices that run monthly over years and would be unreasonable to enter row by row in the dialog.
+In the dialog "Tarife & Annahmen" (tariffs & assumptions) the button
+**Datei importieren** (import file) is attached to it.
 
-Format ist JSON, entweder als `{ "entries": [...] }` oder als blanke Liste:
+The format is JSON, either as `{ "entries": [...] }` or as a bare list:
 
 ```json
 {
@@ -656,373 +655,371 @@ Format ist JSON, entweder als `{ "entries": [...] }` oder als blanke Liste:
 }
 ```
 
-`kind` und `unit` sind im Request bewusst als freie Strings typisiert und
-werden je Zeile geprüft: als Union getippt würde ein einziger Tippfehler die
-komplette Datei am Gateway scheitern lassen, statt die fehlerhafte Zeile zu
-benennen. Der Import ist **idempotent** über denselben natürlichen Schlüssel
-wie der Unique-Index (`kind`, `valid_from`, `unit`, `name`) — eine schon
-vorhandene Zeile wird aktualisiert, nicht verdoppelt, ein korrigiertes File
-darf also erneut eingespielt werden. Fehlerhafte Zeilen stoppen den Rest
-nicht, sondern kommen mit ihrer Position in `errors` zurück (Muster:
+`kind` and `unit` are deliberately typed as free strings in the request and
+are checked per row: typed as a union, a single typo would make the
+entire file fail at the gateway instead of naming the faulty row. The import is **idempotent** via the same natural key
+as the unique index (`kind`, `valid_from`, `unit`, `name`) — an already
+existing row is updated, not duplicated, so a corrected file
+may be imported again. Faulty rows do not stop the rest,
+but come back with their position in `errors` (pattern:
 `finance/data-import.ts`).
 
-#### 5.2.2.1 Benzinpreise aus dem EU-Ölbulletin
+#### 5.2.2.1 Petrol prices from the EU Oil Bulletin
 
 ```
 POST /meters/petrol-prices/fetch    (meters.manage)
-POST /internal/meters/petrol-prices (Job, täglich 08:00 UTC)
+POST /internal/meters/petrol-prices (job, daily 08:00 UTC)
 ```
 
-Die Vergleichsrechnung bewertet jeden Bucket mit dem `petrol_price`, der in
-**seinen** Monaten galt (`weightedAmountForPeriod`, tagesanteilig). Das ist der
-ganze Sinn der datierten Reihe — Sprit kostete 2022 zwei Euro und 2016 einen
-zwanzig; ein einziger aktueller Preis schreibt die Geschichte um. Jahre von
-Monatswerten von Hand zu pflegen macht aber niemand, deshalb holt
-`fuel-prices.service.ts` sie, analog zu den Gradtagzahlen:
+The comparison calculation values every bucket with the `petrol_price` that applied in
+**its** months (`weightedAmountForPeriod`, pro rata per day). That is the
+whole point of the dated series — fuel cost two euros in 2022 and one euro
+twenty in 2016; a single current price rewrites history. But nobody
+maintains years of monthly values by hand, so
+`fuel-prices.service.ts` fetches them, analogous to the degree days:
 
-- **Quelle**: EU Weekly Oil Bulletin der Kommission (DG ENER), die
-  History-Arbeitsmappe mit Wochenwerten je Mitgliedsstaat zurück bis 2005.
-  Spalte `DE_price_with_tax_euro95`, Euro-Super 95 inkl. aller Steuern und
-  Abgaben, notiert in **EUR je 1000 Liter**. Kein Key nötig; Host in der
-  Netzwerk-Policy: `energy.ec.europa.eu`.
-- **Link statt UUID**: Die Download-URL trägt eine UUID, die sich beim
-  Neu-Hochladen ändert. Der Client liest den Link deshalb von der
-  Bulletin-Seite (`findHistoryWorkbookUrl`), statt ihn fest zu verdrahten.
-- **Plausibilitätsband** 0,20–5,00 €/l nach der Umrechnung: Wechselt die
-  Quelle irgendwann die Einheit, landen die Werte weit daneben und werden
-  verworfen, statt als Preis geschrieben zu werden.
-- **Monatsmittel** aus den Wochenwerten, mindestens `MIN_WEEKS_PER_MONTH` (3)
-  erhobene Wochen. Der laufende Monat ist damit automatisch draußen, und ein
-  halber Monat wird nicht als Monatsmittel ausgegeben.
-- **Bereich**: ab dem Monat der ersten Ablesung des Zählers mit Rolle
-  `ev_charger_total` — vorher gibt es nichts zu vergleichen — bis zum letzten
-  vollständig veröffentlichten Monat. Ohne Wallbox-Zähler passiert nichts, und
-  das Bulletin wird dann auch nicht abgerufen.
-- **Vorhandene Zeilen bleiben unangetastet**, wie bei den Gradtagzahlen. Der
-  Bundesdurchschnitt ist eine Modellannahme, nicht der Preis an der Tankstelle
-  dieses Haushalts — eine Korrektur von Hand muss den Abruf überleben.
-- **Ein Download je Lauf**: Der Job lädt die Mappe einmal und reicht dieselbe
-  Monatsreihe an jeden Haushalt weiter (`loadMonthlyFuelPrices`), statt sie je
-  Nutzer neu zu ziehen.
-- `source` je Zeile hält fest, woher der Wert kommt (`eu-weekly-oil-bulletin`,
-  Land, Kraftstoff, Anzahl Wochen, Abrufzeitpunkt).
+- **Source**: EU Weekly Oil Bulletin of the Commission (DG ENER), the
+  history workbook with weekly values per member state going back to 2005.
+  Column `DE_price_with_tax_euro95`, Euro-Super 95 including all taxes and
+  levies, quoted in **EUR per 1000 liters**. No key needed; host in the
+  network policy: `energy.ec.europa.eu`.
+- **Link instead of UUID**: The download URL carries a UUID that changes on
+  re-upload. The client therefore reads the link from the
+  bulletin page (`findHistoryWorkbookUrl`) instead of hard-wiring it.
+- **Plausibility band** 0.20–5.00 €/l after conversion: If the source
+  ever changes the unit, the values end up far off and are
+  discarded instead of being written as a price.
+- **Monthly mean** from the weekly values, at least `MIN_WEEKS_PER_MONTH` (3)
+  surveyed weeks. The current month is thus automatically excluded, and half a
+  month is not output as a monthly mean.
+- **Range**: from the month of the first reading of the meter with role
+  `ev_charger_total` — before that there is nothing to compare — up to the last
+  completely published month. Without a wallbox meter nothing happens, and
+  the bulletin is then not fetched either.
+- **Existing rows stay untouched**, as with the degree days. The
+  federal average is a model assumption, not the price at this household's
+  filling station — a manual correction must survive the retrieval.
+- **One download per run**: The job loads the workbook once and passes the same
+  monthly series on to every household (`loadMonthlyFuelPrices`) instead of pulling it
+  anew per user.
+- `source` per row records where the value comes from (`eu-weekly-oil-bulletin`,
+  country, fuel, number of weeks, retrieval time).
 
-Ausfälle der Kommission kommen als `unavailable` zurück, nicht als interner
-Fehler; der Job protokolliert sie und läuft am nächsten Tag wieder.
+Outages at the Commission come back as `unavailable`, not as an internal
+error; the job logs them and runs again the next day.
 
-### 5.2.3 Anlagenzustand
+### 5.2.3 System condition
 
 `GET /meters/reports/equipment?granularity=month|year&from=&to=`
 
-Frühindikatoren, die in den Verbrauchssummen untergehen:
+Early indicators that get lost in the consumption sums:
 
-- **kWh je Verdichterstunde** — Wärmepumpen-Strom ÷ Verdichter-Betriebsstunden.
-  Ein steigender Wert heißt: mehr Strom für dieselbe Laufstunde (Vereisung,
-  Kältemittelverlust, verschmutzter Wärmetauscher). Braucht die Rolle
-  `compressor_hours` (Migration 0149, Import setzt sie für „Verdichter“).
-  Das Verhältnis wird nur gebildet, wenn **beide** Seiten vollständig gemessen
-  sind — sonst stünde ein voller Monat Strom gegen einen halben Monat Stunden —
-  und wenn der Verdichter mindestens `MIN_COMPRESSOR_RUNTIME_SHARE` (3 %) der
-  Periode lief: im Sommer misst der Quotient Stand-by und Anläufe, nicht die
-  Pumpe. `changePercent` vergleicht die letzte Periode mit **derselben Periode
-  ein Jahr früher** (`previousYearKwhPerHour`, `latestKey`), nie einen Januar
-  mit einem Juli; `slopePerYear` ist eine Regression über die Kalenderzeit.
-- **Laufzeitanteil** je Aggregat — Betriebsstunden ÷ gemessene Zeit der
-  Periode. Gemessen wird gegen die tatsächlich abgedeckte Zeit
-  (`coverage`), sonst wirkte ein halb abgelesener Monat halb so ausgelastet.
-  Der Anteil wird **nicht** auf 100 % gekappt: mehr Stunden als der Zeitraum
-  hat sind ein Ablesefehler, den der Leser sehen soll (`implausible`). Der
-  Durchschnitt ist nach Periodenlänge gewichtet.
-- **Wasser-Grundlast** — der *kleinste* Tagesverbrauch einer Periode. Steigt
-  dieser Boden bei gleichbleibendem Gesamtverbrauch, ist das die klassische
-  Signatur eines laufenden Spülkastens oder Lecks. Berechnet aus den rohen
-  Ableseintervallen, **nicht** aus den interpolierten Buckets: ein Minimum
-  lässt sich nicht interpolieren, das Verteilen würde genau die ruhige Phase
-  verwischen, die das Leck sichtbar macht. Jedes Intervall zählt zur Periode
-  seines Startzeitpunkts; `from`/`to` filtern nach diesem Startzeitpunkt.
-  Ein Minimum gibt es nur, wenn die Periode mindestens zwei Intervalle hat oder
-  das kürzeste höchstens `MAX_BASELINE_INTERVAL_DAYS` (7) lang ist — mit einer
-  Ablesung pro Monat ist das Minimum der Durchschnitt und sagt nichts
-  (`minDailyRate` `null`, `tooSparse` wenn das für alle Perioden gilt).
-  Verglichen (`latestKey`, Vorjahr, Regression) werden nur Perioden, deren
-  Intervalle mindestens die Hälfte der Periode abdecken (`measuredDays`).
-- **Ertrag je kWp** — Jahresertrag ÷ Anlagenleistung (`pv_capacity_kwp`).
-  Normalisiert das Wetterjahr heraus und ist damit der einzige belastbare
-  Frühindikator für Degradation oder verschmutzte Module. Immer je
-  **Kalenderjahr**, unabhängig von der Report-Granularität — ein Dezember
-  gegen einen Juli ist Wetter, keine Degradation. Je Jahr gilt die damals
-  installierte Leistung (`timeline.amountAt("pv_capacity_kwp", …)`,
-  `capacityKwp` im Bucket), damit eine Erweiterung nicht als Ertragssprung
-  erscheint. Verglichen wird mit dem Vorjahr (`changeVsPreviousYearPercent`)
-  und mit dem **Median der übrigen Jahre** (`changeVsMedianPercent`) — das
-  beste Jahr ist per Definition das glücklichste Wetter, gegen das jedes
-  normale Jahr wie Verfall aussieht (`bestYieldPerKwp` bleibt als Zusatzinfo).
-  Teilperioden bleiben außen vor, sonst sähe eine Messlücke wie Degradation
-  aus.
+- **kWh per compressor hour** — heat pump electricity ÷ compressor operating hours.
+  A rising value means: more electricity for the same running hour (icing,
+  refrigerant loss, dirty heat exchanger). Needs the role
+  `compressor_hours` (migration 0149, the import sets it for "Verdichter" (compressor)).
+  The ratio is only formed if **both** sides are completely measured
+  — otherwise a full month of electricity would stand against half a month of hours —
+  and if the compressor ran at least `MIN_COMPRESSOR_RUNTIME_SHARE` (3 %) of the
+  period: in summer the quotient measures standby and start-ups, not the
+  pump. `changePercent` compares the last period with the **same period
+  one year earlier** (`previousYearKwhPerHour`, `latestKey`), never a January
+  with a July; `slopePerYear` is a regression over calendar time.
+- **Runtime share** per unit — operating hours ÷ measured time of the
+  period. It is measured against the time actually covered
+  (`coverage`), otherwise a half-read month would look half as utilized.
+  The share is **not** capped at 100 %: more hours than the period
+  has are a reading error that the reader should see (`implausible`). The
+  average is weighted by period length.
+- **Water base load** — the *smallest* daily consumption of a period. If
+  this floor rises at constant total consumption, that is the classic
+  signature of a running toilet cistern or a leak. Computed from the raw
+  reading intervals, **not** from the interpolated buckets: a minimum
+  cannot be interpolated, distributing would blur exactly the quiet phase
+  that makes the leak visible. Each interval counts toward the period
+  of its start time; `from`/`to` filter by this start time.
+  A minimum only exists if the period has at least two intervals or
+  the shortest is at most `MAX_BASELINE_INTERVAL_DAYS` (7) long — with
+  one reading per month the minimum is the average and says nothing
+  (`minDailyRate` `null`, `tooSparse` if this applies to all periods).
+  Only periods whose intervals cover at least half of the period
+  (`measuredDays`) are compared (`latestKey`, previous year, regression).
+- **Yield per kWp** — annual yield ÷ system capacity (`pv_capacity_kwp`).
+  Normalizes out the weather year and is thus the only reliable
+  early indicator of degradation or dirty modules. Always per
+  **calendar year**, independent of the report granularity — a December
+  against a July is weather, not degradation. For each year the capacity installed
+  at that time applies (`timeline.amountAt("pv_capacity_kwp", …)`,
+  `capacityKwp` in the bucket), so that an extension does not
+  appear as a yield jump. It is compared with the previous year (`changeVsPreviousYearPercent`)
+  and with the **median of the other years** (`changeVsMedianPercent`) — the
+  best year is by definition the luckiest weather, against which every
+  normal year looks like decline (`bestYieldPerKwp` remains as additional info).
+  Partial periods are left out, otherwise a measurement gap would look like
+  degradation.
 
-Der Report meldet `missingRoles` (Wärmepumpe gesamt, PV-Produktion,
-Verdichter) und `duplicateRoles`, lädt jeden Zähler-Report je Granularität nur
-einmal und die Teilberichte parallel.
+The report returns `missingRoles` (heat pump overall, PV production,
+compressor) and `duplicateRoles`, loads each meter report per granularity only
+once and the sub-reports in parallel.
 
-### 5.2.4 Wasserkosten
+### 5.2.4 Water costs
 
-Teil des Wirtschaftlichkeits-Reports (§5.2.1) als `water[]`, ein Eintrag je
-sichtbarem Wasserzähler. Frisch- und Abwasser werden beide auf die gemessene
-Menge berechnet (`water_price`, `sewage_price`), die Grundgebühr
-(`water_base_price`) anteilig über Monatsgrenzen. Ohne Wassertarife (auch
-nur Grundgebühr) bleibt die Liste leer.
+Part of the profitability report (§5.2.1) as `water[]`, one entry per
+visible water meter. Fresh water and wastewater are both calculated on the measured
+quantity (`water_price`, `sewage_price`), the base fee
+(`water_base_price`) pro rata across month boundaries. Without water tariffs (even
+just a base fee) the list stays empty.
 
-Rollen (Migration 0194): **`water_main`** ist der Hausanschluss und trägt die
-Grundgebühr — fehlt die Rolle, ist es der erste Wasserzähler ohne Gartenrolle.
-**`water_garden`** ist ein Gartenwasserzähler: keine Abwassergebühr (das
-Wasser landet nicht im Kanal) und keine Grundgebühr. Vorher bekam jeder
-Wasserzähler beides, und ein Haushalt mit zwei Zählern zahlte die Grundgebühr
-rechnerisch doppelt.
+Roles (migration 0194): **`water_main`** is the house connection and carries the
+base fee — if the role is missing, it is the first water meter without a garden role.
+**`water_garden`** is a garden water meter: no wastewater fee (the
+water does not end up in the sewer) and no base fee. Previously every
+water meter got both, and a household with two meters paid the base fee
+twice on paper.
 
-### 5.2.5 Saisonprofil Autarkie/Eigenverbrauch (A3, #1022)
+### 5.2.5 Season profile self-sufficiency/self-consumption (A3, #1022)
 
 `GET /meters/reports/season-profile?from=&to=`
 
-Heatmap Jahr × Monat für Autarkie und Eigenverbrauchsquote. Keine neuen
-Daten: `season-profile.service.ts` pivotiert die Monats-Buckets des
-Energie-Reports in ein Gitter je Kennzahl (`years[].months[0..11]`), ergänzt
-Zeilen- (`average`) und Spaltenmittel (`monthAverages`) sowie `min`/`max`.
-Nur vollständig gemessene Monate (`coverage ≥ 0,99`) füllen eine Zelle —
-ein halber Monat hätte eine verzerrte Quote. Frontend:
-`MeterSeasonProfilePanel.vue`, Farbskala fest 0..100 % (nicht min/max), damit
-eine Anlage mit 40 % Autarkie auch blass aussieht.
+Heatmap year × month for self-sufficiency and self-consumption rate. No new
+data: `season-profile.service.ts` pivots the monthly buckets of the
+energy report into a grid per metric (`years[].months[0..11]`), adds
+row (`average`) and column means (`monthAverages`) as well as `min`/`max`.
+Only completely measured months (`coverage ≥ 0.99`) fill a cell —
+a half month would have a distorted rate. Frontend:
+`MeterSeasonProfilePanel.vue`, color scale fixed at 0..100 % (not min/max), so that
+a system with 40 % self-sufficiency also looks pale.
 
-### 5.2.6 Heizung witterungsbereinigt (C3, #1023)
+### 5.2.6 Weather-adjusted heating (C3, #1023)
 
 `GET /meters/reports/heating-weather?from=&to=`
 
-„Mehr Heizstrom als letztes Jahr“ ist meist nur „kälterer Winter“. Der
-Report teilt den monatlichen Heizverbrauch (Rolle `heat_heating_total`,
-Fallback `heat_pump_total`) durch die Gradtagzahl des Monats; der Rest —
-kWh je Gradtag — beschreibt Haus und Heizung statt des Wetters.
+"More heating electricity than last year" is usually just "colder winter". The
+report divides the monthly heating consumption (role `heat_heating_total`,
+fallback `heat_pump_total`) by the degree days of the month; the remainder —
+kWh per degree day — describes the house and heating instead of the weather.
 
-Die offene Entscheidung Nr. 4 (`documentation/utility-meters-reports.md` §5) ist so
-gelöst, dass **beide** Optionen existieren und der Report die verwendete
-Quelle ausweist (`source`):
+The open decision no. 4 (`documentation/utility-meters-reports.md` §5) is
+resolved such that **both** options exist and the report states the source
+used (`source`):
 
-- **`degree_days`** — Gradtagzahlen als Annahme-Reihe in
+- **`degree_days`** — degree days as an assumption series in
   `meter_electricity_tariffs`: `kind = heating_degree_days`, `unit = kd`
-  (Kelvin-Tage), eine Zeile je Monat mit `valid_from` = Monatserster
-  (Migration 0192). Standardweg ist der **automatische Abruf** aus dem
-  Open-Meteo-Archiv (siehe unten); alternativ eine VDI-2067-Reihe einer
-  standortnahen Station über den Datei-Import. Je Monat entstehen
-  `kwhPerDegreeDay` und `adjustedKwh` (Verbrauch normiert auf einen
-  *Normalmonat*: kWh/Kd × mehrjähriges Mittel der Gradtage dieses
-  Kalendermonats). Jahreswerte sind das Verhältnis der Summen, nicht das
-  Mittel der Monatsquotienten — Sommermonate mit einer Handvoll Gradtagen
-  würden sonst dominieren. `changePercent` vergleicht die kWh/Kd des letzten
-  vollständigen Jahres mit dem Jahr davor, `slopePerYear` ist die
-  Regression darüber.
-- **`estimated`** — ohne Gradtag-Zeilen wird der Referenzwinter aus den
-  eigenen Daten geschätzt: das mehrjährige Mittel jedes Kalendermonats
-  (mindestens zwei Jahre, sonst `null`). Das kann die Witterung nicht
-  herausrechnen, zeigt aber ehrlich die Abweichung vom hauseigenen
-  Normalmonat (`deviationPercent`). Das Frontend benennt den Modus und
-  verweist auf den Import.
+  (Kelvin days), one row per month with `valid_from` = first of the month
+  (migration 0192). The standard route is the **automatic retrieval** from the
+  Open-Meteo archive (see below); alternatively a VDI 2067 series of a
+  nearby station via the file import. Per month, `kwhPerDegreeDay` and
+  `adjustedKwh` result (consumption normalized to a
+  *normal month*: kWh/Kd × multi-year mean of the degree days of this
+  calendar month). Annual values are the ratio of the sums, not the
+  mean of the monthly quotients — summer months with a handful of degree days
+  would otherwise dominate. `changePercent` compares the kWh/Kd of the last
+  complete year with the year before, `slopePerYear` is the
+  regression over it.
+- **`estimated`** — without degree-day rows the reference winter is estimated from the
+  own data: the multi-year mean of each calendar month
+  (at least two years, otherwise `null`). This cannot remove the weather,
+  but honestly shows the deviation from the household's own
+  normal month (`deviationPercent`). The frontend names the mode and
+  points to the import.
 
-Frontend: `MeterHeatingWeatherPanel.vue` (Kacheln kWh/Kd aktuell/Vorjahr/
-Veränderung, Jahres- und Monatstabelle, darunter die Wohnort-Karte). Die
-Begriffe erklärt `MeterDegreeDaysHelpView.vue` (Route `zaehler-hilfe-gradtage`),
-verlinkt über „Was sind Gradtage?“ in der Panel-Überschrift: Definition und
-Einheit Kd, warum kWh/Kd die Witterung herausrechnet, die drei Quellen der
-Zahlen, Lesehilfe für Normalmonat/typisch/Abweichung sowie Konvention G20/15
-und ihre Grenzen.
+Frontend: `MeterHeatingWeatherPanel.vue` (tiles kWh/Kd current/previous year/
+change, annual and monthly table, below it the home-location card). The
+terms are explained by `MeterDegreeDaysHelpView.vue` (route `zaehler-hilfe-gradtage`),
+linked via "Was sind Gradtage?" (what are degree days?) in the panel heading: definition and
+unit Kd, why kWh/Kd removes the weather, the three sources of the
+numbers, reading aid for normal month/typical/deviation as well as the G20/15 convention
+and its limits.
 
-#### Gradtagzahlen aus dem Open-Meteo-Archiv
+#### Degree days from the Open-Meteo archive
 
 `meter/open-meteo-client.ts`, `meter/degree-days.service.ts`,
-`meter/home-location.ts` — damit niemand eine Tabelle importieren muss:
+`meter/home-location.ts` — so that nobody has to import a table:
 
-- **Wohnort** (`meter_home_locations`, Migration 0193, ein Eintrag je
-  Nutzer): `label`, `lat`, `lon`, `source = geocoded | manual`. Die
-  Koordinate wird wie beim Reiseplaner auf das 0,05°-Raster (≈ 5 km)
-  gerundet gespeichert — mehr löst die Reanalyse ohnehin nicht auf, und
-  mehr verlässt das Haus nicht. Endpunkte `GET/PUT/DELETE
+- **Home location** (`meter_home_locations`, migration 0193, one entry per
+  user): `label`, `lat`, `lon`, `source = geocoded | manual`. As in the trip planner, the
+  coordinate is stored rounded to the 0.05° grid (≈ 5 km) —
+  the reanalysis does not resolve more than that anyway, and
+  more does not leave the house. Endpoints `GET/PUT/DELETE
   /meters/home-location` (`meters.view` / `meters.manage`).
-- **Ortssuche** `GET /meters/places?q=` (`meters.manage`) über
-  `geocoding-api.open-meteo.com` (Stadt/Gemeinde, kein Key). Fällt die
-  Suche aus, lassen sich Koordinaten direkt eingeben (`source = manual`).
-- **Abruf** `archive-api.open-meteo.com/v1/archive`, `daily =
-  temperature_2m_mean`, Zeitzone des Orts (`timezone=auto`), ERA5-Reanalyse
-  ab 1940, etwa fünf Tage hinter heute (`ARCHIVE_LAG_DAYS = 7`).
-  Gradtagzahl nach VDI 2067: Heiztag bei Tagesmittel < 15 °C, Beitrag
-  20 °C − Tagesmittel, monatlich summiert. Ein Monat mit mehr als zwei
-  fehlenden Tagen wird nicht geschrieben — eine Lücke darf nicht wie ein
-  milder Monat aussehen.
-- **Auffüllen** (`fillDegreeDaysForUser`): vom Monat der ersten Ablesung
-  des Heizungszählers bis zum letzten abgeschlossenen, archivierten Monat;
-  nur fehlende Monate, ein Archiv-Aufruf je Kalenderjahr mit Lücke. Bereits
-  vorhandene Zeilen (Import, Handeingabe, früherer Abruf) bleiben
-  unangetastet, die geschriebenen tragen `source.provider =
+- **Place search** `GET /meters/places?q=` (`meters.manage`) via
+  `geocoding-api.open-meteo.com` (city/municipality, no key). If the
+  search is down, coordinates can be entered directly (`source = manual`).
+- **Retrieval** `archive-api.open-meteo.com/v1/archive`, `daily =
+  temperature_2m_mean`, time zone of the place (`timezone=auto`), ERA5 reanalysis
+  from 1940, about five days behind today (`ARCHIVE_LAG_DAYS = 7`).
+  Degree days per VDI 2067: heating day at daily mean < 15 °C, contribution
+  20 °C − daily mean, summed monthly. A month with more than two
+  missing days is not written — a gap must not look like a
+  mild month.
+- **Backfill** (`fillDegreeDaysForUser`): from the month of the first reading
+  of the heating meter to the last completed, archived month;
+  only missing months, one archive call per calendar year with a gap. Already
+  existing rows (import, manual entry, earlier retrieval) stay
+  untouched, the written ones carry `source.provider =
   "open-meteo-archive"`. Idempotent.
-- **Job** `meter-degree-days`, täglich 04:00 UTC für alle Nutzer mit
-  Wohnort (ein No-op, solange kein neuer Monat im Archiv liegt); manuell
-  über `POST /meters/degree-days/fetch` („Gradtagzahlen abrufen“ in der
-  Wohnort-Karte, `meters.manage`). Ausfälle des Dienstes werden als
-  `unavailable` gemeldet, nicht als interner Fehler.
-- **Netzwerk-Policy**: `archive-api.open-meteo.com` und
-  `geocoding-api.open-meteo.com` müssen erreichbar sein.
+- **Job** `meter-degree-days`, daily 04:00 UTC for all users with a
+  home location (a no-op as long as no new month is in the archive); manually
+  via `POST /meters/degree-days/fetch` ("Gradtagzahlen abrufen" (fetch degree days) in the
+  home-location card, `meters.manage`). Outages of the service are reported as
+  `unavailable`, not as an internal error.
+- **Network policy**: `archive-api.open-meteo.com` and
+  `geocoding-api.open-meteo.com` must be reachable.
 
-### 5.3 Anomalie-Erkennung (Etappe 7, #1015)
+### 5.3 Anomaly detection (stage 7, #1015)
 
-Umgesetzt in `meter/anomalies.service.ts` (reiner Detektor + Job) und
-`meter/anomalies.ts` (Endpunkte + Job-Registrierung), Muster von
+Implemented in `meter/anomalies.service.ts` (pure detector + job) and
+`meter/anomalies.ts` (endpoints + job registration), pattern of
 `finance/anomaly-detector.ts`:
 
-- **Job** `meter-anomaly-detection`, täglich 10:30 UTC über
-  `lib/local-cron` (der Meter-Service ruft jetzt `startLocalCron()`), manuell
-  über `POST /meters/anomalies/run`. Er lädt je Messstelle die absolute
-  Ablesereihe (über Gerätewechsel hinweg) und bewertet nur Intervalle, die
-  in den letzten `ANOMALY_RECENCY_DAYS` (60) enden — ältere Intervalle
-  speisen nur Baseline und Saisonreferenz.
-- **Baseline**: gewichtetes Mittel und Standardabweichung der Tagesrate der
-  bis zu 12 vorangehenden Intervalle (mindestens 4), gewichtet nach
-  Intervalllänge. Die Standardabweichung hat einen Boden von 10 % des
-  Mittels — zwölf nahezu identische Monatsablesungen würden sonst jede
-  Schwankung zum Fünf-Sigma-Ereignis machen.
-- **Saisonalität**: Rate desselben Zeitraums ein Jahr früher (zeitanteilig
-  über die damaligen Intervalle). Liegt die aktuelle Rate innerhalb von
-  ±25 % davon, ist der Ausschlag saisonal und wird nicht gemeldet.
-- **Typen**: `consumption_spike` / `consumption_drop` (|z| ≥ 3 und mindestens
-  ±50 % gegenüber der Baseline), `standstill` (Betriebsstundenzähler ohne
-  Fortschritt über ≥ 7 Tage, obwohl er üblicherweise läuft),
-  `negative_consumption` (Absolutstand rückläufig — die Gerätevalidierung
-  fängt das innerhalb eines Geräts ab, nicht über einen falsch
-  konfigurierten Gerätewechsel hinweg).
-- **Tabelle `meter_anomalies`** (Migration 0191): Status
-  `pending → confirmed | dismissed`, `score` (z-Score), Intervallgrenzen,
-  `reading_id` der schließenden Ablesung, `details` (Rate, Baseline,
-  Saisonrate, Tage, Werte). `UNIQUE (meter_id, type, interval_end)` macht
-  den täglichen Lauf idempotent; offene Funde im Fenster, die nicht erneut
-  erkannt werden (die Ablesung wurde korrigiert), zieht der Lauf zurück —
-  bestätigte oder verworfene bleiben.
-- **Frontend**: `MeterAnomaliesView.vue` (Route `zaehler-anomalien`,
-  Menüpunkt „Auffälligkeiten“ mit Badge aus `stores/meterAnomalies.ts`),
-  Bestätigen/Verwerfen/Wieder öffnen, Filter nach Art und Status,
-  „Jetzt prüfen“ mit `meters.manage`.
-- Optionale LLM-Bewertung (Begründungstext) bleibt eine spätere Ausbaustufe.
+- **Job** `meter-anomaly-detection`, daily 10:30 UTC via
+  `lib/local-cron` (the meter service now calls `startLocalCron()`), manually
+  via `POST /meters/anomalies/run`. Per metering point it loads the absolute
+  reading series (across device replacements) and only evaluates intervals that end
+  within the last `ANOMALY_RECENCY_DAYS` (60) — older intervals
+  only feed baseline and season reference.
+- **Baseline**: weighted mean and standard deviation of the daily rate of the
+  up to 12 preceding intervals (at least 4), weighted by
+  interval length. The standard deviation has a floor of 10 % of the
+  mean — twelve nearly identical monthly readings would otherwise turn every
+  fluctuation into a five-sigma event.
+- **Seasonality**: rate of the same period one year earlier (pro rata in time
+  over the intervals back then). If the current rate lies within
+  ±25 % of it, the deviation is seasonal and is not reported.
+- **Types**: `consumption_spike` / `consumption_drop` (|z| ≥ 3 and at least
+  ±50 % versus the baseline), `standstill` (operating-hours meter without
+  progress over ≥ 7 days although it usually runs),
+  `negative_consumption` (absolute reading decreasing — the device validation
+  catches this within a device, not across a wrongly
+  configured device replacement).
+- **Table `meter_anomalies`** (migration 0191): status
+  `pending → confirmed | dismissed`, `score` (z-score), interval boundaries,
+  `reading_id` of the closing reading, `details` (rate, baseline,
+  seasonal rate, days, values). `UNIQUE (meter_id, type, interval_end)` makes
+  the daily run idempotent; open findings in the window that are not
+  detected again (the reading was corrected) are withdrawn by the run —
+  confirmed or dismissed ones remain.
+- **Frontend**: `MeterAnomaliesView.vue` (route `zaehler-anomalien`,
+  menu entry "Auffälligkeiten" (anomalies) with badge from `stores/meterAnomalies.ts`),
+  confirm/dismiss/reopen, filter by type and status,
+  "Jetzt prüfen" (check now) with `meters.manage`.
+- Optional LLM assessment (explanatory text) remains a later expansion stage.
 
 ---
 
-## 6. Finance-Verknüpfung (Etappe 8, #1018)
+## 6. Finance link (stage 8, #1018)
 
-- Link-Tabelle `meter_reading_transactions` (§2.1), Muster
-  `finance_transaction_document`. Endpunkte in
-  `meter/reading-transactions.ts`, Logik in
-  `reading-transactions.service.ts`: Die Ablesung muss auf einem sichtbaren
-  Zähler liegen, die Transaktion unter der Finance-ACL lesbar sein
-  (`finance_account_access`, `finance.admin` umgeht sie). Verknüpfen ist
-  idempotent; die Liste blendet Transaktionen aus, die der Aufrufer nicht
-  (mehr) lesen darf.
-- `GET /meters/:id/readings` liefert je Ablesung `linkedTransactions`
-  (Anzahl), damit die Tabelle den Zustand ohne Zusatzabfrage zeigt.
-- UI: Spalte „Zahlung“ in der Ablesungstabelle (nur mit `finance.view`) →
-  `MeterReadingTransactionsDialog.vue`: verknüpfte Buchungen (lösen mit
-  `meters.read_entry`) und die bestehende Finance-Suche; ohne Suchbegriff
-  werden die Buchungen ±45 Tage um die Ablesung angeboten.
-- Match-Vorschläge (Score aus Datum/Empfänger wie
-  `finance/document-matcher.ts`) bleiben eine spätere Etappe — zunächst rein
-  manuelle Verknüpfung.
+- Link table `meter_reading_transactions` (§2.1), pattern
+  `finance_transaction_document`. Endpoints in
+  `meter/reading-transactions.ts`, logic in
+  `reading-transactions.service.ts`: The reading must belong to a visible
+  meter, the transaction must be readable under the finance ACL
+  (`finance_account_access`, `finance.admin` bypasses it). Linking is
+  idempotent; the list hides transactions that the caller may not (or no longer)
+  read.
+- `GET /meters/:id/readings` returns per reading `linkedTransactions`
+  (count), so that the table shows the state without an extra query.
+- UI: column "Zahlung" (payment) in the readings table (only with `finance.view`) →
+  `MeterReadingTransactionsDialog.vue`: linked bookings (unlink with
+  `meters.read_entry`) and the existing finance search; without a search term
+  the bookings ±45 days around the reading are offered.
+- Match suggestions (score from date/recipient like
+  `finance/document-matcher.ts`) remain a later stage — initially purely
+  manual linking.
 
-### 6.1 Abschläge vs. Ist-Kosten (Report E3)
+### 6.1 Advance payments vs. actual costs (report E3)
 
 `GET /meters/reports/advance-payments` (`meters.view` + `finance.view`),
-`meter/advance-payments.service.ts`, Panel `MeterAdvancePaymentsPanel.vue`.
+`meter/advance-payments.service.ts`, panel `MeterAdvancePaymentsPanel.vue`.
 
-Je Zähler mit verknüpften Zahlungen und Kalenderjahr: `paidEur` = Σ −Betrag
-der verknüpften Buchungen des Jahres (Zahlungen sind negative Buchungen; eine
-positiv gebuchte Erstattung mindert die Summe), `actualCostEur` = bei
-Stromzählern die Netto-Stromkosten des Energie-Reports (Jahres-Bucket), bei
-Wasserzählern die Wasserkosten aus dem Wirtschaftlichkeits-Report; Gas hat
-noch kein Kostenmodell (`null`). `expectedSettlementEur = paid − actual`,
-positiv = Erstattung zu erwarten. Kalenderjahr ist eine Näherung an das
-Abrechnungsjahr des Versorgers; das laufende Jahr ist als `partial`
-markiert.
+Per meter with linked payments and calendar year: `paidEur` = Σ −amount
+of the linked bookings of the year (payments are negative bookings; a
+refund booked positively reduces the sum), `actualCostEur` = for
+electricity meters the net electricity costs of the energy report (annual bucket), for
+water meters the water costs from the profitability report; gas has
+no cost model yet (`null`). `expectedSettlementEur = paid − actual`,
+positive = refund expected. The calendar year is an approximation of the
+utility's billing year; the current year is marked as `partial`.
 
 ---
 
 ## 7. Frontend (Vue 3 + PrimeVue)
 
-Neue Views unter `frontend/src/views/meters/`, Navigation gated auf
+New views under `frontend/src/views/meters/`, navigation gated on
 `module.meters`:
 
-| View | Recht | Inhalt |
+| View | Permission | Content |
 |---|---|---|
-| `MetersView.vue` | `meters.view` | Kachel-/Listenübersicht: Name, Typ-Icon, Standort, letzter Stand + Datum, Absolutstand, Anomalie-Badge; Schnellaktion „Ablesen“. Sortiert nach Typ (Reihenfolge von `METER_TYPE_LABELS`), dann Name (`frontend/src/utils/meterSort.ts`) |
-| `MeterReportsView.vue` | `meters.view` | Alle Auswertungen: Trend-Kacheln, Energie-Report, Wirtschaftlichkeit, Vergleichsrechnungen, Anlagenzustand, Saisonprofil, Heizung witterungsbereinigt, Abschläge — plus der Dialog „Tarife & Annahmen“ |
-| `MeterDetailView.vue` | `meters.view` | Stammdaten, Gerätehistorie (Tabelle wie im Issue-Beispiel), Ablesungsliste, Verbrauchs-Chart mit Vorjahresvergleich, verknüpfte Zahlungen |
-| `MeterQuickEntryView.vue` | `meters.read_entry` | Schnelle Ablesemaske mit einem gemeinsamen Datum für alle konfigurierten Zähler und OCR-Kamera je Zählerzeile |
-| `MeterQuickEntryConfigView.vue` | `meters.read_entry` | Persönliche Konfigurationsseite für Zählerauswahl/Reihenfolge (`meter_quick_entry_items`), erreichbar über das Zahnrad in der Schnell-Erfassung |
-| `MeterReadingEntryView.vue` (oder Dialog) | `meters.read_entry` | Wert + Datum/Zeit (Default jetzt), Foto-Button → OCR-Vorschlag mit Confidence, Bestätigen/Korrigieren |
-| `MetersAdminView.vue` | `meters.manage` | Zähler-CRUD, Gerät ersetzen (Wizard: Endstand alt → Startwert neu), API-Key-Verwaltung |
-| `MeterAnomaliesView.vue` | `meters.view` (Status setzen: `meters.read_entry`) | Auffälligkeiten-Postfach (§5.3), Badge im Modulmenü |
-| `MeterDegreeDaysHelpView.vue` | `meters.view` | Online-Hilfe zu Gradtagen und Witterungsbereinigung (§5.2.6), verlinkt aus dem Heizungs-Report (Muster: `finance/BankcontactsHelpView.vue`) |
+| `MetersView.vue` | `meters.view` | Tile/list overview: name, type icon, location, last reading + date, absolute reading, anomaly badge; quick action "Ablesen" (read). Sorted by type (order of `METER_TYPE_LABELS`), then name (`frontend/src/utils/meterSort.ts`) |
+| `MeterReportsView.vue` | `meters.view` | All analyses: trend tiles, energy report, profitability, comparison calculations, system condition, season profile, weather-adjusted heating, advance payments — plus the dialog "Tarife & Annahmen" |
+| `MeterDetailView.vue` | `meters.view` | Master data, device history (table as in the issue example), readings list, consumption chart with previous-year comparison, linked payments |
+| `MeterQuickEntryView.vue` | `meters.read_entry` | Quick reading form with one shared date for all configured meters and OCR camera per meter row |
+| `MeterQuickEntryConfigView.vue` | `meters.read_entry` | Personal configuration page for meter selection/order (`meter_quick_entry_items`), reachable via the gear icon in the quick entry |
+| `MeterReadingEntryView.vue` (or dialog) | `meters.read_entry` | Value + date/time (default now), photo button → OCR suggestion with confidence, confirm/correct |
+| `MetersAdminView.vue` | `meters.manage` | Meter CRUD, replace device (wizard: old final reading → new start value), API key management |
+| `MeterAnomaliesView.vue` | `meters.view` (set status: `meters.read_entry`) | Anomalies inbox (§5.3), badge in the module menu |
+| `MeterDegreeDaysHelpView.vue` | `meters.view` | Online help on degree days and weather adjustment (§5.2.6), linked from the heating report (pattern: `finance/BankcontactsHelpView.vue`) |
 
-**Zähler und Auswertungen sind zwei Seiten.** Die Zählerseite (`/zaehler`)
-verwaltet Stammdaten und Ablesungen — Liste, Anlegen/Bearbeiten, Historien-
-Import; die Auswertungsseite (`/zaehler/auswertungen`) trägt jeden Report.
-Beides auf einer Seite hieß: erst an sieben Panels vorbeiscrollen, um an die
-Zählerliste zu kommen. Die Tarife und Annahmen liegen bei den Auswertungen,
-weil sie nur dort wirken — jede Preisänderung lädt die Kosten-Reports neu.
-Beide Seiten verlinken aufeinander in der Kopfzeile, und das Modulmenü führt
-beide.
+**Meters and analyses are two pages.** The meters page (`/zaehler`)
+manages master data and readings — list, create/edit, history
+import; the analysis page (`/zaehler/auswertungen`) carries every report.
+Both on one page meant: first scrolling past seven panels to get to the
+meter list. The tariffs and assumptions sit with the analyses,
+because they only take effect there — every price change reloads the cost reports.
+Both pages link to each other in the header row, and the module menu leads to
+both.
 
-Design: nur semantische PrimeVue-CSS-Variablen (CSS-Style-Guide),
-Datums-Handling über `frontend/src/utils/dateFormat.ts`
-(`toLocalIsoDate`/`parseLocalDate`). Charts wie in den Finance-Views.
-Storybook-Stories für Übersicht + Erfassungsdialog.
+Design: only semantic PrimeVue CSS variables (CSS style guide),
+date handling via `frontend/src/utils/dateFormat.ts`
+(`toLocalIsoDate`/`parseLocalDate`). Charts as in the Finance views.
+Storybook stories for overview + entry dialog.
 
 ---
 
-## 8. Etappen
+## 8. Stages
 
-| # | Titel | Inhalt | Abhängig von |
+| # | Title | Content | Depends on |
 |---|---|---|---|
-| 1 | DB + Rechte | Migration `0121` + `_journal.json`, Schema in `db/schema.ts`, Seed-Permissions, Service-Skelett `meter/` | — |
-| 2 | Zähler-CRUD + Geräte | `meter.ts`, Ersetzen-Flow, Admin-View, Tests (Monotonie, Gerätewechsel-Invarianten) | 1 |
-| 3 | Manuelle Ablesungen | `readings.ts`, Absolutstand-Berechnung, Übersichts- + Detail-View, Erfassungsdialog | 2 |
-| 4 | Foto-OCR | `receipt-ocr-service`-Endpunkt `/meter-reading`, `readings-ocr.ts`, Foto-Ablage, Bestätigungs-UI | 3 |
-| 5 | API-Ingestion | `meter_api_keys`, `ingest.ts` (Bearer, Idempotenz, Rate-Limit), Key-Verwaltung in Admin-View | 3 |
-| 6 | Reports | Umgesetzt (6a–6e, siehe `documentation/utility-meters-reports.md`), inkl. Day/Week-Granularität (#1024), Saisonprofil A3 (#1022) und Witterungsbereinigung C3 (#1023) | 3 |
-| 7 | Anomalien | Umgesetzt: Job + `meter_anomalies` (Migration 0191), Postfach mit Badge (#1015) | 6 |
-| 8 | Finance-Link | Umgesetzt: Endpunkte, Dialog an der Ablesung, Report E3 Abschlagsvergleich (#1018) | 3 (+ Finance) |
+| 1 | DB + permissions | Migration `0121` + `_journal.json`, schema in `db/schema.ts`, seed permissions, service skeleton `meter/` | — |
+| 2 | Meter CRUD + devices | `meter.ts`, replace flow, admin view, tests (monotonicity, device-replacement invariants) | 1 |
+| 3 | Manual readings | `readings.ts`, absolute-reading calculation, overview + detail view, entry dialog | 2 |
+| 4 | Photo OCR | `receipt-ocr-service` endpoint `/meter-reading`, `readings-ocr.ts`, photo storage, confirmation UI | 3 |
+| 5 | API ingestion | `meter_api_keys`, `ingest.ts` (bearer, idempotency, rate limit), key management in admin view | 3 |
+| 6 | Reports | Implemented (6a–6e, see `documentation/utility-meters-reports.md`), incl. day/week granularity (#1024), season profile A3 (#1022) and weather adjustment C3 (#1023) | 3 |
+| 7 | Anomalies | Implemented: job + `meter_anomalies` (migration 0191), inbox with badge (#1015) | 6 |
+| 8 | Finance link | Implemented: endpoints, dialog on the reading, report E3 advance-payment comparison (#1018) | 3 (+ Finance) |
 
-MVP = Etappen 1–3; jede Etappe wird einzeln getestet (`npm run test` vor
-jedem Push) und ist unabhängig deploybar.
+MVP = stages 1–3; each stage is tested individually (`npm run test` before
+every push) and can be deployed independently.
 
 ---
 
-## 9. Tests (je Etappe, Vitest)
+## 9. Tests (per stage, Vitest)
 
-- **Monotonie**: rückwirkende/zukünftige Ablesungen, Grenzfälle exakt gleicher
-  Wert, Verstoß → `invalid_argument`.
-- **Gerätewechsel**: Absolutstand vor/nach Wechsel (Issue-Beispiel 102→734,
-  neu ab 3), nur ein aktives Gerät pro Messstelle.
-- **Ingest**: gültiger/ungültiger/deaktivierter Key, Duplikat (idempotent),
-  Monotonie-422, `last_used_at`.
-- **Reports**: Bucketbildung über Gerätewechsel, leere Zeiträume,
-  Filtergrenzen; später Interpolation und Vorjahresvergleich.
-- **Rechte**: Sichtbarkeit Owner/Gruppe, `meters.manage` erforderlich für
-  CRUD/Keys.
-- **OCR**: Client gemockt (Muster `documents/llm-client.test.ts`),
-  Confidence-Weitergabe, kein Auto-Save.
-- **Anomalien** (`anomalies.service.test.ts`): reiner Detektor (Sprung,
-  Einbruch, saisonaler Anstieg wird nicht gemeldet, alte Intervalle nur
-  Baseline, Mindest-Baseline, Stillstand nur bei Betriebsstunden,
-  rückläufiger Stand, zu kurze Intervalle); Job idempotent, zieht korrigierte
-  Funde zurück, behält bestätigte; Endpunkte Sichtbarkeit + Rechte.
-- **Finance-Link** (`reading-transactions.test.ts`): verknüpfen/listen/lösen,
-  Idempotenz, Zähler-Sichtbarkeit, Finance-ACL inkl. `finance.admin`,
-  `linkedTransactions` in der Ablesungsliste, Abschlagsreport.
-- **Reports**: Day/Week-Buckets (ISO-Woche, Jahreswechsel, Tages-Split,
-  Vorjahr), Saisonprofil-Pivot, Witterungsbereinigung in beiden Modi.
-- **Gradtagzahlen** (`degree-days.service.test.ts`): VDI-Summe und
-  Heizgrenze, Toleranz fehlender Tage, Archiv-Nachlauf, Parser, Wohnort
-  (Raster, Validierung, Rechte), Auffüllen mit Fake-Archiv (nur fehlende
-  Monate, Handeingabe bleibt, ein Aufruf je Jahr, idempotent,
-  unvollständige Monate), Ausfall → `unavailable`.
+- **Monotonicity**: retroactive/future readings, edge cases of exactly equal
+  value, violation → `invalid_argument`.
+- **Device replacement**: absolute reading before/after replacement (issue example 102→734,
+  new from 3), only one active device per metering point.
+- **Ingest**: valid/invalid/disabled key, duplicate (idempotent),
+  monotonicity 422, `last_used_at`.
+- **Reports**: bucket formation across device replacement, empty periods,
+  filter boundaries; later interpolation and previous-year comparison.
+- **Permissions**: visibility owner/group, `meters.manage` required for
+  CRUD/keys.
+- **OCR**: client mocked (pattern `documents/llm-client.test.ts`),
+  confidence passthrough, no auto-save.
+- **Anomalies** (`anomalies.service.test.ts`): pure detector (spike,
+  drop, seasonal rise is not reported, old intervals only
+  baseline, minimum baseline, standstill only for operating hours,
+  decreasing reading, too-short intervals); job idempotent, withdraws corrected
+  findings, keeps confirmed ones; endpoints visibility + permissions.
+- **Finance link** (`reading-transactions.test.ts`): link/list/unlink,
+  idempotency, meter visibility, finance ACL incl. `finance.admin`,
+  `linkedTransactions` in the readings list, advance-payment report.
+- **Reports**: day/week buckets (ISO week, turn of the year, day split,
+  previous year), season-profile pivot, weather adjustment in both modes.
+- **Degree days** (`degree-days.service.test.ts`): VDI sum and
+  heating limit, tolerance of missing days, archive lag, parser, home location
+  (grid, validation, permissions), backfill with fake archive (only missing
+  months, manual entry stays, one call per year, idempotent,
+  incomplete months), outage → `unavailable`.

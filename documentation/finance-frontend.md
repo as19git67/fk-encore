@@ -1,81 +1,81 @@
-# Finance — Frontend: Views, Stores, Wireframes
+# Finance — Frontend: views, stores, wireframes
 
-Ziel: Das Finanz-Modul bekommt im Vue/PrimeVue-Frontend von fk-encore
-eine eigene Navigationssektion mit 13 Views. Der Legacy-Finanzkraft-
-Stack (Vue 3, PrimeVue, Pinia) matcht 1:1, sodass Views *inhaltlich*
-übernommen werden können — der Code wird jedoch neu geschrieben gegen
-den fk-encore-API-Helper und den bestehenden User-Store.
+Goal: The finance module gets its own navigation section with 13 views in the Vue/PrimeVue
+frontend of fk-encore. The legacy Finanzkraft
+stack (Vue 3, PrimeVue, Pinia) matches 1:1, so views can be adopted
+*in content* — the code, however, is rewritten against
+the fk-encore API helper and the existing user store.
 
-Entfallen gegenüber Legacy: `CategoriesView`, `TransactionRulesView`.
-Neu gegenüber Legacy: `AccountAssignmentView`, `SyncScheduleView`,
+Dropped compared to legacy: `CategoriesView`, `TransactionRulesView`.
+New compared to legacy: `AccountAssignmentView`, `SyncScheduleView`,
 `AnalysisView`.
 
-Status: Feature-Plan, Umsetzung in Etappen.
+Status: Feature plan, implemented in stages.
 
-Ergänzung: Die umgesetzten Finance-Basket-Aktionen (`Split`, benannte
-`Baskets`) sind in
-[`finance-basket-actions.md`](finance-basket-actions.md) dokumentiert.
+Addendum: The implemented finance basket actions (`Split`, named
+`Baskets`) are documented in
+[`finance-basket-actions.md`](finance-basket-actions.md).
 
 ---
 
-## 1. Stack und Konventionen
+## 1. Stack and conventions
 
 - **Vue 3.5** Composition API, `<script setup lang="ts">`.
-- **PrimeVue 4.5** für UI-Komponenten; Theme folgt dem bestehenden
-  fk-encore-Theme.
-- **Pinia 3** für State, Stores in `src/stores/finance/`.
-- **Vue Router 4**, Routen unter `/finance/*`.
-- **TypeScript strict**, Interfaces für API-Responses aus dem
-  generierten Encore-Client.
-- **API-Zugriff**: über den bestehenden fk-encore-API-Helper (nicht
-  axios, nicht eigenes Fetch-Wrapping).
-- **Auth**: über den bestehenden User-Store; kein eigener Auth-Layer im
-  Modul. Permissions werden via `useAuth().hasPermission("finance.view")`
-  abgefragt, parallel zu den Backend-Checks.
+- **PrimeVue 4.5** for UI components; the theme follows the existing
+  fk-encore theme.
+- **Pinia 3** for state, stores in `src/stores/finance/`.
+- **Vue Router 4**, routes under `/finance/*`.
+- **TypeScript strict**, interfaces for API responses from the
+  generated Encore client.
+- **API access**: via the existing fk-encore API helper (not
+  axios, not a custom fetch wrapper).
+- **Auth**: via the existing user store; no separate auth layer in the
+  module. Permissions are queried via `useAuth().hasPermission("finance.view")`,
+  in parallel with the backend checks.
 
 ---
 
-## 2. Pinia-Stores
+## 2. Pinia stores
 
-| Store | Zweck |
+| Store | Purpose |
 |---|---|
-| `useAccountsStore` | Listen- und Detail-Cache, Permissions-aware Filter |
-| `useTransactionsStore` | paginierte Liste pro Konto, Tag-Filter, optimistische Updates |
-| `useBankcontactsStore` | Bankkontakte inkl. offenem TAN-Dialog-State |
-| `useTagsStore` | globale Tag-Liste, getrennt nach `source='user'` und `source='ai'` |
-| `useSyncScheduleStore` | `finance_bankcontact.sync_times` laden/speichern |
-| `useFinancePrefsStore` | `finance_system_pref` (globale Einstellungen) |
+| `useAccountsStore` | List and detail cache, permissions-aware filter |
+| `useTransactionsStore` | paginated list per account, tag filter, optimistic updates |
+| `useBankcontactsStore` | Bank contacts including open TAN dialog state |
+| `useTagsStore` | global tag list, separated by `source='user'` and `source='ai'` |
+| `useSyncScheduleStore` | load/save `finance_bankcontact.sync_times` |
+| `useFinancePrefsStore` | `finance_system_pref` (global settings) |
 
-Jeder Store hält seinen Loading- und Error-State; Komponenten rufen nur
-Store-Actions, nie direkt den API-Helper.
+Each store holds its loading and error state; components call only
+store actions, never the API helper directly.
 
-**Hinweis:** Depot-Holdings werden *nicht* über einen eigenen Store
-verwaltet, sondern on-demand direkt via `listHoldings(accountId)` aus
-dem API-Helper geladen. Die Daten leben ausschließlich im lokalen State
-der `AccountDetailView`-Komponente.
+**Note:** Depot holdings are *not* managed via a dedicated store,
+but loaded on demand directly via `listHoldings(accountId)` from
+the API helper. The data lives exclusively in the local state
+of the `AccountDetailView` component.
 
 ---
 
 ## 3. Views
 
-| View | Route | Permission | Zweck |
+| View | Route | Permission | Purpose |
 |---|---|---|---|
-| `BankcontactsView` | `/finance/bankcontacts` | `finance.accounts.manage` | Liste + Anlegen |
-| `BankcontactDetailView` | `/finance/bankcontacts/:id` | `finance.accounts.manage` | Edit, Credentials setzen, Sync-Trigger |
-| `TanDialog` (Modal) | — | `finance.accounts.manage` | TAN-Eingabe mit Countdown |
-| `AccountsView` | `/finance/accounts` | `finance.view` | Konten-Liste (ACL-gefiltert) |
-| `AccountDetailView` | `/finance/accounts/:id` | `finance.view` | Saldo-Historie, Transaktionen |
-| `AccountAssignmentView` | `/finance/admin/access` | `finance.admin` | User↔Konto ACL (neu) |
-| `TransactionsView` | `/finance/transactions` | `finance.view` | Liste + Tag-Filter |
-| `TransactionDetailView` | `/finance/transactions/:id` | `finance.view` | Edit, Tag-Vorschläge annehmen |
-| `TransactionNewView` | `/finance/transactions/new` | `finance.view` | manuelle Buchung |
-| `BatchTagView` | `/finance/tags/batch` | `finance.view` | Mehrfach-Tagging auf Auswahl |
-| `SyncScheduleView` | `/finance/bankcontacts/:id/schedule` | `finance.accounts.manage` | UI-Cron pro Bankkontakt (neu) |
-| `AnalysisView` | `/finance/analysis` | `finance.view` | Natural-Language-Queries (neu) |
+| `BankcontactsView` | `/finance/bankcontacts` | `finance.accounts.manage` | List + create |
+| `BankcontactDetailView` | `/finance/bankcontacts/:id` | `finance.accounts.manage` | Edit, set credentials, sync trigger |
+| `TanDialog` (modal) | — | `finance.accounts.manage` | TAN entry with countdown |
+| `AccountsView` | `/finance/accounts` | `finance.view` | Account list (ACL-filtered) |
+| `AccountDetailView` | `/finance/accounts/:id` | `finance.view` | Balance history, transactions |
+| `AccountAssignmentView` | `/finance/admin/access` | `finance.admin` | User↔account ACL (new) |
+| `TransactionsView` | `/finance/transactions` | `finance.view` | List + tag filter |
+| `TransactionDetailView` | `/finance/transactions/:id` | `finance.view` | Edit, accept tag suggestions |
+| `TransactionNewView` | `/finance/transactions/new` | `finance.view` | manual transaction |
+| `BatchTagView` | `/finance/tags/batch` | `finance.view` | Multi-tagging on a selection |
+| `SyncScheduleView` | `/finance/bankcontacts/:id/schedule` | `finance.accounts.manage` | UI cron per bank contact (new) |
+| `AnalysisView` | `/finance/analysis` | `finance.view` | Natural-language queries (new) |
 
-Router-Guards prüfen die jeweilige Permission und leiten bei fehlender
-Berechtigung auf den Dashboard-Root zurück — analog zu den bestehenden
-Photos/Documents-Routen.
+Router guards check the respective permission and redirect to the dashboard root
+if authorization is missing — analogous to the existing
+Photos/Documents routes.
 
 ---
 
@@ -83,306 +83,307 @@ Photos/Documents-Routen.
 
 ### 4.1 `TanDialog`
 
-Wird als PrimeVue-Dialog über jede Ansicht gelegt, die einen Sync
-auslöst. Countdown bindet gegen `expires_at` aus der TAN-Session.
+Is overlaid as a PrimeVue dialog on every view that triggers a sync.
+The countdown binds against `expires_at` from the TAN session.
 
 ```
 +---------------------------------------------+
-| TAN erforderlich — Sparkasse XY             |
+| TAN required — Sparkasse XY                 |
 +---------------------------------------------+
-| Herausforderung:                            |
-|   Bitte bestätigen Sie die Anmeldung        |
-|   in der pushTAN-App Ihrer Sparkasse.       |
+| Challenge:                                  |
+|   Please confirm the login                  |
+|   in the pushTAN app of your Sparkasse.     |
 |                                             |
 | TAN:  [ _ _ _ _ _ _ ]                       |
 |                                             |
-| Gültig noch:  09:42                         |
+| Valid for:  09:42                           |
 |                                             |
-|                   [Abbrechen]  [Bestätigen] |
+|                     [Cancel]  [Confirm]     |
 +---------------------------------------------+
 ```
 
-Flow (siehe `finance-fints-integration.md` §4): wenn
-`POST /finance/statements` mit `{ state: "tan-required" }` antwortet,
-öffnet die UI den Dialog mit `tanReference` und `challenge`; Submit
-ruft `POST /finance/tan-sessions/complete`, das dieselbe
-discriminated-union-Response liefert (bei Erfolg `state: "idle"`,
-bei falscher TAN erneut `state: "tan-required"` mit neuem Challenge).
+Flow (see `finance-fints-integration.md` §4): when
+`POST /finance/statements` responds with `{ state: "tan-required" }`,
+the UI opens the dialog with `tanReference` and `challenge`; submit
+calls `POST /finance/tan-sessions/complete`, which returns the same
+discriminated-union response (on success `state: "idle"`,
+on a wrong TAN `state: "tan-required"` again with a new challenge).
 
 ### 4.2 `AnalysisView`
 
 ```
 +--------------------------------------------------------+
-| Analyse                                                |
+| Analysis                                               |
 +--------------------------------------------------------+
-| Frage:  [ Was habe ich im Italien-Urlaub 2024 …   ] 🔍 |
+| Question:  [ Was habe ich im Italien-Urlaub 2024 … ] 🔍 |
 +--------------------------------------------------------+
-| Erkannt:                                               |
-|   Tags:      [urlaub ✕] [italien-2024 ✕]  + hinzufügen |
+| Detected:                                              |
+|   Tags:      [urlaub ✕] [italien-2024 ✕]  + add         |
 |   Operator:  (•) AND   ( ) OR                          |
-|   Zeitraum:  [2024-06-01] — [2024-09-30]               |
-|                                    [Aktualisieren]     |
+|   Period:    [2024-06-01] — [2024-09-30]               |
+|                                    [Refresh]           |
 +--------------------------------------------------------+
-| Summe:     2.341,50 €   Anzahl: 47   Ø:  49,82 €       |
+| Total:     2.341,50 €   Count: 47   Avg:  49,82 €      |
 |                                                        |
-| [ Monats-Balken-Chart (PrimeVue Chart)              ]  |
+| [ Monthly bar chart (PrimeVue Chart)                ]  |
 |                                                        |
-| Top-Gegenseiten:                                       |
-|   Trattoria Da Luigi      412,00 €   (14 Buchungen)    |
-|   Hotel Firenze           890,00 €   ( 3 Buchungen)    |
-|   Trenitalia              234,00 €   ( 8 Buchungen)    |
+| Top counterparties:                                    |
+|   Trattoria Da Luigi      412,00 €   (14 transactions) |
+|   Hotel Firenze           890,00 €   ( 3 transactions) |
+|   Trenitalia              234,00 €   ( 8 transactions) |
 |                                                        |
-|                     [Als CSV exportieren (optional)]   |
+|                     [Export as CSV (optional)]         |
 +--------------------------------------------------------+
 ```
 
-AST-Chips sind editierbar — User kann Tags entfernen/hinzufügen,
-Operator umschalten, Zeitraum anpassen, dann „Aktualisieren". Nur der
-initiale Parse ruft den `llm-service`; Editierungen laufen rein als
-SQL gegen das Backend.
+(The sample question reads in English: "What did I spend on the 2024 Italy vacation …".)
+
+AST chips are editable — the user can remove/add tags, toggle the
+operator, adjust the period, then click "Refresh". Only the
+initial parse calls the `llm-service`; edits run purely as
+SQL against the backend.
 
 ### 4.3 `SyncScheduleView`
 
 ```
 +--------------------------------------------------------+
-| Sync-Zeiten — Sparkasse XY                             |
+| Sync times — Sparkasse XY                              |
 +--------------------------------------------------------+
-| Zeitzone:  [ Europe/Berlin ▾ ]                         |
+| Time zone:  [ Europe/Berlin ▾ ]                        |
 |                                                        |
 | Slots:                                                 |
-|   Mo Di Mi Do Fr       06:25   [Entfernen]             |
-|   Mo Di Mi Do Fr       15:25   [Entfernen]             |
-|   Sa                   08:00   [Entfernen]             |
+|   Mo Tu We Th Fr      06:25   [Remove]                 |
+|   Mo Tu We Th Fr      15:25   [Remove]                 |
+|   Sa                  08:00   [Remove]                 |
 |                                                        |
-|   + Slot hinzufügen                                    |
-|     Wochentage: [ ]Mo [ ]Di … [ ]So                    |
-|     Zeit:       [ 08:00 ]                              |
-|     [Hinzufügen]                                       |
+|   + Add slot                                           |
+|     Weekdays:  [ ]Mo [ ]Tu … [ ]Su                     |
+|     Time:      [ 08:00 ]                               |
+|     [Add]                                              |
 |                                                        |
-|                       [Abbrechen]  [Speichern]         |
+|                       [Cancel]  [Save]                 |
 +--------------------------------------------------------+
 ```
 
-Speichern schreibt `finance_bankcontact.sync_times` als JSON-Array (siehe
-`finance-data-model.md` §2.3). Die UI zeigt die nächste effektive
-Ausführung relativ zu `now()` in der aktuellen Zeitzone — inklusive
-DST-Anpassung.
+Saving writes `finance_bankcontact.sync_times` as a JSON array (see
+`finance-data-model.md` §2.3). The UI shows the next effective
+run relative to `now()` in the current time zone — including
+DST adjustment.
 
 ### 4.4 `AccountAssignmentView`
 
 ```
 +--------------------------------------------------------+
-| Konto-Zugriff  (nur finance.admin)                     |
+| Account access  (finance.admin only)                   |
 +--------------------------------------------------------+
-| Konto:  [ DE12 … 3456  Girokonto Sparkasse XY  ▾ ]     |
+| Account:  [ DE12 … 3456  Checking Sparkasse XY  ▾ ]    |
 +--------------------------------------------------------+
-| Zugriffsberechtigte:                                   |
-|   Alice Müller     [ read  ▾ ]   [Entfernen]           |
-|   Bob Schmidt      [ write ▾ ]   [Entfernen]           |
+| Authorized users:                                      |
+|   Alice Müller     [ read  ▾ ]   [Remove]              |
+|   Bob Schmidt      [ write ▾ ]   [Remove]              |
 |                                                        |
-|   + User hinzufügen:                                   |
-|     [ User suchen …          ]   [ read ▾ ]   [+]      |
+|   + Add user:                                          |
+|     [ Search user …          ]   [ read ▾ ]   [+]      |
 |                                                        |
-|                                      [Speichern]       |
+|                                      [Save]            |
 +--------------------------------------------------------+
 ```
 
-Schreibt auf `finance_account_access`. Das Dropdown für Users zieht aus
-dem bestehenden User-Endpoint (keine eigene Finance-User-Liste).
-Bestehende Zeilen des gewählten Kontos werden vor dem Speichern als
-Diff gegen die neue Liste berechnet (Inserts / Deletes / Level-Updates).
+Writes to `finance_account_access`. The dropdown for users draws from
+the existing user endpoint (no separate finance user list).
+Existing rows of the selected account are computed before saving as
+a diff against the new list (inserts / deletes / level updates).
 
 ### 4.5 `BankcontactsView`
 
-Einstiegsliste für Nutzer mit `finance.accounts.manage`.
+Entry list for users with `finance.accounts.manage`.
 
 ```
 +-----------------------------------------------------------------------+
-| Bankkontakte                                     [+ Neu anlegen]      |
+| Bank contacts                                    [+ Create new]       |
 +-----------------------------------------------------------------------+
-| Name            BLZ       Login            Letzter Sync       Status  |
+| Name            BLZ       Login            Last sync          Status  |
 |-----------------------------------------------------------------------|
 | Sparkasse XY    12345678  max.mustermann   2026-04-23 06:25   ✓ OK    |
 | ING             50010517  123456789        2026-04-22 15:25   ⚠ TAN   |
-| DKB             12030000  98765432         —                  ⛔ Fehler|
+| DKB             12030000  98765432         —                  ⛔ Error |
 +-----------------------------------------------------------------------+
-| Filter: [ Status: Alle ▾ ]      Zeile klicken → Detailansicht         |
+| Filter: [ Status: All ▾ ]       Click row → detail view               |
 +-----------------------------------------------------------------------+
 ```
 
-Status-Spalte: `last_sync_status` (`OK`, `tan-required`, `error`) plus
-passendes Icon. Die Zeilenfarbe signalisiert Probleme (gelb für
-`tan-required`, rot für `error`). Klick öffnet `BankcontactDetailView`.
+Status column: `last_sync_status` (`OK`, `tan-required`, `error`) plus
+a matching icon. The row color signals problems (yellow for
+`tan-required`, red for `error`). Clicking opens `BankcontactDetailView`.
 
 ### 4.6 `BankcontactDetailView`
 
-Formular-View für Stammdaten, Credentials und Sync-Aktionen. Teilt sich
-in drei klar getrennte Kartenbereiche.
+Form view for master data, credentials and sync actions. Divided
+into three clearly separated card areas.
 
 ```
 +-----------------------------------------------------------------------+
-| Bankkontakt: Sparkasse XY                              [Zurück]       |
+| Bank contact: Sparkasse XY                             [Back]         |
 +-----------------------------------------------------------------------+
-| Stammdaten                                                            |
+| Master data                                                           |
 |   Name:         [ Sparkasse XY                             ]          |
 |   BLZ:          [ 12345678 ]                                          |
 |   Login:        [ max.mustermann                           ]          |
-|   Server-URL:   [ https://hbci.sparkasse-xy.de             ]          |
-|   TAN-Methode:  [ pushTAN ▾ ]      [TAN-Methoden neu laden]           |
+|   Server URL:   [ https://hbci.sparkasse-xy.de             ]          |
+|   TAN method:   [ pushTAN ▾ ]      [Reload TAN methods]               |
 +-----------------------------------------------------------------------+
 | Credentials                                                           |
-|   Passwort/PIN: [ ············ ]   [Neu setzen]                       |
-|   Status: ✓ verschlüsselt gespeichert  (zuletzt 2026-04-23)           |
+|   Password/PIN: [ ············ ]   [Set new]                          |
+|   Status: ✓ stored encrypted  (last 2026-04-23)                       |
 +-----------------------------------------------------------------------+
 | Sync                                                                  |
-|   Letzter Sync:  2026-04-23 06:25 — OK, 3 Umsätze                     |
-|   [Sync jetzt]          [Sync-Zeiten bearbeiten]                      |
+|   Last sync:  2026-04-23 06:25 — OK, 3 transactions                   |
+|   [Sync now]            [Edit sync times]                             |
 +-----------------------------------------------------------------------+
-|                           [Abbrechen]           [Speichern]           |
+|                           [Cancel]              [Save]                |
 +-----------------------------------------------------------------------+
 ```
 
-- Der `Passwort/PIN`-Input sendet den Klartext ausschließlich an den
-  Set-Credentials-Endpoint, der `encryption.ts` (siehe
-  `finance-fints-integration.md` §3) nutzt; im Store bleibt nur der
-  boolesche „Status gespeichert"-Flag.
-- `Sync jetzt` ruft `POST /finance/statements`; liefert die Antwort
-  `{ state: "tan-required", ... }`, öffnet sich der `TanDialog` (§4.1).
-- `Sync-Zeiten bearbeiten` navigiert zu `SyncScheduleView` (§4.3) für
-  denselben Bankkontakt.
-- `TAN-Methoden neu laden` startet einen kurzen FinTS-Dialog nur zum
-  Lesen der verfügbaren Verfahren und aktualisiert das Dropdown.
+- The `Passwort/PIN` (password/PIN) input sends the plaintext exclusively to the
+  set-credentials endpoint, which uses `encryption.ts` (see
+  `finance-fints-integration.md` §3); only the
+  boolean "status stored" flag remains in the store.
+- `Sync jetzt` (Sync now) calls `POST /finance/statements`; if the response is
+  `{ state: "tan-required", ... }`, the `TanDialog` opens (§4.1).
+- `Sync-Zeiten bearbeiten` (Edit sync times) navigates to `SyncScheduleView` (§4.3) for
+  the same bank contact.
+- `TAN-Methoden neu laden` (Reload TAN methods) starts a short FinTS dialog only to
+  read the available methods and updates the dropdown.
 
 ### 4.7 `AccountsView`
 
-Die einzige View, die jeder `finance.view`-User sieht. ACL-gefiltert:
-nur Konten, auf denen der User einen `finance_account_access`-Eintrag
-hat (oder alle, wenn er `finance.admin` besitzt).
+The only view that every `finance.view` user sees. ACL-filtered:
+only accounts on which the user has a `finance_account_access` entry
+(or all, if they hold `finance.admin`).
 
 ```
 +-----------------------------------------------------------------------+
-| Konten                                     [ Bankkontakt: Alle ▾ ]    |
+| Accounts                                   [ Bank contact: All ▾ ]    |
 +-----------------------------------------------------------------------+
-| Label             IBAN              Währ.  Saldo        Letzter Umsatz|
+| Label             IBAN              Curr.  Balance      Last txn      |
 |-----------------------------------------------------------------------|
 | Giro Sparkasse    DE12 … 3456       EUR     2.341,50 €  2026-04-22    |
 | Tagesgeld ING     DE50 … 0517       EUR    12.000,00 €  2026-04-15    |
 | Depot DKB         DE12 … 0000       EUR    45.678,90 €  2026-04-10    |
 +-----------------------------------------------------------------------+
-| Inaktive Konten anzeigen: [ ]     Zeile klicken → AccountDetailView   |
+| Show inactive accounts: [ ]       Click row → AccountDetailView       |
 +-----------------------------------------------------------------------+
 ```
 
-Der aktuelle Saldo kommt aus dem jüngsten Eintrag in
-`finance_account_balance`. Kein Inline-Editing — alle Änderungen laufen
-über `AccountDetailView` bzw. `AccountAssignmentView`.
+The current balance comes from the latest entry in
+`finance_account_balance`. No inline editing — all changes go
+through `AccountDetailView` or `AccountAssignmentView`.
 
 ### 4.8 `AccountDetailView`
 
-Zweigeteilt: oben Saldo-Verlauf, unten Umsatz-Liste (mit derselben
-Komponente wie `TransactionsView`, vorausgewähltes Konto).
+Split in two: balance history on top, transaction list below (using the same
+component as `TransactionsView`, with the account preselected).
 
 ```
 +----------------------------------------------------------------------+
-| Giro Sparkasse XY — DE12 … 3456                           [Zurück]   |
+| Giro Sparkasse XY — DE12 … 3456                           [Back]     |
 +----------------------------------------------------------------------+
-| Aktueller Saldo: 2.341,50 €      Stand: 2026-04-22 06:25             |
+| Current balance: 2.341,50 €      As of: 2026-04-22 06:25             |
 |                                                                      |
-| [ Saldo-Verlauf (PrimeVue Line Chart, 12 Monate)                  ]  |
+| [ Balance history (PrimeVue Line Chart, 12 months)                ]  |
 |                                                                      |
 +----------------------------------------------------------------------+
-| Umsätze                      [Filter ▾]   [+ Manuelle Buchung]       |
+| Transactions                 [Filter ▾]   [+ Manual transaction]     |
 |----------------------------------------------------------------------|
-| Datum       Verwendungszweck   Gegenseite      Betrag       Tags     |
+| Date        Purpose            Counterparty    Amount       Tags     |
 | 2026-04-22  Miete April        B. Vermieter    -850,00 €    [miete]  |
 | 2026-04-20  Supermarkt         REWE              -47,32 €   [alltag] |
 | 2026-04-15  Gehalt April       AG GmbH        +3.800,00 €   [gehalt] |
 +----------------------------------------------------------------------+
-| Zeitraum:  [ 12 Monate ▾ ]            Seite 1 von 14    < 1 2 3 >    |
+| Period:  [ 12 months ▾ ]              Page 1 of 14    < 1 2 3 >      |
 +----------------------------------------------------------------------+
 ```
 
-- Saldo-Chart-Zeitraum-Dropdown reused `finance_timespan`-Presets (siehe
+- The balance chart period dropdown reuses the `finance_timespan` presets (see
   `finance-data-model.md` §2.2).
-- `+ Manuelle Buchung` öffnet `TransactionNewView` mit vorausgewähltem
-  Konto — nur sichtbar, wenn der User `level='write'` auf dem Konto
-  hält.
-- Zeilen-Klick führt zu `TransactionDetailView`.
+- `+ Manuelle Buchung` (+ Manual transaction) opens `TransactionNewView` with a preselected
+  account — only visible if the user holds `level='write'` on the account.
+- Clicking a row leads to `TransactionDetailView`.
 
-#### Depot-Ansicht
+#### Depot view
 
-Für Depot-Konten (`type_kind === 'depot'`) wechselt die
-`AccountTransactionsView` in ein depot-optimiertes Layout:
+For depot accounts (`type_kind === 'depot'`), the
+`AccountTransactionsView` switches to a depot-optimized layout:
 
-- **Holdings-Tabelle** ("Positionen") wird anstelle der Umsatzliste
-  angezeigt. Spalten: Name/ISIN, Stück (amount), Kurs (price), Wert
-  (value), optional Einstand (cost_basis), G/V (unrealized_gain),
-  Realisiert (realized_gain), Anteil (share %). Eine Footer-Zeile zeigt
-  den Gesamtwert (Gesamt) und 100 %.
-  - Einstand/G-V/Realisiert werden komplett ausgeblendet, wenn keine
-    Position einen Wert dafür hat (`show*Column`-Computeds in
-    `AccountTransactionsView.vue`). Unter 640px fallen Einstand und
-    Realisiert zusätzlich weg (neben dem bereits bestehenden Wegfall von
-    Anteil) — auf schmalen Displays bleiben Name/Stk/Kurs/Wert/G-V
-    (#887). Jede aufgeklappte Position zeigt alle Werte trotzdem in
-    einer schmalen Kennzahlenzeile (`holdings-facts`) unter dem Chart.
-- **Wertverlauf-Chart** (Gesamtwert über die Zeit) und die
-  Positions-Sparkline im aufgeklappten Zustand nutzen kompakte
-  x-Achsen-Labels aus `utils/financeChartDates.ts`: Tag+Monat innerhalb
-  eines Kalenderjahres, Monat/Kurzjahr bei höchstens einem Datenpunkt pro
-  Monat über mehrere Jahre, sonst Tag+Monat+Kurzjahr. Das volle Datum
-  steht im Tooltip-Titel (#887).
-- **Transaction-Toolbar** (Filter, Batch-Select, Batch-Tag-Buttons) wird
-  ausgeblendet — Depot-Konten haben keine klassischen Buchungen.
-- **"Keine Buchungen vorhanden"**-Meldung wird unterdrückt — die
-  Holdings-Tabelle behandelt ihren eigenen Leer-Zustand ("Keine
-  Positionen vorhanden").
-- **Transaction-Loading wird übersprungen** für Depot-Konten, um eine
-  unnötige DB-Abfrage zu vermeiden.
+- **Holdings table** ("Positionen", positions) is shown instead of the transaction list.
+  Columns: name/ISIN, quantity (amount), price (price), value
+  (value), optional cost basis (cost_basis), gain/loss (unrealized_gain),
+  realized (realized_gain), share (share %). A footer row shows
+  the total value ("Gesamt", total) and 100 %.
+  - Cost basis/gain-loss/realized are hidden entirely if no
+    position has a value for them (`show*Column` computeds in
+    `AccountTransactionsView.vue`). Below 640px, cost basis and realized
+    additionally drop out (in addition to the already existing dropping of
+    share) — on narrow displays name/qty/price/value/gain-loss remain
+    (#887). Each expanded position shows all values nonetheless in
+    a narrow key-figures row (`holdings-facts`) below the chart.
+- **Value history chart** (total value over time) and the
+  position sparkline in the expanded state use compact
+  x-axis labels from `utils/financeChartDates.ts`: day+month within
+  one calendar year, month/short year for at most one data point per
+  month over several years, otherwise day+month+short year. The full date
+  appears in the tooltip title (#887).
+- **Transaction toolbar** (filter, batch select, batch tag buttons) is
+  hidden — depot accounts have no classic transactions.
+- The **"Keine Buchungen vorhanden"** (no transactions available) message is suppressed — the
+  holdings table handles its own empty state ("Keine
+  Positionen vorhanden", no positions available).
+- **Transaction loading is skipped** for depot accounts, to avoid an
+  unnecessary DB query.
 
-Holdings werden über `GET /finance/accounts/:id/holdings` geladen und
-in einer `<table>` angezeigt. Das jüngste `as_of`-Datum erscheint in
-der Abschnittsüberschrift.
+Holdings are loaded via `GET /finance/accounts/:id/holdings` and
+displayed in a `<table>`. The latest `as_of` date appears in
+the section heading.
 
-Die Depot-Erkennung nutzt `resolvedAccount.value?.type_kind === 'depot'`
-aus dem Overview-Store.
+Depot detection uses `resolvedAccount.value?.type_kind === 'depot'`
+from the overview store.
 
 ```
 +----------------------------------------------------------------------+
-| Depot DKB — 1234567800                                      [Zurück]   |
+| Depot DKB — 1234567800                                      [Back]   |
 +----------------------------------------------------------------------+
-| Aktueller Wert: 45.678,90 €      Stand: 2026-05-13                   |
+| Current value: 45.678,90 €      As of: 2026-05-13                    |
 +----------------------------------------------------------------------+
-| Positionen (13.05.2026)                                               |
+| Positions (13.05.2026)                                                |
 |----------------------------------------------------------------------|
-| Name / ISIN              Stück    Kurs        Wert         Anteil    |
+| Name / ISIN              Qty      Price       Value        Share     |
 | ADIDAS AG                10      215,40 €    2.154,00 €    4,7 %     |
 |   DE000A1EWWW0                                                       |
 | ISHARES CORE MSCI WO.    150      75,20 €   11.280,00 €   24,7 %     |
 |   IE00B4L5Y983                                                       |
 | …                                                                    |
 |----------------------------------------------------------------------|
-| Gesamt                                      45.678,90 €   100 %      |
+| Total                                       45.678,90 €   100 %      |
 +----------------------------------------------------------------------+
 ```
 
 ### 4.9 `TransactionsView`
 
-Haupt-Arbeitsansicht. DataTable mit Virtual-Scroll, Filter-Leiste,
-Multi-Select für Batch-Aktionen.
+Main working view. DataTable with virtual scroll, filter bar,
+multi-select for batch actions.
 
 ```
 +-----------------------------------------------------------------------+
-| Umsätze                            [ Zeitraum: 30 Tage ▾ ]  [Export]  |
+| Transactions                       [ Period: 30 days ▾ ]  [Export]    |
 +-----------------------------------------------------------------------+
 | Filter:                                                               |
-|   Konto:       [ Alle ▾ ]        Tags: [urlaub ✕] [+]                 |
-|   Betrag:      [ min ] — [ max ]  Gegenseite: [ Suche …           ]   |
-|                          [Filter anwenden]   [Leeren]                 |
+|   Account:     [ All ▾ ]         Tags: [urlaub ✕] [+]                 |
+|   Amount:      [ min ] — [ max ]  Counterparty: [ Search …        ]   |
+|                          [Apply filter]   [Clear]                     |
 +-----------------------------------------------------------------------+
-| [x] Alles auswählen (47)             [Tags auf Auswahl anwenden]      |
+| [x] Select all (47)                  [Apply tags to selection]        |
 |-----------------------------------------------------------------------|
-| [x] Datum       Konto       Gegenseite       Verwendung     Betrag    |
+| [x] Date        Account     Counterparty     Purpose        Amount    |
 | [x] 2024-08-12  Giro SpaXY  Hotel Firenze    Übernachtung  -340,00 €  |
 |                                                           [urlaub] [italien-2024] |
 | [ ] 2024-08-11  Giro SpaXY  Trattoria Luigi  Mittagessen    -47,30 €  |
@@ -390,152 +391,150 @@ Multi-Select für Batch-Aktionen.
 | [x] 2024-08-10  Giro SpaXY  Trenitalia       Zug Rom-Flo.   -89,00 €  |
 |                                                           [urlaub] [italien-2024] |
 +-----------------------------------------------------------------------+
-| Summe Auswahl: -476,30 €          Seite 1 von 3    < 1 2 3 >          |
+| Selection total: -476,30 €        Page 1 of 3    < 1 2 3 >            |
 +-----------------------------------------------------------------------+
 ```
 
-Zeilen-Klick öffnet `TransactionDetailView` (§4.10). „Tags auf Auswahl
-anwenden" öffnet `BatchTagView` (§4.12). „Export" liefert CSV der
-aktuell gefilterten Liste (optional MVP-Feature).
+Clicking a row opens `TransactionDetailView` (§4.10). "Tags auf Auswahl
+anwenden" (apply tags to selection) opens `BatchTagView` (§4.12). "Export" delivers a CSV of the
+currently filtered list (optional MVP feature).
 
 ### 4.10 `TransactionDetailView`
 
-Detailansicht mit Tag-Editor. KI-Vorschläge und User-Tags sind visuell
-klar getrennt.
+Detail view with tag editor. AI suggestions and user tags are visually
+clearly separated.
 
 ```
 +-----------------------------------------------------------------------+
-| Transaktion #421876                                         [Zurück]  |
+| Transaction #421876                                         [Back]    |
 +-----------------------------------------------------------------------+
-| Buchungsdatum:   2024-08-12     Wertstellung:  2024-08-12             |
-| Konto:           Giro Sparkasse XY (DE12 … 3456)                      |
-| Gegenseite:      Hotel Firenze                                        |
+| Booking date:    2024-08-12     Value date:    2024-08-12             |
+| Account:         Giro Sparkasse XY (DE12 … 3456)                      |
+| Counterparty:    Hotel Firenze                                        |
 |                  IT12 A 07601 03200 000012345678                      |
-| Verwendungszweck:                                                     |
+| Purpose:                                                              |
 |   Übernachtung 09.–12.08.2024, Doppelzimmer                           |
-| Betrag:         -340,00 €                                             |
+| Amount:         -340,00 €                                             |
 +-----------------------------------------------------------------------+
 | Tags                                                                  |
 |   User:   [urlaub ✕]  [italien-2024 ✕]  [hotel ✕]  [+ Tag]            |
 |                                                                       |
-|   KI-Vorschläge:                                                      |
-|     ◌ restaurant     ▰▱▱▱▱  0.34   [✓ übernehmen]  [✕ verwerfen]     |
-|     ◌ reise          ▰▰▰▰▱  0.62   [✓ übernehmen]  [✕ verwerfen]     |
+|   AI suggestions:                                                     |
+|     ◌ restaurant     ▰▱▱▱▱  0.34   [✓ accept]  [✕ discard]            |
+|     ◌ reise          ▰▰▰▰▱  0.62   [✓ accept]  [✕ discard]            |
 |                                                                       |
-|   Übernommen → wird User-Tag (blauer Chip oben).                      |
+|   Accepted → becomes user tag (blue chip above).                      |
 +-----------------------------------------------------------------------+
-|                                                    [Speichern]       |
+|                                                    [Save]            |
 +-----------------------------------------------------------------------+
 ```
 
-User-Tags sind blaue Chips mit `✕`-Entfernen; KI-Vorschläge sind graue
-Chips mit Confidence-Balken. „Übernehmen" führt genau das Promotion-
-Verhalten aus `finance-tagging-and-ai.md` §2 aus (AI-Join löschen,
-User-Join anlegen, `confidence = NULL`).
+User tags are blue chips with `✕` remove; AI suggestions are gray
+chips with a confidence bar. "Übernehmen" (accept) performs exactly the promotion
+behavior from `finance-tagging-and-ai.md` §2 (delete AI join,
+create user join, `confidence = NULL`).
 
 ### 4.11 `TransactionNewView`
 
-Formular für manuelle Buchungen. Nur erreichbar, wenn der User auf
-mindestens einem Konto `level='write'` hält.
+Form for manual transactions. Reachable only if the user holds
+`level='write'` on at least one account.
 
 ```
 +-----------------------------------------------------------------------+
-| Neue Buchung                                                [Zurück]  |
+| New transaction                                             [Back]    |
 +-----------------------------------------------------------------------+
-| Konto *:             [ Giro Sparkasse XY ▾ ]                          |
-| Buchungsdatum *:     [ 2026-04-23 ]                                   |
-| Wertstellung:        [            ]   (optional)                      |
-| Betrag *:            [        0,00 ]  EUR                             |
-|                      ( ) Einnahme    (•) Ausgabe                      |
-| Gegenseite:          [                                       ]        |
-| IBAN Gegenseite:     [                                       ]        |
-| Verwendungszweck *:  [                                       ]        |
+| Account *:           [ Giro Sparkasse XY ▾ ]                          |
+| Booking date *:      [ 2026-04-23 ]                                   |
+| Value date:          [            ]   (optional)                      |
+| Amount *:            [        0,00 ]  EUR                             |
+|                      ( ) Income      (•) Expense                      |
+| Counterparty:        [                                       ]        |
+| Counterparty IBAN:   [                                       ]        |
+| Purpose *:           [                                       ]        |
 |                      [                                       ]        |
-| Tags:                [+ Tag hinzufügen]                               |
+| Tags:                [+ Add tag]                                      |
 +-----------------------------------------------------------------------+
-|                            [Abbrechen]            [Buchen]            |
+|                            [Cancel]               [Book]              |
 +-----------------------------------------------------------------------+
 ```
 
-Pflichtfelder mit `*` markiert. Das Konto-Dropdown zeigt ausschließlich
-Konten mit `finance_account_access.level = 'write'` für den
-eingeloggten User (bzw. alle, wenn `finance.admin`).
+Required fields are marked with `*`. The account dropdown shows only
+accounts with `finance_account_access.level = 'write'` for the
+logged-in user (or all, if `finance.admin`).
 
 ### 4.12 `BatchTagView`
 
-Wird aus `TransactionsView` als PrimeVue-Dialog geöffnet, sobald
-mindestens eine Zeile selektiert ist und „Tags auf Auswahl anwenden"
-geklickt wird.
+Is opened from `TransactionsView` as a PrimeVue dialog as soon as at
+least one row is selected and "Tags auf Auswahl anwenden" (apply tags to selection)
+is clicked.
 
 ```
 +-----------------------------------------------------------------------+
-| Tags auf Auswahl anwenden                                             |
+| Apply tags to selection                                               |
 +-----------------------------------------------------------------------+
-| Auswahl:                                                              |
-|   12 Transaktionen                                                    |
-|   Zeitraum: 2024-08-10 — 2024-08-18                                   |
-|   Summe:   -876,45 €                                                  |
+| Selection:                                                            |
+|   12 transactions                                                     |
+|   Period: 2024-08-10 — 2024-08-18                                     |
+|   Total:  -876,45 €                                                   |
 +-----------------------------------------------------------------------+
-| Tags hinzufügen:                                                      |
-|   [urlaub ▾]  [italien-2024 ▾]   [+ weiterer Tag]                     |
+| Add tags:                                                             |
+|   [urlaub ▾]  [italien-2024 ▾]   [+ another tag]                      |
 |                                                                       |
-| Tags entfernen (optional):                                            |
+| Remove tags (optional):                                               |
 |   [alltag ▾]                                                          |
 |                                                                       |
-| Modus:  (•) Nur hinzufügen   ( ) Vorhandene ersetzen                  |
+| Mode:  (•) Add only   ( ) Replace existing                            |
 +-----------------------------------------------------------------------+
-|                          [Abbrechen]            [Anwenden]            |
+|                          [Cancel]               [Apply]               |
 +-----------------------------------------------------------------------+
 ```
 
-„Vorhandene ersetzen" entfernt vor dem Hinzufügen alle bestehenden
-User-Tags der Auswahl — explizit hinter einem Radio-Button, damit
-niemand versehentlich bestehende Tags überschreibt.
+"Replace existing" removes all existing user tags of the selection before
+adding — explicitly behind a radio button, so that
+nobody accidentally overwrites existing tags.
 
 
 ---
 
-## 5. Interaktions-Besonderheiten
+## 5. Interaction specifics
 
-- **TAN-Flow**: Die `useBankcontactsStore`-Action `syncNow(id)`
-  switcht auf `response.state`: bei `"tan-required"` öffnet sie den
-  `TanDialog` und blockt weitere Sync-Trigger für diesen Bankkontakt
-  bis `complete` oder Abbruch. Push-Notifications (aus dem Cron, siehe
-  `finance-fints-integration.md` §5.1) führen im Foreground-Tab
-  automatisch zu einem Store-Refresh, damit der User den Dialog direkt
-  sieht.
-- **KI-Tag-Promotion**: `TransactionDetailView` schickt beim Klick auf
-  einen AI-Chip `POST /finance/transactions/:id/tags/promote` mit dem
-  Tag-Namen. Der Store aktualisiert optimistisch; bei Fehler Rollback.
-- **Analysis**: `AnalysisView` sendet die Freitext-Frage nur beim
-  initialen Parse; Edits am AST lösen einen reinen Aggregations-Call aus
-  (`POST /finance/analysis/aggregate`), ohne den LLM erneut zu befragen.
-- **Permissions-UI-Konsistenz**: Menüpunkte und Buttons sind hinter
-  `hasPermission(...)` gewrapped, aber die endgültige Durchsetzung liegt
-  im Backend (`requirePermission(...)` in jedem Handler).
+- **TAN flow**: The `useBankcontactsStore` action `syncNow(id)`
+  switches on `response.state`: on `"tan-required"` it opens the
+  `TanDialog` and blocks further sync triggers for this bank contact
+  until `complete` or cancel. Push notifications (from the cron, see
+  `finance-fints-integration.md` §5.1) lead in the foreground tab
+  automatically to a store refresh, so that the user sees the dialog right away.
+- **AI tag promotion**: `TransactionDetailView` sends, on click on
+  an AI chip, `POST /finance/transactions/:id/tags/promote` with the
+  tag name. The store updates optimistically; rollback on error.
+- **Analysis**: `AnalysisView` sends the free-text question only on the
+  initial parse; edits to the AST trigger a pure aggregation call
+  (`POST /finance/analysis/aggregate`), without querying the LLM again.
+- **Permissions UI consistency**: menu items and buttons are wrapped behind
+  `hasPermission(...)`, but final enforcement lies
+  in the backend (`requirePermission(...)` in every handler).
 
 ---
 
-## 6. Referenzen
+## 6. References
 
-| Stelle | Wofür |
+| Location | Purpose |
 |---|---|
-| bestehende Photos-/Documents-Views | API-Helper-Nutzung, Store-Pattern |
-| `finance-fints-integration.md` §4 | `TanDialog`-Backend-Kontrakt |
-| `finance-tagging-and-ai.md` §3–§4 | KI-Chips, `AnalysisView`-Backend |
-| `finance-data-import.md` | Import-Backend (Dropbox) |
-| `finance-data-model.md` §5 | Permissions für Router-Guards |
+| existing Photos/Documents views | API helper usage, store pattern |
+| `finance-fints-integration.md` §4 | `TanDialog` backend contract |
+| `finance-tagging-and-ai.md` §3–§4 | AI chips, `AnalysisView` backend |
+| `finance-data-import.md` | Import backend (dropbox) |
+| `finance-data-model.md` §5 | Permissions for router guards |
 
 ---
 
-## 7. Offene Punkte
+## 7. Open points
 
-- **CSV-Export in `AnalysisView`**: wirklich MVP oder erst später?
-- **Diff-Preview in `AccountAssignmentView`**: brauchen wir eine
-  Bestätigungsansicht („+ Alice read, − Bob, Charlie read→write")
-  vor dem Speichern?
-- **Push-im-Foreground-Tab**: sollen wir beim Eintreffen einer TAN-
-  Push-Benachrichtigung automatisch den `TanDialog` öffnen, oder nur
-  einen dezenten Hinweis im Menü zeigen?
-- **Saldo-Chart-Zeitraum**: Default 12 Monate? Oder an `finance_timespan`
-  gekoppelt?
+- **CSV export in `AnalysisView`**: really MVP or only later?
+- **Diff preview in `AccountAssignmentView`**: do we need a
+  confirmation view ("+ Alice read, − Bob, Charlie read→write")
+  before saving?
+- **Push in the foreground tab**: should we automatically open the `TanDialog` when a TAN
+  push notification arrives, or only show
+  a subtle hint in the menu?
+- **Balance chart period**: default 12 months? Or coupled to `finance_timespan`?

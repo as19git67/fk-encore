@@ -1,433 +1,428 @@
-# Auto-Pick: vom Qualitätsbewerter zum Vergleicher
+# Auto-Pick: from Quality Scorer to Comparator
 
-Konzept, noch nicht umgesetzt. Folgearbeit zu #873 (Focus Peaking) und
+Concept, not yet implemented. Follow-up work to #873 (focus peaking) and
 `documentation/ai-auto-pick.md`.
 
-Grundlage sind drei Messrunden an der produktiven Datenbank
-(Stand 2026-08-07, 511 auswertbare reviewte Gruppen):
+The basis is three measurement rounds against the production database
+(as of 2026-08-07, 511 evaluable reviewed groups):
 
-| Skript | Frage |
+| Script | Question |
 |---|---|
-| `diagnose-autopick-faces.mjs` | Leidet die Trefferquote unter vielen Gesichtern? |
-| `diagnose-autopick-delta.mjs` | Welches Signal erzeugt den Score-Abstand Δ? |
-| `diagnose-autopick-calibration.mjs` | Sagt die Größe des Δ die Trefferquote voraus? |
+| `diagnose-autopick-faces.mjs` | Does the hit rate suffer from many faces? |
+| `diagnose-autopick-delta.mjs` | Which signal produces the score gap Δ? |
+| `diagnose-autopick-calibration.mjs` | Does the size of Δ predict the hit rate? |
 
-Alle drei sind read-only und jederzeit wiederholbar — siehe
+All three are read-only and repeatable at any time — see
 `scripts/photos/README.md`.
 
-## 1. Was gemessen wurde
+## 1. What was measured
 
-### Zwei widerlegte Hypothesen
+### Two refuted hypotheses
 
-Beide stammen von der Entwicklungsseite und werden hier festgehalten, damit
-sie nicht erneut aufgewärmt werden.
+Both come from the development side and are recorded here so that
+they are not warmed up again.
 
-**Widerlegt: „`min()` schadet auf Fotos mit vielen Gesichtern."** Die
-Trefferquote bleibt über die Gesichtszahl flach (92,5 % / 93,6 % / 93,6 %
-bei 1–5 Gesichtern; der Abfall auf 86,8 % bei 6–15 liegt bei n=38 im
-Rauschen). σ(face_sharpness) steigt nicht mit der Gesichtszahl.
+**Refuted: "`min()` hurts on photos with many faces."** The
+hit rate stays flat across the face count (92.5% / 93.6% / 93.6%
+for 1–5 faces; the drop to 86.8% at 6–15 is within the noise at n=38).
+σ(face_sharpness) does not increase with the face count.
 
-**Widerlegt: „`face_coverage` erzeugt den Δ."** Tatsächlich dominiert
-`face_sharpness` den Δ in allen Konfidenz-Buckets (99 % / 75 % / 64 % des
-Median-Δ). Die Vorhersage beruhte auf einem Denkfehler: aus σ(face_sharpness)
-≈ 0,035 über *alle* Gruppen wurde geschlossen, das Signal könne bei Gewicht
-0,40 keinen Δ von 0,10 erzeugen. Die `high`-Gruppen sind aber genau die
-Teilmenge mit großem Δ — ein Auswahleffekt. Wer den unbedingten Mittelwert
-auf die Bedingung anwendet, die ihn erzeugt, rechnet sich in die Irre.
+**Refuted: "`face_coverage` produces the Δ."** In fact `face_sharpness`
+dominates the Δ in all confidence buckets (99% / 75% / 64% of the
+median Δ). The prediction rested on a flawed inference: from σ(face_sharpness)
+≈ 0.035 across *all* groups it was concluded that the signal could not, at weight
+0.40, produce a Δ of 0.10. But the `high` groups are exactly the
+subset with a large Δ — a selection effect. Applying the unconditional mean
+to the very condition that produces it leads you astray.
 
-### Der belastbare Befund
+### The solid finding
 
-**Innerhalb einer Ähnlichkeitsgruppe unterscheidet fast nichts.** Beiträge
-zum Δ in den `high`-Gruppen:
+**Within a similarity group, almost nothing differentiates.** Contributions
+to the Δ in the `high` groups:
 
-| Signal | Median-Beitrag |
+| Signal | Median contribution |
 |---|---|
-| `face_sharpness` | 0,1649 (99 %) |
-| `eyes_open` | 0,0097 |
-| `clip_aesthetics` | **0,0000** (Mittel −0,0007) |
-| `blur` | **0,0000** |
+| `face_sharpness` | 0.1649 (99%) |
+| `eyes_open` | 0.0097 |
+| `clip_aesthetics` | **0.0000** (mean −0.0007) |
+| `blur` | **0.0000** |
 
-Ästhetik und globale Schärfe tragen exakt nichts zur Unterscheidung bei.
-Das ist keine Überraschung, sondern Definition: ähnliche Bilder haben
-ähnliche Ästhetik. σ(blur) innerhalb der Gruppen liegt bei 0,000.
+Aesthetics and global sharpness contribute exactly nothing to the distinction.
+This is not a surprise but a matter of definition: similar images have
+similar aesthetics. σ(blur) within the groups is 0.000.
 
-**Der Δ ist nicht monoton mit der Trefferwahrscheinlichkeit.** Lift über
-einer hypergeometrischen Zufallsbasislinie:
+**Δ is not monotonic with the hit probability.** Lift over
+a hypergeometric random baseline:
 
-| Δ-Bereich | Gruppen | Lift |
+| Δ range | Groups | Lift |
 |---|---|---|
-| 0,00–0,02 | 337 | +0,0 pp |
-| 0,02–0,04 | 12 | +6,7 pp |
-| 0,04–0,06 | 18 | +18,9 pp |
-| 0,06–0,10 | 58 | **+25,2 pp** |
-| 0,10–0,15 ← ab hier `high` | 28 | +11,9 pp |
-| 0,15–0,25 | 36 | +5,7 pp |
-| 0,25+ | 22 | +6,1 pp |
+| 0.00–0.02 | 337 | +0.0 pp |
+| 0.02–0.04 | 12 | +6.7 pp |
+| 0.04–0.06 | 18 | +18.9 pp |
+| 0.06–0.10 | 58 | **+25.2 pp** |
+| 0.10–0.15 ← `high` from here | 28 | +11.9 pp |
+| 0.15–0.25 | 36 | +5.7 pp |
+| 0.25+ | 22 | +6.1 pp |
 
-Umgekehrt U-förmig, in einer zweiten Stichprobe (nur exakt reproduzierbare
-Scores, n=301) reproduziert. Nach Konfidenz-Bucket:
+Inverted U-shaped, reproduced in a second sample (only exactly reproducible
+scores, n=301). By confidence bucket:
 
-| Bucket | Trefferquote | Lift | Verhalten |
+| Bucket | Hit rate | Lift | Behavior |
 |---|---|---|---|
-| `low` | 96,8 % | +0,2 pp | nichts |
-| `medium` | 90,8 % | **+23,7 pp** | nur Marker |
-| `high` | 75,6 % | +7,8 pp | **blendet ungefragt aus** |
+| `low` | 96.8% | +0.2 pp | nothing |
+| `medium` | 90.8% | **+23.7 pp** | marker only |
+| `high` | 75.6% | +7.8 pp | **hides without asking** |
 
-Der einzige Bucket, der automatisch ausblendet, ist der zweitschlechteste.
-Der beste zeigt bloß einen Marker.
+The only bucket that hides automatically is the second worst.
+The best merely shows a marker.
 
-**In zwei Dritteln der Fälle entscheidet das Modell gar nicht.** 337 der 511
-Gruppen liegen bei Δ≈0. Dort greift Multi-Pick (`MULTI_PICK_THRESHOLD` 0,92)
-und wählt im Schnitt 2,33 von 2,3 Mitgliedern — also praktisch alle. Ein
-Treffer ist damit garantiert, die Basislinie ebenso hoch, der Lift null. Das
-ist keine Fehlentscheidung, sondern eine **Enthaltung**.
+**In two thirds of the cases the model does not decide at all.** 337 of the 511
+groups sit at Δ≈0. There, multi-pick (`MULTI_PICK_THRESHOLD` 0.92) kicks in
+and selects on average 2.33 of 2.3 members — that is, practically all. A
+hit is thus guaranteed, the baseline is just as high, the lift zero. That
+is not a wrong decision but an **abstention**.
 
-## 2. Die strukturelle Diagnose
+## 2. The structural diagnosis
 
-> Das Modell ist ein **absoluter Qualitätsbewerter**, wird aber als
-> **Vergleicher innerhalb einer Gruppe** eingesetzt.
+> The model is an **absolute quality scorer** but is used as a
+> **comparator within a group**.
 
-Rund 0,85 des Gewichts liegt auf Signalen, die innerhalb einer Gruppe
-konstant sind. Sie heben den absoluten Score, tragen zur Rangfolge aber
-nichts bei. Das ist kein Tuning-Problem, sondern ein Konstruktionsfehler: es
-wird gemessen, was ein Bild gut macht, statt was die Bilder *voneinander*
-unterscheidet.
+Around 0.85 of the weight lies on signals that are constant within a group.
+They raise the absolute score but contribute nothing to the ranking. This is not a tuning problem but a design flaw: it
+measures what makes an image good, instead of what *distinguishes* the images
+*from one another*.
 
-Daraus folgen alle drei Symptome:
+All three symptoms follow from this:
 
-- **Der Δ taugt nicht als Konfidenz.** Variiert faktisch nur ein Signal, ist
-  Δ im Kern „wie stark hat dieses eine Signal geschwankt". Ein sehr großer Δ
-  ist dann eher ein Ausreißer in einem `min()`-aggregierten, rauschanfälligen
-  Signal als ein echter Qualitätsunterschied — daher der Abfall des Lifts bei
-  großem Δ.
-- **Die Kalibrierung kann nicht greifen** (0,608 gegen Baseline 0,590). Die
-  paarweise Regression hat die richtige Form — sie lernt auf
-  Signal*differenzen*. Aber es lassen sich keine unterscheidenden Gewichte
-  lernen, wenn die Merkmale nicht variieren.
-- **Die hohe Enthaltungsquote.** Ohne variierende Merkmale liegen die Scores
-  dicht beieinander, Multi-Pick greift, es wird nicht entschieden.
+- **Δ is useless as a confidence.** If effectively only one signal varies,
+  Δ is at its core "how much did this one signal fluctuate". A very large Δ
+  is then more likely an outlier in a `min()`-aggregated, noise-prone
+  signal than a real quality difference — hence the drop of the lift at
+  large Δ.
+- **Calibration cannot take hold** (0.608 against baseline 0.590). The
+  pairwise regression has the right form — it learns on signal
+  *differences*. But no distinguishing weights can be
+  learned if the features do not vary.
+- **The high abstention rate.** Without varying features the scores lie
+  close together, multi-pick kicks in, no decision is made.
 
-### Warum `min()` die Varianz nicht nur verrauscht, sondern *löscht*
+### Why `min()` does not just add noise to the variance but *deletes* it
 
-Ein Mechanismus, der bisher untergegangen ist und die Enthaltungsquote
-erklärt: `face_sharpness` ist das Minimum über alle Detektionen. Ist das
-unschärfste Gesicht durchgängig dasselbe winzige Hintergrundgesicht — und
-das ist bei kleinen Gesichtern der Regelfall, weil sie physikalisch immer am
-unschärfsten sind — dann ist das Minimum über alle Frames eines Bursts
-**identisch**. Die Schärfe des Hauptmotivs, die zwischen den Aufnahmen
-durchaus schwankt, wird vom konstanten Minimum vollständig maskiert.
+A mechanism that has so far been overlooked and explains the abstention rate:
+`face_sharpness` is the minimum over all detections. If the
+least sharp face is consistently the same tiny background face — and
+with small faces that is the rule, because they are physically always the
+least sharp — then the minimum across all frames of a burst is
+**identical**. The sharpness of the main subject, which does fluctuate
+between shots, is completely masked by the constant minimum.
 
-Die Varianz ist also in den Pixeln vorhanden, wird aber von der Aggregation
-weggeworfen, bevor sie das Scoring erreicht. Das ist die konkrete Erklärung
-dafür, warum so viele Gruppen bei Δ≈0 landen — und zugleich die begründete
-Erwartung, dass eine prominenzgewichtete Aggregation sie freilegt.
+So the variance is present in the pixels, but is thrown away by the aggregation
+before it reaches scoring. This is the concrete explanation
+for why so many groups land at Δ≈0 — and at the same time the well-founded
+expectation that a prominence-weighted aggregation will uncover it.
 
-## 3. Zielbild: zwei Regime
+## 3. Target picture: two regimes
 
-Vom Nutzer formuliert und durch die Messung gestützt:
+Formulated by the user and supported by the measurement:
 
-**Regime A — Gesichter prominent.** Man schaut genauer hin. Es entscheiden
-Gesichtsdetails: Schärfe des *relevanten* Gesichts, Augen offen,
-Blickrichtung. Alles Übrige ist innerhalb der Gruppe konstant.
+**Regime A — faces prominent.** One looks more closely. Facial details
+decide: sharpness of the *relevant* face, eyes open,
+gaze direction. Everything else is constant within the group.
 
-**Regime B — Gesichter klein oder keine.** Hier variieren tatsächlich
-Ausschnitt, Belichtung, Moment; die vorhandenen Signale können etwas leisten.
+**Regime B — faces small or none.** Here crop, exposure and moment
+actually vary; the existing signals can achieve something.
 
-Der heutige Binärschalter `face_count > 0` ist eine kaputte Näherung genau
-dieser Unterscheidung — eine einzelne Fehldetektion im Hintergrund schiebt
-ein Landschaftsfoto in Regime A und wirft dabei `clip_composition` und
-`clip_technical` aus der Bewertung. Prominenz beantwortet nicht nur „welche
-Gesichter soll ich messen", sondern die vorgelagerte Frage: **in welchem
-Regime befindet sich diese Gruppe?**
+Today's binary switch `face_count > 0` is a broken approximation of exactly
+this distinction — a single false detection in the background pushes
+a landscape photo into regime A and thereby throws `clip_composition` and
+`clip_technical` out of the scoring. Prominence answers not only "which
+faces should I measure", but the upstream question: **which regime
+is this group in?**
 
-### Relevanzgewicht
+### Relevance weight
 
 ```
 w(face) = prominence(face) · identity_bonus(face)
 ```
 
-Prominenz (bbox-Fläche, mit Untergrenze) ist das primäre Kriterium — dieselbe
-Erkenntnis wie bei Focus Peaking (`MIN_RENDERED_FACE_PX`): ein 15-px-Gesicht
-ist nicht beurteilbar, egal wem es gehört.
+Prominence (bbox area, with a lower bound) is the primary criterion — the same
+insight as with focus peaking (`MIN_RENDERED_FACE_PX`): a 15 px face
+cannot be judged, no matter whom it belongs to.
 
-Identität wirkt **nur als Bonus, nie als Strafe**: zugeordnete Personen
-`1 + KNOWN_BONUS`, alle anderen `1` — auch explizit ignorierte.
+Identity acts **only as a bonus, never as a penalty**: assigned persons get
+`1 + KNOWN_BONUS`, all others `1` — including explicitly ignored ones.
 
-### Warum ignorierte Gesichter *nicht* ausgeschlossen werden
+### Why ignored faces are *not* excluded
 
-Das Flag `ignored` vermischt zwei in der Datenbank nicht unterscheidbare
-Aussagen (beide `ignored = TRUE, person_id = NULL`):
+The `ignored` flag mixes two statements that cannot be told apart in the database
+(both `ignored = TRUE, person_id = NULL`):
 
-1. „Das ist gar kein Gesicht" — Fehldetektion.
-2. „Das ist ein Gesicht, aber ein Fremder, der nicht in meinen Personenindex
-   gehört."
+1. "That is not a face at all" — false detection.
+2. "That is a face, but a stranger who does not belong in my person index."
 
-Für Fall 2 gilt: ein scharf abgebildeter Fremder ist immer noch scharf. Ein
-Bild mit fünf scharfen Personen ist besser als eines mit drei scharfen und
-zwei verwackelten — unabhängig davon, ob man sie kennt. Fehldetektionen
-werden über die **Prominenz** ausgesiebt, nicht über das Flag; das erwischt
-auch die, die nie jemand ignoriert hat.
+For case 2 the following holds: a stranger depicted sharply is still sharp. An
+image with five sharp people is better than one with three sharp and
+two blurred — regardless of whether you know them. False detections
+are filtered out via **prominence**, not via the flag; that catches
+the ones nobody ever ignored, too.
 
-Geschrieben wird das Flag ausschließlich durch explizite Nutzeraktionen
-(`ignoreFaceLogic`, `ignorePersonFacesLogic`) — es ist verlässlich
-Nutzerabsicht, aber eine über *Personenverwaltung*, nicht über
-*Bildqualität*.
+The flag is written exclusively by explicit user actions
+(`ignoreFaceLogic`, `ignorePersonFacesLogic`) — it reliably reflects
+user intent, but one about *person management*, not about
+*image quality*.
 
-### Warum ein Identitätsbonus unbedenklich ist
+### Why an identity bonus is harmless
 
-Der Score wird ausschließlich *innerhalb* einer Ähnlichkeitsgruppe
-verglichen, nie über die Bibliothek hinweg. Eine systematische Anhebung von
-Personenfotos verzerrt also keine Rangfolge zwischen Landschaft und Porträt —
-sie wirkt nur dort, wo zwei Aufnahmen derselben Szene gegeneinander stehen.
+The score is compared exclusively *within* a similarity group,
+never across the library. A systematic boost of
+photos of people therefore does not distort any ranking between landscape and portrait —
+it only acts where two shots of the same scene are pitted against each other.
 
-## 4. Datenlage
+## 4. Data situation
 
-| Daten | vorhanden? |
+| Data | Available? |
 |---|---|
-| bbox je Gesicht | **ja** (`faces.bbox`) |
-| Personenzuordnung / ignoriert | **ja** (`user_face_assignments`) |
-| Schärfe **je Gesicht** | **nein** — nur das Minimum |
-| Augen offen **je Gesicht** | **nein** — nur das Minimum |
-| Blickrichtung | **nein** — aber siehe unten |
+| bbox per face | **yes** (`faces.bbox`) |
+| Person assignment / ignored | **yes** (`user_face_assignments`) |
+| Sharpness **per face** | **no** — only the minimum |
+| Eyes open **per face** | **no** — only the minimum |
+| Gaze direction | **no** — but see below |
 
-`faces.quality` existiert, wird beim Insert konstant auf `100` gesetzt und
-trägt keine Information.
+`faces.quality` exists, is set to a constant `100` on insert,
+and carries no information.
 
-**Blickrichtung ist billiger als erwartet.** Der InsightFace-Service liefert
-in `/detect` bereits `kps` mit — fünf Landmarken je Gesicht (Augenmitten,
-Nasenspitze, Mundwinkel). Im Photo-Service kommt `kps` kein einziges Mal vor;
-die Daten werden verworfen. Kopfdrehung und -neigung lassen sich daraus
-geometrisch ableiten (Nasenversatz gegenüber der Augenlinie → Gierwinkel,
-Neigung der Augenlinie → Rollwinkel). Kein neues Modell, sondern
-Persistierung plus erneute Detektion.
+**Gaze direction is cheaper than expected.** The InsightFace service already returns
+`kps` in `/detect` — five landmarks per face (eye centers,
+nose tip, mouth corners). In the photo service `kps` does not occur even once;
+the data is discarded. Head rotation and tilt can be derived from it
+geometrically (nose offset relative to the eye line → yaw angle,
+tilt of the eye line → roll angle). No new model, but
+persistence plus re-detection.
 
-**Augenöffnung geht damit nicht.** Fünf Landmarken geben Augen*mitten*, keine
-Lidkonturen. Dafür bräuchte es weiter CLIP je Ausschnitt oder ein
-68-Punkte-Modell — die teuerste der drei Optionen.
+**Eye openness is not possible this way.** Five landmarks give eye *centers*, not
+eyelid contours. That would still require CLIP per crop or a
+68-point model — the most expensive of the three options.
 
-Schärfe je Gesicht braucht einen Backfill, aber einen billigen: die
-Laplace-Varianz über einen bbox-Ausschnitt ist reine Pixelarithmetik. Kein
-CLIP, keine GPU. Die Formel existiert bereits unit-getestet in
-`frontend/src/utils/focusPeaking.ts` und müsste serverseitig mit `sharp`
-gespiegelt werden.
+Sharpness per face needs a backfill, but a cheap one: the
+Laplacian variance over a bbox crop is pure pixel arithmetic. No
+CLIP, no GPU. The formula already exists, unit-tested, in
+`frontend/src/utils/focusPeaking.ts` and would have to be mirrored server-side with `sharp`.
 
-## 5. Das Ziel, präzise
+## 5. The goal, precisely
 
-Zwei Dinge, in dieser Reihenfolge.
+Two things, in this order.
 
-### Ziel 1: Das Entscheidungsband verbreitern
+### Goal 1: Widen the decision band
 
-Heute entscheidet das Modell nur in einem schmalen Bereich sinnvoll —
-Δ ∈ [0,04; 0,15], das sind 86 von 511 Gruppen (17 %). In 66 % enthält es
-sich (Multi-Pick), darüber wird es unzuverlässig.
+Today the model decides meaningfully only in a narrow range —
+Δ ∈ [0.04, 0.15], that is 86 of 511 groups (17%). In 66% it
+abstains (multi-pick), above that it becomes unreliable.
 
-„Verbreitern" heißt: **die Enthaltungsquote senken, ohne die Trefferquote zu
-verschlechtern.** Drei Hebel, in aufsteigendem Aufwand:
+"Widen" means: **lower the abstention rate without worsening the hit
+rate.** Three levers, in ascending effort:
 
-1. **Vorhandene Varianz freilegen** — prominenzgewichtete Aggregation statt
-   `min()`. Nach Abschnitt 2 ist die Schärfevarianz des Hauptmotivs bereits
-   in den Daten, wird aber vom konstanten Minimum maskiert. Dies ist der
-   Hebel mit dem besten Verhältnis von Aufwand zu Wirkung.
-2. **Signale ergänzen, die per Konstruktion variieren** — Blickrichtung, und
-   perspektivisch Augenzustand je Gesicht. Zwischen zwei Aufnahmen eines
-   Bursts ändern sich genau diese Dinge: Menschen bewegen sich, blinzeln,
-   drehen den Kopf. Es sind zugleich die, nach denen der Nutzer tatsächlich
-   entscheidet.
-3. **Gruppenrelativ statt absolut rechnen.** Nicht die absolute
-   Signaldifferenz gewichten, sondern ihr Verhältnis zur Streuung *dieses
-   Signals in dieser Gruppe*. Eine Differenz von 0,02 in einem Signal, das
-   sonst felsenfest liegt, ist aussagekräftiger als 0,10 in einem, das in
-   dieser Gruppe ohnehin springt. Reine Algorithmusänderung, keine neuen
-   Daten — und der direkte Angriff auf „Δ misst nicht, was es vorgibt".
+1. **Uncover the existing variance** — prominence-weighted aggregation instead of
+   `min()`. According to Section 2, the sharpness variance of the main subject is already
+   in the data but is masked by the constant minimum. This is the
+   lever with the best ratio of effort to effect.
+2. **Add signals that vary by construction** — gaze direction, and
+   eventually eye state per face. Between two shots of a
+   burst exactly these things change: people move, blink,
+   turn their heads. They are also the ones by which the user actually
+   decides.
+3. **Compute group-relative instead of absolute.** Do not weight the absolute
+   signal difference, but its ratio to the spread of *this signal
+   in this group*. A difference of 0.02 in a signal that is otherwise rock-steady is more
+   meaningful than 0.10 in one that jumps around in
+   this group anyway. A pure algorithm change, no new data — and the
+   direct attack on "Δ does not measure what it claims to".
 
-Messgröße für den Erfolg: Anteil der Gruppen mit belegtem Lift, gegen die
-Trefferquote gehalten. Nicht „höherer Score", sondern „öfter eine
-Entscheidung, die trägt".
+Success metric: share of groups with a demonstrated lift, held against the
+hit rate. Not "higher score", but "more often a decision that holds".
 
-### Ziel 2: Das Auto-Ausblenden ehrlich machen
+### Goal 2: Make auto-hiding honest
 
-Heute behauptet das System Sicherheit („high") auf Basis eines
-Score-Abstands, von dem gemessen ist, dass er oberhalb 0,10 nicht mit
-Richtigkeit korreliert. Das ist der Kern des Problems — nicht die Höhe der
-Schwelle.
+Today the system claims confidence ("high") on the basis of a
+score gap which has been measured not to correlate with
+correctness above 0.10. That is the core of the problem — not the height of
+the threshold.
 
-Der Leitsatz dazu:
+The guiding principle:
 
-> **Vertrauen wird gemessen, nicht behauptet.**
+> **Trust is measured, not asserted.**
 
-Konkret: die Konfidenz-Einstufung wird nicht mehr aus dem Score-Abstand
-abgeleitet, sondern aus der **an den eigenen Reviews gemessenen
-Trefferquote** des jeweiligen Bereichs. Das System darf genau dann
-automatisch ausblenden, wenn es sich diese Erlaubnis auf den Daten dieses
-Nutzers verdient hat — belegt durch Lift und Trefferquote oberhalb einer
-festgelegten Schranke. Erreicht kein Bereich diese Schranke, bleibt das
-Auto-Ausblenden **aus**, und das System beschränkt sich auf den Marker.
+Concretely: the confidence rating is no longer derived from the score gap,
+but from the **hit rate measured on the user's own reviews**
+for the respective range. The system may hide automatically exactly when it has
+earned this permission on this user's data — evidenced by lift and hit rate above a
+fixed threshold. If no range reaches this threshold, auto-hiding stays
+**off**, and the system restricts itself to the marker.
 
-Bemerkenswert: die Maschinerie dafür existiert bereits. Der
-Bulk-Accept-Dialog zeigt dem Nutzer schon heute seine Übereinstimmungsquote —
-sie ist nur nicht mit der Entscheidung verknüpft, ob überhaupt ausgeblendet
-werden darf. Und `diagnose-autopick-calibration.mjs` misst genau die Größe,
-die dafür gebraucht wird.
+Notably, the machinery for this already exists. The
+bulk-accept dialog already shows the user their agreement rate today —
+it just is not tied to the decision whether hiding is allowed at all.
+And `diagnose-autopick-calibration.mjs` measures exactly the quantity
+needed for it.
 
-Ein naheliegender, aber verworfener Kurzschluss: „dann setze `high` eben auf
-das Intervall mit dem besten Lift (0,04–0,15)". Das wäre eine
-Kurvenanpassung an n=86 und zudem kaum erklärbar („bei mittlerem Abstand
-blenden wir aus, bei großem nicht"). Die Ursache des Abfalls bei großem Δ ist
-nicht verstanden — solange sie es nicht ist, ist Zurückhaltung die ehrlichere
-Antwort als eine an die Kurve angepasste Schwelle.
+An obvious but rejected shortcut: "then just set `high` to
+the interval with the best lift (0.04–0.15)". That would be a
+curve fit to n=86 and also hardly explainable ("at a medium gap
+we hide, at a large one we do not"). The cause of the drop at large Δ is
+not understood — as long as it is not, restraint is the more honest
+answer than a threshold fitted to the curve.
 
-**Was nicht das Ziel ist:** ein System, das die Auswahl abnimmt. Der
-Gesamt-Lift liegt bei +5,0 pp, im besten Bereich bei +25 pp. Realistisch ist
-eine gute Vorsortierung mit ehrlicher Selbstauskunft darüber, wie sicher sie
-ist — nicht Automatisierung des Aussortierens.
+**What is not the goal:** a system that takes over the selection. The
+overall lift is +5.0 pp, in the best range +25 pp. What is realistic is
+a good pre-sorting with honest self-disclosure of how certain it
+is — not automation of culling.
 
-## 6. Etappen
+## 6. Stages
 
-**Sofort, ohne Abhängigkeit: Auto-Ausblenden bei `high` abschalten** (oder
-hinter eine Bestätigung je Gruppe legen). Datenbelegt: 75,6 % Trefferquote
-bei +7,8 pp Lift, während `medium` ohne jedes Ausblenden +23,7 pp liefert.
-Produktentscheidung, technisch trivial. **Erledigt:** Default von
-`aiHiddenMode` in `photo/photo.filters.ts` von `exclude` auf `include`
-umgestellt — `high`-Konfidenz-Gruppen verhalten sich jetzt wie `medium`
-(auffälliger Marker, kein automatisches Verstecken). `exclude`/`only`
-bleiben als expliziter Query-Parameter für Aufrufer erhalten, die das
-alte Verhalten weiterhin brauchen.
+**Immediately, without dependencies: switch off auto-hiding for `high`** (or
+put it behind a per-group confirmation). Backed by data: 75.6% hit rate
+at +7.8 pp lift, while `medium` without any hiding delivers +23.7 pp.
+A product decision, technically trivial. **Done:** default of
+`aiHiddenMode` in `photo/photo.filters.ts` changed from `exclude` to `include`
+— `high`-confidence groups now behave like `medium`
+(conspicuous marker, no automatic hiding). `exclude`/`only`
+remain as an explicit query parameter for callers that still need the
+old behavior.
 
-**Etappe 1 — Prominenz aus bbox.** Relevanzgewicht, gleitender
-Regime-Übergang statt `face_count > 0`, `face_coverage` nur über prominente
-Gesichter, Anwesenheit bekannter Personen als schwaches Signal. Kein
-Re-Scan nötig, vollständig offline validierbar. **Erledigt:**
-`computeFaceProminence()` und der Regime-Blend in
-`photo/group-auto-pick.ts`, gespeist aus `faces.bbox` +
+**Stage 1 — prominence from bbox.** Relevance weight, smooth
+regime transition instead of `face_count > 0`, `face_coverage` only over prominent
+faces, presence of known persons as a weak signal. No
+re-scan needed, fully validatable offline. **Done:**
+`computeFaceProminence()` and the regime blend in
+`photo/group-auto-pick.ts`, fed from `faces.bbox` +
 `user_face_assignments` (`loadFaceProminenceData()` in
-`photo/group-auto-pick.service.ts`). Die Schwellwerte
+`photo/group-auto-pick.service.ts`). The thresholds
 (`PROMINENCE_FLOOR`, `PROMINENCE_SATURATION`, `KNOWN_BONUS`,
-`FACE_REGIME_THRESHOLD`) sind zunächst begründete Startwerte und werden
-über den Replay bestimmt.
+`FACE_REGIME_THRESHOLD`) are initially reasoned starting values and will be determined
+via the replay.
 
-**Etappe 2 — Schärfe je Gesicht.** Neue Spalte `faces.sharpness`, gefüllt per
-Hintergrund-Job analog zum Dimensions-Backfill. Erst damit wird das
-eigentliche Kriterium messbar: „die Aufnahme, auf der das Gesicht der
-bekannten Person scharf ist". Nebeneffekt: Focus Peaking im Frontend könnte
-die Werte lesen, statt sie bei jedem Betrachten neu zu berechnen.
-**Erledigt — Datenerhebung, ohne jede Formeländerung:**
+**Stage 2 — sharpness per face.** New column `faces.sharpness`, filled by a
+background job analogous to the dimensions backfill. Only with this does the
+actual criterion become measurable: "the shot in which the face of the
+known person is sharp". Side effect: focus peaking in the frontend could
+read the values instead of recomputing them on every view.
+**Done — data collection, without any formula change:**
 
-- Spalte `faces.sharpness` (Migration `0142_face_sharpness.sql`), `NULL`
-  bleibt ein eigener Zustand: „noch nicht gemessen" bzw. „zu klein zum
-  Beurteilen" ist ausdrücklich *nicht* 0.0 — eine Winzdetektion mit 0.0
-  würde einen gewichteten Mittelwert genauso nach unten ziehen, wie es
-  `min()` heute tut.
-- `photo/face-sharpness.ts`: Laplace-Varianz über den bbox-Ausschnitt, mit
-  `sharp` serverseitig gespiegelt aus `frontend/src/utils/focusPeaking.ts`
-  (gleiche 128×128-Stichprobe, gleicher Vollausschlag 500, gleiches
-  Überspringen der Randzeile statt `np.roll`) — auf dem Bildschirm und im
-  Score steht damit dieselbe Zahl.
-- Gemessen wird beim Scan (`detectPhotoFaces`) und für den Bestand per
-  `POST /photos/backfill-face-sharpness` — foto-weise gebündelt (ein Decode
-  bedient alle Gesichter eines Fotos), fortsetzbar über einen Cursor, mit
-  Button „Gesichtsschärfe nachtragen" unter Fotos › Einstellungen › Wartung.
-- Stimmt die Orientierung des eigenen Decodes nicht mit der des Detektors
-  überein, bleibt der Wert `NULL` statt plausibel falsch zu sein.
+- Column `faces.sharpness` (migration `0142_face_sharpness.sql`), `NULL`
+  remains a state of its own: "not yet measured" or "too small to
+  judge" is expressly *not* 0.0 — a tiny detection with 0.0
+  would pull a weighted mean down just as `min()` does
+  today.
+- `photo/face-sharpness.ts`: Laplacian variance over the bbox crop, mirrored
+  server-side with `sharp` from `frontend/src/utils/focusPeaking.ts`
+  (same 128×128 sample, same full scale of 500, same
+  skipping of the edge row instead of `np.roll`) — so the same number appears
+  on screen and in the score.
+- Measured during the scan (`detectPhotoFaces`) and for existing data via
+  `POST /photos/backfill-face-sharpness` — bundled per photo (one decode
+  serves all faces of a photo), resumable via a cursor, with a
+  button "Gesichtsschärfe nachtragen" (backfill face sharpness) under Fotos › Einstellungen › Wartung.
+- If the orientation of the own decode does not match that of the detector,
+  the value stays `NULL` instead of being plausibly wrong.
 
-**Erster Produktivlauf (2026-08-13): kein Urteil, Messaufbau defekt.** Der
-Report meldete „V1 trifft NICHT zu" — die Aussage ist wertlos, aus zwei
-unabhängigen Gründen, und beide sind inzwischen behoben:
+**First production run (2026-08-13): no verdict, measurement setup broken.** The
+report said "V1 does NOT hold" — the statement is worthless, for two
+independent reasons, both of which have since been fixed:
 
-1. **Abdeckung 3,3 %** (4 218 von 129 633 Gesichtern). Auswertbar waren 70
-   von 6 801 Gruppen — eine winzige, nicht zufällige Teilmenge.
-2. **Die Skala sättigt.** σ war in *beiden* Spalten exakt 0 und „gewichtet >
-   min" in exakt 0,0 % der Gruppen. Zwei verschiedene Aggregationen, die nie
-   auseinanderlaufen, rechnen auf identischen Zahlen. Ursache:
-   `LAPLACIAN_FULL_SCALE` (500) ist am Frontend kalibriert, das die
-   *gerenderte*, herunterskalierte Datei misst (`img.naturalWidth` in
-   `useFocusPeaking.ts`). Serverseitig wird das Original gelesen — derselbe
-   Ausschnitt trägt dort deutlich mehr Hochfrequenzanteil und landet an der
-   1,0-Decke. Ein σ von 0 misst dann die Normalisierung, nicht die Bilder.
+1. **Coverage 3.3%** (4,218 of 129,633 faces). Only 70
+   of 6,801 groups were evaluable — a tiny, non-random subset.
+2. **The scale saturates.** σ was exactly 0 in *both* columns and "weighted >
+   min" in exactly 0.0% of the groups. Two different aggregations that never
+   diverge are computing on identical numbers. Cause:
+   `LAPLACIAN_FULL_SCALE` (500) is calibrated on the frontend, which measures the
+   *rendered*, downscaled file (`img.naturalWidth` in
+   `useFocusPeaking.ts`). Server-side the original is read — the same
+   crop carries significantly more high-frequency content there and ends up at the
+   1.0 ceiling. A σ of 0 then measures the normalization, not the images.
 
-Daraus folgt die eigentliche Lehre für diese Etappe: **eine Kennzahl, die
-nur einen Wert annehmen kann, widerlegt nichts.** Der Denkfehler ist derselbe
-wie bei der zweiten widerlegten Hypothese in Abschnitt 1 — aus einer
-Kennzahl auf eine Bedingung schließen, die sie nicht trägt.
+From this follows the actual lesson for this stage: **a metric that
+can only take one value refutes nothing.** The flawed inference is the same
+as in the second refuted hypothesis in Section 1 — inferring from a
+metric a condition that it does not support.
 
-Konsequenzen, umgesetzt:
+Consequences, implemented:
 
-- **Die Rohvarianz wird mitgespeichert** (`faces.sharpness_variance`,
-  Migration `0143`). Der Vollausschlag lässt sich damit aus den Daten
-  bestimmen — wie in Abschnitt 7 gefordert, gemessen statt geraten — und die
-  Neuskalierung ist ein `UPDATE`, kein zweiter Lauf über 130 000 Ausschnitte.
-- Der Backfill greift jetzt auch Gesichter wieder auf, die bereits einen
-  Score, aber noch keine Varianz haben.
-- Das Diagnoseskript weist die Verteilung aus (Anteil an der 1,0-Decke,
-  Perzentile von Score und Rohvarianz), trennt „noch nachzutragen" von
-  „unter der Messgrenze" — und **verweigert das Urteil**, solange die
-  Abdeckung unvollständig, die Skala gesättigt oder die auswertbare Menge zu
-  klein ist.
+- **The raw variance is stored as well** (`faces.sharpness_variance`,
+  migration `0143`). The full scale can thereby be determined from the data —
+  as demanded in Section 7, measured instead of guessed — and
+  rescaling is an `UPDATE`, not a second run over 130,000 crops.
+- The backfill now also picks up faces that already have a
+  score but no variance yet.
+- The diagnostic script reports the distribution (share at the 1.0 ceiling,
+  percentiles of score and raw variance), separates "still to be backfilled" from
+  "below the measurement limit" — and **refuses to give a verdict** as long as
+  coverage is incomplete, the scale saturated or the evaluable set too
+  small.
 
-**Als Nächstes:** Backfill vollständig durchlaufen lassen, Vollausschlag
-anhand der Rohvarianz-Verteilung neu setzen, dann erneut messen. Erst dann
-ist V1 überhaupt prüfbar — und erst deren Ergebnis entscheidet, ob die
-Aggregation in `scorePhoto()` angefasst wird.
+**Next:** let the backfill run through completely, reset the full scale
+based on the raw-variance distribution, then measure again. Only then
+is V1 testable at all — and only its result decides whether the
+aggregation in `scorePhoto()` is touched.
 
-**Etappe 3 — `kps` persistieren → Blickrichtung.** Erneute Detektion nötig,
-aber kein neues Modell.
+**Stage 3 — persist `kps` → gaze direction.** Re-detection needed,
+but no new model.
 
-**Etappe 4 — Gruppenrelative Normalisierung.** Reine Algorithmusänderung,
-kann jederzeit dazwischen; sinnvoll erst, wenn mehrere variierende Signale
-vorliegen.
+**Stage 4 — group-relative normalization.** A pure algorithm change,
+can come in between at any time; only makes sense once several varying signals
+are available.
 
-**Etappe 5 — Augen offen je Gesicht.** Teuerste Option, nur falls die
-Messung zeigt, dass es sich lohnt.
+**Stage 5 — eyes open per face.** Most expensive option, only if the
+measurement shows that it is worthwhile.
 
-## 7. Validierung: Offline-Replay als Pflicht, nicht als Kür
+## 7. Validation: offline replay is mandatory, not optional
 
-Zwei Hypothesen sind in diesem Projekt bereits an den Daten gescheitert. Für
-jede weitere Änderung gilt daher: **keine Formeländerung ohne vorherige
-Messung am historischen Bestand.**
+Two hypotheses in this project have already failed against the data. For
+every further change, therefore: **no formula change without prior
+measurement on the historical data.**
 
-Die reviewten Gruppen sind ein fertiges Testset — Gruppe, gespeicherte
-Signale, tatsächliche Nutzerentscheidung. Zu messen ist alt gegen neu:
+The reviewed groups are a ready-made test set — group, stored
+signals, actual user decision. What is to be measured is old versus new:
 
-- Trefferquote und **Lift** gesamt (Lift, nicht Quote — sonst vergleicht man
-  unterschiedlich schwere Gruppen)
-- Lift je Δ-Bin: wird die Kurve monoton?
-- Enthaltungsquote: sinkt der Anteil der Δ≈0-Gruppen?
-- Anzahl Gruppen mit geändertem Pick (Bewegungsmaß)
+- Hit rate and **lift** overall (lift, not rate — otherwise you compare
+  groups of different difficulty)
+- Lift per Δ bin: does the curve become monotonic?
+- Abstention rate: does the share of Δ≈0 groups fall?
+- Number of groups with a changed pick (measure of movement)
 
-Schwellwerte (`PROMINENCE_SATURATION`, Untergrenze, `KNOWN_BONUS`) werden
-**nicht geraten**, sondern über den Replay bestimmt.
+Thresholds (`PROMINENCE_SATURATION`, lower bound, `KNOWN_BONUS`) are
+**not guessed** but determined via the replay.
 
-### Prüfbare Vorhersagen
+### Testable predictions
 
-Explizit formuliert, damit sie widerlegbar sind:
+Formulated explicitly so that they are refutable:
 
-- **V1:** Prominenzgewichtete Schärfe hat eine höhere Streuung innerhalb der
-  Gruppe als das heutige Minimum. *Prüfbar direkt nach dem Backfill in
-  Etappe 2, vor jeder Formeländerung.* Trifft V1 nicht zu, ist die
-  Kernannahme aus Abschnitt 2 falsch und Etappe 2 zwecklos. Das Messskript
-  dafür steht: `scripts/photos/diagnose-face-sharpness-variance.mjs`
-  (read-only, Ergebnis noch offen — der Backfill muss auf der produktiven
-  Datenbank erst laufen).
-- **V2:** Ein erheblicher Teil der heutigen Δ≈0-Gruppen erhält einen von null
-  verschiedenen Δ. *Offline prüfbar.*
-- **V3:** Die Lift-Kurve über Δ verliert ihren Abfall bei großem Δ.
-  *Offline prüfbar.*
+- **V1:** Prominence-weighted sharpness has a higher spread within the
+  group than today's minimum. *Testable directly after the backfill in
+  stage 2, before any formula change.* If V1 does not hold, the
+  core assumption from Section 2 is wrong and stage 2 is pointless. The measurement script
+  for it exists: `scripts/photos/diagnose-face-sharpness-variance.mjs`
+  (read-only, result still open — the backfill first has to run on the production
+  database).
+- **V2:** A considerable share of today's Δ≈0 groups gets a Δ different from
+  zero. *Testable offline.*
+- **V3:** The lift curve over Δ loses its drop at large Δ.
+  *Testable offline.*
 
-V1 ist die billigste und zugleich schärfste Prüfung — sie entscheidet über
-Etappe 2, bevor irgendetwas am Scoring angefasst wird.
+V1 is the cheapest and at the same time the sharpest test — it decides on
+stage 2 before anything in the scoring is touched.
 
-## 8. Offene Punkte
+## 8. Open points
 
-- **Die Ursache des Lift-Abfalls bei großem Δ ist nicht verstanden.** Die
-  Artefakt-Vermutung (Extremwert in einem rauschanfälligen Minimum) ist
-  plausibel, aber ungeprüft. Ein Filter auf die 22 Gruppen mit Δ ≥ 0,25 in
-  `diagnose-autopick-delta.mjs` würde es zeigen.
-- **Selektionseffekt:** reviewte `high`-Gruppen sind keine Zufallsstichprobe.
-  Der Replay erbt das, verzerrt den Vergleich alt/neu aber nicht, solange
-  beide auf demselben Testset laufen.
-- **Reproduzierbarkeit:** nur 58,2 % der gespeicherten Scores lassen sich mit
-  den heutigen Gewichten exakt nachrechnen — ältere Gruppen tragen Scores
-  früherer Formelversionen. Die Kernbefunde wurden auf der reproduzierbaren
-  Teilmenge gegengeprüft und blieben bestehen.
-- **Bestehende Picks** ändern sich durch eine neue Formel. Reviewte Gruppen
-  werden nicht mehr angefasst, betroffen sind nur offene — sichtbar bewegt
-  sich für den Nutzer trotzdem etwas.
+- **The cause of the lift drop at large Δ is not understood.** The
+  artifact hypothesis (extreme value in a noise-prone minimum) is
+  plausible but untested. A filter on the 22 groups with Δ ≥ 0.25 in
+  `diagnose-autopick-delta.mjs` would show it.
+- **Selection effect:** reviewed `high` groups are not a random sample.
+  The replay inherits this but does not distort the old/new comparison as long as
+  both run on the same test set.
+- **Reproducibility:** only 58.2% of the stored scores can be recomputed exactly with
+  today's weights — older groups carry scores
+  of earlier formula versions. The core findings were cross-checked on the reproducible
+  subset and held up.
+- **Existing picks** change through a new formula. Reviewed groups
+  are no longer touched, only open ones are affected — something visibly
+  moves for the user nonetheless.

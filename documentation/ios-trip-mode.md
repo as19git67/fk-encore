@@ -1,519 +1,524 @@
-# iOS Trip Mode – Feature-Plan
+# iOS Trip Mode – Feature Plan
 
-Stand: 2026-07-24 · Status: Entwurf (Entscheidungen 1–4 gesperrt)
+As of: 2026-07-24 · Status: Draft (decisions 1–4 locked)
 
-## 1. Ziel & Kernidee
+## 1. Goal & Core Idea
 
-Ein Toggle „Trip Mode". Ist er an, werden neue auf dem iPhone gemachte Fotos
-automatisch in ein fk-encore-Album synchronisiert — **ohne** dass vorher ein
-Album angelegt werden muss (weder in iOS noch in fk-encore). Die App legt ein
-iOS-Album automatisch an, füllt es mit den neuen Trip-Fotos und synct es. Für
-Gruppenreisen kann leicht ein gemeinsames, geteiltes Album verwendet werden.
+A toggle "Trip Mode". When it is on, new photos taken on the iPhone are
+automatically synchronized into an fk-encore album — **without** an album
+having to be created beforehand (neither in iOS nor in fk-encore). The app
+creates an iOS album automatically, fills it with the new trip photos and
+syncs it. For group trips, a shared album can easily be used.
 
-**Zentrale Erkenntnis:** ~80 % existiert bereits. Trip Mode ist eine
-Orchestrierungsschicht über der Album-Sync-Maschinerie
-(`makeAvailable` → `albumMappings` / `albumSyncModes` / Watermark-Upload /
-bisync-Download / `albumShares` / Push). Wirklich **neu** ist nur ein
-Mechanismus: neue Fotos automatisch in ein iOS-Album *legen* (heute kuratiert
-das der Nutzer von Hand in Fotos.app).
+**Key insight:** ~80 % already exists. Trip Mode is an orchestration layer
+on top of the album sync machinery
+(`makeAvailable` → `albumMappings` / `albumSyncModes` / watermark upload /
+bisync download / `albumShares` / push). Only one mechanism is truly **new**:
+automatically *putting* new photos into an iOS album (today the user curates
+that by hand in Photos.app).
 
-## 2. Gesperrte Entscheidungen
+## 2. Locked Decisions
 
-1. **Default-Modus solo = `sync`** (nicht bisync). Grund: `sync` propagiert
-   iPhone-seitiges Aussortieren (Foto aus dem Album entfernt) auch zum
-   Server-Album. bisync optional zuschaltbar.
-2. **Trip-Mitgliedschaft = Zeitfenster** als Default, **Home-Ausschlusszone**
-   als Verfeinerung. Ausdrücklich *keine* Zone um den Startort: ein Trip
-   bewegt sich vom Start weg, die Entfernung zum Startort sagt nichts über die
-   Zugehörigkeit eines Fotos aus.
-3. **Geteilter Trip = `sync` als Default**, pro Nutzer auf bisync umschaltbar.
-   Server-Album ist die gemeinsame Basis.
-4. **Automatische Trip-Erkennung**: gewünscht (als Vorschlag), wenn sie
-   einigermaßen zuverlässig funktioniert → eigene Etappe.
+1. **Default mode solo = `sync`** (not bisync). Reason: `sync` also propagates
+   culling on the iPhone (photo removed from the album) to the server album.
+   bisync can optionally be switched on.
+2. **Trip membership = time window** as the default, **home exclusion zone**
+   as a refinement. Explicitly *no* zone around the starting location: a trip
+   moves away from the start, and the distance to the starting location says
+   nothing about whether a photo belongs.
+3. **Shared trip = `sync` as the default**, switchable to bisync per user.
+   The server album is the common basis.
+4. **Automatic trip detection**: desired (as a suggestion) if it works
+   reasonably reliably → its own stage.
 
-## 3. Wiederverwendung vs. Neu
+## 3. Reuse vs. New
 
-| Baustein | Status |
+| Building block | Status |
 |---|---|
-| iOS↔Server-Album-Verknüpfung, Modus setzen | vorhanden (`LibraryBrowserViewModel.makeAvailable`) |
-| Upload neuer Fotos, Watermark, Dedup | vorhanden (`PhotoSyncService`) |
-| Aussortieren → Server-Entfernung (`sync`) | vorhanden (`syncAlbumDeletions`) |
-| Server-Fotos aufs Gerät (bisync) | vorhanden (`PhotoDownloadService`) |
-| Album teilen, Teilnehmer finden | vorhanden (`/albums/share`, `/albums/:id/shareable-users`) |
-| Push/Notifications | vorhanden (sharedalbum-Service) |
-| Trip-Erkennung (Home-Zentroid, Zeit/Geo-Cluster) | vorhanden für Recaps (`recaps.service.ts`) |
-| **Neue Fotos automatisch ins iOS-Album legen** | **NEU** |
-| **Trip-Metadaten (Start/Ende/aktiv) am Server** | **NEU (minimal)** |
+| iOS↔server album link, setting the mode | exists (`LibraryBrowserViewModel.makeAvailable`) |
+| Upload of new photos, watermark, dedup | exists (`PhotoSyncService`) |
+| Culling → server removal (`sync`) | exists (`syncAlbumDeletions`) |
+| Server photos to the device (bisync) | exists (`PhotoDownloadService`) |
+| Share album, find participants | exists (`/albums/share`, `/albums/:id/shareable-users`) |
+| Push/notifications | exists (sharedalbum service) |
+| Trip detection (home centroid, time/geo cluster) | exists for recaps (`recaps.service.ts`) |
+| **Automatically put new photos into the iOS album** | **NEW** |
+| **Trip metadata (start/end/active) on the server** | **NEW (minimal)** |
 
-## 4. Capture-Window-Mechanik (Herzstück)
+## 4. Capture Window Mechanics (Core)
 
-Ein Trip ist ein Zeitfenster `[start, ende?]` (+ optional Geofence
-lat/lon/radius). Der Auto-Add-Pass läuft überall dort, wo schon Sync läuft
-(Foreground-Resume, Kaltstart, BG-Task) und zusätzlich reaktiv über
+A trip is a time window `[start, end?]` (+ optional geofence
+lat/lon/radius). The auto-add pass runs wherever sync already runs
+(foreground resume, cold start, BG task) and additionally reactively via
 `PHPhotoLibraryChangeObserver`:
 
-> Für jedes Bild-Asset mit `creationDate ≥ start` (und, falls Geofence gesetzt,
-> innerhalb des Radius), **das noch nie behandelt wurde**, → ins Trip-iOS-Album
-> legen und als behandelt markieren.
+> For every image asset with `creationDate ≥ start` (and, if a geofence is set,
+> within the radius) **that has never been handled**, → put it into the trip
+> iOS album and mark it as handled.
 
-**Aussortieren-Reconciliation (kritisch wegen Entscheidung 1):** Auto-Add darf
-nie „alle Fenster-Assets, die nicht im Album sind" nehmen — sonst würde ein
-gerade ausgemistetes Foto sofort wieder eingefügt und der `sync`-Modus geriete
-in einen Add/Remove-Konflikt samt Re-Upload. Stattdessen ein **`handledAssetIds`**
-(bzw. High-Water-Mark auf `creationDate` + Randliste), exakt analog zum
-Upload-Watermark: nur nie-behandelte Assets werden hinzugefügt. Entfernt der
-Nutzer danach ein Foto aus dem Album, bleibt es entfernt und `sync` löscht es
-serverseitig.
+**Culling reconciliation (critical because of decision 1):** Auto-add must
+never take "all window assets that are not in the album" — otherwise a photo
+that was just culled would be re-inserted immediately, and `sync` mode would
+get into an add/remove conflict including a re-upload. Instead, a
+**`handledAssetIds`** (or a high-water mark on `creationDate` + edge list),
+exactly analogous to the upload watermark: only never-handled assets are
+added. If the user then removes a photo from the album, it stays removed and
+`sync` deletes it server-side.
 
-- **Auto-Modus:** behandelt = automatisch hinzugefügt.
-- **Manueller Modus:** behandelt = hinzugefügt **oder** verworfen (`dismissed`).
-  Kandidaten fürs Review-Grid = Fenster-Assets − behandelt.
+- **Auto mode:** handled = automatically added.
+- **Manual mode:** handled = added **or** discarded (`dismissed`).
+  Candidates for the review grid = window assets − handled.
 
-Robust gegen App-Kills: Der Pass holt beim nächsten Lauf nach (idempotent),
-passt zur Resilienz-Arbeit an `runFullSync`.
+Robust against app kills: the pass catches up on the next run (idempotent),
+which fits the resilience work on `runFullSync`.
 
-**Warum die Reconciliation überhaupt nötig ist (und heute nicht auftritt):** Die
-aktuelle Implementierung hat **genau einen Schreiber** der Album-Mitgliedschaft
-— den Nutzer (in Fotos.app). Der Sync *liest* die Mitgliedschaft nur und leitet
-Upload/Löschung ab; er *fügt nie* etwas hinzu. Entfernt der Nutzer ein Foto,
-propagiert `sync` das zum Server und nichts fügt es je wieder ein → kein
-Konflikt. Trip Mode führt mit dem Auto-Add-Pass einen **zweiten, automatischen
-Schreiber** ein — erst dadurch kann „aussortiert → sofort wieder eingefügt →
-Re-Upload → …" entstehen. `handledAssetIds` (jedes Asset genau einmal anfassen)
-stellt die „ein effektiver Schreiber"-Eigenschaft wieder her. Präzedenzfall: die
-bisync-Download-Seite fügt schon heute Fotos ins iOS-Album (heruntergeladene
-Server-Fotos) und trackt via `downloadedPhotos` / `forgetDownloadedPhotos`, was
-sie hinzugefügt hat, genau um denselben Kampf mit dem Aussortieren zu vermeiden.
-`handledAssetIds` ist das Upload-seitige Gegenstück.
+**Why the reconciliation is needed at all (and does not occur today):** The
+current implementation has **exactly one writer** of album membership
+— the user (in Photos.app). The sync only *reads* membership and derives
+upload/deletion from it; it *never adds* anything. If the user removes a photo,
+`sync` propagates that to the server and nothing ever re-inserts it → no
+conflict. With the auto-add pass, Trip Mode introduces a **second, automatic
+writer** — only then can "culled → immediately re-inserted → re-upload → …"
+arise. `handledAssetIds` (touch every asset exactly once) restores the "one
+effective writer" property. Precedent: the bisync download side already
+inserts photos into the iOS album today (downloaded server photos) and
+tracks what it added via `downloadedPhotos` / `forgetDownloadedPhotos`, exactly
+to avoid the same fight with culling. `handledAssetIds` is the upload-side
+counterpart.
 
-## 5. Trip-Lebenszyklus
+## 5. Trip Lifecycle
 
-- **Start:** Zeitpunkt des Einschaltens (deterministisch, keine Fehlalarme).
-- **Ort/Name:** aktuelle `CLLocation` beim Start holen, reverse-geocoden
-  (geo/osm-admin) → Namensvorschlag „Gardasee (Juli 2026)", editierbar. Der
-  Name wird zum Server-Album-Namen.
-- **Home-Ausschlusszone (optional):** Home-Zentroid (`GET /trips/home-location`,
-  dieselbe Quelle wie das Auto-Ende) + `homeArrivalRadiusMeters`; grenzt
-  Mitgliedschaft ein (daheim während laufendem Trip gemachte Fotos fallen
-  raus). Ohne bekannten Home-Ort gilt das reine Zeitfenster.
-- **Ende:** Toggle-off (Standard). Später optional Auto-Ende (wieder länger in
-  Home-Region) + Max-Dauer.
-- **Toggle-off:** Auto-Add stoppt für *neue* Fotos. iOS-Album, Server-Album,
-  Verknüpfung bleiben — der Trip wird ein normales verknüpftes Album, Modus
-  weiter änderbar (bestehende Disconnect/Mode-Logik).
-- **Nachlauf nach dem Ende (wichtig):** Der Trip wird beim Beenden **nicht
-  verworfen**, sondern mit gesetztem `endedAt` in eine Liste beendeter Trips
-  übernommen (`TripPreferences.loadClosedTrips`). Grund: Der Auto-Add-Pass
-  sieht die Fotomediathek nur, während die App läuft — mit der Kamera-App
-  aufgenommene Fotos werden regelmäßig erst später entdeckt, unter Umständen
-  erst nach dem Toggle-off. Der Catch-up arbeitet solche Fotos noch nach.
-  `endedAt` ist dabei die **harte Obergrenze**: Fotos, die nach dem Beenden
-  entstanden sind, landen nie im Trip-Album. Nach Ablauf einer Karenzzeit
-  (`TripMembership.closedTripGrace`, 24 h) fällt der beendete Trip aus der
-  Liste.
+- **Start:** the time of switching on (deterministic, no false alarms).
+- **Place/name:** fetch the current `CLLocation` at the start, reverse-geocode
+  (geo/osm-admin) → name suggestion "Gardasee (Juli 2026)" (Lake Garda
+  (July 2026)), editable. The name becomes the server album name.
+- **Home exclusion zone (optional):** home centroid (`GET /trips/home-location`,
+  same source as the auto-end) + `homeArrivalRadiusMeters`; narrows
+  membership (photos taken at home during a running trip drop out). Without a
+  known home location, the pure time window applies.
+- **End:** toggle-off (default). Later optionally auto-end (again longer in
+  the home region) + max duration.
+- **Toggle-off:** auto-add stops for *new* photos. iOS album, server album,
+  link remain — the trip becomes a normal linked album, mode still
+  changeable (existing disconnect/mode logic).
+- **Follow-up after the end (important):** On ending, the trip is **not
+  discarded**, but moved with `endedAt` set into a list of ended trips
+  (`TripPreferences.loadClosedTrips`). Reason: the auto-add pass only sees the
+  photo library while the app is running — photos taken with the camera app are
+  regularly discovered only later, possibly only after the toggle-off. The
+  catch-up still processes such photos. `endedAt` is the **hard upper bound**:
+  photos created after the end never land in the trip album. After a grace
+  period (`TripMembership.closedTripGrace`, 24 h), the ended trip drops out of
+  the list.
 
-## 6. Solo-Trip – Ablauf
+## 6. Solo Trip – Flow
 
-1. Toggle an → App legt iOS-Album an, ruft `makeAvailable`-Logik
-   (Server-Album per Namensabgleich finden/erstellen), Modus **sync**, confirm,
-   `syncEnabled = true`, Watermark = jetzt.
-2. Auto-Add-Pass legt neue Fotos ins Album, Sync lädt hoch.
-3. Nutzer sortiert am iPhone aus → `syncAlbumDeletions` entfernt sie aus dem
-   Server-Album (nur eigene Uploads, sicher).
-4. Toggle aus → einfrieren.
+1. Toggle on → app creates the iOS album, calls the `makeAvailable` logic
+   (find/create server album by name matching), mode **sync**, confirm,
+   `syncEnabled = true`, watermark = now.
+2. The auto-add pass puts new photos into the album, sync uploads.
+3. The user culls on the iPhone → `syncAlbumDeletions` removes them from the
+   server album (own uploads only, safe).
+4. Toggle off → freeze.
 
-## 7. Manueller Kurationsmodus (Option 5/6)
+## 7. Manual Curation Mode (Option 5/6)
 
-**Was der Schalter Auto/Manuell entscheidet – und was nicht.** Der Schalter
-betrifft ausschließlich den Weg neuer Fotos *in das iOS-Album*:
+**What the Auto/Manual switch decides – and what it does not.** The switch
+only concerns the path of new photos *into the iOS album*:
 
-- **Automatisch** (`autoAdd = true`): Neu aufgenommene Fotos werden vom
-  Auto-Add-Pass in das iOS-Trip-Album gelegt. Damit greift die
-  Synchronisation ins f4mil-Album.
-- **Manuell** (`autoAdd = false`): Neu aufgenommene Fotos bleiben in der
-  Aufnahmen-Ansicht. Der Nutzer legt selbst in der Fotos-App ins
-  iOS-Trip-Album, was dazugehören soll.
+- **Automatic** (`autoAdd = true`): Newly taken photos are put into the iOS
+  trip album by the auto-add pass. The synchronization into the f4mil album
+  thus takes effect.
+- **Manual** (`autoAdd = false`): Newly taken photos stay in the Recents
+  view. The user puts into the iOS trip album, in the Photos app, whatever
+  should belong.
 
-In **beiden** Fällen wird das iOS-Trip-Album nach f4mil synchronisiert –
-auch wenn es im manuellen Modus leer bleibt, solange niemand etwas
-hineingelegt hat. „Manuell" ist also nicht „aus": Sync-Modus
-(copy/sync/bisync) und Album bleiben unverändert aktiv. Die App sagt das in
-der Zeile unter dem Schalter und im Leerzustand des Foto-Grids.
+In **both** cases the iOS trip album is synchronized to f4mil –
+even if it stays empty in manual mode as long as nobody has put anything in.
+"Manual" is therefore not "off": sync mode (copy/sync/bisync) and album stay
+active unchanged. The app says so in the line below the switch and in the
+empty state of the photo grid.
 
-Schalter `autoAdd = false` im Trip. Neben dem Trip-Toggle ein Button →
-Review-View: Grid aller neuen, noch nicht behandelten Trip-Kandidaten
-(Fenster-Regel). Mehrfachauswahl → „Zum Trip-Album hinzufügen"
-(+ optional „Jetzt synchronisieren"). Nicht ausgewählte können verworfen werden
-(`dismissedAssetIds`), tauchen nicht wieder auf.
+Switch `autoAdd = false` in the trip. Next to the trip toggle a button →
+review view: grid of all new, not yet handled trip candidates (window rule).
+Multi-select → "Zum Trip-Album hinzufügen" (add to trip album)
+(+ optionally "Jetzt synchronisieren" (sync now)). Unselected ones can be
+dismissed (`dismissedAssetIds`) and do not reappear.
 
-## 8. Geteilter Trip
+## 8. Shared Trip
 
-Ein geteilter Trip = **ein geteiltes Server-Album mit koordiniertem
-Lebenszyklus**, kein neues Sharing-Konzept. Jedes Mitglied hat sein eigenes
-iOS-Trip-Album, das per **sync** ins gemeinsame Server-Album synct.
+A shared trip = **one shared server album with a coordinated lifecycle**, not
+a new sharing concept. Each member has their own iOS trip album, which syncs
+via **sync** into the shared server album.
 
-**Deletion-Sicherheit passt perfekt:** `syncAlbumDeletions` fasst nur Fotos an,
-die *dieses Gerät* hochgeladen hat (`serverPhotoMap`). A kann also nur A's
-eigene Fotos aus dem geteilten Album aussortieren, nie B's. Genau richtig.
+**Deletion safety fits perfectly:** `syncAlbumDeletions` only touches photos
+that *this device* uploaded (`serverPhotoMap`). A can therefore only cull A's
+own photos from the shared album, never B's. Exactly right.
 
-- **Einladen (umgesetzt, Issue #918):** Der „Teilen"-Button in der aktiven
-  Trip-Ansicht öffnet die reguläre `AlbumShareView` für das Trip-Server-Album:
-  Teilnehmer aus `/albums/:id/shareable-users` mit `read` / `write` /
-  `write_share` einladen oder einen öffentlichen Link erzeugen. Der
-  Trip-spezifische Push („Anna hat dich zum Trip 'Gardasee' eingeladen") und
-  die Empfänger-Provisionierung folgen weiterhin in Etappe 3.
-- **Beitreten beim Einschalten:** Client fragt `GET /trips/active` (aktive
-  Trips aus meinem Kreis) → Dialog „An Trip von Anna teilnehmen?". Bei Zusage:
-  Provisionierung mappt das lokale iOS-Album **direkt auf die bekannte
-  Server-Album-ID** (nicht über Namensabgleich!), Modus sync.
-- **bisync optional:** Wer die Fotos aller anderen aufs Gerät will, schaltet pro
-  Trip auf bisync (Speicher-Hinweis).
+- **Invite (implemented, issue #918):** The "Teilen" (share) button in the
+  active trip view opens the regular `AlbumShareView` for the trip server
+  album: invite participants from `/albums/:id/shareable-users` with `read` /
+  `write` / `write_share` or create a public link. The trip-specific push
+  ("Anna hat dich zum Trip 'Gardasee' eingeladen" — Anna invited you to the
+  trip 'Gardasee') and the recipient provisioning still follow in stage 3.
+- **Join on switch-on:** The client asks `GET /trips/active` (active trips
+  from my circle) → dialog "An Trip von Anna teilnehmen?" (join Anna's trip?).
+  On acceptance, provisioning maps the local iOS album **directly to the known
+  server album ID** (not via name matching!), mode sync.
+- **bisync optional:** Whoever wants everyone else's photos on the device
+  switches to bisync per trip (storage notice).
 
-## 9. Automatische Trip-Erkennung (Vorschlag, Etappe 5)
+## 9. Automatic Trip Detection (Suggestion, Stage 5)
 
-Home-Distanz-Heuristik aus den Recaps geliehen (`computeHomeCentroid`): Ist der
-Nutzer > X km vom Home-Zentroid für > Y Stunden → proaktiver Vorschlag „Sieht
-aus, als wärst du unterwegs (Ort). Trip Mode einschalten?". Bewusst nur
-Vorschlag, nie automatisch (Zuverlässigkeit/Akku).
+Home-distance heuristic borrowed from the recaps (`computeHomeCentroid`): if the
+user is > X km from the home centroid for > Y hours → proactive suggestion
+"Sieht aus, als wärst du unterwegs (Ort). Trip Mode einschalten?" (Looks like
+you're on the road (place). Turn on Trip Mode?). Deliberately only a
+suggestion, never automatic (reliability/battery).
 
-**Stand: beide Richtungen sind umgesetzt** — §9.1 (Ende), §9.2 (Start) und die
-Bremsen aus §9.3.
+**Status: both directions are implemented** — §9.1 (end), §9.2 (start) and the
+brakes from §9.3.
 
-### 9.1 Auto-Ende-Vorschlag (umgesetzt)
+### 9.1 Auto-End Suggestion (Implemented)
 
-Die spiegelbildliche Hälfte — „wieder länger in Home-Region → Trip beenden?"
-— **ist umgesetzt**, unabhängig vom (noch offenen) Start-Vorschlag:
+The mirror-image half — "longer in the home region again → end the trip?"
+— **is implemented**, independent of the (still open) start suggestion:
 
-- **Server:** `GET /trips/home-location` (`photo/trips.ts`) liefert den
-  Home-Zentroid des Nutzers, berechnet mit derselben
-  `computeHomeCentroid`-Funktion wie die Recaps — Client und Server sind sich
-  damit einig, wo „zuhause" ist. `null`, solange zu wenig Geodaten vorliegen.
-- **Client:** `TripAutoEndMonitor` (Singleton, `@MainActor`) startet bei
-  `TripStore.startTrip` und stoppt bei `endTrip`. Registriert
-  `CLLocationManager.startMonitoringSignificantLocationChanges()` — läuft
-  auch, während die App im Hintergrund oder (mit „Immer"-Berechtigung)
-  beendet ist; das System weckt die App bei Bedarf, um das Update
-  zuzustellen. `NSLocationAlwaysAndWhenInUseUsageDescription` in `Info.plist`
-  begründet die zusätzliche Berechtigungsanfrage.
-- **Heuristik (`TripAutoEndHeuristic`, pur/testbar):** Bleibt das Gerät
-  ununterbrochen innerhalb von `homeArrivalRadiusMeters` (2 km — enger als
-  ein typischer Trip-Geofence von 25 km, damit ein Trip in Heimatnähe nicht
-  sofort als „beendet" erscheint) für mindestens `homeArrivalGrace` (2 h),
-  wird der Vorschlag ausgelöst. Verlässt das Gerät den Radius zwischendurch,
-  beginnt die Uhr neu. Nach einem Vorschlag greift `suggestionCooldown` (6 h),
-  damit ein kurzer Einkauf in Heimatnähe nicht sofort erneut fragt.
-- **Vorschlag erreicht den Nutzer auf zwei Wegen, beide aus `pendingSuggestion`
-  gespeist (`TripAutoEndPreferences`):**
-  1. Lokale Notification mit Aktionen „Trip beenden" / „Weiter unterwegs" —
-     beantwortbar direkt von der Sperrbildschirm-Benachrichtigung aus, ohne
-     die App zu öffnen (`AppDelegate.userNotificationCenter(_:didReceive:)`).
-  2. Banner oben in `TripView`, falls die Notification nicht erlaubt,
-     verpasst oder ignoriert wurde — erscheint beim nächsten Öffnen/
-     Vordergrund-Wechsel der App.
-  Beide Wege beenden den Trip nur nach expliziter Bestätigung; ein Antippen
-  der Notification ohne Aktion oder „Weiter unterwegs" räumt den Vorschlag
-  nur weg (Cooldown greift trotzdem, damit nicht sofort erneut gefragt wird).
-- Fehlt die Standortberechtigung oder wird sie verweigert, läuft der Trip
-  unverändert weiter — der Monitor ist eine reine Zusatzfunktion über dem
-  bestehenden manuellen „Beenden"-Button in `TripView`.
+- **Server:** `GET /trips/home-location` (`photo/trips.ts`) returns the user's
+  home centroid, computed with the same `computeHomeCentroid` function as the
+  recaps — client and server thus agree on where "home" is. `null` as long as
+  too little geodata is available.
+- **Client:** `TripAutoEndMonitor` (singleton, `@MainActor`) starts on
+  `TripStore.startTrip` and stops on `endTrip`. Registers
+  `CLLocationManager.startMonitoringSignificantLocationChanges()` — also runs
+  while the app is in the background or (with "Always" permission)
+  terminated; the system wakes the app as needed to deliver the update.
+  `NSLocationAlwaysAndWhenInUseUsageDescription` in `Info.plist` justifies
+  the additional permission request.
+- **Heuristic (`TripAutoEndHeuristic`, pure/testable):** If the device stays
+  continuously within `homeArrivalRadiusMeters` (2 km — tighter than
+  a typical trip geofence of 25 km, so that a trip near home does not
+  immediately appear "ended") for at least `homeArrivalGrace` (2 h),
+  the suggestion is triggered. If the device leaves the radius in between,
+  the clock starts over. After a suggestion, `suggestionCooldown` (6 h)
+  applies, so that a short shopping trip near home does not ask again
+  immediately.
+- **The suggestion reaches the user in two ways, both fed from `pendingSuggestion`
+  (`TripAutoEndPreferences`):**
+  1. Local notification with actions "Trip beenden" (end trip) / "Weiter
+     unterwegs" (still on the road) — answerable directly from the lock-screen
+     notification without opening the app
+     (`AppDelegate.userNotificationCenter(_:didReceive:)`).
+  2. Banner at the top of `TripView`, if the notification is not allowed,
+     missed or ignored — appears on the next opening/
+     foreground switch of the app.
+  Both ways end the trip only after explicit confirmation; tapping the
+  notification without an action or "Weiter unterwegs" only clears the
+  suggestion (the cooldown still applies, so it does not ask again
+  immediately).
+- If location permission is missing or denied, the trip continues
+  unchanged — the monitor is a pure add-on on top of the existing manual
+  "Beenden" (end) button in `TripView`.
 
-#### 9.1.1 Warum der Vorschlag anfangs nie ankam (behoben)
+#### 9.1.1 Why the Suggestion Initially Never Arrived (Fixed)
 
-Die erste Fassung wertete die Heuristik **ausschließlich in
-`didUpdateLocations`** aus. Significant-Change-Updates liefert iOS aber nur bei
-*Bewegung* — und „zuhause angekommen" heißt gerade, dass das Gerät stehen
-bleibt. Praktisch: bei der Ankunft kam genau ein Update (Uhr startet,
-`shouldSuggest == false`), danach lag das Telefon still, es kam nie wieder ein
-Update, und der Moment „zwei Stunden ununterbrochen zuhause" wurde nie
-ausgewertet. Der Vorschlag konnte so grundsätzlich nicht erscheinen.
+The first version evaluated the heuristic **exclusively in
+`didUpdateLocations`**. But iOS delivers significant-change updates only on
+*movement* — and "arrived at home" means precisely that the device stays put.
+In practice: on arrival exactly one update came (clock starts,
+`shouldSuggest == false`), after that the phone lay still, no further update
+ever came, and the moment "two hours continuously at home" was never
+evaluated. The suggestion could therefore fundamentally not appear.
 
-Verschärfend kam hinzu, dass `resumeIfTripActive()` beim Start **jedes
-Prozesses** `resetArrivalTracking()` aufrief. `isMonitoring` ist prozesslokal,
-also lief das bei jedem Kaltstart — und der Significant-Change-Dienst startet
-die App zum Zustellen von Updates selbst neu. Die Ankunftsuhr wurde damit genau
-von dem Mechanismus zurückgesetzt, dessen Ablauf sie messen sollte.
+Aggravating this, `resumeIfTripActive()` called `resetArrivalTracking()` at
+the start of **every process**. `isMonitoring` is process-local,
+so this happened on every cold start — and the significant-change service
+itself restarts the app to deliver updates. The arrival clock was thus reset
+by exactly the mechanism whose expiry it was supposed to measure.
 
-Drei Änderungen beheben das:
+Three changes fix this:
 
-1. **Vorausgeplante Benachrichtigung statt reaktiver Auswertung.** Die
-   Heuristik liefert nicht mehr nur „jetzt vorschlagen: ja/nein", sondern den
-   *Zeitpunkt*, ab dem gefragt werden darf (`armFireAt` — das spätere von
-   Ablauf der Grace-Periode und Ende des Cooldowns). Bei Ankunft plant
-   `TripAutoEndMonitor.arm(...)` dafür eine
-   `UNTimeIntervalNotificationTrigger`-Notification ein. Die stellt das System
-   selbstständig zu, auch wenn die App nie wieder läuft. Verlässt das Gerät den
-   Radius, wird sie über `disarm()` zurückgenommen.
-2. **Ankunftsuhr überlebt Neustarts.** `start(resetTracking:)` setzt den
-   Zustand nur noch beim *Beginn* eines Trips zurück; `resumeIfTripActive()`
-   übergibt `false`.
-3. **Auswertung auch ohne Ortsupdate.** `evaluateNow()` prüft die letzte
-   bekannte Position und läuft in `runFullSync()` mit — also bei App-Start,
-   Foreground-Wechsel und Hintergrund-Task. Das trägt zusätzlich den Fall, dass
-   überhaupt nur „Beim Verwenden"-Berechtigung erteilt wurde.
+1. **Pre-scheduled notification instead of reactive evaluation.** The
+   heuristic no longer returns just "suggest now: yes/no", but the
+   *point in time* from which asking is allowed (`armFireAt` — the later of
+   the expiry of the grace period and the end of the cooldown). On arrival,
+   `TripAutoEndMonitor.arm(...)` schedules a
+   `UNTimeIntervalNotificationTrigger` notification for it. The system delivers
+   it on its own, even if the app never runs again. If the device leaves the
+   radius, it is withdrawn via `disarm()`.
+2. **Arrival clock survives restarts.** `start(resetTracking:)` only resets
+   the state at the *beginning* of a trip; `resumeIfTripActive()`
+   passes `false`.
+3. **Evaluation even without a location update.** `evaluateNow()` checks the
+   last known position and also runs in `runFullSync()` — i.e. on app start,
+   foreground switch and background task. This additionally covers the case
+   that only "While Using" permission was granted at all.
 
-Die Notification-ID ist pro Trip stabil und wird für die geplante *und* die
-sofortige Variante verwendet — dieselbe ID ersetzt die vorherige Anfrage, ein
-Doppel-Nachfragen ist damit ausgeschlossen. Die reine Entscheidungslogik ist in
-`TripAutoEndHeuristicTests` festgenagelt.
+The notification ID is stable per trip and is used for the scheduled *and* the
+immediate variant — the same ID replaces the previous request, so
+double-asking is ruled out. The pure decision logic is pinned down in
+`TripAutoEndHeuristicTests`.
 
-**Start und Ende sind bewusst kein Spiegelbild.** Beim Start läuft noch kein
-Trip — hier ist ein CoreLocation-Dauerbetrieb mit „Immer"-Berechtigung nicht
-zu rechtfertigen wie beim (bereits laufenden, explizit gestarteten) Trip oben.
-Der Start-Vorschlag nutzt stattdessen ein Signal, das ohnehin schon kostenlos
-anfällt: die GPS-Koordinaten neuer Fotos aus dem Auto-Add-/Sync-Pass.
+**Start and end are deliberately not mirror images.** At the start, no trip
+is running yet — continuous CoreLocation operation with "Always" permission
+cannot be justified here as it can for the (already running, explicitly
+started) trip above. The start suggestion instead uses a signal that is
+already available for free: the GPS coordinates of new photos from the
+auto-add/sync pass.
 
-### 9.2 Start-Vorschlag (umgesetzt)
+### 9.2 Start Suggestion (Implemented)
 
-`TripAutoStartMonitor` (Singleton, `@Observable @MainActor`).
+`TripAutoStartMonitor` (singleton, `@Observable @MainActor`).
 
-- **Signalquelle:** `PHAsset.location` der Fotos, die der ohnehin laufende
-  Enumerations-Pass (`runFullSync`: Foreground-Resume, Kaltstart, BG-Task; plus
-  reaktiv über `PHPhotoLibraryChangeObserver`) sowieso schon sieht — kein
-  zusätzliches CoreLocation-Monitoring, keine neue Berechtigung. Betrachtet
-  werden Fotos der letzten `lookback` = 48 h.
-- **Heuristik (`TripAutoStartHeuristic`, pur/testbar, analog zu
-  `TripAutoEndHeuristic`):** Fotos mit GPS **> 100 km** vom Home-Zentroid
-  (`TripHomeLocation.resolve()`, dieselbe Quelle wie §9.1) UND über
-  **≥ 2 distinkte Aufnahmezeitpunkte hinweg mit ≥ 6 h Spanne** zwischen erstem
-  und letztem → Vorschlag. Die Zeitspanne verhindert, dass ein einzelnes Foto
-  vom Flughafen-Zwischenstopp sofort auslöst; 100 km ist deutlich mehr als der
-  2-km-Home-Radius aus §9.1 und mehr als ein typischer Tagesausflug.
-  - Distanz und Spanne werden **nur über die weit entfernten Fotos** gemessen —
-    sonst würde ein einzelnes fernes Foto die Zeitachse unbeteiligter
-    Zuhause-Fotos erben.
-  - Das jüngste ferne Foto muss höchstens `recencyWindow` = 12 h alt sein,
-    sonst ist die Reise schon vorbei („heute früh heimgefahren").
-  - Läuft bereits ein Trip (oder klingt einer gerade nach,
-    `TripStore.hasPendingTripWork`), wird gar nicht erst geprüft — es gibt nur
-    einen aktiven Trip (§14.4).
-  - Kein Home-Zentroid bekannt → keine Prüfung, kein Vorschlag (wie überall in
-    diesem Dokument: fehlende Geodaten sind kein Fehlerzustand, s. §14.3).
-  - Nach einem abgelehnten Vorschlag greift `suggestionCooldown` = **24 h** —
-    deutlich länger als die 6 h beim Ende, weil Starten die größere Zusage ist.
-- **Signalisierung — bewusst leiser als beim Ende (§9.1), weil Starten mehr
-  Konsequenzen hat als Beenden:**
-  1. **Lokale Notification** „Sieht aus, als wärst du unterwegs" mit den
-     Aktionen **„Trip starten"**, **„Nicht jetzt"** und **„Für diesen Ort nicht
-     mehr fragen"** (letztere schreibt in `TripRegionSuppression`, §9.3).
-  2. **„Trip starten" öffnet das vorbefüllte `TripStartSheet`** statt den Trip
-     direkt zu starten — anders als beim Ende (§9.1: „Trip beenden" ist
-     Ein-Klick). Der Start-Flow braucht den vom Nutzer bestätigten Namen
-     (§14.3: Reverse-Geocoding → Vorschlag → Bestätigung/Editierbarkeit); das
-     darf eine Notification-Aktion nicht überspringen. Technisch läuft das über
-     `shouldPresentStartSheet`: die Aktion kann in einem frisch gestarteten
-     Prozess laufen, lange bevor eine View existiert, die sie entgegennehmen
-     könnte. `TripView` konsumiert das Flag beim Erscheinen. Der grobe Ort aus
-     dem Foto-Cluster füllt den Namensvorschlag vorab, ersetzt aber nicht das
-     übliche Reverse-Geocoding beim tatsächlichen Start.
-  3. **Banner in `TripView`** im „Kein aktiver Trip"-Zustand (`noTripView`,
-     `TripView.swift`) als Fallback, falls Notifications verweigert, verpasst
-     oder ignoriert wurden — analog zum Auto-Ende-Banner in `ActiveTripView`.
-     Im Vordergrund wird deshalb *keine* Notification gepostet: der Banner
-     trägt sie bereits.
-  4. **Tab-Icon-Badge:** der Punkt am Trip-Tab erscheint jetzt auch bei offenem
-     Start-Vorschlag (`ContentView`), nicht nur bei laufendem Trip. Trägt
-     allein, falls sowohl Notification als auch Banner verpasst wurden.
-  Ein bloßes Antippen der Notification ohne Aktion öffnet nur die App (das
-  vorbefüllte Sheet erscheint dann nicht automatisch) und ist kein implizites
-  Ja — genau wie beim Ende (§9.1) räumt erst eine explizite Aktion den
-  Vorschlag weg; „Nicht jetzt" startet zusätzlich den Cooldown.
-- **Persistenz:** `PendingStartSuggestion` (Namensvorschlag, Gitterzelle,
-  `travellingSince`, `raisedAt`) in `TripAutoStartPreferences` — getrennt von
-  `TripAutoEndPreferences`, mit eigenen Keys: ein abgelehnter Start-Vorschlag
-  für eine Region darf einen späteren Ende-Vorschlag nicht beeinflussen und
-  umgekehrt. Der Monitor spiegelt den Zustand zusätzlich als `@Observable`
-  in-memory, damit Banner und Badge darauf reagieren; UserDefaults ist die
-  Kopie, die den Prozessneustart überlebt.
+- **Signal source:** `PHAsset.location` of the photos that the already running
+  enumeration pass (`runFullSync`: foreground resume, cold start, BG task; plus
+  reactively via `PHPhotoLibraryChangeObserver`) sees anyway — no
+  additional CoreLocation monitoring, no new permission. Photos from the last
+  `lookback` = 48 h are considered.
+- **Heuristic (`TripAutoStartHeuristic`, pure/testable, analogous to
+  `TripAutoEndHeuristic`):** Photos with GPS **> 100 km** from the home centroid
+  (`TripHomeLocation.resolve()`, same source as §9.1) AND across
+  **≥ 2 distinct capture times with a ≥ 6 h span** between first
+  and last → suggestion. The time span prevents a single photo
+  from an airport layover from triggering immediately; 100 km is considerably
+  more than the 2 km home radius from §9.1 and more than a typical day trip.
+  - Distance and span are measured **only over the far-away photos** —
+    otherwise a single distant photo would inherit the time axis of
+    uninvolved photos taken at home.
+  - The most recent distant photo must be at most `recencyWindow` = 12 h old,
+    otherwise the trip is already over ("drove home this morning").
+  - If a trip is already running (or one is just winding down,
+    `TripStore.hasPendingTripWork`), no check is done at all — there is only
+    one active trip (§14.4).
+  - No home centroid known → no check, no suggestion (as everywhere in
+    this document: missing geodata is not an error state, see §14.3).
+  - After a rejected suggestion, `suggestionCooldown` = **24 h** applies —
+    much longer than the 6 h for the end, because starting is the bigger commitment.
+- **Signaling — deliberately quieter than for the end (§9.1), because starting has more
+  consequences than ending:**
+  1. **Local notification** "Sieht aus, als wärst du unterwegs" (Looks like
+     you're on the road) with the actions **"Trip starten"** (start trip),
+     **"Nicht jetzt"** (not now) and **"Für diesen Ort nicht mehr fragen"**
+     (don't ask again for this place) (the latter writes to
+     `TripRegionSuppression`, §9.3).
+  2. **"Trip starten" opens the prefilled `TripStartSheet`** instead of starting
+     the trip directly — unlike at the end (§9.1: "Trip beenden" is
+     one-click). The start flow needs the name confirmed by the user
+     (§14.3: reverse geocoding → suggestion → confirmation/editability); a
+     notification action must not skip that. Technically this runs via
+     `shouldPresentStartSheet`: the action can run in a freshly started
+     process, long before a view exists that could receive it.
+     `TripView` consumes the flag when it appears. The rough location from
+     the photo cluster prefills the name suggestion, but does not replace the
+     usual reverse geocoding at the actual start.
+  3. **Banner in `TripView`** in the "Kein aktiver Trip" (no active trip) state
+     (`noTripView`, `TripView.swift`) as a fallback if notifications are
+     denied, missed or ignored — analogous to the auto-end banner in
+     `ActiveTripView`. In the foreground, therefore, *no* notification is
+     posted: the banner already carries it.
+  4. **Tab icon badge:** the dot on the trip tab now also appears for an open
+     start suggestion (`ContentView`), not only for a running trip. Carries
+     on its own if both the notification and the banner were missed.
+  Merely tapping the notification without an action only opens the app (the
+  prefilled sheet then does not appear automatically) and is not an implicit
+  yes — just like at the end (§9.1), only an explicit action clears the
+  suggestion; "Nicht jetzt" additionally starts the cooldown.
+- **Persistence:** `PendingStartSuggestion` (name suggestion, grid cell,
+  `travellingSince`, `raisedAt`) in `TripAutoStartPreferences` — separate from
+  `TripAutoEndPreferences`, with its own keys: a rejected start suggestion
+  for a region must not influence a later end suggestion and
+  vice versa. The monitor additionally mirrors the state as `@Observable`
+  in memory, so that banner and badge react to it; UserDefaults is the
+  copy that survives a process restart.
 
-**Beide Notification-Kategorien werden gemeinsam registriert**
+**Both notification categories are registered together**
 (`TripNotificationCategories.registerAll()`). `setNotificationCategories`
-*ersetzt* die Menge, statt sie zu ergänzen — registrierte sich jede Kategorie
-selbst, bliebe nur die zuletzt registrierte übrig und die andere Notification
-käme ohne Aktions-Buttons an.
+*replaces* the set instead of adding to it — if each category registered
+itself, only the last registered one would remain and the other notification
+would arrive without action buttons.
 
-### 9.3 Vorschlag dauerhaft ortsbezogen abwählbar (umgesetzt)
+### 9.3 Suggestion Permanently Dismissible per Location (Implemented)
 
-Ohne das würde z. B. das tägliche Pendeln zum Arbeitsplatz jeden Tag „Trip Mode
-einschalten?" fragen. Drei ineinandergreifende Bremsen:
+Without this, e.g. the daily commute to the workplace would ask "Trip Mode
+einschalten?" (turn on Trip Mode?) every day. Three interlocking brakes:
 
-1. **„Für diesen Ort nicht mehr fragen"** als Aktion am Vorschlag (Notification
-   und Banner) → die Gitterzelle landet in `TripRegionSuppression`. Die
-   Zellgröße ist `TripRegionGrid.cellDegrees` = 0,05° — derselbe Wert wie
-   `HOME_CELL_DEG` in `photo/recaps.service.ts`, damit „dieser Ort" auf Client
-   und Server dasselbe bedeutet. *Neue* Reiseziele werden weiterhin
-   vorgeschlagen, nur dieser Ort verstummt.
-2. **Auto-Unterdrückung häufiger Orte:** Zellen mit
-   `autoSuppressAfterDistinctDays` = 5 distinkten Fototagen sind faktisch
-   Zweit-Zuhause (Arbeit, Eltern, Gym) und nie Trips — dieselbe
-   „distinkte-Tage"-Idee wie die Home-Erkennung, nur pro Region. Gezählt wird
-   über **alle** Fotos des Passes, nicht nur die weit entfernten, und
-   unabhängig davon, ob ein Vorschlag entsteht: eine Region qualifiziert sich
-   gerade über die Besuche, die nie eine Nachfrage wert waren. Der Arbeitsweg
-   verstummt so mit der Zeit von selbst.
-3. **Cooldown & globaler Schalter:** 24 h Ruhe nach jedem Ablehnen (§9.2);
-   zusätzlich in den Sync-Einstellungen der Schalter „Trip-Vorschläge", der
-   beide Richtungen stilllegt — inklusive Zurücknahme einer bereits geplanten
-   Ende-Benachrichtigung. Dort lassen sich auch die ausgeblendeten Orte wieder
-   zurücksetzen.
+1. **"Für diesen Ort nicht mehr fragen"** as an action on the suggestion
+   (notification and banner) → the grid cell lands in `TripRegionSuppression`.
+   The cell size is `TripRegionGrid.cellDegrees` = 0.05° — the same value as
+   `HOME_CELL_DEG` in `photo/recaps.service.ts`, so that "this place" means the
+   same on client and server. *New* travel destinations are still
+   suggested, only this place falls silent.
+2. **Auto-suppression of frequent places:** cells with
+   `autoSuppressAfterDistinctDays` = 5 distinct photo days are effectively
+   second homes (work, parents, gym) and never trips — the same
+   "distinct days" idea as the home detection, only per region. Counted
+   over **all** photos of the pass, not just the far-away ones, and
+   independent of whether a suggestion arises: a region qualifies precisely
+   through the visits that were never worth asking about. The commute thus
+   falls silent on its own over time.
+3. **Cooldown & global switch:** 24 h of quiet after every rejection (§9.2);
+   additionally, in the sync settings, the switch "Trip-Vorschläge" (trip
+   suggestions), which shuts down both directions — including withdrawal of an
+   already scheduled end notification. There, the hidden places can also be
+   reset ("Ausgeblendete Orte zurücksetzen").
 
-**Warum die Regions-Unterdrückung nur den Start betrifft:** Die Region des
-Ende-Vorschlags ist per Definition das Zuhause. „Hier nicht mehr fragen" wäre
-dort kein Eingrenzen, sondern ein Abschalten des Features — und dafür ist der
-globale Schalter da.
+**Why region suppression only affects the start:** The region of the
+end suggestion is by definition home. "Don't ask here anymore" would not be a
+narrowing there, but a switching off of the feature — and that is what the
+global switch is for.
 
-## 10. Server-Änderungen (minimal)
+## 10. Server Changes (Minimal)
 
 - `albums`: `is_trip boolean`, `trip_started_at timestamptz null`,
-  `trip_ended_at timestamptz null` (Owner = `albums.user_id` existiert schon).
-- `GET /trips/active` — Trips, die ich besitze oder in die ich geteilt bin und
-  die aktiv sind (für den Beitritts-Dialog).
-- Trip-Erstellung: `POST /albums` + Flag (oder dünnes `POST /trips`).
-- Einladung: bestehendes `/albums/share` + neuer Notification-Typ „trip_invite".
-- Alles andere (Album/Share/Sync-Endpunkte) unverändert wiederverwendet.
+  `trip_ended_at timestamptz null` (owner = `albums.user_id` already exists).
+- `GET /trips/active` — trips that I own or that are shared with me and
+  that are active (for the join dialog).
+- Trip creation: `POST /albums` + flag (or a thin `POST /trips`).
+- Invitation: existing `/albums/share` + new notification type "trip_invite".
+- Everything else (album/share/sync endpoints) reused unchanged.
 
-## 11. Client-State (`TripPreferences`)
+## 11. Client State (`TripPreferences`)
 
 `ActiveTrip`: `serverAlbumId`, `iosAlbumId`, `name`, `startedAt`, `endedAt?`,
-`geofence?` (lat/lon/radius), `autoAdd` (auto/manuell), `mode` (sync/bisync),
+`geofence?` (lat/lon/radius), `autoAdd` (auto/manual), `mode` (sync/bisync),
 `handledAssetIds` / `dismissedAssetIds`, `isShared`, `ownerUserId?`.
 
-Für die Auto-Erkennung (Etappe 5): `suggestionsEnabled` (globaler Schalter),
-`suppressedTripRegions` (Set von Gitterzellen-Keys), `lastSuggestionByRegion`
-(Cooldown pro Region).
+For the auto-detection (stage 5): `suggestionsEnabled` (global switch),
+`suppressedTripRegions` (set of grid cell keys), `lastSuggestionByRegion`
+(cooldown per region).
 
-## 12. Etappen
+## 12. Stages
 
-1. **Solo, manuell gestartet** (Detailspezifikation §14): Trip-Tab (ersetzt
-   Personen-Tab), Auto-iOS-Album + Server-Album (reuse `makeAvailable`),
-   Capture-Window-Auto-Add (ChangeObserver + Catch-up beim Sync) inkl.
-   `handledAssetIds`-Reconciliation, **Geofence + Auto-Name** aus CoreLocation.
-   Modus sync. Genau **ein** aktiver Trip. Nur Bilder. Toggle-off friert ein.
-2. **Manueller Kurationsmodus**: Review-Grid, Auswahl → hinzufügen → optional
-   Sync, `dismissedAssetIds`.
-3. **Geteilter Trip – Einladung**: `albums`-Trip-Spalten, Einladung via Share +
-   Push, Empfänger-Provisionierung (direktes Mapping), Modus sync.
-4. **Beitritt beim Einschalten**: `GET /trips/active` + Beitritts-Dialog.
-5. **Auto-Vorschlag**: Home-Distanz-Erkennung + Auto-Ende.
+1. **Solo, manually started** (detailed specification §14): trip tab (replaces
+   the people tab), auto iOS album + server album (reuse `makeAvailable`),
+   capture-window auto-add (change observer + catch-up on sync) including
+   `handledAssetIds` reconciliation, **geofence + auto-name** from CoreLocation.
+   Mode sync. Exactly **one** active trip. Images only. Toggle-off freezes.
+2. **Manual curation mode**: review grid, selection → add → optionally
+   sync, `dismissedAssetIds`.
+3. **Shared trip – invitation**: `albums` trip columns, invitation via share +
+   push, recipient provisioning (direct mapping), mode sync.
+4. **Join on switch-on**: `GET /trips/active` + join dialog.
+5. **Auto-suggestion**: home-distance detection + auto-end.
 
-## 13. Offene Detailfragen (für später)
+## 13. Open Detail Questions (for Later)
 
-- Auto-Ende-Heuristik: Schwellen (Stunden in Home-Region, km).
-- „Trip aktiv" am Server: reicht `trip_ended_at IS NULL`, oder braucht es ein
-  Sichtbarkeitsfenster für den Beitritts-Dialog (z. B. nur Trips der letzten
-  N Tage)?
+- Auto-end heuristic: thresholds (hours in the home region, km).
+- "Trip active" on the server: is `trip_ended_at IS NULL` enough, or is a
+  visibility window needed for the join dialog (e.g. only trips of the last
+  N days)?
 
-## 14. Etappe 1 – Detailspezifikation
+## 14. Stage 1 – Detailed Specification
 
-Gesperrt am 2026-07-24.
+Locked on 2026-07-24.
 
-### 14.1 Navigation / UI-Umbau
+### 14.1 Navigation / UI Rework
 
-- **Tab-Leiste** (`ContentView.MainTabView`): Der **Personen-Tab wird durch
-  einen Trip-Tab ersetzt**. Reihenfolge dann: Feed, Alben, **Trip**, Suche,
-  Einstellungen.
-- **Personen wandert in „Alben"** als spezielle Einstiegs-Zeile — analog zu den
-  bestehenden „Alle Fotos" (`AllPhotosRef`) und „Gruppen-Review"
-  (`GroupReviewRef`) oben in `AlbumsListView`. Neue Zeile „Personen" öffnet
-  das bestehende Personen-Grid. (Eigener, klar abgrenzbarer Teil-Task des UI-
-  Umbaus, unabhängig von der Trip-Logik.)
-- **Trip-Tab-Icon ist zustandsabhängig**: unterschiedliches Symbol bzw.
-  Einfärbung je nachdem, ob gerade ein Trip aktiv ist (z. B. akzentfarben/gefüllt
-  bei aktivem Trip, neutral sonst).
+- **Tab bar** (`ContentView.MainTabView`): The **people tab is replaced by
+  a trip tab**. Order then: Feed, Albums, **Trip**, Search,
+  Settings.
+- **People moves into "Alben"** (Albums) as a special entry row — analogous to
+  the existing "Alle Fotos" (all photos) (`AllPhotosRef`) and "Gruppen-Review"
+  (group review) (`GroupReviewRef`) at the top of `AlbumsListView`. A new row
+  "Personen" (people) opens the existing people grid. (A separate, clearly
+  delimited sub-task of the UI rework, independent of the trip logic.)
+- **The trip tab icon is state-dependent**: different symbol or
+  coloring depending on whether a trip is currently active (e.g. accent-colored/filled
+  with an active trip, neutral otherwise).
 
-### 14.2 Trip-View (Inhalt des Trip-Tabs)
+### 14.2 Trip View (Content of the Trip Tab)
 
-- **Kein aktiver Trip:** Einstieg mit „Trip starten"-Aktion (+ ggf. Liste
-  vergangener/eingefrorener Trips als normale Alben).
-- **Aktiver Trip:** oben die Optionen-Buttons (Trip beenden, Modus
-  copy/sync/bisync, Auto/Manuell, Name/Ort bearbeiten), darunter das **Foto-Grid**
-  der Trip-Album-Inhalte. Unter dem Auto/Manuell-Schalter eine Zeile, die
-  sagt, was er tut (siehe §7: nur der Weg ins iOS-Album, die Synchronisation
-  läuft in beiden Stellungen). Im manuellen Modus zusätzlich der Button zum
-  Review-Grid (Etappe 2).
+- **No active trip:** entry with a "Trip starten" (start trip) action (+ possibly
+  a list of past/frozen trips as normal albums).
+- **Active trip:** at the top the option buttons (end trip, mode
+  copy/sync/bisync, auto/manual, edit name/place), below it the **photo grid**
+  of the trip album contents. Below the auto/manual switch, a line that
+  says what it does (see §7: only the path into the iOS album, synchronization
+  runs in both positions). In manual mode additionally the button to the
+  review grid (stage 2).
 
-### 14.3 Start-Flow
+### 14.3 Start Flow
 
-1. Toggle „Trip starten".
-2. **CoreLocation** einmalig abfragen (Berechtigung „When in use" reicht):
-   aktuelle Position → Reverse-Geocoding → **Ortsname sofort vorschlagen**, mit
-   Bestätigung + Editiermöglichkeit. Der bestätigte Name wird Server-Album-Name.
-3. **Home-Ausschlusszone** aus dem Home-Zentroid stempeln (nicht aus der
-   Startkoordinate!). Der Startort dient ausschließlich dem Namensvorschlag.
-   Die Zone wird **nachgereicht** (`TripStore.applyHomeExclusion`), nicht im
-   Start-Pfad abgewartet: ein Trip startet oft ohne Netz. Bis sie steht, gilt
-   das reine Zeitfenster — die sichere Richtung (lieber zu viel aufnehmen).
-4. Auto-iOS-Album anlegen, `makeAvailable`-Logik (Server-Album per Namensabgleich
-   finden/erstellen), Modus **sync**, confirm, `syncEnabled = true`,
-   Watermark = jetzt.
+1. Toggle "Trip starten".
+2. Query **CoreLocation** once ("When in use" permission is enough):
+   current position → reverse geocoding → **suggest place name immediately**, with
+   confirmation + option to edit. The confirmed name becomes the server album name.
+3. Stamp the **home exclusion zone** from the home centroid (not from the
+   start coordinate!). The starting location serves exclusively the name suggestion.
+   The zone is **supplied later** (`TripStore.applyHomeExclusion`), not awaited
+   in the start path: a trip often starts without network. Until it is in place,
+   the pure time window applies — the safe direction (better to include too much).
+4. Create the auto iOS album, `makeAvailable` logic (find/create server album by
+   name matching), mode **sync**, confirm, `syncEnabled = true`,
+   watermark = now.
 
-### 14.4 Fixierte Parameter
+### 14.4 Fixed Parameters
 
-- **Genau ein aktiver Trip** zur Zeit (keine parallelen Trips in Etappe 1).
-- **Nur Bilder**, keine Videos (wie im bestehenden Upload).
-- **`handledAssetIds` + High-Water-Mark auf `creationDate`** (umgesetzt): der
-  Wasserstand (`ActiveTrip.handledWatermark`) ist die effiziente
-  Enumerationsgrenze (wie beim Upload-Sync), die ID-Liste nur die kleine
-  Randmenge — hält den State bei großen Bibliotheken/langen Trips klein.
+- **Exactly one active trip** at a time (no parallel trips in stage 1).
+- **Images only**, no videos (as in the existing upload).
+- **`handledAssetIds` + high-water mark on `creationDate`** (implemented): the
+  watermark (`ActiveTrip.handledWatermark`) is the efficient
+  enumeration bound (as in the upload sync), the ID list only the small
+  edge set — keeps the state small for large libraries/long trips.
   Details:
-  - Der Wasserstand bedeutet „bis hierher wurde **alles angeschaut**" — auch
-    Assets, die *keine* Kandidaten waren (bereits behandelt oder außerhalb des
-    Geofence). Nur so darf die alte ID-Liste beim Vorrücken wegfallen: sonst
-    könnte ein bereits behandeltes, neueres Foto unter den Wasserstand rutschen
-    und beim nächsten Pass erneut eingefügt werden (Konflikt mit dem
-    Aussortieren, §4).
-  - Die Untergrenze ist **inklusiv** (`creationDate >= watermark`), die
-    Randliste enthält genau die Assets auf diesem Zeitstempel. Ein striktes `>`
-    würde Serienbilder verschlucken, die sich einen `creationDate` teilen.
-    Rückt der Wasserstand vor, ersetzt die neue Randliste die alte; bleibt er
-    gleich, werden beide vereinigt.
-  - Der Wasserstand rückt **nur bei erfolgreichem Add** vor. Schlägt
-    `performChanges` fehl, bleibt er stehen und die Assets werden beim nächsten
-    Pass erneut versucht.
-  - Trips, die vor dem Wasserstand gespeichert wurden, dekodieren ihn als `nil`
-    und starten einmalig wieder bei `startedAt`; der erste Pass verdichtet die
-    angesammelte ID-Liste. Keine Migration nötig.
-  - Bekannte Konsequenz (wie beim Upload-Sync): ein Foto, das *nachträglich*
-    mit einem `creationDate` unterhalb des Wasserstands in der Mediathek landet
-    (iCloud-Nachlauf von einem anderen Gerät, Import), wird nicht mehr
-    aufgenommen.
-- **Home-Ausschluss-Mitgliedschaft**: Ein Fenster-Asset fällt nur dann raus,
-  wenn es GPS hat *und* innerhalb der Home-Zone liegt. Alles andere im Fenster
-  zählt zum Trip — unabhängig davon, wie weit es vom Startort entfernt
-  aufgenommen wurde. Assets **ohne** GPS: „einschließen" (im Zweifel aufnehmen;
-  Nutzer kann im manuellen Modus/beim Aussortieren korrigieren).
+  - The watermark means "everything up to here has been **looked at**" — also
+    assets that were *not* candidates (already handled or outside the
+    geofence). Only this allows the old ID list to be dropped on advancing:
+    otherwise an already handled, newer photo could slip below the watermark
+    and be re-inserted on the next pass (conflict with culling, §4).
+  - The lower bound is **inclusive** (`creationDate >= watermark`), the edge
+    list contains exactly the assets on that timestamp. A strict `>`
+    would swallow burst shots that share a `creationDate`.
+    If the watermark advances, the new edge list replaces the old one; if it
+    stays the same, both are merged.
+  - The watermark advances **only on a successful add**. If
+    `performChanges` fails, it stays put and the assets are retried on the next
+    pass.
+  - Trips that were stored before the watermark decode it as `nil`
+    and start once again at `startedAt`; the first pass condenses the
+    accumulated ID list. No migration needed.
+  - Known consequence (as with the upload sync): a photo that *subsequently*
+    lands in the library with a `creationDate` below the watermark
+    (iCloud lag from another device, import) is no longer picked up.
+- **Home exclusion membership**: A window asset drops out only if
+  it has GPS *and* lies within the home zone. Everything else in the window
+  belongs to the trip — regardless of how far from the starting location it was
+  taken. Assets **without** GPS: "include" (when in doubt, take it;
+  the user can correct in manual mode/when culling).
 
-  > **Historie (Bug):** Bis dahin war dies eine *Einschluss*-Zone um den
-  > Startort mit 25 km Radius. Ein Trip, der in München eingeschaltet und in
-  > Frankfurt fotografiert wurde, verlor damit alle Fotos lautlos. Weil der
-  > Wasserstand auch über die abgelehnten Assets vorrückt (siehe oben), war der
-  > Verlust endgültig: die Fotos lagen unter dem Wasserstand und wurden nie
-  > wieder enumeriert. Trips, die noch mit `geofence` gespeichert sind, setzen
-  > beim Laden einmalig ihren Wasserstand zurück
-  > (`TripPreferences.migratedFromStartGeofence`) und holen die Fotos nach.
+  > **History (bug):** Until then, this was an *inclusion* zone around the
+  > starting location with a 25 km radius. A trip switched on in Munich and
+  > photographed in Frankfurt thereby silently lost all its photos. Because the
+  > watermark also advances over the rejected assets (see above), the
+  > loss was final: the photos lay below the watermark and were never
+  > enumerated again. Trips still stored with `geofence` reset
+  > their watermark once on loading
+  > (`TripPreferences.migratedFromStartGeofence`) and fetch the photos
+  > retroactively.
 
 ### 14.5 ChangeObserver
 
-- `PHPhotoLibraryChangeObserver` registrieren, während ein Trip aktiv ist; auf
-  Bild-Assets beschränkt. Reaktives Auto-Add ergänzt den Catch-up-Pass in
-  `runFullSync` (Foreground/Kaltstart/BG), ersetzt ihn nicht — der Catch-up
-  bleibt die verlässliche Grenze gegen verpasste Änderungen bei App-Kills.
-- Der Observer feuert **nur, während die App läuft**. Fotos, die in der
-  Kamera-App bei suspendierter F4mil-App entstehen, erzeugen keinen Callback;
-  der Catch-up in `runFullSync` ist für sie der einzige Weg.
+- Register `PHPhotoLibraryChangeObserver` while a trip is active; restricted to
+  image assets. Reactive auto-add complements the catch-up pass in
+  `runFullSync` (foreground/cold start/BG), it does not replace it — the catch-up
+  remains the reliable boundary against missed changes on app kills.
+- The observer fires **only while the app is running**. Photos taken in the
+  camera app while the F4mil app is suspended produce no callback;
+  the catch-up in `runFullSync` is the only way for them.
 
-### 14.6 Catch-up-Garantien
+### 14.6 Catch-up Guarantees
 
-- Der Pass läuft in `runFullSync` **vor** Download/Upload und **außerhalb** des
-  `pipelineLock`. Innerhalb des Locks wurde er übersprungen, sobald ein anderer
-  Trigger schon eine Pipeline hielt (Kaltstart-Task und Foreground-Resume
-  rennen routinemäßig gegeneinander) — die Fotos verpassten dann genau den
-  Scan, der gerade lief. Der Pass ist lokal, billig und idempotent; der Lock
-  schützt nur die Upload/Download-Pipeline.
-- Gleichzeitige Trigger werden **verkettet, nicht verworfen**. Der frühere
-  `isAutoAdding`-Guard gab bei laufendem Pass `0` zurück, wodurch ein während
-  des Passes aufgenommenes Foto bis zum nächsten Trigger liegen blieb. Jetzt
-  bekommt jeder Aufrufer einen Pass, der nach seinem Aufruf startet; ein
-  Folge-Pass ohne neue Kandidaten kehrt sofort zurück, die Kette terminiert.
-- Beendete Trips werden im selben Pass mitverarbeitet (Fenster bis `endedAt`),
-  beendete zuerst. Beim Toggle-off läuft zusätzlich sofort ein Pass samt Sync,
-  solange die App ohnehin im Vordergrund ist.
+- The pass runs in `runFullSync` **before** download/upload and **outside** the
+  `pipelineLock`. Inside the lock it was skipped as soon as another
+  trigger already held a pipeline (cold-start task and foreground resume
+  routinely race each other) — the photos then missed exactly the scan that was
+  just running. The pass is local, cheap and idempotent; the lock
+  protects only the upload/download pipeline.
+- Concurrent triggers are **chained, not discarded**. The former
+  `isAutoAdding` guard returned `0` when a pass was running, so a photo taken
+  during the pass sat until the next trigger. Now
+  every caller gets a pass that starts after its call; a follow-up pass without
+  new candidates returns immediately, the chain terminates.
+- Ended trips are processed in the same pass (window up to `endedAt`),
+  ended ones first. On toggle-off, a pass including sync additionally runs
+  immediately, as long as the app is in the foreground anyway.

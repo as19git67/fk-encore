@@ -1,70 +1,69 @@
-# Tax Document Detection — Feature-Plan
+# Tax Document Detection — Feature Plan
 
-Ziel: Beim automatischen Klassifizieren eines Dokuments soll die KI zusätzlich
-erkennen (a) **ob** das Dokument für die deutsche Einkommensteuererklärung
-relevant ist, (b) für **welches Steuerjahr** und (c) welcher **Anlage /
-welchem Abzugsbereich** es zuzuordnen ist. Das Frontend bekommt eine
-"Steuer"-Ansicht, die alle als steuerrelevant markierten Dokumente nach
-Steuerjahr und Anlage gruppiert anzeigt ("ein Klick → alle Belege für 2025
-nach Anlagen sortiert").
+Goal: When a document is classified automatically, the AI should additionally
+detect (a) **whether** the document is relevant for the German income tax
+return, (b) for **which tax year** and (c) which **Anlage (form appendix) /
+deduction area** it belongs to. The frontend gets a "Steuer" (tax) view that
+shows all documents marked as tax-relevant, grouped by tax year and Anlage
+("one click → all receipts for 2025 sorted by Anlage").
 
-Status: Feature-Plan, Umsetzung in Etappen.
+Status: Feature plan, implementation in stages.
 
 ---
 
-## 1. Recherche: deutsche Einkommensteuer — Anlagen & Abzugsbereiche
+## 1. Research: German income tax — Anlagen & deduction areas
 
-Die Einkommensteuererklärung besteht aus dem **Hauptvordruck (Mantelbogen)**
-für persönliche Daten und thematischen **Anlagen**. Jeder Beleg gehört genau
-einer Hauptanlage (Werbungskosten können aber innerhalb von Anlage N, V, KAP,
-R vorkommen — deshalb zusätzlich ein Subtyp).
+The income tax return consists of the **main form (Mantelbogen)** for personal
+data and thematic **Anlagen**. Each receipt belongs to exactly one main Anlage
+(income-related expenses (Werbungskosten) can however occur within Anlage N, V,
+KAP, R — hence an additional subtype).
 
-### 1.1 Einkünfte-Anlagen (Einnahmen)
+### 1.1 Income Anlagen (income)
 
-| Slug            | Anlage / Formular         | Typische Belege                                                                 |
+| Slug            | Anlage / form             | Typical receipts                                                                |
 |-----------------|---------------------------|---------------------------------------------------------------------------------|
-| `anlage-n`      | Anlage N                  | Lohnsteuerbescheinigung, Arbeitgeberbescheinigung, Lohn-/Gehaltsabrechnungen    |
-| `anlage-kap`    | Anlage KAP                | Jahressteuerbescheinigung der Bank/Broker, Dividenden, Zinsabrechnungen         |
-| `anlage-v`      | Anlage V (Vermietung)     | Mieteinnahmen-Nachweise, Nebenkostenabrechnungen (Vermieter), WEG-Abrechnungen  |
-| `anlage-r`      | Anlage R (Renten)         | Rentenbezugsmitteilung Deutsche Rentenversicherung, private Rentenauszahlungen  |
-| `anlage-r-aus`  | Anlage R-AUS              | Ausländische Renten                                                             |
-| `anlage-r-av`   | Anlage R-AV/bAV           | Leistungen aus bAV / Riester-Auszahlungen                                       |
-| `anlage-g`      | Anlage G (Gewerbe)        | Gewerbeeinkünfte, Bilanzen                                                      |
-| `anlage-s`      | Anlage S (Selbstständig)  | Einkünfte aus freiberuflicher/selbstständiger Arbeit                            |
-| `anlage-euer`   | Anlage EÜR                | Einnahmenüberschussrechnung (gehört zu G oder S)                                |
-| `anlage-so`     | Anlage SO                 | Sonstige Einkünfte (private Veräußerungen, Unterhaltsempfang)                   |
+| `anlage-n`      | Anlage N                  | Wage tax certificate (Lohnsteuerbescheinigung), employer certificate, payslips  |
+| `anlage-kap`    | Anlage KAP                | Annual tax certificate from the bank/broker, dividends, interest statements     |
+| `anlage-v`      | Anlage V (rental)         | Proof of rental income, utility cost statements (landlord), HOA statements      |
+| `anlage-r`      | Anlage R (pensions)       | Pension benefit notification from Deutsche Rentenversicherung, private pension payouts |
+| `anlage-r-aus`  | Anlage R-AUS              | Foreign pensions                                                                |
+| `anlage-r-av`   | Anlage R-AV/bAV           | Benefits from company pension scheme (bAV) / Riester payouts                    |
+| `anlage-g`      | Anlage G (trade)          | Trade income, balance sheets                                                    |
+| `anlage-s`      | Anlage S (self-employed)  | Income from freelance/self-employed work                                        |
+| `anlage-euer`   | Anlage EÜR                | Cash-basis profit statement (belongs to G or S)                                 |
+| `anlage-so`     | Anlage SO                 | Other income (private sales, receipt of maintenance)                            |
 
-### 1.2 Abzugs-Anlagen (Ausgaben → mindern Steuer)
+### 1.2 Deduction Anlagen (expenses → reduce tax)
 
-| Slug                    | Anlage / Kategorie                | Typische Belege                                                                  |
+| Slug                    | Anlage / category                 | Typical receipts                                                                 |
 |-------------------------|-----------------------------------|----------------------------------------------------------------------------------|
-| `werbungskosten-n`      | Werbungskosten (Anlage N)         | Fahrtkostennachweise, Fortbildungen, Arbeitsmittel, Arbeitszimmer, Reisekosten   |
-| `werbungskosten-v`      | Werbungskosten (Anlage V)         | Reparaturen Mietobjekt, Grundsteuer Mietobjekt, Hausgeld, Darlehenszinsen        |
-| `werbungskosten-kap`    | Werbungskosten (Anlage KAP)       | (selten, nur Sonderfälle)                                                        |
-| `werbungskosten-r`      | Werbungskosten (Anlage R)         | Steuerberatungskosten Rentner, Rentenberatungskosten                             |
-| `sonderausgaben`        | Sonderausgaben                    | Spendenquittungen, Kirchensteuer, Unterhaltsleistungen (§10), Steuerberatung     |
-| `vorsorgeaufwand`       | Anlage Vorsorgeaufwand            | Krankenkassenbeiträge, Pflegeversicherung, Rürup, Haftpflicht, Unfallversicherung|
-| `anlage-av`             | Anlage AV (Riester)               | Riester-Vertrag-Bescheinigung, Zulagenantrag                                     |
-| `aussergewoehnliche`    | Außergewöhnliche Belastungen      | Krankheitskosten, Zahnarzt, Medikamente (Rezept), Pflegeheim, Kur, Beerdigung    |
-| `haushaltsnahe`         | Haushaltsnahe Dienstleistungen/Handwerker (§35a) | Rechnungen Putzkraft, Gartenarbeiten, Handwerker (Lohnanteil) + Kontobeleg |
-| `anlage-kind`           | Anlage Kind                       | Geburtsurkunde, Kindergeldnachweis, Schulbescheinigung, Kinderbetreuungskosten   |
-| `anlage-unterhalt`      | Anlage Unterhalt                  | Unterhaltszahlungen an bedürftige Personen                                       |
-| `anlage-energetisch`    | Anlage Energetische Maßnahmen (§35c) | Rechnungen & Bescheinigung für energetische Sanierung selbst genutzter Immobilie |
+| `werbungskosten-n`      | Income-related expenses (Anlage N) | Commuting proofs, continuing education, work equipment, home office, travel expenses |
+| `werbungskosten-v`      | Income-related expenses (Anlage V) | Repairs of rental property, property tax on rental property, HOA fees (Hausgeld), loan interest |
+| `werbungskosten-kap`    | Income-related expenses (Anlage KAP) | (rare, special cases only)                                                      |
+| `werbungskosten-r`      | Income-related expenses (Anlage R) | Tax advisor costs of pensioners, pension advisory costs                          |
+| `sonderausgaben`        | Special expenses (Sonderausgaben)  | Donation receipts, church tax, maintenance payments (§10), tax advisory          |
+| `vorsorgeaufwand`       | Anlage Vorsorgeaufwand (provision expenses) | Health insurance contributions, long-term care insurance, Rürup, liability insurance, accident insurance |
+| `anlage-av`             | Anlage AV (Riester)               | Riester contract certificate, subsidy application                                |
+| `aussergewoehnliche`    | Extraordinary burdens (außergewöhnliche Belastungen) | Medical costs, dentist, medication (prescription), nursing home, spa treatment, funeral |
+| `haushaltsnahe`         | Household-related services/craftsmen (§35a) | Invoices for cleaner, garden work, craftsmen (labor share) + bank statement proof |
+| `anlage-kind`           | Anlage Kind (child)               | Birth certificate, child benefit proof, school certificate, childcare costs      |
+| `anlage-unterhalt`      | Anlage Unterhalt (maintenance)    | Maintenance payments to persons in need                                          |
+| `anlage-energetisch`    | Anlage energy-efficiency measures (§35c) | Invoices & certificate for energy-efficient renovation of an owner-occupied property |
 
-### 1.3 Bescheid / Rahmen
+### 1.3 Assessment notice / framework
 
-| Slug                    | Kategorie                         | Typische Belege                                        |
+| Slug                    | Category                          | Typical receipts                                       |
 |-------------------------|-----------------------------------|--------------------------------------------------------|
-| `steuerbescheid`        | Finanzamtsbescheid (kein Beleg)   | Einkommensteuerbescheid, Vorauszahlungs-Bescheid       |
-| `mantelbogen`           | Stammdaten / Persönliches         | Heiratsurkunde, Adressnachweis (meist nicht nötig)     |
+| `steuerbescheid`        | Tax office notice (not a receipt) | Income tax assessment notice, prepayment notice        |
+| `mantelbogen`           | Master data / personal            | Marriage certificate, proof of address (usually not needed) |
 
-Die Liste ist bewusst eng an den realen ELSTER-/Finanzamts-Anlagen orientiert,
-weil die Ausgabe des Features eine **druckbare Ablage-Liste pro Anlage** sein
-soll (Anwender:in kann mit dem Papierstapel in die Steuererklärung gehen).
+The list is deliberately closely modeled on the real ELSTER/tax-office Anlagen,
+because the output of the feature is meant to be a **printable filing list per
+Anlage** (the user can go into the tax return with the stack of paper).
 
 ---
 
-## 2. Domänen-Konstanten (`documents/tax-sections.ts`, neu)
+## 2. Domain constants (`documents/tax-sections.ts`, new)
 
 ```ts
 export const TAX_SECTIONS = [
@@ -100,17 +99,16 @@ export type TaxSectionSlug = typeof TAX_SECTIONS[number]["slug"];
 export type TaxSectionGroup = "einkuenfte" | "abzuege" | "bescheid" | "rahmen";
 ```
 
-Die Enum liegt bewusst als TS-Konstante (nicht als DB-Tabelle): klein,
-versionskontrolliert, einfach erweiterbar; die KI bekommt die Liste pro
-`/classify`-Call als Teil des Prompts genauso wie heute die Kategorien-
-Taxonomie.
+The enum is deliberately a TS constant (not a DB table): small,
+version-controlled, easily extensible; the AI gets the list per `/classify`
+call as part of the prompt, just like the category taxonomy today.
 
 ---
 
-## 3. DB-Migration `0029_tax_fields.sql`
+## 3. DB migration `0029_tax_fields.sql`
 
-Ergänzt drei Spalten zur `documents`-Tabelle und einen Index für die
-Gruppierungs-Query. Keine neue Tabelle nötig.
+Adds three columns to the `documents` table and an index for the grouping
+query. No new table needed.
 
 ```sql
 ALTER TABLE documents
@@ -120,7 +118,7 @@ ALTER TABLE documents
   ADD COLUMN tax_confidence        real,
   ADD COLUMN tax_user_confirmed    boolean NOT NULL DEFAULT false;
 
--- Wertebereich-Check (defensiv; schützt vor KI-Ausrutschern)
+-- Value range check (defensive; protects against AI slips)
 ALTER TABLE documents
   ADD CONSTRAINT documents_tax_year_range
     CHECK (tax_year IS NULL OR (tax_year BETWEEN 2000 AND 2100));
@@ -130,27 +128,27 @@ CREATE INDEX documents_tax_idx
   WHERE tax_relevant = true;
 ```
 
-Entsprechende Änderung in `db/schema.ts` (Drizzle):
+Corresponding change in `db/schema.ts` (Drizzle):
 
 ```ts
 tax_relevant:       boolean("tax_relevant").notNull().default(false),
 tax_year:           integer("tax_year"),
-tax_section:        text("tax_section"),          // TaxSectionSlug oder null
+tax_section:        text("tax_section"),          // TaxSectionSlug or null
 tax_confidence:     real("tax_confidence"),
 tax_user_confirmed: boolean("tax_user_confirmed").notNull().default(false),
 ```
 
-`tax_user_confirmed` unterscheidet User-bestätigte Werte von KI-Vorschlägen
-(wie `classification_confidence` → UI zeigt "KI-Vorschlag" mit Bestätigen-
-Button).
+`tax_user_confirmed` distinguishes user-confirmed values from AI suggestions
+(like `classification_confidence` → the UI shows "KI-Vorschlag" (AI suggestion)
+with a confirm button).
 
 ---
 
-## 4. LLM-Service (`llm-service/main.py`)
+## 4. LLM service (`llm-service/main.py`)
 
-Zwei kleine Anpassungen, kein neues Endpoint nötig.
+Two small adjustments, no new endpoint needed.
 
-**4.1 Response-Schema erweitern** (`ClassifyResponse`):
+**4.1 Extend the response schema** (`ClassifyResponse`):
 
 ```py
 class ClassifyResponse(BaseModel):
@@ -161,15 +159,16 @@ class ClassifyResponse(BaseModel):
     summary: str
     tags: list[str]
     confidence: float = Field(..., ge=0.0, le=1.0)
-    # Neu:
+    # New:
     tax_relevant: bool = False
     tax_year: int | None = None
-    tax_section: str | None = None     # slug aus TAX_SECTIONS
+    tax_section: str | None = None     # slug from TAX_SECTIONS
     tax_confidence: float = Field(0.0, ge=0.0, le=1.0)
 ```
 
-**4.2 Request um `tax_sections` erweitern** (Encore ts übergibt Liste), und
-System-Prompt anhängen:
+**4.2 Extend the request by `tax_sections`** (Encore ts passes the list), and
+append to the system prompt (the prompt text is sent to the model in German and
+is therefore kept verbatim):
 
 ```text
 STEUER-ERKENNUNG
@@ -207,21 +206,21 @@ Einkommensteuererklärung dient.
   (unabhängig von confidence der Hauptkategorie).
 ```
 
-Der Prompt listet dann alle `TAX_SECTIONS` (slug + name) nach Gruppe auf,
-genau wie heute die Kategorien-Taxonomie.
+The prompt then lists all `TAX_SECTIONS` (slug + name) by group, just like the
+category taxonomy today.
 
-**4.3 Tokens**: `max_tokens` von 512 → 640 erhöhen (vier neue Felder).
-Der Kontext (6000 Zeichen Text + Taxonomie + Tax-Liste) bleibt im Rahmen.
+**4.3 Tokens**: raise `max_tokens` from 512 → 640 (four new fields).
+The context (6000 characters of text + taxonomy + tax list) stays within bounds.
 
-**4.4 Tests** (`llm-service/tests/`): neuer Fixture-Test, der mit einem
-Mock-LLM prüft, dass `ClassifyResponse` Tax-Felder durchreicht und
-Default-Werte korrekt sind.
+**4.4 Tests** (`llm-service/tests/`): new fixture test that uses a mock LLM to
+check that `ClassifyResponse` passes tax fields through and default values are
+correct.
 
 ---
 
-## 5. Encore-Service (`documents/`)
+## 5. Encore service (`documents/`)
 
-**5.1 `llm-client.ts`** — Types um Tax-Felder erweitern:
+**5.1 `llm-client.ts`** — extend types with tax fields:
 
 ```ts
 export interface Classification {
@@ -239,24 +238,24 @@ export interface Classification {
 }
 ```
 
-`parseClassification()` validiert die neuen Felder (tax_year nur wenn ganz­zahlig
-2000..2100, tax_section nur wenn in `TAX_SECTIONS`, sonst null).
+`parseClassification()` validates the new fields (tax_year only if an integer
+2000..2100, tax_section only if in `TAX_SECTIONS`, otherwise null).
 
-**5.2 `document-ops.ts:runClassify`** — persistiert zusätzlich:
+**5.2 `document-ops.ts:runClassify`** — additionally persists:
 
 ```ts
 tax_relevant:   classification.tax_relevant,
 tax_year:       classification.tax_year,
 tax_section:    classification.tax_section,
 tax_confidence: classification.tax_confidence,
-// tax_user_confirmed bleibt false
+// tax_user_confirmed stays false
 ```
 
-**5.3 Neue Endpoints in `documents.ts`**:
+**5.3 New endpoints in `documents.ts`**:
 
 - `GET /documents/tax/years` → `{ years: number[] }` — DISTINCT `tax_year`
-  über alle steuerrelevanten Dokumente des Users (für Dropdown).
-- `GET /documents/tax?year=2025` → gruppierte Liste:
+  across all tax-relevant documents of the user (for dropdown).
+- `GET /documents/tax?year=2025` → grouped list:
   ```ts
   interface TaxYearOverview {
     year: number;
@@ -269,221 +268,221 @@ tax_confidence: classification.tax_confidence,
     unassigned: DocumentSummary[];  // tax_relevant=true, tax_section=null
   }
   ```
-  Sortiert: zuerst `einkuenfte`, dann `abzuege`, dann `bescheid`.
-- `POST /documents/:id/tax` — manuelles Überschreiben durch den User:
+  Sorted: first `einkuenfte`, then `abzuege`, then `bescheid`.
+- `POST /documents/:id/tax` — manual override by the user:
   ```ts
   { tax_relevant?: boolean; tax_year?: number | null; tax_section?: TaxSectionSlug | null }
   ```
-  setzt `tax_user_confirmed = true`.
-- `listDocuments` um Filter erweitern: `tax_relevant?: boolean`,
+  sets `tax_user_confirmed = true`.
+- Extend `listDocuments` by filters: `tax_relevant?: boolean`,
   `tax_year?: number`, `tax_section?: TaxSectionSlug`.
 
-**5.4 Backfill-Script** (`documents/backfill-tax.ts`, one-shot):
-Requeued alle bestehenden `ready`-Dokumente in eine `classify`-Job, damit die
-KI auch Altbestand mit Tax-Feldern anreichert. Alternativ: nur-Tax-Job
-(`runClassifyTaxOnly`), der den `extracted_text` neu durch den LLM schickt,
-aber nur die Tax-Felder aktualisiert (spart Tokens).
+**5.4 Backfill script** (`documents/backfill-tax.ts`, one-shot):
+Re-enqueues all existing `ready` documents into a `classify` job, so that the
+AI also enriches the legacy inventory with tax fields. Alternatively: a
+tax-only job (`runClassifyTaxOnly`) that sends the `extracted_text` through the
+LLM again but only updates the tax fields (saves tokens).
 
 ---
 
 ## 6. Frontend (`frontend/src/views/`)
 
-**6.1 Neue Route `/documents/steuer`** → `TaxView.vue`:
+**6.1 New route `/documents/steuer`** → `TaxView.vue`:
 
-- Oben: Dropdown **Steuerjahr** (Default: aktuelles Jahr − 1), Toggle "auch
-  unbestätigte KI-Vorschläge anzeigen", Button "Checkliste als PDF/Druck".
-- Darunter: pro `group` eine Section ("Einkünfte", "Abzüge", "Bescheide"),
-  pro `tax_section` ein aufklappbares Panel mit Doc-Liste (Dateiname,
-  Absender, Datum, Betrag falls vorhanden, Confidence-Badge falls
-  KI-Vorschlag).
-- Unassigned-Bucket am Ende ("Steuerrelevant, aber Anlage unklar — bitte
-  prüfen").
+- At the top: dropdown **Steuerjahr** (tax year; default: current year − 1),
+  toggle "auch unbestätigte KI-Vorschläge anzeigen" (also show unconfirmed AI
+  suggestions), button "Checkliste als PDF/Druck" (checklist as PDF/print).
+- Below: one section per `group` ("Einkünfte", "Abzüge", "Bescheide"), one
+  collapsible panel per `tax_section` with a doc list (file name, sender, date,
+  amount if available, confidence badge if AI suggestion).
+- Unassigned bucket at the end ("Steuerrelevant, aber Anlage unklar — bitte
+  prüfen": tax-relevant, but Anlage unclear — please check).
 
-**6.2 `DocumentDetailView.vue`** — neue Karte "Steuer":
+**6.2 `DocumentDetailView.vue`** — new card "Steuer":
 
 - Toggle `Steuerrelevant`
-- Zahlenfeld `Steuerjahr`
-- Select `Anlage / Abzugsbereich` (gruppiert nach group)
-- KI-Badge "Vorschlag (72%)" solange `tax_user_confirmed=false`;
-  Button "Übernehmen" setzt `tax_user_confirmed=true`.
+- Number field `Steuerjahr`
+- Select `Anlage / Abzugsbereich` (grouped by group)
+- AI badge "Vorschlag (72%)" (suggestion) as long as
+  `tax_user_confirmed=false`; button "Übernehmen" (accept) sets
+  `tax_user_confirmed=true`.
 
-**6.3 `DocumentsView.vue`** — neue Filter-Chips: `Steuer 2024`, `Steuer 2025`
-(nur sichtbar wenn Jahre existieren). Klick setzt `tax_relevant=true` +
+**6.3 `DocumentsView.vue`** — new filter chips: `Steuer 2024`, `Steuer 2025`
+(only visible if years exist). Click sets `tax_relevant=true` +
 `tax_year=X`.
 
-**6.4 Navigation** — Menüpunkt "Dokumente" bekommt Untereintrag "Steuer".
+**6.4 Navigation** — the menu item "Dokumente" gets the sub-entry "Steuer".
 
 ---
 
-## 7. Etappen (so lasse ich commiten)
+## 7. Stages (how I'll have it committed)
 
-1. **Schema & Enum** — Migration 0029, `schema.ts`, `tax-sections.ts`,
-   Drizzle-Typen. Grün durch `drizzle-kit check` und bestehende Tests.
-2. **LLM-Prompt & Client-Types** — `llm-service/main.py` erweitern,
-   `llm-client.ts` Typ + Parser, Python-Test + TS-Unit-Test für Parser.
-3. **Persistenz & Backfill** — `runClassify` schreibt Tax-Felder;
-   Backfill-Script; manuelle Override-Endpoints.
-4. **Listing-/Gruppierungs-API** — `/documents/tax` + `/tax/years` +
-   Filter-Query-Params; Encore-Tests.
-5. **Frontend Tax-View** — neue Route, Detail-Karte, Filter-Chips,
-   Print-Layout.
-6. **QA-Durchgang** — echte Beispielbelege (Lohnsteuerbescheinigung,
-   Handwerkerrechnung, Spendenquittung, Arztrechnung, Jahressteuer-
-   bescheinigung) durch die Pipeline; manuelles Review der KI-Zuordnung,
-   Schwellenwert `tax_confidence < 0.7` → UI-Hinweis "bitte bestätigen".
+1. **Schema & enum** — migration 0029, `schema.ts`, `tax-sections.ts`,
+   Drizzle types. Green via `drizzle-kit check` and existing tests.
+2. **LLM prompt & client types** — extend `llm-service/main.py`,
+   `llm-client.ts` type + parser, Python test + TS unit test for the parser.
+3. **Persistence & backfill** — `runClassify` writes tax fields;
+   backfill script; manual override endpoints.
+4. **Listing/grouping API** — `/documents/tax` + `/tax/years` +
+   filter query params; Encore tests.
+5. **Frontend tax view** — new route, detail card, filter chips,
+   print layout.
+6. **QA pass** — real sample receipts (wage tax certificate,
+   craftsman invoice, donation receipt, doctor's invoice, annual tax
+   certificate) through the pipeline; manual review of the AI assignment,
+   threshold `tax_confidence < 0.7` → UI hint "bitte bestätigen" (please
+   confirm).
 
 ---
 
-## 8. Entschiedene Fragen
+## 8. Decided questions
 
-1. **Mehrere Sektionen pro Dokument**: **N:M** über Join-Tabelle
-   `document_tax_sections`. Begründung: reale Belege passen häufig in
-   mehrere Anlagen (Handwerker am Mietobjekt = Anlage V + ggf. §35a,
-   Lohnabrechnung = Anlage N + §35a für Versorgungsleistungen, …).
-2. **Betragsextraktion**: Erst in **Iteration 2**. Iteration 1 liefert
-   nur Klassifikation; der Druckauszug nennt „Betrag lt. Beleg" —
-   Nutzer:in trägt selbst in ELSTER ein.
-3. **`werbungskosten-*` feingranular**: Pro Anlage ein eigener Slug
-   (N/V/KAP/R). Fallback der KI: wenn unsicher → `werbungskosten-n`
-   (häufigster Fall) mit niedriger Confidence.
-4. **Datenschutz / Retention**: Steuerbelege müssen in DE ≥ 2 Jahre
-   (privat, Einkommensteuer) bis 10 Jahre (Vermieter/Selbstständig)
-   aufbewahrt werden. Keine Änderung am Purge-Verhalten nötig — das
-   Modul löscht Dokumente ohnehin nie automatisch.
+1. **Multiple sections per document**: **N:M** via join table
+   `document_tax_sections`. Reasoning: real receipts often fit into several
+   Anlagen (craftsman at a rental property = Anlage V + possibly §35a, payslip
+   = Anlage N + §35a for pension benefits, …).
+2. **Amount extraction**: Only in **iteration 2**. Iteration 1 delivers only
+   classification; the printout states "Betrag lt. Beleg" (amount per receipt) —
+   the user enters it into ELSTER themselves.
+3. **`werbungskosten-*` fine-grained**: One slug per Anlage (N/V/KAP/R).
+   AI fallback: if unsure → `werbungskosten-n` (most common case) with low
+   confidence.
+4. **Data protection / retention**: Tax receipts must be retained in DE for
+   ≥ 2 years (private, income tax) up to 10 years (landlord/self-employed). No
+   change to the purge behavior needed — the module never deletes documents
+   automatically anyway.
 
-### 8.1 Konsequenzen aus der N:M-Entscheidung
+### 8.1 Consequences of the N:M decision
 
-- `documents` trägt nur die **dokument-weiten** Felder:
+- `documents` carries only the **document-wide** fields:
   `tax_relevant` (bool), `tax_year` (int), `tax_year_confidence` (real),
-  `tax_reviewed` (bool). Keine `tax_section`-Spalte auf `documents`
-  mehr — sie wandert in die Join-Tabelle.
-- `document_tax_sections` (neu) speichert pro (document_id, tax_section)
-  die KI-`confidence` und eine `source`-Enum `{ai, user}`. Damit kann
-  der Klassifizierer gefahrlos neu laufen: er löscht nur seine eigenen
-  `source='ai'`-Zeilen und ersetzt sie, User-Zuweisungen
-  (`source='user'`) bleiben unangetastet.
-- Der LLM-Prompt liefert `tax_sections: Array<{slug, confidence}>`
-  statt eines einzelnen Slug.
+  `tax_reviewed` (bool). No `tax_section` column on `documents` any
+  more — it moves into the join table.
+- `document_tax_sections` (new) stores per (document_id, tax_section)
+  the AI `confidence` and a `source` enum `{ai, user}`. This allows the
+  classifier to safely run again: it only deletes its own
+  `source='ai'` rows and replaces them, user assignments
+  (`source='user'`) remain untouched.
+- The LLM prompt delivers `tax_sections: Array<{slug, confidence}>`
+  instead of a single slug.
 
 ---
 
-## 9. Bezugspersonen-Steuer-Prüfung (Migrationen 0137–0146)
+## 9. Subject-person tax review (migrations 0137–0146)
 
-Ergänzt die dokumentenweite Steuer-Erkennung (§ 1–8) um eine
-**personenbezogene** Steuer-Prüf-Logik: Wird ein Dokument einer
-Bezugsperson zugeordnet (via Namensabgleich im Klassifizierer), bestimmt
-das System automatisch, ob das Dokument zur manuellen Steuer-Prüfung
-markiert werden soll — abhängig von Beziehungsart, Alter, Veranlagung
-und eigenem Steuererklärungsstatus der Person.
+Supplements the document-wide tax detection (§ 1–8) with a
+**person-related** tax review logic: If a document is assigned to a
+subject person (via name matching in the classifier), the system automatically
+determines whether the document should be flagged for manual tax review —
+depending on relationship type, age, assessment and the person's own tax return
+status.
 
-### 9.1 Datenmodell
+### 9.1 Data model
 
-**`user_subject_persons`** (erweitert in 0137/0145/0146):
+**`user_subject_persons`** (extended in 0137/0145/0146):
 
-| Spalte | Typ | Beschreibung |
+| Column | Type | Description |
 |--------|-----|--------------|
 | `relation_kind` | enum | `self`, `spouse`, `child`, `parent`, `sibling`, `ward`, `other` |
-| `birth_date` | date | Geburtsdatum (optional, relevant für Altersgrenze) |
-| `in_household` | boolean | Lebt im selben Haushalt |
-| `tax_cost_bearer` | enum | `unknown`, `user`, `person` — wer die Kosten trägt |
-| `requires_tax_review` | boolean | Effektiv-Flag (gespeicherter Wert) |
-| `requires_tax_review_override` | boolean/null | Manuelles Override; `null` = automatisch ableiten |
-| `own_tax_return_from_tax_year` | integer/null | Ab welchem Steuerjahr die Person eine eigene Steuererklärung macht |
+| `birth_date` | date | Date of birth (optional, relevant for the age limit) |
+| `in_household` | boolean | Lives in the same household |
+| `tax_cost_bearer` | enum | `unknown`, `user`, `person` — who bears the costs |
+| `requires_tax_review` | boolean | Effective flag (stored value) |
+| `requires_tax_review_override` | boolean/null | Manual override; `null` = derive automatically |
+| `own_tax_return_from_tax_year` | integer/null | From which tax year the person files their own tax return |
 
-**`documents`** (erweitert in 0146):
+**`documents`** (extended in 0146):
 
-| Spalte | Typ | Beschreibung |
+| Column | Type | Description |
 |--------|-----|--------------|
-| `tax_return_person_id` | FK → `user_subject_persons(id)` | Person, der das Dokument in deren eigener Steuerakte gehört (ON DELETE SET NULL) |
+| `tax_return_person_id` | FK → `user_subject_persons(id)` | Person to whose own tax file the document belongs (ON DELETE SET NULL) |
 
-### 9.2 Ableitungslogik (`documents/subject-persons.ts`)
+### 9.2 Derivation logic (`documents/subject-persons.ts`)
 
-Die Steuer-Prüfung wird **pro Dokument und dessen Steuerjahr** abgeleitet
-(nicht pauschal für die Person):
+The tax review is derived **per document and its tax year** (not across the
+board for the person):
 
 ```
 deriveRequiresTaxReview(person, referenceYear):
-  1. person hat eigene Steuererklärung ab ≤ referenceYear → false
+  1. person has own tax return from ≤ referenceYear → false
   2. person.relation_kind = 'self' → false
-  3. person.relation_kind = 'spouse' UND Zusammenveranlagung → false
-  4. person.relation_kind = 'child' UND im Haushalt
-     UND Alter ≤ 25 im referenceYear → false  (§ 32 Abs. 4 EStG)
-  5. sonst → true (muss manuell geprüft werden)
+  3. person.relation_kind = 'spouse' AND joint assessment → false
+  4. person.relation_kind = 'child' AND in household
+     AND age ≤ 25 in referenceYear → false  (§ 32 para. 4 EStG)
+  5. otherwise → true (must be reviewed manually)
 ```
 
-**Prioritätsregel** (`computeEffectiveRequiresTaxReview`):
-- Eigene Steuererklärung (`own_tax_return_from_tax_year`) schlägt alles →
-  `false` (Dokument gehört in die eigene Akte, nicht in die Prüf-Liste).
-- Manuelles Override (`requires_tax_review_override`) schlägt die Ableitung.
-- Ohne Override → automatische Ableitung per `deriveRequiresTaxReview`.
+**Priority rule** (`computeEffectiveRequiresTaxReview`):
+- Own tax return (`own_tax_return_from_tax_year`) beats everything →
+  `false` (the document belongs in the own file, not in the review list).
+- Manual override (`requires_tax_review_override`) beats the derivation.
+- Without an override → automatic derivation via `deriveRequiresTaxReview`.
 
-### 9.3 § 32 Abs. 4 EStG — Altersgrenze 25
+### 9.3 § 32 para. 4 EStG — age limit 25
 
-Kinder können steuerlich als Dependents (Kinderfreibetrag, Anlage Kind)
-berücksichtigt werden, solange sie das 25. Lebensjahr noch nicht vollendet
-haben. Die Prüfung arbeitet jahresgranular: Ein Kind, das im
-Steuerjahr 2025 25 wird, gilt 2025 noch als innerhalb der Grenze
-(`referenceYear − birthYear ≤ 25`), ab 2026 nicht mehr.
+Children can be considered for tax purposes as dependents (child allowance,
+Anlage Kind) as long as they have not yet completed their 25th year of life.
+The check works at year granularity: A child who turns 25 in tax year 2025
+still counts as within the limit in 2025
+(`referenceYear − birthYear ≤ 25`), but no longer from 2026.
 
-### 9.4 Eigene Steuerakte (`tax_return_person_id`)
+### 9.4 Own tax file (`tax_return_person_id`)
 
-Wenn eine Person unter „Eigene Erklärung ab" ein Steuerjahr eingetragen
-hat und ein Dokument diesem oder einem späteren Jahr zugeordnet ist,
-wird das Dokument in die **eigene Steuerakte** der Person verschoben:
+If a person has entered a tax year under „Eigene Erklärung ab" (own return
+from), and a document is assigned to this or a later year, the document is
+moved into the person's **own tax file**:
 
-- **Beim Klassifizieren** (`document-ops.ts:runClassify`): Der
-  Klassifizierer prüft, ob genau eine der gematchten Personen eine
-  eigene Steuererklärung für das Dokumenten-Steuerjahr macht. Wenn ja,
-  setzt er `tax_return_person_id`. Bei Mehrdeutigkeit (mehrere
-  Kandidaten) bleibt das Feld leer.
-- **Retroaktiv** (`syncOwnTaxReturnAssignment`): Wird das
-  `own_tax_return_from_tax_year` einer Person geändert, werden alle
-  betroffenen Dokumente rückwirkend zugewiesen oder losgelöst.
+- **On classification** (`document-ops.ts:runClassify`): The
+  classifier checks whether exactly one of the matched persons files
+  their own tax return for the document's tax year. If so,
+  it sets `tax_return_person_id`. In case of ambiguity (several
+  candidates) the field stays empty.
+- **Retroactively** (`syncOwnTaxReturnAssignment`): If a person's
+  `own_tax_return_from_tax_year` is changed, all
+  affected documents are assigned or detached retroactively.
 
-### 9.5 Frontend-Ansicht
+### 9.5 Frontend view
 
 **SubjectPersonsView** (`frontend/src/views/SubjectPersonsView.vue`):
-- Spalte „Eigene Erklärung ab" mit Jahreseingabe.
-- Spalte „Steuer-Prüfung" zeigt den effektiven Status mit Tags:
-  - `auto` — automatisch abgeleitet.
-  - `manuell` — explizit ein-/ausgeschaltet (Klick setzt auf auto zurück).
-  - `eigene Akte` — Person hat eigene Steuererklärung.
-- Aufklappbare Spalten-Legende erklärt jede Spalte.
+- Column „Eigene Erklärung ab" with year input.
+- Column „Steuer-Prüfung" (tax review) shows the effective status with tags:
+  - `auto` — derived automatically.
+  - `manuell` — explicitly switched on/off (click resets to auto).
+  - `eigene Akte` — person has their own tax return.
+- A collapsible column legend explains each column.
 
 **DocumentsSteuerView** (`frontend/src/views/DocumentsSteuerView.vue`):
-- Steuerakte-Switcher: Buttons filtern die Ansicht nach Person
+- Tax file switcher: buttons filter the view by person
   (`?tax_return_person=<id>`).
-- Standard-Ansicht schließt Dokumente aus, die einer eigenen Akte
-  zugewiesen sind.
+- The default view excludes documents that are assigned to an own file.
 
-### 9.6 Täglicher Cron (`tax-review-recompute-cron.ts`)
+### 9.6 Daily cron (`tax-review-recompute-cron.ts`)
 
-Täglich um 11:00 UTC (13:00 Uhr Sommerzeit, 12:00 Uhr Winterzeit) läuft ein Cron-Job, der für alle User die
-Steuer-Prüf-Flags neu berechnet. Zweck: Wenn ein Kind am 1.1. eines
-neuen Jahres die Altersgrenze überschreitet, ändert sich der
-Prüf-Status für künftige Steuerjahre — ohne dass der User etwas
-bearbeiten muss.
+Daily at 11:00 UTC (13:00 summer time, 12:00 winter time) a cron job runs that
+recomputes the tax review flags for all users. Purpose: When a child exceeds
+the age limit on 1 January of a new year, the review status changes for future
+tax years — without the user having to edit anything.
 
-Der Cron ruft pro User `recomputeDerivedTaxReviewForUser` und
-`syncTaxReviewFlagForAllSubjectPersons` auf. Jedes Dokument wird
-individuell gegen sein eigenes Steuerjahr bewertet.
+Per user, the cron calls `recomputeDerivedTaxReviewForUser` and
+`syncTaxReviewFlagForAllSubjectPersons`. Each document is evaluated
+individually against its own tax year.
 
-### 9.7 Sync-Logik (`documents/documents.ts`)
+### 9.7 Sync logic (`documents/documents.ts`)
 
-`syncTaxReviewFlagForSubjectPerson` evaluiert **pro Dokument** statt
-pauschal per SQL-UPDATE:
-1. Lädt alle Derivation-Felder der Person.
-2. Lädt alle Dokumente, die mit der Person verknüpft sind.
-3. Bestimmt für jedes Dokument das `referenceYear` (= `doc.tax_year`
-   oder aktuelles Jahr als Fallback).
-4. Cached den `getEffectiveAssessmentType(userId, year)` pro Jahr.
-5. Schreibt `tax_review_needed` individuell pro Dokument.
+`syncTaxReviewFlagForSubjectPerson` evaluates **per document** instead of
+across the board via an SQL UPDATE:
+1. Loads all derivation fields of the person.
+2. Loads all documents linked to the person.
+3. Determines the `referenceYear` for each document (= `doc.tax_year`
+   or the current year as a fallback).
+4. Caches `getEffectiveAssessmentType(userId, year)` per year.
+5. Writes `tax_review_needed` individually per document.
 
-### 9.8 Migrationen (Übersicht)
+### 9.8 Migrations (overview)
 
-| Migration | Inhalt |
+| Migration | Content |
 |-----------|--------|
-| 0137 | `user_subject_persons`: `relation_kind`, `birth_date`, `in_household`, `tax_cost_bearer`, `requires_tax_review` → Steuer-Prüf-System |
-| 0138 | Assessment-Settings-Tabelle (`user_assessment_settings`) |
-| 0145 | `requires_tax_review_override` — trennt manuelles Override von effektivem Wert |
-| 0146 | `own_tax_return_from_tax_year` auf `user_subject_persons`, `tax_return_person_id` FK auf `documents` |
+| 0137 | `user_subject_persons`: `relation_kind`, `birth_date`, `in_household`, `tax_cost_bearer`, `requires_tax_review` → tax review system |
+| 0138 | Assessment settings table (`user_assessment_settings`) |
+| 0145 | `requires_tax_review_override` — separates manual override from the effective value |
+| 0146 | `own_tax_return_from_tax_year` on `user_subject_persons`, `tax_return_person_id` FK on `documents` |

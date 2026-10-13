@@ -1,49 +1,49 @@
-# Finance — Datenmodell & Migration
+# Finance — Data model & migration
 
-Ziel: Greenfield-Finanzmodul neben `photos` und `documents` in fk-encore.
-Dieses Dokument legt Tabellen, Indizes, Constraints, die Initial-Migration
-`0043_finance_initial.sql` und die neuen Permissions fest. Klassifikation
-läuft ausschließlich über flache Tags (keine Kategorien, keine Rules).
+Goal: Greenfield finance module alongside `photos` and `documents` in fk-encore.
+This document defines tables, indexes, constraints, the initial migration
+`0043_finance_initial.sql` and the new permissions. Classification
+runs exclusively via flat tags (no categories, no rules).
 
-Status: Feature-Plan, Umsetzung in Etappen.
+Status: Feature plan, implemented in stages.
 
-Ergänzung: Die später hinzugekommenen Tabellen und Endpunkte für
-Finance-Basket-Aktionen (`finance_transaction_split`,
-`finance_basket_snapshot`) sind in
-[`finance-basket-actions.md`](finance-basket-actions.md) dokumentiert.
+Addendum: The tables and endpoints added later for
+finance basket actions (`finance_transaction_split`,
+`finance_basket_snapshot`) are documented in
+[`finance-basket-actions.md`](finance-basket-actions.md).
 
 ---
 
-## 1. Tabellenübersicht
+## 1. Table overview
 
 ```mermaid
 erDiagram
-    finance_currency ||--o{ finance_account : "währung"
-    finance_account_type ||--o{ finance_account : "typ"
-    finance_bankcontact ||--o{ finance_account : "betreibt"
+    finance_currency ||--o{ finance_account : "currency"
+    finance_account_type ||--o{ finance_account : "type"
+    finance_bankcontact ||--o{ finance_account : "operates"
     finance_account ||--o{ finance_account_access : "acl"
-    finance_account ||--o{ finance_transaction : "bucht"
-    finance_account ||--o{ finance_account_balance : "saldo-historie"
-    finance_transaction ||--o{ finance_tag_transaction : "zuordnung"
-    finance_tag ||--o{ finance_tag_transaction : "zuordnung"
-    finance_account ||--o{ finance_account_holding : "depot-positionen"
+    finance_account ||--o{ finance_transaction : "books"
+    finance_account ||--o{ finance_account_balance : "balance history"
+    finance_transaction ||--o{ finance_tag_transaction : "assignment"
+    finance_tag ||--o{ finance_tag_transaction : "assignment"
+    finance_account ||--o{ finance_account_holding : "depot positions"
     finance_bankcontact ||--o{ finance_tan_session : "dialog"
-    users ||--o{ finance_account_access : "berechtigt"
-    users ||--o{ finance_tan_session : "initiiert"
+    users ||--o{ finance_account_access : "authorizes"
+    users ||--o{ finance_tan_session : "initiates"
     finance_timespan }o--|| finance_system_pref : "preset"
 ```
 
-Querbeziehungen ausgelassen: `finance_system_pref` ist reiner Key-Value-
-Speicher ohne FK; `finance_timespan` dient nur als Preset-Nachschlag für
-das Frontend.
+Cross-relations omitted: `finance_system_pref` is a pure key-value
+store without FK; `finance_timespan` serves only as a preset lookup for
+the frontend.
 
 ---
 
-## 2. Drizzle-Definitionen
+## 2. Drizzle definitions
 
-Stil wie `db/schema.ts` — `pgTable`, `bigserial` für hochvolumige Tabellen,
-`numeric(12,2)` für Geldbeträge, `timestamp({ mode: "string" })`, `pgEnum`,
-`jsonb().$type<…>()` für getypte JSON-Spalten, Join-Tables mit
+Style as in `db/schema.ts` — `pgTable`, `bigserial` for high-volume tables,
+`numeric(12,2)` for monetary amounts, `timestamp({ mode: "string" })`, `pgEnum`,
+`jsonb().$type<…>()` for typed JSON columns, join tables with
 `primaryKey({ columns: [...] })`.
 
 ### 2.1 Enums
@@ -71,11 +71,11 @@ export const financeAccountKindEnum = pgEnum("finance_account_kind", [
 ]);
 ```
 
-### 2.2 Stammdaten
+### 2.2 Master data
 
 ```ts
 export const financeCurrency = pgTable("finance_currency", {
-  code: text("code").primaryKey(), // z. B. "EUR", "USD" (ISO 4217)
+  code: text("code").primaryKey(), // e.g. "EUR", "USD" (ISO 4217)
   symbol: text("symbol").notNull(),
   decimals: integer("decimals").notNull().default(2),
 });
@@ -88,20 +88,20 @@ export const financeAccountType = pgTable("finance_account_type", {
 
 export const financeTimespan = pgTable("finance_timespan", {
   id: serial("id").primaryKey(),
-  slug: text("slug").unique().notNull(), // z. B. "current-month", "last-year"
+  slug: text("slug").unique().notNull(), // e.g. "current-month", "last-year"
   label: text("label").notNull(),
   offset_days: integer("offset_days"),
   offset_months: integer("offset_months"),
 });
 ```
 
-### 2.3 Bankkontakte und Konten
+### 2.3 Bank contacts and accounts
 
 ```ts
 export interface FinanceSyncSlot {
-  weekdays: number[]; // 0 = Sonntag … 6 = Samstag
+  weekdays: number[]; // 0 = Sunday … 6 = Saturday
   time: string;       // "HH:MM"
-  tz: string;         // IANA-Zone, z. B. "Europe/Berlin"
+  tz: string;         // IANA zone, e.g. "Europe/Berlin"
 }
 
 export const financeBankcontact = pgTable("finance_bankcontact", {
@@ -149,7 +149,7 @@ export const financeAccount = pgTable(
 );
 ```
 
-### 2.4 Konto-ACL
+### 2.4 Account ACL
 
 ```ts
 export const financeAccountAccess = pgTable(
@@ -168,11 +168,11 @@ export const financeAccountAccess = pgTable(
 );
 ```
 
-Ersetzt die beiden Finanzkraft-Rollen `Fk_AccountReader` und
-`Fk_AccountWriter`. Das Level ist eine Tabellen-Spalte, keine Rolle —
-so bleibt die fk-encore-Rollenmatrix unberührt.
+Replaces the two Finanzkraft roles `Fk_AccountReader` and
+`Fk_AccountWriter`. The level is a table column, not a role —
+so the fk-encore role matrix remains untouched.
 
-### 2.5 Transaktionen und Salden
+### 2.5 Transactions and balances
 
 ```ts
 export const financeTransaction = pgTable("finance_transaction", {
@@ -189,8 +189,8 @@ export const financeTransaction = pgTable("finance_transaction", {
   purpose: text("purpose"),
   counterparty: text("counterparty"),
   counterparty_iban: text("counterparty_iban"),
-  fints_id: text("fints_id"), // stabile FinTS-Transaktions-ID (wenn vorhanden)
-  dedupe_hash: text("dedupe_hash").notNull(), // siehe §3
+  fints_id: text("fints_id"), // stable FinTS transaction ID (if available)
+  dedupe_hash: text("dedupe_hash").notNull(), // see §3
   raw: jsonb("raw").$type<Record<string, unknown>>(),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
@@ -209,11 +209,11 @@ export const financeAccountBalance = pgTable(
 );
 ```
 
-Bewusst keine eigene Status-Tabelle — Status wird bei Bedarf später als
-`pgEnum`-Spalte nachgezogen. Beim Finanzkraft-Import wird der historische
-Status nicht migriert (siehe `finance-data-import.md`).
+Deliberately no dedicated status table — status will be added later as a
+`pgEnum` column if needed. During the Finanzkraft import the historical
+status is not migrated (see `finance-data-import.md`).
 
-### 2.6 Depot-Holdings
+### 2.6 Depot holdings
 
 ```ts
 export const financeAccountHolding = pgTable(
@@ -263,8 +263,8 @@ export const financeTag = pgTable(
     created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   },
   (table) => [
-    // Gleicher Tag-Name kann als user- und als ai-Variante existieren,
-    // damit AI-Vorschläge User-Tags nicht überschreiben.
+    // The same tag name can exist as a user and as an ai variant,
+    // so that AI suggestions do not overwrite user tags.
     uniqueIndex("finance_tag_name_source_unique").on(table.name, table.source),
   ]
 );
@@ -278,7 +278,7 @@ export const financeTagTransaction = pgTable(
     transaction_id: integer("transaction_id")
       .notNull()
       .references(() => financeTransaction.id, { onDelete: "cascade" }),
-    confidence: numeric("confidence", { precision: 4, scale: 3 }), // nur bei source='ai'
+    confidence: numeric("confidence", { precision: 4, scale: 3 }), // only for source='ai'
     created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
   },
   (table) => [
@@ -287,7 +287,7 @@ export const financeTagTransaction = pgTable(
 );
 ```
 
-### 2.8 TAN-Sessions und System-Preferences
+### 2.8 TAN sessions and system preferences
 
 ```ts
 export const financeTanSession = pgTable("finance_tan_session", {
@@ -300,7 +300,7 @@ export const financeTanSession = pgTable("finance_tan_session", {
     .references(() => financeBankcontact.id, { onDelete: "cascade" }),
   banking_information: jsonb("banking_information")
     .notNull()
-    .$type<Record<string, unknown>>(), // lib-fints-State
+    .$type<Record<string, unknown>>(), // lib-fints state
   challenge: text("challenge").notNull(),
   expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
@@ -315,33 +315,33 @@ export const financeSystemPref = pgTable("finance_system_pref", {
 
 ---
 
-## 3. Indizes & Duplikaterkennung
+## 3. Indexes & duplicate detection
 
-| Tabelle | Index | Zweck |
+| Table | Index | Purpose |
 |---|---|---|
-| `finance_account` | `(bankcontact_id)` | FK-Lookup |
-| `finance_account` | `unique(iban)` | Eindeutigkeit |
-| `finance_account` | `unique(bankcontact_id, fints_account_number, type_id)` | Bank-Link-Eindeutigkeit |
-| `finance_transaction` | `(account_id, booking_date desc)` | Listen-Query |
-| `finance_transaction` | `unique(account_id, dedupe_hash)` | Duplikat-Schutz |
+| `finance_account` | `(bankcontact_id)` | FK lookup |
+| `finance_account` | `unique(iban)` | Uniqueness |
+| `finance_account` | `unique(bankcontact_id, fints_account_number, type_id)` | Bank-link uniqueness |
+| `finance_transaction` | `(account_id, booking_date desc)` | List query |
+| `finance_transaction` | `unique(account_id, dedupe_hash)` | Duplicate protection |
 | `finance_transaction` | `(fints_id)` where `fints_id is not null` | Re-Import |
-| `finance_tag_transaction` | `(transaction_id)` | Umkehrrichtung |
-| `finance_tan_session` | `(expires_at)` | Cleanup-Cron |
-| `finance_account_balance` | `(account_id, as_of desc)` | Saldo-Verlauf |
-| `finance_account_holding` | `(account_id, as_of)` | Positionen pro Konto und Stichtag |
+| `finance_tag_transaction` | `(transaction_id)` | Reverse direction |
+| `finance_tan_session` | `(expires_at)` | Cleanup cron |
+| `finance_account_balance` | `(account_id, as_of desc)` | Balance history |
+| `finance_account_holding` | `(account_id, as_of)` | Positions per account and as-of date |
 
-`dedupe_hash` = SHA-256 über `booking_date | value_date | amount |
-currency | purpose | counterparty_iban`. Liefert FinTS eine stabile
-`fints_id`, wird diese bevorzugt zur Duplikatprüfung genutzt; `dedupe_hash`
-bleibt als Fallback für Import und manuelle Buchungen.
+`dedupe_hash` = SHA-256 over `booking_date | value_date | amount |
+currency | purpose | counterparty_iban`. If FinTS delivers a stable
+`fints_id`, it is preferred for duplicate checking; `dedupe_hash`
+remains as a fallback for import and manual transactions.
 
 ---
 
 ## 4. Migration `0043_finance_initial.sql`
 
-Nummer `0043`, weil `0042_feed_item_album_left.sql` bereits vergeben ist.
-Die SQL wird über Drizzle generiert (`drizzle-kit generate`); diese Skizze
-beschreibt den erwarteten Inhalt.
+Number `0043`, because `0042_feed_item_album_left.sql` is already taken.
+The SQL is generated via Drizzle (`drizzle-kit generate`); this sketch
+describes the expected content.
 
 ```sql
 -- 0043_finance_initial.sql
@@ -537,24 +537,24 @@ INSERT INTO finance_timespan (slug, label, offset_days, offset_months) VALUES
 
 ---
 
-## 5. Permissions & Seed-Erweiterung
+## 5. Permissions & seed extension
 
-Vier neue Keys — analog zum Muster in `db/seed.ts:38-90` (siehe
+Four new keys — analogous to the pattern in `db/seed.ts:38-90` (see
 `module.photos` / `module.documents`):
 
-| Key | Zweck |
+| Key | Purpose |
 |---|---|
-| `module.finance` | Modul-Toggle (Navigation, Dashboard-Kachel) |
-| `finance.view` | Konten und Transaktionen sehen (ACL-gefiltert) |
-| `finance.accounts.manage` | Bankkontakte / Konten anlegen, TAN-Flow auslösen |
-| `finance.admin` | ACL-Bypass, Admin-Import, Systempreferences |
+| `module.finance` | Module toggle (navigation, dashboard tile) |
+| `finance.view` | View accounts and transactions (ACL-filtered) |
+| `finance.accounts.manage` | Create bank contacts / accounts, trigger TAN flow |
+| `finance.admin` | ACL bypass, admin import, system preferences |
 
-`finance.admin` gehört in das `adminExcludedPermissions`-Set (analog zu
-`photos.purge`), damit selbst Nutzer mit `roles.admin` den Key nur explizit
-vergeben bekommen und das nicht automatisch erben.
+`finance.admin` belongs in the `adminExcludedPermissions` set (analogous to
+`photos.purge`), so that even users with `roles.admin` get the key only if explicitly
+granted and do not inherit it automatically.
 
 ```ts
-// db/seed.ts (ergänzen)
+// db/seed.ts (add)
 await upsertPermission(db, "module.finance", "Finanzmodul aktivieren");
 await upsertPermission(db, "finance.view", "Konten & Transaktionen sehen");
 await upsertPermission(
@@ -567,35 +567,35 @@ await upsertPermission(db, "finance.admin", "Finanz-Admin (ACL-Bypass, Import)")
 adminExcludedPermissions.add("finance.admin");
 ```
 
-In Handlern gilt konsequent das Pattern aus `user/auth-handler.ts:30-35`:
+In handlers, the pattern from `user/auth-handler.ts:30-35` applies consistently:
 
 ```ts
 const authData = getAuthData()!;
 await requirePermission(authData, "finance.view");
 ```
 
-Konto-bezogene Endpoints (Liste, Detail, Transaktionen) filtern zusätzlich
-über `finance_account_access`:
+Account-related endpoints (list, detail, transactions) additionally filter
+via `finance_account_access`:
 
 ```sql
 WHERE a.id IN (
   SELECT account_id FROM finance_account_access
   WHERE user_id = :userId
 )
--- oder Bypass, falls der Caller 'finance.admin' hält.
+-- or bypass, if the caller holds 'finance.admin'.
 ```
 
 ---
 
-## 6. Offene Punkte
+## 6. Open points
 
-- **Duplikaterkennung**: Ist `fints_id` für alle produktiv genutzten Banken
-  stabil genug, dass wir sie als Primär-Kriterium nehmen? Ansonsten bleibt
-  es beim kombinierten `dedupe_hash`. Erst nach Erfassung echter
-  FinTS-Responses entscheidbar.
-- **Retention für `finance_account_balance`**: Reicht ein Eintrag pro Tag,
-  oder brauchen wir jede Saldo-Mitteilung? Impliziert Plattenplatz und
-  Chart-Auflösung.
-- **`raw`-Spalte**: Legen wir den vollständigen FinTS-Response in
-  `finance_transaction.raw` ab, oder nur ausgewählte Felder? Rohdaten sind
-  nützlich für Nach-Analysen, aber vergrößern die Tabelle deutlich.
+- **Duplicate detection**: Is `fints_id` stable enough for all banks used in
+  production that we take it as the primary criterion? Otherwise we stay
+  with the combined `dedupe_hash`. Decidable only after capturing real
+  FinTS responses.
+- **Retention for `finance_account_balance`**: Is one entry per day enough,
+  or do we need every balance notification? Implies disk space and
+  chart resolution.
+- **`raw` column**: Do we store the complete FinTS response in
+  `finance_transaction.raw`, or only selected fields? Raw data is
+  useful for post-analyses, but enlarges the table considerably.

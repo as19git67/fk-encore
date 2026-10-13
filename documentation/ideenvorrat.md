@@ -1,271 +1,271 @@
-# Ideenvorrat — die Sammlung ohne Reise
+# Idea Pool — the Collection Without a Trip
 
-Stand: 2026-09-11 · Status: Backend vollständig, iOS-Oberfläche gebaut
-(zwei Wege hinein und die Veranstaltungen ausgenommen — §6)
+As of: 2026-09-11 · Status: backend complete, iOS UI built
+(two ways in and the events excepted — §6)
 
-Ausführliche Begründung und Entwurf: `documentation/ios-urlaubsplanung.md` §20.
-Dieses Dokument beschreibt, **was gebaut ist** — Endpunkte, Datenmodell,
-Regeln — damit man es benutzen kann, ohne 3 600 Zeilen Konzept zu lesen.
+Detailed rationale and design: `documentation/ios-urlaubsplanung.md` §20.
+This document describes **what is built** — endpoints, data model,
+rules — so that it can be used without reading 3,600 lines of concept.
 
-## 1. Was es ist
+## 1. What it is
 
-Alles Übrige im Urlaubsplaner braucht eine Reise: anlegen, Ort nennen, Tage
-bekommen. Das ist die Hälfte, die man *plant*, und die seltenere. Die
-häufigere ist die, die man *sammelt* — der Biergarten, den jemand erwähnt
-hat, die Ausstellung im Nachbarort, der Weg, der zweimal aufkam. Dinge ohne
-Datum, ohne Stadt, ohne Rahmen.
+Everything else in the vacation planner needs a trip: create it, name a place,
+get days. That is the half you *plan*, and the rarer one. The more
+frequent one is the one you *collect* — the beer garden someone
+mentioned, the exhibition in the neighboring town, the trail that came up
+twice. Things without a date, without a city, without a frame.
 
-Der Baustein dafür gab es längst: Der Etappenvorrat (§5) ist eine bewertete
-Liste von Möglichkeiten, die zufällig an einer Etappe hängt. Der Ideenvorrat
-ist dieselbe Liste ohne sie.
+The building block for it has existed for a while: the stage pool (§5) is a rated
+list of possibilities that happens to hang off a stage. The idea pool
+is the same list without it.
 
-Zwei Eigenschaften unterscheiden ihn von einer Merkliste:
+Two properties set it apart from a bookmark list:
 
-- **Er ist geteilt** — eine Liste, in die die Familie schreibt, keine Kopie je
-  Person. Jeder Eintrag trägt, wer ihn hineingelegt hat, denn „Papa wollte da
-  hin" ist die halbe Information.
-- **Er ist ortsbezogen, nicht listenförmig.** Eine Sammlung, die nur eine Liste
-  ist, wird gelesen, bis sie zu lang ist, und danach nie wieder. Der Nutzen
-  entsteht, wenn sie sich **von selbst meldet** — und daraus einen Nachmittag
-  vorschlägt.
+- **It is shared** — one list the family writes into, not a copy per
+  person. Every entry records who put it in, because "Dad wanted to go
+  there" is half the information.
+- **It is location-based, not list-shaped.** A collection that is only a list
+  gets read until it is too long, and never again afterwards. The value
+  arises when it **speaks up on its own** — and proposes an afternoon
+  from that.
 
-## 2. Status auf einen Blick
+## 2. Status at a glance
 
-| Teil | Stand |
+| Part | Status |
 | --- | --- |
-| Sammeln, Auflisten, Entfernen, Teilen | gebaut (`trip-planner/ideas.ts`) |
-| Nähe-Meldung mit Ruhezeit, „nicht jetzt" | gebaut (`trip-planner/outing.ts`) |
-| Ausflugsvorschlag aus mehreren Ideen | gebaut (`trip-planner/outing.ts`) |
-| Die drei Wege zwischen Vorrat und Reise | gebaut (`trip-planner/ideas-trip.ts`) |
-| Veranstaltungen mit Gültigkeitsfenster | Spalten da, Quelle fehlt — §20.4, vorerst nicht gebaut |
-| Bildschirm: Liste, Merken, Entfernen, Teilen | gebaut (`TripIdeasView`) |
-| Wege hinein: eigener Standort, geteilter Kartenlink | gebaut (`TripMapLink`) |
-| Bildschirm „In der Nähe" samt „nicht jetzt" | gebaut (`TripIdeasNearbyView`) |
-| Ausflugsvorschlag samt Übernahme als Reise | gebaut (`TripIdeasOutingView`) |
-| Angebot in der Reise + „für später merken" | gebaut (`TripPlanIdeasView`, Vorrat-Wischgeste) |
-| Die Meldung **von selbst** (Standortschleife) | gebaut (`TripIdeaNoticeMonitor`), **standardmäßig aus** |
-| Suche über alle Gruppen, inkl. Gruppenname | gebaut (`TripIdeaSearch`, `TripIdeasView`) |
-| Wege hinein: Artikel, Suche | **nicht gebaut** — brauchen eine Reise (§9.3), siehe §6 |
+| Collect, list, remove, share | built (`trip-planner/ideas.ts`) |
+| Proximity notice with quiet period, "not now" | built (`trip-planner/outing.ts`) |
+| Outing proposal from several ideas | built (`trip-planner/outing.ts`) |
+| The three paths between pool and trip | built (`trip-planner/ideas-trip.ts`) |
+| Events with validity window | columns exist, source missing — §20.4, not built for now |
+| Screen: list, save, remove, share | built (`TripIdeasView`) |
+| Ways in: own location, shared map link | built (`TripMapLink`) |
+| "In der Nähe" (nearby) screen including "nicht jetzt" (not now) | built (`TripIdeasNearbyView`) |
+| Outing proposal including adoption as a trip | built (`TripIdeasOutingView`) |
+| Offer within the trip + "für später merken" (save for later) | built (`TripPlanIdeasView`, pool swipe gesture) |
+| The notice **on its own** (location loop) | built (`TripIdeaNoticeMonitor`), **off by default** |
+| Search across all groups, including group name | built (`TripIdeaSearch`, `TripIdeasView`) |
+| Ways in: article, search | **not built** — need a trip (§9.3), see §6 |
 
-Der Einstieg steht: In der Urlaubsplanung führt „Ideen" auf eine Liste je
-Sammlung — mit Notiz, mit „wer hat's gemerkt", mit Hinweis auf Einträge, die
-die Karte nicht kennt. Hinein kommen **der Ort, an dem man gerade steht**, und
-ein **geteilter Kartenlink** (Apple Maps, auch als Kurzlink — der wird
-aufgelöst); Artikel und Suche aus §9.2 fehlen und werden hier bewusst nicht
-gebaut (§6).
+The entry point is in place: in vacation planning, "Ideen" (ideas) leads to a list per
+collection — with note, with "who saved it", with a hint about entries that
+the map does not know. What gets in is **the place where you are standing right now** and
+a **shared map link** (Apple Maps, also as a short link — it is
+resolved); articles and search from §9.2 are missing and are deliberately not built
+here (§6).
 
-Die drei Wege zwischen Vorrat und Reise stehen alle: der angenommene
-**Ausflugsvorschlag** als eintägige Reise, das **Angebot in der Reise**
-(„Aus dem Vorrat" im Menü der Tageskarte) und **„für später merken"** als
-Wischgeste im Etappenvorrat. „In der Nähe" gibt es als **Frage** (ein
-Bildschirm, den man öffnet, und der deshalb keine Ruhezeit verbraucht) und als
-**Meldung von selbst** — letztere ist ein Schalter im Menü und standardmäßig
-**aus**.
+All three paths between pool and trip are in place: the accepted
+**outing proposal** as a one-day trip, the **offer within the trip**
+("Aus dem Vorrat" (from the pool) in the menu of the day card) and **"für später merken"** as a
+swipe gesture in the stage pool. "In der Nähe" exists as a **question** (a
+screen you open, which therefore consumes no quiet period) and as a
+**notice on its own** — the latter is a switch in the menu and is **off**
+by default.
 
-Gesucht wird **über alle Gruppen hinweg**: Das Feld steht dauerhaft über der
-Liste und filtert Name (der eigene wie der auf dem Schild), Notiz, „von wem",
-Art — und den **Namen der Gruppe**. „Lissabon" findet damit alles, was dort
-gemerkt wurde, auch wenn kein einzelner Eintrag das Wort trägt. Die Gruppen
-werden sonst erst benannt, wenn man zu ihnen scrollt (der Geocoder ist
-rate-limitiert); sobald jemand sucht, werden die fehlenden Namen nachgeholt,
-einer nach dem anderen. Gruppen, in denen nichts übrig bleibt, verschwinden;
-eine Zeile oben sagt „3 von 40 Ideen".
+Search works **across all groups**: the field sits permanently above the
+list and filters name (the user's own as well as the one on the sign), note, "from whom", type —
+and the **name of the group**. "Lissabon" thus finds everything saved
+there, even if no single entry carries the word. The groups
+are otherwise only named once you scroll to them (the geocoder is
+rate-limited); as soon as someone searches, the missing names are fetched,
+one after the other. Groups in which nothing remains disappear;
+a line at the top says "3 von 40 Ideen" (3 of 40 ideas).
 
-## 3. Datenmodell
+## 3. Data model
 
-Migration `0179_idea_pool.sql`, zwei Tabellen.
+Migration `0179_idea_pool.sql`, two tables.
 
-**`idea_pool`** spiegelt `trip_plan_pool` absichtlich Spalte für Spalte, minus
-`leg_id` und plus drei Dinge, die eine stehende Sammlung braucht:
+**`idea_pool`** deliberately mirrors `trip_plan_pool` column by column, minus
+`leg_id` and plus three things a standing collection needs:
 
-- `owner_id`, `created_by` — wem die Sammlung gehört, wer diesen Eintrag
-  hineingelegt hat.
-- `valid_from`, `valid_to` — für etwas, das endet (eine Ausstellung bis
-  Sonntag). Beide `null` für den Normalfall: einen Ort, den es einfach gibt.
-- `last_suggested_at`, `dismissed_count` — die Buchführung, die „einmal
-  gemeldet" haltbar macht.
+- `owner_id`, `created_by` — who the collection belongs to, who put this entry
+  in.
+- `valid_from`, `valid_to` — for something that ends (an exhibition until
+  Sunday). Both `null` for the normal case: a place that simply exists.
+- `last_suggested_at`, `dismissed_count` — the bookkeeping that makes "reported
+  once" durable.
 
-Ein eindeutiger Index auf `(owner_id, osm_ref)`: derselbe Biergarten, zweimal
-erwähnt, ist **eine** Idee.
+A unique index on `(owner_id, osm_ref)`: the same beer garden, mentioned twice,
+is **one** idea.
 
-**`idea_pool_shares`** hat dieselbe Form wie die Teilnehmerliste einer Reise
-(§6.2) — Personen, kein Rechte-Raster. Ein Haushalt ist eine Liste von
-Menschen.
+**`idea_pool_shares`** has the same shape as the participant list of a trip
+(§6.2) — people, no permission grid. A household is a list of
+people.
 
-## 4. Endpunkte
+## 4. Endpoints
 
-Alle unter `/trip-planner`, alle mit `auth: true` und der Berechtigung
-`photos.view`. `ownerId` ist überall optional. **Ohne** `ownerId` gilt seit
-der Haushaltsansicht: gelesen wird über **alle Sammlungen, in die man
-hineingelassen wurde** (die eigene zuerst); geschrieben wird in die eigene.
-Mit `ownerId` ist genau diese eine Sammlung gemeint.
+All under `/trip-planner`, all with `auth: true` and the permission
+`photos.view`. `ownerId` is optional everywhere. **Without** `ownerId`, since
+the household view: reading spans **all collections one has been
+let into** (one's own first); writing goes to one's own.
+With `ownerId`, exactly that one collection is meant.
 
-**Zwei Sammlungen, eine Sicht.** Jede Person hat ihre eigene Sammlung
-(`idea_pool.owner_id`); hineinlassen (`idea_pool_shares`) gibt der anderen
-Person Schreibrecht in *meine*. Fangen zwei Haushaltsmitglieder getrennt an
-und lassen sich später gegenseitig hinein, wird **nichts umgehängt und nichts
-zusammengeführt**: beide behalten ihre Sammlung, beide sehen ab dann **eine
-Liste** aus beiden — mit „von X“ an jeder Zeile und `ownerId` an jedem Eintrag,
-damit Bearbeiten und Löschen wissen, wohin. Derselbe Ort in zwei Sammlungen
-(gleicher `osm_ref`, oder zwei `manual:`-Einträge innerhalb von 80 m) ist in
-der Liste **eine** Zeile; die eigene Kopie gewinnt, sonst die ältere. Nähe,
-Ausflug, „schon bei den Ideen“ beim Entdecken und „aus den Ideen übernehmen“
-in einer Reise lesen dieselbe Vereinigung.
+**Two collections, one view.** Each person has their own collection
+(`idea_pool.owner_id`); letting someone in (`idea_pool_shares`) gives the other
+person write access to *my* collection. If two household members start separately
+and later let each other in, **nothing is re-parented and nothing is
+merged**: both keep their collection, both see from then on **one
+list** made of both — with "von X" (by X) on every row and `ownerId` on every entry,
+so that edit and delete know where to go. The same place in two collections
+(same `osm_ref`, or two `manual:` entries within 80 m) is **one** row in
+the list; the user's own copy wins, otherwise the older one. Proximity,
+outing, "already in the ideas" when discovering, and "take over from the ideas"
+in a trip read the same union.
 
-### 4.1 Die Sammlung selbst (`ideas.ts`)
+### 4.1 The collection itself (`ideas.ts`)
 
-| Aufruf | Was er tut |
+| Call | What it does |
 | --- | --- |
-| `POST /ideas` | Idee hinzufügen |
-| `GET /ideas` | Einträge aller zugänglichen Sammlungen als eine Liste (oder eine per `ownerId`), plus die Sammlungen selbst |
-| `GET /ideas/members` | wer in meine Sammlung schreiben darf |
-| `POST /ideas/remove` | Eintrag löschen (`ownerId` sagt, aus welcher Sammlung) |
-| `POST /ideas/share` | jemanden hineinlassen — per `userId` aus dem Haushalt (die App zeigt die Liste, wie die Albumfreigabe) oder per `email` |
-| `POST /ideas/unshare` | jemanden wieder hinausnehmen |
-| `GET /shareable-users?forIdeas=true` | der Haushalt minus wer schon mitschreibt (`household.ts`; mit `planId` statt `forIdeas` dasselbe für eine Reise) |
+| `POST /ideas` | add an idea |
+| `GET /ideas` | entries of all accessible collections as one list (or one via `ownerId`), plus the collections themselves |
+| `GET /ideas/members` | who may write into my collection |
+| `POST /ideas/remove` | delete an entry (`ownerId` says which collection it is from) |
+| `POST /ideas/share` | let someone in — via `userId` from the household (the app shows the list, like album sharing) or via `email` |
+| `POST /ideas/unshare` | take someone out again |
+| `GET /shareable-users?forIdeas=true` | the household minus those who already write along (`household.ts`; with `planId` instead of `forIdeas` the same for a trip) |
 
-Der Weg hinein ist **derselbe wie bei einem Fund** (§9.2), nicht ein zweiter:
-Koordinate, optional Name, Notiz, Herkunft. Im Umkreis von **80 m** wird der
-passende OSM-Eintrag gesucht; findet sich keiner, wird die eine erlaubte Frage
-gestellt (`dwellMinutes` — wie lange?), statt eine Dauer zu erfinden. Der
-Eintrag ist dann als `unmatched` markiert, und die Antwort nennt unter
-`unknown` in Klartext, was nicht bekannt ist (§15.3).
+The way in is **the same as for a find** (§9.2), not a second one:
+coordinate, optional name, note, origin. Within **80 m**, the
+matching OSM entry is searched; if none is found, the one permitted question is
+asked (`dwellMinutes` — how long?), instead of inventing a duration. The
+entry is then marked as `unmatched`, and the response states in plain text under
+`unknown` what is not known (§15.3).
 
-Eine zweite Erwähnung desselben Orts wird **zusammengeführt** und ergänzt nur,
-was sie mitbringt — was beim ersten Mal jemand geschrieben hat, überschreibt
-sie nie (`merged: true` in der Antwort).
+A second mention of the same place is **merged** and only adds
+what it brings with it — what someone wrote the first time is never overwritten
+by it (`merged: true` in the response).
 
-Wer in einer Sammlung ist, darf auch etwas herausnehmen: §6.2 gibt dem
-Organisator drei Rechte, und das ist keines davon.
+Anyone who is in a collection may also remove something from it: §6.2 gives the
+organizer three rights, and this is none of them.
 
-Eine Sammlung, in die niemand hineingelassen wurde, existiert für Fremde
-**nicht** — `not_found`, nicht `permission_denied`. Was einem nicht gehört,
-ist auch nicht zu wissen, dass es das gibt.
+A collection that nobody has been let into does **not** exist for outsiders
+— `not_found`, not `permission_denied`. What does not belong to you
+is also not something you should know exists.
 
-### 4.2 Der Vorrat meldet sich (`outing.ts`)
+### 4.2 The pool speaks up (`outing.ts`)
 
-| Aufruf | Was er tut |
+| Call | What it does |
 | --- | --- |
-| `POST /ideas/nearby` | „Ist etwas von uns hier in der Nähe?" |
-| `POST /ideas/dismiss` | „Nicht jetzt." |
-| `POST /ideas/outing` | „Soll ich daraus einen Nachmittag machen?" |
+| `POST /ideas/nearby` | "Is anything of ours nearby?" |
+| `POST /ideas/dismiss` | "Not now." |
+| `POST /ideas/outing` | "Shall I turn that into an afternoon?" |
 
-**Nähe.** Nach Entfernung sortiert, mit `addedBy` — „der Biergarten, den Anna
-gemerkt hat" ist die Form, die §20 verlangt. Standardradius 5 km, maximal
+**Proximity.** Sorted by distance, with `addedBy` — "the beer garden Anna
+saved" is the form §20 demands. Default radius 5 km, maximum
 100 km.
 
-> **Zurückgegeben zu werden ist gemeldet worden.** Der Zeitstempel wird beim
-> Ausliefern gesetzt, nicht wenn eine App zurückmeldet, sie habe es angezeigt —
-> eine App, die das vergisst, machte die Regel still wirkungslos. Danach ist
-> **eine Woche Ruhe** (`QUIET_DAYS = 7`). Wer nur die Liste nach Entfernung
-> sehen will, schickt `markSuggested: false`; ein Bildschirm ist nicht dasselbe
-> wie eine Meldung.
+> **Being returned counts as having been reported.** The timestamp is set on
+> delivery, not when an app reports back that it displayed it —
+> an app that forgets that would make the rule silently ineffective. After that there is
+> **one week of quiet** (`QUIET_DAYS = 7`). Anyone who only wants to see the list
+> by distance sends `markSuggested: false`; a screen is not the same as
+> a notice.
 
-Was im Radius liegt, aber bewusst nicht angeboten wurde, wird als `quiet`
-**gezählt statt aufgelistet** — die Zahl ist ehrlich, die Liste wäre Lärm.
+What lies within the radius but was deliberately not offered is **counted**
+as `quiet` **rather than listed** — the number is honest, the list would be noise.
 
-**Weggewischt.** `dismiss` zählt hoch und lässt den Eintrag stehen. Nach drei
-„nicht jetzt" (`DISMISSALS_UNTIL_QUIET = 3`) schweigt er — aber er ist weiter
-im Vorrat, denn „raus damit" hat niemand gesagt (§7.1 merkt sich ein Nein,
-statt es zu löschen).
+**Swiped away.** `dismiss` counts up and leaves the entry in place. After three
+"nicht jetzt" (not now) (`DISMISSALS_UNTIL_QUIET = 3`) it goes silent — but it remains
+in the pool, because nobody said "get rid of it" (§7.1 remembers a no
+instead of deleting it).
 
-**Der Ausflug.** Der Punkt, an dem aus einer Merkliste ein Planer wird: Liegen
-mehrere Einträge dicht genug beieinander, ist die Frage nicht „willst du zu
-diesem?", sondern „soll ich daraus einen Nachmittag machen?". Die Antwort ist
-ein Aufruf von `solveDay` mit dem Standort als Anker, **einem** Block über das
-Zeitbudget und dem Vorrat als Kandidaten (Standardradius 25 km — ein
-Tagesausflugsradius —, Standardbudget 240 Minuten, Standardverkehrsmittel
-Auto). Ein Ausflug ist ein Block, keine
-Vierteilung — die gehört zum Urlaub, nicht zum Samstagnachmittag.
+**The outing.** The point at which a bookmark list becomes a planner: if
+several entries lie close enough together, the question is not "do you want to go to
+this one?" but "shall I turn this into an afternoon?". The answer is
+a call to `solveDay` with the location as anchor, **one** block spanning the
+time budget and the pool as candidates (default radius 25 km — a
+day-trip radius —, default budget 240 minutes, default means of transport
+car). An outing is one block, not a division
+into four — that belongs to the vacation, not to Saturday afternoon.
 
-Vier Entscheidungen, die dabei getroffen wurden:
+Four decisions that were made along the way:
 
-- **Gesammeltes zuerst.** Ideen gehen mit Startbonus (`score: 10`) in die
-  Auswahl und stehen damit vor dem, was die Regionssuche auffüllt. Beides ist
-  im Ergebnis als `fromIdeas` markiert, damit „von uns" und „gefunden"
-  unterscheidbar bleiben.
-- **Auffüllen ist erlaubt, aber abschaltbar** (`fillFromRegion: false`).
-- **Das Beinlimit ist ein Fuß-Budget.** Die 40 Minuten des Planers sind
-  innerhalb einer Stadt die richtige Absage und für einen Ausflug die falsche:
-  Eine halbe Stunde im Auto ist der Weg zum See, kein Umweg. Für Auto und ÖPNV
-  gelten deshalb 90 Minuten je Etappe, zu Fuß und mit dem Rad bleibt es bei 40.
-- **Abgelaufene Termine werden gar nicht erst betrachtet.** Eine Ausstellung,
-  die am Sonntag zu Ende war, ist keine Idee mehr.
+- **Collected items first.** Ideas enter the selection with a starting bonus (`score: 10`)
+  and thus come before what the region search fills in. Both are
+  marked in the result as `fromIdeas`, so that "ours" and "found"
+  remain distinguishable.
+- **Filling up is allowed, but can be switched off** (`fillFromRegion: false`).
+- **The leg limit is a walking budget.** The planner's 40 minutes are
+  the right rejection within a city and the wrong one for an outing:
+  half an hour by car is the way to the lake, not a detour. For car and public transit
+  90 minutes per stage therefore apply; on foot and by bike it stays at 40.
+- **Expired dates are not even considered.** An exhibition
+  that ended on Sunday is no longer an idea.
 
-Die Antwort sagt auch, wenn nichts geht (`offered: false`, `reason:
-no-ideas | nothing-fits`) und wie viel wegfiel (`leftOut`). Ein Ausflug, der
-passt, ist kürzer als der, den jemand wollte.
+The response also says when nothing works (`offered: false`, `reason:
+no-ideas | nothing-fits`) and how much was dropped (`leftOut`). An outing that
+fits is shorter than the one someone wanted.
 
-### 4.3 Zwischen Vorrat und Reise (`ideas-trip.ts`)
+### 4.3 Between pool and trip (`ideas-trip.ts`)
 
-Kein zweiter Mechanismus, sondern eine Quelle mehr — drei Richtungen, alle
-über vorhandene Wege:
+Not a second mechanism, but one more source — three directions, all
+over existing paths:
 
-| Aufruf | Richtung |
+| Call | Direction |
 | --- | --- |
-| `POST /ideas/outing/accept` | Vorschlag → **neue eintägige Reise** |
-| `GET /plans/:planId/ideas` | „Ihr habt vier Ideen für Lissabon gesammelt" |
-| `POST /plans/:planId/ideas/take` | Idee → **Etappenvorrat** dieser Reise |
-| `POST /plans/:planId/pool/to-ideas` | Übriggebliebenes → **zurück** in die Sammlung |
+| `POST /ideas/outing/accept` | proposal → **new one-day trip** |
+| `GET /plans/:planId/ideas` | "You have collected four ideas for Lisbon" |
+| `POST /plans/:planId/ideas/take` | idea → **stage pool** of this trip |
+| `POST /plans/:planId/pool/to-ideas` | leftovers → **back** into the collection |
 
-Beim Anlegen einer Reise wird die Sammlung **nicht** automatisch als
-Kandidatenquelle benutzt — eine Idee vom letzten Jahr ist nicht automatisch der
-Wunsch dieser Reise (§20.3). Damit sie trotzdem nicht unsichtbar bleibt, sagt
-der Tagesbildschirm der App einmal den Satz aus dem Konzept: „Ihr habt vier
-Ideen für Lissabon gesammelt." Die Zeile führt zu „Aus den Ideen übernehmen",
-wo entschieden wird; „Später" lässt genau diese Anzahl still, eine weitere
-gesammelte Idee fragt erneut. Der Menüpunkt trägt die Anzahl der noch nicht
-übernommenen Ideen.
+When a trip is created, the collection is **not** automatically used as a
+candidate source — an idea from last year is not automatically the
+wish of this trip (§20.3). So that it does not stay invisible nonetheless, the app's
+day screen says the sentence from the concept once: "Ihr habt vier
+Ideen für Lissabon gesammelt." (you have collected four ideas for Lisbon). The line leads to "Aus den Ideen übernehmen" (take over from the ideas),
+where the decision is made; "Später" (later) silences exactly this count, one more
+collected idea asks again. The menu item carries the number of ideas not yet
+taken over.
 
-**Angenommener Ausflug.** Eine ganz normale eintägige Reise mit einer Etappe
-und einem Block. Der Tag wird bewusst erst ausgeplant, **nachdem** die
-angenommenen Ideen im Vorrat liegen — sonst plante er sich aus der
-Regionssuche und die Ideen kämen hinterher. Die Antwort nennt getrennt, was
-auf dem Tag landete (`planned`) und was im Vorrat blieb (`inPool`).
+**Accepted outing.** A perfectly normal one-day trip with one stage
+and one block. The day is deliberately only planned out **after** the
+accepted ideas are in the pool — otherwise it would plan itself from the
+region search and the ideas would come afterwards. The response states separately what
+ended up on the day (`planned`) and what stayed in the pool (`inPool`).
 
-**Beim Anlegen einer Reise** wird angeboten, was in einer ihrer Etappen liegt —
-sortiert nach Etappe und Entfernung, mit „wer hat's gemerkt". **Übernommen
-wird nichts von selbst:** Eine Idee vom letzten Jahr ist nicht automatisch der
-Wunsch dieser Reise. Was schon in der Reise ist, wird markiert
-(`alreadyInTrip`) statt versteckt — dass es da ist, ist die Antwort auf
-dieselbe Frage.
+**When creating a trip**, what lies in one of its stages is offered —
+sorted by stage and distance, with "who saved it". **Nothing is taken over
+automatically:** an idea from last year is not automatically the
+wish of this trip. What is already in the trip is marked
+(`alreadyInTrip`) rather than hidden — that it is there is the answer to
+the same question.
 
-**Zurück in den Vorrat** schiebt, was auf der Reise niemand gesehen hat.
-„Beim nächsten Mal" ist die ehrlichste Ablage für einen Spot, der es nicht in
-den Plan geschafft hat. Schon Gesammeltes ist dabei kein Fehler, sondern wird
-gezählt und gemeldet (`alreadyThere`).
+**Back into the pool** pushes what nobody saw on the trip.
+"Next time" is the most honest place to file a spot that did not make it into
+the plan. Things already collected are not an error here, but are
+counted and reported (`alreadyThere`).
 
-**In allen drei Richtungen bleibt die Idee stehen** — sie ist nicht
-verbraucht, nur benutzt.
+**In all three directions the idea stays in place** — it is not
+used up, only used.
 
-## 5. Ein Detail, das Ärger macht, wenn man es übersieht
+## 5. A detail that causes trouble if overlooked
 
-Ein Ort, den die Karte nicht kennt, bekommt als Fund eine **neue**
-`manual:`-Referenz. Die eigene Referenz der Idee taugt danach nicht mehr zum
-Wiedererkennen. „Schon in der Reise" wird deshalb über dieselben **80 Meter**
-entschieden, mit denen `finds.ts` zwei Einträge denselben Ort nennt — eine
-andere Zahl hier ließe denselben Biergarten gleichzeitig „schon dabei" und
-„Dublette" sein.
+A place the map does not know gets a **new**
+`manual:` reference as a find. The idea's own reference then no longer serves for
+recognition. "Already in the trip" is therefore decided via the same **80 meters**
+with which `finds.ts` calls two entries the same place — a
+different number here would let the same beer garden be "already included" and
+"duplicate" at the same time.
 
-## 6. Was fehlt
+## 6. What is missing
 
-- **Zwei Wege hinein**: Artikel und Suche. Beide brauchen die Regionssuche
-  bzw. das Sprachmodell und hängen deshalb an einer Reise (§9.3) — im Vorrat
-  ohne Reise wären sie ein Versprechen auf eine Lesart, die hier niemand
-  leisten kann. Alles Übrige aus §20 steht.
-- **Veranstaltungen** (§20.4) — vorerst nicht gebaut, weil es keine Quelle
-  gibt, die den Anspruch aushält. Die Spalten (`valid_from`, `valid_to`) und
-  die Filterung abgelaufener Einträge stehen; ein Termin ist dann ein
-  gewöhnlicher Eintrag mit Gültigkeitsfenster, und Nähe, Ausflug und Übernahme
-  gelten unverändert.
+- **Two ways in**: article and search. Both need the region search
+  or the language model and therefore hang off a trip (§9.3) — in the pool
+  without a trip they would be a promise of a reading that nobody here can
+  deliver. Everything else from §20 is in place.
+- **Events** (§20.4) — not built for now, because there is no source
+  that holds up to the claim. The columns (`valid_from`, `valid_to`) and
+  the filtering of expired entries are in place; an event is then an
+  ordinary entry with a validity window, and proximity, outing and takeover
+  apply unchanged.
 
-## 7. Wo der Code liegt
+## 7. Where the code lives
 
-| Datei | Inhalt |
+| File | Content |
 | --- | --- |
-| `trip-planner/ideas.ts` | Sammlung: anlegen, lesen, entfernen, teilen |
-| `trip-planner/outing.ts` | Nähe, „nicht jetzt", Ausflugsvorschlag |
-| `trip-planner/ideas-trip.ts` | die drei Wege zwischen Vorrat und Reise |
+| `trip-planner/ideas.ts` | Collection: create, read, remove, share |
+| `trip-planner/outing.ts` | Proximity, "not now", outing proposal |
+| `trip-planner/ideas-trip.ts` | the three paths between pool and trip |
 | `db/migrations/postgres/0179_idea_pool.sql` | `idea_pool`, `idea_pool_shares` |
 | `trip-planner/ideas.test.ts`, `outing.test.ts`, `ideas-trip.test.ts` | Tests |
-| `ios/Sources/FKPhotos/Features/TripPlanner/TripIdea*.swift` | Liste, Modelle, ViewModel, Suche (`TripIdeaSearch`) |
+| `ios/Sources/FKPhotos/Features/TripPlanner/TripIdea*.swift` | List, models, view model, search (`TripIdeaSearch`) |
