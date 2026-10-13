@@ -1,7 +1,9 @@
 /**
  * News about the securities the depots hold.
  *
- * A news provider (`quote-provider.ts`) is optional and may be metered:
+ * News providers (`quote-provider.ts`) are optional and asked in turn,
+ * each with its own symbol and "last asked" per security: EODHD first,
+ * Yahoo's free RSS feed after it. A provider may be metered:
  * EODHD's free plan allows 20 calls a day and a news request costs five.
  * `refreshNews` therefore spends a daily budget, equities only (funds and
  * ETFs rarely get news worth the calls), the securities longest unasked
@@ -27,7 +29,7 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { visibleDepots } from "./portfolio";
 import { activePositions, type ActivePosition } from "./quotes";
-import { QuoteRateLimitedError, newsProvider, type NewsItem } from "./quote-provider";
+import { QuoteRateLimitedError, newsProviders, type NewsItem, type NewsProvider } from "./quote-provider";
 
 console.log("[boot] finance/news.ts: all imports resolved");
 
@@ -85,75 +87,147 @@ export interface NewsStats {
 }
 
 /**
- * Fetch news for the held equities until today's budget is spent. A
- * security whose type the quote provider did not say is resolved with the
- * news provider, whose answer then decides.
+ * Fetch news for the held equities, from every installed news provider
+ * in turn, until each one's daily budget is spent. A security whose type
+ * the quote provider did not say is resolved with the news provider,
+ * whose answer then decides.
  */
 export async function refreshNews(positions: ActivePosition[], now = new Date()): Promise<NewsStats> {
   const stats: NewsStats = { candidates: 0, asked: 0, resolved: 0, skipped_not_equity: 0, items: 0, budget_spent: false, rate_limited: false, errors: [] };
-  const provider = newsProvider();
-  if (!provider || positions.length === 0) return stats;
-  const metering = provider.metering;
-  const pay = (cost: number) => (metering ? charge(provider.name, cost, metering.dailyCalls, now) : Promise.resolve(true));
+  const providers = newsProviders();
+  if (providers.length === 0 || positions.length === 0) return stats;
 
   const keys = positions.map((p) => p.key);
-  const types = new Map(
+  const quoteSymbols = new Map(
     (await db
-      .select({ key: financeQuoteSymbol.position_key, type: financeQuoteSymbol.security_type })
+      .select({
+        key: financeQuoteSymbol.position_key,
+        type: financeQuoteSymbol.security_type,
+        symbol: financeQuoteSymbol.symbol,
+        provider: financeQuoteSymbol.provider,
+      })
       .from(financeQuoteSymbol)
-      .where(inArray(financeQuoteSymbol.position_key, keys))).map((r) => [r.key, r.type]),
+      .where(inArray(financeQuoteSymbol.position_key, keys))).map((r) => [r.key, r]),
   );
-  const sources = new Map(
-    (await db.select().from(financeNewsSource).where(inArray(financeNewsSource.position_key, keys))).map((r) => [r.position_key, r]),
-  );
+  // One source row per position and provider; updated here as the run goes,
+  // so a provider later in the list sees the symbols an earlier one found.
+  const sources = new Map<string, NewsSourceRow>();
+  for (const r of await db.select().from(financeNewsSource).where(inArray(financeNewsSource.position_key, keys))) {
+    sources.set(sourceKey(r.position_key, r.provider), r);
+  }
+
+  for (const provider of providers) {
+    await refreshFromProvider(provider, positions, quoteSymbols, sources, stats, now);
+  }
+
+  await pruneNews(now);
+  return stats;
+}
+
+type NewsSourceRow = typeof financeNewsSource.$inferSelect;
+type QuoteSymbolRow = { type: string | null; symbol: string | null; provider: string };
+
+function sourceKey(position: string, provider: string): string {
+  return `${position}\u0000${provider}`;
+}
+
+/** What the other providers call the security: the base for `symbolFromKnown`. */
+function knownSymbols(
+  key: string,
+  provider: string,
+  quote: QuoteSymbolRow | undefined,
+  sources: Map<string, NewsSourceRow>,
+): Array<{ provider: string; symbol: string }> {
+  const known: Array<{ provider: string; symbol: string }> = [];
+  for (const s of sources.values()) {
+    if (s.position_key === key && s.provider !== provider && s.symbol) known.push({ provider: s.provider, symbol: s.symbol });
+  }
+  if (quote?.symbol) known.push({ provider: quote.provider, symbol: quote.symbol });
+  return known;
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function refreshFromProvider(
+  provider: NewsProvider,
+  positions: ActivePosition[],
+  quoteSymbols: Map<string, QuoteSymbolRow>,
+  sources: Map<string, NewsSourceRow>,
+  stats: NewsStats,
+  now: Date,
+): Promise<void> {
+  const metering = provider.metering;
+  const pay = (cost: number) => (metering ? charge(provider.name, cost, metering.dailyCalls, now) : Promise.resolve(true));
+  const source = (key: string) => sources.get(sourceKey(key, provider.name));
+  const derive = (key: string) =>
+    provider.symbolFromKnown?.(knownSymbols(key, provider.name, quoteSymbols.get(key), sources)) ?? null;
 
   // Equities, and the ones whose type nobody knows yet; longest unasked first.
   const candidates = positions
     .filter((p) => {
-      const t = types.get(p.key);
+      const t = quoteSymbols.get(p.key)?.type;
       return t === "equity" || t === null || t === undefined;
     })
     .filter((p) => {
-      const s = sources.get(p.key);
-      if (!s || s.provider !== provider.name) return true;
-      if (!s.symbol) return !!s.failed_at && now.getTime() - Date.parse(s.failed_at) >= RESOLVE_RETRY_MS;
+      const s = source(p.key);
+      if (!s) return true;
+      if (!s.symbol) {
+        if (derive(p.key)) return true;
+        return !!s.failed_at && now.getTime() - Date.parse(s.failed_at) >= RESOLVE_RETRY_MS;
+      }
       return !s.checked_at || now.getTime() - Date.parse(s.checked_at) >= RECHECK_MS;
     })
     .sort((a, b) => {
-      const ca = sources.get(a.key)?.checked_at ?? "";
-      const cb = sources.get(b.key)?.checked_at ?? "";
+      const ca = source(a.key)?.checked_at ?? "";
+      const cb = source(b.key)?.checked_at ?? "";
       return ca.localeCompare(cb) || a.key.localeCompare(b.key);
     });
-  stats.candidates = candidates.length;
+  stats.candidates += candidates.length;
+
+  let requests = 0;
+  const politely = async <T>(call: () => Promise<T>): Promise<T> => {
+    if (requests++ > 0 && provider.pauseMs) await pause(provider.pauseMs);
+    return call();
+  };
+  // The search refused: the rest of the run sticks to what it can derive.
+  let resolveRefused = false;
 
   for (const p of candidates) {
     try {
-      let source = sources.get(p.key);
-      if (!source || source.provider !== provider.name || !source.symbol) {
-        if (!(await pay(metering?.resolve ?? 0))) {
-          stats.budget_spent = true;
-          break;
+      let current = source(p.key);
+      if (!current?.symbol) {
+        const derived = derive(p.key);
+        let symbol: string | null = derived;
+        let notEquity = false;
+        if (!derived) {
+          if (resolveRefused) continue;
+          if (!(await pay(metering?.resolve ?? 0))) {
+            stats.budget_spent = true;
+            break;
+          }
+          const found = await politely(() => provider.resolve({ isin: p.isin, wkn: p.wkn, name: p.name }));
+          notEquity = !!found?.securityType && found.securityType !== "equity";
+          symbol = found && !notEquity ? found.symbol : null;
         }
-        const found = await provider.resolve({ isin: p.isin, wkn: p.wkn, name: p.name });
-        const notEquity = found?.securityType && found.securityType !== "equity";
         const values = {
           position_key: p.key,
           provider: provider.name,
-          symbol: found && !notEquity ? found.symbol : null,
-          resolved_at: found && !notEquity ? now.toISOString() : null,
-          failed_at: found && !notEquity ? null : now.toISOString(),
-          checked_at: source?.provider === provider.name ? source.checked_at : null,
+          symbol,
+          resolved_at: symbol ? now.toISOString() : null,
+          failed_at: symbol ? null : now.toISOString(),
+          checked_at: current?.checked_at ?? null,
         };
-        [source] = await db
+        [current] = await db
           .insert(financeNewsSource)
           .values(values)
-          .onConflictDoUpdate({ target: financeNewsSource.position_key, set: values })
+          .onConflictDoUpdate({ target: [financeNewsSource.position_key, financeNewsSource.provider], set: values })
           .returning();
+        sources.set(sourceKey(p.key, provider.name), current!);
         if (notEquity) {
           stats.skipped_not_equity++;
           continue;
         }
-        if (!found) continue;
+        if (!symbol) continue;
         stats.resolved++;
       }
 
@@ -161,27 +235,36 @@ export async function refreshNews(positions: ActivePosition[], now = new Date())
         stats.budget_spent = true;
         break;
       }
-      const since = source!.checked_at
-        ? new Date(Date.parse(source!.checked_at) - 60 * 60_000)
+      const since = current!.checked_at
+        ? new Date(Date.parse(current!.checked_at) - 60 * 60_000)
         : new Date(now.getTime() - FIRST_FETCH_DAYS * 24 * 60 * 60_000);
-      const items = await provider.news(source!.symbol!, since);
+      const items = await politely(() => provider.news(current!.symbol!, since));
       stats.asked++;
       stats.items += await storeNews(p.key, provider.name, items);
-      await db.update(financeNewsSource).set({ checked_at: now.toISOString() }).where(eq(financeNewsSource.position_key, p.key));
+      const checkedAt = now.toISOString();
+      await db
+        .update(financeNewsSource)
+        .set({ checked_at: checkedAt })
+        .where(and(eq(financeNewsSource.position_key, p.key), eq(financeNewsSource.provider, provider.name)));
+      sources.set(sourceKey(p.key, provider.name), { ...current!, checked_at: checkedAt });
     } catch (err) {
       if (err instanceof QuoteRateLimitedError) {
         stats.rate_limited = true;
-        log.warn("news provider refused; ending the run", { provider: provider.name, position: p.key });
+        if (!source(p.key)?.symbol && !derive(p.key)) {
+          // Refused while looking the symbol up: go on with the securities
+          // whose symbol is known, without asking the search again.
+          resolveRefused = true;
+          log.warn("news provider refused the search; going on without it", { provider: provider.name, position: p.key });
+          continue;
+        }
+        log.warn("news provider refused; ending its run", { provider: provider.name, position: p.key });
         break;
       }
       const message = (err as Error).message ?? String(err);
-      stats.errors.push(`${p.key}: ${message}`);
-      log.warn("news refresh failed for a position", { position: p.key, err: message });
+      stats.errors.push(`${provider.name} ${p.key}: ${message}`);
+      log.warn("news refresh failed for a position", { provider: provider.name, position: p.key, err: message });
     }
   }
-
-  await pruneNews(now);
-  return stats;
 }
 
 /** Insert the items not stored yet for this security; returns how many were new. */
@@ -233,7 +316,7 @@ interface NewsParams {
 
 interface NewsResponse {
   items: NewsItemOut[];
-  /** When the news of this security were last fetched; null when never. */
+  /** When the news of this security were last fetched, by any provider; null when never. */
   checked_at: string | null;
   /** When the caller last looked at them; null when never. Items newer are new to them. */
   seen_at: string | null;
@@ -275,10 +358,15 @@ export const getPositionNews = api(
       .where(eq(financeQuoteNews.position_key, key))
       .orderBy(desc(financeQuoteNews.at), desc(financeQuoteNews.id))
       .limit(parseLimit(limit));
-    const [source] = await db
+    // Asked by several providers: the latest of their checks.
+    const checks = await db
       .select({ checked_at: financeNewsSource.checked_at })
       .from(financeNewsSource)
       .where(eq(financeNewsSource.position_key, key));
+    const checkedAt = checks
+      .map((c) => (c.checked_at ? Date.parse(c.checked_at) : NaN))
+      .filter(Number.isFinite)
+      .reduce<number | null>((max, t) => (max === null || t > max ? t : max), null);
     const [seen] = await db
       .select({ seen_at: financeNewsSeen.seen_at })
       .from(financeNewsSeen)
@@ -295,7 +383,7 @@ export const getPositionNews = api(
         sentiment: r.sentiment,
         provider: r.provider,
       })),
-      checked_at: source?.checked_at ? iso(source.checked_at) : null,
+      checked_at: checkedAt === null ? null : new Date(checkedAt).toISOString(),
       seen_at: seen?.seen_at ? iso(seen.seen_at) : null,
     };
   },

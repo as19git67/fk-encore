@@ -2271,14 +2271,19 @@ export const financeQuoteSymbol = pgTable("finance_quote_symbol", {
  * it, and when its news were last fetched (the scheduler asks the ones
  * longest unasked first).
  */
-export const financeNewsSource = pgTable("finance_news_source", {
-  position_key: text("position_key").primaryKey(),
-  provider: text("provider").notNull(),
-  symbol: text("symbol"),
-  resolved_at: timestamp("resolved_at", { mode: "string", withTimezone: true }),
-  failed_at: timestamp("failed_at", { mode: "string", withTimezone: true }),
-  checked_at: timestamp("checked_at", { mode: "string", withTimezone: true }),
-});
+export const financeNewsSource = pgTable(
+  "finance_news_source",
+  {
+    position_key: text("position_key").notNull(),
+    provider: text("provider").notNull(),
+    symbol: text("symbol"),
+    resolved_at: timestamp("resolved_at", { mode: "string", withTimezone: true }),
+    failed_at: timestamp("failed_at", { mode: "string", withTimezone: true }),
+    checked_at: timestamp("checked_at", { mode: "string", withTimezone: true }),
+  },
+  // One row per security and news provider (migration 0240).
+  (table) => [primaryKey({ columns: [table.position_key, table.provider] })],
+);
 
 /** News about the held securities, kept 90 days. */
 export const financeQuoteNews = pgTable(

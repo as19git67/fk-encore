@@ -1681,6 +1681,13 @@
       "when": 1788652800059,
       "tag": "0239_finance_document_paper_llm",
       "breakpoints": true
+    },
+    {
+      "idx": 240,
+      "version": "7",
+      "when": 1788652800060,
+      "tag": "0240_finance_news_source_per_provider",
+      "breakpoints": true
     }
   ]
 }
