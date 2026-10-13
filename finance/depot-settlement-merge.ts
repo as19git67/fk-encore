@@ -13,10 +13,11 @@
  *                        taken as they are; where they disagree, each
  *                        field goes to whichever source makes the figures
  *                        add up — the quantity may come from one and the
- *                        charges from the other. When no combination
- *                        adds up and they disagree on something that
- *                        matters, the result is "unverified" — the caller
- *                        books nothing and asks the user.
+ *                        charges from the other — and on a tie to the
+ *                        model. When no combination adds up and they
+ *                        disagree on something that matters, the result is
+ *                        "unverified" — the caller books nothing and asks
+ *                        the user.
  *
  * The rules are exact where they match and blind where a bank changed a
  * label; the model reads any layout but can misplace a digit without a
@@ -314,8 +315,25 @@ function combine(rules: SettlementValues, llm: SettlementValues, fromLlm: Set<Me
 }
 
 /**
+ * Whether the model's value of a field can be found in the text where such
+ * a value stands — the ISIN in the text, the quantity on a line with a
+ * quantity label. False: the model may have taken it from anywhere on the
+ * page (a code on the letterhead). Missing: nothing to say, the value counts
+ * as grounded. Computed by the reader, which has the text.
+ */
+export type Grounding = Partial<Record<MergeField, boolean>>;
+
+/**
  * One reading from the rule-based one and the model's (either may be
  * missing). Without the model, the rules stand as they are.
+ *
+ * The model reads first (documentation/plans/wertpapier-stamm.md, stage 3):
+ * where both readings pass the checks equally, the model's value is taken —
+ * it reads tables off OCR'd, column-split text better than labels do. The
+ * rules keep three things: a field whose model value fails a check the
+ * rules' value passes (the checks decide), the kind of paper (it is what
+ * the rules recognise by the heading), and a field no check reaches whose
+ * model value is not grounded in the text.
  */
 export function mergeSettlement(
   rules: SettlementValues | null,
@@ -327,6 +345,7 @@ export function mergeSettlement(
    * the bank actually booked wins.
    */
   bookingNet: number | null = null,
+  grounding: Grounding = {},
 ): MergeResult {
   const r = rules ?? EMPTY_SETTLEMENT;
   const l = llm ?? EMPTY_SETTLEMENT;
@@ -339,7 +358,11 @@ export function mergeSettlement(
   const disagreeing = MERGE_FIELDS.filter((f) => r[f] !== null && l[f] !== null && !same(f, r[f], l[f]));
   const choices = disagreeing.length <= MAX_COMBINED_FIELDS ? 1 << disagreeing.length : 2;
   let best: { values: SettlementValues; checks: SettlementCheck[]; fromLlm: Set<MergeField> } | null = null;
-  let bestKey: [number, number, number] | null = null;
+  let bestKey: number[] | null = null;
+  const better = (a: number[], b: number[]) => {
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i]! < b[i]!;
+    return false;
+  };
   for (let mask = 0; mask < choices; mask++) {
     // Too many disagreements to try them all: one source or the other, whole.
     const fromLlm = new Set<MergeField>(
@@ -348,14 +371,16 @@ export function mergeSettlement(
     const values = combine(r, l, fromLlm);
     const checks = settlementChecks(values, today, bookingNet);
     const s = score(checks);
-    // Fewer failures wins, then more passes, then fewer values taken from
-    // the model: a tie goes to the rules, which never invent a number. That
-    // last rule also keeps a field no check reaches — the quantity of a
-    // dividend statement without a price per share, say — with the rules:
-    // it was read after a printed label, while the model may have taken a
-    // number from anywhere on the page.
-    const key: [number, number, number] = [s.failed, -s.ok, fromLlm.size];
-    if (!bestKey || key[0] < bestKey[0] || (key[0] === bestKey[0] && (key[1] < bestKey[1] || (key[1] === bestKey[1] && key[2] < bestKey[2])))) {
+    // Fewer failures wins, then more passes. On a tie: the kind stays with
+    // the rules; a model value the text does not show where such a value
+    // stands loses (the quantity of a dividend statement without a price
+    // per share — no check reaches it, and the model may have taken a code
+    // off the letterhead); then the model wins every other field.
+    const kindFromLlm = fromLlm.has("kind") ? 1 : 0;
+    const ungrounded = [...fromLlm].filter((f) => grounding[f] === false).length;
+    const keptFromRules = disagreeing.filter((f) => f !== "kind" && !fromLlm.has(f)).length;
+    const key = [s.failed, -s.ok, kindFromLlm, ungrounded, keptFromRules];
+    if (!bestKey || better(key, bestKey)) {
       best = { values, checks, fromLlm };
       bestKey = key;
     }
@@ -374,6 +399,8 @@ export function mergeSettlement(
     return { field, rules: rv, llm: lv, source, disagree };
   });
 
+  // Unverified only when no combination passes the checks: the best one is
+  // tried first, so a failure or no pass at all here means none did.
   const materialDisagreement = fields.some((f) => f.disagree && MATERIAL_FIELDS.includes(f.field));
   const settled = checks.some((c) => c.result === "ok") && !checks.some((c) => c.result === "failed");
   const verdict: MergeResult["verdict"] = materialDisagreement && !settled ? "unverified" : "ok";

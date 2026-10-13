@@ -1,6 +1,6 @@
 # Securities master, depot statements, model-first reading
 
-Status: stages 1 (#1518) and 2 done; stage 3 next. Follows the portfolio
+Status: stages 1 (#1518), 2 (#1520) and 3 done. Follows the portfolio
 work of #1336 (settlement documents, derivation from bookings, review page).
 
 ## Problem
@@ -112,13 +112,33 @@ The portfolio takes securities from wherever they turn up:
      document holdings and the stored answers, so every statement is read
      again with today's rules.
 
-3. **Model-first reading** (`depot-settlement-merge.ts`, `llm-client.ts`).
-   - `mergeSettlement`: on a tie the model wins; "unverified" only when no
-     combination passes the checks. The rules still win a field whose
-     model value fails a check the rules' value passes.
-   - A second question to the model for papers the rules do not take for
-     a settlement: "which kind of paper, which securities" — used by
-     stage 2 and to send more candidates to the settlement reading.
+3. **Model-first reading** — done (`depot-settlement-merge.ts`,
+   `depot-settlement-reader.ts`, `depot-paper-type.ts`).
+   - `mergeSettlement`: on a tie the model wins. The rules keep a field
+     whose model value fails a check the rules' value passes (the checks
+     still decide first), the kind of paper (the heading the rules
+     recognise decides buy, sell or dividend), and a field whose model value
+     is not grounded in the text. "Unverified" only when no combination
+     passes the checks.
+   - Grounding (`groundingOf` in the reader): the model's ISIN, WKN and
+     depot number must appear in the text, its quantity on a line with a
+     quantity label ("Stück", "Anteile", "Nominale", …), its date as
+     printed. An ungrounded value loses a tie — the letterhead code read as
+     the quantity of a dividend without a price per share stays out. The
+     statement reader drops model positions whose identifier the text does
+     not show.
+   - The name follows the text both ways: the one printed nearer the
+     identifier wins, whichever source read it.
+   - A second question to the model (`classifySecuritiesPaper`, answer kept
+     in `finance_document_paper_llm`, migration 0239): a paper with an
+     identifier and securities wording but no heading the rules know (and
+     not insurance paperwork) is asked "trade, dividend, tax, statement or
+     other?". The answer makes it a candidate of the settlement reader or
+     the statement reader; "other" leaves it alone. The background run asks
+     first, then reads; new documents go through `readDepotPaper`. "Belege
+     neu einlesen" clears the answers. The question asks only for the kind
+     of paper — each reader lists the securities itself, so a second list
+     would only duplicate them.
    - Identifiers the model reads count only against the master (stage 1):
      an ISIN or WKN not confirmed is a proposal, never a booking.
 
@@ -129,6 +149,10 @@ The portfolio takes securities from wherever they turn up:
   deploy, the review page may show proposals for securities sold before
   the first holdings snapshot — one "Aufnehmen" each.
 - The master is per depot: the same ISIN in two depots is two entries.
+- Stage 3 changes which reading stands where rules and model both add up:
+  the model's. "Belege neu einlesen" applies it to papers read before.
+  Papers the rules did not recognise cost one short model question each on
+  the next run (only those with an ISIN or WKN and securities wording).
 - Stage 2 reads statements on the next "Belege einlesen" (the run reads
   them after the settlements). A statement that lists only part of a depot
   (one page of a reporting, a sub-depot) counts as a snapshot day of the

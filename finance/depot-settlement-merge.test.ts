@@ -150,7 +150,7 @@ describe("mergeSettlement", () => {
     expect(l.fields.find((f) => f.field === "gross")!.source).toBe("rules");
   });
 
-  it("keeps the rules' value for a field no check vouches for, even when the model wins on the figures", () => {
+  it("keeps the rules' value for a field no check vouches for when the text does not show the model's", () => {
     // A dividend tax statement: the rules read "Stk. 15" and the credited
     // foreign tax as the tax; the model adds up (gross − tax = net) but took
     // "150" from a code on the letterhead as the quantity. No price per
@@ -171,7 +171,8 @@ describe("mergeSettlement", () => {
       tax: 4.5,
       net: 25.5,
     };
-    const r = mergeSettlement(rules, llm, today);
+    // The reader found "150" on no line with a quantity label.
+    const r = mergeSettlement(rules, llm, today, null, { quantity: false });
     expect(r.verdict).toBe("ok");
     expect(r.values.quantity).toBe(15);
     expect(r.fields.find((f) => f.field === "quantity")).toMatchObject({ source: "rules", disagree: true });
@@ -179,6 +180,26 @@ describe("mergeSettlement", () => {
     expect(r.values.tax).toBe(4.5);
     expect(r.fields.find((f) => f.field === "tax")!.source).toBe("llm");
     expect(r.values.net).toBe(25.5);
+
+    // Shown where a quantity stands, the model's value wins the tie.
+    const grounded = mergeSettlement(rules, llm, today, null, { quantity: true });
+    expect(grounded.values.quantity).toBe(150);
+    expect(grounded.fields.find((f) => f.field === "quantity")!.source).toBe("llm");
+  });
+
+  it("takes the model's value on a tie, but keeps the rules' kind of paper", () => {
+    // Both readings pass every check; they differ only in the date and the WKN.
+    const r = mergeSettlement(buy({ executedAt: "2026-03-13" }), buy({ wkn: "AAA112" }), today);
+    expect(r.verdict).toBe("ok");
+    expect(r.values.executedAt).toBe("2026-03-14");
+    expect(r.values.wkn).toBe("AAA112");
+    expect(r.fields.find((f) => f.field === "executedAt")!.source).toBe("llm");
+
+    // A dividend the model reads as a sale: no check tells them apart, the heading does.
+    const div: SettlementValues = { ...EMPTY_SETTLEMENT, kind: "dividend", isin: VALID_ISIN, gross: 50, tax: 13.18, net: 36.82, executedAt: "2026-05-12" };
+    const k = mergeSettlement(div, { ...div, kind: "sell" }, today);
+    expect(k.values.kind).toBe("dividend");
+    expect(k.fields.find((f) => f.field === "kind")!.source).toBe("rules");
   });
 
   it("lets the booking's net decide between charges the two read differently", () => {
@@ -187,8 +208,10 @@ describe("mergeSettlement", () => {
     const base = buy({ quantity: 10, price: 40, gross: 400, tax: null, net: null, isin: null, wkn: "AAA111" });
     const rules = { ...base, fees: 16.5 };
     const llm = { ...base, fees: 7.5 };
+    // Without the booking both add up alike: the model's reading stands.
     const blind = mergeSettlement(rules, llm, today);
-    expect(blind.values.fees).toBe(16.5);
+    expect(blind.values.fees).toBe(7.5);
+    // With it, the booking confirms that reading.
     const decided = mergeSettlement(rules, llm, today, -407.5);
     expect(decided.values.fees).toBe(7.5);
     expect(decided.values.net).toBe(-407.5);

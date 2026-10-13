@@ -39,6 +39,7 @@ import {
   findDepotByNumber,
   isIgnoredForDepots,
 } from "./depot-document-enrichment";
+import { storedPaperType } from "./depot-paper-type";
 import { admitSecurity, findSecurity, type SecurityStatus } from "./depot-securities";
 import { STRONG_SETTLEMENT_PATTERN } from "./depot-settlement-parser";
 import type { LlmMode, LlmStatus } from "./depot-settlement-reader";
@@ -52,6 +53,8 @@ import {
   type StatementInspection,
 } from "./depot-statement-parser";
 import { extractStatementPositions, LlmServiceUnavailableError } from "./llm-client";
+import { documentsOfPaperType, paperTypeOf } from "./depot-paper-type";
+import { enrichDocument } from "./depot-document-enrichment";
 
 console.log("[boot] finance/depot-statement-enrichment.ts: all imports resolved");
 
@@ -179,6 +182,20 @@ async function readStatement(documentId: number, rules: StatementInspection, tex
       }
     }
   }
+  // Positions only count with an identifier the text shows: the model reads, the text checks.
+  if (llm) {
+    const compact = text.toUpperCase().replace(/\s+/g, "");
+    llm = {
+      ...llm,
+      positions: llm.positions
+        .map((p) => ({
+          ...p,
+          isin: p.isin && compact.includes(p.isin) ? p.isin : null,
+          wkn: p.wkn && compact.includes(p.wkn) ? p.wkn : null,
+        }))
+        .filter((p) => p.isin || p.wkn),
+    };
+  }
   return { rules, llm, llmStatus };
 }
 
@@ -258,7 +275,9 @@ export async function readDepotStatement(
   }
 
   const rules = inspectDepotStatement(doc.extracted_text);
-  if (!rules || !rules.statement) return result;
+  if (!rules) return result;
+  // No heading the rules know: a statement only when the model said so (stage 3).
+  if (!rules.statement && (await storedPaperType(documentId)) !== "statement") return result;
 
   const reading = await readStatement(documentId, rules, doc.extracted_text, options.llm ?? (dryRun ? "cache-only" : "allow"));
   result.llm_status = reading.llmStatus;
@@ -358,6 +377,24 @@ export async function readDepotStatement(
   return result;
 }
 
+/**
+ * A document that was just classified, read for the depots: the model is
+ * asked which kind of paper it is when the rules do not recognise its
+ * wording, then the settlement reader and the statement reader each take
+ * what is theirs. Each step is a no-op for a paper that is not its kind.
+ */
+export async function readDepotPaper(documentId: number): Promise<void> {
+  const [doc] = await db
+    .select({ status: documents.status, extracted_text: documents.extracted_text })
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .limit(1);
+  if (!doc || doc.status !== "ready") return;
+  await paperTypeOf(documentId, doc.extracted_text);
+  await enrichDocument(documentId);
+  await readDepotStatement(documentId);
+}
+
 const STATEMENT_PATTERN = `(${STATEMENT_CANDIDATE_PATTERN})`;
 const STRONG_PATTERN = `(${STRONG_SETTLEMENT_PATTERN})`;
 
@@ -391,8 +428,11 @@ export async function enrichPendingStatements(
   const conditions = [
     eq(documents.status, "ready"),
     isNotNull(documents.extracted_text),
-    sql`${documents.extracted_text} ~* ${STATEMENT_PATTERN}`,
-    sql`${documents.extracted_text} !~* ${STRONG_PATTERN}`,
+    or(
+      and(sql`${documents.extracted_text} ~* ${STATEMENT_PATTERN}`, sql`${documents.extracted_text} !~* ${STRONG_PATTERN}`),
+      // Worded unlike anything the rules know, but the model took it for a statement.
+      inArray(documents.id, documentsOfPaperType(["statement"])),
+    )!,
     notInArray(documents.id, stored),
   ];
   if (!(options.includeIgnored && options.dryRun)) conditions.push(notInArray(documents.id, ignored));

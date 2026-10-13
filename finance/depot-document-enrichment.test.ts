@@ -763,7 +763,7 @@ Datum 15.01.2026`);
     expect(await depotRows(depot)).toHaveLength(2);
   });
 
-  it("enriches the booking with the reading that adds up to it when rules and model read different fees", async () => {
+  it("enriches the booking with the model's fees when rules and model read different fees that both add up", async () => {
     const { depot } = await setup();
     await db.insert(financeDepotTransaction).values({
       account_id: depot,
@@ -781,13 +781,38 @@ Datum 15.01.2026`);
     const docId = await insertDocument(text);
     const r = await enrichDocument(docId);
     expect(r.outcome).toBe("enriched");
-    expect(r.checked_against_booking).toBe(true);
+    // The model reads first: its fees win the tie, and the booking's net agrees
+    // without being asked to decide.
+    expect(r.checked_against_booking).toBe(false);
     expect(r.statement_net).toBe("-2966.40");
     const [row] = await depotRows(depot);
     expect(row!.fees).toBe("6.40");
     const i = await inspectSettlementDocument({ documentId: docId });
     expect(i.fields.fees).toBe("6.40");
     expect(i.checks.find((c) => c.name === "booking_net")!.result).toBe("ok");
+  });
+
+  it("lets the booking's net overrule the model when its fees win the tie but do not add up to what was booked", async () => {
+    const { depot } = await setup();
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: ISIN_A,
+      kind: "buy",
+      executed_at: "2026-03-16",
+      net_amount: "-2966.40",
+      currency: "EUR",
+      source: "giro-derived",
+      dedupe_hash: "giro:1",
+    });
+    // No final amount printed; the model counts a boilerplate fee line the rules leave out.
+    const text = BUY_TEXT.replace("Ausmachender Betrag 2.966,40 EUR", "");
+    vi.mocked(extractSettlementValues).mockResolvedValue({ ...llmAnswer, fees: 15, net: null });
+    const docId = await insertDocument(text);
+    const r = await enrichDocument(docId);
+    expect(r.outcome).toBe("enriched");
+    expect(r.checked_against_booking).toBe(true);
+    const [row] = await depotRows(depot);
+    expect(row!.fees).toBe("6.40");
   });
 
   it("stops starting documents when the time budget is spent and says where to go on", async () => {

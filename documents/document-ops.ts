@@ -41,8 +41,7 @@ import {
 import { deleteJobsForDocument, hasAnyJob, hasUnfinishedJob } from "./scan-queue";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import { onDocumentClassified as linkForecastStatements } from "../finance/forecast-statements.service";
-import { enrichDocument as enrichDepotTransactionFromDocument } from "../finance/depot-document-enrichment";
-import { readDepotStatement } from "../finance/depot-statement-enrichment";
+import { readDepotPaper } from "../finance/depot-statement-enrichment";
 import {
   assertPathUnderDocumentsRoot,
 } from "./documents.service";
@@ -1001,10 +1000,10 @@ export async function runClassify(documentId: number): Promise<{ classification:
   void checkReceiptEnrichment(documentId).catch(err => console.error(`[documents] receipt enrichment check failed for document=${documentId}:`, err));
   // A statement for a contract in the retirement forecast (#1343): link and read it.
   void linkForecastStatements(documentId).catch(err => console.error(`[documents] forecast statement linking failed for document=${documentId}:`, err));
-  // A Wertpapierabrechnung or dividend statement (#1336): create or enrich the depot transaction.
-  void enrichDepotTransactionFromDocument(documentId).catch(err => console.error(`[documents] depot settlement enrichment failed for document=${documentId}:`, err));
-  // A depot statement or reporting: its positions become a holdings snapshot of the depot.
-  void readDepotStatement(documentId).catch(err => console.error(`[documents] depot statement reading failed for document=${documentId}:`, err));
+  // A securities paper (#1336): a settlement creates or enriches a depot
+  // transaction, a depot statement becomes a holdings snapshot; the model is
+  // asked about papers whose wording the rules do not recognise.
+  void readDepotPaper(documentId).catch(err => console.error(`[documents] depot paper reading failed for document=${documentId}:`, err));
 
   // Report the category the document actually carries now: the fresh guess
   // when applied, or the pinned existing one when the category is protected.

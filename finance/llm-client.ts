@@ -769,6 +769,43 @@ export async function extractSettlementValues(
 }
 
 // -----------------------------------------------------------------------
+// /json-prompt (portfolio — which kind of securities paper is this?)
+// -----------------------------------------------------------------------
+
+/** The first page says what a paper is; a short excerpt keeps the question cheap. */
+const PAPER_TYPE_TEXT_LIMIT = 4_000;
+
+/**
+ * Asks the model which kind of paper a document is, for papers with a
+ * security identifier whose wording the rules do not recognise. Returns
+ * the raw JSON object; depot-paper-type.ts validates it.
+ */
+export async function classifySecuritiesPaper(text: string): Promise<Record<string, unknown>> {
+  const system =
+    "Du ordnest Belege deutscher Banken, Broker, Fondsgesellschaften und Versicherer ein. " +
+    "Antworte ausschließlich mit einem JSON-Objekt.";
+  const prompt =
+    "Gib ein JSON-Objekt mit genau diesem Schlüssel zurück:\n" +
+    '- "paper_type": eine der folgenden Angaben\n' +
+    '    "trade" — Abrechnung eines Kaufs oder Verkaufs von Wertpapieren (auch Sparplan-Ausführung, Zeichnung, Rücknahme von Fondsanteilen)\n' +
+    '    "dividend" — Gutschrift einer Dividende, Ausschüttung oder eines Ertrags\n' +
+    '    "tax" — Thesaurierung oder Vorabpauschale, bei der nur Steuer belastet wird\n' +
+    '    "statement" — Depotauszug, Depotbestand, Vermögensübersicht oder Reporting mit einer Liste der gehaltenen Wertpapiere zu einem Stichtag\n' +
+    '    "other" — alles andere: Kostenausweis, Kontoauszug, Steuerbescheinigung, Versicherungsmitteilung, Werbung, Vertragsunterlagen\n\n' +
+    `Text des Belegs:\n"""\n${text.slice(0, PAPER_TYPE_TEXT_LIMIT)}\n"""`;
+  const resp = await postJson<JsonPromptRequest, Record<string, unknown>>("/json-prompt", {
+    prompt,
+    system,
+    temperature: 0,
+    max_tokens: 60,
+  });
+  if (!resp || typeof resp !== "object") {
+    throw new LlmServiceUnavailableError("/json-prompt returned no object for the paper type");
+  }
+  return resp;
+}
+
+// -----------------------------------------------------------------------
 // /json-prompt (portfolio — positions from a depot statement or reporting)
 // -----------------------------------------------------------------------
 
