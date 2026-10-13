@@ -526,6 +526,7 @@ async function reportRun(run: EnrichRun) {
   if (r.skipped_no_holding > 0) parts.push(`${r.skipped_no_holding} ohne passendes Depot`)
   if (r.skipped_no_transaction > 0) parts.push(`${r.skipped_no_transaction} Steuermitteilungen ohne passende Transaktion`)
   if ((r.skipped_unknown_security ?? 0) > 0) parts.push(`${r.skipped_unknown_security} zu Wertpapieren, die unter „Zu prüfen“ auf dich warten`)
+  if ((r.papers_recognized ?? 0) > 0) parts.push(`${r.papers_recognized} weitere Belege vom KI-Modell als Wertpapierbelege erkannt`)
   const statements = r.statements_stored ?? 0
   if (statements > 0) parts.push(`${statements} Depotauszüge als Bestand übernommen`)
   if ((r.statements_unplaced ?? 0) > 0) parts.push(`${r.statements_unplaced} Depotauszüge ohne Depot — bitte prüfen`)

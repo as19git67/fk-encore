@@ -14,11 +14,21 @@ vi.mock("./llm-client", async (importOriginal) => {
     extractStatementPositions: vi.fn(async () => {
       throw new orig.LlmServiceUnavailableError("not in tests");
     }),
+    classifySecuritiesPaper: vi.fn(async () => {
+      throw new orig.LlmServiceUnavailableError("not in tests");
+    }),
   };
 });
 
 import db from "../db/database";
-import { extractStatementPositions, LlmServiceUnavailableError } from "./llm-client";
+import {
+  classifySecuritiesPaper,
+  extractSettlementValues,
+  extractStatementPositions,
+  LlmServiceUnavailableError,
+} from "./llm-client";
+import { classifyPendingPapers, storedPaperType } from "./depot-paper-type";
+import { enrichPendingDocuments } from "./depot-document-enrichment";
 import {
   documents,
   financeAccount,
@@ -109,10 +119,12 @@ beforeEach(async () => {
   await db.delete(users);
   await ensureUser(1);
   resetDocumentEnrichRuns();
-  vi.mocked(extractStatementPositions).mockReset();
-  vi.mocked(extractStatementPositions).mockImplementation(async () => {
-    throw new LlmServiceUnavailableError("not in tests");
-  });
+  for (const fn of [extractStatementPositions, classifySecuritiesPaper, extractSettlementValues]) {
+    vi.mocked(fn).mockReset();
+    vi.mocked(fn).mockImplementation(async () => {
+      throw new LlmServiceUnavailableError("not in tests");
+    });
+  }
   setAuth("1", ["finance.view", "finance.admin"]);
 });
 
@@ -367,6 +379,60 @@ Alpha Industries AG ${ISIN_A}
     expect(run!.status).toBe("done");
     expect(run!.totals.statements_stored).toBe(1);
     expect(run!.totals.statements_unplaced).toBe(1);
+  });
+
+  it("asks the model once about a paper the rules do not recognise and reads it as the kind it names", async () => {
+    const { depot } = await setup();
+    // No heading the rules know: neither "Depotauszug" nor "Wertpapierabrechnung".
+    const overview = await insertDocument(`Beispielbank AG
+Übersicht Ihrer Anlagen zum Stichtag
+Stand: 30.09.2025
+Depot ${DEPOT_NUMBER}
+Alpha Industries AG ISIN ${ISIN_A}
+Anteile 15 Kurs 100,00 EUR Kurswert 1.500,00 EUR`);
+    const order = await insertDocument(`Beispielbank AG
+Ihre Order wurde ausgeführt
+Alpha Industries AG ISIN ${ISIN_A}
+Anteile 5 zu 112,00 EUR
+Belastung 565,00 EUR`);
+    const letter = await insertDocument(`Beispielbank AG
+Information zu Ihrem Fonds Alpha Industries AG ISIN ${ISIN_A}
+Wir informieren Sie über die neue Anteilklasse.`);
+    vi.mocked(classifySecuritiesPaper).mockImplementation(async (text: string) => ({
+      paper_type: text.includes("Übersicht") ? "statement" : text.includes("Order") ? "trade" : "other",
+    }));
+
+    const stats = await classifyPendingPapers();
+    expect(stats).toMatchObject({ documents_examined: 3, statements: 1, settlements: 1, other: 1, unanswered: 0 });
+    expect(await storedPaperType(overview)).toBe("statement");
+    expect(await storedPaperType(letter)).toBe("other");
+    // Asked once: a second run finds nothing left to ask.
+    expect((await classifyPendingPapers()).documents_examined).toBe(0);
+    expect(classifySecuritiesPaper).toHaveBeenCalledTimes(3);
+
+    // The statement reader takes the overview.
+    const statements = await enrichPendingStatements([depot]);
+    expect(statements.results.map((r) => r.document_id)).toEqual([overview]);
+    expect(statements.stored).toBe(1);
+    const rows = await holdingsOf(depot);
+    expect(rows.find((h) => h.document_id === overview)).toMatchObject({ isin: ISIN_A, source: "document" });
+
+    // The settlement reader takes the order confirmation — and only it.
+    vi.mocked(extractSettlementValues).mockResolvedValueOnce({
+      is_settlement: true,
+      kind: "buy",
+      isin: ISIN_A,
+      executed_at: "2026-01-15",
+      quantity: 5,
+      price: 112,
+      gross: 560,
+      fees: 5,
+      net: 565,
+      currency: "EUR",
+    });
+    const settlements = await enrichPendingDocuments([depot]);
+    expect(settlements.results.map((r) => r.document_id)).toEqual([order]);
+    expect(settlements.created).toBe(1);
   });
 
   it("'read again' removes what statements wrote and clears their model answers", async () => {

@@ -48,6 +48,7 @@ import {
 } from "./depot-settlement-parser";
 import type { SettlementValues } from "./depot-settlement-merge";
 import { admitSecurity } from "./depot-securities";
+import { documentsOfPaperType, SETTLEMENT_PAPER_TYPES } from "./depot-paper-type";
 import {
   readSettlement,
   rereadAgainstBooking,
@@ -1096,6 +1097,8 @@ export async function enrichPendingDocuments(
         sql`NOT (${documents.extracted_text} ~* ${INSURANCE_ONLY_PATTERN} AND ${documents.extracted_text} !~* ${STRONG_PATTERN})`,
       ),
       inArray(documents.id, onBooking),
+      // Worded unlike anything the rules know, but the model took it for a settlement.
+      inArray(documents.id, documentsOfPaperType(SETTLEMENT_PAPER_TYPES)),
     )!,
     notInArray(documents.id, linked),
   ];

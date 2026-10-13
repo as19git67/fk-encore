@@ -23,6 +23,7 @@ import { extractIsin, extractWkn } from "./depot-derivation";
 import {
   inspectSettlement,
   paperTypeOf,
+  parseGermanNumber,
   settlementBlock,
   type ExchangeRate,
   type SettlementInspection,
@@ -31,6 +32,7 @@ import {
   mergeSettlement,
   parseLlmPaperVerdict,
   parseLlmSettlement,
+  type Grounding,
   type MergeResult,
   type SettlementValues,
 } from "./depot-settlement-merge";
@@ -58,6 +60,8 @@ export interface SettlementReading {
   llmStatus: LlmStatus;
   /** Which source's name the text puts nearer the identifier, when they differ. */
   nameFrom: "rules" | "llm" | null;
+  /** Where the text shows the model's values (see groundingOf). */
+  grounding: Grounding;
 }
 
 /**
@@ -146,15 +150,58 @@ export function nameNearerIdentifier(
   return r < Infinity ? "rules" : null;
 }
 
+/** The name the text puts nearer the identifier, whichever source read it; the merge's choice otherwise. */
 function withNameFrom(merge: MergeResult, from: "rules" | "llm" | null): MergeResult {
-  if (from !== "llm") return merge;
+  if (from === null) return merge;
   const field = merge.fields.find((f) => f.field === "name");
-  if (!field || !field.disagree || field.llm === null) return merge;
+  const value = from === "llm" ? field?.llm : field?.rules;
+  if (!field || !field.disagree || value === null || value === undefined) return merge;
   return {
     ...merge,
-    values: { ...merge.values, name: String(field.llm) },
-    fields: merge.fields.map((f) => (f.field === "name" ? { ...f, source: "llm" } : f)),
+    values: { ...merge.values, name: String(value) },
+    fields: merge.fields.map((f) => (f.field === "name" ? { ...f, source: from } : f)),
   };
+}
+
+/** Labels a quantity is printed after or before. */
+const QUANTITY_LABEL_RE = /st(?:ü|ii|u)ck|\bstk\b|\bst\.|anteile?|nominale?|menge|bestand|\bstücke\b/i;
+
+/** Every number on a line, read the German way. */
+function numbersOn(line: string): number[] {
+  const out: number[] = [];
+  for (const m of line.matchAll(/\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?/g)) {
+    const n = parseGermanNumber(m[0]);
+    if (n !== null) out.push(n);
+  }
+  return out;
+}
+
+/**
+ * Where the text shows the model's values: the identifiers anywhere in it,
+ * the quantity on a line with a quantity label, the date as printed. A
+ * value not found loses a tie against the rules (see mergeSettlement); a
+ * field not listed here counts as grounded — the checks reach it.
+ */
+export function groundingOf(text: string | null, llm: SettlementValues | null): Grounding {
+  if (!text || !llm) return {};
+  const g: Grounding = {};
+  const compact = text.toUpperCase().replace(/\s+/g, "");
+  if (llm.isin) g.isin = compact.includes(llm.isin);
+  if (llm.wkn) g.wkn = compact.includes(llm.wkn);
+  if (llm.depotNumber) g.depotNumber = text.replace(/\D/g, "").includes(llm.depotNumber);
+  if (llm.quantity !== null) {
+    const q = llm.quantity;
+    g.quantity = text
+      .split("\n")
+      .filter((l) => QUANTITY_LABEL_RE.test(l))
+      .some((l) => numbersOn(l).some((n) => Math.abs(n - q) < 1e-6));
+  }
+  if (llm.executedAt) {
+    const [y, m, d] = llm.executedAt.split("-");
+    const re = new RegExp(String.raw`\b0?${Number(d)}\.0?${Number(m)}\.(?:${y}|${y!.slice(2)})\b`);
+    g.executedAt = re.test(text);
+  }
+  return g;
 }
 
 export function rulesValues(r: SettlementInspection | null): SettlementValues | null {
@@ -238,13 +285,15 @@ export async function readSettlement(
   // the amount the model reads there is the income kept, never a net.
   if (llm && rules?.accumulation) llm = { ...llm, net: llm.tax === null ? null : -Math.abs(llm.tax) };
   const nameFrom = nameNearerIdentifier(text, rules?.isin ?? rules?.wkn ?? null, rules?.name ?? null, llm?.name ?? null);
+  const grounding = groundingOf(text, llm);
   return {
     rules,
     llm,
     llmSaysSettlement,
-    merge: withNameFrom(mergeSettlement(fromRules, llm), nameFrom),
+    merge: withNameFrom(mergeSettlement(fromRules, llm, new Date(), null, grounding), nameFrom),
     llmStatus,
     nameFrom,
+    grounding,
   };
 }
 
@@ -254,5 +303,5 @@ export async function readSettlement(
  * nothing is asked.
  */
 export function rereadAgainstBooking(r: SettlementReading, bookingNet: number): SettlementReading {
-  return { ...r, merge: withNameFrom(mergeSettlement(rulesValues(r.rules), r.llm, new Date(), bookingNet), r.nameFrom) };
+  return { ...r, merge: withNameFrom(mergeSettlement(rulesValues(r.rules), r.llm, new Date(), bookingNet, r.grounding), r.nameFrom) };
 }

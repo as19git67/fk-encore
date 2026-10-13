@@ -2425,6 +2425,24 @@ export const financeDocumentStatementLlm = pgTable("finance_document_statement_l
     .defaultNow(),
 });
 
+// The kind of paper the model took a document for, when the rules
+// recognised neither a settlement nor a statement in it — see migration 0239.
+export const financeDocumentPaperLlm = pgTable(
+  "finance_document_paper_llm",
+  {
+    document_id: integer("document_id")
+      .primaryKey()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    /** "trade" | "dividend" | "tax" | "statement" | "other" */
+    paper_type: text("paper_type").notNull(),
+    values: jsonb("values").$type<Record<string, unknown>>().notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("finance_document_paper_llm_type_idx").on(table.paper_type)],
+);
+
 // Documents the user marked as irrelevant to the depots (#1336): left out
 // of "read documents" and the review page; the document itself stays.
 /**

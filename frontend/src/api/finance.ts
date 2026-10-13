@@ -1037,6 +1037,8 @@ export interface EnrichRunTotals {
   statements_unplaced?: number
   /** Positions on statements about securities the master has not confirmed: proposed. */
   statement_positions_proposed?: number
+  /** Papers the rules did not recognise that the model took for a settlement or a statement. */
+  papers_recognized?: number
 }
 
 /** A read of the settlement documents running (or run) on the server. */

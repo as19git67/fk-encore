@@ -46,6 +46,7 @@ import {
   financeDepotTransaction,
   financeDocumentSettlementLlm,
   financeDocumentStatementLlm,
+  financeDocumentPaperLlm,
   users,
 } from "../db/schema";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
@@ -69,6 +70,7 @@ import {
 } from "./depot-document-enrichment";
 import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliation";
 import { enrichPendingStatements, readDepotStatement, type StatementStats } from "./depot-statement-enrichment";
+import { classifyPendingPapers } from "./depot-paper-type";
 import { decideSecurity, evidenceDocumentIds, listSecurities, type ListedSecurity, type SecurityStatus } from "./depot-securities";
 import { cleanSecurityName, isPersonName, paperTypeOf, type PaperType } from "./depot-settlement-parser";
 import { readSettlement, rereadAgainstBooking, rejectedAsOtherPaper, type LlmStatus } from "./depot-settlement-reader";
@@ -1599,6 +1601,8 @@ export interface EnrichRunTotals {
   statements_unplaced: number;
   /** Positions on statements about securities the master has not confirmed: proposed. */
   statement_positions_proposed: number;
+  /** Papers the rules did not recognise that the model took for a settlement or a statement (stage 3). */
+  papers_recognized: number;
 }
 
 export interface EnrichRun {
@@ -1631,6 +1635,7 @@ function emptyTotals(): EnrichRunTotals {
     statements_stored: 0,
     statements_unplaced: 0,
     statement_positions_proposed: 0,
+    papers_recognized: 0,
   };
 }
 
@@ -1656,6 +1661,13 @@ function addStatementPage(totals: EnrichRunTotals, page: StatementStats): void {
 async function runEnrichment(run: EnrichRun): Promise<void> {
   try {
     let before: number | null = null;
+    // First the papers the rules do not recognise: the model says which
+    // kind each is, so the readers below take them as candidates too.
+    do {
+      const page = await classifyPendingPapers(200, { before, budgetMs: ENRICH_REQUEST_BUDGET_MS });
+      run.totals.papers_recognized += page.settlements + page.statements;
+      before = page.next_before;
+    } while (before !== null);
     do {
       const page = await enrichPage(run.account_ids, 200, before);
       for (const k of SETTLEMENT_TOTAL_KEYS) run.totals[k] += page[k];
@@ -2502,7 +2514,7 @@ interface ResetDocumentsResponse {
   removed: number;
   /** Manual transactions that only lost their link to a document. */
   unlinked: number;
-  /** Stored model answers cleared (settlements and statements). */
+  /** Stored model answers cleared (settlements, statements and paper types). */
   answers_cleared: number;
   /** Holdings rows read from depot statements deleted; the statements are read again on the next run. */
   holdings_removed: number;
@@ -2577,6 +2589,10 @@ export const resetDocumentReadings = api(
       .delete(financeDocumentStatementLlm)
       .where(hasAdmin(auth) ? sql`true` : inArray(financeDocumentStatementLlm.document_id, ownDocuments))
       .returning({ id: financeDocumentStatementLlm.document_id });
+    const clearedPaperTypes = await db
+      .delete(financeDocumentPaperLlm)
+      .where(hasAdmin(auth) ? sql`true` : inArray(financeDocumentPaperLlm.document_id, ownDocuments))
+      .returning({ id: financeDocumentPaperLlm.document_id });
 
     // What statements wrote into the holdings goes too: they are read again with today's rules.
     const holdingsRemoved = await db
@@ -2597,7 +2613,7 @@ export const resetDocumentReadings = api(
     return {
       removed: removed.length,
       unlinked: kept.length,
-      answers_cleared: cleared.length + clearedStatements.length,
+      answers_cleared: cleared.length + clearedStatements.length + clearedPaperTypes.length,
       holdings_removed: holdingsRemoved.length,
       rederived,
     };
