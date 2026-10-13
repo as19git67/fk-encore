@@ -363,6 +363,29 @@ describe("collection visibility", () => {
     ).rejects.toThrow(/shared with the same group/);
   });
 
+  it("shares a dossier whose rule took private documents; the rule sorts them out", async () => {
+    await seedGroup();
+    const privateDoc = await insertDoc({ visibility: "private" });
+    const groupDoc = await insertDoc({ visibility: "group", groupId: GROUP_ID });
+    await db.execute(sql`
+      UPDATE documents
+         SET reference_numbers = '[{"kind":"other","value":"XI 1234/05","normalized":"XI123405","source":"user"}]'::jsonb
+       WHERE id IN (${privateDoc}, ${groupDoc})
+    `);
+    const collection = await createCollection({ title: "Verfahren" });
+    const dossier = await updateCollection({
+      id: collection.id,
+      kind: "dossier",
+      rule: { reference_numbers: ["XI 1234/05"] },
+    });
+    // A private dossier considers the owner's private and group documents.
+    expect(dossier.items.map((i) => i.document_id).sort()).toEqual([privateDoc, groupDoc].sort());
+
+    const shared = await updateCollection({ id: collection.id, visibility: "group", group_id: GROUP_ID });
+    expect(shared.visibility).toBe("group");
+    expect(shared.items.map((i) => i.document_id)).toEqual([groupDoc]);
+  });
+
   it("lets a group member edit a shared collection but not delete it", async () => {
     const doc = await insertDoc({ visibility: "group", groupId: GROUP_ID });
     const collection = await createCollection({

@@ -27,16 +27,20 @@
  * nothing else: a document a person put in stays, and a document a person
  * took out is remembered in `excluded_document_ids` so the next run does not
  * put it back. Membership never widens access: a group dossier takes only
- * documents shared with that group, a private one only its owner's.
+ * documents shared with that group; a private one takes what its owner can
+ * see — their private documents and those of their groups. Imports land in
+ * the owner's default group, so a private dossier limited to private
+ * documents stayed empty; adding a group document to a private Sammelmappe
+ * by hand was always allowed, and the rule may do what the hand may.
  */
 
-import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
-import { documentCollectionItems, documentCollections, documents } from "../db/schema";
+import { documentCollectionItems, documentCollections, documents, groupMembers } from "../db/schema";
 import {
   normalizeReference,
   referenceKeys,
@@ -44,7 +48,7 @@ import {
   type DocumentReferenceNumber,
 } from "./reference-numbers";
 import { normalizeSourceFolder } from "./source-folder";
-import { assertGroupMember } from "./visibility";
+import { assertGroupMember, loadUserGroupIds, visibleDocumentsWhere } from "./visibility";
 import { discardCollectionExports } from "./collection-export";
 
 console.log("[boot] documents/dossiers.ts: all imports resolved");
@@ -121,11 +125,24 @@ export function ruleMatchesDocument(rule: CollectionRule, doc: RuleSubject): boo
 
 type CollectionRow = typeof documentCollections.$inferSelect;
 
-/** The document's own scope, as the WHERE a dossier must satisfy to take it. */
+/**
+ * The dossiers that may take this document: for a group document the
+ * group's dossiers and the private dossiers of its members, for a private
+ * document its owner's private dossiers.
+ */
 function dossiersInScopeOf(doc: { user_id: number; visibility: string; group_id: number | null }) {
   const scope =
     doc.visibility === "group" && doc.group_id != null
-      ? and(eq(documentCollections.visibility, "group"), eq(documentCollections.group_id, doc.group_id))!
+      ? or(
+          and(eq(documentCollections.visibility, "group"), eq(documentCollections.group_id, doc.group_id)),
+          and(
+            eq(documentCollections.visibility, "private"),
+            inArray(
+              documentCollections.user_id,
+              db.select({ user_id: groupMembers.user_id }).from(groupMembers).where(eq(groupMembers.group_id, doc.group_id)),
+            ),
+          ),
+        )!
       : and(eq(documentCollections.visibility, "private"), eq(documentCollections.user_id, doc.user_id))!;
   return and(eq(documentCollections.kind, "dossier"), isNotNull(documentCollections.rule), scope)!;
 }
@@ -244,7 +261,7 @@ export async function applyRuleToCorpus(collection: CollectionRow): Promise<Appl
   const scope =
     collection.visibility === "group" && collection.group_id != null
       ? and(eq(documents.visibility, "group"), eq(documents.group_id, collection.group_id))!
-      : and(eq(documents.visibility, "private"), eq(documents.user_id, collection.user_id))!;
+      : visibleDocumentsWhere(collection.user_id, await loadUserGroupIds(collection.user_id));
   const candidates = await dbAll<RuleSubject>(
     db
       .select({

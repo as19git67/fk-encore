@@ -201,10 +201,39 @@ describe("dossier rules against the database", () => {
     `);
 
     const res = await applyRuleToCorpus(dossier);
-    // `a` and `terms` enter through the folder; the Posteingang letter lacks
-    // the number; the group document is outside a private dossier's scope.
+    // `a` and `terms` enter through the folder; the Posteingang letter and
+    // the group document lack the number.
     expect(res).toEqual({ added: 2, removed: 1 });
     expect((await membersOf(dossier.id)).map((m) => m.document_id).sort()).toEqual([a, terms].sort());
     expect(shared).toBeGreaterThan(0);
+  });
+
+  it("lets a private dossier take its owner's group documents, not a stranger group's", async () => {
+    const OTHER_GROUP = GROUP_ID + 1;
+    await db.execute(sql`INSERT INTO groups (id, slug, name) VALUES (${OTHER_GROUP}, 'dossiers-test-other', 'Andere') ON CONFLICT (id) DO NOTHING`);
+    await db.execute(sql`INSERT INTO group_members (group_id, user_id, role) VALUES (${OTHER_GROUP}, ${MEMBER_ID}, 'member') ON CONFLICT DO NOTHING`);
+    try {
+      const mine = await insertDoc({ refs: ["XI 1234/05"] });
+      const ourGroup = await insertDoc({ userId: MEMBER_ID, refs: ["XI 1234/05"], visibility: "group", groupId: GROUP_ID });
+      const theirGroup = await insertDoc({ userId: MEMBER_ID, refs: ["XI 1234/05"], visibility: "group", groupId: OTHER_GROUP });
+      const row = await db.execute<any>(sql`
+        INSERT INTO document_collections (user_id, title, visibility, kind, rule)
+        VALUES (${OWNER_ID}, 'Verfahren', 'private', 'dossier', ${JSON.stringify({ reference_numbers: ["XI 1234/05"] })}::jsonb)
+        RETURNING *
+      `);
+      const dossier = row.rows[0]!;
+
+      expect(await applyRuleToCorpus(dossier)).toEqual({ added: 2, removed: 0 });
+      expect((await membersOf(dossier.id)).map((m) => m.document_id).sort()).toEqual([mine, ourGroup].sort());
+
+      // The per-document path finds the same dossier for a new group document.
+      const later = await insertDoc({ userId: MEMBER_ID, refs: ["XI 1234/05"], visibility: "group", groupId: GROUP_ID });
+      expect(await applyDossierRulesForDocument(later)).toEqual({ added: 1, removed: 0 });
+      expect(await applyDossierRulesForDocument(theirGroup)).toEqual({ added: 0, removed: 0 });
+    } finally {
+      await db.execute(sql`DELETE FROM documents WHERE group_id = ${OTHER_GROUP}`);
+      await db.execute(sql`DELETE FROM group_members WHERE group_id = ${OTHER_GROUP}`);
+      await db.execute(sql`DELETE FROM groups WHERE id = ${OTHER_GROUP}`);
+    }
   });
 });
