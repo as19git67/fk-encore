@@ -8,6 +8,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
@@ -29,6 +30,7 @@ import {
 import { anchorKey, saveListAnchor } from '../utils/listAnchor'
 
 const router = useRouter()
+const confirm = useConfirm()
 
 /** One key for this list — anchor and scroll offset are stored under it. */
 const ANCHOR_KEY = 'dokumente-mappen'
@@ -106,10 +108,18 @@ async function create() {
   }
 }
 
-async function remove(collection: DocumentCollection) {
-  if (!window.confirm(`Sammelmappe „${collection.title}" löschen? Die Dokumente bleiben erhalten.`)) {
-    return
-  }
+function remove(collection: DocumentCollection) {
+  confirm.require({
+    header: 'Sammelmappe löschen',
+    message: `Sammelmappe „${collection.title}“ löschen? Die Dokumente darin bleiben erhalten.`,
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Löschen', severity: 'danger' },
+    accept: () => { void doRemove(collection) },
+  })
+}
+
+async function doRemove(collection: DocumentCollection) {
   try {
     await deleteCollection(collection.id)
     items.value = items.value.filter((c) => c.id !== collection.id)
@@ -133,7 +143,7 @@ onMounted(load)
   <PageLayout
     title="Sammelmappen"
     hint="Mehrere Dokumente zusammenfassen und als ein PDF weitergeben. Ein Dokument darf in mehreren Mappen liegen."
-    width="normal"
+    width="full"
     :ready="!loading"
     :anchor-key="ANCHOR_KEY"
   >

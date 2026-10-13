@@ -108,6 +108,60 @@ const LABELS: ReadonlyArray<{ kind: ReferenceKind; label: string }> = [
 // groups, as court and tax file numbers print it, but only when a digit follows.
 const VALUE_RE = String.raw`[:\s.]*([\p{L}\p{N}][\p{L}\p{N}./-]*(?:\s(?:\p{N}[\p{L}\p{N}./-]*|\p{Lu}{1,3}(?=\s\p{N})))*)`;
 
+/**
+ * A value with its label still in front ("Referenz: 7 K 123/24",
+ * "Vertragsnummer 4711") is the same number as the bare value. The label
+ * creeps in three ways: a person types it into the edit field without the
+ * colon the form expects, the model answers with it, or the regex captures a
+ * label word that sits between another label and the number. Left in, it
+ * becomes part of `normalized` ("REFERENZ7K12324") and the number no longer
+ * meets itself in the search or in a dossier rule. Stripped once, at every
+ * door, and only when what remains is still a plausible number.
+ */
+const LEADING_LABEL_RE = new RegExp(
+  String.raw`^(?:` +
+    [
+      ...Object.values(REFERENCE_KIND_LABELS).map((l) => l.toLowerCase()),
+      ...[
+        String.raw`versicherungs(?:schein)?[\s-]*(?:nummer|nr\.?|konto)`,
+        String.raw`policen?[\s-]*(?:nummer|nr\.?)`,
+        String.raw`vertrags[\s-]*(?:konto(?:[\s-]*nummer)?|nummer|nr\.?)`,
+        String.raw`kunden[\s-]*(?:nummer|nr\.?)`,
+        String.raw`auftrags[\s-]*(?:nummer|nr\.?)`,
+        String.raw`referenz[\s-]*(?:nummer|nr\.?)?`,
+        String.raw`aktenzeichen`,
+        String.raw`az\.?`,
+      ],
+    ].join("|") +
+    String.raw`)(?![\p{L}])[\s:.#-]*`,
+  "iu",
+);
+
+export function stripReferenceLabel(value: string): string {
+  const v = value.trim();
+  const rest = v.replace(LEADING_LABEL_RE, "").trim();
+  return rest !== v && isPlausibleReferenceValue(rest) ? rest : v;
+}
+
+/** The same reference with its label stripped and `normalized` recomputed. */
+export function cleanReference(ref: DocumentReferenceNumber): DocumentReferenceNumber {
+  const value = stripReferenceLabel(ref.value ?? "");
+  const normalized = normalizeReference(value);
+  return value === ref.value && normalized === ref.normalized ? ref : { ...ref, value, normalized };
+}
+
+/**
+ * Every key a stored reference answers to: its stored `normalized` and the
+ * normalised value with any label stripped. Rows written before the label
+ * was stripped still match the bare number this way.
+ */
+export function referenceKeys(ref: Pick<DocumentReferenceNumber, "value" | "normalized">): string[] {
+  const keys = new Set<string>();
+  if (ref.normalized) keys.add(ref.normalized);
+  if (ref.value) keys.add(normalizeReference(stripReferenceLabel(ref.value)));
+  return [...keys];
+}
+
 /** Labelled numbers from the text, deduplicated by normalised value, in order of appearance. */
 export function extractReferenceNumbers(text: string): DocumentReferenceNumber[] {
   const found: Array<{ index: number; ref: DocumentReferenceNumber }> = [];
@@ -116,7 +170,7 @@ export function extractReferenceNumbers(text: string): DocumentReferenceNumber[]
     const re = new RegExp(String.raw`(?<![\p{L}\p{N}])` + label + VALUE_RE, "giu");
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
-      const value = m[1]!.replace(/[.\-/\s]+$/, "").trim();
+      const value = stripReferenceLabel(m[1]!.replace(/[.\-/\s]+$/, "").trim());
       if (!isPlausibleReferenceValue(value)) continue;
       const normalized = normalizeReference(value);
       if (seen.has(normalized)) continue;
@@ -150,6 +204,7 @@ export function parseModelReferenceNumbers(raw: unknown): DocumentReferenceNumbe
       kind = toKind(o.kind);
       value = typeof o.value === "string" ? o.value.trim() : "";
     }
+    value = stripReferenceLabel(value);
     if (!isPlausibleReferenceValue(value)) continue;
     const normalized = normalizeReference(value);
     if (seen.has(normalized)) continue;
@@ -167,7 +222,7 @@ export function parseUserReferenceNumbers(
   const out: DocumentReferenceNumber[] = [];
   const seen = new Set<string>();
   for (const item of raw) {
-    const value = (item.value ?? "").trim();
+    const value = stripReferenceLabel(item.value ?? "");
     if (!isPlausibleReferenceValue(value)) continue;
     const normalized = normalizeReference(value);
     if (seen.has(normalized)) continue;
@@ -191,7 +246,9 @@ export function mergeReferenceNumbers(
   const byNorm = new Map<string, DocumentReferenceNumber>();
   // A classification from before this field (or a test double) has no list.
   for (const list of [user ?? [], regex ?? [], model ?? []]) {
-    for (const r of list) {
+    for (const raw of list) {
+      // Repairs a row stored with its label in front, on the next write.
+      const r = cleanReference(raw);
       if (!byNorm.has(r.normalized)) byNorm.set(r.normalized, r);
     }
   }

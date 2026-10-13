@@ -12,8 +12,12 @@ import { parseUserReferenceNumbers } from "./reference-numbers";
 
 describe("normalizeRule", () => {
   it("normalises every part and drops an empty rule", () => {
+    // Numbers keep the form they were typed in; duplicates by normalised value
+    // and too-short ones go.
     expect(normalizeRule({ correspondent_slug: " Beispiel-AG ", reference_numbers: ["ab 12-34", "AB1234", "x"], source_folder_prefix: "/Versicherungen/Hausrat/" }))
-      .toEqual({ correspondent_slug: "beispiel-ag", reference_numbers: ["AB1234"], source_folder_prefix: "Versicherungen/Hausrat" });
+      .toEqual({ correspondent_slug: "beispiel-ag", reference_numbers: ["ab 12-34"], source_folder_prefix: "Versicherungen/Hausrat" });
+    expect(normalizeRule({ reference_numbers: [" 7 K 123/24 ", "Referenz: 4711-08"] }))
+      .toEqual({ reference_numbers: ["7 K 123/24", "4711-08"] });
     expect(normalizeRule({ correspondent_slug: "", reference_numbers: [], source_folder_prefix: null })).toBeNull();
     expect(normalizeRule(null)).toBeNull();
     expect(normalizeRule({ correspondent_slug: "x-ag" }, { excluded_document_ids: [7] })).toEqual({ correspondent_slug: "x-ag", excluded_document_ids: [7] });
@@ -24,6 +28,15 @@ describe("ruleMatchesDocument", () => {
   const refs = (...values: string[]) => parseUserReferenceNumbers(values.map((v) => ({ value: v })));
   const doc = (over: Partial<Parameters<typeof ruleMatchesDocument>[1]> = {}) => ({
     id: 1, correspondent_slug: "beispiel-ag", reference_numbers: refs("AB 123456"), source_folder: "Versicherungen/Hausrat/2024", ...over,
+  });
+
+  it("matches a number typed with spaces and slash, and one stored with its label in front", () => {
+    const court = doc({ reference_numbers: refs("7 K 123/24") });
+    expect(ruleMatchesDocument({ reference_numbers: ["7 K 123/24"] }, court)).toBe(true);
+    expect(ruleMatchesDocument({ reference_numbers: ["7K12324"] }, court)).toBe(true);
+    // A row written before labels were stripped.
+    const legacy = doc({ reference_numbers: [{ kind: "other", value: "Referenz: 7 K 123/24", normalized: "REFERENZ7K12324", source: "user" }] });
+    expect(ruleMatchesDocument({ reference_numbers: ["7 K 123/24"] }, legacy)).toBe(true);
   });
 
   it("needs every set part among correspondent and numbers", () => {

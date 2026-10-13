@@ -274,9 +274,10 @@ const sourceFolderSegments = computed<Array<{ name: string; path: string }>>(() 
 
 // Reference numbers go through the form as text: one per line, optionally
 // prefixed with the kind's German label ("Vertragsnummer: 12345"). A bare
-// value keeps the kind it already had on the document, else 'other'.
+// value keeps the kind it already had on the document, else 'other'. The
+// 'other' kind is written bare: "Referenz: 4711" read like part of the number.
 function referenceNumbersToText(list: ReferenceNumber[]): string {
-  return list.map((r) => `${REFERENCE_KIND_LABELS[r.kind]}: ${r.value}`).join('\n')
+  return list.map((r) => (r.kind === 'other' ? r.value : `${REFERENCE_KIND_LABELS[r.kind]}: ${r.value}`)).join('\n')
 }
 
 function parseReferenceNumbersText(text: string): Array<{ kind: ReferenceKind; value: string }> {
@@ -306,7 +307,7 @@ const dossierRuleSeed = computed(() => {
   if (!d) return null
   return {
     correspondent_slug: d.correspondent_slug,
-    reference_numbers: d.reference_numbers.map((r) => r.normalized),
+    reference_numbers: d.reference_numbers.map((r) => r.value),
     source_folder_prefix: d.source_folder,
   }
 })
@@ -1221,9 +1222,9 @@ onBeforeUnmount(() => {
                 :key="r.normalized"
                 class="reference-chip"
                 :to="{ name: 'dokumente-list', query: { ref: r.normalized, collectionScope: 'with' } }"
-                :title="`Alle Dokumente mit ${REFERENCE_KIND_LABELS[r.kind]} ${r.value}`"
+                :title="`Alle Dokumente mit ${r.kind === 'other' ? 'Nummer' : REFERENCE_KIND_LABELS[r.kind]} ${r.value}`"
               >
-                <span class="reference-chip__kind">{{ REFERENCE_KIND_LABELS[r.kind] }}</span>
+                <span v-if="r.kind !== 'other'" class="reference-chip__kind">{{ REFERENCE_KIND_LABELS[r.kind] }}</span>
                 <span class="reference-chip__value">{{ r.value }}</span>
               </RouterLink>
             </div>

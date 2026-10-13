@@ -365,7 +365,7 @@ export function useDocumentFilterChips(
       add('subjectPerson', `Person: ${label}`, ['subjectPersonId'])
     }
     if (f.folder) add('folder', `Ordner: ${f.folder}`, ['folder'])
-    if (f.ref) add('ref', `Referenz: ${f.ref}`, ['ref'])
+    if (f.ref) add('ref', `Referenznummer ${f.ref}`, ['ref'])
     if (f.categorySource) {
       add('categorySource', `Quelle: ${f.categorySource}`, ['categorySource'])
     }

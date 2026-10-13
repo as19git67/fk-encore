@@ -11,6 +11,7 @@ import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
 import PageLayout from '../components/layout/PageLayout.vue'
+import { useConfirmAsync } from '../composables/useConfirmAsync'
 import {
   activateLlmConfig,
   cancelLlmDownload,
@@ -182,8 +183,15 @@ async function saveConfig() {
   if (!error.value) editorOpen.value = false
 }
 
+const askConfirm = useConfirmAsync()
+
 async function onDelete(config: LlmConfigRow) {
-  if (!window.confirm(`„${config.label}" löschen?`)) return
+  if (!(await askConfirm({
+    header: 'Konfiguration löschen',
+    message: `Modell-Konfiguration „${config.label}“ löschen? Die Modelldatei bleibt in der Ablage.`,
+    acceptLabel: 'Löschen',
+    danger: true,
+  }))) return
   await withBusy(config.id, () => deleteLlmConfig(config.id), 'Konfiguration gelöscht.')
 }
 
@@ -218,7 +226,12 @@ async function onCancelDownload() {
 }
 
 async function onDeleteFile(filename: string) {
-  if (!window.confirm(`„${filename}" von der Modell-Ablage löschen?`)) return
+  if (!(await askConfirm({
+    header: 'Modelldatei löschen',
+    message: `„${filename}“ von der Modell-Ablage löschen?`,
+    acceptLabel: 'Löschen',
+    danger: true,
+  }))) return
   await withBusy(-2, () => deleteLlmModelFile(filename), `${filename} gelöscht.`)
 }
 

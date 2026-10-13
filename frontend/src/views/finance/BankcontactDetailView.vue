@@ -21,6 +21,9 @@ import {
 } from '../../api/finance'
 import TanDialog from '../../components/finance/TanDialog.vue'
 import { toLocalIsoDate } from '../../utils/dateFormat'
+import { useConfirmAsync } from '../../composables/useConfirmAsync'
+
+const askConfirm = useConfirmAsync()
 
 const route = useRoute()
 const router = useRouter()
@@ -445,7 +448,7 @@ async function del() {
     ? `Bankkontakt "${bc.value.name}" löschen? ${attached} verknüpfte Konten ` +
         `fallen auf manuell zurück (Transaktionen bleiben erhalten).`
     : `Bankkontakt "${bc.value.name}" wirklich löschen?`
-  if (!confirm(msg)) return
+  if (!(await askConfirm({ header: 'Bankkontakt löschen', message: msg, acceptLabel: 'Löschen', danger: true }))) return
   try {
     await store.remove(bc.value.id)
     await accountsStore.refresh()

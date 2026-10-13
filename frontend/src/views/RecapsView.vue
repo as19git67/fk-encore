@@ -41,6 +41,9 @@ import {
   triggerDownload,
 } from '../utils/shareFile'
 import { personCompareFromSeed, type RecapCompareData } from '../utils/recapCompare'
+import { useConfirmAsync } from '../composables/useConfirmAsync'
+
+const askConfirm = useConfirmAsync()
 
 const route = useRoute()
 const router = useRouter()
@@ -314,7 +317,7 @@ function closeDetail() {
 }
 
 async function handleDismiss(recap: RecapSummary) {
-  if (!confirm(`Rückblick „${recap.title}“ ausblenden?`)) return
+  if (!(await askConfirm({ header: 'Rückblick ausblenden', message: `Rückblick „${recap.title}“ ausblenden?`, acceptLabel: 'Ausblenden' }))) return
   try {
     await dismissRecap(recap.id)
     recaps.value = recaps.value.filter((r) => r.id !== recap.id)

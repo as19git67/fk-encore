@@ -22,6 +22,9 @@ import {
 } from '../api/documents'
 import { listUsers, type UserWithRoles } from '../api/users'
 import { useAuthStore } from '../stores/auth'
+import { useConfirmAsync } from '../composables/useConfirmAsync'
+
+const askConfirm = useConfirmAsync()
 
 const auth = useAuthStore()
 const groups = ref<GroupSummary[]>([])
@@ -114,7 +117,7 @@ async function handleAddMember() {
 
 async function handleRemoveMember(userId: number) {
   if (!selectedGroup.value) return
-  if (!confirm('Mitglied wirklich entfernen?')) return
+  if (!(await askConfirm({ header: 'Mitglied entfernen', message: 'Mitglied wirklich entfernen?', acceptLabel: 'Entfernen', danger: true }))) return
   try {
     await removeGroupMember(selectedGroup.value.id, userId)
     await openDetails(selectedGroup.value) // Refresh
@@ -124,7 +127,7 @@ async function handleRemoveMember(userId: number) {
 }
 
 async function handleDeleteGroup(h: GroupSummary) {
-  if (!confirm(`Gruppe "${h.name}" wirklich löschen? Alle Dokument-Zuordnungen gehen verloren.`)) return
+  if (!(await askConfirm({ header: 'Gruppe löschen', message: `Gruppe "${h.name}" wirklich löschen? Alle Dokument-Zuordnungen gehen verloren.`, acceptLabel: 'Löschen', danger: true }))) return
   try {
     await deleteGroup(h.id)
     if (selectedGroup.value?.id === h.id) selectedGroup.value = null
