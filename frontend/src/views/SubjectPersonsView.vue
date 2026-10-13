@@ -26,6 +26,9 @@ import {
   type SubjectPerson,
 } from '../api/documents'
 import { toLocalIsoDate } from '../utils/dateFormat'
+import { useConfirmAsync } from '../composables/useConfirmAsync'
+
+const askConfirm = useConfirmAsync()
 
 // ─── relation kind options ──────────────────────────────────────────────────
 
@@ -221,7 +224,7 @@ async function handleOwnReturnChange(p: SubjectPerson, year: number | null) {
 }
 
 async function handleDelete(p: SubjectPerson) {
-  if (!confirm(`Bezugsperson "${p.full_name}" wirklich entfernen?`)) return
+  if (!(await askConfirm({ header: 'Bezugsperson entfernen', message: `Bezugsperson "${p.full_name}" wirklich entfernen?`, acceptLabel: 'Entfernen', danger: true }))) return
   deletingId.value = p.id
   error.value = ''
   try {

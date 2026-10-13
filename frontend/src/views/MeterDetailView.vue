@@ -54,6 +54,9 @@ import ScrollX from '../components/layout/ScrollX.vue'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 import { decimalInputPt } from '../utils/inputNumberPt'
+import { useConfirmAsync } from '../composables/useConfirmAsync'
+
+const askConfirm = useConfirmAsync()
 
 const route = useRoute()
 const router = useRouter()
@@ -629,7 +632,7 @@ async function handleSaveReading() {
 }
 
 async function handleDeleteReading(r: Reading) {
-  if (!confirm('Ablesung wirklich löschen?')) return
+  if (!(await askConfirm({ header: 'Ablesung löschen', message: 'Ablesung wirklich löschen?', acceptLabel: 'Löschen', danger: true }))) return
   error.value = ''
   try {
     await deleteReading(r.id)
@@ -730,7 +733,7 @@ async function handleCreateKey() {
 }
 
 async function handleDeleteKey(key: ApiKey) {
-  if (!confirm(`API-Key „${key.name}“ wirklich löschen?`)) return
+  if (!(await askConfirm({ header: 'API-Key löschen', message: `API-Key „${key.name}“ wirklich löschen?`, acceptLabel: 'Löschen', danger: true }))) return
   error.value = ''
   try {
     await deleteApiKey(key.id)
