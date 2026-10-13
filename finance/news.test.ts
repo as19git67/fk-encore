@@ -22,6 +22,7 @@ import { activePositions } from "./quotes";
 import {
   QuoteRateLimitedError,
   setNewsProvider,
+  setNewsProviders,
   type NewsItem,
   type NewsProvider,
   type SecurityType,
@@ -84,18 +85,23 @@ function item(n: number, at = hours(n)): NewsItem {
 
 /** A metered provider that answers from memory and counts what it was asked. */
 function memoryNews(opts: {
+  name?: string;
   dailyCalls?: number | null;
   types?: Record<string, SecurityType>;
   items?: (symbol: string, since: Date) => NewsItem[];
   failWith?: Error;
+  resolveFailWith?: Error;
+  symbolFromKnown?: NewsProvider["symbolFromKnown"];
 } = {}): NewsProvider & { calls: { resolve: string[]; news: [string, string][] } } {
   const calls = { resolve: [] as string[], news: [] as [string, string][] };
   return {
-    name: "memnews",
+    name: opts.name ?? "memnews",
     calls,
     metering: opts.dailyCalls === null ? null : { resolve: 1, news: 5, dailyCalls: opts.dailyCalls ?? 20 },
+    symbolFromKnown: opts.symbolFromKnown,
     async resolve(id) {
       calls.resolve.push(id.isin ?? "");
+      if (opts.resolveFailWith) throw opts.resolveFailWith;
       return { symbol: `${id.isin}.XETRA`, name: null, exchange: "XETRA", currency: "EUR", securityType: opts.types?.[id.isin ?? ""] ?? "equity" };
     },
     async news(symbol, since) {
@@ -201,6 +207,64 @@ describe("refreshNews", () => {
     const stats = await refreshNews(await activePositions([d]), NOW);
     expect(stats.rate_limited).toBe(true);
     expect(refusing.calls.news).toHaveLength(1);
+  });
+
+  it("asks every provider in turn, each with its own symbol and last check", async () => {
+    const d = await insertDepot();
+    await hold(d, A);
+    await hold(d, B);
+    await quoteType(A, "equity");
+    await quoteType(B, "equity");
+    // The metered one has room for one security only.
+    const metered = memoryNews({ dailyCalls: 6, items: () => [item(1)] });
+    // The free one derives its symbol from the metered one's, else from the quote symbol.
+    const free = memoryNews({
+      name: "freenews",
+      dailyCalls: null,
+      items: (symbol) => [{ ...item(2), url: `https://frei.test/${symbol}` }, item(1)],
+      symbolFromKnown: (known) => {
+        const m = known.find((k) => k.provider === "memnews") ?? known.find((k) => k.provider === "yahoo");
+        return m ? `frei:${m.symbol}` : null;
+      },
+    });
+    setNewsProviders([metered, free]);
+
+    const stats = await refreshNews(await activePositions([d]), NOW);
+    expect(metered.calls.news.map(([s]) => s)).toEqual([`${B}.XETRA`]);
+    expect(free.calls.resolve).toEqual([]);
+    expect(free.calls.news.map(([s]) => s).sort()).toEqual([`frei:${B}.XETRA`, `frei:${A}.DE`].sort());
+    expect(stats).toMatchObject({ candidates: 4, asked: 3, budget_spent: true });
+
+    const rows = await db.select().from(financeNewsSource);
+    expect(rows.map((r) => `${r.position_key}:${r.provider}:${r.symbol}`).sort()).toEqual(
+      [`${B}:memnews:${B}.XETRA`, `${B}:freenews:frei:${B}.XETRA`, `${A}:freenews:frei:${A}.DE`].sort(),
+    );
+    // The same article from two providers is stored once per security.
+    const stored = await db.select().from(financeQuoteNews).where(eq(financeQuoteNews.position_key, B));
+    expect(stored.map((n) => `${n.provider}:${n.url}`).sort()).toEqual(
+      ["memnews:https://beispiel.test/1", `freenews:https://frei.test/frei:${B}.XETRA`].sort(),
+    );
+    expect((await getPositionNews({ key: B })).checked_at).toBe(NOW.toISOString());
+  });
+
+  it("goes on with derivable symbols when the search refuses", async () => {
+    const d = await insertDepot();
+    for (const k of [A, B]) await hold(d, k);
+    // A has no quote symbol, B one the free provider can translate.
+    await quoteType(B, "equity");
+    const free = memoryNews({
+      name: "freenews",
+      dailyCalls: null,
+      resolveFailWith: new QuoteRateLimitedError(),
+      symbolFromKnown: (known) => (known[0] ? `frei:${known[0].symbol}` : null),
+    });
+    setNewsProvider(free);
+
+    const stats = await refreshNews(await activePositions([d]), NOW);
+    // A has no symbol anywhere: the search is asked once and refuses; B still gets its news.
+    expect(free.calls.resolve).toEqual([A]);
+    expect(free.calls.news.map(([s]) => s)).toEqual([`frei:${B}.DE`]);
+    expect(stats.rate_limited).toBe(true);
   });
 
   it("does nothing without a news provider", async () => {

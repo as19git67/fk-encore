@@ -74,11 +74,24 @@ history is kept in our own database so it outlives the provider.
    migration 0230); loading the news marks them seen
    (`POST /finance/quotes/news/seen`). A position never opened counts the
    last week's news.
-5. **Yahoo news** as the free second way: the RSS feed per symbol
+5. **Yahoo news** as the free second way — built. The RSS feed per symbol
    (`feeds.finance.yahoo.com/rss/2.0/headline?s=SYMBOL`, no cookie
-   needed), `id` from the article URL, same table and pages. Coverage
-   of German securities is thin, so it complements rather than replaces
-   EODHD.
+   needed; `finance/quote-provider-yahoo-news.ts`), same table and pages.
+   Coverage of German securities is thin, so it complements rather than
+   replaces EODHD.
+   - Several news providers are installed in order (`setNewsProviders`):
+     EODHD first with its budget, Yahoo after it. `finance_news_source`
+     is kept per position and provider (migration 0240), so each has its
+     own symbol and "last asked"; the page's "last checked" is the latest
+     of them.
+   - Yahoo's symbol is derived without a request where possible: Yahoo's
+     own quote symbol, else EODHD's (`ABC.XETRA` → `ABC.DE`, `.US` → no
+     suffix, `.LSE` → `.L`, …). Only then is Yahoo's search asked; when it
+     refuses, the run goes on with the securities whose symbol is known.
+   - An item is identified by its URL without the feed's `.tsrc=rss`, so
+     the same article is stored once per security. Yahoo gives no
+     sentiment. 1.5 s between two feeds.
+   - `FINANCE_YAHOO_NEWS=off` switches it off.
 6. **Optional:** today's price in the portfolio overview and the position
    chart instead of the bank's last snapshot.
 
@@ -92,7 +105,7 @@ history is kept in our own database so it outlives the provider.
   and only then reports a rate limit; the tick then stops and the next
   waits a quarter of an hour. Hosts to allow: `fc.yahoo.com`,
   `query1.finance.yahoo.com`, `query2.finance.yahoo.com` (later
-  `feeds.finance.yahoo.com` for news, `eodhd.com` for EODHD).
+  `feeds.finance.yahoo.com` for news (stage 5), `eodhd.com` for EODHD).
 - A security the provider does not know stays `unresolved`, is logged
   with its ISIN, and is asked again after a day — at once when the page's
   refresh button is pressed. The symbol can be set by hand in

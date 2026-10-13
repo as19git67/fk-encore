@@ -86,18 +86,40 @@ export interface NewsProvider {
    * allowance. Null: unmetered.
    */
   readonly metering: { resolve: number; news: number; dailyCalls: number } | null;
+  /**
+   * The provider's symbol worked out from symbols other providers already
+   * know for the security (another news provider's, the quote provider's),
+   * without asking anybody. Null when none of them translates.
+   */
+  symbolFromKnown?(known: Array<{ provider: string; symbol: string }>): string | null;
+  /** Wait this long between two requests: an unmetered source that should not be hammered. */
+  readonly pauseMs?: number;
 }
 
 let installed: QuoteProvider | null = null;
-let installedNews: NewsProvider | null = null;
+let installedNews: NewsProvider[] = [];
 
-/** Install the news provider; null switches the news off. */
-export function setNewsProvider(p: NewsProvider | null): void {
-  installedNews = p;
+/**
+ * Install the news providers, in the order they are asked: a metered one
+ * with its own budget first, free ones after it. An empty list switches
+ * the news off.
+ */
+export function setNewsProviders(list: NewsProvider[]): void {
+  installedNews = [...list];
 }
 
-export function newsProvider(): NewsProvider | null {
+/** Install one news provider; null switches the news off. */
+export function setNewsProvider(p: NewsProvider | null): void {
+  setNewsProviders(p ? [p] : []);
+}
+
+export function newsProviders(): NewsProvider[] {
   return installedNews;
+}
+
+/** The first news provider, when there is one. */
+export function newsProvider(): NewsProvider | null {
+  return installedNews[0] ?? null;
 }
 
 export function setQuoteProvider(p: QuoteProvider | null): void {
