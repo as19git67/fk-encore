@@ -3,6 +3,9 @@ import { sql } from "drizzle-orm";
 
 import db from "../db/database";
 import {
+  cleanReference,
+  referenceKeys,
+  stripReferenceLabel,
   extractReferenceNumbers,
   isPlausibleReferenceValue,
   mergeReferenceNumbers,
@@ -17,6 +20,26 @@ describe("normalizeReference", () => {
   it("keeps letters and digits only, upper-cased", () => {
     expect(normalizeReference("AB 12.345-6/7")).toBe("AB1234567");
     expect(normalizeReference("ab123456")).toBe("AB123456");
+  });
+});
+
+describe("stripReferenceLabel", () => {
+  it("drops a leading label only when a plausible number remains", () => {
+    expect(stripReferenceLabel("Referenz: 7 K 123/24")).toBe("7 K 123/24");
+    expect(stripReferenceLabel("Referenz 4711-08")).toBe("4711-08");
+    expect(stripReferenceLabel("Vertragsnummer: AB 123456")).toBe("AB 123456");
+    expect(stripReferenceLabel("Vers.-Nr. 99887766")).toBe("Vers.-Nr. 99887766");
+    expect(stripReferenceLabel("Az. 3 C 45/23")).toBe("3 C 45/23");
+    // Nothing plausible behind it, or no label: unchanged.
+    expect(stripReferenceLabel("Referenz: X")).toBe("Referenz: X");
+    expect(stripReferenceLabel("Referenzkunde 12345")).toBe("Referenzkunde 12345");
+    expect(stripReferenceLabel("AB 123456")).toBe("AB 123456");
+  });
+
+  it("cleans a stored reference and answers to both keys", () => {
+    const legacy = { kind: "other" as const, value: "Referenz: 7 K 123/24", normalized: "REFERENZ7K12324", source: "user" as const };
+    expect(cleanReference(legacy)).toEqual({ ...legacy, value: "7 K 123/24", normalized: "7K12324" });
+    expect(referenceKeys(legacy).sort()).toEqual(["7K12324", "REFERENZ7K12324"]);
   });
 });
 

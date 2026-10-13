@@ -33,7 +33,12 @@ import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import { dbAll, dbExec, dbFirst } from "../db/adapter";
 import { documentCollectionItems, documentCollections, documents } from "../db/schema";
-import { normalizeReference, type DocumentReferenceNumber } from "./reference-numbers";
+import {
+  normalizeReference,
+  referenceKeys,
+  stripReferenceLabel,
+  type DocumentReferenceNumber,
+} from "./reference-numbers";
 import { normalizeSourceFolder } from "./source-folder";
 import { assertGroupMember } from "./visibility";
 import { discardCollectionExports } from "./collection-export";
@@ -44,7 +49,11 @@ export type CollectionKind = "manual" | "dossier";
 
 export interface CollectionRule {
   correspondent_slug?: string | null;
-  /** Normalised (letters and digits, upper-cased). */
+  /**
+   * As typed (trimmed, a leading label stripped), so the rule panel shows
+   * "7 K 123/24" and not "7K12324". Compared normalised on both sides; a rule
+   * saved before kept the normalised form, which compares the same.
+   */
   reference_numbers?: string[];
   source_folder_prefix?: string | null;
   /** Documents a person took out of this dossier; the rule leaves them alone. */
@@ -65,11 +74,15 @@ export function normalizeRule(
 ): CollectionRule | null {
   if (!input) return null;
   const correspondent = (input.correspondent_slug ?? "").trim().toLowerCase() || null;
-  const refs = [...new Set(
-    (input.reference_numbers ?? [])
-      .map((r) => normalizeReference(r ?? ""))
-      .filter((r) => r.length >= 3),
-  )];
+  const refs: string[] = [];
+  const seenRefs = new Set<string>();
+  for (const raw of input.reference_numbers ?? []) {
+    const shown = stripReferenceLabel(raw ?? "");
+    const key = normalizeReference(shown);
+    if (key.length < 3 || seenRefs.has(key)) continue;
+    seenRefs.add(key);
+    refs.push(shown);
+  }
   const folder = normalizeSourceFolder(input.source_folder_prefix);
   if (!correspondent && refs.length === 0 && !folder) return null;
   const rule: CollectionRule = {};
@@ -99,8 +112,8 @@ export function ruleMatchesDocument(rule: CollectionRule, doc: RuleSubject): boo
   if (!wantsCorrespondent && !wantsRefs) return false;
   if (wantsCorrespondent && doc.correspondent_slug !== rule.correspondent_slug) return false;
   if (wantsRefs) {
-    const have = new Set((doc.reference_numbers ?? []).map((r) => r.normalized));
-    if (!rule.reference_numbers!.some((n) => have.has(n))) return false;
+    const have = new Set((doc.reference_numbers ?? []).flatMap((r) => referenceKeys(r)));
+    if (!rule.reference_numbers!.some((n) => have.has(normalizeReference(stripReferenceLabel(n))))) return false;
   }
   return true;
 }
