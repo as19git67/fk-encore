@@ -1,255 +1,252 @@
-# Zähler-Reports — Ausbauplan (Issue #792, Etappe 6)
+# Meter Reports — Expansion Plan (Issue #792, Stage 6)
 
-Ergänzung zu `documentation/utility-meters.md` §5. Beschreibt, welche Auswertungen über
-den bestehenden Report-MVP hinaus sinnvoll sind, was dafür an Daten und
-Annahmen fehlt, und in welcher Reihenfolge das umgesetzt werden sollte.
+Supplement to `documentation/utility-meters.md` §5. Describes which analyses
+make sense beyond the existing report MVP, what data and assumptions are
+missing for them, and in which order they should be implemented.
 
-Status: **Etappe 6 vollständig umgesetzt** (6a–6e), ebenso die zunächst
-zurückgestellten Punkte: Saisonprofil A3 (#1022), Witterungsbereinigung C3
-(#1023), Abschlagsvergleich E3 (mit Etappe 8, #1018) und die
-Tages-/Wochen-Granularität (#1024). Details in `documentation/utility-meters.md`
+Status: **Stage 6 fully implemented** (6a–6e), as are the items that were
+initially deferred: season profile A3 (#1022), weather adjustment C3
+(#1023), advance-payment comparison E3 (with stage 8, #1018) and the
+day/week granularity (#1024). Details in `documentation/utility-meters.md`
 §5.1, §5.2.5, §5.2.6, §6.1.
 
 ---
 
-## 1. Ist-Stand (was schon da ist)
+## 1. Current state (what already exists)
 
-| Baustein | Ort | Inhalt |
+| Building block | Location | Content |
 |---|---|---|
-| Verbrauchsreihe je Zähler | `GET /meters/:id/report` | Monats-/Jahres-Buckets aus Ableseintervallen, über Gerätewechsel hinweg |
-| Aggregierter Energie-Report | `GET /meters/reports/energy` | Bezug, Einspeisung, Produktion, Eigenverbrauch, Autarkie, EV-Quote, WP-/Heizung-/WW-/Wallbox-Aufteilung, PV-Anteile |
-| Kostenrechnung | `tariffs.service.ts` | Netzbezugskosten, Grundpreis, Einspeiseerlös, vermiedener Netzbezug, PV-Nutzen, Netto-Stromkosten, `noPvElectricityCostEur` |
-| Tarif-Stammdaten | `meter_electricity_tariffs` | Arbeitspreis, Grundpreis, Einspeisevergütung, Eigenverbrauchswert, PV-Invest, Opportunitätskosten, Amortisationsjahre |
-| Auswertung im Frontend | `MetersView.vue`, `MeterDetailView.vue` | Mittelwerte, lineare Trendsteigung (nur Bezug + Autarkie), YTD-Vergleich Vorjahr |
+| Consumption series per meter | `GET /meters/:id/report` | Monthly/yearly buckets from reading intervals, across device replacements |
+| Aggregated energy report | `GET /meters/reports/energy` | Grid import, feed-in, production, self-consumption, self-sufficiency, self-consumption rate, heat pump/heating/hot water/wallbox breakdown, PV shares |
+| Cost calculation | `tariffs.service.ts` | Grid import costs, base price, feed-in revenue, avoided grid import, PV benefit, net electricity costs, `noPvElectricityCostEur` |
+| Tariff master data | `meter_electricity_tariffs` | Unit price, base price, feed-in tariff, self-consumption value, PV investment, opportunity costs, payback years |
+| Evaluation in the frontend | `MetersView.vue`, `MeterDetailView.vue` | Averages, linear trend slope (grid import + self-sufficiency only), year-to-date comparison with the previous year |
 
-Vorhandene Messstellen: Netzstrom Bezug/Einspeisung, PV Produktion, Wärmepumpe
-komplett, Fußbodenheizung (+PV), Warmwasser (+PV), E-Auto Wallbox (+PV),
-4 Betriebsstundenzähler (Verdichter, Primär-, Heizungs-, Warmwasserpumpe),
-Wasser.
+Existing metering points: grid electricity import/feed-in, PV production,
+heat pump overall, underfloor heating (+PV), hot water (+PV), EV wallbox (+PV),
+4 operating-hours meters (compressor, primary pump, heating pump, hot water
+pump), water.
 
-### 1.1 Bekannte Lücken im Ist-Stand
+### 1.1 Known gaps in the current state
 
-> Alle fünf Punkte sind behoben: 1–4 mit Etappe 6a/6b, Punkt 5 (PV-Invest)
-> mit 6c.
+> All five items are fixed: 1–4 with stage 6a/6b, item 5 (PV investment)
+> with 6c.
 
-1. **Wallbox fehlt im Energie-Report.** `ev_charger_total` / `ev_charger_pv`
-   sind in `MeterRole`, in `meters_role_check` (Migration 0126) und in
-   `reports.service.ts` implementiert, aber der damalige Historien-Import
-   (inzwischen entfernt) mappte `e_auto_wallbox` / `e_auto_pv` nicht, und
-   keine Migration backfilled sie. Die Rolle muss
-   heute manuell in der UI gesetzt werden, sonst bleiben alle
-   Wallbox-Kennzahlen `null`.
-2. **Bucket-Zuordnung ohne Interpolation.** Ein Ableseintervall wird
-   vollständig dem Bucket seines *Startzeitpunkts* zugerechnet. Wer am 3.
-   und am 5. des Folgemonats abliest, verschiebt den halben Monatsverbrauch.
-   Für Jahres-Buckets und für den Vorjahresvergleich verzerrt das spürbar.
-3. **Trend nur im Frontend, nur für zwei Kennzahlen.** Die Regression steckt
-   in `MetersView.vue` und deckt Bezug + Autarkie ab — nicht Haushaltsstrom,
-   Heizung, Warmwasser, Wallbox, Wasser.
-4. **Keine Saisonbereinigung.** Rohe Monatswerte einer Heizung sind
-   zwischen Januar und Juli nicht vergleichbar; eine Trendgerade über
-   12 Rohmonate misst überwiegend die Jahreszeit.
-5. **PV-Invest ungenutzt.** `pv_investment_*` und die aus dem Excel-Sheet
-   übernommenen Ergebniszellen (`opportunity_cost_*`, `amortization_years`)
-   sind gespeichert, fließen aber in keine Rechnung ein. Letztere sind
-   inzwischen entfallen: sie waren Resultate, keine Eingaben — geblieben ist
-   `expected_return_rate` als einzige Annahme dahinter (Migration 0150).
+1. **Wallbox missing from the energy report.** `ev_charger_total` / `ev_charger_pv`
+   are implemented in `MeterRole`, in `meters_role_check` (migration 0126) and
+   in `reports.service.ts`, but the former history import
+   (since removed) did not map `e_auto_wallbox` / `e_auto_pv`, and
+   no migration backfills them. Today the role has to be set
+   manually in the UI, otherwise all wallbox metrics stay `null`.
+2. **Bucket allocation without interpolation.** A reading interval is
+   attributed entirely to the bucket of its *start time*. Anyone who reads on
+   the 3rd and on the 5th of the following month shifts half of the monthly consumption.
+   For yearly buckets and for the previous-year comparison this distorts noticeably.
+3. **Trend only in the frontend, only for two metrics.** The regression lives
+   in `MetersView.vue` and covers grid import + self-sufficiency — not household
+   electricity, heating, hot water, wallbox, water.
+4. **No seasonal adjustment.** Raw monthly values of a heating system are not
+   comparable between January and July; a trend line over
+   12 raw months mostly measures the season.
+5. **PV investment unused.** `pv_investment_*` and the result cells taken over
+   from the Excel sheet (`opportunity_cost_*`, `amortization_years`)
+   are stored but enter no calculation. The latter have since been dropped:
+   they were results, not inputs — what remains is
+   `expected_return_rate` as the only assumption behind them (migration 0150).
 
 ---
 
-## 2. Report-Ideen
+## 2. Report ideas
 
-Gruppiert nach Nutzen. Die vom Auftraggeber genannten Wünsche sind mit ⭐
-markiert.
+Grouped by benefit. The wishes named by the client are marked with ⭐.
 
-### A — PV-Wirtschaftlichkeit
+### A — PV profitability
 
-| # | Report | Inhalt | Braucht |
+| # | Report | Content | Needs |
 |---|---|---|---|
-| A1 ⭐ | **PV-Ersparnis kumuliert** | Kumulierte Kurve „Stromkosten mit PV“ vs. „hypothetische Kosten ohne PV“ seit Inbetriebnahme; Differenzfläche = Ersparnis. Je Bucket bereits als `netElectricityCostEur` / `noPvElectricityCostEur` vorhanden — es fehlt nur Kumulierung + Darstellung. | — |
-| A2 ⭐ | **Amortisation** | Invest (netto + MwSt.) minus kumulierter PV-Nutzen → Restbetrag, prognostiziertes Amortisationsdatum aus dem Mittel der letzten 12 Monate. Zweite Linie *inkl.* Opportunitätskosten: entgangene Rendite, zinseszinslich aus `expected_return_rate` gerechnet — nicht als fertiger Betrag gepflegt. | `pv_investment_*`, `expected_return_rate` |
-| A3 ✅ | **Saisonprofil Autarkie/Eigenverbrauch** | Heatmap Jahr × Monat für Autarkie und Eigenverbrauchsquote. Zeigt sofort, in welchen Monaten der Speicher/die Anlage trägt und ob sich das über die Jahre verbessert. `GET /meters/reports/season-profile` (#1022). | — |
-| A4 | **Ertrag je kWp / Performance-Ratio** | Jahresertrag pro kWp gegen Vorjahre — der einzige belastbare Frühindikator für Anlagendegradation oder verschmutzte Module. | Anlagenleistung kWp (neue Stammdatum-Annahme; wird ohnehin für die korrekte Einspeise-Leistungsstufe gebraucht, siehe `documentation/utility-meters.md` §5.2) |
+| A1 ⭐ | **Cumulative PV savings** | Cumulative curve "electricity costs with PV" vs. "hypothetical costs without PV" since commissioning; difference area = savings. Already available per bucket as `netElectricityCostEur` / `noPvElectricityCostEur` — only cumulation + presentation are missing. | — |
+| A2 ⭐ | **Payback** | Investment (net + VAT) minus cumulative PV benefit → remaining amount, forecast payback date from the average of the last 12 months. Second line *incl.* opportunity costs: forgone return, computed with compound interest from `expected_return_rate` — not maintained as a finished amount. | `pv_investment_*`, `expected_return_rate` |
+| A3 ✅ | **Season profile self-sufficiency/self-consumption** | Heatmap year × month for self-sufficiency and self-consumption rate. Shows at a glance in which months the battery/system carries and whether this improves over the years. `GET /meters/reports/season-profile` (#1022). | — |
+| A4 | **Yield per kWp / performance ratio** | Annual yield per kWp against previous years — the only reliable early indicator of system degradation or dirty modules. | System capacity in kWp (new master-data assumption; it is needed anyway for the correct feed-in capacity tier, see `documentation/utility-meters.md` §5.2) |
 
-### B — Technologie-Vergleich (kontrafaktisch)
+### B — Technology comparison (counterfactual)
 
-Das sind Modellrechnungen, keine Messungen. Entscheidend ist, dass jede
-Annahme sichtbar, datiert und editierbar ist — sonst ist die Zahl wertlos.
-Darstellung deshalb immer mit ausklappbarer Annahmen-Box.
+These are model calculations, not measurements. What matters is that every
+assumption is visible, dated and editable — otherwise the number is worthless.
+The presentation therefore always comes with a collapsible assumptions box.
 
-| # | Report | Rechenweg | Braucht |
+| # | Report | Calculation | Needs |
 |---|---|---|---|
-| B1 ⭐ | **Wärmepumpe vs. Gasheizung** | Wärmemenge = (Heizung + Warmwasser) [kWh el.] × JAZ. Gasbedarf = Wärmemenge ÷ Kesselwirkungsgrad. Gaskosten = Gasbedarf × Gaspreis + Gas-Grundpreis. Gegenüberstellung mit den *tatsächlichen* Stromkosten für Heizung+WW (PV-Anteil zum Eigenverbrauchswert, Netzanteil zum Arbeitspreis). Ausgabe: €/Monat, €/Jahr, kumuliert. | Annahmen: JAZ (bzw. getrennt Heizung/WW), Kesselwirkungsgrad, Gaspreis-Zeitreihe, Gas-Grundpreis |
-| B2 ⭐ | **E-Auto vs. Benzin-Pkw** | km = Wallbox-kWh ÷ Verbrauch [kWh/100 km] × 100. Benzinbedarf = km ÷ 100 × [l/100 km]. Kosten Benzin = Liter × Benzinpreis-Zeitreihe. Kosten E-Auto = PV-Anteil × Eigenverbrauchswert + Netzanteil × Arbeitspreis. Ausgabe: €/Monat, €/Jahr, kumuliert, zusätzlich „ct/km“ beider Varianten. | Rollen-Fix (§1.1.1); Annahmen: kWh/100 km, l/100 km, Benzinpreis-Zeitreihe. Optional: Ladeverluste-Faktor |
-| B3 | **CO₂-Bilanz** | Vermiedenes CO₂ aus PV (Eigenverbrauch + Einspeisung × Netzmix-Faktor) sowie aus B1/B2 (Erdgas 0,201 kg/kWh, Benzin 2,37 kg/l). Netzbezug mit jahresspezifischem Netzmix. Fällt fast gratis ab, sobald B1/B2 stehen. | Netzmix-Faktor je Jahr (Annahme-Zeitreihe) |
-| B4 | **Sanity-Check JAZ aus Betriebsstunden** | Verdichterstunden × geschätzte Leistungsaufnahme gegen tatsächlichen WP-Stromverbrauch — plausibilisiert die für B1 angenommene JAZ, ohne einen Wärmemengenzähler zu haben. Ehrlicherweise nur eine Größenordnung, aber besser als eine ungeprüfte Annahme. | — |
+| B1 ⭐ | **Heat pump vs. gas heating** | Heat quantity = (heating + hot water) [kWh el.] × JAZ (seasonal performance factor). Gas demand = heat quantity ÷ boiler efficiency. Gas costs = gas demand × gas price + gas base price. Compared with the *actual* electricity costs for heating+hot water (PV share at the self-consumption value, grid share at the unit price). Output: €/month, €/year, cumulative. | Assumptions: JAZ (or separately heating/hot water), boiler efficiency, gas price time series, gas base price |
+| B2 ⭐ | **EV vs. petrol car** | km = wallbox kWh ÷ consumption [kWh/100 km] × 100. Petrol demand = km ÷ 100 × [l/100 km]. Petrol costs = liters × petrol price time series. EV costs = PV share × self-consumption value + grid share × unit price. Output: €/month, €/year, cumulative, additionally "ct/km" of both variants. | Role fix (§1.1.1); assumptions: kWh/100 km, l/100 km, petrol price time series. Optional: charging-loss factor |
+| B3 | **CO₂ balance** | Avoided CO₂ from PV (self-consumption + feed-in × grid-mix factor) as well as from B1/B2 (natural gas 0.201 kg/kWh, petrol 2.37 kg/l). Grid import with the year-specific grid mix. Falls out almost for free once B1/B2 exist. | Grid-mix factor per year (assumption time series) |
+| B4 | **Sanity check of the JAZ from operating hours** | Compressor hours × estimated power consumption against actual heat pump electricity consumption — checks the plausibility of the JAZ assumed for B1 without having a heat meter. Honestly only an order of magnitude, but better than an unchecked assumption. | — |
 
-> Hinweis zur Belastbarkeit: B1 steht und fällt mit der JAZ. Ohne
-> Wärmemengenzähler ist sie geschätzt; der Report sollte die Ersparnis
-> deshalb als **Bandbreite** über JAZ ± 0,5 zeigen statt als eine
-> Punktzahl. Gleiches gilt für B2 mit dem Realverbrauch des Verbrenners.
+> Note on reliability: B1 stands and falls with the JAZ. Without a
+> heat meter it is estimated; the report should therefore show the savings
+> as a **range** over JAZ ± 0.5 rather than as a single figure. The same applies
+> to B2 with the real-world consumption of the combustion car.
 
-### C — Verbrauchstrends ⭐
+### C — Consumption trends ⭐
 
-Kern des Wunsches: „nehme ich tendenziell mehr oder weniger?“ — je Kennzahl
-Haushaltsstrom (ohne Heizung/WW/Wallbox), Heizung, Warmwasser, Wallbox,
-Wasser.
+Core of the wish: "do I tend to use more or less?" — per metric
+household electricity (without heating/hot water/wallbox), heating, hot water, wallbox,
+water.
 
-| # | Report | Inhalt |
+| # | Report | Content |
 |---|---|---|
-| C1 | **Trend-Dashboard** | Eine Kachel je Kennzahl: aktueller 12-Monats-Wert, Änderung ggü. den 12 Monaten davor (absolut + %), Richtungspfeil, Sparkline. Zusätzlich Steigung pro Jahr aus linearer Regression über die **rollierende 12-Monats-Summe** — dadurch ist die Saison herausgerechnet und der Trend tatsächlich lesbar. |
-| C2 | **Vorjahresvergleich je Bucket** | `compare=previous_year`: jeder Monat/Jahr bekommt `previousValue`, `deltaAbsolute`, `deltaPercent`. Im Chart als zweite, blassere Linie. Bereits als offener Punkt in `documentation/utility-meters.md` §5.1 notiert. |
-| C3 ✅ | **Witterungsbereinigung Heizung** | Heizverbrauch ÷ Gradtagzahl des Monats. Ohne das ist „mehr Heizstrom als letztes Jahr“ meist nur „kälterer Winter“. Umgesetzt mit beiden Quellen: Gradtagzahl-Reihe als Annahme (`heating_degree_days`, Datei-Import) oder — ohne externe Daten — aus den eigenen Daten geschätzter Referenzwinter, jeweils ausgewiesen (`GET /meters/reports/heating-weather`, #1023). |
-| C4 | **Ausreißer-Kontext** | Im Trend-Chart die Buckets markieren, die auf ungewöhnlich langen/kurzen Ableseintervallen beruhen (< 20 oder > 40 Tage bei Monatsbuckets). Verhindert Fehlinterpretationen, bevor Etappe 7 (Anomalien) überhaupt existiert. |
+| C1 | **Trend dashboard** | One tile per metric: current 12-month value, change vs. the 12 months before (absolute + %), direction arrow, sparkline. Additionally slope per year from linear regression over the **rolling 12-month sum** — this removes the season and makes the trend actually readable. |
+| C2 | **Previous-year comparison per bucket** | `compare=previous_year`: every month/year gets `previousValue`, `deltaAbsolute`, `deltaPercent`. In the chart as a second, paler line. Already noted as an open item in `documentation/utility-meters.md` §5.1. |
+| C3 ✅ | **Weather adjustment of heating** | Heating consumption ÷ heating degree days of the month. Without it, "more heating electricity than last year" is usually just "colder winter". Implemented with both sources: degree-day series as an assumption (`heating_degree_days`, file import) or — without external data — a reference winter estimated from the own data, each time stated explicitly (`GET /meters/reports/heating-weather`, #1023). |
+| C4 | **Outlier context** | In the trend chart, mark the buckets that are based on unusually long/short reading intervals (< 20 or > 40 days for monthly buckets). Prevents misinterpretations before stage 7 (anomalies) even exists. |
 
-### D — Betrieb & Anlagenzustand
+### D — Operation & system condition
 
-| # | Report | Inhalt |
+| # | Report | Content |
 |---|---|---|
-| D1 | **kWh je Verdichterstunde** | Stromverbrauch WP ÷ Verdichterstunden, über die Jahre. Steigender Wert = sinkende Effizienz (Vereisung, Kältemittelverlust, verschmutzter Wärmetauscher). |
-| D2 | **Laufzeitanteil & Taktung** | Betriebsstunden je Pumpe pro Monat als Auslastung in %; Verdichterstunden pro Heiz-kWh als Taktungsindikator. |
-| D3 | **Wasser: Grundlast-Detektor** | Kleinster Tagesverbrauch eines Monats (aus Ableseintervallen abgeleitet). Ein steigender Boden bei sonst gleichem Verbrauch ist das klassische Signal für einen laufenden Spülkasten oder ein Leck. |
+| D1 | **kWh per compressor hour** | Heat pump electricity consumption ÷ compressor hours, over the years. A rising value = declining efficiency (icing, refrigerant loss, dirty heat exchanger). |
+| D2 | **Runtime share & cycling** | Operating hours per pump per month as utilization in %; compressor hours per heating kWh as a cycling indicator. |
+| D3 | **Water: base-load detector** | Smallest daily consumption of a month (derived from reading intervals). A rising floor at otherwise unchanged consumption is the classic signal for a running toilet cistern or a leak. |
 
-### E — Kosten & Finance
+### E — Costs & Finance
 
-| # | Report | Inhalt |
+| # | Report | Content |
 |---|---|---|
-| E1 | **Kosten je Anwendung** | Heizung, Warmwasser, Wallbox, Haushalt jeweils in € — PV-Anteil zum Eigenverbrauchswert, Netzanteil zum Arbeitspreis. Beantwortet „was kostet mich das Heizen wirklich“ direkt und ist die Grundlage für B1/B2. |
-| E2 | **Wasserkosten** | Analog Strom mit Wasser-/Abwassertarif (Arbeitspreis je m³ + Grundgebühr). |
-| E3 ✅ | **Abschlag vs. Ist** | Gezahlte Abschläge (Finance, über Ablesungen verknüpft) gegen berechnete Ist-Kosten → erwartete Nachzahlung/Erstattung vor der Jahresabrechnung. `GET /meters/reports/advance-payments` (#1018). |
+| E1 | **Costs per application** | Heating, hot water, wallbox, household each in € — PV share at the self-consumption value, grid share at the unit price. Directly answers "what does heating really cost me" and is the basis for B1/B2. |
+| E2 | **Water costs** | Analogous to electricity with water/wastewater tariff (unit price per m³ + base fee). |
+| E3 ✅ | **Advance payment vs. actual** | Advance payments made (Finance, linked via readings) against calculated actual costs → expected additional payment/refund before the annual statement. `GET /meters/reports/advance-payments` (#1018). |
 
 ---
 
-## 3. Technische Voraussetzungen
+## 3. Technical prerequisites
 
-### 3.1 Report-Kern (Grundlage für fast alles oben)
+### 3.1 Report core (basis for almost everything above)
 
-- **Interpolation auf Bucket-Grenzen.** Verbrauch eines Ableseintervalls
-  linear auf die überlappenden Buckets verteilen statt komplett dem
-  Start-Bucket zuzuschlagen. Betrifft `buildMeterReportBuckets`.
-  Rückwärtskompatibilität: als Option `allocation=interval_start|interpolated`
-  mit `interpolated` als neuem Default, damit sich Zahlen erklärbar ändern.
-- **Vorjahresvergleich** (`compare=previous_year`) in `MeterReport` und
+- **Interpolation onto bucket boundaries.** Distribute the consumption of a
+  reading interval linearly onto the overlapping buckets instead of attributing it entirely
+  to the start bucket. Affects `buildMeterReportBuckets`.
+  Backward compatibility: as option `allocation=interval_start|interpolated`
+  with `interpolated` as the new default, so that numbers change in an explainable way.
+- **Previous-year comparison** (`compare=previous_year`) in `MeterReport` and
   `EnergyReport`.
-- **Rollierende 12-Monats-Summe + Trendkennzahlen im Backend**, statt der
-  Regression im Frontend. Ergebnis je Kennzahl: `rolling12`, `slopePerYear`,
+- **Rolling 12-month sum + trend metrics in the backend**, instead of the
+  regression in the frontend. Result per metric: `rolling12`, `slopePerYear`,
   `changeVsPreviousYear`, `dataPoints`.
-- `granularity=day|week` — umgesetzt (#1024): Tages-Buckets `YYYY-MM-DD`,
-  ISO-Wochen `YYYY-Www`; für monatliche Handablesungen wenig aussagekräftig,
-  wertvoll sobald die API-Ingestion täglich liefert.
+- `granularity=day|week` — implemented (#1024): day buckets `YYYY-MM-DD`,
+  ISO weeks `YYYY-Www`; not very informative for monthly manual readings,
+  valuable as soon as the API ingestion delivers daily.
 
-### 3.2 Annahmen-Stammdaten
+### 3.2 Assumption master data
 
-B1/B2/B3 brauchen datierte Annahmen (Gaspreis, Benzinpreis, JAZ,
-Kesselwirkungsgrad, kWh/100 km, l/100 km, kWp, Netzmix). Die vorhandene
-Tabelle `meter_electricity_tariffs` ist bereits ein generischer
-`(kind, valid_from, amount, unit)`-Speicher und enthält mit
-`pv_investment_*` / `expected_return_rate` schon nicht-tarifliche Werte.
+B1/B2/B3 need dated assumptions (gas price, petrol price, JAZ,
+boiler efficiency, kWh/100 km, l/100 km, kWp, grid mix). The existing
+table `meter_electricity_tariffs` is already a generic
+`(kind, valid_from, amount, unit)` store and, with
+`pv_investment_*` / `expected_return_rate`, already contains non-tariff values.
 
-**Empfehlung:** Tabelle wiederverwenden und um neue `kind`s und `unit`s
-erweitern (`eur_per_l`, `eur_per_m3`, `kwh_per_100km`, `l_per_100km`,
-`ratio`, `kw`, `kg_per_kwh`), in der UI als „Tarife & Annahmen“ mit zwei
-Abschnitten führen. Das spart eine Migration samt zweitem CRUD; der Preis
-ist ein inhaltlich etwas weiter gefasster Tabellenname.
-Alternative wäre eine eigene `meter_assumptions`-Tabelle — sauberer benannt,
-aber doppelter Code für dieselbe Semantik.
+**Recommendation:** Reuse the table and extend it with new `kind`s and `unit`s
+(`eur_per_l`, `eur_per_m3`, `kwh_per_100km`, `l_per_100km`,
+`ratio`, `kw`, `kg_per_kwh`), and present it in the UI as "Tarife & Annahmen"
+(tariffs & assumptions) with two sections. This saves a migration plus a second CRUD; the price
+is a table name that is somewhat broader in meaning.
+The alternative would be a separate `meter_assumptions` table — named more cleanly,
+but duplicated code for the same semantics.
 
-Jede Modellrechnung liefert die verwendeten Annahmen in der Response mit
-(`assumptions: [{ kind, amount, unit, validFrom }]`), damit die UI sie
-anzeigen kann und die Zahl nachvollziehbar bleibt.
+Every model calculation returns the assumptions used in the response
+(`assumptions: [{ kind, amount, unit, validFrom }]`), so that the UI can
+display them and the number stays traceable.
 
-### 3.3 Rollen-Fix (Blocker für B2)
+### 3.3 Role fix (blocker for B2)
 
-- `IMPORT_METER_ROLES` um `e_auto_wallbox → ev_charger_total` und
-  `e_auto_pv → ev_charger_pv` ergänzen.
-- Migration mit Backfill für bereits importierte Bestände (Muster: 0123).
-- Test, der sicherstellt, dass jede in `MeterRole` definierte Rolle nach dem
-  Import auch tatsächlich vergeben ist — genau diese Lücke ist sonst
-  unsichtbar.
+- Extend `IMPORT_METER_ROLES` with `e_auto_wallbox → ev_charger_total` and
+  `e_auto_pv → ev_charger_pv`.
+- Migration with backfill for already imported data (pattern: 0123).
+- A test that ensures every role defined in `MeterRole` is actually
+  assigned after the import — exactly this gap is otherwise invisible.
 
 ---
 
-## 4. Vorgeschlagene Reihenfolge
+## 4. Proposed order
 
-| Etappe | Inhalt | Warum hier |
+| Stage | Content | Why here |
 |---|---|---|
-| **6a** ✅ | Report-Kern: Interpolation, Vorjahresvergleich, Trend-/Rolling-Kennzahlen im Backend + Rollen-Fix | Grundlage; ohne Interpolation und Saisonbereinigung sind alle Trendaussagen unsauber |
-| **6b** ✅ | Trend-Dashboard (C1, C2, C4) im Frontend | Der direkt gewünschte Nutzen, sobald 6a steht |
-| **6c** ✅ | PV-Ersparnis kumuliert + Amortisation (A1, A2), Kosten je Anwendung (E1) | Nutzt nur vorhandene Tarife, keine neuen Annahmen |
-| **6d** ✅ | Annahmen-Stammdaten + Gas- und Benzin-Vergleich (B1, B2), CO₂ (B3) | Braucht 6c (Kosten je Anwendung) als Vergleichsbasis |
-| **6e** ✅ | Anlagenzustand (D1–D3), Ertrag je kWp (A4), Wasserkosten (E2) | Nice-to-have, unabhängig voneinander |
-| **6f** ✅ | Saisonprofil (A3), Witterungsbereinigung (C3), Tages-/Wochen-Granularität | Nachträge aus #1022, #1023, #1024 |
-| **8** ✅ | Finance-Link + Abschlagsvergleich (E3) | #1018 |
+| **6a** ✅ | Report core: interpolation, previous-year comparison, trend/rolling metrics in the backend + role fix | Foundation; without interpolation and seasonal adjustment all trend statements are unsound |
+| **6b** ✅ | Trend dashboard (C1, C2, C4) in the frontend | The directly desired benefit, as soon as 6a is in place |
+| **6c** ✅ | Cumulative PV savings + payback (A1, A2), costs per application (E1) | Uses only existing tariffs, no new assumptions |
+| **6d** ✅ | Assumption master data + gas and petrol comparison (B1, B2), CO₂ (B3) | Needs 6c (costs per application) as comparison basis |
+| **6e** ✅ | System condition (D1–D3), yield per kWp (A4), water costs (E2) | Nice-to-have, independent of each other |
+| **6f** ✅ | Season profile (A3), weather adjustment (C3), day/week granularity | Follow-ups from #1022, #1023, #1024 |
+| **8** ✅ | Finance link + advance-payment comparison (E3) | #1018 |
 
-Jede Etappe einzeln testbar und deploybar; `npm run test` vor jedem Push.
+Each stage can be tested and deployed individually; `npm run test` before every push.
 
 ---
 
-## 5. Entscheidungen
+## 5. Decisions
 
-Getroffen:
+Made:
 
-1. **Interpolation ist der neue Default** (`allocation=interpolated`), die
-   Excel-Logik bleibt als `allocation=interval_start` erreichbar.
-2. **Annahmen kommen in `meter_electricity_tariffs`** — die Tabelle wird um
-   neue `kind`s und `unit`s erweitert statt eine zweite Tabelle anzulegen
-   (§3.2). Umsetzung in 6d.
-3. **`granularity=day|week`** ist umgesetzt (#1024); ISO-Wochen, Montag
-   bis Sonntag.
-4. **Gradtagzahlen** (C3) — Standard ist der automatische Abruf aus dem
-   Open-Meteo-Archiv (ERA5-Tagesmittel für den hinterlegten Wohnort, VDI-2067-
-   Summe, täglicher Auffüll-Job); die Reihe liegt als Annahme
-   `heating_degree_days` (Einheit `kd`, eine Zeile je Monat) und kann
-   ebenso per Datei-Import oder von Hand gepflegt werden — vorhandene Zeilen
-   überschreibt der Abruf nie. Fehlt beides, schätzt der Report den
-   Referenzwinter aus den eigenen Daten und sagt das im Frontend.
+1. **Interpolation is the new default** (`allocation=interpolated`), the
+   Excel logic remains available as `allocation=interval_start`.
+2. **Assumptions go into `meter_electricity_tariffs`** — the table is extended
+   with new `kind`s and `unit`s instead of creating a second table
+   (§3.2). Implemented in 6d.
+3. **`granularity=day|week`** is implemented (#1024); ISO weeks, Monday
+   to Sunday.
+4. **Degree days** (C3) — the default is the automatic retrieval from the
+   Open-Meteo archive (ERA5 daily mean for the stored home location, VDI 2067
+   sum, daily backfill job); the series is stored as the assumption
+   `heating_degree_days` (unit `kd`, one row per month) and can
+   equally be maintained via file import or by hand — the retrieval never overwrites
+   existing rows. If both are missing, the report estimates the
+   reference winter from the own data and says so in the frontend.
 
-Umgesetzt wie vorgeschlagen: die **JAZ-Bandbreite** (± 0,5) statt eines
-Punktwerts bei B1.
+Implemented as proposed: the **JAZ range** (± 0.5) instead of a
+single value for B1.
 
-Nachgezogen nach der Modell-Analyse (PR #1201, Details in
+Added after the model analysis (PR #1201, details in
 `utility-meters.md` §5.1–§5.2.4):
 
-5. **Summen nur über vollständige Buckets** (`complete`), Quoten aus gemeinsam
-   vorhandenen Paaren, fehlende Rolle → `null` statt 0, Datenfehler als
-   `warnings` statt gekappt, doppelte Rollen gemeldet.
-6. **PV-Anteil zur Einspeisevergütung** in beiden Vergleichen (statt
-   Doppelbewertung beim E-Auto und Nullbewertung bei der Wärmepumpe); CO₂ nur
-   über den Netzanteil; Annahmen und Preise zeitgültig je Bucket; Summen nur
-   über die gemeinsame Bucket-Menge; Ladeverluste als Annahme.
-7. **Amortisation** auf gemessenen Monaten (`measuredMonths`), Hochrechnung
-   nur aus zwölf lückenlosen Monaten; Investition als Summe aller Einträge;
-   `heatPumpRest` als eigene Anwendung.
-8. **Regressionen über die Kalenderzeit** mit Mindestpunktzahl; Vorjahr statt
-   Erstwert bei Verdichter und PV-Ertrag; PV-Ertrag immer je Kalenderjahr
-   gegen den Median; Wasser-Grundlast nur bei ausreichend dichten Ablesungen;
-   Laufzeitanteil ungekappt mit `implausible`-Marker.
-9. **Wasserrollen** `water_main`/`water_garden` (Grundgebühr einmal, Garten
-   ohne Abwasser); Einspeisevergütung nach Generation und Leistungsstufe;
-   Jahreskosten aus Monaten; Plausibilitätsgrenzen beim Anlegen von Annahmen.
+5. **Sums only over complete buckets** (`complete`), rates from jointly
+   available pairs, missing role → `null` instead of 0, data errors as
+   `warnings` instead of being clipped, duplicate roles reported.
+6. **PV share at the feed-in tariff** in both comparisons (instead of
+   double valuation for the EV and zero valuation for the heat pump); CO₂ only
+   via the grid share; assumptions and prices valid per bucket in time; sums only
+   over the common bucket set; charging losses as an assumption.
+7. **Payback** on measured months (`measuredMonths`), extrapolation
+   only from twelve gapless months; investment as the sum of all entries;
+   `heatPumpRest` as its own application.
+8. **Regressions over calendar time** with a minimum number of points; previous year instead of
+   first value for compressor and PV yield; PV yield always per calendar year
+   against the median; water base load only with sufficiently dense readings;
+   runtime share uncapped with an `implausible` marker.
+9. **Water roles** `water_main`/`water_garden` (base fee once, garden
+   without wastewater); feed-in tariff by generation and capacity tier;
+   annual costs from months; plausibility limits when creating assumptions.
 
-Nachgezogen nach der Nachrechnung des Energie-Blocks von Hand:
+Added after recalculating the energy block by hand:
 
-10. **Kennzahlen decken das angezeigte Fenster**: Die Kacheln des Blocks
-    „Energie" aggregieren genau die Zeiträume der Tabelle darunter (12 Monate
-    bzw. alle Jahre) und darin nur die vollständig abgelesenen, statt die
-    `totals` des Reports über die gesamte Historie zu zeigen. Quoten kommen aus
-    den Summen des Fensters, nicht aus dem Mittel der Monatsprozente, und der
-    Trend liegt auf der Kalenderachse. Hinter jedem Wert steht seine
-    Bezugsgröße (`kWh / Monat`, `€ / 12 Monate`).
+10. **Metrics cover the displayed window**: The tiles of the block
+    "Energie" (energy) aggregate exactly the periods of the table below (12 months
+    or all years) and within them only the completely read ones, instead of showing the
+    `totals` of the report over the entire history. Rates come from
+    the sums of the window, not from the mean of the monthly percentages, and the
+    trend lies on the calendar axis. Behind each value stands its
+    reference basis (`kWh / Monat`, `€ / 12 Monate`).
 
-11. **Benzinpreise automatisch**: Die datierte Annahme `petrol_price` wird aus
-    dem EU Weekly Oil Bulletin gefüllt (Monatsmittel Euro-Super 95 inkl.
-    Steuern, Bundesdurchschnitt), ab dem ersten Monat mit Wallbox-Ablesung.
-    Damit wird jeder Bucket mit dem Preis seiner eigenen Monate bewertet,
-    ohne dass jemand Jahre von Werten von Hand pflegt. Vorhandene Zeilen
-    bleiben stehen — der Landesdurchschnitt ist eine Modellannahme, nicht der
-    Preis an der eigenen Tankstelle.
+11. **Petrol prices automatic**: The dated assumption `petrol_price` is filled from
+    the EU Weekly Oil Bulletin (monthly mean Euro-Super 95 including
+    taxes, federal average), starting from the first month with a wallbox reading.
+    This values every bucket with the price of its own months,
+    without anyone having to maintain years of values by hand. Existing rows
+    stay in place — the national average is a model assumption, not the
+    price at one's own filling station.
 
-12. **Umsatzsteuer in der Amortisation**: Die erstattete Vorsteuer
-    (`pv_vat_refunded`) wird von der Investition abgezogen — zurückerstattetes
-    Geld muss sich nicht erwirtschaften. Umgekehrt mindert die Umsatzsteuer auf
-    den Eigenverbrauch (`self_consumption_vat_rate`, unentgeltliche
-    Wertabgabe) den PV-Nutzen, solange Regelbesteuerung gilt; eine zweite
-    Zeile mit 0 zum Wechsel in die Kleinunternehmerregelung beendet sie, ohne
-    die Jahre davor zu verändern.
+12. **VAT in the payback**: The refunded input VAT
+    (`pv_vat_refunded`) is deducted from the investment — money that was refunded
+    does not have to be earned back. Conversely, the VAT on
+    self-consumption (`self_consumption_vat_rate`, gratuitous
+    withdrawal) reduces the PV benefit as long as regular taxation applies; a second
+    row with 0 for the switch to the small-business scheme ends it without
+    changing the years before.

@@ -1,87 +1,86 @@
-# Finance — Flache Tags und KI-Tagging
+# Finance — Flat Tags and AI Tagging
 
-Ziel: Transaktionen werden nicht über Kategorien oder Rules klassifiziert,
-sondern über **flache, mehrfach zuweisbare Tags**. Neue Transaktionen
-bekommen beim Insert automatisch KI-Vorschläge vom `llm-service`; der User
-bestätigt oder verwirft. Analyse-Abfragen nutzen Freitextfragen, die in
-Tag-Filter übersetzt werden.
+Goal: Transactions are classified not via categories or rules
+but via **flat tags that can be assigned multiple times**. New transactions
+automatically receive AI suggestions from the `llm-service` on insert; the user
+confirms or discards them. Analysis queries use free-text questions that are
+translated into tag filters.
 
-Status: Feature-Plan, Umsetzung in Etappen.
+Status: feature plan, implementation in stages.
 
 ---
 
-## 1. Designentscheidung: flache Tags statt Hierarchie
+## 1. Design decision: flat tags instead of a hierarchy
 
-Das Legacy-Finanzkraft kannte eine hierarchische Kategorie-Baumstruktur
-plus Regel-Engine. Beides wird **nicht** portiert. Begründung:
+The legacy Finanzkraft had a hierarchical category tree
+plus a rule engine. Neither is ported. Rationale:
 
-- **Ein Buchungsvorgang gehört fast immer zu mehreren Clustern
-  gleichzeitig** — ein Restaurantbesuch in Florenz ist zugleich
-  `urlaub`, `italien-2024`, `restaurant`, und er lässt sich nicht
-  widerspruchsfrei in einem einzigen Baum unterbringen.
-- **Flexibles Querschneiden**: Summen lassen sich über beliebige Tag-
-  Kombinationen aggregieren, statt nur entlang einer Hierarchie.
-- **Weniger Pflegeaufwand**: keine Regel-Engine, die nachträglich wieder
-  angepasst werden muss, wenn sich ein Geschäft umbenennt oder ein neuer
-  Vertragspartner hinzukommt.
+- **A transaction almost always belongs to several clusters
+  at once** — a restaurant visit in Florence is at the same time
+  `urlaub`, `italien-2024`, `restaurant`, and it cannot be placed
+  consistently in a single tree.
+- **Flexible cross-cutting**: sums can be aggregated over arbitrary tag
+  combinations, instead of only along a hierarchy.
+- **Less maintenance effort**: no rule engine that has to be adjusted
+  again later when a shop is renamed or a new
+  contractual partner is added.
 
-Beispiel-Cluster, die sich damit sauber abbilden lassen:
+Example clusters that can be mapped cleanly this way:
 
-| Cluster | Tag-Set |
+| Cluster | Tag set |
 |---|---|
-| „Ausgaben Italien-Urlaub 2024" | `urlaub` + `italien-2024` |
-| „Altersvorsorge, jährliche Einzahlungen" | `altersvorsorge` + `jährlich` |
-| „Instandhaltung Immobilie X" | `immobilie-x` + `instandhaltung` |
-| „Rendite Kapitalanlage A" | `kapitalanlage-a` + `rendite` |
-| „Einzahlungen Lebensversicherung B" | `lebensversicherung-b` + `einzahlung` |
+| "Expenses Italy vacation 2024" | `urlaub` + `italien-2024` |
+| "Retirement provision, annual payments" | `altersvorsorge` + `jährlich` |
+| "Maintenance of property X" | `immobilie-x` + `instandhaltung` |
+| "Return on investment A" | `kapitalanlage-a` + `rendite` |
+| "Payments into life insurance B" | `lebensversicherung-b` + `einzahlung` |
 
-Empfohlene Tag-Konvention (nicht erzwungen, nur für Konsistenz in der
-UI-Vorschlagsliste): kleinschreiben, Bindestrich statt Leerzeichen,
-optional Jahr als Suffix.
+Recommended tag convention (not enforced, only for consistency in the
+UI suggestion list): lowercase, hyphen instead of spaces,
+optionally the year as a suffix.
 
 ---
 
-## 2. Datenmodell-Querverweis
+## 2. Data model cross-reference
 
-Siehe `finance-data-model.md` §2.6. Kernpunkte:
+See `finance-data-model.md` §2.6. Key points:
 
-- `finance_tag(id, name, source enum('user','ai'), created_at)` mit
-  `UNIQUE(name, source)` — derselbe Tag-Name kann als User- und als
-  AI-Variante existieren, sodass AI-Vorschläge User-Tags nicht
-  überschreiben.
+- `finance_tag(id, name, source enum('user','ai'), created_at)` with
+  `UNIQUE(name, source)` — the same tag name can exist as a user and as an
+  AI variant, so that AI suggestions do not overwrite user tags.
 - `finance_tag_transaction(tag_id, transaction_id, confidence numeric(4,3))`
-  — `confidence` ist nur bei `source = 'ai'` gesetzt.
-- **Promotion**: bestätigt der User einen AI-Tag, wird der Join-Eintrag
-  umgehängt: der AI-Tag-Eintrag wird gelöscht, ein User-Tag-Join-Eintrag
-  angelegt (`confidence = NULL`). Falls der gleiche User-Tag noch nicht
-  existiert, wird er beim Promoten angelegt.
+  — `confidence` is only set for `source = 'ai'`.
+- **Promotion**: if the user confirms an AI tag, the join entry is
+  re-pointed: the AI tag entry is deleted, a user tag join entry is
+  created (`confidence = NULL`). If the same user tag does not exist yet, it
+  is created on promotion.
 
 ---
 
-## 3. KI-Tagging-Pipeline
+## 3. AI tagging pipeline
 
-### 3.1 `llm-service`-Integration
+### 3.1 `llm-service` integration
 
-Der `llm-service` existiert bereits im Repo und wird von der Dokumenten-
-Pipeline genutzt — siehe `documents/llm-client.ts`. Er bietet zwei
-relevante Endpoints:
+The `llm-service` already exists in the repo and is used by the documents
+pipeline — see `documents/llm-client.ts`. It offers two
+relevant endpoints:
 
-- `POST /classify` — strukturierte JSON-Antwort (Llama im JSON-Mode).
-- `POST /embed` — 768-d-Embeddings aus `multilingual-e5-base`, für
+- `POST /classify` — structured JSON response (Llama in JSON mode).
+- `POST /embed` — 768-d embeddings from `multilingual-e5-base`, for
   `pgvector`.
 
-Das Finance-Modul bekommt einen eigenen `finance/llm-client.ts`, der
-denselben HTTP-Stil (Timeout, `LlmServiceUnavailableError`) übernimmt,
-aber finance-spezifische Prompts hält.
+The Finance module gets its own `finance/llm-client.ts`, which adopts
+the same HTTP style (timeout, `LlmServiceUnavailableError`)
+but holds Finance-specific prompts.
 
-### 3.2 Similarity: pgvector-Embeddings
+### 3.2 Similarity: pgvector embeddings
 
-`pgvector` ist im Projekt bereits aktiv (`document_embeddings` in
-Migration `0027_documents.sql`, HNSW-Index, `vector(768)`). Das Finance-
-Modul spiegelt das Pattern:
+`pgvector` is already active in the project (`document_embeddings` in
+migration `0027_documents.sql`, HNSW index, `vector(768)`). The Finance
+module mirrors the pattern:
 
 ```sql
--- in 0043_finance_initial.sql (optional) oder später
+-- in 0043_finance_initial.sql (optional) or later
 CREATE TABLE finance_transaction_embedding (
   transaction_id BIGINT PRIMARY KEY
                   REFERENCES finance_transaction(id) ON DELETE CASCADE,
@@ -94,15 +93,15 @@ CREATE INDEX finance_transaction_embedding_hnsw
   USING hnsw (embedding vector_cosine_ops);
 ```
 
-Der Embedding-Input ist `"<purpose> | <counterparty> | <amount-sign>"`
-(Vorzeichen als Token, damit Einnahmen und Ausgaben getrennt clustern).
+The embedding input is `"<purpose> | <counterparty> | <amount-sign>"`
+(sign as a token, so that income and expenses cluster separately).
 
-Trigram-Similarity als Minimal-Fallback ist möglich, liefert aber
-erfahrungsgemäß deutlich schlechteres Clustering, sobald Verwendungs-
-zwecke nur lose standardisiert sind. **Empfehlung: direkt mit
-Embeddings starten**, im Gleichklang mit den Dokumenten.
+Trigram similarity as a minimal fallback is possible, but in our
+experience delivers significantly worse clustering as soon as purposes
+are only loosely standardized. **Recommendation: start directly with
+embeddings**, in line with the documents.
 
-### 3.3 Pipeline je neuer Transaktion
+### 3.3 Pipeline per new transaction
 
 ```mermaid
 sequenceDiagram
@@ -116,20 +115,23 @@ sequenceDiagram
   TX->>EMB: embed("<purpose> | <counterparty> | <sign>")
   EMB-->>TX: vector(768)
   TX->>NN: INSERT finance_transaction_embedding
-  TX->>NN: SELECT 20 nächste Nachbarn WHERE source='user'
-  NN-->>TX: 20 Beispiel-Transaktionen + deren User-Tags
-  TX->>CLS: classify({ neu, 20 beispiele })
+  TX->>NN: SELECT 20 nearest neighbors WHERE source='user'
+  NN-->>TX: 20 example transactions + their user tags
+  TX->>CLS: classify({ new, 20 examples })
   CLS-->>TX: [{tag, confidence}, …]
   TX->>DB: UPSERT finance_tag (source='ai') + INSERT finance_tag_transaction
 ```
 
-**Trigger-Varianten**:
-- **A — synchron beim Insert** (MVP): best-effort, Fehler werden
-  geloggt, blockieren den Insert nicht.
-- **B — Batch**: `POST /finance/tags/suggest { accountId?, from?, to? }`
-  für Altbestand nach Datenimport.
+**Trigger variants**:
+- **A — synchronous on insert** (MVP): best-effort, errors are
+  logged and do not block the insert.
+- **B — batch**: `POST /finance/tags/suggest { accountId?, from?, to? }`
+  for legacy data after a data import.
 
-### 3.4 Prompt-Vertrag
+### 3.4 Prompt contract
+
+The prompt text sent to the model is German and stays so (English gloss
+below the block).
 
 ```
 Input:
@@ -146,20 +148,24 @@ Output (JSON):
   { "tags": [ { "tag": "urlaub", "confidence": 0.87 }, … ] }
 ```
 
-Die Einschränkung „nur Tags aus den Beispielen" hält die KI innerhalb
-des bestehenden Tag-Vokabulars. Neue Tags entstehen nur durch den User.
+Gloss of the instruction: suggest 1–5 tags; use EXCLUSIVELY tags that occur
+in at least one example, do not invent new tag names; give a confidence
+between 0 and 1 per tag.
 
-### 3.5 Persistenz-Regeln
+The restriction "only tags from the examples" keeps the AI within
+the existing tag vocabulary. New tags are created only by the user.
 
-- Bestehender User-Tag-Eintrag mit `(tag, transaction_id)`? → KI-
-  Vorschlag wird **nicht** geschrieben (kein „Bestätigen" dessen, was
-  der User schon gesetzt hat).
-- Bestehender AI-Eintrag mit höherer Confidence? → nicht überschreiben.
-- Confidence < 0.3 → verwerfen (Rauschen).
+### 3.5 Persistence rules
+
+- Existing user tag entry with `(tag, transaction_id)`? → the AI
+  suggestion is **not** written (no "confirming" of what
+  the user has already set).
+- Existing AI entry with a higher confidence? → do not overwrite.
+- Confidence < 0.3 → discard (noise).
 
 ---
 
-## 4. Analyse-Abfragen (post-MVP, eigene Etappe)
+## 4. Analysis queries (post-MVP, separate stage)
 
 ### 4.1 Endpoint
 
@@ -167,9 +173,9 @@ des bestehenden Tag-Vokabulars. Neue Tags entstehen nur durch den User.
 
 ```ts
 interface Req {
-  question: string;             // freitextlich, deutsch
-  timespanHint?: string;        // optional, z. B. "2024"
-  accountIds?: number[];        // optional Vorauswahl
+  question: string;             // free text, German
+  timespanHint?: string;        // optional, e.g. "2024"
+  accountIds?: number[];        // optional preselection
 }
 
 interface QueryAst {
@@ -180,7 +186,7 @@ interface QueryAst {
 }
 
 interface Res {
-  ast: QueryAst;                // für UI-Chips + Editierbarkeit
+  ast: QueryAst;                // for UI chips + editability
   total: { sum: number; count: number; avg: number };
   byMonth: { month: string; sum: number }[];
   topCounterparties: { name: string; sum: number; count: number }[];
@@ -189,16 +195,18 @@ interface Res {
 
 ### 4.2 Parsing
 
-`llm-service`-Call mit Prompt:
+`llm-service` call with the prompt (German, as sent to the model):
 
 > Wandle die folgende Frage in einen Tag-Filter-AST um. Die verfügbaren
 > Tags sind: <Liste>. Gib nur JSON zurück.
 
-Das aktuelle Tag-Vokabular wird dem Prompt aus `finance_tag`
-(`source='user'`) mitgegeben, damit die KI keine unbekannten Tags
-erfindet.
+(Convert the following question into a tag-filter AST. The available tags
+are: <list>. Return JSON only.)
 
-### 4.3 SQL-Skizze
+The current tag vocabulary is passed to the prompt from `finance_tag`
+(`source='user'`), so that the AI does not invent unknown tags.
+
+### 4.3 SQL sketch
 
 ```sql
 SELECT
@@ -214,20 +222,21 @@ WHERE t.booking_date BETWEEN :from AND :to
     WHERE tg.source = 'user'
       AND tg.name = ANY(:tags)
     GROUP BY transaction_id
-    HAVING COUNT(DISTINCT tg.name) = :tagCount   -- AND-Semantik
+    HAVING COUNT(DISTINCT tg.name) = :tagCount   -- AND semantics
   )
 GROUP BY month
 ORDER BY month;
 ```
 
-Für `op = 'OR'` entfällt das `HAVING`, die `IN`-Subquery liefert direkt
-die Vereinigung.
+For `op = 'OR'` the `HAVING` is dropped, and the `IN` subquery directly returns
+the union.
 
-### 4.4 Beispiel
+### 4.4 Example
 
-Frage: „Was habe ich im Italien-Urlaub 2024 ausgegeben?"
+Question: "Was habe ich im Italien-Urlaub 2024 ausgegeben?" (What did I spend
+on the Italy vacation 2024?)
 
-AST (vom LLM erzeugt):
+AST (generated by the LLM):
 ```json
 {
   "tags": ["urlaub", "italien-2024"],
@@ -236,42 +245,42 @@ AST (vom LLM erzeugt):
 }
 ```
 
-Die UI zeigt AST als editierbare Chips; der User kann den Zeitraum
-anpassen, Tags entfernen, Operator von AND auf OR schalten, und dann
-„Aktualisieren" drücken — zweite LLM-Runde nicht nötig.
+The UI shows the AST as editable chips; the user can adjust the time range,
+remove tags, switch the operator from AND to OR, and then
+press "Aktualisieren" (refresh) — a second LLM round is not needed.
 
 ---
 
-## 5. Etappen-Einordnung
+## 5. Stage classification
 
-| Etappe | Inhalt |
+| Stage | Content |
 |---|---|
-| MVP (mit Transaktionen) | §3 KI-Tagging-Pipeline, Embeddings-Tabelle |
-| Post-MVP | §4 Analyse-Abfragen + `AnalysisView` |
+| MVP (with transactions) | §3 AI tagging pipeline, embeddings table |
+| Post-MVP | §4 Analysis queries + `AnalysisView` |
 
 ---
 
-## 6. Referenzen
+## 6. References
 
-| Stelle | Wofür |
+| Location | Purpose |
 |---|---|
-| `documents/llm-client.ts` | HTTP-Client-Pattern, Timeout, Error-Typ |
-| `db/migrations/postgres/0027_documents.sql` | pgvector + HNSW-Setup |
-| `finance-data-model.md` §2.6 | Tag-Schema, Source-Enum, Promotion |
+| `documents/llm-client.ts` | HTTP client pattern, timeout, error type |
+| `db/migrations/postgres/0027_documents.sql` | pgvector + HNSW setup |
+| `finance-data-model.md` §2.6 | Tag schema, source enum, promotion |
 
 ---
 
-## 7. Offene Punkte
+## 7. Open points
 
-- **Kostenbudget pro Insert**: `classify`-Call direkt beim Insert
-  (synchron) oder asynchron über eine interne Queue? Bei Massen-Imports
-  summieren sich die LLM-Calls deutlich.
-- **Promotion-Schwelle**: ab welcher `confidence` darf die UI einen
-  „Auto-Apply"-Button anbieten, der alle Vorschläge eines Batches ohne
-  Einzelbestätigung promotet?
-- **Tag-Name-Normalisierung**: Trimmen, Lowercasing, Umlaut-Mapping beim
-  Eintragen erzwingen? Oder nur softe UI-Vorschläge?
-- **Embedding-Re-Run**: wenn ein neuer Tag entsteht, brauchen wir die
-  bestehenden Embeddings nicht neu zu rechnen, aber die KI-Vorschläge
-  für Altbestand sind dann veraltet — dafür ist der Batch-Endpoint aus
-  §3.3 Variante B gedacht.
+- **Cost budget per insert**: `classify` call directly on insert
+  (synchronous) or asynchronously via an internal queue? With bulk imports
+  the LLM calls add up significantly.
+- **Promotion threshold**: from which `confidence` may the UI offer an
+  "Auto-Apply" button that promotes all suggestions of a batch without
+  individual confirmation?
+- **Tag name normalization**: enforce trimming, lowercasing, umlaut mapping
+  on entry? Or only soft UI suggestions?
+- **Embedding re-run**: when a new tag is created, we do not need to
+  recompute the existing embeddings, but the AI suggestions
+  for legacy data are then outdated — the batch endpoint from
+  §3.3 variant B is intended for that.

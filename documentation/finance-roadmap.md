@@ -1,234 +1,233 @@
-# Finance — Etappen-Roadmap
+# Finance — Stage Roadmap
 
-Reihenfolge und Scope der Umsetzungsschritte nach Abschluss von Etappe 0
-(Architektur-Dokumentation). Jede Etappe nennt ihr Liefer-Artefakt,
-die leitende Architektur-Doku, Test-Schwerpunkte und Abhängigkeiten.
+Order and scope of the implementation steps after completion of stage 0
+(architecture documentation). Each stage names its deliverable,
+the guiding architecture doc, test focus, and dependencies.
 
-Status: Feature-Plan, Umsetzung startet mit Etappe 1.
+Status: feature plan, implementation starts with stage 1.
 
 ---
 
-## 0. Übersicht
+## 0. Overview
 
-| # | Titel | Leitende Doku | MVP? |
+| # | Title | Guiding doc | MVP? |
 |---|---|---|---|
-| 0 | Architektur-Dokumentation | alle 7 Dokus | ✓ (abgeschlossen) |
-| 1 | DB-Schema + Migration | `finance-data-model.md` | ✓ |
-| 2 | Credential-Crypto + FinTS-Client | `finance-fints-integration.md` §1–§3 | ✓ |
-| 3 | Bankkontakte-CRUD + TAN-Flow | `finance-fints-integration.md` §4 + `finance-frontend.md` §4.1/§4.5/§4.6 | ✓ |
-| 4 | Konten + ACL | `finance-data-model.md` §5 + `finance-frontend.md` §4.4/§4.7/§4.8 | ✓ |
-| 5 | Transaktionen + KI-Tagging | `finance-tagging-and-ai.md` §3 + `finance-frontend.md` §4.9–§4.12 | ✓ |
-| 6 | Sync-Cron + Push | `finance-fints-integration.md` §5 + `finance-frontend.md` §4.3 | ✓ |
-| 7 | Datenimport | `finance-data-import.md` + `finance-frontend.md` §4.13 | ✓ |
-| 8 | Frontend-Gesamtbild | `finance-frontend.md` §1–§5 | ✓ |
-| 9 | Analyse-Abfragen | `finance-tagging-and-ai.md` §4 + `finance-frontend.md` §4.2 | post-MVP |
+| 0 | Architecture documentation | all 7 docs | ✓ (completed) |
+| 1 | DB schema + migration | `finance-data-model.md` | ✓ |
+| 2 | Credential crypto + FinTS client | `finance-fints-integration.md` §1–§3 | ✓ |
+| 3 | Bank contacts CRUD + TAN flow | `finance-fints-integration.md` §4 + `finance-frontend.md` §4.1/§4.5/§4.6 | ✓ |
+| 4 | Accounts + ACL | `finance-data-model.md` §5 + `finance-frontend.md` §4.4/§4.7/§4.8 | ✓ |
+| 5 | Transactions + AI tagging | `finance-tagging-and-ai.md` §3 + `finance-frontend.md` §4.9–§4.12 | ✓ |
+| 6 | Sync cron + push | `finance-fints-integration.md` §5 + `finance-frontend.md` §4.3 | ✓ |
+| 7 | Data import | `finance-data-import.md` + `finance-frontend.md` §4.13 | ✓ |
+| 8 | Overall frontend picture | `finance-frontend.md` §1–§5 | ✓ |
+| 9 | Analysis queries | `finance-tagging-and-ai.md` §4 + `finance-frontend.md` §4.2 | post-MVP |
 
-MVP = Etappen 1–8. Etappe 9 folgt nach MVP.
+MVP = stages 1–8. Stage 9 follows after the MVP.
 
 ---
 
-## 1. Etappe 1 — DB-Schema + Migration
+## 1. Stage 1 — DB schema + migration
 
-**Ziel**: Migration `0043_finance_initial.sql` produktiv einsetzbar,
-Drizzle-Schema importierbar, Permissions seeded.
+**Goal**: Migration `0043_finance_initial.sql` ready for production use,
+Drizzle schema importable, permissions seeded.
 
-**Neue Dateien**:
-- `db/migrations/postgres/0043_finance_initial.sql` (Drizzle-generiert)
-- Ergänzung in `db/schema.ts` (alle Tabellen + Enums aus
+**New files**:
+- `db/migrations/postgres/0043_finance_initial.sql` (Drizzle-generated)
+- Addition in `db/schema.ts` (all tables + enums from
   `finance-data-model.md` §2)
-- Ergänzung in `db/seed.ts` (4 neue Permissions + Admin-Exclusion)
+- Addition in `db/seed.ts` (4 new permissions + admin exclusion)
 
-**Tests**: Schema-Konsistenz (`drizzle-kit check`), Migrations-Roundtrip
-gegen frische `encore_test`-DB.
+**Tests**: schema consistency (`drizzle-kit check`), migration round trip
+against a fresh `encore_test` DB.
 
-**Abhängigkeiten**: keine.
+**Dependencies**: none.
 
 ---
 
-## 2. Etappe 2 — Credential-Crypto + FinTS-Client
+## 2. Stage 2 — Credential crypto + FinTS client
 
-**Ziel**: Credentials verschlüsselt ablegen, `lib-fints` eingebunden,
-`runSynchronize` als testbare Funktion.
+**Goal**: Store credentials encrypted, integrate `lib-fints`,
+`runSynchronize` as a testable function.
 
-**Neue Dateien**:
+**New files**:
 - `finance/encore.service.ts`, `finance/types.ts`
 - `finance/encryption.ts` + `.test.ts`
 - `finance/fints-client.ts` + `.test.ts`
-- `package.json` ergänzt um `lib-fints`
-- `vitest.setup.ts` ergänzt um einen Mock für `encore.dev/config`,
-  damit Module, die Secrets beim Import instanziieren, in Tests
-  nicht am Fehler der fehlenden Encore-Runtime scheitern
-- Drei Encore-Secrets lokal + in CI gesetzt:
-  - `FinanceCredentialsKey` — 32 Byte base64, AES-256-GCM-Key
-  - `FinanceFintsProductId` — ZKA-registrierte Produkt-ID (lokal
-    Dummy ok, Prod Pflicht)
-  - `FinanceFintsProductVersion` — semantische Versionsnummer des
-    Finance-Moduls
+- `package.json` extended with `lib-fints`
+- `vitest.setup.ts` extended with a mock for `encore.dev/config`,
+  so that modules that instantiate secrets on import do not fail
+  in tests because of the missing Encore runtime
+- Three Encore secrets set locally + in CI:
+  - `FinanceCredentialsKey` — 32 bytes base64, AES-256-GCM key
+  - `FinanceFintsProductId` — ZKA-registered product ID (dummy
+    is fine locally, mandatory in prod)
+  - `FinanceFintsProductVersion` — semantic version number of the
+    Finance module
 
-**Tests**: Roundtrip + Tampering (§2.1), FinTS-Wrapper-Logik mit
-gemocktem `lib-fints` (§2.2 aus `finance-testing.md`).
+**Tests**: round trip + tampering (§2.1), FinTS wrapper logic with
+mocked `lib-fints` (§2.2 from `finance-testing.md`).
 
-**Abhängigkeiten**: Etappe 1 (Schema vorhanden, aber noch keine
-Endpoints nötig).
+**Dependencies**: stage 1 (schema present, but no endpoints needed
+yet).
 
 ---
 
-## 3. Etappe 3 — Bankkontakte-CRUD + TAN-Flow
+## 3. Stage 3 — Bank contacts CRUD + TAN flow
 
-**Ziel**: Ein User kann einen Bankkontakt anlegen, Credentials setzen,
-manuell einen Sync auslösen und die TAN bestätigen. Noch ohne Cron.
+**Goal**: A user can create a bank contact, set credentials,
+manually trigger a sync, and confirm the TAN. Still without cron.
 
-**Neue Dateien**:
+**New files**:
 - `finance/bankcontacts.ts` + `.test.ts`
-- `finance/statements.ts` + `.test.ts` (vorerst nur manueller Trigger)
+- `finance/statements.ts` + `.test.ts` (for now only the manual trigger)
 - `finance/tan-sessions.ts` + `.test.ts`
 - Frontend: `BankcontactsView`, `BankcontactDetailView`, `TanDialog` +
   `useBankcontactsStore`
 
-**Tests**: Happy-Path TAN-Flow End-to-End mit gemocktem FinTS-Client
-(§2.3/§2.4), Session-TTL, Falsche-TAN-Pfad.
+**Tests**: happy-path TAN flow end-to-end with a mocked FinTS client
+(§2.3/§2.4), session TTL, wrong-TAN path.
 
-**Abhängigkeiten**: Etappe 2.
+**Dependencies**: stage 2.
 
 ---
 
-## 4. Etappe 4 — Konten + ACL
+## 4. Stage 4 — Accounts + ACL
 
-**Ziel**: Konten lesbar für berechtigte User; Admin kann Zugriffsrechte
-vergeben.
+**Goal**: Accounts readable for authorized users; admin can grant
+access rights.
 
-**Neue Dateien**:
+**New files**:
 - `finance/accounts.ts` + `.test.ts`
 - `finance/account-access.ts` + `.test.ts`
 - Frontend: `AccountsView`, `AccountDetailView`,
   `AccountAssignmentView` + `useAccountsStore`
 
-**Tests**: ACL-Filter in GET-Endpoints (§2.5), Diff-Speichern im
+**Tests**: ACL filter in GET endpoints (§2.5), diff saving in
 `account-access` (§2.9).
 
-**Abhängigkeiten**: Etappe 3 (Bankkontakte liefern die FK für Konten).
+**Dependencies**: stage 3 (bank contacts provide the FK for accounts).
 
 ---
 
-## 5. Etappe 5 — Transaktionen + KI-Tagging
+## 5. Stage 5 — Transactions + AI tagging
 
-**Ziel**: Transaktionen werden beim Sync persistiert, KI-Vorschläge
-entstehen beim Insert, User kann sie annehmen/verwerfen/manuell
-ergänzen.
+**Goal**: Transactions are persisted during sync, AI suggestions
+are created on insert, the user can accept/discard/manually
+add to them.
 
-**Neue Dateien**:
+**New files**:
 - `finance/transactions.ts` + `.test.ts`
 - `finance/tags.ts` + `.test.ts`
 - `finance/tag-suggester.ts` + `.test.ts`
 - `finance/llm-client.ts`
-- Embedding-Tabelle als Migration `0044_finance_embeddings.sql`
-  (siehe `finance-tagging-and-ai.md` §3.2)
+- Embedding table as migration `0044_finance_embeddings.sql`
+  (see `finance-tagging-and-ai.md` §3.2)
 - Frontend: `TransactionsView`, `TransactionDetailView`,
   `TransactionNewView`, `BatchTagView` + `useTransactionsStore`,
   `useTagsStore`
 
-**Tests**: Tag-Promotion, Confidence-Schwelle, Dedupe-Unique-Konflikt
+**Tests**: tag promotion, confidence threshold, dedupe unique conflict
 (§2.5/§2.6).
 
-**Abhängigkeiten**: Etappe 4 (Konten vorhanden), `llm-service` läuft.
+**Dependencies**: stage 4 (accounts present), `llm-service` running.
 
 ---
 
-## 6. Etappe 6 — Sync-Cron + Push
+## 6. Stage 6 — Sync cron + push
 
-**Ziel**: Bankkontakte werden automatisch nach konfigurierten
-Zeit-Slots synchronisiert; bei TAN-Bedarf Push.
+**Goal**: Bank contacts are synchronized automatically according to configured
+time slots; push when a TAN is needed.
 
-**Neue Dateien**:
+**New files**:
 - `finance/statements-cron.ts` + `.test.ts`
-- `finance/sync-schedule.ts` (CRUD für `finance_bankcontact.sync_times`)
+- `finance/sync-schedule.ts` (CRUD for `finance_bankcontact.sync_times`)
 - Frontend: `SyncScheduleView` + `useSyncScheduleStore`
 
-**Tests**: Slot-Filter mit Fake-Timer, DST-Korrektheit, Cleanup-Cron
+**Tests**: slot filter with fake timer, DST correctness, cleanup cron
 (§2.10).
 
-**Abhängigkeiten**: Etappen 3+5 (Statements- und Transactions-Pfad
-live), `push.service` verfügbar (bestehend).
+**Dependencies**: stages 3+5 (statements and transactions path
+live), `push.service` available (existing).
 
 ---
 
-## 7. Etappe 7 — Datenimport
+## 7. Stage 7 — Data import
 
-**Ziel**: Admin kann den Finanzkraft-Export als JSON hochladen; Import
-läuft idempotent, ACL wird nachgelagert manuell gesetzt.
+**Goal**: Admin can upload the Finanzkraft export as JSON; the import
+runs idempotently, ACL is set manually afterwards.
 
-**Neue Dateien**:
+**New files**:
 - `finance/data-import.ts` + `.test.ts`
-- `finance/import-schema.ts` (Zod-Schema)
+- `finance/import-schema.ts` (Zod schema)
 - `finance/fixtures/finanzkraft-export.fixture.ts`
 - Frontend: `AdminImportView`
 
-**Tests**: Happy-Path, Re-Import-Idempotenz, Validierungsfehler pro
-Stage (§2.8).
+**Tests**: happy path, re-import idempotency, validation errors per
+stage (§2.8).
 
-**Abhängigkeiten**: Etappen 3–5 (alle Ziel-Tabellen müssen Endpoints
-mit Schreib-Logik haben, damit der Import denselben Validierungspfad
-nutzen kann).
-
----
-
-## 8. Etappe 8 — Frontend-Gesamtbild
-
-**Ziel**: Navigationseintrag, Permissions-Guards, Dashboard-Kachel,
-globales Layout für alle Finance-Routen.
-
-**Neue Dateien**:
-- Route-Registrierung in `frontend/src/router.ts`
-- Menü-Eintrag in der Hauptnavigation (hinter `module.finance`)
-- Optional: Finance-Dashboard-Widget mit nächster Sync-Zeit und
-  TAN-Badge-Counter
-
-**Tests**: manueller Smoke-Test im Browser (kein Component-Test-Setup
-im Repo).
-
-**Abhängigkeiten**: Etappen 3–7 (alle Views haben ihre Backends).
-
-**MVP-Abschluss nach dieser Etappe.**
+**Dependencies**: stages 3–5 (all target tables must have endpoints
+with write logic, so that the import can use the same validation path).
 
 ---
 
-## 9. Etappe 9 — Analyse-Abfragen (post-MVP)
+## 8. Stage 8 — Overall frontend picture
 
-**Ziel**: `AnalysisView` nutzbar; Natural-Language-Fragen werden in
-Tag-Filter-ASTs übersetzt und aggregiert.
+**Goal**: Navigation entry, permission guards, dashboard tile,
+global layout for all Finance routes.
 
-**Neue Dateien**:
-- `finance/analysis.ts` + `.test.ts` (Parser + Aggregator)
-- Frontend: `AnalysisView` + Store-Erweiterung
+**New files**:
+- Route registration in `frontend/src/router.ts`
+- Menu entry in the main navigation (behind `module.finance`)
+- Optional: Finance dashboard widget with next sync time and
+  TAN badge counter
 
-**Tests**: Parser gegen Beispiele, SQL-Aggregation mit Fixture-
-Transaktionen (§2.7).
+**Tests**: manual smoke test in the browser (no component test setup
+in the repo).
 
-**Abhängigkeiten**: MVP (Etappen 1–8).
+**Dependencies**: stages 3–7 (all views have their backends).
 
----
-
-## 10. Parallelisierbarkeit und Teamgröße
-
-Bei einer einzelnen Person: strikt sequentiell, wie oben.
-
-Bei zwei parallelen Streams:
-- Stream A (Backend): 1 → 2 → 3 → 4 → 5 → 6 → 7
-- Stream B (Frontend): wartet auf Etappe 3, dann parallel zu 4+5+6+7:
-  Bankkontakt-/Konto-/Transaktions-/Schedule-Views.
-- Stream B kann ab Etappe 5 die UI gegen ein Mock-Backend bauen, wenn
-  Stream A hinterherhängt.
+**MVP completion after this stage.**
 
 ---
 
-## 11. Referenzen
+## 9. Stage 9 — Analysis queries (post-MVP)
 
-| Stelle | Wofür |
+**Goal**: `AnalysisView` usable; natural-language questions are translated into
+tag-filter ASTs and aggregated.
+
+**New files**:
+- `finance/analysis.ts` + `.test.ts` (parser + aggregator)
+- Frontend: `AnalysisView` + store extension
+
+**Tests**: parser against examples, SQL aggregation with fixture
+transactions (§2.7).
+
+**Dependencies**: MVP (stages 1–8).
+
+---
+
+## 10. Parallelizability and team size
+
+With a single person: strictly sequential, as above.
+
+With two parallel streams:
+- Stream A (backend): 1 → 2 → 3 → 4 → 5 → 6 → 7
+- Stream B (frontend): waits for stage 3, then runs in parallel to 4+5+6+7:
+  bank contact/account/transaction/schedule views.
+- From stage 5, stream B can build the UI against a mock backend if
+  stream A lags behind.
+
+---
+
+## 11. References
+
+| Location | Purpose |
 |---|---|
-| `finance-data-model.md` | Etappen 1, 4, 5 (DB + ACL) |
-| `finance-fints-integration.md` | Etappen 2, 3, 6, 10 |
-| `finance-tagging-and-ai.md` | Etappen 5, 9 |
-| `finance-data-import.md` | Etappe 7 |
-| `finance-frontend.md` | Etappen 3–9 (UI-Arbeiten) |
-| `finance-service-layout.md` | jede Etappe (Zieldateien) |
-| `finance-testing.md` | jede Etappe (Test-Schwerpunkte) |
+| `finance-data-model.md` | Stages 1, 4, 5 (DB + ACL) |
+| `finance-fints-integration.md` | Stages 2, 3, 6, 10 |
+| `finance-tagging-and-ai.md` | Stages 5, 9 |
+| `finance-data-import.md` | Stage 7 |
+| `finance-frontend.md` | Stages 3–9 (UI work) |
+| `finance-service-layout.md` | every stage (target files) |
+| `finance-testing.md` | every stage (test focus) |

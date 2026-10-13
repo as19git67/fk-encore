@@ -1,207 +1,209 @@
-# Etappenplan: Asynchrone Beleg-Erkennung mit automatischer Bar-Transaktion
+# Stage plan: asynchronous receipt recognition with automatic cash transaction
 
-## Ziel & UX
+## Goal & UX
 
-Heute blockiert das Beleg-Foto das Erfassungsformular bis zu **130 s**, während das
-`receipt-ocr-service` synchron Betrag/Datum/Posten extrahiert
-(`extractReceiptOcr` in `TransactionNewView.vue:200`). Das soll weg.
+Today the receipt photo blocks the entry form for up to **130 s** while the
+`receipt-ocr-service` synchronously extracts amount/date/line items
+(`extractReceiptOcr` in `TransactionNewView.vue:200`). That has to go.
 
-**Gewünschter Ablauf:**
+**Desired flow:**
 
-1. Beleg fotografieren → Belegbild wird als Dokument gespeichert, der Nutzer ist
-   sofort wieder frei. **Es entsteht hier noch keine Transaktion.**
-2. Die Beleg-Erkennung (Kern-OCR + Einzelposten) läuft **im Hintergrund**.
-3. **Sobald die Metadaten vorliegen**, wird **vollautomatisch** eine
-   Bar-Transaktion angelegt — **ohne Zustimmung und ohne eigenen Review-Schritt** —
-   bereits befüllt mit Betrag/Datum/Store/Posten und mit dem Beleg verknüpft.
-4. Der Nutzer wird per Realtime-Notifikation informiert. Die Transaktion ist von
-   da an eine **ganz normale, bearbeitbare Bar-Buchung**: korrigieren kann er
-   sie jederzeit über die bestehende Bearbeitung — das ist aber freiwillig und
-   kein erzwungener Schritt.
+1. Photograph the receipt → the receipt image is stored as a document, the user
+   is free again immediately. **No transaction is created at this point.**
+2. The receipt recognition (core OCR + line items) runs **in the background**.
+3. **As soon as the metadata is available**, a cash transaction is created
+   **fully automatically** — **without approval and without a separate review
+   step** — already filled with amount/date/store/items and linked to the
+   receipt.
+4. The user is informed via a realtime notification. From then on the
+   transaction is a **completely normal, editable cash booking**: he can correct
+   it at any time via the existing edit function — but that is voluntary and
+   not a forced step.
 
-## Architekturentscheidung
+## Architecture decision
 
-Variante **B** (Background-Pipeline, kein Vorab-Bestätigungsschritt). Die
-Transaktion wird **erst mit vorhandenen Metadaten** erstellt — also vom
-Hintergrund-Worker nach erfolgreicher OCR, nicht beim Fotografieren — und zwar
-**vollautomatisch, ohne Zustimmung und ohne dedizierten Review-/Bestätigungs-
-Flow**. Es entsteht eine reguläre Bar-Transaktion; eine spätere Korrektur läuft
-über die normale Transaktionsbearbeitung, nicht über ein eigenes Review-UI.
+Variant **B** (background pipeline, no up-front confirmation step). The
+transaction is created **only once metadata exists** — that is, by the
+background worker after successful OCR, not when the photo is taken — and
+**fully automatically, without approval and without a dedicated
+review/confirmation flow**. A regular cash transaction is created; a later
+correction goes through the normal transaction editing, not through a separate
+review UI.
 
-### Folge dieser Entscheidung (großer Vorteil)
+### Consequence of this decision (big advantage)
 
-Weil die Transaktion **immer** schon einen echten Betrag hat, entfallen die zwei
-größten Komplexitäten der ursprünglichen Idee:
+Because the transaction **always** already has a real amount, the two biggest
+complexities of the original idea disappear:
 
-- **Kein Platzhalter-`amount`** → die Sperre `amount === "0.00"`
-  (`transactions.ts:493`) ist kein Thema; wir können den regulären
-  Erstell-Pfad nutzen.
-- **Kein Saldo-Ausschluss** nötig → es gibt nie eine pending-Transaktion, die
-  Kontostand/Auswertungen verfälschen könnte.
+- **No placeholder `amount`** → the lock `amount === "0.00"`
+  (`transactions.ts:493`) is a non-issue; we can use the regular create path.
+- **No balance exclusion** needed → there is never a pending transaction that
+  could distort account balance/reports.
 
-### Vorhandene Bausteine (werden wiederverwendet)
+### Existing building blocks (to be reused)
 
-| Baustein | Ort | Rolle |
+| Building block | Location | Role |
 | --- | --- | --- |
-| Beleg-Upload + Background-Scan | `documents/documents.ts` (`receipt-capture`), `scan-worker.ts`, `document-ops.ts` | Speichert Dokument, stößt Verarbeitung an |
-| Realtime-Events | `finance/document-match.service.ts:104` (`realtime.publishEvent`, `receipt.enriched`) | Notifikation an den Nutzer |
-| Transaktions↔Dokument-Link | `finance_transaction.receipt_document_id` (`db/schema.ts:1500`) | Verknüpfung besteht schon |
-| Enrichment-Diff | `computeReceiptEnrichment` (`document-match.service.ts:57`) | Diff Beleg ↔ Transaktion für Review |
-| receipt-ocr-service | `receipt-ocr-service/main.py`, Client `documents/receipt-ocr-client.ts` | Kern-OCR + Items |
+| Receipt upload + background scan | `documents/documents.ts` (`receipt-capture`), `scan-worker.ts`, `document-ops.ts` | Stores the document, triggers processing |
+| Realtime events | `finance/document-match.service.ts:104` (`realtime.publishEvent`, `receipt.enriched`) | Notification to the user |
+| Transaction↔document link | `finance_transaction.receipt_document_id` (`db/schema.ts:1500`) | The link already exists |
+| Enrichment diff | `computeReceiptEnrichment` (`document-match.service.ts:57`) | Diff receipt ↔ transaction for review |
+| receipt-ocr-service | `receipt-ocr-service/main.py`, client `documents/receipt-ocr-client.ts` | Core OCR + items |
 
-### Was offen bleibt: der „kein Betrag erkannt"-Fall
+### What remains open: the "no amount recognized" case
 
-Wenn die OCR keinen verlässlichen Betrag liefert, soll **keine** Transaktion
-automatisch entstehen (sonst stünde eine falsche Buchung im Hauptbuch).
-Stattdessen: Dokument als „erkannt, aber unvollständig" markieren und den Nutzer
-notifizieren, damit er manuell bucht. Siehe Etappe 4.
+If the OCR does not deliver a reliable amount, **no** transaction should be
+created automatically (otherwise a wrong booking would end up in the ledger).
+Instead: mark the document as "recognized but incomplete" and notify the user
+so that he books manually. See stage 4.
 
 ---
 
-## Etappen
+## Stages
 
-Jede Etappe ist eigenständig lauffähig & testbar. **Test-Pflicht vor jedem
-Push** (`npm run test`, alle grün). Bei neuen/umbenannten Migrationen immer
-`db/migrations/postgres/meta/_journal.json` mitpflegen.
+Each stage is independently runnable & testable. **Tests are mandatory before
+every push** (`npm run test`, all green). For new/renamed migrations, always
+maintain `db/migrations/postgres/meta/_journal.json` as well.
 
-### Etappe 1 — Datenmodell
+### Stage 1 — Data model
 
-**Ziel:** Persistenz der strukturierten Extraktion + Idempotenz-Anker +
-gewähltes Konto.
+**Goal:** Persistence of the structured extraction + idempotency anchor +
+selected account.
 
-- **Separate Tabelle `document_receipt_extraction`** (entschieden): hält
-  Betrag/Datum/Store/Items/Confidence aus der schlanken `documents`-Zeile
-  heraus. 1:1 zum Dokument.
-- **Gewähltes Cash-Konto persistieren:** das beim Fotografieren gewählte Konto
-  (Etappe 2) muss bis zur späteren Hintergrund-Buchung erhalten bleiben —
-  Spalte `receipt_account_id` am Dokument (oder an der Extraktions-/Capture-
-  Zeile), Pflicht für den Auto-Buchungs-Pfad.
-- Idempotenz: sicherstellen, dass pro Beleg höchstens **eine** auto-erzeugte
-  Transaktion entsteht (Worker ist at-least-once). Variante: partieller
-  Unique-Index auf `finance_transaction.receipt_document_id` für auto-erzeugte
-  Zeilen, oder Marker `receipt_transaction_id` am Dokument.
-- Statusmarker am Dokument für den OCR-Fortschritt
-  (`receipt_ocr_state: 'pending' | 'booked' | 'incomplete' | 'failed'`),
-  damit Notifikation & UI den Zustand kennen.
-- Drizzle-Migration unter `db/migrations/postgres/`, `_journal.json` ergänzen.
+- **Separate table `document_receipt_extraction`** (decided): keeps
+  amount/date/store/items/confidence out of the lean `documents` row. 1:1 with
+  the document.
+- **Persist the selected cash account:** the account selected when taking the
+  photo (stage 2) must be preserved until the later background booking —
+  column `receipt_account_id` on the document (or on the extraction/capture
+  row), mandatory for the auto-booking path.
+- Idempotency: ensure that at most **one** auto-created transaction is created
+  per receipt (the worker is at-least-once). Variant: partial unique index on
+  `finance_transaction.receipt_document_id` for auto-created rows, or a marker
+  `receipt_transaction_id` on the document.
+- Status marker on the document for the OCR progress
+  (`receipt_ocr_state: 'pending' | 'booked' | 'incomplete' | 'failed'`), so
+  that notification & UI know the state.
+- Drizzle migration under `db/migrations/postgres/`, extend `_journal.json`.
 
-**Done:** Schema migriert, Tests grün, keine Verhaltensänderung.
+**Done:** Schema migrated, tests green, no behavior change.
 
-### Etappe 2 — Capture entkoppeln (nur speichern, nicht erkennen)
+### Stage 2 — Decouple capture (only store, do not recognize)
 
-**Ziel:** Foto blockiert nicht mehr; OCR wandert in den Hintergrund.
+**Goal:** The photo no longer blocks; OCR moves to the background.
 
-- `receipt-capture`-Pfad bleibt: Bild als Dokument speichern (schnell, 201) und
-  Background-Verarbeitung anstoßen. Der synchrone `extractReceiptOcr`-Aufruf
-  wird aus dem Capture-Flow entfernt.
-- **Konto-Wahl beim Fotografieren (entschieden):** der Foto-Dialog lässt den
-  Nutzer das Cash-Konto wählen, bevor er den Beleg aufnimmt. Das gewählte
-  `account_id` geht als Pflichtparameter an den Capture-Endpoint und wird am
-  Dokument persistiert (Etappe 1), damit die spätere Hintergrund-Buchung weiß,
-  wohin sie bucht. Vorbelegung mit zuletzt genutztem Cash-Konto ist erlaubt,
-  aber der Nutzer kann umstellen.
+- The `receipt-capture` path stays: store the image as a document (fast, 201)
+  and trigger background processing. The synchronous `extractReceiptOcr` call
+  is removed from the capture flow.
+- **Account selection when taking the photo (decided):** the photo dialog lets
+  the user select the cash account before taking the receipt. The selected
+  `account_id` goes to the capture endpoint as a mandatory parameter and is
+  persisted on the document (stage 1), so that the later background booking
+  knows where to book. Pre-filling with the most recently used cash account is
+  allowed, but the user can change it.
 
-**Done:** Capture liefert sofort zurück; kein synchrones OCR mehr im Request;
-gewähltes Konto ist gespeichert.
+**Done:** Capture returns immediately; no synchronous OCR in the request any
+more; the selected account is stored.
 
-### Etappe 3 — Background-OCR im Worker
+### Stage 3 — Background OCR in the worker
 
-**Ziel:** Erkennung läuft asynchron und persistiert das Ergebnis.
+**Goal:** Recognition runs asynchronously and persists the result.
 
-- In der Dokument-Scan-Pipeline (`scan-worker.ts` / `document-ops.ts`) für
-  Belege (mime/Priorität) `receipt-ocr-client` aufrufen: `extractReceipt` +
+- In the document scan pipeline (`scan-worker.ts` / `document-ops.ts`), call
+  `receipt-ocr-client` for receipts (mime/priority): `extractReceipt` +
   `extractReceiptItems`.
-- Ergebnis in die Extraktions-Persistenz (Etappe 1) schreiben,
-  Dokument-Status auf den passenden `receipt_ocr_state` setzen.
+- Write the result into the extraction persistence (stage 1), set the document
+  status to the matching `receipt_ocr_state`.
 
-**Done:** Nach Capture liegen die strukturierten OCR-Felder am Dokument vor.
+**Done:** After capture, the structured OCR fields are available on the
+document.
 
-### Etappe 4 — Automatische Buchung aus Metadaten
+### Stage 4 — Automatic booking from metadata
 
-**Ziel:** Aus dem OCR-Ergebnis entsteht die Bar-Transaktion.
+**Goal:** The cash transaction is created from the OCR result.
 
-- **Verlässlicher Betrag = `> 0 und <= 999` (entschieden):** nur in diesem
-  Bereich wird automatisch gebucht. `amount <= 0` oder `> 999` gilt als nicht
-  verlässlich → kein Auto-Buchen.
-- Wenn verlässlicher Betrag vorliegt: Bar-Transaktion über den regulären
-  Erstell-Pfad auf dem gewählten `receipt_account_id` anlegen — `amount`,
-  `booking_date`, `counterparty` (=store), `purpose` (=Items-Notiz),
-  `receipt_document_id` gesetzt; Status `booked`.
-- **Buchungsdatum (entschieden):** erkanntes Belegdatum, Fallback heute, und
-  **niemals neuer als heute**. „Heute" ist die *lokale* Sicht des Nutzers, nicht
-  Server-UTC — daher die Date-only-Helfer aus `frontend/src/utils/dateFormat.ts`
-  (`toLocalIsoDate`/`parseLocalDate`) verwenden bzw. das Clamping serverseitig so
-  umsetzen, dass eine am selben Tag aufgenommene Quittung nicht durch eine
-  UTC-Verschiebung fälschlich als „morgen" abgelehnt wird (Timezone
-  Frontend↔Server beachten).
-- Wenn **kein verlässlicher** Betrag: **keine** Transaktion anlegen,
-  Dokument-Status `incomplete`, Notifikation „Beleg erkannt — Betrag bitte
-  ergänzen".
-- Wenn das OCR-Service **down** ist: Job zurückstellen/retry (wie bestehende
-  LLM-Backoff-Logik im Worker), kein Fehlschlag.
-- Idempotent über den Anker aus Etappe 1.
+- **Reliable amount = `> 0 and <= 999` (decided):** automatic booking happens
+  only in this range. `amount <= 0` or `> 999` counts as not reliable → no
+  auto-booking.
+- If a reliable amount is available: create the cash transaction via the
+  regular create path on the selected `receipt_account_id` — `amount`,
+  `booking_date`, `counterparty` (=store), `purpose` (=items note),
+  `receipt_document_id` set; status `booked`.
+- **Booking date (decided):** recognized receipt date, fallback today, and
+  **never newer than today**. "Today" is the user's *local* view, not server
+  UTC — so use the date-only helpers from `frontend/src/utils/dateFormat.ts`
+  (`toLocalIsoDate`/`parseLocalDate`) or implement the clamping on the server
+  such that a receipt taken on the same day is not wrongly rejected as
+  "tomorrow" because of a UTC shift (mind the timezone frontend↔server).
+- If there is **no reliable** amount: create **no** transaction, document
+  status `incomplete`, notification "Beleg erkannt — Betrag bitte ergänzen"
+  (receipt recognized — please add the amount).
+- If the OCR service is **down**: defer/retry the job (like the existing LLM
+  backoff logic in the worker), no failure.
+- Idempotent via the anchor from stage 1.
 
-**Done:** Erfolgreiche OCR erzeugt automatisch eine korrekte Bar-Transaktion;
-Failure-/Incomplete-Pfade getestet.
+**Done:** A successful OCR automatically produces a correct cash transaction;
+failure/incomplete paths tested.
 
-### Etappe 5 — Realtime-Notifikation
+### Stage 5 — Realtime notification
 
-**Ziel:** Eine einzige Notifikation weist darauf hin, dass eine neue Buchung
-existiert — mehr nicht. Kein Inbox, kein Badge, kein Review-Aufbau.
+**Goal:** A single notification points out that a new booking exists — nothing
+more. No inbox, no badge, no review setup.
 
-- Neues Event analog `receipt.enriched`:
+- New event analogous to `receipt.enriched`:
   `receipt.booked` `{ transaction_id, document_id, amount, store }`.
-- Frontend: **eine** Benachrichtigung „Neue Buchung aus Beleg" über den
-  bestehenden Notifikations-Mechanismus. Antippen führt zur normalen
-  Transaktionsansicht — als bequemer Sprung, nicht als Pflicht-Schritt.
-- Sonderfall „kein Betrag erkannt" (Etappe 4): ebenfalls nur eine Notifikation
-  „Beleg erkannt — Betrag bitte ergänzen", die zur manuellen Erfassung führt.
+- Frontend: **one** notification "Neue Buchung aus Beleg" (new booking from
+  receipt) via the existing notification mechanism. Tapping it leads to the
+  normal transaction view — as a convenient jump, not as a mandatory step.
+- Special case "no amount recognized" (stage 4): likewise only one
+  notification "Beleg erkannt — Betrag bitte ergänzen", which leads to manual
+  entry.
 
-**Done:** Genau eine Notifikation pro Beleg-Ergebnis erreicht den Client.
+**Done:** Exactly one notification per receipt result reaches the client.
 
-### Etappe 6 — Frontend-Capture-Flow umbauen
+### Stage 6 — Rebuild the frontend capture flow
 
-**Ziel:** Kein synchrones Warten mehr.
+**Goal:** No synchronous waiting any more.
 
-- `TransactionNewView.vue`: synchronen `extractReceiptOcr`/`extractReceiptItems`
-  durch den entkoppelten Capture (Etappe 2) ersetzen. Nach dem Foto kehrt der
-  Nutzer sofort zurück; keine 130-s-Blockade.
-- Einstiegspunkt fürs reine Beleg-Fotografieren (ohne sofort ins Formular zu
-  müssen), da die Transaktion ohnehin automatisch entsteht.
+- `TransactionNewView.vue`: replace the synchronous
+  `extractReceiptOcr`/`extractReceiptItems` with the decoupled capture
+  (stage 2). After the photo the user returns immediately; no 130 s blockage.
+- Entry point for pure receipt photographing (without having to go into the
+  form right away), since the transaction is created automatically anyway.
 
-**Done:** Foto blockiert die UI nicht mehr; manuelle Erfassung weiter möglich.
+**Done:** The photo no longer blocks the UI; manual entry is still possible.
 
-### Etappe 7 — Beleg an der fertigen Transaktion sichtbar machen
+### Stage 7 — Make the receipt visible on the finished transaction
 
-**Ziel:** Kein eigener Review-/Bestätigungs-Flow — nur Transparenz.
+**Goal:** No separate review/confirmation flow — only transparency.
 
-- In `TransactionDetailView` den verknüpften Beleg + erkannte Items anzeigen
-  (read-only Verknüpfung). Korrektur erfolgt über die **bestehende** Bearbeitung
-  einer Cash-Transaktion — keine separate „bestätigen/übernehmen"-Mechanik.
-- Optional: dezente Markierung „aus Beleg erkannt" + niedrige `ocr_confidence`
-  als Hinweis, aber ohne Aktion zu erzwingen.
+- In `TransactionDetailView`, show the linked receipt + recognized items
+  (read-only link). Correction happens via the **existing** editing of a cash
+  transaction — no separate "confirm/accept" mechanism.
+- Optional: discreet marker "aus Beleg erkannt" (recognized from receipt) + low
+  `ocr_confidence` as a hint, but without forcing an action.
 
-**Done:** Beleg/Items sind an der Transaktion einsehbar; Korrektur nur über den
-normalen Bearbeiten-Pfad, kein Extra-Review.
+**Done:** Receipt/items can be viewed on the transaction; correction only via
+the normal edit path, no extra review.
 
-### Etappe 8 — Aufräumen, Doku, Migration
+### Stage 8 — Cleanup, docs, migration
 
-- Tote synchrone OCR-Endpoints (`/documents/receipt-ocr`,
-  `/documents/receipt-ocr-items`) deprecaten/entfernen, sobald Etappe 6 sie
-  ablöst.
-- Doku (`documentation/finance-frontend.md`, `finance-tagging-and-ai.md`) aktualisieren.
-- End-to-end-Test über den ganzen Flow.
+- Deprecate/remove dead synchronous OCR endpoints (`/documents/receipt-ocr`,
+  `/documents/receipt-ocr-items`) as soon as stage 6 replaces them.
+- Update docs (`documentation/finance-frontend.md`,
+  `finance-tagging-and-ai.md`).
+- End-to-end test of the whole flow.
 
 ---
 
-## Getroffene Entscheidungen
+## Decisions made
 
-1. **Persistenz der Extraktion:** separate Tabelle
+1. **Persistence of the extraction:** separate table
    `document_receipt_extraction`.
-2. **Konto-Auswahl:** der Nutzer wählt das Cash-Konto **beim Fotografieren**;
-   das gewählte Konto wird am Dokument persistiert und steuert die spätere
-   Hintergrund-Buchung.
-3. **Schwelle „verlässlicher Betrag":** automatisch buchen nur bei
-   `amount > 0 und <= 999`; sonst `incomplete` + Notifikation.
-4. **Buchungsdatum:** erkanntes Belegdatum, Fallback heute, niemals neuer als
-   heute — mit korrekter Timezone-Behandlung Frontend↔Server (lokales „heute").
+2. **Account selection:** the user selects the cash account **when taking the
+   photo**; the selected account is persisted on the document and controls the
+   later background booking.
+3. **Threshold "reliable amount":** book automatically only with
+   `amount > 0 and <= 999`; otherwise `incomplete` + notification.
+4. **Booking date:** recognized receipt date, fallback today, never newer than
+   today — with correct timezone handling frontend↔server (local "today").

@@ -1,330 +1,329 @@
-# Orientierungs-Varianten: Hoch- und Querformat desselben Motivs
+# Orientation variants: portrait and landscape of the same subject
 
-Status: **Umgesetzt** — Etappen 1–3 (PR #1421), 4 (PR #1425), 5 (PR #1426) und 6 (Rückblicke und Stream).
+Status: **Implemented** — stages 1–3 (PR #1421), 4 (PR #1425), 5 (PR #1426) and 6 (recaps and stream).
 
-## Umsetzungsstand
+## Implementation status
 
-- **Etappe 1 (Backend) — umgesetzt.** Migration `0225_orientation_variants`
+- **Stage 1 (backend) — implemented.** Migration `0225_orientation_variants`
   (`photo_groups.orientation_variants`, `users.collapse_orientation_variants`).
-  Regel und Konstante in `photo/orientation-variants.ts`
-  (`VARIANT_TIME_WINDOW_SECONDS = 120`, benannt wie `TIME_WINDOW_SECONDS` in
-  `photo.service.ts`; der Plan sprach von `_MS`). Dort liegen die reine
-  Funktion `computeOrientationVariants` und das SQL-Prädikat
-  `orientationVariantSuppressedSql`, das `buildPhotoFilterConditions` für
-  `variantMode=portrait|landscape` anwendet — damit gilt der Filter für
-  `/gallery/grid`, `/gallery/ids`, `/photos` und `/photos/index`. Der
-  Nutzer-Schalter und ein `off` an der Gruppe stecken im SQL, kein Aufrufer
-  muss sie nachschlagen. `GalleryGridEntry.orientation`, `Photo.orientation`,
+  Rule and constant in `photo/orientation-variants.ts`
+  (`VARIANT_TIME_WINDOW_SECONDS = 120`, named like `TIME_WINDOW_SECONDS` in
+  `photo.service.ts`; the plan said `_MS`). That file holds the pure
+  function `computeOrientationVariants` and the SQL predicate
+  `orientationVariantSuppressedSql`, which `buildPhotoFilterConditions` applies for
+  `variantMode=portrait|landscape` — so the filter applies to
+  `/gallery/grid`, `/gallery/ids`, `/photos` and `/photos/index`. The
+  user toggle and an `off` on the group are built into the SQL, no caller
+  has to look them up. `GalleryGridEntry.orientation`, `Photo.orientation`,
   `GalleryGridGroup.variants`, `PhotoGroup.orientation_variants`/`variants`,
-  `ReviewQueueGroup.orientation_pair`. Cover-Wahl: zeigt das Raster nur eine
-  Seite und liegt das Cover auf der anderen, trägt das bestplatzierte Mitglied
-  der gezeigten Seite `is_cover` (die Datenbank bleibt unberührt). Endpunkte:
+  `ReviewQueueGroup.orientation_pair`. Cover selection: if the grid shows only one
+  side and the cover is on the other, the best-ranked member of the shown side
+  carries `is_cover` (the database stays untouched). Endpoints:
   `PATCH /photos/groups/:id/variants` (`{ mode: 'auto' | 'off' }`),
   `GET`/`PATCH /photos/groups/orientation-variants` (`{ enabled }`). Tests in
-  `photo/orientation-variants.test.ts` (Zeitfenster, Sichtbarkeit, `off`,
-  Schalter, Fremdgruppe, Cover, Review-Queue) und `photo.filters.test.ts`.
-- **Etappe 2 (Web Raster + Vollbild) — umgesetzt.** `GalleryGridGroup.variants`
-  trägt zusätzlich zu den Zählern die Foto-IDs je Seite (`portrait_ids`,
-  `landscape_ids`, bestplatziert zuerst), damit der Viewer die Gegenseite
-  ohne zweite Abfrage kennt. Im Web: `composables/useScreenOrientation.ts`
-  (eine Quelle für die Bildschirm-Orientierung), `utils/orientationVariants.ts`
-  (Seite eines Eintrags, Gegenseite, `variantModeFor`, `shouldSwitchSide`,
+  `photo/orientation-variants.test.ts` (time window, visibility, `off`,
+  toggle, foreign group, cover, review queue) and `photo.filters.test.ts`.
+- **Stage 2 (web grid + fullscreen) — implemented.** In addition to the counts,
+  `GalleryGridGroup.variants` carries the photo IDs per side (`portrait_ids`,
+  `landscape_ids`, best-ranked first), so the viewer knows the opposite side
+  without a second query. On the web: `composables/useScreenOrientation.ts`
+  (one source for the screen orientation), `utils/orientationVariants.ts`
+  (side of an entry, opposite side, `variantModeFor`, `shouldSwitchSide`,
   `nextIndexSkippingCounterparts`), `composables/useVariantCursor.ts`
-  (Gegenseite neben `cursorPhoto`, `toggle` mit `pinned`, Wechsel bei
-  Drehung). `VirtualGallery` lädt mit `variantMode=<Orientierung>` und bei
-  Drehung neu um den sichtbaren Anker, im Auswahlmodus und mit dem
-  Filter-Schalter „Formatvarianten anzeigen" (`showVariants` in der URL,
-  Chip „Inkl. Formatvarianten") mit `all`. Format-Badge (`.vg-variant-badge`,
-  Icon `pi pi-sync`) in derselben Ecke wie das Stapel-Badge, Tipp öffnet das
-  Vollbild auf der Gegenseite (`variant-click`). `FullscreenOverlay`: Prop
-  `variantPhoto`, Knopf „Querformat"/„Hochformat" mit `R`, Event
-  `toggle-variant`, Gegenseite wird vorgeladen; die Überblendung ist der
-  bestehende Fade-in beim Laden. `PhotoDetailSidebar` zeigt den Dateinamen der
-  Gegenseite. Blättern überspringt die Gegenseite, wenn die Liste beide Seiten
-  hält. Der Nutzer-Schalter sitzt im Profil neben „Ähnliche Fotos" (Karte
-  „Hoch- und Querformat"). Stories: `VirtualGallery.stories.ts` (Quer, Hochkant,
-  beide Seiten, Auswahlmodus) und zwei Formatpaar-Stories im
-  `FullscreenOverlay` mit `testViewport`. Tests: `useScreenOrientation`,
+  (opposite side next to `cursorPhoto`, `toggle` with `pinned`, switch on
+  rotation). `VirtualGallery` loads with `variantMode=<orientation>` and on
+  rotation reloads around the visible anchor, in selection mode and with the
+  filter toggle „Formatvarianten anzeigen" (show format variants; `showVariants` in the URL,
+  chip „Inkl. Formatvarianten", incl. format variants) with `all`. Format badge (`.vg-variant-badge`,
+  icon `pi pi-sync`) in the same corner as the stack badge, a tap opens
+  fullscreen on the opposite side (`variant-click`). `FullscreenOverlay`: prop
+  `variantPhoto`, button „Querformat"/„Hochformat" (landscape/portrait) with `R`, event
+  `toggle-variant`, the opposite side is preloaded; the crossfade is the
+  existing fade-in on load. `PhotoDetailSidebar` shows the file name of the
+  opposite side. Paging skips the opposite side if the list
+  holds both sides. The user toggle sits in the profile next to „Ähnliche Fotos" (similar photos; card
+  „Hoch- und Querformat", portrait and landscape). Stories: `VirtualGallery.stories.ts` (landscape, portrait,
+  both sides, selection mode) and two format-pair stories in
+  `FullscreenOverlay` with `testViewport`. Tests: `useScreenOrientation`,
   `useVariantCursor`, `orientationVariants`.
-- **Etappe 3 (Web Review) — umgesetzt.** Backend:
+- **Stage 3 (web review) — implemented.** Backend:
   `POST /photos/groups/:id/keep-best-per-orientation` (`bestPerOrientation`
-  in `orientation-variants.ts`, läuft über `acceptAiPickLogic`, Favoriten
-  bleiben geschützt), Review-Queue-Filter `orientationPair=true` über das
-  SQL-Prädikat `groupIsOrientationPairSql` (ohne den Nutzer-Schalter: ob zwei
-  Bilder ein Paar sind, ist eine Eigenschaft der Gruppe). Web:
-  `ReviewQueueView` mit Chip „Formatpaare" (`pairs` in der URL), Tag
-  „Hoch + Quer", Knopf „Bestes je Format behalten" und „Nicht dasselbe
-  Motiv" / „Als Formatpaar behandeln" direkt an der Karte.
-  `PhotoCompareView`: in einem Formatpaar duellieren sich nur Fotos derselben
-  Orientierung (`allowedDuel`), das beste Foto je Seite wird nie zum
-  Ausblenden vorgeschlagen (`bestPerSide`), und das Abschlussraster trägt den
-  Hinweis „bleiben als Formatpaar erhalten" mit dem Schalter „Nicht dasselbe
-  Motiv". `ReviewQueuePhoto.width/height` sind im Frontend-Typ deklariert.
-  Stories: Review-Queue mit Formatpaar und mit aktivem Chip, Vergleich als
-  Formatpaar.
-- **Etappe 4 (iOS Raster, Vollbild, Diashow) — umgesetzt.**
+  in `orientation-variants.ts`, runs via `acceptAiPickLogic`, favorites
+  remain protected), review queue filter `orientationPair=true` via the
+  SQL predicate `groupIsOrientationPairSql` (without the user toggle: whether two
+  images are a pair is a property of the group). Web:
+  `ReviewQueueView` with chip „Formatpaare" (format pairs; `pairs` in the URL), tag
+  „Hoch + Quer" (portrait + landscape), button „Bestes je Format behalten" (keep best per format) and „Nicht dasselbe
+  Motiv" (not the same subject) / „Als Formatpaar behandeln" (treat as format pair) directly on the card.
+  `PhotoCompareView`: in a format pair only photos of the same
+  orientation duel each other (`allowedDuel`), the best photo per side is never
+  suggested for hiding (`bestPerSide`), and the final grid carries the
+  note „bleiben als Formatpaar erhalten" (are kept as a format pair) with the toggle „Nicht dasselbe
+  Motiv". `ReviewQueuePhoto.width/height` are declared in the frontend type.
+  Stories: review queue with a format pair and with the chip active, compare as
+  format pair.
+- **Stage 4 (iOS grid, fullscreen, slideshow) — implemented.**
   `Core/Models/OrientationVariants.swift` (`PhotoOrientation`,
-  `OrientationVariants` mit Seite/Gegenseite je Foto, `VariantMode.forScreen`,
-  `OrientationVariantRules.shouldSwitchSide`, `SlideshowVariants`) und
+  `OrientationVariants` with side/opposite side per photo, `VariantMode.forScreen`,
+  `OrientationVariantRules.shouldSwitchSide`, `SlideshowVariants`) and
   `Core/UI/ScreenOrientationEnvironment.swift` (`@Environment(\.screenOrientation)`,
-  einmal in `MainTabView` über `.providesScreenOrientation()` gesetzt, plus
-  `VariantBadge`). `PhotoWithCuration`/`Photo` tragen `orientation`,
-  `AlbumGroupReview.Group` trägt `orientation_variants` und `variants`.
-  `PhotosViewModel` lädt `/photos` mit `variantMode` und parallel
-  `/photos/groups`, woraus `variantsByPhotoId` entsteht. `PhotoGridView`:
-  Seite nach Bildschirm, `all` im Auswahlmodus oder mit dem Filter
-  „Formatvarianten anzeigen" (`PhotoFilter.showVariants`, Schalter im
-  `FilterSortMenuView`), Neuladen bei Drehung um die oberste sichtbare Kachel,
-  Badge oben rechts öffnet den Viewer auf der Gegenseite.
-  `PhotoFullscreenView`: Gegenseite wird je Seite nachgeladen
-  (`PhotoFetch.byId`) und **an Ort und Stelle** gezeigt (Seitenindex bleibt),
-  Knopf in der unteren Leiste, Drehen wechselt automatisch, ein manueller
-  Wechsel pinnt die Seite. `PhotoSlideshowView`: Gegenseiten einmal per
-  `PhotoFetch.byIds` holen, die Gegenseite eines früheren Fotos aus der Folge
-  streichen, je Bildschirm-Orientierung die passende Seite einsetzen (Indizes
-  bleiben stabil), erst dann paart `SlideshowPlanner` den Rest. Tests in
-  `OrientationVariantsTests.swift`. Nicht gemacht: zweiter Dateiname in der
-  iOS-Detailansicht; der Nutzer-Schalter liegt nur im Web-Profil. Ohne Xcode
-  in dieser Umgebung ist der Swift-Code nicht kompiliert worden.
-- **Etappe 5 (iOS Review) — umgesetzt.** `CompareTournament` nimmt
-  `formatPair:` und schließt dann alle Hoch-gegen-Quer-Paare vom Turnier aus
-  (`crossOrientationPairs`, `totalPairs` zählt sie nicht, `isFormatPair`);
-  `PhotoCompareView(photos:formatPair:)` reicht es durch, die Review-Queue
-  mit `group.isOrientationPair`, das Album-Review mit `group.variants != nil`.
-  `ReviewQueueGroup.orientation_pair` (optional dekodiert, `isOrientationPair`,
-  `hasBothOrientations`). Wischgeste **↓ „Bestes je Format"**
-  (`ReviewSwipe.bestPerFormat`, nur mit `allowsDown` auf einem Formatpaar,
-  Knopf in der Aktionsleiste), Entscheidung `.keepBestPerOrientation` →
-  `POST /photos/groups/:id/keep-best-per-orientation`. Kontextmenü auf der
-  Karte: „Nicht dasselbe Motiv" (`PATCH …/variants` `off`) und zurück „Als
-  Formatpaar behandeln" (`auto`), `ReviewQueueState.setOrientationPair` hält
-  die Karte aktuell. Tag „Hoch + Quer" im Kartenkopf. Tests in
-  `CompareTournamentTests` und `ReviewQueueTests`.
-- **Etappe 6 (Rückblicke und Stream) — umgesetzt.** Backend:
+  set once in `MainTabView` via `.providesScreenOrientation()`, plus
+  `VariantBadge`). `PhotoWithCuration`/`Photo` carry `orientation`,
+  `AlbumGroupReview.Group` carries `orientation_variants` and `variants`.
+  `PhotosViewModel` loads `/photos` with `variantMode` and in parallel
+  `/photos/groups`, from which `variantsByPhotoId` is built. `PhotoGridView`:
+  side by screen, `all` in selection mode or with the filter
+  „Formatvarianten anzeigen" (`PhotoFilter.showVariants`, toggle in
+  `FilterSortMenuView`), reload on rotation around the topmost visible tile,
+  badge at the top right opens the viewer on the opposite side.
+  `PhotoFullscreenView`: the opposite side is loaded per side
+  (`PhotoFetch.byId`) and shown **in place** (page index stays),
+  button in the bottom bar, rotating switches automatically, a manual
+  switch pins the side. `PhotoSlideshowView`: fetch opposite sides once via
+  `PhotoFetch.byIds`, strike the opposite side of an earlier photo from the sequence,
+  insert the fitting side per screen orientation (indices
+  stay stable), only then does `SlideshowPlanner` pair the rest. Tests in
+  `OrientationVariantsTests.swift`. Not done: second file name in the
+  iOS detail view; the user toggle exists only in the web profile. Without Xcode
+  in this environment the Swift code has not been compiled.
+- **Stage 5 (iOS review) — implemented.** `CompareTournament` takes
+  `formatPair:` and then excludes all portrait-versus-landscape pairs from the tournament
+  (`crossOrientationPairs`, `totalPairs` does not count them, `isFormatPair`);
+  `PhotoCompareView(photos:formatPair:)` passes it through, the review queue
+  with `group.isOrientationPair`, the album review with `group.variants != nil`.
+  `ReviewQueueGroup.orientation_pair` (decoded as optional, `isOrientationPair`,
+  `hasBothOrientations`). Swipe gesture **↓ „Bestes je Format"** (best per format)
+  (`ReviewSwipe.bestPerFormat`, only with `allowsDown` on a format pair,
+  button in the action bar), decision `.keepBestPerOrientation` →
+  `POST /photos/groups/:id/keep-best-per-orientation`. Context menu on the
+  card: „Nicht dasselbe Motiv" (`PATCH …/variants` `off`) and back „Als
+  Formatpaar behandeln" (`auto`), `ReviewQueueState.setOrientationPair` keeps
+  the card up to date. Tag „Hoch + Quer" in the card header. Tests in
+  `CompareTournamentTests` and `ReviewQueueTests`.
+- **Stage 6 (recaps and stream) — implemented.** Backend:
   `counterpartsByPhotoId(userId, photoIds)` in `orientation-variants.ts`
-  liefert je Foto die bestplatzierte Gegenseite (`OrientationCounterpart`
-  mit `id`, `filename`, `width`, `height`, `orientation`); `GET /recaps/:id`
-  trägt `counterparts[]`, `FeedPhotoItem` trägt `counterpart`. Nur die
-  Gruppen des Betrachters zählen, fremde Fotos im Stream haben keine
-  Gegenseite. Web: `pickSideForScreen` in `utils/orientationVariants.ts` ist
-  die eine Regel; `RecapPlayer` nimmt `counterparts` und baut die Slides über
-  die passende Seite (Länge bleibt, Indizes bleiben), `RecapsView` lädt die
-  Gegenseiten im selben Details-Batch; `PhotoFeedCard` zeigt die passende
-  Seite mit deren Seitenverhältnis, Likes und Vollbild gehören weiter dem
-  Eintrag. iOS: `SlideshowVariants.pickSide`, `RecapPlayerView` ersetzt je
-  Orientierung vor dem Paaren (wie die Diashow), `FeedCardView` lädt die
-  Datei der passenden Seite (`FeedPhotoItem.shownFilename(for:)`). Stories:
-  `RecapPlayer` Formatpaar in beiden Orientierungen. Tests: Backend
-  (`counterpartsByPhotoId`), Web (`pickSideForScreen`), iOS (Dekodierung,
-  Seitenwahl).
-- Die album-gebundene Liste läuft über `/gallery/grid`
-  mit `albumScopeId` und ist damit abgedeckt, die anonyme Link-Ansicht hat
-  keinen Nutzer (und damit keine Gruppen) und bleibt außen vor. Die Diashow
-  im Web läuft über dasselbe `cursorPhoto`, der Drehungswechsel greift also
-  auch dort; eine eigene Seitenwahl pro Schritt in `utils/slideshow.ts` ist
-  erst nötig, wenn die Liste beide Seiten hält.
+  returns the best-ranked opposite side per photo (`OrientationCounterpart`
+  with `id`, `filename`, `width`, `height`, `orientation`); `GET /recaps/:id`
+  carries `counterparts[]`, `FeedPhotoItem` carries `counterpart`. Only the
+  viewer's groups count, foreign photos in the stream have no
+  opposite side. Web: `pickSideForScreen` in `utils/orientationVariants.ts` is
+  the one rule; `RecapPlayer` takes `counterparts` and builds the slides via
+  the fitting side (length stays, indices stay), `RecapsView` loads the
+  opposite sides in the same details batch; `PhotoFeedCard` shows the fitting
+  side with its aspect ratio, likes and fullscreen still belong to the
+  entry. iOS: `SlideshowVariants.pickSide`, `RecapPlayerView` substitutes per
+  orientation before pairing (like the slideshow), `FeedCardView` loads the
+  file of the fitting side (`FeedPhotoItem.shownFilename(for:)`). Stories:
+  `RecapPlayer` format pair in both orientations. Tests: backend
+  (`counterpartsByPhotoId`), web (`pickSideForScreen`), iOS (decoding,
+  side selection).
+- The album-bound list runs via `/gallery/grid`
+  with `albumScopeId` and is thus covered, the anonymous link view has
+  no user (and thus no groups) and is left out. The slideshow
+  on the web runs via the same `cursorPhoto`, so the rotation switch applies
+  there too; a separate side selection per step in `utils/slideshow.ts` is
+  only needed once the list holds both sides.
 
 ## Problem
 
-Vom selben Motiv gibt es oft ein Hoch- und ein Querformat, wenige Sekunden
-auseinander aufgenommen. Beide sind gewollt (der KI-Pick hält sie über die
-Orientierungs-Diversität bewusst beide), aber in jeder Ansicht stehen sie
-nebeneinander, und auf einem gedrehten Bildschirm passt immer eines von beiden
-schlecht: im Vollbild hochkant bleibt vom Querformat ein Streifen, in der
-Diashow quer bleibt vom Hochformat eine Säule.
+Of the same subject there is often a portrait and a landscape shot, taken a few seconds
+apart. Both are wanted (the AI pick deliberately keeps both through
+orientation diversity), but in every view they sit
+next to each other, and on a rotated screen one of the two always fits
+badly: in portrait fullscreen only a strip remains of the landscape shot, in the
+landscape slideshow only a column remains of the portrait shot.
 
-## Idee in einem Satz
+## Idea in one sentence
 
-> Fotos, die dasselbe Motiv in beiden Formaten zeigen, bilden eine
-> **Formatgruppe**. Jede Ansicht zeigt davon nur die Seite, die zur aktuellen
-> Bildschirm-Orientierung passt; die andere Seite ist einen Tipp (oder eine
-> Drehung des Geräts) entfernt.
+> Photos that show the same subject in both formats form a
+> **format group**. Each view shows only the side that matches the current
+> screen orientation; the other side is one tap (or one
+> rotation of the device) away.
 
-Die Formatgruppe ist eine **Ansicht**, kein Ausblenden: nichts wird in
-`photo_curation` geschrieben, Zähler bleiben ehrlich, und sobald der Nutzer
-auswählt oder löscht, ist alles sichtbar.
+The format group is a **view**, not a hiding: nothing is written to
+`photo_curation`, counters stay honest, and as soon as the user
+selects or deletes, everything is visible.
 
-## Datenmodell
+## Data model
 
-### Woher die Formatgruppe kommt
+### Where the format group comes from
 
-Nichts Neues clustern. Die Ähnlichkeitsgruppen (`photo_groups`, DINOv2 ≥ 0.90
-im 10-Minuten-Fenster, pro Nutzer) liefern schon „dasselbe Motiv". Eine
-Formatgruppe ist die Teilmenge einer Ähnlichkeitsgruppe, die
+Cluster nothing new. The similarity groups (`photo_groups`, DINOv2 ≥ 0.90
+within the 10-minute window, per user) already provide "same subject". A
+format group is the subset of a similarity group that
 
-- mindestens ein `portrait`- und ein `landscape`-Mitglied hat
-  (`classifyOrientation` aus `photo/group-auto-pick.ts`, `square` zählt nie),
-- deren Mitglieder für diesen Nutzer sichtbar sind (nicht `hidden`),
-- und bei der die beiden Formate höchstens `VARIANT_TIME_WINDOW` (Vorschlag
-  120 s) auseinanderliegen. Das engere Fenster trennt „zwei Formate derselben
-  Aufnahme" von „ich war zehn Minuten am selben Ort".
+- has at least one `portrait` and one `landscape` member
+  (`classifyOrientation` from `photo/group-auto-pick.ts`, `square` never counts),
+- whose members are visible to this user (not `hidden`),
+- and where the two formats are at most `VARIANT_TIME_WINDOW` apart (proposal
+  120 s). The narrower window separates "two formats of the same shot"
+  from "I was at the same place for ten minutes".
 
-Weil `photo_groups` pro Nutzer sind und Sichtbarkeit pro Nutzer ist, ist die
-Formatgruppe automatisch pro Nutzer. Fotos ohne `width`/`height` (Backfill
-„Bildmaße nachtragen" fehlt) bilden nie eine Formatgruppe.
+Because `photo_groups` are per user and visibility is per user, the
+format group is automatically per user. Photos without `width`/`height` (backfill
+„Bildmaße nachtragen" (backfill image dimensions) missing) never form a format group.
 
-Reviewte und unreviewte Gruppen verhalten sich verschieden:
+Reviewed and unreviewed groups behave differently:
 
-| Gruppe | heute | mit Formatgruppe |
+| Group | today | with format group |
 |---|---|---|
-| unreviewt | Stapel, nur das Cover sichtbar | Stapel bleibt; als Cover wird das Mitglied gezeigt, das zur Orientierung passt (Fallback: bisheriges Cover) |
-| reviewt, beide Formate behalten | alle behaltenen Fotos nebeneinander | nur die Seite der aktuellen Orientierung; die andere Seite hinter einem Format-Badge |
-| reviewt, ein Format behalten | ein Foto | unverändert |
+| unreviewed | stack, only the cover visible | stack stays; the member that matches the orientation is shown as cover (fallback: previous cover) |
+| reviewed, both formats kept | all kept photos next to each other | only the side of the current orientation; the other side behind a format badge |
+| reviewed, one format kept | one photo | unchanged |
 
-### Persistenz
+### Persistence
 
-Keine neue Tabelle. Zwei Ergänzungen:
+No new table. Two additions:
 
-| Spalte | Tabelle | Bedeutung |
+| Column | Table | Meaning |
 |---|---|---|
-| `orientation_variants` | `photo_groups` | `'auto'` (Standard, berechnet), `'off'` (Nutzer: „nicht dasselbe Motiv", Formatgruppe gilt nie), NULL = nicht geprüft |
-| `collapse_orientation_variants` | `users` | globaler Schalter, Default `TRUE` |
+| `orientation_variants` | `photo_groups` | `'auto'` (default, computed), `'off'` (user: "not the same subject", format group never applies), NULL = not checked |
+| `collapse_orientation_variants` | `users` | global toggle, default `TRUE` |
 
-Die Mitgliedschaft selbst wird beim Lesen berechnet (Orientierung, Sichtbarkeit
-und Zeitfenster liegen alle schon in der Abfrage von `listPhotoGroupsLogic`
-bzw. `/gallery/grid`). Materialisieren wäre erst nötig, wenn das Lesen zu teuer
-wird; die Zahl der Gruppen mit beiden Formaten ist klein.
+The membership itself is computed on read (orientation, visibility
+and time window are all already in the query of `listPhotoGroupsLogic`
+resp. `/gallery/grid`). Materializing would only be needed if reading becomes
+too expensive; the number of groups with both formats is small.
 
 ### API
 
-- `GalleryGridEntry` und `Photo` bekommen `orientation: 'portrait'|'landscape'|'square'|null`.
-- `GalleryGridGroup` bekommt `variants?: { portrait: number; landscape: number }`.
-- `/gallery/grid` (und die album-/link-gebundenen Listen) lernen den Filter
-  `variantMode=all|portrait|landscape`. Der Server lässt bei `portrait` die
-  Querformate jeder Formatgruppe weg und umgekehrt; `all` zeigt alles. Der
-  Filter lebt in `photo/photo.filters.ts` neben `hiddenMode`. Server-seitig
-  deshalb, weil das Raster server-paginiert ist und ein Client-Filter Lücken
-  in Offsets und Zählern risse.
-- `PATCH /photos/groups/:id/variants` mit `{ mode: 'auto' | 'off' }`.
-- `ReviewQueueGroup` bekommt `orientation_pair: boolean`, und
-  `ReviewQueuePhoto.width/height` werden im Frontend-Typ endlich deklariert.
+- `GalleryGridEntry` and `Photo` get `orientation: 'portrait'|'landscape'|'square'|null`.
+- `GalleryGridGroup` gets `variants?: { portrait: number; landscape: number }`.
+- `/gallery/grid` (and the album-/link-bound lists) learn the filter
+  `variantMode=all|portrait|landscape`. For `portrait` the server omits the
+  landscape shots of each format group and vice versa; `all` shows everything. The
+  filter lives in `photo/photo.filters.ts` next to `hiddenMode`. Server-side
+  because the grid is server-paginated and a client filter would tear gaps
+  into offsets and counters.
+- `PATCH /photos/groups/:id/variants` with `{ mode: 'auto' | 'off' }`.
+- `ReviewQueueGroup` gets `orientation_pair: boolean`, and
+  `ReviewQueuePhoto.width/height` are finally declared in the frontend type.
 
-## Verhalten in den Ansichten
+## Behavior in the views
 
-Die Bildschirm-Orientierung kommt im Web aus `useMediaQuery('(orientation: portrait)')`
-(`composables/useBreakpoint.ts`), in iOS aus `GeometryReader` wie in
-`PhotoCompareView.swift`. Beide Apps halten sie in **einem** Composable bzw.
-einer Umgebungsgröße (`useScreenOrientation` / `@Environment(\.screenOrientation)`),
-nicht in jeder View neu.
+On the web the screen orientation comes from `useMediaQuery('(orientation: portrait)')`
+(`composables/useBreakpoint.ts`), in iOS from `GeometryReader` as in
+`PhotoCompareView.swift`. Both apps hold it in **one** composable or
+environment value (`useScreenOrientation` / `@Environment(\.screenOrientation)`),
+not anew in each view.
 
-### Raster (Alle Fotos, Album, geteiltes Album, iOS-Raster)
+### Grid (all photos, album, shared album, iOS grid)
 
-- Die Liste lädt mit `variantMode=<aktuelle Orientierung>`. Dreht sich der
-  Bildschirm, lädt sie neu und hält die Scroll-Position über den
-  `listAnchor` (Issue #1279), der ohnehin existiert.
-- Das gezeigte Foto trägt ein kleines Format-Badge (Icon „Drehen", Tooltip
-  „Auch im Querformat vorhanden"). Es sitzt neben dem Stapel-Badge, in derselben
-  Ecke und Größe (`.vg-stack-badge` in `VirtualGallery.vue`). Tipp auf das
-  Badge öffnet das Vollbild direkt mit der **anderen** Seite.
-- Im **Auswahlmodus** ist `variantMode=all`: wer auswählt, löscht oder in den
-  Basket legt, sieht alles. Keine Aktion trifft etwas Unsichtbares.
-- Der Filter „ausgeblendete Fotos" bekommt die Option **„Formatvarianten"**
-  (analog zu „übernommen"), damit man jederzeit sehen kann, was zusammengefasst
-  ist.
+- The list loads with `variantMode=<current orientation>`. When the
+  screen rotates, it reloads and keeps the scroll position via the
+  `listAnchor` (issue #1279), which already exists.
+- The shown photo carries a small format badge (icon "rotate", tooltip
+  „Auch im Querformat vorhanden" (also available in landscape)). It sits next to the stack badge, in the same
+  corner and size (`.vg-stack-badge` in `VirtualGallery.vue`). A tap on the
+  badge opens fullscreen directly with the **other** side.
+- In **selection mode** `variantMode=all`: anyone who selects, deletes or puts into the
+  basket sees everything. No action affects something invisible.
+- The „hidden photos" filter gets the option **„Formatvarianten"** (format variants)
+  (analogous to "adopted"), so one can see at any time what is
+  collapsed.
 
-### Vollbild / Fullscreen (Web `FullscreenOverlay`, iOS `PhotoFullscreenView`)
+### Fullscreen (web `FullscreenOverlay`, iOS `PhotoFullscreenView`)
 
-- Der Viewer kennt zu jedem Foto seine Gegenseite. Ein Knopf „Querformat" /
-  „Hochformat" (Icon Drehen, Tastatur `R`) wechselt zur Gegenseite an Ort und
-  Stelle, Index in der Liste bleibt.
-- **Drehen des Geräts wechselt automatisch** auf die passende Seite, mit
-  Überblendung. Das ist das sichtbare Versprechen des Features: man dreht das
-  Telefon, und das Bild ist plötzlich das hochkant aufgenommene. Wer gerade
-  bewusst die Gegenseite gewählt hat, wird beim Drehen nicht überstimmt (ein
-  manueller Wechsel setzt ein `pinned`-Flag bis zum nächsten Foto).
-- Blättern überspringt die Gegenseite (sie ist Teil des aktuellen Fotos, kein
-  eigener Schritt). Die Detail-Seitenleiste zeigt beide Dateinamen.
+- The viewer knows the opposite side of every photo. A button „Querformat" /
+  „Hochformat" (icon rotate, keyboard `R`) switches to the opposite side in place,
+  the index in the list stays.
+- **Rotating the device switches automatically** to the fitting side, with a
+  crossfade. This is the visible promise of the feature: you rotate the
+  phone, and the picture is suddenly the one shot in portrait. Anyone who has just
+  deliberately chosen the opposite side is not overruled on rotating (a
+  manual switch sets a `pinned` flag until the next photo).
+- Paging skips the opposite side (it is part of the current photo, not a
+  step of its own). The detail sidebar shows both file names.
 
-### Diashow
+### Slideshow
 
-- Web: `utils/slideshow.ts` wählt pro Schritt die passende Seite; bei
-  Drehung mitten in der Diashow wechselt das aktuelle Bild sofort.
-- iOS: `SlideshowPlanner` paart heute zwei Querformate auf dem hochkanten
-  Bildschirm. Mit Formatgruppen ist die erste Regel: passende Seite nehmen,
-  und erst dann paaren, was übrig bleibt. Die Orientierung des Fotos kommt dann
-  aus der API statt aus der dekodierten Bildgröße.
+- Web: `utils/slideshow.ts` picks the fitting side per step; on
+  rotation in the middle of the slideshow the current picture switches immediately.
+- iOS: `SlideshowPlanner` today pairs two landscape shots on the portrait
+  screen. With format groups the first rule is: take the fitting side,
+  and only then pair what is left. The orientation of the photo then comes
+  from the API instead of the decoded image size.
 
-### Rückblicke und Stream
+### Recaps and stream
 
-Rückblick-Player und Feed-Karte zeigen ein Foto groß; sie nehmen dieselbe
-Hilfsfunktion „passende Seite zur Orientierung" und sind damit mit abgedeckt.
-Keine eigene Logik, nur eine Etappe später.
+The recap player and feed card show one photo large; they use the same
+helper function "fitting side for orientation" and are thus covered too.
+No logic of their own, just a stage later.
 
-## Gruppen-Review
+## Group review
 
-Das Review ist der Ort, an dem die Formatgruppe **bestätigt** wird: wer eine
-Gruppe fertig reviewt und beide Formate behält, hat gesagt „das ist ein Motiv in
-zwei Formaten". Deshalb drei Änderungen:
+The review is the place where the format group is **confirmed**: anyone who
+finishes reviewing a group and keeps both formats has said "this is one subject in
+two formats". Hence three changes:
 
-1. **Nicht gegeneinander antreten lassen.** Hoch- gegen Querformat zu
-   vergleichen ist die falsche Frage. In `PhotoCompareView` (Web) duellieren
-   sich zuerst die Fotos *innerhalb* einer Orientierung; im Abschlussraster
-   stehen die Sieger beider Formate als verbundenes Paar mit dem Hinweis
+1. **Do not let them compete against each other.** Comparing portrait against
+   landscape is the wrong question. In `PhotoCompareView` (web) the photos
+   *within* an orientation duel first; in the final grid
+   the winners of both formats appear as a connected pair with the note
    „bleiben als Formatpaar erhalten". iOS `CompareTournament.suggestedKeepIds`
-   macht das für die Vorauswahl schon, die Duell-Reihenfolge noch nicht.
-2. **Eine Aktion „Bestes je Format behalten".** In der Review-Queue (Web-Karte
-   und iOS-Wischen) neben „KI-Pick übernehmen": behält pro Orientierung das
-   bestbewertete Foto und markiert reviewt. Für Gruppen mit genau einem Foto je
-   Format ist es dasselbe wie „Alle behalten", nur mit der Aussage „Formatpaar".
-   Als iOS-Wischgeste bietet sich *unten* an (rechts, links, hoch sind belegt).
-3. **Eine Aktion „Nicht dasselbe Motiv".** Im Review und in der Seitenleiste
-   der Gruppe: setzt `orientation_variants='off'`. Ab da werden beide Fotos
-   überall nebeneinander gezeigt. Umgekehrt stellt „Als Formatpaar behandeln"
-   `auto` wieder her. Kein Dialog, beides sofort rückgängig machbar.
+   already does this for the preselection, but not yet the duel order.
+2. **One action „Bestes je Format behalten".** In the review queue (web card
+   and iOS swipe) next to „KI-Pick übernehmen" (adopt AI pick): keeps the best-rated photo per orientation
+   and marks it reviewed. For groups with exactly one photo per
+   format it is the same as "keep all", only with the statement "format pair".
+   As an iOS swipe gesture, *down* suggests itself (right, left, up are taken).
+3. **One action „Nicht dasselbe Motiv".** In the review and in the sidebar
+   of the group: sets `orientation_variants='off'`. From then on both photos are
+   shown next to each other everywhere. Conversely, „Als Formatpaar behandeln" restores
+   `auto`. No dialog, both immediately undoable.
 
-Die Review-Queue bekommt einen Filter-Chip **„Formatpaare"** und zeigt auf der
-Karte das Tag „Hoch + Quer". KI-Auto-Pick bleibt wie er ist: die
-Orientierungs-Diversität tut genau das Richtige, und der neue Zustand macht
-nur sichtbar, warum die KI zwei Fotos behalten hat.
+The review queue gets a filter chip **„Formatpaare"** and shows the tag
+„Hoch + Quer" on the card. KI auto-pick stays as it is: the
+orientation diversity does exactly the right thing, and the new state
+merely makes visible why the AI kept two photos.
 
-Übernahme fremder Reviews (`documentation/group-review-adoption.md`) überträgt
-`orientation_variants` **nicht**: ob zwei Bilder dasselbe Motiv sind, ist
-objektiv genug, dass `auto` für alle gilt; ein `off` ist eine persönliche
-Entscheidung an der eigenen Gruppe.
+Adopting others' reviews (`documentation/group-review-adoption.md`) does **not**
+carry over `orientation_variants`: whether two images are the same subject is
+objective enough that `auto` applies to everyone; an `off` is a personal
+decision on one's own group.
 
-## Was bewusst nicht passiert
+## What deliberately does not happen
 
-- Kein Schreiben in `photo_curation`. Die Gegenseite ist nicht „ausgeblendet",
-  sie ist nur gerade nicht an der Reihe. Alle ~20 Abfragestellen, die
-  `hidden` auswerten, bleiben unangetastet.
-- Keine Zählerkorrektur: „120 Fotos" bleibt 120, auch wenn das Raster 110
-  Kacheln zeigt. Das Badge erklärt die Differenz an Ort und Stelle.
-- Keine Formatgruppe über Gruppengrenzen hinweg und kein eigener
-  Clustering-Lauf.
-- Der Schalter `collapse_orientation_variants` steht unter Fotos ›
-  Einstellungen; wer das Verhalten nicht will, hat alles wie heute.
+- No writing to `photo_curation`. The opposite side is not "hidden",
+  it simply isn't its turn right now. All ~20 query sites that evaluate
+  `hidden` remain untouched.
+- No counter correction: "120 photos" stays 120, even if the grid shows 110
+  tiles. The badge explains the difference on the spot.
+- No format group across group boundaries and no clustering run of its own.
+- The toggle `collapse_orientation_variants` lives under Photos ›
+  Settings; anyone who does not want the behavior has everything as today.
 
-## Etappen
+## Stages
 
-1. **Backend**: `orientation` in `Photo`/`GalleryGridEntry`, Formatgruppe in
-   `listPhotoGroupsLogic`, `variantMode`-Filter, Cover-Wahl nach Orientierung,
-   `orientation_variants`-Spalte + Endpoint, Nutzer-Schalter, Tests für
-   Zeitfenster, Sichtbarkeit und `off`.
-2. **Web Raster + Vollbild**: `useScreenOrientation`, Neuladen bei Drehung mit
-   Anker, Format-Badge, Gegenseite im `FullscreenOverlay` (Knopf, `R`,
-   Auto-Wechsel bei Drehung, `pinned`), Filteroption, Auswahlmodus = `all`,
-   Storybook-Stories für Badge und Overlay in beiden Orientierungen
+1. **Backend**: `orientation` in `Photo`/`GalleryGridEntry`, format group in
+   `listPhotoGroupsLogic`, `variantMode` filter, cover selection by orientation,
+   `orientation_variants` column + endpoint, user toggle, tests for
+   time window, visibility and `off`.
+2. **Web grid + fullscreen**: `useScreenOrientation`, reload on rotation with
+   anchor, format badge, opposite side in `FullscreenOverlay` (button, `R`,
+   auto-switch on rotation, `pinned`), filter option, selection mode = `all`,
+   Storybook stories for badge and overlay in both orientations
    (`testViewport`).
-3. **Web Review**: Duelle innerhalb der Orientierung, Formatpaar im
-   Abschlussraster, „Bestes je Format behalten", „Nicht dasselbe Motiv",
-   Chip „Formatpaare".
-4. **iOS Raster, Vollbild, Diashow**: Umgebungswert für Orientierung,
-   Badge, Gegenseite im `PhotoFullscreenView`, `SlideshowPlanner` nimmt die
-   passende Seite vor dem Paaren.
-5. **iOS Review**: Wischgeste „Bestes je Format", Kontextmenü „Nicht dasselbe
-   Motiv", Duell-Reihenfolge in `CompareTournament`.
-6. **Rückblicke und Stream** mit derselben Hilfsfunktion.
+3. **Web review**: duels within the orientation, format pair in the
+   final grid, „Bestes je Format behalten", „Nicht dasselbe Motiv",
+   chip „Formatpaare".
+4. **iOS grid, fullscreen, slideshow**: environment value for orientation,
+   badge, opposite side in `PhotoFullscreenView`, `SlideshowPlanner` takes the
+   fitting side before pairing.
+5. **iOS review**: swipe gesture „Bestes je Format", context menu „Nicht dasselbe
+   Motiv", duel order in `CompareTournament`.
+6. **Recaps and stream** with the same helper function.
 
-## Entscheidungen
+## Decisions
 
-Die drei anfangs offenen Fragen sind mit dem Nutzer entschieden:
+The three initially open questions were decided with the user:
 
-- **Zeitfenster 120 s** zwischen den beiden Formaten, als Konstante
-  `VARIANT_TIME_WINDOW_MS` neben `TIME_WINDOW_MS`. Das volle Gruppenfenster
-  von zehn Minuten gilt nicht.
-- **Seite zeigen, nicht paaren.** Hat der Nutzer mehrere Fotos je Format
-  behalten (3 hoch, 2 quer), zeigt die Ansicht alle Fotos der passenden
-  Seite; die andere Seite liegt gesammelt dahinter. Keine 1:1-Zuordnung.
-- **Drehen wechselt automatisch** im Vollbild und in der Diashow, mit
-  Überblendung. Ein manueller Wechsel setzt `pinned` bis zum nächsten Foto
-  und wird vom Drehen nicht überstimmt.
+- **Time window 120 s** between the two formats, as constant
+  `VARIANT_TIME_WINDOW_MS` next to `TIME_WINDOW_MS`. The full group window
+  of ten minutes does not apply.
+- **Show a side, do not pair.** If the user kept several photos per format
+  (3 portrait, 2 landscape), the view shows all photos of the fitting
+  side; the other side lies collected behind it. No 1:1 assignment.
+- **Rotating switches automatically** in fullscreen and in the slideshow, with a
+  crossfade. A manual switch sets `pinned` until the next photo
+  and is not overruled by rotating.

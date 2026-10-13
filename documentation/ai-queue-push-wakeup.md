@@ -1,132 +1,130 @@
-# AI-Queue: Push-Wakeup statt Sekunden-Polling
+# AI Queue: Push Wakeup Instead of Per-Second Polling
 
-Status: **Umgesetzt** — `ai-queue/waiters.ts`, `ai-queue/api.ts`,
-`ai-queue/slot-helper.ts` samt Tests
-(`ai-queue/waiters.test.ts`, `ai-queue/slot-helper.test.ts`, erweiterte
+Status: **Implemented** — `ai-queue/waiters.ts`, `ai-queue/api.ts`,
+`ai-queue/slot-helper.ts` including tests
+(`ai-queue/waiters.test.ts`, `ai-queue/slot-helper.test.ts`, extended
 `ai-queue/api.test.ts`).
 
 ## Problem
 
-`ai-queue` serialisiert den Zugriff auf die externen AI-Services (llm,
-embedding, insightface) über die Tabelle `ai_model_slot`: pro Modell genau
-ein `active`-Slot, alle weiteren Anfragen warten priorisiert.
+`ai-queue` serializes access to the external AI services (llm,
+embedding, insightface) via the `ai_model_slot` table: exactly one
+`active` slot per model, all further requests wait in priority order.
 
-Das Warten ist heute Polling: `withAiSlot()` (in
-`ai-queue/slot-helper.ts`) ruft im Wartezustand jede Sekunde
-`pollSlot` auf (`AI_QUEUE_POLL_INTERVAL_MS`, Default 1000 ms). Jeder Poll
-kostet zwei SQL-Queries (Status + Positionsberechnung). Bei Kontention —
-z. B. photo-embedding, photo-quality, documents-scan und finance-tagging
-gleichzeitig auf `llm`/`embedding` — entsteht dauerhafter, nutzloser
-DB-Traffic, obwohl sich am Zustand meist nichts ändert.
+Waiting is polling today: in the waiting state, `withAiSlot()` (in
+`ai-queue/slot-helper.ts`) calls `pollSlot` every second
+(`AI_QUEUE_POLL_INTERVAL_MS`, default 1000 ms). Each poll costs two SQL
+queries (status + position calculation). Under contention —
+e.g. photo-embedding, photo-quality, documents-scan and finance-tagging
+at the same time on `llm`/`embedding` — this produces permanent, useless
+DB traffic even though the state usually does not change.
 
-## Kernidee
+## Core Idea
 
-**Der Slot-Inhaber weckt beim Freigeben den nächsten Warter direkt auf,
-statt dass alle Warter pollen.**
+**When releasing, the slot holder wakes up the next waiter directly,
+instead of all waiters polling.**
 
-Entscheidende Vereinfachung gegenüber einer vollständigen
-Dispatcher-Inversion („ai-queue ruft den App-Service zurück und der
-verteilt den nächsten Job"): Das gefürchtete Ketten-Problem — *„wenn die
-Queue leer ist, gibt es keinen zukünftigen Trigger mehr; neue Elemente
-müssten die Kette neu anstoßen"* — existiert in der heutigen Struktur
-gar nicht, wenn man nur das **Warten** push-basiert macht:
+A key simplification compared to a full dispatcher inversion ("ai-queue
+calls back the app service, which dispatches the next job"): the dreaded
+chain problem — *"when the queue is empty, there is no future trigger
+anymore; new items would have to restart the chain"* — does not exist at
+all in the current structure if only the **waiting** is made push-based:
 
-- `acquireSlot` prüft **atomar** beim Einreihen, ob ein Slot frei ist,
-  und aktiviert sofort (`INSERT` + bedingtes `UPDATE`). Der
-  Acquire-Aufruf selbst ist also immer der „initiale Trigger" — eine
-  leere Queue braucht kein Re-Priming.
-- `releaseSlot` promotet bereits heute den nächsten Warter in der DB
-  (`waiting` → `active`). Es fehlt nur die Benachrichtigung des
-  wartenden Aufrufers — genau die ersetzt das Polling.
+- `acquireSlot` checks **atomically** on enqueue whether a slot is free
+  and activates immediately (`INSERT` + conditional `UPDATE`). The
+  acquire call itself is therefore always the "initial trigger" — an
+  empty queue needs no re-priming.
+- `releaseSlot` already promotes the next waiter in the DB today
+  (`waiting` → `active`). Only the notification of the waiting caller is
+  missing — and that is exactly what replaces the polling.
 
-Die Job-Queues der Services (photo scan-queue, documents scan-queue,
-finance tag-queue) bleiben unverändert: Jeder Worker dequeued weiterhin
-selbst und schedult seine konkurrierenden Queues selbst (Concurrency,
-Backpressure, Service-Health, Backup-Pause). Nur die Wartephase in
-`withAiSlot` wird ereignisgesteuert.
+The services' job queues (photo scan-queue, documents scan-queue,
+finance tag-queue) stay unchanged: each worker still dequeues on its own
+and schedules its competing queues itself (concurrency, backpressure,
+service health, backup pause). Only the waiting phase in `withAiSlot`
+becomes event-driven.
 
-### Warum keine vollständige Inversion?
+### Why Not a Full Inversion?
 
-Die Variante „ai-queue ruft bei freiem Slot einen Callback-Endpoint des
-App-Services auf, der dann den nächsten Job dequeued" wurde bewusst
-verworfen:
+The variant "ai-queue calls a callback endpoint of the app service when
+a slot is free, which then dequeues the next job" was deliberately
+rejected:
 
-1. **Zustand verteilt sich auf zwei Systeme.** Der Worker hält den Job
-   heute bereits dequeued, während er auf den Slot wartet; bei Inversion
-   müsste der Job entweder zurückgelegt oder die Job-Auswahl in die
-   ai-queue verlagert werden.
-2. **Scheduling-Vorbedingungen müssten dupliziert werden.** Die Worker
-   prüfen vor dem Dequeue Event-Loop-Pressure, Service-Health,
-   Backup-Pause etc. Ein Callback aus der ai-queue müsste all das erneut
-   prüfen und bei „passt gerade nicht" den Slot weiterreichen —
-   zusätzliche Fehlerpfade.
-3. **Das Re-Priming-Problem entstünde dadurch erst** (leere Queue → kein
-   Trigger → App-Service muss „initiales Element" einspeisen). Mit dem
-   Wakeup-Ansatz bleibt die Acquire-Semantik selbstanstoßend.
+1. **State is spread across two systems.** The worker already holds the
+   job dequeued while it waits for the slot; with inversion the job would
+   either have to be put back or the job selection moved into the
+   ai-queue.
+2. **Scheduling preconditions would have to be duplicated.** Before the
+   dequeue, the workers check event-loop pressure, service health,
+   backup pause, etc. A callback from the ai-queue would have to re-check
+   all of that and, on "doesn't fit right now", pass the slot on —
+   additional error paths.
+3. **The re-priming problem would only arise through this** (empty queue
+   → no trigger → app service has to feed in an "initial item"). With the
+   wakeup approach, the acquire semantics remain self-triggering.
 
-Das Wakeup-Design erreicht dasselbe Ziel (kein Polling, sofortige
-Slot-Übergabe) mit einem Bruchteil des Umbaus.
+The wakeup design achieves the same goal (no polling, immediate slot
+handover) with a fraction of the rework.
 
-## Randbedingung: Prozess-Topologie
+## Constraint: Process Topology
 
-Alle Encore-TS-Services laufen self-hosted als **ein** Node-Prozess (ein
-`fk-encore`-Container, siehe `docker-compose.yml`); sie teilen sich eine
-Postgres-DB über einen gemeinsamen Pool (`db/database.ts`). Damit
-funktioniert ein **In-Process-Waiter-Registry** (Modul-Singleton):
-`ai-queue/api.ts` (weckt) und `ai-queue/slot-helper.ts` (wartet) sehen
-dieselbe Registry-Instanz.
+All Encore TS services run self-hosted as **one** Node process (one
+`fk-encore` container, see `docker-compose.yml`); they share one Postgres
+DB via a common pool (`db/database.ts`). This makes an **in-process
+waiter registry** (module singleton) work: `ai-queue/api.ts` (wakes) and
+`ai-queue/slot-helper.ts` (waits) see the same registry instance.
 
-Sollte die Topologie je auf mehrere Prozesse aufgeteilt werden, greift
-der Fallback-Poll (s. u.) — das System degradiert dann zu langsamem
-Polling statt zu hängen. Phase 2 (optional, nur bei Bedarf): Postgres
-`LISTEN/NOTIFY` als prozessübergreifender Wakeup-Kanal.
+Should the topology ever be split across several processes, the fallback
+poll (see below) kicks in — the system then degrades to slow polling
+instead of hanging. Phase 2 (optional, only if needed): Postgres
+`LISTEN/NOTIFY` as a cross-process wakeup channel.
 
 ## Design
 
-### 1. Neues Modul `ai-queue/waiters.ts` (In-Process-Registry)
+### 1. New Module `ai-queue/waiters.ts` (In-Process Registry)
 
 ```ts
-// Map slotId → resolve-Funktion des wartenden Promise
+// Map slotId → resolve function of the waiting promise
 const waiters = new Map<number, () => void>();
 
-/** Registriert einen Warter. Auflösung durch wakeWaiter(slotId). */
+/** Registers a waiter. Resolved by wakeWaiter(slotId). */
 export function registerWaiter(slotId: number): Promise<void>;
 
-/** Entfernt einen Warter (Timeout/Cancel), idempotent. */
+/** Removes a waiter (timeout/cancel), idempotent. */
 export function unregisterWaiter(slotId: number): void;
 
-/** Weckt den Warter für slotId, falls registriert. No-op sonst. */
+/** Wakes the waiter for slotId if registered. No-op otherwise. */
 export function wakeWaiter(slotId: number): void;
 ```
 
-Kein Timer, kein Zustand außer der Map. `wakeWaiter` für einen nicht
-(mehr) registrierten Slot ist bewusst ein No-op — der Slot wurde dann
-entweder schon aktiv gesehen oder per Timeout gecancelt (der
-Cleanup-Cron räumt verwaiste `active`-Slots ohnehin ab).
+No timer, no state besides the map. `wakeWaiter` for a slot that is not
+(or no longer) registered is deliberately a no-op — the slot was then
+either already seen as active or cancelled via timeout (the cleanup cron
+removes orphaned `active` slots anyway).
 
-### 2. `ai-queue/api.ts`: Promotion meldet den Gewinner
+### 2. `ai-queue/api.ts`: Promotion Reports the Winner
 
-Überall, wo ein Warter `waiting → active` promotet wird, liefert das
-`UPDATE … RETURNING id` den Gewinner, und der Aufrufer weckt ihn:
+Everywhere a waiter is promoted `waiting → active`, the
+`UPDATE … RETURNING id` yields the winner, and the caller wakes it:
 
-- **`releaseSlot`**: nach der Promotion `wakeWaiter(promotedId)`.
-- **`cleanupStaleSlots`**: dito je betroffenem Modell.
+- **`releaseSlot`**: `wakeWaiter(promotedId)` after the promotion.
+- **`cleanupStaleSlots`**: likewise per affected model.
 
-Das sind die einzigen beiden Stellen, an denen ein wartender Slot aktiv
-wird (in `acquireSlot` aktiviert sich nur der frisch eingefügte Slot
-selbst — dessen Aufrufer bekommt das Ergebnis synchron zurück).
+These are the only two places where a waiting slot becomes active (in
+`acquireSlot` only the freshly inserted slot activates itself — its
+caller gets the result back synchronously).
 
-### 3. `ai-queue/slot-helper.ts`: Warten ohne Sekunden-Poll
+### 3. `ai-queue/slot-helper.ts`: Waiting Without Per-Second Polling
 
 ```ts
 if (slot.status === "waiting") {
-  const wakeup = registerWaiter(slotId);        // (a) zuerst registrieren
+  const wakeup = registerWaiter(slotId);        // (a) register first
   try {
-    // (b) Race-Schutz: Promotion zwischen acquire-Antwort und (a)?
+    // (b) race protection: promotion between acquire response and (a)?
     const recheck = await aiqueue.pollSlot({ slotId });
     if (recheck.status !== "active") {
       if (recheck.status === "cancelled") throw new AiSlotTimeoutError(...);
-      // (c) warten: Wakeup ODER Fallback-Poll ODER Timeout
+      // (c) wait: wakeup OR fallback poll OR timeout
       await waitForActive(slotId, wakeup, timeoutMs);
     }
   } finally {
@@ -135,97 +133,96 @@ if (slot.status === "waiting") {
 }
 ```
 
-`waitForActive` implementiert die Warteschleife:
+`waitForActive` implements the wait loop:
 
-- **Primär:** `await wakeup` — der Normalfall, Latenz ≈ 0 statt bis zu
-  1 s heute.
-- **Fallback-Poll:** alle `AI_QUEUE_FALLBACK_POLL_MS` (Default
-  **30 000 ms**) ein `pollSlot` als Sicherheitsnetz gegen verlorene
-  Wakeups (Bug, künftige Multi-Prozess-Topologie). Meldet der Poll
-  `active`, ist das gleichwertig zum Wakeup; `cancelled` → Abbruch.
-- **Timeout:** wie heute (`AI_QUEUE_SLOT_TIMEOUT_MS`, Default 5 min) —
-  bei Ablauf `cancelSlot` + `AiSlotTimeoutError`.
-- **Verifikation nach Wakeup:** nach einem Wakeup ein einzelnes
-  `pollSlot` zur Bestätigung (`active`?). Kostet eine Query im seltenen
-  Wakeup-Moment statt jede Sekunde und macht die Registry rein
-  advisory — die DB bleibt alleinige Source of Truth. Falls der Status
-  wider Erwarten noch `waiting` ist (sollte nicht vorkommen), weiter
-  warten bis Fallback-Poll/Timeout.
+- **Primary:** `await wakeup` — the normal case, latency ≈ 0 instead of up
+  to 1 s today.
+- **Fallback poll:** every `AI_QUEUE_FALLBACK_POLL_MS` (default
+  **30,000 ms**) a `pollSlot` as a safety net against lost wakeups (bug,
+  future multi-process topology). If the poll reports `active`, it is
+  equivalent to the wakeup; `cancelled` → abort.
+- **Timeout:** as today (`AI_QUEUE_SLOT_TIMEOUT_MS`, default 5 min) —
+  on expiry `cancelSlot` + `AiSlotTimeoutError`.
+- **Verification after wakeup:** after a wakeup, a single `pollSlot` for
+  confirmation (`active`?). Costs one query at the rare wakeup moment
+  instead of every second and makes the registry purely advisory — the DB
+  remains the sole source of truth. If the status is unexpectedly still
+  `waiting` (should not happen), keep waiting until fallback poll/timeout.
 
-Wichtige Race-Betrachtung:
+Important race considerations:
 
-| Race | Behandlung |
+| Race | Handling |
 | --- | --- |
-| Promotion passiert, bevor der Warter registriert ist (zwischen `acquireSlot`-Antwort und `registerWaiter`) | Einmaliger `pollSlot`-Recheck direkt nach der Registrierung (Schritt b) |
-| Wakeup trifft ein, nachdem der Warter per Timeout aufgegeben hat | `wakeWaiter` ist No-op für unregistrierte Slots; der per `cancelSlot` gelöschte bzw. vom Cleanup-Cron abgeräumte Slot blockiert nichts dauerhaft |
-| Timeout und Wakeup gleichzeitig (Slot rast im Timeout-Moment auf `active`) | `waitForActiveSlot` ruft beim Timeout `cancelSlot` — das löscht nur eine noch `waiting`e Zeile und verhindert, dass der `finally`-`releaseSlot` fälschlich einen zweiten aktiven Slot promotet. Ist der Slot schon `active`, ist `cancelSlot` ein No-op und der `finally`-`releaseSlot` in `withAiSlot` gibt ihn frei und promotet den Nächsten. |
+| Promotion happens before the waiter is registered (between the `acquireSlot` response and `registerWaiter`) | One-time `pollSlot` recheck right after registration (step b) |
+| Wakeup arrives after the waiter has given up via timeout | `wakeWaiter` is a no-op for unregistered slots; the slot deleted via `cancelSlot` or cleaned up by the cleanup cron does not block anything permanently |
+| Timeout and wakeup at the same time (slot races to `active` at the moment of the timeout) | On timeout, `waitForActiveSlot` calls `cancelSlot` — it only deletes a row that is still `waiting` and prevents the `finally` `releaseSlot` from wrongly promoting a second active slot. If the slot is already `active`, `cancelSlot` is a no-op and the `finally` `releaseSlot` in `withAiSlot` releases it and promotes the next one. |
 
-Dieses Zusammenspiel (`cancelSlot` für den Waiting-Fall, `finally`-`releaseSlot`
-für den Aktiv-Race) war schon in der Poll-Variante korrekt und bleibt so
-erhalten — `cancelSlot`-vor-`throw` ist dabei lasttragend, weil ein
-`releaseSlot` auf einer noch `waiting`en Zeile sonst einen zweiten aktiven
-Slot promoten würde.
+This interplay (`cancelSlot` for the waiting case, `finally` `releaseSlot`
+for the active race) was already correct in the poll variant and is
+retained as is — `cancelSlot` before `throw` is load-bearing here, because
+a `releaseSlot` on a still-`waiting` row would otherwise promote a second
+active slot.
 
-### 4. Konfiguration
+### 4. Configuration
 
-| Variable | vorher | nachher |
+| Variable | before | after |
 | --- | --- | --- |
-| `AI_QUEUE_POLL_INTERVAL_MS` | 1000 ms aktives Polling | **entfällt** — wird nicht mehr gelesen |
-| `AI_QUEUE_FALLBACK_POLL_MS` | — | neu, Default 30 000 ms (Sicherheitsnetz, pro Warteschritt aus der Env gelesen) |
-| `AI_QUEUE_SLOT_TIMEOUT_MS` | 300 000 ms | unverändert |
-| `AI_QUEUE_STALE_TTL_MINUTES` | 5 min | unverändert (Cleanup-Cron bleibt als Absicherung gegen abgestürzte Inhaber) |
+| `AI_QUEUE_POLL_INTERVAL_MS` | 1000 ms active polling | **removed** — no longer read |
+| `AI_QUEUE_FALLBACK_POLL_MS` | — | new, default 30,000 ms (safety net, read from the env per wait step) |
+| `AI_QUEUE_SLOT_TIMEOUT_MS` | 300,000 ms | unchanged |
+| `AI_QUEUE_STALE_TTL_MINUTES` | 5 min | unchanged (cleanup cron stays as a safeguard against crashed holders) |
 
-### 5. Unverändert
+### 5. Unchanged
 
-- Tabelle `ai_model_slot`, Prioritäts-/FIFO-Ordnung, `FOR UPDATE SKIP
-  LOCKED`-Promotion — keine Migration nötig.
-- API-Verträge von `acquireSlot`/`pollSlot`/`releaseSlot`/`cancelSlot`
-  (`pollSlot` bleibt für Fallback, Status-UI und Tests erhalten).
-- Alle Aufrufer (`photo/scan-worker.ts`, `documents/scan-worker.ts`,
-  `finance/tag-worker.ts`) — die Signatur von `withAiSlot` ändert sich
-  nicht.
-- Cleanup-Cron (`ai-queue/cleanup-cron.ts`).
+- Table `ai_model_slot`, priority/FIFO ordering, `FOR UPDATE SKIP
+  LOCKED` promotion — no migration needed.
+- API contracts of `acquireSlot`/`pollSlot`/`releaseSlot`/`cancelSlot`
+  (`pollSlot` is kept for the fallback, status UI and tests).
+- All callers (`photo/scan-worker.ts`, `documents/scan-worker.ts`,
+  `finance/tag-worker.ts`) — the signature of `withAiSlot` does not
+  change.
+- Cleanup cron (`ai-queue/cleanup-cron.ts`).
 
-## Tests (`ai-queue/api.test.ts` + neu `ai-queue/slot-helper.test.ts`)
+## Tests (`ai-queue/api.test.ts` + new `ai-queue/slot-helper.test.ts`)
 
-1. **Wakeup-Happy-Path:** Warter B auf Modell X; `releaseSlot(A)` →
-   B's `withAiSlot` läuft ohne Fallback-Poll weiter (messbar über kurze
-   Gesamtdauer ≪ Fallback-Intervall).
-2. **Prioritäten:** zwei Warter (p1, p2) — Release weckt den
-   p1-Warter, der p2-Warter bleibt registriert und wartet weiter.
-3. **Race acquire→register:** Promotion vor `registerWaiter` simulieren
-   → der Recheck fängt es, kein Hänger.
-4. **Timeout:** kein Release → `AiSlotTimeoutError` nach `timeoutMs`,
-   Slot-Zeile ist entfernt, Registry leer (`unregisterWaiter` griff).
-5. **Timeout trifft aktivierten Slot:** Slot wird unmittelbar vor dem
-   Timeout aktiv → Freigabe statt Leiche; nächster Warter rückt nach.
-6. **Cleanup-Cron weckt:** stale `active` + ein Warter →
-   `cleanupStaleSlots` promotet und weckt.
-7. **Fallback-Poll:** Wakeup unterdrücken (Registry gezielt leeren) →
-   Warter kommt trotzdem über den Fallback-Poll zum Zug.
-8. Bestehende `api.test.ts`-Fälle bleiben grün (Verträge unverändert).
+1. **Wakeup happy path:** waiter B on model X; `releaseSlot(A)` →
+   B's `withAiSlot` continues without a fallback poll (measurable via a
+   short total duration ≪ fallback interval).
+2. **Priorities:** two waiters (p1, p2) — the release wakes the
+   p1 waiter, the p2 waiter stays registered and keeps waiting.
+3. **Race acquire→register:** simulate promotion before `registerWaiter`
+   → the recheck catches it, no hang.
+4. **Timeout:** no release → `AiSlotTimeoutError` after `timeoutMs`,
+   slot row is removed, registry empty (`unregisterWaiter` took effect).
+5. **Timeout hits an activated slot:** slot becomes active immediately
+   before the timeout → release instead of a zombie; the next waiter
+   moves up.
+6. **Cleanup cron wakes:** stale `active` + one waiter →
+   `cleanupStaleSlots` promotes and wakes.
+7. **Fallback poll:** suppress the wakeup (deliberately empty the
+   registry) → the waiter still gets its turn via the fallback poll.
+8. Existing `api.test.ts` cases stay green (contracts unchanged).
 
-## Umsetzungsetappen
+## Implementation Stages
 
-1. `ai-queue/waiters.ts` + Unit-Tests der Registry.
-2. `api.ts`: Promotion mit `RETURNING id` + `wakeWaiter` in
-   `releaseSlot` und `cleanupStaleSlots`.
-3. `slot-helper.ts`: Warteschleife umbauen (register → recheck →
-   race(wakeup, fallback, timeout)), Timeout-Pfad mit
-   release-statt-cancel für bereits aktivierte Slots.
-4. Integrations-Tests (Liste oben), `npm run test` grün.
-5. Doku-Feinschliff (dieses Dokument auf „umgesetzt" stellen,
-   Env-Variablen in DEPLOYMENT.md ergänzen, falls dort gelistet).
+1. `ai-queue/waiters.ts` + unit tests of the registry.
+2. `api.ts`: promotion with `RETURNING id` + `wakeWaiter` in
+   `releaseSlot` and `cleanupStaleSlots`.
+3. `slot-helper.ts`: rebuild the wait loop (register → recheck →
+   race(wakeup, fallback, timeout)), timeout path with
+   release-instead-of-cancel for already activated slots.
+4. Integration tests (list above), `npm run test` green.
+5. Documentation polish (set this document to "implemented",
+   add env variables to DEPLOYMENT.md if listed there).
 
-Aufwand: klein — drei Dateien plus Tests, keine Migration, keine
-API-Änderung nach außen.
+Effort: small — three files plus tests, no migration, no outward API
+change.
 
-## Phase 2 (optional): Multi-Prozess-Fähigkeit
+## Phase 2 (Optional): Multi-Process Capability
 
-Nur falls die Encore-Services je auf mehrere Prozesse/Container
-aufgeteilt werden: `releaseSlot`/Cleanup feuern zusätzlich
-`pg_notify('ai_slot_activated', slotId)`; ein dediziertes
-Listener-Connection-Modul pro Prozess verteilt eingehende
-Notifications an die lokale Registry. Registry-API und `withAiSlot`
-bleiben dabei unverändert — es ändert sich nur die Transportschicht
-des Wakeups.
+Only if the Encore services are ever split across several
+processes/containers: `releaseSlot`/cleanup additionally fire
+`pg_notify('ai_slot_activated', slotId)`; a dedicated
+listener-connection module per process distributes incoming
+notifications to the local registry. Registry API and `withAiSlot`
+stay unchanged — only the transport layer of the wakeup changes.

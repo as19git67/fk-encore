@@ -1,304 +1,305 @@
-# Foto-Diashow (Vollbild) – Feature-Dokumentation
+# Photo Slideshow (Fullscreen) – Feature Documentation
 
-Die Diashow ist Teil der gemeinsamen `FullscreenOverlay`-Komponente und steht
-damit überall zur Verfügung, wo das Vollbild mit konfiguriertem Intervall
-geöffnet wird. Sie wird **manuell per Play/Pause-Button** gesteuert und startet
-nie von selbst.
+The slideshow is part of the shared `FullscreenOverlay` component and is
+therefore available everywhere the fullscreen view is opened with a configured
+interval. It is controlled **manually via the play/pause button** and never
+starts on its own.
 
-## Wo es die Diashow gibt
+## Where the Slideshow Exists
 
-Eine Diashow existiert genau dann, wenn der `FullscreenOverlay` mit
-`autoAdvanceMs > 0` eingebunden ist:
+A slideshow exists exactly when the `FullscreenOverlay` is embedded with
+`autoAdvanceMs > 0`:
 
-| Ansicht | Einbindung | Diashow |
+| View | Embedding | Slideshow |
 |---|---|---|
-| Album-Rasteransicht (`AlbumDetailView`) | `:autoAdvanceMs="10000"` | ✅ |
-| Album-Kartenansicht (`AlbumDetailView`) | `:autoAdvanceMs="10000"` | ✅ |
-| Geteiltes Album (`SharedAlbumView`) | `:autoAdvanceMs="10000"` | ✅ |
-| `GalleryView`, `PersonsView` | kein `autoAdvanceMs` | – |
+| Album grid view (`AlbumDetailView`) | `:autoAdvanceMs="10000"` | ✅ |
+| Album map view (`AlbumDetailView`) | `:autoAdvanceMs="10000"` | ✅ |
+| Shared album (`SharedAlbumView`) | `:autoAdvanceMs="10000"` | ✅ |
+| `GalleryView`, `PersonsView` | no `autoAdvanceMs` | – |
 
-## Play/Pause-Steuerung
+## Play/Pause Control
 
-- **Kein Auto-Start:** Das interne `playing`-Flag ist standardmäßig `false`. Der
-  Auto-Advance läuft nur, solange der Nutzer ihn gestartet hat.
-- **Toolbar-Button:** In der Action-Bar des Overlays (außerhalb des
-  `actions`-Slots, damit Slot-Overrides ihn nicht verdrängen). Sichtbar, sobald
+- **No auto-start:** The internal `playing` flag is `false` by default. The
+  auto-advance only runs as long as the user has started it.
+- **Toolbar button:** In the overlay's action bar (outside the
+  `actions` slot, so slot overrides cannot displace it). Visible as soon as
   `autoAdvanceMs > 0`.
-- **Tastatur:** `S` startet/pausiert die Diashow (überall, wo sie verfügbar
-  ist; nicht beim Tippen in Eingabefeldern).
-- **Icon = Klick-Aktion:** Das Icon zeigt immer, was der Klick auslöst – ▶
-  (`pi-play`) wenn gestoppt, ⏸ (`pi-pause`) während sie läuft. Jeder echte
-  Stopp setzt `playing = false`, sodass das Icon stets stimmt.
-- **Einstellbarer Abstand (user-spezifisch):** Auswahl zwischen
-  **3 / 5 / 10 / 15 / 20 / 30 s** (Default **5 s**). Die Bedienung ist
-  eingabeabhängig:
-  - **Desktop / Maus (hover-fähig):** ein reines Caret-Dropdown (`Select`, nur
-    der Pfeil) neben dem Play-Button. Der gewählte Wert wird nicht inline
-    angezeigt, sondern erscheint im Tooltip bzw. im aufgeklappten Menü.
-  - **Touch / Mobile (`(hover: none), (pointer: coarse)`):** der Caret entfällt;
-    stattdessen öffnet ein **Long-Press (~450 ms) auf den Play-Button** ein
-    Popup-Menü (`Menu`) mit den Zeitoptionen (aktueller Wert mit Häkchen). Ein
-    kurzer Tap startet/pausiert wie gewohnt; der ausgelöste Long-Press wird vom
-    folgenden Klick „verschluckt", sodass er nicht zusätzlich togglet. Da die
-    Geste unsichtbar ist, erscheint **beim ersten Mal** ein einmaliger Hinweis
-    („Play lange drücken, um das Diashow-Intervall zu wählen") als Sprechblase
-    über der Action-Bar; er verschwindet nach 5 s, bei Antippen oder sobald der
-    Play-Button gedrückt wird. Die „gesehen"-Flag liegt in `localStorage`
-    (`slideshow_longpress_hint_seen`).
+- **Keyboard:** `S` starts/pauses the slideshow (everywhere it is available;
+  not while typing in input fields).
+- **Icon = click action:** The icon always shows what the click triggers – ▶
+  (`pi-play`) when stopped, ⏸ (`pi-pause`) while it is running. Every real
+  stop sets `playing = false`, so the icon is always correct.
+- **Adjustable interval (per user):** Choice between
+  **3 / 5 / 10 / 15 / 20 / 30 s** (default **5 s**). Operation depends on
+  the input method:
+  - **Desktop / mouse (hover-capable):** a pure caret dropdown (`Select`, arrow
+    only) next to the play button. The chosen value is not shown inline,
+    but appears in the tooltip or in the opened menu.
+  - **Touch / mobile (`(hover: none), (pointer: coarse)`):** the caret is
+    omitted; instead, a **long press (~450 ms) on the play button** opens a
+    popup menu (`Menu`) with the time options (current value with a check
+    mark). A short tap starts/pauses as usual; the long press that was
+    triggered is "swallowed" by the subsequent click so it does not
+    additionally toggle. Since the gesture is invisible, a one-time hint
+    ("Play lange drücken, um das Diashow-Intervall zu wählen" — press and hold
+    play to choose the slideshow interval) appears **the first time** as a
+    speech bubble above the action bar; it disappears after 5 s, on tap, or as
+    soon as the play button is pressed. The "seen" flag is stored in
+    `localStorage` (`slideshow_longpress_hint_seen`).
 
-  Der Wert wird **pro Browser** in `localStorage` (`slideshow_interval_ms`)
-  gespeichert; Logik in `frontend/src/utils/slideshowInterval.ts`. Die
-  `autoAdvanceMs`-Prop schaltet die Diashow nur **ein** (Wert > 0) und dient als
-  Fallback-Default.
-- **Intervall & Idle-Reset:** Während des Laufs wird alle (eingestellten)
-  Sekunden zum nächsten Foto weitergeschaltet. Jede Interaktion
-  (Pointer/Tastatur/Wheel) setzt das Intervall zurück, sodass erst nach kurzer
-  Ruhe weitergeschaltet wird. Zwischen zwei Fotos wird gewartet, bis das
-  nächste Bild geladen ist (`playing` bleibt dabei `true`).
-- **Details-Flyout pausiert nicht:** Bei geöffneter Detail-Ansicht läuft die
-  Diashow weiter (die Beschreibung steht dort ohnehin in der Seitenleiste).
-- **Stopps (Icon → ▶):** letztes Foto erreicht (kein Wrap-around), Öffnen des
-  Transform-Editors (Bearbeiten), und das Schließen des Vollbilds.
+  The value is stored **per browser** in `localStorage`
+  (`slideshow_interval_ms`); logic in `frontend/src/utils/slideshowInterval.ts`.
+  The `autoAdvanceMs` prop only switches the slideshow **on** (value > 0) and
+  serves as the fallback default.
+- **Interval & idle reset:** While running, it advances to the next photo
+  every (configured) number of seconds. Every interaction
+  (pointer/keyboard/wheel) resets the interval, so it only advances after a
+  short period of rest. Between two photos, it waits until the next image has
+  loaded (`playing` stays `true` meanwhile).
+- **Details flyout does not pause:** With the detail view open, the
+  slideshow keeps running (the description is shown in the sidebar there
+  anyway).
+- **Stops (icon → ▶):** last photo reached (no wrap-around), opening the
+  transform editor (edit), and closing the fullscreen view.
 
-Die reine Entscheidungslogik ist in `frontend/src/utils/slideshow.ts`
-ausgelagert (`shouldArmSlideshow`, `slideshowReachedEnd`) und unit-getestet; die
-Komponente besitzt nur Timer und `playing`-State und setzt `playing = false` bei
-echten Stopps (Listenende, Editor öffnen).
+The pure decision logic is extracted into `frontend/src/utils/slideshow.ts`
+(`shouldArmSlideshow`, `slideshowReachedEnd`) and unit-tested; the
+component owns only the timer and the `playing` state and sets
+`playing = false` on real stops (end of list, opening the editor).
 
-## Durchlaufen ohne Tages-/Stopp-Grenze (Kartenansicht)
+## Running Through Without a Day/Stop Boundary (Map View)
 
-Beim Öffnen des Vollbilds aus der Karte übergibt `TripMap` **alle Trip-Fotos**
-in chronologischer Timeline-Reihenfolge (Tage aufsteigend, Stopps nach Zeit,
-Fotos nach Zeit – Computed `allStopPhotos`), mit Start-Index auf dem angetippten
-Foto. Dadurch laufen Blättern und Diashow durchgehend über alle Tage und
-Stopps. Beim Schließen wird der ausgewählte Karten-Stopp auf das zuletzt
-gezeigte Foto synchronisiert (`closeMapFullscreen` → `selectStopByPhotoId`).
+When opening the fullscreen view from the map, `TripMap` passes **all trip
+photos** in chronological timeline order (days ascending, stops by time,
+photos by time – computed `allStopPhotos`), with the start index on the
+tapped photo. As a result, paging and the slideshow run continuously across
+all days and stops. On closing, the selected map stop is synchronized to the
+last photo shown (`closeMapFullscreen` → `selectStopByPhotoId`).
 
-## Datums-Banner beim Tageswechsel
+## Date Banner on Day Change
 
-Damit ein durchlaufender Tageswechsel erkennbar ist, blendet das Overlay ein
-dezentes Datums-Label ein, sobald die Navigation in einen neuen Tag wechselt:
+So that a day change during continuous playback is recognizable, the overlay
+fades in a subtle date label as soon as the navigation moves into a new day:
 
-- Opt-in über die Prop `markDayChanges`.
-- Tageswechsel-Erkennung über den **lokalen** Datums-Key
-  (`toLocalIsoDate`, vermeidet UTC-Verschiebung) des neuen vs. zuletzt gezeigten
-  Fotos; angekündigt wird nur ein **Wechsel**, nie das Startfoto (`isDayChange`).
-- Das Label (z. B. „Mittwoch, 14. Januar 2026") fährt mittig unter der Topbar
-  ein, bleibt ~2,5 s und fährt wieder aus – **ohne Pause** im Ablauf. Es ist
-  `pointer-events: none`, blockiert also keine Taps.
-- Aktiv in der Album-Kartenansicht (immer) und im geteilten Album nur, wenn das
-  Vollbild aus der Karte geöffnet wurde (`fullscreenFromMap`), nicht im Raster.
+- Opt-in via the `markDayChanges` prop.
+- Day-change detection via the **local** date key
+  (`toLocalIsoDate`, avoids UTC shift) of the new vs. the last shown
+  photo; only a **change** is announced, never the start photo (`isDayChange`).
+- The label (e.g. "Mittwoch, 14. Januar 2026", i.e. Wednesday, 14 January
+  2026) slides in centered below the top bar, stays for ~2.5 s, and slides
+  out again – **without pausing** playback. It is
+  `pointer-events: none`, so it does not block taps.
+- Active in the album map view (always) and in the shared album only if the
+  fullscreen view was opened from the map (`fullscreenFromMap`), not in the
+  grid.
 
-## Beschreibungs-Caption
+## Description Caption
 
-Während die Diashow läuft, wird – **falls vorhanden** – die Foto-Beschreibung
-(`photo.description`) oben zentriert über dem Bild eingeblendet:
+While the slideshow is running, the photo description
+(`photo.description`) is shown – **if present** – centered at the top above
+the image:
 
-- **Einzeilig**, mit `text-overflow: ellipsis` abgeschnitten (`white-space:
-  nowrap`); der volle Text steht im `title`-Tooltip.
-- **Lesbarkeit** über einen dezent transluzenten, leicht geblurrten Hintergrund
-  (`rgba(0,0,0,0.6)`), unabhängig von den Bildfarben.
-- Gezeigt nur, wenn die Diashow läuft, kein Details-Split offen ist und eine
-  nicht-leere Beschreibung existiert (`shouldShowCaption`).
-- Caption und Datums-Banner teilen sich einen zentrierten Top-Stack
-  (`.fs-top-overlays`), sodass sie sich nie überlappen; beide sind
+- **Single line**, truncated with `text-overflow: ellipsis` (`white-space:
+  nowrap`); the full text is in the `title` tooltip.
+- **Legibility** via a subtly translucent, slightly blurred background
+  (`rgba(0,0,0,0.6)`), independent of the image colors.
+- Shown only when the slideshow is running, no details split is open, and a
+  non-empty description exists (`shouldShowCaption`).
+- Caption and date banner share a centered top stack
+  (`.fs-top-overlays`), so they never overlap; both are
   `pointer-events: none`.
 
-Die Beschreibung ist in den Slideshow-Fotos verfügbar: Der Grid-Pfad
-hydratisiert das aktuelle Foto per `getPhotoDetailsBatch`, und die
-Album-/Karten-Fotos (`getAlbumLogic`) liefern `description` direkt mit.
+The description is available in the slideshow photos: the grid path
+hydrates the current photo via `getPhotoDetailsBatch`, and the
+album/map photos (`getAlbumLogic`) deliver `description` directly.
 
-## iOS (`ios/`, Issue #767 Etappe 2)
+## iOS (`ios/`, issue #767 stage 2)
 
-Auf iOS ist die Diashow **kein Modus des Vollbild-Viewers**, sondern ein eigener
-Vollbild-Player (`PhotoSlideshowView`) — derselbe Story-Player, den die
-Rückblicke schon nutzen (`RecapPlayerView`). Der Viewer selbst spielt nichts
-mehr ab; sein Play-Button übergibt die Fotos an den Player.
+On iOS, the slideshow is **not a mode of the fullscreen viewer**, but a
+separate fullscreen player (`PhotoSlideshowView`) — the same story player the
+recaps already use (`RecapPlayerView`). The viewer itself no longer plays
+anything; its play button hands the photos over to the player.
 
-Der Player zeigt ausschließlich das Bild:
+The player shows only the image:
 
-- **Story-Fortschrittsleiste** oben, ein Segment pro Foto — ab einer
-  gewissen Fotozahl ein durchgehender Balken, siehe unten.
-- **Tippen links** = ein Bild zurück, **tippen rechts** = weiter.
-- **Langes Drücken** pausiert, solange der Finger liegt.
-- **Nach unten wischen** oder ✕ schließt.
-- **Ken-Burns-Bewegung** pro Bild plus Überblendung zwischen den Slides.
-- **Warten auf das geladene Bild:** Solange ein Foto der aktuellen Slide noch
-  lädt, steht der Fortschritt still — die Anzeigedauer ist Betrachtungszeit,
-  nicht Ladezeit. Ein **fehlgeschlagener** Ladeversuch zählt als geladen, sonst
-  würde ein einziges kaputtes Bild die Diashow dauerhaft anhalten.
-- **Intervall 3 / 5 / 10 / 15 / 20 / 30 s**, Default 5 s, pro Gerät gespeichert
-  (`UserDefaults`-Key `slideshow_interval_seconds`; das Web nutzt `localStorage`
-  — beide sind bewusst unabhängig, es gibt keinen Server-Sync). Ein
-  gespeicherter Wert außerhalb der Optionen fällt auf den Default zurück.
-  Umgestellt wird er über das Timer-Menü in der Kopfzeile des Players.
-  Rückblicke behalten ihre feste Taktung von 4 s.
-- **Hintergrundmusik** wie im Rückblick (Lautsprecher-Button stummschalten,
-  ⏩ wechselt den Track) — siehe unten.
-- **Beschreibungs-Caption** unten, zweizeilig, nur bei nicht-leerer
-  Beschreibung. Bei einem Foto-Paar gewinnt die erste vorhandene Beschreibung.
-- **Herz-Button** markiert das Gezeigte als Favorit — bei einem Paar beide
-  Fotos, weil sich der Tap auf das bezieht, was auf dem Schirm steht.
-- **Kein Wrap-around:** Nach dem letzten Foto endet der Player und schließt sich.
+- **Story progress bar** at the top, one segment per photo — beyond a
+  certain number of photos a continuous bar, see below.
+- **Tap left** = one image back, **tap right** = forward.
+- **Long press** pauses as long as the finger is down.
+- **Swipe down** or ✕ closes.
+- **Ken Burns motion** per image plus crossfade between slides.
+- **Waiting for the loaded image:** As long as a photo of the current slide
+  is still loading, progress stands still — the display duration is viewing
+  time, not loading time. A **failed** load attempt counts as loaded, otherwise
+  a single broken image would stop the slideshow permanently.
+- **Interval 3 / 5 / 10 / 15 / 20 / 30 s**, default 5 s, stored per device
+  (`UserDefaults` key `slideshow_interval_seconds`; the web uses
+  `localStorage` — both are deliberately independent, there is no server
+  sync). A stored value outside the options falls back to the default.
+  It is changed via the timer menu in the player's header.
+  Recaps keep their fixed pacing of 4 s.
+- **Background music** as in the recap (speaker button mutes,
+  ⏩ switches the track) — see below.
+- **Description caption** at the bottom, two lines, only for a non-empty
+  description. For a photo pair, the first available description wins.
+- **Heart button** marks what is shown as a favorite — for a pair both
+  photos, because the tap refers to what is on the screen.
+- **No wrap-around:** After the last photo, the player ends and closes.
 
-### Woher die Fotos kommen
+### Where the Photos Come From
 
-| Einstieg | Umfang |
+| Entry point | Scope |
 |---|---|
-| Überlaufmenü „Diashow" in `AlbumDetailView` | alle angezeigten Album-Fotos |
-| Play-Button in der Auswahl-Toolbar (Album, Mediathek, Monat, gefilterte Timeline) | die ausgewählten Fotos |
-| Play-Button in der Toolbar ohne Auswahl | alles, was die Ansicht gerade zeigt |
-| Play-Button in der Bottom-Bar von `PhotoFullscreenView` | ab dem gezeigten Foto bis zum Ende |
+| Overflow menu "Diashow" (slideshow) in `AlbumDetailView` | all displayed album photos |
+| Play button in the selection toolbar (album, media library, month, filtered timeline) | the selected photos |
+| Play button in the toolbar without a selection | everything the view currently shows |
+| Play button in the bottom bar of `PhotoFullscreenView` | from the photo shown to the end |
 
-Der Einstieg ist überall ab **zwei** Fotos sichtbar/aktiv — für ein einzelnes
-gibt es nichts weiterzuschalten.
+The entry point is visible/active everywhere from **two** photos on — for a
+single one there is nothing to advance to.
 
-### Zwei Bilder pro Slide (auch im Rückblick)
+### Two Images per Slide (Also in the Recap)
 
-Ein Querformat-Foto füllt auf einem hochkant gehaltenen Handy nur ein Band in
-der Mitte. Deshalb legt der Player **zwei Querformat-Fotos übereinander** auf
-eine Slide, wenn das Gerät im Hochformat ist — und **zwei Hochformat-Fotos
-nebeneinander**, wenn es quer gehalten wird. Die beiden Hälften fahren dabei
-von den gegenüberliegenden Rändern ein; einzelne Bilder blenden weiterhin über.
-Fast quadratische Fotos (±5 %) werden nie gepaart, weil ein Paar dort genauso
-viel Fläche verschenkt wie ein Einzelbild.
+A landscape photo on a phone held upright fills only a band in the middle.
+Therefore the player stacks **two landscape photos on top of each other** on
+one slide when the device is in portrait, and puts **two portrait photos side
+by side** when it is held in landscape. The two halves slide in from opposite
+edges; single images still crossfade.
+Nearly square photos (±5 %) are never paired, because a pair wastes just as
+much area there as a single image.
 
-Die Ausrichtung ist erst bekannt, wenn ein Bild dekodiert ist. Der Plan wird
-deshalb **inkrementell** gebaut (`SlideshowPlanner.extend`): Er legt so viele
-Slides fest, wie er entscheiden kann, und wartet am ersten Foto, dessen Partner
-noch fehlt. Bereits gezeigte Slides werden nie umnummeriert. Wartet der Player
-länger als 2 s auf ein Bild, gibt er **für dieses eine Foto** auf und zeigt es
-einzeln — der Rest wird danach wieder normal geplant. Dreht der Nutzer das
-Gerät, bleibt der bereits gespielte Teil stehen und nur der Rest wird neu
-gruppiert.
+The orientation is only known once an image has been decoded. The plan is
+therefore built **incrementally** (`SlideshowPlanner.extend`): it fixes as
+many slides as it can decide and waits at the first photo whose partner is
+still missing. Slides that have already been shown are never renumbered. If
+the player waits longer than 2 s for an image, it gives up **on that one
+photo** and shows it on its own — the rest is then planned normally again. If
+the user rotates the device, the part already played stays as is and only the
+rest is regrouped.
 
-Die Fortschrittsleiste hat deshalb ein Segment pro **Foto**, nicht pro Slide:
-So behält sie ihre Form, während der Plan noch wächst; die beiden Segmente
-eines Paares füllen sich gemeinsam.
+The progress bar therefore has one segment per **photo**, not per slide:
+this way it keeps its shape while the plan is still growing; the two segments
+of a pair fill together.
 
-### Fortschrittsleiste bei vielen Fotos
+### Progress Bar With Many Photos
 
-Ein Rückblick hat eine Handvoll Bilder, eine Diashow über ein ganzes Album
-aber schnell mehrere hundert. Ein Segment pro Foto trägt so weit nicht:
-Die Segmente werden zu unsichtbaren Haarlinien, und schlimmer noch, allein
-die Abstände dazwischen werden breiter als der Bildschirm. Ein `HStack`,
-der nicht passt, schrumpft nicht — er macht sein Elternelement breiter.
-Damit wuchs die `ZStack` des Players mit, und das Foto darin wurde zur
-Seite geschoben: Bei 247 Fotos auf einem 402 pt breiten Gerät brauchte die
-Leiste 984 pt nur an Abständen, und vom Bild blieb ein 99 pt schmaler
-Streifen am rechten Rand übrig.
+A recap has a handful of images, but a slideshow over a whole album quickly
+has several hundred. One segment per photo does not scale that far:
+the segments become invisible hairlines, and worse, the gaps between them
+alone become wider than the screen. An `HStack` that does not fit does not
+shrink — it makes its parent wider. As a result, the player's `ZStack` grew
+with it, and the photo inside was pushed aside: with 247 photos on a 402 pt
+wide device, the bar needed 984 pt for gaps alone, and only a 99 pt narrow
+strip of the image was left at the right edge.
 
-`SlideshowProgressTrack` prüft deshalb zuerst, ob die Segmente überhaupt
-passen (mindestens 6 pt pro Segment plus 4 pt Abstand). Passen sie nicht,
-wird die Leiste zu **einem** durchgehenden Balken, der den Gesamtfortschritt
-in Fotos zeigt (`SlideshowPlayback.overallFraction`) — ein Paar rückt ihn
-doppelt so weit vor wie ein Einzelbild, noch ungeplante Fotos zählen als
-ausstehend. Zusätzlich ist die `ZStack` des Players fest auf die
-Bildschirmgröße genagelt, damit kein Overlay das Bild je wieder verschieben
-kann.
+`SlideshowProgressTrack` therefore first checks whether the segments fit at
+all (at least 6 pt per segment plus 4 pt gap). If they do not,
+the bar becomes **one** continuous bar showing the overall progress
+in photos (`SlideshowPlayback.overallFraction`) — a pair advances it
+twice as far as a single image, photos not yet planned count as
+pending. In addition, the player's `ZStack` is pinned to the
+screen size so that no overlay can ever shift the image again.
 
-### Warum die Intervall-Auswahl kein `Menu` ist
+### Why the Interval Selection Is Not a `Menu`
 
-Der Ticker schreibt zwanzigmal pro Sekunde in `playback`, und jeder Schreib­vorgang
-baut die View neu auf. Ein `Menu`, das aus einer so schnell wechselnden View
-heraus aufgeklappt wird, verliert die Taps auf seine eigenen Zeilen — die
-Auswahl ging auf. Ein `Menu` hat aber keinen „ist offen"-Zustand, an dem sich
-ein Anhalten festmachen ließe.
+The ticker writes to `playback` twenty times per second, and every write
+rebuilds the view. A `Menu` that is opened from such a rapidly changing view
+loses the taps on its own rows — the selection fell through. A `Menu` also
+has no "is open" state that a pause could be tied to.
 
-Deshalb gehört die Auswahl jetzt dieser View (`isChoosingInterval` +
-`confirmationDialog`), und `isSuspended` hält Ticker **und** Musik an, solange
-sie offen ist — genau wie beim langen Drücken. Das aktuelle Intervall ist mit
-einem ✓ im Text markiert, weil eine Action-Sheet-Zeile keinen eigenen
-Auswahl­zustand hat.
+The selection therefore now belongs to this view (`isChoosingInterval` +
+`confirmationDialog`), and `isSuspended` halts ticker **and** music while it
+is open — just like with the long press. The current interval is marked with
+a ✓ in the text, because an action sheet row has no selection state of its
+own.
 
-### Chrome und die Kamera-Aussparung
+### Chrome and the Camera Cutout
 
-Das Foto ist bewusst randlos: Der Inhalt des Players ignoriert die Safe Area,
-damit das Bild bis an jede Kante reicht. Die Bedienelemente dürfen ihm dorthin
-**nicht** folgen — mit 12 pt Abstand zur *Bildschirmkante* lagen
-Fortschrittsleiste und Albumname im Hochformat unter der Dynamic Island.
-`SlideshowChromeInsets` legt sie deshalb wieder in die Safe Area: oben,
-unten (Home-Indicator) und im Querformat auch seitlich, jeweils plus dem
-eigenen Rand des Players von 12 pt. Der untere Wert kommt ohne diesen Rand,
-weil die Aufrufer dort schon größere Abstände mitbringen (Caption 92 pt).
+The photo is deliberately edge-to-edge: the player's content ignores the safe
+area so the image reaches every edge. The controls must **not** follow it
+there — with a 12 pt distance from the *screen edge*, the progress bar and
+album name sat under the Dynamic Island in portrait.
+`SlideshowChromeInsets` therefore places them back inside the safe area: top,
+bottom (home indicator) and, in landscape, also on the sides, each plus the
+player's own margin of 12 pt. The bottom value comes without this margin,
+because the callers there already bring larger spacing (caption 92 pt).
 
-**Wichtig:** `.ignoresSafeArea()` muss auf den *Inhalt* des `GeometryReader`
-gelegt werden, nicht auf den Reader selbst. Am Reader angebracht, meldet er ab
-diesem Punkt `safeAreaInsets` von **null** — er wurde ja schon auf Vollbild
-erweitert, bevor sein Closure läuft, hat also aus eigener Sicht nichts mehr,
-wovon er absetzen könnte. Genau das ist beim ersten Anlauf passiert: `chrome`
-existierte, wurde aber immer mit Null-Insets berechnet, also landete die
-Chrome weiterhin exakt an der alten, kaputten Position unter der Insel — ein
-Fehler, der sich nur am Gerät zeigt, keine Unit-Test-Assertion verletzt und
-sich rein an der Reihenfolge der Modifier festmacht.
+**Important:** `.ignoresSafeArea()` must be applied to the *content* of the
+`GeometryReader`, not to the reader itself. Attached to the reader, it
+reports `safeAreaInsets` of **zero** from that point on — it was already
+extended to full screen before its closure runs, so from its own point of
+view it has nothing left to offset from. That is exactly what happened on the
+first attempt: `chrome` existed but was always computed with zero insets, so
+the chrome still ended up at exactly the old, broken position under the
+island — a bug that only shows on a device, violates no unit-test assertion,
+and comes down purely to the order of the modifiers.
 
-### Musik
+### Music
 
-Beide Player nutzen dieselbe Klasse `SlideshowMusic` (Tracks aus
-`GET /recaps-music`, gestreamt über den `APIClient`, Endlosschleife, Einblenden
-über 1,5 s, Lautstärke 0,55). Fehler bleiben still — ein Fehler-UI ist Musik
-nie wert.
+Both players use the same class `SlideshowMusic` (tracks from
+`GET /recaps-music`, streamed via the `APIClient`, endless loop, fade-in
+over 1.5 s, volume 0.55). Errors stay silent — an error UI is never worth it
+for music.
 
-Unterschied zwischen den beiden:
+Difference between the two:
 
-| | Rückblick | Diashow |
+| | Recap | Slideshow |
 | --- | --- | --- |
-| Track-Vorschlag | vom Server (`GET /recaps/:id`, Feld `music`) | keiner — es gibt kein Album-„Mood" |
-| Startpunkt | der vorgeschlagene Track, der Zyklus kehrt zu ihm zurück | der zuletzt gewählte Track, sonst der erste der Liste |
-| Stummschaltung | pro Abspielvorgang | pro Gerät gemerkt (`slideshow_music_muted`) |
+| Track suggestion | from the server (`GET /recaps/:id`, field `music`) | none — there is no album "mood" |
+| Starting point | the suggested track, the cycle returns to it | the last chosen track, otherwise the first of the list |
+| Muting | per playback | remembered per device (`slideshow_music_muted`) |
 
-Eine Diashow wird viel beiläufiger gestartet als ein Rückblick, deshalb merkt
-sie sich beide Entscheidungen (`slideshow_music_muted`,
-`slideshow_music_track`): Wer einmal stummschaltet, bekommt auch beim nächsten
-Mal Ruhe.
+A slideshow is started far more casually than a recap, so it remembers
+both decisions (`slideshow_music_muted`, `slideshow_music_track`): whoever
+mutes once gets peace and quiet the next time as well.
 
-### Ken Burns und Gesichter
+### Ken Burns and Faces
 
-Die Ken-Burns-Bewegung ist pro Foto deterministisch aus der Foto-ID abgeleitet
-(gleicher Hash wie im Web), damit ein Bild immer gleich driftet. Der
-Gesichtsbezug hat zwei Stufen:
+The Ken Burns motion is derived deterministically per photo from the photo ID
+(same hash as on the web), so an image always drifts the same way. The face
+relation has two levels:
 
-1. **Bildausschnitt:** Liegt ein serverseitiger Fokuspunkt vor (`auto_crop`,
-   Gesichtsmitte, 0..1 normalisiert), wird der Füll-Crop dorthin verschoben —
-   begrenzt durch den Überstand, analog zu CSS `object-position`. Ohne
-   Fokuspunkt bleibt es beim geometrischen Zentrum.
-2. **Bewegungsziel:** Das **herangezoomte** Ende der Fahrt liegt exakt auf
-   diesem Fokuspunkt (Versatz 0), nur das weite Ende wandert zufällig. Die
-   Bewegung läuft also immer auf das Gesicht zu (bzw. von ihm weg) statt
-   ziellos zu driften. Fotos ohne Fokuspunkt behalten die rein zufällige
-   Bewegung an beiden Enden.
+1. **Image crop:** If a server-side focus point exists (`auto_crop`,
+   face center, normalized 0..1), the fill crop is shifted there —
+   limited by the overhang, analogous to CSS `object-position`. Without a
+   focus point, it stays at the geometric center.
+2. **Motion target:** The **zoomed-in** end of the move lies exactly on
+   this focus point (offset 0), only the wide end wanders randomly. The
+   motion thus always runs toward the face (or away from it) instead of
+   drifting aimlessly. Photos without a focus point keep the purely random
+   motion at both ends.
 
-`auto_crop` wird serverseitig gesetzt und ist nicht für jedes Foto vorhanden;
-ohne Wert verhält sich die Bewegung wie vorher.
+`auto_crop` is set server-side and is not present for every photo;
+without a value, the motion behaves as before.
 
-### Bewusst anders als im Web
+### Deliberately Different From the Web
 
-- Der Web-Player ist ein Modus des `FullscreenOverlay` mit Play/Pause-Button;
-  auf iOS ist er eine eigene Ansicht. Entsprechend gibt es dort kein
-  Play/Pause-Icon, sondern Pause per Fingerdruck.
-- **Foto-Paare und der Gesichtsbezug der Ken-Burns-Bewegung existieren bisher
-  nur auf iOS.**
-- **Kein Datums-Banner und kein Idle-Reset.** Beide hängen im Web an der
-  Karten-/Trip-Ansicht bzw. an Pointer-/Wheel-Events; auf iOS gibt es dafür
-  bisher keinen entsprechenden Einstiegspunkt.
+- The web player is a mode of the `FullscreenOverlay` with a play/pause
+  button; on iOS it is a separate view. Accordingly, there is no
+  play/pause icon there, but pause by finger press.
+- **Photo pairs and the face relation of the Ken Burns motion exist so far
+  only on iOS.**
+- **No date banner and no idle reset.** On the web, both hang on the
+  map/trip view or on pointer/wheel events; on iOS there is no
+  corresponding entry point for them so far.
 
-## Betroffene Dateien
+## Affected Files
 
-| Datei | Rolle |
+| File | Role |
 |---|---|
-| `frontend/src/components/FullscreenOverlay.vue` | Play/Pause-Button, Auto-Advance-Timer, Datums-Banner, Beschreibungs-Caption, `markDayChanges`-Prop |
-| `frontend/src/utils/slideshow.ts` | Reine Logik: `shouldArmSlideshow`, `slideshowReachedEnd`, `isDayChange`, `shouldShowCaption` |
-| `frontend/src/utils/slideshow.test.ts` | Unit-Tests der Logik |
-| `frontend/src/components/TripMap.vue` | `allStopPhotos`: ganzer Trip als Vollbild-Scope (`open-fullscreen`) |
-| `frontend/src/views/AlbumDetailView.vue` | Map-Overlay: `:markDayChanges="true"`, Stopp-Sync beim Schließen |
+| `frontend/src/components/FullscreenOverlay.vue` | Play/pause button, auto-advance timer, date banner, description caption, `markDayChanges` prop |
+| `frontend/src/utils/slideshow.ts` | Pure logic: `shouldArmSlideshow`, `slideshowReachedEnd`, `isDayChange`, `shouldShowCaption` |
+| `frontend/src/utils/slideshow.test.ts` | Unit tests of the logic |
+| `frontend/src/components/TripMap.vue` | `allStopPhotos`: whole trip as fullscreen scope (`open-fullscreen`) |
+| `frontend/src/views/AlbumDetailView.vue` | Map overlay: `:markDayChanges="true"`, stop sync on close |
 | `frontend/src/views/SharedAlbumView.vue` | Overlay: `:markDayChanges="fullscreenFromMap"` |
-| `ios/Sources/FKPhotos/Features/Photos/PhotoSlideshowView.swift` | iOS: Story-Player über Album/Auswahl/Mediathek |
-| `ios/Sources/FKPhotos/Features/Recaps/RecapPlayerView.swift` | iOS: derselbe Player für Rückblicke (plus Musik/Intros) |
-| `ios/Sources/FKPhotos/Features/Photos/SlideshowPlan.swift` | iOS: reine Logik — Ausrichtung, Paar-Planung, Playback-Position |
-| `ios/Sources/FKPhotos/Features/Photos/SlideshowStage.swift` | iOS: Darstellung einer Slide (einzeln/Paar), Ken-Burns-Bewegung, Fortschrittsleiste |
-| `ios/Sources/FKPhotos/Features/Photos/SlideshowImageStore.swift` | iOS: Vorausladen der Bilder + Ausrichtung nach dem Dekodieren |
-| `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: Intervall-/Musik-Persistenz + Caption-Regel |
-| `ios/Sources/FKPhotos/Features/Photos/SlideshowMusic.swift` | iOS: Hintergrundmusik, geteilt von Diashow und Rückblick |
-| `ios/Sources/FKPhotos/Features/Albums/AlbumDetailView.swift` | iOS: Menüpunkt „Diashow" und Auswahl-Diashow |
-| `ios/Tests/FKPhotosTests/SlideshowPlanTests.swift` | iOS: Unit-Tests für Planung, Playback und Ken Burns |
-| `ios/Tests/FKPhotosTests/SlideshowTests.swift` | iOS: Unit-Tests für Intervall und Caption |
+| `ios/Sources/FKPhotos/Features/Photos/PhotoSlideshowView.swift` | iOS: story player over album/selection/media library |
+| `ios/Sources/FKPhotos/Features/Recaps/RecapPlayerView.swift` | iOS: the same player for recaps (plus music/intros) |
+| `ios/Sources/FKPhotos/Features/Photos/SlideshowPlan.swift` | iOS: pure logic — orientation, pair planning, playback position |
+| `ios/Sources/FKPhotos/Features/Photos/SlideshowStage.swift` | iOS: rendering of a slide (single/pair), Ken Burns motion, progress bar |
+| `ios/Sources/FKPhotos/Features/Photos/SlideshowImageStore.swift` | iOS: image preloading + orientation after decoding |
+| `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: interval/music persistence + caption rule |
+| `ios/Sources/FKPhotos/Features/Photos/SlideshowMusic.swift` | iOS: background music, shared by slideshow and recap |
+| `ios/Sources/FKPhotos/Features/Albums/AlbumDetailView.swift` | iOS: menu item "Diashow" and selection slideshow |
+| `ios/Tests/FKPhotosTests/SlideshowPlanTests.swift` | iOS: unit tests for planning, playback and Ken Burns |
+| `ios/Tests/FKPhotosTests/SlideshowTests.swift` | iOS: unit tests for interval and caption |

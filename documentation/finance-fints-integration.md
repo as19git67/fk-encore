@@ -1,45 +1,45 @@
-# Finance — FinTS-Integration, Credential-Verschlüsselung, TAN-Flow, Sync-Cron
+# Finance — FinTS integration, credential encryption, TAN flow, sync cron
 
-Ziel: direkte Anbindung an deutsche Bank-APIs via FinTS (kein PSD2-
-Aggregator), mit persistenten TAN-Sessions, verschlüsselter Credential-
-Speicherung und periodischem Abruf neuer Umsätze.
+Goal: direct connection to German bank APIs via FinTS (no PSD2
+aggregator), with persistent TAN sessions, encrypted credential
+storage and periodic retrieval of new transactions.
 
-Status: Feature-Plan, Umsetzung in Etappen.
+Status: Feature plan, implemented in stages.
 
 ---
 
-## 1. Bibliotheks-Strategie: `lib-fints` via npm
+## 1. Library strategy: `lib-fints` via npm
 
-Wir nutzen das npm-Paket `lib-fints`, nicht die Legacy-Finanzkraft-
-Eigenimplementierung (`dbMixinOnlineBanking.js`).
+We use the npm package `lib-fints`, not the legacy Finanzkraft
+in-house implementation (`dbMixinOnlineBanking.js`).
 
-- **Abhängigkeit**: `"lib-fints": "^<current>"` in `package.json`.
-- **Bugfixes**: primär als **Upstream-PR**. Fork nur als Plan B, falls
-  Upstream nicht zeitnah mergt. Damit bleibt unsere `package.json`
-  semver-sauber und Updates problemlos.
+- **Dependency**: `"lib-fints": "^<current>"` in `package.json`.
+- **Bugfixes**: primarily as an **upstream PR**. A fork only as plan B if
+  upstream does not merge in a timely manner. This keeps our `package.json`
+  semver-clean and updates painless.
 
 ---
 
 ## 2. `finance/fints-client.ts`
 
-Dünner Wrapper über `lib-fints`, der das Dialog-Management kapselt und
-den für uns relevanten Teil-Status exponiert.
+Thin wrapper around `lib-fints` that encapsulates dialog management and
+exposes the part of the state that is relevant to us.
 
-### 2.1 State-Enum
+### 2.1 State enum
 
-Abgeleitet aus den Boolean-Flags der lib-fints-`ClientResponse`
-(`success`, `requiresTan`). Der Wrapper exponiert die abgeleitete
-Repräsentation — kein `"dialog"`-Zwischenstate mehr, weil lib-fints
-uns diesen nicht mitteilt:
+Derived from the boolean flags of the lib-fints `ClientResponse`
+(`success`, `requiresTan`). The wrapper exposes the derived
+representation — no `"dialog"` intermediate state any more, because lib-fints
+does not tell us about it:
 
 ```ts
 export type FintsDialogState =
-  | "idle"           // Dialog sauber beendet, Daten verfügbar
-  | "tan-required"   // wartet auf User-TAN oder decoupled Approval
-  | "error";         // Transport oder FinTS-Antwort fehlgeschlagen
+  | "idle"           // Dialog ended cleanly, data available
+  | "tan-required"   // waiting for user TAN or decoupled approval
+  | "error";         // Transport or FinTS response failed
 ```
 
-### 2.2 Schnittstelle (Auszug)
+### 2.2 Interface (excerpt)
 
 ```ts
 export interface DialogResult {
@@ -48,7 +48,7 @@ export interface DialogResult {
   tanChallenge?: string;
   tanReference?: string;
   tanMediaName?: string;
-  // Set when state = "tan-required" oder "idle":
+  // Set when state = "tan-required" or "idle":
   bankingInformation?: Record<string, unknown>;
   // Set when state = "error":
   errorCode?: string;
@@ -65,123 +65,123 @@ export async function runSynchronize(
 ): Promise<DialogResult>;
 ```
 
-Die Implementierung ist kein 1:1-Port des Legacy-`runSynchronize`.
-Wir ersetzen das In-Memory-Singleton durch einen stateless Wrapper,
-der seinen kompletten State (Credentials via DB-Lookup, Banking-Info
-via Funktions-Parameter) auf jeden Call neu auflädt. Für Etappe 2
-deckt `runSynchronize` nur das `synchronize` / `synchronizeWithTan`-
-Paar ab; `getAccountStatements` + `…WithTan` folgen in Etappe 3 als
-eigene Funktion.
+The implementation is not a 1:1 port of the legacy `runSynchronize`.
+We replace the in-memory singleton with a stateless wrapper
+that reloads its complete state (credentials via DB lookup, banking info
+via function parameter) on every call. For stage 2,
+`runSynchronize` covers only the `synchronize` / `synchronizeWithTan`
+pair; `getAccountStatements` + `…WithTan` follow in stage 3 as
+a separate function.
 
-### 2.3 Fehler- und Retry-Strategie
+### 2.3 Error and retry strategy
 
-| FinTS-Code | Bedeutung | Reaktion |
+| FinTS code | Meaning | Reaction |
 |---|---|---|
-| 9010 / 9050 | Allgemeiner Fehler | State `error`, kein Retry |
-| 9910 | PIN/TAN falsch | State `error`, **kein** automatischer Retry; User muss Credentials neu setzen |
-| Timeout | Netzwerk / Bankserver | bis zu 2 Retries mit 2s/4s Backoff |
-| TAN-Methode nicht unterstützt | lib-fints-spezifisch | State `error`, Hinweis im Detail |
+| 9010 / 9050 | General error | State `error`, no retry |
+| 9910 | PIN/TAN wrong | State `error`, **no** automatic retry; user must reset credentials |
+| Timeout | Network / bank server | up to 2 retries with 2s/4s backoff |
+| TAN method not supported | lib-fints-specific | State `error`, hint in the detail |
 
-TAN-Methoden-Auswahl: beim ersten Dialog werden die verfügbaren Verfahren
-aus der Bankantwort gelesen. Der User wählt genau einmal im Frontend
-(`BankcontactDetailView`); die Wahl landet in `finance_bankcontact.tan_method`.
+TAN method selection: on the first dialog the available methods
+are read from the bank response. The user chooses exactly once in the frontend
+(`BankcontactDetailView`); the choice ends up in `finance_bankcontact.tan_method`.
 
-### 2.4 Pflicht-Secrets: ZKA-Produkt-Registrierung
+### 2.4 Required secrets: ZKA product registration
 
-`lib-fints` setzt — per PSD2-Vorgabe der Deutschen Kreditwirtschaft —
-eine Produkt-Registrierung voraus. Jeder FinTS-Aufruf braucht eine
-`productId` + `productVersion`, die man [bei der ZKA
-registriert](https://www.fints.org/de/hersteller/produktregistrierung)
-und als Konfiguration mitgibt.
+`lib-fints` requires — per PSD2 requirements of the Deutsche Kreditwirtschaft
+(German banking industry committee) — a product registration. Every FinTS call needs a
+`productId` + `productVersion`, which one [registers with the
+ZKA](https://www.fints.org/de/hersteller/produktregistrierung)
+and passes in as configuration.
 
-Beides lebt als Encore-Secret, nicht im Code:
+Both live as Encore secrets, not in code:
 
-| Secret | Zweck |
+| Secret | Purpose |
 |---|---|
-| `FinanceCredentialsKey` | 32 Byte base64, AES-256-GCM-Key (siehe §3) |
-| `FinanceFintsProductId` | ZKA-registrierte Produkt-ID |
-| `FinanceFintsProductVersion` | Semantische Version des Finance-Moduls |
+| `FinanceCredentialsKey` | 32 bytes base64, AES-256-GCM key (see §3) |
+| `FinanceFintsProductId` | ZKA-registered product ID |
+| `FinanceFintsProductVersion` | Semantic version of the finance module |
 
-Für lokale Entwicklung und CI reichen Dummy-Strings — echte Werte sind
-nur für Production verpflichtend. Setup:
+For local development and CI, dummy strings suffice — real values are
+mandatory only for production. Setup:
 
 ```bash
 encore secret set --type local FinanceFintsProductId "dev-placeholder"
 encore secret set --type local FinanceFintsProductVersion "0.0.1"
 ```
 
-### 2.5 Portfolio-Abruf für Depot-Konten (HKWPD)
+### 2.5 Portfolio retrieval for securities accounts (HKWPD)
 
-Neben Giro-/Tagesgeld-Konten (HKKAZ/HKSAL) unterstützt der Client den
-Abruf von Wertpapier-Depots über das FinTS-Segment HKWPD/HIWPD.
+Besides checking/overnight-money accounts (HKKAZ/HKSAL), the client supports
+retrieving securities depots via the FinTS segment HKWPD/HIWPD.
 
-#### Depot-Erkennung
+#### Depot detection
 
-`effectiveAccountKind()` in `fints-client.ts` erkennt Depot-Konten auf
-zwei Wegen:
+`effectiveAccountKind()` in `fints-client.ts` detects depot accounts
+in two ways:
 
-1. **Direkt**: `accountType === "SecuritiesAccount"` → wird sofort als
-   `"depot"` gemappt.
-2. **Fallback**: Meldet die Bank den Typ `Miscellaneous` (z. B.
-   comdirect, 1822direkt), prüft die Funktion das Feld `subAccountId`
-   auf die Strings `"depot"` oder `"wertpapier"` (case-insensitive).
+1. **Direct**: `accountType === "SecuritiesAccount"` → is immediately mapped to
+   `"depot"`.
+2. **Fallback**: If the bank reports the type `Miscellaneous` (e.g.
+   comdirect, 1822direkt), the function checks the field `subAccountId`
+   for the strings `"depot"` or `"wertpapier"` (case-insensitive).
 
-#### Fetch-Routing
+#### Fetch routing
 
-`fetchOneAccount()` routet Depot-Konten durch `fetchDepotPortfolio()`
-anstatt den Standard-Pfad HKKAZ/HKSAL. Depots verwenden weder
-`getAccountStatements` noch `getAccountBalance` — stattdessen wird
-`getPortfolio()` (HKWPD/HIWPD) aufgerufen.
+`fetchOneAccount()` routes depot accounts through `fetchDepotPortfolio()`
+instead of the standard path HKKAZ/HKSAL. Depots use neither
+`getAccountStatements` nor `getAccountBalance` — instead
+`getPortfolio()` (HKWPD/HIWPD) is called.
 
-#### Geteilte Kontonummern und `patchGetBankAccountForDepot()`
+#### Shared account numbers and `patchGetBankAccountForDepot()`
 
-Einige Banken (z. B. comdirect) melden Giro- und Depot-Konto mit
-derselben `accountNumber`; nur die `subAccountId` unterscheidet sie.
-Das Problem: `config.getBankAccount(accountNumber)` in lib-fints nutzt
-intern `.find()` und liefert immer den ersten Treffer (meist das Giro).
-Ohne Eingriff würden `canGetPortfolio` und `getPortfolio` deshalb den
-Giro-Eintrag statt des Depots prüfen bzw. verwenden.
+Some banks (e.g. comdirect) report the checking and depot account with
+the same `accountNumber`; only the `subAccountId` distinguishes them.
+The problem: `config.getBankAccount(accountNumber)` in lib-fints uses
+`.find()` internally and always returns the first match (usually the checking account).
+Without intervention, `canGetPortfolio` and `getPortfolio` would therefore check or use
+the checking entry instead of the depot.
 
-**Lösung**: `patchGetBankAccountForDepot()` monkey-patcht
-`config.getBankAccount` auf der Client-Instanz, sodass für die geteilte
-`accountNumber` bevorzugt der Depot-Eintrag (Abgleich über
-`subAccountId`) zurückgegeben wird. Der Patch überlebt UPD-Rebuilds
-während der Dialog-Initialisierung — lib-fints ersetzt in
-`initDialogInteraction.js:167` zwar `config.bankingInformation.upd`,
-aber nicht die gepatchte Methode. Nach Abschluss des Portfolio-Abrufs
-wird der Patch wieder zurückgesetzt.
+**Solution**: `patchGetBankAccountForDepot()` monkey-patches
+`config.getBankAccount` on the client instance, so that for the shared
+`accountNumber` the depot entry is preferably returned (matching via
+`subAccountId`). The patch survives UPD rebuilds
+during dialog initialization — lib-fints replaces
+`config.bankingInformation.upd` in `initDialogInteraction.js:167`,
+but not the patched method. After the portfolio retrieval completes,
+the patch is reverted.
 
-Ein früherer Ansatz (Umsortierung des `upd.bankAccounts`-Arrays) schlug
-fehl, weil die Dialog-Initialisierung das UPD aus der Bankantwort neu
-aufbaut und jede Umsortierung damit rückgängig macht.
+An earlier approach (re-sorting the `upd.bankAccounts` array) failed
+because dialog initialization rebuilds the UPD from the bank response
+and thereby undoes any re-sorting.
 
-#### Deduplizierung in `runFetchAccounts()`
+#### Deduplication in `runFetchAccounts()`
 
-`runFetchAccounts()` dedupliziert Bank-seitige Konten nach
-`accountNumber:effectiveKind` statt nur nach `accountNumber`. Damit wird
-ein Depot nicht als vermeintliches Duplikat des Giro-Kontos übersprungen,
-wenn beide dieselbe Kontonummer tragen.
+`runFetchAccounts()` deduplicates bank-side accounts by
+`accountNumber:effectiveKind` instead of only by `accountNumber`. This way
+a depot is not skipped as an alleged duplicate of the checking account
+when both carry the same account number.
 
-#### Persist-Matching (Zwei-Phasen-Zuordnung)
+#### Persist matching (two-phase assignment)
 
-`persistFetchResult()` ordnet Abruf-Ergebnisse in zwei Phasen zu:
+`persistFetchResult()` assigns fetch results in two phases:
 
-1. **Phase 1 — Exakter Match**: Abgleich auf
-   `(bankcontact_id, fints_account_number, kind)`. Der gefundene
-   DB-Account wird als "claimed" markiert.
-2. **Phase 2 — Fallback**: Für nicht zugeordnete Snapshots wird der
-   einzige noch nicht beanspruchte Kandidat mit derselben Kontonummer
-   verwendet.
+1. **Phase 1 — exact match**: matching on
+   `(bankcontact_id, fints_account_number, kind)`. The DB account found
+   is marked as "claimed".
+2. **Phase 2 — fallback**: For unassigned snapshots, the
+   only not-yet-claimed candidate with the same account number is
+   used.
 
-Dieses Verfahren verhindert, dass ein Depot-Snapshot versehentlich dem
-DB-Eintrag des Giro-Kontos zugeordnet wird (und umgekehrt).
+This procedure prevents a depot snapshot from being accidentally assigned to the
+DB entry of the checking account (and vice versa).
 
-#### Holdings-Persistierung
+#### Holdings persistence
 
-Der `totalValue` des Portfolios wird als Saldo in
-`finance_account_balance` geschrieben. Die einzelnen Positionen (ISIN,
-WKN, Name, Stückzahl, Kurs, Wert) werden per Upsert in
-`finance_account_holding` persistiert:
+The portfolio's `totalValue` is written as a balance to
+`finance_account_balance`. The individual positions (ISIN,
+WKN, name, quantity, price, value) are persisted via upsert into
+`finance_account_holding`:
 
 ```sql
 ON CONFLICT (account_id, as_of, COALESCE(isin, wkn, name)) DO UPDATE
@@ -189,16 +189,16 @@ ON CONFLICT (account_id, as_of, COALESCE(isin, wkn, name)) DO UPDATE
 
 ---
 
-## 3. `finance/encryption.ts` — Credential-Verschlüsselung
+## 3. `finance/encryption.ts` — credential encryption
 
-### 3.1 Verfahren
+### 3.1 Method
 
-AES-256-GCM mit einem globalen Key aus Encore-Secret
-`FinanceCredentialsKey`. Key ist 32 Bytes (base64). Der Blob enthält
-`iv (12 B) | ciphertext | authTag (16 B)`, base64-codiert, und landet in
+AES-256-GCM with a global key from the Encore secret
+`FinanceCredentialsKey`. The key is 32 bytes (base64). The blob contains
+`iv (12 B) | ciphertext | authTag (16 B)`, base64-encoded, and ends up in
 `finance_bankcontact.credentials_encrypted`.
 
-### 3.2 Skizze
+### 3.2 Sketch
 
 ```ts
 import { secret } from "encore.dev/config";
@@ -233,28 +233,28 @@ export function decryptCredentials(blob: string): string {
 }
 ```
 
-Die Secret-Nutzung folgt dem Muster aus `push/push.service.ts:23-27`.
-Plaintext-Credentials werden niemals in der DB oder in Logs abgelegt.
+Secret usage follows the pattern from `push/push.service.ts:23-27`.
+Plaintext credentials are never stored in the DB or in logs.
 
 ### 3.3 Rotation
 
-1. Neues 32-Byte-Secret in Encore setzen: `encore secret set --type
+1. Set a new 32-byte secret in Encore: `encore secret set --type
    production FinanceCredentialsKey <base64>`.
-2. Re-Encrypt-Skript (`scripts/finance-reencrypt.ts`) liest alle
-   `finance_bankcontact`-Zeilen, entschlüsselt mit **altem** Key (über
-   temporäre Envvar) und verschlüsselt mit **neuem** Key.
+2. A re-encrypt script (`scripts/finance-reencrypt.ts`) reads all
+   `finance_bankcontact` rows, decrypts with the **old** key (via a
+   temporary env var) and encrypts with the **new** key.
 3. Deploy.
 
-Alternative Envelope-Encryption (Root-Key + pro-Kontakt-DEK in der Zeile)
-steht als Erweiterung offen — MVP startet mit einem globalen Key.
+Alternative envelope encryption (root key + per-contact DEK in the row)
+remains open as an extension — the MVP starts with a global key.
 
 ---
 
-## 4. Stateful TAN-Flow
+## 4. Stateful TAN flow
 
-Der Legacy-Stack hielt TAN-State in einem In-Memory-Singleton; das
-funktioniert in einer skalierten Encore-App nicht. Stattdessen liegt der
-State in `finance_tan_session` (siehe `finance-data-model.md` §2.7):
+The legacy stack held TAN state in an in-memory singleton; that
+does not work in a scaled Encore app. Instead the
+state lives in `finance_tan_session` (see `finance-data-model.md` §2.7):
 `tan_reference UUID`, `banking_information jsonb`, `challenge text`,
 `expires_at timestamptz` (TTL 10 min).
 
@@ -268,127 +268,126 @@ sequenceDiagram
 
   UI->>API: POST /finance/statements { bankcontactId }
   API->>FC: runSynchronize(bankcontactId, {})
-  FC->>FC: liveClientCache[bankcontactId] = client (hält den offenen Dialog)
+  FC->>FC: liveClientCache[bankcontactId] = client (holds the open dialog)
   FC-->>API: state=tan-required, challenge, bankingInformation, fintsTanRef
   API->>DB: INSERT tan_reference (uuid), banking_information (bi + fintsTanRef), challenge, expires_at
   API-->>UI: 200 { state: "tan-required", tanReference, challenge, tanMediaName? }
-  UI->>UI: TanDialog öffnen, User gibt TAN ein
+  UI->>UI: open TanDialog, user enters TAN
   UI->>TAN: POST /finance/tan-sessions/complete { tanReference, tan }
   TAN->>DB: SELECT … WHERE tan_reference=? AND user_id=? AND expires_at>now()
   DB-->>TAN: banking_information (bi, fintsTanRef)
   TAN->>FC: runSynchronize(bankcontactId, { tanReference: fintsTanRef, tanAnswer, bankingInformation: bi })
-  FC->>FC: liveClientCache[bankcontactId] holen → client.synchronizeWithTan(ref, tan)
-  FC-->>TAN: state=idle  (Etappe 5 liefert auch transactions + balances)
+  FC->>FC: fetch liveClientCache[bankcontactId] → client.synchronizeWithTan(ref, tan)
+  FC-->>TAN: state=idle  (stage 5 also delivers transactions + balances)
   TAN->>DB: DELETE tan_reference
   TAN-->>UI: 200 { state: "idle" }
 ```
 
-**Der Live-Client ist Teil des States.** `lib-fints` hängt den offenen
-Dialog an die Client-Instanz (`FinTSClient.currentDialog`);
-`synchronizeWithTan()` setzt genau diesen Dialog fort. Ein aus der
-persistierten `bankingInformation` neu gebauter Client hat kein
-`currentDialog` und wirft
+**The live client is part of the state.** `lib-fints` attaches the open
+dialog to the client instance (`FinTSClient.currentDialog`);
+`synchronizeWithTan()` continues exactly this dialog. A client rebuilt from the
+persisted `bankingInformation` has no
+`currentDialog` and throws
 
 ```
 no customer dialog was started which can continue
 ```
 
-Deshalb legt `runSynchronize` den Client **auch bei `tan-required`** in
-den `liveClientCache` (TTL 30 min) und der Resume-Pfad nimmt ihn von
-dort, statt einen neuen zu bauen. Die in `finance_tan_session`
-gespeicherte `banking_information` bleibt trotzdem nützlich (Warm-Start
-beim nächsten Sync), taugt aber prinzipiell nicht zum Fortsetzen eines
-laufenden Dialogs.
+That is why `runSynchronize` puts the client into the
+`liveClientCache` (TTL 30 min) **even on `tan-required`**, and the resume path takes it from
+there instead of building a new one. The `banking_information` stored in
+`finance_tan_session` remains useful nonetheless (warm start
+on the next sync), but is in principle unsuitable for continuing a
+running dialog.
 
-Der Resume-Aufruf ist bewusst **nicht** retry-gewrappt: ein Dialog ist
-entweder offen oder weg — Wiederholungen reparieren nichts und kosten
-nur das Backoff-Budget (2s + 4s), was den Fehler in der UI um 6
-Sekunden verzögert.
+The resume call is deliberately **not** retry-wrapped: a dialog is
+either open or gone — retries repair nothing and only cost
+the backoff budget (2s + 4s), which delays the error in the UI by 6
+seconds.
 
-Edge Cases:
-- **Live-Client weg** (Container-Neustart oder TTL-Ablauf zwischen
-  Challenge und Eingabe): Die Bank-Sitzung ist damit ebenfalls
-  beendet. `complete` liefert `state: "error"` mit
-  `errorCode: "live-client-evicted"` und der Bitte, den Sync neu zu
-  starten — statt eines nichtssagenden Transport-Fehlers.
-- **Abgelaufene Session**: `complete` wirft `deadline_exceeded` (HTTP
-  504); die Zeile bleibt liegen und wird vom Cleanup-Cron gelöscht.
-  UI startet einen frischen Dialog.
-- **Falsche TAN**: lib-fints liefert wieder `state: "tan-required"`
-  mit neuem Challenge. Der Endpoint **hält die Session** (nur
-  `banking_information` + `challenge` werden aktualisiert) und gibt
-  `200 { state: "tan-required", tanReference (same!), challenge: new }`
-  zurück, sodass die UI direkt weiterfragen kann. Der FinTS-Server
-  limitiert selbst auf typisch 3 Versuche — danach erhält der Client
-  `state: "error"` und die Session wird gelöscht.
-- **Fremde Session**: gehört die Reference einem anderen User, wirft
-  der Endpoint `not_found` (statt `forbidden`), damit Enumeration
-  fremder Sessions nicht möglich ist.
-- **User verwirft Dialog**: Session wird nicht aktiv gelöscht, läuft
-  durch TTL ab; Cleanup siehe §5.
-- **Zweite TAN direkt nach der ersten** (comdirect/photoTAN): Nach dem
-  akzeptierten Init-TAN verlangt die Bank für die Umsatzabfrage selbst
-  noch einmal SCA. `complete` reicht deshalb die `userId` an
-  `fetchAndPersist` weiter, damit daraus eine Folge-Session mit
-  `kind="statements"` entsteht und die UI direkt weiterfragt. Ohne die
-  `userId` fiel diese Challenge unter den Tisch: die Antwort war
-  `state: "idle"`, der Dialog schloss sich wie bei Erfolg — und der
-  nächste Sync fing wieder bei derselben TAN an.
-- **Terminaler Fehler**: `state: "error"` löscht die Session
-  serverseitig. Die UI **schließt den Dialog nicht**, sondern zeigt
-  `errorCode: errorMessage` an und bietet nur noch „Schließen" an —
-  sonst ist eine abgelehnte TAN von einer erfolgreichen nicht zu
-  unterscheiden. Backend-seitig wird jeder nicht-`idle`-Ausgang von
-  `complete` geloggt (`[fints] resume sync … state=…`,
-  `[finance.tan-sessions] … init-TAN rejected: …`); vorher war der
-  einzige Hinweis ein HTTP 200 im Access-Log.
+Edge cases:
+- **Live client gone** (container restart or TTL expiry between
+  challenge and input): The bank session has ended as well.
+  `complete` returns `state: "error"` with
+  `errorCode: "live-client-evicted"` and a request to restart the
+  sync — instead of a meaningless transport error.
+- **Expired session**: `complete` throws `deadline_exceeded` (HTTP
+  504); the row stays around and is deleted by the cleanup cron.
+  The UI starts a fresh dialog.
+- **Wrong TAN**: lib-fints again returns `state: "tan-required"`
+  with a new challenge. The endpoint **keeps the session** (only
+  `banking_information` + `challenge` are updated) and returns
+  `200 { state: "tan-required", tanReference (same!), challenge: new }`,
+  so that the UI can ask again right away. The FinTS server
+  itself limits to typically 3 attempts — after that the client receives
+  `state: "error"` and the session is deleted.
+- **Foreign session**: if the reference belongs to another user, the
+  endpoint throws `not_found` (instead of `forbidden`), so that enumeration
+  of other users' sessions is not possible.
+- **User dismisses dialog**: the session is not actively deleted, it expires
+  through TTL; for cleanup see §5.
+- **Second TAN right after the first** (comdirect/photoTAN): After the
+  accepted init TAN, the bank demands SCA once more for the transaction query itself.
+  `complete` therefore passes the `userId` on to
+  `fetchAndPersist`, so that a follow-up session with
+  `kind="statements"` is created and the UI asks again right away. Without the
+  `userId` this challenge was dropped: the response was
+  `state: "idle"`, the dialog closed as on success — and the
+  next sync started again with the same TAN.
+- **Terminal error**: `state: "error"` deletes the session
+  server-side. The UI **does not close the dialog**, but shows
+  `errorCode: errorMessage` and offers only "Schließen" (Close) —
+  otherwise a rejected TAN cannot be told apart from a successful one. On the backend side, every non-`idle` outcome of
+  `complete` is logged (`[fints] resume sync … state=…`,
+  `[finance.tan-sessions] … init-TAN rejected: …`); previously the
+  only hint was an HTTP 200 in the access log.
 
-**Transport-Konvention**: Sowohl `POST /finance/statements` als auch
-`POST /finance/tan-sessions/complete` liefern eine gemeinsame
-discriminated-union-Response (`SyncApiResponse`) mit den Varianten
-`idle` / `tan-required` / `error`. Bewusst **kein** HTTP 409 Conflict
-— das würde den Encore-type-safe-Client-Generator zu einem Exception-
-Pfad zwingen. Stattdessen switcht das Frontend auf `response.state`.
+**Transport convention**: Both `POST /finance/statements` and
+`POST /finance/tan-sessions/complete` return a shared
+discriminated-union response (`SyncApiResponse`) with the variants
+`idle` / `tan-required` / `error`. Deliberately **no** HTTP 409 Conflict
+— that would force the Encore type-safe client generator into an exception
+path. Instead the frontend switches on `response.state`.
 
 ---
 
-## 5. Cron-Jobs
+## 5. Cron jobs
 
-Das Repo verwendet Encore-native `new CronJob(...)`-Deklarationen mit
-einem privaten Internal-API-Endpoint (`expose: false`) — siehe
-`documents/inbox-cron.ts:28-76`. Wir folgen exakt diesem Muster; **kein**
-externer Scheduler.
+The repo uses Encore-native `new CronJob(...)` declarations with
+a private internal API endpoint (`expose: false`) — see
+`documents/inbox-cron.ts:28-76`. We follow exactly this pattern; **no**
+external scheduler.
 
-### 5.1 Sync neuer Umsätze
+### 5.1 Syncing new transactions
 
 ```ts
 // finance/statements-cron.ts
 export const syncStatements = api(
   { expose: false, method: "POST", path: "/internal/finance/sync-statements" },
   async (): Promise<{ contacts: number; tanRequired: number }> => {
-    // 1. Bankkontakte mit passendem Slot aus sync_times laden
-    // 2. Für jeden: runSynchronize(...)
-    // 3. Bei state=tan-required:
-    //    - finance_tan_session schreiben
-    //    - Push an owner-User: "TAN für Sparkasse XY benötigt"
-    // 4. Bei state=idle: Transaktionen + Salden persistieren
-    // 5. finance_bankcontact.last_sync_at / last_sync_status aktualisieren
+    // 1. Load bank contacts with a matching slot from sync_times
+    // 2. For each: runSynchronize(...)
+    // 3. On state=tan-required:
+    //    - write finance_tan_session
+    //    - push to owner user: "TAN für Sparkasse XY benötigt" (TAN needed for Sparkasse XY)
+    // 4. On state=idle: persist transactions + balances
+    // 5. Update finance_bankcontact.last_sync_at / last_sync_status
   },
 );
 
 const _ = new CronJob("finance-sync-statements", {
   title: "Finance: sync bank statements",
-  every: "5m", // triggert oft, Filter sitzt in sync_times
+  every: "5m", // triggers often, the filter lives in sync_times
   endpoint: syncStatements,
 });
 ```
 
-Der Cron feuert alle 5 Minuten (oder kleinster gemeinsamer Teiler der
-tatsächlich verwendeten Slots). `sync_times` je Bankkontakt ist
-timezone-aware (`{ weekdays, time: "HH:MM", tz }`); der Handler rechnet
-auf UTC um und entscheidet, ob dieser Tick den Slot trifft (±2 min
-Toleranz). Damit funktioniert die DST-Umstellung korrekt, ohne doppelte
-UTC-Spalte.
+The cron fires every 5 minutes (or the smallest common divisor of the
+slots actually used). `sync_times` per bank contact is
+timezone-aware (`{ weekdays, time: "HH:MM", tz }`); the handler converts
+to UTC and decides whether this tick hits the slot (±2 min
+tolerance). This way DST changeover works correctly, without a duplicate
+UTC column.
 
 ```mermaid
 sequenceDiagram
@@ -399,8 +398,8 @@ sequenceDiagram
   participant DB as finance_tan_session
 
   Cron->>API: POST /internal/finance/sync-statements
-  API->>API: Slots aus sync_times vs. now() filtern
-  loop je Bankkontakt
+  API->>API: filter slots from sync_times vs. now()
+  loop per bank contact
     API->>FC: runSynchronize(id, {})
     alt state = tan-required
       API->>DB: INSERT tan_reference
@@ -413,34 +412,34 @@ sequenceDiagram
   end
 ```
 
-### 5.2 Inkrementeller Abruf — `from`-Fenster pro Konto
+### 5.2 Incremental retrieval — `from` window per account
 
-`getAccountStatements(accountNumber, from?)` lässt die Bank ab einem
-Stichdatum bis heute liefern. Ohne `from` pickt jede Bank einen anderen,
-oft uralten Default (comdirect z. B. liefert dann teils 3+ Jahre statt
-neuer Buchungen). Wir setzen `from` deshalb pro Konto in
+`getAccountStatements(accountNumber, from?)` makes the bank deliver from a
+cutoff date until today. Without `from`, each bank picks a different,
+often ancient default (comdirect, for example, then sometimes delivers 3+ years instead of
+new transactions). We therefore set `from` per account in
 `fetchAndPersist`:
 
-| Konto-Status | `from` |
+| Account status | `from` |
 |---|---|
-| Hat bereits Buchungen in `finance_transaction` | `MAX(booking_date) − 14 Tage` |
-| Frisch verlinktes Konto, noch keine Daten | `now() − 89 Tage` |
+| Already has transactions in `finance_transaction` | `MAX(booking_date) − 14 days` |
+| Freshly linked account, no data yet | `now() − 89 days` |
 
-Die 14-Tage-Überlappung fängt Spät-Buchungen und Nachträge auf;
-Duplikate werden über den Unique-Index `dedupe_hash` (siehe
-`finance-data-model.md` §3) ohne Datenbank-Konflikt verworfen. Die
-Erstabfrage liegt mit 89 Tagen bewusst *innerhalb* des
-PSD2-Read-Only-Fensters (ein Datum exakt auf der 90-Tage-Grenze werten
-manche Banken schon als „älter als 90 Tage" und verlangen dann bei
-jedem Sync eine frische TAN) und löst deshalb keine zusätzliche SCA aus — wer mehr Historie braucht,
-muss entweder den Finanzkraft-Import nutzen
-(`finance-data-import.md`) oder den Default-Wert in `statements.ts`
-temporär hochsetzen und die einmalige TAN-Aufforderung in Kauf nehmen.
+The 14-day overlap catches late postings and adjustments;
+duplicates are discarded via the unique index `dedupe_hash` (see
+`finance-data-model.md` §3) without a database conflict. The
+initial retrieval, at 89 days, lies deliberately *within* the
+PSD2 read-only window (some banks already treat a date exactly on the 90-day boundary
+as "older than 90 days" and then demand a fresh TAN on
+every sync) and therefore triggers no additional SCA — anyone who needs more history
+must either use the Finanzkraft import
+(`finance-data-import.md`) or temporarily raise the default value in `statements.ts`
+and accept the one-time TAN prompt.
 
-`to` lassen wir leer; die Bank liefert dann bis zum aktuellen Tag.
+We leave `to` empty; the bank then delivers up to the current day.
 
 ```ts
-// finance/statements.ts (Auszug)
+// finance/statements.ts (excerpt)
 const fromByAccountNumber = new Map<string, Date>();
 const overlapMs = 14 * 24 * 60 * 60_000;
 for (const m of maxes) {
@@ -458,35 +457,35 @@ await runFetchAccounts(client, {
 });
 ```
 
-`runFetchAccounts` (`finance/fints-client.ts`) ruft pro Konto den
-passenden Wert ab; nicht-verlinkte Bank-Konten werden komplett
-übersprungen, damit jede TAN nur einmal angefordert wird (siehe §5.3
-unten).
+`runFetchAccounts` (`finance/fints-client.ts`) calls the matching value
+per account; unlinked bank accounts are skipped entirely,
+so that each TAN is requested only once (see §5.3
+below).
 
-Der Plan (verlinkte Konten + `from`-Map + `defaultFrom`) steckt in
-`statements.buildFetchPlan()` und wird **auch beim TAN-Resume** benutzt
-(`tan-sessions.resumeStatementsTan` → `resumeFetchAfterTan`). Vorher lief
-die Warteschlange hinter dem pausierten Konto ohne Plan weiter: ohne
-`linkedAccountNumbers` mit SCA-Push für nicht verlinkte Konten, ohne
-`from` außerhalb des 90-Tage-Fensters — also mit einer neuen
-TAN-Challenge für praktisch jedes Folgekonto.
+The plan (linked accounts + `from` map + `defaultFrom`) lives in
+`statements.buildFetchPlan()` and is **also used on TAN resume**
+(`tan-sessions.resumeStatementsTan` → `resumeFetchAfterTan`). Previously
+the queue behind the paused account continued without a plan: without
+`linkedAccountNumbers` with SCA push for unlinked accounts, without
+`from` outside the 90-day window — i.e. with a new
+TAN challenge for practically every subsequent account.
 
-### 5.3 Nur verlinkte Konten abrufen
+### 5.3 Fetch only linked accounts
 
-Bevor `runFetchAccounts` ein Bank-Konto öffnet, prüft es
-`linkedAccountNumbers`. Steht das Konto nicht drin (z. B. weil der User
-es bewusst nicht in fk-encore verlinkt hat), überspringt der Loop
-sowohl `getAccountStatements` als auch `getAccountBalance`. Resultat:
+Before `runFetchAccounts` opens a bank account, it checks
+`linkedAccountNumbers`. If the account is not in it (e.g. because the user
+deliberately did not link it in fk-encore), the loop skips
+both `getAccountStatements` and `getAccountBalance`. Result:
 
-- Keine SCA-Push-Aufforderung für Konten, an denen wir gar nicht
-  interessiert sind.
-- Keine doppelten TAN-Eingaben, wenn die Bank pro Konto-Block neu
-  fragt.
-- Bank-Konten, die noch nie in fk-encore verlinkt wurden, tauchen in
-  der `pendingAccounts`-Antwort auf, damit das Frontend sie zur
-  Verlinkung anbieten kann (siehe `finance-frontend.md` §4.3).
+- No SCA push prompt for accounts we are not even
+  interested in.
+- No duplicate TAN entries when the bank asks anew per account
+  block.
+- Bank accounts that have never been linked in fk-encore appear in
+  the `pendingAccounts` response, so that the frontend can offer them for
+  linking (see `finance-frontend.md` §4.3).
 
-### 5.4 Cleanup abgelaufener TAN-Sessions
+### 5.4 Cleanup of expired TAN sessions
 
 ```ts
 export const cleanupTanSessions = api(
@@ -506,24 +505,24 @@ const _ = new CronJob("finance-tan-cleanup", {
 
 ---
 
-## 6. Referenzen
+## 6. References
 
-| Stelle im Repo | Wofür |
+| Location in repo | Purpose |
 |---|---|
-| `documents/inbox-cron.ts:28-76` | Cron-Pattern (`new CronJob` + privater Internal-Endpoint) |
-| `push/push.service.ts:23-27` | `secret()`-Nutzung für Verschlüsselungs-Keys |
-| `user/auth-handler.ts:30-35` | `requirePermission("finance.accounts.manage")` in Handlern |
+| `documents/inbox-cron.ts:28-76` | Cron pattern (`new CronJob` + private internal endpoint) |
+| `push/push.service.ts:23-27` | `secret()` usage for encryption keys |
+| `user/auth-handler.ts:30-35` | `requirePermission("finance.accounts.manage")` in handlers |
 | `finance-data-model.md` §2.7 | Schema `finance_tan_session` |
 | `finance-data-model.md` §2.3 | `finance_bankcontact.sync_times` |
 
 ---
 
-## 7. Offene Punkte
+## 7. Open points
 
-- **Key-Rotation**: globaler Key (MVP) vs. Envelope-Encryption (pro-
-  Kontakt-DEK)? Letzteres wäre nach einem kompromittierten Dump leichter
-  zu mitigieren, fügt aber eine Indirektion hinzu.
-- **Retry-Budget im Sync-Cron**: nach wie vielen aufeinanderfolgenden
-  Fehl-Syncs schalten wir einen Bankkontakt automatisch auf „paused"?
-- **TAN-Push-Spam**: wenn ein Cron wiederholt `tan-required` meldet und
-  der User nicht reagiert — Rate-Limit pro Bankkontakt?
+- **Key rotation**: global key (MVP) vs. envelope encryption (per-
+  contact DEK)? The latter would be easier to mitigate after a compromised
+  dump, but adds an indirection.
+- **Retry budget in the sync cron**: after how many consecutive
+  failed syncs do we automatically switch a bank contact to "paused"?
+- **TAN push spam**: if a cron repeatedly reports `tan-required` and
+  the user does not react — rate limit per bank contact?

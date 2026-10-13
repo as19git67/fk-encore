@@ -1,67 +1,67 @@
-# Finance — Rate-Limiting & Brute-Force-Schutz
+# Finance — Rate Limiting & Brute-Force Protection
 
-Ziel: Festlegen, welche Finanz-Endpoints geschützt werden müssen, welche
-Limits angemessen sind und wie das mit dem bestehenden Rate-Limiter aus
-`user/rateLimiter.ts` umgesetzt wird — ohne eigene Infrastruktur.
+Goal: Define which Finance endpoints must be protected, which limits are
+appropriate, and how this is implemented with the existing rate limiter from
+`user/rateLimiter.ts` — without any new infrastructure.
 
-Status: Feature-Plan, Umsetzung mit den jeweiligen Endpoints aus
+Status: feature plan, implemented together with the respective endpoints from
 `finance-roadmap.md`.
 
 ---
 
-## 1. Ausgangslage im Repo
+## 1. Starting point in the repo
 
-`user/rateLimiter.ts` bietet:
+`user/rateLimiter.ts` provides:
 
-- `getClientIp()` — liest `X-Forwarded-For` bzw. `X-Real-IP` aus dem
-  Encore-Request (über `currentRequest()`).
-- `checkRateLimit(key)` — Sliding-Window-Zähler (10 Versuche / 15 min),
-  wirft `APIError` mit HTTP 429 bei Überschreitung.
-- `resetRateLimit(key)` — für erfolgreiche Operationen (Gegenstück).
-- Storage: **In-Memory-Map**, pro Prozess. Limitierung ist damit an
-  einen Instanz-Prozess gebunden; bei Multi-Instance-Deployment
-  irrelevant für die aktuellen Auth-Endpoints (Single-Instance-
-  Produktion) — Hinweis im Datei-Kommentar: ggf. auf Encore Cache
-  (Redis) migrieren.
+- `getClientIp()` — reads `X-Forwarded-For` or `X-Real-IP` from the
+  Encore request (via `currentRequest()`).
+- `checkRateLimit(key)` — sliding-window counter (10 attempts / 15 min),
+  throws `APIError` with HTTP 429 when exceeded.
+- `resetRateLimit(key)` — for successful operations (counterpart).
+- Storage: **in-memory map**, per process. The limit is therefore bound to
+  a single instance process; with a multi-instance deployment this is
+  irrelevant for the current auth endpoints (single-instance
+  production) — note in the file comment: possibly migrate to Encore Cache
+  (Redis).
 
-Nutzer bisher: `user/auth.service.ts` (Login), `user/passkey.ts`
-(Passkey-Attempts). **Kein** anderer Service limitiert aktuell.
+Users so far: `user/auth.service.ts` (login), `user/passkey.ts`
+(passkey attempts). **No** other service currently limits.
 
-Entscheidung für Finance: **bestehenden Rate-Limiter wiederverwenden**,
-nicht neu bauen. Keys werden so gewählt, dass die Auth-Limits und
-Finanz-Limits unabhängig zählen.
+Decision for Finance: **reuse the existing rate limiter**,
+do not build a new one. Keys are chosen so that the auth limits and
+Finance limits count independently.
 
 ---
 
-## 2. Welche Endpoints werden limitiert
+## 2. Which endpoints are limited
 
-Nur Endpoints mit realem Missbrauchs-/DoS-Risiko werden beschränkt;
-reine Lese-Endpoints bleiben unlimitiert (liegen hinter `finance.view`
-und der ACL).
+Only endpoints with a real abuse/DoS risk are restricted;
+pure read endpoints remain unlimited (they sit behind `finance.view`
+and the ACL).
 
-| Endpoint | Methode | Limit | Key | Begründung |
+| Endpoint | Method | Limit | Key | Rationale |
 |---|---|---|---|---|
-| `/finance/tan-sessions/complete` | POST | 5 / 10 min | `tan-complete:<tan_reference>` | FinTS-Server limitiert selbst (i. d. R. 3 TAN-Versuche), aber wir wollen verhindern, dass ein Angreifer die TAN-Referenz von Dritten brute-forced, solange sie nicht abgelaufen ist. Key ist **pro Reference**, nicht pro IP — drei Benutzer hinter NAT dürfen sich nicht gegenseitig aussperren. |
-| `/finance/bankcontacts/:id/credentials` | POST | 10 / 15 min | `bank-creds:<userId>:<bankcontactId>` | Credential-Set-Rate eindämmen — verhindert, dass ein kompromittierter User-Account beliebig viele Credential-Änderungen probiert (Rauschen im Log + CPU für Crypto). |
-| `/finance/statements` | POST | 20 / 15 min | `sync-trigger:<userId>:<bankcontactId>` | Manueller Sync-Trigger: begrenzt pro User×Bankkontakt, damit niemand versehentlich (oder böswillig) die Bank mit HBCI-Dialogen flutet. Der Cron läuft sowieso eigenständig. |
-| `/finance/admin/import` | POST | 3 / 60 min | `finance-import:<userId>` | Import ist teuer (Minuten, große DB-Transaktionen). Drei Versuche pro Stunde sind mehr als der Admin in Wirklichkeit braucht. |
-| `/finance/analysis/query` | POST | 30 / 10 min | `analysis-query:<userId>` | LLM-Call beim Parsing kostet Rechenzeit des `llm-service`. Edit-basierte Re-Aggregate (`/finance/analysis/aggregate`) zählen **nicht** mit, weil sie kein LLM rufen. |
-| `/finance/tags/suggest` | POST | 5 / 60 min | `tag-suggest-batch:<userId>` | Batch-Endpoint läuft über viele Transaktionen → viele LLM-Calls. Strikt begrenzen. |
+| `/finance/tan-sessions/complete` | POST | 5 / 10 min | `tan-complete:<tan_reference>` | The FinTS server limits itself (usually 3 TAN attempts), but we want to prevent an attacker from brute-forcing third parties' TAN references as long as they have not expired. The key is **per reference**, not per IP — three users behind NAT must not lock each other out. |
+| `/finance/bankcontacts/:id/credentials` | POST | 10 / 15 min | `bank-creds:<userId>:<bankcontactId>` | Curb the credential-set rate — prevents a compromised user account from trying an arbitrary number of credential changes (noise in the log + CPU for crypto). |
+| `/finance/statements` | POST | 20 / 15 min | `sync-trigger:<userId>:<bankcontactId>` | Manual sync trigger: limited per user×bank contact so that nobody accidentally (or maliciously) floods the bank with HBCI dialogs. The cron runs on its own anyway. |
+| `/finance/admin/import` | POST | 3 / 60 min | `finance-import:<userId>` | The import is expensive (minutes, large DB transactions). Three attempts per hour are more than the admin actually needs. |
+| `/finance/analysis/query` | POST | 30 / 10 min | `analysis-query:<userId>` | The LLM call during parsing costs compute time of the `llm-service`. Edit-based re-aggregates (`/finance/analysis/aggregate`) do **not** count, because they do not call an LLM. |
+| `/finance/tags/suggest` | POST | 5 / 60 min | `tag-suggest-batch:<userId>` | The batch endpoint runs over many transactions → many LLM calls. Limit strictly. |
 
-Nicht limitiert (aber dokumentieren, warum):
+Not limited (but documenting why):
 
-| Endpoint | Grund |
+| Endpoint | Reason |
 |---|---|
-| `GET /finance/accounts`, `/finance/transactions`, `/finance/tags` | Reine Reads, ACL-gefiltert, kein Missbrauchsanreiz. |
-| `POST /finance/transactions` (manuelle Buchung) | Schreibt genau eine Zeile; Missbrauch wäre höchstens DB-Rauschen, kein DoS. |
-| `POST /finance/transactions/:id/tags/promote` | Billige Operation, nur innerhalb der eigenen ACL. |
-| `POST /finance/analysis/aggregate` | Reine SQL-Aggregation, kein LLM-Call. |
+| `GET /finance/accounts`, `/finance/transactions`, `/finance/tags` | Pure reads, ACL-filtered, no incentive for abuse. |
+| `POST /finance/transactions` (manual transaction) | Writes exactly one row; abuse would at most be DB noise, not DoS. |
+| `POST /finance/transactions/:id/tags/promote` | Cheap operation, only within the user's own ACL. |
+| `POST /finance/analysis/aggregate` | Pure SQL aggregation, no LLM call. |
 
 ---
 
-## 3. Integration im Handler-Code
+## 3. Integration in handler code
 
-Dasselbe Muster wie in `user/auth.service.ts`. Beispiel für
+Same pattern as in `user/auth.service.ts`. Example for
 `tan-sessions.complete`:
 
 ```ts
@@ -79,25 +79,25 @@ export const complete = api(
 
     const result = await finishTanDialog(req.tanReference, req.tan);
     if (result.state === "idle") {
-      resetRateLimit(key);      // Erfolg: Zähler zurücksetzen
+      resetRateLimit(key);      // success: reset the counter
     }
     return { imported: result.imported ?? 0 };
   },
 );
 ```
 
-Der bestehende `checkRateLimit(ip)` aus `user/rateLimiter.ts` bekommt in
-dieser Etappe einen zweiten Parameter `{ maxAttempts, windowMs }`,
-damit nicht jeder Endpoint die Default-Limits (10 / 15 min) erbt.
+The existing `checkRateLimit(ip)` from `user/rateLimiter.ts` gets a second
+parameter `{ maxAttempts, windowMs }` in this stage,
+so that not every endpoint inherits the default limits (10 / 15 min).
 
-### 3.1 Signatur-Erweiterung
+### 3.1 Signature extension
 
-Aktuell:
+Currently:
 ```ts
 export function checkRateLimit(ip: string): void
 ```
 
-Erweiterung (rückwärtskompatibel):
+Extension (backward compatible):
 ```ts
 interface RateLimitOpts {
   maxAttempts?: number;   // default: 10
@@ -106,37 +106,37 @@ interface RateLimitOpts {
 export function checkRateLimit(key: string, opts?: RateLimitOpts): void
 ```
 
-Die Umbenennung `ip` → `key` im Parameter macht sichtbar, dass
-Finance-Keys keine IPs sind. Der bestehende Caller in
-`user/auth.service.ts` übergibt weiterhin `getClientIp()` — Verhalten
-identisch.
+Renaming the parameter `ip` → `key` makes it visible that
+Finance keys are not IPs. The existing caller in
+`user/auth.service.ts` continues to pass `getClientIp()` — behavior
+identical.
 
 ---
 
-## 4. Frontend-Verhalten bei 429
+## 4. Frontend behavior on 429
 
-Die Frontend-Stores fangen HTTP 429 ab und zeigen eine
-`PrimeVue.Toast`-Nachricht:
+The frontend stores catch HTTP 429 and show a
+`PrimeVue.Toast` message:
 
-> „Zu viele Versuche — bitte {remainingSeconds}s warten."
+> "Zu viele Versuche — bitte {remainingSeconds}s warten." (Too many attempts — please wait {remainingSeconds}s.)
 
-Der `Retry-After`-Header wird von `checkRateLimit` gesetzt
-(Ergänzung am bestehenden Helper: aktuelle `resetAt - now()`-
-Differenz in Sekunden). Die Stores lesen den Header und setzen einen
-Countdown-State, den die UI z. B. im `TanDialog` als disabled-Button
-mit Timer anzeigt.
+The `Retry-After` header is set by `checkRateLimit`
+(addition to the existing helper: the current `resetAt - now()`
+difference in seconds). The stores read the header and set a
+countdown state, which the UI shows, e.g. in the `TanDialog`, as a disabled
+button with a timer.
 
 ---
 
-## 5. Push-Rate-Limiting (Verbindung zu `finance-logging-monitoring.md`)
+## 5. Push rate limiting (link to `finance-logging-monitoring.md`)
 
-Die in §3.2 des Logging-Dokuments genannten Push-Rate-Limits (TAN:
-max. 1× / 30 min pro Bankkontakt; Fehl-Sync: max. 1× / 6 h) laufen
-**nicht** über `checkRateLimit` — das ist kein Endpoint-Schutz,
-sondern Notification-Dedupe. Implementierung in `statements-cron.ts`:
+The push rate limits mentioned in §3.2 of the logging document (TAN:
+max. 1× / 30 min per bank contact; failed sync: max. 1× / 6 h) do
+**not** go through `checkRateLimit` — that is not endpoint protection
+but notification dedupe. Implementation in `statements-cron.ts`:
 
 ```ts
-// Einfache DB-gestützte Dedupe-Zeile
+// Simple DB-backed dedupe row
 CREATE TABLE finance_push_dedupe (
   scope      TEXT NOT NULL,       -- "tan-required" | "sync-failed"
   entity_id  INTEGER NOT NULL,    -- bankcontact_id
@@ -145,7 +145,7 @@ CREATE TABLE finance_push_dedupe (
 );
 ```
 
-Der Cron prüft vor `notifyUser(...)`:
+The cron checks before `notifyUser(...)`:
 
 ```ts
 const lastSent = await db.queryRow<{ last_sent: string }>`
@@ -157,59 +157,59 @@ if (lastSent && Date.now() - Date.parse(lastSent.last_sent) < windowMs) {
 // send + upsert last_sent
 ```
 
-Die Tabelle gehört in eine Folge-Migration (z. B. `0045_finance_push_dedupe.sql`)
-und ist nicht Teil der Initial-Migration aus Etappe 1.
+The table belongs in a follow-up migration (e.g. `0045_finance_push_dedupe.sql`)
+and is not part of the initial migration from stage 1.
 
 ---
 
-## 6. Was wir bewusst nicht machen
+## 6. What we deliberately do not do
 
-- **Kein IP-basiertes Limiting auf Finanz-Endpoints** — User sitzen oft
-  hinter NAT, und die Endpoints sind alle `auth: true` (kein
-  IP-Brute-Force ohne gültiges Session-Cookie denkbar). Limits laufen
-  pro User oder pro Ressource.
-- **Kein Captcha / reCAPTCHA** — der Auth-Layer schützt den Einstieg
-  bereits, und Finanz-Endpoints sind nie öffentlich.
-- **Keine Redis-Migration im MVP** — das Projekt läuft als Single-
-  Instance. Wenn das später skaliert werden muss, ist der Rate-Limiter
-  laut Kommentar in `user/rateLimiter.ts` ohnehin der erste Kandidat
-  für Encore-Cache (Redis).
-- **Keine per-Route-Config-Datei** — Limits stehen im jeweiligen
-  Handler als Literal neben dem Aufruf; das hält die Konfiguration lokal
-  zu ihrem Kontext.
-
----
-
-## 7. Tests (Ergänzung zu `finance-testing.md`)
-
-Pro limitiertem Endpoint mindestens drei Tests:
-
-1. **Normale Nutzung**: 3 Aufrufe innerhalb des Windows → alle
-   erfolgreich.
-2. **Überschreitung**: `maxAttempts + 1` schnelle Aufrufe → der letzte
-   wirft `APIError` 429.
-3. **Reset nach Erfolg**: Aufruf, der `resetRateLimit(key)` triggert,
-   setzt den Zähler auf 0 — danach wieder `maxAttempts` Versuche frei.
-
-Vitest-Setup: `vi.useFakeTimers()`, damit das Window ohne `sleep`
-simuliert werden kann. Die In-Memory-Map wird pro Test in
-`beforeEach` über einen neu zu erstellenden Helper
-`__resetRateLimiterForTests()` geleert (Export aus
-`user/rateLimiter.ts`, nur in Tests verwendet).
+- **No IP-based limiting on Finance endpoints** — users often sit
+  behind NAT, and the endpoints are all `auth: true` (no
+  IP brute force conceivable without a valid session cookie). Limits apply
+  per user or per resource.
+- **No captcha / reCAPTCHA** — the auth layer already protects the entry point,
+  and Finance endpoints are never public.
+- **No Redis migration in the MVP** — the project runs as a single
+  instance. If it has to scale later, the rate limiter is, according to the
+  comment in `user/rateLimiter.ts`, the first candidate
+  for Encore Cache (Redis) anyway.
+- **No per-route config file** — limits are written in the respective
+  handler as a literal next to the call; this keeps the configuration local
+  to its context.
 
 ---
 
-## 8. Offene Punkte
+## 7. Tests (supplement to `finance-testing.md`)
 
-- **Limit-Tuning**: die Zahlen in §2 sind Schätzungen; nach drei Monaten
-  Produktivbetrieb gegen Log-Statistik abgleichen und ggf. anpassen.
-- **`finance_push_dedupe`-Tabelle vs. In-Memory**: für Single-Instance
-  genügt In-Memory, aber die DB-Variante übersteht Restarts. Empfehlung:
-  DB-Variante (siehe §5).
-- **Retry-After-Header**: muss `checkRateLimit` aktiv setzen lernen —
-  der bestehende Code wirft nur `APIError`, ohne Header. Kleine
-  Ergänzung in `user/rateLimiter.ts`, nicht in Finance.
-- **`resetRateLimit` bei partiellem Erfolg**: TAN-Complete bei
-  `state: "tan-required"` (Folge-TAN) — zählt das als Erfolg (reset)
-  oder als Versuch? Vorschlag: als Erfolg zählen, weil der User auf
-  dem richtigen Pfad ist.
+At least three tests per limited endpoint:
+
+1. **Normal use**: 3 calls within the window → all
+   succeed.
+2. **Exceeding**: `maxAttempts + 1` rapid calls → the last
+   throws `APIError` 429.
+3. **Reset after success**: a call that triggers `resetRateLimit(key)`
+   sets the counter to 0 — afterwards `maxAttempts` attempts are free again.
+
+Vitest setup: `vi.useFakeTimers()`, so that the window can be
+simulated without `sleep`. The in-memory map is cleared per test in
+`beforeEach` via a newly to-be-created helper
+`__resetRateLimiterForTests()` (export from
+`user/rateLimiter.ts`, used only in tests).
+
+---
+
+## 8. Open points
+
+- **Limit tuning**: the numbers in §2 are estimates; after three months
+  of production operation, compare against log statistics and adjust if necessary.
+- **`finance_push_dedupe` table vs. in-memory**: for a single instance
+  in-memory suffices, but the DB variant survives restarts. Recommendation:
+  DB variant (see §5).
+- **Retry-After header**: `checkRateLimit` must learn to set it actively —
+  the existing code only throws `APIError`, without a header. Small
+  addition in `user/rateLimiter.ts`, not in Finance.
+- **`resetRateLimit` on partial success**: TAN complete with
+  `state: "tan-required"` (follow-up TAN) — does that count as success (reset)
+  or as an attempt? Proposal: count it as success, because the user is on
+  the right path.

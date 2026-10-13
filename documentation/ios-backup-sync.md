@@ -1,420 +1,429 @@
-# iOS Backup & Sync – Architektur
+# iOS Backup & Sync – Architecture
 
-Stand: Juni 2026
+As of: June 2026
 
-Dieses Dokument beschreibt die **Backup-/Sync-Architektur** der nativen
-iOS-App (`ios/`): wie Fotos vom Gerät zum Server hochgeladen (Upload-Sync) und
-wieder auf das Gerät geladen werden (Download-Sync), wie der Vorgang im
-Hintergrund läuft und wie Duplikate vermieden werden. Ergänzt das
-Feature-Inventar in [`ios-app.md`](./ios-app.md) um die technischen Details.
+This document describes the **backup/sync architecture** of the native
+iOS app (`ios/`): how photos are uploaded from the device to the server
+(upload sync) and downloaded back to the device (download sync), how the
+process runs in the background, and how duplicates are avoided. It
+complements the feature inventory in [`ios-app.md`](./ios-app.md) with the
+technical details.
 
 ---
 
-## 1. Komponenten
+## 1. Components
 
-| Datei | Rolle |
+| File | Role |
 |---|---|
-| `Features/Sync/PhotoSyncService.swift` | Orchestriert einen Upload-Sync-Lauf (`actor`). |
-| `Features/Sync/AssetUploadEnqueuer.swift` | Wandelt ein `PHAsset` in einen `UploadQueueItem` (gemeinsam für manuellen & automatischen Upload). |
-| `Features/Sync/UploadQueue.swift` | Persistente Upload-Warteschlange im App-Group-Container (`actor`). |
-| `Features/Sync/PhotoHashing.swift` | Berechnet `imageDataHash` / `fullHash` (`PhotoHasher`). |
-| `Features/Sync/BackgroundSyncManager.swift` | Hintergrund-Ausführung (BGTask / PhotoKit), Queue-Drain, Netzwerk-Gate. |
-| `Features/Sync/PhotoDownloadService.swift` | Zwei-Wege-Sync: lädt Server-Fotos aufs Gerät (`actor`). |
-| `Features/Sync/PhotoSyncPreferences.swift` | UserDefaults-Keys & typisierte Accessoren für den Upload. |
-| `Features/Sync/DownloadSyncPreferences.swift` | dito für den Download. |
-| `Features/Sync/SyncProgress.swift` | Beobachtbarer Fortschritt für die UI. |
-| `Features/Sync/SyncSettingsView.swift` / `DownloadSettingsView.swift` | Einstellungen. |
-| `Features/Sync/ServerAlbumPickerView.swift` | Geräte-Album → Server-Album-Zuordnung. |
-| `Core/Storage/SharedStorage.swift` | App-Group-UserDefaults (Token-/Server-URL-Sharing mit der Share-Extension). |
-| `F4milShare/` | Share-Extension zum Upload aus anderen Apps (Code). `App/ShareExtension/` enthält nur ihre `Info.plist`. |
+| `Features/Sync/PhotoSyncService.swift` | Orchestrates an upload sync run (`actor`). |
+| `Features/Sync/AssetUploadEnqueuer.swift` | Converts a `PHAsset` into an `UploadQueueItem` (shared by manual & automatic upload). |
+| `Features/Sync/UploadQueue.swift` | Persistent upload queue in the app group container (`actor`). |
+| `Features/Sync/PhotoHashing.swift` | Computes `imageDataHash` / `fullHash` (`PhotoHasher`). |
+| `Features/Sync/BackgroundSyncManager.swift` | Background execution (BGTask / PhotoKit), queue drain, network gate. |
+| `Features/Sync/PhotoDownloadService.swift` | Two-way sync: downloads server photos to the device (`actor`). |
+| `Features/Sync/PhotoSyncPreferences.swift` | UserDefaults keys & typed accessors for the upload. |
+| `Features/Sync/DownloadSyncPreferences.swift` | Same for the download. |
+| `Features/Sync/SyncProgress.swift` | Observable progress for the UI. |
+| `Features/Sync/SyncSettingsView.swift` / `DownloadSettingsView.swift` | Settings. |
+| `Features/Sync/ServerAlbumPickerView.swift` | Device album → server album mapping. |
+| `Core/Storage/SharedStorage.swift` | App group UserDefaults (token/server URL sharing with the share extension). |
+| `F4milShare/` | Share extension for uploading from other apps (code). `App/ShareExtension/` contains only its `Info.plist`. |
 
-App-Group: **`group.dev.fk-encore.F4milPhotos`** (gemeinsamer Container für
-Queue-Datei, Temp-Dateien und geteilte UserDefaults).
+App group: **`group.dev.fk-encore.F4milPhotos`** (shared container for the
+queue file, temp files and shared UserDefaults).
 
 ---
 
-## 2. Hashing- & Dedup-Modell
+## 2. Hashing & Dedup Model
 
-`PhotoHasher` erzeugt pro Asset einen `PhotoHashResult` mit drei Werten:
+`PhotoHasher` produces a `PhotoHashResult` with three values per asset:
 
-- **`imageDataHash`** – SHA-256 der **dekodierten Bildpixel**. Stabil über
-  Caption-/Favorit-/Datums-Änderungen hinweg → identifiziert „dasselbe Bild".
-- **`fullHash`** – SHA-256 über `imageDataHash + caption + isFavorite +
-  capturedAtString`. Ändert sich bei **jeder sync-relevanten** Änderung →
-  identifiziert „dieses Bild in genau diesem Zustand".
-- **`capturedAtString`** – Aufnahmezeit in `TimeZone.current` (v2-Cache;
-  behebt UTC-Drift bei heruntergeladenen Fotos).
+- **`imageDataHash`** – SHA-256 of the **decoded image pixels**. Stable across
+  caption/favorite/date changes → identifies "the same image".
+- **`fullHash`** – SHA-256 over `imageDataHash + caption + isFavorite +
+  capturedAtString`. Changes on **every sync-relevant** change →
+  identifies "this image in exactly this state".
+- **`capturedAtString`** – capture time in `TimeZone.current` (v2 cache;
+  fixes UTC drift for downloaded photos).
 
-Wichtig: Gehasht und hochgeladen werden die Bytes der **besten Ressource**
-(`AssetUploadEnqueuer.bestResource`) – bevorzugt der **bearbeitete** Render
-(`.fullSizePhoto`), sonst das Original (`.photo`). Hash-Pipeline, hochgeladene
-Bytes (`PhotoSyncService.loadAssetData`) und Hintergrund-Jobs verwenden
-zwingend dieselbe Ressourcen-Auswahl, damit der serverseitige Dedup über beide
-Upload-Pfade identisch greift (#591). Der Dateiname wird dagegen aus der
-`.photo`-Ressource gelesen (der `.fullSizePhoto`-Render heißt generisch
+Important: what is hashed and uploaded are the bytes of the **best resource**
+(`AssetUploadEnqueuer.bestResource`) – preferably the **edited** render
+(`.fullSizePhoto`), otherwise the original (`.photo`). The hash pipeline,
+uploaded bytes (`PhotoSyncService.loadAssetData`) and background jobs must
+use the same resource selection, so that server-side dedup works identically
+across both upload paths (#591). The file name, by contrast, is read from the
+`.photo` resource (the `.fullSizePhoto` render is generically named
 `FullSizeRender.heic`).
 
-`PhotoHasher` cached Ergebnisse per `localIdentifier` und überspringt
-Neu-Hashing, solange die `modificationDate` des Assets unverändert ist
+`PhotoHasher` caches results per `localIdentifier` and skips
+re-hashing as long as the asset's `modificationDate` is unchanged
 (`PhotoSyncPreferences.HashCacheEntry`).
 
 ---
 
-## 3. Upload-Sync-Pipeline (`PhotoSyncService.sync()`)
+## 3. Upload Sync Pipeline (`PhotoSyncService.sync()`)
 
-Vorbedingungen (sonst stiller Abbruch): `syncEnabled`, Netzwerk-Gate erfüllt
-(siehe §6), Foto-Berechtigung `.authorized`/`.limited`.
+Preconditions (otherwise a silent abort): `syncEnabled`, network gate
+satisfied (see §6), photo permission `.authorized`/`.limited`.
 
-1. **Queue zuerst leeren** (`drainQueueWithProgress`) – Share-Extension-Items
-   und Reste eines abgebrochenen Laufs werden sofort hochgeladen, damit der
-   Nutzer Fortschritt sieht, statt auf den Library-Scan zu warten.
-2. **Assets ermitteln** (`fetchAssets`, off-main): je nach Auswahl die ganze
-   Mediathek (Sentinel `__all_photos__`) oder die **bestätigten** Album-IDs;
-   gefiltert über `PHFetchOptions` (nur Bilder, `creationDate`/`modificationDate`
-   neuer als das Album-Watermark, optional Screenshots ausgeschlossen).
-3. In **Batches à 500**:
-   - **Hashen** (`PhotoHasher`, mit Cache).
-   - **Sync-Check**: `APIClient.syncCheck` (`POST /photos/sync/check`) liefert,
-     welche `fullHash`-Werte der Server schon hat.
-   - **Enqueue** der fehlenden Assets (und noch nicht in der Queue liegenden)
-     als `UploadQueueItem` via `AssetUploadEnqueuer.makeQueueItem`, danach
-     erneuter Queue-Drain.
-   - **Watermark** je Quell-Album monoton auf die neueste `creationDate` der
-     erfolgreich verarbeiteten Assets vorrücken (`advanceAlbumSyncDate` schreibt
-     nur, wenn strikt neuer → keine Rückwärts-Sprünge bei out-of-order-Abschluss).
-     Assets, deren Hash fehlschlug (z. B. iCloud-Bytes nicht verfügbar), werden
-     **bewusst nicht** ins Watermark aufgenommen und beim nächsten Lauf erneut
-     versucht.
-4. **Abschluss**: finaler Drain + `lastSyncDate` setzen.
+1. **Drain the queue first** (`drainQueueWithProgress`) – share extension items
+   and leftovers of an aborted run are uploaded immediately, so that the
+   user sees progress instead of waiting for the library scan.
+2. **Determine assets** (`fetchAssets`, off-main): depending on the selection,
+   the whole media library (sentinel `__all_photos__`) or the **confirmed**
+   album IDs; filtered via `PHFetchOptions` (images only, `creationDate`/
+   `modificationDate` newer than the album watermark, optionally screenshots
+   excluded).
+3. In **batches of 500**:
+   - **Hash** (`PhotoHasher`, with cache).
+   - **Sync check**: `APIClient.syncCheck` (`POST /photos/sync/check`) returns
+     which `fullHash` values the server already has.
+   - **Enqueue** the missing assets (and those not yet in the queue)
+     as `UploadQueueItem` via `AssetUploadEnqueuer.makeQueueItem`, then
+     another queue drain.
+   - **Watermark** per source album advances monotonically to the newest
+     `creationDate` of the successfully processed assets (`advanceAlbumSyncDate`
+     only writes if strictly newer → no backward jumps on out-of-order
+     completion). Assets whose hash failed (e.g. iCloud bytes unavailable) are
+     **deliberately not** included in the watermark and are retried on the next
+     run.
+4. **Completion**: final drain + set `lastSyncDate`.
 
-Bei jedem Exit-Pfad (auch Task-Abbruch durch BGTask-Zeitlimit) wird der
-Fortschritt zurückgesetzt, damit der Spinner nie hängen bleibt.
+On every exit path (including task cancellation through the BGTask time limit)
+the progress is reset, so the spinner never gets stuck.
 
-### Manueller Upload
+### Manual Upload
 
-`PhotoUploadView` nutzt denselben `AssetUploadEnqueuer`, sodass manuell und
-automatisch hochgeladene Fotos serverseitig identisch dedupliziert werden.
-
----
-
-## 4. Upload-Queue (`UploadQueue`)
-
-- **Persistenz**: JSON-Datei `upload_queue.json` im App-Group-Container →
-  überlebt App-Neustarts und ist von Haupt-App **und** Share-Extension lesbar.
-  Temp-Bilddaten liegen in `pending_uploads/`.
-- **Status** je Item: `pending → uploading → done | failed`.
-- **Nebenläufigkeit**: `claimNextPending()` schaltet **atomar** ein Item von
-  `pending` auf `uploading`. Ab da ist es für andere Drain-Läufe (anderer
-  Prozess: Haupt-App vs. Share-Extension) unsichtbar – verhindert die
-  Doppel-Uploads, die früher Server-Duplikate erzeugten.
-- **Wiederaufnahme**: durch Hintergrund-Suspendierung abgebrochene Uploads
-  landen als `failed` mit transienter Fehlermeldung; `requeueTransientFailures()`
-  (beim Foreground-Resume) setzt diese auf `pending` zurück. `resetStaleUploading()`
-  beim App-Start räumt nach einem Crash hängengebliebene `uploading`-Items auf.
-- **UI**: `UploadQueueObserver` (`@Observable @MainActor`) spiegelt die Queue
-  über einen `AsyncStream` live in SwiftUI.
+`PhotoUploadView` uses the same `AssetUploadEnqueuer`, so that manually and
+automatically uploaded photos are deduplicated identically on the server.
 
 ---
 
-## 5. `UploadQueueItem` & Server-Contract
+## 4. Upload Queue (`UploadQueue`)
 
-Ein `UploadQueueItem` trägt u. a. `imageDataHash`, `fullHash`,
+- **Persistence**: JSON file `upload_queue.json` in the app group container →
+  survives app restarts and is readable by the main app **and** the share
+  extension. Temporary image data is stored in `pending_uploads/`.
+- **Status** per item: `pending → uploading → done | failed`.
+- **Concurrency**: `claimNextPending()` **atomically** switches an item from
+  `pending` to `uploading`. From then on it is invisible to other drain runs
+  (other process: main app vs. share extension) – prevents the
+  double uploads that used to create server duplicates.
+- **Resumption**: uploads aborted by background suspension
+  end up as `failed` with a transient error message; `requeueTransientFailures()`
+  (on foreground resume) resets these to `pending`. `resetStaleUploading()`
+  at app start cleans up `uploading` items left hanging after a crash.
+- **UI**: `UploadQueueObserver` (`@Observable @MainActor`) mirrors the queue
+  live into SwiftUI via an `AsyncStream`.
+
+---
+
+## 5. `UploadQueueItem` & Server Contract
+
+An `UploadQueueItem` carries, among others, `imageDataHash`, `fullHash`,
 `capturedAtString`, `caption`, `isFavorite`, `targetAlbumIds`,
-`sourceIosAlbumId`, optionale GPS-Koordinaten und (für Share-Extension-Items)
-eine `tempFileURL`.
+`sourceIosAlbumId`, optional GPS coordinates and (for share extension items)
+a `tempFileURL`.
 
-Upload-Request an **`POST /photos`** (`photo/photo.ts`) trägt die Metadaten als
-Header:
+The upload request to **`POST /photos`** (`photo/photo.ts`) carries the
+metadata as headers:
 
-| Header | Inhalt |
+| Header | Content |
 |---|---|
-| `X-File-Name` | Originaldateiname (percent-encoded) |
-| `X-Image-Data-Hash` | Pixel-Hash → serverseitiger Dedup |
-| `X-Full-Hash` | Zustands-Hash |
+| `X-File-Name` | Original file name (percent-encoded) |
+| `X-Image-Data-Hash` | Pixel hash → server-side dedup |
+| `X-Full-Hash` | State hash |
 | `X-Description` | Caption (percent-encoded) |
 | `X-Is-Favorite` | `true`/`false` |
-| `X-Captured-At` | Aufnahmezeit |
-| `X-Asset-Id` | `PHAsset.localIdentifier` → Dedup/Replace per `device_asset_id` |
-| `X-GPS-Lat` / `X-GPS-Lon` | GPS-Fallback (die Resource-Bytes sind EXIF-bereinigt) |
+| `X-Captured-At` | Capture time |
+| `X-Asset-Id` | `PHAsset.localIdentifier` → dedup/replace via `device_asset_id` |
+| `X-GPS-Lat` / `X-GPS-Lon` | GPS fallback (the resource bytes are EXIF-stripped) |
 
-Weitere Endpunkte:
-- **`POST /photos/sync/check`** – Batch-Abgleich: welche `fullHash` existieren schon.
-- **`POST /photos/sync/metadata`** – reiner Metadaten-Sync (Pixel unverändert,
-  nur Caption/Favorit/Datum geändert); `.notFound` ⇒ Fallback auf vollen Upload.
-- **`GET /photos/index`** (ETag) – Fast-Skip für den Download (§7).
-
----
-
-## 6. Netzwerk-Gate („Nur WLAN")
-
-`BackgroundSyncManager.networkAllowsUpload()` ist die **einzige** Quelle der
-Wahrheit für das Gate und wird sowohl vor als auch **während** des Queue-Drains
-(vor jedem Item) frisch ausgewertet:
-
-- `PhotoSyncPreferences.wifiOnly` (Default **an**) direkt aus UserDefaults.
-- Live-Pfad von `PhotoSyncService` (`isWifiConnected` / `isNetworkAvailable`).
-
-So wirkt ein Umschalten der Einstellung oder ein Konnektivitätswechsel sofort,
-auch mitten im Drain (ein bei wieder eingeschaltetem „Nur WLAN" laufendes Item
-wird als `pending` zurückgelegt).
-
-> **First-Path-Race (behoben):** `NWPathMonitor.currentPath` ist im kurzen
-> Fenster direkt nach `start()` noch nicht zuverlässig befüllt. Früher meldete
-> der **erste** Tap auf „Jetzt synchronisieren" deshalb fälschlich „kein WLAN"
-> und man musste zweimal tippen. `PhotoSyncService`/`PhotoDownloadService`
-> cachen den Pfad jetzt über den `pathUpdateHandler` und **warten beim ersten
-> Aufruf auf das erste Update** (mit Sicherheits-Timeout), bevor sie antworten.
+Further endpoints:
+- **`POST /photos/sync/check`** – batch comparison: which `fullHash` values already exist.
+- **`POST /photos/sync/metadata`** – metadata-only sync (pixels unchanged,
+  only caption/favorite/date changed); `.notFound` ⇒ fallback to a full upload.
+- **`GET /photos/index`** (ETag) – fast skip for the download (§7).
 
 ---
 
-## 7. Gesamtpipeline & Auslöser
+## 6. Network Gate ("Nur WLAN" / Wi-Fi only)
 
-Alle Auslöser laufen über **`BackgroundSyncManager.runFullSync()`**: Trip-Auto-Add
-→ **Download-/Bisync-Sync** (`PhotoDownloadService.sync()`) → Queue-Drain →
-Upload-Sync (`PhotoSyncService.sync()`). `runFullSync()` ist durch `pipelineLock`
-gegen einen zweiten gleichzeitigen Lauf geschützt (manueller Tap +
-Foreground-Resume + BG-Task), so dass sich zwei Pipelines nie überlagern.
+`BackgroundSyncManager.networkAllowsUpload()` is the **single** source of
+truth for the gate and is evaluated freshly both before and **during** the
+queue drain (before each item):
 
-> **Reihenfolge Download vor Upload (wichtig):** Ein am Server **gelöschtes**
-> Foto muss zuerst per Download aus dem lokalen Album entfernt (in „F4mil Trash"
-> verschoben) werden, **bevor** der Upload-Scan läuft. Sonst sieht der Upload die
-> noch vorhandene lokale Kopie im Album, lädt sie wieder hoch und lässt das
-> gelöschte Foto **auferstehen** (es taucht erneut im Album auf, während eine
-> Streukopie im Trash liegt). Download-zuerst schließt dieses Rennen für jedes
-> heruntergeladene Foto — unabhängig vom Round-Trip-Tracking-Set.
+- `PhotoSyncPreferences.wifiOnly` (default **on**) directly from UserDefaults.
+- Live path of `PhotoSyncService` (`isWifiConnected` / `isNetworkAvailable`).
 
-> **Wichtig:** Die Download-Hälfte lief früher **ausschließlich** im
-> BGProcessingTask. Da iOS diesen Task nur selten und meist beim Laden/Idle
-> ausführt, holte ein **manuell** ausgelöster Sync server-seitig ins Album
-> aufgenommene Fotos nie herunter. Seit alle Auslöser über `runFullSync()`
-> gehen, läuft der Download auch beim manuellen Tap und beim Foreground-Resume.
+This way, toggling the setting or a connectivity change takes effect
+immediately, even in the middle of a drain (an item running when "Nur WLAN"
+is switched back on is put back as `pending`).
 
-Auslöser:
+> **First-path race (fixed):** `NWPathMonitor.currentPath` is not yet reliably
+> populated in the short window right after `start()`. Previously, the
+> **first** tap on "Jetzt synchronisieren" (sync now) therefore wrongly
+> reported "no Wi-Fi" and you had to tap twice. `PhotoSyncService`/
+> `PhotoDownloadService` now cache the path via the `pathUpdateHandler` and
+> **on the first call wait for the first update** (with a safety timeout)
+> before they answer.
 
-- **Manueller Tap** („Jetzt synchronisieren", `SyncSettingsView`) → nach dem
-  Netzwerk-Vorabcheck `runFullSync()`.
-- **Foreground-Resume** (`applicationWillEnterForeground`, App war suspendiert,
-  nicht beendet) → `handleForegroundResume()` → `requeueTransientFailures()` +
+---
+
+## 7. Overall Pipeline & Triggers
+
+All triggers go through **`BackgroundSyncManager.runFullSync()`**: trip auto-add
+→ **download/bisync sync** (`PhotoDownloadService.sync()`) → queue drain →
+upload sync (`PhotoSyncService.sync()`). `runFullSync()` is protected by
+`pipelineLock` against a second simultaneous run (manual tap +
+foreground resume + BG task), so two pipelines never overlap.
+
+> **Order download before upload (important):** A photo **deleted** on the
+> server must first be removed from the local album via the download (moved
+> to "F4mil Trash") **before** the upload scan runs. Otherwise the upload
+> sees the still-existing local copy in the album, uploads it again and lets
+> the deleted photo **resurrect** (it shows up in the album again while a
+> stray copy sits in the trash). Download-first closes this race for every
+> downloaded photo — independent of the round-trip tracking set.
+
+> **Important:** The download half used to run **exclusively** in the
+> BGProcessingTask. Since iOS runs this task only rarely and mostly during
+> charging/idle, a **manually** triggered sync never downloaded photos that
+> had been added to the album on the server. Since all triggers go through
+> `runFullSync()`, the download also runs on a manual tap and on foreground
+> resume.
+
+Triggers:
+
+- **Manual tap** ("Jetzt synchronisieren", `SyncSettingsView`) → after the
+  network pre-check, `runFullSync()`.
+- **Foreground resume** (`applicationWillEnterForeground`, app was suspended,
+  not terminated) → `handleForegroundResume()` → `requeueTransientFailures()` +
   `runFullSync()`.
-- **Kaltstart** (`MainTabView.task` in `ContentView.swift`) → ebenfalls
-  `handleForegroundResume()`. `applicationWillEnterForeground` feuert **nur**
-  beim Aufwachen aus dem Suspend, nicht bei einem frischen Prozessstart. Wurde
-  die App im Hintergrund vom System beendet (jetsam — siehe Kasten unten, sehr
-  wahrscheinlich ohne Ladekabel), ist der nächste Öffnen-Vorgang ein Kaltstart;
-  ohne diesen zweiten Auslöser bliebe ein unterbrochener Sync bis zum nächsten
-  manuellen Tap liegen. `pipelineLock` macht Doppelauslösungen (z. B. beide
-  Trigger kurz nacheinander) zum No-op.
-- **BGProcessingTask** (siehe unten) → `runFullSync()`.
+- **Cold start** (`MainTabView.task` in `ContentView.swift`) → likewise
+  `handleForegroundResume()`. `applicationWillEnterForeground` fires **only**
+  when waking from suspend, not on a fresh process start. If the app was
+  terminated by the system in the background (jetsam — see the box below, very
+  likely without a charging cable), the next open is a cold start;
+  without this second trigger, an interrupted sync would stay put until the
+  next manual tap. `pipelineLock` makes double triggers (e.g. both
+  triggers shortly after one another) a no-op.
+- **BGProcessingTask** (see below) → `runFullSync()`.
 
-> **Abgebrochener manueller Sync — warum er früher immer bei 0 neu startete:**
-> `runFullSync()` läuft beim manuellen Tap als einfacher `Task` **ohne**
-> Hintergrund-Ausführungszeit vom System. Ohne Ladekabel/Idle friert iOS die
-> App fast unmittelbar nach dem Backgrounding ein und kann sie jederzeit
-> beenden (jetsam), um Speicher freizugeben — bei „App wieder öffnen, ohne dass
-> zwischenzeitlich ein Hintergrund-Task lief" ist das der Normalfall, nicht die
-> Ausnahme. Zwei Maßnahmen dagegen:
-> 1. `runFullSync()` fordert per `UIApplication.beginBackgroundTask` echte
->    Zusatzlaufzeit an; deren Expiration-Handler bricht den inneren `Task`
->    kooperativ ab (`Task.checkCancellation()`), statt den Prozess mitten im
->    Schritt einfrieren zu lassen.
-> 2. Der Upload-Sync (`PhotoSyncService.sync()`) hat den Wasserstand pro Album
->    früher erst nach einem kompletten 500er-Batch vorangetrieben. Bei
->    ~30 Sek. Hash-Zeit pro 100 Fotos dauert ein 500er-Batch mehrere Minuten —
->    deutlich länger, als die App realistisch Restlaufzeit bekommt. Der
->    Wasserstand bewegte sich dadurch nie, jeder Versuch scannte sichtbar wieder
->    von vorn. `processingBatchSize` ist jetzt **50**, sodass ein Batch-Checkpoint
->    auch bei kurzer Restlaufzeit erreichbar ist.
+> **Aborted manual sync — why it used to always restart at 0:**
+> On a manual tap, `runFullSync()` runs as a plain `Task` **without**
+> background execution time from the system. Without a charging cable/idle, iOS
+> freezes the app almost immediately after backgrounding and can terminate it
+> at any time (jetsam) to free memory — for "reopen the app without a
+> background task having run in between" this is the normal case, not the
+> exception. Two countermeasures:
+> 1. `runFullSync()` requests real additional runtime via
+>    `UIApplication.beginBackgroundTask`; its expiration handler cancels the
+>    inner `Task` cooperatively (`Task.checkCancellation()`) instead of
+>    letting the process freeze in the middle of a step.
+> 2. The upload sync (`PhotoSyncService.sync()`) used to advance the
+>    watermark per album only after a complete batch of 500. At
+>    ~30 s hash time per 100 photos, a batch of 500 takes several minutes —
+>    much longer than the app realistically gets as remaining runtime. As a
+>    result, the watermark never moved, and every attempt visibly scanned from
+>    the start again. `processingBatchSize` is now **50**, so that a batch
+>    checkpoint is reachable even with a short remaining runtime.
 
-Hintergrund-Ausführung, zwei Pfade je nach iOS-Version:
+Background execution, two paths depending on the iOS version:
 
-- **iOS 26.1+**: PhotoKit-Hintergrund-Upload
-  (`PHBackgroundResourceUploadExtension`). `enqueueForBackgroundUpload` bäckt den
-  `POST /photos`-Request inkl. frisch erneuertem Token
-  (`APIClient.ensureFreshToken()`) und übergibt ihn dem System. Hinweis: Da es
-  (noch) kein dediziertes Extension-Target gibt, kann der System-Job das Token
-  nicht selbst erneuern – läuft er nach Ablauf, scheitert er still und der
-  Foreground-Drain lädt später erneut hoch.
-- **iOS < 26.1 / Fallback**: `BGProcessingTask`
-  (`dev.fk-encore.F4milPhotos.photoSync`). `register()` wird im `AppDelegate`
-  vor App-Ende registriert; `scheduleNextSyncIfNeeded()` plant beim Wechsel in
-  den Hintergrund den nächsten Lauf (`requiresNetworkConnectivity = true`,
-  `earliestBeginDate` +5 min) und storniert ihn, wenn weder Up- noch Download
-  aktiv ist. Der Handler ruft `runFullSync()`.
+- **iOS 26.1+**: PhotoKit background upload
+  (`PHBackgroundResourceUploadExtension`). `enqueueForBackgroundUpload` bakes
+  the `POST /photos` request including a freshly renewed token
+  (`APIClient.ensureFreshToken()`) and hands it to the system. Note: since there
+  is (not yet) a dedicated extension target, the system job cannot renew the
+  token itself – if it runs after expiry, it fails silently and the
+  foreground drain uploads again later.
+- **iOS < 26.1 / fallback**: `BGProcessingTask`
+  (`dev.fk-encore.F4milPhotos.photoSync`). `register()` is registered in the
+  `AppDelegate` before the end of app launch; `scheduleNextSyncIfNeeded()` schedules the
+  next run on moving to the background (`requiresNetworkConnectivity = true`,
+  `earliestBeginDate` +5 min) and cancels it if neither upload nor download is
+  active. The handler calls `runFullSync()`.
 
-`drainUploadQueue()` ist durch `drainLock` gegen einen zweiten gleichzeitigen
-Drain im selben Prozess geschützt; prozessübergreifend schützt zusätzlich der
-atomare `claimNextPending()`-Schritt.
-
----
-
-## 8. Album-Zuordnung & Auswahl
-
-- **Konfiguration** erfolgt über zwei spiegelbildliche Einstiegspunkte, die
-  **dieselbe** Verknüpfung schreiben — alles dahinter (Upload-Scan,
-  Löschabgleich, Bisync-Download) kennt den Unterschied nicht:
-  1. **iOS-Mediathek → „Verfügbar machen"** (`LibraryBrowserViewModel.makeAvailable`):
-     startet beim iOS-Album, findet/erzeugt das Server-Album.
-  2. **f4mil-Album → „Mit iPhone synchronisieren…"** (`AlbumSyncLinkModel.link`,
-     Issue #812): startet beim **Server-Album** und findet/erzeugt das iOS-Album
-     via `IOSAlbumLocator.findOrCreate(named:)`. Das ist der Weg für **geteilte
-     Alben**: wer Bearbeiten-Freigabe auf ein fremdes Album hat, kann seine
-     eigenen Fotos dort einbringen, ohne vorher ein lokales Album passend
-     umbenennen zu müssen. Erreichbar aus dem Kontextmenü der Albumliste und
-     dem Überlauf-Menü der Album-Detailansicht; erfordert Schreibzugriff, weil
-     alle drei Modi hochladen.
-     Vorbedingungen (`AlbumSyncLinkModel.precondition`, rein & getestet):
-     Schreibzugriff, nicht-leerer Name, Server-Album noch nicht verknüpft, und
-     kein gleichnamiges iOS-Album, das bereits an einem **anderen** Server-Album
-     hängt (sonst würden zwei Verknüpfungen um dasselbe iOS-Album streiten).
-  Die Einstellungen
-  (`SyncSettingsView` → „Foto-Synchronisierung") enthalten nur noch den
-  Haupt­schalter, globale Optionen (Nur WLAN, Screenshots), Status und den
-  manuellen Auslöser — keine Album-Auswahl/-Zuordnung mehr. Nur reguläre
-  Benutzeralben sind verknüpfbar; Smart-Alben werden nicht angezeigt.
-  **Leere Alben werden mit aufgelistet** (Issue #822), damit eine
-  Synchronisierung schon vor dem ersten Foto eingerichtet werden kann; die
-  Rückfrage „alle Fotos / nur neue" bleibt relevant, weil sie den Wasserstand
-  (`creationDate`) setzt und damit über später nachgelegte ältere Fotos
-  entscheidet.
-- **Namensabgleich ist getrimmt** (Issue #849): iOS behält Leerzeichen am
-  Namensende, das Web trimmt beim Anlegen. `AlbumName.normalized/matches`
-  vergleicht beide Seiten getrimmt und sendet den getrimmten Namen an den
-  Server (der ihn zusätzlich in `createAlbumLogic`/`updateAlbumLogic` trimmt),
-  sodass „Urlaub " kein zweites Album neben „Urlaub" mehr erzeugt.
-- **Einmal-Migration `purgeLegacySmartAlbumsIfNeeded()`** (in
-  `PhotoSyncService.sync()`, vor dem Löschabgleich): Alt-Konfigurationen, die
-  über den früheren Settings-Picker ein Smart-Album (Favoriten, Recents, …)
-  referenzierten, sind weder sichtbar noch trennbar und dynamisch unsicher.
-  Die Migration klassifiziert die gespeicherten IDs per PhotoKit
-  (`assetCollectionType == .smartAlbum`) und entfernt Smart-Album-Einträge aus
-  allen Sync-Config-Stores (`purgeAlbumsFromConfig`). Bereits hochgeladene
-  Fotos am Server bleiben unberührt. Der `__all_photos__`-Sentinel bleibt
-  erhalten (kein Smart-Album, legitime Ganze-Mediathek-Wahl).
-- **Geräte-Album → Server-Album**: `PhotoSyncPreferences.albumMappings`
-  (`[iOS-localIdentifier: serverAlbumId]`), gesetzt beim „Verfügbar machen"
-  (Namensabgleich own → shared → neu anlegen).
-- **Bestätigte Zuordnungen**: `confirmedMappingIds` – nur Alben mit einer
-  expliziten Nutzer-Entscheidung werden auto-synchronisiert; unbestätigte
-  werden übersprungen.
-- **„Gesamte Mediathek"**: Sentinel `__all_photos__` – enumeriert alle
-  Bild-Assets direkt; bei gesetztem Sentinel werden Einzelalben ignoriert
-  (kein versehentlicher Doppel-Sync).
-- **Screenshots ausschließen**: `excludeScreenshots` (Default **an**).
-- **Server-Foto-Map**: `serverPhotoMap` (`[serverPhotoId: iOS-localIdentifier]`)
-  wird beim Upload gepflegt und vom Download genutzt, um bereits lokal
-  vorhandene Fotos nicht erneut herunterzuladen. Bleibt bei
-  `resetUploadHistory()` erhalten (strukturelles Wissen).
-- **Sync-Modus je Album** (`albumSyncModes`, Issue #812): `copy`, `sync` oder
-  `bisync`, gewählt beim „Verfügbar machen" in der iOS-Mediathek. Default
-  `copy` (Etappe-2-Verhalten). Bei `sync`/`bisync` läuft vor dem Upload-Scan der
-  Löschabgleich `PhotoSyncService.syncAlbumDeletions()`:
-  aktuelle iOS-Album-Mitgliedschaft (nur `localIdentifier`) vs.
-  `GET /albums/:id/photos`; Server-Fotos, die über `serverPhotoMap` von
-  diesem Gerät stammen und deren Quell-Asset das iOS-Album verlassen hat,
-  werden via `POST /albums/photos/batch` (`action: "remove"`) aus dem
-  Album entfernt. **Nicht-destruktiv**: nur die Album-Zuordnung wird
-  gelöst, das Foto bleibt auf dem Server; Web-Uploads (nicht in
-  `serverPhotoMap`) werden nie angefasst; ein nicht auflösbares Album wird
-  übersprungen (kein versehentliches Leeren).
-- **Bisync** (Etappe 4): `bisync` = `sync` in Upload-Richtung **plus** die
-  Download-Hälfte fürs selbe Album-Paar. `PhotoSyncPreferences.bisyncServerAlbumIds()`
-  liefert die Server-Album-IDs der bisync-Alben; `PhotoDownloadService` bezieht
-  sie in den Download-Lauf ein — **auch wenn „Automatisch herunterladen" aus
-  ist**. Damit iOS-seitiges Entfernen nicht unnötig in `F4mil Trash` landet,
-  ruft der Delete-up-Pass `DownloadSyncPreferences.forgetDownloadedPhotos()`
-  auf, sodass die Download-Seite diese Fotos nicht als „server-seitig gelöscht"
-  interpretiert. **Zusätzliches Delete-up-Gate bei Bisync**: Ein Server-Foto
-  wird nur entfernt, wenn es auch im Download-Tracking des Album-Paars
-  registriert ist (`downloadedPhotos[serverAlbumId]`). Die globale
-  `serverPhotoMap` allein reicht nicht — ein von diesem Gerät (z. B. über
-  „Gesamte Mediathek") hochgeladenes Foto, das am Server ins Album aufgenommen
-  wurde, war nie im iOS-Album; sein Fehlen dort ist keine lokale Löschung,
-  sondern eine noch nicht heruntergesynchte Server-Aufnahme. Das iOS-Zielalbum ist dasselbe wie beim Upload (Download nutzt
-  `getOrCreateIOSAlbum(named:)`, Namensgleichheit durch „Verfügbar machen").
-- **Entzogene Freigaben** (`revokedLinkIds`, Issue #812): Eine Verknüpfung kann
-  auf ein **fremdes** Album zeigen. Wird die Freigabe entzogen, auf Nur-Lesen
-  herabgestuft oder das Album gelöscht, würde der Upload sonst bei jedem Lauf
-  aufs Neue mit 403/404 scheitern. `PhotoSyncService.reconcileLinkAccess()` holt
-  darum zu Beginn jedes Laufs **ein** `GET /albums` und parkt alle
-  Verknüpfungen, deren Ziel nicht (mehr) beschreibbar ist
-  (`PhotoSyncPreferences.computeRevokedLinks`, rein & getestet). Geparkte
-  Verknüpfungen werden vom Upload-Scan (`fetchAssetsSync`), vom Löschabgleich
-  und von `bisyncServerAlbumIds()` übersprungen; die Mediathek zeigt das Badge
-  „kein Zugriff" samt Erklärung. Die Menge wird **jedes Mal neu berechnet**,
-  also reaktiviert sich eine Verknüpfung von selbst, sobald der Zugriff zurück
-  ist. Ein fehlgeschlagener Request lässt die gespeicherte Menge bewusst
-  unverändert — ein Netzwerkfehler darf nie als Freigabe-Entzug durchgehen.
-- **Einmal-Kopie einzelner Fotos** (`LibraryPhotoCopyModel`, Issue #812
-  Etappe 5): „Nach f4mil kopieren…" im Kontextmenü des Mediathek-Grids und in
-  der Vollbildansicht. Bewusst **keine** dauerhafte Beziehung — es wird nichts
-  in die Verknüpfungs-Stores geschrieben, und das Queue-Item trägt **kein**
-  `sourceIosAlbumId`, damit die Einmal-Kopie keinen Album-Wasserstand
-  vorschiebt und so Fotos aus dem echten Sync des Albums verschluckt.
-  Zielauswahl: alle Alben mit Schreibzugriff (Nur-Lesen-Freigaben würden
-  serverseitig abgelehnt). Mehrfaches Kopieren ist harmlos: der Server
-  dedupliziert über `full_hash` und hängt das vorhandene Foto nur ans Album.
+`drainUploadQueue()` is protected by `drainLock` against a second simultaneous
+drain in the same process; across processes, the atomic
+`claimNextPending()` step additionally protects.
 
 ---
 
-## 9. Download-Sync (Zwei-Wege)
+## 8. Album Mapping & Selection
 
-`PhotoDownloadService.sync()` lädt Server-Alben aufs Gerät. Es gibt **keine
-eigenständige Download-UI mehr** — der Download läuft nur noch als Hälfte des
-Bisync-Modus. Die `DownloadSyncPreferences` (inkl. `downloadEnabled`, Filter)
-bleiben intern erhalten; `downloadEnabled` ist standardmäßig aus und wird nicht
-mehr per UI umgeschaltet.
-
-- Vorbedingungen: `downloadEnabled` **oder** mindestens ein Bisync-Album
-  (`bisyncServerAlbumIds()`), Netzwerk-Gate (eigener `wifiOnly`-Schalter),
-  Album-Menge = `selectedServerAlbumIds ∪ bisyncServerAlbumIds` nicht leer,
-  Foto-Berechtigung `readWrite` (`.authorized`/`.limited`).
-- **Fast-Skip per ETag**: `GET /photos/index` mit `If-None-Match`. Ein **304**
-  bedeutet „nichts geändert" und überspringt den Album-Walk. Der erste Lauf
-  (ohne ETag) macht den vollen Walk und speichert das ETag. Der serverseitige
-  Fingerprint (`getPhotoIndexFingerprint`) umfasst neben den eigenen Fotos
-  auch die **Album-Mitgliedschaften** (MAX `added_at` + COUNT über
-  `album_photos`) und die Foto-`updated_at` der Mitglieder in allen sichtbaren
-  Alben (eigene + geteilte) — sonst würde das Aufnehmen eines bestehenden
-  Fotos in ein Album (nur ein `album_photos`-Insert) das ETag nicht ändern
-  und der 304-Fast-Skip würde server-seitige Album-Änderungen verstecken.
-- Eigener `F4mil Trash`-Mechanismus zum Verschieben gelöschter Fotos (nur bei
-  `readWrite`-Zugriff).
-- Eigener `NWPathMonitor` mit derselben First-Path-Await-Logik wie der Upload.
-
-Einstellungen in `DownloadSyncPreferences` (`download.enabled`,
-`download.wifiOnly`, ausgewählte Server-Alben, `lastIndexETag` …).
+- **Configuration** happens through two mirror-image entry points that write
+  the **same** link — everything behind it (upload scan,
+  deletion reconciliation, bisync download) does not know the difference:
+  1. **iOS media library → "Verfügbar machen"** (make available)
+     (`LibraryBrowserViewModel.makeAvailable`): starts at the iOS album,
+     finds/creates the server album.
+  2. **f4mil album → "Mit iPhone synchronisieren…"** (sync with iPhone)
+     (`AlbumSyncLinkModel.link`, issue #812): starts at the **server album**
+     and finds/creates the iOS album via
+     `IOSAlbumLocator.findOrCreate(named:)`. This is the way for **shared
+     albums**: anyone with edit permission on someone else's album can
+     contribute their own photos there without first having to rename a local
+     album to match. Reachable from the context menu of the album list and
+     the overflow menu of the album detail view; requires write access, because
+     all three modes upload.
+     Preconditions (`AlbumSyncLinkModel.precondition`, pure & tested):
+     write access, non-empty name, server album not yet linked, and
+     no iOS album of the same name that is already attached to a **different**
+     server album (otherwise two links would fight over the same iOS album).
+  The settings
+  (`SyncSettingsView` → "Foto-Synchronisierung" / photo synchronization) now
+  contain only the main switch, global options (Wi-Fi only, screenshots),
+  status and the manual trigger — no album selection/mapping anymore. Only
+  regular user albums can be linked; smart albums are not shown.
+  **Empty albums are listed too** (issue #822), so that a
+  synchronization can be set up before the first photo; the
+  prompt "alle Fotos / nur neue" (all photos / only new) remains relevant,
+  because it sets the watermark (`creationDate`) and thereby decides about
+  older photos added later.
+- **Name matching is trimmed** (issue #849): iOS keeps trailing whitespace in
+  a name, the web trims on creation. `AlbumName.normalized/matches`
+  compares both sides trimmed and sends the trimmed name to the
+  server (which additionally trims it in `createAlbumLogic`/`updateAlbumLogic`),
+  so that "Urlaub " (vacation) no longer creates a second album next to "Urlaub".
+- **One-time migration `purgeLegacySmartAlbumsIfNeeded()`** (in
+  `PhotoSyncService.sync()`, before the deletion reconciliation): legacy configurations
+  that referenced a smart album (favorites, recents, …) via the former settings picker
+  are neither visible nor unlinkable and dynamically unsafe.
+  The migration classifies the stored IDs via PhotoKit
+  (`assetCollectionType == .smartAlbum`) and removes smart album entries from
+  all sync config stores (`purgeAlbumsFromConfig`). Photos already uploaded
+  to the server remain untouched. The `__all_photos__` sentinel is kept
+  (not a smart album, a legitimate whole-library choice).
+- **Device album → server album**: `PhotoSyncPreferences.albumMappings`
+  (`[iOS-localIdentifier: serverAlbumId]`), set on "Verfügbar machen"
+  (name matching own → shared → create new).
+- **Confirmed mappings**: `confirmedMappingIds` – only albums with an
+  explicit user decision are auto-synchronized; unconfirmed ones
+  are skipped.
+- **"Gesamte Mediathek"** (entire media library): sentinel `__all_photos__` –
+  enumerates all image assets directly; when the sentinel is set, individual
+  albums are ignored (no accidental double sync).
+- **Exclude screenshots**: `excludeScreenshots` (default **on**).
+- **Server photo map**: `serverPhotoMap` (`[serverPhotoId: iOS-localIdentifier]`)
+  is maintained on upload and used by the download to avoid downloading
+  photos that already exist locally again. Is retained on
+  `resetUploadHistory()` (structural knowledge).
+- **Sync mode per album** (`albumSyncModes`, issue #812): `copy`, `sync` or
+  `bisync`, chosen on "Verfügbar machen" in the iOS media library. Default
+  `copy` (stage 2 behavior). For `sync`/`bisync`, the deletion reconciliation
+  `PhotoSyncService.syncAlbumDeletions()` runs before the upload scan:
+  current iOS album membership (`localIdentifier` only) vs.
+  `GET /albums/:id/photos`; server photos that originate from this device via
+  `serverPhotoMap` and whose source asset has left the iOS album
+  are removed from the album via `POST /albums/photos/batch` (`action: "remove"`).
+  **Non-destructive**: only the album assignment is
+  removed, the photo stays on the server; web uploads (not in
+  `serverPhotoMap`) are never touched; an unresolvable album is
+  skipped (no accidental emptying).
+- **Bisync** (stage 4): `bisync` = `sync` in the upload direction **plus** the
+  download half for the same album pair. `PhotoSyncPreferences.bisyncServerAlbumIds()`
+  returns the server album IDs of the bisync albums; `PhotoDownloadService` includes
+  them in the download run — **even if "Automatisch herunterladen"
+  (download automatically) is off**. So that removal on the iOS side does not
+  needlessly end up in `F4mil Trash`, the delete-up pass calls
+  `DownloadSyncPreferences.forgetDownloadedPhotos()`, so that the download side
+  does not interpret these photos as "deleted on the server". **Additional
+  delete-up gate for bisync**: A server photo is only removed if it is also
+  registered in the download tracking of the album pair
+  (`downloadedPhotos[serverAlbumId]`). The global `serverPhotoMap` alone is
+  not enough — a photo uploaded from this device (e.g. via "Gesamte Mediathek")
+  that was added to the album on the server was never in the iOS album; its
+  absence there is not a local deletion, but a server addition that has not yet
+  been synced down. The iOS target album is the same as for the upload (the
+  download uses `getOrCreateIOSAlbum(named:)`, name equality through
+  "Verfügbar machen").
+- **Revoked shares** (`revokedLinkIds`, issue #812): A link can
+  point to someone **else's** album. If the share is revoked, downgraded to
+  read-only or the album deleted, the upload would otherwise fail
+  with 403/404 again on every run. `PhotoSyncService.reconcileLinkAccess()`
+  therefore fetches **one** `GET /albums` at the start of each run and parks all
+  links whose target is not (or no longer) writable
+  (`PhotoSyncPreferences.computeRevokedLinks`, pure & tested). Parked
+  links are skipped by the upload scan (`fetchAssetsSync`), by the deletion
+  reconciliation and by `bisyncServerAlbumIds()`; the media library shows the
+  badge "kein Zugriff" (no access) along with an explanation. The set is
+  **recomputed every time**, so a link reactivates itself as soon as access
+  is back. A failed request deliberately leaves the stored set
+  unchanged — a network error must never pass as a share revocation.
+- **One-time copy of individual photos** (`LibraryPhotoCopyModel`, issue #812
+  stage 5): "Nach f4mil kopieren…" (copy to f4mil) in the context menu of the
+  media library grid and in the fullscreen view. Deliberately **no** permanent
+  relationship — nothing is written to the link stores, and the queue item
+  carries **no** `sourceIosAlbumId`, so that the one-time copy does not advance
+  an album watermark and thereby swallow photos from the album's real sync.
+  Target selection: all albums with write access (read-only shares would be
+  rejected server-side). Copying multiple times is harmless: the server
+  deduplicates via `full_hash` and only attaches the existing photo to the album.
 
 ---
 
-## 10. Share-Extension & Token-Sharing
+## 9. Download Sync (Two-Way)
 
-- Die Share-Extension legt hochzuladende Fotos als `UploadQueueItem`
-  (mit `tempFileURL`) in dieselbe `UploadQueue` → die Haupt-App lädt sie beim
-  nächsten Drain hoch.
-- **`SharedStorage`** (App-Group-UserDefaults) spiegelt Access-/Refresh-Token,
-  Token-Ablauf (`tokenExpiryKey`, Epoch-Sekunden) und Server-URL, damit die
-  Extension API-Calls ohne Zugriff auf die Keychain der Haupt-App machen und das
-  Token selbst erneuern kann. `AuthManager.saveTokens`/`restoreSession` halten
-  diese Spiegelung aktuell.
-- Der `ShareHasher.imageDataHash` der Extension muss **byte-identisch** zum
-  `PhotoHasher.imageDataHash` der Haupt-App bleiben, damit der Dedup greift.
+`PhotoDownloadService.sync()` downloads server albums to the device. There is **no
+standalone download UI anymore** — the download only runs as a half of the
+bisync mode. The `DownloadSyncPreferences` (including `downloadEnabled`, filters)
+are retained internally; `downloadEnabled` is off by default and is no
+longer toggled via the UI.
+
+- Preconditions: `downloadEnabled` **or** at least one bisync album
+  (`bisyncServerAlbumIds()`), network gate (own `wifiOnly` switch),
+  album set = `selectedServerAlbumIds ∪ bisyncServerAlbumIds` not empty,
+  photo permission `readWrite` (`.authorized`/`.limited`).
+- **Fast skip via ETag**: `GET /photos/index` with `If-None-Match`. A **304**
+  means "nothing changed" and skips the album walk. The first run
+  (without an ETag) does the full walk and stores the ETag. The server-side
+  fingerprint (`getPhotoIndexFingerprint`) includes, besides the own photos,
+  also the **album memberships** (MAX `added_at` + COUNT over
+  `album_photos`) and the photo `updated_at` of the members in all visible
+  albums (own + shared) — otherwise adding an existing photo to an album
+  (just an `album_photos` insert) would not change the ETag
+  and the 304 fast skip would hide server-side album changes.
+- Own `F4mil Trash` mechanism for moving deleted photos (only with
+  `readWrite` access).
+- Own `NWPathMonitor` with the same first-path-await logic as the upload.
+
+Settings in `DownloadSyncPreferences` (`download.enabled`,
+`download.wifiOnly`, selected server albums, `lastIndexETag` …).
 
 ---
 
-## 11. Fehlerbehandlung & Wiederholung
+## 10. Share Extension & Token Sharing
 
-- Transiente `URLError`/Cancellation-Fehler werden gemustert
-  (`isTransientErrorMessage`) und automatisch erneut in die Queue gelegt.
-- Items, deren Asset-Bytes nicht hashbar sind (iCloud nicht verfügbar), werden
-  übersprungen und beim nächsten Lauf erneut versucht (kein Watermark-Vorlauf).
-- `retryCount`/`lastError` je Item; die UI bietet „Alle erneut" / „Alle löschen".
+- The share extension puts photos to be uploaded as `UploadQueueItem`
+  (with `tempFileURL`) into the same `UploadQueue` → the main app uploads them
+  on the next drain.
+- **`SharedStorage`** (app group UserDefaults) mirrors access/refresh token,
+  token expiry (`tokenExpiryKey`, epoch seconds) and server URL, so that the
+  extension makes API calls without access to the main app's keychain and can
+  renew the token itself. `AuthManager.saveTokens`/`restoreSession` keep
+  this mirroring up to date.
+- The extension's `ShareHasher.imageDataHash` must remain **byte-identical** to
+  the main app's `PhotoHasher.imageDataHash` so that dedup works.
 
 ---
 
-## 12. Bekannte Grenzen / offen
+## 11. Error Handling & Retry
 
-- Kein dediziertes `PHBackgroundResourceUploadExtension`-Target → System-Upload
-  kann das Access-Token nicht selbst erneuern (siehe §7).
-- Kein „Speicher freigeben" (bereits gesicherte Originale vom Gerät entfernen) –
-  geplant, siehe [`ios-app.md`](./ios-app.md) §5 / Issue-Tracker.
-- Rein fotobasiert; Live Photos / Video werden (noch) nicht gesichert.
+- Transient `URLError`/cancellation errors are classified
+  (`isTransientErrorMessage`) and automatically put back into the queue.
+- Items whose asset bytes cannot be hashed (iCloud unavailable) are
+  skipped and retried on the next run (no watermark advance).
+- `retryCount`/`lastError` per item; the UI offers "Alle erneut" (retry all) /
+  "Alle löschen" (delete all).
+
+---
+
+## 12. Known Limits / Open
+
+- No dedicated `PHBackgroundResourceUploadExtension` target → system upload
+  cannot renew the access token itself (see §7).
+- No "free up storage" (remove already backed-up originals from the device) –
+  planned, see [`ios-app.md`](./ios-app.md) §5 / issue tracker.
+- Purely photo-based; Live Photos / video are (not yet) backed up.

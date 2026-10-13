@@ -1,65 +1,64 @@
-# Rückblick-Musik
+# Recap Music
 
-Rückblicke spielen automatisch Hintergrundmusik, sobald Audiodateien im
-Musik-Ordner liegen. Ohne Dateien laufen Rückblicke einfach stumm — es ist
-keine weitere Konfiguration nötig.
+Recaps automatically play background music as soon as audio files are present
+in the music folder. Without files, recaps simply play silently — no further
+configuration is needed.
 
-## Ordner-Struktur
+## Folder Structure
 
-Der Ordner wird über die Umgebungsvariable `RECAPS_MUSIC_DIR` konfiguriert
-(Default: `/mnt/data/recap-music`). Darin gibt es vier Stimmungs-Unterordner:
+The folder is configured via the environment variable `RECAPS_MUSIC_DIR`
+(default: `/mnt/data/recap-music`). It contains four mood subfolders:
 
 ```
 recap-music/
-├── upbeat/      # treibend, fröhlich   → Reisen, „Kürzlich“-Highlights
-├── warm/        # warm, herzlich       → Personen-Rückblicke
-├── nostalgic/   # nostalgisch, ruhig   → „Heute vor X Jahren“
-└── calm/        # ruhig, atmosphärisch → Orte, Themen
+├── upbeat/      # driving, cheerful    → trips, "Kürzlich" (recent) highlights
+├── warm/        # warm, heartfelt      → person recaps
+├── nostalgic/   # nostalgic, calm      → "Heute vor X Jahren" (X years ago today)
+└── calm/        # calm, atmospheric    → places, topics
 ```
 
-Einfach Dateien hineinlegen — mehr ist nicht zu tun:
+Just drop files in — nothing else to do:
 
-- Unterstützte Formate: `.mp3`, `.m4a`, `.aac`, `.ogg`, `.wav`
-  (MP3 oder M4A empfohlen, das spielen Web und iOS ohne Sonderfälle).
-- Der Track-Titel wird aus dem Dateinamen abgeleitet:
-  `01_sunny-road.mp3` → „Sunny Road“ (führende Nummern werden entfernt).
-- Versteckte Dateien (`.foo.mp3`) und Nicht-Audio-Dateien werden ignoriert.
-- Empfohlen: instrumentale Stücke mit 2–3 Minuten Länge; der Player loopt.
-  Auf einheitliche Lautstärke achten (ggf. vorher normalisieren, z. B. mit
+- Supported formats: `.mp3`, `.m4a`, `.aac`, `.ogg`, `.wav`
+  (MP3 or M4A recommended; web and iOS play these without special cases).
+- The track title is derived from the file name:
+  `01_sunny-road.mp3` → "Sunny Road" (leading numbers are stripped).
+- Hidden files (`.foo.mp3`) and non-audio files are ignored.
+- Recommended: instrumental pieces 2–3 minutes long; the player loops.
+  Watch for consistent loudness (normalize beforehand if needed, e.g. with
   `ffmpeg -i in.mp3 -filter:a loudnorm out.mp3`).
 
-## Wie die Auswahl funktioniert
+## How the Selection Works
 
-- Jede Rückblick-Art ist fest einer Stimmung zugeordnet (siehe oben).
-- Pro Rückblick wird deterministisch ein Track aus dem passenden
-  Stimmungs-Ordner gewählt — derselbe Rückblick bekommt bei jedem Abspielen
-  denselben Track.
-- Ist ein Stimmungs-Ordner leer, wird auf den Gesamtbestand ausgewichen.
-- Der Player (Web und iOS) blendet die Musik sanft ein und aus, koppelt sie
-  an Pause/Weiter und hat einen Stummschalt-Knopf.
+- Each recap type is permanently assigned to a mood (see above).
+- For each recap, one track is chosen deterministically from the matching
+  mood folder — the same recap gets the same track on every playback.
+- If a mood folder is empty, the selection falls back to the whole pool.
+- The player (web and iOS) fades the music in and out smoothly, ties it to
+  pause/resume, and has a mute button.
 
-## Woher Musik nehmen? (Lizenz!)
+## Where to Get Music (License!)
 
-Nur Musik verwenden, deren Lizenz das Einbetten in eine eigene Anwendung
-erlaubt. Bewährte Quellen:
+Only use music whose license allows embedding it in your own application.
+Proven sources:
 
-- **Pixabay Music** (https://pixabay.com/music/) — kostenlos, kommerzielle
-  Nutzung erlaubt, keine Namensnennung nötig. Beste erste Anlaufstelle.
-- **Free Music Archive** (https://freemusicarchive.org/) — Lizenz je Track
-  prüfen; CC-BY erfordert Namensnennung.
+- **Pixabay Music** (https://pixabay.com/music/) — free, commercial use
+  allowed, no attribution required. Best first stop.
+- **Free Music Archive** (https://freemusicarchive.org/) — check the license
+  per track; CC-BY requires attribution.
 - **Incompetech / Kevin MacLeod** (https://incompetech.com/) — CC-BY.
 
-**Nicht** geeignet: Abo-Dienste (Epidemic Sound, Artlist — Lizenz erlischt
-mit dem Abo), YouTube Audio Library (nur für YouTube-Videos lizenziert),
-gekaufte/gestreamte Musik aus iTunes/Spotify o. ä.
+**Not** suitable: subscription services (Epidemic Sound, Artlist — the
+license expires with the subscription), YouTube Audio Library (licensed only
+for YouTube videos), purchased/streamed music from iTunes/Spotify or the like.
 
-Tipp: Pro Track eine Zeile mit Quelle und Lizenz in einer `LICENSES.txt`
-im Musik-Ordner festhalten — die Datei wird ignoriert und stört nicht.
+Tip: record one line per track with source and license in a `LICENSES.txt`
+in the music folder — the file is ignored and does no harm.
 
 ## API
 
-- `GET /recaps-music` — listet alle Tracks (`id`, `mood`, `title`, `url`).
-- `GET /recaps-music/file/<mood>/<datei>` — streamt einen Track
-  (mit HTTP-Range-Support für Safari/AVPlayer).
-- `GET /recaps/:id` — liefert im Feld `music` den vorgeschlagenen Track
-  für den Player.
+- `GET /recaps-music` — lists all tracks (`id`, `mood`, `title`, `url`).
+- `GET /recaps-music/file/<mood>/<file>` — streams a track
+  (with HTTP range support for Safari/AVPlayer).
+- `GET /recaps/:id` — returns the suggested track for the player in the
+  `music` field.

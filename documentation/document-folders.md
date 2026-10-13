@@ -1,285 +1,282 @@
-# Dokumenten-Ordner-Struktur & Gruppenkonzept (ehem. Haushalte)
+# Document folder structure & group concept (formerly households)
 
-Dieses Dokument beschreibt, wie hochgeladene Dokumente auf der Platte unter
-`DOCUMENTS_DIR` abgelegt werden und wie Dokumente zwischen Einzelpersonen und
-Gruppen (z. B. Familien oder Haushalts-Teilbereichen) geteilt werden können.
+This document describes how uploaded documents are stored on disk under
+`DOCUMENTS_DIR` and how documents can be shared between individuals and groups
+(e.g. families or sub-areas of a household).
 
-Status: implementiert in Migration `0036_documents_households`; die
-Korrespondenten-Ebene (Abschnitt 3a) kam in Migration `0130`/`0131` dazu.
-
----
-
-## 1. Ziele
-
-- **Durchstöberbar im Dateisystem**: Ein Anwender soll auch ohne die Web-App
-  auf einem File-Share direkt zur gesuchten Rechnung bzw. zum Bescheid
-  navigieren können.
-- **Sprechende Dateinamen**: `[YYYY_][#dokumentnummer_]<absender>_<titel>__<hash8>.pdf`
-  statt opaker SHA-256-Shards.
-- **Umzug bei Reklassifikation**: Ändert sich die Kategorie, das Datum, der
-  Absender oder die Sichtbarkeit, wandert die Datei automatisch an ihren neuen
-  kanonischen Platz.
-- **Pro-Person-Isolation**: Private Dokumente eines Nutzers sind für andere
-  nicht sichtbar — weder im UI noch im Dateisystem.
-- **Gruppen-Pool**: Eine gemeinsame Gruppe (z. B. eine Familie oder nur die Eltern) kann eine
-  gemeinsame Dokumentenablage verwenden, damit das Elternteil, das die Post aus
-  dem Briefkasten geholt hat, nicht exklusiver Eigentümer der eingescannten
-  Bescheide bleibt.
-- **Steuer-Sicht per Hardlink**: Steuerrelevante Dokumente erscheinen zusätzlich
-  unter `_steuer/<jahr>/<anlage>/` als Hardlink auf die kanonische Datei — ohne
-  die Bytes zu verdoppeln.
-- **Nach Korrespondent gruppiert**: Innerhalb einer Kategorie liegen alle
-  Dokumente desselben Absenders (und, wo erkennbar, desselben Vertrags)
-  zusammen in einem Ordner — statt nur nach Jahr verstreut. Siehe Abschnitt 3a.
+Status: implemented in migration `0036_documents_households`; the
+correspondent level (section 3a) was added in migration `0130`/`0131`.
 
 ---
 
-## 2. Sichtbarkeitsmodell
+## 1. Goals
 
-Ein Dokument besitzt genau eine Sichtbarkeit:
+- **Browsable in the file system**: A user should be able to navigate directly
+  to the invoice or notice they are looking for on a file share, even without
+  the web app.
+- **Descriptive file names**: `[YYYY_][#documentnumber_]<sender>_<title>__<hash8>.pdf`
+  instead of opaque SHA-256 shards.
+- **Move on reclassification**: If the category, the date, the sender or the
+  visibility changes, the file automatically moves to its new canonical place.
+- **Per-person isolation**: A user's private documents are not visible to
+  others — neither in the UI nor in the file system.
+- **Group pool**: A shared group (e.g. a family or just the parents) can use a
+  shared document store, so that the parent who picked up the mail from the
+  mailbox does not remain the exclusive owner of the scanned notices.
+- **Tax view via hardlink**: Tax-relevant documents additionally appear under
+  `_steuer/<year>/<anlage>/` as a hardlink to the canonical file — without
+  duplicating the bytes.
+- **Grouped by correspondent**: Within a category, all documents from the same
+  sender (and, where recognizable, the same contract) lie together in one
+  folder — instead of being scattered by year only. See section 3a.
 
-| `visibility`  | `user_id`     | `group_id`     | Wer sieht es?                            |
+---
+
+## 2. Visibility model
+
+A document has exactly one visibility:
+
+| `visibility`  | `user_id`     | `group_id`     | Who sees it?                             |
 |---------------|---------------|----------------|------------------------------------------|
-| `private`     | Uploader      | `NULL`         | nur der Uploader                         |
-| `group`       | Uploader      | Gruppen-ID     | jedes Mitglied dieser Gruppe             |
+| `private`     | uploader      | `NULL`         | only the uploader                        |
+| `group`       | uploader      | group ID       | every member of this group               |
 
-Der Uploader (`user_id`) bleibt in beiden Fällen erhalten — auch
-Gruppendokumente "gehören" nominell der Person, die sie eingescannt hat.
-Admin-Mutationen (Löschen, Sichtbarkeit umschalten) dürfen der Uploader *oder*
-ein Gruppen-Owner — siehe `loadAdministrableDocument` in
-`documents/visibility.ts`.
+The uploader (`user_id`) is retained in both cases — group documents also
+nominally "belong" to the person who scanned them. Admin mutations (delete,
+switch visibility) are allowed for the uploader *or* a group owner — see
+`loadAdministrableDocument` in `documents/visibility.ts`.
 
-Die Datenbank setzt das Konsistenzregel als CHECK-Constraint durch:
+The database enforces the consistency rule as a CHECK constraint:
 `(visibility='private' AND group_id IS NULL) OR (visibility='group'
 AND group_id IS NOT NULL)`.
 
-Das Löschen einer Gruppe ist durch `ON DELETE RESTRICT` blockiert, solange
-noch Dokumente daran hängen — damit niemand versehentlich Gruppendokumente
-verwaist.
+Deleting a group is blocked by `ON DELETE RESTRICT` as long as documents are
+still attached to it — so that nobody accidentally orphans group documents.
 
-### Gruppen-Rollen
+### Group roles
 
-- `owner` — darf Mitglieder hinzufügen/entfernen, die Gruppe umbenennen,
-  Dokumente anderer Mitglieder löschen.
-- `member` — sieht alle Gruppendokumente, darf eigene hochladen, darf aber
-  keine fremden Dokumente löschen.
+- `owner` — may add/remove members, rename the group, delete documents of other
+  members.
+- `member` — sees all group documents, may upload their own, but may not delete
+  documents of others.
 
 ---
 
-## 3. Ordner-Schema
+## 3. Folder scheme
 
 ```
 DOCUMENTS_DIR/
-├── <user-login-slug>/                                  ← private Dokumente
-│   ├── _inbox/YYYY-MM/                                 ← noch nicht klassifiziert
-│   ├── <category-path>/<korrespondent>/*.pdf           ← klassifiziert
-│   └── _steuer/<year>/<anlage>/*.pdf                   ← Hardlinks in Steuer-Sicht
-└── _gruppe/<group-slug>/                            ← Gruppendokumente
+├── <user-login-slug>/                                  ← private documents
+│   ├── _inbox/YYYY-MM/                                 ← not yet classified
+│   ├── <category-path>/<correspondent>/*.pdf           ← classified
+│   └── _steuer/<year>/<anlage>/*.pdf                   ← hardlinks in tax view
+└── _gruppe/<group-slug>/                            ← group documents
     ├── _inbox/YYYY-MM/
-    ├── <category-path>/<korrespondent>/*.pdf
+    ├── <category-path>/<correspondent>/*.pdf
     └── _steuer/<year>/<anlage>/*.pdf
 ```
 
-`<korrespondent>` ist das in Abschnitt 3a beschriebene Ordner-Segment; die
-`_steuer/`-Sicht bleibt bewusst nach Jahr/Anlage organisiert, ohne
-Korrespondenten-Ebene.
+`<correspondent>` is the folder segment described in section 3a; the
+`_steuer/` view is deliberately kept organized by year/anlage, without a
+correspondent level.
 
-Die kanonische Ablage besitzt keinen zusätzlichen Jahresordner. Das Jahr steht
-bereits am Anfang des sprechenden Dateinamens; Dokumente verschiedener Jahre
-liegen dadurch gemeinsam im Ordner ihres Korrespondenten und bleiben trotzdem
-lexikografisch nach Jahr gruppiert.
+The canonical storage has no additional year folder. The year is already at the
+beginning of the descriptive file name; documents of different years therefore
+lie together in the folder of their correspondent and are still grouped
+lexicographically by year.
 
-Einzelne Kategorien können in der Taxonomie eine zusätzliche
-`filesystemGrouping`-Dimension definieren. Sie wird direkt hinter der
-konfigurierten Kategorie in den Pfad eingefügt und derzeit aus den am Dokument
-verknüpften Bezugspersonen gebildet. Damit entsteht beispielsweise:
+Individual categories can define an additional `filesystemGrouping` dimension
+in the taxonomy. It is inserted into the path directly after the configured
+category and is currently formed from the subject persons linked to the
+document. This yields, for example:
 
 ```
 betreuung/erika-mustermann/betreuung-rechenschaftsbericht/amtsgericht-augsburg/*.pdf
 ```
 
-Aktuell sind folgende Wurzelkategorien konfiguriert:
+The following root categories are currently configured:
 
-- `betreuung`: Die Person ist für die Ablage zwingend. Ohne Zuordnung wird
-  `_ohne-betreuten`, bei mehreren Personen `_mehrere-betreute` verwendet.
-- `gesundheit`, `familie`, `vereine`, `bildung`: Die Personendimension wird nur ergänzt,
-  wenn eine Bezugsperson verknüpft ist. Eigene Dokumente behalten daher den
-  bisherigen kurzen Pfad. Mehrere Personen landen unter
+- `betreuung`: The person is mandatory for storage. Without an assignment,
+  `_ohne-betreuten` is used, with several persons `_mehrere-betreute`.
+- `gesundheit`, `familie`, `vereine`, `bildung`: The person dimension is only
+  added if a subject person is linked. The user's own documents therefore keep
+  the previous short path. Several persons end up under
   `_mehrere-bezugspersonen`.
 
-Der Personenname wird mit demselben sicheren Slug-Verfahren wie andere
-Ordnersegmente normalisiert. Zuordnung, Entfernen oder Umbenennen einer
-Bezugsperson löst eine erneute Ablage des betroffenen Dokuments aus. Welche
-Kategorien gruppieren, ist nicht im Path-Builder hart codiert, sondern wird
-zentral in `documents/taxonomy.ts` festgelegt.
+The person's name is normalized with the same safe slug procedure as other
+folder segments. Assigning, removing or renaming a subject person triggers a
+renewed filing of the affected document. Which categories group is not
+hard-coded in the path builder but is defined centrally in
+`documents/taxonomy.ts`.
 
-Der `<user-login-slug>` wird aus dem Local-Part der E-Mail-Adresse abgeleitet
-(`max.mueller@example.com` → `max-mueller`). Für rein numerische oder leere
-Local-Parts fällt der Algorithmus auf `user-<id>` zurück.
+The `<user-login-slug>` is derived from the local part of the e-mail address
+(`max.mueller@example.com` → `max-mueller`). For purely numeric or empty local
+parts the algorithm falls back to `user-<id>`.
 
-Der `<group-slug>` wird beim Anlegen aus dem Gruppennamen erzeugt und
-ist im Schema `UNIQUE`.
+The `<group-slug>` is generated from the group name on creation and is
+`UNIQUE` in the schema.
 
-Das Dateinamens-Schema ist:
+The file name scheme is:
 
 ```
-[YYYY_][#dokumentnummer_]<absender-slug>_<titel-slug>__<hash8>.pdf
+[YYYY_][#documentnumber_]<sender-slug>_<title-slug>__<hash8>.pdf
 ```
 
-Der Jahrespräfix stammt aus dem Dokumentdatum (`doc_date`). Wenn kein
-Dokumentdatum vorhanden ist, entfällt der Jahrespräfix und stattdessen bleibt
-das Upload-Datum `YYYY-MM-DD` als Fallback-Bestandteil im Dateinamen. Die
-Dokumentnummer wird mit `#` vorangestellt, sofern sie vorhanden ist.
+The year prefix comes from the document date (`doc_date`). If there is no
+document date, the year prefix is omitted and instead the upload date
+`YYYY-MM-DD` remains as a fallback component in the file name. The document
+number is prefixed with `#` if present.
 
-Beispiele:
+Examples:
 
 - `2026_#2661160_finanzamt-muenchen_bescheid__a1b2c3d4.pdf`
 - `2026_finanzamt-muenchen_bescheid__a1b2c3d4.pdf`
 - `#2661160_2026-04-17_finanzamt-muenchen_bescheid__a1b2c3d4.pdf`
 
-Fehlende Bestandteile entfallen (Dokument ohne Absender →
-`2026_<titel>__<hash8>.pdf`). Das `__<hash8>`-Suffix sind die ersten 8
-hex-Stellen des SHA-256 und garantiert Eindeutigkeit auch wenn zwei Dokumente
-vom selben Absender im selben Jahr mit demselben Titel hochgeladen werden.
+Missing components are omitted (document without sender →
+`2026_<title>__<hash8>.pdf`). The `__<hash8>` suffix is the first 8 hex digits
+of the SHA-256 and guarantees uniqueness even if two documents from the same
+sender in the same year with the same title are uploaded.
 
 ---
 
-## 3a. Korrespondenten-Ebene
+## 3a. Correspondent level
 
-Der `sender`, den die KI-Klassifikation extrahiert, ist Freitext und für sich
-genommen zu instabil, um als Ordnername zu dienen — "Janitos",
-"Janitos Versicherung AG" und "Janitos AG" würden sonst drei verschiedene
-Ordner erzeugen. Deshalb wird der Absender zuerst auf eine **stabile
-Korrespondenten-Identität** abgebildet (`documents/correspondent.ts`), bevor
-er in den Pfad einfließt.
+The `sender` extracted by the AI classification is free text and, taken by
+itself, too unstable to serve as a folder name — "Janitos",
+"Janitos Versicherung AG" and "Janitos AG" would otherwise produce three
+different folders. That is why the sender is first mapped to a **stable
+correspondent identity** (`documents/correspondent.ts`) before it flows into
+the path.
 
-### Aufbau des Ordner-Slugs
+### Structure of the folder slug
 
 ```
-<absender>[-<produkt>][-<vertragsanker>]
+<sender>[-<product>][-<contract-anchor>]
 ```
 
-- **`<absender>`** — kommt aus einer kuratierten Registry bekannter
-  Institutionen (`documents/institutions.ts`, z. B. `janitos`, `comdirect`,
-  `barmer`). Unbekannte Absender fallen auf einen slugifizierten Rohnamen
-  zurück (Long-Tail, leichte Fragmentierung möglich — siehe Overrides unten).
-- **`<produkt>`** — optional, aus einer Stichwort-Tabelle über den **Titel**
-  des Dokuments (`privathaftpflicht`, `hausrat`, `kfz`, `leben`, …). Nur der
-  Titel wird geprüft, damit beiläufige Erwähnungen im Fließtext kein Dokument
-  in die falsche Produkt-Schublade stecken.
-- **`<vertragsanker>`** — optional, aus den bereits vorhandenen
-  Referenz-Tags `versicherungsnr:…` bzw. `vertragsnr:…`
-  (`versicherungsnr` hat Vorrang). Wird angehängt, sobald vorhanden — damit
-  mehrere Verträge desselben Anbieters und derselben Sparte nicht in einem
-  Ordner landen (z. B. zwei Privathaftpflicht-Policen bei Janitos). Bewusst
-  **nicht** `document_number`: dieses Feld ist pro Dokument, nicht pro
-  Vertrag (siehe Issue #664 in `documents/metadata-extract.ts`).
+- **`<sender>`** — comes from a curated registry of known institutions
+  (`documents/institutions.ts`, e.g. `janitos`, `comdirect`, `barmer`).
+  Unknown senders fall back to a slugified raw name (long tail, slight
+  fragmentation possible — see overrides below).
+- **`<product>`** — optional, from a keyword table over the **title** of the
+  document (`privathaftpflicht`, `hausrat`, `kfz`, `leben`, …). Only the title
+  is checked, so that incidental mentions in the body text do not put a
+  document into the wrong product drawer.
+- **`<contract-anchor>`** — optional, from the already existing reference tags
+  `versicherungsnr:…` or `vertragsnr:…` (`versicherungsnr` takes precedence).
+  Appended as soon as present — so that several contracts of the same provider
+  and the same line of business do not end up in one folder (e.g. two personal
+  liability policies at Janitos). Deliberately **not** `document_number`: this
+  field is per document, not per contract (see issue #664 in
+  `documents/metadata-extract.ts`).
 
-Beispiele: `janitos-privathaftpflicht-4711884`, `janitos-hausrat`,
-`comdirect` (nur Absender, kein Produkt/Vertrag erkannt). Ohne auflösbaren
-Absender: das Platzhalter-Segment `_ohne-absender`.
+Examples: `janitos-privathaftpflicht-4711884`, `janitos-hausrat`,
+`comdirect` (sender only, no product/contract recognized). Without a
+resolvable sender: the placeholder segment `_ohne-absender`.
 
-### Persistierung
+### Persistence
 
-Die aufgelöste Identität (`correspondent_slug`, `correspondent_display`) wird
-zusätzlich auf der `documents`-Zeile persistiert (Migration `0130`) — nicht
-nur im Pfad. Geschrieben wird sie von `relocateDocument`, unabhängig davon, ob
-die Datei tatsächlich verschoben wird. Das ermöglicht das Filtern/Gruppieren
-"nach Korrespondent" in der Dokumentenliste, ohne den Absender bei jeder
-Abfrage neu herzuleiten (`GET /documents/correspondents` für die Facette,
-`?correspondent=<slug>` als Filter auf `GET /documents` und der Suche).
+The resolved identity (`correspondent_slug`, `correspondent_display`) is
+additionally persisted on the `documents` row (migration `0130`) — not only in
+the path. It is written by `relocateDocument`, regardless of whether the file
+is actually moved. This enables filtering/grouping "by correspondent" in the
+document list without re-deriving the sender on every query
+(`GET /documents/correspondents` for the facet, `?correspondent=<slug>` as a
+filter on `GET /documents` and on search).
 
-### Nutzer-Overrides
+### User overrides
 
-Passt die automatische Zuordnung nicht (z. B. soll ein unbekannter Absender
-mit einem bestehenden Korrespondenten zusammengelegt werden, oder eine
-Fehlzuordnung korrigiert werden), kann ein Nutzer in der Wartungsseite unter
-„Korrespondenten-Overrides" ein Absender-Muster → Korrespondent-Mapping
-anlegen (Migration `0131`, `documents/correspondent-overrides.ts`). Ein
-Override schlägt die eingebaute Registry und greift, sobald das betroffene
-Dokument neu abgelegt wird (Reklassifikation oder „Dateipfade
-aktualisieren"). Treffen mehrere Muster, gewinnt immer das längste und damit
-spezifischste Muster, unabhängig von der Reihenfolge in der Datenbank.
-Overrides sind haushaltsweit (nicht pro Nutzer) und werden
-mit kurzer TTL gecacht, damit der Massen-Umzug nicht pro Dokument nachfragt.
+If the automatic assignment does not fit (e.g. an unknown sender is to be
+merged with an existing correspondent, or a misassignment is to be corrected),
+a user can create a sender pattern → correspondent mapping in the maintenance
+page under „Korrespondenten-Overrides" (correspondent overrides)
+(migration `0131`, `documents/correspondent-overrides.ts`). An override beats
+the built-in registry and takes effect as soon as the affected document is
+filed again (reclassification or „Dateipfade aktualisieren" (update file
+paths)). If several patterns match, the longest and therefore most specific
+pattern always wins, regardless of the order in the database. Overrides are
+household-wide (not per user) and are cached with a short TTL, so that the
+bulk move does not query per document.
 
-### Single Source der bekannten Institutionen
+### Single source of known institutions
 
-Die Korrespondenten-Registry wird aus `documents/institutions.ts` abgeleitet,
-statt eine eigene Liste zu pflegen. `documents/institutions.test.ts` prüft,
-dass jedes dort verwendete Absender-Fragment auch in den
-Sender-Routing-Regeln (`documents/sender-rules.ts`) bekannt ist — die beiden
-Listen können also nicht auseinanderlaufen, ohne dass ein Test fehlschlägt.
-
----
-
-## 4. Lebenszyklus einer Datei
-
-1. **Upload** (`POST /documents` oder Inbox-Watcher): Die Datei landet unter
-   `<owner-root>/_inbox/<YYYY-MM>/<sha256>.pdf`. Die Sichtbarkeit ist
-   zunächst `private` — das Hochschieben in eine Gruppe macht der Nutzer
-   aktiv über das UI.
-2. **Klassifikation** (Worker-Pipeline `text_extract → classify → embed`): Der
-   `classify`-Job schreibt Kategorie, Datum, Absender, Titel und Steuerfelder
-   in die DB. Danach ruft er `relocateDocument(id)` auf — das löst die
-   Korrespondenten-Identität auf (Abschnitt 3a), verschiebt die Datei an
-   ihren kanonischen Platz und baut die Steuer-Hardlinks auf.
-3. **Nutzer-Korrektur** (`PATCH /documents/:id`): Das Ändern einer der Felder
-   triggert erneut `relocateDocument`. Der Verschiebevorgang ist idempotent —
-   steht die Datei bereits richtig, passiert nichts ausser einem Rebuild der
-   Steuer-Links. Das gilt auch für die Zuordnung einer Bezugsperson, sofern die
-   Kategorie eine `filesystemGrouping`-Dimension verwendet.
-4. **Sichtbarkeits-Wechsel** (`POST /documents/:id/visibility`): Versetzt das
-   Dokument zwischen privatem Bereich und Gruppenbereich; die Datei wandert
-   in die entsprechende Owner-Root, alte Steuer-Hardlinks werden weggeräumt.
-5. **Löschen** (`DELETE /documents/:id`): Entfernt die Steuer-Hardlinks zuerst,
-   dann den DB-Eintrag (cascadet Tags + Tax-Zuordnungen), dann die kanonische
-   Datei, und räumt leere Ordner nach oben hin auf.
-
-`relocateDocument` ist in `documents/relocate.ts` implementiert. Es ist
-cross-device-sicher (fällt bei EXDEV auf `copy+unlink` zurück) und path-traversal-
-gesichert (`assertPathUnderDocumentsRoot` vor jeder fs-Operation).
+The correspondent registry is derived from `documents/institutions.ts` instead
+of maintaining its own list. `documents/institutions.test.ts` checks that
+every sender fragment used there is also known in the sender routing rules
+(`documents/sender-rules.ts`) — so the two lists cannot diverge without a test
+failing.
 
 ---
 
-## 5. Relevante Module
+## 4. Lifecycle of a file
 
-| `db/migrations/postgres/0036_…`   | Schema-Erweiterung: households (jetzt Gruppen)      |
-| `db/migrations/postgres/0069_…`   | Umbenennung households -> groups                    |
-| `db/migrations/postgres/0130_…`   | Persistierte Korrespondenten-Spalten auf `documents`     |
-| `db/migrations/postgres/0131_…`   | Tabelle für Korrespondenten-Overrides                    |
-| `documents/documents.service.ts`  | Path-Builder (`resolveDocumentDiskPath`, Slugifier, …)   |
-| `documents/relocate.ts`           | Physische Umzüge + Steuer-Hardlink-Rebuild + Korrespondenten-Persistierung |
-| `documents/correspondent.ts`      | Absender → Korrespondent (+ Produkt, Vertragsanker)      |
-| `documents/institutions.ts`       | Registry bekannter Institutionen (Single Source, Abschnitt 3a) |
-| `documents/correspondent-overrides.ts` | Laden/Cache der Nutzer-Overrides                    |
-| `documents/visibility.ts`         | Zugriffskontrolle (`loadVisibleDocument`, …)             |
-| `documents/groups.ts`             | API-Endpoints zum Verwalten von Gruppen                  |
-| `documents/documents.ts`          | `POST /documents/:id/visibility`, Upload, CRUD, Suche, Korrespondenten-Facette + Override-CRUD |
-| `documents/import.ts`             | Import-Logik für Dokumente                               |
+1. **Upload** (`POST /documents` or inbox watcher): The file lands under
+   `<owner-root>/_inbox/<YYYY-MM>/<sha256>.pdf`. The visibility is initially
+   `private` — moving it up into a group is done actively by the user via the
+   UI.
+2. **Classification** (worker pipeline `text_extract → classify → embed`): The
+   `classify` job writes category, date, sender, title and tax fields into the
+   DB. Afterwards it calls `relocateDocument(id)` — which resolves the
+   correspondent identity (section 3a), moves the file to its canonical place
+   and builds the tax hardlinks.
+3. **User correction** (`PATCH /documents/:id`): Changing one of the fields
+   triggers `relocateDocument` again. The move operation is idempotent — if the
+   file is already in the right place, nothing happens except a rebuild of the
+   tax links. This also applies to the assignment of a subject person, provided
+   the category uses a `filesystemGrouping` dimension.
+4. **Visibility change** (`POST /documents/:id/visibility`): Moves the document
+   between the private area and the group area; the file moves to the
+   corresponding owner root, old tax hardlinks are cleaned up.
+5. **Delete** (`DELETE /documents/:id`): Removes the tax hardlinks first, then
+   the DB entry (cascades tags + tax assignments), then the canonical file, and
+   cleans up empty folders upwards.
+
+`relocateDocument` is implemented in `documents/relocate.ts`. It is
+cross-device-safe (falls back to `copy+unlink` on EXDEV) and secured against
+path traversal (`assertPathUnderDocumentsRoot` before every fs operation).
 
 ---
 
-## 6. Bestandsdateien aktualisieren
+## 5. Relevant modules
 
-Vor Version 0036 hochgeladene Dokumente liegen unter dem alten
-`YYYY/YYYY-MM/<sha256>.pdf`-Schema. Migration 0036 ändert nur das DB-Schema —
-die Dateien wandern erst beim expliziten Aktualisieren der Dateipfade.
+| `db/migrations/postgres/0036_…`   | Schema extension: households (now groups)      |
+| `db/migrations/postgres/0069_…`   | Rename households -> groups                    |
+| `db/migrations/postgres/0130_…`   | Persisted correspondent columns on `documents`     |
+| `db/migrations/postgres/0131_…`   | Table for correspondent overrides                    |
+| `documents/documents.service.ts`  | Path builder (`resolveDocumentDiskPath`, slugifier, …)   |
+| `documents/relocate.ts`           | Physical moves + tax hardlink rebuild + correspondent persistence |
+| `documents/correspondent.ts`      | Sender → correspondent (+ product, contract anchor)      |
+| `documents/institutions.ts`       | Registry of known institutions (single source, section 3a) |
+| `documents/correspondent-overrides.ts` | Loading/cache of the user overrides                    |
+| `documents/visibility.ts`         | Access control (`loadVisibleDocument`, …)             |
+| `documents/groups.ts`             | API endpoints for managing groups                  |
+| `documents/documents.ts`          | `POST /documents/:id/visibility`, upload, CRUD, search, correspondent facet + override CRUD |
+| `documents/import.ts`             | Import logic for documents                               |
 
-Die Wartungsseite bietet dafür neben „Nur KI-Klassifikation“ und
-„OCR + Klassifikation“ die Aktion **Dateipfade aktualisieren**. Technisch ruft
-sie `POST /documents/relocate-all` auf. Der Endpunkt benötigt `data.manage`,
-iteriert alle Dokumente, ruft `relocateDocument` auf jedes einzelne auf und
-meldet zurück, wie viele Dokumente geprüft, verschoben oder fehlgeschlagen sind.
+---
 
-`relocateDocument` ist idempotent: mehrfache Aufrufe sind gefahrlos.
+## 6. Updating existing files
 
-Derselbe Mechanismus deckt auch die Einführung der Korrespondenten-Ebene
-(Abschnitt 3a, Migration `0130`) ab: `relocateDocument` leitet Pfad und
-Korrespondenten-Spalten immer frisch aus den aktuellen Metadaten ab, ein
-einziger Klick auf **Dateipfade aktualisieren** genügt also, um den gesamten
-Altbestand in die neue Ordnerstruktur zu überführen und die persistierten
-Korrespondenten-Felder zu befüllen — ohne eigene Migrations-/Backfill-Logik.
-Das gilt ebenso für das Entfernen der früheren Jahresordner-Ebene und für die
-konfigurierten Bezugspersonen-Ordner: Die bestehenden DB-Verknüpfungen werden
-beim Lauf ausgewertet und die Dateien entsprechend verschoben.
+Documents uploaded before version 0036 lie under the old
+`YYYY/YYYY-MM/<sha256>.pdf` scheme. Migration 0036 only changes the DB schema —
+the files only move when the file paths are explicitly updated.
+
+For this, the maintenance page offers, next to „Nur KI-Klassifikation" (AI
+classification only) and „OCR + Klassifikation" (OCR + classification), the
+action **Dateipfade aktualisieren**. Technically it calls
+`POST /documents/relocate-all`. The endpoint requires `data.manage`, iterates
+over all documents, calls `relocateDocument` on each one and reports back how
+many documents were checked, moved or failed.
+
+`relocateDocument` is idempotent: repeated calls are harmless.
+
+The same mechanism also covers the introduction of the correspondent level
+(section 3a, migration `0130`): `relocateDocument` always derives the path and
+correspondent columns freshly from the current metadata, so a single click on
+**Dateipfade aktualisieren** is enough to transfer the entire legacy inventory
+into the new folder structure and to fill the persisted correspondent fields —
+without its own migration/backfill logic. This applies equally to the removal
+of the former year folder level and to the configured subject-person folders:
+the existing DB links are evaluated during the run and the files are moved
+accordingly.

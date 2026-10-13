@@ -1,285 +1,299 @@
-# Plan: Taxonomie & Steuer-Einordnung datengetrieben verbessern
+# Plan: improve taxonomy & tax classification in a data-driven way
 
-Status: **Entwurf zum Review — noch keine Implementierung.**
-Ziel: Aus den bereits eingespannten Dokumenten der letzten Jahre **einmalig** eine
-vollständige, belastbare Taxonomie und eine vollständige Hints-Aufstellung für die
-Steuer-Einordnung ableiten. Bevorzugt lokal; Cloud nur für wenige hundert
-**anonymisierte** Repräsentanten, wo ein starkes Modell echten Mehrwert bringt.
+Status: **Draft for review — no implementation yet.**
+Goal: From the already ingested documents of the past years, derive a complete,
+robust taxonomy and a complete hints inventory for the tax classification
+**once**. Preferably local; cloud only for a few hundred **anonymized**
+representatives where a strong model brings real added value.
 
 ---
 
-## 0. Ausgangslage (Ist-Zustand im Code)
+## 0. Starting point (current state in the code)
 
-- **Taxonomie**: fest in `documents/taxonomy.ts` (12 Top-Kategorien + ~40 Unter-
-  kategorien), geseedet via `db/seed.ts` → Tabelle `document_categories`.
-  Optionale `hint`-Felder pro Kategorie. **Kein** Runtime-Override für Taxonomie-Hints.
-- **Steuer-Sektionen**: 30 feste Slugs in `documents/tax-sections.ts`, je mit `hint`.
-  Hints zur Laufzeit tunebar über Tabelle `tax_section_hint_overrides`
-  (`documents/tax-hint-overrides.ts`).
-- **Klassifikation**: lokales Llama-GGUF (`llm-service/main.py`), **Zero-Shot**,
-  JSON-Grammar, `temperature=0.2`, `max_tokens=768`. Prompt enthält Taxonomie-Outline,
-  Steuer-Sektionen (gruppiert) und Bezugspersonen.
-- **Haushaltskontext für die Steuerentscheidung**: Die Bezugspersonen-Liste trägt
-  `relation_kind`, `tax_cost_bearer` und `in_household`; dazu kommt die
-  Veranlagungsart (`assessment_type`). Der `PERSONENBEZUG`-Block in
-  `CLASSIFY_TAX_PROMPT` unterscheidet damit einen eindeutigen Abzug des Nutzers
-  (Ehepartner bei Zusammenveranlagung, eigenes Kind im Haushalt) von einem
-  offenen Fall (Eltern, Betreute), statt jede Bezugsperson pauschal zu
-  unterdrücken. Die Altersgrenze bei Kindern (§ 32 Abs. 4 EStG) wertet erst die
-  nachgelagerte Review-Ableitung aus — der Klassifikator bekommt kein
-  Geburtsdatum.
-- **Embeddings**: `intfloat/multilingual-e5-base` (768-dim), pro Dokument-Chunk in
-  `document_embeddings` gespeichert.
-- **Bereits persistierte Daten je Dokument** (das Rohmaterial dieses Plans):
-  - `documents.extracted_text` (OCR-Volltext)
-  - `documents.summary` (1–2 neutrale deutsche Sätze), `tags`
+- **Taxonomy**: fixed in `documents/taxonomy.ts` (12 top categories + ~40
+  subcategories), seeded via `db/seed.ts` → table `document_categories`.
+  Optional `hint` fields per category. **No** runtime override for taxonomy
+  hints.
+- **Tax sections**: 30 fixed slugs in `documents/tax-sections.ts`, each with a
+  `hint`. Hints can be tuned at runtime via the table
+  `tax_section_hint_overrides` (`documents/tax-hint-overrides.ts`).
+- **Classification**: local Llama GGUF (`llm-service/main.py`), **zero-shot**,
+  JSON grammar, `temperature=0.2`, `max_tokens=768`. The prompt contains the
+  taxonomy outline, tax sections (grouped) and subject persons.
+- **Household context for the tax decision**: The subject-persons list carries
+  `relation_kind`, `tax_cost_bearer` and `in_household`; in addition there is
+  the assessment type (`assessment_type`). The `PERSONENBEZUG` block in
+  `CLASSIFY_TAX_PROMPT` thus distinguishes a clear deduction of the user
+  (spouse with joint assessment, own child in the household) from an open case
+  (parents, wards), instead of suppressing every subject person across the
+  board. The age limit for children (§ 32 para. 4 EStG) is only evaluated by
+  the downstream review derivation — the classifier does not get a date of
+  birth.
+- **Embeddings**: `intfloat/multilingual-e5-base` (768-dim), stored per document
+  chunk in `document_embeddings`.
+- **Data already persisted per document** (the raw material of this plan):
+  - `documents.extracted_text` (full OCR text)
+  - `documents.summary` (1–2 neutral German sentences), `tags`
   - `documents.classification_confidence`, `documents.sender`, `documents.doc_date`
   - `documents.tax_relevant`, `tax_year`, `tax_year_confidence`, `tax_reviewed`
   - `document_tax_sections` (document_id, tax_section, confidence, source ∈ {ai,user})
   - `document_embeddings` (document_id, chunk_idx, embedding)
 
-**Konsequenz:** Wir müssen die tausenden PDFs **nicht neu durch OCR/LLM jagen**. Alles
-für Clustering, Repräsentanten-Auswahl und Hint-Mining liegt schon in der DB.
+**Consequence:** We do **not** have to run the thousands of PDFs through OCR/LLM
+again. Everything for clustering, representative selection and hint mining is
+already in the DB.
 
-### 0.1 Wie stark hängt der Plan an manuell korrigierten Dokumenten?
+### 0.1 How much does the plan depend on manually corrected documents?
 
-**Antwort: wenig — und bewusst asymmetrisch.** Die Taxonomie-Ableitung (Etappe B/C)
-ist **unsupervised** und braucht überhaupt keine manuellen Labels; sie arbeitet nur
-auf den Embeddings. Manuelle Korrekturen nutzt der Plan ausschließlich dort, wo das
-Schema sie sauber als „vom Menschen bestätigt" markiert — und das ist ungleich verteilt:
+**Answer: little — and deliberately asymmetric.** The taxonomy derivation
+(stage B/C) is **unsupervised** and needs no manual labels at all; it works only
+on the embeddings. The plan uses manual corrections exclusively where the schema
+cleanly marks them as "confirmed by a human" — and that is unevenly
+distributed:
 
-| Feld | Manuelles Signal im Schema | Als „Wahrheit" nutzbar? |
-|------|----------------------------|-------------------------|
-| Steuer-Relevanz / `tax_year` | `documents.tax_reviewed` (→ true bei Nutzer-Edit) | **Ja, sauber** |
-| Steuer-Sektionen | `document_tax_sections.source ∈ {ai, user}` | **Ja, sauber** |
-| Kategorie | **kein** `source`/`reviewed`-Flag auf `category_id` — Nutzerkorrektur überschreibt den AI-Wert ununterscheidbar | **Nein** |
-| Tags | `document_tag_links` hat **keine** `source`-Spalte (anders als Finance-Tags) | **Nein** |
+| Field | Manual signal in the schema | Usable as "truth"? |
+|-------|----------------------------|-------------------------|
+| Tax relevance / `tax_year` | `documents.tax_reviewed` (→ true on user edit) | **Yes, cleanly** |
+| Tax sections | `document_tax_sections.source ∈ {ai, user}` | **Yes, cleanly** |
+| Category | **no** `source`/`reviewed` flag on `category_id` — a user correction overwrites the AI value indistinguishably | **No** |
+| Tags | `document_tag_links` has **no** `source` column (unlike finance tags) | **No** |
 
-**Folgen für den Plan:**
-- Die manuelle Abhängigkeit beschränkt sich auf das **Steuer-Gold-Set** (Etappe A/F:
-  `tax_reviewed=true`, `source='user'`) und die **Few-Shot-Positiv-Beispiele** (Etappe E).
-  Ist dieses Set klein, ist nur das Eval-Gate schwächer — die Taxonomie-Ableitung bleibt
-  davon unberührt.
-- Für **Kategorie und Tags** lässt sich aus der DB **kein** Gold-Set automatisch bauen
-  (kein Marker). Deshalb dient die Handprüfung der ~150–400 Repräsentanten (Etappe C/F)
-  bewusst als Ersatz für das fehlende Signal.
-- **Etappe A zählt als Allererstes** die vorhandenen Mengen (`tax_reviewed=true`,
-  `source='user'`-Sektionen, korrigierte Anteile), damit wir wissen, ob das Gold-Set
-  fürs Eval-Gate reicht oder per Handprüfung aufgestockt werden muss.
+**Consequences for the plan:**
+- The manual dependency is limited to the **tax gold set** (stage A/F:
+  `tax_reviewed=true`, `source='user'`) and the **few-shot positive examples**
+  (stage E). If this set is small, only the eval gate is weaker — the taxonomy
+  derivation remains unaffected.
+- For **category and tags**, **no** gold set can be built automatically from the
+  DB (no marker). That is why the manual review of the ~150–400 representatives
+  (stage C/F) deliberately serves as a substitute for the missing signal.
+- **Stage A counts first of all** the existing quantities (`tax_reviewed=true`,
+  `source='user'` sections, corrected shares), so that we know whether the gold
+  set suffices for the eval gate or has to be topped up by manual review.
 
-**Optionaler Zukunfts-Fix (nicht Voraussetzung für diesen Einmal-Lauf):** eine
-`category_source`-Spalte (`ai`/`user`) auf `documents` und eine `source`-Spalte auf
-`document_tag_links` — analog zu den Steuer-Sektionen. Dann werden *künftige* Kategorie-/
-Tag-Korrekturen mineable, und das Reclassify überschreibt sie nicht mehr. Macht die
-nächste Iteration deutlich stärker.
-
----
-
-## 1. Leitprinzipien
-
-1. **Erst messen, dann ändern.** Keine Taxonomie-Operation ohne Diagnose-Zahlen.
-2. **Lokal zuerst.** Clustering, Repräsentanten-Auswahl, Mining laufen vollständig
-   lokal (Python, vorhandene `llm-service`-Umgebung + sklearn/hdbscan).
-3. **Cloud nur für Repräsentanten, nur anonymisiert.** Höchstens ein paar hundert
-   `summary`-Texte (nicht Roh-OCR), nach PII-Scrubbing.
-4. **Versionierbar.** Ergebnisse (Taxonomie, Hints) landen als Code-Diffs in
-   `taxonomy.ts` / `tax-sections.ts` bzw. als reproduzierbare Seed-Dateien — keine
-   undokumentierten DB-Handänderungen.
-5. **Mess-Schleife.** Vorher/Nachher-Genauigkeit auf einem kleinen Gold-Set, sonst
-   ist „besser" nicht überprüfbar.
-6. **Einmal-Charakter.** Alles unter `scripts/taxonomy/` als Offline-Tools, die die
-   Produktion nicht berühren (read-only auf der DB, Output als Dateien zum Review).
+**Optional future fix (not a prerequisite for this one-time run):** a
+`category_source` column (`ai`/`user`) on `documents` and a `source` column on
+`document_tag_links` — analogous to the tax sections. Then *future* category/tag
+corrections become minable, and the reclassify no longer overwrites them. Makes
+the next iteration considerably stronger.
 
 ---
 
-## 2. Werkzeug- und Ablage-Struktur (geplant)
+## 1. Guiding principles
+
+1. **Measure first, then change.** No taxonomy operation without diagnosis
+   numbers.
+2. **Local first.** Clustering, representative selection, mining run entirely
+   locally (Python, existing `llm-service` environment + sklearn/hdbscan).
+3. **Cloud only for representatives, only anonymized.** At most a few hundred
+   `summary` texts (not raw OCR), after PII scrubbing.
+4. **Versionable.** Results (taxonomy, hints) land as code diffs in
+   `taxonomy.ts` / `tax-sections.ts` or as reproducible seed files — no
+   undocumented manual DB changes.
+5. **Measurement loop.** Before/after accuracy on a small gold set, otherwise
+   "better" cannot be verified.
+6. **One-time character.** Everything under `scripts/taxonomy/` as offline tools
+   that do not touch production (read-only on the DB, output as files for
+   review).
+
+---
+
+## 2. Tool and storage structure (planned)
 
 ```
 scripts/taxonomy/
-  00_diagnose.py        # Read-only Report über Ist-Zuordnungen
-  01_doc_vectors.py     # Chunk-Embeddings → 1 Vektor/Dokument (mean-pool)
-  02_cluster.py         # HDBSCAN/hierarchisch → Cluster + Ausreißer
-  03_representatives.py # Medoide + Diversitäts-Sampling + Problemfälle
-  04_anonymize.py       # PII-Scrubbing der Repräsentanten-Summaries
-  05_propose_taxonomy.* # (lokal ODER Cloud) Cluster benennen + Baum vorschlagen
-  06_mine_hints.py      # Absender/Keyword/Confusion-Mining je Kategorie+Sektion
-  07_write_hints.*      # (lokal ODER Cloud) finale Hints formulieren
-  08_eval.py            # Gold-Set: Vorher/Nachher-Genauigkeit
-  out/                  # Reports, Vorschläge, anonymisierte Exporte (gitignored)
+  00_diagnose.py        # Read-only report on current assignments
+  01_doc_vectors.py     # Chunk embeddings → 1 vector/document (mean-pool)
+  02_cluster.py         # HDBSCAN/hierarchical → clusters + outliers
+  03_representatives.py # Medoids + diversity sampling + problem cases
+  04_anonymize.py       # PII scrubbing of the representative summaries
+  05_propose_taxonomy.* # (local OR cloud) name clusters + propose tree
+  06_mine_hints.py      # Sender/keyword/confusion mining per category+section
+  07_write_hints.*      # (local OR cloud) formulate final hints
+  08_eval.py            # Gold set: before/after accuracy
+  out/                  # Reports, proposals, anonymized exports (gitignored)
 ```
 
-DB-Zugriff aus Python via `psycopg` + pgvector gegen die Encore-Postgres-Instanz
-(read-only Rolle). Clustering mit `numpy`/`scikit-learn`/`hdbscan` (neue Dev-Deps,
-nur für die Skripte — nicht im Laufzeit-Image des `llm-service`).
+DB access from Python via `psycopg` + pgvector against the Encore Postgres
+instance (read-only role). Clustering with `numpy`/`scikit-learn`/`hdbscan` (new
+dev deps, only for the scripts — not in the runtime image of the
+`llm-service`).
 
 ---
 
-## 3. Etappe A — Diagnose (read-only, lokal, ~1 Tag)
+## 3. Stage A — Diagnosis (read-only, local, ~1 day)
 
-**Skript:** `00_diagnose.py`. Ausschließlich `SELECT`. Output: `out/diagnose.md`.
+**Script:** `00_diagnose.py`. `SELECT` only. Output: `out/diagnose.md`.
 
-Kennzahlen:
-- Verteilung über `document_categories` inkl. **`sonstiges`-Quote** und Anteil mit
-  `classification_confidence < 0.5`. → Taxonomie-Lücken.
-- Histogramm `classification_confidence` gesamt und je Top-Kategorie.
-- Steuer-Sektionen: Anzahl Dokumente je `tax_section` (source='ai'); **nie** und
-  **fast immer** vergebene Sektionen; mittlere Confidence je Sektion. → tote /
-  überladene Sektionen.
-- Häufigste `sender` je Kategorie und je Steuer-Sektion. → Überlappungen sichtbar.
-- **Confusion-Heuristik** (nutzt Embeddings, ohne Labels): für jedes Dokument die
-  k=10 nächsten Nachbarn; Anteil, deren Mehrheit in einer *anderen* Kategorie liegt
-  als das Dokument selbst → Liste wahrscheinlicher Fehlklassifikationen, gruppiert
-  nach „von Kategorie X fälschlich wie Y".
-- `tax_reviewed=true`-Dokumente werden als **Mini-Gold-Set** markiert (vom Nutzer
-  bestätigte Wahrheit) und für Etappe F beiseitegelegt.
+Metrics:
+- Distribution over `document_categories` including the **`sonstiges` share**
+  (miscellaneous) and the share with `classification_confidence < 0.5`. →
+  Taxonomy gaps.
+- Histogram of `classification_confidence` overall and per top category.
+- Tax sections: number of documents per `tax_section` (source='ai'); sections
+  assigned **never** and **almost always**; mean confidence per section. → Dead
+  / overloaded sections.
+- Most frequent `sender` per category and per tax section. → Overlaps become
+  visible.
+- **Confusion heuristic** (uses embeddings, without labels): for each document
+  the k=10 nearest neighbors; share whose majority lies in a *different*
+  category than the document itself → list of likely misclassifications,
+  grouped by "from category X wrongly like Y".
+- `tax_reviewed=true` documents are marked as a **mini gold set** (truth
+  confirmed by the user) and set aside for stage F.
 
-**Entscheidungsausgang:** Der Report sagt, ob das Problem primär Struktur (Etappe C),
-Hints (Etappe D) oder Modell (Etappe E) ist.
+**Decision outcome:** The report says whether the problem is primarily structure
+(stage C), hints (stage D) or model (stage E).
 
 ---
 
-## 4. Etappe B — Dokument-Vektoren & Clustering (lokal)
+## 4. Stage B — Document vectors & clustering (local)
 
 **`01_doc_vectors.py`**
-- Lädt alle `document_embeddings`, **Mean-Pooling** über Chunks → ein L2-normierter
-  768-dim Vektor je Dokument. Persistenz als `out/doc_vectors.npy` + ID-Index.
+- Loads all `document_embeddings`, **mean pooling** over chunks → one
+  L2-normalized 768-dim vector per document. Persisted as `out/doc_vectors.npy`
+  + ID index.
 
 **`02_cluster.py`**
-- **HDBSCAN** (findet Clusteranzahl selbst, markiert Ausreißer als `-1`) als Default;
-  optional Agglomerative/Ward für eine explizite **Hierarchie**, falls wir die
-  Baumstruktur direkt ableiten wollen.
-- Output `out/clusters.json`: Cluster-ID → Dokument-IDs, Cluster-Größe,
-  Intra-Cluster-Kohäsion, Ausreißer-Liste.
-- Sanity-Check: Cluster gegen bestehende Kategorien kreuztabellieren — zeigt, welche
-  Cluster sauber einer Kategorie entsprechen, welche zwei Kategorien mischen
-  (Merge-Kandidat) und welche quer zu `sonstiges` liegen (neue Kategorie).
+- **HDBSCAN** (finds the number of clusters itself, marks outliers as `-1`) as
+  default; optionally agglomerative/Ward for an explicit **hierarchy**, if we
+  want to derive the tree structure directly.
+- Output `out/clusters.json`: cluster ID → document IDs, cluster size,
+  intra-cluster cohesion, outlier list.
+- Sanity check: cross-tabulate clusters against existing categories — shows
+  which clusters cleanly correspond to one category, which mix two categories
+  (merge candidate) and which lie across `sonstiges` (new category).
 
 ---
 
-## 5. Etappe C — Repräsentanten & Taxonomie-Vorschlag
+## 5. Stage C — Representatives & taxonomy proposal
 
-### 5.1 Repräsentanten herauspicken (`03_representatives.py`, lokal)
+### 5.1 Picking the representatives (`03_representatives.py`, local)
 
-Drei Quellen kombiniert, Ziel ~150–400 Dokumente gesamt:
-- **Medoide**: je Cluster das zentralste Dokument + k nächste (typische Vertreter).
-- **Diversitäts-Sampling**: Max-Min/Facility-Location über alle Vektoren (deckt die
-  Bandbreite ab, fängt Seltenes).
-- **Problemfälle**: niedrige Confidence, `sonstiges`, HDBSCAN-Ausreißer (zeigen
-  Ränder/Lücken).
+Three sources combined, target ~150–400 documents in total:
+- **Medoids**: per cluster the most central document + k nearest (typical
+  representatives).
+- **Diversity sampling**: max-min/facility location over all vectors (covers the
+  breadth, catches rare things).
+- **Problem cases**: low confidence, `sonstiges`, HDBSCAN outliers (show
+  edges/gaps).
 
-Output `out/representatives.json` (Dokument-IDs + Quelle + `summary` + `tags` +
+Output `out/representatives.json` (document IDs + source + `summary` + `tags` +
 `sender`).
 
-### 5.2 Anonymisierung (`04_anonymize.py`, lokal — Pflicht vor jedem Cloud-Schritt)
+### 5.2 Anonymization (`04_anonymize.py`, local — mandatory before any cloud step)
 
-Auf `summary`/`tags`/`sender` der Repräsentanten:
-- Namen aus der **Bezugspersonen-Liste** (Tabelle vorhanden) maskieren.
-- Regex/Presidio: IBAN, Steuer-/Sozial-IDs, Adressen, Telefon, E-Mail, Geldbeträge,
-  Geburtsdaten → Platzhalter (`[BETRAG]`, `[NAME]`, `[ADRESSE]` …).
-- **Nur `summary` + `tags` + Absender-*Typ*** (z. B. „Bank", „Finanzamt", „Arzt")
-  verlassen die Maschine — **kein** Roh-OCR, keine Klarnamen.
-- Output `out/representatives.anon.jsonl` + ein Diff-Report, der zeigt, was maskiert
-  wurde (zum Sichtprüfen vor dem Upload).
+On `summary`/`tags`/`sender` of the representatives:
+- Mask names from the **subject-persons list** (table exists).
+- Regex/Presidio: IBAN, tax/social IDs, addresses, phone, e-mail, monetary
+  amounts, dates of birth → placeholders (`[BETRAG]`, `[NAME]`, `[ADRESSE]` …).
+- **Only `summary` + `tags` + sender *type*** (e.g. „Bank", „Finanzamt" (tax
+  office), „Arzt" (doctor)) leave the machine — **no** raw OCR, no real names.
+- Output `out/representatives.anon.jsonl` + a diff report showing what was
+  masked (for visual inspection before the upload).
 
-### 5.3 Taxonomie vorschlagen (`05_propose_taxonomy`)
+### 5.3 Propose taxonomy (`05_propose_taxonomy`)
 
-- **Lokal-Variante**: das vorhandene Llama benennt/gruppiert die Cluster aus den
-  anonymisierten Summaries. Günstig, datensicher, ggf. gröber.
-- **Cloud-Variante (empfohlen, anonymisiert)**: die ~150–400 anonymisierten
-  Repräsentanten-Summaries gehen **einmalig** an ein starkes Modell (Claude) mit der
-  Aufgabe: vollständige, hierarchische Taxonomie vorschlagen, bestehende
-  `taxonomy.ts` als Ausgangspunkt, Lücken/Merges explizit begründen.
-- Output `out/taxonomy.proposal.md`: vorgeschlagener Baum + Mapping „alter Slug →
-  neuer Slug" + Begründung je Änderung. **Reiner Vorschlag** — Übernahme nach
-  manuellem Review als Diff in `taxonomy.ts` (+ `seed.ts` bleibt idempotent;
-  Slug-Umbenennungen brauchen eine kleine Migration für `document_categories`).
+- **Local variant**: the existing Llama names/groups the clusters from the
+  anonymized summaries. Cheap, data-safe, possibly coarser.
+- **Cloud variant (recommended, anonymized)**: the ~150–400 anonymized
+  representative summaries go **once** to a strong model (Claude) with the task:
+  propose a complete, hierarchical taxonomy, existing `taxonomy.ts` as the
+  starting point, explicitly justify gaps/merges.
+- Output `out/taxonomy.proposal.md`: proposed tree + mapping "old slug → new
+  slug" + justification per change. **Pure proposal** — adoption after manual
+  review as a diff in `taxonomy.ts` (+ `seed.ts` stays idempotent; slug
+  renamings need a small migration for `document_categories`).
 
 ---
 
-## 6. Etappe D — Vollständige Hints-Aufstellung
+## 6. Stage D — Complete hints inventory
 
-### 6.1 Mining (`06_mine_hints.py`, lokal)
+### 6.1 Mining (`06_mine_hints.py`, local)
 
-Je Taxonomie-Kategorie **und** je Steuer-Sektion aus den real zugeordneten
-Dokumenten aggregieren:
-- Top-Absender (echte Institutsnamen → konkrete Hint-Beispiele).
-- Charakteristische Schlüsselbegriffe (TF-IDF gegen den Restkorpus).
-- **Confusion-Paare** aus Etappe A → Kandidaten für „NICHT: … → andere-sektion"-Regeln
-  (genau das Muster, das die heutigen Hints schon nutzen, z. B. `anlage-n` vs
-  `anlage-kap`).
+Per taxonomy category **and** per tax section, aggregate from the actually
+assigned documents:
+- Top senders (real institution names → concrete hint examples).
+- Characteristic keywords (TF-IDF against the rest of the corpus).
+- **Confusion pairs** from stage A → candidates for "NICHT: … → andere-sektion"
+  rules ("NOT: … → other section"; exactly the pattern that today's hints
+  already use, e.g. `anlage-n` vs `anlage-kap`).
 - Output `out/hints.mining.json`.
 
-### 6.2 Formulieren (`07_write_hints`)
+### 6.2 Formulating (`07_write_hints`)
 
-- Aus dem Mining je Slug einen finalen `hint` formulieren (lokal oder Cloud,
-  Input nur aggregierte/anonyme Statistik — keine Einzeldokumente nötig).
+- From the mining, formulate a final `hint` per slug (local or cloud, input only
+  aggregated/anonymous statistics — no individual documents needed).
 - Output:
-  - **Steuer-Sektionen** → direkt als Upserts in `tax_section_hint_overrides`
-    (bestehender Mechanismus, sofort wirksam, reversibel) **oder** als Diff in
-    `tax-sections.ts`. Empfehlung: erst Override-Tabelle (A/B-fähig), nach Bewährung
-    in den Quelltext zurückschreiben.
-  - **Taxonomie-Kategorien** → es fehlt heute ein Override-Mechanismus. Zwei Optionen:
-    - (a) Hints direkt in `taxonomy.ts` zurückschreiben (versioniert, einfach, passt
-      zum Einmal-Charakter) — **empfohlen**.
-    - (b) Neue Tabelle `taxonomy_hint_overrides` + Merge in
-      `loadTaxonomyForClassifier()` (mehr Aufwand, dafür Laufzeit-tunebar wie bei den
-      Steuer-Sektionen). Nur falls du Hints langfristig ohne Deploy ändern willst.
+  - **Tax sections** → directly as upserts into `tax_section_hint_overrides`
+    (existing mechanism, immediately effective, reversible) **or** as a diff in
+    `tax-sections.ts`. Recommendation: first the override table (A/B-capable),
+    after proving itself write back into the source code.
+  - **Taxonomy categories** → there is currently no override mechanism. Two
+    options:
+    - (a) Write hints directly back into `taxonomy.ts` (versioned, simple, fits
+      the one-time character) — **recommended**.
+    - (b) New table `taxonomy_hint_overrides` + merge in
+      `loadTaxonomyForClassifier()` (more effort, but tunable at runtime like
+      the tax sections). Only if you want to change hints without a deploy in
+      the long term.
 
 ---
 
-## 7. Etappe E — Reliability-Hebel (optional, unabhängig)
+## 7. Stage E — Reliability levers (optional, independent)
 
-Falls Diagnose/Eval zeigt, dass auch mit besseren Hints zu viel danebenliegt:
-- **Few-Shot / Retrieval-augmented Klassifikation**: vor dem LLM-Call die k
-  ähnlichsten, bereits **korrekt** (idealerweise `tax_reviewed`/`source=user`)
-  eingeordneten Dokumente per Embedding ziehen und als Beispiele in den Prompt geben.
-  Vollständig lokal, nutzt vorhandene Embeddings. Größter erwartbarer Sprung.
-- **Modell-Upgrade**: größeres lokales GGUF (z. B. Qwen2.5-14B/32B-Instruct), falls
-  das kleine Modell der Flaschenhals ist. Nur Konfig/Infra, kein Datenschutz-Thema.
+If diagnosis/eval shows that even with better hints too much is off:
+- **Few-shot / retrieval-augmented classification**: before the LLM call, pull
+  the k most similar documents already classified **correctly** (ideally
+  `tax_reviewed`/`source=user`) via embedding and give them as examples in the
+  prompt. Fully local, uses existing embeddings. Biggest expected jump.
+- **Model upgrade**: larger local GGUF (e.g. Qwen2.5-14B/32B-Instruct), if the
+  small model is the bottleneck. Config/infra only, not a privacy topic.
 
-Diese Etappe ist eine **dauerhafte** Verbesserung der Pipeline, kein Einmal-Job —
-daher bewusst getrennt und nur bei Bedarf.
-
----
-
-## 8. Etappe F — Validierung (Pflicht-Gate)
-
-- **Gold-Set**: die `tax_reviewed=true`-Dokumente (vom Nutzer bestätigt) + die
-  handgeprüften Repräsentanten.
-- `08_eval.py`: klassifiziert das Gold-Set mit **alter** vs **neuer**
-  Taxonomie/Hints und berichtet Top-1-Genauigkeit für Kategorie, `tax_relevant`,
-  `tax_year` und Steuer-Sektion (Precision/Recall je Sektion).
-- **Gate:** Änderungen an `taxonomy.ts`/Hints werden nur übernommen, wenn die neue
-  Variante auf dem Gold-Set nicht schlechter ist. Ergebnis als `out/eval.md`.
-- Danach: Re-Klassifikation des Korpus über die vorhandene Reclassify-Pipeline
-  (Dokumente neu einreihen) — bestehende `source=user`-Zuordnungen bleiben unberührt.
+This stage is a **permanent** improvement of the pipeline, not a one-time job —
+hence deliberately separate and only if needed.
 
 ---
 
-## 9. Reihenfolge & Aufwand (Empfehlung)
+## 8. Stage F — Validation (mandatory gate)
 
-| # | Etappe | Lokal/Cloud | Aufwand | Nutzen |
+- **Gold set**: the `tax_reviewed=true` documents (confirmed by the user) + the
+  manually reviewed representatives.
+- `08_eval.py`: classifies the gold set with **old** vs **new** taxonomy/hints
+  and reports top-1 accuracy for category, `tax_relevant`, `tax_year` and tax
+  section (precision/recall per section).
+- **Gate:** Changes to `taxonomy.ts`/hints are only adopted if the new variant
+  is not worse on the gold set. Result as `out/eval.md`.
+- Afterwards: reclassification of the corpus via the existing reclassify
+  pipeline (re-enqueue documents) — existing `source=user` assignments remain
+  untouched.
+
+---
+
+## 9. Order & effort (recommendation)
+
+| # | Stage | Local/Cloud | Effort | Benefit |
 |---|--------|-------------|---------|--------|
-| 1 | A Diagnose | lokal | ~1 Tag | entscheidet alles Weitere |
-| 2 | D Hints | lokal (+ optional Cloud-Formulierung) | klein | oft schon großer Effekt, voll versionierbar |
-| 3 | B+C Taxonomie | lokal + anonym. Cloud | mittel | falls Diagnose Struktur-Lücken zeigt |
-| 4 | F Eval | lokal | klein, aber Pflicht-Gate | macht „besser" überprüfbar |
-| 5 | E Few-Shot/Modell | lokal | mittel | dauerhafte Reliability, nur bei Bedarf |
+| 1 | A Diagnosis | local | ~1 day | decides everything else |
+| 2 | D Hints | local (+ optional cloud formulation) | small | often already a big effect, fully versionable |
+| 3 | B+C Taxonomy | local + anonymized cloud | medium | if diagnosis shows structural gaps |
+| 4 | F Eval | local | small, but mandatory gate | makes "better" verifiable |
+| 5 | E Few-shot/model | local | medium | permanent reliability, only if needed |
 
 ---
 
-## 10. Offene Punkte für deine Entscheidung
+## 10. Open points for your decision
 
-1. **Slug-Umbenennungen** in der Taxonomie: erlaubt (saubere Struktur, aber Migration
-   für `document_categories` + Re-Mapping bestehender Zuordnungen nötig) — oder nur
-   **additive** Änderungen (neue Unterkategorien, keine Umbenennung)?
-2. **Hints-Ablage**: Steuer-Sektionen über Override-Tabelle (reversibel, A/B) oder
-   direkt im Quelltext? Taxonomie-Hints Option (a) Quelltext vs (b) neue Tabelle?
-3. **Cloud-Modell**: Bestätigung, dass anonymisierte Summaries an Claude gehen dürfen
-   (sonst strikt lokal mit etwas gröberem Ergebnis).
-4. **Re-Klassifikation**: gesamter Korpus neu einordnen, oder nur die heute
-   unsicheren/`sonstiges`-Dokumente?
+1. **Slug renamings** in the taxonomy: allowed (clean structure, but migration
+   for `document_categories` + re-mapping of existing assignments needed) — or
+   only **additive** changes (new subcategories, no renaming)?
+2. **Hints storage**: tax sections via override table (reversible, A/B) or
+   directly in the source code? Taxonomy hints option (a) source code vs (b) new
+   table?
+3. **Cloud model**: Confirmation that anonymized summaries may go to Claude
+   (otherwise strictly local with a somewhat coarser result).
+4. **Reclassification**: reclassify the entire corpus, or only the documents
+   that are uncertain/`sonstiges` today?
 
-> Nichts in diesem Plan verändert produktive Daten. Alle Skripte sind read-only auf
-> der DB; Ergebnisse sind Dateien zum Review. Übernahme erfolgt erst nach deinem OK
-> und nach bestandenem Eval-Gate (Etappe F).
+> Nothing in this plan changes production data. All scripts are read-only on
+> the DB; results are files for review. Adoption happens only after your OK
+> and after passing the eval gate (stage F).
