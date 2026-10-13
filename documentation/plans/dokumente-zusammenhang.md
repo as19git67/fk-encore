@@ -161,7 +161,9 @@ when its origin folder lies under the prefix, or when it carries one of
 the rule's numbers, or (for a rule without numbers) when its correspondent
 is the rule's. A number used to need the correspondent as well; that kept
 out letters about the same file from other senders, so a number now decides
-alone. The rule runs after
+alone. A private dossier considers every document its owner can see,
+their groups' documents included (imports land in the owner's default
+group); a group dossier only that group's. The rule runs after
 classification, after an attribute edit, on save of the rule and on
 "Regel jetzt anwenden"; it withdraws only what it added, and a document a
 person removed is remembered in `rule.excluded_document_ids`. A new dossier
