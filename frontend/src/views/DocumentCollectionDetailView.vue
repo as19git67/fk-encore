@@ -502,8 +502,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <p class="cd-rule-hint">
-        Ein Dokument tritt bei, wenn es aus dem Herkunftsordner stammt oder Korrespondent und
-        Referenznummer passen. Was die Regel aufnimmt, nimmt sie auch wieder heraus, wenn das
+        Ein Dokument tritt bei, wenn es aus dem Herkunftsordner stammt oder eine der
+        Referenznummern trägt. Der Korrespondent zählt nur, wenn die Regel keine Nummern hat. Was die Regel aufnimmt, nimmt sie auch wieder heraus, wenn das
         Dokument nicht mehr passt; von Hand Hinzugefügtes und Entferntes bleibt, wie es ist.
       </p>
       <div class="cd-rule-fields">
