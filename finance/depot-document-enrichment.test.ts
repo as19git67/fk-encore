@@ -48,6 +48,7 @@ import {
   getPortfolio,
   getPortfolioPosition,
   getPortfolioReview,
+  removePositionFromDepot,
   ignoreSettlementDocument,
   inspectSettlementDocument,
   listPortfolioTransactions,
@@ -307,7 +308,7 @@ describe("finance/depot-document-enrichment", () => {
     const invoice = await insertDocument("Rechnung Nr. 1 über 120,00 EUR");
     expect((await enrichDocument(invoice)).outcome).toBe("not_settlement");
 
-    const foreign = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ9"));
+    const foreign = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ2"));
     expect((await enrichDocument(foreign)).outcome).toBe("no_holding");
 
     const pending = await insertDocument(BUY_TEXT, { status: "pending" });
@@ -387,7 +388,7 @@ describe("finance/portfolio — review and apply", () => {
     await insertGiroBooking(giro, "2026-03-16", "-2900.00");
     await deriveDepotTransactionsForBankcontact(bc);
     const conflictDoc = await insertDocument(BUY_TEXT);
-    const foreignDoc = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ9"));
+    const foreignDoc = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ2"));
 
     const review = await getPortfolioReview({});
     expect(review.conflicts).toHaveLength(1);
@@ -475,8 +476,8 @@ describe("finance/portfolio — review and apply", () => {
 });
 
 describe("finance/depot-document-enrichment — finding the depot without a holding", () => {
-  // A position sold before the first sync: no snapshot holds DE000000SLD3.
-  const SOLD_ISIN = "DE000000SLD3";
+  // A position sold before the first sync: no snapshot holds DE000000SLD4.
+  const SOLD_ISIN = "DE000000SLD4";
   const soldText = (depotLine: string) => `Beispielbank AG
 Wertpapierabrechnung Verkauf
 ${depotLine}
@@ -529,6 +530,68 @@ Ausmachender Betrag 100,00 EUR`;
     const rows = await depotRows(depot);
     expect(rows.map((x) => [x.isin, x.kind, x.name])).toEqual([[SOLD_ISIN, "sell", "Beta Altbestand AG"]]);
     expect((await getPortfolioReview({})).new_securities).toEqual([]);
+  });
+
+  it("takes a security added by mistake out of the depot, keeps it out, and lets the user undo it", async () => {
+    const { depot } = await setup();
+    await setDepotNumber(depot, "0012345678");
+    // The user's own row of the security stays whatever happens.
+    await db.insert(financeDepotTransaction).values({
+      account_id: depot,
+      isin: SOLD_ISIN,
+      kind: "buy",
+      executed_at: "2020-01-15",
+      amount: "5",
+      price: "15.00",
+      net_amount: "-75.00",
+      currency: "EUR",
+      source: "manual",
+    });
+    const docId = await insertDocument(soldText("Depotnummer 12345678"));
+    await enrichDocument(docId);
+    const sec = (await getPortfolioReview({})).new_securities[0]!;
+    await decideDepotSecurity({ securityId: sec.id, decision: "confirm" });
+    expect((await depotRows(depot)).filter((x) => x.source === "document")).toHaveLength(1);
+
+    // The position page says what removing it would delete.
+    const page = await getPortfolioPosition({ key: SOLD_ISIN });
+    expect(page.depots).toEqual([
+      expect.objectContaining({
+        account_id: depot,
+        status: "confirmed",
+        bank_held: false,
+        writable: true,
+        removable_transactions: 1,
+        removable_holdings: 0,
+      }),
+    ]);
+
+    const r = await removePositionFromDepot({ key: SOLD_ISIN, accountId: depot });
+    expect(r).toMatchObject({ security_id: sec.id, transactions_removed: 1, holdings_removed: 0 });
+    const rows = await depotRows(depot);
+    expect(rows.map((x) => x.source)).toEqual(["manual"]);
+
+    // A later run does not bring it back.
+    await enrichPendingDocuments([depot]);
+    expect((await depotRows(depot)).map((x) => x.source)).toEqual(["manual"]);
+
+    // Undo: the review lists it with "show ignored", proposing and taking it in reads it again.
+    expect((await getPortfolioReview({})).ignored_securities_count).toBe(1);
+    expect((await getPortfolioReview({ ignored: true })).new_securities).toEqual([expect.objectContaining({ id: sec.id, ignored: true })]);
+    await decideDepotSecurity({ securityId: sec.id, decision: "propose" });
+    const again = await decideDepotSecurity({ securityId: sec.id, decision: "confirm" });
+    expect(again.documents_read).toBe(1);
+    expect((await depotRows(depot)).filter((x) => x.source === "document")).toHaveLength(1);
+  });
+
+  it("refuses to take out a security the bank still reports in the depot", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(BUY_TEXT);
+    expect((await enrichDocument(docId)).outcome).toBe("created");
+    const page = await getPortfolioPosition({ key: ISIN_A });
+    expect(page.depots[0]).toMatchObject({ account_id: depot, bank_held: true, status: "confirmed" });
+    await expect(removePositionFromDepot({ key: ISIN_A, accountId: depot })).rejects.toThrow(/bank still reports/);
+    expect(await depotRows(depot)).toHaveLength(1);
   });
 
   it("uses the one depot that already has transactions of the security — once the user took it in", async () => {
@@ -850,7 +913,7 @@ Datum 15.01.2026`);
 describe("finance/portfolio — documents ignored for the depots", () => {
   it("are neither read in nor listed, show up on request, and come back when taken back", async () => {
     const { depot } = await setup();
-    const foreign = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ9"));
+    const foreign = await insertDocument(BUY_TEXT.replace(ISIN_A, "DE000000ZZZ2"));
     const buy = await insertDocument(BUY_TEXT);
 
     let review = await getPortfolioReview({});
@@ -1084,15 +1147,15 @@ describe("finance/portfolio — security names", () => {
       // The holding names this one.
       tx(ISIN_A, "per 01.02.2026 Falsch gelesen AG"),
       // Only documents name these.
-      tx("DE000000BBB2", "per 01.02.2026 Beta Werke AG"),
+      tx("DE000000BBB5", "per 01.02.2026 Beta Werke AG"),
       // ensureUser(1) is called "User1": the address block, not a security.
-      tx("DE000000CCC3", "User1"),
+      tx("DE000000CCC9", "User1"),
     ]);
     const resp = await getPortfolio({});
     const name = (isin: string) => resp.positions.find((p) => p.isin === isin)?.name;
     expect(name(ISIN_A)).toBe("Alpha Industries AG");
-    expect(name("DE000000BBB2")).toBe("Beta Werke AG");
-    expect(name("DE000000CCC3")).toBeNull();
+    expect(name("DE000000BBB5")).toBe("Beta Werke AG");
+    expect(name("DE000000CCC9")).toBeNull();
   });
 });
 

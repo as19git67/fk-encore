@@ -141,6 +141,31 @@ The portfolio takes securities from wherever they turn up:
      would only duplicate them.
    - Identifiers the model reads count only against the master (stage 1):
      an ISIN or WKN not confirmed is a proposal, never a booking.
+   - Holdings tables of a bank's periodic report ("Finanzreport"): rows of
+     WKN / custody type, quantity, last price, currency, value, purchase
+     value and gain, the name on the next line (after a custodian line for
+     securities held abroad), running over pages. `holdingRows` reads them
+     with the usual OCR slips repaired: "7" for "/", amounts split after a
+     separator, and an I or O in a WKN (WKNs use neither). A holdings table
+     makes a paper a statement whatever trades the report also lists; the
+     model gets the report's head and the table, not the account pages
+     before it. A WKN-only row for a security the master knows only by its
+     ISIN is matched by name (exactly one confirmed entry, every significant
+     word shared), which also places a report without a depot number.
+
+## Taking a security out of a depot
+
+A security added by mistake (a booking or paper read wrong, a proposal
+taken in too quickly) is taken out on the position page, per depot:
+"Aus Depot entfernen" (`removePositionFromDepot`, `removeSecurity`). It
+becomes ignored in that depot's master — later runs leave its bookings and
+papers alone — and what readings booked for it goes: transactions from
+papers or derived from bookings (sources `document`, `giro-derived`,
+`giro-derived+document`) and holdings from statements. Manual rows and the
+bank's own stay. A security the bank's latest snapshot still lists cannot
+be removed: the next sync would confirm it again. The review page's "show
+ignored" toggle counts ignored securities too; "Wieder vorschlagen" and
+"Aufnehmen" undo a removal and read the evidence again.
 
 ## Operations
 

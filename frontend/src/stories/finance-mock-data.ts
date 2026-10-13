@@ -494,6 +494,10 @@ export const MOCK_PORTFOLIO_POSITION: PortfolioPositionResponse = {
     { account_id: 12, position_key: PF_ISIN_A, from: '2025-06-01', to: '2025-09-01', amount_before: '10.00000000', amount_after: '20.00000000', delta: '10.00000000', explained: '0.00000000', unexplained: '10.00000000', transaction_count: 0 },
   ],
   unverifiable_changes: 1,
+  depots: [
+    { account_id: 11, account_label: 'Depot Beispielbank', status: 'confirmed', bank_held: true, writable: true, removable_transactions: 2, removable_holdings: 0 },
+    { account_id: 12, account_label: 'Depot Musterbroker', status: 'confirmed', bank_held: false, writable: true, removable_transactions: 3, removable_holdings: 1 },
+  ],
   years: [
     { year: 2026, realized: '218.95', realized_complete: true, sell_count: 1, income: '88.35', dividend_count: 1, fees: '10.00', taxes: '52.70', },
     { year: 2025, realized: '0.00', realized_complete: true, sell_count: 0, income: '120.00', dividend_count: 1, fees: '0.00', taxes: '30.00' },
@@ -533,6 +537,7 @@ export const MOCK_PORTFOLIO_REVIEW: PortfolioReviewResponse = {
   unverifiable_changes: 2,
   ignored_other: [],
   ignored_count: 2,
+  ignored_securities_count: 1,
   new_securities: [
     {
       id: 41, account_id: 12, account_label: 'Depot Musterbroker', isin: 'DE000000DDD4', wkn: 'DDD444', name: 'Delta Holding SE',

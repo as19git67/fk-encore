@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import Button from 'primevue/button'
 import Chart from 'primevue/chart'
 import SelectButton from 'primevue/selectbutton'
+import Message from 'primevue/message'
+import { useConfirm } from 'primevue/useconfirm'
 import PageLayout from '../../components/layout/PageLayout.vue'
 import ScrollX from '../../components/layout/ScrollX.vue'
 import EmptyState from '../../components/layout/EmptyState.vue'
@@ -17,7 +19,9 @@ import {
   getPortfolioPosition,
   getPositionNews,
   markPositionNewsSeen,
+  removePositionFromDepot,
   type PortfolioPositionResponse,
+  type PositionDepotSecurity,
   type PortfolioTransaction,
   type PositionNewsResponse,
 } from '../../api/finance'
@@ -77,6 +81,77 @@ async function load() {
 
 onMounted(load)
 watch([positionKey, () => accountIds.value.join(','), () => route.query.closedDepots], () => void load())
+
+// ── Taking a security out of a depot ────────────────────────────────
+// A security added by mistake (a booking or a paper read wrong, a
+// proposal taken in too quickly) leaves the depot here: from then on it is
+// ignored there, and the rows readings booked for it go. The user's own
+// rows and the bank's stay; what the bank still holds cannot be removed.
+// "Zu prüfen › Ignoriertes zeigen" on the portfolio page undoes it.
+
+const confirm = useConfirm()
+const removing = ref<number | null>(null)
+const removeNotice = ref<string | null>(null)
+
+function depotStatusText(d: PositionDepotSecurity): string {
+  if (d.bank_held) return 'von der Bank gemeldet'
+  switch (d.status) {
+    case 'confirmed': return 'aufgenommen'
+    case 'proposed': return 'vorgeschlagen'
+    case 'ignored': return 'entfernt'
+    default: return 'ohne Eintrag im Wertpapier-Stamm'
+  }
+}
+
+/** What readings booked for it in the depot: transactions from papers and bookings, holdings from statements. */
+function readRows(d: PositionDepotSecurity): string {
+  const tx = `${d.removable_transactions} Transaktion${d.removable_transactions === 1 ? '' : 'en'}`
+  if (d.removable_holdings === 0) return tx
+  return `${tx}, ${d.removable_holdings} Bestandsst${d.removable_holdings === 1 ? 'and' : 'ände'}`
+}
+
+function canRemove(d: PositionDepotSecurity): boolean {
+  return d.writable && !d.bank_held && d.status !== 'ignored'
+}
+
+function askRemove(d: PositionDepotSecurity) {
+  const name = position.value?.name ?? position.value?.isin ?? position.value?.wkn ?? positionKey.value
+  const what: string[] = []
+  if (d.removable_transactions > 0) {
+    what.push(`${d.removable_transactions} Transaktion${d.removable_transactions === 1 ? '' : 'en'} aus Belegen und Buchungen`)
+  }
+  if (d.removable_holdings > 0) {
+    what.push(`${d.removable_holdings} Bestandsst${d.removable_holdings === 1 ? 'and' : 'ände'} aus Depotauszügen`)
+  }
+  confirm.require({
+    header: 'Wertpapier aus Depot entfernen',
+    message:
+      `„${name}“ wird aus „${d.account_label}“ entfernt. ` +
+      (what.length > 0 ? `Gelöscht werden ${what.join(' und ')}. ` : 'Es gibt keine eingelesenen Zeilen zu löschen. ') +
+      'Eigene Einträge bleiben. Künftige Buchungen und Belege zu diesem Wertpapier werden in diesem Depot ignoriert; ' +
+      'rückgängig machen lässt es sich auf der Portfolio-Seite unter „Zu prüfen“ mit „Ignoriertes zeigen“.',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Entfernen', severity: 'danger' },
+    accept: () => { void remove(d) },
+  })
+}
+
+async function remove(d: PositionDepotSecurity) {
+  removing.value = d.account_id
+  try {
+    const r = await removePositionFromDepot(positionKey.value, d.account_id)
+    removeNotice.value =
+      `Aus „${d.account_label}“ entfernt: ${r.transactions_removed} Transaktionen, ${r.holdings_removed} Bestandsstände.`
+    await load()
+    // Nothing of the position is left in scope: back to the portfolio.
+    if (!data.value) goBack()
+  } catch (e: any) {
+    error.value = e?.message ?? 'Wertpapier konnte nicht entfernt werden'
+  } finally {
+    removing.value = null
+  }
+}
 
 // ── News ─────────────────────────────────────────────────────────────
 // What the news provider brought about this security (`documentation/plans/
@@ -323,6 +398,7 @@ function transactionCash(tx: PortfolioTransaction): string {
 
     <template #notice>
       <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = null" />
+      <Message v-if="removeNotice" severity="success" closable @close="removeNotice = null">{{ removeNotice }}</Message>
     </template>
 
     <PageSkeleton v-if="loading && !data" variant="list" :count="6" />
@@ -490,6 +566,45 @@ function transactionCash(tx: PortfolioTransaction): string {
                   <span v-if="a.cost_basis_source === 'tx-wac'" class="pp-cost-source" title="Aus Käufen berechnet (gewichteter Durchschnitt)">∅</span>
                 </td>
                 <td class="pp-date">{{ formatIsoDate(a.as_of) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </ScrollX>
+      </section>
+
+      <!-- ── Securities master per depot ─────────────────────────── -->
+      <section v-if="data.depots?.length" class="pp-section" aria-labelledby="pp-master-heading">
+        <h2 id="pp-master-heading">Zuordnung zu Depots</h2>
+        <p class="pp-master-hint">
+          Wurde das Wertpapier fälschlich einem Depot zugeordnet, nimm es hier heraus. Was die Bank im Bestand meldet, bleibt.
+        </p>
+        <ScrollX>
+          <table class="pp-table">
+            <thead>
+              <tr>
+                <th>Depot</th>
+                <th>Stand</th>
+                <th class="pp-col-num">Eingelesen</th>
+                <th><span class="visually-hidden">Aktion</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="d in data.depots" :key="d.account_id">
+                <td>{{ d.account_label }}</td>
+                <td>{{ depotStatusText(d) }}</td>
+                <td class="pp-col-num">{{ readRows(d) }}</td>
+                <td>
+                  <Button
+                    v-if="canRemove(d)"
+                    label="Aus Depot entfernen"
+                    icon="pi pi-trash"
+                    size="small"
+                    text
+                    severity="danger"
+                    :loading="removing === d.account_id"
+                    @click="askRemove(d)"
+                  />
+                </td>
               </tr>
             </tbody>
           </table>
@@ -678,6 +793,12 @@ function transactionCash(tx: PortfolioTransaction): string {
   flex-direction: column;
   gap: var(--space-2);
 }
+.pp-master-hint {
+  margin: 0 0 var(--space-2);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+
 .pp-section h2 {
   margin: 0;
   font-size: var(--text-xl);

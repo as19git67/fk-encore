@@ -40,13 +40,16 @@ import {
   isIgnoredForDepots,
 } from "./depot-document-enrichment";
 import { storedPaperType } from "./depot-paper-type";
-import { admitSecurity, findSecurity, type SecurityStatus } from "./depot-securities";
+import { admitSecurity, findConfirmedByName, findSecurity, type SecurityStatus } from "./depot-securities";
 import { STRONG_SETTLEMENT_PATTERN } from "./depot-settlement-parser";
 import type { LlmMode, LlmStatus } from "./depot-settlement-reader";
 import {
+  HOLDINGS_TABLE_PATTERN,
+  holdingsSection,
   inspectDepotStatement,
   mergeStatement,
   parseLlmStatement,
+  repairWkn,
   STATEMENT_CANDIDATE_PATTERN,
   type LlmStatement,
   type MergedPosition,
@@ -164,7 +167,8 @@ async function readStatement(documentId: number, rules: StatementInspection, tex
       llmStatus = "cached";
     } else if (mode === "allow") {
       try {
-        const raw = await extractStatementPositions(text);
+        // A long report: the model reads its head and the holdings table, not the account pages before it.
+        const raw = await extractStatementPositions(holdingsSection(text) ?? text);
         await db
           .insert(financeDocumentStatementLlm)
           .values({ document_id: documentId, values: raw })
@@ -185,13 +189,16 @@ async function readStatement(documentId: number, rules: StatementInspection, tex
   // Positions only count with an identifier the text shows: the model reads, the text checks.
   if (llm) {
     const compact = text.toUpperCase().replace(/\s+/g, "");
+    // An identifier as OCR printed it may carry an O for a 0: compared with
+    // O/0 and I/1 alike (repairWkn maps both the same way).
+    const compactWkn = repairWkn(compact);
     llm = {
       ...llm,
       positions: llm.positions
         .map((p) => ({
           ...p,
-          isin: p.isin && compact.includes(p.isin) ? p.isin : null,
-          wkn: p.wkn && compact.includes(p.wkn) ? p.wkn : null,
+          isin: p.isin && compactWkn.includes(repairWkn(p.isin)) ? p.isin : null,
+          wkn: p.wkn && compactWkn.includes(p.wkn) ? p.wkn : null,
         }))
         .filter((p) => p.isin || p.wkn),
     };
@@ -220,6 +227,31 @@ async function depotsConfirming(positions: MergedPosition[], accountIds: number[
     .from(financeDepotSecurity)
     .where(and(...conditions));
   return rows.map((r) => r.account_id);
+}
+
+/** The depots in scope where a WKN-only position's name stands for exactly one confirmed security. */
+async function depotsConfirmingByName(positions: MergedPosition[], accountIds: number[] | null): Promise<number[]> {
+  const named = positions.filter((p) => !p.isin && p.name);
+  if (named.length === 0) return [];
+  const conditions = [eq(financeDepotSecurity.status, "confirmed")];
+  if (accountIds) {
+    if (accountIds.length === 0) return [];
+    conditions.push(inArray(financeDepotSecurity.account_id, accountIds));
+  }
+  const candidates = await db
+    .selectDistinct({ account_id: financeDepotSecurity.account_id })
+    .from(financeDepotSecurity)
+    .where(and(...conditions));
+  const out: number[] = [];
+  for (const c of candidates) {
+    for (const p of named) {
+      if (await findConfirmedByName(c.account_id, p.name)) {
+        out.push(c.account_id);
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 function fixed(n: number | null, scale: number): string | null {
@@ -306,7 +338,9 @@ export async function readDepotStatement(
     if (accountId !== null) result.matched_by = "depot_number";
   }
   if (accountId === null) {
-    const depots = await depotsConfirming(positions, scope);
+    let depots = await depotsConfirming(positions, scope);
+    // WKN-only rows against a master that holds ISINs: the names place the paper.
+    if (depots.length === 0) depots = await depotsConfirmingByName(positions, scope);
     if (depots.length === 1) {
       accountId = depots[0]!;
       result.matched_by = "securities";
@@ -324,6 +358,11 @@ export async function readDepotStatement(
   let existing = 0;
   for (const p of positions) {
     const ids = { isin: p.isin, wkn: p.wkn, name: p.name };
+    // A row with the WKN alone, for a security the master knows only by its ISIN: the name tells.
+    if (!ids.isin && ids.wkn && !(await findSecurity(accountId, ids))) {
+      const byName = await findConfirmedByName(accountId, p.name);
+      if (byName) ids.isin = byName.isin;
+    }
     // A dry run only looks: no proposal is written for what it sees.
     const status: SecurityStatus = dryRun
       ? ((await findSecurity(accountId, ids))?.status as SecurityStatus | undefined) ?? "proposed"
@@ -430,6 +469,8 @@ export async function enrichPendingStatements(
     isNotNull(documents.extracted_text),
     or(
       and(sql`${documents.extracted_text} ~* ${STATEMENT_PATTERN}`, sql`${documents.extracted_text} !~* ${STRONG_PATTERN}`),
+      // A report with a holdings table among its trades and account pages.
+      sql`${documents.extracted_text} ~* ${HOLDINGS_TABLE_PATTERN}`,
       // Worded unlike anything the rules know, but the model took it for a statement.
       inArray(documents.id, documentsOfPaperType(["statement"])),
     )!,

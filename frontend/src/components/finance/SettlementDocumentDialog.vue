@@ -200,6 +200,20 @@ const CHECK_TEXT: Record<string, string> = {
   booking_net: 'Betrag = Buchung auf dem Konto',
 }
 
+/** The net equation in the words of the paper it is checked on. */
+const NET_EQUATION_TEXT: Record<string, string> = {
+  dividend: 'Brutto − Gebühren − Steuern = Betrag',
+  tax_statement: 'Vor Steuern − Steuern = nach Steuern',
+}
+
+function checkText(name: string): string {
+  if (name === 'net_equation') {
+    const own = NET_EQUATION_TEXT[inspection.value?.paper_type ?? '']
+    if (own) return own
+  }
+  return CHECK_TEXT[name] ?? name
+}
+
 const hasLlm = computed(() => inspection.value?.llm_fallback_used === true)
 
 const recognisedCount = computed(() => visibleRows.value.filter((r) => fieldValue(r.key) !== null).length)
@@ -336,9 +350,9 @@ function openInDocuments() {
                 :key="row.key"
                 :class="{ 'sd-missing': fieldValue(row.key) === null, 'sd-disagree': sourceOf(row.key)?.disagree }"
               >
-                <td>{{ rowLabel(row) }}</td>
+                <td class="sd-field">{{ rowLabel(row) }}</td>
                 <td class="sd-value">{{ fieldValue(row.key) ?? 'nicht gefunden' }}</td>
-                <td>
+                <td class="sd-src">
                   <span
                     v-if="sourceOf(row.key)?.source"
                     class="sd-source"
@@ -363,7 +377,7 @@ function openInDocuments() {
                 :class="c.result === 'ok' ? 'pi pi-check-circle' : c.result === 'failed' ? 'pi pi-times-circle' : 'pi pi-minus-circle'"
                 aria-hidden="true"
               />
-              {{ CHECK_TEXT[c.name] ?? c.name }}:
+              {{ checkText(c.name) }}:
               {{ c.result === 'ok' ? 'stimmt' : c.result === 'failed' ? 'stimmt nicht' : 'nicht prüfbar' }}
               <span v-if="c.detail && c.result !== 'skipped'" class="sd-check-detail">({{ c.detail }})</span>
             </li>
@@ -492,6 +506,7 @@ function openInDocuments() {
 .sd-label {
   color: var(--p-text-muted-color);
   font-style: italic;
+  overflow-wrap: anywhere;
 }
 .sd-label-after {
   display: block;
@@ -583,6 +598,59 @@ function openInDocuments() {
 }
 .sd-spacer {
   flex: 1 1 auto;
+}
+
+/* A phone has no room for four columns: each field becomes a block — its
+   name with the source beside it, the value below, then what rules and
+   model read. Values keep their width instead of breaking mid-number. */
+@media (max-width: 639px) {
+  .sd-fields,
+  .sd-fields tbody {
+    display: block;
+  }
+  .sd-fields thead {
+    display: none;
+  }
+  .sd-fields tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'field src'
+      'value value'
+      'label label';
+    column-gap: var(--space-2);
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--p-content-border-color);
+  }
+  .sd-fields td {
+    border-bottom: none;
+    padding: 0;
+  }
+  .sd-field {
+    grid-area: field;
+    font-weight: 600;
+  }
+  .sd-src {
+    grid-area: src;
+  }
+  .sd-value {
+    grid-area: value;
+    font-size: var(--text-base);
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  .sd-label {
+    grid-area: label;
+  }
+  .sd-label:empty {
+    display: none;
+  }
+  .sd-fields tr.sd-disagree {
+    background: rgba(234, 179, 8, 0.12);
+  }
+  .sd-fields tr.sd-disagree td {
+    background: none;
+  }
 }
 
 @media (max-width: 767px) {

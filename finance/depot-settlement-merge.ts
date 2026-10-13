@@ -24,7 +24,7 @@
  * trace. The checks are what lets either one be trusted.
  */
 
-import { isinChecksumValid } from "./depot-derivation";
+import { isinChecksumValid, repairIsin } from "./depot-derivation";
 import { isMoneyOut, type SettlementExtraction, type SettlementKind } from "./depot-settlement-parser";
 
 /** The fields a reading consists of, in the inspection view's order. */
@@ -131,7 +131,9 @@ export function parseLlmSettlement(raw: Record<string, unknown>): SettlementValu
   const kindRaw = str(raw.kind)?.toLowerCase();
   const kind: SettlementKind | null =
     kindRaw === "buy" || kindRaw === "sell" || kindRaw === "dividend" ? kindRaw : null;
-  const isin = str(raw.isin)?.toUpperCase().replace(/\s/g, "") ?? null;
+  // A model copying OCR'd text copies its slips too ("DEOOO…" for "DE000…").
+  const isinRaw = str(raw.isin)?.toUpperCase().replace(/\s/g, "") ?? null;
+  const isin = isinRaw ? repairIsin(isinRaw) : null;
   const wkn = str(raw.wkn)?.toUpperCase().replace(/\s/g, "") ?? null;
   const depot = str(raw.depot_number)?.replace(/\D/g, "") ?? null;
   const net = amount(raw.net);
@@ -257,6 +259,15 @@ export function settlementChecks(
   return checks;
 }
 
+/** The fields each check reads. */
+const CHECK_FIELDS: Record<CheckName, MergeField[]> = {
+  net_equation: ["kind", "gross", "fees", "tax", "net"],
+  quantity_price: ["quantity", "price", "gross"],
+  isin_checksum: ["isin"],
+  date_plausible: ["executedAt"],
+  booking_net: ["kind", "gross", "fees", "tax", "net"],
+};
+
 function score(checks: SettlementCheck[]): { ok: number; failed: number } {
   return {
     ok: checks.filter((c) => c.result === "ok").length,
@@ -357,6 +368,8 @@ export function mergeSettlement(
   // whose figures add up wins.
   const disagreeing = MERGE_FIELDS.filter((f) => r[f] !== null && l[f] !== null && !same(f, r[f], l[f]));
   const choices = disagreeing.length <= MAX_COMBINED_FIELDS ? 1 << disagreeing.length : 2;
+  /** Checks some combination does not fail: the disagreement decides them. */
+  const passedSomewhere = new Set<CheckName>();
   let best: { values: SettlementValues; checks: SettlementCheck[]; fromLlm: Set<MergeField> } | null = null;
   let bestKey: number[] | null = null;
   const better = (a: number[], b: number[]) => {
@@ -370,6 +383,9 @@ export function mergeSettlement(
     );
     const values = combine(r, l, fromLlm);
     const checks = settlementChecks(values, today, bookingNet);
+    for (const c of checks) {
+      if (c.result !== "failed") passedSomewhere.add(c.name);
+    }
     const s = score(checks);
     // Fewer failures wins, then more passes. On a tie: the kind stays with
     // the rules; a model value the text does not show where such a value
@@ -402,7 +418,17 @@ export function mergeSettlement(
   // Unverified only when no combination passes the checks: the best one is
   // tried first, so a failure or no pass at all here means none did.
   const materialDisagreement = fields.some((f) => f.disagree && MATERIAL_FIELDS.includes(f.field));
-  const settled = checks.some((c) => c.result === "ok") && !checks.some((c) => c.result === "failed");
+  // A check that fails whichever source each field comes from, and reads
+  // none of the fields they disagree on (an ISIN both read with the same
+  // OCR slip, while they differ on the date), says nothing about the
+  // disagreement: it does not keep it from being settled — without a
+  // disagreement it never did either. A check over a disputed field that
+  // no combination passes still leaves the reading unverified.
+  const independent = (name: CheckName) =>
+    !passedSomewhere.has(name) && !CHECK_FIELDS[name].some((f) => disagreeing.includes(f));
+  const settled =
+    checks.some((c) => c.result === "ok") &&
+    !checks.some((c) => c.result === "failed" && !independent(c.name));
   const verdict: MergeResult["verdict"] = materialDisagreement && !settled ? "unverified" : "ok";
 
   // A statement that prints the Kurswert and the charges but no final

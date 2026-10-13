@@ -8,6 +8,7 @@ import {
   settlementChecks,
   type SettlementValues,
 } from "./depot-settlement-merge";
+import { extractIsin, repairIsin } from "./depot-derivation";
 
 // A checksum-valid ISIN for the checks (the synthetic DE000000AAA1 used
 // elsewhere is shape-only). DE0007164600 is a well-known public ISIN of a
@@ -27,6 +28,25 @@ const buy = (over: Partial<SettlementValues> = {}): SettlementValues => ({
   net: -2966.4,
   currency: "EUR",
   ...over,
+});
+
+describe("repairIsin", () => {
+  it("reads O and I after the country code as 0 and 1 when that makes the check digit hold", () => {
+    expect(repairIsin("DEOOOOOOAAA1")).toBe("DE000000AAA1");
+    // A partial slip, and a reading whose O passes the check digit by chance.
+    expect(repairIsin("DE00000ODDD3")).toBe("DE000000DDD3");
+    expect(repairIsin("DEOO0000AAA1")).toBe("DE000000AAA1");
+    expect(repairIsin(VALID_ISIN)).toBe(VALID_ISIN);
+  });
+
+  it("does not guess when no replacement holds", () => {
+    expect(repairIsin("DE000000DDDO")).toBe("DE000000DDDO");
+    expect(repairIsin("DE000000AAA2")).toBe("DE000000AAA2");
+  });
+
+  it("is used where the rules find an ISIN in text", () => {
+    expect(extractIsin("Wertpapier ISIN DEOOOOOOAAA1 Stück 5")).toBe("DE000000AAA1");
+  });
 });
 
 describe("isinChecksumValid", () => {
@@ -247,6 +267,21 @@ describe("mergeSettlement", () => {
   it("is unverified when they disagree and neither adds up", () => {
     const r = mergeSettlement(buy({ net: -3100 }), buy({ net: -3200 }), today);
     expect(r.verdict).toBe("unverified");
+  });
+
+  it("does not let a check both readings fail alike keep a disagreement elsewhere unsettled", () => {
+    // Both read the same misprinted ISIN (its check digit fails either way)
+    // and differ on the date: the figures add up, the date is decided.
+    const badIsin = "DE000000AAA2";
+    const r = mergeSettlement(buy({ isin: badIsin, executedAt: "2026-03-12" }), buy({ isin: badIsin }), today);
+    expect(r.checks.find((c) => c.name === "isin_checksum")!.result).toBe("failed");
+    expect(r.verdict).toBe("ok");
+    expect(r.values.executedAt).toBe("2026-03-14");
+  });
+
+  it("repairs an ISIN the model copied with OCR's O for 0", () => {
+    const v = parseLlmSettlement({ kind: "buy", isin: "LUOOOOOOBBB4", net: 10 });
+    expect(v.isin).toBe("LU000000BBB4");
   });
 
   it("derives the net from Kurswert and charges when no source printed one", () => {

@@ -67,6 +67,10 @@ import {
   financeTransaction,
 } from "../db/schema";
 import { admitSecurity } from "./depot-securities";
+import { isinChecksumValid, repairIsin } from "./isin";
+
+// Kept here for the modules that import them from the derivation.
+export { isinChecksumValid, repairIsin };
 
 console.log("[boot] finance/depot-derivation.ts: all imports resolved");
 
@@ -80,32 +84,22 @@ const ISIN_RE = /\b[A-Z]{2}[A-Z0-9]{9}[0-9]\b/;
  */
 const SPACED_ISIN_RE = /\bISIN[.:\s]*((?:[A-Z0-9] ?){11}[0-9])(?![A-Z0-9])/;
 
-/** ISO 6166 check digit: letters to numbers (A=10 … Z=35), then Luhn over the digits. */
-export function isinChecksumValid(isin: string): boolean {
-  if (!/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(isin)) return false;
-  const digits = isin
-    .split("")
-    .map((c) => (/\d/.test(c) ? c : String(c.charCodeAt(0) - 55)))
-    .join("");
-  let sum = 0;
-  let double = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let d = Number(digits[i]);
-    if (double) {
-      d *= 2;
-      if (d > 9) d -= 9;
-    }
-    sum += d;
-    double = !double;
-  }
-  return sum % 10 === 0;
-}
+
+/** An ISIN whose check digit OCR spoilt with an O or I in its place. */
+const ISIN_LOOKALIKE_RE = /\b[A-Z]{2}[A-Z0-9]{9}[0-9OI]\b/;
 
 /** Extract the first ISIN appearing in a free-text field, or null. */
 export function extractIsin(text: string | null | undefined): string | null {
   if (!text) return null;
-  const m = text.match(ISIN_RE);
-  if (m) return m[0];
+  const m = text.match(ISIN_RE) ?? text.match(ISIN_LOOKALIKE_RE);
+  if (m) {
+    const repaired = repairIsin(m[0]);
+    // A valid-shaped one is taken as before (repaired where that holds). A
+    // lookalike only when its repair holds and it looks like an ISIN at all:
+    // a capitalised word could pass a check digit by chance.
+    if (/\d$/.test(m[0])) return repaired;
+    if (isinChecksumValid(repaired) && (m[0].match(/\d/g) ?? []).length >= 3) return repaired;
+  }
   const spaced = text.match(SPACED_ISIN_RE);
   if (!spaced) return null;
   const isin = spaced[1]!.replace(/ /g, "");

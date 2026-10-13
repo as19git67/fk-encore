@@ -48,6 +48,7 @@ import {
 } from "./depot-settlement-parser";
 import type { SettlementValues } from "./depot-settlement-merge";
 import { admitSecurity } from "./depot-securities";
+import { isinChecksumValid } from "./isin";
 import { documentsOfPaperType, SETTLEMENT_PAPER_TYPES } from "./depot-paper-type";
 import {
   readSettlement,
@@ -727,7 +728,9 @@ export async function enrichDocument(
     return result;
   }
   const toParsed = (rd: SettlementReading): SettlementExtraction | null => {
-    const v = rd.merge.values;
+    // An ISIN whose check digit fails even after repair is no identifier:
+    // booked under it, the position would split from the bank's.
+    const v = { ...rd.merge.values, isin: rd.merge.values.isin && isinChecksumValid(rd.merge.values.isin) ? rd.merge.values.isin : null };
     const p: SettlementExtraction | null =
       v.kind && (v.isin || v.wkn) ? { ...v, kind: v.kind, markers: [] } : null;
     if (p && !p.executedAt && doc.doc_date) p.executedAt = doc.doc_date.slice(0, 10);
