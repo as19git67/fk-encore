@@ -1,6 +1,6 @@
 # Assistant: one chat over everything the server knows
 
-Status: concept, nothing implemented yet.
+Status: concept, nothing implemented yet. Tracking issue #1524, stages #1525–#1534.
 
 ## Problem
 
