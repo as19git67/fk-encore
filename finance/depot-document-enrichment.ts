@@ -48,7 +48,7 @@ import {
 } from "./depot-settlement-parser";
 import type { SettlementValues } from "./depot-settlement-merge";
 import { admitSecurity } from "./depot-securities";
-import { isinChecksumValid } from "./depot-derivation";
+import { isinChecksumValid } from "./isin";
 import { documentsOfPaperType, SETTLEMENT_PAPER_TYPES } from "./depot-paper-type";
 import {
   readSettlement,

@@ -16,7 +16,7 @@
 import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 
 import db from "../db/database";
-import { isinChecksumValid } from "./depot-derivation";
+import { isinChecksumValid } from "./isin";
 import {
   financeAccountHolding,
   financeDepotSecurity,
