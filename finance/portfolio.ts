@@ -73,6 +73,7 @@ import { reconcileHoldings, type HoldingGap } from "./depot-holding-reconciliati
 import { enrichPendingStatements, readDepotStatement, type StatementStats } from "./depot-statement-enrichment";
 import { classifyPendingPapers } from "./depot-paper-type";
 import {
+  bankHolding,
   bankHolds,
   decideSecurity,
   evidenceDocumentIds,
@@ -1360,8 +1361,13 @@ export interface PositionDepotSecurity {
   account_label: string;
   /** The master's status; null when the depot has no entry (rows from before the master). */
   status: SecurityStatus | null;
-  /** The bank's latest snapshot lists it: it cannot be removed, the bank would bring it back. */
+  /**
+   * The bank's latest snapshot lists it and no newer snapshot of the depot
+   * says otherwise: it cannot be removed, the bank would bring it back.
+   */
   bank_held: boolean;
+  /** Day of the bank's latest snapshot when that lists it — current or outdated by a newer statement. */
+  bank_as_of: string | null;
   /** The caller may write to the depot. */
   writable: boolean;
   /** Transactions read from papers or derived from bookings that removing it deletes. */
@@ -1623,16 +1629,17 @@ async function positionDepotSecurities(
   const out: PositionDepotSecurity[] = [];
   for (const accountId of position.account_ids) {
     if (!labelById.has(accountId)) continue;
-    const [entry, bankHeld, counts] = await Promise.all([
+    const [entry, bank, counts] = await Promise.all([
       findSecurity(accountId, ids),
-      bankHolds(accountId, ids),
+      bankHolding(accountId, ids),
       removalPreview(accountId, ids),
     ]);
     out.push({
       account_id: accountId,
       account_label: labelById.get(accountId) ?? "",
       status: (entry?.status as SecurityStatus | undefined) ?? null,
-      bank_held: bankHeld,
+      bank_held: bank?.current ?? false,
+      bank_as_of: bank?.as_of ?? null,
       writable: writable.has(accountId),
       removable_transactions: counts.transactions,
       removable_holdings: counts.holdings,

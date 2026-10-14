@@ -25,12 +25,17 @@
  * them carries no quantity (a giro-derived row without its settlement),
  * or a split / corporate action is among them — is counted as
  * unverifiable, not reported as a gap.
+ *
+ * A security the depot ignores (taken out by the user, or a proposal
+ * turned down) is left out: its read transactions are gone, so the
+ * bank's old snapshots of it would otherwise show as gaps forever.
  */
 
 import { asc, inArray } from "drizzle-orm";
 
 import db from "../db/database";
 import { financeAccountHolding, financeDepotTransaction } from "../db/schema";
+import { ignoredSecurities, isIgnoredIn } from "./depot-securities";
 
 /** Shares below this are rounding noise, not a gap. */
 const QUANTITY_EPSILON = 1e-6;
@@ -199,7 +204,7 @@ export async function reconcileHoldings(
   const result: PositionReconciliation = { gaps: [], unverifiable: 0 };
   if (accountIds.length === 0) return result;
 
-  const [holdings, txs] = await Promise.all([
+  const [holdings, txs, ignored] = await Promise.all([
     db
       .select({
         account_id: financeAccountHolding.account_id,
@@ -224,6 +229,7 @@ export async function reconcileHoldings(
       })
       .from(financeDepotTransaction)
       .where(inArray(financeDepotTransaction.account_id, accountIds)),
+    ignoredSecurities(accountIds),
   ]);
 
   // Per depot: every snapshot day, and the amount per position per day.
@@ -236,6 +242,7 @@ export async function reconcileHoldings(
     daysByAccount.set(h.account_id, days);
     const key = keyOf(h);
     if (!key || (onlyKey !== null && key !== onlyKey)) continue;
+    if (isIgnoredIn(ignored, h.account_id, h)) continue;
     const id = `${h.account_id}|${key}`;
     const byDay = amounts.get(id) ?? new Map<string, number>();
     const a = h.amount === null ? 0 : Number(h.amount);
@@ -247,6 +254,7 @@ export async function reconcileHoldings(
   for (const t of txs) {
     const key = keyOf(t);
     if (!key || (onlyKey !== null && key !== onlyKey)) continue;
+    if (isIgnoredIn(ignored, t.account_id, t)) continue;
     const id = `${t.account_id}|${key}`;
     const list = txsById.get(id) ?? [];
     const a = t.amount === null ? null : Number(t.amount);
