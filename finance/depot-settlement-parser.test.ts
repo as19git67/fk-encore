@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   cleanSecurityName,
+  dropTaxRates,
   extractDepotNumber,
   inspectSettlement,
   isPersonName,
@@ -882,5 +883,31 @@ Schlusstag 03.02.2026
 Kurswert EUR 500,00
 Ausmachender Betrag EUR -517, 25`)!;
     expect(s.net).toBe(-517.25);
+  });
+});
+
+describe("parseSettlement — tax lines that state rate and base", () => {
+  // Synthetic: each tax with its rate and the amount it was charged on.
+  const CREDIT = `Ertragsgutschrift
+Beispiel Fonds ISIN DE0000000AA7
+Zahltag 15.03.2026
+Steuerberechnung
+Kapitalertragsteuer 24,51% auf 0,39 EUR 0,09- EUR
+Kirchensteuer 8,00% auf 0,09 EUR 0,01- EUR
+Ausmachender Betrag 0,29 EUR`;
+
+  it("adds every tax, church tax included", () => {
+    expect(parseSettlement(CREDIT)!.tax).toBe(0.1);
+  });
+
+  it("joins a tax whose amount stands on the next line", () => {
+    const s = parseSettlement(CREDIT.replace("0,09 EUR 0,01- EUR", "0,09 EUR\n0,01- EUR"))!;
+    expect(s.tax).toBe(0.1);
+  });
+
+  it("never takes the next label's amount for a tax without one", () => {
+    const s = parseSettlement(CREDIT.replace("auf 0,09 EUR 0,01- EUR", "auf 0,09"))!;
+    expect(s.tax).toBe(0.09);
+    expect(dropTaxRates("Kirchensteuer 8,00% auf 0,09\nAusmachender Betrag 0,29 EUR")).toContain("\nAusmachender");
   });
 });
