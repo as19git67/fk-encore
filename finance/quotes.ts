@@ -22,6 +22,7 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { latestHoldings, visibleDepots } from "./portfolio";
 import { QuoteRateLimitedError, quoteProvider, type HistoryRange } from "./quote-provider";
+import { isoTimestamp, latestQuotes } from "./quote-store";
 
 console.log("[boot] finance/quotes.ts: all imports resolved");
 
@@ -234,10 +235,7 @@ async function storeSeries(
   return written.length;
 }
 
-/** A timestamp as the driver returns it ("2026-02-04 10:00:00+00") in ISO form. */
-function iso(at: string): string {
-  return new Date(at).toISOString();
-}
+const iso = isoTimestamp;
 
 async function pruneIntraday(now: Date): Promise<void> {
   const cutoff = new Date(now.getTime() - INTRADAY_KEEP_DAYS * 24 * 60 * 60_000).toISOString();
@@ -391,18 +389,7 @@ export async function buildQuoteTiles(
   }
   // The newest price of each security, from either kind — a day's range
   // on a closed market would otherwise show nothing.
-  const latest = await db
-    .select({ key: financeQuote.position_key, at: sql<string>`MAX(${financeQuote.at})` })
-    .from(financeQuote)
-    .where(inArray(financeQuote.position_key, keys))
-    .groupBy(financeQuote.position_key);
-  const latestRows = latest.length
-    ? await db
-        .select({ key: financeQuote.position_key, at: financeQuote.at, price: financeQuote.price, currency: financeQuote.currency })
-        .from(financeQuote)
-        .where(sql`(${financeQuote.position_key}, ${financeQuote.at}) IN (${sql.join(latest.map((l) => sql`(${l.key}, ${l.at}::timestamptz)`), sql`, `)})`)
-    : [];
-  const lastByKey = new Map(latestRows.map((r) => [r.key, r]));
+  const lastByKey = await latestQuotes(keys);
   const unread = await unreadNewsCounts(userId, keys, now);
 
   return positions
@@ -423,8 +410,8 @@ export async function buildQuoteTiles(
           : null;
       // The closes end yesterday; the newest price finishes the line.
       const drawn = thin(series).map((r) => ({ at: iso(r.at), price: Number(r.price).toFixed(6) }));
-      if (last && (drawn.length === 0 || iso(last.at) > drawn[drawn.length - 1]!.at)) {
-        drawn.push({ at: iso(last.at), price: Number(last.price).toFixed(6) });
+      if (last && (drawn.length === 0 || last.at > drawn[drawn.length - 1]!.at)) {
+        drawn.push({ at: last.at, price: last.price.toFixed(6) });
       }
       return {
         key: p.key,
@@ -433,8 +420,8 @@ export async function buildQuoteTiles(
         name,
         amount: p.amount.toFixed(8),
         currency,
-        last: last ? { at: iso(last.at), price: Number(last.price).toFixed(6) } : null,
-        value: last ? (p.amount * Number(last.price)).toFixed(2) : null,
+        last: last ? { at: last.at, price: last.price.toFixed(6) } : null,
+        value: last ? (p.amount * last.price).toFixed(2) : null,
         change,
         points: drawn,
         status,

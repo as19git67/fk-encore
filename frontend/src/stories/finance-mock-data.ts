@@ -1,4 +1,4 @@
-import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, PositionNewsResponse, QuotesResponse, SettlementInspection, Tag, Transaction } from '../api/finance'
+import type { Account, AnomalyItem, Bankcontact, OverviewResponse, PortfolioPositionResponse, PortfolioResponse, PortfolioReviewResponse, PortfolioTransaction, PositionHistoryPoint, PositionNewsResponse, QuotesResponse, SettlementInspection, Tag, Transaction } from '../api/finance'
 
 /**
  * Fixtures for the finance stories (issue #1281).
@@ -277,6 +277,8 @@ export const MOCK_PORTFOLIO: PortfolioResponse = {
   mixed_currency: false,
   summary: {
     as_of: '2026-09-30',
+    price_as_of: '2026-10-02',
+    quotes_at: '2026-10-02T13:05:00.000Z',
     market_value: '14250.00',
     cost_basis: '12000.00',
     cost_basis_complete: true,
@@ -306,7 +308,9 @@ export const MOCK_PORTFOLIO: PortfolioResponse = {
       open: true,
       amount: '60.00000000',
       price: '150.000000',
-      price_as_of: '2026-09-30',
+      price_as_of: '2026-10-02',
+      price_source: 'quote',
+      price_at: '2026-10-02T13:05:00.000Z',
       value: '9000.00',
       cost_basis: '7200.00',
       cost_basis_per_unit: '120.000000',
@@ -339,6 +343,8 @@ export const MOCK_PORTFOLIO: PortfolioResponse = {
       amount: '100.00000000',
       price: '52.500000',
       price_as_of: '2026-09-29',
+      price_source: 'bank',
+      price_at: null,
       value: '5250.00',
       cost_basis: '4800.00',
       cost_basis_per_unit: '48.000000',
@@ -371,6 +377,8 @@ export const MOCK_PORTFOLIO: PortfolioResponse = {
       amount: null,
       price: null,
       price_as_of: null,
+      price_source: null,
+      price_at: null,
       value: null,
       cost_basis: null,
       cost_basis_per_unit: null,
@@ -407,6 +415,8 @@ export const MOCK_PORTFOLIO_EMPTY: PortfolioResponse = {
   mixed_currency: false,
   summary: {
     as_of: null,
+    price_as_of: null,
+    quotes_at: null,
     market_value: '0.00',
     cost_basis: '0.00',
     cost_basis_complete: true,
@@ -485,7 +495,9 @@ export const MOCK_PORTFOLIO_POSITION: PortfolioPositionResponse = {
     ['2026-03-01', '60', '146.000000', '8760.00'],
     ['2026-06-01', '60', '143.000000', '8580.00'],
     ['2026-09-30', '60', '150.000000', '9000.00'],
-  ] as Array<[string, string, string, string]>).map(([as_of, amount, price, value]) => ({ as_of, amount, price, value })),
+  ] as Array<[string, string, string, string]>)
+    .map(([as_of, amount, price, value]): PositionHistoryPoint => ({ as_of, amount, price, value, source: 'bank' }))
+    .concat([{ as_of: '2026-10-02', amount: '60', price: '150.000000', value: '9000.00', source: 'quote' as const }]),
   transactions: MOCK_PORTFOLIO_TRANSACTIONS.filter((t) => t.position_key === PF_ISIN_A),
   sales: [
     { transaction_id: 903, account_id: 11, executed_at: '2026-02-03', quantity: '10.00000000', proceeds: '1418.95', cost: '1200.00', cost_per_unit: '120.000000', gain: '218.95' },

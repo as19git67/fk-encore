@@ -38,9 +38,11 @@ import {
   formatIsoDate,
   formatPercent,
   formatQuantity,
+  formatQuoteTime,
   formatSignedCurrency,
   formatSignedPercent,
   gainSign,
+  priceOriginLabel,
 } from '../../utils/financeFormat'
 
 /**
@@ -369,7 +371,12 @@ const hint = computed(() => {
   if (portfolio.value.closed_hidden > 0) {
     parts.push(`${portfolio.value.closed_hidden} geschlossene ausgeblendet`)
   }
-  if (summary.value?.as_of) parts.push(`Stand ${formatIsoDate(summary.value.as_of)}`)
+  if (summary.value?.quotes_at) {
+    if (summary.value.as_of) parts.push(`Bestand ${formatIsoDate(summary.value.as_of)}`)
+    parts.push(`Kurse ${formatQuoteTime(summary.value.quotes_at)}`)
+  } else if (summary.value?.as_of) {
+    parts.push(`Stand ${formatIsoDate(summary.value.as_of)}`)
+  }
   if (portfolio.value.mixed_currency) parts.push('gemischte Währungen — Summen nominal')
   return parts.join(' · ')
 })
@@ -779,9 +786,9 @@ onBeforeUnmount(() => {
                   </span>
                 </td>
                 <td class="pf-col-num">{{ formatQuantity(p.amount) }}</td>
-                <td class="pf-col-num">
+                <td class="pf-col-num" :title="priceOriginLabel(p) ?? undefined">
                   {{ formatCurrency(p.price, p.currency) }}
-                  <span v-if="p.price_as_of && p.price_as_of !== summary.as_of" class="pf-stale" :title="`Kurs vom ${formatIsoDate(p.price_as_of)}`">
+                  <span v-if="p.open && p.price_as_of && p.price_as_of !== summary.price_as_of" class="pf-stale">
                     {{ formatIsoDate(p.price_as_of) }}
                   </span>
                 </td>

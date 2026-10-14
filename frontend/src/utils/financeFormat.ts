@@ -72,6 +72,26 @@ export function formatIsoDate(iso: string | null | undefined): string {
   return `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`
 }
 
+const quoteTimeFormat = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' })
+
+/** A quote's ISO timestamp in local time ("02.10.2026, 15:05"). */
+export function formatQuoteTime(at: string | null | undefined): string {
+  if (!at) return '–'
+  const d = new Date(at)
+  return Number.isNaN(d.getTime()) ? '–' : quoteTimeFormat.format(d)
+}
+
+/** Where a position's price comes from, for a hint or a tooltip. */
+export function priceOriginLabel(p: {
+  price_source: 'quote' | 'bank' | null
+  price_as_of: string | null
+  price_at: string | null
+}): string | null {
+  if (p.price_source === 'quote' && p.price_at) return `Kurs vom ${formatQuoteTime(p.price_at)}`
+  if (p.price_as_of) return `Kurs der Bank vom ${formatIsoDate(p.price_as_of)}`
+  return null
+}
+
 export const DEPOT_KIND_LABELS: Record<string, string> = {
   buy: 'Kauf',
   sell: 'Verkauf',

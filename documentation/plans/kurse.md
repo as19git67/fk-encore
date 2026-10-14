@@ -92,8 +92,26 @@ history is kept in our own database so it outlives the provider.
      the same article is stored once per security. Yahoo gives no
      sentiment. 1.5 s between two feeds.
    - `FINANCE_YAHOO_NEWS=off` switches it off.
-6. **Optional:** today's price in the portfolio overview and the position
-   chart instead of the bank's last snapshot.
+6. **Today's price in the portfolio** — built. The portfolio overview and
+   the position page value an open position at the newest stored quote
+   (minute or close, `finance/quote-store.ts`: `latestQuotes`) instead of
+   the bank's last snapshot, as long as the quote is not older than the
+   snapshot and in the position's currency (a quote in dollars does not
+   value a position kept in euros). Value, unrealized gain, weight and the
+   summary follow; the depots on the position page are valued at the same
+   price so they add up.
+   - `PortfolioPosition.price_source` ("quote" | "bank") and `price_at`
+     (the quote's time); `PortfolioSummary.price_as_of` (newest price
+     day) and `quotes_at` (newest quote used). The overview's hint reads
+     "Bestand <snapshot day> · Kurse <time>", a price older than the
+     newest is marked with its day, and the price's tooltip names its
+     origin.
+   - The position chart continues after the last snapshot with the stored
+     closes (one per Berlin day, `closesAfter`) and ends in the current
+     quote, valued at today's shares (`PositionHistoryPoint.source =
+     "quote"`), drawn dashed.
+   - Days are Berlin days (`quoteDay`): a close stamped at local midnight
+     is 22:00 UTC the evening before.
 
 ## Operations
 

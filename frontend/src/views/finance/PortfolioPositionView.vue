@@ -34,6 +34,7 @@ import {
   formatSignedCurrency,
   formatSignedPercent,
   gainSign,
+  priceOriginLabel,
 } from '../../utils/financeFormat'
 
 /**
@@ -213,7 +214,8 @@ const hint = computed(() => {
   if (p.isin) parts.push(`ISIN ${p.isin}`)
   if (p.wkn) parts.push(`WKN ${p.wkn}`)
   parts.push(p.open ? 'offen' : 'geschlossen')
-  if (p.price_as_of) parts.push(`Kurs vom ${formatIsoDate(p.price_as_of)}`)
+  const origin = priceOriginLabel(p)
+  if (origin) parts.push(origin)
   return parts.join(' · ')
 })
 
@@ -236,6 +238,7 @@ const isDark = useMediaQuery('(prefers-color-scheme: dark)')
 
 const history = computed(() => data.value?.history ?? [])
 const hasChart = computed(() => history.value.length >= 2)
+const hasQuotePoints = computed(() => history.value.some((p) => p.source === 'quote'))
 
 function seriesValue(point: { value: string | null; price: string | null }): number | null {
   const raw = metric.value === 'value' ? point.value : point.price
@@ -313,6 +316,12 @@ const chartData = computed(() => {
         pointRadius: 0,
         pointHitRadius: 8,
         spanGaps: false,
+        // After the bank's last snapshot the line follows the stored
+        // quotes at today's shares: drawn dashed.
+        segment: {
+          borderDash: (ctx: { p1DataIndex: number }) =>
+            points[ctx.p1DataIndex]?.source === 'quote' ? [6, 4] : undefined,
+        },
         order: 2,
       },
       ...markerSets.map((set) => ({ ...set, order: 1 })),
@@ -501,8 +510,11 @@ function transactionCash(tx: PortfolioTransaction): string {
         <div v-if="hasChart" class="pp-chart-wrap">
           <Chart type="line" :data="chartData ?? undefined" :options="chartOptions" class="pp-chart" />
         </div>
+        <p v-if="hasChart && hasQuotePoints" class="pp-muted">
+          Gestrichelt: nach dem letzten Stand der Bank aus den Kursen, mit dem heutigen Bestand.
+        </p>
         <p v-else class="pp-muted">
-          Der Verlauf erscheint, sobald mindestens zwei Tages-Snapshots dieses Wertpapiers vorliegen.
+          Der Verlauf erscheint, sobald mindestens zwei Tage dieses Wertpapiers vorliegen.
         </p>
       </section>
 

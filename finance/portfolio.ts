@@ -50,6 +50,7 @@ import {
   users,
 } from "../db/schema";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
+import { closesAfter, latestQuotes, quoteDay, quoteFitsCurrency, type StoredQuote } from "./quote-store";
 import {
   buyCost,
   computeCostBasis,
@@ -261,11 +262,22 @@ export interface PortfolioPosition {
   open: boolean;
   /** Sum of the current amounts across depots (scale 8). */
   amount: string | null;
-  /** Latest price seen in any depot's snapshot (scale 6). */
+  /**
+   * The current price (scale 6): the newest stored quote when it is not
+   * older than the bank's snapshot and in the position's currency, else
+   * the latest price seen in any depot's snapshot.
+   */
   price: string | null;
   /** Date of that price. */
   price_as_of: string | null;
-  /** Sum of the current values across depots (scale 2). */
+  /** Where the price comes from: the quote provider or the bank's snapshot. */
+  price_source: "quote" | "bank" | null;
+  /** When the quote was priced (ISO timestamp); null for the bank's price. */
+  price_at: string | null;
+  /**
+   * Current value (scale 2): amount × the quote when the price is a
+   * quote, else the sum of the depots' snapshot values.
+   */
   value: string | null;
   /** Sum of the cost bases across depots (scale 2); null when unknown. */
   cost_basis: string | null;
@@ -315,6 +327,10 @@ export interface PortfolioYear {
 export interface PortfolioSummary {
   /** Date of the newest snapshot across the depots; null without snapshots. */
   as_of: string | null;
+  /** Date of the newest price of an open position (quote or snapshot). */
+  price_as_of: string | null;
+  /** When the newest quote used was priced; null when every price is the bank's. */
+  quotes_at: string | null;
   market_value: string;
   /** Sum of the cost bases of the open positions that have one. */
   cost_basis: string;
@@ -404,6 +420,8 @@ interface PositionAcc {
   amount: number;
   price: number | null;
   priceAsOf: string | null;
+  /** The quote's timestamp when the price is a quote. */
+  priceAt: string | null;
   value: number;
   hasValue: boolean;
   costBasis: number;
@@ -439,6 +457,7 @@ function newAcc(key: string): PositionAcc {
     amount: 0,
     price: null,
     priceAsOf: null,
+    priceAt: null,
     value: 0,
     hasValue: false,
     costBasis: 0,
@@ -608,6 +627,8 @@ export function buildPortfolio(
   txs: DepotTxRow[],
   /** Names a security can never have (see householdNames). */
   people: readonly string[] = [],
+  /** The newest stored quote per position key (see latestQuotes). */
+  quotes: ReadonlyMap<string, StoredQuote> = new Map(),
 ): Pick<PortfolioResponse, "summary" | "positions" | "years"> {
   const positions = new Map<string, PositionAcc>();
   const acc = (key: string) => {
@@ -666,6 +687,21 @@ export function buildPortfolio(
     } else if (amount !== null && amount > 0) {
       p.costComplete = false;
     }
+  }
+
+  // 1b. Today's price: a quote not older than the snapshot values the
+  // shares held instead of the bank's price, which is yesterday's at best.
+  for (const p of positions.values()) {
+    if (!p.open || p.amount <= 0) continue;
+    const q = quotes.get(p.key);
+    if (!q || !quoteFitsCurrency(q.currency, p.currency)) continue;
+    const day = quoteDay(q.at);
+    if (p.priceAsOf && day < p.priceAsOf) continue;
+    p.price = q.price;
+    p.priceAsOf = day;
+    p.priceAt = q.at;
+    p.value = p.amount * q.price;
+    p.hasValue = true;
   }
 
   // 2. Transactions → realized, income, fees, taxes, counts, years.
@@ -794,10 +830,14 @@ export function buildPortfolio(
   let taxes = 0;
   let openCount = 0;
   let closedCount = 0;
+  let priceAsOf: string | null = null;
+  let quotesAt: string | null = null;
 
   for (const p of positions.values()) {
     if (p.open) {
       openCount += 1;
+      if (p.priceAsOf && (!priceAsOf || p.priceAsOf > priceAsOf)) priceAsOf = p.priceAsOf;
+      if (p.priceAt && (!quotesAt || p.priceAt > quotesAt)) quotesAt = p.priceAt;
       marketValue += p.value;
       if (p.costComplete && p.costSources.size > 0) costBasis += p.costBasis;
       else costComplete = false;
@@ -839,6 +879,8 @@ export function buildPortfolio(
       amount: p.open ? p.amount.toFixed(8) : null,
       price: p.price === null ? null : p.price.toFixed(6),
       price_as_of: p.priceAsOf,
+      price_source: p.price === null ? null : p.priceAt ? "quote" : "bank",
+      price_at: p.priceAt,
       value: p.open && p.hasValue ? p.value.toFixed(2) : null,
       cost_basis: cost === null ? null : cost.toFixed(2),
       cost_basis_per_unit:
@@ -910,6 +952,8 @@ export function buildPortfolio(
   return {
     summary: {
       as_of: asOf,
+      price_as_of: priceAsOf,
+      quotes_at: quotesAt,
       market_value: marketValue.toFixed(2),
       cost_basis: costBasis.toFixed(2),
       cost_basis_complete: costComplete,
@@ -961,6 +1005,16 @@ async function loadTransactions(accountIds: number[]): Promise<DepotTxRow[]> {
     .where(inArray(financeDepotTransaction.account_id, accountIds));
 }
 
+/** The keys the quotes are kept under: the held securities with an ISIN or WKN. */
+function quotedKeys(holdings: HoldingRow[]): string[] {
+  const keys = new Set<string>();
+  for (const h of holdings) {
+    const key = h.isin || h.wkn;
+    if (key && Number(h.amount) > 0) keys.add(key);
+  }
+  return [...keys];
+}
+
 function scopeCurrency(accounts: DepotAccount[]): { currency: string; mixed: boolean } {
   const codes = new Set(accounts.map((a) => a.currency_code));
   if (codes.size === 0) return { currency: "EUR", mixed: false };
@@ -997,13 +1051,14 @@ export const getPortfolio = api(
       householdNames(),
     ]);
     const { currency, mixed } = scopeCurrency(depots);
+    const quotes = await latestQuotes(quotedKeys(holdings));
 
     return {
       accounts: allDepots,
       closed_hidden: closedHidden,
       currency,
       mixed_currency: mixed,
-      ...buildPortfolio(holdings, txs, people),
+      ...buildPortfolio(holdings, txs, people, quotes),
     };
   },
 );
@@ -1217,6 +1272,38 @@ export interface PositionHistoryPoint {
   price: string | null;
   /** Sum of the values that day (scale 2). */
   value: string | null;
+  /** "bank": a snapshot; "quote": a close or today's quote after the last snapshot. */
+  source: "bank" | "quote";
+}
+
+/**
+ * The days after the last snapshot, from the stored closes and ending in
+ * the position's current quote, each valued at today's shares. Empty when
+ * the position's price is not a quote.
+ */
+async function quoteHistory(position: PortfolioPosition, lastSnapshot: string | null): Promise<PositionHistoryPoint[]> {
+  if (position.price_source !== "quote" || position.price === null || position.price_at === null || position.amount === null) return [];
+  const amount = Number(position.amount);
+  const point = (as_of: string, price: number): PositionHistoryPoint => ({
+    as_of,
+    amount: position.amount,
+    price: price.toFixed(6),
+    value: (amount * price).toFixed(2),
+    source: "quote",
+  });
+  const after = lastSnapshot ?? quoteDay(position.price_at);
+  const out = lastSnapshot
+    ? (await closesAfter(position.key, after))
+        .filter((c) => quoteFitsCurrency(c.currency, position.currency))
+        .map((c) => point(c.day, c.price))
+    : [];
+  // The current price finishes the line: today's close so far, or a new day.
+  const today = position.price_as_of!;
+  if (lastSnapshot !== null && today <= lastSnapshot) return out;
+  const price = Number(position.price);
+  if (out.length > 0 && out[out.length - 1]!.as_of === today) out[out.length - 1] = point(today, price);
+  else out.push(point(today, price));
+  return out;
 }
 
 export interface PositionSale {
@@ -1315,7 +1402,7 @@ export const getPortfolioPosition = api(
       loadTransactions(ids),
       householdNames(),
     ]);
-    const built = buildPortfolio(holdings, txs, people);
+    const built = buildPortfolio(holdings, txs, people, await latestQuotes(quotedKeys(holdings)));
     const position = built.positions.find((p) => p.key === key);
     if (!position) throw APIError.notFound(`position ${key} not found`);
 
@@ -1338,7 +1425,12 @@ export const getPortfolioPosition = api(
         account_id: h.account_id,
         account_label: labelById.get(h.account_id) ?? "",
         amount: h.amount,
-        value: h.value,
+        // Valued at the position's price when that is a quote, so the
+        // depots add up to the position.
+        value:
+          position.price_source === "quote" && position.price !== null && num(h.amount) !== null
+            ? (num(h.amount)! * Number(position.price)).toFixed(2)
+            : h.value,
         cost_basis: valuation.costBasisTotal,
         cost_basis_source: valuation.source,
         as_of: dateOnly(h.as_of),
@@ -1390,7 +1482,9 @@ export const getPortfolioPosition = api(
         amount: d.hasAmount ? d.amount.toFixed(8) : null,
         price: d.price === null ? null : d.price.toFixed(6),
         value: d.hasValue ? d.value.toFixed(2) : null,
+        source: "bank" as const,
       }));
+    history.push(...(await quoteHistory(position, history[history.length - 1]?.as_of ?? null)));
 
     // Sales, replayed per depot exactly as the realized figure is.
     const sales: PositionSale[] = [];
