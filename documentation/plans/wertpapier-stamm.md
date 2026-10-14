@@ -172,6 +172,22 @@ that remain do not show as "Bestand ohne passende Transaktion". The review page'
 ignored" toggle counts ignored securities too; "Wieder vorschlagen" and
 "Aufnehmen" undo a removal and read the evidence again.
 
+## One security, one identity
+
+The bank's FinTS holdings may name a security by its WKN only, while
+statements and settlements carry the ISIN. Keyed by COALESCE(isin, wkn,
+name), the same security fell apart into an open WKN position (the bank's
+snapshots) and a closed ISIN position (the statements' history), and the
+reconciliation reported the shares vanishing and reappearing between
+snapshots of different sources. `finance/security-identity.ts` collects
+the (ISIN, WKN) pairs every row that carries both teaches (master,
+holdings, transactions, quote symbols; ISINs with a valid check digit
+only, a WKN known with two ISINs left alone) and completes rows that carry
+one of them. The portfolio, the position page, the transactions list, the
+review and the reconciliation read completed rows; rows of one depot and
+day that name the same security twice count once (the bank's). A link by
+the old WKN key finds the ISIN position.
+
 ## Operations
 
 - Stage 1 changes what "Belege einlesen" books: a paper about a security

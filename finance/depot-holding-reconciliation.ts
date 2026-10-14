@@ -36,6 +36,7 @@ import { asc, inArray } from "drizzle-orm";
 import db from "../db/database";
 import { financeAccountHolding, financeDepotTransaction } from "../db/schema";
 import { ignoredSecurities, isIgnoredIn } from "./depot-securities";
+import { dedupeSnapshotRows, securityIdentity } from "./security-identity";
 
 /** Shares below this are rounding noise, not a gap. */
 const QUANTITY_EPSILON = 1e-6;
@@ -204,7 +205,7 @@ export async function reconcileHoldings(
   const result: PositionReconciliation = { gaps: [], unverifiable: 0 };
   if (accountIds.length === 0) return result;
 
-  const [holdings, txs, ignored] = await Promise.all([
+  const [rawHoldings, rawTxs, ignored, identity] = await Promise.all([
     db
       .select({
         account_id: financeAccountHolding.account_id,
@@ -213,6 +214,7 @@ export async function reconcileHoldings(
         wkn: financeAccountHolding.wkn,
         name: financeAccountHolding.name,
         amount: financeAccountHolding.amount,
+        source: financeAccountHolding.source,
       })
       .from(financeAccountHolding)
       .where(inArray(financeAccountHolding.account_id, accountIds))
@@ -230,7 +232,14 @@ export async function reconcileHoldings(
       .from(financeDepotTransaction)
       .where(inArray(financeDepotTransaction.account_id, accountIds)),
     ignoredSecurities(accountIds),
+    securityIdentity(),
   ]);
+  // One identity per security: the bank's WKN row and a statement's ISIN
+  // row of the same day are one holding, not a sale and a buy.
+  const holdings = dedupeSnapshotRows(rawHoldings.map((h) => identity.complete(h))).sort((a, b) =>
+    a.as_of < b.as_of ? -1 : a.as_of > b.as_of ? 1 : 0,
+  );
+  const txs = rawTxs.map((t) => identity.complete(t));
 
   // Per depot: every snapshot day, and the amount per position per day.
   const daysByAccount = new Map<number, string[]>();

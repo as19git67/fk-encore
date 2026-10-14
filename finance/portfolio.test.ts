@@ -503,6 +503,41 @@ describe("finance/portfolio — today's price", () => {
   });
 });
 
+describe("finance/portfolio — one security under two identifiers", () => {
+  // The pair is only taught by an ISIN with a valid check digit.
+  const ISIN_FUND = "DE0000000AA7";
+
+  it("joins the bank's WKN-only rows with the statements' ISIN rows into one position", async () => {
+    const bc = await insertBankcontact();
+    const depot = await insertAccount(bc, "depot", "Depot");
+    // A settlement that names both identifiers teaches the pair.
+    await insertTx({ accountId: depot, kind: "buy", executedAt: "2026-01-10", isin: ISIN_FUND, wkn: "AAA111", name: "Alpha Fonds", amount: "5", price: "10.00", net: "-50.00" });
+    // Statements carry the ISIN, the bank's snapshots only the WKN.
+    await db.insert(financeAccountHolding).values([
+      { account_id: depot, as_of: "2026-02-01", isin: ISIN_FUND, name: "Alpha Fonds", amount: "5", price: "10.00", value: "50.00", currency: "EUR", source: "document" },
+      { account_id: depot, as_of: "2026-03-01", wkn: "AAA111", name: "ALPHA FONDS", amount: "5", price: "11.00", value: "55.00", currency: "EUR", source: "bank" },
+      // The same day from both: one holding, not ten shares.
+      { account_id: depot, as_of: "2026-04-01", isin: ISIN_FUND, name: "Alpha Fonds", amount: "5", price: "12.00", value: "60.00", currency: "EUR", source: "document" },
+      { account_id: depot, as_of: "2026-04-01", wkn: "AAA111", name: "ALPHA FONDS", amount: "5", price: "12.00", value: "60.00", currency: "EUR", source: "bank" },
+    ]);
+
+    const resp = await getPortfolio({});
+    expect(resp.positions.map((p) => [p.key, p.open, p.amount && Number(p.amount)])).toEqual([[ISIN_FUND, true, 5]]);
+
+    const page = await getPortfolioPosition({ key: ISIN_FUND });
+    expect(page.history.map((h) => [h.as_of, h.amount && Number(h.amount)])).toEqual([
+      ["2026-02-01", 5],
+      ["2026-03-01", 5],
+      ["2026-04-01", 5],
+    ]);
+    // No share count jumps between the sources.
+    expect(page.holding_gaps).toEqual([]);
+    // An old link by WKN finds the same position.
+    expect((await getPortfolioPosition({ key: "AAA111" })).position.key).toBe(ISIN_FUND);
+    expect((await listPortfolioTransactions({ position: ISIN_FUND })).items.map((t) => t.position_key)).toEqual([ISIN_FUND]);
+  });
+});
+
 describe("finance/portfolio — listPortfolioTransactions", () => {
   async function seed(): Promise<{ d1: number; d2: number }> {
     const bc = await insertBankcontact();

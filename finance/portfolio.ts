@@ -50,6 +50,7 @@ import {
   users,
 } from "../db/schema";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
+import { dedupeSnapshotRows, securityIdentity, type SecurityIdentity } from "./security-identity";
 import { closesAfter, latestQuotes, quoteDay, quoteFitsCurrency, type StoredQuote } from "./quote-store";
 import {
   buyCost,
@@ -527,7 +528,8 @@ function adoptIdentity(
  * every holding row of that day. One query per account keeps it simple;
  * a household has a handful of depots, not hundreds.
  */
-export async function latestHoldings(accountIds: number[]): Promise<HoldingRow[]> {
+export async function latestHoldings(accountIds: number[], identity?: SecurityIdentity): Promise<HoldingRow[]> {
+  const ident = identity ?? (await securityIdentity());
   const out: HoldingRow[] = [];
   for (const id of accountIds) {
     const [latest] = await db
@@ -549,6 +551,7 @@ export async function latestHoldings(accountIds: number[]): Promise<HoldingRow[]
         value: financeAccountHolding.value,
         currency: financeAccountHolding.currency,
         acquisition_price: financeAccountHolding.acquisition_price,
+        source: financeAccountHolding.source,
       })
       .from(financeAccountHolding)
       .where(
@@ -557,7 +560,8 @@ export async function latestHoldings(accountIds: number[]): Promise<HoldingRow[]
           eq(financeAccountHolding.as_of, latest.as_of),
         ),
       );
-    out.push(...rows);
+    // One identity per security, whichever identifier the row carries.
+    out.push(...dedupeSnapshotRows(rows.map((r) => ident.complete(r))).map(({ source: _source, ...r }) => r));
   }
   return out;
 }
@@ -980,9 +984,10 @@ export function buildPortfolio(
   };
 }
 
-async function loadTransactions(accountIds: number[]): Promise<DepotTxRow[]> {
+async function loadTransactions(accountIds: number[], identity?: SecurityIdentity): Promise<DepotTxRow[]> {
   if (accountIds.length === 0) return [];
-  return db
+  const ident = identity ?? (await securityIdentity());
+  const rows = await db
     .select({
       id: financeDepotTransaction.id,
       account_id: financeDepotTransaction.account_id,
@@ -1004,6 +1009,7 @@ async function loadTransactions(accountIds: number[]): Promise<DepotTxRow[]> {
     })
     .from(financeDepotTransaction)
     .where(inArray(financeDepotTransaction.account_id, accountIds));
+  return rows.map((r) => ident.complete(r));
 }
 
 /** The keys the quotes are kept under: the held securities with an ISIN or WKN. */
@@ -1046,9 +1052,10 @@ export const getPortfolio = api(
         ? 0
         : allDepots.filter((d) => d.closed && !depots.includes(d)).length;
 
+    const identity = await securityIdentity();
     const [holdings, txs, people] = await Promise.all([
-      latestHoldings(ids),
-      loadTransactions(ids),
+      latestHoldings(ids, identity),
+      loadTransactions(ids, identity),
       householdNames(),
     ]);
     const { currency, mixed } = scopeCurrency(depots);
@@ -1161,12 +1168,16 @@ export const listPortfolioTransactions = api(
     if (p.kind) conditions.push(eq(t.kind, p.kind));
     if (from) conditions.push(sql`${t.executed_at} >= ${from}::date`);
     if (to) conditions.push(sql`${t.executed_at} <= ${to}::date`);
+    const identity = await securityIdentity();
     if (p.position) {
-      const key = p.position;
+      // The key names the security; a row may carry only its other identifier.
+      const key = identity.complete({ isin: null, wkn: p.position }).isin ?? p.position;
+      const wkns = identity.wknsOf(key);
       conditions.push(
         or(
           eq(t.isin, key),
           and(sql`${t.isin} IS NULL`, eq(t.wkn, key)),
+          ...(wkns.length > 0 ? [and(sql`${t.isin} IS NULL`, inArray(t.wkn, wkns))] : []),
           and(sql`${t.isin} IS NULL`, sql`${t.wkn} IS NULL`, eq(t.name, key)),
         )!,
       );
@@ -1218,7 +1229,7 @@ export const listPortfolioTransactions = api(
         id: r.id,
         account_id: r.account_id,
         account_label: labelById.get(r.account_id) ?? "",
-        position_key: positionKey(r),
+        position_key: identity.key(r),
         isin: r.isin,
         wkn: r.wkn,
         name: securityDisplayName(r.name, people),
@@ -1390,8 +1401,9 @@ export const getPortfolioPosition = api(
     path: "/finance/portfolio/positions/:key",
     auth: true,
   },
-  async ({ key, accounts, closed }: PositionParams): Promise<PositionResponse> => {
+  async ({ key: requestedKey, accounts, closed }: PositionParams): Promise<PositionResponse> => {
     const auth = getAuthData()!;
+    let key = requestedKey;
     requirePermission(auth, "finance.view");
     if (!key || key.trim() === "") {
       throw APIError.invalidArgument("key is required");
@@ -1403,11 +1415,15 @@ export const getPortfolioPosition = api(
 
     // The position's figures come from the same fold as the overview, so
     // both pages agree to the cent.
+    const identity = await securityIdentity();
     const [holdings, txs, people] = await Promise.all([
-      latestHoldings(ids),
-      loadTransactions(ids),
+      latestHoldings(ids, identity),
+      loadTransactions(ids, identity),
       householdNames(),
     ]);
+    // A link from before the identifiers were joined may name the WKN.
+    const joined = identity.complete({ isin: null, wkn: key }).isin;
+    if (joined) key = joined;
     const built = buildPortfolio(holdings, txs, people, await latestQuotes(quotedKeys(holdings)));
     const position = built.positions.find((p) => p.key === key);
     if (!position) throw APIError.notFound(`position ${key} not found`);
@@ -1455,10 +1471,12 @@ export const getPortfolioPosition = api(
         amount: financeAccountHolding.amount,
         price: financeAccountHolding.price,
         value: financeAccountHolding.value,
+        source: financeAccountHolding.source,
       })
       .from(financeAccountHolding)
       .where(inArray(financeAccountHolding.account_id, ids))
-      .orderBy(asc(financeAccountHolding.as_of), asc(financeAccountHolding.id));
+      .orderBy(asc(financeAccountHolding.as_of), asc(financeAccountHolding.id))
+      .then((rows) => dedupeSnapshotRows(rows.map((r) => identity.complete(r))));
     const byDay = new Map<
       string,
       { amount: number; hasAmount: boolean; value: number; hasValue: boolean; price: number | null }
@@ -1676,9 +1694,10 @@ export const removePositionFromDepot = api(
     if ((await writableDepots(auth, [accountId])).length === 0) {
       throw APIError.permissionDenied("write access to the depot is required");
     }
+    const identity = await securityIdentity();
     const [holdings, txs, people] = await Promise.all([
-      latestHoldings([accountId]),
-      loadTransactions([accountId]),
+      latestHoldings([accountId], identity),
+      loadTransactions([accountId], identity),
       householdNames(),
     ]);
     const position = buildPortfolio(holdings, txs, people).positions.find((p) => p.key === key);
@@ -2088,6 +2107,7 @@ export const getPortfolioReview = api(
       };
     }
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
+    const identity = await securityIdentity();
 
     const [dry, recon, misbooked, securities, statements] = await Promise.all([
       enrichPendingDocuments(ids, 200, { dryRun: true, includeIgnored: ignored === true }),
@@ -2184,7 +2204,7 @@ export const getPortfolioReview = api(
         account_id: tx.account_id,
         account_label: labelById.get(tx.account_id) ?? "",
         depot_transaction_id: tx.id,
-        position_key: positionKey(tx),
+        position_key: identity.key(tx),
         name: tx.name,
         kind: tx.kind,
         executed_at: dateOnly(tx.executed_at),
@@ -2585,6 +2605,7 @@ export const inspectSettlementDocument = api(
 
     const depots = await visibleDepots(auth, null);
     const labelById = new Map(depots.map((d) => [d.id, d.label]));
+    const identity = await securityIdentity();
     const ids = depots.map((d) => d.id);
 
     // The user is looking at this one document: ask the model if it has
@@ -2693,7 +2714,7 @@ export const inspectSettlementDocument = api(
           depot_transaction_id: r.id,
           account_id: r.account_id,
           account_label: labelById.get(r.account_id) ?? "",
-          position_key: positionKey(r),
+          position_key: identity.key(r),
           kind: r.kind,
           executed_at: dateOnly(r.executed_at),
           net_amount: r.net_amount,
