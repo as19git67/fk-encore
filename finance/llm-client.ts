@@ -750,6 +750,7 @@ export async function extractSettlementValues(
     '- "gross": Kurswert bzw. Bruttobetrag\n' +
     '- "fees": Summe aller Gebühren, Provisionen und Spesen\n' +
     '- "tax": Summe aller einbehaltenen Steuern (Kapitalertragsteuer, Solidaritätszuschlag, Kirchensteuer, Quellensteuer); ' +
+    'steht je Steuer ein Satz und eine Bemessungsgrundlage ("Kirchensteuer 8,00% auf 0,09 EUR 0,01- EUR"), zählt nur der Steuerbetrag am Ende, und jede Steuerzeile wird addiert; ' +
     'wurden Steuern erstattet statt einbehalten (Steuererstattung, erstattete Steuern), dann die erstattete Summe als negative Zahl\n' +
     '- "net": der ausmachende Betrag bzw. Endbetrag, der dem Konto belastet oder gutgeschrieben wird; ' +
     'steht ein Betrag vor und einer nach Steuern, dann der nach Steuern\n' +

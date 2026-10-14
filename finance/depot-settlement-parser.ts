@@ -391,6 +391,20 @@ export function rejoinColumnAmounts(text: string): string {
   return out.join("\n");
 }
 
+/**
+ * A tax line that states its rate and base before the tax itself
+ * ("Kirchensteuer 8,00% auf 0,09 EUR 0,01- EUR") reads with the rate and
+ * base taken out, so the label meets its amount: an amount is never read
+ * across a percentage. A tax whose amount stands alone on the next line is
+ * joined to it. A line without an amount stays without one.
+ */
+export function dropTaxRates(text: string): string {
+  return text.replace(
+    /\d{1,3}(?:,\d{1,4})?[ \t]*%[ \t]*(?:auf|von)[ \t]*-?\d{1,3}(?:\.\d{3})*(?:,\d{1,8})?[ \t]*(?:EUR|USD|CHF|GBP|€)?(?:[ \t]*\n[ \t]*(?=-?\d{1,3}(?:\.\d{3})*,\d{2}[ \t]*-?[ \t]*(?:EUR|USD|CHF|GBP|€)?[ \t]*(?:\n|$)))?/g,
+    " ",
+  );
+}
+
 /** First amount after any of the labels, as a positive number. */
 function amountAfter(text: string, labels: string[], markers: string[]): number | null {
   for (const label of labels) {
@@ -836,7 +850,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     markers.push("vor − nach Steuern");
     return Math.round((gross - netAbs) * 100) / 100;
   })() ?? sumAfter(
-    text,
+    dropTaxRates(text),
     [
       String.raw`Kapitalertrag(?:s)?steuer(?!satz)`,
       String.raw`KESt`,
