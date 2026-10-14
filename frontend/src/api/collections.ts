@@ -21,6 +21,12 @@ export interface CollectionRule {
   excluded_document_ids?: number[]
 }
 
+/** One key of a collection's automatic order (documents/collection-sort.ts). */
+export interface CollectionSortKey {
+  field: 'correspondent' | 'title' | 'doc_date'
+  dir: 'asc' | 'desc'
+}
+
 /** The rule as typed; the server normalises it. */
 export interface CollectionRuleInput {
   correspondent_slug?: string | null
@@ -45,6 +51,8 @@ export interface DocumentCollection {
   /** 'dossier' when a rule fills the folder by itself (#1480). */
   kind: CollectionKind
   rule: CollectionRule | null
+  /** Automatic order, up to three keys; null = the order set by dragging. */
+  sort_order: CollectionSortKey[] | null
   created_at: string | null
   updated_at: string | null
   /** Documents in the folder, switched on or off. */
@@ -145,6 +153,8 @@ export interface UpdateCollectionPayload {
   group_id?: number | null
   kind?: CollectionKind
   rule?: CollectionRuleInput | null
+  /** Up to three keys, or null for the order set by dragging. */
+  sort_order?: CollectionSortKey[] | null
 }
 
 /** Run a dossier's rule over the corpus now. */

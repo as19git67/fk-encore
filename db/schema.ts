@@ -1,6 +1,7 @@
 import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint, date } from "drizzle-orm/pg-core";
 import type { DocumentReferenceNumber } from "../documents/reference-numbers";
 import type { CollectionKind, CollectionRule } from "../documents/dossiers";
+import type { CollectionSortKey } from "../documents/collection-sort";
 import { sql } from "drizzle-orm";
 
 /**
@@ -1324,6 +1325,9 @@ export const documentCollections = pgTable("document_collections", {
   // documents/dossiers.ts for the rule's shape and semantics.
   kind: text("kind").$type<CollectionKind>().notNull().default("manual"),
   rule: jsonb("rule").$type<CollectionRule>(),
+  // Automatic order (migration 0241, documents/collection-sort.ts). NULL =
+  // the order set by hand; otherwise positions follow these keys.
+  sort_order: jsonb("sort_order").$type<CollectionSortKey[]>(),
   created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });

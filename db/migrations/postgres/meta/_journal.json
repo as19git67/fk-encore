@@ -1688,6 +1688,13 @@
       "when": 1788652800060,
       "tag": "0240_finance_news_source_per_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 241,
+      "version": "7",
+      "when": 1788652800061,
+      "tag": "0241_document_collection_sort_order",
+      "breakpoints": true
     }
   ]
 }

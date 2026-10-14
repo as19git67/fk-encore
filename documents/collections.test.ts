@@ -19,6 +19,7 @@ import {
   collectionPdfFilename,
 } from "./collections";
 import { refreshStaleCollectionSummaries } from "./collection-summary-cron";
+import { resortCollectionsOfDocument } from "./collection-sort";
 
 const OWNER_ID = 940_101;
 const MEMBER_ID = 940_102;
@@ -384,6 +385,39 @@ describe("collection visibility", () => {
     const shared = await updateCollection({ id: collection.id, visibility: "group", group_id: GROUP_ID });
     expect(shared.visibility).toBe("group");
     expect(shared.items.map((i) => i.document_id)).toEqual([groupDoc]);
+  });
+
+  it("sorts itself while a sort is set, and refuses to be dragged", async () => {
+    const late = await insertDoc({ title: "Bescheid", sender: "Zweite Bank" });
+    const early = await insertDoc({ title: "Antrag", sender: "Erste Kasse" });
+    const collection = await createCollection({ title: "Sortiert", document_ids: [late, early] });
+    await db.execute(sql`UPDATE documents SET correspondent_display = sender WHERE id IN (${late}, ${early})`);
+
+    const sorted = await updateCollection({
+      id: collection.id,
+      sort_order: [{ field: "correspondent", dir: "asc" }, { field: "title", dir: "asc" }],
+    });
+    expect(sorted.sort_order).toEqual([{ field: "correspondent", dir: "asc" }, { field: "title", dir: "asc" }]);
+    expect(sorted.items.map((i) => i.document_id)).toEqual([early, late]);
+
+    await expect(reorderCollection({ id: collection.id, document_ids: [late, early] })).rejects.toThrow(/sorts itself/);
+
+    // A newcomer takes its place by the keys, not at the end.
+    const middle = await insertDoc({ title: "Bescheid", sender: "Erste Kasse" });
+    await db.execute(sql`UPDATE documents SET correspondent_display = sender WHERE id = ${middle}`);
+    const added = await addCollectionDocuments({ id: collection.id, document_ids: [middle] });
+    expect(added.items.map((i) => i.document_id)).toEqual([early, middle, late]);
+
+    // A renamed member moves when its document's attributes change.
+    await db.execute(sql`UPDATE documents SET title = 'Zahlung' WHERE id = ${early}`);
+    await resortCollectionsOfDocument(early);
+    expect((await getCollection({ id: collection.id })).items.map((i) => i.document_id)).toEqual([middle, early, late]);
+
+    // Back to manual: the order stays, dragging works again.
+    const manual = await updateCollection({ id: collection.id, sort_order: null });
+    expect(manual.sort_order).toBeNull();
+    const dragged = await reorderCollection({ id: collection.id, document_ids: [late, middle, early] });
+    expect(dragged.items.map((i) => i.document_id)).toEqual([late, middle, early]);
   });
 
   it("lets a group member edit a shared collection but not delete it", async () => {

@@ -41,6 +41,7 @@ import {
 } from "../db/schema";
 import { assertPathUnderDocumentsRoot } from "./documents.service";
 import { applyRuleToCorpus, normalizeRule, type CollectionKind, type CollectionRule, type RuleInput } from "./dossiers";
+import { normalizeSortOrder, resortCollection, type CollectionSortKey } from "./collection-sort";
 import { assertGroupMember, loadUserGroupIds, visibleDocumentsWhere } from "./visibility";
 import { shouldUseTesseractSidecar } from "./receipt-capture";
 import { ensureSearchablePdf } from "./ocr-pdf";
@@ -131,6 +132,8 @@ export interface CollectionSummaryDTO {
   /** 'dossier' when a membership rule fills the folder (#1480). */
   kind: CollectionKind;
   rule: CollectionRule | null;
+  /** Automatic order (collection-sort.ts); null = the order set by dragging. */
+  sort_order: CollectionSortKey[] | null;
   created_at: string | null;
   updated_at: string | null;
   /** Members in the folder, switched on or off. */
@@ -354,6 +357,7 @@ async function toSummaryDTO(
     group_id: row.group_id,
     kind: row.kind,
     rule: row.rule ?? null,
+    sort_order: normalizeSortOrder(row.sort_order),
     created_at: row.created_at,
     updated_at: row.updated_at,
     item_count: counts?.total ?? 0,
@@ -576,6 +580,11 @@ export interface UpdateCollectionRequest {
    */
   kind?: CollectionKind;
   rule?: RuleInput | null;
+  /**
+   * Sort the folder by up to three keys, or `null`/`[]` for the order set by
+   * dragging. While set, the folder keeps itself in this order.
+   */
+  sort_order?: CollectionSortKey[] | null;
 }
 
 export const updateCollection = api(
@@ -660,6 +669,8 @@ export const updateCollection = api(
       }
     }
 
+    if (req.sort_order !== undefined) patch.sort_order = normalizeSortOrder(req.sort_order);
+
     // A dossier shared or taken back covers other documents now.
     if (req.visibility !== undefined && (patch.kind ?? row.kind) === "dossier") applyRule = true;
 
@@ -673,6 +684,7 @@ export const updateCollection = api(
       );
       if (fresh) await applyRuleToCorpus(fresh);
     }
+    if (patch.sort_order) await resortCollection(row.id);
     return await buildDetail(row.id, userId, isAdmin);
   },
 );
@@ -742,6 +754,7 @@ async function addDocumentsToCollection(
       })),
     ),
   );
+  await resortCollection(collection.id);
   await touchCollection(collection.id);
   return fresh.length;
 }
@@ -873,6 +886,9 @@ export const reorderCollection = api(
     const userId = getUserId();
     const isAdmin = isDataAdmin(authData);
     const row = await loadEditableCollection(userId, req.id, isAdmin);
+    if (normalizeSortOrder(row.sort_order)) {
+      throw APIError.failedPrecondition("this collection sorts itself; switch to manual order first");
+    }
 
     const current = await dbAll<{ id: number; document_id: number }>(
       db
