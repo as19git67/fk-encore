@@ -43,6 +43,7 @@ import {
   updateCollection,
   updateCollectionItem,
   type CollectionExport,
+  type CollectionSortKey,
   type DocumentCollectionDetail,
   type DocumentCollectionItem,
   type PageRedaction,
@@ -287,6 +288,48 @@ function setOption(patch: { include_cover?: boolean; include_toc?: boolean; incl
   void run(() => updateCollection(collectionId.value, patch))
 }
 
+// ─── Order ──────────────────────────────────────────────────────────────────
+// Either set by dragging, or kept by the server along up to three keys
+// ("Korrespondent, dann Dokumentdatum"). While a sort is set, dragging is off.
+const SORT_FIELDS: Array<{ label: string; value: CollectionSortKey['field'] }> = [
+  { label: 'Korrespondent', value: 'correspondent' },
+  { label: 'Dokumentname', value: 'title' },
+  { label: 'Dokumentdatum', value: 'doc_date' },
+]
+const sortKeys = computed<CollectionSortKey[]>(() => collection.value?.sort_order ?? [])
+const autoSorted = computed(() => sortKeys.value.length > 0)
+/** One select per key, plus one to add the next — at most three. */
+const sortLevels = computed(() => Math.min(sortKeys.value.length + 1, SORT_FIELDS.length))
+function sortLevelOptions(level: number) {
+  const usedElsewhere = sortKeys.value.filter((_, i) => i < level).map((k) => k.field)
+  return [
+    { label: level === 0 ? 'Von Hand (Ziehen)' : '—', value: null as CollectionSortKey['field'] | null },
+    ...SORT_FIELDS.filter((f) => !usedElsewhere.includes(f.value)),
+  ]
+}
+function saveSort(keys: CollectionSortKey[]) {
+  void run(() => updateCollection(collectionId.value, { sort_order: keys.length > 0 ? keys : null }))
+}
+/** Choosing a field at a level keeps the levels above; "—" drops it and those below. */
+function setSortLevel(level: number, field: CollectionSortKey['field'] | null) {
+  const keys = sortKeys.value.slice(0, level)
+  if (field) {
+    const previous = sortKeys.value[level]
+    keys.push({ field, dir: previous?.field === field ? previous.dir : 'asc' })
+    keys.push(...sortKeys.value.slice(level + 1).filter((k) => k.field !== field))
+  }
+  saveSort(keys)
+}
+function sortDirAt(level: number): CollectionSortKey['dir'] | null {
+  return sortKeys.value[level]?.dir ?? null
+}
+function toggleSortDir(level: number) {
+  saveSort(
+    sortKeys.value.map((k, i) => (i === level ? { ...k, dir: k.dir === 'asc' ? 'desc' : 'asc' } : k)),
+  )
+}
+const dragDisabled = computed(() => busy.value || autoSorted.value)
+
 /**
  * The order is set by dragging the grip (or ArrowUp/ArrowDown on it). The
  * list shows the would-be order while dragging and saves once on release.
@@ -301,7 +344,7 @@ const {
   items,
   keyOf: (item) => item.document_id,
   commit: (keys) => run(() => reorderCollection(collectionId.value, keys as number[])),
-  disabled: busy,
+  disabled: dragDisabled,
 })
 
 function toggleIncluded(item: DocumentCollectionItem, included: boolean) {
@@ -690,6 +733,36 @@ onBeforeUnmount(() => {
         <span class="cd-list-count">({{ includedCount }} von {{ items.length }} im PDF)</span>
       </h3>
 
+      <div v-if="items.length > 1 || autoSorted" class="cd-sort">
+        <span class="cd-sort-label">Reihenfolge</span>
+        <template v-for="level in sortLevels" :key="level">
+          <span v-if="level > 1" class="cd-sort-then">dann</span>
+          <Select
+            :model-value="sortKeys[level - 1]?.field ?? null"
+            :options="sortLevelOptions(level - 1)"
+            option-label="label"
+            option-value="value"
+            :disabled="busy"
+            :aria-label="level === 1 ? 'Sortieren nach' : `Danach sortieren nach (Stufe ${level})`"
+            @update:model-value="setSortLevel(level - 1, $event)"
+          />
+          <Button
+            v-if="sortDirAt(level - 1)"
+            :icon="sortDirAt(level - 1) === 'asc' ? 'pi pi-sort-amount-up-alt' : 'pi pi-sort-amount-down'"
+            text
+            rounded
+            :disabled="busy"
+            :aria-label="sortDirAt(level - 1) === 'asc' ? 'Aufsteigend, auf absteigend umschalten' : 'Absteigend, auf aufsteigend umschalten'"
+            v-tooltip.bottom="sortDirAt(level - 1) === 'asc' ? 'Aufsteigend' : 'Absteigend'"
+            @click="toggleSortDir(level - 1)"
+          />
+        </template>
+      </div>
+      <p v-if="autoSorted" class="cd-rule-hint cd-sort-hint">
+        Die Mappe sortiert sich selbst, auch neu hinzugefügte und geänderte Dokumente. Von Hand
+        verschieben lässt sich erst wieder mit „Von Hand (Ziehen)“.
+      </p>
+
       <p v-if="!loading && items.length === 0" class="cd-empty">
         Noch keine Dokumente. Über „In Sammelmappe legen" aus der Dokumentenliste oder dem
         Arbeitskorb hinzufügen.
@@ -708,7 +781,7 @@ onBeforeUnmount(() => {
           :style="rowStyle(item.document_id)"
         >
           <button
-            v-if="items.length > 1"
+            v-if="items.length > 1 && !autoSorted"
             type="button"
             class="cd-grip"
             :aria-label="`Dokument ${index + 1} verschieben (Pfeiltasten hoch/runter)`"
@@ -957,6 +1030,21 @@ onBeforeUnmount(() => {
   font-size: var(--text-lg);
   font-weight: 600;
   margin: 0 0 8px;
+}
+.cd-sort {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.cd-sort-label,
+.cd-sort-then {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+.cd-sort-hint {
+  margin-bottom: var(--space-3);
 }
 .cd-list-count {
   font-weight: 400;

@@ -50,6 +50,7 @@ import {
 import { normalizeSourceFolder } from "./source-folder";
 import { assertGroupMember, loadUserGroupIds, visibleDocumentsWhere } from "./visibility";
 import { discardCollectionExports } from "./collection-export";
+import { resortCollection, resortCollectionsOfDocument } from "./collection-sort";
 
 console.log("[boot] documents/dossiers.ts: all imports resolved");
 
@@ -217,6 +218,7 @@ export async function applyDossierRulesForDocument(documentId: number): Promise<
           joined_by: "rule",
         }),
       );
+      await resortCollection(dossier.id);
       await touch(dossier.id);
       added += 1;
     } else if (!matches && joinedBy === "rule") {
@@ -246,6 +248,13 @@ export async function applyDossierRulesQuietly(documentId: number): Promise<void
     }
   } catch (err: any) {
     console.warn(`[documents.dossiers] rules for ${documentId} failed: ${err?.message ?? err}`);
+  }
+  // Called wherever a document's title, date or correspondent may have
+  // changed: a collection sorted by them keeps its order.
+  try {
+    await resortCollectionsOfDocument(documentId);
+  } catch (err: any) {
+    console.warn(`[documents.dossiers] re-sorting collections of ${documentId} failed: ${err?.message ?? err}`);
   }
 }
 
@@ -312,6 +321,7 @@ export async function applyRuleToCorpus(collection: CollectionRow): Promise<Appl
       ),
     );
   }
+  if (toAdd.length > 0) await resortCollection(collection.id);
   if (toAdd.length > 0 || toRemove.length > 0) await touch(collection.id);
   return { added: toAdd.length, removed: toRemove.length };
 }
