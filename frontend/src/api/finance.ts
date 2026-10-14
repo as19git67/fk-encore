@@ -1205,6 +1205,8 @@ export interface PositionDepotSecurity {
   status: 'confirmed' | 'proposed' | 'ignored' | null
   /** The bank's latest snapshot lists it: it cannot be removed. */
   bank_held: boolean
+  /** Day of the bank's latest snapshot when that lists it — current, or outdated by a newer statement. */
+  bank_as_of: string | null
   writable: boolean
   removable_transactions: number
   removable_holdings: number

@@ -189,17 +189,31 @@ function idMatch(
   return m.length > 0 ? or(...m)! : null;
 }
 
-/** Whether the bank's latest holdings snapshot of the depot lists the security. */
-export async function bankHolds(accountId: number, ids: Pick<SecurityIds, "isin" | "wkn">): Promise<boolean> {
+export interface BankHolding {
+  /** The day of the bank's latest snapshot that lists the security. */
+  as_of: string;
+  /**
+   * No snapshot of the depot is newer — the bank's word is the last word.
+   * A depot statement read since then that no longer lists the security
+   * makes the bank's snapshot history.
+   */
+  current: boolean;
+}
+
+/**
+ * The bank's latest holdings snapshot of the depot, when it lists the
+ * security with shares; null when it does not (or the depot has none).
+ */
+export async function bankHolding(accountId: number, ids: Pick<SecurityIds, "isin" | "wkn">): Promise<BankHolding | null> {
   const match = idMatch(financeAccountHolding, ids);
-  if (!match) return false;
+  if (!match) return null;
   const [latest] = await db
     .select({ as_of: financeAccountHolding.as_of })
     .from(financeAccountHolding)
     .where(and(eq(financeAccountHolding.account_id, accountId), eq(financeAccountHolding.source, "bank")))
     .orderBy(desc(financeAccountHolding.as_of))
     .limit(1);
-  if (!latest) return false;
+  if (!latest) return null;
   const [row] = await db
     .select({ id: financeAccountHolding.id })
     .from(financeAccountHolding)
@@ -208,11 +222,54 @@ export async function bankHolds(accountId: number, ids: Pick<SecurityIds, "isin"
         eq(financeAccountHolding.account_id, accountId),
         eq(financeAccountHolding.source, "bank"),
         eq(financeAccountHolding.as_of, latest.as_of),
+        sql`${financeAccountHolding.amount} > 0`,
         match,
       ),
     )
     .limit(1);
-  return !!row;
+  if (!row) return null;
+  const [newer] = await db
+    .select({ id: financeAccountHolding.id })
+    .from(financeAccountHolding)
+    .where(and(eq(financeAccountHolding.account_id, accountId), sql`${financeAccountHolding.as_of} > ${latest.as_of}`))
+    .limit(1);
+  return { as_of: String(latest.as_of).slice(0, 10), current: !newer };
+}
+
+/**
+ * Whether the bank still reports the security in the depot: its latest
+ * snapshot lists it and nothing newer says otherwise. Such a security
+ * cannot be taken out — the next sync would bring it back.
+ */
+export async function bankHolds(accountId: number, ids: Pick<SecurityIds, "isin" | "wkn">): Promise<boolean> {
+  return (await bankHolding(accountId, ids))?.current ?? false;
+}
+
+/** The securities the depots ignore (taken out, or a proposal turned down), by depot. */
+export async function ignoredSecurities(accountIds: number[]): Promise<Map<number, Array<{ isin: string | null; wkn: string | null }>>> {
+  const out = new Map<number, Array<{ isin: string | null; wkn: string | null }>>();
+  if (accountIds.length === 0) return out;
+  const rows = await db
+    .select({ account_id: financeDepotSecurity.account_id, isin: financeDepotSecurity.isin, wkn: financeDepotSecurity.wkn })
+    .from(financeDepotSecurity)
+    .where(and(inArray(financeDepotSecurity.account_id, accountIds), eq(financeDepotSecurity.status, "ignored")));
+  for (const r of rows) {
+    const list = out.get(r.account_id) ?? [];
+    list.push({ isin: r.isin, wkn: r.wkn });
+    out.set(r.account_id, list);
+  }
+  return out;
+}
+
+/** Whether a row's identifiers name one of the depot's ignored securities. */
+export function isIgnoredIn(
+  ignored: Map<number, Array<{ isin: string | null; wkn: string | null }>>,
+  accountId: number,
+  row: { isin: string | null; wkn: string | null },
+): boolean {
+  const list = ignored.get(accountId);
+  if (!list) return false;
+  return list.some((e) => (!!row.isin && e.isin === row.isin) || (!!row.wkn && e.wkn === row.wkn));
 }
 
 export interface RemovalCounts {

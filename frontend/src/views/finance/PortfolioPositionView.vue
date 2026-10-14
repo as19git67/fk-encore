@@ -95,13 +95,18 @@ const removing = ref<number | null>(null)
 const removeNotice = ref<string | null>(null)
 
 function depotStatusText(d: PositionDepotSecurity): string {
-  if (d.bank_held) return 'von der Bank gemeldet'
-  switch (d.status) {
-    case 'confirmed': return 'aufgenommen'
-    case 'proposed': return 'vorgeschlagen'
-    case 'ignored': return 'entfernt'
-    default: return 'ohne Eintrag im Wertpapier-Stamm'
-  }
+  if (d.bank_held) return `von der Bank gemeldet (Stand ${formatIsoDate(d.bank_as_of)})`
+  const status = (() => {
+    switch (d.status) {
+      case 'confirmed': return 'aufgenommen'
+      case 'proposed': return 'vorgeschlagen'
+      case 'ignored': return 'entfernt'
+      default: return 'ohne Eintrag im Wertpapier-Stamm'
+    }
+  })()
+  // The bank's last snapshot still lists it, but a newer statement does not.
+  if (d.bank_as_of && d.status !== 'ignored') return `${status} · Bankbestand vom ${formatIsoDate(d.bank_as_of)} ist überholt`
+  return status
 }
 
 /** What readings booked for it in the depot: transactions from papers and bookings, holdings from statements. */
@@ -129,6 +134,7 @@ function askRemove(d: PositionDepotSecurity) {
     message:
       `„${name}“ wird aus „${d.account_label}“ entfernt. ` +
       (what.length > 0 ? `Gelöscht werden ${what.join(' und ')}. ` : 'Es gibt keine eingelesenen Zeilen zu löschen. ') +
+      (d.bank_as_of ? `Der überholte Bankbestand vom ${formatIsoDate(d.bank_as_of)} bleibt gespeichert, zählt aber nicht mehr. ` : '') +
       'Eigene Einträge bleiben. Künftige Buchungen und Belege zu diesem Wertpapier werden in diesem Depot ignoriert; ' +
       'rückgängig machen lässt es sich auf der Portfolio-Seite unter „Zu prüfen“ mit „Ignoriertes zeigen“.',
     icon: 'pi pi-exclamation-triangle',

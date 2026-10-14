@@ -507,8 +507,8 @@ export const MOCK_PORTFOLIO_POSITION: PortfolioPositionResponse = {
   ],
   unverifiable_changes: 1,
   depots: [
-    { account_id: 11, account_label: 'Depot Beispielbank', status: 'confirmed', bank_held: true, writable: true, removable_transactions: 2, removable_holdings: 0 },
-    { account_id: 12, account_label: 'Depot Musterbroker', status: 'confirmed', bank_held: false, writable: true, removable_transactions: 3, removable_holdings: 1 },
+    { account_id: 11, account_label: 'Depot Beispielbank', status: 'confirmed', bank_held: true, bank_as_of: '2026-09-30', writable: true, removable_transactions: 2, removable_holdings: 0 },
+    { account_id: 12, account_label: 'Depot Musterbroker', status: 'confirmed', bank_held: false, bank_as_of: null, writable: true, removable_transactions: 3, removable_holdings: 1 },
   ],
   years: [
     { year: 2026, realized: '218.95', realized_complete: true, sell_count: 1, income: '88.35', dividend_count: 1, fees: '10.00', taxes: '52.70', },

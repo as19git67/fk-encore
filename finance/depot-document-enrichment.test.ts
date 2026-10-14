@@ -594,6 +594,31 @@ Ausmachender Betrag 100,00 EUR`;
     expect(await depotRows(depot)).toHaveLength(1);
   });
 
+  it("takes out a security an outdated bank snapshot still lists, and its gaps go with it", async () => {
+    const { depot } = await setup();
+    const docId = await insertDocument(BUY_TEXT);
+    expect((await enrichDocument(docId)).outcome).toBe("created");
+    // A depot statement read since the bank's last snapshot no longer lists it.
+    await db.insert(financeAccountHolding).values({
+      account_id: depot,
+      as_of: "2026-06-30",
+      isin: SOLD_ISIN,
+      name: "Beta Altbestand AG",
+      amount: "3",
+      currency: "EUR",
+      source: "document",
+    });
+    expect((await getPortfolioReview({})).holding_gaps.map((g) => g.position_key)).toContain(ISIN_A);
+
+    const page = await getPortfolioPosition({ key: ISIN_A });
+    expect(page.position.open).toBe(false);
+    expect(page.depots[0]).toMatchObject({ account_id: depot, bank_held: false, bank_as_of: "2026-03-01" });
+
+    await removePositionFromDepot({ key: ISIN_A, accountId: depot });
+    // The bank's snapshot stays, but an ignored security is not reconciled.
+    expect((await getPortfolioReview({})).holding_gaps.map((g) => g.position_key)).not.toContain(ISIN_A);
+  });
+
   it("uses the one depot that already has transactions of the security — once the user took it in", async () => {
     const { depot } = await setup();
     await db.insert(financeDepotTransaction).values({

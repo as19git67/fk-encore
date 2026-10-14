@@ -162,8 +162,13 @@ becomes ignored in that depot's master — later runs leave its bookings and
 papers alone — and what readings booked for it goes: transactions from
 papers or derived from bookings (sources `document`, `giro-derived`,
 `giro-derived+document`) and holdings from statements. Manual rows and the
-bank's own stay. A security the bank's latest snapshot still lists cannot
-be removed: the next sync would confirm it again. The review page's "show
+bank's own stay. A security the bank's latest snapshot still lists (with
+shares) cannot be removed: the next sync would confirm it again — unless a
+newer snapshot of the depot (a statement read since) no longer lists it;
+then the bank's snapshot is outdated and no longer blocks
+(`bankHolding`, shown with its day on the position page). An ignored
+security is left out of the holdings reconciliation, so the bank snapshots
+that remain do not show as "Bestand ohne passende Transaktion". The review page's "show
 ignored" toggle counts ignored securities too; "Wieder vorschlagen" and
 "Aufnehmen" undo a removal and read the evidence again.
 
