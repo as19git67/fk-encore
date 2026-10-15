@@ -2516,6 +2516,8 @@ interface InspectionFieldSource {
   disagree: boolean;
   /** The taxes' sign was turned because only that way the figures add up. */
   sign_turned?: boolean;
+  /** Snapped to a known security: what was read. */
+  known_from?: string;
 }
 
 interface InspectionCheck {
@@ -2687,6 +2689,7 @@ export const inspectSettlementDocument = api(
         source: f.source,
         disagree: f.disagree,
         ...(f.sign_turned ? { sign_turned: true } : {}),
+        ...(f.known_from ? { known_from: f.known_from } : {}),
       };
     }
 
