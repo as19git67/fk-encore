@@ -38,6 +38,9 @@ import {
 import { addCollectionDocuments, listCollections, listCollectionsForDocument } from "../documents/collections";
 import { listBasketSnapshots, loadBasketSnapshot, saveBasketSnapshot } from "../finance/basket";
 import fs from "fs";
+import { listTransactions } from "../finance/transactions";
+import { listMeters } from "../meter/meter";
+import { listGalleryIds } from "../photo/gallery-grid";
 import path from "path";
 
 const OWNER = 951_001;
@@ -529,5 +532,35 @@ describe("saved finance baskets", () => {
       await db.execute(sql`DELETE FROM finance_basket_snapshot WHERE user_id = ${OWNER}`);
       await db.execute(sql`ALTER TABLE document_collections DROP COLUMN IF EXISTS migrated_snapshot_id`);
     }
+  });
+});
+
+describe("module lists scoped to a collection", () => {
+  it("lists only the members, and nothing for a collection the caller may not read", async () => {
+    const acc = await account([OWNER, STRANGER]);
+    const inside = await transaction(acc, "Drinnen");
+    await transaction(acc, "Draußen");
+    const m1 = await meter(OWNER);
+    await meter(OWNER);
+    const p1 = await photo(OWNER);
+    await photo(OWNER);
+    const col = await createAnyCollection({
+      name: "Gemischt",
+      members: [
+        { entity_type: "transaction", entity_id: inside },
+        { entity_type: "meter", entity_id: m1 },
+        { entity_type: "photo", entity_id: p1 },
+      ],
+    });
+
+    const txs = await listTransactions({ accountId: acc, collectionId: col.id });
+    expect(txs.items.map((t) => Number(t.id))).toEqual([inside]);
+    expect((await listMeters({ collection: col.id })).meters.map((m) => m.id)).toEqual([m1]);
+    expect((await listGalleryIds({ collectionId: col.id })).ids).toEqual([p1]);
+
+    // Someone who may read the booking but not the private folder gets nothing.
+    as(STRANGER);
+    expect((await listTransactions({ accountId: acc, collectionId: col.id })).items).toEqual([]);
+    expect((await listTransactions({ accountId: acc })).items).toHaveLength(2);
   });
 });

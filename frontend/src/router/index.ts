@@ -69,6 +69,14 @@ const router = createRouter({
     // Shared authenticated routes
     { path: '/profile', name: 'profile', component: ProfileView },
 
+    // Collections of every type (#1548): the list, and the page of a mixed one.
+    { path: '/sammelmappen', name: 'sammelmappen', component: () => import('../views/CollectionsView.vue') },
+    {
+      path: '/sammelmappen/:id',
+      name: 'sammelmappe-detail',
+      component: () => import('../views/CollectionDetailView.vue'),
+    },
+
     // Public shared album (no auth required)
     { path: '/albums/shared/:token', name: 'shared-album', component: SharedAlbumView },
 

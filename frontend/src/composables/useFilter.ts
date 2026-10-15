@@ -1,4 +1,5 @@
 import { ref, computed, watch } from 'vue'
+import { collectionName } from './useCollectionNames'
 import type { ComputedRef, Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { LocationQueryRaw } from 'vue-router'
@@ -79,6 +80,8 @@ export function parseFilterFromQuery(q: Record<string, unknown>): PhotoFilter {
   const albumIds = parseIntList(q.albumIds);   if (albumIds)  f.albumIds  = albumIds
   const personIds = parseIntList(q.personIds); if (personIds) f.personIds = personIds
   const ownerIds = parseIntList(q.ownerIds);   if (ownerIds)  f.ownerIds  = ownerIds
+  const collectionId = parseNum(q.collection)
+  if (collectionId !== undefined && Number.isInteger(collectionId) && collectionId > 0) f.collectionId = collectionId
   const mts = parseMediaTypes(q.mediaTypes);   if (mts)       f.mediaTypes = mts
 
   const am = q.albumMode
@@ -129,6 +132,7 @@ export function filterToQuery(f: PhotoFilter): Record<string, string> {
     if (f.personMode && f.personMode !== 'include') out.personMode = f.personMode
   }
   if (f.ownerIds?.length) out.ownerIds = f.ownerIds.join(',')
+  if (f.collectionId) out.collection = String(f.collectionId)
   if (f.mediaTypes?.length) out.mediaTypes = f.mediaTypes.join(',')
   if (f.hasGps !== undefined) out.hasGps = String(f.hasGps)
   if (f.hasFaces !== undefined) out.hasFaces = String(f.hasFaces)
@@ -164,6 +168,7 @@ export function countActiveFilters(f: PhotoFilter): number {
   if (f.albumIds?.length) n++
   if (f.personIds?.length) n++
   if (f.ownerIds?.length) n++
+  if (f.collectionId) n++
   if (f.mediaTypes?.length) n++
   if (f.hasGps !== undefined) n++
   if (f.hasFaces !== undefined) n++
@@ -324,6 +329,7 @@ export function usePhotoFilterChips(filter: UseFilterReturn): ComputedRef<Filter
       const prefix = f.personMode === 'exclude' ? 'Ohne Person' : 'Mit Person'
       add(`${prefix}: ${names.join(', ')}`, ['personIds', 'personMode'])
     }
+    if (f.collectionId) add(`Sammelmappe: ${collectionName(f.collectionId)}`, ['collectionId'])
     if (f.ownerIds?.length) {
       add(`Besitzer: ${f.ownerIds.map((id) => `#${id}`).join(', ')}`, ['ownerIds'])
     }

@@ -125,6 +125,8 @@ export type MembershipMode = 'include' | 'exclude'
 export type MediaType = 'photo' | 'video' | 'raw'
 
 export interface PhotoFilter {
+  /** Only the photos in this collection (#1548); `collection` in the URL. */
+  collectionId?: number
   hiddenMode?: HiddenMode
   favorite?: boolean
   albumHighlight?: boolean

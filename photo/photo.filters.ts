@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { collectionScopeCondition } from "../collections/scope";
 import type { SQL } from "drizzle-orm";
 import {
   photos,
@@ -65,6 +66,8 @@ export interface PhotoFilterParams {
    * non-owner viewers.
    */
   albumScopeId?: number;
+  /** Only the photos in this collection (#1548), readable by the caller. */
+  collectionId?: number;
   /**
    * Portrait/landscape format groups (orientation-variants.ts):
    *   "all" (default) — every photo, both sides of a format group.
@@ -109,6 +112,8 @@ export interface PhotoFilterQuery {
   aiHiddenMode?: string;
   ownerIds?: string;
   albumScopeId?: number;
+  /** Only the photos in this collection (#1548), readable by the caller. */
+  collectionId?: number;
   variantMode?: string;
 }
 
@@ -171,6 +176,9 @@ export function parsePhotoFilterQuery(q: PhotoFilterQuery): PhotoFilterParams {
   } else if (q.showAiHidden === true) {
     f.aiHiddenMode = "include";
   }
+  if (q.collectionId !== undefined && Number(q.collectionId) > 0) {
+    f.collectionId = Number(q.collectionId);
+  }
   if (q.albumScopeId !== undefined && Number(q.albumScopeId) > 0) {
     f.albumScopeId = Number(q.albumScopeId);
   }
@@ -190,6 +198,10 @@ export function buildPhotoFilterConditions(
   filter: PhotoFilterParams
 ): SQL[] {
   const conds: SQL[] = [];
+
+  if (filter.collectionId) {
+    conds.push(collectionScopeCondition("photo", photos.id, filter.collectionId, userId));
+  }
 
   const mode = filter.hiddenMode ?? "exclude";
   if (mode === "exclude") {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import CollectionScopeBar from '../components/collections/CollectionScopeBar.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
@@ -35,6 +36,17 @@ import { anchorKey, saveListAnchor } from '../utils/listAnchor'
 const ANCHOR_KEY = 'zaehler'
 
 const router = useRouter()
+const route = useRoute()
+
+/** `?collection=` limits the list to one collection's meters (#1548). */
+const collectionScope = computed<number | null>(() => {
+  const id = Number(route.query.collection)
+  return Number.isInteger(id) && id > 0 ? id : null
+})
+function clearCollectionScope() {
+  const { collection: _drop, ...rest } = route.query
+  void router.replace({ query: rest })
+}
 const auth = useAuthStore()
 const confirm = useConfirm()
 const canManage = computed(() => auth.hasPermission('meters.manage'))
@@ -63,11 +75,16 @@ const DEFAULT_UNIT: Record<MeterType, string> = {
   operating_hours: 'h',
 }
 
+watch(collectionScope, () => void load())
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [mRes, gRes] = await Promise.all([listMeters(), loadGroups()])
+    const [mRes, gRes] = await Promise.all([
+      listMeters({ collection: collectionScope.value ?? undefined }),
+      loadGroups(),
+    ])
     meters.value = mRes.meters
     groups.value = gRes
   } catch (err: any) {
@@ -276,11 +293,18 @@ onMounted(load)
     </template>
 
     <template #notice>
+      <CollectionScopeBar
+        v-if="collectionScope"
+        :collection-id="collectionScope"
+        @clear="clearCollectionScope"
+      />
       <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
     </template>
 
     <div v-if="loading" class="info"><i class="pi pi-spin pi-spinner" /> Zähler werden geladen…</div>
-    <div v-else-if="meters.length === 0" class="info">Noch keine Zähler angelegt.</div>
+    <div v-else-if="meters.length === 0" class="info">
+      {{ collectionScope ? 'In dieser Sammelmappe liegen keine Zähler.' : 'Noch keine Zähler angelegt.' }}
+    </div>
 
     <template v-else>
       <div class="meter-grid">

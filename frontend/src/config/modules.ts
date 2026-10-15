@@ -315,6 +315,14 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
+        // A collection typed for transactions (#1548): the same list, across
+        // every account the caller may read, limited to its members.
+        path: 'sammelmappe/:collectionId',
+        name: 'finance-collection-transactions',
+        component: () => import('../views/finance/AccountTransactionsView.vue'),
+        meta: { permission: 'finance.view' },
+      },
+      {
         path: 'uebersicht/sektion/:name',
         name: 'finance-section-transactions',
         component: () => import('../views/finance/AccountTransactionsView.vue'),

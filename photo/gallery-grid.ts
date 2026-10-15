@@ -65,6 +65,8 @@ type GalleryGridQueryParams = {
    * non-owner viewer.
    */
   albumScopeId?: Query<number>;
+  /** Only the photos in this collection (#1548). */
+  collectionId?: Query<number>;
 
   /**
    * Portrait/landscape format groups: `all` (default) shows both sides,
@@ -134,6 +136,7 @@ function toFilterQuery(p: GalleryGridQueryParams): PhotoFilterQuery {
     aiHiddenMode: p.aiHiddenMode,
     ownerIds: p.ownerIds,
     albumScopeId: p.albumScopeId,
+    collectionId: p.collectionId,
     variantMode: p.variantMode,
   };
 }
@@ -242,6 +245,8 @@ type GalleryIdsQueryParams = {
   aiHiddenMode?: Query<string>;
   ownerIds?: Query<string>;
   albumScopeId?: Query<number>;
+  /** Only the photos in this collection (#1548). */
+  collectionId?: Query<number>;
   variantMode?: Query<string>;
   sortBy?: Query<string>;
   sortDir?: Query<string>;

@@ -10,8 +10,10 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
+import { collectionRoute } from '../../utils/collectionRoute'
 import {
   collectionsOfItem,
+  markCollectionOpened,
   type CollectionEntityType,
   type CollectionSummary,
 } from '../../api/collections'
@@ -82,13 +84,19 @@ watch(() => [props.type, props.id], load)
     </div>
     <p v-if="error" class="in-collections-empty">{{ error }}</p>
     <div v-else-if="items.length > 0" class="in-collections-chips">
-      <Tag
+      <RouterLink
         v-for="c in items"
         :key="c.id"
-        :value="c.name"
-        :severity="c.archived_at ? 'secondary' : 'info'"
-        :icon="c.archived_at ? 'pi pi-box' : undefined"
-      />
+        :to="collectionRoute(c)"
+        class="in-collections-link"
+        @click="markCollectionOpened(c.id).catch(() => {})"
+      >
+        <Tag
+          :value="c.name"
+          :severity="c.archived_at ? 'secondary' : 'info'"
+          :icon="c.archived_at ? 'pi pi-box' : 'pi pi-folder'"
+        />
+      </RouterLink>
     </div>
     <p v-else class="in-collections-empty">In keiner Sammelmappe.</p>
     <AddToCollectionDialog v-model:visible="dialogOpen" :members="[ref_]" @added="load" />
@@ -125,6 +133,14 @@ watch(() => [props.type, props.id], load)
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+.in-collections-link {
+  border-radius: 6px;
+  text-decoration: none;
+}
+.in-collections-link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .in-collections-empty {
   margin: 0;

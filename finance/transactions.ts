@@ -20,6 +20,7 @@
  * user-tags the caller supplied and do nothing else.
  */
 
+import { collectionScopeCondition, parseCollectionId } from "../collections/scope";
 import { createHash } from "node:crypto";
 import { createTransactionReportPdf } from "./pdf-report";
 import { api, APIError } from "encore.dev/api";
@@ -310,6 +311,8 @@ function toView(
 
 interface ListParams {
   accountId?: number;
+  /** Only the bookings in this collection (#1548), readable by the caller. */
+  collectionId?: number;
   /** Comma-separated list of account ids — alternative to `accountId`
    *  for the overview "Alle Buchungen" view that pools transactions
    *  across all accounts in a section. Both filters can be supplied
@@ -368,6 +371,10 @@ export const listTransactions = api(
         return { items: [], total: 0 };
       }
       conds.push(eq(financeTransaction.account_id, p.accountId));
+    }
+    const collectionId = parseCollectionId(p.collectionId);
+    if (collectionId) {
+      conds.push(collectionScopeCondition("transaction", financeTransaction.id, collectionId, Number(auth.userID)));
     }
     if (p.accountIdsCsv) {
       const ids = p.accountIdsCsv

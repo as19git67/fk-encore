@@ -465,3 +465,14 @@ export function describeCounts(
     })
     .join(', ')
 }
+
+export function updateAnyCollection(
+  id: number,
+  patch: { name?: string; description?: string | null; archived?: boolean; favourite?: boolean },
+): Promise<CollectionDetail> {
+  return apiFetch(`/collections/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+export function deleteAnyCollection(id: number): Promise<{ deleted: boolean }> {
+  return apiFetch(`/collections/${id}`, { method: 'DELETE' })
+}

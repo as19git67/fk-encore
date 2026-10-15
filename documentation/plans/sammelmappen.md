@@ -88,7 +88,7 @@ collections.
 ## Stages
 
 1. **Backend: generic collections** — done (#1557).
-2. **Shared basket, "add to collection" everywhere** — done:
+2. **Shared basket, "add to collection" everywhere** — done (#1558):
    - The basket is a collection with `kind = 'basket'` (migration 0243, one
      per user by a partial unique index), with endpoints under
      `/collections/basket` (get, add, remove, empty by type, save as
@@ -111,9 +111,29 @@ collections.
      photo sidebar, the meter page and its readings, and the security rows of
      a position. Non-document detail pages carry `InCollectionsCard`;
      documents keep their own card with dossier details.
-3. Typed collection = module list with `collection` filter; global
-   "Collections" page.
-4. Mixed `CollectionView` with grouped action menu.
+3. **Typed collection = module list; the "Collections" page** — done:
+   - `collection` filter in the module lists: the gallery (`collectionId`
+     in the photo filter, `?collection=` in the URL, picker in the filter
+     menu), albums (client-side, from the collection's members), the
+     transaction list (`collectionId`; a new route
+     `/finanzen/sammelmappe/:collectionId` lists a transaction collection
+     across every readable account), meters (`?collection=`, scope bar).
+     Documents already had it. Backend: `collections/scope.ts` builds the
+     condition and checks in SQL that the caller may read the collection,
+     so a foreign folder yields an empty list.
+   - `utils/collectionRoute.ts` decides where a collection opens: a typed
+     one in its module list, document folders and dossiers on their folder
+     page, everything else on `/sammelmappen/:id`.
+   - `/sammelmappen` (navbar folder button): `ListToolbar` with search,
+     filters for type, archive, favourites and creator, sort by last visit,
+     change, name or size, tiles or table; starred first; rename, archive,
+     delete per row; "Neue Sammelmappe" with a type.
+   - `/sammelmappen/:id` for mixed collections, securities and readings:
+     members grouped by type, each group with "Als Liste öffnen", search,
+     type filter, sort, remove, hidden members counted.
+   - The chips of `InCollectionsCard` link to the collection.
+4. Grouped action menu for mixed collections (batch actions of every type
+   on `/sammelmappen/:id`).
 5. Rules for photos, transactions, securities and meters; "create album from
    collection".
 6. Exporters per type and export profiles; ZIP; "save as document".

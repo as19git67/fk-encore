@@ -21,6 +21,7 @@ import {
 } from '../../api/collections'
 import { useBasketStore } from '../../stores/basket'
 import { parseLocalDate } from '../../utils/dateFormat'
+import { memberRoute } from '../../utils/collectionRoute'
 
 const basket = useBasketStore()
 // App.vue loads it on sign-in; asking again is free and keeps this usable alone.
@@ -41,22 +42,8 @@ const groups = computed(() =>
   })).filter((group) => group.members.length > 0),
 )
 
-/** Where a member opens, when its type has a page of its own. */
 function target(member: CollectionMember): RouteLocationRaw | null {
-  switch (member.entity_type) {
-    case 'document':
-      return { name: 'dokumente-detail', params: { id: member.entity_id } }
-    case 'transaction':
-      return { name: 'finance-transaction-detail', params: { id: member.entity_id } }
-    case 'photo':
-      return { name: 'fotos-gallery', query: { photoId: member.entity_id } }
-    case 'album':
-      return { name: 'fotos-album-detail', params: { id: member.entity_id } }
-    case 'meter':
-      return { name: 'zaehler-detail', params: { id: member.entity_id } }
-    default:
-      return null
-  }
+  return memberRoute(member.entity_type, member.entity_id)
 }
 
 function open(member: CollectionMember) {
