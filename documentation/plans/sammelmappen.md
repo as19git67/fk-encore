@@ -111,7 +111,7 @@ collections.
      photo sidebar, the meter page and its readings, and the security rows of
      a position. Non-document detail pages carry `InCollectionsCard`;
      documents keep their own card with dossier details.
-3. **Typed collection = module list; the "Collections" page** — done:
+3. **Typed collection = module list; the "Collections" page** — done (#1559):
    - `collection` filter in the module lists: the gallery (`collectionId`
      in the photo filter, `?collection=` in the URL, picker in the filter
      menu), albums (client-side, from the collection's members), the
@@ -132,8 +132,19 @@ collections.
      members grouped by type, each group with "Als Liste öffnen", search,
      type filter, sort, remove, hidden members counted.
    - The chips of `InCollectionsCard` link to the collection.
-4. Grouped action menu for mixed collections (batch actions of every type
-   on `/sammelmappen/:id`).
+4. **Grouped action menu for mixed collections** — done:
+   - `/sammelmappen/:id` has a selection mode (`useListSelection`, the
+     usual `SelectionBar`; a member is keyed by one number that encodes
+     type and id, `utils/collectionActions.ts`).
+   - One menu (`groupedSelectionActions`): "Herausnehmen", "In
+     Sammelmappe", "In den Basket" first, then each type's batch actions
+     with type and count in the label ("Buchungen (3): Als geprüft
+     markieren"); with one type selected the prefix goes away.
+   - Type actions: documents (reviewed, tax-relevant), transactions
+     (reviewed, tax-relevant, CSV), photos (favourite, add to albums).
+     Actions that need a module's own dialog with whole objects (tags,
+     batch attributes with tristate) stay in that module's list, reachable
+     through "Als Liste öffnen".
 5. Rules for photos, transactions, securities and meters; "create album from
    collection".
 6. Exporters per type and export profiles; ZIP; "save as document".
