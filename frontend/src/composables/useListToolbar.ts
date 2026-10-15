@@ -269,6 +269,8 @@ export interface ListToolbarParts {
     /** Omit when the backend reports no total. */
     total?: Source<number | undefined>
     loading: Source<boolean>
+    /** Optional sum or similar after the count — see ListToolbarResult. */
+    summary?: Source<string | undefined>
   }
   view?: ListToolbarView
   selection?: ListToolbarSelection
@@ -297,6 +299,7 @@ export function useListToolbar(parts: ListToolbarParts): ListToolbarModel {
       loaded: toComputed(parts.result.loaded),
       total: parts.result.total ? toComputed(parts.result.total) : computed(() => undefined),
       loading: toComputed(parts.result.loading),
+      summary: parts.result.summary ? toComputed(parts.result.summary) : undefined,
     },
     view: parts.view,
     selection: parts.selection,

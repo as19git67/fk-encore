@@ -243,6 +243,15 @@ behind it.
      the typical amount, scoped by `readableAccountIds()`. This is also a
      useful page on its own (Finanzen › Lastschriften), independent of the
      assistant.
+     **Implemented** (#1526): `finance/upcoming-debits.ts` with
+     `GET /finance/mandates/upcoming?from=&until=` (default: today to the
+     end of the month) and the page Finanzen › Lastschriften. Outgoing,
+     non-card series with at least three bookings and an interval of 7 to
+     400 days; a series silent for more than three intervals has ended.
+     Intervals near a month, quarter, half year or year step by calendar
+     months from `last_seen`, so a series on the 1st stays on the 1st. A
+     booking up to seven days late is still listed, marked overdue. The
+     response carries the sum, so neither the page nor the model adds up.
    - Guards: `checkRateLimit` per user (20 questions per 10 minutes), the
      `llm` slot from `ai-queue`, a per-conversation context cap, and
      `APIError.unavailable` with the same "try later" semantics as the

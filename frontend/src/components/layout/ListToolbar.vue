@@ -274,7 +274,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
       />
       <span class="list-toolbar__count" data-testid="list-count">
         <i v-if="model.result.loading.value" class="pi pi-spin pi-spinner" aria-label="Lädt" />
-        <template v-else>{{ countLabel }}</template>
+        <template v-else>{{ countLabel }}<template v-if="model.result.summary?.value"> · {{ model.result.summary.value }}</template></template>
       </span>
     </div>
   </div>

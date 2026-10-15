@@ -60,6 +60,11 @@ export interface ListToolbarResult {
   /** How many exist in total; `undefined` when the backend gives no count. */
   total: ComputedRef<number | undefined>
   loading: ComputedRef<boolean>
+  /**
+   * What the rows add up to, shown after the count ("· −116,50 €"). The view
+   * formats it; the number comes from the server, which did the sum.
+   */
+  summary?: ComputedRef<string | undefined>
 }
 
 export interface ListToolbarView {
