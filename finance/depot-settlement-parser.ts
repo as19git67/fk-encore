@@ -845,7 +845,7 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     return refund === null ? null : -refund;
   })() ?? amountAfter(
     text,
-    [String.raw`abgeführte\s*${STEUERN}`, String.raw`einbehaltene\s*${STEUERN}(?=\s*[:\s]*(?:EUR|-?\d))`, String.raw`Summe\s*${STEUERN}`, String.raw`${STEUERN}\s*gesamt`],
+    [String.raw`abgef(?:ü|u|ue)hrte\s*${STEUERN}`, String.raw`einbehaltene\s*${STEUERN}(?=\s*[:\s]*(?:EUR|-?\d))`, String.raw`Summe\s*${STEUERN}`, String.raw`${STEUERN}\s*gesamt`],
     markers,
   ) ?? (() => {
     // No printed total: on a tax statement, what lies between the amounts
@@ -860,7 +860,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
       String.raw`Kapitalertrag(?:s)?steuer(?!satz)`,
       String.raw`KESt`,
       String.raw`KapSt`,
-      String.raw`Solidaritätszuschlag`,
+      // OCR drops the umlaut ("Solidaritatszuschlag").
+      String.raw`Solidarit(?:ä|a|ae)tszuschlag`,
       String.raw`Soli(?:daritätszuschlag)?\b`,
       String.raw`SolZ\b`,
       String.raw`Kirchensteuer(?!satz)`,

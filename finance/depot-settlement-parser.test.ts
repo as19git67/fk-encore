@@ -939,3 +939,23 @@ Zu Ihren Gunsten vor Steuern EUR 455,30`;
     expect(s.depotNumber).toBe("123456700");
   });
 });
+
+describe("parseSettlement — tax words OCR read without umlauts", () => {
+  // Synthetic tax statement; the scan lost the umlauts.
+  const TAX = `Steuerliche Behandlung: Wertpapierverkauf Nr. 1 vom 02.03.2026
+Stk. 10 BEISPIEL AG, WKN / ISIN: A1B2C3 / DE000A1B2C35
+Zu Ihren Gunsten vor Steuern: EUR 995,00
+Kapitalertragsteuer EUR -80,00
+Solidaritatszuschlag EUR -4,40
+Kirchensteuer EUR 0,00
+Zu Ihren Gunsten nach Steuern: EUR 910,60`;
+
+  it("still adds the solidarity surcharge", () => {
+    expect(inspectSettlement(TAX)!.tax).toBe(84.4);
+  });
+
+  it("reads the total withheld without its umlaut", () => {
+    const s = inspectSettlement(TAX.replace("Kirchensteuer EUR 0,00", "Kirchensteuer EUR 0,00\nabgefuhrte Steuern EUR -84,40"))!;
+    expect(s.tax).toBe(84.4);
+  });
+});

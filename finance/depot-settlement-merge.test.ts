@@ -321,3 +321,23 @@ describe("OCR slips in identifiers and the depot number", () => {
     expect(r.fields.find((f) => f.field === "depotNumber")?.source).toBe("rules");
   });
 });
+
+describe("the taxes' sign", () => {
+  // Synthetic sale: 1000.00 Kurswert, 5.00 fees, 88.00 taxes withheld, 907.00 paid out.
+  const sale = (over: Partial<SettlementValues> = {}): SettlementValues =>
+    buy({ kind: "sell", quantity: 10, price: 100, gross: 1000, fees: 5, net: 907, ...over });
+
+  it("turns a withheld tax read as a refund when only that makes the figures add up", () => {
+    const r = mergeSettlement(sale({ tax: 80 }), sale({ tax: -88 }), new Date("2026-04-01"));
+    expect(r.values.tax).toBe(88);
+    expect(r.fields.find((f) => f.field === "tax")).toMatchObject({ source: "llm", sign_turned: true });
+    expect(r.checks.find((c) => c.name === "net_equation")?.result).toBe("ok");
+    expect(r.verdict).toBe("ok");
+  });
+
+  it("keeps a real refund", () => {
+    const r = mergeSettlement(sale({ tax: -20, net: 1015 }), sale({ tax: -20, net: 1015 }), new Date("2026-04-01"));
+    expect(r.values.tax).toBe(-20);
+    expect(r.fields.find((f) => f.field === "tax")?.sign_turned).toBeUndefined();
+  });
+});

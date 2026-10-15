@@ -738,6 +738,8 @@ export interface SettlementFieldSourceInfo {
   llm: string | null
   source: SettlementFieldSource
   disagree: boolean
+  /** The taxes' sign was turned because only that way the figures add up. */
+  sign_turned?: boolean
 }
 
 export interface SettlementCheck {
