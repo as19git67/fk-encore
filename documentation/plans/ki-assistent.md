@@ -1,8 +1,9 @@
 # Assistant: one chat over everything the server knows
 
-Status: stage 1 implemented (`POST /chat` in llm-service, benchmark in
-`llm-service/bench/`); its benchmark has not yet been run on the production
-GPU. Tracking issue #1524, stages #1525–#1534.
+Status: stages 1 and 2 implemented (`POST /chat` in llm-service with its
+benchmark in `llm-service/bench/`; the `assistant` service with the read
+tools and the direct-debits endpoint). The benchmark has not yet been run on
+the production GPU. Tracking issue #1524, stages #1525–#1534.
 
 ## Problem
 
@@ -259,6 +260,40 @@ behind it.
    - Logging: each tool call with its arguments and row count, no row
      content, so a wrong answer can be traced to the call that produced
      it.
+
+   - **Implemented** (#1527), with three deviations from the text above:
+     - *Asking is a POST, the stream only watches.* A browser can open a
+       WebSocket only with `?token=`, and the gateway downgrades that token
+       to the media scope (`user/auth-handler.ts`), under which every
+       `requirePermission("finance.view")` fails — in the assistant and in
+       every service its tools call. So the client picks a turn id, opens
+       `GET /assistant/turns/:turnId/stream` (`api.streamOut`, events
+       `token`, `tool_start`, `tool_result`, `done`, `error`), then posts
+       `POST /assistant/conversations/:id/ask {message, turnId}` with the
+       full bearer token. The agent runs in the POST, which also returns the
+       whole answer; `assistant/live.ts` hands the events to the stream
+       in-process and replays what a late stream missed.
+     - *The generated part of the catalog is small for now.*
+       `openapi/spec.json` is the iOS subset (photos, albums, persons,
+       auth). `catalog.ts` builds tools from it through
+       `tool-allowlist.ts` (`list_persons` so far) and warns about
+       allow-listed operations the spec lacks; the stage's read tools are
+       hand-written in `assistant/tools/` because each needs trimming or a
+       list route. Regenerating the spec with every service
+       (`scripts/generate-openapi.sh`) lets the allow-list grow without code.
+     - *Trip plans are read through the plan store*, with the endpoint's own
+       `photos.view` check: the client name Encore generates for the
+       hyphenated `trip-planner` service could not be checked without the
+       Encore CLI.
+     Schemas: up to `ASSISTANT_SCHEMA_BUDGET_TOKENS` (3500) every tool's
+     schema goes along; past it the model gets the one-line catalog and
+     `describe_tools`. The context budget is `ASSISTANT_CONTEXT_TOKENS`
+     (12000) minus the answer; older tool results shrink to digests first,
+     then the oldest history goes, and a `413` from llm-service shrinks
+     everything once more and retries the round. The last round sends
+     `tool_choice: "none"`, so the loop always ends with an answer. Each
+     `/chat` call takes the `llm` slot of the ai-queue at priority 1. Tool
+     calls are logged with their arguments and row count, never row content.
 
 3. **Chat page in the web app** (`frontend/src/views/AssistantView.vue`,
    `api/assistant.ts`, `components/assistant/`).

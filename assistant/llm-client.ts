@@ -1,0 +1,174 @@
+/**
+ * The assistant's side of llm-service's `POST /chat` (stage 1 of the plan).
+ *
+ * Always streamed: text deltas reach the asking user as they come, and tool
+ * calls arrive as deltas too (`index`, then name and argument fragments),
+ * which this client assembles into whole calls. The bearer token for the
+ * service is added by `lib/internal-service-auth`, imported by the service.
+ */
+
+import type { ChatMessage, ChatToolCall } from "./types";
+
+const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
+/** One round may prefill a long prompt on a busy GPU; above the per-call default of the other clients. */
+const TIMEOUT_MS = Number.parseInt(process.env.ASSISTANT_LLM_TIMEOUT_MS ?? "180000", 10);
+
+/** The model is reloading, busy or gone — "try again later". */
+export class LlmServiceUnavailableError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "LlmServiceUnavailableError";
+  }
+}
+
+/** The conversation does not fit the context window (llm-service 413). */
+export class ContextTooLargeError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "ContextTooLargeError";
+  }
+}
+
+export interface ChatRequest {
+  messages: ChatMessage[];
+  tools?: unknown[];
+  tool_choice?: "auto" | "none" | "required";
+  max_tokens?: number;
+  temperature?: number;
+}
+
+export interface ChatReply {
+  content: string | null;
+  tool_calls: ChatToolCall[];
+  finish_reason: string | null;
+}
+
+export type ChatFn = (req: ChatRequest, onToken?: (text: string) => void) => Promise<ChatReply>;
+
+interface ChunkDelta {
+  content?: string | null;
+  tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>;
+}
+
+/**
+ * Folds OpenAI chunk objects into one reply. Separate from the transport so
+ * the test can feed it the chunks llama-server writes.
+ */
+export class ReplyAssembler {
+  private content = "";
+  private calls = new Map<number, { id: string; name: string; arguments: string }>();
+  private finish: string | null = null;
+
+  constructor(private readonly onToken?: (text: string) => void) {}
+
+  push(chunk: unknown): void {
+    if (!chunk || typeof chunk !== "object") return;
+    const error = (chunk as { error?: { status?: number; message?: string } }).error;
+    if (error) {
+      const message = error.message ?? "llm-service error";
+      if (error.status === 413) throw new ContextTooLargeError(message);
+      throw new LlmServiceUnavailableError(message);
+    }
+    const choice = (chunk as { choices?: Array<{ delta?: ChunkDelta; finish_reason?: string | null }> }).choices?.[0];
+    if (!choice) return;
+    const delta = choice.delta ?? {};
+    if (typeof delta.content === "string" && delta.content) {
+      this.content += delta.content;
+      this.onToken?.(delta.content);
+    }
+    for (const part of delta.tool_calls ?? []) {
+      const index = part.index ?? this.calls.size;
+      const call = this.calls.get(index) ?? { id: "", name: "", arguments: "" };
+      if (part.id) call.id = part.id;
+      if (part.function?.name) call.name += part.function.name;
+      if (part.function?.arguments) call.arguments += part.function.arguments;
+      this.calls.set(index, call);
+    }
+    if (choice.finish_reason) this.finish = choice.finish_reason;
+  }
+
+  reply(): ChatReply {
+    const tool_calls: ChatToolCall[] = [...this.calls.entries()]
+      .sort(([a], [b]) => a - b)
+      .filter(([, c]) => c.name)
+      .map(([i, c]) => ({
+        id: c.id || `call_${i}_${Math.random().toString(36).slice(2, 10)}`,
+        type: "function",
+        function: { name: c.name, arguments: c.arguments || "{}" },
+      }));
+    const content = this.content.trim() ? this.content.trim() : null;
+    return { content, tool_calls, finish_reason: tool_calls.length ? "tool_calls" : this.finish };
+  }
+}
+
+/** Splits an SSE byte stream into the JSON of its `data:` lines. */
+export async function* sseData(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") return;
+        if (data) yield data;
+      }
+    }
+    const rest = buffer.trim();
+    if (rest.startsWith("data:") && rest.slice(5).trim() !== "[DONE]") yield rest.slice(5).trim();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/** One streamed /chat call. */
+export const chat: ChatFn = async (req, onToken) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let resp: Response;
+  try {
+    resp = await fetch(`${LLM_SERVICE_URL}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify({ temperature: 0.2, max_tokens: 1024, ...req, stream: true }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    throw new LlmServiceUnavailableError(`llm-service unreachable: ${(err as Error).message}`);
+  }
+
+  try {
+    if (!resp.ok || !resp.body) {
+      const detail = await resp.text().catch(() => "");
+      if (resp.status === 413) throw new ContextTooLargeError(detail || "context too large");
+      if (resp.status === 422) throw new Error(`llm-service rejected the conversation: ${detail.slice(0, 300)}`);
+      throw new LlmServiceUnavailableError(`llm-service /chat -> HTTP ${resp.status}: ${detail.slice(0, 200)}`);
+    }
+    const assembler = new ReplyAssembler(onToken);
+    for await (const data of sseData(resp.body)) {
+      let chunk: unknown;
+      try {
+        chunk = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      assembler.push(chunk);
+    }
+    return assembler.reply();
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new LlmServiceUnavailableError(`llm-service /chat timed out after ${TIMEOUT_MS} ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+};
