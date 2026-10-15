@@ -10,7 +10,18 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
+import SelectionBar from '../components/layout/SelectionBar.vue'
+import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
+import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
+import type { ToolbarItem } from '../components/ResponsiveToolbar.vue'
+import { useListSelection } from '../composables/useListSelection'
+import { useBasketStore } from '../stores/basket'
+import { decodeMember, encodeMember, groupedSelectionActions, type TypeAction } from '../utils/collectionActions'
+import { batchUpdateDocumentAttributes, batchUpdateDocumentTax } from '../api/documents'
+import { batchReview, batchTaxRelevant, downloadTransactionsCsv } from '../api/finance'
+import { updatePhotoCuration } from '../api/photos'
 import PageLayout from '../components/layout/PageLayout.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
@@ -27,6 +38,7 @@ import {
   markCollectionOpened,
   removeAnyCollectionMember,
   updateAnyCollection,
+  type MemberRef,
   type CollectionDetail,
   type CollectionEntityType,
   type CollectionMember,
@@ -123,6 +135,161 @@ const groups = computed(() =>
   })).filter((g) => g.members.length > 0),
 )
 
+// ── Selection and the grouped action menu (#1548, stage 4) ──────────────────
+
+const selection = useListSelection({
+  loadedIds: () => visible.value.map((m) => encodeMember(m)),
+})
+const { selectMode, selectedIds } = selection
+const selectedRefs = computed<MemberRef[]>(() => [...selectedIds.value].map(decodeMember))
+
+const basket = useBasketStore()
+const info = ref('')
+const busy = ref(false)
+const moveOpen = ref(false)
+const albumDialogPhotoIds = ref<number[]>([])
+const albumDialogOpen = ref(false)
+
+/** Run one batch action, say what it did, and show the folder as it is now. */
+async function runAction(work: () => Promise<unknown>, done: string) {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    await work()
+    info.value = done
+    await load()
+  } catch (err: unknown) {
+    error.value = err instanceof Error ? err.message : 'Aktion fehlgeschlagen.'
+  } finally {
+    busy.value = false
+  }
+}
+
+function countLabel(n: number, type: CollectionEntityType): string {
+  return `${n} ${n === 1 ? ENTITY_LABELS[type].singular : ENTITY_LABELS[type].plural}`
+}
+
+/** The batch actions each type brings, the same ones its own list offers. */
+const typeActions: Partial<Record<CollectionEntityType, TypeAction[]>> = {
+  document: [
+    {
+      key: 'reviewed',
+      title: 'Als geprüft markieren',
+      icon: 'pi pi-check-circle',
+      run: (ids) => void runAction(
+        () => batchUpdateDocumentAttributes({ document_ids: ids, attributes_reviewed: true }),
+        `${countLabel(ids.length, 'document')} als geprüft markiert.`,
+      ),
+    },
+    {
+      key: 'tax',
+      title: 'Als steuerrelevant markieren',
+      icon: 'pi pi-percentage',
+      run: (ids) => void runAction(
+        () => batchUpdateDocumentTax({ document_ids: ids, tax_relevant: true }),
+        `${countLabel(ids.length, 'document')} als steuerrelevant markiert.`,
+      ),
+    },
+  ],
+  transaction: [
+    {
+      key: 'reviewed',
+      title: 'Als geprüft markieren',
+      icon: 'pi pi-check-circle',
+      run: (ids) => void runAction(() => batchReview(ids, true), `${countLabel(ids.length, 'transaction')} als geprüft markiert.`),
+    },
+    {
+      key: 'tax',
+      title: 'Als steuerrelevant markieren',
+      icon: 'pi pi-percentage',
+      run: (ids) => void runAction(() => batchTaxRelevant(ids, true), `${countLabel(ids.length, 'transaction')} als steuerrelevant markiert.`),
+    },
+    {
+      key: 'csv',
+      title: 'Als CSV herunterladen',
+      icon: 'pi pi-download',
+      run: (ids) => void runAction(() => downloadTransactionsCsv(ids), `${countLabel(ids.length, 'transaction')} als CSV heruntergeladen.`),
+    },
+  ],
+  photo: [
+    {
+      key: 'favorite',
+      title: 'Als Favorit markieren',
+      icon: 'pi pi-heart',
+      run: (ids) => void runAction(
+        () => Promise.all(ids.map((id) => updatePhotoCuration(id, 'favorite'))),
+        `${countLabel(ids.length, 'photo')} als Favorit markiert.`,
+      ),
+    },
+    {
+      key: 'albums',
+      title: 'Zu Alben hinzufügen',
+      icon: 'pi pi-book',
+      run: (ids) => {
+        albumDialogPhotoIds.value = ids
+        albumDialogOpen.value = true
+      },
+    },
+  ],
+}
+
+const selectionActions = computed<ToolbarItem[]>(() =>
+  groupedSelectionActions(
+    selectedRefs.value,
+    [
+      {
+        key: 'remove',
+        label: 'Herausnehmen',
+        title: 'Aus der Sammelmappe nehmen',
+        icon: 'pi pi-times',
+        severity: 'secondary',
+        disabled: busy.value,
+        command: () => void removeSelected(),
+      },
+      {
+        key: 'move',
+        label: 'In Sammelmappe',
+        title: 'In eine andere Sammelmappe legen',
+        icon: 'pi pi-folder',
+        severity: 'secondary',
+        command: () => (moveOpen.value = true),
+      },
+      {
+        key: 'basket',
+        label: 'In den Basket',
+        title: 'In den Basket legen',
+        icon: 'pi pi-shopping-cart',
+        severity: 'secondary',
+        command: () => {
+          basket.add(selectedRefs.value)
+          info.value = `${selectedRefs.value.length} in den Basket gelegt.`
+        },
+      },
+    ],
+    typeActions,
+  ),
+)
+
+async function removeSelected() {
+  const refs = selectedRefs.value
+  if (!detail.value || refs.length === 0) return
+  const id = detail.value.id
+  await runAction(async () => {
+    for (const ref of refs) await removeAnyCollectionMember(id, ref)
+    selection.clear()
+  }, `${refs.length} aus der Sammelmappe genommen.`)
+}
+
+function onRowClick(m: CollectionMember, index: number, event: MouseEvent) {
+  if (selectMode.value) {
+    void selection.toggle({ id: encodeMember(m) }, { index, range: event.shiftKey })
+    return
+  }
+  openMember(m)
+}
+
 const toolbar = useListToolbar({
   search,
   filter: {
@@ -138,6 +305,7 @@ const toolbar = useListToolbar({
     total: () => detail.value?.members.length,
     loading: () => loading.value,
   },
+  selection: { active: selectMode, toggle: selection.toggleMode },
 })
 
 // ── Display and actions ──────────────────────────────────────────────────────
@@ -222,7 +390,12 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
       </div>
     </template>
 
+    <template #selection>
+      <SelectionBar v-if="selectMode" :selection="selection" :actions="selectionActions" noun="Einträge" />
+    </template>
+
     <template #notice>
+      <Message v-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
       <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = ''" />
       <Message v-if="detail && detail.hidden_count > 0" severity="secondary" :closable="false">
         {{ detail.hidden_count }} {{ detail.hidden_count === 1 ? 'Eintrag ist' : 'Einträge sind' }}
@@ -256,13 +429,25 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
         />
       </header>
       <ul class="cd-rows">
-        <li v-for="m in g.members" :key="`${m.entity_type}:${m.entity_id}`" class="cd-row">
+        <li
+          v-for="m in g.members"
+          :key="`${m.entity_type}:${m.entity_id}`"
+          class="cd-row"
+          :class="{ 'cd-row--selected': selectedIds.has(encodeMember(m)) }"
+        >
+          <Checkbox
+            v-if="selectMode"
+            binary
+            :model-value="selectedIds.has(encodeMember(m))"
+            :aria-label="`Auswählen: ${m.title}`"
+            @update:model-value="(v: boolean) => selection.toggleId(encodeMember(m), v)"
+          />
           <button
             type="button"
             class="cd-row-body"
-            :disabled="!memberRoute(m.entity_type, m.entity_id)"
-            :aria-label="`Öffnen: ${m.title}`"
-            @click="openMember(m)"
+            :disabled="!selectMode && !memberRoute(m.entity_type, m.entity_id)"
+            :aria-label="selectMode ? `Auswählen: ${m.title}` : `Öffnen: ${m.title}`"
+            @click="onRowClick(m, visible.indexOf(m), $event)"
           >
             <span class="cd-row-title">{{ m.title }}</span>
             <span class="cd-row-meta">
@@ -272,6 +457,7 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
             </span>
           </button>
           <Button
+            v-if="!selectMode"
             icon="pi pi-times"
             text
             rounded
@@ -283,6 +469,13 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
         </li>
       </ul>
     </section>
+
+    <AddToCollectionDialog
+      v-model:visible="moveOpen"
+      :members="selectedRefs"
+      @added="(p) => (info = `${p.count} in „${p.name}“ gelegt.`)"
+    />
+    <PhotoAlbumDialog v-model:visible="albumDialogOpen" :photo-ids="albumDialogPhotoIds" />
   </PageLayout>
 </template>
 
@@ -366,6 +559,9 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
   gap: var(--space-3);
   color: var(--p-text-muted-color);
   font-size: var(--text-sm);
+}
+.cd-row--selected {
+  background: var(--p-content-hover-background);
 }
 .cd-row-amount {
   font-variant-numeric: tabular-nums;
