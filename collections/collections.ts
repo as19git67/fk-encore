@@ -40,6 +40,15 @@ import { removeCollectionExports } from "../documents/collection-export";
 import { assertGroupMember, loadUserGroupIds } from "../documents/visibility";
 import type { CollectionKind } from "../documents/dossiers";
 import {
+  applyMemberRule,
+  excludeFromRule,
+  normalizeMemberRule,
+  ruleOf,
+  type MemberRule,
+  type RuleApplyResult,
+} from "./rules";
+import { createAlbumLogic, batchUpdateAlbumPhotosLogic } from "../photo/photo.service";
+import {
   COLLECTION_ENTITY_TYPES,
   isCollectionEntityType,
   mayUseType,
@@ -98,6 +107,8 @@ export interface CollectionSummary {
   total: number;
   /** True when the caller may share, archive or delete it. */
   can_administer: boolean;
+  /** The membership rule of a rule collection (#1548, stage 5); null otherwise. */
+  rule: MemberRule | null;
 }
 
 export interface CollectionMember extends MemberDisplay {
@@ -210,6 +221,7 @@ async function toSummaries(rows: CollectionRow[], c: Caller): Promise<Collection
         counts: rowCounts,
         total: Object.values(rowCounts).reduce((sum, n) => sum + (n ?? 0), 0),
         can_administer: await mayAdminister(row, c),
+        rule: ruleOf(row),
       };
     }),
   );
@@ -672,6 +684,8 @@ export const removeAnyCollectionMember = api(
     if (type === "document") {
       await removeDocumentFromCollection(row, entityId);
     } else {
+      // Out of a rule collection, a removal is a decision the rule respects.
+      await excludeFromRule(row, type as CollectionMemberType, entityId);
       await dbExec(
         db
           .delete(collectionMembers)
@@ -935,5 +949,161 @@ export const saveBasketAsCollection = api(
     await markOpened(created.id, c.userId);
     const fresh = await loadReadableCollection(c.userId, created.id, isAdmin(c));
     return await buildDetail(fresh, c);
+  },
+);
+
+// ─── Rules (#1548, stage 5) ─────────────────────────────────────────────────
+
+export interface CreateRuleCollectionRequest {
+  name: string;
+  description?: string | null;
+  visibility?: "private" | "group";
+  group_id?: number | null;
+  /** `{ type: "photo", filter }`, `{ type: "transaction" | "security" | "meter", criteria }`. */
+  rule: Record<string, unknown>;
+}
+
+export interface RuleCollectionResponse {
+  collection: CollectionDetail;
+  applied: RuleApplyResult;
+}
+
+/**
+ * A collection whose members join by themselves: typed for the rule's kind,
+ * filled at once with what matches today, kept current by the hourly job.
+ */
+export const createRuleCollection = api(
+  { expose: true, method: "POST", path: "/collections/rule", auth: true },
+  async (req: CreateRuleCollectionRequest): Promise<RuleCollectionResponse> => {
+    const c = caller();
+    const name = (req.name ?? "").trim();
+    if (!name) throw APIError.invalidArgument("name must not be empty");
+    const rule = normalizeMemberRule(req.rule);
+    if (!rule) throw APIError.invalidArgument("the rule must narrow something");
+    if (!mayUseType(c, rule.type)) throw APIError.permissionDenied(`no access to ${rule.type} items`);
+
+    const visibility = req.visibility ?? "private";
+    const groupId = visibility === "group" ? (req.group_id ?? null) : null;
+    if (visibility === "group") {
+      if (groupId == null) throw APIError.invalidArgument("group_id is required for a group collection");
+      await assertGroupMember(c.userId, groupId);
+    }
+    const created = await dbInsertReturning<CollectionRow>(
+      db
+        .insert(documentCollections)
+        .values({
+          user_id: c.userId,
+          title: name,
+          notes: req.description?.trim() || null,
+          visibility,
+          group_id: groupId,
+          kind: "rule",
+          entity_type: rule.type,
+          rule: rule as never,
+          summary_stale: false,
+        })
+        .returning(),
+    );
+    if (!created) throw APIError.internal("failed to create collection");
+    const applied = await applyMemberRule(created);
+    await markOpened(created.id, c.userId);
+    const fresh = await loadReadableCollection(c.userId, created.id, isAdmin(c));
+    return { collection: await buildDetail(fresh, c), applied };
+  },
+);
+
+export interface SetCollectionRuleRequest {
+  id: number;
+  /** The new rule, or null to stop: members stay, nothing joins by itself any more. */
+  rule: Record<string, unknown> | null;
+}
+
+export const setCollectionRule = api(
+  { expose: true, method: "PUT", path: "/collections/:id/rule", auth: true },
+  async (req: SetCollectionRuleRequest): Promise<RuleCollectionResponse> => {
+    const c = caller();
+    assertMayUseCollections(c);
+    const row = await loadReadableCollection(c.userId, req.id, isAdmin(c));
+    if (row.kind === "dossier" || row.kind === "basket") {
+      throw APIError.failedPrecondition("dossiers and the basket keep their own rules");
+    }
+    if (req.rule === null) {
+      await dbExec(
+        db
+          .update(documentCollections)
+          .set({ kind: "manual", rule: null, updated_at: sql`now()` })
+          .where(eq(documentCollections.id, row.id)),
+      );
+      // What the rule gathered is now simply in the folder.
+      await dbExec(
+        db
+          .update(collectionMembers)
+          .set({ joined_by: "user" })
+          .where(eq(collectionMembers.collection_id, row.id)),
+      );
+      const fresh = await loadReadableCollection(c.userId, row.id, isAdmin(c));
+      return { collection: await buildDetail(fresh, c), applied: { added: 0, removed: 0 } };
+    }
+    const previous = ruleOf(row);
+    const rule = normalizeMemberRule(req.rule, previous?.excluded_ids ?? []);
+    if (!rule) throw APIError.invalidArgument("the rule must narrow something");
+    if (row.entity_type != null && row.entity_type !== rule.type) {
+      throw APIError.failedPrecondition(`this collection holds ${row.entity_type} items only, not ${rule.type}`);
+    }
+    if (!mayUseType(c, rule.type)) throw APIError.permissionDenied(`no access to ${rule.type} items`);
+    await dbExec(
+      db
+        .update(documentCollections)
+        .set({ kind: "rule", rule: rule as never, entity_type: rule.type, updated_at: sql`now()` })
+        .where(eq(documentCollections.id, row.id)),
+    );
+    const updated = await loadReadableCollection(c.userId, row.id, isAdmin(c));
+    const applied = await applyMemberRule(updated);
+    const fresh = await loadReadableCollection(c.userId, row.id, isAdmin(c));
+    return { collection: await buildDetail(fresh, c), applied };
+  },
+);
+
+/** Bring one rule collection up to date now instead of at the next hour. */
+export const applyCollectionRuleNow = api(
+  { expose: true, method: "POST", path: "/collections/:id/apply-rule", auth: true },
+  async ({ id }: { id: number }): Promise<RuleCollectionResponse> => {
+    const c = caller();
+    assertMayUseCollections(c);
+    const row = await loadReadableCollection(c.userId, id, isAdmin(c));
+    if (!ruleOf(row)) throw APIError.failedPrecondition("this collection has no rule");
+    const applied = await applyMemberRule(row);
+    const fresh = await loadReadableCollection(c.userId, id, isAdmin(c));
+    return { collection: await buildDetail(fresh, c), applied };
+  },
+);
+
+
+// ─── Album from a collection (#1548, stage 5) ───────────────────────────────
+
+export interface CollectionToAlbumRequest {
+  id: number;
+  name: string;
+}
+
+/**
+ * A new album with the photos of a collection the caller may see. A copy,
+ * not a link: the album is curated from here on, the collection stays a
+ * working set (albums are what gets shared and published).
+ */
+export const createAlbumFromCollection = api(
+  { expose: true, method: "POST", path: "/collections/:id/to-album", auth: true },
+  async (req: CollectionToAlbumRequest): Promise<{ album_id: number; photos: number }> => {
+    const c = caller();
+    if (!c.permissions.includes("albums.manage")) throw APIError.permissionDenied("missing permission: albums.manage");
+    const name = (req.name ?? "").trim();
+    if (!name) throw APIError.invalidArgument("name must not be empty");
+    const row = await loadReadableCollection(c.userId, req.id, isAdmin(c));
+    const members = await resolveVisible(await loadStoredMembers(row.id), c);
+    const photoIds = members.filter((m) => m.entity_type === "photo").map((m) => m.entity_id);
+    if (photoIds.length === 0) throw APIError.failedPrecondition("the collection holds no photos you can see");
+    const album = await createAlbumLogic(c.userId, { name });
+    await batchUpdateAlbumPhotosLogic(c.userId, { albumIds: [album.id], photoIds, action: "add" });
+    return { album_id: album.id, photos: photoIds.length };
   },
 );

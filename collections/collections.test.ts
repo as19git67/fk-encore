@@ -41,6 +41,13 @@ import fs from "fs";
 import { listTransactions } from "../finance/transactions";
 import { listMeters } from "../meter/meter";
 import { listGalleryIds } from "../photo/gallery-grid";
+import {
+  applyCollectionRuleNow,
+  createAlbumFromCollection,
+  createRuleCollection,
+  setCollectionRule,
+} from "./collections";
+import { applyAllMemberRules } from "./rules";
 import path from "path";
 
 const OWNER = 951_001;
@@ -562,5 +569,116 @@ describe("module lists scoped to a collection", () => {
     as(STRANGER);
     expect((await listTransactions({ accountId: acc, collectionId: col.id })).items).toEqual([]);
     expect((await listTransactions({ accountId: acc })).items).toHaveLength(2);
+  });
+});
+
+describe("rule collections", () => {
+  it("gathers transactions by criteria, keeps up, and respects a removal", async () => {
+    const acc = await account([OWNER]);
+    const other = await account([OWNER]);
+    const a = await transaction(acc, "Stadtwerke Strom");
+    await transaction(acc, "Bäckerei");
+    await transaction(other, "Stadtwerke Wasser");
+
+    const { collection, applied } = await createRuleCollection({
+      name: "Stadtwerke",
+      rule: { type: "transaction", criteria: { text: "stadtwerke", account_ids: [acc] } },
+    });
+    expect(applied).toEqual({ added: 1, removed: 0 });
+    expect(collection.kind).toBe("rule");
+    expect(collection.entity_type).toBe("transaction");
+    expect(collection.members.map((m) => m.entity_id)).toEqual([a]);
+
+    // A new booking joins on the next run.
+    const b = await transaction(acc, "Stadtwerke Gas");
+    await applyAllMemberRules();
+    let detail = await getAnyCollection({ id: collection.id });
+    expect(detail.members.map((m) => m.entity_id).sort()).toEqual([a, b].sort());
+
+    // Taken out by hand, it stays out.
+    await removeAnyCollectionMember({ id: collection.id, entityType: "transaction", entityId: b });
+    detail = (await applyCollectionRuleNow({ id: collection.id })).collection;
+    expect(detail.members.map((m) => m.entity_id)).toEqual([a]);
+    expect(detail.rule?.excluded_ids).toEqual([b]);
+
+    // A wider rule keeps the exclusion and takes in the other account.
+    const widened = await setCollectionRule({
+      id: collection.id,
+      rule: { type: "transaction", criteria: { text: "stadtwerke" } },
+    });
+    expect(widened.collection.members).toHaveLength(2);
+    expect(widened.collection.rule?.excluded_ids).toEqual([b]);
+  });
+
+  it("gathers meters by type and photos by gallery filter", async () => {
+    const m1 = await meter(OWNER);
+    const [water] = await db
+      .insert(meters)
+      .values({ name: "Wasser", type: "water", unit: "m3", owner_user_id: OWNER })
+      .returning({ id: meters.id });
+    created.meters.push(water!.id);
+    const meterRule = await createRuleCollection({
+      name: "Strom",
+      rule: { type: "meter", criteria: { meter_types: ["electricity"] } },
+    });
+    expect(meterRule.collection.members.map((m) => m.entity_id)).toEqual([m1]);
+
+    const p1 = await photo(OWNER);
+    await db.execute(sql`UPDATE photos SET taken_at = '2025-07-01 10:00:00' WHERE id = ${p1}`);
+    await photo(OWNER);
+    const photoRule = await createRuleCollection({
+      name: "Sommer 2025",
+      // As the gallery sends it: the strings of its URL, plus keys that are dropped.
+      rule: { type: "photo", filter: { dateFrom: "2025-06-01", dateTo: "2025-08-31", favorite: "false", collectionId: "9", variantMode: "all" } },
+    });
+    expect(photoRule.collection.members.map((m) => m.entity_id)).toEqual([p1]);
+  });
+
+  it("refuses a rule that narrows nothing, and stops a rule on request", async () => {
+    await expectCode(createRuleCollection({ name: "Alles", rule: { type: "photo", filter: {} } }), "invalid_argument");
+    const m1 = await meter(OWNER);
+    const { collection } = await createRuleCollection({
+      name: "Zähler",
+      rule: { type: "meter", criteria: { location: "" , meter_types: ["electricity"] } },
+    });
+    const stopped = await setCollectionRule({ id: collection.id, rule: null });
+    expect(stopped.collection.kind).toBe("manual");
+    expect(stopped.collection.rule).toBeNull();
+    expect(stopped.collection.members.map((m) => [m.entity_id, m.joined_by])).toEqual([[m1, "user"]]);
+  });
+});
+
+describe("album from a collection", () => {
+  it("copies the visible photos into a new album", async () => {
+    as(OWNER, [...ALL_PERMISSIONS, "albums.manage"]);
+    const p1 = await photo(OWNER);
+    const p2 = await photo(OWNER);
+    const docId = await document(OWNER, "Notiz");
+    const col = await createAnyCollection({
+      name: "Fall",
+      members: [
+        { entity_type: "photo", entity_id: p1 },
+        { entity_type: "photo", entity_id: p2 },
+        { entity_type: "document", entity_id: docId },
+      ],
+    });
+    const res = await createAlbumFromCollection({ id: col.id, name: "Aus der Mappe" });
+    created.albums.push(res.album_id);
+    expect(res.photos).toBe(2);
+    const rows = await db.execute<{ photo_id: number }>(
+      sql`SELECT photo_id FROM album_photos WHERE album_id = ${res.album_id} ORDER BY photo_id`,
+    );
+    expect(rows.rows.map((r) => r.photo_id)).toEqual([p1, p2].sort((x, y) => x - y));
+
+    as(OWNER);
+    await expectCode(createAlbumFromCollection({ id: col.id, name: "Ohne Recht" }), "permission_denied");
+  });
+});
+
+describe("coercePhotoFilter", () => {
+  it("types the gallery's URL strings and drops view-bound keys", async () => {
+    const { coercePhotoFilter } = await import("./rules");
+    expect(coercePhotoFilter({ favorite: "true", qualityMin: "40", albumIds: "1,2", collectionId: "3", albumScopeId: 4, variantMode: "all", bogus: 1 }))
+      .toEqual({ favorite: true, qualityMin: 40, albumIds: "1,2" });
   });
 });

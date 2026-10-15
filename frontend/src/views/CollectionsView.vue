@@ -16,6 +16,9 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Menu from 'primevue/menu'
+import Message from 'primevue/message'
+import Checkbox from 'primevue/checkbox'
+import MultiSelect from 'primevue/multiselect'
 import SelectButton from 'primevue/selectbutton'
 import Tag from 'primevue/tag'
 import PageLayout from '../components/layout/PageLayout.vue'
@@ -28,8 +31,14 @@ import type { FilterChip } from '../components/layout/listToolbar'
 import { useListSearch, useListToolbar, useListView } from '../composables/useListToolbar'
 import { useSort } from '../composables/useSort'
 import { rememberCollectionName } from '../composables/useCollectionNames'
+import { getOverview } from '../api/finance'
 import {
   ENTITY_LABELS,
+  applyCollectionRuleNow,
+  createAlbumFromCollection,
+  createRuleCollection,
+  setCollectionRule,
+  type MemberRuleInput,
   createAnyCollection,
   deleteAnyCollection,
   describeCounts,
@@ -214,6 +223,7 @@ const ordered = computed(() => [
 
 function typeLabel(c: CollectionSummary): string {
   if (c.kind === 'dossier') return 'Akte'
+  if (c.kind === 'rule' && c.entity_type) return `${ENTITY_LABELS[c.entity_type].plural} · Regel`
   return c.entity_type ? ENTITY_LABELS[c.entity_type].plural : 'Gemischt'
 }
 function typeIcon(c: CollectionSummary): string {
@@ -291,6 +301,15 @@ function openRowMenu(event: Event, c: CollectionSummary) {
   const entries: Array<{ label: string; icon: string; command: () => void }> = [
     { label: 'Umbenennen', icon: 'pi pi-pencil', command: () => openRename(c) },
   ]
+  if (c.kind === 'rule') {
+    entries.push(
+      { label: 'Regel jetzt anwenden', icon: 'pi pi-sync', command: () => void applyRule(c) },
+      { label: 'Regel beenden', icon: 'pi pi-ban', command: () => askStopRule(c) },
+    )
+  }
+  if ((c.counts.photo ?? 0) > 0) {
+    entries.push({ label: 'Album daraus erstellen', icon: 'pi pi-book', command: () => openAlbumFrom(c) })
+  }
   if (c.can_administer) {
     entries.push(
       c.archived_at
@@ -303,6 +322,56 @@ function openRowMenu(event: Event, c: CollectionSummary) {
   rowMenu.value?.toggle(event)
 }
 
+// ── Rules and albums (#1548, stage 5) ────────────────────────────────────────
+
+const notice = ref('')
+
+async function applyRule(c: CollectionSummary) {
+  try {
+    const { applied } = await applyCollectionRuleNow(c.id)
+    notice.value = `„${c.name}“: ${applied.added} neu, ${applied.removed} entfernt.`
+    await load()
+  } catch (err: unknown) {
+    error.value = err instanceof Error ? err.message : 'Regel konnte nicht angewendet werden.'
+  }
+}
+
+function askStopRule(c: CollectionSummary) {
+  confirm.require({
+    header: 'Regel beenden?',
+    message: `„${c.name}“ behält, was darin liegt, füllt sich aber nicht mehr von selbst.`,
+    icon: 'pi pi-question-circle',
+    acceptLabel: 'Regel beenden',
+    rejectLabel: 'Abbrechen',
+    accept: () => {
+      void setCollectionRule(c.id, null)
+        .then(load)
+        .catch((err: unknown) => {
+          error.value = err instanceof Error ? err.message : 'Speichern fehlgeschlagen.'
+        })
+    },
+  })
+}
+
+const albumSource = ref<CollectionSummary | null>(null)
+const albumName = ref('')
+function openAlbumFrom(c: CollectionSummary) {
+  albumSource.value = c
+  albumName.value = c.name
+}
+async function createAlbum() {
+  const c = albumSource.value
+  const name = albumName.value.trim()
+  if (!c || !name) return
+  try {
+    const res = await createAlbumFromCollection(c.id, name)
+    albumSource.value = null
+    void router.push({ name: 'fotos-album-detail', params: { id: res.album_id } })
+  } catch (err: unknown) {
+    error.value = err instanceof Error ? err.message : 'Album konnte nicht erstellt werden.'
+  }
+}
+
 // New collection, made here and opened at once.
 const createOpen = ref(false)
 const createName = ref('')
@@ -313,10 +382,60 @@ const CREATE_TYPES = [
     .filter((t) => t !== 'meter_reading')
     .map((t) => ({ label: ENTITY_LABELS[t].plural, value: t })),
 ]
+// Meters and securities can fill themselves from the start; photos and
+// transactions get their rule from their list's filter ("Als Regel-Mappe").
+const createWithRule = ref(false)
+const ruleMeterTypes = ref<Array<'electricity' | 'water' | 'gas' | 'operating_hours'>>([])
+const ruleLocation = ref('')
+const ruleDepots = ref<number[]>([])
+const depotOptions = ref<Array<{ id: number; label: string }>>([])
+const METER_TYPE_OPTIONS = [
+  { label: 'Strom', value: 'electricity' },
+  { label: 'Wasser', value: 'water' },
+  { label: 'Gas', value: 'gas' },
+  { label: 'Betriebsstunden', value: 'operating_hours' },
+]
+const ruleCapable = computed(() => createType.value === 'meter' || createType.value === 'security')
+watch(createType, async (type) => {
+  createWithRule.value = false
+  if (type !== 'security' || depotOptions.value.length) return
+  try {
+    const overview = await getOverview()
+    const accounts = [...overview.sections.flatMap((s) => s.accounts), ...overview.unassigned]
+    depotOptions.value = accounts.filter((a) => a.type_kind === 'depot').map((a) => ({ id: a.id, label: a.label }))
+  } catch {
+    depotOptions.value = []
+  }
+})
+const createRule = computed<MemberRuleInput | null>(() => {
+  if (!createWithRule.value) return null
+  if (createType.value === 'meter') {
+    const location = ruleLocation.value.trim()
+    if (!ruleMeterTypes.value.length && !location) return null
+    return { type: 'meter', criteria: { meter_types: ruleMeterTypes.value, ...(location ? { location } : {}) } }
+  }
+  if (createType.value === 'security') {
+    return { type: 'security', criteria: ruleDepots.value.length ? { account_ids: ruleDepots.value } : {} }
+  }
+  return null
+})
+
 async function create() {
   const name = createName.value.trim()
   if (!name) return
   try {
+    if (createWithRule.value) {
+      if (!createRule.value) {
+        error.value = 'Die Regel braucht mindestens eine Bedingung.'
+        return
+      }
+      const res = await createRuleCollection({ name, rule: createRule.value })
+      createOpen.value = false
+      createName.value = ''
+      createType.value = ''
+      open(res.collection)
+      return
+    }
     const created = await createAnyCollection({ name, entity_type: createType.value || null })
     createOpen.value = false
     createName.value = ''
@@ -391,6 +510,7 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
 
     <template #notice>
       <ErrorBanner v-if="error" :message="error" closable @retry="load" @close="error = ''" />
+      <Message v-if="notice" severity="success" closable @close="notice = ''">{{ notice }}</Message>
     </template>
 
     <PageSkeleton v-if="loading && !loaded" />
@@ -416,6 +536,7 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
           <span class="collection-tile-meta">{{ describeCounts(c.counts) || 'leer' }}</span>
           <span class="collection-tile-tags">
             <Tag :value="typeLabel(c)" severity="secondary" />
+            <Tag v-if="c.kind === 'rule'" value="Regel" icon="pi pi-bolt" severity="info" />
             <Tag v-if="c.visibility === 'group'" value="Gruppe" icon="pi pi-users" severity="info" />
             <Tag v-if="c.created_by === 'assistant'" value="Assistent" icon="pi pi-sparkles" severity="info" />
             <Tag v-if="c.archived_at" value="Archiviert" icon="pi pi-box" severity="secondary" />
@@ -516,6 +637,26 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
       </template>
     </Dialog>
 
+    <Dialog
+      class="dialog-sm"
+      :visible="albumSource !== null"
+      modal
+      header="Album aus Sammelmappe"
+      @update:visible="(v: boolean) => { if (!v) albumSource = null }"
+    >
+      <p class="collections-note">
+        Die Fotos der Mappe kommen in ein neues Album. Die Mappe bleibt, wie sie ist.
+      </p>
+      <label class="collections-field">
+        <span>Name des Albums</span>
+        <InputText v-model="albumName" autofocus class="collections-input" @keyup.enter="createAlbum" />
+      </label>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" text @click="albumSource = null" />
+        <Button label="Album erstellen" icon="pi pi-book" :disabled="!albumName.trim()" @click="createAlbum" />
+      </template>
+    </Dialog>
+
     <Dialog v-model:visible="createOpen" class="dialog-sm" modal header="Neue Sammelmappe">
       <label class="collections-field">
         <span>Name</span>
@@ -531,6 +672,41 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
           :allow-empty="false"
         />
       </label>
+      <label v-if="ruleCapable" class="collections-check">
+        <Checkbox v-model="createWithRule" binary />
+        <span>Automatisch füllen (Regel)</span>
+      </label>
+      <template v-if="createWithRule && createType === 'meter'">
+        <label class="collections-field">
+          <span>Zählerarten</span>
+          <MultiSelect
+            v-model="ruleMeterTypes"
+            :options="METER_TYPE_OPTIONS"
+            option-label="label"
+            option-value="value"
+            placeholder="Alle Arten"
+            display="chip"
+          />
+        </label>
+        <label class="collections-field">
+          <span>Ort enthält</span>
+          <InputText v-model="ruleLocation" class="collections-input" placeholder="z. B. Keller" />
+        </label>
+      </template>
+      <label v-if="createWithRule && createType === 'security'" class="collections-field">
+        <span>Depots</span>
+        <MultiSelect
+          v-model="ruleDepots"
+          :options="depotOptions"
+          option-label="label"
+          option-value="id"
+          placeholder="Alle Depots"
+          display="chip"
+        />
+      </label>
+      <p v-if="createType === 'photo' || createType === 'transaction'" class="collections-note">
+        Fotos und Buchungen bekommen ihre Regel aus dem Filter ihrer Liste: dort „Als Regel-Mappe“.
+      </p>
       <template #footer>
         <Button label="Abbrechen" severity="secondary" text @click="createOpen = false" />
         <Button label="Anlegen" icon="pi pi-plus" :disabled="!createName.trim()" @click="create" />
@@ -561,6 +737,18 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
 }
 .collections-filter :deep(.p-selectbutton) {
   flex-wrap: wrap;
+}
+.collections-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+}
+.collections-note {
+  margin: 0 0 var(--space-3);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
 }
 .collections-input {
   width: 100%;

@@ -103,6 +103,16 @@ export interface GalleryGridQuery {
   photoIds?: number[]
 }
 
+/**
+ * A gallery filter in the form the backend reads it — what a rule collection
+ * stores as its photo rule (#1548, stage 5).
+ */
+export function photoFilterQuery(filter: PhotoFilter): Record<string, string> {
+  const sp = new URLSearchParams()
+  buildFilterParams(filter, sp)
+  return Object.fromEntries(sp.entries())
+}
+
 function buildFilterParams(filter: PhotoFilter | undefined, sp: URLSearchParams) {
   if (!filter) return
   const add = (k: string, v: string | number | boolean) => sp.set(k, String(v))

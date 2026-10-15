@@ -38,6 +38,8 @@ import {
   markCollectionOpened,
   removeAnyCollectionMember,
   updateAnyCollection,
+  applyCollectionRuleNow,
+  createAlbumFromCollection,
   type MemberRef,
   type CollectionDetail,
   type CollectionEntityType,
@@ -158,7 +160,7 @@ async function runAction(work: () => Promise<unknown>, done: string) {
   info.value = ''
   try {
     await work()
-    info.value = done
+    if (done) info.value = done
     await load()
   } catch (err: unknown) {
     error.value = err instanceof Error ? err.message : 'Aktion fehlgeschlagen.'
@@ -345,6 +347,31 @@ async function toggleFavourite() {
   }
 }
 
+// ── Rule and album (#1548, stage 5) ──────────────────────────────────────────
+
+async function applyRule() {
+  if (!detail.value) return
+  const id = detail.value.id
+  await runAction(async () => {
+    const res = await applyCollectionRuleNow(id)
+    info.value = `${res.applied.added} neu, ${res.applied.removed} entfernt.`
+  }, '')
+}
+
+async function makeAlbum() {
+  if (!detail.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    const res = await createAlbumFromCollection(detail.value.id, detail.value.name)
+    void router.push({ name: 'fotos-album-detail', params: { id: res.album_id } })
+  } catch (err: unknown) {
+    error.value = err instanceof Error ? err.message : 'Album konnte nicht erstellt werden.'
+  } finally {
+    busy.value = false
+  }
+}
+
 function goBack() {
   if (window.history.state?.back) router.back()
   else void router.push({ name: 'sammelmappen' })
@@ -371,6 +398,24 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
         :aria-label="detail.favourite ? 'Favorit entfernen' : 'Als Favorit markieren'"
         :aria-pressed="detail.favourite"
         @click="toggleFavourite"
+      />
+      <Button
+        v-if="detail?.kind === 'rule'"
+        icon="pi pi-sync"
+        label="Regel anwenden"
+        severity="secondary"
+        text
+        :loading="busy"
+        @click="applyRule"
+      />
+      <Button
+        v-if="(detail?.counts.photo ?? 0) > 0"
+        icon="pi pi-book"
+        label="Album erstellen"
+        severity="secondary"
+        text
+        :disabled="busy"
+        @click="makeAlbum"
       />
     </template>
 

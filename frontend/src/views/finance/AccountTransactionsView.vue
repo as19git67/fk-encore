@@ -8,7 +8,8 @@ import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 import SelectionBar from '../../components/layout/SelectionBar.vue'
 import AddToCollectionDialog from '../../components/collections/AddToCollectionDialog.vue'
-import type { MemberRef } from '../../api/collections'
+import type { MemberRef, MemberRuleInput, TransactionRuleCriteria } from '../../api/collections'
+import SaveRuleDialog from '../../components/collections/SaveRuleDialog.vue'
 /**
  * Buchungsliste — entweder für ein einzelnes Konto (`/finanzen/uebersicht/konto/:id`)
  * oder für alle Konten einer Sektion (`/finanzen/uebersicht/sektion/:name`).
@@ -330,6 +331,32 @@ const facetCount = computed(() => {
   if (collectionScope.value && mode.value?.kind !== 'collection') n++
   return n
 })
+
+// ── The current filter as a rule collection (#1548, stage 5) ─────────────────
+
+const saveRuleOpen = ref(false)
+/** The list's filter as transaction criteria; null when nothing narrows it. */
+const ruleInput = computed<MemberRuleInput | null>(() => {
+  const m = mode.value
+  if (!m || m.kind === 'collection' || collectionScope.value) return null
+  const criteria: TransactionRuleCriteria = {}
+  if (m.kind === 'account') criteria.account_ids = [m.accountId]
+  else if (resolvedSection.value) criteria.account_ids = resolvedSection.value.accounts.map((a) => a.id)
+  const text = filtersStore.appliedQuery.trim()
+  if (text) criteria.text = text
+  if (filtersStore.appliedTags.length) criteria.tags = [...filtersStore.appliedTags]
+  if (filtersStore.appliedTaxRelevant !== null) criteria.tax_relevant = filtersStore.appliedTaxRelevant
+  if (filtersStore.appliedFrom) criteria.from = isoDate(filtersStore.appliedFrom)
+  if (filtersStore.appliedTo) criteria.to = isoDate(filtersStore.appliedTo)
+  const narrows = !!(criteria.text || criteria.tags || criteria.tax_relevant !== undefined || criteria.from || criteria.to)
+  return narrows ? { type: 'transaction', criteria } : null
+})
+const canSaveRule = computed(() => ruleInput.value !== null && !isDepot.value)
+const ruleSummary = computed(() =>
+  [search.term.value.trim() ? `„${search.term.value.trim()}“` : '', ...filterChips.value.map((c) => c.label)]
+    .filter(Boolean)
+    .join(' · '),
+)
 
 /** Limit an account or section list to one collection, or lift it (#1548). */
 function setCollectionScope(id: number | null) {
@@ -1355,6 +1382,16 @@ function goBack() {
         <template #actions>
           <span v-if="hasActiveFilters" class="tx-summary-sum">Σ {{ formatFilteredSum() }}</span>
           <Button
+            v-if="canSaveRule"
+            icon="pi pi-folder"
+            label="Als Regel-Mappe"
+            severity="secondary"
+            outlined
+            size="small"
+            v-tooltip.bottom="'Filter als Regel-Sammelmappe speichern'"
+            @click="saveRuleOpen = true"
+          />
+          <Button
             v-if="canAddCashTransaction && !isDepot"
             icon="pi pi-money-bill"
             severity="secondary"
@@ -1945,6 +1982,7 @@ function goBack() {
       @applied="refreshAfterTagChange"
     />
     <AddToCollectionDialog v-model:visible="collectionDialogOpen" :members="selectedTxRefs" />
+    <SaveRuleDialog v-model:visible="saveRuleOpen" :rule="ruleInput" :summary="ruleSummary" />
   </PageLayout>
 </template>
 
