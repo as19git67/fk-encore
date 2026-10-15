@@ -1369,6 +1369,8 @@ interface PositionResponse {
 /** The security in one depot's master, for "Aus Depot entfernen" on the position page. */
 export interface PositionDepotSecurity {
   account_id: number;
+  /** The master row (`finance_depot_security.id`), what a collection holds (#1548); null without an entry. */
+  security_id: number | null;
   account_label: string;
   /** The master's status; null when the depot has no entry (rows from before the master). */
   status: SecurityStatus | null;
@@ -1654,6 +1656,7 @@ async function positionDepotSecurities(
     ]);
     out.push({
       account_id: accountId,
+      security_id: entry?.id != null ? Number(entry.id) : null,
       account_label: labelById.get(accountId) ?? "",
       status: (entry?.status as SecurityStatus | undefined) ?? null,
       bank_held: bank?.current ?? false,

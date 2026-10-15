@@ -1204,6 +1204,8 @@ export interface PortfolioPositionResponse {
 /** The security in one depot's master, for "Aus Depot entfernen". */
 export interface PositionDepotSecurity {
   account_id: number
+  /** The master row a collection holds (#1548); null when the depot has no entry. */
+  security_id: number | null
   account_label: string
   /** null: the depot has no entry yet (rows from before the master). */
   status: 'confirmed' | 'proposed' | 'ignored' | null

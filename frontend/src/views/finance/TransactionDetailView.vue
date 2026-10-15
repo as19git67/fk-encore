@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InCollectionsCard from '../../components/collections/InCollectionsCard.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
@@ -1145,6 +1146,10 @@ const extractedFields = computed(() => {
         Über den Filter „Nur steuerrelevante“ in der Buchungsliste findest du sowohl
         markierte Buchungen als auch Buchungen mit markierten Teilbeträgen.
       </p>
+    </section>
+
+    <section v-if="tx" class="card">
+      <InCollectionsCard type="transaction" :id="tx.id" hide-basket />
     </section>
 
     <section v-if="tx" class="card">

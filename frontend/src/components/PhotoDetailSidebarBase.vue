@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import AddToCollectionDialog from './collections/AddToCollectionDialog.vue'
+import { useBasketStore } from '../stores/basket'
+import type { MemberRef } from '../api/collections'
 import Button from 'primevue/button'
 import { sideLabel } from '../utils/orientationVariants'
 import DatePicker from 'primevue/datepicker'
@@ -124,6 +127,17 @@ const effectiveCurationStats = computed(
 )
 
 const previewPhotoId = computed(() => props.photo?.id ?? null)
+
+// Basket and collections (#1548): the photo set aside or filed. A guest on a
+// shared album has neither, so only a signed-in, editable view offers them.
+const basket = useBasketStore()
+const collectionDialogOpen = ref(false)
+const canCollect = computed(() => auth.isAuthenticated && !props.readOnly)
+const photoRef = computed<MemberRef>(() => ({ entity_type: 'photo', entity_id: props.photo.id }))
+const photoInBasket = computed(() => basket.has(photoRef.value))
+function togglePhotoInBasket() {
+  basket.toggle({ ...photoRef.value, display: { title: props.photo.original_name } })
+}
 const {
   recipe: userRecipe,
   cssFilter: userPhotoFilter,
@@ -501,6 +515,28 @@ watch(() => props.readOnly, (ro) => {
       <div v-if="!inFlyout" class="quick-actions">
         <Button icon="pi pi-expand" v-tooltip.bottom="'Vollbild'" @click="emit('fullscreen')" severity="secondary" text rounded />
         <Button icon="pi pi-share-alt" v-tooltip.bottom="'Foto teilen'" @click="emit('share', photo.id)" severity="secondary" text rounded :loading="props.sharing" />
+        <template v-if="canCollect">
+          <Button
+            :icon="photoInBasket ? 'pi pi-check' : 'pi pi-shopping-cart'"
+            v-tooltip.bottom="photoInBasket ? 'Aus dem Basket nehmen' : 'In den Basket legen'"
+            :aria-label="photoInBasket ? 'Aus dem Basket nehmen' : 'In den Basket legen'"
+            :aria-pressed="photoInBasket"
+            severity="secondary"
+            text
+            rounded
+            data-testid="photo-basket-toggle"
+            @click="togglePhotoInBasket"
+          />
+          <Button
+            icon="pi pi-folder"
+            v-tooltip.bottom="'In Sammelmappe legen'"
+            aria-label="In Sammelmappe legen"
+            severity="secondary"
+            text
+            rounded
+            @click="collectionDialogOpen = true"
+          />
+        </template>
         <Button v-if="canUpload" icon="pi pi-sliders-h" v-tooltip.bottom="'Schnitt &amp; Belichtung bearbeiten'" @click="transformEditorVisible = true" severity="secondary" text rounded />
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
         <template v-if="canDelete">
@@ -829,6 +865,7 @@ watch(() => props.readOnly, (ro) => {
       :photo-id="photo.id"
       :photo-filename="photo.filename"
     />
+    <AddToCollectionDialog v-if="canCollect" v-model:visible="collectionDialogOpen" :members="[photoRef]" />
   </aside>
 </template>
 

@@ -17,7 +17,7 @@
  * UI instead of looking like a folder nobody has summarised yet.
  */
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { api } from "encore.dev/api";
 import db from "../db/database";
 import { discardCollectionExports } from "./collection-export";
@@ -70,7 +70,8 @@ export async function refreshStaleCollectionSummaries(
         notes: documentCollections.notes,
       })
       .from(documentCollections)
-      .where(eq(documentCollections.summary_stale, true))
+      // The basket is a working pile, not a folder anyone reads a summary of.
+      .where(and(eq(documentCollections.summary_stale, true), ne(documentCollections.kind, "basket")))
       .orderBy(asc(documentCollections.updated_at))
       .limit(limit),
   );

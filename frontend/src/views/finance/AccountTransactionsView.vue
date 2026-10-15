@@ -5,6 +5,8 @@ import EmptyState from '../../components/layout/EmptyState.vue'
 import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 import SelectionBar from '../../components/layout/SelectionBar.vue'
+import AddToCollectionDialog from '../../components/collections/AddToCollectionDialog.vue'
+import type { MemberRef } from '../../api/collections'
 /**
  * Buchungsliste — entweder für ein einzelnes Konto (`/finanzen/uebersicht/konto/:id`)
  * oder für alle Konten einer Sektion (`/finanzen/uebersicht/sektion/:name`).
@@ -1241,7 +1243,22 @@ const selectionActions = computed<ToolbarItem[]>(() => [
     disabled: localSelectionCount.value === 0,
     command: openBatchTagEditor,
   },
+  {
+    key: 'collection',
+    label: 'In Sammelmappe',
+    title: 'Auswahl in eine Sammelmappe legen',
+    icon: 'pi pi-folder',
+    severity: 'secondary',
+    disabled: localSelectionCount.value === 0,
+    command: () => (collectionDialogOpen.value = true),
+  },
 ])
+
+// Collections (#1548): the picked bookings into a named folder.
+const collectionDialogOpen = ref(false)
+const selectedTxRefs = computed<MemberRef[]>(() =>
+  Array.from(selectedIds.value, (id) => ({ entity_type: 'transaction' as const, entity_id: Number(id) })),
+)
 
 function openBatchTagEditor() {
   if (localSelectionCount.value === 0) return
@@ -1882,6 +1899,7 @@ function goBack() {
       :transactions="localSelectedItems"
       @applied="refreshAfterTagChange"
     />
+    <AddToCollectionDialog v-model:visible="collectionDialogOpen" :members="selectedTxRefs" />
   </PageLayout>
 </template>
 

@@ -49,6 +49,28 @@ const MOCK_PHOTO_FILES = new Set([
   'steak.jpg',
 ])
 
+/** The basket as the server answers it when nothing lies in it. */
+export const EMPTY_BASKET = {
+  id: 1,
+  name: 'Basket',
+  description: null,
+  entity_type: null,
+  kind: 'basket',
+  visibility: 'private',
+  group_id: null,
+  archived_at: null,
+  created_by: 'user',
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  favourite: false,
+  last_opened_at: null,
+  counts: {},
+  total: 0,
+  can_administer: true,
+  members: [],
+  hidden_count: 0,
+}
+
 export const defaultHandlers = [
   // ── Secondary lookups the detail views load beside their main record ──────
   // (empty by default so a story renders without a per-story handler).
@@ -56,6 +78,10 @@ export const defaultHandlers = [
   http.get('/api/groups', () => HttpResponse.json({ items: [] })),
   http.get('/api/documents/:id/collections', () => HttpResponse.json({ items: [] })),
   http.get('/api/document-collections', () => HttpResponse.json({ items: [] })),
+  // Collections and the basket (#1548): empty unless a story says otherwise.
+  http.get('/api/collections/basket', () => HttpResponse.json(EMPTY_BASKET)),
+  http.get('/api/collections/of/:type/:id', () => HttpResponse.json({ items: [] })),
+  http.get('/api/collections', () => HttpResponse.json({ items: [] })),
   http.get('/api/finance/documents/:id/transactions', () => HttpResponse.json({ items: [] })),
   http.get('/api/albums/:id/photos', () => HttpResponse.json({ photos: [] })),
   http.get('/api/gallery/grid', () => HttpResponse.json({ total: 0, offset: 0, photos: [] })),

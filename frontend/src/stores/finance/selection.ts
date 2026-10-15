@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { computed } from 'vue'
 import type { Transaction } from '../../api/finance'
 import { useSelection } from '../../composables/useSelection'
+import { useBasketMirror } from '../../composables/useBasketMirror'
+import { getTransaction } from '../../api/finance'
 
 /**
  * Finance-specific selection: holds the user's transaction basket so
@@ -15,13 +17,27 @@ import { useSelection } from '../../composables/useSelection'
  */
 
 export const useTxSelectionStore = defineStore('finance.txSelection', () => {
-  const selection = useSelection<Transaction>({
-    storageKey: 'finance.txSelection.v1',
-    isValidItem: (item) =>
-      !!item &&
-      typeof item === 'object' &&
-      typeof (item as Transaction).id === 'number',
-  })
+  // The pile itself is the shared basket (#1548); this keeps the whole
+  // transactions the drawer computes with, cached per tab.
+  const selection = useBasketMirror(
+    useSelection<Transaction>({
+      storageKey: 'finance.txSelection.v1',
+      isValidItem: (item) =>
+        !!item &&
+        typeof item === 'object' &&
+        typeof (item as Transaction).id === 'number',
+    }),
+    {
+      type: 'transaction',
+      fetchOne: getTransaction,
+      display: (tx) => ({
+        title: tx.counterparty?.trim() || tx.purpose?.trim() || `#${tx.id}`,
+        date: tx.booking_date,
+        amount: String(tx.amount),
+        currency: tx.currency_code,
+      }),
+    },
+  )
 
   const sum = computed(() =>
     selection.items.value.reduce((acc, t) => acc + Number(t.amount || 0), 0),

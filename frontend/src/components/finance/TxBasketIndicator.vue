@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BasketOthers from '../collections/BasketOthers.vue'
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -398,6 +399,9 @@ async function compareSnapshots() {
     @update:info="actionInfo = null"
     @update:error="actionError = null"
   >
+    <template #others>
+      <BasketOthers own="transaction" @saved="(name) => (actionInfo = `Sammelmappe „${name}“ angelegt.`)" />
+    </template>
     <template #subtitle>
       <span v-if="count > 0" class="drawer-sum">{{ sumLabel }}</span>
     </template>

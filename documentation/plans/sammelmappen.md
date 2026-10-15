@@ -87,11 +87,30 @@ collections.
 
 ## Stages
 
-1. **Backend: generic collections** — done in this stage's PR.
-2. One basket store and drawer across modules; "add to collection" from every
-   list and detail page; "In collections" panel on detail pages. Migrate the
-   finance basket snapshots (`finance_basket_snapshot`, named saved baskets
-   with compare) into transaction collections.
+1. **Backend: generic collections** — done (#1557).
+2. **Shared basket, "add to collection" everywhere** — done:
+   - The basket is a collection with `kind = 'basket'` (migration 0243, one
+     per user by a partial unique index), with endpoints under
+     `/collections/basket` (get, add, remove, empty by type, save as
+     collection). It never appears in folder lists, document badges, the
+     "in a collection" filter, the reverse lookup or the summary job.
+   - Saved finance baskets were copied into private transaction collections
+     (migration 0243; the old table stays untouched as a backup). The finance
+     snapshot endpoints now read and write those collections, so the drawer's
+     "load/save/compare" and the collections see the same folders.
+   - Frontend: `stores/basket.ts` holds the shared basket (optimistic, writes
+     batched). The transaction and document stores keep their whole objects
+     and mirror the basket (`composables/useBasketMirror.ts`): their changes
+     go to the server, and what arrives or leaves elsewhere is fetched or
+     dropped. A tab's old sessionStorage pile is handed over once.
+   - Modules without a drawer of their own (photos, meters, …) show
+     `SharedBasketIndicator`; the document and finance drawers say what else
+     lies in the basket and can save the whole pile (`BasketOthers`).
+   - "In den Basket" and "In Sammelmappe legen" in the gallery and album
+     selection bars, the transaction list selection, the album page, the
+     photo sidebar, the meter page and its readings, and the security rows of
+     a position. Non-document detail pages carry `InCollectionsCard`;
+     documents keep their own card with dossier details.
 3. Typed collection = module list with `collection` filter; global
    "Collections" page.
 4. Mixed `CollectionView` with grouped action menu.
@@ -106,6 +125,6 @@ collections.
 
 - There is no photo basket today; only finance and documents have one, and
   both live in `sessionStorage` (per browser tab).
-- Finance already has named, saved baskets with a compare view
-  (`finance/basket.ts`, `finance_basket_snapshot`); they are transaction
-  collections in all but name and move over in stage 2.
+- Finance already had named, saved baskets with a compare view
+  (`finance/basket.ts`, `finance_basket_snapshot`); they moved over in
+  stage 2.

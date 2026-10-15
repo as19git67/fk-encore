@@ -21,6 +21,9 @@ import FilterMenu from '../components/FilterMenu.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
 import SelectionBar from '../components/layout/SelectionBar.vue'
+import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
+import { useBasketStore } from '../stores/basket'
+import type { MemberRef } from '../api/collections'
 import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
@@ -434,6 +437,20 @@ const selection = useListSelection({
   })).ids,
 })
 const { selectMode, selectedIds, selectedCount } = selection
+
+// Basket and collections (#1548): selected photos, or the album itself.
+const basket = useBasketStore()
+const collectionDialogOpen = ref(false)
+const collectionDialogMembers = ref<MemberRef[]>([])
+const selectedPhotoRefs = computed<MemberRef[]>(() =>
+  Array.from(selectedIds.value, (id) => ({ entity_type: 'photo' as const, entity_id: Number(id) })),
+)
+const albumRef = computed<MemberRef>(() => ({ entity_type: 'album', entity_id: albumId.value }))
+const albumInBasket = computed(() => basket.has(albumRef.value))
+function openCollectionDialog(members: MemberRef[]) {
+  collectionDialogMembers.value = members
+  collectionDialogOpen.value = true
+}
 const exitSelectMode = selection.exit
 // Das Raster kennt die Signatur aus #830 unverändert.
 const onToggleSelect = selection.toggle
@@ -678,6 +695,8 @@ const selectionActions = computed<ToolbarItem[]>(() => {
     command: () => void shareSelectedPhotos(),
   })
   if (canShowCollage.value) push({ key: 'collage', title: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
+  push({ key: 'basket', title: 'In den Basket legen', icon: 'pi pi-shopping-cart', command: () => basket.add(selectedPhotoRefs.value) })
+  push({ key: 'collection', title: 'In Sammelmappe legen', icon: 'pi pi-folder', command: () => openCollectionDialog(selectedPhotoRefs.value) })
   if (canUploadPhotos.value && canReuseAlbumPhotos.value) {
     push({ key: 'albums', title: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
   }
@@ -2315,6 +2334,26 @@ function triggerFileSelect() {
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
 
+  // The album itself can be set aside or filed, like any other item (#1548).
+  if (album.value) {
+    items.push({
+      key: 'album-basket',
+      title: albumInBasket.value ? 'Album aus dem Basket nehmen' : 'Album in den Basket legen',
+      icon: albumInBasket.value ? 'pi pi-check' : 'pi pi-shopping-cart',
+      severity: 'secondary',
+      text: true,
+      command: () => basket.toggle({ ...albumRef.value, display: { title: album.value?.name } }),
+    })
+    items.push({
+      key: 'album-collection',
+      title: 'Album in Sammelmappe legen',
+      icon: 'pi pi-folder',
+      severity: 'secondary',
+      text: true,
+      command: () => openCollectionDialog([albumRef.value]),
+    })
+  }
+
   if (jumpButton.value && viewMode.value !== 'map') {
     items.push({
       key: 'jump',
@@ -3191,6 +3230,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
     <!-- Add selected photos to other albums (reuses the same dialog as the
          main gallery's select-bar). -->
+    <AddToCollectionDialog v-model:visible="collectionDialogOpen" :members="collectionDialogMembers" />
     <PhotoAlbumDialog
       v-model:visible="albumDialogVisible"
       :photo-ids="albumDialogPhotoIds"

@@ -13,7 +13,7 @@
  * one here goes through the same code as the document folder endpoints.
  */
 
-import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
@@ -38,6 +38,7 @@ import {
 } from "../documents/collection-membership";
 import { removeCollectionExports } from "../documents/collection-export";
 import { assertGroupMember, loadUserGroupIds } from "../documents/visibility";
+import type { CollectionKind } from "../documents/dossiers";
 import {
   COLLECTION_ENTITY_TYPES,
   isCollectionEntityType,
@@ -82,7 +83,7 @@ export interface CollectionSummary {
   description: string | null;
   /** The one type the collection holds, or null for any. */
   entity_type: CollectionEntityType | null;
-  kind: "manual" | "dossier";
+  kind: CollectionKind;
   visibility: "private" | "group";
   group_id: number | null;
   archived_at: string | null;
@@ -337,7 +338,7 @@ export const listAllCollections = api(
     assertMayUseCollections(c);
     const groupIds = await loadUserGroupIds(c.userId);
 
-    const conditions: SQL[] = [];
+    const conditions: SQL[] = [ne(documentCollections.kind, "basket")];
     const readable = readableCollectionsWhere(c.userId, groupIds, isAdmin(c));
     if (readable) conditions.push(readable);
     conditions.push(
@@ -724,7 +725,7 @@ export const collectionsOfItem = api(
       db
         .select()
         .from(documentCollections)
-        .where(readable ? and(readable, holds) : holds)
+        .where(and(readable, holds, ne(documentCollections.kind, "basket")))
         .orderBy(asc(documentCollections.title)),
     );
     return {
@@ -735,5 +736,204 @@ export const collectionsOfItem = api(
         archived_at: r.archived_at,
       })),
     };
+  },
+);
+
+// ─── Basket ─────────────────────────────────────────────────────────────────
+
+/**
+ * The caller's basket: their one unnamed, mixed collection of what they set
+ * aside while working. Made on first use; at most one per user (a partial
+ * unique index), so two tabs asking at once both end up with the same row.
+ */
+async function loadBasket(userId: number): Promise<CollectionRow> {
+  const find = () =>
+    dbAll<CollectionRow>(
+      db
+        .select()
+        .from(documentCollections)
+        .where(and(eq(documentCollections.user_id, userId), eq(documentCollections.kind, "basket"))),
+    );
+  const [existing] = await find();
+  if (existing) return existing;
+  await dbExec(
+    db
+      .insert(documentCollections)
+      .values({
+        user_id: userId,
+        title: "Basket",
+        visibility: "private",
+        kind: "basket",
+        entity_type: null,
+        summary_stale: false,
+      })
+      .onConflictDoNothing(),
+  );
+  const [created] = await find();
+  if (!created) throw APIError.internal("failed to create basket");
+  return created;
+}
+
+export const getBasket = api(
+  { expose: true, method: "GET", path: "/collections/basket", auth: true },
+  async (): Promise<CollectionDetail> => {
+    const c = caller();
+    assertMayUseCollections(c);
+    return await buildDetail(await loadBasket(c.userId), c);
+  },
+);
+
+export const addToBasket = api(
+  { expose: true, method: "POST", path: "/collections/basket/members", auth: true },
+  async (req: { members: MemberRef[] }): Promise<AddMembersResponse> => {
+    const c = caller();
+    assertMayUseCollections(c);
+    const basket = await loadBasket(c.userId);
+    const added = await addMembers(basket, req.members ?? [], c);
+    return { added, collection: await buildDetail(await loadBasket(c.userId), c) };
+  },
+);
+
+/**
+ * Take members out of the basket. References that are not in it are ignored:
+ * the drawer and a list can both remove the same item a moment apart.
+ */
+async function removeMembers(row: CollectionRow, refs: MemberRef[]): Promise<number> {
+  const byType = new Map<CollectionEntityType, number[]>();
+  for (const ref of refs) {
+    const type = parseEntityType(ref.entity_type, "entity_type");
+    const id = Number(ref.entity_id);
+    if (!Number.isInteger(id) || id <= 0) continue;
+    byType.set(type, [...(byType.get(type) ?? []), id]);
+  }
+  let removed = 0;
+  for (const [type, ids] of byType) {
+    if (type === "document") {
+      const deleted = await dbAll<{ id: number }>(
+        db
+          .delete(documentCollectionItems)
+          .where(
+            and(
+              eq(documentCollectionItems.collection_id, row.id),
+              inArray(documentCollectionItems.document_id, ids),
+            ),
+          )
+          .returning({ id: documentCollectionItems.id }),
+      );
+      removed += deleted.length;
+      continue;
+    }
+    const deleted = await dbAll<{ id: number }>(
+      db
+        .delete(collectionMembers)
+        .where(
+          and(
+            eq(collectionMembers.collection_id, row.id),
+            eq(collectionMembers.entity_type, type),
+            inArray(collectionMembers.entity_id, ids),
+          ),
+        )
+        .returning({ id: collectionMembers.id }),
+    );
+    removed += deleted.length;
+  }
+  if (removed > 0) {
+    await dbExec(
+      db
+        .update(documentCollections)
+        .set({ updated_at: sql`now()` })
+        .where(eq(documentCollections.id, row.id)),
+    );
+  }
+  return removed;
+}
+
+export const removeFromBasket = api(
+  { expose: true, method: "POST", path: "/collections/basket/remove", auth: true },
+  async (req: { members: MemberRef[] }): Promise<CollectionDetail> => {
+    const c = caller();
+    assertMayUseCollections(c);
+    const basket = await loadBasket(c.userId);
+    await removeMembers(basket, req.members ?? []);
+    return await buildDetail(await loadBasket(c.userId), c);
+  },
+);
+
+export interface ClearBasketRequest {
+  /** Only this type; absent empties the whole basket. */
+  type?: Query<string>;
+}
+
+/**
+ * Empty the basket, or one type of it. Only what the caller can see goes:
+ * a member they lost access to stays put rather than vanishing unseen.
+ */
+export const clearBasket = api(
+  { expose: true, method: "DELETE", path: "/collections/basket/members", auth: true },
+  async (req: ClearBasketRequest): Promise<CollectionDetail> => {
+    const c = caller();
+    assertMayUseCollections(c);
+    const type = req.type ? parseEntityType(req.type, "type") : null;
+    const basket = await loadBasket(c.userId);
+    const visible = await resolveVisible(await loadStoredMembers(basket.id), c);
+    await removeMembers(
+      basket,
+      visible.filter((m) => !type || m.entity_type === type).map((m) => ({
+        entity_type: m.entity_type,
+        entity_id: m.entity_id,
+      })),
+    );
+    return await buildDetail(await loadBasket(c.userId), c);
+  },
+);
+
+export interface SaveBasketRequest {
+  name: string;
+  description?: string | null;
+  /** Empty the basket after saving (default), or keep it as it is. */
+  keep?: boolean;
+  /** Only this type of the basket; absent saves everything. */
+  type?: CollectionEntityType;
+}
+
+/**
+ * Give the basket a name: a new collection with what the caller sees in it.
+ * A basket of one type becomes a collection typed for it; a mixed one stays
+ * mixed.
+ */
+export const saveBasketAsCollection = api(
+  { expose: true, method: "POST", path: "/collections/basket/save", auth: true },
+  async (req: SaveBasketRequest): Promise<CollectionDetail> => {
+    const c = caller();
+    assertMayUseCollections(c);
+    const name = (req.name ?? "").trim();
+    if (!name) throw APIError.invalidArgument("name must not be empty");
+    const type = req.type ? parseEntityType(req.type, "type") : null;
+    const basket = await loadBasket(c.userId);
+    const members = (await resolveVisible(await loadStoredMembers(basket.id), c))
+      .filter((m) => !type || m.entity_type === type)
+      .map((m) => ({ entity_type: m.entity_type, entity_id: m.entity_id }));
+    if (members.length === 0) throw APIError.failedPrecondition("the basket holds nothing to save");
+    const types = new Set(members.map((m) => m.entity_type));
+
+    const created = await dbInsertReturning<CollectionRow>(
+      db
+        .insert(documentCollections)
+        .values({
+          user_id: c.userId,
+          title: name,
+          notes: req.description?.trim() || null,
+          visibility: "private",
+          kind: "manual",
+          entity_type: types.size === 1 ? [...types][0]! : null,
+        })
+        .returning(),
+    );
+    if (!created) throw APIError.internal("failed to create collection");
+    await addMembers(created, members, c);
+    if (!req.keep) await removeMembers(basket, members);
+    await markOpened(created.id, c.userId);
+    const fresh = await loadReadableCollection(c.userId, created.id, isAdmin(c));
+    return await buildDetail(fresh, c);
   },
 );

@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import type { DocumentSummary } from '../../api/documents'
 import { useSelection } from '../../composables/useSelection'
+import { useBasketMirror } from '../../composables/useBasketMirror'
+import { getDocument } from '../../api/documents'
 
 /**
  * Documents-specific selection: the user's document basket (issue #736),
@@ -14,20 +16,29 @@ import { useSelection } from '../../composables/useSelection'
  */
 
 export const useDocSelectionStore = defineStore('documents.docSelection', () => {
-  const selection = useSelection<DocumentSummary>({
-    storageKey: 'documents.docSelection.v1',
-    isValidItem: (item) =>
-      !!item &&
-      typeof item === 'object' &&
-      typeof (item as DocumentSummary).id === 'number',
-  })
+  // The pile itself is the shared basket (#1548); this keeps the whole
+  // documents the drawer computes with, cached per tab.
+  const selection = useBasketMirror(
+    useSelection<DocumentSummary>({
+      storageKey: 'documents.docSelection.v1',
+      isValidItem: (item) =>
+        !!item &&
+        typeof item === 'object' &&
+        typeof (item as DocumentSummary).id === 'number',
+    }),
+    {
+      type: 'document',
+      fetchOne: getDocument,
+      display: (doc) => ({
+        title: doc.title?.trim() || doc.original_filename,
+        subtitle: doc.sender,
+        date: doc.doc_date,
+      }),
+    },
+  )
 
   /** Add many documents at once (e.g. a whole filter result), deduplicated. */
-  function addAll(docs: DocumentSummary[]) {
-    const known = new Set(selection.items.value.map((d) => d.id))
-    const fresh = docs.filter((d) => !known.has(d.id))
-    if (fresh.length > 0) selection.set([...selection.items.value, ...fresh])
-  }
+  const addAll = selection.addAll
 
   /** Basket position of a document id, -1 when absent. Drives detail-view nav. */
   function indexOf(id: number): number {

@@ -1,11 +1,12 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { IncomingMessage, ServerResponse } from "http";
 import db from "../db/database";
 import {
+  collectionMembers,
+  documentCollections,
   financeAccountAccess,
-  financeBasketSnapshot,
   financeTransaction,
   financeTransactionSplit,
 } from "../db/schema";
@@ -89,58 +90,142 @@ export interface SplitInput {
   is_tax_relevant?: boolean;
 }
 
-type BasketSnapshotRow = typeof financeBasketSnapshot.$inferSelect;
 type TransactionSplitRow = typeof financeTransactionSplit.$inferSelect;
 
 function normalizeId(value: number | string | bigint): number {
   return Number(value);
 }
 
-function normalizeIdArray(values: Array<number | string | bigint>): number[] {
-  return values.map(normalizeId).filter(Number.isInteger);
+/**
+ * Saved baskets are transaction collections (#1548): the caller's private
+ * collections typed for transactions. The endpoints below keep the shape the
+ * basket drawer knows (`tx_ids`, save-by-name overwrites), so the drawer and
+ * the collections pages see the same folders.
+ */
+function snapshotScope(userId: number) {
+  return and(
+    eq(documentCollections.user_id, userId),
+    eq(documentCollections.visibility, "private"),
+    eq(documentCollections.entity_type, "transaction"),
+    eq(documentCollections.kind, "manual"),
+    isNull(documentCollections.archived_at),
+  )!;
 }
 
-function basketSnapshotDto(snapshot: BasketSnapshotRow) {
+async function snapshotMemberIds(collectionIds: number[]): Promise<Map<number, number[]>> {
+  const byCollection = new Map<number, number[]>();
+  if (!collectionIds.length) return byCollection;
+  const rows = await db
+    .select({ collection_id: collectionMembers.collection_id, entity_id: collectionMembers.entity_id })
+    .from(collectionMembers)
+    .where(and(
+      inArray(collectionMembers.collection_id, collectionIds),
+      eq(collectionMembers.entity_type, "transaction"),
+    ))
+    .orderBy(asc(collectionMembers.added_at), asc(collectionMembers.id));
+  for (const row of rows) {
+    const list = byCollection.get(row.collection_id) ?? [];
+    list.push(normalizeId(row.entity_id));
+    byCollection.set(row.collection_id, list);
+  }
+  return byCollection;
+}
+
+type SnapshotCollection = Pick<typeof documentCollections.$inferSelect, "id" | "title" | "created_at" | "updated_at">;
+
+function basketSnapshotDto(collection: SnapshotCollection, txIds: number[]) {
   return {
-    id: normalizeId(snapshot.id),
-    name: snapshot.name,
-    tx_ids: normalizeIdArray(snapshot.tx_ids as Array<number | string | bigint>),
-    created_at: snapshot.created_at,
-    updated_at: snapshot.updated_at,
+    id: collection.id,
+    name: collection.title,
+    tx_ids: txIds,
+    created_at: collection.created_at,
+    updated_at: collection.updated_at,
   };
 }
 
+const snapshotColumns = {
+  id: documentCollections.id,
+  title: documentCollections.title,
+  created_at: documentCollections.created_at,
+  updated_at: documentCollections.updated_at,
+};
+
 async function listBasketSnapshotDtosForCurrentUser() {
   const current = auth();
-  const rows = await db.select().from(financeBasketSnapshot).where(eq(financeBasketSnapshot.user_id, Number(current.userID)));
-  return rows.map(basketSnapshotDto);
+  const rows = await db.select(snapshotColumns).from(documentCollections)
+    .where(snapshotScope(Number(current.userID)))
+    .orderBy(asc(documentCollections.title));
+  const members = await snapshotMemberIds(rows.map(row => row.id));
+  return rows.map(row => basketSnapshotDto(row, members.get(row.id) ?? []));
 }
 
 async function saveBasketSnapshotForCurrentUser(name: string, transaction_ids: number[]) {
   const current = auth();
+  const userId = Number(current.userID);
   const trimmed = name?.trim();
   if (!trimmed) throw APIError.invalidArgument("name required");
-  const ids = await allowedIds(transaction_ids);
-  const [saved] = await db.insert(financeBasketSnapshot).values({ user_id: Number(current.userID), name: trimmed, tx_ids: ids })
-    .onConflictDoUpdate({
-      target: [financeBasketSnapshot.user_id, financeBasketSnapshot.name],
-      set: { tx_ids: ids, updated_at: sql`NOW()` },
-    }).returning();
-  return basketSnapshotDto(saved);
+  // Keep the basket's order: allowedIds answers in table order.
+  const allowed = new Set(await allowedIds(transaction_ids));
+  const ids = [...new Set(transaction_ids)].filter(id => allowed.has(id));
+  const saved = await db.transaction(async tx => {
+    // Saving under a name that exists replaces that folder's contents, as
+    // saving a basket always did.
+    const [existing] = await tx.select(snapshotColumns).from(documentCollections)
+      .where(and(snapshotScope(userId), eq(documentCollections.title, trimmed)))
+      .orderBy(desc(documentCollections.updated_at))
+      .limit(1);
+    let collection: SnapshotCollection;
+    if (existing) {
+      [collection] = await tx.update(documentCollections)
+        .set({ updated_at: sql`now()` })
+        .where(eq(documentCollections.id, existing.id))
+        .returning(snapshotColumns);
+      await tx.delete(collectionMembers).where(eq(collectionMembers.collection_id, existing.id));
+    } else {
+      [collection] = await tx.insert(documentCollections).values({
+        user_id: userId,
+        title: trimmed,
+        visibility: "private",
+        kind: "manual",
+        entity_type: "transaction",
+        summary_stale: false,
+      }).returning(snapshotColumns);
+    }
+    if (ids.length) {
+      await tx.insert(collectionMembers).values(ids.map(id => ({
+        collection_id: collection.id,
+        entity_type: "transaction" as const,
+        entity_id: id,
+        added_by: userId,
+      })));
+    }
+    return collection;
+  });
+  return basketSnapshotDto(saved, ids);
+}
+
+async function loadSnapshotCollection(id: number): Promise<SnapshotCollection> {
+  const current = auth();
+  const [collection] = await db.select(snapshotColumns).from(documentCollections)
+    .where(and(eq(documentCollections.id, id), snapshotScope(Number(current.userID))));
+  if (!collection) throw APIError.notFound("basket not found");
+  return collection;
 }
 
 async function loadBasketSnapshotForCurrentUser(id: number) {
-  const current = auth();
-  const [snapshot] = await db.select().from(financeBasketSnapshot).where(and(eq(financeBasketSnapshot.id, id), eq(financeBasketSnapshot.user_id, Number(current.userID))));
-  if (!snapshot) throw APIError.notFound("basket not found");
-  const snapshotDto = basketSnapshotDto(snapshot);
-  const ids = await allowedIds(snapshotDto.tx_ids);
-  return { ...snapshotDto, transaction_ids: ids, missing: snapshotDto.tx_ids.length - ids.length };
+  const collection = await loadSnapshotCollection(id);
+  const stored = (await snapshotMemberIds([collection.id])).get(collection.id) ?? [];
+  const ids = await allowedIds(stored);
+  const allowed = new Set(ids);
+  const ordered = stored.filter(txId => allowed.has(txId));
+  return { ...basketSnapshotDto(collection, stored), transaction_ids: ordered, missing: stored.length - ordered.length };
 }
 
 async function deleteBasketSnapshotForCurrentUser(id: number) {
-  const current = auth();
-  const deleted = await db.delete(financeBasketSnapshot).where(and(eq(financeBasketSnapshot.id, id), eq(financeBasketSnapshot.user_id, Number(current.userID)))).returning({ id: financeBasketSnapshot.id });
+  const collection = await loadSnapshotCollection(id);
+  const deleted = await db.delete(documentCollections)
+    .where(eq(documentCollections.id, collection.id))
+    .returning({ id: documentCollections.id });
   return { deleted: deleted.length > 0 };
 }
 

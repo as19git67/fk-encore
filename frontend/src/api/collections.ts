@@ -9,7 +9,7 @@
 import { API_BASE_URL, apiFetch } from './client'
 import type { DocumentStatus, DocumentVisibility } from './documents'
 
-export type CollectionKind = 'manual' | 'dossier'
+export type CollectionKind = 'manual' | 'dossier' | 'basket'
 
 /** What a dossier takes in (#1480); every part optional, see documents/dossiers.ts. */
 export interface CollectionRule {
@@ -303,4 +303,165 @@ export async function fetchCollectionPdf(
     url: URL.createObjectURL(blob),
     skipped: Number.isFinite(skipped) ? skipped : 0,
   }
+}
+
+// ─── Collections of every type (#1548) ─────────────────────────────────────
+
+/** Everything a collection can hold. */
+export type CollectionEntityType =
+  | 'document'
+  | 'photo'
+  | 'album'
+  | 'transaction'
+  | 'security'
+  | 'meter'
+  | 'meter_reading'
+
+export interface MemberRef {
+  entity_type: CollectionEntityType
+  entity_id: number
+}
+
+export interface CollectionSummary {
+  id: number
+  name: string
+  description: string | null
+  /** The one type the collection holds, or null for any. */
+  entity_type: CollectionEntityType | null
+  kind: CollectionKind
+  visibility: 'private' | 'group'
+  group_id: number | null
+  archived_at: string | null
+  created_by: 'user' | 'assistant'
+  created_at: string
+  updated_at: string
+  favourite: boolean
+  last_opened_at: string | null
+  counts: Partial<Record<CollectionEntityType, number>>
+  total: number
+  can_administer: boolean
+}
+
+export interface CollectionMember extends MemberRef {
+  title: string
+  subtitle: string | null
+  date: string | null
+  amount: string | null
+  currency: string | null
+  joined_by: 'user' | 'rule'
+  added_at: string
+}
+
+export interface CollectionDetail extends CollectionSummary {
+  members: CollectionMember[]
+  /** Members stored that the caller may not open. */
+  hidden_count: number
+}
+
+export interface ListAllCollectionsQuery {
+  q?: string
+  type?: CollectionEntityType | 'mixed'
+  holds?: CollectionEntityType
+  archived?: boolean
+  favourite?: boolean
+  sort?: 'last_opened' | 'updated' | 'name' | 'count'
+  dir?: 'asc' | 'desc'
+}
+
+export function listAllCollections(query: ListAllCollectionsQuery = {}): Promise<{ items: CollectionSummary[] }> {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== '') params.set(key, String(value))
+  }
+  const qs = params.toString()
+  return apiFetch(`/collections${qs ? `?${qs}` : ''}`)
+}
+
+export function getAnyCollection(id: number): Promise<CollectionDetail> {
+  return apiFetch(`/collections/${id}`)
+}
+
+export function createAnyCollection(payload: {
+  name: string
+  description?: string | null
+  entity_type?: CollectionEntityType | null
+  visibility?: 'private' | 'group'
+  group_id?: number | null
+  members?: MemberRef[]
+}): Promise<CollectionDetail> {
+  return apiFetch('/collections', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function addAnyCollectionMembers(
+  id: number,
+  members: MemberRef[],
+): Promise<{ added: number; collection: CollectionDetail }> {
+  return apiFetch(`/collections/${id}/members`, { method: 'POST', body: JSON.stringify({ members }) })
+}
+
+export function removeAnyCollectionMember(id: number, ref: MemberRef): Promise<CollectionDetail> {
+  return apiFetch(`/collections/${id}/members/${ref.entity_type}/${ref.entity_id}`, { method: 'DELETE' })
+}
+
+export function markCollectionOpened(id: number): Promise<{ ok: boolean }> {
+  return apiFetch(`/collections/${id}/opened`, { method: 'POST' })
+}
+
+export function collectionsOfItem(
+  ref: MemberRef,
+): Promise<{ items: Array<Pick<CollectionSummary, 'id' | 'name' | 'entity_type' | 'archived_at'>> }> {
+  return apiFetch(`/collections/of/${ref.entity_type}/${ref.entity_id}`)
+}
+
+// ─── Basket (#1548) ─────────────────────────────────────────────────────────
+
+export function getBasket(): Promise<CollectionDetail> {
+  return apiFetch('/collections/basket')
+}
+
+export function addToBasket(members: MemberRef[]): Promise<{ added: number; collection: CollectionDetail }> {
+  return apiFetch('/collections/basket/members', { method: 'POST', body: JSON.stringify({ members }) })
+}
+
+export function removeFromBasket(members: MemberRef[]): Promise<CollectionDetail> {
+  return apiFetch('/collections/basket/remove', { method: 'POST', body: JSON.stringify({ members }) })
+}
+
+export function clearBasket(type?: CollectionEntityType): Promise<CollectionDetail> {
+  return apiFetch(`/collections/basket/members${type ? `?type=${type}` : ''}`, { method: 'DELETE' })
+}
+
+export function saveBasketAsCollection(payload: {
+  name: string
+  description?: string | null
+  keep?: boolean
+  type?: CollectionEntityType
+}): Promise<CollectionDetail> {
+  return apiFetch('/collections/basket/save', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+/** What one item of each type is called, for counts and headings. */
+export const ENTITY_LABELS: Record<CollectionEntityType, { singular: string; plural: string; icon: string }> = {
+  document: { singular: 'Dokument', plural: 'Dokumente', icon: 'pi pi-file' },
+  photo: { singular: 'Foto', plural: 'Fotos', icon: 'pi pi-image' },
+  album: { singular: 'Album', plural: 'Alben', icon: 'pi pi-images' },
+  transaction: { singular: 'Buchung', plural: 'Buchungen', icon: 'pi pi-wallet' },
+  security: { singular: 'Wertpapier', plural: 'Wertpapiere', icon: 'pi pi-chart-line' },
+  meter: { singular: 'Zähler', plural: 'Zähler', icon: 'pi pi-gauge' },
+  meter_reading: { singular: 'Zählerstand', plural: 'Zählerstände', icon: 'pi pi-pencil' },
+}
+
+/** "3 Fotos, 1 Buchung" — the parts in a fixed order, empty types left out. */
+export function describeCounts(
+  counts: Partial<Record<CollectionEntityType, number>>,
+  except?: CollectionEntityType,
+): string {
+  return (Object.keys(ENTITY_LABELS) as CollectionEntityType[])
+    .filter((type) => type !== except && (counts[type] ?? 0) > 0)
+    .map((type) => {
+      const n = counts[type]!
+      const label = ENTITY_LABELS[type]
+      return `${n} ${n === 1 ? label.singular : label.plural}`
+    })
+    .join(', ')
 }
