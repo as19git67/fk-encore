@@ -137,6 +137,7 @@ function buildFilterParams(filter: PhotoFilter | undefined, sp: URLSearchParams)
   if (filter.showAiHidden) add('showAiHidden', true)
   if (filter.ownerIds && filter.ownerIds.length) add('ownerIds', filter.ownerIds.join(','))
   if (filter.albumScopeId !== undefined) add('albumScopeId', filter.albumScopeId)
+  if (filter.collectionId !== undefined) add('collectionId', filter.collectionId)
   // The grid sets `variantMode` from the screen; a bare `showVariants` (from
   // the URL, e.g. the select-all ids request) means "both sides".
   if (filter.variantMode) add('variantMode', filter.variantMode)

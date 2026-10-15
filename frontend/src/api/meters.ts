@@ -98,8 +98,9 @@ export interface UpdateMeterDeviceRequest {
   notes?: string | null
 }
 
-export function listMeters() {
-  return apiFetch<{ meters: MeterListItem[] }>('/meters')
+/** All visible meters, or only those in one collection (#1548). */
+export function listMeters(opts: { collection?: number } = {}) {
+  return apiFetch<{ meters: MeterListItem[] }>(opts.collection ? `/meters?collection=${opts.collection}` : '/meters')
 }
 
 export function getMeter(id: number) {

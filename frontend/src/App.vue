@@ -267,10 +267,22 @@ onBeforeUnmount(() => stackObserver?.disconnect())
         </div>
 
         <div class="navbar-end">
+          <!-- Every collection of every type (#1548), reachable from anywhere. -->
+          <Button
+            v-if="auth.isAuthenticated"
+            v-tooltip.bottom="'Sammelmappen'"
+            icon="pi pi-folder"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Sammelmappen"
+            data-testid="navbar-collections"
+            @click="router.push({ name: 'sammelmappen' })"
+          />
           <DocBasketIndicator v-if="activeModule?.id === 'dokumente'" />
           <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
           <SharedBasketIndicator
-            v-if="activeModule && !['dokumente', 'finanzen', 'admin'].includes(activeModule.id)"
+            v-if="auth.isAuthenticated && !['dokumente', 'finanzen', 'admin'].includes(activeModule?.id ?? '')"
           />
           <!-- Settings gear for the active module -->
           <Button

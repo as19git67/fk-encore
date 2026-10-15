@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CollectionSelect from '../../components/collections/CollectionSelect.vue'
+import { collectionName } from '../../composables/useCollectionNames'
 import PageLayout from '../../components/layout/PageLayout.vue'
 import ListToolbar from '../../components/layout/ListToolbar.vue'
 import EmptyState from '../../components/layout/EmptyState.vue'
@@ -93,6 +95,7 @@ const ANCHOR_KEY = 'finance-transactions'
 type Mode =
   | { kind: 'account'; accountId: number }
   | { kind: 'section'; sectionName: string }
+  | { kind: 'collection'; collectionId: number }
 
 const mode = computed<Mode | null>(() => {
   if (route.name === 'finance-account-transactions') {
@@ -103,7 +106,21 @@ const mode = computed<Mode | null>(() => {
     const name = String(route.params.name ?? '').trim()
     return name ? { kind: 'section', sectionName: name } : null
   }
+  if (route.name === 'finance-collection-transactions') {
+    const id = Number(route.params.collectionId)
+    return Number.isInteger(id) && id > 0 ? { kind: 'collection', collectionId: id } : null
+  }
   return null
+})
+
+/**
+ * The collection this list is limited to (#1548): the page's own one, or
+ * `?collection=` on an account or section list.
+ */
+const collectionScope = computed<number | null>(() => {
+  if (mode.value?.kind === 'collection') return mode.value.collectionId
+  const id = Number(route.query.collection)
+  return Number.isInteger(id) && id > 0 ? id : null
 })
 
 // Resolve the section / single account from the overview store. The
@@ -134,6 +151,7 @@ const resolvedSection = computed<OverviewSection | null>(() => {
 const headerTitle = computed(() => {
   if (!mode.value) return ''
   if (mode.value.kind === 'account') return resolvedAccount.value?.label ?? '…'
+  if (mode.value.kind === 'collection') return collectionName(mode.value.collectionId)
   return mode.value.sectionName
 })
 
@@ -239,6 +257,8 @@ function buildQuery(): ListTransactionsQuery {
   const base: ListTransactionsQuery = { limit: PAGE_LIMIT }
   if (m.kind === 'account') {
     base.accountId = m.accountId
+  } else if (m.kind === 'collection') {
+    // Every readable account; the collection decides which bookings.
   } else {
     const sec = resolvedSection.value
     const ids = sec ? sec.accounts.map((a) => a.id) : []
@@ -250,6 +270,7 @@ function buildQuery(): ListTransactionsQuery {
   if (filtersStore.appliedTaxRelevant !== null) base.taxRelevant = filtersStore.appliedTaxRelevant
   if (filtersStore.appliedFrom) base.from = isoDate(filtersStore.appliedFrom)
   if (filtersStore.appliedTo) base.to = isoDate(filtersStore.appliedTo)
+  if (collectionScope.value) base.collectionId = collectionScope.value
   return base
 }
 
@@ -306,11 +327,28 @@ const facetCount = computed(() => {
   if (filtersStore.appliedTags.length > 0) n++
   if (filtersStore.appliedTaxRelevant !== null) n++
   if (filtersStore.appliedFrom || filtersStore.appliedTo) n++
+  if (collectionScope.value && mode.value?.kind !== 'collection') n++
   return n
 })
 
+/** Limit an account or section list to one collection, or lift it (#1548). */
+function setCollectionScope(id: number | null) {
+  const { collection: _drop, ...rest } = route.query
+  void router.replace({ query: id ? { ...rest, collection: String(id) } : rest })
+}
+
 const filterChips = computed<FilterChip[]>(() => {
   const out: FilterChip[] = []
+  // On an account or section list the collection is one more filter; on the
+  // collection's own page it is the page itself, so no chip.
+  if (collectionScope.value && mode.value?.kind !== 'collection') {
+    const id = collectionScope.value
+    out.push({
+      key: 'collection',
+      label: `Sammelmappe: ${collectionName(id)}`,
+      remove: () => setCollectionScope(null),
+    })
+  }
   for (const tag of filtersStore.appliedTags) {
     out.push({
       key: `tag:${tag}`,
@@ -361,7 +399,7 @@ onMounted(async () => {
 // switch from one account to another within the same session — the
 // applied filters are explicitly account-agnostic.
 watch(
-  () => [route.name, route.params.id, route.params.name],
+  () => [route.name, route.params.id, route.params.name, route.params.collectionId, route.query.collection],
   async () => {
     await loadTransactions()
   },
@@ -1344,6 +1382,13 @@ function goBack() {
 
       <section v-if="filterPanelOpen" class="tx-filter-panel" data-testid="finance-filter-subheader">
       <div class="tx-filter-fields">
+        <div v-if="mode?.kind !== 'collection'" class="tx-filter-input">
+          <CollectionSelect
+            type="transaction"
+            :model-value="collectionScope"
+            @update:model-value="setCollectionScope"
+          />
+        </div>
         <MultiSelect
           v-model="formTags"
           :options="tagOptions"

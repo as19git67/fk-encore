@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import CollectionSelect from '../components/collections/CollectionSelect.vue'
+import { getAnyCollection } from '../api/collections'
+import { collectionName } from '../composables/useCollectionNames'
 import {onMounted, ref, computed, watch, nextTick} from 'vue'
 import {useRouter, useRoute} from 'vue-router'
 import Button from 'primevue/button'
@@ -133,6 +136,7 @@ const activeAlbumFilterCount = computed(() => {
   if (f.dateFrom || f.dateTo) n++
   if (f.emptyMode !== 'any') n++
   if (f.sharedByMe || f.sharedWithMe) n++
+  if (collectionScope.value) n++
   return n
 })
 
@@ -208,7 +212,17 @@ function albumFilterChips(): FilterChip[] {
   return chips
 }
 
-const albumFilterChipList = computed<FilterChip[]>(() => albumFilterChips())
+const albumFilterChipList = computed<FilterChip[]>(() => {
+  const chips = albumFilterChips()
+  if (collectionScope.value) {
+    chips.unshift({
+      key: 'collection',
+      label: `Sammelmappe: ${collectionName(collectionScope.value)}`,
+      remove: clearCollectionScope,
+    })
+  }
+  return chips
+})
 
 function matchesAlbumFilter(album: Album, f: AlbumFilter): boolean {
   const userId = auth.user?.id
@@ -327,6 +341,7 @@ const filteredAlbums = computed(() => {
       const descMatch = album.description?.toLocaleLowerCase().includes(q) ?? false
       if (!nameMatch && !descMatch) return false
     }
+    if (collectionAlbumIds.value && !collectionAlbumIds.value.has(album.id)) return false
     return matchesAlbumFilter(album, f)
   })
 })
@@ -343,6 +358,38 @@ const creating = ref(false)
 
 const router = useRouter()
 const route = useRoute()
+
+// `?collection=` limits the list to one collection's albums (#1548). The
+// album list is filtered here, so the collection's album ids are fetched once.
+const collectionScope = computed<number | null>(() => {
+  const id = Number(route.query.collection)
+  return Number.isInteger(id) && id > 0 ? id : null
+})
+const collectionAlbumIds = ref<Set<number> | null>(null)
+watch(
+  collectionScope,
+  async (id) => {
+    collectionAlbumIds.value = null
+    if (!id) return
+    try {
+      const detail = await getAnyCollection(id)
+      if (collectionScope.value !== id) return
+      collectionAlbumIds.value = new Set(
+        detail.members.filter((m) => m.entity_type === 'album').map((m) => m.entity_id),
+      )
+    } catch {
+      collectionAlbumIds.value = new Set()
+    }
+  },
+  { immediate: true },
+)
+function clearCollectionScope() {
+  setCollectionScope(null)
+}
+function setCollectionScope(id: number | null) {
+  const { collection: _drop, ...rest } = route.query
+  void router.replace({ query: id ? { ...rest, collection: String(id) } : rest })
+}
 
 // ── Sticky filter/sort/search persistence ────────────────────────────────────
 // Filter state survives:
@@ -581,6 +628,15 @@ onMounted(async () => {
     <Dialog
     class="dialog-md" v-model:visible="showAlbumFilterMenu" header="Filter" modal>
       <div class="album-filter-menu">
+        <div class="afm-row">
+          <label class="afm-label" for="albums-filter-collection">Sammelmappe</label>
+          <CollectionSelect
+            input-id="albums-filter-collection"
+            type="album"
+            :model-value="collectionScope"
+            @update:model-value="setCollectionScope"
+          />
+        </div>
         <div class="afm-row">
           <label class="afm-label">Besitzer</label>
           <SelectButton

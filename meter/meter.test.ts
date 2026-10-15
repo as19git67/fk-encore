@@ -113,7 +113,7 @@ describe("GET /meters", () => {
       { device_id: active.id, value: "45", taken_at: "2026-01-01T08:00:00Z", entered_by: userId },
     ]);
 
-    const res = await endpoints.listMeters();
+    const res = await endpoints.listMeters({});
     expect(res.meters).toHaveLength(1);
     const m = res.meters[0];
     expect(m.name).toBe("Wasser Haupt");
@@ -127,7 +127,7 @@ describe("GET /meters", () => {
 
   it("lists a meter without devices with a zero total", async () => {
     await createMeter(userId, "Strom Garage");
-    const res = await endpoints.listMeters();
+    const res = await endpoints.listMeters({});
     expect(res.meters).toHaveLength(1);
     expect(res.meters[0].activeDeviceSerial).toBeNull();
     expect(res.meters[0].lastReadingValue).toBeNull();
@@ -153,7 +153,7 @@ describe("GET /meters", () => {
 
   it("rejects callers without meters.view", async () => {
     setAuth(String(userId), []);
-    await expect(endpoints.listMeters()).rejects.toMatchObject({
+    await expect(endpoints.listMeters({})).rejects.toMatchObject({
       code: "permission_denied",
     });
   });

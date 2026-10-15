@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CollectionSelect from './collections/CollectionSelect.vue'
 import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -45,7 +46,7 @@ const props = withDefaults(defineProps<{
     'othersFavorited', 'othersHidden', 'notInAnyAlbum',
     'qualityRange', 'albumIds', 'personIds', 'mediaTypes',
     'hasGps', 'hasFaces', 'hasAssignedPerson',
-    'dateRange', 'importedDaysAgo', 'nearLocation',
+    'dateRange', 'importedDaysAgo', 'nearLocation', 'collectionId',
   ],
 })
 
@@ -520,6 +521,17 @@ function close() {
           Qualität: {{ qualityRange[0] }}% – {{ qualityRange[1] }}%
         </label>
         <Slider v-model="qualityRange" range :min="0" :max="100" class="filter-slider" />
+      </div>
+
+      <!-- One collection (#1548) -->
+      <div v-if="has('collectionId')" class="filter-row">
+        <label class="filter-label" for="filter-collection">Sammelmappe</label>
+        <CollectionSelect
+          input-id="filter-collection"
+          type="photo"
+          :model-value="local.collectionId"
+          @update:model-value="(v: number | null) => local = { ...local, collectionId: v ?? undefined }"
+        />
       </div>
 
       <!-- Albums multi-select -->

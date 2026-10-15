@@ -13,6 +13,7 @@
  * and, when `group_id` is set, to every member of that group.
  */
 
+import { collectionScopeCondition } from "../collections/scope";
 import { and, asc, count, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
@@ -174,13 +175,21 @@ export interface MeterListItem {
 }
 
 /** All meters visible to the user, with active device + latest reading. */
-export async function listMeters(userId: number): Promise<MeterListItem[]> {
+export async function listMeters(
+  userId: number,
+  opts: { collectionId?: number } = {},
+): Promise<MeterListItem[]> {
   const groupIds = await loadUserGroupIds(userId);
+  const visible = visibleMetersWhere(userId, groupIds);
   const meterRows = await dbAll<typeof meters.$inferSelect>(
     db
       .select()
       .from(meters)
-      .where(visibleMetersWhere(userId, groupIds))
+      .where(
+        opts.collectionId
+          ? and(visible, collectionScopeCondition("meter", meters.id, opts.collectionId, userId))
+          : visible,
+      )
       .orderBy(meters.name),
   );
   if (meterRows.length === 0) return [];

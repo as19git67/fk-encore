@@ -12,7 +12,8 @@
  * later stages — see documentation/utility-meters.md.
  */
 
-import { api, APIError } from "encore.dev/api";
+import { parseCollectionId } from "../collections/scope";
+import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import * as svc from "./meter.service";
@@ -29,11 +30,16 @@ interface ListMetersResponse {
   meters: svc.MeterListItem[];
 }
 
+export interface ListMetersQuery {
+  /** Only the meters in this collection (#1548), readable by the caller. */
+  collection?: Query<number>;
+}
+
 export const listMeters = api(
   { expose: true, method: "GET", path: "/meters", auth: true },
-  async (): Promise<ListMetersResponse> => {
+  async (req: ListMetersQuery): Promise<ListMetersResponse> => {
     const userId = requireUser("meters.view");
-    return { meters: await svc.listMeters(userId) };
+    return { meters: await svc.listMeters(userId, { collectionId: parseCollectionId(req.collection) }) };
   },
 );
 
