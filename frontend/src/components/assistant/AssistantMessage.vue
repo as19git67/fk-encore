@@ -3,9 +3,10 @@
  * One message of the conversation (#1528): the user's question, or the
  * assistant's answer with what it looked up and the rows it found.
  */
-import type { ResultBlock } from '../../api/assistant'
+import type { Proposal, ResultBlock } from '../../api/assistant'
 import type { TurnStep } from '../../utils/assistantTurn'
 import AssistantBlock from './AssistantBlock.vue'
+import ProposalCard from './ProposalCard.vue'
 
 withDefaults(defineProps<{
   role: 'user' | 'assistant'
@@ -48,7 +49,10 @@ withDefaults(defineProps<{
     </p>
 
     <div v-if="blocks.length" class="blocks">
-      <AssistantBlock v-for="(b, i) in blocks" :key="`${b.tool}-${i}`" :block="b" />
+      <template v-for="(b, i) in blocks" :key="`${b.tool}-${i}`">
+        <ProposalCard v-for="p in b.kind === 'proposal' ? b.rows : []" :key="String(p.proposal_id)" :proposal="(p as unknown as Proposal)" />
+        <AssistantBlock v-if="b.kind !== 'proposal'" :block="b" />
+      </template>
     </div>
   </article>
 </template>

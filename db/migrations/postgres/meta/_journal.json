@@ -1730,6 +1730,13 @@
       "when": 1788652800110,
       "tag": "0246_assistant_conversations",
       "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "7",
+      "when": 1788652800120,
+      "tag": "0247_assistant_proposals",
+      "breakpoints": true
     }
   ]
 }

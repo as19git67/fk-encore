@@ -71,12 +71,14 @@ Rules:
 - Combine tools from different areas when the question needs it.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
 - If a tool finds nothing, say so plainly and suggest how to search differently.
+- Tools of kind "write" never change anything: they create a proposal the user confirms with a button. Call one only when the user asks for that change, then say what you proposed and that it waits for their confirmation. Never claim it is done.
 - Answer briefly in the user's language (usually German).`;
 
 const EXAMPLES = `Examples of chained calls:
 1. "Welche Lastschriften muss ich diesen Monat noch erwarten?" → upcoming_direct_debits(until = end of this month) → answer with the debits and the sum the tool printed.
 2. "Gib mir die Protokolle der Eigentümerversammlung der Wohnung in Musterstadt." → list_categories → search_documents(q = "Protokoll Eigentümerversammlung", category = the matching slug) → name the documents that fit.
-3. "Wie viel Strom haben wir letztes Jahr verbraucht?" → list_meters → consumption_report(meter_id = the electricity meter, from/to = last year) → state the total the tool printed.`;
+3. "Wie viel Strom haben wir letztes Jahr verbraucht?" → list_meters → consumption_report(meter_id = the electricity meter, from/to = last year) → state the total the tool printed.
+4. "Leg ein Album mit allen Favoriten von 2025 an." → create_album(name = "Favoriten 2025", photos = {favorite: true, date_from: "2025-01-01", date_to: "2025-12-31"}) → say the album is proposed with the count the tool printed and waits for "Ausführen".`;
 
 export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean): string {
   const catalog = tools.length
@@ -103,6 +105,8 @@ export interface TurnInput {
   schemaBudgetTokens?: number;
   /** Wraps each /chat call, e.g. in the ai-queue's llm slot. */
   withSlot?: <T>(fn: () => Promise<T>) => Promise<T>;
+  /** The conversation the turn belongs to; proposals are filed under it. */
+  conversationId?: number;
   /** Per tool call: name, argument keys and row count — never row content. */
   log?: (entry: { tool: string; arguments: Record<string, unknown>; rows: number; ms: number; error?: string }) => void;
 }
@@ -175,7 +179,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let lastRoundStart = questionIndex;
   const digests = new Map<string, string>();
   const blocks: ResultBlock[] = [];
-  const ctx = { user: input.user, today: localIso(now) };
+  const ctx = { user: input.user, today: localIso(now), conversationId: input.conversationId };
 
   let answer: string | null = null;
   let rounds = 0;

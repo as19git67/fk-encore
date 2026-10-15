@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/vue3'
 import AssistantMessage from '../components/assistant/AssistantMessage.vue'
+import { http, HttpResponse } from 'msw'
 import { defaultHandlers } from './handlers'
 import {
   ANALYSIS_BLOCK,
@@ -7,6 +8,10 @@ import {
   DOCUMENTS_BLOCK,
   METERS_BLOCK,
   PHOTOS_BLOCK,
+  PROPOSAL_DISCARDED_BLOCK,
+  PROPOSAL_EXECUTED_BLOCK,
+  PROPOSAL_FAILED_BLOCK,
+  PROPOSAL_PENDING_BLOCK,
   RECAPS_BLOCK,
   TABLE_BLOCK,
   TRANSACTIONS_BLOCK,
@@ -81,5 +86,36 @@ export const Fehler: Story = {
     role: 'assistant',
     content: 'Den Zähler konnte ich nicht lesen.',
     steps: [{ tool: 'latest_readings', label: 'Zählerstände lesen', done: true, error: 'meter not found' }],
+  },
+}
+
+const executed = PROPOSAL_EXECUTED_BLOCK.rows[0]
+const discarded = PROPOSAL_DISCARDED_BLOCK.rows[0]
+
+/** Write actions (#1529): the card waits for "Ausführen" or "Verwerfen". */
+export const Vorschlag: Story = {
+  name: 'Vorschlag: wartet auf Bestätigung',
+  parameters: {
+    msw: {
+      handlers: [
+        http.post('/api/assistant/proposals/:id/execute', () => HttpResponse.json({ ...executed, proposal_id: 1 })),
+        http.post('/api/assistant/proposals/:id/discard', () => HttpResponse.json({ ...discarded, proposal_id: 1 })),
+        ...defaultHandlers,
+      ],
+    },
+  },
+  args: {
+    role: 'assistant',
+    content: 'Ich habe das Album „Favoriten 2025“ mit 143 Fotos vorgeschlagen. Es wird erst angelegt, wenn du „Ausführen“ drückst.',
+    blocks: [PROPOSAL_PENDING_BLOCK],
+  },
+}
+
+export const VorschlagAusgefuehrt: Story = {
+  name: 'Vorschlag: ausgeführt, verworfen, fehlgeschlagen',
+  args: {
+    role: 'assistant',
+    content: 'Drei Vorschläge in verschiedenen Zuständen.',
+    blocks: [PROPOSAL_EXECUTED_BLOCK, PROPOSAL_DISCARDED_BLOCK, PROPOSAL_FAILED_BLOCK],
   },
 }

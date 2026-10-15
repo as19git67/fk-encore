@@ -84,6 +84,32 @@ export const TABLE_BLOCK: ResultBlock = {
   rows: [{ id: 1, name: 'Person A', faceCount: 120 }, { id: 2, name: 'Person B', faceCount: 48 }],
 }
 
+function proposal(status: 'pending' | 'executed' | 'discarded', extra: Record<string, unknown> = {}): ResultBlock {
+  return {
+    kind: 'proposal',
+    tool: 'create_album',
+    rows: [{
+      proposal_id: status === 'pending' ? 1 : status === 'executed' ? 2 : 3,
+      tool: 'create_album',
+      summary: 'Album „Favoriten 2025“ anlegen und 143 Fotos hinzufügen',
+      count: 143,
+      status,
+      result_summary: null,
+      result_route: null,
+      error: null,
+      ...extra,
+    }],
+  }
+}
+
+export const PROPOSAL_PENDING_BLOCK = proposal('pending')
+export const PROPOSAL_EXECUTED_BLOCK = proposal('executed', {
+  result_summary: 'Album „Favoriten 2025“ mit 143 Fotos angelegt',
+  result_route: '/fotos/alben/12',
+})
+export const PROPOSAL_DISCARDED_BLOCK = proposal('discarded')
+export const PROPOSAL_FAILED_BLOCK = proposal('pending', { error: 'album name already in use' })
+
 export const CONVERSATION: ConversationDetail = {
   id: 1,
   title: 'Strom und Lastschriften',

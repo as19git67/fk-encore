@@ -1,8 +1,9 @@
 # Assistant: one chat over everything the server knows
 
-Status: stages 1 to 3 implemented (`POST /chat` in llm-service with its
+Status: stages 1 to 4 implemented (`POST /chat` in llm-service with its
 benchmark in `llm-service/bench/`; the `assistant` service with the read
-tools and the direct-debits endpoint; the chat page in the web app). The benchmark has not yet been run on
+tools and the direct-debits endpoint; the chat page in the web app; write
+actions as proposals the user confirms). The benchmark has not yet been run on
 the production GPU. Tracking issue #1524, stages #1525–#1534.
 
 ## Problem
@@ -347,6 +348,22 @@ behind it.
    - The proposal card shows what will happen in plain words ("Album
      ‚Favoriten 2025' anlegen und 143 Fotos hinzufügen") and the row
      count; the same card stays visible after execution with its result.
+   - **Implemented** (#1529), with these details: the status has a fourth,
+     transient value `executing` — execute moves `pending → executing` in
+     one UPDATE, so a double click or a second tab finds nothing to take;
+     a failed action goes back to `pending` with `result.error`, and the
+     card offers "Erneut ausführen". `execute` re-checks the tool's
+     permissions before calling the service. Photo selections take the
+     filter `list_photos` takes (or explicit ids) and are resolved to ids
+     when the proposal is made, since the model sees only the first ids of
+     a result; the card's count is what will really be touched (capped at
+     2000 photos, 500 bookings, 200 documents or favourites). The executed
+     result is not a new block but the same card with its result line and a
+     link (`result_route`); reopening a conversation refreshes every card
+     from the table (`refreshProposalBlocks`). The tool result tells the
+     model "NOT executed" and the system prompt forbids claiming otherwise.
+     Write tools live in `assistant/tools/writes.ts`, the card in
+     `components/assistant/ProposalCard.vue`.
 
 5. **Follow-up questions and memory within a conversation.**
    - The loop sends the last N turns and, instead of raw tool results, a

@@ -46,6 +46,11 @@ const TOOL_LABELS: Record<string, string> = {
   latest_readings: 'Zählerstände lesen',
   consumption_report: 'Verbrauch berechnen',
   list_trip_plans: 'Reisepläne ansehen',
+  create_album: 'Album vorschlagen',
+  add_photos_to_album: 'Fotos für ein Album vorschlagen',
+  set_photo_favorite: 'Favoriten vorschlagen',
+  create_document_follow_up: 'Wiedervorlage vorschlagen',
+  tag_transactions: 'Tags vorschlagen',
 }
 
 /** What the user reads while a tool runs. */

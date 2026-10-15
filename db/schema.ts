@@ -4535,3 +4535,27 @@ export const assistantMessage = pgTable(
   },
   (table) => [index("assistant_message_by_conversation").on(table.conversation_id, table.id)],
 );
+
+/**
+ * A write action the assistant proposed (migration 0247, #1529). The stored
+ * arguments are what "Ausführen" runs — resolved when the proposal was made,
+ * so the user confirms exactly what the card showed.
+ */
+export const assistantProposal = pgTable(
+  "assistant_proposal",
+  {
+    id: serial("id").primaryKey(),
+    conversation_id: integer("conversation_id").references(() => assistantConversation.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tool: text("tool").notNull(),
+    arguments: jsonb("arguments").$type<Record<string, unknown>>().notNull(),
+    summary: text("summary").notNull(),
+    status: text("status").$type<"pending" | "executing" | "executed" | "discarded">().notNull().default("pending"),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    decided_at: timestamp("decided_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [index("assistant_proposal_by_user").on(table.user_id, table.created_at)],
+);
