@@ -48,6 +48,27 @@ function handlers(setup: ExportSetup, runs: ExportRun[]) {
   return [
     http.get('/api/collections/:id/export-setup', () => HttpResponse.json(setup)),
     http.get('/api/collections/:id/exports', () => HttpResponse.json({ items: runs })),
+    http.get('/api/collections/:id/sends', () =>
+      HttpResponse.json({
+        mail_configured: true,
+        items: [
+          {
+            id: 1,
+            export_id: 8,
+            recipients: ['steuer@beispiel.test'],
+            mode: 'attachment',
+            filename: 'Nebenkosten 2026.zip',
+            status: 'sent',
+            error: null,
+            sent_at: '2026-10-15T09:40:00Z',
+            sent_by: 'Max Muster',
+          },
+        ],
+      }),
+    ),
+    http.get('/api/collections/exports/:exportId/entries', () =>
+      HttpResponse.json({ items: [{ name: 'Dokumente/Abrechnung.pdf', size: 1000 }, { name: 'Fotos/Zaehler.jpg', size: 2000 }], single_files_allowed: true }),
+    ),
     http.get('/api/collections/exports/:exportId', ({ params }) =>
       HttpResponse.json(runs.find((r) => r.id === Number(params.exportId)) ?? runs[0]),
     ),
@@ -117,5 +138,17 @@ export const NurBuchungen: Story = {
 export const Leer: Story = {
   parameters: {
     msw: { handlers: handlers({ groups: {}, defaults: DEFAULTS, profiles: [], accounts: [] }, []) },
+  },
+}
+
+/** A run's "Weitergeben" panel opened: share, mail, link. */
+export const Weitergeben: Story = {
+  ...Gemischt,
+  play: async ({ canvasElement }) => {
+    const root = canvasElement.ownerDocument
+    for (let i = 0; i < 40 && !root.querySelector('[data-testid="export-run-send"]'); i++) {
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    ;(root.querySelector('[data-testid="export-run-send"]') as HTMLButtonElement | null)?.click()
   },
 }

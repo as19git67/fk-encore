@@ -30,6 +30,7 @@ import {
   fetchCollectionExportFile,
   getCollectionExportRun,
   getExportSetup,
+  listCollectionSends,
   listCollectionExportRuns,
   saveCollectionExportAsDocument,
   saveExportProfile,
@@ -38,12 +39,14 @@ import {
   type ExportOptions,
   type ExportRun,
   type ExportSetup,
+  type CollectionSend,
   type TableFormat,
   type TransactionExportColumn,
 } from '../../api/collections'
 import { useAuthStore } from '../../stores/auth'
 import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
 import { triggerDownload } from '../../utils/shareFile'
+import ExportSendPanel from './ExportSendPanel.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -65,6 +68,26 @@ const info = ref('')
 const profileName = ref('')
 const naming = ref(false)
 const busyRun = ref<number | null>(null)
+/** The run whose "Weitergeben" panel is open (#1548, stage 7). */
+const sendFor = ref<number | null>(null)
+const sends = ref<CollectionSend[]>([])
+const mailConfigured = ref(false)
+
+async function loadSends() {
+  if (props.collectionId === null) return
+  try {
+    const res = await listCollectionSends(props.collectionId)
+    sends.value = res.items
+    mailConfigured.value = res.mail_configured
+  } catch {
+    /* the log is an extra */
+  }
+}
+
+function sendLabel(s: CollectionSend): string {
+  const how = s.mode === 'link' ? 'als Link' : s.mode === 'items' ? 'einzeln angehängt' : 'angehängt'
+  return `${s.recipients.join(', ')} · ${how}`
+}
 
 const TABLE_FORMATS: Array<{ label: string; value: TableFormat }> = [
   { label: 'PDF', value: 'pdf' },
@@ -134,6 +157,7 @@ async function load() {
     const [s, r] = await Promise.all([getExportSetup(props.collectionId), listCollectionExportRuns(props.collectionId)])
     setup.value = s
     runs.value = r.items
+    void loadSends()
     const first = s.profiles[0] ?? null
     profileId.value = first?.id ?? null
     options.value = clone(first?.options ?? s.defaults)
@@ -483,6 +507,18 @@ function timeLabel(iso: string): string {
               @click="fileAsDocument(run)"
             />
             <Button
+              v-if="run.status === 'done'"
+              icon="pi pi-send"
+              text
+              rounded
+              :severity="sendFor === run.id ? undefined : 'secondary'"
+              :aria-expanded="sendFor === run.id"
+              :aria-label="`Weitergeben: ${run.filename}`"
+              v-tooltip.bottom="'Weitergeben: teilen, mailen, Link'"
+              data-testid="export-run-send"
+              @click="sendFor = sendFor === run.id ? null : run.id"
+            />
+            <Button
               v-if="run.status !== 'running'"
               icon="pi pi-times"
               text
@@ -492,6 +528,29 @@ function timeLabel(iso: string): string {
               v-tooltip.bottom="'Entfernen'"
               @click="removeRun(run)"
             />
+          </div>
+          <ExportSendPanel
+            v-if="sendFor === run.id && run.status === 'done'"
+            class="exp-run-send"
+            :run="run"
+            :mail-configured="mailConfigured"
+            @sent="loadSends"
+          />
+        </li>
+      </ul>
+    </section>
+
+    <section v-if="sends.length > 0" class="exp-runs" aria-label="Versendet">
+      <h3 class="exp-group-title">Versendet</h3>
+      <ul>
+        <li v-for="s in sends" :key="s.id" class="exp-run">
+          <div class="exp-run-body">
+            <span class="exp-run-title">
+              <i :class="s.status === 'sent' ? 'pi pi-envelope' : 'pi pi-exclamation-triangle'" aria-hidden="true" />
+              {{ s.filename ?? 'Export' }}
+            </span>
+            <span class="exp-run-meta">{{ timeLabel(s.sent_at) }} · {{ s.sent_by ?? '' }} → {{ sendLabel(s) }}</span>
+            <span v-if="s.status === 'failed' && s.error" class="exp-run-error">{{ s.error }}</span>
           </div>
         </li>
       </ul>
@@ -614,6 +673,7 @@ function timeLabel(iso: string): string {
 }
 .exp-run {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
@@ -646,5 +706,8 @@ function timeLabel(iso: string): string {
 .exp-run-actions {
   display: flex;
   flex: 0 0 auto;
+}
+.exp-run-send {
+  flex: 1 0 100%;
 }
 </style>
