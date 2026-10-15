@@ -23,6 +23,7 @@ import os
 import re
 import resource
 import signal
+import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -30,9 +31,11 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Callable, TypeVar
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from service_auth import install_service_auth
 from pydantic import BaseModel, Field
 
+import chat
 from llama_supervisor import LlamaServerProcess, terminate_own_process
 from llm_config import ConfigError, LlmConfig, clear_active, load_active, save_active
 from model_downloads import (
@@ -2747,6 +2750,172 @@ async def json_prompt(req: JsonPromptRequest) -> dict[str, Any]:
             data[k] = [_repair_mojibake(x) if isinstance(x, str) else x for x in v]
 
     return data
+
+
+# ─── /chat ─────────────────────────────────────────────────────────────────────
+#
+# Multi-turn chat with tool calling for the assistant (documentation/plans/
+# ki-assistent.md, stage 1). The request and both backends live in chat.py;
+# this is only the transport: the single inference slot, error mapping and
+# the SSE relay.
+
+
+def _chat_error_status(exc: Exception) -> tuple[int, str]:
+    """HTTP status and detail for a failed chat turn.
+
+    A prompt that does not fit the window is the caller's to fix (drop old
+    tool results, shorten the history), so it gets 413 like /classify's
+    budget failure; everything else from the model side is a 502.
+    """
+
+    text = str(exc)
+    if isinstance(exc, chat.ChatModelError):
+        return 502, f"llm returned an unusable turn: {text}"
+    lowered = text.lower()
+    if "context size" in lowered or "exceed_context" in lowered or "exceeds the available context" in lowered:
+        return 413, f"conversation does not fit the context window: {text}"
+    return 502, f"llm failure: {text}"
+
+
+def _chat_inproc_turn(llm: Any, req: chat.ChatRequest) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "messages": chat.emulation_messages(req),
+        "temperature": req.temperature,
+        "max_tokens": req.max_tokens,
+    }
+    response_format = chat.emulation_response_format(req)
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+    completion = llm.create_chat_completion(**kwargs)
+    raw = completion["choices"][0]["message"].get("content") or ""
+    reply = chat.parse_emulated(raw, req)
+    if reply["message"].get("content"):
+        reply["message"]["content"] = _repair_mojibake(reply["message"]["content"])
+    reply["usage"] = completion.get("usage")
+    return reply
+
+
+def _chat_server_turn(llm: Any, req: chat.ChatRequest) -> dict[str, Any]:
+    result = llm.chat_completion(chat.server_payload(req))
+    choice = result["choices"][0]
+    reply = chat.normalize_reply(choice.get("message") or {}, choice.get("finish_reason"), req.tool_names())
+    reply["usage"] = result.get("usage")
+    return reply
+
+
+def _is_server_llm(llm: Any) -> bool:
+    # Duck-typed rather than LLM_BACKEND: the loaded object is what answers,
+    # and during a reload the two can disagree for a moment.
+    return hasattr(llm, "stream_chat_completion")
+
+
+_STREAM_END = object()
+
+
+@app.post("/chat")
+async def chat_turn(req: chat.ChatRequest) -> Any:
+    """One assistant turn: a text answer, or the tool calls the model wants.
+
+    ``stream=false`` returns ``{message, finish_reason, usage, model, backend,
+    processing_ms}``. ``stream=true`` answers ``text/event-stream`` with
+    OpenAI chunk objects as ``data:`` lines and a final ``data: [DONE]``; on
+    the server backend these are llama-server's own chunks, relayed as they
+    come, so tool-call arguments arrive as deltas the caller assembles. A
+    failure after the stream has started arrives as ``data: {"error":
+    {"status", "message"}}`` before ``[DONE]``, because the status line has
+    already been sent.
+    """
+
+    llm = _state["llm"]
+    if llm is None:
+        raise HTTPException(status_code=503, detail="llm not loaded")
+    server = _is_server_llm(llm)
+    backend = "server" if server else "inproc"
+    model = LLM_MODEL_PATH.name
+
+    if req.stream:
+        return await _chat_stream(llm, req, server=server, model=model)
+
+    t0 = time.monotonic()
+    try:
+        reply = await _run_blocking(_chat_server_turn if server else _chat_inproc_turn, llm, req)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        status, detail = _chat_error_status(exc)
+        if status == 502 and not isinstance(exc, chat.ChatModelError):
+            log.exception("/chat: %s turn failed", backend)
+        else:
+            log.warning("/chat: %s", detail)
+        raise HTTPException(status_code=status, detail=detail) from exc
+
+    reply.update(model=model, backend=backend, processing_ms=int((time.monotonic() - t0) * 1000))
+    calls = reply["message"].get("tool_calls") or []
+    log.info(
+        "/chat: %s turn in %d ms, %d message(s), %d tool(s) offered -> %s",
+        backend, reply["processing_ms"], len(req.messages), len(req.tools or []),
+        ", ".join(c["function"]["name"] for c in calls) if calls else "answer",
+    )
+    return reply
+
+
+async def _chat_stream(llm: Any, req: chat.ChatRequest, *, server: bool, model: str) -> StreamingResponse:
+    # Take the inference slot before answering, so "busy" is still a plain
+    # 503 and not an error event inside a 200 stream.
+    sem = _get_inference_sem()
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=10.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail="inference busy")
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[Any] = asyncio.Queue()
+    stop = threading.Event()
+
+    def put(item: Any) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, item)
+
+    def produce() -> None:
+        try:
+            if server:
+                for chunk in llm.stream_chat_completion(chat.server_payload(req), should_stop=stop.is_set):
+                    put(chunk)
+            else:
+                reply = _chat_inproc_turn(llm, req)
+                for chunk in chat.reply_as_chunks(reply, model):
+                    put(json.dumps(chunk, ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001 — every failure becomes an event
+            status, detail = _chat_error_status(exc)
+            log.warning("/chat stream: %s", detail)
+            put(json.dumps({"error": {"status": status, "message": detail}}, ensure_ascii=False))
+        finally:
+            put(_STREAM_END)
+
+    try:
+        future = loop.run_in_executor(_inference_executor, produce)
+    except BaseException:
+        sem.release()
+        raise
+    # Released when the generation has actually stopped, not when the client
+    # disconnects — the worker is busy until then either way.
+    future.add_done_callback(lambda _f: sem.release())
+
+    async def events() -> AsyncIterator[str]:
+        try:
+            while True:
+                item = await queue.get()
+                if item is _STREAM_END:
+                    break
+                yield f"data: {item}\n\n"
+            yield "data: [DONE]\n\n"
+        finally:
+            stop.set()
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ─── /recap-title ──────────────────────────────────────────────────────────────

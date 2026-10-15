@@ -1,0 +1,147 @@
+{
+  "today": "2026-10-15",
+  "system": "You are the assistant of a private household server that keeps finance bookings, documents, photos, meter readings and trip plans. Answer questions by calling the tools; never invent data a tool did not return. Today is Thursday, 2026-10-15. 'this month' is 2026-10-01..2026-10-31, 'last month' is 2026-09-01..2026-09-30, 'last year' is 2025-01-01..2025-12-31. Dates in tool arguments are ISO (YYYY-MM-DD). Write tools only create proposals the user confirms. Answer in the user's language, briefly.",
+  "tools": [
+    {"type": "function", "function": {"name": "upcoming_direct_debits", "description": "Direct debits of standing mandates expected between today and a date, with typical amount.", "parameters": {"type": "object", "properties": {"until": {"type": "string", "description": "last day of the window, ISO date"}}, "required": ["until"]}}},
+    {"type": "function", "function": {"name": "list_transactions", "description": "Finance bookings filtered by text, date range and account; returns rows and the total.", "parameters": {"type": "object", "properties": {"q": {"type": "string", "description": "counterparty or purpose text"}, "dateFrom": {"type": "string"}, "dateTo": {"type": "string"}, "accountId": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}}}},
+    {"type": "function", "function": {"name": "analyze_spending", "description": "Sums and groupings of bookings for a question in natural language (spending per category, month, counterparty).", "parameters": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}}},
+    {"type": "function", "function": {"name": "list_accounts", "description": "The user's bank and depot accounts with balance.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "list_categories", "description": "Document categories (id, label) to filter a document search by.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "search_documents", "description": "Hybrid full-text and semantic document search, optionally limited to a category and date range.", "parameters": {"type": "object", "properties": {"q": {"type": "string"}, "category": {"type": "string", "description": "category id from list_categories"}, "dateFrom": {"type": "string"}, "dateTo": {"type": "string"}}, "required": ["q"]}}},
+    {"type": "function", "function": {"name": "list_photos", "description": "Photos filtered by favorite flag, date range, person and place; returns ids and count.", "parameters": {"type": "object", "properties": {"favorite": {"type": "boolean"}, "dateFrom": {"type": "string"}, "dateTo": {"type": "string"}, "person": {"type": "string"}, "place": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "search_photos", "description": "Natural-language photo search over image content, place and date.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "list_recaps", "description": "Photo recaps (Rückblicke); kind 'trip' are journeys with dates and places.", "parameters": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["trip", "year", "month", "event"]}, "year": {"type": "integer"}}}}},
+    {"type": "function", "function": {"name": "list_albums", "description": "Photo albums, optionally only those with an event name, by year.", "parameters": {"type": "object", "properties": {"year": {"type": "integer"}, "hasEvent": {"type": "boolean"}}}}},
+    {"type": "function", "function": {"name": "list_trip_plans", "description": "Trip plans from the trip planner with dates and destination.", "parameters": {"type": "object", "properties": {"year": {"type": "integer"}}}}},
+    {"type": "function", "function": {"name": "list_meters", "description": "Utility meters (electricity, water, gas) with id and name.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "latest_readings", "description": "Latest readings of one meter.", "parameters": {"type": "object", "properties": {"meter_id": {"type": "string"}}, "required": ["meter_id"]}}},
+    {"type": "function", "function": {"name": "consumption_report", "description": "Consumption of one meter over a date range.", "parameters": {"type": "object", "properties": {"meter_id": {"type": "string"}, "from": {"type": "string"}, "to": {"type": "string"}}, "required": ["meter_id", "from", "to"]}}},
+    {"type": "function", "function": {"name": "create_album", "description": "Write: propose a new album with the photos of the previous result.", "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "photo_ids": {"type": "array", "items": {"type": "integer"}}}, "required": ["name"]}}}
+  ],
+  "cases": [
+    {
+      "id": "debits-this-month",
+      "question": "Welche Lastschriften muss ich in diesem Monat noch erwarten?",
+      "expect": [{"tool": "upcoming_direct_debits", "args": {"until": "2026-10-31"}}],
+      "results": {"upcoming_direct_debits": {"rows": [{"date": "2026-10-20", "counterparty": "Stadtwerke Musterstadt", "amount": -84.0}, {"date": "2026-10-28", "counterparty": "Beispiel Versicherung AG", "amount": -32.5}], "total": -116.5}}
+    },
+    {
+      "id": "debits-until-november",
+      "question": "Welche Abbuchungen kommen bis Ende November noch auf mich zu?",
+      "expect": [{"tool": "upcoming_direct_debits", "args": {"until": "2026-11-30"}}],
+      "results": {"upcoming_direct_debits": {"rows": [{"date": "2026-11-02", "counterparty": "Muster Telekom", "amount": -39.99}], "total": -39.99}}
+    },
+    {
+      "id": "owners-meeting-minutes",
+      "question": "Gib mir alle Protokolle der Eigentümerversammlung der Immobilie in München.",
+      "expect": [{"tool": "search_documents", "args": {"q": {"$contains": "eigentümerversammlung"}, "category": "kapitalanlage-immobilie-muenchen"}}],
+      "results": {
+        "list_categories": {"rows": [{"id": "kapitalanlage-immobilie-muenchen", "label": "Kapitalanlage › Immobilie München"}, {"id": "kapitalanlage-immobilie-musterstadt", "label": "Kapitalanlage › Immobilie Musterstadt"}, {"id": "versicherung", "label": "Versicherung"}]},
+        "search_documents": {"rows": [{"id": 101, "title": "Protokoll Eigentümerversammlung 2025", "date": "2025-06-12"}, {"id": 87, "title": "Protokoll Eigentümerversammlung 2024", "date": "2024-06-20"}], "total": 2, "route": "/dokumente?q=Eigent%C3%BCmerversammlung&category=kapitalanlage-immobilie-muenchen"}
+      }
+    },
+    {
+      "id": "utility-statements",
+      "question": "Such mir die Nebenkostenabrechnungen raus.",
+      "expect": [{"tool": "search_documents", "args": {"q": {"$contains": "nebenkosten"}}}],
+      "results": {"search_documents": {"rows": [{"id": 55, "title": "Nebenkostenabrechnung 2025", "date": "2026-03-01"}], "total": 1}}
+    },
+    {
+      "id": "trips-last-year",
+      "question": "Welche Urlaubsreisen haben wir letztes Jahr gemacht?",
+      "expect": [{"tool": "list_recaps", "args": {"kind": "trip", "year": 2025}}],
+      "results": {
+        "list_recaps": {"rows": [{"id": 7, "title": "Sommer am Gardasee", "from": "2025-08-02", "to": "2025-08-16"}, {"id": 9, "title": "Herbst in Wien", "from": "2025-10-10", "to": "2025-10-13"}]},
+        "list_trip_plans": {"rows": []},
+        "list_albums": {"rows": [{"id": 31, "name": "Gardasee 2025", "event": "Sommerurlaub"}]}
+      }
+    },
+    {
+      "id": "trips-2024",
+      "question": "Wo waren wir 2024 überall im Urlaub?",
+      "expect": [{"tool": "list_recaps", "args": {"kind": "trip", "year": 2024}}],
+      "results": {"list_recaps": {"rows": [{"id": 3, "title": "Ostsee", "from": "2024-07-20", "to": "2024-08-03"}]}, "list_trip_plans": {"rows": []}, "list_albums": {"rows": []}}
+    },
+    {
+      "id": "favorites-album-2025",
+      "question": "Mach mir ein Album mit allen favorisierten Bildern von 2025.",
+      "expect": [
+        {"tool": "list_photos", "args": {"favorite": true, "dateFrom": "2025-01-01", "dateTo": "2025-12-31"}},
+        {"tool": "create_album", "args": {"name": {"$present": true}}}
+      ],
+      "results": {
+        "list_photos": {"ids": [1201, 1202, 1203], "total": 143, "note": "143 photos; ids truncated"},
+        "create_album": {"proposal": {"id": "p-1", "summary": "Album 'Favoriten 2025' anlegen und 143 Fotos hinzufügen"}}
+      }
+    },
+    {
+      "id": "beach-photos",
+      "question": "Zeig mir die Fotos vom Strand in Italien.",
+      "expect": [{"tool": "search_photos", "args": {"query": {"$contains": "strand"}}}],
+      "results": {"search_photos": {"ids": [501, 502], "total": 2}}
+    },
+    {
+      "id": "groceries-last-month",
+      "question": "Wie viel habe ich letzten Monat für Lebensmittel ausgegeben?",
+      "expect": [{"tool": "analyze_spending", "args": {"question": {"$present": true}}}],
+      "results": {"analyze_spending": {"total": -412.37, "formula": "sum of 23 bookings tagged Lebensmittel, 2026-09-01..2026-09-30"}}
+    },
+    {
+      "id": "bookings-by-counterparty",
+      "question": "Zeig mir alle Buchungen von Musterhandel im September.",
+      "expect": [{"tool": "list_transactions", "args": {"q": {"$contains": "musterhandel"}, "dateFrom": "2026-09-01", "dateTo": "2026-09-30"}}],
+      "results": {"list_transactions": {"rows": [{"id": 9001, "date": "2026-09-05", "counterparty": "Musterhandel GmbH", "amount": -23.9}], "total": -23.9, "count": 1}}
+    },
+    {
+      "id": "electricity-last-year",
+      "question": "Wie hoch war unser Stromverbrauch im letzten Jahr?",
+      "expect": [{"tool": "consumption_report", "args": {"meter_id": "m-strom", "from": "2025-01-01", "to": "2025-12-31"}}],
+      "results": {
+        "list_meters": {"rows": [{"id": "m-strom", "name": "Strom Haus"}, {"id": "m-wasser", "name": "Wasser Haus"}]},
+        "consumption_report": {"meter_id": "m-strom", "consumption": 3412, "unit": "kWh", "formula": "reading 2025-12-31 minus reading 2025-01-01"}
+      }
+    },
+    {
+      "id": "latest-water-reading",
+      "question": "Was war der letzte Stand vom Wasserzähler?",
+      "expect": [{"tool": "latest_readings", "args": {"meter_id": "m-wasser"}}],
+      "results": {
+        "list_meters": {"rows": [{"id": "m-strom", "name": "Strom Haus"}, {"id": "m-wasser", "name": "Wasser Haus"}]},
+        "latest_readings": {"rows": [{"date": "2026-10-01", "value": 1234.5, "unit": "m³"}]}
+      }
+    },
+    {
+      "id": "accounts",
+      "question": "Welche Konten habe ich eigentlich alle?",
+      "expect": [{"tool": "list_accounts", "args": {}}],
+      "results": {"list_accounts": {"rows": [{"id": "acc-1", "label": "Girokonto"}, {"id": "acc-2", "label": "Depot"}]}}
+    },
+    {
+      "id": "trip-plans",
+      "question": "Welche Reisen haben wir gerade in Planung?",
+      "expect": [{"tool": "list_trip_plans", "args": {}}],
+      "results": {"list_trip_plans": {"rows": [{"id": 12, "destination": "Musterinsel", "from": "2027-05-01", "to": "2027-05-14"}]}}
+    },
+    {
+      "id": "property-purchase",
+      "question": "Zeige mir alles, was beim Kauf der Immobilie in München relevant war.",
+      "expect": [
+        {"tool": "search_documents", "args": {"q": {"$present": true}}},
+        {"tool": "list_transactions", "args": {}}
+      ],
+      "results": {
+        "list_categories": {"rows": [{"id": "kapitalanlage-immobilie-muenchen", "label": "Kapitalanlage › Immobilie München"}]},
+        "search_documents": {"rows": [{"id": 40, "title": "Kaufvertrag Wohnung", "date": "2019-04-02"}, {"id": 41, "title": "Grundbuchauszug", "date": "2019-06-10"}], "total": 2},
+        "list_transactions": {"rows": [{"id": 700, "date": "2019-05-15", "counterparty": "Notariat Muster", "amount": -2400.0}], "count": 1, "total": -2400.0},
+        "analyze_spending": {"total": -2400.0, "formula": "1 booking"}
+      }
+    },
+    {
+      "id": "thanks-no-tool",
+      "question": "Danke, das war's schon.",
+      "expect": [],
+      "forbid_tools": true,
+      "results": {}
+    }
+  ]
+}

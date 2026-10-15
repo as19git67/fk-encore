@@ -27,7 +27,7 @@ import logging
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 log = logging.getLogger("llm-service.llama-server")
 
@@ -200,3 +200,61 @@ class LlamaServerClient:
         if not isinstance(message.get("content"), str):
             raise LlamaServerError("/v1/chat/completions returned a choice without text content")
         return result
+
+    # ── /chat: tool calling and streaming ─────────────────────────────────
+    #
+    # Separate from create_chat_completion on purpose: that mirror insists on
+    # text content, which is right for the JSON endpoints and wrong for a tool
+    # turn, where the answer is `tool_calls` and `content` is null.
+
+    def chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST an OpenAI-shaped chat request and return the reply untouched."""
+
+        result = self._post("/v1/chat/completions", {**payload, "stream": False})
+        if not isinstance(result, dict) or not result.get("choices"):
+            raise LlamaServerError("/v1/chat/completions returned no choices")
+        return result
+
+    def stream_chat_completion(
+        self,
+        payload: dict[str, Any],
+        should_stop: Callable[[], bool] = lambda: False,
+    ) -> Iterator[str]:
+        """Yield the ``data:`` payloads of a streamed chat completion.
+
+        Each item is the JSON text of one OpenAI chunk; the terminal
+        ``[DONE]`` is not yielded. *should_stop* is polled between lines:
+        once the caller has gone away, closing the response makes llama-server
+        notice the dropped connection and stop generating, instead of holding
+        the one inference slot for an answer nobody reads.
+        """
+
+        url = f"{self.base_url}/v1/chat/completions"
+        data = json.dumps({**payload, "stream": True}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "text/event-stream")
+        try:
+            resp = urllib.request.urlopen(req, timeout=self.request_timeout)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            raise LlamaServerError(f"POST /v1/chat/completions -> HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise LlamaServerError(f"POST /v1/chat/completions -> {exc.reason}") from exc
+        except OSError as exc:
+            raise LlamaServerError(f"POST /v1/chat/completions -> {exc}") from exc
+
+        with resp:
+            try:
+                for raw in resp:
+                    if should_stop():
+                        return
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data:"):
+                        continue  # blank separators, comments, `event:` lines
+                    body = line[len("data:"):].strip()
+                    if body == "[DONE]":
+                        return
+                    yield body
+            except OSError as exc:
+                raise LlamaServerError(f"stream from /v1/chat/completions broke: {exc}") from exc
