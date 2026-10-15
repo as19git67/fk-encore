@@ -2514,6 +2514,10 @@ interface InspectionFieldSource {
   /** Where the value in `fields` came from; "both" when they agree. */
   source: FieldSource;
   disagree: boolean;
+  /** The taxes' sign was turned because only that way the figures add up. */
+  sign_turned?: boolean;
+  /** Snapped to a known security: what was read. */
+  known_from?: string;
 }
 
 interface InspectionCheck {
@@ -2679,7 +2683,14 @@ export const inspectSettlementDocument = api(
     for (const f of shown.merge.fields) {
       const key = keyOf(f.field);
       fields[key] = show(f.field, sv[f.field]);
-      sources[key] = { rules: show(f.field, f.rules), llm: show(f.field, f.llm), source: f.source, disagree: f.disagree };
+      sources[key] = {
+        rules: show(f.field, f.rules),
+        llm: show(f.field, f.llm),
+        source: f.source,
+        disagree: f.disagree,
+        ...(f.sign_turned ? { sign_turned: true } : {}),
+        ...(f.known_from ? { known_from: f.known_from } : {}),
+      };
     }
 
     return {

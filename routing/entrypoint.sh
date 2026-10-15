@@ -111,10 +111,26 @@ if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$(stamp)" ]; then
   valhalla_build_admins -c "$CONFIG" "$source_pbf" || true
   [ -f "$DATA_DIR/timezones.sqlite" ] || valhalla_build_timezones > "$DATA_DIR/timezones.sqlite" || true
   valhalla_build_tiles -c "$CONFIG" "$source_pbf"
-  valhalla_build_extract -c "$CONFIG" -v || true
+  # A failed pack must not leave a half-written archive behind: the
+  # service prefers tiles.tar whenever it exists, and the tile
+  # directory is the fallback only while there is no archive.
+  if ! valhalla_build_extract -c "$CONFIG" -v; then
+    echo "fk-routing: valhalla_build_extract failed — serving the tile directory" >&2
+    rm -f "$DATA_DIR/tiles.tar"
+  fi
   rm -f "$MERGED"
   echo "$building" > "$STAMP"
   echo "fk-routing: tiles built"
+fi
+
+# Valhalla reads tiles.tar when it exists and ignores the directory it
+# was packed from, which holds the same data a second time (about as
+# large as the archive). Dropped here rather than after the build so
+# that a deployment started with both present is cleaned up too. Only
+# with a non-empty archive: without one the directory is all there is.
+# The next build empties it anyway, so nothing depends on it.
+if [ -s "$DATA_DIR/tiles.tar" ]; then
+  find "$TILE_DIR" -mindepth 1 -delete
 fi
 
 valhalla_service "$CONFIG" 1 &

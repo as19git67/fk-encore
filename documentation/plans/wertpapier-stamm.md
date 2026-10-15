@@ -188,6 +188,21 @@ review and the reconciliation read completed rows; rows of one depot and
 day that name the same security twice count once (the bank's). A link by
 the old WKN key finds the ISIN position.
 
+## Reading a scan against the known securities
+
+A paper almost always concerns a security the depots hold or held. After
+rules and model are merged, `finance/known-securities.ts` snaps the
+reading to it: an ISIN or WKN no security is known by, but that differs
+from exactly one known one only in characters OCR confuses (0/O/Q/D,
+1/I/L, 5/S, 8/B, 2/Z, 6/G; at most three), becomes that one; a missing
+WKN comes from the known security; a name that is the known one with
+OCR's accents ("Telefönica") takes the known spelling (case stays as
+printed). Known are the quote provider's symbols, the master, the
+transactions and the holdings — the installation's own securities, of any
+country. A global list would let a slip land on a stranger; a first buy
+finds nothing and keeps what was read. Snapped fields carry `known_from`
+(what was read), shown in the document dialog.
+
 ## Operations
 
 - Stage 1 changes what "Belege einlesen" books: a paper about a security

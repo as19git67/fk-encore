@@ -1,6 +1,7 @@
 import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint, date } from "drizzle-orm/pg-core";
 import type { DocumentReferenceNumber } from "../documents/reference-numbers";
 import type { CollectionKind, CollectionRule } from "../documents/dossiers";
+import type { CollectionSortKey } from "../documents/collection-sort";
 import { sql } from "drizzle-orm";
 
 /**
@@ -1324,8 +1325,11 @@ export const documentCollections = pgTable("document_collections", {
   // documents/dossiers.ts for the rule's shape and semantics.
   kind: text("kind").$type<CollectionKind>().notNull().default("manual"),
   rule: jsonb("rule").$type<CollectionRule>(),
+  // Automatic order (migration 0241, documents/collection-sort.ts). NULL =
+  // the order set by hand; otherwise positions follow these keys.
+  sort_order: jsonb("sort_order").$type<CollectionSortKey[]>(),
   /**
-   * What the collection may hold (#1548, migration 0241): one entity type, or
+   * What the collection may hold (#1548, migration 0242): one entity type, or
    * NULL for any. Every collection made before was a document folder.
    */
   entity_type: text("entity_type").$type<CollectionEntityType | null>().default("document"),
@@ -1351,7 +1355,7 @@ export type CollectionEntityType =
 export type CollectionMemberType = Exclude<CollectionEntityType, "document">;
 
 /**
- * A collection member that is not a document (#1548, migration 0241).
+ * A collection member that is not a document (#1548, migration 0242).
  *
  * Polymorphic on purpose: one column points into six tables, so there is no
  * foreign key; triggers on those tables delete the membership with the row.

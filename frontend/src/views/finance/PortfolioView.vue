@@ -659,7 +659,7 @@ onBeforeUnmount(() => {
       message="Lege unter Konten ein Depotkonto an oder lass dir Zugriff auf eines geben — dann erscheinen hier seine Wertpapiere."
     />
 
-    <template v-else-if="portfolio && summary">
+    <div class="pf-sections" v-else-if="portfolio && summary">
       <!-- ── Key figures ──────────────────────────────────────────── -->
       <section class="pf-section" aria-labelledby="pf-kpi-heading">
         <h2 id="pf-kpi-heading" class="visually-hidden">Kennzahlen</h2>
@@ -971,11 +971,17 @@ onBeforeUnmount(() => {
           />
         </div>
       </section>
-    </template>
+    </div>
   </PageLayout>
 </template>
 
 <style scoped>
+/* Space between the page's sections; each section spaces its own parts. */
+.pf-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
 /* Page frame and title: PageLayout (issue #1272). */
 .pf-filter-panel {
   display: grid;

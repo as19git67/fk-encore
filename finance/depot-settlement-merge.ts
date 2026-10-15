@@ -25,6 +25,7 @@
  */
 
 import { isinChecksumValid, repairIsin } from "./depot-derivation";
+import { wknFromIsin } from "./isin";
 import { isMoneyOut, type SettlementExtraction, type SettlementKind } from "./depot-settlement-parser";
 
 /** The fields a reading consists of, in the inspection view's order. */
@@ -141,7 +142,7 @@ export function parseLlmSettlement(raw: Record<string, unknown>): SettlementValu
   return {
     kind,
     isin: isin && /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(isin) ? isin : null,
-    wkn: wkn && /^[A-Z0-9]{6}$/.test(wkn) ? wkn : null,
+    wkn: wkn && /^[A-Z0-9]{6}$/.test(wkn) ? wkn : wknFromIsin(isin),
     name: str(raw.name),
     depotNumber: depot && depot.length >= 5 ? depot : null,
     executedAt: isoDate(raw.executed_at),
@@ -290,6 +291,10 @@ export interface MergedField {
   source: FieldSource;
   /** Both read a value and they differ. */
   disagree: boolean;
+  /** The taxes' sign was turned, because only that way the figures add up. */
+  sign_turned?: boolean;
+  /** Snapped to a known security (see known-securities.ts): what was read. */
+  known_from?: string;
 }
 
 export interface MergeResult {
@@ -370,7 +375,7 @@ export function mergeSettlement(
   const choices = disagreeing.length <= MAX_COMBINED_FIELDS ? 1 << disagreeing.length : 2;
   /** Checks some combination does not fail: the disagreement decides them. */
   const passedSomewhere = new Set<CheckName>();
-  let best: { values: SettlementValues; checks: SettlementCheck[]; fromLlm: Set<MergeField> } | null = null;
+  let best: { values: SettlementValues; checks: SettlementCheck[]; fromLlm: Set<MergeField>; taxFlipped: boolean } | null = null;
   let bestKey: number[] | null = null;
   const better = (a: number[], b: number[]) => {
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i]! < b[i]!;
@@ -381,7 +386,14 @@ export function mergeSettlement(
     const fromLlm = new Set<MergeField>(
       disagreeing.length <= MAX_COMBINED_FIELDS ? disagreeing.filter((_, i) => mask & (1 << i)) : mask ? disagreeing : [],
     );
-    const values = combine(r, l, fromLlm);
+    const combined = combine(r, l, fromLlm);
+    // The sign of the taxes is easily misread: "abgeführte Steuern -162,68"
+    // is tax withheld, printed negative because it lowers the amount, and a
+    // reader may take it for a refund. So each reading is also tried with
+    // the taxes' sign turned; it wins only where the figures then add up.
+    const variants: Array<{ values: SettlementValues; taxFlipped: number }> = [{ values: combined, taxFlipped: 0 }];
+    if (combined.tax !== null && combined.tax !== 0) variants.push({ values: { ...combined, tax: -combined.tax }, taxFlipped: 1 });
+    for (const { values, taxFlipped } of variants) {
     const checks = settlementChecks(values, today, bookingNet);
     for (const c of checks) {
       if (c.result !== "failed") passedSomewhere.add(c.name);
@@ -395,13 +407,26 @@ export function mergeSettlement(
     const kindFromLlm = fromLlm.has("kind") ? 1 : 0;
     const ungrounded = [...fromLlm].filter((f) => grounding[f] === false).length;
     const keptFromRules = disagreeing.filter((f) => f !== "kind" && !fromLlm.has(f)).length;
-    const key = [s.failed, -s.ok, kindFromLlm, ungrounded, keptFromRules];
+    const key = [s.failed, -s.ok, taxFlipped, kindFromLlm, ungrounded, keptFromRules];
     if (!bestKey || better(key, bestKey)) {
-      best = { values, checks, fromLlm };
+      best = { values, checks, fromLlm, taxFlipped: taxFlipped === 1 };
       bestKey = key;
     }
+    }
   }
-  const { values, checks, fromLlm } = best!;
+  const { values, checks, fromLlm, taxFlipped } = best!;
+
+  // A depot number one source read in part ("4018735" of "4018735 00",
+  // cut at the space): the longer reading holds what the shorter one does.
+  if (r.depotNumber && l.depotNumber && r.depotNumber !== l.depotNumber) {
+    const longer = r.depotNumber.length > l.depotNumber.length ? r.depotNumber : l.depotNumber;
+    const shorter = longer === r.depotNumber ? l.depotNumber : r.depotNumber;
+    if (longer.startsWith(shorter)) {
+      values.depotNumber = longer;
+      if (longer === l.depotNumber) fromLlm.add("depotNumber");
+      else fromLlm.delete("depotNumber");
+    }
+  }
 
   const fields: MergedField[] = MERGE_FIELDS.map((field) => {
     const rv = r[field];
@@ -412,7 +437,7 @@ export function mergeSettlement(
     else if (rv !== null && lv !== null && !disagree) source = "both";
     else if (disagree) source = fromLlm.has(field) ? "llm" : "rules";
     else source = rv !== null ? "rules" : "llm";
-    return { field, rules: rv, llm: lv, source, disagree };
+    return { field, rules: rv, llm: lv, source, disagree, ...(field === "tax" && taxFlipped ? { sign_turned: true } : {}) };
   });
 
   // Unverified only when no combination passes the checks: the best one is

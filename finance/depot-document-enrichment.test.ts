@@ -664,7 +664,8 @@ Ausmachender Betrag 100,00 EUR`;
 
     const review = await getPortfolioReview({});
     expect(review.unmatched_documents).toEqual([
-      expect.objectContaining({ document_id: docId, isin: SOLD_ISIN, wkn: null, depot_number: "12345678" }),
+      // The WKN is the one the German ISIN carries.
+      expect.objectContaining({ document_id: docId, isin: SOLD_ISIN, wkn: "000SLD", depot_number: "12345678" }),
     ]);
   });
 });

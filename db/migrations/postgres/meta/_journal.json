@@ -1692,8 +1692,15 @@
     {
       "idx": 241,
       "version": "7",
+      "when": 1788652800061,
+      "tag": "0241_document_collection_sort_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 242,
+      "version": "7",
       "when": 1788652800070,
-      "tag": "0241_collections_generic",
+      "tag": "0242_collections_generic",
       "breakpoints": true
     }
   ]

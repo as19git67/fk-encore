@@ -171,7 +171,7 @@ async function reading(meterId: number, value: string): Promise<number> {
     .returning({ id: meterDevices.id });
   const [row] = await db
     .insert(meterReadings)
-    .values({ device_id: device!.id, meter_id: meterId, value, taken_at: "2026-01-31T12:00:00Z", source: "manual" })
+    .values({ device_id: device!.id, value, taken_at: "2026-01-31T12:00:00Z", source: "manual" })
     .returning({ id: meterReadings.id });
   return row!.id;
 }

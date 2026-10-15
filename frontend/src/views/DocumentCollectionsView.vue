@@ -211,6 +211,7 @@ onMounted(load)
         </button>
         <Button
           v-if="c.can_administer"
+          class="cv-delete"
           icon="pi pi-trash"
           text
           rounded
@@ -282,12 +283,17 @@ onMounted(load)
   color: var(--p-text-color);
   cursor: pointer;
 }
+/* A long summary must not squeeze the button: it keeps its size. */
+.cv-delete {
+  flex: 0 0 auto;
+}
 .cv-line {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 .cv-name {
+  min-width: 0;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -295,6 +301,7 @@ onMounted(load)
 }
 .cv-summary {
   margin: 6px 0 0;
+  overflow-wrap: anywhere;
   color: var(--p-text-muted-color);
   font-size: var(--text-md);
   display: -webkit-box;

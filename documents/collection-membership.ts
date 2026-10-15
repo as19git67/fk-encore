@@ -12,6 +12,7 @@ import { documentCollectionItems, documentCollections, documents } from "../db/s
 import type { CollectionRule } from "./dossiers";
 import type { CollectionRow } from "./collection-access";
 import { discardCollectionExports } from "./collection-export";
+import { resortCollection } from "./collection-sort";
 import { loadUserGroupIds, visibleDocumentsWhere } from "./visibility";
 
 /**
@@ -142,6 +143,8 @@ export async function addDocumentsToCollection(
       })),
     ),
   );
+  // A folder that sorts itself puts the newcomers in their place (#1547).
+  await resortCollection(collection.id);
   await touchCollection(collection.id);
   return fresh.length;
 }
