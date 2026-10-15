@@ -57,14 +57,12 @@ import { useModuleBack } from '../composables/useModuleBack'
 import PageLayout from '../components/layout/PageLayout.vue'
 import PdfViewer from '../components/PdfViewer.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
-import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
+import FileButton from '../components/collections/FileButton.vue'
 import RelatedDocumentsCard from '../components/documents/RelatedDocumentsCard.vue'
 import { listDuplicatesForDocument, REFERENCE_KIND_LABELS, type ReferenceKind, type ReferenceNumber } from '../api/documents'
 import {
   getCollection,
-  listCollectionsForDocument,
   type DocumentCollectionDetail,
-  type DocumentCollectionRef,
 } from '../api/collections'
 import { getDocumentTransactionLinks, unlinkTransactionDocument } from '../api/finance'
 
@@ -138,9 +136,11 @@ function goCollectionDoc(id: number) {
   })
 }
 
-function toggleBasket() {
-  if (!doc.value) return
-  basket.toggle(doc.value)
+// The documents store holds whole documents for its drawer, so the "Ablegen"
+// dialog puts this one in the module's way.
+const docBasket = {
+  add: () => { if (doc.value && !basket.has(doc.value.id)) basket.add(doc.value) },
+  remove: () => { if (doc.value) basket.remove(doc.value.id) },
 }
 
 const doc = ref<DocumentDetail | null>(null)
@@ -431,21 +431,6 @@ watch(selectedDocumentTypeOption, (v) => {
   form.value.document_type = v ? v.slug : null
 })
 
-// Sammelmappen this document is part of. A document may be in several at
-// once, so this is a list, not a field on the document.
-const documentCollections = ref<DocumentCollectionRef[]>([])
-const addToCollectionOpen = ref(false)
-
-async function reloadCollections() {
-  const id = docId.value
-  if (!Number.isFinite(id)) return
-  try {
-    documentCollections.value = (await listCollectionsForDocument(id)).items
-  } catch {
-    /* the card simply keeps what it had */
-  }
-}
-
 async function load() {
   const id = docId.value
   if (!Number.isFinite(id)) return
@@ -453,7 +438,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [detail, cats, docTypes, taxCats, houseItems, people, links, collections] =
+    const [detail, cats, docTypes, taxCats, houseItems, people, links] =
       await Promise.all([
       getDocument(id),
       listDocumentCategories(),
@@ -462,7 +447,6 @@ async function load() {
       listGroups(),
       listSubjectPersons(),
       getDocumentTransactionLinks(id).catch(() => []),
-      listCollectionsForDocument(id).catch(() => ({ items: [] })),
     ])
     doc.value = detail
     void loadDuplicateNotice(id)
@@ -472,7 +456,6 @@ async function load() {
     groups.value = houseItems.items
     subjectPeople.value = people.items
     linkedTransactions.value = links
-    documentCollections.value = collections.items
     // Cached full text belongs to the previously shown document/state.
     fullText.value = null
     fullTextVisible.value = false
@@ -930,15 +913,11 @@ onBeforeUnmount(() => {
             @click="basketNext && goBasketDoc(basketNext.id)"
           />
         </div>
-          <Button
+          <FileButton
             v-if="doc"
-            :icon="inBasket ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
-            :aria-label="inBasket ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
-            text
-            rounded
-            :severity="inBasket ? 'success' : undefined"
-            v-tooltip.bottom="inBasket ? 'Aus dem Basket entfernen' : 'Dokument in den Basket legen'"
-            @click="toggleBasket"
+            :members="[{ entity_type: 'document', entity_id: doc.id }]"
+            :basket="docBasket"
+            :dossier-seed="dossierRuleSeed"
           />
           <Button
             v-if="auth.hasPermission('documents.edit') && doc"
@@ -1020,10 +999,10 @@ onBeforeUnmount(() => {
                   </div>
                 </li>
                 <li>
-                  <i class="pi pi-shopping-cart" aria-hidden="true" />
+                  <i class="pi pi-folder-plus" aria-hidden="true" />
                   <div>
-                    <strong>In den Basket</strong>
-                    <span>Dokument in den Basket legen bzw. wieder entfernen — für Stapelbearbeitung oder als Navigationsliste.</span>
+                    <strong>Ablegen</strong>
+                    <span>Dokument in den Basket oder eine Sammelmappe legen bzw. wieder herausnehmen — der Basket dient auch als Navigationsliste.</span>
                   </div>
                 </li>
                 <li v-if="auth.hasPermission('documents.edit')">
@@ -1405,42 +1384,10 @@ onBeforeUnmount(() => {
           <RouterLink v-if="auth.hasPermission('data.manage')" :to="{ name: 'dokumente-duplikate' }">Zur Prüfung</RouterLink>
         </Message>
 
-        <section class="collections-card">
-          <div class="collections-header">
-            <h2 class="collections-title"><i class="pi pi-folder" /> Sammelmappen</h2>
-            <Button
-              icon="pi pi-plus"
-              label="Hinzufügen"
-              text
-              size="small"
-              @click="addToCollectionOpen = true"
-            />
-          </div>
-          <div v-if="documentCollections.length > 0" class="collections-chips">
-            <button
-              v-for="c in documentCollections"
-              :key="c.id"
-              type="button"
-              class="collection-chip"
-              :class="{ 'collection-chip--off': !c.included }"
-              @click="router.push({ name: 'dokumente-mappe', params: { id: c.id } })"
-            >
-              <i class="pi pi-folder" /> {{ c.title }}
-            </button>
-          </div>
-          <p v-else class="collections-empty">
-            Noch in keiner Sammelmappe. Ein Dokument darf in mehreren liegen.
-          </p>
-        </section>
-
         <!-- What else belongs next to this document, grouped by why (#1478).
-             Loads after the document itself; a neighbour put into a
-             Sammelmappe may be in one of ours now, so our card reloads. -->
-        <RelatedDocumentsCard
-          v-if="doc"
-          :document-id="doc.id"
-          @collection-changed="reloadCollections"
-        />
+             Loads after the document itself. Where the document lies shows
+             the "Ablegen" dialog at the top. -->
+        <RelatedDocumentsCard v-if="doc" :document-id="doc.id" />
 
         <section class="tax-card">
           <div class="tax-card-header">
@@ -1684,13 +1631,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-
-    <AddToCollectionDialog
-      v-model:visible="addToCollectionOpen"
-      :document-ids="[docId]"
-      :rule-seed="dossierRuleSeed"
-      @added="reloadCollections"
-    />
 
     <DocumentFollowUpDialog
       v-if="doc"
@@ -2231,54 +2171,6 @@ onBeforeUnmount(() => {
   max-height: 60vh;
 }
 
-.collections-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.85rem 1rem;
-  background: var(--p-content-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 8px;
-}
-.collections-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-.collections-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.collections-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-.collection-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid var(--p-content-border-color);
-  background: var(--p-content-hover-background);
-  color: var(--p-text-color);
-  font-size: var(--text-md);
-  cursor: pointer;
-}
-.collection-chip--off {
-  opacity: 0.55;
-}
-.collections-empty {
-  margin: 0;
-  color: var(--p-text-muted-color);
-  font-size: var(--text-md);
-}
 .tax-card {
   display: flex;
   flex-direction: column;

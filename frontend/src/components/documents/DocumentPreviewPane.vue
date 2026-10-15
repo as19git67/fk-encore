@@ -15,7 +15,7 @@
  * id they were made for: arrowing quickly through a list starts several, and
  * without that check a slow early response could overwrite a fast later one.
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
@@ -23,6 +23,8 @@ import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
 import PdfViewer from '../PdfViewer.vue'
+import FileButton from '../collections/FileButton.vue'
+import { useDocSelectionStore } from '../../stores/documents/selection'
 import {
   fetchDocumentBytes,
   getDocument,
@@ -36,6 +38,24 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const basket = useDocSelectionStore()
+
+// "Ablegen" right from the preview (#1548): the same dialog as on the detail
+// page, with the documents store doing the basket so its drawer has the
+// whole document.
+const docBasket = {
+  add: () => { if (doc.value && !basket.has(doc.value.id)) basket.add(doc.value) },
+  remove: () => { if (doc.value) basket.remove(doc.value.id) },
+}
+const dossierSeed = computed(() => {
+  const d = doc.value
+  if (!d) return null
+  return {
+    correspondent_slug: d.correspondent_slug,
+    reference_numbers: d.reference_numbers.map((r) => r.value),
+    source_folder_prefix: d.source_folder,
+  }
+})
 
 /**
  * The pane's own scroll container and the point the jump button aims at. The
@@ -167,6 +187,12 @@ function formatDate(value: string | null): string {
           severity="secondary"
           v-tooltip.bottom="'Zu den Angaben unter der Vorschau springen'"
           @click="scrollToDetails"
+        />
+        <FileButton
+          :members="[{ entity_type: 'document', entity_id: doc.id }]"
+          :basket="docBasket"
+          :dossier-seed="dossierSeed"
+          size="small"
         />
         <Button
           icon="pi pi-arrow-up-right"

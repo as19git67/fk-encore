@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import BasketOthers from '../collections/BasketOthers.vue'
+import BasketMemberList from '../collections/BasketMemberList.vue'
+import BasketFooter from '../collections/BasketFooter.vue'
+import { useBasketStore } from '../../stores/basket'
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -29,6 +31,9 @@ import { compareBasketCounterparties } from '../../utils/financeBasketCompare'
  */
 
 const selectionStore = useTxSelectionStore()
+/** The whole shared basket (#1548); the drawer shows every kind in it. */
+const basket = useBasketStore()
+const shell = ref<InstanceType<typeof BasketIndicator> | null>(null)
 const txStore = useTransactionsStore()
 const confirm = useConfirm()
 const tagDialogVisible = ref(false)
@@ -349,11 +354,6 @@ async function loadSnapshot() {
   snapshotDialogVisible.value = false
 }
 
-function clearBasket() {
-  selectionStore.clear()
-  activeBasketName.value = null
-}
-
 async function removeSnapshot() {
   if (!selectedSnapshotId.value) return
   const selected = snapshots.value.find(snapshot => snapshot.id === selectedSnapshotId.value)
@@ -388,20 +388,17 @@ async function compareSnapshots() {
 
 <template>
   <BasketIndicator
-    singular="Buchung"
-    plural="Buchungen"
+    ref="shell"
+    singular="Eintrag"
+    plural="Einträge"
     :title="drawerTitle"
-    :count="count"
-    empty-text="Noch keine Buchungen im Basket."
-    empty-hint="Lege Buchungen aus der Liste, der Detailansicht oder den Anomalien ab, um sie hier zu sammeln."
+    :count="basket.count"
+    empty-hint="Lege Buchungen über „Ablegen“ aus der Liste, der Detailansicht oder den Anomalien in den Basket. Fotos, Dokumente und Zähler kommen in denselben Basket."
     :info="actionInfo"
     :error="actionError"
     @update:info="actionInfo = null"
     @update:error="actionError = null"
   >
-    <template #others>
-      <BasketOthers own="transaction" @saved="(name) => (actionInfo = `Sammelmappe „${name}“ angelegt.`)" />
-    </template>
     <template #subtitle>
       <span v-if="count > 0" class="drawer-sum">{{ sumLabel }}</span>
     </template>
@@ -409,6 +406,7 @@ async function compareSnapshots() {
     <!-- Belegzuordnung, Auswertung und Wiederholungen stehen über der Liste:
          sie beschreiben den ganzen Basket, nicht eine einzelne Buchung. -->
     <template #before-rows>
+      <template v-if="count > 0">
       <section class="basket-matches">
         <div class="basket-match-actions">
           <Button label="Verknüpfen" icon="pi pi-link" size="small" @click="openManualLink" />
@@ -450,9 +448,12 @@ async function compareSnapshots() {
             </li>
           </ul>
       </section>
+      </template>
     </template>
 
     <template #rows>
+      <BasketMemberList first="transaction" @open="shell?.close()">
+      <template #rows-transaction>
       <li
         v-for="tx in items"
         :key="tx.id"
@@ -484,9 +485,13 @@ async function compareSnapshots() {
             <i class="pi pi-times-circle" />
           </button>
       </li>
+      </template>
+      </BasketMemberList>
     </template>
 
     <template #footer>
+          <div v-if="count > 0" class="module-actions">
+          <p class="module-actions-label">Für {{ count === 1 ? 'die Buchung' : `die ${count} Buchungen` }} im Basket</p>
           <div class="drawer-actions">
             <Button
               :label="majorityReviewed ? 'Prüfvermerk entfernen' : 'Als geprüft markieren'"
@@ -530,17 +535,8 @@ async function compareSnapshots() {
             />
             <Button label="PDF" icon="pi pi-file-pdf" size="small" severity="secondary" outlined :disabled="count === 0" :loading="pdfExporting" @click="openPdfDialog" />
           </div>
-          <div class="clear-row">
-            <Button
-              label="Alles leeren"
-              icon="pi pi-times"
-              severity="secondary"
-              text
-              size="small"
-              :disabled="count === 0"
-              @click="clearBasket"
-            />
-      </div>
+          </div>
+      <BasketFooter @saved="(name) => (actionInfo = `Sammelmappe „${name}“ angelegt.`)" @cleared="activeBasketName = null" />
     </template>
   </BasketIndicator>
 
@@ -706,9 +702,14 @@ async function compareSnapshots() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.clear-row {
-  display: flex;
-  justify-content: flex-end;
+.module-actions-label {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--p-text-muted-color);
+}
+.module-actions {
+  margin-bottom: var(--space-3);
 }
 
 @media (max-width: 520px) {

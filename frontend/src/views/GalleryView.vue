@@ -58,7 +58,6 @@ import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToo
 import PageLayout from '../components/layout/PageLayout.vue'
 import SelectionBar from '../components/layout/SelectionBar.vue'
 import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
-import { useBasketStore } from '../stores/basket'
 import type { MemberRef, MemberRuleInput } from '../api/collections'
 import SaveRuleDialog from '../components/collections/SaveRuleDialog.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
@@ -369,15 +368,11 @@ const albumDialogPhotoIds = computed(() => Array.from(selectedIds.value))
 const saveRuleOpen = ref(false)
 const saveRuleInput = computed<MemberRuleInput>(() => ({ type: 'photo', filter: photoFilterQuery(filter.value) }))
 
-// Basket and collections (#1548): the same two actions every list offers.
-const basket = useBasketStore()
+// "Ablegen" (#1548): the one action every list offers — basket or collection.
 const collectionDialogOpen = ref(false)
 const selectedPhotoRefs = computed<MemberRef[]>(() =>
   Array.from(selectedIds.value, (id) => ({ entity_type: 'photo' as const, entity_id: id })),
 )
-function addSelectionToBasket() {
-  basket.add(selectedPhotoRefs.value)
-}
 function openAlbumDialog() {
   if (selectedIds.value.size === 0) return
   albumDialogVisible.value = true
@@ -558,8 +553,7 @@ const selectionActions = computed<ToolbarItem[]>(() => {
     command: () => void shareSelectedPhotos(),
   })
   if (canShowCollage.value) push({ key: 'collage', title: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
-  push({ key: 'basket', title: 'In den Basket legen', icon: 'pi pi-shopping-cart', command: addSelectionToBasket })
-  push({ key: 'collection', title: 'In Sammelmappe legen', icon: 'pi pi-folder', command: () => (collectionDialogOpen.value = true) })
+  push({ key: 'file', title: 'Ablegen', icon: 'pi pi-folder-plus', command: () => (collectionDialogOpen.value = true) })
   if (canUpload.value) push({ key: 'albums', title: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
   if (canUpload.value) push({ key: 'description', title: 'Beschreibung bearbeiten', icon: 'pi pi-align-left', command: openDescriptionDialog })
   if (canDelete.value) {

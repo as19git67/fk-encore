@@ -10,7 +10,7 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import DocumentThumbnail from '../DocumentThumbnail.vue'
-import AddToCollectionDialog from './AddToCollectionDialog.vue'
+import AddToCollectionDialog from '../collections/AddToCollectionDialog.vue'
 import { getRelatedDocuments, type RelatedDocument, type RelatedGroup, type RelatedReason } from '../../api/documents'
 import { parseLocalDate } from '../../utils/dateFormat'
 
@@ -79,17 +79,18 @@ function openCollection(g: RelatedGroup) {
   void router.push({ name: 'dokumente-mappe', params: { id: g.collection_id } })
 }
 
-// "In Sammelmappe" for one related document — the same dialog the page uses
-// for the document itself, pointed at the neighbour.
+// "Ablegen" for one related document — the same dialog the page uses for the
+// document itself, pointed at the neighbour.
 const addTarget = ref<number | null>(null)
 const addOpen = computed({
   get: () => addTarget.value !== null,
   set: (v: boolean) => { if (!v) addTarget.value = null },
 })
-const addTargetIds = computed(() => (addTarget.value === null ? [] : [addTarget.value]))
+const addTargetRefs = computed(() =>
+  addTarget.value === null ? [] : [{ entity_type: 'document' as const, entity_id: addTarget.value }],
+)
 
 function onAdded() {
-  addTarget.value = null
   emit('collection-changed')
   void load(props.documentId)
 }
@@ -147,8 +148,9 @@ function onAdded() {
               text
               rounded
               size="small"
-              aria-label="In Sammelmappe legen"
-              v-tooltip.left="'In Sammelmappe legen'"
+              aria-haspopup="dialog"
+              aria-label="Ablegen: Basket oder Sammelmappe"
+              v-tooltip.left="'Ablegen: Basket oder Sammelmappe'"
               @click="addTarget = item.id"
             />
           </li>
@@ -158,8 +160,8 @@ function onAdded() {
 
     <AddToCollectionDialog
       v-model:visible="addOpen"
-      :document-ids="addTargetIds"
-      @added="onAdded"
+      :members="addTargetRefs"
+      @changed="onAdded"
     />
   </section>
 </template>

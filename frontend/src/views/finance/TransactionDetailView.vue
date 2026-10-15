@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import InCollectionsCard from '../../components/collections/InCollectionsCard.vue'
+import FileButton from '../../components/collections/FileButton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
@@ -287,9 +287,11 @@ function goBasketTx(id: number) {
   router.push({ name: 'finance-transaction-detail', params: { id } })
 }
 
-function toggleBasket() {
-  if (!tx.value) return
-  selectionStore.toggle(tx.value)
+// The finance store holds whole bookings for its drawer, so the dialog puts
+// this one in the module's way.
+const txBasket = {
+  add: () => { if (tx.value && !selectionStore.has(tx.value.id)) selectionStore.add(tx.value) },
+  remove: () => { if (tx.value) selectionStore.remove(tx.value.id) },
 }
 
 function toIso(d: Date): string {
@@ -746,17 +748,10 @@ const extractedFields = computed(() => {
           @click="basketNext && goBasketTx(basketNext.id)"
         />
       </div>
-      <Button
+      <FileButton
         v-if="tx"
-        v-tooltip.bottom="inBasket ? 'Aus Basket entfernen' : 'In Basket legen'"
-        :icon="inBasket ? 'pi pi-times-circle' : 'pi pi-shopping-cart'"
-        :severity="inBasket ? 'success' : 'secondary'"
-        :aria-label="inBasket ? 'Aus Basket entfernen' : 'In Basket legen'"
-        :aria-pressed="inBasket"
-        size="small"
-        text
-        rounded
-        @click="toggleBasket"
+        :members="[{ entity_type: 'transaction', entity_id: tx.id }]"
+        :basket="txBasket"
       />
       <Button
         v-if="tx"
@@ -1146,10 +1141,6 @@ const extractedFields = computed(() => {
         Über den Filter „Nur steuerrelevante“ in der Buchungsliste findest du sowohl
         markierte Buchungen als auch Buchungen mit markierten Teilbeträgen.
       </p>
-    </section>
-
-    <section v-if="tx" class="card">
-      <InCollectionsCard type="transaction" :id="tx.id" hide-basket />
     </section>
 
     <section v-if="tx" class="card">

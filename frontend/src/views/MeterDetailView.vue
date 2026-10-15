@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import InCollectionsCard from '../components/collections/InCollectionsCard.vue'
-import { useBasketStore } from '../stores/basket'
+import FileButton from '../components/collections/FileButton.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMediaQuery } from '../composables/useBreakpoint'
@@ -69,16 +68,8 @@ const canEnter = computed(() => auth.hasPermission('meters.read_entry'))
 
 const meterId = computed(() => Number(route.params.id))
 
-const basket = useBasketStore()
-function readingInBasket(id: number): boolean {
-  return basket.has({ entity_type: 'meter_reading', entity_id: id })
-}
-function toggleReadingInBasket(reading: Reading) {
-  basket.toggle({
-    entity_type: 'meter_reading',
-    entity_id: reading.id,
-    display: { title: `${detail.value?.name ?? 'Zähler'}: ${reading.value} ${detail.value?.unit ?? ''}`.trim(), date: reading.takenAt },
-  })
+function readingTitle(reading: Reading): string {
+  return `${detail.value?.name ?? 'Zähler'}: ${reading.value} ${detail.value?.unit ?? ''}`.trim()
 }
 
 const detail = ref<MeterDetail | null>(null)
@@ -774,6 +765,7 @@ watch(meterId, () => loadDetail())
     <template #actions>
       <Button class="back-button" icon="pi pi-arrow-left" text rounded severity="secondary" @click="router.push({ name: 'zaehler-list' })" v-tooltip.right="'Zurück'" />
       <template v-if="!loading && detail">
+        <FileButton :members="[{ entity_type: 'meter', entity_id: meterId }]" :title="detail.name" />
         <Button v-if="canEnter" label="Neue Ablesung" icon="pi pi-plus" size="small" @click="openReadingEntry" />
         <Button v-if="canManage" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit" />
         <Button v-if="canManage" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete" />
@@ -810,8 +802,6 @@ watch(meterId, () => loadDetail())
         </div>
       </div>
 
-      <!-- Basket and collections (#1548) -->
-      <InCollectionsCard type="meter" :id="meterId" :title="detail.name" class="meter-collections" />
 
       <!-- Report -->
       <div class="section-header">
@@ -973,16 +963,10 @@ watch(meterId, () => loadDetail())
           <template #body="{ data }">
             <div class="reading-actions">
               <!-- A single reading as evidence, e.g. the one at a move-out (#1548). -->
-              <Button
-                :icon="readingInBasket(data.id) ? 'pi pi-check' : 'pi pi-shopping-cart'"
-                text
-                rounded
+              <FileButton
+                :members="[{ entity_type: 'meter_reading', entity_id: data.id }]"
+                :title="readingTitle(data)"
                 size="small"
-                severity="secondary"
-                :aria-label="readingInBasket(data.id) ? 'Ablesung aus dem Basket nehmen' : 'Ablesung in den Basket legen'"
-                :aria-pressed="readingInBasket(data.id)"
-                v-tooltip.left="readingInBasket(data.id) ? 'Aus dem Basket nehmen' : 'In den Basket legen'"
-                @click="toggleReadingInBasket(data)"
               />
             </div>
             <div class="reading-actions" v-if="canEditReading(data)">
@@ -1293,9 +1277,6 @@ watch(meterId, () => loadDetail())
 }
 .device-table :deep(.p-datatable-table) {
   min-width: 44rem;
-}
-.meter-collections {
-  margin: var(--space-4) 0;
 }
 .readings-table :deep(.p-datatable-table) {
   min-width: 40rem;

@@ -112,9 +112,6 @@ defineExpose({
         </div>
       </template>
 
-      <!-- What else lies in the shared basket (#1548), shown either way. -->
-      <slot name="others" />
-
       <div v-if="count === 0" class="basket-empty">
         <i class="pi pi-shopping-cart basket-empty-icon" />
         <p>{{ emptyText ?? `Noch keine ${plural} im ${title}.` }}</p>

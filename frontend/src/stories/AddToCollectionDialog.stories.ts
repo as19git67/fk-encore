@@ -5,9 +5,9 @@ import { defaultHandlers } from './handlers'
 import type { CollectionSummary } from '../api/collections'
 
 /**
- * "In Sammelmappe legen" for any type (#1548): the basket first, a new folder
- * on the spot, then the folders that can take these items. A folder typed for
- * another kind is not offered.
+ * "Ablegen" for any type (#1548): the basket first, a new folder on the spot,
+ * then the folders that can take these items. A folder typed for another kind
+ * is not offered. For a single item, check marks say where it already lies.
  */
 
 function summary(id: number, name: string, extra: Partial<CollectionSummary> = {}): CollectionSummary {
@@ -50,4 +50,28 @@ export const Gemischt: Story = {
 export const OhneMappen: Story = {
   parameters: { msw: { handlers: defaultHandlers } },
   args: { members: [{ entity_type: 'meter', entity_id: 3 }] },
+}
+
+/** One transaction that already lies in two folders: both carry a check mark. */
+export const EinzelnAbgelegt: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/collections/of/:type/:id', () =>
+          HttpResponse.json({ items: [COLLECTIONS[0], COLLECTIONS[3]] }),
+        ),
+        listed,
+        ...defaultHandlers,
+      ],
+    },
+  },
+  args: { members: [{ entity_type: 'transaction', entity_id: 9 }], title: 'Stadtwerke Musterstadt' },
+}
+
+/** A document: a new folder can be a dossier seeded from it. */
+export const DokumentMitAkte: Story = {
+  args: {
+    members: [{ entity_type: 'document', entity_id: 5 }],
+    dossierSeed: { correspondent_slug: 'stadtwerke', reference_numbers: ['VN-0000-0000'], source_folder_prefix: null },
+  },
 }
