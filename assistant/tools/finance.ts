@@ -74,6 +74,14 @@ export const listTransactions: ToolSpec = {
       limit,
     })) as unknown as { items: TransactionView[]; total: number };
     const rows = res.items;
+    // The transaction list is per account, so only a search within one
+    // account has a list page showing the same set.
+    const accountId = int(args.account_id);
+    const route = accountId !== undefined
+      ? `/finanzen/uebersicht/konto/${accountId}${query({
+          q: str(args.q), dateFrom: isoDate(args.from), dateTo: isoDate(args.to), tags: tags.join(",") || undefined,
+        })}`
+      : undefined;
     return {
       text: table(
         ["id", "date", "amount", "counterparty", "purpose", "tags"],
@@ -86,6 +94,7 @@ export const listTransactions: ToolSpec = {
         kind: "transactions",
         tool: "list_transactions",
         total: res.total,
+        route,
         rows: rows.map((t) => ({
           id: t.id, booking_date: t.booking_date.slice(0, 10), amount: t.amount, counterparty: t.counterparty, purpose: t.purpose,
         })),

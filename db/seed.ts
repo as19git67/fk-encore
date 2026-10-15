@@ -88,6 +88,8 @@ export async function seed(db: any): Promise<void> {
     { key: "meters.view", description: "View meters, readings and reports" },
     { key: "meters.read_entry", description: "Enter meter readings (manual/OCR)" },
     { key: "meters.manage", description: "Create/edit/replace meters and manage API keys" },
+    // --- Assistant (documentation/plans/ki-assistent.md, #1528) ---
+    { key: "module.assistant", description: "Enable the assistant chat" },
   ];
 
   // Permissions that are NEVER auto-assigned to the Admin role.
@@ -155,6 +157,8 @@ export async function seed(db: any): Promise<void> {
     User: ["users.read"],
     "Photo User": [
       "module.photos",
+      // The assistant answers over every module the user has (#1528).
+      "module.assistant",
       "photos.view",
       "photos.upload",
       "photos.delete",
@@ -163,6 +167,8 @@ export async function seed(db: any): Promise<void> {
     ],
     "Dokumente User": [
       "module.documents",
+      // The assistant answers over every module the user has (#1528).
+      "module.assistant",
       "documents.view",
       "documents.upload",
       "documents.edit",
@@ -172,16 +178,22 @@ export async function seed(db: any): Promise<void> {
     ],
     "Finance User": [
       "module.finance",
+      // The assistant answers over every module the user has (#1528).
+      "module.assistant",
       "finance.view",
       "finance.accounts.manage",
     ],
     "Label User": [
       "module.label",
+      // The assistant answers over every module the user has (#1528).
+      "module.assistant",
       "label.view",
       "label.print",
     ],
     "Zähler User": [
       "module.meters",
+      // The assistant answers over every module the user has (#1528).
+      "module.assistant",
       "meters.view",
       "meters.read_entry",
     ],

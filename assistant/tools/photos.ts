@@ -13,7 +13,7 @@ const PHOTOS = ["module.photos", "photos.view"];
 const PHOTO_COUNT_CAP = 2000;
 
 interface PhotoRow { id: number; taken_at?: string; created_at?: string; location_city?: string; location_country?: string; filename?: string }
-interface NaturalResult { photoId: number; taken_at?: string; created_at: string; location_city?: string; location_country?: string; score: number }
+interface NaturalResult { photoId: number; filename?: string; taken_at?: string; created_at: string; location_city?: string; location_country?: string; score: number }
 interface Recap { id: number; kind: string; title: string; subtitle: string | null; period_start: string | null; period_end: string | null; photo_count: number }
 interface Album { id: number; name: string; event_name: string | null; oldest_photo_at: string | null; newest_photo_at: string | null; photo_count: number }
 
@@ -71,7 +71,8 @@ export const listPhotos: ToolSpec = {
         kind: "photos",
         tool: "list_photos",
         total: count,
-        rows: photos.slice(0, 60).map((p) => ({ id: p.id, taken_at: p.taken_at ?? null })),
+        // The filename is what a thumbnail URL is built from.
+        rows: photos.slice(0, 60).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
         route: `/fotos/galerie${query({
           favorite: favorite ? "true" : undefined, dateFrom, dateTo, personIds: personIds.join(",") || undefined,
         })}`,
@@ -108,7 +109,7 @@ export const searchPhotos: ToolSpec = {
         kind: "photos",
         tool: "search_photos",
         total: rows.length,
-        rows: rows.slice(0, 60).map((r) => ({ id: r.photoId, taken_at: r.taken_at ?? null })),
+        rows: rows.slice(0, 60).map((r) => ({ id: r.photoId, filename: r.filename ?? null, taken_at: r.taken_at ?? null })),
         route: `/fotos/galerie${query({ q })}`,
       },
     };

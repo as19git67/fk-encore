@@ -241,3 +241,18 @@ describe("the loop", () => {
     expect(buildSystemPrompt([], NOW, false)).toContain("no tools");
   });
 });
+
+describe("list routes", () => {
+  it("a search within one account links to that account's list with the same filters", async () => {
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    const tool = catalogFor(USER).find((t) => t.name === "list_transactions")!;
+    const ctx = { user: USER, today: "2026-10-15" };
+
+    const scoped = await tool.run({ account_id: 4, q: "Stadtwerke", from: "2026-01-01", to: "2026-09-30", tags: ["Strom"] }, ctx);
+    expect(scoped.block?.route).toBe("/finanzen/uebersicht/konto/4?q=Stadtwerke&dateFrom=2026-01-01&dateTo=2026-09-30&tags=Strom");
+
+    // Across accounts there is no list page showing the same set.
+    const all = await tool.run({ q: "Stadtwerke" }, ctx);
+    expect(all.block?.route).toBeUndefined();
+  });
+});

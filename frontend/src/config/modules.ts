@@ -458,6 +458,24 @@ export const modules: ModuleConfig[] = [
     ],
   },
   {
+    // The assistant (documentation/plans/ki-assistent.md, #1528): one chat
+    // over every module the user has. One page, so no sub-menu row.
+    id: 'assistent',
+    label: 'Assistent',
+    icon: 'pi pi-comments',
+    basePath: '/assistent',
+    permission: 'module.assistant',
+    routes: [
+      {
+        path: '',
+        name: 'assistent',
+        component: () => import('../views/AssistantView.vue'),
+        meta: { permission: 'module.assistant' },
+      },
+    ],
+    menuItems: [],
+  },
+  {
     id: 'label',
     label: 'Label',
     icon: 'pi pi-tag',

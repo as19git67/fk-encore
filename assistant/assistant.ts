@@ -15,6 +15,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { assistantConversation, assistantMessage } from "../db/schema";
 import { checkRateLimit } from "../user/rateLimiter";
+import { requirePermission } from "../user/auth-handler";
 import { AiSlotTimeoutError, withAiSlot } from "../ai-queue/slot-helper";
 import { runTurn } from "./agent";
 import { catalogFor } from "./catalog";
@@ -33,6 +34,13 @@ const SLOT_PRIORITY = 1;
 function currentUser() {
   const auth = getAuthData();
   if (!auth) throw APIError.unauthenticated("not signed in");
+  return auth;
+}
+
+/** Everything but the stream needs the module; see `watchTurn` for why it differs. */
+function assistantUser() {
+  const auth = currentUser();
+  requirePermission(auth, "module.assistant");
   return auth;
 }
 
@@ -78,7 +86,7 @@ export interface CreateConversationRequest {
 export const createConversation = api(
   { expose: true, method: "POST", path: "/assistant/conversations", auth: true },
   async (req: CreateConversationRequest): Promise<ConversationSummary> => {
-    const auth = currentUser();
+    const auth = assistantUser();
     const [row] = await db
       .insert(assistantConversation)
       .values({ user_id: Number(auth.userID), title: req.title?.trim().slice(0, 200) || null })
@@ -90,7 +98,7 @@ export const createConversation = api(
 export const listConversations = api(
   { expose: true, method: "GET", path: "/assistant/conversations", auth: true },
   async (): Promise<{ conversations: ConversationSummary[] }> => {
-    const auth = currentUser();
+    const auth = assistantUser();
     const rows = await db
       .select()
       .from(assistantConversation)
@@ -104,7 +112,7 @@ export const listConversations = api(
 export const getConversation = api(
   { expose: true, method: "GET", path: "/assistant/conversations/:id", auth: true },
   async ({ id }: { id: number }): Promise<ConversationDetail> => {
-    const auth = currentUser();
+    const auth = assistantUser();
     const conversation = await ownConversation(id, Number(auth.userID));
     const rows = await db
       .select()
@@ -129,7 +137,7 @@ export const getConversation = api(
 export const deleteConversation = api(
   { expose: true, method: "DELETE", path: "/assistant/conversations/:id", auth: true },
   async ({ id }: { id: number }): Promise<{ deleted: boolean }> => {
-    const auth = currentUser();
+    const auth = assistantUser();
     await ownConversation(id, Number(auth.userID));
     await db.delete(assistantConversation).where(eq(assistantConversation.id, id));
     return { deleted: true };
@@ -201,7 +209,7 @@ async function persist(conversationId: number, transcript: ChatMessage[], blocks
 export const ask = api(
   { expose: true, method: "POST", path: "/assistant/conversations/:id/ask", auth: true },
   async (req: AskRequest): Promise<AskResponse> => {
-    const auth = currentUser();
+    const auth = assistantUser();
     const userId = Number(auth.userID);
     const question = req.message?.trim() ?? "";
     if (!question) throw APIError.invalidArgument("message is empty");
@@ -315,6 +323,10 @@ interface WatchHandshake {
 export const watchTurn = api.streamOut<WatchHandshake, StreamEvent>(
   { expose: true, path: "/assistant/turns/:turnId/stream", auth: true },
   async ({ turnId }, stream) => {
+    // No module check here: a browser opens this socket with `?token=`, which
+    // carries only the media scope, so requirePermission would refuse every
+    // caller. Nothing is lost — a turn can only be posted through `ask`, which
+    // checks the module, and only its owner may follow it (live.ts).
     const auth = currentUser();
     if (!TURN_ID_RE.test(turnId)) {
       try { stream.send({ type: "error", message: "invalid turn id" }); } catch { /* closed */ }
