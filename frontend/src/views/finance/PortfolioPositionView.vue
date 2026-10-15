@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import AddToCollectionDialog from '../../components/collections/AddToCollectionDialog.vue'
+import { useBasketStore } from '../../stores/basket'
+import type { MemberRef } from '../../api/collections'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Button from 'primevue/button'
@@ -114,6 +117,24 @@ function readRows(d: PositionDepotSecurity): string {
   const tx = `${d.removable_transactions} Transaktion${d.removable_transactions === 1 ? '' : 'en'}`
   if (d.removable_holdings === 0) return tx
   return `${tx}, ${d.removable_holdings} Bestandsst${d.removable_holdings === 1 ? 'and' : 'ände'}`
+}
+
+// Basket and collections (#1548): the member is this depot's master row.
+const basket = useBasketStore()
+const collectionDialogOpen = ref(false)
+const collectionMembers = ref<MemberRef[]>([])
+function securityRef(id: number): MemberRef {
+  return { entity_type: 'security', entity_id: id }
+}
+function securityInBasket(id: number): boolean {
+  return basket.has(securityRef(id))
+}
+function toggleSecurityInBasket(id: number) {
+  basket.toggle({ ...securityRef(id), display: { title: data.value?.position.name ?? undefined } })
+}
+function openSecurityCollection(id: number) {
+  collectionMembers.value = [securityRef(id)]
+  collectionDialogOpen.value = true
 }
 
 function canRemove(d: PositionDepotSecurity): boolean {
@@ -611,7 +632,31 @@ function transactionCash(tx: PortfolioTransaction): string {
                 <td>{{ d.account_label }}</td>
                 <td>{{ depotStatusText(d) }}</td>
                 <td class="pp-col-num">{{ readRows(d) }}</td>
-                <td>
+                <td class="pp-depot-actions">
+                  <!-- The security in this depot, set aside or filed (#1548). -->
+                  <template v-if="d.security_id != null">
+                    <Button
+                      :icon="securityInBasket(d.security_id) ? 'pi pi-check' : 'pi pi-shopping-cart'"
+                      size="small"
+                      text
+                      rounded
+                      severity="secondary"
+                      :aria-label="securityInBasket(d.security_id) ? `Aus dem Basket nehmen: ${d.account_label}` : `In den Basket legen: ${d.account_label}`"
+                      :aria-pressed="securityInBasket(d.security_id)"
+                      v-tooltip.left="securityInBasket(d.security_id) ? 'Aus dem Basket nehmen' : 'In den Basket legen'"
+                      @click="toggleSecurityInBasket(d.security_id)"
+                    />
+                    <Button
+                      icon="pi pi-folder"
+                      size="small"
+                      text
+                      rounded
+                      severity="secondary"
+                      :aria-label="`In Sammelmappe legen: ${d.account_label}`"
+                      v-tooltip.left="'In Sammelmappe legen'"
+                      @click="openSecurityCollection(d.security_id)"
+                    />
+                  </template>
                   <Button
                     v-if="canRemove(d)"
                     label="Aus Depot entfernen"
@@ -801,6 +846,7 @@ function transactionCash(tx: PortfolioTransaction): string {
         </ScrollX>
       </section>
     </div>
+    <AddToCollectionDialog v-model:visible="collectionDialogOpen" :members="collectionMembers" />
   </PageLayout>
 </template>
 
@@ -1049,5 +1095,8 @@ function transactionCash(tx: PortfolioTransaction): string {
   .pp-chart-wrap {
     height: 14rem;
   }
+}
+.pp-depot-actions {
+  white-space: nowrap;
 }
 </style>

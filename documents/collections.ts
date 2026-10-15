@@ -25,7 +25,7 @@
  */
 
 import fs from "fs";
-import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
@@ -330,8 +330,12 @@ export const listCollections = api(
       isNull(documentCollections.entity_type),
       eq(documentCollections.entity_type, "document"),
     )!;
+    // The basket (#1548) is not a folder; it has its own drawer.
+    const notBasket = ne(documentCollections.kind, "basket");
     const readable = readableCollectionsWhere(userId, groupIds, isAdmin);
-    const where = readable ? and(readable, holdsDocuments)! : holdsDocuments;
+    const where = readable
+      ? and(readable, holdsDocuments, notBasket)!
+      : and(holdsDocuments, notBasket)!;
 
     const term = (q ?? "").trim();
     const textMatch = term
@@ -800,7 +804,12 @@ export const listCollectionsForDocument = api(
           documentCollections,
           eq(documentCollections.id, documentCollectionItems.collection_id),
         )
-        .where(eq(documentCollectionItems.document_id, id))
+        .where(
+          and(
+            eq(documentCollectionItems.document_id, id),
+            ne(documentCollections.kind, "basket"),
+          ),
+        )
         .orderBy(asc(documentCollections.title)),
     );
     if (isAdmin) return { items: rows };
@@ -882,9 +891,11 @@ export async function fetchCollectionsForDocuments(
         eq(documentCollections.id, documentCollectionItems.collection_id),
       )
       .where(
-        readable
-          ? and(inArray(documentCollectionItems.document_id, documentIds), readable)
-          : inArray(documentCollectionItems.document_id, documentIds),
+        and(
+          inArray(documentCollectionItems.document_id, documentIds),
+          ne(documentCollections.kind, "basket"),
+          readable,
+        ),
       )
       .orderBy(asc(documentCollections.title)),
   );
@@ -921,12 +932,14 @@ export function collectionMembershipCondition(opts: {
   if (opts.in_collection === true) {
     return sql`EXISTS (
       SELECT 1 FROM document_collection_items dci
+      JOIN document_collections dc ON dc.id = dci.collection_id AND dc.kind <> 'basket'
       WHERE dci.document_id = ${documents.id}
     )`;
   }
   if (opts.in_collection === false) {
     return sql`NOT EXISTS (
       SELECT 1 FROM document_collection_items dci
+      JOIN document_collections dc ON dc.id = dci.collection_id AND dc.kind <> 'basket'
       WHERE dci.document_id = ${documents.id}
     )`;
   }

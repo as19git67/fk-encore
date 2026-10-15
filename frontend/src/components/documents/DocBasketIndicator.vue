@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BasketOthers from '../collections/BasketOthers.vue'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
@@ -410,6 +411,9 @@ function handleReprocessDone(payload: { affected: number }) {
     @update:info="actionInfo = null"
     @update:error="actionError = null"
   >
+    <template #others>
+      <BasketOthers own="document" @saved="(name) => (actionInfo = `Sammelmappe „${name}“ angelegt.`)" />
+    </template>
     <template #rows>
       <li v-for="doc in items" :key="doc.id" class="basket-row">
           <button

@@ -2252,6 +2252,10 @@ export const financeTransactionSplit = pgTable("finance_transaction_split", {
   created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Saved finance baskets before #1548. Copied into transaction collections by
+ * migration 0243 and no longer written; kept as a backup of that copy.
+ */
 export const financeBasketSnapshot = pgTable("finance_basket_snapshot", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

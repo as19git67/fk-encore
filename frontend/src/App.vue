@@ -6,6 +6,8 @@ import Menu from 'primevue/menu'
 import ConfirmDialog from 'primevue/confirmdialog'
 import TxBasketIndicator from './components/finance/TxBasketIndicator.vue'
 import DocBasketIndicator from './components/documents/DocBasketIndicator.vue'
+import SharedBasketIndicator from './components/collections/SharedBasketIndicator.vue'
+import { useBasketStore } from './stores/basket'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
 import { useMeterAnomalyStore } from './stores/meterAnomalies'
@@ -17,6 +19,18 @@ import { usePhotoNavStore } from './stores/photoNav'
 import { albumMenuTarget, albumsViewQueryFromStorage, readRememberedAlbumId } from './utils/albumsViewState'
 
 const auth = useAuthStore()
+
+// The basket lives on the server (#1548); load it once someone is signed in
+// and forget it when they leave.
+const basket = useBasketStore()
+watch(
+  () => auth.isAuthenticated,
+  (signedIn) => {
+    if (signedIn) void basket.load()
+    else basket.reset()
+  },
+  { immediate: true },
+)
 const anomalyStore = useAnomalyStore()
 const meterAnomalyStore = useMeterAnomalyStore()
 const feedBadgeStore = useFeedBadgeStore()
@@ -193,6 +207,7 @@ function prefetchSubMenu(routeName?: string) {
 }
 
 async function handleLogout() {
+  basket.reset()
   await auth.logout()
   router.push('/login')
 }
@@ -254,6 +269,9 @@ onBeforeUnmount(() => stackObserver?.disconnect())
         <div class="navbar-end">
           <DocBasketIndicator v-if="activeModule?.id === 'dokumente'" />
           <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
+          <SharedBasketIndicator
+            v-if="activeModule && !['dokumente', 'finanzen', 'admin'].includes(activeModule.id)"
+          />
           <!-- Settings gear for the active module -->
           <Button
             v-if="settingsGroup?.children"

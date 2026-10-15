@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import InCollectionsCard from '../components/collections/InCollectionsCard.vue'
+import { useBasketStore } from '../stores/basket'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMediaQuery } from '../composables/useBreakpoint'
@@ -66,6 +68,18 @@ const canManage = computed(() => auth.hasPermission('meters.manage'))
 const canEnter = computed(() => auth.hasPermission('meters.read_entry'))
 
 const meterId = computed(() => Number(route.params.id))
+
+const basket = useBasketStore()
+function readingInBasket(id: number): boolean {
+  return basket.has({ entity_type: 'meter_reading', entity_id: id })
+}
+function toggleReadingInBasket(reading: Reading) {
+  basket.toggle({
+    entity_type: 'meter_reading',
+    entity_id: reading.id,
+    display: { title: `${detail.value?.name ?? 'Zähler'}: ${reading.value} ${detail.value?.unit ?? ''}`.trim(), date: reading.takenAt },
+  })
+}
 
 const detail = ref<MeterDetail | null>(null)
 const groups = ref<GroupSummary[]>([])
@@ -796,6 +810,9 @@ watch(meterId, () => loadDetail())
         </div>
       </div>
 
+      <!-- Basket and collections (#1548) -->
+      <InCollectionsCard type="meter" :id="meterId" :title="detail.name" class="meter-collections" />
+
       <!-- Report -->
       <div class="section-header">
         <h2><i class="pi pi-chart-bar" /> Verbrauch</h2>
@@ -952,8 +969,22 @@ watch(meterId, () => loadDetail())
             />
           </template>
         </Column>
-        <Column style="width: 6rem">
+        <Column style="width: 8rem">
           <template #body="{ data }">
+            <div class="reading-actions">
+              <!-- A single reading as evidence, e.g. the one at a move-out (#1548). -->
+              <Button
+                :icon="readingInBasket(data.id) ? 'pi pi-check' : 'pi pi-shopping-cart'"
+                text
+                rounded
+                size="small"
+                severity="secondary"
+                :aria-label="readingInBasket(data.id) ? 'Ablesung aus dem Basket nehmen' : 'Ablesung in den Basket legen'"
+                :aria-pressed="readingInBasket(data.id)"
+                v-tooltip.left="readingInBasket(data.id) ? 'Aus dem Basket nehmen' : 'In den Basket legen'"
+                @click="toggleReadingInBasket(data)"
+              />
+            </div>
             <div class="reading-actions" v-if="canEditReading(data)">
               <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" v-tooltip.left="'Bearbeiten'" @click="openReadingEdit(data)" />
               <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip.left="'Löschen'" @click="handleDeleteReading(data)" />
@@ -1262,6 +1293,9 @@ watch(meterId, () => loadDetail())
 }
 .device-table :deep(.p-datatable-table) {
   min-width: 44rem;
+}
+.meter-collections {
+  margin: var(--space-4) 0;
 }
 .readings-table :deep(.p-datatable-table) {
   min-width: 40rem;

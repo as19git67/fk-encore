@@ -19,6 +19,11 @@ import {
 } from "../db/schema";
 import {
   addAnyCollectionMembers,
+  addToBasket,
+  clearBasket,
+  getBasket,
+  removeFromBasket,
+  saveBasketAsCollection,
   collectionsOfItem,
   createAnyCollection,
   deleteAnyCollection,
@@ -30,7 +35,10 @@ import {
   updateAnyCollection,
   type CollectionSummary,
 } from "./collections";
-import { addCollectionDocuments, listCollections } from "../documents/collections";
+import { addCollectionDocuments, listCollections, listCollectionsForDocument } from "../documents/collections";
+import { listBasketSnapshots, loadBasketSnapshot, saveBasketSnapshot } from "../finance/basket";
+import fs from "fs";
+import path from "path";
 
 const OWNER = 951_001;
 const MEMBER = 951_002;
@@ -404,5 +412,122 @@ describe("trimDecimals", () => {
     expect(trimDecimals("1234.500")).toBe("1234.5");
     expect(trimDecimals("1200.000")).toBe("1200");
     expect(trimDecimals("1200")).toBe("1200");
+  });
+});
+
+describe("basket", () => {
+  it("is one per user, made on first use and kept out of every folder list", async () => {
+    const first = await getBasket();
+    const again = await getBasket();
+    expect(again.id).toBe(first.id);
+    expect(first.kind).toBe("basket");
+    expect(first.entity_type).toBeNull();
+
+    const docId = await document(OWNER, "Kontoauszug");
+    await addToBasket({ members: [{ entity_type: "document", entity_id: docId }] });
+    expect((await listAllCollections({})).items.map((i) => i.id)).not.toContain(first.id);
+    expect((await listCollections({})).items.map((i) => i.id)).not.toContain(first.id);
+    expect((await listCollectionsForDocument({ id: docId })).items).toEqual([]);
+
+    as(MEMBER);
+    expect((await getBasket()).id).not.toBe(first.id);
+  });
+
+  it("holds any type, takes things out and empties by type", async () => {
+    const own = await photo(OWNER);
+    const acc = await account([OWNER]);
+    const tx = await transaction(acc, "Bäckerei");
+    const docId = await document(OWNER, "Beleg");
+    let basket = (
+      await addToBasket({
+        members: [
+          { entity_type: "photo", entity_id: own },
+          { entity_type: "transaction", entity_id: tx },
+          { entity_type: "document", entity_id: docId },
+        ],
+      })
+    ).collection;
+    expect(basket.counts).toEqual({ photo: 1, transaction: 1, document: 1 });
+
+    // Removing what is not there is not an error.
+    basket = await removeFromBasket({ members: [{ entity_type: "photo", entity_id: own }, { entity_type: "meter", entity_id: 1 }] });
+    expect(basket.counts).toEqual({ transaction: 1, document: 1 });
+
+    basket = await clearBasket({ type: "document" });
+    expect(basket.members.map((m) => m.entity_type)).toEqual(["transaction"]);
+    basket = await clearBasket({});
+    expect(basket.total).toBe(0);
+  });
+
+  it("saves as a named collection, typed when it holds one type", async () => {
+    const acc = await account([OWNER]);
+    const a = await transaction(acc, "Miete");
+    const b = await transaction(acc, "Strom");
+    await addToBasket({ members: [{ entity_type: "transaction", entity_id: a }, { entity_type: "transaction", entity_id: b }] });
+
+    const kept = await saveBasketAsCollection({ name: "Wohnen", keep: true });
+    expect(kept.entity_type).toBe("transaction");
+    expect(kept.members.map((m) => m.entity_id)).toEqual([a, b]);
+    expect((await getBasket()).total).toBe(2);
+
+    const own = await photo(OWNER);
+    await addToBasket({ members: [{ entity_type: "photo", entity_id: own }] });
+    const mixed = await saveBasketAsCollection({ name: "Alles" });
+    expect(mixed.entity_type).toBeNull();
+    expect(mixed.total).toBe(3);
+    expect((await getBasket()).total).toBe(0);
+    await expectCode(saveBasketAsCollection({ name: "Leer" }), "failed_precondition");
+  });
+});
+
+describe("saved finance baskets", () => {
+  it("are transaction collections, visible on both sides", async () => {
+    as(OWNER, [...ALL_PERMISSIONS]);
+    const acc = await account([OWNER]);
+    const a = await transaction(acc, "Versicherung");
+    const b = await transaction(acc, "Tankstelle");
+    const saved = await saveBasketSnapshot({ name: "Q1", transaction_ids: [b, a] });
+    expect(saved.tx_ids).toEqual([b, a]);
+
+    const col = (await listAllCollections({ type: "transaction" })).items.find((i) => i.id === saved.id);
+    expect(col?.name).toBe("Q1");
+
+    // A transaction collection made elsewhere shows up as a saved basket too.
+    const other = await createAnyCollection({ name: "Urlaub", entity_type: "transaction", members: [{ entity_type: "transaction", entity_id: a }] });
+    expect((await listBasketSnapshots()).items.map((i) => i.name)).toEqual(["Q1", "Urlaub"]);
+    expect((await loadBasketSnapshot({ id: other.id })).transaction_ids).toEqual([a]);
+
+    // Saving under the same name replaces the contents.
+    await saveBasketSnapshot({ name: "Q1", transaction_ids: [a] });
+    expect((await loadBasketSnapshot({ id: saved.id })).transaction_ids).toEqual([a]);
+  });
+
+  it("migration 0243 copies a saved basket with its order, skipping deleted bookings", async () => {
+    const acc = await account([OWNER]);
+    const a = await transaction(acc, "Eins");
+    const b = await transaction(acc, "Zwei");
+    await db.execute(sql`
+      INSERT INTO finance_basket_snapshot (user_id, name, tx_ids)
+      VALUES (${OWNER}, 'Alt', ARRAY[${b}, 999999999, ${a}]::bigint[])
+    `);
+    const file = path.join(process.cwd(), "db/migrations/postgres/0243_collections_basket.sql");
+    const statements = fs
+      .readFileSync(file, "utf8")
+      .split("--> statement-breakpoint")
+      .map((part) => part.trim())
+      .filter((part) => part && !part.includes("CREATE UNIQUE INDEX"));
+    try {
+      for (const statement of statements) await db.execute(sql.raw(statement));
+      const rows = await db.execute<{ id: number; entity_type: string }>(sql`
+        SELECT id, entity_type FROM document_collections WHERE user_id = ${OWNER} AND title = 'Alt'
+      `);
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]!.entity_type).toBe("transaction");
+      as(OWNER);
+      expect((await loadBasketSnapshot({ id: rows.rows[0]!.id })).transaction_ids).toEqual([b, a]);
+    } finally {
+      await db.execute(sql`DELETE FROM finance_basket_snapshot WHERE user_id = ${OWNER}`);
+      await db.execute(sql`ALTER TABLE document_collections DROP COLUMN IF EXISTS migrated_snapshot_id`);
+    }
   });
 });
