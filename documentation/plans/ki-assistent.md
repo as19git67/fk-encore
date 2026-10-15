@@ -1,6 +1,8 @@
 # Assistant: one chat over everything the server knows
 
-Status: concept, nothing implemented yet. Tracking issue #1524, stages #1525–#1534.
+Status: stage 1 implemented (`POST /chat` in llm-service, benchmark in
+`llm-service/bench/`); its benchmark has not yet been run on the production
+GPU. Tracking issue #1524, stages #1525–#1534.
 
 ## Problem
 
@@ -167,6 +169,28 @@ behind it.
      against the production Gemma model, scored on "right tool, right
      arguments" and timed per round. The CPU fallback is measured once
      for the record; the assistant is designed for the GPU deployment.
+
+   - **Implemented** (#1525): `llm-service/chat.py` holds the request
+     shape, the reply checks (a call must name an offered tool, its
+     arguments must parse into an object, else `502`) and the inproc
+     emulation; `main.py` adds the endpoint and the SSE relay. A prompt
+     that does not fit `LLM_CTX` is a `413`, so the agent loop knows to
+     shrink the history rather than retry. On `inproc`, `stream=true`
+     keeps the wire format and delivers the finished reply as one chunk.
+     Thinking is off per request (`chat_template_kwargs.enable_thinking`).
+   - **Benchmark** (`llm-service/bench/chat_bench.py`, 16 cases in
+     `chat_cases.json`): the questions above plus variants, as a small
+     agent loop with canned tool results; a case passes when every
+     expected call occurred with the right arguments and the run ended in
+     an answer. Order of calls is free, extra read calls are not penalised.
+     Results on the production Gemma model (hit rate, median and p90 time
+     per round, rounds per case) and the one CPU-fallback run go here once
+     measured on the GPU host:
+
+     | Deployment | Passed | Tool hit | Args hit | Median ms/round | p90 | Median rounds |
+     |---|---|---|---|---|---|---|
+     | Gemma 4 26B-A4B, GPU, `server` | — | — | — | — | — | — |
+     | Qwen2.5-7B, CPU, `inproc` | — | — | — | — | — | — |
 
 2. **The `assistant` service** (new, `assistant/`).
    - Tables `assistant_conversation` (`id`, `user_id`, `title`,

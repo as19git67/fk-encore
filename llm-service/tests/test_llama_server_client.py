@@ -202,3 +202,61 @@ def test_client_satisfies_the_surface_main_uses(server):
 
     for attr in ("tokenize", "detokenize", "create_chat_completion"):
         assert callable(getattr(client, attr, None)), attr
+
+
+def test_chat_completion_returns_tool_calls_without_content(server):
+    """A tool turn has ``content: null`` — the /chat path must not reject it
+    the way create_chat_completion does for the JSON endpoints."""
+
+    reply = {
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "c1", "type": "function",
+                                "function": {"name": "list_albums", "arguments": "{}"}}],
+            },
+            "finish_reason": "tool_calls",
+        }],
+    }
+    client = server({"/v1/chat/completions": (200, reply)})
+
+    result = client.chat_completion({"messages": [{"role": "user", "content": "x"}], "stream": True})
+
+    assert result["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == "list_albums"
+    # Non-streaming even if the payload asked otherwise.
+    assert _Handler.received[0][1]["stream"] is False
+
+
+def test_stream_chat_completion_yields_data_payloads_until_done(server):
+    sse = (
+        b'data: {"choices":[{"delta":{"content":"Hal"}}]}\n\n'
+        b": keep-alive comment\n\n"
+        b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
+        b"data: [DONE]\n\n"
+        b'data: {"never":"read"}\n\n'
+    )
+    client = server({"/v1/chat/completions": (200, sse)})
+
+    chunks = list(client.stream_chat_completion({"messages": [{"role": "user", "content": "x"}]}))
+
+    assert [json.loads(c)["choices"][0]["delta"]["content"] for c in chunks] == ["Hal", "lo"]
+    assert _Handler.received[0][1]["stream"] is True
+
+
+def test_stream_chat_completion_stops_when_asked(server):
+    sse = b"".join(f'data: {{"n":{i}}}\n\n'.encode() for i in range(5))
+    client = server({"/v1/chat/completions": (200, sse)})
+    seen: list[str] = []
+
+    for chunk in client.stream_chat_completion({"messages": []}, should_stop=lambda: len(seen) >= 2):
+        seen.append(chunk)
+
+    assert len(seen) == 2
+
+
+def test_stream_chat_completion_maps_http_errors(server):
+    client = server({"/v1/chat/completions": (400, {"error": {"message": "exceeds the available context size"}})})
+
+    with pytest.raises(LlamaServerError, match="context size"):
+        list(client.stream_chat_completion({"messages": []}))

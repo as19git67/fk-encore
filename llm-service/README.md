@@ -9,6 +9,7 @@ A FastAPI-based microservice that hosts a local GGUF model for structured docume
 ```
 llm-service/
   main.py               # FastAPI application, model lifecycle, and UTF-8 repair
+  chat.py               # /chat: request shape, tool-call checks, inproc tool emulation
   llm_config.py         # The knobs that pick a model, from env or from a file
   llama_server.py       # HTTP client for the llama-server backend
   llama_supervisor.py   # Owns the llama-server subprocess (start/stop/crash)
@@ -20,6 +21,7 @@ llm-service/
   entrypoint.sh         # Model download, then uvicorn
   requirements.txt      # Core dependencies (torch, llama-cpp-python, etc.)
   tests/                # Unit tests for classification and schemas
+  bench/                # Tool-use benchmark for /chat (chat_bench.py, chat_cases.json)
 ```
 
 ### Two inference backends
@@ -229,6 +231,69 @@ A generic endpoint for JSON-mode chat completions. Useful for finance tag sugges
   "system": "You are a data extraction assistant."
 }
 ```
+
+### `POST /chat`
+Multi-turn chat with tool calling, for the assistant
+(`documentation/plans/ki-assistent.md`, stage 1). OpenAI message shape:
+`system`, `user`, `assistant` (text or `tool_calls`) and `tool` messages.
+```json
+{
+  "messages": [
+    {"role": "system", "content": "Today is 2026-10-15. ..."},
+    {"role": "user", "content": "Welche Lastschriften kommen diesen Monat noch?"}
+  ],
+  "tools": [{"type": "function", "function": {"name": "upcoming_direct_debits",
+    "description": "...", "parameters": {"type": "object", "properties": {"until": {"type": "string"}}}}}],
+  "tool_choice": "auto",
+  "max_tokens": 1024,
+  "temperature": 0.2,
+  "stream": false
+}
+```
+Returns `{message, finish_reason, usage, model, backend, processing_ms}`;
+`message.tool_calls` carries the calls the model wants, each with
+`function.arguments` as a JSON string already checked to parse into an object
+and to name an offered tool. The service never runs a tool — the caller does,
+and sends the result back as a `tool` message with the call's `tool_call_id`.
+
+- **`server` backend:** forwarded to llama-server's `/v1/chat/completions`,
+  where the GGUF's own chat template (`--jinja`) renders the tools and parses
+  the calls. Thinking is switched off per request
+  (`chat_template_kwargs.enable_thinking=false`) on top of `LLM_REASONING`.
+- **`inproc` backend:** llama-cpp-python has no tool protocol, so the tools go
+  into the system prompt and a JSON grammar makes the model answer
+  `{"tool", "arguments"}` or `{"answer"}`; that is turned back into the same
+  reply shape. One call per turn.
+- **`stream: true`** answers `text/event-stream` with OpenAI chunk objects and a
+  closing `data: [DONE]`. On `server` these are llama-server's chunks as they
+  come (tool-call arguments arrive as deltas); on `inproc` the finished reply
+  arrives as one chunk. An error after the stream started arrives as
+  `data: {"error": {"status", "message"}}` before `[DONE]`.
+- **Errors:** `422` malformed conversation (a `tool` message answering an
+  unknown call, a last message from the assistant, `tool_choice` naming an
+  unknown tool), `413` the conversation does not fit the context window,
+  `502` the model's turn names an unknown tool or has unparsable arguments,
+  `503` model not loaded or the inference slot busy.
+
+Like every other inference call it runs through the single-worker executor,
+so a chat turn waits for a running classification and vice versa.
+
+**Benchmark.** `bench/chat_bench.py` runs the cases in `bench/chat_cases.json`
+(the assistant plan's example questions plus variants, synthetic data, a fixed
+"today") as a small agent loop with canned tool results, and prints hit rates
+and the time per round:
+
+```bash
+INTERNAL_SERVICE_SECRET=... python bench/chat_bench.py --url http://localhost:8001 --json out.json
+```
+
+**Before relying on it on a deployment**, check that the pinned
+`LLAMA_CPP_REF` parses the model's tool calls: run the benchmark's
+`--only accounts --verbose`. A `502 ... unusable turn` or a call that shows up
+as text in `content` means the template's tool-call syntax is not recognised by
+that llama.cpp build. The full benchmark's `prompt_tokens` per round (in the
+`--json` output) shows how much of `LLM_CTX` a tool turn takes with the
+projector loaded.
 
 ### `POST /recap-title`
 Generates warm, personal titles and subtitles for private photo recaps (e.g., "A Summer in Paris").
