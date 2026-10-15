@@ -9,12 +9,22 @@ on:
       - 'embedding_service/**'
       - 'insightface-service/**'
       - 'geo/**'
+      # Nothing here goes into the image or is covered by a test.
+      - 'docs/**'
+      - 'documentation/**'
+      - 'ios/**'
+      - '**.md'
   pull_request:
     branches: [ "main" ]
     paths-ignore:
       - 'embedding_service/**'
       - 'insightface-service/**'
       - 'geo/**'
+      # Nothing here goes into the image or is covered by a test.
+      - 'docs/**'
+      - 'documentation/**'
+      - 'ios/**'
+      - '**.md'
 
 env:
   REGISTRY: ghcr.io
