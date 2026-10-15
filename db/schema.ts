@@ -4496,3 +4496,42 @@ export const financeForecastBookingLink = pgTable(
     index("idx_finance_forecast_booking_link_transaction").on(table.transaction_id),
   ]
 );
+
+// ---------- Assistant (documentation/plans/ki-assistent.md, #1527) ----------
+
+/** One chat of one user with the assistant (migration 0246). */
+export const assistantConversation = pgTable(
+  "assistant_conversation",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("assistant_conversation_by_user").on(table.user_id, table.updated_at)],
+);
+
+/**
+ * One turn in the OpenAI shape the agent loop replays: `user`, `assistant`
+ * (text or `tool_calls`) and `tool` (a compact result for the model).
+ * `blocks` are the typed rows shown beside an answer.
+ */
+export const assistantMessage = pgTable(
+  "assistant_message",
+  {
+    id: serial("id").primaryKey(),
+    conversation_id: integer("conversation_id")
+      .notNull()
+      .references(() => assistantConversation.id, { onDelete: "cascade" }),
+    role: text("role").$type<"user" | "assistant" | "tool">().notNull(),
+    content: text("content"),
+    tool_calls: jsonb("tool_calls").$type<Array<{ id: string; name: string; arguments: string }>>(),
+    tool_call_id: text("tool_call_id"),
+    blocks: jsonb("blocks").$type<unknown[]>(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("assistant_message_by_conversation").on(table.conversation_id, table.id)],
+);

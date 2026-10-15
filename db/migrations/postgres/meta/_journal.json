@@ -1723,6 +1723,13 @@
       "when": 1788652800100,
       "tag": "0245_collection_sends",
       "breakpoints": true
+    },
+    {
+      "idx": 246,
+      "version": "7",
+      "when": 1788652800110,
+      "tag": "0246_assistant_conversations",
+      "breakpoints": true
     }
   ]
 }
