@@ -526,3 +526,152 @@ export function applyCollectionRuleNow(id: number): Promise<RuleCollectionRespon
 export function createAlbumFromCollection(id: number, name: string): Promise<{ album_id: number; photos: number }> {
   return apiFetch(`/collections/${id}/to-album`, { method: 'POST', body: JSON.stringify({ name }) })
 }
+
+// ─── Exports (#1548, stage 6) ──────────────────────────────────────────────
+
+export type TableFormat = 'csv' | 'xlsx' | 'pdf'
+
+export const TRANSACTION_EXPORT_COLUMNS = [
+  'booking_date',
+  'value_date',
+  'account',
+  'counterparty',
+  'counterparty_iban',
+  'purpose',
+  'amount',
+  'currency',
+  'tags',
+  'notice',
+] as const
+export type TransactionExportColumn = (typeof TRANSACTION_EXPORT_COLUMNS)[number]
+
+export const TRANSACTION_COLUMN_LABELS: Record<TransactionExportColumn, string> = {
+  booking_date: 'Buchungstag',
+  value_date: 'Valuta',
+  account: 'Konto',
+  counterparty: 'Gegenseite',
+  counterparty_iban: 'IBAN Gegenseite',
+  purpose: 'Verwendungszweck',
+  amount: 'Betrag',
+  currency: 'Währung',
+  tags: 'Tags',
+  notice: 'Notiz',
+}
+
+export interface PhotoExportOptions {
+  size: 'original' | 'large'
+  strip_metadata: boolean
+}
+
+export interface ExportOptions {
+  document: { format: 'pdf' | 'zip' }
+  transaction: {
+    format: TableFormat
+    columns: TransactionExportColumn[]
+    group_by_account: boolean
+    account_order: number[]
+  }
+  photo: PhotoExportOptions
+  album: PhotoExportOptions
+  security: { format: TableFormat }
+  meter: { format: TableFormat; from: string | null; to: string | null }
+  always_zip: boolean
+}
+
+/** Meters and single readings are exported together. */
+export type ExportGroup = Exclude<CollectionEntityType, 'meter_reading'>
+
+export interface ExportProfile {
+  id: number
+  name: string
+  options: ExportOptions
+  updated_at: string
+}
+
+export interface ExportSetup {
+  groups: Partial<Record<ExportGroup, number>>
+  defaults: ExportOptions
+  profiles: ExportProfile[]
+  accounts: Array<{ id: number; label: string }>
+}
+
+export interface ExportSkip {
+  entity_type: CollectionEntityType
+  entity_id: number
+  reason: string
+}
+
+export interface ExportRun {
+  id: number
+  collection_id: number
+  status: 'running' | 'done' | 'failed'
+  profile_id: number | null
+  filename: string | null
+  mime_type: string | null
+  size_bytes: number | null
+  item_count: number
+  skipped: ExportSkip[]
+  error: string | null
+  document_id: number | null
+  started_at: string
+  finished_at: string | null
+  expires_at: string
+}
+
+export const EXPORT_SKIP_REASONS: Record<string, string> = {
+  switched_off: 'in der Mappe ausgeschaltet',
+  file_missing: 'Datei fehlt',
+  redacted: 'hat Schwärzungen, nur im PDF',
+  unreadable: 'nicht lesbar',
+  not_visible: 'nicht sichtbar',
+  no_pages_selected: 'keine Seite ausgewählt',
+  unsupported_type: 'Dateityp nicht unterstützt',
+}
+
+export function getExportSetup(id: number): Promise<ExportSetup> {
+  return apiFetch(`/collections/${id}/export-setup`)
+}
+
+export function saveExportProfile(id: number, name: string, options: ExportOptions): Promise<ExportProfile> {
+  return apiFetch(`/collections/${id}/export-profiles`, { method: 'POST', body: JSON.stringify({ name, options }) })
+}
+
+export function deleteExportProfile(id: number, profileId: number): Promise<{ ok: boolean }> {
+  return apiFetch(`/collections/${id}/export-profiles/${profileId}`, { method: 'DELETE' })
+}
+
+export function startCollectionExportRun(
+  id: number,
+  request: { options: ExportOptions } | { profile_id: number },
+): Promise<ExportRun> {
+  return apiFetch(`/collections/${id}/exports`, { method: 'POST', body: JSON.stringify(request) })
+}
+
+export function listCollectionExportRuns(id: number): Promise<{ items: ExportRun[] }> {
+  return apiFetch(`/collections/${id}/exports`)
+}
+
+export function getCollectionExportRun(exportId: number): Promise<ExportRun> {
+  return apiFetch(`/collections/exports/${exportId}`)
+}
+
+export function deleteCollectionExportRun(exportId: number): Promise<{ ok: boolean }> {
+  return apiFetch(`/collections/exports/${exportId}`, { method: 'DELETE' })
+}
+
+export function saveCollectionExportAsDocument(
+  exportId: number,
+): Promise<{ document_id: number; already_existed: boolean }> {
+  return apiFetch(`/collections/exports/${exportId}/document`, { method: 'POST' })
+}
+
+/** The finished file as a `File`, for a download link or the share sheet. */
+export async function fetchCollectionExportFile(run: ExportRun): Promise<File> {
+  const token = localStorage.getItem('auth_token')
+  const res = await fetch(`${API_BASE_URL}/collections/exports/${run.id}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error((await res.text()) || `Export ${run.id}: HTTP ${res.status}`)
+  const blob = await res.blob()
+  return new File([blob], run.filename ?? 'export', { type: run.mime_type ?? blob.type })
+}

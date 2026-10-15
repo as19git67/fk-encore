@@ -14,6 +14,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
+import ExportDialog from '../components/collections/ExportDialog.vue'
 import InputText from 'primevue/inputtext'
 import Menu from 'primevue/menu'
 import Message from 'primevue/message'
@@ -294,12 +295,22 @@ async function saveRename() {
   }
 }
 
+// "Exportieren" (#1548, stage 6): one dialog for the page, for the row's collection.
+const exportTarget = ref<CollectionSummary | null>(null)
+const exportOpen = computed({
+  get: () => exportTarget.value !== null,
+  set: (open: boolean) => {
+    if (!open) exportTarget.value = null
+  },
+})
+
 // One row menu for the whole page, filled for the row that opened it.
 const rowMenu = ref<InstanceType<typeof Menu> | null>(null)
 const rowMenuItems = ref<Array<{ label: string; icon: string; command: () => void }>>([])
 function openRowMenu(event: Event, c: CollectionSummary) {
   const entries: Array<{ label: string; icon: string; command: () => void }> = [
     { label: 'Umbenennen', icon: 'pi pi-pencil', command: () => openRename(c) },
+    { label: 'Exportieren', icon: 'pi pi-download', command: () => (exportTarget.value = c) },
   ]
   if (c.kind === 'rule') {
     entries.push(
@@ -712,6 +723,7 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
         <Button label="Anlegen" icon="pi pi-plus" :disabled="!createName.trim()" @click="create" />
       </template>
     </Dialog>
+    <ExportDialog v-model:visible="exportOpen" :collection-id="exportTarget?.id ?? null" :name="exportTarget?.name ?? ''" />
   </PageLayout>
 </template>
 

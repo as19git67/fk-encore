@@ -24,7 +24,9 @@ import { and, eq, ne } from "drizzle-orm";
 import db from "../db/database";
 import { dbExec } from "../db/adapter";
 import { documentCollectionExports } from "../db/schema";
-import { DOCUMENTS_DIR } from "./documents.service";
+import { DOCUMENTS_DIR, assertPathUnderDocumentsRoot } from "./documents.service";
+import { shouldUseTesseractSidecar } from "./receipt-capture";
+import { ensureSearchablePdf } from "./ocr-pdf";
 
 console.log("[boot] documents/collection-export.ts: all imports resolved");
 
@@ -120,4 +122,34 @@ export interface CollectionExportInputs {
 /** A stable digest of a build's inputs: equal digests, equal PDFs. */
 export function collectionExportFingerprint(inputs: CollectionExportInputs): string {
   return crypto.createHash("sha256").update(JSON.stringify(inputs)).digest("hex");
+}
+
+/**
+ * The file whose pages go into the export.
+ *
+ * Mirrors `downloadDocument`: regular scans are served through their
+ * searchable ("sandwich") sidecar so the assembled PDF stays selectable and
+ * searchable, while PaddleOCR receipt captures keep their prepared scan —
+ * rasterizing that through Tesseract visibly costs thermal-print detail.
+ */
+export async function exportSourcePath(row: {
+  id: number;
+  disk_path: string;
+  receipt_ocr_state: string | null;
+}): Promise<{ path: string; mime: string } | null> {
+  try {
+    assertPathUnderDocumentsRoot(row.disk_path);
+  } catch {
+    return null;
+  }
+  if (shouldUseTesseractSidecar(row.receipt_ocr_state as any)) {
+    const ocrPath = await ensureSearchablePdf(row.id, row.disk_path);
+    if (ocrPath) return { path: ocrPath, mime: "application/pdf" };
+  }
+  try {
+    await fs.promises.access(row.disk_path, fs.constants.R_OK);
+  } catch {
+    return null;
+  }
+  return { path: row.disk_path, mime: "" };
 }
