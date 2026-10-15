@@ -2000,6 +2000,41 @@ export async function getMandateHistory(mandateId: number): Promise<MandateHisto
   return apiFetch(`/finance/mandates/${mandateId}/history`)
 }
 
+/** One booking a recurring series is still expected to make (#1526). */
+export interface UpcomingDebit {
+  mandate_id: number
+  account_id: number
+  account_label: string
+  counterparty: string | null
+  creditor_id: string | null
+  mandate_ref: string | null
+  payment_channel: string | null
+  expected_date: string
+  /** Due before today and not booked yet. */
+  overdue: boolean
+  /** Negative: money leaving the account. */
+  typical_amount: string
+  interval_days: number
+  last_seen: string
+  transaction_count: number
+}
+
+export interface UpcomingDebitsResponse {
+  from: string
+  until: string
+  items: UpcomingDebit[]
+  count: number
+  total_amount: string
+}
+
+export async function listUpcomingDebits(params: { from?: string; until?: string } = {}): Promise<UpcomingDebitsResponse> {
+  const query = new URLSearchParams()
+  if (params.from) query.set('from', params.from)
+  if (params.until) query.set('until', params.until)
+  const qs = query.toString()
+  return apiFetch(`/finance/mandates/upcoming${qs ? `?${qs}` : ''}`)
+}
+
 export interface RelatedRecurringResponse {
   /** null when the transaction is not part of any tracked recurring series. */
   mandate_id: number | null
