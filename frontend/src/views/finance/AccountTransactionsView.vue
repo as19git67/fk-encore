@@ -1183,7 +1183,7 @@ function openTransaction(tx: Transaction) {
 // Local, transient selection — deliberately decoupled from the global
 // basket. Picking/un-picking transactions here only affects the list's
 // own working set; nothing flows into the basket until the user
-// explicitly hits the "in den Warenkorb" action.
+// explicitly hits the "Ablegen" action.
 //
 // The behaviour itself is the shared one (issue #1272, stage 5): this list
 // used to roll its own Set, its own tristate and its own "clear also leaves
@@ -1296,7 +1296,7 @@ const batchTagDialogVisible = ref(false)
 /**
  * What the bar can do with the picked bookings. Tagging goes through the
  * shared toolbar so it folds into the overflow menu on a narrow screen;
- * "in den Warenkorb" stays the view's own primary action.
+ * "Ablegen" opens the one dialog for the basket and the collections.
  */
 const selectionActions = computed<ToolbarItem[]>(() => [
   {
@@ -1309,10 +1309,10 @@ const selectionActions = computed<ToolbarItem[]>(() => [
     command: openBatchTagEditor,
   },
   {
-    key: 'collection',
-    label: 'In Sammelmappe',
-    title: 'Auswahl in eine Sammelmappe legen',
-    icon: 'pi pi-folder',
+    key: 'file',
+    label: 'Ablegen',
+    title: 'Auswahl in den Basket oder eine Sammelmappe legen',
+    icon: 'pi pi-folder-plus',
     severity: 'secondary',
     disabled: localSelectionCount.value === 0,
     command: () => (collectionDialogOpen.value = true),
@@ -1470,24 +1470,11 @@ function goBack() {
     </template>
 
     <template #selection>
-      <!-- The shared bar; the running sum and the basket handover are the
-           only things this list adds to it. -->
+      <!-- The shared bar; the running sum is the only thing this list adds to it. -->
       <div v-if="selectMode" data-testid="finance-selection-subheader">
         <SelectionBar :selection="selection" :actions="selectionActions" noun="Buchungen">
           <template #info>
             <span v-if="localSelectionCount > 0" class="tx-summary-sum">Σ {{ formatSelectionSum() }}</span>
-          </template>
-          <template #primary>
-            <Button
-              icon="pi pi-shopping-cart"
-              label="In den Warenkorb"
-              size="small"
-              severity="secondary"
-              aria-label="Auswahl in den Warenkorb geben"
-              v-tooltip.bottom="'Auswahl in den Warenkorb geben'"
-              :disabled="localSelectionCount === 0"
-              @click="addLocalSelectionToBasket"
-            />
           </template>
         </SelectionBar>
       </div>
@@ -1981,7 +1968,11 @@ function goBack() {
       :transactions="localSelectedItems"
       @applied="refreshAfterTagChange"
     />
-    <AddToCollectionDialog v-model:visible="collectionDialogOpen" :members="selectedTxRefs" />
+    <AddToCollectionDialog
+      v-model:visible="collectionDialogOpen"
+      :members="selectedTxRefs"
+      :basket="{ add: addLocalSelectionToBasket, remove: () => {} }"
+    />
     <SaveRuleDialog v-model:visible="saveRuleOpen" :rule="ruleInput" :summary="ruleSummary" />
   </PageLayout>
 </template>

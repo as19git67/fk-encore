@@ -119,7 +119,8 @@ function readRows(d: PositionDepotSecurity): string {
   return `${tx}, ${d.removable_holdings} Bestandsst${d.removable_holdings === 1 ? 'and' : 'ände'}`
 }
 
-// Basket and collections (#1548): the member is this depot's master row.
+// "Ablegen" (#1548): the member is this depot's master row. One dialog for
+// the page, opened from a depot's row.
 const basket = useBasketStore()
 const collectionDialogOpen = ref(false)
 const collectionMembers = ref<MemberRef[]>([])
@@ -128,9 +129,6 @@ function securityRef(id: number): MemberRef {
 }
 function securityInBasket(id: number): boolean {
   return basket.has(securityRef(id))
-}
-function toggleSecurityInBasket(id: number) {
-  basket.toggle({ ...securityRef(id), display: { title: data.value?.position.name ?? undefined } })
 }
 function openSecurityCollection(id: number) {
   collectionMembers.value = [securityRef(id)]
@@ -633,30 +631,19 @@ function transactionCash(tx: PortfolioTransaction): string {
                 <td>{{ depotStatusText(d) }}</td>
                 <td class="pp-col-num">{{ readRows(d) }}</td>
                 <td class="pp-depot-actions">
-                  <!-- The security in this depot, set aside or filed (#1548). -->
-                  <template v-if="d.security_id != null">
-                    <Button
-                      :icon="securityInBasket(d.security_id) ? 'pi pi-check' : 'pi pi-shopping-cart'"
-                      size="small"
-                      text
-                      rounded
-                      severity="secondary"
-                      :aria-label="securityInBasket(d.security_id) ? `Aus dem Basket nehmen: ${d.account_label}` : `In den Basket legen: ${d.account_label}`"
-                      :aria-pressed="securityInBasket(d.security_id)"
-                      v-tooltip.left="securityInBasket(d.security_id) ? 'Aus dem Basket nehmen' : 'In den Basket legen'"
-                      @click="toggleSecurityInBasket(d.security_id)"
-                    />
-                    <Button
-                      icon="pi pi-folder"
-                      size="small"
-                      text
-                      rounded
-                      severity="secondary"
-                      :aria-label="`In Sammelmappe legen: ${d.account_label}`"
-                      v-tooltip.left="'In Sammelmappe legen'"
-                      @click="openSecurityCollection(d.security_id)"
-                    />
-                  </template>
+                  <!-- The security in this depot, filed (#1548). -->
+                  <Button
+                    v-if="d.security_id != null"
+                    :icon="securityInBasket(d.security_id) ? 'pi pi-folder-open' : 'pi pi-folder-plus'"
+                    size="small"
+                    text
+                    rounded
+                    severity="secondary"
+                    aria-haspopup="dialog"
+                    :aria-label="`Ablegen: ${d.account_label}`"
+                    v-tooltip.left="securityInBasket(d.security_id) ? 'Ablegen – liegt im Basket' : 'Ablegen: Basket oder Sammelmappe'"
+                    @click="openSecurityCollection(d.security_id)"
+                  />
                   <Button
                     v-if="canRemove(d)"
                     label="Aus Depot entfernen"
@@ -846,7 +833,11 @@ function transactionCash(tx: PortfolioTransaction): string {
         </ScrollX>
       </section>
     </div>
-    <AddToCollectionDialog v-model:visible="collectionDialogOpen" :members="collectionMembers" />
+    <AddToCollectionDialog
+      v-model:visible="collectionDialogOpen"
+      :members="collectionMembers"
+      :title="data?.position.name ?? undefined"
+    />
   </PageLayout>
 </template>
 

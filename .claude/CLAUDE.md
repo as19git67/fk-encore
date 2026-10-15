@@ -1304,17 +1304,29 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
 - Eine Liste mit Filter bietet „Als Regel-Mappe“, wenn ihr Typ Regeln kennt
   (Fotos, Buchungen); die Regel ist der Filter der Liste
   (`components/collections/SaveRuleDialog.vue`, `collections/rules.ts`).
-- Jede Liste mit Auswahl bietet „In den Basket legen“ und „In Sammelmappe
-  legen“ (`components/collections/AddToCollectionDialog.vue`), jede
-  Detailseite eines Nicht-Dokuments die Karte `InCollectionsCard`. Eine neue
-  Liste oder Detailseite bekommt beides gleich mit.
+- Basket und Sammelmappe erreicht man über **eine** Aktion „Ablegen“
+  (Icon `pi-folder-plus`, `pi-folder-open` solange das Ding im Basket
+  liegt): ein Dialog (`components/collections/AddToCollectionDialog.vue`)
+  mit dem Basket zuoberst, den passenden Mappen und „Neue Sammelmappe“; für
+  ein einzelnes Ding hakt er an, wo es schon liegt. Jede Detailseite trägt
+  `components/collections/FileButton.vue` oben in `#actions` neben ihren
+  anderen Aktionen, jede Auswahlleiste genau eine Aktion „Ablegen“, Zeilen
+  und Kacheln öffnen denselben Dialog. Nie zwei Knöpfe „In den Basket“ und
+  „In Sammelmappe“ nebeneinander, und keine Karte „Sammelmappen“ auf einer
+  Detailseite. Ein Modul, das ganze Objekte hält (Buchungen, Dokumente),
+  reicht dem Dialog `basket: { add, remove }` mit. Eine neue Liste oder
+  Detailseite bekommt „Ablegen“ gleich mit.
 - `Ctrl/Cmd+A` wählt alles (das Composable bindet es selbst),
   Umschalt+Klick den Bereich, `Esc` beendet.
-- Der Basket-Knopf mit Schublade ist `components/BasketIndicator.vue`. Module
-  ohne eigenen Drawer zeigen `SharedBasketIndicator`; Module mit eigenem
-  Drawer legen `BasketOthers` in `#others`. Ein Modul liefert nur `#rows` (je ein `<li class="basket-row">`), optional
-  `#before-rows`, `#subtitle` und `#footer`. Durch den Basket blättert
-  `composables/useBasketNavigation.ts`.
+- Der Basket-Knopf mit Schublade ist `components/BasketIndicator.vue`; sein
+  Badge zählt alles im Basket. Jeder Drawer zeigt den ganzen Basket nach Typ
+  gruppiert (`components/collections/BasketMemberList.vue`) und endet mit
+  `BasketFooter` („Leeren“, „Als Sammelmappe speichern“). Module ohne
+  Stapelaktionen zeigen `SharedBasketIndicator`. Dokumente und Finanzen
+  zeichnen ihre eigenen Zeilen über den Slot `rows-<typ>`, stellen ihre
+  Gruppe nach oben (`first`) und setzen ihre Stapelaktionen über den Fuß,
+  beschriftet für ihre Art. Optional `#before-rows` und `#subtitle`. Durch
+  den Basket blättert `composables/useBasketNavigation.ts`.
 
 ## Aktionen an Spots in der iOS-App
 

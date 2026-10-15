@@ -17,7 +17,6 @@ import AddToCollectionDialog from '../components/collections/AddToCollectionDial
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import type { ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useListSelection } from '../composables/useListSelection'
-import { useBasketStore } from '../stores/basket'
 import { decodeMember, encodeMember, groupedSelectionActions, type TypeAction } from '../utils/collectionActions'
 import { batchUpdateDocumentAttributes, batchUpdateDocumentTax } from '../api/documents'
 import { batchReview, batchTaxRelevant, downloadTransactionsCsv } from '../api/finance'
@@ -145,7 +144,6 @@ const selection = useListSelection({
 const { selectMode, selectedIds } = selection
 const selectedRefs = computed<MemberRef[]>(() => [...selectedIds.value].map(decodeMember))
 
-const basket = useBasketStore()
 const info = ref('')
 const busy = ref(false)
 const moveOpen = ref(false)
@@ -251,23 +249,12 @@ const selectionActions = computed<ToolbarItem[]>(() =>
         command: () => void removeSelected(),
       },
       {
-        key: 'move',
-        label: 'In Sammelmappe',
-        title: 'In eine andere Sammelmappe legen',
-        icon: 'pi pi-folder',
+        key: 'file',
+        label: 'Ablegen',
+        title: 'Ablegen: Basket oder eine andere Sammelmappe',
+        icon: 'pi pi-folder-plus',
         severity: 'secondary',
         command: () => (moveOpen.value = true),
-      },
-      {
-        key: 'basket',
-        label: 'In den Basket',
-        title: 'In den Basket legen',
-        icon: 'pi pi-shopping-cart',
-        severity: 'secondary',
-        command: () => {
-          basket.add(selectedRefs.value)
-          info.value = `${selectedRefs.value.length} in den Basket gelegt.`
-        },
       },
     ],
     typeActions,

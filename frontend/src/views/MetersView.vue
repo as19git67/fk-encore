@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CollectionScopeBar from '../components/collections/CollectionScopeBar.vue'
+import FileButton from '../components/collections/FileButton.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
@@ -338,9 +339,12 @@ onMounted(load)
             <span class="figure-value">{{ fmt(m.absoluteTotal, m.decimals) }} {{ m.unit }}</span>
           </div>
         </div>
-        <div v-if="canManage" class="meter-actions" @click.stop>
-          <Button icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit(m)" />
-          <Button icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete(m)" />
+        <div class="meter-actions" @click.stop>
+          <FileButton :members="[{ entity_type: 'meter', entity_id: m.id }]" :title="m.name" />
+          <template v-if="canManage">
+            <Button icon="pi pi-pencil" text rounded severity="secondary" aria-label="Bearbeiten" v-tooltip.top="'Bearbeiten'" @click="openEdit(m)" />
+            <Button icon="pi pi-trash" text rounded severity="danger" aria-label="Löschen" v-tooltip.top="'Löschen'" @click="handleDelete(m)" />
+          </template>
         </div>
       </div>
       </div>

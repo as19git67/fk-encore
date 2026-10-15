@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import BasketOthers from '../collections/BasketOthers.vue'
+import BasketMemberList from '../collections/BasketMemberList.vue'
+import BasketFooter from '../collections/BasketFooter.vue'
+import { useBasketStore } from '../../stores/basket'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
@@ -48,6 +50,8 @@ import { useAuthStore } from '../../stores/auth'
 const router = useRouter()
 const auth = useAuthStore()
 const selectionStore = useDocSelectionStore()
+/** The whole shared basket (#1548); the drawer shows every kind in it. */
+const basket = useBasketStore()
 const canEdit = computed(() => auth.hasPermission('documents.edit'))
 
 /** Die Hülle besitzt die Sichtbarkeit; hierüber wird sie geschlossen. */
@@ -402,19 +406,18 @@ function handleReprocessDone(payload: { affected: number }) {
 <template>
   <BasketIndicator
     ref="shell"
-    singular="Dokument"
-    plural="Dokumente"
-    :count="count"
-    empty-hint="Lege Dokumente aus der Liste ab — einzeln über die Auswahl oder die ganze Trefferliste eines Filters — um sie hier gemeinsam zu bearbeiten oder nacheinander durchzugehen."
+    singular="Eintrag"
+    plural="Einträge"
+    :count="basket.count"
+    empty-hint="Lege Dokumente über „Ablegen“ in den Basket — einzeln oder als Auswahl —, um sie hier gemeinsam zu bearbeiten oder nacheinander durchzugehen. Fotos, Buchungen und Zähler kommen in denselben Basket."
     :info="actionInfo"
     :error="actionError"
     @update:info="actionInfo = null"
     @update:error="actionError = null"
   >
-    <template #others>
-      <BasketOthers own="document" @saved="(name) => (actionInfo = `Sammelmappe „${name}“ angelegt.`)" />
-    </template>
     <template #rows>
+      <BasketMemberList first="document" @open="shell?.close()">
+      <template #rows-document>
       <li v-for="doc in items" :key="doc.id" class="basket-row">
           <button
             type="button"
@@ -446,9 +449,13 @@ function handleReprocessDone(payload: { affected: number }) {
             <i class="pi pi-times-circle" />
           </button>
       </li>
+      </template>
+      </BasketMemberList>
     </template>
 
     <template #footer>
+          <p v-if="canEdit && count > 0" class="module-actions-label">Für {{ count === 1 ? 'das Dokument' : `die ${count} Dokumente` }} im Basket</p>
+          <template v-if="canEdit && count > 0">
           <div v-if="canEdit" class="action-row">
             <Button label="Tags" icon="pi pi-tag" size="small" :disabled="count === 0" @click="openTagDialog" />
             <Button label="Kategorie" icon="pi pi-folder" size="small" :disabled="count === 0" @click="openCategoryDialog" />
@@ -484,17 +491,8 @@ function handleReprocessDone(payload: { affected: number }) {
               @click="approveAttribution"
             />
           </div>
-      <div class="clear-row">
-        <Button
-          label="Alles leeren"
-          icon="pi pi-times"
-          severity="secondary"
-          text
-          size="small"
-          :disabled="count === 0"
-          @click="selectionStore.clear()"
-        />
-      </div>
+          </template>
+      <BasketFooter @saved="(name) => (actionInfo = `Sammelmappe „${name}“ angelegt.`)" />
     </template>
   </BasketIndicator>
 
@@ -665,9 +663,14 @@ function handleReprocessDone(payload: { affected: number }) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.clear-row {
-  display: flex;
-  justify-content: flex-end;
+.module-actions-label {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--p-text-muted-color);
+}
+.module-actions {
+  margin-bottom: var(--space-3);
 }
 
 .basket-dialog .dialog-hint,

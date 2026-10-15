@@ -531,27 +531,23 @@ const albumCollectionOpen = ref(false)
 const selectedAlbumRefs = computed<MemberRef[]>(() =>
   [...selectedIds.value].map((id) => ({ entity_type: 'album' as const, entity_id: id })),
 )
+// The basket gets the names right away, before the server has named them.
+const albumBasket = {
+  add: () =>
+    basket.add(
+      selectedAlbumRefs.value.map((ref) => ({
+        ...ref,
+        display: { title: albums.value.find((a) => a.id === ref.entity_id)?.name },
+      })),
+    ),
+  remove: () => basket.remove(selectedAlbumRefs.value),
+}
 const albumSelectionActions = computed<ToolbarItem[]>(() => [
   {
-    key: 'basket',
-    label: 'In den Basket',
-    title: 'In den Basket legen',
-    icon: 'pi pi-shopping-cart',
-    severity: 'secondary',
-    disabled: selectedIds.value.size === 0,
-    command: () =>
-      basket.add(
-        selectedAlbumRefs.value.map((ref) => ({
-          ...ref,
-          display: { title: albums.value.find((a) => a.id === ref.entity_id)?.name },
-        })),
-      ),
-  },
-  {
-    key: 'collection',
-    label: 'In Sammelmappe',
-    title: 'In Sammelmappe legen',
-    icon: 'pi pi-folder',
+    key: 'file',
+    label: 'Ablegen',
+    title: 'Ablegen: Basket oder Sammelmappe',
+    icon: 'pi pi-folder-plus',
     severity: 'secondary',
     disabled: selectedIds.value.size === 0,
     command: () => (albumCollectionOpen.value = true),
@@ -656,7 +652,7 @@ onMounted(async () => {
       @open="openAlbum"
       @toggle="onAlbumToggle"
     />
-    <AddToCollectionDialog v-model:visible="albumCollectionOpen" :members="selectedAlbumRefs" />
+    <AddToCollectionDialog v-model:visible="albumCollectionOpen" :members="selectedAlbumRefs" :basket="albumBasket" />
 
     <Dialog v-model:visible="showCreateDialog" class="dialog-md" header="Neues Album erstellen" :modal="true">
       <div class="dialog-content">

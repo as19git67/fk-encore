@@ -16,7 +16,8 @@ import PageSkeleton from '../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
-import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
+import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
+import type { MemberRef } from '../api/collections'
 import { listCollections, type DocumentCollection } from '../api/collections'
 import {
   listDocuments,
@@ -284,13 +285,39 @@ function filterByCollection(id: number) {
   filter.apply()
 }
 
-// "In Sammelmappe" gathers the checked documents into a folder that is later
-// handed over as a single PDF. Unlike the basket, membership is durable and a
-// document may sit in several folders at once.
-const addToCollectionOpen = ref(false)
+// "Ablegen" (#1548): one dialog for the basket and the collections, opened
+// for the checked documents from the selection bar or for one document from
+// its row. A collection is durable and a document may sit in several; the
+// basket is the pile being worked on.
+const fileDialogOpen = ref(false)
+const fileTarget = ref<DocumentSummary[]>([])
+const fileFromSelection = ref(false)
+const fileMembers = computed<MemberRef[]>(() =>
+  fileTarget.value.map((d) => ({ entity_type: 'document' as const, entity_id: d.id })),
+)
+const fileBasket = {
+  add: () => { basket.addAll(fileTarget.value.filter((d) => !basket.has(d.id))) },
+  remove: () => { for (const d of fileTarget.value) basket.remove(d.id) },
+}
 
-function onAddedToCollection(payload: { title: string; count: number }) {
-  info.value = `${payload.count} Dokument${payload.count === 1 ? '' : 'e'} zu „${payload.title}" hinzugefügt.`
+function fileSelection() {
+  fileTarget.value = selectedDocs.value
+  fileFromSelection.value = true
+  fileDialogOpen.value = true
+}
+
+function fileOne(doc: DocumentSummary) {
+  fileTarget.value = [doc]
+  fileFromSelection.value = false
+  fileDialogOpen.value = true
+}
+
+function onFiled(payload: { collectionId: number | null; title: string; count: number }) {
+  if (!fileFromSelection.value) return
+  const what = `${payload.count} Dokument${payload.count === 1 ? '' : 'e'}`
+  info.value = payload.collectionId === null
+    ? `${what} in den Basket gelegt.`
+    : `${what} in „${payload.title}" abgelegt.`
   clearSelection()
 }
 
@@ -309,14 +336,6 @@ const selectedDocs = computed(() =>
 
 const basket = useDocSelectionStore()
 
-/** Move the checked documents into the basket (drawer in the navbar). */
-function addSelectionToBasket() {
-  const docs = selectedDocs.value
-  if (docs.length === 0) return
-  basket.addAll(docs)
-  info.value = `${docs.length} Dokument${docs.length === 1 ? '' : 'e'} in den Basket gelegt.`
-  clearSelection()
-}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 /** "New" = ready, but no human has approved the AI attribution yet (#635). */
@@ -412,17 +431,18 @@ const toolbar = useListToolbar({
 
 /**
  * Batch actions on the picked documents. Everything that edits a document
- * lives in the basket, so the bar only offers the two hand-overs.
+ * lives in the basket, so the bar only offers the hand-over: "Ablegen" into
+ * the basket or a collection.
  */
 const selectionActions = computed<ToolbarItem[]>(() => [
   {
-    key: 'collection',
-    label: 'In Sammelmappe',
-    title: 'Auswahl in eine Sammelmappe legen — mehrere Dokumente als ein PDF weitergeben.',
-    icon: 'pi pi-folder',
+    key: 'file',
+    label: 'Ablegen',
+    title: 'Auswahl in den Basket (dort gemeinsam bearbeiten) oder eine Sammelmappe legen',
+    icon: 'pi pi-folder-plus',
     severity: 'secondary',
     disabled: selection.selectedCount.value === 0,
-    command: () => { addToCollectionOpen.value = true },
+    command: fileSelection,
   },
 ])
 const hasMore = computed(() => !isSearchActive.value && items.value.length < total.value)
@@ -748,23 +768,13 @@ onMounted(async () => {
     </template>
 
     <template #selection>
-      <!-- The shared bar; the basket hand-over is this list's own action. -->
+      <!-- The shared bar; "Ablegen" is its one action. -->
       <SelectionBar
         v-if="selectMode"
         :selection="selection"
         :actions="selectionActions"
         noun="Dokumente"
       >
-        <template #primary>
-          <Button
-            label="In den Basket"
-            icon="pi pi-shopping-cart"
-            size="small"
-            :disabled="selectedIds.size === 0"
-            v-tooltip.bottom="'Auswahl in den Basket legen (oben rechts) — dort werden Tags, Kategorie, Datum, Steuer, Sichtbarkeit und OCR/KI gemeinsam bearbeitet oder durchblättert.'"
-            @click="addSelectionToBasket"
-          />
-        </template>
       </SelectionBar>
     </template>
 
@@ -868,14 +878,15 @@ onMounted(async () => {
             {{ doc.title || doc.original_filename }}
           </button>
           <Button
-            :icon="basket.has(doc.id) ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
+            :icon="basket.has(doc.id) ? 'pi pi-folder-open' : 'pi pi-folder-plus'"
             text
             rounded
             size="small"
             :severity="basket.has(doc.id) ? 'success' : 'secondary'"
-            :aria-label="basket.has(doc.id) ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
-            v-tooltip.bottom="basket.has(doc.id) ? 'Aus dem Basket entfernen' : 'Dokument direkt in den Basket legen'"
-            @click.stop="basket.toggle(doc)"
+            :aria-label="basket.has(doc.id) ? 'Ablegen (liegt im Basket)' : 'Ablegen: Basket oder Sammelmappe'"
+            v-tooltip.bottom="basket.has(doc.id) ? 'Ablegen – liegt im Basket' : 'Ablegen: Basket oder Sammelmappe'"
+            aria-haspopup="dialog"
+            @click.stop="fileOne(doc)"
           />
           <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
           <Tag
@@ -951,14 +962,15 @@ onMounted(async () => {
         </div>
         <Button
           class="grid-card-basket-btn"
-          :icon="basket.has(doc.id) ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
+          :icon="basket.has(doc.id) ? 'pi pi-folder-open' : 'pi pi-folder-plus'"
           text
           rounded
           size="small"
           :severity="basket.has(doc.id) ? 'success' : 'secondary'"
-          :aria-label="basket.has(doc.id) ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
-          v-tooltip.bottom="basket.has(doc.id) ? 'Aus dem Basket entfernen' : 'Dokument direkt in den Basket legen'"
-          @click.stop="basket.toggle(doc)"
+          :aria-label="basket.has(doc.id) ? 'Ablegen (liegt im Basket)' : 'Ablegen: Basket oder Sammelmappe'"
+          v-tooltip.bottom="basket.has(doc.id) ? 'Ablegen – liegt im Basket' : 'Ablegen: Basket oder Sammelmappe'"
+          aria-haspopup="dialog"
+          @click.stop="fileOne(doc)"
         />
         <div class="grid-card-thumb">
           <DocumentThumbnail :id="doc.id" :alt="doc.title || doc.original_filename" />
@@ -1007,9 +1019,11 @@ onMounted(async () => {
 
     <!-- Dialogs -->
     <AddToCollectionDialog
-      v-model:visible="addToCollectionOpen"
-      :document-ids="[...selectedIds]"
-      @added="onAddedToCollection"
+      v-model:visible="fileDialogOpen"
+      :members="fileMembers"
+      :title="fileTarget.length === 1 ? (fileTarget[0]!.title || fileTarget[0]!.original_filename) : undefined"
+      :basket="fileBasket"
+      @added="onFiled"
     />
 
     <DocumentUploadDefaultsDialog

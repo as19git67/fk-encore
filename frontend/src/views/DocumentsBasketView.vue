@@ -16,7 +16,7 @@ import Message from 'primevue/message'
 import PageLayout from '../components/layout/PageLayout.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
-import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
+import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
 import { getDocumentBasket, type DocumentSummary } from '../api/documents'
 
 const router = useRouter()
@@ -34,6 +34,7 @@ const allSelected = computed(
   () => items.value.length > 0 && items.value.every((d) => selected.value.has(d.id)),
 )
 const selectedIds = computed(() => [...selected.value])
+const selectedRefs = computed(() => selectedIds.value.map((id) => ({ entity_type: 'document' as const, entity_id: id })))
 
 async function load() {
   loading.value = true
@@ -74,8 +75,9 @@ function onFollowUpDone(payload: { scheduled: number }) {
   void load()
 }
 
-function onAddedToCollection(payload: { title: string; count: number }) {
-  info.value = `${payload.count} Dokument${payload.count === 1 ? '' : 'e'} zu „${payload.title}" hinzugefügt.`
+function onAddedToCollection(payload: { collectionId: number | null; title: string; count: number }) {
+  const what = `${payload.count} Dokument${payload.count === 1 ? '' : 'e'}`
+  info.value = payload.collectionId === null ? `${what} in den Basket gelegt.` : `${what} in „${payload.title}" abgelegt.`
   selected.value = new Set()
 }
 
@@ -109,9 +111,11 @@ onMounted(load)
         @click="followUpOpen = true"
       />
       <Button
-        icon="pi pi-folder"
-        label="In Sammelmappe"
+        icon="pi pi-folder-plus"
+        label="Ablegen"
         severity="secondary"
+        aria-haspopup="dialog"
+        v-tooltip.bottom="'Ablegen: Basket oder Sammelmappe'"
         :disabled="selectedIds.length === 0"
         @click="addToCollectionOpen = true"
       />
@@ -187,7 +191,7 @@ onMounted(load)
 
     <AddToCollectionDialog
       v-model:visible="addToCollectionOpen"
-      :document-ids="selectedIds"
+      :members="selectedRefs"
       @added="onAddedToCollection"
     />
   </PageLayout>

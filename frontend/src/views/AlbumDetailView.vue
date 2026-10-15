@@ -438,17 +438,20 @@ const selection = useListSelection({
 })
 const { selectMode, selectedIds, selectedCount } = selection
 
-// Basket and collections (#1548): selected photos, or the album itself.
+// "Ablegen" (#1548): selected photos, or the album itself, into the basket or
+// a collection — one dialog for both.
 const basket = useBasketStore()
 const collectionDialogOpen = ref(false)
 const collectionDialogMembers = ref<MemberRef[]>([])
+const collectionDialogTitle = ref<string | undefined>(undefined)
 const selectedPhotoRefs = computed<MemberRef[]>(() =>
   Array.from(selectedIds.value, (id) => ({ entity_type: 'photo' as const, entity_id: Number(id) })),
 )
 const albumRef = computed<MemberRef>(() => ({ entity_type: 'album', entity_id: albumId.value }))
 const albumInBasket = computed(() => basket.has(albumRef.value))
-function openCollectionDialog(members: MemberRef[]) {
+function openCollectionDialog(members: MemberRef[], title?: string) {
   collectionDialogMembers.value = members
+  collectionDialogTitle.value = title
   collectionDialogOpen.value = true
 }
 const exitSelectMode = selection.exit
@@ -695,8 +698,7 @@ const selectionActions = computed<ToolbarItem[]>(() => {
     command: () => void shareSelectedPhotos(),
   })
   if (canShowCollage.value) push({ key: 'collage', title: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
-  push({ key: 'basket', title: 'In den Basket legen', icon: 'pi pi-shopping-cart', command: () => basket.add(selectedPhotoRefs.value) })
-  push({ key: 'collection', title: 'In Sammelmappe legen', icon: 'pi pi-folder', command: () => openCollectionDialog(selectedPhotoRefs.value) })
+  push({ key: 'file', title: 'Ablegen', icon: 'pi pi-folder-plus', command: () => openCollectionDialog(selectedPhotoRefs.value) })
   if (canUploadPhotos.value && canReuseAlbumPhotos.value) {
     push({ key: 'albums', title: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
   }
@@ -2334,25 +2336,17 @@ function triggerFileSelect() {
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
 
-  // The album itself can be set aside or filed, like any other item (#1548).
-  // Not while photos are being picked: then the selection bar offers the
-  // same two actions for the photos, and two pairs side by side confuse.
+  // The album itself can be filed, like any other item (#1548). Not while
+  // photos are being picked: then the selection bar's "Ablegen" is for the
+  // photos, and two of them side by side would confuse.
   if (album.value && !selectMode.value) {
     items.push({
-      key: 'album-basket',
-      title: albumInBasket.value ? 'Album aus dem Basket nehmen' : 'Album in den Basket legen',
-      icon: albumInBasket.value ? 'pi pi-check' : 'pi pi-shopping-cart',
+      key: 'album-file',
+      title: albumInBasket.value ? 'Album ablegen (liegt im Basket)' : 'Album ablegen: Basket oder Sammelmappe',
+      icon: albumInBasket.value ? 'pi pi-folder-open' : 'pi pi-folder-plus',
       severity: 'secondary',
       text: true,
-      command: () => basket.toggle({ ...albumRef.value, display: { title: album.value?.name } }),
-    })
-    items.push({
-      key: 'album-collection',
-      title: 'Album in Sammelmappe legen',
-      icon: 'pi pi-folder',
-      severity: 'secondary',
-      text: true,
-      command: () => openCollectionDialog([albumRef.value]),
+      command: () => openCollectionDialog([albumRef.value], album.value?.name),
     })
   }
 
@@ -3232,7 +3226,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
     <!-- Add selected photos to other albums (reuses the same dialog as the
          main gallery's select-bar). -->
-    <AddToCollectionDialog v-model:visible="collectionDialogOpen" :members="collectionDialogMembers" />
+    <AddToCollectionDialog v-model:visible="collectionDialogOpen" :members="collectionDialogMembers" :title="collectionDialogTitle" />
     <PhotoAlbumDialog
       v-model:visible="albumDialogVisible"
       :photo-ids="albumDialogPhotoIds"

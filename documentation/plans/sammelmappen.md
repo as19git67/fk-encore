@@ -109,8 +109,9 @@ collections.
    - "In den Basket" and "In Sammelmappe legen" in the gallery and album
      selection bars, the transaction list selection, the album page, the
      photo sidebar, the meter page and its readings, and the security rows of
-     a position. Non-document detail pages carry `InCollectionsCard`;
-     documents keep their own card with dossier details.
+     a position. Non-document detail pages carried `InCollectionsCard`;
+     documents kept their own card with dossier details (both replaced in
+     stage 5, see "Ablegen").
 3. **Typed collection = module list; the "Collections" page** — done (#1559):
    - `collection` filter in the module lists: the gallery (`collectionId`
      in the photo filter, `?collection=` in the URL, picker in the filter
@@ -166,6 +167,28 @@ collections.
    - Also in this stage: the albums overview got a selection mode with "In
      den Basket" and "In Sammelmappe"; the album page hides its own "Album
      in den Basket / in Sammelmappe" while photos are being picked.
+   - **Filing in one place ("Ablegen")**, after feedback on stages 1–5:
+     one button and one dialog for the basket and the collections instead
+     of two side by side (`components/collections/FileButton.vue`,
+     `AddToCollectionDialog.vue`). The dialog puts the basket first, lists
+     the fitting collections and makes a new one (for documents optionally
+     as a dossier). For a single item it ticks where the item already lies,
+     and a click takes it out again. Every detail page has the button at
+     the top next to its other actions (photo sidebar, document page and
+     document preview, transaction, meter, album); every selection bar has
+     one "Ablegen" action; rows that had a basket toggle (documents,
+     readings, depot rows, meter tiles) open the same dialog. Icon:
+     `pi-folder-plus`, `pi-folder-open` while the item lies in the basket.
+     The "Sammelmappen" cards on detail pages are gone: where an item lies
+     is shown in the dialog, and every collection is reachable from the
+     navbar.
+   - **One basket drawer**: every module shows the whole shared basket,
+     grouped by type with the same headers
+     (`components/collections/BasketMemberList.vue`), and ends with the same
+     footer, "Leeren" and "Als Sammelmappe speichern" (`BasketFooter.vue`).
+     The badge counts every item. Documents and finance draw their own rows
+     in more detail through the slot `rows-<type>`, put their group first
+     and keep their batch actions above the footer, labelled for their kind.
 6. Exporters per type and export profiles; ZIP; "save as document".
 7. Sending: share sheet in web and iOS, email via SMTP.
 8. Anonymous share links (after per-item access checks).
