@@ -1,8 +1,8 @@
 # Assistant: one chat over everything the server knows
 
-Status: stages 1 and 2 implemented (`POST /chat` in llm-service with its
+Status: stages 1 to 3 implemented (`POST /chat` in llm-service with its
 benchmark in `llm-service/bench/`; the `assistant` service with the read
-tools and the direct-debits endpoint). The benchmark has not yet been run on
+tools and the direct-debits endpoint; the chat page in the web app). The benchmark has not yet been run on
 the production GPU. Tracking issue #1524, stages #1525–#1534.
 
 ## Problem
@@ -313,6 +313,23 @@ behind it.
      has, taken from the examples above.
    - Storybook stories for the message, the blocks and the proposal card;
      the focus-ring and overflow checks apply.
+
+   - **Implemented** (#1528): `views/AssistantView.vue` with
+     `components/assistant/` (`AssistantMessage`, `AssistantBlock`,
+     `AssistantComposer`, `ConversationList`), `api/assistant.ts` and the
+     event reducer `utils/assistantTurn.ts`. The open conversation is
+     `?c=<id>`. The client opens the turn's stream first and then posts the
+     question; a socket that cannot connect costs only the live text, since
+     the POST returns the whole answer. Blocks are rendered by the assistant's
+     own compact rows rather than the modules' list rows (those are inline
+     markup in their views, not components); photos show thumbnails from the
+     `filename` the photo tools now include. `module.assistant` is seeded for
+     every module role and checked on every endpoint but the stream, whose
+     media-scope token only lets the turn's owner follow it. The transaction
+     list (`AccountTransactionsView`) takes `dateFrom`, `dateTo` and `tags`
+     from a deep link once on entry, so `list_transactions` within one account
+     links to the same set; across accounts there is no such list page and the
+     block carries no route.
 
 4. **Write actions with confirmation** (`assistant/proposals.ts`).
    - Table `assistant_proposal` (`id`, `conversation_id`, `user_id`,

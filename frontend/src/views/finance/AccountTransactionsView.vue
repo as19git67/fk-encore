@@ -43,7 +43,7 @@ import { useTxFiltersStore } from '../../stores/finance/txFilters'
 import { useAuthStore } from '../../stores/auth'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import BatchTagDialog from '../../components/finance/BatchTagDialog.vue'
-import { toLocalIsoDate } from '../../utils/dateFormat'
+import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
 import { compactDateLabels, fullDateLabel } from '../../utils/financeChartDates'
 import type {
   DepotTransaction,
@@ -315,6 +315,24 @@ const search = useListSearch({
 // Seeded before the first load so a deep link searches straight away.
 filtersStore.formQuery = search.term.value
 filtersStore.appliedQuery = search.term.value
+
+// A deep link may carry the period and tags too (the assistant's "In der
+// Liste öffnen", #1528). They seed the filter panel once, on entry; the
+// panel stays the place where they are changed.
+{
+  const isoDay = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
+  const from = isoDay(route.query.dateFrom)
+  const to = isoDay(route.query.dateTo)
+  const tags = typeof route.query.tags === 'string'
+    ? route.query.tags.split(',').map((t) => t.trim()).filter(Boolean)
+    : []
+  if (from || to || tags.length) {
+    filtersStore.formFrom = from ? parseLocalDate(from) : null
+    filtersStore.formTo = to ? parseLocalDate(to) : null
+    filtersStore.formTags = tags
+    filtersStore.apply()
+  }
+}
 
 watch(search.term, (term) => {
   filtersStore.formQuery = term

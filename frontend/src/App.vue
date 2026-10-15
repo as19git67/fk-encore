@@ -267,6 +267,18 @@ onBeforeUnmount(() => stackObserver?.disconnect())
         </div>
 
         <div class="navbar-end">
+          <!-- The assistant (#1528), reachable from every module. -->
+          <Button
+            v-if="auth.hasPermission('module.assistant')"
+            v-tooltip.bottom="'Assistent'"
+            icon="pi pi-comments"
+            :severity="activeModule?.id === 'assistent' ? 'primary' : 'secondary'"
+            text
+            rounded
+            aria-label="Assistent"
+            data-testid="navbar-assistant"
+            @click="router.push({ name: 'assistent' })"
+          />
           <!-- Every collection of every type (#1548), reachable from anywhere. -->
           <Button
             v-if="auth.isAuthenticated"

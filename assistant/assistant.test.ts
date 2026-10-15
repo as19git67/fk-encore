@@ -24,7 +24,7 @@ import {
   type StreamEvent,
 } from "./assistant";
 
-const PERMS = ["module.meters", "meters.view"];
+const PERMS = ["module.assistant", "module.meters", "meters.view"];
 
 function setAuth(userID: string, permissions: string[] = PERMS) {
   vi.mocked(getAuthData).mockReturnValue({ userID, permissions });
@@ -200,5 +200,25 @@ describe("a conversation too long for the model", () => {
     vi.mocked(chat).mockRejectedValue(new ContextTooLargeError("too long"));
     const conv = await createConversation({});
     await expect(ask({ id: conv.id, message: "Hallo" })).rejects.toMatchObject({ code: "failed_precondition" });
+  });
+});
+
+describe("the module permission", () => {
+  it("guards every endpoint but the stream", async () => {
+    vi.mocked(chat).mockResolvedValue(text("Hallo."));
+    const conv = await createConversation({});
+    await ask({ id: conv.id, message: "Hallo", turnId: "turn-perm-1" });
+
+    setAuth("701", ["module.meters", "meters.view"]);
+    await expect(listConversations()).rejects.toMatchObject({ code: "permission_denied" });
+    await expect(createConversation({})).rejects.toMatchObject({ code: "permission_denied" });
+    await expect(getConversation({ id: conv.id })).rejects.toMatchObject({ code: "permission_denied" });
+    await expect(ask({ id: conv.id, message: "x" })).rejects.toMatchObject({ code: "permission_denied" });
+
+    // The socket carries a media-scope token; it may follow its own turn.
+    const sent: StreamEvent[] = [];
+    const watch = watchTurn as unknown as (h: { turnId: string }, s: unknown) => Promise<void>;
+    await watch({ turnId: "turn-perm-1" }, { send: (e: StreamEvent) => sent.push(e), close: async () => {} });
+    expect(sent.map((e) => e.type)).toEqual(["done"]);
   });
 });

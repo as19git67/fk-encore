@@ -82,6 +82,8 @@ const router = createRouter({
     { path: '/zaehler/auffaelligkeiten', name: 'zaehler-anomalien', component: { template: '<div />' } },
     { path: '/zaehler/schnellerfassung/konfiguration', name: 'zaehler-schnellerfassung-config', component: { template: '<div />' } },
     { path: '/zaehler', name: 'zaehler-list', component: { template: '<div />' } },
+    { path: '/assistent', name: 'assistent', component: { template: '<div />' } },
+    { path: '/finanzen/lastschriften', name: 'finance-direct-debits', component: { template: '<div />' } },
     { path: '/zaehler/:id', name: 'zaehler-detail', component: { template: '<div />' } },
     // Admin module
     { path: '/admin', component: { template: '<div />' } },
