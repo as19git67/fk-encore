@@ -37,6 +37,7 @@ import {
   type SettlementValues,
 } from "./depot-settlement-merge";
 import { extractSettlementValues, LlmServiceUnavailableError } from "./llm-client";
+import { knownSecurities, snapToKnown, type KnownSecurities } from "./known-securities";
 
 export type LlmMode = "allow" | "cache-only" | "off";
 
@@ -62,6 +63,8 @@ export interface SettlementReading {
   nameFrom: "rules" | "llm" | null;
   /** Where the text shows the model's values (see groundingOf). */
   grounding: Grounding;
+  /** The securities the reading's identifiers and name were snapped to (see known-securities.ts). */
+  known: KnownSecurities;
 }
 
 /**
@@ -289,14 +292,16 @@ export async function readSettlement(
   if (llm && rules?.accumulation) llm = { ...llm, net: llm.tax === null ? null : -Math.abs(llm.tax) };
   const nameFrom = nameNearerIdentifier(text, rules?.isin ?? rules?.wkn ?? null, rules?.name ?? null, llm?.name ?? null);
   const grounding = groundingOf(text, llm);
+  const known = await knownSecurities();
   return {
     rules,
     llm,
     llmSaysSettlement,
-    merge: withNameFrom(mergeSettlement(fromRules, llm, new Date(), null, grounding), nameFrom),
+    merge: snapToKnown(withNameFrom(mergeSettlement(fromRules, llm, new Date(), null, grounding), nameFrom), known),
     llmStatus,
     nameFrom,
     grounding,
+    known,
   };
 }
 
@@ -306,5 +311,8 @@ export async function readSettlement(
  * nothing is asked.
  */
 export function rereadAgainstBooking(r: SettlementReading, bookingNet: number): SettlementReading {
-  return { ...r, merge: withNameFrom(mergeSettlement(rulesValues(r.rules), r.llm, new Date(), bookingNet, r.grounding), r.nameFrom) };
+  return {
+    ...r,
+    merge: snapToKnown(withNameFrom(mergeSettlement(rulesValues(r.rules), r.llm, new Date(), bookingNet, r.grounding), r.nameFrom), r.known),
+  };
 }

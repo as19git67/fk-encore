@@ -293,6 +293,8 @@ export interface MergedField {
   disagree: boolean;
   /** The taxes' sign was turned, because only that way the figures add up. */
   sign_turned?: boolean;
+  /** Snapped to a known security (see known-securities.ts): what was read. */
+  known_from?: string;
 }
 
 export interface MergeResult {

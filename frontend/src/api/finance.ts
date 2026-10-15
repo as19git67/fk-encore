@@ -740,6 +740,8 @@ export interface SettlementFieldSourceInfo {
   disagree: boolean
   /** The taxes' sign was turned because only that way the figures add up. */
   sign_turned?: boolean
+  /** Snapped to a security the app already knows: what was read. */
+  known_from?: string
 }
 
 export interface SettlementCheck {

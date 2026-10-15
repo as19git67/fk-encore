@@ -354,6 +354,7 @@ function openInDocuments() {
                 <td class="sd-value">
                   {{ fieldValue(row.key) ?? 'nicht gefunden' }}
                   <span v-if="sourceOf(row.key)?.sign_turned" class="sd-label-after">Vorzeichen umgekehrt — nur so geht die Rechnung auf</span>
+                  <span v-if="sourceOf(row.key)?.known_from" class="sd-label-after">an bekanntes Wertpapier angeglichen, gelesen: {{ sourceOf(row.key)!.known_from }}</span>
                 </td>
                 <td class="sd-src">
                   <span
