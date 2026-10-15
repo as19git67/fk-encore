@@ -59,7 +59,8 @@ import PageLayout from '../components/layout/PageLayout.vue'
 import SelectionBar from '../components/layout/SelectionBar.vue'
 import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
 import { useBasketStore } from '../stores/basket'
-import type { MemberRef } from '../api/collections'
+import type { MemberRef, MemberRuleInput } from '../api/collections'
+import SaveRuleDialog from '../components/collections/SaveRuleDialog.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
@@ -101,6 +102,7 @@ import {
   type GallerySortField,
   getGalleryIds,
   getGalleryGrid,
+  photoFilterQuery,
 } from '../api/gallery'
 import {
   listPhotoGroups,
@@ -362,6 +364,10 @@ const toolbar = useListToolbar({
 //    desktop sidebar is hidden) ────────────────────────────────────────────
 const albumDialogVisible = ref(false)
 const albumDialogPhotoIds = computed(() => Array.from(selectedIds.value))
+
+// The current filter as a rule (#1548, stage 5).
+const saveRuleOpen = ref(false)
+const saveRuleInput = computed<MemberRuleInput>(() => ({ type: 'photo', filter: photoFilterQuery(filter.value) }))
 
 // Basket and collections (#1548): the same two actions every list offers.
 const basket = useBasketStore()
@@ -949,6 +955,20 @@ function triggerFileSelect() {
 // overflow dropdown. Order = reading order.
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
+
+  // A filter worth keeping becomes a rule collection (#1548, stage 5). Not a
+  // filter that is itself a collection, and not while photos are picked.
+  if (activeCount.value > 0 && !filter.value.collectionId && !selectMode.value) {
+    items.push({
+      key: 'save-rule',
+      label: 'Als Regel-Mappe',
+      title: 'Filter als Regel-Sammelmappe speichern',
+      icon: 'pi pi-folder',
+      severity: 'secondary',
+      outlined: true,
+      command: () => (saveRuleOpen.value = true),
+    })
+  }
 
   if (jumpButton.value) {
     items.push({
@@ -1938,6 +1958,11 @@ void refreshReviewSequence()
          on mobile (where the desktop sidebar is hidden) this is the only
          way to open it. -->
     <AddToCollectionDialog v-model:visible="collectionDialogOpen" :members="selectedPhotoRefs" />
+    <SaveRuleDialog
+      v-model:visible="saveRuleOpen"
+      :rule="saveRuleInput"
+      :summary="filterChips.map((c) => c.label).join(' · ')"
+    />
     <PhotoAlbumDialog
       v-model:visible="albumDialogVisible"
       :photo-ids="albumDialogPhotoIds"

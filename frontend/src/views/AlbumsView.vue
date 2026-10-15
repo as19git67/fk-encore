@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import SelectionBar from '../components/layout/SelectionBar.vue'
+import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
+import type { ToolbarItem } from '../components/ResponsiveToolbar.vue'
+import { useListSelection } from '../composables/useListSelection'
+import { useBasketStore } from '../stores/basket'
+import type { MemberRef } from '../api/collections'
 import CollectionSelect from '../components/collections/CollectionSelect.vue'
 import { getAnyCollection } from '../api/collections'
 import { collectionName } from '../composables/useCollectionNames'
@@ -517,6 +523,44 @@ watch([appliedAlbumFilter, appliedAlbumSort, search.term], async () => {
 
 // Declared last: `useListToolbar` reads the refs eagerly, so everything it
 // points at has to exist by now.
+// ── Selection: albums into the basket or a collection (#1548) ──────────────
+const selection = useListSelection({ loadedIds: () => filteredAlbums.value.map((a) => a.id) })
+const { selectMode, selectedIds } = selection
+const basket = useBasketStore()
+const albumCollectionOpen = ref(false)
+const selectedAlbumRefs = computed<MemberRef[]>(() =>
+  [...selectedIds.value].map((id) => ({ entity_type: 'album' as const, entity_id: id })),
+)
+const albumSelectionActions = computed<ToolbarItem[]>(() => [
+  {
+    key: 'basket',
+    label: 'In den Basket',
+    title: 'In den Basket legen',
+    icon: 'pi pi-shopping-cart',
+    severity: 'secondary',
+    disabled: selectedIds.value.size === 0,
+    command: () =>
+      basket.add(
+        selectedAlbumRefs.value.map((ref) => ({
+          ...ref,
+          display: { title: albums.value.find((a) => a.id === ref.entity_id)?.name },
+        })),
+      ),
+  },
+  {
+    key: 'collection',
+    label: 'In Sammelmappe',
+    title: 'In Sammelmappe legen',
+    icon: 'pi pi-folder',
+    severity: 'secondary',
+    disabled: selectedIds.value.size === 0,
+    command: () => (albumCollectionOpen.value = true),
+  },
+])
+function onAlbumToggle(album: Album, index: number, range: boolean) {
+  void selection.toggle({ id: album.id }, { index, range })
+}
+
 const toolbar = useListToolbar({
   search,
   filter: {
@@ -531,6 +575,7 @@ const toolbar = useListToolbar({
     total: () => albums.value.length,
     loading: () => loading.value,
   },
+  selection: { active: selectMode, toggle: selection.toggleMode },
 })
 
 onMounted(async () => {
@@ -569,6 +614,10 @@ onMounted(async () => {
       <ListToolbar :model="toolbar" />
     </template>
 
+    <template #selection>
+      <SelectionBar v-if="selectMode" :selection="selection" :actions="albumSelectionActions" noun="Alben" />
+    </template>
+
     <template #notice>
       <!-- Service status warning bar -->
       <ServiceStatusBar />
@@ -602,8 +651,12 @@ onMounted(async () => {
       ref="gridRef"
       :albums="filteredAlbums"
       :rememberedAlbumId="rememberedAlbumId"
+      :select-mode="selectMode"
+      :selected-ids="selectedIds"
       @open="openAlbum"
+      @toggle="onAlbumToggle"
     />
+    <AddToCollectionDialog v-model:visible="albumCollectionOpen" :members="selectedAlbumRefs" />
 
     <Dialog v-model:visible="showCreateDialog" class="dialog-md" header="Neues Album erstellen" :modal="true">
       <div class="dialog-content">

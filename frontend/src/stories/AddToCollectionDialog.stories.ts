@@ -14,7 +14,7 @@ function summary(id: number, name: string, extra: Partial<CollectionSummary> = {
   return {
     id, name, description: null, entity_type: null, kind: 'manual', visibility: 'private', group_id: null,
     archived_at: null, created_by: 'user', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
-    favourite: false, last_opened_at: null, counts: {}, total: 0, can_administer: true, ...extra,
+    favourite: false, last_opened_at: null, counts: {}, total: 0, can_administer: true, rule: null, ...extra,
   }
 }
 

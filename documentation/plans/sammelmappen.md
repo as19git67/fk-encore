@@ -132,7 +132,7 @@ collections.
      members grouped by type, each group with "Als Liste öffnen", search,
      type filter, sort, remove, hidden members counted.
    - The chips of `InCollectionsCard` link to the collection.
-4. **Grouped action menu for mixed collections** — done:
+4. **Grouped action menu for mixed collections** — done (#1560):
    - `/sammelmappen/:id` has a selection mode (`useListSelection`, the
      usual `SelectionBar`; a member is keyed by one number that encodes
      type and id, `utils/collectionActions.ts`).
@@ -145,8 +145,27 @@ collections.
      Actions that need a module's own dialog with whole objects (tags,
      batch attributes with tristate) stay in that module's list, reachable
      through "Als Liste öffnen".
-5. Rules for photos, transactions, securities and meters; "create album from
-   collection".
+5. **Rules for photos, transactions, securities and meters; album from a
+   collection** — done:
+   - A rule collection has `kind = 'rule'`, is typed for the rule's kind and
+     stores the rule in `rule` (`collections/rules.ts`): photos keep a
+     gallery filter (the gallery's URL form, typed by `coercePhotoFilter`),
+     transactions keep the list's criteria (accounts, text, tags, dates,
+     tax-relevant), securities depots and statuses (confirmed by default),
+     meters types and a location text.
+   - Rules run as the collection's owner, on create, on change, on demand
+     ("Regel jetzt anwenden") and every hour (`collections/rules-cron.ts`).
+     What the rule added it takes away again; a member taken out by hand is
+     remembered in `excluded_ids`. "Regel beenden" keeps the members as
+     hand-picked ones.
+   - Making one: "Als Regel-Mappe" in the gallery and the transaction list
+     saves the current filter; the new-collection dialog offers a rule for
+     meters (types, location) and securities (depots).
+   - "Album daraus erstellen" copies the photos a reader can see into a new
+     album (needs `albums.manage`); the collection stays as it is.
+   - Also in this stage: the albums overview got a selection mode with "In
+     den Basket" and "In Sammelmappe"; the album page hides its own "Album
+     in den Basket / in Sammelmappe" while photos are being picked.
 6. Exporters per type and export profiles; ZIP; "save as document".
 7. Sending: share sheet in web and iOS, email via SMTP.
 8. Anonymous share links (after per-item access checks).

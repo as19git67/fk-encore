@@ -32,11 +32,28 @@ import { useAuthStore } from '../stores/auth'
 const props = defineProps<{
   albums: Album[]
   rememberedAlbumId?: number | null
+  /** Select mode (#1548): a click picks the album instead of opening it. */
+  selectMode?: boolean
+  selectedIds?: Set<number>
 }>()
 
 const emit = defineEmits<{
   open: [album: Album]
+  /** A pick in select mode; `range` for a shift-click. */
+  toggle: [album: Album, index: number, range: boolean]
 }>()
+
+function isSelected(album: Album): boolean {
+  return props.selectedIds?.has(album.id) ?? false
+}
+
+function activate(album: Album, event?: MouseEvent | KeyboardEvent) {
+  if (props.selectMode) {
+    emit('toggle', album, props.albums.indexOf(album), !!(event && 'shiftKey' in event && event.shiftKey))
+    return
+  }
+  emit('open', album)
+}
 
 // ── Layout: column count + cell size ────────────────────────────────────────
 // Constants match VirtualGallery so the album list and the photo gallery
@@ -234,12 +251,24 @@ watch(
           :key="album.id"
           :data-album-id="album.id"
           class="album-card"
-          :class="{ 'album-card--restored-focus': restoredFocusId === album.id }"
+          :class="{
+            'album-card--restored-focus': restoredFocusId === album.id,
+            'album-card--selected': selectMode && isSelected(album),
+          }"
           tabindex="0"
-          @click="emit('open', album)"
-          @keydown.enter="emit('open', album)"
-          @keydown.space.prevent="emit('open', album)"
+          :role="selectMode ? 'checkbox' : undefined"
+          :aria-checked="selectMode ? isSelected(album) : undefined"
+          :aria-label="selectMode ? `Auswählen: ${album.name}` : undefined"
+          @click="activate(album, $event)"
+          @keydown.enter="activate(album, $event)"
+          @keydown.space.prevent="activate(album, $event)"
         >
+          <i
+            v-if="selectMode"
+            class="pi select-badge"
+            :class="isSelected(album) ? 'pi-check-circle' : 'pi-circle'"
+            aria-hidden="true"
+          />
           <div class="album-cover">
             <HeicImage
               v-if="album.cover_filename"
@@ -315,6 +344,22 @@ watch(
 }
 
 .album-card:hover { transform: scale(1.02); }
+
+.album-card--selected {
+  outline: 3px solid var(--p-primary-color);
+  outline-offset: -3px;
+}
+
+.select-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  font-size: var(--text-xl);
+  color: var(--p-primary-contrast-color);
+  background: var(--p-primary-color);
+  border-radius: 50%;
+}
 
 .album-card:focus,
 .album-card.album-card--restored-focus {

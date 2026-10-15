@@ -46,6 +46,7 @@ import { triggerTagWorker } from "./tag-worker";
 import { normalizeCounterparty } from "./tag-suggester";
 import { createSuggestionsForTransaction } from "./document-match.service";
 import { hasFinanceAdmin, readableFinanceAccountIds } from "./account-acl";
+import { taxRelevantCondition } from "./transaction-conditions";
 
 console.log("[boot] finance/transactions.ts: all imports resolved");
 
@@ -243,17 +244,6 @@ async function annotateTaxRelevantSplits(
  * Matches transactions that are tax-relevant themselves or have at
  * least one tax-relevant split.
  */
-function taxRelevantCondition() {
-  const flaggedSplits = db
-    .select({ id: financeTransactionSplit.transaction_id })
-    .from(financeTransactionSplit)
-    .where(eq(financeTransactionSplit.is_tax_relevant, true));
-  return or(
-    eq(financeTransaction.is_tax_relevant, true),
-    inArray(financeTransaction.id, flaggedSplits),
-  )!;
-}
-
 /**
  * Normalises Postgres timestamp string ('YYYY-MM-DD HH:MM:SS') to an
  * ISO date when the time component is zero, leaving ISO-formatted

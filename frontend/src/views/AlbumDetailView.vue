@@ -2335,7 +2335,9 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
 
   // The album itself can be set aside or filed, like any other item (#1548).
-  if (album.value) {
+  // Not while photos are being picked: then the selection bar offers the
+  // same two actions for the photos, and two pairs side by side confuse.
+  if (album.value && !selectMode.value) {
     items.push({
       key: 'album-basket',
       title: albumInBasket.value ? 'Album aus dem Basket nehmen' : 'Album in den Basket legen',

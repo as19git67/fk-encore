@@ -9,7 +9,7 @@
 import { API_BASE_URL, apiFetch } from './client'
 import type { DocumentStatus, DocumentVisibility } from './documents'
 
-export type CollectionKind = 'manual' | 'dossier' | 'basket'
+export type CollectionKind = 'manual' | 'dossier' | 'basket' | 'rule'
 
 /** What a dossier takes in (#1480); every part optional, see documents/dossiers.ts. */
 export interface CollectionRule {
@@ -340,6 +340,8 @@ export interface CollectionSummary {
   counts: Partial<Record<CollectionEntityType, number>>
   total: number
   can_administer: boolean
+  /** The membership rule of a rule collection (#1548, stage 5); null otherwise. */
+  rule: MemberRule | null
 }
 
 export interface CollectionMember extends MemberRef {
@@ -475,4 +477,52 @@ export function updateAnyCollection(
 
 export function deleteAnyCollection(id: number): Promise<{ deleted: boolean }> {
   return apiFetch(`/collections/${id}`, { method: 'DELETE' })
+}
+
+// ─── Rules (#1548, stage 5) ────────────────────────────────────────────────
+
+export interface TransactionRuleCriteria {
+  account_ids?: number[]
+  tags?: string[]
+  text?: string
+  from?: string
+  to?: string
+  tax_relevant?: boolean
+}
+
+export type MemberRule =
+  | { type: 'photo'; filter: Record<string, string | number | boolean>; excluded_ids?: number[] }
+  | { type: 'transaction'; criteria: TransactionRuleCriteria; excluded_ids?: number[] }
+  | { type: 'security'; criteria: { account_ids?: number[]; statuses?: Array<'confirmed' | 'proposed' | 'ignored'> }; excluded_ids?: number[] }
+  | { type: 'meter'; criteria: { meter_types?: Array<'electricity' | 'water' | 'gas' | 'operating_hours'>; location?: string }; excluded_ids?: number[] }
+
+export type MemberRuleInput =
+  | { type: 'photo'; filter: Record<string, string | number | boolean> }
+  | { type: 'transaction'; criteria: TransactionRuleCriteria }
+  | { type: 'security'; criteria: { account_ids?: number[]; statuses?: Array<'confirmed' | 'proposed' | 'ignored'> } }
+  | { type: 'meter'; criteria: { meter_types?: Array<'electricity' | 'water' | 'gas' | 'operating_hours'>; location?: string } }
+
+export interface RuleCollectionResponse {
+  collection: CollectionDetail
+  applied: { added: number; removed: number }
+}
+
+export function createRuleCollection(payload: {
+  name: string
+  description?: string | null
+  rule: MemberRuleInput
+}): Promise<RuleCollectionResponse> {
+  return apiFetch('/collections/rule', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function setCollectionRule(id: number, rule: MemberRuleInput | null): Promise<RuleCollectionResponse> {
+  return apiFetch(`/collections/${id}/rule`, { method: 'PUT', body: JSON.stringify({ rule }) })
+}
+
+export function applyCollectionRuleNow(id: number): Promise<RuleCollectionResponse> {
+  return apiFetch(`/collections/${id}/apply-rule`, { method: 'POST' })
+}
+
+export function createAlbumFromCollection(id: number, name: string): Promise<{ album_id: number; photos: number }> {
+  return apiFetch(`/collections/${id}/to-album`, { method: 'POST', body: JSON.stringify({ name }) })
 }
