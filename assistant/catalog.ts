@@ -6,7 +6,8 @@
  *     the model (results to trim, a list route to attach, a composite);
  *   - entries generated from the OpenAPI spec Encore emits
  *     (`encore gen client --lang=openapi`, `openapi/spec.json`), filtered
- *     through `tool-allowlist.ts`, which decides what is offered at all.
+ *     through `tool-allowlist.ts`, which decides what is offered at all and
+ *     how each endpoint is called.
  *
  * A user sees only the entries whose permissions they hold, so the model
  * cannot even ask for the rest; running a tool checks the permissions again,
@@ -16,7 +17,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { call } from "./clients";
 import { digestOf, table, type Cell } from "./format";
 import { TOOL_ALLOWLIST, type AllowlistEntry } from "./tool-allowlist";
 import { DOCUMENT_TOOLS } from "./tools/documents";
@@ -57,12 +57,6 @@ interface OpenApiOperation {
 
 export interface OpenApiSpec {
   paths: Record<string, Record<string, OpenApiOperation>>;
-}
-
-/** `GET:photo.listPersons` → service `photo`, endpoint `listPersons`. */
-export function parseOperationId(operationId: string): { service: string; endpoint: string } | null {
-  const m = /^[A-Z]+:([A-Za-z0-9_-]+)\.([A-Za-z0-9_]+)$/.exec(operationId);
-  return m ? { service: m[1], endpoint: m[2] } : null;
 }
 
 /** A plain schema for the model: no `$ref`s, which the model cannot follow. */
@@ -115,9 +109,7 @@ function toCell(v: unknown): Cell {
   return JSON.stringify(v).slice(0, 80);
 }
 
-function generatedTool(entry: AllowlistEntry, op: OpenApiOperation): ToolSpec | null {
-  const target = parseOperationId(entry.operationId);
-  if (!target) return null;
+function generatedTool(entry: AllowlistEntry, op: OpenApiOperation): ToolSpec {
   const { schema, names } = operationParameters(op);
   return {
     name: entry.name,
@@ -129,7 +121,7 @@ function generatedTool(entry: AllowlistEntry, op: OpenApiOperation): ToolSpec | 
     async run(args) {
       const params: Record<string, unknown> = {};
       for (const name of names) if (args[name] !== undefined) params[name] = args[name];
-      const result = await call<unknown>(target.service, target.endpoint, params);
+      const result = await entry.invoke(params);
       const rows = rowsOf(result);
       const columns = entry.columns
         ?? Array.from(new Set(rows.flatMap((r) => Object.keys(r)))).filter((k) => {
@@ -166,8 +158,7 @@ export function toolsFromOpenApi(
   const missing: string[] = [];
   for (const entry of allowlist) {
     const op = byId.get(entry.operationId);
-    const tool = op ? generatedTool(entry, op) : null;
-    if (tool) tools.push(tool);
+    if (op) tools.push(generatedTool(entry, op));
     else missing.push(entry.operationId);
   }
   return { tools, missing };

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("./clients", () => ({ call: vi.fn(), endpoint: vi.fn() }));
+vi.mock("~encore/clients", async () => (await import("./clients.test-helper")).clients);
 vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
-import { call } from "./clients";
+import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
 import { buildSystemPrompt, fitContext, runTurn, timeGrounding } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
@@ -44,13 +44,13 @@ function answer(text: string): ChatReply {
 }
 
 beforeEach(() => {
-  vi.mocked(call).mockReset();
+  resetClients();
   vi.mocked(listPlans).mockReset();
 });
 
 describe("the example questions of #1524", () => {
   it("Lastschriften diesen Monat → upcoming_direct_debits", async () => {
-    vi.mocked(call).mockResolvedValue({
+    clients.finance.listUpcomingDebits.mockResolvedValue({
       from: "2026-10-15", until: "2026-10-31", count: 1, total_amount: "-84.00",
       items: [{ mandate_id: 3, account_label: "Giro", counterparty: "Stadtwerke Musterstadt", expected_date: "2026-10-20", overdue: false, typical_amount: "-84.00", interval_days: 30 }],
     });
@@ -65,7 +65,7 @@ describe("the example questions of #1524", () => {
       tools: catalogFor(USER), chat: fn, emit: (e) => events.push(e), now: NOW,
     });
 
-    expect(call).toHaveBeenCalledWith("finance", "listUpcomingDebits", { from: undefined, until: "2026-10-31" });
+    expect(clients.finance.listUpcomingDebits).toHaveBeenCalledWith({ from: undefined, until: "2026-10-31" });
     expect(res.answer).toContain("Stadtwerke");
     expect(res.rounds).toBe(2);
     expect(res.blocks[0]).toMatchObject({ kind: "debits", route: "/finanzen/lastschriften" });
@@ -78,15 +78,13 @@ describe("the example questions of #1524", () => {
   });
 
   it("Protokolle der Eigentümerversammlung → list_categories, then search_documents with the slug", async () => {
-    vi.mocked(call).mockImplementation(async (_svc, name) => {
-      if (name === "listDocumentCategories") {
-        return { items: [
-          { id: 1, slug: "kapitalanlage", name: "Kapitalanlage", parent_id: null },
-          { id: 2, slug: "kapitalanlage-immobilie-muenchen", name: "Immobilie München", parent_id: 1 },
-        ] };
-      }
-      return { items: [{ id: 101, title: "Protokoll Eigentümerversammlung 2025", doc_date: "2025-06-12", correspondent_display: "Muster Hausverwaltung", category_slug: "kapitalanlage-immobilie-muenchen" }] };
-    });
+    clients.documents.listDocumentCategories.mockResolvedValue({ items: [
+      { id: 1, slug: "kapitalanlage", name: "Kapitalanlage", parent_id: null },
+      { id: 2, slug: "kapitalanlage-immobilie-muenchen", name: "Immobilie München", parent_id: 1 },
+    ] });
+    clients.documents.searchDocumentsEndpoint.mockResolvedValue({ items: [
+      { id: 101, title: "Protokoll Eigentümerversammlung 2025", doc_date: "2025-06-12", correspondent_display: "Muster Hausverwaltung", category_slug: "kapitalanlage-immobilie-muenchen" },
+    ] });
     const { fn, requests } = scripted([
       calls(["list_categories", {}]),
       calls(["search_documents", { q: "Protokoll Eigentümerversammlung", category: "kapitalanlage-immobilie-muenchen" }]),
@@ -98,8 +96,8 @@ describe("the example questions of #1524", () => {
       tools: catalogFor(USER), chat: fn, now: NOW,
     });
 
-    expect(call).toHaveBeenNthCalledWith(1, "documents", "listDocumentCategories");
-    expect(call).toHaveBeenNthCalledWith(2, "documents", "searchDocumentsEndpoint", expect.objectContaining({
+    expect(calledEndpoints()).toEqual(["documents.listDocumentCategories", "documents.searchDocumentsEndpoint"]);
+    expect(clients.documents.searchDocumentsEndpoint).toHaveBeenCalledWith(expect.objectContaining({
       q: "Protokoll Eigentümerversammlung", category: "kapitalanlage-immobilie-muenchen", mode: "hybrid",
     }));
     // The category tool shows the path, so the model can find "München".
@@ -109,7 +107,7 @@ describe("the example questions of #1524", () => {
   });
 
   it("Urlaubsreisen letztes Jahr → list_recaps(kind trip, 2025) and list_trip_plans together", async () => {
-    vi.mocked(call).mockResolvedValue({ recaps: [
+    clients.photo.listRecaps.mockResolvedValue({ recaps: [
       { id: 7, kind: "trip", title: "Sommer am Gardasee", subtitle: null, period_start: "2025-08-02", period_end: "2025-08-16", photo_count: 212 },
       { id: 8, kind: "trip", title: "Ostsee", subtitle: null, period_start: "2024-07-20", period_end: "2024-08-03", photo_count: 90 },
       { id: 9, kind: "person", title: "Mit Oma", subtitle: null, period_start: "2025-01-01", period_end: "2025-12-31", photo_count: 40 },
@@ -128,7 +126,7 @@ describe("the example questions of #1524", () => {
       tools: catalogFor(USER), chat: fn, now: NOW,
     });
 
-    expect(call).toHaveBeenCalledWith("photo", "listRecaps");
+    expect(clients.photo.listRecaps).toHaveBeenCalledTimes(1);
     expect(listPlans).toHaveBeenCalledWith(7);
     const results = requests[1].messages.filter((m) => m.role === "tool") as Array<{ content: string }>;
     expect(results[0].content).toContain("Sommer am Gardasee");
@@ -140,7 +138,7 @@ describe("the example questions of #1524", () => {
   });
 
   it("Album mit den Favoriten von 2025 → list_photos(favorite, 2025)", async () => {
-    vi.mocked(call).mockResolvedValue({ photos: [{ id: 11, taken_at: "2025-03-01T10:00:00Z" }, { id: 12, taken_at: "2025-07-01T10:00:00Z" }] });
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 11, taken_at: "2025-03-01T10:00:00Z" }, { id: 12, taken_at: "2025-07-01T10:00:00Z" }] });
     const { fn } = scripted([
       calls(["list_photos", { favorite: true, date_from: "2025-01-01", date_to: "2025-12-31" }]),
       answer("Ich habe 2 favorisierte Fotos aus 2025 gefunden."),
@@ -151,7 +149,7 @@ describe("the example questions of #1524", () => {
       tools: catalogFor(USER), chat: fn, now: NOW,
     });
 
-    expect(call).toHaveBeenCalledWith("photo", "listPhotos", expect.objectContaining({
+    expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({
       favorite: true, dateFrom: "2025-01-01", dateTo: "2025-12-31",
     }));
     expect(res.blocks[0]).toMatchObject({
@@ -179,14 +177,14 @@ describe("the loop", () => {
       answer("Dafür habe ich keinen Zugriff."),
     ]);
     await runTurn({ user: noFinance, history: [], question: "Zeig mir die Miete", tools: HAND_TOOLS, chat: fn, now: NOW });
-    expect(call).not.toHaveBeenCalled();
+    expect(calledEndpoints()).toEqual([]);
     const result = requests[1].messages.at(-1) as { content: string };
     expect(result.content).toBe("error: list_transactions is not in the catalog");
     expect(requests[0].tools!.some((t) => (t as { function: { name: string } }).function.name === "list_transactions")).toBe(false);
   });
 
   it("a failing tool becomes an error the model can explain", async () => {
-    vi.mocked(call).mockRejectedValue(new Error("meter not found"));
+    clients.meter.listReadings.mockRejectedValue(new Error("meter not found"));
     const { fn, requests } = scripted([calls(["latest_readings", { meter_id: 99 }]), answer("Den Zähler gibt es nicht.")]);
     const events: TurnEvent[] = [];
     await runTurn({ user: USER, history: [], question: "Stand?", tools: catalogFor(USER), chat: fn, now: NOW, emit: (e) => events.push(e) });
@@ -195,7 +193,7 @@ describe("the loop", () => {
   });
 
   it("the last round forbids tools, so the loop always ends with an answer", async () => {
-    vi.mocked(call).mockResolvedValue({ items: [] });
+    clients.finance.listAccounts.mockResolvedValue({ items: [] });
     const { fn, requests } = scripted([
       calls(["list_accounts", {}]),
       { content: "Keine Konten.", tool_calls: [{ id: "z", type: "function", function: { name: "list_accounts", arguments: "{}" } }], finish_reason: "tool_calls" },
@@ -203,11 +201,11 @@ describe("the loop", () => {
     const res = await runTurn({ user: USER, history: [], question: "Konten?", tools: catalogFor(USER), chat: fn, now: NOW, maxRounds: 2 });
     expect(requests.map((r) => r.tool_choice)).toEqual(["auto", "none"]);
     expect(res.answer).toBe("Keine Konten.");
-    expect(call).toHaveBeenCalledTimes(1);
+    expect(clients.finance.listAccounts).toHaveBeenCalledTimes(1);
   });
 
   it("past the schema budget the model gets describe_tools and fetches schemas first", async () => {
-    vi.mocked(call).mockResolvedValue({ meters: [] });
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
     const { fn, requests } = scripted([
       calls(["list_meters", {}]),
       calls(["describe_tools", { names: ["list_meters"] }]),
@@ -219,7 +217,7 @@ describe("the loop", () => {
     expect(offered[0]).toEqual(["describe_tools"]);
     expect((requests[1].messages.at(-1) as { content: string }).content).toBe("error: call describe_tools for list_meters first");
     expect(offered[2]).toEqual(["describe_tools", "list_meters"]);
-    expect(call).toHaveBeenCalledTimes(1);
+    expect(clients.meter.listMeters).toHaveBeenCalledTimes(1);
     expect((requests[0].messages[0] as { content: string }).content).toContain("fetch a tool's argument schema with describe_tools");
   });
 

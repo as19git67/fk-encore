@@ -280,7 +280,10 @@ behind it.
        allow-listed operations the spec lacks; the stage's read tools are
        hand-written in `assistant/tools/` because each needs trimming or a
        list route. Regenerating the spec with every service
-       (`scripts/generate-openapi.sh`) lets the allow-list grow without code.
+       (`scripts/generate-openapi.sh`) lets the allow-list grow; each entry
+       still carries one line that calls its endpoint
+       (`invoke: () => photo.listPersons()`), because Encore's parser accepts
+       a service client only as a direct call, never looked up by name.
      - *Trip plans are read through the plan store*, with the endpoint's own
        `photos.view` check: the client name Encore generates for the
        hyphenated `trip-planner` service could not be checked without the

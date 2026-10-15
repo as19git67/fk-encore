@@ -11,8 +11,14 @@
  *
  * Endpoints whose results need trimming, a list route or a computation get a
  * hand-written tool in `tools/` instead and are not listed here.
+ *
+ * `invoke` is the one line per entry that cannot come from the spec: Encore's
+ * parser accepts a service client only as a direct call
+ * (`photo.listPersons(...)`), never looked up by name, so each entry says how
+ * its endpoint is called. Schema and summary still come from the spec.
  */
 
+import { photo } from "~encore/clients";
 import type { ToolKind } from "./types";
 
 export interface AllowlistEntry {
@@ -24,6 +30,8 @@ export interface AllowlistEntry {
   summary?: string;
   /** Fields of each result row shown to the model; the rest are dropped. */
   columns?: string[];
+  /** Calls the endpoint as the current user with the arguments the schema allows. */
+  invoke: (params: Record<string, unknown>) => Promise<unknown>;
 }
 
 export const TOOL_ALLOWLIST: AllowlistEntry[] = [
@@ -34,5 +42,6 @@ export const TOOL_ALLOWLIST: AllowlistEntry[] = [
     permissions: ["module.photos", "photos.view"],
     summary: "People recognised in the photos (id, name); pass ids to list_photos as person_ids.",
     columns: ["id", "name", "faceCount"],
+    invoke: () => photo.listPersons(),
   },
 ];

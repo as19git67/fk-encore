@@ -71,9 +71,13 @@ function summary(row: typeof assistantConversation.$inferSelect): ConversationSu
   return { id: row.id, title: row.title, created_at: row.created_at, updated_at: row.updated_at };
 }
 
+export interface CreateConversationRequest {
+  title?: string;
+}
+
 export const createConversation = api(
   { expose: true, method: "POST", path: "/assistant/conversations", auth: true },
-  async (req: { title?: string }): Promise<ConversationSummary> => {
+  async (req: CreateConversationRequest): Promise<ConversationSummary> => {
     const auth = currentUser();
     const [row] = await db
       .insert(assistantConversation)

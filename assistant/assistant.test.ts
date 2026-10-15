@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { getAuthData } from "~encore/auth";
 import { sql } from "drizzle-orm";
 
-vi.mock("./clients", () => ({ call: vi.fn(), endpoint: vi.fn() }));
+vi.mock("~encore/clients", async () => (await import("./clients.test-helper")).clients);
 vi.mock("./llm-client", async (importOriginal) => {
   const real = await importOriginal<typeof import("./llm-client")>();
   return { ...real, chat: vi.fn() };
@@ -11,7 +11,7 @@ vi.mock("./llm-client", async (importOriginal) => {
 import db from "../db/database";
 import { assistantConversation, assistantMessage } from "../db/schema";
 import { __resetRateLimiterForTests } from "../user/rateLimiter";
-import { call } from "./clients";
+import { clients, resetClients } from "./clients.test-helper";
 import { chat, LlmServiceUnavailableError, type ChatReply } from "./llm-client";
 import { __resetLiveTurnsForTests } from "./live";
 import {
@@ -52,7 +52,7 @@ beforeEach(async () => {
   await db.delete(assistantConversation);
   await ensureUser(701);
   await ensureUser(702);
-  vi.mocked(call).mockReset();
+  resetClients();
   vi.mocked(chat).mockReset();
   __resetRateLimiterForTests();
   __resetLiveTurnsForTests();
@@ -77,7 +77,7 @@ describe("conversations", () => {
 
 describe("asking", () => {
   it("runs the turn, keeps the transcript and shows only question and answer", async () => {
-    vi.mocked(call).mockResolvedValue({ meters: [{ id: 3, name: "Strom Haus", type: "electricity", unit: "kWh", lastReadingValue: 1234, lastReadingAt: "2026-10-01T00:00:00Z" }] });
+    clients.meter.listMeters.mockResolvedValue({ meters: [{ id: 3, name: "Strom Haus", type: "electricity", unit: "kWh", lastReadingValue: 1234, lastReadingAt: "2026-10-01T00:00:00Z" }] });
     vi.mocked(chat)
       .mockResolvedValueOnce(toolCall("list_meters", {}))
       .mockResolvedValueOnce(text("Der Stromzähler stand zuletzt bei 1234 kWh."));
@@ -88,7 +88,7 @@ describe("asking", () => {
     expect(res.answer).toBe("Der Stromzähler stand zuletzt bei 1234 kWh.");
     expect(res.rounds).toBe(2);
     expect(res.blocks[0]).toMatchObject({ kind: "meters", route: "/zaehler" });
-    expect(call).toHaveBeenCalledWith("meter", "listMeters", {});
+    expect(clients.meter.listMeters).toHaveBeenCalledWith({});
 
     const rows = await db.select().from(assistantMessage);
     expect(rows.map((r) => r.role)).toEqual(["user", "assistant", "tool", "assistant"]);
@@ -105,7 +105,7 @@ describe("asking", () => {
   });
 
   it("replays earlier questions and answers, not the tool rounds", async () => {
-    vi.mocked(call).mockResolvedValue({ meters: [] });
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
     vi.mocked(chat)
       .mockResolvedValueOnce(toolCall("list_meters", {}))
       .mockResolvedValueOnce(text("Keine Zähler."))
@@ -151,7 +151,7 @@ describe("watching a turn", () => {
   const watch = watchTurn as unknown as (h: { turnId: string }, s: ReturnType<typeof fakeStream>["stream"]) => Promise<void>;
 
   it("the stream opened first sees every event of the posted turn", async () => {
-    vi.mocked(call).mockResolvedValue({ meters: [] });
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
     vi.mocked(chat)
       .mockResolvedValueOnce(toolCall("list_meters", {}))
       .mockImplementationOnce(async (_req, onToken) => {

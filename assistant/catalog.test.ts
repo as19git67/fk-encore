@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("./clients", () => ({ call: vi.fn(), endpoint: vi.fn() }));
+vi.mock("~encore/clients", async () => (await import("./clients.test-helper")).clients);
 
-import { call } from "./clients";
 import {
   allTools,
   catalogFor,
@@ -10,7 +9,6 @@ import {
   describeTools,
   DESCRIBE_MAX,
   HAND_TOOLS,
-  parseOperationId,
   toolsFromOpenApi,
   __resetCatalogForTests,
   type OpenApiSpec,
@@ -50,15 +48,19 @@ const SPEC: OpenApiSpec = {
   },
 };
 
+const invokePersons = vi.fn();
+const invokePerson = vi.fn();
+
 const ALLOW: AllowlistEntry[] = [
-  { operationId: "GET:photo.listPersons", name: "list_persons", kind: "read", permissions: ["photos.view"], columns: ["id", "name"] },
-  { operationId: "GET:photo.getPersonDetails", name: "get_person", kind: "read", permissions: ["photos.view"] },
-  { operationId: "POST:widget.search", name: "search_widgets", kind: "read", permissions: [], summary: "Widgets by text." },
-  { operationId: "GET:photo.gone", name: "gone", kind: "read", permissions: [] },
+  { operationId: "GET:photo.listPersons", name: "list_persons", kind: "read", permissions: ["photos.view"], columns: ["id", "name"], invoke: invokePersons },
+  { operationId: "GET:photo.getPersonDetails", name: "get_person", kind: "read", permissions: ["photos.view"], invoke: invokePerson },
+  { operationId: "POST:widget.search", name: "search_widgets", kind: "read", permissions: [], summary: "Widgets by text.", invoke: vi.fn() },
+  { operationId: "GET:photo.gone", name: "gone", kind: "read", permissions: [], invoke: vi.fn() },
 ];
 
 beforeEach(() => {
-  vi.mocked(call).mockReset();
+  invokePersons.mockReset();
+  invokePerson.mockReset();
   __resetCatalogForTests();
 });
 
@@ -82,14 +84,14 @@ describe("generation from the OpenAPI spec", () => {
     expect(search.summary).toBe("Widgets by text.");
   });
 
-  it("runs through the service client and trims rows to the listed columns", async () => {
-    vi.mocked(call).mockResolvedValue({
+  it("runs through the entry's service call and trims rows to the listed columns", async () => {
+    invokePersons.mockResolvedValue({
       enableLocalFaces: true,
       persons: [{ id: 1, name: "Person A", user_id: 9, cover_bbox: { x: 1 } }, { id: 2, name: "Person B", user_id: 9 }],
     });
     const { tools } = toolsFromOpenApi(SPEC, ALLOW);
     const out = await tools[0].run({ ignored: 1 }, { user: { userID: "1", permissions: [] }, today: "2026-10-15" });
-    expect(call).toHaveBeenCalledWith("photo", "listPersons", {});
+    expect(invokePersons).toHaveBeenCalledWith({});
     expect(out.rowCount).toBe(2);
     expect(out.text).toContain("id | name");
     expect(out.text).toContain("1 | Person A");
@@ -98,19 +100,17 @@ describe("generation from the OpenAPI spec", () => {
   });
 
   it("passes only the operation's own parameters", async () => {
-    vi.mocked(call).mockResolvedValue({ id: 5, name: "Person C" });
+    invokePerson.mockResolvedValue({ id: 5, name: "Person C" });
     const { tools } = toolsFromOpenApi(SPEC, ALLOW);
     await tools.find((t) => t.name === "get_person")!.run({ id: 5, extra: "x" }, { user: { userID: "1", permissions: [] }, today: "2026-10-15" });
-    expect(call).toHaveBeenCalledWith("photo", "getPersonDetails", { id: 5 });
+    expect(invokePerson).toHaveBeenCalledWith({ id: 5 });
   });
 
-  it("parses Encore's operation ids", () => {
-    expect(parseOperationId("GET:photo.listAlbums")).toEqual({ service: "photo", endpoint: "listAlbums" });
-    expect(parseOperationId("POST:trip-planner.createPlan")).toEqual({ service: "trip-planner", endpoint: "createPlan" });
-    expect(parseOperationId("nonsense")).toBeNull();
-  });
-
-  it("the repository's spec yields the allow-listed tools beside the hand-written ones", () => {
+  it("the repository's spec yields the allow-listed tools beside the hand-written ones", async () => {
+    const { clients } = await import("./clients.test-helper");
+    clients.photo.listPersons.mockResolvedValue({ persons: [{ id: 1, name: "Person A", faceCount: 3 }] });
+    const persons = allTools().find((t) => t.name === "list_persons")!;
+    expect((await persons.run({}, { user: { userID: "1", permissions: [] }, today: "2026-10-15" })).text).toContain("Person A");
     const names = allTools().map((t) => t.name);
     expect(names).toContain("list_persons");
     for (const t of HAND_TOOLS) expect(names).toContain(t.name);

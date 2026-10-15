@@ -3,7 +3,7 @@
  * access per meter.
  */
 
-import { call } from "../clients";
+import { meter } from "~encore/clients";
 import { digestOf, int, isoDate, str, table } from "../format";
 import type { ToolSpec } from "../types";
 
@@ -22,7 +22,7 @@ export const listMeters: ToolSpec = {
   source: "hand",
   parameters: { type: "object", properties: {} },
   async run() {
-    const res = await call<{ meters: MeterItem[] }>("meter", "listMeters", {});
+    const res = await (meter.listMeters({})) as unknown as { meters: MeterItem[] };
     const rows = res.meters;
     return {
       text: table(
@@ -60,7 +60,7 @@ export const latestReadings: ToolSpec = {
     const id = int(args.meter_id);
     if (id === undefined) throw new Error("meter_id is required");
     const limit = int(args.limit, { min: 1, max: 20 }) ?? 5;
-    const res = await call<{ readings: Reading[]; total: number }>("meter", "listReadings", { id, limit });
+    const res = await (meter.listReadings({ id, limit })) as unknown as { readings: Reading[]; total: number };
     return {
       text: table(["id", "taken", "value", "source"], res.readings.map((r) => [r.id, r.takenAt.slice(0, 10), r.value, r.source]), { total: res.total, cap: limit }),
       digest: digestOf("latest_readings", res.readings.length, res.readings.map((r) => r.id)),
@@ -96,7 +96,7 @@ export const consumptionReport: ToolSpec = {
     const id = int(args.meter_id);
     if (id === undefined) throw new Error("meter_id is required");
     const granularity = str(args.granularity) ?? "month";
-    const res = await call<Report>("meter", "getMeterReport", { id, granularity, from: isoDate(args.from), to: isoDate(args.to) });
+    const res = await (meter.getMeterReport({ id, granularity, from: isoDate(args.from), to: isoDate(args.to) })) as unknown as Report;
     return {
       text: table(
         ["period", "consumption", "coverage"],

@@ -3,7 +3,7 @@
  * the per-account ACL apply exactly as on the finance pages.
  */
 
-import { call } from "../clients";
+import { finance } from "~encore/clients";
 import { digestOf, int, isoDate, money, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 
@@ -34,7 +34,7 @@ export const listAccounts: ToolSpec = {
   source: "hand",
   parameters: { type: "object", properties: {} },
   async run() {
-    const res = await call<{ items: AccountView[] }>("finance", "listAccounts");
+    const res = await (finance.listAccounts()) as unknown as { items: AccountView[] };
     const rows = res.items.filter((a) => !a.closed_at);
     return {
       text: table(["id", "label", "type", "currency"], rows.map((a) => [a.id, a.label, a.type_label, a.currency_code])),
@@ -65,14 +65,14 @@ export const listTransactions: ToolSpec = {
   async run(args) {
     const limit = int(args.limit, { min: 1, max: 50 }) ?? 25;
     const tags = Array.isArray(args.tags) ? args.tags.filter((t): t is string => typeof t === "string") : [];
-    const res = await call<{ items: TransactionView[]; total: number }>("finance", "listTransactions", {
+    const res = await (finance.listTransactions({
       q: str(args.q),
       from: isoDate(args.from),
       to: isoDate(args.to),
       accountId: int(args.account_id),
       tagsCsv: tags.length ? tags.join(",") : undefined,
       limit,
-    });
+    })) as unknown as { items: TransactionView[]; total: number };
     const rows = res.items;
     return {
       text: table(
@@ -110,7 +110,7 @@ export const analyzeSpending: ToolSpec = {
   async run(args) {
     const question = str(args.question);
     if (!question) throw new Error("question is required");
-    const res = await call<AnalysisResult>("finance", "query", { question });
+    const res = await (finance.query({ question })) as unknown as AnalysisResult;
     const lines = [
       `total: sum ${money(res.total.sum)} EUR over ${res.total.count} bookings (avg ${money(res.total.avg)})`,
     ];
@@ -152,9 +152,7 @@ export const upcomingDirectDebits: ToolSpec = {
     },
   },
   async run(args) {
-    const res = await call<{ from: string; until: string; items: UpcomingDebit[]; count: number; total_amount: string }>(
-      "finance", "listUpcomingDebits", { from: isoDate(args.from), until: isoDate(args.until) },
-    );
+    const res = await (finance.listUpcomingDebits({ from: isoDate(args.from), until: isoDate(args.until) })) as unknown as { from: string; until: string; items: UpcomingDebit[]; count: number; total_amount: string };
     return {
       text: table(
         ["mandate_id", "expected", "counterparty", "account", "typical_amount", "overdue"],

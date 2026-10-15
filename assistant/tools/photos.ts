@@ -3,7 +3,7 @@
  * and which photos the user may see (own, shared albums, group).
  */
 
-import { call } from "../clients";
+import { photo } from "~encore/clients";
 import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 
@@ -47,14 +47,14 @@ export const listPhotos: ToolSpec = {
     const personIds = Array.isArray(args.person_ids)
       ? args.person_ids.map((v) => int(v)).filter((v): v is number => v !== undefined)
       : [];
-    const res = await call<{ photos: PhotoRow[] }>("photo", "listPhotos", {
+    const res = await (photo.listPhotos({
       favorite: favorite || undefined,
       dateFrom,
       dateTo,
       personIds: personIds.length ? personIds.join(",") : undefined,
       personMode: personIds.length ? "include" : undefined,
       limit: PHOTO_COUNT_CAP + 1,
-    });
+    })) as unknown as { photos: PhotoRow[] };
     const capped = res.photos.length > PHOTO_COUNT_CAP;
     const photos = res.photos.slice(0, PHOTO_COUNT_CAP);
     const count = photos.length;
@@ -94,7 +94,7 @@ export const searchPhotos: ToolSpec = {
   async run(args) {
     const q = str(args.query);
     if (!q) throw new Error("query is required");
-    const res = await call<{ results: NaturalResult[] }>("photo", "searchPhotosNatural", { query: q, limit: 200 });
+    const res = await (photo.searchPhotosNatural({ query: q, limit: 200 })) as unknown as { results: NaturalResult[] };
     const rows = res.results;
     return {
       text: table(
@@ -131,7 +131,7 @@ export const listRecaps: ToolSpec = {
   async run(args) {
     const kind = str(args.kind);
     const year = int(args.year);
-    const res = await call<{ recaps: Recap[] }>("photo", "listRecaps");
+    const res = await (photo.listRecaps()) as unknown as { recaps: Recap[] };
     const rows = res.recaps.filter((r) => {
       if (kind && r.kind !== kind) return false;
       if (year !== undefined) {
@@ -180,7 +180,7 @@ export const listAlbums: ToolSpec = {
     const year = int(args.year);
     const hasEvent = bool(args.has_event);
     const q = str(args.q)?.toLocaleLowerCase("de");
-    const res = await call<{ albums: Album[] }>("photo", "listAlbums");
+    const res = await (photo.listAlbums()) as unknown as { albums: Album[] };
     const rows = res.albums.filter((a) => {
       if (hasEvent && !a.event_name) return false;
       if (q && !`${a.name} ${a.event_name ?? ""}`.toLocaleLowerCase("de").includes(q)) return false;

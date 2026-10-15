@@ -3,7 +3,7 @@
  * `documents.view` and the per-document visibility on every call.
  */
 
-import { call } from "../clients";
+import { documents } from "~encore/clients";
 import { digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 
@@ -31,7 +31,7 @@ export const listCategories: ToolSpec = {
   source: "hand",
   parameters: { type: "object", properties: {} },
   async run() {
-    const res = await call<{ items: Category[] }>("documents", "listDocumentCategories");
+    const res = await (documents.listDocumentCategories()) as unknown as { items: Category[] };
     const byId = new Map(res.items.map((c) => [c.id, c]));
     const path = (c: Category): string => {
       const names = [c.name];
@@ -74,9 +74,9 @@ export const searchDocuments: ToolSpec = {
     const dateFrom = isoDate(args.date_from);
     const dateTo = isoDate(args.date_to);
     const limit = int(args.limit, { min: 1, max: 25 }) ?? 15;
-    const res = await call<{ items: DocumentSummary[] }>("documents", "searchDocumentsEndpoint", {
+    const res = await (documents.searchDocumentsEndpoint({
       q, mode: "hybrid", category, date_from: dateFrom, date_to: dateTo, limit,
-    });
+    })) as unknown as { items: DocumentSummary[] };
     const rows = res.items;
     return {
       text: table(
@@ -112,7 +112,7 @@ export const getDocumentSummary: ToolSpec = {
   async run(args) {
     const id = int(args.id);
     if (id === undefined) throw new Error("id is required");
-    const d = await call<DocumentDetail>("documents", "getDocument", { id });
+    const d = await (documents.getDocument({ id })) as unknown as DocumentDetail;
     const refs = Array.isArray(d.reference_numbers)
       ? (d.reference_numbers as Array<{ value?: string; kind?: string }>).map((r) => `${r.kind ?? "ref"} ${r.value ?? ""}`.trim()).join("; ")
       : "";
