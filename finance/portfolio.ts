@@ -1423,11 +1423,46 @@ export const getPortfolioPosition = api(
       loadTransactions(ids, identity),
       householdNames(),
     ]);
-    // A link from before the identifiers were joined may name the WKN.
-    const joined = identity.complete({ isin: null, wkn: key }).isin;
-    if (joined) key = joined;
-    const built = buildPortfolio(holdings, txs, people, await latestQuotes(quotedKeys(holdings)));
-    const position = built.positions.find((p) => p.key === key);
+    // A link from before the identifiers were joined may name the WKN, or
+    // an ISIN as OCR read it.
+    key = identity.key({ isin: /^[A-Z]{2}[A-Z0-9]{10}$/.test(key) ? key : null, wkn: /^[A-Z0-9]{6}$/.test(key) ? key : null, name: key });
+    let built = buildPortfolio(holdings, txs, people, await latestQuotes(quotedKeys(holdings)));
+    let position = built.positions.find((p) => p.key === key);
+    if (!position) {
+      // Only in older snapshots (a holding gap links here): no depot holds
+      // it now and no transaction names it. Shown as a closed position
+      // with its history rather than not found.
+      const seen = dedupeSnapshotRows(
+        (
+          await db
+            .select({
+              account_id: financeAccountHolding.account_id,
+              as_of: financeAccountHolding.as_of,
+              isin: financeAccountHolding.isin,
+              wkn: financeAccountHolding.wkn,
+              name: financeAccountHolding.name,
+              amount: financeAccountHolding.amount,
+              price: financeAccountHolding.price,
+              value: financeAccountHolding.value,
+              currency: financeAccountHolding.currency,
+              acquisition_price: financeAccountHolding.acquisition_price,
+              source: financeAccountHolding.source,
+            })
+            .from(financeAccountHolding)
+            .where(inArray(financeAccountHolding.account_id, ids))
+        ).map((r) => identity.complete(r)),
+      ).filter((r) => matchesKey(r, key));
+      const lastByAccount = new Map<number, (typeof seen)[number]>();
+      for (const r of seen) {
+        const prev = lastByAccount.get(r.account_id);
+        if (!prev || r.as_of > prev.as_of) lastByAccount.set(r.account_id, r);
+      }
+      const gone: HoldingRow[] = [...lastByAccount.values()].map(({ source: _source, ...r }) => ({ ...r, amount: "0", value: null }));
+      if (gone.length > 0) {
+        built = buildPortfolio([...holdings, ...gone], txs, people, await latestQuotes(quotedKeys(holdings)));
+        position = built.positions.find((p) => p.key === key);
+      }
+    }
     if (!position) throw APIError.notFound(`position ${key} not found`);
 
     const labelById = new Map(depots.map((d) => [d.id, d.label]));

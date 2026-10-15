@@ -117,6 +117,23 @@ async function createDb(): Promise<DbInstance> {
     ON CONFLICT (kind) DO NOTHING
   `);
 
+  // Tests insert users with fixed small ids (1, 2, 5 …) and others let the
+  // sequence pick one; which file runs first decides whether the sequence
+  // hands out an id a fixed insert already took. In tests the sequence
+  // starts far above any fixed id, so the two never meet. Only ever moves up.
+  if (isTest) {
+    await pool.query(`
+      SELECT setval(
+        pg_get_serial_sequence('users', 'id'),
+        GREATEST(
+          100000,
+          (SELECT last_value FROM users_id_seq),
+          (SELECT COALESCE(MAX(id), 0) FROM users)
+        )
+      )
+    `);
+  }
+
   return db;
 }
 

@@ -959,3 +959,21 @@ Zu Ihren Gunsten nach Steuern: EUR 910,60`;
     expect(s.tax).toBe(84.4);
   });
 });
+
+describe("parseSettlement — the printed tax total wins over the single taxes", () => {
+  // Synthetic: the church tax line is unreadable, the total is not.
+  const SALE = `Wertpapierverkauf
+Stück 10 Beispiel AG ISIN DE000A1B2C35
+Schlusstag 02.03.2026
+Kurswert EUR 1.000,00
+Provision EUR 5,00
+Kapitalertragsteuer 25,00% auf 320,00 EUR 80,00- EUR
+Kirchensteuer 8,00% auf 80,00 EUR
+Steuern insgesamt EUR 86,40
+Ausmachender Betrag EUR 908,60`;
+
+  it("takes the total, under its other spellings too", () => {
+    expect(parseSettlement(SALE)!.tax).toBe(86.4);
+    expect(parseSettlement(SALE.replace("Steuern insgesamt", "Summe der Steuern"))!.tax).toBe(86.4);
+  });
+});

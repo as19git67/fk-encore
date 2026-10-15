@@ -18,7 +18,7 @@
 import { sql } from "drizzle-orm";
 
 import db from "../db/database";
-import { isinChecksumValid } from "./isin";
+import { isinChecksumValid, repairIsin } from "./isin";
 
 export interface SecurityIdentity {
   /** The row with the identifier it lacks filled in, when known. */
@@ -51,7 +51,14 @@ export function identityFromPairs(pairs: Iterable<{ isin: string | null; wkn: st
     // Only a WKN that names this ISIN alone.
     return isinOf(wkn) === isin.trim().toUpperCase() ? wkn : null;
   };
-  const complete = <T extends { isin: string | null; wkn: string | null }>(row: T): T => {
+  const complete = <T extends { isin: string | null; wkn: string | null }>(input: T): T => {
+    // An ISIN stored as OCR read it ("GBOOB…" for "GB00B…"), from before
+    // the readings repaired it: the repair that holds its check digit.
+    let row = input;
+    if (row.isin && !isinChecksumValid(row.isin)) {
+      const repaired = repairIsin(row.isin);
+      if (repaired !== row.isin && isinChecksumValid(repaired)) row = { ...row, isin: repaired };
+    }
     if (row.isin && row.wkn) return row;
     if (!row.isin && row.wkn) {
       const isin = isinOf(row.wkn);
