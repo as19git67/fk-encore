@@ -55,7 +55,7 @@ import { resortCollection, resortCollectionsOfDocument } from "./collection-sort
 console.log("[boot] documents/dossiers.ts: all imports resolved");
 
 /** `basket`: the user's one unnamed collection of what they set aside (#1548). */
-export type CollectionKind = "manual" | "dossier" | "basket";
+export type CollectionKind = "manual" | "dossier" | "basket" | "rule";
 
 export interface CollectionRule {
   correspondent_slug?: string | null;
