@@ -538,6 +538,29 @@ describe("finance/portfolio — one security under two identifiers", () => {
   });
 });
 
+describe("finance/portfolio — a position only older snapshots know", () => {
+  it("opens as closed with its history, also by an ISIN as OCR read it or by a WKN", async () => {
+    const bc = await insertBankcontact();
+    const depot = await insertAccount(bc, "depot", "Depot");
+    // Synthetic: DE000A1B2C35 stored as OCR read it, and a WKN-only security.
+    await db.insert(financeAccountHolding).values([
+      { account_id: depot, as_of: "2026-01-31", isin: "DEOOOA1B2C35", name: "Beispiel Fonds", amount: "4", price: "10.00", value: "40.00", currency: "EUR", source: "document" },
+      { account_id: depot, as_of: "2026-01-31", wkn: "A0BCDE", name: "Muster Anleihe", amount: "2", price: "99.00", value: "198.00", currency: "EUR", source: "document" },
+      // The newest snapshot holds neither.
+      { account_id: depot, as_of: "2026-03-31", isin: ISIN_B, name: "Beta ETF", amount: "1", price: "11.00", value: "11.00", currency: "EUR", source: "bank" },
+    ]);
+
+    const fund = await getPortfolioPosition({ key: "DEOOOA1B2C35" });
+    expect(fund.position).toMatchObject({ key: "DE000A1B2C35", open: false });
+    expect(fund.history.map((h) => [h.as_of, h.amount && Number(h.amount)])).toEqual([["2026-01-31", 4]]);
+
+    const bond = await getPortfolioPosition({ key: "A0BCDE" });
+    expect(bond.position).toMatchObject({ key: "A0BCDE", open: false, name: "Muster Anleihe" });
+
+    await expect(getPortfolioPosition({ key: "NOPE" })).rejects.toThrow(/not found/);
+  });
+});
+
 describe("finance/portfolio — listPortfolioTransactions", () => {
   async function seed(): Promise<{ d1: number; d2: number }> {
     const bc = await insertBankcontact();

@@ -1448,6 +1448,27 @@ export const collectionExports = pgTable("collection_exports", {
   started_at: timestamp("started_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
   expires_at: timestamp("expires_at", { mode: "string", withTimezone: true }).notNull(),
+  /** A link for people without an account, valid as long as the file (#1548, stage 7). */
+  download_token: text("download_token"),
+});
+
+/**
+ * Every mail sent with a collection's export (#1548, stage 7): when, by whom,
+ * to whom and how — attached, as single files, or as a link.
+ */
+export const collectionSends = pgTable("collection_sends", {
+  id: serial("id").primaryKey(),
+  collection_id: integer("collection_id")
+    .notNull()
+    .references(() => documentCollections.id, { onDelete: "cascade" }),
+  export_id: integer("export_id").references(() => collectionExports.id, { onDelete: "set null" }),
+  user_id: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  recipients: text("recipients").array().notNull(),
+  mode: text("mode").$type<"attachment" | "items" | "link">().notNull(),
+  filename: text("filename"),
+  status: text("status").$type<"sent" | "failed">().notNull(),
+  error: text("error"),
+  sent_at: timestamp("sent_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
 
 /**

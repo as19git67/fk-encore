@@ -1716,6 +1716,13 @@
       "when": 1788652800090,
       "tag": "0244_collection_exports",
       "breakpoints": true
+    },
+    {
+      "idx": 245,
+      "version": "7",
+      "when": 1788652800100,
+      "tag": "0245_collection_sends",
+      "breakpoints": true
     }
   ]
 }

@@ -845,7 +845,15 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     return refund === null ? null : -refund;
   })() ?? amountAfter(
     text,
-    [String.raw`abgef(?:ü|u|ue)hrte\s*${STEUERN}`, String.raw`einbehaltene\s*${STEUERN}(?=\s*[:\s]*(?:EUR|-?\d))`, String.raw`Summe\s*${STEUERN}`, String.raw`${STEUERN}\s*gesamt`],
+    // The printed total first: adding up the single taxes misses one the
+    // rules cannot read (a rate before its amount, a word OCR mangled).
+    [
+      String.raw`abgef(?:ü|u|ue)hrte\s*${STEUERN}`,
+      String.raw`einbehaltene\s*${STEUERN}(?=\s*[:\s]*(?:EUR|-?\d))`,
+      String.raw`einbehaltene\s*Steuer\b(?=\s*[:\s]*(?:EUR|-?\d))`,
+      String.raw`Summe\s*(?:der\s*)?${STEUERN}`,
+      String.raw`${STEUERN}\s*(?:gesamt|insgesamt)`,
+    ],
     markers,
   ) ?? (() => {
     // No printed total: on a tax statement, what lies between the amounts
