@@ -59,19 +59,19 @@ import {
 
 // ─── Caller ─────────────────────────────────────────────────────────────────
 
-function caller(): Caller {
+export function caller(): Caller {
   const authData = getAuthData();
   if (!authData) throw APIError.unauthenticated("Unauthorized");
   return { userId: parseInt(authData.userID, 10), permissions: authData.permissions };
 }
 
 /** Folder-level admin: the same `data.manage` that reads every document folder. */
-function isAdmin(c: Caller): boolean {
+export function isAdmin(c: Caller): boolean {
   return c.permissions.includes("data.manage");
 }
 
 /** Anyone who uses at least one module that can put something into a collection. */
-function assertMayUseCollections(c: Caller): void {
+export function assertMayUseCollections(c: Caller): void {
   if (!COLLECTION_ENTITY_TYPES.some((type) => mayUseType(c, type))) {
     throw APIError.permissionDenied("no module that can use collections");
   }
@@ -227,7 +227,7 @@ async function toSummaries(rows: CollectionRow[], c: Caller): Promise<Collection
   );
 }
 
-interface StoredMember {
+export interface StoredMember {
   entity_type: CollectionEntityType;
   entity_id: number;
   joined_by: "user" | "rule";
@@ -235,7 +235,7 @@ interface StoredMember {
   position: number;
 }
 
-async function loadStoredMembers(collectionId: number): Promise<StoredMember[]> {
+export async function loadStoredMembers(collectionId: number): Promise<StoredMember[]> {
   const docs = await dbAll<StoredMember>(
     db
       .select({
@@ -266,7 +266,7 @@ async function loadStoredMembers(collectionId: number): Promise<StoredMember[]> 
 }
 
 /** Stored members turned into what this caller may see, in stored order. */
-async function resolveVisible(
+export async function resolveVisible(
   stored: StoredMember[],
   c: Caller,
 ): Promise<CollectionMember[]> {

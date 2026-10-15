@@ -1402,6 +1402,55 @@ export const collectionUserState = pgTable(
 );
 
 /**
+ * A named set of export options kept with a collection (#1548, stage 6,
+ * migration 0244). The options are `collections/export-options.ts`'s
+ * `ExportOptions`; the same profile later drives sending, the share link and
+ * the scheduled export.
+ */
+export const collectionExportProfiles = pgTable("collection_export_profiles", {
+  id: serial("id").primaryKey(),
+  collection_id: integer("collection_id")
+    .notNull()
+    .references(() => documentCollections.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  options: jsonb("options").$type<Record<string, unknown>>().notNull(),
+  created_by: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One export run of a collection for one reader (#1548, stage 6). The file
+ * lives on disk (collections/exports.ts) until `expires_at`; the row says how
+ * the run went and what was left out.
+ */
+export const collectionExports = pgTable("collection_exports", {
+  id: serial("id").primaryKey(),
+  collection_id: integer("collection_id")
+    .notNull()
+    .references(() => documentCollections.id, { onDelete: "cascade" }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  profile_id: integer("profile_id").references(() => collectionExportProfiles.id, { onDelete: "set null" }),
+  options: jsonb("options").$type<Record<string, unknown>>().notNull(),
+  status: text("status").$type<"running" | "done" | "failed">().notNull(),
+  filename: text("filename"),
+  mime_type: text("mime_type"),
+  size_bytes: bigint("size_bytes", { mode: "number" }),
+  item_count: integer("item_count").notNull().default(0),
+  skipped: jsonb("skipped")
+    .$type<Array<{ entity_type: string; entity_id: number; reason: string }>>()
+    .notNull()
+    .default([]),
+  error: text("error"),
+  document_id: integer("document_id").references(() => documents.id, { onDelete: "set null" }),
+  started_at: timestamp("started_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
+  expires_at: timestamp("expires_at", { mode: "string", withTimezone: true }).notNull(),
+});
+
+/**
  * The last PDF built from a collection, per reader (migration 0235).
  *
  * Per reader because the export is: a group folder leaves out what the

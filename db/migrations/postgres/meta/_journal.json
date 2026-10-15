@@ -1709,6 +1709,13 @@
       "when": 1788652800080,
       "tag": "0243_collections_basket",
       "breakpoints": true
+    },
+    {
+      "idx": 244,
+      "version": "7",
+      "when": 1788652800090,
+      "tag": "0244_collection_exports",
+      "breakpoints": true
     }
   ]
 }
