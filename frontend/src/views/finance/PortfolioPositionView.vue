@@ -425,7 +425,7 @@ function transactionCash(tx: PortfolioTransaction): string {
       message="Kein Depot in deinem Zugriff kennt dieses Wertpapier."
     />
 
-    <template v-else>
+    <div class="pp-sections" v-else>
       <!-- ── Key figures ──────────────────────────────────────────── -->
       <section class="pp-section" aria-labelledby="pp-kpi-heading">
         <h2 id="pp-kpi-heading" class="visually-hidden">Kennzahlen</h2>
@@ -800,11 +800,17 @@ function transactionCash(tx: PortfolioTransaction): string {
           </table>
         </ScrollX>
       </section>
-    </template>
+    </div>
   </PageLayout>
 </template>
 
 <style scoped>
+/* Space between the page's sections; each section spaces its own parts. */
+.pp-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
 /* Page frame and title: PageLayout (issue #1272). */
 .pp-section {
   display: flex;

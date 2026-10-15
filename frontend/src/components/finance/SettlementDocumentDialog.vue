@@ -351,7 +351,10 @@ function openInDocuments() {
                 :class="{ 'sd-missing': fieldValue(row.key) === null, 'sd-disagree': sourceOf(row.key)?.disagree }"
               >
                 <td class="sd-field">{{ rowLabel(row) }}</td>
-                <td class="sd-value">{{ fieldValue(row.key) ?? 'nicht gefunden' }}</td>
+                <td class="sd-value">
+                  {{ fieldValue(row.key) ?? 'nicht gefunden' }}
+                  <span v-if="sourceOf(row.key)?.sign_turned" class="sd-label-after">Vorzeichen umgekehrt — nur so geht die Rechnung auf</span>
+                </td>
                 <td class="sd-src">
                   <span
                     v-if="sourceOf(row.key)?.source"
