@@ -25,7 +25,7 @@
  */
 
 import fs from "fs";
-import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
@@ -37,12 +37,27 @@ import {
   documentCollectionItems,
   documentCollections,
   documents,
-  groupMembers,
 } from "../db/schema";
 import { assertPathUnderDocumentsRoot } from "./documents.service";
+import {
+  assertCollectionAdministrable,
+  loadReadableCollection,
+  readableCollectionsWhere,
+  type CollectionRow,
+} from "./collection-access";
+export { membersFitVisibility };
+import {
+  addDocumentsToCollection,
+  assertMembersFitVisibility,
+  loadVisibleDocumentsById,
+  membersFitVisibility,
+  removeDocumentFromCollection,
+  renumber,
+  touchCollection,
+} from "./collection-membership";
 import { applyRuleToCorpus, normalizeRule, type CollectionKind, type CollectionRule, type RuleInput } from "./dossiers";
 import { normalizeSortOrder, resortCollection, type CollectionSortKey } from "./collection-sort";
-import { assertGroupMember, loadUserGroupIds, visibleDocumentsWhere } from "./visibility";
+import { assertGroupMember, loadUserGroupIds } from "./visibility";
 import { shouldUseTesseractSidecar } from "./receipt-capture";
 import { ensureSearchablePdf } from "./ocr-pdf";
 import {
@@ -64,7 +79,6 @@ import {
 
 console.log("[boot] documents/collections.ts: all imports resolved");
 
-type CollectionRow = typeof documentCollections.$inferSelect;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -177,32 +191,6 @@ export interface ListCollectionsResponse {
 // ─── Access ─────────────────────────────────────────────────────────────────
 
 /**
- * Load a collection the caller may read: their own private one, or a group
- * one in a group they belong to. `data.manage` admins may read any, matching
- * how they already see every document.
- */
-async function loadReadableCollection(
-  userId: number,
-  collectionId: number,
-  isAdmin: boolean,
-): Promise<CollectionRow> {
-  const row = await dbFirst<CollectionRow>(
-    db.select().from(documentCollections).where(eq(documentCollections.id, collectionId)),
-  );
-  if (!row) throw APIError.notFound("collection not found");
-  if (isAdmin) return row;
-  if (row.visibility === "private") {
-    if (row.user_id !== userId) throw APIError.notFound("collection not found");
-    return row;
-  }
-  const groupIds = await loadUserGroupIds(userId);
-  if (row.group_id == null || !groupIds.includes(row.group_id)) {
-    throw APIError.notFound("collection not found");
-  }
-  return row;
-}
-
-/**
  * Who may change what.
  *
  * Editing the folder — title, note, membership, order, page selection — is
@@ -217,109 +205,6 @@ async function loadEditableCollection(
   isAdmin: boolean,
 ): Promise<CollectionRow> {
   return await loadReadableCollection(userId, collectionId, isAdmin);
-}
-
-/**
- * Deleting a collection, or changing who it is shared with, is the creator's
- * call (or a group owner's, or an admin's) — not every member's.
- */
-async function assertCollectionAdministrable(
-  row: CollectionRow,
-  userId: number,
-  isAdmin: boolean,
-): Promise<void> {
-  if (isAdmin) return;
-  if (row.user_id === userId) return;
-  if (row.visibility === "group" && row.group_id != null) {
-    const membership = await dbFirst<{ role: "owner" | "member" }>(
-      db
-        .select({ role: groupMembers.role })
-        .from(groupMembers)
-        .where(
-          and(eq(groupMembers.group_id, row.group_id), eq(groupMembers.user_id, userId)),
-        ),
-    );
-    if (membership?.role === "owner") return;
-  }
-  throw APIError.permissionDenied(
-    "only the creator or a group owner may share or delete this collection",
-  );
-}
-
-/**
- * Every reader of the collection must be able to read every member.
- *
- * A private collection is read by its creator alone, so anything they can see
- * qualifies. A group collection is read by the whole group, so its members
- * have to be shared with that same group — a private document inside one
- * would show up in the group's table of contents and summary while staying
- * unopenable for everyone but its owner.
- */
-export function membersFitVisibility(
-  collection: { visibility: "private" | "group"; group_id: number | null },
-  docs: Array<{ id: number; visibility: "private" | "group"; group_id: number | null }>,
-): number[] {
-  if (collection.visibility === "private") return [];
-  return docs
-    .filter((doc) => doc.visibility !== "group" || doc.group_id !== collection.group_id)
-    .map((doc) => doc.id);
-}
-
-function assertMembersFitVisibility(
-  collection: { visibility: "private" | "group"; group_id: number | null },
-  docs: Array<{ id: number; visibility: "private" | "group"; group_id: number | null }>,
-): void {
-  const offenders = membersFitVisibility(collection, docs);
-  if (offenders.length === 0) return;
-  throw APIError.failedPrecondition(
-    `a group collection may only contain documents shared with the same group; ` +
-      `not shared: ${offenders.join(", ")}`,
-  );
-}
-
-/** Load the documents the caller may see, out of a set of ids. */
-async function loadVisibleDocumentsById(
-  userId: number,
-  ids: number[],
-  isAdmin: boolean,
-): Promise<Array<typeof documents.$inferSelect>> {
-  if (ids.length === 0) return [];
-  if (isAdmin) {
-    return await dbAll(db.select().from(documents).where(inArray(documents.id, ids)));
-  }
-  const groupIds = await loadUserGroupIds(userId);
-  return await dbAll(
-    db
-      .select()
-      .from(documents)
-      .where(and(inArray(documents.id, ids), visibleDocumentsWhere(userId, groupIds))),
-  );
-}
-
-/**
- * Mark the summary as needing a rewrite, bump the change timestamp, and throw
- * away the PDFs built from the folder as it was.
- */
-async function touchCollection(collectionId: number): Promise<void> {
-  await dbExec(
-    db
-      .update(documentCollections)
-      .set({ summary_stale: true, updated_at: sql`now()` })
-      .where(eq(documentCollections.id, collectionId)),
-  );
-  await discardCollectionExports(collectionId);
-}
-
-/** Renumber a collection's items to a dense 0-based sequence. */
-async function renumber(collectionId: number, orderedItemIds: number[]): Promise<void> {
-  for (let index = 0; index < orderedItemIds.length; index++) {
-    await dbExec(
-      db
-        .update(documentCollectionItems)
-        .set({ position: index })
-        .where(eq(documentCollectionItems.id, orderedItemIds[index])),
-    );
-  }
 }
 
 async function toSummaryDTO(
@@ -439,22 +324,14 @@ export const listCollections = api(
     const userId = getUserId();
     const isAdmin = isDataAdmin(authData);
     const groupIds = await loadUserGroupIds(userId);
-
-    const ownPrivate = and(
-      eq(documentCollections.visibility, "private"),
-      eq(documentCollections.user_id, userId),
+    // A folder typed for photos or transactions (#1548) has no documents to
+    // show here; a mixed one may hold some and stays.
+    const holdsDocuments = or(
+      isNull(documentCollections.entity_type),
+      eq(documentCollections.entity_type, "document"),
     )!;
-    const where = isAdmin
-      ? undefined
-      : groupIds.length > 0
-        ? or(
-            ownPrivate,
-            and(
-              eq(documentCollections.visibility, "group"),
-              inArray(documentCollections.group_id, groupIds),
-            ),
-          )!
-        : ownPrivate;
+    const readable = readableCollectionsWhere(userId, groupIds, isAdmin);
+    const where = readable ? and(readable, holdsDocuments)! : holdsDocuments;
 
     const term = (q ?? "").trim();
     const textMatch = term
@@ -707,58 +584,6 @@ export const deleteCollection = api(
 
 // ─── Membership ─────────────────────────────────────────────────────────────
 
-/**
- * Append documents to a collection, keeping the order they were given in and
- * ignoring the ones already there. Returns how many were newly added.
- */
-async function addDocumentsToCollection(
-  collection: CollectionRow,
-  documentIds: number[],
-  userId: number,
-  isAdmin: boolean,
-): Promise<number> {
-  const wanted = [...new Set(documentIds.filter((id) => Number.isFinite(id)))];
-  if (wanted.length === 0) return 0;
-
-  const visible = await loadVisibleDocumentsById(userId, wanted, isAdmin);
-  const byId = new Map(visible.map((doc) => [doc.id, doc]));
-  const missing = wanted.filter((id) => !byId.has(id));
-  if (missing.length > 0) {
-    throw APIError.notFound(`document not found: ${missing.join(", ")}`);
-  }
-  assertMembersFitVisibility(collection, visible);
-
-  const existing = await dbAll<{ document_id: number }>(
-    db
-      .select({ document_id: documentCollectionItems.document_id })
-      .from(documentCollectionItems)
-      .where(eq(documentCollectionItems.collection_id, collection.id)),
-  );
-  const present = new Set(existing.map((row) => row.document_id));
-  const fresh = wanted.filter((id) => !present.has(id));
-  if (fresh.length === 0) return 0;
-
-  const next = await dbFirst<{ next: number }>(
-    db
-      .select({ next: sql<number>`coalesce(max(${documentCollectionItems.position}), -1) + 1` })
-      .from(documentCollectionItems)
-      .where(eq(documentCollectionItems.collection_id, collection.id)),
-  );
-  let position = next?.next ?? 0;
-  await dbExec(
-    db.insert(documentCollectionItems).values(
-      fresh.map((documentId) => ({
-        collection_id: collection.id,
-        document_id: documentId,
-        position: position++,
-      })),
-    ),
-  );
-  await resortCollection(collection.id);
-  await touchCollection(collection.id);
-  return fresh.length;
-}
-
 export interface AddCollectionDocumentsRequest {
   id: number;
   document_ids: number[];
@@ -803,40 +628,7 @@ export const removeCollectionDocument = api(
     const userId = getUserId();
     const isAdmin = isDataAdmin(authData);
     const row = await loadEditableCollection(userId, id, isAdmin);
-    // Taking a document out of a dossier is a decision the rule must respect:
-    // remember it, or the next run would put the document straight back.
-    if (row.kind === "dossier" && row.rule) {
-      const rule = row.rule as CollectionRule;
-      const excluded = new Set(rule.excluded_document_ids ?? []);
-      if (!excluded.has(documentId)) {
-        excluded.add(documentId);
-        await dbExec(
-          db
-            .update(documentCollections)
-            .set({ rule: { ...rule, excluded_document_ids: [...excluded] } })
-            .where(eq(documentCollections.id, id)),
-        );
-      }
-    }
-    await dbExec(
-      db
-        .delete(documentCollectionItems)
-        .where(
-          and(
-            eq(documentCollectionItems.collection_id, id),
-            eq(documentCollectionItems.document_id, documentId),
-          ),
-        ),
-    );
-    const remaining = await dbAll<{ id: number }>(
-      db
-        .select({ id: documentCollectionItems.id })
-        .from(documentCollectionItems)
-        .where(eq(documentCollectionItems.collection_id, id))
-        .orderBy(asc(documentCollectionItems.position)),
-    );
-    await renumber(id, remaining.map((item) => item.id));
-    await touchCollection(id);
+    await removeDocumentFromCollection(row, documentId);
     return await buildDetail(row.id, userId, isAdmin);
   },
 );
