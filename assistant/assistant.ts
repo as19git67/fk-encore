@@ -21,6 +21,14 @@ import { runTurn } from "./agent";
 import { catalogFor } from "./catalog";
 import { chat, ContextTooLargeError, LlmServiceUnavailableError } from "./llm-client";
 import { followTurn, openTurn, TURN_ID_RE } from "./live";
+import {
+  discardProposal,
+  executeProposal,
+  ProposalError,
+  refreshProposalBlocks,
+  type ProposalRow,
+} from "./proposals";
+import { WRITE_TOOLS_BY_NAME } from "./tools/writes";
 import type { ChatMessage, ResultBlock, TurnEvent } from "./types";
 
 /** Questions per user and window — each one may cost several model rounds. */
@@ -121,15 +129,16 @@ export const getConversation = api(
       .orderBy(asc(assistantMessage.id));
     // What the user said and what the assistant answered; the tool rounds in
     // between are the loop's working memory, not part of the chat.
-    const messages: ConversationMessage[] = rows
+    const messages: ConversationMessage[] = await Promise.all(rows
       .filter((m) => (m.role === "user" || m.role === "assistant") && !m.tool_calls && m.content !== null)
-      .map((m) => ({
+      .map(async (m) => ({
         id: m.id,
         role: m.role as "user" | "assistant",
         content: m.content ?? "",
-        blocks: (m.blocks ?? []) as ResultBlock[],
+        // Proposal cards show what became of them since, not the state they were stored in.
+        blocks: await refreshProposalBlocks((m.blocks ?? []) as ResultBlock[], Number(auth.userID)),
         created_at: m.created_at,
-      }));
+      })));
     return { ...summary(conversation), messages };
   },
 );
@@ -237,6 +246,7 @@ export const ask = api(
         user,
         history: await history(conversation.id),
         question,
+        conversationId: conversation.id,
         tools: catalogFor(user),
         chat,
         emit,
@@ -275,6 +285,46 @@ export const ask = api(
       if (err instanceof APIError) throw err;
       throw APIError.internal("the assistant could not answer");
     }
+  },
+);
+
+// ── proposals ─────────────────────────────────────────────────────────────
+
+function today(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function proposalError(err: unknown): never {
+  if (err instanceof ProposalError) {
+    if (err.reason === "not_found") throw APIError.notFound(err.message);
+    throw APIError.failedPrecondition(err.message);
+  }
+  throw err;
+}
+
+/**
+ * Runs a proposal the assistant made, as the user, through the services' own
+ * endpoints. A failure comes back as the proposal with `error` set and stays
+ * pending, so the card can say what went wrong and offer to try again.
+ */
+export const executeAssistantProposal = api(
+  { expose: true, method: "POST", path: "/assistant/proposals/:id/execute", auth: true },
+  async ({ id }: { id: number }): Promise<ProposalRow> => {
+    const auth = assistantUser();
+    const ctx = { user: { userID: auth.userID, permissions: auth.permissions }, today: today() };
+    const row = await executeProposal(id, ctx, WRITE_TOOLS_BY_NAME).catch(proposalError);
+    log.info("assistant proposal decided", { proposal_id: id, tool: row.tool, status: row.status, failed: row.error !== null });
+    return row;
+  },
+);
+
+export const discardAssistantProposal = api(
+  { expose: true, method: "POST", path: "/assistant/proposals/:id/discard", auth: true },
+  async ({ id }: { id: number }): Promise<ProposalRow> => {
+    const auth = assistantUser();
+    const ctx = { user: { userID: auth.userID, permissions: auth.permissions }, today: today() };
+    return discardProposal(id, ctx).catch(proposalError);
   },
 );
 

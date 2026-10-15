@@ -33,6 +33,7 @@ export type BlockKind =
   | "readings"
   | "consumption"
   | "trip_plans"
+  | "proposal"
   | "table";
 
 /**
@@ -62,6 +63,8 @@ export interface ToolContext {
   user: AssistantUser;
   /** Today on the server's calendar, YYYY-MM-DD. */
   today: string;
+  /** The conversation a proposal belongs to. */
+  conversationId?: number;
 }
 
 export type ToolKind = "read" | "write";

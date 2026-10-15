@@ -12,11 +12,13 @@ export const clients = {
     listTransactions: vi.fn(),
     query: vi.fn(),
     listUpcomingDebits: vi.fn(),
+    batchTag: vi.fn(),
   },
   documents: {
     listDocumentCategories: vi.fn(),
     searchDocumentsEndpoint: vi.fn(),
     getDocument: vi.fn(),
+    setDocumentFollowUp: vi.fn(),
   },
   photo: {
     listPhotos: vi.fn(),
@@ -24,6 +26,9 @@ export const clients = {
     listRecaps: vi.fn(),
     listAlbums: vi.fn(),
     listPersons: vi.fn(),
+    createAlbum: vi.fn(),
+    batchUpdateAlbumPhotos: vi.fn(),
+    updatePhotoCuration: vi.fn(),
   },
   meter: {
     listMeters: vi.fn(),

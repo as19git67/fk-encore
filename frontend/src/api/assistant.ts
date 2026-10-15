@@ -12,7 +12,7 @@ import { API_BASE_URL, apiFetch, ensureFreshToken } from './client'
 export type BlockKind =
   | 'accounts' | 'transactions' | 'analysis' | 'debits' | 'categories'
   | 'documents' | 'document' | 'photos' | 'recaps' | 'albums'
-  | 'meters' | 'readings' | 'consumption' | 'trip_plans' | 'table'
+  | 'meters' | 'readings' | 'consumption' | 'trip_plans' | 'table' | 'proposal'
 
 /** Rows a tool returned, for display beside the answer. */
 export interface ResultBlock {
@@ -78,6 +78,26 @@ export function getConversation(id: number): Promise<ConversationDetail> {
 
 export function deleteConversation(id: number): Promise<{ deleted: boolean }> {
   return apiFetch(`/assistant/conversations/${id}`, { method: 'DELETE' })
+}
+
+/** A write action the assistant proposed; it runs only when the user says so (#1529). */
+export interface Proposal {
+  proposal_id: number
+  tool: string
+  summary: string
+  count: number | null
+  status: 'pending' | 'executing' | 'executed' | 'discarded'
+  result_summary: string | null
+  result_route: string | null
+  error: string | null
+}
+
+export function executeProposal(id: number): Promise<Proposal> {
+  return apiFetch(`/assistant/proposals/${id}/execute`, { method: 'POST' })
+}
+
+export function discardProposal(id: number): Promise<Proposal> {
+  return apiFetch(`/assistant/proposals/${id}/discard`, { method: 'POST' })
 }
 
 /** Several model rounds and tool calls; give it longer than a list load. */

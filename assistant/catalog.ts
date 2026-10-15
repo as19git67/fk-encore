@@ -24,6 +24,7 @@ import { FINANCE_TOOLS } from "./tools/finance";
 import { METER_TOOLS } from "./tools/meters";
 import { PHOTO_TOOLS } from "./tools/photos";
 import { TRIP_TOOLS } from "./tools/trips";
+import { WRITE_TOOLS } from "./tools/writes";
 import type { AssistantUser, JsonSchema, ToolSpec } from "./types";
 
 export const HAND_TOOLS: ToolSpec[] = [
@@ -32,6 +33,7 @@ export const HAND_TOOLS: ToolSpec[] = [
   ...PHOTO_TOOLS,
   ...METER_TOOLS,
   ...TRIP_TOOLS,
+  ...WRITE_TOOLS,
 ];
 
 /** `describe_tools` returns at most this many schemas per call. */

@@ -9,7 +9,7 @@ vi.mock("./llm-client", async (importOriginal) => {
 });
 
 import db from "../db/database";
-import { assistantConversation, assistantMessage } from "../db/schema";
+import { assistantConversation, assistantMessage, assistantProposal } from "../db/schema";
 import { __resetRateLimiterForTests } from "../user/rateLimiter";
 import { clients, resetClients } from "./clients.test-helper";
 import { chat, LlmServiceUnavailableError, type ChatReply } from "./llm-client";
@@ -48,6 +48,7 @@ function text(content: string): ChatReply {
 }
 
 beforeEach(async () => {
+  await db.delete(assistantProposal);
   await db.delete(assistantMessage);
   await db.delete(assistantConversation);
   await ensureUser(701);
