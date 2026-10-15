@@ -44,8 +44,12 @@ export interface WriteToolDefinition {
 
 export type ProposalStatus = "pending" | "executing" | "executed" | "discarded";
 
-/** One row of a `proposal` block, as the client renders the card. */
-export interface ProposalRow extends Record<string, unknown> {
+/**
+ * One row of a `proposal` block, as the client renders the card. No index
+ * signature: it is also an endpoint response, and Encore's schema parser
+ * rejects those.
+ */
+export interface ProposalRow {
   proposal_id: number;
   tool: string;
   summary: string;
@@ -57,7 +61,7 @@ export interface ProposalRow extends Record<string, unknown> {
 }
 
 function proposalBlock(row: ProposalRow): ResultBlock {
-  return { kind: "proposal", tool: row.tool, rows: [row] };
+  return { kind: "proposal", tool: row.tool, rows: [{ ...row }] };
 }
 
 /**
