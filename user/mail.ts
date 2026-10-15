@@ -305,3 +305,84 @@ function renderGuestDigestText(params: GuestDigestMailParams, unsubUrl: string):
   lines.push(`Abmelden: ${unsubUrl}`);
   return lines.join("\n");
 }
+
+// ─── Collection exports (#1548, stage 7) ─────────────────────────────────────
+
+/** True when the server can send mail at all. */
+export function mailConfigured(): boolean {
+  return isSmtpConfigured() || testTransport !== null;
+}
+
+let testTransport: Pick<nodemailer.Transporter, "sendMail"> | null = null;
+
+/** Tests capture outgoing mail instead of talking to an SMTP server. */
+export function setMailTransportForTests(t: Pick<nodemailer.Transporter, "sendMail"> | null): void {
+  testTransport = t;
+}
+
+export interface CollectionExportMailParams {
+  to: string[];
+  /** The sender's own address: replies go to them, not to the app. */
+  replyTo: string | null;
+  senderName: string;
+  collectionName: string;
+  /** What the sender wrote; plain text. */
+  message: string | null;
+  /** Files to attach; empty when the mail carries a link instead. */
+  attachments: Array<{ filename: string; path?: string; content?: Buffer; contentType?: string }>;
+  /** A download link, when the files were too large to attach. */
+  link: { url: string; filename: string; expiresAt: string } | null;
+}
+
+/**
+ * Send a collection's export. The mail comes from the app's address, but
+ * `Reply-To` is the person who sent it, so the answer reaches them.
+ */
+export async function sendCollectionExportEmail(params: CollectionExportMailParams): Promise<void> {
+  if (!mailConfigured()) throw new Error("SMTP_NOT_CONFIGURED");
+  const subject = `${params.collectionName} – von ${params.senderName}`;
+  const expires = params.link
+    ? new Date(params.link.expiresAt).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })
+    : "";
+  const lines = [
+    `${params.senderName} schickt dir „${params.collectionName}“ aus ${APP_NAME}.`,
+    ...(params.message ? ["", params.message] : []),
+    "",
+    params.link
+      ? `Die Datei ist zu groß für einen Anhang. Herunterladen bis ${expires}: ${params.link.url}`
+      : params.attachments.length === 1
+        ? "Die Datei hängt an."
+        : `${params.attachments.length} Dateien hängen an.`,
+  ];
+  const html = `
+    <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">
+      <p>${escapeHtml(params.senderName)} schickt dir <strong>${escapeHtml(params.collectionName)}</strong> aus ${escapeHtml(APP_NAME)}.</p>
+      ${params.message ? `<p style="white-space: pre-wrap;">${escapeHtml(params.message)}</p>` : ""}
+      ${
+        params.link
+          ? `<p>Die Datei ist zu groß für einen Anhang:</p>
+             <p style="margin: 1.5em 0;">
+               <a href="${params.link.url}" style="display: inline-block; padding: 0.75em 1.5em; background: #4f46e5; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+                 ${escapeHtml(params.link.filename)} herunterladen
+               </a>
+             </p>
+             <p style="font-size: 0.85em; color: #666;">Der Link gilt bis ${expires}.</p>`
+          : `<p style="font-size: 0.85em; color: #666;">${params.attachments.length === 1 ? "Die Datei hängt an." : `${params.attachments.length} Dateien hängen an.`}</p>`
+      }
+    </div>
+  `;
+  await (testTransport ?? getTransporter()).sendMail({
+    from: SMTP_FROM,
+    to: params.to,
+    replyTo: params.replyTo ?? undefined,
+    subject,
+    text: lines.join("\n"),
+    html,
+    attachments: params.attachments,
+  });
+}
+
+/** The public address of the app, for links in mails. */
+export function appUrl(): string {
+  return APP_URL;
+}

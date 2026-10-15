@@ -83,3 +83,29 @@ export async function shareFile(
   triggerDownload(fallbackUrl, file.name)
   return false
 }
+
+/** True when the platform can share these files (count and types). */
+export function canShareTheseFiles(files: File[]): boolean {
+  const nav = navigator as Navigator & { canShare?: (data: { files?: File[] }) => boolean }
+  try {
+    return typeof nav.canShare === 'function' && nav.canShare({ files })
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Share several already-fetched files in one sheet. Same rule as `shareFile`:
+ * call it straight from the click, nothing awaited before. Returns false when
+ * the platform cannot share them (the caller offers a download instead).
+ */
+export async function shareFiles(files: File[], title: string): Promise<boolean> {
+  const nav = navigator as Navigator & { share?: (data: { files?: File[]; title?: string }) => Promise<void> }
+  if (!canShareTheseFiles(files) || typeof nav.share !== 'function') return false
+  try {
+    await nav.share({ files, title })
+  } catch (err) {
+    if ((err as DOMException)?.name !== 'AbortError') throw err
+  }
+  return true
+}

@@ -675,3 +675,57 @@ export async function fetchCollectionExportFile(run: ExportRun): Promise<File> {
   const blob = await res.blob()
   return new File([blob], run.filename ?? 'export', { type: run.mime_type ?? blob.type })
 }
+
+// ─── Sending (#1548, stage 7) ──────────────────────────────────────────────
+
+export interface ExportEntry {
+  name: string
+  size: number
+}
+
+export interface CollectionSend {
+  id: number
+  export_id: number | null
+  recipients: string[]
+  mode: 'attachment' | 'items' | 'link'
+  filename: string | null
+  status: 'sent' | 'failed'
+  error: string | null
+  sent_at: string
+  sent_by: string | null
+}
+
+export function listExportEntries(exportId: number): Promise<{ items: ExportEntry[]; single_files_allowed: boolean }> {
+  return apiFetch(`/collections/exports/${exportId}/entries`)
+}
+
+/** One file out of an export ZIP, for the share sheet. */
+export async function fetchExportEntryFile(exportId: number, name: string): Promise<File> {
+  const token = localStorage.getItem('auth_token')
+  const res = await fetch(`${API_BASE_URL}/collections/exports/${exportId}/entry?name=${encodeURIComponent(name)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error((await res.text()) || `Datei ${name}: HTTP ${res.status}`)
+  const blob = await res.blob()
+  return new File([blob], name.split('/').pop() || name, { type: blob.type || 'application/octet-stream' })
+}
+
+export function createExportLink(exportId: number): Promise<{ url: string; expires_at: string }> {
+  return apiFetch(`/collections/exports/${exportId}/link`, { method: 'POST' })
+}
+
+export function sendExportByMail(
+  exportId: number,
+  to: string[],
+  message: string | null,
+  singleFiles: boolean,
+): Promise<{ mode: CollectionSend['mode']; send_id: number }> {
+  return apiFetch(`/collections/exports/${exportId}/send`, {
+    method: 'POST',
+    body: JSON.stringify({ to, message, single_files: singleFiles }),
+  })
+}
+
+export function listCollectionSends(id: number): Promise<{ items: CollectionSend[]; mail_configured: boolean }> {
+  return apiFetch(`/collections/${id}/sends`)
+}

@@ -113,9 +113,9 @@ export interface ExportSetup {
   accounts: Array<{ id: number; label: string }>;
 }
 
-type ExportRow = typeof collectionExports.$inferSelect;
+export type ExportRow = typeof collectionExports.$inferSelect;
 
-function toRun(row: ExportRow): ExportRun {
+export function toRun(row: ExportRow): ExportRun {
   return {
     id: row.id,
     collection_id: row.collection_id,
@@ -379,7 +379,7 @@ export async function buildExport(
   return { filename: `${base}.zip`, mime: "application/zip", zip: files, skipped, item_count: itemCount };
 }
 
-function exportPath(id: number): string {
+export function exportPath(id: number): string {
   return path.join(COLLECTION_EXPORTS_DIR, String(id));
 }
 
@@ -516,7 +516,7 @@ function markInterrupted(row: ExportRow): ExportRow {
   return row;
 }
 
-async function loadOwnRun(exportId: number): Promise<{ c: Caller; row: ExportRow }> {
+export async function loadOwnRun(exportId: number): Promise<{ c: Caller; row: ExportRow }> {
   const c = caller();
   const row = await dbFirst<ExportRow>(db.select().from(collectionExports).where(eq(collectionExports.id, exportId)));
   // Someone else's run reads as missing, not as forbidden.
@@ -543,7 +543,7 @@ export const deleteExport = api(
 );
 
 /** RFC 5987 so umlauts survive in the download name. */
-function contentDisposition(filename: string): string {
+export function contentDisposition(filename: string): string {
   const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'");
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }

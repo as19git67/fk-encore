@@ -217,7 +217,24 @@ collections.
      drawer's footer.
    - Not yet: a push when a long export is ready (the dialog polls), the
      document folder page keeps its own PDF builder with cover and summary.
-7. Sending: share sheet in web and iOS, email via SMTP.
+7. **Sending: share sheet, email via SMTP, download link** — done:
+   - "Weitergeben" under a finished export (`ExportSendPanel.vue`):
+     "Teilen" hands the file to the device's share sheet
+     (`navigator.share` with files; on iOS the file is fetched first, the
+     tap then shares at once); up to ten items can go as single files
+     instead of the ZIP (`GET /collections/exports/:id/entries`, raw
+     `…/entry?name=`), without the table of contents.
+   - "Per E-Mail" sends from the server (`user/mail.ts`
+     `sendCollectionExportEmail`): from the app address, `Reply-To` the
+     sender, attached or as single files; above `COLLECTION_MAIL_MAX_BYTES`
+     (15 MB) the mail carries a download link instead. Every mail is logged
+     in `collection_sends` (migration 0245) and listed in the dialog.
+   - "Link kopieren": a random token on the run
+     (`collection_exports.download_token`), public raw endpoint
+     `/collections/download/:token`, valid until the file expires; an
+     expired or unknown link answers 404 alike.
+   - The iOS app has no collections yet; on the iPhone the web app's share
+     sheet is the native one.
 8. Anonymous share links (after per-item access checks).
 9. Scheduled exports.
 
