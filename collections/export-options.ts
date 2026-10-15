@@ -16,8 +16,25 @@ import type { CollectionEntityType } from "../db/schema";
 
 export type TableFormat = "csv" | "xlsx" | "pdf";
 
-/** Columns a transaction export can carry, in the order they appear. */
-export const TRANSACTION_COLUMNS = [
+/**
+ * Columns a transaction export can carry. Spelled out as a union, not derived
+ * from the array: Encore's parser reads the API types and does not resolve
+ * `(typeof X)[number]`.
+ */
+export type TransactionColumn =
+  | "booking_date"
+  | "value_date"
+  | "account"
+  | "counterparty"
+  | "counterparty_iban"
+  | "purpose"
+  | "amount"
+  | "currency"
+  | "tags"
+  | "notice";
+
+/** The same columns, in the order they appear. */
+export const TRANSACTION_COLUMNS: readonly TransactionColumn[] = [
   "booking_date",
   "value_date",
   "account",
@@ -28,8 +45,7 @@ export const TRANSACTION_COLUMNS = [
   "currency",
   "tags",
   "notice",
-] as const;
-export type TransactionColumn = (typeof TRANSACTION_COLUMNS)[number];
+];
 
 export const DEFAULT_TRANSACTION_COLUMNS: TransactionColumn[] = [
   "booking_date",

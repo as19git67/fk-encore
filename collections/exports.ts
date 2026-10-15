@@ -98,8 +98,11 @@ export interface ExportRun {
   expires_at: string;
 }
 
-/** The groups an export is made of: meters and single readings are one. */
-export type ExportGroup = Exclude<CollectionEntityType, "meter_reading">;
+/**
+ * The groups an export is made of: meters and single readings are one.
+ * Spelled out, because Encore's parser reads it as part of an API type.
+ */
+export type ExportGroup = "document" | "photo" | "album" | "transaction" | "security" | "meter";
 
 export interface ExportSetup {
   /** Visible members per export group. */

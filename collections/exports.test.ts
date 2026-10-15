@@ -271,7 +271,7 @@ describe("tables", () => {
 
   it("writes one Excel sheet per section with numbers as numbers", async () => {
     const book = new ExcelJS.Workbook();
-    await book.xlsx.load((await renderTable(doc, "xlsx")).bytes);
+    await book.xlsx.load((await renderTable(doc, "xlsx")).bytes as unknown as ExcelJS.Buffer);
     expect(book.worksheets.map((s) => s.name)).toEqual(["A", "B"]);
     expect(book.worksheets[0]!.getRow(2).getCell(3).value).toBe(-12.5);
     expect(book.worksheets[0]!.getRow(3).getCell(1).value).toBe("Summe");
@@ -308,7 +308,7 @@ describe("exporting a collection", () => {
     expect(run.filename).toBe("Steuer 2026 - Buchungen.xlsx");
     expect(run.item_count).toBe(3);
     const book = new ExcelJS.Workbook();
-    await book.xlsx.load(await fileOf(run));
+    await book.xlsx.load((await fileOf(run)) as unknown as ExcelJS.Buffer);
     expect(book.worksheets.map((s) => s.name)).toEqual(["Kreditkarte", "Girokonto"]);
     const card_sheet = book.worksheets[0]!;
     const sumRow = card_sheet.getRow(card_sheet.rowCount);
