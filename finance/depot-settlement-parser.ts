@@ -19,6 +19,7 @@
  */
 
 import { extractIsin, extractWkn } from "./depot-derivation";
+import { wknFromIsin } from "./isin";
 
 /**
  * "tax": the tax charged on income that was not paid out — a fund's
@@ -638,9 +639,12 @@ export function cleanSecurityName(raw: string): string | null {
     .replace(/^(?:per\s+)?\d{1,2}\.\d{1,2}\.\d{2,4}\s+/i, "")
     // "Stück" as OCR also reads it ("Stiick", "Stuck").
     .replace(/^(?:STK|St(?:ü|ii|u)ck|St\.)\s*[\d.,]+\s+/i, "")
-    // The identifier column at the end: an ISIN, or a WKN (six characters, at least one digit).
+    // The identifier column at the end: an ISIN, or a WKN (six characters,
+    // at least one digit) — or one OCR read a character too many into
+    // ("A1LJ5RX" for "A1J5RX"): seven, with letters and digits.
     .replace(/\s+[A-Z]{2}[A-Z0-9]{9}\d$/, "")
     .replace(/\s+(?=[A-Z0-9]*\d)[A-Z0-9]{6}$/, "")
+    .replace(/\s+(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{7}$/, "")
     .replace(/\s{2,}/g, " ")
     .trim();
   if (name.length < 2 || NOT_A_NAME.test(name)) return null;
@@ -715,7 +719,8 @@ export function inspectSettlement(raw: string | null | undefined): SettlementIns
     ? null
     : (taxLine ? detectKind(taxLine.toLowerCase()) : null) ?? detectKind(lower);
   const isin = extractIsin(text) ?? extractIsin(whole);
-  const wkn = extractWkn(text) ?? wknNextToIsin(text, isin) ?? extractWkn(whole);
+  // A German ISIN carries the WKN inside it ("DE000" + WKN + check digit).
+  const wkn = extractWkn(text) ?? wknNextToIsin(text, isin) ?? extractWkn(whole) ?? wknFromIsin(isin);
 
   const markers: string[] = [];
   /** Which label each field was read after, for the "what was recognised" view. */

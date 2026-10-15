@@ -29,16 +29,25 @@ export function isinChecksumValid(isin: string): boolean {
   return sum % 10 === 0;
 }
 
-/** Letters OCR reads where an ISIN has a digit. */
-const DIGIT_FOR: Record<string, string> = { O: "0", I: "1" };
+/** Letters OCR reads where an ISIN has a digit (a 0 with a speck reads as Q). */
+const DIGIT_FOR: Record<string, string> = { O: "0", Q: "0", I: "1" };
 
 /**
- * An ISIN as OCR read it, repaired. ISINs rarely use the letters O and I
+ * The WKN inside a German ISIN: "DE000" + the six characters of the WKN +
+ * the check digit. Null for any other ISIN.
+ */
+export function wknFromIsin(isin: string | null): string | null {
+  if (!isin || !/^DE000[A-Z0-9]{6}\d$/.test(isin) || !isinChecksumValid(isin)) return null;
+  return isin.slice(5, 11);
+}
+
+/**
+ * An ISIN as OCR read it, repaired. ISINs rarely use the letters O, Q and I
  * after the country code, while OCR often reads a 0 or 1 as one ("DEOOO…"
- * for "DE000…" — read so by the rules and by a model copying the text
+ * or "DEQOO…" for "DE000…" — read so by the rules and by a model copying the text
  * alike). So:
  *
- *   1. every O and I after the country code read as 0 and 1: taken when
+ *   1. every O, Q and I after the country code read as 0, 0 and 1: taken when
  *      its check digit holds — even when the reading as printed passes
  *      too, which an O does by chance about one time in ten;
  *   2. otherwise the reading as printed, when its check digit holds;

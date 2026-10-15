@@ -25,6 +25,7 @@
  */
 
 import { isinChecksumValid, repairIsin } from "./depot-derivation";
+import { wknFromIsin } from "./isin";
 import { isMoneyOut, type SettlementExtraction, type SettlementKind } from "./depot-settlement-parser";
 
 /** The fields a reading consists of, in the inspection view's order. */
@@ -141,7 +142,7 @@ export function parseLlmSettlement(raw: Record<string, unknown>): SettlementValu
   return {
     kind,
     isin: isin && /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(isin) ? isin : null,
-    wkn: wkn && /^[A-Z0-9]{6}$/.test(wkn) ? wkn : null,
+    wkn: wkn && /^[A-Z0-9]{6}$/.test(wkn) ? wkn : wknFromIsin(isin),
     name: str(raw.name),
     depotNumber: depot && depot.length >= 5 ? depot : null,
     executedAt: isoDate(raw.executed_at),
@@ -402,6 +403,18 @@ export function mergeSettlement(
     }
   }
   const { values, checks, fromLlm } = best!;
+
+  // A depot number one source read in part ("4018735" of "4018735 00",
+  // cut at the space): the longer reading holds what the shorter one does.
+  if (r.depotNumber && l.depotNumber && r.depotNumber !== l.depotNumber) {
+    const longer = r.depotNumber.length > l.depotNumber.length ? r.depotNumber : l.depotNumber;
+    const shorter = longer === r.depotNumber ? l.depotNumber : r.depotNumber;
+    if (longer.startsWith(shorter)) {
+      values.depotNumber = longer;
+      if (longer === l.depotNumber) fromLlm.add("depotNumber");
+      else fromLlm.delete("depotNumber");
+    }
+  }
 
   const fields: MergedField[] = MERGE_FIELDS.map((field) => {
     const rv = r[field];

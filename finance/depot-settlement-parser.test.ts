@@ -911,3 +911,31 @@ Ausmachender Betrag 0,29 EUR`;
     expect(dropTaxRates("Kirchensteuer 8,00% auf 0,09\nAusmachender Betrag 0,29 EUR")).toContain("\nAusmachender");
   });
 });
+
+describe("parseSettlement — a scanned sale with OCR slips", () => {
+  // Synthetic, laid out like a scanned bank sale: the WKN column beside the
+  // name (OCR added a character), the ISIN further down with 0s read as O
+  // and Q, the depot number printed in two groups.
+  const SALE = `Beispielbank
+Depotnr.: 1234567 00
+GESCHÄFTSABRECHNUNG VOM 31.08.2026
+Wertpapierverkauf
+Geschäftstag 31.08.2026
+Wertpapier-Bezeichnung WPKNR/ISIN
+Beispiel Telekom Hldg AG   A1LB2C3
+Namens-Aktien o.N.
+Nennwert Zum Kurs von
+St. 200 EUR 2,326
+Kurswert : EUR 465,20
+Provision : EUR 9,90-
+DEOQOA1B2C35
+Zu Ihren Gunsten vor Steuern EUR 455,30`;
+
+  it("repairs the ISIN, derives the WKN, and leaves the name without the WKN column", () => {
+    const s = parseSettlement(SALE)!;
+    expect(s.isin).toBe("DE000A1B2C35");
+    expect(s.wkn).toBe("A1B2C3");
+    expect(s.name).toBe("Beispiel Telekom Hldg AG");
+    expect(s.depotNumber).toBe("123456700");
+  });
+});

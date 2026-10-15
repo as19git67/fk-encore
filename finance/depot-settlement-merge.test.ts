@@ -77,7 +77,8 @@ describe("parseLlmSettlement", () => {
     expect(v).toEqual({
       kind: "buy",
       isin: VALID_ISIN,
-      wkn: null,
+      // The malformed WKN goes; the German ISIN carries the real one.
+      wkn: "716460",
       name: "Alpha AG",
       depotNumber: "12345678",
       executedAt: "2026-03-14",
@@ -299,5 +300,24 @@ describe("mergeSettlement", () => {
     expect(r.values.kind).toBe("buy");
     expect(r.fields.every((f) => f.source === null || f.source === "llm")).toBe(true);
     expect(r.verdict).toBe("ok");
+  });
+});
+
+describe("OCR slips in identifiers and the depot number", () => {
+  // Synthetic: DE000A1B2C35 is the ISIN the WKN A1B2C3 gives.
+  it("reads a Q after the country code as a 0, even when the Q passes by chance", () => {
+    expect(repairIsin("DEOQOA1B2C35")).toBe("DE000A1B2C35");
+    expect(repairIsin("DEQOOA1B2C35")).toBe("DE000A1B2C35");
+    expect(repairIsin("DEQ00A1B2C35")).toBe("DE000A1B2C35");
+  });
+
+  it("takes the WKN out of a German ISIN when the model gives none", () => {
+    expect(parseLlmSettlement({ isin: "DEQ00A1B2C35" }).wkn).toBe("A1B2C3");
+  });
+
+  it("keeps the whole depot number when one source cut it at a space", () => {
+    const r = mergeSettlement(buy({ depotNumber: "123456700" }), buy({ depotNumber: "1234567" }), new Date("2026-04-01"));
+    expect(r.values.depotNumber).toBe("123456700");
+    expect(r.fields.find((f) => f.field === "depotNumber")?.source).toBe("rules");
   });
 });
