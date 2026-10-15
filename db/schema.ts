@@ -1324,9 +1324,78 @@ export const documentCollections = pgTable("document_collections", {
   // documents/dossiers.ts for the rule's shape and semantics.
   kind: text("kind").$type<CollectionKind>().notNull().default("manual"),
   rule: jsonb("rule").$type<CollectionRule>(),
+  /**
+   * What the collection may hold (#1548, migration 0241): one entity type, or
+   * NULL for any. Every collection made before was a document folder.
+   */
+  entity_type: text("entity_type").$type<CollectionEntityType | null>().default("document"),
+  /** Set when a finished collection leaves the default view (#1548). */
+  archived_at: timestamp("archived_at", { mode: "string", withTimezone: true }),
+  /** Who made it: a person, or the assistant (#1532). */
+  created_by: text("created_by").$type<"user" | "assistant">().notNull().default("user"),
   created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Every type a collection can hold (#1548). Documents keep their own table. */
+export type CollectionEntityType =
+  | "document"
+  | "photo"
+  | "album"
+  | "transaction"
+  | "security"
+  | "meter"
+  | "meter_reading";
+
+/** The types held in `collection_members` — everything but documents. */
+export type CollectionMemberType = Exclude<CollectionEntityType, "document">;
+
+/**
+ * A collection member that is not a document (#1548, migration 0241).
+ *
+ * Polymorphic on purpose: one column points into six tables, so there is no
+ * foreign key; triggers on those tables delete the membership with the row.
+ * Documents stay in `document_collection_items`, whose membership carries
+ * what only a document has in a folder (PDF order, pages, redactions).
+ */
+export const collectionMembers = pgTable(
+  "collection_members",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    collection_id: integer("collection_id")
+      .notNull()
+      .references(() => documentCollections.id, { onDelete: "cascade" }),
+    entity_type: text("entity_type").$type<CollectionMemberType>().notNull(),
+    entity_id: bigint("entity_id", { mode: "number" }).notNull(),
+    joined_by: text("joined_by").$type<"user" | "rule">().notNull().default("user"),
+    added_by: integer("added_by").references(() => users.id, { onDelete: "set null" }),
+    added_at: timestamp("added_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("collection_members_member_key").on(
+      table.collection_id,
+      table.entity_type,
+      table.entity_id,
+    ),
+    index("collection_members_entity_idx").on(table.entity_type, table.entity_id),
+  ],
+);
+
+/** What one reader keeps about a collection: their star and when they last opened it. */
+export const collectionUserState = pgTable(
+  "collection_user_state",
+  {
+    collection_id: integer("collection_id")
+      .notNull()
+      .references(() => documentCollections.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    favourite: boolean("favourite").notNull().default(false),
+    last_opened_at: timestamp("last_opened_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [primaryKey({ columns: [table.collection_id, table.user_id] })],
+);
 
 /**
  * The last PDF built from a collection, per reader (migration 0235).

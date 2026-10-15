@@ -44,6 +44,7 @@ import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
 import { normalizeCounterparty } from "./tag-suggester";
 import { createSuggestionsForTransaction } from "./document-match.service";
+import { hasFinanceAdmin, readableFinanceAccountIds } from "./account-acl";
 
 console.log("[boot] finance/transactions.ts: all imports resolved");
 
@@ -52,24 +53,11 @@ console.log("[boot] finance/transactions.ts: all imports resolved");
 // -----------------------------------------------------------------------
 
 function hasAdmin(auth: { permissions: string[] }): boolean {
-  return auth.permissions.includes("finance.admin");
+  return hasFinanceAdmin(auth);
 }
 
-/**
- * Returns the set of accountIds the caller may READ. Admins get
- * `null` (meaning "no filter"); everyone else gets an explicit list
- * — an empty array means "no access at all, produce zero results".
- */
-async function readableAccountIds(
-  auth: { userID: string; permissions: string[] },
-): Promise<number[] | null> {
-  if (hasAdmin(auth)) return null;
-  const rows = await db
-    .select({ id: financeAccountAccess.account_id })
-    .from(financeAccountAccess)
-    .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-  return rows.map((r) => r.id);
-}
+/** See `readableFinanceAccountIds` in account-acl.ts. */
+const readableAccountIds = readableFinanceAccountIds;
 
 async function accessibleTransactionIds(
   auth: { userID: string; permissions: string[] },
