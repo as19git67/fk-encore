@@ -61,10 +61,14 @@ export const useBasketStore = defineStore('basket', () => {
   }
 
   function apply(detail: CollectionDetail) {
+    id.value = detail.id
     members.value = detail.members
     hiddenCount.value = detail.hidden_count
     loaded.value = true
   }
+
+  /** The basket's own collection id, for what works on any collection (export). */
+  const id = ref<number | null>(null)
 
   let loading: Promise<void> | null = null
   /** Load once; later calls reuse the first answer unless `force`. */
@@ -200,9 +204,11 @@ export const useBasketStore = defineStore('basket', () => {
     members.value = []
     hiddenCount.value = 0
     loaded.value = false
+    id.value = null
   }
 
   return {
+    id,
     members,
     hiddenCount,
     loaded,

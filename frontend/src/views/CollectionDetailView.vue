@@ -14,6 +14,7 @@ import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
 import SelectionBar from '../components/layout/SelectionBar.vue'
 import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
+import ExportDialog from '../components/collections/ExportDialog.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import type { ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useListSelection } from '../composables/useListSelection'
@@ -147,6 +148,7 @@ const selectedRefs = computed<MemberRef[]>(() => [...selectedIds.value].map(deco
 const info = ref('')
 const busy = ref(false)
 const moveOpen = ref(false)
+const exportOpen = ref(false)
 const albumDialogPhotoIds = ref<number[]>([])
 const albumDialogOpen = ref(false)
 
@@ -387,6 +389,15 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
         @click="toggleFavourite"
       />
       <Button
+        v-if="detail"
+        icon="pi pi-download"
+        label="Exportieren"
+        severity="secondary"
+        text
+        data-testid="collection-export"
+        @click="exportOpen = true"
+      />
+      <Button
         v-if="detail?.kind === 'rule'"
         icon="pi pi-sync"
         label="Regel anwenden"
@@ -508,6 +519,7 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
       @added="(p) => (info = `${p.count} in „${p.name}“ gelegt.`)"
     />
     <PhotoAlbumDialog v-model:visible="albumDialogOpen" :photo-ids="albumDialogPhotoIds" />
+    <ExportDialog v-model:visible="exportOpen" :collection-id="detail?.id ?? null" :name="detail?.name ?? ''" />
   </PageLayout>
 </template>
 

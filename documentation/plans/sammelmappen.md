@@ -189,7 +189,34 @@ collections.
      The badge counts every item. Documents and finance draw their own rows
      in more detail through the slot `rows-<type>`, put their group first
      and keep their batch actions above the footer, labelled for their kind.
-6. Exporters per type and export profiles; ZIP; "save as document".
+6. **Exporters per type and export profiles; ZIP; "save as document"** — done:
+   - Options per type in one object (`collections/export-options.ts`):
+     documents as one PDF (the folder's page selection and redactions apply,
+     `buildCollectionPdf`) or a ZIP of the originals (switched-off and
+     redacted documents stay out); transactions as PDF, Excel or CSV with a
+     column picker, grouping by account in a chosen order and sums per
+     account and in total — the PDF says it is a selection, not a bank
+     statement, so it shows no opening or closing balance; photos and albums
+     (a folder per album) as originals or 2560 px JPEGs, metadata stripped on
+     request by re-encoding; securities with the bank's latest holding and
+     the cached quote; meters with their readings in a period and the
+     consumption between two readings of the same device, single readings
+     in a section of their own.
+   - One kind that fits one file is the export itself; anything else is a
+     ZIP with a folder per kind plus `Inhalt.pdf` and `Inhalt.csv`, which
+     list every item and say why one is missing (`collections/exporters.ts`,
+     tables in `export-tables.ts`).
+   - Runs happen in the background per reader (`collection_exports`,
+     migration 0244), files on disk for a week, the last five runs per reader
+     kept; the hourly collections job removes expired files. A PDF can be
+     filed into the documents module ("Als Dokument ablegen").
+   - Profiles: named options per collection (`collection_export_profiles`),
+     overwritten by name; stages 7–9 reuse them.
+   - Frontend: `components/collections/ExportDialog.vue` on the collection
+     page, in the row menu of the collections list and in every basket
+     drawer's footer.
+   - Not yet: a push when a long export is ready (the dialog polls), the
+     document folder page keeps its own PDF builder with cover and summary.
 7. Sending: share sheet in web and iOS, email via SMTP.
 8. Anonymous share links (after per-item access checks).
 9. Scheduled exports.

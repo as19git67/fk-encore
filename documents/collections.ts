@@ -38,7 +38,6 @@ import {
   documentCollections,
   documents,
 } from "../db/schema";
-import { assertPathUnderDocumentsRoot } from "./documents.service";
 import {
   assertCollectionAdministrable,
   loadReadableCollection,
@@ -58,12 +57,11 @@ import {
 import { applyRuleToCorpus, normalizeRule, type CollectionKind, type CollectionRule, type RuleInput } from "./dossiers";
 import { normalizeSortOrder, resortCollection, type CollectionSortKey } from "./collection-sort";
 import { assertGroupMember, loadUserGroupIds } from "./visibility";
-import { shouldUseTesseractSidecar } from "./receipt-capture";
-import { ensureSearchablePdf } from "./ocr-pdf";
 import {
   collectionExportFingerprint,
   collectionExportPath,
   discardCollectionExports,
+  exportSourcePath,
   removeCollectionExport,
   removeCollectionExports,
   writeCollectionExport,
@@ -96,36 +94,6 @@ function checkModule(): void {
 
 function isDataAdmin(authData: { permissions: string[] }): boolean {
   return authData.permissions.includes("data.manage");
-}
-
-/**
- * The file whose pages go into the export.
- *
- * Mirrors `downloadDocument`: regular scans are served through their
- * searchable ("sandwich") sidecar so the assembled PDF stays selectable and
- * searchable, while PaddleOCR receipt captures keep their prepared scan —
- * rasterizing that through Tesseract visibly costs thermal-print detail.
- */
-async function exportSourcePath(row: {
-  id: number;
-  disk_path: string;
-  receipt_ocr_state: string | null;
-}): Promise<{ path: string; mime: string } | null> {
-  try {
-    assertPathUnderDocumentsRoot(row.disk_path);
-  } catch {
-    return null;
-  }
-  if (shouldUseTesseractSidecar(row.receipt_ocr_state as any)) {
-    const ocrPath = await ensureSearchablePdf(row.id, row.disk_path);
-    if (ocrPath) return { path: ocrPath, mime: "application/pdf" };
-  }
-  try {
-    await fs.promises.access(row.disk_path, fs.constants.R_OK);
-  } catch {
-    return null;
-  }
-  return { path: row.disk_path, mime: "" };
 }
 
 // ─── DTOs ───────────────────────────────────────────────────────────────────
