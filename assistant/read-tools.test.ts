@@ -235,3 +235,27 @@ describe("depot tools", () => {
     expect(out.block?.rows[0]).toMatchObject({ url: "https://example.test/a", sentiment: 0.6 });
   });
 });
+
+describe("search_documents with a sender", () => {
+  it("turns the sender's name into the known correspondent's slug", async () => {
+    clients.documents.listCorrespondents.mockResolvedValue({ items: [
+      { slug: "techniker-krankenkasse", display: "Techniker Krankenkasse (TK)", count: 40 },
+      { slug: "tk-leasing", display: "TK Leasing GmbH", count: 2 },
+    ] });
+    clients.documents.searchDocumentsEndpoint.mockResolvedValue({ items: [] });
+    const out = await tool("search_documents").run({ q: "Gesundheitsdividende einlösen", correspondent: "TK", mode: "fts" }, ctx());
+    expect(clients.documents.searchDocumentsEndpoint).toHaveBeenCalledWith(expect.objectContaining({ mode: "fts", correspondent: "techniker-krankenkasse", sender: undefined }));
+    expect(out.text).toContain('Correspondent "TK" taken as Techniker Krankenkasse (TK) (40 documents); also matching: TK Leasing GmbH.');
+    expect(out.text).toContain("Word match only");
+    expect(out.block?.route).toContain("correspondent=techniker-krankenkasse");
+  });
+
+  it("falls back to the sender line when no correspondent matches, and refuses an unknown mode", async () => {
+    clients.documents.listCorrespondents.mockResolvedValue({ items: [] });
+    clients.documents.searchDocumentsEndpoint.mockResolvedValue({ items: [] });
+    const out = await tool("search_documents").run({ q: "Beitrag", correspondent: "Beispielkasse" }, ctx());
+    expect(clients.documents.searchDocumentsEndpoint).toHaveBeenCalledWith(expect.objectContaining({ mode: "hybrid", correspondent: undefined, sender: "Beispielkasse" }));
+    expect(out.text).toContain('No known correspondent matches "Beispielkasse"');
+    await expect(tool("search_documents").run({ q: "x", mode: "fuzzy" }, ctx())).rejects.toThrow("mode must be one of");
+  });
+});

@@ -51,16 +51,55 @@ export const listCategories: ToolSpec = {
   },
 };
 
+const SEARCH_MODES = ["hybrid", "fts", "semantic"];
+
+interface Correspondent { slug: string; display: string; count: number }
+
+/**
+ * The sender as the user names it ("TK") to the way the documents carry it:
+ * the correspondent slug when one known correspondent matches the name,
+ * otherwise a substring filter on the sender line. The search endpoint's
+ * `correspondent` is an exact slug, which the model cannot know.
+ */
+async function resolveCorrespondent(name: string | undefined): Promise<{ slug?: string; sender?: string; note?: string }> {
+  if (!name) return {};
+  const needle = name.toLocaleLowerCase("de");
+  let known: Correspondent[] = [];
+  try {
+    known = ((await documents.listCorrespondents()) as unknown as { items: Correspondent[] }).items;
+  } catch {
+    // Without the facet the sender line still narrows the search.
+  }
+  const exact = known.filter((c) => c.slug === needle || c.display.toLocaleLowerCase("de") === needle);
+  const partial = exact.length ? exact : known.filter((c) => c.slug.includes(needle) || c.display.toLocaleLowerCase("de").includes(needle));
+  const best = [...partial].sort((a, b) => b.count - a.count)[0];
+  if (best) {
+    const others = partial.filter((c) => c !== best).map((c) => c.display);
+    return {
+      slug: best.slug,
+      note: `Correspondent "${name}" taken as ${best.display} (${best.count} documents)${others.length ? `; also matching: ${others.slice(0, 5).join(", ")}` : ""}.`,
+    };
+  }
+  return { sender: name, note: `No known correspondent matches "${name}"; filtered on the sender line instead.` };
+}
+
 export const searchDocuments: ToolSpec = {
   name: "search_documents",
   kind: "read",
-  summary: "Hybrid full-text and semantic document search, optionally narrowed to a category slug and a document date range; ranked by relevance unless sort says otherwise.",
+  refines: true,
+  summary: "Document search by what the documents are about, optionally narrowed to the sender organisation (correspondent), a category slug and a document date range; ranked by relevance unless sort says otherwise. Put the sender (an insurer, a bank, an authority) into correspondent, not into q.",
   permissions: DOCUMENTS,
   source: "hand",
   parameters: {
     type: "object",
     properties: {
-      q: { type: "string", description: "what the documents are about" },
+      q: { type: "string", description: "what the documents are about — the subject, not the sender" },
+      correspondent: { type: "string", description: "the sender organisation as the user names it ('TK', 'Stadtwerke'); matched against the known correspondents, else against the sender line" },
+      mode: {
+        type: "string",
+        enum: ["hybrid", "fts", "semantic"],
+        description: "hybrid (default) mixes exact words and meaning and brings near misses; fts matches the words only — use it for a rare or technical term ('Gesundheitsdividende', an invoice number); semantic for a paraphrase",
+      },
       category: { type: "string", description: "category slug from list_categories" },
       date_from: { type: "string", description: "document date from, YYYY-MM-DD" },
       date_to: { type: "string", description: "document date to, YYYY-MM-DD" },
@@ -83,20 +122,28 @@ export const searchDocuments: ToolSpec = {
     const sort = str(args.sort);
     const byDate = sort === "date_desc" || sort === "date_asc";
     const sortDir = sort === "date_asc" ? "asc" : "desc";
+    const mode = str(args.mode) ?? "hybrid";
+    if (!SEARCH_MODES.includes(mode)) throw new Error(`mode must be one of ${SEARCH_MODES.join(", ")}`);
+    const who = await resolveCorrespondent(str(args.correspondent));
     const res = await (documents.searchDocumentsEndpoint({
-      q, mode: "hybrid", category, date_from: dateFrom, date_to: dateTo, limit,
+      q, mode, category, date_from: dateFrom, date_to: dateTo, limit,
+      correspondent: who.slug, sender: who.sender,
       sort_by: byDate ? "doc_date" : undefined, sort_dir: byDate ? sortDir : undefined,
     })) as unknown as { items: DocumentSummary[] };
     const rows = res.items;
+    const modeNote = mode === "fts" ? "Word match only" : mode === "semantic" ? "By meaning" : "Ranked by relevance";
     return {
       text: table(
         ["id", "date", "title", "from", "category"],
         rows.map((d) => [d.id, d.doc_date?.slice(0, 10), docTitle(d), d.correspondent_display ?? d.sender, d.category_slug]),
         {
           cap: limit,
-          note: byDate
-            ? `Sorted by document date, ${sortDir === "asc" ? "oldest" : "newest"} first; the list may hold near misses — say which ones fit.`
-            : "Ranked by relevance; the list may hold near misses — say which ones fit.",
+          note: [
+            who.note,
+            byDate
+              ? `Sorted by document date, ${sortDir === "asc" ? "oldest" : "newest"} first; the list may hold near misses — say which ones fit.`
+              : `${modeNote}; the list may hold near misses — say which ones fit.`,
+          ].filter(Boolean).join(" "),
         },
       ),
       digest: digestOf("search_documents", rows.length, rows.map((d) => d.id)),
@@ -108,7 +155,7 @@ export const searchDocuments: ToolSpec = {
         rows: rows.map((d) => ({
           id: d.id, title: docTitle(d), doc_date: d.doc_date, from: d.correspondent_display ?? d.sender ?? null, category: d.category_slug ?? null,
         })),
-        route: `/dokumente${query({ q, category, dateFrom, dateTo, sortBy: byDate ? "doc_date" : undefined, sortDir: byDate ? sortDir : undefined })}`,
+        route: `/dokumente${query({ q, category, correspondent: who.slug, sender: who.sender, dateFrom, dateTo, sortBy: byDate ? "doc_date" : undefined, sortDir: byDate ? sortDir : undefined })}`,
       },
     };
   },

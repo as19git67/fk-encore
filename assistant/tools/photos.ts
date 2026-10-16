@@ -146,6 +146,7 @@ async function photoDetails(ids: number[]): Promise<PhotoRow[]> {
 export const searchPhotos: ToolSpec = {
   name: "search_photos",
   kind: "read",
+  refines: true,
   summary: "Natural-language photo search over what the image shows, place and date (German works).",
   permissions: PHOTOS,
   source: "hand",

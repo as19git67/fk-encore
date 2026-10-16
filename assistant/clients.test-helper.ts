@@ -25,6 +25,7 @@ export const clients = {
   },
   documents: {
     listDocumentCategories: vi.fn(),
+    listCorrespondents: vi.fn(),
     searchDocumentsEndpoint: vi.fn(),
     getDocument: vi.fn(),
     setDocumentFollowUp: vi.fn(),

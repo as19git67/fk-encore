@@ -113,6 +113,16 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "insurer-documents-by-subject",
+    title: "Dokumente eines Absenders zu einem Thema",
+    question: "Such mir die Dokumente der TK, in denen es um das Einlösen der Gesundheitsdividende geht.",
+    expect: [{ tool: "search_documents", args: { q: { $contains: "gesundheitsdividende" }, correspondent: { $present: true } } }],
+    results: {
+      list_categories: { rows: [{ slug: "versicherung", path: "Versicherung" }] },
+      search_documents: { rows: [{ id: 61, title: "Gesundheitsdividende: Auszahlung beantragen", date: "2026-02-10", from: "TK" }], total: 1 },
+    },
+  },
+  {
     id: "utility-statements",
     title: "Dokumente frei suchen",
     question: "Such mir die Nebenkostenabrechnungen raus.",

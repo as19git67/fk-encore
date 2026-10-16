@@ -342,8 +342,15 @@ behind it.
        position and Kurse pages.
      - documents: `search_documents` (hybrid search with filters; `sort`
        switches the relevance ranking to document date, because the rows
-       next to the answer follow the tool's order, not the model's text),
-       `list_categories`, `get_document_summary`.
+       next to the answer follow the tool's order, not the model's text;
+       `mode` picks `fts` for a rare term that the hybrid ranking would
+       surround with near misses; `correspondent` takes the sender as the
+       user names it and resolves it against `GET /documents/correspondents`
+       to the slug, else filters the sender line), `list_categories`,
+       `get_document_summary`. `search_documents` and `search_photos` are
+       marked `refines`: a second call in the same turn replaces the first
+       call's block beside the answer, since a model that searches again did
+       not like what it found; lists (two accounts, two meters) keep both.
      - photos: `list_album_shares` (who the user's shared albums are
        shared with — the "participants" of an album are its shares, not
        the persons on its photos; one `GET /albums/:id/shares` per owned

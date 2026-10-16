@@ -404,7 +404,15 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         digests.set(call.id, outcome.digest);
         toolResults[call.id] = { digest: outcome.digest, ref: outcome.ref };
         if (outcome.ref) refs.set(outcome.ref.type, outcome.ref.ids);
-        if (outcome.block) blocks.push(outcome.block);
+        if (outcome.block) {
+          // A repeated search replaces its earlier block: the model searched
+          // again because the first rows did not fit, and showing both put
+          // a table of near misses above the one the answer is about.
+          if (tool.refines) {
+            for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i]!.tool === name) blocks.splice(i, 1);
+          }
+          blocks.push(outcome.block);
+        }
         result(outcome.text);
         emit({ type: "tool_result", tool: name, rowCount: outcome.rowCount, block: outcome.block });
         input.log?.({ tool: name, arguments: args, rows: outcome.rowCount, ms: Date.now() - started });
