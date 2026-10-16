@@ -295,12 +295,13 @@ describe("documents.scan-queue constants", () => {
     expect(DOCUMENT_SERVICES).toEqual(["text_extract", "classify", "embed"]);
   });
 
-  it("reports the specialised PaddleOCR worker in queue status", () => {
+  it("reports the specialised workers in queue status", () => {
     expect(DOCUMENT_QUEUE_SERVICES).toEqual([
       "text_extract",
       "classify",
       "embed",
       "receipt_ocr",
+      "page_words",
     ]);
   });
 });

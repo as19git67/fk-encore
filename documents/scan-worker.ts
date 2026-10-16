@@ -29,6 +29,7 @@ import {
 import {
   runClassify,
   runEmbed,
+  runPageWords,
   runReceiptOcr,
   runTextExtract,
   markDocumentFailed,
@@ -133,7 +134,7 @@ class DocumentScanWorker {
           );
           await markJobFailed(job.id, msg).catch(() => {});
           triggerWorkers();
-          if (this.service !== "embed") {
+          if (this.service !== "embed" && this.service !== "page_words") {
             await markDocumentFailed(job.document_id, msg).catch(() => {});
           }
           return true;
@@ -154,7 +155,8 @@ class DocumentScanWorker {
       // Only mark the document failed for the first-stage (text_extract)
       // and classify failures — a missing embedding is not worth
       // blocking the document from appearing in the UI.
-      if (this.service !== "embed") {
+      // A failed backfill leaves a finished document as it was.
+      if (this.service !== "embed" && this.service !== "page_words") {
         await markDocumentFailed(job.document_id, msg).catch(() => {});
       }
     }
@@ -183,6 +185,9 @@ class DocumentScanWorker {
       case "receipt_ocr":
         await runReceiptOcr(job.document_id);
         return;
+      case "page_words":
+        await runPageWords(job.document_id);
+        return;
     }
   }
 
@@ -208,8 +213,10 @@ const textExtractWorker = new DocumentScanWorker("text_extract", textConcurrency
 const classifyWorker = new DocumentScanWorker("classify", classifyConcurrency);
 const embedWorker = new DocumentScanWorker("embed", embedConcurrency);
 const receiptOcrWorker = new DocumentScanWorker("receipt_ocr", receiptOcrConcurrency);
+// One at a time: it re-runs OCR for old scans and only ever fills a gap.
+const pageWordsWorker = new DocumentScanWorker("page_words", 1);
 
-const ALL_WORKERS = [textExtractWorker, classifyWorker, embedWorker, receiptOcrWorker];
+const ALL_WORKERS = [textExtractWorker, classifyWorker, embedWorker, receiptOcrWorker, pageWordsWorker];
 
 /** Wake every worker. Non-blocking; call after enqueueing new jobs. */
 export function triggerWorkers(): void {

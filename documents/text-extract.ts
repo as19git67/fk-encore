@@ -65,7 +65,8 @@ import {
   type ResolvedSpan,
 } from "./ocr-resolver";
 import { tesseractEnv } from "./tesseract-env";
-import { renderPageWithSpacing } from "./pdf-text-layout";
+import { renderPageCollecting, renderPageWithSpacing, type PdfPageItems } from "./pdf-text-layout";
+import { pngSize, wordsFromOcrRows, wordsFromPdfItems, type PageWords } from "./page-words";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
 import {
   letterheadSearchOrder,
@@ -149,7 +150,10 @@ export function ownedBytes(buffer: Buffer): Uint8Array {
   return bytes;
 }
 
-async function pdfParseQuiet(buffer: Buffer): Promise<TextLayer> {
+async function pdfParseQuiet(
+  buffer: Buffer,
+  sink?: (page: PdfPageItems) => void,
+): Promise<TextLayer> {
   const originalLog = console.log;
   console.log = (...args: unknown[]) => {
     const first = args[0];
@@ -171,12 +175,15 @@ async function pdfParseQuiet(buffer: Buffer): Promise<TextLayer> {
       useSystemFonts: false,
     }).promise;
     try {
+      // The same rendering, also handing each page's items to `sink` when
+      // the caller keeps word positions (#1531).
+      const render = sink ? renderPageCollecting(sink) : renderPageWithSpacing;
       let text = "";
       for (let n = 1; n <= doc.numPages; n++) {
         const page = await doc.getPage(n);
         // Restore the separators pdf.js leaves out between items on one
         // baseline — see pdf-text-layout.ts.
-        text += `\n\n${await renderPageWithSpacing(page)}`;
+        text += `\n\n${await render(page)}`;
         page.cleanup?.();
       }
       return { text, numpages: doc.numPages };
@@ -186,6 +193,19 @@ async function pdfParseQuiet(buffer: Buffer): Promise<TextLayer> {
   } finally {
     console.log = originalLog;
   }
+}
+
+/** A born-digital page's words, in points with a top-left origin. */
+function textLayerPageWords(page: PdfPageItems): PageWords {
+  const [x0, y0, x1, y1] = page.view;
+  return {
+    page: page.pageNumber,
+    width: x1 - x0,
+    height: y1 - y0,
+    unit: "pt",
+    rotation: page.rotate,
+    words: wordsFromPdfItems(page.items, page.view),
+  };
 }
 
 /** Minimum number of characters before we accept a text-layer result. */
@@ -378,6 +398,12 @@ export interface ExtractResult {
   searchablePdf: Buffer | null;
   /** See OcrResult.letterhead. Null on the text-layer path, which sees no page. */
   letterhead: DocumentLetterhead | null;
+  /**
+   * Where each word stands, per page (#1531): the text layer's item boxes, or
+   * the OCR rows after the resolver corrected them — the same words the text
+   * was built from. Empty when nothing was read.
+   */
+  pageWords: PageWords[];
 }
 
 export interface ExtractOptions {
@@ -587,9 +613,10 @@ export async function extractPdfText(
     let textLayer = "";
     let pageCount = 0;
     let pdfParseBrokenXref = false;
+    const layerPages: PdfPageItems[] = [];
     const parseStarted = Date.now();
     try {
-      const parsed = await pdfParseQuiet(buffer);
+      const parsed = await pdfParseQuiet(buffer, (page) => layerPages.push(page));
       textLayer = stripNulBytes((parsed.text ?? "").trim());
       pageCount = parsed.numpages ?? 0;
     } catch (err) {
@@ -633,6 +660,7 @@ export async function extractPdfText(
         ocrPagesTotal: null,
         ocrPagesOcred: null,
         letterhead: null,
+        pageWords: layerPages.map(textLayerPageWords),
       };
     }
 
@@ -673,6 +701,9 @@ export async function extractPdfText(
         ocrPagesTotal: ocr.pagesTotal,
         ocrPagesOcred: ocr.pagesOcred,
         letterhead: ocr.letterhead,
+        // The text layer had too little to be worth positions; the OCR pages
+        // cover the document.
+        pageWords: ocr.pageWords,
       };
     }
     return {
@@ -684,6 +715,7 @@ export async function extractPdfText(
       ocrPagesTotal: ocr.pagesTotal,
       ocrPagesOcred: ocr.pagesOcred,
       letterhead: ocr.letterhead,
+      pageWords: ocr.pageWords,
     };
   } finally {
     if (tmpDir) {
@@ -719,6 +751,8 @@ export interface OcrResult {
    * document has no page 1 raster to look at.
    */
   letterhead: DocumentLetterhead | null;
+  /** The corrected rows of each recognized page, with the raster's size. */
+  pageWords: PageWords[];
 }
 
 /**
@@ -799,6 +833,7 @@ async function ocrPdf(
         pagesTotal: 0,
         pagesOcred: 0,
         letterhead: null,
+        pageWords: [],
       };
     }
     log(
@@ -848,6 +883,7 @@ async function ocrPdf(
     const rotationSampler = new PageRotationSampler();
 
     const parts: string[] = [];
+    const pageWords: PageWords[] = [];
     const pagePdfs: string[] = [];
     // The document-number marker (see below) lives on page 1 in practice —
     // remember its final (post-preprocessing) image for the fallback pass.
@@ -894,6 +930,9 @@ async function ocrPdf(
       if (prepStep.value) {
         pagePath = prepPath;
       }
+      // The boxes are measured on `pagePath`; it carries the rotation only
+      // when the cleanup step wrote it.
+      const appliedRotation = prepStep.value ? rotate : 0;
       if (i === 0) firstPagePath = pagePath;
       // tesseract appends the extension per output config (`txt`, `tsv`, `pdf`).
       // All requested formats come out of one recognition pass, so asking for
@@ -976,6 +1015,19 @@ async function ocrPdf(
           letterheadPages.set(i, { pageImagePath: pagePath, rows: layoutStep.value.rows });
         }
         const pageText = layoutStep.value.text;
+        if (layoutStep.value.rows.length > 0) {
+          const size = await pngSize(pagePath).catch(() => null);
+          if (size) {
+            pageWords.push({
+              page: i + 1,
+              width: size.width,
+              height: size.height,
+              unit: "px",
+              rotation: appliedRotation,
+              words: wordsFromOcrRows(layoutStep.value.rows),
+            });
+          }
+        }
         confidenceSum += layoutStep.value.confidenceSum;
         confidenceWords += layoutStep.value.wordCount;
         if (pageText.length > 0) parts.push(pageText);
@@ -1096,6 +1148,7 @@ async function ocrPdf(
       pagesTotal: entries.length,
       pagesOcred,
       letterhead,
+      pageWords,
     };
   } finally {
     // Best-effort cleanup — never throw from the finally block.
