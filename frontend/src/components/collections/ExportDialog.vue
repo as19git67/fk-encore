@@ -87,6 +87,7 @@ const sends = ref<CollectionSend[]>([])
 const mailConfigured = ref(false)
 const senderEmail = ref<string | null>(null)
 const systemSender = ref('')
+const selfSenderAllowed = ref(false)
 const tab = ref<'new' | 'history' | 'schedules'>('new')
 /** The run started from the form; while set, the first tab shows it instead of the form. */
 const currentId = ref<number | null>(null)
@@ -100,6 +101,7 @@ async function loadSends() {
     mailConfigured.value = res.mail_configured
     senderEmail.value = res.sender_email
     systemSender.value = res.system_sender
+    selfSenderAllowed.value = res.self_sender_allowed
   } catch {
     /* the log is an extra */
   }
@@ -464,6 +466,8 @@ function timeLabel(iso: string): string {
                 :run="current"
                 :mail-configured="mailConfigured"
                 :sender-email="senderEmail"
+                :system-sender="systemSender"
+                :self-sender-allowed="selfSenderAllowed"
                 @sent="loadSends"
               />
             </template>
@@ -658,6 +662,8 @@ function timeLabel(iso: string): string {
                   :run="run"
                   :mail-configured="mailConfigured"
                   :sender-email="senderEmail"
+                  :system-sender="systemSender"
+                  :self-sender-allowed="selfSenderAllowed"
                   @sent="loadSends"
                 />
               </li>
@@ -691,6 +697,7 @@ function timeLabel(iso: string): string {
             :mail-configured="mailConfigured"
             :sender-email="senderEmail"
             :system-sender="systemSender"
+            :self-sender-allowed="selfSenderAllowed"
             @ran="reloadRuns"
           />
         </TabPanel>

@@ -700,10 +700,12 @@ export interface CollectionSend {
 export interface CollectionSendsResponse {
   items: CollectionSend[]
   mail_configured: boolean
-  /** The signed-in user's address: a mail from the dialog goes out from it. */
+  /** The signed-in user's address. */
   sender_email: string | null
-  /** The app's address, used for an automatic export the owner mails to themselves. */
+  /** The app's address: the sender unless the user chooses their own. */
   system_sender: string
+  /** The user's address shares the app's domain and may be the sender instead. */
+  self_sender_allowed: boolean
 }
 
 export function listExportEntries(exportId: number): Promise<{ items: ExportEntry[]; single_files_allowed: boolean }> {
@@ -730,10 +732,11 @@ export function sendExportByMail(
   to: string[],
   message: string | null,
   singleFiles: boolean,
+  fromSelf = false,
 ): Promise<{ mode: CollectionSend['mode']; send_id: number }> {
   return apiFetch(`/collections/exports/${exportId}/send`, {
     method: 'POST',
-    body: JSON.stringify({ to, message, single_files: singleFiles }),
+    body: JSON.stringify({ to, message, single_files: singleFiles, from_self: fromSelf }),
   })
 }
 
@@ -759,6 +762,8 @@ export interface CollectionSchedule {
   recipients: string[]
   /** The From address of its mails; `null` without recipients. */
   sender: string | null
+  /** The owner chose their own address as sender. */
+  send_as_self: boolean
   single_files: boolean
   message: string | null
   enabled: boolean
@@ -784,6 +789,8 @@ export interface CreateScheduleInput {
   recipients?: string[]
   single_files?: boolean
   message?: string | null
+  /** From the owner's own address instead of the app's (same domain only). */
+  from_self?: boolean
 }
 
 export function listCollectionSchedules(id: number): Promise<{ items: CollectionSchedule[] }> {

@@ -204,9 +204,27 @@ describe("scheduled exports", () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toEqual(["steuer@beispiel.test"]);
-    expect(sent[0]!.from).toEqual({ name: `Person ${OWNER}`, address: `u${OWNER}@schedules.test` });
+    expect(sent[0]!.from).toBe("noreply@example.com");
     expect(sent[0]!.attachments.map((a) => a.filename)).toEqual(["Kartenumsätze - Buchungen.csv"]);
-    expect(after!.sender).toBe(`u${OWNER}@schedules.test`);
+    expect(after!.sender).toBe("noreply@example.com");
+  });
+
+  it("mails from the owner's address when chosen and on the app's domain", async () => {
+    await db.execute(sql`UPDATE users SET email = ${`u${OWNER}@example.com`} WHERE id = ${OWNER}`);
+    const col = await bookings(["2026-02-03"]);
+    const schedule = await createSchedule({
+      id: col,
+      cadence: "monthly",
+      day: 1,
+      scope: "all",
+      options: { transaction: { format: "csv" } },
+      recipients: ["steuer@beispiel.test"],
+      from_self: true,
+    });
+    expect(schedule).toMatchObject({ send_as_self: true, sender: `u${OWNER}@example.com` });
+    await db.update(collectionSchedules).set({ next_run_at: "2026-03-01T04:00:00Z" }).where(eq(collectionSchedules.id, schedule.id));
+    expect(await runDueSchedules(new Date("2026-03-01T04:00:00Z"))).toEqual({ ran: 1, failed: 0 });
+    expect(sent[0]!.from).toEqual({ name: `Person ${OWNER}`, address: `u${OWNER}@example.com` });
   });
 
   it("mails the owner from the app's address when only they get it", async () => {

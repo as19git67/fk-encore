@@ -8,8 +8,9 @@
  *   single files instead of the ZIP. iOS only shares a file that is already
  *   fetched when the tap happens, so the panel fetches it as soon as it
  *   opens (up to PREFETCH_LIMIT) and "Teilen" then shares on the first tap.
- * - "Per E-Mail" sends from the server, from the user's own address (shown
- *   in the form); above the size limit the mail carries a download link.
+ * - "Per E-Mail" sends from the server, from the app's address or — where
+ *   the user's shares its domain — the user's (ExportSenderField); above the
+ *   size limit the mail carries a download link.
  * - "Link kopieren" gives a download link for people without an account,
  *   valid as long as the file.
  */
@@ -29,13 +30,18 @@ import {
   type ExportRun,
 } from '../../api/collections'
 import { canShareFiles, shareFiles } from '../../utils/shareFile'
+import ExportSenderField from './ExportSenderField.vue'
 
 const props = defineProps<{
   run: ExportRun
   /** False when the server cannot send mail; the mail form then explains. */
   mailConfigured: boolean
-  /** The user's address, which a mail from here goes out from. */
+  /** The user's address. */
   senderEmail?: string | null
+  /** The app's address, the sender by default. */
+  systemSender?: string
+  /** The user's address shares the app's domain and may be chosen instead. */
+  selfSenderAllowed?: boolean
 }>()
 
 /** Fetched ahead for the share sheet up to this size; above it, on request. */
@@ -53,6 +59,7 @@ const mailOpen = ref(false)
 const recipients = ref('')
 const message = ref('')
 const sending = ref(false)
+const fromSelf = ref(false)
 
 const isZip = computed(() => props.run.mime_type === 'application/zip')
 const shareable = canShareFiles()
@@ -132,7 +139,13 @@ async function send() {
   error.value = ''
   info.value = ''
   try {
-    const res = await sendExportByMail(props.run.id, recipientList.value, message.value.trim() || null, singleFiles.value)
+    const res = await sendExportByMail(
+      props.run.id,
+      recipientList.value,
+      message.value.trim() || null,
+      singleFiles.value,
+      fromSelf.value && props.selfSenderAllowed === true,
+    )
     info.value =
       res.mode === 'link'
         ? 'Gesendet, mit Download-Link: Die Datei ist zu groß für einen Anhang.'
@@ -191,12 +204,18 @@ async function send() {
         Der E-Mail-Versand ist auf diesem Server nicht eingerichtet. Teilen oder den Link weitergeben geht trotzdem.
       </p>
       <template v-else>
-        <p class="send-from">Von: <strong>{{ senderEmail ?? 'deiner Adresse' }}</strong></p>
+        <ExportSenderField
+          v-model="fromSelf"
+          :sender-email="senderEmail ?? null"
+          :system-sender="systemSender ?? ''"
+          :allowed="selfSenderAllowed === true"
+          :input-id="`send-self-${run.id}`"
+        />
         <label class="send-label" :for="`send-to-${run.id}`">An (mehrere mit Komma)</label>
         <InputText :id="`send-to-${run.id}`" v-model="recipients" placeholder="name@beispiel.de" class="send-field" />
         <label class="send-label" :for="`send-msg-${run.id}`">Nachricht (optional)</label>
         <Textarea :id="`send-msg-${run.id}`" v-model="message" rows="3" auto-resize class="send-field" />
-        <p class="send-hint">Antworten kommen zu dir. Große Dateien gehen als Link, der bis zum Ablauf des Exports gilt.</p>
+        <p class="send-hint">Große Dateien gehen als Link, der bis zum Ablauf des Exports gilt.</p>
         <Button
           icon="pi pi-send"
           label="Senden"
@@ -241,11 +260,6 @@ async function send() {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-sm);
-}
-.send-from {
-  margin: 0;
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
 }
 .send-hint {
   margin: 0;

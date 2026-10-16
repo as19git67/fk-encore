@@ -225,10 +225,13 @@ collections.
      instead of the ZIP (`GET /collections/exports/:id/entries`, raw
      `…/entry?name=`), without the table of contents.
    - "Per E-Mail" sends from the server (`user/mail.ts`
-     `sendCollectionExportEmail`): `From` is the sender's own address (shown
-     in the form; `Sender` and the envelope are the app's SMTP account, so
-     bounces come back to the app); only an automatic export that goes to
-     no one but its owner comes from the app address (`mailSender`).
+     `sendCollectionExportEmail`): from the app address with `Reply-To` the
+     user; the user's own address is the alternative, chosen with a switch
+     in the mail and schedule forms (`ExportSenderField.vue`), and only
+     offered when it shares the app address's domain (`mayUseOwnSender`):
+     anything else fails SPF/DMARC. Then `Sender` and the envelope stay the
+     app's SMTP account, so bounces come back to the app. Schedules keep the
+     choice in `send_as_self` (migration 0255).
      Attached or as single files; above `COLLECTION_MAIL_MAX_BYTES`
      (15 MB) the mail carries a download link instead. Every mail is logged
      in `collection_sends` (migration 0245, `sender` since 0254) and listed

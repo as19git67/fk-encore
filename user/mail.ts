@@ -323,10 +323,13 @@ export function setMailTransportForTests(t: Pick<nodemailer.Transporter, "sendMa
 export interface CollectionExportMailParams {
   to: string[];
   /**
-   * Who the mail is from: the person who sends it. `null` sends from the
-   * app's own address (an automatic export someone mails to themselves).
+   * Who the mail is from: the person who sends it, when they chose so and
+   * their address shares the app's domain (`mayUseOwnSender`). `null` sends
+   * from the app's own address.
    */
   from: { name: string; email: string } | null;
+  /** Where answers go when the app is the sender: the person who sent it. */
+  replyTo: string | null;
   senderName: string;
   collectionName: string;
   /** What the sender wrote; plain text. */
@@ -342,11 +345,26 @@ export function systemSenderAddress(): string {
   return /<([^>]+)>/.exec(SMTP_FROM)?.[1]?.trim() ?? SMTP_FROM.trim();
 }
 
+function domainOf(address: string): string {
+  return address.trim().toLowerCase().split("@").pop() ?? "";
+}
+
 /**
- * Send a collection's export. `From` is the person who sends it, so the
- * recipient sees who it is from and answers them; the app's SMTP account
- * still delivers it, which `Sender` and the envelope say (and bounces come
- * back to the app). With `from: null` the mail is the app's own.
+ * A user's own address may stand in From only when it shares the domain of
+ * the app's sender: the app's SMTP account sends for that domain, so SPF and
+ * DMARC hold. Any other address would land in spam or be refused.
+ */
+export function mayUseOwnSender(address: string | null | undefined): boolean {
+  if (!address?.includes("@")) return false;
+  const domain = domainOf(address);
+  return domain !== "" && domain === domainOf(systemSenderAddress());
+}
+
+/**
+ * Send a collection's export. With `from`, the person who sends it stands in
+ * `From`; the app's SMTP account still delivers it, which `Sender` and the
+ * envelope say (and bounces come back to the app). With `from: null` the
+ * mail is the app's own, and `replyTo` sends answers to the person.
  */
 export async function sendCollectionExportEmail(params: CollectionExportMailParams): Promise<void> {
   if (!mailConfigured()) throw new Error("SMTP_NOT_CONFIGURED");
@@ -385,6 +403,7 @@ export async function sendCollectionExportEmail(params: CollectionExportMailPara
   await (testTransport ?? getTransporter()).sendMail({
     from: params.from ? { name: params.from.name, address: params.from.email } : SMTP_FROM,
     ...(params.from ? { sender: system, envelope: { from: system, to: params.to } } : {}),
+    ...(!params.from && params.replyTo ? { replyTo: params.replyTo } : {}),
     to: params.to,
     subject,
     text: lines.join("\n"),

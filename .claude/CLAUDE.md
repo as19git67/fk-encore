@@ -1322,10 +1322,12 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
   `collections/exporters.ts` und seinen Teil der Optionen in
   `export-options.ts`; was nicht in die Datei kommt, steht mit Grund im
   Inhaltsverzeichnis, nie still weggelassen. Weitergegeben wird ein fertiger
-  Export über `ExportSendPanel.vue` (Teilen-Menü, E-Mail vom Server mit der
-  Adresse des Nutzers als Absender, Download-Link); nur ein automatischer
-  Versand, der allein an den Nutzer selbst geht, kommt von der App-Adresse
-  (`mailSender` in `collections/sending.ts`). Der Absender steht im Formular
+  Export über `ExportSendPanel.vue` (Teilen-Menü, E-Mail vom Server,
+  Download-Link). Absender ist die App-Adresse, Antworten gehen an den
+  Nutzer; die eigene Adresse ist per Umschalter die Alternative, aber nur,
+  wenn sie dieselbe Domain hat wie die App-Adresse (`mayUseOwnSender` in
+  `user/mail.ts`, `mailSender` in `collections/sending.ts`, Umschalter
+  `ExportSenderField.vue`, auch im Zeitplan). Der Absender steht im Formular
   und im Protokoll `collection_sends`. Der Dialog hat drei Reiter
   (Exportieren, Verlauf, Regelmäßig); nach „Exportieren“ zeigt der erste das
   Ergebnis mit allen Wegen weiter statt des Formulars. Zeitpläne (`collections/schedules.ts`) laufen als der,

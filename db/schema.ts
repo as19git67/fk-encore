@@ -1481,6 +1481,8 @@ export const collectionSchedules = pgTable("collection_schedules", {
   save_as_document: boolean("save_as_document").notNull().default(false),
   recipients: text("recipients").array().notNull().default(sql`'{}'::text[]`),
   single_files: boolean("single_files").notNull().default(false),
+  /** Mails from the owner's own address (same domain only, migration 0255). */
+  send_as_self: boolean("send_as_self").notNull().default(false),
   message: text("message"),
   enabled: boolean("enabled").notNull().default(true),
   next_run_at: timestamp("next_run_at", { mode: "string", withTimezone: true }).notNull(),

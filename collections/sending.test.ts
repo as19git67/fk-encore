@@ -44,6 +44,7 @@ function as(userId: number): void {
 interface SentMail {
   to: string[];
   from: string | { name: string; address: string };
+  replyTo?: string;
   sender?: string;
   envelope?: { from: string };
   subject: string;
@@ -193,14 +194,14 @@ describe("recipients", () => {
 });
 
 describe("mail sender", () => {
-  const max = { name: "Max", email: "Max@Beispiel.test" };
-  it("is the person sending, unless an automatic export goes only to them", () => {
-    expect(mailSender(max, ["steuer@beispiel.test"], false)).toEqual(max);
-    expect(mailSender(max, ["max@beispiel.test"], false)).toEqual(max);
-    expect(mailSender(max, ["steuer@beispiel.test"], true)).toEqual(max);
-    expect(mailSender(max, ["steuer@beispiel.test", "max@beispiel.test"], true)).toEqual(max);
-    expect(mailSender(max, ["max@beispiel.test"], true)).toBeNull();
-    expect(mailSender(null, ["steuer@beispiel.test"], false)).toBeNull();
+  // The app sends as noreply@example.com in tests.
+  const same = { name: "Max", email: "Max@Example.com" };
+  const other = { name: "Max", email: "max@beispiel.test" };
+  it("is the app, or the person's own address when chosen and on the app's domain", () => {
+    expect(mailSender(same, true)).toEqual(same);
+    expect(mailSender(same, false)).toBeNull();
+    expect(mailSender(other, true)).toBeNull();
+    expect(mailSender(null, true)).toBeNull();
   });
 });
 
@@ -212,17 +213,36 @@ describe("sending by mail", () => {
     expect(result.mode).toBe("attachment");
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toEqual(["steuer@beispiel.test"]);
-    expect(sent[0]!.from).toEqual({ name: `Person ${OWNER}`, address: `u${OWNER}@sending.test` });
-    // The app's account delivers it and gets the bounces.
-    expect(sent[0]!.sender).toBe("noreply@example.com");
-    expect(sent[0]!.envelope?.from).toBe("noreply@example.com");
+    // From the app; answers go to the person who sent it.
+    expect(sent[0]!.from).toBe("noreply@example.com");
+    expect(sent[0]!.replyTo).toBe(`u${OWNER}@sending.test`);
     expect(sent[0]!.subject).toContain("Belege");
     expect(sent[0]!.text).toContain("Für die Erklärung.");
     expect(sent[0]!.attachments.map((a) => a.filename)).toEqual(["Belege - Buchungen.csv"]);
 
     const log = await listCollectionSends({ id: col });
     expect(log.items).toHaveLength(1);
-    expect(log.items[0]).toMatchObject({ recipients: ["steuer@beispiel.test"], mode: "attachment", status: "sent", sent_by: `Person ${OWNER}`, sender: `u${OWNER}@sending.test` });
+    expect(log.items[0]).toMatchObject({ recipients: ["steuer@beispiel.test"], mode: "attachment", status: "sent", sent_by: `Person ${OWNER}`, sender: "noreply@example.com" });
+
+    const setup = await listCollectionSends({ id: col });
+    expect(setup).toMatchObject({ sender_email: `u${OWNER}@sending.test`, self_sender_allowed: false });
+  });
+
+  it("sends from the person's own address when chosen and on the app's domain, else from the app", async () => {
+    const col = await transactionCollection();
+    const run = await exported(col, { transaction: { format: "csv" } });
+    // Another domain: the choice is ignored.
+    await sendExport({ exportId: run.id, to: ["steuer@beispiel.test"], from_self: true });
+    expect(sent[0]!.from).toBe("noreply@example.com");
+
+    await db.execute(sql`UPDATE users SET email = ${`u${OWNER}@example.com`} WHERE id = ${OWNER}`);
+    expect((await listCollectionSends({ id: col })).self_sender_allowed).toBe(true);
+    await sendExport({ exportId: run.id, to: ["steuer@beispiel.test"], from_self: true });
+    expect(sent[1]!.from).toEqual({ name: `Person ${OWNER}`, address: `u${OWNER}@example.com` });
+    // The app's account delivers it and gets the bounces.
+    expect(sent[1]!.sender).toBe("noreply@example.com");
+    expect(sent[1]!.envelope?.from).toBe("noreply@example.com");
+    expect(sent[1]!.replyTo).toBeUndefined();
   });
 
   it("sends the files inside a ZIP one by one, without the table of contents", async () => {

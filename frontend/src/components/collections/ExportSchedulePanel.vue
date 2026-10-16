@@ -30,6 +30,7 @@ import {
   type ScheduleCadence,
 } from '../../api/collections'
 import { useAuthStore } from '../../stores/auth'
+import ExportSenderField from './ExportSenderField.vue'
 
 const props = defineProps<{
   collectionId: number
@@ -39,10 +40,12 @@ const props = defineProps<{
   /** The dialog's options, used when no profile is chosen. */
   options: ExportOptions
   mailConfigured: boolean
-  /** The user's address: what the schedule's mails go out from. */
+  /** The user's address. */
   senderEmail?: string | null
-  /** The app's address: used when the only recipient is the user. */
+  /** The app's address, the sender by default. */
   systemSender?: string
+  /** The user's address shares the app's domain and may be chosen instead. */
+  selfSenderAllowed?: boolean
 }>()
 const emit = defineEmits<{ (e: 'ran'): void }>()
 
@@ -85,12 +88,11 @@ const MONTHS = [
 
 const canFile = computed(() => auth.hasPermission('documents.upload'))
 const recipientList = computed(() => recipients.value.split(/[\s,;]+/).map((r) => r.trim()).filter(Boolean))
+const fromSelf = ref(false)
 /** Same rule as the server (collections/sending.ts, mailSender). */
-const formSenderToSelf = computed(() => {
-  const own = props.senderEmail?.toLowerCase()
-  return !!own && recipientList.value.length > 0 && recipientList.value.every((r) => r.toLowerCase() === own)
-})
-const formSender = computed(() => (formSenderToSelf.value ? props.systemSender : props.senderEmail) ?? '')
+const formSender = computed(() =>
+  (props.selfSenderAllowed && fromSelf.value ? props.senderEmail : props.systemSender) ?? '',
+)
 const periodLabel = computed(() =>
   cadence.value === 'weekly' ? 'die sieben Tage davor' : cadence.value === 'monthly' ? 'den Vormonat' : 'das Vorjahr',
 )
@@ -139,6 +141,7 @@ async function save() {
       recipients: recipientList.value,
       single_files: singleFiles.value,
       message: message.value.trim() || null,
+      from_self: fromSelf.value && props.selfSenderAllowed === true,
     })
     schedules.value = [...schedules.value, created]
     adding.value = false
@@ -313,10 +316,13 @@ function askDelete(s: CollectionSchedule) {
         <label class="sch-label" for="sch-to">Per E-Mail an (optional, mehrere mit Komma)</label>
         <InputText id="sch-to" v-model="recipients" placeholder="name@beispiel.de" class="sch-field" />
         <template v-if="recipientList.length">
-          <p v-if="formSender" class="sch-from">
-            Von: <strong>{{ formSender }}</strong>
-            <template v-if="formSenderToSelf"> — geht er nur an dich, schickt ihn die App</template>
-          </p>
+          <ExportSenderField
+            v-model="fromSelf"
+            :sender-email="senderEmail ?? null"
+            :system-sender="systemSender ?? ''"
+            :allowed="selfSenderAllowed === true"
+            input-id="sch-from-self"
+          />
           <label class="sch-label" for="sch-msg">Nachricht (optional)</label>
           <InputText id="sch-msg" v-model="message" class="sch-field" />
           <label class="sch-check">
@@ -335,11 +341,6 @@ function askDelete(s: CollectionSchedule) {
 </template>
 
 <style scoped>
-.sch-from {
-  margin: 0;
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
-}
 .sch {
   display: flex;
   flex-direction: column;

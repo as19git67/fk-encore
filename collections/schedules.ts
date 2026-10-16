@@ -6,8 +6,8 @@
  * as PDF"), with which options (a profile, or the options at the time it was
  * made) and where the file goes: kept as a run for a week like any export,
  * filed as a document (PDFs), mailed to the recipients confirmed when the
- * schedule was set up — from the owner's address, or from the app's when the
- * owner is the only recipient.
+ * schedule was set up — from the app's address, or from the owner's when
+ * they chose so and it shares the app's domain.
  *
  * Runs happen as the person who set the schedule up, with their permissions
  * at the time of the run: what they can no longer see does not go out. An
@@ -61,6 +61,8 @@ export interface CollectionSchedule {
   recipients: string[];
   /** The From address its mails carry. */
   sender: string | null;
+  /** The owner asked for their own address as sender. */
+  send_as_self: boolean;
   single_files: boolean;
   message: string | null;
   enabled: boolean;
@@ -103,8 +105,9 @@ async function toSchedules(rows: ScheduleRow[], c: Caller, collection: Collectio
     save_as_document: r.save_as_document,
     recipients: r.recipients,
     sender: r.recipients.length
-      ? (mailSender(owners.get(r.user_id), r.recipients, true)?.email ?? systemSenderAddress())
+      ? (mailSender(owners.get(r.user_id), r.send_as_self)?.email ?? systemSenderAddress())
       : null,
+    send_as_self: r.send_as_self,
     single_files: r.single_files,
     message: r.message,
     enabled: r.enabled,
@@ -173,6 +176,8 @@ export interface CreateScheduleRequest {
   recipients?: string[];
   single_files?: boolean;
   message?: string | null;
+  /** Mails from the owner's own address instead of the app's (same domain only). */
+  from_self?: boolean;
 }
 
 export const createSchedule = api(
@@ -224,6 +229,7 @@ export const createSchedule = api(
           save_as_document: saveAsDocument,
           recipients,
           single_files: req.single_files === true,
+          send_as_self: req.from_self === true,
           message: (req.message ?? "").trim().slice(0, 4000) || null,
           next_run_at: nextRunAt(spec, new Date()).toISOString(),
         })
@@ -356,7 +362,7 @@ export async function runSchedule(
     }
     if (schedule.recipients.length > 0) {
       try {
-        await mailExport(exported, c, schedule.recipients, schedule.message, schedule.single_files, true);
+        await mailExport(exported, c, schedule.recipients, schedule.message, schedule.single_files, schedule.send_as_self);
       } catch (err) {
         problems.push(`E-Mail: ${(err as Error).message}`);
       }
