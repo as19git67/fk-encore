@@ -250,6 +250,21 @@ export const BENCH_CASES: BenchCase[] = [
     results: { list_meters: METERS, consumption_report: { meter_id: 3, consumption: 3412, unit: "kWh", formula: "reading 2025-12-31 minus reading 2025-01-01" } },
   },
   {
+    id: "farm-depreciation",
+    title: "AfA der Landwirtschaft",
+    question: "Wie hoch ist die AfA für die verpachtete Landwirtschaft im Jahr 2025, und welche Flächen gehören dazu?",
+    expect: [{ tool: "business_assets", args: { business_id: 2, year: 2025 } }],
+    results: {
+      list_businesses: { rows: [{ id: 1, name: "PV-Anlage Dach", kind: "photovoltaik" }, { id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
+      business_assets: {
+        year: 2025,
+        assets: [{ id: 7, name: "Stallgebäude", kind: "gebaeude", acquisition_cost: 120000, afa_rate_pct: 2, afa_2025: 2400, book_value_end_2025: 106200 }],
+        parcels: [{ id: 3, parcel: "Musterfeld Flst. 12/3", usage: "acker", area_m2: 21500, lessee: "Beispiel Agrar GbR", annual_rent: 860 }],
+        totals: { afa: 2400, book_value: 106200, annual_rent: 860 },
+      },
+    },
+  },
+  {
     id: "latest-water-reading",
     title: "Letzter Zählerstand",
     question: "Was war der letzte Stand vom Wasserzähler?",

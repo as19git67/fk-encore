@@ -2866,3 +2866,155 @@ export async function refreshQuotes(opts: { accounts?: number[] } = {}): Promise
     body: JSON.stringify(opts.accounts && opts.accounts.length > 0 ? { accounts: opts.accounts.join(',') } : {}),
   })
 }
+
+// ─── Businesses (Betriebe): register, assets with AfA, parcels ───────────
+// documentation/plans/betriebe-euer.md, stage 1.
+
+export type BusinessKind = 'landwirtschaft' | 'photovoltaik' | 'gewerbe' | 'vermietung'
+export type BusinessTaxSection = 'anlage-l' | 'anlage-g' | 'anlage-v'
+export type BusinessAssetKind = 'gebaeude' | 'flaeche' | 'maschine' | 'pv_anlage' | 'sonstiges'
+export type ParcelUsage = 'acker' | 'gruenland' | 'wald' | 'hof' | 'sonstiges'
+
+export interface Business {
+  id: number
+  owner_user_id: number
+  name: string
+  kind: BusinessKind
+  tax_section: BusinessTaxSection
+  notes: string | null
+  asset_count: number
+  parcel_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface BusinessInput {
+  name: string
+  kind: BusinessKind
+  tax_section?: BusinessTaxSection
+  notes?: string | null
+}
+
+/** One year of an asset's schedule; money as decimal strings. */
+export interface DepreciationYear {
+  year: number
+  months: number
+  afa: string
+  accumulated: string
+  book_value: string
+  disposal_result: string | null
+}
+
+export interface BusinessAsset {
+  id: number
+  business_id: number
+  name: string
+  kind: BusinessAssetKind
+  acquisition_date: string
+  acquisition_cost: string
+  afa_rate_pct: string
+  afa_start_date: string | null
+  disposal_date: string | null
+  disposal_proceeds: string | null
+  notes: string | null
+  /** The requested year's row of the schedule. */
+  depreciation: DepreciationYear
+}
+
+export interface BusinessAssetInput {
+  name: string
+  kind: BusinessAssetKind
+  acquisition_date: string
+  acquisition_cost: string | number
+  afa_rate_pct?: string | number
+  afa_start_date?: string | null
+  disposal_date?: string | null
+  disposal_proceeds?: string | number | null
+  notes?: string | null
+}
+
+export interface BusinessParcel {
+  id: number
+  business_id: number
+  asset_id: number | null
+  gemarkung: string
+  flur: string | null
+  flurstueck: string
+  area_m2: number | null
+  usage: ParcelUsage
+  lessee: string | null
+  lease_from: string | null
+  lease_to: string | null
+  annual_rent: string | null
+  notes: string | null
+}
+
+export interface BusinessParcelInput {
+  asset_id?: number | null
+  gemarkung: string
+  flur?: string | null
+  flurstueck: string
+  area_m2?: number | null
+  usage?: ParcelUsage
+  lessee?: string | null
+  lease_from?: string | null
+  lease_to?: string | null
+  annual_rent?: string | number | null
+  notes?: string | null
+}
+
+export interface BusinessDetail {
+  business: Business
+  year: number
+  assets: BusinessAsset[]
+  parcels: BusinessParcel[]
+  totals: { acquisition_cost: string; afa: string; book_value: string; annual_rent: string; area_m2: number }
+}
+
+export async function listBusinesses(): Promise<{ items: Business[] }> {
+  return apiFetch('/finance/businesses')
+}
+
+export async function getBusiness(id: number, year?: number): Promise<BusinessDetail> {
+  return apiFetch(`/finance/businesses/${id}${year ? `?year=${year}` : ''}`)
+}
+
+export async function createBusiness(input: BusinessInput): Promise<Business> {
+  return apiFetch('/finance/businesses', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function updateBusiness(id: number, input: Partial<BusinessInput>): Promise<Business> {
+  return apiFetch(`/finance/businesses/${id}`, { method: 'PATCH', body: JSON.stringify(input) })
+}
+
+export async function deleteBusiness(id: number): Promise<{ deleted: boolean }> {
+  return apiFetch(`/finance/businesses/${id}`, { method: 'DELETE' })
+}
+
+export async function createBusinessAsset(businessId: number, input: BusinessAssetInput): Promise<BusinessAsset> {
+  return apiFetch(`/finance/businesses/${businessId}/assets`, { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function updateBusinessAsset(assetId: number, input: Partial<BusinessAssetInput>): Promise<BusinessAsset> {
+  return apiFetch(`/finance/business-assets/${assetId}`, { method: 'PATCH', body: JSON.stringify(input) })
+}
+
+export async function deleteBusinessAsset(assetId: number): Promise<{ deleted: boolean }> {
+  return apiFetch(`/finance/business-assets/${assetId}`, { method: 'DELETE' })
+}
+
+export async function getBusinessAssetSchedule(assetId: number, untilYear?: number): Promise<{ asset: BusinessAsset; rows: DepreciationYear[] }> {
+  return apiFetch(`/finance/business-assets/${assetId}/schedule${untilYear ? `?until_year=${untilYear}` : ''}`)
+}
+
+export async function createBusinessParcel(businessId: number, input: BusinessParcelInput): Promise<BusinessParcel> {
+  return apiFetch(`/finance/businesses/${businessId}/parcels`, { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function updateBusinessParcel(parcelId: number, input: Partial<BusinessParcelInput>): Promise<BusinessParcel> {
+  return apiFetch(`/finance/business-parcels/${parcelId}`, { method: 'PATCH', body: JSON.stringify(input) })
+}
+
+export async function deleteBusinessParcel(parcelId: number): Promise<{ deleted: boolean }> {
+  return apiFetch(`/finance/business-parcels/${parcelId}`, { method: 'DELETE' })
+}

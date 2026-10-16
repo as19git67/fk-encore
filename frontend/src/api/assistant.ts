@@ -13,7 +13,7 @@ export type BlockKind =
   | 'accounts' | 'transactions' | 'analysis' | 'debits' | 'categories'
   | 'documents' | 'document' | 'photos' | 'recaps' | 'albums'
   | 'meters' | 'readings' | 'consumption' | 'trip_plans'
-  | 'positions' | 'depot_transactions' | 'quotes' | 'news' | 'comments' | 'activity' | 'table' | 'proposal'
+  | 'positions' | 'depot_transactions' | 'quotes' | 'news' | 'comments' | 'activity' | 'businesses' | 'business_assets' | 'table' | 'proposal'
 
 /** Rows a tool returned, for display beside the answer. */
 export interface ResultBlock {

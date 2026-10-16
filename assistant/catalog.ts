@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { digestOf, table, type Cell } from "./format";
 import { TOOL_ALLOWLIST, type AllowlistEntry } from "./tool-allowlist";
+import { BUSINESS_TOOLS } from "./tools/business";
 import { DEPOT_TOOLS } from "./tools/depot";
 import { DOCUMENT_TOOLS } from "./tools/documents";
 import { FINANCE_TOOLS } from "./tools/finance";
@@ -31,6 +32,7 @@ import type { AssistantUser, JsonSchema, ToolSpec } from "./types";
 export const HAND_TOOLS: ToolSpec[] = [
   ...FINANCE_TOOLS,
   ...DEPOT_TOOLS,
+  ...BUSINESS_TOOLS,
   ...DOCUMENT_TOOLS,
   ...PHOTO_TOOLS,
   ...METER_TOOLS,

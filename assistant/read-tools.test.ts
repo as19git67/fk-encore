@@ -428,3 +428,33 @@ describe("tax_worksheet", () => {
     expect(out.text).toContain("Bookings and depot figures are left out");
   });
 });
+
+describe("businesses", () => {
+  const FARM = { id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft", tax_section: "anlage-l", notes: null, asset_count: 1, parcel_count: 1 };
+  const PV = { id: 1, name: "PV-Anlage Dach", kind: "photovoltaik", tax_section: "anlage-g", notes: null, asset_count: 1, parcel_count: 0 };
+
+  it("lists the register with kind, tax form and counts", async () => {
+    clients.finance.listBusinesses.mockResolvedValue({ items: [PV, FARM] });
+    const out = await tool("list_businesses").run({}, ctx());
+    expect(out.text).toContain("2 | Landwirtschaft Musterhof | farm (Anlage L) | anlage-l | 1 | 1");
+    expect(out.block).toMatchObject({ kind: "businesses", route: "/finanzen/betriebe" });
+    expect(out.block?.rows[1]).toMatchObject({ id: 2, route: "/finanzen/betriebe/2" });
+  });
+
+  it("shows the assets with the year's AfA and the parcels, and leaves the arithmetic to the server", async () => {
+    clients.finance.getBusiness.mockResolvedValue({
+      business: FARM,
+      year: 2025,
+      assets: [{ id: 7, name: "Stallgebäude", kind: "gebaeude", acquisition_date: "2020-04-15", acquisition_cost: "120000.00", afa_rate_pct: "2.000", afa_start_date: null, disposal_date: null, disposal_proceeds: null, depreciation: { year: 2025, months: 12, afa: "2400.00", accumulated: "13800.00", book_value: "106200.00", disposal_result: null } }],
+      parcels: [{ id: 3, gemarkung: "Musterfeld", flur: "4", flurstueck: "12/3", area_m2: 21500, usage: "acker", lessee: "Beispiel Agrar GbR", lease_from: "2019-10-01", lease_to: null, annual_rent: "860.00" }],
+      totals: { acquisition_cost: "120000.00", afa: "2400.00", book_value: "106200.00", annual_rent: "860.00", area_m2: 21500 },
+    });
+    const out = await tool("business_assets").run({ business_id: 2, year: 2025 }, ctx());
+    expect(clients.finance.getBusiness).toHaveBeenCalledWith({ id: 2, year: 2025 });
+    expect(out.text).toContain("7 | Stallgebäude | gebaeude | 2020-04-15 | 120000.00 | 2% | 12 | 2400.00 | 106200.00 |");
+    expect(out.text).toContain("3 | Musterfeld Flur 4 Flst. 12/3 | acker | 21500 | Beispiel Agrar GbR | 860.00 |");
+    expect(out.text).toContain("AfA 2400.00, book value 106200.00");
+    expect(out.block).toMatchObject({ kind: "business_assets", subtitle: "Landwirtschaft Musterhof · 2025 · AfA 2400.00 € · Buchwert 106200.00 €" });
+    expect(out.block?.rows.map((r) => r.kind)).toEqual(["gebaeude", "parcel"]);
+  });
+});
