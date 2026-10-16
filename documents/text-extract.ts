@@ -1,7 +1,7 @@
 /**
  * PDF text extraction with OCR fallback.
  *
- * Happy path: `pdf-parse` pulls the text layer out of a digital PDF in
+ * Happy path: pdf.js (`pdfjs-dist`) pulls the text layer out of a digital PDF in
  * <100 ms. Fallback path (text layer empty or too short): rasterize
  * pages with `pdftoppm`, clean each page raster (auto-rotate to upright +
  * contrast-stretch gray scans toward black-on-white, see `ocr-preprocess.ts`)
@@ -17,7 +17,7 @@
  * on one visual line stays on one line even when tesseract split the page into
  * several blocks — see `OCR_LAYOUT_REBUILD_ENABLED` below.
  *
- * When either `pdf-parse` or `pdftoppm` rejects the file as broken
+ * When either pdf.js or `pdftoppm` rejects the file as broken
  * (missing trailer dictionary / unreadable xref — common for PDFs
  * truncated in transit or assembled by buggy scanners), we attempt a
  * one-shot repair pass through `qpdf` which rewrites the file with a
@@ -41,7 +41,6 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { createRequire } from "module";
 import { spawn } from "child_process";
 import { PageRotationSampler, preprocessOcrImage } from "./ocr-preprocess";
 import {
@@ -75,18 +74,41 @@ import {
 } from "./letterhead";
 import type { DocumentLetterhead } from "../db/schema";
 
-// pdf-parse is CJS and its default import pulls in a debug routine that
-// tries to read `test/05-versions-space.pdf` when `module.parent` is
-// null. Loading it via createRequire bypasses that.
-const _require = createRequire(import.meta.url);
-type PdfParseOptions = { pagerender?: (page: never) => Promise<string> };
-type PdfParseFn = (
-  buffer: Buffer,
-  options?: PdfParseOptions,
-) => Promise<{ text: string; numpages: number }>;
-const pdfParse: PdfParseFn = _require("pdf-parse");
+/**
+ * The text layer is read with pdf.js itself. `pdf-parse` used to do it, but
+ * its 2.x line dropped the v1 function this module called (`pdfParse(buffer,
+ * { pagerender })`): `require("pdf-parse")` now returns an object of classes,
+ * so every call threw "pdfParse is not a function", was caught as a broken
+ * PDF, and sent every born-digital document to OCR. pdf.js is the library
+ * pdf-parse wraps, and reading it directly keeps what the v1 wrapper gave us:
+ * the page's text items, rendered with the separators of pdf-text-layout.ts,
+ * pages joined by a blank line.
+ */
+type PdfJsPage = Parameters<typeof renderPageWithSpacing>[0] & { cleanup?: () => void };
+interface PdfJsDocument {
+  numPages: number;
+  getPage(n: number): Promise<PdfJsPage>;
+  destroy(): Promise<void>;
+}
+type PdfJsModule = {
+  getDocument(params: Record<string, unknown>): { promise: Promise<PdfJsDocument> };
+};
 
-// PDF.js (bundled inside pdf-parse) emits noisy "Warning: ..." lines
+let pdfjs: Promise<PdfJsModule> | null = null;
+function loadPdfJs(): Promise<PdfJsModule> {
+  // The legacy build runs in Node without a DOM; loaded on first use so a
+  // module that never reads a PDF does not pay for it.
+  pdfjs ??= import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as Promise<PdfJsModule>;
+  return pdfjs;
+}
+
+/** What pdf-parse v1 returned: the text of all pages and their count. */
+interface TextLayer {
+  text: string;
+  numpages: number;
+}
+
+// PDF.js emits noisy "Warning: ..." lines
 // through console.log when it hits benign edge cases while building a
 // font's glyph map — most commonly "Ran out of space in font private
 // use area" on PDFs that pack many custom glyphs. These warnings don't
@@ -103,11 +125,11 @@ export function isSuppressedPdfJsWarning(message: string): boolean {
 }
 
 /**
- * Hand pdf-parse bytes that own their `ArrayBuffer`.
+ * Hand pdf.js bytes that own their `ArrayBuffer`.
  *
  * Node pools allocations under 8 KB: `fs.readFile` on a small file returns a
  * Buffer that is a *view* into a shared 8192-byte pool, with a non-zero
- * `byteOffset`. The pdf.js build bundled inside pdf-parse reads the underlying
+ * `byteOffset`. pdf.js reads the underlying
  * ArrayBuffer without honouring that offset, so it parses the pool — other
  * files' bytes — instead of the PDF, and throws `bad XRef entry` on a document
  * that is perfectly valid (poppler reads it without complaint).
@@ -127,7 +149,7 @@ export function ownedBytes(buffer: Buffer): Uint8Array {
   return bytes;
 }
 
-async function pdfParseQuiet(buffer: Buffer): ReturnType<PdfParseFn> {
+async function pdfParseQuiet(buffer: Buffer): Promise<TextLayer> {
   const originalLog = console.log;
   console.log = (...args: unknown[]) => {
     const first = args[0];
@@ -140,11 +162,27 @@ async function pdfParseQuiet(buffer: Buffer): ReturnType<PdfParseFn> {
     originalLog(...args);
   };
   try {
-    // Restore the separators pdf-parse drops between items on one baseline —
-    // see pdf-text-layout.ts.
-    return await pdfParse(ownedBytes(buffer) as unknown as Buffer, {
-      pagerender: renderPageWithSpacing as PdfParseOptions["pagerender"],
-    });
+    const { getDocument } = await loadPdfJs();
+    const doc = await getDocument({
+      data: ownedBytes(buffer),
+      verbosity: 0,
+      isEvalSupported: false,
+      disableFontFace: true,
+      useSystemFonts: false,
+    }).promise;
+    try {
+      let text = "";
+      for (let n = 1; n <= doc.numPages; n++) {
+        const page = await doc.getPage(n);
+        // Restore the separators pdf.js leaves out between items on one
+        // baseline — see pdf-text-layout.ts.
+        text += `\n\n${await renderPageWithSpacing(page)}`;
+        page.cleanup?.();
+      }
+      return { text, numpages: doc.numPages };
+    } finally {
+      await doc.destroy();
+    }
   } finally {
     console.log = originalLog;
   }
@@ -504,7 +542,7 @@ export function hasPoorSpacing(text: string): boolean {
  * when it would have passed the length threshold. When the text layer
  * looks broken (see `hasPoorSpacing`), we also fall through to OCR.
  */
-// Postgres `text` columns reject NUL bytes, which pdf-parse occasionally
+// Postgres `text` columns reject NUL bytes, which pdf.js occasionally
 // emits on PDFs with broken character maps (Tesla order confirmations
 // being a known offender).
 function stripNulBytes(text: string): string {
@@ -522,7 +560,7 @@ export async function extractPdfText(
   // Encryption gate. A document needing an open password can't be read at
   // all — surface that distinctly so the pipeline can prompt the user.
   // Owner/permission-only encryption opens without a password; transparently
-  // strip it into a temp copy so pdf-parse/poppler/tesseract see plain bytes.
+  // strip it into a temp copy so pdf.js/poppler/tesseract see plain bytes.
   const encryptionStep = await timed(() => inspectPdfEncryption(absPath));
   const encryption = encryptionStep.value;
   if (encryption === "password") {
@@ -555,13 +593,13 @@ export async function extractPdfText(
       textLayer = stripNulBytes((parsed.text ?? "").trim());
       pageCount = parsed.numpages ?? 0;
     } catch (err) {
-      // pdf-parse throws on malformed PDFs; treat as "no text layer" and
+      // pdf.js throws on malformed PDFs; treat as "no text layer" and
       // fall through to OCR. Remember whether the failure smells like a
       // broken xref so the OCR path can repair the file up front instead
       // of paying for a pdftoppm round-trip that's certain to fail.
       const msg = (err as Error).message;
       pdfParseBrokenXref = looksLikeBrokenXref(msg);
-      console.warn(`[documents.text-extract] pdf-parse failed: ${msg}`);
+      console.warn(`[documents.text-extract] text layer read failed: ${msg}`);
     }
 
     const parseMs = since(parseStarted);
@@ -694,10 +732,10 @@ export interface OcrResult {
  * sandwich PDF and returned. This is best-effort: a failure to build the
  * PDF never affects the extracted text.
  *
- * When `repairFirst` is true (set by the caller after pdf-parse already
+ * When `repairFirst` is true (set by the caller after pdf.js already
  * rejected the file as having a broken xref), we run qpdf eagerly so
  * pdftoppm doesn't have to fail first. Ghostscript is intentionally not
- * part of that eager path: pdf-parse can reject files that poppler still
+ * part of that eager path: pdf.js can reject files that poppler still
  * rasterizes, and gs is expensive. We only escalate to gs after pdftoppm
  * has actually failed with a repairable PDF-structure error.
  */
@@ -1406,7 +1444,7 @@ function runPdftoppm(pdfPath: string, outPrefix: string): Promise<void> {
 }
 
 /**
- * Stderr signatures that mean poppler (or pdf.js inside pdf-parse)
+ * Stderr signatures that mean poppler (or pdf.js)
  * gave up because the cross-reference table or trailer is unreadable.
  * These are recoverable by `qpdf` in the vast majority of cases.
  *
@@ -1424,7 +1462,7 @@ export function looksLikeBrokenXref(stderr: string): boolean {
  * When qpdf fails after poppler has also rejected the file, fall back to
  * Ghostscript which re-renders the entire file from scratch and handles
  * deeper structural corruption. This function must not be called on the
- * eager pdf-parse failure path — use `repairPdfWithQpdf` there so gs does
+ * eager pdf.js failure path — use `repairPdfWithQpdf` there so gs does
  * not run before poppler had a chance to accept the original PDF.
  * Returns the repaired file path, or null when both tools fail.
  */
