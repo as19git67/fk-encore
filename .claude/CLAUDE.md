@@ -1329,7 +1329,12 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
 - `Ctrl/Cmd+A` wählt alles (das Composable bindet es selbst),
   Umschalt+Klick den Bereich, `Esc` beendet.
 - Der Basket-Knopf mit Schublade ist `components/BasketIndicator.vue`; sein
-  Badge zählt alles im Basket. Jeder Drawer zeigt den ganzen Basket nach Typ
+  Badge zählt alles im Basket. Er ist im Hauptmenü zugleich der Weg zu den
+  Sammelmappen („Alle Sammelmappen“ oben in der Schublade) — kein eigener
+  Mappen-Knopf daneben. Gezeigt wird er nur, wer mindestens einen Typ nutzen
+  darf, der in Mappen kommt (wie `mayUseType` in `collections/members.ts`).
+- Das Zahnrad im Hauptmenü gibt es in jedem Modul: oben die Einstellungen
+  des Moduls (nach Rechten gefiltert), darunter immer „Mein Profil“. Jeder Drawer zeigt den ganzen Basket nach Typ
   gruppiert (`components/collections/BasketMemberList.vue`) und endet mit
   `BasketFooter` („Leeren“, „Als Sammelmappe speichern“). Module ohne
   Stapelaktionen zeigen `SharedBasketIndicator`. Dokumente und Finanzen

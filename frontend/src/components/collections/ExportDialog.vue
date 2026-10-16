@@ -190,6 +190,9 @@ async function load() {
   }
 }
 
+// Declared before the watch: it runs at once and, closed, stops the polling.
+let timer: ReturnType<typeof setTimeout> | null = null
+
 watch(
   () => props.visible,
   (open) => {
@@ -270,7 +273,6 @@ async function removeProfile() {
 
 // ── Runs ────────────────────────────────────────────────────────────────────
 
-let timer: ReturnType<typeof setTimeout> | null = null
 
 function stopPolling() {
   if (timer) clearTimeout(timer)
