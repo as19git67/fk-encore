@@ -330,13 +330,17 @@ behind it.
        (`GET /finance/portfolio` — market value, cost basis, unrealized
        and realized gain, income, fees, taxes, total return, positions
        with value and gain, per-year figures; `q` finds a security's key),
+       Each position names the depot(s) holding it, so "in welchem Depot
+       liegt X" and "was liegt im Depot Y" (`account_ids`) are one call.
        `position_detail` (`GET /finance/portfolio/positions/:key` — one
        security with share per depot, sales with gain, years,
        transactions), `depot_transactions`
        (`GET /finance/portfolio/transactions` — buys, sells, dividends by
        security, kind and period, with the server's sums), `quotes`
        (`GET /finance/quotes` — last price, change over a range, unread
-       news) and `position_news` (`GET /finance/quotes/news`). All
+       news, and the totals the Kurse page shows: value of the holdings
+       and their change over the range, so "habe ich heute Gewinn gemacht"
+       is `range=1d`) and `position_news` (`GET /finance/quotes/news`). All
        arithmetic is the finance service's; the blocks `positions`,
        `depot_transactions`, `quotes` and `news` link to the Portfolio,
        position and Kurse pages.
@@ -347,11 +351,16 @@ behind it.
        surround with near misses; `correspondent` takes the sender as the
        user names it and resolves it against `GET /documents/correspondents`
        to the slug, else filters the sender line), `list_categories`,
-       `get_document_summary`. `search_documents` and `search_photos` are
+       `get_document_summary` (one or several ids in one call — the rule in
+       the prompt says a "ja" to the assistant's own offer acts on the rows
+       of the previous answer, never on a new search). `search_documents` and `search_photos` are
        marked `refines`: a second call in the same turn replaces the first
        call's block beside the answer, since a model that searches again did
        not like what it found; lists (two accounts, two meters) keep both.
-     - photos: `list_album_shares` (who the user's shared albums are
+     - photos: `photo_comments` (`GET /photos/:id/comments`, the comments
+       under one photo in an album) and `photo_activity` (`GET /feed`,
+       filtered by kind, album, photo or unread — the discussions around
+       the photos), `list_album_shares` (who the user's shared albums are
        shared with — the "participants" of an album are its shares, not
        the persons on its photos; one `GET /albums/:id/shares` per owned
        album, at most 40 per call, albums shared *with* the user listed

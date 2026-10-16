@@ -164,37 +164,57 @@ export const searchDocuments: ToolSpec = {
 export const getDocumentSummary: ToolSpec = {
   name: "get_document_summary",
   kind: "read",
-  summary: "One document's title, date, sender, category, tags, reference numbers and summary.",
+  summary: "Title, date, sender, category, tags, reference numbers and summary of one document or of several at once (ids) — one call for all the documents an answer looks at, not one per document.",
   permissions: DOCUMENTS,
   source: "hand",
   parameters: {
     type: "object",
-    properties: { id: { type: "integer", description: "document id" } },
-    required: ["id"],
+    properties: {
+      id: { type: "integer", description: "one document id" },
+      ids: { type: "array", items: { type: "integer" }, description: "several document ids, at most 10 — e.g. the documents of the previous answer" },
+    },
   },
   async run(args) {
-    const id = int(args.id);
-    if (id === undefined) throw new Error("id is required");
-    const d = await (documents.getDocument({ id })) as unknown as DocumentDetail;
-    const refs = Array.isArray(d.reference_numbers)
-      ? (d.reference_numbers as Array<{ value?: string; kind?: string }>).map((r) => `${r.kind ?? "ref"} ${r.value ?? ""}`.trim()).join("; ")
-      : "";
-    const text = [
-      `id: ${d.id}`,
-      `title: ${docTitle(d)}`,
-      `date: ${d.doc_date ?? "-"}`,
-      `from: ${d.correspondent_display ?? d.sender ?? "-"}`,
-      `category: ${d.category_slug ?? "-"}`,
-      `type: ${d.document_type ?? "-"}`,
-      d.tags?.length ? `tags: ${d.tags.join(", ")}` : null,
-      refs ? `reference numbers: ${refs}` : null,
-      `summary: ${(d.summary ?? "-").slice(0, 1200)}`,
-    ].filter(Boolean).join("\n");
+    const one = int(args.id);
+    const many = Array.isArray(args.ids) ? args.ids.map((v) => int(v)).filter((v): v is number => v !== undefined) : [];
+    const ids = [...new Set([...(one !== undefined ? [one] : []), ...many])].slice(0, 10);
+    if (!ids.length) throw new Error("id or ids is required");
+    const docs: DocumentDetail[] = [];
+    const missing: number[] = [];
+    for (const id of ids) {
+      try {
+        docs.push((await documents.getDocument({ id })) as unknown as DocumentDetail);
+      } catch {
+        missing.push(id);
+      }
+    }
+    const perDoc = docs.length > 1 ? 600 : 1200;
+    const text = docs.map((d) => {
+      const refs = Array.isArray(d.reference_numbers)
+        ? (d.reference_numbers as Array<{ value?: string; kind?: string }>).map((r) => `${r.kind ?? "ref"} ${r.value ?? ""}`.trim()).join("; ")
+        : "";
+      return [
+        `id: ${d.id}`,
+        `title: ${docTitle(d)}`,
+        `date: ${d.doc_date ?? "-"}`,
+        `from: ${d.correspondent_display ?? d.sender ?? "-"}`,
+        `category: ${d.category_slug ?? "-"}`,
+        `type: ${d.document_type ?? "-"}`,
+        d.tags?.length ? `tags: ${d.tags.join(", ")}` : null,
+        refs ? `reference numbers: ${refs}` : null,
+        `summary: ${(d.summary ?? "-").slice(0, perDoc)}`,
+      ].filter(Boolean).join("\n");
+    }).join("\n\n");
+    const note = missing.length ? `\n\nNot found or not visible: ${missing.join(", ")}.` : "";
+    const rows = docs.map((d) => ({ id: d.id, title: docTitle(d), doc_date: d.doc_date, from: d.correspondent_display ?? d.sender ?? null, category: d.category_slug ?? null }));
     return {
-      text,
-      digest: `[earlier result of get_document_summary: document ${d.id}]`,
-      rowCount: 1,
-      block: { kind: "document", tool: "get_document_summary", rows: [{ id: d.id, title: docTitle(d), doc_date: d.doc_date }], route: `/dokumente/${d.id}` },
+      text: (text || "No document found.") + note,
+      digest: `[earlier result of get_document_summary: document${docs.length === 1 ? "" : "s"} ${docs.map((d) => d.id).join(", ") || "none"}]`,
+      rowCount: docs.length,
+      ref: docs.length ? { type: "document", ids: docs.map((d) => d.id) } : undefined,
+      block: docs.length === 1
+        ? { kind: "document", tool: "get_document_summary", rows, route: `/dokumente/${docs[0]!.id}` }
+        : { kind: "documents", tool: "get_document_summary", rows },
     };
   },
 };

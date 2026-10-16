@@ -72,17 +72,23 @@ function matches(p: { name: string | null; isin: string | null; wkn: string | nu
   return [p.name, p.isin, p.wkn, p.key].some((v) => v?.toLocaleLowerCase("de").includes(needle));
 }
 
-function positionRows(positions: Position[]) {
+/** The depots a position lies in, by label; ids the user cannot see stay ids. */
+function depotsOf(p: Position, labels: Map<number, string>): string {
+  return p.account_ids.map((id) => labels.get(id) ?? `#${id}`).join(", ");
+}
+
+function positionRows(positions: Position[], labels: Map<number, string> = new Map()) {
   return positions.map((p) => ({
     key: p.key, name: p.name ?? p.key, isin: p.isin, amount: p.amount, value: p.value, currency: p.currency,
-    unrealized_gain: p.unrealized_gain, unrealized_gain_pct: p.unrealized_gain_pct, open: p.open, route: positionRoute(p.key),
+    unrealized_gain: p.unrealized_gain, unrealized_gain_pct: p.unrealized_gain_pct, open: p.open,
+    depots: depotsOf(p, labels) || null, route: positionRoute(p.key),
   }));
 }
 
 export const portfolioOverview: ToolSpec = {
   name: "portfolio_overview",
   kind: "read",
-  summary: "The user's depots as one portfolio: market value, cost basis, unrealized and realized gain, income (dividends, interest), fees, taxes and total return, the positions with value and gain each, and realized gain and income per year. The server does all arithmetic. Use q to find one security's key for position_detail, depot_transactions, quotes and position_news.",
+  summary: "The user's depots as one portfolio: market value, cost basis, unrealized and realized gain, income (dividends, interest), fees, taxes and total return, the positions with value, gain and the depot(s) each lies in, and realized gain and income per year. The server does all arithmetic. account_ids narrows to one depot ('welche Wertpapiere sind im Depot X'); q finds one security and its key ('in welchem Depot liegt Y').",
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -102,16 +108,17 @@ export const portfolioOverview: ToolSpec = {
     const positions = res.positions.filter((p) => matches(p, q)).sort((a, b) => Number(b.value ?? 0) - Number(a.value ?? 0));
     const shown = positions.slice(0, limit);
     const cur = res.currency;
+    const labels = new Map(res.accounts.map((a) => [a.id, a.label]));
     const summary = [
-      `Portfolio of ${res.accounts.length} depot${res.accounts.length === 1 ? "" : "s"} (${res.accounts.map((a) => a.label).join(", ")}), figures in ${cur}${res.mixed_currency ? " (mixed currencies, converted)" : ""}, prices as of ${day(s.price_as_of) ?? "?"}:`,
+      `Portfolio of ${res.accounts.length} depot${res.accounts.length === 1 ? "" : "s"} (${res.accounts.map((a) => `${a.label} [id ${a.id}]`).join(", ")}), figures in ${cur}${res.mixed_currency ? " (mixed currencies, converted)" : ""}, prices as of ${day(s.price_as_of) ?? "?"}:`,
       `market value ${money(s.market_value)}; cost basis ${money(s.cost_basis)}${s.cost_basis_complete ? "" : " (incomplete: some buys are unknown)"}; unrealized gain ${money(s.unrealized_gain)}${s.unrealized_gain_pct ? ` (${money(s.unrealized_gain_pct)} %)` : ""}`,
       `realized gain ${money(s.realized_gain)} (this year ${money(s.realized_gain_ytd)})${s.realized_gain_complete ? "" : " (incomplete)"}; income from dividends and interest ${money(s.income)} (this year ${money(s.income_ytd)}); fees ${money(s.fees)}; taxes ${money(s.taxes)}`,
       `total return ${money(s.total_return)}${s.total_return_pct ? ` (${money(s.total_return_pct)} %)` : ""}; ${s.open_positions} open and ${s.closed_positions} closed positions, ${s.transaction_count} transactions${res.closed_hidden ? `; ${res.closed_hidden} closed depot(s) left out` : ""}.`,
     ].join("\n");
     const positionsTable = table(
-      ["key", "name", "amount", "price", "value", "unrealized gain", "%", "realized", "income", "weight %"],
-      shown.map((p) => [p.key, p.name, p.amount, p.price, p.value, p.unrealized_gain, pct(p.unrealized_gain_pct), p.realized_gain, p.income, p.weight_pct]),
-      { total: positions.length, cap: limit, note: "key is the security's id for position_detail, depot_transactions, quotes and position_news." },
+      ["key", "name", "depot", "amount", "price", "value", "unrealized gain", "%", "realized", "income", "weight %"],
+      shown.map((p) => [p.key, p.name, depotsOf(p, labels), p.amount, p.price, p.value, p.unrealized_gain, pct(p.unrealized_gain_pct), p.realized_gain, p.income, p.weight_pct]),
+      { total: positions.length, cap: limit, note: "key is the security's id for position_detail, depot_transactions, quotes and position_news; depot names the depot(s) holding the position." },
     );
     const yearsTable = q ? "" : "\nPer year:\n" + table(
       ["year", "realized gain", "sells", "income", "dividends", "fees", "taxes", "net invested"],
@@ -127,7 +134,7 @@ export const portfolioOverview: ToolSpec = {
         tool: "portfolio_overview",
         total: positions.length,
         subtitle: `Depotwert ${money(s.market_value)} ${cur} · unrealisiert ${money(s.unrealized_gain)} ${cur}`,
-        rows: positionRows(shown),
+        rows: positionRows(shown, labels),
         route: "/finanzen/portfolio",
       },
     };
@@ -180,7 +187,7 @@ export const positionDetail: ToolSpec = {
         kind: "positions",
         tool: "position_detail",
         subtitle: `${p.name ?? p.key} · Wert ${money(p.value)} ${cur}`,
-        rows: positionRows([p]),
+        rows: positionRows([p], new Map(res.accounts.map((a) => [a.account_id, a.account_label]))),
         route: positionRoute(p.key),
       },
     };
@@ -243,7 +250,7 @@ export const depotTransactions: ToolSpec = {
 export const quotes: ToolSpec = {
   name: "quotes",
   kind: "read",
-  summary: "Current quotes of the securities the user holds: last price with its time, value of the holding, change over a range (1d, 1w, 1m, 3m, 1y, max) and the count of unread news. Prices come from the quote cache the server refreshes in trading hours.",
+  summary: "Current quotes of the securities the user holds: last price with its time, value of the holding, change over a range (1d, 1w, 1m, 3m, 1y, max) and the count of unread news, plus the total value and the total change of all holdings over the range — 'habe ich heute Gewinn gemacht' is range=1d. Prices come from the quote cache the server refreshes in trading hours.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -260,8 +267,18 @@ export const quotes: ToolSpec = {
     const q = str(args.q);
     const res = (await finance.getQuotes({ range, accounts: accountsParam(args) })) as unknown as { range: string; tiles: QuoteTile[]; as_of: string | null };
     const tiles = res.tiles.filter((t) => matches(t, q));
+    // The same sums the Kurse page shows: value of the holdings with a quote,
+    // and the shares' change over the range, summed.
+    const priced = tiles.filter((t) => t.value !== null);
+    const totalValue = priced.reduce((sum, t) => sum + Number(t.value), 0);
+    const changed = tiles.filter((t) => t.change !== null);
+    const totalChange = changed.reduce((sum, t) => sum + Number(t.change!.absolute) * Number(t.amount), 0);
+    const rangeText: Record<string, string> = { "1d": "since yesterday", "1w": "over the week", "1m": "over the month", "3m": "over three months", "1y": "over the year", max: "since the first quote" };
+    const totals = priced.length
+      ? `Total value of the ${priced.length} priced holding${priced.length === 1 ? "" : "s"}: ${totalValue.toFixed(2)}; change ${rangeText[range] ?? range}: ${totalChange >= 0 ? "+" : ""}${totalChange.toFixed(2)} (${changed.length} with a comparison price). Positive = gain.`
+      : "No holding has a quote yet.";
     return {
-      text: table(
+      text: totals + "\n" + table(
         ["key", "name", "amount", "last price", "at", "value", `change ${range}`, "%", "unread news"],
         tiles.map((t) => [
           t.key, t.name, t.amount, t.status === "ok" ? t.last?.price : `(${t.status})`, t.last?.at?.slice(0, 16).replace("T", " "),
@@ -275,7 +292,9 @@ export const quotes: ToolSpec = {
         kind: "quotes",
         tool: "quotes",
         total: tiles.length,
-        subtitle: res.as_of ? `Stand ${res.as_of.slice(0, 16).replace("T", " ")}` : undefined,
+        subtitle: priced.length
+          ? `Wert ${totalValue.toFixed(2)} · ${totalChange >= 0 ? "+" : ""}${totalChange.toFixed(2)} ${({ "1d": "seit gestern", "1w": "seit einer Woche", "1m": "seit einem Monat", "3m": "seit drei Monaten", "1y": "seit einem Jahr", max: "seit Beginn" } as Record<string, string>)[range] ?? range}`
+          : (res.as_of ? `Stand ${res.as_of.slice(0, 16).replace("T", " ")}` : undefined),
         rows: tiles.map((t) => ({
           key: t.key, name: t.name ?? t.key, price: t.last?.price ?? null, currency: t.currency, value: t.value,
           change_percent: t.change?.percent ?? null, status: t.status, news_unread: t.news_unread, route: positionRoute(t.key),

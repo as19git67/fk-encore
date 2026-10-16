@@ -169,7 +169,7 @@ describe("depot tools", () => {
     const out = await tool("portfolio_overview").run({}, ctx());
     expect(out.text).toContain("market value 12510.00; cost basis 10000.00; unrealized gain 2510.00 (25.10 %)");
     expect(out.text).toContain("realized gain 210.00 (this year 0.00); income from dividends and interest 120.00 (this year 48.20)");
-    expect(out.text).toContain("DE0000000001 | Beispiel AG | 100 | 75.10 | 7510.00 | 1510.00 | 25.17 %");
+    expect(out.text).toContain("DE0000000001 | Beispiel AG | Depot | 100 | 75.10 | 7510.00 | 1510.00 | 25.17 %");
     expect(out.text).toContain("2025 | 210.00 | 1 | 71.80 | 2");
     expect(out.block?.rows.map((r) => r.key)).toEqual(["DE0000000001", "DE0000000002"]);
     expect(out.block).toMatchObject({ kind: "positions", route: "/finanzen/portfolio", subtitle: "Depotwert 12510.00 EUR · unrealisiert 2510.00 EUR" });
@@ -257,5 +257,88 @@ describe("search_documents with a sender", () => {
     expect(clients.documents.searchDocumentsEndpoint).toHaveBeenCalledWith(expect.objectContaining({ mode: "hybrid", correspondent: undefined, sender: "Beispielkasse" }));
     expect(out.text).toContain('No known correspondent matches "Beispielkasse"');
     await expect(tool("search_documents").run({ q: "x", mode: "fuzzy" }, ctx())).rejects.toThrow("mode must be one of");
+  });
+});
+
+describe("get_document_summary for several documents", () => {
+  it("reads them in one call and returns one block, naming the ones it could not read", async () => {
+    clients.documents.getDocument
+      .mockResolvedValueOnce({ id: 61, title: "Gesundheitsdividende beantragen", doc_date: "2026-02-10", correspondent_display: "TK", category_slug: "versicherung", summary: "So wird sie eingelöst." })
+      .mockRejectedValueOnce(new Error("not found"))
+      .mockResolvedValueOnce({ id: 63, title: "Bonusprogramm", doc_date: "2026-03-01", sender: "TK", summary: "Punkte sammeln." });
+    const out = await tool("get_document_summary").run({ ids: [61, 62, 63] }, ctx());
+    expect(out.rowCount).toBe(2);
+    expect(out.text).toContain("title: Gesundheitsdividende beantragen");
+    expect(out.text).toContain("title: Bonusprogramm");
+    expect(out.text).toContain("Not found or not visible: 62.");
+    expect(out.block).toMatchObject({ kind: "documents", rows: [{ id: 61 }, { id: 63 }] });
+    expect(out.ref).toEqual({ type: "document", ids: [61, 63] });
+  });
+
+  it("keeps the single-document shape for one id", async () => {
+    clients.documents.getDocument.mockResolvedValue({ id: 61, title: "Antrag", doc_date: "2026-02-10", summary: "x" });
+    const out = await tool("get_document_summary").run({ id: 61 }, ctx());
+    expect(out.block).toMatchObject({ kind: "document", route: "/dokumente/61" });
+    await expect(tool("get_document_summary").run({}, ctx())).rejects.toThrow("id or ids is required");
+  });
+});
+
+describe("photo comments and activity", () => {
+  it("photo_comments lists who wrote what under a photo of an album", async () => {
+    clients.photo.listComments.mockResolvedValue({
+      comments: [{ id: 9, photoId: 1203, albumId: 31, author: { id: 712, name: "Erika Beispiel", kind: "user" }, body: "Was für ein Sonnenuntergang!", createdAt: "2026-10-15T19:02:00.000Z", editedAt: null }],
+      nextCursor: 8,
+    });
+    const out = await tool("photo_comments").run({ photo_id: 1203, album_id: 31 }, ctx());
+    expect(clients.photo.listComments).toHaveBeenCalledWith({ id: 1203, albumId: 31, limit: 30 });
+    expect(out.text).toContain("9 | 2026-10-15 19:02 | Erika Beispiel | Was für ein Sonnenuntergang!");
+    expect(out.text).toContain("Older comments exist");
+    expect(out.block).toMatchObject({ kind: "comments", route: "/fotos/alben/31?photoId=1203" });
+  });
+
+  it("photo_activity filters the feed by kind and marks unread entries", async () => {
+    clients.feed.listFeed.mockResolvedValue({
+      items: [
+        { id: 501, kind: "photo_commented", actor: { id: 712, name: "Erika Beispiel" }, album: { id: 31, name: "Gardasee 2025" }, photo: { id: 1203, filename: "a.jpg", description: null }, payload: { commentId: 9, excerpt: "Was für ein Sonnenuntergang!" }, seen_at: null, created_at: "2026-10-15T19:02:00.000Z" },
+        { id: 500, kind: "photo_favorited", actor: { id: 713, name: "Max Muster" }, album: { id: 31, name: "Gardasee 2025" }, photo: { id: 1201, filename: "b.jpg", description: null }, payload: {}, seen_at: "2026-10-15T20:00:00.000Z", created_at: "2026-10-15T18:00:00.000Z" },
+      ],
+      nextCursor: null, unreadCount: 1,
+    });
+    const out = await tool("photo_activity").run({ kind: "photo_commented" }, ctx());
+    expect(out.rowCount).toBe(1);
+    expect(out.text).toContain("501 | 2026-10-15 19:02 | comment | Erika Beispiel | Gardasee 2025 | 1203 | Was für ein Sonnenuntergang! | yes");
+    expect(out.text).toContain("1 unread entries in the whole feed");
+    expect(out.block?.rows[0]).toMatchObject({ kind: "photo_commented", unread: true, route: "/fotos/alben/31?photoId=1203" });
+    await expect(tool("photo_activity").run({ kind: "likes" }, ctx())).rejects.toThrow("kind must be one of");
+  });
+});
+
+describe("depots per position and the day's gain", () => {
+  it("portfolio_overview names the depot(s) a position lies in", async () => {
+    clients.finance.getPortfolio.mockResolvedValue({
+      accounts: [{ id: 2, label: "Depot Beispielbank", currency_code: "EUR", closed: false }, { id: 5, label: "Depot Musterbank", currency_code: "EUR", closed: false }],
+      closed_hidden: 0, currency: "EUR", mixed_currency: false,
+      summary: { as_of: null, price_as_of: null, market_value: "1.00", cost_basis: "1.00", cost_basis_complete: true, unrealized_gain: "0.00", unrealized_gain_pct: null, realized_gain: "0.00", realized_gain_ytd: "0.00", realized_gain_complete: true, income: "0.00", income_ytd: "0.00", fees: "0.00", taxes: "0.00", total_return: "0.00", total_return_pct: null, open_positions: 1, closed_positions: 0, transaction_count: 1 },
+      positions: [{ key: "DE0000000001", isin: "DE0000000001", wkn: null, name: "Beispiel AG", currency: "EUR", account_ids: [2, 5], open: true, amount: "10", price: "1.00", price_as_of: null, price_source: null, value: "10.00", cost_basis: null, unrealized_gain: null, unrealized_gain_pct: null, weight_pct: null, realized_gain: null, realized_gain_complete: true, income: null, yield_on_cost_pct: null, fees: null, taxes: null, total_return: null, total_return_pct: null, buy_count: 1, sell_count: 0, dividend_count: 0, first_transaction_at: null, last_transaction_at: null }],
+      years: [],
+    });
+    const out = await tool("portfolio_overview").run({ q: "Beispiel" }, ctx());
+    expect(out.text).toContain("Depot Beispielbank [id 2], Depot Musterbank [id 5]");
+    expect(out.text).toContain("DE0000000001 | Beispiel AG | Depot Beispielbank, Depot Musterbank | 10");
+    expect(out.block?.rows[0]).toMatchObject({ depots: "Depot Beispielbank, Depot Musterbank" });
+  });
+
+  it("quotes sums the value and the change over the range, as the Kurse page does", async () => {
+    clients.finance.getQuotes.mockResolvedValue({
+      range: "1d", as_of: "2026-10-16T13:30:00.000Z",
+      tiles: [
+        { key: "A", isin: null, wkn: null, name: "Beispiel AG", amount: "100", currency: "EUR", last: { at: "2026-10-16T13:30:00.000Z", price: "75.10" }, value: "7510.00", change: { absolute: "0.60", percent: "0.81" }, points: [], status: "ok", news_unread: 0 },
+        { key: "B", isin: null, wkn: null, name: "Muster ETF", amount: "50", currency: "EUR", last: { at: "2026-10-16T13:30:00.000Z", price: "100.00" }, value: "5000.00", change: { absolute: "-0.40", percent: "-0.40" }, points: [], status: "ok", news_unread: 0 },
+        { key: "C", isin: null, wkn: null, name: "Unbekannt", amount: "1", currency: null, last: null, value: null, change: null, points: [], status: "unresolved", news_unread: 0 },
+      ],
+    });
+    const out = await tool("quotes").run({ range: "1d" }, ctx());
+    expect(out.text).toContain("Total value of the 2 priced holdings: 12510.00; change since yesterday: +40.00 (2 with a comparison price). Positive = gain.");
+    expect(out.block?.subtitle).toBe("Wert 12510.00 · +40.00 seit gestern");
   });
 });

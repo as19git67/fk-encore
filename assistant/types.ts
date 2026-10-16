@@ -37,6 +37,8 @@ export type BlockKind =
   | "depot_transactions"
   | "quotes"
   | "news"
+  | "comments"
+  | "activity"
   | "proposal"
   | "table";
 

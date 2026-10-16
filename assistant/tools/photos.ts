@@ -3,7 +3,7 @@
  * and which photos the user may see (own, shared albums, group).
  */
 
-import { photo } from "~encore/clients";
+import { feed, photo } from "~encore/clients";
 import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 
@@ -352,4 +352,125 @@ export const listAlbumShares: ToolSpec = {
   },
 };
 
-export const PHOTO_TOOLS = [listPhotos, searchPhotos, listRecaps, listAlbums, listAlbumShares];
+interface PhotoComment { id: number; photoId: number; albumId: number; author: { id: number; name: string | null; kind: string }; body: string; createdAt: string; editedAt: string | null }
+interface FeedItem {
+  id: number; kind: string; actor: { id: number | null; name: string | null }; album: { id: number; name: string } | null;
+  photo: { id: number; filename: string; description: string | null } | null; payload: Record<string, unknown>; seen_at: string | null; created_at: string;
+}
+const FEED_KINDS = ["photo_commented", "photo_favorited", "photo_added", "album_shared", "album_left"] as const;
+const FEED_LABEL: Record<string, string> = {
+  photo_commented: "comment", photo_favorited: "favorite", photo_added: "photos added", album_shared: "album shared", album_left: "left the album",
+};
+const FEED_PAGE = 100;
+
+export const photoComments: ToolSpec = {
+  name: "photo_comments",
+  kind: "read",
+  summary: "The comments under one photo in a shared album — who wrote what and when. Needs the album the photo is discussed in (album ids from list_albums or photo_activity).",
+  permissions: PHOTOS,
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      photo_id: { type: "integer" },
+      album_id: { type: "integer", description: "the album the comments belong to" },
+      limit: { type: "integer", description: "newest comments to return, at most 100 (default 30)" },
+    },
+    required: ["photo_id", "album_id"],
+  },
+  async run(args) {
+    const photoId = int(args.photo_id);
+    const albumId = int(args.album_id);
+    if (photoId === undefined || albumId === undefined) throw new Error("photo_id and album_id are required");
+    const limit = int(args.limit, { min: 1, max: 100 }) ?? 30;
+    const res = (await photo.listComments({ id: photoId, albumId, limit })) as unknown as { comments: PhotoComment[]; nextCursor: number | null };
+    const rows = res.comments;
+    return {
+      text: table(
+        ["id", "at", "author", "comment"],
+        rows.map((c) => [c.id, c.createdAt.slice(0, 16).replace("T", " "), c.author.name ?? (c.author.kind === "guest" ? "guest" : `user ${c.author.id}`), c.body + (c.editedAt ? " (edited)" : "")]),
+        { cap: limit, note: res.nextCursor !== null ? "Older comments exist beyond this page." : undefined },
+      ),
+      digest: digestOf("photo_comments", rows.length, rows.map((c) => c.id)),
+      rowCount: rows.length,
+      block: {
+        kind: "comments",
+        tool: "photo_comments",
+        total: rows.length,
+        rows: rows.map((c) => ({ id: c.id, author: c.author.name ?? "Gast", at: c.createdAt, body: c.body, photo_id: c.photoId, album_id: c.albumId, route: `/fotos/alben/${c.albumId}?photoId=${c.photoId}` })),
+        route: `/fotos/alben/${albumId}?photoId=${photoId}`,
+      },
+    };
+  },
+};
+
+export const photoActivity: ToolSpec = {
+  name: "photo_activity",
+  kind: "read",
+  summary: "What happened in the user's shared albums, newest first: comments (with an excerpt), favorites, photos added, albums shared — the discussions around the photos. Filter by kind, album or photo; unread entries are marked.",
+  permissions: PHOTOS,
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      kind: { type: "string", enum: [...FEED_KINDS], description: "only this kind of event; photo_commented for the discussions" },
+      album_id: { type: "integer", description: "only one album" },
+      photo_id: { type: "integer", description: "only one photo" },
+      unread_only: { type: "boolean", description: "only what the user has not seen yet" },
+      limit: { type: "integer", description: "entries to return, at most 50 (default 20)" },
+    },
+  },
+  async run(args) {
+    const kind = str(args.kind);
+    if (kind && !(FEED_KINDS as readonly string[]).includes(kind)) throw new Error(`kind must be one of ${FEED_KINDS.join(", ")}`);
+    const albumId = int(args.album_id);
+    const photoId = int(args.photo_id);
+    const unreadOnly = bool(args.unread_only) === true;
+    const limit = int(args.limit, { min: 1, max: 50 }) ?? 20;
+    // The feed is one stream; a filter reads a few pages of it, never the whole history.
+    const rows: FeedItem[] = [];
+    let cursor: number | undefined;
+    let unread = 0;
+    for (let page = 0; page < 5 && rows.length < limit; page++) {
+      const res = (await feed.listFeed({ cursor, limit: FEED_PAGE })) as unknown as { items: FeedItem[]; nextCursor: number | null; unreadCount: number };
+      if (page === 0) unread = res.unreadCount;
+      for (const it of res.items) {
+        if (kind && it.kind !== kind) continue;
+        if (albumId !== undefined && it.album?.id !== albumId) continue;
+        if (photoId !== undefined && it.photo?.id !== photoId) continue;
+        if (unreadOnly && it.seen_at) continue;
+        rows.push(it);
+        if (rows.length >= limit) break;
+      }
+      if (res.nextCursor === null) break;
+      cursor = res.nextCursor;
+    }
+    const what = (it: FeedItem) => {
+      const excerpt = typeof it.payload.excerpt === "string" ? it.payload.excerpt : undefined;
+      const count = typeof it.payload.count === "number" ? it.payload.count : undefined;
+      return excerpt ?? (count !== undefined ? `${count} photos` : it.photo?.description ?? "");
+    };
+    return {
+      text: table(
+        ["id", "at", "kind", "who", "album", "photo", "what", "unread"],
+        rows.map((it) => [it.id, it.created_at.slice(0, 16).replace("T", " "), FEED_LABEL[it.kind] ?? it.kind, it.actor.name, it.album?.name, it.photo?.id, what(it), it.seen_at ? "" : "yes"]),
+        { cap: limit, note: `${unread} unread entries in the whole feed. For the full text of a comment call photo_comments(photo_id, album_id).` },
+      ),
+      digest: digestOf("photo_activity", rows.length, rows.map((it) => it.id)),
+      rowCount: rows.length,
+      block: {
+        kind: "activity",
+        tool: "photo_activity",
+        total: rows.length,
+        rows: rows.map((it) => ({
+          id: it.id, kind: it.kind, label: FEED_LABEL[it.kind] ?? it.kind, actor: it.actor.name ?? "Gast", at: it.created_at,
+          album: it.album?.name ?? null, photo_id: it.photo?.id ?? null, filename: it.photo?.filename ?? null, what: what(it), unread: !it.seen_at,
+          route: it.album ? `/fotos/alben/${it.album.id}${it.photo ? `?photoId=${it.photo.id}` : ""}` : null,
+        })),
+        route: "/fotos/feed",
+      },
+    };
+  },
+};
+
+export const PHOTO_TOOLS = [listPhotos, searchPhotos, listRecaps, listAlbums, listAlbumShares, photoComments, photoActivity];
