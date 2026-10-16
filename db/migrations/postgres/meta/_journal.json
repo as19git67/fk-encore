@@ -1786,6 +1786,13 @@
       "when": 1788652800190,
       "tag": "0254_collection_send_sender",
       "breakpoints": true
+    },
+    {
+      "idx": 255,
+      "version": "7",
+      "when": 1788652800200,
+      "tag": "0255_collection_schedule_sender",
+      "breakpoints": true
     }
   ]
 }

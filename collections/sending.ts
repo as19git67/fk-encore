@@ -20,7 +20,7 @@ import db from "../db/database";
 import { dbAll, dbExec, dbFirst, dbInsertReturning } from "../db/adapter";
 import { collectionExports, collectionSends, users } from "../db/schema";
 import { loadReadableCollection } from "../documents/collection-access";
-import { appUrl, mailConfigured, sendCollectionExportEmail, systemSenderAddress } from "../user/mail";
+import { appUrl, mailConfigured, mayUseOwnSender, sendCollectionExportEmail, systemSenderAddress } from "../user/mail";
 import { assertMayUseCollections, caller, isAdmin } from "./collections";
 import { contentDisposition, exportPath, loadOwnRun, type ExportRow } from "./exports";
 import type { Caller } from "./members";
@@ -185,6 +185,8 @@ export interface SendExportRequest {
   message?: string | null;
   /** The single files instead of the ZIP (up to ten). */
   single_files?: boolean;
+  /** From the user's own address instead of the app's (same domain only). */
+  from_self?: boolean;
 }
 
 export interface CollectionSend {
@@ -202,19 +204,23 @@ export interface CollectionSend {
 }
 
 /**
- * Who a mail is from: the person sending it. Only an automatic export that
- * goes to no one but that person comes from the app's address — a note from
- * the system to its user, not a mail the user wrote. `null` is the app.
+ * Who a mail is from. The app's address unless the person chose their own
+ * (`fromSelf`) and it shares the app's domain (`mayUseOwnSender`); `null`
+ * is the app.
  */
 export function mailSender(
   user: { name: string; email: string } | null | undefined,
-  recipients: string[],
-  automatic: boolean,
+  fromSelf: boolean,
 ): { name: string; email: string } | null {
-  if (!user?.email) return null;
-  const own = user.email.trim().toLowerCase();
-  if (automatic && recipients.every((r) => r.trim().toLowerCase() === own)) return null;
+  if (!fromSelf || !user?.email || !mayUseOwnSender(user.email)) return null;
   return { name: user.name, email: user.email };
+}
+
+/** Answers to a mail the app sends for someone go to them, unless they are its only recipient. */
+function replyToFor(user: { email: string } | null | undefined, recipients: string[]): string | null {
+  const own = user?.email?.trim().toLowerCase();
+  if (!own || recipients.every((r) => r.trim().toLowerCase() === own)) return null;
+  return user!.email;
 }
 
 const EMAIL = /^[^\s@<>()[\],;:"]+@[^\s@<>()[\],;:"]+\.[^\s@<>()[\],;:"]+$/;
@@ -260,8 +266,8 @@ async function logSend(
 /**
  * Mail a finished export: attached when it fits, as a link when it does not;
  * with `singleFiles`, the files inside the ZIP go one by one (at most ten).
- * Logs the mail either way. Used by the endpoint and, with `automatic`, by
- * the scheduled exports (see `mailSender` for whose address it carries).
+ * Logs the mail either way. Used by the endpoint and by the scheduled
+ * exports; `fromSelf` asks for the user's own address (see `mailSender`).
  */
 export async function mailExport(
   row: ExportRow,
@@ -269,7 +275,7 @@ export async function mailExport(
   recipients: string[],
   message: string | null,
   singleFiles: boolean,
-  automatic = false,
+  fromSelf = false,
 ): Promise<{ mode: CollectionSend["mode"]; send_id: number }> {
   assertReady(row);
   if (!mailConfigured()) throw APIError.failedPrecondition("sending mail is not set up on this server");
@@ -310,12 +316,13 @@ export async function mailExport(
     mode = "link";
   }
 
-  const from = mailSender(sender, recipients, automatic);
+  const from = mailSender(sender, fromSelf);
   const fromAddress = from?.email ?? systemSenderAddress();
   try {
     await sendCollectionExportEmail({
       to: recipients,
       from,
+      replyTo: from ? null : replyToFor(sender, recipients),
       senderName: sender?.name ?? "Jemand",
       collectionName,
       message,
@@ -338,17 +345,19 @@ export const sendExport = api(
     assertReady(row);
     const recipients = normalizeRecipients(req.to);
     const message = (req.message ?? "").trim().slice(0, 4000) || null;
-    return await mailExport(row, c, recipients, message, req.single_files === true);
+    return await mailExport(row, c, recipients, message, req.single_files === true, req.from_self === true);
   },
 );
 
 export interface CollectionSendsResponse {
   items: CollectionSend[];
   mail_configured: boolean;
-  /** The caller's address: what a mail from the dialog goes out from. */
+  /** The caller's address. */
   sender_email: string | null;
-  /** The app's address, for automatic exports to oneself. */
+  /** The app's address: the sender unless the caller chooses their own. */
   system_sender: string;
+  /** True when the caller's address shares the app's domain and may be the sender. */
+  self_sender_allowed: boolean;
 }
 
 /** Every mail sent with this collection's exports, newest first. */
@@ -384,6 +393,7 @@ export const listCollectionSends = api(
       mail_configured: mailConfigured(),
       sender_email: me?.email ?? null,
       system_sender: systemSenderAddress(),
+      self_sender_allowed: mayUseOwnSender(me?.email),
     };
   },
 );

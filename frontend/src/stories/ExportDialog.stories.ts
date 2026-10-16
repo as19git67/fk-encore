@@ -53,6 +53,7 @@ function handlers(setup: ExportSetup, runs: ExportRun[]) {
         mail_configured: true,
         sender_email: 'max@beispiel.test',
         system_sender: 'noreply@beispiel.test',
+        self_sender_allowed: true,
         items: [
           {
             id: 1,
@@ -85,6 +86,7 @@ function handlers(setup: ExportSetup, runs: ExportRun[]) {
             save_as_document: true,
             recipients: ['vermieter@beispiel.test'],
             sender: 'max@beispiel.test',
+            send_as_self: true,
             single_files: false,
             message: null,
             enabled: true,
