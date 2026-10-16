@@ -1137,7 +1137,7 @@ onMounted(load)
             />
             <Button
               label="Datei importieren"
-              icon="pi pi-file-import"
+              icon="pi pi-upload"
               severity="secondary"
               outlined
               :loading="importingTariffFile"

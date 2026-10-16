@@ -569,7 +569,7 @@ onBeforeUnmount(() => {
       />
       <Button
         v-tooltip.bottom="'Wertpapier- und Dividendenabrechnungen aus den Dokumenten lesen und den Transaktionen zuordnen'"
-        icon="pi pi-file-import"
+        icon="pi pi-receipt"
         :label="enriching && enrichProgress > 0 ? `Belege einlesen … ${enrichProgress} geprüft` : 'Belege einlesen'"
         severity="secondary"
         text

@@ -440,7 +440,7 @@ const selectionActions = computed<ToolbarItem[]>(() => [
     key: 'file',
     label: 'Ablegen',
     title: 'Auswahl in den Basket (dort gemeinsam bearbeiten) oder eine Sammelmappe legen',
-    icon: 'pi pi-bookmark',
+    icon: 'pi pi-file-import',
     severity: 'secondary',
     disabled: selection.selectedCount.value === 0,
     command: fileSelection,
@@ -890,7 +890,7 @@ onMounted(async () => {
             {{ doc.title || doc.original_filename }}
           </button>
           <Button
-            :icon="basket.has(doc.id) ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
+            icon="pi pi-file-import"
             text
             rounded
             size="small"
@@ -974,7 +974,7 @@ onMounted(async () => {
         </div>
         <Button
           class="grid-card-basket-btn"
-          :icon="basket.has(doc.id) ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
+          icon="pi pi-file-import"
           text
           rounded
           size="small"

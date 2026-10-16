@@ -634,11 +634,11 @@ function transactionCash(tx: PortfolioTransaction): string {
                   <!-- The security in this depot, filed (#1548). -->
                   <Button
                     v-if="d.security_id != null"
-                    :icon="securityInBasket(d.security_id) ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
+                    icon="pi pi-file-import"
                     size="small"
                     text
                     rounded
-                    severity="secondary"
+                    :severity="securityInBasket(d.security_id) ? 'success' : 'secondary'"
                     aria-haspopup="dialog"
                     :aria-label="`Ablegen: ${d.account_label}`"
                     v-tooltip.left="securityInBasket(d.security_id) ? 'Ablegen – liegt im Basket' : 'Ablegen: Basket oder Sammelmappe'"
