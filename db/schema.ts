@@ -1495,6 +1495,25 @@ export const collectionSchedules = pgTable("collection_schedules", {
 });
 
 /**
+ * Anonymous share links of a collection (#1548, stage 8, migration 0256).
+ * Live: the link shows the collection as it is now, as far as its creator
+ * may see it. Soft-deleted through `disabled_at`.
+ */
+export const collectionPublicLinks = pgTable("collection_public_links", {
+  id: serial("id").primaryKey(),
+  collection_id: integer("collection_id")
+    .notNull()
+    .references(() => documentCollections.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  created_by_user_id: integer("created_by_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  expires_at: timestamp("expires_at", { mode: "string", withTimezone: true }),
+  disabled_at: timestamp("disabled_at", { mode: "string", withTimezone: true }),
+});
+
+/**
  * Every mail sent with a collection's export (#1548, stage 7): when, by whom,
  * to whom and how — attached, as single files, or as a link.
  */

@@ -12,7 +12,7 @@ import {
 import { makeMultiPagePdf } from './mock-pdf'
 
 // Generates a deterministic placeholder SVG for a photo filename
-function placeholderSvg(filename: string): string {
+export function placeholderSvg(filename: string): string {
   const hue = filename.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360
   const label = filename.replace(/\.[^.]+$/, '')
   return `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
