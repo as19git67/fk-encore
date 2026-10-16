@@ -203,6 +203,7 @@ class LlmConfig:
             kv_type=str(data.get("kv_type", base.kv_type)).lower(),
             n_cpu_moe=int(data.get("n_cpu_moe", base.n_cpu_moe)),
             mmproj_path=str(data.get("mmproj_path") or ""),
+            vision=bool(data.get("vision", True)),
             reasoning=str(data.get("reasoning", base.reasoning)).lower(),
             server_url=str(data.get("server_url", base.server_url)).rstrip("/"),
             server_extra_args=str(data.get("server_extra_args") or ""),
@@ -233,6 +234,9 @@ class LlmConfig:
             "kv_type": self.kv_type,
             "n_cpu_moe": self.n_cpu_moe,
             "mmproj_path": self.mmproj_path,
+            # False once llama-server refused the projector and the model
+            # went up without it: what loaded is what the next boot repeats.
+            "vision": self.vision,
             "reasoning": self.reasoning,
             "server_url": self.server_url,
             "server_extra_args": self.server_extra_args,

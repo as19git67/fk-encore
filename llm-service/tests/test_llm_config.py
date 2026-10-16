@@ -238,3 +238,11 @@ def test_clear_active_reports_whether_it_removed_anything(tmp_path):
     save_active(tmp_path, LlmConfig.from_dict(_minimal(), models_dir=tmp_path))
     assert clear_active(tmp_path) is True
     assert load_active(tmp_path) is None
+
+
+def test_vision_round_trips_and_defaults_to_on():
+    cfg = LlmConfig.from_dict(_minimal(backend="server"), models_dir=Path("/vol"))
+    assert cfg.vision is True
+    off = LlmConfig.from_dict({**_minimal(backend="server"), "vision": False}, models_dir=Path("/vol"))
+    assert off.vision is False
+    assert LlmConfig.from_dict(off.to_dict(), models_dir=Path("/vol")) == off
