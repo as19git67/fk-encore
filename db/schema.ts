@@ -1458,6 +1458,41 @@ export const collectionExports = pgTable("collection_exports", {
 });
 
 /**
+ * A scheduled export of a collection (#1548, stage 9, migration 0252): when
+ * it runs (weekly on `weekday`, monthly on `day`, yearly on `month`/`day`),
+ * what it takes (all members, or those dated in the elapsed period) and where
+ * the file goes (kept as a run, filed as a document, mailed).
+ */
+export const collectionSchedules = pgTable("collection_schedules", {
+  id: serial("id").primaryKey(),
+  collection_id: integer("collection_id")
+    .notNull()
+    .references(() => documentCollections.id, { onDelete: "cascade" }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  profile_id: integer("profile_id").references(() => collectionExportProfiles.id, { onDelete: "set null" }),
+  options: jsonb("options").$type<Record<string, unknown>>().notNull(),
+  cadence: text("cadence").$type<"weekly" | "monthly" | "yearly">().notNull(),
+  weekday: integer("weekday"),
+  day: integer("day"),
+  month: integer("month"),
+  scope: text("scope").$type<"all" | "period">().notNull(),
+  save_as_document: boolean("save_as_document").notNull().default(false),
+  recipients: text("recipients").array().notNull().default(sql`'{}'::text[]`),
+  single_files: boolean("single_files").notNull().default(false),
+  message: text("message"),
+  enabled: boolean("enabled").notNull().default(true),
+  next_run_at: timestamp("next_run_at", { mode: "string", withTimezone: true }).notNull(),
+  last_run_at: timestamp("last_run_at", { mode: "string", withTimezone: true }),
+  last_status: text("last_status").$type<"done" | "failed" | "skipped">(),
+  last_error: text("last_error"),
+  last_export_id: integer("last_export_id").references(() => collectionExports.id, { onDelete: "set null" }),
+  failures: integer("failures").notNull().default(0),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Every mail sent with a collection's export (#1548, stage 7): when, by whom,
  * to whom and how — attached, as single files, or as a link.
  */
@@ -4672,7 +4707,7 @@ export const documentLinks = pgTable(
 );
 
 /**
- * A run of the assistant benchmark (migration 0252). `results` grows by one
+ * A run of the assistant benchmark (migration 0253). `results` grows by one
  * entry per finished case, so the page can show progress while it runs.
  */
 export const assistantBenchmarkRun = pgTable(
