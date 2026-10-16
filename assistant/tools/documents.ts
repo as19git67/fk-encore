@@ -86,6 +86,7 @@ export const searchDocuments: ToolSpec = {
       ),
       digest: digestOf("search_documents", rows.length, rows.map((d) => d.id)),
       rowCount: rows.length,
+      ref: { type: "document", ids: rows.map((d) => d.id) },
       block: {
         kind: "documents",
         tool: "search_documents",

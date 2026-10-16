@@ -29,7 +29,8 @@ import {
   type ProposalRow,
 } from "./proposals";
 import { WRITE_TOOLS_BY_NAME } from "./tools/writes";
-import type { ChatMessage, ResultBlock, TurnEvent } from "./types";
+import { fallbackTitle, suggestTitle } from "./titles";
+import type { ChatMessage, RefType, ResultBlock, ResultRef, TurnEvent } from "./types";
 
 /** Questions per user and window — each one may cost several model rounds. */
 const RATE_LIMIT = { maxAttempts: 20, windowMs: 10 * 60_000 };
@@ -38,6 +39,10 @@ const MAX_QUESTION_LENGTH = 4000;
 const HISTORY_MESSAGES = 12;
 /** ai-queue priority: someone is waiting for this answer. */
 const SLOT_PRIORITY = 1;
+/** Naming a conversation can wait behind other work. */
+const TITLE_SLOT_PRIORITY = 5;
+/** The note of the tools behind one earlier answer, at most. */
+const TOOL_NOTE_CHARS = 900;
 
 function currentUser() {
   const auth = getAuthData();
@@ -172,27 +177,80 @@ export interface AskResponse {
   rounds: number;
 }
 
-async function history(conversationId: number): Promise<ChatMessage[]> {
-  const rows = await db
-    .select({ role: assistantMessage.role, content: assistantMessage.content, tool_calls: assistantMessage.tool_calls })
+/**
+ * Earlier turns as the model sees them again: each question with its answer,
+ * and after the answer a note of the tools behind it — name, arguments and
+ * the one-line digest of what they found — so a follow-up ("nur die aus
+ * München") knows what the previous answer was based on without the rows.
+ */
+export async function history(conversationId: number): Promise<ChatMessage[]> {
+  const rows = (await db
+    .select({
+      role: assistantMessage.role,
+      content: assistantMessage.content,
+      tool_calls: assistantMessage.tool_calls,
+      tool_call_id: assistantMessage.tool_call_id,
+      digest: assistantMessage.digest,
+    })
     .from(assistantMessage)
     .where(eq(assistantMessage.conversation_id, conversationId))
     .orderBy(desc(assistantMessage.id))
-    .limit(HISTORY_MESSAGES * 4);
-  const turns = rows
-    .filter((m) => (m.role === "user" || m.role === "assistant") && !m.tool_calls && m.content)
-    .slice(0, HISTORY_MESSAGES)
-    .reverse();
+    .limit(HISTORY_MESSAGES * 6)).reverse();
+
+  const turns: ChatMessage[] = [];
+  let calls: Array<{ id: string; name: string; arguments: string }> = [];
+  const digests = new Map<string, string>();
+  for (const m of rows) {
+    if (m.role === "user") {
+      calls = [];
+      if (m.content) turns.push({ role: "user", content: m.content });
+    } else if (m.role === "tool") {
+      if (m.tool_call_id && m.digest) digests.set(m.tool_call_id, m.digest);
+    } else if (m.tool_calls) {
+      calls.push(...m.tool_calls);
+    } else if (m.content) {
+      turns.push({ role: "assistant", content: m.content + toolNote(calls, digests) });
+      calls = [];
+    }
+  }
+  const recent = turns.slice(-HISTORY_MESSAGES);
   // Start on a question, so the replayed history never opens with an answer.
-  const first = turns.findIndex((m) => m.role === "user");
-  return turns.slice(first < 0 ? turns.length : first).map((m) =>
-    m.role === "user"
-      ? { role: "user", content: m.content! }
-      : { role: "assistant", content: m.content! },
-  );
+  const first = recent.findIndex((m) => m.role === "user");
+  return recent.slice(first < 0 ? recent.length : first);
 }
 
-async function persist(conversationId: number, transcript: ChatMessage[], blocks: ResultBlock[]): Promise<number> {
+function toolNote(calls: Array<{ id: string; name: string; arguments: string }>, digests: Map<string, string>): string {
+  if (!calls.length) return "";
+  const lines = calls.map((c) => {
+    const args = c.arguments && c.arguments !== "{}" ? ` ${c.arguments.slice(0, 200)}` : "";
+    return `${c.name}${args} → ${digests.get(c.id) ?? "[no result]"}`;
+  });
+  let note = `\n\n[tools behind this answer: ${lines.join("; ")}]`;
+  if (note.length > TOOL_NOTE_CHARS) note = `${note.slice(0, TOOL_NOTE_CHARS - 2)}…]`;
+  return note;
+}
+
+/** The latest result set of each type in the conversation, for `from_previous_result`. */
+async function previousRefs(conversationId: number): Promise<Partial<Record<RefType, number[]>>> {
+  const rows = await db
+    .select({ ref: assistantMessage.result_ref })
+    .from(assistantMessage)
+    .where(and(eq(assistantMessage.conversation_id, conversationId), sql`${assistantMessage.result_ref} IS NOT NULL`))
+    .orderBy(desc(assistantMessage.id))
+    .limit(50);
+  const refs: Partial<Record<RefType, number[]>> = {};
+  for (const { ref } of rows) {
+    if (ref && !refs[ref.type]) refs[ref.type] = ref.ids;
+  }
+  return refs;
+}
+
+async function persist(
+  conversationId: number,
+  transcript: ChatMessage[],
+  blocks: ResultBlock[],
+  toolResults: Record<string, { digest: string; ref?: ResultRef }> = {},
+): Promise<number> {
   let finalId = 0;
   for (let i = 0; i < transcript.length; i++) {
     const m = transcript[i];
@@ -207,6 +265,8 @@ async function persist(conversationId: number, transcript: ChatMessage[], blocks
           ? m.tool_calls.map((c) => ({ id: c.id, name: c.function.name, arguments: c.function.arguments }))
           : null,
         tool_call_id: m.role === "tool" ? m.tool_call_id : null,
+        digest: m.role === "tool" ? toolResults[m.tool_call_id]?.digest ?? null : null,
+        result_ref: m.role === "tool" ? toolResults[m.tool_call_id]?.ref ?? null : null,
         blocks: isFinal && blocks.length ? blocks : null,
       })
       .returning({ id: assistantMessage.id });
@@ -247,6 +307,7 @@ export const ask = api(
         history: await history(conversation.id),
         question,
         conversationId: conversation.id,
+        previousRefs: await previousRefs(conversation.id),
         tools: catalogFor(user),
         chat,
         emit,
@@ -262,14 +323,13 @@ export const ask = api(
         }),
       });
 
-      const messageId = await persist(conversation.id, result.transcript, result.blocks);
+      const messageId = await persist(conversation.id, result.transcript, result.blocks, result.toolResults);
+      const fallback = fallbackTitle(question);
       await db
         .update(assistantConversation)
-        .set({
-          updated_at: sql`now()`,
-          title: conversation.title ?? question.replace(/\s+/g, " ").slice(0, 80),
-        })
+        .set({ updated_at: sql`now()`, title: conversation.title ?? fallback })
         .where(eq(assistantConversation.id, conversation.id));
+      if (conversation.title === null) nameConversation(conversation.id, question, fallback);
       log.info("assistant answered", { conversation_id: conversation.id, rounds: result.rounds, blocks: result.blocks.length });
       return { answer: result.answer, blocks: result.blocks, message_id: messageId, rounds: result.rounds };
     } catch (err) {
@@ -287,6 +347,33 @@ export const ask = api(
     }
   },
 );
+
+// ── titles ────────────────────────────────────────────────────────────────
+
+const naming = new Set<Promise<void>>();
+
+/**
+ * Names a new conversation after its first answer, in the background. Only
+ * replaces the fallback, so a title set meanwhile stays.
+ */
+function nameConversation(id: number, question: string, fallback: string): void {
+  const job = withAiSlot("llm", TITLE_SLOT_PRIORITY, "assistant-title", () => suggestTitle(chat, question))
+    .then(async (title) => {
+      if (!title || title === fallback) return;
+      await db
+        .update(assistantConversation)
+        .set({ title })
+        .where(and(eq(assistantConversation.id, id), eq(assistantConversation.title, fallback)));
+    })
+    .catch((err) => log.warn("assistant conversation title failed", { conversation_id: id, error: String(err) }))
+    .finally(() => naming.delete(job));
+  naming.add(job);
+}
+
+/** Waits for titles still being made; for tests. */
+export async function __settleTitlesForTests(): Promise<void> {
+  await Promise.all([...naming]);
+}
 
 // ── proposals ─────────────────────────────────────────────────────────────
 

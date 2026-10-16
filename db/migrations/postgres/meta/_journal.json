@@ -1737,6 +1737,13 @@
       "when": 1788652800120,
       "tag": "0247_assistant_proposals",
       "breakpoints": true
+    },
+    {
+      "idx": 248,
+      "version": "7",
+      "when": 1788652800130,
+      "tag": "0248_assistant_result_refs",
+      "breakpoints": true
     }
   ]
 }

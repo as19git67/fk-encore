@@ -90,6 +90,8 @@ export const listTransactions: ToolSpec = {
       ),
       digest: digestOf("list_transactions", res.total, rows.map((t) => t.id)),
       rowCount: rows.length,
+      // Only the rows fetched: a follow-up acts on what the user saw.
+      ref: { type: "transaction", ids: rows.map((t) => t.id) },
       block: {
         kind: "transactions",
         tool: "list_transactions",

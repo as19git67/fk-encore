@@ -3,6 +3,10 @@ import { getAuthData } from "~encore/auth";
 import { sql } from "drizzle-orm";
 
 vi.mock("~encore/clients", async () => (await import("./clients.test-helper")).clients);
+vi.mock("./titles", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./titles")>()),
+  suggestTitle: vi.fn(async () => null),
+}));
 vi.mock("./llm-client", async (importOriginal) => {
   const real = await importOriginal<typeof import("./llm-client")>();
   return { ...real, chat: vi.fn() };
@@ -105,7 +109,7 @@ describe("asking", () => {
     expect(detail.messages[1].blocks[0]).toMatchObject({ kind: "meters" });
   });
 
-  it("replays earlier questions and answers, not the tool rounds", async () => {
+  it("replays earlier questions and answers with a note of their tools, not the tool rounds", async () => {
     clients.meter.listMeters.mockResolvedValue({ meters: [] });
     vi.mocked(chat)
       .mockResolvedValueOnce(toolCall("list_meters", {}))
@@ -118,7 +122,7 @@ describe("asking", () => {
     const third = vi.mocked(chat).mock.calls[2][0];
     expect(third.messages.slice(1).map((m) => [m.role, m.content])).toEqual([
       ["user", "Welche Zähler gibt es?"],
-      ["assistant", "Keine Zähler."],
+      ["assistant", "Keine Zähler.\n\n[tools behind this answer: list_meters → [earlier result of list_meters: 0 rows]]"],
       ["user", "Und jetzt?"],
     ]);
   });

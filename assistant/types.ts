@@ -49,6 +49,19 @@ export interface ResultBlock {
   route?: string;
 }
 
+/** The kinds of objects a later tool can take over from an earlier result. */
+export type RefType = "photo" | "document" | "transaction";
+
+/**
+ * The ids an earlier result held — all of them, not just the rows shown — so
+ * a follow-up ("mach daraus ein Album", "nur die aus München") works on that
+ * set instead of searching again (#1530).
+ */
+export interface ResultRef {
+  type: RefType;
+  ids: number[];
+}
+
 /** What a tool hands back. */
 export interface ToolOutcome {
   /** Compact text for the model: a capped table with ids and totals. */
@@ -57,6 +70,8 @@ export interface ToolOutcome {
   digest: string;
   block?: ResultBlock;
   rowCount: number;
+  /** The set a follow-up may refer to with `from_previous_result`. */
+  ref?: ResultRef;
 }
 
 export interface ToolContext {
@@ -65,6 +80,8 @@ export interface ToolContext {
   today: string;
   /** The conversation a proposal belongs to. */
   conversationId?: number;
+  /** The latest result of this type in the conversation, this turn included. */
+  previous?: (type: RefType) => number[] | undefined;
 }
 
 export type ToolKind = "read" | "write";

@@ -11,7 +11,7 @@
 import { documents, finance, photo } from "~encore/clients";
 import { bool, int, isoDate, str } from "../format";
 import { writeTool, type WriteToolDefinition } from "../proposals";
-import type { JsonSchema } from "../types";
+import type { JsonSchema, RefType, ToolContext } from "../types";
 
 /** More than this many objects in one proposal is refused; the user narrows first. */
 const MAX_PHOTOS = 2000;
@@ -33,7 +33,23 @@ const PHOTO_SELECTION: Record<string, Record<string, unknown>> = {
     },
   },
   photo_ids: { type: "array", items: { type: "integer" }, description: "explicit photo ids, instead of a filter" },
+  from_previous_result: { type: "boolean", description: "the photos of the previous answer, instead of a filter or ids" },
 };
+
+const FROM_PREVIOUS = (what: string) => ({
+  type: "boolean",
+  description: `the ${what} of the previous answer, instead of listing ids`,
+});
+
+/** Explicit ids, or the latest result of `type` when the model asks for it. */
+function idsOrPrevious(args: Record<string, unknown>, key: string, type: RefType, ctx: ToolContext): number[] {
+  if (bool(args.from_previous_result) === true) {
+    const previous = ctx.previous?.(type);
+    if (!previous) throw new Error(`there is no earlier ${type} result in this conversation`);
+    return [...new Set(previous)];
+  }
+  return ids(args[key]);
+}
 
 function ids(value: unknown): number[] {
   return Array.isArray(value)
@@ -47,7 +63,8 @@ function deDate(iso: string): string {
 }
 
 /** The photo ids a selection points at, now. */
-async function resolvePhotos(args: Record<string, unknown>): Promise<number[]> {
+async function resolvePhotos(args: Record<string, unknown>, ctx: ToolContext): Promise<number[]> {
+  if (bool(args.from_previous_result) === true) return idsOrPrevious(args, "photo_ids", "photo", ctx);
   const explicit = ids(args.photo_ids);
   if (explicit.length) return explicit.slice(0, MAX_PHOTOS + 1);
   const f = (args.photos && typeof args.photos === "object" ? args.photos : {}) as Record<string, unknown>;
@@ -56,7 +73,7 @@ async function resolvePhotos(args: Record<string, unknown>): Promise<number[]> {
   const dateTo = isoDate(f.date_to);
   const personIds = ids(f.person_ids);
   if (!favorite && !dateFrom && !dateTo && !personIds.length) {
-    throw new Error("say which photos: a filter (favorite, date range, persons) or photo_ids");
+    throw new Error("say which photos: a filter (favorite, date range, persons), photo_ids or from_previous_result");
   }
   const res = (await photo.listPhotos({
     favorite: favorite || undefined,
@@ -94,11 +111,11 @@ const createAlbum: WriteToolDefinition = {
     },
     required: ["name"],
   } as JsonSchema,
-  async prepare(args) {
+  async prepare(args, ctx) {
     const name = str(args.name);
     if (!name) throw new Error("name is required");
-    const wantsPhotos = Boolean(args.photos || ids(args.photo_ids).length);
-    const photoIds = wantsPhotos ? await resolvePhotos(args) : [];
+    const wantsPhotos = Boolean(args.photos || ids(args.photo_ids).length || bool(args.from_previous_result));
+    const photoIds = wantsPhotos ? await resolvePhotos(args, ctx) : [];
     checkPhotoCount(photoIds);
     return {
       summary: photoIds.length
@@ -135,13 +152,13 @@ const addPhotosToAlbum: WriteToolDefinition = {
     },
     required: ["album_id"],
   } as JsonSchema,
-  async prepare(args) {
+  async prepare(args, ctx) {
     const albumId = int(args.album_id);
     if (albumId === undefined) throw new Error("album_id is required");
     const albums = (await photo.listAlbums()) as unknown as { albums: { id: number; name: string }[] };
     const album = albums.albums.find((a) => a.id === albumId);
     if (!album) throw new Error(`album ${albumId} not found`);
-    const photoIds = await resolvePhotos(args);
+    const photoIds = await resolvePhotos(args, ctx);
     checkPhotoCount(photoIds);
     if (!photoIds.length) throw new Error("no photos match");
     return {
@@ -169,13 +186,14 @@ const setPhotoFavorite: WriteToolDefinition = {
     type: "object",
     properties: {
       photo_ids: { type: "array", items: { type: "integer" } },
+      from_previous_result: FROM_PREVIOUS("photos"),
       favorite: { type: "boolean", description: "false removes the mark" },
     },
-    required: ["photo_ids", "favorite"],
+    required: ["favorite"],
   },
-  async prepare(args) {
-    const photoIds = ids(args.photo_ids);
-    if (!photoIds.length) throw new Error("photo_ids is required");
+  async prepare(args, ctx) {
+    const photoIds = idsOrPrevious(args, "photo_ids", "photo", ctx);
+    if (!photoIds.length) throw new Error("photo_ids or from_previous_result is required");
     if (photoIds.length > MAX_FAVORITES) throw new Error(`at most ${MAX_FAVORITES} photos at once`);
     const favorite = bool(args.favorite) ?? true;
     return {
@@ -207,14 +225,15 @@ const createDocumentFollowUp: WriteToolDefinition = {
     type: "object",
     properties: {
       document_ids: { type: "array", items: { type: "integer" } },
+      from_previous_result: FROM_PREVIOUS("documents"),
       date: { type: "string", description: "YYYY-MM-DD" },
       note: { type: "string" },
     },
-    required: ["document_ids", "date"],
+    required: ["date"],
   },
   async prepare(args, ctx) {
-    const documentIds = ids(args.document_ids);
-    if (!documentIds.length) throw new Error("document_ids is required");
+    const documentIds = idsOrPrevious(args, "document_ids", "document", ctx);
+    if (!documentIds.length) throw new Error("document_ids or from_previous_result is required");
     if (documentIds.length > MAX_DOCUMENTS) throw new Error(`at most ${MAX_DOCUMENTS} documents at once`);
     const date = isoDate(args.date);
     if (!date) throw new Error("date must be YYYY-MM-DD");
@@ -247,14 +266,14 @@ const tagTransactions: WriteToolDefinition = {
     type: "object",
     properties: {
       transaction_ids: { type: "array", items: { type: "integer" } },
+      from_previous_result: FROM_PREVIOUS("bookings"),
       add: { type: "array", items: { type: "string" }, description: "tags to add" },
       remove: { type: "array", items: { type: "string" }, description: "tags to remove" },
     },
-    required: ["transaction_ids"],
   },
-  async prepare(args) {
-    const transactionIds = ids(args.transaction_ids);
-    if (!transactionIds.length) throw new Error("transaction_ids is required");
+  async prepare(args, ctx) {
+    const transactionIds = idsOrPrevious(args, "transaction_ids", "transaction", ctx);
+    if (!transactionIds.length) throw new Error("transaction_ids or from_previous_result is required");
     if (transactionIds.length > MAX_TRANSACTIONS) throw new Error(`at most ${MAX_TRANSACTIONS} bookings at once`);
     const clean = (v: unknown) => (Array.isArray(v) ? v.map((t) => str(t)).filter((t): t is string => !!t) : []);
     const add = clean(args.add);

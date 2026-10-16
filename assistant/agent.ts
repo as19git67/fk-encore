@@ -27,7 +27,9 @@ import { ContextTooLargeError, type ChatFn, type ChatReply } from "./llm-client"
 import type {
   AssistantUser,
   ChatMessage,
+  RefType,
   ResultBlock,
+  ResultRef,
   ToolSpec,
   TurnEvent,
 } from "./types";
@@ -71,6 +73,7 @@ Rules:
 - Combine tools from different areas when the question needs it.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
 - If a tool finds nothing, say so plainly and suggest how to search differently.
+- Earlier answers end with a note of the tools behind them and what they found. For a follow-up on those rows ("davon", "nur die aus …", "mach daraus …") pass from_previous_result: true to a tool that offers it instead of searching again.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button. Call one only when the user asks for that change, then say what you proposed and that it waits for their confirmation. Never claim it is done.
 - Answer briefly in the user's language (usually German).`;
 
@@ -78,7 +81,8 @@ const EXAMPLES = `Examples of chained calls:
 1. "Welche Lastschriften muss ich diesen Monat noch erwarten?" → upcoming_direct_debits(until = end of this month) → answer with the debits and the sum the tool printed.
 2. "Gib mir die Protokolle der Eigentümerversammlung der Wohnung in Musterstadt." → list_categories → search_documents(q = "Protokoll Eigentümerversammlung", category = the matching slug) → name the documents that fit.
 3. "Wie viel Strom haben wir letztes Jahr verbraucht?" → list_meters → consumption_report(meter_id = the electricity meter, from/to = last year) → state the total the tool printed.
-4. "Leg ein Album mit allen Favoriten von 2025 an." → create_album(name = "Favoriten 2025", photos = {favorite: true, date_from: "2025-01-01", date_to: "2025-12-31"}) → say the album is proposed with the count the tool printed and waits for "Ausführen".`;
+4. "Leg ein Album mit allen Favoriten von 2025 an." → create_album(name = "Favoriten 2025", photos = {favorite: true, date_from: "2025-01-01", date_to: "2025-12-31"}) → say the album is proposed with the count the tool printed and waits for "Ausführen".
+5. After an answer listing photos: "Nur die aus München, und mach daraus ein Album." → list_photos(from_previous_result = true, place = "München") → create_album(name = …, from_previous_result = true) → say what was proposed.`;
 
 export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean): string {
   const catalog = tools.length
@@ -107,6 +111,8 @@ export interface TurnInput {
   withSlot?: <T>(fn: () => Promise<T>) => Promise<T>;
   /** The conversation the turn belongs to; proposals are filed under it. */
   conversationId?: number;
+  /** The latest result sets of earlier turns, by type. */
+  previousRefs?: Partial<Record<RefType, number[]>>;
   /** Per tool call: name, argument keys and row count — never row content. */
   log?: (entry: { tool: string; arguments: Record<string, unknown>; rows: number; ms: number; error?: string }) => void;
 }
@@ -116,6 +122,8 @@ export interface TurnResult {
   blocks: ResultBlock[];
   /** The turn's messages after the history: question, tool rounds, answer. */
   transcript: ChatMessage[];
+  /** Per tool call id: its one-line digest and the set it found, for later turns. */
+  toolResults: Record<string, { digest: string; ref?: ResultRef }>;
   rounds: number;
 }
 
@@ -179,7 +187,16 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let lastRoundStart = questionIndex;
   const digests = new Map<string, string>();
   const blocks: ResultBlock[] = [];
-  const ctx = { user: input.user, today: localIso(now), conversationId: input.conversationId };
+  const refs = new Map<RefType, number[]>(
+    Object.entries(input.previousRefs ?? {}) as Array<[RefType, number[]]>,
+  );
+  const toolResults: TurnResult["toolResults"] = {};
+  const ctx = {
+    user: input.user,
+    today: localIso(now),
+    conversationId: input.conversationId,
+    previous: (type: RefType) => refs.get(type),
+  };
 
   let answer: string | null = null;
   let rounds = 0;
@@ -255,6 +272,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       try {
         const outcome = await tool.run(args, ctx);
         digests.set(call.id, outcome.digest);
+        toolResults[call.id] = { digest: outcome.digest, ref: outcome.ref };
+        if (outcome.ref) refs.set(outcome.ref.type, outcome.ref.ids);
         if (outcome.block) blocks.push(outcome.block);
         result(outcome.text);
         emit({ type: "tool_result", tool: name, rowCount: outcome.rowCount, block: outcome.block });
@@ -272,5 +291,5 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   messages.push({ role: "assistant", content: final });
   const transcript = messages.slice(questionIndex);
   emit({ type: "done", answer: final, blocks });
-  return { answer: final, blocks, transcript, rounds };
+  return { answer: final, blocks, transcript, rounds, toolResults };
 }

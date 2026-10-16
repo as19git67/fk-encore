@@ -1,9 +1,10 @@
 # Assistant: one chat over everything the server knows
 
-Status: stages 1 to 4 implemented (`POST /chat` in llm-service with its
+Status: stages 1 to 5 implemented (`POST /chat` in llm-service with its
 benchmark in `llm-service/bench/`; the `assistant` service with the read
 tools and the direct-debits endpoint; the chat page in the web app; write
-actions as proposals the user confirms). The benchmark has not yet been run on
+actions as proposals the user confirms; follow-up questions on earlier
+results and generated conversation titles). The benchmark has not yet been run on
 the production GPU. Tracking issue #1524, stages #1525–#1534.
 
 ## Problem
@@ -374,6 +375,23 @@ behind it.
      of re-querying (needed for "mach daraus ein Album").
    - Conversation titles from the first question (`/json-prompt`, as the
      recap titles do).
+   - **Implemented** (#1530), with these details: each tool row of the
+     transcript keeps its digest and the ids its result held
+     (`assistant_message.digest`, `result_ref`, migration 0248). The
+     replayed history appends to each earlier answer a note of the tools
+     behind it — name, arguments, digest — instead of the rows. A
+     `from_previous_result` set is per type (photo, document, transaction):
+     the latest result of that type in the conversation, results of the
+     current turn included, so "nur die aus München, und mach daraus ein
+     Album" narrows and then uses the narrowed set. `list_photos` takes it
+     together with a new `place` filter; a server-side filter (date,
+     favorite, persons) is intersected with the previous ids, otherwise the
+     previous photos are loaded by id. The write tools take it in place of
+     ids. A booking set holds only the rows fetched, so a follow-up acts on
+     what the user saw. Titles come from a short `/chat` call
+     (`assistant/titles.ts`) rather than `/json-prompt`, run in the
+     background in a low-priority llm slot after the first answer, and
+     only replace the fallback (the question, cut short).
 
 6. **Work products: bundles, redactions, reports.** The example that
    needs all of this:
