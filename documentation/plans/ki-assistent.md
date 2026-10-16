@@ -213,8 +213,32 @@ behind it.
 
      | Deployment | Passed | Tool hit | Args hit | Median ms/round | p90 | Median rounds |
      |---|---|---|---|---|---|---|
-     | Gemma 4 26B-A4B, GPU, `server` | — | — | — | — | — | — |
+     | Gemma 4 26B-A4B, GPU, `server`, context 30000 (2026-10-16, 25 cases, in the app) | 21/25 | 88 % | 84 % | 868 | 2040 | 2 |
      | Qwen2.5-7B, CPU, `inproc` | — | — | — | — | — | — |
+
+     What the first run showed, and what changed after it:
+     - The three follow-up cases failed the same way: the model answered
+       without a tool call and wrote "[tools behind this answer: …]" itself,
+       copying the note the server appended to earlier answers (other answers
+       gained "*Tools: …*" lines the same way). Earlier turns are now
+       replayed as real tool calls with the digest as the tool result, the
+       rule about notes says never to write them, such lines are stripped
+       from answers, and an answer that writes a call as text is sent back
+       once (`FAKE_CALL_NUDGE`).
+     - "Zwei Module verbinden" ran all eight rounds, calling
+       `list_transactions` with the same arguments three times, and ended
+       in Gemma's raw call syntax as the "answer" (scored as answered). A
+       repeated call is now answered with "already called, see above"
+       instead of running again, and a forced last round that writes a call
+       gets one more request without tools for the answer in words; failing
+       that, the turn ends with `OUT_OF_ROUNDS`, which scores as unanswered.
+     - The Mahnung reply named the deadline in the chat but not in the
+       letter; the rules now say everything asked for goes into the letter
+       text, dates as DD.MM.YYYY, and the server signs with the user's name
+       in place of a "[[Dein Name]]" gap.
+     - `list_trip_plans` was called with `year: 2026` for "gerade in
+       Planung", which would miss a trip in 2027; its description now says
+       to leave the year out, and the case checks that.
 
 2. **The `assistant` service** (new, `assistant/`).
    - Tables `assistant_conversation` (`id`, `user_id`, `title`,

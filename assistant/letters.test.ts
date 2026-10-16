@@ -31,6 +31,7 @@ import {
   setConversationContext,
 } from "./assistant";
 import { DIN5008_B, gapsIn, MM, renderLetterPdf } from "./letter-pdf";
+import { signed } from "./tools/letters";
 import { getDocumentText } from "./tools/documents";
 import type { ProposalRow } from "./proposals";
 
@@ -268,3 +269,13 @@ describe("the DIN 5008 page", () => {
     expect(gapsIn("[keine Lücke]")).toEqual([]);
   });
 });
+
+describe("signing a letter", () => {
+  it("puts the user's name where the model left a gap for it, or under a bare closing", () => {
+    expect(signed("Text.\n\nMit freundlichen Grüßen,\n\n[[Dein Name]]", "Erika Beispiel")).toBe("Text.\n\nMit freundlichen Grüßen,\nErika Beispiel");
+    expect(signed("Text.\n\nMit freundlichen Grüßen", "Erika Beispiel")).toBe("Text.\n\nMit freundlichen Grüßen\nErika Beispiel");
+    expect(signed("Text.\n\nMit freundlichen Grüßen\nMax Muster", "Erika Beispiel")).toBe("Text.\n\nMit freundlichen Grüßen\nMax Muster");
+    expect(signed("Text.\n\n[[Dein Name]]", "[[Ihr Name]]")).toBe("Text.\n\n[[Dein Name]]");
+  });
+});
+

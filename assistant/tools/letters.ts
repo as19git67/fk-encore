@@ -87,6 +87,21 @@ function editOf(args: Record<string, unknown>, edits: ProposalEdits): Record<str
   return next;
 }
 
+/** The name a model leaves as a gap under the closing ("[[Dein Name]]"). */
+const NAME_GAP_RE = /\n*\[\[[^\]\n]*name[^\]\n]*\]\]\s*$/i;
+const CLOSING_RE = /(?:grüßen|grüße|gruß|hochachtungsvoll)[,.!]?\s*$/i;
+
+/**
+ * Signs the letter with the user's name: in place of a name gap at the end,
+ * or under a closing formula that has none. A name the model wrote stays.
+ */
+export function signed(body: string, name: string): string {
+  if (!name || name.startsWith("[[")) return body;
+  if (NAME_GAP_RE.test(body)) return body.replace(NAME_GAP_RE, `\n${name}`);
+  if (CLOSING_RE.test(body)) return `${body.trimEnd()}\n${name}`;
+  return body;
+}
+
 function firstLine(text: string): string {
   return lines(text)[0] ?? "";
 }
@@ -109,14 +124,14 @@ async function rememberAddress(userId: number, sender: string): Promise<void> {
 
 export const renderLetter: WriteToolDefinition = {
   name: "render_letter",
-  summary: "Propose a letter as a DIN 5008 PDF: you write salutation, text and closing; the server adds the user's sender block, today's date and the enclosures. Write [[what is missing]] for any fact you do not have. Enclosures default to the documents of the working set.",
+  summary: "Propose a letter as a DIN 5008 PDF: you write salutation, text and the closing formula; the server adds the user's sender block, today's date, the signature with the user's name and the enclosures. Everything the user wants mentioned goes into body. Write [[what is missing]] for any fact you do not have. Enclosures default to the documents of the working set.",
   permissions: ["module.assistant"],
   parameters: {
     type: "object",
     properties: {
       recipient: { type: "string", description: "the recipient's address, one line per row (name, street, postcode and town)" },
       subject: { type: "string" },
-      body: { type: "string", description: "salutation, paragraphs separated by a blank line, closing with the user's name" },
+      body: { type: "string", description: "salutation, paragraphs separated by a blank line, closing formula (the server signs with the user's name); dates as DD.MM.YYYY" },
       attachment_document_ids: {
         type: "array",
         items: { type: "integer" },
@@ -126,12 +141,13 @@ export const renderLetter: WriteToolDefinition = {
     required: ["body"],
   },
   async prepare(args, ctx) {
-    const body = str(args.body);
-    if (!body) throw new Error("body is required");
-    if (body.length > MAX_BODY) throw new Error(`the text is longer than ${MAX_BODY} characters`);
+    const written = str(args.body);
+    if (!written) throw new Error("body is required");
+    if (written.length > MAX_BODY) throw new Error(`the text is longer than ${MAX_BODY} characters`);
     const recipient = str(args.recipient) ?? RECIPIENT_GAP;
     const subject = str(args.subject) ?? SUBJECT_GAP;
     const sender = await senderOf(Number(ctx.user.userID));
+    const body = signed(written, firstLine(sender));
 
     const askedFor = Array.isArray(args.attachment_document_ids)
       ? args.attachment_document_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0)

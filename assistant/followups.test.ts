@@ -83,11 +83,16 @@ describe("follow-up questions", () => {
     await ask({ id: conversation.id, message: "Wie viele waren das?" });
 
     const request = vi.mocked(chat).mock.calls.at(-1)![0];
-    const earlier = request.messages.find((m) => m.role === "assistant" && m.content?.startsWith("Drei Favoriten"));
-    expect(earlier?.content).toContain("[tools behind this answer: list_photos {\"favorite\":true,\"date_from\":\"2025-01-01\",\"date_to\":\"2025-12-31\"}");
-    expect(earlier?.content).toContain("[earlier result of list_photos: 3 rows, ids 5,6,7]");
-    // The rows themselves are not replayed.
-    expect(request.messages.some((m) => m.role === "tool")).toBe(false);
+    const call = request.messages.find((m) => m.role === "assistant" && "tool_calls" in m && m.tool_calls) as
+      { tool_calls: Array<{ function: { name: string; arguments: string } }> } | undefined;
+    expect(call?.tool_calls[0]!.function).toEqual({
+      name: "list_photos",
+      arguments: JSON.stringify({ favorite: true, date_from: "2025-01-01", date_to: "2025-12-31" }),
+    });
+    // The rows themselves are not replayed, only the digest of the result.
+    const results = request.messages.filter((m) => m.role === "tool");
+    expect(results.map((m) => m.content)).toEqual(["[earlier result of list_photos: 3 rows, ids 5,6,7]"]);
+    expect(request.messages.some((m) => m.role === "assistant" && m.content?.includes("tools behind"))).toBe(false);
   });
 
   it("narrow the previous photos by place and make an album of them", async () => {

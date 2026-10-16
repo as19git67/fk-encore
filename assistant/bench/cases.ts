@@ -59,23 +59,30 @@ const INVOICE_BRIEFS = [
   'document 203: "Rechnung Anfahrt"\n  from: Musterfirma Haustechnik GmbH; dated: 2026-09-16; type: Rechnung\n  reference numbers: invoice RE-2026-0103\n  amount (read from the text): 45,00 €',
 ];
 
-const PURCHASE_HISTORY: ChatMessage[] = [
-  { role: "user", content: "Zeig mir die Unterlagen zum Kauf der Wohnung in Musterstadt." },
-  {
-    role: "assistant",
-    content: "Ich habe drei Unterlagen zum Kauf gefunden: den Kaufvertrag, den Grundbuchauszug und die Notarrechnung.\n\n"
-      + "[tools behind this answer: search_documents {\"q\":\"Kauf Wohnung Musterstadt\"} → [earlier result of search_documents: 3 rows, ids 301,302,303]]",
-  },
-];
+/** An earlier turn as the assistant replays it: question, tool call with its digest, answer. */
+function earlierTurn(question: string, tool: string, args: Record<string, unknown>, digest: string, answer: string): ChatMessage[] {
+  const id = `h-${tool}`;
+  return [
+    { role: "user", content: question },
+    { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: tool, arguments: JSON.stringify(args) } }] },
+    { role: "tool", tool_call_id: id, content: digest },
+    { role: "assistant", content: answer },
+  ];
+}
 
-const PHOTO_HISTORY: ChatMessage[] = [
-  { role: "user", content: "Zeig meine Favoriten von 2025." },
-  {
-    role: "assistant",
-    content: "Du hast 3 Favoriten aus 2025.\n\n"
-      + "[tools behind this answer: list_photos {\"favorite\":true,\"date_from\":\"2025-01-01\",\"date_to\":\"2025-12-31\"} → [earlier result of list_photos: 3 rows, ids 1201,1202,1203]]",
-  },
-];
+const PURCHASE_HISTORY = earlierTurn(
+  "Zeig mir die Unterlagen zum Kauf der Wohnung in Musterstadt.",
+  "search_documents", { q: "Kauf Wohnung Musterstadt" },
+  "[earlier result of search_documents: 3 rows, ids 301,302,303]",
+  "Ich habe drei Unterlagen zum Kauf gefunden: den Kaufvertrag, den Grundbuchauszug und die Notarrechnung.",
+);
+
+const PHOTO_HISTORY = earlierTurn(
+  "Zeig meine Favoriten von 2025.",
+  "list_photos", { favorite: true, date_from: "2025-01-01", date_to: "2025-12-31" },
+  "[earlier result of list_photos: 3 rows, ids 1201,1202,1203]",
+  "Du hast 3 Favoriten aus 2025.",
+);
 
 const PROPOSAL = (summary: string) => ({ proposal: { id: 1, summary, status: "pending — the user confirms on the card" } });
 
@@ -191,7 +198,7 @@ export const BENCH_CASES: BenchCase[] = [
     id: "trip-plans",
     title: "Reisen in Planung",
     question: "Welche Reisen haben wir gerade in Planung?",
-    expect: [{ tool: "list_trip_plans" }],
+    expect: [{ tool: "list_trip_plans", args: { year: { $absent: true } } }],
     results: { list_trip_plans: { rows: [{ id: 12, destination: "Musterinsel", from: "2027-05-01", to: "2027-05-14" }] } },
   },
   {

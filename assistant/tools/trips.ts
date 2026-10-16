@@ -24,7 +24,7 @@ export const listTripPlans: ToolSpec = {
   source: "hand",
   parameters: {
     type: "object",
-    properties: { year: { type: "integer", description: "only plans starting in this year" } },
+    properties: { year: { type: "integer", description: "only plans starting in this year; leave out for every plan, e.g. for trips being planned now, which may start next year" } },
   },
   async run(args, ctx) {
     const year = int(args.year);
