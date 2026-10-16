@@ -143,3 +143,95 @@ describe("list_photos", () => {
     expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ sortDir: "desc", locationText: undefined }));
   });
 });
+
+describe("depot tools", () => {
+  const POSITION = {
+    key: "DE0000000001", isin: "DE0000000001", wkn: "000001", name: "Beispiel AG", currency: "EUR", account_ids: [2], open: true,
+    amount: "100", price: "75.10", price_as_of: "2026-10-16", price_source: "quote", value: "7510.00", cost_basis: "6000.00",
+    unrealized_gain: "1510.00", unrealized_gain_pct: "25.17", weight_pct: "60.00", realized_gain: "0.00", realized_gain_complete: true,
+    income: "48.20", yield_on_cost_pct: "0.80", fees: "9.90", taxes: "12.70", total_return: "1535.60", total_return_pct: "25.59",
+    buy_count: 2, sell_count: 0, dividend_count: 1, first_transaction_at: "2024-02-01", last_transaction_at: "2026-05-12",
+  };
+  const SUMMARY = {
+    as_of: "2026-10-16", price_as_of: "2026-10-16", market_value: "12510.00", cost_basis: "10000.00", cost_basis_complete: true,
+    unrealized_gain: "2510.00", unrealized_gain_pct: "25.10", realized_gain: "210.00", realized_gain_ytd: "0.00", realized_gain_complete: true,
+    income: "120.00", income_ytd: "48.20", fees: "14.80", taxes: "12.70", total_return: "2812.50", total_return_pct: "28.13",
+    open_positions: 2, closed_positions: 0, transaction_count: 5,
+  };
+
+  it("portfolio_overview reads the summary, the positions and the years out, largest first", async () => {
+    clients.finance.getPortfolio.mockResolvedValue({
+      accounts: [{ id: 2, label: "Depot", currency_code: "EUR", closed: false }], closed_hidden: 0, currency: "EUR", mixed_currency: false,
+      summary: SUMMARY,
+      positions: [{ ...POSITION, key: "DE0000000002", name: "Muster ETF", value: "5000.00" }, POSITION],
+      years: [{ year: 2025, realized: "210.00", sell_count: 1, realized_complete: true, income: "71.80", dividend_count: 2, fees: "4.90", taxes: "0.00", net_invested: "-1000.00" }],
+    });
+    const out = await tool("portfolio_overview").run({}, ctx());
+    expect(out.text).toContain("market value 12510.00; cost basis 10000.00; unrealized gain 2510.00 (25.10 %)");
+    expect(out.text).toContain("realized gain 210.00 (this year 0.00); income from dividends and interest 120.00 (this year 48.20)");
+    expect(out.text).toContain("DE0000000001 | Beispiel AG | 100 | 75.10 | 7510.00 | 1510.00 | 25.17 %");
+    expect(out.text).toContain("2025 | 210.00 | 1 | 71.80 | 2");
+    expect(out.block?.rows.map((r) => r.key)).toEqual(["DE0000000001", "DE0000000002"]);
+    expect(out.block).toMatchObject({ kind: "positions", route: "/finanzen/portfolio", subtitle: "Depotwert 12510.00 EUR · unrealisiert 2510.00 EUR" });
+
+    const one = await tool("portfolio_overview").run({ q: "muster" }, ctx());
+    expect(one.rowCount).toBe(1);
+    expect(one.text).not.toContain("Per year");
+  });
+
+  it("depot_transactions filters by kind and period and repeats the server's sums", async () => {
+    clients.finance.listPortfolioTransactions.mockResolvedValue({
+      items: [{ id: 31, account_id: 2, account_label: "Depot", position_key: "DE0000000001", isin: "DE0000000001", wkn: null, name: "Beispiel AG", kind: "dividend", executed_at: "2026-05-12", amount: "100", price: null, gross_amount: "60.90", fees: "0.00", tax: "12.70", net_amount: "48.20", currency: "EUR", source: "bank", linked_transaction_id: null, note: null, document_ids: [] }],
+      total: 1, sums: { net_amount: "48.20", fees: "0.00", taxes: "12.70" },
+    });
+    const out = await tool("depot_transactions").run({ kind: "dividend", from: "2026-01-01", to: "2026-12-31" }, ctx());
+    expect(clients.finance.listPortfolioTransactions).toHaveBeenCalledWith(expect.objectContaining({ kind: "dividend", from: "2026-01-01", to: "2026-12-31", limit: 25 }));
+    expect(out.text).toContain("31 | 2026-05-12 | dividend | Beispiel AG | Depot | 100 | - | 48.20 | 0.00 | 12.70 | EUR");
+    expect(out.text).toContain("net 48.20, fees 0.00, taxes 12.70");
+    expect(out.block).toMatchObject({ kind: "depot_transactions", subtitle: "Netto 48.20 · Gebühren 0.00 · Steuern 12.70", route: "/finanzen/portfolio?kind=dividend&from=2026-01-01&to=2026-12-31" });
+    await expect(tool("depot_transactions").run({ kind: "bonus" }, ctx())).rejects.toThrow("kind must be one of");
+  });
+
+  it("position_detail reads one security with its sales and years", async () => {
+    clients.finance.getPortfolioPosition.mockResolvedValue({
+      currency: "EUR", position: POSITION,
+      accounts: [{ account_id: 2, account_label: "Depot", amount: "100", value: "7510.00", cost_basis: "6000.00" }],
+      transactions: [{ id: 1, account_label: "Depot", kind: "buy", executed_at: "2024-02-01", amount: "100", price: "60.00", net_amount: "-6009.90", fees: "9.90", tax: "0.00" }],
+      sales: [{ transaction_id: 7, executed_at: "2025-03-03", quantity: "10", proceeds: "700.00", cost: "600.00", gain: "100.00" }],
+      years: [{ year: 2025, realized: "100.00", realized_complete: true, sell_count: 1, income: "0.00", dividend_count: 0, fees: "0.00", taxes: "0.00" }],
+    });
+    const out = await tool("position_detail").run({ key: "DE0000000001" }, ctx());
+    expect(out.text).toContain("Beispiel AG (ISIN DE0000000001, WKN 000001), held");
+    expect(out.text).toContain("2025-03-03 | 10 | 700.00 | 600.00 | 100.00");
+    expect(out.text).toContain("2024-02-01 | buy | Depot | 100 | 60.00 | -6009.90 | 9.90 | 0.00");
+    expect(out.block).toMatchObject({ kind: "positions", route: "/finanzen/portfolio/DE0000000001" });
+  });
+
+  it("quotes lists last price, change and unread news, filtered by name", async () => {
+    clients.finance.getQuotes.mockResolvedValue({
+      range: "1m", as_of: "2026-10-16T13:30:00.000Z",
+      tiles: [
+        { key: "DE0000000001", isin: "DE0000000001", wkn: null, name: "Beispiel AG", amount: "100", currency: "EUR", last: { at: "2026-10-16T13:30:00.000Z", price: "75.100000" }, value: "7510.00", change: { absolute: "2.30", percent: "3.16" }, points: [], status: "ok", news_unread: 2 },
+        { key: "XX0", isin: null, wkn: null, name: "Unbekannt", amount: "1", currency: null, last: null, value: null, change: null, points: [], status: "unresolved", news_unread: 0 },
+      ],
+    });
+    const out = await tool("quotes").run({ q: "beispiel", range: "1m" }, ctx());
+    expect(clients.finance.getQuotes).toHaveBeenCalledWith({ range: "1m", accounts: undefined });
+    expect(out.rowCount).toBe(1);
+    expect(out.text).toContain("DE0000000001 | Beispiel AG | 100 | 75.100000 | 2026-10-16 13:30 | 7510.00 | 2.30 | 3.16 | 2");
+    expect(out.block).toMatchObject({ kind: "quotes", route: "/finanzen/kurse?range=1m" });
+    await expect(tool("quotes").run({ range: "2y" }, ctx())).rejects.toThrow("range must be one of");
+  });
+
+  it("position_news reads the collected news of one security", async () => {
+    clients.finance.getPositionNews.mockResolvedValue({
+      items: [{ id: 5, url: "https://example.test/a", title: "Beispiel AG hebt Prognose an", source: "Beispiel Wirtschaft", at: "2026-10-15T07:00:00.000Z", summary: "Mehr Umsatz.", sentiment: 0.6, provider: "yahoo" }],
+      checked_at: "2026-10-16T06:00:00.000Z", seen_at: null,
+    });
+    const out = await tool("position_news").run({ key: "DE0000000001", limit: 5 }, ctx());
+    expect(clients.finance.getPositionNews).toHaveBeenCalledWith({ key: "DE0000000001", limit: 5 });
+    expect(out.text).toContain("2026-10-15 | Beispiel Wirtschaft | Beispiel AG hebt Prognose an | 0.6 | Mehr Umsatz.");
+    expect(out.block).toMatchObject({ kind: "news", route: "/finanzen/portfolio/DE0000000001" });
+    expect(out.block?.rows[0]).toMatchObject({ url: "https://example.test/a", sentiment: 0.6 });
+  });
+});

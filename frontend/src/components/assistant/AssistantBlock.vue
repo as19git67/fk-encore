@@ -37,7 +37,34 @@ const TITLES: Record<string, string> = {
   readings: 'Zählerstände',
   consumption: 'Verbrauch',
   trip_plans: 'Reisepläne',
+  positions: 'Wertpapiere',
+  depot_transactions: 'Depotumsätze',
+  quotes: 'Kurse',
+  news: 'Nachrichten',
   table: 'Ergebnis',
+}
+
+const KIND_LABELS: Record<string, string> = {
+  buy: 'Kauf', sell: 'Verkauf', dividend: 'Dividende', in: 'Einlieferung', out: 'Auslieferung',
+  split: 'Split', corp_action: 'Kapitalmaßnahme', tax: 'Steuer',
+}
+
+function kindLabel(v: unknown): string {
+  const k = str(v)
+  return KIND_LABELS[k] ?? k
+}
+
+function withUnit(v: unknown, currency: unknown): string {
+  const s = str(v)
+  if (!s) return ''
+  const c = str(currency)
+  return c && c !== 'EUR' ? `${formatCurrency(s)} ${c}` : formatCurrency(s)
+}
+
+function sentimentClass(v: unknown): string {
+  const n = Number(v)
+  if (!Number.isFinite(n) || v === null) return 'amount'
+  return n < -0.2 ? 'amount amount--out' : n > 0.2 ? 'amount amount--in' : 'amount'
 }
 
 const title = computed(() => TITLES[props.block.kind] ?? 'Ergebnis')
@@ -218,6 +245,68 @@ const analysis = computed(() => {
       </li>
     </ul>
 
+    <!-- Securities: name, holding, value and unrealized gain -->
+    <ul v-else-if="block.kind === 'positions'" class="rows">
+      <li v-for="r in shown" :key="str(r.key)">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+          <span class="row-main">
+            <span class="row-title">{{ str(r.name) }}</span>
+            <span class="row-sub">{{ [str(r.isin), r.amount ? `${str(r.amount)} Stück` : '', r.open === false ? 'verkauft' : ''].filter(Boolean).join(' · ') }}</span>
+          </span>
+          <span class="row-figures">
+            <span class="amount">{{ withUnit(r.value, r.currency) }}</span>
+            <span v-if="r.unrealized_gain !== null && r.unrealized_gain !== undefined" :class="[amountClass(r.unrealized_gain), 'row-sub']">
+              {{ withUnit(r.unrealized_gain, r.currency) }}{{ r.unrealized_gain_pct ? ` (${str(r.unrealized_gain_pct)} %)` : '' }}
+            </span>
+          </span>
+        </component>
+      </li>
+    </ul>
+
+    <!-- Depot transactions: date, kind and security, net amount -->
+    <ul v-else-if="block.kind === 'depot_transactions'" class="rows">
+      <li v-for="r in shown" :key="str(r.id)">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+          <span class="row-date">{{ date(r.executed_at) }}</span>
+          <span class="row-main">
+            <span class="row-title">{{ kindLabel(r.kind) }} · {{ str(r.name) }}</span>
+            <span class="row-sub">{{ [str(r.account_label), r.amount ? `${str(r.amount)} Stück` : ''].filter(Boolean).join(' · ') }}</span>
+          </span>
+          <span :class="amountClass(r.net_amount)">{{ withUnit(r.net_amount, r.currency) }}</span>
+        </component>
+      </li>
+    </ul>
+
+    <!-- Quotes: last price and change -->
+    <ul v-else-if="block.kind === 'quotes'" class="rows">
+      <li v-for="r in shown" :key="str(r.key)">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+          <span class="row-main">
+            <span class="row-title">{{ str(r.name) }}</span>
+            <span class="row-sub">{{ r.status === 'ok' ? withUnit(r.value, r.currency) : (r.status === 'unresolved' ? 'keine Kursquelle' : 'noch kein Kurs') }}{{ num(r.news_unread) > 0 ? ` · ${str(r.news_unread)} neue Nachrichten` : '' }}</span>
+          </span>
+          <span class="row-figures">
+            <span class="amount">{{ r.price !== null && r.price !== undefined ? withUnit(r.price, r.currency) : '–' }}</span>
+            <span v-if="r.change_percent !== null && r.change_percent !== undefined" :class="[amountClass(r.change_percent), 'row-sub']">{{ num(r.change_percent) > 0 ? '+' : '' }}{{ str(r.change_percent) }} %</span>
+          </span>
+        </component>
+      </li>
+    </ul>
+
+    <!-- News: title, source and date; opens the article -->
+    <ul v-else-if="block.kind === 'news'" class="rows">
+      <li v-for="r in shown" :key="str(r.id)">
+        <a class="row" :href="str(r.url)" target="_blank" rel="noopener noreferrer">
+          <span class="row-date">{{ date(r.at) }}</span>
+          <span class="row-main">
+            <span class="row-title">{{ str(r.title) }}</span>
+            <span v-if="r.source" class="row-sub">{{ str(r.source) }}</span>
+          </span>
+          <i v-if="r.sentiment !== null && r.sentiment !== undefined" :class="['pi', num(r.sentiment) > 0.2 ? 'pi-arrow-up-right' : num(r.sentiment) < -0.2 ? 'pi-arrow-down-right' : 'pi-minus', sentimentClass(r.sentiment)]" aria-hidden="true" />
+        </a>
+      </li>
+    </ul>
+
     <!-- Trip plans -->
     <ul v-else-if="block.kind === 'trip_plans'" class="rows">
       <li v-for="r in shown" :key="str(r.id)" class="row row--static">
@@ -313,6 +402,13 @@ const analysis = computed(() => {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.row-figures {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
 }
 
 .row {
