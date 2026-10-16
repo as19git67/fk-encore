@@ -54,9 +54,18 @@ app's KI-Modell page offers only those.
 A projector is found by name (`discover_mmproj`). One that names another
 model family is never used — Gemma's projector handed to a Qwen model stopped
 llama-server from starting, and the reload fell back to the previous model.
-If llama-server still does not start with the projector it found, the
-service retries once without it: the model runs text-only, and
-`config.notice` says so.
+A projector whose file name carries no model (`mmproj-F16.gguf`, as upstream
+repos ship it next to the weights) is judged by its GGUF header instead
+(`gguf_meta.py` reads `general.name`, `general.base_model.0.name` and
+`clip.projector_type` without touching the weights). If llama-server still
+does not start with the projector it found, the service retries once without
+it: the model runs text-only, and `config.notice` says so.
+
+When llama-server dies while loading, the reload error names its exit status
+(`exited with status 1 while loading …`; `-9` is the kernel's OOM killer)
+rather than the last HTTP error the readiness poll saw. What llama.cpp itself
+complained about — a tensor that did not fit, a context it could not
+allocate — is in the container log right before that line.
 
 `config.vision` in `/reload/status` says whether image requests are served.
 A text-only model is a supported configuration, not a degraded one: every

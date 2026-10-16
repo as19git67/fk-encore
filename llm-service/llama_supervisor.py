@@ -107,6 +107,7 @@ class LlamaServerProcess:
         # watcher thread's exit handling.
         self._lock = threading.Lock()
         self._stopping = False
+        self._last_status: int | None = None
 
     @property
     def binary(self) -> str:
@@ -126,6 +127,19 @@ class LlamaServerProcess:
         proc = self._proc
         return proc is not None and proc.poll() is None
 
+    @property
+    def last_exit_status(self) -> int | None:
+        """How the most recent process ended — None while it runs or before
+        one was started. Negative is the signal that killed it, as Popen
+        reports it: -9 when the kernel's OOM killer took it."""
+
+        proc = self._proc
+        if proc is not None:
+            status = proc.poll()
+            if status is not None:
+                return status
+        return self._last_status
+
     def start(self, cfg: LlmConfig) -> None:
         if self.is_running:
             raise RuntimeError("llama-server is already running")
@@ -136,6 +150,7 @@ class LlamaServerProcess:
         log.info("Starting llama-server: %s", " ".join(args))
         with self._lock:
             self._stopping = False
+            self._last_status = None
             # stdout/stderr are inherited so llama.cpp's own logging lands in
             # the container log, exactly as it did under entrypoint.sh.
             self._proc = subprocess.Popen(args)
@@ -171,6 +186,7 @@ class LlamaServerProcess:
         if watcher is not None:
             watcher.join(timeout=5)
         with self._lock:
+            self._last_status = proc.returncode
             self._proc = None
             self._watcher = None
 
@@ -178,6 +194,7 @@ class LlamaServerProcess:
         status = proc.wait()
         with self._lock:
             deliberate = self._stopping
+            self._last_status = status
         if deliberate:
             log.info("llama-server exited as requested (status=%s)", status)
             return

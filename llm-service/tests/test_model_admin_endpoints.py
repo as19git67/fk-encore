@@ -495,3 +495,46 @@ def test_a_projector_that_stops_llama_server_is_dropped_and_the_model_runs_text_
     finally:
         main._state["llm"] = None
         main._apply_config(main._BOOT_CONFIG, source="env")
+
+
+def test_a_crash_while_loading_is_reported_by_its_exit_status(volume, monkeypatch):
+    """"GET /props -> HTTP 503 Loading model" was the last thing the poll
+    saw, not why the process died; the status is, and -9 is the OOM killer."""
+
+    import llama_server
+
+    (volume / "test.gguf").write_bytes(b"x")
+
+    class FakeSupervisor:
+        available = True
+        is_running = False
+        last_exit_status = None
+        binary = "llama-server"
+
+        def start(self, cfg):
+            self.is_running = False
+            self.last_exit_status = -9
+
+        def stop(self):
+            self.is_running = False
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def wait_until_ready(self, timeout, still_starting=None):
+            raise llama_server.LlamaServerError("llama-server exited before becoming ready: GET /props -> HTTP 503 Loading model")
+
+    monkeypatch.setattr(main, "_llama_server", FakeSupervisor())
+    monkeypatch.setattr(llama_server, "LlamaServerClient", FakeClient)
+    main._apply_config(LlmConfig(model_path=volume / "test.gguf", backend="server"), source="file")
+    try:
+        with pytest.raises(llama_server.LlamaServerError) as excinfo:
+            main._load_server_llm()
+        message = str(excinfo.value)
+        assert "exited with status -9 while loading test.gguf" in message
+        assert "OOM killer" in message
+        assert "503" not in message
+    finally:
+        main._state["llm"] = None
+        main._apply_config(main._BOOT_CONFIG, source="env")

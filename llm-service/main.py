@@ -532,7 +532,7 @@ def _load_server_llm() -> None:
     run at a fraction of the speed.
     """
 
-    from llama_server import LlamaServerClient
+    from llama_server import LlamaServerClient, LlamaServerError
 
     if _llama_server.available:
         if not _llama_server.is_running:
@@ -556,10 +556,28 @@ def _load_server_llm() -> None:
     # rolling back promptly and the caller sitting through the whole wait
     # first. Only meaningful when we spawned the process ourselves.
     def wait() -> Any:
-        return client.wait_until_ready(
-            float(LLM_SERVER_READY_TIMEOUT),
-            still_starting=(lambda: _llama_server.is_running) if _llama_server.available else None,
-        )
+        try:
+            return client.wait_until_ready(
+                float(LLM_SERVER_READY_TIMEOUT),
+                still_starting=(lambda: _llama_server.is_running) if _llama_server.available else None,
+            )
+        except LlamaServerError as exc:
+            # The last HTTP error ("503 Loading model") is not why the
+            # process is gone; its exit status is the only clue this side
+            # has, and llama.cpp's own message sits in the container log.
+            status = _llama_server.last_exit_status if _llama_server.available else None
+            if status is None:
+                raise
+            raise LlamaServerError(
+                f"llama-server exited with status {status} while loading "
+                f"{_state['config'].model_path.name}"
+                + (
+                    " (killed by SIGKILL — the kernel's OOM killer, most likely)" if status == -9
+                    else f" (killed by signal {-status})" if status < 0
+                    else ""
+                )
+                + "; llama.cpp's own message is in the container log just before this one"
+            ) from exc
 
     try:
         props = wait()
