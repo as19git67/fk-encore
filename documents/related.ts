@@ -8,6 +8,8 @@
  * is suggested, so the reader can judge every suggestion on its stated
  * ground rather than on a blended score:
  *
+ *   - `linked`: one answers the other — a letter the assistant drafted about
+ *     it (#1534), from either side of the link.
  *   - `same_folder`: the file came from the same origin folder (#1477).
  *   - `same_correspondent_nearby`: the same correspondent wrote it within
  *     ±NEARBY_DAYS of this document's date — the letter and its enclosures.
@@ -32,6 +34,7 @@ import {
   documentCategories,
   documentCollectionItems,
   documentCollections,
+  documentLinks,
   documents,
 } from "../db/schema";
 import { loadUserGroupIds, loadVisibleDocument, visibleDocumentsWhere } from "./visibility";
@@ -52,6 +55,7 @@ export const RELATED_SEMANTIC_MAX_DISTANCE = parseFloat(
 );
 
 export type RelatedReason =
+  | "linked"
   | "same_folder"
   | "same_correspondent_nearby"
   | "same_collection"
@@ -173,10 +177,29 @@ export async function collectRelatedDocuments(
       ? sql`${documents.id} NOT IN (${sql.join([...shown].map((id) => sql`${id}`), sql`, `)})`
       : sql`TRUE`;
 
+  // 0. Explicit links, both ways: the letter written about this document,
+  //    or the documents this letter answers.
+  {
+    const rows = await dbAll<DtoRow>(
+      baseQuery(
+        sql`(
+          EXISTS (SELECT 1 FROM ${documentLinks} l WHERE l.document_id = ${doc.id} AND l.linked_document_id = ${documents.id})
+          OR EXISTS (SELECT 1 FROM ${documentLinks} l WHERE l.linked_document_id = ${doc.id} AND l.document_id = ${documents.id})
+        )`,
+      )
+        .orderBy(desc(documents.uploaded_at), desc(documents.id))
+        .limit(limit),
+    );
+    if (rows.length > 0) {
+      groups.push({ reason: "linked", label: null, collection_id: null, items: rows.map(toDto) });
+      for (const r of rows) shown.add(r.id);
+    }
+  }
+
   // 1. Same origin folder, newest first.
   if (doc.source_folder) {
     const rows = await dbAll<DtoRow>(
-      baseQuery(eq(documents.source_folder, doc.source_folder))
+      baseQuery(and(eq(documents.source_folder, doc.source_folder), notShown())!)
         .orderBy(desc(documents.doc_date), desc(documents.id))
         .limit(limit),
     );

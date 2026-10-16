@@ -54,6 +54,7 @@ import { useDocSelectionStore } from '../stores/documents/selection'
 import { useBasketNavigation } from '../composables/useBasketNavigation'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useModuleBack } from '../composables/useModuleBack'
+import { assistantLocation } from '../utils/assistantContext'
 import PageLayout from '../components/layout/PageLayout.vue'
 import PdfViewer from '../components/PdfViewer.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
@@ -144,6 +145,15 @@ const docBasket = {
 }
 
 const doc = ref<DocumentDetail | null>(null)
+
+/** Opens the assistant with this document as the working set, ready to draft a reply (#1534). */
+function draftReply() {
+  if (!doc.value) return
+  void router.push(assistantLocation(
+    [{ type: 'document', id: doc.value.id }],
+    'Entwirf eine Antwort auf dieses Schreiben.',
+  ))
+}
 const categories = ref<DocumentCategory[]>([])
 const documentTypes = ref<DocumentTypeCatalogEntry[]>([])
 const groups = ref<GroupSummary[]>([])
@@ -918,6 +928,15 @@ onBeforeUnmount(() => {
             :members="[{ entity_type: 'document', entity_id: doc.id }]"
             :basket="docBasket"
             :dossier-seed="dossierRuleSeed"
+          />
+          <Button
+            v-if="doc && auth.hasPermission('module.assistant')"
+            icon="pi pi-reply"
+            text
+            rounded
+            aria-label="Antwort entwerfen"
+            v-tooltip.bottom="'Antwort mit dem Assistenten entwerfen'"
+            @click="draftReply"
           />
           <Button
             v-if="auth.hasPermission('documents.edit') && doc"

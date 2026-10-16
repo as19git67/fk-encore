@@ -57,6 +57,7 @@ import FilterMenu from '../components/FilterMenu.vue'
 import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import PageLayout from '../components/layout/PageLayout.vue'
 import SelectionBar from '../components/layout/SelectionBar.vue'
+import { assistantLocation, MAX_ASSISTANT_CONTEXT } from '../utils/assistantContext'
 import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
 import type { MemberRef, MemberRuleInput } from '../api/collections'
 import SaveRuleDialog from '../components/collections/SaveRuleDialog.vue'
@@ -553,6 +554,16 @@ const selectionActions = computed<ToolbarItem[]>(() => {
     command: () => void shareSelectedPhotos(),
   })
   if (canShowCollage.value) push({ key: 'collage', title: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
+  if (auth.hasPermission('module.assistant') && selectedCount.value <= MAX_ASSISTANT_CONTEXT) {
+    push({
+      key: 'assistant',
+      title: 'An den Assistenten',
+      icon: 'pi pi-comments',
+      command: () => void router.push(assistantLocation(
+        Array.from(selectedIds.value, (id) => ({ type: 'photo' as const, id: Number(id) })),
+      )),
+    })
+  }
   push({ key: 'file', title: 'Ablegen', icon: 'pi pi-folder-plus', command: () => (collectionDialogOpen.value = true) })
   if (canUpload.value) push({ key: 'albums', title: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
   if (canUpload.value) push({ key: 'description', title: 'Beschreibung bearbeiten', icon: 'pi pi-align-left', command: openDescriptionDialog })

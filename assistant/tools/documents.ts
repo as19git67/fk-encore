@@ -138,6 +138,43 @@ export const getDocumentSummary: ToolSpec = {
   },
 };
 
+/** Characters of a document's text one call hands over; the rest is offered by `offset`. */
+const TEXT_CHUNK = 6000;
+
+export const getDocumentText: ToolSpec = {
+  name: "get_document_text",
+  kind: "read",
+  summary: "The full extracted text of one document, in pieces of 6000 characters; use it when a summary or the working set lacks a fact a letter or answer needs.",
+  permissions: DOCUMENTS,
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      id: { type: "integer", description: "document id" },
+      offset: { type: "integer", description: "character to start at, for the next piece (default 0)" },
+    },
+    required: ["id"],
+  },
+  async run(args) {
+    const id = int(args.id);
+    if (id === undefined) throw new Error("id is required");
+    const offset = int(args.offset, { min: 0 }) ?? 0;
+    const res = (await documents.getDocumentText({ id })) as unknown as { text: string | null };
+    const text = res.text ?? "";
+    if (!text) {
+      return { text: `document ${id} has no extracted text (yet)`, digest: `[earlier result of get_document_text: document ${id}, no text]`, rowCount: 0 };
+    }
+    const piece = text.slice(offset, offset + TEXT_CHUNK);
+    const end = offset + piece.length;
+    const more = end < text.length ? `\n[characters ${offset}–${end} of ${text.length}; call again with offset ${end} for more]` : "";
+    return {
+      text: `text of document ${id}:\n${piece}${more}`,
+      digest: `[earlier result of get_document_text: document ${id}, characters ${offset}–${end} of ${text.length}]`,
+      rowCount: 1,
+    };
+  },
+};
+
 /** Documents searched per call; more is a sign the model should narrow first. */
 const FIND_MAX_DOCUMENTS = 50;
 
@@ -190,4 +227,4 @@ export const findTextInDocument: ToolSpec = {
   },
 };
 
-export const DOCUMENT_TOOLS = [listCategories, searchDocuments, getDocumentSummary, findTextInDocument];
+export const DOCUMENT_TOOLS = [listCategories, searchDocuments, getDocumentSummary, getDocumentText, findTextInDocument];

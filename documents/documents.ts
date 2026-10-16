@@ -34,6 +34,7 @@ import {
   financeTransactionDocument,
   userSubjectPersons,
   type DocumentLetterhead,
+  documentLinks,
 } from "../db/schema";
 import {
   DOCUMENTS_MAX_BYTES,
@@ -615,6 +616,76 @@ export const uploadDocument = api.raw(
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: err?.message ?? "Internal Server Error" }));
     }
+  },
+);
+
+// ─── Generated PDFs (internal) ──────────────────────────────────────────────
+
+export interface StoreGeneratedDocumentRequest {
+  filename: string;
+  title: string;
+  /** The PDF, base64-encoded. */
+  pdf_base64: string;
+  /** Documents this one answers; each must be visible to the caller. */
+  linked_document_ids?: number[];
+}
+
+export interface StoreGeneratedDocumentResponse {
+  id: number;
+  /** The linked documents the caller could see; the others were left out. */
+  linked_document_ids: number[];
+}
+
+/**
+ * Files a PDF another service made for the caller — a letter the assistant
+ * drafted (#1534) — like an upload, and links it to the documents it answers
+ * so it shows in their related-documents panel. Not exposed: the browser
+ * uploads through `POST /documents`.
+ */
+export const storeGeneratedDocument = api(
+  { expose: false, method: "POST", path: "/documents/generated", auth: true },
+  async (req: StoreGeneratedDocumentRequest): Promise<StoreGeneratedDocumentResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.upload");
+    const userId = getUserId();
+    const buffer = Buffer.from(req.pdf_base64, "base64");
+    if (buffer.subarray(0, 5).toString("latin1") !== "%PDF-") {
+      throw APIError.invalidArgument("pdf_base64 is not a PDF");
+    }
+
+    const linked: number[] = [];
+    for (const id of [...new Set(req.linked_document_ids ?? [])]) {
+      try {
+        await loadVisibleDocument(userId, id, isDataAdmin(authData));
+        linked.push(id);
+      } catch {
+        // Invisible or gone: not linked, and not named back either.
+      }
+    }
+
+    let stored: DocumentSummary;
+    try {
+      stored = await storeDocumentBuffer({
+        buffer,
+        originalName: req.filename.trim() || "brief.pdf",
+        mimeType: "application/pdf",
+        userId,
+      });
+    } catch (err) {
+      if ((err as Error).message === "DOCUMENT_ALREADY_EXISTS") throw APIError.alreadyExists("this PDF is already filed");
+      if ((err as Error).message === "DOCUMENT_TOO_LARGE") throw APIError.invalidArgument("the PDF is too large");
+      throw err;
+    }
+    const title = req.title.trim();
+    if (title) await db.update(documents).set({ title }).where(eq(documents.id, stored.id));
+    if (linked.length) {
+      await db
+        .insert(documentLinks)
+        .values(linked.map((id) => ({ document_id: stored.id, linked_document_id: id, kind: "reply" as const })))
+        .onConflictDoNothing();
+    }
+    return { id: stored.id, linked_document_ids: linked };
   },
 );
 

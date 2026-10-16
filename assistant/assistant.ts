@@ -13,11 +13,13 @@ import { getAuthData } from "~encore/auth";
 import log from "encore.dev/log";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import db from "../db/database";
-import { assistantConversation, assistantMessage } from "../db/schema";
+import { assistantConversation, assistantLetter, assistantMessage } from "../db/schema";
 import { checkRateLimit } from "../user/rateLimiter";
 import { requirePermission } from "../user/auth-handler";
 import { AiSlotTimeoutError, withAiSlot } from "../ai-queue/slot-helper";
 import { runTurn } from "./agent";
+import { cleanContext, describeContext, type ContextRef } from "./briefs";
+import { renderLetterPdf } from "./letter-pdf";
 import { catalogFor } from "./catalog";
 import { chat, ContextTooLargeError, LlmServiceUnavailableError } from "./llm-client";
 import { followTurn, openTurn, TURN_ID_RE } from "./live";
@@ -26,6 +28,7 @@ import {
   executeProposal,
   ProposalError,
   refreshProposalBlocks,
+  type ProposalEdits,
   type ProposalRow,
 } from "./proposals";
 import { WRITE_TOOLS_BY_NAME } from "./tools/writes";
@@ -84,8 +87,17 @@ export interface ConversationMessage {
   created_at: string;
 }
 
+/** One object of the working set, as the chip above the chat shows it. */
+export interface ContextItem {
+  type: "photo" | "document" | "transaction";
+  id: number;
+  label: string;
+  visible: boolean;
+}
+
 export interface ConversationDetail extends ConversationSummary {
   messages: ConversationMessage[];
+  context: ContextItem[];
 }
 
 function summary(row: typeof assistantConversation.$inferSelect): ConversationSummary {
@@ -94,6 +106,8 @@ function summary(row: typeof assistantConversation.$inferSelect): ConversationSu
 
 export interface CreateConversationRequest {
   title?: string;
+  /** The working set to start with: a selection, or the document a reply is for (#1534). */
+  context?: ContextRef[];
 }
 
 export const createConversation = api(
@@ -102,7 +116,7 @@ export const createConversation = api(
     const auth = assistantUser();
     const [row] = await db
       .insert(assistantConversation)
-      .values({ user_id: Number(auth.userID), title: req.title?.trim().slice(0, 200) || null })
+      .values({ user_id: Number(auth.userID), title: req.title?.trim().slice(0, 200) || null, context: cleanContext(req.context) })
       .returning();
     return summary(row);
   },
@@ -144,7 +158,30 @@ export const getConversation = api(
         blocks: await refreshProposalBlocks((m.blocks ?? []) as ResultBlock[], Number(auth.userID)),
         created_at: m.created_at,
       })));
-    return { ...summary(conversation), messages };
+    const user = { userID: auth.userID, permissions: auth.permissions };
+    return { ...summary(conversation), messages, context: await contextItems(conversation.context, user) };
+  },
+);
+
+async function contextItems(refs: ContextRef[], user: { userID: string; permissions: string[] }): Promise<ContextItem[]> {
+  const entries = await describeContext(cleanContext(refs), user);
+  return entries.map(({ type, id, label, visible }) => ({ type, id, label, visible }));
+}
+
+export interface SetContextRequest {
+  id: number;
+  context: ContextRef[];
+}
+
+/** Replaces the working set; an empty list clears it. */
+export const setConversationContext = api(
+  { expose: true, method: "PUT", path: "/assistant/conversations/:id/context", auth: true },
+  async (req: SetContextRequest): Promise<{ context: ContextItem[] }> => {
+    const auth = assistantUser();
+    await ownConversation(req.id, Number(auth.userID));
+    const context = cleanContext(req.context);
+    await db.update(assistantConversation).set({ context }).where(eq(assistantConversation.id, req.id));
+    return { context: await contextItems(context, { userID: auth.userID, permissions: auth.permissions }) };
   },
 );
 
@@ -302,12 +339,17 @@ export const ask = api(
 
     const user = { userID: auth.userID, permissions: auth.permissions };
     try {
+      const refs = cleanContext(conversation.context);
+      const entries = refs.length ? await describeContext(refs, user) : [];
       const result = await runTurn({
         user,
         history: await history(conversation.id),
         question,
         conversationId: conversation.id,
         previousRefs: await previousRefs(conversation.id),
+        context: entries.length
+          ? { refs: entries.filter((e) => e.visible).map(({ type, id }) => ({ type, id })), briefs: entries.map((e) => e.brief) }
+          : undefined,
         tools: catalogFor(user),
         chat,
         emit,
@@ -395,12 +437,18 @@ function proposalError(err: unknown): never {
  * endpoints. A failure comes back as the proposal with `error` set and stays
  * pending, so the card can say what went wrong and offer to try again.
  */
+export interface ExecuteProposalRequest {
+  id: number;
+  /** What the user changed on the card; only proposals that offer editing take it. */
+  edits?: ProposalEdits;
+}
+
 export const executeAssistantProposal = api(
   { expose: true, method: "POST", path: "/assistant/proposals/:id/execute", auth: true },
-  async ({ id }: { id: number }): Promise<ProposalRow> => {
+  async ({ id, edits }: ExecuteProposalRequest): Promise<ProposalRow> => {
     const auth = assistantUser();
     const ctx = { user: { userID: auth.userID, permissions: auth.permissions }, today: today() };
-    const row = await executeProposal(id, ctx, WRITE_TOOLS_BY_NAME).catch(proposalError);
+    const row = await executeProposal(id, ctx, WRITE_TOOLS_BY_NAME, edits).catch(proposalError);
     log.info("assistant proposal decided", { proposal_id: id, tool: row.tool, status: row.status, failed: row.error !== null });
     return row;
   },
@@ -412,6 +460,53 @@ export const discardAssistantProposal = api(
     const auth = assistantUser();
     const ctx = { user: { userID: auth.userID, permissions: auth.permissions }, today: today() };
     return discardProposal(id, ctx).catch(proposalError);
+  },
+);
+
+// ── letters ───────────────────────────────────────────────────────────────
+
+function pdfName(subject: string, date: string): string {
+  const slug = subject.normalize("NFKD").replace(/[^\w -]+/g, "").trim().replace(/\s+/g, "-").slice(0, 60);
+  return `Brief-${date}${slug ? `-${slug}` : ""}.pdf`;
+}
+
+/**
+ * A confirmed letter as PDF, rendered from its stored fields. Only its
+ * author may fetch it; anyone else gets a 404.
+ */
+export const letterPdf = api.raw(
+  { expose: true, method: "GET", path: "/assistant/letters/:id/pdf", auth: true },
+  async (req, res) => {
+    try {
+      const auth = assistantUser();
+      const id = Number((req.url ?? "").split("?")[0].split("/").at(-2));
+      if (!Number.isInteger(id)) throw APIError.invalidArgument("bad letter id");
+      const [letter] = await db
+        .select()
+        .from(assistantLetter)
+        .where(and(eq(assistantLetter.id, id), eq(assistantLetter.user_id, Number(auth.userID))))
+        .limit(1);
+      if (!letter) throw APIError.notFound("letter not found");
+      const pdf = await renderLetterPdf({
+        sender: letter.sender,
+        recipient: letter.recipient,
+        subject: letter.subject,
+        body: letter.body,
+        date: letter.letter_date,
+        attachments: letter.attachments.map((a) => a.title),
+      });
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Disposition", `attachment; filename="${pdfName(letter.subject, letter.letter_date)}"`);
+      res.end(pdf);
+    } catch (err) {
+      const status = err instanceof APIError
+        ? ({ not_found: 404, unauthenticated: 401, permission_denied: 403, invalid_argument: 400 } as Record<string, number>)[err.code] ?? 500
+        : 500;
+      res.statusCode = status;
+      res.end(err instanceof Error ? err.message : "error");
+    }
   },
 );
 

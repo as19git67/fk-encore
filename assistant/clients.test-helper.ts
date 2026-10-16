@@ -15,6 +15,7 @@ export const clients = {
     batchTag: vi.fn(),
     previewGroupedReport: vi.fn(),
     createGroupedReport: vi.fn(),
+    getTransaction: vi.fn(),
   },
   documents: {
     listDocumentCategories: vi.fn(),
@@ -26,6 +27,9 @@ export const clients = {
     updateCollectionItem: vi.fn(),
     startCollectionExport: vi.fn(),
     getCollection: vi.fn(),
+    getDocumentText: vi.fn(),
+    getDocumentReceiptSuggestion: vi.fn(),
+    storeGeneratedDocument: vi.fn(),
   },
   photo: {
     listPhotos: vi.fn(),

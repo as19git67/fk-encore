@@ -37,6 +37,8 @@ export const users = pgTable("users", {
   // screen orientation (documentation/plans/orientierungs-varianten.md). Off gives
   // back both sides next to each other everywhere.
   collapse_orientation_variants: boolean("collapse_orientation_variants").notNull().default(true),
+  // The sender block of a letter the assistant drafts (#1534), kept once typed.
+  postal_address: text("postal_address"),
 });
 
 // ========== Roles ==========
@@ -4511,6 +4513,8 @@ export const assistantConversation = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     title: text("title"),
+    /** The working set handed to the assistant (#1534): documents, photos, bookings. */
+    context: jsonb("context").$type<Array<{ type: "photo" | "document" | "transaction"; id: number }>>().notNull().default([]),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
@@ -4615,3 +4619,54 @@ export const financeGroupedReport = pgTable(
   (table) => [index("finance_grouped_report_by_user").on(table.user_id, table.created_at)],
 );
 
+
+/**
+ * A letter the assistant drafted and the user confirmed (migration 0251,
+ * #1534). The fields, not the PDF: the PDF is rendered from them on download.
+ */
+export const assistantLetter = pgTable(
+  "assistant_letter",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversation_id: integer("conversation_id").references(() => assistantConversation.id, { onDelete: "set null" }),
+    sender: text("sender").notNull(),
+    recipient: text("recipient").notNull(),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    letter_date: date("letter_date", { mode: "string" }).notNull(),
+    /** The enclosures by id and the title they had when the letter was confirmed. */
+    attachments: jsonb("attachments").$type<Array<{ id: number; title: string }>>().notNull().default([]),
+    /** Where the letter was filed, if it was; owned by the documents service, so no foreign key. */
+    document_id: integer("document_id"),
+    collection_id: integer("collection_id"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("assistant_letter_by_user").on(table.user_id, table.created_at)],
+);
+
+/**
+ * A document that answers or encloses others (migration 0251, #1534): a
+ * letter drafted about three invoices links to each of them, and the related
+ * documents panel shows the link from both sides.
+ */
+export const documentLinks = pgTable(
+  "document_links",
+  {
+    id: serial("id").primaryKey(),
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    linked_document_id: integer("linked_document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"reply">().notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("document_links_pair").on(table.document_id, table.linked_document_id),
+    index("document_links_by_linked").on(table.linked_document_id),
+  ],
+);
