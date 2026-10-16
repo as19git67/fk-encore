@@ -1751,6 +1751,13 @@
       "when": 1788652800140,
       "tag": "0249_document_page_words",
       "breakpoints": true
+    },
+    {
+      "idx": 250,
+      "version": "7",
+      "when": 1788652800150,
+      "tag": "0250_finance_grouped_report",
+      "breakpoints": true
     }
   ]
 }

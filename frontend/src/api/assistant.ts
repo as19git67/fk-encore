@@ -89,11 +89,31 @@ export interface Proposal {
   status: 'pending' | 'executing' | 'executed' | 'discarded'
   result_summary: string | null
   result_route: string | null
+  /** An API path to download the result from, e.g. a report's PDF. */
+  result_download: string | null
   error: string | null
 }
 
 export function executeProposal(id: number): Promise<Proposal> {
   return apiFetch(`/assistant/proposals/${id}/execute`, { method: 'POST' })
+}
+
+/** Downloads a file the API serves behind the user's token, under the name it suggests. */
+export async function downloadResult(path: string): Promise<void> {
+  const token = localStorage.getItem('auth_token')
+  const resp = await fetch(`${API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    cache: 'no-store',
+  })
+  if (!resp.ok) throw new Error(`Download fehlgeschlagen (${resp.status})`)
+  const blob = await resp.blob()
+  const match = /filename="([^"]+)"/.exec(resp.headers.get('Content-Disposition') ?? '')
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = match?.[1] ?? 'ergebnis.pdf'
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export function discardProposal(id: number): Promise<Proposal> {

@@ -54,6 +54,7 @@ const TOOL_LABELS: Record<string, string> = {
   find_text_in_document: 'In Dokumenten suchen',
   create_collection: 'Sammelmappe vorschlagen',
   build_collection_pdf: 'PDF vorschlagen',
+  transaction_report: 'Bericht vorschlagen',
 }
 
 /** What the user reads while a tool runs. */
