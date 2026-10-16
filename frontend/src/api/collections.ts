@@ -729,3 +729,68 @@ export function sendExportByMail(
 export function listCollectionSends(id: number): Promise<{ items: CollectionSend[]; mail_configured: boolean }> {
   return apiFetch(`/collections/${id}/sends`)
 }
+
+// ─── Scheduled exports (#1548, stage 9) ────────────────────────────────────
+
+export type ScheduleCadence = 'weekly' | 'monthly' | 'yearly'
+
+export interface CollectionSchedule {
+  id: number
+  collection_id: number
+  profile_id: number | null
+  profile_name: string | null
+  cadence: ScheduleCadence
+  weekday: number | null
+  day: number | null
+  month: number | null
+  scope: 'all' | 'period'
+  save_as_document: boolean
+  recipients: string[]
+  single_files: boolean
+  message: string | null
+  enabled: boolean
+  next_run_at: string
+  last_run_at: string | null
+  last_status: 'done' | 'failed' | 'skipped' | null
+  last_error: string | null
+  last_export_id: number | null
+  failures: number
+  owner_name: string | null
+  can_edit: boolean
+}
+
+export interface CreateScheduleInput {
+  cadence: ScheduleCadence
+  weekday?: number | null
+  day?: number | null
+  month?: number | null
+  scope: 'all' | 'period'
+  profile_id?: number | null
+  options?: ExportOptions
+  save_as_document?: boolean
+  recipients?: string[]
+  single_files?: boolean
+  message?: string | null
+}
+
+export function listCollectionSchedules(id: number): Promise<{ items: CollectionSchedule[] }> {
+  return apiFetch(`/collections/${id}/schedules`)
+}
+
+export function createCollectionSchedule(id: number, input: CreateScheduleInput): Promise<CollectionSchedule> {
+  return apiFetch(`/collections/${id}/schedules`, { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function setCollectionScheduleEnabled(scheduleId: number, enabled: boolean): Promise<CollectionSchedule> {
+  return apiFetch(`/collections/schedules/${scheduleId}`, { method: 'PATCH', body: JSON.stringify({ enabled }) })
+}
+
+export function deleteCollectionSchedule(scheduleId: number): Promise<{ ok: boolean }> {
+  return apiFetch(`/collections/schedules/${scheduleId}`, { method: 'DELETE' })
+}
+
+export function runCollectionScheduleNow(
+  scheduleId: number,
+): Promise<{ schedule: CollectionSchedule; run: ExportRun | null }> {
+  return apiFetch(`/collections/schedules/${scheduleId}/run`, { method: 'POST' })
+}

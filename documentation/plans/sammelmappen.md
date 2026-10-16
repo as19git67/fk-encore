@@ -236,7 +236,29 @@ collections.
    - The iOS app has no collections yet; on the iPhone the web app's share
      sheet is the native one.
 8. Anonymous share links (after per-item access checks).
-9. Scheduled exports.
+9. **Scheduled exports** — done:
+   - `collection_schedules` (migration 0252): weekly on a weekday, monthly
+     on a day (1–28, so February is never skipped), yearly on a date; runs
+     at 04:00 UTC (`collections/schedule-dates.ts`). Scope "the whole
+     collection" or "only what is dated in the elapsed period" (the seven
+     days before, the previous month, the previous year); meters take their
+     readings of that period.
+   - The export uses a profile in its current version, or the options kept
+     when the schedule was made. The file is kept as a run for a week; a PDF
+     can be filed as a document; recipients (confirmed once in the dialog)
+     get the mail of stage 7.
+   - Runs happen as the person who set the schedule up, with their
+     permissions at run time (`getPermissionsForUser`). An archived
+     collection pauses its schedules (outcome "skipped"). A failed run tries
+     again six hours later, up to three times, then waits for the next date;
+     the last outcome and error show with the schedule.
+   - An hourly local cron job runs what is due (`collections/schedules.ts`);
+     "Jetzt ausführen" runs one out of turn without moving its date. Only
+     the owner of the schedule or of the collection may change it. The
+     basket has no schedules.
+   - Frontend: "Regelmäßig" in the export dialog (`ExportSchedulePanel.vue`).
+   - Not done: a push notification on repeated failures (the outcome is
+     shown in the dialog instead).
 
 ## Facts found while starting
 

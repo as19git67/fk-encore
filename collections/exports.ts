@@ -164,7 +164,7 @@ function collectionName(row: CollectionRow): string {
 
 // ─── Setup and profiles ─────────────────────────────────────────────────────
 
-async function loadProfiles(collectionId: number): Promise<ExportProfile[]> {
+export async function loadProfiles(collectionId: number): Promise<ExportProfile[]> {
   const rows = await dbAll<typeof collectionExportProfiles.$inferSelect>(
     db
       .select()
@@ -416,9 +416,16 @@ export async function awaitExportRun(id: number): Promise<void> {
   await runs.get(id);
 }
 
-async function runExport(exportId: number, c: Caller, row: CollectionRow, options: ExportOptions): Promise<void> {
+async function runExport(
+  exportId: number,
+  c: Caller,
+  row: CollectionRow,
+  options: ExportOptions,
+  keep?: (m: CollectionMember) => boolean,
+): Promise<void> {
   try {
-    const members = await resolveVisible(await loadStoredMembers(row.id), c);
+    const visible = await resolveVisible(await loadStoredMembers(row.id), c);
+    const members = keep ? visible.filter(keep) : visible;
     const built = await buildExport(c.userId, { id: row.id, name: collectionName(row) }, members, options);
     const size = await writeExport(exportId, built);
     await dbExec(
@@ -448,6 +455,42 @@ async function runExport(exportId: number, c: Caller, row: CollectionRow, option
   }
 }
 
+async function insertRun(collectionId: number, userId: number, profileId: number | null, options: ExportOptions): Promise<ExportRow> {
+  const created = await dbInsertReturning<ExportRow>(
+    db
+      .insert(collectionExports)
+      .values({
+        collection_id: collectionId,
+        user_id: userId,
+        profile_id: profileId,
+        options: options as unknown as Record<string, unknown>,
+        status: "running",
+        expires_at: new Date(Date.now() + EXPORT_TTL_MS).toISOString(),
+      })
+      .returning(),
+  );
+  if (!created) throw APIError.internal("export not started");
+  return created;
+}
+
+/**
+ * Run an export to the end and return its row — for the scheduled exports,
+ * which have no dialog to poll. `keep` narrows the members (e.g. to a period).
+ */
+export async function runExportNow(
+  c: Caller,
+  row: CollectionRow,
+  options: ExportOptions,
+  profileId: number | null,
+  keep?: (m: CollectionMember) => boolean,
+): Promise<ExportRow> {
+  const created = await insertRun(row.id, c.userId, profileId, options);
+  await runExport(created.id, c, row, options, keep);
+  void pruneOldRuns(row.id, c.userId);
+  const done = await dbFirst<ExportRow>(db.select().from(collectionExports).where(eq(collectionExports.id, created.id)));
+  return done ?? created;
+}
+
 export interface StartExportRequest {
   id: number;
   /** Options to use; ignored when a profile is given. */
@@ -470,20 +513,7 @@ export const startExport = api(
     } else {
       options = parseOptions(req.options ?? {});
     }
-    const created = await dbInsertReturning<ExportRow>(
-      db
-        .insert(collectionExports)
-        .values({
-          collection_id: row.id,
-          user_id: c.userId,
-          profile_id: profileId,
-          options: options as unknown as Record<string, unknown>,
-          status: "running",
-          expires_at: new Date(Date.now() + EXPORT_TTL_MS).toISOString(),
-        })
-        .returning(),
-    );
-    if (!created) throw APIError.internal("export not started");
+    const created = await insertRun(row.id, c.userId, profileId, options);
     const run = runExport(created.id, c, row, options).finally(() => runs.delete(created.id));
     runs.set(created.id, run);
     void pruneOldRuns(row.id, c.userId);
@@ -584,27 +614,35 @@ export const saveExportAsDocument = api(
     if (!c.permissions.includes("documents.upload") && !c.permissions.includes("documents.edit")) {
       throw APIError.permissionDenied("missing permission: documents.upload");
     }
-    if (row.status !== "done" || !row.filename) throw APIError.failedPrecondition("the export is not ready");
-    if (row.mime_type !== "application/pdf") throw APIError.failedPrecondition("only a PDF can be saved as a document");
-    if (row.document_id) return { document_id: row.document_id, already_existed: true };
-    // The import moves its source, so it gets a copy.
-    const tmp = path.join(os.tmpdir(), `collection-export-${row.id}-${Date.now()}.pdf`);
-    await fs.promises.copyFile(exportPath(row.id), tmp);
-    let documentId: number;
-    let existed = false;
-    try {
-      documentId = (await importDocumentFromPath({ userId: c.userId, sourcePath: tmp, originalFilename: row.filename, mimeType: "application/pdf" })).id;
-    } catch (err) {
-      if (!(err instanceof DuplicateDocumentError)) throw err;
-      documentId = err.existingId;
-      existed = true;
-    } finally {
-      await fs.promises.rm(tmp, { force: true });
-    }
-    await dbExec(db.update(collectionExports).set({ document_id: documentId }).where(eq(collectionExports.id, row.id)));
-    return { document_id: documentId, already_existed: existed };
+    return await fileExportAsDocument(row, c.userId);
   },
 );
+
+/** File a finished PDF export into the documents module, once. */
+export async function fileExportAsDocument(
+  row: ExportRow,
+  userId: number,
+): Promise<{ document_id: number; already_existed: boolean }> {
+  if (row.status !== "done" || !row.filename) throw APIError.failedPrecondition("the export is not ready");
+  if (row.mime_type !== "application/pdf") throw APIError.failedPrecondition("only a PDF can be saved as a document");
+  if (row.document_id) return { document_id: row.document_id, already_existed: true };
+  // The import moves its source, so it gets a copy.
+  const tmp = path.join(os.tmpdir(), `collection-export-${row.id}-${Date.now()}.pdf`);
+  await fs.promises.copyFile(exportPath(row.id), tmp);
+  let documentId: number;
+  let existed = false;
+  try {
+    documentId = (await importDocumentFromPath({ userId, sourcePath: tmp, originalFilename: row.filename, mimeType: "application/pdf" })).id;
+  } catch (err) {
+    if (!(err instanceof DuplicateDocumentError)) throw err;
+    documentId = err.existingId;
+    existed = true;
+  } finally {
+    await fs.promises.rm(tmp, { force: true });
+  }
+  await dbExec(db.update(collectionExports).set({ document_id: documentId }).where(eq(collectionExports.id, row.id)));
+  return { document_id: documentId, already_existed: existed };
+}
 
 // ─── Housekeeping ───────────────────────────────────────────────────────────
 

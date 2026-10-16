@@ -3,6 +3,8 @@ import { startLocalCron } from "../lib/local-cron";
 
 // The hourly job that keeps rule collections current (#1548, stage 5).
 import "./rules-cron";
+// The hourly job that runs due scheduled exports (#1548, stage 9).
+import "./schedules";
 
 startLocalCron();
 

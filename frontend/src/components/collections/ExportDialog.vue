@@ -47,12 +47,15 @@ import { useAuthStore } from '../../stores/auth'
 import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
 import { triggerDownload } from '../../utils/shareFile'
 import ExportSendPanel from './ExportSendPanel.vue'
+import ExportSchedulePanel from './ExportSchedulePanel.vue'
 
 const props = defineProps<{
   visible: boolean
   collectionId: number | null
   /** Shown in the header. */
   name: string
+  /** The basket exports and sends, but has no schedules (save it as a collection first). */
+  basket?: boolean
 }>()
 const emit = defineEmits<{ (e: 'update:visible', value: boolean): void }>()
 
@@ -142,10 +145,28 @@ const accountsInOrder = computed(() => {
   )
 })
 
+/** The chosen profile, when the options shown are still its own (a schedule then follows the profile). */
+const scheduleProfile = computed(() => {
+  const profile = setup.value?.profiles.find((p) => p.id === profileId.value)
+  return profile && JSON.stringify(profile.options) === JSON.stringify(options.value) ? profile : null
+})
+
 const canFileAsDocument = computed(() => auth.hasPermission('documents.upload'))
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+/** After a schedule ran on demand: its file joins the recent runs. */
+async function reloadRuns() {
+  if (props.collectionId === null) return
+  try {
+    runs.value = (await listCollectionExportRuns(props.collectionId)).items
+    poll()
+    void loadSends()
+  } catch {
+    /* the list stays as it was */
+  }
 }
 
 async function load() {
@@ -463,6 +484,16 @@ function timeLabel(iso: string): string {
         <Button v-else label="Als Profil speichern" icon="pi pi-bookmark" size="small" text @click="naming = true" />
       </div>
     </template>
+
+    <ExportSchedulePanel
+      v-if="!basket && collectionId !== null && options && setup && groups.length > 0"
+      :collection-id="collectionId"
+      :profile-id="scheduleProfile?.id ?? null"
+      :profile-name="scheduleProfile?.name ?? null"
+      :options="options"
+      :mail-configured="mailConfigured"
+      @ran="reloadRuns"
+    />
 
     <section v-if="runs.length > 0" class="exp-runs" aria-label="Letzte Exporte">
       <h3 class="exp-group-title">Letzte Exporte</h3>
