@@ -15,6 +15,7 @@ import Message from 'primevue/message'
 import SelectionBar from '../components/layout/SelectionBar.vue'
 import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
 import ExportDialog from '../components/collections/ExportDialog.vue'
+import ShareLinkDialog from '../components/collections/ShareLinkDialog.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
 import type { ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useListSelection } from '../composables/useListSelection'
@@ -149,6 +150,7 @@ const info = ref('')
 const busy = ref(false)
 const moveOpen = ref(false)
 const exportOpen = ref(false)
+const shareOpen = ref(false)
 const albumDialogPhotoIds = ref<number[]>([])
 const albumDialogOpen = ref(false)
 
@@ -398,6 +400,15 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
         @click="exportOpen = true"
       />
       <Button
+        v-if="detail?.can_administer && detail.kind !== 'basket'"
+        icon="pi pi-globe"
+        label="Freigabelink"
+        severity="secondary"
+        text
+        data-testid="collection-share-link"
+        @click="shareOpen = true"
+      />
+      <Button
         v-if="detail?.kind === 'rule'"
         icon="pi pi-sync"
         label="Regel anwenden"
@@ -520,6 +531,7 @@ const filtered = computed(() => !!typeFilter.value || !!search.term.value.trim()
     />
     <PhotoAlbumDialog v-model:visible="albumDialogOpen" :photo-ids="albumDialogPhotoIds" />
     <ExportDialog v-model:visible="exportOpen" :collection-id="detail?.id ?? null" :name="detail?.name ?? ''" />
+    <ShareLinkDialog v-model:visible="shareOpen" :collection-id="detail?.id ?? null" :name="detail?.name ?? ''" />
   </PageLayout>
 </template>
 

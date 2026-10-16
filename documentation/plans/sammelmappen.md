@@ -248,7 +248,29 @@ collections.
      expired or unknown link answers 404 alike.
    - The iOS app has no collections yet; on the iPhone the web app's share
      sheet is the native one.
-8. Anonymous share links (after per-item access checks).
+8. **Anonymous share links** — done:
+   - `collection_public_links` (migration 0256): a random token per link,
+     the person who made it, an expiry (7, 30, 90 days or none) and
+     `disabled_at`. Only who may administer the collection makes or ends a
+     link; the basket has none.
+   - Always live: the link shows the collection as it is when opened
+     (cached for a minute), resolved as the person who made the link with
+     their permissions at that moment (`getPermissionsForUser`). Losing
+     the right to a photo or document takes it off the link.
+   - What goes out: photos the maker may see and has not hidden, albums
+     (their photos under the same rule), and whole documents. Documents
+     with redactions or left-out pages, bookings, securities, meters and
+     meter readings stay back and are counted under "Nicht geteilt".
+   - Photos are re-encoded on the way out (`sharp`, at most 2560 px, no
+     EXIF, GPS or camera data). Documents stream as stored. Expired, ended
+     or unknown tokens answer 404 alike.
+   - Endpoints in `collections/public-links.ts`: `GET/POST
+     /collections/:id/public-links`, `DELETE /collections/public-links/:id`,
+     public `GET /collections/public/:token` plus raw `/photos/:id` and
+     `/documents/:id` under it.
+   - Frontend: "Freigabelink" on the collection page and in the row menu
+     (`ShareLinkDialog.vue`); the public page `/geteilt/:token`
+     (`SharedCollectionView.vue`).
 9. **Scheduled exports** — done:
    - `collection_schedules` (migration 0252): weekly on a weekday, monthly
      on a day (1–28, so February is never skipped), yearly on a date; runs

@@ -18,7 +18,7 @@ import { markNavigation, saveScrollOffset } from '../utils/scrollMemory'
 // the entry. Public auth routes are excluded so logging out and back in
 // doesn't snap the user back to /login.
 export const LAST_ROUTE_KEY = 'app_last_route'
-const PUBLIC_ROUTE_NAMES = new Set(['login', 'register', 'forgot-password', 'shared-album'])
+const PUBLIC_ROUTE_NAMES = new Set(['login', 'register', 'forgot-password', 'shared-album', 'shared-collection'])
 
 function readLastRoute(): string | null {
   const raw = localStorage.getItem(LAST_ROUTE_KEY)
@@ -79,6 +79,12 @@ const router = createRouter({
 
     // Public shared album (no auth required)
     { path: '/albums/shared/:token', name: 'shared-album', component: SharedAlbumView },
+    // A collection behind an anonymous share link (#1548, stage 8).
+    {
+      path: '/geteilt/:token',
+      name: 'shared-collection',
+      component: () => import('../views/SharedCollectionView.vue'),
+    },
 
     // Module routes
     ...moduleRoutes,

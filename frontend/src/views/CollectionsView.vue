@@ -15,6 +15,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import ExportDialog from '../components/collections/ExportDialog.vue'
+import ShareLinkDialog from '../components/collections/ShareLinkDialog.vue'
 import InputText from 'primevue/inputtext'
 import Menu from 'primevue/menu'
 import Message from 'primevue/message'
@@ -304,6 +305,15 @@ const exportOpen = computed({
   },
 })
 
+// "Freigabelink" (#1548, stage 8), likewise one dialog for the row's collection.
+const shareTarget = ref<CollectionSummary | null>(null)
+const shareOpen = computed({
+  get: () => shareTarget.value !== null,
+  set: (open: boolean) => {
+    if (!open) shareTarget.value = null
+  },
+})
+
 // One row menu for the whole page, filled for the row that opened it.
 const rowMenu = ref<InstanceType<typeof Menu> | null>(null)
 const rowMenuItems = ref<Array<{ label: string; icon: string; command: () => void }>>([])
@@ -323,6 +333,7 @@ function openRowMenu(event: Event, c: CollectionSummary) {
   }
   if (c.can_administer) {
     entries.push(
+      { label: 'Freigabelink', icon: 'pi pi-globe', command: () => (shareTarget.value = c) },
       c.archived_at
         ? { label: 'Zurückholen', icon: 'pi pi-replay', command: () => void setArchived(c, false) }
         : { label: 'Archivieren', icon: 'pi pi-box', command: () => void setArchived(c, true) },
@@ -724,6 +735,7 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
       </template>
     </Dialog>
     <ExportDialog v-model:visible="exportOpen" :collection-id="exportTarget?.id ?? null" :name="exportTarget?.name ?? ''" />
+    <ShareLinkDialog v-model:visible="shareOpen" :collection-id="shareTarget?.id ?? null" :name="shareTarget?.name ?? ''" />
   </PageLayout>
 </template>
 

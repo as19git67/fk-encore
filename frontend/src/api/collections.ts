@@ -814,3 +814,69 @@ export function runCollectionScheduleNow(
 ): Promise<{ schedule: CollectionSchedule; run: ExportRun | null }> {
   return apiFetch(`/collections/schedules/${scheduleId}/run`, { method: 'POST' })
 }
+
+// ─── Anonymous share links (#1548, stage 8) ────────────────────────────────
+
+export type LinkExpiry = '7d' | '30d' | '90d' | 'never'
+
+export interface CollectionPublicLink {
+  id: number
+  collection_id: number
+  token: string
+  created_at: string
+  expires_at: string | null
+}
+
+export interface PublicPhoto {
+  id: number
+  taken_on: string | null
+}
+
+export interface PublicAlbum {
+  id: number
+  title: string
+  photo_ids: number[]
+}
+
+export interface PublicDocument {
+  id: number
+  title: string
+  date: string | null
+  mime_type: string
+}
+
+export interface PublicCollection {
+  title: string
+  description: string | null
+  expires_at: string | null
+  photos: PublicPhoto[]
+  albums: PublicAlbum[]
+  documents: PublicDocument[]
+  withheld: Array<{ kind: string; count: number }>
+}
+
+export function listCollectionPublicLinks(id: number): Promise<{ items: CollectionPublicLink[] }> {
+  return apiFetch(`/collections/${id}/public-links`)
+}
+
+export function createCollectionPublicLink(id: number, expiresIn: LinkExpiry): Promise<CollectionPublicLink> {
+  return apiFetch(`/collections/${id}/public-links`, { method: 'POST', body: JSON.stringify({ expires_in: expiresIn }) })
+}
+
+export function disableCollectionPublicLink(linkId: number): Promise<{ ok: boolean }> {
+  return apiFetch(`/collections/public-links/${linkId}`, { method: 'DELETE' })
+}
+
+export function getPublicCollection(token: string): Promise<PublicCollection> {
+  return apiFetch(`/collections/public/${encodeURIComponent(token)}`)
+}
+
+/** A photo behind a link, re-encoded by the server without metadata. */
+export function publicCollectionPhotoUrl(token: string, photoId: number, width?: number): string {
+  const w = width ? `?w=${width}` : ''
+  return `${API_BASE_URL}/collections/public/${encodeURIComponent(token)}/photos/${photoId}${w}`
+}
+
+export function publicCollectionDocumentUrl(token: string, documentId: number): string {
+  return `${API_BASE_URL}/collections/public/${encodeURIComponent(token)}/documents/${documentId}`
+}

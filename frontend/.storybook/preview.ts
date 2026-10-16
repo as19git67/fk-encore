@@ -54,6 +54,7 @@ const router = createRouter({
     // Collections across modules (#1548)
     { path: '/sammelmappen', name: 'sammelmappen', component: { template: '<div />' } },
     { path: '/sammelmappen/:id', name: 'sammelmappe-detail', component: { template: '<div />' } },
+    { path: '/geteilt/:token', name: 'shared-collection', component: { template: '<div />' } },
     { path: '/finanzen/konten', name: 'finance-accounts', component: { template: '<div />' } },
     { path: '/finanzen/umsaetze/:id', name: 'finance-transaction-detail', component: { template: '<div />' } },
     { path: '/finanzen/bankkontakte', name: 'finance-bankcontacts', component: { template: '<div />' } },
