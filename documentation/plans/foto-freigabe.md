@@ -1,6 +1,6 @@
 # Photo release (approval workflow)
 
-Status: **plan, not implemented yet.** Third revision. Earlier revisions had an
+Status: **stage 0 done, stages 1–8 not implemented yet.** Third revision. Earlier revisions had an
 instance-wide switch, and the first one stored the state per album
 membership.
 
@@ -482,8 +482,30 @@ reviewer can see place and time. It is only stripped on anonymous delivery.
 
 ## Stages
 
-0. **Server-side access control** (separate issue and PR, before
-   everything else):
+0. **Server-side access control** — done. Most of the list was already
+   fixed under #1435 (file access, render, export, OCR, POI matches,
+   transforms, face assign person check, person reads, uploaders, guest
+   comments). What remained, and how it closed:
+   - One more rule next to `accessiblePhotoCondition`: `coViewerIds(viewer,
+     photo)` in `photo/photo-file-access.ts` — the viewer plus everyone
+     taking part in an album that holds the photo and in which the viewer
+     takes part. It is the audience for what one person's dealings with a
+     photo reveal: the transforms bundle's `others`, adopting a recipe,
+     `v=user` renders and exports, the `curation.changed` event and the
+     `photo_favorited` feed item, and person names inherited by face
+     assignment.
+   - Album comments: the photo owner is no longer in every album's
+     audience by owning the photo, and moderates only where they take part.
+   - Faces: assign and ignore check the face's photo; a person page and the
+     person covers only use photos the user can open; deleting an album or
+     taking photos out of one removes the participants' face data for
+     photos they can no longer see (`cleanupAfterUnshare`, now built on
+     `accessiblePhotoCondition`).
+   - Curation and the locations endpoint use `assertPhotoAccess`, so a
+     photo out of scope reads as missing (no 403/404 oracle).
+   - Tests: `photo/photo-coviewers.test.ts`.
+
+   Original scope:
    - The `canSeePhoto` rule applied to file access, render, export, OCR,
      POI matches and transforms.
    - `personId` ownership on face assign, a user filter on person and face

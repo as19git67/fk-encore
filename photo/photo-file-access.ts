@@ -150,6 +150,14 @@ export function publicLinkCoversPhoto(publicLinkId: number, photoId: number): Pr
  * screen can list, it can also display — and nothing more.
  */
 export function accessiblePhotoCondition(userId: number): SQL {
+  return accessiblePhotoConditionFor(userId, sql`${photos.id}`, sql`${photos.user_id}`);
+}
+
+/**
+ * The same rule over any reference to a photo row — for raw subqueries
+ * that join `photos` under an alias (`p.id`, `p.user_id`).
+ */
+export function accessiblePhotoConditionFor(userId: number, photoId: SQL, ownerId: SQL): SQL {
   const albumIsMine = sql`(
     a.user_id = ${userId}
     OR EXISTS (
@@ -158,18 +166,54 @@ export function accessiblePhotoCondition(userId: number): SQL {
     )
   )`;
   return sql`(
-    ${photos.user_id} = ${userId}
+    ${ownerId} = ${userId}
     OR EXISTS (
       SELECT 1
       FROM ${albumPhotos} ap
       JOIN ${albums} a ON a.id = ap.album_id
-      WHERE ap.photo_id = ${photos.id} AND ${albumIsMine}
+      WHERE ap.photo_id = ${photoId} AND ${albumIsMine}
     )
     OR EXISTS (
       SELECT 1 FROM ${albums} a
-      WHERE a.cover_photo_id = ${photos.id} AND ${albumIsMine}
+      WHERE a.cover_photo_id = ${photoId} AND ${albumIsMine}
     )
   )`;
+}
+
+/**
+ * Who sees `photoId` the way `viewerId` does: the viewer, and everyone
+ * taking part in an album that holds the photo (as member or cover) and in
+ * which the viewer takes part too — its owner and the people it is shared
+ * with.
+ *
+ * This is the audience for anything one person's dealings with a photo
+ * reveal to others: their edit recipe, their favourite or hide, the name
+ * they gave a face. Seeing the same photo is not enough. When the photo
+ * sits in two unrelated albums, the people in one learn nothing about the
+ * people in the other, and the photo's owner belongs only where they take
+ * part — not in somebody else's private album that reused the photo.
+ */
+export async function coViewerIds(viewerId: number, photoId: number): Promise<number[]> {
+  const result = await db.execute<{ user_id: number }>(sql`
+    WITH shared_albums AS (
+      SELECT a.id, a.user_id
+      FROM ${albums} a
+      WHERE (
+          a.cover_photo_id = ${photoId}
+          OR EXISTS (SELECT 1 FROM ${albumPhotos} ap WHERE ap.album_id = a.id AND ap.photo_id = ${photoId})
+        )
+        AND (
+          a.user_id = ${viewerId}
+          OR EXISTS (SELECT 1 FROM ${albumShares} s WHERE s.album_id = a.id AND s.user_id = ${viewerId})
+        )
+    )
+    SELECT ${viewerId}::int AS user_id
+    UNION
+    SELECT user_id FROM shared_albums
+    UNION
+    SELECT s.user_id FROM ${albumShares} s JOIN shared_albums sa ON sa.id = s.album_id
+  `);
+  return [...new Set(result.rows.map((r) => Number(r.user_id)))];
 }
 
 async function viewerMayRead(userId: number, where: SQL): Promise<boolean> {

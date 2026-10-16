@@ -11,7 +11,7 @@ import * as orientationVariants from "./orientation-variants";
 import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
-import { assertPhotoAccess, denyPhotoFileRequest, viewerMayReadPhotoId } from "./photo-file-access";
+import { assertPhotoAccess, coViewerIds, denyPhotoFileRequest, viewerMayReadPhotoId } from "./photo-file-access";
 import { getPhotoOcrLogic, type PhotoOcrResult } from "./photo-ocr.service";
 import * as spotlight from "./photo-spotlight.service";
 import type { SpotlightIdsResponse, SpotlightIndexResponse } from "./photo-spotlight.service";
@@ -1143,7 +1143,11 @@ export const renderPhotoTransformed = api.raw(
           res.end("v=user requires a numeric user= query parameter");
           return;
         }
-        result = await renderUserAndCache(photoId, userId, targetWidth);
+        // Somebody else's recipe only when the viewer could see it in the editor.
+        result =
+          userId === viewerId || (await coViewerIds(viewerId, photoId)).includes(userId)
+            ? await renderUserAndCache(photoId, userId, targetWidth)
+            : null;
         if (!result) {
           res.statusCode = 404;
           res.end("No transform exists for this photo+user");
@@ -1385,7 +1389,10 @@ export const exportPhotoTransformed = api.raw(
           res.end("v=user requires a numeric user= query parameter");
           return;
         }
-        const r = await renderUserAndCache(photoId, userId, null);
+        const r =
+          userId === viewerId || (await coViewerIds(viewerId, photoId)).includes(userId)
+            ? await renderUserAndCache(photoId, userId, null)
+            : null;
         buffer = r?.buffer ?? null;
       } else {
         const ratio = url.searchParams.get("ratio");

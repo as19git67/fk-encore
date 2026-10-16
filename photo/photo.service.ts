@@ -153,7 +153,7 @@ import { writeCacheFileAtomically } from "./cache-file";
 import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
 import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS, MlRpcTimeoutError } from "./rpc-timeout";
 import { computeOrientationVariants, photoOrientation } from "./orientation-variants";
-import { accessiblePhotoCondition, assertPhotoAccess } from "./photo-file-access";
+import { accessiblePhotoCondition, accessiblePhotoConditionFor, assertPhotoAccess, coViewerIds } from "./photo-file-access";
 import {
   buildPhotoFilterConditions,
   type PhotoFilterParams,
@@ -900,6 +900,7 @@ export async function assignFacesForUser(userId: number, photoId: number, resetI
     }
   }
 
+  let coViewers: number[] | null = null;
   for (const face of detectedFaces) {
     const bbox = JSON.parse(face.bbox);
 
@@ -924,13 +925,17 @@ export async function assignFacesForUser(userId: number, photoId: number, resetI
     let personId = match?.personId;
     if (!personId) {
       // Try to inherit the person name from existing assignments by other users
-      // (e.g. the photo owner already named this person).
+      // (e.g. the photo owner already named this person) — only from people
+      // who see the photo the way this user does, so a name somebody gave a
+      // face in their own album does not travel to strangers.
+      const nameSources = coViewers ?? (coViewers = await coViewerIds(userId, photoId));
       const sourceAssignment = await dbFirst<{ person_name: string }>(
         db.select({ person_name: persons.name })
           .from(userFaceAssignments)
           .innerJoin(persons, eq(persons.id, userFaceAssignments.person_id))
           .where(and(
             eq(userFaceAssignments.face_id, face.id),
+            inArray(userFaceAssignments.user_id, nameSources),
             sql`${persons.name} != 'Unbenannt'`,
             eq(userFaceAssignments.ignored, false),
           ))
@@ -3646,39 +3651,14 @@ export async function updatePhotoCurationLogic(
   photoId: number,
   status: CurationStatus
 ): Promise<{ success: boolean }> {
-  // Fetch the photo record regardless of ownership. Users who do not own the
-  // photo are allowed to change their OWN curation status for it if the photo
-  // appears in an album that has been shared with them.
+  // Curation (favorites/hiding) is the caller's own and allowed on any
+  // photo they may see — their own, or one in an album they own or that is
+  // shared with them, at any access level. Anything else reads as missing.
+  await assertPhotoAccess(userId, photoId);
   const photo = await dbFirst<typeof photos.$inferSelect>(
     db.select().from(photos).where(eq(photos.id, photoId))
   );
-
-  if (!photo) {
-    throw new Error("Photo not found");
-  }
-
-  // If the requester is not the owner, allow the action only when the photo
-  // is part of an album they own or that has been shared with them (any
-  // access level). Curation (favorites/hiding) is user-specific and does not
-  // affect other users, so both "read" and "write" shares are permitted.
-  if (photo.user_id !== userId) {
-    const accessible = await dbFirst(
-      db
-        .select({ album_id: albumPhotos.album_id })
-        .from(albumPhotos)
-        .innerJoin(albums, eq(albums.id, albumPhotos.album_id))
-        .where(and(
-          eq(albumPhotos.photo_id, photoId),
-          or(
-            eq(albums.user_id, userId),
-            sql`EXISTS (SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albums.id} AND ${albumShares.user_id} = ${userId})`
-          )
-        ))
-    );
-    if (!accessible) {
-      throw new Error("Photo not found or unauthorized");
-    }
-  }
+  if (!photo) throw APIError.notFound("photo not found");
 
   // Read the previous status so we can detect favourite transitions for
   // the XMP write-back below.
@@ -3737,7 +3717,10 @@ export async function updatePhotoCurationLogic(
   // the event count bounded, and only when the photo is actually
   // shared — a private favourite is strictly personal.
   if (prevStatus !== status) {
-    const audience = await getUsersWithPhotoAccess(photoId);
+    // Only those who see the photo the way the actor does: people in an
+    // unrelated album holding the same photo must not learn that the actor
+    // liked or hid it.
+    const audience = await coViewerIds(userId, photoId);
     const recipients = audience.filter((uid) => uid !== userId);
 
     // Live update for every open photo view that can see this photo —
@@ -3780,16 +3763,22 @@ export async function updatePhotoCurationLogic(
     // Push + feed only on the explicit "into favorite" transition so
     // un-favouriting doesn't spam recipients.
     if (status === "favorite" && recipients.length > 0) {
-      // Pick any album that both (a) contains the photo and (b) has
-      // at least one recipient with access — used as the deep-link
-      // target for the push notification. Owner-only albums are
-      // skipped because recipients wouldn't be able to open them.
+      // The deep-link target: a shared album holding the photo in which
+      // the actor takes part — the one the recipients see it through.
+      // Owner-only albums are skipped because recipients couldn't open them.
       const albumRow = await dbFirst<{ album_id: number }>(
         db
           .select({ album_id: albumPhotos.album_id })
           .from(albumPhotos)
+          .innerJoin(albums, eq(albums.id, albumPhotos.album_id))
           .innerJoin(albumShares, eq(albumShares.album_id, albumPhotos.album_id))
-          .where(eq(albumPhotos.photo_id, photoId))
+          .where(and(
+            eq(albumPhotos.photo_id, photoId),
+            or(
+              eq(albums.user_id, userId),
+              sql`EXISTS (SELECT 1 FROM ${albumShares} s2 WHERE s2.album_id = ${albums.id} AND s2.user_id = ${userId})`,
+            ),
+          ))
           .limit(1),
       );
       if (albumRow) {
@@ -5000,9 +4989,13 @@ export async function deleteAlbumLogic(userId: number, albumId: number): Promise
   const albumPhotoIds = (await dbAll<{ photo_id: number }>(
     db.select({ photo_id: albumPhotos.photo_id }).from(albumPhotos).where(eq(albumPhotos.album_id, albumId))
   )).map((r) => r.photo_id);
+  if (album.cover_photo_id != null) albumPhotoIds.push(album.cover_photo_id);
+  const participants = await albumParticipantIds(albumId, album.user_id);
 
   await dbExec(db.delete(albums).where(eq(albums.id, albumId)));
   await contentFeed.reconcilePhotoViewers(albumPhotoIds);
+  // Everyone who saw these photos only through this album loses their face data for them.
+  for (const uid of participants) await cleanupAfterUnshare(uid, albumPhotoIds);
   return { success: true, message: "Album deleted" };
 }
 
@@ -5168,7 +5161,9 @@ export async function getPhotoLocationsLogic(
   userId: number,
   photoId: number
 ): Promise<import("../db/types").PhotoLocationsResponse> {
-  // Verify the photo exists and belongs to the user.
+  // The same gate as every photo addressed by id: outside the caller's
+  // scope the photo reads as missing.
+  await assertPhotoAccess(userId, photoId);
   const photo = await dbFirst<{ id: number; user_id: number; latitude: number | null; longitude: number | null }>(
     db.select({
       id: photos.id,
@@ -5178,22 +5173,6 @@ export async function getPhotoLocationsLogic(
     }).from(photos).where(eq(photos.id, photoId))
   );
   if (!photo) throw APIError.notFound("photo not found");
-  if (photo.user_id !== userId) {
-    // The photo is visible to the user only if it appears in an album they
-    // own or that has been shared with them.
-    const sharedHit = await dbFirst<{ exists: number }>(
-      db.select({ exists: sql<number>`1` }).from(albumPhotos)
-        .innerJoin(albums, eq(albums.id, albumPhotos.album_id))
-        .where(and(
-          eq(albumPhotos.photo_id, photoId),
-          or(
-            eq(albums.user_id, userId),
-            sql`EXISTS (SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albums.id} AND ${albumShares.user_id} = ${userId})`
-          )
-        )).limit(1)
-    );
-    if (!sharedHit) throw APIError.permissionDenied("not allowed");
-  }
 
   const albumRows = await dbAll<{ id: number; name: string }>(
     db.select({ id: albums.id, name: albums.name })
@@ -5376,6 +5355,13 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
       }
     }
   } else if (action === "remove") {
+    const participants = new Set<number>();
+    for (const albumId of albumIds) {
+      const album = await dbFirst<{ user_id: number }>(
+        db.select({ user_id: albums.user_id }).from(albums).where(eq(albums.id, albumId))
+      );
+      for (const uid of await albumParticipantIds(albumId, album?.user_id ?? null)) participants.add(uid);
+    }
     await dbExec(
       db.delete(albumPhotos).where(and(
         inArray(albumPhotos.album_id, albumIds),
@@ -5385,6 +5371,8 @@ export async function batchUpdateAlbumPhotosLogic(userId: number, req: BatchAlbu
     // Content feed: drop entries for viewers who no longer see these photos
     // via any album they still participate in.
     await contentFeed.reconcilePhotoViewers(photoIds);
+    // And their face data for photos they can no longer open at all.
+    for (const uid of participants) await cleanupAfterUnshare(uid, photoIds);
   }
 
   return { success: true };
@@ -5688,32 +5676,42 @@ export async function leaveAlbumLogic(userId: number, albumId: number): Promise<
   return { success: true };
 }
 
+/** The album's owner and everyone it is shared with. */
+async function albumParticipantIds(albumId: number, ownerId: number | null): Promise<number[]> {
+  const shared = await dbAll<{ user_id: number }>(
+    db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId))
+  );
+  return [...new Set([...(ownerId != null ? [ownerId] : []), ...shared.map((s) => s.user_id)])];
+}
+
+/** A face is addressed like its photo: outside the caller's scope it reads as missing. */
+async function assertFaceAccess(userId: number, faceId: number): Promise<void> {
+  const face = await dbFirst<{ photo_id: number }>(
+    db.select({ photo_id: faces.photo_id }).from(faces).where(eq(faces.id, faceId))
+  );
+  if (!face) throw APIError.notFound("face not found");
+  try {
+    await assertPhotoAccess(userId, face.photo_id);
+  } catch {
+    throw APIError.notFound("face not found");
+  }
+}
+
 /**
- * After an album share is removed, delete the user's face data for photos
- * they no longer have access to (not owned and not in any other shared album).
+ * After a user loses sight of photos — an album share removed, the album
+ * left or deleted, photos taken out of an album — delete their face data for
+ * the ones they no longer have access to (`accessiblePhotoCondition`), so
+ * their people pages stop showing faces, places and dates from photos they
+ * cannot open.
  */
 async function cleanupAfterUnshare(sharedUserId: number, albumPhotoIds: number[]): Promise<void> {
-  // Find which of these photos the user still has access to
-  // (owns the photo OR has access through another shared album).
-  const stillAccessibleResult = await db.execute<{ photo_id: number }>(sql`
-    SELECT DISTINCT photo_id FROM (
-      -- Photos owned by the user
-      SELECT id AS photo_id FROM photos WHERE user_id = ${sharedUserId} AND id IN (${sql.join(albumPhotoIds.map(id => sql`${id}`), sql`, `)})
-      UNION
-      -- Photos in albums owned by the user
-      SELECT ap.photo_id
-      FROM album_photos ap
-      INNER JOIN albums a ON a.id = ap.album_id AND a.user_id = ${sharedUserId}
-      WHERE ap.photo_id IN (${sql.join(albumPhotoIds.map(id => sql`${id}`), sql`, `)})
-      UNION
-      -- Photos accessible through other shared albums
-      SELECT ap.photo_id
-      FROM album_photos ap
-      INNER JOIN album_shares ash ON ash.album_id = ap.album_id AND ash.user_id = ${sharedUserId}
-      WHERE ap.photo_id IN (${sql.join(albumPhotoIds.map(id => sql`${id}`), sql`, `)})
-    ) accessible
-  `);
-  const stillAccessibleSet = new Set(stillAccessibleResult.rows.map(r => r.photo_id));
+  if (albumPhotoIds.length === 0) return;
+  const stillAccessible = await dbAll<{ id: number }>(
+    db.select({ id: photos.id })
+      .from(photos)
+      .where(and(inArray(photos.id, albumPhotoIds), accessiblePhotoCondition(sharedUserId)))
+  );
+  const stillAccessibleSet = new Set(stillAccessible.map(r => r.id));
   const orphanedPhotoIds = albumPhotoIds.filter(id => !stillAccessibleSet.has(id));
 
   if (orphanedPhotoIds.length === 0) return;
@@ -6057,6 +6055,8 @@ function calculateOverlap(b1: any, b2: any): number {
 }
 
 export async function listPersonsLogic(userId: number, limit?: number): Promise<ListPersonsResponse> {
+  // A cover comes only from a photo the user can still open.
+  const coverAccess = accessiblePhotoConditionFor(userId, sql`p.id`, sql`p.user_id`);
   const query = db.select({
       id: persons.id,
       user_id: persons.user_id,
@@ -6070,6 +6070,7 @@ export async function listPersonsLogic(userId: number, limit?: number): Promise<
           WHERE ufa.person_id = persons.id
             AND ufa.user_id = persons.user_id
             AND ufa.ignored = ${rawFalse}
+            AND ${coverAccess}
           ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
@@ -6087,6 +6088,7 @@ export async function listPersonsLogic(userId: number, limit?: number): Promise<
           WHERE ufa.person_id = persons.id
             AND ufa.user_id = persons.user_id
             AND ufa.ignored = ${rawFalse}
+            AND ${coverAccess}
           ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
@@ -6101,6 +6103,7 @@ export async function listPersonsLogic(userId: number, limit?: number): Promise<
           WHERE ufa.person_id = persons.id
             AND ufa.user_id = persons.user_id
             AND ufa.ignored = ${rawFalse}
+            AND ${coverAccess}
           ORDER BY ${rawCoalesceDate} DESC NULLS LAST, f.id DESC
           LIMIT 1
         ),
@@ -6207,7 +6210,13 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
         photoCuration,
         and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)),
       )
-      .where(and(eq(userFaceAssignments.person_id, personId), eq(userFaceAssignments.user_id, userId)))
+      .where(and(
+        eq(userFaceAssignments.person_id, personId),
+        eq(userFaceAssignments.user_id, userId),
+        // Only photos the user can still open: no faces, places or dates
+        // from an album that was deleted or that they left.
+        accessiblePhotoCondition(userId),
+      ))
       .orderBy(sql`${photoDateOrder} DESC NULLS LAST`, sql`${faces.id} DESC`)
   );
 
@@ -6271,7 +6280,7 @@ export async function updatePersonLogic(userId: number, personId: number, name: 
         created_at: persons.created_at,
         updated_at: persons.updated_at,
         faceCount: sql<number>`CAST(COALESCE((SELECT count(*) FROM user_face_assignments ufa WHERE ufa.person_id = persons.id AND ufa.ignored = ${rawFalse}), 0) AS INTEGER)`,
-        cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
+        cover_filename: sql<string>`COALESCE((SELECT p.filename FROM photos p INNER JOIN faces f ON f.photo_id = p.id WHERE f.id = persons.cover_face_id AND ${accessiblePhotoConditionFor(userId, sql`p.id`, sql`p.user_id`)} LIMIT 1), '')`,
         cover_bbox: sql<string>`COALESCE((SELECT f.bbox FROM faces f WHERE f.id = persons.cover_face_id LIMIT 1), '')`,
       })
       .from(persons)
@@ -6360,6 +6369,7 @@ export async function assignFaceToPersonLogic(
       .where(and(eq(persons.id, personId), eq(persons.user_id, userId)))
   );
   if (!person) throw APIError.notFound("person not found");
+  await assertFaceAccess(userId, faceId);
 
   await dbExec(
     db.update(userFaceAssignments)
@@ -6373,6 +6383,7 @@ export async function ignoreFaceLogic(
   userId: number,
   faceId: number
 ): Promise<{ success: boolean }> {
+  await assertFaceAccess(userId, faceId);
   await dbExec(
     db.update(userFaceAssignments)
       .set({ ignored: true, person_id: null })

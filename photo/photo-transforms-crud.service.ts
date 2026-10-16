@@ -5,7 +5,7 @@
 // banner in the editor; the suggestion payload sits alongside so the UI
 // can render the AI variant without a second request.
 
-import { eq, and, ne } from "drizzle-orm";
+import { eq, and, ne, inArray } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst, dbExec, dbInsertReturning } from "../db/adapter";
 import {
@@ -17,7 +17,7 @@ import {
   type PhotoTransformCrop,
   type PhotoTransformSuggestionsPayload,
 } from "../db/schema";
-import { assertPhotoAccess } from "./photo-file-access";
+import { assertPhotoAccess, coViewerIds } from "./photo-file-access";
 import { APIError } from "encore.dev/api";
 
 // ----------------- DTO types -----------------
@@ -142,7 +142,9 @@ function rowFromDb(r: typeof photoTransforms.$inferSelect): PhotoTransformRow {
 /**
  * Returns the full transforms bundle for a photo:
  *   - the caller's own transform (if any),
- *   - other users' transforms (with their display name),
+ *   - the transforms of the people who see the photo the way the caller
+ *     does (`coViewerIds`), with their display name — not of everyone who
+ *     happens to see it through some other album,
  *   - the AI suggestion payload + model version (if any).
  * The bundle drives both the editor's main view and the adopt banner.
  */
@@ -164,7 +166,8 @@ export async function getPhotoTransformsLogic(
       ),
   );
 
-  const othersRows = await dbAll<
+  const coViewers = (await coViewerIds(userId, photoId)).filter((id) => id !== userId);
+  const othersRows = coViewers.length === 0 ? [] : await dbAll<
     typeof photoTransforms.$inferSelect & { user_name: string }
   >(
     db
@@ -192,6 +195,7 @@ export async function getPhotoTransformsLogic(
         and(
           eq(photoTransforms.photo_id, photoId),
           ne(photoTransforms.user_id, userId),
+          inArray(photoTransforms.user_id, coViewers),
         ),
       ),
   );
@@ -394,6 +398,10 @@ export async function adoptTransformLogic(
   }
   if (source.user_id === userId) {
     throw APIError.failedPrecondition("cannot adopt your own transform");
+  }
+  // Only a recipe the caller could have seen in the bundle above.
+  if (!(await coViewerIds(userId, photoId)).includes(source.user_id)) {
+    throw APIError.notFound(`transform ${fromTransformId} not found`);
   }
 
   return await upsertWithSource(userId, photoId, "adopted", source.id, {

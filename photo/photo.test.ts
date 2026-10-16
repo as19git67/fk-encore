@@ -1764,7 +1764,7 @@ describe("Photo Module", () => {
       await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
 
       // user2 has no share at all -> should NOT be able to hide
-      await expect(service.updatePhotoCurationLogic(user2.id, photo.id, 'hidden')).rejects.toThrow("Photo not found or unauthorized");
+      await expect(service.updatePhotoCurationLogic(user2.id, photo.id, 'hidden')).rejects.toThrow("photo not found");
     });
 
     it("should let an album owner reuse a participant's photo in another album", async () => {
