@@ -261,6 +261,37 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "security-depot",
+    title: "In welchem Depot liegt ein Wertpapier",
+    question: "In welchem Depot liegt die Beispiel AG?",
+    expect: [{ tool: "portfolio_overview", args: { q: { $contains: "beispiel" } } }],
+    results: { portfolio_overview: { rows: [{ key: "DE0000000001", name: "Beispiel AG", depot: "Depot Bank A", value: "7500.00" }] } },
+  },
+  {
+    id: "securities-in-depot",
+    title: "Wertpapiere eines Depots",
+    question: "Welche Wertpapiere liegen im Depot bei der Beispielbank?",
+    expect: [{ tool: "list_accounts" }, { tool: "portfolio_overview", args: { account_ids: { $present: true } } }],
+    results: {
+      list_accounts: { rows: [{ id: 1, section: "Täglich", label: "Girokonto", type: "Girokonto" }, { id: 2, section: "Sparen", label: "Depot Beispielbank", type: "Depot", balance: "12500.00 EUR (as of 2026-10-15)" }] },
+      portfolio_overview: { rows: [{ key: "DE0000000001", name: "Beispiel AG", depot: "Depot Beispielbank", value: "7500.00" }, { key: "DE0000000002", name: "Muster ETF", depot: "Depot Beispielbank", value: "5000.00" }] },
+    },
+  },
+  {
+    id: "gain-today",
+    title: "Gewinn heute",
+    question: "Habe ich heute mit meinen Aktien Gewinn gemacht?",
+    expect: [{ tool: "quotes", args: { range: "1d" } }],
+    results: { quotes: { summary: "Total value of the 2 priced holdings: 12510.00; change since yesterday: +82.30 (2 with a comparison price). Positive = gain.", rows: [{ key: "DE0000000001", name: "Beispiel AG", "last price": "75.10", "change 1d": "0.60", "%": "0.81" }] } },
+  },
+  {
+    id: "photo-discussions",
+    title: "Diskussionen zu Fotos",
+    question: "Was wurde zuletzt zu unseren Fotos kommentiert?",
+    expect: [{ tool: "photo_activity", args: { kind: "photo_commented" } }],
+    results: { photo_activity: { rows: [{ id: 501, at: "2026-10-15 19:02", kind: "comment", who: "Erika Beispiel", album: "Gardasee 2025", photo: 1203, what: "Was für ein Sonnenuntergang!", unread: "yes" }] } },
+  },
+  {
     id: "account-balance",
     title: "Saldo eines Kontos",
     question: "Wie viel ist gerade auf meinem Girokonto?",

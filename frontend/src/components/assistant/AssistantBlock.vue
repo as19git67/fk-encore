@@ -41,12 +41,23 @@ const TITLES: Record<string, string> = {
   depot_transactions: 'Depotumsätze',
   quotes: 'Kurse',
   news: 'Nachrichten',
+  comments: 'Kommentare',
+  activity: 'Neuigkeiten',
   table: 'Ergebnis',
 }
 
 const KIND_LABELS: Record<string, string> = {
   buy: 'Kauf', sell: 'Verkauf', dividend: 'Dividende', in: 'Einlieferung', out: 'Auslieferung',
   split: 'Split', corp_action: 'Kapitalmaßnahme', tax: 'Steuer',
+}
+
+const ACTIVITY_LABELS: Record<string, string> = {
+  photo_commented: 'Kommentar', photo_favorited: 'Favorit', photo_added: 'Fotos hinzugefügt', album_shared: 'Album geteilt', album_left: 'Album verlassen',
+}
+
+function activityLabel(v: unknown): string {
+  const k = str(v)
+  return ACTIVITY_LABELS[k] ?? k
 }
 
 function kindLabel(v: unknown): string {
@@ -251,7 +262,7 @@ const analysis = computed(() => {
         <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
           <span class="row-main">
             <span class="row-title">{{ str(r.name) }}</span>
-            <span class="row-sub">{{ [str(r.isin), r.amount ? `${str(r.amount)} Stück` : '', r.open === false ? 'verkauft' : ''].filter(Boolean).join(' · ') }}</span>
+            <span class="row-sub">{{ [str(r.depots), str(r.isin), r.amount ? `${str(r.amount)} Stück` : '', r.open === false ? 'verkauft' : ''].filter(Boolean).join(' · ') }}</span>
           </span>
           <span class="row-figures">
             <span class="amount">{{ withUnit(r.value, r.currency) }}</span>
@@ -304,6 +315,32 @@ const analysis = computed(() => {
           </span>
           <i v-if="r.sentiment !== null && r.sentiment !== undefined" :class="['pi', num(r.sentiment) > 0.2 ? 'pi-arrow-up-right' : num(r.sentiment) < -0.2 ? 'pi-arrow-down-right' : 'pi-minus', sentimentClass(r.sentiment)]" aria-hidden="true" />
         </a>
+      </li>
+    </ul>
+
+    <!-- Comments under a photo -->
+    <ul v-else-if="block.kind === 'comments'" class="rows">
+      <li v-for="r in shown" :key="str(r.id)">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+          <span class="row-date">{{ date(r.at) }}</span>
+          <span class="row-main">
+            <span class="row-title">{{ str(r.author) }}</span>
+            <span class="row-sub row-sub--wrap">{{ str(r.body) }}</span>
+          </span>
+        </component>
+      </li>
+    </ul>
+
+    <!-- Activity in shared albums -->
+    <ul v-else-if="block.kind === 'activity'" class="rows">
+      <li v-for="r in shown" :key="str(r.id)">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route, 'row--unread': r.unread === true }]">
+          <span class="row-date">{{ date(r.at) }}</span>
+          <span class="row-main">
+            <span class="row-title">{{ str(r.actor) }} · {{ activityLabel(r.kind) }}{{ r.album ? ` · ${str(r.album)}` : '' }}</span>
+            <span v-if="r.what" class="row-sub row-sub--wrap">{{ str(r.what) }}</span>
+          </span>
+        </component>
       </li>
     </ul>
 
@@ -402,6 +439,15 @@ const analysis = computed(() => {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.row-sub--wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.row--unread .row-title {
+  font-weight: 600;
 }
 
 .row-figures {
