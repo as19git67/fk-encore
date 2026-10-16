@@ -44,6 +44,13 @@ Mixture-of-Experts model larger than VRAM can only be placed sensibly by
 `/classify`'s JSON-schema grammar, which llama-server compiles from the same
 schema object the binding does.
 
+A configuration activated for `inproc` in the GPU image, which has no
+llama-cpp-python, is not refused: the service runs it in llama-server instead,
+with `--n-gpu-layers 0` and no expert offload, so a CPU model can be compared
+against the GPU model without a second image. `/reload/status` then reports
+`config.notice`, and `backends` says which of the two this image can run; the
+app's KI-Modell page offers only those.
+
 ---
 
 ## Quick Start

@@ -365,6 +365,28 @@ describe("status", () => {
     expect(status.in_sync).toBe(true);
   });
 
+  it("passes on which backends the image has, and a rerouted configuration still counts as in sync", async () => {
+    const { config } = await createLlmConfig(input({ label: "CPU-Modell" }));
+    await db.update(llmModelConfig).set({ is_active: true }).where(eq(llmModelConfig.id, config.id));
+    const notice = "backend 'inproc' needs llama-cpp-python, which this image does not ship; the model runs in llama-server on the CPU instead (0 GPU layers)";
+    stubLlmService({
+      "/reload/status": {
+        body: {
+          reload: { state: "ready", detail: null, label: "CPU-Modell", started_at: 1, finished_at: 2 },
+          config: liveConfig({ config_id: config.id, source: "file", label: "CPU-Modell", backend: "server", notice }),
+          download: IDLE_DOWNLOAD,
+          llm_loaded: true,
+          backends: { inproc: false, server: true },
+        },
+      },
+    });
+
+    const status = await getLlmStatus();
+    expect(status.backends).toEqual({ inproc: false, server: true });
+    expect(status.live.notice).toBe(notice);
+    expect(status.in_sync).toBe(true);
+  });
+
   it("reports in sync when the loaded config is the activated one", async () => {
     const { config } = await createLlmConfig(input({ label: "Active" }));
     await db.update(llmModelConfig).set({ is_active: true }).where(eq(llmModelConfig.id, config.id));

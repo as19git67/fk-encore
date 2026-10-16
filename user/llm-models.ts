@@ -453,6 +453,14 @@ export interface LlmLiveConfig {
   /** "env" = running on the container's environment, "file" = an activated row. */
   source: string;
   model_present: boolean;
+  /** Set when llm-service ran the configuration differently than asked — e.g. `inproc` via llama-server. */
+  notice?: string | null;
+}
+
+/** Which backends the running llm-service image can load a model with. */
+export interface LlmBackends {
+  inproc: boolean;
+  server: boolean;
 }
 
 export interface LlmDownloadState {
@@ -478,6 +486,8 @@ export interface LlmStatusResponse {
   reload: LlmReloadState;
   download: LlmDownloadState;
   llm_loaded: boolean;
+  /** Null when llm-service is older and does not report it. */
+  backends: LlmBackends | null;
   /**
    * False when the service is running something other than the activated
    * configuration — a failed load that rolled back, or a container that was
@@ -502,6 +512,7 @@ export const getLlmStatus = api(
       config: LlmLiveConfig;
       download: LlmDownloadState;
       llm_loaded: boolean;
+      backends?: LlmBackends;
     }>("/reload/status");
 
     const in_sync = intended
@@ -514,6 +525,7 @@ export const getLlmStatus = api(
       reload: status.reload,
       download: status.download,
       llm_loaded: status.llm_loaded,
+      backends: status.backends ?? null,
       in_sync,
     };
   },

@@ -391,3 +391,60 @@ def test_a_corrupt_activated_configuration_falls_back_instead_of_crash_looping(v
     cfg, source = main._resolve_startup_config()
     assert source == "env"
     assert cfg == main._BOOT_CONFIG
+
+
+# ─── inproc in an image without llama-cpp-python ───────────────────────────────
+
+
+def test_an_inproc_config_runs_in_llama_server_on_the_cpu_when_the_image_lacks_llama_cpp(client, volume, monkeypatch):
+    """The GPU image ships llama-server but not llama-cpp-python. A CPU model
+    configured for `inproc` used to fail there and fall back to the previous
+    model; llama-server runs it instead, with nothing offloaded."""
+
+    (volume / "test.gguf").write_bytes(b"x")
+    monkeypatch.setattr(main, "_inproc_available", lambda: False)
+    monkeypatch.setattr(type(main._llama_server), "available", property(lambda self: True))
+    loaded: list[tuple[str, int]] = []
+    monkeypatch.setattr(main, "_load_llm", lambda: loaded.append((main.LLM_BACKEND, main.LLM_GPU_LAYERS)))
+
+    assert client.post("/reload", json=_row(backend="inproc", gpu_layers=20, n_cpu_moe=4)).status_code == 202
+    body = _wait_for_reload(client)
+
+    assert body["reload"]["state"] == "ready"
+    assert loaded == [("server", 0)]
+    assert body["config"]["backend"] == "server"
+    assert "llama-server on the CPU" in body["config"]["notice"]
+    assert body["backends"] == {"inproc": False, "server": True}
+
+
+def test_an_inproc_config_is_left_alone_where_llama_cpp_is_installed(client, volume, monkeypatch):
+    (volume / "test.gguf").write_bytes(b"x")
+    monkeypatch.setattr(main, "_inproc_available", lambda: True)
+    monkeypatch.setattr(type(main._llama_server), "available", property(lambda self: True))
+    loaded: list[str] = []
+    monkeypatch.setattr(main, "_load_llm", lambda: loaded.append(main.LLM_BACKEND))
+
+    assert client.post("/reload", json=_row(backend="inproc")).status_code == 202
+    body = _wait_for_reload(client)
+
+    assert loaded == ["inproc"]
+    assert body["config"]["notice"] is None
+
+
+def test_a_failed_rerouted_reload_does_not_leave_its_notice_behind(client, volume, monkeypatch):
+    (volume / "test.gguf").write_bytes(b"x")
+    monkeypatch.setattr(main, "_inproc_available", lambda: False)
+    monkeypatch.setattr(type(main._llama_server), "available", property(lambda self: True))
+    calls = {"n": 0}
+
+    def flaky_load():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("cannot read this model")
+
+    monkeypatch.setattr(main, "_load_llm", flaky_load)
+    assert client.post("/reload", json=_row(backend="inproc")).status_code == 202
+    body = _wait_for_reload(client)
+
+    assert body["reload"]["state"] == "error"
+    assert body["config"]["notice"] is None
