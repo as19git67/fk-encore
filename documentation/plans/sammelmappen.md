@@ -236,9 +236,10 @@ collections.
      (15 MB) the mail carries a download link instead. Every mail is logged
      in `collection_sends` (migration 0245, `sender` since 0254) and listed
      in the dialog.
-   - The dialog has three tabs: "Exportieren" (options; after a start the
-     run itself — progress, then download, share, mail, link, file as
-     document — in place of the form), "Verlauf" (runs and mails),
+   - The dialog has three tabs: "Zusammenstellen" (options; "Datei
+     erstellen" starts the run, which then replaces the form — progress,
+     then "Weitergeben" with save, share, mail and copy link as equal tiles
+     in one row, and file as document below), "Verlauf" (runs and mails),
      "Regelmäßig" (schedules). The share sheet gets the file fetched ahead
      (up to 40 MB), so "Teilen" is one tap.
    - "Link kopieren": a random token on the run

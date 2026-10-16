@@ -10,9 +10,10 @@
  * The options can be kept as a named profile with the collection, so the
  * next export is one click. Runs happen on the server.
  *
- * Three tabs: "Exportieren" sets up a run and, once started, shows that run
- * in place of the form — progress, then download, share, mail, link — so
- * nobody presses "Exportieren" again to find out whether it worked.
+ * Three tabs: "Zusammenstellen" sets up what goes into the file; "Datei
+ * erstellen" starts the run, and the tab then shows it in place of the form —
+ * progress, then the ways on (save, share, mail, link) side by side — so
+ * nobody presses the button again to find out whether it worked.
  * "Verlauf" keeps the reader's recent runs (a week) and the mails sent;
  * "Regelmäßig" the schedules (not for the basket).
  */
@@ -419,9 +420,9 @@ function timeLabel(iso: string): string {
     <p v-if="loading" class="exp-hint"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> Wird vorbereitet …</p>
     <p v-else-if="setup && groups.length === 0" class="exp-hint">Die Mappe enthält nichts, was du exportieren kannst.</p>
 
-    <Tabs v-else-if="options && setup" v-model:value="tab" class="exp-tabs">
+    <Tabs v-else-if="options && setup" v-model:value="tab" class="exp-tabs" :show-navigators="false">
       <TabList>
-        <Tab value="new" data-testid="export-tab-new">Exportieren</Tab>
+        <Tab value="new" data-testid="export-tab-new">Zusammenstellen</Tab>
         <Tab value="history" data-testid="export-tab-history">
           Verlauf<span v-if="runs.length" class="exp-tab-count">{{ runs.length }}</span>
         </Tab>
@@ -432,7 +433,7 @@ function timeLabel(iso: string): string {
           <!-- The run just started: what came of it, and where it can go. -->
           <section v-if="current" class="exp-result" aria-live="polite" data-testid="export-result">
             <template v-if="current.status === 'running'">
-              <p class="exp-result-title"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> Wird erstellt …</p>
+              <p class="exp-result-title"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> Datei wird erstellt …</p>
               <p class="exp-hint">Das dauert bei vielen Fotos oder Dokumenten etwas. Du kannst den Dialog schließen; der Export liegt danach im Verlauf.</p>
             </template>
             <template v-else-if="current.status === 'done'">
@@ -443,32 +444,27 @@ function timeLabel(iso: string): string {
                   · {{ current.skipped.length }} nicht enthalten
                 </span>
               </p>
-              <div class="exp-result-actions">
-                <Button
-                  icon="pi pi-download"
-                  label="Herunterladen"
-                  size="small"
-                  :loading="busyRun === current.id"
-                  data-testid="export-result-download"
-                  @click="download(current)"
-                />
-                <Button
-                  v-if="current.mime_type === 'application/pdf' && canFileAsDocument"
-                  :icon="current.document_id ? 'pi pi-check' : 'pi pi-file-arrow-up'"
-                  :label="current.document_id ? 'Liegt bei den Dokumenten' : 'Als Dokument ablegen'"
-                  size="small"
-                  outlined
-                  :disabled="current.document_id !== null || busyRun === current.id"
-                  @click="fileAsDocument(current)"
-                />
-              </div>
+              <h3 class="exp-group-title">Weitergeben</h3>
               <ExportSendPanel
                 :run="current"
                 :mail-configured="mailConfigured"
                 :sender-email="senderEmail"
                 :system-sender="systemSender"
                 :self-sender-allowed="selfSenderAllowed"
+                downloadable
+                :downloading="busyRun === current.id"
+                @download="download(current)"
                 @sent="loadSends"
+              />
+              <Button
+                v-if="current.mime_type === 'application/pdf' && canFileAsDocument"
+                :icon="current.document_id ? 'pi pi-check' : 'pi pi-file-arrow-up'"
+                :label="current.document_id ? 'Liegt bei den Dokumenten' : 'Als Dokument ablegen'"
+                size="small"
+                text
+                class="exp-result-back"
+                :disabled="current.document_id !== null || busyRun === current.id"
+                @click="fileAsDocument(current)"
               />
             </template>
             <template v-else>
@@ -476,7 +472,7 @@ function timeLabel(iso: string): string {
               <p v-if="current.error" class="exp-hint">{{ current.error }}</p>
             </template>
             <Button
-              :label="current.status === 'failed' ? 'Einstellungen prüfen und neu starten' : 'Neuer Export'"
+              :label="current.status === 'failed' ? 'Einstellungen prüfen und neu starten' : 'Neu zusammenstellen'"
               icon="pi pi-arrow-left"
               text
               size="small"
@@ -709,8 +705,8 @@ function timeLabel(iso: string): string {
       <Button label="Schließen" severity="secondary" text @click="emit('update:visible', false)" />
       <Button
         v-if="tab === 'new' && !current"
-        label="Exportieren"
-        icon="pi pi-download"
+        label="Datei erstellen"
+        icon="pi pi-file"
         :loading="starting"
         :disabled="!options || groups.length === 0"
         data-testid="export-start"
@@ -765,6 +761,13 @@ function timeLabel(iso: string): string {
    edge: the ring goes inside the tab. */
 .exp-tabs :deep(.p-tab) {
   outline-offset: var(--focus-ring-offset-inset);
+  /* Three tabs that share the width and fit a phone: nothing to scroll. */
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: var(--space-2);
+  font-size: var(--text-sm);
+  justify-content: center;
+  white-space: nowrap;
 }
 .exp-panels {
   padding: 0;
@@ -786,11 +789,6 @@ function timeLabel(iso: string): string {
   align-items: center;
   gap: var(--space-2);
   overflow-wrap: anywhere;
-}
-.exp-result-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
 }
 .exp-result-back {
   align-self: flex-start;

@@ -1329,8 +1329,9 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
   `user/mail.ts`, `mailSender` in `collections/sending.ts`, Umschalter
   `ExportSenderField.vue`, auch im Zeitplan). Der Absender steht im Formular
   und im Protokoll `collection_sends`. Der Dialog hat drei Reiter
-  (Exportieren, Verlauf, Regelmäßig); nach „Exportieren“ zeigt der erste das
-  Ergebnis mit allen Wegen weiter statt des Formulars. Zeitpläne (`collections/schedules.ts`) laufen als der,
+  (Zusammenstellen, Verlauf, Regelmäßig); nach „Datei erstellen“ zeigt der
+  erste statt des Formulars das Ergebnis und darunter „Weitergeben“: Speichern,
+  Teilen, E-Mail und Link kopieren gleichrangig in einer Zeile. Zeitpläne (`collections/schedules.ts`) laufen als der,
   der sie angelegt hat, mit seinen Rechten zur Laufzeit; der Basket hat keine.
 - `Ctrl/Cmd+A` wählt alles (das Composable bindet es selbst),
   Umschalt+Klick den Bereich, `Esc` beendet.

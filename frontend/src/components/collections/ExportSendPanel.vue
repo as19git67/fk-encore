@@ -42,11 +42,15 @@ const props = defineProps<{
   systemSender?: string
   /** The user's address shares the app's domain and may be chosen instead. */
   selfSenderAllowed?: boolean
+  /** Show "Speichern" as the first of the ways on (emits `download`). */
+  downloadable?: boolean
+  /** The download is under way. */
+  downloading?: boolean
 }>()
 
 /** Fetched ahead for the share sheet up to this size; above it, on request. */
 const PREFETCH_LIMIT = 40 * 1024 * 1024
-const emit = defineEmits<{ (e: 'sent'): void }>()
+const emit = defineEmits<{ (e: 'sent'): void; (e: 'download'): void }>()
 
 const entries = ref<ExportEntry[]>([])
 const singleAllowed = ref(false)
@@ -165,27 +169,52 @@ async function send() {
 
 <template>
   <div class="send" data-testid="export-send">
-    <div class="send-actions">
+    <!-- The ways on, side by side and alike: none is the main one. -->
+    <div class="send-actions" role="group" aria-label="Weitergeben">
+      <Button
+        v-if="downloadable"
+        icon="pi pi-download"
+        icon-pos="top"
+        label="Speichern"
+        size="small"
+        outlined
+        class="send-action"
+        :loading="downloading"
+        data-testid="export-result-download"
+        @click="emit('download')"
+      />
       <Button
         v-if="shareable"
         icon="pi pi-share-alt"
+        icon-pos="top"
         :label="prepared || preparing || (run.size_bytes ?? 0) <= PREFETCH_LIMIT ? 'Teilen' : 'Zum Teilen laden'"
         size="small"
         outlined
+        class="send-action"
         :loading="preparing"
         data-testid="export-share-now"
         @click="share"
       />
       <Button
         icon="pi pi-envelope"
-        label="Per E-Mail"
+        icon-pos="top"
+        label="E-Mail"
         size="small"
         :outlined="!mailOpen"
+        class="send-action"
         :aria-expanded="mailOpen"
         data-testid="export-mail-toggle"
         @click="mailOpen = !mailOpen"
       />
-      <Button icon="pi pi-link" label="Link kopieren" size="small" text @click="copyLink" />
+      <Button
+        icon="pi pi-link"
+        icon-pos="top"
+        label="Link kopieren"
+        size="small"
+        outlined
+        class="send-action"
+        @click="copyLink"
+      />
     </div>
     <p v-if="!shareable" class="send-hint">
       An andere Apps teilen geht in diesem Browser nicht, auf dem Smartphone schon.
@@ -238,9 +267,17 @@ async function send() {
   padding: var(--space-2) 0 0;
 }
 .send-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: var(--space-2);
+}
+.send-action {
+  min-width: 0;
+  white-space: normal;
+  text-align: center;
+  /* Icons on one line, however many lines a label takes. */
+  justify-content: flex-start;
 }
 .send-body {
   display: flex;
