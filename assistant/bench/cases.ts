@@ -152,6 +152,21 @@ export const BENCH_CASES: BenchCase[] = [
     results: { list_transactions: { rows: [{ id: 9001, date: "2026-09-05", counterparty: "Musterhandel GmbH", amount: -23.9 }], total: -23.9, count: 1 } },
   },
   {
+    id: "latest-bookings",
+    title: "Neueste Buchungen nicht erfinden",
+    question: "Zeige mir die 10 neuesten Buchungen.",
+    expect: [{ tool: "list_transactions", args: { limit: 10 } }],
+    results: {
+      list_transactions: {
+        rows: [
+          { id: 9101, date: "2026-10-14", counterparty: "Beispiel Markt", purpose: "Einkauf", amount: -23.4 },
+          { id: 9102, date: "2026-10-13", counterparty: "Muster Tankstelle", purpose: "Tanken", amount: -61.0 },
+        ],
+        count: 2,
+      },
+    },
+  },
+  {
     id: "electricity-last-year",
     title: "Verbrauch eines Zählers",
     question: "Wie hoch war unser Stromverbrauch im letzten Jahr?",

@@ -67,6 +67,9 @@ export function applyEvent(turn: LiveTurn, event: StreamEvent): LiveTurn {
   switch (event.type) {
     case 'token':
       return { ...turn, text: turn.text + (event.text ?? '') }
+    // The server withdrew an answer that stated data without a tool behind it.
+    case 'retract':
+      return { ...turn, text: '' }
     case 'tool_start': {
       const tool = event.tool ?? 'tool'
       return { ...turn, text: '', steps: [...turn.steps, { tool, label: toolLabel(tool), done: false }] }

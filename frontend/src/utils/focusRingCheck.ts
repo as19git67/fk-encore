@@ -19,6 +19,11 @@
  * fold is not clipped — it is one scroll away. A row flush with the start or
  * the end of the canvas is: there is nothing left to scroll to.
  *
+ * Only the nearest container that actually scrolls on an axis counts on that
+ * axis. Inside a chat that scrolls, where a link sits relative to the page
+ * around it depends on how far the chat is scrolled — the chat can bring it
+ * clear of any edge, so the containers beyond it are not measured.
+ *
  * The walk stops at `<body>`. The page itself clips sideways on purpose
  * (`overflow-x: clip`, so nothing can scroll the document), but a real page
  * keeps its content a gutter away from that edge — only a component story,
@@ -118,6 +123,9 @@ export function findClippedFocusRings(
 
     const sides = new Set<string>()
     let culprit: Element | null = null
+    // Set once the walk has passed a container that scrolls on that axis.
+    let pastScrollerX = false
+    let pastScrollerY = false
     let node = el.parentElement
     while (node && node !== document.body && node !== document.documentElement) {
       const box = node.getBoundingClientRect()
@@ -135,7 +143,7 @@ export function findClippedFocusRings(
       const style = getStyle(node)
       const borderTop = Number.parseFloat(style.borderTopWidth) || 0
       const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0
-      if (clips(node, 'x')) {
+      if (clips(node, 'x') && !pastScrollerX) {
         // Where the scrollable canvas starts and ends, in viewport
         // coordinates — scrolled back to position zero.
         const canvasLeft = box.left + borderLeft - node.scrollLeft
@@ -150,7 +158,7 @@ export function findClippedFocusRings(
         if (insideLeft >= -tolerance && insideLeft < reach - tolerance) sides.add('left')
         if (insideRight >= -tolerance && insideRight < reach - tolerance) sides.add('right')
       }
-      if (clips(node, 'y')) {
+      if (clips(node, 'y') && !pastScrollerY) {
         const canvasTop = box.top + borderTop - node.scrollTop
         const canvasBottom = canvasTop + node.scrollHeight
         const insideTop = rect.top - canvasTop
@@ -159,6 +167,8 @@ export function findClippedFocusRings(
         if (insideBottom >= -tolerance && insideBottom < reach - tolerance) sides.add('bottom')
       }
       if (sides.size > 0 && !culprit) culprit = node
+      if (clips(node, 'x') && node.scrollWidth > box.width + tolerance) pastScrollerX = true
+      if (clips(node, 'y') && node.scrollHeight > box.height + tolerance) pastScrollerY = true
       node = node.parentElement
     }
     if (sides.size > 0) {

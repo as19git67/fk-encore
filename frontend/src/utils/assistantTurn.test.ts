@@ -13,6 +13,15 @@ describe('applyEvent', () => {
     expect(t.finished).toBe(false)
   })
 
+  it('drops a withdrawn answer and keeps what follows', () => {
+    const t = play([
+      { type: 'token', text: '1. 01.10.2026 Beispiel GmbH −12,00 €' },
+      { type: 'retract' },
+      { type: 'token', text: 'Ich sehe nach.' },
+    ])
+    expect(t.text).toBe('Ich sehe nach.')
+  })
+
   it('starts the text afresh when a tool is called', () => {
     const t = play([
       { type: 'token', text: 'Ich sehe nach …' },

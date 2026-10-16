@@ -521,7 +521,7 @@ export const letterPdf = api.raw(
  * `tool_start`. `done` carries the final answer either way.
  */
 export interface StreamEvent {
-  type: "token" | "tool_start" | "tool_result" | "done" | "error";
+  type: "token" | "retract" | "tool_start" | "tool_result" | "done" | "error";
   text?: string;
   tool?: string;
   arguments?: Record<string, unknown>;
@@ -537,6 +537,8 @@ export function toStreamEvent(event: TurnEvent): StreamEvent {
   switch (event.type) {
     case "token":
       return { type: "token", text: event.text };
+    case "retract":
+      return { type: "retract" };
     case "tool_start":
       return { type: "tool_start", tool: event.tool, arguments: event.arguments };
     case "tool_result":

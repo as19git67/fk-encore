@@ -246,6 +246,10 @@ defineExpose({ contentEl })
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* Keeps absolutely placed content (visually hidden labels) inside this
+     scroller; placed against <main> they would lengthen the document and
+     let the whole page scroll under the app's stack. */
+  position: relative;
   display: flex;
   flex-direction: column;
   /* A scroller clips what reaches past it, and a focus ring reaches 4px

@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { buildSystemPrompt, fitContext, runTurn, timeGrounding } from "./agent";
+import { buildSystemPrompt, fitContext, GROUNDING_NUDGE, looksLikeUserData, runTurn, timeGrounding } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -256,3 +256,58 @@ describe("list routes", () => {
     expect(all.block?.route).toBeUndefined();
   });
 });
+
+describe("answers without a tool behind them", () => {
+  const INVENTED = "Hier sind deine 10 neuesten Buchungen:\n1. 14.10.2026 Supermarkt −23,40 €\n2. 13.10.2026 Tankstelle −61,00 €\n3. 12.10.2026 Gehalt 2.400,00 €";
+
+  it("are recognised by amounts, dates or a numbered list", () => {
+    expect(looksLikeUserData(INVENTED)).toBe(true);
+    expect(looksLikeUserData("Das kostet 12,50 €.")).toBe(true);
+    expect(looksLikeUserData("Am 2026-10-01 war das.")).toBe(true);
+    expect(looksLikeUserData("Gern geschehen!")).toBe(false);
+    expect(looksLikeUserData("Dazu brauche ich ein Konto. Welches meinst du?")).toBe(false);
+  });
+
+  it("are sent back once, withdrawn from the stream and kept out of the transcript", async () => {
+    clients.finance.listTransactions.mockResolvedValue({
+      items: [{ id: 41, booking_date: "2026-10-14", amount: "-9.99", currency_code: "EUR", counterparty: "Beispiel Markt", purpose: "Einkauf", tags: [] }],
+      total: 1,
+    });
+    const { fn, requests } = scripted([
+      answer(INVENTED),
+      calls(["list_transactions", { limit: 10 }]),
+      answer("Die neueste Buchung ist ein Einkauf bei Beispiel Markt."),
+    ]);
+    const events: TurnEvent[] = [];
+    const res = await runTurn({
+      user: USER, history: [], question: "Zeige mir die 10 neuesten Buchungen", tools: catalogFor(USER), chat: fn,
+      emit: (e) => events.push(e), now: NOW,
+    });
+
+    expect(res.answer).toBe("Die neueste Buchung ist ein Einkauf bei Beispiel Markt.");
+    expect(clients.finance.listTransactions).toHaveBeenCalledWith(expect.objectContaining({ limit: 10 }));
+    // The second request carried the invented draft and the nudge; the third no longer does.
+    expect(requests[1]!.messages.at(-1)).toEqual({ role: "user", content: GROUNDING_NUDGE });
+    expect(JSON.stringify(requests[2]!.messages)).not.toContain(GROUNDING_NUDGE);
+    expect(events.map((e) => e.type)).toContain("retract");
+    expect(JSON.stringify(res.transcript)).not.toContain("Supermarkt");
+  });
+
+  it("are accepted the second time, and never questioned after a tool call or for small talk", async () => {
+    const again = scripted([answer("Das waren 116,50 €."), answer("Das waren 116,50 €.")]);
+    const res = await runTurn({ user: USER, history: [], question: "Wie viel war das?", tools: catalogFor(USER), chat: again.fn, now: NOW });
+    expect(res.answer).toBe("Das waren 116,50 €.");
+    expect(again.requests).toHaveLength(2);
+
+    const thanks = scripted([answer("Gern geschehen!")]);
+    await runTurn({ user: USER, history: [], question: "Danke!", tools: catalogFor(USER), chat: thanks.fn, now: NOW });
+    expect(thanks.requests).toHaveLength(1);
+  });
+
+  it("are covered by the rules: the model knows nothing of the user's data", () => {
+    const prompt = buildSystemPrompt(catalogFor(USER), NOW, false);
+    expect(prompt).toContain("You know nothing about this user's data");
+    expect(prompt).toContain('"Zeige mir die 10 neuesten Buchungen." → list_transactions(limit = 10)');
+  });
+});
+
