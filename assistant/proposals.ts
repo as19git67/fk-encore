@@ -23,6 +23,8 @@ export interface PreparedAction {
   arguments: Record<string, unknown>;
   /** How many objects the action touches, for the card. */
   count?: number;
+  /** What the model may tell about the proposal beyond the summary — figures the server computed. */
+  note?: string;
 }
 
 /** What an executed action did. */
@@ -30,6 +32,8 @@ export interface ActionResult {
   summary: string;
   /** Where the result can be seen, e.g. `/fotos/alben/12`. */
   route?: string;
+  /** An API path the card downloads with the user's token, e.g. a report's PDF. */
+  download?: string;
   details?: Record<string, unknown>;
 }
 
@@ -57,6 +61,7 @@ export interface ProposalRow {
   status: ProposalStatus;
   result_summary: string | null;
   result_route: string | null;
+  result_download: string | null;
   error: string | null;
 }
 
@@ -96,11 +101,13 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
         status: "pending",
         result_summary: null,
         result_route: null,
+        result_download: null,
         error: null,
       };
       return {
         text: [
           `Proposal #${stored.id} created, NOT executed: ${prepared.summary}.`,
+          ...(prepared.note ? [prepared.note] : []),
           "The user sees a card with \"Ausführen\" and \"Verwerfen\" and decides. Tell them what you proposed; never say it is done.",
         ].join("\n"),
         digest: `[earlier proposal #${stored.id}: ${prepared.summary}]`,
@@ -194,7 +201,7 @@ async function refusal(id: number, userId: number): Promise<ProposalError> {
 }
 
 export function toRow(row: typeof assistantProposal.$inferSelect): ProposalRow {
-  const result = (row.result ?? {}) as { summary?: string; route?: string; error?: string };
+  const result = (row.result ?? {}) as { summary?: string; route?: string; download?: string; error?: string };
   return {
     proposal_id: row.id,
     tool: row.tool,
@@ -203,6 +210,7 @@ export function toRow(row: typeof assistantProposal.$inferSelect): ProposalRow {
     status: row.status,
     result_summary: row.status === "executed" ? result.summary ?? null : null,
     result_route: row.status === "executed" ? result.route ?? null : null,
+    result_download: row.status === "executed" ? result.download ?? null : null,
     error: row.status === "pending" ? result.error ?? null : null,
   };
 }

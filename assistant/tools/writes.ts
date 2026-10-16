@@ -415,6 +415,109 @@ const buildCollectionPdf: WriteToolDefinition = {
   },
 };
 
+interface ReportPreview {
+  id: number | null;
+  title: string;
+  currency: string;
+  groups: Array<{ name: string; count: number; subtotal: number }>;
+  total: number;
+  count: number;
+  yield: { formula: string; total: number; per_year: number } | null;
+}
+
+function money(centsValue: number, currency: string): string {
+  return new Intl.NumberFormat("de-DE", { style: "currency", currency }).format(centsValue / 100);
+}
+
+/** The groups as the model gave them, cleaned to what the finance endpoint takes. */
+function reportDefinition(args: Record<string, unknown>, ctx: ToolContext) {
+  const title = str(args.title);
+  if (!title) throw new Error("title is required");
+  const rawGroups = Array.isArray(args.groups) ? args.groups : [];
+  if (!rawGroups.length) throw new Error("groups is required");
+  const groups = rawGroups.map((g) => {
+    const o = (g && typeof g === "object" ? g : {}) as Record<string, unknown>;
+    const name = str(o.name);
+    if (!name) throw new Error("every group needs a name");
+    const tag = str(o.tag);
+    return tag ? { name, tag } : { name, transaction_ids: ids(o.transaction_ids) };
+  });
+  const all = bool(args.from_previous_result) === true
+    ? ctx.previous?.("transaction") ?? []
+    : ids(args.transaction_ids);
+  const y = (args.yield && typeof args.yield === "object" ? args.yield : null) as Record<string, unknown> | null;
+  const names = (v: unknown) => (Array.isArray(v) ? v.map((x) => str(x)).filter((x): x is string => !!x) : []);
+  const yieldSpec = y && str(y.investment_group)
+    ? { investment_group: str(y.investment_group)!, income_groups: names(y.income_groups), cost_groups: names(y.cost_groups) }
+    : null;
+  return { title, groups, transaction_ids: all, yield: yieldSpec };
+}
+
+const transactionReport: WriteToolDefinition = {
+  name: "transaction_report",
+  summary: "Propose a PDF report of bookings in named groups with subtotals, a total and optionally the yield; the server computes every number. Group bookings by ids from list_transactions, or by one of the user's tags.",
+  permissions: ["module.finance", "finance.view"],
+  parameters: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      groups: {
+        type: "array",
+        description: "each booking in at most one group",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "e.g. 'Kauf', 'Reparatur', 'Mieteinnahmen'" },
+            transaction_ids: { type: "array", items: { type: "integer" } },
+            tag: { type: "string", description: "instead of ids: every booking with this tag of the user" },
+          },
+          required: ["name"],
+        },
+      },
+      transaction_ids: { type: "array", items: { type: "integer" }, description: "all bookings of the report; those in no group are listed under 'Sonstige'" },
+      from_previous_result: { type: "boolean", description: "the bookings of the previous answer as all bookings of the report" },
+      yield: {
+        type: "object",
+        description: "compute the yield: net income (income + cost groups) over the investment",
+        properties: {
+          investment_group: { type: "string" },
+          income_groups: { type: "array", items: { type: "string" } },
+          cost_groups: { type: "array", items: { type: "string" } },
+        },
+        required: ["investment_group"],
+      },
+    },
+    required: ["title", "groups"],
+  },
+  async prepare(args, ctx) {
+    const definition = reportDefinition(args, ctx);
+    const preview = (await finance.previewGroupedReport(definition)) as unknown as ReportPreview;
+    const groupsText = preview.groups.map((g) => `${g.name} ${g.count}`).join(", ");
+    const parts = [`Bericht „${preview.title}“ als PDF: ${groupsText}; ${preview.count} Buchungen, Summe ${money(preview.total, preview.currency)}`];
+    if (preview.yield) parts.push("mit Rendite");
+    return {
+      summary: parts.join(", "),
+      arguments: definition,
+      count: preview.count,
+      // What the model may repeat: every figure below was computed by the server.
+      note: [
+        ...preview.groups.map((g) => `${g.name}: ${g.count} bookings, subtotal ${money(g.subtotal, preview.currency)}`),
+        `Total: ${preview.count} bookings, ${money(preview.total, preview.currency)}`,
+        ...(preview.yield ? [preview.yield.formula] : []),
+      ].join("\n"),
+    };
+  },
+  async execute(args) {
+    const report = (await finance.createGroupedReport(args as never)) as unknown as ReportPreview;
+    return {
+      summary: `Bericht „${report.title}“ gespeichert – ${report.count} Buchungen, Summe ${money(report.total, report.currency)}`
+        + (report.yield ? `, ${report.yield.formula.split("\n")[0]}` : ""),
+      download: `/finance/reports/grouped/${report.id}/pdf`,
+      details: { report_id: report.id },
+    };
+  },
+};
+
 export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
   createAlbum,
   addPhotosToAlbum,
@@ -423,6 +526,7 @@ export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
   tagTransactions,
   createCollection,
   buildCollectionPdf,
+  transactionReport,
 ];
 
 export const WRITE_TOOLS = WRITE_TOOL_DEFINITIONS.map(writeTool);

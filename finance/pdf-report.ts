@@ -124,3 +124,68 @@ export function createTransactionReportPdf(
 }
 
 export const createExpenseReportPdf = createTransactionReportPdf;
+
+/**
+ * A report in groups (#1533): each group under its heading with its bookings
+ * and a subtotal, then the grand total and, when asked for, the yield with its
+ * formula and period. Every number comes from `buildGroupedReport`.
+ */
+export function createGroupedReportPdf(report: import("./grouped-report").GroupedReport): PDFKit.PDFDocument {
+  const money = (c: number) => new Intl.NumberFormat("de-DE", { style: "currency", currency: report.currency }).format(c / 100);
+  const title = normalizePdfText(report.title);
+  const pdf = new PDFDocument({ size: "A4", margin: 42, info: { Title: title } });
+  const right = (text: string) => pdf.text(text, { align: "right" });
+  const rule = (color = "#ddd") => pdf.strokeColor(color).moveTo(42, pdf.y).lineTo(553, pdf.y).stroke();
+
+  pdf.fontSize(18).text(title, { align: "center" });
+  pdf.moveDown(0.4).fontSize(9).fillColor("#666")
+    .text(`Erstellt am ${formatLocalDate(report.generated_on)} · ${report.count} Buchungen in ${report.groups.length} Gruppen`, { align: "center" });
+  pdf.moveDown(1).fillColor("#000");
+
+  for (const group of report.groups) {
+    if (pdf.y > 700) pdf.addPage();
+    pdf.font("Helvetica-Bold").fontSize(12).text(normalizePdfText(group.name), { continued: true });
+    pdf.font("Helvetica").fontSize(9).fillColor("#666").text(`  ${group.count} Buchungen`);
+    pdf.fillColor("#000").moveDown(0.3);
+    rule("#999");
+    pdf.moveDown(0.3);
+    for (const b of group.bookings) {
+      if (pdf.y > 760) pdf.addPage();
+      const head = `${formatLocalDate(b.booking_date)}  ${normalizePdfText(b.counterparty ?? "(ohne Gegenseite)")}`;
+      pdf.font("Helvetica").fontSize(9).text(head, { continued: true });
+      right(money(Math.round(Number(b.amount) * 100)));
+      if (b.purpose) pdf.fillColor("#555").fontSize(8).text(normalizePdfText(b.purpose), { width: 420 }).fillColor("#000");
+      pdf.moveDown(0.2);
+    }
+    pdf.moveDown(0.2);
+    rule();
+    pdf.moveDown(0.2).font("Helvetica-Bold").fontSize(10).text(`Zwischensumme ${normalizePdfText(group.name)}`, { continued: true });
+    right(money(group.subtotal));
+    pdf.font("Helvetica").moveDown(1);
+  }
+
+  if (pdf.y > 680) pdf.addPage();
+  rule("#000");
+  pdf.moveDown(0.3).font("Helvetica-Bold").fontSize(12).text(`Summe (${report.count} Buchungen)`, { continued: true });
+  right(money(report.total));
+
+  if (report.yield) {
+    const y = report.yield;
+    pdf.moveDown(1.2).font("Helvetica-Bold").fontSize(12).text("Rendite");
+    pdf.font("Helvetica").fontSize(9).moveDown(0.3);
+    for (const [label, value] of [
+      ["Investition", money(y.investment)],
+      ["Einnahmen", money(y.income)],
+      ["Kosten", money(y.costs)],
+      ["Ertrag (Einnahmen + Kosten)", money(y.net)],
+    ] as const) {
+      pdf.text(label, { continued: true });
+      right(value);
+    }
+    pdf.moveDown(0.6).fillColor("#333").fontSize(9).text(normalizePdfText(y.formula), { width: 511 });
+    pdf.moveDown(0.4).fillColor("#666").fontSize(8)
+      .text("Einfache Rendite ohne Zinseszins: Ertrag geteilt durch die Investition, für p. a. geteilt durch die Jahre seit der ersten Buchung der Investition.", { width: 511 });
+    pdf.fillColor("#000");
+  }
+  return pdf;
+}

@@ -282,3 +282,70 @@ describe("a redacted Sammelmappe", () => {
     expect(out.text).toContain('"450.000" found in 2 of 3 documents.');
   });
 });
+
+describe("a transaction report", () => {
+  const preview = {
+    id: null,
+    title: "Wohnung Musterstadt",
+    currency: "EUR",
+    groups: [
+      { name: "Kauf", count: 1, subtotal: -30000000 },
+      { name: "Mieteinnahmen", count: 2, subtotal: 160000 },
+      { name: "Sonstige", count: 1, subtotal: -1234 },
+    ],
+    total: -29841234,
+    count: 4,
+    yield: { formula: "Rendite = (1.600,00 € + 0,00 €) ÷ 300.000,00 € = 0,53 %\nRendite p. a. = 0,53 % ÷ 1,00 Jahre = 0,53 %", total: 0.0053, per_year: 0.0053 },
+  };
+
+  it("is computed by the server and only proposed; the model gets the figures to repeat", async () => {
+    clients.finance.previewGroupedReport.mockResolvedValue(preview);
+    const conversation = await createConversation({});
+    vi.mocked(chat)
+      .mockResolvedValueOnce(toolCall("transaction_report", {
+        title: "Wohnung Musterstadt",
+        groups: [{ name: "Kauf", transaction_ids: [1] }, { name: "Mieteinnahmen", tag: "Miete" }],
+        transaction_ids: [1, 2, 3, 4],
+        yield: { investment_group: "Kauf", income_groups: ["Mieteinnahmen"] },
+      }))
+      .mockResolvedValueOnce(text("Bericht vorgeschlagen."));
+    const res = await ask({ id: conversation.id, message: "Mach einen Bericht mit Rendite." });
+
+    expect(clients.finance.previewGroupedReport).toHaveBeenCalledWith({
+      title: "Wohnung Musterstadt",
+      groups: [{ name: "Kauf", transaction_ids: [1] }, { name: "Mieteinnahmen", tag: "Miete" }],
+      transaction_ids: [1, 2, 3, 4],
+      yield: { investment_group: "Kauf", income_groups: ["Mieteinnahmen"], cost_groups: [] },
+    });
+    expect(clients.finance.createGroupedReport).not.toHaveBeenCalled();
+    const card = res.blocks.find((b) => b.kind === "proposal")?.rows[0];
+    expect(String(card?.summary).replace(/ /g, " ")).toBe(
+      "Bericht „Wohnung Musterstadt“ als PDF: Kauf 1, Mieteinnahmen 2, Sonstige 1; 4 Buchungen, Summe -298.412,34 €, mit Rendite",
+    );
+    // The figures the answer may use come from the tool, subtotals and formula included.
+    const toolMessage = vi.mocked(chat).mock.calls[1][0].messages.find((m) => m.role === "tool")!;
+    expect(toolMessage.content!.replace(/\u00a0/g, " ")).toContain("Mieteinnahmen: 2 bookings, subtotal 1.600,00 €");
+    expect(toolMessage.content).toContain("Rendite p. a. = 0,53 %");
+  });
+
+  it("is saved on 'Ausführen' and offers its PDF", async () => {
+    clients.finance.previewGroupedReport.mockResolvedValue(preview);
+    const out = await tool("transaction_report").run({ title: "Wohnung Musterstadt", groups: [{ name: "Kauf", transaction_ids: [1] }] }, ctx());
+    clients.finance.createGroupedReport.mockResolvedValue({ ...preview, id: 77 });
+    const done = await executeAssistantProposal({ id: Number(out.block?.rows[0].proposal_id) });
+    expect(done).toMatchObject({ status: "executed", result_download: "/finance/reports/grouped/77/pdf" });
+    expect(String(done.result_summary).replace(/\u00a0/g, " ")).toContain("Rendite = (1.600,00 € + 0,00 €)");
+    expect(clients.finance.createGroupedReport).toHaveBeenCalledWith({
+      title: "Wohnung Musterstadt", groups: [{ name: "Kauf", transaction_ids: [1] }], transaction_ids: [], yield: null,
+    });
+  });
+
+  it("takes the previous booking result as the bookings of the report", async () => {
+    clients.finance.previewGroupedReport.mockResolvedValue(preview);
+    await tool("transaction_report").run(
+      { title: "x", groups: [{ name: "Kauf", transaction_ids: [1] }], from_previous_result: true },
+      { ...ctx(), previous: (type) => (type === "transaction" ? [1, 2, 3] : undefined) },
+    );
+    expect(clients.finance.previewGroupedReport.mock.calls[0][0]).toMatchObject({ transaction_ids: [1, 2, 3] });
+  });
+});

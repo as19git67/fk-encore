@@ -8,7 +8,7 @@
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
-import { discardProposal, executeProposal, type Proposal } from '../../api/assistant'
+import { discardProposal, downloadResult, executeProposal, type Proposal } from '../../api/assistant'
 
 const props = defineProps<{ proposal: Proposal }>()
 
@@ -26,6 +26,21 @@ const STATUS: Record<Proposal['status'], { label: string; severity: 'info' | 'su
 }
 
 const status = computed(() => STATUS[current.value.status])
+const downloading = ref(false)
+
+async function download() {
+  const path = current.value.result_download
+  if (!path || downloading.value) return
+  downloading.value = true
+  requestError.value = null
+  try {
+    await downloadResult(path)
+  } catch (e) {
+    requestError.value = e instanceof Error ? e.message : 'Der Download ist fehlgeschlagen.'
+  } finally {
+    downloading.value = false
+  }
+}
 const error = computed(() => requestError.value ?? current.value.error)
 
 async function decide(action: 'execute' | 'discard') {
@@ -60,6 +75,21 @@ async function decide(action: 'execute' | 'discard') {
         <i class="pi pi-check" aria-hidden="true" />
         <span>{{ current.result_summary }}</span>
         <RouterLink v-if="current.result_route" :to="current.result_route" class="proposal-link">Ansehen</RouterLink>
+      </p>
+      <div v-if="current.status === 'executed' && current.result_download" class="proposal-download">
+        <Button
+          label="PDF herunterladen"
+          icon="pi pi-download"
+          size="small"
+          severity="secondary"
+          outlined
+          :loading="downloading"
+          @click="download"
+        />
+      </div>
+      <p v-if="requestError && current.status === 'executed'" class="proposal-error" role="alert">
+        <i class="pi pi-exclamation-circle" aria-hidden="true" />
+        {{ requestError }}
       </p>
       <p v-if="error && current.status !== 'executed'" class="proposal-error" role="alert">
         <i class="pi pi-exclamation-circle" aria-hidden="true" />
@@ -164,5 +194,9 @@ async function decide(action: 'execute' | 'discard') {
 
 .proposal-error {
   color: var(--p-red-600);
+}
+
+.proposal-download {
+  display: flex;
 }
 </style>

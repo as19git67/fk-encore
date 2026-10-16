@@ -13,6 +13,8 @@ export const clients = {
     query: vi.fn(),
     listUpcomingDebits: vi.fn(),
     batchTag: vi.fn(),
+    previewGroupedReport: vi.fn(),
+    createGroupedReport: vi.fn(),
   },
   documents: {
     listDocumentCategories: vi.fn(),

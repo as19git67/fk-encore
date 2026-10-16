@@ -1,11 +1,11 @@
 # Assistant: one chat over everything the server knows
 
-Status: stages 1 to 5 and the first half of stage 6 implemented (`POST /chat` in llm-service with its
+Status: stages 1 to 6 implemented (`POST /chat` in llm-service with its
 benchmark in `llm-service/bench/`; the `assistant` service with the read
 tools and the direct-debits endpoint; the chat page in the web app; write
 actions as proposals the user confirms; follow-up questions on earlier
-results and generated conversation titles; word positions and redacted
-document bundles). The benchmark has not yet been run on
+results and generated conversation titles; word positions, redacted
+document bundles and grouped transaction reports). The benchmark has not yet been run on
 the production GPU. Tracking issue #1524, stages #1525–#1534.
 
 ## Problem
@@ -483,6 +483,21 @@ behind it.
      (`/finance/saved-analysis`) so it can be re-run with new bookings,
      and the proposal card shows the groups with their counts before
      anything is built.
+   - **Implemented** (#1533), with these details: not stored as a saved
+     analysis — that table holds a tag filter (`AnalysisAst`) the analysis
+     page renders, and a list of groups by booking id does not fit it. The
+     report has its own table `finance_grouped_report` (migration 0250)
+     that keeps the definition only; every run computes the numbers from
+     the bookings as they are (`finance/grouped-report.ts`, in cents). A
+     group is either booking ids or one user tag — a rule, so a re-run
+     picks up bookings tagged since. Endpoints under
+     `/finance/reports/grouped` (preview, save, list, re-run, delete, PDF).
+     The yield is simple, not compounded: net income (income + cost groups)
+     over the investment, per year divided by the years since the first
+     investment booking; formula and period are printed and handed to the
+     model as the only figures it may repeat. The proposal card's result
+     carries a download (`result_download`), so the PDF is fetched with the
+     user's token from the card.
    - Grouping is where the model earns its keep: it sorts bookings by
      counterparty, purpose and the user's tags ("Miete", "Reparatur") and
      explains a doubtful one in the answer rather than hiding it. A

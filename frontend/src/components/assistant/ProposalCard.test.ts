@@ -7,9 +7,10 @@ import type { Proposal } from '../../api/assistant'
 vi.mock('../../api/assistant', () => ({
   executeProposal: vi.fn(),
   discardProposal: vi.fn(),
+  downloadResult: vi.fn(),
 }))
 
-import { discardProposal, executeProposal } from '../../api/assistant'
+import { discardProposal, downloadResult, executeProposal } from '../../api/assistant'
 
 const pending: Proposal = {
   proposal_id: 7,
@@ -19,6 +20,7 @@ const pending: Proposal = {
   status: 'pending',
   result_summary: null,
   result_route: null,
+  result_download: null,
   error: null,
 }
 
@@ -85,5 +87,15 @@ describe('ProposalCard', () => {
     await flushPromises()
     expect(el.querySelector('[role="alert"]')?.textContent).toContain('album name already in use')
     expect(button(el, 'Erneut ausführen')).toBeTruthy()
+  })
+
+  it('offers the PDF of an executed report', async () => {
+    vi.mocked(downloadResult).mockResolvedValue()
+    const el = mountCard({
+      ...pending, status: 'executed', result_summary: 'Bericht gespeichert', result_download: '/finance/reports/grouped/4/pdf',
+    })
+    button(el, 'PDF herunterladen').click()
+    await flushPromises()
+    expect(downloadResult).toHaveBeenCalledWith('/finance/reports/grouped/4/pdf')
   })
 })

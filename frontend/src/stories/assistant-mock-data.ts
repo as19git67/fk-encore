@@ -96,6 +96,7 @@ function proposal(status: 'pending' | 'executed' | 'discarded', extra: Record<st
       status,
       result_summary: null,
       result_route: null,
+      result_download: null,
       error: null,
       ...extra,
     }],
@@ -107,6 +108,22 @@ export const PROPOSAL_EXECUTED_BLOCK = proposal('executed', {
   result_summary: 'Album „Favoriten 2025“ mit 143 Fotos angelegt',
   result_route: '/fotos/alben/12',
 })
+export const PROPOSAL_REPORT_BLOCK: ResultBlock = {
+  kind: 'proposal',
+  tool: 'transaction_report',
+  rows: [{
+    proposal_id: 4,
+    tool: 'transaction_report',
+    summary: 'Bericht „Wohnung Musterstadt“ als PDF: Kauf 3, Reparatur 2, Mieteinnahmen 12, Sonstige 1; 18 Buchungen, Summe −455.280,00 €, mit Rendite',
+    count: 18,
+    status: 'executed',
+    result_summary: 'Bericht „Wohnung Musterstadt“ gespeichert – 18 Buchungen, Summe −455.280,00 €, Rendite = (10.800,00 € + −2.400,00 €) ÷ 463.680,00 € = 1,81 %',
+    result_route: null,
+    result_download: '/finance/reports/grouped/4/pdf',
+    error: null,
+  }],
+}
+
 export const PROPOSAL_DISCARDED_BLOCK = proposal('discarded')
 export const PROPOSAL_FAILED_BLOCK = proposal('pending', { error: 'album name already in use' })
 

@@ -4590,3 +4590,28 @@ export const documentPageWords = pgTable(
   },
   (table) => [primaryKey({ columns: [table.document_id, table.page] })],
 );
+
+/**
+ * A transaction report in groups (#1533): the definition only — groups of
+ * booking ids or of one user tag, the bookings it covers, the yield's groups.
+ * The numbers are computed on every run (`finance/grouped-report.ts`).
+ */
+export const financeGroupedReport = pgTable(
+  "finance_grouped_report",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    definition: jsonb("definition").notNull().$type<{
+      groups: Array<{ name: string; transaction_ids?: number[]; tag?: string }>;
+      transaction_ids?: number[];
+      yield?: { investment_group: string; income_groups: string[]; cost_groups: string[] } | null;
+    }>(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("finance_grouped_report_by_user").on(table.user_id, table.created_at)],
+);
+
