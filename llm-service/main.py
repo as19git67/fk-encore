@@ -1059,6 +1059,10 @@ def _config_view() -> dict[str, Any]:
     data["source"] = _state["config_source"]
     data["model_present"] = cfg.model_path.exists()
     data["notice"] = _state.get("backend_notice")
+    # Whether image requests can be served: a projector is resolved for the
+    # model and llama-server came up with it. Everything but the three vision
+    # readers in document extraction works the same either way.
+    data["vision"] = bool(cfg.resolve_mmproj())
     return data
 
 

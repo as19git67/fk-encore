@@ -58,6 +58,23 @@ If llama-server still does not start with the projector it found, the
 service retries once without it: the model runs text-only, and
 `config.notice` says so.
 
+`config.vision` in `/reload/status` says whether image requests are served.
+A text-only model is a supported configuration, not a degraded one: every
+reader of an image in the app is a *third opinion* with a fallback that is
+the behaviour before vision existed (`documents/ocr-resolver.ts`,
+`documents/letterhead.ts`). Without vision, three things in document text
+extraction get weaker and nothing else changes:
+
+| Reader | With vision | Without |
+|---|---|---|
+| Uncertain OCR spans (`transcribeCrop`) | the model re-reads the crop when Tesseract and PaddleOCR disagree | the best OCR reading stands |
+| Field pairing (`assignFields`) | the model pairs labels and values on the page image | the layout and regex rules alone |
+| Letterhead (`readLetterhead`) | date and sender of an unlabelled business letter read off the page | the classifier's reading of the text alone |
+
+Classification, search, the assistant, reports, letters and recap titles are
+text-only by design. The KI-Modell page shows this list when the loaded
+model has no vision.
+
 ---
 
 ## Quick Start

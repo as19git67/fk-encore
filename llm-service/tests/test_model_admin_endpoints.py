@@ -93,6 +93,8 @@ def test_config_reports_the_live_values(client):
     assert body["config"]["backend"] == main.LLM_BACKEND
     assert body["config"]["source"] == "env"
     assert body["reload"]["state"] == "idle"
+    # No projector on the test volume: the app's model page says "nur Text".
+    assert body["config"]["vision"] is False
 
 
 # ─── /models/files ─────────────────────────────────────────────────────────────
