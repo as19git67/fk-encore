@@ -377,7 +377,21 @@ function formatEta(seconds: number | null): string {
           <dt>Experten im RAM</dt>
           <dd>{{ status.live.n_cpu_moe > 0 ? `${status.live.n_cpu_moe} Layer` : '–' }}</dd>
         </div>
+        <div v-if="status.live.vision !== undefined" class="field">
+          <dt>Bildverständnis</dt>
+          <dd>{{ status.live.vision ? 'ja' : 'nein (nur Text)' }}</dd>
+        </div>
       </dl>
+
+      <Message v-if="status.live.vision === false" severity="info" :closable="false">
+        <strong>Dieses Modell versteht keine Bilder.</strong> Alles andere – Klassifikation, Suche,
+        Assistent, Berichte, Briefe, Rückblick-Titel – läuft unverändert. Nur beim Lesen gescannter
+        Dokumente fehlt die dritte Lesung von der Seite, und drei Dinge werden dort schwächer:
+        unsichere OCR-Stellen bleiben bei der besten OCR-Lesung statt vom Modell nachgelesen zu werden;
+        Feldzuordnungen (Betrag, Rechnungsnummer) kommen nur aus Textregeln; Datum und Absender eines
+        Geschäftsbriefs ohne gedruckte Beschriftung erkennt nur noch der Klassifikator aus dem Text.
+        Für Bilder einen <code>mmproj</code>-Projektor zum Modell herunterladen.
+      </Message>
 
       <Message v-if="liveNotices.length" severity="info" :closable="false">
         <template v-for="(n, i) in liveNotices" :key="i">

@@ -70,6 +70,7 @@ const STATUS: LlmStatus = {
     config_id: CONFIG.id,
     source: 'file',
     model_present: true,
+    vision: true,
   },
   reload: {
     state: 'ready',
@@ -152,6 +153,20 @@ export const InprocUeberServer: Story = {
               notice: "backend 'inproc' needs llama-cpp-python, which this image does not ship; the model runs in llama-server on the CPU instead (0 GPU layers)",
             },
           }),
+        ),
+        ...llmHandlers,
+      ],
+    },
+  },
+}
+
+export const NurText: Story = {
+  name: 'Textmodell ohne Bildverständnis',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/admin/llm-status', () =>
+          HttpResponse.json({ ...STATUS, live: { ...STATUS.live, model_filename: 'Qwen3-14B-Q4_K_M.gguf', label: 'Qwen3-14B Q4_K_M (CUDA)', vision: false } }),
         ),
         ...llmHandlers,
       ],

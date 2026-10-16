@@ -455,6 +455,8 @@ export interface LlmLiveConfig {
   model_present: boolean;
   /** Set when llm-service ran the configuration differently than asked — e.g. `inproc` via llama-server. */
   notice?: string | null;
+  /** Whether the loaded model answers image requests (a projector is loaded). */
+  vision?: boolean;
 }
 
 /** Which backends the running llm-service image can load a model with. */
