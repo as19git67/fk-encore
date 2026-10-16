@@ -351,9 +351,22 @@ behind it.
        bookings carry; the write tool `tax_return_bundle(year)` proposes a
        mixed Sammelmappe (`POST /collections`) of every flagged document of
        the year plus the bookings marked tax-relevant in it, which the user
-       then exports, sends or shares from the folder's page. A prompt rule
+       then exports, sends or shares from the folder's page. Filling in the
+       forms: `tax_worksheet(year)` (`assistant/tax-worksheet.ts`) arranges
+       what the household holds the way the forms ask for it — per Anlage
+       the flagged documents with the amount recognised in each
+       (`GET /documents/:id/receipt-suggestion`, first 80 documents) and
+       the sum, the bookings marked tax-relevant in the year summed by tag,
+       the depot's income, gains and taxes of the year from the portfolio,
+       and hints (an Anlage that had documents last year but none yet,
+       documents without a recognised amount); `tax_worksheet_pdf(year)`
+       stores it as the document "Ausfüllhilfe Steuer <Jahr>"
+       (`assistant/tax-worksheet-pdf.ts`, pdfkit) linked to the flagged
+       documents. Recognised amounts are marked unchecked everywhere; the
+       user confirms each against the document. The Anlagen list
+       (`documents/tax-sections.ts`) gained KAP-INV and AUS. A prompt rule
        routes "Steuer <Jahr>" questions there and forbids the model to
-       judge tax relevance itself.
+       judge tax relevance or compute a tax figure itself.
      - documents: `search_documents` (hybrid search with filters; `sort`
        switches the relevance ranking to document date, because the rows
        next to the answer follow the tool's order, not the model's text;

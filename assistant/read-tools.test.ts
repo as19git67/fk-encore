@@ -379,3 +379,52 @@ describe("tax", () => {
     expect(out.text).toContain("tax: relevant for the tax return of 2025, Anlage(n): Anlage N");
   });
 });
+
+describe("tax_worksheet", () => {
+  it("arranges documents with recognised amounts per Anlage, bookings by tag, the depot year and hints", async () => {
+    clients.documents.listTaxDocuments
+      .mockResolvedValueOnce({
+        year: 2025, total_documents: 2,
+        sections: [
+          { slug: "anlage-n", name: "Anlage N", group: "einkuenfte", documents: [{ document: { id: 71, title: "Lohnsteuerbescheinigung 2025", doc_date: "2026-01-20", correspondent_display: "Beispiel GmbH" }, confidence: null, source: "user" }] },
+          { slug: "haushaltsnahe", name: "Haushaltsnahe Aufwendungen", group: "abzuege", documents: [{ document: { id: 73, title: "Rechnung Gartenpflege", doc_date: "2025-06-02", sender: "Beispiel Gartenbau" }, confidence: 0.8, source: "ai" }] },
+          { slug: "anlage-v", name: "Anlage V", group: "einkuenfte", documents: [] },
+        ],
+      })
+      .mockResolvedValueOnce({ year: 2024, total_documents: 1, sections: [{ slug: "anlage-kap", name: "Anlage KAP", group: "einkuenfte", documents: [{ document: { id: 5, title: "Jahressteuerbescheinigung 2024" }, confidence: null, source: "user" }] }] });
+    clients.documents.getDocumentReceiptSuggestion
+      .mockResolvedValueOnce({ amount: 48200 })
+      .mockResolvedValueOnce({ amount: null });
+    clients.finance.listTransactions.mockResolvedValue({
+      items: [
+        { id: 1, booking_date: "2025-03-10", amount: "-480.00", counterparty: "Beispiel Handwerk GmbH", purpose: "Rechnung", tags: [{ name: "Handwerker" }] },
+        { id: 2, booking_date: "2025-07-01", amount: "-700.00", counterparty: "Muster Sanitär", purpose: "Bad", tags: [{ name: "Handwerker" }] },
+        { id: 3, booking_date: "2025-12-24", amount: "-200.00", counterparty: "Beispielverein", purpose: "Spende", tags: [] },
+      ],
+      total: 3,
+    });
+    clients.finance.getPortfolio.mockResolvedValue({ years: [{ year: 2025, realized: "210.00", sell_count: 1, realized_complete: true, income: "120.00", dividend_count: 4, fees: "9.90", taxes: "31.60" }] });
+    const out = await tool("tax_worksheet").run({ year: 2025 }, ctx());
+    expect(clients.documents.listTaxDocuments).toHaveBeenNthCalledWith(2, { year: 2024, tax_return_person: undefined });
+    expect(out.text).toContain("71 | 2026-01-20 | Lohnsteuerbescheinigung 2025 | Beispiel GmbH | 48200.00 EUR");
+    expect(out.text).toContain("sum of recognised amounts: 48200.00 EUR");
+    expect(out.text).toContain("73 | 2025-06-02 | Rechnung Gartenpflege | Beispiel Gartenbau | no amount recognised | Anlage 80 %");
+    expect(out.text).toContain("sum of recognised amounts: 0.00 EUR (1 without amount)");
+    expect(out.text).toContain("Handwerker: 2 booking(s), -1180.00 EUR");
+    expect(out.text).toContain("(ohne Tag): 1 booking(s), -200.00 EUR");
+    expect(out.text).toContain("total: -1380.00 EUR over 3 booking(s)");
+    expect(out.text).toContain("income (dividends, interest): 120.00 EUR from 4 payment(s); realized gain: 210.00 EUR from 1 sale(s); taxes withheld: 31.60 EUR");
+    expect(out.text).toContain("Anlage KAP: 1 document(s) last year, none flagged for 2025 yet.");
+    expect(out.text).toContain("1 document(s) carry no recognised amount");
+    expect(out.text).not.toContain("Anlage V");
+    expect(out.block).toMatchObject({ kind: "documents", subtitle: "Ausfüllhilfe 2025 · 2 Anlagen · 3 Buchungen", route: "/dokumente/steuer?year=2025" });
+    expect(out.block?.rows[0]).toMatchObject({ section: "Anlage N", amount: 48200, route: "/dokumente/71" });
+  });
+
+  it("leaves bookings and depot out without finance access", async () => {
+    clients.documents.listTaxDocuments.mockResolvedValue({ year: 2025, total_documents: 0, sections: [] });
+    const out = await tool("tax_worksheet").run({ year: 2025 }, { ...ctx(), user: { userID: "711", permissions: ["module.documents", "documents.view", "module.assistant"] } });
+    expect(clients.finance.listTransactions).not.toHaveBeenCalled();
+    expect(out.text).toContain("Bookings and depot figures are left out");
+  });
+});

@@ -6,6 +6,7 @@
 import { documents } from "~encore/clients";
 import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
+import { taxWorksheet } from "./tax";
 import { findInDocuments } from "./text-boxes";
 
 const DOCUMENTS = ["module.documents", "documents.view"];
@@ -364,4 +365,4 @@ export const findTextInDocument: ToolSpec = {
   },
 };
 
-export const DOCUMENT_TOOLS = [taxDocuments, listCategories, searchDocuments, getDocumentSummary, getDocumentText, findTextInDocument];
+export const DOCUMENT_TOOLS = [taxDocuments, taxWorksheet, listCategories, searchDocuments, getDocumentSummary, getDocumentText, findTextInDocument];

@@ -41,17 +41,24 @@ export const NO_ANSWER = "Dazu habe ich keine Antwort gefunden.";
 export const OUT_OF_ROUNDS = "Ich konnte die Frage nicht in der vorgesehenen Zahl von Schritten beantworten.";
 /** What one answer may spend on generation. */
 const ANSWER_TOKENS = 1024;
-/** The window the loop budgets against; the deployment's LLM_CTX, minus headroom. */
-const DEFAULT_CONTEXT_TOKENS = Number.parseInt(process.env.ASSISTANT_CONTEXT_TOKENS ?? "12000", 10);
+/**
+ * The window the loop budgets against; the deployment's LLM_CTX, minus
+ * headroom. The production model runs with a 30000-token window and the
+ * tool schemas alone take about 6100 of the budget on every round, so
+ * 12000 left too little for the tool results of a longer turn.
+ */
+const DEFAULT_CONTEXT_TOKENS = Number.parseInt(process.env.ASSISTANT_CONTEXT_TOKENS ?? "20000", 10);
 /**
  * Up to this size every schema goes along with every request; past it the
  * model gets the one-line catalog and fetches schemas with describe_tools.
- * The full catalog of a user with every module is about 4600 tokens (32
- * tools, the depot tools included); the budget leaves room for a few more
- * before a round goes to fetching. A deployment with a small context window
- * lowers it through the environment.
+ * The full catalog of a user with every module is about 6100 tokens (38
+ * tools, the depot and tax tools included); the budget leaves room for a
+ * few more before a round goes to fetching. A deployment with a small
+ * context window lowers it through the environment — and raises
+ * ASSISTANT_CONTEXT_TOKENS along with the model's window, since the
+ * schemas count against that budget on every round.
  */
-const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "6000", 10);
+const DEFAULT_SCHEMA_BUDGET = Number.parseInt(process.env.ASSISTANT_SCHEMA_BUDGET_TOKENS ?? "8000", 10);
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -84,7 +91,7 @@ Rules:
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
 - If a tool finds nothing, say so plainly and suggest how to search differently.
 - Earlier turns show the tool calls behind each answer and what they found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
-- Tax: documents carry a tax-relevant flag, a tax year and Anlagen (tax sections); bookings carry a tax-relevant flag. "Steuer 2025" questions go to tax_documents(year) and list_transactions(tax_relevant = true, from/to = that year); "alle Unterlagen für die Steuer 2025 in eine Mappe" is tax_return_bundle(year = 2025). Never judge tax relevance yourself.
+- Tax: documents carry a tax-relevant flag, a tax year and Anlagen (tax sections); bookings carry a tax-relevant flag. "Steuer 2025" questions go to tax_documents(year) and list_transactions(tax_relevant = true, from/to = that year); "alle Unterlagen für die Steuer 2025 in eine Mappe" is tax_return_bundle(year = 2025); "hilf mir beim Ausfüllen" is tax_worksheet(year), as PDF tax_worksheet_pdf(year). Never judge tax relevance yourself, and never compute a tax figure: repeat the sums the worksheet printed and say that recognised amounts are unchecked.
 - When the user answers an offer you made ("Soll ich eines davon genauer ansehen?" → "ja"), act on the rows of your previous answer — their ids are in the earlier tool results — with get_document_summary(ids = …) or get_document_text; never search again for them.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button. Call one only when the user asks for that change, then say what you proposed and that it waits for their confirmation. Never claim it is done.
 - For a letter (Anschreiben, Antwort, Widerspruch, Kündigung …) call render_letter with the whole text: salutation, body and the closing formula ("Mit freundlichen Grüßen") — the server signs it with the user's name. Take every fact — names, dates, amounts, reference numbers — from the working set or a tool result, and put everything the user asks to have mentioned into the letter text itself, not only into your reply. Write dates in letters as DD.MM.YYYY. Where the letter needs a fact you do not have, write a gap as [[what is missing]] instead of guessing; the user fills it in on the card.
