@@ -12,12 +12,16 @@ import { documents, finance, photo } from "~encore/clients";
 import { bool, int, isoDate, str } from "../format";
 import { writeTool, type WriteToolDefinition } from "../proposals";
 import type { JsonSchema, RefType, ToolContext } from "../types";
+import { findInDocuments, pageCount, type Box } from "./text-boxes";
 
 /** More than this many objects in one proposal is refused; the user narrows first. */
 const MAX_PHOTOS = 2000;
 const MAX_FAVORITES = 200;
 const MAX_TRANSACTIONS = 500;
 const MAX_DOCUMENTS = 200;
+/** Documents per new Sammelmappe; each one's pages are searched per term. */
+const MAX_COLLECTION_DOCUMENTS = 50;
+const MAX_REDACT_TERMS = 5;
 /** Ids per call of the album batch endpoint. */
 const BATCH = 500;
 
@@ -299,12 +303,126 @@ const tagTransactions: WriteToolDefinition = {
   },
 };
 
+function plural(n: number, one: string, many: string): string {
+  return n === 1 ? `1 ${one}` : `${n} ${many}`;
+}
+
+const createCollection: WriteToolDefinition = {
+  name: "create_collection",
+  summary: "Propose a document Sammelmappe (folder) of documents, optionally with values blacked out wherever they stand and its PDF built. Name what to black out in `redact`; the server finds the boxes.",
+  permissions: ["module.documents", "documents.view"],
+  parameters: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      document_ids: { type: "array", items: { type: "integer" } },
+      from_previous_result: { type: "boolean", description: "the documents of the previous answer, instead of ids" },
+      redact: {
+        type: "array",
+        items: { type: "string" },
+        description: "values to black out in every document, e.g. ['450.000,00'] for a purchase price; an amount matches in all its printed forms",
+      },
+      build_pdf: { type: "boolean", description: "also build the folder's PDF (default true)" },
+    },
+    required: ["name"],
+  },
+  async prepare(args, ctx) {
+    const name = str(args.name);
+    if (!name) throw new Error("name is required");
+    const documentIds = idsOrPrevious(args, "document_ids", "document", ctx);
+    if (!documentIds.length) throw new Error("document_ids or from_previous_result is required");
+    if (documentIds.length > MAX_COLLECTION_DOCUMENTS) {
+      throw new Error(`at most ${MAX_COLLECTION_DOCUMENTS} documents in one folder`);
+    }
+    const terms = Array.isArray(args.redact)
+      ? [...new Set(args.redact.map((t) => str(t)).filter((t): t is string => !!t))]
+      : [];
+    if (terms.length > MAX_REDACT_TERMS) throw new Error(`at most ${MAX_REDACT_TERMS} values to black out`);
+    const buildPdf = bool(args.build_pdf) ?? true;
+
+    const hits = terms.length ? await findInDocuments(documentIds, terms) : [];
+    const invisible = hits.filter((h) => h.status === "not_found").map((h) => h.document_id);
+    if (invisible.length) throw new Error(`documents ${invisible.join(", ")} not found`);
+    const redactions: Record<string, Box[]> = {};
+    for (const h of hits) if (h.boxes.length) redactions[String(h.document_id)] = h.boxes;
+    const unsearchable = hits.filter((h) => h.status === "no_words").map((h) => h.document_id);
+
+    const termText = terms.map((t) => `„${t}“`).join(", ");
+    const parts = [`Sammelmappe „${name}“ mit ${plural(documentIds.length, "Dokument", "Dokumenten")}`];
+    if (terms.length) {
+      const pages = pageCount(hits);
+      parts.push(pages > 0 ? `${termText} auf ${plural(pages, "Seite", "Seiten")} geschwärzt` : `${termText} nirgends gefunden, nichts geschwärzt`);
+    }
+    if (unsearchable.length) {
+      parts.push(`${plural(unsearchable.length, "Dokument", "Dokumente")} noch ohne Wortpositionen, dort nichts geschwärzt`);
+    }
+    if (buildPdf) parts.push("PDF wird erzeugt");
+    return {
+      summary: parts.join(", "),
+      arguments: { name, document_ids: documentIds, redact: terms, redactions, unsearchable, build_pdf: buildPdf },
+      count: documentIds.length,
+    };
+  },
+  async execute(args) {
+    const created = (await documents.createCollection({
+      title: String(args.name),
+      document_ids: ids(args.document_ids),
+    })) as unknown as { id: number; title: string };
+    const redactions = (args.redactions ?? {}) as Record<string, Box[]>;
+    let pages = 0;
+    for (const [documentId, boxes] of Object.entries(redactions)) {
+      await documents.updateCollectionItem({ id: created.id, documentId: Number(documentId), redactions: boxes });
+      pages += new Set(boxes.map((b) => b.page)).size;
+    }
+    if (args.build_pdf !== false) await documents.startCollectionExport({ id: created.id });
+    const parts = [`Sammelmappe „${created.title}“ angelegt`];
+    if (pages > 0) parts.push(`${plural(pages, "Seite", "Seiten")} geschwärzt – bitte die Boxen dort prüfen`);
+    if (args.build_pdf !== false) parts.push("das PDF wird erzeugt und liegt dann in der Mappe zum Herunterladen");
+    return {
+      summary: parts.join(", "),
+      route: `/dokumente/mappen/${created.id}`,
+      details: { collection_id: created.id },
+    };
+  },
+};
+
+const buildCollectionPdf: WriteToolDefinition = {
+  name: "build_collection_pdf",
+  summary: "Propose building the PDF of an existing document Sammelmappe (with its redactions burnt in).",
+  permissions: ["module.documents", "documents.view"],
+  parameters: {
+    type: "object",
+    properties: { collection_id: { type: "integer" } },
+    required: ["collection_id"],
+  },
+  async prepare(args) {
+    const id = int(args.collection_id);
+    if (id === undefined) throw new Error("collection_id is required");
+    const c = (await documents.getCollection({ id })) as unknown as { id: number; title: string; items?: unknown[] };
+    return {
+      summary: `PDF der Sammelmappe „${c.title}“ erzeugen`,
+      arguments: { collection_id: id, title: c.title },
+      count: c.items?.length,
+    };
+  },
+  async execute(args) {
+    const id = Number(args.collection_id);
+    await documents.startCollectionExport({ id });
+    return {
+      summary: `PDF der Sammelmappe „${String(args.title)}“ wird erzeugt und liegt dann in der Mappe zum Herunterladen`,
+      route: `/dokumente/mappen/${id}`,
+    };
+  },
+};
+
 export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
   createAlbum,
   addPhotosToAlbum,
   setPhotoFavorite,
   createDocumentFollowUp,
   tagTransactions,
+  createCollection,
+  buildCollectionPdf,
 ];
 
 export const WRITE_TOOLS = WRITE_TOOL_DEFINITIONS.map(writeTool);

@@ -72,6 +72,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // Rows pointing at temp files must not outlive them: fsck walks every row.
+  await db.delete(documents).where(inArray(documents.id, DOC_IDS));
   await fs.promises.rm(path.dirname(pdfPath), { recursive: true, force: true });
 });
 

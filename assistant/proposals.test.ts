@@ -204,3 +204,81 @@ describe("deciding", () => {
     expect(clients.documents.setDocumentFollowUp).toHaveBeenCalledWith({ document_ids: [9], follow_up_date: "2026-11-02", note: "Frist" });
   });
 });
+
+describe("a redacted Sammelmappe", () => {
+  const box = (page: number) => ({ page, x: 0.2, y: 0.1, w: 0.15, h: 0.02 });
+
+  function scriptBoxes() {
+    clients.documents.findDocumentTextBoxes.mockImplementation(async ({ id }: { id: number }) => {
+      if (id === 41) return { status: "ok", boxes: [box(1)], pages: [1] };
+      if (id === 42) return { status: "ok", boxes: [box(2), box(3)], pages: [2, 3] };
+      if (id === 43) return { status: "no_words", boxes: [], pages: [] };
+      return { status: "ok", boxes: [], pages: [] };
+    });
+  }
+
+  it("is only proposed: the boxes are found, nothing is created", async () => {
+    scriptBoxes();
+    const conversation = await createConversation({});
+    clients.documents.searchDocumentsEndpoint.mockResolvedValue({
+      items: [41, 42, 43, 44].map((id) => ({ id, title: `Dokument ${id}`, doc_date: "2024-05-01" })),
+    });
+    vi.mocked(chat)
+      .mockResolvedValueOnce(toolCall("search_documents", { q: "Kauf Wohnung" }))
+      .mockResolvedValueOnce(text("Vier Dokumente."));
+    await ask({ id: conversation.id, message: "Was war beim Kauf der Wohnung relevant?" });
+
+    vi.mocked(chat)
+      .mockResolvedValueOnce(toolCall("create_collection", { name: "Kauf Musterstadt", from_previous_result: true, redact: ["450.000,00"] }))
+      .mockResolvedValueOnce(text("Vorgeschlagen."));
+    const res = await ask({ id: conversation.id, message: "Schwärze den Kaufpreis und mach ein PDF daraus." });
+
+    const card = res.blocks.find((b) => b.kind === "proposal")?.rows[0];
+    expect(card).toMatchObject({
+      tool: "create_collection",
+      summary: "Sammelmappe „Kauf Musterstadt“ mit 4 Dokumenten, „450.000,00“ auf 3 Seiten geschwärzt, 1 Dokument noch ohne Wortpositionen, dort nichts geschwärzt, PDF wird erzeugt",
+      count: 4,
+    });
+    expect(clients.documents.findDocumentTextBoxes).toHaveBeenCalledTimes(4);
+    expect(clients.documents.createCollection).not.toHaveBeenCalled();
+    expect(clients.documents.updateCollectionItem).not.toHaveBeenCalled();
+    expect(clients.documents.startCollectionExport).not.toHaveBeenCalled();
+  });
+
+  it("is created with its boxes and its PDF started on 'Ausführen'", async () => {
+    scriptBoxes();
+    const out = await tool("create_collection").run({ name: "Kauf Musterstadt", document_ids: [41, 42, 43], redact: ["450.000,00"] }, ctx());
+    const id = Number(out.block?.rows[0].proposal_id);
+    clients.documents.createCollection.mockResolvedValue({ id: 7, title: "Kauf Musterstadt" });
+    clients.documents.updateCollectionItem.mockResolvedValue({});
+    clients.documents.startCollectionExport.mockResolvedValue({ status: "running" });
+
+    const done = await executeAssistantProposal({ id });
+    expect(done).toMatchObject({ status: "executed", result_route: "/dokumente/mappen/7" });
+    expect(done.result_summary).toContain("3 Seiten geschwärzt");
+    expect(clients.documents.createCollection).toHaveBeenCalledWith({ title: "Kauf Musterstadt", document_ids: [41, 42, 43] });
+    expect(clients.documents.updateCollectionItem.mock.calls.map((c) => c[0])).toEqual([
+      { id: 7, documentId: 41, redactions: [box(1)] },
+      { id: 7, documentId: 42, redactions: [box(2), box(3)] },
+    ]);
+    expect(clients.documents.startCollectionExport).toHaveBeenCalledWith({ id: 7 });
+  });
+
+  it("says so when the value is nowhere, and refuses documents the user cannot see", async () => {
+    clients.documents.findDocumentTextBoxes.mockResolvedValue({ status: "ok", boxes: [], pages: [] });
+    const out = await tool("create_collection").run({ name: "Leer", document_ids: [44], redact: ["999,99"], build_pdf: false }, ctx());
+    expect(out.block?.rows[0].summary).toBe("Sammelmappe „Leer“ mit 1 Dokument, „999,99“ nirgends gefunden, nichts geschwärzt");
+
+    clients.documents.findDocumentTextBoxes.mockRejectedValue(Object.assign(new Error("document not found"), { code: "not_found" }));
+    await expect(tool("create_collection").run({ name: "Fremd", document_ids: [99], redact: ["1"] }, ctx())).rejects.toThrow("documents 99 not found");
+  });
+
+  it("find_text_in_document names the pages and the documents without positions", async () => {
+    scriptBoxes();
+    const out = await tool("find_text_in_document").run({ document_ids: [41, 42, 43], query: "450.000" }, ctx());
+    expect(out.text).toContain("41 | pages 1");
+    expect(out.text).toContain("42 | pages 2, 3");
+    expect(out.text).toContain("43 | no word positions yet");
+    expect(out.text).toContain('"450.000" found in 2 of 3 documents.');
+  });
+});

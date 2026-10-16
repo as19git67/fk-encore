@@ -51,6 +51,9 @@ const TOOL_LABELS: Record<string, string> = {
   set_photo_favorite: 'Favoriten vorschlagen',
   create_document_follow_up: 'Wiedervorlage vorschlagen',
   tag_transactions: 'Tags vorschlagen',
+  find_text_in_document: 'In Dokumenten suchen',
+  create_collection: 'Sammelmappe vorschlagen',
+  build_collection_pdf: 'PDF vorschlagen',
 }
 
 /** What the user reads while a tool runs. */
