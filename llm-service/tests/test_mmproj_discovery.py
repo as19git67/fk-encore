@@ -101,3 +101,35 @@ def test_resolve_is_empty_once_vision_is_switched_off(tmp_path: Path) -> None:
     cfg = LlmConfig(model_path=tmp_path / MODEL, backend="server")
     assert cfg.resolve_mmproj()
     assert replace(cfg, vision=False).resolve_mmproj() == ""
+
+
+def test_a_projector_without_a_model_name_is_judged_by_its_header(tmp_path: Path) -> None:
+    """`mmproj-F16.gguf` carried Gemma's vision tower and was handed to
+    Qwen3-14B, which has none: llama-server failed to start, then ran the
+    model text-only after a second start. The header says whose it is."""
+
+    from gguf_meta import write_metadata
+
+    touch(tmp_path, "Qwen3-14B-Q4_K_M.gguf", MODEL)
+    write_metadata(tmp_path / "mmproj-F16.gguf", {"general.architecture": "clip", "general.name": "Gemma 4 26B A4B It", "clip.projector_type": "gemma3"})
+    assert discover_mmproj(tmp_path, "Qwen3-14B-Q4_K_M.gguf") == ""
+    assert discover_mmproj(tmp_path, MODEL).endswith("mmproj-F16.gguf")
+
+
+def test_the_header_may_name_the_family_only_by_projector_type(tmp_path: Path) -> None:
+    from gguf_meta import write_metadata
+
+    touch(tmp_path, "Qwen3.6-35B-A3B-UD-Q5_K_M.gguf")
+    write_metadata(tmp_path / "mmproj-BF16.gguf", {"general.architecture": "clip", "clip.projector_type": "qwen3vl"})
+    assert discover_mmproj(tmp_path, "Qwen3.6-35B-A3B-UD-Q5_K_M.gguf").endswith("mmproj-BF16.gguf")
+    assert discover_mmproj(tmp_path, MODEL) == ""
+
+
+def test_a_generic_projector_type_names_no_family(tmp_path: Path) -> None:
+    # llava-style projectors say `mlp`; that is a tower, not a model, and the
+    # projector counts as it did before headers were read.
+    from gguf_meta import write_metadata
+
+    touch(tmp_path, MODEL)
+    write_metadata(tmp_path / "mmproj-F16.gguf", {"general.architecture": "clip", "clip.projector_type": "mlp"})
+    assert discover_mmproj(tmp_path, MODEL).endswith("mmproj-F16.gguf")

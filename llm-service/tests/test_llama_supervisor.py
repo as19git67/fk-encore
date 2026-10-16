@@ -202,3 +202,17 @@ def test_stop_after_a_crash_does_not_hang(fake_server):
         time.sleep(0.05)
     proc.stop(timeout=5)
     assert proc.is_running is False
+
+
+def test_the_exit_status_of_a_crash_is_kept(fake_server):
+    """The reload worker reports it: "exited with status 3" says more than
+    the last HTTP error the readiness poll happened to see."""
+
+    done = threading.Event()
+    proc = LlamaServerProcess(binary=str(fake_server), on_unexpected_exit=lambda _s: done.set())
+    assert proc.last_exit_status is None
+    proc.start(_cfg(server_url="http://127.0.0.1:1"))
+    assert done.wait(timeout=10) is True
+    assert proc.last_exit_status == 3
+    proc.stop(timeout=1)
+    assert proc.last_exit_status == 3

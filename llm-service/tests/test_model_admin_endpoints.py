@@ -495,3 +495,139 @@ def test_a_projector_that_stops_llama_server_is_dropped_and_the_model_runs_text_
     finally:
         main._state["llm"] = None
         main._apply_config(main._BOOT_CONFIG, source="env")
+
+
+def test_a_crash_while_loading_is_reported_by_its_exit_status(volume, monkeypatch):
+    """"GET /props -> HTTP 503 Loading model" was the last thing the poll
+    saw, not why the process died; the status is, and -9 is the OOM killer."""
+
+    import llama_server
+
+    (volume / "test.gguf").write_bytes(b"x")
+
+    class FakeSupervisor:
+        available = True
+        is_running = False
+        last_exit_status = None
+        binary = "llama-server"
+
+        def start(self, cfg):
+            self.is_running = False
+            self.last_exit_status = -9
+
+        def stop(self):
+            self.is_running = False
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def wait_until_ready(self, timeout, still_starting=None):
+            raise llama_server.LlamaServerError("llama-server exited before becoming ready: GET /props -> HTTP 503 Loading model")
+
+    monkeypatch.setattr(main, "_llama_server", FakeSupervisor())
+    monkeypatch.setattr(llama_server, "LlamaServerClient", FakeClient)
+    main._apply_config(LlmConfig(model_path=volume / "test.gguf", backend="server"), source="file")
+    try:
+        with pytest.raises(llama_server.LlamaServerError) as excinfo:
+            main._load_server_llm()
+        message = str(excinfo.value)
+        assert "exited with status -9 while loading test.gguf" in message
+        assert "OOM killer" in message
+        assert "503" not in message
+    finally:
+        main._state["llm"] = None
+        main._apply_config(main._BOOT_CONFIG, source="env")
+
+
+# ─── Loading at boot ───────────────────────────────────────────────────────────
+
+
+def test_a_crash_while_a_model_loads_does_not_kill_the_service(monkeypatch):
+    """At boot the kill arrived as SIGTERM during startup: the service came up
+    text-only after the retry and shut down the moment it was ready, and
+    compose started it again — a loop no endpoint could break."""
+
+    killed = []
+    monkeypatch.setattr(main, "terminate_own_process", lambda status: killed.append(status))
+    monkeypatch.setattr(main, "_reload_running", False)
+    monkeypatch.setattr(main, "_llm_loading", True)
+
+    main._handle_unexpected_exit(-6)
+
+    assert killed == []
+
+
+def test_loading_sets_the_flag_only_while_it_runs(monkeypatch):
+    seen = []
+
+    def load():
+        seen.append(main._llm_loading)
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(main, "_load_server_llm", load)
+    monkeypatch.setattr(main, "_load_inproc_llm", load)
+    with pytest.raises(RuntimeError):
+        main._load_llm()
+    assert seen == [True]
+    assert main._llm_loading is False
+
+
+def test_an_activated_configuration_that_fails_at_boot_yields_to_the_environment(volume, monkeypatch):
+    """The persisted file is only rewritten by a successful reload, and a
+    reload needs the service up — so the service must come up."""
+
+    (volume / "test.gguf").write_bytes(b"x")
+    loads: list[str] = []
+
+    def load():
+        loads.append(main._state["config"].model_path.name)
+        if len(loads) == 1:
+            raise RuntimeError("llama-server exited with status 1 while loading test.gguf")
+
+    monkeypatch.setattr(main, "_load_llm", load)
+    monkeypatch.setattr(main, "_ensure_model_present", lambda cfg: None)
+    main._apply_config(LlmConfig(model_path=volume / "test.gguf", backend="inproc", label="Broken"), source="file")
+    try:
+        main._load_llm_at_boot("file")
+        assert loads == ["test.gguf", main._BOOT_CONFIG.model_path.name]
+        assert main._state["config_source"] == "env"
+        assert main._reload_status["state"] == "error"
+        assert "'Broken' did not load at startup" in main._reload_status["detail"]
+        assert main._BOOT_CONFIG.model_path.name in main._reload_status["detail"]
+    finally:
+        main._apply_config(main._BOOT_CONFIG, source="env")
+
+
+def test_the_environment_configuration_failing_at_boot_is_still_fatal(monkeypatch):
+    def load():
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(main, "_load_llm", load)
+    with pytest.raises(RuntimeError):
+        main._load_llm_at_boot("env")
+
+
+def test_a_reload_persists_what_loaded_not_what_was_asked_for(client, volume, monkeypatch):
+    """A model that went up without its projector boots without it too,
+    instead of failing on the projector again at every start."""
+
+    import dataclasses
+
+    (volume / "test.gguf").write_bytes(b"x")
+    monkeypatch.setattr(main, "_inproc_available", lambda: True)
+
+    def load():
+        main._state["config"] = dataclasses.replace(main._state["config"], vision=False)
+
+    monkeypatch.setattr(main, "_load_llm", load)
+    try:
+        assert client.post("/reload", json=_row(backend="inproc")).status_code == 202
+        body = _wait_for_reload(client)
+        assert body["reload"]["state"] == "ready"
+        assert body["config"]["vision"] is False
+        assert load_active(volume).vision is False
+    finally:
+        # vision=False must not leak into the tests that hand a projector to
+        # the live configuration.
+        main._apply_config(main._BOOT_CONFIG, source="env")

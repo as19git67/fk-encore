@@ -25,6 +25,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from gguf_meta import GgufError, read_metadata
+
 ACTIVE_CONFIG_FILENAME = ".active_config.json"
 
 BACKENDS = ("inproc", "server")
@@ -201,6 +203,7 @@ class LlmConfig:
             kv_type=str(data.get("kv_type", base.kv_type)).lower(),
             n_cpu_moe=int(data.get("n_cpu_moe", base.n_cpu_moe)),
             mmproj_path=str(data.get("mmproj_path") or ""),
+            vision=bool(data.get("vision", True)),
             reasoning=str(data.get("reasoning", base.reasoning)).lower(),
             server_url=str(data.get("server_url", base.server_url)).rstrip("/"),
             server_extra_args=str(data.get("server_extra_args") or ""),
@@ -231,6 +234,9 @@ class LlmConfig:
             "kv_type": self.kv_type,
             "n_cpu_moe": self.n_cpu_moe,
             "mmproj_path": self.mmproj_path,
+            # False once llama-server refused the projector and the model
+            # went up without it: what loaded is what the next boot repeats.
+            "vision": self.vision,
             "reasoning": self.reasoning,
             "server_url": self.server_url,
             "server_extra_args": self.server_extra_args,
@@ -330,6 +336,45 @@ def _family(name: str) -> str:
     return m.group(0) if m else ""
 
 
+# The header keys that name the model a projector was converted from, in the
+# order they are trusted. `clip.projector_type` is the architecture of the
+# vision tower (`gemma3`, `qwen3vl`, `llama4`); its generic values name no
+# family and are ignored.
+_PROJECTOR_NAME_KEYS = (
+    "general.base_model.0.name",
+    "general.name",
+    "general.basename",
+    "clip.projector_type",
+)
+_GENERIC_PROJECTOR_TYPES = frozenset({"mlp", "ldp", "ldpv2", "resampler", "adapter"})
+
+
+def projector_family(path: Path) -> str:
+    """The family of the model a projector file belongs to, from its GGUF
+    metadata; empty when the header does not say or cannot be read.
+
+    This is what tells `mmproj-F16.gguf` apart: the file name carries no
+    model, the header does (`general.name = "Gemma 4 26B A4B It"`). A name
+    is only the convention for the file; the metadata is what llama.cpp
+    wrote when it converted the projector.
+    """
+
+    try:
+        meta = read_metadata(path, _PROJECTOR_NAME_KEYS)
+    except (OSError, GgufError):
+        return ""
+    for key in _PROJECTOR_NAME_KEYS:
+        value = meta.get(key)
+        if not isinstance(value, str):
+            continue
+        if key == "clip.projector_type" and value.lower() in _GENERIC_PROJECTOR_TYPES:
+            continue
+        family = _family(value.strip())
+        if family:
+            return family
+    return ""
+
+
 def discover_mmproj(models_dir: Path, model_filename: str) -> str:
     """The projector belonging to *model_filename*, or "" if none is there.
 
@@ -358,7 +403,9 @@ def discover_mmproj(models_dir: Path, model_filename: str) -> str:
     # flight cannot be handed to llama-server as a complete projector.
     # A projector that names another family is never this model's, however
     # few candidates there are: Gemma's projector handed to a Qwen model
-    # stops llama-server from starting at all.
+    # stops llama-server from starting at all. A file whose name carries no
+    # family is judged by its GGUF header instead, which names the model it
+    # was converted from.
     family = _family(model_filename)
     best: Path | None = None
     best_score = -1
@@ -368,7 +415,9 @@ def discover_mmproj(models_dir: Path, model_filename: str) -> str:
             if stem.lower().startswith(prefix):
                 stem = stem[len(prefix):]
                 break
-        other = _family(stem)
+        # The name first; a name without a family (`mmproj-F16.gguf`) is
+        # asked what its header says.
+        other = _family(stem) or (projector_family(candidate) if family else "")
         if family and other and other != family:
             continue
         score = _shared_prefix(stem, model_filename)

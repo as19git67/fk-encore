@@ -234,14 +234,24 @@ def _handle_unexpected_exit(status: int) -> None:
     rollback path fast rather than a wait for the full ready-timeout.
     """
 
-    if _reload_running:
+    if _reload_running or _llm_loading:
         log.error(
-            "llama-server died (status=%s) during a reload — leaving recovery to the "
-            "reload worker instead of restarting the container",
+            "llama-server died (status=%s) while a model was loading — leaving recovery "
+            "to the loader instead of restarting the container",
             status,
         )
         return
     terminate_own_process(status)
+
+
+# True while `_load_llm` runs — at boot as much as during a reload. A
+# llama-server that dies then is the loader's to handle (the retry without a
+# projector, the fallback to the environment), not a reason to kill the
+# process: at boot the kill arrived as SIGTERM while startup was still
+# running, so the service came up text-only and shut down the moment it was
+# ready, and compose started it again — a restart loop that no endpoint and
+# no UI could break.
+_llm_loading = False
 
 
 # Owns the llama-server subprocess for the server backend. Created eagerly so
@@ -532,7 +542,7 @@ def _load_server_llm() -> None:
     run at a fraction of the speed.
     """
 
-    from llama_server import LlamaServerClient
+    from llama_server import LlamaServerClient, LlamaServerError
 
     if _llama_server.available:
         if not _llama_server.is_running:
@@ -556,10 +566,28 @@ def _load_server_llm() -> None:
     # rolling back promptly and the caller sitting through the whole wait
     # first. Only meaningful when we spawned the process ourselves.
     def wait() -> Any:
-        return client.wait_until_ready(
-            float(LLM_SERVER_READY_TIMEOUT),
-            still_starting=(lambda: _llama_server.is_running) if _llama_server.available else None,
-        )
+        try:
+            return client.wait_until_ready(
+                float(LLM_SERVER_READY_TIMEOUT),
+                still_starting=(lambda: _llama_server.is_running) if _llama_server.available else None,
+            )
+        except LlamaServerError as exc:
+            # The last HTTP error ("503 Loading model") is not why the
+            # process is gone; its exit status is the only clue this side
+            # has, and llama.cpp's own message sits in the container log.
+            status = _llama_server.last_exit_status if _llama_server.available else None
+            if status is None:
+                raise
+            raise LlamaServerError(
+                f"llama-server exited with status {status} while loading "
+                f"{_state['config'].model_path.name}"
+                + (
+                    " (killed by SIGKILL — the kernel's OOM killer, most likely)" if status == -9
+                    else f" (killed by signal {-status})" if status < 0
+                    else ""
+                )
+                + "; llama.cpp's own message is in the container log just before this one"
+            ) from exc
 
     try:
         props = wait()
@@ -741,12 +769,57 @@ def _ensure_model_present(cfg: LlmConfig) -> None:
 def _load_llm() -> None:
     """Load the model described by the live configuration."""
 
-    if LLM_BACKEND == "server":
-        _load_server_llm()
-    else:
-        _load_inproc_llm()
+    global _llm_loading
+
+    _llm_loading = True
+    try:
+        if LLM_BACKEND == "server":
+            _load_server_llm()
+        else:
+            _load_inproc_llm()
+    finally:
+        _llm_loading = False
     _state["llm_accelerator"] = LLM_ACCELERATOR
     _state["classify_response_format"] = _resolve_classify_response_format()
+
+
+def _load_llm_at_boot(source: str) -> None:
+    """Load the boot configuration; when it is an activated one that will not
+    load, run the environment's model instead of going down.
+
+    Before, a persisted configuration whose model no longer started took the
+    service with it on every boot: the file is only rewritten by a successful
+    reload, and a reload needs the service up. The environment's model is
+    what the deployment shipped with and what `/config/reset` restores, so
+    it is the right thing to be running while the admin picks another.
+    """
+
+    try:
+        _load_llm()
+    except Exception as exc:
+        if source != "file":
+            raise
+        failed: LlmConfig = _state["config"]
+        log.exception(
+            "The activated configuration %r did not load — running the environment's "
+            "model instead. Activate another configuration or reset to the environment.",
+            failed.label or failed.model_path.name,
+        )
+        if _llama_server.is_running:
+            _llama_server.stop()
+        cfg, notice = _runnable(_BOOT_CONFIG)
+        _apply_config(cfg, source="env", notice=notice)
+        _ensure_model_present(cfg)
+        _load_llm()
+        _reload_status.update({"label": failed.label, "started_at": None})
+        _set_reload_state(
+            "error",
+            detail=(
+                f"{type(exc).__name__}: {exc} — the activated configuration "
+                f"{failed.label or failed.model_path.name!r} did not load at startup; "
+                f"running {cfg.model_path.name} from the environment instead"
+            ),
+        )
 
 
 @asynccontextmanager
@@ -763,7 +836,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     import torch
     from sentence_transformers import SentenceTransformer
 
-    _load_llm()
+    _load_llm_at_boot(source)
 
     embed_device = _resolve_embed_device(torch)
     log.info("Loading embedder %s on %s", EMBEDDING_MODEL, embed_device)
@@ -1118,7 +1191,9 @@ def _reload_worker(cfg: LlmConfig, notice: str | None = None) -> None:
 
     # Persisted only now: a configuration that cannot load must not become the
     # one the container boots into after a restart.
-    save_active(MODELS_DIR, cfg)
+    # What loaded, not what was asked for: a model that went up without its
+    # projector boots without it too, instead of failing on it again.
+    save_active(MODELS_DIR, _state["config"])
     log.info("Reload complete: %s (%s)", cfg.model_path.name, cfg.label or "unnamed")
 
 
