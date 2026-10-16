@@ -2944,31 +2944,23 @@ export async function uploadPhotoLogic(
   };
 }
 
+export interface ListPhotosOptions {
+  /** Date order of the rows; newest first by default. */
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
 export async function listPhotosLogic(
   userId: number,
-  filter: PhotoFilterParams = {}
+  filter: PhotoFilterParams = {},
+  options: ListPhotosOptions = {}
 ): Promise<ListPhotosResponse> {
   const filterConds = buildPhotoFilterConditions(userId, filter);
   const whereClause = and(eq(photos.user_id, userId), ...filterConds);
+  const dateOrder = options.order === "asc" ? sql`${photoDateOrder} ASC NULLS LAST` : sql`${photoDateOrder} DESC`;
 
-  const rows = await dbAll<{
-    id: number; user_id: number; filename: string; original_name: string;
-    mime_type: string; size: number; hash: string | null; taken_at: string | null;
-    created_at: string | null; curation_status: string | null;
-    latitude: number | null; longitude: number | null;
-    location_name: string | null; location_city: string | null; location_country: string | null;
-    location_short: string | null;
-    ai_quality_score: number | null;
-    ai_quality_details: Record<string, number> | null;
-    auto_crop: { x: number; y: number } | null;
-    description: string | null;
-    keywords: string[] | null;
-    link_visibility: string | null;
-    has_known_face: boolean | null;
-    width: number | null;
-    height: number | null;
-  }>(
-    db
+  let query = db
       .select({
         id: photos.id,
         user_id: photos.user_id,
@@ -3002,8 +2994,28 @@ export async function listPhotosLogic(
         and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
       )
       .where(whereClause)
-      .orderBy(sql`${photoDateOrder} DESC`)
-  );
+      .orderBy(dateOrder, photos.id)
+      .$dynamic();
+  if (options.limit !== undefined) query = query.limit(options.limit);
+  if (options.offset) query = query.offset(options.offset);
+
+  const rows = await dbAll<{
+    id: number; user_id: number; filename: string; original_name: string;
+    mime_type: string; size: number; hash: string | null; taken_at: string | null;
+    created_at: string | null; curation_status: string | null;
+    latitude: number | null; longitude: number | null;
+    location_name: string | null; location_city: string | null; location_country: string | null;
+    location_short: string | null;
+    ai_quality_score: number | null;
+    ai_quality_details: Record<string, number> | null;
+    auto_crop: { x: number; y: number } | null;
+    description: string | null;
+    keywords: string[] | null;
+    link_visibility: string | null;
+    has_known_face: boolean | null;
+    width: number | null;
+    height: number | null;
+  }>(query);
 
   return {
     photos: rows.map((r) => ({

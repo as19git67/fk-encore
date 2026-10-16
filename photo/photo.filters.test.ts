@@ -37,3 +37,12 @@ describe("orientation variant mode", () => {
     expect(parsePhotoFilterQuery({})).not.toHaveProperty("variantMode");
   });
 });
+
+describe("place by name", () => {
+  it("is trimmed, capped and only set when given", () => {
+    expect(parsePhotoFilterQuery({ locationText: "  München " }).locationText).toBe("München");
+    expect(parsePhotoFilterQuery({ locationText: "   " }).locationText).toBeUndefined();
+    expect(parsePhotoFilterQuery({}).locationText).toBeUndefined();
+    expect(parsePhotoFilterQuery({ locationText: "x".repeat(200) }).locationText).toHaveLength(100);
+  });
+});

@@ -9,7 +9,44 @@ import type { ToolSpec } from "../types";
 
 const FINANCE = ["module.finance", "finance.view"];
 
-interface AccountView { id: number; label: string; type_label?: string | null; currency_code?: string; closed_at?: string | null }
+interface OverviewAccount {
+  id: number; label: string; type_kind: string; type_label: string; currency_code: string;
+  balance: string | null; balance_as_of: string | null;
+}
+interface Overview { sections: { name: string; accounts: OverviewAccount[] }[]; unassigned: OverviewAccount[] }
+
+/** An account as placed on the user's Übersicht page, with its section. */
+interface PlacedAccount extends OverviewAccount { section: string | null }
+
+/**
+ * The accounts the user holds, in the order and sections of their Übersicht
+ * page, with the latest balance; accounts they can see but have not placed
+ * come last. This is the list the user means by "meine Konten" — not every
+ * account of the household, and not the raw account table.
+ */
+async function placedAccounts(): Promise<PlacedAccount[]> {
+  const res = (await finance.getOverview()) as unknown as Overview;
+  return [
+    ...res.sections.flatMap((s) => s.accounts.map((a) => ({ ...a, section: s.name }))),
+    ...res.unassigned.map((a) => ({ ...a, section: null })),
+  ];
+}
+
+/** One placed account, or undefined when it is not the user's or the overview is unavailable. */
+async function placedAccount(id: number): Promise<PlacedAccount | undefined> {
+  try {
+    return (await placedAccounts()).find((a) => a.id === id);
+  } catch {
+    // The booking list stands on its own; the heading is extra.
+    return undefined;
+  }
+}
+
+/** "1234.56 EUR (as of 2026-10-14)", or why there is none. */
+function balanceText(a: OverviewAccount): string {
+  if (a.balance === null) return a.type_kind === "bargeld" ? "none (cash account)" : "none";
+  return `${money(a.balance)} ${a.currency_code}${a.balance_as_of ? ` (as of ${a.balance_as_of.slice(0, 10)})` : ""}`;
+}
 interface TransactionView {
   id: number; account_id: number; booking_date: string; amount: string; currency_code?: string;
   counterparty: string | null; purpose: string | null; tags?: { name: string }[];
@@ -29,18 +66,30 @@ interface UpcomingDebit {
 export const listAccounts: ToolSpec = {
   name: "list_accounts",
   kind: "read",
-  summary: "The user's bank and depot accounts (id, label, type); use the id to filter bookings.",
+  summary: "The user's accounts as arranged on their Übersicht page (section, label, type) with the latest balance of each; a cash account keeps no balance. Use the id to filter bookings.",
   permissions: FINANCE,
   source: "hand",
   parameters: { type: "object", properties: {} },
   async run() {
-    const res = await (finance.listAccounts()) as unknown as { items: AccountView[] };
-    const rows = res.items.filter((a) => !a.closed_at);
+    const rows = await placedAccounts();
     return {
-      text: table(["id", "label", "type", "currency"], rows.map((a) => [a.id, a.label, a.type_label, a.currency_code])),
+      text: table(
+        ["id", "section", "label", "type", "balance"],
+        rows.map((a) => [a.id, a.section ?? "(not on the Übersicht page)", a.label, a.type_label, balanceText(a)]),
+        { note: "The balance is the account's latest statement balance, not a sum of bookings. A cash account (Bargeld) and a manual account without statements have none." },
+      ),
       digest: digestOf("list_accounts", rows.length, rows.map((a) => a.id)),
       rowCount: rows.length,
-      block: { kind: "accounts", tool: "list_accounts", rows: rows.map((a) => ({ id: a.id, label: a.label, type: a.type_label ?? null })) },
+      block: {
+        kind: "accounts",
+        tool: "list_accounts",
+        rows: rows.map((a) => ({
+          id: a.id, label: a.label, type: a.type_label ?? null, section: a.section,
+          balance: a.balance, balance_as_of: a.balance_as_of, currency: a.currency_code,
+          route: `/finanzen/uebersicht/konto/${a.id}`,
+        })),
+        route: "/finanzen/uebersicht",
+      },
     };
   },
 };
@@ -75,8 +124,11 @@ export const listTransactions: ToolSpec = {
     })) as unknown as { items: TransactionView[]; total: number };
     const rows = res.items;
     // The transaction list is per account, so only a search within one
-    // account has a list page showing the same set.
+    // account has a list page showing the same set — and a heading naming
+    // the account and its balance, as the list page has.
     const accountId = int(args.account_id);
+    const account = accountId !== undefined ? await placedAccount(accountId) : undefined;
+    const subtitle = account ? `${account.label} · Saldo ${account.balance === null ? "–" : `${money(account.balance)} ${account.currency_code}`}` : undefined;
     const route = accountId !== undefined
       ? `/finanzen/uebersicht/konto/${accountId}${query({
           q: str(args.q), dateFrom: isoDate(args.from), dateTo: isoDate(args.to), tags: tags.join(",") || undefined,
@@ -86,7 +138,13 @@ export const listTransactions: ToolSpec = {
       text: table(
         ["id", "date", "amount", "counterparty", "purpose", "tags"],
         rows.map((t) => [t.id, t.booking_date.slice(0, 10), money(t.amount), t.counterparty, t.purpose, (t.tags ?? []).map((x) => x.name).join(",")]),
-        { total: res.total, cap: limit, note: "Amounts in EUR; negative = money out. Do not add these up yourself — use analyze_spending for sums." },
+        {
+          total: res.total, cap: limit,
+          note: [
+            account ? `Account: ${account.label}, balance ${balanceText(account)}.` : undefined,
+            "Amounts in EUR; negative = money out. Do not add these up yourself — use analyze_spending for sums.",
+          ].filter(Boolean).join(" "),
+        },
       ),
       digest: digestOf("list_transactions", res.total, rows.map((t) => t.id)),
       rowCount: rows.length,
@@ -97,6 +155,7 @@ export const listTransactions: ToolSpec = {
         tool: "list_transactions",
         total: res.total,
         route,
+        subtitle,
         rows: rows.map((t) => ({
           id: t.id, booking_date: t.booking_date.slice(0, 10), amount: t.amount, counterparty: t.counterparty, purpose: t.purpose,
         })),

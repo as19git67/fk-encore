@@ -47,6 +47,8 @@ export interface ResultBlock {
   /** How many exist, when more than `rows` holds. */
   total?: number;
   route?: string;
+  /** A line under the title: the account and its balance of a booking list. */
+  subtitle?: string;
 }
 
 /** The kinds of objects a later tool can take over from an earlier result. */

@@ -22,6 +22,8 @@ export interface ResultBlock {
   total?: number
   /** A list page showing the same set, e.g. `/dokumente?q=…`. */
   route?: string
+  /** A line under the title: the account and its balance of a booking list. */
+  subtitle?: string
 }
 
 export interface ConversationSummary {

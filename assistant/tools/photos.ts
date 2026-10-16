@@ -15,7 +15,17 @@ const PHOTO_COUNT_CAP = 2000;
 interface PhotoRow { id: number; taken_at?: string; created_at?: string; location_name?: string; location_city?: string; location_country?: string; filename?: string }
 interface NaturalResult { photoId: number; filename?: string; taken_at?: string; created_at: string; location_city?: string; location_country?: string; score: number }
 interface Recap { id: number; kind: string; title: string; subtitle: string | null; period_start: string | null; period_end: string | null; photo_count: number }
-interface Album { id: number; name: string; event_name: string | null; oldest_photo_at: string | null; newest_photo_at: string | null; photo_count: number }
+interface Album {
+  id: number; user_id: number; name: string; event_name: string | null;
+  oldest_photo_at: string | null; newest_photo_at: string | null; photo_count: number;
+  /** Shared with at least one user, or reachable by a public link. */
+  is_shared: boolean;
+}
+interface AlbumShare { user_id: number; user_name: string; access_level: string }
+interface AlbumShares { shares: AlbumShare[]; publicLink?: { token?: string } | null }
+
+/** How many albums one `list_album_shares` call looks up — one service call each. */
+const SHARE_LOOKUP_CAP = 40;
 
 function place(p: { location_city?: string; location_country?: string }): string | undefined {
   return [p.location_city, p.location_country].filter(Boolean).join(", ") || undefined;
@@ -28,7 +38,7 @@ function yearOf(date: string | null | undefined): number | undefined {
 export const listPhotos: ToolSpec = {
   name: "list_photos",
   kind: "read",
-  summary: "Photos filtered by favorite flag, date range, person ids and place; or narrows the previous photo result. Returns the count and the first ids.",
+  summary: "Photos filtered by favorite flag, date range, person ids and place name, newest or oldest first; or narrows the previous photo result. Returns the count and the first ids.",
   permissions: PHOTOS,
   source: "hand",
   parameters: {
@@ -39,6 +49,8 @@ export const listPhotos: ToolSpec = {
       date_to: { type: "string", description: "taken on or before, YYYY-MM-DD" },
       person_ids: { type: "array", items: { type: "integer" }, description: "ids from list_persons; photos showing these persons" },
       place: { type: "string", description: "city, country or place name the photo was taken in, e.g. 'München'" },
+      order: { type: "string", enum: ["newest", "oldest"], description: "newest first (default) or oldest first — 'das älteste Foto' is order=oldest, limit=1" },
+      limit: { type: "integer", description: "rows to show, at most 60 (default 15); the count is reported regardless" },
       from_previous_result: { type: "boolean", description: "narrow the photos of the previous answer instead of all photos" },
     },
   },
@@ -50,8 +62,12 @@ export const listPhotos: ToolSpec = {
       ? args.person_ids.map((v) => int(v)).filter((v): v is number => v !== undefined)
       : [];
     const placeTerm = str(args.place);
+    const oldest = str(args.order) === "oldest";
+    const limit = int(args.limit, { min: 1, max: 60 }) ?? 15;
     const fromPrevious = bool(args.from_previous_result) === true;
-    const serverFilter = Boolean(favorite || dateFrom || dateTo || personIds.length);
+    // A place narrows the previous result here, from the rows already
+    // known; everything else is the server's.
+    const serverFilter = Boolean(favorite || dateFrom || dateTo || personIds.length || (placeTerm && !fromPrevious));
 
     const previous = fromPrevious ? ctx.previous?.("photo") : undefined;
     if (fromPrevious && !previous) throw new Error("there is no earlier photo result in this conversation");
@@ -59,12 +75,16 @@ export const listPhotos: ToolSpec = {
     let rows: PhotoRow[];
     let capped = false;
     if (!previous || serverFilter) {
+      // The place is matched on the server: filtering the newest 2000 here
+      // missed every older photo from that place.
       const res = await (photo.listPhotos({
         favorite: favorite || undefined,
         dateFrom,
         dateTo,
         personIds: personIds.length ? personIds.join(",") : undefined,
         personMode: personIds.length ? "include" : undefined,
+        locationText: previous ? undefined : placeTerm,
+        sortDir: oldest ? "asc" : "desc",
         limit: PHOTO_COUNT_CAP + 1,
       })) as unknown as { photos: PhotoRow[] };
       capped = res.photos.length > PHOTO_COUNT_CAP;
@@ -76,8 +96,9 @@ export const listPhotos: ToolSpec = {
       }
     } else {
       rows = await photoDetails(previous);
+      if (oldest) rows = [...rows].reverse();
     }
-    if (placeTerm) {
+    if (placeTerm && previous) {
       const needle = placeTerm.toLowerCase();
       rows = rows.filter((p) => [p.location_name, p.location_city, p.location_country]
         .some((v) => v?.toLowerCase().includes(needle)));
@@ -93,7 +114,7 @@ export const listPhotos: ToolSpec = {
       text: table(
         ["id", "taken", "place"],
         rows.map((p) => [p.id, (p.taken_at ?? p.created_at ?? "").slice(0, 10), place(p)]),
-        { cap: 15, total: count, note: `photo count: ${countText}${previous ? " (narrowed from the previous result)" : ""}` },
+        { cap: limit, total: count, note: `photo count: ${countText}, ${oldest ? "oldest" : "newest"} first${previous ? " (narrowed from the previous result)" : ""}` },
       ),
       digest: digestOf("list_photos", count, rows.map((p) => p.id)),
       rowCount: count,
@@ -103,7 +124,7 @@ export const listPhotos: ToolSpec = {
         tool: "list_photos",
         total: count,
         // The filename is what a thumbnail URL is built from.
-        rows: rows.slice(0, 60).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
+        rows: rows.slice(0, Math.max(limit, 12)).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
         route,
       },
     };
@@ -208,7 +229,7 @@ export const listRecaps: ToolSpec = {
 export const listAlbums: ToolSpec = {
   name: "list_albums",
   kind: "read",
-  summary: "Photo albums with event name, photo period and count; optionally only those with an event or in a year.",
+  summary: "Photo albums with event name, photo period, count and whether they are shared; optionally only those with an event, in a year, or shared. For who an album is shared with use list_album_shares.",
   permissions: ["module.photos"],
   source: "hand",
   parameters: {
@@ -216,16 +237,22 @@ export const listAlbums: ToolSpec = {
     properties: {
       year: { type: "integer", description: "only albums whose photos fall in this year" },
       has_event: { type: "boolean", description: "only albums with an event name (trips, parties)" },
+      shared: { type: "boolean", description: "true: only albums shared with other users or by a public link; false: only unshared ones" },
       q: { type: "string", description: "text in name or event" },
+      limit: { type: "integer", description: "rows to return, at most 100 (default 30)" },
     },
   },
-  async run(args) {
+  async run(args, ctx) {
     const year = int(args.year);
     const hasEvent = bool(args.has_event);
+    const shared = bool(args.shared);
+    const limit = int(args.limit, { min: 1, max: 100 }) ?? 30;
     const q = str(args.q)?.toLocaleLowerCase("de");
+    const me = Number(ctx.user.userID);
     const res = await (photo.listAlbums()) as unknown as { albums: Album[] };
     const rows = res.albums.filter((a) => {
       if (hasEvent && !a.event_name) return false;
+      if (shared !== undefined && Boolean(a.is_shared) !== shared) return false;
       if (q && !`${a.name} ${a.event_name ?? ""}`.toLocaleLowerCase("de").includes(q)) return false;
       if (year !== undefined) {
         const from = yearOf(a.oldest_photo_at);
@@ -234,22 +261,94 @@ export const listAlbums: ToolSpec = {
       }
       return true;
     });
+    const shown = rows.slice(0, limit);
     return {
       text: table(
-        ["id", "name", "event", "from", "to", "photos"],
-        rows.map((a) => [a.id, a.name, a.event_name, a.oldest_photo_at?.slice(0, 10), a.newest_photo_at?.slice(0, 10), a.photo_count]),
-        { cap: 30 },
+        ["id", "name", "event", "from", "to", "photos", "shared", "owner"],
+        shown.map((a) => [
+          a.id, a.name, a.event_name, a.oldest_photo_at?.slice(0, 10), a.newest_photo_at?.slice(0, 10), a.photo_count,
+          a.is_shared ? "yes" : "no", a.user_id === me ? "me" : "another user",
+        ]),
+        { total: rows.length, cap: limit },
       ),
       digest: digestOf("list_albums", rows.length, rows.map((a) => a.id)),
       rowCount: rows.length,
       block: {
         kind: "albums",
         tool: "list_albums",
-        rows: rows.map((a) => ({ id: a.id, name: a.name, event_name: a.event_name, photo_count: a.photo_count, route: `/fotos/alben/${a.id}` })),
+        total: rows.length,
+        rows: shown.map((a) => ({
+          id: a.id, name: a.name, event_name: a.event_name, photo_count: a.photo_count, shared: Boolean(a.is_shared), route: `/fotos/alben/${a.id}`,
+        })),
         route: `/fotos/alben${query({ q: str(args.q) })}`,
       },
     };
   },
 };
 
-export const PHOTO_TOOLS = [listPhotos, searchPhotos, listRecaps, listAlbums];
+export const listAlbumShares: ToolSpec = {
+  name: "list_album_shares",
+  kind: "read",
+  summary: "Who the user's shared albums are shared with: the users (participants) by name and whether a public link exists — for every shared album the user owns, or one album by id.",
+  permissions: ["module.photos"],
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      album_id: { type: "integer", description: "one album; default: every shared album the user owns" },
+      q: { type: "string", description: "text in album name or event" },
+      limit: { type: "integer", description: `albums to look up, at most ${SHARE_LOOKUP_CAP} (default ${SHARE_LOOKUP_CAP})` },
+    },
+  },
+  async run(args, ctx) {
+    const me = Number(ctx.user.userID);
+    const albumId = int(args.album_id);
+    const q = str(args.q)?.toLocaleLowerCase("de");
+    const limit = int(args.limit, { min: 1, max: SHARE_LOOKUP_CAP }) ?? SHARE_LOOKUP_CAP;
+    const res = await (photo.listAlbums()) as unknown as { albums: Album[] };
+    const candidates = res.albums.filter((a) => {
+      if (albumId !== undefined) return a.id === albumId;
+      if (!a.is_shared) return false;
+      if (q && !`${a.name} ${a.event_name ?? ""}`.toLocaleLowerCase("de").includes(q)) return false;
+      return true;
+    });
+    // The share list is the owner's to see; an album shared *with* the user
+    // is listed with its owner and no participants.
+    const own = candidates.filter((a) => a.user_id === me);
+    const foreign = candidates.filter((a) => a.user_id !== me);
+    const looked = own.slice(0, limit);
+    const rows: Array<{ id: number; name: string; event_name: string | null; shared_with: string[]; public_link: boolean; owner: "me" | "another user" }> = [];
+    for (const a of looked) {
+      const shares = (await photo.getAlbumShares({ id: a.id })) as unknown as AlbumShares;
+      rows.push({
+        id: a.id, name: a.name, event_name: a.event_name, owner: "me",
+        shared_with: shares.shares.map((x) => x.user_name),
+        public_link: Boolean(shares.publicLink),
+      });
+    }
+    for (const a of foreign) rows.push({ id: a.id, name: a.name, event_name: a.event_name, owner: "another user", shared_with: [], public_link: false });
+    const notes = [
+      foreign.length ? `${foreign.length} album${foreign.length === 1 ? " is" : "s are"} shared with the user by someone else; only the owner sees their participants.` : undefined,
+      own.length > looked.length ? `Only the first ${looked.length} of ${own.length} shared albums were looked up; narrow with q or ask for one album_id.` : undefined,
+    ].filter(Boolean);
+    return {
+      text: table(
+        ["id", "name", "event", "owner", "shared with", "public link"],
+        rows.map((r) => [r.id, r.name, r.event_name, r.owner, r.shared_with.join(", ") || (r.owner === "me" ? "nobody (link only)" : "?"), r.public_link ? "yes" : "no"]),
+        { cap: rows.length || 1, note: notes.join(" ") || undefined },
+      ),
+      digest: digestOf("list_album_shares", rows.length, rows.map((r) => r.id)),
+      rowCount: rows.length,
+      block: {
+        kind: "albums",
+        tool: "list_album_shares",
+        rows: rows.map((r) => ({
+          id: r.id, name: r.name, event_name: r.event_name, shared: true,
+          shared_with: r.shared_with.join(", ") || null, public_link: r.public_link, route: `/fotos/alben/${r.id}`,
+        })),
+      },
+    };
+  },
+};
+
+export const PHOTO_TOOLS = [listPhotos, searchPhotos, listRecaps, listAlbums, listAlbumShares];

@@ -54,7 +54,7 @@ export const listCategories: ToolSpec = {
 export const searchDocuments: ToolSpec = {
   name: "search_documents",
   kind: "read",
-  summary: "Hybrid full-text and semantic document search, optionally narrowed to a category slug and a document date range.",
+  summary: "Hybrid full-text and semantic document search, optionally narrowed to a category slug and a document date range; ranked by relevance unless sort says otherwise.",
   permissions: DOCUMENTS,
   source: "hand",
   parameters: {
@@ -65,6 +65,11 @@ export const searchDocuments: ToolSpec = {
       date_from: { type: "string", description: "document date from, YYYY-MM-DD" },
       date_to: { type: "string", description: "document date to, YYYY-MM-DD" },
       limit: { type: "integer", description: "at most 25 (default 15)" },
+      sort: {
+        type: "string",
+        enum: ["relevance", "date_desc", "date_asc"],
+        description: "relevance (default), or by document date — newest or oldest first. Use it when the user asks for a date order: the rows shown next to your answer follow this order, not your text.",
+      },
     },
     required: ["q"],
   },
@@ -75,15 +80,24 @@ export const searchDocuments: ToolSpec = {
     const dateFrom = isoDate(args.date_from);
     const dateTo = isoDate(args.date_to);
     const limit = int(args.limit, { min: 1, max: 25 }) ?? 15;
+    const sort = str(args.sort);
+    const byDate = sort === "date_desc" || sort === "date_asc";
+    const sortDir = sort === "date_asc" ? "asc" : "desc";
     const res = await (documents.searchDocumentsEndpoint({
       q, mode: "hybrid", category, date_from: dateFrom, date_to: dateTo, limit,
+      sort_by: byDate ? "doc_date" : undefined, sort_dir: byDate ? sortDir : undefined,
     })) as unknown as { items: DocumentSummary[] };
     const rows = res.items;
     return {
       text: table(
         ["id", "date", "title", "from", "category"],
         rows.map((d) => [d.id, d.doc_date?.slice(0, 10), docTitle(d), d.correspondent_display ?? d.sender, d.category_slug]),
-        { cap: limit, note: "Ranked by relevance; the list may hold near misses — say which ones fit." },
+        {
+          cap: limit,
+          note: byDate
+            ? `Sorted by document date, ${sortDir === "asc" ? "oldest" : "newest"} first; the list may hold near misses — say which ones fit.`
+            : "Ranked by relevance; the list may hold near misses — say which ones fit.",
+        },
       ),
       digest: digestOf("search_documents", rows.length, rows.map((d) => d.id)),
       rowCount: rows.length,
@@ -94,7 +108,7 @@ export const searchDocuments: ToolSpec = {
         rows: rows.map((d) => ({
           id: d.id, title: docTitle(d), doc_date: d.doc_date, from: d.correspondent_display ?? d.sender ?? null, category: d.category_slug ?? null,
         })),
-        route: `/dokumente${query({ q, category, dateFrom, dateTo })}`,
+        route: `/dokumente${query({ q, category, dateFrom, dateTo, sortBy: byDate ? "doc_date" : undefined, sortDir: byDate ? sortDir : undefined })}`,
       },
     };
   },
