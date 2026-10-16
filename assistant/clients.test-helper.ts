@@ -19,6 +19,11 @@ export const clients = {
     searchDocumentsEndpoint: vi.fn(),
     getDocument: vi.fn(),
     setDocumentFollowUp: vi.fn(),
+    findDocumentTextBoxes: vi.fn(),
+    createCollection: vi.fn(),
+    updateCollectionItem: vi.fn(),
+    startCollectionExport: vi.fn(),
+    getCollection: vi.fn(),
   },
   photo: {
     listPhotos: vi.fn(),

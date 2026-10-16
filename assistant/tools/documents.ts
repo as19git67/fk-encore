@@ -4,8 +4,9 @@
  */
 
 import { documents } from "~encore/clients";
-import { digestOf, int, isoDate, query, str, table } from "../format";
+import { bool, digestOf, int, isoDate, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
+import { findInDocuments } from "./text-boxes";
 
 const DOCUMENTS = ["module.documents", "documents.view"];
 
@@ -137,4 +138,56 @@ export const getDocumentSummary: ToolSpec = {
   },
 };
 
-export const DOCUMENT_TOOLS = [listCategories, searchDocuments, getDocumentSummary];
+/** Documents searched per call; more is a sign the model should narrow first. */
+const FIND_MAX_DOCUMENTS = 50;
+
+export const findTextInDocument: ToolSpec = {
+  name: "find_text_in_document",
+  kind: "read",
+  summary: "Where a value (an amount in any printed form, or a phrase) stands in documents: the pages per document. Documents read before word positions were kept are named as such.",
+  permissions: DOCUMENTS,
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      document_ids: { type: "array", items: { type: "integer" } },
+      from_previous_result: { type: "boolean", description: "the documents of the previous answer, instead of ids" },
+      query: { type: "string", description: "e.g. '450.000,00' or 'Kaufpreis'" },
+    },
+    required: ["query"],
+  },
+  async run(args, ctx) {
+    const q = str(args.query);
+    if (!q) throw new Error("query is required");
+    const ids = bool(args.from_previous_result) === true
+      ? ctx.previous?.("document") ?? []
+      : Array.isArray(args.document_ids)
+        ? [...new Set(args.document_ids.map((v) => int(v)).filter((v): v is number => v !== undefined))]
+        : [];
+    if (!ids.length) throw new Error("say which documents: document_ids or from_previous_result");
+    if (ids.length > FIND_MAX_DOCUMENTS) throw new Error(`at most ${FIND_MAX_DOCUMENTS} documents at once`);
+    const hits = await findInDocuments(ids, [q]);
+    const pagesText = (pages: number[]) => pages.join(", ");
+    const statusText = (h: (typeof hits)[number]) =>
+      h.status === "no_words" ? "no word positions yet (not searchable)"
+        : h.status === "not_found" ? "not visible"
+          : h.pages.length ? `pages ${pagesText(h.pages)}` : "not found";
+    const found = hits.filter((h) => h.pages.length > 0);
+    return {
+      text: table(
+        ["document", "result"],
+        hits.map((h) => [h.document_id, statusText(h)]),
+        { cap: 50, note: `"${q}" found in ${found.length} of ${hits.length} documents.` },
+      ),
+      digest: digestOf("find_text_in_document", found.length, found.map((h) => h.document_id)),
+      rowCount: hits.length,
+      block: {
+        kind: "table",
+        tool: "find_text_in_document",
+        rows: hits.map((h) => ({ id: h.document_id, result: statusText(h), route: `/dokumente/${h.document_id}` })),
+      },
+    };
+  },
+};
+
+export const DOCUMENT_TOOLS = [listCategories, searchDocuments, getDocumentSummary, findTextInDocument];

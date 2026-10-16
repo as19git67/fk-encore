@@ -61,9 +61,16 @@ describe("words from a text layer", () => {
       [0, 0, 595, 842],
     );
     expect(words.map((w) => w.text)).toEqual(["Kaufpreis:", "450.000,00", "EUR"]);
-    // 125pt over 25 characters: 5pt each.
-    expect(words[1].left).toBeCloseTo(72 + 11 * 5);
-    expect(words[1].right).toBeCloseTo(72 + 21 * 5);
+    // The width is shared out by advance widths, not evenly: "Kaufpreis: "
+    // is narrow, the digits are wide.
+    const advance: Record<string, number> = {
+      K: 667, a: 556, u: 556, f: 278, p: 556, r: 333, e: 556, i: 222, s: 500,
+      ":": 278, " ": 278, ",": 278, ".": 278, E: 667, U: 722, R: 722,
+    };
+    const units = (t: string) => [...t].reduce((n, ch) => n + (advance[ch] ?? 556), 0);
+    const scale = 125 / units("Kaufpreis: 450.000,00 EUR");
+    expect(words[1].left).toBeCloseTo(72 + units("Kaufpreis: ") * scale);
+    expect(words[1].right).toBeCloseTo(72 + units("Kaufpreis: 450.000,00") * scale);
     expect(words[1].top).toBeCloseTo(842 - 708);
     expect(words[1].bottom).toBeCloseTo(842 - 698);
   });

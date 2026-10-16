@@ -1,10 +1,11 @@
 # Assistant: one chat over everything the server knows
 
-Status: stages 1 to 5 implemented (`POST /chat` in llm-service with its
+Status: stages 1 to 5 and the first half of stage 6 implemented (`POST /chat` in llm-service with its
 benchmark in `llm-service/bench/`; the `assistant` service with the read
 tools and the direct-debits endpoint; the chat page in the web app; write
 actions as proposals the user confirms; follow-up questions on earlier
-results and generated conversation titles). The benchmark has not yet been run on
+results and generated conversation titles; word positions and redacted
+document bundles). The benchmark has not yet been run on
 the production GPU. Tracking issue #1524, stages #1525–#1534.
 
 ## Problem
@@ -456,6 +457,19 @@ behind it.
      Sammelmappe, where the user checks and corrects the boxes by hand
      before passing the PDF on. A missed box is not a risk the assistant
      should take alone.
+   - **Implemented** (#1532), with these details: the boxes come from
+     `GET /documents/:id/text-boxes` (the document's own visibility check),
+     and `create_collection` takes the values to black out (`redact`), not
+     rectangles — the server finds the boxes when the proposal is made, so
+     the card's page count is the truth and the model never copies
+     coordinates. Boxes are padded by 15 % of the line height on every
+     side; on a born-digital page a word's place inside its text run is
+     estimated from Helvetica advance widths, since pdf.js reports one width
+     per run. `create_collection` also starts the PDF (`build_pdf`, default
+     on); `build_collection_pdf` does it for an existing folder. The result
+     links the folder page (`/dokumente/mappen/:id`), where the PDF is
+     downloaded once built. Documents without stored positions are named on
+     the card and left unredacted.
    - `transaction_report(title, groups, yield?)` takes the grouping the
      model made — `groups: [{name, transaction_ids}]`, one booking in at
      most one group, the rest in "Sonstige" — and computes per group the

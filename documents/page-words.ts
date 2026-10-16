@@ -87,10 +87,31 @@ const ASCENT = 0.8;
 const DESCENT = 0.2;
 
 /**
+ * Relative advance widths (Helvetica, per 1000 em). pdf.js reports one width
+ * per text run — often a whole line — so a word's place inside it has to be
+ * estimated. Sharing the width out by these proportions instead of evenly
+ * keeps a number after "Kaufpreis: " where it is printed: digits are twice
+ * as wide as an `i` or a space. Unknown characters count as a digit.
+ */
+const ADVANCE: Record<string, number> = {
+  " ": 278, ".": 278, ",": 278, ":": 278, ";": 278, "!": 278, "/": 278, "-": 333, "(": 333, ")": 333,
+  "'": 191, '"': 355, "%": 889, "&": 667, "+": 584, "€": 556, "§": 556,
+  a: 556, b: 556, c: 500, d: 556, e: 556, f: 278, g: 556, h: 556, i: 222, j: 222, k: 500, l: 222, m: 833,
+  n: 556, o: 556, p: 556, q: 556, r: 333, s: 500, t: 278, u: 556, v: 500, w: 722, x: 500, y: 500, z: 500,
+  A: 667, B: 667, C: 722, D: 722, E: 667, F: 611, G: 778, H: 722, I: 278, J: 500, K: 667, L: 556, M: 833,
+  N: 722, O: 778, P: 667, Q: 778, R: 722, S: 667, T: 611, U: 722, V: 667, W: 944, X: 667, Y: 667, Z: 611,
+  ä: 556, ö: 556, ü: 556, Ä: 667, Ö: 778, Ü: 722, ß: 611,
+};
+
+function advance(ch: string): number {
+  return ADVANCE[ch] ?? 556;
+}
+
+/**
  * The words of a born-digital page from pdf.js text items. An item is a run
  * of text in one font; it is split at whitespace and its width shared out by
- * character count, which is close enough for a box that has to cover a value.
- * `view` is the page's [x0, y0, x1, y1] in PDF user space (y up).
+ * the characters' relative advance widths. `view` is the page's
+ * [x0, y0, x1, y1] in PDF user space (y up).
  */
 export function wordsFromPdfItems(items: readonly PdfTextItem[], view: readonly number[]): StoredWord[] {
   const [x0, , , y1] = view;
@@ -102,19 +123,37 @@ export function wordsFromPdfItems(items: readonly PdfTextItem[], view: readonly 
     const baseline = t[5];
     if (!Number.isFinite(x) || !Number.isFinite(baseline)) continue;
     const size = item.height != null && item.height > 0 ? item.height : Math.abs(t[3]) || 1;
-    const width = item.width != null && item.width > 0 ? item.width : size * 0.5 * item.str.length;
-    const perChar = width / item.str.length;
+    const chars = [...item.str];
+    const units = chars.reduce((n, ch) => n + advance(ch), 0);
+    const width = item.width != null && item.width > 0 ? item.width : (size * units) / 1000;
+    const scale = width / units;
+    // Offset of each character's left edge, in the item's units.
+    const offsets: number[] = [];
+    let at = 0;
+    for (const ch of chars) {
+      offsets.push(at);
+      at += advance(ch);
+    }
+    offsets.push(at);
     const top = y1 - (baseline + size * ASCENT);
     const bottom = y1 - (baseline - size * DESCENT);
-    for (const match of item.str.matchAll(/\S+/g)) {
-      const start = match.index ?? 0;
+    // Character indices, not UTF-16 ones, so "€" and umlauts count once.
+    let i = 0;
+    while (i < chars.length) {
+      if (/\s/.test(chars[i])) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < chars.length && !/\s/.test(chars[j])) j++;
       words.push({
-        text: match[0],
-        left: x - x0 + start * perChar,
+        text: chars.slice(i, j).join(""),
+        left: x - x0 + offsets[i] * scale,
         top,
-        right: x - x0 + (start + match[0].length) * perChar,
+        right: x - x0 + offsets[j] * scale,
         bottom,
       });
+      i = j;
     }
   }
   return words;
@@ -182,11 +221,20 @@ function adjacent(a: StoredWord, b: StoredWord): boolean {
   return gap > -0.5 * height && gap < 3 * height;
 }
 
+/**
+ * A box grows by this share of its height on every side. Word boxes are
+ * measured (OCR) or estimated (text layer), and a redaction that falls short
+ * by a hair leaves the edge of a digit readable; a little extra costs nothing.
+ */
+const BOX_PADDING = 0.15;
+
 function boxOf(page: PageWords, words: readonly StoredWord[]): TextBox {
-  const left = Math.min(...words.map((w) => w.left));
-  const top = Math.min(...words.map((w) => w.top));
-  const right = Math.max(...words.map((w) => w.right));
-  const bottom = Math.max(...words.map((w) => w.bottom));
+  const height = Math.max(...words.map((w) => w.bottom - w.top));
+  const pad = height * BOX_PADDING;
+  const left = Math.min(...words.map((w) => w.left)) - pad;
+  const top = Math.min(...words.map((w) => w.top)) - pad;
+  const right = Math.max(...words.map((w) => w.right)) + pad;
+  const bottom = Math.max(...words.map((w) => w.bottom)) + pad;
   const clamp = (v: number) => Math.min(1, Math.max(0, v));
   const x = clamp(left / page.width);
   const y = clamp(top / page.height);
