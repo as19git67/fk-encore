@@ -12,7 +12,7 @@ const PHOTOS = ["module.photos", "photos.view"];
 /** Photos counted per call; past this the answer says "more than". */
 const PHOTO_COUNT_CAP = 2000;
 
-interface PhotoRow { id: number; taken_at?: string; created_at?: string; location_city?: string; location_country?: string; filename?: string }
+interface PhotoRow { id: number; taken_at?: string; created_at?: string; location_name?: string; location_city?: string; location_country?: string; filename?: string }
 interface NaturalResult { photoId: number; filename?: string; taken_at?: string; created_at: string; location_city?: string; location_country?: string; score: number }
 interface Recap { id: number; kind: string; title: string; subtitle: string | null; period_start: string | null; period_end: string | null; photo_count: number }
 interface Album { id: number; name: string; event_name: string | null; oldest_photo_at: string | null; newest_photo_at: string | null; photo_count: number }
@@ -28,7 +28,7 @@ function yearOf(date: string | null | undefined): number | undefined {
 export const listPhotos: ToolSpec = {
   name: "list_photos",
   kind: "read",
-  summary: "Photos filtered by favorite flag, date range and person ids; returns the count and the first ids.",
+  summary: "Photos filtered by favorite flag, date range, person ids and place; or narrows the previous photo result. Returns the count and the first ids.",
   permissions: PHOTOS,
   source: "hand",
   parameters: {
@@ -38,48 +38,89 @@ export const listPhotos: ToolSpec = {
       date_from: { type: "string", description: "taken on or after, YYYY-MM-DD" },
       date_to: { type: "string", description: "taken on or before, YYYY-MM-DD" },
       person_ids: { type: "array", items: { type: "integer" }, description: "ids from list_persons; photos showing these persons" },
+      place: { type: "string", description: "city, country or place name the photo was taken in, e.g. 'München'" },
+      from_previous_result: { type: "boolean", description: "narrow the photos of the previous answer instead of all photos" },
     },
   },
-  async run(args) {
+  async run(args, ctx) {
     const favorite = bool(args.favorite);
     const dateFrom = isoDate(args.date_from);
     const dateTo = isoDate(args.date_to);
     const personIds = Array.isArray(args.person_ids)
       ? args.person_ids.map((v) => int(v)).filter((v): v is number => v !== undefined)
       : [];
-    const res = await (photo.listPhotos({
-      favorite: favorite || undefined,
-      dateFrom,
-      dateTo,
-      personIds: personIds.length ? personIds.join(",") : undefined,
-      personMode: personIds.length ? "include" : undefined,
-      limit: PHOTO_COUNT_CAP + 1,
-    })) as unknown as { photos: PhotoRow[] };
-    const capped = res.photos.length > PHOTO_COUNT_CAP;
-    const photos = res.photos.slice(0, PHOTO_COUNT_CAP);
-    const count = photos.length;
+    const placeTerm = str(args.place);
+    const fromPrevious = bool(args.from_previous_result) === true;
+    const serverFilter = Boolean(favorite || dateFrom || dateTo || personIds.length);
+
+    const previous = fromPrevious ? ctx.previous?.("photo") : undefined;
+    if (fromPrevious && !previous) throw new Error("there is no earlier photo result in this conversation");
+
+    let rows: PhotoRow[];
+    let capped = false;
+    if (!previous || serverFilter) {
+      const res = await (photo.listPhotos({
+        favorite: favorite || undefined,
+        dateFrom,
+        dateTo,
+        personIds: personIds.length ? personIds.join(",") : undefined,
+        personMode: personIds.length ? "include" : undefined,
+        limit: PHOTO_COUNT_CAP + 1,
+      })) as unknown as { photos: PhotoRow[] };
+      capped = res.photos.length > PHOTO_COUNT_CAP;
+      rows = res.photos.slice(0, PHOTO_COUNT_CAP);
+      if (previous) {
+        const keep = new Set(previous);
+        rows = rows.filter((p) => keep.has(p.id));
+        capped = false;
+      }
+    } else {
+      rows = await photoDetails(previous);
+    }
+    if (placeTerm) {
+      const needle = placeTerm.toLowerCase();
+      rows = rows.filter((p) => [p.location_name, p.location_city, p.location_country]
+        .some((v) => v?.toLowerCase().includes(needle)));
+    }
+
+    const count = rows.length;
     const countText = capped ? `more than ${PHOTO_COUNT_CAP}` : String(count);
+    // The gallery has neither a place filter nor "the previous result".
+    const route = previous || placeTerm ? undefined : `/fotos/galerie${query({
+      favorite: favorite ? "true" : undefined, dateFrom, dateTo, personIds: personIds.join(",") || undefined,
+    })}`;
     return {
       text: table(
         ["id", "taken", "place"],
-        photos.map((p) => [p.id, (p.taken_at ?? p.created_at ?? "").slice(0, 10), place(p)]),
-        { cap: 15, total: count, note: `photo count: ${countText}` },
+        rows.map((p) => [p.id, (p.taken_at ?? p.created_at ?? "").slice(0, 10), place(p)]),
+        { cap: 15, total: count, note: `photo count: ${countText}${previous ? " (narrowed from the previous result)" : ""}` },
       ),
-      digest: digestOf("list_photos", count, photos.map((p) => p.id)),
+      digest: digestOf("list_photos", count, rows.map((p) => p.id)),
       rowCount: count,
+      ref: { type: "photo", ids: rows.map((p) => p.id) },
       block: {
         kind: "photos",
         tool: "list_photos",
         total: count,
         // The filename is what a thumbnail URL is built from.
-        rows: photos.slice(0, 60).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
-        route: `/fotos/galerie${query({
-          favorite: favorite ? "true" : undefined, dateFrom, dateTo, personIds: personIds.join(",") || undefined,
-        })}`,
+        rows: rows.slice(0, 60).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
+        route,
       },
     };
   },
 };
+
+/** Ids per call of the details endpoint, which takes them in the query string. */
+const DETAILS_BATCH = 500;
+
+async function photoDetails(ids: number[]): Promise<PhotoRow[]> {
+  const rows: PhotoRow[] = [];
+  for (let i = 0; i < ids.length; i += DETAILS_BATCH) {
+    const res = await (photo.getPhotoDetailsBatch({ ids: ids.slice(i, i + DETAILS_BATCH).join(",") })) as unknown as { photos: PhotoRow[] };
+    rows.push(...res.photos);
+  }
+  return rows;
+}
 
 export const searchPhotos: ToolSpec = {
   name: "search_photos",
@@ -105,6 +146,7 @@ export const searchPhotos: ToolSpec = {
       ),
       digest: digestOf("search_photos", rows.length, rows.map((r) => r.photoId)),
       rowCount: rows.length,
+      ref: { type: "photo", ids: rows.map((r) => r.photoId) },
       block: {
         kind: "photos",
         tool: "search_photos",

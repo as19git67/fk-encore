@@ -35,6 +35,9 @@ import { useAuthStore } from '../stores/auth'
 import { useAtLeast } from '../composables/useBreakpoint'
 import { applyEvent, emptyTurn, suggestedQuestions, type LiveTurn } from '../utils/assistantTurn'
 
+/** How long the server usually needs to name a new conversation. */
+const TITLE_RELOAD_MS = 8000
+
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -166,6 +169,9 @@ async function send(question: string) {
       stream.close()
     }
     void loadConversations()
+    // The server names a new conversation after its first answer, in the
+    // background; look again once that has had time to finish.
+    if (openedBySend === conversationId) setTimeout(() => void loadConversations(), TITLE_RELOAD_MS)
   } catch (e) {
     sendError.value = sendErrorText(e)
     // The question stays in the field, so asking again is one key away.

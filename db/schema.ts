@@ -4531,6 +4531,10 @@ export const assistantMessage = pgTable(
     tool_calls: jsonb("tool_calls").$type<Array<{ id: string; name: string; arguments: string }>>(),
     tool_call_id: text("tool_call_id"),
     blocks: jsonb("blocks").$type<unknown[]>(),
+    /** Tool rows: the one-line digest a later turn replays instead of the result. */
+    digest: text("digest"),
+    /** Tool rows: the ids the result held, for `from_previous_result`. */
+    result_ref: jsonb("result_ref").$type<{ type: "photo" | "document" | "transaction"; ids: number[] }>(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("assistant_message_by_conversation").on(table.conversation_id, table.id)],
