@@ -32,7 +32,7 @@ const inBasket = computed(() => props.members.length === 1 && basketStore.has(pr
 
 <template>
   <Button
-    :icon="inBasket ? 'pi pi-folder-open' : 'pi pi-folder-plus'"
+    :icon="inBasket ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
     :label="showLabel ? 'Ablegen' : undefined"
     text
     rounded

@@ -53,7 +53,7 @@ const canAdopt = computed(() => !!actuals.value && actuals.value.livingItemId !=
       <span>Heute verfügbar <strong>{{ formatEur(data.now.liquid) }}</strong>, gesamt {{ formatEur(data.now.wealth) }}.</span>
       <Button
         :label="`Stand festhalten (${scenarioName})`"
-        icon="pi pi-bookmark"
+        icon="pi pi-save"
         size="small"
         outlined
         :disabled="!canEdit || busy"

@@ -131,13 +131,39 @@ const subMenuItems = computed(() => {
 // as a gear among the meta icons in navbar-end. The documents module was the
 // first to have one; photos and finance now do too, so the rule is the same
 // everywhere: the first group in a module's menu becomes that module's gear.
-// (Documents additionally swaps in its basket at the strip's end, where the
-// gear used to sit.)
+// The gear is always there: below the module's settings it carries the own
+// profile (see settingsMenuItems).
 const settingsGroup = computed(() => subMenuItems.value.find((item) => item.children))
 const stripItems = computed(() =>
   settingsGroup.value
     ? subMenuItems.value.filter((item) => item !== settingsGroup.value)
     : subMenuItems.value,
+)
+
+// The gear holds the module's settings (filtered by permission as above) and,
+// below them, the own profile, which every signed-in user has. So the gear
+// is there in every module, also in those without settings of their own.
+interface MenuEntry {
+  label: string
+  icon: string
+  routeName?: string
+  separator?: boolean
+}
+const settingsMenuItems = computed<MenuEntry[]>(() => [
+  ...(settingsGroup.value?.children ?? []),
+  ...(settingsGroup.value?.children ? [{ label: '', icon: '', separator: true }] : []),
+  { label: 'Mein Profil', icon: 'pi pi-user', routeName: 'profile' },
+])
+const settingsActive = computed(() => isGroupActive(settingsMenuItems.value))
+
+// Mirrors the server's rule (collections/members.ts): collections are open to
+// whoever can use at least one type that goes into them.
+const mayUseCollections = computed(
+  () =>
+    (auth.hasPermission('module.documents') && auth.hasPermission('documents.view')) ||
+    (auth.hasPermission('module.photos') && auth.hasPermission('photos.view')) ||
+    auth.hasPermission('finance.view') ||
+    auth.hasPermission('meters.view'),
 )
 
 // Shared popup for submenu groups. The model is rebuilt on each open so a
@@ -147,15 +173,19 @@ const groupMenuModel = ref<Array<Record<string, unknown>>>([])
 
 function openGroupMenu(
   event: Event,
-  children: Array<{ label: string; icon: string; routeName?: string }>,
+  children: MenuEntry[],
 ) {
-  groupMenuModel.value = children.map((c) => ({
-    label: c.label,
-    icon: c.icon,
-    command: () => {
-      if (c.routeName) router.push({ name: c.routeName })
-    },
-  }))
+  groupMenuModel.value = children.map((c) =>
+    c.separator
+      ? { separator: true }
+      : {
+          label: c.label,
+          icon: c.icon,
+          command: () => {
+            if (c.routeName) router.push({ name: c.routeName })
+          },
+        },
+  )
   groupMenuRef.value?.toggle(event)
 }
 
@@ -279,42 +309,25 @@ onBeforeUnmount(() => stackObserver?.disconnect())
             data-testid="navbar-assistant"
             @click="router.push({ name: 'assistent' })"
           />
-          <!-- Every collection of every type (#1548), reachable from anywhere. -->
+          <!-- The basket, and through its drawer every collection (#1548).
+               Only for someone with a module that can file things at all. -->
+          <template v-if="mayUseCollections">
+            <DocBasketIndicator v-if="activeModule?.id === 'dokumente'" />
+            <TxBasketIndicator v-else-if="activeModule?.id === 'finanzen'" />
+            <SharedBasketIndicator v-else />
+          </template>
+          <!-- Settings: the active module's group, then the own profile.
+               Every module has one, since everyone has a profile. -->
           <Button
-            v-if="auth.isAuthenticated"
-            v-tooltip.bottom="'Sammelmappen'"
-            icon="pi pi-folder"
-            severity="secondary"
+            :icon="settingsGroup?.icon ?? 'pi pi-cog'"
             text
             rounded
-            aria-label="Sammelmappen"
-            data-testid="navbar-collections"
-            @click="router.push({ name: 'sammelmappen' })"
-          />
-          <DocBasketIndicator v-if="activeModule?.id === 'dokumente'" />
-          <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
-          <SharedBasketIndicator
-            v-if="auth.isAuthenticated && !['dokumente', 'finanzen', 'admin'].includes(activeModule?.id ?? '')"
-          />
-          <!-- Settings gear for the active module -->
-          <Button
-            v-if="settingsGroup?.children"
-            :icon="settingsGroup.icon"
-            text
-            rounded
-            :severity="isGroupActive(settingsGroup.children) ? 'primary' : 'secondary'"
-            :aria-label="settingsGroup.label"
-            v-tooltip.bottom="settingsGroup.label"
-            @click="openGroupMenu($event, settingsGroup.children)"
-          />
-          <Button
-            icon="pi pi-user"
-            severity="secondary"
-            text
-            rounded
-            aria-label="Profil"
-            v-tooltip.bottom="'Profil'"
-            @click="router.push('/profile')"
+            :severity="settingsActive ? 'primary' : 'secondary'"
+            aria-label="Einstellungen"
+            aria-haspopup="true"
+            v-tooltip.bottom="'Einstellungen'"
+            data-testid="navbar-settings"
+            @click="openGroupMenu($event, settingsMenuItems)"
           />
           <Button
             icon="pi pi-sign-out"

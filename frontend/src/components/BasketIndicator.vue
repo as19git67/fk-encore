@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
 import Message from 'primevue/message'
@@ -53,6 +54,13 @@ const emit = defineEmits<{
 }>()
 
 const visible = ref(false)
+const router = useRouter()
+
+/** The basket is the one unnamed collection; the named ones are a step away. */
+function openCollections() {
+  visible.value = false
+  void router.push({ name: 'sammelmappen' })
+}
 
 const noun = computed(() => (props.count === 1 ? props.singular : props.plural))
 const countLabel = computed(() => `${props.count} ${noun.value}`)
@@ -111,6 +119,17 @@ defineExpose({
           <slot name="subtitle" />
         </div>
       </template>
+
+      <Button
+        label="Alle Sammelmappen"
+        icon="pi pi-folder"
+        severity="secondary"
+        text
+        size="small"
+        class="drawer-collections"
+        data-testid="basket-collections"
+        @click="openCollections"
+      />
 
       <div v-if="count === 0" class="basket-empty">
         <i class="pi pi-shopping-cart basket-empty-icon" />
@@ -183,6 +202,12 @@ defineExpose({
 .drawer-count {
   color: var(--p-text-muted-color);
   font-size: var(--text-base);
+}
+
+.drawer-collections {
+  /* The drawer's content starts flush under the header and clips: room for the ring. */
+  margin-top: var(--focus-ring-reach);
+  margin-bottom: var(--space-2);
 }
 
 .basket-empty {

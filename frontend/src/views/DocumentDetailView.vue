@@ -960,7 +960,7 @@ onBeforeUnmount(() => {
           />
           <Button
             v-if="auth.hasPermission('documents.edit') && doc"
-            :icon="doc.teacher_requested ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
+            :icon="doc.teacher_requested ? 'pi pi-flag-fill' : 'pi pi-flag'"
             :label="doc.teacher_requested ? 'Vorgemerkt' : 'Vormerken'"
             :aria-label="doc.teacher_requested ? 'Vormerkung aufheben' : 'Für Cloud-Lehrer vormerken'"
             text
@@ -1018,7 +1018,7 @@ onBeforeUnmount(() => {
                   </div>
                 </li>
                 <li>
-                  <i class="pi pi-folder-plus" aria-hidden="true" />
+                  <i class="pi pi-bookmark" aria-hidden="true" />
                   <div>
                     <strong>Ablegen</strong>
                     <span>Dokument in den Basket oder eine Sammelmappe legen bzw. wieder herausnehmen — der Basket dient auch als Navigationsliste.</span>

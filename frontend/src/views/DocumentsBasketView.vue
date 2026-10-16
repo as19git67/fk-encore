@@ -111,7 +111,7 @@ onMounted(load)
         @click="followUpOpen = true"
       />
       <Button
-        icon="pi pi-folder-plus"
+        icon="pi pi-bookmark"
         label="Ablegen"
         severity="secondary"
         aria-haspopup="dialog"

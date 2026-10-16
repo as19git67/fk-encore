@@ -190,6 +190,9 @@ async function load() {
   }
 }
 
+// Declared before the watch: it runs at once and, closed, stops the polling.
+let timer: ReturnType<typeof setTimeout> | null = null
+
 watch(
   () => props.visible,
   (open) => {
@@ -270,7 +273,6 @@ async function removeProfile() {
 
 // ── Runs ────────────────────────────────────────────────────────────────────
 
-let timer: ReturnType<typeof setTimeout> | null = null
 
 function stopPolling() {
   if (timer) clearTimeout(timer)
@@ -481,7 +483,7 @@ function timeLabel(iso: string): string {
           <Button label="Speichern" size="small" :disabled="!profileName.trim()" @click="saveProfile" />
           <Button label="Abbrechen" size="small" text severity="secondary" @click="naming = false" />
         </template>
-        <Button v-else label="Als Profil speichern" icon="pi pi-bookmark" size="small" text @click="naming = true" />
+        <Button v-else label="Als Profil speichern" icon="pi pi-save" size="small" text @click="naming = true" />
       </div>
     </template>
 

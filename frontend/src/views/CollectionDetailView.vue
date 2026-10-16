@@ -254,7 +254,7 @@ const selectionActions = computed<ToolbarItem[]>(() =>
         key: 'file',
         label: 'Ablegen',
         title: 'Ablegen: Basket oder eine andere Sammelmappe',
-        icon: 'pi pi-folder-plus',
+        icon: 'pi pi-bookmark',
         severity: 'secondary',
         command: () => (moveOpen.value = true),
       },

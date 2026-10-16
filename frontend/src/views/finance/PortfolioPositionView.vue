@@ -634,7 +634,7 @@ function transactionCash(tx: PortfolioTransaction): string {
                   <!-- The security in this depot, filed (#1548). -->
                   <Button
                     v-if="d.security_id != null"
-                    :icon="securityInBasket(d.security_id) ? 'pi pi-folder-open' : 'pi pi-folder-plus'"
+                    :icon="securityInBasket(d.security_id) ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
                     size="small"
                     text
                     rounded

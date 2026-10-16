@@ -1305,8 +1305,8 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
   (Fotos, Buchungen); die Regel ist der Filter der Liste
   (`components/collections/SaveRuleDialog.vue`, `collections/rules.ts`).
 - Basket und Sammelmappe erreicht man über **eine** Aktion „Ablegen“
-  (Icon `pi-folder-plus`, `pi-folder-open` solange das Ding im Basket
-  liegt): ein Dialog (`components/collections/AddToCollectionDialog.vue`)
+  (Icon `pi-bookmark`, `pi-bookmark-fill` solange das Ding im Basket
+  liegt; das Lesezeichen steht in der App für nichts anderes): ein Dialog (`components/collections/AddToCollectionDialog.vue`)
   mit dem Basket zuoberst, den passenden Mappen und „Neue Sammelmappe“; für
   ein einzelnes Ding hakt er an, wo es schon liegt. Jede Detailseite trägt
   `components/collections/FileButton.vue` oben in `#actions` neben ihren
@@ -1329,7 +1329,12 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
 - `Ctrl/Cmd+A` wählt alles (das Composable bindet es selbst),
   Umschalt+Klick den Bereich, `Esc` beendet.
 - Der Basket-Knopf mit Schublade ist `components/BasketIndicator.vue`; sein
-  Badge zählt alles im Basket. Jeder Drawer zeigt den ganzen Basket nach Typ
+  Badge zählt alles im Basket. Er ist im Hauptmenü zugleich der Weg zu den
+  Sammelmappen („Alle Sammelmappen“ oben in der Schublade) — kein eigener
+  Mappen-Knopf daneben. Gezeigt wird er nur, wer mindestens einen Typ nutzen
+  darf, der in Mappen kommt (wie `mayUseType` in `collections/members.ts`).
+- Das Zahnrad im Hauptmenü gibt es in jedem Modul: oben die Einstellungen
+  des Moduls (nach Rechten gefiltert), darunter immer „Mein Profil“. Jeder Drawer zeigt den ganzen Basket nach Typ
   gruppiert (`components/collections/BasketMemberList.vue`) und endet mit
   `BasketFooter` („Leeren“, „Als Sammelmappe speichern“). Module ohne
   Stapelaktionen zeigen `SharedBasketIndicator`. Dokumente und Finanzen

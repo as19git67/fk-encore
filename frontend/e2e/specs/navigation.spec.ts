@@ -38,14 +38,15 @@ test.describe('Navigation (Maus + Tastatur)', () => {
     await expect(items.nth(1)).toBeFocused()
   })
 
-  test('Profil-Button (icon-only) hat aria-label und ist per Enter aktivierbar', async ({ page }) => {
+  test('Einstellungen (icon-only) hat aria-label, öffnet per Enter und führt zum Profil', async ({ page }) => {
     await page.goto('fotos/galerie')
 
-    const profileBtn = page.getByRole('button', { name: 'Profil' })
-    await expect(profileBtn).toBeVisible()
-    await profileBtn.focus()
+    const settingsBtn = page.getByRole('button', { name: 'Einstellungen' })
+    await expect(settingsBtn).toBeVisible()
+    await settingsBtn.focus()
     await page.keyboard.press('Enter')
 
+    await page.getByRole('menuitem', { name: 'Mein Profil' }).click()
     await expect(page).toHaveURL(/\/profile/)
   })
 })

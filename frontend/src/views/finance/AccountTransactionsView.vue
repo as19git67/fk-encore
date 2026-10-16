@@ -1331,7 +1331,7 @@ const selectionActions = computed<ToolbarItem[]>(() => [
     key: 'file',
     label: 'Ablegen',
     title: 'Auswahl in den Basket oder eine Sammelmappe legen',
-    icon: 'pi pi-folder-plus',
+    icon: 'pi pi-bookmark',
     severity: 'secondary',
     disabled: localSelectionCount.value === 0,
     command: () => (collectionDialogOpen.value = true),
