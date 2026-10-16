@@ -80,6 +80,14 @@ export interface LlmLiveConfig {
   /** `env` = the container's environment, `file` = an activated configuration. */
   source: string
   model_present: boolean
+  /** Set when llm-service ran the configuration differently than asked — `inproc` via llama-server. */
+  notice?: string | null
+}
+
+/** Which backends the running llm-service image can load a model with. */
+export interface LlmBackends {
+  inproc: boolean
+  server: boolean
 }
 
 export interface LlmDownloadState {
@@ -103,6 +111,8 @@ export interface LlmStatus {
   reload: LlmReloadState
   download: LlmDownloadState
   llm_loaded: boolean
+  /** Null when llm-service does not report it. */
+  backends: LlmBackends | null
   in_sync: boolean
 }
 

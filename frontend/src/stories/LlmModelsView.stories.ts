@@ -80,6 +80,7 @@ const STATUS: LlmStatus = {
   },
   download: IDLE_DOWNLOAD,
   llm_loaded: true,
+  backends: { inproc: false, server: true },
   in_sync: true,
 }
 
@@ -129,6 +130,47 @@ export const NichtGeladen: Story = {
             in_sync: false,
             live: { ...STATUS.live, model_present: false, source: 'env' },
             reload: { ...STATUS.reload, state: 'idle', finished_at: null },
+          }),
+        ),
+        ...llmHandlers,
+      ],
+    },
+  },
+}
+
+/** A CPU model configured for `inproc`, run in llama-server because the GPU image lacks llama-cpp-python. */
+export const InprocUeberServer: Story = {
+  name: 'CPU-Modell über llama-server (inproc fehlt im Image)',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/admin/llm-status', () =>
+          HttpResponse.json({
+            ...STATUS,
+            live: {
+              ...STATUS.live,
+              notice: "backend 'inproc' needs llama-cpp-python, which this image does not ship; the model runs in llama-server on the CPU instead (0 GPU layers)",
+            },
+          }),
+        ),
+        ...llmHandlers,
+      ],
+    },
+  },
+}
+
+export const OhneProjektor: Story = {
+  name: 'Modell ohne passenden Projektor (nur Text)',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/admin/llm-status', () =>
+          HttpResponse.json({
+            ...STATUS,
+            live: {
+              ...STATUS.live,
+              notice: 'llama-server did not start with the projector mmproj-F16.gguf; the model runs without image understanding',
+            },
           }),
         ),
         ...llmHandlers,

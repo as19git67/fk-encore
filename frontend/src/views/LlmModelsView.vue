@@ -32,6 +32,23 @@ import {
 
 const configs = ref<LlmConfigRow[]>([])
 const status = ref<LlmStatus | null>(null)
+/** `inproc` exists only in the CPU image; in the GPU image llm-service runs such a configuration in llama-server on the CPU. */
+const inprocMissing = computed(() => status.value?.backends?.inproc === false)
+
+/** What llm-service did differently than configured, in words. */
+const liveNotices = computed(() => {
+  const notice = status.value?.live.notice ?? ''
+  const out: string[] = []
+  if (notice.includes('inproc')) {
+    out.push('Läuft über llama-server auf der CPU: Dieses Image hat kein llama-cpp-python für das Backend inproc, deshalb lädt der llm-service das Modell ohne GPU-Layer über llama-server.')
+  }
+  if (notice.includes('projector')) {
+    const name = /projector (\S+?);/.exec(notice)?.[1]
+    out.push(`Ohne Bildverständnis: llama-server ist mit dem Projektor${name ? ` ${name}` : ''} nicht gestartet, deshalb läuft das Modell nur mit Text. Für Bilder einen passenden mmproj-Projektor zum Modell herunterladen.`)
+  }
+  if (notice && !out.length) out.push(notice)
+  return out
+})
 const files = ref<ModelFilesResponse | null>(null)
 const error = ref('')
 const notice = ref('')
@@ -139,7 +156,7 @@ function blankForm(): LlmConfigInput {
     model_url: '',
     model_sha256: '',
     extra_urls: [],
-    backend: 'inproc',
+    backend: inprocMissing.value ? 'server' : 'inproc',
     accelerator: 'cpu',
     ctx_size: 8192,
     gpu_layers: 0,
@@ -237,10 +254,14 @@ async function onDeleteFile(filename: string) {
 
 // ── Formatting ───────────────────────────────────────────────────────────────
 
-const BACKEND_OPTIONS = [
-  { label: 'inproc (llama-cpp-python)', value: 'inproc' },
-  { label: 'server (llama-server)', value: 'server' },
-]
+const backendOptions = computed(() => [
+  {
+    label: inprocMissing.value ? 'inproc (llama-cpp-python) – nicht in diesem Image' : 'inproc (llama-cpp-python)',
+    value: 'inproc',
+    disabled: inprocMissing.value,
+  },
+  { label: 'server (llama-server)', value: 'server', disabled: status.value?.backends?.server === false },
+])
 const ACCELERATOR_OPTIONS = [
   { label: 'CPU', value: 'cpu' },
   { label: 'CUDA', value: 'cuda' },
@@ -357,6 +378,12 @@ function formatEta(seconds: number | null): string {
           <dd>{{ status.live.n_cpu_moe > 0 ? `${status.live.n_cpu_moe} Layer` : '–' }}</dd>
         </div>
       </dl>
+
+      <Message v-if="liveNotices.length" severity="info" :closable="false">
+        <template v-for="(n, i) in liveNotices" :key="i">
+          <br v-if="i > 0" />{{ n }}
+        </template>
+      </Message>
 
       <Message v-if="!status.in_sync" severity="warn" :closable="false">
         Gewünscht ist <strong>{{ status.intended?.label ?? 'die Umgebung' }}</strong>, geladen ist
@@ -623,7 +650,17 @@ function formatEta(seconds: number | null): string {
         <div class="form-grid">
           <label class="form-field">
             <span>Backend</span>
-            <Select v-model="form.backend" :options="BACKEND_OPTIONS" optionLabel="label" optionValue="value" />
+            <Select
+              v-model="form.backend"
+              :options="backendOptions"
+              optionLabel="label"
+              optionValue="value"
+              optionDisabled="disabled"
+            />
+            <small v-if="inprocMissing && form.backend === 'inproc'" class="hint">
+              Dieses Image hat kein llama-cpp-python. Der llm-service lädt das Modell dann über
+              llama-server auf der CPU (0 GPU-Layer). Am besten auf <code>server</code> umstellen.
+            </small>
           </label>
           <label class="form-field">
             <span>Beschleuniger</span>

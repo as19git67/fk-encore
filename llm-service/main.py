@@ -16,7 +16,9 @@ and :http:post:`/embed`, plus :http:get:`/healthz` for compose.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import functools
+import importlib.util
 import json
 import logging
 import os
@@ -252,7 +254,7 @@ _llama_server = LlamaServerProcess(on_unexpected_exit=_handle_unexpected_exit)
 _downloads = DownloadManager(MODELS_DIR)
 
 
-def _apply_config(cfg: LlmConfig, *, source: str) -> None:
+def _apply_config(cfg: LlmConfig, *, source: str, notice: str | None = None) -> None:
     """Publish *cfg* as this module's live configuration.
 
     Rebinding module globals is deliberate: every read site in this file
@@ -285,6 +287,7 @@ def _apply_config(cfg: LlmConfig, *, source: str) -> None:
 
     _state["config"] = cfg
     _state["config_source"] = source
+    _state["backend_notice"] = notice
 
 
 def _resolve_embed_device(torch: Any) -> str:
@@ -552,10 +555,33 @@ def _load_server_llm() -> None:
     # full timeout — the difference between _reload_worker's except block
     # rolling back promptly and the caller sitting through the whole wait
     # first. Only meaningful when we spawned the process ourselves.
-    props = client.wait_until_ready(
-        float(LLM_SERVER_READY_TIMEOUT),
-        still_starting=(lambda: _llama_server.is_running) if _llama_server.available else None,
-    )
+    def wait() -> Any:
+        return client.wait_until_ready(
+            float(LLM_SERVER_READY_TIMEOUT),
+            still_starting=(lambda: _llama_server.is_running) if _llama_server.available else None,
+        )
+
+    try:
+        props = wait()
+    except Exception:
+        # A projector that does not fit the model — another model's, found on
+        # a shared volume — stops llama-server at startup. Text is worth more
+        # than the rollback to the previous model, so try once without it.
+        cfg: LlmConfig = _state["config"]
+        projector = cfg.resolve_mmproj()
+        if not (_llama_server.available and projector):
+            raise
+        log.exception("llama-server did not start with projector %s — retrying without it", projector)
+        if _llama_server.is_running:
+            _llama_server.stop()
+        _state["config"] = dataclasses.replace(cfg, vision=False)
+        _state["backend_notice"] = "; ".join(filter(None, [
+            _state.get("backend_notice"),
+            f"llama-server did not start with the projector {Path(projector).name}; "
+            "the model runs without image understanding",
+        ]))
+        _llama_server.start(_state["config"])
+        props = wait()
     _state["llm"] = client
     # n_ctx from /props is the server's actual window, which may differ from our
     # LLM_CTX if the sidecar clamped it — and LLM_CTX is what /classify budgets
@@ -568,6 +594,40 @@ def _load_server_llm() -> None:
             server_ctx, LLM_CTX,
         )
     log.info("llama-server ready (model=%s)", props.get("model_path", "?") if isinstance(props, dict) else "?")
+
+
+def _inproc_available() -> bool:
+    """llama-cpp-python is only in the CPU image."""
+
+    return importlib.util.find_spec("llama_cpp") is not None
+
+
+def _backends() -> dict[str, bool]:
+    """Which backends this image can run, for the app's model page."""
+
+    return {"inproc": _inproc_available(), "server": _llama_server.available}
+
+
+INPROC_REROUTED = (
+    "backend 'inproc' needs llama-cpp-python, which this image does not ship; "
+    "the model runs in llama-server on the CPU instead (0 GPU layers)"
+)
+
+
+def _runnable(cfg: LlmConfig) -> tuple[LlmConfig, str | None]:
+    """The configuration as this image can run it.
+
+    A CPU model configured for `inproc` cannot load in the GPU image, which
+    has no llama-cpp-python. llama-server runs the same GGUF on the CPU with
+    no layers offloaded, so it takes over instead of the reload failing and
+    falling back to the previous model. Anything else is returned unchanged.
+    The second value says what was changed, for /reload/status.
+    """
+
+    if cfg.backend == "inproc" and not _inproc_available() and _llama_server.available:
+        log.warning("%s (%s)", INPROC_REROUTED, cfg.label or cfg.model_path.name)
+        return dataclasses.replace(cfg, backend="server", gpu_layers=0, n_cpu_moe=0), INPROC_REROUTED
+    return cfg, None
 
 
 def _resolve_startup_config() -> tuple[LlmConfig, str]:
@@ -694,7 +754,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     startup_monotonic = time.monotonic()
 
     cfg, source = _resolve_startup_config()
-    _apply_config(cfg, source=source)
+    cfg, notice = _runnable(cfg)
+    _apply_config(cfg, source=source, notice=notice)
     _ensure_model_present(cfg)
 
     # Lazy imports keep `python main.py --help`-style inspection cheap and
@@ -997,6 +1058,7 @@ def _config_view() -> dict[str, Any]:
     data = cfg.to_dict()
     data["source"] = _state["config_source"]
     data["model_present"] = cfg.model_path.exists()
+    data["notice"] = _state.get("backend_notice")
     return data
 
 
@@ -1012,10 +1074,11 @@ def _drain_inference() -> None:
     _inference_executor.submit(lambda: None).result(timeout=RELOAD_DRAIN_TIMEOUT)
 
 
-def _reload_worker(cfg: LlmConfig) -> None:
+def _reload_worker(cfg: LlmConfig, notice: str | None = None) -> None:
     """Swap the loaded model. Runs on the reload thread."""
 
     previous: LlmConfig = _state["config"]
+    previous_notice = _state.get("backend_notice")
 
     # Reject new work first, then wait for the work already accepted.
     _state["llm"] = None
@@ -1031,7 +1094,7 @@ def _reload_worker(cfg: LlmConfig) -> None:
         _ensure_model_present(cfg)
 
         _set_reload_state("loading")
-        _apply_config(cfg, source="file")
+        _apply_config(cfg, source="file", notice=notice)
         _load_llm()
     except Exception:
         # Try to get back to the model that was working. If that fails too the
@@ -1042,7 +1105,7 @@ def _reload_worker(cfg: LlmConfig) -> None:
         try:
             if _llama_server.is_running:
                 _llama_server.stop()
-            _apply_config(previous, source=_state["config_source"])
+            _apply_config(previous, source=_state["config_source"], notice=previous_notice)
             _load_llm()
             log.info("Previous configuration restored")
         except Exception:
@@ -1124,6 +1187,7 @@ async def reload_model(req: ReloadRequest) -> dict[str, Any]:
         cfg = LlmConfig.from_dict(payload, models_dir=MODELS_DIR)
     except ConfigError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    cfg, notice = _runnable(cfg)
 
     if cfg.backend == "server" and not _llama_server.available:
         # Loading it in-process instead would silently ignore the very flags
@@ -1141,7 +1205,7 @@ async def reload_model(req: ReloadRequest) -> dict[str, Any]:
             detail=f"{cfg.model_path.name} is not on the models volume and no model_url was given",
         )
 
-    _submit_reload(functools.partial(_reload_worker, cfg), label=cfg.label)
+    _submit_reload(functools.partial(_reload_worker, cfg, notice), label=cfg.label)
     return {"status": "accepted", "reload": dict(_reload_status)}
 
 
@@ -1152,6 +1216,7 @@ async def reload_status() -> dict[str, Any]:
         "llm_loaded": _state["llm"] is not None,
         "config": _config_view(),
         "download": _downloads.status(),
+        "backends": _backends(),
     }
 
 
@@ -1182,7 +1247,8 @@ def _reload_worker_env() -> None:
         _llama_server.stop()
     _ensure_model_present(_BOOT_CONFIG)
     _set_reload_state("loading")
-    _apply_config(_BOOT_CONFIG, source="env")
+    cfg, notice = _runnable(_BOOT_CONFIG)
+    _apply_config(cfg, source="env", notice=notice)
     _load_llm()
     log.info("Back on the environment configuration (%s)", _BOOT_CONFIG.model_path.name)
 

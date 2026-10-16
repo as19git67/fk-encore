@@ -77,3 +77,27 @@ def test_resolve_is_empty_for_the_inproc_backend(tmp_path: Path) -> None:
     touch(tmp_path, MODEL, "mmproj-gemma-4-26B-A4B-it-qat-F16.gguf")
     cfg = LlmConfig(model_path=tmp_path / MODEL, backend="inproc")
     assert cfg.resolve_mmproj() == ""
+
+
+def test_never_hands_a_model_the_projector_of_another_family(tmp_path: Path) -> None:
+    """Gemma's projector made Qwen3 fail to start, and the service fell back
+    to the previous model."""
+
+    touch(tmp_path, "Qwen3-14B-Q4_K_M.gguf", "mmproj-gemma-4-26B-A4B-it-qat-F16.gguf")
+    assert discover_mmproj(tmp_path, "Qwen3-14B-Q4_K_M.gguf") == ""
+
+
+def test_a_projector_without_a_model_name_still_counts(tmp_path: Path) -> None:
+    """Upstream repos often ship it as `mmproj-F16.gguf` next to the weights."""
+
+    touch(tmp_path, MODEL, "mmproj-F16.gguf")
+    assert discover_mmproj(tmp_path, MODEL).endswith("mmproj-F16.gguf")
+
+
+def test_resolve_is_empty_once_vision_is_switched_off(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    touch(tmp_path, MODEL, "mmproj-gemma-4-26B-A4B-it-qat-F16.gguf")
+    cfg = LlmConfig(model_path=tmp_path / MODEL, backend="server")
+    assert cfg.resolve_mmproj()
+    assert replace(cfg, vision=False).resolve_mmproj() == ""
