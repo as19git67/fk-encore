@@ -65,7 +65,7 @@ export interface AskResponse {
 
 /** One event of a running turn, as the stream sends it. */
 export interface StreamEvent {
-  type: 'token' | 'tool_start' | 'tool_result' | 'done' | 'error'
+  type: 'token' | 'retract' | 'tool_start' | 'tool_result' | 'done' | 'error'
   text?: string
   tool?: string
   arguments?: Record<string, unknown>

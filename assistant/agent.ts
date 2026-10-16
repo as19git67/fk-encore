@@ -70,8 +70,10 @@ export function timeGrounding(now: Date): string {
 
 const RULES = `You are the assistant of a private household server that keeps finance bookings, documents, photos, utility meters and trip plans. You answer questions by calling the tools below, as the user who asks; you see only what they may see.
 
+You know nothing about this user's data. Everything you say about their bookings, accounts, documents, photos, albums, meters or trips must come from a tool result in this conversation — never from memory, never from what such data usually looks like, never as an example. A question about the user's data is answered by calling a tool first, every time, even when it looks simple ("die 10 neuesten Buchungen", "mein Kontostand"). If no tool returns what is asked, say so; do not fill in plausible rows.
+
 Rules:
-- Use tools for every fact. Never invent data, ids, names or numbers a tool did not return.
+- Use tools for every fact. Never invent data, ids, names, dates or amounts a tool did not return.
 - Never do arithmetic yourself. Sums, counts and periods come from tools (analyze_spending, upcoming_direct_debits, consumption_report print them). If no tool computed a number, do not state it.
 - Dates in tool arguments are ISO (YYYY-MM-DD); use the periods resolved below.
 - Combine tools from different areas when the question needs it.
@@ -83,6 +85,7 @@ Rules:
 - Answer briefly in the user's language (usually German).`;
 
 const EXAMPLES = `Examples of chained calls:
+0. "Zeige mir die 10 neuesten Buchungen." → list_transactions(limit = 10) → name what the rows show; the rows themselves appear beside the answer.
 1. "Welche Lastschriften muss ich diesen Monat noch erwarten?" → upcoming_direct_debits(until = end of this month) → answer with the debits and the sum the tool printed.
 2. "Gib mir die Protokolle der Eigentümerversammlung der Wohnung in Musterstadt." → list_categories → search_documents(q = "Protokoll Eigentümerversammlung", category = the matching slug) → name the documents that fit.
 3. "Wie viel Strom haben wir letztes Jahr verbraucht?" → list_meters → consumption_report(meter_id = the electricity meter, from/to = last year) → state the total the tool printed.
@@ -101,6 +104,24 @@ export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolea
     : "Tools you may call:";
   const working = contextSection(briefs);
   return [RULES, timeGrounding(now), ...(working ? [working] : []), `${how}\n${catalog}`, EXAMPLES].join("\n\n");
+}
+
+/**
+ * Sent back once when the model answers a turn without calling any tool but
+ * its answer reads like the user's data: an amount, a date, a list. Models
+ * fill such answers from memory when they skip the tool; this asks again.
+ */
+export const GROUNDING_NUDGE = "Your answer states amounts, dates or list rows about the user's data, but you called no tool in this turn. You do not know the user's data. Call the tool that returns it now. Only if every figure is already in an earlier tool result of this conversation, repeat your answer unchanged; if no tool can answer, say so.";
+
+const AMOUNT_RE = /\d,\d{2}\s*(?:€|eur\b)|(?:€|eur)\s*-?\d|\d\.\d{2}\s*(?:€|eur\b)/i;
+const DATE_RE = /\b\d{1,2}\.\s?\d{1,2}\.\s?(?:\d{4}|\d{2})\b|\b\d{4}-\d{2}-\d{2}\b/;
+const LIST_LINE_RE = /^\s*(?:[-*•]|\d+[.)])\s+.*\d/;
+
+/** Does an answer read like rows of the user's data (amounts, dates, a list with numbers)? */
+export function looksLikeUserData(text: string | null): boolean {
+  if (!text) return false;
+  if (AMOUNT_RE.test(text) || DATE_RE.test(text)) return true;
+  return text.split("\n").filter((line) => LIST_LINE_RE.test(line)).length >= 3;
 }
 
 export interface TurnInput {
@@ -217,6 +238,9 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
 
   let answer: string | null = null;
   let rounds = 0;
+  let calledTools = false;
+  /** The ungrounded answer and the nudge, sent along until the model calls a tool or answers again. */
+  let nudge: ChatMessage[] | null = null;
   for (let round = 1; round <= maxRounds && answer === null; round++) {
     rounds = round;
     const last = round === maxRounds;
@@ -230,7 +254,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     lastRoundStart -= shift;
 
     const request = {
-      messages: [...messages],
+      messages: [...messages, ...(nudge ?? [])],
       tools: definitions.length ? definitions : undefined,
       tool_choice: definitions.length ? (last ? "none" as const : "auto" as const) : undefined,
       max_tokens: ANSWER_TOKENS,
@@ -247,10 +271,20 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       );
       questionIndex -= cut;
       lastRoundStart -= cut;
-      request.messages = [...messages];
+      request.messages = [...messages, ...(nudge ?? [])];
       reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text })));
     }
 
+    if (!reply.tool_calls.length && !last && !calledTools && nudge === null && looksLikeUserData(reply.content)) {
+      // Not kept in the transcript: the draft was never the answer.
+      nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: GROUNDING_NUDGE }];
+      emit({ type: "retract" });
+      continue;
+    }
+    if (reply.tool_calls.length) {
+      calledTools = true;
+      nudge = null;
+    }
     if (!reply.tool_calls.length || last) {
       answer = reply.content ?? "";
       if (!answer.trim()) {

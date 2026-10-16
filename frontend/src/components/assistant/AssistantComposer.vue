@@ -10,7 +10,7 @@ import Textarea from 'primevue/textarea'
 const props = withDefaults(defineProps<{
   busy?: boolean
   placeholder?: string
-}>(), { busy: false, placeholder: 'Frag etwas über deine Finanzen, Dokumente, Fotos oder Zähler …' })
+}>(), { busy: false, placeholder: 'Was möchtest du wissen?' })
 
 const emit = defineEmits<{ send: [message: string] }>()
 
@@ -63,7 +63,9 @@ defineExpose({ focus: () => field.value?.$el.focus() })
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
-  padding: var(--space-2) var(--focus-ring-reach);
+  /* Clear of the home indicator on a phone: the app draws edge to edge
+     (viewport-fit=cover), so the bottom inset is ours to keep free. */
+  padding: var(--space-2) var(--focus-ring-reach) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
 }
 
 .field {
@@ -71,6 +73,10 @@ defineExpose({ focus: () => field.value?.$el.focus() })
   min-width: 0;
   max-height: 12rem;
   overflow-y: auto !important;
+}
+
+.field::placeholder {
+  font-size: var(--text-sm);
 }
 
 .visually-hidden {

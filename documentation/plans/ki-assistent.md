@@ -284,6 +284,16 @@ behind it.
      content, so a wrong answer can be traced to the call that produced
      it.
 
+   - **Grounding check** (after a first test answered "die 10 neuesten
+     Buchungen" with invented rows): the system prompt now opens with "You
+     know nothing about this user's data" and an example for that question.
+     Besides, `runTurn` sends an answer back once when the model called no
+     tool in the turn but the answer reads like the user's data (an amount,
+     a date, or three list lines with numbers, `looksLikeUserData`). The
+     draft is withdrawn on the stream (event `retract`) and never stored;
+     the model gets `GROUNDING_NUDGE` and either calls the tool or, when the
+     figures come from an earlier result, repeats itself, which is then
+     accepted. The benchmark has the case `latest-bookings`.
    - **Implemented** (#1527), with three deviations from the text above:
      - *Asking is a POST, the stream only watches.* A browser can open a
        WebSocket only with `?token=`, and the gateway downgrades that token

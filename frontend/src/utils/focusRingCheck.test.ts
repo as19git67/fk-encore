@@ -224,4 +224,41 @@ describe('findClippedFocusRings', () => {
     root.appendChild(span)
     expect(findClippedFocusRings(root)).toEqual([])
   })
+
+  it('measures a link in a scrolled chat against the chat only, not the page around it', () => {
+    // The chat (y 100–400) scrolls 600px of messages; scrolled down, a link
+    // happens to sit 1px below the page content's top edge (y 100). The chat
+    // can scroll it clear, so the page content is not the one to make room.
+    const root = document.createElement('div')
+    const page = document.createElement('div')
+    const chat = document.createElement('div')
+    const link = document.createElement('a')
+    link.setAttribute('href', '#')
+    chat.appendChild(link)
+    page.appendChild(chat)
+    root.appendChild(page)
+    const place = (el: Element, b: Box, scroll: { top?: number; height?: number } = {}) => {
+      Object.defineProperty(el, 'getBoundingClientRect', {
+        value: () => ({ ...b, width: b.right - b.left, height: b.bottom - b.top, x: b.left, y: b.top, toJSON: () => b }),
+      })
+      Object.defineProperty(el, 'scrollHeight', { value: scroll.height ?? b.bottom - b.top, configurable: true })
+      Object.defineProperty(el, 'scrollWidth', { value: b.right - b.left, configurable: true })
+      Object.defineProperty(el, 'scrollTop', { value: scroll.top ?? 0, configurable: true })
+      Object.defineProperty(el, 'scrollLeft', { value: 0, configurable: true })
+    }
+    place(page, { left: 0, top: 100, right: 300, bottom: 400 })
+    place(chat, { left: 10, top: 100, right: 290, bottom: 400 }, { top: 200, height: 600 })
+    place(link, { left: 20, top: 101, right: 120, bottom: 121 })
+
+    const clipping = new Set<Element>([page, chat])
+    const found = findClippedFocusRings(root, {
+      reach: 4,
+      getStyle: (el) => {
+        const o = clipping.has(el) ? 'auto' : 'visible'
+        return { overflowX: o, overflowY: o, overflow: o, visibility: 'visible', display: 'block', outlineOffset: '2px', borderTopWidth: '0px', borderLeftWidth: '0px' }
+      },
+    })
+    expect(found).toEqual([])
+  })
 })
+

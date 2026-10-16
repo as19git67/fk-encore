@@ -117,6 +117,8 @@ export type ChatMessage =
 /** What the agent reports while it works, in order. */
 export type TurnEvent =
   | { type: "token"; text: string }
+  /** The text streamed so far is withdrawn; a new answer follows. */
+  | { type: "retract" }
   | { type: "tool_start"; tool: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; tool: string; rowCount: number; block?: ResultBlock; error?: string }
   | { type: "done"; answer: string; blocks: ResultBlock[] }

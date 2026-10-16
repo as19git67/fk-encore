@@ -378,11 +378,14 @@ function remove(conversation: ConversationSummary) {
 <style scoped>
 /* Page frame and title: PageLayout (issue #1272). The page itself does not
    scroll; the messages do, and the question field stays at the bottom. */
+/* Fills the page content and never outgrows it: the messages scroll, not
+   the page, so the app's menu stays put while an answer streams in. */
 .assistant {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--space-4);
-  height: 100%;
+  flex: 1 1 auto;
   min-height: 0;
 }
 
@@ -395,6 +398,7 @@ function remove(conversation: ConversationSummary) {
 .side {
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border-right: 1px solid var(--p-content-border-color);
   padding-right: var(--space-2);
 }
@@ -410,6 +414,14 @@ function remove(conversation: ConversationSummary) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* At either end a swipe stops here instead of moving the whole page —
+     on a phone that dragged the app's menu along with the chat. */
+  overscroll-behavior: contain;
+  /* The containing block of the visually hidden headings inside: without
+     it they are placed against <main>, outside this scroller, and every
+     message made the whole document taller — the page scrolled and took
+     the app's menu with it. */
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);

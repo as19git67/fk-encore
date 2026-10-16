@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/vue3'
+import { h, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { http, HttpResponse, delay } from 'msw'
+import App from '../App.vue'
 import AssistantView from '../views/AssistantView.vue'
 import { defaultHandlers } from './handlers'
 import { routeFromParameters } from './storyRoute'
@@ -106,5 +109,37 @@ export const MitKontext: Story = {
       ],
     },
   },
+}
+
+const LONG = {
+  ...CONVERSATION,
+  messages: [...CONVERSATION.messages, ...CONVERSATION.messages.map((m) => ({ ...m, id: m.id + 100 }))],
+}
+
+/**
+ * Inside the app's frame on a phone: only the messages scroll; the navbar
+ * stays where it is and the page never grows past the screen.
+ */
+export const ImAppRahmen: Story = {
+  name: 'Im App-Rahmen auf dem Telefon',
+  parameters: {
+    testViewport: { width: 390, height: 700 },
+    msw: {
+      handlers: [
+        http.get('/api/assistant/conversations/:id', () => HttpResponse.json(LONG)),
+        ...handlers,
+      ],
+    },
+  },
+  render: () => ({
+    setup() {
+      const router = useRouter()
+      if (!router.hasRoute('story-assistent')) {
+        router.addRoute({ path: '/assistent/story-demo', name: 'story-assistent', component: AssistantView })
+      }
+      onMounted(() => { void router.push({ path: '/assistent/story-demo', query: { c: '1' } }) })
+      return () => h(App)
+    },
+  }),
 }
 
