@@ -209,6 +209,48 @@ export const BENCH_CASES: BenchCase[] = [
     results: { list_accounts: { rows: [{ id: 1, label: "Girokonto" }, { id: 2, label: "Depot" }] } },
   },
   {
+    id: "portfolio-gain",
+    title: "Depotentwicklung",
+    question: "Wie steht mein Depot, und wie viel Gewinn habe ich bisher gemacht?",
+    expect: [{ tool: "portfolio_overview" }],
+    results: {
+      portfolio_overview: {
+        summary: "market value 12500.00 EUR; cost basis 10000.00; unrealized gain 2500.00 (25.00 %); realized gain 300.00; income 120.00",
+        rows: [{ key: "DE0000000001", name: "Beispiel AG", value: "7500.00", unrealized_gain: "1500.00" }, { key: "DE0000000002", name: "Muster ETF", value: "5000.00", unrealized_gain: "1000.00" }],
+      },
+    },
+  },
+  {
+    id: "dividends-this-year",
+    title: "Dividenden dieses Jahr",
+    question: "Welche Dividenden habe ich dieses Jahr bekommen?",
+    expect: [{ tool: "depot_transactions", args: { kind: "dividend", from: "2026-01-01", to: "2026-12-31" } }],
+    results: {
+      depot_transactions: { rows: [{ id: 31, date: "2026-05-12", kind: "dividend", name: "Beispiel AG", net: "48.20" }], total: 1, sums: { net_amount: "48.20", fees: "0.00", taxes: "12.70" } },
+    },
+  },
+  {
+    id: "quote-of-security",
+    title: "Kurs eines Wertpapiers",
+    question: "Wie steht die Beispiel AG gerade, und was gibt es Neues dazu?",
+    expect: [{ tool: "quotes", args: { q: { $contains: "beispiel" } } }, { tool: "position_news", args: { key: "DE0000000001" } }],
+    results: {
+      portfolio_overview: { rows: [{ key: "DE0000000001", name: "Beispiel AG", value: "7500.00" }] },
+      quotes: { rows: [{ key: "DE0000000001", name: "Beispiel AG", "last price": "75.10", at: "2026-10-16 15:30", value: "7510.00", "change 1m": "2.30", "%": "3.16", "unread news": 2 }] },
+      position_news: { rows: [{ date: "2026-10-15", source: "Beispiel Wirtschaft", title: "Beispiel AG hebt Prognose an", sentiment: 0.6 }] },
+    },
+  },
+  {
+    id: "sales-last-year",
+    title: "Verkäufe letztes Jahr",
+    question: "Was habe ich letztes Jahr im Depot verkauft, und mit welchem Ergebnis?",
+    expect: [{ tool: "depot_transactions", args: { kind: "sell", from: "2025-01-01", to: "2025-12-31" } }],
+    results: {
+      depot_transactions: { rows: [{ id: 22, date: "2025-03-03", kind: "sell", name: "Muster ETF", amount: "10", net: "1210.00" }], total: 1, sums: { net_amount: "1210.00", fees: "4.90", taxes: "0.00" } },
+      portfolio_overview: { rows: [{ key: "DE0000000002", name: "Muster ETF", realized: "210.00" }] },
+    },
+  },
+  {
     id: "account-balance",
     title: "Saldo eines Kontos",
     question: "Wie viel ist gerade auf meinem Girokonto?",

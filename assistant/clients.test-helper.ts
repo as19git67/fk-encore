@@ -10,6 +10,11 @@ export const clients = {
   finance: {
     listAccounts: vi.fn(),
     getOverview: vi.fn(),
+    getPortfolio: vi.fn(),
+    getPortfolioPosition: vi.fn(),
+    listPortfolioTransactions: vi.fn(),
+    getQuotes: vi.fn(),
+    getPositionNews: vi.fn(),
     listTransactions: vi.fn(),
     query: vi.fn(),
     listUpcomingDebits: vi.fn(),

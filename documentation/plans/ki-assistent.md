@@ -326,6 +326,20 @@ behind it.
        latest statement balance — "meine Konten" are the ones the user
        placed there, not the account table; a cash account has no balance
        and the row says so), `upcoming_direct_debits` (new, see below).
+     - depots (`assistant/tools/depot.ts`): `portfolio_overview`
+       (`GET /finance/portfolio` — market value, cost basis, unrealized
+       and realized gain, income, fees, taxes, total return, positions
+       with value and gain, per-year figures; `q` finds a security's key),
+       `position_detail` (`GET /finance/portfolio/positions/:key` — one
+       security with share per depot, sales with gain, years,
+       transactions), `depot_transactions`
+       (`GET /finance/portfolio/transactions` — buys, sells, dividends by
+       security, kind and period, with the server's sums), `quotes`
+       (`GET /finance/quotes` — last price, change over a range, unread
+       news) and `position_news` (`GET /finance/quotes/news`). All
+       arithmetic is the finance service's; the blocks `positions`,
+       `depot_transactions`, `quotes` and `news` link to the Portfolio,
+       position and Kurse pages.
      - documents: `search_documents` (hybrid search with filters; `sort`
        switches the relevance ranking to document date, because the rows
        next to the answer follow the tool's order, not the model's text),

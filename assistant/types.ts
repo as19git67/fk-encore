@@ -33,6 +33,10 @@ export type BlockKind =
   | "readings"
   | "consumption"
   | "trip_plans"
+  | "positions"
+  | "depot_transactions"
+  | "quotes"
+  | "news"
   | "proposal"
   | "table";
 

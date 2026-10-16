@@ -12,7 +12,8 @@ import { API_BASE_URL, apiFetch, ensureFreshToken } from './client'
 export type BlockKind =
   | 'accounts' | 'transactions' | 'analysis' | 'debits' | 'categories'
   | 'documents' | 'document' | 'photos' | 'recaps' | 'albums'
-  | 'meters' | 'readings' | 'consumption' | 'trip_plans' | 'table' | 'proposal'
+  | 'meters' | 'readings' | 'consumption' | 'trip_plans'
+  | 'positions' | 'depot_transactions' | 'quotes' | 'news' | 'table' | 'proposal'
 
 /** Rows a tool returned, for display beside the answer. */
 export interface ResultBlock {
