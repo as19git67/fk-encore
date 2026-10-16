@@ -54,6 +54,7 @@ export const clients = {
     cancelSlot: vi.fn(async () => {}),
   },
   realtime: { publishEvent: vi.fn(async () => {}) },
+  user: { getLlmStatus: vi.fn() },
 };
 
 /** Forget scripted answers and recorded calls of the service endpoints. */

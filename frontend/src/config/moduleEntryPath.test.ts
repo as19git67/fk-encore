@@ -89,6 +89,7 @@ describe('moduleEntryPath', () => {
       'Taxonomie-Cockpit',
       'Taxonomie-Tools',
       'KI-Modell',
+      'KI-Benchmark',
       'Hilfe',
     ])
   })

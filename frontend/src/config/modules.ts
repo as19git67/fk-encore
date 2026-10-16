@@ -255,6 +255,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'data.manage' },
       },
       {
+        path: 'ki-benchmark',
+        name: 'dokumente-ki-benchmark',
+        component: () => import('../views/AssistantBenchmarkView.vue'),
+        meta: { permission: 'data.manage' },
+      },
+      {
         // Must stay last — this route would otherwise swallow every
         // sibling path above it.
         path: ':id',
@@ -284,6 +290,7 @@ export const modules: ModuleConfig[] = [
           { label: 'Taxonomie-Cockpit', icon: 'pi pi-chart-line', routeName: 'dokumente-taxonomie-cockpit', permission: 'data.manage' },
           { label: 'Taxonomie-Tools', icon: 'pi pi-wrench', routeName: 'dokumente-taxonomie-tools', permission: 'data.manage' },
           { label: 'KI-Modell', icon: 'pi pi-microchip-ai', routeName: 'dokumente-ki-modell', permission: 'data.manage' },
+          { label: 'KI-Benchmark', icon: 'pi pi-stopwatch', routeName: 'dokumente-ki-benchmark', permission: 'data.manage' },
           { label: 'Hilfe', icon: 'pi pi-question-circle', routeName: 'dokumente-hilfe', permission: 'documents.view' },
         ],
       },
