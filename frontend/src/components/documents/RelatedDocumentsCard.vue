@@ -29,6 +29,7 @@ const loading = ref(false)
 const failed = ref(false)
 
 const REASON_TITLES: Record<RelatedReason, string> = {
+  linked: 'Antwort und Bezug',
   same_folder: 'Aus demselben Ordner',
   same_correspondent_nearby: 'Vom selben Absender, zeitlich nah',
   same_collection: 'In derselben Sammelmappe',
@@ -36,6 +37,7 @@ const REASON_TITLES: Record<RelatedReason, string> = {
 }
 
 const REASON_ICONS: Record<RelatedReason, string> = {
+  linked: 'pi pi-reply',
   same_folder: 'pi pi-folder-open',
   same_correspondent_nearby: 'pi pi-envelope',
   same_collection: 'pi pi-folder',

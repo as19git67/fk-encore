@@ -22,6 +22,23 @@ const pending: Proposal = {
   result_route: null,
   result_download: null,
   error: null,
+  letter: null,
+}
+
+const letter: Proposal = {
+  ...pending,
+  proposal_id: 9,
+  tool: 'render_letter',
+  summary: 'Brief „Ihre Rechnung RE-2026-0001“ an Musterfirma GmbH, 1 Anlage, 1 Lücke zum Ausfüllen',
+  letter: {
+    sender: 'Erika Beispiel\nBeispielweg 2\n12345 Musterstadt',
+    recipient: 'Musterfirma GmbH\nBeispielstraße 1\n12345 Musterstadt',
+    subject: 'Ihre Rechnung RE-2026-0001',
+    body: 'Sehr geehrte Damen und Herren,\n\nbezahlt am [[Zahlungsdatum]].',
+    attachments: [{ id: 101, title: 'Rechnung Heizungswartung' }],
+    destinations: ['document'],
+    gaps: ['Zahlungsdatum'],
+  },
 }
 
 const RouterLink = defineComponent({
@@ -46,6 +63,13 @@ function button(el: HTMLElement, label: string): HTMLButtonElement {
 }
 
 const flushPromises = () => new Promise((r) => setTimeout(r, 0))
+
+// The letter's auto-resizing text areas watch their size; jsdom has no observer.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver
 
 beforeEach(() => {
   vi.mocked(executeProposal).mockReset()
@@ -97,5 +121,38 @@ describe('ProposalCard', () => {
     button(el, 'PDF herunterladen').click()
     await flushPromises()
     expect(downloadResult).toHaveBeenCalledWith('/finance/reports/grouped/4/pdf')
+  })
+
+  it('lets a letter be edited, and sends it only once every gap is filled', async () => {
+    vi.mocked(executeProposal).mockResolvedValue({
+      ...letter, status: 'executed', result_summary: 'Brief erstellt', result_download: '/assistant/letters/3/pdf',
+    })
+    const el = mountCard(letter)
+    expect(el.textContent).toContain('Noch auszufüllen: Zahlungsdatum')
+    expect(button(el, 'Ausführen').disabled).toBe(true)
+
+    const body = el.querySelector<HTMLTextAreaElement>('#letter-9-body')!
+    body.value = 'Sehr geehrte Damen und Herren,\n\nbezahlt am 20.03.2026.'
+    body.dispatchEvent(new Event('input'))
+    await flushPromises()
+    expect(el.textContent).not.toContain('Noch auszufüllen')
+    const collection = el.querySelector<HTMLInputElement>('#letter-9-dest-collection')!
+    collection.click()
+    await flushPromises()
+
+    button(el, 'Ausführen').click()
+    await flushPromises()
+    expect(executeProposal).toHaveBeenCalledWith(9, {
+      sender: letter.letter!.sender,
+      recipient: letter.letter!.recipient,
+      subject: 'Ihre Rechnung RE-2026-0001',
+      body: 'Sehr geehrte Damen und Herren,\n\nbezahlt am 20.03.2026.',
+      destinations: ['document', 'collection'],
+      attachment_ids: [101],
+    })
+    // Afterwards: the PDF, and the text as an e-mail draft.
+    expect(button(el, 'PDF herunterladen')).toBeTruthy()
+    const mail = [...el.querySelectorAll('a')].find((a) => a.getAttribute('href')?.startsWith('mailto:'))
+    expect(decodeURIComponent(mail!.getAttribute('href')!)).toContain('subject=Ihre Rechnung RE-2026-0001')
   })
 })

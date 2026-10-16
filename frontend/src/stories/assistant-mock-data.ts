@@ -98,6 +98,7 @@ function proposal(status: 'pending' | 'executed' | 'discarded', extra: Record<st
       result_route: null,
       result_download: null,
       error: null,
+      letter: null,
       ...extra,
     }],
   }
@@ -124,6 +125,42 @@ export const PROPOSAL_REPORT_BLOCK: ResultBlock = {
   }],
 }
 
+const LETTER_BODY = [
+  'Sehr geehrte Damen und Herren,',
+  'hiermit bestätige ich, dass ich die folgenden Rechnungen am [[Zahlungsdatum]] bezahlt habe:',
+  'RE-2026-0001 vom 02.03.2026 über 120,50 €\nRE-2026-0002 vom 09.03.2026 über 89,90 €\nRE-2026-0003 vom 16.03.2026 über 45,00 €',
+  'Mit freundlichen Grüßen\nErika Beispiel',
+].join('\n\n')
+
+export const PROPOSAL_LETTER_BLOCK: ResultBlock = {
+  kind: 'proposal',
+  tool: 'render_letter',
+  rows: [{
+    proposal_id: 5,
+    tool: 'render_letter',
+    summary: 'Brief „Ihre Rechnungen RE-2026-0001 bis RE-2026-0003“ an Musterfirma Haustechnik GmbH, 3 Anlagen, 2 Lücken zum Ausfüllen',
+    count: 3,
+    status: 'pending',
+    result_summary: null,
+    result_route: null,
+    result_download: null,
+    error: null,
+    letter: {
+      sender: 'Erika Beispiel\n[[Ihre Anschrift]]',
+      recipient: 'Musterfirma Haustechnik GmbH\nBeispielstraße 1\n12345 Musterstadt',
+      subject: 'Ihre Rechnungen RE-2026-0001 bis RE-2026-0003',
+      body: LETTER_BODY,
+      attachments: [
+        { id: 101, title: 'Rechnung Heizungswartung' },
+        { id: 102, title: 'Rechnung Ersatzteil' },
+        { id: 103, title: 'Rechnung Anfahrt' },
+      ],
+      destinations: ['document'],
+      gaps: ['Ihre Anschrift', 'Zahlungsdatum'],
+    },
+  }],
+}
+
 export const PROPOSAL_DISCARDED_BLOCK = proposal('discarded')
 export const PROPOSAL_FAILED_BLOCK = proposal('pending', { error: 'album name already in use' })
 
@@ -132,6 +169,7 @@ export const CONVERSATION: ConversationDetail = {
   title: 'Strom und Lastschriften',
   created_at: '2026-10-15T09:00:00Z',
   updated_at: '2026-10-15T09:05:00Z',
+  context: [],
   messages: [
     { id: 1, role: 'user', content: 'Welche Lastschriften muss ich in diesem Monat noch erwarten?', blocks: [], created_at: '2026-10-15T09:00:00Z' },
     {

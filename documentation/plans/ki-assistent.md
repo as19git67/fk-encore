@@ -1,12 +1,14 @@
 # Assistant: one chat over everything the server knows
 
-Status: stages 1 to 6 implemented (`POST /chat` in llm-service with its
+Status: stages 1 to 7 implemented (`POST /chat` in llm-service with its
 benchmark in `llm-service/bench/`; the `assistant` service with the read
 tools and the direct-debits endpoint; the chat page in the web app; write
 actions as proposals the user confirms; follow-up questions on earlier
 results and generated conversation titles; word positions, redacted
-document bundles and grouped transaction reports). The benchmark has not yet been run on
-the production GPU. Tracking issue #1524, stages #1525–#1534.
+document bundles and grouped transaction reports; letters from selected
+context). The benchmark has not yet been run on the production GPU.
+Tracking issue #1524, stages #1525–#1534; stage 8 (iOS) has its own plan
+later.
 
 ## Problem
 
@@ -572,6 +574,38 @@ behind it.
    - Follow-ups edit the draft in place: "kürzer", "förmlicher", "nenne
      auch die zweite Rechnung" produce a new draft from the same context;
      the card keeps the latest.
+   - **Implemented** (#1534), with these details:
+     - The working set is a column `context` on `assistant_conversation`
+       (migration 0251), set when the conversation is created or with
+       `PUT /assistant/conversations/:id/context`. `assistant/briefs.ts`
+       renders each object into a few lines for the system prompt and a
+       label for the chips above the question field; an object the user
+       cannot see is named as such, never described. Without an earlier
+       result of a type, `from_previous_result` means the working set's
+       objects of that type.
+     - Entry points: "An den Assistenten" in the selection bars of
+       documents, bookings and photos, and "Antwort entwerfen" on a
+       document page, all opening `/assistent?context=…`
+       (`utils/assistantContext.ts`). The basket has no entry of its own
+       yet; its members can be selected in their lists.
+     - The draft goes straight into the `render_letter` proposal rather
+       than into the answer text first: the card is the editable field.
+       Gaps are written `[[…]]` (double brackets, so a bracket in a
+       quoted reference does not count) and the card refuses "Ausführen"
+       while one is left; the server checks again.
+     - The sender block is the user's name plus `users.postal_address`.
+       The first letter asks for the address as a gap; the address typed
+       on the card is kept for the next one.
+     - `assistant_letter` keeps the fields, not the PDF;
+       `GET /assistant/letters/:id/pdf` renders it on demand
+       (`assistant/letter-pdf.ts`, form B).
+     - *Save as document* goes through the internal endpoint
+       `POST /documents/generated` rather than the raw upload, and links
+       the letter to its enclosures in the new table `document_links`.
+       The related-documents panel shows the link from both sides as its
+       first group, "Antwort und Bezug". There is no `source = assistant`
+       column; the link and the letter row say where it came from.
+     - Photos are context only; enclosing them as pages is left for later.
 
 8. **iOS** (later, own plan). The service API is the contract; the
    stream endpoint is a WebSocket the iOS client can consume like

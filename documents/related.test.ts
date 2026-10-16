@@ -175,4 +175,24 @@ describe("collectRelatedDocuments", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]!.items.map((i) => i.id)).toEqual([inside]);
   });
+  it("shows a letter and the documents it answers on both sides of the link", async () => {
+    const invoice = await insertDoc({ title: "Rechnung 1", folder: "Posteingang" });
+    const second = await insertDoc({ title: "Rechnung 2" });
+    const letter = await insertDoc({ title: "Antwort auf die Rechnungen", folder: "Posteingang" });
+    const hidden = await insertDoc({ userId: STRANGER_ID, title: "Fremde Rechnung" });
+    for (const id of [invoice, second, hidden]) {
+      await db.execute(sql`INSERT INTO document_links (document_id, linked_document_id, kind) VALUES (${letter}, ${id}, 'reply')`);
+    }
+
+    // From an invoice: the letter, first and under the link, not the folder.
+    const fromInvoice = await collectRelatedDocuments(await loadDoc(invoice), ctx);
+    expect(fromInvoice[0]).toMatchObject({ reason: "linked", label: null });
+    expect(fromInvoice[0]!.items.map((i) => i.id)).toEqual([letter]);
+    expect(fromInvoice.flatMap((g) => g.items.map((i) => i.id)).filter((id) => id === letter)).toHaveLength(1);
+
+    // From the letter: what it answers, minus what the caller cannot see.
+    const fromLetter = await collectRelatedDocuments(await loadDoc(letter), ctx);
+    expect(fromLetter[0]!.reason).toBe("linked");
+    expect(fromLetter[0]!.items.map((i) => i.id).sort((a, b) => a - b)).toEqual([invoice, second].sort((a, b) => a - b));
+  });
 });

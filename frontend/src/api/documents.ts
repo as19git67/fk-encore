@@ -307,6 +307,7 @@ export function listDocuments(params: ListDocumentsQuery = {}) {
 // ─── Related documents (#1478) ──────────────────────────────────────────────
 
 export type RelatedReason =
+  | 'linked'
   | 'same_folder'
   | 'same_correspondent_nearby'
   | 'same_collection'

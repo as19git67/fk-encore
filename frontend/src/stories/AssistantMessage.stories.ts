@@ -11,6 +11,7 @@ import {
   PROPOSAL_DISCARDED_BLOCK,
   PROPOSAL_EXECUTED_BLOCK,
   PROPOSAL_FAILED_BLOCK,
+  PROPOSAL_LETTER_BLOCK,
   PROPOSAL_PENDING_BLOCK,
   PROPOSAL_REPORT_BLOCK,
   RECAPS_BLOCK,
@@ -127,5 +128,14 @@ export const VorschlagBericht: Story = {
     role: 'assistant',
     content: 'Der Bericht ist gespeichert. Die Rendite beträgt laut Bericht 1,81 %.',
     blocks: [PROPOSAL_REPORT_BLOCK],
+  },
+}
+
+export const VorschlagBrief: Story = {
+  name: 'Vorschlag: Brief zum Bearbeiten',
+  args: {
+    role: 'assistant',
+    content: 'Der Brief liegt als Vorschlag bereit. Bitte das Zahlungsdatum und deine Anschrift ergänzen.',
+    blocks: [PROPOSAL_LETTER_BLOCK],
   },
 }

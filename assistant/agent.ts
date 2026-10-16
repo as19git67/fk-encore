@@ -23,6 +23,7 @@ import {
   mayUse,
   toolDefinition,
 } from "./catalog";
+import { contextSection, type ContextRef } from "./briefs";
 import { ContextTooLargeError, type ChatFn, type ChatReply } from "./llm-client";
 import type {
   AssistantUser,
@@ -75,6 +76,7 @@ Rules:
 - If a tool finds nothing, say so plainly and suggest how to search differently.
 - Earlier answers end with a note of the tools behind them and what they found. For a follow-up on those rows ("davon", "nur die aus …", "mach daraus …") pass from_previous_result: true to a tool that offers it instead of searching again.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button. Call one only when the user asks for that change, then say what you proposed and that it waits for their confirmation. Never claim it is done.
+- For a letter (Anschreiben, Antwort, Widerspruch, Kündigung …) call render_letter with the whole text: salutation, body and closing. Take every fact — names, dates, amounts, reference numbers — from the working set or a tool result. Where the letter needs a fact you do not have, write a gap as [[what is missing]] instead of guessing; the user fills it in on the card.
 - Answer briefly in the user's language (usually German).`;
 
 const EXAMPLES = `Examples of chained calls:
@@ -84,16 +86,18 @@ const EXAMPLES = `Examples of chained calls:
 4. "Leg ein Album mit allen Favoriten von 2025 an." → create_album(name = "Favoriten 2025", photos = {favorite: true, date_from: "2025-01-01", date_to: "2025-12-31"}) → say the album is proposed with the count the tool printed and waits for "Ausführen".
 5. After an answer listing photos: "Nur die aus München, und mach daraus ein Album." → list_photos(from_previous_result = true, place = "München") → create_album(name = …, from_previous_result = true) → say what was proposed.
 6. After an answer listing documents of a purchase: "Schwärze den Kaufpreis und mach ein PDF daraus." → find the price first if it is not known (get_document_summary of the contract) → create_collection(name = …, from_previous_result = true, redact = [the price as printed, e.g. "450.000,00"]) → say how many pages get blacked out, name documents without word positions, and that the boxes should be checked in the Sammelmappe before passing the PDF on.
-7. "Liste alle Buchungen zur Wohnung mit Zwischensummen für Kauf, Reparatur und Mieteinnahmen und ermittle die Rendite." → list_transactions (as needed) → transaction_report(title = …, groups = [{name: "Kauf", transaction_ids: […]}, {name: "Reparatur", …}, {name: "Mieteinnahmen", tag: "Miete"}], transaction_ids = all bookings found, yield = {investment_group: "Kauf", income_groups: ["Mieteinnahmen"], cost_groups: ["Reparatur"]}) → repeat only the subtotals and the yield formula the tool printed, and name bookings whose group was doubtful.`;
+7. "Liste alle Buchungen zur Wohnung mit Zwischensummen für Kauf, Reparatur und Mieteinnahmen und ermittle die Rendite." → list_transactions (as needed) → transaction_report(title = …, groups = [{name: "Kauf", transaction_ids: […]}, {name: "Reparatur", …}, {name: "Mieteinnahmen", tag: "Miete"}], transaction_ids = all bookings found, yield = {investment_group: "Kauf", income_groups: ["Mieteinnahmen"], cost_groups: ["Reparatur"]}) → repeat only the subtotals and the yield formula the tool printed, and name bookings whose group was doubtful.
+8. Working set of three invoices: "Schreib dem Absender, dass ich die drei Rechnungen bezahlt habe." → render_letter(recipient = the sender's address if a tool showed it, else [[Anschrift des Absenders]], subject = "Ihre Rechnungen …" with their numbers, body = salutation, one line per invoice with number, date and amount from the working set, [[Zahlungsdatum]] where the date of payment is unknown, closing) → say the letter waits on the card and name the gaps to fill.`;
 
-export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean): string {
+export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolean, briefs: string[] = []): string {
   const catalog = tools.length
     ? catalogLines(tools)
     : "(no tools — the user has no module the assistant can read)";
   const how = deferred
     ? `Tools you may call (fetch a tool's argument schema with ${DESCRIBE_TOOLS_NAME} before its first call):`
     : "Tools you may call:";
-  return [RULES, timeGrounding(now), `${how}\n${catalog}`, EXAMPLES].join("\n\n");
+  const working = contextSection(briefs);
+  return [RULES, timeGrounding(now), ...(working ? [working] : []), `${how}\n${catalog}`, EXAMPLES].join("\n\n");
 }
 
 export interface TurnInput {
@@ -115,6 +119,8 @@ export interface TurnInput {
   conversationId?: number;
   /** The latest result sets of earlier turns, by type. */
   previousRefs?: Partial<Record<RefType, number[]>>;
+  /** The working set the user handed over, and a brief of each object (#1534). */
+  context?: { refs: ContextRef[]; briefs: string[] };
   /** Per tool call: name, argument keys and row count — never row content. */
   log?: (entry: { tool: string; arguments: Record<string, unknown>; rows: number; ms: number; error?: string }) => void;
 }
@@ -181,7 +187,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const offered = new Map<string, ToolSpec>(deferred ? [] : tools.map((t) => [t.name, t]));
 
   const messages: ChatMessage[] = [
-    { role: "system", content: buildSystemPrompt(tools, now, deferred) },
+    { role: "system", content: buildSystemPrompt(tools, now, deferred, input.context?.briefs) },
     ...input.history,
     { role: "user", content: input.question },
   ];
@@ -192,12 +198,18 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const refs = new Map<RefType, number[]>(
     Object.entries(input.previousRefs ?? {}) as Array<[RefType, number[]]>,
   );
+  // Without an earlier result of a type, "these" means the working set's.
+  for (const r of input.context?.refs ?? []) {
+    if (input.previousRefs?.[r.type]) continue;
+    refs.set(r.type, [...(refs.get(r.type) ?? []), r.id]);
+  }
   const toolResults: TurnResult["toolResults"] = {};
   const ctx = {
     user: input.user,
     today: localIso(now),
     conversationId: input.conversationId,
     previous: (type: RefType) => refs.get(type),
+    context: input.context?.refs ?? [],
   };
 
   let answer: string | null = null;

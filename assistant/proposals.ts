@@ -44,6 +44,41 @@ export interface WriteToolDefinition {
   parameters: JsonSchema;
   prepare(args: Record<string, unknown>, ctx: ToolContext): Promise<PreparedAction>;
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ActionResult>;
+  /** The editable letter the card shows, for a tool whose proposal the user may change (#1534). */
+  draft?(args: Record<string, unknown>): LetterDraft;
+  /** The stored arguments with the user's changes from the card applied. */
+  edit?(args: Record<string, unknown>, edits: ProposalEdits): Record<string, unknown>;
+}
+
+/** Where a confirmed letter goes besides the download. */
+export type LetterDestination = "document" | "collection";
+
+export interface LetterAttachment {
+  id: number;
+  title: string;
+}
+
+/** A letter as the card shows it for editing. */
+export interface LetterDraft {
+  sender: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  attachments: LetterAttachment[];
+  destinations: LetterDestination[];
+  /** What the model could not fill in, as `[[…]]` in the text. */
+  gaps: string[];
+}
+
+/** What the user changed on the card before "Ausführen". */
+export interface ProposalEdits {
+  sender?: string;
+  recipient?: string;
+  subject?: string;
+  body?: string;
+  destinations?: LetterDestination[];
+  /** Enclosures to keep; only ids the proposal already had. */
+  attachment_ids?: number[];
 }
 
 export type ProposalStatus = "pending" | "executing" | "executed" | "discarded";
@@ -63,6 +98,16 @@ export interface ProposalRow {
   result_route: string | null;
   result_download: string | null;
   error: string | null;
+  /** Set for a letter: the fields the card lets the user change. */
+  letter: LetterDraft | null;
+}
+
+/** Per tool, how its stored arguments become the card's editable letter. */
+const drafters = new Map<string, (args: Record<string, unknown>) => LetterDraft>();
+
+function letterOf(tool: string, args: Record<string, unknown>): LetterDraft | null {
+  const draft = drafters.get(tool);
+  return draft ? draft(args) : null;
 }
 
 function proposalBlock(row: ProposalRow): ResultBlock {
@@ -74,6 +119,7 @@ function proposalBlock(row: ProposalRow): ResultBlock {
  * the model so in words it cannot mistake for "done".
  */
 export function writeTool(def: WriteToolDefinition): ToolSpec {
+  if (def.draft) drafters.set(def.name, def.draft.bind(def));
   return {
     name: def.name,
     kind: "write",
@@ -103,6 +149,7 @@ export function writeTool(def: WriteToolDefinition): ToolSpec {
         result_route: null,
         result_download: null,
         error: null,
+        letter: letterOf(def.name, prepared.arguments),
       };
       return {
         text: [
@@ -137,6 +184,7 @@ export async function executeProposal(
   id: number,
   ctx: ToolContext,
   tools: Map<string, WriteToolDefinition>,
+  edits?: ProposalEdits,
 ): Promise<ProposalRow> {
   const userId = Number(ctx.user.userID);
   const [claimed] = await db
@@ -151,15 +199,21 @@ export async function executeProposal(
   if (!claimed) throw await refusal(id, userId);
 
   const def = tools.get(claimed.tool);
+  let args = claimed.arguments;
   try {
     if (!def) throw new Error(`the action ${claimed.tool} no longer exists`);
     if (!def.permissions.every((p) => ctx.user.permissions.includes(p))) {
       throw new Error("you no longer have the permission this action needs");
     }
-    const result = await def.execute(claimed.arguments, { ...ctx, conversationId: claimed.conversation_id ?? undefined });
+    if (edits) {
+      if (!def.edit) throw new Error("this proposal cannot be changed");
+      // Kept even if the action fails below, so the card keeps what was typed.
+      args = def.edit(claimed.arguments, edits);
+    }
+    const result = await def.execute(args, { ...ctx, conversationId: claimed.conversation_id ?? undefined });
     const [done] = await db
       .update(assistantProposal)
-      .set({ status: "executed", decided_at: sql`now()`, result: { ...result } })
+      .set({ status: "executed", decided_at: sql`now()`, result: { ...result }, arguments: args })
       .where(eq(assistantProposal.id, id))
       .returning();
     return toRow(done);
@@ -167,7 +221,7 @@ export async function executeProposal(
     const message = err instanceof Error ? err.message : String(err);
     const [back] = await db
       .update(assistantProposal)
-      .set({ status: "pending", result: { error: message } })
+      .set({ status: "pending", result: { error: message }, arguments: args })
       .where(eq(assistantProposal.id, id))
       .returning();
     return toRow(back);
@@ -212,6 +266,7 @@ export function toRow(row: typeof assistantProposal.$inferSelect): ProposalRow {
     result_route: row.status === "executed" ? result.route ?? null : null,
     result_download: row.status === "executed" ? result.download ?? null : null,
     error: row.status === "pending" ? result.error ?? null : null,
+    letter: letterOf(row.tool, row.arguments),
   };
 }
 

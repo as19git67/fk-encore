@@ -39,8 +39,21 @@ export interface ConversationMessage {
   created_at: string
 }
 
+/** An object handed to the assistant: a document, photo or booking (#1534). */
+export interface ContextRef {
+  type: 'document' | 'photo' | 'transaction'
+  id: number
+}
+
+/** One object of a conversation's working set, as the chip shows it. */
+export interface ContextItem extends ContextRef {
+  label: string
+  visible: boolean
+}
+
 export interface ConversationDetail extends ConversationSummary {
   messages: ConversationMessage[]
+  context: ContextItem[]
 }
 
 export interface AskResponse {
@@ -68,8 +81,15 @@ export function listConversations(): Promise<{ conversations: ConversationSummar
   return apiFetch('/assistant/conversations')
 }
 
-export function createConversation(title?: string): Promise<ConversationSummary> {
-  return apiFetch('/assistant/conversations', { method: 'POST', body: JSON.stringify(title ? { title } : {}) })
+export function createConversation(title?: string, context?: ContextRef[]): Promise<ConversationSummary> {
+  const body: { title?: string; context?: ContextRef[] } = {}
+  if (title) body.title = title
+  if (context?.length) body.context = context
+  return apiFetch('/assistant/conversations', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function setConversationContext(id: number, context: ContextRef[]): Promise<{ context: ContextItem[] }> {
+  return apiFetch(`/assistant/conversations/${id}/context`, { method: 'PUT', body: JSON.stringify({ context }) })
 }
 
 export function getConversation(id: number): Promise<ConversationDetail> {
@@ -92,10 +112,38 @@ export interface Proposal {
   /** An API path to download the result from, e.g. a report's PDF. */
   result_download: string | null
   error: string | null
+  /** A letter the user can change before it goes out (#1534). */
+  letter: LetterDraft | null
 }
 
-export function executeProposal(id: number): Promise<Proposal> {
-  return apiFetch(`/assistant/proposals/${id}/execute`, { method: 'POST' })
+export type LetterDestination = 'document' | 'collection'
+
+export interface LetterDraft {
+  sender: string
+  recipient: string
+  subject: string
+  body: string
+  attachments: { id: number; title: string }[]
+  destinations: LetterDestination[]
+  /** What the model left as `[[…]]` for the user to fill in. */
+  gaps: string[]
+}
+
+/** What the user changed on a proposal's card. */
+export interface ProposalEdits {
+  sender?: string
+  recipient?: string
+  subject?: string
+  body?: string
+  destinations?: LetterDestination[]
+  attachment_ids?: number[]
+}
+
+export function executeProposal(id: number, edits?: ProposalEdits): Promise<Proposal> {
+  return apiFetch(`/assistant/proposals/${id}/execute`, {
+    method: 'POST',
+    body: edits ? JSON.stringify({ edits }) : undefined,
+  })
 }
 
 /** Downloads a file the API serves behind the user's token, under the name it suggests. */

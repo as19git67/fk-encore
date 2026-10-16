@@ -50,6 +50,7 @@ import {
   useDocumentFilterChips,
 } from '../composables/useDocumentFilter'
 import SelectionBar from '../components/layout/SelectionBar.vue'
+import { assistantLocation, MAX_ASSISTANT_CONTEXT } from '../utils/assistantContext'
 import { useListSearch, useListToolbar, useListView } from '../composables/useListToolbar'
 import { useListSelection } from '../composables/useListSelection'
 import type { ToolbarItem } from '../components/ResponsiveToolbar.vue'
@@ -444,6 +445,17 @@ const selectionActions = computed<ToolbarItem[]>(() => [
     disabled: selection.selectedCount.value === 0,
     command: fileSelection,
   },
+  ...(auth.hasPermission('module.assistant') ? [{
+    key: 'assistant',
+    label: 'An den Assistenten',
+    title: selection.selectedCount.value > MAX_ASSISTANT_CONTEXT
+      ? `Höchstens ${MAX_ASSISTANT_CONTEXT} Dokumente auf einmal`
+      : 'Die Auswahl dem Assistenten übergeben, z. B. für ein Anschreiben',
+    icon: 'pi pi-comments',
+    severity: 'secondary' as const,
+    disabled: selection.selectedCount.value === 0 || selection.selectedCount.value > MAX_ASSISTANT_CONTEXT,
+    command: () => void router.push(assistantLocation([...selectedIds.value].map((id) => ({ type: 'document' as const, id })))),
+  }] : []),
 ])
 const hasMore = computed(() => !isSearchActive.value && items.value.length < total.value)
 

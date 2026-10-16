@@ -8,6 +8,9 @@
  * render beside it with the module's own rows and a link to the list page.
  *
  * The open conversation lives in `?c=<id>`, so a reload or a link shows it.
+ * `?context=document:12,…` (from a selection or "Antwort entwerfen", #1534)
+ * starts a new conversation with that working set, `?prompt=` fills the
+ * question field.
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -27,9 +30,12 @@ import {
   getConversation,
   listConversations,
   newTurnId,
+  setConversationContext,
+  type ContextItem,
   type ConversationMessage,
   type ConversationSummary,
 } from '../api/assistant'
+import { parseContextQuery } from '../utils/assistantContext'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useAtLeast } from '../composables/useBreakpoint'
@@ -46,6 +52,8 @@ const wide = useAtLeast('lg')
 
 const conversations = ref<ConversationSummary[]>([])
 const messages = ref<ConversationMessage[]>([])
+/** The working set of the open conversation. */
+const context = ref<ContextItem[]>([])
 const live = ref<LiveTurn | null>(null)
 /** The conversation the running turn belongs to. */
 const liveFor = ref<number | null>(null)
@@ -88,11 +96,14 @@ let openedBySend: number | null = null
 async function loadConversation(id: number | null) {
   if (id === null) {
     messages.value = []
+    context.value = []
     return
   }
   if (id === openedBySend) return
   try {
-    messages.value = (await getConversation(id)).messages
+    const detail = await getConversation(id)
+    messages.value = detail.messages
+    context.value = detail.context ?? []
     loadError.value = null
     scrollToEnd()
   } catch (e) {
@@ -103,7 +114,45 @@ async function loadConversation(id: number | null) {
 
 watch(activeId, (id) => void loadConversation(id))
 
+/** A selection handed over in the URL becomes a new conversation's working set. */
+async function startFromQuery(): Promise<void> {
+  const refs = parseContextQuery(route.query.context)
+  const prompt = typeof route.query.prompt === 'string' ? route.query.prompt : ''
+  if (!refs.length && !prompt && route.query.context === undefined) return
+  const { context: _c, prompt: _p, ...rest } = route.query
+  if (prompt) draft.value = prompt
+  if (!refs.length) {
+    await router.replace({ query: rest })
+    return
+  }
+  try {
+    const created = await createConversation(undefined, refs)
+    await router.replace({ query: { ...rest, c: String(created.id) } })
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : 'Die Unterhaltung konnte nicht angelegt werden'
+    await router.replace({ query: rest })
+  }
+}
+
+async function removeFromContext(item: ContextItem) {
+  const id = activeId.value
+  if (id === null) return
+  const next = context.value.filter((c) => !(c.type === item.type && c.id === item.id))
+  try {
+    context.value = (await setConversationContext(id, next.map((c) => ({ type: c.type, id: c.id })))).context
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : 'Der Kontext konnte nicht geändert werden'
+  }
+}
+
+const CONTEXT_ICONS: Record<ContextItem['type'], string> = {
+  document: 'pi pi-file',
+  photo: 'pi pi-image',
+  transaction: 'pi pi-euro',
+}
+
 onMounted(async () => {
+  await startFromQuery()
   await Promise.all([loadConversations(), loadConversation(activeId.value)])
   loaded.value = true
   void nextTick(() => composer.value?.focus())
@@ -287,6 +336,29 @@ function remove(conversation: ConversationSummary) {
           <i class="pi pi-exclamation-circle" aria-hidden="true" />
           {{ sendError }}
         </p>
+        <div v-if="context.length" class="context" aria-label="Arbeitskontext">
+          <span class="context-label">Kontext</span>
+          <ul class="context-items">
+            <li
+              v-for="c in context"
+              :key="`${c.type}:${c.id}`"
+              class="context-item"
+              :class="{ 'context-item--hidden': !c.visible }"
+            >
+              <i :class="CONTEXT_ICONS[c.type]" aria-hidden="true" />
+              <span class="context-text">{{ c.label }}</span>
+              <Button
+                icon="pi pi-times"
+                text
+                rounded
+                size="small"
+                :aria-label="`${c.label} aus dem Kontext entfernen`"
+                :disabled="busy"
+                @click="removeFromContext(c)"
+              />
+            </li>
+          </ul>
+        </div>
         <AssistantComposer ref="composer" v-model="draft" :busy="busy" @send="send" />
       </section>
     </div>
@@ -377,6 +449,51 @@ function remove(conversation: ConversationSummary) {
 .suggestions :deep(.p-button) {
   white-space: normal;
   text-align: left;
+}
+
+.context {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.context-label {
+  color: var(--p-text-muted-color);
+}
+
+.context-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.context-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding-left: var(--space-2);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 1rem;
+  background: var(--p-content-hover-background);
+}
+
+.context-item--hidden {
+  color: var(--p-text-muted-color);
+}
+
+.context-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16rem;
 }
 
 .send-error {

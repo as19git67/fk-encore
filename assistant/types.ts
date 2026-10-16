@@ -82,6 +82,8 @@ export interface ToolContext {
   conversationId?: number;
   /** The latest result of this type in the conversation, this turn included. */
   previous?: (type: RefType) => number[] | undefined;
+  /** The working set the user handed over for this conversation (#1534). */
+  context?: Array<{ type: RefType; id: number }>;
 }
 
 export type ToolKind = "read" | "write";

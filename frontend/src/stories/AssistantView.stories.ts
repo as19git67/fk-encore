@@ -86,3 +86,25 @@ export const Ladefehler: Story = {
     },
   },
 }
+
+const CONTEXT = [
+  { type: 'document', id: 101, label: 'Rechnung Heizungswartung', visible: true },
+  { type: 'document', id: 102, label: 'Rechnung Ersatzteil mit einem recht langen Titel, der gekürzt wird', visible: true },
+  { type: 'transaction', id: 7, label: '20.03.2026 Musterfirma Haustechnik GmbH −255,40 €', visible: true },
+  { type: 'document', id: 999, label: 'Nicht sichtbar', visible: false },
+]
+
+export const MitKontext: Story = {
+  name: 'Unterhaltung mit Arbeitskontext',
+  parameters: {
+    route: '/assistent?c=1',
+    testViewport: { width: 390, height: 844 },
+    msw: {
+      handlers: [
+        http.get('/api/assistant/conversations/:id', () => HttpResponse.json({ ...CONVERSATION, messages: [], context: CONTEXT })),
+        ...handlers,
+      ],
+    },
+  },
+}
+

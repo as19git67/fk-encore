@@ -3,17 +3,60 @@
  * A write action the assistant proposed (#1529). Nothing has happened yet:
  * "Ausführen" runs it as the user, through the same endpoints the app's own
  * buttons use; "Verwerfen" drops it. Afterwards the card says what became of
- * it and links to the result.
+ * it and links to the result. A letter (#1534) stays editable on the card
+ * until it runs.
  */
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
-import { discardProposal, downloadResult, executeProposal, type Proposal } from '../../api/assistant'
+import { discardProposal, downloadResult, executeProposal, type Proposal, type ProposalEdits } from '../../api/assistant'
+import { letterGaps } from '../../utils/letterGaps'
+import LetterEditor, { type LetterForm } from './LetterEditor.vue'
 
 const props = defineProps<{ proposal: Proposal }>()
 
 const current = ref<Proposal>({ ...props.proposal })
 watch(() => props.proposal, (p) => { current.value = { ...p } })
+
+function formOf(p: Proposal): LetterForm | null {
+  const l = p.letter
+  if (!l) return null
+  return {
+    sender: l.sender,
+    recipient: l.recipient,
+    subject: l.subject,
+    body: l.body,
+    destinations: [...l.destinations],
+    attachmentIds: l.attachments.map((a) => a.id),
+  }
+}
+
+const letterForm = ref<LetterForm | null>(formOf(props.proposal))
+watch(() => props.proposal, (p) => { letterForm.value = formOf(p) })
+const gaps = computed(() => {
+  const f = letterForm.value
+  return f && current.value.letter ? letterGaps(f.sender, f.recipient, f.subject, f.body) : []
+})
+
+function letterEdits(): ProposalEdits | undefined {
+  const f = letterForm.value
+  if (!f) return undefined
+  return {
+    sender: f.sender,
+    recipient: f.recipient,
+    subject: f.subject,
+    body: f.body,
+    destinations: f.destinations,
+    attachment_ids: f.attachmentIds,
+  }
+}
+
+/** The confirmed letter as an e-mail draft; the PDF has to be attached by hand. */
+const mailto = computed(() => {
+  const f = letterForm.value
+  if (!f || current.value.status !== 'executed') return null
+  return `mailto:?subject=${encodeURIComponent(f.subject)}&body=${encodeURIComponent(f.body)}`
+})
 
 const busy = ref<'execute' | 'discard' | null>(null)
 const requestError = ref<string | null>(null)
@@ -49,7 +92,10 @@ async function decide(action: 'execute' | 'discard') {
   requestError.value = null
   try {
     const id = current.value.proposal_id
-    const next = action === 'execute' ? await executeProposal(id) : await discardProposal(id)
+    const edits = action === 'execute' ? letterEdits() : undefined
+    const next = action === 'execute'
+      ? await (edits ? executeProposal(id, edits) : executeProposal(id))
+      : await discardProposal(id)
     current.value = { ...next, count: next.count ?? current.value.count }
   } catch (e) {
     requestError.value = e instanceof Error ? e.message : 'Der Vorschlag konnte nicht bearbeitet werden.'
@@ -71,6 +117,13 @@ async function decide(action: 'execute' | 'discard') {
 
     <div class="proposal-body">
       <p class="proposal-summary">{{ current.summary }}</p>
+      <LetterEditor
+        v-if="letterForm && current.letter && current.status === 'pending'"
+        v-model="letterForm"
+        :letter="current.letter"
+        :disabled="busy !== null"
+        :id-prefix="`letter-${current.proposal_id}`"
+      />
       <p v-if="current.status === 'executed' && current.result_summary" class="proposal-result">
         <i class="pi pi-check" aria-hidden="true" />
         <span>{{ current.result_summary }}</span>
@@ -86,6 +139,10 @@ async function decide(action: 'execute' | 'discard') {
           :loading="downloading"
           @click="download"
         />
+        <a v-if="mailto" :href="mailto" class="proposal-mail">
+          <i class="pi pi-envelope" aria-hidden="true" />
+          Als E-Mail-Entwurf öffnen
+        </a>
       </div>
       <p v-if="requestError && current.status === 'executed'" class="proposal-error" role="alert">
         <i class="pi pi-exclamation-circle" aria-hidden="true" />
@@ -112,7 +169,7 @@ async function decide(action: 'execute' | 'discard') {
         icon="pi pi-play"
         size="small"
         :loading="busy === 'execute'"
-        :disabled="busy !== null"
+        :disabled="busy !== null || gaps.length > 0"
         @click="decide('execute')"
       />
     </footer>
@@ -198,5 +255,16 @@ async function decide(action: 'execute' | 'discard') {
 
 .proposal-download {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.proposal-mail {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--p-primary-color);
 }
 </style>

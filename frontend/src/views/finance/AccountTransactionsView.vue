@@ -7,6 +7,7 @@ import EmptyState from '../../components/layout/EmptyState.vue'
 import PageSkeleton from '../../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../../components/layout/ErrorBanner.vue'
 import SelectionBar from '../../components/layout/SelectionBar.vue'
+import { assistantLocation, MAX_ASSISTANT_CONTEXT } from '../../utils/assistantContext'
 import AddToCollectionDialog from '../../components/collections/AddToCollectionDialog.vue'
 import type { MemberRef, MemberRuleInput, TransactionRuleCriteria } from '../../api/collections'
 import SaveRuleDialog from '../../components/collections/SaveRuleDialog.vue'
@@ -1335,6 +1336,19 @@ const selectionActions = computed<ToolbarItem[]>(() => [
     disabled: localSelectionCount.value === 0,
     command: () => (collectionDialogOpen.value = true),
   },
+  ...(authStore.hasPermission('module.assistant') ? [{
+    key: 'assistant',
+    label: 'An den Assistenten',
+    title: localSelectionCount.value > MAX_ASSISTANT_CONTEXT
+      ? `Höchstens ${MAX_ASSISTANT_CONTEXT} Buchungen auf einmal`
+      : 'Die Auswahl dem Assistenten übergeben, z. B. für ein Anschreiben',
+    icon: 'pi pi-comments',
+    severity: 'secondary' as const,
+    disabled: localSelectionCount.value === 0 || localSelectionCount.value > MAX_ASSISTANT_CONTEXT,
+    command: () => void router.push(assistantLocation(
+      Array.from(selectedIds.value, (id) => ({ type: 'transaction' as const, id: Number(id) })),
+    )),
+  }] : []),
 ])
 
 // Collections (#1548): the picked bookings into a named folder.
