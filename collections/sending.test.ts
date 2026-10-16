@@ -26,6 +26,7 @@ import {
   downloadByLink,
   listCollectionSends,
   listExportEntries,
+  mailSender,
   normalizeRecipients,
   sendExport,
 } from "./sending";
@@ -42,7 +43,9 @@ function as(userId: number): void {
 
 interface SentMail {
   to: string[];
-  replyTo?: string;
+  from: string | { name: string; address: string };
+  sender?: string;
+  envelope?: { from: string };
   subject: string;
   text: string;
   attachments: Array<{ filename: string; path?: string; content?: Buffer }>;
@@ -189,22 +192,37 @@ describe("recipients", () => {
   });
 });
 
+describe("mail sender", () => {
+  const max = { name: "Max", email: "Max@Beispiel.test" };
+  it("is the person sending, unless an automatic export goes only to them", () => {
+    expect(mailSender(max, ["steuer@beispiel.test"], false)).toEqual(max);
+    expect(mailSender(max, ["max@beispiel.test"], false)).toEqual(max);
+    expect(mailSender(max, ["steuer@beispiel.test"], true)).toEqual(max);
+    expect(mailSender(max, ["steuer@beispiel.test", "max@beispiel.test"], true)).toEqual(max);
+    expect(mailSender(max, ["max@beispiel.test"], true)).toBeNull();
+    expect(mailSender(null, ["steuer@beispiel.test"], false)).toBeNull();
+  });
+});
+
 describe("sending by mail", () => {
-  it("attaches a small export and replies go to the sender", async () => {
+  it("attaches a small export, from the sender's own address", async () => {
     const col = await transactionCollection();
     const run = await exported(col, { transaction: { format: "csv" } });
     const result = await sendExport({ exportId: run.id, to: ["steuer@beispiel.test"], message: "Für die Erklärung." });
     expect(result.mode).toBe("attachment");
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toEqual(["steuer@beispiel.test"]);
-    expect(sent[0]!.replyTo).toBe(`u${OWNER}@sending.test`);
+    expect(sent[0]!.from).toEqual({ name: `Person ${OWNER}`, address: `u${OWNER}@sending.test` });
+    // The app's account delivers it and gets the bounces.
+    expect(sent[0]!.sender).toBe("noreply@example.com");
+    expect(sent[0]!.envelope?.from).toBe("noreply@example.com");
     expect(sent[0]!.subject).toContain("Belege");
     expect(sent[0]!.text).toContain("Für die Erklärung.");
     expect(sent[0]!.attachments.map((a) => a.filename)).toEqual(["Belege - Buchungen.csv"]);
 
     const log = await listCollectionSends({ id: col });
     expect(log.items).toHaveLength(1);
-    expect(log.items[0]).toMatchObject({ recipients: ["steuer@beispiel.test"], mode: "attachment", status: "sent", sent_by: `Person ${OWNER}` });
+    expect(log.items[0]).toMatchObject({ recipients: ["steuer@beispiel.test"], mode: "attachment", status: "sent", sent_by: `Person ${OWNER}`, sender: `u${OWNER}@sending.test` });
   });
 
   it("sends the files inside a ZIP one by one, without the table of contents", async () => {

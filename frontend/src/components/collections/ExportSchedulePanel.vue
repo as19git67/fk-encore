@@ -39,6 +39,10 @@ const props = defineProps<{
   /** The dialog's options, used when no profile is chosen. */
   options: ExportOptions
   mailConfigured: boolean
+  /** The user's address: what the schedule's mails go out from. */
+  senderEmail?: string | null
+  /** The app's address: used when the only recipient is the user. */
+  systemSender?: string
 }>()
 const emit = defineEmits<{ (e: 'ran'): void }>()
 
@@ -81,6 +85,12 @@ const MONTHS = [
 
 const canFile = computed(() => auth.hasPermission('documents.upload'))
 const recipientList = computed(() => recipients.value.split(/[\s,;]+/).map((r) => r.trim()).filter(Boolean))
+/** Same rule as the server (collections/sending.ts, mailSender). */
+const formSenderToSelf = computed(() => {
+  const own = props.senderEmail?.toLowerCase()
+  return !!own && recipientList.value.length > 0 && recipientList.value.every((r) => r.toLowerCase() === own)
+})
+const formSender = computed(() => (formSenderToSelf.value ? props.systemSender : props.senderEmail) ?? '')
 const periodLabel = computed(() =>
   cadence.value === 'weekly' ? 'die sieben Tage davor' : cadence.value === 'monthly' ? 'den Vormonat' : 'das Vorjahr',
 )
@@ -105,7 +115,7 @@ function what(s: CollectionSchedule): string {
   const parts = [s.scope === 'period' ? 'abgelaufener Zeitraum' : 'ganze Mappe']
   parts.push(s.profile_name ? `Profil „${s.profile_name}“` : 'gespeicherte Einstellungen')
   if (s.save_as_document) parts.push('als Dokument ablegen')
-  if (s.recipients.length) parts.push(`an ${s.recipients.join(', ')}`)
+  if (s.recipients.length) parts.push(`an ${s.recipients.join(', ')}${s.sender ? ` von ${s.sender}` : ''}`)
   return parts.join(' · ')
 }
 
@@ -150,7 +160,7 @@ function askSave() {
   }
   confirm.require({
     header: 'Empfänger bestätigen',
-    message: `${recipientList.value.join(', ')} bekommt ab jetzt ${when({ cadence: cadence.value, weekday: weekday.value, day: day.value, month: month.value })} eine E-Mail mit diesem Export.`,
+    message: `${recipientList.value.join(', ')} bekommt ab jetzt ${when({ cadence: cadence.value, weekday: weekday.value, day: day.value, month: month.value })} eine E-Mail mit diesem Export${formSender.value ? `, Absender ${formSender.value}` : ''}.`,
     icon: 'pi pi-envelope',
     acceptLabel: 'Zeitplan anlegen',
     rejectLabel: 'Abbrechen',
@@ -179,7 +189,7 @@ async function runNow(s: CollectionSchedule) {
   try {
     const res = await runCollectionScheduleNow(s.id)
     replace(res.schedule)
-    info.value = res.schedule.last_status === 'done' ? 'Ausgeführt; die Datei steht unter „Letzte Exporte“.' : ''
+    info.value = res.schedule.last_status === 'done' ? 'Ausgeführt; die Datei steht im Verlauf.' : ''
     if (res.schedule.last_status === 'failed') error.value = res.schedule.last_error ?? 'Lauf fehlgeschlagen.'
     emit('ran')
   } catch (err: unknown) {
@@ -212,7 +222,7 @@ function askDelete(s: CollectionSchedule) {
 <template>
   <section class="sch" aria-label="Regelmäßig exportieren" data-testid="export-schedules">
     <div class="sch-head">
-      <h3 class="sch-title"><i class="pi pi-calendar-clock" aria-hidden="true" /> Regelmäßig</h3>
+      <h3 class="sch-title"><i class="pi pi-calendar-clock" aria-hidden="true" /> Zeitpläne</h3>
       <Button
         v-if="!adding"
         icon="pi pi-plus"
@@ -271,7 +281,7 @@ function askDelete(s: CollectionSchedule) {
         </div>
       </li>
     </ul>
-    <p v-else-if="!adding" class="sch-hint">Noch kein Zeitplan. Ein Zeitplan nimmt den Export, wie er oben eingestellt ist.</p>
+    <p v-else-if="!adding" class="sch-hint">Noch kein Zeitplan. Ein Zeitplan nimmt den Export, wie er unter „Exportieren“ eingestellt ist.</p>
 
     <div v-if="adding" class="sch-form" data-testid="schedule-form">
       <SelectButton v-model="cadence" :options="CADENCES" option-label="label" option-value="value" :allow-empty="false" aria-label="Rhythmus" />
@@ -293,7 +303,7 @@ function askDelete(s: CollectionSchedule) {
       <p class="sch-hint">
         <template v-if="scope === 'period'">Jeder Lauf nimmt nur, was in {{ periodLabel }} fällt; Zähler mit ihren Ablesungen aus diesem Zeitraum. Einträge ohne Datum bleiben draußen.</template>
         <template v-else>Jeder Lauf nimmt die ganze Mappe, wie sie dann ist.</template>
-        Exportiert wird {{ profileName ? `mit dem Profil „${profileName}“ in seiner jeweils aktuellen Fassung` : 'mit den Einstellungen oben, wie sie jetzt sind' }}.
+        Exportiert wird {{ profileName ? `mit dem Profil „${profileName}“ in seiner jeweils aktuellen Fassung` : 'mit den Einstellungen unter „Exportieren“, wie sie jetzt sind' }}.
       </p>
       <label v-if="canFile" class="sch-check">
         <Checkbox v-model="saveAsDocument" binary />
@@ -303,6 +313,10 @@ function askDelete(s: CollectionSchedule) {
         <label class="sch-label" for="sch-to">Per E-Mail an (optional, mehrere mit Komma)</label>
         <InputText id="sch-to" v-model="recipients" placeholder="name@beispiel.de" class="sch-field" />
         <template v-if="recipientList.length">
+          <p v-if="formSender" class="sch-from">
+            Von: <strong>{{ formSender }}</strong>
+            <template v-if="formSenderToSelf"> — geht er nur an dich, schickt ihn die App</template>
+          </p>
           <label class="sch-label" for="sch-msg">Nachricht (optional)</label>
           <InputText id="sch-msg" v-model="message" class="sch-field" />
           <label class="sch-check">
@@ -311,7 +325,7 @@ function askDelete(s: CollectionSchedule) {
           </label>
         </template>
       </template>
-      <p v-else class="sch-hint">E-Mail-Versand ist auf diesem Server nicht eingerichtet; die Datei bleibt eine Woche unter „Letzte Exporte“.</p>
+      <p v-else class="sch-hint">E-Mail-Versand ist auf diesem Server nicht eingerichtet; die Datei bleibt eine Woche im Verlauf.</p>
       <div class="sch-line">
         <Button label="Abbrechen" size="small" text severity="secondary" @click="adding = false" />
         <Button label="Zeitplan anlegen" icon="pi pi-check" size="small" :loading="saving" data-testid="schedule-save" @click="askSave" />
@@ -321,10 +335,12 @@ function askDelete(s: CollectionSchedule) {
 </template>
 
 <style scoped>
+.sch-from {
+  margin: 0;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
 .sch {
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--p-content-border-color);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);

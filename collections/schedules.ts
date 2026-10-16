@@ -6,7 +6,8 @@
  * as PDF"), with which options (a profile, or the options at the time it was
  * made) and where the file goes: kept as a run for a week like any export,
  * filed as a document (PDFs), mailed to the recipients confirmed when the
- * schedule was set up.
+ * schedule was set up — from the owner's address, or from the app's when the
+ * owner is the only recipient.
  *
  * Runs happen as the person who set the schedule up, with their permissions
  * at the time of the run: what they can no longer see does not go out. An
@@ -28,7 +29,8 @@ import { assertMayUseCollections, caller, isAdmin, type CollectionMember } from 
 import type { Caller } from "./members";
 import { ExportOptionsError, normalizeExportOptions, type ExportOptions } from "./export-options";
 import { fileExportAsDocument, loadProfiles, runExportNow, toRun, type ExportRun } from "./exports";
-import { mailExport, normalizeRecipients } from "./sending";
+import { mailExport, mailSender, normalizeRecipients } from "./sending";
+import { systemSenderAddress } from "../user/mail";
 import {
   ScheduleSpecError,
   elapsedPeriod,
@@ -57,6 +59,8 @@ export interface CollectionSchedule {
   scope: "all" | "period";
   save_as_document: boolean;
   recipients: string[];
+  /** The From address its mails carry. */
+  sender: string | null;
   single_files: boolean;
   message: string | null;
   enabled: boolean;
@@ -77,13 +81,13 @@ async function toSchedules(rows: ScheduleRow[], c: Caller, collection: Collectio
   const profiles = new Map((await loadProfiles(collection.id)).map((p) => [p.id, p.name]));
   const owners = new Map(
     (
-      await dbAll<{ id: number; name: string }>(
+      await dbAll<{ id: number; name: string; email: string }>(
         db
-          .select({ id: users.id, name: users.name })
+          .select({ id: users.id, name: users.name, email: users.email })
           .from(users)
           .where(inArray(users.id, [...new Set(rows.map((r) => r.user_id))])),
       )
-    ).map((u) => [u.id, u.name]),
+    ).map((u) => [u.id, u]),
   );
   const admin = isAdmin(c) || collection.user_id === c.userId;
   return rows.map((r) => ({
@@ -98,6 +102,9 @@ async function toSchedules(rows: ScheduleRow[], c: Caller, collection: Collectio
     scope: r.scope,
     save_as_document: r.save_as_document,
     recipients: r.recipients,
+    sender: r.recipients.length
+      ? (mailSender(owners.get(r.user_id), r.recipients, true)?.email ?? systemSenderAddress())
+      : null,
     single_files: r.single_files,
     message: r.message,
     enabled: r.enabled,
@@ -107,7 +114,7 @@ async function toSchedules(rows: ScheduleRow[], c: Caller, collection: Collectio
     last_error: r.last_error,
     last_export_id: r.last_export_id,
     failures: r.failures,
-    owner_name: owners.get(r.user_id) ?? null,
+    owner_name: owners.get(r.user_id)?.name ?? null,
     can_edit: admin || r.user_id === c.userId,
   }));
 }
@@ -349,7 +356,7 @@ export async function runSchedule(
     }
     if (schedule.recipients.length > 0) {
       try {
-        await mailExport(exported, c, schedule.recipients, schedule.message, schedule.single_files);
+        await mailExport(exported, c, schedule.recipients, schedule.message, schedule.single_files, true);
       } catch (err) {
         problems.push(`E-Mail: ${(err as Error).message}`);
       }

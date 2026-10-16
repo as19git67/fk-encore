@@ -6,14 +6,14 @@
  * - "Teilen" hands the file to the device's share sheet — every messenger
  *   and mail app installed, sent as the user. Up to ten items can go as
  *   single files instead of the ZIP. iOS only shares a file that is already
- *   fetched when the tap happens, so the files are fetched first and the
- *   button then shares at once.
- * - "Per E-Mail" sends from the server, with replies going to the user;
- *   above the size limit the mail carries a download link instead.
+ *   fetched when the tap happens, so the panel fetches it as soon as it
+ *   opens (up to PREFETCH_LIMIT) and "Teilen" then shares on the first tap.
+ * - "Per E-Mail" sends from the server, from the user's own address (shown
+ *   in the form); above the size limit the mail carries a download link.
  * - "Link kopieren" gives a download link for people without an account,
  *   valid as long as the file.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
@@ -34,7 +34,12 @@ const props = defineProps<{
   run: ExportRun
   /** False when the server cannot send mail; the mail form then explains. */
   mailConfigured: boolean
+  /** The user's address, which a mail from here goes out from. */
+  senderEmail?: string | null
 }>()
+
+/** Fetched ahead for the share sheet up to this size; above it, on request. */
+const PREFETCH_LIMIT = 40 * 1024 * 1024
 const emit = defineEmits<{ (e: 'sent'): void }>()
 
 const entries = ref<ExportEntry[]>([])
@@ -44,7 +49,7 @@ const prepared = ref<File[] | null>(null)
 const preparing = ref(false)
 const error = ref('')
 const info = ref('')
-const mode = ref<'share' | 'mail' | null>(null)
+const mailOpen = ref(false)
 const recipients = ref('')
 const message = ref('')
 const sending = ref(false)
@@ -53,21 +58,23 @@ const isZip = computed(() => props.run.mime_type === 'application/zip')
 const shareable = canShareFiles()
 
 onMounted(async () => {
-  if (!isZip.value) return
-  try {
-    const res = await listExportEntries(props.run.id)
-    entries.value = res.items
-    singleAllowed.value = res.single_files_allowed && res.items.length > 1
-  } catch {
-    /* single files are an extra; the ZIP still goes */
+  if (isZip.value) {
+    try {
+      const res = await listExportEntries(props.run.id)
+      entries.value = res.items
+      singleAllowed.value = res.single_files_allowed && res.items.length > 1
+    } catch {
+      /* single files are an extra; the ZIP still goes */
+    }
   }
+  if (shareable && (props.run.size_bytes ?? 0) <= PREFETCH_LIMIT) void prepare()
 })
 
-function reset() {
+// Single files or the ZIP: what was fetched no longer fits.
+watch(singleFiles, () => {
   prepared.value = null
-  error.value = ''
-  info.value = ''
-}
+  if (shareable && (props.run.size_bytes ?? 0) <= PREFETCH_LIMIT) void prepare()
+})
 
 async function prepare() {
   preparing.value = true
@@ -86,7 +93,11 @@ async function prepare() {
 
 /** Straight from the click: nothing awaited before the share call. */
 function share() {
-  if (!prepared.value) return
+  if (!prepared.value) {
+    // Too large to fetch ahead: fetch now, the next tap shares.
+    void prepare()
+    return
+  }
   shareFiles(prepared.value, props.run.filename ?? 'Export')
     .then((shared) => {
       if (!shared) error.value = 'Dieses Gerät kann die Dateien nicht teilen. Lade sie stattdessen herunter.'
@@ -143,66 +154,56 @@ async function send() {
   <div class="send" data-testid="export-send">
     <div class="send-actions">
       <Button
+        v-if="shareable"
         icon="pi pi-share-alt"
-        label="Teilen"
+        :label="prepared || preparing || (run.size_bytes ?? 0) <= PREFETCH_LIMIT ? 'Teilen' : 'Zum Teilen laden'"
         size="small"
-        :outlined="mode !== 'share'"
-        :aria-expanded="mode === 'share'"
-        @click="mode = mode === 'share' ? null : 'share'; reset()"
+        outlined
+        :loading="preparing"
+        data-testid="export-share-now"
+        @click="share"
       />
       <Button
         icon="pi pi-envelope"
         label="Per E-Mail"
         size="small"
-        :outlined="mode !== 'mail'"
-        :aria-expanded="mode === 'mail'"
-        @click="mode = mode === 'mail' ? null : 'mail'; reset()"
+        :outlined="!mailOpen"
+        :aria-expanded="mailOpen"
+        data-testid="export-mail-toggle"
+        @click="mailOpen = !mailOpen"
       />
       <Button icon="pi pi-link" label="Link kopieren" size="small" text @click="copyLink" />
     </div>
+    <p v-if="!shareable" class="send-hint">
+      An andere Apps teilen geht in diesem Browser nicht, auf dem Smartphone schon.
+    </p>
 
     <Message v-if="error" severity="error" :closable="true" @close="error = ''">{{ error }}</Message>
     <Message v-if="info" severity="success" :closable="true" @close="info = ''">{{ info }}</Message>
 
-    <label v-if="mode && singleAllowed" class="send-check">
-      <Checkbox v-model="singleFiles" binary @update:model-value="prepared = null" />
-      <span>Einzeln statt als ZIP ({{ entries.length }} Dateien)</span>
+    <label v-if="singleAllowed" class="send-check">
+      <Checkbox v-model="singleFiles" binary />
+      <span>Einzeln statt als ZIP teilen oder mailen ({{ entries.length }} Dateien)</span>
     </label>
 
-    <div v-if="mode === 'share'" class="send-body">
-      <p v-if="!shareable" class="send-hint">
-        Dieser Browser kann keine Dateien an andere Apps geben. Auf dem Smartphone öffnet „Teilen“ das Teilen-Menü;
-        hier bleibt der Download oder der Link.
-      </p>
-      <template v-else>
-        <Button
-          v-if="!prepared"
-          icon="pi pi-cloud-download"
-          :label="singleFiles ? 'Dateien vorbereiten' : 'Datei vorbereiten'"
-          size="small"
-          :loading="preparing"
-          @click="prepare"
-        />
-        <Button v-else icon="pi pi-share-alt" label="Jetzt teilen" size="small" data-testid="export-share-now" @click="share" />
-      </template>
-    </div>
-
-    <div v-if="mode === 'mail'" class="send-body">
+    <div v-if="mailOpen" class="send-body">
       <p v-if="!mailConfigured" class="send-hint">
         Der E-Mail-Versand ist auf diesem Server nicht eingerichtet. Teilen oder den Link weitergeben geht trotzdem.
       </p>
       <template v-else>
+        <p class="send-from">Von: <strong>{{ senderEmail ?? 'deiner Adresse' }}</strong></p>
         <label class="send-label" :for="`send-to-${run.id}`">An (mehrere mit Komma)</label>
         <InputText :id="`send-to-${run.id}`" v-model="recipients" placeholder="name@beispiel.de" class="send-field" />
         <label class="send-label" :for="`send-msg-${run.id}`">Nachricht (optional)</label>
         <Textarea :id="`send-msg-${run.id}`" v-model="message" rows="3" auto-resize class="send-field" />
-        <p class="send-hint">Absender ist die App, Antworten gehen an dich. Große Dateien gehen als Link, der bis zum Ablauf des Exports gilt.</p>
+        <p class="send-hint">Antworten kommen zu dir. Große Dateien gehen als Link, der bis zum Ablauf des Exports gilt.</p>
         <Button
           icon="pi pi-send"
           label="Senden"
           size="small"
           :loading="sending"
           :disabled="recipientList.length === 0"
+          data-testid="export-mail-send"
           @click="send"
         />
       </template>
@@ -240,6 +241,11 @@ async function send() {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-sm);
+}
+.send-from {
+  margin: 0;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
 .send-hint {
   margin: 0;

@@ -691,8 +691,19 @@ export interface CollectionSend {
   filename: string | null
   status: 'sent' | 'failed'
   error: string | null
+  /** The From address the mail carried. */
+  sender: string | null
   sent_at: string
   sent_by: string | null
+}
+
+export interface CollectionSendsResponse {
+  items: CollectionSend[]
+  mail_configured: boolean
+  /** The signed-in user's address: a mail from the dialog goes out from it. */
+  sender_email: string | null
+  /** The app's address, used for an automatic export the owner mails to themselves. */
+  system_sender: string
 }
 
 export function listExportEntries(exportId: number): Promise<{ items: ExportEntry[]; single_files_allowed: boolean }> {
@@ -726,7 +737,7 @@ export function sendExportByMail(
   })
 }
 
-export function listCollectionSends(id: number): Promise<{ items: CollectionSend[]; mail_configured: boolean }> {
+export function listCollectionSends(id: number): Promise<CollectionSendsResponse> {
   return apiFetch(`/collections/${id}/sends`)
 }
 
@@ -746,6 +757,8 @@ export interface CollectionSchedule {
   scope: 'all' | 'period'
   save_as_document: boolean
   recipients: string[]
+  /** The From address of its mails; `null` without recipients. */
+  sender: string | null
   single_files: boolean
   message: string | null
   enabled: boolean

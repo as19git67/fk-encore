@@ -225,10 +225,19 @@ collections.
      instead of the ZIP (`GET /collections/exports/:id/entries`, raw
      `…/entry?name=`), without the table of contents.
    - "Per E-Mail" sends from the server (`user/mail.ts`
-     `sendCollectionExportEmail`): from the app address, `Reply-To` the
-     sender, attached or as single files; above `COLLECTION_MAIL_MAX_BYTES`
+     `sendCollectionExportEmail`): `From` is the sender's own address (shown
+     in the form; `Sender` and the envelope are the app's SMTP account, so
+     bounces come back to the app); only an automatic export that goes to
+     no one but its owner comes from the app address (`mailSender`).
+     Attached or as single files; above `COLLECTION_MAIL_MAX_BYTES`
      (15 MB) the mail carries a download link instead. Every mail is logged
-     in `collection_sends` (migration 0245) and listed in the dialog.
+     in `collection_sends` (migration 0245, `sender` since 0254) and listed
+     in the dialog.
+   - The dialog has three tabs: "Exportieren" (options; after a start the
+     run itself — progress, then download, share, mail, link, file as
+     document — in place of the form), "Verlauf" (runs and mails),
+     "Regelmäßig" (schedules). The share sheet gets the file fetched ahead
+     (up to 40 MB), so "Teilen" is one tap.
    - "Link kopieren": a random token on the run
      (`collection_exports.download_token`), public raw endpoint
      `/collections/download/:token`, valid until the file expires; an

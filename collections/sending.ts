@@ -5,7 +5,7 @@
  * file — or, for up to ten items, the single files inside the ZIP — to the
  * system's share sheet, which reaches every messenger and mail app installed.
  * This file serves those single files, and does what needs the server: mail
- * through the app's SMTP account (with `Reply-To` set to the sender), and a
+ * through the app's SMTP account, from the sender's own address, and a
  * download link for people without an account when a file is too large to
  * attach. Every mail is logged with the collection.
  */
@@ -20,7 +20,7 @@ import db from "../db/database";
 import { dbAll, dbExec, dbFirst, dbInsertReturning } from "../db/adapter";
 import { collectionExports, collectionSends, users } from "../db/schema";
 import { loadReadableCollection } from "../documents/collection-access";
-import { appUrl, mailConfigured, sendCollectionExportEmail } from "../user/mail";
+import { appUrl, mailConfigured, sendCollectionExportEmail, systemSenderAddress } from "../user/mail";
 import { assertMayUseCollections, caller, isAdmin } from "./collections";
 import { contentDisposition, exportPath, loadOwnRun, type ExportRow } from "./exports";
 import type { Caller } from "./members";
@@ -195,8 +195,26 @@ export interface CollectionSend {
   filename: string | null;
   status: "sent" | "failed";
   error: string | null;
+  /** The From address of the mail. */
+  sender: string | null;
   sent_at: string;
   sent_by: string | null;
+}
+
+/**
+ * Who a mail is from: the person sending it. Only an automatic export that
+ * goes to no one but that person comes from the app's address — a note from
+ * the system to its user, not a mail the user wrote. `null` is the app.
+ */
+export function mailSender(
+  user: { name: string; email: string } | null | undefined,
+  recipients: string[],
+  automatic: boolean,
+): { name: string; email: string } | null {
+  if (!user?.email) return null;
+  const own = user.email.trim().toLowerCase();
+  if (automatic && recipients.every((r) => r.trim().toLowerCase() === own)) return null;
+  return { name: user.name, email: user.email };
 }
 
 const EMAIL = /^[^\s@<>()[\],;:"]+@[^\s@<>()[\],;:"]+\.[^\s@<>()[\],;:"]+$/;
@@ -218,6 +236,7 @@ async function logSend(
   mode: CollectionSend["mode"],
   status: CollectionSend["status"],
   error: string | null,
+  sender: string,
 ): Promise<number> {
   const inserted = await dbInsertReturning<{ id: number }>(
     db
@@ -231,6 +250,7 @@ async function logSend(
         filename: row.filename,
         status,
         error,
+        sender,
       })
       .returning({ id: collectionSends.id }),
   );
@@ -238,13 +258,10 @@ async function logSend(
 }
 
 /**
- * Mail the export. Attached when it fits, as a link when it does not; with
- * `single_files`, the files inside the ZIP go one by one (at most ten).
- */
-/**
  * Mail a finished export: attached when it fits, as a link when it does not;
  * with `singleFiles`, the files inside the ZIP go one by one (at most ten).
- * Logs the mail either way. Used by the endpoint and the scheduled exports.
+ * Logs the mail either way. Used by the endpoint and, with `automatic`, by
+ * the scheduled exports (see `mailSender` for whose address it carries).
  */
 export async function mailExport(
   row: ExportRow,
@@ -252,6 +269,7 @@ export async function mailExport(
   recipients: string[],
   message: string | null,
   singleFiles: boolean,
+  automatic = false,
 ): Promise<{ mode: CollectionSend["mode"]; send_id: number }> {
   assertReady(row);
   if (!mailConfigured()) throw APIError.failedPrecondition("sending mail is not set up on this server");
@@ -292,10 +310,12 @@ export async function mailExport(
     mode = "link";
   }
 
+  const from = mailSender(sender, recipients, automatic);
+  const fromAddress = from?.email ?? systemSenderAddress();
   try {
     await sendCollectionExportEmail({
       to: recipients,
-      replyTo: sender?.email ?? null,
+      from,
       senderName: sender?.name ?? "Jemand",
       collectionName,
       message,
@@ -304,10 +324,10 @@ export async function mailExport(
     });
   } catch (err) {
     const reason = (err as Error)?.message ?? String(err);
-    await logSend(row, c.userId, recipients, mode, "failed", reason.slice(0, 500));
+    await logSend(row, c.userId, recipients, mode, "failed", reason.slice(0, 500), fromAddress);
     throw APIError.unavailable(`the mail could not be sent: ${reason}`);
   }
-  return { mode, send_id: await logSend(row, c.userId, recipients, mode, "sent", null) };
+  return { mode, send_id: await logSend(row, c.userId, recipients, mode, "sent", null, fromAddress) };
 }
 
 /** Mail the export from the dialog. */
@@ -322,10 +342,19 @@ export const sendExport = api(
   },
 );
 
+export interface CollectionSendsResponse {
+  items: CollectionSend[];
+  mail_configured: boolean;
+  /** The caller's address: what a mail from the dialog goes out from. */
+  sender_email: string | null;
+  /** The app's address, for automatic exports to oneself. */
+  system_sender: string;
+}
+
 /** Every mail sent with this collection's exports, newest first. */
 export const listCollectionSends = api(
   { expose: true, method: "GET", path: "/collections/:id/sends", auth: true },
-  async ({ id }: { id: number }): Promise<{ items: CollectionSend[]; mail_configured: boolean }> => {
+  async ({ id }: { id: number }): Promise<CollectionSendsResponse> => {
     const c = caller();
     assertMayUseCollections(c);
     const row = await loadReadableCollection(c.userId, id, isAdmin(c));
@@ -339,6 +368,7 @@ export const listCollectionSends = api(
           filename: collectionSends.filename,
           status: collectionSends.status,
           error: collectionSends.error,
+          sender: collectionSends.sender,
           sent_at: collectionSends.sent_at,
           sent_by: users.name,
         })
@@ -348,6 +378,12 @@ export const listCollectionSends = api(
         .orderBy(desc(collectionSends.sent_at), desc(collectionSends.id))
         .limit(50),
     );
-    return { items: rows as CollectionSend[], mail_configured: mailConfigured() };
+    const me = await dbFirst<{ email: string }>(db.select({ email: users.email }).from(users).where(eq(users.id, c.userId)));
+    return {
+      items: rows as CollectionSend[],
+      mail_configured: mailConfigured(),
+      sender_email: me?.email ?? null,
+      system_sender: systemSenderAddress(),
+    };
   },
 );
