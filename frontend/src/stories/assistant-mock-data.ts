@@ -8,6 +8,7 @@ export const TRANSACTIONS_BLOCK: ResultBlock = {
   kind: 'transactions',
   tool: 'list_transactions',
   total: 14,
+  subtitle: 'Girokonto · Saldo 1234.56 EUR',
   route: '/finanzen/uebersicht/konto/1?q=Stadtwerke&dateFrom=2026-01-01&dateTo=2026-09-30',
   rows: [
     { id: 501, booking_date: '2026-09-20', amount: '-84.00', counterparty: 'Stadtwerke Musterstadt', purpose: 'Abschlag Strom September' },

@@ -195,6 +195,30 @@ export const BENCH_CASES: BenchCase[] = [
     results: { list_accounts: { rows: [{ id: 1, label: "Girokonto" }, { id: 2, label: "Depot" }] } },
   },
   {
+    id: "account-balance",
+    title: "Saldo eines Kontos",
+    question: "Wie viel ist gerade auf meinem Girokonto?",
+    expect: [{ tool: "list_accounts" }],
+    results: {
+      list_accounts: {
+        rows: [
+          { id: 1, section: "Täglich", label: "Girokonto", type: "Girokonto", balance: "1234.56 EUR (as of 2026-10-14)" },
+          { id: 3, section: "Täglich", label: "Portemonnaie", type: "Bargeld", balance: "none (cash account)" },
+        ],
+      },
+    },
+  },
+  {
+    id: "shared-albums-participants",
+    title: "Freigegebene Alben mit Teilnehmern",
+    question: "Erstelle mir eine Liste der Alben, die freigegeben sind, und schreibe jeweils die Teilnehmer dazu.",
+    expect: [{ tool: "list_album_shares" }],
+    results: {
+      list_albums: { rows: [{ id: 1, name: "Gardasee 2025", shared: "yes", owner: "me" }], total: 1 },
+      list_album_shares: { rows: [{ id: 1, name: "Gardasee 2025", event: "Sommerurlaub", owner: "me", "shared with": "Erika Beispiel, Max Muster", "public link": "no" }] },
+    },
+  },
+  {
     id: "trip-plans",
     title: "Reisen in Planung",
     question: "Welche Reisen haben wir gerade in Planung?",

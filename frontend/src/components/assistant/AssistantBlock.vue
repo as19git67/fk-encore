@@ -65,6 +65,16 @@ function amountClass(v: unknown): string {
   return n < 0 ? 'amount amount--out' : n > 0 ? 'amount amount--in' : 'amount'
 }
 
+/** Event, photo count, and for a shared album who it is shared with. */
+function albumSub(r: Row): string {
+  const parts = [str(r.event_name)]
+  if (r.photo_count !== undefined && r.photo_count !== null) parts.push(`${str(r.photo_count)} Fotos`)
+  if (r.shared_with) parts.push(`geteilt mit ${str(r.shared_with)}`)
+  else if (r.public_link === true) parts.push('öffentlicher Link')
+  else if (r.shared === true) parts.push('freigegeben')
+  return parts.filter(Boolean).join(' · ')
+}
+
 /** Generic rows: the scalar fields of the first row, at most four. */
 const genericColumns = computed(() => {
   const first = props.block.rows[0] ?? {}
@@ -89,12 +99,33 @@ const analysis = computed(() => {
 <template>
   <section class="block" :aria-label="title">
     <header class="block-head">
-      <span class="block-title">{{ title }}</span>
+      <span class="block-heading">
+        <span class="block-title">{{ title }}</span>
+        <span v-if="block.subtitle" class="block-subtitle">{{ block.subtitle }}</span>
+      </span>
       <span v-if="block.kind !== 'analysis'" class="block-count">{{ total }}</span>
     </header>
 
+    <!-- Accounts: as on the Übersicht page, with the latest balance -->
+    <ul v-if="block.kind === 'accounts'" class="rows">
+      <li v-for="r in shown" :key="str(r.id)">
+        <component
+          :is="r.route ? 'RouterLink' : 'div'"
+          :to="r.route ? str(r.route) : undefined"
+          :class="['row', { 'row--static': !r.route }]"
+        >
+          <span class="row-main">
+            <span class="row-title">{{ str(r.label) }}</span>
+            <span class="row-sub">{{ [str(r.section), str(r.type)].filter(Boolean).join(' · ') }}</span>
+          </span>
+          <span v-if="r.balance !== null && r.balance !== undefined" :class="amountClass(r.balance)">{{ formatCurrency(str(r.balance)) }}</span>
+          <span v-else class="row-sub">kein Saldo</span>
+        </component>
+      </li>
+    </ul>
+
     <!-- Bookings -->
-    <ul v-if="block.kind === 'transactions'" class="rows">
+    <ul v-else-if="block.kind === 'transactions'" class="rows">
       <li v-for="r in shown" :key="str(r.id)">
         <RouterLink class="row" :to="{ name: 'finance-transaction-detail', params: { id: str(r.id) } }">
           <span class="row-date">{{ date(r.booking_date) }}</span>
@@ -177,7 +208,7 @@ const analysis = computed(() => {
               {{ [date(r.period_start), date(r.period_end)].filter(Boolean).join(' – ') }} · {{ str(r.photo_count) }} Fotos
             </span>
             <span v-else-if="block.kind === 'albums'" class="row-sub">
-              {{ [str(r.event_name), `${str(r.photo_count)} Fotos`].filter(Boolean).join(' · ') }}
+              {{ albumSub(r) }}
             </span>
             <span v-else class="row-sub">
               {{ r.last_value !== null && r.last_value !== undefined ? `${str(r.last_value)} ${str(r.unit)} am ${date(r.last_read)}` : 'Noch kein Stand' }}
@@ -252,9 +283,24 @@ const analysis = computed(() => {
   border-top: 1px solid var(--p-content-border-color);
 }
 
+.block-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .block-title {
   font-weight: 600;
   font-size: var(--text-sm);
+}
+
+.block-subtitle {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .block-count {

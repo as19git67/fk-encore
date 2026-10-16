@@ -3,12 +3,14 @@
  * One message of the conversation (#1528): the user's question, or the
  * assistant's answer with what it looked up and the rows it found.
  */
+import { computed } from 'vue'
 import type { Proposal, ResultBlock } from '../../api/assistant'
 import type { TurnStep } from '../../utils/assistantTurn'
+import { parseBlocks } from '../../utils/assistantMarkdown'
 import AssistantBlock from './AssistantBlock.vue'
 import ProposalCard from './ProposalCard.vue'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   role: 'user' | 'assistant'
   content: string
   blocks?: ResultBlock[]
@@ -18,6 +20,10 @@ withDefaults(defineProps<{
   pending?: boolean
   error?: string
 }>(), { blocks: () => [], steps: () => [], pending: false, error: undefined })
+
+// The assistant's bold, lists and code are rendered; the user's own text is
+// shown as typed.
+const rendered = computed(() => (props.role === 'assistant' ? parseBlocks(props.content) : []))
 </script>
 
 <template>
@@ -36,7 +42,32 @@ withDefaults(defineProps<{
     </ul>
 
     <div v-if="content || (pending && !steps.length)" class="bubble">
-      <p v-if="content" class="text">{{ content }}</p>
+      <div v-if="content && role === 'assistant'" class="text text--rich">
+        <template v-for="(b, i) in rendered" :key="i">
+          <p v-if="b.type === 'p'">
+            <template v-for="(line, j) in b.lines" :key="j">
+              <br v-if="j > 0" />
+              <template v-for="(run, k) in line" :key="k">
+                <strong v-if="run.bold">{{ run.text }}</strong>
+                <em v-else-if="run.italic">{{ run.text }}</em>
+                <code v-else-if="run.code">{{ run.text }}</code>
+                <template v-else>{{ run.text }}</template>
+              </template>
+            </template>
+          </p>
+          <component :is="b.type" v-else>
+            <li v-for="(item, j) in b.items" :key="j">
+              <template v-for="(run, k) in item" :key="k">
+                <strong v-if="run.bold">{{ run.text }}</strong>
+                <em v-else-if="run.italic">{{ run.text }}</em>
+                <code v-else-if="run.code">{{ run.text }}</code>
+                <template v-else>{{ run.text }}</template>
+              </template>
+            </li>
+          </component>
+        </template>
+      </div>
+      <p v-else-if="content" class="text">{{ content }}</p>
       <p v-else class="text text--waiting">
         <i class="pi pi-spin pi-spinner" aria-hidden="true" />
         Denkt nach …
@@ -88,6 +119,36 @@ withDefaults(defineProps<{
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.5;
+}
+
+.text--rich {
+  white-space: normal;
+}
+
+.text--rich p,
+.text--rich ul,
+.text--rich ol {
+  margin: 0;
+}
+
+.text--rich p + p,
+.text--rich p + ul,
+.text--rich p + ol,
+.text--rich ul + p,
+.text--rich ol + p {
+  margin-top: var(--space-2);
+}
+
+.text--rich ul,
+.text--rich ol {
+  padding-left: 1.25em;
+}
+
+.text--rich code {
+  font-size: 0.92em;
+  padding: 0 0.25em;
+  border-radius: 0.25em;
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .text--waiting {

@@ -9,6 +9,7 @@ import { vi } from "vitest";
 export const clients = {
   finance: {
     listAccounts: vi.fn(),
+    getOverview: vi.fn(),
     listTransactions: vi.fn(),
     query: vi.fn(),
     listUpcomingDebits: vi.fn(),
@@ -37,6 +38,7 @@ export const clients = {
     searchPhotosNatural: vi.fn(),
     listRecaps: vi.fn(),
     listAlbums: vi.fn(),
+    getAlbumShares: vi.fn(),
     listPersons: vi.fn(),
     createAlbum: vi.fn(),
     batchUpdateAlbumPhotos: vi.fn(),

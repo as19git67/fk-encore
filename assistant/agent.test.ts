@@ -193,7 +193,7 @@ describe("the loop", () => {
   });
 
   it("the last round forbids tools, so the loop always ends with an answer", async () => {
-    clients.finance.listAccounts.mockResolvedValue({ items: [] });
+    clients.finance.getOverview.mockResolvedValue({ sections: [], unassigned: [] });
     const { fn, requests } = scripted([
       calls(["list_accounts", {}]),
       { content: "Keine Konten.", tool_calls: [{ id: "z", type: "function", function: { name: "list_accounts", arguments: "{}" } }], finish_reason: "tool_calls" },
@@ -201,7 +201,7 @@ describe("the loop", () => {
     const res = await runTurn({ user: USER, history: [], question: "Konten?", tools: catalogFor(USER), chat: fn, now: NOW, maxRounds: 2 });
     expect(requests.map((r) => r.tool_choice)).toEqual(["auto", "none"]);
     expect(res.answer).toBe("Keine Konten.");
-    expect(clients.finance.listAccounts).toHaveBeenCalledTimes(1);
+    expect(clients.finance.getOverview).toHaveBeenCalledTimes(1);
   });
 
   it("past the schema budget the model gets describe_tools and fetches schemas first", async () => {
@@ -245,6 +245,7 @@ describe("the loop", () => {
 describe("list routes", () => {
   it("a search within one account links to that account's list with the same filters", async () => {
     clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    clients.finance.getOverview.mockResolvedValue({ sections: [], unassigned: [] });
     const tool = catalogFor(USER).find((t) => t.name === "list_transactions")!;
     const ctx = { user: USER, today: "2026-10-15" };
 

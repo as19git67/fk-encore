@@ -318,12 +318,24 @@ behind it.
      trimming or a route (`search_documents` returning rows plus the list
      URL), or a computation (stage 6). They register in the same catalog.
    - Read tools of this stage:
-     - finance: `list_transactions` (the `/finance/transactions` filters),
-       `analyze_spending` (the analysis AST path), `list_accounts`,
-       `upcoming_direct_debits` (new, see below).
-     - documents: `search_documents` (hybrid search with filters),
+     - finance: `list_transactions` (the `/finance/transactions` filters;
+       a list for one account carries the account and its balance as the
+       block's subtitle, as the list page has), `analyze_spending` (the
+       analysis AST path), `list_accounts` (the accounts as arranged on
+       the Übersicht page, `GET /finance/overview`, with section and
+       latest statement balance — "meine Konten" are the ones the user
+       placed there, not the account table; a cash account has no balance
+       and the row says so), `upcoming_direct_debits` (new, see below).
+     - documents: `search_documents` (hybrid search with filters; `sort`
+       switches the relevance ranking to document date, because the rows
+       next to the answer follow the tool's order, not the model's text),
        `list_categories`, `get_document_summary`.
-     - photos: `list_photos` (favorite, dates, persons, place),
+     - photos: `list_album_shares` (who the user's shared albums are
+       shared with — the "participants" of an album are its shares, not
+       the persons on its photos; one `GET /albums/:id/shares` per owned
+       album, at most 40 per call, albums shared *with* the user listed
+       with their owner only), `list_albums` (with `shared` and the
+       owner), `list_photos` (favorite, dates, persons, place),
        `search_photos` (natural search), `list_recaps` (kind `trip`),
        `list_albums`.
      - meters: `list_meters`, `latest_readings`, `consumption_report`.
