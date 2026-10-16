@@ -117,6 +117,15 @@ describe("write tools", () => {
     await expect(tool("add_photos_to_album").run({ album_id: 1 }, ctx())).rejects.toThrow();
   });
 
+  it("refuses a filter on top of the previous photos, naming the way round", async () => {
+    // The filter would be dropped and every earlier photo would land in the
+    // album; the benchmark saw Gemma try this for "nur die aus München".
+    await expect(tool("create_album").run(
+      { name: "München 2025", from_previous_result: true, photos: { place: "München" } },
+      { ...ctx(), previous: (type) => (type === "photo" ? [1, 2, 3] : undefined) },
+    )).rejects.toThrow("list_photos with from_previous_result");
+  });
+
   it("refuses a follow-up in the past", async () => {
     await expect(tool("create_document_follow_up").run({ document_ids: [1], date: "2026-10-01" }, ctx()))
       .rejects.toThrow("past");

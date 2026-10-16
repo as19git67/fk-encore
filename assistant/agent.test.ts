@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { buildSystemPrompt, cleanAnswer, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, looksLikeFakeToolCall, looksLikeUserData, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
+import { buildSystemPrompt, cleanAnswer, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -341,6 +341,21 @@ describe("what the benchmark caught", () => {
     const stubborn = scripted([calls(["list_transactions", { q: "b" }]), answer(raw), answer(raw)]);
     const again = await runTurn({ user: USER, history: [], question: "Kauf?", tools: catalogFor(USER), chat: stubborn.fn, now: NOW, maxRounds: 2 });
     expect(again.answer).toBe(OUT_OF_ROUNDS);
+  });
+
+  it("an empty reply after the tool results is asked once more for words", async () => {
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    const loop = scripted([calls(["list_transactions", { q: "a" }]), answer(""), answer("Keine Buchungen gefunden.")]);
+    const res = await runTurn({ user: USER, history: [], question: "Kauf?", tools: catalogFor(USER), chat: loop.fn, now: NOW });
+    expect(loop.requests[2]!.messages.at(-1)).toEqual({ role: "user", content: FINAL_ANSWER_NUDGE });
+    expect(loop.requests[2]!.tools).toBeUndefined();
+    expect(res.answer).toBe("Keine Buchungen gefunden.");
+    expect(res.rounds).toBe(3);
+
+    const silent = scripted([calls(["list_transactions", { q: "b" }]), answer(""), answer("")]);
+    const again = await runTurn({ user: USER, history: [], question: "Kauf?", tools: catalogFor(USER), chat: silent.fn, now: NOW });
+    expect(again.answer).toBe(NO_ANSWER);
+    expect(silent.requests).toHaveLength(3);
   });
 
   it("a repeated call with the same arguments is answered from above, not run again", async () => {

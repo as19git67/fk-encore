@@ -131,7 +131,7 @@ export const renderLetter: WriteToolDefinition = {
     properties: {
       recipient: { type: "string", description: "the recipient's address, one line per row (name, street, postcode and town)" },
       subject: { type: "string" },
-      body: { type: "string", description: "salutation, paragraphs separated by a blank line, closing formula (the server signs with the user's name); dates as DD.MM.YYYY" },
+      body: { type: "string", description: "salutation, paragraphs separated by a blank line, closing formula (the server signs with the user's name); dates as DD.MM.YYYY. Every fact the user asked to be named (reference numbers, deadlines, amounts) stands here, not only in your reply" },
       attachment_document_ids: {
         type: "array",
         items: { type: "integer" },

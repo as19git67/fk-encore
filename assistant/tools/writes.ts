@@ -69,7 +69,15 @@ function deDate(iso: string): string {
 
 /** The photo ids a selection points at, now. */
 async function resolvePhotos(args: Record<string, unknown>, ctx: ToolContext): Promise<number[]> {
-  if (bool(args.from_previous_result) === true) return idsOrPrevious(args, "photo_ids", "photo", ctx);
+  if (bool(args.from_previous_result) === true) {
+    // The filter would be dropped on the floor and the album would get every
+    // photo of the earlier answer; the benchmark saw Gemma try exactly this
+    // for "nur die aus München". Narrowing is list_photos's job.
+    if (args.photos && typeof args.photos === "object" && Object.keys(args.photos).length) {
+      throw new Error("from_previous_result cannot be combined with a photos filter: call list_photos with from_previous_result and the filter first, then create_album with from_previous_result");
+    }
+    return idsOrPrevious(args, "photo_ids", "photo", ctx);
+  }
   const explicit = ids(args.photo_ids);
   if (explicit.length) return explicit.slice(0, MAX_PHOTOS + 1);
   const f = (args.photos && typeof args.photos === "object" ? args.photos : {}) as Record<string, unknown>;
