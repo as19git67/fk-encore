@@ -4754,3 +4754,71 @@ export const assistantBenchmarkRun = pgTable(
   },
   (table) => [index("assistant_benchmark_run_by_start").on(table.started_at)],
 );
+
+// ========== Businesses (documentation/plans/betriebe-euer.md) ==========
+
+export type BusinessKind = "landwirtschaft" | "photovoltaik" | "gewerbe" | "vermietung";
+export type BusinessTaxSection = "anlage-l" | "anlage-g" | "anlage-v";
+export type BusinessAssetKind = "gebaeude" | "flaeche" | "maschine" | "pv_anlage" | "sonstiges";
+export type ParcelUsage = "acker" | "gruenland" | "wald" | "hof" | "sonstiges";
+
+/** A business in the tax sense: a leased farm, a PV system, a trade. */
+export const financeBusiness = pgTable(
+  "finance_business",
+  {
+    id: serial("id").primaryKey(),
+    owner_user_id: integer("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind").$type<BusinessKind>().notNull(),
+    tax_section: text("tax_section").$type<BusinessTaxSection>().notNull(),
+    notes: text("notes"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("finance_business_by_owner").on(table.owner_user_id)],
+);
+
+/** A fixed asset of a business; its depreciation is computed, never stored. */
+export const financeBusinessAsset = pgTable(
+  "finance_business_asset",
+  {
+    id: serial("id").primaryKey(),
+    business_id: integer("business_id").notNull().references(() => financeBusiness.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind").$type<BusinessAssetKind>().notNull(),
+    acquisition_date: date("acquisition_date", { mode: "string" }).notNull(),
+    acquisition_cost: numeric("acquisition_cost", { precision: 14, scale: 2 }).notNull(),
+    /** Linear rate per year in percent; 0 for land, 2 for a building, 5 for a PV system. */
+    afa_rate_pct: numeric("afa_rate_pct", { precision: 6, scale: 3 }).notNull().default("0"),
+    afa_start_date: date("afa_start_date", { mode: "string" }),
+    disposal_date: date("disposal_date", { mode: "string" }),
+    disposal_proceeds: numeric("disposal_proceeds", { precision: 14, scale: 2 }),
+    notes: text("notes"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("finance_business_asset_by_business").on(table.business_id)],
+);
+
+/** A parcel of land (Flurstück) of a farm, with its lease. */
+export const financeBusinessParcel = pgTable(
+  "finance_business_parcel",
+  {
+    id: serial("id").primaryKey(),
+    business_id: integer("business_id").notNull().references(() => financeBusiness.id, { onDelete: "cascade" }),
+    asset_id: integer("asset_id").references(() => financeBusinessAsset.id, { onDelete: "set null" }),
+    gemarkung: text("gemarkung").notNull(),
+    flur: text("flur"),
+    flurstueck: text("flurstueck").notNull(),
+    area_m2: integer("area_m2"),
+    usage: text("usage").$type<ParcelUsage>().notNull().default("acker"),
+    lessee: text("lessee"),
+    lease_from: date("lease_from", { mode: "string" }),
+    lease_to: date("lease_to", { mode: "string" }),
+    annual_rent: numeric("annual_rent", { precision: 14, scale: 2 }),
+    notes: text("notes"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("finance_business_parcel_by_business").on(table.business_id)],
+);

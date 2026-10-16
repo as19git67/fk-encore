@@ -22,6 +22,8 @@ export const clients = {
     previewGroupedReport: vi.fn(),
     createGroupedReport: vi.fn(),
     getTransaction: vi.fn(),
+    listBusinesses: vi.fn(),
+    getBusiness: vi.fn(),
   },
   documents: {
     listDocumentCategories: vi.fn(),

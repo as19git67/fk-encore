@@ -39,6 +39,8 @@ export type BlockKind =
   | "news"
   | "comments"
   | "activity"
+  | "businesses"
+  | "business_assets"
   | "proposal"
   | "table";
 

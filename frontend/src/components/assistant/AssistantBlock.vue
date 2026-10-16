@@ -43,6 +43,8 @@ const TITLES: Record<string, string> = {
   news: 'Nachrichten',
   comments: 'Kommentare',
   activity: 'Neuigkeiten',
+  businesses: 'Betriebe',
+  business_assets: 'Anlagegüter und Flächen',
   table: 'Ergebnis',
 }
 
@@ -98,6 +100,12 @@ function date(v: unknown): string {
   return s ? formatIsoDate(s.slice(0, 10)) : ''
 }
 
+const EUR = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' })
+function money(v: unknown): string {
+  const n = Number(v)
+  return v === null || v === undefined || v === '' || !Number.isFinite(n) ? '' : EUR.format(n)
+}
+
 function amountClass(v: unknown): string {
   const n = num(v)
   return n < 0 ? 'amount amount--out' : n > 0 ? 'amount amount--in' : 'amount'
@@ -111,6 +119,11 @@ function albumSub(r: Row): string {
   else if (r.public_link === true) parts.push('öffentlicher Link')
   else if (r.shared === true) parts.push('freigegeben')
   return parts.filter(Boolean).join(' · ')
+}
+
+const BUSINESS_KINDS: Record<string, string> = { landwirtschaft: 'Landwirtschaft', photovoltaik: 'Photovoltaik', gewerbe: 'Gewerbe', vermietung: 'Vermietung' }
+function businessKind(v: unknown): string {
+  return BUSINESS_KINDS[str(v)] ?? str(v)
 }
 
 /** Generic rows: the scalar fields of the first row, at most four. */
@@ -252,6 +265,34 @@ const analysis = computed(() => {
               {{ r.last_value !== null && r.last_value !== undefined ? `${str(r.last_value)} ${str(r.unit)} am ${date(r.last_read)}` : 'Noch kein Stand' }}
             </span>
           </span>
+        </component>
+      </li>
+    </ul>
+
+    <!-- Businesses: name, kind, tax form and counts -->
+    <ul v-else-if="block.kind === 'businesses'" class="rows">
+      <li v-for="r in shown" :key="str(r.id)">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+          <span class="row-main">
+            <span class="row-title">{{ str(r.name) }}</span>
+            <span class="row-sub">{{ businessKind(r.kind) }} · {{ str(r.tax_section).toUpperCase() }} · {{ str(r.asset_count) }} Anlagegüter · {{ str(r.parcel_count) }} Flächen</span>
+          </span>
+        </component>
+      </li>
+    </ul>
+
+    <!-- Assets with the year's AfA, parcels with lessee and rent -->
+    <ul v-else-if="block.kind === 'business_assets'" class="rows">
+      <li v-for="r in shown" :key="`${str(r.kind)}-${str(r.id)}`">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+          <span class="row-main">
+            <span class="row-title">{{ str(r.name) }}</span>
+            <span v-if="r.kind === 'parcel'" class="row-sub">
+              {{ [str(r.usage), r.area_m2 !== null && r.area_m2 !== undefined ? `${str(r.area_m2)} m²` : '', r.lessee ? `Pächter ${str(r.lessee)}` : ''].filter(Boolean).join(' · ') }}
+            </span>
+            <span v-else class="row-sub">{{ str(r.kind) }} · AK {{ money(r.acquisition_cost) }} · {{ Number(r.afa_rate_pct) }} %</span>
+          </span>
+          <span class="row-amount">{{ r.kind === 'parcel' ? (r.annual_rent ? `${money(r.annual_rent)}/Jahr` : '') : `AfA ${money(r.afa)} · BW ${money(r.book_value)}` }}</span>
         </component>
       </li>
     </ul>
