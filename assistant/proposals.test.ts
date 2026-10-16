@@ -148,6 +148,26 @@ describe("write tools", () => {
     });
   });
 
+  it("stores the worksheet as a PDF document linked to the flagged documents", async () => {
+    clients.documents.listTaxDocuments.mockResolvedValue({
+      year: 2025, total_documents: 1,
+      sections: [{ slug: "anlage-n", name: "Anlage N", group: "einkuenfte", documents: [{ document: { id: 71, title: "Lohnsteuerbescheinigung 2025", doc_date: "2026-01-20" }, confidence: null, source: "user" }] }],
+    });
+    clients.documents.getDocumentReceiptSuggestion.mockResolvedValue({ amount: 48200 });
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    clients.finance.getPortfolio.mockResolvedValue({ years: [] });
+    const out = await tool("tax_worksheet_pdf").run({ year: 2025 }, ctx());
+    const row = out.block?.rows[0] as Record<string, unknown>;
+    expect(row).toMatchObject({ tool: "tax_worksheet_pdf", summary: "Ausfüllhilfe Steuer 2025 als PDF: 1 Dokumente in 1 Anlagen, 0 steuerrelevante Buchungen", status: "pending" });
+
+    clients.documents.storeGeneratedDocument.mockResolvedValue({ id: 900 });
+    const done = await executeAssistantProposal({ id: Number(row.proposal_id) });
+    expect(done).toMatchObject({ status: "executed", result_route: "/dokumente/900" });
+    const stored = clients.documents.storeGeneratedDocument.mock.calls[0]![0] as { filename: string; title: string; pdf_base64: string; linked_document_ids: number[] };
+    expect(stored).toMatchObject({ filename: "Ausfüllhilfe Steuer 2025.pdf", title: "Ausfüllhilfe Steuererklärung 2025", linked_document_ids: [71] });
+    expect(Buffer.from(stored.pdf_base64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
+  });
+
   it("refuses a tax folder for a year with nothing flagged", async () => {
     clients.documents.listTaxDocuments.mockResolvedValue({ year: 2019, total_documents: 0, sections: [] });
     clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });

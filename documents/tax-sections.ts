@@ -42,6 +42,18 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     hint: "Jahresbelege von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable): Jahressteuerbescheinigung, Steuerbescheinigung, Erträgnisaufstellung, Verlustbescheinigung. Auch Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder Kirchensteuer im Kontext von Wertpapieren/Dividenden/Bank ausweisen, gehören hierher und NICHT in Anlage N. NICHT: einzelne Depotabrechnungen (Dividendengutschrift, Steuerliche Behandlung einer Dividende, Wertpapierabrechnung, Vorabpauschale) — deren Werte stehen gesammelt in der Jahressteuerbescheinigung, sie sind nicht steuerrelevant.",
   },
   {
+    slug: "anlage-kap-inv",
+    group: "einkuenfte",
+    name: "Anlage KAP-INV — Investmentfonds ohne Steuerbescheinigung",
+    hint: "Erträge aus Investmentfonds, für die KEINE deutsche Jahressteuerbescheinigung vorliegt: Fonds in ausländischen Depots (Interactive Brokers, Degiro, ausländische Bank), Vorabpauschale und Ausschüttungen aus Depotauszügen ohne deutschen Steuerabzug, Fondsabrechnungen mit Teilfreistellung ohne KESt. Gehört NICHT hierher: eine deutsche Jahressteuerbescheinigung, in der die Fondserträge schon enthalten sind — die ist Anlage KAP.",
+  },
+  {
+    slug: "anlage-aus",
+    group: "einkuenfte",
+    name: "Anlage AUS — Ausländische Einkünfte",
+    hint: "Einkünfte aus dem Ausland und dort gezahlte Steuern: ausländische Dividenden- oder Zinsabrechnungen mit Quellensteuer ohne deutschen Steuerabzug, ausländische Steuerbescheinigungen (tax statement, withholding tax, Form 1042-S), Mieteinnahmen einer Auslandsimmobilie, ausländische Renten- oder Lohnnachweise, Doppelbesteuerungsbescheinigungen. NICHT: Quellensteuer, die eine deutsche Bank in der Jahressteuerbescheinigung bereits angerechnet hat — die bleibt Anlage KAP.",
+  },
+  {
     slug: "anlage-v",
     group: "einkuenfte",
     name: "Anlage V — Vermietung & Verpachtung",

@@ -395,7 +395,7 @@ const SECURITIES_ANNUAL_CERTIFICATE_MARKERS: readonly string[] = [
 const NO_CERTIFICATE_NOTICE = "keinesteuerbescheinigung";
 
 /** Sektionen, die ein Kapitalertragsbeleg behalten darf. */
-const KAP_TAX_SLUGS = new Set(["anlage-kap", "werbungskosten-kap"]);
+const KAP_TAX_SLUGS = new Set(["anlage-kap", "werbungskosten-kap", "anlage-kap-inv", "anlage-aus"]);
 
 export function applySecuritiesSettlementTaxRule(input: {
   text: string;
