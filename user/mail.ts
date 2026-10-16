@@ -322,8 +322,11 @@ export function setMailTransportForTests(t: Pick<nodemailer.Transporter, "sendMa
 
 export interface CollectionExportMailParams {
   to: string[];
-  /** The sender's own address: replies go to them, not to the app. */
-  replyTo: string | null;
+  /**
+   * Who the mail is from: the person who sends it. `null` sends from the
+   * app's own address (an automatic export someone mails to themselves).
+   */
+  from: { name: string; email: string } | null;
   senderName: string;
   collectionName: string;
   /** What the sender wrote; plain text. */
@@ -334,9 +337,16 @@ export interface CollectionExportMailParams {
   link: { url: string; filename: string; expiresAt: string } | null;
 }
 
+/** The bare address of the app's sender, `SMTP_FROM` without its name. */
+export function systemSenderAddress(): string {
+  return /<([^>]+)>/.exec(SMTP_FROM)?.[1]?.trim() ?? SMTP_FROM.trim();
+}
+
 /**
- * Send a collection's export. The mail comes from the app's address, but
- * `Reply-To` is the person who sent it, so the answer reaches them.
+ * Send a collection's export. `From` is the person who sends it, so the
+ * recipient sees who it is from and answers them; the app's SMTP account
+ * still delivers it, which `Sender` and the envelope say (and bounces come
+ * back to the app). With `from: null` the mail is the app's own.
  */
 export async function sendCollectionExportEmail(params: CollectionExportMailParams): Promise<void> {
   if (!mailConfigured()) throw new Error("SMTP_NOT_CONFIGURED");
@@ -371,10 +381,11 @@ export async function sendCollectionExportEmail(params: CollectionExportMailPara
       }
     </div>
   `;
+  const system = systemSenderAddress();
   await (testTransport ?? getTransporter()).sendMail({
-    from: SMTP_FROM,
+    from: params.from ? { name: params.from.name, address: params.from.email } : SMTP_FROM,
+    ...(params.from ? { sender: system, envelope: { from: system, to: params.to } } : {}),
     to: params.to,
-    replyTo: params.replyTo ?? undefined,
     subject,
     text: lines.join("\n"),
     html,

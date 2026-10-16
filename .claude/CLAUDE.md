@@ -1322,9 +1322,13 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
   `collections/exporters.ts` und seinen Teil der Optionen in
   `export-options.ts`; was nicht in die Datei kommt, steht mit Grund im
   Inhaltsverzeichnis, nie still weggelassen. Weitergegeben wird ein fertiger
-  Export über `ExportSendPanel.vue` (Teilen-Menü, E-Mail vom Server mit
-  `Reply-To` des Absenders, Download-Link); jede Mail landet im Protokoll
-  `collection_sends`. Zeitpläne (`collections/schedules.ts`) laufen als der,
+  Export über `ExportSendPanel.vue` (Teilen-Menü, E-Mail vom Server mit der
+  Adresse des Nutzers als Absender, Download-Link); nur ein automatischer
+  Versand, der allein an den Nutzer selbst geht, kommt von der App-Adresse
+  (`mailSender` in `collections/sending.ts`). Der Absender steht im Formular
+  und im Protokoll `collection_sends`. Der Dialog hat drei Reiter
+  (Exportieren, Verlauf, Regelmäßig); nach „Exportieren“ zeigt der erste das
+  Ergebnis mit allen Wegen weiter statt des Formulars. Zeitpläne (`collections/schedules.ts`) laufen als der,
   der sie angelegt hat, mit seinen Rechten zur Laufzeit; der Basket hat keine.
 - `Ctrl/Cmd+A` wählt alles (das Composable bindet es selbst),
   Umschalt+Klick den Bereich, `Esc` beendet.

@@ -8,8 +8,13 @@
  * a ZIP with a folder per kind and a table of contents otherwise.
  *
  * The options can be kept as a named profile with the collection, so the
- * next export is one click. Runs happen on the server; the dialog lists the
- * reader's recent ones and offers the file as long as it is kept (a week).
+ * next export is one click. Runs happen on the server.
+ *
+ * Three tabs: "Exportieren" sets up a run and, once started, shows that run
+ * in place of the form — progress, then download, share, mail, link — so
+ * nobody presses "Exportieren" again to find out whether it worked.
+ * "Verlauf" keeps the reader's recent runs (a week) and the mails sent;
+ * "Regelmäßig" the schedules (not for the basket).
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Button from 'primevue/button'
@@ -20,6 +25,11 @@ import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
+import Tab from 'primevue/tab'
+import TabList from 'primevue/tablist'
+import TabPanel from 'primevue/tabpanel'
+import TabPanels from 'primevue/tabpanels'
+import Tabs from 'primevue/tabs'
 import {
   ENTITY_LABELS,
   EXPORT_SKIP_REASONS,
@@ -75,6 +85,12 @@ const busyRun = ref<number | null>(null)
 const sendFor = ref<number | null>(null)
 const sends = ref<CollectionSend[]>([])
 const mailConfigured = ref(false)
+const senderEmail = ref<string | null>(null)
+const systemSender = ref('')
+const tab = ref<'new' | 'history' | 'schedules'>('new')
+/** The run started from the form; while set, the first tab shows it instead of the form. */
+const currentId = ref<number | null>(null)
+const current = computed(() => runs.value.find((r) => r.id === currentId.value) ?? null)
 
 async function loadSends() {
   if (props.collectionId === null) return
@@ -82,6 +98,8 @@ async function loadSends() {
     const res = await listCollectionSends(props.collectionId)
     sends.value = res.items
     mailConfigured.value = res.mail_configured
+    senderEmail.value = res.sender_email
+    systemSender.value = res.system_sender
   } catch {
     /* the log is an extra */
   }
@@ -174,6 +192,9 @@ async function load() {
   loading.value = true
   error.value = ''
   info.value = ''
+  tab.value = 'new'
+  currentId.value = null
+  sendFor.value = null
   try {
     const [s, r] = await Promise.all([getExportSetup(props.collectionId), listCollectionExportRuns(props.collectionId)])
     setup.value = s
@@ -308,6 +329,7 @@ async function start() {
       unchanged ? { profile_id: profile.id } : { options: options.value },
     )
     runs.value = [run, ...runs.value.filter((r) => r.id !== run.id)].slice(0, 5)
+    currentId.value = run.id
     poll()
   } catch (err: unknown) {
     error.value = err instanceof Error ? err.message : 'Export konnte nicht gestartet werden.'
@@ -349,6 +371,7 @@ async function removeRun(run: ExportRun) {
   try {
     await deleteCollectionExportRun(run.id)
     runs.value = runs.value.filter((r) => r.id !== run.id)
+    if (currentId.value === run.id) currentId.value = null
   } catch (err: unknown) {
     error.value = err instanceof Error ? err.message : 'Löschen fehlgeschlagen.'
   }
@@ -364,6 +387,11 @@ function skippedLabel(run: ExportRun): string {
   return run.skipped
     .map((s) => `${ENTITY_LABELS[s.entity_type].singular} #${s.entity_id}: ${EXPORT_SKIP_REASONS[s.reason] ?? s.reason}`)
     .join('\n')
+}
+
+function dayLabel(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
 }
 
 function timeLabel(iso: string): string {
@@ -389,210 +417,291 @@ function timeLabel(iso: string): string {
     <p v-if="loading" class="exp-hint"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> Wird vorbereitet …</p>
     <p v-else-if="setup && groups.length === 0" class="exp-hint">Die Mappe enthält nichts, was du exportieren kannst.</p>
 
-    <template v-else-if="options && setup">
-      <div class="exp-profile">
-        <label class="exp-label" for="export-profile">Profil</label>
-        <Select v-model="profileId" input-id="export-profile" :options="profileOptions" option-label="label" option-value="value" class="exp-grow" />
-        <Button
-          v-if="profileId !== null"
-          icon="pi pi-trash"
-          text
-          rounded
-          severity="danger"
-          aria-label="Profil löschen"
-          v-tooltip.bottom="'Profil löschen'"
-          @click="removeProfile"
-        />
-      </div>
-
-      <section v-for="g in groups" :key="g.key" class="exp-group" :data-testid="`export-group-${g.key}`">
-        <h3 class="exp-group-title"><i :class="g.icon" aria-hidden="true" /> {{ g.label }} ({{ g.count }})</h3>
-
-        <template v-if="g.key === 'document'">
-          <SelectButton v-model="options.document.format" :options="DOCUMENT_FORMATS" option-label="label" option-value="value" :allow-empty="false" aria-label="Format der Dokumente" />
-          <p class="exp-hint">
-            {{ options.document.format === 'pdf'
-              ? 'Alle Dokumente in einem PDF, mit der Seitenauswahl und den Schwärzungen der Mappe.'
-              : 'Die Dateien wie hochgeladen. Dokumente mit Schwärzungen bleiben draußen, sie gibt es nur im PDF.' }}
-          </p>
-        </template>
-
-        <template v-else-if="g.key === 'transaction'">
-          <SelectButton v-model="options.transaction.format" :options="TABLE_FORMATS" option-label="label" option-value="value" :allow-empty="false" aria-label="Format der Buchungen" />
-          <label class="exp-check">
-            <Checkbox v-model="options.transaction.group_by_account" binary />
-            <span>Nach Konto gruppieren, mit Summe je Konto</span>
-          </label>
-          <div class="exp-columns" role="group" aria-label="Spalten">
-            <button
-              v-for="c in TRANSACTION_EXPORT_COLUMNS"
-              :key="c"
-              type="button"
-              class="exp-chip"
-              :class="{ 'exp-chip--on': hasColumn(c) }"
-              :aria-pressed="hasColumn(c)"
-              @click="toggleColumn(c)"
-            >
-              {{ TRANSACTION_COLUMN_LABELS[c] }}
-            </button>
-          </div>
-          <ol v-if="options.transaction.group_by_account && accountsInOrder.length > 1" class="exp-accounts" aria-label="Reihenfolge der Konten">
-            <li v-for="(a, i) in accountsInOrder" :key="a.id">
-              <span class="exp-grow">{{ a.label }}</span>
-              <Button icon="pi pi-arrow-up" text rounded size="small" :disabled="i === 0" :aria-label="`${a.label} nach oben`" @click="moveAccount(i, -1)" />
-              <Button icon="pi pi-arrow-down" text rounded size="small" :disabled="i === accountsInOrder.length - 1" :aria-label="`${a.label} nach unten`" @click="moveAccount(i, 1)" />
-            </li>
-          </ol>
-          <p class="exp-hint">Eine Auswahl ist kein Kontoauszug: Die Summen gelten nur für die Buchungen in der Mappe.</p>
-        </template>
-
-        <template v-else-if="g.key === 'photo' || g.key === 'album'">
-          <SelectButton v-model="options[g.key].size" :options="PHOTO_SIZES" option-label="label" option-value="value" :allow-empty="false" :aria-label="`Größe der ${g.label}`" />
-          <label class="exp-check">
-            <Checkbox v-model="options[g.key].strip_metadata" binary />
-            <span>Metadaten entfernen (Aufnahmeort, Kamera)</span>
-          </label>
-          <p v-if="g.key === 'album'" class="exp-hint">Ein Ordner je Album mit den Fotos darin, die du sehen darfst.</p>
-        </template>
-
-        <template v-else-if="g.key === 'security'">
-          <SelectButton v-model="options.security.format" :options="TABLE_FORMATS" option-label="label" option-value="value" :allow-empty="false" aria-label="Format der Wertpapiere" />
-          <p class="exp-hint">Bestand laut letztem Depotauszug, Kurs aus dem Kurs-Cache.</p>
-        </template>
-
-        <template v-else-if="g.key === 'meter'">
-          <SelectButton v-model="options.meter.format" :options="TABLE_FORMATS" option-label="label" option-value="value" :allow-empty="false" aria-label="Format der Zählerstände" />
-          <div class="exp-period">
-            <label class="exp-label" for="export-meter-from">Von</label>
-            <DatePicker v-model="meterFrom" input-id="export-meter-from" date-format="dd.mm.yy" show-button-bar placeholder="Anfang" />
-            <label class="exp-label" for="export-meter-to">Bis</label>
-            <DatePicker v-model="meterTo" input-id="export-meter-to" date-format="dd.mm.yy" show-button-bar placeholder="heute" />
-          </div>
-        </template>
-      </section>
-
-      <label v-if="singleFile" class="exp-check">
-        <Checkbox v-model="options.always_zip" binary />
-        <span>Trotzdem als ZIP, mit Inhaltsverzeichnis</span>
-      </label>
-      <p class="exp-hint">{{ outcome }}</p>
-
-      <div class="exp-save">
-        <template v-if="naming">
-          <InputText v-model="profileName" placeholder="Name des Profils" aria-label="Name des Profils" class="exp-grow" @keyup.enter="saveProfile" />
-          <Button label="Speichern" size="small" :disabled="!profileName.trim()" @click="saveProfile" />
-          <Button label="Abbrechen" size="small" text severity="secondary" @click="naming = false" />
-        </template>
-        <Button v-else label="Als Profil speichern" icon="pi pi-save" size="small" text @click="naming = true" />
-      </div>
-    </template>
-
-    <ExportSchedulePanel
-      v-if="!basket && collectionId !== null && options && setup && groups.length > 0"
-      :collection-id="collectionId"
-      :profile-id="scheduleProfile?.id ?? null"
-      :profile-name="scheduleProfile?.name ?? null"
-      :options="options"
-      :mail-configured="mailConfigured"
-      @ran="reloadRuns"
-    />
-
-    <section v-if="runs.length > 0" class="exp-runs" aria-label="Letzte Exporte">
-      <h3 class="exp-group-title">Letzte Exporte</h3>
-      <ul>
-        <li v-for="run in runs" :key="run.id" class="exp-run" :data-testid="`export-run-${run.status}`">
-          <div class="exp-run-body">
-            <span class="exp-run-title">
-              <i
-                :class="run.status === 'running' ? 'pi pi-spin pi-spinner' : run.status === 'done' ? 'pi pi-file' : 'pi pi-exclamation-triangle'"
-                aria-hidden="true"
+    <Tabs v-else-if="options && setup" v-model:value="tab" class="exp-tabs">
+      <TabList>
+        <Tab value="new" data-testid="export-tab-new">Exportieren</Tab>
+        <Tab value="history" data-testid="export-tab-history">
+          Verlauf<span v-if="runs.length" class="exp-tab-count">{{ runs.length }}</span>
+        </Tab>
+        <Tab v-if="!basket" value="schedules" data-testid="export-tab-schedules">Regelmäßig</Tab>
+      </TabList>
+      <TabPanels class="exp-panels">
+        <TabPanel value="new">
+          <!-- The run just started: what came of it, and where it can go. -->
+          <section v-if="current" class="exp-result" aria-live="polite" data-testid="export-result">
+            <template v-if="current.status === 'running'">
+              <p class="exp-result-title"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> Wird erstellt …</p>
+              <p class="exp-hint">Das dauert bei vielen Fotos oder Dokumenten etwas. Du kannst den Dialog schließen; der Export liegt danach im Verlauf.</p>
+            </template>
+            <template v-else-if="current.status === 'done'">
+              <p class="exp-result-title"><i class="pi pi-check-circle" aria-hidden="true" /> {{ current.filename }}</p>
+              <p class="exp-hint">
+                {{ sizeLabel(current.size_bytes) }} · {{ current.item_count }} Einträge · liegt bis {{ dayLabel(current.expires_at) }} bereit
+                <span v-if="current.skipped.length > 0" v-tooltip.bottom="skippedLabel(current)" class="exp-run-skipped">
+                  · {{ current.skipped.length }} nicht enthalten
+                </span>
+              </p>
+              <div class="exp-result-actions">
+                <Button
+                  icon="pi pi-download"
+                  label="Herunterladen"
+                  size="small"
+                  :loading="busyRun === current.id"
+                  data-testid="export-result-download"
+                  @click="download(current)"
+                />
+                <Button
+                  v-if="current.mime_type === 'application/pdf' && canFileAsDocument"
+                  :icon="current.document_id ? 'pi pi-check' : 'pi pi-file-import'"
+                  :label="current.document_id ? 'Liegt bei den Dokumenten' : 'Als Dokument ablegen'"
+                  size="small"
+                  outlined
+                  :disabled="current.document_id !== null || busyRun === current.id"
+                  @click="fileAsDocument(current)"
+                />
+              </div>
+              <ExportSendPanel
+                :run="current"
+                :mail-configured="mailConfigured"
+                :sender-email="senderEmail"
+                @sent="loadSends"
               />
-              {{ run.status === 'running' ? 'Wird erstellt …' : run.filename ?? 'Export fehlgeschlagen' }}
-            </span>
-            <span class="exp-run-meta">
-              {{ timeLabel(run.started_at) }}
-              <template v-if="run.status === 'done'"> · {{ sizeLabel(run.size_bytes) }} · {{ run.item_count }} Einträge</template>
-              <span v-if="run.skipped.length > 0" v-tooltip.bottom="skippedLabel(run)" class="exp-run-skipped">
-                · {{ run.skipped.length }} nicht enthalten
-              </span>
-            </span>
-            <span v-if="run.status === 'failed' && run.error" class="exp-run-error">{{ run.error }}</span>
-          </div>
-          <div class="exp-run-actions">
+            </template>
+            <template v-else>
+              <p class="exp-result-title exp-run-error"><i class="pi pi-exclamation-triangle" aria-hidden="true" /> Export fehlgeschlagen</p>
+              <p v-if="current.error" class="exp-hint">{{ current.error }}</p>
+            </template>
             <Button
-              v-if="run.status === 'done'"
-              icon="pi pi-download"
+              :label="current.status === 'failed' ? 'Einstellungen prüfen und neu starten' : 'Neuer Export'"
+              icon="pi pi-arrow-left"
               text
-              rounded
-              :loading="busyRun === run.id"
-              :aria-label="`Herunterladen: ${run.filename}`"
-              v-tooltip.bottom="'Herunterladen'"
-              @click="download(run)"
+              size="small"
+              class="exp-result-back"
+              data-testid="export-result-back"
+              @click="currentId = null"
             />
-            <Button
-              v-if="run.status === 'done' && run.mime_type === 'application/pdf' && canFileAsDocument"
-              :icon="run.document_id ? 'pi pi-check' : 'pi pi-file-import'"
-              text
-              rounded
-              :disabled="run.document_id !== null || busyRun === run.id"
-              :aria-label="run.document_id ? 'Liegt bei den Dokumenten' : 'Als Dokument ablegen'"
-              v-tooltip.bottom="run.document_id ? 'Liegt bei den Dokumenten' : 'Als Dokument ablegen'"
-              @click="fileAsDocument(run)"
-            />
-            <Button
-              v-if="run.status === 'done'"
-              icon="pi pi-send"
-              text
-              rounded
-              :severity="sendFor === run.id ? undefined : 'secondary'"
-              :aria-expanded="sendFor === run.id"
-              :aria-label="`Weitergeben: ${run.filename}`"
-              v-tooltip.bottom="'Weitergeben: teilen, mailen, Link'"
-              data-testid="export-run-send"
-              @click="sendFor = sendFor === run.id ? null : run.id"
-            />
-            <Button
-              v-if="run.status !== 'running'"
-              icon="pi pi-times"
-              text
-              rounded
-              severity="secondary"
-              aria-label="Export entfernen"
-              v-tooltip.bottom="'Entfernen'"
-              @click="removeRun(run)"
-            />
-          </div>
-          <ExportSendPanel
-            v-if="sendFor === run.id && run.status === 'done'"
-            class="exp-run-send"
-            :run="run"
-            :mail-configured="mailConfigured"
-            @sent="loadSends"
-          />
-        </li>
-      </ul>
-    </section>
+          </section>
 
-    <section v-if="sends.length > 0" class="exp-runs" aria-label="Versendet">
-      <h3 class="exp-group-title">Versendet</h3>
-      <ul>
-        <li v-for="s in sends" :key="s.id" class="exp-run">
-          <div class="exp-run-body">
-            <span class="exp-run-title">
-              <i :class="s.status === 'sent' ? 'pi pi-envelope' : 'pi pi-exclamation-triangle'" aria-hidden="true" />
-              {{ s.filename ?? 'Export' }}
-            </span>
-            <span class="exp-run-meta">{{ timeLabel(s.sent_at) }} · {{ s.sent_by ?? '' }} → {{ sendLabel(s) }}</span>
-            <span v-if="s.status === 'failed' && s.error" class="exp-run-error">{{ s.error }}</span>
-          </div>
-        </li>
-      </ul>
-    </section>
+          <template v-else>
+            <div class="exp-profile">
+              <label class="exp-label" for="export-profile">Profil</label>
+              <Select v-model="profileId" input-id="export-profile" :options="profileOptions" option-label="label" option-value="value" class="exp-grow" />
+              <Button
+                v-if="profileId !== null"
+                icon="pi pi-trash"
+                text
+                rounded
+                severity="danger"
+                aria-label="Profil löschen"
+                v-tooltip.bottom="'Profil löschen'"
+                @click="removeProfile"
+              />
+            </div>
+
+            <section v-for="g in groups" :key="g.key" class="exp-group" :data-testid="`export-group-${g.key}`">
+              <h3 class="exp-group-title"><i :class="g.icon" aria-hidden="true" /> {{ g.label }} ({{ g.count }})</h3>
+
+              <template v-if="g.key === 'document'">
+                <SelectButton v-model="options.document.format" :options="DOCUMENT_FORMATS" option-label="label" option-value="value" :allow-empty="false" aria-label="Format der Dokumente" />
+                <p class="exp-hint">
+                  {{ options.document.format === 'pdf'
+                    ? 'Alle Dokumente in einem PDF, mit der Seitenauswahl und den Schwärzungen der Mappe.'
+                    : 'Die Dateien wie hochgeladen. Dokumente mit Schwärzungen bleiben draußen, sie gibt es nur im PDF.' }}
+                </p>
+              </template>
+
+              <template v-else-if="g.key === 'transaction'">
+                <SelectButton v-model="options.transaction.format" :options="TABLE_FORMATS" option-label="label" option-value="value" :allow-empty="false" aria-label="Format der Buchungen" />
+                <label class="exp-check">
+                  <Checkbox v-model="options.transaction.group_by_account" binary />
+                  <span>Nach Konto gruppieren, mit Summe je Konto</span>
+                </label>
+                <div class="exp-columns" role="group" aria-label="Spalten">
+                  <button
+                    v-for="c in TRANSACTION_EXPORT_COLUMNS"
+                    :key="c"
+                    type="button"
+                    class="exp-chip"
+                    :class="{ 'exp-chip--on': hasColumn(c) }"
+                    :aria-pressed="hasColumn(c)"
+                    @click="toggleColumn(c)"
+                  >
+                    {{ TRANSACTION_COLUMN_LABELS[c] }}
+                  </button>
+                </div>
+                <ol v-if="options.transaction.group_by_account && accountsInOrder.length > 1" class="exp-accounts" aria-label="Reihenfolge der Konten">
+                  <li v-for="(a, i) in accountsInOrder" :key="a.id">
+                    <span class="exp-grow">{{ a.label }}</span>
+                    <Button icon="pi pi-arrow-up" text rounded size="small" :disabled="i === 0" :aria-label="`${a.label} nach oben`" @click="moveAccount(i, -1)" />
+                    <Button icon="pi pi-arrow-down" text rounded size="small" :disabled="i === accountsInOrder.length - 1" :aria-label="`${a.label} nach unten`" @click="moveAccount(i, 1)" />
+                  </li>
+                </ol>
+                <p class="exp-hint">Eine Auswahl ist kein Kontoauszug: Die Summen gelten nur für die Buchungen in der Mappe.</p>
+              </template>
+
+              <template v-else-if="g.key === 'photo' || g.key === 'album'">
+                <SelectButton v-model="options[g.key].size" :options="PHOTO_SIZES" option-label="label" option-value="value" :allow-empty="false" :aria-label="`Größe der ${g.label}`" />
+                <label class="exp-check">
+                  <Checkbox v-model="options[g.key].strip_metadata" binary />
+                  <span>Metadaten entfernen (Aufnahmeort, Kamera)</span>
+                </label>
+                <p v-if="g.key === 'album'" class="exp-hint">Ein Ordner je Album mit den Fotos darin, die du sehen darfst.</p>
+              </template>
+
+              <template v-else-if="g.key === 'security'">
+                <SelectButton v-model="options.security.format" :options="TABLE_FORMATS" option-label="label" option-value="value" :allow-empty="false" aria-label="Format der Wertpapiere" />
+                <p class="exp-hint">Bestand laut letztem Depotauszug, Kurs aus dem Kurs-Cache.</p>
+              </template>
+
+              <template v-else-if="g.key === 'meter'">
+                <SelectButton v-model="options.meter.format" :options="TABLE_FORMATS" option-label="label" option-value="value" :allow-empty="false" aria-label="Format der Zählerstände" />
+                <div class="exp-period">
+                  <div class="exp-field">
+                    <label class="exp-label" for="export-meter-from">Stände von</label>
+                    <DatePicker v-model="meterFrom" input-id="export-meter-from" date-format="dd.mm.yy" show-button-bar placeholder="Anfang" fluid />
+                  </div>
+                  <div class="exp-field">
+                    <label class="exp-label" for="export-meter-to">bis</label>
+                    <DatePicker v-model="meterTo" input-id="export-meter-to" date-format="dd.mm.yy" show-button-bar placeholder="heute" fluid />
+                  </div>
+                </div>
+              </template>
+            </section>
+
+            <label v-if="singleFile" class="exp-check">
+              <Checkbox v-model="options.always_zip" binary />
+              <span>Trotzdem als ZIP, mit Inhaltsverzeichnis</span>
+            </label>
+            <p class="exp-hint">{{ outcome }}</p>
+
+            <div class="exp-save">
+              <template v-if="naming">
+                <InputText v-model="profileName" placeholder="Name des Profils" aria-label="Name des Profils" class="exp-grow" @keyup.enter="saveProfile" />
+                <Button label="Speichern" size="small" :disabled="!profileName.trim()" @click="saveProfile" />
+                <Button label="Abbrechen" size="small" text severity="secondary" @click="naming = false" />
+              </template>
+              <Button v-else label="Als Profil speichern" icon="pi pi-save" size="small" text @click="naming = true" />
+            </div>
+          </template>
+        </TabPanel>
+
+        <TabPanel value="history">
+          <p v-if="runs.length === 0 && sends.length === 0" class="exp-hint">Noch nichts exportiert. Ein Export liegt hier eine Woche lang bereit.</p>
+          <section v-if="runs.length > 0" class="exp-runs" aria-label="Letzte Exporte">
+            <h3 class="exp-group-title">Letzte Exporte</h3>
+            <ul>
+              <li v-for="run in runs" :key="run.id" class="exp-run" :data-testid="`export-run-${run.status}`">
+                <div class="exp-run-body">
+                  <span class="exp-run-title">
+                    <i
+                      :class="run.status === 'running' ? 'pi pi-spin pi-spinner' : run.status === 'done' ? 'pi pi-file' : 'pi pi-exclamation-triangle'"
+                      aria-hidden="true"
+                    />
+                    {{ run.status === 'running' ? 'Wird erstellt …' : run.filename ?? 'Export fehlgeschlagen' }}
+                  </span>
+                  <span class="exp-run-meta">
+                    {{ timeLabel(run.started_at) }}
+                    <template v-if="run.status === 'done'"> · {{ sizeLabel(run.size_bytes) }} · {{ run.item_count }} Einträge</template>
+                    <span v-if="run.skipped.length > 0" v-tooltip.bottom="skippedLabel(run)" class="exp-run-skipped">
+                      · {{ run.skipped.length }} nicht enthalten
+                    </span>
+                  </span>
+                  <span v-if="run.status === 'failed' && run.error" class="exp-run-error">{{ run.error }}</span>
+                </div>
+                <div class="exp-run-actions">
+                  <Button
+                    v-if="run.status === 'done'"
+                    icon="pi pi-download"
+                    text
+                    rounded
+                    :loading="busyRun === run.id"
+                    :aria-label="`Herunterladen: ${run.filename}`"
+                    v-tooltip.bottom="'Herunterladen'"
+                    @click="download(run)"
+                  />
+                  <Button
+                    v-if="run.status === 'done' && run.mime_type === 'application/pdf' && canFileAsDocument"
+                    :icon="run.document_id ? 'pi pi-check' : 'pi pi-file-import'"
+                    text
+                    rounded
+                    :disabled="run.document_id !== null || busyRun === run.id"
+                    :aria-label="run.document_id ? 'Liegt bei den Dokumenten' : 'Als Dokument ablegen'"
+                    v-tooltip.bottom="run.document_id ? 'Liegt bei den Dokumenten' : 'Als Dokument ablegen'"
+                    @click="fileAsDocument(run)"
+                  />
+                  <Button
+                    v-if="run.status === 'done'"
+                    icon="pi pi-send"
+                    text
+                    rounded
+                    :severity="sendFor === run.id ? undefined : 'secondary'"
+                    :aria-expanded="sendFor === run.id"
+                    :aria-label="`Weitergeben: ${run.filename}`"
+                    v-tooltip.bottom="'Weitergeben: teilen, mailen, Link'"
+                    data-testid="export-run-send"
+                    @click="sendFor = sendFor === run.id ? null : run.id"
+                  />
+                  <Button
+                    v-if="run.status !== 'running'"
+                    icon="pi pi-times"
+                    text
+                    rounded
+                    severity="secondary"
+                    aria-label="Export entfernen"
+                    v-tooltip.bottom="'Entfernen'"
+                    @click="removeRun(run)"
+                  />
+                </div>
+                <ExportSendPanel
+                  v-if="sendFor === run.id && run.status === 'done'"
+                  class="exp-run-send"
+                  :run="run"
+                  :mail-configured="mailConfigured"
+                  :sender-email="senderEmail"
+                  @sent="loadSends"
+                />
+              </li>
+            </ul>
+          </section>
+
+          <section v-if="sends.length > 0" class="exp-runs" aria-label="Versendet">
+            <h3 class="exp-group-title">Versendet</h3>
+            <ul>
+              <li v-for="s in sends" :key="s.id" class="exp-run">
+                <div class="exp-run-body">
+                  <span class="exp-run-title">
+                    <i :class="s.status === 'sent' ? 'pi pi-envelope' : 'pi pi-exclamation-triangle'" aria-hidden="true" />
+                    {{ s.filename ?? 'Export' }}
+                  </span>
+                  <span class="exp-run-meta">{{ timeLabel(s.sent_at) }} · von {{ s.sender ?? s.sent_by ?? '' }} → {{ sendLabel(s) }}</span>
+                  <span v-if="s.status === 'failed' && s.error" class="exp-run-error">{{ s.error }}</span>
+                </div>
+              </li>
+            </ul>
+          </section>
+        </TabPanel>
+
+        <TabPanel v-if="!basket" value="schedules">
+          <ExportSchedulePanel
+            v-if="collectionId !== null"
+            :collection-id="collectionId"
+            :profile-id="scheduleProfile?.id ?? null"
+            :profile-name="scheduleProfile?.name ?? null"
+            :options="options"
+            :mail-configured="mailConfigured"
+            :sender-email="senderEmail"
+            :system-sender="systemSender"
+            @ran="reloadRuns"
+          />
+        </TabPanel>
+      </TabPanels>
+    </Tabs>
     </div>
 
     <template #footer>
       <Button label="Schließen" severity="secondary" text @click="emit('update:visible', false)" />
       <Button
+        v-if="tab === 'new' && !current"
         label="Exportieren"
         icon="pi pi-download"
         :loading="starting"
@@ -623,12 +732,61 @@ function timeLabel(iso: string): string {
   min-width: 0;
 }
 .exp-profile,
-.exp-save,
-.exp-period {
+.exp-save {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+}
+/* Two dates side by side while they fit, one above the other on a phone. */
+.exp-period {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--space-2);
+  width: 100%;
+}
+.exp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.exp-tabs :deep(.p-tablist) {
+  margin-bottom: var(--space-3);
+}
+/* The tab strip scrolls sideways and clips, and the tabs fill it edge to
+   edge: the ring goes inside the tab. */
+.exp-tabs :deep(.p-tab) {
+  outline-offset: var(--focus-ring-offset-inset);
+}
+.exp-panels {
+  padding: 0;
+}
+.exp-tab-count {
+  margin-left: var(--space-1);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+.exp-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.exp-result-title {
+  margin: 0;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.exp-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.exp-result-back {
+  align-self: flex-start;
 }
 .exp-profile {
   margin-bottom: var(--space-3);
@@ -691,7 +849,7 @@ function timeLabel(iso: string): string {
   gap: var(--space-1);
   font-size: var(--text-sm);
 }
-.exp-runs {
+.exp-runs + .exp-runs {
   margin-top: var(--space-3);
   padding-top: var(--space-3);
   border-top: 1px solid var(--p-content-border-color);

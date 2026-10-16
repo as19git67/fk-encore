@@ -41,7 +41,7 @@ function as(userId: number): void {
   vi.mocked(getAuthData).mockReturnValue({ userID: String(userId), permissions: PERMISSIONS });
 }
 
-let sent: Array<{ to: string[]; attachments: Array<{ filename: string }> }> = [];
+let sent: Array<{ to: string[]; from: unknown; attachments: Array<{ filename: string }> }> = [];
 const created = { accounts: [] as number[] };
 
 async function cleanup(): Promise<void> {
@@ -86,7 +86,7 @@ beforeEach(async () => {
   await grantFinanceView(OWNER);
   sent = [];
   setMailTransportForTests({
-    sendMail: (async (mail: { to: string[]; attachments: Array<{ filename: string }> }) => {
+    sendMail: (async (mail: { to: string[]; from: unknown; attachments: Array<{ filename: string }> }) => {
       sent.push(mail);
       return {};
     }) as never,
@@ -204,7 +204,26 @@ describe("scheduled exports", () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toEqual(["steuer@beispiel.test"]);
+    expect(sent[0]!.from).toEqual({ name: `Person ${OWNER}`, address: `u${OWNER}@schedules.test` });
     expect(sent[0]!.attachments.map((a) => a.filename)).toEqual(["Kartenumsätze - Buchungen.csv"]);
+    expect(after!.sender).toBe(`u${OWNER}@schedules.test`);
+  });
+
+  it("mails the owner from the app's address when only they get it", async () => {
+    const col = await bookings(["2026-02-03"]);
+    const schedule = await createSchedule({
+      id: col,
+      cadence: "monthly",
+      day: 1,
+      scope: "all",
+      options: { transaction: { format: "csv" } },
+      recipients: [`u${OWNER}@schedules.test`],
+    });
+    expect(schedule.sender).toBe("noreply@example.com");
+    await db.update(collectionSchedules).set({ next_run_at: "2026-03-01T04:00:00Z" }).where(eq(collectionSchedules.id, schedule.id));
+    expect(await runDueSchedules(new Date("2026-03-01T04:00:00Z"))).toEqual({ ran: 1, failed: 0 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.from).toBe("noreply@example.com");
   });
 
   it("tries a failed run again six hours later", async () => {

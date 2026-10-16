@@ -1508,6 +1508,8 @@ export const collectionSends = pgTable("collection_sends", {
   filename: text("filename"),
   status: text("status").$type<"sent" | "failed">().notNull(),
   error: text("error"),
+  /** The From address (migration 0254): the sender's, or the app's. */
+  sender: text("sender"),
   sent_at: timestamp("sent_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
 });
 

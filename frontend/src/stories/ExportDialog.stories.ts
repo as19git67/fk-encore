@@ -51,6 +51,8 @@ function handlers(setup: ExportSetup, runs: ExportRun[]) {
     http.get('/api/collections/:id/sends', () =>
       HttpResponse.json({
         mail_configured: true,
+        sender_email: 'max@beispiel.test',
+        system_sender: 'noreply@beispiel.test',
         items: [
           {
             id: 1,
@@ -60,6 +62,7 @@ function handlers(setup: ExportSetup, runs: ExportRun[]) {
             filename: 'Nebenkosten 2026.zip',
             status: 'sent',
             error: null,
+            sender: 'max@beispiel.test',
             sent_at: '2026-10-15T09:40:00Z',
             sent_by: 'Max Muster',
           },
@@ -81,6 +84,7 @@ function handlers(setup: ExportSetup, runs: ExportRun[]) {
             scope: 'period',
             save_as_document: true,
             recipients: ['vermieter@beispiel.test'],
+            sender: 'max@beispiel.test',
             single_files: false,
             message: null,
             enabled: true,
@@ -98,6 +102,9 @@ function handlers(setup: ExportSetup, runs: ExportRun[]) {
     ),
     http.get('/api/collections/exports/:exportId/entries', () =>
       HttpResponse.json({ items: [{ name: 'Dokumente/Abrechnung.pdf', size: 1000 }, { name: 'Fotos/Zaehler.jpg', size: 2000 }], single_files_allowed: true }),
+    ),
+    http.post('/api/collections/:id/exports', () =>
+      HttpResponse.json(run(10, { filename: 'Nebenkosten 2026.zip', started_at: '2026-10-16T08:00:00Z' })),
     ),
     http.get('/api/collections/exports/:exportId', ({ params }) =>
       HttpResponse.json(runs.find((r) => r.id === Number(params.exportId)) ?? runs[0]),
@@ -171,26 +178,53 @@ export const Leer: Story = {
   },
 }
 
-/** A run's "Weitergeben" panel opened: share, mail, link. */
+/** Click what the dialog renders once it has loaded and enabled it (it lives in a teleport). */
+async function clickWhenThere(root: Document, testId: string): Promise<void> {
+  const selector = `[data-testid="${testId}"]`
+  const ready = () => {
+    const el = root.querySelector(selector) as HTMLButtonElement | null
+    return el && !el.disabled ? el : null
+  }
+  for (let i = 0; i < 80 && !ready(); i++) {
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  ready()?.click()
+}
+
+/** After "Exportieren": the run in place of the form, with where it can go. */
+export const Ergebnis: Story = {
+  ...Gemischt,
+  play: async ({ canvasElement }) => {
+    await clickWhenThere(canvasElement.ownerDocument, 'export-start')
+  },
+}
+
+/** The result with the mail form open: the sender is the user. */
+export const ErgebnisPerMail: Story = {
+  ...Gemischt,
+  play: async ({ canvasElement }) => {
+    const root = canvasElement.ownerDocument
+    await clickWhenThere(root, 'export-start')
+    await clickWhenThere(root, 'export-mail-toggle')
+  },
+}
+
+/** "Verlauf" with a run's "Weitergeben" panel opened: share, mail, link. */
 export const Weitergeben: Story = {
   ...Gemischt,
   play: async ({ canvasElement }) => {
     const root = canvasElement.ownerDocument
-    for (let i = 0; i < 40 && !root.querySelector('[data-testid="export-run-send"]'); i++) {
-      await new Promise((r) => setTimeout(r, 50))
-    }
-    ;(root.querySelector('[data-testid="export-run-send"]') as HTMLButtonElement | null)?.click()
+    await clickWhenThere(root, 'export-tab-history')
+    await clickWhenThere(root, 'export-run-send')
   },
 }
 
-/** "Zeitplan" opened: rhythm, scope, filing and recipients. */
+/** "Regelmäßig" with a new schedule's form: rhythm, scope, filing and recipients. */
 export const NeuerZeitplan: Story = {
   ...Gemischt,
   play: async ({ canvasElement }) => {
     const root = canvasElement.ownerDocument
-    for (let i = 0; i < 40 && !root.querySelector('[data-testid="schedule-add"]'); i++) {
-      await new Promise((r) => setTimeout(r, 50))
-    }
-    ;(root.querySelector('[data-testid="schedule-add"]') as HTMLButtonElement | null)?.click()
+    await clickWhenThere(root, 'export-tab-schedules')
+    await clickWhenThere(root, 'schedule-add')
   },
 }
