@@ -24,6 +24,10 @@ const props = withDefaults(defineProps<{
 // The assistant's bold, lists and code are rendered; the user's own text is
 // shown as typed.
 const rendered = computed(() => (props.role === 'assistant' ? parseBlocks(props.content) : []))
+
+// A lookup that found nothing has its "· 0" in the steps above; an empty
+// grid under the answer said the same thing again, with nothing in it.
+const shownBlocks = computed(() => props.blocks.filter((b) => b.kind === 'analysis' || b.rows.length > 0))
 </script>
 
 <template>
@@ -79,8 +83,8 @@ const rendered = computed(() => (props.role === 'assistant' ? parseBlocks(props.
       {{ error }}
     </p>
 
-    <div v-if="blocks.length" class="blocks">
-      <template v-for="(b, i) in blocks" :key="`${b.tool}-${i}`">
+    <div v-if="shownBlocks.length" class="blocks">
+      <template v-for="(b, i) in shownBlocks" :key="`${b.tool}-${i}`">
         <ProposalCard v-for="p in b.kind === 'proposal' ? b.rows : []" :key="String(p.proposal_id)" :proposal="(p as unknown as Proposal)" />
         <AssistantBlock v-if="b.kind !== 'proposal'" :block="b" />
       </template>

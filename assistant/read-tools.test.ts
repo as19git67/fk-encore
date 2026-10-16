@@ -126,3 +126,20 @@ describe("search_documents", () => {
     expect(out.text).toContain("Ranked by relevance");
   });
 });
+
+describe("list_photos", () => {
+  it("matches the place on the server and can ask for the oldest first", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [{ id: 1, filename: "a.jpg", taken_at: "2003-07-14T10:00:00Z", location_city: "Musterstadt" }] });
+    const out = await tool("list_photos").run({ place: "Musterstadt", order: "oldest", limit: 1 }, ctx());
+    expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ locationText: "Musterstadt", sortDir: "asc" }));
+    expect(out.text).toContain("1 | 2003-07-14 | Musterstadt");
+    expect(out.text).toContain("oldest first");
+    expect(out.block?.route).toBeUndefined();
+  });
+
+  it("asks newest first by default", async () => {
+    clients.photo.listPhotos.mockResolvedValue({ photos: [] });
+    await tool("list_photos").run({ favorite: true }, ctx());
+    expect(clients.photo.listPhotos).toHaveBeenCalledWith(expect.objectContaining({ sortDir: "desc", locationText: undefined }));
+  });
+});

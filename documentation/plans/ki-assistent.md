@@ -335,7 +335,11 @@ behind it.
        the persons on its photos; one `GET /albums/:id/shares` per owned
        album, at most 40 per call, albums shared *with* the user listed
        with their owner only), `list_albums` (with `shared` and the
-       owner), `list_photos` (favorite, dates, persons, place),
+       owner), `list_photos` (favorite, dates, persons, place — the place
+       is matched on the server as `locationText` of `GET /photos`, since
+       filtering the newest 2000 here missed every older photo from it;
+       `order=oldest` for "das älteste Foto", `limit` for how many rows are
+       shown),
        `search_photos` (natural search), `list_recaps` (kind `trip`),
        `list_albums`.
      - meters: `list_meters`, `latest_readings`, `consumption_report`.

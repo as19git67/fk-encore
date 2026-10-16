@@ -38,7 +38,7 @@ function yearOf(date: string | null | undefined): number | undefined {
 export const listPhotos: ToolSpec = {
   name: "list_photos",
   kind: "read",
-  summary: "Photos filtered by favorite flag, date range, person ids and place; or narrows the previous photo result. Returns the count and the first ids.",
+  summary: "Photos filtered by favorite flag, date range, person ids and place name, newest or oldest first; or narrows the previous photo result. Returns the count and the first ids.",
   permissions: PHOTOS,
   source: "hand",
   parameters: {
@@ -49,6 +49,8 @@ export const listPhotos: ToolSpec = {
       date_to: { type: "string", description: "taken on or before, YYYY-MM-DD" },
       person_ids: { type: "array", items: { type: "integer" }, description: "ids from list_persons; photos showing these persons" },
       place: { type: "string", description: "city, country or place name the photo was taken in, e.g. 'München'" },
+      order: { type: "string", enum: ["newest", "oldest"], description: "newest first (default) or oldest first — 'das älteste Foto' is order=oldest, limit=1" },
+      limit: { type: "integer", description: "rows to show, at most 60 (default 15); the count is reported regardless" },
       from_previous_result: { type: "boolean", description: "narrow the photos of the previous answer instead of all photos" },
     },
   },
@@ -60,8 +62,12 @@ export const listPhotos: ToolSpec = {
       ? args.person_ids.map((v) => int(v)).filter((v): v is number => v !== undefined)
       : [];
     const placeTerm = str(args.place);
+    const oldest = str(args.order) === "oldest";
+    const limit = int(args.limit, { min: 1, max: 60 }) ?? 15;
     const fromPrevious = bool(args.from_previous_result) === true;
-    const serverFilter = Boolean(favorite || dateFrom || dateTo || personIds.length);
+    // A place narrows the previous result here, from the rows already
+    // known; everything else is the server's.
+    const serverFilter = Boolean(favorite || dateFrom || dateTo || personIds.length || (placeTerm && !fromPrevious));
 
     const previous = fromPrevious ? ctx.previous?.("photo") : undefined;
     if (fromPrevious && !previous) throw new Error("there is no earlier photo result in this conversation");
@@ -69,12 +75,16 @@ export const listPhotos: ToolSpec = {
     let rows: PhotoRow[];
     let capped = false;
     if (!previous || serverFilter) {
+      // The place is matched on the server: filtering the newest 2000 here
+      // missed every older photo from that place.
       const res = await (photo.listPhotos({
         favorite: favorite || undefined,
         dateFrom,
         dateTo,
         personIds: personIds.length ? personIds.join(",") : undefined,
         personMode: personIds.length ? "include" : undefined,
+        locationText: previous ? undefined : placeTerm,
+        sortDir: oldest ? "asc" : "desc",
         limit: PHOTO_COUNT_CAP + 1,
       })) as unknown as { photos: PhotoRow[] };
       capped = res.photos.length > PHOTO_COUNT_CAP;
@@ -86,8 +96,9 @@ export const listPhotos: ToolSpec = {
       }
     } else {
       rows = await photoDetails(previous);
+      if (oldest) rows = [...rows].reverse();
     }
-    if (placeTerm) {
+    if (placeTerm && previous) {
       const needle = placeTerm.toLowerCase();
       rows = rows.filter((p) => [p.location_name, p.location_city, p.location_country]
         .some((v) => v?.toLowerCase().includes(needle)));
@@ -103,7 +114,7 @@ export const listPhotos: ToolSpec = {
       text: table(
         ["id", "taken", "place"],
         rows.map((p) => [p.id, (p.taken_at ?? p.created_at ?? "").slice(0, 10), place(p)]),
-        { cap: 15, total: count, note: `photo count: ${countText}${previous ? " (narrowed from the previous result)" : ""}` },
+        { cap: limit, total: count, note: `photo count: ${countText}, ${oldest ? "oldest" : "newest"} first${previous ? " (narrowed from the previous result)" : ""}` },
       ),
       digest: digestOf("list_photos", count, rows.map((p) => p.id)),
       rowCount: count,
@@ -113,7 +124,7 @@ export const listPhotos: ToolSpec = {
         tool: "list_photos",
         total: count,
         // The filename is what a thumbnail URL is built from.
-        rows: rows.slice(0, 60).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
+        rows: rows.slice(0, Math.max(limit, 12)).map((p) => ({ id: p.id, filename: p.filename ?? null, taken_at: p.taken_at ?? null })),
         route,
       },
     };

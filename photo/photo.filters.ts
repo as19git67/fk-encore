@@ -48,6 +48,12 @@ export interface PhotoFilterParams {
   nearLat?: number;
   nearLon?: number;
   nearRadiusKm?: number;
+  /**
+   * A place by name — city, country or the reverse-geocoded place — matched
+   * case-insensitively as a substring. The assistant's "Fotos aus München"
+   * (#1528): a name is what the user has, not a coordinate.
+   */
+  locationText?: string;
   ownerIds?: number[];
   // AI auto-pick filter (Track I, see migration 0075):
   //   "exclude" (default) — hide non-picked members of high-confidence
@@ -108,6 +114,7 @@ export interface PhotoFilterQuery {
   nearLat?: number;
   nearLon?: number;
   nearRadiusKm?: number;
+  locationText?: string;
   showAiHidden?: boolean;
   aiHiddenMode?: string;
   ownerIds?: string;
@@ -169,6 +176,9 @@ export function parsePhotoFilterQuery(q: PhotoFilterQuery): PhotoFilterParams {
     f.nearLon = nearLon;
     const radius = q.nearRadiusKm === undefined ? 10 : Number(q.nearRadiusKm);
     f.nearRadiusKm = Number.isFinite(radius) ? Math.min(Math.max(radius, 0.1), 20_000) : 10;
+  }
+  if (typeof q.locationText === "string" && q.locationText.trim()) {
+    f.locationText = q.locationText.trim().slice(0, 100);
   }
   if (q.ownerIds) f.ownerIds = parseIntArray(q.ownerIds);
   if (q.aiHiddenMode === "exclude" || q.aiHiddenMode === "include" || q.aiHiddenMode === "only") {
@@ -375,6 +385,18 @@ export function buildPhotoFilterConditions(
   }
   if (filter.sizeMax !== undefined) {
     conds.push(sql`${photos.size} <= ${filter.sizeMax}`);
+  }
+
+  if (filter.locationText) {
+    // `%` and `_` in the term would be wildcards; a place name has neither
+    // on purpose, so they are escaped.
+    const pattern = `%${filter.locationText.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    conds.push(sql`(
+      ${photos.location_name} ILIKE ${pattern}
+      OR ${photos.location_city} ILIKE ${pattern}
+      OR ${photos.location_country} ILIKE ${pattern}
+      OR ${photos.location_short} ILIKE ${pattern}
+    )`);
   }
 
   if (filter.nearLat !== undefined && filter.nearLon !== undefined) {

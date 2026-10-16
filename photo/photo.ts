@@ -96,6 +96,10 @@ type PhotoFilterQueryParams = {
   aiHiddenMode?: Query<string>;
   /** Orientation variants: all | portrait | landscape (photo.filters.ts). */
   variantMode?: Query<string>;
+  /** A place by name (city, country, reverse-geocoded place), substring. */
+  locationText?: Query<string>;
+  /** Date order of the rows: desc (default, newest first) or asc. */
+  sortDir?: Query<string>;
   /** Maximum number of rows to return. Omit for "all". */
   limit?: Query<number>;
   /** Number of rows to skip before returning `limit` rows. */
@@ -134,6 +138,7 @@ function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
     showAiHidden: p.showAiHidden,
     aiHiddenMode: p.aiHiddenMode,
     variantMode: p.variantMode,
+    locationText: p.locationText,
   };
 }
 
@@ -377,7 +382,16 @@ export const listPhotos = api(
     requirePermission(authData, "photos.view");
 
     const filter = parsePhotoFilterQuery(toFilterQuery(params));
-    return await service.listPhotosLogic(userId, filter);
+    // `limit` and `offset` were declared but never forwarded: every call
+    // returned the whole library. The same cap as the gallery index.
+    const MAX_LIMIT = 5000;
+    const limit = typeof params.limit === "number" && params.limit > 0 ? Math.min(params.limit, MAX_LIMIT) : undefined;
+    const offset = typeof params.offset === "number" && params.offset > 0 ? params.offset : undefined;
+    return await service.listPhotosLogic(userId, filter, {
+      order: params.sortDir === "asc" ? "asc" : "desc",
+      limit,
+      offset,
+    });
   }
 );
 

@@ -138,6 +138,20 @@ export const BENCH_CASES: BenchCase[] = [
     results: { list_recaps: { rows: [{ id: 3, title: "Ostsee", from: "2024-07-20", to: "2024-08-03" }] }, list_trip_plans: { rows: [] }, list_albums: { rows: [] } },
   },
   {
+    id: "photos-at-place",
+    title: "Fotos an einem Ort",
+    question: "Welche Fotos habe ich in Musterstadt gemacht?",
+    expect: [{ tool: "list_photos", args: { place: { $contains: "musterstadt" } } }],
+    results: { list_photos: { rows: [{ id: 901, taken: "2019-05-01", place: "Musterstadt, Deutschland" }], total: 1 } },
+  },
+  {
+    id: "oldest-photo",
+    title: "Ältestes Foto",
+    question: "Was ist das älteste Foto in meiner Bibliothek?",
+    expect: [{ tool: "list_photos", args: { order: "oldest" } }],
+    results: { list_photos: { rows: [{ id: 1, taken: "2003-07-14", place: "Beispielheim" }], total: 48210 } },
+  },
+  {
     id: "beach-photos",
     title: "Fotos nach Inhalt suchen",
     question: "Zeig mir die Fotos vom Strand in Italien.",
