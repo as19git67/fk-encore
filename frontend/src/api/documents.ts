@@ -948,6 +948,20 @@ export function reclassifyAllDocuments(mode: ReclassifyAllMode) {
   })
 }
 
+export interface PageWordsBackfillResponse {
+  queued: number
+  /** Ready documents still without word positions. */
+  remaining: number
+}
+
+/** Queues the word-position backfill (#1531): old documents re-read in the background. */
+export function backfillPageWords(limit?: number) {
+  return apiFetch<PageWordsBackfillResponse>('/documents/page-words/backfill', {
+    method: 'POST',
+    body: JSON.stringify(limit ? { limit } : {}),
+  })
+}
+
 export interface RelocateAllDocumentsResponse {
   processed: number
   moved: number

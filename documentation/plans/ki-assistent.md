@@ -419,6 +419,23 @@ behind it.
      documents get their rows by the targeted re-extraction that exists
      for OCR changes (`text-extract.ts` prioritises by quality), run once
      as a backfill. Stage 6 does not start before this is in place.
+     **Implemented** (#1531), with these details: the table also keeps the
+     page's `unit` (`px`/`pt`) and `rotation` (what OCR turned the raster
+     by, or the page's /Rotate), since a box is only meaningful against
+     the image it was measured on. Words are stored flat in reading order;
+     `findTextBoxes` (`documents/page-words-store.ts`, matching in
+     `page-words.ts`) joins adjacent words on one line and puts a currency
+     sign or code next to an amount into the same box. There was no
+     targeted re-extraction to reuse, so the backfill is its own queue
+     service `page_words` (`POST /documents/page-words/backfill`, button
+     "Wortpositionen nachtragen" in the document queue panel): lowest OCR
+     confidence first, then oldest; the worker runs only while no
+     text_extract is queued, leaves status and classification alone, and
+     replaces the text only when a re-OCR reads it differently (then the
+     embedding is redone). On the way it turned out that the text layer
+     had not been read at all since `pdf-parse` 2 dropped its v1 function
+     (every born-digital PDF went to OCR); it is now read with `pdfjs-dist`
+     directly (#1572).
    - `find_text_in_document(document_id, query)` reads
      `document_page_words` and returns the pages and rectangles where a
      value stands (`{page, x, y, w, h}` in the 0..1 page coordinates

@@ -17,7 +17,7 @@ import { and, eq, sql, inArray } from "drizzle-orm";
 import db from "../db/database";
 import { documentScanQueue } from "../db/schema";
 
-export type DocumentScanService = "text_extract" | "classify" | "embed" | "receipt_ocr";
+export type DocumentScanService = "text_extract" | "classify" | "embed" | "receipt_ocr" | "page_words";
 export type DocumentScanStatus = "pending" | "processing" | "failed" | "done";
 
 /** Services processed for every document, in dependency order. */
@@ -31,6 +31,7 @@ export const DOCUMENT_SERVICES: readonly DocumentScanService[] = [
 export const DOCUMENT_QUEUE_SERVICES: readonly DocumentScanService[] = [
   ...DOCUMENT_SERVICES,
   "receipt_ocr",
+  "page_words",
 ] as const;
 
 /**
@@ -143,6 +144,17 @@ export async function dequeueNextJob(
       )`
     : sql``;
 
+  // The word-position backfill re-reads documents that are already done, with
+  // the same CPU text_extract needs; it waits until no extraction is queued
+  // anywhere, so new uploads never stand behind it.
+  const yieldToExtraction = service === "page_words"
+    ? sql`AND NOT EXISTS (
+        SELECT 1 FROM document_scan_queue t
+        WHERE t.service = 'text_extract'
+          AND t.status IN ('pending', 'processing')
+      )`
+    : sql``;
+
   const rows = await db.execute<typeof documentScanQueue.$inferSelect>(sql`
     UPDATE document_scan_queue
     SET status = 'processing',
@@ -153,6 +165,7 @@ export async function dequeueNextJob(
       WHERE q.service = ${service}
         AND q.status = 'pending'
         ${upstreamReady}
+        ${yieldToExtraction}
       ORDER BY q.priority ASC, q.enqueued_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED

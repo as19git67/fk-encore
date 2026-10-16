@@ -5,8 +5,9 @@ import Message from 'primevue/message'
 import ProgressBar from 'primevue/progressbar'
 import {
   getDocumentQueueStatus, reclassifyAllDocuments, relocateAllDocuments,
-  cancelDocumentQueue, retryDocumentQueue,
+  cancelDocumentQueue, retryDocumentQueue, backfillPageWords,
   type DocQueueStatus,
+  type PageWordsBackfillResponse,
   type ReclassifyAllMode,
   type RelocateAllDocumentsResponse,
 } from '../../api/documents'
@@ -18,6 +19,8 @@ const docReclassifyError = ref('')
 const docReclassifyResult = ref<{ queued: number; skipped_encrypted?: number; status_breakdown?: Record<string, number> } | null>(null)
 const docRelocateLoading = ref(false)
 const docRelocateResult = ref<RelocateAllDocumentsResponse | null>(null)
+const pageWordsLoading = ref(false)
+const pageWordsResult = ref<PageWordsBackfillResponse | null>(null)
 const docCancelLoading = ref(false)
 const docRetryLoading = ref(false)
 
@@ -26,6 +29,7 @@ const docQueueServiceLabels: Record<string, string> = {
   classify: 'KI-Klassifikation',
   embed: 'Embedding',
   receipt_ocr: 'Beleg-OCR (PaddleOCR)',
+  page_words: 'Wortpositionen (nachtragen)',
 }
 
 const docTotalPending = computed(() =>
@@ -84,6 +88,20 @@ async function handleDocRelocateAll() {
   }
 }
 
+async function handlePageWordsBackfill() {
+  docReclassifyError.value = ''
+  pageWordsResult.value = null
+  pageWordsLoading.value = true
+  try {
+    pageWordsResult.value = await backfillPageWords()
+    await fetchDocQueueStatus()
+  } catch (err: any) {
+    docReclassifyError.value = err.message || 'Fehler beim Einreihen'
+  } finally {
+    pageWordsLoading.value = false
+  }
+}
+
 async function handleDocCancel() {
   docReclassifyError.value = ''
   docCancelLoading.value = true
@@ -135,6 +153,13 @@ async function handleDocRetry() {
             {{ status }}={{ count }}
           </span>
         </template>
+      </Message>
+    </div>
+
+    <div v-if="pageWordsResult !== null" class="mb-3">
+      <Message severity="info" :closable="false">
+        {{ pageWordsResult.queued }} Dokument(e) zum Nachtragen der Wortpositionen eingereiht,
+        {{ pageWordsResult.remaining }} noch ohne. Die Aufträge laufen nur, solange keine neue Texterkennung wartet.
       </Message>
     </div>
 
@@ -248,6 +273,15 @@ async function handleDocRetry() {
         :loading="docRelocateLoading"
         :disabled="docRelocateLoading || docReclassifyLoading || docIsActive"
         @click="handleDocRelocateAll"
+      />
+      <Button
+        label="Wortpositionen nachtragen"
+        icon="pi pi-th-large"
+        severity="secondary"
+        v-tooltip.top="'Liest ältere Dokumente erneut, damit bekannt ist, wo jedes Wort auf der Seite steht (für Schwärzungen). Läuft nachrangig.'"
+        :loading="pageWordsLoading"
+        :disabled="pageWordsLoading || docReclassifyLoading"
+        @click="handlePageWordsBackfill"
       />
       <Button
         v-if="docTotalFailed > 0"

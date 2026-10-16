@@ -175,6 +175,20 @@ export function renderItems(
 /** The subset of a pdf.js page object this module touches. */
 interface PdfPageLike {
   getTextContent: (options?: unknown) => Promise<{ items: PdfTextItem[] }>;
+  /** 1-based; pdf.js sets it on every page proxy. */
+  pageNumber?: number;
+  /** [x0, y0, x1, y1] of the page in PDF user space. */
+  view?: number[];
+  /** The page's /Rotate, in degrees. */
+  rotate?: number;
+}
+
+/** What a page's text items look like before they are flattened to text. */
+export interface PdfPageItems {
+  pageNumber: number;
+  view: number[];
+  rotate: number;
+  items: PdfTextItem[];
 }
 
 /**
@@ -187,4 +201,26 @@ export async function renderPageWithSpacing(page: PdfPageLike): Promise<string> 
     disableCombineTextItems: false,
   });
   return renderItems(content?.items ?? []);
+}
+
+/**
+ * The same `pagerender`, also handing each page's items to `sink` — the
+ * boxes the text is built from, which text extraction keeps as word
+ * positions (#1531). pdf-parse renders the pages one after another, so the
+ * sink sees them in order.
+ */
+export function renderPageCollecting(sink: (page: PdfPageItems) => void) {
+  let seen = 0;
+  return async (page: PdfPageLike): Promise<string> => {
+    const content = await page.getTextContent({
+      normalizeWhitespace: false,
+      disableCombineTextItems: false,
+    });
+    const items = content?.items ?? [];
+    seen++;
+    if (Array.isArray(page.view) && page.view.length >= 4) {
+      sink({ pageNumber: page.pageNumber ?? seen, view: page.view, rotate: page.rotate ?? 0, items });
+    }
+    return renderItems(items);
+  };
 }

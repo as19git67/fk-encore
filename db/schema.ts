@@ -853,6 +853,9 @@ export const documentJobServiceEnum = pgEnum("document_job_service", [
   "classify",
   "embed",
   "receipt_ocr",
+  // Backfill of document_page_words for documents extracted before positions
+  // were kept (#1531); yields to text_extract.
+  "page_words",
 ]);
 
 export const documentJobStatusEnum = pgEnum("document_job_status", [
@@ -4562,4 +4565,28 @@ export const assistantProposal = pgTable(
     decided_at: timestamp("decided_at", { mode: "string", withTimezone: true }),
   },
   (table) => [index("assistant_proposal_by_user").on(table.user_id, table.created_at)],
+);
+
+/**
+ * Where each word of a document stands, per page (#1531). Written by
+ * text_extract in the same transaction as `documents.extracted_text`, so text
+ * search and box search see the same words. `words` holds
+ * `{text, left, top, right, bottom, confidence?}` in the page's `unit`:
+ * pixels of the rasterized page for a scan, points for a born-digital page.
+ */
+export const documentPageWords = pgTable(
+  "document_page_words",
+  {
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    page: integer("page").notNull(),
+    width: real("width").notNull(),
+    height: real("height").notNull(),
+    unit: text("unit").$type<"px" | "pt">().notNull(),
+    rotation: integer("rotation").notNull().default(0),
+    words: jsonb("words").$type<Array<{ text: string; left: number; top: number; right: number; bottom: number; confidence?: number }>>().notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.document_id, table.page] })],
 );

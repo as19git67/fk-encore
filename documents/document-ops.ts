@@ -38,7 +38,8 @@ import {
   buildReceiptDocumentCompletion,
   isReliableReceiptAmount,
 } from "./receipt-capture";
-import { deleteJobsForDocument, hasAnyJob, hasUnfinishedJob } from "./scan-queue";
+import { deleteJobsForDocument, hasAnyJob, hasUnfinishedJob, requeueDocument } from "./scan-queue";
+import { hasPageWords, replacePageWords } from "./page-words-store";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import { onDocumentClassified as linkForecastStatements } from "../finance/forecast-statements.service";
 import { readDepotPaper } from "../finance/depot-statement-enrichment";
@@ -304,24 +305,29 @@ export async function runTextExtract(documentId: number): Promise<void> {
   // classify that already settled this document on "ready" (see the
   // hasUnfinishedJob guard in runClassify): pushing it back to "classifying"
   // would strand it there, since no classify job is left to move it on.
-  const updated = await db
-    .update(documents)
-    .set({
-      extracted_text: text.length === 0 ? null : text,
-      text_source: result.source,
-      ocr_mean_confidence: result.ocrMeanConfidence,
-      pages_total: result.ocrPagesTotal,
-      pages_ocred: result.ocrPagesOcred,
-      // Only written when a reading was actually taken. A run with the stage
-      // off must not erase what an earlier run found — the same rule the
-      // sender already follows, and for the same reason: a field that silently
-      // empties also drops the learned rule that was filing the document.
-      ...(result.letterhead ? { letterhead: result.letterhead } : {}),
-      status: sql`CASE WHEN ${documents.status} IN ('pending', 'extracting')
-                       THEN ${nextStatus} ELSE ${documents.status} END`,
-    })
-    .where(eq(documents.id, documentId))
-    .returning({ status: documents.status });
+  // Text and word positions in one transaction, so text search and box search
+  // never see different words (#1531).
+  const updated = await db.transaction(async (tx) => {
+    await replacePageWords(tx, documentId, result.pageWords);
+    return tx
+      .update(documents)
+      .set({
+        extracted_text: text.length === 0 ? null : text,
+        text_source: result.source,
+        ocr_mean_confidence: result.ocrMeanConfidence,
+        pages_total: result.ocrPagesTotal,
+        pages_ocred: result.ocrPagesOcred,
+        // Only written when a reading was actually taken. A run with the stage
+        // off must not erase what an earlier run found — the same rule the
+        // sender already follows, and for the same reason: a field that silently
+        // empties also drops the learned rule that was filing the document.
+        ...(result.letterhead ? { letterhead: result.letterhead } : {}),
+        status: sql`CASE WHEN ${documents.status} IN ('pending', 'extracting')
+                         THEN ${nextStatus} ELSE ${documents.status} END`,
+      })
+      .where(eq(documents.id, documentId))
+      .returning({ status: documents.status });
+  });
   const actualStatus = (updated[0]?.status as DocumentStatus) ?? nextStatus;
   await publishStatusChanged(documentId, row.user_id, actualStatus);
 
@@ -335,6 +341,68 @@ export async function runTextExtract(documentId: number): Promise<void> {
       `source=${result.source}, ${text.length} chars`,
   );
 }
+
+/**
+ * Job: `page_words` — the backfill of word positions for a document
+ * extracted before they were kept (#1531).
+ *
+ * Reads the document again the way text_extract would, and stores the words
+ * with the text they belong to: for a born-digital PDF the text comes out the
+ * same; a re-OCR'd scan may read a little differently, and then the new text
+ * (and its sandwich PDF) replace the old so text search and box search keep
+ * seeing the same words, and only the embedding is redone. Status,
+ * classification and everything the user set stay as they are.
+ */
+export async function runPageWords(documentId: number): Promise<void> {
+  const row = await getDocumentOrThrow(documentId);
+  // A document still on its way through the pipeline gets its words from
+  // text_extract; one that never got text has nothing to locate.
+  if (row.status !== "ready" || !row.extracted_text) return;
+  if (await hasUnfinishedJob(documentId, "text_extract")) return;
+  if (await hasPageWords(documentId)) return;
+  assertPathUnderDocumentsRoot(row.disk_path);
+
+  let result;
+  try {
+    result = await extractPdfText(await freshDiskPath(documentId), {
+      forceOcr: row.force_ocr ?? false,
+      docId: documentId,
+    });
+  } catch (err) {
+    if (err instanceof PdfPasswordRequiredError) return;
+    throw err;
+  }
+
+  const text = (result.text ?? "").trim();
+  const textChanged = text.length > 0 && text !== row.extracted_text.trim();
+  if (textChanged && result.searchablePdf && result.searchablePdf.length > 0) {
+    await writeOcrPdf(documentId, result.searchablePdf).catch((err) =>
+      console.warn(`[documents] page_words(${documentId}): writing OCR sidecar failed: ${(err as Error).message}`));
+  }
+  await db.transaction(async (tx) => {
+    await replacePageWords(tx, documentId, result.pageWords);
+    if (textChanged) {
+      await tx
+        .update(documents)
+        .set({
+          extracted_text: text,
+          text_source: result.source,
+          ocr_mean_confidence: result.ocrMeanConfidence,
+          pages_total: result.ocrPagesTotal,
+          pages_ocred: result.ocrPagesOcred,
+        })
+        .where(eq(documents.id, documentId));
+    }
+  });
+  if (textChanged) await requeueDocument(documentId, ["embed"], PAGE_WORDS_PRIORITY);
+  console.log(
+    `[documents] page_words(${documentId}) — ${result.pageWords.length} page(s), ` +
+      `source=${result.source}${textChanged ? ", text re-read, embedding queued" : ""}`,
+  );
+}
+
+/** Queue priority of the backfill: behind every upload and re-run. */
+export const PAGE_WORDS_PRIORITY = 9;
 
 /**
  * Job: `classify`.

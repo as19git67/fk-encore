@@ -53,6 +53,7 @@ const serviceLabel: Record<string, string> = {
   classify: 'KI',
   embed: 'Embedding',
   receipt_ocr: 'Beleg-OCR',
+  page_words: 'Wortpositionen',
 }
 
 async function load() {
