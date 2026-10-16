@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -131,6 +132,10 @@ class LlmConfig:
     model_url: str = ""
     model_sha256: str = ""
     extra_urls: tuple[str, ...] = field(default_factory=tuple)
+
+    # Set by the service, never stored: False after the projector found for
+    # this model kept llama-server from starting, so it runs text-only.
+    vision: bool = True
 
     # ── construction ─────────────────────────────────────────────────────────
 
@@ -253,7 +258,7 @@ class LlmConfig:
         /healthz to advertise vision that no request can use.
         """
 
-        if self.backend != "server":
+        if self.backend != "server" or not self.vision:
             return ""
         if self.mmproj_path:
             return self.mmproj_path
@@ -309,6 +314,22 @@ def _shared_prefix(a: str, b: str) -> int:
     return n
 
 
+_GENERIC_STEM_RE = re.compile(r"^(?:b?f(?:16|32)|q\d)", re.IGNORECASE)
+
+
+def _family(name: str) -> str:
+    """The model family a file name starts with: `gemma`, `qwen`, `llama`.
+
+    Empty for a name that carries no model at all, such as the projector an
+    upstream repo ships as `mmproj-F16.gguf` next to its weights.
+    """
+
+    if _GENERIC_STEM_RE.match(name):
+        return ""
+    m = re.match(r"[a-z]+", name.lower())
+    return m.group(0) if m else ""
+
+
 def discover_mmproj(models_dir: Path, model_filename: str) -> str:
     """The projector belonging to *model_filename*, or "" if none is there.
 
@@ -335,6 +356,10 @@ def discover_mmproj(models_dir: Path, model_filename: str) -> str:
 
     # `.part` files are excluded by the glob's .gguf suffix, so a download in
     # flight cannot be handed to llama-server as a complete projector.
+    # A projector that names another family is never this model's, however
+    # few candidates there are: Gemma's projector handed to a Qwen model
+    # stops llama-server from starting at all.
+    family = _family(model_filename)
     best: Path | None = None
     best_score = -1
     for candidate in candidates:
@@ -343,6 +368,9 @@ def discover_mmproj(models_dir: Path, model_filename: str) -> str:
             if stem.lower().startswith(prefix):
                 stem = stem[len(prefix):]
                 break
+        other = _family(stem)
+        if family and other and other != family:
+            continue
         score = _shared_prefix(stem, model_filename)
         if score > best_score:
             best, best_score = candidate, score

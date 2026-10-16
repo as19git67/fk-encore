@@ -448,3 +448,48 @@ def test_a_failed_rerouted_reload_does_not_leave_its_notice_behind(client, volum
 
     assert body["reload"]["state"] == "error"
     assert body["config"]["notice"] is None
+
+
+def test_a_projector_that_stops_llama_server_is_dropped_and_the_model_runs_text_only(volume, monkeypatch):
+    """Rather than rolling back to the previous model, the model loads without
+    image understanding, and the status says so."""
+
+    import llama_server
+
+    (volume / "test.gguf").write_bytes(b"x")
+    (volume / "mmproj-F16.gguf").write_bytes(b"x")
+    starts: list[str] = []
+
+    class FakeSupervisor:
+        available = True
+        is_running = False
+        binary = "llama-server"
+
+        def start(self, cfg):
+            starts.append(cfg.resolve_mmproj())
+            self.is_running = True
+
+        def stop(self):
+            self.is_running = False
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def wait_until_ready(self, timeout, still_starting=None):
+            if main._state["config"].resolve_mmproj():
+                raise RuntimeError("llama-server exited during startup")
+            return {"model_path": "test.gguf"}
+
+    monkeypatch.setattr(main, "_llama_server", FakeSupervisor())
+    monkeypatch.setattr(llama_server, "LlamaServerClient", FakeClient)
+    cfg = LlmConfig(model_path=volume / "test.gguf", backend="server")
+    main._apply_config(cfg, source="file")
+    try:
+        main._load_server_llm()
+        assert starts == [str(volume / "mmproj-F16.gguf"), ""]
+        assert main._state["llm"] is not None
+        assert "without image understanding" in main._state["backend_notice"]
+    finally:
+        main._state["llm"] = None
+        main._apply_config(main._BOOT_CONFIG, source="env")

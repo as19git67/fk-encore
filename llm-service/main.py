@@ -555,10 +555,33 @@ def _load_server_llm() -> None:
     # full timeout — the difference between _reload_worker's except block
     # rolling back promptly and the caller sitting through the whole wait
     # first. Only meaningful when we spawned the process ourselves.
-    props = client.wait_until_ready(
-        float(LLM_SERVER_READY_TIMEOUT),
-        still_starting=(lambda: _llama_server.is_running) if _llama_server.available else None,
-    )
+    def wait() -> Any:
+        return client.wait_until_ready(
+            float(LLM_SERVER_READY_TIMEOUT),
+            still_starting=(lambda: _llama_server.is_running) if _llama_server.available else None,
+        )
+
+    try:
+        props = wait()
+    except Exception:
+        # A projector that does not fit the model — another model's, found on
+        # a shared volume — stops llama-server at startup. Text is worth more
+        # than the rollback to the previous model, so try once without it.
+        cfg: LlmConfig = _state["config"]
+        projector = cfg.resolve_mmproj()
+        if not (_llama_server.available and projector):
+            raise
+        log.exception("llama-server did not start with projector %s — retrying without it", projector)
+        if _llama_server.is_running:
+            _llama_server.stop()
+        _state["config"] = dataclasses.replace(cfg, vision=False)
+        _state["backend_notice"] = "; ".join(filter(None, [
+            _state.get("backend_notice"),
+            f"llama-server did not start with the projector {Path(projector).name}; "
+            "the model runs without image understanding",
+        ]))
+        _llama_server.start(_state["config"])
+        props = wait()
     _state["llm"] = client
     # n_ctx from /props is the server's actual window, which may differ from our
     # LLM_CTX if the sidecar clamped it — and LLM_CTX is what /classify budgets

@@ -51,6 +51,13 @@ against the GPU model without a second image. `/reload/status` then reports
 `config.notice`, and `backends` says which of the two this image can run; the
 app's KI-Modell page offers only those.
 
+A projector is found by name (`discover_mmproj`). One that names another
+model family is never used — Gemma's projector handed to a Qwen model stopped
+llama-server from starting, and the reload fell back to the previous model.
+If llama-server still does not start with the projector it found, the
+service retries once without it: the model runs text-only, and
+`config.notice` says so.
+
 ---
 
 ## Quick Start

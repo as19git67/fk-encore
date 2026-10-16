@@ -159,6 +159,26 @@ export const InprocUeberServer: Story = {
   },
 }
 
+export const OhneProjektor: Story = {
+  name: 'Modell ohne passenden Projektor (nur Text)',
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('/api/admin/llm-status', () =>
+          HttpResponse.json({
+            ...STATUS,
+            live: {
+              ...STATUS.live,
+              notice: 'llama-server did not start with the projector mmproj-F16.gguf; the model runs without image understanding',
+            },
+          }),
+        ),
+        ...llmHandlers,
+      ],
+    },
+  },
+}
+
 export const DienstNichtErreichbar: Story = {
   name: 'llm-service nicht erreichbar',
   parameters: {

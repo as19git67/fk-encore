@@ -34,6 +34,21 @@ const configs = ref<LlmConfigRow[]>([])
 const status = ref<LlmStatus | null>(null)
 /** `inproc` exists only in the CPU image; in the GPU image llm-service runs such a configuration in llama-server on the CPU. */
 const inprocMissing = computed(() => status.value?.backends?.inproc === false)
+
+/** What llm-service did differently than configured, in words. */
+const liveNotices = computed(() => {
+  const notice = status.value?.live.notice ?? ''
+  const out: string[] = []
+  if (notice.includes('inproc')) {
+    out.push('Läuft über llama-server auf der CPU: Dieses Image hat kein llama-cpp-python für das Backend inproc, deshalb lädt der llm-service das Modell ohne GPU-Layer über llama-server.')
+  }
+  if (notice.includes('projector')) {
+    const name = /projector (\S+?);/.exec(notice)?.[1]
+    out.push(`Ohne Bildverständnis: llama-server ist mit dem Projektor${name ? ` ${name}` : ''} nicht gestartet, deshalb läuft das Modell nur mit Text. Für Bilder einen passenden mmproj-Projektor zum Modell herunterladen.`)
+  }
+  if (notice && !out.length) out.push(notice)
+  return out
+})
 const files = ref<ModelFilesResponse | null>(null)
 const error = ref('')
 const notice = ref('')
@@ -364,9 +379,10 @@ function formatEta(seconds: number | null): string {
         </div>
       </dl>
 
-      <Message v-if="status.live.notice" severity="info" :closable="false">
-        Läuft über llama-server auf der CPU: Dieses Image hat kein llama-cpp-python für das Backend
-        <code>inproc</code>, deshalb lädt der llm-service das Modell ohne GPU-Layer über llama-server.
+      <Message v-if="liveNotices.length" severity="info" :closable="false">
+        <template v-for="(n, i) in liveNotices" :key="i">
+          <br v-if="i > 0" />{{ n }}
+        </template>
       </Message>
 
       <Message v-if="!status.in_sync" severity="warn" :closable="false">
