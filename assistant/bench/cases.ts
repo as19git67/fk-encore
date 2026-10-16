@@ -312,7 +312,17 @@ export const BENCH_CASES: BenchCase[] = [
     title: "Bericht nach Tags",
     question: "Mach mir einen Bericht über meine Wohnungsbuchungen mit je einer Gruppe für die Tags Miete und Hausgeld.",
     expect: [{ tool: "transaction_report", args: { groups: { $all: [{ $contains: "miete" }, { $contains: "hausgeld" }] } } }],
-    results: { transaction_report: PROPOSAL("Bericht „Wohnung“ als PDF: Miete 24, Hausgeld 12; 36 Buchungen") },
+    results: {
+      // Looking at the bookings first is fine; only the report is scored.
+      list_transactions: {
+        rows: [
+          { id: 811, date: "2026-10-01", counterparty: "Erika Beispiel", purpose: "Miete Oktober", amount: 900, tags: ["Miete"] },
+          { id: 812, date: "2026-10-05", counterparty: "Hausverwaltung Muster", purpose: "Hausgeld Oktober", amount: -310, tags: ["Hausgeld"] },
+        ],
+        count: 36,
+      },
+      transaction_report: PROPOSAL("Bericht „Wohnung“ als PDF: Miete 24, Hausgeld 12; 36 Buchungen"),
+    },
   },
 
   // ── letters (stage 7, #1534) ────────────────────────────────────────────

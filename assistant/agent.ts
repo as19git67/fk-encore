@@ -279,6 +279,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const seenCalls = new Set<string>();
   /** The ungrounded answer and the nudge, sent along until the model calls a tool or answers again. */
   let nudge: ChatMessage[] | null = null;
+  /** One more request for words after an empty reply; never twice. */
+  let emptyRetried = false;
   for (let round = 1; round <= maxRounds && answer === null; round++) {
     rounds = round;
     const last = round === maxRounds;
@@ -330,6 +332,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         max_tokens: ANSWER_TOKENS,
       }, (text) => emit({ type: "token", text })));
       rounds++;
+      emptyRetried = true;
       reply = { ...retry, tool_calls: [] };
       if (looksLikeFakeToolCall(reply.content)) reply = { ...reply, content: null };
     }
@@ -339,6 +342,18 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     }
     if (!reply.tool_calls.length || last) {
       answer = cleanAnswer(reply.content ?? "");
+      if (!answer && !emptyRetried && !looksLikeFakeToolCall(reply.content ?? "")) {
+        // Nothing at all after the tool results (the benchmark saw Gemma end
+        // a Lastschriften turn this way): ask once more, without tools, for
+        // the answer in words before giving up on the turn.
+        emptyRetried = true;
+        const retry = await withSlot(() => input.chat({
+          messages: [...messages, { role: "user", content: FINAL_ANSWER_NUDGE }],
+          max_tokens: ANSWER_TOKENS,
+        }, (text) => emit({ type: "token", text })));
+        rounds++;
+        answer = cleanAnswer(retry.content ?? "");
+      }
       if (!answer || looksLikeFakeToolCall(answer)) {
         answer = last ? OUT_OF_ROUNDS : NO_ANSWER;
       }

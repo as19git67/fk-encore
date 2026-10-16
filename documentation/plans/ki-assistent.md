@@ -207,14 +207,57 @@ behind it.
      the model llm-service had loaded, so switching the model under
      KI-Modell and running again compares the two; a run can be cancelled
      and keeps the cases it finished.
-     Results on the production Gemma model (hit rate, median and p90 time
-     per round, rounds per case) and the one CPU-fallback run go here once
-     measured on the GPU host:
+     Results on the GPU host (16 GB VRAM), measured in the app on
+     2026-10-16. The first row is the run before the fixes listed below it;
+     the four rows after it are the same 26 cases on four models, after
+     those fixes.
 
      | Deployment | Passed | Tool hit | Args hit | Median ms/round | p90 | Median rounds |
      |---|---|---|---|---|---|---|
-     | Gemma 4 26B-A4B, GPU, `server`, context 30000 (2026-10-16, 25 cases, in the app) | 21/25 | 88 % | 84 % | 868 | 2040 | 2 |
-     | Qwen2.5-7B, CPU, `inproc` | — | — | — | — | — | — |
+     | Gemma 4 26B-A4B QAT UD-Q4_K_XL, `server`, context 30000 (25 cases, before the fixes) | 21/25 | 88 % | 84 % | 868 | 2040 | 2 |
+     | Gemma 4 26B-A4B QAT UD-Q4_K_XL, `server`, context 30000 | 22/26 | 96 % | 88 % | 819 | 1535 | 3 |
+     | Qwen3.6-35B-A3B UD-Q5_K_M (MoE), `server`, context 18500 | 23/26 | 96 % | 88 % | 4119 | 12092 | 3 |
+     | Qwen3-14B Q4_K_M (dense), `server`, context 18700, text-only | 18/26 | 81 % | 69 % | 913 | 1866 | 3 |
+     | Qwen2.5-7B Q4_K_M, CPU (`inproc` run in llama-server, 0 GPU layers), context 10000 | 11/26 | 46 % | 42 % | 4379 | 12403 | 3 |
+
+     What the four runs say:
+     - **Gemma stays the production model.** Qwen3.6-35B-A3B passes one case
+       more but needs five times the time per round (its first round after a
+       tool result takes 10–12 s, single rounds up to 60 s), which on a chat
+       is the difference between an answer and a wait. Qwen3-14B is as fast
+       as Gemma and clearly weaker on the catalog: it reaches for
+       `list_trip_plans` where `list_recaps` is asked, passes `year: 2026`
+       for "gerade in Planung", narrows the previous photos without the
+       `place` filter, and gives up on the Mahnung after
+       `get_document_summary` instead of reading the text. Qwen2.5-7B on the
+       CPU is not usable as an assistant: it answers Lastschriften, Reisen
+       and Konten from imagination without a tool call, and asks the user
+       for a meter id instead of calling `list_meters`.
+     - **Both strong models miss the same two cases.** The Mahnung reply
+       names the invoice number but not the deadline in the letter text,
+       although the question asks for both; and the letter about three paid
+       invoices either claims payment without a date gap (Qwen3.6, which
+       puts its gaps into the recipient's address instead) or leaves a
+       single-bracket "[Name des Nutzers]" the server cannot recognise
+       (Qwen3-14B). The `body` parameter of `render_letter` now says that
+       every fact the user asked to be named stands in the body.
+     - **Gemma once answered with nothing**: `debits-this-month` ended after
+       the tool result with an empty reply and scored as unanswered. The loop
+       now asks once more, without tools, for the answer in words before
+       giving up (the same request the forced last round uses).
+     - **Gemma took a shortcut the tool silently ignored**: for "nur die aus
+       München" it called `create_album(from_previous_result, photos:
+       {place})` in one go; `from_previous_result` would have won and the
+       album would have held all three photos. The tool now refuses the
+       combination and names the way round (`list_photos` with the filter
+       first), so the model can correct itself in the next round.
+     - **One case punished looking first**: `report-by-tags` had no canned
+       `list_transactions`, so a model that checked the bookings before
+       building the report got "no data" and stopped (both Qwen3 models).
+       The case now has rows for that call; only the report is scored.
+     - Gemma searched the Eigentümerversammlung protocols with the town in
+       `q` instead of the category, which the case counts as a miss while
+       the rows would have been the same; left as is.
 
      What the first run showed, and what changed after it:
      - The three follow-up cases failed the same way: the model answered
