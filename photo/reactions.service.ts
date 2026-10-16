@@ -7,8 +7,8 @@
  * album that happens to contain the same photo.
  *
  * Audience for an album-scoped comment is everyone who can see the
- * photo *through that album* — the album owner, anyone the album is
- * shared with, and the photo owner (see `getUsersWithAlbumPhotoAccess`).
+ * photo *through that album* — the album owner and anyone the album is
+ * shared with (see `getUsersWithAlbumPhotoAccess`).
  * Each comment fans out a realtime `photos/…` event (carrying the
  * albumId) and a feed entry to that audience minus the actor.
  *
@@ -55,21 +55,21 @@ export interface PhotoComment {
 
 /**
  * Users who can see a given photo *within a specific album* — i.e. the
- * audience for an album-scoped comment. This is the album owner, anyone
- * the album is shared with, and the photo owner. Unlike
- * `getUsersWithPhotoAccess`, it does not pull in members of *other*
- * albums that happen to contain the same photo: comments are bound to
- * one album and must not fan out across albums.
+ * audience for an album-scoped comment: the album owner and anyone the
+ * album is shared with. Unlike `getUsersWithPhotoAccess`, it does not pull
+ * in members of *other* albums that happen to contain the same photo:
+ * comments are bound to one album and must not fan out across albums.
+ *
+ * The photo's owner is not in it by owning the photo. Somebody else's
+ * private album that reused the photo is that person's conversation; the
+ * owner joins it only by taking part in the album.
  */
 async function getUsersWithAlbumPhotoAccess(
   albumId: number,
-  photoId: number,
+  _photoId: number,
 ): Promise<number[]> {
   const rows = await db.execute<{ user_id: number }>(sql`
     SELECT DISTINCT u.user_id FROM (
-      -- Photo owner
-      SELECT user_id FROM photos WHERE id = ${photoId}
-      UNION
       -- Owner of the album the comment lives in
       SELECT a.user_id FROM albums a WHERE a.id = ${albumId}
       UNION
@@ -83,8 +83,7 @@ async function getUsersWithAlbumPhotoAccess(
 /**
  * Authorize a user to read/write comments on `photoId` within
  * `albumId`. The photo must actually belong to the album and the user
- * must have access to that album (own it, have it shared with them, or
- * own the photo). Returns the album-scoped audience for fan-out.
+ * must take part in that album (own it or have it shared with them). Returns the album-scoped audience for fan-out.
  */
 async function assertAlbumPhotoAccess(
   userId: number,
@@ -708,7 +707,7 @@ export async function deleteComment(
 
   // Author may always delete their own comment. The photo owner may
   // moderate (delete) any comment on their photo — including guest
-  // comments.
+  // comments — in an album they take part in.
   let isAuthor = existing.user_id !== null && existing.user_id === userId;
   let isPhotoOwner = false;
   if (!isAuthor) {
@@ -718,7 +717,9 @@ export async function deleteComment(
         .from(photos)
         .where(eq(photos.id, existing.photo_id)),
     );
-    isPhotoOwner = owner?.user_id === userId;
+    isPhotoOwner =
+      owner?.user_id === userId &&
+      (await getUsersWithAlbumPhotoAccess(existing.album_id, existing.photo_id)).includes(userId);
   }
   if (!isAuthor && !isPhotoOwner) {
     throw APIError.permissionDenied("not allowed to delete this comment");
