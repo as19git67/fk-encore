@@ -1,0 +1,560 @@
+<script setup lang="ts">
+/**
+ * The assistant benchmark on a button (documentation/plans/ki-assistent.md,
+ * "Benchmark"). The cases run through the real agent loop against the model
+ * llm-service has loaded; the results are kept per run, so switching the
+ * model under "KI-Modell" and running again compares the two.
+ */
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
+import MultiSelect from 'primevue/multiselect'
+import ProgressBar from 'primevue/progressbar'
+import Tag from 'primevue/tag'
+import { useConfirm } from 'primevue/useconfirm'
+import PageLayout from '../components/layout/PageLayout.vue'
+import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import EmptyState from '../components/layout/EmptyState.vue'
+import ScrollX from '../components/layout/ScrollX.vue'
+import {
+  cancelBenchRun,
+  deleteBenchRun,
+  getBenchRun,
+  listBenchCases,
+  listBenchRuns,
+  startBenchRun,
+  type BenchCaseInfo,
+  type BenchCaseRun,
+  type BenchRunDetail,
+  type BenchRunSummary,
+  type BenchStatus,
+} from '../api/assistantBenchmark'
+
+const POLL_MS = 2000
+
+const confirm = useConfirm()
+const cases = ref<BenchCaseInfo[]>([])
+const today = ref('')
+const runs = ref<BenchRunSummary[]>([])
+const selected = ref<BenchRunDetail | null>(null)
+const label = ref('')
+const chosenCases = ref<string[]>([])
+const loaded = ref(false)
+const busy = ref<'start' | 'cancel' | null>(null)
+const error = ref<string | null>(null)
+
+const running = computed(() => runs.value.find((r) => r.status === 'running') ?? null)
+const caseTitle = (id: string | null) => cases.value.find((c) => c.id === id)?.title ?? id ?? ''
+const caseOptions = computed(() => cases.value.map((c) => ({ value: c.id, label: c.title })))
+
+const STATUS: Record<BenchStatus, { label: string; severity: 'info' | 'success' | 'danger' | 'secondary' }> = {
+  running: { label: 'Läuft', severity: 'info' },
+  done: { label: 'Fertig', severity: 'success' },
+  failed: { label: 'Fehler', severity: 'danger' },
+  cancelled: { label: 'Abgebrochen', severity: 'secondary' },
+}
+
+function percent(v: number | undefined | null): string {
+  return v === null || v === undefined ? '–' : `${Math.round(v * 100)} %`
+}
+
+function ms(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '–'
+  return v >= 10_000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`
+}
+
+function when(iso: string): string {
+  return new Date(iso).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+function callText(c: BenchCaseRun['calls'][number]): string {
+  return `${c.tool}(${JSON.stringify(c.args)})`
+}
+
+function message(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback
+}
+
+async function refreshRuns() {
+  runs.value = (await listBenchRuns()).runs
+}
+
+async function select(id: number) {
+  try {
+    selected.value = await getBenchRun(id)
+  } catch (e) {
+    error.value = message(e, 'Der Lauf konnte nicht geladen werden')
+  }
+}
+
+let timer: ReturnType<typeof setTimeout> | null = null
+
+function schedulePoll() {
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(() => void poll(), POLL_MS)
+}
+
+/** While a run is going, follow it; when it ends, the history shows its numbers. */
+async function poll() {
+  timer = null
+  try {
+    await refreshRuns()
+    const current = running.value
+    if (current && (!selected.value || selected.value.id === current.id || selected.value.status !== 'running')) {
+      await select(current.id)
+    } else if (selected.value?.status === 'running') {
+      await select(selected.value.id)
+    }
+  } catch (e) {
+    error.value = message(e, 'Der Stand konnte nicht geladen werden')
+  }
+  if (running.value || selected.value?.status === 'running') schedulePoll()
+}
+
+onMounted(async () => {
+  try {
+    const [c] = await Promise.all([listBenchCases(), refreshRuns()])
+    cases.value = c.cases
+    today.value = c.today
+    const first = running.value ?? runs.value[0]
+    if (first) await select(first.id)
+  } catch (e) {
+    error.value = message(e, 'Der Benchmark konnte nicht geladen werden')
+  } finally {
+    loaded.value = true
+  }
+  if (running.value) schedulePoll()
+})
+
+onBeforeUnmount(() => {
+  if (timer) clearTimeout(timer)
+})
+
+async function start() {
+  busy.value = 'start'
+  error.value = null
+  try {
+    const run = await startBenchRun({
+      label: label.value.trim() || undefined,
+      case_ids: chosenCases.value.length ? chosenCases.value : undefined,
+    })
+    selected.value = run
+    await refreshRuns()
+    schedulePoll()
+  } catch (e) {
+    error.value = message(e, 'Der Benchmark konnte nicht gestartet werden')
+  } finally {
+    busy.value = null
+  }
+}
+
+async function cancel() {
+  const run = running.value
+  if (!run) return
+  busy.value = 'cancel'
+  try {
+    await cancelBenchRun(run.id)
+    await refreshRuns()
+    await select(run.id)
+  } catch (e) {
+    error.value = message(e, 'Der Lauf konnte nicht abgebrochen werden')
+  } finally {
+    busy.value = null
+  }
+}
+
+function remove(run: BenchRunSummary) {
+  confirm.require({
+    message: `Den Lauf „${run.label}“ vom ${when(run.started_at)} mit allen Ergebnissen löschen?`,
+    header: 'Lauf löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Löschen',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await deleteBenchRun(run.id)
+        if (selected.value?.id === run.id) selected.value = null
+        await refreshRuns()
+      } catch (e) {
+        error.value = message(e, 'Der Lauf konnte nicht gelöscht werden')
+      }
+    },
+  })
+}
+</script>
+
+<template>
+  <PageLayout
+    title="KI-Benchmark"
+    hint="Prüft, ob das geladene Modell für typische Fragen die richtigen Werkzeuge mit den richtigen Argumenten wählt, und misst die Zeit je Runde."
+    width="wide"
+    :ready="loaded"
+  >
+    <template #notice>
+      <ErrorBanner v-if="error" :message="error" :retryable="false" closable @close="error = null" />
+    </template>
+
+    <div class="bench">
+      <section class="card" aria-labelledby="bench-start">
+        <h2 id="bench-start" class="card-title">Neuer Lauf</h2>
+        <p class="muted">
+          {{ cases.length }} Fälle laufen nacheinander durch die echte Agent-Schleife des Assistenten – mit dem
+          echten Systemprompt und Werkzeugkatalog, aber mit festen, erfundenen Werkzeugergebnissen und
+          dem festen Datum {{ today }}. Es werden keine Daten gelesen oder geändert. Jede Runde wartet
+          im KI-Slot hinter den Fragen der Nutzer; gemessen wird nur die Zeit des Modells. Zum Vergleich:
+          unter <em>KI-Modell</em> ein anderes Modell aktivieren und erneut laufen lassen.
+        </p>
+
+        <div v-if="running" class="progress" aria-live="polite">
+          <div class="progress-head">
+            <span>
+              Lauf „{{ running.label }}“: {{ running.cases_done }} von {{ running.cases_total }} Fällen
+              <template v-if="running.current_case"> – gerade „{{ caseTitle(running.current_case) }}“</template>
+            </span>
+            <Button
+              label="Abbrechen"
+              icon="pi pi-stop"
+              severity="secondary"
+              size="small"
+              :loading="busy === 'cancel'"
+              @click="cancel"
+            />
+          </div>
+          <ProgressBar
+            :value="Math.round((running.cases_done / Math.max(1, running.cases_total)) * 100)"
+            :aria-label="`${running.cases_done} von ${running.cases_total} Fällen`"
+          />
+        </div>
+
+        <div v-else class="form">
+          <div class="field">
+            <label for="bench-label">Bezeichnung</label>
+            <InputText id="bench-label" v-model="label" placeholder="Standard: das geladene Modell" />
+          </div>
+          <div class="field">
+            <label for="bench-cases">Fälle</label>
+            <MultiSelect
+              v-model="chosenCases"
+              input-id="bench-cases"
+              :options="caseOptions"
+              option-label="label"
+              option-value="value"
+              placeholder="Alle Fälle"
+              filter
+              :max-selected-labels="2"
+              selected-items-label="{0} Fälle"
+            />
+          </div>
+          <Button
+            label="Benchmark starten"
+            icon="pi pi-play"
+            class="start"
+            :loading="busy === 'start'"
+            :disabled="!cases.length"
+            @click="start"
+          />
+        </div>
+      </section>
+
+      <section v-if="selected" class="card" aria-labelledby="bench-result">
+        <header class="result-head">
+          <h2 id="bench-result" class="card-title">Lauf „{{ selected.label }}“</h2>
+          <Tag :value="STATUS[selected.status].label" :severity="STATUS[selected.status].severity" />
+        </header>
+        <p class="muted">
+          Gestartet {{ when(selected.started_at) }}<template v-if="selected.model">
+            · {{ selected.model.model_filename }} · {{ selected.model.backend }} · Kontext {{ selected.model.ctx_size }}</template>
+        </p>
+        <p v-if="selected.error" class="failure" role="alert">{{ selected.error }}</p>
+
+        <dl v-if="selected.summary" class="tiles">
+          <div class="tile"><dt>Bestanden</dt><dd>{{ selected.summary.passed }} / {{ selected.summary.cases }}</dd></div>
+          <div class="tile"><dt>Richtiges Werkzeug</dt><dd>{{ percent(selected.summary.tool_hit_rate) }}</dd></div>
+          <div class="tile"><dt>Richtige Argumente</dt><dd>{{ percent(selected.summary.args_hit_rate) }}</dd></div>
+          <div class="tile"><dt>Median je Runde</dt><dd>{{ ms(selected.summary.median_ms_per_round) }}</dd></div>
+          <div class="tile"><dt>p90 je Runde</dt><dd>{{ ms(selected.summary.p90_ms_per_round) }}</dd></div>
+          <div class="tile">
+            <dt>Runden je Fall</dt>
+            <dd>{{ selected.summary.median_rounds_per_case ?? '–' }} (max. {{ selected.summary.max_rounds_used ?? '–' }})</dd>
+          </div>
+        </dl>
+
+        <ScrollX v-if="selected.results.length">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Fall</th>
+                <th scope="col">Ergebnis</th>
+                <th scope="col">Runden</th>
+                <th scope="col">Aufrufe</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in selected.results" :key="r.id">
+                <td class="case">
+                  <span class="case-title">{{ r.title }}</span>
+                  <span class="muted case-id">{{ r.id }}</span>
+                </td>
+                <td>
+                  <Tag :value="r.score.passed ? 'bestanden' : 'nicht bestanden'" :severity="r.score.passed ? 'success' : 'danger'" />
+                  <div v-if="r.error" class="failure">{{ r.error }}</div>
+                  <div v-else-if="r.score.missing.length" class="muted">fehlt: {{ r.score.missing.join(', ') }}</div>
+                  <div v-else-if="!r.score.answered" class="muted">keine Antwort</div>
+                </td>
+                <td class="num">{{ r.rounds_ms.length }} · {{ r.rounds_ms.map((x) => ms(x)).join(' / ') }}</td>
+                <td class="calls">
+                  <code v-for="(c, i) in r.calls" :key="i" class="call">{{ callText(c) }}</code>
+                  <span v-if="!r.calls.length" class="muted">keine</span>
+                  <details v-if="r.answer" class="answer">
+                    <summary>Antwort</summary>
+                    <p>{{ r.answer }}</p>
+                  </details>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </ScrollX>
+      </section>
+
+      <section class="card" aria-labelledby="bench-history">
+        <h2 id="bench-history" class="card-title">Verlauf</h2>
+        <EmptyState
+          v-if="!runs.length"
+          icon="pi pi-chart-bar"
+          title="Noch kein Lauf"
+          message="Der erste Lauf erscheint hier, sobald er gestartet ist."
+        />
+        <ScrollX v-else>
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Gestartet</th>
+                <th scope="col">Bezeichnung</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="num">Bestanden</th>
+                <th scope="col" class="num">Werkzeug</th>
+                <th scope="col" class="num">Argumente</th>
+                <th scope="col" class="num">Median</th>
+                <th scope="col" class="num">p90</th>
+                <th scope="col"><span class="sr-only">Aktionen</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in runs" :key="r.id" :class="{ 'row-selected': selected?.id === r.id }">
+                <td>{{ when(r.started_at) }}</td>
+                <td>
+                  <button type="button" class="link" @click="select(r.id)">{{ r.label }}</button>
+                </td>
+                <td><Tag :value="STATUS[r.status].label" :severity="STATUS[r.status].severity" /></td>
+                <td class="num">{{ r.summary ? `${r.summary.passed} / ${r.summary.cases}` : `${r.cases_done} / ${r.cases_total}` }}</td>
+                <td class="num">{{ percent(r.summary?.tool_hit_rate) }}</td>
+                <td class="num">{{ percent(r.summary?.args_hit_rate) }}</td>
+                <td class="num">{{ ms(r.summary?.median_ms_per_round) }}</td>
+                <td class="num">{{ ms(r.summary?.p90_ms_per_round) }}</td>
+                <td>
+                  <Button
+                    icon="pi pi-trash"
+                    text
+                    rounded
+                    severity="secondary"
+                    size="small"
+                    :aria-label="`Lauf ${r.label} löschen`"
+                    :disabled="r.status === 'running'"
+                    @click="remove(r)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </ScrollX>
+      </section>
+    </div>
+  </PageLayout>
+</template>
+
+<style scoped>
+.bench {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  background: var(--p-content-background);
+  min-width: 0;
+}
+
+.card-title {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.muted {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.field label {
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.progress-head {
+  font-size: var(--text-sm);
+}
+
+.progress-head,
+.result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.failure {
+  margin: 0;
+  color: var(--p-red-600);
+  font-size: var(--text-sm);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.tile {
+  padding: var(--space-2) var(--space-3);
+  border-radius: 0.5rem;
+  background: var(--p-content-hover-background);
+}
+
+.tile dt {
+  font-size: var(--text-xs);
+  color: var(--p-text-muted-color);
+}
+
+.tile dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th,
+.table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--p-content-border-color);
+  text-align: left;
+  vertical-align: top;
+}
+
+.table th {
+  color: var(--p-text-muted-color);
+  font-weight: 600;
+}
+
+.num {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wide enough to read on a phone; ScrollX scrolls the rest. */
+.case {
+  min-width: 10rem;
+}
+
+.calls {
+  min-width: 18rem;
+}
+
+.case-title {
+  display: block;
+}
+
+.case-id {
+  display: block;
+  font-size: var(--text-xs);
+}
+
+.call {
+  display: block;
+  max-width: 32rem;
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+}
+
+.answer summary {
+  cursor: pointer;
+  color: var(--p-primary-color);
+}
+
+.answer p {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+}
+
+.row-selected {
+  background: var(--p-content-hover-background);
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--p-primary-color);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+</style>

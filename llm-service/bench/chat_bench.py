@@ -13,6 +13,10 @@ Usage (from ``llm-service/``):
     python bench/chat_bench.py --url ... --only trips-last-year --verbose
     python bench/chat_bench.py --url ... --json out.json
 
+This checks the raw tool protocol of ``/chat`` with a simplified tool list.
+The benchmark of the assistant as deployed (real prompt, real catalog, the
+later write tools) runs in the app: Dokumente › Einstellungen › KI-Benchmark.
+
 Stdlib only, so it runs from any host that can reach the service. The cases
 use synthetic data and a fixed "today" so the expected dates do not drift.
 """

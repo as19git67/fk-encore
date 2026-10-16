@@ -1,0 +1,122 @@
+/**
+ * Scoring the assistant benchmark: did the model call the right tools with
+ * the right arguments, and did it end in an answer? The same rules as
+ * `llm-service/bench/chat_bench.py`, plus nested keys and `$all`.
+ */
+
+import type { BenchCase, Expected, ExpectedCall } from "./cases";
+
+export interface BenchCall {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+export interface CaseScore {
+  /** Every expected tool was called at all. */
+  tool_hit: boolean;
+  /** Every expected tool was called with matching arguments. */
+  args_hit: boolean;
+  answered: boolean;
+  passed: boolean;
+  /** Expected calls no call matched, by tool name. */
+  missing: string[];
+}
+
+function loose(value: unknown): string {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value !== null && typeof value === "object") return JSON.stringify(value).normalize("NFC").toLowerCase();
+  return String(value).trim().normalize("NFC").toLowerCase();
+}
+
+/** One argument against its expectation. */
+export function matches(expected: Expected, actual: unknown): boolean {
+  if (expected !== null && typeof expected === "object") {
+    if ("$present" in expected) return actual !== undefined && actual !== null && actual !== "";
+    if ("$absent" in expected) return actual === undefined || actual === null;
+    if ("$all" in expected) return expected.$all.every((e) => matches(e, actual));
+    if (actual === undefined || actual === null) return false;
+    if ("$contains" in expected) return loose(actual).includes(loose(expected.$contains));
+    if ("$in" in expected) return expected.$in.some((o) => loose(o) === loose(actual));
+  }
+  if (actual === undefined || actual === null) return false;
+  return loose(expected) === loose(actual);
+}
+
+/** `yield.investment_group` reads `args.yield.investment_group`. */
+function argAt(args: Record<string, unknown>, key: string): unknown {
+  if (key in args) return args[key];
+  let value: unknown = args;
+  for (const part of key.split(".")) {
+    if (value === null || typeof value !== "object") return undefined;
+    value = (value as Record<string, unknown>)[part];
+  }
+  return value;
+}
+
+export function callMatches(expect: ExpectedCall, call: BenchCall): boolean {
+  if (call.tool !== expect.tool) return false;
+  return Object.entries(expect.args ?? {}).every(([key, want]) => matches(want, argAt(call.args, key)));
+}
+
+/**
+ * Every expected call must occur somewhere in the run, in any order. A model
+ * that lists the categories first and one that searches straight away both
+ * reach the right documents, so extra read calls are not penalised.
+ */
+export function scoreCase(c: BenchCase, calls: BenchCall[], answered: boolean): CaseScore {
+  if (c.forbidTools && calls.length) {
+    return { tool_hit: false, args_hit: false, answered, passed: false, missing: ["no tool call expected"] };
+  }
+  const called = new Set(calls.map((x) => x.tool));
+  const tool_hit = c.expect.every((e) => called.has(e.tool));
+  const missing = c.expect.filter((e) => !calls.some((x) => callMatches(e, x))).map((e) => e.tool);
+  const args_hit = missing.length === 0;
+  return { tool_hit, args_hit, answered, passed: tool_hit && args_hit && answered, missing };
+}
+
+export interface BenchSummary {
+  cases: number;
+  passed: number;
+  tool_hit_rate: number;
+  args_hit_rate: number;
+  pass_rate: number;
+  errors: number;
+  rounds: number;
+  median_ms_per_round: number | null;
+  p90_ms_per_round: number | null;
+  median_rounds_per_case: number | null;
+  max_rounds_used: number | null;
+}
+
+export interface CaseRunSummaryInput {
+  rounds_ms: number[];
+  error: string | null;
+  score: CaseScore;
+}
+
+function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const s = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+export function summarize(runs: CaseRunSummaryInput[]): BenchSummary {
+  const n = runs.length || 1;
+  const roundMs = runs.flatMap((r) => r.rounds_ms);
+  const perCase = runs.filter((r) => r.rounds_ms.length).map((r) => r.rounds_ms.length);
+  const sorted = [...roundMs].sort((a, b) => a - b);
+  return {
+    cases: runs.length,
+    passed: runs.filter((r) => r.score.passed).length,
+    tool_hit_rate: runs.filter((r) => r.score.tool_hit).length / n,
+    args_hit_rate: runs.filter((r) => r.score.args_hit).length / n,
+    pass_rate: runs.filter((r) => r.score.passed).length / n,
+    errors: runs.filter((r) => r.error !== null).length,
+    rounds: roundMs.length,
+    median_ms_per_round: median(roundMs),
+    p90_ms_per_round: sorted.length ? sorted[Math.floor(0.9 * (sorted.length - 1))] : null,
+    median_rounds_per_case: median(perCase),
+    max_rounds_used: perCase.length ? Math.max(...perCase) : null,
+  };
+}

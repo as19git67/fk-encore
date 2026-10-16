@@ -36,6 +36,9 @@ import type {
 } from "./types";
 
 export const DEFAULT_MAX_ROUNDS = 8;
+/** What the loop says itself when the model gave no answer; never the model's words. */
+export const NO_ANSWER = "Dazu habe ich keine Antwort gefunden.";
+export const OUT_OF_ROUNDS = "Ich konnte die Frage nicht in der vorgesehenen Zahl von Schritten beantworten.";
 /** What one answer may spend on generation. */
 const ANSWER_TOKENS = 1024;
 /** The window the loop budgets against; the deployment's LLM_CTX, minus headroom. */
@@ -251,7 +254,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     if (!reply.tool_calls.length || last) {
       answer = reply.content ?? "";
       if (!answer.trim()) {
-        answer = "Dazu habe ich keine Antwort gefunden.";
+        answer = NO_ANSWER;
       }
       break;
     }
@@ -301,7 +304,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     }
   }
 
-  const final = answer ?? "Ich konnte die Frage nicht in der vorgesehenen Zahl von Schritten beantworten.";
+  const final = answer ?? OUT_OF_ROUNDS;
   messages.push({ role: "assistant", content: final });
   const transcript = messages.slice(questionIndex);
   emit({ type: "done", answer: final, blocks });

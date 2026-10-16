@@ -4705,3 +4705,29 @@ export const documentLinks = pgTable(
     index("document_links_by_linked").on(table.linked_document_id),
   ],
 );
+
+/**
+ * A run of the assistant benchmark (migration 0253). `results` grows by one
+ * entry per finished case, so the page can show progress while it runs.
+ */
+export const assistantBenchmarkRun = pgTable(
+  "assistant_benchmark_run",
+  {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    label: text("label").notNull(),
+    model: jsonb("model").$type<Record<string, unknown>>(),
+    status: text("status").$type<"running" | "done" | "failed" | "cancelled">().notNull().default("running"),
+    case_ids: jsonb("case_ids").$type<string[]>().notNull().default([]),
+    cases_total: integer("cases_total").notNull(),
+    cases_done: integer("cases_done").notNull().default(0),
+    current_case: text("current_case"),
+    results: jsonb("results").$type<unknown[]>().notNull().default([]),
+    summary: jsonb("summary").$type<Record<string, unknown>>(),
+    error: text("error"),
+    started_at: timestamp("started_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    finished_at: timestamp("finished_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [index("assistant_benchmark_run_by_start").on(table.started_at)],
+);

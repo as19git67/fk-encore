@@ -189,6 +189,24 @@ behind it.
      agent loop with canned tool results; a case passes when every
      expected call occurred with the right arguments and the run ended in
      an answer. Order of calls is free, extra read calls are not penalised.
+     This script checks the raw tool protocol of `/chat` with its own
+     simplified tool list and runs from any host. The benchmark that
+     measures the assistant as it is deployed is the one in the app:
+   - **Benchmark in the app** (Dokumente › Einstellungen › KI-Benchmark,
+     `assistant/benchmark.ts`, cases in `assistant/bench/cases.ts`): every
+     case goes through the real agent loop (`runTurn`) with the real system
+     prompt, the real catalog (deferred schemas and `describe_tools`
+     included), the context budget and the round cap of production; only the
+     tools return canned, synthetic results, so nothing is read or written.
+     The cases cover the questions above plus follow-ups on earlier
+     results, redacted bundles, grouped reports and letters from a working
+     set (25 cases). A test checks that every expected tool and argument
+     exists in the catalog, so a renamed parameter fails CI rather than the
+     benchmark. Each round runs in the ai-queue's `llm` slot at priority 5
+     and is timed inside it. Runs are kept in `assistant_benchmark_run` with
+     the model llm-service had loaded, so switching the model under
+     KI-Modell and running again compares the two; a run can be cancelled
+     and keeps the cases it finished.
      Results on the production Gemma model (hit rate, median and p90 time
      per round, rounds per case) and the one CPU-fallback run go here once
      measured on the GPU host:
