@@ -23,6 +23,7 @@ import { loadReadableCollection } from "../documents/collection-access";
 import { appUrl, mailConfigured, sendCollectionExportEmail } from "../user/mail";
 import { assertMayUseCollections, caller, isAdmin } from "./collections";
 import { contentDisposition, exportPath, loadOwnRun, type ExportRow } from "./exports";
+import type { Caller } from "./members";
 
 /** Above this, a mail carries a link instead of attachments. */
 export const MAIL_ATTACHMENT_LIMIT = Number(process.env.COLLECTION_MAIL_MAX_BYTES || 15 * 1024 * 1024);
@@ -240,68 +241,84 @@ async function logSend(
  * Mail the export. Attached when it fits, as a link when it does not; with
  * `single_files`, the files inside the ZIP go one by one (at most ten).
  */
+/**
+ * Mail a finished export: attached when it fits, as a link when it does not;
+ * with `singleFiles`, the files inside the ZIP go one by one (at most ten).
+ * Logs the mail either way. Used by the endpoint and the scheduled exports.
+ */
+export async function mailExport(
+  row: ExportRow,
+  c: Caller,
+  recipients: string[],
+  message: string | null,
+  singleFiles: boolean,
+): Promise<{ mode: CollectionSend["mode"]; send_id: number }> {
+  assertReady(row);
+  if (!mailConfigured()) throw APIError.failedPrecondition("sending mail is not set up on this server");
+  const sender = await dbFirst<{ name: string; email: string }>(
+    db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, c.userId)),
+  );
+  const collection = await loadReadableCollection(c.userId, row.collection_id, isAdmin(c));
+  const collectionName = collection.kind === "basket" ? "Basket" : collection.title;
+
+  let mode: CollectionSend["mode"] = "attachment";
+  let attachments: Array<{ filename: string; path?: string; content?: Buffer }> = [];
+  if (singleFiles && isZip(row)) {
+    const entries = await exportEntries(row);
+    if (entries.length > MAX_SINGLE_FILES) {
+      throw APIError.invalidArgument(`single files only for up to ${MAX_SINGLE_FILES} items`);
+    }
+    const zip = await openZip(row);
+    const taken = new Set<string>();
+    for (const e of entries) {
+      let name = baseName(e.name);
+      for (let n = 2; taken.has(name.toLowerCase()); n++) name = name.replace(/(\.[^.]*)?$/, ` (${n})$1`);
+      taken.add(name.toLowerCase());
+      attachments.push({ filename: name, content: await zip.file(e.name)!.async("nodebuffer") });
+    }
+    mode = "items";
+  } else {
+    attachments = [{ filename: row.filename!, path: exportPath(row.id) }];
+  }
+  const size = attachments.reduce(
+    (sum, a) => sum + (a.content ? a.content.length : Number(row.size_bytes ?? 0)),
+    0,
+  );
+  let link: { url: string; filename: string; expiresAt: string } | null = null;
+  if (size > MAIL_ATTACHMENT_LIMIT) {
+    const l = await ensureDownloadLink(row);
+    link = { url: l.url, filename: row.filename!, expiresAt: l.expires_at };
+    attachments = [];
+    mode = "link";
+  }
+
+  try {
+    await sendCollectionExportEmail({
+      to: recipients,
+      replyTo: sender?.email ?? null,
+      senderName: sender?.name ?? "Jemand",
+      collectionName,
+      message,
+      attachments,
+      link,
+    });
+  } catch (err) {
+    const reason = (err as Error)?.message ?? String(err);
+    await logSend(row, c.userId, recipients, mode, "failed", reason.slice(0, 500));
+    throw APIError.unavailable(`the mail could not be sent: ${reason}`);
+  }
+  return { mode, send_id: await logSend(row, c.userId, recipients, mode, "sent", null) };
+}
+
+/** Mail the export from the dialog. */
 export const sendExport = api(
   { expose: true, method: "POST", path: "/collections/exports/:exportId/send", auth: true },
   async (req: SendExportRequest): Promise<{ mode: CollectionSend["mode"]; send_id: number }> => {
     const { c, row } = await loadOwnRun(req.exportId);
     assertReady(row);
     const recipients = normalizeRecipients(req.to);
-    if (!mailConfigured()) throw APIError.failedPrecondition("sending mail is not set up on this server");
     const message = (req.message ?? "").trim().slice(0, 4000) || null;
-
-    const sender = await dbFirst<{ name: string; email: string }>(
-      db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, c.userId)),
-    );
-    const collection = await loadReadableCollection(c.userId, row.collection_id, isAdmin(c));
-    const collectionName = collection.kind === "basket" ? "Basket" : collection.title;
-
-    let mode: CollectionSend["mode"] = "attachment";
-    let attachments: Array<{ filename: string; path?: string; content?: Buffer }> = [];
-    if (req.single_files && isZip(row)) {
-      const entries = await exportEntries(row);
-      if (entries.length > MAX_SINGLE_FILES) {
-        throw APIError.invalidArgument(`single files only for up to ${MAX_SINGLE_FILES} items`);
-      }
-      const zip = await openZip(row);
-      const taken = new Set<string>();
-      for (const e of entries) {
-        let name = baseName(e.name);
-        for (let n = 2; taken.has(name.toLowerCase()); n++) name = name.replace(/(\.[^.]*)?$/, ` (${n})$1`);
-        taken.add(name.toLowerCase());
-        attachments.push({ filename: name, content: await zip.file(e.name)!.async("nodebuffer") });
-      }
-      mode = "items";
-    } else {
-      attachments = [{ filename: row.filename!, path: exportPath(row.id) }];
-    }
-    const size = attachments.reduce(
-      (sum, a) => sum + (a.content ? a.content.length : Number(row.size_bytes ?? 0)),
-      0,
-    );
-    let link: { url: string; filename: string; expiresAt: string } | null = null;
-    if (size > MAIL_ATTACHMENT_LIMIT) {
-      const l = await ensureDownloadLink(row);
-      link = { url: l.url, filename: row.filename!, expiresAt: l.expires_at };
-      attachments = [];
-      mode = "link";
-    }
-
-    try {
-      await sendCollectionExportEmail({
-        to: recipients,
-        replyTo: sender?.email ?? null,
-        senderName: sender?.name ?? "Jemand",
-        collectionName,
-        message,
-        attachments,
-        link,
-      });
-    } catch (err) {
-      const reason = (err as Error)?.message ?? String(err);
-      await logSend(row, c.userId, recipients, mode, "failed", reason.slice(0, 500));
-      throw APIError.unavailable(`the mail could not be sent: ${reason}`);
-    }
-    return { mode, send_id: await logSend(row, c.userId, recipients, mode, "sent", null) };
+    return await mailExport(row, c, recipients, message, req.single_files === true);
   },
 );
 

@@ -66,6 +66,36 @@ function handlers(setup: ExportSetup, runs: ExportRun[]) {
         ],
       }),
     ),
+    http.get('/api/collections/:id/schedules', () =>
+      HttpResponse.json({
+        items: [
+          {
+            id: 4,
+            collection_id: 1,
+            profile_id: 3,
+            profile_name: 'Für den Vermieter',
+            cadence: 'monthly',
+            weekday: null,
+            day: 1,
+            month: null,
+            scope: 'period',
+            save_as_document: true,
+            recipients: ['vermieter@beispiel.test'],
+            single_files: false,
+            message: null,
+            enabled: true,
+            next_run_at: '2026-11-01T04:00:00Z',
+            last_run_at: '2026-10-01T04:00:00Z',
+            last_status: 'done',
+            last_error: null,
+            last_export_id: 8,
+            failures: 0,
+            owner_name: 'Max Muster',
+            can_edit: true,
+          },
+        ],
+      }),
+    ),
     http.get('/api/collections/exports/:exportId/entries', () =>
       HttpResponse.json({ items: [{ name: 'Dokumente/Abrechnung.pdf', size: 1000 }, { name: 'Fotos/Zaehler.jpg', size: 2000 }], single_files_allowed: true }),
     ),
@@ -150,5 +180,17 @@ export const Weitergeben: Story = {
       await new Promise((r) => setTimeout(r, 50))
     }
     ;(root.querySelector('[data-testid="export-run-send"]') as HTMLButtonElement | null)?.click()
+  },
+}
+
+/** "Zeitplan" opened: rhythm, scope, filing and recipients. */
+export const NeuerZeitplan: Story = {
+  ...Gemischt,
+  play: async ({ canvasElement }) => {
+    const root = canvasElement.ownerDocument
+    for (let i = 0; i < 40 && !root.querySelector('[data-testid="schedule-add"]'); i++) {
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    ;(root.querySelector('[data-testid="schedule-add"]') as HTMLButtonElement | null)?.click()
   },
 }

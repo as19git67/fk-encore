@@ -66,7 +66,7 @@ function confirmClear() {
       @click="saveOpen = true"
     />
     <SaveBasketDialog v-model:visible="saveOpen" @saved="(c) => emit('saved', c.name)" />
-    <ExportDialog v-model:visible="exportOpen" :collection-id="basket.id" name="Basket" />
+    <ExportDialog v-model:visible="exportOpen" :collection-id="basket.id" name="Basket" basket />
   </div>
 </template>
 
