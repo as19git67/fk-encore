@@ -178,7 +178,7 @@ collections.
      document preview, transaction, meter, album); every selection bar has
      one "Ablegen" action; rows that had a basket toggle (documents,
      readings, depot rows, meter tiles) open the same dialog. Icon:
-     `pi-folder-plus`, `pi-folder-open` while the item lies in the basket.
+     `pi-bookmark`, `pi-bookmark-fill` while the item lies in the basket (the bookmark means only this).
      The "Sammelmappen" cards on detail pages are gone: where an item lies
      is shown in the dialog, and every collection is reachable from the
      navbar.

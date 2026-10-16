@@ -698,7 +698,7 @@ const selectionActions = computed<ToolbarItem[]>(() => {
     command: () => void shareSelectedPhotos(),
   })
   if (canShowCollage.value) push({ key: 'collage', title: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
-  push({ key: 'file', title: 'Ablegen', icon: 'pi pi-folder-plus', command: () => openCollectionDialog(selectedPhotoRefs.value) })
+  push({ key: 'file', title: 'Ablegen', icon: 'pi pi-bookmark', command: () => openCollectionDialog(selectedPhotoRefs.value) })
   if (canUploadPhotos.value && canReuseAlbumPhotos.value) {
     push({ key: 'albums', title: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
   }
@@ -2343,7 +2343,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
     items.push({
       key: 'album-file',
       title: albumInBasket.value ? 'Album ablegen (liegt im Basket)' : 'Album ablegen: Basket oder Sammelmappe',
-      icon: albumInBasket.value ? 'pi pi-folder-open' : 'pi pi-folder-plus',
+      icon: albumInBasket.value ? 'pi pi-bookmark-fill' : 'pi pi-bookmark',
       severity: 'secondary',
       text: true,
       command: () => openCollectionDialog([albumRef.value], album.value?.name),

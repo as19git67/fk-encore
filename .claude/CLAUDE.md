@@ -1305,8 +1305,8 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
   (Fotos, Buchungen); die Regel ist der Filter der Liste
   (`components/collections/SaveRuleDialog.vue`, `collections/rules.ts`).
 - Basket und Sammelmappe erreicht man über **eine** Aktion „Ablegen“
-  (Icon `pi-folder-plus`, `pi-folder-open` solange das Ding im Basket
-  liegt): ein Dialog (`components/collections/AddToCollectionDialog.vue`)
+  (Icon `pi-bookmark`, `pi-bookmark-fill` solange das Ding im Basket
+  liegt; das Lesezeichen steht in der App für nichts anderes): ein Dialog (`components/collections/AddToCollectionDialog.vue`)
   mit dem Basket zuoberst, den passenden Mappen und „Neue Sammelmappe“; für
   ein einzelnes Ding hakt er an, wo es schon liegt. Jede Detailseite trägt
   `components/collections/FileButton.vue` oben in `#actions` neben ihren

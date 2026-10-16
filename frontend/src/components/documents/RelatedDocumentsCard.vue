@@ -146,7 +146,7 @@ function onAdded() {
               </span>
             </button>
             <Button
-              icon="pi pi-folder-plus"
+              icon="pi pi-bookmark"
               text
               rounded
               size="small"

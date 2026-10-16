@@ -483,7 +483,7 @@ function timeLabel(iso: string): string {
           <Button label="Speichern" size="small" :disabled="!profileName.trim()" @click="saveProfile" />
           <Button label="Abbrechen" size="small" text severity="secondary" @click="naming = false" />
         </template>
-        <Button v-else label="Als Profil speichern" icon="pi pi-bookmark" size="small" text @click="naming = true" />
+        <Button v-else label="Als Profil speichern" icon="pi pi-save" size="small" text @click="naming = true" />
       </div>
     </template>
 

@@ -816,7 +816,7 @@ const tagChartOptions = computed(() => {
       <div class="result-header">
         <h2>Erkannt</h2>
         <Button
-          icon="pi pi-bookmark"
+          icon="pi pi-save"
           label="Speichern"
           text
           size="small"
