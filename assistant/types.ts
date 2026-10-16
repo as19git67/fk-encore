@@ -104,6 +104,14 @@ export interface ToolSpec {
   parameters: JsonSchema;
   /** Where the entry came from: written by hand or generated from the spec. */
   source: "hand" | "openapi";
+  /**
+   * A second call in the same turn is a correction of the first, not an
+   * addition: its block replaces the earlier one beside the answer. True for
+   * searches — a model that searches again did not like what it found — and
+   * false for lists, where two calls (two accounts, two meters) are two
+   * results.
+   */
+  refines?: boolean;
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome>;
 }
 

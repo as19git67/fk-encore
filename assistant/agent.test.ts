@@ -359,6 +359,28 @@ describe("what the benchmark caught", () => {
     expect(silent.requests).toHaveLength(3);
   });
 
+  it("a second search in the same turn replaces the first one's rows beside the answer", async () => {
+    // Searching again means the first rows did not fit; both tables showed
+    // a list of near misses above the one the answer is about.
+    clients.documents.searchDocumentsEndpoint
+      .mockResolvedValueOnce({ items: [{ id: 1, title: "Beitragsbescheid" }, { id: 2, title: "Bonusprogramm" }] })
+      .mockResolvedValueOnce({ items: [{ id: 3, title: "Gesundheitsdividende einlösen" }] });
+    const loop = scripted([
+      calls(["search_documents", { q: "TK" }]),
+      calls(["search_documents", { q: "Gesundheitsdividende" }]),
+      answer("Ein Dokument passt."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: "TK Gesundheitsdividende?", tools: catalogFor(USER), chat: loop.fn, now: NOW });
+    expect(res.blocks.map((b) => [b.tool, b.rows.map((r) => r.id)])).toEqual([["search_documents", [3]]]);
+
+    // Lists are not searches: two accounts are two results.
+    clients.finance.listTransactions.mockResolvedValue({ items: [{ id: 9, booking_date: "2026-10-01", amount: "-1.00" }], total: 1 });
+    clients.finance.getOverview.mockResolvedValue({ sections: [], unassigned: [] });
+    const two = scripted([calls(["list_transactions", { account_id: 1 }], ["list_transactions", { account_id: 2 }]), answer("Zwei.")]);
+    const both = await runTurn({ user: USER, history: [], question: "?", tools: catalogFor(USER), chat: two.fn, now: NOW });
+    expect(both.blocks.filter((b) => b.tool === "list_transactions")).toHaveLength(2);
+  });
+
   it("a repeated call with the same arguments is answered from above, not run again", async () => {
     clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
     const { fn, requests } = scripted([
