@@ -17,8 +17,10 @@ interface DocumentSummary {
   reference_numbers?: unknown;
 }
 interface DocumentDetail extends DocumentSummary {
-  summary?: string | null; tags?: string[]; document_type?: string | null; tax_year?: number | null;
+  summary?: string | null; tags?: string[]; document_type?: string | null;
+  tax_relevant?: boolean; tax_year?: number | null; tax_sections?: { slug: string; name: string; group: string }[];
 }
+interface TaxBucket { slug: string; name: string; group: string; documents: { document: DocumentSummary & { tax_year?: number | null }; confidence: number | null; source: string }[] }
 
 function docTitle(d: DocumentSummary): string {
   return d.title ?? d.original_filename ?? `#${d.id}`;
@@ -101,6 +103,7 @@ export const searchDocuments: ToolSpec = {
         description: "hybrid (default) mixes exact words and meaning and brings near misses; fts matches the words only — use it for a rare or technical term ('Gesundheitsdividende', an invoice number); semantic for a paraphrase",
       },
       category: { type: "string", description: "category slug from list_categories" },
+      tax_relevant: { type: "boolean", description: "only documents flagged as relevant for the tax return (true) or not flagged (false); for one tax year use tax_documents instead" },
       date_from: { type: "string", description: "document date from, YYYY-MM-DD" },
       date_to: { type: "string", description: "document date to, YYYY-MM-DD" },
       limit: { type: "integer", description: "at most 25 (default 15)" },
@@ -125,9 +128,10 @@ export const searchDocuments: ToolSpec = {
     const mode = str(args.mode) ?? "hybrid";
     if (!SEARCH_MODES.includes(mode)) throw new Error(`mode must be one of ${SEARCH_MODES.join(", ")}`);
     const who = await resolveCorrespondent(str(args.correspondent));
+    const taxRelevant = bool(args.tax_relevant);
     const res = await (documents.searchDocumentsEndpoint({
       q, mode, category, date_from: dateFrom, date_to: dateTo, limit,
-      correspondent: who.slug, sender: who.sender,
+      correspondent: who.slug, sender: who.sender, tax_relevant: taxRelevant,
       sort_by: byDate ? "doc_date" : undefined, sort_dir: byDate ? sortDir : undefined,
     })) as unknown as { items: DocumentSummary[] };
     const rows = res.items;
@@ -202,6 +206,9 @@ export const getDocumentSummary: ToolSpec = {
         `type: ${d.document_type ?? "-"}`,
         d.tags?.length ? `tags: ${d.tags.join(", ")}` : null,
         refs ? `reference numbers: ${refs}` : null,
+        d.tax_relevant
+          ? `tax: relevant for the tax return${d.tax_year ? ` of ${d.tax_year}` : ""}${d.tax_sections?.length ? `, Anlage(n): ${d.tax_sections.map((t) => t.name).join(", ")}` : ""}`
+          : "tax: not flagged as tax-relevant",
         `summary: ${(d.summary ?? "-").slice(0, perDoc)}`,
       ].filter(Boolean).join("\n");
     }).join("\n\n");
@@ -215,6 +222,55 @@ export const getDocumentSummary: ToolSpec = {
       block: docs.length === 1
         ? { kind: "document", tool: "get_document_summary", rows, route: `/dokumente/${docs[0]!.id}` }
         : { kind: "documents", tool: "get_document_summary", rows },
+    };
+  },
+};
+
+export const taxDocuments: ToolSpec = {
+  name: "tax_documents",
+  kind: "read",
+  summary: "The documents flagged for the tax return of one year, grouped by Anlage (tax section: Anlage N, KAP, V, Vorsorgeaufwand …) as the Steuer page shows them — what the Finanzamt gets. Documents can carry a tax year and Anlagen; this reads them. For the folder with everything, tax_return_bundle.",
+  permissions: DOCUMENTS,
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      year: { type: "integer", description: "the tax year, e.g. 2025; without it every flagged document" },
+      section: { type: "string", description: "one Anlage by slug, e.g. anlage-kap" },
+      review_needed: { type: "boolean", description: "only documents the tax review still has to look at" },
+      person_id: { type: "integer", description: "the Steuerakte of a household member with their own tax return (subject person id); default: the user's own return" },
+    },
+  },
+  async run(args) {
+    const year = int(args.year);
+    const res = (await documents.listTaxDocuments({
+      year, section: str(args.section), review_needed: bool(args.review_needed), tax_return_person: int(args.person_id),
+    })) as unknown as { year: number | null; total_documents: number; sections: TaxBucket[] };
+    const lines = [`${res.total_documents} document${res.total_documents === 1 ? "" : "s"} for the tax return${res.year ? ` of ${res.year}` : ""}, in ${res.sections.length} Anlage${res.sections.length === 1 ? "" : "n"}:`];
+    const rows: Array<{ id: number; title: string; doc_date: string | null; from: string | null; section: string; section_slug: string }> = [];
+    for (const b of res.sections) {
+      lines.push(`\n${b.name} (${b.slug}, ${b.group}) — ${b.documents.length}:`);
+      for (const e of b.documents) {
+        const d = e.document;
+        lines.push(`  ${d.id} | ${d.doc_date?.slice(0, 10) ?? "-"} | ${docTitle(d)} | ${d.correspondent_display ?? d.sender ?? "-"}${e.source === "user" ? "" : ` (${e.source}${e.confidence !== null ? ` ${Math.round(e.confidence * 100)} %` : ""})`}`);
+        rows.push({ id: d.id, title: docTitle(d), doc_date: d.doc_date, from: d.correspondent_display ?? d.sender ?? null, section: b.name, section_slug: b.slug });
+      }
+    }
+    if (!rows.length) lines.push("None flagged yet.");
+    const ids = [...new Set(rows.map((r) => r.id))];
+    return {
+      text: lines.join("\n"),
+      digest: digestOf("tax_documents", ids.length, ids),
+      rowCount: ids.length,
+      ref: ids.length ? { type: "document", ids } : undefined,
+      block: {
+        kind: "documents",
+        tool: "tax_documents",
+        total: ids.length,
+        subtitle: res.year ? `Steuer ${res.year}` : undefined,
+        rows,
+        route: `/dokumente/steuer${query({ year })}`,
+      },
     };
   },
 };
@@ -308,4 +364,4 @@ export const findTextInDocument: ToolSpec = {
   },
 };
 
-export const DOCUMENT_TOOLS = [listCategories, searchDocuments, getDocumentSummary, getDocumentText, findTextInDocument];
+export const DOCUMENT_TOOLS = [taxDocuments, listCategories, searchDocuments, getDocumentSummary, getDocumentText, findTextInDocument];

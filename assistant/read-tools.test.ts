@@ -342,3 +342,40 @@ describe("depots per position and the day's gain", () => {
     expect(out.block?.subtitle).toBe("Wert 12510.00 · +40.00 seit gestern");
   });
 });
+
+describe("tax", () => {
+  it("tax_documents groups the year's documents by Anlage", async () => {
+    clients.documents.listTaxDocuments.mockResolvedValue({
+      year: 2025, total_documents: 2,
+      sections: [
+        { slug: "anlage-n", name: "Anlage N", group: "income", documents: [{ document: { id: 71, title: "Lohnsteuerbescheinigung 2025", doc_date: "2026-01-20", correspondent_display: "Beispiel GmbH" }, confidence: null, source: "user" }] },
+        { slug: "anlage-kap", name: "Anlage KAP", group: "income", documents: [{ document: { id: 72, title: "Jahressteuerbescheinigung", doc_date: "2026-02-02", sender: "Beispielbank" }, confidence: 0.91, source: "ai" }] },
+      ],
+    });
+    const out = await tool("tax_documents").run({ year: 2025 }, ctx());
+    expect(clients.documents.listTaxDocuments).toHaveBeenCalledWith({ year: 2025, section: undefined, review_needed: undefined, tax_return_person: undefined });
+    expect(out.text).toContain("2 documents for the tax return of 2025, in 2 Anlagen");
+    expect(out.text).toContain("Anlage N (anlage-n, income) — 1:");
+    expect(out.text).toContain("72 | 2026-02-02 | Jahressteuerbescheinigung | Beispielbank (ai 91 %)");
+    expect(out.ref).toEqual({ type: "document", ids: [71, 72] });
+    expect(out.block).toMatchObject({ kind: "documents", subtitle: "Steuer 2025", route: "/dokumente/steuer?year=2025" });
+    expect(out.block?.rows[1]).toMatchObject({ id: 72, section: "Anlage KAP" });
+  });
+
+  it("search_documents and list_transactions pass the tax-relevant flag on", async () => {
+    clients.documents.listCorrespondents.mockResolvedValue({ items: [] });
+    clients.documents.searchDocumentsEndpoint.mockResolvedValue({ items: [] });
+    await tool("search_documents").run({ q: "Spende", tax_relevant: true }, ctx());
+    expect(clients.documents.searchDocumentsEndpoint).toHaveBeenCalledWith(expect.objectContaining({ tax_relevant: true }));
+    clients.finance.listTransactions.mockResolvedValue({ items: [{ id: 1, account_id: 1, booking_date: "2025-03-10", amount: "-480.00", counterparty: "Beispiel Handwerk GmbH", purpose: "Rechnung", is_tax_relevant: true }], total: 1 });
+    const out = await tool("list_transactions").run({ tax_relevant: true, from: "2025-01-01", to: "2025-12-31" }, ctx());
+    expect(clients.finance.listTransactions).toHaveBeenCalledWith(expect.objectContaining({ taxRelevant: true, from: "2025-01-01", to: "2025-12-31" }));
+    expect(out.text).toMatch(/Rechnung \| [^|]* \| yes/);
+  });
+
+  it("get_document_summary names the tax year and the Anlagen", async () => {
+    clients.documents.getDocument.mockResolvedValue({ id: 71, title: "Lohnsteuerbescheinigung 2025", doc_date: "2026-01-20", tax_relevant: true, tax_year: 2025, tax_sections: [{ slug: "anlage-n", name: "Anlage N", group: "income" }], summary: "x" });
+    const out = await tool("get_document_summary").run({ id: 71 }, ctx());
+    expect(out.text).toContain("tax: relevant for the tax return of 2025, Anlage(n): Anlage N");
+  });
+});
