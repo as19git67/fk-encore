@@ -4,7 +4,7 @@
  */
 
 import { finance } from "~encore/clients";
-import { digestOf, int, isoDate, money, query, str, table } from "../format";
+import { bool, digestOf, int, isoDate, money, query, str, table } from "../format";
 import type { ToolSpec } from "../types";
 
 const FINANCE = ["module.finance", "finance.view"];
@@ -49,7 +49,7 @@ function balanceText(a: OverviewAccount): string {
 }
 interface TransactionView {
   id: number; account_id: number; booking_date: string; amount: string; currency_code?: string;
-  counterparty: string | null; purpose: string | null; tags?: { name: string }[];
+  counterparty: string | null; purpose: string | null; tags?: { name: string }[]; is_tax_relevant?: boolean;
 }
 interface AnalysisResult {
   total: { sum: number; count: number; avg: number };
@@ -97,7 +97,7 @@ export const listAccounts: ToolSpec = {
 export const listTransactions: ToolSpec = {
   name: "list_transactions",
   kind: "read",
-  summary: "Finance bookings filtered by text (counterparty or purpose), date range, account and tags; newest first. For sums use analyze_spending.",
+  summary: "Finance bookings filtered by text (counterparty or purpose), date range, account, tags and the tax-relevant flag; newest first. For sums use analyze_spending.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -108,6 +108,7 @@ export const listTransactions: ToolSpec = {
       to: { type: "string", description: "last booking date, YYYY-MM-DD" },
       account_id: { type: "integer", description: "id from list_accounts" },
       tags: { type: "array", items: { type: "string" }, description: "the user's tags, all must match" },
+      tax_relevant: { type: "boolean", description: "only bookings flagged as relevant for the tax return (true) or not flagged (false)" },
       limit: { type: "integer", description: "rows to return, at most 50 (default 25)" },
     },
   },
@@ -120,6 +121,7 @@ export const listTransactions: ToolSpec = {
       to: isoDate(args.to),
       accountId: int(args.account_id),
       tagsCsv: tags.length ? tags.join(",") : undefined,
+      taxRelevant: bool(args.tax_relevant),
       limit,
     })) as unknown as { items: TransactionView[]; total: number };
     const rows = res.items;
@@ -136,8 +138,8 @@ export const listTransactions: ToolSpec = {
       : undefined;
     return {
       text: table(
-        ["id", "date", "amount", "counterparty", "purpose", "tags"],
-        rows.map((t) => [t.id, t.booking_date.slice(0, 10), money(t.amount), t.counterparty, t.purpose, (t.tags ?? []).map((x) => x.name).join(",")]),
+        ["id", "date", "amount", "counterparty", "purpose", "tags", "tax"],
+        rows.map((t) => [t.id, t.booking_date.slice(0, 10), money(t.amount), t.counterparty, t.purpose, (t.tags ?? []).map((x) => x.name).join(","), t.is_tax_relevant ? "yes" : ""]),
         {
           total: res.total, cap: limit,
           note: [

@@ -344,6 +344,16 @@ behind it.
        arithmetic is the finance service's; the blocks `positions`,
        `depot_transactions`, `quotes` and `news` link to the Portfolio,
        position and Kurse pages.
+     - tax: `tax_documents` (`GET /documents/tax` — the documents
+       flagged for one tax year, grouped by Anlage as the Steuer page lists
+       them), `search_documents(tax_relevant)` and
+       `list_transactions(tax_relevant)` read the flags documents and
+       bookings carry; the write tool `tax_return_bundle(year)` proposes a
+       mixed Sammelmappe (`POST /collections`) of every flagged document of
+       the year plus the bookings marked tax-relevant in it, which the user
+       then exports, sends or shares from the folder's page. A prompt rule
+       routes "Steuer <Jahr>" questions there and forbids the model to
+       judge tax relevance itself.
      - documents: `search_documents` (hybrid search with filters; `sort`
        switches the relevance ranking to document date, because the rows
        next to the answer follow the tool's order, not the model's text;

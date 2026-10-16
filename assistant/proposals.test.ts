@@ -117,6 +117,43 @@ describe("write tools", () => {
     await expect(tool("add_photos_to_album").run({ album_id: 1 }, ctx())).rejects.toThrow();
   });
 
+  it("proposes the tax return's folder from the flagged documents and bookings, and creates a mixed Sammelmappe", async () => {
+    clients.documents.listTaxDocuments.mockResolvedValue({
+      year: 2025, total_documents: 2,
+      sections: [
+        { slug: "anlage-n", name: "Anlage N", group: "income", documents: [{ document: { id: 71, title: "Lohnsteuerbescheinigung" } }] },
+        { slug: "anlage-kap", name: "Anlage KAP", group: "income", documents: [{ document: { id: 72, title: "Jahressteuerbescheinigung" } }, { document: { id: 71, title: "Lohnsteuerbescheinigung" } }] },
+        { slug: "anlage-v", name: "Anlage V", group: "income", documents: [] },
+      ],
+    });
+    clients.finance.listTransactions.mockResolvedValue({ items: [{ id: 9301 }, { id: 9302 }], total: 2 });
+    const out = await tool("tax_return_bundle").run({ year: 2025 }, { ...ctx(), user: { userID: "711", permissions: [...PERMS, "module.finance", "finance.view"] } });
+    expect(clients.documents.listTaxDocuments).toHaveBeenCalledWith({ year: 2025, tax_return_person: undefined });
+    expect(clients.finance.listTransactions).toHaveBeenCalledWith(expect.objectContaining({ taxRelevant: true, from: "2025-01-01", to: "2025-12-31" }));
+    const row = out.block?.rows[0] as Record<string, unknown>;
+    expect(row).toMatchObject({ tool: "tax_return_bundle", summary: "Sammelmappe „Steuererklärung 2025“ mit 2 Dokumenten in 2 Anlagen (Anlage N 1, Anlage KAP 2) und 2 steuerrelevanten Buchungen", count: 4, status: "pending" });
+    expect(calledEndpoints()).toEqual(["finance.listTransactions", "documents.listTaxDocuments"].sort() ? expect.arrayContaining(["documents.listTaxDocuments", "finance.listTransactions"]) : []);
+    expect(clients.collections.createAnyCollection).not.toHaveBeenCalled();
+
+    clients.collections.createAnyCollection.mockResolvedValue({ id: 88, name: "Steuererklärung 2025" });
+    const done = await executeAssistantProposal({ id: Number(row.proposal_id) });
+    expect(done).toMatchObject({ status: "executed", result_route: "/sammelmappen/88" });
+    expect(clients.collections.createAnyCollection).toHaveBeenCalledWith({
+      name: "Steuererklärung 2025",
+      description: "Steuererklärung 2025: 2 Dokumente (Anlage N 1, Anlage KAP 2), 2 steuerrelevante Buchungen",
+      members: [
+        { entity_type: "document", entity_id: 71 }, { entity_type: "document", entity_id: 72 },
+        { entity_type: "transaction", entity_id: 9301 }, { entity_type: "transaction", entity_id: 9302 },
+      ],
+    });
+  });
+
+  it("refuses a tax folder for a year with nothing flagged", async () => {
+    clients.documents.listTaxDocuments.mockResolvedValue({ year: 2019, total_documents: 0, sections: [] });
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    await expect(tool("tax_return_bundle").run({ year: 2019 }, ctx())).rejects.toThrow("nothing is flagged for the tax year 2019");
+  });
+
   it("refuses a filter on top of the previous photos, naming the way round", async () => {
     // The filter would be dropped and every earlier photo would land in the
     // album; the benchmark saw Gemma try this for "nur die aus München".

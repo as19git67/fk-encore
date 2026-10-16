@@ -123,6 +123,32 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "tax-documents-year",
+    title: "Steuerunterlagen eines Jahres",
+    question: "Welche Dokumente sind für meine Steuererklärung 2025 relevant?",
+    expect: [{ tool: "tax_documents", args: { year: 2025 } }],
+    results: {
+      tax_documents: { summary: "4 documents for the tax return of 2025, in 2 Anlagen", rows: [{ id: 71, title: "Lohnsteuerbescheinigung 2025", section: "Anlage N" }, { id: 72, title: "Jahressteuerbescheinigung Depot", section: "Anlage KAP" }] },
+    },
+  },
+  {
+    id: "tax-bundle",
+    title: "Steuermappe anlegen",
+    question: "Erstelle eine Mappe mit allen Unterlagen für die Steuererklärung 2025.",
+    expect: [{ tool: "tax_return_bundle", args: { year: 2025 } }],
+    results: {
+      tax_documents: { summary: "4 documents for the tax return of 2025, in 2 Anlagen", rows: [{ id: 71, title: "Lohnsteuerbescheinigung 2025", section: "Anlage N" }] },
+      tax_return_bundle: PROPOSAL("Sammelmappe „Steuererklärung 2025“ mit 4 Dokumenten in 2 Anlagen (Anlage N 2, Anlage KAP 2) und 3 steuerrelevanten Buchungen"),
+    },
+  },
+  {
+    id: "tax-bookings-year",
+    title: "Steuerrelevante Buchungen",
+    question: "Zeig mir die steuerrelevanten Buchungen von 2025.",
+    expect: [{ tool: "list_transactions", args: { tax_relevant: true, from: "2025-01-01", to: "2025-12-31" } }],
+    results: { list_transactions: { rows: [{ id: 9301, date: "2025-03-10", amount: "-480.00", counterparty: "Beispiel Handwerk GmbH", purpose: "Rechnung 2025-017", tax: "yes" }], total: 3 } },
+  },
+  {
     id: "utility-statements",
     title: "Dokumente frei suchen",
     question: "Such mir die Nebenkostenabrechnungen raus.",

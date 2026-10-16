@@ -8,7 +8,7 @@
  * and the card has to name the count the action will really touch.
  */
 
-import { documents, finance, photo } from "~encore/clients";
+import { collections, documents, finance, photo } from "~encore/clients";
 import { bool, int, isoDate, str } from "../format";
 import { writeTool, type WriteToolDefinition } from "../proposals";
 import type { JsonSchema, RefType, ToolContext } from "../types";
@@ -527,7 +527,82 @@ const transactionReport: WriteToolDefinition = {
   },
 };
 
+const MAX_BUNDLE_DOCUMENTS = 500;
+
+interface TaxBundleBucket { slug: string; name: string; group: string; documents: { document: { id: number; title: string | null; original_filename?: string } }[] }
+
+const taxReturnBundle: WriteToolDefinition = {
+  name: "tax_return_bundle",
+  summary: "Propose the Sammelmappe for one year's tax return: every document flagged for that tax year, grouped by Anlage as the Steuer page lists them, plus the bookings flagged tax-relevant in that year. The folder can then be exported, sent or shared from its page. Ask for this when the user wants 'alle Unterlagen für die Steuer 2025'.",
+  permissions: ["module.documents", "documents.view"],
+  parameters: {
+    type: "object",
+    properties: {
+      year: { type: "integer", description: "the tax year, e.g. 2025" },
+      name: { type: "string", description: "folder name; default 'Steuererklärung <year>'" },
+      include_transactions: { type: "boolean", description: "also the bookings flagged tax-relevant in that year (default true, if the user may see finance)" },
+      person_id: { type: "integer", description: "the Steuerakte of a household member with their own tax return (subject person id); default: the user's own return" },
+    },
+    required: ["year"],
+  },
+  async prepare(args, ctx) {
+    const year = int(args.year, { min: 1990, max: 2100 });
+    if (year === undefined) throw new Error("year is required (e.g. 2025)");
+    const name = str(args.name) ?? `Steuererklärung ${year}`;
+    const personId = int(args.person_id);
+    const tax = (await documents.listTaxDocuments({ year, tax_return_person: personId })) as unknown as { total_documents: number; sections: TaxBundleBucket[] };
+    const documentIds = [...new Set(tax.sections.flatMap((b) => b.documents.map((e) => e.document.id)))].slice(0, MAX_BUNDLE_DOCUMENTS);
+    const sections = tax.sections.filter((b) => b.documents.length).map((b) => `${b.name} ${b.documents.length}`);
+
+    const mayFinance = ["module.finance", "finance.view"].every((perm) => ctx.user.permissions.includes(perm));
+    const wantTransactions = (bool(args.include_transactions) ?? true) && mayFinance;
+    let transactionIds: number[] = [];
+    let transactionTotal = 0;
+    if (wantTransactions) {
+      const res = (await finance.listTransactions({ taxRelevant: true, from: `${year}-01-01`, to: `${year}-12-31`, limit: MAX_TRANSACTIONS })) as unknown as { items: { id: number }[]; total: number };
+      transactionIds = res.items.map((t) => t.id);
+      transactionTotal = res.total;
+    }
+    if (!documentIds.length && !transactionIds.length) {
+      throw new Error(`nothing is flagged for the tax year ${year}: no document carries tax year ${year}${wantTransactions ? " and no booking of that year is marked tax-relevant" : ""}. Flag documents on the Steuer page first.`);
+    }
+    const parts = [`Sammelmappe „${name}“ mit ${plural(documentIds.length, "Dokument", "Dokumenten")}`];
+    if (sections.length) parts.push(`in ${plural(sections.length, "Anlage", "Anlagen")} (${sections.join(", ")})`);
+    if (wantTransactions) parts.push(`und ${plural(transactionIds.length, "steuerrelevanter Buchung", "steuerrelevanten Buchungen")}`);
+    const notes = [
+      tax.total_documents > documentIds.length ? `Only the first ${documentIds.length} of ${tax.total_documents} documents fit into one folder.` : undefined,
+      transactionTotal > transactionIds.length ? `Only the first ${transactionIds.length} of ${transactionTotal} bookings fit.` : undefined,
+      "The folder is a mixed Sammelmappe; from its page the user exports it as PDF or ZIP, sends it or shares a link. Documents the tax review still has to look at are included as flagged.",
+    ].filter(Boolean);
+    return {
+      summary: parts.join(" "),
+      arguments: { name, year, document_ids: documentIds, transaction_ids: transactionIds, person_id: personId ?? null, sections },
+      count: documentIds.length + transactionIds.length,
+      note: notes.join(" "),
+    };
+  },
+  async execute(args) {
+    const documentIds = ids(args.document_ids);
+    const transactionIds = ids(args.transaction_ids);
+    const sections = Array.isArray(args.sections) ? args.sections.map(String) : [];
+    const created = (await collections.createAnyCollection({
+      name: String(args.name),
+      description: [`Steuererklärung ${String(args.year)}: ${documentIds.length} Dokumente${sections.length ? ` (${sections.join(", ")})` : ""}`, transactionIds.length ? `${transactionIds.length} steuerrelevante Buchungen` : ""].filter(Boolean).join(", "),
+      members: [
+        ...documentIds.map((id) => ({ entity_type: "document", entity_id: id })),
+        ...transactionIds.map((id) => ({ entity_type: "transaction", entity_id: id })),
+      ],
+    })) as unknown as { id: number; name?: string; title?: string };
+    return {
+      summary: `Sammelmappe „${String(args.name)}“ angelegt mit ${plural(documentIds.length, "Dokument", "Dokumenten")}${transactionIds.length ? ` und ${plural(transactionIds.length, "Buchung", "Buchungen")}` : ""} – auf ihrer Seite lässt sie sich als PDF oder ZIP exportieren, versenden oder teilen`,
+      route: `/sammelmappen/${created.id}`,
+      details: { collection_id: created.id, documents: documentIds.length, transactions: transactionIds.length },
+    };
+  },
+};
+
 export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
+  taxReturnBundle,
   createAlbum,
   addPhotosToAlbum,
   setPhotoFavorite,

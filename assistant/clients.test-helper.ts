@@ -26,6 +26,7 @@ export const clients = {
   documents: {
     listDocumentCategories: vi.fn(),
     listCorrespondents: vi.fn(),
+    listTaxDocuments: vi.fn(),
     searchDocumentsEndpoint: vi.fn(),
     getDocument: vi.fn(),
     setDocumentFollowUp: vi.fn(),
@@ -54,6 +55,9 @@ export const clients = {
   feed: {
     listFeed: vi.fn(),
   },
+  collections: {
+    createAnyCollection: vi.fn(),
+  },
   meter: {
     listMeters: vi.fn(),
     listReadings: vi.fn(),
@@ -71,7 +75,7 @@ export const clients = {
 
 /** Forget scripted answers and recorded calls of the service endpoints. */
 export function resetClients(): void {
-  for (const service of [clients.finance, clients.documents, clients.photo, clients.meter, clients.feed]) {
+  for (const service of [clients.finance, clients.documents, clients.photo, clients.meter, clients.feed, clients.collections]) {
     for (const fn of Object.values(service)) fn.mockReset();
   }
 }
@@ -80,7 +84,7 @@ export function resetClients(): void {
 export function calledEndpoints(): string[] {
   const calls: Array<{ name: string; order: number }> = [];
   for (const [service, endpoints] of Object.entries({
-    finance: clients.finance, documents: clients.documents, photo: clients.photo, meter: clients.meter, feed: clients.feed,
+    finance: clients.finance, documents: clients.documents, photo: clients.photo, meter: clients.meter, feed: clients.feed, collections: clients.collections,
   })) {
     for (const [name, fn] of Object.entries(endpoints)) {
       fn.mock.invocationCallOrder.forEach((order) => calls.push({ name: `${service}.${name}`, order }));
