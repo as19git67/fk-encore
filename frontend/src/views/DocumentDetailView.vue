@@ -931,7 +931,7 @@ onBeforeUnmount(() => {
           />
           <Button
             v-if="doc && auth.hasPermission('module.assistant')"
-            icon="pi pi-reply"
+            icon="pi pi-sparkles"
             text
             rounded
             aria-label="Antwort entwerfen"
@@ -1018,7 +1018,7 @@ onBeforeUnmount(() => {
                   </div>
                 </li>
                 <li>
-                  <i class="pi pi-bookmark" aria-hidden="true" />
+                  <i class="pi pi-file-import" aria-hidden="true" />
                   <div>
                     <strong>Ablegen</strong>
                     <span>Dokument in den Basket oder eine Sammelmappe legen bzw. wieder herausnehmen — der Basket dient auch als Navigationsliste.</span>

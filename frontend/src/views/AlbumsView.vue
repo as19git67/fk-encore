@@ -547,7 +547,7 @@ const albumSelectionActions = computed<ToolbarItem[]>(() => [
     key: 'file',
     label: 'Ablegen',
     title: 'Ablegen: Basket oder Sammelmappe',
-    icon: 'pi pi-bookmark',
+    icon: 'pi pi-file-import',
     severity: 'secondary',
     disabled: selectedIds.value.size === 0,
     command: () => (albumCollectionOpen.value = true),

@@ -452,7 +452,7 @@ function timeLabel(iso: string): string {
                 />
                 <Button
                   v-if="current.mime_type === 'application/pdf' && canFileAsDocument"
-                  :icon="current.document_id ? 'pi pi-check' : 'pi pi-file-import'"
+                  :icon="current.document_id ? 'pi pi-check' : 'pi pi-file-arrow-up'"
                   :label="current.document_id ? 'Liegt bei den Dokumenten' : 'Als Dokument ablegen'"
                   size="small"
                   outlined
@@ -621,7 +621,7 @@ function timeLabel(iso: string): string {
                   />
                   <Button
                     v-if="run.status === 'done' && run.mime_type === 'application/pdf' && canFileAsDocument"
-                    :icon="run.document_id ? 'pi pi-check' : 'pi pi-file-import'"
+                    :icon="run.document_id ? 'pi pi-check' : 'pi pi-file-arrow-up'"
                     text
                     rounded
                     :disabled="run.document_id !== null || busyRun === run.id"

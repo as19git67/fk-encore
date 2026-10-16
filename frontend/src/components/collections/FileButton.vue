@@ -32,12 +32,12 @@ const inBasket = computed(() => props.members.length === 1 && basketStore.has(pr
 
 <template>
   <Button
-    :icon="inBasket ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
+    icon="pi pi-file-import"
     :label="showLabel ? 'Ablegen' : undefined"
     text
     rounded
     :size="size"
-    severity="secondary"
+    :severity="inBasket ? 'success' : 'secondary'"
     :aria-label="inBasket ? 'Ablegen (liegt im Basket)' : 'Ablegen: Basket oder Sammelmappe'"
     v-tooltip.bottom="inBasket ? 'Ablegen – liegt im Basket' : 'Ablegen: Basket oder Sammelmappe'"
     aria-haspopup="dialog"

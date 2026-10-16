@@ -564,7 +564,7 @@ const selectionActions = computed<ToolbarItem[]>(() => {
       )),
     })
   }
-  push({ key: 'file', title: 'Ablegen', icon: 'pi pi-bookmark', command: () => (collectionDialogOpen.value = true) })
+  push({ key: 'file', title: 'Ablegen', icon: 'pi pi-file-import', command: () => (collectionDialogOpen.value = true) })
   if (canUpload.value) push({ key: 'albums', title: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
   if (canUpload.value) push({ key: 'description', title: 'Beschreibung bearbeiten', icon: 'pi pi-align-left', command: openDescriptionDialog })
   if (canDelete.value) {
