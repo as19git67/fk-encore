@@ -109,7 +109,7 @@ describe("asking", () => {
     expect(detail.messages[1].blocks[0]).toMatchObject({ kind: "meters" });
   });
 
-  it("replays earlier questions and answers with a note of their tools, not the tool rounds", async () => {
+  it("replays earlier turns with their tool calls and the digest of each result", async () => {
     clients.meter.listMeters.mockResolvedValue({ meters: [] });
     vi.mocked(chat)
       .mockResolvedValueOnce(toolCall("list_meters", {}))
@@ -120,11 +120,14 @@ describe("asking", () => {
     await ask({ id: conv.id, message: "Und jetzt?" });
 
     const third = vi.mocked(chat).mock.calls[2][0];
-    expect(third.messages.slice(1).map((m) => [m.role, m.content])).toEqual([
-      ["user", "Welche Zähler gibt es?"],
-      ["assistant", "Keine Zähler.\n\n[tools behind this answer: list_meters → [earlier result of list_meters: 0 rows]]"],
-      ["user", "Und jetzt?"],
-    ]);
+    const replayed = third.messages.slice(1);
+    expect(replayed.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant", "user"]);
+    const call = replayed[1] as { tool_calls: Array<{ id: string; function: { name: string } }> };
+    expect(call.tool_calls[0]!.function.name).toBe("list_meters");
+    // The result is the one-line digest, never the rows.
+    expect(replayed[2]).toEqual({ role: "tool", tool_call_id: call.tool_calls[0]!.id, content: "[earlier result of list_meters: 0 rows]" });
+    // The answer stays as written: no note the model could copy.
+    expect(replayed[3]).toEqual({ role: "assistant", content: "Keine Zähler." });
   });
 
   it("a busy model is 'unavailable', and nothing is stored", async () => {

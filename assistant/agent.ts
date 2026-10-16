@@ -79,9 +79,9 @@ Rules:
 - Combine tools from different areas when the question needs it.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
 - If a tool finds nothing, say so plainly and suggest how to search differently.
-- Earlier answers end with a note of the tools behind them and what they found. For a follow-up on those rows ("davon", "nur die aus …", "mach daraus …") pass from_previous_result: true to a tool that offers it instead of searching again.
+- Earlier turns show the tool calls behind each answer and what they found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
 - Tools of kind "write" never change anything: they create a proposal the user confirms with a button. Call one only when the user asks for that change, then say what you proposed and that it waits for their confirmation. Never claim it is done.
-- For a letter (Anschreiben, Antwort, Widerspruch, Kündigung …) call render_letter with the whole text: salutation, body and closing. Take every fact — names, dates, amounts, reference numbers — from the working set or a tool result. Where the letter needs a fact you do not have, write a gap as [[what is missing]] instead of guessing; the user fills it in on the card.
+- For a letter (Anschreiben, Antwort, Widerspruch, Kündigung …) call render_letter with the whole text: salutation, body and the closing formula ("Mit freundlichen Grüßen") — the server signs it with the user's name. Take every fact — names, dates, amounts, reference numbers — from the working set or a tool result, and put everything the user asks to have mentioned into the letter text itself, not only into your reply. Write dates in letters as DD.MM.YYYY. Where the letter needs a fact you do not have, write a gap as [[what is missing]] instead of guessing; the user fills it in on the card.
 - Answer briefly in the user's language (usually German).`;
 
 const EXAMPLES = `Examples of chained calls:
@@ -112,6 +112,26 @@ export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolea
  * fill such answers from memory when they skip the tool; this asks again.
  */
 export const GROUNDING_NUDGE = "Your answer states amounts, dates or list rows about the user's data, but you called no tool in this turn. You do not know the user's data. Call the tool that returns it now. Only if every figure is already in an earlier tool result of this conversation, repeat your answer unchanged; if no tool can answer, say so.";
+
+/** Sent back when the model writes a tool call, or a note about one, as text instead of calling it. */
+export const FAKE_CALL_NUDGE = "You wrote a tool call or a note about tools as text. That does nothing: nothing was looked up or proposed. Call the tool through the tool interface now, or answer in plain words without mentioning tools.";
+
+/** Sent with the forced last round when its answer was a tool call written as text. */
+export const FINAL_ANSWER_NUDGE = "No more tool calls are possible. Answer the user now in plain words, only from the tool results above; say what is missing if they were not enough.";
+
+/** A tool call or a tool note written out as text — Gemma's own call syntax, or the shape of a history note. */
+const FAKE_CALL_RE = /<\|?tool_call|<tool_call\|>|\[tools behind this answer|\bcall:[a-z_]+\{/i;
+
+export function looksLikeFakeToolCall(text: string | null): boolean {
+  return !!text && FAKE_CALL_RE.test(text);
+}
+
+/** Lines a model adds about the tools it used ("*Tools: list_categories*"); the app shows those itself. */
+const TOOL_NOTE_LINE_RE = /^\s*[*_(]*\s*(?:tools?|werkzeuge?)\s*:\s*[a-z_]+(?:\s*,\s*[a-z_]+)*\s*[*_)]*\s*$/gim;
+
+export function cleanAnswer(text: string): string {
+  return text.replace(TOOL_NOTE_LINE_RE, "").replace(/\n{3,}/g, "\n\n").trim();
+}
 
 const AMOUNT_RE = /\d,\d{2}\s*(?:€|eur\b)|(?:€|eur)\s*-?\d|\d\.\d{2}\s*(?:€|eur\b)/i;
 const DATE_RE = /\b\d{1,2}\.\s?\d{1,2}\.\s?(?:\d{4}|\d{2})\b|\b\d{4}-\d{2}-\d{2}\b/;
@@ -184,8 +204,24 @@ export function fitContext(
   while (size() > budget && bounds.questionIndex - removed > 1) {
     messages.splice(1, 1);
     removed++;
+    // A turn goes whole: a tool call never stays behind without the
+    // question that led to it, nor a tool result without its call.
+    while (bounds.questionIndex - removed > 1 && messages[1].role !== "user") {
+      messages.splice(1, 1);
+      removed++;
+    }
   }
   return removed;
+}
+
+/** JSON with object keys sorted at every depth, so equal arguments compare equal. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 function parseArguments(raw: string): Record<string, unknown> | null {
@@ -239,6 +275,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   let answer: string | null = null;
   let rounds = 0;
   let calledTools = false;
+  /** Calls already made in this turn, by tool and arguments: a repeat is answered from above. */
+  const seenCalls = new Set<string>();
   /** The ungrounded answer and the nudge, sent along until the model calls a tool or answers again. */
   let nudge: ChatMessage[] | null = null;
   for (let round = 1; round <= maxRounds && answer === null; round++) {
@@ -275,20 +313,34 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       reply = await withSlot(() => input.chat(request, (text) => emit({ type: "token", text })));
     }
 
-    if (!reply.tool_calls.length && !last && !calledTools && nudge === null && looksLikeUserData(reply.content)) {
+    const fakeCall = !reply.tool_calls.length && looksLikeFakeToolCall(reply.content);
+    const ungrounded = !reply.tool_calls.length && !calledTools && looksLikeUserData(reply.content);
+    if (!last && nudge === null && (fakeCall || ungrounded)) {
       // Not kept in the transcript: the draft was never the answer.
-      nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: GROUNDING_NUDGE }];
+      nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: fakeCall ? FAKE_CALL_NUDGE : GROUNDING_NUDGE }];
       emit({ type: "retract" });
       continue;
+    }
+    if (last && fakeCall) {
+      // The forced last round wrote a call instead of an answer: ask once
+      // more, without tools, for the answer in words.
+      emit({ type: "retract" });
+      const retry = await withSlot(() => input.chat({
+        messages: [...messages, { role: "assistant", content: reply.content }, { role: "user", content: FINAL_ANSWER_NUDGE }],
+        max_tokens: ANSWER_TOKENS,
+      }, (text) => emit({ type: "token", text })));
+      rounds++;
+      reply = { ...retry, tool_calls: [] };
+      if (looksLikeFakeToolCall(reply.content)) reply = { ...reply, content: null };
     }
     if (reply.tool_calls.length) {
       calledTools = true;
       nudge = null;
     }
     if (!reply.tool_calls.length || last) {
-      answer = reply.content ?? "";
-      if (!answer.trim()) {
-        answer = NO_ANSWER;
+      answer = cleanAnswer(reply.content ?? "");
+      if (!answer || looksLikeFakeToolCall(answer)) {
+        answer = last ? OUT_OF_ROUNDS : NO_ANSWER;
       }
       break;
     }
@@ -310,6 +362,11 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
         result(text);
         continue;
       }
+      const key = `${name}:${canonical(args)}`;
+      if (seenCalls.has(key)) {
+        result(`error: you already called ${name} with these arguments in this turn; its result is above. Use it, change the arguments, or answer.`);
+        continue;
+      }
       const tool = tools.find((t) => t.name === name);
       if (!tool || (deferred && !offered.has(name))) {
         result(tool
@@ -317,6 +374,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           : `error: ${name} is not in the catalog`);
         continue;
       }
+      // Only a call that runs counts; a refused one may come again.
+      seenCalls.add(key);
 
       emit({ type: "tool_start", tool: name, arguments: args });
       const started = Date.now();

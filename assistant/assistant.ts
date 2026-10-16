@@ -38,14 +38,12 @@ import type { ChatMessage, RefType, ResultBlock, ResultRef, TurnEvent } from "./
 /** Questions per user and window — each one may cost several model rounds. */
 const RATE_LIMIT = { maxAttempts: 20, windowMs: 10 * 60_000 };
 const MAX_QUESTION_LENGTH = 4000;
-/** Earlier text turns replayed as context (user and assistant messages). */
-const HISTORY_MESSAGES = 12;
+/** Earlier turns (question, tool calls, answer) replayed as context. */
+const HISTORY_TURNS = 6;
 /** ai-queue priority: someone is waiting for this answer. */
 const SLOT_PRIORITY = 1;
 /** Naming a conversation can wait behind other work. */
 const TITLE_SLOT_PRIORITY = 5;
-/** The note of the tools behind one earlier answer, at most. */
-const TOOL_NOTE_CHARS = 900;
 
 function currentUser() {
   const auth = getAuthData();
@@ -215,10 +213,12 @@ export interface AskResponse {
 }
 
 /**
- * Earlier turns as the model sees them again: each question with its answer,
- * and after the answer a note of the tools behind it — name, arguments and
- * the one-line digest of what they found — so a follow-up ("nur die aus
- * München") knows what the previous answer was based on without the rows.
+ * Earlier turns as the model sees them again: each question, the tool calls
+ * behind its answer with the one-line digest of what each found, and the
+ * answer. Replayed as real tool calls rather than a note in the answer — a
+ * model that saw "[tools behind this answer: …]" in earlier answers wrote
+ * such notes itself instead of calling the tool. A follow-up ("nur die aus
+ * München") still knows what the previous answer was based on.
  */
 export async function history(conversationId: number): Promise<ChatMessage[]> {
   const rows = (await db
@@ -232,39 +232,47 @@ export async function history(conversationId: number): Promise<ChatMessage[]> {
     .from(assistantMessage)
     .where(eq(assistantMessage.conversation_id, conversationId))
     .orderBy(desc(assistantMessage.id))
-    .limit(HISTORY_MESSAGES * 6)).reverse();
+    .limit(HISTORY_TURNS * 12)).reverse();
 
-  const turns: ChatMessage[] = [];
-  let calls: Array<{ id: string; name: string; arguments: string }> = [];
-  const digests = new Map<string, string>();
+  const turns: ChatMessage[][] = [];
+  let turn: ChatMessage[] | null = null;
+  let open = new Set<string>();
+  // Every call gets its result before the next message, even one whose row is missing.
+  const closeCalls = () => {
+    for (const id of open) turn?.push({ role: "tool", tool_call_id: id, content: "[no result kept]" });
+    open = new Set();
+  };
   for (const m of rows) {
     if (m.role === "user") {
-      calls = [];
-      if (m.content) turns.push({ role: "user", content: m.content });
+      closeCalls();
+      turn = m.content ? [{ role: "user", content: m.content }] : null;
+      if (turn) turns.push(turn);
+    } else if (!turn) {
+      continue; // the fetched window began inside a turn
     } else if (m.role === "tool") {
-      if (m.tool_call_id && m.digest) digests.set(m.tool_call_id, m.digest);
+      if (!m.tool_call_id || !open.has(m.tool_call_id)) continue;
+      open.delete(m.tool_call_id);
+      turn.push({ role: "tool", tool_call_id: m.tool_call_id, content: m.digest ?? "[no result kept]" });
     } else if (m.tool_calls) {
-      calls.push(...m.tool_calls);
+      closeCalls();
+      turn.push({
+        role: "assistant",
+        content: null,
+        tool_calls: m.tool_calls.map((c) => ({ id: c.id, type: "function" as const, function: { name: c.name, arguments: c.arguments } })),
+      });
+      for (const c of m.tool_calls) open.add(c.id);
     } else if (m.content) {
-      turns.push({ role: "assistant", content: m.content + toolNote(calls, digests) });
-      calls = [];
+      closeCalls();
+      turn.push({ role: "assistant", content: m.content });
     }
   }
-  const recent = turns.slice(-HISTORY_MESSAGES);
-  // Start on a question, so the replayed history never opens with an answer.
-  const first = recent.findIndex((m) => m.role === "user");
-  return recent.slice(first < 0 ? recent.length : first);
-}
-
-function toolNote(calls: Array<{ id: string; name: string; arguments: string }>, digests: Map<string, string>): string {
-  if (!calls.length) return "";
-  const lines = calls.map((c) => {
-    const args = c.arguments && c.arguments !== "{}" ? ` ${c.arguments.slice(0, 200)}` : "";
-    return `${c.name}${args} → ${digests.get(c.id) ?? "[no result]"}`;
+  closeCalls();
+  // Only turns that ended in an answer; a failed turn has nothing to build on.
+  const complete = turns.filter((t) => {
+    const last = t.at(-1)!;
+    return last.role === "assistant" && !("tool_calls" in last && last.tool_calls);
   });
-  let note = `\n\n[tools behind this answer: ${lines.join("; ")}]`;
-  if (note.length > TOOL_NOTE_CHARS) note = `${note.slice(0, TOOL_NOTE_CHARS - 2)}…]`;
-  return note;
+  return complete.slice(-HISTORY_TURNS).flat();
 }
 
 /** The latest result set of each type in the conversation, for `from_previous_result`. */

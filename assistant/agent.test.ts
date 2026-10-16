@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { buildSystemPrompt, fitContext, GROUNDING_NUDGE, looksLikeUserData, runTurn, timeGrounding } from "./agent";
+import { buildSystemPrompt, cleanAnswer, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, looksLikeFakeToolCall, looksLikeUserData, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -308,6 +308,73 @@ describe("answers without a tool behind them", () => {
     const prompt = buildSystemPrompt(catalogFor(USER), NOW, false);
     expect(prompt).toContain("You know nothing about this user's data");
     expect(prompt).toContain('"Zeige mir die 10 neuesten Buchungen." → list_transactions(limit = 10)');
+  });
+});
+
+describe("what the benchmark caught", () => {
+  it("a tool call written as text is sent back, and the model then calls it", async () => {
+    clients.photo.getPhotoDetailsBatch.mockResolvedValue({ photos: [{ id: 5, taken_at: "2025-06-01T10:00:00Z", location_city: "München" }] });
+    const { fn, requests } = scripted([
+      answer("Album vorgeschlagen.\n\n[tools behind this answer: list_photos {\"from_previous_result\":true} → 2 rows]"),
+      calls(["list_photos", { from_previous_result: true, place: "München" }]),
+      answer("Eins aus München."),
+    ]);
+    const events: TurnEvent[] = [];
+    const res = await runTurn({
+      user: USER, history: [], question: "Nur die aus München.", tools: catalogFor(USER), chat: fn,
+      emit: (e) => events.push(e), now: NOW, previousRefs: { photo: [5, 6] },
+    });
+    expect(requests[1]!.messages.at(-1)).toEqual({ role: "user", content: FAKE_CALL_NUDGE });
+    expect(events.some((e) => e.type === "retract")).toBe(true);
+    expect(res.answer).toBe("Eins aus München.");
+  });
+
+  it("the forced last round's call-as-text is asked once more for words, and never shown", async () => {
+    const raw = "<|tool_call>call:list_transactions{from:<|\"|>2019-01-01<|\"|>}<tool_call|>";
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    const loop = scripted([calls(["list_transactions", { q: "a" }]), answer(raw), answer("Dazu habe ich keine Buchungen gefunden.")]);
+    const res = await runTurn({ user: USER, history: [], question: "Kauf?", tools: catalogFor(USER), chat: loop.fn, now: NOW, maxRounds: 2 });
+    expect(loop.requests[2]!.messages.at(-1)).toEqual({ role: "user", content: FINAL_ANSWER_NUDGE });
+    expect(loop.requests[2]!.tools).toBeUndefined();
+    expect(res.answer).toBe("Dazu habe ich keine Buchungen gefunden.");
+
+    const stubborn = scripted([calls(["list_transactions", { q: "b" }]), answer(raw), answer(raw)]);
+    const again = await runTurn({ user: USER, history: [], question: "Kauf?", tools: catalogFor(USER), chat: stubborn.fn, now: NOW, maxRounds: 2 });
+    expect(again.answer).toBe(OUT_OF_ROUNDS);
+  });
+
+  it("a repeated call with the same arguments is answered from above, not run again", async () => {
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    const { fn, requests } = scripted([
+      calls(["list_transactions", { from: "2019-01-01", to: "2019-12-31" }]),
+      calls(["list_transactions", { to: "2019-12-31", from: "2019-01-01" }]),
+      answer("Keine Buchungen 2019."),
+    ]);
+    await runTurn({ user: USER, history: [], question: "2019?", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(clients.finance.listTransactions).toHaveBeenCalledTimes(1);
+    expect(String(requests[2]!.messages.at(-1)!.content)).toContain("you already called list_transactions");
+  });
+
+  it("notes about tools are taken out of the answer", () => {
+    expect(cleanAnswer("Zwei Protokolle gefunden.\n\n*Tools: list_categories, search_documents*")).toBe("Zwei Protokolle gefunden.");
+    expect(cleanAnswer("Werkzeuge: list_recaps\nOstsee 2024")).toBe("Ostsee 2024");
+    expect(cleanAnswer("Das Tool hat 3 Treffer.")).toBe("Das Tool hat 3 Treffer.");
+    expect(looksLikeFakeToolCall("[tools behind this answer: x]")).toBe(true);
+    expect(looksLikeFakeToolCall("Ich rufe gleich die Buchungen ab.")).toBe(false);
+  });
+
+  it("trimming drops a whole earlier turn, never a tool call without its question", () => {
+    const messages: ChatMessage[] = [
+      { role: "system", content: "s" },
+      { role: "user", content: "alt ".repeat(200) },
+      { role: "assistant", content: null, tool_calls: [{ id: "h1", type: "function", function: { name: "x", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "h1", content: "digest ".repeat(200) },
+      { role: "assistant", content: "antwort ".repeat(200) },
+      { role: "user", content: "neu" },
+    ];
+    const removed = fitContext(messages, new Map(), 60, { protectFrom: 6, questionIndex: 5 });
+    expect(removed).toBe(4);
+    expect(messages.map((m) => m.role)).toEqual(["system", "user"]);
   });
 });
 
