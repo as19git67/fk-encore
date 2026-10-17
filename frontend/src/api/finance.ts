@@ -2027,10 +2027,13 @@ export interface UpcomingDebitsResponse {
   total_amount: string
 }
 
-export async function listUpcomingDebits(params: { from?: string; until?: string } = {}): Promise<UpcomingDebitsResponse> {
+export type UpcomingChannel = 'all' | 'direct_debit' | 'transfer'
+
+export async function listUpcomingDebits(params: { from?: string; until?: string; channel?: UpcomingChannel } = {}): Promise<UpcomingDebitsResponse> {
   const query = new URLSearchParams()
   if (params.from) query.set('from', params.from)
   if (params.until) query.set('until', params.until)
+  if (params.channel && params.channel !== 'all') query.set('channel', params.channel)
   const qs = query.toString()
   return apiFetch(`/finance/mandates/upcoming${qs ? `?${qs}` : ''}`)
 }

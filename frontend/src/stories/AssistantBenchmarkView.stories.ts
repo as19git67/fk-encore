@@ -8,7 +8,7 @@ import type { BenchRunDetail, BenchRunSummary } from '../api/assistantBenchmark'
 /** The assistant benchmark page: a finished run with its cases, and a run in progress. */
 
 const CASES = [
-  { id: 'debits-this-month', title: 'Lastschriften bis Monatsende', question: 'Welche Lastschriften muss ich in diesem Monat noch erwarten?', tools: ['upcoming_direct_debits'] },
+  { id: 'debits-this-month', title: 'Lastschriften bis Monatsende', question: 'Welche Lastschriften muss ich in diesem Monat noch erwarten?', tools: ['upcoming_payments'] },
   { id: 'report-with-yield', title: 'Bericht mit Gruppen und Rendite', question: 'Liste alle Buchungen zur Wohnung …', tools: ['transaction_report'] },
   { id: 'letter-paid-invoices', title: 'Brief aus drei Rechnungen, Lücke für das Unbekannte', question: 'Schreib der Musterfirma …', tools: ['render_letter'] },
 ]
@@ -33,7 +33,7 @@ const DONE: BenchRunDetail = {
   results: [
     {
       id: 'debits-this-month', title: 'Lastschriften bis Monatsende', rounds_ms: [1820, 2140],
-      calls: [{ tool: 'upcoming_direct_debits', args: { until: '2026-10-31' } }],
+      calls: [{ tool: 'upcoming_payments', args: { until: '2026-10-31', channel: 'direct_debit' } }],
       answer: 'Bis Ende Oktober kommen noch zwei Lastschriften, zusammen 116,50 €.', error: null,
       score: { tool_hit: true, args_hit: true, answered: true, passed: true, missing: [] },
     },

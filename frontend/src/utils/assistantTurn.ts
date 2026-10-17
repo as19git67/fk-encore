@@ -33,7 +33,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_accounts: 'Konten ansehen',
   list_transactions: 'Buchungen durchsuchen',
   analyze_spending: 'Ausgaben auswerten',
-  upcoming_direct_debits: 'Lastschriften vorausberechnen',
+  upcoming_payments: 'Erwartete Zahlungen vorausberechnen',
   list_categories: 'Kategorien ansehen',
   search_documents: 'Dokumente durchsuchen',
   get_document_summary: 'Dokument lesen',

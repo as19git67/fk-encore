@@ -150,11 +150,11 @@ describe("running a case", () => {
 
   it("names what is missing when the arguments are wrong", async () => {
     const run = await runBenchCase(caseById("debits-this-month"), {
-      chat: scripted([{ tool: "upcoming_direct_debits", args: { until: "2026-12-31" } }]),
+      chat: scripted([{ tool: "upcoming_payments", args: { until: "2026-12-31" } }]),
       tools,
       user,
     });
-    expect(run.score).toMatchObject({ tool_hit: true, args_hit: false, passed: false, missing: ["upcoming_direct_debits"] });
+    expect(run.score).toMatchObject({ tool_hit: true, args_hit: false, passed: false, missing: ["upcoming_payments"] });
   });
 });
 

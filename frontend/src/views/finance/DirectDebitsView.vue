@@ -1,11 +1,13 @@
 <script setup lang="ts">
 /**
- * Finanzen › Lastschriften (#1526): what recurring debits are still coming
- * in a period, from the mandates the anomaly detector keeps. The server
- * computes the dates and the sum; this page only picks the period and
- * shows the rows, each with the series' past bookings on demand.
+ * Finanzen › Erwartete Zahlungen (#1526): what recurring outgoing payments
+ * are still coming in a period — direct debits and transfers, never card
+ * payments or cash — from the series the anomaly detector keeps. The
+ * server computes the dates and the sum; this page only picks the period
+ * and the channel and shows the rows, each with the series' past bookings
+ * on demand.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
@@ -19,6 +21,7 @@ import {
   getMandateHistory,
   listUpcomingDebits,
   type MandateHistoryItem,
+  type UpcomingChannel,
   type UpcomingDebit,
 } from '../../api/finance'
 import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
@@ -36,6 +39,19 @@ const periodOptions = [
 // the same period.
 const periodView = useListView({ options: periodOptions, defaultValue: 'month', key: 'period' })
 const period = periodView.value
+
+const channelOptions: { label: string; value: UpcomingChannel }[] = [
+  { label: 'Lastschriften und Überweisungen', value: 'all' },
+  { label: 'Nur Lastschriften', value: 'direct_debit' },
+  { label: 'Nur Überweisungen und Daueraufträge', value: 'transfer' },
+]
+const channelView = useListView({ options: channelOptions, defaultValue: 'all', key: 'channel' })
+const channel = channelView.value as unknown as Ref<UpcomingChannel>
+
+const CHANNEL_LABELS: Record<string, string> = { direct_debit: 'Lastschrift', transfer: 'Überweisung', card: 'Karte', other: 'Kanal unbekannt' }
+function channelLabel(v: string | null): string {
+  return CHANNEL_LABELS[v ?? 'other'] ?? 'Kanal unbekannt'
+}
 
 /** The window for a period, in local dates. */
 function windowFor(value: string, today = new Date()): { from: string; until: string } {
@@ -98,7 +114,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const res = await listUpcomingDebits(windowFor(period.value))
+    const res = await listUpcomingDebits({ ...windowFor(period.value), channel: channel.value })
     items.value = res.items
     totalAmount.value = res.total_amount
   } catch (e: unknown) {
@@ -109,7 +125,7 @@ async function load() {
   }
 }
 
-watch(period, load, { immediate: true })
+watch([period, channel], load, { immediate: true })
 
 const periodLabel = computed(
   () => periodOptions.find((o) => o.value === period.value)?.label ?? '',
@@ -152,8 +168,8 @@ function openTransaction(id: number) {
 
 <template>
   <PageLayout
-    title="Lastschriften"
-    hint="Regelmäßige Abbuchungen, die im gewählten Zeitraum noch kommen — geschätzt aus den bisherigen Buchungen."
+    title="Erwartete Zahlungen"
+    hint="Regelmäßige Lastschriften und Überweisungen, die im gewählten Zeitraum noch vom Konto abgehen — geschätzt aus den bisherigen Buchungen. Kartenzahlungen und Bargeld zählen nicht."
     width="wide"
     :ready="loaded"
   >
@@ -169,6 +185,15 @@ function openTransaction(id: number) {
             aria-label="Zeitraum"
             class="period-select"
           />
+          <Select
+            v-model="channel"
+            :options="channelOptions"
+            option-label="label"
+            option-value="value"
+            size="small"
+            aria-label="Zahlungsart"
+            class="period-select"
+          />
         </template>
       </ListToolbar>
     </template>
@@ -182,7 +207,7 @@ function openTransaction(id: number) {
     <EmptyState
       v-else-if="items.length === 0"
       icon="pi pi-calendar"
-      title="Keine Lastschriften erwartet"
+      title="Keine Zahlungen erwartet"
       :message="`Im Zeitraum „${periodLabel}“ steht nach den bisherigen Buchungen nichts mehr an.`"
     />
 
@@ -196,7 +221,7 @@ function openTransaction(id: number) {
               <Tag v-if="item.overdue" severity="warn" value="überfällig" class="debit-tag" />
             </span>
             <span class="debit-meta">
-              {{ item.account_label }} · {{ intervalLabel(item.interval_days) }} ·
+              {{ item.account_label }} · {{ channelLabel(item.payment_channel) }} · {{ intervalLabel(item.interval_days) }} ·
               zuletzt {{ parseLocalDate(item.last_seen).toLocaleDateString('de-DE') }}
             </span>
           </span>

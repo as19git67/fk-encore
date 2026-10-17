@@ -407,10 +407,15 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
-        path: 'lastschriften',
+        path: 'zahlungen',
         name: 'finance-direct-debits',
         component: () => import('../views/finance/DirectDebitsView.vue'),
         meta: { permission: 'finance.view' },
+      },
+      {
+        // The page was called Lastschriften until it also listed transfers.
+        path: 'lastschriften',
+        redirect: { name: 'finance-direct-debits' },
       },
       {
         path: 'betriebe',
@@ -462,7 +467,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
       { label: 'Prognose', icon: 'pi pi-chart-line', routeName: 'finance-forecast', permission: 'finance.view' },
-      { label: 'Lastschriften', icon: 'pi pi-calendar-clock', routeName: 'finance-direct-debits', permission: 'finance.view' },
+      { label: 'Erwartete Zahlungen', icon: 'pi pi-calendar-clock', routeName: 'finance-direct-debits', permission: 'finance.view' },
       { label: 'Betriebe', icon: 'pi pi-warehouse', routeName: 'finance-businesses', permission: 'finance.view' },
       { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
       { label: 'Belegabgleich', icon: 'pi pi-receipt', routeName: 'finance-receipt-enrichment', permission: 'finance.view' },

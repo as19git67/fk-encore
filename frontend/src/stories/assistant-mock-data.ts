@@ -19,9 +19,9 @@ export const TRANSACTIONS_BLOCK: ResultBlock = {
 
 export const DEBITS_BLOCK: ResultBlock = {
   kind: 'debits',
-  tool: 'upcoming_direct_debits',
+  tool: 'upcoming_payments',
   total: 2,
-  route: '/finanzen/lastschriften',
+  route: '/finanzen/zahlungen',
   rows: [
     { mandate_id: 1, expected_date: '2026-10-10', overdue: true, counterparty: 'Muster Telekom', account_label: 'Girokonto', typical_amount: '-39.99' },
     { mandate_id: 2, expected_date: '2026-10-20', overdue: false, counterparty: 'Stadtwerke Musterstadt', account_label: 'Girokonto', typical_amount: '-84.00' },

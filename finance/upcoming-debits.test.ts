@@ -142,8 +142,9 @@ async function ensureUser(id: number): Promise<void> {
   );
 }
 
-async function insertAccount(label: string, closed = false): Promise<number> {
-  const [type] = await db.select({ id: financeAccountType.id }).from(financeAccountType).limit(1);
+async function insertAccount(label: string, closed = false, kind?: string): Promise<number> {
+  const types = await db.select({ id: financeAccountType.id, kind: financeAccountType.kind }).from(financeAccountType);
+  const type = kind ? types.find((t) => t.kind === kind)! : types.find((t) => t.kind !== "bargeld")!;
   const [row] = await db
     .insert(financeAccount)
     .values({
@@ -273,6 +274,24 @@ describe("GET /finance/mandates/upcoming", () => {
     await expect(listUpcomingDebits({ from: "2026-10-31", until: "2026-10-01" })).rejects.toThrow("until");
     await expect(listUpcomingDebits({ from: "15.10.2026" })).rejects.toThrow("YYYY-MM-DD");
     await expect(listUpcomingDebits({ from: "2026-01-01", until: "2027-12-31" })).rejects.toThrow("at most");
+  });
+
+  it("narrows to direct debits or transfers, and never counts a cash account", async () => {
+    const giro = await insertAccount("Giro");
+    const wallet = await insertAccount("Portemonnaie", false, "bargeld");
+    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: wallet, user_id: 901, level: "read" });
+    await insertMandate({ accountId: giro, counterparty: "Stadtwerke Musterstadt", amount: "-84.00", interval: 30, lastSeen: "2026-09-20" });
+    await insertMandate({ accountId: giro, counterparty: "Miete Beispiel GmbH", amount: "-650.00", interval: 30, lastSeen: "2026-09-28", channel: "transfer" });
+    await insertMandate({ accountId: giro, counterparty: "Unbekannt", amount: "-5.00", interval: 30, lastSeen: "2026-09-22", channel: null });
+    await insertMandate({ accountId: wallet, counterparty: "Markt", amount: "-20.00", interval: 7, lastSeen: "2026-10-12", channel: null });
+    setAuth("901", ["finance.view"]);
+
+    const all = await listUpcomingDebits({});
+    expect(all.items.map((i) => i.counterparty)).toEqual(["Stadtwerke Musterstadt", "Unbekannt", "Miete Beispiel GmbH"]);
+    expect((await listUpcomingDebits({ channel: "direct_debit" })).items.map((i) => i.counterparty)).toEqual(["Stadtwerke Musterstadt"]);
+    expect((await listUpcomingDebits({ channel: "transfer" })).items.map((i) => i.counterparty)).toEqual(["Miete Beispiel GmbH"]);
+    await expect(listUpcomingDebits({ channel: "cash" as never })).rejects.toThrow("channel");
   });
 
   it("needs finance.view", async () => {

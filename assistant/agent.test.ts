@@ -49,13 +49,13 @@ beforeEach(() => {
 });
 
 describe("the example questions of #1524", () => {
-  it("Lastschriften diesen Monat → upcoming_direct_debits", async () => {
+  it("Lastschriften diesen Monat → upcoming_payments(channel direct_debit)", async () => {
     clients.finance.listUpcomingDebits.mockResolvedValue({
       from: "2026-10-15", until: "2026-10-31", count: 1, total_amount: "-84.00",
       items: [{ mandate_id: 3, account_label: "Giro", counterparty: "Stadtwerke Musterstadt", expected_date: "2026-10-20", overdue: false, typical_amount: "-84.00", interval_days: 30 }],
     });
     const { fn, requests } = scripted([
-      calls(["upcoming_direct_debits", { until: "2026-10-31" }]),
+      calls(["upcoming_payments", { until: "2026-10-31", channel: "direct_debit" }]),
       answer("Bis Monatsende kommt noch eine Lastschrift: Stadtwerke Musterstadt, 84,00 €."),
     ]);
     const events: TurnEvent[] = [];
@@ -65,10 +65,10 @@ describe("the example questions of #1524", () => {
       tools: catalogFor(USER), chat: fn, emit: (e) => events.push(e), now: NOW,
     });
 
-    expect(clients.finance.listUpcomingDebits).toHaveBeenCalledWith({ from: undefined, until: "2026-10-31" });
+    expect(clients.finance.listUpcomingDebits).toHaveBeenCalledWith({ from: undefined, until: "2026-10-31", channel: "direct_debit" });
     expect(res.answer).toContain("Stadtwerke");
     expect(res.rounds).toBe(2);
-    expect(res.blocks[0]).toMatchObject({ kind: "debits", route: "/finanzen/lastschriften" });
+    expect(res.blocks[0]).toMatchObject({ kind: "debits", route: "/finanzen/zahlungen?channel=direct_debit", subtitle: "Nur Lastschriften" });
     // The tool result the model saw carries the sum the server computed.
     const toolMsg = requests[1].messages.find((m) => m.role === "tool") as { content: string };
     expect(toolMsg.content).toContain("-84.00");
@@ -165,7 +165,7 @@ describe("the loop", () => {
     const system = requests[0].messages[0] as { content: string };
     expect(system.content).toContain("Today is Thursday, 2026-10-15.");
     expect(system.content).toContain('"last year" = 2025-01-01..2025-12-31');
-    expect(system.content).toContain("- upcoming_direct_debits:");
+    expect(system.content).toContain("- upcoming_payments:");
     expect(requests[0].tools).toHaveLength(catalogFor(USER).length);
     expect(timeGrounding(NOW)).toContain('"last month" = 2026-09-01..2026-09-30');
   });

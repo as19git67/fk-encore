@@ -314,7 +314,7 @@ behind it.
      all, so the model cannot even ask for it.
    - Hand-written tools (`assistant/tools/*.ts`) exist only where an
      endpoint is not the right shape for the model: a composite that
-     saves rounds (`upcoming_direct_debits`), a result that needs
+     saves rounds (`upcoming_payments`, formerly `upcoming_direct_debits`), a result that needs
      trimming or a route (`search_documents` returning rows plus the list
      URL), or a computation (stage 6). They register in the same catalog.
    - Read tools of this stage:
@@ -325,7 +325,7 @@ behind it.
        the Übersicht page, `GET /finance/overview`, with section and
        latest statement balance — "meine Konten" are the ones the user
        placed there, not the account table; a cash account has no balance
-       and the row says so), `upcoming_direct_debits` (new, see below).
+       and the row says so), `upcoming_payments` (new, see below).
      - depots (`assistant/tools/depot.ts`): `portfolio_overview`
        (`GET /finance/portfolio` — market value, cost basis, unrealized
        and realized gain, income, fees, taxes, total return, positions
@@ -397,7 +397,7 @@ behind it.
        `list_albums`.
      - meters: `list_meters`, `latest_readings`, `consumption_report`.
      - trip planner: `list_trip_plans`.
-   - New endpoint behind `upcoming_direct_debits`: `GET
+   - New endpoint behind `upcoming_payments`: `GET
      /finance/mandates/upcoming?until=` lists active recurring mandates
      whose `last_seen + typical_interval_days` falls in the window, with
      the typical amount, scoped by `readableAccountIds()`. This is also a
@@ -779,7 +779,7 @@ behind it.
 
 | Question | Router | Tools | Answer |
 |---|---|---|---|
-| Lastschriften diesen Monat | finance | `upcoming_direct_debits(until=end of month)` | Table of mandates with date and amount; route to the new Lastschriften page |
+| Lastschriften diesen Monat | finance | `upcoming_payments(channel=direct_debit, until=end of month)` | Table of series with date, channel and amount; route to the page Erwartete Zahlungen (renamed from Lastschriften once it listed transfers too; `channel` narrows to direct debits or transfers, card payments and cash accounts never count) |
 | Protokolle Eigentümerversammlung München | documents | `list_categories` → `search_documents(q, category=kapitalanlage-immobilie-*)` | Document rows; route `/dokumente?q=…&category=…` |
 | Urlaubsreisen letztes Jahr | photos (+ trip planner) | `list_recaps(kind=trip, year)`, `list_trip_plans(year)`, `list_albums(hasEvent, year)` | One line per trip with dates and place; photo cells |
 | Album mit Favoriten 2025 | photos | `list_photos(favorite, 2025)` → proposal `create_album` + `add_photos_to_album(from_previous_result)` | Proposal card, album link after "Ausführen" |
