@@ -19,7 +19,9 @@ const props = withDefaults(defineProps<{
   /** The answer is still arriving. */
   pending?: boolean
   error?: string
-}>(), { blocks: () => [], steps: () => [], pending: false, error: undefined })
+  /** The stored message's id; rows of a stored answer can be returned to. */
+  messageId?: number
+}>(), { blocks: () => [], steps: () => [], pending: false, error: undefined, messageId: undefined })
 
 // The assistant's bold, lists and code are rendered; the user's own text is
 // shown as typed.
@@ -28,6 +30,23 @@ const rendered = computed(() => (props.role === 'assistant' ? parseBlocks(props.
 // A lookup that found nothing has its "· 0" in the steps above; an empty
 // grid under the answer said the same thing again, with nothing in it.
 const shownBlocks = computed(() => props.blocks.filter((b) => b.kind === 'analysis' || b.rows.length > 0))
+
+// One answer often holds several lists of the same kind: the model searched
+// the tax documents, then all documents, then summarised three. Only the
+// last list of a kind is what the answer is about; the ones before it fold
+// to their header so the thread stays readable (a click opens them).
+function family(kind: string): string {
+  return kind === 'document' ? 'documents' : kind
+}
+const lastOfFamily = computed(() => {
+  const last = new Map<string, number>()
+  shownBlocks.value.forEach((b, i) => last.set(family(b.kind), i))
+  return last
+})
+function isFolded(i: number): boolean {
+  const b = shownBlocks.value[i]
+  return b !== undefined && b.kind !== 'analysis' && lastOfFamily.value.get(family(b.kind)) !== i
+}
 </script>
 
 <template>
@@ -86,7 +105,12 @@ const shownBlocks = computed(() => props.blocks.filter((b) => b.kind === 'analys
     <div v-if="shownBlocks.length" class="blocks">
       <template v-for="(b, i) in shownBlocks" :key="`${b.tool}-${i}`">
         <ProposalCard v-for="p in b.kind === 'proposal' ? b.rows : []" :key="String(p.proposal_id)" :proposal="(p as unknown as Proposal)" />
-        <AssistantBlock v-if="b.kind !== 'proposal'" :block="b" />
+        <AssistantBlock
+          v-if="b.kind !== 'proposal'"
+          :block="b"
+          :folded="isFolded(i)"
+          :anchor-scope="messageId !== undefined ? `m${messageId}-${i}` : undefined"
+        />
       </template>
     </div>
   </article>

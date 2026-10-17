@@ -7,9 +7,11 @@
  * show, each row opens its object, and `route` opens the list page with the
  * same filters ("In der Liste öffnen").
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ResultBlock } from '../../api/assistant'
 import { getThumbUrl } from '../../api/gallery'
+import { anchorKey, saveListAnchor } from '../../utils/listAnchor'
+import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import DocumentThumbnail from '../DocumentThumbnail.vue'
 import { formatCurrency, formatIsoDate } from '../../utils/financeFormat'
@@ -18,7 +20,35 @@ const props = withDefaults(defineProps<{
   block: ResultBlock
   /** Rows shown before "… weitere"; photos show more since they are small. */
   limit?: number
-}>(), { limit: 8 })
+  /**
+   * Folded to its header: an earlier search the answer narrowed down again
+   * (the message shows the last block of a kind open, the ones before it
+   * folded). The reader opens it with one click.
+   */
+  folded?: boolean
+  /**
+   * Names this block among all blocks of the conversation (message and
+   * position), so a row opened from here is the row the reader comes back
+   * to — the same document can be listed in two blocks of one answer.
+   */
+  anchorScope?: string
+}>(), { limit: 8, folded: false, anchorScope: undefined })
+
+const open = ref(!props.folded)
+
+/** The marker a row carries so `PageLayout` finds it again on the way back. */
+function anchorFor(r: Row): string | undefined {
+  const id = Number(r.id)
+  if (!props.anchorScope || !Number.isSafeInteger(id) || id <= 0) return undefined
+  return anchorKey(`${props.block.kind}@${props.anchorScope}`, id)
+}
+
+/** Remember the row being opened; the chat restores it on the way back. */
+function remember(r: Row): void {
+  const id = Number(r.id)
+  if (!props.anchorScope || !Number.isSafeInteger(id) || id <= 0) return
+  saveListAnchor('assistent', { kind: `${props.block.kind}@${props.anchorScope}`, id })
+}
 
 type Row = Record<string, unknown>
 
@@ -155,8 +185,22 @@ const analysis = computed(() => {
         <span class="block-title">{{ title }}</span>
         <span v-if="block.subtitle" class="block-subtitle">{{ block.subtitle }}</span>
       </span>
-      <span v-if="block.kind !== 'analysis'" class="block-count">{{ total }}</span>
+      <span class="block-head-end">
+        <span v-if="block.kind !== 'analysis'" class="block-count">{{ total }}</span>
+        <Button
+          v-if="folded"
+          :icon="open ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+          text
+          rounded
+          size="small"
+          :aria-label="open ? 'Liste einklappen' : 'Liste ausklappen'"
+          :aria-expanded="open"
+          @click="open = !open"
+        />
+      </span>
     </header>
+
+    <template v-if="open">
 
     <!-- Accounts: as on the Übersicht page, with the latest balance -->
     <ul v-if="block.kind === 'accounts'" class="rows">
@@ -164,7 +208,7 @@ const analysis = computed(() => {
         <component
           :is="r.route ? 'RouterLink' : 'div'"
           :to="r.route ? str(r.route) : undefined"
-          :class="['row', { 'row--static': !r.route }]"
+          :class="['row', 'scroll-anchor', { 'row--static': !r.route }]" :data-anchor="r.route ? anchorFor(r) : undefined" @click="r.route && remember(r)"
         >
           <span class="row-main">
             <span class="row-title">{{ str(r.label) }}</span>
@@ -179,7 +223,7 @@ const analysis = computed(() => {
     <!-- Bookings -->
     <ul v-else-if="block.kind === 'transactions'" class="rows">
       <li v-for="r in shown" :key="str(r.id)">
-        <RouterLink class="row" :to="{ name: 'finance-transaction-detail', params: { id: str(r.id) } }">
+        <RouterLink class="row scroll-anchor" :to="{ name: 'finance-transaction-detail', params: { id: str(r.id) } }" :data-anchor="anchorFor(r)" @click="remember(r)">
           <span class="row-date">{{ date(r.booking_date) }}</span>
           <span class="row-main">
             <span class="row-title">{{ str(r.counterparty) || 'Ohne Gegenpartei' }}</span>
@@ -208,7 +252,7 @@ const analysis = computed(() => {
     <!-- Documents -->
     <ul v-else-if="block.kind === 'documents' || block.kind === 'document'" class="rows">
       <li v-for="r in shown" :key="str(r.id)">
-        <RouterLink class="row" :to="{ name: 'dokumente-detail', params: { id: str(r.id) } }">
+        <RouterLink class="row scroll-anchor" :to="{ name: 'dokumente-detail', params: { id: str(r.id) } }" :data-anchor="anchorFor(r)" @click="remember(r)">
           <span class="row-thumb" aria-hidden="true"><DocumentThumbnail :id="num(r.id)" /></span>
           <span class="row-main">
             <span class="row-title">{{ str(r.title) }}</span>
@@ -222,8 +266,10 @@ const analysis = computed(() => {
     <ul v-else-if="block.kind === 'photos'" class="photos">
       <li v-for="r in shown" :key="str(r.id)">
         <RouterLink
-          class="photo"
+          class="photo scroll-anchor"
           :to="{ name: 'fotos-gallery', query: { photoId: str(r.id) } }"
+          :data-anchor="anchorFor(r)"
+          @click="remember(r)"
           :aria-label="`Foto ${date(r.taken_at) || str(r.id)} öffnen`"
         >
           <img v-if="r.filename" :src="getThumbUrl(str(r.filename), 240)" alt="" loading="lazy" />
@@ -252,7 +298,7 @@ const analysis = computed(() => {
         <component
           :is="r.route ? 'RouterLink' : 'div'"
           :to="r.route ? str(r.route) : undefined"
-          :class="['row', { 'row--static': !r.route }]"
+          :class="['row', 'scroll-anchor', { 'row--static': !r.route }]" :data-anchor="r.route ? anchorFor(r) : undefined" @click="r.route && remember(r)"
         >
           <span class="row-main">
             <span class="row-title">{{ str(r.title ?? r.name) }}</span>
@@ -273,7 +319,7 @@ const analysis = computed(() => {
     <!-- Businesses: name, kind, tax form and counts -->
     <ul v-else-if="block.kind === 'businesses'" class="rows">
       <li v-for="r in shown" :key="str(r.id)">
-        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', 'scroll-anchor', { 'row--static': !r.route }]" :data-anchor="r.route ? anchorFor(r) : undefined" @click="r.route && remember(r)">
           <span class="row-main">
             <span class="row-title">{{ str(r.name) }}</span>
             <span class="row-sub">{{ businessKind(r.kind) }} · {{ str(r.tax_section).toUpperCase() }} · {{ str(r.asset_count) }} Anlagegüter · {{ str(r.parcel_count) }} Flächen</span>
@@ -285,7 +331,7 @@ const analysis = computed(() => {
     <!-- Assets with the year's AfA, parcels with lessee and rent -->
     <ul v-else-if="block.kind === 'business_assets'" class="rows">
       <li v-for="r in shown" :key="`${str(r.kind)}-${str(r.id)}`">
-        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', 'scroll-anchor', { 'row--static': !r.route }]" :data-anchor="r.route ? anchorFor(r) : undefined" @click="r.route && remember(r)">
           <span class="row-main">
             <span class="row-title">{{ str(r.name) }}</span>
             <span v-if="r.kind === 'parcel'" class="row-sub">
@@ -301,7 +347,7 @@ const analysis = computed(() => {
     <!-- EÜR: the lines with their sums, the AfA, the result in the subtitle -->
     <ul v-else-if="block.kind === 'euer'" class="rows">
       <li v-for="r in shown" :key="str(r.id)">
-        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', 'scroll-anchor', { 'row--static': !r.route }]" :data-anchor="r.route ? anchorFor(r) : undefined" @click="r.route && remember(r)">
           <span class="row-main">
             <span class="row-title">{{ r.form_line ? `${str(r.form_line)} · ` : '' }}{{ str(r.name) }}</span>
             <span class="row-sub">{{ r.kind === 'income' ? 'Einnahme' : r.kind === 'expense' ? 'Ausgabe' : 'AfA' }}{{ r.count ? ` · ${str(r.count)} ${r.kind === 'afa' ? 'Anlagegüter' : 'Buchungen'}` : '' }}</span>
@@ -314,7 +360,7 @@ const analysis = computed(() => {
     <!-- Securities: name, holding, value and unrealized gain -->
     <ul v-else-if="block.kind === 'positions'" class="rows">
       <li v-for="r in shown" :key="str(r.key)">
-        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', 'scroll-anchor', { 'row--static': !r.route }]" :data-anchor="r.route ? anchorFor(r) : undefined" @click="r.route && remember(r)">
           <span class="row-main">
             <span class="row-title">{{ str(r.name) }}</span>
             <span class="row-sub">{{ [str(r.depots), str(r.isin), r.amount ? `${str(r.amount)} Stück` : '', r.open === false ? 'verkauft' : ''].filter(Boolean).join(' · ') }}</span>
@@ -332,7 +378,7 @@ const analysis = computed(() => {
     <!-- Depot transactions: date, kind and security, net amount -->
     <ul v-else-if="block.kind === 'depot_transactions'" class="rows">
       <li v-for="r in shown" :key="str(r.id)">
-        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', 'scroll-anchor', { 'row--static': !r.route }]" :data-anchor="r.route ? anchorFor(r) : undefined" @click="r.route && remember(r)">
           <span class="row-date">{{ date(r.executed_at) }}</span>
           <span class="row-main">
             <span class="row-title">{{ kindLabel(r.kind) }} · {{ str(r.name) }}</span>
@@ -346,7 +392,7 @@ const analysis = computed(() => {
     <!-- Quotes: last price and change -->
     <ul v-else-if="block.kind === 'quotes'" class="rows">
       <li v-for="r in shown" :key="str(r.key)">
-        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', 'scroll-anchor', { 'row--static': !r.route }]" :data-anchor="r.route ? anchorFor(r) : undefined" @click="r.route && remember(r)">
           <span class="row-main">
             <span class="row-title">{{ str(r.name) }}</span>
             <span class="row-sub">{{ r.status === 'ok' ? withUnit(r.value, r.currency) : (r.status === 'unresolved' ? 'keine Kursquelle' : 'noch kein Kurs') }}{{ num(r.news_unread) > 0 ? ` · ${str(r.news_unread)} neue Nachrichten` : '' }}</span>
@@ -376,7 +422,7 @@ const analysis = computed(() => {
     <!-- Comments under a photo -->
     <ul v-else-if="block.kind === 'comments'" class="rows">
       <li v-for="r in shown" :key="str(r.id)">
-        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', 'scroll-anchor', { 'row--static': !r.route }]" :data-anchor="r.route ? anchorFor(r) : undefined" @click="r.route && remember(r)">
           <span class="row-date">{{ date(r.at) }}</span>
           <span class="row-main">
             <span class="row-title">{{ str(r.author) }}</span>
@@ -428,7 +474,9 @@ const analysis = computed(() => {
       </li>
     </ul>
 
-    <footer v-if="more > 0 || block.route" class="block-foot">
+    </template>
+
+    <footer v-if="open && (more > 0 || block.route)" class="block-foot">
       <span v-if="more > 0" class="row-sub">{{ more }} weitere</span>
       <RouterLink v-if="block.route" class="open-list" :to="block.route">
         <i class="pi pi-external-link" aria-hidden="true" />
@@ -482,6 +530,12 @@ const analysis = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.block-head-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .block-count {
