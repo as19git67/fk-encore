@@ -65,6 +65,8 @@ export const clients = {
     listMeters: vi.fn(),
     listReadings: vi.fn(),
     getMeterReport: vi.fn(),
+    getEnergyReport: vi.fn(),
+    listTariffs: vi.fn(),
   },
   aiqueue: {
     acquireSlot: vi.fn(async () => ({ slotId: 1, status: "active", position: 0 })),

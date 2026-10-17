@@ -4764,6 +4764,7 @@ export type ParcelUsage = "acker" | "gruenland" | "wald" | "hof" | "sonstiges";
 
 /** A business in the tax sense: a leased farm, a PV system, a trade. */
 export type EuerLineKind = "income" | "expense";
+export type PvTaxOverride = "exempt" | "taxable";
 export interface EuerLineDefinition {
   name: string;
   kind: EuerLineKind;
@@ -4788,6 +4789,11 @@ export const financeBusiness = pgTable(
     document_category: text("document_category"),
     /** The lines of the Anlage EÜR, in order; a booking goes to the first line one of its tags names. */
     euer_lines: jsonb("euer_lines").$type<EuerLineDefinition[]>().notNull().default([]),
+    /** PV only (stage 3): installed capacity in kWp, the user's own figure. */
+    pv_capacity_kwp: numeric("pv_capacity_kwp", { precision: 7, scale: 3 }),
+    pv_commissioned_on: date("pv_commissioned_on", { mode: "string" }),
+    /** Overrides the derived § 3 Nr. 72 EStG status; null derives it from capacity and year. */
+    pv_tax_override: text("pv_tax_override").$type<PvTaxOverride>(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },

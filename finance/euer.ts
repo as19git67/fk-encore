@@ -69,6 +69,8 @@ export interface EuerReport {
   /** Bookings of the business that are not flagged tax-relevant; a hint, not an error. */
   unflagged: number;
   hints: string[];
+  /** PV only (stage 3): the § 3 Nr. 72 EStG status; an exempt system's EÜR is for information. */
+  tax_exempt?: { exempt: boolean | null; reason: string };
 }
 
 export const OTHER_INCOME = "Sonstige Betriebseinnahmen";

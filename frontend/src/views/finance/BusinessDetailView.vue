@@ -30,7 +30,7 @@ import {
   createBusinessAsset, createBusinessParcel, deleteBusiness, deleteBusinessAsset, deleteBusinessParcel, downloadBusinessEuerPdf,
   getBusiness, getBusinessAssetSchedule, getBusinessEuer, updateBusiness, updateBusinessAsset, updateBusinessParcel,
   type BusinessAsset, type BusinessAssetKind, type BusinessDetail, type BusinessKind, type BusinessParcel,
-  type BusinessTaxSection, type DepreciationYear, type EuerLine, type EuerLineKind, type EuerReport, type ParcelUsage,
+  type BusinessTaxSection, type DepreciationYear, type EuerLine, type EuerLineKind, type EuerReport, type ParcelUsage, type PvTaxOverride,
 } from '../../api/finance'
 import {
   ASSET_KIND_OPTIONS, BUSINESS_KIND_OPTIONS, PARCEL_USAGE_OPTIONS, TAX_SECTION_OPTIONS,
@@ -116,11 +116,32 @@ function fail(e: unknown, fallback: string): string {
 const businessDialog = ref(false)
 const businessSaving = ref(false)
 const businessError = ref<string | null>(null)
-const businessForm = ref<{ name: string; kind: BusinessKind; tax_section: BusinessTaxSection; notes: string; booking_tag: string; document_category: string }>({ name: '', kind: 'landwirtschaft', tax_section: 'anlage-l', notes: '', booking_tag: '', document_category: '' })
+interface BusinessForm {
+  name: string
+  kind: BusinessKind
+  tax_section: BusinessTaxSection
+  notes: string
+  booking_tag: string
+  document_category: string
+  pv_capacity_kwp: number | null
+  pv_commissioned_on: Date | null
+  pv_tax_override: PvTaxOverride | 'auto'
+}
+
+const businessForm = ref<BusinessForm>({ name: '', kind: 'landwirtschaft', tax_section: 'anlage-l', notes: '', booking_tag: '', document_category: '', pv_capacity_kwp: null, pv_commissioned_on: null, pv_tax_override: 'auto' })
+
+const PV_TAX_OPTIONS: { value: PvTaxOverride | 'auto'; label: string }[] = [
+  { value: 'auto', label: 'Aus Leistung und Jahr ableiten (§ 3 Nr. 72 EStG)' },
+  { value: 'exempt', label: 'Steuerfrei' },
+  { value: 'taxable', label: 'Steuerpflichtig' },
+]
 
 function openBusinessEdit() {
   const b = data.value!.business
-  businessForm.value = { name: b.name, kind: b.kind, tax_section: b.tax_section, notes: b.notes ?? '', booking_tag: b.booking_tag ?? '', document_category: b.document_category ?? '' }
+  businessForm.value = {
+    name: b.name, kind: b.kind, tax_section: b.tax_section, notes: b.notes ?? '', booking_tag: b.booking_tag ?? '', document_category: b.document_category ?? '',
+    pv_capacity_kwp: b.pv_capacity_kwp === null ? null : Number(b.pv_capacity_kwp), pv_commissioned_on: toDate(b.pv_commissioned_on), pv_tax_override: b.pv_tax_override ?? 'auto',
+  }
   businessError.value = null
   businessDialog.value = true
 }
@@ -130,7 +151,11 @@ async function saveBusiness() {
   businessError.value = null
   try {
     const f = businessForm.value
-    await updateBusiness(id.value, { ...f, notes: f.notes || null, booking_tag: f.booking_tag.trim() || null, document_category: f.document_category.trim() || null })
+    await updateBusiness(id.value, {
+      name: f.name, kind: f.kind, tax_section: f.tax_section, notes: f.notes || null,
+      booking_tag: f.booking_tag.trim() || null, document_category: f.document_category.trim() || null,
+      pv_capacity_kwp: f.pv_capacity_kwp, pv_commissioned_on: fromDate(f.pv_commissioned_on), pv_tax_override: f.pv_tax_override === 'auto' ? null : f.pv_tax_override,
+    })
     businessDialog.value = false
     await load()
     await loadEuer()
@@ -532,6 +557,43 @@ async function removeParcel(p: BusinessParcel) {
         </ScrollX>
       </section>
 
+      <section v-if="data.pv" class="section">
+        <header class="section-head">
+          <h2>Photovoltaik {{ year }}</h2>
+          <RouterLink :to="{ name: 'zaehler-auswertungen' }" class="section-link">Zähler-Auswertungen</RouterLink>
+        </header>
+        <div :class="['pv-card', { 'pv-card--exempt': data.pv.status.exempt === true, 'pv-card--taxable': data.pv.status.exempt === false }]">
+          <dl class="pv-facts">
+            <div>
+              <dt>Leistung</dt>
+              <dd>
+                <template v-if="data.pv.capacity_kwp">{{ num.format(Number(data.pv.capacity_kwp)) }} kWp<span v-if="data.pv.capacity_source === 'meters'" class="cell-sub-inline"> (aus den Zählertarifen)</span></template>
+                <template v-else>nicht eingetragen</template>
+              </dd>
+            </div>
+            <div>
+              <dt>Inbetriebnahme</dt>
+              <dd>{{ fmtDate(data.pv.commissioned_on) }}</dd>
+            </div>
+            <div>
+              <dt>Einspeisung {{ year }} laut Zählern</dt>
+              <dd>
+                <template v-if="data.pv.feed_in && data.pv.feed_in.revenue_eur !== null">
+                  {{ eur.format(data.pv.feed_in.revenue_eur) }}<span v-if="data.pv.feed_in.exported_kwh !== null" class="cell-sub-inline"> für {{ num.format(Math.round(data.pv.feed_in.exported_kwh)) }} kWh</span><span v-if="!data.pv.feed_in.complete" class="cell-sub-inline"> (Ablesungen unvollständig)</span>
+                </template>
+                <template v-else>keine Zählerdaten</template>
+              </dd>
+            </div>
+          </dl>
+          <p class="pv-status">
+            <i :class="['pi', data.pv.status.exempt === true ? 'pi-check-circle' : data.pv.status.exempt === false ? 'pi-info-circle' : 'pi-question-circle']" aria-hidden="true" />
+            <strong>{{ data.pv.status.exempt === true ? 'Steuerfrei' : data.pv.status.exempt === false ? 'Steuerpflichtig' : 'Status offen' }}</strong>
+            {{ data.pv.status.reason }}
+            <span v-if="data.pv.status.source === 'override'" class="cell-sub-inline">(manuell festgelegt)</span>
+          </p>
+        </div>
+      </section>
+
       <section class="section">
         <header class="section-head">
           <h2>Einnahmen-Überschuss-Rechnung {{ year }}</h2>
@@ -544,6 +606,9 @@ async function removeParcel(p: BusinessParcel) {
         <ErrorBanner v-if="euerError" :message="euerError" closable @retry="loadEuer" @close="euerError = null" />
         <PageSkeleton v-else-if="euerLoading && !euer" variant="list" :count="4" />
         <template v-else-if="euer">
+          <Message v-if="euer.tax_exempt?.exempt === true" severity="info" :closable="false">
+            Steuerfrei nach § 3 Nr. 72 EStG: diese Aufstellung dient nur der Information, nichts davon gehört in die Anlage G oder die Anlage EÜR.
+          </Message>
           <p class="euer-intro">
             <template v-if="euer.tag">Buchungen mit dem Tag „{{ euer.tag }}“ ({{ euer.booking_count }} in {{ euer.year }}), nach ihren weiteren Tags den Zeilen zugeordnet; die AfA kommt aus dem Anlagenverzeichnis.</template>
             <template v-else>Der Betrieb hat noch keinen Buchungs-Tag. Trage ihn unter „Betrieb bearbeiten“ ein, damit seine Buchungen hier erscheinen.</template>
@@ -680,6 +745,24 @@ async function removeParcel(p: BusinessParcel) {
           <small class="field-hint">Kategorie-Slug, in den die Belege einsortiert werden.</small>
         </div>
       </div>
+      <template v-if="businessForm.kind === 'photovoltaik'">
+        <div class="field-row">
+          <div class="field">
+            <label for="b-kwp">Leistung in kWp</label>
+            <InputNumber id="b-kwp" v-model="businessForm.pv_capacity_kwp" :min="0" :max="10000" :min-fraction-digits="0" :max-fraction-digits="3" locale="de-DE" suffix=" kWp" />
+            <small class="field-hint">Bis 30 kWp sind die Einnahmen ab 2022 steuerfrei (§ 3 Nr. 72 EStG).</small>
+          </div>
+          <div class="field">
+            <label for="b-commissioned">Inbetriebnahme</label>
+            <DatePicker id="b-commissioned" v-model="businessForm.pv_commissioned_on" date-format="dd.mm.yy" show-icon fluid show-clear />
+          </div>
+        </div>
+        <div class="field">
+          <label for="b-pv-tax">Steuerlicher Status</label>
+          <Select id="b-pv-tax" v-model="businessForm.pv_tax_override" :options="PV_TAX_OPTIONS" option-label="label" option-value="value" />
+          <small class="field-hint">Nur festlegen, wenn die einfache Regel nicht passt (mehrere Anlagen, Mehrfamilienhaus).</small>
+        </div>
+      </template>
       <div class="field"><label for="b-notes">Notizen</label><Textarea id="b-notes" v-model="businessForm.notes" rows="3" auto-resize /></div>
       <template #footer>
         <Button label="Abbrechen" severity="secondary" text @click="businessDialog = false" />
@@ -852,6 +935,52 @@ async function removeParcel(p: BusinessParcel) {
   gap: var(--space-2) var(--space-5);
   justify-content: flex-end;
   font-size: var(--text-sm);
+}
+
+.section-link {
+  font-size: var(--text-sm);
+}
+
+.pv-card {
+  padding: var(--space-3);
+  border-radius: 0.5rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+}
+
+.pv-card--exempt {
+  border-color: var(--p-tag-success-color);
+}
+
+.pv-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+
+.pv-facts dt {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pv-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pv-status {
+  margin: 0;
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.pv-card--exempt .pv-status .pi {
+  color: var(--p-tag-success-color);
 }
 
 .section-actions {
