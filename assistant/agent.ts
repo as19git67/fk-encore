@@ -79,6 +79,14 @@ export function timeGrounding(now: Date): string {
   ].join("\n");
 }
 
+/**
+ * The line the model ends its answer with when the rows it found do not
+ * answer the question (asked for flights, found coffee bills): the answer
+ * says so in words, and the rows stay out of the chat. The prompt names it;
+ * `cleanAnswer` removes it from what the user reads.
+ */
+export const NO_ROWS_MARKER = "[[ohne Liste]]";
+
 const RULES = `You are the assistant of a private household server that keeps finance bookings, documents, photos, utility meters and trip plans. You answer questions by calling the tools below, as the user who asks; you see only what they may see.
 
 You know nothing about this user's data. Everything you say about their bookings, accounts, documents, photos, albums, meters, securities, businesses or trips must come from a tool result in this conversation — never from memory, never from what such data usually looks like, never as an example. A question about the user's data is answered by calling a tool first, every time, even when it looks simple ("die 10 neuesten Buchungen", "mein Kontostand", "welche Zähler haben wir"). What a household typically has — an electricity meter, a water meter, a Girokonto — is not knowledge about this household: never name a meter, account, document, photo, security or trip that no tool returned. If a tool returns no rows, say that the system holds none of it ("Im System sind keine Zähler angelegt"), and never fill in plausible rows.
@@ -89,6 +97,7 @@ Rules:
 - Dates in tool arguments are ISO (YYYY-MM-DD); use the periods resolved below.
 - Combine tools from different areas when the question needs it.
 - The rows a tool returned are shown to the user beside your answer, so summarise rather than repeat every row; name what fits the question and what does not.
+- If the rows you found do not answer the question — a search for flights that returned only coffee bills, a listing with nothing that matches — say so and end your answer with the line ${NO_ROWS_MARKER} on its own; the app then leaves the rows out. Use it only when none of the rows is what was asked for.
 - If a tool finds nothing, say so plainly and suggest how to search differently.
 - Earlier turns show the tool calls behind each answer and what they found. A follow-up on those rows ("davon", "nur die aus …", "mach daraus …") is a new tool call with from_previous_result: true, never an answer from memory. Only a real tool call does anything: never write tool calls, tool names or notes about tools into your answer — the app shows the tools itself.
 - Businesses (Betriebe): a leased farm, a PV system or a trade is a business in the register with its fixed assets (Anlagegüter), their depreciation (AfA) and, for a farm, its parcels (Flurstücke) with lessee and rent. "Welche Anlagegüter hat die Landwirtschaft", "wie hoch ist die AfA 2025", "welche Flächen sind verpachtet" go to list_businesses → business_assets(business_id, year); quote the AfA and book values the tool printed, never recompute them. "EÜR", "Gewinn der Landwirtschaft", "Betriebseinnahmen und -ausgaben" go to euer_report(business_id, year), and "als PDF" to euer_pdf(business_id, year); repeat the line sums, the totals and the result the tool printed. "Ist die PV-Anlage steuerfrei" is list_businesses → business_assets(the PV business, year): repeat the status and the reason the tool printed (§ 3 Nr. 72 EStG, up to 30 kWp from 2022), never decide it yourself. "Der Pachtvertrag der Fläche", "die Rechnung zum Stall", "Unterlagen der Landwirtschaft" go to business_documents(business_id); for a document's content, get_document_summary or get_document_text on the ids it printed.
@@ -176,8 +185,14 @@ export function looksLikeFakeToolCall(text: string | null): boolean {
 /** Lines a model adds about the tools it used ("*Tools: list_categories*"); the app shows those itself. */
 const TOOL_NOTE_LINE_RE = /^\s*[*_(]*\s*(?:tools?|werkzeuge?)\s*:\s*[a-z_]+(?:\s*,\s*[a-z_]+)*\s*[*_)]*\s*$/gim;
 
+const NO_ROWS_RE = /\[\[\s*ohne\s+liste\s*\]\]/gi;
+
+export function wantsNoRows(text: string | null): boolean {
+  return !!text && new RegExp(NO_ROWS_RE.source, "i").test(text);
+}
+
 export function cleanAnswer(text: string): string {
-  return text.replace(TOOL_NOTE_LINE_RE, "").replace(/\n{3,}/g, "\n\n").trim();
+  return text.replace(TOOL_NOTE_LINE_RE, "").replace(NO_ROWS_RE, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 const AMOUNT_RE = /\d,\d{2}\s*(?:€|eur\b)|(?:€|eur)\s*-?\d|\d\.\d{2}\s*(?:€|eur\b)/i;
@@ -332,6 +347,8 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   };
 
   let answer: string | null = null;
+
+  let noRows = false;
   let rounds = 0;
   let calledTools = false;
   /** Calls already made in this turn, by tool and arguments: a repeat is answered from above. */
@@ -402,6 +419,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       nudge = null;
     }
     if (!reply.tool_calls.length || last) {
+      noRows = wantsNoRows(reply.content);
       answer = cleanAnswer(reply.content ?? "");
       if (!answer && !emptyRetried && !looksLikeFakeToolCall(reply.content ?? "")) {
         // Nothing at all after the tool results (the benchmark saw Gemma end
@@ -413,6 +431,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           max_tokens: ANSWER_TOKENS,
         }, (text) => emit({ type: "token", text })));
         rounds++;
+        noRows = wantsNoRows(retry.content);
         answer = cleanAnswer(retry.content ?? "");
       }
       if (!answer || looksLikeFakeToolCall(answer)) {
@@ -492,6 +511,11 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const final = answer ?? OUT_OF_ROUNDS;
   messages.push({ role: "assistant", content: final });
   const transcript = messages.slice(questionIndex);
+  // The model said the rows do not answer the question: the answer stands
+  // alone. A proposal card stays — it is the user's button, not a result.
+  if (noRows) {
+    for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i]!.kind !== "proposal") blocks.splice(i, 1);
+  }
   emit({ type: "done", answer: final, blocks });
   return { answer: final, blocks, transcript, rounds, toolResults };
 }
