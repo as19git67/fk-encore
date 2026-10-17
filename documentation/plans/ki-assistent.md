@@ -380,6 +380,12 @@ behind it.
        marked `refines`: a second call in the same turn replaces the first
        call's block beside the answer, since a model that searches again did
        not like what it found; lists (two accounts, two meters) keep both.
+       Beyond that, a document or photo block replaces every earlier block
+       of its kind in the turn whatever tool made it (`narrowingFamily` in
+       `agent.ts`): the tax listing, then a search, then the summary of the
+       three it read are one trail to one list, and the steps line keeps
+       the trail. The chat still folds older lists of a kind in one stored
+       answer, for answers from before this rule.
      - photos: `photo_comments` (`GET /photos/:id/comments`, the comments
        under one photo in an album) and `photo_activity` (`GET /feed`,
        filtered by kind, album, photo or unread — the discussions around
