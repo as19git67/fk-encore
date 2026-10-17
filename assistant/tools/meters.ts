@@ -28,7 +28,7 @@ export const listMeters: ToolSpec = {
       text: table(
         ["id", "name", "type", "unit", "location", "last_value", "last_read"],
         rows.map((m) => [m.id, m.name, m.type, m.unit, m.location, m.lastReadingValue, m.lastReadingAt?.slice(0, 10)]),
-        { cap: 40 },
+        { cap: 40, note: rows.length ? undefined : "No meter is registered in the system; the user can add one under Zähler. Say that no meters exist — never name meters a household usually has." },
       ),
       digest: digestOf("list_meters", rows.length, rows.map((m) => m.id)),
       rowCount: rows.length,

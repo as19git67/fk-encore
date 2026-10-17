@@ -81,7 +81,7 @@ export function timeGrounding(now: Date): string {
 
 const RULES = `You are the assistant of a private household server that keeps finance bookings, documents, photos, utility meters and trip plans. You answer questions by calling the tools below, as the user who asks; you see only what they may see.
 
-You know nothing about this user's data. Everything you say about their bookings, accounts, documents, photos, albums, meters or trips must come from a tool result in this conversation — never from memory, never from what such data usually looks like, never as an example. A question about the user's data is answered by calling a tool first, every time, even when it looks simple ("die 10 neuesten Buchungen", "mein Kontostand"). If no tool returns what is asked, say so; do not fill in plausible rows.
+You know nothing about this user's data. Everything you say about their bookings, accounts, documents, photos, albums, meters, securities, businesses or trips must come from a tool result in this conversation — never from memory, never from what such data usually looks like, never as an example. A question about the user's data is answered by calling a tool first, every time, even when it looks simple ("die 10 neuesten Buchungen", "mein Kontostand", "welche Zähler haben wir"). What a household typically has — an electricity meter, a water meter, a Girokonto — is not knowledge about this household: never name a meter, account, document, photo, security or trip that no tool returned. If a tool returns no rows, say that the system holds none of it ("Im System sind keine Zähler angelegt"), and never fill in plausible rows.
 
 Rules:
 - Use tools for every fact. Never invent data, ids, names, dates or amounts a tool did not return.
@@ -127,6 +127,38 @@ export function buildSystemPrompt(tools: ToolSpec[], now: Date, deferred: boolea
  * fill such answers from memory when they skip the tool; this asks again.
  */
 export const GROUNDING_NUDGE = "Your answer states amounts, dates or list rows about the user's data, but you called no tool in this turn. You do not know the user's data. Call the tool that returns it now. Only if every figure is already in an earlier tool result of this conversation, repeat your answer unchanged; if no tool can answer, say so.";
+
+/**
+ * Sent back once when the question is about the user's data (it names
+ * meters, accounts, documents …) but the model answered without any tool
+ * call. The answer may read like prose ("Sie haben einen Strom- und einen
+ * Wasserzähler") and pass the data check above, and still be invented.
+ */
+export const DATA_QUESTION_NUDGE = "The question is about the user's data in this system, but you called no tool in this turn. You do not know this user's data, and what such data usually looks like does not apply here. Call the tool that lists or reads it now (list_meters, list_accounts, search_documents, list_photos, portfolio_overview, list_businesses, list_trip_plans …). If no tool covers the question, say that the system holds no such data; if you need the user to choose first, ask that again unchanged. Never name items from memory.";
+
+/**
+ * Words that make a question one about the user's data: the things the
+ * services keep, in German and English, with their usual compounds
+ * (Zählerstand, Kontostand, Depotauszug …). A question with one of them
+ * and no tool call behind its answer is sent back once.
+ */
+const DATA_TERMS_RE = new RegExp(
+  "\\b(?:z[äa]hler|stromz|wasserz|gasz|verbrauch|meter|readings?|consumption|"
+  + "konto|konten|kontostand|saldo|buchung|umsatz|umsätze|lastschrift|überweisung|account|balance|booking|transaction|debit|"
+  + "dokument|unterlage|rechnung|vertrag|beleg|brief|protokoll|document|invoice|contract|receipt|"
+  + "foto|bild|album|alben|photo|picture|"
+  + "depot|wertpapier|aktie|fonds|etf|kurs|dividende|portfolio|position|security|securities|share|stock|quote|"
+  + "betrieb|anlageg|anlagevermögen|afa|abschreibung|fläche|flurstück|pacht|pächter|business|asset|parcel|lease|"
+  + "reise|reiseplan|urlaub|trip|"
+  + "sammelmappe|basket|collection|"
+  + "steuer|tax)",
+  "i",
+);
+
+/** Is the question about what the system keeps for this user, rather than small talk or a how-to? */
+export function isDataQuestion(question: string): boolean {
+  return DATA_TERMS_RE.test(question);
+}
 
 /** Sent back when the model writes a tool call, or a note about one, as text instead of calling it. */
 export const FAKE_CALL_NUDGE = "You wrote a tool call or a note about tools as text. That does nothing: nothing was looked up or proposed. Call the tool through the tool interface now, or answer in plain words without mentioning tools.";
@@ -331,10 +363,12 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     }
 
     const fakeCall = !reply.tool_calls.length && looksLikeFakeToolCall(reply.content);
+    const dataQuestion = !reply.tool_calls.length && !calledTools && isDataQuestion(input.question);
     const ungrounded = !reply.tool_calls.length && !calledTools && looksLikeUserData(reply.content);
-    if (!last && nudge === null && (fakeCall || ungrounded)) {
+    if (!last && nudge === null && (fakeCall || dataQuestion || ungrounded)) {
       // Not kept in the transcript: the draft was never the answer.
-      nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: fakeCall ? FAKE_CALL_NUDGE : GROUNDING_NUDGE }];
+      const text = fakeCall ? FAKE_CALL_NUDGE : ungrounded ? GROUNDING_NUDGE : DATA_QUESTION_NUDGE;
+      nudge = [{ role: "assistant", content: reply.content }, { role: "user", content: text }];
       emit({ type: "retract" });
       continue;
     }

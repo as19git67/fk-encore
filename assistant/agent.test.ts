@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { buildSystemPrompt, cleanAnswer, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
+import { buildSystemPrompt, cleanAnswer, DATA_QUESTION_NUDGE, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -303,6 +303,45 @@ describe("answers without a tool behind them", () => {
     const thanks = scripted([answer("Gern geschehen!")]);
     await runTurn({ user: USER, history: [], question: "Danke!", tools: catalogFor(USER), chat: thanks.fn, now: NOW });
     expect(thanks.requests).toHaveLength(1);
+  });
+
+  it("a question about the user's data is recognised by what it names", () => {
+    expect(isDataQuestion("Welche Zähler haben wir?")).toBe(true);
+    expect(isDataQuestion("Was war der letzte Zählerstand?")).toBe(true);
+    expect(isDataQuestion("Wie ist mein Kontostand?")).toBe(true);
+    expect(isDataQuestion("Welche Flächen sind verpachtet?")).toBe(true);
+    expect(isDataQuestion("Danke!")).toBe(false);
+    expect(isDataQuestion("Wie heißt du?")).toBe(false);
+  });
+
+  it("a data question answered in prose without a tool is sent back once, then the tool is called", async () => {
+    clients.meter.listMeters.mockResolvedValue({ meters: [{ id: 3, name: "Strom Haus", type: "electricity", unit: "kWh", lastReadingValue: 1200, lastReadingAt: "2026-10-01T06:00:00Z" }] });
+    const { fn, requests } = scripted([
+      answer("Sie haben einen Stromzähler, einen Wasserzähler und einen Gaszähler."),
+      calls(["list_meters", {}]),
+      answer("Im System ist ein Zähler angelegt: Strom Haus."),
+    ]);
+    const events: TurnEvent[] = [];
+    const res = await runTurn({ user: USER, history: [], question: "Welche Zähler haben wir?", tools: catalogFor(USER), chat: fn, now: NOW, emit: (e) => events.push(e) });
+    expect(res.answer).toBe("Im System ist ein Zähler angelegt: Strom Haus.");
+    expect(requests[1]!.messages.at(-1)).toEqual({ role: "user", content: DATA_QUESTION_NUDGE });
+    expect(events.map((e) => e.type)).toContain("retract");
+    expect(JSON.stringify(res.transcript)).not.toContain("Gaszähler");
+  });
+
+  it("the second answer stands even without a tool, so a clarifying question survives", async () => {
+    const { fn, requests } = scripted([answer("Welchen Zähler meinst du?"), answer("Welchen Zähler meinst du?")]);
+    const res = await runTurn({ user: USER, history: [], question: "Wie ist der Zählerstand?", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect(res.answer).toBe("Welchen Zähler meinst du?");
+    expect(requests).toHaveLength(2);
+  });
+
+  it("a tool with no rows says so, instead of letting the model fill in a household's usual meters", async () => {
+    clients.meter.listMeters.mockResolvedValue({ meters: [] });
+    const { fn, requests } = scripted([calls(["list_meters", {}]), answer("Im System sind keine Zähler angelegt.")]);
+    await runTurn({ user: USER, history: [], question: "Welche Zähler gibt es?", tools: catalogFor(USER), chat: fn, now: NOW });
+    expect((requests[1]!.messages.at(-1) as { content: string }).content).toContain("No meter is registered in the system");
+    expect(buildSystemPrompt(catalogFor(USER), NOW, false)).toContain("never name a meter, account, document, photo, security or trip that no tool returned");
   });
 
   it("are covered by the rules: the model knows nothing of the user's data", () => {

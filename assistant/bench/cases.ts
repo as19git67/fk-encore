@@ -243,6 +243,20 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "which-meters",
+    title: "Welche Zähler es gibt",
+    question: "Welche Zähler haben wir eigentlich?",
+    expect: [{ tool: "list_meters" }],
+    results: { list_meters: METERS },
+  },
+  {
+    id: "no-meters",
+    title: "Keine Zähler im System",
+    question: "Was war der letzte Stand vom Gaszähler?",
+    expect: [{ tool: "list_meters" }],
+    results: { list_meters: { rows: [], note: "No meter is registered in the system." } },
+  },
+  {
     id: "electricity-last-year",
     title: "Verbrauch eines Zählers",
     question: "Wie hoch war unser Stromverbrauch im letzten Jahr?",
