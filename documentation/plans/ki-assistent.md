@@ -363,7 +363,11 @@ behind it.
        stores it as the document "Ausfüllhilfe Steuer <Jahr>"
        (`assistant/tax-worksheet-pdf.ts`, pdfkit) linked to the flagged
        documents. Recognised amounts are marked unchecked everywhere; the
-       user confirms each against the document. The Anlagen list
+       user confirms each against the document. The same worksheet opens
+       without a chat from the Steuer page ("Ausfüllhilfe" for the chosen
+       year and Steuerakte): `GET /assistant/tax-worksheet` and `POST
+       /assistant/tax-worksheet/pdf` in `assistant/tax-worksheet-api.ts`,
+       dialog `components/documents/TaxWorksheetDialog.vue`. The Anlagen list
        (`documents/tax-sections.ts`) gained KAP-INV and AUS. A prompt rule
        routes "Steuer <Jahr>" questions there and forbids the model to
        judge tax relevance or compute a tax figure itself.
@@ -417,7 +421,15 @@ behind it.
      `GET /finance/mandates/upcoming?from=&until=` (default: today to the
      end of the month) and the page Finanzen › Lastschriften. Outgoing,
      non-card series with at least three bookings and an interval of 7 to
-     400 days; a series silent for more than three intervals has ended.
+     400 days; a series that missed two cycles has ended. Whether a series
+     is regular is read from its last twelve bookings, not from the
+     mandate's running average: the intervals and the amounts must vary
+     little (`seriesProfile`, `isRegular`), so a shop visited every few
+     weeks for a different basket each time is not "expected". The cadence
+     is the median gap, the amount the median of the newest bookings. A
+     series that went on under another mandate — the insurer moved to a
+     new account — is superseded by that one and listed once
+     (`isSuperseded`, with the detector's `isLikelySeriesContinuation`).
      Intervals near a month, quarter, half year or year step by calendar
      months from `last_seen`, so a series on the 1st stays on the 1st. A
      booking up to seven days late is still listed, marked overdue. The

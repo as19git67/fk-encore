@@ -1113,7 +1113,7 @@ async function hasSuccessorActivity(
   });
 }
 
-interface SeriesContinuationInput {
+export interface SeriesContinuationInput {
   previousCounterparty: string;
   nextCounterparty: string;
   previousAmount: string | null;
@@ -1153,7 +1153,7 @@ export function counterpartySimilarity(left: string, right: string): number {
   return intersection / new Set([...aTokens, ...bTokens]).size;
 }
 
-function isLikelySeriesContinuation(input: SeriesContinuationInput): boolean {
+export function isLikelySeriesContinuation(input: SeriesContinuationInput): boolean {
   if (counterpartySimilarity(input.previousCounterparty, input.nextCounterparty) < 0.8) {
     return false;
   }

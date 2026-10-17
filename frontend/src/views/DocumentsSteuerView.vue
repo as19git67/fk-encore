@@ -10,6 +10,7 @@ import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
 import PageSkeleton from '../components/layout/PageSkeleton.vue'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
+import TaxWorksheetDialog from '../components/documents/TaxWorksheetDialog.vue'
 import { useListToolbar } from '../composables/useListToolbar'
 import type { FilterChip } from '../components/layout/listToolbar'
 import {
@@ -76,6 +77,8 @@ const loading = ref(true)
 const error = ref('')
 const info = ref('')
 const backfilling = ref(false)
+/** The Ausfüllhilfe dialog; it needs one year, so "Alle" cannot open it. */
+const worksheetOpen = ref(false)
 
 function syncQueryParams() {
   const query: Record<string, string> = {}
@@ -312,6 +315,14 @@ onMounted(async () => {
   >
     <template #actions>
       <Button
+        icon="pi pi-list-check"
+        label="Ausfüllhilfe"
+        text
+        :disabled="selectedYear === null"
+        :title="selectedYear === null ? 'Erst ein Steuerjahr wählen' : `Ausfüllhilfe für die Steuererklärung ${selectedYear}: Beträge je Anlage, Buchungen, Betriebe und Depot`"
+        @click="worksheetOpen = true"
+      />
+      <Button
         v-if="auth.hasPermission('documents.edit')"
         icon="pi pi-sync"
         label="KI-Analyse nachholen"
@@ -454,6 +465,13 @@ onMounted(async () => {
       </section>
     </div>
     </div>
+    <TaxWorksheetDialog
+      v-if="selectedYear !== null"
+      v-model:visible="worksheetOpen"
+      :year="selectedYear"
+      :person-id="taxReturnPersonId"
+      :can-store="auth.hasPermission('documents.upload')"
+    />
   </PageLayout>
 </template>
 
