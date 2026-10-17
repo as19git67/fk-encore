@@ -5,7 +5,7 @@ vi.mock("../trip-planner/plan-store", () => ({ listPlans: vi.fn() }));
 
 import { calledEndpoints, clients, resetClients } from "./clients.test-helper";
 import { listPlans } from "../trip-planner/plan-store";
-import { buildSystemPrompt, cleanAnswer, DATA_QUESTION_NUDGE, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
+import { buildSystemPrompt, cleanAnswer, NO_ROWS_MARKER, wantsNoRows, DATA_QUESTION_NUDGE, FAKE_CALL_NUDGE, FINAL_ANSWER_NUDGE, fitContext, GROUNDING_NUDGE, isDataQuestion, looksLikeFakeToolCall, looksLikeUserData, NO_ANSWER, OUT_OF_ROUNDS, runTurn, timeGrounding } from "./agent";
 import { catalogFor, HAND_TOOLS } from "./catalog";
 import type { ChatRequest, ChatReply } from "./llm-client";
 import type { ChatMessage, TurnEvent } from "./types";
@@ -456,10 +456,33 @@ describe("what the benchmark caught", () => {
     expect(String(requests[2]!.messages.at(-1)!.content)).toContain("you already called list_transactions");
   });
 
+  it("an answer ending with the no-rows line keeps its rows out of the chat", async () => {
+    // Asked for flights, found coffee bills: the model says so and ends with
+    // the marker; the answer stands alone and the marker is not shown.
+    clients.finance.listTransactions.mockResolvedValue({ items: [{ id: 9, booking_date: "2026-06-06", counterparty: "Starbucks Japan", amount: "-2.51" }], total: 1 });
+    clients.finance.getOverview.mockResolvedValue({ sections: [], unassigned: [] });
+    const loop = scripted([
+      calls(["list_transactions", { q: "Japan" }]),
+      answer(`Es gibt Buchungen mit "Japan", aber keine Flugbuchung.\n\n${NO_ROWS_MARKER}`),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: "Flug nach Japan?", tools: catalogFor(USER), chat: loop.fn, now: NOW });
+    expect(res.answer).toBe('Es gibt Buchungen mit "Japan", aber keine Flugbuchung.');
+    expect(res.blocks).toEqual([]);
+    expect(Object.keys(res.toolResults)).toHaveLength(1);
+
+    // Without the line the rows stay beside the answer.
+    const plain = scripted([calls(["list_transactions", { q: "Japan" }]), answer("Eine Buchung.")]);
+    const kept = await runTurn({ user: USER, history: [], question: "Japan?", tools: catalogFor(USER), chat: plain.fn, now: NOW });
+    expect(kept.blocks).toHaveLength(1);
+  });
+
   it("notes about tools are taken out of the answer", () => {
     expect(cleanAnswer("Zwei Protokolle gefunden.\n\n*Tools: list_categories, search_documents*")).toBe("Zwei Protokolle gefunden.");
     expect(cleanAnswer("Werkzeuge: list_recaps\nOstsee 2024")).toBe("Ostsee 2024");
     expect(cleanAnswer("Das Tool hat 3 Treffer.")).toBe("Das Tool hat 3 Treffer.");
+    expect(cleanAnswer("Keine Flüge.\n\n[[ohne Liste]]")).toBe("Keine Flüge.");
+    expect(wantsNoRows("Keine Flüge. [[ ohne liste ]]")).toBe(true);
+    expect(wantsNoRows("Keine Flüge.")).toBe(false);
     expect(looksLikeFakeToolCall("[tools behind this answer: x]")).toBe(true);
     expect(looksLikeFakeToolCall("Ich rufe gleich die Buchungen ab.")).toBe(false);
   });

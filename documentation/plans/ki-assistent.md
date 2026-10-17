@@ -385,7 +385,11 @@ behind it.
        `agent.ts`): the tax listing, then a search, then the summary of the
        three it read are one trail to one list, and the steps line keeps
        the trail. The chat still folds older lists of a kind in one stored
-       answer, for answers from before this rule.
+       answer, for answers from before this rule. When the rows do not
+       answer the question at all (asked for flights, found coffee bills),
+       the model ends its answer with the line `[[ohne Liste]]`
+       (`NO_ROWS_MARKER`); the agent strips it and drops every block but a
+       proposal card, so the answer stands alone.
      - photos: `photo_comments` (`GET /photos/:id/comments`, the comments
        under one photo in an album) and `photo_activity` (`GET /feed`,
        filtered by kind, album, photo or unread — the discussions around
