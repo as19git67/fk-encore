@@ -13,7 +13,7 @@ import { bool, int, isoDate, str } from "../format";
 import { writeTool, type WriteToolDefinition } from "../proposals";
 import type { JsonSchema, RefType, ToolContext } from "../types";
 import { renderLetter } from "./letters";
-import { taxWorksheetPdf } from "./tax";
+import { euerPdf, taxWorksheetPdf } from "./tax";
 import { findInDocuments, pageCount, type Box } from "./text-boxes";
 
 /** More than this many objects in one proposal is refused; the user narrows first. */
@@ -605,6 +605,7 @@ const taxReturnBundle: WriteToolDefinition = {
 export const WRITE_TOOL_DEFINITIONS: WriteToolDefinition[] = [
   taxReturnBundle,
   taxWorksheetPdf,
+  euerPdf,
   createAlbum,
   addPhotosToAlbum,
   setPhotoFavorite,

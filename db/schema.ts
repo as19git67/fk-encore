@@ -4763,6 +4763,16 @@ export type BusinessAssetKind = "gebaeude" | "flaeche" | "maschine" | "pv_anlage
 export type ParcelUsage = "acker" | "gruenland" | "wald" | "hof" | "sonstiges";
 
 /** A business in the tax sense: a leased farm, a PV system, a trade. */
+export type EuerLineKind = "income" | "expense";
+export interface EuerLineDefinition {
+  name: string;
+  kind: EuerLineKind;
+  /** User tags; a booking carrying one of them belongs to this line. */
+  tags: string[];
+  /** The line of the official form, as the user wants it printed ("Zeile 14"). */
+  form_line?: string | null;
+}
+
 export const financeBusiness = pgTable(
   "finance_business",
   {
@@ -4772,6 +4782,12 @@ export const financeBusiness = pgTable(
     kind: text("kind").$type<BusinessKind>().notNull(),
     tax_section: text("tax_section").$type<BusinessTaxSection>().notNull(),
     notes: text("notes"),
+    /** The user tag that marks a booking as this business's (stage 2). */
+    booking_tag: text("booking_tag"),
+    /** The document category (slug) its receipts are classified into. */
+    document_category: text("document_category"),
+    /** The lines of the Anlage EÜR, in order; a booking goes to the first line one of its tags names. */
+    euer_lines: jsonb("euer_lines").$type<EuerLineDefinition[]>().notNull().default([]),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },

@@ -404,7 +404,12 @@ describe("tax_worksheet", () => {
       total: 3,
     });
     clients.finance.getPortfolio.mockResolvedValue({ years: [{ year: 2025, realized: "210.00", sell_count: 1, realized_complete: true, income: "120.00", dividend_count: 4, fees: "9.90", taxes: "31.60" }] });
+    clients.finance.listBusinesses.mockResolvedValue({ items: [{ id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft", tax_section: "anlage-l" }] });
+    clients.finance.getBusinessEuer.mockResolvedValue({ total_income: 86000, total_expenses: 249640, result: -163640, afa: { sum: 240000 }, booking_count: 3, hints: [] });
     const out = await tool("tax_worksheet").run({ year: 2025 }, ctx());
+    expect(clients.finance.getBusinessEuer).toHaveBeenCalledWith({ id: 2, year: 2025 });
+    expect(out.text).toContain("== Landwirtschaft Musterhof (anlage-l, EÜR 2025) ==");
+    expect(out.text).toContain("Betriebseinnahmen 860.00 EUR; Betriebsausgaben 2496.40 EUR (AfA 2400.00 EUR included); Verlust -1636.40 EUR from 3 booking(s). Details: euer_report(business_id = 2).");
     expect(clients.documents.listTaxDocuments).toHaveBeenNthCalledWith(2, { year: 2024, tax_return_person: undefined });
     expect(out.text).toContain("71 | 2026-01-20 | Lohnsteuerbescheinigung 2025 | Beispiel GmbH | 48200.00 EUR");
     expect(out.text).toContain("sum of recognised amounts: 48200.00 EUR");
@@ -456,5 +461,26 @@ describe("businesses", () => {
     expect(out.text).toContain("AfA 2400.00, book value 106200.00");
     expect(out.block).toMatchObject({ kind: "business_assets", subtitle: "Landwirtschaft Musterhof · 2025 · AfA 2400.00 € · Buchwert 106200.00 €" });
     expect(out.block?.rows.map((r) => r.kind)).toEqual(["gebaeude", "parcel"]);
+  });
+});
+
+describe("euer_report", () => {
+  it("prints every line, the AfA, the totals and the result, and leaves nothing to add up", async () => {
+    clients.finance.getBusinessEuer.mockResolvedValue({
+      year: 2025, business: "Landwirtschaft Musterhof", tag: "Landwirtschaft",
+      income: [{ name: "Pachteinnahmen", kind: "income", form_line: "Zeile 14", count: 2, sum: 86000, other: false, bookings: [] }],
+      expenses: [{ name: "Grundsteuer", kind: "expense", form_line: null, count: 1, sum: 9640, other: false, bookings: [] }, { name: "Sonstige Betriebsausgaben", kind: "expense", form_line: null, count: 1, sum: 5000, other: true, bookings: [] }],
+      afa: { sum: 240000, assets: [{ asset_id: 7, name: "Stall", afa: 240000 }] },
+      total_income: 86000, total_expenses: 254640, result: -168640, booking_count: 4, unflagged: 0,
+      hints: ['1 booking(s) went to "Sonstige Betriebsausgaben": no line names one of their tags.'],
+    });
+    const out = await tool("euer_report").run({ business_id: 2, year: 2025 }, ctx());
+    expect(clients.finance.getBusinessEuer).toHaveBeenCalledWith({ id: 2, year: 2025 });
+    expect(out.text).toContain("Zeile 14 · Pachteinnahmen: 860.00 EUR (2 bookings)");
+    expect(out.text).toContain("AfA: 2400.00 EUR (Stall 2400.00 EUR)");
+    expect(out.text).toContain("Verlust: -1686.40 EUR (= 860.00 EUR − 2546.40 EUR)");
+    expect(out.text).toContain("Sonstige Betriebsausgaben");
+    expect(out.block).toMatchObject({ kind: "euer", subtitle: "Landwirtschaft Musterhof · 2025 · Verlust -1686.40 €", route: "/finanzen/betriebe/2?year=2025" });
+    expect(out.block?.rows.map((r) => [r.kind, r.sum])).toEqual([["income", 860], ["expense", 96.4], ["expense", 50], ["afa", 2400]]);
   });
 });

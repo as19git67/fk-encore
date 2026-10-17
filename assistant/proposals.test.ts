@@ -168,6 +168,25 @@ describe("write tools", () => {
     expect(Buffer.from(stored.pdf_base64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
   });
 
+  it("proposes the EÜR of a business as a PDF and stores it as a document", async () => {
+    clients.finance.getBusinessEuer.mockResolvedValue({
+      year: 2025, business: "Landwirtschaft Musterhof", tag: "Landwirtschaft",
+      income: [{ name: "Pachteinnahmen", kind: "income", form_line: null, count: 2, sum: 86000, other: false, bookings: [{ id: 1, booking_date: "2025-03-01", counterparty: "Beispiel Agrar GbR", purpose: "Pacht", amount: "430.00" }] }],
+      expenses: [], afa: { sum: 240000, assets: [{ asset_id: 7, name: "Stall", afa: 240000 }] },
+      total_income: 86000, total_expenses: 240000, result: -154000, booking_count: 2, unflagged: 0, hints: [],
+    });
+    const out = await tool("euer_pdf").run({ business_id: 2, year: 2025 }, ctx());
+    const row = out.block?.rows[0] as Record<string, unknown>;
+    expect(row).toMatchObject({ tool: "euer_pdf", summary: "EÜR 2025 Landwirtschaft Musterhof als PDF: 2 Buchungen, Einnahmen 860.00 €, Ausgaben 2400.00 €, Verlust -1540.00 €", status: "pending" });
+
+    clients.documents.storeGeneratedDocument.mockResolvedValue({ id: 901 });
+    const done = await executeAssistantProposal({ id: Number(row.proposal_id) });
+    expect(done).toMatchObject({ status: "executed", result_route: "/dokumente/901" });
+    const stored = clients.documents.storeGeneratedDocument.mock.calls[0]![0] as { filename: string; title: string; pdf_base64: string };
+    expect(stored).toMatchObject({ filename: "EÜR Landwirtschaft Musterhof 2025.pdf", title: "Einnahmen-Überschuss-Rechnung 2025 Landwirtschaft Musterhof" });
+    expect(Buffer.from(stored.pdf_base64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
+  });
+
   it("refuses a tax folder for a year with nothing flagged", async () => {
     clients.documents.listTaxDocuments.mockResolvedValue({ year: 2019, total_documents: 0, sections: [] });
     clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });

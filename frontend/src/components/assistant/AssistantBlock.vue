@@ -45,6 +45,7 @@ const TITLES: Record<string, string> = {
   activity: 'Neuigkeiten',
   businesses: 'Betriebe',
   business_assets: 'Anlagegüter und Flächen',
+  euer: 'Einnahmen-Überschuss-Rechnung',
   table: 'Ergebnis',
 }
 
@@ -293,6 +294,19 @@ const analysis = computed(() => {
             <span v-else class="row-sub">{{ str(r.kind) }} · AK {{ money(r.acquisition_cost) }} · {{ Number(r.afa_rate_pct) }} %</span>
           </span>
           <span class="row-amount">{{ r.kind === 'parcel' ? (r.annual_rent ? `${money(r.annual_rent)}/Jahr` : '') : `AfA ${money(r.afa)} · BW ${money(r.book_value)}` }}</span>
+        </component>
+      </li>
+    </ul>
+
+    <!-- EÜR: the lines with their sums, the AfA, the result in the subtitle -->
+    <ul v-else-if="block.kind === 'euer'" class="rows">
+      <li v-for="r in shown" :key="str(r.id)">
+        <component :is="r.route ? 'RouterLink' : 'div'" :to="r.route ? str(r.route) : undefined" :class="['row', { 'row--static': !r.route }]">
+          <span class="row-main">
+            <span class="row-title">{{ r.form_line ? `${str(r.form_line)} · ` : '' }}{{ str(r.name) }}</span>
+            <span class="row-sub">{{ r.kind === 'income' ? 'Einnahme' : r.kind === 'expense' ? 'Ausgabe' : 'AfA' }}{{ r.count ? ` · ${str(r.count)} ${r.kind === 'afa' ? 'Anlagegüter' : 'Buchungen'}` : '' }}</span>
+          </span>
+          <span class="row-amount">{{ money(r.sum) }}</span>
         </component>
       </li>
     </ul>

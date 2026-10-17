@@ -8,7 +8,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -16,12 +16,19 @@ import {
   financeBusiness,
   financeBusinessAsset,
   financeBusinessParcel,
+  financeTag,
+  financeTagTransaction,
+  financeTransaction,
   type BusinessAssetKind,
   type BusinessKind,
   type BusinessTaxSection,
+  type EuerLineDefinition,
   type ParcelUsage,
 } from "../db/schema";
+import { readableFinanceAccountIds } from "./account-acl";
 import { depreciationOfYear, depreciationSchedule, type DepreciationYear } from "./depreciation";
+import { buildEuer, defaultBookingTag, defaultDocumentCategory, defaultEuerLines, type EuerBooking, type EuerReport } from "./euer";
+import { createEuerPdf } from "./euer-pdf";
 
 console.log("[boot] finance/businesses.ts: all imports resolved");
 
@@ -38,6 +45,9 @@ export interface BusinessView {
   kind: BusinessKind;
   tax_section: BusinessTaxSection;
   notes: string | null;
+  booking_tag: string | null;
+  document_category: string | null;
+  euer_lines: EuerLineDefinition[];
   asset_count: number;
   parcel_count: number;
   created_at: string;
@@ -157,6 +167,7 @@ async function counts(ids: number[]): Promise<Map<number, { assets: number; parc
 function toBusiness(row: BusinessRow, c: { assets: number; parcels: number }): BusinessView {
   return {
     id: row.id, owner_user_id: row.owner_user_id, name: row.name, kind: row.kind, tax_section: row.tax_section, notes: row.notes,
+    booking_tag: row.booking_tag, document_category: row.document_category, euer_lines: row.euer_lines,
     asset_count: c.assets, parcel_count: c.parcels, created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -197,6 +208,32 @@ export interface BusinessInput {
   kind?: BusinessKind;
   tax_section?: BusinessTaxSection;
   notes?: string | null;
+  /** The user tag that marks a booking as this business's; null for none. */
+  booking_tag?: string | null;
+  /** The document category (slug) its receipts are classified into; null for none. */
+  document_category?: string | null;
+  /** The lines of the Anlage EÜR, replacing the whole list. */
+  euer_lines?: EuerLineDefinition[];
+}
+
+const MAX_EUER_LINES = 60;
+
+function euerLines(value: unknown): EuerLineDefinition[] {
+  if (!Array.isArray(value)) throw APIError.invalidArgument("euer_lines must be an array");
+  if (value.length > MAX_EUER_LINES) throw APIError.invalidArgument(`at most ${MAX_EUER_LINES} EÜR lines`);
+  const seen = new Set<string>();
+  return value.map((raw, i) => {
+    const l = (raw ?? {}) as Record<string, unknown>;
+    const name = text(l.name, `euer_lines[${i}].name`, true)!;
+    const key = name.toLowerCase();
+    if (seen.has(key)) throw APIError.invalidArgument(`EÜR line "${name}" appears twice`);
+    seen.add(key);
+    const kind = oneOf(l.kind, ["income", "expense"] as const, `euer_lines[${i}].kind`);
+    const tags = Array.isArray(l.tags)
+      ? [...new Set(l.tags.map((t) => String(t ?? "").trim()).filter((t) => t.length > 0 && t.length <= 100))]
+      : [];
+    return { name, kind, tags, form_line: text(l.form_line, `euer_lines[${i}].form_line`) };
+  });
 }
 
 /** The Anlage a kind files under unless told otherwise. */
@@ -216,6 +253,9 @@ export const createBusiness = api(
       kind,
       tax_section: oneOf(req.tax_section, SECTIONS, "tax_section", DEFAULT_SECTION[kind]),
       notes: text(req.notes, "notes"),
+      booking_tag: req.booking_tag === undefined ? defaultBookingTag(kind) : text(req.booking_tag, "booking_tag"),
+      document_category: req.document_category === undefined ? defaultDocumentCategory(kind) : text(req.document_category, "document_category"),
+      euer_lines: req.euer_lines === undefined ? defaultEuerLines(kind) : euerLines(req.euer_lines),
     }).returning();
     return toBusiness(row!, { assets: 0, parcels: 0 });
   },
@@ -260,10 +300,111 @@ export const updateBusiness = api(
       kind,
       tax_section: req.tax_section === undefined ? row.tax_section : oneOf(req.tax_section, SECTIONS, "tax_section"),
       notes: req.notes === undefined ? row.notes : text(req.notes, "notes"),
+      booking_tag: req.booking_tag === undefined ? row.booking_tag : text(req.booking_tag, "booking_tag"),
+      document_category: req.document_category === undefined ? row.document_category : text(req.document_category, "document_category"),
+      euer_lines: req.euer_lines === undefined ? row.euer_lines : euerLines(req.euer_lines),
       updated_at: new Date().toISOString(),
     }).where(eq(financeBusiness.id, id)).returning();
     const n = await counts([id]);
     return toBusiness(updated!, n.get(id)!);
+  },
+);
+
+// ── EÜR ──────────────────────────────────────────────────────────────────────
+
+/** Loads the bookings of the year carrying the business's tag, with every tag they carry. */
+async function euerBookings(c: Caller, tag: string | null, year: number): Promise<EuerBooking[]> {
+  if (!tag) return [];
+  const auth = getAuthData()!;
+  const readable = await readableFinanceAccountIds(auth);
+  if (readable !== null && readable.length === 0) return [];
+  const rows = await db
+    .select({
+      id: financeTransaction.id,
+      booking_date: financeTransaction.booking_date,
+      counterparty: financeTransaction.counterparty,
+      purpose: financeTransaction.purpose,
+      amount: financeTransaction.amount,
+      is_tax_relevant: financeTransaction.is_tax_relevant,
+    })
+    .from(financeTagTransaction)
+    .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
+    .innerJoin(financeTransaction, eq(financeTransaction.id, financeTagTransaction.transaction_id))
+    .where(and(
+      eq(financeTag.name, tag),
+      gte(financeTransaction.booking_date, `${year}-01-01`),
+      lte(financeTransaction.booking_date, `${year}-12-31`),
+      ...(readable === null ? [] : [inArray(financeTransaction.account_id, readable)]),
+    ));
+  const ids = [...new Set(rows.map((r) => r.id))];
+  const tagRows = ids.length
+    ? await db.select({ transaction_id: financeTagTransaction.transaction_id, name: financeTag.name })
+      .from(financeTagTransaction)
+      .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
+      .where(inArray(financeTagTransaction.transaction_id, ids))
+    : [];
+  const tags = new Map<number, string[]>();
+  for (const t of tagRows) tags.set(t.transaction_id, [...(tags.get(t.transaction_id) ?? []), t.name]);
+  const seen = new Set<number>();
+  const out: EuerBooking[] = [];
+  for (const r of rows) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push({
+      id: r.id, booking_date: r.booking_date.slice(0, 10), counterparty: r.counterparty, purpose: r.purpose, amount: r.amount,
+      tags: tags.get(r.id) ?? [], is_tax_relevant: r.is_tax_relevant,
+    });
+  }
+  void c;
+  return out;
+}
+
+async function euerOf(c: Caller, id: number, year: number | undefined): Promise<EuerReport> {
+  const row = await loadBusiness(c, id);
+  const y = Number.isInteger(year) && year! >= 1990 && year! <= 2100 ? year! : currentYear();
+  const assets = await db.select().from(financeBusinessAsset).where(eq(financeBusinessAsset.business_id, id)).orderBy(asc(financeBusinessAsset.id));
+  const afa = assets
+    .map((a) => ({ asset_id: a.id, name: a.name, afa: Math.round(Number(depreciationOfYear(a, y).afa) * 100) }))
+    .filter((a) => a.afa !== 0);
+  const bookings = await euerBookings(c, row.booking_tag, y);
+  return buildEuer({ year: y, business: row.name, tag: row.booking_tag, lines: row.euer_lines, bookings, afa });
+}
+
+export const getBusinessEuer = api(
+  { expose: true, method: "GET", path: "/finance/businesses/:id/euer", auth: true },
+  async ({ id, year }: { id: number; year?: number }): Promise<EuerReport> => euerOf(caller(), id, year),
+);
+
+function slug(s: string): string {
+  return s.normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "euer";
+}
+
+export const businessEuerPdf = api.raw(
+  { expose: true, method: "GET", path: "/finance/businesses/:id/euer/pdf", auth: true },
+  async (req, res) => {
+    let report: EuerReport;
+    try {
+      const c = caller();
+      const url = new URL(req.url ?? "", "http://localhost");
+      const id = Number(url.pathname.split("/").at(-3));
+      if (!Number.isInteger(id)) throw APIError.invalidArgument("bad business id");
+      const year = url.searchParams.get("year");
+      report = await euerOf(c, id, year ? Number(year) : undefined);
+    } catch (err) {
+      const status = err instanceof APIError
+        ? ({ not_found: 404, unauthenticated: 401, permission_denied: 403, invalid_argument: 400 } as Record<string, number>)[err.code] ?? 500
+        : 500;
+      res.statusCode = status;
+      res.end(err instanceof Error ? err.message : "error");
+      return;
+    }
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Disposition", `attachment; filename="euer-${slug(report.business)}-${report.year}.pdf"`);
+    const pdf = createEuerPdf(report, new Date().toISOString().slice(0, 10));
+    pdf.pipe(res);
+    pdf.end();
   },
 );
 

@@ -44,8 +44,24 @@ export interface WorksheetTag {
   bookings: { id: number; date: string; amount: number; counterparty: string | null; purpose: string | null }[];
 }
 
+/** One business's EÜR of the year, as the form asks for it under its Anlage. */
+export interface WorksheetBusiness {
+  id: number;
+  name: string;
+  kind: string;
+  tax_section: string;
+  income: number;
+  expenses: number;
+  afa: number;
+  result: number;
+  bookings: number;
+  hints: string[];
+}
+
 export interface TaxWorksheet {
   year: number;
+  /** The businesses of the register with the year's EÜR each (stage 2 of betriebe-euer.md). */
+  businesses: WorksheetBusiness[];
   sections: WorksheetSection[];
   documentCount: number;
   /** Tax-relevant bookings of the year by tag; a booking with several tags counts under each. */
@@ -106,6 +122,8 @@ export async function buildTaxWorksheet(input: { year: number; personId?: number
     });
 
   const tags = new Map<string, WorksheetTag>();
+
+  const businesses: WorksheetBusiness[] = [];
   let bookingCount = 0;
   let bookingTotal = 0;
   let depot: PortfolioYear | null = null;
@@ -127,6 +145,19 @@ export async function buildTaxWorksheet(input: { year: number; personId?: number
       }
     } catch {
       // Finance down: the worksheet still has the documents.
+    }
+    try {
+      const list = (await finance.listBusinesses()) as unknown as { items: { id: number; name: string; kind: string; tax_section: string }[] };
+      for (const b of list.items ?? []) {
+        const r = (await finance.getBusinessEuer({ id: b.id, year })) as unknown as { total_income: number; total_expenses: number; result: number; afa: { sum: number }; booking_count: number; hints: string[] };
+        businesses.push({
+          id: b.id, name: b.name, kind: b.kind, tax_section: b.tax_section,
+          income: r.total_income / 100, expenses: r.total_expenses / 100, afa: r.afa.sum / 100, result: r.result / 100,
+          bookings: r.booking_count, hints: r.hints,
+        });
+      }
+    } catch {
+      // No business register, or finance down: the worksheet goes on without it.
     }
     try {
       const portfolio = (await finance.getPortfolio({})) as unknown as { years: PortfolioYear[] };
@@ -154,6 +185,7 @@ export async function buildTaxWorksheet(input: { year: number; personId?: number
 
   return {
     year,
+    businesses,
     sections,
     documentCount: distinct.size,
     tags: [...tags.values()].sort((a, b) => Math.abs(b.sum) - Math.abs(a.sum)),
@@ -182,6 +214,11 @@ export function worksheetText(w: TaxWorksheet): string {
     out.push(`  total: ${eur(w.bookingTotal)} over ${w.bookingCount} booking(s)`);
   } else if (w.bookingCount === 0) {
     out.push(`\nNo booking of ${w.year} is marked tax-relevant.`);
+  }
+  for (const b of w.businesses) {
+    out.push(`\n== ${b.name} (${b.tax_section}, EÜR ${w.year}) ==`);
+    out.push(`  Betriebseinnahmen ${eur(b.income)}; Betriebsausgaben ${eur(b.expenses)} (AfA ${eur(b.afa)} included); ${b.result >= 0 ? "Gewinn" : "Verlust"} ${eur(b.result)} from ${b.bookings} booking(s). Details: euer_report(business_id = ${b.id}).`);
+    for (const h of b.hints) out.push(`  - ${h}`);
   }
   if (w.depot) {
     out.push(`\n== Depot ${w.year} (Anlage KAP, from the portfolio) ==`);
