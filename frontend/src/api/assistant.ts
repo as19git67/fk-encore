@@ -245,3 +245,89 @@ export function followTurn(turnId: string, onEvent: (event: StreamEvent) => void
     },
   }
 }
+
+// ── Ausfüllhilfe (tax worksheet), straight from the Steuer page ──────────
+
+export interface TaxWorksheetDocument {
+  id: number
+  title: string
+  date: string | null
+  from: string | null
+  /** Cents, as recognised in the document's text; null when none was. */
+  amount: number | null
+  confidence: number | null
+}
+
+export interface TaxWorksheetSection {
+  slug: string
+  name: string
+  group: string
+  documents: TaxWorksheetDocument[]
+  /** Cents. */
+  sum: number
+  withoutAmount: number
+}
+
+export interface TaxWorksheetTag {
+  tag: string
+  count: number
+  /** Cents, negative = paid. */
+  sum: number
+}
+
+export interface TaxWorksheetBusiness {
+  id: number
+  name: string
+  kind: string
+  tax_section: string
+  income: number
+  expenses: number
+  afa: number
+  result: number
+  bookings: number
+  hints: string[]
+  exempt: boolean | null
+}
+
+export interface TaxWorksheetDepot {
+  year: number
+  realized: string
+  sell_count: number
+  realized_complete: boolean
+  income: string
+  dividend_count: number
+  fees: string
+  taxes: string
+}
+
+export interface TaxWorksheet {
+  year: number
+  businesses: TaxWorksheetBusiness[]
+  sections: TaxWorksheetSection[]
+  documentCount: number
+  tags: TaxWorksheetTag[]
+  bookingCount: number
+  bookingTotal: number
+  depot: TaxWorksheetDepot | null
+  hints: string[]
+}
+
+export function getTaxWorksheet(year: number, personId?: number | null): Promise<TaxWorksheet> {
+  const query = new URLSearchParams({ year: String(year) })
+  if (personId != null) query.set('person_id', String(personId))
+  return apiFetch(`/assistant/tax-worksheet?${query}`)
+}
+
+export interface TaxWorksheetPdfResult {
+  document_id: number
+  route: string
+  sections: number
+  bookings: number
+}
+
+export function storeTaxWorksheetPdf(year: number, personId?: number | null): Promise<TaxWorksheetPdfResult> {
+  return apiFetch('/assistant/tax-worksheet/pdf', {
+    method: 'POST',
+    body: JSON.stringify(personId != null ? { year, person_id: personId } : { year }),
+  })
+}

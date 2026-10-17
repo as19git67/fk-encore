@@ -363,7 +363,11 @@ behind it.
        stores it as the document "Ausfüllhilfe Steuer <Jahr>"
        (`assistant/tax-worksheet-pdf.ts`, pdfkit) linked to the flagged
        documents. Recognised amounts are marked unchecked everywhere; the
-       user confirms each against the document. The Anlagen list
+       user confirms each against the document. The same worksheet opens
+       without a chat from the Steuer page ("Ausfüllhilfe" for the chosen
+       year and Steuerakte): `GET /assistant/tax-worksheet` and `POST
+       /assistant/tax-worksheet/pdf` in `assistant/tax-worksheet-api.ts`,
+       dialog `components/documents/TaxWorksheetDialog.vue`. The Anlagen list
        (`documents/tax-sections.ts`) gained KAP-INV and AUS. A prompt rule
        routes "Steuer <Jahr>" questions there and forbids the model to
        judge tax relevance or compute a tax figure itself.

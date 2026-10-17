@@ -9,7 +9,7 @@
 import { documents, finance } from "~encore/clients";
 import { int, str } from "../format";
 import type { WriteToolDefinition } from "../proposals";
-import { buildTaxWorksheet, worksheetText } from "../tax-worksheet";
+import { buildTaxWorksheet, worksheetText, type TaxWorksheet } from "../tax-worksheet";
 import { renderTaxWorksheetPdf } from "../tax-worksheet-pdf";
 import { createEuerPdf } from "../../finance/euer-pdf";
 import type { EuerReport } from "../../finance/euer";
@@ -94,15 +94,8 @@ export const taxWorksheetPdf: WriteToolDefinition = {
   },
   async execute(args, ctx) {
     const year = yearOf(args);
-    const personId = int(args.person_id);
-    const w = await buildTaxWorksheet({ year, personId, mayFinance: mayFinance(ctx) });
-    const pdf = await renderTaxWorksheetPdf(w, ctx.today);
-    const stored = (await documents.storeGeneratedDocument({
-      filename: `Ausfüllhilfe Steuer ${year}.pdf`,
-      title: `Ausfüllhilfe Steuererklärung ${year}`,
-      pdf_base64: pdf.toString("base64"),
-      linked_document_ids: [...new Set(w.sections.flatMap((s) => s.documents.map((d) => d.id)))].slice(0, 200),
-    })) as unknown as { id: number };
+    const w = await buildTaxWorksheet({ year, personId: int(args.person_id), mayFinance: mayFinance(ctx) });
+    const stored = await storeTaxWorksheetPdf(w, ctx.today);
     return {
       summary: `Ausfüllhilfe Steuer ${year} als Dokument abgelegt (${w.sections.length} Anlagen, ${w.bookingCount} Buchungen)`,
       route: `/dokumente/${stored.id}`,
@@ -110,6 +103,21 @@ export const taxWorksheetPdf: WriteToolDefinition = {
     };
   },
 };
+
+/**
+ * The worksheet as a PDF, stored as a document linked to the flagged
+ * documents. The proposal above and the button on the Steuer page
+ * (`tax-worksheet-api.ts`) both end here.
+ */
+export async function storeTaxWorksheetPdf(w: TaxWorksheet, today: string): Promise<{ id: number }> {
+  const pdf = await renderTaxWorksheetPdf(w, today);
+  return (await documents.storeGeneratedDocument({
+    filename: `Ausfüllhilfe Steuer ${w.year}.pdf`,
+    title: `Ausfüllhilfe Steuererklärung ${w.year}`,
+    pdf_base64: pdf.toString("base64"),
+    linked_document_ids: [...new Set(w.sections.flatMap((s) => s.documents.map((d) => d.id)))].slice(0, 200),
+  })) as unknown as { id: number };
+}
 
 const FINANCE_AND_DOCUMENTS = ["module.finance", "finance.view", "module.documents", "documents.view"];
 
