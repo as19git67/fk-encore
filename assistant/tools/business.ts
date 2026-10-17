@@ -15,14 +15,27 @@ interface BusinessItem { id: number; name: string; kind: string; tax_section: st
 interface DepreciationRow { year: number; months: number; afa: string; accumulated: string; book_value: string; disposal_result: string | null }
 interface AssetItem { id: number; name: string; kind: string; acquisition_date: string; acquisition_cost: string; afa_rate_pct: string; afa_start_date: string | null; disposal_date: string | null; disposal_proceeds: string | null; depreciation: DepreciationRow }
 interface ParcelItem { id: number; gemarkung: string; flur: string | null; flurstueck: string; area_m2: number | null; usage: string; lessee: string | null; lease_from: string | null; lease_to: string | null; annual_rent: string | null }
-interface BusinessDetail { business: BusinessItem; year: number; assets: AssetItem[]; parcels: ParcelItem[]; totals: { acquisition_cost: string; afa: string; book_value: string; annual_rent: string; area_m2: number } }
+interface PvInfo { capacity_kwp: string | null; capacity_source: string | null; commissioned_on: string | null; tax_override: string | null; status: { exempt: boolean | null; reason: string; source: string }; feed_in: { revenue_eur: number | null; exported_kwh: number | null; complete: boolean } | null }
+interface BusinessDetail { business: BusinessItem; year: number; assets: AssetItem[]; parcels: ParcelItem[]; totals: { acquisition_cost: string; afa: string; book_value: string; annual_rent: string; area_m2: number }; pv: PvInfo | null }
+
+/** One line about a PV system's tax status and metered feed-in, for the model. */
+function pvText(pv: PvInfo, year: number): string {
+  const status = pv.status.exempt === true ? "tax-exempt (§ 3 Nr. 72 EStG): no EÜR, no Anlage G" : pv.status.exempt === false ? "taxable (Anlage G, EÜR)" : "status unknown";
+  const parts = [
+    `PV system: ${pv.capacity_kwp ? `${Number(pv.capacity_kwp)} kWp${pv.capacity_source === "meters" ? " (from the meters' tariff timeline)" : ""}` : "capacity not entered"}`,
+    pv.commissioned_on ? `commissioned ${pv.commissioned_on}` : "",
+    `${year}: ${status} — ${pv.status.reason}`,
+    pv.feed_in && pv.feed_in.revenue_eur !== null ? `feed-in ${year} per meters ${pv.feed_in.revenue_eur.toFixed(2)} EUR${pv.feed_in.exported_kwh !== null ? ` for ${pv.feed_in.exported_kwh.toFixed(0)} kWh` : ""}${pv.feed_in.complete ? "" : " (readings incomplete)"}` : "",
+  ];
+  return parts.filter(Boolean).join("; ") + ".";
+}
 
 const KIND_LABEL: Record<string, string> = { landwirtschaft: "farm (Anlage L)", photovoltaik: "PV system (Anlage G)", gewerbe: "trade (Anlage G)", vermietung: "letting (Anlage V)" };
 
 export const listBusinesses: ToolSpec = {
   name: "list_businesses",
   kind: "read",
-  summary: "The user's businesses in the tax sense (leased farm, PV system, trade, letting) with id, kind, tax form and how many assets and parcels each has. Start here for questions about Landwirtschaft, Verpachtung, PV-Anlage, Anlagegüter, AfA or Flurstücke.",
+  summary: "The user's businesses in the tax sense (leased farm, PV system, trade, letting) with id, kind, tax form and how many assets and parcels each has. Start here for questions about Landwirtschaft, Verpachtung, PV-Anlage, Anlagegüter, AfA or Flurstücke; whether the PV system is tax-exempt is in business_assets.",
   permissions: FINANCE,
   source: "hand",
   parameters: { type: "object", properties: {} },
@@ -50,7 +63,7 @@ export const listBusinesses: ToolSpec = {
 export const businessAssets: ToolSpec = {
   name: "business_assets",
   kind: "read",
-  summary: "The fixed assets of one business with acquisition cost, AfA rate and the depreciation of one year (months held, AfA, book value at year end), plus the parcels with area, lessee and annual rent, and the totals. The depreciation is computed by the server (linear, pro rata by month, residual 1 €); quote it, never recompute it.",
+  summary: "The fixed assets of one business with acquisition cost, AfA rate and the depreciation of one year (months held, AfA, book value at year end), plus the parcels with area, lessee and annual rent, and the totals; for a PV system also its capacity, whether its income is tax-exempt under § 3 Nr. 72 EStG for the year and why, and the year's metered feed-in. The depreciation is computed by the server (linear, pro rata by month, residual 1 €); quote it, never recompute it.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -71,19 +84,19 @@ export const businessAssets: ToolSpec = {
     const assetTable = table(
       ["id", "name", "kind", "acquired", "cost", "afa_rate", "months", `afa_${res.year}`, `book_value_end_${res.year}`, "disposal"],
       assets,
-      { cap: 60, note: `${res.business.name} (${KIND_LABEL[res.business.kind] ?? res.business.kind}), year ${res.year}: ${res.assets.length} assets, acquisition cost ${res.totals.acquisition_cost}, AfA ${res.totals.afa}, book value ${res.totals.book_value}.` },
+      { cap: 60, note: `${res.business.name} (${KIND_LABEL[res.business.kind] ?? res.business.kind}), year ${res.year}: ${res.assets.length} assets, acquisition cost ${res.totals.acquisition_cost}, AfA ${res.totals.afa}, book value ${res.totals.book_value}.${res.pv ? ` ${pvText(res.pv, res.year)}` : ""}` },
     );
     const parcelTable = res.parcels.length
       ? "\n" + table(["id", "parcel", "usage", "area_m2", "lessee", "annual_rent", "lease"], parcels, { cap: 60, note: `${res.parcels.length} parcels, ${res.totals.area_m2} m² in all, annual rent ${res.totals.annual_rent}.` })
       : "";
     return {
       text: assetTable + parcelTable,
-      digest: `[earlier result of business_assets: business ${id} "${res.business.name}", year ${res.year}, ${res.assets.length} assets (AfA ${res.totals.afa}, book value ${res.totals.book_value}), ${res.parcels.length} parcels (rent ${res.totals.annual_rent})]`,
+      digest: `[earlier result of business_assets: business ${id} "${res.business.name}", year ${res.year}, ${res.assets.length} assets (AfA ${res.totals.afa}, book value ${res.totals.book_value}), ${res.parcels.length} parcels (rent ${res.totals.annual_rent})${res.pv ? `, PV ${res.pv.status.exempt === true ? "tax-exempt" : res.pv.status.exempt === false ? "taxable" : "status unknown"}` : ""}]`,
       rowCount: res.assets.length + res.parcels.length,
       block: {
         kind: "business_assets",
         tool: "business_assets",
-        subtitle: `${res.business.name} · ${res.year} · AfA ${res.totals.afa} € · Buchwert ${res.totals.book_value} €`,
+        subtitle: `${res.business.name} · ${res.year} · AfA ${res.totals.afa} € · Buchwert ${res.totals.book_value} €${res.pv ? ` · ${res.pv.status.exempt === true ? "steuerfrei (§ 3 Nr. 72 EStG)" : res.pv.status.exempt === false ? "steuerpflichtig" : "Status offen"}` : ""}`,
         rows: [
           ...res.assets.map((a) => ({ id: a.id, name: a.name, kind: a.kind, acquisition_cost: a.acquisition_cost, afa_rate_pct: a.afa_rate_pct, afa: a.depreciation.afa, book_value: a.depreciation.book_value, route: `/finanzen/betriebe/${id}` })),
           ...res.parcels.map((p) => ({ id: p.id, name: `${p.gemarkung} Flst. ${p.flurstueck}`, kind: "parcel", usage: p.usage, area_m2: p.area_m2, lessee: p.lessee, annual_rent: p.annual_rent, route: `/finanzen/betriebe/${id}` })),
@@ -95,13 +108,14 @@ export const businessAssets: ToolSpec = {
 };
 
 interface EuerLineItem { name: string; kind: "income" | "expense"; form_line: string | null; count: number; sum: number; other: boolean; bookings: { id: number; booking_date: string; counterparty: string | null; purpose: string | null; amount: string }[] }
-interface EuerResult { year: number; business: string; tag: string | null; income: EuerLineItem[]; expenses: EuerLineItem[]; afa: { sum: number; assets: { asset_id: number; name: string; afa: number }[] }; total_income: number; total_expenses: number; result: number; booking_count: number; unflagged: number; hints: string[] }
+interface EuerResult { year: number; business: string; tag: string | null; tax_exempt?: { exempt: boolean | null; reason: string }; income: EuerLineItem[]; expenses: EuerLineItem[]; afa: { sum: number; assets: { asset_id: number; name: string; afa: number }[] }; total_income: number; total_expenses: number; result: number; booking_count: number; unflagged: number; hints: string[] }
 
 const eur = (c: number) => `${(c / 100).toFixed(2)} EUR`;
 
 /** The EÜR as the model reads it: every figure printed, nothing left to add up. */
 export function euerText(r: EuerResult): string {
   const out = [`EÜR ${r.year} of ${r.business}${r.tag ? ` (bookings tagged "${r.tag}")` : ""}: ${r.booking_count} bookings, AfA from the asset register. Amounts in EUR, each line in its own direction (income in, expenses out).`];
+  if (r.tax_exempt?.exempt === true) out.push(`TAX-EXEMPT (§ 3 Nr. 72 EStG): ${r.tax_exempt.reason} This EÜR is for information only; nothing of it goes into Anlage G or Anlage EÜR.`);
   out.push("\n== Betriebseinnahmen ==");
   for (const l of r.income) out.push(`  ${l.form_line ? `${l.form_line} · ` : ""}${l.name}: ${eur(l.sum)} (${l.count} booking${l.count === 1 ? "" : "s"})`);
   out.push(`  Summe Betriebseinnahmen: ${eur(r.total_income)}`);

@@ -76,6 +76,9 @@ export function renderTaxWorksheetPdf(w: TaxWorksheet, generatedOn: string): Pro
 
   for (const b of w.businesses) {
     heading(`${b.name} – EÜR ${w.year} (${b.tax_section.replace("anlage-", "Anlage ").toUpperCase()})`);
+    if (b.exempt === true) {
+      row(["", "Steuerfrei nach § 3 Nr. 72 EStG – keine Angaben in Anlage G und Anlage EÜR; Zahlen nur zur Information.", ""], true);
+    }
     row(["", `Betriebseinnahmen (${b.bookings} Buchungen)`, money(b.income)]);
     row(["", "Betriebsausgaben einschließlich AfA", money(b.expenses)]);
     row(["", "davon AfA aus dem Anlagenverzeichnis", money(b.afa)]);

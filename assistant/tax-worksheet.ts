@@ -56,6 +56,8 @@ export interface WorksheetBusiness {
   result: number;
   bookings: number;
   hints: string[];
+  /** PV: true when § 3 Nr. 72 EStG exempts the income, so nothing of it goes into the forms. */
+  exempt: boolean | null;
 }
 
 export interface TaxWorksheet {
@@ -149,11 +151,11 @@ export async function buildTaxWorksheet(input: { year: number; personId?: number
     try {
       const list = (await finance.listBusinesses()) as unknown as { items: { id: number; name: string; kind: string; tax_section: string }[] };
       for (const b of list.items ?? []) {
-        const r = (await finance.getBusinessEuer({ id: b.id, year })) as unknown as { total_income: number; total_expenses: number; result: number; afa: { sum: number }; booking_count: number; hints: string[] };
+        const r = (await finance.getBusinessEuer({ id: b.id, year })) as unknown as { total_income: number; total_expenses: number; result: number; afa: { sum: number }; booking_count: number; hints: string[]; tax_exempt?: { exempt: boolean | null; reason: string } };
         businesses.push({
           id: b.id, name: b.name, kind: b.kind, tax_section: b.tax_section,
           income: r.total_income / 100, expenses: r.total_expenses / 100, afa: r.afa.sum / 100, result: r.result / 100,
-          bookings: r.booking_count, hints: r.hints,
+          bookings: r.booking_count, hints: r.hints, exempt: r.tax_exempt ? r.tax_exempt.exempt : null,
         });
       }
     } catch {
@@ -217,7 +219,8 @@ export function worksheetText(w: TaxWorksheet): string {
   }
   for (const b of w.businesses) {
     out.push(`\n== ${b.name} (${b.tax_section}, EÜR ${w.year}) ==`);
-    out.push(`  Betriebseinnahmen ${eur(b.income)}; Betriebsausgaben ${eur(b.expenses)} (AfA ${eur(b.afa)} included); ${b.result >= 0 ? "Gewinn" : "Verlust"} ${eur(b.result)} from ${b.bookings} booking(s). Details: euer_report(business_id = ${b.id}).`);
+    if (b.exempt === true) out.push(`  TAX-EXEMPT under § 3 Nr. 72 EStG: nothing of this business goes into ${b.tax_section} or Anlage EÜR. For information: income ${eur(b.income)}, expenses ${eur(b.expenses)}.`);
+    else out.push(`  Betriebseinnahmen ${eur(b.income)}; Betriebsausgaben ${eur(b.expenses)} (AfA ${eur(b.afa)} included); ${b.result >= 0 ? "Gewinn" : "Verlust"} ${eur(b.result)} from ${b.bookings} booking(s). Details: euer_report(business_id = ${b.id}).`);
     for (const h of b.hints) out.push(`  - ${h}`);
   }
   if (w.depot) {

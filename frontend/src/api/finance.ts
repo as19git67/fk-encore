@@ -2876,6 +2876,24 @@ export type BusinessAssetKind = 'gebaeude' | 'flaeche' | 'maschine' | 'pv_anlage
 export type ParcelUsage = 'acker' | 'gruenland' | 'wald' | 'hof' | 'sonstiges'
 
 export type EuerLineKind = 'income' | 'expense'
+export type PvTaxOverride = 'exempt' | 'taxable'
+
+export interface PvTaxStatus {
+  /** null: no capacity entered and no override. */
+  exempt: boolean | null
+  reason: string
+  source: 'override' | 'rule' | 'unknown'
+}
+
+export interface PvView {
+  capacity_kwp: string | null
+  capacity_source: 'business' | 'meters' | null
+  commissioned_on: string | null
+  tax_override: PvTaxOverride | null
+  status: PvTaxStatus
+  /** The year's feed-in from the meters' energy report; null without meters or tariffs. */
+  feed_in: { revenue_eur: number | null; exported_kwh: number | null; complete: boolean } | null
+}
 
 /** One line of the Anlage EÜR; a booking goes to the first line one of its tags names. */
 export interface EuerLineDefinition {
@@ -2897,6 +2915,10 @@ export interface Business {
   /** The document category (slug) its receipts are classified into. */
   document_category: string | null
   euer_lines: EuerLineDefinition[]
+  /** PV only: capacity in kWp as entered, commissioning date, exemption override. */
+  pv_capacity_kwp: string | null
+  pv_commissioned_on: string | null
+  pv_tax_override: PvTaxOverride | null
   asset_count: number
   parcel_count: number
   created_at: string
@@ -2911,6 +2933,9 @@ export interface BusinessInput {
   booking_tag?: string | null
   document_category?: string | null
   euer_lines?: EuerLineDefinition[]
+  pv_capacity_kwp?: string | number | null
+  pv_commissioned_on?: string | null
+  pv_tax_override?: PvTaxOverride | null
 }
 
 export interface EuerBooking {
@@ -2950,6 +2975,8 @@ export interface EuerReport {
   booking_count: number
   unflagged: number
   hints: string[]
+  /** PV only: the § 3 Nr. 72 EStG status; an exempt system's EÜR is for information. */
+  tax_exempt?: { exempt: boolean | null; reason: string }
 }
 
 /** One year of an asset's schedule; money as decimal strings. */
@@ -3026,6 +3053,8 @@ export interface BusinessDetail {
   assets: BusinessAsset[]
   parcels: BusinessParcel[]
   totals: { acquisition_cost: string; afa: string; book_value: string; annual_rent: string; area_m2: number }
+  /** For a PV business; null otherwise. */
+  pv: PvView | null
 }
 
 export async function listBusinesses(): Promise<{ items: Business[] }> {

@@ -183,3 +183,37 @@ describe("EÜR", () => {
     expect(Buffer.concat(chunks).subarray(0, 5).toString()).toBe("%PDF-");
   });
 });
+
+describe("photovoltaics", () => {
+  it("derives the § 3 Nr. 72 EStG status from the capacity, takes the override, and marks the EÜR", async () => {
+    setAuth(OWNER, MANAGE);
+    const pv = await createBusiness({ name: "PV Dach", kind: "photovoltaik", pv_capacity_kwp: 9.8, pv_commissioned_on: "2023-05-02" });
+    expect(pv).toMatchObject({ tax_section: "anlage-g", pv_capacity_kwp: "9.800", pv_commissioned_on: "2023-05-02", pv_tax_override: null });
+
+    const d = await getBusiness({ id: pv.id, year: 2025 });
+    expect(d.pv).toMatchObject({ capacity_kwp: "9.800", capacity_source: "business", status: { exempt: true, source: "rule" } });
+    expect(d.pv!.status.reason).toContain("§ 3 Nr. 72 EStG");
+    // No meter access in this test: the feed-in stays unknown, never an error.
+    expect(d.pv!.feed_in).toBeNull();
+
+    const before = await getBusiness({ id: pv.id, year: 2021 });
+    expect(before.pv!.status.exempt).toBe(false);
+
+    const euer = await getBusinessEuer({ id: pv.id, year: 2025 });
+    expect(euer.tax_exempt).toMatchObject({ exempt: true });
+    expect(euer.hints[0]).toContain("Steuerfrei");
+
+    const overridden = await updateBusiness({ id: pv.id, pv_tax_override: "taxable" });
+    expect(overridden.pv_tax_override).toBe("taxable");
+    expect((await getBusiness({ id: pv.id, year: 2025 })).pv!.status).toMatchObject({ exempt: false, source: "override" });
+
+    await updateBusiness({ id: pv.id, pv_tax_override: null, pv_capacity_kwp: null });
+    expect((await getBusiness({ id: pv.id, year: 2025 })).pv!.status).toMatchObject({ exempt: null, source: "unknown" });
+
+    await expect(updateBusiness({ id: pv.id, pv_capacity_kwp: -1 })).rejects.toThrow(/kWp/);
+    await expect(updateBusiness({ id: pv.id, pv_tax_override: "maybe" as never })).rejects.toThrow(/exempt, taxable/);
+
+    const farm = await createBusiness({ name: "Hof", kind: "landwirtschaft" });
+    expect((await getBusiness({ id: farm.id })).pv).toBeNull();
+  });
+});

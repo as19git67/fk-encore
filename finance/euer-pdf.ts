@@ -51,6 +51,11 @@ export function createEuerPdf(r: EuerReport, generatedOn: string): PDFKit.PDFDoc
   pdf.moveDown(0.3).fontSize(9).fillColor("#666")
     .text(t(`Erstellt am ${germanDate(generatedOn)} · ${r.booking_count} Buchungen${r.tag ? ` mit Tag „${r.tag}“` : ""} · AfA aus dem Anlagenverzeichnis`), { align: "center" });
   pdf.fillColor("#000");
+  if (r.tax_exempt?.exempt === true) {
+    pdf.moveDown(0.4).font("Helvetica-Bold").fontSize(10).fillColor("#000")
+      .text(t("Steuerfrei nach § 3 Nr. 72 EStG – diese Aufstellung dient nur der Information, keine Anlage G und keine Anlage EÜR."), left, pdf.y, { width: right - left, align: "center" });
+    pdf.font("Helvetica").fillColor("#000");
+  }
 
   heading("Betriebseinnahmen");
   lines(r.income);

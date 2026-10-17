@@ -289,6 +289,16 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "pv-tax-exempt",
+    title: "PV-Anlage steuerfrei?",
+    question: "Ist meine PV-Anlage eigentlich steuerfrei?",
+    expect: [{ tool: "business_assets", args: { business_id: 1 } }],
+    results: {
+      list_businesses: { rows: [{ id: 1, name: "PV-Anlage Dach", kind: "photovoltaik" }, { id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
+      business_assets: { year: 2026, assets: [{ id: 9, name: "PV-Anlage", kind: "pv_anlage", acquisition_cost: 18000, afa_rate_pct: 5 }], pv: { capacity_kwp: 9.8, status: "tax-exempt (§ 3 Nr. 72 EStG): no EÜR, no Anlage G", reason: "9,8 kWp, höchstens 30 kWp" } },
+    },
+  },
+  {
     id: "farm-euer-pdf",
     title: "EÜR als PDF",
     question: "Erstell mir die EÜR 2025 der Landwirtschaft als PDF.",

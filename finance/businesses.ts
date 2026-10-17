@@ -8,6 +8,7 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
+import { meter } from "~encore/clients";
 import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
@@ -24,11 +25,13 @@ import {
   type BusinessTaxSection,
   type EuerLineDefinition,
   type ParcelUsage,
+  type PvTaxOverride,
 } from "../db/schema";
 import { readableFinanceAccountIds } from "./account-acl";
 import { depreciationOfYear, depreciationSchedule, type DepreciationYear } from "./depreciation";
 import { buildEuer, defaultBookingTag, defaultDocumentCategory, defaultEuerLines, type EuerBooking, type EuerReport } from "./euer";
 import { createEuerPdf } from "./euer-pdf";
+import { pvTaxStatus, type PvTaxStatus } from "./pv";
 
 console.log("[boot] finance/businesses.ts: all imports resolved");
 
@@ -48,6 +51,10 @@ export interface BusinessView {
   booking_tag: string | null;
   document_category: string | null;
   euer_lines: EuerLineDefinition[];
+  /** PV only: capacity in kWp as entered, commissioning date, and the exemption override. */
+  pv_capacity_kwp: string | null;
+  pv_commissioned_on: string | null;
+  pv_tax_override: PvTaxOverride | null;
   asset_count: number;
   parcel_count: number;
   created_at: string;
@@ -168,6 +175,7 @@ function toBusiness(row: BusinessRow, c: { assets: number; parcels: number }): B
   return {
     id: row.id, owner_user_id: row.owner_user_id, name: row.name, kind: row.kind, tax_section: row.tax_section, notes: row.notes,
     booking_tag: row.booking_tag, document_category: row.document_category, euer_lines: row.euer_lines,
+    pv_capacity_kwp: row.pv_capacity_kwp, pv_commissioned_on: row.pv_commissioned_on, pv_tax_override: row.pv_tax_override,
     asset_count: c.assets, parcel_count: c.parcels, created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -214,6 +222,35 @@ export interface BusinessInput {
   document_category?: string | null;
   /** The lines of the Anlage EÜR, replacing the whole list. */
   euer_lines?: EuerLineDefinition[];
+  /** PV only: capacity in kWp (null clears), commissioning date, exemption override ("exempt", "taxable", null = derive). */
+  pv_capacity_kwp?: string | number | null;
+  pv_commissioned_on?: string | null;
+  pv_tax_override?: PvTaxOverride | null;
+}
+
+function kwp(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0 || n > 10000) throw APIError.invalidArgument("pv_capacity_kwp must be a capacity in kWp between 0 and 10000");
+  return n.toFixed(3);
+}
+
+function pvOverride(value: unknown): PvTaxOverride | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (value !== "exempt" && value !== "taxable") throw APIError.invalidArgument("pv_tax_override must be exempt, taxable or null");
+  return value;
+}
+
+/** What the page and the tools say about a PV business: its status for the year and the meters' feed-in. */
+export interface PvView {
+  capacity_kwp: string | null;
+  /** Where the capacity came from: the business, or the tariff timeline of the meters when the business has none. */
+  capacity_source: "business" | "meters" | null;
+  commissioned_on: string | null;
+  tax_override: PvTaxOverride | null;
+  status: PvTaxStatus;
+  /** The year's feed-in from the energy report of the meters; null without meter access or tariffs. */
+  feed_in: { revenue_eur: number | null; exported_kwh: number | null; complete: boolean } | null;
 }
 
 const MAX_EUER_LINES = 60;
@@ -256,6 +293,9 @@ export const createBusiness = api(
       booking_tag: req.booking_tag === undefined ? defaultBookingTag(kind) : text(req.booking_tag, "booking_tag"),
       document_category: req.document_category === undefined ? defaultDocumentCategory(kind) : text(req.document_category, "document_category"),
       euer_lines: req.euer_lines === undefined ? defaultEuerLines(kind) : euerLines(req.euer_lines),
+      pv_capacity_kwp: kwp(req.pv_capacity_kwp),
+      pv_commissioned_on: isoDate(req.pv_commissioned_on, "pv_commissioned_on"),
+      pv_tax_override: pvOverride(req.pv_tax_override),
     }).returning();
     return toBusiness(row!, { assets: 0, parcels: 0 });
   },
@@ -263,7 +303,7 @@ export const createBusiness = api(
 
 export const getBusiness = api(
   { expose: true, method: "GET", path: "/finance/businesses/:id", auth: true },
-  async ({ id, year }: { id: number; year?: number }): Promise<{ business: BusinessView; year: number; assets: AssetView[]; parcels: ParcelView[]; totals: { acquisition_cost: string; afa: string; book_value: string; annual_rent: string; area_m2: number } }> => {
+  async ({ id, year }: { id: number; year?: number }): Promise<{ business: BusinessView; year: number; assets: AssetView[]; parcels: ParcelView[]; totals: { acquisition_cost: string; afa: string; book_value: string; annual_rent: string; area_m2: number }; pv: PvView | null }> => {
     const c = caller();
     const row = await loadBusiness(c, id);
     const y = Number.isInteger(year) && year! >= 1990 && year! <= 2100 ? year! : currentYear();
@@ -284,6 +324,7 @@ export const getBusiness = api(
         annual_rent: sum(parcels.map((p) => p.annual_rent ?? "0")),
         area_m2: parcels.reduce((acc, p) => acc + (p.area_m2 ?? 0), 0),
       },
+      pv: row.kind === "photovoltaik" ? await pvView(row, y) : null,
     };
   },
 );
@@ -303,12 +344,64 @@ export const updateBusiness = api(
       booking_tag: req.booking_tag === undefined ? row.booking_tag : text(req.booking_tag, "booking_tag"),
       document_category: req.document_category === undefined ? row.document_category : text(req.document_category, "document_category"),
       euer_lines: req.euer_lines === undefined ? row.euer_lines : euerLines(req.euer_lines),
+      pv_capacity_kwp: req.pv_capacity_kwp === undefined ? row.pv_capacity_kwp : kwp(req.pv_capacity_kwp),
+      pv_commissioned_on: req.pv_commissioned_on === undefined ? row.pv_commissioned_on : isoDate(req.pv_commissioned_on, "pv_commissioned_on"),
+      pv_tax_override: req.pv_tax_override === undefined ? row.pv_tax_override : pvOverride(req.pv_tax_override),
       updated_at: new Date().toISOString(),
     }).where(eq(financeBusiness.id, id)).returning();
     const n = await counts([id]);
     return toBusiness(updated!, n.get(id)!);
   },
 );
+
+// ── photovoltaics ────────────────────────────────────────────────────────────
+
+/** The latest `pv_capacity_kwp` entry of the user's tariff timeline, when the meter module is reachable. */
+async function meterCapacityKwp(): Promise<number | null> {
+  try {
+    const res = (await meter.listTariffs()) as unknown as { tariffs: { kind: string; validFrom: string; amount: number }[] };
+    const rows = (res.tariffs ?? []).filter((t) => t.kind === "pv_capacity_kwp").sort((a, b) => a.validFrom.localeCompare(b.validFrom));
+    const last = rows.at(-1);
+    return last && Number.isFinite(last.amount) && last.amount > 0 ? last.amount : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The year's feed-in of the household's meters, from the energy report; null when there is none. */
+async function meterFeedIn(year: number): Promise<PvView["feed_in"]> {
+  try {
+    const res = (await meter.getEnergyReport({ granularity: "year", from: `${year}-01-01`, to: `${year}-12-31` })) as unknown as {
+      buckets: { complete: boolean }[];
+      totals: { gridExport: number | null; costs: { feedInRevenueEur: number | null } | null };
+    };
+    if (!res.totals) return null;
+    return {
+      revenue_eur: res.totals.costs?.feedInRevenueEur ?? null,
+      exported_kwh: res.totals.gridExport ?? null,
+      complete: (res.buckets ?? []).length > 0 && res.buckets.every((b) => b.complete),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function pvView(row: BusinessRow, year: number): Promise<PvView> {
+  let capacity = row.pv_capacity_kwp === null ? null : Number(row.pv_capacity_kwp);
+  let source: PvView["capacity_source"] = capacity === null ? null : "business";
+  if (capacity === null) {
+    const fromMeters = await meterCapacityKwp();
+    if (fromMeters !== null) { capacity = fromMeters; source = "meters"; }
+  }
+  return {
+    capacity_kwp: capacity === null ? null : capacity.toFixed(3),
+    capacity_source: source,
+    commissioned_on: row.pv_commissioned_on,
+    tax_override: row.pv_tax_override,
+    status: pvTaxStatus({ capacityKwp: capacity, year, override: row.pv_tax_override }),
+    feed_in: await meterFeedIn(year),
+  };
+}
 
 // ── EÜR ──────────────────────────────────────────────────────────────────────
 
@@ -367,7 +460,17 @@ async function euerOf(c: Caller, id: number, year: number | undefined): Promise<
     .map((a) => ({ asset_id: a.id, name: a.name, afa: Math.round(Number(depreciationOfYear(a, y).afa) * 100) }))
     .filter((a) => a.afa !== 0);
   const bookings = await euerBookings(c, row.booking_tag, y);
-  return buildEuer({ year: y, business: row.name, tag: row.booking_tag, lines: row.euer_lines, bookings, afa });
+  const report = buildEuer({ year: y, business: row.name, tag: row.booking_tag, lines: row.euer_lines, bookings, afa });
+  if (row.kind === "photovoltaik") {
+    const pv = await pvView(row, y);
+    report.tax_exempt = { exempt: pv.status.exempt, reason: pv.status.reason };
+    if (pv.status.exempt === true) report.hints.unshift(`Steuerfrei: ${pv.status.reason} The figures below are for information; nothing goes into Anlage G or Anlage EÜR.`);
+    else if (pv.status.exempt === null) report.hints.unshift(pv.status.reason);
+    if (pv.feed_in?.revenue_eur !== null && pv.feed_in?.revenue_eur !== undefined) {
+      report.hints.push(`Meters: feed-in of ${y} from the energy report ${pv.feed_in.revenue_eur.toFixed(2)} EUR${pv.feed_in.exported_kwh !== null ? ` for ${pv.feed_in.exported_kwh.toFixed(0)} kWh` : ""}${pv.feed_in.complete ? "" : " (readings incomplete)"}; compare with the income lines.`);
+    }
+  }
+  return report;
 }
 
 export const getBusinessEuer = api(
