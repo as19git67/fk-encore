@@ -8,19 +8,21 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { meter } from "~encore/clients";
-import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
+import { documents, meter } from "~encore/clients";
+import { and, asc, desc, eq, gte, inArray, isNull as sqlIsNull, lte } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
 import {
   financeBusiness,
   financeBusinessAsset,
+  financeBusinessDocument,
   financeBusinessParcel,
   financeTag,
   financeTagTransaction,
   financeTransaction,
   type BusinessAssetKind,
+  type BusinessDocumentTarget,
   type BusinessKind,
   type BusinessTaxSection,
   type EuerLineDefinition,
@@ -714,6 +716,146 @@ export const deleteParcel = api(
     requireManage(c);
     await loadParcel(c, parcelId);
     await db.delete(financeBusinessParcel).where(eq(financeBusinessParcel.id, parcelId));
+    return { deleted: true };
+  },
+);
+
+// ── documents ────────────────────────────────────────────────────────────────
+
+const DOCUMENT_TARGETS: readonly BusinessDocumentTarget[] = ["business", "asset", "parcel"];
+const MAX_BUSINESS_DOCUMENTS = 500;
+
+/** What the documents module says about a document, as far as the business page needs it. */
+export interface LinkedDocumentMeta {
+  id: number;
+  title: string | null;
+  original_filename: string;
+  doc_date: string | null;
+  category_slug: string | null;
+  correspondent_display: string | null;
+  sender: string | null;
+}
+
+export interface BusinessDocumentLink {
+  id: number;
+  business_id: number;
+  document_id: number;
+  target_kind: BusinessDocumentTarget;
+  target_id: number | null;
+  /** The asset's or parcel's name, for the list. */
+  target_name: string | null;
+  note: string | null;
+  created_at: string;
+  /** null when the document is gone or the caller may not read it. */
+  document: LinkedDocumentMeta | null;
+}
+
+interface DocumentLike { id: number; title?: string | null; original_filename?: string; doc_date?: string | null; category_slug?: string | null; correspondent_display?: string | null; sender?: string | null }
+
+/** The document as the caller sees it, or null when they may not. */
+async function documentMeta(id: number): Promise<LinkedDocumentMeta | null> {
+  try {
+    const d = (await documents.getDocument({ id })) as unknown as DocumentLike;
+    return {
+      id: d.id, title: d.title ?? null, original_filename: d.original_filename ?? "", doc_date: d.doc_date ?? null,
+      category_slug: d.category_slug ?? null, correspondent_display: d.correspondent_display ?? null, sender: d.sender ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function targetNames(businessId: number): Promise<{ assets: Map<number, string>; parcels: Map<number, string> }> {
+  const assets = await db.select({ id: financeBusinessAsset.id, name: financeBusinessAsset.name }).from(financeBusinessAsset).where(eq(financeBusinessAsset.business_id, businessId));
+  const parcels = await db.select({ id: financeBusinessParcel.id, gemarkung: financeBusinessParcel.gemarkung, flurstueck: financeBusinessParcel.flurstueck }).from(financeBusinessParcel).where(eq(financeBusinessParcel.business_id, businessId));
+  return {
+    assets: new Map(assets.map((a) => [a.id, a.name])),
+    parcels: new Map(parcels.map((p) => [p.id, `${p.gemarkung} Flst. ${p.flurstueck}`])),
+  };
+}
+
+function targetName(row: { target_kind: BusinessDocumentTarget; target_id: number | null }, names: { assets: Map<number, string>; parcels: Map<number, string> }): string | null {
+  if (row.target_kind === "asset" && row.target_id !== null) return names.assets.get(row.target_id) ?? null;
+  if (row.target_kind === "parcel" && row.target_id !== null) return names.parcels.get(row.target_id) ?? null;
+  return null;
+}
+
+export const listBusinessDocuments = api(
+  { expose: true, method: "GET", path: "/finance/businesses/:id/documents", auth: true },
+  async ({ id }: { id: number }): Promise<{ items: BusinessDocumentLink[] }> => {
+    const c = caller();
+    await loadBusiness(c, id);
+    const rows = await db.select().from(financeBusinessDocument).where(eq(financeBusinessDocument.business_id, id)).orderBy(desc(financeBusinessDocument.created_at), desc(financeBusinessDocument.id));
+    const names = await targetNames(id);
+    const items: BusinessDocumentLink[] = [];
+    for (const r of rows) {
+      items.push({
+        id: r.id, business_id: r.business_id, document_id: r.document_id, target_kind: r.target_kind, target_id: r.target_id,
+        target_name: targetName(r, names), note: r.note, created_at: r.created_at,
+        document: await documentMeta(r.document_id),
+      });
+    }
+    return { items };
+  },
+);
+
+export interface BusinessDocumentInput {
+  document_id: number;
+  /** "business" (default), "asset" or "parcel"; the latter two need target_id. */
+  target_kind?: BusinessDocumentTarget;
+  target_id?: number | null;
+  note?: string | null;
+}
+
+export const linkBusinessDocument = api(
+  { expose: true, method: "POST", path: "/finance/businesses/:id/documents", auth: true },
+  async ({ id, ...req }: BusinessDocumentInput & { id: number }): Promise<BusinessDocumentLink> => {
+    const c = caller();
+    requireManage(c);
+    await loadBusiness(c, id);
+    const documentId = Number(req.document_id);
+    if (!Number.isInteger(documentId) || documentId <= 0) throw APIError.invalidArgument("document_id is required");
+    const kind = oneOf(req.target_kind, DOCUMENT_TARGETS, "target_kind", "business");
+    let targetId: number | null = null;
+    if (kind !== "business") {
+      targetId = Number(req.target_id);
+      if (!Number.isInteger(targetId) || targetId <= 0) throw APIError.invalidArgument(`target_id is required for a ${kind}`);
+      const names = await targetNames(id);
+      const known = kind === "asset" ? names.assets.has(targetId) : names.parcels.has(targetId);
+      if (!known) throw APIError.notFound(`${kind} ${targetId} does not belong to business ${id}`);
+    }
+    // The link is only made for a document the caller can read now.
+    const meta = await documentMeta(documentId);
+    if (!meta) throw APIError.notFound(`document ${documentId} not found or not readable`);
+    const all = await db.select({ id: financeBusinessDocument.id }).from(financeBusinessDocument).where(eq(financeBusinessDocument.business_id, id));
+    if (all.length >= MAX_BUSINESS_DOCUMENTS) throw APIError.resourceExhausted(`at most ${MAX_BUSINESS_DOCUMENTS} documents per business`);
+    const existing = await db.select({ id: financeBusinessDocument.id }).from(financeBusinessDocument).where(and(
+      eq(financeBusinessDocument.business_id, id),
+      eq(financeBusinessDocument.document_id, documentId),
+      eq(financeBusinessDocument.target_kind, kind),
+      targetId === null ? sqlIsNull(financeBusinessDocument.target_id) : eq(financeBusinessDocument.target_id, targetId),
+    )).limit(1);
+    if (existing.length) throw APIError.alreadyExists("this document is already linked there");
+    const [row] = await db.insert(financeBusinessDocument).values({
+      business_id: id, document_id: documentId, target_kind: kind, target_id: targetId, note: text(req.note, "note"),
+    }).returning();
+    const names = await targetNames(id);
+    return {
+      id: row!.id, business_id: id, document_id: documentId, target_kind: kind, target_id: targetId,
+      target_name: targetName(row!, names), note: row!.note, created_at: row!.created_at, document: meta,
+    };
+  },
+);
+
+export const unlinkBusinessDocument = api(
+  { expose: true, method: "DELETE", path: "/finance/business-documents/:linkId", auth: true },
+  async ({ linkId }: { linkId: number }): Promise<{ deleted: boolean }> => {
+    const c = caller();
+    requireManage(c);
+    const [row] = await db.select().from(financeBusinessDocument).where(eq(financeBusinessDocument.id, linkId)).limit(1);
+    if (!row) throw APIError.notFound(`link ${linkId} not found`);
+    await loadBusiness(c, row.business_id);
+    await db.delete(financeBusinessDocument).where(eq(financeBusinessDocument.id, linkId));
     return { deleted: true };
   },
 );

@@ -484,3 +484,21 @@ describe("euer_report", () => {
     expect(out.block?.rows.map((r) => [r.kind, r.sum])).toEqual([["income", 860], ["expense", 96.4], ["expense", 50], ["afa", 2400]]);
   });
 });
+
+describe("business_documents", () => {
+  it("lists the linked documents with what they are linked to, and leaves unreadable ones out of the block", async () => {
+    clients.finance.listBusinessDocuments.mockResolvedValue({ items: [
+      { id: 1, document_id: 71, target_kind: "parcel", target_id: 3, target_name: "Musterfeld Flst. 12/3", note: "Pacht ab 2025", document: { id: 71, title: "Pachtvertrag Musterfeld", original_filename: "71.pdf", doc_date: "2025-03-01", category_slug: "landwirtschaft-pacht", correspondent_display: "Beispiel Agrar GbR", sender: null } },
+      { id: 2, document_id: 72, target_kind: "asset", target_id: 7, target_name: "Stall", note: null, document: { id: 72, title: null, original_filename: "dach.pdf", doc_date: null, category_slug: null, correspondent_display: null, sender: "Beispiel Dachdecker" } },
+      { id: 3, document_id: 73, target_kind: "business", target_id: null, target_name: null, note: null, document: null },
+    ] });
+    const out = await tool("business_documents").run({ business_id: 2 }, ctx());
+    expect(clients.finance.listBusinessDocuments).toHaveBeenCalledWith({ id: 2 });
+    expect(out.text).toContain("71 | Pachtvertrag Musterfeld | 2025-03-01 | Beispiel Agrar GbR | parcel Musterfeld Flst. 12/3 | Pacht ab 2025");
+    expect(out.text).toContain("72 | dach.pdf | - | Beispiel Dachdecker | asset Stall | -");
+    expect(out.text).toContain("73 | (not readable) | - | - | business | -");
+    expect(out.text).toContain("3 linked document(s), 1 not readable by the user");
+    expect(out.ref).toEqual({ type: "document", ids: [71, 72] });
+    expect(out.block?.rows.map((r) => [r.id, r.subtitle])).toEqual([[71, "Fläche Musterfeld Flst. 12/3"], [72, "Anlagegut Stall"]]);
+  });
+});

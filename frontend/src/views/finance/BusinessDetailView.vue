@@ -14,6 +14,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Textarea from 'primevue/textarea'
+import { searchDocuments, type SearchDocumentSummary } from '../../api/documents'
 import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
 import Message from 'primevue/message'
@@ -28,7 +29,8 @@ import { useAuthStore } from '../../stores/auth'
 import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
 import {
   createBusinessAsset, createBusinessParcel, deleteBusiness, deleteBusinessAsset, deleteBusinessParcel, downloadBusinessEuerPdf,
-  getBusiness, getBusinessAssetSchedule, getBusinessEuer, updateBusiness, updateBusinessAsset, updateBusinessParcel,
+  getBusiness, getBusinessAssetSchedule, getBusinessEuer, linkBusinessDocument, listBusinessDocuments, unlinkBusinessDocument, updateBusiness, updateBusinessAsset, updateBusinessParcel,
+  type BusinessDocumentLink, type BusinessDocumentTarget,
   type BusinessAsset, type BusinessAssetKind, type BusinessDetail, type BusinessKind, type BusinessParcel,
   type BusinessTaxSection, type DepreciationYear, type EuerLine, type EuerLineKind, type EuerReport, type ParcelUsage, type PvTaxOverride,
 } from '../../api/finance'
@@ -284,6 +286,134 @@ async function saveLines() {
     linesError.value = fail(e, 'Speichern fehlgeschlagen')
   } finally {
     linesSaving.value = false
+  }
+}
+
+// ── documents ───────────────────────────────────────────────────────────
+
+const docs = ref<BusinessDocumentLink[]>([])
+const docsLoading = ref(false)
+const docsError = ref<string | null>(null)
+
+async function loadDocs() {
+  docsLoading.value = true
+  docsError.value = null
+  try {
+    docs.value = (await listBusinessDocuments(id.value)).items
+  } catch (e: unknown) {
+    docsError.value = fail(e, 'Dokumente konnten nicht geladen werden')
+  } finally {
+    docsLoading.value = false
+  }
+}
+
+watch(id, loadDocs, { immediate: true })
+
+interface DocGroup { key: string; label: string; items: BusinessDocumentLink[] }
+
+/** The links by what they hang on: the business first, then each asset and parcel in page order. */
+const docGroups = computed<DocGroup[]>(() => {
+  const groups: DocGroup[] = []
+  const general = docs.value.filter((d) => d.target_kind === 'business')
+  if (general.length) groups.push({ key: 'business', label: 'Betrieb', items: general })
+  for (const a of data.value?.assets ?? []) {
+    const items = docs.value.filter((d) => d.target_kind === 'asset' && d.target_id === a.id)
+    if (items.length) groups.push({ key: `asset-${a.id}`, label: `Anlagegut ${a.name}`, items })
+  }
+  for (const p of data.value?.parcels ?? []) {
+    const items = docs.value.filter((d) => d.target_kind === 'parcel' && d.target_id === p.id)
+    if (items.length) groups.push({ key: `parcel-${p.id}`, label: `Fläche ${parcelLabel(p)}`, items })
+  }
+  const orphans = docs.value.filter((d) => !groups.some((g) => g.items.includes(d)))
+  if (orphans.length) groups.push({ key: 'other', label: 'Ohne Ziel', items: orphans })
+  return groups
+})
+
+function docTitle(d: BusinessDocumentLink): string {
+  return d.document ? (d.document.title ?? d.document.original_filename) : `Dokument ${d.document_id} (nicht lesbar)`
+}
+
+async function removeDoc(d: BusinessDocumentLink) {
+  const ok = await askConfirm({ header: 'Verknüpfung lösen', message: `„${docTitle(d)}“ vom Betrieb lösen? Das Dokument selbst bleibt erhalten.`, acceptLabel: 'Lösen', danger: true })
+  if (!ok) return
+  try {
+    await unlinkBusinessDocument(d.id)
+    await loadDocs()
+  } catch (e: unknown) {
+    docsError.value = fail(e, 'Lösen fehlgeschlagen')
+  }
+}
+
+// ── link a document ─────────────────────────────────────────────────────
+
+interface TargetOption { value: string; label: string; kind: BusinessDocumentTarget; id: number | null }
+
+const linkDialog = ref(false)
+const linkSaving = ref(false)
+const linkError = ref<string | null>(null)
+const linkQuery = ref('')
+const linkOnlyCategory = ref(true)
+const linkResults = ref<SearchDocumentSummary[]>([])
+const linkSearching = ref(false)
+const linkTarget = ref('business')
+const linkNote = ref('')
+let linkSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+const targetOptions = computed<TargetOption[]>(() => [
+  { value: 'business', label: 'Betrieb allgemein', kind: 'business', id: null },
+  ...(data.value?.assets ?? []).map((a) => ({ value: `asset-${a.id}`, label: `Anlagegut: ${a.name}`, kind: 'asset' as const, id: a.id })),
+  ...(data.value?.parcels ?? []).map((p) => ({ value: `parcel-${p.id}`, label: `Fläche: ${parcelLabel(p)}`, kind: 'parcel' as const, id: p.id })),
+])
+
+function openLink(target = 'business') {
+  linkTarget.value = target
+  linkQuery.value = ''
+  linkNote.value = ''
+  linkResults.value = []
+  linkError.value = null
+  linkOnlyCategory.value = !!data.value?.business.document_category
+  linkDialog.value = true
+  void runLinkSearch()
+}
+
+async function runLinkSearch() {
+  linkSearching.value = true
+  try {
+    const filters = linkOnlyCategory.value && data.value?.business.document_category ? { category: data.value.business.document_category } : {}
+    const res = await searchDocuments(linkQuery.value.trim(), 'hybrid', 20, filters)
+    linkResults.value = res.items
+  } catch (e: unknown) {
+    linkError.value = fail(e, 'Suche fehlgeschlagen')
+  } finally {
+    linkSearching.value = false
+  }
+}
+
+function onLinkQuery() {
+  if (linkSearchTimer) clearTimeout(linkSearchTimer)
+  linkSearchTimer = setTimeout(() => void runLinkSearch(), 300)
+}
+
+watch(linkOnlyCategory, () => void runLinkSearch())
+
+function alreadyLinked(docId: number): boolean {
+  const t = targetOptions.value.find((o) => o.value === linkTarget.value)
+  return docs.value.some((d) => d.document_id === docId && d.target_kind === t?.kind && (d.target_id ?? null) === (t?.id ?? null))
+}
+
+async function pickDoc(d: SearchDocumentSummary) {
+  const t = targetOptions.value.find((o) => o.value === linkTarget.value)
+  if (!t) return
+  linkSaving.value = true
+  linkError.value = null
+  try {
+    await linkBusinessDocument(id.value, { document_id: d.id, target_kind: t.kind, target_id: t.id, note: linkNote.value.trim() || null })
+    await loadDocs()
+    linkDialog.value = false
+  } catch (e: unknown) {
+    linkError.value = fail(e, 'Verknüpfen fehlgeschlagen')
+  } finally {
+    linkSaving.value = false
   }
 }
 
@@ -723,7 +853,75 @@ async function removeParcel(p: BusinessParcel) {
           </DataTable>
         </ScrollX>
       </section>
+
+      <section class="section">
+        <header class="section-head">
+          <h2>Dokumente</h2>
+          <Button v-if="canWrite" label="Dokument verknüpfen" icon="pi pi-link" size="small" severity="secondary" outlined @click="openLink()" />
+        </header>
+
+        <ErrorBanner v-if="docsError" :message="docsError" closable @retry="loadDocs" @close="docsError = null" />
+        <PageSkeleton v-else-if="docsLoading && docs.length === 0" variant="list" :count="3" />
+        <EmptyState
+          v-else-if="docs.length === 0"
+          icon="pi pi-file"
+          title="Noch kein Dokument verknüpft"
+          message="Pachtverträge an die Fläche, Rechnungen ans Anlagegut, Bescheide an den Betrieb."
+        />
+        <div v-else class="doc-groups">
+          <div v-for="g in docGroups" :key="g.key" class="doc-group">
+            <h3 class="doc-group-title">{{ g.label }}</h3>
+            <ul class="doc-list">
+              <li v-for="d in g.items" :key="d.id" class="doc-row">
+                <RouterLink v-if="d.document" :to="`/dokumente/${d.document_id}`" class="doc-main">
+                  <span class="cell-name">{{ docTitle(d) }}</span>
+                  <span class="cell-sub">{{ [fmtDate(d.document.doc_date), d.document.correspondent_display ?? d.document.sender, d.note].filter((x) => x && x !== '–').join(' · ') }}</span>
+                </RouterLink>
+                <span v-else class="doc-main">
+                  <span class="cell-name">{{ docTitle(d) }}</span>
+                  <span v-if="d.note" class="cell-sub">{{ d.note }}</span>
+                </span>
+                <Button v-if="canWrite" icon="pi pi-times" text rounded size="small" aria-label="Verknüpfung lösen" @click="removeDoc(d)" />
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
     </template>
+
+    <!-- link a document -->
+    <Dialog v-model:visible="linkDialog" modal header="Dokument verknüpfen" class="dialog-md">
+      <Message v-if="linkError" severity="error" :closable="false">{{ linkError }}</Message>
+      <div class="field">
+        <label for="l-target">Verknüpfen mit</label>
+        <Select id="l-target" v-model="linkTarget" :options="targetOptions" option-label="label" option-value="value" />
+      </div>
+      <div class="field">
+        <label for="l-note">Notiz (optional)</label>
+        <InputText id="l-note" v-model="linkNote" placeholder="z. B. Pacht ab 2025" />
+      </div>
+      <div class="field">
+        <label for="l-q">Dokument suchen</label>
+        <InputText id="l-q" v-model="linkQuery" placeholder="Titel, Absender, Inhalt …" @input="onLinkQuery" />
+        <label v-if="data?.business.document_category" class="field-check">
+          <input v-model="linkOnlyCategory" type="checkbox" /> nur Kategorie „{{ data.business.document_category }}“
+        </label>
+      </div>
+      <PageSkeleton v-if="linkSearching && linkResults.length === 0" variant="list" :count="3" />
+      <p v-else-if="linkResults.length === 0" class="lines-intro">Keine Dokumente gefunden.</p>
+      <ul v-else class="doc-list doc-list--pick">
+        <li v-for="d in linkResults" :key="d.id" class="doc-row">
+          <span class="doc-main">
+            <span class="cell-name">{{ d.title ?? d.original_filename }}</span>
+            <span class="cell-sub">{{ [fmtDate(d.doc_date), d.correspondent_display ?? d.sender, d.category_slug].filter((x) => x && x !== '–').join(' · ') }}</span>
+          </span>
+          <Button :label="alreadyLinked(d.id) ? 'Verknüpft' : 'Verknüpfen'" size="small" :disabled="alreadyLinked(d.id) || linkSaving" @click="pickDoc(d)" />
+        </li>
+      </ul>
+      <template #footer>
+        <Button label="Schließen" severity="secondary" text @click="linkDialog = false" />
+      </template>
+    </Dialog>
 
     <!-- business -->
     <Dialog v-model:visible="businessDialog" modal header="Betrieb bearbeiten" class="dialog-md">
@@ -935,6 +1133,69 @@ async function removeParcel(p: BusinessParcel) {
   gap: var(--space-2) var(--space-5);
   justify-content: flex-end;
   font-size: var(--text-sm);
+}
+
+.doc-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.doc-group-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--p-text-muted-color);
+}
+
+.doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.doc-list--pick {
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: var(--focus-ring-reach);
+  margin: calc(-1 * var(--focus-ring-reach));
+}
+
+.doc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 0.5rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+}
+
+.doc-main {
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+a.doc-main:hover .cell-name {
+  text-decoration: underline;
+}
+
+a.doc-main:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.field-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--p-text-muted-color);
 }
 
 .section-link {

@@ -299,6 +299,16 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "farm-lease-contracts",
+    title: "Pachtverträge der Landwirtschaft",
+    question: "Wo sind die Pachtverträge der Landwirtschaft?",
+    expect: [{ tool: "business_documents", args: { business_id: 2 } }],
+    results: {
+      list_businesses: { rows: [{ id: 1, name: "PV-Anlage Dach", kind: "photovoltaik" }, { id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
+      business_documents: { rows: [{ document_id: 71, title: "Pachtvertrag Musterfeld", date: "2025-03-01", from: "Beispiel Agrar GbR", linked_to: "parcel Musterfeld Flst. 12/3" }] },
+    },
+  },
+  {
     id: "farm-euer-pdf",
     title: "EÜR als PDF",
     question: "Erstell mir die EÜR 2025 der Landwirtschaft als PDF.",

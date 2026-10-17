@@ -167,4 +167,56 @@ export const euerReport: ToolSpec = {
   },
 };
 
-export const BUSINESS_TOOLS = [listBusinesses, businessAssets, euerReport];
+interface BusinessDocumentItem { id: number; document_id: number; target_kind: "business" | "asset" | "parcel"; target_id: number | null; target_name: string | null; note: string | null; document: { id: number; title: string | null; original_filename: string; doc_date: string | null; category_slug: string | null; correspondent_display: string | null; sender: string | null } | null }
+
+const TARGET_LABEL: Record<string, string> = { business: "business", asset: "asset", parcel: "parcel" };
+
+export const businessDocuments: ToolSpec = {
+  name: "business_documents",
+  kind: "read",
+  summary: "The documents linked to one business: the lease contracts on its parcels, the invoices on its assets, the notices on the business itself, each with title, date, correspondent and what it is linked to. Use it for 'Pachtvertrag der Fläche', 'Rechnung zum Stall', 'Unterlagen der Landwirtschaft'.",
+  permissions: FINANCE,
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      business_id: { type: "integer", description: "id from list_businesses" },
+    },
+    required: ["business_id"],
+  },
+  async run(args) {
+    const id = int(args.business_id);
+    if (id === undefined) throw new Error("business_id is required");
+    const res = await (finance.listBusinessDocuments({ id })) as unknown as { items: BusinessDocumentItem[] };
+    const rows = res.items;
+    const readable = rows.filter((r) => r.document);
+    return {
+      text: table(
+        ["document_id", "title", "date", "from", "linked_to", "note"],
+        rows.map((r) => [
+          r.document_id,
+          r.document ? (r.document.title ?? r.document.original_filename) : "(not readable)",
+          r.document?.doc_date,
+          r.document?.correspondent_display ?? r.document?.sender,
+          `${TARGET_LABEL[r.target_kind]}${r.target_name ? ` ${r.target_name}` : ""}`,
+          r.note,
+        ]),
+        { cap: 60, note: rows.length ? `${rows.length} linked document(s)${readable.length < rows.length ? `, ${rows.length - readable.length} not readable by the user` : ""}. Open one with get_document_summary(ids = …).` : "No document is linked to this business yet; the user links one on the business page." },
+      ),
+      digest: digestOf("business_documents", rows.length, rows.map((r) => r.document_id)),
+      rowCount: rows.length,
+      ref: readable.length ? { type: "document", ids: readable.map((r) => r.document_id) } : undefined,
+      block: {
+        kind: "documents",
+        tool: "business_documents",
+        rows: readable.map((r) => ({
+          id: r.document_id, title: r.document!.title ?? r.document!.original_filename, date: r.document!.doc_date, from: r.document!.correspondent_display ?? r.document!.sender,
+          subtitle: `${r.target_kind === "business" ? "Betrieb" : r.target_kind === "asset" ? "Anlagegut" : "Fläche"}${r.target_name ? ` ${r.target_name}` : ""}`, route: `/dokumente/${r.document_id}`,
+        })),
+        route: `/finanzen/betriebe/${id}`,
+      },
+    };
+  },
+};
+
+export const BUSINESS_TOOLS = [listBusinesses, businessAssets, euerReport, businessDocuments];
