@@ -143,9 +143,12 @@ export interface ProposalEdits {
 }
 
 export function executeProposal(id: number, edits?: ProposalEdits): Promise<Proposal> {
+  // The endpoint reads `edits` from the body, so Encore parses the body on
+  // every call: an empty one fails with "EOF while parsing a value". A card
+  // without edits sends an empty object.
   return apiFetch(`/assistant/proposals/${id}/execute`, {
     method: 'POST',
-    body: edits ? JSON.stringify({ edits }) : undefined,
+    body: JSON.stringify(edits ? { edits } : {}),
   })
 }
 
