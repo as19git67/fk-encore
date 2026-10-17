@@ -22,7 +22,10 @@ import {
   expectedDates,
   isEnded,
   isIsoDate,
+  isRegular,
+  isSuperseded,
   listUpcomingDebits,
+  seriesProfile,
 } from "./upcoming-debits";
 
 // ── next-date computation ──────────────────────────────────────────────────
@@ -110,10 +113,70 @@ describe("expectedDates", () => {
 });
 
 describe("isEnded", () => {
-  it("a series silent for more than three intervals has ended", () => {
+  it("a series that missed two cycles has ended", () => {
     expect(isEnded("2026-06-01", 30, "2026-10-15")).toBe(true);
-    expect(isEnded("2026-08-01", 30, "2026-10-15")).toBe(false);
+    // One missed booking is late, not gone.
+    expect(isEnded("2026-08-20", 30, "2026-10-15")).toBe(false);
+    expect(isEnded("2026-08-01", 30, "2026-10-15")).toBe(true);
     expect(isEnded("2025-12-05", 365, "2026-10-15")).toBe(false);
+    // Yearly, silent for two years and a bit.
+    expect(isEnded("2024-09-01", 365, "2026-10-15")).toBe(true);
+  });
+});
+
+describe("seriesProfile and isRegular", () => {
+  it("a monthly instalment with small jitter is regular, at its latest level", () => {
+    const profile = seriesProfile([
+      { date: "2026-09-02", amount: -84 }, { date: "2026-08-01", amount: -84 }, { date: "2026-07-01", amount: -79 },
+      { date: "2026-06-02", amount: -79 }, { date: "2026-05-01", amount: -79 }, { date: "2026-04-01", amount: -79 },
+    ])!;
+    expect(profile).toMatchObject({ intervalDays: 31, amountCents: -8400, count: 6 });
+    expect(profile.intervalCv).toBeLessThan(0.1);
+    expect(isRegular(profile)).toBe(true);
+  });
+
+  it("a shop visited whenever, for whatever, is not a series", () => {
+    const profile = seriesProfile([
+      { date: "2026-09-28", amount: -12.99 }, { date: "2026-09-25", amount: -149 }, { date: "2026-08-02", amount: -8.5 },
+      { date: "2026-06-14", amount: -63.2 }, { date: "2026-06-10", amount: -22 }, { date: "2026-02-01", amount: -310 },
+    ])!;
+    expect(profile.intervalCv).toBeGreaterThan(0.3);
+    expect(profile.amountCv).toBeGreaterThan(0.35);
+    expect(isRegular(profile)).toBe(false);
+  });
+
+  it("regular dates with erratic amounts are not a series either", () => {
+    const profile = seriesProfile([
+      { date: "2026-09-01", amount: -5 }, { date: "2026-08-01", amount: -120 }, { date: "2026-07-01", amount: -40 },
+      { date: "2026-06-01", amount: -9 }, { date: "2026-05-01", amount: -250 },
+    ])!;
+    expect(profile.intervalCv).toBeLessThan(0.1);
+    expect(isRegular(profile)).toBe(false);
+  });
+
+  it("a split booking on one day is one payment; too few bookings say nothing", () => {
+    const profile = seriesProfile([
+      { date: "2026-09-01", amount: -30 }, { date: "2026-09-01", amount: -54 },
+      { date: "2026-08-01", amount: -84 }, { date: "2026-07-01", amount: -84 },
+    ])!;
+    expect(profile).toMatchObject({ intervalDays: 31, amountCents: -8400, count: 3 });
+    expect(seriesProfile([{ date: "2026-09-01", amount: -1 }, { date: "2026-08-01", amount: -1 }])).toBeNull();
+  });
+});
+
+describe("isSuperseded", () => {
+  const old = { id: 1, counterparty: "Beispiel Versicherung AG", typical_amount: "-412.00", typical_interval_days: 365, first_seen: "2021-11-10", last_seen: "2024-11-10" };
+  it("a series that went on under a new mandate after it fell silent is superseded", () => {
+    const successor = { id: 2, counterparty: "Beispiel Versicherung", typical_amount: "-425.00", typical_interval_days: 365, first_seen: "2025-11-12", last_seen: "2025-11-12" };
+    expect(isSuperseded(old, [old, successor])).toBe(true);
+    // The successor itself is not.
+    expect(isSuperseded(successor, [old, successor])).toBe(false);
+  });
+  it("a parallel contract, another creditor or another amount is no successor", () => {
+    const parallel = { ...old, id: 3, first_seen: "2023-01-05", last_seen: "2025-11-05" };
+    const otherCreditor = { ...old, id: 4, counterparty: "Muster Energie GmbH", first_seen: "2025-11-12", last_seen: "2025-11-12" };
+    const otherAmount = { ...old, id: 5, typical_amount: "-90.00", first_seen: "2025-11-12", last_seen: "2025-11-12" };
+    expect(isSuperseded(old, [old, parallel, otherCreditor, otherAmount])).toBe(false);
   });
 });
 
@@ -183,6 +246,19 @@ async function insertMandate(values: {
     })
     .returning({ id: financeRecurringMandate.id });
   return row.id;
+}
+
+/** Bookings matched to a mandate by its reference, as the detector matches them. */
+async function insertBookings(accountId: number, counterparty: string, bookings: Array<[string, string]>): Promise<void> {
+  await db.insert(financeTransaction).values(bookings.map(([date, amount], i) => ({
+    account_id: accountId,
+    booking_date: date,
+    amount,
+    currency_code: "EUR",
+    counterparty,
+    mandate_ref: `REF-${counterparty}`,
+    dedupe_hash: `${counterparty}-${date}-${i}`,
+  })));
 }
 
 describe("GET /finance/mandates/upcoming", () => {
@@ -292,6 +368,49 @@ describe("GET /finance/mandates/upcoming", () => {
     expect((await listUpcomingDebits({ channel: "direct_debit" })).items.map((i) => i.counterparty)).toEqual(["Stadtwerke Musterstadt"]);
     expect((await listUpcomingDebits({ channel: "transfer" })).items.map((i) => i.counterparty)).toEqual(["Miete Beispiel GmbH"]);
     await expect(listUpcomingDebits({ channel: "cash" as never })).rejects.toThrow("channel");
+  });
+
+  it("judges a series by its bookings: a shop visited whenever is not expected, an instalment is", async () => {
+    const giro = await insertAccount("Giro");
+    await db.insert(financeAccountAccess).values({ account_id: giro, user_id: 901, level: "read" });
+    // The detector's running average made 30 days of it; the bookings say otherwise.
+    await insertMandate({ accountId: giro, counterparty: "Beispiel Versand", amount: "-45.00", interval: 30, lastSeen: "2026-09-28" });
+    await insertBookings(giro, "Beispiel Versand", [
+      ["2026-09-28", "-12.99"], ["2026-09-25", "-149.00"], ["2026-08-02", "-8.50"],
+      ["2026-06-14", "-63.20"], ["2026-06-10", "-22.00"], ["2026-02-01", "-310.00"],
+    ]);
+    // The running average drifted to 33 days and 90 €; the bookings say the 1st and 84 €.
+    await insertMandate({ accountId: giro, counterparty: "Stadtwerke Musterstadt", amount: "-90.00", interval: 33, lastSeen: "2026-10-01" });
+    await insertBookings(giro, "Stadtwerke Musterstadt", [
+      ["2026-10-01", "-84.00"], ["2026-09-01", "-84.00"], ["2026-08-03", "-84.00"],
+      ["2026-07-01", "-79.00"], ["2026-06-01", "-79.00"], ["2026-05-02", "-79.00"],
+    ]);
+
+    setAuth("901", ["finance.view"]);
+    const res = await listUpcomingDebits({ from: "2026-10-15", until: "2026-11-30" });
+    expect(res.items.map((i) => [i.counterparty, i.expected_date, i.typical_amount, i.interval_days])).toEqual([
+      ["Stadtwerke Musterstadt", "2026-11-01", "-84.00", 30],
+    ]);
+  });
+
+  it("lists a series that moved to another account once, under its new mandate", async () => {
+    const alt = await insertAccount("Altes Giro");
+    const neu = await insertAccount("Neues Giro");
+    await db.insert(financeAccountAccess).values({ account_id: alt, user_id: 901, level: "read" });
+    await db.insert(financeAccountAccess).values({ account_id: neu, user_id: 901, level: "read" });
+    // Yearly premium, last paid from the old account two years ago — silent,
+    // but not for two full cycles yet.
+    const oldId = await insertMandate({ accountId: alt, counterparty: "Beispiel Versicherung AG", amount: "-412.00", interval: 365, lastSeen: "2024-11-10" });
+    await db.update(financeRecurringMandate).set({ first_seen: "2021-11-10" }).where(sql`id = ${oldId}`);
+    // Since then from the new account; the bank issued a new mandate.
+    const newId = await insertMandate({ accountId: neu, counterparty: "Beispiel Versicherung", amount: "-425.00", interval: 365, lastSeen: "2025-11-12", count: 3 });
+    await db.update(financeRecurringMandate).set({ first_seen: "2025-11-12" }).where(sql`id = ${newId}`);
+
+    setAuth("901", ["finance.view"]);
+    const res = await listUpcomingDebits({ from: "2026-10-15", until: "2026-11-30" });
+    expect(res.items.map((i) => [i.counterparty, i.account_label, i.expected_date])).toEqual([
+      ["Beispiel Versicherung", "Neues Giro", "2026-11-12"],
+    ]);
   });
 
   it("needs finance.view", async () => {
