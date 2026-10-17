@@ -18,6 +18,7 @@ import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
 import { useConfirm } from 'primevue/useconfirm'
 import PageLayout from '../components/layout/PageLayout.vue'
+import { navigatedFromHistory } from '../utils/scrollMemory'
 import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import AssistantComposer from '../components/assistant/AssistantComposer.vue'
 import AssistantMessage from '../components/assistant/AssistantMessage.vue'
@@ -105,7 +106,10 @@ async function loadConversation(id: number | null) {
     messages.value = detail.messages
     context.value = detail.context ?? []
     loadError.value = null
-    scrollToEnd()
+    // Coming back from a row opened out of an answer, `PageLayout` puts the
+    // reader on that row (or the offset they left); anything else starts at
+    // the newest message.
+    if (!navigatedFromHistory()) scrollToEnd()
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : 'Die Unterhaltung konnte nicht geladen werden'
     messages.value = []
@@ -320,6 +324,7 @@ function remove(conversation: ConversationSummary) {
             :role="m.role"
             :content="m.content"
             :blocks="m.blocks"
+            :message-id="m.id > 0 ? m.id : undefined"
           />
           <AssistantMessage
             v-if="live && liveFor === activeId"

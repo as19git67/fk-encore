@@ -690,7 +690,10 @@ async function removeParcel(p: BusinessParcel) {
       <section v-if="data.pv" class="section">
         <header class="section-head">
           <h2>Photovoltaik {{ year }}</h2>
-          <RouterLink :to="{ name: 'zaehler-auswertungen' }" class="section-link">Zähler-Auswertungen</RouterLink>
+          <span class="section-actions">
+            <RouterLink :to="{ name: 'zaehler-auswertungen' }" class="section-link">Zähler-Auswertungen</RouterLink>
+            <Button v-if="canWrite" label="Anlage bearbeiten" icon="pi pi-pencil" text size="small" @click="openBusinessEdit" />
+          </span>
         </header>
         <div :class="['pv-card', { 'pv-card--exempt': data.pv.status.exempt === true, 'pv-card--taxable': data.pv.status.exempt === false }]">
           <dl class="pv-facts">
@@ -698,7 +701,7 @@ async function removeParcel(p: BusinessParcel) {
               <dt>Leistung</dt>
               <dd>
                 <template v-if="data.pv.capacity_kwp">{{ num.format(Number(data.pv.capacity_kwp)) }} kWp<span v-if="data.pv.capacity_source === 'meters'" class="cell-sub-inline"> (aus den Zählertarifen)</span></template>
-                <template v-else>nicht eingetragen</template>
+                <template v-else>nicht eingetragen<span v-if="canWrite" class="cell-sub-inline"> (über „Anlage bearbeiten“)</span></template>
               </dd>
             </div>
             <div>
@@ -1006,7 +1009,11 @@ async function removeParcel(p: BusinessParcel) {
       </div>
       <div class="field-row">
         <div class="field"><label for="a-date">Anschaffungsdatum</label><DatePicker id="a-date" v-model="assetForm.acquisition_date" date-format="dd.mm.yy" show-icon fluid /></div>
-        <div class="field"><label for="a-cost">Anschaffungskosten</label><InputNumber id="a-cost" v-model="assetForm.acquisition_cost" mode="currency" currency="EUR" locale="de-DE" :min="0" /></div>
+        <div class="field">
+          <label for="a-cost">Anschaffungskosten</label>
+          <InputNumber id="a-cost" v-model="assetForm.acquisition_cost" mode="currency" currency="EUR" locale="de-DE" :min="0" />
+          <small class="field-hint">Bemessungsgrundlage der AfA. Ohne Vorsteuerabzug brutto eingeben, mit Vorsteuerabzug netto.</small>
+        </div>
       </div>
       <div class="field">
         <label for="a-start">AfA-Beginn (nur wenn abweichend, z. B. Fertigstellung)</label>
@@ -1247,6 +1254,7 @@ a.doc-main:focus-visible {
 .section-actions {
   display: flex;
   gap: var(--space-2);
+  align-items: center;
 }
 
 .euer-intro {
