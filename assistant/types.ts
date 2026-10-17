@@ -41,6 +41,7 @@ export type BlockKind =
   | "activity"
   | "businesses"
   | "business_assets"
+  | "euer"
   | "proposal"
   | "table";
 

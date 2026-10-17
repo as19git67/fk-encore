@@ -2875,6 +2875,16 @@ export type BusinessTaxSection = 'anlage-l' | 'anlage-g' | 'anlage-v'
 export type BusinessAssetKind = 'gebaeude' | 'flaeche' | 'maschine' | 'pv_anlage' | 'sonstiges'
 export type ParcelUsage = 'acker' | 'gruenland' | 'wald' | 'hof' | 'sonstiges'
 
+export type EuerLineKind = 'income' | 'expense'
+
+/** One line of the Anlage EÜR; a booking goes to the first line one of its tags names. */
+export interface EuerLineDefinition {
+  name: string
+  kind: EuerLineKind
+  tags: string[]
+  form_line?: string | null
+}
+
 export interface Business {
   id: number
   owner_user_id: number
@@ -2882,6 +2892,11 @@ export interface Business {
   kind: BusinessKind
   tax_section: BusinessTaxSection
   notes: string | null
+  /** The user tag that marks a booking as this business's. */
+  booking_tag: string | null
+  /** The document category (slug) its receipts are classified into. */
+  document_category: string | null
+  euer_lines: EuerLineDefinition[]
   asset_count: number
   parcel_count: number
   created_at: string
@@ -2893,6 +2908,48 @@ export interface BusinessInput {
   kind: BusinessKind
   tax_section?: BusinessTaxSection
   notes?: string | null
+  booking_tag?: string | null
+  document_category?: string | null
+  euer_lines?: EuerLineDefinition[]
+}
+
+export interface EuerBooking {
+  id: number
+  booking_date: string
+  counterparty: string | null
+  purpose: string | null
+  amount: string
+  tags: string[]
+  is_tax_relevant: boolean
+}
+
+export interface EuerLine {
+  name: string
+  kind: EuerLineKind
+  form_line: string | null
+  tags: string[]
+  count: number
+  /** Cents, positive in the line's direction. */
+  sum: number
+  bookings: EuerBooking[]
+  /** "Sonstige": what no line claimed, by sign. */
+  other: boolean
+}
+
+export interface EuerReport {
+  year: number
+  business: string
+  tag: string | null
+  income: EuerLine[]
+  expenses: EuerLine[]
+  afa: { sum: number; assets: { asset_id: number; name: string; afa: number }[] }
+  /** Cents. */
+  total_income: number
+  total_expenses: number
+  result: number
+  booking_count: number
+  unflagged: number
+  hints: string[]
 }
 
 /** One year of an asset's schedule; money as decimal strings. */
@@ -2989,6 +3046,28 @@ export async function updateBusiness(id: number, input: Partial<BusinessInput>):
 
 export async function deleteBusiness(id: number): Promise<{ deleted: boolean }> {
   return apiFetch(`/finance/businesses/${id}`, { method: 'DELETE' })
+}
+
+export async function getBusinessEuer(id: number, year?: number): Promise<EuerReport> {
+  return apiFetch(`/finance/businesses/${id}/euer${year ? `?year=${year}` : ''}`)
+}
+
+/** Fetches the EÜR PDF with the bearer token and hands it to the browser as a download. */
+export async function downloadBusinessEuerPdf(id: number, year: number): Promise<void> {
+  const token = localStorage.getItem('auth_token')
+  const resp = await fetch(`${API_BASE_URL}/finance/businesses/${id}/euer/pdf?year=${year}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    cache: 'no-store',
+  })
+  if (!resp.ok) throw new Error(`PDF konnte nicht erstellt werden (${resp.status})`)
+  const blob = await resp.blob()
+  const match = /filename="([^"]+)"/.exec(resp.headers.get('Content-Disposition') ?? '')
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = match?.[1] ?? `euer-${year}.pdf`
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export async function createBusinessAsset(businessId: number, input: BusinessAssetInput): Promise<BusinessAsset> {

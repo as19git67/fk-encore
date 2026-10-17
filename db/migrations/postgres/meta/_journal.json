@@ -1807,6 +1807,13 @@
       "when": 1788739200210,
       "tag": "0257_finance_businesses",
       "breakpoints": true
+    },
+    {
+      "idx": 258,
+      "version": "7",
+      "when": 1788739201210,
+      "tag": "0258_finance_business_euer",
+      "breakpoints": true
     }
   ]
 }

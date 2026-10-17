@@ -74,6 +74,15 @@ export function renderTaxWorksheetPdf(w: TaxWorksheet, generatedOn: string): Pro
     row(["", `Summe aller steuerrelevanten Buchungen (${w.bookingCount})`, money(w.bookingTotal)], true);
   }
 
+  for (const b of w.businesses) {
+    heading(`${b.name} – EÜR ${w.year} (${b.tax_section.replace("anlage-", "Anlage ").toUpperCase()})`);
+    row(["", `Betriebseinnahmen (${b.bookings} Buchungen)`, money(b.income)]);
+    row(["", "Betriebsausgaben einschließlich AfA", money(b.expenses)]);
+    row(["", "davon AfA aus dem Anlagenverzeichnis", money(b.afa)]);
+    rule();
+    row(["", b.result >= 0 ? "Gewinn" : "Verlust", money(b.result)], true);
+    for (const h of b.hints) row(["", `Hinweis: ${h}`, ""]);
+  }
   if (w.depot) {
     heading(`Depot ${w.year} (Anlage KAP, aus dem Portfolio)`);
     row(["", `Erträge aus Dividenden und Zinsen (${w.depot.dividend_count} Zahlungen)`, money(Number(w.depot.income))]);

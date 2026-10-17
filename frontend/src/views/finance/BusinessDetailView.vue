@@ -27,10 +27,10 @@ import { useConfirmAsync } from '../../composables/useConfirmAsync'
 import { useAuthStore } from '../../stores/auth'
 import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
 import {
-  createBusinessAsset, createBusinessParcel, deleteBusiness, deleteBusinessAsset, deleteBusinessParcel,
-  getBusiness, getBusinessAssetSchedule, updateBusiness, updateBusinessAsset, updateBusinessParcel,
+  createBusinessAsset, createBusinessParcel, deleteBusiness, deleteBusinessAsset, deleteBusinessParcel, downloadBusinessEuerPdf,
+  getBusiness, getBusinessAssetSchedule, getBusinessEuer, updateBusiness, updateBusinessAsset, updateBusinessParcel,
   type BusinessAsset, type BusinessAssetKind, type BusinessDetail, type BusinessKind, type BusinessParcel,
-  type BusinessTaxSection, type DepreciationYear, type ParcelUsage,
+  type BusinessTaxSection, type DepreciationYear, type EuerLine, type EuerLineKind, type EuerReport, type ParcelUsage,
 } from '../../api/finance'
 import {
   ASSET_KIND_OPTIONS, BUSINESS_KIND_OPTIONS, PARCEL_USAGE_OPTIONS, TAX_SECTION_OPTIONS,
@@ -116,11 +116,11 @@ function fail(e: unknown, fallback: string): string {
 const businessDialog = ref(false)
 const businessSaving = ref(false)
 const businessError = ref<string | null>(null)
-const businessForm = ref<{ name: string; kind: BusinessKind; tax_section: BusinessTaxSection; notes: string }>({ name: '', kind: 'landwirtschaft', tax_section: 'anlage-l', notes: '' })
+const businessForm = ref<{ name: string; kind: BusinessKind; tax_section: BusinessTaxSection; notes: string; booking_tag: string; document_category: string }>({ name: '', kind: 'landwirtschaft', tax_section: 'anlage-l', notes: '', booking_tag: '', document_category: '' })
 
 function openBusinessEdit() {
   const b = data.value!.business
-  businessForm.value = { name: b.name, kind: b.kind, tax_section: b.tax_section, notes: b.notes ?? '' }
+  businessForm.value = { name: b.name, kind: b.kind, tax_section: b.tax_section, notes: b.notes ?? '', booking_tag: b.booking_tag ?? '', document_category: b.document_category ?? '' }
   businessError.value = null
   businessDialog.value = true
 }
@@ -129,9 +129,11 @@ async function saveBusiness() {
   businessSaving.value = true
   businessError.value = null
   try {
-    await updateBusiness(id.value, { ...businessForm.value, notes: businessForm.value.notes || null })
+    const f = businessForm.value
+    await updateBusiness(id.value, { ...f, notes: f.notes || null, booking_tag: f.booking_tag.trim() || null, document_category: f.document_category.trim() || null })
     businessDialog.value = false
     await load()
+    await loadEuer()
   } catch (e: unknown) {
     businessError.value = fail(e, 'Speichern fehlgeschlagen')
   } finally {
@@ -153,6 +155,110 @@ async function removeBusiness() {
     void router.push({ name: 'finance-businesses' })
   } catch (e: unknown) {
     error.value = fail(e, 'Löschen fehlgeschlagen')
+  }
+}
+
+// ── EÜR ─────────────────────────────────────────────────────────────────
+
+const euer = ref<EuerReport | null>(null)
+const euerLoading = ref(false)
+const euerError = ref<string | null>(null)
+const euerOpen = ref<Set<string>>(new Set())
+const pdfBusy = ref(false)
+
+async function loadEuer() {
+  euerLoading.value = true
+  euerError.value = null
+  try {
+    euer.value = await getBusinessEuer(id.value, year.value)
+  } catch (e: unknown) {
+    euerError.value = fail(e, 'EÜR konnte nicht geladen werden')
+  } finally {
+    euerLoading.value = false
+  }
+}
+
+watch([id, year], loadEuer, { immediate: true })
+
+function lineKey(l: EuerLine): string {
+  return `${l.kind}-${l.name}`
+}
+
+function toggleLine(l: EuerLine) {
+  const key = lineKey(l)
+  if (euerOpen.value.has(key)) euerOpen.value.delete(key)
+  else euerOpen.value.add(key)
+}
+
+function cents(c: number): string {
+  return eur.format(c / 100)
+}
+
+async function downloadPdf() {
+  pdfBusy.value = true
+  try {
+    await downloadBusinessEuerPdf(id.value, year.value)
+  } catch (e: unknown) {
+    error.value = fail(e, 'PDF konnte nicht erstellt werden')
+  } finally {
+    pdfBusy.value = false
+  }
+}
+
+const documentsRoute = computed(() => {
+  const slug = data.value?.business.document_category
+  return slug ? { name: 'dokumente-list', query: { category: slug, dateFrom: `${year.value}-01-01`, dateTo: `${year.value}-12-31` } } : null
+})
+
+// ── EÜR lines editor ────────────────────────────────────────────────────
+
+interface LineForm { name: string; kind: EuerLineKind; tags: string; form_line: string }
+
+const linesDialog = ref(false)
+const linesSaving = ref(false)
+const linesError = ref<string | null>(null)
+const lineForms = ref<LineForm[]>([])
+const LINE_KIND_OPTIONS: { value: EuerLineKind; label: string }[] = [
+  { value: 'income', label: 'Einnahme' },
+  { value: 'expense', label: 'Ausgabe' },
+]
+
+function openLinesEdit() {
+  lineForms.value = (data.value?.business.euer_lines ?? []).map((l) => ({ name: l.name, kind: l.kind, tags: l.tags.join(', '), form_line: l.form_line ?? '' }))
+  linesError.value = null
+  linesDialog.value = true
+}
+
+function addLine(kind: EuerLineKind) {
+  lineForms.value.push({ name: '', kind, tags: '', form_line: '' })
+}
+
+function removeLine(i: number) {
+  lineForms.value.splice(i, 1)
+}
+
+function moveLine(i: number, dir: -1 | 1) {
+  const j = i + dir
+  if (j < 0 || j >= lineForms.value.length) return
+  const list = lineForms.value
+  ;[list[i], list[j]] = [list[j]!, list[i]!]
+}
+
+async function saveLines() {
+  const lines = lineForms.value
+    .map((l) => ({ name: l.name.trim(), kind: l.kind, tags: l.tags.split(',').map((t) => t.trim()).filter(Boolean), form_line: l.form_line.trim() || null }))
+    .filter((l) => l.name)
+  linesSaving.value = true
+  linesError.value = null
+  try {
+    await updateBusiness(id.value, { euer_lines: lines })
+    linesDialog.value = false
+    await load()
+    await loadEuer()
+  } catch (e: unknown) {
+    linesError.value = fail(e, 'Speichern fehlgeschlagen')
+  } finally {
+    linesSaving.value = false
   }
 }
 
@@ -426,6 +532,85 @@ async function removeParcel(p: BusinessParcel) {
         </ScrollX>
       </section>
 
+      <section class="section">
+        <header class="section-head">
+          <h2>Einnahmen-Überschuss-Rechnung {{ year }}</h2>
+          <span class="section-actions">
+            <Button v-if="canWrite" label="Zeilen" icon="pi pi-sliders-h" size="small" severity="secondary" outlined @click="openLinesEdit" />
+            <Button label="PDF" icon="pi pi-file-pdf" size="small" severity="secondary" outlined :loading="pdfBusy" :disabled="!euer" @click="downloadPdf" />
+          </span>
+        </header>
+
+        <ErrorBanner v-if="euerError" :message="euerError" closable @retry="loadEuer" @close="euerError = null" />
+        <PageSkeleton v-else-if="euerLoading && !euer" variant="list" :count="4" />
+        <template v-else-if="euer">
+          <p class="euer-intro">
+            <template v-if="euer.tag">Buchungen mit dem Tag „{{ euer.tag }}“ ({{ euer.booking_count }} in {{ euer.year }}), nach ihren weiteren Tags den Zeilen zugeordnet; die AfA kommt aus dem Anlagenverzeichnis.</template>
+            <template v-else>Der Betrieb hat noch keinen Buchungs-Tag. Trage ihn unter „Betrieb bearbeiten“ ein, damit seine Buchungen hier erscheinen.</template>
+            <RouterLink v-if="documentsRoute" :to="documentsRoute" class="euer-docs-link">Belege {{ year }} in den Dokumenten</RouterLink>
+          </p>
+
+          <ScrollX>
+            <table class="euer-table">
+              <tbody>
+                <tr class="euer-head"><th colspan="3">Betriebseinnahmen</th></tr>
+                <template v-for="l in euer.income" :key="lineKey(l)">
+                  <tr :class="['euer-line', { 'euer-line--other': l.other }]">
+                    <td class="euer-form">{{ l.form_line ?? '' }}</td>
+                    <td>
+                      <button v-if="l.count" type="button" class="euer-toggle" :aria-expanded="euerOpen.has(lineKey(l))" @click="toggleLine(l)">
+                        <i :class="['pi', euerOpen.has(lineKey(l)) ? 'pi-chevron-down' : 'pi-chevron-right']" aria-hidden="true" />
+                        {{ l.name }} <span class="cell-sub-inline">({{ l.count }})</span>
+                      </button>
+                      <span v-else class="euer-empty">{{ l.name }}</span>
+                    </td>
+                    <td class="col-num">{{ cents(l.sum) }}</td>
+                  </tr>
+                  <tr v-for="b in (euerOpen.has(lineKey(l)) ? l.bookings : [])" :key="b.id" class="euer-booking">
+                    <td></td>
+                    <td><RouterLink :to="{ name: 'finance-transaction-detail', params: { id: b.id } }">{{ fmtDate(b.booking_date) }} · {{ b.counterparty ?? '–' }}<span v-if="b.purpose" class="cell-sub-inline"> · {{ b.purpose }}</span></RouterLink><span v-if="!b.is_tax_relevant" class="euer-flag"> nicht steuerrelevant</span></td>
+                    <td class="col-num">{{ money(b.amount) }}</td>
+                  </tr>
+                </template>
+                <tr class="euer-sum"><td></td><td>Summe Betriebseinnahmen</td><td class="col-num">{{ cents(euer.total_income) }}</td></tr>
+
+                <tr class="euer-head"><th colspan="3">Betriebsausgaben</th></tr>
+                <template v-for="l in euer.expenses" :key="lineKey(l)">
+                  <tr :class="['euer-line', { 'euer-line--other': l.other }]">
+                    <td class="euer-form">{{ l.form_line ?? '' }}</td>
+                    <td>
+                      <button v-if="l.count" type="button" class="euer-toggle" :aria-expanded="euerOpen.has(lineKey(l))" @click="toggleLine(l)">
+                        <i :class="['pi', euerOpen.has(lineKey(l)) ? 'pi-chevron-down' : 'pi-chevron-right']" aria-hidden="true" />
+                        {{ l.name }} <span class="cell-sub-inline">({{ l.count }})</span>
+                      </button>
+                      <span v-else class="euer-empty">{{ l.name }}</span>
+                    </td>
+                    <td class="col-num">{{ cents(l.sum) }}</td>
+                  </tr>
+                  <tr v-for="b in (euerOpen.has(lineKey(l)) ? l.bookings : [])" :key="b.id" class="euer-booking">
+                    <td></td>
+                    <td><RouterLink :to="{ name: 'finance-transaction-detail', params: { id: b.id } }">{{ fmtDate(b.booking_date) }} · {{ b.counterparty ?? '–' }}<span v-if="b.purpose" class="cell-sub-inline"> · {{ b.purpose }}</span></RouterLink><span v-if="!b.is_tax_relevant" class="euer-flag"> nicht steuerrelevant</span></td>
+                    <td class="col-num">{{ money(b.amount) }}</td>
+                  </tr>
+                </template>
+                <tr class="euer-line">
+                  <td class="euer-form"></td>
+                  <td>Absetzung für Abnutzung (AfA)<span v-if="euer.afa.assets.length" class="cell-sub-inline"> ({{ euer.afa.assets.map((a) => a.name).join(', ') }})</span></td>
+                  <td class="col-num">{{ cents(euer.afa.sum) }}</td>
+                </tr>
+                <tr class="euer-sum"><td></td><td>Summe Betriebsausgaben</td><td class="col-num">{{ cents(euer.total_expenses) }}</td></tr>
+
+                <tr class="euer-result"><td></td><td>{{ euer.result >= 0 ? 'Gewinn' : 'Verlust' }}</td><td class="col-num">{{ cents(euer.result) }}</td></tr>
+              </tbody>
+            </table>
+          </ScrollX>
+
+          <ul v-if="euer.hints.length" class="euer-hints">
+            <li v-for="h in euer.hints" :key="h">{{ h }}</li>
+          </ul>
+        </template>
+      </section>
+
       <section v-if="data.business.kind === 'landwirtschaft' || data.parcels.length > 0 || canWrite" class="section">
         <header class="section-head">
           <h2>Flächen</h2>
@@ -483,10 +668,47 @@ async function removeParcel(p: BusinessParcel) {
         <div class="field"><label for="b-kind">Art</label><Select id="b-kind" v-model="businessForm.kind" :options="BUSINESS_KIND_OPTIONS" option-label="label" option-value="value" /></div>
         <div class="field"><label for="b-section">Steuerformular</label><Select id="b-section" v-model="businessForm.tax_section" :options="TAX_SECTION_OPTIONS" option-label="label" option-value="value" /></div>
       </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="b-tag">Buchungs-Tag</label>
+          <InputText id="b-tag" v-model="businessForm.booking_tag" placeholder="z. B. Landwirtschaft" />
+          <small class="field-hint">Buchungen mit diesem Tag gehören zum Betrieb und bilden die EÜR.</small>
+        </div>
+        <div class="field">
+          <label for="b-category">Dokumentkategorie</label>
+          <InputText id="b-category" v-model="businessForm.document_category" placeholder="z. B. landwirtschaft" />
+          <small class="field-hint">Kategorie-Slug, in den die Belege einsortiert werden.</small>
+        </div>
+      </div>
       <div class="field"><label for="b-notes">Notizen</label><Textarea id="b-notes" v-model="businessForm.notes" rows="3" auto-resize /></div>
       <template #footer>
         <Button label="Abbrechen" severity="secondary" text @click="businessDialog = false" />
         <Button label="Speichern" icon="pi pi-check" :loading="businessSaving" @click="saveBusiness" />
+      </template>
+    </Dialog>
+
+    <!-- EÜR lines -->
+    <Dialog v-model:visible="linesDialog" modal header="Zeilen der Anlage EÜR" class="dialog-lg">
+      <Message v-if="linesError" severity="error" :closable="false">{{ linesError }}</Message>
+      <p class="lines-intro">Eine Buchung landet in der ersten Zeile, die einen ihrer Tags nennt. Was keine Zeile nennt, steht unter „Sonstige“. Die Formularzeile ist frei wählbar und erscheint im PDF.</p>
+      <div v-for="(l, i) in lineForms" :key="i" class="line-row">
+        <InputText v-model="l.name" placeholder="Bezeichnung" :aria-label="`Zeile ${i + 1}: Bezeichnung`" class="line-name" />
+        <Select v-model="l.kind" :options="LINE_KIND_OPTIONS" option-label="label" option-value="value" :aria-label="`Zeile ${i + 1}: Art`" class="line-kind" />
+        <InputText v-model="l.tags" placeholder="Tags, durch Komma getrennt" :aria-label="`Zeile ${i + 1}: Tags`" class="line-tags" />
+        <InputText v-model="l.form_line" placeholder="Formularzeile" :aria-label="`Zeile ${i + 1}: Formularzeile`" class="line-form" />
+        <span class="line-actions">
+          <Button icon="pi pi-arrow-up" text rounded size="small" :disabled="i === 0" aria-label="Zeile nach oben" @click="moveLine(i, -1)" />
+          <Button icon="pi pi-arrow-down" text rounded size="small" :disabled="i === lineForms.length - 1" aria-label="Zeile nach unten" @click="moveLine(i, 1)" />
+          <Button icon="pi pi-trash" text rounded size="small" severity="danger" aria-label="Zeile entfernen" @click="removeLine(i)" />
+        </span>
+      </div>
+      <div class="line-add">
+        <Button label="Einnahme-Zeile" icon="pi pi-plus" size="small" severity="secondary" text @click="addLine('income')" />
+        <Button label="Ausgabe-Zeile" icon="pi pi-plus" size="small" severity="secondary" text @click="addLine('expense')" />
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" text @click="linesDialog = false" />
+        <Button label="Speichern" icon="pi pi-check" :loading="linesSaving" @click="saveLines" />
       </template>
     </Dialog>
 
@@ -630,6 +852,141 @@ async function removeParcel(p: BusinessParcel) {
   gap: var(--space-2) var(--space-5);
   justify-content: flex-end;
   font-size: var(--text-sm);
+}
+
+.section-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.euer-intro {
+  margin: 0 0 var(--space-3);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+
+.euer-docs-link {
+  margin-left: var(--space-2);
+}
+
+.euer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.euer-table td,
+.euer-table th {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--p-content-border-color);
+  text-align: left;
+  vertical-align: top;
+}
+
+.euer-head th {
+  padding-top: var(--space-3);
+  font-weight: 600;
+  background: var(--p-content-hover-background);
+}
+
+.euer-form {
+  width: 6rem;
+  color: var(--p-text-muted-color);
+  white-space: nowrap;
+}
+
+.euer-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.euer-toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.euer-empty,
+.euer-booking td {
+  color: var(--p-text-muted-color);
+}
+
+.euer-booking td:nth-child(2) {
+  padding-left: var(--space-5);
+}
+
+.euer-line--other td:nth-child(2) {
+  font-style: italic;
+}
+
+.euer-flag {
+  color: var(--p-tag-warn-color);
+  font-size: var(--text-xs);
+}
+
+.euer-sum td {
+  font-weight: 600;
+}
+
+.euer-result td {
+  font-weight: 700;
+  font-size: var(--text-base);
+  border-top: 2px solid var(--p-text-color);
+  border-bottom: 0;
+}
+
+.cell-sub-inline {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-xs);
+}
+
+.euer-hints {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-4);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+
+.field-hint {
+  color: var(--p-text-muted-color);
+  font-size: var(--text-xs);
+}
+
+.lines-intro {
+  margin: 0 0 var(--space-3);
+  color: var(--p-text-muted-color);
+  font-size: var(--text-sm);
+}
+
+.line-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 2fr) 8rem minmax(8rem, 3fr) 7rem auto;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.line-actions {
+  white-space: nowrap;
+}
+
+.line-add {
+  display: flex;
+  gap: var(--space-2);
+}
+
+@media (max-width: 767px) {
+  .line-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .line-tags,
+  .line-actions {
+    grid-column: 1 / -1;
+  }
 }
 
 .schedule-intro {

@@ -279,6 +279,27 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
   {
+    id: "farm-euer",
+    title: "EÜR der Landwirtschaft",
+    question: "Wie sieht die Einnahmen-Überschuss-Rechnung der Landwirtschaft für 2025 aus?",
+    expect: [{ tool: "euer_report", args: { business_id: 2, year: 2025 } }],
+    results: {
+      list_businesses: { rows: [{ id: 1, name: "PV-Anlage Dach", kind: "photovoltaik" }, { id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
+      euer_report: { year: 2025, income: [{ name: "Pachteinnahmen", sum: 860 }], expenses: [{ name: "Grundsteuer", sum: 96.4 }], afa: 2400, total_income: 860, total_expenses: 2496.4, result: -1636.4 },
+    },
+  },
+  {
+    id: "farm-euer-pdf",
+    title: "EÜR als PDF",
+    question: "Erstell mir die EÜR 2025 der Landwirtschaft als PDF.",
+    expect: [{ tool: "euer_pdf", args: { business_id: 2, year: 2025 } }],
+    results: {
+      list_businesses: { rows: [{ id: 2, name: "Landwirtschaft Musterhof", kind: "landwirtschaft" }] },
+      euer_report: { year: 2025, total_income: 860, total_expenses: 2496.4, result: -1636.4 },
+      euer_pdf: { proposal: "EÜR 2025 Landwirtschaft Musterhof als PDF", status: "pending" },
+    },
+  },
+  {
     id: "latest-water-reading",
     title: "Letzter Zählerstand",
     question: "Was war der letzte Stand vom Wasserzähler?",

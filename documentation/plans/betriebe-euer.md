@@ -24,7 +24,7 @@ Anlage G, Anlage EÜR, Anlage AV/SZ where the forms ask).
 | What a business is | `finance_business`: name, kind (`landwirtschaft`, `photovoltaik`, `gewerbe`, `vermietung`), the Anlage it files under (`anlage-l`, `anlage-g`, `anlage-v`), the owner, notes. Read with `finance.view`, changed with `finance.accounts.manage`. |
 | Fixed assets | `finance_business_asset`: name, kind (`gebaeude`, `flaeche`, `maschine`, `pv_anlage`, `sonstiges`), acquisition date and cost, the AfA rate in percent (2 % for a building, 5 % for a PV system over 20 years, 0 for land), an optional AfA start that differs from the acquisition, disposal date and proceeds. The schedule is computed, never stored: linear, pro rata by month in the first and the last year (the month of acquisition counts), down to a residual value of 1 € while the asset is held, the disposal year pro rata up to the month of disposal with the gain or loss against the book value. |
 | Parcels | `finance_business_parcel`: Gemarkung, Flur, Flurstück, area in m², use (Acker, Grünland, Wald, Hof, Sonstiges), the lessee, lease period and annual rent, notes; optionally the asset that carries the land's cost. Land is not depreciated; it is tracked so the lease income per parcel and the ground tax can be checked and the sale of a parcel finds its cost. |
-| EÜR | Stage 2. The bookings of the year flagged tax-relevant and tagged for the business, mapped to the lines of the Anlage EÜR by a per-business mapping of tags to EÜR lines (Betriebseinnahmen: Pacht, Jagdpacht, Einspeisevergütung …; Betriebsausgaben: Grundsteuer, Versicherung, Instandhaltung, AfA …). AfA comes from the asset register as a non-cash expense. Rendered with the grouped report (`finance/grouped-report.ts`) and its PDF. |
+| EÜR | Stage 2. The bookings of the year carrying the business's tag (`booking_tag`; the tax flag is checked and counted, not required), mapped to the lines of the Anlage EÜR by the business's own list of lines (`euer_lines`: name, direction, tags, form line) (Betriebseinnahmen: Pacht, Jagdpacht, Einspeisevergütung …; Betriebsausgaben: Grundsteuer, Versicherung, Instandhaltung, AfA …). AfA comes from the asset register as a non-cash expense. Rendered with the grouped report (`finance/grouped-report.ts`) and its PDF. |
 | Photovoltaics | Stage 3. A PV business links the meters of the system; feed-in revenue per year comes from the grid-export meter and the feed-in tariff the meter module keeps (`feed_in`, `pv_capacity_kwp`, `pv_investment_net`). A system of at most 30 kWp (§ 3 Nr. 72 EStG, from 2022) is marked exempt: no EÜR, no Anlage G; the register still keeps the asset. |
 | Assistant | Stage 1 already: `list_businesses` and `business_assets(business_id, year)` read the register and the schedule; stage 2 adds `euer_report`, and the tax worksheet lists each business's EÜR under its Anlage. |
 | Documents | Stage 4. A lease contract links to its parcel, an invoice to its asset, through `document_links`; the Betrieb page shows them. |
@@ -34,6 +34,20 @@ Anlage G, Anlage EÜR, Anlage AV/SZ where the forms ask).
 **Stage 1 done**: migration 0257, `finance/depreciation.ts`,
 `finance/businesses.ts`, pages Finanzen › Betriebe and the business,
 assistant tools `list_businesses` and `business_assets`.
+
+**Stage 2 done**: migration 0258 (`booking_tag`, `document_category`,
+`euer_lines` on `finance_business`), `finance/euer.ts` (the EÜR as a pure
+function: bookings of the year carrying the business's tag sorted into the
+lines by their other tags, "Sonstige" by sign for the rest, the register's
+AfA as the one non-cash expense, totals and result in cents),
+`GET /finance/businesses/:id/euer?year=` and the PDF under `…/euer/pdf`
+(`finance/euer-pdf.ts`), the EÜR section with the lines editor on the
+business page, assistant tools `euer_report` and `euer_pdf`, and the
+businesses' EÜR in the tax worksheet under their Anlage. New businesses
+start with lines per kind (`defaultEuerLines`); the user's actual tags
+are the household's own — the farm's bookings carry the tag
+"Landwirtschaft" and the tax flag, its documents the category
+`landwirtschaft`.
 
 1. **Register** (this stage): tables, migration, `finance/depreciation.ts`
    (the schedule as a pure function with tests), CRUD endpoints under

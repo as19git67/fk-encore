@@ -6,11 +6,13 @@
  * is the model's arithmetic.
  */
 
-import { documents } from "~encore/clients";
+import { documents, finance } from "~encore/clients";
 import { int, str } from "../format";
 import type { WriteToolDefinition } from "../proposals";
 import { buildTaxWorksheet, worksheetText } from "../tax-worksheet";
 import { renderTaxWorksheetPdf } from "../tax-worksheet-pdf";
+import { createEuerPdf } from "../../finance/euer-pdf";
+import type { EuerReport } from "../../finance/euer";
 import type { ToolContext, ToolSpec } from "../types";
 
 const DOCUMENTS = ["module.documents", "documents.view"];
@@ -105,6 +107,62 @@ export const taxWorksheetPdf: WriteToolDefinition = {
       summary: `Ausfüllhilfe Steuer ${year} als Dokument abgelegt (${w.sections.length} Anlagen, ${w.bookingCount} Buchungen)`,
       route: `/dokumente/${stored.id}`,
       details: { document_id: stored.id, sections: w.sections.length, bookings: w.bookingCount },
+    };
+  },
+};
+
+const FINANCE_AND_DOCUMENTS = ["module.finance", "finance.view", "module.documents", "documents.view"];
+
+async function euerOf(args: Record<string, unknown>): Promise<{ id: number; r: EuerReport }> {
+  const id = int(args.business_id);
+  if (id === undefined) throw new Error("business_id is required (from list_businesses)");
+  const year = yearOf(args);
+  const r = (await finance.getBusinessEuer({ id, year })) as unknown as EuerReport;
+  return { id, r };
+}
+
+export const euerPdf: WriteToolDefinition = {
+  name: "euer_pdf",
+  summary: "Propose the Einnahmen-Überschuss-Rechnung of one business and year as a PDF ('EÜR <Betrieb> <Jahr>'), stored as a document: the income and expense lines with their bookings, the AfA from the asset register, the totals and the result. Read it first with euer_report when the user wants to see the figures.",
+  permissions: FINANCE_AND_DOCUMENTS,
+  parameters: {
+    type: "object",
+    properties: {
+      business_id: { type: "integer", description: "id from list_businesses" },
+      year: { type: "integer", description: "the tax year, e.g. 2025" },
+    },
+    required: ["business_id", "year"],
+  },
+  async prepare(args) {
+    const { id, r } = await euerOf(args);
+    if (!r.booking_count && !r.afa.sum) throw new Error(`the EÜR ${r.year} of ${r.business} is empty: no booking of ${r.year} carries its tag and no asset is depreciated`);
+    return {
+      summary: `EÜR ${r.year} ${r.business} als PDF: ${r.booking_count} Buchungen, Einnahmen ${(r.total_income / 100).toFixed(2)} €, Ausgaben ${(r.total_expenses / 100).toFixed(2)} €, ${r.result >= 0 ? "Gewinn" : "Verlust"} ${(r.result / 100).toFixed(2)} €`,
+      arguments: { business_id: id, year: r.year },
+      count: r.booking_count,
+      note: `${r.hints.length ? `Hints in the PDF: ${r.hints.join(" ")} ` : ""}The PDF is stored as a document.`,
+    };
+  },
+  async execute(args, ctx) {
+    const { id, r } = await euerOf(args);
+    const pdf = createEuerPdf(r, ctx.today);
+    const chunks: Buffer[] = [];
+    pdf.on("data", (c: Buffer) => chunks.push(c));
+    const buffer = await new Promise<Buffer>((resolve, reject) => {
+      pdf.on("end", () => resolve(Buffer.concat(chunks)));
+      pdf.on("error", reject);
+      pdf.end();
+    });
+    const stored = (await documents.storeGeneratedDocument({
+      filename: `EÜR ${r.business} ${r.year}.pdf`,
+      title: `Einnahmen-Überschuss-Rechnung ${r.year} ${r.business}`,
+      pdf_base64: buffer.toString("base64"),
+      linked_document_ids: [],
+    })) as unknown as { id: number };
+    return {
+      summary: `EÜR ${r.year} ${r.business} als Dokument abgelegt (${r.result >= 0 ? "Gewinn" : "Verlust"} ${(r.result / 100).toFixed(2)} €)`,
+      route: `/dokumente/${stored.id}`,
+      details: { document_id: stored.id, business_id: id, year: r.year, result: r.result },
     };
   },
 };

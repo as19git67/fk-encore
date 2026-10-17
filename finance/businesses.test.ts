@@ -6,13 +6,14 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 
 import db from "../db/database";
-import { financeBusiness } from "../db/schema";
+import { financeAccount, financeAccountAccess, financeAccountType, financeBusiness, financeTag, financeTagTransaction, financeTransaction } from "../db/schema";
 import {
-  createAsset, createBusiness, createParcel, deleteBusiness, getAssetSchedule, getBusiness, listBusinesses, updateAsset, updateBusiness,
+  createAsset, createBusiness, createParcel, deleteBusiness, getAssetSchedule, getBusiness, getBusinessEuer, listBusinesses, updateAsset, updateBusiness,
 } from "./businesses";
+import { createEuerPdf } from "./euer-pdf";
 
 const OWNER = 7310;
 const OTHER = 7311;
@@ -94,5 +95,91 @@ describe("businesses", () => {
     await expect(createAsset({ id: farm.id, name: "x", kind: "gebaeude", acquisition_date: "15.04.2020", acquisition_cost: 1 })).rejects.toThrow("YYYY-MM-DD");
     await expect(createAsset({ id: farm.id, name: "x", kind: "gebaeude", acquisition_date: "2020-04-15", acquisition_cost: -1 })).rejects.toThrow("non-negative");
     await expect(createParcel({ id: farm.id, gemarkung: "A", flurstueck: "1", asset_id: 999999 })).rejects.toThrow("does not belong");
+  });
+});
+
+describe("EÜR", () => {
+  const TAGS = ["Landwirtschaft-7310", "Pacht-7310", "Grundsteuer-7310"];
+
+  async function account(label: string): Promise<number> {
+    const [type] = await db.select({ id: financeAccountType.id }).from(financeAccountType).limit(1);
+    const [row] = await db.insert(financeAccount)
+      .values({ type_id: type!.id, currency_code: "EUR", account_number: `AN-${label}`, label })
+      .returning({ id: financeAccount.id });
+    return row!.id;
+  }
+  async function tagId(name: string): Promise<number> {
+    const [t] = await db.insert(financeTag).values({ name, source: "user" })
+      .onConflictDoUpdate({ target: [financeTag.name, financeTag.source], set: { name } })
+      .returning({ id: financeTag.id });
+    return t!.id;
+  }
+  async function booking(accountId: number, date: string, amount: string, tags: number[], flagged = true): Promise<number> {
+    const [row] = await db.insert(financeTransaction)
+      .values({ account_id: accountId, booking_date: `${date}T00:00:00`, amount, currency_code: "EUR", counterparty: "Beispiel Agrar GbR", purpose: "Pacht", is_tax_relevant: flagged, dedupe_hash: `test-euer-${accountId}-${date}-${amount}-${tags.join(".")}` })
+      .returning({ id: financeTransaction.id });
+    for (const t of tags) await db.insert(financeTagTransaction).values({ tag_id: t, transaction_id: row!.id });
+    return row!.id;
+  }
+
+  beforeEach(async () => {
+    const accounts = await db.select({ id: financeAccount.id }).from(financeAccount).where(inArray(financeAccount.label, ["Giro Hof 7310"]));
+    const ids = accounts.map((a) => a.id);
+    if (ids.length) {
+      await db.delete(financeTransaction).where(inArray(financeTransaction.account_id, ids));
+      await db.delete(financeAccountAccess).where(inArray(financeAccountAccess.account_id, ids));
+      await db.delete(financeAccount).where(inArray(financeAccount.id, ids));
+    }
+    await db.delete(financeTag).where(inArray(financeTag.name, TAGS));
+  });
+
+  it("builds the year's EÜR from the tagged bookings and the register's AfA, and serves it as a PDF", async () => {
+    setAuth(OWNER, MANAGE);
+    const farm = await createBusiness({ name: "Hof Beispielheim", kind: "landwirtschaft", booking_tag: TAGS[0] });
+    expect(farm.document_category).toBe("landwirtschaft");
+    expect(farm.euer_lines.map((l) => l.name)).toContain("Pachteinnahmen");
+    await updateBusiness({ id: farm.id, euer_lines: [
+      { name: "Pachteinnahmen", kind: "income", tags: [TAGS[1]!], form_line: "Zeile 14" },
+      { name: "Grundsteuer", kind: "expense", tags: [TAGS[2]!] },
+    ] });
+    await createAsset({ id: farm.id, name: "Stall", kind: "gebaeude", acquisition_date: "2020-01-01", acquisition_cost: 120000 });
+
+    const acct = await account("Giro Hof 7310");
+    await db.insert(financeAccountAccess).values({ account_id: acct, user_id: OWNER, level: "read" });
+    const [lw, pacht, grund] = await Promise.all(TAGS.map(tagId));
+    await booking(acct, "2025-03-01", "430.00", [lw!, pacht!]);
+    await booking(acct, "2025-09-01", "430.00", [lw!, pacht!]);
+    await booking(acct, "2025-02-10", "-96.40", [lw!, grund!], false);
+    await booking(acct, "2024-09-01", "430.00", [lw!, pacht!]);
+    await booking(acct, "2025-05-01", "-50.00", [pacht!]);
+
+    const r = await getBusinessEuer({ id: farm.id, year: 2025 });
+    expect(r.booking_count).toBe(3);
+    expect(r.income.find((l) => l.name === "Pachteinnahmen")).toMatchObject({ count: 2, sum: 86000, form_line: "Zeile 14" });
+    expect(r.expenses.find((l) => l.name === "Grundsteuer")).toMatchObject({ count: 1, sum: 9640 });
+    expect(r.afa).toEqual({ sum: 240000, assets: [{ asset_id: expect.any(Number), name: "Stall", afa: 240000 }] });
+    expect(r.total_income).toBe(86000);
+    expect(r.total_expenses).toBe(9640 + 240000);
+    expect(r.result).toBe(86000 - 249640);
+    expect(r.unflagged).toBe(1);
+
+    // Another reader without access to the account sees the business's lines but no bookings.
+    setAuth(OTHER, VIEW);
+    await expect(getBusinessEuer({ id: farm.id, year: 2025 })).rejects.toThrow(/not found/);
+
+    setAuth(OWNER, MANAGE);
+    const own = await updateBusiness({ id: farm.id, euer_lines: [{ name: "Pacht", kind: "income", tags: [TAGS[1]!] }] });
+    expect(own.euer_lines).toEqual([{ name: "Pacht", kind: "income", tags: [TAGS[1]], form_line: null }]);
+    const again = await getBusinessEuer({ id: farm.id, year: 2025 });
+    expect(again.expenses.map((l) => l.name)).toEqual(["Sonstige Betriebsausgaben"]);
+    expect(again.expenses[0]!.sum).toBe(9640);
+
+    await expect(updateBusiness({ id: farm.id, euer_lines: [{ name: "A", kind: "income", tags: [] }, { name: "a", kind: "expense", tags: [] }] })).rejects.toThrow(/appears twice/);
+
+    const pdf = createEuerPdf(again, "2026-10-17");
+    const chunks: Buffer[] = [];
+    pdf.on("data", (c: Buffer) => chunks.push(c));
+    await new Promise<void>((resolve) => { pdf.on("end", () => resolve()); pdf.end(); });
+    expect(Buffer.concat(chunks).subarray(0, 5).toString()).toBe("%PDF-");
   });
 });

@@ -94,4 +94,63 @@ export const businessAssets: ToolSpec = {
   },
 };
 
-export const BUSINESS_TOOLS = [listBusinesses, businessAssets];
+interface EuerLineItem { name: string; kind: "income" | "expense"; form_line: string | null; count: number; sum: number; other: boolean; bookings: { id: number; booking_date: string; counterparty: string | null; purpose: string | null; amount: string }[] }
+interface EuerResult { year: number; business: string; tag: string | null; income: EuerLineItem[]; expenses: EuerLineItem[]; afa: { sum: number; assets: { asset_id: number; name: string; afa: number }[] }; total_income: number; total_expenses: number; result: number; booking_count: number; unflagged: number; hints: string[] }
+
+const eur = (c: number) => `${(c / 100).toFixed(2)} EUR`;
+
+/** The EÜR as the model reads it: every figure printed, nothing left to add up. */
+export function euerText(r: EuerResult): string {
+  const out = [`EÜR ${r.year} of ${r.business}${r.tag ? ` (bookings tagged "${r.tag}")` : ""}: ${r.booking_count} bookings, AfA from the asset register. Amounts in EUR, each line in its own direction (income in, expenses out).`];
+  out.push("\n== Betriebseinnahmen ==");
+  for (const l of r.income) out.push(`  ${l.form_line ? `${l.form_line} · ` : ""}${l.name}: ${eur(l.sum)} (${l.count} booking${l.count === 1 ? "" : "s"})`);
+  out.push(`  Summe Betriebseinnahmen: ${eur(r.total_income)}`);
+  out.push("\n== Betriebsausgaben ==");
+  for (const l of r.expenses) out.push(`  ${l.form_line ? `${l.form_line} · ` : ""}${l.name}: ${eur(l.sum)} (${l.count} booking${l.count === 1 ? "" : "s"})`);
+  out.push(`  AfA: ${eur(r.afa.sum)}${r.afa.assets.length ? ` (${r.afa.assets.map((a) => `${a.name} ${eur(a.afa)}`).join(", ")})` : ""}`);
+  out.push(`  Summe Betriebsausgaben: ${eur(r.total_expenses)}`);
+  out.push(`\n${r.result >= 0 ? "Gewinn" : "Verlust"}: ${eur(r.result)} (= ${eur(r.total_income)} − ${eur(r.total_expenses)})`);
+  if (r.hints.length) out.push("\nHints:\n" + r.hints.map((h) => `  - ${h}`).join("\n"));
+  return out.join("\n");
+}
+
+export const euerReport: ToolSpec = {
+  name: "euer_report",
+  kind: "read",
+  summary: "The Einnahmen-Überschuss-Rechnung (EÜR) of one business for one year: the income and expense lines of the Anlage EÜR with their sums from the tagged bookings, the AfA from the asset register, the totals and the profit or loss, all computed by the server. Use it for 'EÜR', 'Gewinn der Landwirtschaft', 'Betriebseinnahmen/-ausgaben'; for the PDF, euer_pdf.",
+  permissions: FINANCE,
+  source: "hand",
+  parameters: {
+    type: "object",
+    properties: {
+      business_id: { type: "integer", description: "id from list_businesses" },
+      year: { type: "integer", description: "the tax year (default: the current year)" },
+    },
+    required: ["business_id"],
+  },
+  async run(args) {
+    const id = int(args.business_id);
+    if (id === undefined) throw new Error("business_id is required");
+    const year = int(args.year, { min: 1900, max: 2200 });
+    const r = await (finance.getBusinessEuer({ id, year })) as unknown as EuerResult;
+    const rows = [
+      ...r.income.map((l) => ({ id: `income-${l.name}`, name: l.name, kind: "income", form_line: l.form_line, count: l.count, sum: l.sum / 100 })),
+      ...r.expenses.map((l) => ({ id: `expense-${l.name}`, name: l.name, kind: "expense", form_line: l.form_line, count: l.count, sum: l.sum / 100 })),
+      { id: "afa", name: "AfA (Anlagenverzeichnis)", kind: "afa", form_line: null, count: r.afa.assets.length, sum: r.afa.sum / 100 },
+    ];
+    return {
+      text: euerText(r),
+      digest: `[earlier result of euer_report: business ${id} "${r.business}", year ${r.year}, income ${eur(r.total_income)}, expenses ${eur(r.total_expenses)}, result ${eur(r.result)}]`,
+      rowCount: r.income.length + r.expenses.length + 1,
+      block: {
+        kind: "euer",
+        tool: "euer_report",
+        subtitle: `${r.business} · ${r.year} · ${r.result >= 0 ? "Gewinn" : "Verlust"} ${(r.result / 100).toFixed(2)} €`,
+        rows,
+        route: `/finanzen/betriebe/${id}?year=${r.year}`,
+      },
+    };
+  },
+};
+
+export const BUSINESS_TOOLS = [listBusinesses, businessAssets, euerReport];
