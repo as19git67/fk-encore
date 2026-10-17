@@ -127,6 +127,7 @@ vi.mock("~encore/clients", () => ({
   },
   documents: {
     batchReclassify: vi.fn(() => Promise.resolve({ affected_documents: 0 })),
+    getDocument: vi.fn(() => Promise.reject(new Error("documents.getDocument is not scripted in this test"))),
   },
 }));
 

@@ -4844,3 +4844,20 @@ export const financeBusinessParcel = pgTable(
   },
   (table) => [index("finance_business_parcel_by_business").on(table.business_id)],
 );
+
+export type BusinessDocumentTarget = "business" | "asset" | "parcel";
+
+/** A document linked to a business, one of its assets or one of its parcels (stage 4). */
+export const financeBusinessDocument = pgTable(
+  "finance_business_document",
+  {
+    id: serial("id").primaryKey(),
+    business_id: integer("business_id").notNull().references(() => financeBusiness.id, { onDelete: "cascade" }),
+    document_id: integer("document_id").notNull(),
+    target_kind: text("target_kind").$type<BusinessDocumentTarget>().notNull(),
+    target_id: integer("target_id"),
+    note: text("note"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("finance_business_document_by_document").on(table.document_id)],
+);

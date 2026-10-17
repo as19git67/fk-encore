@@ -27,7 +27,7 @@ Anlage G, Anlage EÜR, Anlage AV/SZ where the forms ask).
 | EÜR | Stage 2. The bookings of the year carrying the business's tag (`booking_tag`; the tax flag is checked and counted, not required), mapped to the lines of the Anlage EÜR by the business's own list of lines (`euer_lines`: name, direction, tags, form line) (Betriebseinnahmen: Pacht, Jagdpacht, Einspeisevergütung …; Betriebsausgaben: Grundsteuer, Versicherung, Instandhaltung, AfA …). AfA comes from the asset register as a non-cash expense. Rendered with the grouped report (`finance/grouped-report.ts`) and its PDF. |
 | Photovoltaics | Stage 3. The business carries the system's capacity in kWp (prefilled from the meters' `pv_capacity_kwp` tariff entry when empty), its commissioning date and an optional override of the exemption; the year's feed-in comes from the meters' energy report (`gridExport`, `feedInRevenueEur`). A system of at most 30 kWp (§ 3 Nr. 72 EStG, from 2022) is exempt: its EÜR is for information only, nothing goes into Anlage G; the register still keeps the asset. |
 | Assistant | Stage 1 already: `list_businesses` and `business_assets(business_id, year)` read the register and the schedule; stage 2 adds `euer_report`, and the tax worksheet lists each business's EÜR under its Anlage. |
-| Documents | Stage 4. A lease contract links to its parcel, an invoice to its asset, through `document_links`; the Betrieb page shows them. |
+| Documents | Stage 4. A lease contract links to its parcel, an invoice to its asset, a notice to the business, through `finance_business_document` in the finance service (not `document_links`, which joins two documents); the Betrieb page shows them grouped by target and links them from a search over the documents. |
 
 ## Stages
 
@@ -59,6 +59,18 @@ from the meters' energy report (`GET /meters/reports/energy`); an exempt
 system's EÜR is marked "for information" on the page, in the PDF, in
 `euer_report` and in the tax worksheet. The capacity is the user's entry,
 never a constant in the code.
+
+**Stage 4 done**: migration 0260 (`finance_business_document`: the link
+of a document to the business, one of its assets or one of its parcels,
+with a note), endpoints `GET/POST /finance/businesses/:id/documents` and
+`DELETE /finance/business-documents/:id` (a link is only made for a
+document the caller can read now, checked through `documents.getDocument`;
+the list carries each document's meta as the documents module serves it,
+or null when it is no longer readable), the Dokumente section on the
+business page grouped by target with a search dialog over the documents
+(category of the business preselected), and the assistant tool
+`business_documents`. The link lives in the finance service; the
+documents module is not changed.
 
 1. **Register** (this stage): tables, migration, `finance/depreciation.ts`
    (the schedule as a pure function with tests), CRUD endpoints under

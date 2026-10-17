@@ -3126,3 +3126,45 @@ export async function updateBusinessParcel(parcelId: number, input: Partial<Busi
 export async function deleteBusinessParcel(parcelId: number): Promise<{ deleted: boolean }> {
   return apiFetch(`/finance/business-parcels/${parcelId}`, { method: 'DELETE' })
 }
+
+// ─── Documents of a business (stage 4) ───────────────────────────────────
+
+export type BusinessDocumentTarget = 'business' | 'asset' | 'parcel'
+
+export interface LinkedDocumentMeta {
+  id: number
+  title: string | null
+  original_filename: string
+  doc_date: string | null
+  category_slug: string | null
+  correspondent_display: string | null
+  sender: string | null
+}
+
+export interface BusinessDocumentLink {
+  id: number
+  business_id: number
+  document_id: number
+  target_kind: BusinessDocumentTarget
+  target_id: number | null
+  target_name: string | null
+  note: string | null
+  created_at: string
+  /** null when the document is gone or not readable by the caller. */
+  document: LinkedDocumentMeta | null
+}
+
+export async function listBusinessDocuments(businessId: number): Promise<{ items: BusinessDocumentLink[] }> {
+  return apiFetch(`/finance/businesses/${businessId}/documents`)
+}
+
+export async function linkBusinessDocument(
+  businessId: number,
+  input: { document_id: number; target_kind?: BusinessDocumentTarget; target_id?: number | null; note?: string | null },
+): Promise<BusinessDocumentLink> {
+  return apiFetch(`/finance/businesses/${businessId}/documents`, { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function unlinkBusinessDocument(linkId: number): Promise<{ deleted: boolean }> {
+  return apiFetch(`/finance/business-documents/${linkId}`, { method: 'DELETE' })
+}

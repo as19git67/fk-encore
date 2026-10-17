@@ -25,6 +25,7 @@ export const clients = {
     listBusinesses: vi.fn(),
     getBusiness: vi.fn(),
     getBusinessEuer: vi.fn(),
+    listBusinessDocuments: vi.fn(),
   },
   documents: {
     listDocumentCategories: vi.fn(),
