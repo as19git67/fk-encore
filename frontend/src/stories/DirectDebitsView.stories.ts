@@ -52,18 +52,18 @@ const handlers = [
 const meta: Meta<typeof DirectDebitsView> = {
   title: 'Views/DirectDebitsView',
   component: DirectDebitsView,
-  decorators: [routeFromParameters('/finanzen/lastschriften')],
+  decorators: [routeFromParameters('/finanzen/zahlungen')],
   parameters: { msw: { handlers } },
 }
 
 export default meta
 type Story = StoryObj<typeof DirectDebitsView>
 
-export const MitLastschriften: Story = { name: 'Mit Lastschriften' }
+export const MitLastschriften: Story = { name: 'Mit erwarteten Zahlungen' }
 
 export const NaechsterMonat: Story = {
   name: 'Zeitraum aus der URL',
-  parameters: { route: '/finanzen/lastschriften?period=next-month' },
+  parameters: { route: '/finanzen/zahlungen?period=next-month' },
 }
 
 export const NichtsErwartet: Story = {

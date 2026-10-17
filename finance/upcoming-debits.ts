@@ -6,7 +6,7 @@
  * date (`last_seen`, `typical_interval_days`, `typical_amount`). Until now only
  * the overdue side of it surfaced, as `missing_transaction` anomalies. This
  * lists the next expected bookings of every running series: the Lastschriften
- * page and, later, the assistant's `upcoming_direct_debits` tool.
+ * page (Finanzen › Erwartete Zahlungen) and the assistant's `upcoming_payments` tool.
  *
  * The next date is computed from `last_seen`, not counted forward from the
  * previous estimate: a monthly series on the 1st stays on the 1st however many
@@ -15,6 +15,10 @@
  *
  * Only outgoing series count, and not card payments — a card bought at the
  * same shop every few weeks is a habit, not something the bank will debit.
+ * Cash accounts are left out for the same reason: nothing is debited from a
+ * wallet. `channel` narrows to the direct debits (SEPA mandates) or to the
+ * transfers (standing orders); by default both show, so the page is honest
+ * about what it lists — expected payments, not only Lastschriften.
  */
 
 import { api, APIError, Query } from "encore.dev/api";
@@ -22,7 +26,7 @@ import { getAuthData } from "~encore/auth";
 import { and, asc, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
-import { financeAccount, financeRecurringMandate } from "../db/schema";
+import { financeAccount, financeAccountType, financeRecurringMandate } from "../db/schema";
 import { readableFinanceAccountIds } from "./account-acl";
 
 /** A series silent for longer than this many intervals has ended. */
@@ -191,18 +195,30 @@ export interface UpcomingDebitsResponse {
   total_amount: string;
 }
 
+export type UpcomingChannel = "all" | "direct_debit" | "transfer";
+
 export interface UpcomingDebitsParams {
   /** First day of the window, ISO. Default: today. */
   from?: Query<string>;
   /** Last day of the window, ISO. Default: end of the month `from` is in. */
   until?: Query<string>;
+  /**
+   * "direct_debit": SEPA direct debits only; "transfer": transfers and
+   * standing orders only; "all" (default): both, plus series whose channel
+   * is unknown. Card payments and cash accounts never count.
+   */
+  channel?: Query<UpcomingChannel>;
 }
 
 export const listUpcomingDebits = api(
   { expose: true, method: "GET", path: "/finance/mandates/upcoming", auth: true },
-  async ({ from, until }: UpcomingDebitsParams): Promise<UpcomingDebitsResponse> => {
+  async ({ from, until, channel }: UpcomingDebitsParams): Promise<UpcomingDebitsResponse> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
+    const wanted: UpcomingChannel = channel ?? "all";
+    if (!["all", "direct_debit", "transfer"].includes(wanted)) {
+      throw APIError.invalidArgument("channel must be all, direct_debit or transfer");
+    }
 
     const today = localToday();
     const windowFrom = from || today;
@@ -240,13 +256,18 @@ export const listUpcomingDebits = api(
       })
       .from(m)
       .innerJoin(financeAccount, sql`${financeAccount.id} = ${m.account_id}`)
+      .innerJoin(financeAccountType, sql`${financeAccountType.id} = ${financeAccount.type_id}`)
       .where(
         and(
           readable === null ? undefined : inArray(m.account_id, readable),
           isNull(financeAccount.closed_at),
+          // Nothing is debited from a wallet: a recurring cash expense is a habit.
+          sql`${financeAccountType.kind} <> 'bargeld'`,
           isNotNull(m.last_seen),
           lt(m.typical_amount, "0"),
-          sql`${m.payment_channel} IS DISTINCT FROM 'card'`,
+          wanted === "all"
+            ? sql`${m.payment_channel} IS DISTINCT FROM 'card'`
+            : sql`${m.payment_channel} = ${wanted}`,
           gte(m.typical_interval_days, MIN_INTERVAL_DAYS),
           lte(m.typical_interval_days, MAX_INTERVAL_DAYS),
           gte(m.transaction_count, MIN_TRANSACTIONS),

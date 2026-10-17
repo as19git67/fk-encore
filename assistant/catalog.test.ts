@@ -124,7 +124,7 @@ describe("catalog per user", () => {
   it("a user without finance.view sees no finance tool", () => {
     const names = catalogFor({ userID: "1", permissions: everything.filter((p) => p !== "finance.view") }).map((t) => t.name);
     expect(names).not.toContain("list_transactions");
-    expect(names).not.toContain("upcoming_direct_debits");
+    expect(names).not.toContain("upcoming_payments");
     expect(names).toContain("search_documents");
   });
 

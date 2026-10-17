@@ -26,7 +26,7 @@ const TITLES: Record<string, string> = {
   accounts: 'Konten',
   transactions: 'Buchungen',
   analysis: 'Auswertung',
-  debits: 'Erwartete Lastschriften',
+  debits: 'Erwartete Zahlungen',
   categories: 'Kategorien',
   documents: 'Dokumente',
   document: 'Dokument',

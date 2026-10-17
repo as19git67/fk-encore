@@ -42,9 +42,9 @@ describe('applyEvent', () => {
   })
 
   it('takes the final answer and blocks from done', () => {
-    const block = { kind: 'debits' as const, tool: 'upcoming_direct_debits', rows: [] }
+    const block = { kind: 'debits' as const, tool: 'upcoming_payments', rows: [] }
     const t = play([
-      { type: 'tool_start', tool: 'upcoming_direct_debits' },
+      { type: 'tool_start', tool: 'upcoming_payments' },
       { type: 'token', text: 'Bis Monatsende …' },
       { type: 'done', answer: 'Bis Monatsende kommt nichts mehr.', blocks: [block] },
       { type: 'token', text: 'ignored' },

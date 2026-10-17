@@ -58,7 +58,7 @@ interface AnalysisResult {
   topCounterparties?: { name: string; sum: number; count: number }[];
   ast?: { timespan?: { from?: string; to?: string } };
 }
-interface UpcomingDebit {
+interface UpcomingDebit { payment_channel?: string | null;
   mandate_id: number; account_label: string; counterparty: string | null; expected_date: string;
   overdue: boolean; typical_amount: string; interval_days: number;
 }
@@ -210,10 +210,12 @@ export const analyzeSpending: ToolSpec = {
   },
 };
 
-export const upcomingDirectDebits: ToolSpec = {
-  name: "upcoming_direct_debits",
+const CHANNEL_LABEL: Record<string, string> = { direct_debit: "direct debit", transfer: "transfer", other: "unknown channel" };
+
+export const upcomingPayments: ToolSpec = {
+  name: "upcoming_payments",
   kind: "read",
-  summary: "Direct debits of standing mandates still expected in a period, with typical amount and the server-computed sum.",
+  summary: "Recurring outgoing payments still expected in a period, estimated from the bookings so far: SEPA direct debits (Lastschriften), transfers and standing orders (Überweisungen, Daueraufträge), with typical amount, the channel of each and the server-computed sum. channel = \"direct_debit\" for Lastschriften only, \"transfer\" for Überweisungen only, default both. Never card payments or cash.",
   permissions: FINANCE,
   source: "hand",
   parameters: {
@@ -221,27 +223,31 @@ export const upcomingDirectDebits: ToolSpec = {
     properties: {
       from: { type: "string", description: "first day, YYYY-MM-DD (default today)" },
       until: { type: "string", description: "last day, YYYY-MM-DD (default end of this month)" },
+      channel: { type: "string", enum: ["all", "direct_debit", "transfer"], description: "direct_debit for Lastschriften, transfer for Überweisungen and Daueraufträge, all (default) for both" },
     },
   },
   async run(args) {
-    const res = await (finance.listUpcomingDebits({ from: isoDate(args.from), until: isoDate(args.until) })) as unknown as { from: string; until: string; items: UpcomingDebit[]; count: number; total_amount: string };
+    const channel = str(args.channel);
+    const wanted = channel === "direct_debit" || channel === "transfer" ? channel : "all";
+    const res = await (finance.listUpcomingDebits({ from: isoDate(args.from), until: isoDate(args.until), channel: wanted })) as unknown as { from: string; until: string; items: UpcomingDebit[]; count: number; total_amount: string };
     return {
       text: table(
-        ["mandate_id", "expected", "counterparty", "account", "typical_amount", "overdue"],
-        res.items.map((d) => [d.mandate_id, d.expected_date, d.counterparty, d.account_label, money(d.typical_amount), d.overdue ? "yes" : ""]),
-        { cap: 40, note: `window ${res.from} to ${res.until}; sum of typical amounts: ${money(res.total_amount)} EUR` },
+        ["mandate_id", "expected", "counterparty", "account", "channel", "typical_amount", "overdue"],
+        res.items.map((d) => [d.mandate_id, d.expected_date, d.counterparty, d.account_label, CHANNEL_LABEL[d.payment_channel ?? "other"] ?? d.payment_channel, money(d.typical_amount), d.overdue ? "yes" : ""]),
+        { cap: 40, note: `window ${res.from} to ${res.until}, ${wanted === "all" ? "direct debits and transfers" : CHANNEL_LABEL[wanted]}; sum of typical amounts: ${money(res.total_amount)} EUR` },
       ),
-      digest: `[earlier result of upcoming_direct_debits: ${res.count} expected, sum ${money(res.total_amount)}]`,
+      digest: `[earlier result of upcoming_payments (${wanted}): ${res.count} expected, sum ${money(res.total_amount)}]`,
       rowCount: res.count,
       block: {
         kind: "debits",
-        tool: "upcoming_direct_debits",
+        tool: "upcoming_payments",
+        subtitle: wanted === "direct_debit" ? "Nur Lastschriften" : wanted === "transfer" ? "Nur Überweisungen und Daueraufträge" : undefined,
         rows: res.items.map((d) => ({ ...d })),
         total: res.count,
-        route: `/finanzen/lastschriften${query({})}`,
+        route: `/finanzen/zahlungen${query({ channel: wanted === "all" ? undefined : wanted })}`,
       },
     };
   },
 };
 
-export const FINANCE_TOOLS = [listAccounts, listTransactions, analyzeSpending, upcomingDirectDebits];
+export const FINANCE_TOOLS = [listAccounts, listTransactions, analyzeSpending, upcomingPayments];
