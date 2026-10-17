@@ -50,7 +50,7 @@ const channel = channelView.value as unknown as Ref<UpcomingChannel>
 
 const CHANNEL_LABELS: Record<string, string> = { direct_debit: 'Lastschrift', transfer: 'Überweisung', card: 'Karte', other: 'Kanal unbekannt' }
 function channelLabel(v: string | null): string {
-  return CHANNEL_LABELS[v ?? 'other'] ?? CHANNEL_LABELS.other
+  return CHANNEL_LABELS[v ?? 'other'] ?? 'Kanal unbekannt'
 }
 
 /** The window for a period, in local dates. */
