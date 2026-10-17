@@ -281,6 +281,18 @@ function parseArguments(raw: string): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Block kinds where a later block in the same turn supersedes the earlier
+ * ones whatever tool produced them: a document found by summary replaces the
+ * search it came from, which replaced the tax listing before it. Lists of
+ * other kinds (two accounts, two meters) stay side by side.
+ */
+const NARROWING_FAMILIES: Record<string, string> = { documents: "documents", document: "documents", photos: "photos" };
+
+function narrowingFamily(kind: string): string | null {
+  return NARROWING_FAMILIES[kind] ?? null;
+}
+
 export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const now = input.now ?? new Date();
   const maxRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS;
@@ -454,6 +466,14 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
           // a table of near misses above the one the answer is about.
           if (tool.refines) {
             for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i]!.tool === name) blocks.splice(i, 1);
+          }
+          // The same across tools for the kinds the model narrows down: the
+          // tax documents, then a search, then the three it read are one
+          // trail to one list, not three lists. The steps line keeps the
+          // trail; the answer carries the list it is about.
+          const family = narrowingFamily(outcome.block.kind);
+          if (family) {
+            for (let i = blocks.length - 1; i >= 0; i--) if (narrowingFamily(blocks[i]!.kind) === family) blocks.splice(i, 1);
           }
           blocks.push(outcome.block);
         }

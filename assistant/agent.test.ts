@@ -420,6 +420,30 @@ describe("what the benchmark caught", () => {
     expect(both.blocks.filter((b) => b.tool === "list_transactions")).toHaveLength(2);
   });
 
+  it("a document list from any tool replaces the document lists before it", async () => {
+    // Tax documents, then a search, then the summary of what it read: one
+    // trail to one list. The steps line keeps the trail.
+    clients.documents.listTaxDocuments.mockResolvedValue({
+      year: 2025, total_documents: 1,
+      sections: [{ slug: "anlage-n", name: "Anlage N", group: "Einkünfte", documents: [{ source: "user", confidence: null, document: { id: 1, title: "Lohnsteuerbescheinigung", original_filename: "l.pdf", doc_date: "2025-12-10", correspondent_display: "Finanzamt Musterstadt", sender: null } }] }],
+    });
+    clients.documents.searchDocumentsEndpoint
+      .mockResolvedValueOnce({ items: [{ id: 2, title: "Rechnung PV-Anlage" }, { id: 3, title: "Förderantrag" }] });
+    clients.documents.getDocument.mockImplementation(async ({ id }: { id: number }) => ({ id, title: id === 2 ? "Rechnung PV-Anlage" : "Förderantrag", summary: "…" }));
+    const loop = scripted([
+      calls(["tax_documents", { year: 2025 }]),
+      calls(["search_documents", { q: "PV-Anlage" }]),
+      calls(["get_document_summary", { ids: [2, 3] }]),
+      answer("Die Rechnung und der Förderantrag."),
+    ]);
+    const res = await runTurn({ user: USER, history: [], question: "PV-Rechnung?", tools: catalogFor(USER), chat: loop.fn, now: NOW });
+    expect(clients.documents.listTaxDocuments).toHaveBeenCalledTimes(1);
+    expect(res.blocks.map((b) => b.tool)).toEqual(["get_document_summary"]);
+    expect(res.blocks[0]!.rows.map((r) => r.id)).toEqual([2, 3]);
+    // The trail stays: every lookup is a step with its row count.
+    expect(res.toolResults && Object.keys(res.toolResults)).toHaveLength(3);
+  });
+
   it("a repeated call with the same arguments is answered from above, not run again", async () => {
     clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
     const { fn, requests } = scripted([
