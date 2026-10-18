@@ -168,14 +168,29 @@ function goBack() {
       <h2><i class="pi pi-receipt" /> 5. Steuer-Zuordnung</h2>
       <p>
         Unter den Metadaten gibt es den Bereich <strong>Steuer</strong>.
-        Die KI markiert relevante Dokumente automatisch und schlägt Steuerjahr
-        und Sektionen vor:
+        Die KI bestimmt die Rolle des Dokuments für die Steuererklärung und
+        schlägt Steuerjahr und Sektionen vor. Zwei Fragen werden dabei
+        getrennt beantwortet: <em>welchen</em> steuerlichen Sachverhalt das
+        Dokument betrifft (die Sektion) und ob es der <em>Beleg</em> ist, der
+        eingereicht oder aufbewahrt wird:
       </p>
       <ul>
         <li>
-          <Tag severity="success" value="Steuerrelevant" /> bzw.
-          <Tag severity="secondary" value="Nicht steuerrelevant" />
-          zeigen die aktuelle Einstufung.
+          <Tag severity="success" value="Steuerrelevant" /> – der Beleg
+          selbst: Lohnsteuerbescheinigung, Jahressteuerbescheinigung der Bank,
+          Spendenquittung, Handwerkerrechnung, Kindergeldbescheid.
+        </li>
+        <li>
+          <Tag severity="warn" value="Steuerbezug" /> – betrifft den
+          Sachverhalt, ist aber nicht der Beleg: die monatliche
+          Gehaltsabrechnung, die Dividendengutschrift, die
+          Erträgnisaufstellung, die Standmitteilung, das Schulzeugnis. Das
+          Dokument behält seine Sektionen, damit es neben dem Beleg zu finden
+          ist, zählt aber nicht als Steuerdokument.
+        </li>
+        <li>
+          <Tag severity="secondary" value="Nicht steuerrelevant" /> – kein
+          Steuerbezug.
         </li>
         <li>
           <Tag severity="info" value="Manuell bestätigt" /> erscheint, sobald
@@ -191,10 +206,12 @@ function goBack() {
       </ul>
       <p>
         Mit <strong>Bearbeiten</strong> öffnest du den Editier-Modus, in dem
-        du „steuerrelevant" umschalten, Jahr setzen und Sektionen per
-        Checkbox (de-)aktivieren kannst. Beim Speichern muss ein
-        steuerrelevantes Dokument ein Jahr <em>und</em> mindestens eine
-        Sektion haben.
+        du die Rolle (Beleg, Bezug, kein Steuerbezug) wählst, das Jahr setzt
+        und Sektionen per Checkbox (de-)aktivierst. Ein Beleg braucht ein
+        Jahr <em>und</em> mindestens eine Sektion, ein Bezug mindestens eine
+        Sektion. Was du einmal festlegst, lernt die App: setzt du dieselbe
+        Art von Dokument desselben Absenders wiederholt auf „Bezug", wird das
+        nächste gleich so eingeordnet.
       </p>
       <p class="hint">
         Der Menüpunkt <strong>Steuer</strong> in der Seitennavigation zeigt

@@ -30,7 +30,8 @@ import {
 import { requirePermission } from "../user/auth-handler";
 import { replaceUserTaxSections } from "./document-ops";
 import { relocateDocument } from "./relocate";
-import { isValidTaxSectionSlug } from "./tax-sections";
+import { taxRelevantFromRole, type TaxRole } from "./tax-sections";
+import { validateTaxOverride } from "./tax-override";
 import { loadUserGroupIds, visibleDocumentsWhere } from "./visibility";
 
 // ─── helpers ──────────────────────────────────────────────────────────────
@@ -170,10 +171,13 @@ export async function batchSetAttributes(
 // ─── tax (relevance / year / sections) ──────────────────────────────────────
 
 export interface BatchTaxPatch {
-  tax_relevant: boolean;
-  /** Required when `tax_relevant=true`. */
+  /** Old shape: `true` = beleg, `false` = keine. Ignored when `tax_role` is given. */
+  tax_relevant?: boolean;
+  /** Role for the return: 'beleg', 'bezug' or 'keine'. */
+  tax_role?: TaxRole;
+  /** Required for `beleg`, optional for `bezug`. */
   tax_year?: number | null;
-  /** Replaces every section assignment; required non-empty when relevant. */
+  /** Replaces every section assignment; required non-empty unless `keine`. */
   tax_sections?: string[];
 }
 
@@ -187,26 +191,7 @@ export async function batchSetTax(
   ids: readonly number[],
   patch: BatchTaxPatch,
 ): Promise<number> {
-  let year: number | null = null;
-  if (patch.tax_relevant) {
-    if (patch.tax_year === undefined || patch.tax_year === null) {
-      throw APIError.invalidArgument("tax_year is required when tax_relevant=true");
-    }
-    if (!Number.isInteger(patch.tax_year) || patch.tax_year < 2000 || patch.tax_year > 2100) {
-      throw APIError.invalidArgument("tax_year must be an integer between 2000 and 2100");
-    }
-    year = patch.tax_year;
-  }
-
-  const slugs = (patch.tax_sections ?? []).map((s) => s.trim().toLowerCase());
-  if (patch.tax_relevant && slugs.length === 0) {
-    throw APIError.invalidArgument("tax_sections must not be empty when tax_relevant=true");
-  }
-  for (const s of slugs) {
-    if (!isValidTaxSectionSlug(s)) {
-      throw APIError.invalidArgument(`unknown tax section slug: ${s}`);
-    }
-  }
+  const { role, year, slugs } = validateTaxOverride(patch);
 
   const docIds = await visibleDocumentIds(userId, ids);
   if (docIds.length === 0) return 0;
@@ -214,9 +199,10 @@ export async function batchSetTax(
   await db
     .update(documents)
     .set({
-      tax_relevant: patch.tax_relevant,
+      tax_relevant: taxRelevantFromRole(role),
+      tax_role: role,
       tax_year: year,
-      tax_year_confidence: patch.tax_relevant ? 1 : 0,
+      tax_year_confidence: year != null ? 1 : 0,
       tax_reviewed: true,
       // Human pinned the tax fields → clear the deduction review flag (0136).
       tax_review_needed: false,
@@ -224,7 +210,7 @@ export async function batchSetTax(
     .where(inArray(documents.id, docIds));
 
   for (const id of docIds) {
-    await replaceUserTaxSections(id, patch.tax_relevant ? slugs : []);
+    await replaceUserTaxSections(id, slugs);
   }
 
   // Rebuild the `_steuer/` hardlink view against the new tax metadata.
@@ -350,7 +336,10 @@ export const batchUpdateAttributes = api(
 );
 
 export interface BatchUpdateTaxRequest extends BatchDocumentIdsRequest {
-  tax_relevant: boolean;
+  /** Old shape: `true` = beleg, `false` = keine. Ignored when `tax_role` is given. */
+  tax_relevant?: boolean;
+  /** Role for the return: 'beleg', 'bezug' or 'keine' (see documents.ts). */
+  tax_role?: TaxRole;
   tax_year?: number | null;
   tax_sections?: string[];
 }
@@ -362,6 +351,7 @@ export const batchUpdateTax = api(
     requirePermission(getAuthData()!, "documents.edit");
     const affected = await batchSetTax(getUserId(), requireDocumentIds(req), {
       tax_relevant: req.tax_relevant,
+      tax_role: req.tax_role,
       tax_year: req.tax_year,
       tax_sections: req.tax_sections,
     });

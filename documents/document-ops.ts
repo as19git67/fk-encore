@@ -58,7 +58,7 @@ import {
   type TaxonomyEntry,
 } from "./llm-client";
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
-import { isValidTaxSectionSlug } from "./tax-sections";
+import { isValidTaxSectionSlug, taxRelevantFromRole } from "./tax-sections";
 import { DOCUMENT_TYPES } from "./document-types";
 import {
   computeEffectiveRequiresTaxReview,
@@ -72,12 +72,14 @@ import { matchContentRule, matchSenderRule } from "./sender-rules";
 import { loadSenderRuleOverrides } from "./sender-rule-overrides";
 import { buildClassifyExamples } from "./few-shot";
 import {
+  applyLearnedTaxRole,
   learnedRelationTags,
   loadLearnedMemory,
   mergeLearnedPersonIds,
   mergeLearnedTags,
   mergeLearnedTaxSections,
   resolveLearned,
+  resolveLearnedTaxRole,
 } from "./learned-rules";
 import { recordUncategorizedDocument } from "./suggestion-writer";
 import { rankReadings, type Reading } from "./letterhead";
@@ -88,6 +90,7 @@ import {
   applyKindergeldTaxRule,
   applySecuritiesSettlementTaxRule,
 } from "./tax-rules";
+import { householdTaxFacts, resolveTaxRole } from "./tax-role";
 import {
   buildUmlautRestorationMap,
   detectSubjectPersonIds,
@@ -729,16 +732,45 @@ export async function runClassify(documentId: number): Promise<{ classification:
   });
   if (rescuedSections.length > 0) {
     classification.tax_sections = [...classification.tax_sections, ...rescuedSections];
-    classification.tax_relevant = true;
+    classification.tax_role = "beleg";
   }
 
   // 7. Tax sections the user consistently assigns for this sender (learned).
-  //    Reflects the user's own repeated tax_reviewed decisions, so it may make
-  //    a document tax-relevant that the LLM marked otherwise.
-  const beforeLearnedTax = classification.tax_sections.length;
+  //    Reflects the user's own repeated tax_reviewed decisions. The role is
+  //    NOT touched here: a section says which matter the document concerns,
+  //    whether it is the evidence is the learned role's call (step 7d).
   classification.tax_sections = mergeLearnedTaxSections(classification.tax_sections, learned);
-  if (classification.tax_sections.length > beforeLearnedTax) {
-    classification.tax_relevant = true;
+  if (classification.tax_sections.length > 0 && classification.tax_role === "keine") {
+    classification.tax_role = "bezug";
+  }
+
+  // 7a. Evidence matrix (tax-role.ts, documentation/plans/steuer-belegrolle.md):
+  //     the model named a role; whether a `beleg` stands is decided from the
+  //     document type and the section — a school report (urkunde) or an
+  //     Erträgnisaufstellung (abrechnung) is about the matter, not the
+  //     evidence. Household facts come from the matched Bezugspersonen: a
+  //     school certificate is evidence for Anlage Kind only for a child of 18
+  //     or more in the tax year. The matrix only downgrades; the text rules
+  //     below may still force `beleg` on a high-precision marker.
+  {
+    const resolved = resolveTaxRole({
+      role: classification.tax_role,
+      taxSections: classification.tax_sections,
+      documentType: classification.document_type,
+      facts: householdTaxFacts(
+        subjectPersons.filter((p) => subjectPersonIds.includes(p.id)),
+        classification.tax_year,
+      ),
+    });
+    if (resolved.downgraded) {
+      console.log(
+        `[documents] tax evidence matrix(${documentId}): beleg → bezug ` +
+          `(${classification.document_type} is no evidence for ` +
+          `${classification.tax_sections.map((s) => s.slug).join(",")})`,
+      );
+    }
+    classification.tax_sections = resolved.taxSections;
+    classification.tax_role = resolved.role;
   }
 
   // 7b. Deterministic tax post-rule (see tax-rules.ts): private pension/life/
@@ -751,19 +783,19 @@ export async function runClassify(documentId: number): Promise<{ classification:
     const adjusted = applyInsuranceAdminTaxRule({
       text: clipped,
       taxSections: classification.tax_sections,
-      taxRelevant: classification.tax_relevant,
+      taxRole: classification.tax_role,
     });
     classification.tax_sections = adjusted.taxSections;
-    classification.tax_relevant = adjusted.taxRelevant;
+    classification.tax_role = adjusted.taxRole;
   }
   {
     const adjusted = applyKindergeldTaxRule({
       text: clipped,
       taxSections: classification.tax_sections,
-      taxRelevant: classification.tax_relevant,
+      taxRole: classification.tax_role,
     });
     classification.tax_sections = adjusted.taxSections;
-    classification.tax_relevant = adjusted.taxRelevant;
+    classification.tax_role = adjusted.taxRole;
     if (adjusted.matched && classification.tax_year == null) {
       const year = /^(\d{4})-/.exec(classification.doc_date ?? "")?.[1];
       if (year) {
@@ -784,18 +816,39 @@ export async function runClassify(documentId: number): Promise<{ classification:
     const adjusted = applySecuritiesSettlementTaxRule({
       text: clipped,
       taxSections: classification.tax_sections,
-      taxRelevant: classification.tax_relevant,
+      taxRole: classification.tax_role,
     });
     if (adjusted.matched) {
       console.log(
         `[documents] securities settlement tax rule(${documentId}): ` +
-          `${classification.tax_sections.map((s) => s.slug).join(",") || "-"} → ` +
-          `${adjusted.taxSections.map((s) => s.slug).join(",")}`,
+          `${classification.tax_role} ${classification.tax_sections.map((s) => s.slug).join(",") || "-"} → ` +
+          `${adjusted.taxRole} ${adjusted.taxSections.map((s) => s.slug).join(",")}`,
       );
     }
     classification.tax_sections = adjusted.taxSections;
-    classification.tax_relevant = adjusted.taxRelevant;
+    classification.tax_role = adjusted.taxRole;
   }
+  // 7d. The user's own decision, last: the role they pinned on reviewed
+  //     documents of the same sender AND document type (learned-rules.ts).
+  //     Runs after the matrix and the text rules so a repeated manual
+  //     "Bezug" on the bank's Erträgnisaufstellung — or a repeated "Beleg"
+  //     the matrix would downgrade — wins over everything above.
+  {
+    const applied = applyLearnedTaxRole(
+      { taxRole: classification.tax_role, taxSections: classification.tax_sections },
+      resolveLearnedTaxRole(learned, classification.document_type),
+    );
+    if (applied.matched) {
+      console.log(
+        `[documents] learned tax role(${documentId}): ${classification.tax_role} → ${applied.taxRole} ` +
+          `(sender ${classification.sender ?? "-"}, type ${classification.document_type ?? "-"})`,
+      );
+    }
+    classification.tax_role = applied.taxRole;
+    classification.tax_sections = applied.taxSections;
+  }
+  // The role is settled: the boolean every consumer reads is derived from it.
+  classification.tax_relevant = taxRelevantFromRole(classification.tax_role);
   {
     const adjusted = applyAgricultureFiscalYearTaxRule({
       text: clipped,
@@ -1039,7 +1092,8 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // ('cloud','user') = trusted source also wrote the tax metadata.
   const taxProtected = row.tax_reviewed || row.category_source === "cloud" || row.category_source === "user";
   if (!taxProtected) {
-    patch.tax_relevant = classification.tax_relevant;
+    patch.tax_relevant = taxRelevantFromRole(classification.tax_role);
+    patch.tax_role = classification.tax_role;
     patch.tax_year = classification.tax_year;
     patch.tax_year_confidence = classification.tax_year_confidence;
     // Carry the subject-person deduction review as its own flag (see above).

@@ -15,7 +15,14 @@
  */
 
 import { CLASSIFY_PROMPTS } from "./classify-prompts";
-import { isValidTaxSectionSlug, type TaxSectionGroup } from "./tax-sections";
+import { roleFromLegacy } from "./tax-role";
+import {
+  isTaxRole,
+  isValidTaxSectionSlug,
+  taxRelevantFromRole,
+  type TaxRole,
+  type TaxSectionGroup,
+} from "./tax-sections";
 import { isValidDocumentTypeSlug } from "./document-types";
 import { parseModelReferenceNumbers, type DocumentReferenceNumber } from "./reference-numbers";
 
@@ -130,6 +137,14 @@ export interface Classification {
   // off (no `tax_sections` list was sent) or when the LLM didn't find
   // a match.
   tax_relevant: boolean;
+  /**
+   * Role for the return (documentation/plans/steuer-belegrolle.md):
+   * `beleg` is the evidence (`tax_relevant` is derived from it), `bezug`
+   * concerns a tax matter and keeps its sections, `keine` has none. Here
+   * only the invariants are applied; the evidence matrix runs in
+   * document-ops.ts because it needs the document type and the household.
+   */
+  tax_role: TaxRole;
   tax_year: number | null;
   tax_year_confidence: number;
   tax_sections: TaxAssignment[];
@@ -402,11 +417,13 @@ function parseDocumentType(r: Record<string, unknown>): {
 
 function parseTaxFields(r: Record<string, unknown>): {
   tax_relevant: boolean;
+  tax_role: TaxRole;
   tax_year: number | null;
   tax_year_confidence: number;
   tax_sections: TaxAssignment[];
 } {
   const tax_relevant = r.tax_relevant === true;
+  const rawRole = typeof r.tax_role === "string" ? r.tax_role.trim().toLowerCase() : "";
 
   const yr = r.tax_year;
   const tax_year =
@@ -433,14 +450,21 @@ function parseTaxFields(r: Record<string, unknown>): {
     .filter((s) => s.confidence > 0)
     .sort((a, b) => b.confidence - a.confidence || a.slug.localeCompare(b.slug));
 
-  // If nothing passed validation, don't pretend the document is tax-relevant —
-  // a `tax_relevant=true` without any section is useless downstream.
-  const coercedRelevant = tax_sections.length === 0 ? false : tax_relevant;
+  // The role the model named, or the old boolean's reading when an older
+  // llm-service answered. Invariants: no section → `keine` (a `beleg`
+  // without any section is useless downstream); a section without a role →
+  // `bezug`. The year stays on a `bezug` — an Erträgnisaufstellung 2024 is
+  // about 2024 even though it is not the evidence.
+  const namedRole: TaxRole = isTaxRole(rawRole) ? rawRole : roleFromLegacy(tax_relevant, tax_sections);
+  const tax_role: TaxRole =
+    tax_sections.length === 0 ? "keine" : namedRole === "keine" ? "bezug" : namedRole;
+  const hasRelation = tax_role !== "keine";
 
   return {
-    tax_relevant: coercedRelevant,
-    tax_year: coercedRelevant ? tax_year : null,
-    tax_year_confidence: coercedRelevant ? tax_year_confidence : 0,
+    tax_relevant: taxRelevantFromRole(tax_role),
+    tax_role,
+    tax_year: hasRelation ? tax_year : null,
+    tax_year_confidence: hasRelation ? tax_year_confidence : 0,
     tax_sections,
   };
 }

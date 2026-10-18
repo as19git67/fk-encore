@@ -474,6 +474,7 @@ function currentFilterParams() {
     date_from: f.dateFrom,
     date_to: f.dateTo,
     tax_relevant: f.taxRelevant,
+    tax_role: f.taxRole,
     subject_person_id: f.subjectPersonId,
     category_source: f.categorySource as any,
     document_type: f.documentType,
@@ -924,7 +925,8 @@ onMounted(async () => {
             <span v-if="doc.sender"><i class="pi pi-user" /> {{ doc.sender }}</span>
             <span v-if="doc.doc_date"><i class="pi pi-calendar" /> {{ formatDate(doc.doc_date) }}</span>
             <span class="document-size"><i class="pi pi-database" /> {{ formatSize(doc.size_bytes) }}</span>
-            <span v-if="doc.tax_relevant" class="tax-badge"><i class="pi pi-calculator" /> Steuer</span>
+            <span v-if="doc.tax_role === 'beleg'" class="tax-badge"><i class="pi pi-calculator" /> Steuer</span>
+            <span v-else-if="doc.tax_role === 'bezug'" class="tax-badge tax-badge--bezug" title="Betrifft einen steuerlichen Sachverhalt, ist aber kein Beleg"><i class="pi pi-calculator" /> Steuerbezug</span>
           </div>
           <div v-if="doc.status === 'failed' && doc.last_error" class="document-error">
             <i class="pi pi-times-circle" /> {{ doc.last_error }}
@@ -1338,6 +1340,7 @@ onMounted(async () => {
 .document-meta span { display: inline-flex; align-items: center; gap: 0.25rem; }
 
 .tax-badge { color: var(--p-primary-color); font-weight: 500; }
+.tax-badge--bezug { color: var(--p-text-muted-color); font-weight: 400; }
 
 .document-error {
   display: inline-flex;

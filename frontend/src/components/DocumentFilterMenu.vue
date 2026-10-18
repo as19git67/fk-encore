@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { TAX_ROLE_OPTIONS, isTaxRole } from '../utils/taxRole'
 import { ref, computed, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
@@ -137,10 +138,11 @@ const statusOptions: Array<{ label: string; value: string }> = [
   { label: 'Text-Extraktion', value: 'extracting' },
 ]
 
+// Three roles (documentation/plans/steuer-belegrolle.md); the old boolean
+// filter is only ever set by an old link and is dropped on the first choice.
 const taxOptions = [
   { label: 'Egal', value: '' },
-  { label: 'Ja', value: 'true' },
-  { label: 'Nein', value: 'false' },
+  ...TAX_ROLE_OPTIONS,
 ]
 
 const categorySourceOptions = [
@@ -297,13 +299,13 @@ function handleReset() {
       </div>
 
       <div class="filter-row">
-        <label class="filter-label">Steuerrelevant</label>
+        <label class="filter-label">Steuer</label>
         <Select
-          :model-value="local.taxRelevant === undefined ? '' : String(local.taxRelevant)"
+          :model-value="local.taxRole ?? (local.taxRelevant === undefined ? '' : local.taxRelevant ? 'beleg' : '')"
           :options="taxOptions"
           option-label="label"
           option-value="value"
-          @update:model-value="(v: string) => local = { ...local, taxRelevant: v === '' ? undefined : v === 'true' }"
+          @update:model-value="(v: string) => local = { ...local, taxRelevant: undefined, taxRole: isTaxRole(v) ? v : undefined }"
         />
       </div>
 

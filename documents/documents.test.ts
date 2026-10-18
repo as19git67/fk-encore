@@ -676,6 +676,7 @@ describe("documents.sortDocumentSummaries", () => {
       document_type: null,
       tags: [],
       tax_relevant: false,
+      tax_role: "keine",
       tax_year: null,
       last_error: null,
       visibility: "private",

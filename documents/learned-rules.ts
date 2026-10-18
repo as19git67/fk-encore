@@ -13,6 +13,9 @@
  *
  *   - category       ← documents with `attributes_reviewed = true`
  *   - tax sections   ← documents with `tax_reviewed = true`
+ *   - tax role       ← documents with `tax_reviewed = true`, per sender AND
+ *                      document type (the same bank sends the
+ *                      Jahressteuerbescheinigung and the Erträgnisaufstellung)
  *   - tags           ← tag links with `source = 'user'`
  *   - Bezugspersonen ← subject-person links with `source = 'user'`
  *
@@ -39,7 +42,7 @@ import {
   documents,
 } from "../db/schema";
 import { normalizeForMatch } from "./sender-rules";
-import { isValidTaxSectionSlug } from "./tax-sections";
+import { isTaxRole, isValidTaxSectionSlug, type TaxRole } from "./tax-sections";
 import type { TaxAssignment } from "./llm-client";
 
 // ─── Thresholds ────────────────────────────────────────────────────────────
@@ -58,6 +61,13 @@ const MIN_TAX_SUPPORT = 2;
 const MAX_TAX_SECTIONS = 3;
 /** Docs a (sender, user-tag) pair needs before the tag is applied. */
 const MIN_TAG_SUPPORT = 2;
+/**
+ * Reviewed docs a (sender, document type) pair needs before its tax role is
+ * applied — and they must all agree. Two pinned "Bezug" on the bank's
+ * Erträgnisaufstellung make the third one a Bezug; one is a one-off
+ * (documentation/plans/steuer-belegrolle.md, stage 3).
+ */
+const MIN_TAX_ROLE_SUPPORT = 2;
 /** Share of a sender's user-tagged docs a tag must appear on to be learned. */
 const TAG_DOMINANCE = 0.6;
 /** Max learned tags applied per sender. */
@@ -76,6 +86,12 @@ export interface SenderCategoryRow {
 export interface SenderTaxRow {
   sender: string | null;
   tax_section: string;
+}
+export interface SenderTaxRoleRow {
+  sender: string | null;
+  /** Dokumentart facet slug, or null when untyped. */
+  document_type: string | null;
+  tax_role: string;
 }
 export interface SenderTagRow {
   sender: string | null;
@@ -101,6 +117,11 @@ export interface SenderMemoryEntry {
   category: LearnedCategory | null;
   /** Tax section slugs the user consistently files for this sender. */
   taxSections: string[];
+  /**
+   * Tax role the user consistently pins for this sender, keyed by document
+   * type slug ("" for untyped). Only unanimous decisions with enough support.
+   */
+  taxRoles: Record<string, TaxRole>;
   /** Content tags the user consistently adds for this sender. */
   tags: string[];
   /** Subject-person ids the user consistently links for this sender. */
@@ -113,7 +134,7 @@ export type LearnedMemory = Map<string, SenderMemoryEntry>;
 function ensureEntry(memory: LearnedMemory, key: string): SenderMemoryEntry {
   let e = memory.get(key);
   if (!e) {
-    e = { category: null, taxSections: [], tags: [], subjectPersonIds: [] };
+    e = { category: null, taxSections: [], taxRoles: {}, tags: [], subjectPersonIds: [] };
     memory.set(key, e);
   }
   return e;
@@ -126,10 +147,35 @@ function ensureEntry(memory: LearnedMemory, key: string): SenderMemoryEntry {
 export function buildLearnedMemory(inputs: {
   categories: readonly SenderCategoryRow[];
   taxSections: readonly SenderTaxRow[];
+  taxRoles?: readonly SenderTaxRoleRow[];
   tags: readonly SenderTagRow[];
   persons: readonly SenderPersonRow[];
 }): LearnedMemory {
   const memory: LearnedMemory = new Map();
+
+  // Tax role: per (sender, document type), the one role every reviewed
+  // document carries — once there are enough of them. A split decision
+  // teaches nothing.
+  const roleCounts = new Map<string, Map<string, Map<TaxRole, number>>>();
+  for (const r of inputs.taxRoles ?? []) {
+    const key = normalizeForMatch(r.sender);
+    const role = r.tax_role?.trim().toLowerCase();
+    if (!key || !isTaxRole(role)) continue;
+    const typeKey = taxRoleTypeKey(r.document_type);
+    const byType = roleCounts.get(key) ?? new Map<string, Map<TaxRole, number>>();
+    const counts = byType.get(typeKey) ?? new Map<TaxRole, number>();
+    counts.set(role, (counts.get(role) ?? 0) + 1);
+    byType.set(typeKey, counts);
+    roleCounts.set(key, byType);
+  }
+  for (const [key, byType] of roleCounts) {
+    for (const [typeKey, counts] of byType) {
+      if (counts.size !== 1) continue;
+      const [role, n] = [...counts.entries()][0]!;
+      if (n < MIN_TAX_ROLE_SUPPORT) continue;
+      ensureEntry(memory, key).taxRoles[typeKey] = role;
+    }
+  }
 
   // Category: pick the dominant reviewed category per sender.
   const catBySender = new Map<string, Map<string, number>>();
@@ -246,6 +292,38 @@ function applyTopCounts<T extends { sender: string | null }>(
   }
 }
 
+/** Memory key for a document type: the slug, or "" when untyped. */
+export function taxRoleTypeKey(documentType: string | null | undefined): string {
+  return documentType?.trim().toLowerCase() ?? "";
+}
+
+/** The tax role the user consistently pins for this sender and document
+ *  type, or null when nothing was learned for the pair. */
+export function resolveLearnedTaxRole(
+  learned: SenderMemoryEntry | null,
+  documentType: string | null | undefined,
+): TaxRole | null {
+  if (!learned) return null;
+  return learned.taxRoles[taxRoleTypeKey(documentType)] ?? null;
+}
+
+/**
+ * Apply a learned role to the classifier's result. The user's decision wins
+ * over the model, the matrix and the text rules — with the invariants kept:
+ * a `beleg` needs sections (none → the learned role is not applied), a
+ * `keine` has none.
+ */
+export function applyLearnedTaxRole(
+  current: { taxRole: TaxRole; taxSections: readonly TaxAssignment[] },
+  learnedRole: TaxRole | null,
+): { taxRole: TaxRole; taxSections: TaxAssignment[]; matched: boolean } {
+  const unchanged = { taxRole: current.taxRole, taxSections: [...current.taxSections], matched: false };
+  if (!learnedRole || learnedRole === current.taxRole) return unchanged;
+  if (learnedRole === "keine") return { taxRole: "keine", taxSections: [], matched: true };
+  if (current.taxSections.length === 0) return unchanged;
+  return { taxRole: learnedRole, taxSections: [...current.taxSections], matched: true };
+}
+
 /** Look up the learned signals for a document's sender. */
 export function resolveLearned(
   memory: LearnedMemory,
@@ -332,7 +410,7 @@ export async function loadLearnedMemory(
   excludeDocumentId: number,
 ): Promise<LearnedMemory> {
   try {
-    const [categories, taxSections, tags, persons] = await Promise.all([
+    const [categories, taxSections, taxRoles, tags, persons] = await Promise.all([
       dbAll<SenderCategoryRow>(
         db
           .select({ sender: documents.sender, category_slug: documentCategories.slug })
@@ -352,6 +430,23 @@ export async function loadLearnedMemory(
           .select({ sender: documents.sender, tax_section: documentTaxSections.tax_section })
           .from(documentTaxSections)
           .innerJoin(documents, eq(documents.id, documentTaxSections.document_id))
+          .where(
+            and(
+              eq(documents.user_id, userId),
+              eq(documents.tax_reviewed, true),
+              ne(documents.id, excludeDocumentId),
+              isNotNull(documents.sender),
+            ),
+          ),
+      ),
+      dbAll<SenderTaxRoleRow>(
+        db
+          .select({
+            sender: documents.sender,
+            document_type: documents.document_type,
+            tax_role: documents.tax_role,
+          })
+          .from(documents)
           .where(
             and(
               eq(documents.user_id, userId),
@@ -398,7 +493,7 @@ export async function loadLearnedMemory(
           ),
       ),
     ]);
-    return buildLearnedMemory({ categories, taxSections, tags, persons });
+    return buildLearnedMemory({ categories, taxSections, taxRoles, tags, persons });
   } catch (err) {
     console.warn(
       `[documents] loadLearnedMemory(user=${userId}) failed: ${(err as Error).message}`,

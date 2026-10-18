@@ -18,7 +18,34 @@
  * against the OCR text.
  */
 
+import type { DocumentTypeSlug } from "./document-types";
+
 export type TaxSectionGroup = "einkuenfte" | "abzuege" | "bescheid" | "rahmen";
+
+/**
+ * Role of a document for the income-tax return
+ * (documentation/plans/steuer-belegrolle.md):
+ *
+ * - `beleg`: the evidence — filed with, or kept for, the return. This is
+ *   what `tax_relevant = true` means; the boolean is derived from it.
+ * - `bezug`: concerns a tax matter and keeps its sections so it is found
+ *   next to the evidence, but it is not the evidence: the monthly payslip,
+ *   the dividend credit, the Erträgnisaufstellung, the Standmitteilung,
+ *   the school report.
+ * - `keine`: no tax relation; no sections.
+ */
+export type TaxRole = "beleg" | "bezug" | "keine";
+
+export const TAX_ROLES: readonly TaxRole[] = ["beleg", "bezug", "keine"];
+
+export function isTaxRole(value: unknown): value is TaxRole {
+  return typeof value === "string" && (TAX_ROLES as readonly string[]).includes(value);
+}
+
+/** `tax_relevant` is the boolean view of the role: only the evidence counts. */
+export function taxRelevantFromRole(role: TaxRole): boolean {
+  return role === "beleg";
+}
 
 export interface TaxSection {
   slug: string;
@@ -39,7 +66,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-kap",
     group: "einkuenfte",
     name: "Anlage KAP — Kapitalerträge",
-    hint: "Jahresbelege von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable): Jahressteuerbescheinigung, Steuerbescheinigung, Erträgnisaufstellung, Verlustbescheinigung. Auch Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder Kirchensteuer im Kontext von Wertpapieren/Dividenden/Bank ausweisen, gehören hierher und NICHT in Anlage N. NICHT: einzelne Depotabrechnungen (Dividendengutschrift, Steuerliche Behandlung einer Dividende, Wertpapierabrechnung, Vorabpauschale) — deren Werte stehen gesammelt in der Jahressteuerbescheinigung, sie sind nicht steuerrelevant.",
+    hint: "Jahresbelege von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable): Jahressteuerbescheinigung, Steuerbescheinigung, Verlustbescheinigung. Die Erträgnisaufstellung ist nur eine Information der Bank, kein Steuerbeleg (tax_role=bezug). Auch Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder Kirchensteuer im Kontext von Wertpapieren/Dividenden/Bank ausweisen, gehören hierher und NICHT in Anlage N. NICHT: einzelne Depotabrechnungen (Dividendengutschrift, Steuerliche Behandlung einer Dividende, Wertpapierabrechnung, Vorabpauschale) — deren Werte stehen gesammelt in der Jahressteuerbescheinigung, sie sind nicht steuerrelevant.",
   },
   {
     slug: "anlage-kap-inv",
@@ -179,7 +206,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-kind",
     group: "abzuege",
     name: "Anlage Kind",
-    hint: "Unterlagen pro Kind: Geburtsurkunde, Kindergeldbescheid/Familienkasse, Schul-/Studien-/Ausbildungsbescheinigung, Kita-/Hort-Rechnung mit Überweisungsnachweis.",
+    hint: "Unterlagen pro Kind: Kindergeldbescheid/Familienkasse, Kita-/Hort-Rechnung mit Überweisungsnachweis; Schul-/Studien-/Ausbildungsbescheinigung nur als Nachweis für ein volljähriges Kind. Zeugnisse, Elternbriefe und Bescheinigungen für ein minderjähriges Kind haben Bezug zur Anlage Kind, sind aber kein Beleg (tax_role=bezug).",
   },
   {
     slug: "anlage-unterhalt",
@@ -212,6 +239,83 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
 ] as const;
 
 export type TaxSectionSlug = typeof TAX_SECTIONS[number]["slug"];
+
+/**
+ * A condition under which a document type is evidence for a section. The
+ * facts come from the household, never from the model:
+ *
+ * - `adult_child`: a matched Bezugsperson is a child who is 18 or older in
+ *   the document's tax year — only then does the Finanzamt ask for a
+ *   school, study or training certificate (§ 32 Abs. 4 EStG).
+ */
+export type TaxEvidenceCondition = "adult_child";
+
+export type TaxEvidenceEntry =
+  | DocumentTypeSlug
+  | { readonly type: DocumentTypeSlug; readonly when: TaxEvidenceCondition };
+
+/**
+ * Evidence matrix: per section, the document types (Dokumentart facet) that
+ * can be the evidence for it. `resolveTaxRole` in tax-role.ts downgrades a
+ * `beleg` whose type is in none of its sections' lists to `bezug`. The
+ * matrix only ever downgrades — an unknown document type leaves the model's
+ * answer alone, and the high-precision text rules in tax-rules.ts may still
+ * force `beleg` afterwards. A new "this is about the topic but not the
+ * evidence" case is a row here, not a new rule function.
+ *
+ * Reading guide: a section whose evidence is an annual certificate lists
+ * `bescheinigung` only; a section whose evidence is the single invoice
+ * lists `rechnung`/`beleg`/`abrechnung`.
+ */
+export const TAX_EVIDENCE: Readonly<Record<TaxSectionSlug, readonly TaxEvidenceEntry[]>> = {
+  // ─── Einkünfte ──────────────────────────────────────────────────────
+  // Lohnsteuerbescheinigung; a Bescheid over Lohnersatzleistungen. The
+  // monthly payslip (abrechnung) is summarised by the Lohnsteuerbescheinigung.
+  "anlage-n": ["bescheinigung", "bescheid"],
+  // Only the bank's Jahressteuer-/Verlustbescheinigung. Erträgnisaufstellung
+  // (abrechnung) and single credits (gutschrift) are bezug.
+  "anlage-kap": ["bescheinigung"],
+  // No German certificate exists, so the single settlement IS the evidence.
+  "anlage-kap-inv": ["abrechnung", "gutschrift", "bescheinigung"],
+  "anlage-aus": ["abrechnung", "gutschrift", "bescheinigung", "bescheid"],
+  "anlage-v": ["abrechnung", "vertrag", "rechnung", "bescheinigung", "beleg", "bescheid"],
+  // Rentenbezugsmitteilung, Rentenbescheid, Leistungsmitteilung.
+  "anlage-r": ["bescheinigung", "mitteilung", "bescheid"],
+  "anlage-r-aus": ["bescheinigung", "mitteilung", "bescheid", "abrechnung"],
+  "anlage-r-av": ["bescheinigung", "mitteilung", "bescheid"],
+  // PV Einspeiseabrechnung (abrechnung/gutschrift), Gewerbesteuerbescheid.
+  "anlage-g": ["abrechnung", "gutschrift", "bescheid", "rechnung", "bericht"],
+  "anlage-s": ["rechnung", "abrechnung", "bericht"],
+  "anlage-l": ["abrechnung", "vertrag", "gutschrift", "rechnung", "bescheid", "bericht"],
+  "anlage-euer": ["erklaerung", "abrechnung", "bericht"],
+  "anlage-so": ["abrechnung", "vertrag", "rechnung", "beleg", "bescheinigung", "gutschrift"],
+
+  // ─── Abzüge ─────────────────────────────────────────────────────────
+  "werbungskosten-n": ["rechnung", "beleg", "abrechnung", "bescheinigung"],
+  "werbungskosten-v": ["rechnung", "beleg", "abrechnung", "bescheinigung", "bescheid"],
+  "werbungskosten-kap": ["rechnung", "beleg", "abrechnung", "bescheinigung"],
+  "werbungskosten-r": ["rechnung", "beleg", "abrechnung"],
+  "betriebsausgaben-l": ["rechnung", "beleg", "abrechnung", "bescheid", "vertrag"],
+  "betriebsausgaben-g": ["rechnung", "beleg", "abrechnung", "bescheid", "vertrag"],
+  // Spendenbescheinigung, Kirchensteuerbescheid, Steuerberaterrechnung.
+  sonderausgaben: ["bescheinigung", "bescheid", "rechnung", "beleg"],
+  // The annual Beitragsbescheinigung; a Beitragsbescheid of the Krankenkasse.
+  vorsorgeaufwand: ["bescheinigung", "bescheid"],
+  // Only the §92/§10a certificate and the ZfA Zulagenbescheid.
+  "anlage-av": ["bescheinigung", "bescheid"],
+  // The paid invoice; a Feststellungsbescheid or Ausweis over a disability.
+  aussergewoehnliche: ["rechnung", "beleg", "abrechnung", "bescheid", "ausweis"],
+  haushaltsnahe: ["rechnung", "abrechnung", "beleg"],
+  // Kindergeldbescheid, Kita invoice. A school/training certificate only for
+  // an adult child; a report card (urkunde) never.
+  "anlage-kind": ["bescheid", "rechnung", "beleg", { type: "bescheinigung", when: "adult_child" }],
+  "anlage-unterhalt": ["bescheinigung", "rechnung", "beleg", "vertrag", "erklaerung", "abrechnung"],
+  "anlage-energetisch": ["rechnung", "bescheinigung"],
+
+  // ─── Bescheid / Rahmen ──────────────────────────────────────────────
+  steuerbescheid: ["bescheid"],
+  mantelbogen: ["urkunde", "bescheid", "bescheinigung", "ausweis", "erklaerung"],
+};
 
 const SLUGS: ReadonlySet<string> = new Set(TAX_SECTIONS.map((s) => s.slug));
 

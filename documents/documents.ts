@@ -111,12 +111,17 @@ import { searchDocuments, type SearchMode } from "./search";
 import { documentTextPreview } from "./text-preview";
 import { fetchTagsForDocuments } from "./tags";
 import {
+  TAX_SECTIONS,
+  type TaxRole,
+  type TaxSectionGroup,
   findTaxSection,
+  isTaxRole,
   isValidTaxSectionSlug,
   orderTaxSectionSlugs,
-  TAX_SECTIONS,
-  type TaxSectionGroup,
+  taxRelevantFromRole,
 } from "./tax-sections";
+import { roleFromLegacy } from "./tax-role";
+import { validateTaxOverride } from "./tax-override";
 import { DOCUMENT_TYPES, isValidDocumentTypeSlug } from "./document-types";
 import { retentionFor, retainUntilYear } from "./retention";
 import { isSuggestionVisible, recordUserCategoryProposal } from "./suggestion-writer";
@@ -194,7 +199,14 @@ export interface DocumentSummary {
   /** Document-type facet slug (Dokumentart), or null when untyped (migration 0139). */
   document_type: string | null;
   tags: string[];
+  /** `tax_role === "beleg"` — the document is the evidence filed with the return. */
   tax_relevant: boolean;
+  /**
+   * Role for the return (documentation/plans/steuer-belegrolle.md): `beleg`
+   * is the evidence, `bezug` concerns a tax matter and keeps its sections but
+   * does not count, `keine` has no tax relation.
+   */
+  tax_role: TaxRole;
   tax_year: number | null;
   last_error: string | null;
   visibility: "private" | "group";
@@ -369,6 +381,8 @@ interface ListQuery {
   date_from?: Query<string>;
   date_to?: Query<string>;
   tax_relevant?: Query<boolean>;
+  /** Keep only documents with this tax role: 'beleg', 'bezug' or 'keine'. */
+  tax_role?: Query<string>;
   /** Keep only documents linked to this Bezugsperson (see migration 0102). */
   subject_person_id?: Query<number>;
   /** Filter by category source: 'ai', 'cloud', or 'user'. */
@@ -408,6 +422,7 @@ interface DocumentFilterArgs {
   date_from?: string;
   date_to?: string;
   tax_relevant?: boolean;
+  tax_role?: string;
   subject_person_id?: number;
   category_source?: string;
   document_type?: string;
@@ -491,6 +506,13 @@ async function buildDocumentFilterConditions(
     conds.push(eq(documents.tax_relevant, true));
   } else if (f.tax_relevant === false) {
     conds.push(eq(documents.tax_relevant, false));
+  }
+  if (f.tax_role) {
+    const role = f.tax_role.trim().toLowerCase();
+    if (!isTaxRole(role)) {
+      throw APIError.invalidArgument(`unknown tax_role: ${f.tax_role}`);
+    }
+    conds.push(eq(documents.tax_role, role));
   }
   if (f.subject_person_id != null) {
     conds.push(
@@ -1288,7 +1310,7 @@ export function sortDocumentSummaries<T extends DocumentSummary>(
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, tax_role, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -1303,7 +1325,7 @@ export const listDocuments = api(
       : [visibleDocumentsWhere(userId, groupIds)];
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, tax_role, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -1361,6 +1383,7 @@ export const listDocuments = api(
           document_type: documents.document_type,
           force_ocr: documents.force_ocr,
           tax_relevant: documents.tax_relevant,
+          tax_role: documents.tax_role,
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
@@ -2832,7 +2855,13 @@ export const unlockDocument = api(
 
 export interface UpdateDocumentTaxRequest {
   id: number;
-  tax_relevant: boolean;
+  /** Old shape: `true` = beleg, `false` = keine. Ignored when `tax_role` is given. */
+  tax_relevant?: boolean;
+  /**
+   * Role for the return: `beleg` needs a year and at least one section,
+   * `bezug` needs at least one section (year optional), `keine` wipes both.
+   */
+  tax_role?: TaxRole;
   tax_year?: number | null;
   tax_sections?: string[];
   /** Explicit pin override. Defaults to true (any manual edit pins the doc).
@@ -2861,35 +2890,17 @@ export const updateDocumentTax = api(
 
     const existing = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
 
-    let year: number | null = null;
-    if (req.tax_relevant) {
-      if (req.tax_year === undefined || req.tax_year === null) {
-        throw APIError.invalidArgument("tax_year is required when tax_relevant=true");
-      }
-      if (!Number.isInteger(req.tax_year) || req.tax_year < 2000 || req.tax_year > 2100) {
-        throw APIError.invalidArgument("tax_year must be an integer between 2000 and 2100");
-      }
-      year = req.tax_year;
-    }
-
-    const slugs = req.tax_sections ?? [];
-    if (req.tax_relevant && slugs.length === 0) {
-      throw APIError.invalidArgument("tax_sections must not be empty when tax_relevant=true");
-    }
-    for (const s of slugs) {
-      if (!isValidTaxSectionSlug(s.trim().toLowerCase())) {
-        throw APIError.invalidArgument(`unknown tax section slug: ${s}`);
-      }
-    }
+    const { role, year, slugs } = validateTaxOverride(req);
 
     await db
       .update(documents)
       .set({
-        tax_relevant: req.tax_relevant,
+        tax_relevant: taxRelevantFromRole(role),
+        tax_role: role,
         tax_year: year,
         // A manual override has full confidence — the human *is* the
         // ground truth from here on.
-        tax_year_confidence: req.tax_relevant ? 1 : 0,
+        tax_year_confidence: year != null ? 1 : 0,
         tax_reviewed: req.tax_reviewed !== undefined ? req.tax_reviewed : true,
         // The human just answered the "did you pay this deductible expense?"
         // question by pinning the tax fields — clear the review flag (0136).
@@ -2897,14 +2908,7 @@ export const updateDocumentTax = api(
       })
       .where(eq(documents.id, existing.id));
 
-    if (req.tax_relevant) {
-      await replaceUserTaxSections(
-        existing.id,
-        slugs.map((s) => s.trim().toLowerCase()),
-      );
-    } else {
-      await replaceUserTaxSections(existing.id, []);
-    }
+    await replaceUserTaxSections(existing.id, slugs);
 
     // Rebuild the `_steuer/` hardlink view against the new tax metadata.
     try {
@@ -3400,6 +3404,7 @@ export const listTaxDocuments = api(
           document_type: documents.document_type,
           force_ocr: documents.force_ocr,
           tax_relevant: documents.tax_relevant,
+          tax_role: documents.tax_role,
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
@@ -3576,6 +3581,8 @@ interface SearchQuery {
   date_from?: Query<string>;
   date_to?: Query<string>;
   tax_relevant?: Query<boolean>;
+  /** Keep only documents with this tax role: 'beleg', 'bezug' or 'keine'. */
+  tax_role?: Query<string>;
   subject_person_id?: Query<number>;
   category_source?: Query<string>;
   document_type?: Query<string>;
@@ -3606,7 +3613,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref, sort_by, sort_dir }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, tax_role, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref, sort_by, sort_dir }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -3621,7 +3628,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, tax_role, subject_person_id, category_source, document_type, in_collection, collection_id, folder, ref,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -3665,6 +3672,7 @@ export const searchDocumentsEndpoint = api(
           document_type: documents.document_type,
           force_ocr: documents.force_ocr,
           tax_relevant: documents.tax_relevant,
+          tax_role: documents.tax_role,
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
@@ -4609,6 +4617,7 @@ export function toSummary(
     document_type: row.document_type ?? null,
     tags,
     tax_relevant: row.tax_relevant ?? false,
+    tax_role: row.tax_role ?? roleFromLegacy(row.tax_relevant ?? false, []),
     tax_year: row.tax_year ?? null,
     last_error: row.last_error ?? null,
     visibility: row.visibility,

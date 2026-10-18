@@ -97,6 +97,7 @@ def test_optional_fields_are_not_required():
         "document_type",
         "document_type_confidence",
         "tax_relevant",
+        "tax_role",
         "tax_year",
         "tax_year_confidence",
         "tax_sections",

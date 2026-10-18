@@ -10,31 +10,32 @@ import {
 const AV = [{ slug: "anlage-av", confidence: 0.95 }];
 
 describe("applyInsuranceAdminTaxRule", () => {
-  it("strips anlage-av from an Erhöhungsnachtrag without a certificate", () => {
+  it("makes an Erhöhungsnachtrag without a certificate a bezug and keeps anlage-av", () => {
     const out = applyInsuranceAdminTaxRule({
       text: "Erhöhungsnachtrag zur fondsgebundenen Rentenversicherung, Anpassung des Beitrags im Rahmen der Dynamik.",
       taxSections: AV,
-      taxRelevant: true,
+      taxRole: "beleg",
     });
-    expect(out.taxSections).toEqual([]);
-    expect(out.taxRelevant).toBe(false);
+    expect(out.taxSections).toEqual(AV);
+    expect(out.taxRole).toBe("bezug");
+    expect(out.matched).toBe(true);
   });
 
-  it("strips from a Statusreport / Standmitteilung", () => {
+  it("downgrades a Statusreport / Standmitteilung", () => {
     expect(
       applyInsuranceAdminTaxRule({
         text: "Statusreport Altersvorsorge — Vertragsstand in der Ansparphase",
         taxSections: AV,
-        taxRelevant: true,
-      }).taxRelevant,
-    ).toBe(false);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
     expect(
       applyInsuranceAdminTaxRule({
         text: "Standmitteilung zu Ihrer Lebensversicherung",
         taxSections: [{ slug: "vorsorgeaufwand", confidence: 0.9 }],
-        taxRelevant: true,
-      }).taxSections,
-    ).toEqual([]);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
   });
 
   it("catches the fund-switch and contact-change admin variants", () => {
@@ -42,77 +43,77 @@ describe("applyInsuranceAdminTaxRule", () => {
       applyInsuranceAdminTaxRule({
         text: "Automatische Fondsersetzung im Portfolio Ihrer Riester-Rentenversicherung",
         taxSections: AV,
-        taxRelevant: true,
-      }).taxRelevant,
-    ).toBe(false);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
     expect(
       applyInsuranceAdminTaxRule({
         text: "Änderung Ihrer Kontaktdaten zur Rentenversicherung",
         taxSections: AV,
-        taxRelevant: true,
-      }).taxRelevant,
-    ).toBe(false);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
   });
 
-  it("strips from a Zulagenantrag / Deckungskapitalübertragung / Beitragsanpassung", () => {
+  it("downgrades a Zulagenantrag / Deckungskapitalübertragung / Beitragsanpassung", () => {
     expect(
       applyInsuranceAdminTaxRule({
         text: "Antrag auf Zulagenantrag für Ihre Riester-Rentenversicherung",
         taxSections: AV,
-        taxRelevant: true,
-      }).taxRelevant,
-    ).toBe(false);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
     expect(
       applyInsuranceAdminTaxRule({
         text: "Deckungskapitalübertragung gemäß § 1 Abs. 2 AltvDV",
         taxSections: AV,
-        taxRelevant: true,
-      }).taxRelevant,
-    ).toBe(false);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
     expect(
       applyInsuranceAdminTaxRule({
         text: "Mitteilung über Beitragsanpassung Ihrer Rentenversicherung",
         taxSections: [{ slug: "vorsorgeaufwand", confidence: 0.9 }],
-        taxRelevant: true,
-      }).taxRelevant,
-    ).toBe(false);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
   });
 
-  it("strips from a Leistungsabrechnung / Erstattungsabrechnung / Konsortium notice", () => {
+  it("downgrades a Leistungsabrechnung / Erstattungsabrechnung / Konsortium notice", () => {
     expect(
       applyInsuranceAdminTaxRule({
         text: "Erstattungsabrechnung zu Ihrer Krankenzusatzversicherung",
         taxSections: [{ slug: "vorsorgeaufwand", confidence: 0.9 }],
-        taxRelevant: true,
-      }).taxRelevant,
-    ).toBe(false);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
     expect(
       applyInsuranceAdminTaxRule({
         text: "Leistungsabrechnung Nr. 12345 der Pflegeversicherung",
         taxSections: AV,
-        taxRelevant: true,
-      }).taxRelevant,
-    ).toBe(false);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
     expect(
       applyInsuranceAdminTaxRule({
         text: "Information zur Konsortiumszusammensetzung Ihres Versicherungsvertrags",
         taxSections: AV,
-        taxRelevant: true,
-      }).taxRelevant,
-    ).toBe(false);
+        taxRole: "beleg",
+      }).taxRole,
+    ).toBe("bezug");
   });
 
   it("no longer treats bare 'Leistungsmitteilung' as a certificate marker", () => {
     // An employer Unterstützungskasse "Leistungsmitteilung gemäß Leistungsplan"
     // is mere status/anwartschaft — NOT a tax certificate. Previously the word
-    // was in BELEG_MARKERS and would have shielded admin mail from stripping.
+    // was in BELEG_MARKERS and would have shielded admin mail from the downgrade.
     const out = applyInsuranceAdminTaxRule({
       text: "Leistungsmitteilung gemäß Leistungsplan der Unterstützungskasse. Statusreport Ihrer Anwartschaft.",
       taxSections: AV,
-      taxRelevant: true,
+      taxRole: "beleg",
     });
-    expect(out.taxSections).toEqual([]);
-    expect(out.taxRelevant).toBe(false);
+    expect(out.taxSections).toEqual(AV);
+    expect(out.taxRole).toBe("bezug");
   });
 
   it("KEEPS a genuine Beitrags-/Zulagenbescheinigung even with an admin word present", () => {
@@ -121,19 +122,19 @@ describe("applyInsuranceAdminTaxRule", () => {
     const out = applyInsuranceAdminTaxRule({
       text: "Zulagenbescheinigung nach § 92 EStG für Ihren Riester-Vertrag. Erhöhungsnachtrag anbei.",
       taxSections: AV,
-      taxRelevant: true,
+      taxRole: "beleg",
     });
     expect(out.taxSections).toEqual(AV);
-    expect(out.taxRelevant).toBe(true);
+    expect(out.taxRole).toBe("beleg");
   });
 
   it("KEEPS when a §10a Beitragsbescheinigung is present", () => {
     const out = applyInsuranceAdminTaxRule({
       text: "Beitragsbescheinigung nach § 10a EStG über geleistete Altersvorsorgebeiträge",
       taxSections: [{ slug: "vorsorgeaufwand", confidence: 0.9 }],
-      taxRelevant: true,
+      taxRole: "beleg",
     });
-    expect(out.taxRelevant).toBe(true);
+    expect(out.taxRole).toBe("beleg");
     expect(out.taxSections).toHaveLength(1);
   });
 
@@ -142,33 +143,44 @@ describe("applyInsuranceAdminTaxRule", () => {
     const out = applyInsuranceAdminTaxRule({
       text: "Statusreport Erhöhungsnachtrag Dynamik", // admin words, but no insurance section
       taxSections: sections,
-      taxRelevant: true,
+      taxRole: "beleg",
     });
     expect(out.taxSections).toEqual(sections);
-    expect(out.taxRelevant).toBe(true);
+    expect(out.taxRole).toBe("beleg");
   });
 
   it("does nothing when no admin marker is present", () => {
     const out = applyInsuranceAdminTaxRule({
       text: "Jährliche Beitragsübersicht Ihrer Rentenversicherung",
       taxSections: AV,
-      taxRelevant: true,
+      taxRole: "beleg",
     });
     expect(out.taxSections).toEqual(AV);
-    expect(out.taxRelevant).toBe(true);
+    expect(out.taxRole).toBe("beleg");
   });
 
-  it("only strips the insurance sections, keeping co-assigned non-insurance ones", () => {
+  it("keeps co-assigned sections on the downgraded document", () => {
+    const sections = [
+      { slug: "anlage-av", confidence: 0.95 },
+      { slug: "aussergewoehnliche", confidence: 0.8 },
+    ];
     const out = applyInsuranceAdminTaxRule({
       text: "Erhöhungsnachtrag Dynamik Rentenversicherung",
-      taxSections: [
-        { slug: "anlage-av", confidence: 0.95 },
-        { slug: "aussergewoehnliche", confidence: 0.8 },
-      ],
-      taxRelevant: true,
+      taxSections: sections,
+      taxRole: "beleg",
     });
-    expect(out.taxSections).toEqual([{ slug: "aussergewoehnliche", confidence: 0.8 }]);
-    expect(out.taxRelevant).toBe(true); // still relevant via the surviving section
+    expect(out.taxSections).toEqual(sections);
+    expect(out.taxRole).toBe("bezug");
+  });
+
+  it("reports no change when the document already is a bezug", () => {
+    const out = applyInsuranceAdminTaxRule({
+      text: "Erhöhungsnachtrag Dynamik Rentenversicherung",
+      taxSections: AV,
+      taxRole: "bezug",
+    });
+    expect(out.taxRole).toBe("bezug");
+    expect(out.matched).toBe(false);
   });
 
   it("ignores the (unreliable) title — only the OCR text counts", () => {
@@ -176,9 +188,9 @@ describe("applyInsuranceAdminTaxRule", () => {
     const out = applyInsuranceAdminTaxRule({
       text: "Wir bestätigen Ihren Widerspruch gegen die dynamische Erhöhung. Der Beitrag bleibt unverändert.",
       taxSections: AV,
-      taxRelevant: true,
+      taxRole: "beleg",
     });
-    expect(out.taxRelevant).toBe(false);
+    expect(out.taxRole).toBe("bezug");
   });
 });
 
@@ -189,11 +201,11 @@ describe("applyKindergeldTaxRule", () => {
         "Bescheid über Kindergeld nach dem Einkommensteuergesetz (EStG). " +
         "Die Festsetzung des Kindergeldes wird gemäß § 70 Absatz 2 geändert.",
       taxSections: [{ slug: "mantelbogen", confidence: 0.9 }],
-      taxRelevant: true,
+      taxRole: "beleg",
     });
     expect(out).toEqual({
       taxSections: [{ slug: "anlage-kind", confidence: 0.98 }],
-      taxRelevant: true,
+      taxRole: "beleg",
       matched: true,
     });
   });
@@ -203,8 +215,8 @@ describe("applyKindergeldTaxRule", () => {
     expect(applyKindergeldTaxRule({
       text: "Einkommensteuerbescheid: Bei der Günstigerprüfung wurde Kindergeld berücksichtigt.",
       taxSections: sections,
-      taxRelevant: true,
-    })).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+      taxRole: "beleg",
+    })).toEqual({ taxSections: sections, taxRole: "beleg", matched: false });
   });
 
   it("does not clear other family benefits such as Elterngeld", () => {
@@ -212,8 +224,8 @@ describe("applyKindergeldTaxRule", () => {
     expect(applyKindergeldTaxRule({
       text: "Elterngeldbescheid über Leistungen mit Progressionsvorbehalt",
       taxSections: sections,
-      taxRelevant: true,
-    })).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+      taxRole: "beleg",
+    })).toEqual({ taxSections: sections, taxRole: "beleg", matched: false });
   });
 });
 
@@ -357,7 +369,7 @@ Kirchensteuer EUR -0,29
 reduziert sich der Kapitalertragsteuersatz auf 24,51% bzw. 24,45%.
 KEINE STEUERBESCHEINIGUNG`;
 
-  it("drops all tax sections from a single dividend settlement", () => {
+  it("makes a single dividend settlement a bezug with anlage-kap only", () => {
     const out = applySecuritiesSettlementTaxRule({
       text: DIVIDEND_TEXT,
       taxSections: [
@@ -365,14 +377,14 @@ KEINE STEUERBESCHEINIGUNG`;
         { slug: "sonderausgaben", confidence: 0.95 },
         { slug: "vorsorgeaufwand", confidence: 0.75 },
       ],
-      taxRelevant: true,
+      taxRole: "beleg",
     });
-    expect(out.taxSections).toEqual([]);
-    expect(out.taxRelevant).toBe(false);
+    expect(out.taxSections).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+    expect(out.taxRole).toBe("bezug");
     expect(out.matched).toBe(true);
   });
 
-  it("also drops a Wertpapierabrechnung, Vorabpauschale and Zinsgutschrift", () => {
+  it("also downgrades a Wertpapierabrechnung, Vorabpauschale and Zinsgutschrift", () => {
     for (const text of [
       "Wertpapierabrechnung Kauf, WKN / ISIN: 000000 / DE0000000000",
       "Steuerliche Behandlung: Vorabpauschale, ISIN DE0000000000, Kapitalertragsteuer",
@@ -381,21 +393,43 @@ KEINE STEUERBESCHEINIGUNG`;
       const out = applySecuritiesSettlementTaxRule({
         text,
         taxSections: [{ slug: "anlage-kap", confidence: 0.9 }],
-        taxRelevant: true,
+        taxRole: "beleg",
       });
-      expect(out.taxSections).toEqual([]);
-      expect(out.taxRelevant).toBe(false);
+      expect(out.taxSections).toEqual([{ slug: "anlage-kap", confidence: 0.9 }]);
+      expect(out.taxRole).toBe("bezug");
     }
   });
 
-  it("reports no change when the settlement was already non-tax-relevant", () => {
+  it("reports no change when the settlement already is a bezug with anlage-kap", () => {
+    const sections = [{ slug: "anlage-kap", confidence: 0.9 }];
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: DIVIDEND_TEXT,
+        taxSections: sections,
+        taxRole: "bezug",
+      }),
+    ).toEqual({ taxSections: sections, taxRole: "bezug", matched: false });
+  });
+
+  it("gives a settlement the model found no section for its anlage-kap bezug", () => {
     expect(
       applySecuritiesSettlementTaxRule({
         text: DIVIDEND_TEXT,
         taxSections: [],
-        taxRelevant: false,
+        taxRole: "keine",
       }),
-    ).toEqual({ taxSections: [], taxRelevant: false, matched: false });
+    ).toEqual({ taxSections: [{ slug: "anlage-kap", confidence: 0.95 }], taxRole: "bezug", matched: true });
+  });
+
+  it("makes the Erträgnisaufstellung a bezug with anlage-kap — it is never the evidence", () => {
+    const out = applySecuritiesSettlementTaxRule({
+      text: "Erträgnisaufstellung 2025, Depotnummer 0000000, ISIN DE0000000000",
+      taxSections: [{ slug: "anlage-n", confidence: 0.7 }],
+      taxRole: "beleg",
+    });
+    expect(out.taxSections).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+    expect(out.taxRole).toBe("bezug");
+    expect(out.matched).toBe(true);
   });
 
   it("keeps the annual Jahressteuerbescheinigung in anlage-kap only", () => {
@@ -405,28 +439,21 @@ KEINE STEUERBESCHEINIGUNG`;
         { slug: "anlage-kap", confidence: 0.95 },
         { slug: "sonderausgaben", confidence: 0.8 },
       ],
-      taxRelevant: true,
+      taxRole: "beleg",
     });
     expect(out.taxSections).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
-    expect(out.taxRelevant).toBe(true);
+    expect(out.taxRole).toBe("beleg");
     expect(out.matched).toBe(true);
   });
 
-  it("adds anlage-kap to an annual certificate the model mis-sectioned", () => {
-    expect(
-      applySecuritiesSettlementTaxRule({
-        text: "Erträgnisaufstellung 2025, Depotnummer 0000000, ISIN DE0000000000",
-        taxSections: [{ slug: "anlage-n", confidence: 0.7 }],
-        taxRelevant: true,
-      }).taxSections,
-    ).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
-    expect(
-      applySecuritiesSettlementTaxRule({
-        text: "Verlustbescheinigung nach § 43a EStG zum Depot, ISIN DE0000000000",
-        taxSections: [],
-        taxRelevant: false,
-      }).taxSections,
-    ).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+  it("adds anlage-kap to an annual certificate the model mis-sectioned and forces beleg", () => {
+    const out = applySecuritiesSettlementTaxRule({
+      text: "Verlustbescheinigung nach § 43a EStG zum Depot, ISIN DE0000000000",
+      taxSections: [],
+      taxRole: "keine",
+    });
+    expect(out.taxSections).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+    expect(out.taxRole).toBe("beleg");
   });
 
   it("treats a settlement stamped KEINE STEUERBESCHEINIGUNG as a settlement", () => {
@@ -435,10 +462,10 @@ KEINE STEUERBESCHEINIGUNG`;
     const out = applySecuritiesSettlementTaxRule({
       text: "Dividendengutschrift, ISIN DE0000000000\nKEINE STEUERBESCHEINIGUNG",
       taxSections: [{ slug: "anlage-kap", confidence: 0.9 }],
-      taxRelevant: true,
+      taxRole: "beleg",
     });
-    expect(out.taxSections).toEqual([]);
-    expect(out.taxRelevant).toBe(false);
+    expect(out.taxSections).toEqual([{ slug: "anlage-kap", confidence: 0.9 }]);
+    expect(out.taxRole).toBe("bezug");
   });
 
   it("leaves a fund-linked pension statement alone", () => {
@@ -447,9 +474,9 @@ KEINE STEUERBESCHEINIGUNG`;
       applySecuritiesSettlementTaxRule({
         text: "Standmitteilung zur fondsgebundenen Rentenversicherung, Ausschüttung der Fonds, ISIN DE0000000000",
         taxSections: sections,
-        taxRelevant: true,
+        taxRole: "beleg",
       }),
-    ).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+    ).toEqual({ taxSections: sections, taxRole: "beleg", matched: false });
   });
 
   it("leaves an Einkommensteuerbescheid alone", () => {
@@ -458,9 +485,9 @@ KEINE STEUERBESCHEINIGUNG`;
       applySecuritiesSettlementTaxRule({
         text: "Finanzamt Musterstadt — Einkommensteuerbescheid für 2025: Kapitalertragsteuer, Ausschüttungen",
         taxSections: sections,
-        taxRelevant: true,
+        taxRole: "beleg",
       }),
-    ).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+    ).toEqual({ taxSections: sections, taxRole: "beleg", matched: false });
   });
 
   it("does nothing without a securities context", () => {
@@ -469,7 +496,7 @@ KEINE STEUERBESCHEINIGUNG`;
       applySecuritiesSettlementTaxRule({
         text: "Zuwendungsbestätigung — Ausschüttung von Spendengeldern an das Projekt",
         taxSections: sections,
-        taxRelevant: true,
+        taxRole: "beleg",
       }).matched,
     ).toBe(false);
   });
@@ -480,8 +507,8 @@ KEINE STEUERBESCHEINIGUNG`;
       applySecuritiesSettlementTaxRule({
         text: "Änderung der Konditionen zu Ihrem Depotkonto — Preis- und Leistungsverzeichnis",
         taxSections: sections,
-        taxRelevant: true,
+        taxRole: "beleg",
       }),
-    ).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+    ).toEqual({ taxSections: sections, taxRole: "beleg", matched: false });
   });
 });

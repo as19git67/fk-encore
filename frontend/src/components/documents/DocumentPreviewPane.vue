@@ -215,8 +215,11 @@ function formatDate(value: string | null): string {
             <span v-if="doc.doc_date"><i class="pi pi-calendar" /> {{ formatDate(doc.doc_date) }}</span>
             <span v-if="doc.category_slug"><i class="pi pi-folder-open" /> {{ doc.category_slug }}</span>
             <span v-if="doc.document_number"><i class="pi pi-hashtag" /> {{ doc.document_number }}</span>
-            <span v-if="doc.tax_relevant" class="pane-tax">
+            <span v-if="doc.tax_role === 'beleg'" class="pane-tax">
               <i class="pi pi-calculator" /> Steuer{{ doc.tax_year ? ` ${doc.tax_year}` : '' }}
+            </span>
+            <span v-else-if="doc.tax_role === 'bezug'" class="pane-tax pane-tax--bezug">
+              <i class="pi pi-calculator" /> Steuerbezug{{ doc.tax_year ? ` ${doc.tax_year}` : '' }}
             </span>
           </div>
 
@@ -328,6 +331,7 @@ function formatDate(value: string | null): string {
 .pane-meta i {
   margin-right: 0.2rem;
 }
+.pane-tax--bezug { color: var(--p-text-muted-color); }
 .pane-tax {
   color: var(--p-primary-color);
 }

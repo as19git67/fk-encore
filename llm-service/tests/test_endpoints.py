@@ -394,3 +394,25 @@ def test_healthz_stays_responsive_while_classify_is_blocked():
         release.set()
         main._state["llm"] = None
         main._state["embedder"] = None
+
+
+def test_inference_semaphore_follows_the_running_loop():
+    """A permit bound to a loop that no longer exists must not poison the next
+    request. The getter hands out a fresh semaphore when the running loop is
+    not the one the current semaphore was created on; on one loop it is the
+    same object every time."""
+
+    import asyncio
+
+    async def _get():
+        return main._get_inference_sem()
+
+    first_a = asyncio.run(_get())
+    second = asyncio.run(_get())
+    assert second is not first_a
+
+    async def _twice():
+        return main._get_inference_sem(), main._get_inference_sem()
+
+    a, b = asyncio.run(_twice())
+    assert a is b

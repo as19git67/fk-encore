@@ -76,15 +76,17 @@ beforeEach(async () => {
 });
 
 describe("runClassify — deterministic insurance-admin tax rule", () => {
-  it("strips anlage-av and clears tax_relevant for a Riester Erhöhungsnachtrag", async () => {
+  it("makes a Riester Erhöhungsnachtrag a bezug that keeps anlage-av", async () => {
     await seedDoc(
       "Erhöhungsnachtrag zu Ihrer fondsgebundenen Rentenversicherung. " +
         "Anpassung des Beitrags im Rahmen der vereinbarten Dynamik. Kein steuerlicher Beleg.",
     );
     await runClassify(DOC_ID);
 
-    expect((await readDoc()).tax_relevant).toBe(false);
-    expect(await readTaxSlugs()).not.toContain("anlage-av");
+    const row = await readDoc();
+    expect(row.tax_relevant).toBe(false);
+    expect(row.tax_role).toBe("bezug");
+    expect(await readTaxSlugs()).toContain("anlage-av");
   });
 
   it("keeps anlage-av for a genuine §92 Zulagenbescheinigung", async () => {
@@ -94,7 +96,9 @@ describe("runClassify — deterministic insurance-admin tax rule", () => {
     );
     await runClassify(DOC_ID);
 
-    expect((await readDoc()).tax_relevant).toBe(true);
+    const row = await readDoc();
+    expect(row.tax_relevant).toBe(true);
+    expect(row.tax_role).toBe("beleg");
     expect(await readTaxSlugs()).toContain("anlage-av");
   });
 });

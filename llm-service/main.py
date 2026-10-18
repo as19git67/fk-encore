@@ -30,7 +30,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, TypeVar
+from typing import Any, AsyncIterator, Callable, Literal, TypeVar
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -881,14 +881,22 @@ _inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-
 # Semaphore mirrors max_workers=1.  Callers wait up to acquire_timeout seconds
 # before receiving a 503, so short operations (embed ~1 s) don't spuriously
 # block a concurrent classify.  Initialised lazily on first use so it binds
-# to the correct event loop.
+# to the correct event loop — and re-created when the running loop is not
+# the one it was bound to.  In production there is one loop for the life of
+# the process, so this never triggers; under a test client that opens a loop
+# per request, a permit still held when the previous loop closed would
+# otherwise poison every later request ("is bound to a different event
+# loop"), which is how one flaky stream test once took 77 others with it.
 _inference_sem: asyncio.Semaphore | None = None
+_inference_sem_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _get_inference_sem() -> asyncio.Semaphore:
-    global _inference_sem
-    if _inference_sem is None:
+    global _inference_sem, _inference_sem_loop
+    loop = asyncio.get_running_loop()
+    if _inference_sem is None or _inference_sem_loop is not loop:
         _inference_sem = asyncio.Semaphore(1)
+        _inference_sem_loop = loop
     return _inference_sem
 
 _T = TypeVar("_T")
@@ -1705,6 +1713,11 @@ class ClassifyResponse(BaseModel):
     # Tax-return fields — default "not relevant" so existing callers that
     # don't send ``tax_sections`` still get a valid response.
     tax_relevant: bool = False
+    # Role for the return (documentation/plans/steuer-belegrolle.md): ``beleg``
+    # is the evidence (``tax_relevant`` is derived from it), ``bezug`` concerns
+    # a tax matter and keeps its sections, ``keine`` has none. The handler
+    # reconciles the two fields so a caller may read either.
+    tax_role: Literal["beleg", "bezug", "keine"] = "keine"
     # Lower bound 1970 (not e.g. 2000): household documents legitimately span
     # decades — a 1997 Jahresdepotauszug is a real, unremarkable case, and
     # rejecting it here previously misrouted the document into the "LLM
@@ -1753,6 +1766,7 @@ _CLASSIFY_JSON_SCHEMA: dict[str, Any] = {
         "document_type": {"type": ["string", "null"]},
         "document_type_confidence": {"type": "number"},
         "tax_relevant": {"type": "boolean"},
+        "tax_role": {"type": "string", "enum": ["beleg", "bezug", "keine"]},
         "tax_year": {"type": ["integer", "null"]},
         "tax_year_confidence": {"type": "number"},
         "tax_sections": {
@@ -2192,7 +2206,7 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         # If tax detection is off, ignore any tax_* fields the LLM might have
         # hallucinated — they're not validated against a slug whitelist here.
         if not tax_active:
-            for k in ("tax_relevant", "tax_year", "tax_year_confidence", "tax_sections"):
+            for k in ("tax_relevant", "tax_role", "tax_year", "tax_year_confidence", "tax_sections"):
                 data.pop(k, None)
         else:
             # Drop tax_sections entries whose slug is not in the provided list —
@@ -2219,8 +2233,28 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
                 )
                 data["tax_sections"] = []
                 data["tax_relevant"] = False
+                data["tax_role"] = "keine"
                 data["tax_year"] = None
                 data["tax_year_confidence"] = 0.0
+            # Reconcile the role with the boolean so a caller may read either:
+            # a named role wins and sets the boolean; a missing or unknown
+            # role is read off the boolean (``beleg`` when relevant, ``bezug``
+            # when only sections exist, else ``keine``). No section at all is
+            # never a ``beleg``; a section without a role is a ``bezug``.
+            role = data.get("tax_role")
+            if role not in ("beleg", "bezug", "keine"):
+                if data.get("tax_relevant") is True:
+                    role = "beleg"
+                elif data.get("tax_sections"):
+                    role = "bezug"
+                else:
+                    role = "keine"
+            if not data.get("tax_sections"):
+                role = "keine"
+            elif role == "keine":
+                role = "bezug"
+            data["tax_role"] = role
+            data["tax_relevant"] = role == "beleg"
             # LLM sometimes emits null for numeric confidence fields — coerce to defaults.
             if data.get("tax_year_confidence") is None:
                 data["tax_year_confidence"] = 0.0
@@ -3036,20 +3070,34 @@ async def _chat_stream(llm: Any, req: chat.ChatRequest, *, server: bool, model: 
         finally:
             put(_STREAM_END)
 
+    released = False
+
+    def release_once() -> None:
+        nonlocal released
+        if not released:
+            released = True
+            sem.release()
+
     try:
         future = loop.run_in_executor(_inference_executor, produce)
     except BaseException:
-        sem.release()
+        release_once()
         raise
     # Released when the generation has actually stopped, not when the client
-    # disconnects — the worker is busy until then either way.
-    future.add_done_callback(lambda _f: sem.release())
+    # disconnects — the worker is busy until then either way.  The end marker
+    # is the producer's last act, so the consumer releases on reading it; the
+    # done callback covers a client that left before the end.  Two paths
+    # because the callback alone is a race: it is scheduled onto the loop from
+    # the worker thread, and when the response has already completed and the
+    # loop is gone (a test client), it never runs and the permit leaks.
+    future.add_done_callback(lambda _f: release_once())
 
     async def events() -> AsyncIterator[str]:
         try:
             while True:
                 item = await queue.get()
                 if item is _STREAM_END:
+                    release_once()
                     break
                 yield f"data: {item}\n\n"
             yield "data: [DONE]\n\n"

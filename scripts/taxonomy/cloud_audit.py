@@ -175,6 +175,7 @@ _BASE_COLUMNS = """
     d.classification_confidence AS confidence,
     d.tags_text AS tags,
     d.tax_relevant AS local_tax_relevant,
+    d.tax_role AS local_tax_role,
     d.tax_year AS local_tax_year,
     COALESCE(
       (SELECT array_agg(dts.tax_section || '::' || dts.confidence::text)
@@ -369,6 +370,7 @@ def _anonymize_doc(doc: dict, names: list[str]) -> dict:
         "local_name": doc["cat_name"],
         "local_confidence": doc.get("confidence"),
         "local_tax_relevant": bool(doc.get("local_tax_relevant")),
+        "local_tax_role": doc.get("local_tax_role") or ("beleg" if doc.get("local_tax_relevant") else "keine"),
         "local_tax_year": doc.get("local_tax_year"),
         "local_tax_sections": doc.get("local_tax_sections") or [],
     }
@@ -386,6 +388,7 @@ Antworte ausschließlich mit gültigem JSON (ohne Markdown-Fences):
   "slug": "der-beste-taxonomie-slug",
   "confidence": 0.0-1.0,
   "reasoning": "kurze Begründung zur Kategorie",
+  "tax_role": "beleg" | "bezug" | "keine",
   "tax_relevant": true/false,
   "tax_year": 2024,
   "tax_year_confidence": 0.0-1.0,
@@ -393,8 +396,24 @@ Antworte ausschließlich mit gültigem JSON (ohne Markdown-Fences):
   "tax_reasoning": "kurze Begründung zur Steuer-Einordnung"
 }
 
-Wenn kein Taxonomie-Slug passt, verwende "sonstiges". Wenn das Dokument nicht
-steuerrelevant ist: tax_relevant=false, tax_year=null, tax_sections=[]."""
+Wenn kein Taxonomie-Slug passt, verwende "sonstiges". tax_relevant ist true
+genau dann, wenn tax_role="beleg". Ohne Steuerbezug: tax_role="keine",
+tax_year=null, tax_sections=[]."""
+
+_TAX_ROLES = ("beleg", "bezug", "keine")
+
+
+def _claude_tax_role(parsed: dict) -> str:
+    """Die Rolle aus Claudes Antwort, mit denselben Invarianten wie der
+    llm-service: ohne Sektion nie ``beleg``, eine Sektion ohne Rolle ist
+    ``bezug``; eine Antwort ohne ``tax_role`` wird am Boolean abgelesen."""
+    role = str(parsed.get("tax_role") or "").strip().lower()
+    sections = _clean_claude_tax_sections(parsed.get("tax_sections"))
+    if role not in _TAX_ROLES:
+        role = "beleg" if parsed.get("tax_relevant") else ("bezug" if sections else "keine")
+    if not sections:
+        return "keine"
+    return "bezug" if role == "keine" else role
 
 def _load_prompt_constant(name: str) -> str:
     """Lies eine Prompt-Konstante wortgleich aus documents/classify-prompts.ts.
@@ -749,6 +768,7 @@ def _classify_batch(
             "local_name": doc["local_name"],
             "local_confidence": doc["local_confidence"],
             "local_tax_relevant": doc["local_tax_relevant"],
+            "local_tax_role": doc["local_tax_role"],
             "local_tax_year": doc["local_tax_year"],
             "local_tax_sections": doc["local_tax_sections"],
             "title": doc["title"],
@@ -765,7 +785,8 @@ def _classify_batch(
                 "claude_slug": claude_slug,
                 "claude_confidence": parsed.get("confidence", 0),
                 "reasoning": parsed.get("reasoning", ""),
-                "claude_tax_relevant": bool(parsed.get("tax_relevant", False)),
+                "claude_tax_relevant": _claude_tax_role(parsed) == "beleg",
+                "claude_tax_role": _claude_tax_role(parsed),
                 "claude_tax_year": parsed.get("tax_year"),
                 "claude_tax_sections": _clean_claude_tax_sections(parsed.get("tax_sections")),
                 "tax_reasoning": parsed.get("tax_reasoning", ""),
@@ -794,6 +815,7 @@ def _classify_batch(
                 "claude_confidence": 0,
                 "reasoning": str(e),
                 "claude_tax_relevant": None,
+                "claude_tax_role": None,
                 "claude_tax_year": None,
                 "claude_tax_sections": [],
                 "tax_reasoning": "",
@@ -935,6 +957,26 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
            f"{fp} ({100*fp/len(local_true):.1f}%) hält Claude für NICHT steuerrelevant.")
         md()
 
+    # Role confusion (documentation/plans/steuer-belegrolle.md, stage 4): the
+    # boolean above hides the one mistake that matters now — a Bezug called a
+    # Beleg, or the other way round. A 3×3 shows it on its own.
+    md("### 5c. Rollen-Konfusion (beleg / bezug / keine)")
+    md()
+    role_rows = [r for r in tax_valid if r.get("claude_tax_role")]
+    counts = {(a, b): 0 for a in _TAX_ROLES for b in _TAX_ROLES}
+    for r in role_rows:
+        counts[(r.get("local_tax_role") or "keine", r["claude_tax_role"])] += 1
+    md.table(
+        ["Lokal \\ Claude", *(f"Claude: {b}" for b in _TAX_ROLES)],
+        [[f"Lokal: {a}", *(counts[(a, b)] for b in _TAX_ROLES)] for a in _TAX_ROLES],
+    )
+    md()
+    beleg_as_bezug = counts[("beleg", "bezug")]
+    bezug_as_beleg = counts[("bezug", "beleg")]
+    md(f"Lokal „beleg“, Claude „bezug“: **{beleg_as_bezug}** (Beleg-Kandidaten, die nur Bezug sind) · "
+       f"lokal „bezug“, Claude „beleg“: **{bezug_as_beleg}** (Belege, die die Matrix oder die Regeln abgestuft haben).")
+    md()
+
     # Per-section breakdown: for every locally-assigned section, does Claude's own
     # tax_sections list for the same doc contain the same slug?
     md("### 5a. Bestätigungsrate je lokaler Steuer-Sektion")
@@ -997,6 +1039,10 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
         if r["claude_tax_relevant"] is not None and r["local_tax_relevant"] == r["claude_tax_relevant"]:
             entry["tax_relevant"] = r["claude_tax_relevant"]
             entry["tax_sections"] = r["claude_tax_sections"]
+            # The role only when both agree on it too — a gold label must not
+            # carry a disputed Bezug/Beleg call.
+            if r.get("claude_tax_role") and r.get("claude_tax_role") == r.get("local_tax_role"):
+                entry["tax_role"] = r["claude_tax_role"]
         gold.append(entry)
 
     md()
