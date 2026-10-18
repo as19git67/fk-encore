@@ -152,7 +152,11 @@ Claude übereinstimmte, ein besserer Kandidat kann dort also nur verlieren.
 
 Gemessen werden Kategorie-Trefferquote (gesamt und je Referenzkategorie, mit
 den häufigsten Verwechslungen), Steuerrelevanz (Konfusionsmatrix, Precision,
-Recall) und Steuersektionen (exakte Mengengleichheit + Jaccard). Der Vergleich
+Recall), die Steuer-Rolle `beleg` / `bezug` / `keine` als 3×3-Konfusion mit
+den beiden Zählern, die zählen (Referenz-Beleg als Bezug abgestuft, Bezug
+als Beleg gezählt; `documentation/plans/steuer-belegrolle.md`) und
+Steuersektionen (exakte Mengengleichheit + Jaccard). Eine Referenz ohne
+`tax_role` (ältere Audit-Dateien) wird am Boolean abgelesen. Der Vergleich
 zweier Snapshots listet zusätzlich die Dokumente, die **gekippt** sind — dort
 steht, welche Art von Dokument der eine Kandidat besser trifft, was ein
 Mittelwert nie zeigt.

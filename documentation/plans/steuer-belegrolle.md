@@ -168,8 +168,11 @@ What the code does today (October 2026):
   page, labels in `frontend/src/utils/taxRole.ts`.
 - Stage 3 — done: `taxRoles` per sender and document type in
   `learned-rules.ts`, applied last in `runClassify`.
-- Stage 4 — partly: the unit and integration tests carry the three
-  examples and their counter-examples (`tax-role.test.ts`,
+- Stage 4 — done: the unit and integration tests carry the three examples
+  and their counter-examples (`tax-role.test.ts`,
   `tax-role-integration.test.ts`, `tax-rules.test.ts`, the llm-service
-  backstop tests). The role confusion in the taxonomy cockpit's gold-set
-  evaluation is still open.
+  backstop tests). `scripts/taxonomy/cloud_audit.py` asks the cloud model
+  for `tax_role`, reports a 3×3 role confusion (section 5c) and puts the
+  role into the gold set only where both sides agree;
+  `model_scoreboard.py` scores the role (accuracy, matrix, beleg→bezug and
+  bezug→beleg counts) next to the boolean and shows it in the comparison.

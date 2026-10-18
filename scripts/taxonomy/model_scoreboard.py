@@ -119,6 +119,8 @@ def _load_reference(path: Path) -> tuple[list[dict], str]:
                 "doc_id": r["doc_id"],
                 "slug": r["claude_slug"],
                 "tax_relevant": r.get("claude_tax_relevant"),
+                "tax_role": _role_of(r.get("claude_tax_role"), r.get("claude_tax_relevant"),
+                                     r.get("claude_tax_sections") or []),
                 "tax_sections": [s["slug"] for s in r.get("claude_tax_sections") or []],
                 "title": r.get("title") or "",
             })
@@ -129,10 +131,29 @@ def _load_reference(path: Path) -> tuple[list[dict], str]:
                 "doc_id": r["doc_id"],
                 "slug": r["slug"],
                 "tax_relevant": r.get("tax_relevant"),
+                "tax_role": _role_of(r.get("tax_role"), r.get("tax_relevant"),
+                                     r.get("tax_sections") or []),
                 "tax_sections": [s["slug"] for s in r.get("tax_sections") or []],
                 "title": "",
             })
     return entries, kind
+
+
+TAX_ROLES = ("beleg", "bezug", "keine")
+
+
+def _role_of(role: object, tax_relevant: object, sections: list) -> str | None:
+    """Rolle einer Referenz oder eines DB-Stands (documentation/plans/
+    steuer-belegrolle.md). Eine Referenz ohne ``tax_role`` wird am Boolean
+    abgelesen: ``beleg`` wenn relevant, ``bezug`` wenn nur Sektionen da sind,
+    sonst ``keine``; ohne Aussage zur Relevanz bleibt es ``None``."""
+    if isinstance(role, str) and role in TAX_ROLES:
+        return role
+    if tax_relevant is None:
+        return None
+    if tax_relevant:
+        return "beleg"
+    return "bezug" if sections else "keine"
 
 
 # ── Ist-Zustand aus der DB ────────────────────────────────────────────────────
@@ -151,6 +172,7 @@ def _load_current(doc_ids: list[int]) -> dict[int, dict]:
                cat.slug,
                d.tax_relevant,
                d.classification_confidence,
+               d.tax_role,
                COALESCE(
                  (SELECT array_agg(dts.tax_section)
                   FROM document_tax_sections dts
@@ -169,7 +191,8 @@ def _load_current(doc_ids: list[int]) -> dict[int, dict]:
             "slug": r[1],
             "tax_relevant": bool(r[2]),
             "confidence": float(r[3]) if r[3] is not None else None,
-            "tax_sections": sorted(r[4] or []),
+            "tax_role": _role_of(r[4], bool(r[2]), r[5] or []),
+            "tax_sections": sorted(r[5] or []),
         }
         for r in rows
     }
@@ -210,6 +233,8 @@ def _score(reference: list[dict], current: dict[int, dict]) -> dict[str, Any]:
             "confidence": cur["confidence"],
             "ref_tax": ref["tax_relevant"],
             "got_tax": cur["tax_relevant"],
+            "ref_role": ref["tax_role"],
+            "got_role": cur["tax_role"],
             "ref_sections": sorted(ref_sections),
             "got_sections": sorted(cur_sections),
             "sections_exact": ref_sections == cur_sections,
@@ -237,6 +262,15 @@ def _score(reference: list[dict], current: dict[int, dict]) -> dict[str, Any]:
     fp = sum(1 for d in tax_docs if not d["ref_tax"] and d["got_tax"])
     fn = sum(1 for d in tax_docs if d["ref_tax"] and not d["got_tax"])
     tn = sum(1 for d in tax_docs if not d["ref_tax"] and not d["got_tax"])
+
+    # Rollen-Konfusion (3×3): die Verwechslung, die das Boolean verdeckt — ein
+    # Bezug, der als Beleg zählt, oder ein Beleg, den Matrix oder Regeln auf
+    # Bezug abgestuft haben. Nur Dokumente, für die beide Seiten eine Rolle haben.
+    role_docs = [d for d in per_doc if d["ref_role"] is not None and d["got_role"] is not None]
+    role_matrix = {a: {b: 0 for b in TAX_ROLES} for a in TAX_ROLES}
+    for d in role_docs:
+        role_matrix[d["ref_role"]][d["got_role"]] += 1
+    role_hits = sum(role_matrix[r][r] for r in TAX_ROLES)
 
     # Sektionen nur dort, wo beide Seiten das Dokument für steuerrelevant halten
     # — bei Uneinigkeit über die Relevanz misst ein Sektionsvergleich nichts
@@ -269,6 +303,14 @@ def _score(reference: list[dict], current: dict[int, dict]) -> dict[str, Any]:
             "precision": round(tp / (tp + fp), 4) if (tp + fp) else None,
             "recall": round(tp / (tp + fn), 4) if (tp + fn) else None,
             "accuracy": round((tp + tn) / len(tax_docs), 4) if tax_docs else None,
+        },
+        "tax_role": {
+            "n": len(role_docs),
+            "hits": role_hits,
+            "accuracy": round(role_hits / len(role_docs), 4) if role_docs else None,
+            "matrix": role_matrix,
+            "beleg_as_bezug": role_matrix["beleg"]["bezug"],
+            "bezug_as_beleg": role_matrix["bezug"]["beleg"],
         },
         "tax_sections": {
             "n": len(sec_docs),
@@ -342,6 +384,20 @@ def _report(label: str, ref_path: Path, ref_kind: str, s: dict[str, Any]) -> str
     L.append(f"| **Modell: nicht relevant** | {t['fn']} | {t['tn']} |")
     L.append("")
 
+    role = s.get("tax_role")
+    if role and role["n"]:
+        L.append("## Steuer-Rolle (beleg / bezug / keine)")
+        L.append("")
+        L.append(f"**{role['hits']}/{role['n']} = {_pct(role['accuracy'])}** · "
+                 f"Referenz beleg → Modell bezug: {role['beleg_as_bezug']} · "
+                 f"Referenz bezug → Modell beleg: {role['bezug_as_beleg']}")
+        L.append("")
+        L.append("| Referenz \\ Modell | " + " | ".join(f"Modell: {b}" for b in TAX_ROLES) + " |")
+        L.append("|---|" + "---:|" * len(TAX_ROLES))
+        for a in TAX_ROLES:
+            L.append(f"| **Referenz: {a}** | " + " | ".join(str(role["matrix"][a][b]) for b in TAX_ROLES) + " |")
+        L.append("")
+
     sec = s["tax_sections"]
     L.append("## Steuersektionen")
     L.append("")
@@ -392,6 +448,7 @@ def _compare(paths: list[Path]) -> str:
     row("Kategorie-Trefferquote", lambda s: _pct(s["category"]["accuracy"]))
     row("Steuer: Precision", lambda s: _pct(s["tax_relevant"]["precision"]))
     row("Steuer: Recall", lambda s: _pct(s["tax_relevant"]["recall"]))
+    row("Steuer-Rolle: Trefferquote", lambda s: _pct((s.get("tax_role") or {}).get("accuracy")))
     row("Sektionen exakt", lambda s: _pct(s["tax_sections"]["exact_rate"]))
     L.append("")
 
