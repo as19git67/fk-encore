@@ -5,15 +5,18 @@
  * A folder is what actually gets handed over: to a Steuerberater, an insurer,
  * a landlord. This view is the entry point to building one; the ordering,
  * page selection and export live in the detail view.
+ *
+ * The tiles and their menu are the ones the Sammelmappen page shows
+ * (components/collections/CollectionTiles.vue): the folders that can hold
+ * documents — typed for documents, Akten, and mixed ones.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
-import Tag from 'primevue/tag'
+import CollectionTiles from '../components/collections/CollectionTiles.vue'
 import Textarea from 'primevue/textarea'
 import PageLayout from '../components/layout/PageLayout.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
@@ -23,20 +26,22 @@ import ErrorBanner from '../components/layout/ErrorBanner.vue'
 import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import {
   createCollection,
-  deleteCollection,
-  listCollections,
-  type DocumentCollection,
+  listAllCollections,
+  markCollectionOpened,
+  type CollectionSummary,
 } from '../api/collections'
-import { anchorKey, saveListAnchor } from '../utils/listAnchor'
+import { collectionRoute } from '../utils/collectionRoute'
+import { saveListAnchor } from '../utils/listAnchor'
 
 const router = useRouter()
-const confirm = useConfirm()
 
 /** One key for this list — anchor and scroll offset are stored under it. */
 const ANCHOR_KEY = 'dokumente-mappen'
 
-const items = ref<DocumentCollection[]>([])
-const loading = ref(false)
+const items = ref<CollectionSummary[]>([])
+// True from the start: PageLayout restores the row on the way back once the
+// page is ready, and an empty list before the first load has no row to find.
+const loading = ref(true)
 const loadError = ref('')
 const info = ref('')
 
@@ -55,7 +60,7 @@ const visibleItems = computed(() => {
   const term = search.term.value.trim().toLowerCase()
   if (!term) return items.value
   return items.value.filter((c) =>
-    [c.title, c.summary, c.notes].some((field) => field?.toLowerCase().includes(term)),
+    [c.name, c.description].some((field) => field?.toLowerCase().includes(term)),
   )
 })
 
@@ -72,7 +77,11 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    items.value = (await listCollections()).items
+    // What this list showed before the shared tiles: folders that can hold
+    // documents — typed for them or mixed — and never the basket.
+    items.value = (await listAllCollections()).items.filter(
+      (c) => (c.entity_type === 'document' || c.entity_type === null) && c.kind !== 'basket',
+    )
   } catch (err: any) {
     loadError.value = err?.message ?? 'Sammelmappen konnten nicht geladen werden.'
   } finally {
@@ -80,11 +89,12 @@ async function load() {
   }
 }
 
-function open(id: number) {
+function open(c: Pick<CollectionSummary, 'id' | 'entity_type' | 'kind'>) {
   // The row, not the offset: a mappe that gained a summary while it was open
   // changes the height of everything below it.
-  saveListAnchor(ANCHOR_KEY, { kind: 'collection', id })
-  router.push({ name: 'dokumente-mappe', params: { id } })
+  saveListAnchor(ANCHOR_KEY, { kind: 'collection', id: c.id })
+  void markCollectionOpened(c.id).catch(() => { /* the visit is a hint, not a must */ })
+  router.push(collectionRoute(c))
 }
 
 function openCreate() {
@@ -100,40 +110,12 @@ async function create() {
   try {
     const created = await createCollection({ title, notes: newNotes.value.trim() || null })
     createOpen.value = false
-    open(created.id)
+    open({ id: created.id, entity_type: 'document', kind: created.kind })
   } catch (err: any) {
     loadError.value = err?.message ?? 'Anlegen fehlgeschlagen.'
   } finally {
     creating.value = false
   }
-}
-
-function remove(collection: DocumentCollection) {
-  confirm.require({
-    header: 'Sammelmappe löschen',
-    message: `Sammelmappe „${collection.title}“ löschen? Die Dokumente darin bleiben erhalten.`,
-    icon: 'pi pi-exclamation-triangle',
-    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
-    acceptProps: { label: 'Löschen', severity: 'danger' },
-    accept: () => { void doRemove(collection) },
-  })
-}
-
-async function doRemove(collection: DocumentCollection) {
-  try {
-    await deleteCollection(collection.id)
-    items.value = items.value.filter((c) => c.id !== collection.id)
-    info.value = `„${collection.title}" gelöscht — die Dokumente sind unverändert.`
-  } catch (err: any) {
-    loadError.value = err?.message ?? 'Löschen fehlgeschlagen.'
-  }
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return ''
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 onMounted(load)
@@ -181,46 +163,14 @@ onMounted(load)
       @clear-filters="search.clear"
     />
 
-    <ul v-else class="cv-list">
-      <li
-        v-for="c in visibleItems"
-        :key="c.id"
-        :data-anchor="anchorKey('collection', c.id)"
-        class="cv-card scroll-anchor"
-      >
-        <button type="button" class="cv-body" @click="open(c.id)">
-          <div class="cv-line">
-            <span class="cv-name">{{ c.title }}</span>
-            <Tag v-if="c.visibility === 'group'" value="Gruppe" icon="pi pi-users" severity="info" />
-            <Tag v-if="c.kind === 'dossier'" value="Akte" icon="pi pi-bolt" severity="secondary" />
-          </div>
-          <p v-if="c.summary" class="cv-summary">{{ c.summary }}</p>
-          <p v-else-if="c.summary_stale && c.item_count > 0" class="cv-summary cv-summary--pending">
-            Zusammenfassung wird erstellt …
-          </p>
-          <div class="cv-meta">
-            <span>
-              <i class="pi pi-file" />
-              {{ c.included_count }} von {{ c.item_count }}
-              {{ c.item_count === 1 ? 'Dokument' : 'Dokumenten' }} im PDF
-            </span>
-            <span v-if="formatDate(c.updated_at)">
-              <i class="pi pi-clock" /> {{ formatDate(c.updated_at) }}
-            </span>
-          </div>
-        </button>
-        <Button
-          v-if="c.can_administer"
-          class="cv-delete"
-          icon="pi pi-trash"
-          text
-          rounded
-          severity="danger"
-          aria-label="Sammelmappe löschen"
-          @click="remove(c)"
-        />
-      </li>
-    </ul>
+    <CollectionTiles
+      v-else
+      :items="visibleItems"
+      @open="open"
+      @changed="load"
+      @error="(message) => (loadError = message)"
+      @notice="(message) => (info = message)"
+    />
     </div>
 
     <Dialog
@@ -255,74 +205,6 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-.cv-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.cv-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--p-content-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 10px;
-  padding: 12px 12px 12px 14px;
-}
-.cv-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 0;
-  background: none;
-  padding: 0;
-  text-align: left;
-  color: var(--p-text-color);
-  cursor: pointer;
-}
-/* A long summary must not squeeze the button: it keeps its size. */
-.cv-delete {
-  flex: 0 0 auto;
-}
-.cv-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.cv-name {
-  min-width: 0;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cv-summary {
-  margin: 6px 0 0;
-  overflow-wrap: anywhere;
-  color: var(--p-text-muted-color);
-  font-size: var(--text-md);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.cv-summary--pending {
-  font-style: italic;
-}
-.cv-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 6px;
-  color: var(--p-text-muted-color);
-  font-size: var(--text-md);
-}
-.cv-meta i {
-  margin-right: 3px;
 }
 .cv-form {
   display: flex;

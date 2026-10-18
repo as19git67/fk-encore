@@ -1298,6 +1298,12 @@ Mehrfachauswahl funktioniert in jeder Liste gleich (Issue #1280):
   `?collection=<id>`, gemischt unter `/sammelmappen/:id`. Jede Modulliste
   versteht `collection` als Filter mit Chip „Sammelmappe: …“; das Backend
   baut die Bedingung mit `collectionScopeCondition` aus `collections/scope.ts`.
+- Eine Sammelmappe sieht in jeder Liste gleich aus und kann dort dasselbe:
+  `components/collections/CollectionTile.vue` (Typ-Symbol, Name, Inhalt,
+  Tags, Stern und „⋮“) mit dem Menü und den Dialogen aus
+  `CollectionActions.vue`; als Raster samt Menü `CollectionTiles.vue`. Die
+  Daten kommen aus `GET /collections` (`CollectionSummary`). Keine Liste baut
+  eine eigene Mappen-Kachel oder ein eigenes Mappen-Menü daneben.
 - Eine gemischte Mappe hat **ein** Aktionsmenü: erst was für alles gilt,
   dann die Stapelaktionen je Typ mit Typ und Anzahl im Text
   (`groupedSelectionActions` in `utils/collectionActions.ts`). Eine neue

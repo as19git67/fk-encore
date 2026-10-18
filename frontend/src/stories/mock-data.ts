@@ -16,7 +16,7 @@ import type {
 } from '../api/photos'
 import type { RoleWithPermissions, Permission } from '../api/roles'
 import type { MeterListItem } from '../api/meters'
-import type { DocumentCollection } from '../api/collections'
+import type { CollectionSummary, DocumentCollection } from '../api/collections'
 import type { PasskeyInfo } from '../api/passkeys'
 import type { PhotoLibrary, AvailablePathsResponse } from '../api/libraries'
 import type {
@@ -921,4 +921,31 @@ export const MOCK_INBOX_FOLDERS: InboxFoldersResponse = {
       default_group_id: 1, default_group_name: 'Familie', is_fallback: false, shadowed: true,
     },
   ],
+}
+
+/**
+ * A document folder as the shared collection list (`GET /collections`)
+ * describes it — what the tiles in the document list and in
+ * Dokumente › Sammelmappen read.
+ */
+export function toCollectionSummary(c: Pick<DocumentCollection, 'id' | 'title' | 'notes' | 'kind' | 'visibility' | 'group_id' | 'item_count' | 'can_administer' | 'updated_at' | 'created_at'>): CollectionSummary {
+  return {
+    id: c.id,
+    name: c.title,
+    description: c.notes,
+    entity_type: 'document',
+    kind: c.kind,
+    visibility: c.visibility,
+    group_id: c.group_id,
+    archived_at: null,
+    created_by: 'user',
+    created_at: c.created_at ?? '2026-01-01T00:00:00Z',
+    updated_at: c.updated_at ?? '2026-01-01T00:00:00Z',
+    favourite: false,
+    last_opened_at: null,
+    counts: { document: c.item_count },
+    total: c.item_count,
+    can_administer: c.can_administer,
+    rule: null,
+  }
 }
