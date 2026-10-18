@@ -30,7 +30,7 @@ function yearOf(args: Record<string, unknown>): number {
 export const taxWorksheet: ToolSpec = {
   name: "tax_worksheet",
   kind: "read",
-  summary: "The worksheet for filling in one year's tax return: per Anlage the flagged documents with the amount recognised in each and the sum, the bookings marked tax-relevant in the year summed by tag, the depot's income, gains and taxes of the year, and hints (an Anlage that had documents last year but none yet, documents without a recognised amount). For the PDF of it, tax_worksheet_pdf.",
+  summary: "The worksheet for filling in one year's tax return: per Anlage the flagged documents (their values are not read yet; never state an amount for a document), the bookings marked tax-relevant in the year summed by tag, the depot's income, gains and taxes of the year, and hints (an Anlage that had documents last year but none yet). For the PDF of it, tax_worksheet_pdf.",
   permissions: DOCUMENTS,
   source: "hand",
   parameters: {
@@ -45,7 +45,7 @@ export const taxWorksheet: ToolSpec = {
     const year = yearOf(args);
     const w = await buildTaxWorksheet({ year, personId: int(args.person_id), mayFinance: mayFinance(ctx) });
     const rows = w.sections.flatMap((s) => s.documents.map((d) => ({
-      section: s.name, title: d.title, date: d.date, from: d.from, amount: d.amount, id: d.id, route: `/dokumente/${d.id}`,
+      section: s.name, title: d.title, date: d.date, from: d.from, id: d.id, route: `/dokumente/${d.id}`,
     })));
     const ids = [...new Set(rows.map((r) => r.id))];
     return {
@@ -67,7 +67,7 @@ export const taxWorksheet: ToolSpec = {
 
 export const taxWorksheetPdf: WriteToolDefinition = {
   name: "tax_worksheet_pdf",
-  summary: "Propose the worksheet for one year's tax return as a PDF ('Ausfüllhilfe Steuer <Jahr>'), stored as a document linked to the flagged documents: per Anlage the documents with their recognised amounts and sums, the tax-relevant bookings by tag, the depot's figures and the hints.",
+  summary: "Propose the worksheet for one year's tax return as a PDF ('Ausfüllhilfe Steuer <Jahr>'), stored as a document linked to the flagged documents: per Anlage the documents, the tax-relevant bookings by tag, the depot's figures and the hints.",
   permissions: DOCUMENTS,
   parameters: {
     type: "object",

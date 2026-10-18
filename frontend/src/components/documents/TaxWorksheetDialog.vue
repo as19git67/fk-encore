@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
  * The Ausfüllhilfe for one tax year, opened from the Steuer page: per
- * Anlage the flagged documents with the amount recognised in each and the
- * sum, the tax-relevant bookings by tag, the businesses' EÜR, the depot's
+ * Anlage the flagged documents (their values are not read yet, see
+ * documentation/plans/steuer-ausfuellhilfe.md), the tax-relevant bookings
+ * by tag, the businesses' EÜR, the depot's
  * figures and the hints — what the assistant's `tax_worksheet` tool reads,
  * without a chat. "Als PDF ablegen" stores it as a document linked to the
  * flagged documents, the same PDF the assistant proposes.
@@ -29,8 +30,9 @@ const error = ref('')
 const storing = ref(false)
 const stored = ref<TaxWorksheetPdfResult | null>(null)
 
-function cents(n: number): string {
-  return formatCurrency((n / 100).toFixed(2))
+/** The worksheet's amounts are EUR. */
+function eur(n: number): string {
+  return formatCurrency(n.toFixed(2))
 }
 
 async function load() {
@@ -83,15 +85,15 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
     <template v-else-if="worksheet">
       <p class="hint">
         {{ worksheet.documentCount }} markierte Dokumente in {{ worksheet.sections.length }} Anlagen,
-        {{ worksheet.bookingCount }} steuerrelevante Buchungen. Erkannte Beträge stammen aus dem Text der
-        Dokumente und sind ungeprüft: jede Zahl vor dem Eintragen am Dokument nachsehen.
+        {{ worksheet.bookingCount }} steuerrelevante Buchungen. Die Werte auf den Belegen werden noch nicht
+        ausgelesen: jede Zahl bitte direkt aus dem Dokument übernehmen.
       </p>
 
       <section v-if="worksheet.sections.length" class="part">
         <h3>Anlagen</h3>
         <table class="sheet">
           <thead>
-            <tr><th>Anlage</th><th class="num">Dokumente</th><th class="num">Summe erkannt</th><th class="num">ohne Betrag</th></tr>
+            <tr><th>Anlage</th><th class="num">Dokumente</th></tr>
           </thead>
           <tbody>
             <tr v-for="s in worksheet.sections" :key="s.slug">
@@ -100,13 +102,11 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
                 <ul class="docs">
                   <li v-for="d in s.documents" :key="d.id">
                     <RouterLink :to="{ name: 'dokumente-detail', params: { id: String(d.id) } }">{{ d.title }}</RouterLink>
-                    <span class="sub">{{ [d.date, d.from].filter(Boolean).join(' · ') }}<template v-if="d.amount !== null"> · {{ cents(d.amount) }}</template><template v-else> · kein Betrag erkannt</template></span>
+                    <span class="sub">{{ [d.date, d.from].filter(Boolean).join(' · ') }}</span>
                   </li>
                 </ul>
               </td>
               <td class="num">{{ s.documents.length }}</td>
-              <td class="num">{{ cents(s.sum) }}</td>
-              <td class="num">{{ s.withoutAmount || '' }}</td>
             </tr>
           </tbody>
         </table>
@@ -118,9 +118,9 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
           <thead><tr><th>Tag</th><th class="num">Buchungen</th><th class="num">Summe</th></tr></thead>
           <tbody>
             <tr v-for="t in worksheet.tags" :key="t.tag">
-              <td>{{ t.tag }}</td><td class="num">{{ t.count }}</td><td class="num">{{ cents(t.sum) }}</td>
+              <td>{{ t.tag }}</td><td class="num">{{ t.count }}</td><td class="num">{{ eur(t.sum) }}</td>
             </tr>
-            <tr class="total"><td>Gesamt</td><td class="num">{{ worksheet.bookingCount }}</td><td class="num">{{ cents(worksheet.bookingTotal) }}</td></tr>
+            <tr class="total"><td>Gesamt</td><td class="num">{{ worksheet.bookingCount }}</td><td class="num">{{ eur(worksheet.bookingTotal) }}</td></tr>
           </tbody>
         </table>
       </section>
@@ -130,8 +130,8 @@ watch(() => [props.visible, props.year, props.personId] as const, ([visible]) =>
         <ul class="plain">
           <li v-for="b in worksheet.businesses" :key="b.id">
             <RouterLink :to="`/finanzen/betriebe/${b.id}`">{{ b.name }}</RouterLink> ({{ b.tax_section }}):
-            <template v-if="b.exempt === true">steuerfrei nach § 3 Nr. 72 EStG, nur zur Information Einnahmen {{ cents(b.income) }}, Ausgaben {{ cents(b.expenses) }}</template>
-            <template v-else>Einnahmen {{ cents(b.income) }}, Ausgaben {{ cents(b.expenses) }} (davon AfA {{ cents(b.afa) }}), {{ b.result >= 0 ? 'Gewinn' : 'Verlust' }} {{ cents(b.result) }}</template>
+            <template v-if="b.exempt === true">steuerfrei nach § 3 Nr. 72 EStG, nur zur Information Einnahmen {{ eur(b.income) }}, Ausgaben {{ eur(b.expenses) }}</template>
+            <template v-else>Einnahmen {{ eur(b.income) }}, Ausgaben {{ eur(b.expenses) }} (davon AfA {{ eur(b.afa) }}), {{ b.result >= 0 ? 'Gewinn' : 'Verlust' }} {{ eur(b.result) }}</template>
             <ul v-if="b.hints.length" class="plain sub"><li v-for="h in b.hints" :key="h">{{ h }}</li></ul>
           </li>
         </ul>

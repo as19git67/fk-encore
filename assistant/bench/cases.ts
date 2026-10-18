@@ -148,8 +148,8 @@ export const BENCH_CASES: BenchCase[] = [
     expect: [{ tool: "tax_worksheet", args: { year: 2025 } }],
     results: {
       tax_worksheet: {
-        summary: "Worksheet for the tax return of 2025: 3 flagged document(s) in 2 Anlage(n), 4 tax-relevant booking(s).\n== Anlage N (anlage-n) ==\n  71 | 2026-01-20 | Lohnsteuerbescheinigung 2025 | Beispiel GmbH | 48200.00 EUR\n  sum of recognised amounts: 48200.00 EUR\n== Haushaltsnahe Aufwendungen / §35a (haushaltsnahe) ==\n  73 | 2025-06-02 | Rechnung Gartenpflege | Beispiel Gartenbau | 640.00 EUR\n  74 | 2025-11-14 | Rechnung Schornsteinfeger | Muster Kaminkehrer | no amount recognised\n  sum of recognised amounts: 640.00 EUR (1 without amount)\n== Tax-relevant bookings of 2025 by tag ==\n  Handwerker: 3 booking(s), -1180.00 EUR\n  Spende: 1 booking(s), -200.00 EUR",
-        rows: [{ section: "Anlage N", title: "Lohnsteuerbescheinigung 2025", amount: 48200 }, { section: "Haushaltsnahe Aufwendungen / §35a", title: "Rechnung Gartenpflege", amount: 640 }],
+        summary: "Worksheet for the tax return of 2025: 3 flagged document(s) in 2 Anlage(n), 4 tax-relevant booking(s).\n== Anlage N (anlage-n) ==\n  71 | 2026-01-20 | Lohnsteuerbescheinigung 2025 | Beispiel GmbH\n== Haushaltsnahe Aufwendungen / §35a (haushaltsnahe) ==\n  73 | 2025-06-02 | Rechnung Gartenpflege | Beispiel Gartenbau\n  74 | 2025-11-14 | Rechnung Schornsteinfeger | Muster Kaminkehrer\n== Tax-relevant bookings of 2025 by tag ==\n  Handwerker: 3 booking(s), -1180.00 EUR\n  Spende: 1 booking(s), -200.00 EUR",
+        rows: [{ section: "Anlage N", title: "Lohnsteuerbescheinigung 2025" }, { section: "Haushaltsnahe Aufwendungen / §35a", title: "Rechnung Gartenpflege" }],
       },
     },
   },

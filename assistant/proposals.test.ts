@@ -153,7 +153,6 @@ describe("write tools", () => {
       year: 2025, total_documents: 1,
       sections: [{ slug: "anlage-n", name: "Anlage N", group: "einkuenfte", documents: [{ document: { id: 71, title: "Lohnsteuerbescheinigung 2025", doc_date: "2026-01-20" }, confidence: null, source: "user" }] }],
     });
-    clients.documents.getDocumentReceiptSuggestion.mockResolvedValue({ amount: 48200 });
     clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
     clients.finance.getPortfolio.mockResolvedValue({ years: [] });
     const out = await tool("tax_worksheet_pdf").run({ year: 2025 }, ctx());

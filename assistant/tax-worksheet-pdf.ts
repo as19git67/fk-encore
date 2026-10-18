@@ -1,6 +1,6 @@
 /**
  * The worksheet as a PDF the user keeps next to ELSTER: one page per
- * Anlage with the documents and their recognised amounts, the bookings by
+ * Anlage with the documents, the bookings by
  * tag, the depot's figures and the hints. Plain A4 with pdfkit, like the
  * grouped report.
  */
@@ -43,19 +43,16 @@ export function renderTaxWorksheetPdf(w: TaxWorksheet, generatedOn: string): Pro
   pdf.font("Helvetica-Bold").fontSize(18).text(t(`Ausfüllhilfe Steuererklärung ${w.year}`), { align: "center" });
   pdf.moveDown(0.3).font("Helvetica").fontSize(9).fillColor("#666")
     .text(t(`Erstellt am ${germanDate(generatedOn)} · ${w.documentCount} Dokumente in ${w.sections.length} Anlagen · ${w.bookingCount} steuerrelevante Buchungen`), { align: "center" });
-  pdf.moveDown(0.2).text(t("Erkannte Beträge stammen aus dem Text der Dokumente und sind nicht geprüft. Jede Zahl vor der Eingabe mit dem Dokument abgleichen."), { align: "center" });
+  pdf.moveDown(0.2).text(t("Die Werte auf den Belegen werden noch nicht ausgelesen. Jede Zahl bitte direkt aus dem Dokument übernehmen."), { align: "center" });
   pdf.fillColor("#000");
 
   for (const s of w.sections) {
     heading(s.name);
-    row(["Datum", "Dokument", "Betrag"], true);
+    row(["Datum", "Dokument", "Nr."], true);
     for (const d of s.documents) {
       if (pdf.y > 760) pdf.addPage();
-      row([germanDate(d.date), `${d.title}${d.from ? ` · ${d.from}` : ""} (Nr. ${d.id})`, d.amount === null ? "–" : money(d.amount)]);
+      row([germanDate(d.date), `${d.title}${d.from ? ` · ${d.from}` : ""}`, String(d.id)]);
     }
-    pdf.moveDown(0.2);
-    rule();
-    row(["", `Summe erkannte Beträge${s.withoutAmount ? ` (${s.withoutAmount} ohne Betrag)` : ""}`, money(s.sum)], true);
   }
 
   if (w.tags.length) {

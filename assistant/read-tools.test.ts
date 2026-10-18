@@ -381,7 +381,7 @@ describe("tax", () => {
 });
 
 describe("tax_worksheet", () => {
-  it("arranges documents with recognised amounts per Anlage, bookings by tag, the depot year and hints", async () => {
+  it("arranges documents per Anlage without amounts, bookings by tag, the depot year and hints", async () => {
     clients.documents.listTaxDocuments
       .mockResolvedValueOnce({
         year: 2025, total_documents: 2,
@@ -392,9 +392,6 @@ describe("tax_worksheet", () => {
         ],
       })
       .mockResolvedValueOnce({ year: 2024, total_documents: 1, sections: [{ slug: "anlage-kap", name: "Anlage KAP", group: "einkuenfte", documents: [{ document: { id: 5, title: "Jahressteuerbescheinigung 2024" }, confidence: null, source: "user" }] }] });
-    clients.documents.getDocumentReceiptSuggestion
-      .mockResolvedValueOnce({ amount: 48200 })
-      .mockResolvedValueOnce({ amount: null });
     clients.finance.listTransactions.mockResolvedValue({
       items: [
         { id: 1, booking_date: "2025-03-10", amount: "-480.00", counterparty: "Beispiel Handwerk GmbH", purpose: "Rechnung", tags: [{ name: "Handwerker" }] },
@@ -411,19 +408,20 @@ describe("tax_worksheet", () => {
     expect(out.text).toContain("== Landwirtschaft Musterhof (anlage-l, EÜR 2025) ==");
     expect(out.text).toContain("Betriebseinnahmen 860.00 EUR; Betriebsausgaben 2496.40 EUR (AfA 2400.00 EUR included); Verlust -1636.40 EUR from 3 booking(s). Details: euer_report(business_id = 2).");
     expect(clients.documents.listTaxDocuments).toHaveBeenNthCalledWith(2, { year: 2024, tax_return_person: undefined });
-    expect(out.text).toContain("71 | 2026-01-20 | Lohnsteuerbescheinigung 2025 | Beispiel GmbH | 48200.00 EUR");
-    expect(out.text).toContain("sum of recognised amounts: 48200.00 EUR");
-    expect(out.text).toContain("73 | 2025-06-02 | Rechnung Gartenpflege | Beispiel Gartenbau | no amount recognised | Anlage 80 %");
-    expect(out.text).toContain("sum of recognised amounts: 0.00 EUR (1 without amount)");
+    expect(out.text).toContain("71 | 2026-01-20 | Lohnsteuerbescheinigung 2025 | Beispiel GmbH\n");
+    expect(out.text).toContain("73 | 2025-06-02 | Rechnung Gartenpflege | Beispiel Gartenbau | Anlage 80 %");
+    expect(out.text).not.toContain("recognised");
+    expect(clients.documents.getDocumentReceiptSuggestion).not.toHaveBeenCalled();
     expect(out.text).toContain("Handwerker: 2 booking(s), -1180.00 EUR");
     expect(out.text).toContain("(ohne Tag): 1 booking(s), -200.00 EUR");
     expect(out.text).toContain("total: -1380.00 EUR over 3 booking(s)");
     expect(out.text).toContain("income (dividends, interest): 120.00 EUR from 4 payment(s); realized gain: 210.00 EUR from 1 sale(s); taxes withheld: 31.60 EUR");
     expect(out.text).toContain("Anlage KAP: 1 document(s) last year, none flagged for 2025 yet.");
-    expect(out.text).toContain("1 document(s) carry no recognised amount");
+    expect(out.text).toContain("The values on the documents are not read yet");
     expect(out.text).not.toContain("Anlage V");
     expect(out.block).toMatchObject({ kind: "documents", subtitle: "Ausfüllhilfe 2025 · 2 Anlagen · 3 Buchungen", route: "/dokumente/steuer?year=2025" });
-    expect(out.block?.rows[0]).toMatchObject({ section: "Anlage N", amount: 48200, route: "/dokumente/71" });
+    expect(out.block?.rows[0]).toMatchObject({ section: "Anlage N", route: "/dokumente/71" });
+    expect(out.block?.rows[0]).not.toHaveProperty("amount");
   });
 
   it("leaves bookings and depot out without finance access", async () => {
