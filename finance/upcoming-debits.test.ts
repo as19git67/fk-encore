@@ -27,6 +27,7 @@ import {
   listUpcomingDebits,
   seriesProfile,
 } from "./upcoming-debits";
+import { getMandateHistory } from "./anomaly-detector";
 
 // ── next-date computation ──────────────────────────────────────────────────
 
@@ -411,6 +412,24 @@ describe("GET /finance/mandates/upcoming", () => {
     expect(res.items.map((i) => [i.counterparty, i.account_label, i.expected_date])).toEqual([
       ["Beispiel Versicherung", "Neues Giro", "2026-11-12"],
     ]);
+  });
+
+  it("the history behind a listed row opens under the same access rule as the list", async () => {
+    const other = await insertAccount("Fremdes Giro");
+    await db.insert(financeAccountAccess).values({ account_id: other, user_id: 902, level: "read" });
+    const id = await insertMandate({ accountId: other, counterparty: "Beispiel Fitness GmbH", amount: "-24.90", interval: 30, lastSeen: "2026-09-30" });
+    await insertBookings(other, "Beispiel Fitness GmbH", [["2026-09-30", "-24.90"], ["2026-08-31", "-24.90"], ["2026-07-31", "-24.90"]]);
+
+    // A finance admin without an access row of their own sees the row on
+    // the page, so the history must open as well.
+    setAuth("1", ["finance.view", "finance.admin"]);
+    expect((await listUpcomingDebits({})).items.map((i) => i.mandate_id)).toEqual([id]);
+    expect((await getMandateHistory({ mandateId: id })).items.map((i) => i.amount)).toEqual(["-24.90", "-24.90", "-24.90"]);
+
+    // Someone without access to the account gets neither.
+    setAuth("901", ["finance.view"]);
+    expect((await listUpcomingDebits({})).items).toEqual([]);
+    await expect(getMandateHistory({ mandateId: id })).rejects.toThrow("mandate not found");
   });
 
   it("needs finance.view", async () => {

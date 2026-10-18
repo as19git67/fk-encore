@@ -20,6 +20,7 @@ import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
+import { readableFinanceAccountIds } from "./account-acl";
 import {
   financeAccount,
   financeAccountAccess,
@@ -1770,14 +1771,13 @@ export const getMandateHistory = api(
     const auth = getAuthData()!;
     requirePermission(auth, "finance.view");
 
-    // Read-only view: any account-access level (read or write) is enough.
-    // No admin bypass — admins must hold an explicit account-access row.
-    const accessible = await db
-      .select({ id: financeAccountAccess.account_id })
-      .from(financeAccountAccess)
-      .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
-    const accountIds = accessible.map((a) => a.id);
-    if (accountIds.length === 0) throw APIError.notFound("mandate not found");
+    // Read-only view, under the one rule every finance list uses
+    // (`readableFinanceAccountIds`): any account-access level, and finance
+    // admins see every account. The expected-payments page lists a mandate
+    // under that rule and links here; the two must agree, or the admin gets
+    // "mandate not found" on a row the page just showed.
+    const readable = await readableFinanceAccountIds(auth);
+    if (readable !== null && readable.length === 0) throw APIError.notFound("mandate not found");
 
     const [mandate] = await db
       .select()
@@ -1785,7 +1785,7 @@ export const getMandateHistory = api(
       .where(
         and(
           eq(financeRecurringMandate.id, mandateId),
-          inArray(financeRecurringMandate.account_id, accountIds),
+          readable === null ? undefined : inArray(financeRecurringMandate.account_id, readable),
         ),
       )
       .limit(1);
