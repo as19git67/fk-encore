@@ -459,20 +459,20 @@ describe("what the benchmark caught", () => {
   it("an answer ending with the no-rows line keeps its rows out of the chat", async () => {
     // Asked for flights, found coffee bills: the model says so and ends with
     // the marker; the answer stands alone and the marker is not shown.
-    clients.finance.listTransactions.mockResolvedValue({ items: [{ id: 9, booking_date: "2026-06-06", counterparty: "Starbucks Japan", amount: "-2.51" }], total: 1 });
+    clients.finance.listTransactions.mockResolvedValue({ items: [{ id: 9, booking_date: "2026-06-06", counterparty: "Beispiel Café Musterland", amount: "-2.51" }], total: 1 });
     clients.finance.getOverview.mockResolvedValue({ sections: [], unassigned: [] });
     const loop = scripted([
-      calls(["list_transactions", { q: "Japan" }]),
-      answer(`Es gibt Buchungen mit "Japan", aber keine Flugbuchung.\n\n${NO_ROWS_MARKER}`),
+      calls(["list_transactions", { q: "Musterland" }]),
+      answer(`Es gibt Buchungen mit "Musterland", aber keine Flugbuchung.\n\n${NO_ROWS_MARKER}`),
     ]);
-    const res = await runTurn({ user: USER, history: [], question: "Flug nach Japan?", tools: catalogFor(USER), chat: loop.fn, now: NOW });
-    expect(res.answer).toBe('Es gibt Buchungen mit "Japan", aber keine Flugbuchung.');
+    const res = await runTurn({ user: USER, history: [], question: "Flug nach Musterland?", tools: catalogFor(USER), chat: loop.fn, now: NOW });
+    expect(res.answer).toBe('Es gibt Buchungen mit "Musterland", aber keine Flugbuchung.');
     expect(res.blocks).toEqual([]);
     expect(Object.keys(res.toolResults)).toHaveLength(1);
 
     // Without the line the rows stay beside the answer.
-    const plain = scripted([calls(["list_transactions", { q: "Japan" }]), answer("Eine Buchung.")]);
-    const kept = await runTurn({ user: USER, history: [], question: "Japan?", tools: catalogFor(USER), chat: plain.fn, now: NOW });
+    const plain = scripted([calls(["list_transactions", { q: "Musterland" }]), answer("Eine Buchung.")]);
+    const kept = await runTurn({ user: USER, history: [], question: "Musterland?", tools: catalogFor(USER), chat: plain.fn, now: NOW });
     expect(kept.blocks).toHaveLength(1);
   });
 
