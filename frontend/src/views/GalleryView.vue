@@ -74,6 +74,7 @@ import { useAtLeast } from '../composables/useBreakpoint'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
 import type { FilterChip } from '../components/layout/listToolbar'
 import { parsePinnedPhotoIds, PHOTO_IDS_QUERY_KEY } from '../utils/photoIdsQuery'
+import { isCrossModuleOrigin } from '../composables/useModuleBack'
 import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
@@ -155,11 +156,19 @@ const showPersons = computed(() => auth.hasPermission('people.view'))
 //   2. photoNav.selectedPhotoId — the shared, persisted "last focused photo".
 const initialAnchor = ref<number | null>(null)
 const pendingFullscreenId = ref<number | null>(null)
+/**
+ * The viewer was opened straight from a page that opens objects across
+ * modules (an assistant answer, a Sammelmappe). Closing it is then "Zurück"
+ * to that page — the gallery grid behind the viewer was never where the
+ * reader came from. Read before the deeplink is stripped from the URL.
+ */
+let returnOnViewerClose = false
 {
   const q = Number(route.query.photoId)
   if (Number.isFinite(q) && q > 0) {
     initialAnchor.value = q
     pendingFullscreenId.value = q
+    returnOnViewerClose = isCrossModuleOrigin(window.history.state?.back as string | undefined)
   } else if (photoNav.selectedPhotoId !== null) {
     initialAnchor.value = photoNav.selectedPhotoId
   }
@@ -1333,6 +1342,16 @@ async function openFullscreenAt(index: number): Promise<void> {
   galleryRef.value.scrollToIndex(index)
 }
 
+/** The viewer's own close (arrow, Escape): back to the chat when it came from there. */
+function onViewerClose() {
+  if (returnOnViewerClose) {
+    returnOnViewerClose = false
+    router.back()
+    return
+  }
+  closeFullscreen()
+}
+
 function closeFullscreen() {
   // Deliberately keep `cursorIndex / cursorPhoto / faces / POI`
   // around so the desktop sidebar continues showing the last-viewed
@@ -1933,7 +1952,7 @@ void refreshReviewSequence()
       :group="cursorGroup"
       :variant-photo="variantPhoto"
       @toggle-variant="variantCursor.toggle()"
-      @close="closeFullscreen"
+      @close="onViewerClose"
       @prev="goPrev"
       @next="goNext"
       @current-loaded="onFullscreenImageLoaded"
