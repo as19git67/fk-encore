@@ -1,11 +1,15 @@
 /**
  * The worksheet for filling in a year's tax return (documentation/plans/
- * ki-assistent.md): per Anlage the documents flagged for the year with the
- * amount recognised in each, the bookings marked tax-relevant in the year
- * summed by tag, and the depot's figures of the year — everything the
- * household already holds, arranged the way the forms ask for it. The
- * sums are computed here, never by the model; recognised amounts are
- * marked as such, because an amount read from a scan is a suggestion.
+ * ki-assistent.md): per Anlage the documents flagged for the year, the
+ * bookings marked tax-relevant in the year summed by tag, and the depot's
+ * figures of the year — everything the household already holds, arranged
+ * the way the forms ask for it. The sums are computed here, never by the
+ * model.
+ *
+ * Documents carry no amount here. One amount per document cannot be right
+ * for evidence that prints a dozen values (a Lohnsteuerbescheinigung, a
+ * bank's Jahressteuerbescheinigung); the values are read per form field in
+ * documentation/plans/steuer-ausfuellhilfe.md, stage 2.
  */
 
 import { documents, finance } from "~encore/clients";
@@ -21,8 +25,6 @@ export interface WorksheetDocument {
   title: string;
   date: string | null;
   from: string | null;
-  /** The amount recognised in the document's text, in EUR; null when none was found. */
-  amount: number | null;
   /** The classifier's confidence in the Anlage, null for a user's own assignment. */
   confidence: number | null;
 }
@@ -32,9 +34,6 @@ export interface WorksheetSection {
   name: string;
   group: string;
   documents: WorksheetDocument[];
-  /** Sum of the recognised amounts, EUR. */
-  sum: number;
-  withoutAmount: number;
 }
 
 export interface WorksheetTag {
@@ -74,8 +73,8 @@ export interface TaxWorksheet {
   hints: string[];
 }
 
-/** How many documents get their amount looked up; beyond it the sum is partial and says so. */
-const AMOUNT_LOOKUPS = 80;
+/** Said wherever the documents are listed: their values are not read yet. */
+export const NO_AMOUNTS_HINT = "The values on the documents are not read yet: take each figure from the document itself. Reading them per form field is planned (steuer-ausfuellhilfe).";
 const BOOKING_LIMIT = 500;
 
 function title(d: TaxDoc): string {
@@ -89,21 +88,8 @@ export async function buildTaxWorksheet(input: { year: number; personId?: number
     documents.listTaxDocuments({ year: year - 1, tax_return_person: personId }).catch(() => null) as unknown as Promise<TaxListing | null>,
   ]);
 
-  // One amount lookup per distinct document, the first AMOUNT_LOOKUPS of them.
   const distinct = new Map<number, TaxDoc>();
   for (const b of thisYear.sections) for (const e of b.documents) distinct.set(e.document.id, e.document);
-  const amounts = new Map<number, number | null>();
-  let lookedUp = 0;
-  for (const [id] of distinct) {
-    if (lookedUp >= AMOUNT_LOOKUPS) break;
-    lookedUp++;
-    try {
-      const r = (await documents.getDocumentReceiptSuggestion({ id })) as unknown as { amount: number | null };
-      amounts.set(id, typeof r.amount === "number" && Number.isFinite(r.amount) ? r.amount : null);
-    } catch {
-      amounts.set(id, null);
-    }
-  }
 
   const sections: WorksheetSection[] = thisYear.sections
     .filter((b) => b.documents.length)
@@ -113,14 +99,9 @@ export async function buildTaxWorksheet(input: { year: number; personId?: number
         title: title(e.document),
         date: e.document.doc_date?.slice(0, 10) ?? null,
         from: e.document.correspondent_display ?? e.document.sender ?? null,
-        amount: amounts.get(e.document.id) ?? null,
         confidence: e.source === "user" ? null : e.confidence,
       }));
-      return {
-        slug: b.slug, name: b.name, group: b.group, documents: docs,
-        sum: Math.round(docs.reduce((acc, d) => acc + (d.amount ?? 0), 0) * 100) / 100,
-        withoutAmount: docs.filter((d) => d.amount === null).length,
-      };
+      return { slug: b.slug, name: b.name, group: b.group, documents: docs };
     });
 
   const tags = new Map<string, WorksheetTag>();
@@ -180,9 +161,7 @@ export async function buildTaxWorksheet(input: { year: number; personId?: number
       if (b.documents.length && !now.has(b.slug)) hints.push(`${b.name}: ${b.documents.length} document(s) last year, none flagged for ${year} yet.`);
     }
   }
-  if (distinct.size > lookedUp) hints.push(`Amounts were looked up for the first ${lookedUp} of ${distinct.size} documents; the sums are partial.`);
-  const noAmount = sections.reduce((n, s) => n + s.withoutAmount, 0);
-  if (noAmount) hints.push(`${noAmount} document(s) carry no recognised amount; their figures have to be read from the document.`);
+  if (distinct.size) hints.push(NO_AMOUNTS_HINT);
   if (!mayFinance) hints.push("Bookings and depot figures are left out: the user has no finance access.");
 
   return {
@@ -206,9 +185,8 @@ export function worksheetText(w: TaxWorksheet): string {
   for (const s of w.sections) {
     out.push(`\n== ${s.name} (${s.slug}) ==`);
     for (const d of s.documents) {
-      out.push(`  ${d.id} | ${d.date ?? "-"} | ${d.title} | ${d.from ?? "-"} | ${d.amount === null ? "no amount recognised" : eur(d.amount)}${d.confidence !== null ? ` | Anlage ${Math.round(d.confidence * 100)} %` : ""}`);
+      out.push(`  ${d.id} | ${d.date ?? "-"} | ${d.title} | ${d.from ?? "-"}${d.confidence !== null ? ` | Anlage ${Math.round(d.confidence * 100)} %` : ""}`);
     }
-    out.push(`  sum of recognised amounts: ${eur(s.sum)}${s.withoutAmount ? ` (${s.withoutAmount} without amount)` : ""}`);
   }
   if (w.tags.length) {
     out.push(`\n== Tax-relevant bookings of ${w.year} by tag (negative = paid) ==`);
@@ -228,6 +206,6 @@ export function worksheetText(w: TaxWorksheet): string {
     out.push(`  income (dividends, interest): ${eur(Number(w.depot.income))} from ${w.depot.dividend_count} payment(s); realized gain: ${eur(Number(w.depot.realized))}${w.depot.realized_complete ? "" : " (incomplete)"} from ${w.depot.sell_count} sale(s); taxes withheld: ${eur(Number(w.depot.taxes))}; fees: ${eur(Number(w.depot.fees))}`);
   }
   if (w.hints.length) out.push("\nHints:\n" + w.hints.map((h) => `  - ${h}`).join("\n"));
-  out.push("\nRecognised amounts are read from the documents' text and not checked; the user confirms every figure against the document before entering it.");
+  out.push("\nNo amount of a document is known to the worksheet: never state one, and point the user to the document for each figure.");
   return out.join("\n");
 }

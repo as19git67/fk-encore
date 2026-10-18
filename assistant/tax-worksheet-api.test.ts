@@ -19,7 +19,6 @@ function flagged() {
       sections: [{ slug: "anlage-n", name: "Anlage N", group: "einkuenfte", documents: [{ document: { id: 71, title: "Lohnsteuerbescheinigung 2025", doc_date: "2026-01-20" }, confidence: null, source: "user" }] }],
     }
     : { year, total_documents: 0, sections: [] });
-  clients.documents.getDocumentReceiptSuggestion.mockResolvedValue({ amount: 48200 });
   clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
   clients.finance.listBusinesses.mockResolvedValue({ items: [] });
   clients.finance.getPortfolio.mockResolvedValue({ years: [] });
@@ -31,11 +30,15 @@ beforeEach(() => {
 });
 
 describe("GET /assistant/tax-worksheet", () => {
-  it("reads the worksheet of a year with the recognised amounts", async () => {
+  it("reads the worksheet of a year, without inventing amounts for the documents", async () => {
     flagged();
     const w = await getTaxWorksheet({ year: 2025 });
     expect(w.year).toBe(2025);
-    expect(w.sections.map((s) => [s.name, s.documents.length, s.sum])).toEqual([["Anlage N", 1, 48200]]);
+    expect(w.sections.map((s) => [s.name, s.documents.length])).toEqual([["Anlage N", 1]]);
+    expect(w.sections[0]!.documents[0]).not.toHaveProperty("amount");
+    // The receipt rule picked one number per document; a tax certificate prints a dozen.
+    expect(clients.documents.getDocumentReceiptSuggestion).not.toHaveBeenCalled();
+    expect(w.hints.some((h) => h.includes("not read yet"))).toBe(true);
     expect(w.documentCount).toBe(1);
     expect(clients.documents.listTaxDocuments).toHaveBeenCalledWith(expect.objectContaining({ year: 2025 }));
   });

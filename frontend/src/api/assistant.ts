@@ -253,8 +253,6 @@ export interface TaxWorksheetDocument {
   title: string
   date: string | null
   from: string | null
-  /** Cents, as recognised in the document's text; null when none was. */
-  amount: number | null
   confidence: number | null
 }
 
@@ -263,18 +261,16 @@ export interface TaxWorksheetSection {
   name: string
   group: string
   documents: TaxWorksheetDocument[]
-  /** Cents. */
-  sum: number
-  withoutAmount: number
 }
 
 export interface TaxWorksheetTag {
   tag: string
   count: number
-  /** Cents, negative = paid. */
+  /** EUR, negative = paid. */
   sum: number
 }
 
+/** Amounts in EUR. */
 export interface TaxWorksheetBusiness {
   id: number
   name: string

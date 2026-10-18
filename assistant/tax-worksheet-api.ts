@@ -3,8 +3,8 @@
  * page (no chat needed): `GET /assistant/tax-worksheet` reads it, `POST
  * /assistant/tax-worksheet/pdf` stores it as a document, the same PDF the
  * assistant's `tax_worksheet_pdf` proposal makes. Figures come from
- * `tax-worksheet.ts`; recognised amounts are read from the documents' text
- * and unchecked, which the page says.
+ * `tax-worksheet.ts`; the documents' own values are not read yet
+ * (documentation/plans/steuer-ausfuellhilfe.md), which the page says.
  */
 
 import { api, APIError, Query } from "encore.dev/api";
