@@ -1408,11 +1408,6 @@ onBeforeUnmount(() => {
           <RouterLink v-if="auth.hasPermission('data.manage')" :to="{ name: 'dokumente-duplikate' }">Zur Prüfung</RouterLink>
         </Message>
 
-        <!-- What else belongs next to this document, grouped by why (#1478).
-             Loads after the document itself. Where the document lies shows
-             the "Ablegen" dialog at the top. -->
-        <RelatedDocumentsCard v-if="doc" :document-id="doc.id" />
-
         <section class="tax-card">
           <div class="tax-card-header">
             <h2 class="tax-card-title">
@@ -1572,6 +1567,12 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </section>
+
+        <!-- What else belongs next to this document, grouped by why (#1478).
+             Below the tax card and folded by default; loads after the
+             document itself. Where the document lies shows the "Ablegen"
+             dialog at the top. -->
+        <RelatedDocumentsCard v-if="doc" :document-id="doc.id" />
 
         <div class="extra-info">
           <div><strong>Datei:</strong> {{ doc.original_filename }}</div>
