@@ -14,9 +14,14 @@ export function isPathInsideModule(path: string | null | undefined, basePath: st
  */
 const CROSS_MODULE_ORIGINS = ['/assistent', '/sammelmappen']
 
+/** Whether the previous entry is one of the pages that open objects across modules. */
+export function isCrossModuleOrigin(path: string | null | undefined): boolean {
+  return CROSS_MODULE_ORIGINS.some((origin) => isPathInsideModule(path, origin))
+}
+
 /** Whether "Zurück" from a page of `basePath` may be plain history for this previous entry. */
 export function isReturnableOrigin(path: string | null | undefined, basePath: string): boolean {
-  return isPathInsideModule(path, basePath) || CROSS_MODULE_ORIGINS.some((origin) => isPathInsideModule(path, origin))
+  return isPathInsideModule(path, basePath) || isCrossModuleOrigin(path)
 }
 
 /**

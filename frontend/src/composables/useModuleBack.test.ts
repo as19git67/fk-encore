@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPathInsideModule, isReturnableOrigin } from './useModuleBack'
+import { isCrossModuleOrigin, isPathInsideModule, isReturnableOrigin } from './useModuleBack'
 
 describe('isPathInsideModule', () => {
   it('accepts document list, details and queries', () => {
@@ -24,5 +24,14 @@ describe('isReturnableOrigin', () => {
   it('falls back to the list from another module or a cold start', () => {
     expect(isReturnableOrigin('/finanzen/transaktionen/42', '/dokumente')).toBe(false)
     expect(isReturnableOrigin(undefined, '/dokumente')).toBe(false)
+  })
+})
+
+describe('isCrossModuleOrigin', () => {
+  it('is the assistant or a Sammelmappe, nothing else', () => {
+    expect(isCrossModuleOrigin('/assistent?c=12')).toBe(true)
+    expect(isCrossModuleOrigin('/sammelmappen/7')).toBe(true)
+    expect(isCrossModuleOrigin('/fotos/galerie')).toBe(false)
+    expect(isCrossModuleOrigin(undefined)).toBe(false)
   })
 })
