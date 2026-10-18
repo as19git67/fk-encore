@@ -881,14 +881,22 @@ _inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-
 # Semaphore mirrors max_workers=1.  Callers wait up to acquire_timeout seconds
 # before receiving a 503, so short operations (embed ~1 s) don't spuriously
 # block a concurrent classify.  Initialised lazily on first use so it binds
-# to the correct event loop.
+# to the correct event loop — and re-created when the running loop is not
+# the one it was bound to.  In production there is one loop for the life of
+# the process, so this never triggers; under a test client that opens a loop
+# per request, a permit still held when the previous loop closed would
+# otherwise poison every later request ("is bound to a different event
+# loop"), which is how one flaky stream test once took 77 others with it.
 _inference_sem: asyncio.Semaphore | None = None
+_inference_sem_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _get_inference_sem() -> asyncio.Semaphore:
-    global _inference_sem
-    if _inference_sem is None:
+    global _inference_sem, _inference_sem_loop
+    loop = asyncio.get_running_loop()
+    if _inference_sem is None or _inference_sem_loop is not loop:
         _inference_sem = asyncio.Semaphore(1)
+        _inference_sem_loop = loop
     return _inference_sem
 
 _T = TypeVar("_T")
@@ -3062,20 +3070,34 @@ async def _chat_stream(llm: Any, req: chat.ChatRequest, *, server: bool, model: 
         finally:
             put(_STREAM_END)
 
+    released = False
+
+    def release_once() -> None:
+        nonlocal released
+        if not released:
+            released = True
+            sem.release()
+
     try:
         future = loop.run_in_executor(_inference_executor, produce)
     except BaseException:
-        sem.release()
+        release_once()
         raise
     # Released when the generation has actually stopped, not when the client
-    # disconnects — the worker is busy until then either way.
-    future.add_done_callback(lambda _f: sem.release())
+    # disconnects — the worker is busy until then either way.  The end marker
+    # is the producer's last act, so the consumer releases on reading it; the
+    # done callback covers a client that left before the end.  Two paths
+    # because the callback alone is a race: it is scheduled onto the loop from
+    # the worker thread, and when the response has already completed and the
+    # loop is gone (a test client), it never runs and the permit leaks.
+    future.add_done_callback(lambda _f: release_once())
 
     async def events() -> AsyncIterator[str]:
         try:
             while True:
                 item = await queue.get()
                 if item is _STREAM_END:
+                    release_once()
                     break
                 yield f"data: {item}\n\n"
             yield "data: [DONE]\n\n"
