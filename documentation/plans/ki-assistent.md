@@ -514,7 +514,13 @@ behind it.
      the POST returns the whole answer. Blocks are rendered by the assistant's
      own compact rows rather than the modules' list rows (those are inline
      markup in their views, not components); photos show thumbnails from the
-     `filename` the photo tools now include. `module.assistant` is seeded for
+     `filename` the photo tools now include, and a photo opens the gallery
+     with the answer's photos as the grid (`?ids=3,9,27` beside `photoId`,
+     `utils/photoIdsQuery.ts`), so the viewer's previous/next move through
+     the answer, not the library; a chip in the gallery drops the set, a
+     new search replaces it. "Zurück" on a detail page opened out of an
+     answer returns to the chat (`useModuleBack` treats the assistant and
+     the Sammelmappen as origins), where `PageLayout` lands on the row. `module.assistant` is seeded for
      every module role and checked on every endpoint but the stream, whose
      media-scope token only lets the turn's owner follow it. The transaction
      list (`AccountTransactionsView`) takes `dateFrom`, `dateTo` and `tags`

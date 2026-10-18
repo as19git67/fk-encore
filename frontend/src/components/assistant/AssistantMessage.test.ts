@@ -5,12 +5,13 @@ import AssistantMessage from './AssistantMessage.vue'
 import type { ResultBlock } from '../../api/assistant'
 
 vi.mock('../DocumentThumbnail.vue', () => ({ default: defineComponent({ render: () => h('span') }) }))
+vi.mock('../../api/gallery', () => ({ getThumbUrl: (name: string) => `/thumb/${name}` }))
 
 // A RouterLink that renders an anchor: the row's attributes and click land
 // on it like on the real link.
 const RouterLink = defineComponent({
   props: { to: { type: [String, Object], required: true } },
-  setup: (_props, { slots, attrs }) => () => h('a', { href: '#', ...attrs }, slots.default?.()),
+  setup: (props, { slots, attrs }) => () => h('a', { href: '#', 'data-to': typeof props.to === 'string' ? props.to : JSON.stringify(props.to), ...attrs }, slots.default?.()),
 })
 
 function docs(tool: string, ids: number[], subtitle?: string): ResultBlock {
@@ -70,5 +71,16 @@ describe('AssistantMessage', () => {
     expect(row.dataset.anchor).toBeUndefined()
     row.click()
     expect(sessionStorage.getItem('list_anchor:assistent')).toBeNull()
+  })
+})
+
+describe('AssistantMessage photos', () => {
+  it('opens a photo in the gallery with the answer\'s photos as the grid', () => {
+    const photos = { kind: 'photos', tool: 'search_photos', rows: [{ id: 3, filename: 'a.jpg' }, { id: 9, filename: 'b.jpg' }, { id: 27, filename: 'c.jpg' }] } as ResultBlock
+    const el = mount([photos], 5)
+    const links = [...el.querySelectorAll<HTMLElement>('a.photo')]
+    expect(links).toHaveLength(3)
+    expect(JSON.parse(links[1]!.dataset.to!)).toEqual({ name: 'fotos-gallery', query: { photoId: '9', ids: '3,9,27' } })
+    expect(links[1]!.dataset.anchor).toBe('photos@m5-0:9')
   })
 })

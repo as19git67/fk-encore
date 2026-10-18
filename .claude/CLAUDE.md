@@ -1218,7 +1218,9 @@ steht ganz links, durch einen Spacer von dem Paar getrennt, und fragt über
 Jede Detailseite beginnt ihren `#actions`-Slot mit demselben Ausgang:
 `<Button icon="pi pi-arrow-left" text rounded aria-label="Zurück" />`, der
 `goBack` aus `useModuleBack(basePath, fallbackRouteName)` aufruft — History,
-wenn die vorige Seite im selben Modul lag, sonst die Liste des Moduls.
+wenn die vorige Seite im selben Modul lag oder eine Seite war, die Objekte
+aller Module öffnet (der Assistent, die Sammelmappen; Liste
+`CROSS_MODULE_ORIGINS` im Composable), sonst die Liste des Moduls.
 Danach kommen Vor/Zurück durch den Basket (wo es einen gibt) und erst dann
 die Aktionen der Seite.
 
