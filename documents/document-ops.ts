@@ -90,7 +90,7 @@ import {
   applyKindergeldTaxRule,
   applySecuritiesSettlementTaxRule,
 } from "./tax-rules";
-import { householdTaxFacts, resolveTaxRole } from "./tax-role";
+import { resolveTaxRole } from "./tax-role";
 import {
   buildUmlautRestorationMap,
   detectSubjectPersonIds,
@@ -748,19 +748,13 @@ export async function runClassify(documentId: number): Promise<{ classification:
   //     the model named a role; whether a `beleg` stands is decided from the
   //     document type and the section — a school report (urkunde) or an
   //     Erträgnisaufstellung (abrechnung) is about the matter, not the
-  //     evidence. Household facts come from the matched Bezugspersonen: a
-  //     school certificate is evidence for Anlage Kind only for a child of 18
-  //     or more in the tax year. The matrix only downgrades; the text rules
-  //     below may still force `beleg` on a high-precision marker.
+  //     evidence. The matrix only downgrades; the text rules below may still
+  //     force `beleg` on a high-precision marker.
   {
     const resolved = resolveTaxRole({
       role: classification.tax_role,
       taxSections: classification.tax_sections,
       documentType: classification.document_type,
-      facts: householdTaxFacts(
-        subjectPersons.filter((p) => subjectPersonIds.includes(p.id)),
-        classification.tax_year,
-      ),
     });
     if (resolved.downgraded) {
       console.log(
