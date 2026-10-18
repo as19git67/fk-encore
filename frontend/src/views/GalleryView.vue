@@ -72,6 +72,8 @@ import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDial
 import CollageDialog from '../components/CollageDialog.vue'
 import { useAtLeast } from '../composables/useBreakpoint'
 import { useFilter, usePhotoFilterChips } from '../composables/useFilter'
+import type { FilterChip } from '../components/layout/listToolbar'
+import { parsePinnedPhotoIds, PHOTO_IDS_QUERY_KEY } from '../utils/photoIdsQuery'
 import { useListSearch, useListToolbar } from '../composables/useListToolbar'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { useNaturalSearch } from '../composables/useNaturalSearch'
@@ -167,7 +169,7 @@ if (route.query.photoId !== undefined) {
 }
 
 // ── Filter ──────────────────────────────────────────────────────────────────
-const photoFilter = useFilter({ preserveKeys: ['photoId', 'sortBy', 'sortDir'] })
+const photoFilter = useFilter({ preserveKeys: ['photoId', 'sortBy', 'sortDir', PHOTO_IDS_QUERY_KEY] })
 const {
   applied: filter,
   draft: filterDraft,
@@ -176,9 +178,24 @@ const {
   apply: applyFilter,
   reset: resetFilter,
 } = photoFilter
+// A fixed set of photos in the URL (`?ids=`): the photos of one assistant
+// answer. The grid shows exactly those, so the viewer's previous/next move
+// through the answer; the chip below drops the set. A new search replaces it.
+const pinnedIds = computed<number[] | null>(() => parsePinnedPhotoIds(route.query[PHOTO_IDS_QUERY_KEY]))
+function clearPinnedIds() {
+  if (route.query[PHOTO_IDS_QUERY_KEY] === undefined) return
+  const { [PHOTO_IDS_QUERY_KEY]: _ids, ...rest } = route.query
+  void router.replace({ query: rest })
+}
+const pinnedChip = computed<FilterChip | null>(() => pinnedIds.value
+  ? { key: 'pinned-ids', label: `Antwort des Assistenten: ${pinnedIds.value.length} ${pinnedIds.value.length === 1 ? 'Foto' : 'Fotos'}`, remove: clearPinnedIds }
+  : null)
+
 // Removable summaries of the applied filter; the shared toolbar renders them
 // and every chip carries its own `remove()`.
-const filterChips = usePhotoFilterChips(photoFilter)
+const photoFilterChips = usePhotoFilterChips(photoFilter)
+const filterChips = computed<FilterChip[]>(() => (pinnedChip.value ? [pinnedChip.value, ...photoFilterChips.value] : photoFilterChips.value))
+const filterActiveCount = computed(() => activeCount.value + (pinnedChip.value ? 1 : 0))
 const filterMenuOpen = ref(false)
 // Lazy-mount the filter menu so its onMounted-prefetch (/persons, /albums)
 // only runs when the user actually opens it — not on gallery boot.
@@ -242,8 +259,13 @@ const {
 watch(
   search.term,
   (term) => {
-    if (term) void executeSearch(term)
-    else clearSearch()
+    if (term) {
+      // A search the user types replaces the assistant's set.
+      clearPinnedIds()
+      void executeSearch(term)
+    } else {
+      clearSearch()
+    }
   },
   { immediate: true },
 )
@@ -258,7 +280,7 @@ const searchResultCount = computed(() => searchResultIds.value?.length ?? 0)
 
 // Adapt searchResultIds → number[] | null shape that VirtualGallery wants.
 // useNaturalSearch already gives us that exact shape, just rename.
-const searchPhotoIds = computed<number[] | null>(() => searchResultIds.value)
+const searchPhotoIds = computed<number[] | null>(() => pinnedIds.value ?? searchResultIds.value)
 
 // ── Jump-to-end button ──────────────────────────────────────────────────────
 // Toolbar button that takes the user to the newest or oldest photo.
@@ -344,9 +366,12 @@ const toolbar = useListToolbar({
   search,
   filter: {
     chips: filterChips,
-    activeCount,
+    activeCount: filterActiveCount,
     open: openFilterMenu,
-    clearAll: () => resetFilter(),
+    clearAll: () => {
+      clearPinnedIds()
+      resetFilter()
+    },
   },
   sort: sortControl,
   result: {
@@ -1672,7 +1697,7 @@ void refreshReviewSequence()
             v-model="searchInput"
             class="gallery-search"
             :loading="searchLoading"
-            :result-count="searchResultIds !== null ? searchResultCount : null"
+            :result-count="searchResultIds !== null && !pinnedIds ? searchResultCount : null"
             :has-parsed-chips="hasParsedChips"
             :location-chip="locationChip"
             :date-chip="dateChip"

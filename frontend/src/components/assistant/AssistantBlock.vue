@@ -11,6 +11,7 @@ import { computed, ref } from 'vue'
 import type { ResultBlock } from '../../api/assistant'
 import { getThumbUrl } from '../../api/gallery'
 import { anchorKey, saveListAnchor } from '../../utils/listAnchor'
+import { PHOTO_IDS_QUERY_KEY, pinnedPhotoIdsQuery } from '../../utils/photoIdsQuery'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import DocumentThumbnail from '../DocumentThumbnail.vue'
@@ -35,6 +36,12 @@ const props = withDefaults(defineProps<{
 }>(), { limit: 8, folded: false, anchorScope: undefined })
 
 const open = ref(!props.folded)
+
+/**
+ * A photo opens in the gallery with the answer's photos as the grid, so
+ * previous/next in the viewer move through the answer, not the library.
+ */
+const photoSetQuery = computed(() => pinnedPhotoIdsQuery(props.block.rows.map((r) => num(r.id)).filter((id) => id > 0)))
 
 /** The marker a row carries so `PageLayout` finds it again on the way back. */
 function anchorFor(r: Row): string | undefined {
@@ -267,7 +274,7 @@ const analysis = computed(() => {
       <li v-for="r in shown" :key="str(r.id)">
         <RouterLink
           class="photo scroll-anchor"
-          :to="{ name: 'fotos-gallery', query: { photoId: str(r.id) } }"
+          :to="{ name: 'fotos-gallery', query: { photoId: str(r.id), [PHOTO_IDS_QUERY_KEY]: photoSetQuery } }"
           :data-anchor="anchorFor(r)"
           @click="remember(r)"
           :aria-label="`Foto ${date(r.taken_at) || str(r.id)} öffnen`"
