@@ -5,6 +5,9 @@
  * time, same Sammelmappe, similar text. The card loads after the document
  * itself and never blocks the page; a failed load shows a quiet line, not a
  * toast, and an empty answer shows an empty state rather than nothing.
+ *
+ * Folded by default: the header still says how many there are (it loads
+ * right away), and the list opens on a click.
  */
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -17,6 +20,8 @@ import { parseLocalDate } from '../../utils/dateFormat'
 const props = defineProps<{
   documentId: number
 }>()
+
+const expanded = ref(false)
 
 const emit = defineEmits<{
   /** A related document was put into a Sammelmappe; the page may refresh its own card. */
@@ -100,11 +105,23 @@ function onAdded() {
 
 <template>
   <section class="related-card" aria-labelledby="related-title">
-    <div class="related-header">
-      <h2 id="related-title" class="related-title"><i class="pi pi-sitemap" /> Verwandte Dokumente</h2>
-      <span v-if="!loading && total > 0" class="related-count">{{ total }}</span>
-    </div>
+    <h2 id="related-title" class="related-heading">
+      <button
+        type="button"
+        class="related-toggle"
+        :aria-expanded="expanded"
+        aria-controls="related-body"
+        @click="expanded = !expanded"
+      >
+        <span class="related-title"><i class="pi pi-sitemap" aria-hidden="true" /> Verwandte Dokumente</span>
+        <span class="related-toggle__end">
+          <span v-if="!loading && total > 0" class="related-count">{{ total }}</span>
+          <i :class="expanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'" aria-hidden="true" />
+        </span>
+      </button>
+    </h2>
 
+    <div v-show="expanded" id="related-body" class="related-body">
     <p v-if="loading" class="related-empty">Wird gesucht …</p>
     <p v-else-if="failed" class="related-empty">Verwandte Dokumente konnten nicht geladen werden.</p>
     <p v-else-if="groups.length === 0" class="related-empty">
@@ -159,6 +176,7 @@ function onAdded() {
         </ul>
       </div>
     </div>
+    </div>
 
     <AddToCollectionDialog
       v-model:visible="addOpen"
@@ -178,19 +196,45 @@ function onAdded() {
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
 }
-.related-header {
+.related-heading {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.related-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.related-toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.related-toggle__end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--p-text-muted-color);
 }
 .related-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  margin: 0;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+}
+.related-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 .related-count {
   font-size: var(--text-sm);
