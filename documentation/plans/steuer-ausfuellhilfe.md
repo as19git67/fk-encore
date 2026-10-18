@@ -181,4 +181,23 @@ Kennzahl naming each document and amount.
   PDF, tool text and the assistant's rule say that the documents' values
   are not read yet. The dialog formatted the worksheet's EUR amounts
   (bookings, businesses) as cents; fixed with it.
-- Stages 1–5: open.
+- Stage 1: done, without Kennzahlen. `documents/tax-forms/catalogue.ts`
+  with the 2025 fields in `tax-forms/2025.ts` (N, Werbungskosten N,
+  Vorsorgeaufwand, KAP, R, AV, Sonderausgaben, § 35a, außergewöhnliche
+  Belastungen, Kind, V); every `line` and `kennzahl` is `null` because the
+  official Vordrucke could not be reached from the build environment. A year
+  without its own catalogue uses the newest older one with lines and
+  Kennzahlen cleared. `documents/tax-evidence-kinds.ts` lists 15 evidence
+  kinds with their fields, the form field each feeds and plausibility
+  checks; `evidenceKindsFor` offers the kinds that fit a document's sections
+  and type. `documents/tax-amounts.ts` parses German amounts to cents and
+  checks that a number stands in the text on its own (not inside a longer
+  one). `documents/tax-form-mapping.ts` sums per field and owner, splits a
+  shared certificate half and half under joint assessment, redirects party
+  donations (§ 34g), drops cash-paid § 35a costs (§ 35a Abs. 5), and adds
+  the law as notes: § 35a reductions and caps, Sparer-Pauschbetrag, the
+  Arbeitnehmer-Pauschbetrag, childcare (80 %/4.800 € from 2025, two thirds/
+  4.000 € before), Schulgeld, Spenden, zumutbare Belastung, prefilled data.
+- Next: fill `line`/`kennzahl`/`source` in `tax-forms/2025.ts` from the
+  official forms; a test refuses a Kennzahl without its source.
+- Stages 2–5: open.
