@@ -305,10 +305,10 @@ WICHTIGE ABGRENZUNGSREGELN:
 7) Kindergeld und Familienleistungen:
 - Kindergeldbescheide der Familienkasse sind für die Günstigerprüfung und
   Anlage Kind steuerrelevant (tax_role="beleg", tax_sections=[anlage-kind]).
-- Schulzeugnisse, Elternbriefe der Schule und Schulbescheinigungen für ein
-  minderjähriges Kind sind tax_role="bezug" mit „anlage-kind": die Steuer
-  braucht sie nicht. Eine Schul-/Studien-/Ausbildungsbescheinigung für ein
-  volljähriges Kind ist dagegen ein Beleg.
+- Schulzeugnisse, Elternbriefe der Schule und Schul-/Studien-/
+  Ausbildungsbescheinigungen sind tax_role="bezug" mit „anlage-kind": die
+  Bescheinigung fordert die Familienkasse für das Kindergeld an, die
+  Steuererklärung braucht sie nicht.
   Sie gehören aber NICHT zu finanzen-steuern oder behoerden-steuerbescheid,
   auch wenn sie „Festsetzung", „§ 70" oder „Einkommensteuergesetz (EStG)"
   enthalten. Der EStG-Verweis macht das Schreiben nicht zum Steuerbescheid.

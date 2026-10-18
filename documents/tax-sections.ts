@@ -206,7 +206,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-kind",
     group: "abzuege",
     name: "Anlage Kind",
-    hint: "Unterlagen pro Kind: Kindergeldbescheid/Familienkasse, Kita-/Hort-Rechnung mit Überweisungsnachweis; Schul-/Studien-/Ausbildungsbescheinigung nur als Nachweis für ein volljähriges Kind. Zeugnisse, Elternbriefe und Bescheinigungen für ein minderjähriges Kind haben Bezug zur Anlage Kind, sind aber kein Beleg (tax_role=bezug).",
+    hint: "Unterlagen pro Kind: Kindergeldbescheid/Familienkasse, Kita-/Hort-Rechnung mit Überweisungsnachweis. Zeugnisse, Elternbriefe und Schul-/Studien-/Ausbildungsbescheinigungen haben Bezug zur Anlage Kind, sind aber kein Beleg (tax_role=bezug): die Bescheinigung fordert die Familienkasse für das Kindergeld an, nicht das Finanzamt.",
   },
   {
     slug: "anlage-unterhalt",
@@ -240,19 +240,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
 
 export type TaxSectionSlug = typeof TAX_SECTIONS[number]["slug"];
 
-/**
- * A condition under which a document type is evidence for a section. The
- * facts come from the household, never from the model:
- *
- * - `adult_child`: a matched Bezugsperson is a child who is 18 or older in
- *   the document's tax year — only then does the Finanzamt ask for a
- *   school, study or training certificate (§ 32 Abs. 4 EStG).
- */
-export type TaxEvidenceCondition = "adult_child";
-
-export type TaxEvidenceEntry =
-  | DocumentTypeSlug
-  | { readonly type: DocumentTypeSlug; readonly when: TaxEvidenceCondition };
+export type TaxEvidenceEntry = DocumentTypeSlug;
 
 /**
  * Evidence matrix: per section, the document types (Dokumentart facet) that
@@ -306,9 +294,10 @@ export const TAX_EVIDENCE: Readonly<Record<TaxSectionSlug, readonly TaxEvidenceE
   // The paid invoice; a Feststellungsbescheid or Ausweis over a disability.
   aussergewoehnliche: ["rechnung", "beleg", "abrechnung", "bescheid", "ausweis"],
   haushaltsnahe: ["rechnung", "abrechnung", "beleg"],
-  // Kindergeldbescheid, Kita invoice. A school/training certificate only for
-  // an adult child; a report card (urkunde) never.
-  "anlage-kind": ["bescheid", "rechnung", "beleg", { type: "bescheinigung", when: "adult_child" }],
+  // Kindergeldbescheid, Kita invoice. A school/study/training certificate is
+  // what the Familienkasse asks for (Kindergeld), not the Finanzamt — it is
+  // never evidence for the return; a report card (urkunde) neither.
+  "anlage-kind": ["bescheid", "rechnung", "beleg"],
   "anlage-unterhalt": ["bescheinigung", "rechnung", "beleg", "vertrag", "erklaerung", "abrechnung"],
   "anlage-energetisch": ["rechnung", "bescheinigung"],
 

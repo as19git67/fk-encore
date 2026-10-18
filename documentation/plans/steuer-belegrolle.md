@@ -90,10 +90,12 @@ What the code does today (October 2026):
   the same bank sends the Jahressteuerbescheinigung and the
   Erträgnisaufstellung. This runs last, after the matrix and the text
   rules: the user's decision wins over everything.
-- **Household facts are applied deterministically.** The age limit of
-  § 32 Abs. 4 EStG that the review derivation already knows
-  (`subject-persons.ts`) feeds the matrix condition for Anlage Kind. The
-  classifier is not asked to know a child's age.
+- **The school certificate is never evidence.** The Familienkasse asks
+  for a school, study or training certificate to pay Kindergeld; the
+  Finanzamt relies on the Kindergeld decision. So the certificate is
+  `bezug` with Anlage Kind at any age, and the matrix needs no household
+  facts. (A first version gated the certificate on a child of 18+; that
+  condition and its plumbing were removed.)
 - **Both roles are visible.** The detail page, the list, the preview pane
   and the filter show `Beleg`, `Bezug` and `Kein Steuerbezug`; the edit
   form offers the three as one choice. "Steuerrelevant" as a word stays
@@ -116,7 +118,7 @@ What the code does today (October 2026):
   Erträgnisaufstellung removed from the KAP hint and the Schulbescheinigung
   qualified in the Anlage Kind hint.
 - `documents/tax-role.ts`: pure `resolveTaxRole` (LLM role + sections +
-  document type + household facts → role) and the invariants, unit-tested.
+  document type → role) and the invariants, unit-tested.
 - `llm-service/main.py` and `documents/classify-prompts.ts`: `tax_role` in
   the JSON schema, the response model and the prompt; `tax_relevant`
   derived for old callers; the drift-guard test updated.
@@ -159,7 +161,7 @@ What the code does today (October 2026):
 ## Status
 
 - Stage 1 — done: migration 0261, `TaxRole` and `TAX_EVIDENCE` in
-  `tax-sections.ts`, `resolveTaxRole`/`householdTaxFacts` in `tax-role.ts`,
+  `tax-sections.ts`, `resolveTaxRole` in `tax-role.ts`,
   `tax_role` in the llm-service schema and the prompt, rules in roles,
   `validateTaxOverride` in `tax-override.ts` shared by the single and the
   batch endpoint, `tax_role` filter on list and search.

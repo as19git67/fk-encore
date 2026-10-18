@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { householdTaxFacts, isEvidenceFor, resolveTaxRole, roleFromLegacy } from "./tax-role";
+import { isEvidenceFor, resolveTaxRole, roleFromLegacy } from "./tax-role";
 import { DOCUMENT_TYPES } from "./document-types";
 import { TAX_EVIDENCE, TAX_SECTIONS, taxRelevantFromRole } from "./tax-sections";
 
@@ -15,7 +15,7 @@ describe("TAX_EVIDENCE matrix", () => {
       expect(entries, s.slug).toBeDefined();
       expect(entries.length, s.slug).toBeGreaterThan(0);
       for (const e of entries) {
-        expect(types.has(typeof e === "string" ? e : e.type), s.slug).toBe(true);
+        expect(types.has(e), s.slug).toBe(true);
       }
     }
   });
@@ -23,8 +23,7 @@ describe("TAX_EVIDENCE matrix", () => {
   it("never lists the catch-all types as evidence", () => {
     for (const [slug, entries] of Object.entries(TAX_EVIDENCE)) {
       for (const e of entries) {
-        const type = typeof e === "string" ? e : e.type;
-        expect(["sonstiges", "korrespondenz", "anleitung", "angebot", "rezept"], slug).not.toContain(type);
+        expect(["sonstiges", "korrespondenz", "anleitung", "angebot", "rezept"], slug).not.toContain(e);
       }
     }
   });
@@ -62,21 +61,10 @@ describe("resolveTaxRole", () => {
     expect(out.role).toBe("bezug");
   });
 
-  it("accepts a school certificate for Anlage Kind only with an adult child", () => {
-    const minor = resolveTaxRole({
-      role: "beleg",
-      taxSections: KIND,
-      documentType: "bescheinigung",
-      facts: { adultChild: false },
-    });
-    expect(minor.role).toBe("bezug");
-    const adult = resolveTaxRole({
-      role: "beleg",
-      taxSections: KIND,
-      documentType: "bescheinigung",
-      facts: { adultChild: true },
-    });
-    expect(adult.role).toBe("beleg");
+  it("downgrades a school certificate (bescheinigung) for Anlage Kind — the Familienkasse asks for it, not the Finanzamt", () => {
+    const out = resolveTaxRole({ role: "beleg", taxSections: KIND, documentType: "bescheinigung" });
+    expect(out.role).toBe("bezug");
+    expect(out.taxSections).toEqual(KIND);
   });
 
   it("keeps the Kindergeldbescheid as beleg", () => {
@@ -126,20 +114,5 @@ describe("roleFromLegacy / taxRelevantFromRole", () => {
     expect(taxRelevantFromRole("beleg")).toBe(true);
     expect(taxRelevantFromRole("bezug")).toBe(false);
     expect(taxRelevantFromRole("keine")).toBe(false);
-  });
-});
-
-describe("householdTaxFacts", () => {
-  it("sees an adult child by the tax year, not by today", () => {
-    const child = { relation_kind: "child", birth_date: "2007-05-01" };
-    expect(householdTaxFacts([child], 2024).adultChild).toBe(false);
-    expect(householdTaxFacts([child], 2025).adultChild).toBe(true);
-    expect(householdTaxFacts([child], null, new Date("2030-01-01")).adultChild).toBe(true);
-  });
-
-  it("ignores other relations and children without a birth date", () => {
-    expect(householdTaxFacts([{ relation_kind: "parent", birth_date: "1950-01-01" }], 2024).adultChild).toBe(false);
-    expect(householdTaxFacts([{ relation_kind: "child", birth_date: null }], 2024).adultChild).toBe(false);
-    expect(householdTaxFacts([], 2024).adultChild).toBe(false);
   });
 });
