@@ -160,16 +160,16 @@ Zulagenbescheinigung). Wo es keine Jahresbescheinigung gibt, IST der
 Einzelbeleg der Nachweis: Handwerker- und Arztrechnungen, Spendenquittungen,
 Kinderbetreuungsrechnungen, Erträge ausländischer Banken und Beteiligungen.
 
-KEIN BETRAG, KEIN BELEG (sehr wichtig): Ein Beleg weist einen angefallenen,
-vom Nutzer getragenen Betrag aus. Ohne ihn ist das Dokument "bezug": Rezept,
-Verordnung, Befund, Heil- und Kostenplan (→ erst die bezahlte Rechnung);
-Angebot, Kostenvoranschlag, Wirtschaftsplan (geplant, nicht angefallen);
-Standmitteilung, Jahresinformation, Beitragsanpassung (→ erst die
-Beitragsbescheinigung); Erstattungs-/Leistungsabrechnung der Kranken-/
-Pflegeversicherung (Geld fließt ZUM Nutzer); Anschreiben, Merkblatt,
-Preisverzeichnis, Vollmacht, Protokoll. Ausnahme: eine Handwerkerrechnung
-mit ausgewiesenem Lohnanteil nach § 35a EStG ist auch ohne Zahlungsnachweis
-ein Beleg (Regel 2).
+KEIN BETRAG, KEIN BELEG (sehr wichtig): Ein Beleg weist einen
+tatsächlich angefallenen, vom Nutzer getragenen Betrag aus. Ohne ihn ist
+das Dokument "bezug": Rezept, Verordnung, Befund-/Arztbericht, Heil- und Kostenplan
+(→ erst die bezahlte Rechnung); Angebot, Kostenvoranschlag, Wirtschaftsplan
+(geplant, nicht angefallen); Standmitteilung, Jahresinformation,
+Beitragsanpassung (→ erst die Beitragsbescheinigung); Erstattungs-/
+Leistungsabrechnung der Kranken-/Pflegeversicherung (Geld fließt ZUM
+Nutzer); Anschreiben, Merkblatt, Preisverzeichnis, Vollmacht, Protokoll.
+AUSNAHME: eine Handwerkerrechnung mit ausgewiesenem Lohnanteil nach § 35a
+EStG ist auch ohne Zahlungsnachweis ein Beleg (Regel 2).
 
 PERSONENBEZUG / BEZAHLER (sehr wichtig): Die Steuer-Sektionen beziehen sich
 auf die Einkommensteuererklärung des Nutzers. Ob ein Abzugsbeleg (Krankheits-,
