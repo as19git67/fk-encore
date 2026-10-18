@@ -150,46 +150,26 @@ zu KEINER. Vergib niemals mehrere Abzugs-Sektionen pauschal „auf Verdacht"
 (eine Renteninformation gehört z. B. nur zu anlage-r, NICHT zusätzlich zu
 Werbungskosten, Sonderausgaben usw.). Im Zweifel: leere Liste.
 
-JAHRESBESCHEINIGUNG VOR EINZELBELEG (sehr wichtig): Prüfe bei jedem Dokument
-zuerst, ob es für diesen Sachverhalt üblicherweise eine zusammenfassende
-Jahresbescheinigung gibt. Wenn ja, ist der laufende Einzelbeleg NICHT der
-Steuerbeleg — die Jahresbescheinigung ist es — und der Einzelbeleg ist tax_role="bezug"
-(tax_relevant=false) mit der Sektion des Sachverhalts:
+JAHRESBESCHEINIGUNG VOR EINZELBELEG (sehr wichtig): Gibt es für den
+Sachverhalt üblicherweise eine zusammenfassende Jahresbescheinigung, ist nur
+sie der Beleg; der laufende Einzelbeleg ist "bezug": Gehaltsabrechnung
+(→ Lohnsteuerbescheinigung), Dividendengutschrift/Wertpapierabrechnung/
+Zinsgutschrift einer deutschen Bank (→ Jahressteuerbescheinigung),
+Beitragsabbuchung zur Kranken-/Pflege-/Rentenversicherung (→ Beitrags-/
+Zulagenbescheinigung). Wo es keine Jahresbescheinigung gibt, IST der
+Einzelbeleg der Nachweis: Handwerker- und Arztrechnungen, Spendenquittungen,
+Kinderbetreuungsrechnungen, Erträge ausländischer Banken und Beteiligungen.
 
-- Monatliche Gehalts-/Entgeltabrechnung → maßgeblich ist die
-  Lohnsteuerbescheinigung am Jahresende, nicht die einzelne Abrechnung.
-- Einzelne Dividendengutschrift, Wertpapierabrechnung oder Zinsgutschrift
-  einer deutschen Bank → maßgeblich ist die Jahressteuerbescheinigung.
-- Einzelne Beitragsabbuchung oder Monatsrechnung zur Kranken-/Pflege- oder
-  Rentenversicherung → maßgeblich ist die Beitrags-/Zulagenbescheinigung
-  (z. B. nach § 92 EStG) für das Jahr.
-
-Die Regel gilt nur, wenn eine solche Jahresbescheinigung tatsächlich üblich
-ist. Wo es keine gibt, IST der Einzelbeleg der Nachweis und bleibt
-steuerrelevant — etwa Handwerker- und Arztrechnungen, Spendenquittungen,
-Kinderbetreuungsrechnungen sowie Erträge ausländischer Banken und
-Beteiligungen, für die keine deutsche Jahressteuerbescheinigung ausgestellt
-wird. Die Jahresbescheinigung selbst ist immer steuerrelevant.
-
-KEIN BETRAG, KEIN BELEG (sehr wichtig): Ein Steuerbeleg weist einen
-tatsächlich angefallenen, vom Nutzer getragenen Betrag aus. Fehlt dieser
-Betrag, ist das Dokument tax_role="bezug" (tax_relevant=false) mit der
-Sektion des Sachverhalts — auch wenn Thema und Kategorie steuerlich
-einschlägig sind:
-
-- Verordnung, Rezept, Brillenverordnung, Befund-/Arztbericht, Heil- und
-  Kostenplan → erst die bezahlte Rechnung ist der Beleg.
-- Angebot, Kostenvoranschlag, Wirtschaftsplan, Sonderumlagen-Ankündigung →
-  geplant, nicht angefallen.
-- Standmitteilung, Jahresinformation, Beitragsanpassung ohne bescheinigte
-  Beiträge → erst die Beitragsbescheinigung ist der Beleg.
-- Erstattungs-/Leistungsabrechnung der Kranken-/Pflegeversicherung: Geld
-  fließt ZUM Nutzer — eine Erstattung ist keine Aufwendung.
-- Anschreiben, Informationsschreiben, Eingangsbestätigung, Merkblatt,
-  Preis-/Leistungsverzeichnis, Vollmacht, Protokoll, Beschlusssammlung.
-
-AUSNAHME: Weist eine Handwerkerrechnung einen Lohn-/Arbeitskostenanteil nach
-§ 35a EStG aus, ist sie auch ohne Zahlungsnachweis steuerrelevant (Regel 2).
+KEIN BETRAG, KEIN BELEG (sehr wichtig): Ein Beleg weist einen angefallenen,
+vom Nutzer getragenen Betrag aus. Ohne ihn ist das Dokument "bezug": Rezept,
+Verordnung, Befund, Heil- und Kostenplan (→ erst die bezahlte Rechnung);
+Angebot, Kostenvoranschlag, Wirtschaftsplan (geplant, nicht angefallen);
+Standmitteilung, Jahresinformation, Beitragsanpassung (→ erst die
+Beitragsbescheinigung); Erstattungs-/Leistungsabrechnung der Kranken-/
+Pflegeversicherung (Geld fließt ZUM Nutzer); Anschreiben, Merkblatt,
+Preisverzeichnis, Vollmacht, Protokoll. Ausnahme: eine Handwerkerrechnung
+mit ausgewiesenem Lohnanteil nach § 35a EStG ist auch ohne Zahlungsnachweis
+ein Beleg (Regel 2).
 
 PERSONENBEZUG / BEZAHLER (sehr wichtig): Die Steuer-Sektionen beziehen sich
 auf die Einkommensteuererklärung des Nutzers. Ob ein Abzugsbeleg (Krankheits-,
@@ -233,15 +213,11 @@ WICHTIGE ABGRENZUNGSREGELN:
   Jahressteuerbescheinigung, Steuerbescheinigung, Verlustbescheinigung →
   „anlage-kap" (tax_role="beleg"), NIEMALS „anlage-n".
 - Die Erträgnisaufstellung der Bank ist KEIN Steuerbeleg, sondern eine
-  Information: tax_role="bezug" mit „anlage-kap".
-- EINZELNE Depotabrechnungen sind ebenfalls nur tax_role="bezug" mit
-  „anlage-kap": Dividendengutschrift, „Steuerliche Behandlung: …
-  Dividende", Ertragsgutschrift, Wertpapierabrechnung (Kauf/Verkauf),
-  Vorabpauschale, Zinsgutschrift. Die Bank fasst diese Erträge und die
-  einbehaltene Kapitalertragsteuer am Jahresende in der Jahressteuer-
-  bescheinigung zusammen — genau wie bei den monatlichen Gehaltsabrechnungen
-  zählt nur der Jahresbeleg. Ein aufgedruckter Hinweis „KEINE
-  STEUERBESCHEINIGUNG" bestätigt das ausdrücklich.
+  Information: tax_role="bezug" mit „anlage-kap". Ebenso "bezug" mit
+  „anlage-kap" sind EINZELNE Depotabrechnungen: Dividendengutschrift,
+  „Steuerliche Behandlung: … Dividende", Ertragsgutschrift,
+  Wertpapierabrechnung, Vorabpauschale, Zinsgutschrift (ein aufgedruckter
+  Hinweis „KEINE STEUERBESCHEINIGUNG" bestätigt das).
 - Wenn ein Bank-/Broker-Beleg doch steuerrelevant ist, gehört er
   AUSSCHLIESSLICH zu „anlage-kap" und bekommt KEINE weiteren Abzugs-Sektionen.
   Die einbehaltene Kirchensteuer ist bereits im Steuerabzug verrechnet; auch
@@ -312,14 +288,10 @@ WICHTIGE ABGRENZUNGSREGELN:
   → dann „anlage-av" (Riester/Rürup/bAV) bzw. „vorsorgeaufwand" bzw. „anlage-r".
 - Nur tax_role="bezug" (mit der Sektion, um die es geht) sind reine
   Verwaltungs-/Vertragsschreiben OHNE ausgewiesene Beiträge zum Einreichen:
-  Erhöhungsnachtrag, Dynamik-Nachtrag, Widerspruch zur Dynamik,
-  Statusreport/Standmitteilung zum Vertragsstand in der Ansparphase,
-  Fondsumschichtung, Kontakt-/Adressänderung, allgemeine Produktinfo.
-  Das Wort „Riester", „Rentenversicherung" oder ein Vertragsstand allein
-  macht ein Dokument NICHT steuerrelevant — entscheidend ist eine konkrete,
-  zum Einreichen bestimmte Bescheinigung mit Beitrags-/Auszahlungsbetrag.
-- Analog zu den monatlichen Gehaltsabrechnungen: die laufende Vertragspost
-  ist kein Steuerbeleg, nur die jährliche Bescheinigung zählt.
+  Erhöhungs-/Dynamik-Nachtrag, Widerspruch zur Dynamik, Statusreport/
+  Standmitteilung, Fondsumschichtung, Adressänderung, Produktinfo. Das Wort
+  „Riester" oder ein Vertragsstand allein macht kein Dokument zum Beleg —
+  entscheidend ist die zum Einreichen bestimmte Bescheinigung mit Betrag.
 
 6) Steuererklärungen und Bescheide — nur die deutsche Einkommensteuer:
 - „mantelbogen"/„anlage-*" und die deutsche Einkommensteuererklärung betreffen
