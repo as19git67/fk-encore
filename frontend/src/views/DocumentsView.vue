@@ -18,7 +18,15 @@ import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import AddToCollectionDialog from '../components/collections/AddToCollectionDialog.vue'
 import type { MemberRef } from '../api/collections'
-import { listCollections, type DocumentCollection } from '../api/collections'
+import {
+  listAllCollections,
+  listCollections,
+  markCollectionOpened,
+  type CollectionSummary,
+  type DocumentCollection,
+} from '../api/collections'
+import CollectionTiles from '../components/collections/CollectionTiles.vue'
+import { collectionRoute } from '../utils/collectionRoute'
 import {
   listDocuments,
   listDocumentCategories,
@@ -209,6 +217,13 @@ function clearSelection() {
  * leaving the omission to be guessed.
  */
 const collections = ref<DocumentCollection[]>([])
+/**
+ * The same folders as tiles: the strip shows them with the tile and menu of
+ * the Sammelmappen page, which read the shared collection summary. Which
+ * folders appear (and the search over their summary) still follows
+ * `collections`; an archived folder has no tile.
+ */
+const stripCollections = ref<CollectionSummary[]>([])
 
 /**
  * Facets that describe a document and therefore cannot describe a folder.
@@ -237,8 +252,8 @@ const collectionFacetActive = computed(() => hasDocumentFacetFilter())
 const visibleCollections = computed(() => {
   if (collectionFacetActive.value) return []
   const pinned = filter.applied.value.collectionId
-  if (pinned) return collections.value.filter((c) => c.id === pinned)
-  return collections.value
+  if (pinned) return stripCollections.value.filter((c) => c.id === pinned)
+  return stripCollections.value
 })
 
 /**
@@ -262,22 +277,32 @@ function showBundledDocuments() {
 
 async function loadCollections() {
   try {
-    collections.value = (await listCollections(q.value.trim() || undefined)).items
+    const [docs, all] = await Promise.all([
+      listCollections(q.value.trim() || undefined),
+      listAllCollections(),
+    ])
+    collections.value = docs.items
+    const summaries = new Map(all.items.map((c) => [c.id, c]))
+    stripCollections.value = docs.items
+      .map((c) => summaries.get(c.id))
+      .filter((c): c is CollectionSummary => c !== undefined)
   } catch {
     // The folder rows are an addition to the list, not a precondition for it:
     // a failure here must not blank out the documents.
     collections.value = []
+    stripCollections.value = []
   }
 }
 
-async function openCollection(id: number) {
+async function openCollection(c: CollectionSummary) {
   // Same two steps as openDocument: remember the row so the way back lands on
   // it, and let a still-pending filter/sort URL write settle first — a write
   // that resolves after this push would overwrite the history entry the back
   // arrow returns to, dropping the filter and the position with it.
-  saveListAnchor(ANCHOR_KEY, { kind: 'collection', id })
+  saveListAnchor(ANCHOR_KEY, { kind: 'collection', id: c.id })
+  void markCollectionOpened(c.id).catch(() => { /* the visit is a hint, not a must */ })
   await waitForPendingQueryUpdate(router)
-  router.push({ name: 'dokumente-mappe', params: { id } })
+  router.push(collectionRoute(c))
 }
 
 /** Jump from a chip straight into the folder-members view of the list. */
@@ -488,7 +513,10 @@ function currentFilterParams() {
 async function load() {
   loading.value = true
   error.value = ''
-  void loadCollections()
+  // In parallel with the documents, but awaited before the list counts as
+  // loaded: the way back from a Sammelmappe looks for its row in the strip,
+  // which is not there until the folders have arrived.
+  const collectionsLoaded = loadCollections()
   // Held so the current row can fall to whatever took its place when a reload
   // drops it — deleted, filtered away, or narrowed out by a search.
   const previousItems = items.value
@@ -519,6 +547,7 @@ async function load() {
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Dokumente'
   } finally {
+    await collectionsLoaded
     loading.value = false
     syncActiveDoc(previousItems)
   }
@@ -816,31 +845,13 @@ onMounted(async () => {
       <div ref="listColumn" class="list-column">
     <!-- Sammelmappen: an extra layer above the documents, never a replacement -->
     <div v-if="!loading && visibleCollections.length > 0" class="collection-strip">
-      <button
-        v-for="c in visibleCollections"
-        :key="c.id"
-        :data-collection-id="c.id"
-        :data-anchor="anchorKey('collection', c.id)"
-        type="button"
-        class="collection-row scroll-anchor"
-        @click="openCollection(c.id)"
-      >
-        <span class="collection-icon"><i class="pi pi-folder" /></span>
-        <span class="collection-body">
-          <span class="collection-title">
-            {{ c.title }}
-            <Tag value="Sammelmappe" severity="secondary" />
-            <Tag v-if="c.visibility === 'group'" value="Gruppe" icon="pi pi-users" severity="info" />
-          </span>
-          <span v-if="c.summary" class="collection-summary">{{ c.summary }}</span>
-          <span class="collection-meta">
-            <i class="pi pi-file" />
-            {{ c.included_count }} von {{ c.item_count }}
-            {{ c.item_count === 1 ? 'Dokument' : 'Dokumenten' }} im PDF
-          </span>
-        </span>
-        <span class="collection-open"><i class="pi pi-angle-right" /></span>
-      </button>
+      <CollectionTiles
+        :items="visibleCollections"
+        @open="openCollection"
+        @changed="loadCollections"
+        @error="(message) => (error = message)"
+        @notice="(message) => (info = message)"
+      />
     </div>
 
     <p v-if="!loading && bundledHidden" class="collection-hidden-note">
@@ -1102,29 +1113,10 @@ onMounted(async () => {
   margin-block: 0.75rem;
 }
 .collection-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   margin-bottom: 12px;
 }
-.collection-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  text-align: left;
-  padding: 10px 12px;
-  border: 1px solid var(--p-content-border-color);
-  border-left: 3px solid var(--p-primary-color);
-  border-radius: 10px;
-  background: var(--p-content-background);
-  color: var(--p-text-color);
-  cursor: pointer;
-}
-.collection-row:hover {
-  background: var(--p-content-hover-background);
-}
-.collection-row--highlight {
+/* The tile lives in a child component; the flash is this list's own. */
+.collection-strip :deep(.collection-row--highlight) {
   animation: collection-row-flash 1.5s ease-out;
 }
 @keyframes collection-row-flash {
@@ -1134,44 +1126,6 @@ onMounted(async () => {
   100% {
     background: var(--p-content-background);
   }
-}
-.collection-icon {
-  flex: 0 0 auto;
-  color: var(--p-primary-color);
-  font-size: var(--text-xl);
-}
-.collection-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.collection-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-}
-.collection-summary {
-  color: var(--p-text-muted-color);
-  font-size: var(--text-md);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.collection-meta {
-  color: var(--p-text-muted-color);
-  font-size: var(--text-sm);
-}
-.collection-meta i {
-  margin-right: 3px;
-}
-.collection-open {
-  flex: 0 0 auto;
-  color: var(--p-text-muted-color);
 }
 .collection-hidden-note {
   margin: 0 0 12px;

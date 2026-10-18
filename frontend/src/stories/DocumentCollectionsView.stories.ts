@@ -2,17 +2,17 @@ import type { Meta, StoryObj } from '@storybook/vue3'
 import DocumentCollectionsView from '../views/DocumentCollectionsView.vue'
 import { defaultHandlers } from './handlers'
 import { http, HttpResponse, delay } from 'msw'
-import { MOCK_COLLECTIONS } from './mock-data'
+import { MOCK_COLLECTIONS, toCollectionSummary } from './mock-data'
 import { routeFromParameters } from './storyRoute'
 
 /**
- * The Sammelmappen list (issue #1281). A folder whose summary is still being
- * written and one whose summary failed are the two states the list has to
- * distinguish without opening anything.
+ * The Sammelmappen list of the documents module (issue #1281): the same
+ * tiles and menu as the Sammelmappen page, read from the shared collection
+ * list.
  */
 
 const collectionHandlers = [
-  http.get('/api/document-collections', () => HttpResponse.json({ items: MOCK_COLLECTIONS })),
+  http.get('/api/collections', () => HttpResponse.json({ items: MOCK_COLLECTIONS.map(toCollectionSummary) })),
   ...defaultHandlers,
 ]
 
@@ -33,7 +33,7 @@ export const NochKeine: Story = {
   parameters: {
     msw: {
       handlers: [
-        http.get('/api/document-collections', () => HttpResponse.json({ items: [] })),
+        http.get('/api/collections', () => HttpResponse.json({ items: [] })),
         ...collectionHandlers,
       ],
     },
@@ -45,7 +45,7 @@ export const Laedt: Story = {
   parameters: {
     msw: {
       handlers: [
-        http.get('/api/document-collections', async () => {
+        http.get('/api/collections', async () => {
           await delay('infinite')
           return HttpResponse.json({ items: [] })
         }),
@@ -60,7 +60,7 @@ export const Ladefehler: Story = {
   parameters: {
     msw: {
       handlers: [
-        http.get('/api/document-collections', () =>
+        http.get('/api/collections', () =>
           HttpResponse.json({ message: 'Mappen nicht erreichbar' }, { status: 500 }),
         ),
         ...collectionHandlers,

@@ -11,18 +11,16 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
-import ExportDialog from '../components/collections/ExportDialog.vue'
-import ShareLinkDialog from '../components/collections/ShareLinkDialog.vue'
+import CollectionTile from '../components/collections/CollectionTile.vue'
+import CollectionActions from '../components/collections/CollectionActions.vue'
+import { collectionTypeLabel } from '../components/collections/collectionLabels'
 import InputText from 'primevue/inputtext'
-import Menu from 'primevue/menu'
 import Message from 'primevue/message'
 import Checkbox from 'primevue/checkbox'
 import MultiSelect from 'primevue/multiselect'
 import SelectButton from 'primevue/selectbutton'
-import Tag from 'primevue/tag'
 import PageLayout from '../components/layout/PageLayout.vue'
 import ListToolbar from '../components/layout/ListToolbar.vue'
 import EmptyState from '../components/layout/EmptyState.vue'
@@ -36,17 +34,12 @@ import { rememberCollectionName } from '../composables/useCollectionNames'
 import { getOverview } from '../api/finance'
 import {
   ENTITY_LABELS,
-  applyCollectionRuleNow,
-  createAlbumFromCollection,
   createRuleCollection,
-  setCollectionRule,
   type MemberRuleInput,
   createAnyCollection,
-  deleteAnyCollection,
   describeCounts,
   listAllCollections,
   markCollectionOpened,
-  updateAnyCollection,
   type CollectionEntityType,
   type CollectionSummary,
 } from '../api/collections'
@@ -57,7 +50,6 @@ import { updateRouteQuery } from '../utils/routeQueryUpdate'
 const ANCHOR_KEY = 'sammelmappen'
 const route = useRoute()
 const router = useRouter()
-const confirm = useConfirm()
 
 const items = ref<CollectionSummary[]>([])
 const loading = ref(true)
@@ -222,176 +214,17 @@ const ordered = computed(() => [
 ])
 
 // ── Actions ──────────────────────────────────────────────────────────────────
+// The tile, its star and its "⋮" menu are shared with the document list and
+// Dokumente › Sammelmappen (components/collections/CollectionTile.vue,
+// CollectionActions.vue); this page only opens folders and reloads.
 
-function typeLabel(c: CollectionSummary): string {
-  if (c.kind === 'dossier') return 'Akte'
-  if (c.kind === 'rule' && c.entity_type) return `${ENTITY_LABELS[c.entity_type].plural} · Regel`
-  return c.entity_type ? ENTITY_LABELS[c.entity_type].plural : 'Gemischt'
-}
-function typeIcon(c: CollectionSummary): string {
-  return c.entity_type ? ENTITY_LABELS[c.entity_type].icon : 'pi pi-folder'
-}
+const notice = ref('')
+const actions = ref<InstanceType<typeof CollectionActions> | null>(null)
 
 function open(c: CollectionSummary) {
   saveListAnchor(ANCHOR_KEY, { kind: 'collection', id: c.id })
   void markCollectionOpened(c.id).catch(() => { /* the visit is a hint, not a must */ })
   void router.push(collectionRoute(c))
-}
-
-async function toggleFavourite(c: CollectionSummary) {
-  const next = !c.favourite
-  c.favourite = next
-  try {
-    await updateAnyCollection(c.id, { favourite: next })
-  } catch (err: unknown) {
-    c.favourite = !next
-    error.value = err instanceof Error ? err.message : 'Speichern fehlgeschlagen.'
-  }
-}
-
-async function setArchived(c: CollectionSummary, value: boolean) {
-  try {
-    await updateAnyCollection(c.id, { archived: value })
-    await load()
-  } catch (err: unknown) {
-    error.value = err instanceof Error ? err.message : 'Speichern fehlgeschlagen.'
-  }
-}
-
-function askDelete(c: CollectionSummary) {
-  confirm.require({
-    header: 'Sammelmappe löschen?',
-    message: `„${c.name}“ wird gelöscht. Was darin liegt, bleibt erhalten.`,
-    icon: 'pi pi-exclamation-triangle',
-    acceptLabel: 'Löschen',
-    rejectLabel: 'Abbrechen',
-    acceptClass: 'p-button-danger',
-    accept: () => {
-      void deleteAnyCollection(c.id)
-        .then(load)
-        .catch((err: unknown) => {
-          error.value = err instanceof Error ? err.message : 'Löschen fehlgeschlagen.'
-        })
-    },
-  })
-}
-
-// Rename, shared by every tile.
-const renameTarget = ref<CollectionSummary | null>(null)
-const renameValue = ref('')
-function openRename(c: CollectionSummary) {
-  renameTarget.value = c
-  renameValue.value = c.name
-}
-async function saveRename() {
-  const c = renameTarget.value
-  const name = renameValue.value.trim()
-  if (!c || !name) return
-  try {
-    await updateAnyCollection(c.id, { name })
-    renameTarget.value = null
-    await load()
-  } catch (err: unknown) {
-    error.value = err instanceof Error ? err.message : 'Umbenennen fehlgeschlagen.'
-  }
-}
-
-// "Exportieren" (#1548, stage 6): one dialog for the page, for the row's collection.
-const exportTarget = ref<CollectionSummary | null>(null)
-const exportOpen = computed({
-  get: () => exportTarget.value !== null,
-  set: (open: boolean) => {
-    if (!open) exportTarget.value = null
-  },
-})
-
-// "Freigabelink" (#1548, stage 8), likewise one dialog for the row's collection.
-const shareTarget = ref<CollectionSummary | null>(null)
-const shareOpen = computed({
-  get: () => shareTarget.value !== null,
-  set: (open: boolean) => {
-    if (!open) shareTarget.value = null
-  },
-})
-
-// One row menu for the whole page, filled for the row that opened it.
-const rowMenu = ref<InstanceType<typeof Menu> | null>(null)
-const rowMenuItems = ref<Array<{ label: string; icon: string; command: () => void }>>([])
-function openRowMenu(event: Event, c: CollectionSummary) {
-  const entries: Array<{ label: string; icon: string; command: () => void }> = [
-    { label: 'Umbenennen', icon: 'pi pi-pencil', command: () => openRename(c) },
-    { label: 'Exportieren', icon: 'pi pi-download', command: () => (exportTarget.value = c) },
-  ]
-  if (c.kind === 'rule') {
-    entries.push(
-      { label: 'Regel jetzt anwenden', icon: 'pi pi-sync', command: () => void applyRule(c) },
-      { label: 'Regel beenden', icon: 'pi pi-ban', command: () => askStopRule(c) },
-    )
-  }
-  if ((c.counts.photo ?? 0) > 0) {
-    entries.push({ label: 'Album daraus erstellen', icon: 'pi pi-book', command: () => openAlbumFrom(c) })
-  }
-  if (c.can_administer) {
-    entries.push(
-      { label: 'Freigabelink', icon: 'pi pi-globe', command: () => (shareTarget.value = c) },
-      c.archived_at
-        ? { label: 'Zurückholen', icon: 'pi pi-replay', command: () => void setArchived(c, false) }
-        : { label: 'Archivieren', icon: 'pi pi-box', command: () => void setArchived(c, true) },
-      { label: 'Löschen', icon: 'pi pi-trash', command: () => askDelete(c) },
-    )
-  }
-  rowMenuItems.value = entries
-  rowMenu.value?.toggle(event)
-}
-
-// ── Rules and albums (#1548, stage 5) ────────────────────────────────────────
-
-const notice = ref('')
-
-async function applyRule(c: CollectionSummary) {
-  try {
-    const { applied } = await applyCollectionRuleNow(c.id)
-    notice.value = `„${c.name}“: ${applied.added} neu, ${applied.removed} entfernt.`
-    await load()
-  } catch (err: unknown) {
-    error.value = err instanceof Error ? err.message : 'Regel konnte nicht angewendet werden.'
-  }
-}
-
-function askStopRule(c: CollectionSummary) {
-  confirm.require({
-    header: 'Regel beenden?',
-    message: `„${c.name}“ behält, was darin liegt, füllt sich aber nicht mehr von selbst.`,
-    icon: 'pi pi-question-circle',
-    acceptLabel: 'Regel beenden',
-    rejectLabel: 'Abbrechen',
-    accept: () => {
-      void setCollectionRule(c.id, null)
-        .then(load)
-        .catch((err: unknown) => {
-          error.value = err instanceof Error ? err.message : 'Speichern fehlgeschlagen.'
-        })
-    },
-  })
-}
-
-const albumSource = ref<CollectionSummary | null>(null)
-const albumName = ref('')
-function openAlbumFrom(c: CollectionSummary) {
-  albumSource.value = c
-  albumName.value = c.name
-}
-async function createAlbum() {
-  const c = albumSource.value
-  const name = albumName.value.trim()
-  if (!c || !name) return
-  try {
-    const res = await createAlbumFromCollection(c.id, name)
-    albumSource.value = null
-    void router.push({ name: 'fotos-album-detail', params: { id: res.album_id } })
-  } catch (err: unknown) {
-    error.value = err instanceof Error ? err.message : 'Album konnte nicht erstellt werden.'
-  }
 }
 
 // New collection, made here and opened at once.
@@ -546,47 +379,14 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
     />
 
     <ul v-else-if="view.value.value === 'tiles'" class="collections-grid" data-testid="collections-tiles">
-      <li
+      <CollectionTile
         v-for="c in ordered"
         :key="c.id"
-        class="collection-tile scroll-anchor"
-        :data-anchor="anchorKey('collection', c.id)"
-      >
-        <button type="button" class="collection-tile-body" :aria-label="`Öffnen: ${c.name}`" @click="open(c)">
-          <span class="collection-tile-icon"><i :class="typeIcon(c)" aria-hidden="true" /></span>
-          <span class="collection-tile-name">{{ c.name }}</span>
-          <span class="collection-tile-meta">{{ describeCounts(c.counts) || 'leer' }}</span>
-          <span class="collection-tile-tags">
-            <Tag :value="typeLabel(c)" severity="secondary" />
-            <Tag v-if="c.kind === 'rule'" value="Regel" icon="pi pi-bolt" severity="info" />
-            <Tag v-if="c.visibility === 'group'" value="Gruppe" icon="pi pi-users" severity="info" />
-            <Tag v-if="c.created_by === 'assistant'" value="Assistent" icon="pi pi-sparkles" severity="info" />
-            <Tag v-if="c.archived_at" value="Archiviert" icon="pi pi-box" severity="secondary" />
-          </span>
-        </button>
-        <div class="collection-tile-actions">
-          <Button
-            :icon="c.favourite ? 'pi pi-star-fill' : 'pi pi-star'"
-            text
-            rounded
-            size="small"
-            :severity="c.favourite ? 'warn' : 'secondary'"
-            :aria-label="c.favourite ? `Favorit entfernen: ${c.name}` : `Als Favorit markieren: ${c.name}`"
-            :aria-pressed="c.favourite"
-            @click="toggleFavourite(c)"
-          />
-          <Button
-            icon="pi pi-ellipsis-v"
-            text
-            rounded
-            size="small"
-            severity="secondary"
-            :aria-label="`Weitere Aktionen: ${c.name}`"
-            aria-haspopup="true"
-            @click="openRowMenu($event, c)"
-          />
-        </div>
-      </li>
+        :collection="c"
+        @open="open"
+        @toggle-favourite="actions?.toggleFavourite($event)"
+        @menu="(event, collection) => actions?.openMenu(event, collection)"
+      />
     </ul>
 
     <ScrollX v-else>
@@ -617,13 +417,13 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
                 :severity="c.favourite ? 'warn' : 'secondary'"
                 :aria-label="c.favourite ? `Favorit entfernen: ${c.name}` : `Als Favorit markieren: ${c.name}`"
                 :aria-pressed="c.favourite"
-                @click="toggleFavourite(c)"
+                @click="actions?.toggleFavourite(c)"
               />
             </td>
             <td>
               <button type="button" class="collections-table-link" @click="open(c)">{{ c.name }}</button>
             </td>
-            <td>{{ typeLabel(c) }}</td>
+            <td>{{ collectionTypeLabel(c) }}</td>
             <td>{{ describeCounts(c.counts) || 'leer' }}</td>
             <td>{{ new Date(c.updated_at).toLocaleDateString('de-DE') }}</td>
             <td>
@@ -635,7 +435,7 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
                 severity="secondary"
                 :aria-label="`Weitere Aktionen: ${c.name}`"
                 aria-haspopup="true"
-                @click="openRowMenu($event, c)"
+                @click="actions?.openMenu($event, c)"
               />
             </td>
           </tr>
@@ -643,41 +443,12 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
       </table>
     </ScrollX>
 
-    <Menu ref="rowMenu" :model="rowMenuItems" popup />
-
-    <Dialog
-      class="dialog-sm"
-      :visible="renameTarget !== null"
-      modal
-      header="Sammelmappe umbenennen"
-      @update:visible="(v: boolean) => { if (!v) renameTarget = null }"
-    >
-      <InputText v-model="renameValue" autofocus class="collections-input" aria-label="Neuer Name" @keyup.enter="saveRename" />
-      <template #footer>
-        <Button label="Abbrechen" severity="secondary" text @click="renameTarget = null" />
-        <Button label="Speichern" icon="pi pi-check" :disabled="!renameValue.trim()" @click="saveRename" />
-      </template>
-    </Dialog>
-
-    <Dialog
-      class="dialog-sm"
-      :visible="albumSource !== null"
-      modal
-      header="Album aus Sammelmappe"
-      @update:visible="(v: boolean) => { if (!v) albumSource = null }"
-    >
-      <p class="collections-note">
-        Die Fotos der Mappe kommen in ein neues Album. Die Mappe bleibt, wie sie ist.
-      </p>
-      <label class="collections-field">
-        <span>Name des Albums</span>
-        <InputText v-model="albumName" autofocus class="collections-input" @keyup.enter="createAlbum" />
-      </label>
-      <template #footer>
-        <Button label="Abbrechen" severity="secondary" text @click="albumSource = null" />
-        <Button label="Album erstellen" icon="pi pi-book" :disabled="!albumName.trim()" @click="createAlbum" />
-      </template>
-    </Dialog>
+    <CollectionActions
+      ref="actions"
+      @changed="load"
+      @error="(message) => (error = message)"
+      @notice="(message) => (notice = message)"
+    />
 
     <Dialog v-model:visible="createOpen" class="dialog-sm" modal header="Neue Sammelmappe">
       <label class="collections-field">
@@ -734,8 +505,6 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
         <Button label="Anlegen" icon="pi pi-plus" :disabled="!createName.trim()" @click="create" />
       </template>
     </Dialog>
-    <ExportDialog v-model:visible="exportOpen" :collection-id="exportTarget?.id ?? null" :name="exportTarget?.name ?? ''" />
-    <ShareLinkDialog v-model:visible="shareOpen" :collection-id="shareTarget?.id ?? null" :name="shareTarget?.name ?? ''" />
   </PageLayout>
 </template>
 
@@ -784,61 +553,6 @@ const filtered = computed(() => activeCount.value > 0 || !!search.term.value.tri
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
   gap: var(--space-3);
-}
-.collection-tile {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 10px;
-  background: var(--p-content-background);
-}
-.collection-tile-body {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  padding-right: calc(var(--space-3) + 4.5rem);
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--p-text-color);
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-  min-width: 0;
-}
-.collection-tile-body:hover {
-  background: var(--p-content-hover-background);
-}
-.collection-tile-body:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-.collection-tile-icon {
-  color: var(--p-primary-color);
-  font-size: var(--text-xl);
-}
-.collection-tile-name {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-.collection-tile-meta {
-  color: var(--p-text-muted-color);
-  font-size: var(--text-sm);
-}
-.collection-tile-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  margin-top: var(--space-1);
-}
-.collection-tile-actions {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
-  display: flex;
 }
 .collections-table {
   width: 100%;

@@ -6,6 +6,7 @@ import {
   MOCK_DOCUMENTS,
   MOCK_DOCUMENT_CATEGORIES,
   MOCK_DOCUMENT_COLLECTIONS,
+  toCollectionSummary,
 } from './mock-data'
 
 const meta: Meta<typeof DocumentsView> = {
@@ -38,7 +39,7 @@ export const GeteilteAnsicht: Story = {
 }
 
 /**
- * Sammelmappen sit above the documents as full-width rows. They are their own
+ * Sammelmappen sit above the documents as the shared tiles. They are their own
  * story because they are the widest thing on the page: a row that reaches the
  * page gutter is where a focus ring drawn *around* an element runs out of
  * room (issue #1281).
@@ -50,6 +51,9 @@ export const MitSammelmappen: Story = {
       handlers: [
         http.get('/api/document-collections', () =>
           HttpResponse.json({ items: MOCK_DOCUMENT_COLLECTIONS }),
+        ),
+        http.get('/api/collections', () =>
+          HttpResponse.json({ items: MOCK_DOCUMENT_COLLECTIONS.map(toCollectionSummary) }),
         ),
         ...defaultHandlers,
       ],
