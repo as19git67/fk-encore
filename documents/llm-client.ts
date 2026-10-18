@@ -336,6 +336,15 @@ export async function classifyDocument(req: ClassifyRequest): Promise<Classifica
   return parseClassification(raw);
 }
 
+/**
+ * A JSON answer from the generic `/json-prompt` endpoint. The caller prompts
+ * the shape and validates what comes back; errors follow `fetchJson` (a 5xx
+ * is `LlmServiceUnavailableError`, so a queue job defers).
+ */
+export function jsonPrompt(prompt: string, system: string, maxTokens = 1200): Promise<unknown> {
+  return postJson<unknown>("/json-prompt", { prompt, system, temperature: 0, max_tokens: maxTokens });
+}
+
 export async function embedTexts(
   texts: string[],
   kind: EmbedKind = "passage",

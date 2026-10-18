@@ -111,6 +111,7 @@ import { realtime, push } from "~encore/clients";
 import { checkForDuplicatesOf } from "./duplicates";
 import { extractReferenceNumbers, mergeReferenceNumbers, userEntered } from "./reference-numbers";
 import { applyDossierRulesQuietly } from "./dossiers";
+import { queueTaxValuesIfEvidence } from "./tax-values";
 console.log("[boot] documents/document-ops.ts: all imports resolved");
 
 type DocumentStatus = "pending" | "extracting" | "classifying" | "ready" | "failed" | "encrypted";
@@ -1148,6 +1149,10 @@ export async function runClassify(documentId: number): Promise<{ classification:
   if (!taxProtected) {
     await replaceAiTaxSections(documentId, classification.tax_sections);
   }
+  // Evidence gets its values read per form field (steuer-ausfuellhilfe,
+  // stage 2); the job waits until this classify is done.
+  await queueTaxValuesIfEvidence(documentId).catch((err) =>
+    console.error(`[documents] queueing tax_values for document=${documentId} failed:`, err));
 
   // The classifier filled in category / doc_date / sender / title / tax
   // metadata — everything the speaking path depends on. Move the file

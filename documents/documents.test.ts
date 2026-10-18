@@ -302,6 +302,7 @@ describe("documents.scan-queue constants", () => {
       "embed",
       "receipt_ocr",
       "page_words",
+      "tax_values",
     ]);
   });
 });

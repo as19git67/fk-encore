@@ -41,6 +41,7 @@ import {
 import { ReceiptOcrUnavailableError } from "./receipt-ocr-client";
 import { withAiSlot, AiSlotTimeoutError, type AiModel } from "../ai-queue/slot-helper";
 import { notifyDocScanQueueChanged } from "./scan-queue-events";
+import { runTaxValues } from "./tax-values";
 
 console.log("[boot] documents/scan-worker.ts: all imports resolved");
 
@@ -65,7 +66,14 @@ const POLL_INTERVAL_MS = parseInt(process.env.DOC_SCAN_POLL_INTERVAL_MS ?? "3000
 const AI_MODEL_MAP: Partial<Record<DocumentScanService, AiModel>> = {
   classify: "llm",
   embed: "embedding",
+  tax_values: "llm",
 };
+
+/**
+ * Jobs whose failure leaves the document as it was: a missing embedding, a
+ * backfill or the tax values are not worth hiding a finished document.
+ */
+const KEEPS_DOCUMENT_STATUS: ReadonlySet<DocumentScanService> = new Set(["embed", "page_words", "tax_values"]);
 
 class DocumentScanWorker {
   private running = 0;
@@ -96,7 +104,7 @@ class DocumentScanWorker {
   private async processNext(): Promise<boolean> {
     // classify/embed talk to the LLM service — back off if it's down
     // so we don't burn retries on a cold-start window.
-    if (this.service === "classify" || this.service === "embed") {
+    if (this.service === "classify" || this.service === "embed" || this.service === "tax_values") {
       const healthy = await isLlmServiceHealthy().catch(() => false);
       if (!healthy) return false;
     }
@@ -134,7 +142,7 @@ class DocumentScanWorker {
           );
           await markJobFailed(job.id, msg).catch(() => {});
           triggerWorkers();
-          if (this.service !== "embed" && this.service !== "page_words") {
+          if (!KEEPS_DOCUMENT_STATUS.has(this.service)) {
             await markDocumentFailed(job.document_id, msg).catch(() => {});
           }
           return true;
@@ -156,7 +164,7 @@ class DocumentScanWorker {
       // and classify failures — a missing embedding is not worth
       // blocking the document from appearing in the UI.
       // A failed backfill leaves a finished document as it was.
-      if (this.service !== "embed" && this.service !== "page_words") {
+      if (!KEEPS_DOCUMENT_STATUS.has(this.service)) {
         await markDocumentFailed(job.document_id, msg).catch(() => {});
       }
     }
@@ -188,6 +196,9 @@ class DocumentScanWorker {
       case "page_words":
         await runPageWords(job.document_id);
         return;
+      case "tax_values":
+        await runTaxValues(job.document_id);
+        return;
     }
   }
 
@@ -216,7 +227,10 @@ const receiptOcrWorker = new DocumentScanWorker("receipt_ocr", receiptOcrConcurr
 // One at a time: it re-runs OCR for old scans and only ever fills a gap.
 const pageWordsWorker = new DocumentScanWorker("page_words", 1);
 
-const ALL_WORKERS = [textExtractWorker, classifyWorker, embedWorker, receiptOcrWorker, pageWordsWorker];
+// One at a time: it shares the LLM with classify.
+const taxValuesWorker = new DocumentScanWorker("tax_values", 1);
+
+const ALL_WORKERS = [textExtractWorker, classifyWorker, embedWorker, receiptOcrWorker, pageWordsWorker, taxValuesWorker];
 
 /** Wake every worker. Non-blocking; call after enqueueing new jobs. */
 export function triggerWorkers(): void {

@@ -29,6 +29,8 @@ import {
 } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { replaceUserTaxSections } from "./document-ops";
+import { queueTaxValuesIfEvidence } from "./tax-values";
+import { triggerWorkers } from "./scan-worker";
 import { relocateDocument } from "./relocate";
 import { taxRelevantFromRole, type TaxRole } from "./tax-sections";
 import { validateTaxOverride } from "./tax-override";
@@ -209,9 +211,13 @@ export async function batchSetTax(
     })
     .where(inArray(documents.id, docIds));
 
+  let queued = false;
   for (const id of docIds) {
     await replaceUserTaxSections(id, slugs);
+    // New evidence (or evidence no longer) gets its values read again.
+    if (await queueTaxValuesIfEvidence(id)) queued = true;
   }
+  if (queued) triggerWorkers();
 
   // Rebuild the `_steuer/` hardlink view against the new tax metadata.
   await relocateAll(docIds);
