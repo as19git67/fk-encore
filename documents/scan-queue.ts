@@ -17,7 +17,7 @@ import { and, eq, sql, inArray } from "drizzle-orm";
 import db from "../db/database";
 import { documentScanQueue } from "../db/schema";
 
-export type DocumentScanService = "text_extract" | "classify" | "embed" | "receipt_ocr" | "page_words";
+export type DocumentScanService = "text_extract" | "classify" | "embed" | "receipt_ocr" | "page_words" | "tax_values";
 export type DocumentScanStatus = "pending" | "processing" | "failed" | "done";
 
 /** Services processed for every document, in dependency order. */
@@ -32,6 +32,7 @@ export const DOCUMENT_QUEUE_SERVICES: readonly DocumentScanService[] = [
   ...DOCUMENT_SERVICES,
   "receipt_ocr",
   "page_words",
+  "tax_values",
 ] as const;
 
 /**
@@ -113,6 +114,8 @@ export async function enqueueDocumentScan(
 const UPSTREAM_SERVICE: Partial<Record<DocumentScanService, DocumentScanService>> = {
   classify: "text_extract",
   embed: "text_extract",
+  // Reads the values off a document classify settled as tax evidence.
+  tax_values: "classify",
 };
 
 /**

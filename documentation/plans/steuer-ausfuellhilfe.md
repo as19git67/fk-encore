@@ -200,4 +200,20 @@ Kennzahl naming each document and amount.
   4.000 € before), Schulgeld, Spenden, zumutbare Belastung, prefilled data.
 - Next: fill `line`/`kennzahl`/`source` in `tax-forms/2025.ts` from the
   official forms; a test refuses a Kennzahl without its source.
-- Stages 2–5: open.
+- Stage 2: done. Queue service `tax_values` (`documents/tax-values.ts`),
+  queued after classify and after a manual tax edit whenever the document
+  is `beleg` with a tax year and a candidate kind, and waiting for classify
+  to finish. One question picks the kind when more than one fits; a second
+  reads that kind's fields with the number as printed and its line. Every
+  amount must stand in the text (`amountAnchored`), a flag needs a quote the
+  text contains; anything else is stored as `rejected` with its reason. The
+  kind's plausibility rules attach "Prüfen: …" to values that cannot both
+  be right. The owner comes from the Bezugspersonen on the document (self,
+  spouse, both = joint, exactly one child), never from the model; the page
+  from the word positions. Table `document_tax_value` (migration 0262),
+  `document_tax_reading` records the kind each document was read as. A
+  re-read replaces `read`/`rejected` rows and keeps `confirmed`/`corrected`;
+  a document that is no evidence any more loses its read values. Admin
+  backfill `POST /documents/tax-values/backfill` (`year`, `reread`, `limit`)
+  in `documents/tax-values-api.ts`.
+- Stages 3–5: open.

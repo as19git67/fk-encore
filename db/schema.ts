@@ -858,6 +858,8 @@ export const documentJobServiceEnum = pgEnum("document_job_service", [
   // Backfill of document_page_words for documents extracted before positions
   // were kept (#1531); yields to text_extract.
   "page_words",
+  // Values read off tax evidence per form field (steuer-ausfuellhilfe, stage 2).
+  "tax_values",
 ]);
 
 export const documentJobStatusEnum = pgEnum("document_job_status", [
@@ -4657,6 +4659,49 @@ export const documentPageWords = pgTable(
   },
   (table) => [primaryKey({ columns: [table.document_id, table.page] })],
 );
+
+/**
+ * Values read off tax evidence, per form field (documentation/plans/
+ * steuer-ausfuellhilfe.md, stage 2; `documents/tax-values.ts`). `value` is
+ * cents for amounts and 0/1 for flags; `owner` is `self`, `spouse`, `joint`
+ * or `child:<subject person id>`. A re-read replaces `read`/`rejected` rows
+ * and keeps what the user confirmed or corrected.
+ */
+export const documentTaxValue = pgTable(
+  "document_tax_value",
+  {
+    id: serial("id").primaryKey(),
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    tax_year: integer("tax_year").notNull(),
+    owner: text("owner").notNull(),
+    evidence_kind: text("evidence_kind").notNull(),
+    field_key: text("field_key").notNull(),
+    value: bigint("value", { mode: "number" }).notNull(),
+    printed: text("printed"),
+    quote: text("quote"),
+    page: integer("page"),
+    status: text("status").$type<"read" | "rejected" | "confirmed" | "corrected">().notNull().default("read"),
+    note: text("note"),
+    corrected_by: integer("corrected_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("document_tax_value_document_id_field_key_owner_key").on(table.document_id, table.field_key, table.owner),
+    index("idx_document_tax_value_year").on(table.tax_year),
+  ],
+);
+
+/** Which evidence kind a document was read as; NULL when none of the candidates fit. */
+export const documentTaxReading = pgTable("document_tax_reading", {
+  document_id: integer("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  evidence_kind: text("evidence_kind"),
+  read_at: timestamp("read_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * A transaction report in groups (#1533): the definition only — groups of

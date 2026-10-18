@@ -54,6 +54,7 @@ const serviceLabel: Record<string, string> = {
   embed: 'Embedding',
   receipt_ocr: 'Beleg-OCR',
   page_words: 'Wortpositionen',
+  tax_values: 'Steuerwerte',
 }
 
 async function load() {

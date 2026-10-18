@@ -104,6 +104,7 @@ import {
 } from "./reference-numbers";
 import { applyDossierRulesQuietly } from "./dossiers";
 import { triggerWorkers } from "./scan-worker";
+import { queueTaxValuesIfEvidence } from "./tax-values";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
 import { decryptPdfWithPassword } from "./text-extract";
@@ -2909,6 +2910,8 @@ export const updateDocumentTax = api(
       .where(eq(documents.id, existing.id));
 
     await replaceUserTaxSections(existing.id, slugs);
+    // New evidence (or evidence no longer) gets its values read again.
+    if (await queueTaxValuesIfEvidence(existing.id)) triggerWorkers();
 
     // Rebuild the `_steuer/` hardlink view against the new tax metadata.
     try {

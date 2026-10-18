@@ -30,6 +30,7 @@ const docQueueServiceLabels: Record<string, string> = {
   embed: 'Embedding',
   receipt_ocr: 'Beleg-OCR (PaddleOCR)',
   page_words: 'Wortpositionen (nachtragen)',
+  tax_values: 'Steuerwerte aus Belegen',
 }
 
 const docTotalPending = computed(() =>
