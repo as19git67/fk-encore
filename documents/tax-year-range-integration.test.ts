@@ -85,6 +85,9 @@ describe("runClassify — historical tax_year (DB constraint regression)", () =>
     expect(doc.status).toBe("ready");
     expect(doc.last_error).toBeNull();
     expect(doc.tax_year).toBe(1997);
-    expect(doc.tax_relevant).toBe(true);
+    // A Jahresdepotauszug (abrechnung) is about Anlage KAP but not the
+    // evidence — the matrix makes it a bezug, and the year stays on it.
+    expect(doc.tax_role).toBe("bezug");
+    expect(doc.tax_relevant).toBe(false);
   });
 });

@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import type { TaxRole } from '../../api/documents'
+import { TAX_ROLE_HINTS, TAX_ROLE_OPTIONS } from '../../utils/taxRole'
 import BasketMemberList from '../collections/BasketMemberList.vue'
 import BasketFooter from '../collections/BasketFooter.vue'
 import { useBasketStore } from '../../stores/basket'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
-import Checkbox from 'primevue/checkbox'
 import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
 import BasketIndicator from '../BasketIndicator.vue'
@@ -275,7 +276,7 @@ async function saveDate() {
 // ─── Tax ────────────────────────────────────────────────────────────────────
 
 const taxDialogVisible = ref(false)
-const taxRelevantDraft = ref(true)
+const taxRoleDraft = ref<TaxRole>('beleg')
 const taxYearDraft = ref<number | null>(new Date().getFullYear() - 1)
 const taxSectionsDraft = ref<string[]>([])
 const savingTax = ref(false)
@@ -288,22 +289,24 @@ async function openTaxDialog() {
 
 const taxSaveDisabled = computed(
   () =>
-    taxRelevantDraft.value &&
-    (taxYearDraft.value == null || taxSectionsDraft.value.length === 0),
+    (taxRoleDraft.value === 'beleg' && taxYearDraft.value == null) ||
+    (taxRoleDraft.value !== 'keine' && taxSectionsDraft.value.length === 0),
 )
 
 async function saveTax() {
   savingTax.value = true
   try {
+    const role = taxRoleDraft.value
     const res = await batchUpdateDocumentTax({
       document_ids: selectionStore.ids as number[],
-      tax_relevant: taxRelevantDraft.value,
-      tax_year: taxRelevantDraft.value ? taxYearDraft.value : null,
-      tax_sections: taxRelevantDraft.value ? taxSectionsDraft.value : [],
+      tax_role: role,
+      tax_year: role === 'keine' ? null : taxYearDraft.value,
+      tax_sections: role === 'keine' ? [] : taxSectionsDraft.value,
     })
     for (const d of items.value) {
-      d.tax_relevant = taxRelevantDraft.value
-      d.tax_year = taxRelevantDraft.value ? taxYearDraft.value : null
+      d.tax_role = role
+      d.tax_relevant = role === 'beleg'
+      d.tax_year = role === 'keine' ? null : taxYearDraft.value
     }
     taxDialogVisible.value = false
     reportDone(res.affected_documents, 'Steuer-Metadaten')
@@ -437,7 +440,8 @@ function handleReprocessDone(payload: { affected: number }) {
               <span v-if="doc.sender">{{ doc.sender }}</span>
               <span v-if="doc.doc_date">{{ formatDate(doc.doc_date) }}</span>
               <span v-if="doc.category_slug"><i class="pi pi-folder" /> {{ doc.category_slug }}</span>
-              <span v-if="doc.tax_relevant" class="tax-badge"><i class="pi pi-calculator" /> Steuer</span>
+              <span v-if="doc.tax_role === 'beleg'" class="tax-badge"><i class="pi pi-calculator" /> Steuer</span>
+              <span v-else-if="doc.tax_role === 'bezug'" class="tax-badge tax-badge--bezug"><i class="pi pi-calculator" /> Steuerbezug</span>
             </div>
           </button>
           <button
@@ -560,20 +564,26 @@ function handleReprocessDone(payload: { affected: number }) {
 
     <Dialog v-model:visible="taxDialogVisible" modal header="Steuer-Metadaten setzen" class="basket-dialog dialog-md">
       <p class="dialog-hint">
-        Überschreibt Steuer-Relevanz, Jahr und Steuer-Kategorien auf
+        Überschreibt Steuer-Rolle, Jahr und Steuer-Kategorien auf
         {{ count }} Dokument{{ count === 1 ? '' : 'e' }} (ersetzt vorhandene Zuordnungen).
       </p>
-      <label class="tax-relevant-row">
-        <Checkbox v-model="taxRelevantDraft" binary />
-        <span>Steuerrelevant</span>
-      </label>
-      <template v-if="taxRelevantDraft">
+      <SelectButton
+        v-model="taxRoleDraft"
+        :options="TAX_ROLE_OPTIONS"
+        option-label="label"
+        option-value="value"
+        :allow-empty="false"
+        aria-label="Steuer-Rolle"
+        class="dialog-field"
+      />
+      <p class="dialog-hint">{{ TAX_ROLE_HINTS[taxRoleDraft] }}</p>
+      <template v-if="taxRoleDraft !== 'keine'">
         <InputNumber
           v-model="taxYearDraft"
           :use-grouping="false"
           :min="2000"
           :max="2100"
-          placeholder="Steuerjahr"
+          :placeholder="taxRoleDraft === 'beleg' ? 'Steuerjahr' : 'Steuerjahr (optional)'"
           class="dialog-field"
         />
         <MultiSelect
@@ -642,6 +652,7 @@ function handleReprocessDone(payload: { affected: number }) {
 </template>
 
 <style scoped>
+.tax-badge--bezug { color: var(--p-text-muted-color); font-weight: 400; }
 .tax-badge {
   color: var(--p-primary-color);
 }
@@ -682,12 +693,5 @@ function handleReprocessDone(payload: { affected: number }) {
 .dialog-field {
   width: 100%;
   margin-bottom: 0.75rem;
-}
-.tax-relevant-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-  cursor: pointer;
 }
 </style>

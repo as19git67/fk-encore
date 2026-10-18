@@ -1010,6 +1010,11 @@ export const documents = pgTable("documents", {
   // `tax_reviewed` to true). Section assignments live in the N:M
   // join table `document_tax_sections` below.
   tax_relevant: boolean("tax_relevant").notNull().default(false),
+  // Role of the document for the return (migration 0261,
+  // documentation/plans/steuer-belegrolle.md): 'beleg' is the evidence
+  // (tax_relevant = true), 'bezug' concerns a tax matter and keeps its
+  // sections but never counts, 'keine' has no tax relation.
+  tax_role: text("tax_role").$type<"beleg" | "bezug" | "keine">().notNull().default("keine"),
   tax_year: integer("tax_year"),
   tax_year_confidence: real("tax_year_confidence"),
   tax_reviewed: boolean("tax_reviewed").notNull().default(false),

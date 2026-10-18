@@ -3,11 +3,13 @@ import type { ComputedRef, Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 import type { FilterChip } from '../components/layout/listToolbar'
+import type { TaxRole } from '../api/documents'
+import { TAX_ROLE_LABELS, isTaxRole } from '../utils/taxRole'
 
 const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
   'category', 'tags', 'status', 'review', 'neu', 'sender', 'correspondent', 'dateFrom', 'dateTo',
-  'taxRelevant', 'subjectPerson', 'categorySource', 'documentType', 'collectionScope', 'collection',
+  'taxRelevant', 'taxRole', 'subjectPerson', 'categorySource', 'documentType', 'collectionScope', 'collection',
   'folder', 'ref',
 ] as const
 
@@ -23,7 +25,10 @@ export interface DocumentFilter {
   correspondent?: string
   dateFrom?: string
   dateTo?: string
+  /** Old boolean filter; still parsed from shared links. */
   taxRelevant?: boolean
+  /** Role filter: 'beleg', 'bezug' or 'keine'. */
+  taxRole?: TaxRole
   subjectPersonId?: number
   /** Filter by category source: 'ai', 'cloud', or 'user'. */
   categorySource?: string
@@ -132,6 +137,7 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
   if (typeof q.dateTo === 'string' && q.dateTo) f.dateTo = q.dateTo
   const tr = parseBool(q.taxRelevant)
   if (tr !== undefined) f.taxRelevant = tr
+  if (isTaxRole(q.taxRole)) f.taxRole = q.taxRole
   if (typeof q.subjectPerson === 'string' && q.subjectPerson) {
     const n = Number(q.subjectPerson)
     if (Number.isFinite(n)) f.subjectPersonId = n
@@ -165,6 +171,7 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   if (f.dateFrom) out.dateFrom = f.dateFrom
   if (f.dateTo) out.dateTo = f.dateTo
   if (f.taxRelevant !== undefined) out.taxRelevant = String(f.taxRelevant)
+  if (f.taxRole) out.taxRole = f.taxRole
   if (f.subjectPersonId) out.subjectPerson = String(f.subjectPersonId)
   if (f.categorySource) out.categorySource = f.categorySource
   if (f.documentType) out.documentType = f.documentType
@@ -190,6 +197,7 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   if (f.correspondent) n++
   if (f.dateFrom || f.dateTo) n++
   if (f.taxRelevant !== undefined) n++
+  if (f.taxRole) n++
   if (f.subjectPersonId) n++
   if (f.categorySource) n++
   if (f.documentType) n++
@@ -359,6 +367,9 @@ export function useDocumentFilterChips(
     }
     if (f.taxRelevant !== undefined) {
       add('taxRelevant', `Steuerrelevant: ${f.taxRelevant ? 'Ja' : 'Nein'}`, ['taxRelevant'])
+    }
+    if (f.taxRole) {
+      add('taxRole', `Steuer: ${TAX_ROLE_LABELS[f.taxRole]}`, ['taxRole'])
     }
     if (f.subjectPersonId) {
       const label = labels.subjectPerson?.(f.subjectPersonId) ?? `#${f.subjectPersonId}`

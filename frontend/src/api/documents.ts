@@ -15,6 +15,9 @@ export type TaxAssignmentSource = 'ai' | 'user'
 export type CategorySource = 'ai' | 'cloud' | 'user'
 export type DocumentVisibility = 'private' | 'group'
 
+/** Role of a document for the income-tax return (documentation/plans/steuer-belegrolle.md). */
+export type TaxRole = 'beleg' | 'bezug' | 'keine'
+
 export type ReferenceKind = 'insurance' | 'contract' | 'customer' | 'order' | 'case' | 'other'
 
 export interface ReferenceNumber {
@@ -54,7 +57,13 @@ export interface DocumentSummary {
   /** Document-type facet slug (Dokumentart), or null when untyped. */
   document_type: string | null
   tags: string[]
+  /** `tax_role === 'beleg'`: the document is the evidence filed with the return. */
   tax_relevant: boolean
+  /**
+   * Role for the return: `beleg` is the evidence, `bezug` concerns a tax
+   * matter and keeps its sections but does not count, `keine` has none.
+   */
+  tax_role: TaxRole
   tax_year: number | null
   last_error: string | null
   visibility: DocumentVisibility
@@ -212,6 +221,8 @@ export interface ListDocumentsQuery {
   date_from?: string
   date_to?: string
   tax_relevant?: boolean
+  /** Keep only documents with this tax role. */
+  tax_role?: TaxRole
   /** Keep only documents linked to this Bezugsperson. */
   subject_person_id?: number
   /** Filter by category source: 'ai', 'cloud', or 'user'. */
@@ -878,10 +889,12 @@ export function batchUpdateDocumentAttributes(payload: BatchUpdateAttributesPayl
 
 export interface BatchUpdateTaxPayload {
   document_ids: number[]
-  tax_relevant: boolean
-  /** Required when `tax_relevant=true`. */
+  /** Old shape: `true` = beleg, `false` = keine. Ignored when `tax_role` is given. */
+  tax_relevant?: boolean
+  tax_role?: TaxRole
+  /** Required for `beleg`, optional for `bezug`. */
   tax_year?: number | null
-  /** Replaces every section assignment; required non-empty when relevant. */
+  /** Replaces every section assignment; required non-empty unless `keine`. */
   tax_sections?: string[]
 }
 
@@ -1205,8 +1218,12 @@ export interface ListTaxDocumentsResponse {
 }
 
 export interface UpdateDocumentTaxPayload {
-  tax_relevant: boolean
+  /** Old shape: `true` = beleg, `false` = keine. Ignored when `tax_role` is given. */
+  tax_relevant?: boolean
+  tax_role?: TaxRole
+  /** Required for `beleg`, optional for `bezug`. */
   tax_year?: number | null
+  /** Required non-empty unless `keine`. */
   tax_sections?: string[]
   tax_reviewed?: boolean
 }

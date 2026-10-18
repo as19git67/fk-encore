@@ -131,3 +131,47 @@ def test_backstop_can_be_disabled():
         assert result["tax_relevant"] is True
     finally:
         main.TAX_SECTIONS_MAX = orig
+
+
+# ─── tax_role reconciliation (documentation/plans/steuer-belegrolle.md) ───────
+
+
+def test_named_role_sets_the_boolean():
+    payload = {
+        **_BASE_FIELDS,
+        "tax_relevant": True,
+        "tax_role": "bezug",
+        "tax_sections": [{"slug": "sec-0", "confidence": 0.9}],
+    }
+    result = _classify(payload, n_sections=18)
+    assert result["tax_role"] == "bezug"
+    assert result["tax_relevant"] is False
+    assert len(result["tax_sections"]) == 1
+
+
+def test_missing_role_is_read_off_the_boolean():
+    with_sections = _classify(
+        {**_BASE_FIELDS, "tax_relevant": False, "tax_sections": [{"slug": "sec-0", "confidence": 0.9}]},
+        n_sections=18,
+    )
+    assert with_sections["tax_role"] == "bezug"
+    relevant = _classify(
+        {**_BASE_FIELDS, "tax_relevant": True, "tax_sections": [{"slug": "sec-0", "confidence": 0.9}]},
+        n_sections=18,
+    )
+    assert relevant["tax_role"] == "beleg"
+    assert relevant["tax_relevant"] is True
+
+
+def test_no_section_is_never_a_beleg():
+    result = _classify({**_BASE_FIELDS, "tax_role": "beleg", "tax_sections": []}, n_sections=18)
+    assert result["tax_role"] == "keine"
+    assert result["tax_relevant"] is False
+
+
+def test_section_without_role_is_a_bezug():
+    result = _classify(
+        {**_BASE_FIELDS, "tax_relevant": False, "tax_role": "keine", "tax_sections": [{"slug": "sec-0", "confidence": 0.9}]},
+        n_sections=18,
+    )
+    assert result["tax_role"] == "bezug"

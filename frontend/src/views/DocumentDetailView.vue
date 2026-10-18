@@ -16,6 +16,7 @@ import Select from 'primevue/select'
 import AutoComplete from 'primevue/autocomplete'
 import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
+import SelectButton from 'primevue/selectbutton'
 import Chip from 'primevue/chip'
 import Popover from 'primevue/popover'
 import { useConfirm } from 'primevue/useconfirm'
@@ -48,7 +49,9 @@ import {
   type SubjectPerson,
   type TaxSectionCatalogEntry,
   type TaxSectionGroup,
+  type TaxRole,
 } from '../api/documents'
+import { TAX_ROLE_HINTS, TAX_ROLE_OPTIONS, TAX_ROLE_SEVERITIES, TAX_ROLE_TAG_LABELS } from '../utils/taxRole'
 import { useAuthStore } from '../stores/auth'
 import { useDocSelectionStore } from '../stores/documents/selection'
 import { useBasketNavigation } from '../composables/useBasketNavigation'
@@ -214,7 +217,7 @@ const form = ref({
 })
 
 const taxForm = ref({
-  tax_relevant: false,
+  tax_role: 'keine' as TaxRole,
   tax_year: null as number | null,
   sections: new Set<string>(),
 })
@@ -516,7 +519,7 @@ function resetForm() {
 function resetTaxForm() {
   if (!doc.value) return
   taxForm.value = {
-    tax_relevant: doc.value.tax_relevant,
+    tax_role: doc.value.tax_role,
     tax_year: doc.value.tax_year,
     sections: new Set(doc.value.tax_sections.map((s) => s.slug)),
   }
@@ -536,20 +539,17 @@ async function saveTax() {
   error.value = ''
   info.value = ''
   try {
-    if (taxForm.value.tax_relevant) {
-      if (taxForm.value.tax_year == null) {
-        throw new Error('Bitte ein Steuerjahr auswählen.')
-      }
-      if (taxForm.value.sections.size === 0) {
-        throw new Error('Bitte mindestens eine Steuer-Sektion auswählen.')
-      }
+    const role = taxForm.value.tax_role
+    if (role === 'beleg' && taxForm.value.tax_year == null) {
+      throw new Error('Bitte ein Steuerjahr auswählen.')
+    }
+    if (role !== 'keine' && taxForm.value.sections.size === 0) {
+      throw new Error('Bitte mindestens eine Steuer-Sektion auswählen.')
     }
     const updated = await updateDocumentTax(doc.value.id, {
-      tax_relevant: taxForm.value.tax_relevant,
-      tax_year: taxForm.value.tax_relevant ? taxForm.value.tax_year : null,
-      tax_sections: taxForm.value.tax_relevant
-        ? Array.from(taxForm.value.sections)
-        : [],
+      tax_role: role,
+      tax_year: role === 'keine' ? null : taxForm.value.tax_year,
+      tax_sections: role === 'keine' ? [] : Array.from(taxForm.value.sections),
     })
     doc.value = updated
     resetTaxForm()
@@ -637,7 +637,7 @@ async function onUnpinTax() {
   try {
     // Release the pin so the classifier may overwrite tax fields on the next run.
     doc.value = await updateDocumentTax(doc.value.id, {
-      tax_relevant: doc.value.tax_relevant,
+      tax_role: doc.value.tax_role,
       tax_year: doc.value.tax_year,
       tax_sections: doc.value.tax_sections.map((s) => s.slug),
       tax_reviewed: false,
@@ -1415,14 +1415,9 @@ onBeforeUnmount(() => {
             </h2>
             <div class="tax-badges">
               <Tag
-                v-if="doc.tax_relevant"
-                severity="success"
-                value="Steuerrelevant"
-              />
-              <Tag
-                v-else
-                severity="secondary"
-                value="Nicht steuerrelevant"
+                :severity="TAX_ROLE_SEVERITIES[doc.tax_role]"
+                :value="TAX_ROLE_TAG_LABELS[doc.tax_role]"
+                v-tooltip.bottom="TAX_ROLE_HINTS[doc.tax_role]"
               />
               <Tag
                 v-if="doc.tax_reviewed"
@@ -1465,12 +1460,15 @@ onBeforeUnmount(() => {
                 Beim Bestätigen der Steuer-Zuordnung verschwindet dieser Hinweis.
               </span>
             </div>
-            <div v-if="doc.tax_relevant && doc.tax_year" class="tax-info-row">
+            <p v-if="doc.tax_role === 'bezug'" class="tax-role-hint">
+              {{ TAX_ROLE_HINTS.bezug }}
+            </p>
+            <div v-if="doc.tax_role !== 'keine' && doc.tax_year" class="tax-info-row">
               <span class="label">Steuerjahr</span>
               <span>{{ doc.tax_year }}</span>
             </div>
             <div
-              v-if="doc.tax_relevant && !doc.tax_reviewed && doc.tax_year_confidence != null"
+              v-if="doc.tax_role !== 'keine' && !doc.tax_reviewed && doc.tax_year_confidence != null && doc.tax_year_confidence > 0"
               class="tax-info-row"
             >
               <span class="label">Jahr-Konfidenz</span>
@@ -1493,8 +1491,8 @@ onBeforeUnmount(() => {
                 />
               </div>
             </div>
-            <div v-else-if="!doc.tax_relevant" class="tax-empty-hint">
-              Dieses Dokument wird nicht für die Steuererklärung benötigt.
+            <div v-else-if="doc.tax_role === 'keine'" class="tax-empty-hint">
+              {{ TAX_ROLE_HINTS.keine }}
             </div>
             <Button
               v-if="auth.hasPermission('documents.edit')"
@@ -1507,14 +1505,21 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-else class="tax-edit-mode">
-            <label class="tax-toggle-row">
-              <Checkbox v-model="taxForm.tax_relevant" :binary="true" />
-              <span>Dokument ist steuerrelevant</span>
-            </label>
+            <div class="tax-toggle-row">
+              <SelectButton
+                v-model="taxForm.tax_role"
+                :options="TAX_ROLE_OPTIONS"
+                option-label="label"
+                option-value="value"
+                :allow-empty="false"
+                aria-label="Steuer-Rolle"
+              />
+              <span class="tax-role-hint">{{ TAX_ROLE_HINTS[taxForm.tax_role] }}</span>
+            </div>
 
-            <div v-if="taxForm.tax_relevant" class="tax-edit-fields">
+            <div v-if="taxForm.tax_role !== 'keine'" class="tax-edit-fields">
               <label>
-                <span class="label">Steuerjahr</span>
+                <span class="label">Steuerjahr{{ taxForm.tax_role === 'bezug' ? ' (optional)' : '' }}</span>
                 <InputNumber
                   v-model="taxForm.tax_year"
                   :min="2000"

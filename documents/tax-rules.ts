@@ -15,6 +15,19 @@
 
 import { normalizeForMatch } from "./sender-rules";
 import type { TaxAssignment } from "./llm-client";
+import type { TaxRole } from "./tax-sections";
+
+/**
+ * Every rule below speaks in roles (documentation/plans/steuer-belegrolle.md):
+ * a document the rule recognises as "about the matter but not the evidence"
+ * becomes `bezug` and KEEPS its sections, so it is still found next to the
+ * evidence; only a high-precision certificate marker forces `beleg`.
+ */
+export interface TaxRuleResult {
+  taxSections: TaxAssignment[];
+  taxRole: TaxRole;
+  matched: boolean;
+}
 
 /**
  * Tax sections a private pension/life/Riester insurance document is (wrongly)
@@ -66,26 +79,26 @@ const BELEG_MARKERS: readonly string[] = [
 ];
 
 /**
- * Strip the insurance/pension tax sections from a document that is clearly
- * insurance ADMIN mail (an admin marker present) and carries NO certificate
- * marker. When that empties the tax-section list, the document is no longer
- * tax-relevant. Everything else passes through unchanged.
+ * Insurance ADMIN mail (an admin marker present, no certificate marker) is
+ * `bezug`: it concerns the Vorsorge matter but is not the evidence. The
+ * sections stay so the Standmitteilung is listed next to the certificate.
  *
- * Deliberately conservative: it only fires when the document already has one of
- * the insurance sections AND an admin marker AND no certificate marker — so a
- * genuine Beitrags-/Zulagenbescheinigung (certificate marker present) keeps its
- * status, and non-insurance documents are never affected.
+ * Deliberately conservative: it only fires when the document already has one
+ * of the insurance sections AND an admin marker AND no certificate marker — so
+ * a genuine Beitrags-/Zulagenbescheinigung (certificate marker present) keeps
+ * its role, and non-insurance documents are never affected.
  *
  * `text` should be the OCR-extracted document text, NOT the LLM title.
  */
 export function applyInsuranceAdminTaxRule(input: {
   text: string;
   taxSections: readonly TaxAssignment[];
-  taxRelevant: boolean;
-}): { taxSections: TaxAssignment[]; taxRelevant: boolean } {
-  const passthrough = {
+  taxRole: TaxRole;
+}): TaxRuleResult {
+  const passthrough: TaxRuleResult = {
     taxSections: [...input.taxSections],
-    taxRelevant: input.taxRelevant,
+    taxRole: input.taxRole,
+    matched: false,
   };
 
   const hasInsuranceSection = input.taxSections.some((s) => INSURANCE_TAX_SLUGS.has(s.slug));
@@ -98,10 +111,10 @@ export function applyInsuranceAdminTaxRule(input: {
   const hasBeleg = BELEG_MARKERS.some((m) => ctx.includes(m));
   if (!hasAdmin || hasBeleg) return passthrough;
 
-  const kept = input.taxSections.filter((s) => !INSURANCE_TAX_SLUGS.has(s.slug));
   return {
-    taxSections: kept,
-    taxRelevant: kept.length > 0 ? input.taxRelevant : false,
+    taxSections: [...input.taxSections],
+    taxRole: "bezug",
+    matched: input.taxRole !== "bezug",
   };
 }
 
@@ -124,19 +137,19 @@ const KINDERGELD_NOTICE_MARKERS: readonly string[] = [
 export function applyKindergeldTaxRule(input: {
   text: string;
   taxSections: readonly TaxAssignment[];
-  taxRelevant: boolean;
-}): { taxSections: TaxAssignment[]; taxRelevant: boolean; matched: boolean } {
+  taxRole: TaxRole;
+}): TaxRuleResult {
   const ctx = normalizeForMatch(input.text);
   if (!KINDERGELD_NOTICE_MARKERS.some((marker) => ctx.includes(marker))) {
     return {
       taxSections: [...input.taxSections],
-      taxRelevant: input.taxRelevant,
+      taxRole: input.taxRole,
       matched: false,
     };
   }
   return {
     taxSections: [{ slug: "anlage-kind", confidence: 0.98 }],
-    taxRelevant: true,
+    taxRole: "beleg",
     matched: true,
   };
 }
@@ -312,8 +325,15 @@ export function applyKirchensteuerBescheidYearTaxRule(input: {
  *    Die comdirect druckt das sogar selbst auf den Beleg: "KEINE
  *    STEUERBESCHEINIGUNG".
  * 2. JAHRESBESCHEINIGUNG (Jahressteuerbescheinigung, Steuerbescheinigung,
- *    Erträgnisaufstellung, Verlustbescheinigung). Das ist der eigentliche
- *    Steuerbeleg → ausschließlich die KAP-Sektionen.
+ *    Verlustbescheinigung). Das ist der eigentliche Steuerbeleg → `beleg`,
+ *    ausschließlich die KAP-Sektionen.
+ * 3. ERTRÄGNISAUFSTELLUNG: eine Information der Bank über die Erträge des
+ *    Jahres, für die Erklärung nie nötig — die Jahressteuerbescheinigung ist
+ *    der Beleg. Sie bleibt `bezug` mit Anlage KAP, auch wenn das Modell sie
+ *    für einen Beleg hält.
+ *
+ * Einzelabrechnung und Erträgnisaufstellung werden `bezug` und behalten
+ * Anlage KAP, damit sie neben der Jahresbescheinigung gefunden werden.
  *
  * Das kleine Modell macht bei beiden dieselben Fehler: es hält jede
  * Dividendenabrechnung für einen Steuerbeleg und liest aus dem ausgewiesenen
@@ -382,8 +402,19 @@ const SECURITIES_ANNUAL_CERTIFICATE_MARKERS: readonly string[] = [
   "jahressteuerbescheinigung",
   "steuerbescheinigung",
   "jahresbescheinigung",
-  "erträgnisaufstellung",
   "verlustbescheinigung",
+];
+
+/**
+ * Jahrespost der Bank, die KEIN Steuerbeleg ist: die Erträgnisaufstellung
+ * (auch „Ertragsaufstellung", „Erträgnisübersicht") fasst die Erträge
+ * informativ zusammen; eingereicht wird die Jahressteuerbescheinigung.
+ */
+const SECURITIES_INFORMATIONAL_MARKERS: readonly string[] = [
+  "erträgnisaufstellung",
+  "ertragsaufstellung",
+  "erträgnisübersicht",
+  "ertragsübersicht",
 ];
 
 /**
@@ -400,11 +431,11 @@ const KAP_TAX_SLUGS = new Set(["anlage-kap", "werbungskosten-kap", "anlage-kap-i
 export function applySecuritiesSettlementTaxRule(input: {
   text: string;
   taxSections: readonly TaxAssignment[];
-  taxRelevant: boolean;
-}): { taxSections: TaxAssignment[]; taxRelevant: boolean; matched: boolean } {
-  const unchanged = {
+  taxRole: TaxRole;
+}): TaxRuleResult {
+  const unchanged: TaxRuleResult = {
     taxSections: [...input.taxSections],
-    taxRelevant: input.taxRelevant,
+    taxRole: input.taxRole,
     matched: false,
   };
 
@@ -419,13 +450,28 @@ export function applySecuritiesSettlementTaxRule(input: {
     !declaredNoCertificate &&
     SECURITIES_ANNUAL_CERTIFICATE_MARKERS.some((m) => withoutNegation.includes(m));
 
-  if (isAnnualCertificate) {
+  // Nur die KAP-Sektionen, Anlage KAP immer dabei: die ausgewiesene
+  // Kirchensteuer und die comdirect-Fußnote machen keinen Sonderausgaben-
+  // Nachweis daraus.
+  const kapOnly = (): TaxAssignment[] => {
     const kept = input.taxSections.filter((s) => KAP_TAX_SLUGS.has(s.slug));
     if (!kept.some((s) => s.slug === "anlage-kap")) {
       kept.unshift({ slug: "anlage-kap", confidence: 0.95 });
     }
-    const changed = kept.length !== input.taxSections.length || input.taxRelevant !== true;
-    return { taxSections: kept, taxRelevant: true, matched: changed };
+    return kept;
+  };
+  const changedTo = (role: TaxRole, sections: TaxAssignment[]): TaxRuleResult => {
+    const same =
+      role === input.taxRole &&
+      sections.length === input.taxSections.length &&
+      sections.every((s, i) => s.slug === input.taxSections[i]?.slug);
+    return { taxSections: sections, taxRole: role, matched: !same };
+  };
+
+  if (isAnnualCertificate) return changedTo("beleg", kapOnly());
+
+  if (SECURITIES_INFORMATIONAL_MARKERS.some((m) => withoutNegation.includes(m))) {
+    return changedTo("bezug", kapOnly());
   }
 
   // Einzelabrechnung: nur wenn wirklich eine solche Belegart erkennbar ist —
@@ -433,8 +479,7 @@ export function applySecuritiesSettlementTaxRule(input: {
   if (!SECURITIES_SETTLEMENT_MARKERS.some((m) => withoutNegation.includes(m))) {
     return unchanged;
   }
-  const changed = input.taxSections.length > 0 || input.taxRelevant;
-  return { taxSections: [], taxRelevant: false, matched: changed };
+  return changedTo("bezug", kapOnly());
 }
 
 /** Exposed for tests / diagnostics. */
@@ -459,6 +504,7 @@ export const SECURITIES_SETTLEMENT_TAX_RULE_INTERNALS = {
   SECURITIES_CONTEXT_MARKERS,
   SECURITIES_EXCLUSION_MARKERS,
   SECURITIES_ANNUAL_CERTIFICATE_MARKERS,
+  SECURITIES_INFORMATIONAL_MARKERS,
   NO_CERTIFICATE_NOTICE,
   KAP_TAX_SLUGS,
 };

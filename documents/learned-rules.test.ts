@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  applyLearnedTaxRole,
   buildLearnedMemory,
   learnedRelationTags,
   LEARNED_TAX_CONFIDENCE,
@@ -7,6 +8,7 @@ import {
   mergeLearnedTags,
   mergeLearnedTaxSections,
   resolveLearned,
+  resolveLearnedTaxRole,
   type SenderMemoryEntry,
 } from "./learned-rules";
 
@@ -159,6 +161,7 @@ describe("merge helpers", () => {
   const learned: SenderMemoryEntry = {
     category: null,
     taxSections: ["anlage-kap"],
+    taxRoles: {},
     tags: ["dividende"],
     subjectPersonIds: [3, 5],
   };
@@ -200,5 +203,87 @@ describe("merge helpers", () => {
     ]);
     expect(mergeLearnedPersonIds([1], null)).toEqual([1]);
     expect(learnedRelationTags(null, [{ id: 1, relation_tag: "x" }])).toEqual([]);
+  });
+});
+
+describe("buildLearnedMemory — tax role per sender and document type", () => {
+  const base = { categories: [], taxSections: [], tags: [], persons: [] };
+
+  it("learns a unanimous role once two reviewed documents of the pair agree", () => {
+    const mem = buildLearnedMemory({
+      ...base,
+      taxRoles: [
+        { sender: "Musterbank", document_type: "abrechnung", tax_role: "bezug" },
+        { sender: "MUSTERBANK", document_type: "abrechnung", tax_role: "bezug" },
+        { sender: "Musterbank", document_type: "bescheinigung", tax_role: "beleg" },
+      ],
+    });
+    const e = resolveLearned(mem, "Musterbank");
+    expect(resolveLearnedTaxRole(e, "abrechnung")).toBe("bezug");
+    // Only one reviewed Bescheinigung — not enough support.
+    expect(resolveLearnedTaxRole(e, "bescheinigung")).toBeNull();
+    expect(resolveLearnedTaxRole(e, "gutschrift")).toBeNull();
+    expect(resolveLearnedTaxRole(e, null)).toBeNull();
+  });
+
+  it("does not learn a split decision", () => {
+    const mem = buildLearnedMemory({
+      ...base,
+      taxRoles: [
+        { sender: "Musterbank", document_type: "abrechnung", tax_role: "bezug" },
+        { sender: "Musterbank", document_type: "abrechnung", tax_role: "beleg" },
+        { sender: "Musterbank", document_type: "abrechnung", tax_role: "bezug" },
+      ],
+    });
+    expect(resolveLearnedTaxRole(resolveLearned(mem, "Musterbank"), "abrechnung")).toBeNull();
+  });
+
+  it("keys untyped documents under their own slot and ignores unknown roles", () => {
+    const mem = buildLearnedMemory({
+      ...base,
+      taxRoles: [
+        { sender: "Schule", document_type: null, tax_role: "bezug" },
+        { sender: "Schule", document_type: null, tax_role: "bezug" },
+        { sender: "Schule", document_type: "urkunde", tax_role: "nonsense" },
+        { sender: "Schule", document_type: "urkunde", tax_role: "nonsense" },
+      ],
+    });
+    const e = resolveLearned(mem, "Schule");
+    expect(resolveLearnedTaxRole(e, null)).toBe("bezug");
+    expect(resolveLearnedTaxRole(e, "urkunde")).toBeNull();
+  });
+});
+
+describe("applyLearnedTaxRole", () => {
+  const KAP = [{ slug: "anlage-kap", confidence: 0.9 }];
+
+  it("downgrades a beleg to the learned bezug and keeps the sections", () => {
+    expect(applyLearnedTaxRole({ taxRole: "beleg", taxSections: KAP }, "bezug")).toEqual({
+      taxRole: "bezug",
+      taxSections: KAP,
+      matched: true,
+    });
+  });
+
+  it("upgrades to a learned beleg only when sections exist", () => {
+    expect(applyLearnedTaxRole({ taxRole: "bezug", taxSections: KAP }, "beleg").taxRole).toBe("beleg");
+    expect(applyLearnedTaxRole({ taxRole: "keine", taxSections: [] }, "beleg")).toEqual({
+      taxRole: "keine",
+      taxSections: [],
+      matched: false,
+    });
+  });
+
+  it("a learned keine clears the sections", () => {
+    expect(applyLearnedTaxRole({ taxRole: "bezug", taxSections: KAP }, "keine")).toEqual({
+      taxRole: "keine",
+      taxSections: [],
+      matched: true,
+    });
+  });
+
+  it("is a no-op without a learned role or when it already matches", () => {
+    expect(applyLearnedTaxRole({ taxRole: "beleg", taxSections: KAP }, null).matched).toBe(false);
+    expect(applyLearnedTaxRole({ taxRole: "beleg", taxSections: KAP }, "beleg").matched).toBe(false);
   });
 });

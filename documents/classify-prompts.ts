@@ -101,13 +101,26 @@ Beurteile zusätzlich, ob das Dokument als Beleg für die deutsche
 Einkommensteuererklärung dient.
 
 Zusätzliche Felder:
-- tax_relevant (bool): true, wenn das Dokument üblicherweise als Beleg,
-  Bescheinigung oder Bescheid für die Einkommensteuererklärung dient
-  (Lohnsteuerbescheinigung, Jahressteuerbescheinigung der Bank, Spenden-
-  quittung, Handwerker-/Haushaltshilfe-Rechnung, Krankheitskosten,
-  Vermietungsbelege, Kinderbetreuung, Steuerbescheid,
-  Photovoltaik-Einspeiseabrechnungen, …). false bei rein privaten Belegen
-  ohne Steuerbezug (Supermarktkassenbon, Werbung, privater Schriftverkehr).
+- tax_role ("beleg" | "bezug" | "keine"): die Rolle des Dokuments für die
+  Einkommensteuererklärung. Zwei Fragen, getrennt beantwortet: WELCHEN
+  steuerlichen Sachverhalt betrifft das Dokument (→ tax_sections), und IST
+  es der Beleg, der eingereicht oder aufbewahrt wird (→ tax_role)?
+  • "beleg": das Dokument ist der Nachweis selbst — Lohnsteuerbescheinigung,
+    Jahressteuerbescheinigung der Bank, Spendenquittung, Handwerker-/
+    Haushaltshilfe-Rechnung, Arztrechnung, Vermietungsbeleg, Kita-Rechnung,
+    Kindergeldbescheid, Steuerbescheid, Photovoltaik-Einspeiseabrechnung.
+  • "bezug": das Dokument betrifft einen steuerlichen Sachverhalt, ist aber
+    NICHT der Beleg — die monatliche Gehaltsabrechnung, die einzelne
+    Dividendengutschrift, die Erträgnisaufstellung der Bank, die
+    Standmitteilung der Versicherung, das Schulzeugnis, ein Anschreiben,
+    ein Angebot, eine Verordnung. tax_sections nennt trotzdem den
+    Sachverhalt, damit das Dokument neben dem Beleg gefunden wird.
+  • "keine": kein Steuerbezug (Supermarktkassenbon, Werbung, privater
+    Schriftverkehr). tax_sections ist dann leer.
+  Im Zweifel zwischen "beleg" und "bezug": "bezug". Ein Dokument mit
+  Sachverhalt, aber ohne ausgewiesenen, vom Nutzer getragenen Betrag und
+  ohne amtliche Bescheinigung ist "bezug".
+- tax_relevant (bool): true genau dann, wenn tax_role = "beleg".
 - tax_year (int | null): vierstelliges Kalenderjahr, für das der Beleg
   steuerlich zählt. Bei Jahresbescheinigungen ("Jahressteuerbescheinigung
   2024"): das genannte Jahr. Bei Einzelrechnungen: das Jahr des Leistungs-
@@ -126,7 +139,8 @@ Zusätzliche Felder:
   Liste, jeweils mit eigener confidence. Ein Beleg darf mehreren Sektionen
   zugeordnet werden (z.B. Handwerkerrechnung für das vermietete Objekt →
   sowohl werbungskosten-v als auch ggf. haushaltsnahe, falls Eigennutzungs-
-  anteil). Leere Liste = keine passende Sektion / nicht steuerrelevant.
+  anteil). Leere Liste = kein Steuerbezug (tax_role = "keine"). Auch ein
+  "bezug" nennt seine Sektion(en).
   Format: [{"slug": "anlage-n", "confidence": 0.91}, ...]. Verwende nur
   Slugs aus der Liste; erfinde keine neuen.
 
@@ -139,8 +153,8 @@ Werbungskosten, Sonderausgaben usw.). Im Zweifel: leere Liste.
 JAHRESBESCHEINIGUNG VOR EINZELBELEG (sehr wichtig): Prüfe bei jedem Dokument
 zuerst, ob es für diesen Sachverhalt üblicherweise eine zusammenfassende
 Jahresbescheinigung gibt. Wenn ja, ist der laufende Einzelbeleg NICHT der
-Steuerbeleg — die Jahresbescheinigung ist es — und der Einzelbeleg ist
-tax_relevant=false mit leerer tax_sections-Liste:
+Steuerbeleg — die Jahresbescheinigung ist es — und der Einzelbeleg ist tax_role="bezug"
+(tax_relevant=false) mit der Sektion des Sachverhalts:
 
 - Monatliche Gehalts-/Entgeltabrechnung → maßgeblich ist die
   Lohnsteuerbescheinigung am Jahresende, nicht die einzelne Abrechnung.
@@ -159,8 +173,9 @@ wird. Die Jahresbescheinigung selbst ist immer steuerrelevant.
 
 KEIN BETRAG, KEIN BELEG (sehr wichtig): Ein Steuerbeleg weist einen
 tatsächlich angefallenen, vom Nutzer getragenen Betrag aus. Fehlt dieser
-Betrag, ist das Dokument tax_relevant=false mit leerer tax_sections-Liste —
-auch wenn Thema und Kategorie steuerlich einschlägig sind:
+Betrag, ist das Dokument tax_role="bezug" (tax_relevant=false) mit der
+Sektion des Sachverhalts — auch wenn Thema und Kategorie steuerlich
+einschlägig sind:
 
 - Verordnung, Rezept, Brillenverordnung, Befund-/Arztbericht, Heil- und
   Kostenplan → erst die bezahlte Rechnung ist der Beleg.
@@ -188,7 +203,7 @@ Nutze dafür die Angaben aus der Liste (\`relation_kind\`, \`tax_cost_bearer\`,
 - \`tax_cost_bearer = "user"\`: Der Nutzer trägt die Kosten dieser Person.
   Der Beleg zählt für seine Erklärung — behandle ihn wie einen eigenen.
 - \`tax_cost_bearer = "person"\`: Die Person trägt ihre Kosten selbst.
-  Für den Nutzer NICHT steuerrelevant (tax_relevant=false, tax_sections=[]).
+  Für den Nutzer NICHT steuerrelevant (tax_role="keine", tax_sections=[]).
 - Sonst entscheidet die Beziehungsart:
   - \`self\`: der Nutzer selbst → zählt.
   - \`spouse\` bei \`assessment_type = "zusammen"\`: Zusammenveranlagung, der
@@ -215,10 +230,12 @@ WICHTIGE ABGRENZUNGSREGELN:
 
 1) Wertpapiere / Kapitalerträge:
 - Steuerbeleg ist NUR die Jahresbescheinigung der Bank bzw. des Brokers:
-  Jahressteuerbescheinigung, Steuerbescheinigung, Erträgnisaufstellung,
-  Verlustbescheinigung → „anlage-kap" (tax_relevant=true), NIEMALS „anlage-n".
-- EINZELNE Depotabrechnungen sind NICHT steuerrelevant (tax_relevant=false,
-  tax_sections=[]): Dividendengutschrift, „Steuerliche Behandlung: …
+  Jahressteuerbescheinigung, Steuerbescheinigung, Verlustbescheinigung →
+  „anlage-kap" (tax_role="beleg"), NIEMALS „anlage-n".
+- Die Erträgnisaufstellung der Bank ist KEIN Steuerbeleg, sondern eine
+  Information: tax_role="bezug" mit „anlage-kap".
+- EINZELNE Depotabrechnungen sind ebenfalls nur tax_role="bezug" mit
+  „anlage-kap": Dividendengutschrift, „Steuerliche Behandlung: …
   Dividende", Ertragsgutschrift, Wertpapierabrechnung (Kauf/Verkauf),
   Vorabpauschale, Zinsgutschrift. Die Bank fasst diese Erträge und die
   einbehaltene Kapitalertragsteuer am Jahresende in der Jahressteuer-
@@ -235,8 +252,8 @@ WICHTIGE ABGRENZUNGSREGELN:
   Vorsorgeaufwendungen.
 - Anlage N ist ausschließlich für Arbeitseinkommen (Gehalt,
   Lohnsteuerbescheinigung vom Arbeitgeber).
-- MONATLICHE Gehalts-/Entgeltabrechnungen sind NICHT steuerrelevant
-  (tax_relevant=false, tax_sections=[]), weil die Lohnsteuerbescheinigung
+- MONATLICHE Gehalts-/Entgeltabrechnungen sind tax_role="bezug" mit
+  „anlage-n", weil die Lohnsteuerbescheinigung
   am Jahresende alle relevanten Daten zusammenfasst. Nur die
   Lohnsteuerbescheinigung selbst gehört zu „anlage-n".
 
@@ -293,7 +310,7 @@ WICHTIGE ABGRENZUNGSREGELN:
   • Leistungs-/Renten-/Auszahlungsmitteilung (steuerpflichtige Auszahlung),
   • Jahressteuerbescheinigung des Versicherers.
   → dann „anlage-av" (Riester/Rürup/bAV) bzw. „vorsorgeaufwand" bzw. „anlage-r".
-- NICHT steuerrelevant (tax_relevant=false, tax_sections=[]) sind reine
+- Nur tax_role="bezug" (mit der Sektion, um die es geht) sind reine
   Verwaltungs-/Vertragsschreiben OHNE ausgewiesene Beiträge zum Einreichen:
   Erhöhungsnachtrag, Dynamik-Nachtrag, Widerspruch zur Dynamik,
   Statusreport/Standmitteilung zum Vertragsstand in der Ansparphase,
@@ -311,11 +328,15 @@ WICHTIGE ABGRENZUNGSREGELN:
   (betreffen die Umsatzsteuer des Unternehmers), Gewerbesteuererklärungen sowie
   AUSLÄNDISCHE Steuererklärungen (z. B. US-Einkommensteuererklärung/US tax
   return) und deren Steuerberater-Fragebögen. Diese gehören NICHT zu
-  „mantelbogen" (tax_sections=[]).
+  „mantelbogen" (tax_role="keine", tax_sections=[]).
 
 7) Kindergeld und Familienleistungen:
 - Kindergeldbescheide der Familienkasse sind für die Günstigerprüfung und
-  Anlage Kind steuerrelevant (tax_relevant=true, tax_sections=[anlage-kind]).
+  Anlage Kind steuerrelevant (tax_role="beleg", tax_sections=[anlage-kind]).
+- Schulzeugnisse, Elternbriefe der Schule und Schulbescheinigungen für ein
+  minderjähriges Kind sind tax_role="bezug" mit „anlage-kind": die Steuer
+  braucht sie nicht. Eine Schul-/Studien-/Ausbildungsbescheinigung für ein
+  volljähriges Kind ist dagegen ein Beleg.
   Sie gehören aber NICHT zu finanzen-steuern oder behoerden-steuerbescheid,
   auch wenn sie „Festsetzung", „§ 70" oder „Einkommensteuergesetz (EStG)"
   enthalten. Der EStG-Verweis macht das Schreiben nicht zum Steuerbescheid.
