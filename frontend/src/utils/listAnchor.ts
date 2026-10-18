@@ -50,6 +50,16 @@ export function anchorSelector(anchor: ListAnchor): string {
 }
 
 /**
+ * The anchor key of one Sammelmappe's document list. Shared by the folder,
+ * which saves it when a document is opened, and the document page, which
+ * moves it along when stepping through the folder — so going back lands on
+ * the document last looked at, not the one first opened.
+ */
+export function collectionAnchorKey(collectionId: number): string {
+  return `dokumente-mappe-${collectionId}`
+}
+
+/**
  * Remember the row the user is opening. Call it right before navigating to
  * the detail, with the list's own route name as the key.
  */

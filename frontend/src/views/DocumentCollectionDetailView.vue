@@ -52,6 +52,14 @@ import { listCorrespondents, listGroups, type CorrespondentFacet, type GroupSumm
 import { canShareFiles, shareFile, triggerDownload } from '../utils/shareFile'
 import { useModuleBack } from '../composables/useModuleBack'
 import { useDragReorder } from '../composables/useDragReorder'
+import {
+  anchorKey,
+  anchorSelector,
+  collectionAnchorKey,
+  saveListAnchor,
+  type ListAnchor,
+} from '../utils/listAnchor'
+import type { AnchorResolution } from '../components/layout/pageLayout'
 
 const route = useRoute()
 const router = useRouter()
@@ -371,11 +379,23 @@ function savePageSelection(selection: { excludedPages: number[]; redactions: Pag
   )
 }
 
+// ─── Coming back from a document ────────────────────────────────────────────
+// Back from the document's page lands on the row it was opened from, scrolled
+// into view, with the thumbnail focused — the button that opens it. One
+// anchor per folder, so another folder's row is never looked for here.
+const listAnchorKey = computed(() => collectionAnchorKey(collectionId.value))
+function resolveListAnchor(anchor: ListAnchor | null): AnchorResolution {
+  if (!anchor) return null
+  const row = document.querySelector<HTMLElement>(anchorSelector(anchor))
+  return row?.querySelector<HTMLElement>('.cd-thumb') ?? row ?? null
+}
+
 /**
  * `mappe` tells the detail page which folder it was opened from, so it can
  * step to the previous and next document of this folder directly.
  */
 function openDocument(item: DocumentCollectionItem) {
+  saveListAnchor(listAnchorKey.value, { kind: 'document', id: item.document_id })
   router.push({
     name: 'dokumente-detail',
     params: { id: item.document_id },
@@ -528,7 +548,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <PageLayout :title="collection?.title || 'Sammelmappe'" width="normal" :ready="!loading">
+  <PageLayout
+    :title="collection?.title || 'Sammelmappe'"
+    width="normal"
+    :ready="!!collection && !loading"
+    :anchor-key="listAnchorKey"
+    :resolve-anchor="resolveListAnchor"
+  >
     <template #actions>
       <Button
         icon="pi pi-arrow-left"
@@ -772,7 +798,8 @@ onBeforeUnmount(() => {
         <li
           v-for="(item, index) in orderedItems"
           :key="item.document_id"
-          class="cd-item"
+          class="cd-item scroll-anchor"
+          :data-anchor="anchorKey('document', item.document_id)"
           :class="{
             'cd-item--off': !item.included,
             'cd-item--dragging': draggingKey === item.document_id,
@@ -1132,6 +1159,10 @@ onBeforeUnmount(() => {
   border-radius: 5px;
   overflow: hidden;
   cursor: pointer;
+}
+.cd-thumb:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .cd-thumb :deep(img) {
   width: 100%;

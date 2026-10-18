@@ -55,6 +55,7 @@ import { useBasketNavigation } from '../composables/useBasketNavigation'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useModuleBack } from '../composables/useModuleBack'
 import { assistantLocation } from '../utils/assistantContext'
+import { collectionAnchorKey, saveListAnchor } from '../utils/listAnchor'
 import PageLayout from '../components/layout/PageLayout.vue'
 import PdfViewer from '../components/PdfViewer.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
@@ -130,6 +131,10 @@ async function loadSourceCollection(id: number | null) {
 watch(sourceCollectionId, (id) => void loadSourceCollection(id), { immediate: true })
 
 function goCollectionDoc(id: number) {
+  // Back lands on the folder; let it land on the document reached by stepping.
+  if (sourceCollectionId.value !== null) {
+    saveListAnchor(collectionAnchorKey(sourceCollectionId.value), { kind: 'document', id })
+  }
   void router.replace({
     name: 'dokumente-detail',
     params: { id },
