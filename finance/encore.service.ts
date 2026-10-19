@@ -39,6 +39,7 @@ import "./tag-worker";
 // Side-effect: registers the daily AI-tag cleanup cron.
 import "./tag-cleanup-cron";
 import "./document-match-cleanup-cron";
+import "./depot-model-retry-cron";
 // Side-effect: registers the monthly snapshot of the retirement forecast (#1342).
 import "./forecast-snapshot-cron";
 // Side-effect: registers the refresh of the held securities' quotes.

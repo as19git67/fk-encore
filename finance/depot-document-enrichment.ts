@@ -29,6 +29,7 @@ import {
   documents,
   financeAccount,
   financeDepotDocumentIgnore,
+  financeDocumentSettlementLlm,
   financeAccountAccess,
   financeAccountHolding,
   financeAccountType,
@@ -51,6 +52,7 @@ import { admitSecurity } from "./depot-securities";
 import { isinChecksumValid } from "./isin";
 import { documentsOfPaperType, SETTLEMENT_PAPER_TYPES } from "./depot-paper-type";
 import {
+  asksModel,
   readSettlement,
   rereadAgainstBooking,
   rejectedAsOtherPaper,
@@ -79,7 +81,9 @@ export type EnrichOutcome =
   /** A tax statement with no transaction of the same security, kind and quantity to add its tax to. */
   | "no_transaction"
   /** The security is only proposed (or ignored) in the depot's master: nothing booked until the user decides. */
-  | "unknown_security";
+  | "unknown_security"
+  /** The model could not be reached: nothing is booked on the rules alone, the paper is read again later. */
+  | "model_unavailable";
 
 export interface EnrichResult {
   document_id: number;
@@ -148,6 +152,8 @@ export interface EnrichStats {
   skipped_no_transaction: number;
   /** Papers about a security the depot's master has not confirmed. */
   skipped_unknown_security: number;
+  /** Papers the model could not read yet: read again by the next run. */
+  waiting_for_model: number;
   errors: string[];
   results: EnrichResult[];
   /** Where the next page starts (`before` of the next call); null when this was the last. */
@@ -168,6 +174,7 @@ function emptyStats(): EnrichStats {
     unverified: 0,
     skipped_no_transaction: 0,
     skipped_unknown_security: 0,
+    waiting_for_model: 0,
     errors: [],
     results: [],
   };
@@ -640,6 +647,35 @@ async function missingFieldsPatch(
   return patch;
 }
 
+/**
+ * What a paper now reads differently on the row it created: the trade's
+ * figures always; the charges and the net only when the paper is the
+ * whole settlement (a credit note before taxes left those to its tax
+ * statement).
+ */
+function rereadPatch(
+  row: DepotRow,
+  parsed: SettlementExtraction,
+  withCharges: boolean,
+): Partial<typeof financeDepotTransaction.$inferInsert> {
+  const patch: Partial<typeof financeDepotTransaction.$inferInsert> = {};
+  const put = (key: "amount" | "price" | "gross_amount" | "fees" | "tax" | "net_amount", value: number | null, scale: number) => {
+    if (value === null) return;
+    const current = num(row[key]);
+    if (current !== null && Math.abs(current - value) < 10 ** -scale / 2) return;
+    patch[key] = fixed(value, scale);
+  };
+  put("amount", parsed.quantity, 8);
+  put("price", parsed.price, 6);
+  put("gross_amount", parsed.gross, 2);
+  if (withCharges) {
+    put("fees", parsed.fees, 2);
+    put("tax", parsed.tax, 2);
+    put("net_amount", parsed.net, 2);
+  }
+  return patch;
+}
+
 /** Link the document to the booking's row and change nothing on it. */
 async function linkToBookingRow(
   result: EnrichResult,
@@ -725,6 +761,14 @@ export async function enrichDocument(
   const otherPaper = rejectedAsOtherPaper(reading);
   if (otherPaper) {
     result.detail = otherPaper;
+    return result;
+  }
+  // The model was asked and could not answer: nothing is booked on the
+  // rules alone — a quantity no price confirms would stand unchecked. The
+  // paper stays as it is; the hourly retry or the user's next run reads it
+  // again. Applied by the user after looking at it, it is theirs to decide.
+  if (reading.llmStatus === "unavailable" && !options.overwrite) {
+    result.outcome = "model_unavailable";
     return result;
   }
   const toParsed = (rd: SettlementReading): SettlementExtraction | null => {
@@ -826,10 +870,17 @@ export async function enrichDocument(
     result.transaction_net = row.net_amount;
     const rowNet = num(row.net_amount);
     const netAgrees = rowNet === null || parsed.net === null || Math.abs(Math.abs(rowNet) - Math.abs(parsed.net)) <= NET_TOLERANCE;
+    if (reading.merge.verdict === "unverified" || row.kind !== parsed.kind) return result;
+    // The row this paper created, booked from a reading the model had no
+    // part in yet (it was away): what the paper says now, checked, replaces
+    // what the rules alone read — a quantity no price could confirm.
+    const ownRow = row.dedupe_hash === `doc:${documentId}` && reading.llm !== null;
     // A tax statement's amounts (before and after taxes) are not the trade's.
-    if (reading.rules?.taxStatement || reading.rules?.taxPending) return result;
-    if (reading.merge.verdict === "unverified" || row.kind !== parsed.kind || !netAgrees) return result;
-    const patch = await missingFieldsPatch(row, parsed);
+    const pairPaper = reading.rules?.taxStatement || reading.rules?.taxPending;
+    if (pairPaper && !ownRow) return result;
+    // The bank's booking has the last word on the net.
+    if (!netAgrees && !(ownRow && row.linked_transaction_id === null)) return result;
+    const patch = ownRow ? rereadPatch(row, parsed, !pairPaper) : await missingFieldsPatch(row, parsed);
     if (Object.keys(patch).length === 0) return result;
     if (!dryRun) {
       patch.source = withDocumentSource(row.source);
@@ -1062,7 +1113,9 @@ export async function enrichPendingDocuments(
 
   // Linked papers are done — unless their trade still has no quantity: a
   // paper linked before it could be read is examined again, so what it
-  // says reaches the row once it reads.
+  // says reaches the row once it reads. So is a trade the paper booked
+  // itself without price or Kurswert: read by the rules alone, its
+  // quantity was never checked.
   const linked = db
     .select({ id: financeDepotTransactionDocument.document_id })
     .from(financeDepotTransactionDocument)
@@ -1072,8 +1125,15 @@ export async function enrichPendingDocuments(
     )
     .where(
       or(
-        isNotNull(financeDepotTransaction.amount),
         notInArray(financeDepotTransaction.kind, ["buy", "sell", "dividend"]),
+        and(
+          isNotNull(financeDepotTransaction.amount),
+          or(
+            eq(financeDepotTransaction.kind, "dividend"),
+            sql`${financeDepotTransaction.dedupe_hash} IS DISTINCT FROM 'doc:' || ${financeDepotTransactionDocument.document_id}`,
+            and(isNotNull(financeDepotTransaction.price), isNotNull(financeDepotTransaction.gross_amount)),
+          ),
+        ),
       ),
     );
   const ignored = db
@@ -1140,9 +1200,59 @@ export async function enrichPendingDocuments(
         case "unknown_security": stats.skipped_unknown_security++; break;
         case "conflict": stats.conflicts++; break;
         case "unverified": stats.unverified++; break;
+        case "model_unavailable": stats.waiting_for_model++; break;
       }
     } catch (err) {
       stats.errors.push(`document ${c.id}: ${(err as Error).message ?? String(err)}`);
+    }
+  }
+  return stats;
+}
+
+/**
+ * Papers a read could not finish because the model was away: settlement
+ * candidates, not linked, not ignored, with no answer of the model stored
+ * although it is asked about them. Read again, newest first, at most
+ * `limit`; the first one the model still cannot read ends the run.
+ */
+export async function retryPapersAwaitingModel(limit = 20): Promise<EnrichStats> {
+  const stats = emptyStats();
+  const answered = db.select({ id: financeDocumentSettlementLlm.document_id }).from(financeDocumentSettlementLlm);
+  const linked = db.select({ id: financeDepotTransactionDocument.document_id }).from(financeDepotTransactionDocument);
+  const ignored = db.select({ id: financeDepotDocumentIgnore.document_id }).from(financeDepotDocumentIgnore);
+  const rows = await db
+    .select({ id: documents.id, text: documents.extracted_text })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.status, "ready"),
+        isNotNull(documents.extracted_text),
+        sql`${documents.extracted_text} ~* ${CANDIDATE_PATTERN}`,
+        notInArray(documents.id, answered),
+        notInArray(documents.id, linked),
+        notInArray(documents.id, ignored),
+      ),
+    )
+    .orderBy(desc(documents.id))
+    .limit(limit * 10);
+  for (const r of rows) {
+    if (stats.documents_examined >= limit) break;
+    if (!asksModel(r.text)) continue;
+    stats.documents_examined++;
+    try {
+      const res = await enrichDocument(r.id);
+      stats.results.push(res);
+      switch (res.outcome) {
+        case "created": stats.created++; break;
+        case "enriched": stats.enriched++; break;
+        case "linked": stats.linked++; break;
+        case "conflict": stats.conflicts++; break;
+        case "unverified": stats.unverified++; break;
+        case "model_unavailable": stats.waiting_for_model++; break;
+      }
+      if (res.outcome === "model_unavailable") break;
+    } catch (err) {
+      stats.errors.push(`document ${r.id}: ${(err as Error).message ?? String(err)}`);
     }
   }
   return stats;

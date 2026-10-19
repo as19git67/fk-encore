@@ -339,6 +339,13 @@ export function classifySecuTransaction(tx: {
     if (buy && !sell) return n < 0 ? "buy" : null;
     return n < 0 ? "buy" : "sell";
   }
+  // A settlement's booking that quotes its amounts but names no kind
+  // ("WPKNR … ISIN … Abr.Betrag Brutto 1.234,56 EUR Steuerabzug 12,34- EUR"):
+  // the tax it quotes is the settlement's, not a charge of its own.
+  if (SETTLEMENT_AMOUNT_TEXT_RE.test(text)) {
+    if (PAYOUT_TEXT_RE.test(text)) return n > 0 ? "dividend" : null;
+    return n < 0 ? "buy" : "sell";
+  }
   if (CHARGE_TEXT_RE.test(text)) return null;
   if (PAYOUT_TEXT_RE.test(text)) return n > 0 ? "dividend" : null;
   if (TRANSFER_TEXT_RE.test(text)) return null;
@@ -357,6 +364,8 @@ const BANK_TRADE_CODES: ReadonlySet<string> = new Set(["TRAD", "SUBS", "REDM"]);
 const TAX_ADJUSTMENT_TEXT_RE = /steuer(?:ausgleich|korrektur|erstattung|nachbelastung|neuberechnung|r(?:ü|ue)ckerstattung)/i;
 /** Wording of a trade's booking: it decides over everything below. */
 const TRADE_TEXT_RE = /wertpapierabrechnung|wertpapier-?kauf|wertpapier-?verkauf|\b(?:kauf|verkauf)\b|fondsanteile|ausf(?:ü|ue)hrung/i;
+/** The amount of a settlement, as a booking quotes it ("Abr.Betrag Brutto", "Abrechnungsbetrag"). */
+const SETTLEMENT_AMOUNT_TEXT_RE = /\babr\.?\s*-?betrag|abrechnungsbetrag/i;
 /** The trade's direction, when the text names one. */
 const SELL_TEXT_RE = /verkauf/i;
 const BUY_TEXT_RE = /(?<!ver)kauf/i;

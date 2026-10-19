@@ -34,7 +34,7 @@ import {
   financeTransactionDocument,
   users,
 } from "../db/schema";
-import { enrichDocument, enrichPendingDocuments } from "./depot-document-enrichment";
+import { enrichDocument, enrichPendingDocuments, retryPapersAwaitingModel } from "./depot-document-enrichment";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 import {
   applySettlementDocument,
@@ -110,9 +110,8 @@ beforeEach(async () => {
   await db.delete(users);
   await ensureUser(1);
   vi.mocked(extractSettlementValues).mockReset();
-  vi.mocked(extractSettlementValues).mockImplementation(async () => {
-    throw new LlmServiceUnavailableError("not in tests");
-  });
+  // The model answers, but reads nothing of its own: the rules decide.
+  vi.mocked(extractSettlementValues).mockResolvedValue({});
   setAuth("1", ["finance.view", "finance.admin"]);
 });
 
@@ -687,6 +686,7 @@ describe("finance/portfolio — depots without any data", () => {
 
 describe("finance/portfolio — document inspection", () => {
   it("reports every field, the labels read, the depot a dry run picks and how", async () => {
+    vi.mocked(extractSettlementValues).mockRejectedValue(new LlmServiceUnavailableError("not in this test"));
     const { depot } = await setup();
     const docId = await insertDocument(BUY_TEXT);
 
@@ -719,6 +719,7 @@ describe("finance/portfolio — document inspection", () => {
     });
     expect(before.links).toEqual([]);
 
+    vi.mocked(extractSettlementValues).mockResolvedValue({});
     await enrichDocument(docId);
     const after = await inspectSettlementDocument({ documentId: docId });
     expect(after.depot!.outcome).toBe("already_linked");
@@ -803,7 +804,7 @@ Belastung gesamt 2.966,40 EUR`;
     const other = await insertDocument(BUY_TEXT.replace("2.966,40", "2.966,40 "));
     const r = await enrichDocument(other);
     expect(r.llm_status).toBe("unavailable");
-    expect(r.outcome).toBe("created");
+    expect(r.outcome).toBe("model_unavailable");
   });
 
   it("takes the model's word that weak-worded paper is something else, but not against a settlement heading", async () => {
@@ -1388,13 +1389,17 @@ describe("finance/portfolio — read the documents in afresh", () => {
       .returning({ id: financeDepotTransaction.id });
     const manualDoc = await insertDocument("Beispieltext");
     await db.insert(financeDepotTransactionDocument).values({ depot_transaction_id: manual!.id, document_id: manualDoc });
-    // A stored model answer and an ignore mark.
-    await db.insert(financeDocumentSettlementLlm).values({ document_id: settlement, values: { kind: "buy" } });
+    // A model answer of its own and an ignore mark.
+    await db
+      .insert(financeDocumentSettlementLlm)
+      .values({ document_id: settlement, values: { kind: "buy" } })
+      .onConflictDoUpdate({ target: financeDocumentSettlementLlm.document_id, set: { values: { kind: "buy" } } });
     const ignoredDoc = await insertDocument("Beispieltext");
     await ignoreSettlementDocument({ documentId: ignoredDoc });
 
     const r = await resetDocumentReadings({});
-    expect(r).toMatchObject({ removed: 2, unlinked: 1, answers_cleared: 1, rederived: 1 });
+    // The answers of both papers the model read: the settlement and the dividend.
+    expect(r).toMatchObject({ removed: 2, unlinked: 1, answers_cleared: 2, rederived: 1 });
 
     const rows = await depotRows(depot);
     expect(rows.map((x) => x.source).sort()).toEqual(["giro-derived", "manual"]);
@@ -1572,5 +1577,115 @@ describe("finance/portfolio — the reset derives the bookings again with today'
     const rows = await depotRows(depot);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "buy", source: "giro-derived", linked_transaction_id: bookingId });
+  });
+});
+
+describe("finance/depot-document-enrichment — a sale booked while the model was away", () => {
+  // Synthetic, laid out like a broker's sale: the price under its label, the
+  // Kurswert on the next line, and a number after "Stück" further up that
+  // is not the quantity — the rules alone take it for one.
+  const SALE = `Beispielbank AG
+Wertpapierverkauf
+Geschäftstag : 14.03.2026
+Alpha Industries AG ISIN ${ISIN_A}
+Mindeststückelung 1.800,00
+Nennwert Zum Kurs von
+St. 25 EUR 118,40
+Kurswert
+EUR 2.960,00
+Provision : EUR 6,40-
+Zu Ihren Gunsten nach Steuern EUR 2.953,60`;
+
+  const llmAnswer = {
+    is_settlement: true,
+    kind: "sell",
+    isin: ISIN_A,
+    wkn: null,
+    name: "Alpha Industries AG",
+    depot_number: null,
+    executed_at: "2026-03-14",
+    quantity: 25,
+    price: 118.4,
+    gross: 2960,
+    fees: 6.4,
+    tax: null,
+    net: 2953.6,
+    currency: "EUR",
+  };
+
+  it("books nothing while the model is away, and reads the paper again once it answers", async () => {
+    const { depot } = await setup();
+    vi.mocked(extractSettlementValues).mockRejectedValue(new LlmServiceUnavailableError("down"));
+    const docId = await insertDocument(SALE);
+
+    const first = await enrichDocument(docId);
+    expect(first.outcome).toBe("model_unavailable");
+    expect(await depotRows(depot)).toHaveLength(0);
+    // Still away: the retry stops at the first paper it cannot read.
+    expect((await retryPapersAwaitingModel()).waiting_for_model).toBe(1);
+    expect(await depotRows(depot)).toHaveLength(0);
+
+    vi.mocked(extractSettlementValues).mockResolvedValue(llmAnswer);
+    const retry = await retryPapersAwaitingModel();
+    expect(retry.created).toBe(1);
+    const [row] = await depotRows(depot);
+    expect(Number(row!.amount)).toBe(25);
+    expect(Number(row!.price)).toBe(118.4);
+    // Answered now: nothing left to retry.
+    expect((await retryPapersAwaitingModel()).documents_examined).toBe(0);
+  });
+
+  it("corrects a row booked from the rules alone, and joins the booking that quotes the settlement", async () => {
+    const { bc, giro, depot } = await setup();
+    const docId = await insertDocument(SALE);
+    // Booked before the model's absence stopped a read: the rules' quantity, no price.
+    const [old] = await db
+      .insert(financeDepotTransaction)
+      .values({
+        account_id: depot,
+        isin: ISIN_A,
+        name: "Alpha Industries AG",
+        kind: "sell",
+        executed_at: "2026-03-14",
+        amount: "1800",
+        fees: "6.40",
+        net_amount: "2953.60",
+        currency: "EUR",
+        source: "document",
+        dedupe_hash: `doc:${docId}`,
+      })
+      .returning({ id: financeDepotTransaction.id });
+    await db.insert(financeDepotTransactionDocument).values({ depot_transaction_id: old!.id, document_id: docId });
+
+    vi.mocked(extractSettlementValues).mockResolvedValue(llmAnswer);
+    const again = await enrichPendingDocuments([depot]);
+    expect(again.enriched).toBe(1);
+    let [row] = await depotRows(depot);
+    expect(Number(row!.amount)).toBe(25);
+    expect(Number(row!.price)).toBe(118.4);
+    expect(row!.gross_amount).toBe("2960.00");
+    expect(Number(row!.net_amount)).toBe(2953.6);
+
+    // Read in full now: the next run leaves it alone.
+    expect((await enrichPendingDocuments([depot])).documents_examined).toBe(0);
+
+    // The bank's booking names no kind, only the settlement's amounts.
+    const [booking] = await db
+      .insert(financeTransaction)
+      .values({
+        account_id: giro,
+        booking_date: "2026-03-13",
+        value_date: "2026-03-16",
+        amount: "2953.60",
+        currency_code: "EUR",
+        purpose: `ALPHA INDUSTRIES DL-,01 WPKNR: AAA111 ISIN: ${ISIN_A} Abr.Betrag Brutto 2.953,60 EUR Steuerabzug 0,00- EUR`,
+        dedupe_hash: `sale|${Math.random()}`,
+      })
+      .returning({ id: financeTransaction.id });
+    const stats = await deriveDepotTransactionsForBankcontact(bc);
+    expect(stats.merged).toBe(1);
+    const rows = await depotRows(depot);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.linked_transaction_id).toBe(booking!.id);
   });
 });
