@@ -15,8 +15,8 @@ describe('moduleEntryPath', () => {
   })
 
   it('restores the last route opened within the module', () => {
-    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'dokumente', '/dokumente/steuer')
-    expect(moduleEntryPath(dokumente)).toBe('/dokumente/steuer')
+    localStorage.setItem(MODULE_ROUTE_KEY_PREFIX + 'dokumente', '/dokumente/spaeter')
+    expect(moduleEntryPath(dokumente)).toBe('/dokumente/spaeter')
   })
 
   it('restores a deep detail route within the module', () => {
@@ -74,7 +74,6 @@ describe('moduleEntryPath', () => {
       'Arbeitskorb',
       'Später',
       'Sammelmappen',
-      'Steuer',
       'Einstellungen',
     ])
     expect(dokumente.menuItems.at(-1)?.children?.map((item) => item.label)).toEqual([

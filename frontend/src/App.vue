@@ -113,6 +113,7 @@ const subMenuItems = computed(() => {
         label: item.label,
         icon: item.icon,
         routeName: item.routeName,
+        settings: item.settings,
         children: children && children.length ? children : undefined,
         badge:
           item.routeName === 'finance-anomalies' && anomalyStore.count > 0
@@ -128,12 +129,11 @@ const subMenuItems = computed(() => {
 })
 
 // A module's settings group is lifted out of the submenu strip and rendered
-// as a gear among the meta icons in navbar-end. The documents module was the
-// first to have one; photos and finance now do too, so the rule is the same
-// everywhere: the first group in a module's menu becomes that module's gear.
-// The gear is always there: below the module's settings it carries the own
-// profile (see settingsMenuItems).
-const settingsGroup = computed(() => subMenuItems.value.find((item) => item.children))
+// as a gear among the meta icons in navbar-end. The group marked `settings`
+// becomes that module's gear; other groups (Finanzen › Steuer) stay in the
+// strip. The gear is always there: below the module's settings it carries
+// the own profile (see settingsMenuItems).
+const settingsGroup = computed(() => subMenuItems.value.find((item) => item.settings && item.children))
 const stripItems = computed(() =>
   settingsGroup.value
     ? subMenuItems.value.filter((item) => item !== settingsGroup.value)

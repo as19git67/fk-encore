@@ -8,11 +8,12 @@ export function isPathInsideModule(path: string | null | undefined, basePath: st
 /**
  * Pages that open objects of every module and expect the reader back: the
  * assistant's answers (a document, a booking, a photo out of a chat) and the
- * mixed Sammelmappen. Coming from one of them, "Zurück" is the history, not
+ * mixed Sammelmappen, and Finanzen › Steuer, which lists the documents of a
+ * tax year. Coming from one of them, "Zurück" is the history, not
  * the module's list — the reader was in the middle of a conversation, and
  * `PageLayout` puts them back on the row they opened.
  */
-const CROSS_MODULE_ORIGINS = ['/assistent', '/sammelmappen']
+const CROSS_MODULE_ORIGINS = ['/assistent', '/sammelmappen', '/finanzen/steuer']
 
 /** Whether the previous entry is one of the pages that open objects across modules. */
 export function isCrossModuleOrigin(path: string | null | undefined): boolean {

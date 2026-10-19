@@ -118,7 +118,7 @@ router.beforeEach((to) => {
   }
 
   // Check route-level permission
-  const requiredPermission = to.meta.permission as string | undefined
+  const requiredPermission = to.meta.permission as string | string[] | undefined
   if (requiredPermission && !auth.hasPermission(requiredPermission)) {
     return { name: 'profile' }
   }

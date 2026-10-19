@@ -118,8 +118,10 @@ export const useAuthStore = defineStore('auth', () => {
     realtimeBus.disconnect()
   }
 
-  function hasPermission(permission: string): boolean {
-    return user.value?.permissions?.includes(permission) ?? false
+  /** With a list, the user needs every permission in it. */
+  function hasPermission(permission: string | string[]): boolean {
+    const granted = user.value?.permissions ?? []
+    return (Array.isArray(permission) ? permission : [permission]).every((p) => granted.includes(p))
   }
 
   return { user, token, isAuthenticated, hasPermission, loadFromStorage, login, loginWithPasskey, register, logout }
