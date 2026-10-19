@@ -15,6 +15,7 @@ import { useListToolbar } from '../composables/useListToolbar'
 import type { FilterChip } from '../components/layout/listToolbar'
 import {
   backfillDocumentTax,
+  backfillTaxValues,
   listSubjectPersons,
   listTaxDocuments,
   listTaxYears,
@@ -77,6 +78,7 @@ const loading = ref(true)
 const error = ref('')
 const info = ref('')
 const backfilling = ref(false)
+const readingValues = ref(false)
 /** The Ausfüllhilfe dialog; it needs one year, so "Alle" cannot open it. */
 const worksheetOpen = ref(false)
 
@@ -240,6 +242,28 @@ async function onBackfill() {
   }
 }
 
+async function onBackfillValues() {
+  if (readingValues.value) return
+  readingValues.value = true
+  info.value = ''
+  error.value = ''
+  try {
+    const res = await backfillTaxValues(selectedYear.value ?? undefined)
+    const scope = selectedYear.value != null ? ` für ${selectedYear.value}` : ''
+    const rest = res.remaining > res.queued
+      ? ` ${res.remaining - res.queued} Beleg(e) ohne lesbare Belegart bleiben offen.`
+      : ''
+    info.value =
+      res.queued === 0
+        ? `Alle Belege${scope} sind bereits ausgelesen.${rest}`
+        : `${res.queued} Beleg(e)${scope} zum Auslesen der Werte eingereiht.${rest}`
+  } catch (err: any) {
+    error.value = err.message || 'Auslesen der Belegwerte fehlgeschlagen'
+  } finally {
+    readingValues.value = false
+  }
+}
+
 async function openDocument(sectionSlug: string, docId: number) {
   saveListAnchor(ANCHOR_KEY, { kind: taxAnchorKind(sectionSlug), id: docId })
   // Wait for any pending filter write so the back arrow's history entry
@@ -330,6 +354,17 @@ onMounted(async () => {
         :loading="backfilling"
         title="Bestehende Dokumente erneut vom Klassifier analysieren lassen, um fehlende Steuer-Daten zu ergänzen."
         @click="onBackfill"
+      />
+      <Button
+        v-if="auth.hasPermission('data.manage')"
+        icon="pi pi-calculator"
+        label="Belegwerte nachlesen"
+        text
+        :loading="readingValues"
+        :title="selectedYear === null
+          ? 'Beträge für die Ausfüllhilfe aus allen noch nicht ausgelesenen Belegen lesen'
+          : `Beträge für die Ausfüllhilfe aus den noch nicht ausgelesenen Belegen ${selectedYear} lesen`"
+        @click="onBackfillValues"
       />
     </template>
 
