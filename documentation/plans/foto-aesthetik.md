@@ -148,6 +148,54 @@ photos; a large library is done in a few nights, after that a night
 handles the day's imports in minutes. These numbers are estimates and
 go into this plan once measured.
 
+## Where the score is used
+
+The composite `photos.ai_quality_score` already drives more than the
+auto-pick, so a better aesthetic signal reaches these places on its own
+once the composite is recomputed:
+
+- the auto-pick for similar photos (`photo/group-auto-pick.ts`), which is
+  where the calibration happens;
+- the cover of an orientation variant group (`photo/orientation-variants.ts`)
+  and of a duplicate group (`photo/duplicate-candidates.ts`);
+- the year recaps (`photo/recaps.service.ts`): best photo of a day, "then
+  and now" pairs, the highlight order;
+- the photo stops on the trip map (`usePhotoStops.ts`, `TripMap.vue`),
+  which show the best-scored photo of a stop;
+- the gallery and album sort "Qualität" and the filter `qualityMin` /
+  `qualityMax` (`photo/photo.filters.ts`, `utils/photoFilter.ts`).
+
+Beyond that, with the aesthetic value available on its own:
+
+- **Sort and filter "Ästhetik"** next to "Qualität" in gallery, album and
+  the iOS app, so a sharp but dull frame and a slightly soft but beautiful
+  one can be told apart; the detail sidebar shows both values.
+- **Album cover suggestion**: the highest-scored photo of an album as the
+  default cover, and in the album editor a "best candidates" strip.
+- **Rule collections** (`collections/rules.ts`): a rule "aesthetics above
+  X" so "the best photos of this year" is a live collection that fills
+  itself and can be exported or shared.
+- **Shared albums and public links**: the order in which a shared album
+  or a public share link opens, best first, so a visitor sees the strong
+  frames before the 40 similar ones.
+- **Review queue and photo release** (`ReviewQueueView.vue`, the release
+  workflow in `documentation/plans/foto-freigabe.md`): pre-sort the queue
+  by the score so an approver sees the likely keepers first, and mark the
+  bottom of a burst as "probably reject".
+- **Assistant** (`assistant/tools/`): a tool `best_photos` (person, place,
+  time range, minimum score) so "zeig mir die schönsten Fotos vom
+  Urlaub" works and the result can land in a collection.
+- **Feed and widgets**: a "photo of the day" in the feed and the iOS
+  widget picks among the top-scored photos of the day's anniversary
+  instead of a random one.
+- **Import culling**: a bulk action "hide everything below X in this
+  burst" offered in the auto-pick review, never automatic.
+- **Critique in words** (stage 6): the explanation next to the score on
+  the photo page and in the auto-pick review.
+
+Each of these is its own small change after stage 3; none is a
+prerequisite for the nightly job.
+
 ## Stages
 
 1. **Scorer service** — `aesthetic-service/` with `POST /load`,

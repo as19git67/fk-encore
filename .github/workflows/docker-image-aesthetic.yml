@@ -1,0 +1,118 @@
+name: Docker Image CI - Aesthetic Service
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - '*'
+    paths:
+      - 'aesthetic-service/**'
+      - '.github/workflows/docker-image-aesthetic.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'aesthetic-service/**'
+      - '.github/workflows/docker-image-aesthetic.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/aesthetic
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install fastapi httpx pytest python-multipart Pillow
+        working-directory: aesthetic-service
+
+      - name: Run tests
+        run: pytest tests/ -v
+        working-directory: aesthetic-service
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
+            type=semver,pattern={{version}}
+
+      # Build the amd64 image once into the local daemon and prove it starts
+      # before anything is published. A broken image then never reaches the
+      # registry — which is exactly what happened when service_auth.py was
+      # missing from four of these Dockerfiles. The push step below rebuilds
+      # multi-arch and reuses this layer cache.
+      - name: Build for the smoke test (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./aesthetic-service
+          load: true
+          platforms: linux/amd64
+          tags: fk-smoke-test:local
+
+      - name: Smoke-test the built image
+        run: .github/scripts/smoke-test-image.sh fk-smoke-test:local
+
+      # amd64 only: the image is CUDA-based (see aesthetic-service/Dockerfile).
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./aesthetic-service
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # GitHub withholds repository secrets from workflow runs triggered by
+      # Dependabot (it treats them like fork PRs for secret access), so on
+      # a dependabot/* PR secrets.WATCHTOWER_URL_TEST resolves to an empty
+      # string and curl fails with "missing URL". Skip the deploy in that
+      # case; there is nothing meaningful to smoke-test on the test system
+      # for a dependency-bump-only PR anyway.
+      - name: Deploy to TrueNAS (test)
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        run: |
+          curl -f -X POST \
+            --retry 5 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            ${{ secrets.WATCHTOWER_URL_TEST }}/v1/update
+
+      - name: Deploy to TrueNAS (latest)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -f -X POST \
+            --retry 5 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            ${{ secrets.WATCHTOWER_URL_PROD }}/v1/update
