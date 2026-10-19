@@ -68,11 +68,18 @@ onMounted(load)
                 <span class="text-secondary inbox-email">{{ e.email }}</span>
               </td>
               <td>
-                <span v-if="e.default_group_name">{{ e.default_group_name }}</span>
+                <span v-if="e.default_group_stale" class="text-secondary">privat</span>
+                <span v-else-if="e.default_group_name">{{ e.default_group_name }}</span>
                 <span v-else class="text-secondary">privat</span>
               </td>
               <td class="inbox-flags">
                 <Tag v-if="e.is_fallback" value="Fallback" severity="info" />
+                <Tag
+                  v-if="e.default_group_stale"
+                  value="Kein Mitglied mehr"
+                  severity="warn"
+                  v-tooltip.bottom="`Standard-Gruppe ist ${e.default_group_name ?? 'eine gelöschte Gruppe'}, der Benutzer ist dort aber kein Mitglied mehr. Importe bleiben privat, bis er eine andere Gruppe wählt.`"
+                />
                 <Tag
                   v-if="e.shadowed"
                   value="Ordner vergeben"

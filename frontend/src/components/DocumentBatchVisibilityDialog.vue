@@ -5,8 +5,10 @@ import Button from 'primevue/button'
 import RadioButton from 'primevue/radiobutton'
 import Select from 'primevue/select'
 import Message from 'primevue/message'
+import { useConfirm } from 'primevue/useconfirm'
 import {
   batchUpdateDocumentVisibility,
+  getUploadDefaults,
   type DocumentSummary,
   type DocumentVisibility,
   type GroupSummary,
@@ -31,6 +33,8 @@ const groupId = ref<number | null>(null)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
+const confirm = useConfirm()
+
 const documentIds = computed(() => props.documents.map((d) => d.id))
 
 /** Common visibility across the selection, or null when mixed. */
@@ -52,24 +56,73 @@ const commonGroupId = computed<number | null>(() => {
     : null
 })
 
+/** Different visibilities, or documents from different groups. */
+const isMixed = computed(
+  () =>
+    commonVisibility.value === null ||
+    (commonVisibility.value === 'group' && commonGroupId.value === null),
+)
+
+/** Selected documents that sit in a group today. */
+const groupDocCount = computed(
+  () => props.documents.filter((d) => d.visibility === 'group').length,
+)
+
+/** "2 privat, 3 in Familie" for a mixed selection. */
+const mixedSummary = computed(() => {
+  const parts: string[] = []
+  const privateCount = props.documents.length - groupDocCount.value
+  if (privateCount > 0) parts.push(`${privateCount} privat`)
+  const perGroup = new Map<number | null, number>()
+  for (const d of props.documents) {
+    if (d.visibility !== 'group') continue
+    perGroup.set(d.group_id, (perGroup.get(d.group_id) ?? 0) + 1)
+  }
+  for (const [id, n] of perGroup) {
+    const name = props.groups.find((g) => g.id === id)?.name
+    parts.push(name ? `${n} in ${name}` : `${n} in einer anderen Gruppe`)
+  }
+  return parts.join(', ')
+})
+
+/** The caller's default group for new documents, if it still applies. */
+async function defaultGroupId(): Promise<number | null> {
+  try {
+    const cur = await getUploadDefaults()
+    if (cur.stale || cur.group_id == null) return null
+    return props.groups.some((g) => g.id === cur.group_id) ? cur.group_id : null
+  } catch {
+    return null
+  }
+}
+
 watch(
   () => props.visible,
-  (v) => {
+  async (v) => {
     if (!v) return
-    // Pre-fill with the common state if the selection is uniform; fall
-    // back to private + first-group otherwise so the user has a sane
-    // starting point either way.
+    error.value = null
+    // Pre-fill with the common state if the selection is uniform. A mixed
+    // selection starts on the caller's default group: "privat" here used
+    // to take documents out of their group on a plain "Anwenden".
     if (commonVisibility.value === 'group' && commonGroupId.value != null) {
       visibility.value = 'group'
       groupId.value = commonGroupId.value
     } else if (commonVisibility.value === 'private') {
       visibility.value = 'private'
       groupId.value = props.groups[0]?.id ?? null
+    } else if (props.groups.length > 0) {
+      visibility.value = 'group'
+      const first = props.groups[0]!.id
+      groupId.value = first
+      const preferred = await defaultGroupId()
+      // Only if the user has not touched the form in the meantime.
+      if (preferred != null && props.visible && visibility.value === 'group' && groupId.value === first) {
+        groupId.value = preferred
+      }
     } else {
       visibility.value = 'private'
-      groupId.value = props.groups[0]?.id ?? null
+      groupId.value = null
     }
-    error.value = null
   },
 )
 
@@ -77,11 +130,31 @@ const groupOptions = computed(() =>
   props.groups.map((g) => ({ label: g.name, value: g.id })),
 )
 
-async function apply() {
+function apply() {
   if (visibility.value === 'group' && groupId.value == null) {
     error.value = 'Bitte eine Gruppe auswählen.'
     return
   }
+  const leaving = groupDocCount.value
+  if (visibility.value === 'private' && leaving > 0) {
+    confirm.require({
+      header: 'Aus der Gruppe nehmen?',
+      message:
+        leaving === 1
+          ? '1 Dokument wird aus seiner Gruppe genommen und ist danach nur noch für dich sichtbar.'
+          : `${leaving} Dokumente werden aus ihrer Gruppe genommen und sind danach nur noch für dich sichtbar.`,
+      icon: 'pi pi-exclamation-triangle',
+      defaultFocus: 'reject',
+      rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+      acceptProps: { label: 'Privat machen', severity: 'danger' },
+      accept: () => void save(),
+    })
+    return
+  }
+  void save()
+}
+
+async function save() {
   saving.value = true
   error.value = null
   try {
@@ -118,12 +191,13 @@ async function apply() {
     </p>
 
     <Message
-      v-if="documents.length > 1 && commonVisibility === null"
+      v-if="documents.length > 1 && isMixed"
       severity="info"
       :closable="false"
       class="mixed-msg"
     >
-      Die ausgewählten Dokumente haben unterschiedliche Sichtbarkeiten.
+      Die ausgewählten Dokumente haben unterschiedliche Sichtbarkeiten:
+      {{ mixedSummary }}.
     </Message>
 
     <div class="option">

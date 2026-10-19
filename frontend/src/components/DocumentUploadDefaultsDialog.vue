@@ -26,6 +26,8 @@ const groupId = ref<number | null>(null)
 const loading = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
+/** The saved group no longer applies (no longer a member). */
+const stale = ref(false)
 
 const groupOptions = computed(() =>
   props.groups.map((g) => ({ label: g.name, value: g.id })),
@@ -36,10 +38,12 @@ watch(
   async (v) => {
     if (!v) return
     error.value = null
+    stale.value = false
     loading.value = true
     try {
       const cur = await getUploadDefaults()
-      if (cur.group_id != null && props.groups.some((g) => g.id === cur.group_id)) {
+      stale.value = cur.stale
+      if (!cur.stale && cur.group_id != null && props.groups.some((g) => g.id === cur.group_id)) {
         mode.value = 'group'
         groupId.value = cur.group_id
       } else {
@@ -93,6 +97,11 @@ async function save() {
     </div>
 
     <template v-else>
+      <Message v-if="stale" severity="warn" :closable="false" class="stale-msg">
+        Die gespeicherte Standard-Gruppe gilt nicht mehr, weil du dort kein
+        Mitglied mehr bist. Neue Dokumente bleiben privat, bis du eine Gruppe
+        wählst und speicherst.
+      </Message>
       <div class="option">
         <RadioButton v-model="mode" inputId="def-private" value="private" />
         <label for="def-private">Privat (Standard)</label>
@@ -171,5 +180,8 @@ async function save() {
 }
 .error-msg {
   margin-top: 0.75rem;
+}
+.stale-msg {
+  margin-bottom: 0.75rem;
 }
 </style>

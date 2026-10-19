@@ -16,7 +16,7 @@ import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { groups, users } from "../db/schema";
 import { DOCUMENTS_INBOX_DIR, slugifyUserLogin } from "./documents.service";
-import { loadDefaultGroupForUser } from "./import";
+import { readUploadDefaults } from "./upload-defaults";
 import { resolveInboxOwnerId } from "./inbox-watcher";
 
 export interface InboxFolderEntry {
@@ -25,9 +25,17 @@ export interface InboxFolderEntry {
   email: string;
   /** First folder below the inbox root that routes files to this user. */
   folder: string;
-  /** Group new imports for this user join, or null when they stay private. */
+  /**
+   * Group the user saved for new documents, or null when none is set.
+   * Imports join it unless `default_group_stale`.
+   */
   default_group_id: number | null;
   default_group_name: string | null;
+  /**
+   * The user saved a default group but is no longer a member, so imports
+   * land private. `default_group_name` then names that saved group.
+   */
+  default_group_stale: boolean;
   /** Files outside any user folder go to this user. */
   is_fallback: boolean;
   /**
@@ -68,7 +76,8 @@ export const listInboxFolders = api(
     const entries: InboxFolderEntry[] = [];
     for (const u of userRows) {
       const folder = slugifyUserLogin(u.email, u.id);
-      const defaultGroupId = await loadDefaultGroupForUser(u.id);
+      const defaults = await readUploadDefaults(u.id);
+      const defaultGroupId = defaults.saved_group_id;
       entries.push({
         user_id: u.id,
         name: u.name,
@@ -77,6 +86,7 @@ export const listInboxFolders = api(
         default_group_id: defaultGroupId,
         default_group_name:
           defaultGroupId == null ? null : (groupNames.get(defaultGroupId) ?? null),
+        default_group_stale: defaults.stale,
         is_fallback: u.id === fallbackId,
         shadowed: seen.has(folder),
       });

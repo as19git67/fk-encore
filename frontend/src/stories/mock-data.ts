@@ -910,15 +910,18 @@ export const MOCK_INBOX_FOLDERS: InboxFoldersResponse = {
   entries: [
     {
       user_id: 1, name: 'Admin', email: 'admin@beispiel.test', folder: 'admin',
-      default_group_id: 1, default_group_name: 'Familie', is_fallback: true, shadowed: false,
+      default_group_id: 1, default_group_name: 'Familie', default_group_stale: false,
+      is_fallback: true, shadowed: false,
     },
     {
       user_id: 2, name: 'Erika Muster', email: 'erika@beispiel.test', folder: 'erika',
-      default_group_id: null, default_group_name: null, is_fallback: false, shadowed: false,
+      default_group_id: 1, default_group_name: 'Familie', default_group_stale: true,
+      is_fallback: false, shadowed: false,
     },
     {
       user_id: 3, name: 'Erika Zweit', email: 'erika@anders.test', folder: 'erika',
-      default_group_id: 1, default_group_name: 'Familie', is_fallback: false, shadowed: true,
+      default_group_id: null, default_group_name: null, default_group_stale: false,
+      is_fallback: false, shadowed: true,
     },
   ],
 }
