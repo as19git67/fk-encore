@@ -667,6 +667,26 @@ Zu Ihren Lasten nach Steuern: EUR 2,21`;
     expect(s.executedAt).toBe("2026-01-02");
   });
 
+  it("reads a Vorabpauschale headed as a Wertpapierabrechnung, whose small print mentions a sale, as the tax charged", () => {
+    const s = inspectSettlement(`Beispielbank AG
+Wertpapierabrechnung Vorabpauschale Investmentfonds
+Nominale Wertpapierbezeichnung ISIN (WKN)
+Stück 50 BEISPIEL WELT FONDS DE000000AAA1 (AAA111)
+Zahltag 02.01.2026
+Vorabpauschale pro Stück 0,24 EUR
+Vorabpauschale 12,00 EUR
+Kapitalertragsteuer 2,10- EUR
+Solidaritätszuschlag 0,11- EUR
+Ausmachender Betrag 2,21- EUR
+Die Vorabpauschale ist der Basisertrag abzüglich der Ausschüttungen des Jahres.
+Bei einem späteren Verkauf mindert sie den steuerpflichtigen Veräußerungsgewinn.`)!;
+    expect(s.accumulation).toBe(true);
+    expect(s.kind).toBe("tax");
+    expect(s.price).toBeNull();
+    expect(s.gross).toBeNull();
+    expect(s.net).toBe(-2.21);
+  });
+
   it("is a candidate for reading in at all", () => {
     const re = new RegExp(SETTLEMENT_CANDIDATE_PATTERN, "i");
     expect(re.test(ACCUMULATION)).toBe(true);

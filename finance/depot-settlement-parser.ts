@@ -63,15 +63,30 @@ const NO_TAX_RE = /kein(?:en)?\s+steuerabzug|keine\s+steuern?\s+(?:einbehalten|a
 const ACCUMULATION_RE = /thesaurierung|thesaurierte\s+erträge|vorabpauschale|ausschüttungsgleiche\s+erträge/i;
 const TRADE_RE = /wertpapier[\s-]*abrechnung|abrechnung\s+(?:kauf|verkauf)\b|wertpapierkauf|wertpapierverkauf|kaufabrechnung|verkaufsabrechnung|orderabrechnung|fondsabrechnung|ausführungsanzeige/i;
 const PAYOUT_RE = /dividendengutschrift|ertragsgutschrift|erträgnisgutschrift|ausschüttung(?!sgleich)/i;
+/** A heading that names the direction of a trade. */
+const TRADE_DIRECTION_RE =
+  /abrechnung\s+(?:kauf|verkauf)\b|wertpapier(?:ver)?kauf|(?:ver)?kaufsabrechnung|kaufabrechnung|ausführungsanzeige/i;
+/** What only a trade prints: the price of the shares it moved. */
+const TRADE_PRICE_RE = /kurswert|ausf(?:ü|ue)hrungskurs/i;
 
 /**
  * A notice of income a fund kept (Thesaurierung, ausschüttungsgleiche
  * Erträge) or of the Vorabpauschale: no payout, at most a tax charge. Not
  * when the text is a trade's settlement or a payout's credit note that
- * merely mentions the word.
+ * merely mentions the word: whichever wording comes first decides, and a
+ * trade also gives itself away by the price it prints. A notice headed
+ * "Wertpapierabrechnung Vorabpauschale" whose small print explains the
+ * Vorabpauschale with "Ausschüttungen" and a later "Verkauf" stays a notice.
  */
 export function looksLikeAccumulation(text: string): boolean {
-  return ACCUMULATION_RE.test(text) && !TRADE_RE.test(text) && !PAYOUT_RE.test(text);
+  const at = text.search(ACCUMULATION_RE);
+  if (at < 0) return false;
+  const before = (re: RegExp) => {
+    const i = text.search(re);
+    return i >= 0 && i < at;
+  };
+  if (before(PAYOUT_RE) || before(TRADE_DIRECTION_RE)) return false;
+  return !(TRADE_RE.test(text) && TRADE_PRICE_RE.test(text));
 }
 
 /** The fields the parser looks for, in the order a statement is usually read. */

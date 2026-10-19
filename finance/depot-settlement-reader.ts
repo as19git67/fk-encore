@@ -303,7 +303,8 @@ export async function readSettlement(
   if (llm && (rules?.taxStatement || rules?.accumulation)) llm = { ...llm, gross: rules.gross, price: null, fees: null };
   // On a notice of accumulated income the only money that moves is the tax;
   // the amount the model reads there is the income kept, never a net.
-  if (llm && rules?.accumulation) llm = { ...llm, net: llm.tax === null ? null : -Math.abs(llm.tax) };
+  // Nor is it a trade or a payout, whatever kind the model reads.
+  if (llm && rules?.accumulation) llm = { ...llm, kind: "tax", net: llm.tax === null ? null : -Math.abs(llm.tax) };
   const nameFrom = nameNearerIdentifier(text, rules?.isin ?? rules?.wkn ?? null, rules?.name ?? null, llm?.name ?? null);
   const grounding = groundingOf(text, llm);
   const known = await knownSecurities();

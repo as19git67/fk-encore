@@ -107,7 +107,7 @@ const sort = useSort({
     { value: 'net_amount', label: 'Betrag' },
     { value: 'name', label: 'Wertpapier' },
   ],
-  defaultState: { field: 'account', direction: 'asc' },
+  defaultState: { field: 'executed_at', direction: 'desc' },
 })
 
 // ── Portfolio (summary, positions, years) ────────────────────────────
