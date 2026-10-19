@@ -86,7 +86,10 @@ import { rankReadings, type Reading } from "./letterhead";
 import {
   applyAgricultureFiscalYearTaxRule,
   applyKirchensteuerBescheidYearTaxRule,
+  applyIncomeTaxReturnTaxRule,
   applyInsuranceAdminTaxRule,
+  incomeTaxReturnYear,
+  isIncomeTaxReturn,
   applyKindergeldTaxRule,
   applySecuritiesSettlementTaxRule,
 } from "./tax-rules";
@@ -823,6 +826,36 @@ export async function runClassify(documentId: number): Promise<{ classification:
     classification.tax_sections = adjusted.taxSections;
     classification.tax_role = adjusted.taxRole;
   }
+  // 7b-3. The user's own Einkommensteuererklärung is what was filed, not a
+  //       Bescheid and not evidence for any Anlage it fills (tax-rules.ts).
+  //       Category and title follow further down.
+  const incomeTaxReturn = isIncomeTaxReturn(clipped);
+  {
+    const adjusted = applyIncomeTaxReturnTaxRule({
+      text: clipped,
+      taxSections: classification.tax_sections,
+      taxRole: classification.tax_role,
+    });
+    if (adjusted.matched) {
+      console.log(
+        `[documents] income tax return rule(${documentId}): ` +
+          `${classification.tax_role} ${classification.tax_sections.map((s) => s.slug).join(",") || "-"} ` +
+          `${classification.document_type ?? "-"} → bezug mantelbogen erklaerung`,
+      );
+      classification.document_type = "erklaerung";
+      classification.document_type_confidence = Math.max(classification.document_type_confidence, 0.95);
+      const year = incomeTaxReturnYear(clipped);
+      if (year) {
+        classification.tax_year = year;
+        classification.tax_year_confidence = Math.max(classification.tax_year_confidence, 0.95);
+      }
+      if (/bescheid/i.test(classification.title ?? "")) {
+        classification.title = year ? `Einkommensteuererklärung ${year}` : "Einkommensteuererklärung";
+      }
+    }
+    classification.tax_sections = adjusted.taxSections;
+    classification.tax_role = adjusted.taxRole;
+  }
   // 7d. The user's own decision, last: the role they pinned on reviewed
   //     documents of the same sender AND document type (learned-rules.ts).
   //     Runs after the matrix and the text rules so a repeated manual
@@ -934,10 +967,14 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // it resolves same-sender ambiguity — e.g. Heidelberger issues both a
   // Kapital-Lebensversicherung AND a Riester Rentenversicherung, and the sender
   // rule would force the former.
-  const contentSlug = matchContentRule({
-    title: classification.title,
-    text: clipped,
-  });
+  // The own Einkommensteuererklärung names Riester and Basisrente in its
+  // Anlagen; the content rule would file it as a pension contract.
+  const contentSlug = incomeTaxReturn
+    ? "finanzen-steuern"
+    : matchContentRule({
+        title: classification.title,
+        text: clipped,
+      });
   const senderRuleOverrides = await loadSenderRuleOverrides();
   const ruleSlug = matchSenderRule(
     {

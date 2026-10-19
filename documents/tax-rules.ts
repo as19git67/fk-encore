@@ -508,3 +508,68 @@ export const SECURITIES_SETTLEMENT_TAX_RULE_INTERNALS = {
   NO_CERTIFICATE_NOTICE,
   KAP_TAX_SLUGS,
 };
+
+/**
+ * The user's own Einkommensteuererklärung (the ELSTER printout, the
+ * Übertragungsprotokoll, a tax program's copy) is no Bescheid and no
+ * evidence: it is what was filed. The model takes it for a Bescheid — the
+ * text speaks of Festsetzung and Finanzamt — and marks every Anlage it
+ * fills as a section with `beleg`, and the Riester and Basisrente lines of
+ * Anlage AV and Vorsorgeaufwand send the content rule to the private
+ * pension category.
+ *
+ * Recognised by its own words: "Einkommensteuererklärung" together with a
+ * marker only a filed return carries (Hauptvordruck "ESt 1 A", ELSTER
+ * Transferticket or Übertragungsprotokoll) or with at least two Anlagen
+ * named by their form titles. A Bescheid quotes "Ihre Einkommensteuer-
+ * erklärung" but carries its own heading and a Rechtsbehelfsbelehrung,
+ * so those words rule it out.
+ */
+const INCOME_TAX_RETURN_MARKERS: readonly string[] = [
+  "est1a",
+  "transferticket",
+  "übertragungsprotokoll",
+];
+
+const INCOME_TAX_RETURN_ANLAGEN: readonly string[] = [
+  "anlagevorsorgeaufwand",
+  "anlagesonderausgaben",
+  "anlagekap",
+  "anlagekind",
+  "anlageav",
+  "anlageaußergewöhnlichebelastungen",
+  "anlagehaushaltsnaheaufwendungen",
+  "anlageunterhalt",
+  "anlageeür",
+  "anlagerente",
+];
+
+const INCOME_TAX_ASSESSMENT_MARKERS: readonly string[] = [
+  "bescheidfür",
+  "rechtsbehelfsbelehrung",
+];
+
+export function isIncomeTaxReturn(text: string): boolean {
+  const ctx = normalizeForMatch(text);
+  if (!ctx.includes("einkommensteuererklärung")) return false;
+  if (INCOME_TAX_ASSESSMENT_MARKERS.some((m) => ctx.includes(m))) return false;
+  if (INCOME_TAX_RETURN_MARKERS.some((m) => ctx.includes(m))) return true;
+  return INCOME_TAX_RETURN_ANLAGEN.filter((m) => ctx.includes(m)).length >= 2;
+}
+
+/** The year the return is for, from its heading ("Einkommensteuererklärung 2025", "… für 2025"). */
+export function incomeTaxReturnYear(text: string): number | null {
+  const m = /einkommensteuererklärung\s*(?:für\s*(?:das\s*(?:jahr|kalenderjahr)\s*)?)?(20\d{2})/i.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
+export function applyIncomeTaxReturnTaxRule(input: {
+  text: string;
+  taxSections: readonly TaxAssignment[];
+  taxRole: TaxRole;
+}): TaxRuleResult {
+  if (!isIncomeTaxReturn(input.text)) {
+    return { taxSections: [...input.taxSections], taxRole: input.taxRole, matched: false };
+  }
+  return { taxSections: [{ slug: "mantelbogen", confidence: 0.95 }], taxRole: "bezug", matched: true };
+}
