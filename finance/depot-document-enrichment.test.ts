@@ -34,7 +34,7 @@ import {
   financeTransactionDocument,
   users,
 } from "../db/schema";
-import { enrichDocument, enrichPendingDocuments } from "./depot-document-enrichment";
+import { enrichDocument, enrichPendingDocuments, retryPapersAwaitingModel } from "./depot-document-enrichment";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 import {
   applySettlementDocument,
@@ -110,9 +110,8 @@ beforeEach(async () => {
   await db.delete(users);
   await ensureUser(1);
   vi.mocked(extractSettlementValues).mockReset();
-  vi.mocked(extractSettlementValues).mockImplementation(async () => {
-    throw new LlmServiceUnavailableError("not in tests");
-  });
+  // The model answers, but reads nothing of its own: the rules decide.
+  vi.mocked(extractSettlementValues).mockResolvedValue({});
   setAuth("1", ["finance.view", "finance.admin"]);
 });
 
@@ -687,6 +686,7 @@ describe("finance/portfolio — depots without any data", () => {
 
 describe("finance/portfolio — document inspection", () => {
   it("reports every field, the labels read, the depot a dry run picks and how", async () => {
+    vi.mocked(extractSettlementValues).mockRejectedValue(new LlmServiceUnavailableError("not in this test"));
     const { depot } = await setup();
     const docId = await insertDocument(BUY_TEXT);
 
@@ -719,6 +719,7 @@ describe("finance/portfolio — document inspection", () => {
     });
     expect(before.links).toEqual([]);
 
+    vi.mocked(extractSettlementValues).mockResolvedValue({});
     await enrichDocument(docId);
     const after = await inspectSettlementDocument({ documentId: docId });
     expect(after.depot!.outcome).toBe("already_linked");
@@ -803,7 +804,7 @@ Belastung gesamt 2.966,40 EUR`;
     const other = await insertDocument(BUY_TEXT.replace("2.966,40", "2.966,40 "));
     const r = await enrichDocument(other);
     expect(r.llm_status).toBe("unavailable");
-    expect(r.outcome).toBe("created");
+    expect(r.outcome).toBe("model_unavailable");
   });
 
   it("takes the model's word that weak-worded paper is something else, but not against a settlement heading", async () => {
@@ -1388,13 +1389,17 @@ describe("finance/portfolio — read the documents in afresh", () => {
       .returning({ id: financeDepotTransaction.id });
     const manualDoc = await insertDocument("Beispieltext");
     await db.insert(financeDepotTransactionDocument).values({ depot_transaction_id: manual!.id, document_id: manualDoc });
-    // A stored model answer and an ignore mark.
-    await db.insert(financeDocumentSettlementLlm).values({ document_id: settlement, values: { kind: "buy" } });
+    // A model answer of its own and an ignore mark.
+    await db
+      .insert(financeDocumentSettlementLlm)
+      .values({ document_id: settlement, values: { kind: "buy" } })
+      .onConflictDoUpdate({ target: financeDocumentSettlementLlm.document_id, set: { values: { kind: "buy" } } });
     const ignoredDoc = await insertDocument("Beispieltext");
     await ignoreSettlementDocument({ documentId: ignoredDoc });
 
     const r = await resetDocumentReadings({});
-    expect(r).toMatchObject({ removed: 2, unlinked: 1, answers_cleared: 1, rederived: 1 });
+    // The answers of both papers the model read: the settlement and the dividend.
+    expect(r).toMatchObject({ removed: 2, unlinked: 1, answers_cleared: 2, rederived: 1 });
 
     const rows = await depotRows(depot);
     expect(rows.map((x) => x.source).sort()).toEqual(["giro-derived", "manual"]);
@@ -1608,21 +1613,54 @@ Zu Ihren Gunsten nach Steuern EUR 2.953,60`;
     currency: "EUR",
   };
 
-  it("corrects the row once the model reads the paper, and joins the booking that quotes the settlement", async () => {
-    const { bc, giro, depot } = await setup();
+  it("books nothing while the model is away, and reads the paper again once it answers", async () => {
+    const { depot } = await setup();
+    vi.mocked(extractSettlementValues).mockRejectedValue(new LlmServiceUnavailableError("down"));
     const docId = await insertDocument(SALE);
 
     const first = await enrichDocument(docId);
-    expect(first.outcome).toBe("created");
-    expect(first.llm_status).toBe("unavailable");
-    let [row] = await depotRows(depot);
-    expect(Number(row!.amount)).toBe(1800);
-    expect(row!.price).toBeNull();
+    expect(first.outcome).toBe("model_unavailable");
+    expect(await depotRows(depot)).toHaveLength(0);
+    // Still away: the retry stops at the first paper it cannot read.
+    expect((await retryPapersAwaitingModel()).waiting_for_model).toBe(1);
+    expect(await depotRows(depot)).toHaveLength(0);
+
+    vi.mocked(extractSettlementValues).mockResolvedValue(llmAnswer);
+    const retry = await retryPapersAwaitingModel();
+    expect(retry.created).toBe(1);
+    const [row] = await depotRows(depot);
+    expect(Number(row!.amount)).toBe(25);
+    expect(Number(row!.price)).toBe(118.4);
+    // Answered now: nothing left to retry.
+    expect((await retryPapersAwaitingModel()).documents_examined).toBe(0);
+  });
+
+  it("corrects a row booked from the rules alone, and joins the booking that quotes the settlement", async () => {
+    const { bc, giro, depot } = await setup();
+    const docId = await insertDocument(SALE);
+    // Booked before the model's absence stopped a read: the rules' quantity, no price.
+    const [old] = await db
+      .insert(financeDepotTransaction)
+      .values({
+        account_id: depot,
+        isin: ISIN_A,
+        name: "Alpha Industries AG",
+        kind: "sell",
+        executed_at: "2026-03-14",
+        amount: "1800",
+        fees: "6.40",
+        net_amount: "2953.60",
+        currency: "EUR",
+        source: "document",
+        dedupe_hash: `doc:${docId}`,
+      })
+      .returning({ id: financeDepotTransaction.id });
+    await db.insert(financeDepotTransactionDocument).values({ depot_transaction_id: old!.id, document_id: docId });
 
     vi.mocked(extractSettlementValues).mockResolvedValue(llmAnswer);
     const again = await enrichPendingDocuments([depot]);
     expect(again.enriched).toBe(1);
-    [row] = await depotRows(depot);
+    let [row] = await depotRows(depot);
     expect(Number(row!.amount)).toBe(25);
     expect(Number(row!.price)).toBe(118.4);
     expect(row!.gross_amount).toBe("2960.00");

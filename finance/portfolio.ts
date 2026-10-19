@@ -1860,6 +1860,8 @@ export interface EnrichRunTotals {
   skipped_no_holding: number;
   skipped_no_transaction: number;
   skipped_unknown_security: number;
+  /** Papers the model could not read yet: nothing booked, read again later. */
+  waiting_for_model: number;
   /** Depot statements and reportings read into holdings snapshots (stage 2). */
   statements_stored: number;
   /** Statements no depot could be found for — listed on the review page. */
@@ -1897,6 +1899,7 @@ function emptyTotals(): EnrichRunTotals {
     skipped_no_holding: 0,
     skipped_no_transaction: 0,
     skipped_unknown_security: 0,
+    waiting_for_model: 0,
     statements_stored: 0,
     statements_unplaced: 0,
     statement_positions_proposed: 0,
@@ -1914,6 +1917,7 @@ const SETTLEMENT_TOTAL_KEYS = [
   "skipped_no_holding",
   "skipped_no_transaction",
   "skipped_unknown_security",
+  "waiting_for_model",
 ] as const satisfies readonly (keyof EnrichRunTotals & keyof EnrichStats)[];
 
 function addStatementPage(totals: EnrichRunTotals, page: StatementStats): void {

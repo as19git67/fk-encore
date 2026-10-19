@@ -29,6 +29,7 @@ import {
   documents,
   financeAccount,
   financeDepotDocumentIgnore,
+  financeDocumentSettlementLlm,
   financeAccountAccess,
   financeAccountHolding,
   financeAccountType,
@@ -51,6 +52,7 @@ import { admitSecurity } from "./depot-securities";
 import { isinChecksumValid } from "./isin";
 import { documentsOfPaperType, SETTLEMENT_PAPER_TYPES } from "./depot-paper-type";
 import {
+  asksModel,
   readSettlement,
   rereadAgainstBooking,
   rejectedAsOtherPaper,
@@ -79,7 +81,9 @@ export type EnrichOutcome =
   /** A tax statement with no transaction of the same security, kind and quantity to add its tax to. */
   | "no_transaction"
   /** The security is only proposed (or ignored) in the depot's master: nothing booked until the user decides. */
-  | "unknown_security";
+  | "unknown_security"
+  /** The model could not be reached: nothing is booked on the rules alone, the paper is read again later. */
+  | "model_unavailable";
 
 export interface EnrichResult {
   document_id: number;
@@ -148,6 +152,8 @@ export interface EnrichStats {
   skipped_no_transaction: number;
   /** Papers about a security the depot's master has not confirmed. */
   skipped_unknown_security: number;
+  /** Papers the model could not read yet: read again by the next run. */
+  waiting_for_model: number;
   errors: string[];
   results: EnrichResult[];
   /** Where the next page starts (`before` of the next call); null when this was the last. */
@@ -168,6 +174,7 @@ function emptyStats(): EnrichStats {
     unverified: 0,
     skipped_no_transaction: 0,
     skipped_unknown_security: 0,
+    waiting_for_model: 0,
     errors: [],
     results: [],
   };
@@ -756,6 +763,14 @@ export async function enrichDocument(
     result.detail = otherPaper;
     return result;
   }
+  // The model was asked and could not answer: nothing is booked on the
+  // rules alone — a quantity no price confirms would stand unchecked. The
+  // paper stays as it is; the hourly retry or the user's next run reads it
+  // again. Applied by the user after looking at it, it is theirs to decide.
+  if (reading.llmStatus === "unavailable" && !options.overwrite) {
+    result.outcome = "model_unavailable";
+    return result;
+  }
   const toParsed = (rd: SettlementReading): SettlementExtraction | null => {
     // An ISIN whose check digit fails even after repair is no identifier:
     // booked under it, the position would split from the bank's.
@@ -1185,9 +1200,59 @@ export async function enrichPendingDocuments(
         case "unknown_security": stats.skipped_unknown_security++; break;
         case "conflict": stats.conflicts++; break;
         case "unverified": stats.unverified++; break;
+        case "model_unavailable": stats.waiting_for_model++; break;
       }
     } catch (err) {
       stats.errors.push(`document ${c.id}: ${(err as Error).message ?? String(err)}`);
+    }
+  }
+  return stats;
+}
+
+/**
+ * Papers a read could not finish because the model was away: settlement
+ * candidates, not linked, not ignored, with no answer of the model stored
+ * although it is asked about them. Read again, newest first, at most
+ * `limit`; the first one the model still cannot read ends the run.
+ */
+export async function retryPapersAwaitingModel(limit = 20): Promise<EnrichStats> {
+  const stats = emptyStats();
+  const answered = db.select({ id: financeDocumentSettlementLlm.document_id }).from(financeDocumentSettlementLlm);
+  const linked = db.select({ id: financeDepotTransactionDocument.document_id }).from(financeDepotTransactionDocument);
+  const ignored = db.select({ id: financeDepotDocumentIgnore.document_id }).from(financeDepotDocumentIgnore);
+  const rows = await db
+    .select({ id: documents.id, text: documents.extracted_text })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.status, "ready"),
+        isNotNull(documents.extracted_text),
+        sql`${documents.extracted_text} ~* ${CANDIDATE_PATTERN}`,
+        notInArray(documents.id, answered),
+        notInArray(documents.id, linked),
+        notInArray(documents.id, ignored),
+      ),
+    )
+    .orderBy(desc(documents.id))
+    .limit(limit * 10);
+  for (const r of rows) {
+    if (stats.documents_examined >= limit) break;
+    if (!asksModel(r.text)) continue;
+    stats.documents_examined++;
+    try {
+      const res = await enrichDocument(r.id);
+      stats.results.push(res);
+      switch (res.outcome) {
+        case "created": stats.created++; break;
+        case "enriched": stats.enriched++; break;
+        case "linked": stats.linked++; break;
+        case "conflict": stats.conflicts++; break;
+        case "unverified": stats.unverified++; break;
+        case "model_unavailable": stats.waiting_for_model++; break;
+      }
+      if (res.outcome === "model_unavailable") break;
+    } catch (err) {
+      stats.errors.push(`document ${r.id}: ${(err as Error).message ?? String(err)}`);
     }
   }
   return stats;

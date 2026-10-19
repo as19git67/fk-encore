@@ -229,6 +229,20 @@ export function rulesValues(r: SettlementInspection | null): SettlementValues | 
   };
 }
 
+/** Paper the rules settle on their own: the model is never asked about it. */
+function rulesAlone(rules: SettlementInspection | null): boolean {
+  return Boolean(rules?.insurance || rules?.costInfo || rules?.accountStatement);
+}
+
+/**
+ * Whether the model is asked about this text when it has no answer stored
+ * yet — the papers a read with the model away has to come back to.
+ */
+export function asksModel(text: string | null): boolean {
+  if (!text || text.trim().length === 0 || !looksLikeSecuritiesPaper(text)) return false;
+  return !rulesAlone(inspectSettlement(text));
+}
+
 async function storedAnswer(documentId: number): Promise<Record<string, unknown> | null> {
   const [row] = await db
     .select({ values: financeDocumentSettlementLlm.values })
@@ -251,7 +265,7 @@ export async function readSettlement(
   let llmStatus: LlmStatus = mode === "off" ? "off" : "skipped";
 
   // Insurance paperwork and cost disclosures are settled by the rules alone: no LLM call for them.
-  if (mode !== "off" && text && text.trim().length > 0 && !rules?.insurance && !rules?.costInfo && !rules?.accountStatement) {
+  if (mode !== "off" && text && text.trim().length > 0 && !rulesAlone(rules)) {
     const stored = await storedAnswer(documentId);
     if (stored) {
       llm = parseLlmSettlement(stored);

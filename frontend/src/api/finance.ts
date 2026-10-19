@@ -1046,6 +1046,8 @@ export interface EnrichRunTotals {
   skipped_no_transaction: number
   /** Papers about a security the depot's master has not confirmed. */
   skipped_unknown_security?: number
+  /** Papers the model could not read yet: nothing booked, read again later. */
+  waiting_for_model?: number
   /** Depot statements and reportings read into holdings snapshots. */
   statements_stored?: number
   /** Statements no depot could be found for — listed on the review page. */
