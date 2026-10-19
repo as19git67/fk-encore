@@ -296,8 +296,81 @@ export interface TaxWorksheetDepot {
   taxes: string
 }
 
+export type TaxValueStatus = 'read' | 'rejected' | 'confirmed' | 'corrected'
+
+/** One document's part of a form value (amounts in cents). */
+export interface TaxFormContribution {
+  value_id: number
+  document_id: number
+  document_title: string
+  evidence_kind: string
+  evidence_kind_name: string
+  field_label: string
+  /** What the document adds to the form value (half of a shared value). */
+  cents: number
+  /** The value as stored on the evidence. */
+  value_cents: number
+  printed: string | null
+  quote: string | null
+  page: number | null
+  status: TaxValueStatus
+  note: string | null
+}
+
+/** One field of the form for one owner (amounts in cents). */
+export interface TaxFormValue {
+  key: string
+  anlage: string
+  anlage_name: string
+  label: string
+  owner: string
+  owner_label: string
+  line: number | null
+  kennzahl: string | null
+  /** "Zeile 5 · Kz 110", "Zeile 13 (ohne Kennzahl)", "Kennzahl prüfen". */
+  place: string
+  checked: boolean
+  source: string | null
+  form_note: string | null
+  prefilled: boolean
+  cents: number
+  contributions: TaxFormContribution[]
+  notes: string[]
+  /** Contributions not confirmed or corrected yet. */
+  open: number
+}
+
+export interface TaxFormSkipped {
+  value_id: number
+  document_id: number
+  document_title: string
+  evidence_kind_name: string
+  field_label: string
+  form_label: string | null
+  value_cents: number
+  printed: string | null
+  quote: string | null
+  status: TaxValueStatus
+  reason: string
+  note: string | null
+}
+
+/** The documents' values by Anlage, line and Kennzahl. */
+export interface TaxWorksheetForm {
+  year: number
+  catalogue_year: number
+  exact: boolean
+  joint: boolean
+  values: TaxFormValue[]
+  skipped: TaxFormSkipped[]
+  documents_read: number
+  documents_unread: number
+}
+
 export interface TaxWorksheet {
   year: number
+  /** Null when the values could not be loaded. */
+  form: TaxWorksheetForm | null
   businesses: TaxWorksheetBusiness[]
   sections: TaxWorksheetSection[]
   documentCount: number

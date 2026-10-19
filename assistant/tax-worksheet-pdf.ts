@@ -43,7 +43,10 @@ export function renderTaxWorksheetPdf(w: TaxWorksheet, generatedOn: string): Pro
   pdf.font("Helvetica-Bold").fontSize(18).text(t(`Ausfüllhilfe Steuererklärung ${w.year}`), { align: "center" });
   pdf.moveDown(0.3).font("Helvetica").fontSize(9).fillColor("#666")
     .text(t(`Erstellt am ${germanDate(generatedOn)} · ${w.documentCount} Dokumente in ${w.sections.length} Anlagen · ${w.bookingCount} steuerrelevante Buchungen`), { align: "center" });
-  pdf.moveDown(0.2).text(t("Die Werte auf den Belegen werden noch nicht ausgelesen. Jede Zahl bitte direkt aus dem Dokument übernehmen."), { align: "center" });
+  // The list by Kennzahl is stage 4 of steuer-ausfuellhilfe; until then the PDF lists the evidence.
+  pdf.moveDown(0.2).text(t(w.form?.values.length
+    ? "Die ausgelesenen Werte nach Zeile und Kennzahl zeigt die Ausfüllhilfe auf der Steuer-Seite. Jede Zahl bitte am Dokument prüfen."
+    : "Die Werte auf den Belegen sind noch nicht ausgelesen. Jede Zahl bitte direkt aus dem Dokument übernehmen."), { align: "center" });
   pdf.fillColor("#000");
 
   for (const s of w.sections) {

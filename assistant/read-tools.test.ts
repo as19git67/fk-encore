@@ -380,6 +380,26 @@ describe("tax", () => {
   });
 });
 
+/** The documents service's answer for 2025, synthetic (amounts in cents). */
+const TAX_FORM = {
+  year: 2025, catalogue_year: 2025, exact: true, joint: true, documents_read: 2, documents_unread: 1,
+  values: [
+    {
+      key: "n.bruttoarbeitslohn", anlage: "anlage-n", anlage_name: "Anlage N — Nichtselbstständige Arbeit", label: "Bruttoarbeitslohn",
+      owner: "self", owner_label: "Person A (Sie)", line: 5, kennzahl: "110", place: "Zeile 5 · Kz 110", checked: true, source: "Anlage N 2025", form_note: null,
+      prefilled: true, cents: 4820000, notes: ["Vom Finanzamt elektronisch vorausgefüllt: nur prüfen."], open: 1,
+      contributions: [{ value_id: 1, document_id: 71, document_title: "Lohnsteuerbescheinigung 2025", evidence_kind: "lohnsteuerbescheinigung", evidence_kind_name: "Lohnsteuerbescheinigung", field_label: "Bruttoarbeitslohn", cents: 4820000, value_cents: 4820000, printed: "48.200,00", quote: null, page: 1, status: "read", note: null }],
+    },
+    {
+      key: "vorsorge.rv_arbeitnehmer", anlage: "vorsorgeaufwand", anlage_name: "Vorsorgeaufwand", label: "Arbeitnehmeranteil zur gesetzlichen Rentenversicherung",
+      owner: "spouse", owner_label: "Person B (Ehegatte)", line: 4, kennzahl: "400", place: "Zeile 4 · Kz 400", checked: true, source: "Anlage Vorsorgeaufwand 2025", form_note: null,
+      prefilled: true, cents: 111600, notes: [], open: 0,
+      contributions: [{ value_id: 2, document_id: 72, document_title: "Lohnsteuerbescheinigung Partner", evidence_kind: "lohnsteuerbescheinigung", evidence_kind_name: "Lohnsteuerbescheinigung", field_label: "Arbeitnehmeranteil zur gesetzlichen Rentenversicherung", cents: 111600, value_cents: 223200, printed: null, quote: null, page: null, status: "confirmed", note: null }],
+    },
+  ],
+  skipped: [{ value_id: 3, document_id: 74, document_title: "Rechnung Malerbetrieb", evidence_kind_name: "Handwerkerrechnung", field_label: "Rechnungsbetrag brutto", form_label: null, value_cents: 99900, printed: "999,00", quote: null, status: "rejected", reason: "Zahl steht nicht im Text", note: "Zahl steht nicht im Text" }],
+};
+
 describe("tax_worksheet", () => {
   it("arranges documents per Anlage without amounts, bookings by tag, the depot year and hints", async () => {
     clients.documents.listTaxDocuments
@@ -417,11 +437,38 @@ describe("tax_worksheet", () => {
     expect(out.text).toContain("total: -1380.00 EUR over 3 booking(s)");
     expect(out.text).toContain("income (dividends, interest): 120.00 EUR from 4 payment(s); realized gain: 210.00 EUR from 1 sale(s); taxes withheld: 31.60 EUR");
     expect(out.text).toContain("Anlage KAP: 1 document(s) last year, none flagged for 2025 yet.");
-    expect(out.text).toContain("The values on the documents are not read yet");
+    // The documents service did not answer: no figure is invented for the documents.
+    expect(out.text).toContain("The values read from the documents could not be loaded");
+    expect(out.text).toContain("No value of a document is known to the worksheet: never state one");
     expect(out.text).not.toContain("Anlage V");
     expect(out.block).toMatchObject({ kind: "documents", subtitle: "Ausfüllhilfe 2025 · 2 Anlagen · 3 Buchungen", route: "/dokumente/steuer?year=2025" });
     expect(out.block?.rows[0]).toMatchObject({ section: "Anlage N", route: "/dokumente/71" });
     expect(out.block?.rows[0]).not.toHaveProperty("amount");
+  });
+
+  it("lists the documents' values by Anlage, line and Kennzahl, with where each came from", async () => {
+    clients.documents.listTaxDocuments.mockImplementation(async ({ year }: { year: number }) => year === 2025
+      ? { year, total_documents: 1, sections: [{ slug: "anlage-n", name: "Anlage N", group: "einkuenfte", documents: [{ document: { id: 71, title: "Lohnsteuerbescheinigung 2025", doc_date: "2026-01-20" }, confidence: null, source: "user" }] }] }
+      : { year, total_documents: 0, sections: [] });
+    clients.documents.getTaxFormValues.mockResolvedValue(TAX_FORM);
+    clients.finance.listTransactions.mockResolvedValue({ items: [], total: 0 });
+    clients.finance.listBusinesses.mockResolvedValue({ items: [] });
+    clients.finance.getPortfolio.mockResolvedValue({ years: [] });
+    const out = await tool("tax_worksheet").run({ year: 2025 }, ctx());
+    expect(clients.documents.getTaxFormValues).toHaveBeenCalledWith({ year: 2025, tax_return_person: undefined });
+    expect(out.text).toContain("== Values by form field (joint assessment; form 2025) ==");
+    expect(out.text).toContain("  Anlage N — Nichtselbstständige Arbeit — Person A (Sie)\n    Zeile 5 · Kz 110 | Bruttoarbeitslohn | 48200.00 EUR | 1 unconfirmed | prefilled by the Finanzamt, check only");
+    expect(out.text).toContain("from document 71 (Lohnsteuerbescheinigung 2025, Lohnsteuerbescheinigung): Bruttoarbeitslohn 48200.00 EUR, unconfirmed, page 1");
+    expect(out.text).toContain("Zeile 4 · Kz 400 | Arbeitnehmeranteil zur gesetzlichen Rentenversicherung | 1116.00 EUR | all confirmed");
+    expect(out.text).toContain("share of 2232.00 EUR");
+    expect(out.text).toContain("document 74 (Rechnung Malerbetrieb): Rechnungsbetrag brutto \"999,00\" — Zahl steht nicht im Text");
+    expect(out.text).toContain("1 evidence document(s) of 2025 are not read yet");
+    expect(out.text).toContain("1 value(s) were read but not confirmed yet");
+    expect(out.text).toContain("1 value(s) could not be found in their document's text");
+    expect(out.text).toContain("State a document's figure only as listed under the form values above, with its line and Kennzahl");
+    expect(out.text).not.toContain("could not be loaded");
+    expect(out.block).toMatchObject({ subtitle: "Ausfüllhilfe 2025 · 2 Werte nach Kennzahl · 1 Anlagen · 0 Buchungen" });
+    expect(out.digest).toContain("2 form values");
   });
 
   it("leaves bookings and depot out without finance access", async () => {

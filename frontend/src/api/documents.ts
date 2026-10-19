@@ -7,6 +7,7 @@
  */
 
 import { API_BASE_URL, apiFetch } from './client'
+import type { TaxValueStatus } from './assistant'
 
 export type DocumentStatus = 'pending' | 'extracting' | 'classifying' | 'ready' | 'failed' | 'encrypted'
 export type SearchMode = 'fts' | 'semantic' | 'hybrid'
@@ -1253,6 +1254,23 @@ export function updateDocumentTax(id: number, payload: UpdateDocumentTaxPayload)
     method: 'POST',
     body: JSON.stringify({ id, ...payload }),
   })
+}
+
+/** A value read off tax evidence, after the user confirmed or corrected it (steuer-ausfuellhilfe, stage 3). */
+export interface TaxValueChange {
+  id: number
+  status: TaxValueStatus
+  value_cents: number
+}
+
+/** The user confirms a value read off a document. */
+export function confirmTaxValue(id: number): Promise<TaxValueChange> {
+  return apiFetch(`/documents/tax/values/${id}/confirm`, { method: 'POST', body: JSON.stringify({ id }) })
+}
+
+/** The user states a value (in cents); it replaces what was read. */
+export function correctTaxValue(id: number, valueCents: number): Promise<TaxValueChange> {
+  return apiFetch(`/documents/tax/values/${id}/correct`, { method: 'POST', body: JSON.stringify({ id, value_cents: valueCents }) })
 }
 
 export function backfillDocumentTax() {

@@ -30,7 +30,7 @@ function yearOf(args: Record<string, unknown>): number {
 export const taxWorksheet: ToolSpec = {
   name: "tax_worksheet",
   kind: "read",
-  summary: "The worksheet for filling in one year's tax return: per Anlage the flagged documents (their values are not read yet; never state an amount for a document), the bookings marked tax-relevant in the year summed by tag, the depot's income, gains and taxes of the year, and hints (an Anlage that had documents last year but none yet). For the PDF of it, tax_worksheet_pdf.",
+  summary: "The worksheet for filling in one year's tax return: the values read off the evidence by Anlage, person, Zeile and Kennzahl (summed over the documents, with the law applied, each with the documents it came from and whether the user confirmed it), per Anlage the flagged documents, the bookings marked tax-relevant in the year summed by tag, the depot's income, gains and taxes of the year, and hints (evidence not read yet, values not confirmed, an Anlage that had documents last year but none yet). For the PDF of it, tax_worksheet_pdf.",
   permissions: DOCUMENTS,
   source: "hand",
   parameters: {
@@ -50,14 +50,14 @@ export const taxWorksheet: ToolSpec = {
     const ids = [...new Set(rows.map((r) => r.id))];
     return {
       text: worksheetText(w),
-      digest: `[earlier result of tax_worksheet: ${year}, ${w.documentCount} documents in ${w.sections.length} Anlagen, ${w.bookingCount} bookings]`,
+      digest: `[earlier result of tax_worksheet: ${year}, ${w.form?.values.length ?? 0} form values, ${w.documentCount} documents in ${w.sections.length} Anlagen, ${w.bookingCount} bookings]`,
       rowCount: w.documentCount,
       ref: ids.length ? { type: "document", ids } : undefined,
       block: {
         kind: "documents",
         tool: "tax_worksheet",
         total: ids.length,
-        subtitle: `Ausfüllhilfe ${year} · ${w.sections.length} Anlagen · ${w.bookingCount} Buchungen`,
+        subtitle: `Ausfüllhilfe ${year} · ${w.form?.values.length ? `${w.form.values.length} Werte nach Kennzahl · ` : ""}${w.sections.length} Anlagen · ${w.bookingCount} Buchungen`,
         rows,
         route: `/dokumente/steuer?year=${year}`,
       },
