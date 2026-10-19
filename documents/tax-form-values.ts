@@ -12,6 +12,11 @@
  * Joint assessment is assumed while the household has a spouse without a
  * tax return of their own for the year; a household member's own
  * Steuerakte (`tax_return_person`) is always assessed alone.
+ *
+ * Beside each value stands last year's value of the same field and owner
+ * (stage 5), and the fields that had a value last year but none this year
+ * are listed: evidence that came last year and has not come yet. Only
+ * values, never a judgement — a pension rises, a job changes.
  */
 
 import { and, eq, inArray, isNull, or, sql, gt } from "drizzle-orm";
@@ -76,6 +81,20 @@ export interface TaxFormValue {
   notes: string[];
   /** Contributions neither confirmed nor corrected by the user yet. */
   open: number;
+  /** The same field and owner last year, in cents; null when there was none. */
+  previous_cents: number | null;
+}
+
+/** A field that had a value last year and has none this year. */
+export interface TaxFormMissing {
+  key: string;
+  anlage_name: string;
+  label: string;
+  owner_label: string;
+  place: string;
+  previous_cents: number;
+  /** The documents it came from last year. */
+  previous_documents: { document_id: number; document_title: string }[];
 }
 
 export interface TaxFormSkipped {
@@ -107,6 +126,8 @@ export interface TaxFormValuesResponse {
   /** Evidence documents of the year that were read, and those still waiting to be read. */
   documents_read: number;
   documents_unread: number;
+  /** Last year, when it had values: the fields missing this year. */
+  previous: { year: number; missing: TaxFormMissing[] } | null;
 }
 
 interface StoredValue {
@@ -231,15 +252,9 @@ async function readingCounts(userId: number, year: number, personId: number | nu
   return { read: Number(row?.read ?? 0), unread: Number(row?.unread ?? 0) };
 }
 
-/** The year's values by form field, for the caller (or one of their Steuerakten). */
-export async function buildTaxFormValues(userId: number, year: number, personId: number | null = null): Promise<TaxFormValuesResponse> {
-  await checkOwnPerson(userId, personId);
-  const [rows, joint, counts] = await Promise.all([
-    storedValues(userId, year, personId),
-    isJointReturn(userId, year, personId),
-    readingCounts(userId, year, personId),
-  ]);
-  const byId = new Map(rows.map((r) => [r.id, r]));
+/** One year's stored values summed by field and owner. */
+async function yearMapping(userId: number, year: number, personId: number | null) {
+  const [rows, joint] = await Promise.all([storedValues(userId, year, personId), isJointReturn(userId, year, personId)]);
   const evidence: EvidenceValue[] = rows.map((r) => ({
     id: r.id,
     documentId: r.document_id,
@@ -249,10 +264,25 @@ export async function buildTaxFormValues(userId: number, year: number, personId:
     owner: r.owner as ValueOwner,
     status: r.status,
   }));
-  const mapping = mapToForm(year, evidence, { joint });
+  return { rows, joint, mapping: mapToForm(year, evidence, { joint }) };
+}
+
+/** The year's values by form field, for the caller (or one of their Steuerakten). */
+export async function buildTaxFormValues(userId: number, year: number, personId: number | null = null): Promise<TaxFormValuesResponse> {
+  await checkOwnPerson(userId, personId);
+  const [current, last, counts] = await Promise.all([
+    yearMapping(userId, year, personId),
+    yearMapping(userId, year - 1, personId),
+    readingCounts(userId, year, personId),
+  ]);
+  const { rows, joint, mapping } = current;
+  const byId = new Map(rows.map((r) => [r.id, r]));
   const catalogue = formCatalogue(year);
-  const names = await ownerNames(userId, mapping.values.map((v) => v.owner));
+  const names = await ownerNames(userId, [...mapping.values, ...last.mapping.values].map((v) => v.owner));
   const title = (r: StoredValue) => r.title ?? r.original_filename;
+  // Last year by field and owner. A joint value of last year that is single
+  // now (or the other way round) does not match: the owners differ.
+  const lastByKey = new Map(last.mapping.values.map((v) => [`${v.field.key}|${v.owner}`, v]));
 
   const values: TaxFormValue[] = mapping.values.map((v) => {
     const contributions = v.contributions.map((c): TaxFormContribution => {
@@ -291,8 +321,32 @@ export async function buildTaxFormValues(userId: number, year: number, personId:
       contributions,
       notes: v.notes,
       open: contributions.filter((c) => c.status === "read").length,
+      previous_cents: lastByKey.get(`${v.field.key}|${v.owner}`)?.cents ?? null,
     };
   });
+
+  const now = new Set(mapping.values.map((v) => `${v.field.key}|${v.owner}`));
+  const lastById = new Map(last.rows.map((r) => [r.id, r]));
+  const missing: TaxFormMissing[] = last.mapping.values
+    .filter((v) => v.cents !== 0 && !now.has(`${v.field.key}|${v.owner}`))
+    .map((v) => {
+      // This year's catalogue says where the field goes now.
+      const field = catalogue.fields.find((f) => f.key === v.field.key) ?? v.field;
+      const docs = new Map<number, string>();
+      for (const c of v.contributions) {
+        const r = lastById.get(c.valueId!);
+        if (r) docs.set(r.document_id, title(r));
+      }
+      return {
+        key: field.key,
+        anlage_name: SECTION_NAMES.get(field.anlage) ?? field.anlage,
+        label: field.label,
+        owner_label: ownerLabel(v.owner, joint, names),
+        place: placeLabel(field, v.owner),
+        previous_cents: v.cents,
+        previous_documents: [...docs].map(([document_id, document_title]) => ({ document_id, document_title })),
+      };
+    });
 
   const skipped: TaxFormSkipped[] = mapping.skipped
     // Values that only steer a rule (material, invoice total) are no loss.
@@ -325,6 +379,7 @@ export async function buildTaxFormValues(userId: number, year: number, personId:
     skipped,
     documents_read: counts.read,
     documents_unread: counts.unread,
+    previous: last.mapping.values.length ? { year: year - 1, missing } : null,
   };
 }
 

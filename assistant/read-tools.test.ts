@@ -383,17 +383,18 @@ describe("tax", () => {
 /** The documents service's answer for 2025, synthetic (amounts in cents). */
 const TAX_FORM = {
   year: 2025, catalogue_year: 2025, exact: true, joint: true, documents_read: 2, documents_unread: 1,
+  previous: { year: 2024, missing: [{ key: "sonder.spenden", anlage_name: "Sonderausgaben", label: "Zuwendungen an steuerbegünstigte Organisationen", owner_label: "Gemeinsam", place: "Zeile 5 · Kz 123", previous_cents: 20000, previous_documents: [{ document_id: 8, document_title: "Zuwendungsbestätigung Beispielverein" }] }] },
   values: [
     {
       key: "n.bruttoarbeitslohn", anlage: "anlage-n", anlage_name: "Anlage N — Nichtselbstständige Arbeit", label: "Bruttoarbeitslohn",
       owner: "self", owner_label: "Person A (Sie)", line: 5, kennzahl: "110", place: "Zeile 5 · Kz 110", checked: true, source: "Anlage N 2025", form_note: null,
-      prefilled: true, cents: 4820000, notes: ["Vom Finanzamt elektronisch vorausgefüllt: nur prüfen."], open: 1,
+      prefilled: true, cents: 4820000, notes: ["Vom Finanzamt elektronisch vorausgefüllt: nur prüfen."], open: 1, previous_cents: 4600000,
       contributions: [{ value_id: 1, document_id: 71, document_title: "Lohnsteuerbescheinigung 2025", evidence_kind: "lohnsteuerbescheinigung", evidence_kind_name: "Lohnsteuerbescheinigung", field_label: "Bruttoarbeitslohn", cents: 4820000, value_cents: 4820000, printed: "48.200,00", quote: null, page: 1, status: "read", note: null }],
     },
     {
       key: "vorsorge.rv_arbeitnehmer", anlage: "vorsorgeaufwand", anlage_name: "Vorsorgeaufwand", label: "Arbeitnehmeranteil zur gesetzlichen Rentenversicherung",
       owner: "spouse", owner_label: "Person B (Ehegatte)", line: 4, kennzahl: "400", place: "Zeile 4 · Kz 400", checked: true, source: "Anlage Vorsorgeaufwand 2025", form_note: null,
-      prefilled: true, cents: 111600, notes: [], open: 0,
+      prefilled: true, cents: 111600, notes: [], open: 0, previous_cents: null,
       contributions: [{ value_id: 2, document_id: 72, document_title: "Lohnsteuerbescheinigung Partner", evidence_kind: "lohnsteuerbescheinigung", evidence_kind_name: "Lohnsteuerbescheinigung", field_label: "Arbeitnehmeranteil zur gesetzlichen Rentenversicherung", cents: 111600, value_cents: 223200, printed: null, quote: null, page: null, status: "confirmed", note: null }],
     },
   ],
@@ -457,7 +458,9 @@ describe("tax_worksheet", () => {
     const out = await tool("tax_worksheet").run({ year: 2025 }, ctx());
     expect(clients.documents.getTaxFormValues).toHaveBeenCalledWith({ year: 2025, tax_return_person: undefined });
     expect(out.text).toContain("== Values by form field (joint assessment; form 2025) ==");
-    expect(out.text).toContain("  Anlage N — Nichtselbstständige Arbeit — Person A (Sie)\n    Zeile 5 · Kz 110 | Bruttoarbeitslohn | 48200.00 EUR | 1 unconfirmed | prefilled by the Finanzamt, check only");
+    expect(out.text).toContain("  Anlage N — Nichtselbstständige Arbeit — Person A (Sie)\n    Zeile 5 · Kz 110 | Bruttoarbeitslohn | 48200.00 EUR | 2024: 46000.00 EUR | 1 unconfirmed | prefilled by the Finanzamt, check only");
+    expect(out.text).toContain("Had a value in 2024, none yet in 2025:\n    Sonderausgaben — Gemeinsam | Zeile 5 · Kz 123 | Zuwendungen an steuerbegünstigte Organisationen | 2024: 200.00 EUR from document 8 (Zuwendungsbestätigung Beispielverein)");
+    expect(out.text).toContain("1 field(s) had a value in 2024 but none yet in 2025 (Zuwendungen an steuerbegünstigte Organisationen): check whether evidence is still missing.");
     expect(out.text).toContain("from document 71 (Lohnsteuerbescheinigung 2025, Lohnsteuerbescheinigung): Bruttoarbeitslohn 48200.00 EUR, unconfirmed, page 1");
     expect(out.text).toContain("Zeile 4 · Kz 400 | Arbeitnehmeranteil zur gesetzlichen Rentenversicherung | 1116.00 EUR | all confirmed");
     expect(out.text).toContain("share of 2232.00 EUR");

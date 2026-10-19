@@ -255,4 +255,19 @@ Kennzahl naming each document and amount.
   it, its share and status, and the total. `kennzahlSheet` builds the rows
   and is tested on its own. The stored PDF is linked to the flagged
   documents and to those behind a value.
-- Stage 5: open.
+- Stage 5: done. Learning: when evidence is read, the latest correction per
+  field of the same owner's earlier evidence of the same sender
+  (`correspondent_slug`) and kind goes into the values prompt as an example
+  — what was read, what is right, the line it stands in — at most six,
+  never another household's (`correctionExamples` and `describeCorrections`
+  in `documents/tax-values.ts`). Without a known sender nothing is learned;
+  a "correction" to the number that was read teaches nothing and is
+  skipped. Comparison: `GET /documents/tax/form-values` adds last year's
+  sum of the same field and owner to each value (`previous_cents`) and
+  lists the fields that had a value last year but have none yet
+  (`previous.missing`, with last year's documents). The dialog shows last
+  year as a column and the missing fields with "Fehlt hier noch ein
+  Beleg?"; the worksheet text, its hints and the PDF carry the same. No
+  judgement of a change: only values side by side.
+
+All stages are done.
